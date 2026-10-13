@@ -14,7 +14,7 @@ started: 2026-10-13 00:45 UTC
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-13 00:45 UTC | 2026-10-13 01:27 UTC | reports/S0-scout.md | base_commit 678136bd; code-map.md, 4 sections |
-| S1 spec + review | in progress | 2026-10-13 01:35 UTC | | reports/S1-spec-author.md | spec r1 a1ee792a (18 sections, §12.3 28 rows); review round 1 launched 06:00 UTC |
+| S1 spec + review | in progress | 2026-10-13 01:35 UTC | | reports/S1-spec-author.md, reports/S1-spec-review.md | spec r1 a1ee792a (18 sections, §12.3 28 rows); review r1: SOUND WITH FIXES, 2 Blockers, 7 Majors, 4 Minors; author revising to r2 |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -23,7 +23,7 @@ started: 2026-10-13 00:45 UTC
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 0/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 1/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Parallel run
 - **Sibling pipeline:** `claude-host`, in worktree `C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-claude-host` on branch `feat/claude-host`, from the same base commit. Each run follows the shared-file contract in its request.md §C.
@@ -55,6 +55,16 @@ started: 2026-10-13 00:45 UTC
   1. The export-list bullet now says "insert only your own entries, in the file's own sorted order; never reorder or remove existing ones", replacing "append-only".
   2. A new bullet fixes byte-identical text for the `REPO_MAP.md` native section and the `vidbyte/harnesses/README.md` bullet. The bullet block is byte-identical in both request.md files (SHA-256 `6da4fa77…51277b0`).
   *Why:* spec r1 §12.5 proposed its own REPO_MAP text and asked the orchestrator to give PR B identical text, but ClaudeHost spec r1 had different text at the same two insertion points, which would conflict at the second merge. Spec r1's REPO_MAP text also broke the field guide's `agents-md-map.md` rule, which forbids backtick-quoted names and child-folder paths in a folder description. The fixed text is host-neutral and follows that rule. The spec author must adopt it in revision.
+- 2026-10-13 06:35 UTC — **Review round 1: SOUND WITH FIXES, 13 findings.**
+  - Every finding (R-1 to R-13) went to the author; none is tagged `[scope-adding]`, and none was declined.
+  - They were forwarded by report path and line range (lines 1–278 of reports/S1-spec-review.md), not pasted into the message.
+  - R-4, R-5 and R-6 change §8, §9 and §10, so a scoped round 2 follows the r2 revision.
+- 2026-10-13 06:35 UTC — **R-5: the orchestrator accepted the fail-closed fix.**
+  - The `approvals_reviewer` field and its `USER` member stay, because they are R3's spawn-field vocabulary.
+  - Validation rejects `USER` with the spec's unsupported-combination configuration code. Its next step says that answering approvals in code comes with `set_codex_approval_handler`, which R3 marks ✗ and which is not in this PR.
+  - The handler is not built (rule 11).
+  *Why:* openai-codex 0.162.1 has no decline decision, and its default handler answers `accept`. In this PR, a `USER` reviewer with no handler would silently approve every escalation, the opposite of what that setting asks for. Rejecting the value narrows nothing the user can safely use today.
+- 2026-10-13 06:35 UTC — **R-9: new records go in a new domain module,** not into the 1,205-line `vidbyte/lib/dataclasses/codex.py`. *Why:* AGENTS.md:31 says to split before adding more once a file heads toward four digits. So this is repo-forced, and Q-1 is no longer a question.
 
 ## User replies (verbatim)
 - none yet
@@ -111,4 +121,24 @@ started: 2026-10-13 00:45 UTC
   - Q-4: no root exports.
   - Q-5: refusal cap, default `None`.
   *source:* S1 author.
+- **Line endings.** `core.autocrlf=true` is set and there is no root `.gitattributes`, so working copies are CRLF. Hash `native/__init__.py` from the blob (`git show HEAD:<path>` or `git cat-file -p :<path>`): the LF blob hash is `0374a2c8…`, and the CRLF working-copy hash is `fbf12a15…`. *source:* S1 reviewer R-8.
+- **S054 (ruff S105, zero headroom: baseline 3, current 3).** S105 flags a string literal assigned to, or compared with, any name, attribute or subscript key with an `_`-separated segment `token`, `secret`, `pass`, `pwd` or `password`.
+  - Safe: `tokens`, `tokenBudget`, `CODEX_USAGE_UPDATED_NOTIFICATION`.
+  - Unsafe: `GOAL_TOKEN_BUDGET_DESCRIPTION`.
+  - The three existing findings are `token_budget.py:28`, `compaction/base.py:28` and `workflows/contracts.py:73`.
+  *source:* S1 reviewer R-1.
+- **One reader thread.** openai-codex's `_reader_loop` (`client.py:863-881`) answers server requests synchronously on its single reader thread, so a slow dynamic tool stalls every notification and response on that app-server for up to 300 s. *source:* S1 reviewer R-3.
+- **Closing on Windows.** `shutil.which("codex")` finds the npm `codex.cmd`. The chain is cmd.exe, then node `codex.js`, then `codex.exe` with stdio inherited. `CodexClient.close()` terminates cmd.exe only (`client.py:291-297`, plain Popen, no job object). *source:* S1 reviewer R-4.
+- **Not public API.**
+  - `CodexClient` is not in `openai_codex.__all__`; only `CodexConfig` is imported from `.client`.
+  - Goal operations return the private `_GoalOperationState`.
+  - The SDK's `ApprovalMode` offers only `deny_all` and `auto_review`, and 0.162.1 has no decline decision value.
+  *source:* S1 reviewer.
+- **Tool-call timeout.** `CodexToolCallHandler.handle` returns "Tool call timed out after 300 seconds." at `CODEX_TOOL_CALL_TIMEOUT_SECONDS`. `ToolExecutor` has no timeout of its own, so the wait tool's clamp must stay below 300 s. *source:* S1 reviewer R-7.
+- **Precedent for a dedicated executor:** `openai_codex/async_client.py:53-54` uses `_TURN_START_EXECUTOR = ThreadPoolExecutor(...)`, and its cancelled-start cleanup runs on daemon threads (:258-261, :283-286). *source:* S1 reviewer R-6.
+- **Stale and checked facts.**
+  - The installed binary reports `codex-cli 0.162.1`; request.md's "0.161.0" is stale.
+  - No test enumerates `ComponentRegistry`.
+  - No lint rule caps file length.
+  *source:* S1 reviewer.
 - **openai_codex must load lazily.** Nothing reachable from `import vidbyte`, or from `vidbyte.tools.builtins` (which the YAML component registry scans), may import openai_codex at module level. The precedent is `CodexTransport._load_sdk` (transport.py:215-259). CI installs only `.[dev]`, so SDK-dependent tests skip there (`skipUnless`). The global Python 3.11 has openai-codex 0.162.1. *source:* S0.
