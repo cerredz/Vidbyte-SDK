@@ -106,6 +106,8 @@ NATIVE_HOST_NEXT_STEPS: MappingProxyType[str, str] = MappingProxyType(
         "runtime.error": "This is a defect in the SDK host; report it with error.context['error_type'].",
     }
 )
+# The configuration.invalid_argument next step with the argument's name filled in, so it holds the row's token (EC-1, EC-138).
+NATIVE_INVALID_ARGUMENT_NEXT_STEP = "Fix the {field} argument and call again."
 
 # Grok Build.
 GROK_MIN_VERSION = (1, 0, 13)
