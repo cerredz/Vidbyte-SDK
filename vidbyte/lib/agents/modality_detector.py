@@ -19,12 +19,16 @@ Similar Files:
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import fields
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 
 from vidbyte.lib.enums import ModelModality, ModelProvider
 from vidbyte.lib.enums.model_modality import _MODEL_NAME_MODALITY_MAP
 from vidbyte.lib.errors import ConfigurationError
+
+if TYPE_CHECKING:
+    from vidbyte.lib.dataclasses.agents import ProviderKeys
 
 
 class ModalityDetector:
@@ -124,21 +128,36 @@ class ModalityDetector:
         provider: ModelProvider | str,
         model: str,
         transport: object | None = None,
-        api_key: str | None = None,
+        api_keys: ProviderKeys | Iterable[str | None] | None = None,
         temperature: float | None = None,
         **options: Any,
     ) -> object:
         """Create the internal concrete runner for a resolved modality."""
         from vidbyte.lib.config import AudioModelConfig, EmbeddingModelConfig, ImageModelConfig, TextModelConfig, VideoModelConfig
+        from vidbyte.lib.registries.provider_keys import ProviderKeyMatcher
 
         resolved = ModalityDetector.coerce(modality)
         if resolved is ModelModality.AUTO:
             detected = ModalityDetector.detect_modality(model)
             resolved = detected if detected is not ModelModality.AUTO else ModelModality.TEXT
 
+        # @intent text-runners-take-the-key-list
+        # A text config takes the key list and matches it itself; an old
+        # api_key option would be filtered out silently, so it is
+        # refused. Other configs keep api_key and get their provider's
+        # matched key only, so their variable resolves as before.
+        if resolved is ModelModality.TEXT and "api_key" in options:
+            provider_name = provider.value if isinstance(provider, ModelProvider) else str(provider)
+            raise ConfigurationError(
+                "create_runner takes api_keys, a list of provider keys, for a text model; api_key is not accepted.",
+                details={"provider": provider_name, "model": model},
+            )
         common_options = dict(options)
-        if api_key is not None:
-            common_options["api_key"] = api_key
+        if resolved is ModelModality.TEXT:
+            if api_keys is not None:
+                common_options["api_keys"] = api_keys
+        elif (provider_key := ProviderKeyMatcher.match(api_keys, primary=provider).key_for(provider)) is not None:
+            common_options["api_key"] = provider_key
         if resolved is ModelModality.TEXT and temperature is not None:
             common_options["temperature"] = temperature
 
