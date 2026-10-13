@@ -159,7 +159,7 @@ Spec: `docs/spec/claude-host/spec.md` r3 · Framework: pytest 8.3.5 with pytest-
 | EC-4's "first CLI version that has `--permission-prompts`" | An unverified vendor fact. The host-side behaviour, a start failure with the start next step, is the AC-39 test. |
 | Turn-classification row 5 with a success result (a window rejected during a turn that then succeeds) | The precedence makes it `usage_limited`. But the spec never says whether the outcome flag `rate_limit_rejected` follows D-8's "overage not allowed" condition, so a test would encode one reading. The pack tests a rejected window only together with an error result. Reported as a spec defect. |
 | `launch_claude_subagents` of one prompt with a template `session_id` | EC-33 covers N>1 only. For N=1 the spec does not say whether the chosen id is used. Reported as a spec defect. |
-| Re-entering a host (`__aenter__` twice), and a second `aclose` | INV-15 says a host "is never reopened" but does not say what a second entry or close does: raise, or do nothing. The pack checks the observable part, that every call after `aclose` is refused. |
+| Re-entering a host (`__aenter__` twice), and a second `aclose` | INV-15 says a host "is never reopened" but does not say what a second entry or close does: raise, or do nothing. The pack pins only the observable part. After `aclose`, a second `__aenter__` may raise or return, and every later call is still refused (`CloseTests::test_aclose_interrupts_running_and_queued_handles_and_disconnects_each_client_once`). |
 | INV-24's "existing builtins, toolsets, enums and errors keep every export" | A snapshot of today's export lists is green before the implementation exists, so it can never be proven red (hard rule 6). The default-policy half is guarded by the existing `tests/test_security_executor.py::test_default_policy_denies_write_without_execution` and by `ToolsetTests`. The export half is left to the existing suites that import those names, and to S4's review of the `__all__` diffs. |
 | INV-25 (package smoke from a wheel with no extras) | This is the package stage of `scripts/run_ci.py`. An in-tree import test would be green today. |
 | INV-26 (Codex untouched) and NFR-10 (no CodexHost reference) | Green before implementation. The existing Codex suites guard the Codex side. CodexHost code does not exist on this branch, so importing it would break every pack module at import time. |
@@ -179,28 +179,28 @@ C:/Users/422mi/vidbyte-repos/.venvs/sdk-claude-host/Scripts/python -m pip instal
 Environment check, from the worktree root:
 `.../Scripts/python -c "import vidbyte, importlib.util; print(vidbyte.__file__, importlib.util.find_spec('claude_agent_sdk'))"` → `C:\Users\422mi\vidbyte-repos\worktrees\vidbyte-sdk-claude-host\vidbyte\__init__.py None`. `pip list` shows `pytest 8.3.5`, `pytest-asyncio 1.3.0`, and `vidbyte-sdk 0.2.1` as an editable install of this worktree. claude-agent-sdk is not installed.
 
-Every command below runs from the worktree root, with `PY=C:/Users/422mi/vidbyte-repos/.venvs/sdk-claude-host/Scripts/python`.
+Every command below runs from the worktree root, with `PY=C:/Users/422mi/vidbyte-repos/.venvs/sdk-claude-host/Scripts/python`. All the runs were taken at commit `8e116bc7`, with the tests exactly as committed.
 
 **One file at a time.** `PYTHONPATH=$(pwd) $PY -m pytest tests/features/claude_host/test_claude_host_<area>.py -q -p no:cacheprovider --tb=no` → each file's final line:
 
 | File | Final line |
 |---|---|
 | `test_claude_host_acceptance.py` | `4 failed in 0.69s` |
-| `test_claude_host_admission.py` | `25 failed in 0.77s` |
-| `test_claude_host_contract.py` | `22 failed in 1.34s` |
-| `test_claude_host_history.py` | `11 failed in 0.70s` |
+| `test_claude_host_admission.py` | `25 failed in 0.76s` |
+| `test_claude_host_contract.py` | `22 failed in 1.32s` |
+| `test_claude_host_history.py` | `11 failed in 0.69s` |
 | `test_claude_host_readiness.py` | `24 failed in 0.73s` |
-| `test_claude_host_request.py` | `18 failed in 0.70s` |
-| `test_claude_host_security.py` | `6 failed in 0.69s` |
+| `test_claude_host_request.py` | `18 failed in 0.69s` |
+| `test_claude_host_security.py` | `6 failed in 0.68s` |
 | `test_claude_host_stops.py` | `23 failed in 0.75s` |
-| `test_claude_host_tools.py` | `10 failed in 0.71s` |
-| `test_claude_host_turns.py` | `22 failed in 0.73s` |
+| `test_claude_host_tools.py` | `10 failed in 0.69s` |
+| `test_claude_host_turns.py` | `22 failed in 0.74s` |
 
 **The whole pack.** `PYTHONPATH=$(pwd) $PY -m pytest tests/features/claude_host -q -p no:cacheprovider --tb=short` →
 ```
 FAILED tests/features/claude_host/test_claude_host_turns.py::InitializeAndInjectedResultTests::test_an_injected_result_updates_usage_while_the_turn_keeps_running
 FAILED tests/features/claude_host/test_claude_host_turns.py::InitializeAndInjectedResultTests::test_hooks_applied_is_true_with_hooks_and_none_without
-165 failed in 5.71s
+165 failed in 5.63s
 ```
 Every test fails; none errors at collection and none is skipped. Each failure's last `E` line, grouped:
 
@@ -223,17 +223,17 @@ All 165 `FAILED` lines are under `tests/features/claude_host/`.
 **The neighbouring suites still pass.** `PYTHONPATH=$(pwd) $PY -m pytest tests/features --ignore=tests/features/claude_host tests/test_codex_tools.py tests/test_mcp_studio_server.py tests/test_session_failures.py tests/test_agent_tool_loop.py tests/test_security_executor.py -q -p no:cacheprovider` →
 ```
 .......................                                                  [100%]
-943 passed, 16 skipped in 17.89s
+943 passed, 16 skipped in 17.56s
 ```
 
 **The whole suite without the pack.** `PYTHONPATH=$(pwd) $PY -m pytest -q -p no:cacheprovider --tb=line --ignore=tests/features/claude_host` →
 ```
 ..                                                                       [100%]
-3935 passed, 27 skipped in 33.14s
+3935 passed, 27 skipped in 32.31s
 ```
 Nothing fails, so there is no pre-existing failure to name.
 
-**Collection with the pack.** `PYTHONPATH=$(pwd) $PY -m pytest -q -p no:cacheprovider --collect-only` → `4127 tests collected in 1.33s`. That is 3962 + 165: the pack adds no collection error.
+**Collection with the pack.** `PYTHONPATH=$(pwd) $PY -m pytest -q -p no:cacheprovider --collect-only` → `4127 tests collected in 1.32s`. That is 3962 + 165: the pack adds no collection error.
 
 **Lint, which scans tests for A001 and S062.** `PYTHONPATH=$(pwd) $PY lint/run.py` → `A001 ... 643 643 RATCHETED`, `S062 ... 889 889 RATCHETED`, then:
 ```
@@ -272,9 +272,13 @@ The output is identical to the run taken before the pack existed.
   - `interrupt()` answers only a prompt that has no result yet, as the CLI does.
   - The options fake rejects any keyword `ClaudeAgentOptions` 0.2.165 does not have.
   - History fakes record `threading.get_ident()`, so call them through `asyncio.to_thread`.
+  - The fakes emit the assistant error `model_not_found` and the rate-limit type `seven_day_overage_included`. The 0.2.165 Python `Literal` types omit both, but its `message_parser.py` passes `data.get("error")` and `info.get("rateLimitType")` through unchanged. Map the raw strings; never filter them against the SDK's `Literal` lists.
 - **Fixtures the tests rely on.** All of them are new and all live in `claude_host_fixtures.py`: `FakeClaudeSdk`, `FakeClaudeClient`, `FakeHistory`, the message factories, `TicketTool`, `ClaudeHostCase` (`open_host`, `spawn`, `finished`, `raises`, `client_for`), `eventually`/`settle`, and the verbatim §9.2 next-step texts. No shared fixture or conftest was touched.
 - **Readings the tests encode where the spec is loose.** S3 should know these; the S2 report lists them as spec defects.
   - A rejected window with no `overage_status` refuses spawns (D-8, "overage not allowed").
   - EC-33's `continue_conversation`-without-fork launch of N>1 may raise either `claude.session_busy` or `configuration.unsupported_combination`.
   - A history read error must raise a `ClaudeOperationError` with non-empty fields. Its code is not pinned.
+  - A validation rule the spec words as "X requires Y" may use either configuration code.
+  - D-27's "different after normalization" is not pinned: the cwd tests use two clearly different folders, and compare paths through `pathlib`.
+  - The sandbox's `network` key is checked only when a domain is set.
 - **Do not edit any test or fixture file to make it pass.** If a test contradicts the spec, report it. Do not change the test.
