@@ -316,3 +316,115 @@ The S3 implementer found three test defects, and the coordinator confirmed them 
   - **D-4.** The approve-everything guard in `test_grok_host_reads.py` matches a forbidden flag only as its own element or as a `--flag=` prefix. It no longer matches the suffix of another flag's value, so `--single=--always-approve`, the injection-safe form, holds.
   - **D-5.** The grok and Muse fakes name each log after a launch number they claim with an exclusive file create, and `records()` reads the logs in that order instead of PID order.
   - **D-6.** The expected opencode history ids now match the fake's shared counter: `msg_00000002` and `msg_00000004`, with part `prt_00000003`.
+
+## Addendum r8 — S4 regression tests
+
+The S4 review confirmed six failure paths (R-1, R-2, R-5, R-6, R-7, R-8) that no test guarded, plus the r8 INV-14/EC-157/EC-39 spec changes. This addendum adds one regression test per finding, binding to the r8 names. All new tests run through the §13 fakes; none reads `vidbyte/` source, sends a live prompt, or runs the real `grok`, `muse` or `wsl.exe`.
+
+### Coverage map
+
+| Finding / Spec ID | Test (file → name / row) | Level | Failure it catches | Why it cannot pass vacuously |
+|---|---|---|---|---|
+| R-1, EC-16, EC-41 | `test_grok_host_errors.py` → `test_grok_error_row[EC-16-spawn_grok_session-…-minus-32602-no-cursor]` and `[EC-16-list_grok_sessions-…-minus-32602-no-cursor]` (host + tool); `test_invalid_params_without_a_cursor_is_an_api_error_carrying_the_vendor_message` | C, R | A no-cursor `-32602` mapped to `grok.protocol_mismatch` with `vendor_error` dropped, instead of `grok.api_error` | The rows assert exact `grok.api_error` identity, `vendor_code == "-32602"` and a present `vendor_error`; the focused test asserts `"Invalid params"` is in `vendor_error`. The EC-41 cursor row still asserts `configuration.invalid_argument`, so the two paths are kept apart. Red now: the code returns `grok.protocol_mismatch`. |
+| R-2, EC-157, D-19, T-2 | `test_grok_host_windows_launcher.py` → `test_grok_cmd_on_path_is_refused_at_aenter_and_never_runs[spawn_grok_session, run_grok_once]`, `test_explicit_batch_grok_command_is_refused_at_aenter[cmd, cmd-upper, bat, trailing-dot, trailing-space]` | S, I, R | A win32 batch Grok launcher is started, handing a prompt/model/rule to `cmd.exe` | win32-only. The shim writes a marker when it runs; the test asserts `__aenter__` raises `grok.not_installed` with EC-157's **exact** next step (which distinguishes it from EC-11's default text, same code and token) and that the marker is absent. The prompt and model carry `"&%^`. Red now: the host launches the `.cmd` (observed `grok.process_exited`). |
+| R-5, NFR-2, EC-8 | `test_muse_host_process_bounds.py` → `test_aexit_returns_within_the_bound_when_a_peer_is_silent_on_decide` | X, I, R | `MuseHost.__aexit__` waits `control_timeout_seconds` for a peer silent on `approval/decide` | The decide is confirmed in-flight (`wait_until` on `received("approval/decide")`) before exit; `control_timeout_seconds=6.0` is set well above the NFR-2 bound `grace + (grace + 2·kill_wait) + slack = 3.6 s`. The timing assertion is first, so it fails on the stated reason. Red now: measured `__aexit__` = 6.02 s. |
+| R-6, INV-10, INV-13, EC-87, EC-59 | `test_opencode_host_watcher.py` → `test_a_single_non_counted_poll_failure_aborts_before_failing_the_turn[session_status, permission_list]` | I, R | One 500 poll (EC-59, not counted by EC-87) fails the turn with no `POST …/abort`, orphaning the server turn | The turn is `plan("hold")` so the single 500 is reached; the abort is asserted inside the `async with` (before `__aexit__`, which sends none for an already-failed turn) as exactly `[handle.session_id]`; `wait` must still raise `opencode.api_error`. Red now: `aborts == []`. |
+| R-7, §9.3, D-18 | `test_muse_host_wsl.py` → `test_read_peer_forwards_meta_api_key_through_wslenv` | I, R | A WSL short-lived read peer omits `META_API_KEY/u` from `WSLENV` | win32-only, over the `make_wsl_host` fake `wsl.exe`. `META_API_KEY` and `WSLENV` are set; the read peer's logged `WSLENV` must keep the caller's entries first and contain `META_API_KEY/u`. No real key is used (placeholder). Red now: the read peer's `WSLENV` is `WT_SESSION:WT_PROFILE_ID` only. |
+| R-8 (i), INV-14, EC-29 | `test_grok_host_session_id_case.py` → `test_continue_on_the_upper_cased_id_of_a_live_session_is_busy` | X, R | The Grok busy check compares ids case-sensitively | A held turn on `KNOWN`, then a continue on `KNOWN.upper()`; must raise `grok.session_busy` (token `interrupt_grok_turn`) with one peer started. Red now: `DID NOT RAISE` (a second peer resumes the upper-cased id). |
+| R-8 (i, Muse), INV-14, EC-112 | `test_muse_host_turns.py` → `test_continue_on_the_upper_cased_id_of_a_live_session_is_busy` | X, R | The Muse busy check compares ids case-sensitively | A held turn on `KNOWN`, then a continue on `KNOWN.upper()`; must raise `muse.session_busy` (token `interrupt_muse_turn`) with one `turn/start`. Red now: raises `muse.session_not_found`. |
+| R-8 (ii), INV-14, EC-35 | `test_grok_host_session_id_case.py` → `test_fork_on_the_upper_cased_source_id_is_accepted` | C, R | The fork source listing check is case-sensitive | The default listing holds `KNOWN` (lower); a fork on `KNOWN.upper()` must find it and run the CLI once, with a new session id. Red now: raises `grok.session_not_found`. |
+| R-8 (iii), INV-14, EC-36 | `test_grok_host_session_id_case.py` → `test_fork_new_session_id_that_collides_case_insensitively_is_refused` | C, R | The new-id collision check is case-sensitive | `new_session_id=OTHER.upper()` collides with the listed `OTHER`; must raise `configuration.invalid_argument` (token `new_session_id`) before the CLI run. Red now: `DID NOT RAISE` and the CLI runs. |
+| R-8 (iv), INV-14, EC-39 | `test_grok_host_session_id_case.py` → `test_fork_accepts_a_returned_id_equal_to_the_request_ignoring_case` | C, **lock** | A returned id equal to the request only by case is wrongly refused | Lock: already green. The EC-39 target comparison is already case-insensitive in the current code, so the caller's `NEW.upper()` and the echoed `NEW_SESSION` match and the fork succeeds. It locks that against regression. |
+| R-8 (v), EC-39 | `test_grok_host_session_id_case.py` → `test_fork_refuses_a_returned_id_that_differs_from_the_request` | C, **lock** | The EC-39 target-mismatch guard is dropped | Lock (the one the brief names): a returned id that differs from `new_session_id` even ignoring case must raise `grok.protocol_mismatch` (token `check_grok_ready`). Green now and after the fix; the guard is kept, not dropped. |
+
+Grant (a): `test_grok_host_acceptance.py::test_snippet_prints_completed_text_when_grok_is_the_fake` on win32 now reaches the fake through `grok_command` (the §13 seam), because EC-157 refuses the `grok.cmd` shim. Its three assertions are unchanged; see "Granted test changes" below.
+
+### Tests deliberately NOT written (r8)
+
+- **R-8 EC-32 case-insensitive equality** (`new_session_id` equal to `session_id` ignoring case). Covered in substance by R-8 (iii) for EC-36 and by the same INV-14 rule; empirically it may already be handled (it would then be a second lock test). Per the brief it is omitted to avoid a near-duplicate. The INV-14 case rule it would exercise is already driven by (i)–(iii).
+- **R-2 case (iii): the fallback to `~/.grok/bin/grok.exe` when a PATH `grok.cmd` is shadowed.** Not written. `__aenter__` starts no process, so the only way to observe which program the fallback resolved is to run a turn through a real, runnable `grok.exe` ACP peer at that path. The §13 seam provides a fake only through `grok_command` (an argv prefix), not through a resolved `grok.exe` on disk; a real `.exe` peer (e.g. via pip's bundled distlib launcher, as the Muse WSL fake does) would add a brittle dependency for a branch whose refusal half is already covered by cases (i) and (ii). A minimal "`__aenter__` does not raise when `grok.exe` exists" check is not red, because `__aenter__` succeeds under both the current code and the fix. Recorded as an OPEN ITEM for the repair agent: the fallback-selects-`grok.exe` branch has no regression test.
+
+### Red run (r8)
+
+Environment: global Python 3.11.0 on win32, reached through `PYTHONPATH`; `pytest 8.3.5` (pytest-asyncio 1.3.0, strict). Command:
+
+```
+$ PYTHONPATH=$(pwd) python -m pytest -p no:cacheprovider -q tests/features/grok_host tests/features/opencode_host tests/features/muse_host tests/features/native_backends
+…
+20 failed, 1618 passed, 19 skipped in 158.00s (0:02:37)
+```
+
+The 20 failures are exactly the 20 new non-lock tests (5 for R-1, 7 for R-2, 1 for R-5, 2 for R-6, 1 for R-7, 1+3 for R-8 across Grok and Muse). The two EC-39 locks pass. Every pre-existing test passes (1618 includes the grant-(a) test and the two locks). The 19 skips are the platform guards (POSIX-only liveness/process-group checks skip on win32); on Linux CI the win32-only R-2 and R-7 tests skip instead. Each failure's reason, verified from the traceback:
+
+| Tests | Observed red reason |
+|---|---|
+| R-1 (5) | `grok.protocol_mismatch` where `grok.api_error` is required |
+| R-2 (7) | `grok.process_exited` (the `.cmd` was launched) instead of an EC-157 refusal at `__aenter__` |
+| R-5 (1) | `__aexit__` waited 6.02 s; NFR-2 bounds it at 3.60 s |
+| R-6 (2) | `aborts == []`: no `POST …/abort` before the turn fails |
+| R-7 (1) | read-peer `WSLENV` is `['WT_SESSION','WT_PROFILE_ID']`, no `META_API_KEY/u` |
+| R-8 Grok (i) | `DID NOT RAISE` `grok.session_busy` for the upper-cased id |
+| R-8 Grok (ii) | `grok.session_not_found` for the upper-cased source |
+| R-8 Grok (iii) | `DID NOT RAISE` `configuration.invalid_argument`; the CLI runs |
+| R-8 Muse (i) | `muse.session_not_found` instead of `muse.session_busy` |
+
+Lint on the staged packs: `python lint/run.py` → `SDK-LINT: PASS` (S062 held at 889 after the EC-157 next step was written as one literal; S061 improved 6→5).
+
+### Granted test changes (before → after)
+
+Only grant (a) is used (AC-1's win32 branch moves to the §13 seam, per spec §12.3 r8 and D-19). No existing test's **assertions** change. CI-1's `test_interrupt_raises_process_exited_when_the_cancel_write_fails` is untouched.
+
+`run_snippet` gained an optional keyword and one body line:
+
+Before:
+```python
+def run_snippet(tmp_path: Path, path_entries: list[str]) -> subprocess.CompletedProcess[str]:
+    …
+    snippet = tmp_path / "snippet.py"
+    snippet.write_text(SNIPPET, encoding="utf-8", newline="\n")
+    env = dict(os.environ)
+```
+After:
+```python
+def run_snippet(tmp_path: Path, path_entries: list[str], *, grok_command: tuple[str, ...] | None = None) -> subprocess.CompletedProcess[str]:
+    …
+    snippet = tmp_path / "snippet.py"
+    # r8 grant (a): on win32 the §4 snippet reaches the fake through GrokHostSettings.grok_command, because EC-157 refuses a .cmd shim.
+    body = SNIPPET if grok_command is None else SNIPPET.replace("GrokHostSettings(workspace=Path.cwd())", f"GrokHostSettings(workspace=Path.cwd(), grok_command={tuple(grok_command)!r})")
+    snippet.write_text(body, encoding="utf-8", newline="\n")
+    env = dict(os.environ)
+```
+
+`test_snippet_prints_completed_text_when_grok_is_the_fake` — the setup branches on platform; the three assertions are byte-for-byte unchanged:
+
+Before:
+```python
+    shim_folder = tmp_path / "shim"
+    shim_folder.mkdir()
+    scenario_path = tmp_path / "snippet-scenario.json"
+    scenario_path.write_text(json.dumps(grok_fake.scenario()), encoding="utf-8")
+    write_grok_shim(shim_folder, scenario_path)
+    completed = run_snippet(tmp_path, [str(shim_folder), *system_folders()])
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == "completed alpha-beta", completed.stdout + completed.stderr
+    assert grok_fake.received("session/prompt"), "the snippet's prompt reached the fake, not a real grok"
+```
+After:
+```python
+    scenario_path = tmp_path / "snippet-scenario.json"
+    scenario_path.write_text(json.dumps(grok_fake.scenario()), encoding="utf-8")
+    if sys.platform == "win32":
+        # r8 grant (a) / AC-1: EC-157 refuses a grok.cmd shim, so win32 reaches the fake through the §13 seam; only System32 is on PATH.
+        command = (sys.executable, "-u", str(FAKE_GROK), str(scenario_path))
+        completed = run_snippet(tmp_path, system_folders(), grok_command=command)
+    else:
+        shim_folder = tmp_path / "shim"
+        shim_folder.mkdir()
+        write_grok_shim(shim_folder, scenario_path)
+        completed = run_snippet(tmp_path, [str(shim_folder), *system_folders()])
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == "completed alpha-beta", completed.stdout + completed.stderr
+    assert grok_fake.received("session/prompt"), "the snippet's prompt reached the fake, not a real grok"
+```
+
+The POSIX path still writes `grok` on PATH, so AC-1 holds unchanged there; `write_grok_shim` keeps its win32 branch but is no longer reached by this test on win32. The second AC-1 outcome (`test_snippet_prints_not_installed_line_when_no_grok_exists`) is unchanged.

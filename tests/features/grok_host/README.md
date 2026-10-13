@@ -41,6 +41,8 @@ The implementations belong here:
   It logs every argv, frame and answer to JSONL files.
 - `test_grok_host_acceptance.py`: the §4 snippet as written, plus AC-6, AC-11, AC-12 and `run_grok_once`. Start here for a caller-visible regression.
 - `test_grok_host_errors.py`: one table-driven case per (function, code) from §6.3.2 and §6.3.3, run against the host and against the matching tool.
+- `test_grok_host_session_id_case.py`: INV-14 session-id case-insensitivity for the busy check and the fork id checks (r8).
+- `test_grok_host_windows_launcher.py`: EC-157, the win32-only rule that Grok never starts a batch launcher (r8).
 - `test_grok_host_turns.py`: live-turn behaviour: approvals, interrupts, the ceiling, text and usage, concurrency, and wire shapes.
 - `test_grok_host_reads.py`: the successful reads and CLI runs, with their argv.
 - `test_grok_host_process_bounds.py`: time bounds, cancellation and reaping. Start here for a hang or a leftover process.
@@ -53,3 +55,4 @@ The implementations belong here:
 ## Logs
 
 - 2026-10-13 - The pack was written red before implementation, from spec r3 (S2 test author). Every test fails at setup or in its first assertion until the modules above exist.
+- 2026-10-13 - Added S4 regression tests (addendum r8, S2 test author): R-1 (no-cursor `-32602` api_error rows and a focused test in `test_grok_host_errors.py`), R-2 (new `test_grok_host_windows_launcher.py`, EC-157), and R-8 (new `test_grok_host_session_id_case.py`, INV-14 case-insensitivity). AC-1's win32 completed-text branch in `test_grok_host_acceptance.py` moved to the §13 seam (grant a), because EC-157 now refuses the `grok.cmd` shim.

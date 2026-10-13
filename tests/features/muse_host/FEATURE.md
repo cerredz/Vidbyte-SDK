@@ -154,7 +154,9 @@ These are the failure inventory the tests were chosen from, given as input → w
 
 ## Historical Regressions
 
-None yet. The pack was written red before implementation, from spec r3.
+- **r8 (S4 review R-5): `__aexit__` held for `control_timeout_seconds` when a peer was silent on `approval/decide`.** `MuseHost.__aexit__` did `await asyncio.wait(tasks)` with no timeout, so a silent decide held exit for the control timeout (up to 600 s) instead of the NFR-2 bound; Grok closed its peers after the grace, Muse never did. Caught by `test_aexit_returns_within_the_bound_when_a_peer_is_silent_on_decide` in `test_muse_host_process_bounds.py`.
+- **r8 (S4 review R-7): WSL read peers never got `META_API_KEY/u` in `WSLENV`.** Only turn peers did, but §9.3/D-18 tie the key entry to the variable being set, not to being a turn peer. Caught by `test_read_peer_forwards_meta_api_key_through_wslenv` in `test_muse_host_wsl.py`.
+- **r8 (S4 review R-8 / S4-6): the busy check compared session ids case-sensitively.** INV-14 says Muse ids compare ignoring letter case. Caught by `test_continue_on_the_upper_cased_id_of_a_live_session_is_busy` in `test_muse_host_turns.py`.
 
 ## Test Suite Map
 
@@ -173,7 +175,8 @@ None yet. The pack was written red before implementation, from spec r3.
   - the ack turn id and foreign events (EC-109);
   - steer and interrupt wire;
   - truncation (EC-150, `view/gap`);
-  - usage, the ceiling (D-10), EC-148, INV-17 and EC-9.
+  - usage, the ceiling (D-10), EC-148, INV-17 and EC-9;
+  - the INV-14 busy check on an upper-cased id (r8, R-8).
 - `test_muse_host_wire.py`:
   - `clientInfo` and `initialized`;
   - every command's members;
@@ -191,7 +194,7 @@ None yet. The pack was written red before implementation, from spec r3.
 - `test_muse_host_process_bounds.py`:
   - the AC-3 bound for nine functions, plus the 9 s default;
   - AC-4 cancellation and the cancelled wait;
-  - `__aexit__` (EC-8);
+  - `__aexit__` (EC-8), including the NFR-2 bound with a peer silent on `approval/decide` (r8, R-5);
   - grandchild reaping (EC-10).
 - `test_muse_host_records.py`:
   - EC-106 and the `MuseHostSettings` checks, naming `<Record>.<field>`;
@@ -207,6 +210,7 @@ None yet. The pack was written red before implementation, from spec r3.
   - `to_wsl` and the reap constants;
   - the Linux reap-script test;
   - the WSL argv, overlay and reap;
+  - the read peer's `META_API_KEY/u` in `WSLENV` (r8, R-7);
   - EC-94 and EC-95 in WSL mode.
 
 Run everything with `PYTHONPATH=$(pwd) python -m pytest -q tests/features/muse_host`.

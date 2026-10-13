@@ -60,13 +60,15 @@ def write_grok_shim(folder: Path, scenario_path: Path) -> None:
     shim.chmod(0o755)
 
 
-def run_snippet(tmp_path: Path, path_entries: list[str]) -> subprocess.CompletedProcess[str]:
+def run_snippet(tmp_path: Path, path_entries: list[str], *, grok_command: tuple[str, ...] | None = None) -> subprocess.CompletedProcess[str]:
     workspace = tmp_path / "snippet-workspace"
     workspace.mkdir()
     home = tmp_path / "snippet-home"
     home.mkdir()
     snippet = tmp_path / "snippet.py"
-    snippet.write_text(SNIPPET, encoding="utf-8", newline="\n")
+    # r8 grant (a): on win32 the §4 snippet reaches the fake through GrokHostSettings.grok_command, because EC-157 refuses a .cmd shim.
+    body = SNIPPET if grok_command is None else SNIPPET.replace("GrokHostSettings(workspace=Path.cwd())", f"GrokHostSettings(workspace=Path.cwd(), grok_command={tuple(grok_command)!r})")
+    snippet.write_text(body, encoding="utf-8", newline="\n")
     env = dict(os.environ)
     env.update({"PATH": os.pathsep.join(path_entries), "HOME": str(home), "USERPROFILE": str(home), "PYTHONPATH": str(REPO_ROOT)})
     return subprocess.run([sys.executable, str(snippet)], cwd=workspace, env=env, capture_output=True, text=True, timeout=SNIPPET_TIMEOUT_SECONDS, check=False)
@@ -81,12 +83,17 @@ def system_folders() -> list[str]:
 
 def test_snippet_prints_completed_text_when_grok_is_the_fake(tmp_path: Path, grok_fake) -> None:
     # AC-1, first outcome: `grok` resolves to a fake ACP peer that completes the turn with text "alpha-beta".
-    shim_folder = tmp_path / "shim"
-    shim_folder.mkdir()
     scenario_path = tmp_path / "snippet-scenario.json"
     scenario_path.write_text(json.dumps(grok_fake.scenario()), encoding="utf-8")
-    write_grok_shim(shim_folder, scenario_path)
-    completed = run_snippet(tmp_path, [str(shim_folder), *system_folders()])
+    if sys.platform == "win32":
+        # r8 grant (a) / AC-1: EC-157 refuses a grok.cmd shim, so win32 reaches the fake through the §13 seam; only System32 is on PATH.
+        command = (sys.executable, "-u", str(FAKE_GROK), str(scenario_path))
+        completed = run_snippet(tmp_path, system_folders(), grok_command=command)
+    else:
+        shim_folder = tmp_path / "shim"
+        shim_folder.mkdir()
+        write_grok_shim(shim_folder, scenario_path)
+        completed = run_snippet(tmp_path, [str(shim_folder), *system_folders()])
     assert completed.returncode == 0, completed.stderr
     assert completed.stdout.strip() == "completed alpha-beta", completed.stdout + completed.stderr
     assert grok_fake.received("session/prompt"), "the snippet's prompt reached the fake, not a real grok"

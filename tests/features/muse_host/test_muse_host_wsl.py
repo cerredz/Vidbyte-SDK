@@ -177,6 +177,21 @@ async def test_short_lived_read_peer_skips_the_reap(muse_api, muse_fake, make_ws
 
 @pytest.mark.asyncio
 @win32_only
+async def test_read_peer_forwards_meta_api_key_through_wslenv(muse_api, muse_fake, make_wsl_host, monkeypatch: pytest.MonkeyPatch) -> None:
+    # R-7 / §9.3 / D-18: META_API_KEY/u is keyed to the variable being set, not to being a turn peer, so a read peer forwards it too.
+    monkeypatch.setenv("WSLENV", CALLER_WSLENV)
+    monkeypatch.setenv("META_API_KEY", PLACEHOLDER_KEY)
+    async with make_wsl_host({"env_keys": OVERLAY_KEYS}) as host:
+        page = await host.list_muse_sessions()
+    assert page.sessions
+    entries = peer_start(muse_fake)["env"]["WSLENV"].split(":")
+    assert entries[:2] == ["WT_SESSION", "WT_PROFILE_ID"], "the caller's WSLENV entries are kept first"
+    assert "META_API_KEY/u" in entries, "R-7: a short-lived read peer forwards META_API_KEY into the distro, like a turn peer"
+    assert peer_start(muse_fake)["meta_key_set"] is True
+
+
+@pytest.mark.asyncio
+@win32_only
 async def test_check_in_wsl_mode_runs_version_through_the_distro(muse_api, muse_fake, make_wsl_host, monkeypatch: pytest.MonkeyPatch) -> None:
     # D-19: the launcher prefix is `wsl.exe -d <distro> -e <muse_path>`; readiness names the distro.
     monkeypatch.setenv("WSLENV", CALLER_WSLENV)

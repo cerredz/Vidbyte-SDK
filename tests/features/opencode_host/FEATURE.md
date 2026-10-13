@@ -98,7 +98,7 @@ A finished turn keeps its result for every later wait.
 
 ## Historical Regressions
 
-None yet. The pack was written red before implementation, from spec r3.
+- **r8 (S4 review R-6): a single non-counted poll failure orphaned a running server turn.** One transient HTTP 500 (`opencode.api_error`, EC-59) is not counted by EC-87, so it failed the turn locally, but no `POST …/abort` was sent, leaving a still-spending server turn the SDK could not stop. INV-10/INV-13 and the EC-154/EC-155 abort-first paths imply one best-effort abort before raising. Caught by `test_a_single_non_counted_poll_failure_aborts_before_failing_the_turn` in `test_opencode_host_watcher.py`. The spec does not state this abort rule outright, so it is recorded as a spec gap resting on INV-10/INV-13 and the review.
 
 ## Test Suite Map
 
@@ -118,7 +118,7 @@ None yet. The pack was written red before implementation, from spec r3.
   - the reply set, text and summed usage;
   - the message window, earlier turns and partial replies;
   - stop reasons, the ceiling, host close and abort from elsewhere;
-  - poll failures, deleted sessions and retry;
+  - poll failures, deleted sessions and retry, including one best-effort abort before a single non-counted poll failure fails the turn (r8, R-6);
   - the text cap;
   - the session-tree walk for permissions and questions (EC-154).
 - `test_opencode_host_owned_server.py`:

@@ -324,3 +324,16 @@ async def test_two_concurrent_continues_on_one_session_start_one_turn(muse_api, 
         assert len(muse_fake.received("turn/start")) == 1
         muse_fake.release()
         await host.wait_muse_turn(handles[0], timeout_seconds=WAIT_SECONDS)
+
+
+@pytest.mark.asyncio
+async def test_continue_on_the_upper_cased_id_of_a_live_session_is_busy(muse_api, muse_fake, make_muse_host, fast_stop, check_native_error) -> None:
+    # EC-112 / INV-14: Muse session ids compare ignoring case, so a continue on the upper-cased id hits the live turn.
+    async with make_muse_host({"turn": {"mode": "hold"}}) as host:
+        live = await host.continue_muse_session(KNOWN_SESSION, muse_api.MuseTurnRequest(prompt=PROMPT))
+        with pytest.raises(muse_api.NativeHostError) as caught:
+            await host.continue_muse_session(KNOWN_SESSION.upper(), muse_api.MuseTurnRequest(prompt=PROMPT))
+        check_native_error(caught.value, code="muse.session_busy", token="interrupt_muse_turn", operation="continue_muse_session")
+        assert len(muse_fake.received("turn/start")) == 1, "the upper-cased id names the same live session, so no second turn starts"
+        muse_fake.release()
+        await host.wait_muse_turn(live, timeout_seconds=WAIT_SECONDS)

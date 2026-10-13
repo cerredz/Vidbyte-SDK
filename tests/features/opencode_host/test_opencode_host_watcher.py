@@ -249,6 +249,21 @@ async def test_retry_at_the_limit_aborts_the_turn(opencode_api, fake_opencode, m
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("route", ["session_status", "permission_list"])
+async def test_a_single_non_counted_poll_failure_aborts_before_failing_the_turn(route: str, opencode_api, fake_opencode, make_opencode_host, check_native_error) -> None:
+    # R-6 / INV-10 / INV-13: one 500 (EC-59) is not counted by EC-87, so the turn fails; one best-effort abort must be sent first.
+    fake_opencode.plan("hold")
+    async with make_opencode_host() as host:
+        handle = await host.spawn_opencode_session(opencode_api.OpencodeSpawnRequest(turn=opencode_api.OpencodePromptRequest(prompt=PROMPT)))
+        fake_opencode.fail(route, "500", times=1)
+        with pytest.raises(opencode_api.NativeHostError) as caught:
+            await host.wait_opencode_turn(handle, timeout_seconds=TURN_WAIT_SECONDS)
+        aborts = [item.params["sid"] for item in fake_opencode.seen("abort")]
+        assert aborts == [handle.session_id], "R-6: one best-effort abort for this session before the turn reports failure"
+    check_native_error(caught.value, code="opencode.api_error", token="vendor_error")
+
+
+@pytest.mark.asyncio
 async def test_failed_turn_raises_the_same_code_on_every_wait(opencode_api, fake_opencode, make_opencode_host) -> None:
     # EC-148 / INV-13: the failure is recorded once and raised by every later wait.
     fake_opencode.plan("complete", replies=[reply("", finish=None, error={"name": "APIError", "data": {"message": "payment required", "statusCode": 402, "isRetryable": False}})])

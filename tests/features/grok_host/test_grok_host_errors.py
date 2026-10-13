@@ -43,6 +43,7 @@ VENDOR_FAILURE = {"code": -32099, "message": "backend exploded"}
 FS_NOT_FOUND = {"code": -32603, "message": "Internal error", "data": {"code": "FS_NOT_FOUND"}}
 LIST_SILENT = {"acp": {"session_list": {"mode": "silent"}}}
 LIST_WITHOUT_CWD = {"acp": {"session_list": {"pages": [[{"sessionId": KNOWN_SESSION, "cwd": "$drop"}]]}}}
+INVALID_PARAMS = {"code": -32602, "message": "Invalid params"}
 
 
 @dataclass(frozen=True)
@@ -291,6 +292,8 @@ ROWS: tuple[Row, ...] = (
     Row("EC-14", "spawn_grok_session", PM, "check_grok_ready", {"acp": {"session_new": {"result": {"unexpected": True}}}}, never_sent=("session/prompt",)),
     Row("EC-15", "spawn_grok_session", NS, "grok login", {"acp": {"session_new": {"error": SIGNED_OUT}}}, never_sent=("session/prompt",)),
     Row("EC-16", "spawn_grok_session", AE, "vendor_code", {"acp": {"session_new": {"error": VENDOR_FAILURE}}}, context={"vendor_code": "-32099"}, never_sent=("session/prompt",)),
+    # R-1 (review R-1): session/new has no cursor, so a -32602 answer is a vendor api_error, not a protocol mismatch.
+    Row("EC-16", "spawn_grok_session", AE, "vendor_code", {"acp": {"session_new": {"error": INVALID_PARAMS}}}, variant="minus-32602-no-cursor", context={"vendor_code": "-32602"}, context_keys=("vendor_error",), never_sent=("session/prompt",)),
     Row("EC-17", "spawn_grok_session", VU, "grok update", OLD_AGENT, never_sent=("session/new", "session/prompt")),
     Row("EC-25", "spawn_grok_session", MU, "list_grok_models", call="spawn_unknown_model", context_keys=("available_models",), never_sent=("session/new", "session/prompt")),
     Row("EC-26", "spawn_grok_session", CM, "list_grok_models", call="spawn_unoffered_effort", never_sent=("session/new", "session/prompt")),
@@ -337,6 +340,8 @@ ROWS: tuple[Row, ...] = (
     Row("EC-40", "list_grok_sessions", CM, "grok update", NO_LIST_CAPABILITY, never_sent=("session/list",)),
     Row("EC-16", "list_grok_sessions", CM, "list_grok_models", {"acp": {"session_list": {"error": {"code": -32601, "message": "Method not found"}}}}, variant="minus-32601", context_keys=("method",)),
     Row("EC-41", "list_grok_sessions", IA, "without a cursor", {"acp": {"session_list": {"cursor_error": {"code": -32602, "message": "Invalid params"}}}}, call="list_stale_cursor"),
+    # R-1 (review R-1): the same -32602 with no cursor set is not a stale cursor; it is a vendor api_error (contrast EC-41 above).
+    Row("EC-16", "list_grok_sessions", AE, "vendor_code", {"acp": {"session_list": {"error": INVALID_PARAMS}}}, variant="minus-32602-no-cursor", context={"vendor_code": "-32602"}, context_keys=("vendor_error",)),
     Row("EC-15", "list_grok_sessions", NS, "grok login", {"acp": {"session_list": {"error": SIGNED_OUT}}}),
     Row("EC-16", "list_grok_sessions", AE, "vendor_code", {"acp": {"session_list": {"error": VENDOR_FAILURE}}}, context={"vendor_code": "-32099"}),
     # search_grok_sessions pages session/list.
@@ -414,6 +419,18 @@ async def test_model_unknown_context_names_the_models_grok_offers(grok_api, make
     listed = caught.value.context["available_models"]
     assert "grok-code-fast-1" in listed and "grok-4-heavy" in listed
     assert UNKNOWN_MODEL not in listed
+
+
+@pytest.mark.asyncio
+async def test_invalid_params_without_a_cursor_is_an_api_error_carrying_the_vendor_message(grok_api, make_grok_host, fast_stop, check_native_error) -> None:
+    # R-1 / EC-16: a -32602 answer to session/new has no cursor, so it is a vendor api_error that keeps the vendor message.
+    scenario = {"acp": {"session_new": {"error": INVALID_PARAMS}}}
+    async with make_grok_host(scenario) as host:
+        with pytest.raises(grok_api.NativeHostError) as caught:
+            await host.spawn_grok_session(grok_api.GrokTurnRequest(prompt=PROMPT))
+    check_native_error(caught.value, code="grok.api_error", token="vendor_code", operation="spawn_grok_session")
+    assert caught.value.context["vendor_code"] == "-32602"
+    assert "Invalid params" in caught.value.context.get("vendor_error", ""), caught.value.context
 
 
 EC2_CALLS: dict[str, Callable[[Any, SimpleNamespace], Awaitable[Any]]] = {

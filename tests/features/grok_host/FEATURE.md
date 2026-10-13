@@ -128,12 +128,16 @@ These are the failure inventory the tests were chosen from, given as input → w
 
 ## Historical Regressions
 
-None yet. The pack was written red before implementation, from spec r3.
+- **r8 (S4 review R-1): a no-cursor `-32602` was a protocol mismatch.** `GrokWire` mapped every `-32602` answer sent without a cursor to `grok.protocol_mismatch` and dropped `vendor_error`, but EC-16 requires `grok.api_error` (only EC-41's non-null cursor is `configuration.invalid_argument`). Caught by the `EC-16 … minus-32602-no-cursor` rows for `spawn_grok_session` and `list_grok_sessions` in `test_grok_host_errors.py` and by `test_invalid_params_without_a_cursor_is_an_api_error_carrying_the_vendor_message`.
+- **r8 (S4 review R-2): a win32 batch Grok launcher ran the argv through `cmd.exe`.** A `grok.cmd` on PATH, or an explicit `.cmd`/`.bat` `grok_command`, was started, so a prompt, model id or rule could run as a command. EC-157 refuses it at `__aenter__`. Caught by `test_grok_host_windows_launcher.py` (win32-only).
+- **r8 (S4 review R-8 / S4-6): the busy check and fork listing checks compared session ids case-sensitively.** INV-14 says Grok ids compare ignoring letter case. Caught by `test_grok_host_session_id_case.py` (continue busy on the upper-cased id, fork on an upper-cased source, and an upper-cased `new_session_id` that collides with an existing id). EC-39's target comparison was already case-insensitive, so its two cases are locks.
 
 ## Test Suite Map
 
 - `test_grok_host_acceptance.py`: the §4 snippet as written (both outcomes), spawn with a held turn, wait timeout then result, double interrupt, and the module-level `run_grok_once`.
-- `test_grok_host_errors.py`: the table-driven error rows for every (function, code), in host mode and tool mode. It also covers the unopened or closed host, re-entry, invalid primitive arguments, and the PATH lookup.
+- `test_grok_host_errors.py`: the table-driven error rows for every (function, code), in host mode and tool mode. It also covers the unopened or closed host, re-entry, invalid primitive arguments, the PATH lookup, and the no-cursor `-32602` api_error (r8, R-1).
+- `test_grok_host_session_id_case.py`: INV-14 case-insensitivity (r8, R-8): a continue busy on the upper-cased id, a fork on an upper-cased source, an upper-cased `new_session_id` that collides, and the two EC-39 locks.
+- `test_grok_host_windows_launcher.py`: EC-157 (r8, R-2, win32-only): a `grok.cmd` on PATH and an explicit `.cmd`/`.bat` `grok_command` are refused at `__aenter__` and never run.
 - `test_grok_host_turns.py`: approvals and decisions, stop reasons, interrupt and ceiling, unknown notifications, the text cap, unknown usage, repeated failure, handle scoping, concurrency, wire shapes and peer argv, and a peer that exits mid-write.
 - `test_grok_host_reads.py`: readiness, catalog, pages and cursors, casefolded search and its page cap, one-shot and fork results and argv, live model checks, text capping, garbage frames, and the child environment.
 - `test_grok_host_process_bounds.py`: the AC-3 bound with shrunk and default timings, cancellation of each call, cancelled waits, `__aexit__` with live turns or on error or cancellation, grandchild reaping, and the one-shot tree stop.

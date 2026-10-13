@@ -28,6 +28,8 @@ WAIT_SECONDS = 30.0
 DEFAULT_PEER_BOUND_SECONDS = 9.0
 STUBBORN = {"ignore_eof": True, "ignore_term": True}
 HELD_STUBBORN = {"ignore_eof": True, "ignore_term": True, "turn": {"mode": "hold", "on_interrupt": "ignore"}}
+SILENT_DECIDE_CONTROL_SECONDS = 6.0
+DECIDE_SILENT = {"msp": {"approval/decide": {"mode": "silent"}}, "turn": {"mode": "hold", "approvals": [{}]}}
 posix_only = pytest.mark.skipif(sys.platform == "win32", reason="liveness checks are POSIX-only by spec §13; Windows has no portable equivalent")
 
 
@@ -181,6 +183,23 @@ async def test_aexit_interrupts_live_turns_as_host_closed_within_the_bound(muse_
     assert [result.interrupt_source for result in results] == [muse_api.InterruptSource.HOST_CLOSED] * 2
     assert len(muse_fake.received("turn/interrupt")) == 2
     assert elapsed < fast_stop.grace + peer_bound(fast_stop), "peers close concurrently, so two cost no more than one"
+
+
+@pytest.mark.asyncio
+async def test_aexit_returns_within_the_bound_when_a_peer_is_silent_on_decide(muse_api, muse_fake, make_muse_host, fast_stop, wait_until) -> None:
+    # R-5 / NFR-2 / EC-8: a peer silent on approval/decide must not hold __aexit__ for control_timeout_seconds.
+    host = make_muse_host(DECIDE_SILENT, control_timeout_seconds=SILENT_DECIDE_CONTROL_SECONDS)
+    async with host:
+        handle = await host.spawn_muse_session(muse_api.MuseTurnRequest(prompt=PROMPT))
+        waiter = asyncio.create_task(host.wait_muse_turn(handle, timeout_seconds=WAIT_SECONDS))
+        decided = await wait_until(lambda: bool(muse_fake.received("approval/decide")), STARTED_WITHIN_SECONDS)
+        assert decided, "the host sent approval/decide and is now awaiting the silent peer's answer"
+        started = time.monotonic()
+    elapsed = time.monotonic() - started
+    result = await waiter
+    assert elapsed < fast_stop.grace + peer_bound(fast_stop), f"__aexit__ waited {elapsed:.2f}s; NFR-2 bounds it at {fast_stop.grace + peer_bound(fast_stop):.2f}s"
+    assert result.status is muse_api.NativeTurnStatus.INTERRUPTED
+    assert result.interrupt_source is muse_api.InterruptSource.HOST_CLOSED
 
 
 @pytest.mark.asyncio
