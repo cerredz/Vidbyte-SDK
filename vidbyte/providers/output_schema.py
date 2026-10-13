@@ -80,7 +80,7 @@ class OutputSchemaFormatter:
         # additionalProperties:false and lists every property in required; Pydantic emits neither.
         # Optional fields stay expressible because Pydantic already types them as anyOf [X, null].
         strict = copy.deepcopy(dict(schema))
-        self._strict_node(strict)
+        self._strict_node(strict, strict, frozenset())
         return strict
 
     def validate(self, output: str, schema: type | Mapping[str, Any]) -> tuple[Any, str | None]:
@@ -117,16 +117,45 @@ class OutputSchemaFormatter:
         for child in self._child_nodes(node):
             self._annotate_node(child)
 
-    def _strict_node(self, node: dict[str, Any]) -> None:
+    def _strict_node(self, node: dict[str, Any], root: Mapping[str, Any], inlining: frozenset[str]) -> None:
         # Closes one object node and requires all its properties, then recurses like _annotate_node.
         # A node that already declares additionalProperties keeps the caller's explicit choice; an
         # explicitly closed node (extra="forbid") still needs every property listed in required.
+        # @intent strict-mode-unravels-annotated-refs
+        # OpenAI strict rejects a "$ref" with sibling keywords, which Pydantic emits for defaulted enums
+        # and described nested models, so such a ref is inlined first (mirroring openai-python's
+        # _ensure_strict_json_schema unravel) and the inlined object is then closed like any other.
+        inlined = self._unravel_ref(node, root, inlining)
+        if inlined:
+            inlining = inlining | {inlined}
         if isinstance(node.get("properties"), dict):
             node.setdefault("additionalProperties", False)
             if node["additionalProperties"] is False:
                 node["required"] = list(node["properties"])
         for child in self._child_nodes(node):
-            self._strict_node(child)
+            self._strict_node(child, root, inlining)
+
+    @staticmethod
+    def _unravel_ref(node: dict[str, Any], root: Mapping[str, Any], inlining: frozenset[str]) -> str | None:
+        # Replaces a local "$ref" that carries sibling keywords with a copy of its target, the node's own
+        # keys winning, and returns the ref it inlined. A ref already being inlined on this path (a
+        # self-referential definition) keeps a bare "$ref" instead; a non-local or unknown ref is left alone.
+        ref = node.get("$ref")
+        if not isinstance(ref, str) or len(node) == 1:
+            return None
+        prefix, _, name = ref.rpartition("/")
+        defs = root.get(prefix.removeprefix("#/")) if prefix in ("#/$defs", "#/definitions") else None
+        target = defs.get(name) if isinstance(defs, dict) else None
+        if not isinstance(target, dict):
+            return None
+        own = dict(node)
+        node.clear()
+        if ref in inlining:
+            node["$ref"] = ref
+            return None
+        node.update({**copy.deepcopy(target), **own})
+        node.pop("$ref")
+        return ref
 
     @staticmethod
     def _child_nodes(node: Mapping[str, Any]) -> list[dict[str, Any]]:

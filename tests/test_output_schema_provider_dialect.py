@@ -6,7 +6,8 @@ ARCHITECTURE NOTE: Builds each provider's request payload directly from a TextMo
     annotated Pydantic schema the agent runtime would send, then inspects the payload dict.
 FUNCTION INVENTORY: OpenAIStrictDialectTests checks both strict-mode rules at every object node for the
     OpenAI Responses adapter, the compatible NATIVE_SCHEMA tier and Anthropic's output_config; GeminiResponseSchemaTests checks refs
-    are expanded; StrictFormatterTests checks explicit additionalProperties choices are kept.
+    are expanded; StrictFormatterTests checks explicit additionalProperties choices are kept. Strict payloads
+    must also carry no "$ref" with sibling keywords (defaulted enums, described nested models).
 COMMON MODIFICATION PATTERNS: Add a model per schema shape a provider dialect must accept.
 WHAT NOT TO DO: Do not call real provider endpoints or require API keys from the environment.
 KNOWN EDGE CASES: Pydantic emits Optional[X] as anyOf [X, null] and puts nested models and Enums in $defs.
@@ -21,7 +22,7 @@ import unittest
 from enum import Enum
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from vidbyte.lib.config import ModelProvider, TextModelConfig
 from vidbyte.providers.anthropic import AnthropicProvider
@@ -48,6 +49,16 @@ class Ticket(BaseModel):
     tags: list[Tag]
 
 
+class Customer(BaseModel):
+    name: str
+
+
+class AnnotatedTicket(BaseModel):
+    title: str
+    priority: Priority = Priority.LOW
+    customer: Customer = Field(description="Who filed the ticket")
+
+
 class Closed(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str
@@ -71,6 +82,20 @@ def _object_nodes(node: Any) -> list[dict[str, Any]]:
     elif isinstance(node, list):
         for value in node:
             found.extend(_object_nodes(value))
+    return found
+
+
+def _refs_with_siblings(node: Any) -> list[dict[str, Any]]:
+    # Collects every node that carries "$ref" next to another keyword, which OpenAI strict mode rejects.
+    found: list[dict[str, Any]] = []
+    if isinstance(node, dict):
+        if "$ref" in node and len(node) > 1:
+            found.append(node)
+        for value in node.values():
+            found.extend(_refs_with_siblings(value))
+    elif isinstance(node, list):
+        for value in node:
+            found.extend(_refs_with_siblings(value))
     return found
 
 
@@ -121,6 +146,41 @@ class OpenAIStrictDialectTests(unittest.TestCase):
         self.assertIs(sent["$defs"]["Tag"]["additionalProperties"], False)
         self.assertEqual(json.dumps(schema, sort_keys=True), before)
 
+    def assert_annotated_refs_unravelled(self, strict: dict[str, Any]) -> None:
+        self.assertEqual(_refs_with_siblings(strict), [])
+        customer = strict["properties"]["customer"]
+        self.assertEqual(customer["description"], "Who filed the ticket")
+        self.assertIs(customer["additionalProperties"], False)
+        self.assertEqual(customer["required"], ["name"])
+        priority = strict["properties"]["priority"]
+        self.assertEqual(priority["enum"], ["low", "high"])
+        self.assertEqual(priority["default"], "low")
+
+    def test_strict_unravels_refs_that_carry_sibling_keywords(self) -> None:
+        """A defaulted enum and a described nested model are inlined instead of sent as "$ref" plus siblings."""
+        # @intent strict-mode-unravels-annotated-refs
+        # OpenAI strict 400s with "$ref cannot have keywords {'description'}" on Pydantic's annotated refs.
+        schema = _wire_schema(AnnotatedTicket)
+        before = json.dumps(schema, sort_keys=True)
+        self.assertEqual(len(_refs_with_siblings(schema)), 2)
+
+        strict = OutputSchemaFormatter().strict(schema)
+
+        self.assert_annotated_refs_unravelled(strict)
+        self.assertEqual(json.dumps(schema, sort_keys=True), before)
+
+    def test_openai_responses_payload_unravels_annotated_refs(self) -> None:
+        """The OpenAI Responses text.format schema carries no "$ref" with sibling keywords."""
+        schema = _wire_schema(AnnotatedTicket)
+        before = json.dumps(schema, sort_keys=True)
+        config = TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-5.4-mini", response_format=schema)
+        payload = OpenAIProvider(model="gpt-5.4-mini", api_key="k")._create_text_payload(config, "triage", None, None)
+        sent = payload["text"]["format"]["schema"]
+
+        self.assert_strict(sent)
+        self.assert_annotated_refs_unravelled(sent)
+        self.assertEqual(json.dumps(schema, sort_keys=True), before)
+
     def test_strict_does_not_mutate_the_runtime_schema(self) -> None:
         """The runtime's schema is reused for validation and prompts, so strict() works on a copy."""
         schema = _wire_schema(Ticket)
@@ -142,6 +202,19 @@ class StrictFormatterTests(unittest.TestCase):
         strict = OutputSchemaFormatter().strict(_wire_schema(Closed))
         self.assertIs(strict["additionalProperties"], False)
         self.assertEqual(strict["required"], ["name", "note"])
+
+    def test_self_referencing_annotated_ref_is_inlined_once(self) -> None:
+        """A definition whose body refers to itself through an annotated "$ref" does not expand forever."""
+        schema = {
+            "type": "object",
+            "properties": {"root": {"$ref": "#/$defs/Node", "description": "top"}},
+            "$defs": {"Node": {"type": "object", "properties": {"child": {"$ref": "#/$defs/Node", "description": "self"}}}},
+        }
+        strict = OutputSchemaFormatter().strict(schema)
+
+        self.assertEqual(_refs_with_siblings(strict), [])
+        self.assertEqual(strict["properties"]["root"]["properties"]["child"], {"$ref": "#/$defs/Node"})
+        self.assertIs(strict["properties"]["root"]["additionalProperties"], False)
 
 
 class GeminiResponseSchemaTests(unittest.TestCase):
