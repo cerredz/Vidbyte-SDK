@@ -5,7 +5,7 @@ ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates questions against t
 ARCHITECTURE NOTE: The vocabulary lives in `vidbyte.lib` because the provider layer, record layer, and tool layer all read it, and lower layers may not import the tool layer.
 COMMON MODIFICATION PATTERNS: Add a TypeSafe question type only when documented, and extend validation and answer normalization with it. Add preflight keys with their fixed question dataclasses and preset registration. Add a done check together with its run-state and handoff sections and one fixed question in `vidbyte/lib/jev/done/`; post-run-derived items belong in the handoff.
 KNOWN EDGE CASES: `noul` is TypeSafe's spelling for a yes/no question; keep the serialized value exactly as the API expects. A question key's value is the answer name Jev returns, so it must remain unique. TOOL_SELECTOR has no question keys because it asks one question per configured tool at run time.
-RELATED DOCS: docs/design/jev-can-simplify-done-criteria.md, docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-output-count-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, skills/jev-continuation/SKILL.md, and https://docs.typesafe.ai/api.md, docs/design/jev-negative-coverage.md, docs/design/jev-mid-run-problem-repair-gate.md, docs/design/jev-guaranteed-next-actions.md, docs/design/jev-required-actions-done-criteria.md, docs/design/jev-cumulative-obligations-done-check.md, docs/design/jev-discovered-item-coverage.md.
+RELATED DOCS: docs/design/jev-can-simplify-done-criteria.md, docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-output-count-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-target-outcome-done-check.md, docs/design/jev-completion-evidence.md, docs/design/jev-phase-progress.md, docs/design/jev-input-set-coverage.md, docs/design/jev-report-action-alignment.md, docs/design/jev-assumption-reconciliation-done-criteria.md, skills/jev-continuation/SKILL.md, and https://docs.typesafe.ai/api.md, docs/design/jev-negative-coverage.md, docs/design/jev-mid-run-problem-repair-gate.md, docs/design/jev-guaranteed-next-actions.md, docs/design/jev-required-actions-done-criteria.md, docs/design/jev-cumulative-obligations-done-check.md, docs/design/jev-discovered-item-coverage.md, docs/design/jev-read-only-intent.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, scripts/test-jev-agent-scaffold.py, and scripts/test-jev-preflight.py, tests/test_jev_done.py.
 """
 
@@ -34,6 +34,7 @@ class JevPreflightPreset(str, Enum):
     TOOL_SELECTOR = "tool_selector"
     RUN_STATE_RELATION = "run_state_relation"
     BULK_WORK = "bulk_work"
+    READ_ONLY = "read_only"
 
 
 # Load skills/jev-continuation/SKILL.md before adding a member here: it is the step-by-step checklist for adding
@@ -264,6 +265,14 @@ class JevPreflightQuestionKey(str, Enum):
     CLARITY_CONSISTENCY = "clarity.consistency"
     CLARITY_TIME_CONTEXT = "clarity.time_context"
     CLARITY_SINGLE_READING = "clarity.single_reading"
+    READ_ONLY_ASSESSMENT = "read_only.assessment"
+    READ_ONLY_SOLE_RESULT = "read_only.sole_result"
+    READ_ONLY_UNCHANGED = "read_only.unchanged"
+    READ_ONLY_DESCRIBED = "read_only.described"
+    READ_ONLY_USER_DECIDES = "read_only.user_decides"
+    READ_ONLY_IN_REPLY = "read_only.in_reply"
+    READ_ONLY_READING = "read_only.reading"
+    READ_ONLY_ANSWER_MEETS_GOAL = "read_only.answer_meets_goal"
 
 
 class JevDynamicComputeOption(str, Enum):
