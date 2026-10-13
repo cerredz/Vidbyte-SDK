@@ -171,3 +171,77 @@ Each commit was checked before it was made, using the packs and the lint, with t
 | invariants | INV-19 / INV-22 / FailureCode | PASS | sha256 `0374a2c8…497a`; INV-22 diff empty; `failure.py` unchanged in this iteration (`git diff 406edb56 HEAD` is empty) |
 
 **Still open:** nothing from this packet. The orchestrator deferred R-13, R-14 and R-15 to iteration 3. R-M4, R-M5, R-M7 and R-M8 remain follow-ups. Reflowing existing comments to 72 columns is iteration 3 work; only new comments were kept to that width.
+
+## Iteration 3 — 2026-10-13 15:09 UTC — agent report: reports/S5-repair-3.md
+
+**Defects in:** R-14 and R-15 (one pass, as the packet asked), then R-13; review.md bookkeeping (R-13, R-14 and R-15 fixed; R-M4, R-M5, R-M7 and R-M8 still follow-ups).
+
+**Hypotheses and attempts:**
+- **Scope, measured first.** A scratch counter read only the lines this PR adds under `vidbyte/` (diff against origin/main 8387d666). At bae65c29 it found:
+  - 295 added `#` comments citing a spec id;
+  - 701 added full-line comments wider than 72 columns;
+  - 0 wide trailing comments.
+
+  The review counted 282 and 653 + 20 at de5b7c4c; iterations 1 and 2 added the rest.
+- **R-14 and R-15, one pass.**
+  - **Method.** A scratch tool took each run of PR-added full-line comments at one column and:
+    - stripped the id tokens (parenthesised references and leading "EC-n:" labels);
+    - joined the lines into paragraphs;
+    - filled them again at 72 columns, counting the indent.
+
+    `# @intent <name>` stays on its own first line, and blank `#` lines and list items are kept. A block that mixes main's lines was left alone.
+  - **Hand rewrites.** Where an id carried the meaning, the comment now names the failure code (wsl_unavailable, protocol_mismatch, version_unsupported, process_exited, server_unreachable, turn_not_found) or the step (the at-cap next step).
+  - **`@intent` names and rulers.** Seven names said "row", a spec-table word; they now say "failure", for example `grok-json-rpc-codes-to-failures`. Section rulers were shortened to 72 columns.
+  - **NFR-4.** The first fill pushed `opencode/host.py` past 800 lines, so 28 narration comments there were tightened. It is now 790, the largest new module.
+  - **Comment-only proof.** `ast.dump(ast.parse(...))` is equal for all 38 changed `.py` files against bae65c29.
+  - **Errors along the way, all fixed before committing:**
+    1. A `--dry` flag that was not yet wired wrote the files. I checked AST equality, ran `git restore vidbyte/` (the tree had been clean) and wired the flag.
+    2. The writer kept the CRLF that `core.autocrlf=true` checks out, which made three whole-file diffs. It now writes LF, which is what the blobs hold.
+    3. The id strip capitalised words mid-sentence. It now capitalises only after removing a leading label.
+    4. A fully balanced wrap made lines too narrow. It became a greedy fill that narrows only to avoid a stub last line (under 30% of the width).
+    5. One hand-written line was 73 columns. Hand text now goes through the same wrapper.
+  - **A002 side effect.** `NativePeer.send` and `ProcessStopper._bounded_wait` had passed A002 only because the next function's `@intent` sat within their 20-line window. The reflow pushed it out, and A002 went 601 → 603. Both got real blocks in the same commit (→ 600).
+  - **Byte width.** gawk here counts bytes, so a line in `opencode/turn.py` holding "…" measured 74 although it is 72 characters. It was rewrapped in 96705dfd.
+- **R-13.**
+  - **Before.** Measured with the repo's own `IntentAnalyzer` over each ref's tree: origin/main 8387d666 = 579, bae65c29 = 601. The 24 newly flagged functions:
+    - opencode.py 12, grok.py 3, harness_backends.py 2, muse.py 2, native_hosts.py 1 and errors/base.py 1;
+    - process/runner.py 3: `_feed_stdin`, `_outcome` and `_kill_leader`.
+
+    transport.py went 6 → 4.
+  - **Fix.** 23 got an `@intent` block in main's format in 4f243bc9: the first lines of the body, `# @intent <name>` then the plain-English reason, ≤ 72 columns. Where the body already opened with a narration comment, the block replaced it and kept its meaning.
+  - **`_kill_leader`.** After the reflow it passed only through `_bounded_wait`'s new block 7 lines below. A stricter count, which accepts only an `@intent` inside the function's own lines, caught this, and it got its own block in af3e05e8.
+  - **After.** A002 is 577 against 579 on origin/main. The only per-file difference is transport.py 6 → 4, which this PR already had.
+  - **Rejected:** lowering `lint/baseline.json` as lint suggests ("Lower it with … --update-baseline"). Nothing under `lint/` is edited.
+- **Gate-run trouble.**
+  - **First run, at 96705dfd.** It failed 14 `tests/features/coding_agent/test_coding_agent_verify_command.py` tests ("the runtime asked the model for more turns than the test scripted"). Those tests time real `bash` runs, and my measurement scripts were running at the same time. The file passed alone (`44 passed in 5.10s`).
+  - **Stopping it.** I stopped that run to add af3e05e8. The stop killed only the forked sh child, so the parent script went on through gates 4–8 while the new run's packs ran.
+  - **Final run.** The new run's gates 2–8 ran with nothing alongside, and their outputs replaced the stray ones. Gate 1 was rerun alone afterwards.
+
+**Changes:**
+- R-14 and R-15: f067088d (34 files, +1271/−868)
+- R-13: 4f243bc9 (7 files, +115/−6) and af3e05e8 (1 file, +5/−1)
+- R-15: 96705dfd (1 file, byte-width rewrap)
+- review.md statuses: in this commit
+
+**Gate matrix out (code HEAD af3e05e8):**
+
+| Gate | Command | Result | Final lines |
+|---|---|---|---|
+| packs | gate 1 | PASS (rerun alone) | `1638 passed, 19 skipped in 145.24s (0:02:25)` |
+| neighbour suites | gate 2 | PASS | `464 passed, 12 skipped in 16.89s` |
+| full suite | gate 3 | PASS | `5653 passed, 32 skipped in 178.98s (0:02:58)` |
+| lint | gate 4 | PASS (A002 577/703 IMPROVED, was 601; A001 643/643; A007 255/255; the others at or under their baselines) | `S064 RATCHETED: 4 known finding(s).` / `SDK-LINT: PASS` |
+| source stage | gate 5 | PASS | `5653 passed, 32 skipped in 183.92s (0:03:03)` / `CI passed.` |
+| package stage | gate 6 | PASS | `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` |
+| semgrep | gate 7 | PASS | `Ran 1 rule on 949 files: 0 findings.` |
+| public API | `python scripts/generate-sdk-public-api.py --check` | PASS | `contracts/sdk-public-api.json is current at f7a02bae… (vidbyte-sdk 0.2.1, 606 exports).` |
+| comment scope | added lines vs origin/main | PASS | `TOTAL spec-id comments=0 wide full-line comments=0 wide trailing comments=0` (was 295 / 701 / 0); `comment-format.md` awk over every new file: 0 lines |
+| AST equality | every changed `.py` vs bae65c29 | PASS | `AST-equality: 38 changed .py files, 38 equal and clean, 0 with differences` |
+| A002 by ref | repo `IntentAnalyzer` | 579 → 577 | `origin/main: A002 = 579` / `bae65c29: A002 = 601` / `HEAD: A002 = 577` |
+| remote CI | `gh run view 38418651864` (head af3e05e8) | PASS (3.11, 3.12 and Package all success) | 3.11: `5646 passed, 39 skipped in 175.89s` / `CI passed.`; 3.12: `5646 passed, 39 skipped, 19 warnings in 191.73s` / `CI passed.`; Package: `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` |
+| remote static policy | `gh run view 38418656187` (head af3e05e8) | PASS | `Ran 1 rule on 949 files: 0 findings.` (conclusion success) |
+| invariants | INV-19 / INV-22 / frozen files | PASS | sha256 `0374a2c8…497a`; INV-22 diff empty; `failure.py`, `tests/`, `lint/`, `pyproject.toml` and spec.md unchanged since bae65c29; origin/main 8387d666 is an ancestor of HEAD; the PR is still a draft |
+
+**Still open:** nothing from this packet. Follow-ups: R-M4, R-M5, R-M7 and R-M8. For S6:
+- The S3 sentence "A002 improved 703→623" was misleading: 703 is the stale baseline. The true counts are main 579, branch 601 before this iteration (+22) and 577 now (−2).
+- 15 PR functions still pass A002 only through a neighbour's `@intent`; main has 78 such. The rule counts them as covered and never flagged them, so they were left alone. The list is in the report.
