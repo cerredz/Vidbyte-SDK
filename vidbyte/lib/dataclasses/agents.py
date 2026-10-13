@@ -22,6 +22,7 @@ Relations:
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
@@ -247,10 +248,10 @@ class ProviderKeys:
         # A bare string would be read letter by letter, so it is refused
         # rather than split into one-letter provider names.
         message = f"ProviderKeys.{name} must be a tuple of ModelProvider members or their names."
-        if isinstance(values, (str, bytes)):
+        if isinstance(values, (str, bytes)) or not isinstance(values, Iterable):
             raise ConfigurationError(message, details={"field": name})
         try:
-            return tuple(ModelProvider(value) for value in values)  # type: ignore[attr-defined]
+            return tuple(ModelProvider(value) for value in values)
         except (TypeError, ValueError):
             raise ConfigurationError(message, details={"field": name}) from None
 

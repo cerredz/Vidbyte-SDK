@@ -157,9 +157,10 @@ class TextModelConfig:
         # Adapters build vendor auth from this value, so in a gateway
         # mode they get a non-secret stand-in, and neither the Vidbyte
         # key nor a relayed provider key ever enters a vendor header.
-        if self.mode is TextModelMode.DIRECT:
-            return self.credentials().provider_api_key  # type: ignore[return-value]
-        return VIDBYTE_MANAGED_KEY_PLACEHOLDER
+        # TextCredentials always holds a provider key in DIRECT, so the
+        # placeholder serves the gateway modes only.
+        provider_api_key = self.credentials().provider_api_key if self.mode is TextModelMode.DIRECT else None
+        return provider_api_key if provider_api_key is not None else VIDBYTE_MANAGED_KEY_PLACEHOLDER
 
     def resolved_endpoint(self) -> str:
         # Prefer caller-provided endpoints for tests, proxies, and compatible APIs.

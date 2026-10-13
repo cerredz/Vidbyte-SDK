@@ -85,12 +85,15 @@ class TextModelRunner:
         # call reaches the one gateway route and concurrent calls never
         # share a transport.
         transport = self._transport
-        if self._credentials.uses_gateway:
+        # Every gateway mode's credentials hold the Vidbyte key, and
+        # DIRECT's never do, so a Vidbyte key means a gateway call.
+        vidbyte_api_key = self._credentials.vidbyte_api_key
+        if vidbyte_api_key is not None:
             transport = VidbyteGatewayTransport(
                 self._transport,
                 provider=call_config.normalized_provider(),
                 model=call_config.model,
-                api_key=self._credentials.vidbyte_api_key,  # type: ignore[arg-type]
+                api_key=vidbyte_api_key,
                 provider_api_key=self._credentials.provider_api_key,
             )
         # Let the provider adapter build, send, and parse the request.

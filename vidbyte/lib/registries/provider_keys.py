@@ -207,19 +207,20 @@ class ProviderKeyMatcher:
                 raise ConfigurationError(f"{field_name} is a ProviderKeys record whose key {index} does not fit {provider.value}; pass your keys as a list and the SDK matches each one to its provider.", details={"field": field_name, "index": index, "provider": provider.value})
 
     @staticmethod
-    def _vidbyte_key(entries: tuple[tuple[int, str], ...], explicit: object, field_name: str) -> str | None:
+    def _vidbyte_key(entries: tuple[tuple[int, str], ...], explicit: str | None, field_name: str) -> str | None:
         """Return the one Vidbyte key from the explicit value and the list's Vidbyte entries (M-5)."""
         # @intent vidbyte-entry-is-the-vidbyte-key
         # A Vidbyte-prefixed entry is the Vidbyte key, never a provider
         # key; two different Vidbyte keys have no right answer.
-        found, found_index = explicit, None
+        found: str | None = explicit
+        found_index: int | None = None
         for index, key in ((index, key) for index, key in entries if key.startswith(VIDBYTE_API_KEY_PREFIX)):
             if found is None:
                 found, found_index = key, index
             elif key != found:
                 other = "vidbyte_api_key" if found_index is None else f"{field_name}[{found_index}]"
                 raise ConfigurationError(f"{field_name}[{index}] is a Vidbyte API key that differs from {other}; pass one Vidbyte key.", details={"field": field_name, "index": index, "error_kind": VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND})
-        return found  # type: ignore[return-value]
+        return found
 
     @staticmethod
     def _bind_proven(entries: tuple[tuple[int, str], ...], proven: Mapping[str, ModelProvider | None], field_name: str) -> dict[ModelProvider, tuple[int, str]]:
