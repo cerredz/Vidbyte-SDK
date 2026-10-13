@@ -439,8 +439,11 @@ class AgentRoleSettings:
         # Normalizes tuple and mapping fields. The key list's shape and
         # the Vidbyte key's format are checked here; the role's agent
         # matches the list against its provider when the paradigm
-        # builds it.
+        # builds it. The Vidbyte key is stripped and stored before its
+        # check, as Agent does, so a padded key is the same key.
         object.__setattr__(self, "api_keys", ProviderKeyMatcher.normalize(self.api_keys, field_name="AgentRoleSettings.api_keys"))
+        vidbyte_key = (self.vidbyte_api_key.strip() or None) if isinstance(self.vidbyte_api_key, str) else self.vidbyte_api_key
+        object.__setattr__(self, "vidbyte_api_key", vidbyte_key)
         ProviderKeys(vidbyte_api_key=self.vidbyte_api_key)
         object.__setattr__(self, "tools", _object_tuple(self.tools))
         object.__setattr__(self, "middleware", _object_tuple(self.middleware))
