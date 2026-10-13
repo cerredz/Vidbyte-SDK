@@ -72,11 +72,13 @@ class FirecrawlClient(WebOperationClient):
 
     @staticmethod
     def _final_url(url: str, data: Mapping[str, Any]) -> str:
-        # Prefers the vendor's resolved source URL, falling back to the requested URL.
+        # Prefers the vendor's resolved URL, falling back to the requested URL.
         metadata = data.get("metadata")
         if not isinstance(metadata, Mapping):
             return url
-        resolved = metadata.get("sourceURL") or metadata.get("url")
+        # @intent firecrawl-url-is-the-final-url
+        # Firecrawl's url is the final URL after redirects; sourceURL is the one requested.
+        resolved = metadata.get("url") or metadata.get("sourceURL")
         return resolved if isinstance(resolved, str) and resolved.strip() else url
 
 
