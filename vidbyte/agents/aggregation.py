@@ -30,7 +30,11 @@ from typing import Any
 
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.types import AgentInput, AgentMessage
-from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentMetadata, ProviderKeys
+from vidbyte.lib.dataclasses.agents import (
+    AgentForkSettings,
+    AgentMetadata,
+    ProviderKeys,
+)
 from vidbyte.lib.dataclasses.multi_agent import AggregateConfig, ProposerSpec
 from vidbyte.lib.enums import TextModelMode
 from vidbyte.lib.enums.prompts import Prompt
