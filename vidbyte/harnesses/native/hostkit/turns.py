@@ -90,10 +90,6 @@ class NativeTurnTable:
         # The drivers of every live turn, for interrupting them at __aexit__.
         return tuple(task for _handle, task in self._live.values())
 
-    def live_handles(self) -> tuple[NativeTurnHandle, ...]:
-        # The handles of every live turn, in start order.
-        return tuple(handle for handle, _task in self._live.values())
-
     def _finish(self, turn_id: str, _driver: asyncio.Task[NativeTurnResult]) -> None:
         # Moves a finished driver to the bounded first-in-first-out table and frees its session.
         entry = self._live.pop(turn_id, None)
