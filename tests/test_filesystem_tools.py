@@ -597,6 +597,28 @@ class FileSystemToolErrorPathTests(unittest.TestCase):
                 self.assertIn(f"ReplaceTextTool requires the search text to appear exactly once, {expected}", result.output)
                 self.assertEqual(target.read_bytes(), b"aa\naa\naa\n")
 
+    def test_edit_the_encoding_cannot_hold_returns_error_and_leaves_file_untouched(self) -> None:
+        # @intent failed-edit-leaves-file-untouched
+        # "€" does not exist in latin-1, and a lone surrogate from the model's JSON arguments
+        # cannot be UTF-8, so each edit must fail before the file is emptied by opening it.
+        original = b"<?php\n$name = 'caf\xe9';\n"
+        cases = (
+            ("latin-1", ReplaceTextTool, {"search": "caf\xe9", "replacement": "€5"}),
+            ("latin-1", WriteTextTool, {"content": "<?php\n$price = '€5';\n"}),
+            ("utf-8", ReplaceTextTool, {"search": "$name", "replacement": "$name\ud83d"}),
+            ("utf-8", WriteTextTool, {"content": "print('hi \ud83d')\n"}),
+        )
+        for encoding, tool_class, arguments in cases:
+            with self.subTest(encoding=encoding, tool=tool_class.__name__), TemporaryDirectory() as tmp:
+                content = original if encoding == "latin-1" else original.replace(b"\xe9", b"e")
+                target = Path(tmp) / "app.php"
+                target.write_bytes(content)
+                tool = tool_class(FileSystemToolConfig(root=tmp, allow_write=True, encoding=encoding))
+                result = run(tool.execute(ToolCall(tool.name, {"path": "app.php", **arguments})))
+                self.assertEqual(result.status, ToolStatus.ERROR)
+                self.assertIn("can't encode", result.output)
+                self.assertEqual(target.read_bytes(), content)
+
     def test_read_lines_start_less_than_one_returns_error(self) -> None:
         with TemporaryDirectory() as tmp:
             config = FileSystemToolConfig(root=tmp, allow_write=True)

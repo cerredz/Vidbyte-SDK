@@ -20,6 +20,10 @@ class LocalFileSystemBackend(BaseFileSystemBackend):
         return path.read_bytes()
 
     def write_text(self, path: Path, content: str, *, encoding: str, create_parents: bool, newline: str | None = None) -> None:
+        # @intent failed-edit-leaves-file-untouched
+        # Opening for writing empties the file at once, so text the encoding
+        # cannot hold must fail here, before the file is opened.
+        content.encode(encoding)
         if create_parents:
             path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w", encoding=encoding, newline=newline) as handle:
