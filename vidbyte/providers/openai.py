@@ -327,6 +327,10 @@ class OpenAIProvider:
         # Collect text leaves from one Responses API output item.
         if not isinstance(item, dict):
             return
+        # @intent reasoning-items-are-not-the-answer
+        # A "reasoning" item's content is the model's chain of thought (reasoning_text), never the answer; streaming yields only output_text.
+        if item.get("type") == "reasoning":
+            return
         content = item.get("content")
         if not isinstance(content, list):
             return
