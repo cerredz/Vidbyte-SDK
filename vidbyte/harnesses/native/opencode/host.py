@@ -723,14 +723,18 @@ class OpencodeHost:
         # @intent opencode-turn-driver-names-defects
         # The driver task's outcome is what wait_opencode_turn returns or
         # raises, so a defect inside the watcher becomes runtime.error naming
-        # only its class, under the wait operation (EC-5, S2-6).
+        # only its class, under the wait operation (EC-5, S2-6). Before any
+        # failure is recorded the watcher stops the turn at the server, when
+        # the host and not opencode ended it (EC-158).
         try:
             return await watcher.run()
         except asyncio.CancelledError:
             raise
-        except NativeHostError:
+        except NativeHostError as exc:
+            await watcher.abort_before_failing(exc)
             raise
         except Exception as exc:
+            await watcher.abort_before_failing(exc)
             raise self._errors.from_unexpected(exc, operation=_WAIT_OPERATION) from exc
 
     def _forget(self, turn_id: str, driver: asyncio.Task[NativeTurnResult]) -> None:

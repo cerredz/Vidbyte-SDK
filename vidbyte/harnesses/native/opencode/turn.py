@@ -1,9 +1,9 @@
 """FILE: vidbyte/harnesses/native/opencode/turn.py
 
 PURPOSE: Defines OpencodeTurnWatcher, which polls one opencode turn to its end: it finds the turn's user message after the pre-prompt snapshot, collects every reply whose parentID is that message, confirms completion over several idle polls, rejects the permission and question requests of the turn's session tree, aborts a turn past its ceiling, its tree limit or its retry limit, and returns the NativeTurnResult or raises the turn's failure.
-ROLE IN CODEBASE: Built by OpencodeHost for each spawn or continue; its run coroutine is the turn's driver task, owned by NativeTurnTable and awaited by wait_opencode_turn. interrupt is called by interrupt_opencode_turn and __aexit__; fail records a failure the host found (EC-90).
+ROLE IN CODEBASE: Built by OpencodeHost for each spawn or continue; its run coroutine is the turn's driver task, owned by NativeTurnTable and awaited by wait_opencode_turn. interrupt is called by interrupt_opencode_turn and __aexit__; fail records a failure the host found (EC-90); the host's driver calls abort_before_failing when run raises (EC-158).
 ARCHITECTURE NOTE: Every poll reads GET /session/status, GET /permission, GET /question and the newest OPENCODE_WATCH_MESSAGE_LIMIT messages in that order (§8.5 steps 1 to 6), and every body becomes a §9.1 inbound record through OpencodeWire first (D-13). The loop is bounded by the turn ceiling plus the stop grace, and the poll interval is read from the constants module on each pass so tests can shrink it. Only server_unreachable and process_exited polls count toward OPENCODE_POLL_FAILURE_LIMIT; any other poll failure ends the turn at once (EC-87).
-FUNCTION INVENTORY: run is the narrated main function; interrupt records a source and sends POST …/abort; fail records a host-found failure; _read_statuses, _read_requests and _read_messages read one poll; _track_messages updates the user message and the reply set; _refresh_tree walks the session tree; _reject answers the tree's requests; _count_failure applies EC-87; _retry_failure applies EC-155; _settled applies the idle confirmations; _result builds the outcome.
+FUNCTION INVENTORY: run is the narrated main function; interrupt records a source and sends POST …/abort; fail records a host-found failure; abort_before_failing sends EC-158's best-effort abort for a turn the host fails; _read_statuses, _read_requests and _read_messages read one poll; _track_messages updates the user message and the reply set; _refresh_tree walks the session tree; _reject answers the tree's requests; _count_failure applies EC-87; _retry_failure applies EC-155's limit; _settled applies the idle confirmations; _result builds the outcome.
 COMMON MODIFICATION PATTERNS: A new end condition is one more check in run with its own small helper; a new reply error mapping belongs in OpencodeWire.reply_failure.
 WHAT NOT TO DO IN THIS FILE: 1. Do not answer a request from a session outside the turn's tree; on an attached server it may be the user's. 2. Do not answer anything but reject (D-11, INV-9). 3. Do not decide the outcome from an earlier step's reply; only the newest reply counts (EC-85). 4. Do not sleep in a loop without the turn's deadline.
 KNOWN EDGE CASES: A reply still being written (no time.completed) never completes the turn. An outside session id causes one tree walk and is then remembered for the turn. An abort the server never confirms still ends the turn after NATIVE_STOP_GRACE_SECONDS. An abort the host did not send reads as CALLER.
@@ -67,8 +67,9 @@ class OpencodeTurnWatcher:
         # @intent opencode-watcher-owns-one-turn
         # A watcher holds the state of exactly one turn: the snapshot that
         # separates its reply from earlier ones, the first interrupt source,
-        # the recorded failure that every later wait repeats (EC-148), and
-        # the request timeout that bounds how long its prompt may go unseen.
+        # the recorded failure that every later wait repeats (EC-148),
+        # whether opencode itself ended the turn, and the request timeout
+        # that bounds how long its prompt may go unseen.
         self._handle = handle
         self._session_id = handle.session_id
         self._request = request
@@ -80,6 +81,7 @@ class OpencodeTurnWatcher:
         self._source: InterruptSource | None = None
         self._abort_deadline: float | None = None
         self._failure: NativeHostError | None = None
+        self._server_ended = False
         self._user_message_id: str | None = None
         self._active = False
         self._replies: dict[str, OpencodeMessage] = {}
@@ -132,8 +134,8 @@ class OpencodeTurnWatcher:
                 self._failed_polls = _NO_FAILED_POLLS
                 status = statuses.get(self._session_id)
 
-                # A retry loop at the attempt limit is aborted and fails the turn (EC-155).
-                failure = await self._retry_failure(status)
+                # A retry loop at the attempt limit fails the turn; the driver aborts it first (EC-155, EC-158).
+                failure = self._retry_failure(status)
                 if failure is not None:
                     raise failure
 
@@ -170,6 +172,22 @@ class OpencodeTurnWatcher:
     def fail(self, error: NativeHostError) -> None:
         # Records a failure the host found outside the poll loop; the next pass raises it.
         self._failure = error
+
+    async def abort_before_failing(self, error: Exception) -> None:
+        # @intent opencode-watcher-aborts-a-turn-the-host-fails
+        # EC-158: a turn the host fails on its own would keep running and
+        # spending at the server, so one best-effort POST …/abort is sent
+        # before the failure is recorded, bounded by the request deadline,
+        # and its own failure is dropped so the turn's error stays as it is.
+        # Nothing is sent when opencode itself ended the turn (a reply
+        # error, no reply, a deleted session) or already answered an abort
+        # the host sent for this turn.
+        if self._server_ended or self._abort_deadline is not None or error is self._failure:
+            return
+        if isinstance(error, NativeHostError) and error.failure_code is FailureCode.OPENCODE_SESSION_NOT_FOUND:
+            return
+        with contextlib.suppress(NativeHostError):
+            await self._client.call("POST", ("session", self._session_id, "abort"), operation=_OPERATION)
 
     async def _read_statuses(self) -> Mapping[str, OpencodeSessionStatus]:
         # GET /session/status as a map of session id to status; an absent session is idle.
@@ -262,17 +280,15 @@ class OpencodeTurnWatcher:
         if self._failed_polls >= native_host_constants.OPENCODE_POLL_FAILURE_LIMIT:
             raise error
 
-    async def _retry_failure(self, status: OpencodeSessionStatus | None) -> NativeHostError | None:
+    def _retry_failure(self, status: OpencodeSessionStatus | None) -> NativeHostError | None:
         # @intent opencode-watcher-retry-limit
-        # A retry status at OPENCODE_RETRY_ATTEMPT_LIMIT or later is aborted
-        # and fails the turn: usage_limited when the message or reason
-        # carries a rate-limit marker (A-17), else api_error, with the
-        # attempt, the reason and the scrubbed message in the context
-        # (EC-155). A failed abort does not change that outcome.
+        # A retry status at OPENCODE_RETRY_ATTEMPT_LIMIT or later fails the
+        # turn: usage_limited when the message or reason carries a
+        # rate-limit marker (A-17), else api_error, with the attempt, the
+        # reason and the scrubbed message in the context (EC-155). The
+        # abort that stops the retry loop is EC-158's, sent by the driver.
         if status is None or status.retry_attempt is None or status.retry_attempt < native_host_constants.OPENCODE_RETRY_ATTEMPT_LIMIT:
             return None
-        with contextlib.suppress(NativeHostError):
-            await self._client.call("POST", ("session", self._session_id, "abort"), operation=_OPERATION)
         evidence = f"{status.retry_message or ''} {status.retry_reason or ''}".casefold()
         limited = any(marker in evidence for marker in native_host_constants.OPENCODE_RATE_LIMIT_MARKERS)
         context = {"retry_attempt": str(status.retry_attempt)}
@@ -306,7 +322,9 @@ class OpencodeTurnWatcher:
         # never confirmed, is INTERRUPTED with the recorded source (CALLER
         # when none was recorded); an output-length error is COMPLETED; any
         # other error fails the turn; no reply at all is no_reply. Usage is
-        # summed field by field over every reply (D-14, INV-15).
+        # summed field by field over every reply (D-14, INV-15). From here
+        # the outcome is opencode's own, so a failure needs no abort.
+        self._server_ended = True
         newest = max(self._replies.values(), key=lambda message: (message.created_ms, message.message_id), default=None)
         error = None if newest is None else newest.error
         reports = [reply.usage for reply in self._replies.values() if reply.usage is not None]
