@@ -22,7 +22,7 @@ companion: backend run byok-fee-relay at C:/Users/422mi/vidbyte-repos/worktrees/
 | S5 repair loop | converged | 2026-10-13 | 2026-10-13 | reports/S5-test-author-1.md, reports/S5-repair-1.md, verify-log.md | test pass 1 57596097; repair 1 HEAD 36897094 (code at 6ac82305); full 4107P/13S; 0 open findings (R-18 deferred) |
 | S5 live E2E (both repos) | done | 2026-10-13 | 2026-10-13 | scratchpad live-e2e/ (launcher, sdk_live, cleanup) | PASS: junk-key probe relayed xAI's own 400 invalid-argument; real runner + agent 200 via relay; 1 FEE_ONLY session, cost 1,723,700 nUSD, 200 bps, billed 1 cent = expected; open 0; second cleanup idempotent |
 | S5 re-review | done | 2026-10-13 | 2026-10-13 | reports/S5-rereview-conformance-{1,2}.md | round 1: 13/13 confirmed, 0/1/2; round 2: SOUND, 4/4 confirmed, 0/0/2 (R-D1, R-D2 → follow-ups) |
-| S6 PR | running | 2026-10-13 | | reports/S6-pr-author.md | |
+| S6 PR | running | 2026-10-13 | | reports/S6-pr-author.md (BLOCKED, straggler), reports/S6-pr-author-2.md | merge 0e04102d + straggler ab1f00b3 + 31b4023d |
 
 ## Counters and caps
 - S1 review rounds: 2/2 · S5 repair iterations: 2/8 · S5 re-review rounds: 2/2 (cap reached; final verdict SOUND)
@@ -167,3 +167,14 @@ companion: backend run byok-fee-relay at C:/Users/422mi/vidbyte-repos/worktrees/
   Why follow-ups and not fixes: re-review rounds are at their cap of 2, and both are Minor. Fixing either would ship unreviewed code. Adding `provider_keys` as a secret name could strip a non-secret field without review. Both go in the PR body's follow-ups.
 - 2026-10-13 — Spec set to `status: verified`. Then the SDK S6 starts. The branch is 14 commits behind origin/main (8387d666). Four files overlap (3 tests plus `vidbyte/lib/registries/__init__.py`), and GitHub reports MERGEABLE with BEHIND. One test main added builds `GeminiProvider(model=model, api_key="k")`, a possible straggler. The S6 author merges with `--no-ff` (no rebase: the branch is pushed and force-push is forbidden), runs the gates, and reports BLOCKED if any test fails, since stragglers go to a test author.
 
+- 2026-10-13 — S6 (first author) BLOCKED on a post-merge straggler. After `git merge --no-ff origin/main` (8387d666, 14 commits), the helper that #1038 added at `tests/test_output_schema_provider_dialect.py:245` still built `GeminiProvider(model=model, api_key="k")`, so 4 `GeminiSchemaWithFunctionsTests` tests failed with `TypeError`. The author reset its unpushed merge 29fd3578 to 58fd652b. Its report `reports/S6-pr-author.md` is committed now, because its §4 (diff trace, snippet run, breaking-change checks) is the relaunch's head start. It corrects the briefing: AUTO with provider keys and no Vidbyte key raises when the runner is built (an agent's first `run()`: `AgentExecutionError` caused by `ConfigurationError`), not at `Agent(...)` construction.
+- 2026-10-13 — Ruled per the S2 straggler plan, without asking the user: a fresh test author merges and fixes the helper, tests only, using the file's own line-229 pattern. Done:
+  - merge 0e04102d (parents 58fd652b + 8387d666, no conflicts);
+  - straggler ab1f00b3: one line, `api_key="k"` → `api_keys=[GEMINI_TEST_KEY], mode=TextModelMode.DIRECT`, with no assertion changed;
+  - test-plan §5 row 31b4023d; pushed.
+
+  Orchestrator spot-check:
+  - The merge has two parents.
+  - Its `--cc` diff is only git's union of two adjacent import edits in `vidbyte/lib/registries/__init__.py` (the branch's `ProviderKeyMatcher` plus main's `NATIVE_SCHEMA_WITHOUT_TOOLS`), not a hand edit.
+  - ab1f00b3 touches 1 test line; 31b4023d touches only test-plan.md.
+- 2026-10-13 — S6 relaunched as a fresh agent; the first S6 agent is not resumable. Report `reports/S6-pr-author-2.md`. The body adds two sections that do not reorder the template's headings: "Breaking changes" and "Companion backend PR and deploy order" (#695 deploys first).
