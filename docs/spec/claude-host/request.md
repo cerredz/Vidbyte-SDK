@@ -193,6 +193,21 @@ TESTS: None of its own; each harness subpackage has its own tests.
   - **Export lists and indexes: insert only your own entries, never reorder or remove existing ones.** This covers `vidbyte/lib/enums/__init__.py`, `vidbyte/__init__.py`, `vidbyte/tools/builtins/__init__.py`, `vidbyte/tools/toolsets/__init__.py`, `REPO_MAP.md`, `vidbyte/harnesses/README.md` and `contracts/sdk-public-api.json`.
     - Put each new entry where the file's own ordering puts it. Imports are isort-sorted (I001), and `contracts/sdk-public-api.json` is regenerated, never hand-edited; it keeps its exports sorted (`lint/core/public_api_contract.py:87`).
     - Expect a small conflict in these files when the second PR merges. _(Clarified by the orchestrator after S0, 2026-10-12.)_
+  - **`REPO_MAP.md` and `vidbyte/harnesses/README.md` _(added by the orchestrator after S1 r1, 2026-10-13)_:** both PRs insert the same text at the same spot, byte for byte. Git then sees two identical insertions at the second merge and merges them without a conflict; two different texts at the same spot would conflict. Neither text names a host. These texts replace whatever wording a spec proposed for these two files.
+    - **`REPO_MAP.md`:** insert the first fenced block below, without the fence lines, between the paragraph under `#### \`vidbyte/harnesses/\`` and the `##### \`vidbyte/harnesses/stores/\`` heading, with one blank line on each side.
+      - The text follows the repo's map rule from the field guide's `agents-md-map.md` entry: a general 4–5 sentence description of the folder's intent, with no backtick-quoted file name, child-folder path or command in the description body.
+    - **`vidbyte/harnesses/README.md`:** insert the one-line bullet in the second fenced block as the last item of "## Key modules", directly after the `serialization.py` bullet and before the blank line that follows it.
+
+`````markdown
+##### `vidbyte/harnesses/native/`
+
+Hosts for the coding agents that vendors ship as their own executables, kept apart from the trajectory envelope above even though both use the word harness. Each coding harness gets its own host class, which owns the live processes it starts and wraps the vendor's official SDK in small, atomic functions such as starting, continuing, forking, steering and waiting on a session. Every failure comes back as a semantic error code that names the problem and the next step to take, so an agent that calls these functions as tools can recover without reading a stack trace. Importing the package never requires a vendor SDK: each host loads its SDK only when it is first used, and that SDK comes from the harness's own optional extra.
+`````
+
+`````markdown
+- `native/`: hosts for native coding-harness executables, one subpackage per harness, each wrapping that harness's official SDK in small, atomic functions on a host class; unrelated to the `Harness` envelope above.
+`````
+
   - **`pyproject.toml`:** only this PR changes it (the new `claude` extra). The Codex PR does not touch it.
 - **The user's machine:**
   - `claude` 2.1.296 is installed at `C:/Users/422mi/.local/bin/claude`.
