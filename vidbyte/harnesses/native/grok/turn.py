@@ -174,7 +174,7 @@ class GrokTurnDriver:
         with contextlib.suppress(McpProtocolError):
             await self._peer.answer(permission.request_id, result=self._wire.permission_answer(chosen))
         kind = _PERMISSION_KIND_PREFIX + permission.tool_kind.value
-        return NativeApprovalDecision(request_kind=kind, title=permission.title[: native_host_constants.NATIVE_APPROVAL_TITLE_MAX_CHARS], outcome=outcome)
+        return NativeApprovalDecision(request_kind=kind, title=self._errors.scrub(permission.title)[: native_host_constants.NATIVE_APPROVAL_TITLE_MAX_CHARS], outcome=outcome)
 
     async def _refuse(self, frame: Mapping[str, Any]) -> NativeApprovalDecision:
         # Any other server request gets JSON-RPC -32601 and is

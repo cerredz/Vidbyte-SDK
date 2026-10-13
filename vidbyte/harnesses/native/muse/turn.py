@@ -208,7 +208,7 @@ class MuseTurnDriver:
         if key in self._decided:
             return None
         self._decided.add(key)
-        title = (request.tool_name or request.approval_id)[: native_host_constants.NATIVE_APPROVAL_TITLE_MAX_CHARS]
+        title = self._errors.scrub(request.tool_name or request.approval_id)[: native_host_constants.NATIVE_APPROVAL_TITLE_MAX_CHARS]
         choice = next((item for item in request.choices if item.decision == _DENIED_DECISION and item.scope == _ONCE_SCOPE), None)
         if choice is None:
             self._decisions.append(NativeApprovalDecision(request_kind=_APPROVAL_KIND, title=title, outcome=ApprovalOutcome.CANCELLED))
@@ -232,7 +232,7 @@ class MuseTurnDriver:
         if request.user_input_id in self._cancelled_inputs:
             return None
         self._cancelled_inputs.add(request.user_input_id)
-        title = request.tool_name[: native_host_constants.NATIVE_APPROVAL_TITLE_MAX_CHARS]
+        title = self._errors.scrub(request.tool_name)[: native_host_constants.NATIVE_APPROVAL_TITLE_MAX_CHARS]
         self._decisions.append(NativeApprovalDecision(request_kind=_USER_INPUT_KIND, title=title, outcome=ApprovalOutcome.CANCELLED))
         try:
             await self._peer.call("userInput/cancel", MuseWire.user_input_cancel_params(request), operation=native_host_constants.MUSE_TURN_OPERATION)
