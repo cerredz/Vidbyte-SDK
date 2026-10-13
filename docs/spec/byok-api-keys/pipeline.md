@@ -22,7 +22,7 @@ companion: backend run byok-fee-relay at C:/Users/422mi/vidbyte-repos/worktrees/
 | S5 repair loop | converged | 2026-10-13 | 2026-10-13 | reports/S5-test-author-1.md, reports/S5-repair-1.md, verify-log.md | test pass 1 57596097; repair 1 HEAD 36897094 (code at 6ac82305); full 4107P/13S; 0 open findings (R-18 deferred) |
 | S5 live E2E (both repos) | done | 2026-10-13 | 2026-10-13 | scratchpad live-e2e/ (launcher, sdk_live, cleanup) | PASS: junk-key probe relayed xAI's own 400 invalid-argument; real runner + agent 200 via relay; 1 FEE_ONLY session, cost 1,723,700 nUSD, 200 bps, billed 1 cent = expected; open 0; second cleanup idempotent |
 | S5 re-review | done | 2026-10-13 | 2026-10-13 | reports/S5-rereview-conformance-{1,2}.md | round 1: 13/13 confirmed, 0/1/2; round 2: SOUND, 4/4 confirmed, 0/0/2 (R-D1, R-D2 → follow-ups) |
-| S6 PR | running | 2026-10-13 | | reports/S6-pr-author.md (BLOCKED, straggler), reports/S6-pr-author-2.md | merge 0e04102d + straggler ab1f00b3 + 31b4023d |
+| S6 PR | done | 2026-10-13 | 2026-10-13 | reports/S6-pr-author.md (BLOCKED, straggler), reports/S6-pr-author-2.md | merge 0e04102d + straggler ab1f00b3 + 31b4023d; PR body 99a08d99; final 70391468; draft PR #1027 finalized, CI + Static policy green |
 
 ## Counters and caps
 - S1 review rounds: 2/2 · S5 repair iterations: 2/8 · S5 re-review rounds: 2/2 (cap reached; final verdict SOUND)
@@ -178,3 +178,11 @@ companion: backend run byok-fee-relay at C:/Users/422mi/vidbyte-repos/worktrees/
   - Its `--cc` diff is only git's union of two adjacent import edits in `vidbyte/lib/registries/__init__.py` (the branch's `ProviderKeyMatcher` plus main's `NATIVE_SCHEMA_WITHOUT_TOOLS`), not a hand edit.
   - ab1f00b3 touches 1 test line; 31b4023d touches only test-plan.md.
 - 2026-10-13 — S6 relaunched as a fresh agent; the first S6 agent is not resumable. Report `reports/S6-pr-author-2.md`. The body adds two sections that do not reorder the template's headings: "Breaking changes" and "Companion backend PR and deploy order" (#695 deploys first).
+- 2026-10-13 — S6 relaunch DONE at 70391468: 99a08d99 finalizes the spec and adds pr-body.md and the report; 70391468 records the runs. PR #1027 title: "feat(lib,agents): agents take vidbyte_api_key and a list of api_keys, and text calls relay your provider key through the Vidbyte gateway". Orchestrator spot-check:
+  - PR #1027: draft, base main, MERGEABLE, head 70391468.
+  - Body: 11 sections (Breaking changes and the companion/deploy-order section added); 2 mermaid diagrams; last line is the attribution; no key-shaped strings.
+  - Of the 71 `test_*` tokens in the acceptance table, all 69 real test functions exist; the other 2 are file references.
+  - CI 38479810428 and Static policy 38479813115 succeeded on headSha 70391468.
+  - Tree clean; diff since d3066f84 is docs-only (3 files).
+- 2026-10-13 — Correction (the S6 open item, mine): the live run's provider cost was about $0.0017 (`provider_cost_nanousd` 1,723,700), not the "$0.0004" in my S6 briefing. The body quotes only the settlement figures, so it is right as written.
+- 2026-10-13 — New follow-up from S6, not fixed (re-review cap reached; Minor): `AggregateAgent` reads `proposers` (aggregation.py:215) before `tuple(proposers)` (:226). A one-shot generator now fails with "requires at least one proposer", where main accepted it. The parameter is typed `Sequence`, so this is outside the contract; it is listed in the PR body's follow-ups.
