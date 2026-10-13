@@ -14,7 +14,7 @@ started: 2026-10-13 00:45 UTC
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-13 00:45 UTC | 2026-10-13 01:35 UTC | reports/S0-scout.md | base_commit 678136bd; code-map.md, 4 sections |
-| S1 spec + review | in progress | 2026-10-13 01:45 UTC | | reports/S1-spec-author.md | spec r1 21a947a7 (18 sections, §12.3 31 rows); review round 1 launched 03:40 UTC |
+| S1 spec + review | in progress | 2026-10-13 01:45 UTC | | reports/S1-spec-author.md, reports/S1-spec-review.md | spec r1 21a947a7 (18 sections, §12.3 31 rows); review r1: SOUND WITH FIXES, 3 Blockers, 3 Majors, 4 Minors; author revising to r2 |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -23,7 +23,7 @@ started: 2026-10-13 00:45 UTC
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 0/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 1/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Parallel run
 - **Sibling pipeline:** `codex-host`, in worktree `C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-codex-host` on branch `feat/codex-host`, from the same base commit. Each run follows the shared-file contract in its request.md §C.
@@ -52,6 +52,12 @@ started: 2026-10-13 00:45 UTC
   - Spec r1 puts the `CLAUDE_*` block between lines 34 and 35.
   - CodexHost appends after line 46.
   - Lines 35–46 are untouched by both, so the second merge has no conflict there.
+- 2026-10-13 05:30 UTC — **An API session limit (HTTP 429) killed the S1 reviewer** before it wrote its report. Once the limit reset, the orchestrator resumed the same agent with SendMessage rather than relaunching it.
+- 2026-10-13 05:40 UTC — **Review round 1: SOUND WITH FIXES, 10 findings.**
+  - Every finding (R-1 to R-10) went to the author; none is tagged `[scope-adding]`, and none was declined.
+  - They were forwarded by report path and line range (FINDINGS, lines 23–186 of reports/S1-spec-review.md), not pasted into the message, to keep the orchestrator's context small. The author reads the verbatim text from disk.
+  - The orchestrator added one instruction under rule 11: R-2's bounded stop after an interrupt is a module constant, not a new spawn-request field.
+  - R-2, R-3 and R-5 change §8, §8.5, §9.2 and §10, so a scoped round 2 follows the r2 revision.
 
 ## User replies (verbatim)
 - none yet
@@ -133,3 +139,14 @@ started: 2026-10-13 00:45 UTC
   - S012 (name no method `request`);
   - S045 (parameters are named `timeout_seconds`).
   *source:* S1 author.
+- **Line endings.** `core.autocrlf=true` is set in the system gitconfig, and there is no root `.gitattributes`, so every tracked file is stored with LF and checked out with CRLF.
+  - Any test that checks exact file bytes must hash the committed blob, or the bytes after converting line endings to LF.
+  - For byte-exact files the repo uses a `.gitattributes` in that folder, for example `contracts/.gitattributes` with `*.json text eol=lf`.
+  *source:* S1 reviewer R-1.
+- **S054 (ruff S105, hardcoded passwords) has zero headroom:** baseline 3, current 3. A string constant whose name contains TOKEN, such as `CLAUDE_TOKEN_SOURCE_NONE = "none"`, trips it, and so does a comparison like `token_source != "none"`. `CLAUDE_MAX_OUTPUT_TOKENS_ENV` does not. *source:* S1 reviewer (ruff 0.16.4, run with `--no-cache --isolated`).
+- **Permissions without a prompt handler (CLI 2.1.296).** `--permission-prompts host|none` defaults to `host`, and `none` means a local deny. Without `can_use_tool`, the SDK answers a permission request with an error control_response (`_internal/query.py:590-591`). Permission mode `default` is right: the help lists `manual`, which is an alias of `default`. *source:* S1 reviewer.
+- **Every interrupt kills background tasks,** and so does every steer, because steer interrupts. The Python SDK never sends `perTaskStopAffordance` (TS d.ts:4571). *source:* S1 reviewer.
+- **Results from a crash or a startup error may report zero cost:** `total_cost_usd` and `modelUsage` can come back as zero (TS d.ts:5738/5746). *source:* S1 reviewer.
+- **Finding the CLI on Windows.** The SDK's `_find_cli` prefers a native exe and then `~/.local/bin/claude.exe`, and refuses `.cmd`/`.bat` shims with a `CLIConnectionError` at connect. On this machine `which("claude")` returns `C:\users\422mi\.local\bin\claude.EXE`. *source:* S1 reviewer.
+- **The package smoke imports only the root package,** so spec r1's NFR-1 claim about it was false. *source:* S1 reviewer R-7.
+- **C016 is unaffected by the new extra and the submodule exports.** It reads only the root `__all__` and the pyproject name and version, so `contracts/sdk-public-api.json` does not change. New packages ship through `packages.find`. *source:* S1 reviewer.
