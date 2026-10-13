@@ -101,3 +101,26 @@ Spec: `docs/spec/byok-api-keys/spec.md`, revision r1, committed as e201a52b ("do
 
 - **Test fixtures.** Today's fake keys ("test-key", "sk-mock", "main-key", and the like) are refused by the classifier. Fake keys must be built at runtime in shapes that classify but avoid secret-scanner patterns. Spec §13 lists the shapes.
 - **origin/main has moved.** It was at 3ed3c627 when I checked, past base_commit. Rebasing is S6's job.
+
+## Addendum r2 (2026-10-12): revision after the S1 review
+
+Spec r2 is committed at 01b0bcf6. The frontmatter keeps `status: draft` for a scoped round-2 review. All six Major findings (R-1 to R-6) were accepted. Four of them follow the orchestrator's rulings (§0.2, §16).
+
+**What changed in the design:**
+
+- **Matching is two-tier.**
+  - A proven key goes to its provider. Table F holds only five sourced prefix rules: anthropic, openrouter, openai (`sk-proj/svcacct/admin`), xai, and gemini.
+  - Every other key is unproven. It is bound by unique assignment against the root's configured providers (primary plus named fallbacks or proposers), using the table A compatibility rules: anthropic, xai, gemini, and openrouter never take an unproven key; openai takes only `sk-…`; the rest take any. If one key could belong to more than one provider, the root raises M-19. If no provider could take it, it raises M-6. No length or charset shape decides a vendor (NG-18), so the DeepSeek, Kimi, and legacy-OpenAI rules are gone.
+- **The result is carried, not re-matched.** It is a new record, `ProviderKeys`, defined in the agents dataclass module. Every child carries it unchanged and never re-matches the list (D-13). This is the third new class in the §8.4 budget, and there is still one new file. `FallbackModel` loses its key field (D-26).
+- **The configured model must have its key (INV-24 / M-18).** A non-empty list that holds no key for the primary provider raises at construction. Children for other providers still relay or go Vidbyte-paid with no error.
+- **A Vidbyte entry in the list is the Vidbyte key (D-25).** This follows orchestrator ruling (a).
+- **The three smaller fixes.** R-4: the 422 remedy names DIRECT. R-5: the redactor covers tuples. R-6: the explicit Vidbyte key is format-checked at construction, inside `ProviderKeys`.
+
+**Correction to the note above.** "test-key" and "main-key" are still refused for anthropic, xai, gemini, and openrouter, which take only proven keys. They now work for any provider without a prefix rule when that provider is the only configured one. "sk-mock" now works for an openai-only config. The fake-key guidance is in §13.
+
+**Verified this round.**
+
+- `vidbyte.lib.constants` and `vidbyte.lib.enums` import only enums, so `ProviderKeys`'s new module-level imports cannot close the D-21 cycle.
+- In r1, row 16 was `lib/dataclasses/agents.py`. It is now row 3, and r1 rows 3–15 shift down by one.
+
+The ID self-check is clean: no undefined references, no gaps except struck IDs, every EC guarded, and one CREATE row against a budget of one new file.
