@@ -210,3 +210,33 @@ None of these blocks the work. The tests take the reading stated here, and S3 or
   - read the timing constants through the module at call time;
   - resolve `wsl.exe` with `shutil.which`. `CreateProcess` searches System32 before PATH, so a bare `wsl.exe` launches the real one.
 - **Not committed:** the orchestrator's `pipeline.md` change.
+
+## Addendum: test fixes after S3 (commit `66d5c3bb`)
+
+The S3 implementer reported three test defects, and the coordinator adjudicated them against spec r4. I fixed each with a test-only edit and changed no other assertion.
+
+- **D-1.**
+  - **Test:** `tests/features/grok_host/test_grok_host_records.py::test_validator_rejects_each_bad_value_naming_the_field`.
+  - **Problem:** the reject row `{AcpToolKind.EDIT}` contradicted §9.1, EC-23, EC-134 and §16 S2-4, under which a `set` of members is accepted and stored as a `frozenset`.
+  - **Fix:** the row now uses `{"edit"}`, a plain set holding a value string, which the spec refuses. The file header's edge-case note now says the same.
+- **D-2.**
+  - **Test:** `tests/features/grok_host/test_grok_host_process_helpers.py::test_cli_invocation_validates_and_hides_env_and_stdin`.
+  - **Problem:** the `argv` rows raised `TypeError: invocation() got multiple values for argument 'argv'` inside the helper.
+  - **Fix:** the call is now `invocation(process_api, **{"argv": ("grok",), field_name: bad})`.
+- **D-3.**
+  - **Test:** `tests/features/opencode_host/test_opencode_host_records.py::test_host_settings_reject_each_bad_field`.
+  - **Problem:** the `workspace-*` rows raised `TypeError: attached_settings() got multiple values for argument 'workspace'`.
+  - **Fix:** the call is now `attached_settings(records_api, **{"workspace": tmp_path, **overrides})`.
+
+Re-run at `66d5c3bb`. The command was `PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider <three node ids>`, and its final lines were:
+
+```
+E       ModuleNotFoundError: No module named 'vidbyte.harnesses.native.grok'
+ERROR tests/features/grok_host/test_grok_host_records.py::test_validator_rejects_each_bad_value_naming_the_field
+ERROR tests/features/grok_host/test_grok_host_process_helpers.py::test_cli_invocation_validates_and_hides_env_and_stdin
+1 passed, 2 errors in 0.95s
+```
+
+- **D-3 passes.**
+- **D-1 and D-2 still error, for an unrelated reason.** Their shared `grok_api` fixture imports `vidbyte.harnesses.native.grok`, which is not built yet; only P1 is built. They will run once the Grok host lands.
+- **Their test bodies pass.** I ran both bodies outside pytest from a scratch script. The script replaced only the fixture: it gave `ConfigurationError` from `vidbyte.lib.errors`, as `grok_api` does, and used the real `CliInvocation` record. Both printed `body passed`.
