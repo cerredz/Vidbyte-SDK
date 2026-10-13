@@ -126,10 +126,19 @@ def assert_raises(exc_type, fn):
 # AudioModelRunner tests
 # ---------------------------------------------------------------------------
 
-from vidbyte.lib.config import AudioModelConfig, EmbeddingModelConfig, TextModelConfig
+from vidbyte.lib.config import AudioModelConfig, EmbeddingModelConfig, TextModelConfig, TextModelMode
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ConfigurationError, UnsupportedProviderError
 from vidbyte.lib.runners import AudioModelRunner, EmbeddingModelRunner, StreamingTextModelRunner
+
+# Fake provider keys for the fake transports, built from parts so no
+# literal here looks like a real key. Each carries the prefix its
+# provider's key format needs, and DIRECT sends it straight to the
+# fake transport.
+FAKE_OPENAI_KEY = "sk-" + "proj-" + "fake"
+FAKE_ANTHROPIC_KEY = "sk-" + "ant-" + "fake"
+FAKE_GEMINI_KEY = "AQ" + "." + "fake"
+FAKE_XAI_KEY = "xai" + "-" + "fake"
 
 
 def test_openai_tts_happy_path():
@@ -312,28 +321,28 @@ def test_embedding_model_name():
 
 def test_openai_stream_yields_deltas():
     t = FakeStreamingTransport([_oai_delta("Hello"), _oai_delta(" world")])
-    r = StreamingTextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_key="key"), transport=t)
+    r = StreamingTextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_keys=[FAKE_OPENAI_KEY], mode=TextModelMode.DIRECT), transport=t)
     chunks = list(r.stream("Hi"))
     assert_equal(chunks, ["Hello", " world"])
 
 
 def test_openai_stream_url():
     t = FakeStreamingTransport([_oai_delta("ok")])
-    r = StreamingTextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_key="key"), transport=t)
+    r = StreamingTextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_keys=[FAKE_OPENAI_KEY], mode=TextModelMode.DIRECT), transport=t)
     list(r.stream("Test"))
     assert_true("/responses" in t.requests[0]["url"])
 
 
 def test_openai_stream_stream_flag():
     t = FakeStreamingTransport([_oai_delta("ok")])
-    r = StreamingTextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_key="key"), transport=t)
+    r = StreamingTextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_keys=[FAKE_OPENAI_KEY], mode=TextModelMode.DIRECT), transport=t)
     list(r.stream("Test"))
     assert_true(t.requests[0]["json_body"].get("stream") is True)
 
 
 def test_openai_stream_system_as_instructions():
     t = FakeStreamingTransport([_oai_delta("ok")])
-    r = StreamingTextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_key="key"), transport=t)
+    r = StreamingTextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_keys=[FAKE_OPENAI_KEY], mode=TextModelMode.DIRECT), transport=t)
     list(r.stream("Test", system="Be brief"))
     assert_equal(t.requests[0]["json_body"].get("instructions"), "Be brief")
 
@@ -346,37 +355,37 @@ def test_openai_stream_filters_non_delta_events():
         _oai_delta("chunk2"),
     ]
     t = FakeStreamingTransport(lines)
-    r = StreamingTextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_key="key"), transport=t)
+    r = StreamingTextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_keys=[FAKE_OPENAI_KEY], mode=TextModelMode.DIRECT), transport=t)
     chunks = list(r.stream("Test"))
     assert_equal(chunks, ["chunk1", "chunk2"])
 
 
 def test_openai_stream_empty():
     t = FakeStreamingTransport([])
-    r = StreamingTextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_key="key"), transport=t)
+    r = StreamingTextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_keys=[FAKE_OPENAI_KEY], mode=TextModelMode.DIRECT), transport=t)
     chunks = list(r.stream("Test"))
     assert_equal(chunks, [])
 
 
 def test_anthropic_stream_yields_deltas():
     t = FakeStreamingTransport([_anthropic_delta("Hello"), _anthropic_delta(" Anthropic")])
-    r = StreamingTextModelRunner(TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-3-haiku-20240307", api_key="key"), transport=t)
+    r = StreamingTextModelRunner(TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-3-haiku-20240307", api_keys=[FAKE_ANTHROPIC_KEY], mode=TextModelMode.DIRECT), transport=t)
     chunks = list(r.stream("Hi"))
     assert_equal(chunks, ["Hello", " Anthropic"])
 
 
 def test_anthropic_stream_url():
     t = FakeStreamingTransport([_anthropic_delta("ok")])
-    r = StreamingTextModelRunner(TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-3-haiku-20240307", api_key="key"), transport=t)
+    r = StreamingTextModelRunner(TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-3-haiku-20240307", api_keys=[FAKE_ANTHROPIC_KEY], mode=TextModelMode.DIRECT), transport=t)
     list(r.stream("Test"))
     assert_true("/messages" in t.requests[0]["url"])
 
 
 def test_anthropic_stream_x_api_key_header():
     t = FakeStreamingTransport([_anthropic_delta("ok")])
-    r = StreamingTextModelRunner(TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-3-haiku-20240307", api_key="anthro_key"), transport=t)
+    r = StreamingTextModelRunner(TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-3-haiku-20240307", api_keys=[FAKE_ANTHROPIC_KEY], mode=TextModelMode.DIRECT), transport=t)
     list(r.stream("Test"))
-    assert_equal(t.requests[0]["headers"].get("x-api-key"), "anthro_key")
+    assert_equal(t.requests[0]["headers"].get("x-api-key"), FAKE_ANTHROPIC_KEY)
 
 
 def test_anthropic_stream_filters_non_text_delta_events():
@@ -387,21 +396,21 @@ def test_anthropic_stream_filters_non_text_delta_events():
         _anthropic_delta("also_good"),
     ]
     t = FakeStreamingTransport(lines)
-    r = StreamingTextModelRunner(TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-3-haiku-20240307", api_key="key"), transport=t)
+    r = StreamingTextModelRunner(TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-3-haiku-20240307", api_keys=[FAKE_ANTHROPIC_KEY], mode=TextModelMode.DIRECT), transport=t)
     chunks = list(r.stream("Test"))
     assert_equal(chunks, ["good", "also_good"])
 
 
 def test_gemini_provider_rejected_at_init():
     assert_raises(UnsupportedProviderError, lambda: StreamingTextModelRunner(
-        TextModelConfig(provider=ModelProvider.GEMINI, model="gemini-2.0-flash", api_key="key"),
+        TextModelConfig(provider=ModelProvider.GEMINI, model="gemini-2.0-flash", api_keys=[FAKE_GEMINI_KEY], mode=TextModelMode.DIRECT),
         transport=FakeStreamingTransport([]),
     ))
 
 
 def test_xai_provider_rejected_at_init():
     assert_raises(UnsupportedProviderError, lambda: StreamingTextModelRunner(
-        TextModelConfig(provider=ModelProvider.XAI, model="grok-2", api_key="key"),
+        TextModelConfig(provider=ModelProvider.XAI, model="grok-2", api_keys=[FAKE_XAI_KEY], mode=TextModelMode.DIRECT),
         transport=FakeStreamingTransport([]),
     ))
 
@@ -411,14 +420,14 @@ def test_streaming_missing_config_raises():
 
 
 def test_streaming_model_name():
-    r = StreamingTextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o-mini", api_key="key"), transport=FakeStreamingTransport([]))
+    r = StreamingTextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o-mini", api_keys=[FAKE_OPENAI_KEY], mode=TextModelMode.DIRECT), transport=FakeStreamingTransport([]))
     assert_equal(r.model_name(), "gpt-4o-mini")
 
 
 def test_malformed_sse_lines_skipped():
     lines = ["not-json", _oai_delta("valid"), "{broken"]
     t = FakeStreamingTransport(lines)
-    r = StreamingTextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_key="key"), transport=t)
+    r = StreamingTextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_keys=[FAKE_OPENAI_KEY], mode=TextModelMode.DIRECT), transport=t)
     chunks = list(r.stream("Test"))
     assert_equal(chunks, ["valid"])
 
