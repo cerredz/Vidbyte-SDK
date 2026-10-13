@@ -164,3 +164,43 @@ No gate was run and nothing was installed. That follows S1's read-only rule.
   - the §11 hash command form.
 - Everything else follows the review's smallest fixes or the orchestrator's notes.
 - This addendum is not committed; I staged only the spec.
+
+## Addendum r3: review round 2, final (2026-10-13)
+
+**Inputs.** I applied all 5 findings in `reports/S1-spec-review-r2.md` (SOUND WITH FIXES: 3 Majors, 2 Minors) with the orchestrator's seven notes, and disputed none, so there is no new Q. The spec is at revision 3, commit `81a71d00`, with `status: approved`. §16 has rows r2-1 to r2-5, and §17 has the r3 row.
+
+**Design changes:**
+- **R-1, the effective reviewer (new D-32).** After `thread/start` and `thread/resume`, and before any name, turn or goal request, the host reads the reviewer and policy that Codex reports. A `user` reviewer with any policy but `never`, granular included, is refused, naming the thread. The default path is unchanged and adds no field or setting:
+  - spawn still sends the SDK's own `on-request` plus `auto_review`, so §4 passes (A-15);
+  - resume sends nothing unless set, so a host-spawned thread continues (A-16);
+  - a `user` thread gets the next step `overrides=CodexSpawnRequest(approvals_reviewer=AUTO_REVIEW)`, or `spawn_defaults` on the tool path.
+
+  The runner-up I rejected was sending `auto_review` on every resume, which silently replaces a human reviewer. Review sends no resume, so it is the one residual (EC-77).
+- **R-2, close.** Close now has six steps. Tool handlers are removed and closed first, as the sibling transport does. Goal runs stay registered through their cancel, then get openai-codex's goal-stream close (`finish()`, `wake_notification_reader()`, `unregister_goal_operation`). Process death runs steps 1 and 2.
+- **R-3, late acceptance.**
+  - `CodexConnection` owns the shielded, bounded await.
+  - `future.cancel()` runs first, and the callback is attached only when it returns False.
+  - A late review gets D-23's read-back.
+  - Close wins: a start that returns once close has begun is registered FAILED `process_exited`, and nothing more is sent.
+- **R-4, goal cleanup.** A failed goal start follows openai-codex's order: cancel, bounded by `CODEX_HOST_CLOSE_INTERRUPT_SECONDS`, then `finish()`, then `unregister_goal_operation`. The watcher starts only after the budget check passes.
+- **R-5 and note 6, errors.** The USER rejection is `CodexAgentError` with `configuration.unsupported_combination` and the next step `CODEX_HOST_USER_REVIEWER_TEXT`, now worded for both paths. Every mapped error is raised `from None`, and no message uses `str(exc)`.
+
+**My judgement calls:**
+- **The construction-time operation.** I added `CodexHostOperation.VALIDATE_SPAWN_REQUEST`, because INV-8 requires a `CodexHostOperation` value and no host method runs at construction.
+- **Close wins on the normal path too.** INV-6 now refuses new calls once close has begun. A start that returns during close, with its caller still waiting, is registered FAILED with `process_exited`. Without both, a turn could be registered after close step 2 and never finalized, which would break INV-6's "every turn is terminal".
+- **Goal runs end the same way.** A goal run that finishes normally also gets the goal-stream close. Otherwise each finished goal run would strand one watcher thread.
+
+**New facts I checked this round (openai-codex 0.162.1):**
+- **The closed marker is raised, not returned.** `_GoalStreamClosed` subclasses `Exception`, and `next_notification()` raises any exception it dequeues. So after `wake_notification_reader()`, a blocked `next_goal_notification` raises.
+- **The SDK's own goal stream closes in this order:** `finish()`, `wake_notification_reader()`, then unregister. Its start-failure path runs cancel, `finish()`, then unregister.
+- **`thread/read` cannot be checked.** The `Thread` it returns carries no approval fields, so a review cannot be checked without sending a resume.
+- **What the SDK sends.** `ThreadResumeParams` describes its reviewer as an override "on this thread and subsequent turns". The SDK's `thread_resume` and `thread_fork` default to sending no approval fields, and no `ApprovalMode` maps to `user`.
+- **S017's scan scope** is `vidbyte/providers/`, `vidbyte/tools/`, `vidbyte/mcp_server/` and `vidbyte/lib/runners/`. `vidbyte/harnesses/` is outside it, so the `from None` rule is held by review there.
+- **The classification test** requires a row only for `codex.*` codes, so `configuration.unsupported_combination` needs none.
+- **`JsonRpcError.message`** holds Codex's own message, so the mapper never needs `str(exc)`.
+
+**Least sure:**
+- **A-16.** Does a thread resumed without approval fields keep its reviewer, especially one resumed from disk by a new app-server? If not, plain continues are refused with the next step, though nothing is approved silently.
+- **A-1**, **A-6** and **A-14** stand as in r2.
+
+This addendum is not committed; I staged only the spec.

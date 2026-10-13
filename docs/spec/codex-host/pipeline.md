@@ -14,8 +14,8 @@ started: 2026-10-13 00:45 UTC
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-13 00:45 UTC | 2026-10-13 01:27 UTC | reports/S0-scout.md | base_commit 678136bd; code-map.md, 4 sections |
-| S1 spec + review | in progress | 2026-10-13 01:35 UTC | | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | spec r1 a1ee792a → review r1 SOUND WITH FIXES (2B/7M/4m) → spec r2 b38d573a → review r2 (scoped) SOUND WITH FIXES (0B/3M/2m) → author writing final r3 with status: approved |
-| S2 tests | pending | | | | |
+| S1 spec + review | done | 2026-10-13 01:35 UTC | 2026-10-13 11:25 UTC | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | spec r3 81a71d00, status: approved; 2 review rounds (SOUND WITH FIXES ×2), 18 findings applied, 0 disputed |
+| S2 tests | in progress | 2026-10-13 11:30 UTC | | reports/S2-test-author.md | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
@@ -78,6 +78,24 @@ started: 2026-10-13 00:45 UTC
   - Constraint added by the orchestrator: the check must not break the §4 default spawn, where no approval fields are set.
   - The author must establish from openai-codex what a default thread reports, and choose a default-path behavior that never silently approves and keeps §4 working, using only existing fields and settings.
   - It records that choice as a D-n with evidence, plus an A-n where it cannot be verified offline.
+- 2026-10-13 11:25 UTC — **Spec r3 approved; spot-check passed.**
+  - The frontmatter has `revision: 3` and `status: approved`.
+  - §16 has rows r2-1 to r2-5, and the author disputed none.
+  - There are 18 sections and 28 §12.3 rows.
+  - The commit is `docs(spec): revise codex-host spec r3 (apply review round 2, R-1 to R-5; approved)` (81a71d00).
+  R-1 became D-32. A `user` reviewer reported with any policy except `never` starts no turn or goal. Spawn still sends the SDK's own default (`on-request` plus `auto_review`), so §4 works. Resume sends nothing unless set (A-15, A-16). The "Spec ready" summary was printed, and the run continued to S2 without waiting.
+- 2026-10-13 11:25 UTC — **Every Q-n takes its stated default:**
+  - Q-1: resolved by the new `codex_host` module.
+  - Q-2: minimum `codex` version 0.151.0.
+  - Q-3: resolved; `USER` is rejected, and `accept` remains only as a fallback.
+  - Q-4: no root exports.
+  - Q-5: `launch_codex_subagents` limit, default `None`.
+  - Q-6: `prompt` and `goal` are mutually exclusive.
+  - Q-7: no MCP permission check.
+  - Q-8: no thread-ownership restriction.
+  - Q-9: no ceilings; model-supplied values replace defaults.
+- 2026-10-13 11:30 UTC — **S2 environment:** `C:/Users/422mi/vidbyte-repos/.venvs/sdk-codex-host` with `pip install -e "<W>[dev,codex]"`.
+  *Why:* spec §13 builds fake responses from openai-codex's real generated models, so host tests need openai-codex locally and are gated with `skipUnless(find_spec("openai_codex"))` for CI, which installs only `.[dev]`. The test author must also show which tests still run with openai_codex blocked, which is the CI view.
 
 ## User replies (verbatim)
 - none yet
@@ -185,4 +203,25 @@ started: 2026-10-13 00:45 UTC
   - The §11 hash command works in Git Bash and in PowerShell 5.1.
   - The `agents-md-placement.yml` workflow runs only by hand, and running it could move the `codex_host.py` records into `codex.py`.
   *source:* S1 reviewer r2.
+- **Goal stream close (spec r3).** `_GoalStreamClosed` is an `Exception`. After `wake_notification_reader()`, a blocked `next_goal_notification` raises it; unregistering alone never wakes the reader. The SDK uses two cleanup orders:
+  - after a failed start: cancel, `finish`, unregister;
+  - when a stream closes: `finish`, wake, unregister.
+  *source:* S1 author r3.
+- **The six-step close (INV-7, r3):**
+  1. close the tool handlers;
+  2. finalize the turns, keeping goal runs registered;
+  3. send interrupts;
+  4. close each goal stream;
+  5. close the app-server thread;
+  6. shut down the executor.
+  `CodexConnection` owns the shielded, bounded await and calls `future.cancel()` first on cancel or timeout. INV-6 refuses new calls once close begins. *source:* S1 author r3.
+- **Test fakes (r3).** Fake start and resume responses must report `auto_review` (or the policy `never`) for turns to start (D-32). The fake goal state needs `finish()` and `wake_notification_reader()`. The `Thread` returned by `thread/read` has no reviewer fields. *source:* S1 author r3.
+- **The USER rejection** is `CodexAgentError` with `configuration.unsupported_combination`, the next step `CODEX_HOST_USER_REVIEWER_TEXT`, and operation `CodexHostOperation.VALIDATE_SPAWN_REQUEST` at construction. `configuration.unsupported_combination` needs no row in `CODEX_FAILURE_CLASSIFICATION`; the coverage test checks only `codex.*` codes. *source:* S1 author r3.
+- **S017's scan does not cover `vidbyte/harnesses/`.** The no-`str(exc)` and `from None` rule there is enforced only by review. *source:* S1 author r3.
+- **The test layer (spec r3 §13).**
+  - The pack is `tests/features/codex_host/`, with no `__init__.py`, plus a `FEATURE.md` ("High-Level Feature Description" and "Contract").
+  - Prior art is `tests/test_codex_tools.py:640-680`, with SDK contract tests under `skipUnless(find_spec("openai_codex"))`, and the layout of `tests/features/coding_agent/`.
+  - AC-2 import safety runs in a fresh `sys.executable -I` subprocess with `sys.modules["openai_codex"] = None`.
+  - Run one file with `PYTHONPATH=$(pwd) python -m pytest -q tests/features/codex_host/test_codex_host_<topic>.py`.
+  *source:* spec r3 §13.
 - **openai_codex must load lazily.** Nothing reachable from `import vidbyte`, or from `vidbyte.tools.builtins` (which the YAML component registry scans), may import openai_codex at module level. The precedent is `CodexTransport._load_sdk` (transport.py:215-259). CI installs only `.[dev]`, so SDK-dependent tests skip there (`skipUnless`). The global Python 3.11 has openai-codex 0.162.1. *source:* S0.
