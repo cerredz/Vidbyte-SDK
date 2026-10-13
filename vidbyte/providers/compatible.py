@@ -161,6 +161,16 @@ class OpenAICompatibleProvider:
             raise ProviderResponseError(f"{self.provider.value} response did not include message content.", provider=self.provider.value, response_excerpt=str(parsed))
         return content
 
+    def _raise_if_interrupted(self, parsed: Mapping[str, Any], interrupted_reason: str) -> None:
+        # @intent interrupted-reply-is-not-an-answer
+        # DeepSeek ("insufficient_system_resource") and GLM ("network_error") report a reply their servers cut off after
+        # the 200 under their own finish_reason; the text is not the answer, so raise like OpenRouter's "error" (#1012) and keep the billed usage.
+        choices = parsed.get("choices")
+        first = choices[0] if isinstance(choices, list) and choices else None
+        finish_reason = first.get("finish_reason") if isinstance(first, dict) else None
+        if finish_reason == interrupted_reason:
+            raise ProviderResponseError(f"{self.provider.value} reply was interrupted: {finish_reason}", provider=self.provider.value, response_excerpt=str(parsed))
+
 
 class DeepSeekProvider(OpenAICompatibleProvider):
     provider = ModelProvider.DEEPSEEK
@@ -172,6 +182,7 @@ class DeepSeekProvider(OpenAICompatibleProvider):
         if not isinstance(choices, list) or not choices:
             raise ProviderResponseError(f"{self.provider.value} response did not include choices.", provider=self.provider.value, response_excerpt=str(parsed))
         first = choices[0]
+        self._raise_if_interrupted(parsed, "insufficient_system_resource")
         message = first.get("message") if isinstance(first, dict) else None
         content = message.get("content") if isinstance(message, dict) else None
         has_tool_calls = isinstance(message, dict) and isinstance(message.get("tool_calls"), list) and len(message["tool_calls"]) > 0
@@ -208,6 +219,10 @@ class DeepSeekProvider(OpenAICompatibleProvider):
 
 class GLMProvider(OpenAICompatibleProvider):
     provider = ModelProvider.GLM
+
+    def _extract_chat_text(self, parsed: Mapping[str, Any]) -> str:
+        self._raise_if_interrupted(parsed, "network_error")
+        return super()._extract_chat_text(parsed)
 
 
 class MiniMaxProvider(OpenAICompatibleProvider):
