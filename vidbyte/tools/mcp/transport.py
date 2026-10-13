@@ -15,8 +15,13 @@ Architecture:
       frames that carry "method", send_request, notify, respond, per-call
       timeouts, exit_grace_seconds, and stop_process_tree, plus a read-only
       returncode that outlives close. Only a call with its own
-      timeout_seconds bounds its write and refuses a pipe that closed under
-      it; without one the write is MCP's plain drain.
+      timeout_seconds bounds its write (_drain_within) and refuses a pipe
+      that closed under it; without one the write is MCP's plain drain.
+Known edge cases:
+    CPython 3.11's wait_for can drop a cancel that lands just as its
+    awaitable finishes (gh-86296). The bounded drain compares the task's
+    cancel count before and after the wait and raises CancelledError when
+    it rose, and a cancelled request write drops its pending answer future.
 Relations:
     Related to vidbyte.tools.mcp.client, vidbyte.tools.mcp.bridge, and
     vidbyte.tools.mcp.attach.
@@ -312,17 +317,19 @@ class McpStdioTransport:
                 self._process.stdin.write((json.dumps(payload) + "\n").encode("utf-8"))
                 # @intent mcp-stdio-checked-write-has-a-deadline
                 # Without a deadline this is MCP's plain drain. With
-                # one the drain is bounded, and a pipe already closing
-                # afterwards raises: on a broken pipe asyncio marks
-                # the pipe closing at once but tells drain only a loop
-                # turn later, so drain alone can return as if the
-                # frame had been written.
+                # one the drain is bounded and checked afterwards.
                 if seconds is None:
                     await self._process.stdin.drain()
                 else:
-                    await asyncio.wait_for(self._process.stdin.drain(), seconds)
-                if seconds is not None and self._process.stdin.is_closing():
-                    raise BrokenPipeError("The MCP process stdin closed under the write.")
+                    await self._drain_within(self._process.stdin, seconds)
+            except asyncio.CancelledError:
+                # A cancelled write drops its pending answer future,
+                # or the peer's close would fail it with nobody to
+                # read the error.
+                self._pending.pop(request_id, None)
+                if not future.done():
+                    future.cancel()
+                raise
             except (BrokenPipeError, ConnectionResetError, OSError) as exc:
                 self._pending.pop(request_id, None)
                 if not future.done():
@@ -416,16 +423,36 @@ class McpStdioTransport:
                 process.stdin.write((json.dumps(frame) + "\n").encode("utf-8"))
                 # @intent mcp-stdio-checked-write-has-a-deadline
                 # The same write as _send: plain without a deadline,
-                # bounded and refused on a closing pipe with one.
+                # bounded and checked with one.
                 if seconds is None:
                     await process.stdin.drain()
                 else:
-                    await asyncio.wait_for(process.stdin.drain(), seconds)
-                if seconds is not None and process.stdin.is_closing():
-                    raise BrokenPipeError("The MCP process stdin closed under the write.")
+                    await self._drain_within(process.stdin, seconds)
             except (BrokenPipeError, ConnectionResetError, OSError) as exc:
                 reason = "timeout" if isinstance(exc, TimeoutError) else "stdin_write_failed"
                 raise McpProtocolError("MCP process stdin is not writable", details={"method": method, "stderr_tail": self.stderr_snapshot(), "reason": reason}) from exc
+
+    @staticmethod
+    async def _drain_within(stdin: asyncio.StreamWriter, seconds: float) -> None:
+        """Drain a written frame within seconds, then refuse a dropped cancel or a pipe that closed under the write."""
+        # @intent mcp-stdio-bounded-drain-keeps-the-cancel
+        # On CPython 3.11 wait_for runs the drain in an inner task.
+        # A cancel that lands after that task ended, but before
+        # this task resumes, is dropped (gh-86296), and the call
+        # would wait out its whole deadline. A cancel count that
+        # rose during the wait is that dropped cancel, so raise it.
+        # The drain coroutine goes to wait_for directly, in the
+        # caller's task.
+        task = asyncio.current_task()
+        cancels = 0 if task is None else task.cancelling()
+        await asyncio.wait_for(stdin.drain(), seconds)
+        if task is not None and task.cancelling() > cancels:
+            raise asyncio.CancelledError
+        # On a broken pipe asyncio marks the pipe closing at once
+        # but tells drain only a loop turn later, so drain alone
+        # can return as if the frame had been written.
+        if stdin.is_closing():
+            raise BrokenPipeError("The MCP process stdin closed under the write.")
 
     @staticmethod
     def _seconds_or_invalid_call(value: object, name: str) -> float:
