@@ -4,6 +4,7 @@ Spec: `docs/spec/byok-api-keys/spec.md` r4 (approved), now r5 with the S2 wordin
 New pack: `tests/features/sdk_provider_keys/` (117 tests, 11 files plus fixtures, FEATURE.md, README.md).
 Superseded updates: `tests/features/sdk_managed_text/` and 30 module test files (spec §13), plus post-rebase stragglers in seven module test files, one of them added on main (§5).
 S5 pass 1 (2026-10-13, from `review.md` T-2 to T-6 and the orchestrator's T-7, T-9, T-10): the pack now holds 123 tests. Six test functions are new, and two existing tests gained a row or a block (§1, "S5 pass 1"). Four of the new tests are red until the S5 repair lands (§4). Report: `reports/S5-test-author-1.md`.
+S5 pass 2 (2026-10-13, from re-review R-C2 and R-C3 and the live test's LE-1): the pack now holds 126 tests, with three new test functions, T-11 to T-13 (§1, "S5 pass 2"). T-11 is green. T-12 and T-13 stay red until repair iteration 2 lands (§4). Report: `reports/S5-test-author-2.md`.
 
 Every test that builds a runner or an agent clears the environment (`patch.dict(os.environ, …, clear=True)` or `RecordingEnviron`) and scripts the inner HTTP transport. Only the transport, the retry wait, and the environment are faked. `ProviderKeyMatcher`, `ProviderKeys`, `credentials()`, `ProviderModelRegistry`, the adapters, and `VidbyteGatewayTransport` run for real. Every feature symbol is imported inside the test, so the pack collects while it is red.
 
@@ -107,6 +108,18 @@ Each row closes a guard the S4 verifier proved unexercised (a seeded mutant left
 
 Satisfiability: on a scratch copy of the `c1_shape_before_match` tree, I applied one-line sketches of the ruled R-14, R-15, and R-17 fixes, and the full suite passed (`4107 passed, 13 skipped`). So the four red rows can all go green together with the existing table G tests (the paid 402 still needs `wallet` and `provider key`).
 
+### S5 pass 2: regression tests from re-review 1 and the live test
+
+T-11 pins a fix that had no test (re-review R-C2: reverting 940ff97c left the full suite green). T-12 and T-13 pin confirmed defects that repair iteration 2 must fix. "Proof" trees sit under `<s5b>`, the session scratchpad's `s5-mut2/`. Each tree is a `git archive` of the branch, with the tests copied in where needed, and each was run from inside its own directory (`vidbyte.__file__` was checked to be the tree's). At HEAD the pack gives `2 failed, 124 passed`. The two failures are the red rows below.
+
+| Spec ID (finding) | Test (file → name) | Level | Failure it catches | How it could pass vacuously, and why it does not | Proof |
+|---|---|---|---|---|---|
+| M-18, INV-24 (R-13, re-review R-C2) | match → `ConfiguredPrimaryTests` → `test_m18_offers_vidbytes_own_account_only_for_a_provider_the_gateway_serves` (T-11) | U | M-18 tells a developer on an unserved provider (mistral) to fall back to "Vidbyte's own mistral account", which the gateway cannot serve | Only DIRECT reaches M-18 for mistral, so both unserved roots (`TextModelConfig` and `Agent`) run in DIRECT. `refused` requires a `ConfigurationError`, so an earlier M-12 (`UnsupportedProviderError`) fails instead of passing. `details["provider"] == "mistral"` proves that M-18 is the error under test. The negative check is a regex (`Vidbyte\W?s own`, case-insensitive), so a curly apostrophe cannot slip past. The served half (openai, default mode) requires the clause, so dropping the clause everywhere also fails | green@HEAD. In `tree_r13_revert` (HEAD with `git apply -R` of 940ff97c), both unserved subtests fail: unittest gives `FAILED (failures=2)`, and pytest gives `1 failed`. In `tree_r13_never` (the clause is never offered), it fails: "'Vidbyte's own openai account' not found". Control `tree_head`: `1 passed` |
+| Table G "other relayed provider status", D-15, INV-17 (LE-1) | fail → `GatewayErrorWordingTests` → `test_a_relayed_provider_400_points_at_the_callers_own_key_in_api_keys_and_a_paid_400_does_not` (T-12) | I | xAI answers a wrong key with HTTP 400 `invalid-argument`, not 401. The relayed message then never points at the caller's own key in `api_keys` | The call is proven to relay (the header equals `K_XAI`) before its message is judged. The body is provider-shaped (`"error"` is a string, not `true`) and echoes `K_XAI` and `BODY_CANARY`, so `assert_credential_safe` catches any copied body text. `api_keys` is required, and so are a second `xai`, `400`, "withheld", and "not … bill". The paid control (no relay header) forbids `api_keys`, so a fix that adds the clause to every 400 fails | **red@HEAD**: "'api_keys' not found in …xai returned HTTP 400 through the Vidbyte gateway; the provider's message is withheld, and the call was not billed." In `tree_fix` (the relay-only sketch), it passes. In `tree_both400` (the clause on every 400), it fails at the control: "'api_keys' unexpectedly found" |
+| INV-22, NFR-1 (re-review R-C3) | sec → `CredentialGuardTests` → `test_the_bare_name_provider_key_is_a_secret_name_as_the_free_text_redactor_already_treats_it` (T-13) | U | The free-text redactor scrubs `provider_key=…`, but the name policy does not know the bare name. A captured mapping `{"provider_key": key}` keeps the key | Each spelling (`provider_key`, `providerKey`, `Provider-Key`) is its own subtest. The entry point is the one T-10 uses (`CredentialKeyPolicy.is_secret_key`). The mapping dump must drop the key but keep `"provider": "xai"`, and `is_secret_key("provider")` must stay False, so a policy that treats everything as secret fails | **red@HEAD**: under unittest, `FAILED (failures=4)`, one failure for each spelling and one for the mapping dump, which keeps the key. In `tree_fix` (`"provider_key"` added to `_SECRET_KEYS`), it passes |
+
+Satisfiability: `<s5b>/tree_fix` is HEAD with two sketches. The first adds a relay-only 400 clause ("…; some providers answer a wrong key with HTTP 400, so check your own {provider} key in api_keys"). The second adds `"provider_key"` to `CredentialKeyPolicy._SECRET_KEYS`. There the full suite gives `4110 passed, 13 skipped`. So T-12 and T-13 can go green together with every existing table G and relayed-status test. The sketches are evidence only; the repair agent writes the real fixes.
+
 ## 2. Tests deliberately not written
 
 - **AC-28 (lint, C017, full gate):** a gate, not a pytest test. `python lint/run.py` passes on the red pack (`SDK-LINT: PASS`); `run_ci.py` belongs to the implementer.
@@ -120,6 +133,9 @@ Satisfiability: on a scratch copy of the `c1_shape_before_match` tree, I applied
 - **S5 pass 1, no T-8 (R-9, S014 lint strictness):** the repo has no S014 rule-test harness, and building one is outside this pass. The repair agent proves R-9 with the verifier's mutation matrix (`verify/s014_mut.py`).
 - **S5 pass 1, R-5's "only another provider's key gives `api_key` None" case:** it cannot be built. At every root, M-18 fires first (INV-24), and `ModalityDetector._config_options` matches with `require_primary_key=True` (review.md, refuted sub-claim).
 - **S5 pass 1, the other review findings:** R-1, R-7, R-8, and R-11 to R-13 are structure, lint, or comment findings proven by AST scans and lint counts; R-16 is a duplication follow-up; R-10 awaits a ruling. None of these asked for a pytest case. R-18 (`vb_test_`) is a scope-adding user follow-up.
+- **S5 pass 2, no test for R-C1 (`provider_keys.py` has 300 lines, and NFR-4 says "under 300"):** a line count is a `wc -l` fact, not a behaviour, so the repair agent proves it with that command.
+- **S5 pass 2, M-18 for a served provider in DIRECT:** T-11 asserts it neither way. DIRECT still offers "Vidbyte's own openai account", and that is an accepted limitation (orchestrator ruling), because the matcher never learns the mode.
+- **S5 pass 2, a relayed 400 for providers other than xai:** T-12 uses xai, the provider the live test caught. The existing `test_another_relayed_provider_status_keeps_its_unchanged_wording` still binds the openai relayed 400 (withheld, and no quota, daily, or wallet), and it does not forbid `api_keys`.
 
 ## 3. Red run
 
@@ -169,6 +185,25 @@ The S5 repair agent must turn these four tests green without editing them:
 - **R-17:** `fail → test_a_vidbyte_managed_402_names_the_wallet_and_offers_a_provider_key_only_as_an_auto_option`. The message must match `wallet` (case-insensitive). If it contains `api_keys`, it must also contain `TextModelMode.AUTO`. The full sentence is not pinned. The AUTO paid-402 test still requires `wallet` and `provider key`, and the relay 402 must still not say `provider key`.
 - **R-14:** `match → test_role_settings_accept_a_padded_vidbyte_key_and_store_what_agent_stores`. `AgentRoleSettings(..., vidbyte_api_key=" " + key + " ")` must build, and `role.vidbyte_api_key` must equal `Agent(...).runner_config.api_keys.vidbyte_api_key`, which is the stripped key.
 - **R-15:** `sec → test_the_relay_header_name_is_a_secret_name_and_the_redactor_scrubs_the_key_under_it`. `CredentialKeyPolicy.is_secret_key(VIDBYTE_PROVIDER_KEY_HEADER)` must be True. `HarnessRedactor().redact(...)` of a header mapping must drop the provider key and the bearer and keep `application/json`. `redact` and `safe_error_message` of `"<header>: <key>"` (alone and beside `Authorization: Bearer <vidbyte key>`) must hold neither key. Both the suffix and the free-text alternation are needed: the policy fix alone leaves the free-text half red.
+
+### S5 pass 2 red targets
+
+Repair iteration 2 must turn these two tests green without editing them, and keep T-11 green:
+
+- **LE-1 (T-12):** `fail → test_a_relayed_provider_400_points_at_the_callers_own_key_in_api_keys_and_a_paid_400_does_not`. The test runs a relay call: `TextModelConfig(provider="xai", model="grok-4.5", api_keys=[K_XAI])` with `VIDBYTE_API_KEY` set. The gateway answers HTTP 400 with `{"code": "invalid-argument", "error": "Incorrect API key provided: <K_XAI> (<canary>)."}`.
+  - The message must pass `assert_credential_safe`: `provider="vidbyte"`, `status_code=400`, the "Vidbyte gateway xai request failed: " prefix, no excerpt, no chained exception, and no key or canary text.
+  - It must contain `api_keys` and `400`, and `xai` at least twice.
+  - It must match `withheld` and `(not|n't)\b[^.;]{0,20}bill`.
+  - It must not match `quota|daily|wallet`.
+  - The call is sent once, with no retry wait.
+  - The control is the same 400 on a Vidbyte-paid call (no `api_keys`, no relay header). Its message must not contain `api_keys`, and it must still match `withheld`. So the clause goes only on the relay branch (`relays and status == 400` in `_GatewayAnswer.failure_reason`).
+  - The sentence is not pinned.
+- **R-C3 (T-13):** `sec → test_the_bare_name_provider_key_is_a_secret_name_as_the_free_text_redactor_already_treats_it`.
+  - `CredentialKeyPolicy.is_secret_key` must be True for `provider_key`, `providerKey`, and `Provider-Key`, and False for `provider`.
+  - `HarnessRedactor().redact({"provider_key": K_XAI, "provider": "xai"})` must drop the key and keep `xai`.
+  - `redact("provider_key=<key>")` must not hold the key.
+  - Adding `"provider_key"` to `CredentialKeyPolicy._SECRET_KEYS` is enough.
+- **Keep green:** T-11 (`match → test_m18_offers_vidbytes_own_account_only_for_a_provider_the_gateway_serves`). R-C1's one-line deletion in `provider_keys.py` must keep the R-13 condition (`if missing in VIDBYTE_MANAGED_TEXT_PROVIDERS`).
 
 ## 5. Superseded tests updated
 
