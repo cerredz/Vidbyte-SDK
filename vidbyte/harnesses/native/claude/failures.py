@@ -1,7 +1,7 @@
 """FILE: vidbyte/harnesses/native/claude/failures.py
 
 PURPOSE: Turns an exception from claude-agent-sdk, or the facts of a finished turn, into one claude.* failure code with its reason and next step.
-ROLE IN CODEBASE: The one place ClaudeHost chooses a failure code. The session pump, the probe, the history functions and the host map every exception they catch through from_exception, and the pump classifies each finished turn through classify_turn.
+ROLE IN CODEBASE: The one place ClaudeHost chooses a failure code. The session pump, the probe, the history functions and the host map every exception they catch through from_exception, and the pump classifies each finished turn through classify_turn. The host and the session build their refusals through error, and both apply usage_limited, the one check of whether a rate-limit window refuses new sessions (D-29).
 ARCHITECTURE NOTE: from_exception walks one ordered table of exception classes, each subclass before its base, so CLINotFoundError wins over CLIConnectionError and ResultError over ProcessError. The guarded try lives at each SDK call site, which passes what it caught here. classify_turn checks a fixed precedence and returns at the first match, so a turn carries exactly one code.
 COMMON MODIFICATION PATTERNS: A new SDK exception adds one row to _rows, placed before its base class. A new turn condition adds one ClaudeTurnOutcome field and one check at its place in the precedence.
 WHAT NOT TO DO IN THIS FILE: 1. Do not catch BaseException; only an Exception reaches the mapper, so a cancellation always propagates. 2. Do not format the exception's text, its stderr or any message text into a reason; a reason names the operation and the exception class, or CLI vocabulary such as a result subtype.
@@ -11,6 +11,8 @@ TESTS: tests/features/claude_host/
 """
 
 from __future__ import annotations
+
+import time
 
 from vidbyte.lib.constants.claude import (
     CLAUDE_CONNECT_OPERATION,
@@ -23,10 +25,11 @@ from vidbyte.lib.constants.claude import (
 )
 from vidbyte.lib.dataclasses.claude_host import (
     ClaudeFailure,
+    ClaudeRateLimitWindow,
     ClaudeSdkTypes,
     ClaudeTurnOutcome,
 )
-from vidbyte.lib.enums.claude import ClaudeTurnStatus
+from vidbyte.lib.enums.claude import ClaudeRateLimitStatus, ClaudeTurnStatus
 from vidbyte.lib.enums.failure import FailureCode
 from vidbyte.lib.errors import ClaudeOperationError
 
@@ -91,6 +94,17 @@ class ClaudeFailureMapper:
     def failure(code: FailureCode, reason: str) -> ClaudeFailure:
         """Return a failure for a claude.* code, carrying the next step that code always has."""
         return ClaudeFailure(code=code, reason=reason, next_step=CLAUDE_FAILURE_NEXT_STEPS[code.value])
+
+    @staticmethod
+    def error(code: FailureCode, reason: str, *, operation: str, next_step: str = "") -> ClaudeOperationError:
+        """Return the error for a refused call, with the given next step or else the one a claude.* code always has."""
+        return ClaudeOperationError(reason, failure_code=code.value, operation=operation, next_step=next_step or CLAUDE_FAILURE_NEXT_STEPS[code.value])
+
+    @staticmethod
+    def usage_limited(window: ClaudeRateLimitWindow) -> bool:
+        """Return whether a window refuses new sessions: rejected, resetting later than now, and with no allowed overage (D-29)."""
+        overage_allowed = window.overage_status in (ClaudeRateLimitStatus.ALLOWED, ClaudeRateLimitStatus.ALLOWED_WARNING)
+        return window.status is ClaudeRateLimitStatus.REJECTED and window.resets_at is not None and window.resets_at > time.time() and not overage_allowed
 
     @staticmethod
     def _rows(operation: str, sdk: ClaudeSdkTypes | None) -> dict[type, FailureCode]:
