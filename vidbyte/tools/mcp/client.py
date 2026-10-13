@@ -138,6 +138,18 @@ class McpClient:
                     uri = resource.get("uri", "unknown")
                     mime = resource.get("mimeType", "unknown")
                     parts.append(f"[resource: {uri}, {mime}, {size} base64 chars omitted]")
+                elif (
+                    item.get("type") == "resource"
+                    and isinstance(item.get("resource"), Mapping)
+                    and isinstance(item["resource"].get("text"), str)
+                ):
+                    # @intent mcp-text-resource-is-text
+                    # A text embedded resource carries readable text (GitHub's get_file_contents returns files
+                    # this way), so the model gets the text under its uri, not a dict repr with escaped newlines.
+                    resource = item["resource"]
+                    uri = resource.get("uri", "unknown")
+                    mime = resource.get("mimeType", "unknown")
+                    parts.append(f"[resource: {uri}, {mime}]\n{resource['text']}")
                 else:
                     parts.append(str(item))
             else:
