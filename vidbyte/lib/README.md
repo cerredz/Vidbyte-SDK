@@ -39,6 +39,7 @@ print(default_model, api_key_env, openai_models, gpt56_luna_price)
 - `constants/`: shared SDK constants, including model/provider-to-runner mappings.
 - `registries/`: agent, provider/model, pricing, runtime, prompt, tool, actor, and declarable-component registries.
 - `errors/`: SDK-specific exception types.
+- `process/`: the canonical local-process helpers: `CliRunner` runs one command with a deadline and capped output, `ManagedProcess` starts a long-running server and waits for its ready line, and `ProcessStopper` stops a whole process tree. Failures come back as fields of the returned record, never as exceptions, except cancellation.
 - `runners/`: runner handles, concrete model runners, and runner inference helpers.
 - `tools/`: provider-specific tool schema formatting.
 - `tracing/`: tracer base classes and null tracer.

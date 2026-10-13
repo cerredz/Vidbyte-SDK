@@ -148,6 +148,10 @@ Reusable, prepackaged evaluation suites that can be pointed at an agent without 
 
 The base abstraction for wrapping an existing agent workflow so that every run produces a durable, structured record suitable for use as reinforcement-learning training data — the task given, the full trajectory taken, the resolved configuration used, and a scalar reward. Configuration is treated as the source of truth for a harness's identity, and every run is captured through the session layer rather than through ad hoc logging. Consent and redaction are part of the contract rather than an afterthought bolted on separately. This is the shared contract that executed harnesses elsewhere in the workspace, and example harnesses built for demonstration, both build against.
 
+##### `vidbyte/harnesses/native/`
+
+Hosts that drive vendor coding-agent command-line tools installed on the machine as local child processes: Grok Build over its stdio agent protocol, opencode over an owned or attached local HTTP server, and Muse Code over its stdio protocol (through WSL on Windows), plus the GLM and DeepSeek backend profiles that point Claude Code or opencode at an Anthropic-compatible endpoint. Each host is an async context manager that spawns, continues, waits on and interrupts turns, leaves sessions in the vendor's own history, and raises one error type carrying a closed failure code and a next step. Plumbing the three hosts share, such as scrubbed errors, the live-turn table and the stdio peer, lives once in a `hostkit` subfolder that only the hosts import. The model-facing tools over these hosts live with the other builtins and toolsets in the tools layer, and the hosts never import them.
+
 ##### `vidbyte/harnesses/stores/`
 
 Persistence backends for captured trajectory data, all implementing one common interface so the storage mechanism can be swapped without touching the harness itself. One backend is intended for use in tests, another for local export to disk, and additional backends can be added following the same pattern. Keeping the store swappable behind one interface is what lets a harness behave identically whether it is run in a notebook or in production. A new storage destination should be added as a backend here rather than taught to the harness abstraction directly.
@@ -195,6 +199,10 @@ The JEV agent's capability substrate, placed below the agent layer so the agent,
 ##### `vidbyte/lib/models/`
 
 A namespace reserved for model metadata that currently holds no real content. It is listed here specifically so that its emptiness is a documented, known fact rather than something a reader has to go looking for and wonder if they are missing. Model discovery and configuration actually live in a registries layer elsewhere in the shared substrate today. This folder exists as a placeholder for where that responsibility may eventually move.
+
+##### `vidbyte/lib/process/`
+
+The canonical helpers for running local processes: a one-shot command runner with a deadline and capped output capture, a managed long-running process that waits for a readiness line and keeps draining its output, and a stopper that ends a whole process tree, the process group on POSIX and the taskkill tree on Windows. Every failure comes back as a field of the returned record instead of an exception, except cancellation, which stops and reaps the tree before propagating. New code that needs to start a child process should use these helpers rather than the asyncio subprocess API directly, so the timeout, the output caps and the tree stop exist in one place.
 
 ##### `vidbyte/lib/providers/`
 

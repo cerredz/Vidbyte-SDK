@@ -175,6 +175,7 @@ the same `TrajectorySink` protocol with zero harness changes.
 - `stores/`: `TrajectorySink` port (`base.py`) plus in-memory and atomic-JSONL file
   sinks (`memory.py`, `file.py`), mirroring the `vidbyte/sessions/stores/` layout.
 - `serialization.py`: the single redaction pass and shared secret-key policy.
+- `native/`: hosts that drive vendor coding-agent CLIs installed on the machine: `grok/` (`GrokHost` and `run_grok_once`), `opencode/` (`OpencodeHost`) and `muse/` (`MuseHost`), their shared `hostkit/` plumbing (scrubbed errors, the live-turn table, the stdio peer), and `backends/` (the GLM and DeepSeek profile functions). The model-facing tools live in `vidbyte/tools/builtins/` and `vidbyte/tools/toolsets/`. MCP exposure: `McpStudioServer` runs tools without a `PermissionPolicy`, so expose a host over MCP with `GrokTools.read_only(host)`, `OpencodeTools.read_only(host)` or `MuseTools.read_only(host)`, never the full toolset, whose WRITE tools start paid turns.
 
 The full architecture and rejected alternatives are recorded in
 [`docs/design/harness-execution-contract.md`](../../docs/design/harness-execution-contract.md).
