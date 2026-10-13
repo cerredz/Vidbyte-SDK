@@ -327,3 +327,78 @@ Each commit was checked before it was made, using the packs and the lint, with t
   - INV-14 makes both the same session, and the R-16 tests deliberately do not assert the spelling.
 - `_session_key` names GROK and MUSE explicitly, so any harness not listed is compared exactly.
 - The R-M11 wordings a reviewer may want to check against the spec are the opencode client's five codes, the Muse wire's code list, and the toolsets' replacement for "§9.2 order".
+
+## Iteration 5 — 2026-10-13 17:29 UTC — agent report: none (see below)
+
+**Report file:** none, as in iteration 4. The harness refuses subagent report files, so this entry and the agent's STATUS block are the full record.
+
+**Defects in:** R-RR2-1 [Minor], from post-repair re-review round 2 (`reports/S5-rereview-2.md`). origin/main 8387d666 was already an ancestor of HEAD 7dcc0551, so no merge was needed.
+
+**Hypotheses and attempts:**
+- **R-RR2-1, every mapping the module performs.** I read `grok/wire.py` in full, plus the factory methods it calls (`hostkit/errors.py:82-140`).
+  - `vendor_error`:
+    - -32000 → `grok.not_signed_in`;
+    - -32002, or an `FS_NOT_FOUND` payload → `grok.session_not_found`;
+    - -32601 → `grok.capability_missing`;
+    - -32602 on a request that sent a cursor → `configuration.invalid_argument` (line 245, through `NativeErrorFactory.invalid_argument`);
+    - -32700 and -32600 → `grok.protocol_mismatch`;
+    - any other code, -32602 without a cursor included → `grok.api_error`;
+    - a failure with no JSON-RPC error → `from_protocol_error`, which gives `grok.server_unreachable`, `process_exited`, `api_error` or `protocol_mismatch`.
+  - `check_cli`: `from_launch_failure` (`grok.not_installed` or `process_exited`), then `grok.turn_timed_out`, `grok.server_unreachable`, `grok.not_signed_in` and `grok.api_error`.
+  - The parse and check methods: `grok.protocol_mismatch`, `version_unsupported`, `capability_missing` and `model_unknown`.
+  - Every other path builds its code with `self._errors.code(...)`, which gives `<harness>.<problem>`. So line 245 is the only failure outside `grok.*`.
+- **Fix.** The PURPOSE sentence now ends "…to grok.* failure codes, except a cursor Grok refuses, which is configuration.invalid_argument."
+  - The added clause is 71 characters and cites no spec id. The field stays one line, as on main; A001 only checks that each field is present.
+  - It says "a cursor Grok refuses", not "a stale cursor". The spec row covers a stale or a foreign cursor, and the code's own message names both.
+- **Proof that it is text only.**
+  - A scratch script compares `ast.dump` with the module docstring blanked. Against 7dcc0551 it prints `ast-equal-with-module-docstring-blanked=True` and `module-docstring-changed=True`.
+  - `git diff --stat 7dcc0551 df9566fa`: 1 file, +1/−1. The committed blob has 0 CR bytes.
+- **The header's other claims, checked and left alone.**
+  - **Held:**
+    - FUNCTION INVENTORY lists every method;
+    - all three KNOWN EDGE CASES;
+    - WHAT NOT TO DO 2 (no process, no await);
+    - ROLE IN CODEBASE: host.py and turn.py read only the JSON-RPC envelope's `method` and `id` (turn.py:79, 101, 182 and 184), never an ACP payload field.
+  - **Not true. Reported here, not fixed, because the brief allowed only the R-RR2-1 clause:**
+    1. The `GrokWire` class docstring (wire.py:63) says "into records or grok.* errors". It leaves out the same cursor case as R-RR2-1. It is a class docstring, not the module header.
+    2. WHAT NOT TO DO 1 says vendor text goes only into context values. But `require_model` (wire.py:189) puts Grok's own `currentModelId` into the message. `build` scrubs the message, so nothing leaks; only the claim is wrong.
+    3. COMMON MODIFICATION PATTERNS says a new CLI failure text is a marker in `GROK_NOT_SIGNED_IN_MARKERS`. That holds only for a sign-in failure, because any marker added there raises `grok.not_signed_in`.
+- **Remote 3.11 failure on attempt 1.**
+  - **The failure.** In run 38437336454 attempt 1, `tests/features/muse_host/test_muse_host_turns.py::test_interrupt_answered_interrupted_or_cancelled_counts_as_success[interrupted]` failed on Linux 3.11 with `NativeHostError: The Muse Code process stopped before it answered.` It came from `McpProtocolError: MCP transport closed` while `interrupt_muse_turn` was awaiting `turn/interrupt`. 3.12 passed in the same run.
+  - **Why df9566fa did not cause it.** The code is AST-identical to 45ad54ec, where both Pythons were green (run 38432650695).
+  - **Cause, read from the code. Not fixed: it is outside this iteration's one clause.**
+    1. The fake's `turn_interrupt` (`fake_muse_peer.py:489-491`) sets `interrupt_event` before it writes its answer. So its turn thread can send `turn/completed` (cancelled) first.
+    2. `MuseTurnDriver.run` stops on `turn/completed` and closes the peer in its `finally` block (`muse/turn.py:135-137`).
+    3. If that close lands before the reader hands over the interrupt answer, the pending `peer.call("turn/interrupt")` (`muse/turn.py:148`) fails with "transport closed". `NativePeer.call` maps that to `muse.process_exited` (`hostkit/peers.py:97`).
+  - **Input, state and wrong output.**
+    - Input: `interrupt_muse_turn` on a turn that Muse ends at the same moment.
+    - State: the driver has already closed the peer.
+    - Wrong output: the caller gets `muse.process_exited` instead of `was_running=True`.
+    - A real Muse can send the same order of frames, so this is a host race, not only a fixture race. The verify log records no earlier failure of this test.
+  - **Local check.** On Windows, the 8 interrupt tests passed in 25 of 25 runs (200 executions).
+  - **Rerun.** `gh run rerun 38437336454 --failed`: attempt 2 is green on 3.11.
+
+**Changes:**
+- R-RR2-1: df9566fa (`grok/wire.py`, 1 line, module docstring only).
+- This entry: in the verify-log commit.
+- The push 44545f3f..df9566fa also carried 71be15fd and 7dcc0551 (docs only), which had not been on the remote.
+
+**Gate matrix out (code HEAD df9566fa):** the brief's five local gates were run once, in order, as one sequential script with nothing alongside. Gates 2 and 3 of this log were not run on their own; the source stage runs the full suite.
+
+| Gate | Command | Result | Final lines |
+|---|---|---|---|
+| packs | gate 1 | PASS | `1649 passed, 19 skipped in 150.27s (0:02:30)` |
+| lint | gate 4 | PASS (A001 643/643, A002 577/703; no count rose) | `A001 RATCHETED: 643 known finding(s).` / `A002 IMPROVED 703 -> 577.` / `SDK-LINT: PASS` |
+| source stage | gate 5 | PASS (first run, no flake) | `5664 passed, 32 skipped in 184.93s (0:03:04)` / `CI passed.` |
+| package stage | gate 6 | PASS | `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` |
+| semgrep | gate 7 | PASS | `Ran 1 rule on 949 files: 0 findings.` |
+| docstring-only | AST with the module docstring blanked vs 7dcc0551 | PASS | `ast-equal-with-module-docstring-blanked=True` / `module-docstring-changed=True` |
+| remote CI | `gh run view 38437336454` (head df9566fa) | attempt 1 FAIL (3.11: 1 Muse interrupt test, see above; 3.12 success); attempt 2 PASS (3.11, 3.12 and Package all success) | attempt 1, 3.11: `1 failed, 5656 passed, 39 skipped in 181.85s` / `CI failed: …`; attempt 2, 3.11: `5657 passed, 39 skipped in 180.20s` / `CI passed.`; 3.12: `5657 passed, 39 skipped, 19 warnings in 189.29s` / `CI passed.`; Package: `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` |
+| remote static policy | `gh run view 38437340236` (head df9566fa) | PASS | `Ran 1 rule on 949 files: 0 findings.` (conclusion success) |
+| PR | `gh pr view 1036 --json isDraft` | n/a | `true`; the PR is still a draft |
+| invariants | INV-19 / INV-22 / frozen files | PASS | sha256 `0374a2c8…497a`; INV-22 diff empty; `tests/`, `lint/`, `pyproject.toml`, `failure.py` and `docs/` unchanged by df9566fa; origin/main 8387d666 is an ancestor of HEAD |
+
+**Still open:**
+- **The Muse interrupt race above.** It is intermittent and seen once, on Linux 3.11. It is a host defect, not a flaky test. A fix belongs in the host: when `turn/interrupt` fails because the driver itself closed the peer after `turn/completed`, the turn has stopped, so the interrupt should succeed. A deterministic regression test should order `turn/completed` before the interrupt answer. Nothing was built here.
+- **The three header claims above.** They are wording only, with no behaviour change.
+- **Follow-ups:** R-M4, R-M5, R-M7, R-M8 and R-M10 are unchanged.
