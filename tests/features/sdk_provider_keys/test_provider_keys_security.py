@@ -233,6 +233,28 @@ class CredentialGuardTests(unittest.TestCase):
             self.assertNotIn(key, repr(structured))
         self.assertIn("xai", repr(structured))
 
+    def test_the_relay_header_name_is_a_secret_name_and_the_redactor_scrubs_the_key_under_it(self) -> None:
+        # NFR-1, INV-4, INV-22 (review R-15): a dump of the relay request's headers would otherwise keep the provider key while the bearer is scrubbed.
+        from vidbyte.harnesses.serialization import HarnessRedactor
+        from vidbyte.lib.constants.jev import VIDBYTE_PROVIDER_KEY_HEADER
+        from vidbyte.lib.util.credential_keys import CredentialKeyPolicy
+
+        self.assertTrue(CredentialKeyPolicy.is_secret_key(VIDBYTE_PROVIDER_KEY_HEADER), f"{VIDBYTE_PROVIDER_KEY_HEADER} must be a credential name")
+        redactor = HarnessRedactor()
+        structured = redactor.redact({VIDBYTE_PROVIDER_KEY_HEADER: K_XAI, "Authorization": f"Bearer {VIDBYTE_KEY}", "Content-Type": "application/json"})
+        for key in (K_XAI, VIDBYTE_KEY):
+            self.assertNotIn(key, repr(structured))
+        self.assertIn("application/json", repr(structured))
+        texts = (
+            f"{VIDBYTE_PROVIDER_KEY_HEADER}: {K_XAI}",
+            f"request headers {VIDBYTE_PROVIDER_KEY_HEADER}: {K_XAI} Authorization: Bearer {VIDBYTE_KEY}",
+        )
+        for text in texts:
+            with self.subTest(text=text[:24]):
+                for output in (redactor.safe_error_message(text), redactor.redact(text)):
+                    for key in (K_XAI, VIDBYTE_KEY):
+                        self.assertNotIn(key, output)
+
 
 if __name__ == "__main__":
     unittest.main()
