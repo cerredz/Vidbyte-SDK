@@ -195,3 +195,39 @@ Final revision, committed as `ba522bba` with `status: approved`. It applies revi
 - **A-9:** one client is driven from several tasks: the pump reads while interrupt tasks and the close task act. The anyio internals were read, not run.
 - **A-17:** the 30 s grace is enough for an acknowledged interrupt.
 - **A-3:** `--permission-prompts` and `--no-session-persistence` behave without `--print`.
+
+## Addendum: r4 (2026-10-13)
+
+r4 pins the ten open items in the S2 report (S2-1 to S2-10), which the orchestrator forwarded. It is not a review round, and the status stays approved. No test, fixture or §6.2 Proof cell changed. Every pin agrees with what the frozen tests assert, so there are no open items.
+
+| Item | Disposition | Where |
+|---|---|---|
+| S2-1 | Pinned. An absent or `rejected` `overage_status` means overage is not allowed, so the window refuses spawns. | D-29, D-8, EC-7 |
+| S2-2 | Pinned to `claude.session_busy` for a `continue_conversation` template without fork and N>1. | D-30, EC-33, §9.1, §9.2 launch row |
+| S2-3 | Pinned per rule. A missing value that a set field needs gives `invalid_argument`; two settings forbidden together give `unsupported_combination`. | D-31, §9.1 |
+| S2-4 | Pinned to `claude.session_not_found` with the new `CLAUDE_HISTORY_READ_NEXT_STEP`. No `FailureCode` is added. | D-32, §9.2 exception mapping, row 14 |
+| S2-5 | Pinned to `os.path.normcase(os.path.abspath(cwd))`, compared only when both cwds are set. The cwd passed on is the unchanged text. | D-33, D-27, EC-32 |
+| S2-6 | Pinned: no `network` key is sent without a domain. | §9.2 `sandbox` row |
+| S2-7 | Pinned. Row 5 uses D-29's check, and it still comes before a success result (D-20). | D-29, row 5, EC-8 |
+| S2-8 | Pinned. A launch prompt gets the session id a spawn would get, so N=1 keeps a template `session_id` under the busy guard. | D-30, EC-33, §9.1, §9.2 launch row |
+| S2-9 | Stated limitation. No re-entry guard is added; nothing reopens a closed host, and a second `aclose` does nothing. | EC-61, INV-15 |
+| S2-10 | Pinned. History and fork load the SDK at the same step as every other ★ method. | row 3, §9.2 intro |
+
+**Tests I opened**, one per item and read only, all under `tests/features/claude_host/`:
+- S2-1: `test_claude_host_admission.py::RateLimitTests::test_only_a_live_rejection_without_allowed_overage_refuses_spawns`, with its `run_turn_with` helper and the `finished` and `raises` fixtures. They assert only that the first turn is terminal, so S2-7's pin cannot break them.
+- S2-2: `test_claude_host_admission.py::LaunchTests::test_a_template_that_names_one_session_is_refused_for_several_prompts`. It checks the code only, not the next step.
+- S2-3: `test_claude_host_request.py::RequestValidationTests::test_invalid_values_and_combinations_are_rejected`. All 18 cases it marks EITHER relate settings. The reserved server name is `invalid_argument` only, and the doubled output cap is `unsupported_combination` only, so §9.1 keeps both.
+- S2-4: `test_claude_host_history.py::SessionMessageTests::test_a_history_read_error_surfaces_as_a_claude_operation_error`.
+- S2-5: `test_claude_host_admission.py::ContinueTests::test_continue_from_another_cwd_is_an_unsupported_combination`, and `test_a_valid_continue_resumes_the_session_in_its_recorded_cwd`, which compares the passed cwd through `pathlib`.
+- S2-6: the `sandbox` case of `mapping_cases()` in `test_claude_host_request.py`, which sets both domain lists.
+- S2-7: `test_claude_host_turns.py::FailureDetectionTests::test_each_stream_condition_maps_to_its_code`. Its rejected window has a far-future reset and overage `rejected`, so D-29's check holds.
+- S2-9: `test_claude_host_stops.py::CloseTests::test_aclose_interrupts_running_and_queued_handles_and_disconnects_each_client_once`. It re-enters under `contextlib.suppress(Exception)` and then expects a refusal.
+
+**Choices beyond the items' text:**
+- An `allowed_warning` overage status counts as allowed, as D-8 already treats `allowed_warning` windows. No test covers it.
+- D-32 covers only the three history reads. Fork keeps its AC-8 mapping, because I did not open its test.
+- For a rule that relates settings, the reason names every field of the rule, because the S2 tests look for specific ones.
+
+**Least-sure choices:**
+- **D-29 with a success result.** A turn that succeeded after a refusing window ends FAILED with `usage_limited`. An example is a `seven_day_opus` window while the turn ran on Sonnet. The alternative would add a condition to row 5.
+- **D-32's code.** `session_not_found` reads oddly for a failed list. The reason names the operation and the exception class, and the next step names the real fix.
