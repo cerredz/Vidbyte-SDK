@@ -15,7 +15,7 @@ companion: backend run byok-fee-relay at C:/Users/422mi/vidbyte-repos/worktrees/
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-12 16:20 | 2026-10-12 16:50 | reports/S0-scout.md | base 52aab816; code-map 4 sections |
-| S1 spec + review | running | 2026-10-12 16:52 | | reports/S1-spec-author.md | spec r1 e201a52b; review r1 c511e830 (SOUND WITH FIXES 0/6/0); r2 01b0bcf6; review round 2 running |
+| S1 spec + review | running | 2026-10-12 16:52 | | reports/S1-spec-author.md | spec r1 e201a52b; review r1 c511e830 (SOUND WITH FIXES 0/6/0); r2 01b0bcf6; review r2 SOUND WITH FIXES 0/5/4 (R-7..R-15); author applying, then approved (cap reached) |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -71,3 +71,15 @@ companion: backend run byok-fee-relay at C:/Users/422mi/vidbyte-repos/worktrees/
 - 2026-10-12 — S1 r2 (01b0bcf6, +458/-327) changed §8, §8.5 and §12's rows (new `ProviderKeys` record carried by children; unique-assignment matching; Vidbyte key accepted inside `api_keys`), so a scoped round-2 review runs (last allowed round).
 - 2026-10-12 — Q-3 (relayed streaming in the default mode breaks) is consistent with the /talk default "streaming gap accepted"; carried to the round-2 reviewer to check the failure names `DIRECT`.
 - Spec r2: `ProviderKeys` lives in `vidbyte/lib/dataclasses/agents.py`, built once and carried unchanged by every child (forks, fallbacks); `FallbackModel` loses its key field; the matcher imports `ProviderKeys` inside `match`, not at module level; `vidbyte.lib.constants`/`enums` import only enum modules. r1 row 16 is now row 3 and r1 rows 3–15 moved down one. Table F holds five sourced prefix rules (`sk-ant-`, `xai-`, `AIza`/`AQ.`, `sk-or-`, `vb_live_`). — *source:* S1 author r2
+- 2026-10-12 — Round-2 rulings (cap reached; author applies once, sets approved):
+  - R-7 accept: pair check on a passed-in ProviderKeys, no re-bind; it is treated like a child record, so INV-24 is skipped; docs advertise only the list form (NG-19).
+  - R-8 accept option 1: at an AggregateAgent root, every spec-built proposer and the spec-built aggregator count as primaries for INV-24; a prebuilt aggregator means primary None.
+  - R-9 accept option 1: persist the root's matched provider names (no secrets) in runtime_config and re-match against them on restore. Old sessions without the field match as a root.
+  - R-10 accept the wording fix; Q-6 recorded, default no.
+  - R-11 accept the doc fix, and Q-7 = YES (Prompt 5 "dont want developers to have to worry about this", Prompt 6 "Simply renames"): it is a matching refinement inside the requested behavior, not a new control. A lone remaining unproven key that exactly one keyless primary accepts binds to that primary.
+  - R-12 accept.
+  - R-13 accept the charset check on every resolved provider key, plus the 512 cap when relaying.
+  - R-14 prefer construction-time checks if each is at most 5 lines in existing rows, else the wording fix.
+  - R-15 accept the order fix, and add `vidbyte/lib/dataclasses/__init__.py` as a §12.3 row.
+  - Prefix sources: a rule that ROUTES a key needs a first-party citation; drop `AQ.` unless Google's own docs show it (env var still works). Evidence for refuse-only claims may be secondary.
+- 2026-10-12 — Corrected niche fact: the spec budget for `base.py` is +30 net lines (r2), not 25.
