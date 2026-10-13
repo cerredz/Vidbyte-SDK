@@ -15,8 +15,8 @@ started: 2026-10-13 00:45 UTC
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-13 00:45 UTC | 2026-10-13 01:35 UTC | reports/S0-scout.md | base_commit 678136bd; code-map.md, 4 sections |
 | S1 spec + review | done | 2026-10-13 01:45 UTC | 2026-10-13 08:15 UTC | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | spec r3 ba522bba, status: approved; 2 review rounds (SOUND WITH FIXES ×2), 18 findings applied, 0 disputed |
-| S2 tests | in progress | 2026-10-13 08:20 UTC | | reports/S2-test-author.md | |
-| S3 implement | pending | | | | |
+| S2 tests | done | 2026-10-13 08:20 UTC | 2026-10-13 15:40 UTC | reports/S2-test-author.md | S2_HEAD 9a8ecc3c (tests 8e116bc7, proof 9a8ecc3c); 165 tests in tests/features/claude_host/, all red on `ModuleNotFoundError: vidbyte.harnesses.native`; spec r4 55c233bf pins the S2 open items; spec status: tests-written |
+| S3 implement | in progress | 2026-10-13 15:45 UTC | | reports/S3-implementer.md | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
@@ -89,6 +89,24 @@ started: 2026-10-13 00:45 UTC
   - Q-10: root exports.
   - Q-11: pass MCP configs as a 0600 temp file.
   None of these is built.
+
+- 2026-10-13 15:40 UTC — **S2 spot-check passed.**
+  - All of AC-1..AC-40 are cited in test-plan.md.
+  - The red run is quoted.
+  - I re-ran `test_claude_host_stops.py` myself and got `23 failed in 0.77s`, with every failure `ModuleNotFoundError: No module named 'vidbyte.harnesses.native'`.
+  - There are two commits and the tree is clean.
+  *Why:* the S2 spot-check rule.
+- 2026-10-13 15:40 UTC — **Sent the S2 open items to the spec author in Revision mode (r4) before S3,** as S2-1..S2-10. Lines 272–301 of the S2 report and lines 246–284 of test-plan.md were forwarded by path.
+  - r4 (55c233bf) pins S2-1..S2-8 and S2-10 as D-29..D-33 plus rows 3/14, and makes S2-9 a stated limitation (EC-61).
+  - I verified that only spec.md and the author report changed, that the §6.2 Proof column hashes the same before and after, and that there is no test diff since S2_HEAD.
+  *Why:* the skill resolves spec defects before the implementer meets them. Loose wording would otherwise become private choices in S3.
+- 2026-10-13 15:40 UTC — **Accepted the S2-7 pin but flagged it for S4 engineering.** Under the pin, a turn whose result is `success` but which saw a refusing rate-limit window ends FAILED `usage_limited`. An example is a `seven_day_opus` window on a Sonnet turn.
+  *Why:* it follows r3's reviewed D-20 order (rate-limit row before the result rows), and no frozen test pins the opposite. Whether it is wrong output belongs to the adversarial review, not to me.
+- 2026-10-13 15:40 UTC — **`vidbyte/lib/errors/base.py` is edited by both PRs, outside the request.md §C contract.**
+  - This PR inserts `ClaudeOperationError` before `class ConfigurationError` (:235 at base).
+  - CodexHost changes `CodexAgentError.__init__` (:129–156).
+  The hunks are about 80 lines apart, so no merge conflict is expected. The sorted export inserts (`enums/__init__`, `tools/builtins/__init__`, `toolsets/__init__`) may conflict trivially at the second merge because the Claude* and Codex* names sit next to each other. That is resolved at the catch-up merge.
+- 2026-10-13 15:40 UTC — **Three HTTP 429 session-limit interruptions so far** (~05:30, ~10:30 and ~15:00 UTC). Each time I checked the worktree state and resumed the same agent through SendMessage with what was on disk. No work was lost.
 
 ## User replies (verbatim)
 - none yet
@@ -219,3 +237,33 @@ started: 2026-10-13 00:45 UTC
   - Run one file with `PYTHONPATH=$(pwd) python -m pytest tests/features/claude_host/test_claude_host_<area>.py`.
   *source:* spec r3 §13.
 - **C016 is unaffected by the new extra and the submodule exports.** It reads only the root `__all__` and the pyproject name and version, so `contracts/sdk-public-api.json` does not change. New packages ship through `packages.find`. *source:* S1 reviewer.
+- **S2 seam, from the test author.**
+  - `mock.patch.object(ClaudeSdkLoader, "load", return_value=FakeClaudeSdk().types())`.
+  - `ClaudeSdkTypes` has exactly the 21 §9.1 field names.
+  - `load()` runs on every ★ call (row 3; r4 adds history and fork) and never at import.
+  - `load()` must import `claude_agent_sdk` inside its `try`, because the missing-extra tests use `patch.dict(sys.modules, {"claude_agent_sdk": None})`.
+  *source:* S2 test author.
+- **The patch targets fix the module shapes.**
+  - `vidbyte.harnesses.native.claude.session.CLAUDE_INTERRUPT_GRACE_SECONDS` must be a module global, read at call time.
+  - The tests patch `vidbyte.harnesses.native.claude.probe.shutil.which`, so the probe must `import shutil` and call `shutil.which`.
+  - `__aenter__` calls `ClaudeProbe.locate_cli(settings.cli_path, windows=sys.platform == "win32", home=Path.home())`, with keywords.
+  *source:* S2 test author.
+- **What the fakes model.**
+  - A client stays connected until its `disconnect()` finishes. Until then the turn stays RUNNING and keeps its session id busy and its slot.
+  - A disconnect is never cancelled.
+  - A client whose `connect()` raised is still disconnected once.
+  - The options fake rejects any keyword that 0.2.165 lacks.
+  - The probe passes only `cli_path`.
+  *source:* S2 test author.
+- **SDK 0.2.165 `Literal` types omit `model_not_found` and `seven_day_overage_included`,** but its parser passes raw strings through. The fakes emit both, so map the raw strings. *source:* S2 test author.
+- **The test most likely to catch a real bug** is `test_claude_host_stops.py::CloseTests::test_the_turn_ends_only_after_its_one_disconnect_finishes`. A natural pump marks the turn COMPLETED and frees the session id when the result arrives, before the disconnect has finished. *source:* S2 test author.
+- **How to run the pack:** `PYTHONPATH=$(pwd) C:/Users/422mi/vidbyte-repos/.venvs/sdk-claude-host/Scripts/python -m pytest tests/features/claude_host`, from the worktree root. It needs no claude-agent-sdk. The fixtures import feature symbols lazily, so collection never errors. *source:* S2 test author.
+- **r4 pins.**
+  - D-29: overage is allowed only for `allowed` or `allowed_warning`; an absent value refuses.
+  - D-30: a `continue_conversation` template without fork and N>1 gives `claude.session_busy`. A launch prompt gets spawn semantics.
+  - D-31: a missing required value gives `invalid_argument`, and a forbidden pair gives `unsupported_combination`.
+  - D-32: a history `OSError` gives `claude.session_not_found` plus a new `CLAUDE_HISTORY_READ_NEXT_STEP`. No new FailureCode.
+  - D-33: cwds compare as `normcase(abspath())`.
+  - Sandbox `network` is sent only with non-empty domain lists.
+  - EC-61: there is no re-entry guard; calls after `aclose` stay refused.
+  *source:* spec r4.
