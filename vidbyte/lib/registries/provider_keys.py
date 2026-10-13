@@ -40,11 +40,11 @@ class ProviderKeyMatcher:
         # https://openrouter.ai/docs/cookbook/coding-agents/codex-cli.md
         (ModelProvider.OPENROUTER, ("sk-or-",), re.compile(r"sk-or-[A-Za-z0-9_-]+")),
         # https://github.com/openai/plugins (an sk-proj key)
-        # https://developers.openai.com/api/reference/resources/organization/subresources/admin_api_keys/methods/create
+        # https://raw.githubusercontent.com/openai/openai-openapi/master/openapi.yaml
         (ModelProvider.OPENAI, ("sk-proj-", "sk-admin-"), re.compile(r"sk-(?:proj|admin)-[A-Za-z0-9_-]+")),
         # https://docs.x.ai/build/overview
         (ModelProvider.XAI, ("xai-",), re.compile(r"xai-[A-Za-z0-9_-]+")),
-        # https://cloud.google.com/docs/authentication/api-keys (AIza)
+        # https://docs.cloud.google.com/docs/authentication/api-keys (AIza)
         # https://github.com/google-gemini/cookbook/blob/main/tools/README.md
         (ModelProvider.GEMINI, ("AIza", "AQ."), re.compile(r"(?:AIza[A-Za-z0-9_-]{35}|AQ\.[A-Za-z0-9_-]+)")),
     )
