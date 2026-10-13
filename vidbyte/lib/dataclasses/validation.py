@@ -3,7 +3,7 @@
 PURPOSE: Defines RecordFieldValidator, the one canonical field validator for validated records: text, optional text, positive finite numbers, bounded ints, optional counts, strict bools, enum members, enum sets, argv tuples, text mappings, UUIDs, absolute directories and non-negative decimals.
 ROLE IN CODEBASE: Called from the __post_init__ of the records in vidbyte/lib/dataclasses/native_hosts.py, grok.py, opencode.py, muse.py, harness_backends.py and process.py, by McpStdioTransport in vidbyte/tools/mcp/transport.py for its new options, and by the native tool argument parser in vidbyte/tools/builtins/native_host_tool.py.
 ARCHITECTURE NOTE: A class of static methods, each taking the checked value first and the field name second, returning the checked (and for sets, converted) value or raising ConfigurationError. The checked variable is always named value, so the bool guards here are the single owner lint rules C002, C006, C007 and C008 point at. Messages name the field and the expected type or range, and quote a value only when it is a short, non-secret scalar or text. Every ConfigurationError also carries details["field"], so a tool can name the bad parameter without reading the message text.
-FUNCTION INVENTORY: require_text, require_optional_text, require_number, require_int, require_optional_count, require_bool, require_enum, require_enum_set, require_argv, require_text_mapping, require_uuid, require_directory, require_decimal; _received renders the received value safely for a message. RecordFieldConverter: to_tuple, to_mapping, to_enum (a member or its exact value string), to_decimal (a decimal string), require_instance.
+FUNCTION INVENTORY: require_text, require_optional_text, require_number, require_int, require_optional_count, require_bool, require_enum, require_enum_set, require_argv, require_text_mapping, require_uuid, require_directory, require_decimal; _received renders the received value safely for a message. RecordFieldConverter: to_tuple, to_mapping, to_enum (a member or its exact value string), to_decimal (a decimal string), require_instance, require_url (an https URL, or plain http only to a named host, never quoted).
 COMMON MODIFICATION PATTERNS: Add a new check as one more static method with value first and field_name second, and call it from a record's __post_init__; never copy a check into a record.
 WHAT NOT TO DO IN THIS FILE: 1. Do not convert values silently, except a set to a frozenset in require_enum_set. 2. Do not quote mapping values or long text in a message; they can hold secrets. 3. Do not import from a layer above vidbyte.lib.
 KNOWN EDGE CASES: bool is an int subclass, so every numeric check refuses bool first. A field whose last name segment reads as a credential (password, token, secret) is never quoted, whatever its length. require_argv refuses a list on purpose, because argv fields must be immutable tuples.
@@ -21,13 +21,14 @@ from enum import Enum
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, TypeVar
+from urllib.parse import urlsplit
 
+from vidbyte.lib.constants.native_hosts import NATIVE_QUOTED_VALUE_MAX_CHARS
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.util.credential_keys import CredentialKeyPolicy
 
 EnumT = TypeVar("EnumT", bound=Enum)
 
-_QUOTE_MAX_CHARS = 80
 _UUID_PATTERN = re.compile(r"^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$")
 
 
@@ -35,10 +36,11 @@ class RecordFieldValidator:
     """The canonical field checks every validated record uses."""
 
     @staticmethod
-    def require_text(value: Any, field_name: str, *, max_chars: int, pattern: str | None = None) -> str:
-        # A non-blank str of at most max_chars, fully matching pattern when one is given.
-        if not isinstance(value, str) or not value.strip() or len(value) > max_chars:
-            raise ConfigurationError(f"{field_name} must be non-empty text of at most {max_chars} characters; got {RecordFieldValidator._received(value, field_name)}.", details={"field": field_name})
+    def require_text(value: Any, field_name: str, *, max_chars: int, pattern: str | None = None, allow_blank: bool = False) -> str:
+        # A str of at most max_chars, fully matching pattern when one
+        # is given; it may be empty or blank only with allow_blank.
+        if not isinstance(value, str) or (not allow_blank and not value.strip()) or len(value) > max_chars:
+            raise ConfigurationError(f"{field_name} must be {'text' if allow_blank else 'non-empty text'} of at most {max_chars} characters; got {RecordFieldValidator._received(value, field_name)}.", details={"field": field_name})
         if pattern is not None and re.fullmatch(pattern, value) is None:
             raise ConfigurationError(f"{field_name} must match {pattern}; got {RecordFieldValidator._received(value, field_name)}.", details={"field": field_name})
         return value
@@ -139,13 +141,13 @@ class RecordFieldValidator:
         # Quotes a short non-secret scalar or text; otherwise names only the type, so secrets and long text never reach a message.
         secret = CredentialKeyPolicy.is_secret_key(field_name.rsplit(".", 1)[-1])
         quotable = value is None or isinstance(value, (bool, int, float, Decimal, Enum, str))
-        if secret or not quotable or len(repr(value)) > _QUOTE_MAX_CHARS:
+        if secret or not quotable or len(repr(value)) > NATIVE_QUOTED_VALUE_MAX_CHARS:
             return f"a value of type {type(value).__name__}"
         return repr(value)
 
 
 class RecordFieldConverter:
-    """The canonical conversions records apply: tuple fields to tuples, mapping fields to read-only copies, and plain instance checks."""
+    """The canonical conversions records apply: tuple fields to tuples, mapping fields to read-only copies, plain instance checks and URL checks."""
 
     @staticmethod
     def to_tuple(value: Any, field_name: str, *, item_type: type[Any] | tuple[type[Any], ...], max_items: int | None = None) -> tuple[Any, ...]:
@@ -193,6 +195,28 @@ class RecordFieldConverter:
             return None
         if not isinstance(value, expected) or (isinstance(value, bool) and bool not in RecordFieldConverter._types(expected)):
             raise ConfigurationError(f"{field_name} must be {RecordFieldConverter._type_names(expected)}{' or None' if optional else ''}; got a value of type {type(value).__name__}.", details={"field": field_name})
+        return value
+
+    @staticmethod
+    def require_url(value: Any, field_name: str, *, max_chars: int, plain_http_hosts: frozenset[str] = frozenset(), allow_extras: bool = True) -> str:
+        # @intent record-urls-are-https-and-never-quoted
+        # A stored URL must use https, or plain http only to a host in
+        # plain_http_hosts, because credentials and API keys would
+        # otherwise cross the network in clear text. Without
+        # allow_extras it may not carry user info, a query or a
+        # fragment. The URL is never quoted: it may hold credentials.
+        schemes = ("http", "https") if plain_http_hosts else ("https",)
+        try:
+            parts = urlsplit(value) if isinstance(value, str) and len(value) <= max_chars else None
+            host = None if parts is None else parts.hostname
+        except ValueError:
+            parts, host = None, None
+        if parts is None or not host or parts.scheme not in schemes:
+            raise ConfigurationError(f"{field_name} must be an {' or '.join(schemes)} URL with a host, of at most {max_chars} characters.", details={"field": field_name})
+        if parts.scheme == "http" and host not in plain_http_hosts:
+            raise ConfigurationError(f"{field_name} may use plain http only to {', '.join(sorted(plain_http_hosts))}; use https for any other host.", details={"field": field_name})
+        if not allow_extras and (parts.username is not None or parts.password is not None or parts.query or parts.fragment):
+            raise ConfigurationError(f"{field_name} must not carry user info, a query or a fragment.", details={"field": field_name})
         return value
 
     @staticmethod

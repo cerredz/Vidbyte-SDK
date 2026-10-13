@@ -64,7 +64,6 @@ _ENTER = "__aenter__"
 _CONSTRUCT = "MuseHost"
 _SERVE = "serve"
 _VERSION_FLAG = "--version"
-_MIN_LIMIT = 1
 _RUNNING_STATUS = "running"
 _TURN_NOT_FOUND_NEXT_STEP = "The turn is not running; use continue_muse_session to send a new prompt."
 # The failure rows MuseLauncher.resolve can name at __aenter__ (EC-94, EC-95), with their messages.
@@ -318,7 +317,7 @@ class MuseHost:
             self._require_open(operation)
             if cursor is not None:
                 RecordFieldValidator.require_text(cursor, "cursor", max_chars=native_host_constants.NATIVE_CURSOR_MAX_CHARS)
-            RecordFieldValidator.require_int(limit, "limit", minimum=_MIN_LIMIT, maximum=native_host_constants.NATIVE_LIST_MAX_LIMIT)
+            RecordFieldValidator.require_int(limit, "limit", minimum=native_host_constants.NATIVE_LIST_MIN_LIMIT, maximum=native_host_constants.NATIVE_LIST_MAX_LIMIT)
             # A short-lived peer reads the page; a cursor Muse no longer knows is refused as an argument.
             peer = self._new_peer(None)
             try:
@@ -374,7 +373,7 @@ class MuseHost:
             session_id = RecordFieldValidator.require_uuid(session_id, "session_id").lower()
             if cursor is not None:
                 RecordFieldValidator.require_text(cursor, "cursor", max_chars=native_host_constants.NATIVE_CURSOR_MAX_CHARS)
-            RecordFieldValidator.require_int(limit, "limit", minimum=_MIN_LIMIT, maximum=native_host_constants.MUSE_PAGE_MAX_LIMIT)
+            RecordFieldValidator.require_int(limit, "limit", minimum=native_host_constants.NATIVE_LIST_MIN_LIMIT, maximum=native_host_constants.MUSE_PAGE_MAX_LIMIT)
             RecordFieldConverter.require_instance(direction, "direction", MuseViewDirection)
             # A short-lived peer reads the page, resuming the session once if Muse has not loaded it (EC-114).
             peer = self._new_peer(None)

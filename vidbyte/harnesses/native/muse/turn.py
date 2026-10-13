@@ -36,7 +36,6 @@ from vidbyte.lib.enums.native_hosts import (
 from vidbyte.lib.errors import McpProtocolError, NativeHostError
 
 _SHUTDOWN_OPERATION = "__aexit__"
-_FRAME_POLL_SECONDS = 0.1
 _AGENT_MESSAGE_KIND = "agentMessage"
 _TEXT_SEPARATOR = "\n\n"
 _DENIED_DECISION = "denied"
@@ -164,7 +163,7 @@ class MuseTurnDriver:
     async def _next_frame(self) -> Mapping[str, Any] | None:
         # One frame from the inbox, or None when none arrives within the poll interval.
         try:
-            async with asyncio.timeout(_FRAME_POLL_SECONDS):
+            async with asyncio.timeout(native_host_constants.MUSE_FRAME_POLL_SECONDS):
                 return await self._peer.inbox.get()
         except TimeoutError:
             return None
@@ -199,7 +198,7 @@ class MuseTurnDriver:
         if key in self._decided:
             return None
         self._decided.add(key)
-        title = (request.tool_name or request.approval_id)[: native_host_constants.NATIVE_ID_MAX_CHARS]
+        title = (request.tool_name or request.approval_id)[: native_host_constants.NATIVE_APPROVAL_TITLE_MAX_CHARS]
         choice = next((item for item in request.choices if item.decision == _DENIED_DECISION and item.scope == _ONCE_SCOPE), None)
         if choice is None:
             self._decisions.append(NativeApprovalDecision(request_kind=_APPROVAL_KIND, title=title, outcome=ApprovalOutcome.CANCELLED))
@@ -223,7 +222,7 @@ class MuseTurnDriver:
         if request.user_input_id in self._cancelled_inputs:
             return None
         self._cancelled_inputs.add(request.user_input_id)
-        title = request.tool_name[: native_host_constants.NATIVE_ID_MAX_CHARS]
+        title = request.tool_name[: native_host_constants.NATIVE_APPROVAL_TITLE_MAX_CHARS]
         self._decisions.append(NativeApprovalDecision(request_kind=_USER_INPUT_KIND, title=title, outcome=ApprovalOutcome.CANCELLED))
         try:
             await self._peer.call("userInput/cancel", MuseWire.user_input_cancel_params(request), operation=native_host_constants.MUSE_TURN_OPERATION)

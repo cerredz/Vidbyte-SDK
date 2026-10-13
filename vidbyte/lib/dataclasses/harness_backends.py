@@ -16,8 +16,13 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal
-from urllib.parse import urlsplit
 
+from vidbyte.lib.constants.native_hosts import (
+    BACKEND_CURRENCY_MAX_CHARS,
+    BACKEND_ENV_NAME_MAX_CHARS,
+    NATIVE_ID_MAX_CHARS,
+    NATIVE_URL_MAX_CHARS,
+)
 from vidbyte.lib.dataclasses.validation import (
     RecordFieldConverter,
     RecordFieldValidator,
@@ -28,10 +33,6 @@ from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.util.credential_keys import CredentialKeyPolicy
 
 _ENV_NAME_PATTERN = r"^[A-Z][A-Z0-9_]{0,63}$"
-_ENV_NAME_MAX_CHARS = 64
-_ID_MAX_CHARS = 128
-_URL_MAX_CHARS = 2048
-_CURRENCY_MAX_CHARS = 16
 _AUTH_ENV_KEY = "ANTHROPIC_AUTH_TOKEN"
 
 
@@ -53,29 +54,26 @@ class HarnessBackend:
 
     def __post_init__(self) -> None:
         RecordFieldValidator.require_enum(self.name, HarnessBackendName, "HarnessBackend.name")
-        RecordFieldValidator.require_text(self.anthropic_base_url, "HarnessBackend.anthropic_base_url", max_chars=_URL_MAX_CHARS)
-        if urlsplit(self.anthropic_base_url).scheme != "https" or not urlsplit(self.anthropic_base_url).hostname:
-            raise ConfigurationError("HarnessBackend.anthropic_base_url must be an https URL with a host.")
-        RecordFieldValidator.require_text(self.auth_env_var, "HarnessBackend.auth_env_var", max_chars=_ENV_NAME_MAX_CHARS, pattern=_ENV_NAME_PATTERN)
+        RecordFieldConverter.require_url(self.anthropic_base_url, "HarnessBackend.anthropic_base_url", max_chars=NATIVE_URL_MAX_CHARS)
+        RecordFieldValidator.require_text(self.auth_env_var, "HarnessBackend.auth_env_var", max_chars=BACKEND_ENV_NAME_MAX_CHARS, pattern=_ENV_NAME_PATTERN)
         claude_models = RecordFieldConverter.to_tuple(self.claude_models, "HarnessBackend.claude_models", item_type=str)
         if not claude_models:
-            raise ConfigurationError("HarnessBackend.claude_models must hold at least one model.")
+            raise ConfigurationError("HarnessBackend.claude_models must hold at least one model.", details={"field": "HarnessBackend.claude_models"})
         object.__setattr__(self, "claude_models", claude_models)
         claude_env = RecordFieldConverter.to_mapping(self.claude_env, "HarnessBackend.claude_env")
         if any(CredentialKeyPolicy.is_secret_key(key) for key in claude_env):
-            raise ConfigurationError("HarnessBackend.claude_env holds fixed public pairs only; a credential-named key is not allowed.")
+            raise ConfigurationError("HarnessBackend.claude_env holds fixed public pairs only; a credential-named key is not allowed.", details={"field": "HarnessBackend.claude_env"})
         object.__setattr__(self, "claude_env", claude_env)
         object.__setattr__(self, "unsupported_features", RecordFieldValidator.require_enum_set(self.unsupported_features, BackendFeature, "HarnessBackend.unsupported_features"))
         object.__setattr__(self, "allowed_harnesses", RecordFieldValidator.require_enum_set(self.allowed_harnesses, NativeHarness, "HarnessBackend.allowed_harnesses"))
-        RecordFieldValidator.require_text(self.opencode_provider_id, "HarnessBackend.opencode_provider_id", max_chars=_ID_MAX_CHARS)
-        RecordFieldValidator.require_text(self.opencode_key_env_var, "HarnessBackend.opencode_key_env_var", max_chars=_ENV_NAME_MAX_CHARS, pattern=_ENV_NAME_PATTERN)
+        RecordFieldValidator.require_text(self.opencode_provider_id, "HarnessBackend.opencode_provider_id", max_chars=NATIVE_ID_MAX_CHARS)
+        RecordFieldValidator.require_text(self.opencode_key_env_var, "HarnessBackend.opencode_key_env_var", max_chars=BACKEND_ENV_NAME_MAX_CHARS, pattern=_ENV_NAME_PATTERN)
         opencode_models = RecordFieldConverter.to_tuple(self.opencode_models, "HarnessBackend.opencode_models", item_type=str)
         if not opencode_models:
-            raise ConfigurationError("HarnessBackend.opencode_models must hold at least one model.")
+            raise ConfigurationError("HarnessBackend.opencode_models must hold at least one model.", details={"field": "HarnessBackend.opencode_models"})
         object.__setattr__(self, "opencode_models", opencode_models)
-        RecordFieldValidator.require_optional_text(self.balance_url, "HarnessBackend.balance_url", max_chars=_URL_MAX_CHARS)
-        if self.balance_url is not None and (urlsplit(self.balance_url).scheme != "https" or not urlsplit(self.balance_url).hostname):
-            raise ConfigurationError("HarnessBackend.balance_url must be an https URL with a host.")
+        if self.balance_url is not None:
+            RecordFieldConverter.require_url(self.balance_url, "HarnessBackend.balance_url", max_chars=NATIVE_URL_MAX_CHARS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,7 +87,7 @@ class ClaudeBackendEnv:
 
     def __post_init__(self) -> None:
         RecordFieldValidator.require_enum(self.backend, HarnessBackendName, "ClaudeBackendEnv.backend")
-        RecordFieldValidator.require_text(self.model, "ClaudeBackendEnv.model", max_chars=_ID_MAX_CHARS)
+        RecordFieldValidator.require_text(self.model, "ClaudeBackendEnv.model", max_chars=NATIVE_ID_MAX_CHARS)
         object.__setattr__(self, "public_env", RecordFieldConverter.to_mapping(self.public_env, "ClaudeBackendEnv.public_env"))
         RecordFieldConverter.require_instance(self.auth_token, "ClaudeBackendEnv.auth_token", str)
 
@@ -110,9 +108,9 @@ class OpencodeBackendProvider:
 
     def __post_init__(self) -> None:
         RecordFieldValidator.require_enum(self.backend, HarnessBackendName, "OpencodeBackendProvider.backend")
-        RecordFieldValidator.require_text(self.provider_id, "OpencodeBackendProvider.provider_id", max_chars=_ID_MAX_CHARS)
-        RecordFieldValidator.require_text(self.source_env_var, "OpencodeBackendProvider.source_env_var", max_chars=_ENV_NAME_MAX_CHARS, pattern=_ENV_NAME_PATTERN)
-        RecordFieldValidator.require_text(self.child_env_var, "OpencodeBackendProvider.child_env_var", max_chars=_ENV_NAME_MAX_CHARS, pattern=_ENV_NAME_PATTERN)
+        RecordFieldValidator.require_text(self.provider_id, "OpencodeBackendProvider.provider_id", max_chars=NATIVE_ID_MAX_CHARS)
+        RecordFieldValidator.require_text(self.source_env_var, "OpencodeBackendProvider.source_env_var", max_chars=BACKEND_ENV_NAME_MAX_CHARS, pattern=_ENV_NAME_PATTERN)
+        RecordFieldValidator.require_text(self.child_env_var, "OpencodeBackendProvider.child_env_var", max_chars=BACKEND_ENV_NAME_MAX_CHARS, pattern=_ENV_NAME_PATTERN)
         object.__setattr__(self, "model_ids", RecordFieldConverter.to_tuple(self.model_ids, "OpencodeBackendProvider.model_ids", item_type=str))
 
 
@@ -138,7 +136,7 @@ class DeepseekBalanceEntry:
     topped_up_balance: Decimal
 
     def __post_init__(self) -> None:
-        RecordFieldValidator.require_text(self.currency, "DeepseekBalanceEntry.currency", max_chars=_CURRENCY_MAX_CHARS)
+        RecordFieldValidator.require_text(self.currency, "DeepseekBalanceEntry.currency", max_chars=BACKEND_CURRENCY_MAX_CHARS)
         RecordFieldConverter.require_instance(self.total_balance, "DeepseekBalanceEntry.total_balance", Decimal)
         RecordFieldConverter.require_instance(self.granted_balance, "DeepseekBalanceEntry.granted_balance", Decimal)
         RecordFieldConverter.require_instance(self.topped_up_balance, "DeepseekBalanceEntry.topped_up_balance", Decimal)

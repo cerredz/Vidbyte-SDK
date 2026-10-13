@@ -58,7 +58,6 @@ _ENTER = "__aenter__"
 _EXIT = "__aexit__"
 _CONSTRUCT = "GrokHost"
 _ONE_PAGE = 1
-_SEARCH_MIN_LIMIT = 1
 _READY_CAPABILITY_NEXT_STEP = "Update Grok Build with grok update; this SDK needs ACP session/list and session/resume."
 _RESUME_CAPABILITY_NEXT_STEP = "Update Grok Build with grok update; continuing needs ACP session/resume."
 _LIST_CAPABILITY_NEXT_STEP = "Update Grok Build with grok update; listing needs ACP session/list."
@@ -364,7 +363,7 @@ class GrokHost:
         try:
             # Check the query and the limit, and that the host is open.
             RecordFieldValidator.require_text(query, "query", max_chars=native_host_constants.GROK_QUERY_MAX_CHARS)
-            RecordFieldValidator.require_int(limit, "limit", minimum=_SEARCH_MIN_LIMIT, maximum=native_host_constants.GROK_SEARCH_MAX_LIMIT)
+            RecordFieldValidator.require_int(limit, "limit", minimum=native_host_constants.NATIVE_LIST_MIN_LIMIT, maximum=native_host_constants.GROK_SEARCH_MAX_LIMIT)
             self._require_open(operation)
             # On one short-lived peer: read up to GROK_LIST_MAX_PAGES pages of the listing.
             peer = self._new_peer(None, None)

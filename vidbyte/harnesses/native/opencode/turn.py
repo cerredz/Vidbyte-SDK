@@ -245,13 +245,12 @@ class OpencodeTurnWatcher:
         # Each request from the tree is answered once with reject, never
         # once or always, and recorded; past NATIVE_MAX_RECORDED_DECISIONS
         # the answers are only counted (D-11, INV-10).
-        cap = native_host_constants.NATIVE_ID_MAX_CHARS
         pending: list[tuple[str, tuple[str, ...], Mapping[str, str] | None, NativeApprovalDecision]] = [
             (
                 permission.request_id,
                 ("permission", permission.request_id, "reply"),
                 _REJECT_BODY,
-                NativeApprovalDecision(request_kind=_PERMISSION_KIND.format(permission=permission.permission)[:cap], title=self._errors.scrub(_PATTERN_SEPARATOR.join(permission.patterns))[:cap], outcome=ApprovalOutcome.REJECTED),
+                NativeApprovalDecision(request_kind=_PERMISSION_KIND.format(permission=permission.permission)[: native_host_constants.NATIVE_ID_MAX_CHARS], title=self._errors.scrub(_PATTERN_SEPARATOR.join(permission.patterns))[: native_host_constants.NATIVE_APPROVAL_TITLE_MAX_CHARS], outcome=ApprovalOutcome.REJECTED),
             )
             for permission in permissions
             if permission.session_id in self._tree and permission.request_id not in self._answered

@@ -39,7 +39,6 @@ _PERMISSION_KIND_PREFIX = "acp.permission:"
 _ALLOW_ONCE = "allow_once"
 _REJECT_ONCE = "reject_once"
 _USD = "USD"
-_DECISION_TITLE_MAX_CHARS = 200
 
 
 class GrokTurnDriver:
@@ -166,7 +165,7 @@ class GrokTurnDriver:
         with contextlib.suppress(McpProtocolError):
             await self._peer.answer(permission.request_id, result=self._wire.permission_answer(chosen))
         kind = _PERMISSION_KIND_PREFIX + permission.tool_kind.value
-        return NativeApprovalDecision(request_kind=kind, title=permission.title[:_DECISION_TITLE_MAX_CHARS], outcome=outcome)
+        return NativeApprovalDecision(request_kind=kind, title=permission.title[: native_host_constants.NATIVE_APPROVAL_TITLE_MAX_CHARS], outcome=outcome)
 
     async def _refuse(self, frame: Mapping[str, Any]) -> NativeApprovalDecision:
         # INV-10: any other server request gets JSON-RPC -32601 and is recorded as not supported.

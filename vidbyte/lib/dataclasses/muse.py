@@ -18,7 +18,9 @@ from pathlib import Path
 
 from vidbyte.lib.constants.native_hosts import (
     MUSE_DEFAULT_PATH,
+    MUSE_DISTRO_MAX_CHARS,
     MUSE_FAILED_TERMINAL,
+    MUSE_PATH_MAX_CHARS,
     NATIVE_CONTROL_TIMEOUT_MAX_SECONDS,
     NATIVE_CONTROL_TIMEOUT_SECONDS,
     NATIVE_ID_MAX_CHARS,
@@ -38,9 +40,7 @@ from vidbyte.lib.enums.native_hosts import MuseReasoningEffort
 from vidbyte.lib.errors import ConfigurationError
 
 _DISTRO_PATTERN = r"^[A-Za-z0-9._-]{1,64}$"
-_DISTRO_MAX_CHARS = 64
 _MUSE_PATH_PATTERN = r"^/[^\x00\r\n]*$"
-_MUSE_PATH_MAX_CHARS = 4096
 _MODEL_PATTERN = r"^\S+$"
 
 
@@ -57,12 +57,12 @@ class MuseHostSettings:
 
     def __post_init__(self) -> None:
         RecordFieldValidator.require_directory(self.workspace, "MuseHostSettings.workspace")
-        RecordFieldValidator.require_optional_text(self.wsl_distro, "MuseHostSettings.wsl_distro", max_chars=_DISTRO_MAX_CHARS, pattern=_DISTRO_PATTERN)
-        RecordFieldValidator.require_text(self.muse_path, "MuseHostSettings.muse_path", max_chars=_MUSE_PATH_MAX_CHARS, pattern=_MUSE_PATH_PATTERN)
+        RecordFieldValidator.require_optional_text(self.wsl_distro, "MuseHostSettings.wsl_distro", max_chars=MUSE_DISTRO_MAX_CHARS, pattern=_DISTRO_PATTERN)
+        RecordFieldValidator.require_text(self.muse_path, "MuseHostSettings.muse_path", max_chars=MUSE_PATH_MAX_CHARS, pattern=_MUSE_PATH_PATTERN)
         if self.muse_command is not None:
             RecordFieldValidator.require_argv(self.muse_command, "MuseHostSettings.muse_command")
         if self.wsl_distro is not None and self.muse_command is not None:
-            raise ConfigurationError("MuseHostSettings.wsl_distro and MuseHostSettings.muse_command cannot both be set; pick one launcher.")
+            raise ConfigurationError("MuseHostSettings.wsl_distro and MuseHostSettings.muse_command cannot both be set; pick one launcher.", details={"field": "MuseHostSettings.wsl_distro"})
         RecordFieldValidator.require_number(self.control_timeout_seconds, "MuseHostSettings.control_timeout_seconds", maximum=NATIVE_CONTROL_TIMEOUT_MAX_SECONDS)
         RecordFieldValidator.require_int(self.max_live_turns, "MuseHostSettings.max_live_turns", minimum=NATIVE_MIN_LIVE_TURNS, maximum=NATIVE_MAX_LIVE_TURNS_LIMIT)
 
@@ -276,7 +276,7 @@ class MuseTurnCompleted:
         failed = self.terminal == MUSE_FAILED_TERMINAL
         error_fields = (self.error_kind, self.error_message, self.error_retryable)
         if failed != all(item is not None for item in error_fields) or (not failed and any(item is not None for item in error_fields)):
-            raise ConfigurationError("MuseTurnCompleted.error_kind, MuseTurnCompleted.error_message and MuseTurnCompleted.error_retryable must be set exactly when MuseTurnCompleted.terminal is failed.")
+            raise ConfigurationError("MuseTurnCompleted.error_kind, MuseTurnCompleted.error_message and MuseTurnCompleted.error_retryable must be set exactly when MuseTurnCompleted.terminal is failed.", details={"field": "MuseTurnCompleted.error_kind"})
         RecordFieldConverter.require_instance(self.usage, "MuseTurnCompleted.usage", NativeTokenUsage, optional=True)
 
 

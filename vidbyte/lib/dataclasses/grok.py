@@ -106,7 +106,7 @@ class GrokOneShotRequest:
         for rule in deny_rules:
             RecordFieldValidator.require_text(rule, "GrokOneShotRequest.deny_rules", max_chars=GROK_RULE_MAX_CHARS, pattern=_RULE_PATTERN.pattern)
         if len(allow_rules) + len(deny_rules) > GROK_MAX_RULES:
-            raise ConfigurationError(f"GrokOneShotRequest.allow_rules and GrokOneShotRequest.deny_rules may hold at most {GROK_MAX_RULES} rules together.")
+            raise ConfigurationError(f"GrokOneShotRequest.allow_rules and GrokOneShotRequest.deny_rules may hold at most {GROK_MAX_RULES} rules together.", details={"field": "GrokOneShotRequest.allow_rules"})
         object.__setattr__(self, "allow_rules", allow_rules)
         object.__setattr__(self, "deny_rules", deny_rules)
         if self.max_turns is not None:

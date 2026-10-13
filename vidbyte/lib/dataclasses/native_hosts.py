@@ -17,10 +17,12 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from vidbyte.lib.constants.native_hosts import (
+    NATIVE_APPROVAL_TITLE_MAX_CHARS,
     NATIVE_ID_MAX_CHARS,
     NATIVE_MAX_RECORDED_DECISIONS,
     NATIVE_RESULT_TEXT_MAX_CHARS,
     NATIVE_SESSION_ID_MAX_CHARS,
+    NATIVE_STEER_STATUS_MAX_CHARS,
 )
 from vidbyte.lib.dataclasses.validation import (
     RecordFieldConverter,
@@ -36,8 +38,6 @@ from vidbyte.lib.errors import ConfigurationError
 
 _NO_WHITESPACE_PATTERN = r"^\S+$"
 _TURN_ID_PATTERN = r"^[0-9a-f]{32}$"
-_TITLE_MAX_CHARS = 200
-_STEER_STATUS_MAX_CHARS = 64
 _RESULT_STATUSES = frozenset({NativeTurnStatus.COMPLETED, NativeTurnStatus.INTERRUPTED})
 
 
@@ -88,9 +88,7 @@ class NativeApprovalDecision:
 
     def __post_init__(self) -> None:
         RecordFieldValidator.require_text(self.request_kind, "NativeApprovalDecision.request_kind", max_chars=NATIVE_ID_MAX_CHARS)
-        RecordFieldConverter.require_instance(self.title, "NativeApprovalDecision.title", str)
-        if len(self.title) > _TITLE_MAX_CHARS:
-            raise ConfigurationError(f"NativeApprovalDecision.title must be at most {_TITLE_MAX_CHARS} characters.")
+        RecordFieldValidator.require_text(self.title, "NativeApprovalDecision.title", max_chars=NATIVE_APPROVAL_TITLE_MAX_CHARS, allow_blank=True)
         RecordFieldValidator.require_enum(self.outcome, ApprovalOutcome, "NativeApprovalDecision.outcome")
 
 
@@ -112,17 +110,15 @@ class NativeTurnResult:
         RecordFieldConverter.require_instance(self.handle, "NativeTurnResult.handle", NativeTurnHandle)
         RecordFieldValidator.require_enum(self.status, NativeTurnStatus, "NativeTurnResult.status")
         if self.status not in _RESULT_STATUSES:
-            raise ConfigurationError("NativeTurnResult.status must be COMPLETED or INTERRUPTED; a running or failed turn has no result.")
+            raise ConfigurationError("NativeTurnResult.status must be COMPLETED or INTERRUPTED; a running or failed turn has no result.", details={"field": "NativeTurnResult.status"})
         RecordFieldValidator.require_optional_text(self.stop_reason, "NativeTurnResult.stop_reason", max_chars=NATIVE_ID_MAX_CHARS)
-        RecordFieldConverter.require_instance(self.text, "NativeTurnResult.text", str)
-        if len(self.text) > NATIVE_RESULT_TEXT_MAX_CHARS:
-            raise ConfigurationError(f"NativeTurnResult.text must be at most {NATIVE_RESULT_TEXT_MAX_CHARS} characters.")
+        RecordFieldValidator.require_text(self.text, "NativeTurnResult.text", max_chars=NATIVE_RESULT_TEXT_MAX_CHARS, allow_blank=True)
         RecordFieldValidator.require_bool(self.text_truncated, "NativeTurnResult.text_truncated")
         RecordFieldConverter.require_instance(self.usage, "NativeTurnResult.usage", NativeTokenUsage, optional=True)
         if self.interrupt_source is not None:
             RecordFieldValidator.require_enum(self.interrupt_source, InterruptSource, "NativeTurnResult.interrupt_source")
         if (self.status is NativeTurnStatus.INTERRUPTED) != (self.interrupt_source is not None):
-            raise ConfigurationError("NativeTurnResult.interrupt_source must be set exactly when status is INTERRUPTED.")
+            raise ConfigurationError("NativeTurnResult.interrupt_source must be set exactly when status is INTERRUPTED.", details={"field": "NativeTurnResult.interrupt_source"})
         decisions = RecordFieldConverter.to_tuple(self.decisions, "NativeTurnResult.decisions", item_type=NativeApprovalDecision, max_items=NATIVE_MAX_RECORDED_DECISIONS)
         object.__setattr__(self, "decisions", decisions)
         RecordFieldValidator.require_optional_count(self.decisions_dropped, "NativeTurnResult.decisions_dropped")
@@ -150,7 +146,7 @@ class NativeSteerResult:
 
     def __post_init__(self) -> None:
         RecordFieldConverter.require_instance(self.handle, "NativeSteerResult.handle", NativeTurnHandle)
-        RecordFieldValidator.require_text(self.status, "NativeSteerResult.status", max_chars=_STEER_STATUS_MAX_CHARS)
+        RecordFieldValidator.require_text(self.status, "NativeSteerResult.status", max_chars=NATIVE_STEER_STATUS_MAX_CHARS)
 
 
 @dataclass(frozen=True, slots=True)

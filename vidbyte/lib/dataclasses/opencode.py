@@ -3,7 +3,7 @@
 PURPOSE: Defines the opencode host's records: the host settings, permission rules, prompt and spawn requests, MCP server configs, the read results (readiness, models, providers, auth methods, sessions, messages, message pages, file diffs, MCP status), and the inbound records the host parses from opencode's HTTP bodies (permission and question requests, session statuses and assistant errors).
 ROLE IN CODEBASE: Built by callers and by vidbyte/tools/builtins/opencode/ (settings and requests), by OpencodeHost and OpencodeWire in vidbyte/harnesses/native/opencode/ (outputs and inbound records); read by OpencodeClient, OpencodeServer and OpencodeTurnWatcher.
 ARCHITECTURE NOTE: Data only; frozen, slotted, validated in __post_init__ through RecordFieldValidator and RecordFieldConverter. Secret-bearing fields (server_password, MCP environment and headers) are repr=False and never quoted in a message. Inbound records mirror only the members the host relies on and keep vendor vocabularies verbatim (D-13).
-FUNCTION INVENTORY: OpencodePermissionRule, OpencodePromptRequest, OpencodeSpawnRequest, OpencodeMcpServerConfig, OpencodeHostSettings, OpencodeReadiness, OpencodeModel, OpencodeProvider, OpencodeAuthMethod, OpencodeProviderAuth, OpencodeAssistantError, OpencodeSession, OpencodeMessage, OpencodeMessagePage, OpencodeFileDiff, OpencodeMcpStatus, OpencodePermissionRequest, OpencodeQuestionRequest, OpencodeSessionStatus; _require_http_url checks a server or MCP URL without quoting it.
+FUNCTION INVENTORY: OpencodePermissionRule, OpencodePromptRequest, OpencodeSpawnRequest, OpencodeMcpServerConfig, OpencodeHostSettings, OpencodeReadiness, OpencodeModel, OpencodeProvider, OpencodeAuthMethod, OpencodeProviderAuth, OpencodeAssistantError, OpencodeSession, OpencodeMessage, OpencodeMessagePage, OpencodeFileDiff, OpencodeMcpStatus, OpencodePermissionRequest, OpencodeQuestionRequest, OpencodeSessionStatus.
 COMMON MODIFICATION PATTERNS: A new request option adds a validated field here, its body member in opencode/client.py or host.py, and its tool parameter in vidbyte/tools/builtins/opencode/.
 WHAT NOT TO DO IN THIS FILE: 1. Do not accept the allow-everything permission rule ("*", "*", ALLOW) (INV-9). 2. Do not allow plain http to a non-loopback host; basic-auth credentials would cross the network in clear text (EC-152). 3. Do not quote a URL, password, environment value or header value in a message.
 KNOWN EDGE CASES: A model id is provider/model, and the model part may itself contain slashes. OpencodeMessage.completed_ms has no default because the record keeps the spec's field order; hosts always pass it.
@@ -17,7 +17,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
-from urllib.parse import urlsplit
 
 from vidbyte.lib.constants.native_hosts import (
     NATIVE_CONTROL_TIMEOUT_MAX_SECONDS,
@@ -29,13 +28,18 @@ from vidbyte.lib.constants.native_hosts import (
     NATIVE_RESULT_TEXT_MAX_CHARS,
     NATIVE_TURN_DEFAULT_SECONDS,
     NATIVE_TURN_MAX_SECONDS,
+    NATIVE_URL_MAX_CHARS,
     NATIVE_VENDOR_ID_PATTERN,
+    OPENCODE_CREDENTIAL_MAX_CHARS,
     OPENCODE_ENV_KEY_PATTERN,
     OPENCODE_MAX_MCP_SERVERS,
     OPENCODE_MAX_PERMISSION_RULES,
+    OPENCODE_MCP_MAP_MAX_ITEMS,
+    OPENCODE_MCP_NAME_MAX_CHARS,
     OPENCODE_MCP_NAME_PATTERN,
     OPENCODE_MCP_TIMEOUT_MAX_MS,
     OPENCODE_MCP_TIMEOUT_MIN_MS,
+    OPENCODE_PROVIDER_MODEL_MAX_CHARS,
     OPENCODE_REQUEST_TIMEOUT_SECONDS,
     OPENCODE_RETRY_STATE,
     OPENCODE_RULE_MAX_CHARS,
@@ -53,30 +57,10 @@ from vidbyte.lib.enums.native_hosts import OpencodeMcpKind, OpencodePermissionAc
 from vidbyte.lib.errors import ConfigurationError
 
 _PROVIDER_MODEL_PATTERN = r"^[^\s/-][^\s/]{0,127}/[^\s]{1,128}$"
-_PROVIDER_MODEL_MAX_CHARS = 257
-_MCP_NAME_MAX_CHARS = 64
-_MCP_MAP_MAX_ITEMS = 64
-_URL_MAX_CHARS = 2048
-_CREDENTIAL_MAX_CHARS = 1024
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
-_URL_SCHEMES = frozenset({"http", "https"})
 _PERMISSION_REQUEST_PREFIX = "per"
 _QUESTION_REQUEST_PREFIX = "que"
 
-
-def _require_http_url(value: str, field_name: str, *, allow_extras: bool) -> None:
-    # An http or https URL with a host; plain http only to a loopback host. The URL is never quoted, because it may carry credentials.
-    try:
-        parts = urlsplit(value)
-        host = parts.hostname
-    except ValueError as exc:
-        raise ConfigurationError(f"{field_name} must be an http or https URL with a host.") from exc
-    if parts.scheme not in _URL_SCHEMES or not host:
-        raise ConfigurationError(f"{field_name} must be an http or https URL with a host.")
-    if parts.scheme == "http" and host not in _LOOPBACK_HOSTS:
-        raise ConfigurationError(f"{field_name} may use plain http only to 127.0.0.1, ::1 or localhost; use https for any other host.")
-    if not allow_extras and (parts.username is not None or parts.password is not None or parts.query or parts.fragment):
-        raise ConfigurationError(f"{field_name} must not carry user info, a query or a fragment.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,7 +76,7 @@ class OpencodePermissionRule:
         RecordFieldValidator.require_text(self.pattern, "OpencodePermissionRule.pattern", max_chars=OPENCODE_RULE_MAX_CHARS)
         RecordFieldValidator.require_enum(self.action, OpencodePermissionAction, "OpencodePermissionRule.action")
         if self.permission == "*" and self.pattern == "*" and self.action is OpencodePermissionAction.ALLOW:
-            raise ConfigurationError("OpencodePermissionRule.permission, OpencodePermissionRule.pattern and OpencodePermissionRule.action may not allow everything; narrow the permission or the pattern.")
+            raise ConfigurationError("OpencodePermissionRule.permission, OpencodePermissionRule.pattern and OpencodePermissionRule.action may not allow everything; narrow the permission or the pattern.", details={"field": "OpencodePermissionRule.permission"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,7 +91,7 @@ class OpencodePromptRequest:
 
     def __post_init__(self) -> None:
         RecordFieldValidator.require_text(self.prompt, "OpencodePromptRequest.prompt", max_chars=NATIVE_PROMPT_MAX_CHARS)
-        RecordFieldValidator.require_optional_text(self.model, "OpencodePromptRequest.model", max_chars=_PROVIDER_MODEL_MAX_CHARS, pattern=_PROVIDER_MODEL_PATTERN)
+        RecordFieldValidator.require_optional_text(self.model, "OpencodePromptRequest.model", max_chars=OPENCODE_PROVIDER_MODEL_MAX_CHARS, pattern=_PROVIDER_MODEL_PATTERN)
         RecordFieldValidator.require_optional_text(self.agent, "OpencodePromptRequest.agent", max_chars=NATIVE_ID_MAX_CHARS, pattern=NATIVE_VENDOR_ID_PATTERN)
         RecordFieldValidator.require_optional_text(self.system, "OpencodePromptRequest.system", max_chars=OPENCODE_SYSTEM_MAX_CHARS)
         RecordFieldValidator.require_number(self.max_turn_seconds, "OpencodePromptRequest.max_turn_seconds", maximum=NATIVE_TURN_MAX_SECONDS)
@@ -141,19 +125,18 @@ class OpencodeMcpServerConfig:
     timeout_ms: int | None = None
 
     def __post_init__(self) -> None:
-        RecordFieldValidator.require_text(self.name, "OpencodeMcpServerConfig.name", max_chars=_MCP_NAME_MAX_CHARS, pattern=OPENCODE_MCP_NAME_PATTERN)
+        RecordFieldValidator.require_text(self.name, "OpencodeMcpServerConfig.name", max_chars=OPENCODE_MCP_NAME_MAX_CHARS, pattern=OPENCODE_MCP_NAME_PATTERN)
         RecordFieldValidator.require_enum(self.kind, OpencodeMcpKind, "OpencodeMcpServerConfig.kind")
         if self.kind is OpencodeMcpKind.LOCAL:
             RecordFieldValidator.require_argv(self.command, "OpencodeMcpServerConfig.command")
             if self.url is not None:
-                raise ConfigurationError("OpencodeMcpServerConfig.url must be None for a LOCAL server.")
+                raise ConfigurationError("OpencodeMcpServerConfig.url must be None for a LOCAL server.", details={"field": "OpencodeMcpServerConfig.url"})
         else:
             if self.command != ():
-                raise ConfigurationError("OpencodeMcpServerConfig.command must be empty for a REMOTE server.")
-            url = RecordFieldValidator.require_text(self.url, "OpencodeMcpServerConfig.url", max_chars=_URL_MAX_CHARS)
-            _require_http_url(url, "OpencodeMcpServerConfig.url", allow_extras=True)
-        environment = RecordFieldValidator.require_text_mapping(self.environment, "OpencodeMcpServerConfig.environment", key_pattern=OPENCODE_ENV_KEY_PATTERN, max_items=_MCP_MAP_MAX_ITEMS)
-        headers = RecordFieldValidator.require_text_mapping(self.headers, "OpencodeMcpServerConfig.headers", key_pattern=OPENCODE_ENV_KEY_PATTERN, max_items=_MCP_MAP_MAX_ITEMS)
+                raise ConfigurationError("OpencodeMcpServerConfig.command must be empty for a REMOTE server.", details={"field": "OpencodeMcpServerConfig.command"})
+            RecordFieldConverter.require_url(self.url, "OpencodeMcpServerConfig.url", max_chars=NATIVE_URL_MAX_CHARS, plain_http_hosts=_LOOPBACK_HOSTS)
+        environment = RecordFieldValidator.require_text_mapping(self.environment, "OpencodeMcpServerConfig.environment", key_pattern=OPENCODE_ENV_KEY_PATTERN, max_items=OPENCODE_MCP_MAP_MAX_ITEMS)
+        headers = RecordFieldValidator.require_text_mapping(self.headers, "OpencodeMcpServerConfig.headers", key_pattern=OPENCODE_ENV_KEY_PATTERN, max_items=OPENCODE_MCP_MAP_MAX_ITEMS)
         object.__setattr__(self, "environment", MappingProxyType(dict(environment)))
         object.__setattr__(self, "headers", MappingProxyType(dict(headers)))
         if self.timeout_ms is not None:
@@ -180,26 +163,25 @@ class OpencodeHostSettings:
         if self.opencode_command is not None:
             RecordFieldValidator.require_argv(self.opencode_command, "OpencodeHostSettings.opencode_command")
         if self.server_url is not None:
-            RecordFieldValidator.require_text(self.server_url, "OpencodeHostSettings.server_url", max_chars=_URL_MAX_CHARS)
-            _require_http_url(self.server_url, "OpencodeHostSettings.server_url", allow_extras=False)
+            RecordFieldConverter.require_url(self.server_url, "OpencodeHostSettings.server_url", max_chars=NATIVE_URL_MAX_CHARS, plain_http_hosts=_LOOPBACK_HOSTS, allow_extras=False)
         if self.opencode_command is not None and self.server_url is not None:
-            raise ConfigurationError("OpencodeHostSettings.opencode_command and OpencodeHostSettings.server_url cannot both be set; own a server or attach to one.")
-        RecordFieldValidator.require_optional_text(self.server_username, "OpencodeHostSettings.server_username", max_chars=_CREDENTIAL_MAX_CHARS)
-        RecordFieldValidator.require_optional_text(self.server_password, "OpencodeHostSettings.server_password", max_chars=_CREDENTIAL_MAX_CHARS)
+            raise ConfigurationError("OpencodeHostSettings.opencode_command and OpencodeHostSettings.server_url cannot both be set; own a server or attach to one.", details={"field": "OpencodeHostSettings.opencode_command"})
+        RecordFieldValidator.require_optional_text(self.server_username, "OpencodeHostSettings.server_username", max_chars=OPENCODE_CREDENTIAL_MAX_CHARS)
+        RecordFieldValidator.require_optional_text(self.server_password, "OpencodeHostSettings.server_password", max_chars=OPENCODE_CREDENTIAL_MAX_CHARS)
         if (self.server_username is None) != (self.server_password is None):
-            raise ConfigurationError("OpencodeHostSettings.server_username and OpencodeHostSettings.server_password must be set together.")
+            raise ConfigurationError("OpencodeHostSettings.server_username and OpencodeHostSettings.server_password must be set together.", details={"field": "OpencodeHostSettings.server_username"})
         if self.server_username is not None and self.server_url is None:
-            raise ConfigurationError("OpencodeHostSettings.server_username and OpencodeHostSettings.server_password need OpencodeHostSettings.server_url.")
+            raise ConfigurationError("OpencodeHostSettings.server_username and OpencodeHostSettings.server_password need OpencodeHostSettings.server_url.", details={"field": "OpencodeHostSettings.server_username"})
         backends = RecordFieldConverter.to_tuple(self.backends, "OpencodeHostSettings.backends", item_type=HarnessBackendName)
         if len(set(backends)) != len(backends):
-            raise ConfigurationError("OpencodeHostSettings.backends must not repeat a backend.")
+            raise ConfigurationError("OpencodeHostSettings.backends must not repeat a backend.", details={"field": "OpencodeHostSettings.backends"})
         object.__setattr__(self, "backends", backends)
         RecordFieldValidator.require_number(self.startup_timeout_seconds, "OpencodeHostSettings.startup_timeout_seconds", maximum=NATIVE_CONTROL_TIMEOUT_MAX_SECONDS)
         RecordFieldValidator.require_number(self.request_timeout_seconds, "OpencodeHostSettings.request_timeout_seconds", maximum=NATIVE_CONTROL_TIMEOUT_MAX_SECONDS)
         if not isinstance(self.mcp_servers, Mapping) or len(self.mcp_servers) > OPENCODE_MAX_MCP_SERVERS:
-            raise ConfigurationError(f"OpencodeHostSettings.mcp_servers must be a mapping of at most {OPENCODE_MAX_MCP_SERVERS} servers.")
+            raise ConfigurationError(f"OpencodeHostSettings.mcp_servers must be a mapping of at most {OPENCODE_MAX_MCP_SERVERS} servers.", details={"field": "OpencodeHostSettings.mcp_servers"})
         if not all(isinstance(config, OpencodeMcpServerConfig) and key == config.name for key, config in self.mcp_servers.items()):
-            raise ConfigurationError("OpencodeHostSettings.mcp_servers must map each name to an OpencodeMcpServerConfig with that same name.")
+            raise ConfigurationError("OpencodeHostSettings.mcp_servers must map each name to an OpencodeMcpServerConfig with that same name.", details={"field": "OpencodeHostSettings.mcp_servers"})
         object.__setattr__(self, "mcp_servers", MappingProxyType(dict(self.mcp_servers)))
         RecordFieldValidator.require_int(self.max_live_turns, "OpencodeHostSettings.max_live_turns", minimum=NATIVE_MIN_LIVE_TURNS, maximum=NATIVE_MAX_LIVE_TURNS_LIMIT)
 
@@ -353,9 +335,7 @@ class OpencodeMessage:
         RecordFieldConverter.require_instance(self.role, "OpencodeMessage.role", str)
         RecordFieldConverter.require_instance(self.created_ms, "OpencodeMessage.created_ms", int)
         RecordFieldConverter.require_instance(self.completed_ms, "OpencodeMessage.completed_ms", int, optional=True)
-        RecordFieldConverter.require_instance(self.text, "OpencodeMessage.text", str)
-        if len(self.text) > NATIVE_RESULT_TEXT_MAX_CHARS:
-            raise ConfigurationError(f"OpencodeMessage.text must be at most {NATIVE_RESULT_TEXT_MAX_CHARS} characters.")
+        RecordFieldValidator.require_text(self.text, "OpencodeMessage.text", max_chars=NATIVE_RESULT_TEXT_MAX_CHARS, allow_blank=True)
         RecordFieldValidator.require_bool(self.text_truncated, "OpencodeMessage.text_truncated")
         RecordFieldConverter.require_instance(self.parent_id, "OpencodeMessage.parent_id", str, optional=True)
         RecordFieldConverter.require_instance(self.provider_id, "OpencodeMessage.provider_id", str, optional=True)
@@ -425,7 +405,7 @@ class OpencodePermissionRequest:
     def __post_init__(self) -> None:
         RecordFieldValidator.require_text(self.request_id, "OpencodePermissionRequest.request_id", max_chars=NATIVE_ID_MAX_CHARS)
         if not self.request_id.startswith(_PERMISSION_REQUEST_PREFIX):
-            raise ConfigurationError("OpencodePermissionRequest.request_id must start with per.")
+            raise ConfigurationError("OpencodePermissionRequest.request_id must start with per.", details={"field": "OpencodePermissionRequest.request_id"})
         RecordFieldValidator.require_text(self.session_id, "OpencodePermissionRequest.session_id", max_chars=NATIVE_ID_MAX_CHARS, pattern=OPENCODE_SESSION_ID_PATTERN)
         RecordFieldConverter.require_instance(self.permission, "OpencodePermissionRequest.permission", str)
         object.__setattr__(self, "patterns", RecordFieldConverter.to_tuple(self.patterns, "OpencodePermissionRequest.patterns", item_type=str))
@@ -441,7 +421,7 @@ class OpencodeQuestionRequest:
     def __post_init__(self) -> None:
         RecordFieldValidator.require_text(self.request_id, "OpencodeQuestionRequest.request_id", max_chars=NATIVE_ID_MAX_CHARS)
         if not self.request_id.startswith(_QUESTION_REQUEST_PREFIX):
-            raise ConfigurationError("OpencodeQuestionRequest.request_id must start with que.")
+            raise ConfigurationError("OpencodeQuestionRequest.request_id must start with que.", details={"field": "OpencodeQuestionRequest.request_id"})
         RecordFieldValidator.require_text(self.session_id, "OpencodeQuestionRequest.session_id", max_chars=NATIVE_ID_MAX_CHARS, pattern=OPENCODE_SESSION_ID_PATTERN)
 
 
@@ -460,7 +440,7 @@ class OpencodeSessionStatus:
         RecordFieldConverter.require_instance(self.state, "OpencodeSessionStatus.state", str)
         RecordFieldValidator.require_optional_count(self.retry_attempt, "OpencodeSessionStatus.retry_attempt")
         if (self.state == OPENCODE_RETRY_STATE) != (self.retry_attempt is not None):
-            raise ConfigurationError("OpencodeSessionStatus.retry_attempt must be set exactly when OpencodeSessionStatus.state is retry.")
+            raise ConfigurationError("OpencodeSessionStatus.retry_attempt must be set exactly when OpencodeSessionStatus.state is retry.", details={"field": "OpencodeSessionStatus.retry_attempt"})
         RecordFieldConverter.require_instance(self.retry_message, "OpencodeSessionStatus.retry_message", str, optional=True)
         RecordFieldConverter.require_instance(self.retry_reason, "OpencodeSessionStatus.retry_reason", str, optional=True)
 

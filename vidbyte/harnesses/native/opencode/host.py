@@ -58,9 +58,7 @@ from vidbyte.lib.errors import ConfigurationError, NativeHostError
 _NO_PROVIDER_STEP = "Connect a provider with opencode auth login."
 _PROVIDER_PICK_STEP = "Pick a provider id returned by list_opencode_providers."
 _LIVE_TURNS_KEY = "live_turns"
-_PROVIDER_ID_MAX_CHARS = 64
 _PROVIDER_ID_PATTERN = r"^[^/]+$"
-_MIN_LIST_LIMIT = 1
 _TRUNCATION_PROBE = 1
 _NEWEST_ONE = "1"
 _OLDEST_INDEX = 0
@@ -195,7 +193,7 @@ class OpencodeHost:
             self._require_open(operation)
             # A provider id is one path-free name (EC-64).
             if provider_id is not None:
-                RecordFieldValidator.require_text(provider_id, "provider_id", max_chars=_PROVIDER_ID_MAX_CHARS, pattern=_PROVIDER_ID_PATTERN)
+                RecordFieldValidator.require_text(provider_id, "provider_id", max_chars=native_host_constants.OPENCODE_PROVIDER_ID_MAX_CHARS, pattern=_PROVIDER_ID_PATTERN)
 
             # GET /config/providers lists only the connected providers and their models.
             catalog = self._wire.parse_config_providers(await self._client.call("GET", ("config", "providers"), operation=operation), operation=operation)
@@ -434,7 +432,7 @@ class OpencodeHost:
         operation = "list_opencode_sessions"
         try:
             self._require_open(operation)
-            RecordFieldValidator.require_int(limit, "limit", minimum=_MIN_LIST_LIMIT, maximum=native_host_constants.NATIVE_LIST_MAX_LIMIT)
+            RecordFieldValidator.require_int(limit, "limit", minimum=native_host_constants.NATIVE_LIST_MIN_LIMIT, maximum=native_host_constants.NATIVE_LIST_MAX_LIMIT)
 
             # The server returns at most `limit` sessions, so a long history stays under the body cap.
             body = await self._client.call("GET", ("session",), operation=operation, query={"limit": str(limit)})
@@ -474,7 +472,7 @@ class OpencodeHost:
         try:
             self._require_open(operation)
             RecordFieldValidator.require_text(session_id, "session_id", max_chars=native_host_constants.NATIVE_SESSION_ID_MAX_CHARS, pattern=native_host_constants.OPENCODE_SESSION_ID_PATTERN)
-            RecordFieldValidator.require_int(limit, "limit", minimum=_MIN_LIST_LIMIT, maximum=native_host_constants.NATIVE_LIST_MAX_LIMIT)
+            RecordFieldValidator.require_int(limit, "limit", minimum=native_host_constants.NATIVE_LIST_MIN_LIMIT, maximum=native_host_constants.NATIVE_LIST_MAX_LIMIT)
             RecordFieldValidator.require_optional_text(before, "before", max_chars=native_host_constants.NATIVE_SESSION_ID_MAX_CHARS, pattern=native_host_constants.OPENCODE_MESSAGE_ID_PATTERN)
 
             # Read one page back from `before`; a 404 means the session is not on this server (EC-72).
