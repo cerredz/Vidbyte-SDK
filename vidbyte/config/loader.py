@@ -65,18 +65,37 @@ _HARNESS_AGENT_FIELD_ALIASES = {"model": "model_name"}
 class _DuplicateKeySafeLoader(yaml.SafeLoader):
     """Safe YAML loader that rejects duplicate keys instead of silently overwriting them."""
 
+    def __init__(self, stream: Any) -> None:
+        # Starts each load with no recorded own-pair counts; yaml nodes hash by identity.
+        super().__init__(stream)
+        self._own_pair_counts: dict[MappingNode, int] = {}
+
+    def flatten_mapping(self, node: MappingNode) -> None:
+        # Records how many pairs the mapping wrote itself before its merge keys are flattened away.
+        self._own_pair_counts.setdefault(node, sum(1 for key_node, _ in node.value if key_node.tag != "tag:yaml.org,2002:merge"))
+        super().flatten_mapping(node)
+
     def construct_mapping(self, node: MappingNode, deep: bool = False) -> dict[Any, Any]:
         # @intent configuration-ambiguity-guard
         # Rejecting duplicates prevents an untrusted file from hiding an earlier value behind YAML's last-key-wins behavior.
+        # @intent yaml-merge-keys-are-resolved
+        # `<<` pairs are flattened in front of the mapping's own pairs, as SafeLoader does, so an own key may override a
+        # merged one; own counts are recorded at first flatten because a parent's merge can flatten an anchored child
+        # before the child itself is constructed.
+        self.flatten_mapping(node)
+        merged_count = len(node.value) - self._own_pair_counts[node]
         mapping: dict[Any, Any] = {}
-        for key_node, value_node in node.value:
+        own_keys: set[Any] = set()
+        for index, (key_node, value_node) in enumerate(node.value):
             key = self.construct_object(key_node, deep=deep)
-            try:
-                duplicate = key in mapping
-            except TypeError as error:
-                raise yaml.constructor.ConstructorError("while constructing a mapping", node.start_mark, "found an unhashable mapping key", key_node.start_mark) from error
-            if duplicate:
-                raise yaml.constructor.ConstructorError("while constructing a mapping", node.start_mark, f"found duplicate key {key!r}", key_node.start_mark)
+            if index >= merged_count:
+                try:
+                    duplicate = key in own_keys
+                except TypeError as error:
+                    raise yaml.constructor.ConstructorError("while constructing a mapping", node.start_mark, "found an unhashable mapping key", key_node.start_mark) from error
+                if duplicate:
+                    raise yaml.constructor.ConstructorError("while constructing a mapping", node.start_mark, f"found duplicate key {key!r}", key_node.start_mark)
+                own_keys.add(key)
             mapping[key] = self.construct_object(value_node, deep=deep)
         return mapping
 
@@ -89,7 +108,7 @@ class YamlLoader:
         document_path = self._path(path)
         document = self._read(document_path)
         if self._is_harness(document):
-            return self.load_harness(document_path)
+            return self._parse_harness_spec(document_path)
         return self._parse_agent_settings(document_path, document)
 
     def load_agent(self, path: str | Path) -> AgentSettings:
@@ -100,10 +119,17 @@ class YamlLoader:
     def load_harness(self, path: str | Path) -> HarnessSpec:
         # Loads one harness document into a validated, content-addressed HarnessSpec.
         document_path = self._path(path)
+        # @intent explicit-harness-load-rejects-duplicates
+        # The harness parser is last-key-wins, so run load()'s duplicate-rejecting read first or a hidden later key would win here.
+        self._read(document_path)
+        return self._parse_harness_spec(document_path)
+
+    def _parse_harness_spec(self, path: Path) -> HarnessSpec:
+        # Delegates an already-read harness document to the harness parser, naming the file on failure.
         try:
-            return HarnessConfigLoader().load(document_path)
+            return HarnessConfigLoader().load(path)
         except ConfigurationError as error:
-            error.details.setdefault("path", str(document_path))
+            error.details.setdefault("path", str(path))
             raise
 
     def harness_agent_names(self, spec: HarnessSpec) -> tuple[str, ...]:

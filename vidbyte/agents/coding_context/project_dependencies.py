@@ -6,13 +6,14 @@ ARCHITECTURE NOTE: Plain deterministic parsing with the standard library (tomlli
 FUNCTION INVENTORY: ProjectDependencies.read is the narrated main function; _text reads one manifest up to the size cap; _toml and _json parse text into a table; _python_names, _requirement_names, _node_names, and _rust_names pull the names out of one manifest each.
 COMMON MODIFICATION PATTERNS: A new manifest adds its file name to the reads in read, one _<language>_names helper, and its names to the list in read.
 WHAT NOT TO DO IN THIS FILE: 1. Do not run a package manager or import the project; reading the files is enough. 2. Do not raise for a bad manifest. 3. Do not search parent or child folders; only the root folder's own manifests count.
-KNOWN EDGE CASES: Names are kept in first-mention order and repeated names once, so a runtime dependency listed again as a development one appears once. Versions, extras, and markers are dropped. A requirements.txt line that is a URL, an option, or an include gives no name. Only the first CODING_ENVIRONMENT_MAX_DEPENDENCIES names are kept.
+KNOWN EDGE CASES: Names are kept in first-mention order and repeated names once, so a runtime dependency listed again as a development one appears once. Versions (bare or in parentheses), extras, markers, and requirements.txt comments are dropped. A requirements.txt line that is a URL, an option, or an include gives no name. Only the first CODING_ENVIRONMENT_MAX_DEPENDENCIES names are kept.
 RELATED DOCS: docs/design/coding-agent-environment-context.md; vidbyte/agents/coding_context/README.md
 TESTS: tests/features/coding_agent/test_coding_agent_environment.py
 """
 
 from __future__ import annotations
 
+import codecs
 import json
 import os
 import re
@@ -26,8 +27,10 @@ from vidbyte.lib.constants.coding import (
 )
 
 # A requirement's name at the start of a PEP 508 string, followed by
-# extras, a version, a marker, a URL, or nothing.
-_REQUIREMENT_NAME = re.compile(r"\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?=[\[<>=!~;@]|$)")
+# extras, a version (bare or in parentheses, as Poetry 2 writes it), a
+# marker, a URL, a requirements.txt comment after whitespace, or nothing.
+# A URL, a path, or a VCS line such as git+https:// still gives no name.
+_REQUIREMENT_NAME = re.compile(r"\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?=[\[(<>=!~;@]|(?<=\s)#|$)")
 
 
 class ProjectDependencies:
@@ -47,6 +50,11 @@ class ProjectDependencies:
         # and build tools are what the model most often needs to know.
         names = [*cls._python_names(pyproject), *cls._requirement_names(requirements), *cls._node_names(package_json), *cls._rust_names(cargo)]
 
+        # @intent blank-manifest-key-gives-no-name
+        # A table key such as "" or " " is malformed, not a name, and
+        # EnvironmentContextItem rejects a blank one.
+        names = [name.strip() for name in names if isinstance(name, str) and name.strip()]
+
         # Keep each name once, in the order it first appeared, and cap
         # the list so a huge manifest cannot fill the context.
         return tuple(dict.fromkeys(names))[:CODING_ENVIRONMENT_MAX_DEPENDENCIES]
@@ -62,22 +70,33 @@ class ProjectDependencies:
                 raw = handle.read(CODING_ENVIRONMENT_MANIFEST_MAX_BYTES)
         except OSError:
             return ""
-        return "" if total_bytes > CODING_ENVIRONMENT_MANIFEST_MAX_BYTES else raw.decode("utf-8", errors="replace")
+        # @intent powershell-utf16-manifests-are-read
+        # Windows PowerShell 5.1's > and Out-File write UTF-16 with a
+        # byte-order mark, as in pip freeze > requirements.txt, which pip
+        # reads; "utf-16" reads that mark and drops it. "utf-8-sig" drops
+        # the UTF-8 mark it writes for -Encoding utf8, which npm and pip
+        # accept but tomllib, json, and the name match do not.
+        encoding = "utf-16" if raw.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)) else "utf-8-sig"
+        return "" if total_bytes > CODING_ENVIRONMENT_MANIFEST_MAX_BYTES else raw.decode(encoding, errors="replace")
 
     @staticmethod
     def _toml(text: str) -> dict[str, Any]:
         """Return text parsed as TOML, or an empty table when it is not valid TOML."""
+        # @intent deeply-nested-manifest-gives-no-name
+        # The parser raises RecursionError on input nested thousands deep; that is malformed too.
         try:
             return tomllib.loads(text)
-        except tomllib.TOMLDecodeError:
+        except (tomllib.TOMLDecodeError, RecursionError):
             return {}
 
     @staticmethod
     def _json(text: str) -> dict[str, Any]:
         """Return text parsed as a JSON object, or an empty table when it is not one."""
+        # @intent deeply-nested-manifest-gives-no-name
+        # The parser raises RecursionError on input nested thousands deep; that is malformed too.
         try:
             data = json.loads(text) if text else {}
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, RecursionError):
             return {}
         return data if isinstance(data, dict) else {}
 

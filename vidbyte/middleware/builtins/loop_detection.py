@@ -32,7 +32,7 @@ from vidbyte.lib.dataclasses.middleware import (
     MiddlewareDecision,
     MiddlewareTransform,
 )
-from vidbyte.lib.dataclasses.tools import ToolResult
+from vidbyte.lib.dataclasses.tools import ToolCall, ToolResult
 from vidbyte.middleware.base import AgentMiddleware
 
 # Constant description injected into the agent's context window when the soft
@@ -53,6 +53,8 @@ class _LoopDetectionRunState:
     call_history: collections.deque[str] = field(default_factory=collections.deque)
     # Per-run total-count dict for (tool_name, output_hash) pairs.
     output_counts: dict[str, int] = field(default_factory=dict)
+    # The model tool call whose output was counted last, with that output's key.
+    counted_call: tuple[ToolCall, str] | None = None
 
 
 class LoopDetectionMiddleware(AgentMiddleware):
@@ -122,6 +124,7 @@ class LoopDetectionMiddleware(AgentMiddleware):
         )
         key = self._make_key(ctx.tool_call.tool_name, ctx.tool_call.arguments)
         state.call_history.append(key)
+        state.counted_call = None
         run_state[self] = state
         consecutive = self._count_consecutive_tail(key, state.call_history)
         if consecutive >= self.max_repeated_calls:
@@ -149,8 +152,13 @@ class LoopDetectionMiddleware(AgentMiddleware):
         )
         result = ctx.tool_result
         output_key = self._make_output_key(result.tool_name, result.output)
+        # @intent hidden-retries-count-once
+        # A runtime retry re-runs this hook for the same model call, so its new output replaces the one counted before.
+        if state.counted_call is not None and state.counted_call[0] is ctx.tool_call:
+            state.output_counts[state.counted_call[1]] -= 1
         count = state.output_counts.get(output_key, 0) + 1
         state.output_counts[output_key] = count
+        state.counted_call = (ctx.tool_call, output_key) if ctx.tool_call is not None else None
         run_state[self] = state
         output_hash = output_key.split(":", 1)[1] if ":" in output_key else output_key
         metadata = {

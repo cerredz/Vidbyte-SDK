@@ -6,9 +6,10 @@ from typing import Any, Mapping
 
 from vidbyte.lib.config import AudioModelConfig, EmbeddingModelConfig, ImageModelConfig, TextModelConfig, VideoModelConfig
 from vidbyte.lib.enums import ModelProvider
-from vidbyte.lib.errors import ProviderConfigurationError, ProviderResponseError
+from vidbyte.lib.errors import ProviderConfigurationError, ProviderRequestError, ProviderResponseError
 from vidbyte.lib.http import HttpResponseParser, HttpTransport, SyncHttpTransport
 from vidbyte.lib.runners.types import AudioModelResponse, EmbeddingResponse, GeneratedImage, ImageModelResponse, TextModelResponse, VideoModelJob
+from vidbyte.lib.util import PromptPlacement
 from vidbyte.providers.output_schema import OutputSchemaFormatter
 
 
@@ -124,14 +125,21 @@ class OpenAIProvider:
         return resolved
 
     def _extract_embeddings(self, parsed: Mapping[str, Any], *, expected_count: int) -> tuple[tuple[float, ...], ...]:
-        # Sort data items by index and convert each embedding list to an immutable tuple.
+        # Sort data items by index and convert each embedding list to an immutable tuple, refusing any item without one.
         data = parsed.get("data")
         if not isinstance(data, list):
             raise ProviderResponseError("OpenAI embeddings response missing data list.", provider=self.provider.value, response_excerpt=str(parsed))
         if len(data) != expected_count:
             raise ProviderResponseError(f"OpenAI returned {len(data)} embeddings but {expected_count} were requested.", provider=self.provider.value, response_excerpt=str(parsed))
         sorted_items = sorted(data, key=lambda item: item.get("index", 0) if isinstance(item, dict) else 0)
-        return tuple(tuple(float(v) for v in item["embedding"]) for item in sorted_items if isinstance(item, dict) and isinstance(item.get("embedding"), list))
+        # @intent one-vector-per-input-or-error
+        result: list[tuple[float, ...]] = []
+        for item in sorted_items:
+            embedding = item.get("embedding") if isinstance(item, dict) else None
+            if not isinstance(embedding, list):
+                raise ProviderResponseError("OpenAI embedding item missing embedding list.", provider=self.provider.value, response_excerpt=str(item))
+            result.append(tuple(float(v) for v in embedding))
+        return tuple(result)
 
     def _extract_stream_delta(self, raw_line: str) -> str | None:
         # Parse one SSE JSON line and return the text delta, or None for non-delta events.
@@ -139,7 +147,20 @@ class OpenAIProvider:
             event = json.loads(raw_line)
         except (json.JSONDecodeError, ValueError):
             return None
+        # @intent non-object-sse-payload-is-skipped
+        if not isinstance(event, dict):
+            return None
         event_type = event.get("type", "")
+        # @intent stream-error-event-raises
+        # An error or response.failed event ends a started stream (the streaming form of an HTTP error), so raise instead of returning the text so far as the whole answer.
+        if event_type in ("error", "response.failed"):
+            response = event.get("response")
+            error = event if event_type == "error" else (response.get("error") if isinstance(response, dict) else None)
+            error_code = error.get("code") if isinstance(error, dict) else None
+            error_message = error.get("message") if isinstance(error, dict) else None
+            detail = ": ".join(part for part in (error_code, error_message) if isinstance(part, str))
+            message = f"OpenAI stream ended with a {event_type!r} event: {detail}" if detail else f"OpenAI stream ended with a {event_type!r} event."
+            raise ProviderRequestError(message, provider=self.provider.value, response_excerpt=raw_line)
         if event_type == "response.text.delta":
             delta = event.get("delta")
             return delta if isinstance(delta, str) else None
@@ -185,8 +206,11 @@ class OpenAIProvider:
     def _create_input(self, config: TextModelConfig, prompt: str) -> str | list[Mapping[str, Any]]:
         # Preserve multi-turn Responses inputs when callers provide message history.
         if config.messages:
-            items = [item for message in config.messages for item in self._responses_items(message)]
-            return items + [{"role": "user", "content": prompt}]
+            # Put the prompt in front of the tool exchange it provoked, placed on the chat-shaped turns so an
+            # assistant note and the function_call items it splits into stay together behind the prompt.
+            history = [dict(message) for message in config.messages]
+            history.insert(PromptPlacement.index(history, is_call_turn=PromptPlacement.is_chat_call_turn, boundary=config.prompt_index), {"role": "user", "content": prompt})
+            return [item for message in history for item in self._responses_items(message)]
         return prompt
 
     @staticmethod
@@ -278,7 +302,9 @@ class OpenAIProvider:
         if config.size:
             payload["size"] = config.size
         if config.seconds:
-            payload["seconds"] = config.seconds
+            # @intent openai-video-seconds-is-a-string
+            # The Videos API types seconds as the string enum "4" | "8" | "12" and rejects an integer; the config keeps an int for validation.
+            payload["seconds"] = str(config.seconds)
         if config.extra_body:
             payload.update(dict(config.extra_body))
         return payload
@@ -302,6 +328,10 @@ class OpenAIProvider:
     def _collect_output_text(self, chunks: list[str], item: object) -> None:
         # Collect text leaves from one Responses API output item.
         if not isinstance(item, dict):
+            return
+        # @intent reasoning-items-are-not-the-answer
+        # A "reasoning" item's content is the model's chain of thought (reasoning_text), never the answer; streaming yields only output_text.
+        if item.get("type") == "reasoning":
             return
         content = item.get("content")
         if not isinstance(content, list):

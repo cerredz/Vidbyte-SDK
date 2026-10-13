@@ -29,6 +29,7 @@ from vidbyte.agents.types import AgentForkSettings
 from vidbyte.evals.base import BaseGrader
 from vidbyte.evals.types import EvalCase, GraderResult
 from vidbyte.lib.enums.prompts import Prompt
+from vidbyte.lib.util import SupportedKwargs
 from vidbyte.prompts.catalog import Prompts
 
 
@@ -95,15 +96,18 @@ class RubricGrader(BaseGrader):
                 res = await judge.arun(prompt, temperature=0.0)
             finally:
                 await judge.close_mcp_servers()
+        # @intent judge-runners-get-only-kwargs-they-accept
+        # Ask a plain runner for temperature 0 only when its method takes it, so the SDK's own TextModelRunner can judge.
         elif hasattr(runner, "arun"):
-            res = await runner.arun(prompt, temperature=0.0)
+            res = await runner.arun(prompt, **SupportedKwargs.filter(runner.arun, {"temperature": 0.0}))
         elif hasattr(runner, "generate_reply"):
-            res = await runner.generate_reply(prompt, temperature=0.0)
+            res = await runner.generate_reply(prompt, **SupportedKwargs.filter(runner.generate_reply, {"temperature": 0.0}))
         elif hasattr(runner, "run"):
+            options = SupportedKwargs.filter(runner.run, {"temperature": 0.0})
             if inspect.iscoroutinefunction(runner.run):
-                res = await runner.run(prompt, temperature=0.0)
+                res = await runner.run(prompt, **options)
             else:
-                res = runner.run(prompt, temperature=0.0)
+                res = runner.run(prompt, **options)
         else:
             raise TypeError("Judge runner must expose run(), generate_reply(), or arun() method.")
 

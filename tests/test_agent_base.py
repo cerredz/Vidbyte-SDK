@@ -410,6 +410,16 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertNotIn("INPUT_PLACED_PRIMITIVE", repr(runner.captured_options[-1]))
 
+    async def test_context_manager_supplied_at_both_scopes_renders_its_items_once(self) -> None:
+        # [Silent Failure] One manager on the agent and on AgentInput is one source, so its items reach the model once
+        runner = OptionCaptureRunner()
+        shared = ContextManager().add(TextContextItem(title="Policy", content="SHARED_UNMANAGED_DOCUMENT"))
+        agent = build_test_agent(name="ctx", system_prompt="S.", runner=runner, context_manager=shared)
+
+        await agent.arun(AgentInput(prompt="refund?", context_manager=shared))
+
+        self.assertEqual(repr(runner.captured_options[0]).count("SHARED_UNMANAGED_DOCUMENT"), 1)
+
     async def test_context_manager_metadata_reaches_the_model(self) -> None:
         # [Silent Failure] ContextManager(metadata=...) must reach the model's run metadata, the request's manager over the agent's
         runner = OptionCaptureRunner()

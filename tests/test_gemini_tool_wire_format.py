@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import json
 import unittest
+from enum import Enum, IntEnum
+from typing import Literal, Optional
 
+from pydantic import BaseModel
+
+from vidbyte import tool
 from vidbyte.lib.dataclasses.tools import ToolCall, ToolParameter, ToolResult, ToolSpec
 from vidbyte.lib.tools import ToolsFormatter
 
@@ -49,7 +54,8 @@ class GeminiToolSchemaTests(unittest.TestCase):
         parameters = ToolsFormatter.to_gemini_tool(_spec_with_schema(schema))["function_declarations"][0]["parameters"]
         self.assertEqual(parameters["required"], ["n"])
         self.assertEqual(parameters["properties"]["n"]["minimum"], 1)
-        self.assertEqual(parameters["properties"]["n"]["enum"], [1, 2])
+        # Gemini's Schema.enum is a string list, so integer values travel as their JSON text.
+        self.assertEqual(parameters["properties"]["n"]["enum"], ["1", "2"])
 
     def test_recursive_ref_terminates(self) -> None:
         schema = {
@@ -113,6 +119,196 @@ class GeminiUnionTypeTests(unittest.TestCase):
         schema = {"type": "object", "properties": {"note": {"type": ["string", "null"]}}}
         openai = ToolsFormatter.to_openai_tool(_spec_with_schema(schema))
         self.assertIn('"type": ["string", "null"]', json.dumps(openai))
+
+
+class GeminiArrayItemsTests(unittest.TestCase):
+    """Gemini rejects the whole request when an array schema has no `items`."""
+
+    def _parameters(self, spec: ToolSpec) -> dict:
+        return ToolsFormatter.to_gemini_tool(spec)["function_declarations"][0]["parameters"]
+
+    def test_tool_parameter_array_gets_any_item_schema(self) -> None:
+        # ToolParameter has no item schema, so every type="array" parameter renders item-less.
+        spec = ToolSpec(
+            name="tagThings",
+            description="Tag things.",
+            parameters=(ToolParameter(name="x", type="array", description="Tags.", required=True),),
+        )
+        x = self._parameters(spec)["properties"]["x"]
+        self.assertEqual(x["type"], "array")
+        self.assertEqual(x["items"], {})
+        self.assertEqual(x["description"], "Tags.")
+
+    def test_nested_and_nullable_arrays_get_items_at_every_level(self) -> None:
+        schema = {
+            "type": "object",
+            "properties": {
+                "grid": {"type": "array", "items": {"type": "array"}},
+                "meta": {"type": "object", "properties": {"ids": {"type": "array"}}},
+                "maybe": {"type": ["array", "null"]},
+                "either": {"type": ["array", "string"]},
+            },
+        }
+        properties = self._parameters(_spec_with_schema(schema))["properties"]
+        self.assertEqual(properties["grid"], {"type": "array", "items": {"type": "array", "items": {}}})
+        self.assertEqual(properties["meta"]["properties"]["ids"], {"type": "array", "items": {}})
+        self.assertEqual(properties["maybe"], {"type": "array", "nullable": True, "items": {}})
+        self.assertEqual(properties["either"], {"anyOf": [{"type": "array", "items": {}}, {"type": "string"}]})
+
+    def test_array_with_items_is_unchanged(self) -> None:
+        schema = {"type": "object", "properties": {"s": {"type": "array", "items": {"type": "string"}, "minItems": 1}}}
+        self.assertEqual(self._parameters(_spec_with_schema(schema)), schema)
+
+    def test_grep_tool_extensions_carry_items(self) -> None:
+        from vidbyte.tools.builtins.code_search import GrepTool
+
+        extensions = self._parameters(GrepTool(".").spec())["properties"]["extensions"]
+        self.assertEqual(extensions["type"], "array")
+        self.assertEqual(extensions["items"], {})
+
+    def test_other_providers_keep_item_less_arrays(self) -> None:
+        schema = {"type": "object", "properties": {"x": {"type": "array"}}}
+        openai = ToolsFormatter.to_openai_tool(_spec_with_schema(schema))
+        self.assertNotIn("items", json.dumps(openai))
+
+
+class Level(IntEnum):
+    LOW = 1
+    HIGH = 2
+
+
+class Mood(str, Enum):
+    CALM = "calm"
+    LOUD = "loud"
+
+
+@tool
+def file_ticket(
+    priority: Literal[1, 2, 3],
+    level: Level,
+    weight: Literal[0.5, 1.5],
+    mood: Mood,
+    tag: Literal["a", None],
+    maybe: Optional[Literal[1, 2]] = None,
+) -> str:
+    """File a ticket."""
+    return "filed"
+
+
+class TicketReport(BaseModel):
+    title: str
+    priority: Literal[1, 2, 3]
+
+
+def _first_gemini_request(**agent_options: object) -> dict:
+    # Runs a Gemini agent over a fake transport and returns the first request body it sends.
+    from unittest.mock import patch
+
+    from vidbyte import Agent
+    from vidbyte.lib.http import HttpTransport
+    from vidbyte.lib.http.transport import HttpResponse
+
+    sent: list = []
+    done = {"candidates": [{"content": {"role": "model", "parts": [{"functionCall": {"name": "isDone", "args": {"final_answer": '{"title": "t", "priority": 1}'}}}]}}]}
+
+    async def fake_gemini(self, *, json_body=None, **kwargs) -> HttpResponse:
+        sent.append(json_body or {})
+        return HttpResponse(status_code=200, body=json.dumps(done), headers={})
+
+    agent = Agent(name="r", system_prompt="s", provider="gemini", model_name="gemini-3.5-flash", api_key="g", **agent_options)
+    with patch.object(HttpTransport, "request", fake_gemini):
+        agent.run("go")
+    return sent[0]
+
+
+class GeminiEnumValueTests(unittest.TestCase):
+    """Gemini's Schema.enum is a list of strings; typed enum values fail the request with a 400."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        body = _first_gemini_request(tools=[file_ticket])
+        declarations = [d for entry in body["tools"] for d in entry.get("function_declarations", [])]
+        cls.properties = next(d for d in declarations if d["name"] == "file_ticket")["parameters"]["properties"]
+
+    def test_int_literal_values_become_strings_and_keep_their_type(self) -> None:
+        self.assertEqual(self.properties["priority"]["type"], "integer")
+        self.assertEqual(self.properties["priority"]["enum"], ["1", "2", "3"])
+
+    def test_int_enum_from_defs_becomes_strings(self) -> None:
+        level = self.properties["level"]
+        self.assertNotIn("$ref", level)
+        self.assertEqual(level["type"], "integer")
+        self.assertEqual(level["enum"], ["1", "2"])
+
+    def test_float_literal_values_become_strings(self) -> None:
+        self.assertEqual(self.properties["weight"]["type"], "number")
+        self.assertEqual(self.properties["weight"]["enum"], ["0.5", "1.5"])
+
+    def test_optional_int_literal_any_of_branch_becomes_strings(self) -> None:
+        self.assertEqual(self.properties["maybe"]["anyOf"][0], {"enum": ["1", "2"], "type": "integer"})
+
+    def test_string_enum_and_nullable_literal_are_unchanged(self) -> None:
+        self.assertEqual(self.properties["mood"]["enum"], ["calm", "loud"])
+        self.assertEqual(self.properties["tag"]["enum"], ["a", None])
+
+    def test_response_schema_int_literal_becomes_strings(self) -> None:
+        body = _first_gemini_request(output_schema=TicketReport)
+        priority = body["generationConfig"]["responseSchema"]["properties"]["priority"]
+        self.assertEqual(priority["type"], "integer")
+        self.assertEqual(priority["enum"], ["1", "2", "3"])
+
+    def test_other_providers_keep_typed_enum_values(self) -> None:
+        openai = ToolsFormatter.to_openai_tool(file_ticket.spec())["function"]["parameters"]
+        self.assertEqual(openai["properties"]["priority"]["enum"], [1, 2, 3])
+
+
+_OBJECT_ONLY_KEYWORDS = ("properties", "required", "propertyOrdering")
+_ARRAY_ONLY_KEYWORDS = ("items", "minItems", "maxItems")
+
+
+def _misplaced_type_keywords(node: object, path: str = "$") -> list[str]:
+    # Walks every schema node and names each one carrying object or array keywords without that type.
+    if not isinstance(node, dict):
+        return []
+    found = [f"{path}.{key}" for key in _OBJECT_ONLY_KEYWORDS if key in node and node.get("type") != "object"]
+    found += [f"{path}.{key}" for key in _ARRAY_ONLY_KEYWORDS if key in node and node.get("type") != "array"]
+    for name, sub in (node.get("properties") or {}).items():
+        found += _misplaced_type_keywords(sub, f"{path}.properties.{name}")
+    found += _misplaced_type_keywords(node.get("items"), f"{path}.items")
+    for index, branch in enumerate(node.get("anyOf") or []):
+        found += _misplaced_type_keywords(branch, f"{path}.anyOf[{index}]")
+    return found
+
+
+class GeminiTypeListKeywordTests(unittest.TestCase):
+    """A type list split into anyOf branches must carry each type-only keyword in its own branch."""
+
+    def _reduce(self, node: dict) -> dict:
+        schema = {"type": "object", "properties": {"v": node}}
+        return ToolsFormatter.to_gemini_tool(_spec_with_schema(schema))["function_declarations"][0]["parameters"]
+
+    def test_object_keywords_move_into_the_object_branch(self) -> None:
+        parameters = self._reduce({"type": ["object", "string"], "properties": {"a": {"type": "string"}}, "required": ["a"]})
+        self.assertEqual(_misplaced_type_keywords(parameters), [])
+        self.assertEqual(
+            parameters["properties"]["v"],
+            {"anyOf": [{"type": "object", "properties": {"a": {"type": "string"}}, "required": ["a"]}, {"type": "string"}]},
+        )
+
+    def test_array_keywords_move_into_the_array_branch(self) -> None:
+        parameters = self._reduce({"type": ["array", "string"], "items": {"type": "integer"}, "maxItems": 3})
+        self.assertEqual(_misplaced_type_keywords(parameters), [])
+        self.assertEqual(parameters["properties"]["v"], {"anyOf": [{"type": "array", "items": {"type": "integer"}, "maxItems": 3}, {"type": "string"}]})
+
+    def test_fork_conversation_declaration_has_no_typeless_object_keywords(self) -> None:
+        from vidbyte.tools.builtins.fork import ForkConversationTool
+
+        parameters = ToolsFormatter.to_gemini_tool(ForkConversationTool().spec())["function_declarations"][0]["parameters"]
+        self.assertEqual(_misplaced_type_keywords(parameters), [])
+        self.assertEqual(parameters["properties"]["handoff"]["anyOf"][0]["type"], "object")
+
+    def test_nullable_single_type_is_unchanged(self) -> None:
+        self.assertEqual(self._reduce({"type": ["string", "null"], "maxLength": 5})["properties"]["v"], {"type": "string", "maxLength": 5, "nullable": True})
 
 
 class GeminiToolResultRoleTests(unittest.TestCase):
@@ -211,6 +407,16 @@ class GeminiContentsOrderingTests(unittest.TestCase):
         model_turn = next(c for c in contents if c["role"] == "model")
         self.assertEqual(model_turn["parts"][0]["text"], "prior answer")
         self.assertNotIn("content", model_turn)
+
+    def test_prompt_skips_a_replayed_exchange_and_opens_this_runs_round(self) -> None:
+        # A replayed transcript already holds an introduced exchange; the prompt opens this run's call instead.
+        call = {"role": "model", "parts": [{"functionCall": {"name": "hours", "args": {}}}]}
+        response = {"role": "user", "parts": [{"functionResponse": {"name": "hours", "response": {}}}]}
+        contents = self._contents([{"role": "user", "content": "Hours on Sunday?"}, call, response, {"role": "assistant", "content": "closed"}, call, response])
+        self.assertEqual([c["role"] for c in contents], ["user", "model", "user", "model", "user", "model", "user"])
+        self.assertEqual(contents[3]["parts"], [{"text": "closed"}])
+        self.assertEqual(contents[4]["parts"], [{"text": "do the thing"}])
+        self.assertIn("functionCall", contents[5]["parts"][0])
 
 
 def _call_turn(*names: str) -> dict:

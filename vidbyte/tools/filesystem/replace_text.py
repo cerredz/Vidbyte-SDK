@@ -37,11 +37,18 @@ class ReplaceTextTool(FileSystemTool):
             content = self.backend.read_text(target, encoding=self._config.encoding)
             # Remember the file's own line endings so the edit does not rewrite every line.
             newline = LineEndings.detect(self.backend.read_binary(target).decode(self._config.encoding))
+            # @intent model-crlf-text-keeps-file-endings
+            # The file reads back as LF and is written in its own endings, so CRLF the model spelled is made LF to match and land once.
+            search, replacement = LineEndings.to_lf(search), LineEndings.to_lf(replacement)
             # @intent unique-edit-counts-overlapping-matches
             count = SubstringCounter.count_overlapping(content, search)
             if count != 1:
+                # Say which way the search failed, since the model only reads
+                # this message: not found means re-read the file, while several
+                # matches mean add surrounding text to pick one.
+                reason = "it was not found" if count == 0 else f"it appears {count} times; include more surrounding text to make it unique"
                 raise ToolExecutionError(
-                    "ReplaceTextTool requires the search text to appear exactly once.",
+                    f"ReplaceTextTool requires the search text to appear exactly once, but {reason}.",
                     details={"matches": count, "path": str(target)},
                 )
             updated = content.replace(search, replacement, 1)

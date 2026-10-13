@@ -27,6 +27,7 @@ import yaml
 
 from vidbyte.agents.settings.loop import AgentLoopSettings
 from vidbyte.agents.settings.tool import ToolSettings
+from vidbyte.agents.settings import ToolErrorPolicy
 from vidbyte.lib.dataclasses.adversarial_agent_descriptor import AdversarialAgentDescriptor
 from vidbyte.lib.dataclasses.aggregate_agent_descriptor import AggregateAgentDescriptor
 from vidbyte.lib.dataclasses.agent_descriptor import AgentDescriptor
@@ -49,20 +50,38 @@ _SUPPORTED_EXTENSIONS = frozenset({".yaml", ".yml"})
 class _DuplicateKeySafeLoader(yaml.SafeLoader):
     """SafeLoader variant that rejects duplicate mapping keys."""
 
+    def __init__(self, stream: Any) -> None:
+        # Starts each load with no recorded own-pair counts; yaml nodes hash by identity.
+        super().__init__(stream)
+        self._own_pair_counts: dict[yaml.nodes.MappingNode, int] = {}
+
+    def flatten_mapping(self, node: yaml.nodes.MappingNode) -> None:
+        # Records how many pairs the mapping wrote itself before its merge keys are flattened away.
+        self._own_pair_counts.setdefault(node, sum(1 for key_node, _ in node.value if key_node.tag != "tag:yaml.org,2002:merge"))
+        super().flatten_mapping(node)
+
     def construct_mapping(self, node: yaml.nodes.MappingNode, deep: bool = False) -> dict[Any, Any]:
         # Builds a mapping while detecting and rejecting duplicate keys.
+        # @intent yaml-merge-keys-are-resolved
+        # `<<` pairs are flattened in front of the mapping's own pairs, as SafeLoader does, so an own key may override a
+        # merged one; own counts are recorded at first flatten because a parent's merge can flatten an anchored child
+        # before the child itself is constructed.
+        self.flatten_mapping(node)
+        merged_count = len(node.value) - self._own_pair_counts[node]
         mapping: dict[Any, Any] = {}
-        for key_node, value_node in node.value:
+        own_keys: set[Any] = set()
+        for index, (key_node, value_node) in enumerate(node.value):
             key = self.construct_object(key_node, deep=deep)
             if not isinstance(key, (str, int, float, bool, type(None))):
                 key = str(key)
-            if key in mapping:
-                raise yaml.constructor.ConstructorError(
-                    None, None,
-                    f"Duplicate key {key!r} is not allowed",
-                    key_node.start_mark,
-                )
-            mapping[key] = value_node
+            if index >= merged_count:
+                if key in own_keys:
+                    raise yaml.constructor.ConstructorError(
+                        None, None,
+                        f"Duplicate key {key!r} is not allowed",
+                        key_node.start_mark,
+                    )
+                own_keys.add(key)
             mapping[key] = value_node
         result: dict[Any, Any] = {}
         for key, value_node in mapping.items():
@@ -164,10 +183,19 @@ class YamlLoader:
         tool_settings_raw = loop_raw.pop("tool_settings", None)
         output_contracts_raw = loop_raw.pop("output_contracts", None)
         tool_settings = ToolSettings(**tool_settings_raw) if tool_settings_raw else None
+        # @intent lib-loader-builds-tool-error-policy
+        # YAML only yields a plain mapping for the retry/abort policy, so build the real policy the loop settings require.
+        tool_error_policy = loop_raw.pop("tool_error_policy", None)
+        if isinstance(tool_error_policy, dict):
+            tool_error_policy = ToolErrorPolicy(**tool_error_policy)
+        # @intent lib-loader-builds-output-contracts
+        # YAML only yields plain mappings, so each contract is built into its floor before the loop settings read it.
+        output_contracts = YamlLoader._build_output_contracts(output_contracts_raw, path)
         loop = AgentLoopSettings(
             **loop_raw,
             tool_settings=tool_settings,
-            output_contracts=output_contracts_raw if output_contracts_raw else (),
+            tool_error_policy=tool_error_policy,
+            output_contracts=output_contracts,
         )
         tools_raw = raw.get("tools", [])
         tools = tuple(
@@ -219,6 +247,32 @@ class YamlLoader:
             metadata=dict(raw.get("metadata", {})),
         )
         return descriptor
+
+    @staticmethod
+    def _build_output_contracts(raw_contracts: Any, path: str | Path) -> tuple[Any, ...]:
+        # Builds each `{type: <FloorName>, ...}` mapping into its concrete floor, naming the file and position on failure.
+        from vidbyte.agents import contracts
+
+        # The abstract base is never satisfiable and SchemaConformance comes from output_schema, so neither is nameable here.
+        floors = {name: getattr(contracts, name) for name in contracts.__all__ if name not in {"OutputContract", "SchemaConformance"}}
+        if raw_contracts and not isinstance(raw_contracts, (list, tuple)):
+            raise ConfigurationError("'loop.output_contracts' must be a list of contract mappings.", details={"path": str(path), "field": "loop.output_contracts", "actual_type": type(raw_contracts).__name__})
+        built: list[Any] = []
+        for index, item in enumerate(raw_contracts or ()):
+            field = f"loop.output_contracts[{index}]"
+            if isinstance(item, contracts.OutputContract):
+                built.append(item)
+                continue
+            payload = dict(item) if isinstance(item, dict) else {}
+            name = payload.pop("type", None)
+            builder = floors.get(name) if isinstance(name, str) else None
+            if builder is None:
+                raise ConfigurationError(f"'{field}' must be a mapping whose 'type' is one of {sorted(floors)}.", details={"path": str(path), "field": field, "actual_value": repr(name), "expected": sorted(floors)})
+            try:
+                built.append(builder(**payload))
+            except (TypeError, ValueError, ConfigurationError) as exc:
+                raise ConfigurationError(f"'{field}' is invalid: {exc}", details={"path": str(path), "field": field}) from exc
+        return tuple(built)
 
     @staticmethod
     def _build_harness(raw: dict[str, Any], path: str | Path) -> HarnessDescriptor:

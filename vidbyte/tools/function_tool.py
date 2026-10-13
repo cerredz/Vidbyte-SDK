@@ -109,10 +109,11 @@ class FunctionTool(BaseTool):
         signature = inspect.signature(self.func)
         for param_name, parameter in signature.parameters.items():
             prop = properties.get(param_name, {})
+            # Label each argument with a readable type name for the tool docs the model reads with every request.
             parameters.append(
                 ToolParameter(
                     name=param_name,
-                    type=str(prop.get("type") or prop.get("anyOf") or "any"),
+                    type=_parameter_type_label(prop),
                     description=str(prop.get("description") or ""),
                     required=param_name in required,
                     default=None if parameter.default is inspect.Parameter.empty else parameter.default,
@@ -162,6 +163,18 @@ def _null_means_default_fields(args_model: type[BaseModel]) -> frozenset[str]:
         except ValidationError:
             names.add(name)
     return frozenset(names)
+
+
+def _parameter_type_label(prop: Mapping[str, Any]) -> str:
+    # @intent function-tool-parameter-type-is-a-name
+    # The label is a type name, never a Python repr of the schema: Optional[str] reads "string | null", and a
+    # $ref, enum or model argument reads "any", as it does for a tool declared only by input_schema.
+    if isinstance(prop.get("type"), str):
+        return prop["type"]
+    branches = prop.get("anyOf")
+    if isinstance(branches, list) and branches and all(isinstance(branch, Mapping) and isinstance(branch.get("type"), str) for branch in branches):
+        return " | ".join(branch["type"] for branch in branches)
+    return "any"
 
 
 def _validate_arguments(args_model: type[BaseModel], arguments: dict[str, Any]) -> BaseModel:

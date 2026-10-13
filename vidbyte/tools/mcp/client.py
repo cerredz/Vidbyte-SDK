@@ -20,6 +20,10 @@ from vidbyte.tools.mcp.types import McpToolDefinition
 from vidbyte.tools.mcp.transport import McpTransport
 from vidbyte.tools.types import ToolResult
 
+# @intent mcp-tools-list-reads-every-page
+# Upper bound on tools/list pages read in one discovery, a guard against a server that never stops paging.
+_MAX_TOOLS_LIST_PAGES = 100
+
 
 class McpClient:
     """Minimal MCP client for tool discovery and calls."""
@@ -42,16 +46,35 @@ class McpClient:
                 "clientInfo": {"name": "vidbyte-sdk", "version": "0.2.1"},
             },
         )
+        # @intent mcp-client-sends-initialized-notification
+        # MCP's lifecycle requires notifications/initialized after initialize; servers that enforce it (the
+        # official Python SDK server before mcp 1.18) refuse every request until it arrives. Request-only
+        # custom transports have no notify, so they skip it.
+        notify = getattr(self.transport, "notify", None)
+        if notify is not None:
+            await notify("notifications/initialized")
         self.initialized = True
 
     async def list_tools(self) -> tuple[McpToolDefinition, ...]:
-        """Return remote tool definitions from tools/list."""
+        """Return remote tool definitions from every tools/list page."""
         await self.initialize()
-        result = await self.transport.request("tools/list")
-        raw_tools = result.get("tools", ())
+        raw_tools: list[Any] = []
+        seen_cursors: list[str] = []
+        # @intent mcp-tools-list-reads-every-page
+        # A paginating server sends later tools only for its nextCursor, so follow it page by page; the first
+        # request carries no params, and a repeated cursor or the page cap stops a server that never stops paging.
+        while len(seen_cursors) < _MAX_TOOLS_LIST_PAGES:
+            params = {"cursor": seen_cursors[-1]} if seen_cursors else None
+            result = await self.transport.request("tools/list", params)
+            if not isinstance(result.get("tools"), list):
+                break
+            raw_tools.extend(result["tools"])
+            cursor = result.get("nextCursor")
+            if not isinstance(cursor, str) or not cursor or cursor in seen_cursors:
+                break
+            seen_cursors.append(cursor)
+        # Turn each well-formed remote entry into a tool definition and drop nameless ones.
         tools: list[McpToolDefinition] = []
-        if not isinstance(raw_tools, list):
-            return ()
         for item in raw_tools:
             if not isinstance(item, Mapping):
                 continue
@@ -73,7 +96,16 @@ class McpClient:
                 {"name": name, "arguments": dict(arguments)},
             )
         except Exception as exc:
-            return ToolResult.error(name, f"MCP tool call failed: {exc}", metadata={"error": "mcp_error"})
+            # @intent mcp-protocol-error-reason-reaches-the-model
+            # MCP reports invalid arguments and unknown tools as JSON-RPC errors whose message is the only
+            # explanation, and SDK tool errors forward full detail to the model, so keep the server's message.
+            details = getattr(exc, "details", None)
+            remote = details.get("error") if isinstance(details, Mapping) else None
+            reason = remote.get("message") if isinstance(remote, Mapping) else None
+            output = f"MCP tool call failed: {exc}"
+            if isinstance(reason, str) and reason.strip():
+                output = f"{output}: {reason}"
+            return ToolResult.error(name, output, metadata={"error": "mcp_error"})
         text = self._content_to_text(result)
         if len(text) > self.max_output_chars:
             text = text[: self.max_output_chars] + "\n...[truncated]"
@@ -122,6 +154,18 @@ class McpClient:
                     uri = resource.get("uri", "unknown")
                     mime = resource.get("mimeType", "unknown")
                     parts.append(f"[resource: {uri}, {mime}, {size} base64 chars omitted]")
+                elif (
+                    item.get("type") == "resource"
+                    and isinstance(item.get("resource"), Mapping)
+                    and isinstance(item["resource"].get("text"), str)
+                ):
+                    # @intent mcp-text-resource-is-text
+                    # A text embedded resource carries readable text (GitHub's get_file_contents returns files
+                    # this way), so the model gets the text under its uri, not a dict repr with escaped newlines.
+                    resource = item["resource"]
+                    uri = resource.get("uri", "unknown")
+                    mime = resource.get("mimeType", "unknown")
+                    parts.append(f"[resource: {uri}, {mime}]\n{resource['text']}")
                 else:
                     parts.append(str(item))
             else:

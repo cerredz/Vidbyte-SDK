@@ -10,10 +10,13 @@ from vidbyte.lib.errors import ProviderConfigurationError, ProviderResponseError
 from vidbyte.lib.http import HttpResponseParser, HttpTransport
 from vidbyte.lib.registries.structured_output import StructuredOutputRegistry
 from vidbyte.lib.runners.types import TextModelResponse
+from vidbyte.lib.util import PromptPlacement
 from vidbyte.providers.output_schema import OutputSchemaFormatter
 
 # A reply that is one markdown fence from start to end; its body is unwrapped only when it is JSON.
 _WHOLE_FENCE = re.compile(r"\A\s*```(?:json)?[ \t]*\n?(.*?)\n?[ \t]*```\s*\Z", re.DOTALL | re.IGNORECASE)
+# One complete reasoning block at the very start of a reply, plus the whitespace after it.
+_LEADING_THINK = re.compile(r"\A\s*<think>.*?</think>\s*", re.DOTALL)
 
 
 class OpenAICompatibleProvider:
@@ -68,8 +71,10 @@ class OpenAICompatibleProvider:
         instructions = system or config.system
         if instructions:
             messages.append({"role": "system", "content": instructions})
-        messages.extend(dict(message) for message in config.messages)
-        messages.append({"role": "user", "content": prompt})
+        # Put the prompt in front of the tool exchange it provoked, so the newest turn is the work, not the task again.
+        history = [dict(message) for message in config.messages]
+        history.insert(PromptPlacement.index(history, is_call_turn=PromptPlacement.is_chat_call_turn, boundary=config.prompt_index), {"role": "user", "content": prompt})
+        messages.extend(history)
         return messages
 
     def _attach_sampling(self, payload: dict[str, Any], config: TextModelConfig) -> None:
@@ -134,13 +139,37 @@ class OpenAICompatibleProvider:
         if not isinstance(choices, list) or not choices:
             raise ProviderResponseError(f"{self.provider.value} response did not include choices.", provider=self.provider.value, response_excerpt=str(parsed))
         first = choices[0]
+        # @intent error-finish-reason-is-not-an-answer
+        # OpenRouter reports a failure after its 200 as finish_reason "error" beside the partial text, which is
+        # not the answer, so raise like the streaming error events (#999) and keep the billed usage.
+        if isinstance(first, dict) and first.get("finish_reason") == "error":
+            raw_error = first.get("error")
+            error = raw_error if isinstance(raw_error, dict) else {}
+            reason = ": ".join(str(part) for part in (error.get("code"), error.get("message")) if isinstance(part, (int, str)) and not isinstance(part, bool))
+            raise ProviderResponseError(f"{self.provider.value} reply ended with an error{': ' + reason if reason else '.'}", provider=self.provider.value, response_excerpt=str(parsed))
         message = first.get("message") if isinstance(first, dict) else None
         content = message.get("content") if isinstance(message, dict) else None
-        if isinstance(message, dict) and isinstance(message.get("tool_calls"), list):
+        # @intent empty-tool-calls-is-a-text-turn
+        # vLLM-style servers send "tool_calls": [] on plain text turns; only real calls carry no text.
+        if isinstance(message, dict) and isinstance(message.get("tool_calls"), list) and len(message["tool_calls"]) > 0:
             return ""
+        # @intent chunked-content-answers-with-its-text-chunks
+        # Mistral reasoning models send content as a list of chunks; the answer is the text chunks, never the thinking.
+        if isinstance(content, list):
+            return "".join(chunk["text"] for chunk in content if isinstance(chunk, dict) and chunk.get("type") == "text" and isinstance(chunk.get("text"), str))
         if not isinstance(content, str):
             raise ProviderResponseError(f"{self.provider.value} response did not include message content.", provider=self.provider.value, response_excerpt=str(parsed))
         return content
+
+    def _raise_if_interrupted(self, parsed: Mapping[str, Any], interrupted_reason: str) -> None:
+        # @intent interrupted-reply-is-not-an-answer
+        # DeepSeek ("insufficient_system_resource") and GLM ("network_error") report a reply their servers cut off after
+        # the 200 under their own finish_reason; the text is not the answer, so raise like OpenRouter's "error" (#1012) and keep the billed usage.
+        choices = parsed.get("choices")
+        first = choices[0] if isinstance(choices, list) and choices else None
+        finish_reason = first.get("finish_reason") if isinstance(first, dict) else None
+        if finish_reason == interrupted_reason:
+            raise ProviderResponseError(f"{self.provider.value} reply was interrupted: {finish_reason}", provider=self.provider.value, response_excerpt=str(parsed))
 
 
 class DeepSeekProvider(OpenAICompatibleProvider):
@@ -153,6 +182,7 @@ class DeepSeekProvider(OpenAICompatibleProvider):
         if not isinstance(choices, list) or not choices:
             raise ProviderResponseError(f"{self.provider.value} response did not include choices.", provider=self.provider.value, response_excerpt=str(parsed))
         first = choices[0]
+        self._raise_if_interrupted(parsed, "insufficient_system_resource")
         message = first.get("message") if isinstance(first, dict) else None
         content = message.get("content") if isinstance(message, dict) else None
         has_tool_calls = isinstance(message, dict) and isinstance(message.get("tool_calls"), list) and len(message["tool_calls"]) > 0
@@ -190,9 +220,20 @@ class DeepSeekProvider(OpenAICompatibleProvider):
 class GLMProvider(OpenAICompatibleProvider):
     provider = ModelProvider.GLM
 
+    def _extract_chat_text(self, parsed: Mapping[str, Any]) -> str:
+        self._raise_if_interrupted(parsed, "network_error")
+        return super()._extract_chat_text(parsed)
+
 
 class MiniMaxProvider(OpenAICompatibleProvider):
     provider = ModelProvider.MINIMAX
+
+    def _extract_chat_text(self, parsed: Mapping[str, Any]) -> str:
+        # @intent inline-thinking-is-not-the-answer
+        # MiniMax M2/M3 put their reasoning inside content as one leading <think>...</think> block; the
+        # answer is what follows. Tool-call turns are echoed from the raw message, so the reasoning
+        # MiniMax requires in history stays intact.
+        return _LEADING_THINK.sub("", super()._extract_chat_text(parsed), count=1)
 
 
 class KimiProvider(OpenAICompatibleProvider):

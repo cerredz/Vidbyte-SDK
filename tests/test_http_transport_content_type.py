@@ -1,6 +1,6 @@
 """FILE: tests/test_http_transport_content_type.py
 
-PURPOSE: Verifies that every JSON request built by HttpTransport and SyncHttpTransport carries exactly one content-type header, keeps a caller's own value, and that ExaClient succeeds against a server that rejects a doubled header.
+PURPOSE: Verifies that every JSON request built by HttpTransport and SyncHttpTransport carries exactly one content-type header, keeps a caller's own value, that ExaClient succeeds against a server that rejects a doubled header, and that SyncHttpTransport raises ProviderRequestError for socket failures urllib leaves unwrapped.
 ROLE IN CODEBASE: Pins the transport's header rule. Exa answered every research search with HTTP 400 while the SDK sent "Content-Type" and "content-type" side by side.
 ARCHITECTURE NOTE: httpx.MockTransport stands in for the network on the async path, and a captured urllib Request stands in on the sync paths; the transport and client code run unmodified.
 COMMON MODIFICATION PATTERNS: Add a case here when a new JSON send site is added to vidbyte/lib/http/transport.py.
@@ -12,8 +12,11 @@ TESTS: python -m pytest tests/test_http_transport_content_type.py and python scr
 from __future__ import annotations
 
 import asyncio
+import http.client
 import json
 import unittest
+from collections.abc import Callable, Iterator
+from email.message import Message
 from unittest.mock import patch
 from urllib.error import URLError
 
@@ -136,6 +139,89 @@ class SyncTransportContentTypeTests(unittest.TestCase):
                 request = self._captured_request(call)
                 values = [value for name, value in request.header_items() if name.lower() == "content-type"]
                 self.assertEqual(values, ["application/vnd.api+json"])
+
+
+class _DroppedSocketResponse:
+    """Stands in for an open urllib response whose socket fails while the body is read."""
+
+    status = 200
+
+    def __init__(self, failure: Exception) -> None:
+        self.headers = Message()
+        self._failure = failure
+
+    def __enter__(self) -> _DroppedSocketResponse:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        raise self._failure
+
+    def __iter__(self) -> Iterator[bytes]:
+        yield b"data: first\n"
+        raise self._failure
+
+
+class SyncTransportSocketErrorTests(unittest.TestCase):
+    _FAILURES = (TimeoutError("The read operation timed out"), http.client.RemoteDisconnected("Remote end closed connection without response"), ConnectionResetError(10054, "Connection reset by peer"), http.client.IncompleteRead(b"par", 10))
+
+    def _calls(self, transport: SyncHttpTransport, received: list[str]) -> dict[str, Callable[[], object]]:
+        # Builds one fully consuming call per sync path that has no socket-error mapping of its own.
+        return {
+            "request": lambda: transport.request(method="POST", url=_URL, headers={}, json_body={"q": 1}),
+            "upload_multipart": lambda: transport.upload_multipart(url=_URL, headers={}, fields={"model": "m"}, file_field="file", file_bytes=b"audio", file_name="a.wav", file_content_type="audio/wav"),
+            "stream_request": lambda: received.extend(transport.stream_request(method="POST", url=_URL, headers={}, json_body={"q": 1})),
+        }
+
+    def test_socket_failures_surface_as_provider_request_error(self) -> None:
+        # @intent sync-request-normalizes-socket-errors
+        # @intent sync-upload-multipart-normalizes-socket-errors
+        # @intent sync-stream-request-normalizes-socket-errors
+        # [Error Path] urllib leaves header timeouts, dropped connections and short reads unwrapped; callers catch only ProviderRequestError.
+        for failure in self._FAILURES:
+            for stage in ("waiting for headers", "reading the body"):
+                received: list[str] = []
+                for label, call in self._calls(SyncHttpTransport(), received).items():
+                    with self.subTest(path=label, stage=stage, failure=type(failure).__name__):
+                        received.clear()
+                        opener = patch("vidbyte.lib.http.transport.urlopen", side_effect=failure) if stage == "waiting for headers" else patch("vidbyte.lib.http.transport.urlopen", return_value=_DroppedSocketResponse(failure))
+                        with opener, self.assertRaises(ProviderRequestError) as caught:
+                            call()
+                        self.assertIs(caught.exception.__cause__, failure)
+                        self.assertEqual(caught.exception.response_excerpt, f"{type(failure).__name__}: {failure}")
+                        if label == "stream_request" and stage == "reading the body":
+                            self.assertEqual(received, ["first"])
+
+
+class _LinesResponse:
+    """Stands in for an open urllib SSE response that yields fixed raw lines."""
+
+    status = 200
+
+    def __init__(self, lines: list[bytes]) -> None:
+        self.headers = Message()
+        self._lines = lines
+
+    def __enter__(self) -> _LinesResponse:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def __iter__(self) -> Iterator[bytes]:
+        yield from self._lines
+
+
+class SyncTransportSseFieldTests(unittest.TestCase):
+    def test_data_lines_without_a_space_after_the_colon_are_streamed(self) -> None:
+        # @intent sse-space-after-colon-is-optional
+        # [Hidden Failure] Compatible servers such as Kimi for Coding send "data:{...}"; requiring "data: " streamed nothing.
+        lines = [b'data:{"a":1}\n', b"\n", b'data: {"b":2}\n', b": keep-alive\n", b"event:ping\n", b"data:[DONE]\n", b'data:{"c":3}\n']
+        with patch("vidbyte.lib.http.transport.urlopen", return_value=_LinesResponse(lines)):
+            received = list(SyncHttpTransport().stream_request(method="POST", url=_URL, headers={}, json_body={"q": 1}))
+        self.assertEqual(received, ['{"a":1}', '{"b":2}'])
 
 
 class ExaClientStrictServerTests(unittest.TestCase):

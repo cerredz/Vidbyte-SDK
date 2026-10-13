@@ -226,19 +226,28 @@ class FailureMetadataNormalizer:
     @staticmethod
     def _deduplicate(failures: Sequence[Failure]) -> tuple[Failure, ...]:
         # Deduplicate code/source pairs when runtime metadata exposes the same stop twice.
-        seen: set[tuple[FailureCode, str]] = set()
+        positions: dict[tuple[FailureCode, str], int] = {}
         result: list[Failure] = []
         for failure in failures:
             key = (FailureCode.from_value(failure.code), failure.source)
-            if key in seen:
+            if key not in positions:
+                positions[key] = len(result)
+                result.append(failure)
                 continue
-            seen.add(key)
-            result.append(failure)
+            # @intent one-stop-one-routable-failure
+            # A tool_settings_denied stop shares its code and source with the observed denied-call
+            # aggregate; keep the routable stop in the aggregate's slot so the handler still runs once.
+            kept = result[positions[key]]
+            kept_routable = kept.status is FailureStatus.EXHAUSTED or kept.disposition is FailureDisposition.ROUTE
+            if not kept_routable and (failure.status is FailureStatus.EXHAUSTED or failure.disposition is FailureDisposition.ROUTE):
+                result[positions[key]] = failure
         return tuple(result)
 
 
 class FailureRouter:
     """Session-scoped bounded ledger that escalates only exhausted failures."""
+
+    _FAILURE_IDS_ATTRIBUTE: ClassVar[str] = "__vidbyte_failure_ids__"
 
     def __init__(self, session: object, *, max_history: int = 512, enabled: bool = True, on_capture: Callable[[Failure], object] | None = None) -> None:
         """Bind a router to one Session and validate its bounded ledger settings."""
@@ -378,16 +387,41 @@ class FailureRouter:
         recorded = next((failure for failure in reversed(self._history) if raised_id is not None and failure.id == raised_id), None)
         if recorded is not None:
             return recorded
-        exception_ids: set[int] = set()
-        current: BaseException | None = exc
-        while current is not None:
-            exception_ids.add(id(current))
-            current = current.__cause__ or current.__context__
-        existing = next((failure for failure in reversed(self._history) if failure.details.get("exception_id") in exception_ids), None)
+        # @intent dedup-by-exception-identity-not-id
+        # The same exception object reaches both the agent and the Session boundary, so it must record once;
+        # id() is only a memory address that CPython reuses once an earlier exception is freed, which made a
+        # new, unrelated exception match an old record and skip both the ledger and its handler. The failure
+        # id is therefore tagged onto the exception object itself, so only that very object (or one chained to it) matches.
+        tagged_ids = self._tagged_failure_ids(exc)
+        existing = next((failure for failure in reversed(self._history) if failure.id in tagged_ids), None)
         if existing is not None:
             return existing
-        failure = Failure.from_exception(exc, phase=phase, source=source, details={"exception_id": id(exc)})
-        return self.record(failure)
+        # Record a new failure, then tag the exception so a later boundary seeing the same object reuses it.
+        failure = self.record(Failure.from_exception(exc, phase=phase, source=source))
+        self._tag_exception(exc, failure.id)
+        return failure
+
+    @classmethod
+    def _tagged_failure_ids(cls, exc: BaseException) -> set[str]:
+        # Collect the failure ids tagged onto the exception and its __cause__/__context__ chain.
+        tagged: set[str] = set()
+        seen: set[int] = set()
+        current: BaseException | None = exc
+        # The id() set only guards against a cyclic chain while every link is alive; it is never a dedup key.
+        while current is not None and id(current) not in seen:
+            seen.add(id(current))
+            tagged.update(getattr(current, cls._FAILURE_IDS_ATTRIBUTE, ()))
+            current = current.__cause__ or current.__context__
+        return tagged
+
+    @classmethod
+    def _tag_exception(cls, exc: BaseException, failure_id: str) -> None:
+        # Append rather than overwrite so an exception seen by two Sessions keeps each Session's record id.
+        try:
+            setattr(exc, cls._FAILURE_IDS_ATTRIBUTE, (*getattr(exc, cls._FAILURE_IDS_ATTRIBUTE, ()), failure_id))
+        except (AttributeError, TypeError):
+            # An exception type that refuses new attributes is simply not deduplicated across boundaries.
+            pass
 
     async def route(self, failure: Failure) -> RecoveryResult | None:
         """Run the configured handler once when a failure is eligible for escalation."""

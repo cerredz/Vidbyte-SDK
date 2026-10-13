@@ -69,7 +69,8 @@ class HarnessClient:
         self._registry.register(factory)
 
     def load(self, config: Mapping[str, Any] | str | Path, *, implementation: object | None = None, store: SessionStore | None = None, sink: TrajectorySink | None = None, collect: bool = False, base_path: str | Path | None = None) -> Harness:
-        # Wraps a foreign implementation (or a registered factory) in the Harness envelope.
+        # Wraps a foreign implementation (or a registered factory's) in the Harness envelope. A Harness
+        # subclass is used as is: a None store or sink and collect=False keep what it was built with.
         if implementation is not None:
             harness = wrap_implementation(implementation, store=store, sink=sink, collect=collect)
             harness.load(config, base_path=base_path)

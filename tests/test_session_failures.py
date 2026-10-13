@@ -114,6 +114,15 @@ class _RefundCallRunner:
         return SimpleNamespace(text="", raw={"choices": [{"message": {"role": "assistant", "content": None, "tool_calls": [call]}}]})
 
 
+class _PlainAnswerRunner:
+    """Offline runner that answers in plain text with no tool calls, so the run finishes on its first reply."""
+
+    def run(self, _prompt: str, **_options: object) -> SimpleNamespace:
+        # Return one OpenAI-style plain assistant message without network access.
+        text = "v2 notes: TODO fill in"
+        return SimpleNamespace(text=text, raw={"choices": [{"message": {"role": "assistant", "content": text}}]})
+
+
 class _DenyRefundMiddleware(AgentMiddleware):
     """Middleware that refuses every refund call, the reference refusal for ledger comparisons."""
 
@@ -156,6 +165,21 @@ class FailureContractsTests(unittest.TestCase):
         router.emit(FailureCode.ACTION_UNSAFE, phase=FailurePhase.ACTION, source="three")
         self.assertEqual([item.source for item in router.history()], ["two", "three"])
         self.assertEqual(len(router.history(code=FailureCode.ACTION_UNSAFE)), 1)
+
+    def test_capture_exception_dedups_by_identity_not_reused_id(self) -> None:  # [Silent Failure]
+        # @intent dedup-by-exception-identity-not-id
+        # Verify freed exceptions whose memory address is reused still record, while one object records once.
+        router = FailureRouter(object())
+        for index in range(5):
+            router.capture_exception(RuntimeError(f"turn {index}"))
+        self.assertEqual(len(router.history()), 5)
+        original = RuntimeError("runner failed")
+        first = router.capture_exception(original, source="agent")
+        wrapper = RuntimeError("session wrapper")
+        wrapper.__cause__ = original
+        self.assertIs(router.capture_exception(original, source="session"), first)
+        self.assertIs(router.capture_exception(wrapper, source="session"), first)
+        self.assertEqual(len(router.history()), 6)
 
     def test_disabled_router_does_not_record(self) -> None:  # [Hidden Assumption]
         # Verify disabled instrumentation has no policy side effects.
@@ -375,6 +399,16 @@ class FailureNormalizationTests(unittest.TestCase):
         failures = FailureMetadataNormalizer.from_reply(reply)
         self.assertEqual([(item.code, item.source) for item in failures], [(FailureCode.TOOL_IDENTICAL_CALL_LIMIT, "tool_settings")])
 
+    def test_denied_stop_stays_routable_after_earlier_denied_call(self) -> None:  # [Hidden Failure]
+        # @intent one-stop-one-routable-failure
+        # Verify a tool_settings_denied stop keeps exactly one routable record whether or not an earlier call was denied.
+        for states in ((), ("denied",)):
+            with self.subTest(tool_call_states=states):
+                reply = AgentMessage(sender="a", recipient="o", content="stopped", metadata={"stop_reason": "tool_settings_denied", "tool_call_states": states})
+                failures = FailureMetadataNormalizer.from_reply(reply)
+                rows = [(item.code, item.source, item.status, item.disposition) for item in failures]
+                self.assertEqual(rows, [(FailureCode.TOOL_PERMISSION_DENIED, "agent_runtime", FailureStatus.EXHAUSTED, FailureDisposition.ROUTE)])
+
     def test_middleware_abort_stop_yields_one_record(self) -> None:  # [Hidden Failure]
         # @intent one-middleware-abort-one-record
         # Verify one middleware abort keeps only the richer middleware record, not a runtime twin.
@@ -450,6 +484,22 @@ class SessionFailureIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual([(item.code, item.status, item.disposition) for item in session.failures.history()], [(code, FailureStatus.TERMINAL, FailureDisposition.RAISE)])
                 self.assertEqual(raised.exception.failure.id, session.failures.history()[0].id)
 
+    async def test_review_finish_stop_rule_refuses_the_finish(self) -> None:  # [Silent Failure]
+        # @intent review-finish-rules-are-evaluated
+        # Verify a stop rule declared on review_finish runs, is recorded, and keeps the run from ending as a normal answer.
+        calls: list[int] = []
+
+        def no_todo(_context):
+            calls.append(1)
+            return Failure(code=FailureCode.ACTION_POLICY_VIOLATION, source="no_todo", phase=FailurePhase.ACTION)
+
+        session = Session(build_test_agent(name="notes", system_prompt="Write release notes.", runner=_PlainAnswerRunner()))
+        session.failures.add_rule(rule(code=FailureCode.ACTION_POLICY_VIOLATION, on=MiddlewareHook.REVIEW_FINISH, on_match=FailureDisposition.STOP)(no_todo))
+        reply = await session.arun("write the notes")
+        self.assertEqual(calls, [1])
+        self.assertEqual(len(session.failures.history(code=FailureCode.ACTION_POLICY_VIOLATION)), 1)
+        self.assertEqual(reply.metadata.get("stop_reason"), "contract_unsatisfied")
+
     async def test_settings_refusals_record_tool_runtime_cause_like_middleware(self) -> None:  # [Silent Failure]
         # @intent ledger-records-every-refusal-kind
         # Verify a ToolSettings or allowed_tools refusal leaves the same tool_runtime permission record as a middleware refusal.
@@ -518,6 +568,18 @@ class SessionFailureIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.succeeded)
         self.assertEqual(result.value._policy.value, Session.MANUAL_POLICY)
         self.assertEqual(result.value._tags, ("repair",))
+
+    def test_fork_recovery_keeps_live_agent_key(self) -> None:  # [Silent Failure]
+        # @intent fork-recovery-keeps-agent-key
+        # Verify both the plain and the tagged fork branch authenticate with the live agent's explicit key.
+        agent = build_test_agent(name="tenant", system_prompt="Work.", runner=_FailingRunner(), api_key="sk-tenant-live")
+        session = Session(agent)
+        session.checkpoint()
+        failure = Failure(code=FailureCode.RUNTIME_MAX_ITERATIONS, source="test", phase=FailurePhase.LOOP)
+        for handler in (ForkRecovery(), ForkRecovery(tags=["repair"])):
+            with self.subTest(tags=handler._fork_settings.tags):
+                child = handler.recover(failure, session=session).value
+                self.assertEqual(child.agent.runner_config.api_key, "sk-tenant-live")
 
     def test_fork_recovery_refuses_bare_string_tags(self) -> None:  # [Hidden Assumption]
         # Verify tags="incident" is refused instead of tagging the branch with its characters.

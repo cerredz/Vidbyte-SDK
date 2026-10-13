@@ -168,8 +168,8 @@ class AgentForker:
         # A Tools catalog inside the list adds its own tools in place, as BaseAgent does, so cloning and drop_tools reach them.
         selected = tools.all() if isinstance(tools, Tools) else (agent._agent_tool_items if tools is None else cls._flat_tools(tools))
         parent_mcp_tools = set(agent._mcp_bridged_tools_for_fork())
-        child_items = [cls._clone_tool(tool, agent.context_manager, child_manager) for tool in selected if tool not in parent_mcp_tools]
-        child_items.extend(cls._clone_tool(tool, agent.context_manager, child_manager) for tool in cls._flat_tools(settings.add_tools))
+        child_items = [cls._clone_tool(tool, agent.context_manager, child_manager, parent=agent) for tool in selected if tool not in parent_mcp_tools]
+        child_items.extend(cls._clone_tool(tool, agent.context_manager, child_manager, parent=agent) for tool in cls._flat_tools(settings.add_tools))
         if not settings.drop_tools:
             return tuple(child_items)
         dropped = {str(name) for name in settings.drop_tools}
@@ -181,12 +181,18 @@ class AgentForker:
         return tuple(tool for item in items for tool in (item.all() if isinstance(item, Tools) else (item,)))
 
     @classmethod
-    def _clone_tool(cls, tool: object, parent_manager: ContextManager | None, child_manager: ContextManager | None) -> object:
+    def _clone_tool(cls, tool: object, parent_manager: ContextManager | None, child_manager: ContextManager | None, *, parent: object | None = None) -> object:
         # Clones SDK tools that carry mutable agent bindings, preserving custom tools by identity.
         if isinstance(tool, _ToolWrapper):
             # A customize() or with_activity() view clones the tool it wraps and keeps the same view over the copy.
-            inner = cls._clone_tool(tool.wrapped_tool, parent_manager, child_manager)
+            inner = cls._clone_tool(tool.wrapped_tool, parent_manager, child_manager, parent=parent)
             return tool if inner is tool.wrapped_tool else tool._rewrap(inner)
+        # @intent fork-never-inherits-another-agents-session-grants
+        # A session tool another agent carries holds that agent's session grants, so the child gets the
+        # configured-scope copy BaseAgent gives a sibling; only the parent's own tools keep the parent's scope.
+        owner, for_agent = getattr(tool, "_owner", None), getattr(tool, "clone_for_agent", None)
+        if callable(for_agent) and parent is not None and owner is not None and owner is not parent:
+            return for_agent()
         clone = getattr(tool, "clone_for_fork", None)
         if callable(clone):
             return clone()

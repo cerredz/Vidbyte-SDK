@@ -27,18 +27,22 @@ if TYPE_CHECKING:
 class OutputBehavior:
     """Predicates over final response output for a completed agent run."""
 
-    _CODE_BLOCK_PATTERN = re.compile(r"(?ms)(`{3,}|~{3,})([^\n`]*)\n.*?\n\1")
+    # @intent code-fences-may-be-indented-or-empty
+    # Fences sit on their own lines (LF or CRLF), may be indented (list items) and may wrap no body, so a block never swallows the next one.
+    _CODE_BLOCK_PATTERN = re.compile(r"(?ms)^[ \t]*(`{3,}|~{3,})([^\n`]*)\n(?:.*?\n)??[ \t]*\1[ \t]*\r?$")
     _URL_PATTERN = re.compile(r"(?i)\b(?:https?://|www\.)[^\s<>)\]]+")
     _MARKDOWN_CITATION_PATTERN = re.compile(r"\[[^\]]+\]\((?:https?://|www\.)[^)\s]+\)")
     _FOOTNOTE_CITATION_PATTERN = re.compile(r"\[\^[^\]]+\]")
     _BRACKET_CITATION_PATTERN = re.compile(r"(?<!\^)\[(?:\d+|[A-Za-z][A-Za-z0-9_-]*,\s*\d{4})\]")
     _WORD_PATTERN = re.compile(r"\b\w+\b")
+    # @intent refusal-contractions-accept-typographic-apostrophe
+    # Models often type the contraction apostrophe as U+2019, so the same refusal sentence must match with either apostrophe.
     _REFUSAL_PATTERNS = (
-        re.compile(r"\bi\s+can(?:not|'t)\b", re.IGNORECASE),
+        re.compile(r"\bi\s+can(?:not|['’]t)\b", re.IGNORECASE),
         re.compile(r"\bi\s+am\s+unable\s+to\b", re.IGNORECASE),
-        re.compile(r"\bi'm\s+unable\s+to\b", re.IGNORECASE),
-        re.compile(r"\bi\s+can't\s+help\s+with\b", re.IGNORECASE),
-        re.compile(r"\bi\s+won't\b", re.IGNORECASE),
+        re.compile(r"\bi['’]m\s+unable\s+to\b", re.IGNORECASE),
+        re.compile(r"\bi\s+can['’]t\s+help\s+with\b", re.IGNORECASE),
+        re.compile(r"\bi\s+won['’]t\b", re.IGNORECASE),
     )
     _HEDGING_PATTERNS = (
         re.compile(r"\bmaybe\b", re.IGNORECASE),

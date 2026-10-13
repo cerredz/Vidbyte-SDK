@@ -33,6 +33,7 @@ class FetchResponse:
     status_code: int
     body_bytes: bytes
     content_type: str | None = None
+    url: str | None = None  # Final URL after redirects; None when the fetcher has no such notion.
 
 
 @dataclass(frozen=True, slots=True)

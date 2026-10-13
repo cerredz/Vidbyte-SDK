@@ -48,6 +48,8 @@ class TraceController(TracerBase):
         if semantic is None or semantic.suppressed:
             self._pop_context(semantic)
             return
+        # @intent end-trace-matches-open-mode
+        # Close the context the way it was opened, so a session's converted agent.run ends as a span and any other trace as a trace.
         if semantic.metadata.get("as_trace"):
             self.inner.end_trace(semantic.provider_context or SpanContext(), output=output, error=error)
         else:
@@ -103,6 +105,11 @@ class TraceController(TracerBase):
         elif name.startswith("algorithm."):
             detail = TraceDetail.VERBOSE
             component = "algorithms"
+        elif name.startswith(("runtime.search.", "runtime.actor.")):
+            # @intent runtime-spans-route-to-factory-component
+            # Search/actor runtime spans use the component their factories declare, so `search=`/`actor=` profile settings apply.
+            detail = TraceDetail.VERBOSE
+            component = name.split(".")[1]
         elif name.startswith("runtime."):
             detail = TraceDetail.VERBOSE
             component = "runtimes"
@@ -120,7 +127,9 @@ class TraceController(TracerBase):
             component = "sessions"
         elif name.startswith("agent."):
             component = "agents"
-            detail = TraceDetail.STANDARD if name == "agent.stop" else TraceDetail.MINIMAL
+            # @intent minimal-profile-keeps-only-agent-run
+            # Only agent.run is a core minimal span; agent.stop, agent.fallback, and any other agent.* span are standard detail.
+            detail = TraceDetail.MINIMAL if name == "agent.run" else TraceDetail.STANDARD
         policy = ParentPolicy.ROOT if root else ParentPolicy.CURRENT
         return SpanSpec(name=name, kind=kind, component=component, detail=detail, parent_policy=policy, attributes=dict(attributes))
 

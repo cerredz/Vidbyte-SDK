@@ -4,19 +4,21 @@ PURPOSE: Regression tests proving FileSessionStore treats session and checkpoint
 ROLE IN CODEBASE: Guards against glob injection and path traversal through ids that reach the store from public APIs.
 ARCHITECTURE NOTE: Compares FileSessionStore with InMemorySessionStore on the same ids in temporary directories.
 COMMON MODIFICATION PATTERNS: Add a case when a new store method takes an id from callers.
-KNOWN EDGE CASES: Glob metacharacters, suffix-colliding ids, "..", separators, and Windows drive prefixes.
+KNOWN EDGE CASES: Glob metacharacters, suffix-colliding ids, "..", separators, Windows drive prefixes, and case-aliased ids.
 RELATED DOCS: vidbyte/sessions/stores/file.py.
 TESTS: python -m pytest -q tests/test_file_store_opaque_ids.py.
 """
 
 from __future__ import annotations
 
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from vidbyte.sessions import FileSessionStore, InMemorySessionStore
-from vidbyte.sessions.contracts import SESSION_SCHEMA_VERSION, Checkpoint, RunState
+from vidbyte.sessions import FileSessionStore, InMemorySessionStore, Session
+from vidbyte.sessions.contracts import SESSION_SCHEMA_VERSION, Checkpoint, RunState, SessionMeta, SessionStatus
 from vidbyte.sessions.errors import CheckpointNotFoundError, SessionNotFoundError, SessionStoreError
 
 PATTERN_IDS = ("*", "x*", "ck_9*", "????????*", "[a-z]*", "**")
@@ -113,6 +115,43 @@ class FileStoreOpaqueIdTests(unittest.TestCase):
         self.assertEqual(len(remaining), 2)
         self.assertIn("ck_c3", remaining)
         self.assertEqual(store.get("ck_9alice").session_id, "alice")
+
+    def _alias_acme_directory(self) -> Path:
+        # Present "Acme"'s files under the name the store uses for "acme", as a case-insensitive filesystem does.
+        self.file_store.put(_checkpoint("Acme", "ck_acme"))
+        alias = self.root / "acme"
+        if not alias.exists():
+            shutil.copytree(self.root / "Acme", alias)
+        return alias
+
+    def test_case_aliased_session_id_reads_as_not_found(self) -> None:  # [Silent Failure]
+        self._alias_acme_directory()
+        with self.assertRaises(SessionNotFoundError):
+            self.file_store.get_meta("acme")
+        self.assertEqual(self.file_store.history("acme"), [])
+        self.assertIsNone(self.file_store.head("acme"))
+        with self.assertRaises(SessionNotFoundError):
+            Session.resume(self.file_store, "acme")
+        self.assertEqual(self.file_store.get_meta("Acme").session_id, "Acme")
+
+    def test_case_aliased_session_id_write_refuses_and_keeps_owner(self) -> None:  # [Silent Failure]
+        alias = self._alias_acme_directory()
+        before = (alias / "meta.json").read_bytes()
+        meta = SessionMeta(session_id="acme", head_id=None, parent_session_id=None, agent_name="a", status=SessionStatus.ACTIVE, created_at="2026-06-06T00:00:00+00:00", updated_at="2026-06-06T00:00:00+00:00", tags=())
+        with self.assertRaises(SessionStoreError):
+            self.file_store.put_meta(meta)
+        with self.assertRaises(SessionStoreError):
+            self.file_store.put(_checkpoint("acme", "ck_intruder"))
+        self.assertEqual((alias / "meta.json").read_bytes(), before)
+        self.assertEqual([c.id for c in self.file_store.history("Acme")], ["ck_acme"])
+
+    def test_case_swapped_checkpoint_id_misses_under_case_insensitive_glob(self) -> None:  # [Silent Failure]
+        (real,) = list(self.root.glob("alice/checkpoints/*.json"))
+        with mock.patch.object(type(self.root), "glob", lambda _self, _pattern: iter([real])):
+            with self.assertRaises(CheckpointNotFoundError):
+                self.file_store.get("CK_9ALICE")
+            self.file_store._delete_checkpoint("CK_9ALICE")
+        self.assertTrue(real.exists())
 
 
 if __name__ == "__main__":

@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from vidbyte.sessions.contracts import Checkpoint, SessionStatus
+from vidbyte.sessions.contracts import Checkpoint
 from vidbyte.tools.builtins.sessions.descriptions import CHECKPOINT_TOOL_DESCRIPTION, LABEL_DESCRIPTION, SESSION_ID_DESCRIPTION
 from vidbyte.tools.builtins.sessions._base import _SessionBuiltinTool
 from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec
@@ -87,7 +87,9 @@ class CheckpointTool(_SessionBuiltinTool):
             created_at=datetime.now(timezone.utc).isoformat(),
             run_state=head.run_state,
             label=label,
-            status=SessionStatus.ACTIVE,
+            # @intent bookmark-keeps-session-status
+            # A labeled marker adds no turn, so it keeps the target's lifecycle status; ACTIVE would reopen a COMPLETED session.
+            status=self._store.get_meta(session_id).status,
         )
         stored = self._store.put(marker)
         return ToolResult.success(_TOOL_NAME, stored.id)

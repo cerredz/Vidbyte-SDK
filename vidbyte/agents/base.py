@@ -13,8 +13,9 @@ Architecture:
       lifetime, both reset at the top of every generate_reply() and threaded
       into the AgentRuntime it constructs for the linear-loop runtimes (LINEAR and JEV).
     - Inside a metered run (an active vidbyte.lib.usage_ledger ledger, opened by
-      JevRuntime), a nested agent records into its own tracker and merges that
-      run's usage into the active ledger when it finishes.
+      JevRuntime, a team agent, or a top-level agent over its own tracker), a
+      nested agent records into its own tracker and merges that run's usage into
+      the active ledger when it finishes.
 Relations:
     Inherits from McpAttachableMixin. Used by registries, harnesses, and
     multi-agent orchestration. Agent-bound built-ins are wired in
@@ -545,7 +546,7 @@ class BaseAgent(McpAttachableMixin):
         )
 
     @classmethod
-    def restore(cls, state: RunState, *, tools: Sequence[object] = (), middleware: Sequence[AgentMiddleware] = (), tracer: object | None = None, trace: object | None = None, output_schema: object | None = None, outputs: Sequence[OutputConnector] = ()) -> BaseAgent:
+    def restore(cls, state: RunState, *, tools: Sequence[object] = (), middleware: Sequence[AgentMiddleware] = (), tracer: object | None = None, trace: object | None = None, output_schema: object | None = None, api_key: str | None = None, outputs: Sequence[OutputConnector] = ()) -> BaseAgent:
         """Rebuild a live agent from a RunState, re-supplying non-serializable parts (the rehydration contract)."""
         from vidbyte.sessions.serialization import SessionSerializer
         serializer = SessionSerializer()
@@ -559,6 +560,7 @@ class BaseAgent(McpAttachableMixin):
             provider=state.provider,
             model_name=state.model_name,
             temperature=state.temperature,
+            api_key=api_key,
             run_id=state.run_id,
             agent_loop_settings=cls._restore_loop_settings(state),
             timeout_seconds=state.runtime_config.get("runner_timeout_seconds"),
@@ -602,6 +604,13 @@ class BaseAgent(McpAttachableMixin):
                     "worker_model": self.runtime_config_obj.worker_model,
                 }
             )
+            include = self.runtime_config_obj.include_actors
+            if include is not None:
+                # @intent restore-keeps-actor-set
+                # Store the chosen actors as registered role names, keeping only the ones restore can find again.
+                from vidbyte.lib.registries.actors import actor_registry
+                registered = actor_registry.all()
+                config["include_actors"] = [actor.role_name for actor in include if registered.get(str(getattr(actor, "role_name", "")).lower()) is actor]
         return config
 
     def _export_loop_settings(self) -> dict[str, Any]:
@@ -759,12 +768,17 @@ class BaseAgent(McpAttachableMixin):
             AgentRuntimeType.ACTOR_MODEL_P2P,
             AgentRuntimeType.ACTOR_MODEL_BROADCAST,
         ):
+            # @intent restore-keeps-actor-set
+            # Map saved role names back to actor classes; an older checkpoint without the key keeps the default actors.
+            from vidbyte.agents.runtimes.actor.actor import actor_registry
+            names = state.runtime_config.get("include_actors")
             return ActorRuntime(
                 topology=runtime_type,
                 dynamic_actors=bool(state.runtime_config.get("dynamic_actors", False)),
                 max_loop=int(state.runtime_config.get("max_loop", 20)),
                 termination_mode=str(state.runtime_config.get("termination_mode", "coordinator")),
                 worker_model=state.runtime_config.get("worker_model"),
+                include_actors=None if names is None else [actor_registry.get(name) for name in names],
             )
         return runtime_type
 
@@ -782,6 +796,10 @@ class BaseAgent(McpAttachableMixin):
         got = tuple(child._tool_name(tool) for tool in child._agent_tool_items)
         if set(expected) != set(got):
             child.metadata["__resume_tool_mismatch__"] = {"expected": list(expected), "got": list(got)}
+        else:
+            # @intent resume-tool-marker-describes-this-restore
+            # Drop a marker copied in from an earlier checkpoint, so a matching restore no longer reports a mismatch.
+            child.metadata.pop("__resume_tool_mismatch__", None)
 
     async def receive(self, message: AgentMessage) -> None:
         self.history.append(message)
@@ -802,8 +820,14 @@ class BaseAgent(McpAttachableMixin):
             self.last_queued_replies = []
         try:
             parent = active_usage_ledger()
-            if parent is None or parent is self._usage_tracker:
+            if parent is self._usage_tracker:
                 return await self._generate_reply(message, **options)
+            if parent is None:
+                # @intent top-level-agent-owns-the-run-ledger
+                # A plain top-level run is billed for every call it causes, so it opens the ledger over its own
+                # tracker: sub-agent tools, trace agents and lib-level calls then reach its get_usage() exactly once.
+                with usage_ledger_scope(self._usage_tracker):
+                    return await self._generate_reply(message, **options)
             with usage_ledger_scope(self._usage_tracker):
                 try:
                     return await self._generate_reply(message, **options)
@@ -1170,7 +1194,9 @@ class BaseAgent(McpAttachableMixin):
             # FailureMetadataNormalizer, so the Session boundary must be notified directly.
             metadata["handoff_error"] = repr(exc)
             self._notify_session_exception(exc)
-            self.last_handoff = None
+            # @intent failed-auto-handoff-keeps-run-handoff
+            # Keep a handoff the model already wrote during this run; clear it only when this run recorded none.
+            self.last_handoff = self.handoffs[-1] if len(self.handoffs) > self._run_handoff_start else None
 
     def _build_context(
         self,
@@ -1339,6 +1365,9 @@ class BaseAgent(McpAttachableMixin):
             kwargs["usage_tracker"] = self._usage_tracker
             kwargs["speed_tracker"] = self._speed_tracker
             kwargs["fallback"] = self.fallback
+            # @intent a-tool-the-agent-adds-mid-run-reaches-the-next-iteration
+            # The runtime gets a snapshot of the catalog, so it also reads the live one to adopt tools added mid-run.
+            kwargs["agent_catalog"] = lambda: self.tools
 
         return runtime_cls(
             agent_name=self.name,
@@ -1542,7 +1571,9 @@ class BaseAgent(McpAttachableMixin):
         )
         if self.context_manager is not None:
             manager.extend(self.context_manager.items())
-        if input_context_manager is not None:
+        # @intent shared-context-manager-items-once
+        # A manager supplied both on the agent and for this run is one source, so add its items only once.
+        if input_context_manager is not None and input_context_manager is not self.context_manager:
             manager.extend(input_context_manager.items())
         return manager
 

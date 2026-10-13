@@ -374,6 +374,24 @@ class ZepGetTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status, ToolStatus.SUCCESS)
         self.assertIn("Alice is a developer.", result.output)
 
+    async def test_get_shows_recent_messages_and_never_none(self) -> None:
+        """[Silent Failure] null context must not read 'None', and lastn's recent messages must reach the model."""
+        messages = [
+            {"role": "user", "role_type": "user", "content": "My order #881 arrived broken"},
+            {"role": "assistant", "role_type": "assistant", "content": "Sorry! Refund issued."},
+        ]
+        tool = _inject_transport(ZepGetMemoryTool("zepkey"), MockTransport(200, {"context": None, "messages": messages}))
+        result = await tool.execute(ToolCall("zep_get_memory", {"session_id": "s", "lastn": 2}))
+        self.assertEqual(result.status, ToolStatus.SUCCESS)
+        self.assertNotIn("None", result.output)
+        self.assertIn("user: My order #881 arrived broken", result.output)
+        self.assertIn("assistant: Sorry! Refund issued.", result.output)
+
+        tool = _inject_transport(ZepGetMemoryTool("zepkey"), MockTransport(200, {"context": "FACTS:\n- Ann prefers email", "messages": messages}))
+        result = await tool.execute(ToolCall("zep_get_memory", {"session_id": "s", "lastn": 2}))
+        self.assertIn("FACTS:\n- Ann prefers email", result.output)
+        self.assertIn("#881", result.output)
+
     async def test_get_missing_session_id_returns_error(self) -> None:
         """[Hidden Assumption] session_id is required."""
         tool = ZepGetMemoryTool("zepkey")
@@ -560,6 +578,15 @@ class LettaSearchTests(unittest.IsolatedAsyncioTestCase):
         tool = _inject_transport(LettaSearchArchivalMemoryTool("lettakey"), transport)
         await tool.execute(ToolCall("letta_search_archival_memory", {"agent_id": "a1", "query": "test", "limit": 3}))
         self.assertIn("limit=3", transport.last_call["url"])
+
+    async def test_search_query_sent_as_list_endpoint_search_filter(self) -> None:
+        """[Silent Failure] the query goes in Letta's documented `search` filter, not an ignored `query` key."""
+        transport = MockTransport(200, [])
+        tool = _inject_transport(LettaSearchArchivalMemoryTool("lettakey"), transport)
+        await tool.execute(ToolCall("letta_search_archival_memory", {"agent_id": "a1", "query": "Alice", "limit": 3}))
+        url = transport.last_call["url"]
+        self.assertIn("search=Alice", url)
+        self.assertNotIn("query=", url)
 
 
 class LettaDeleteTests(unittest.IsolatedAsyncioTestCase):

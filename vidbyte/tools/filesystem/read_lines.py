@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from vidbyte.lib.errors import ToolExecutionError
-from vidbyte.lib.tools.filesystem import FileSystemPermissions
+from vidbyte.lib.tools.filesystem import FileSystemPermissions, LineEndings
 from vidbyte.tools.filesystem._base_tool import FileSystemTool
 from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
 
@@ -35,7 +35,10 @@ class ReadLinesTool(FileSystemTool):
                 raise ToolExecutionError("ReadLinesTool end must be greater than or equal to start.")
             target = self._path(path)
             FileSystemPermissions.require_existing_file(target)
-            lines = self.backend.read_text(target, encoding=self._config.encoding).splitlines()
+            # @intent read-lines-numbers-lines-as-on-disk
+            # Split at "\n" only, like the edit diffs and grep -n, so a form feed
+            # or U+2028 inside a line does not shift every later line number.
+            lines = LineEndings.split_bare_lines(self.backend.read_text(target, encoding=self._config.encoding))
             selected = lines[start - 1 : end]
             return ToolResult.success(self.name, "\n".join(selected), metadata={"path": str(target), "start": start, "end": end})
         except Exception as exc:

@@ -15,12 +15,16 @@ Relations:
 from __future__ import annotations
 
 import asyncio
+import http.server
+import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
 
 from vidbyte.lib.dataclasses import ToolCall
+from vidbyte.lib.dataclasses.sources import FetchResponse
 from vidbyte.lib.errors import SourceFetchError, SourcePinMismatchError, SourceSecurityError
 from vidbyte.lib.http.transport import SyncHttpTransport
 from vidbyte.sources import (
@@ -53,6 +57,37 @@ class CountingFetcher:
     def fetch(self, url: str):
         self.calls += 1
         return self._inner.fetch(url)
+
+
+class RedirectingFetcher:
+    """Fake fetcher that reports its bytes as read from a fixed final URL, as after a redirect."""
+
+    def __init__(self, final_url: str) -> None:
+        self._final_url = final_url
+
+    def fetch(self, url: str) -> FetchResponse:
+        return FetchResponse(status_code=200, body_bytes=b"# x\n", url=self._final_url)
+
+
+class _RedirectHandler(http.server.BaseHTTPRequestHandler):
+    """Local test server: /a answers 302 to /b, and /b answers 200 with a tiny markdown body."""
+
+    def do_GET(self) -> None:
+        if self.path == "/a":
+            self.send_response(302)
+            self.send_header("Location", "/b")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        body = b"# b\n"
+        self.send_response(200)
+        self.send_header("Content-Type", "text/markdown")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format: str, *args: object) -> None:
+        return
 
 
 class SourcesBaseTests(unittest.TestCase):
@@ -222,6 +257,41 @@ class SourcesBaseTests(unittest.TestCase):
             cache.put(sha256_hex(_DATA), _DATA)
             self.assertEqual(cache.get(sha256_hex(_DATA)), _DATA)
 
+    def test_filesnapshotcache_tolerates_concurrent_writers(self) -> None:
+        # @intent snapshot-cache-tolerates-concurrent-writers
+        # [Race Condition] An existing entry is never rewritten, and concurrent put/get of one hash never fails.
+        content_hash = sha256_hex(_DATA)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "snaps"
+            cache = FileSnapshotCache(root)
+            cache.put(content_hash, _DATA)
+            cache.put(content_hash, b"different bytes under the same hash")
+            self.assertEqual(cache.get(content_hash), _DATA)
+            self.assertEqual(list(root.glob("*.tmp")), [])
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "snaps"
+            cache = FileSnapshotCache(root)
+            barrier = threading.Barrier(8)
+            errors: list[BaseException] = []
+
+            def worker() -> None:
+                try:
+                    barrier.wait()
+                    for _ in range(20):
+                        cache.put(content_hash, _DATA)
+                        self.assertIn(cache.get(content_hash), (None, _DATA))
+                except BaseException as exc:  # noqa: BLE001 - collected and asserted below
+                    errors.append(exc)
+
+            threads = [threading.Thread(target=worker) for _ in range(8)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+            self.assertEqual(errors, [])
+            self.assertEqual(cache.get(content_hash), _DATA)
+            self.assertEqual(list(root.glob("*.tmp")), [])
+
     def test_filesnapshotcache_end_to_end_no_refetch(self) -> None:
         # [Hidden Failure] A pinned reload from the file cache reads from disk with no network.
         with tempfile.TemporaryDirectory() as tmp:
@@ -260,6 +330,20 @@ class SourcesBaseTests(unittest.TestCase):
             result = source.load(ArtifactRef(url=path.as_uri()))
             self.assertEqual(result.items[0].title, "Title")
 
+    def test_filefetcher_keeps_file_uri_host_as_unc_share(self) -> None:
+        # @intent file-uri-host-is-a-unc-share
+        # [Silent Failure] A file URI host is the share serving the file, never dropped for a local path.
+        path = FileFetcher()._resolve_path("file://docs-share/handbook/oncall.md")
+        self.assertIn("docs-share", str(path))
+        self.assertNotEqual(path, Path("/handbook/oncall.md").resolve())
+        if sys.platform == "win32":
+            self.assertTrue(str(path).startswith("\\\\docs-share\\handbook"))
+        with tempfile.TemporaryDirectory() as tmp:
+            local = Path(tmp).resolve() / "doc.md"
+            local.write_bytes(_DATA)
+            for url in (local.as_uri(), local.as_uri().replace("file://", "file://localhost", 1)):
+                self.assertEqual(FileFetcher().fetch(url).body_bytes, _DATA)
+
     def test_httpfetcher_refuses_file_and_schemeless_urls_before_any_request(self) -> None:
         # [Hidden Assumption] HttpFetcher never opens a local file and only raises SourceFetchError.
         with tempfile.TemporaryDirectory() as tmp:
@@ -272,6 +356,47 @@ class SourcesBaseTests(unittest.TestCase):
                         HttpFetcher().fetch(url)
                     self.assertEqual(caught.exception.details, {"url": url, "scheme": scheme})
             request_bytes.assert_not_called()
+
+    def test_httpfetcher_wraps_read_timeout_so_chained_fetcher_falls_back(self) -> None:
+        # @intent sync-request-bytes-normalizes-socket-errors
+        # [Error Path] urllib leaves a body read timeout unwrapped; HttpFetcher must still raise SourceFetchError.
+        response = mock.MagicMock(status=200)
+        response.__enter__.return_value = response
+        response.read.side_effect = TimeoutError("The read operation timed out")
+        url = "https://ex.com/x.md"
+        with mock.patch("vidbyte.lib.http.transport.urlopen", return_value=response):
+            with self.assertRaises(SourceFetchError) as caught:
+                HttpFetcher().fetch(url)
+            self.assertEqual(caught.exception.details, {"url": url, "status_code": None, "excerpt": "TimeoutError: The read operation timed out"})
+            fetcher = ChainedFetcher([HttpFetcher(), InMemoryFetcher({url: _DATA})])
+            result = DocumentSource(fetcher=fetcher).load(ArtifactRef(url=url))
+        self.assertEqual(result.items[0].title, "Title")
+
+    def test_redirect_off_the_allowlist_is_refused(self) -> None:
+        # @intent redirect-target-is-allowlisted
+        # [Hidden Assumption] An allowlisted URL that redirects to an unlisted host must not load that host's bytes.
+        source = DocumentSource(fetcher=RedirectingFetcher("https://evil.example/x"), allowlist=UrlAllowlist(allowed_hosts=frozenset({"good.com"})))
+        with self.assertRaises(SourceSecurityError):
+            source.load(ArtifactRef(url="https://good.com/start"))
+
+    def test_redirect_within_the_allowlist_still_loads(self) -> None:
+        # [Edge Case] A same-site move to another allowlisted URL is not refused.
+        source = DocumentSource(fetcher=RedirectingFetcher("https://good.com/moved"), allowlist=UrlAllowlist(allowed_hosts=frozenset({"good.com"})))
+        result = source.load(ArtifactRef(url="https://good.com/start"))
+        self.assertEqual(result.items[0].title, "x")
+
+    def test_httpfetcher_reports_the_final_url_after_a_redirect(self) -> None:
+        # [Hidden Assumption] urllib follows the 302 itself; FetchResponse.url must name where the bytes came from.
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _RedirectHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            response = HttpFetcher(timeout_seconds=10).fetch(f"http://127.0.0.1:{server.server_address[1]}/a")
+        finally:
+            server.shutdown()
+            server.server_close()
+        self.assertEqual(response.body_bytes, b"# b\n")
+        self.assertTrue(response.url.endswith("/b"), response.url)
 
     def test_direct_http_fetch_tool_reports_fetch_failed_for_file_url(self) -> None:
         # [Edge Case] A model-supplied file:// URL is a clean fetch_failed result, not an execution error.

@@ -163,6 +163,7 @@ def _validate_provider_model_pair(provider: str | None, model: str | None) -> No
         return
     ProviderModelRegistry.validate_provider(provider)
     ProviderModelRegistry.validate_model(model)
+    ProviderModelRegistry.require_openrouter_for_routed_model(provider, model)
 
 
 def _normalize_names(values: tuple[str, ...], field_name: str) -> tuple[str, ...]:

@@ -7,7 +7,8 @@ from typing import Any
 from unittest.mock import patch
 
 from tests.agent_test_support import build_test_agent
-from vidbyte import Agent, AggregateAgent, ProposerSpec, Trace, TraceController, TraceProfile
+from vidbyte import Agent, AggregateAgent, DebugTracer, ProposerSpec, Trace, TraceController, TraceProfile
+from vidbyte.agents.runtimes.configs import ActorRuntime
 from vidbyte.agents.types import AgentMessage
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.tracing import SpanContext, TracerBase
@@ -17,6 +18,7 @@ from vidbyte.trace.providers import GenericProviderTranslator, LangSmithProvider
 from vidbyte.trace.registry import TraceComponentRegistry
 from vidbyte.trace.schema import SemanticSpanContext, SpanKind, SpanSpec, TraceDetail
 
+_RUNTIME_SPAN_NAMES = ("runtime.iteration", "runtime.search.run", "runtime.search.node", "runtime.actor.run", "runtime.actor.spawn", "runtime.actor.message")
 
 class RecordingTracer(TracerBase):
     """Tracer double used by semantic tracing tests."""
@@ -62,6 +64,17 @@ class DoneRunner:
         # Returns a minimal OpenAI-compatible tool-call response.
         raw = {"output": [{"type": "function_call", "name": "isDone", "arguments": f'{{"final_answer": "{self.final_answer}"}}'}]}
         return types.SimpleNamespace(text="", raw=raw, metadata={})
+
+
+class TextAnswerRunner:
+    """Runner that answers every call with fixed plain text, as actor runtime completions expect."""
+
+    def __init__(self) -> None:
+        self._config = types.SimpleNamespace(provider="xai", model="grok-test")
+
+    def run(self, prompt: str, **kwargs: object) -> object:
+        # Returns a plain-text response with no tool calls.
+        return types.SimpleNamespace(text="ANSWER", raw={}, metadata={})
 
 
 class LookupThenDoneRunner:
@@ -210,6 +223,21 @@ class TraceControllerTests(unittest.TestCase):
         tracer.end_trace(root, output="done")
         self.assertNotIn("runtime.iteration", [event.get("name") for event in inner.events])
 
+    def test_minimal_profile_drops_agent_fallback_span(self) -> None:
+        # Verifies agent.fallback is filtered under the minimal profile but still emitted under the default profile.
+        # @intent minimal-profile-keeps-only-agent-run
+        emitted: dict[str, list[str | None]] = {}
+        for label, profile in (("minimal", TraceProfile.minimal()), ("default", TraceProfile.default())):
+            inner = RecordingTracer()
+            tracer = Trace.profile(inner, profile)
+            root = tracer.start_trace("agent.run")
+            span = tracer.start_span("agent.fallback", parent=root, attempt="1")
+            tracer.end_span(span, output="next-model")
+            tracer.end_trace(root, output="done")
+            emitted[label] = [event.get("name") for event in inner.events if event["type"].startswith("start_")]
+        self.assertEqual(emitted["minimal"], ["agent.run"])
+        self.assertEqual(emitted["default"], ["agent.run", "agent.fallback"])
+
     def test_verbose_profile_allows_runtime_iteration(self) -> None:
         # Verifies verbose spans are delegated when enabled.
         inner = RecordingTracer()
@@ -219,6 +247,26 @@ class TraceControllerTests(unittest.TestCase):
         tracer.end_span(span, output="shown")
         tracer.end_trace(root, output="done")
         self.assertIn("runtime.iteration", [event.get("name") for event in inner.events])
+
+    def test_search_and_actor_component_settings_filter_their_runtime_spans(self) -> None:
+        # Verifies runtime.search.* and runtime.actor.* follow the `search`/`actor` components their factories declare.
+        emitted = self._emitted_runtime_spans
+        self.assertEqual(emitted(TraceProfile.verbose()), set(_RUNTIME_SPAN_NAMES))
+        self.assertEqual(emitted(TraceProfile.verbose().with_components(search="off")), {"runtime.iteration", "runtime.actor.run", "runtime.actor.spawn", "runtime.actor.message"})
+        self.assertEqual(emitted(TraceProfile.verbose().with_components(actor="off")), {"runtime.iteration", "runtime.search.run", "runtime.search.node"})
+        self.assertEqual(emitted(TraceProfile.verbose().with_components(runtimes="off")), {"runtime.search.run", "runtime.search.node", "runtime.actor.run", "runtime.actor.spawn", "runtime.actor.message"})
+        self.assertEqual(emitted(TraceProfile.verbose().with_components(runtimes="off", search="off", actor="off")), set())
+
+    @staticmethod
+    def _emitted_runtime_spans(profile: TraceProfile) -> set[str]:
+        # Opens every sample runtime span under one root and returns the names that reached the debug tracer.
+        events: list[dict[str, Any]] = []
+        tracer = Trace.profile(DebugTracer(events), profile)
+        root = tracer.start_trace("agent.run")
+        for name in _RUNTIME_SPAN_NAMES:
+            tracer.end_span(tracer.start_span(name, parent=root))
+        tracer.end_trace(root)
+        return {event["name"] for event in events if event["type"] == "start_span"}
 
     def test_explicit_parent_beats_current_stack(self) -> None:
         # Verifies explicit parent contexts are passed through to the inner tracer.
@@ -308,6 +356,22 @@ class SessionTraceTests(unittest.TestCase):
         start_types = [(event["type"], event.get("name")) for event in inner.events if event["type"].startswith("start")]
         self.assertEqual(start_types, [("start_trace", "workflow"), ("start_span", "agent.run")])
 
+    def test_session_closes_each_context_the_way_it_was_opened(self) -> None:
+        # Verifies a non-agent trace inside a session ends as a trace while a converted agent.run still ends as a span.
+        inner = RecordingTracer()
+        tracer = Trace.session(inner, profile=TraceProfile.default())
+        with tracer.session("workflow"):
+            step = tracer.start_trace("etl.load", rows=3)
+            tracer.end_trace(step, output="loaded")
+            run = tracer.start_trace("agent.run", agent_name="a")
+            tracer.end_trace(run, output="ok")
+        opened = {id(event["context"]): (event["name"], event["type"]) for event in inner.events if event["type"].startswith("start")}
+        closed = [(*opened[id(event["context"])], event["type"]) for event in inner.events if event["type"].startswith("end")]
+        self.assertEqual(
+            closed,
+            [("etl.load", "start_trace", "end_trace"), ("agent.run", "start_span", "end_span"), ("workflow", "start_trace", "end_trace")],
+        )
+
     def test_session_rejects_nested_active_session(self) -> None:
         # Verifies nested sessions on one controller fail loudly.
         tracer = Trace.session(RecordingTracer(), profile=TraceProfile.default())
@@ -341,6 +405,45 @@ class SessionTraceTests(unittest.TestCase):
         self.assertIs(runs[1]["parent"], tool_call.provider_context)
         ends = [event["type"] for event in inner.events if event["type"].startswith("end")]
         self.assertEqual(ends, ["end_span", "end_span", "end_span", "end_trace"])
+
+    def test_session_with_suppressed_root_keeps_agent_runs_as_root_traces(self) -> None:
+        # Verifies a profile-filtered session root never turns agent runs into parentless spans.
+        self.assertEqual(
+            self._record_two_session_runs(TraceProfile.minimal()),
+            [("start_trace", "agent.run", False), ("end_trace", None, False), ("start_trace", "agent.run", False), ("end_trace", None, False)],
+        )
+        self.assertEqual(
+            self._record_two_session_runs(TraceProfile.default()),
+            [("start_trace", "workflow", False), ("start_span", "agent.run", True), ("end_span", None, False), ("start_span", "agent.run", True), ("end_span", None, False), ("end_trace", None, False)],
+        )
+
+    @staticmethod
+    def _record_two_session_runs(profile: TraceProfile) -> list[tuple[str, str | None, bool]]:
+        # Runs two top-level agent traces inside one session and returns (event type, name, has parent) per event.
+        inner = RecordingTracer()
+        tracer = Trace.session(inner, profile=profile)
+        with tracer.session("workflow"):
+            for agent_name in ("a", "b"):
+                run = tracer.start_trace("agent.run", agent_name=agent_name)
+                tracer.end_trace(run, output=agent_name)
+        return [(event["type"], event.get("name"), event.get("parent") is not None) for event in inner.events]
+
+    def test_session_with_suppressed_root_keeps_nested_agent_run_under_tool_span(self) -> None:
+        # Verifies a nested agent run still attaches to its caller's tool span when the session root is filtered out.
+        inner = RecordingTracer()
+        tracer = Trace.session(inner, profile=TraceProfile.minimal())
+        with tracer.session("workflow"):
+            outer = tracer.start_trace("agent.run", agent_name="orchestrator")
+            tool_call = tracer.start_span("tool.call", tool_name="researcher")
+            nested = tracer.start_trace("agent.run", agent_name="child")
+            tracer.end_trace(nested, output="child")
+            tracer.end_span(tool_call, output="tool")
+            tracer.end_trace(outer, output="outer")
+        starts = [(event["type"], event["name"]) for event in inner.events if event["type"].startswith("start")]
+        self.assertEqual(starts, [("start_trace", "agent.run"), ("start_span", "tool.call"), ("start_span", "agent.run")])
+        self.assertIs(inner.events[2]["parent"], tool_call.provider_context)
+        ends = [event["type"] for event in inner.events if event["type"].startswith("end")]
+        self.assertEqual(ends, ["end_span", "end_span", "end_trace"])
 
 
 class SemanticRuntimeIntegrationTests(unittest.IsolatedAsyncioTestCase):
@@ -401,6 +504,30 @@ class SemanticRuntimeIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("runtime.iteration", names)
         self.assertEqual(names.count("tool.call"), 2)
         self.assertIn("parser.tool_calls", names)
+        self.assertEqual(problems, [])
+
+    async def test_actor_runtime_verbose_profile_never_opens_a_span_under_a_closed_parent(self) -> None:
+        # @intent spans-never-open-under-a-closed-parent
+        # Verifies actor task spans attach to the open run span, not the spawn span that ended when the task was created.
+        events: list[dict[str, Any]] = []
+        tracer = Trace.profile(Trace.debug(events), TraceProfile.verbose())
+        runtime = ActorRuntime(include_actors=[], max_loop=3)
+        agent = build_test_agent(name="coord", system_prompt="Coordinate.", runner=TextAnswerRunner(), trace=tracer, runtime=runtime)
+        reply = await asyncio.wait_for(agent.generate_reply("hello"), 20)
+        open_contexts: list[SpanContext] = []
+        problems: list[str] = []
+        for event in events:
+            if event["type"] == "start_span" and not any(event["parent"] is context for context in open_contexts):
+                problems.append(str(event["name"]))
+            if event["type"] in {"start_trace", "start_span"}:
+                open_contexts.append(event["context"])
+            if event["type"] in {"end_trace", "end_span"}:
+                open_contexts = [context for context in open_contexts if context is not event["context"]]
+        names = [event.get("name") for event in events if event["type"] == "start_span"]
+        self.assertEqual(reply.content, "ANSWER")
+        self.assertIn("runtime.actor.spawn", names)
+        self.assertIn("runtime.actor.llm", names)
+        self.assertIn("runtime.actor.message", names)
         self.assertEqual(problems, [])
 
     async def test_tool_call_attributes_include_arguments(self) -> None:

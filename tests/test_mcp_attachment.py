@@ -16,6 +16,10 @@ Architecture:
     - GatedMcpTransport / OverlappingLazyAttachTests: an attach held open by a gate, proving overlapping
       first runs on one agent wait for the in-flight lazy attach and all see its tools, and that a run
       cancelled mid-attach re-queues its servers (closing any it started) so a later run attaches them.
+    - McpPresetExportTests: every named `*MCP` preset constant in vidbyte.tools.mcp.presets is also
+      exported from vidbyte.tools.mcp, so a growing preset catalog cannot drift from the package surface.
+    - AttachThenUseRunner / MidRunAttachTests: the agent attaches a server with attach_mcp_server mid-run,
+      and the same run's next request offers and runs the server's tool.
 Relations:
     - vidbyte/agents/mixins.py
     - vidbyte/agents/base.py
@@ -32,7 +36,11 @@ from vidbyte.agents import BaseAgent
 from vidbyte.lib.errors import McpAttachmentError, McpInitializeError, ToolRegistrationError
 from vidbyte.pipelines import SequentialPipeline
 from vidbyte.tools import ToolCall, ToolPermission, Tools, tool
+from vidbyte.lib.config.mcp_presets import ALL_PRESETS
+from vidbyte.tools.builtins.mcp import AttachMcpServerTool
 from vidbyte.tools.executor import ToolExecutor
+import vidbyte.tools.mcp as mcp_package
+import vidbyte.tools.mcp.presets as mcp_presets_module
 from vidbyte.tools.mcp.presets import McpPresetConfigurationError, McpPresetRegistry
 from vidbyte.tools.mcp.types import McpServerConfig, McpToolPermission
 from vidbyte.tools.security import PermissionPolicy
@@ -576,6 +584,56 @@ class OverlappingLazyAttachTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(MockMcpStdioTransport.instances), 1)
         self.assertEqual({prompt: "remote_mini" in names for prompt, names in runner.offered.items()}, {"request 1": True, "request 2": True})
+
+
+class McpPresetExportTests(unittest.TestCase):
+    def test_every_named_preset_constant_is_exported_from_the_mcp_package(self) -> None:
+        """Each `*MCP` preset in presets.__all__ is importable from vidbyte.tools.mcp and listed in its __all__."""
+        preset_names = [name for name in mcp_presets_module.__all__ if name.endswith("MCP")]
+
+        missing_attributes = [name for name in preset_names if not hasattr(mcp_package, name)]
+        missing_from_all = [name for name in preset_names if name not in mcp_package.__all__]
+
+        self.assertEqual(len(preset_names), len(ALL_PRESETS))
+        self.assertEqual(missing_attributes, [])
+        self.assertEqual(missing_from_all, [])
+
+
+class AttachThenUseRunner:
+    """Runner that attaches a server with attach_mcp_server, calls its tool in the same run, then finishes."""
+
+    def __init__(self) -> None:
+        self.offered: list[tuple[str, ...]] = []
+
+    async def arun(self, prompt: str, **kwargs: object) -> object:
+        self.offered.append(tuple(spec["function"]["name"] for spec in kwargs.get("tools") or ()))
+        turn = len(self.offered)
+        if turn == 1:
+            name, arguments = "attach_mcp_server", '{"command": "[\\"myserver\\"]"}'
+        elif turn == 2:
+            name, arguments = "remote_myserver", '{"text": "hi"}'
+        else:
+            name, arguments = "isDone", '{"final_answer": "done"}'
+        item = {"type": "function_call", "name": name, "arguments": arguments, "call_id": f"call_{turn}"}
+        return type("_Resp", (), {"text": "", "raw": {"output": [item]}})()
+
+
+@patch("vidbyte.tools.mcp.attach.McpStdioTransport", MockMcpStdioTransport)
+class MidRunAttachTests(unittest.IsolatedAsyncioTestCase):
+    """A server attached by the agent mid-run must serve its tools from the next iteration of that same run."""
+
+    async def test_tool_attached_mid_run_is_offered_and_runs_next_iteration(self) -> None:
+        runner = AttachThenUseRunner()
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[AttachMcpServerTool()], permission_policy=PermissionPolicy.allow_all())
+
+        result = await agent.arun("attach and use")
+
+        # The request after the attach offers the new tool, and the call to it reaches the server.
+        self.assertNotIn("remote_myserver", runner.offered[0])
+        self.assertIn("remote_myserver", runner.offered[1])
+        outputs = {context.tool_name: context.result.output for context in result.metadata["tool_calls"]}
+        self.assertEqual(outputs["remote_myserver"], "mocked_response")
+        await agent.close_mcp_servers()
 
 
 if __name__ == "__main__":

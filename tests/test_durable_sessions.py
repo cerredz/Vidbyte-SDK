@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -11,9 +12,11 @@ from io import BytesIO
 from pathlib import Path
 from unittest import mock
 
+from pydantic import BaseModel
+
 from tests.agent_test_support import bind_test_runner, build_test_agent
-from vidbyte import Agent
-from vidbyte.agents import AgentForkSettings
+from vidbyte import Agent, Trace, TraceProfile
+from vidbyte.agents import AgentForkSettings, BaseAgent
 from vidbyte.agents.contracts import MinCostSpent, MinToolCalls, MinToolCallsById
 from vidbyte.agents.settings import AgentLoopSettings, ToolErrorPolicy, ToolSettings
 from vidbyte.lib.dataclasses.trace import TraceField, TraceOption
@@ -29,10 +32,12 @@ from vidbyte.sessions.contracts import (
     TraceCapture,
 )
 from vidbyte.lib.errors import SessionUsageValidationError, VidbyteSdkError
+from vidbyte.lib.registries.models import ProviderModelRegistry
 from vidbyte.sessions.errors import (
     CheckpointNotFoundError,
     SessionError,
     SessionNotFoundError,
+    SessionSerializationError,
     SessionStoreError,
     SessionVersionError,
 )
@@ -50,13 +55,20 @@ from vidbyte.sessions import (
     TraceRecorder,
     UsageRollup,
 )
-from vidbyte.tools.builtins.sessions import BatchForkTool, CheckpointTool, ForkTool, ResumeAppendTool, ResumeReplaceTool, SessionTool
+from vidbyte.tools.builtins.sessions import BatchForkTool, CheckpointTool, ForkTool, ResumeAppendTool, ResumeOutputTool, ResumeReplaceTool, SessionTool
 from vidbyte.tools.types import ToolCall
 
 
 # ---------------------------------------------------------------------------
 # Test doubles
 # ---------------------------------------------------------------------------
+class _WebhookConfig(BaseModel):
+    # A pydantic value whose field names look like credentials, as a developer might put in metadata.
+    url: str
+    api_key: str
+    auth_token: str
+
+
 class FakeAgent:
     """Minimal stand-in implementing the surface Session uses."""
 
@@ -214,6 +226,16 @@ class SerializerTests(unittest.TestCase):
         out = self.s.message_to_dict(message)
         self.assertNotIn("auth_token", out["metadata"])
         self.assertEqual(out["metadata"]["ok"], 1)
+
+    def test_pydantic_model_fields_get_the_same_secret_filter_as_a_dict(self) -> None:  # [Silent Failure]
+        # A model in metadata must lose its credential fields exactly like the same data as a dict,
+        # while a structured reply (scrub_keys=False) still keeps every field name.
+        config = _WebhookConfig(url="https://hooks.example", api_key="SECRET-KEY", auth_token="SECRET-TOKEN")
+        out = self.s.message_to_dict(AgentMessage(sender="a", recipient="o", content="c", metadata={"as_model": config, "as_dict": config.model_dump()}, structured=config))
+        self.assertEqual(out["metadata"]["as_model"], {"url": "https://hooks.example"})
+        self.assertEqual(out["metadata"]["as_model"], out["metadata"]["as_dict"])
+        self.assertNotIn("SECRET-KEY", json.dumps(out["metadata"]))
+        self.assertEqual(out["structured"], config.model_dump(mode="json"))
 
     def test_marks_non_json_metadata_without_raising(self) -> None:  # [Hidden Failure]
         message = AgentMessage(sender="a", recipient="o", content="c", metadata={"obj": object()})
@@ -415,6 +437,23 @@ class FileStoreTests(unittest.TestCase):
         remaining = {c.id for c in self.store.history("se")}
         self.assertIn(head_id, remaining)
         self.assertLessEqual(len(remaining), 2)
+
+
+class SqliteStoreCorruptionTests(unittest.TestCase):
+    def test_corrupt_rows_raise_session_store_error(self) -> None:  # [Hidden Failure]
+        # @intent provider-store-corrupt-payload-is-session-store-error
+        # A truncated row must fail as SessionStoreError, the same as a truncated file in the file store.
+        from vidbyte.lib.providers import SqliteSessionStore
+        store = SqliteSessionStore(path=":memory:")
+        self.addCleanup(store._conn.close)
+        store.put(_checkpoint("se", "c1"))
+        store._conn.execute("UPDATE vidbyte_sessions SET payload='{not json'")
+        store._conn.execute("UPDATE vidbyte_checkpoints SET payload='{not json'")
+        for read in (lambda: store.get_meta("se"), lambda: store.list_sessions(), lambda: store.get("c1"), lambda: store.history("se")):
+            with self.assertRaises(SessionStoreError) as caught:
+                read()
+            self.assertIsInstance(caught.exception, SessionError)
+            self.assertIsInstance(caught.exception.__cause__, json.JSONDecodeError)
 
 
 class PruneHeadChainTests(unittest.IsolatedAsyncioTestCase):
@@ -624,6 +663,24 @@ class PortableBundleTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(target.history("copy")[0].seq, 0)
 
+    def test_import_of_damaged_compressed_member_raises_serialization_error(self) -> None:  # [Hidden Failure]
+        # @intent bundle-corrupt-member-is-session-serialization-error
+        # A damaged byte inside a checkpoint's deflate data must fail as SessionSerializationError, not raw zlib.error.
+        source = InMemorySessionStore()
+        source.put(_checkpoint("se", "c1"))
+        bundle = bytearray(SessionBundleExporter(source).export("se"))
+        with zipfile.ZipFile(BytesIO(bytes(bundle)), mode="r") as archive:
+            info = next(item for item in archive.infolist() if item.filename.startswith("checkpoints/"))
+        bundle[info.header_offset + 30 + len(info.filename.encode("utf-8")) + len(info.extra)] ^= 0xFF
+        target = InMemorySessionStore()
+
+        with self.assertRaises(SessionSerializationError) as caught:
+            SessionBundleImporter(target).import_bundle(bytes(bundle))
+
+        self.assertEqual(caught.exception.details, {"path": info.filename})
+        with self.assertRaises(SessionNotFoundError):
+            target.get_meta("se")
+
     def test_export_scrubs_secret_keys_inside_trace_payloads(self) -> None:  # [Hidden Assumption]
         # Verify trace payloads reuse serializer secret scrubbing before entering a bundle.
         # The trace artifact drops exact credential names but keeps declared field names like token_estimate.
@@ -728,6 +785,50 @@ class SessionFacadeTests(unittest.IsolatedAsyncioTestCase):
             Session(FakeAgent(), store=store, tags="billing")
         session = Session(FakeAgent(), store=store, tags=("billing",))
         self.assertEqual([meta.session_id for meta in store.list_sessions(tag="billing")], [session.id])
+
+    async def test_explicit_existing_session_id_is_refused_and_left_intact(self) -> None:  # [Silent Failure]
+        # @intent new-session-never-overwrites-a-session
+        # Re-using a stored id must fail before any write, so the session keeps its head, status, created_at, and tags and still resumes.
+        with tempfile.TemporaryDirectory() as root:
+            for name, store in (("memory", InMemorySessionStore()), ("file", FileSessionStore(root))):
+                with self.subTest(store=name):
+                    session = Session(FakeAgent(), store=store, session_id="customer-42", tags=("acme",))
+                    await session.arun("one")
+                    session.complete()
+                    before = store.get_meta("customer-42")
+
+                    with self.assertRaisesRegex(SessionError, r"customer-42.*Session\.resume") as raised:
+                        Session(FakeAgent(), store=store, session_id="customer-42")
+
+                    self.assertEqual(raised.exception.details, {"session_id": "customer-42"})
+                    self.assertEqual(store.get_meta("customer-42"), before)
+                    self.assertEqual(before.head_id, session.head)
+                    self.assertEqual(before.status, SessionStatus.COMPLETED)
+                    self.assertEqual(before.tags, ("acme",))
+                    self.assertEqual(Session.resume(store, "customer-42").head, session.head)
+                    fresh = Session(FakeAgent(), store=store, session_id="customer-43")
+                    self.assertEqual(store.get_meta(fresh.id).head_id, None)
+                    self.assertEqual(store.get_meta(fresh.id).status, SessionStatus.ACTIVE)
+
+    async def test_labeled_checkpoint_keeps_completed_status_and_a_run_reopens(self) -> None:  # [Silent Failure]
+        # @intent bookmark-keeps-session-status
+        # A bookmark adds no turn, so a COMPLETED session stays COMPLETED; a real turn still continues the thread as ACTIVE.
+        store = InMemorySessionStore()
+        session = Session(FakeAgent(), store=store)
+        await session.arun("one")
+        self.assertIs(store.get_meta(session.id).status, SessionStatus.ACTIVE)
+        session.checkpoint(label="draft")
+        self.assertIs(store.get_meta(session.id).status, SessionStatus.ACTIVE)
+
+        session.complete()
+        archived = session.checkpoint(label="archived")
+
+        meta = store.get_meta(session.id)
+        self.assertIs(meta.status, SessionStatus.COMPLETED)
+        self.assertEqual(meta.head_id, archived)
+        self.assertEqual(store.get(archived).label, "archived")
+        await session.arun("two")
+        self.assertIs(store.get_meta(session.id).status, SessionStatus.ACTIVE)
 
     def test_usage_empty_session_returns_zero_rollup(self) -> None:  # [Edge Case]
         # Verify usage() is safe before any checkpoint exists.
@@ -968,6 +1069,40 @@ class SessionFacadeTests(unittest.IsolatedAsyncioTestCase):
         branch = session.fork(at=first)
         self.assertEqual(store.get_meta(branch.id).parent_session_id, session.id)
 
+    def test_live_fork_keeps_agent_key_and_never_stores_it(self) -> None:  # [Silent Failure]
+        # @intent live-fork-keeps-agent-key
+        # A tenant's branch must authenticate with the tenant's explicit key, not the server's env key, and the key stays out of checkpoints.
+        with tempfile.TemporaryDirectory() as root, mock.patch.dict(os.environ, {"DEEPSEEK_API_KEY": "sk-server-default"}):
+            store = FileSessionStore(root)
+            agent = BaseAgent(name="tenant", system_prompt="Work.", provider="deepseek", model_name="deepseek-chat", api_key="sk-tenant-acme")
+            session = Session(agent, store=store)
+            session.checkpoint()
+
+            branches = [session.fork(), session.batch_fork(1)[0].session]
+
+            for branch in branches:
+                config = branch.agent.runner_config
+                self.assertEqual(config.api_key, "sk-tenant-acme")
+                self.assertEqual(ProviderModelRegistry.resolve_api_key(config.provider, config.api_key), "sk-tenant-acme")
+            stored = "".join(path.read_text(encoding="utf-8") for path in Path(root).rglob("*") if path.is_file())
+            self.assertNotIn("sk-tenant-acme", stored)
+
+    def test_cold_resume_and_continue_take_the_agent_key(self) -> None:  # [Silent Failure]
+        # @intent resume-takes-the-agent-key
+        # A tenant's cold resume must authenticate with the re-supplied key, not the server's env key, as fork_from() already does.
+        with tempfile.TemporaryDirectory() as root, mock.patch.dict(os.environ, {"DEEPSEEK_API_KEY": "sk-server-default"}):
+            store = FileSessionStore(root)
+            agent = BaseAgent(name="desk", system_prompt="Work.", provider="deepseek", model_name="deepseek-chat", api_key="sk-tenant-acme")
+            session = Session(agent, store=store)
+            session.checkpoint()
+
+            resumed = [Session.resume(store, session.id, api_key="sk-tenant-acme"), Session.continue_(store, session.id, api_key="sk-tenant-acme")]
+
+            for live in resumed:
+                config = live.agent.runner_config
+                self.assertEqual(config.api_key, "sk-tenant-acme")
+                self.assertEqual(ProviderModelRegistry.resolve_api_key(config.provider, config.api_key), "sk-tenant-acme")
+
     def test_fork_at_foreign_checkpoint_raises(self) -> None:  # [Hidden Assumption]
         store = InMemorySessionStore()
         store.put(_checkpoint("other", "foreign"))
@@ -1022,6 +1157,29 @@ class SessionIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply.content, "answer-1")
         self.assertEqual(len(store.history(session.id)), 1)
         self.assertEqual(store.get(session.head).run_state.history[-1]["content"], "answer-1")
+
+    async def test_full_trace_captures_events_through_wrapped_debug_tracer(self) -> None:  # [Silent Failure]
+        # Verify trace="full" finds DebugTracer events under Trace.profile / Trace.session wrappers, and bare debug is unchanged.
+        builders = {
+            "bare": lambda ev: Trace.debug(ev),
+            "profile": lambda ev: Trace.profile(Trace.debug(ev), TraceProfile.default()),
+            "session": lambda ev: Trace.session(Trace.debug(ev), name="workflow"),
+        }
+        for label, build in builders.items():
+            with self.subTest(tracer=label):
+                events: list = []
+                store = InMemorySessionStore()
+                agent = build_test_agent(name="worker", system_prompt="Work.", runner=EchoRunner(), trace=build(events))
+                session = agent.persist(store=store, trace="full")
+
+                await agent.arun("first")
+                await agent.arun("second")
+
+                captured = [checkpoint.trace_events for checkpoint in store.history(session.id)]
+                self.assertTrue(events)
+                self.assertEqual(len(captured), 2)
+                self.assertTrue(all(captured), captured)
+                self.assertTrue(all(dict(event) in events for event in captured[-1]))
 
     async def test_session_arun_does_not_double_persist_agent_hook(self) -> None:  # [Silent Failure]
         # Verify Session.arun() delegates to the agent hook without writing a second checkpoint.
@@ -1311,6 +1469,31 @@ class SessionToolTests(unittest.IsolatedAsyncioTestCase):
                 following = bound.checkpoint()
                 self.assertEqual(store.get(following).parent_id, result.output)
 
+    async def test_checkpoint_on_completed_session_keeps_it_completed(self) -> None:  # [Silent Failure]
+        # @intent bookmark-keeps-session-status
+        # A reviewer bookmarking a finished research session must not reopen it, or resume_output can no longer read its answer.
+        with tempfile.TemporaryDirectory() as tmp:
+            store = FileSessionStore(tmp)
+            research = Session(FakeAgent(name="researcher"), store=store, tags=("research-q3",))
+            await research.arun("q3 findings")
+            research.complete()
+            reviewer = Session(FakeAgent(name="reviewer"), store=store)
+            await reviewer.arun("review")
+            scope = SessionScope.sessions([research.id])
+            checkpoint_tool, output_tool = CheckpointTool(store, scope=scope), ResumeOutputTool(store, scope=scope)
+            checkpoint_tool.bind_session(reviewer)
+            output_tool.bind_session(reviewer)
+
+            marked = await checkpoint_tool.execute(ToolCall(tool_name="checkpoint", arguments={"session_id": research.id, "label": "reviewed"}))
+            resumed = await output_tool.execute(ToolCall(tool_name="resume_output", arguments={"session_id": research.id}))
+
+            self.assertEqual(marked.status.value, "success")
+            self.assertEqual(store.get(marked.output).label, "reviewed")
+            self.assertIs(store.get_meta(research.id).status, SessionStatus.COMPLETED)
+            self.assertIn(research.id, [meta.session_id for meta in store.list_sessions(status=SessionStatus.COMPLETED)])
+            self.assertEqual(resumed.status.value, "success", resumed.output)
+            self.assertTrue(any("q3 findings" in str(message.content) for message in reviewer.agent.history))
+
     async def test_resume_tools_null_checkpoint_id_resumes_from_head(self) -> None:  # [Silent Failure]
         # A JSON null checkpoint_id means the omitted default: resume from the target session's head.
         for tool_cls, name in ((ResumeAppendTool, "resume_append"), (ResumeReplaceTool, "resume_replace")):
@@ -1414,6 +1597,27 @@ class SessionToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(tool._scope.permits(first.id) and tool._scope.permits(second.id))
         self.assertIsNot(child_tool, tool)
         self.assertTrue(child_tool._scope.permits(second.id))
+
+    async def test_fork_given_another_agents_session_tool_gets_configured_scope(self) -> None:  # [Silent Failure]
+        # @intent fork-never-inherits-another-agents-session-grants
+        # A fork handed a session tool that another agent carries must not reach that agent's session; the owner's fork still does.
+        store = InMemorySessionStore()
+        shared = SessionTool(store)
+        acme = build_test_agent(name="acme", system_prompt="Work.", runner=EchoRunner(), tools=[shared])
+        acme_session = Session(acme, store=store)
+        await acme.arun("acme")
+        globex = build_test_agent(name="globex", system_prompt="Work.", runner=EchoRunner())
+        added = globex.fork(AgentForkSettings(name="added", add_tools=[shared]))
+        listed = globex.fork(AgentForkSettings(name="listed", tools=[shared.customize(description="Sessions.")]))
+        acme_child = acme.fork(AgentForkSettings(name="acme-child"))
+        list_call = ToolCall(tool_name="session", arguments={"operation": "list_my_runs"})
+
+        for child in (added, listed):
+            child_tool = child.tools._get("session")
+            self.assertFalse(getattr(child_tool, "wrapped_tool", child_tool)._scope.permits(acme_session.id))
+            self.assertEqual(json.loads((await child_tool.execute(list_call)).output), [])
+        self.assertEqual(listed.tools._get("session").spec().description, "Sessions.")
+        self.assertTrue(acme_child.tools._get("session")._scope.permits(acme_session.id))
 
 
 # ---------------------------------------------------------------------------
@@ -1568,6 +1772,18 @@ class PostgresSessionStoreRecoveryTests(unittest.TestCase):
         meta = SessionMeta(session_id="se", head_id=None, parent_session_id=None, agent_name="a", status=SessionStatus.ACTIVE, created_at="t", updated_at="t")
         store.put_meta(meta)
         self.assertEqual(store.get_meta("se"), meta)
+
+    def test_corrupt_meta_row_raises_session_store_error(self) -> None:  # [Hidden Failure]
+        # @intent provider-store-corrupt-payload-is-session-store-error
+        # A truncated text payload must fail as SessionStoreError rather than a raw JSONDecodeError.
+        fake_psycopg = mock.MagicMock(spec=["connect"])
+        fake_psycopg.connect.side_effect = lambda dsn, autocommit=False: _FakePgConnection(autocommit)
+        with mock.patch.dict(sys.modules, {"psycopg": fake_psycopg}):
+            from vidbyte.lib.providers import PostgresSessionStore
+            store = PostgresSessionStore(dsn="postgresql://fake/db")
+        store._conn.rows["se"] = "{not json"
+        with self.assertRaises(SessionStoreError):
+            store.get_meta("se")
 
 
 if __name__ == "__main__":

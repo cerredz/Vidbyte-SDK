@@ -53,6 +53,23 @@ class ImageVideoRunnerTests(unittest.TestCase):
         self.assertEqual(response.images[0].b64_json, "abc")
         self.assertEqual(transport.requests[0]["url"], "https://api.x.ai/v1/images/generations")
 
+    def test_xai_image_runner_sends_image_count(self) -> None:
+        transport = FakeTransport([{"data": [{"b64_json": "a"}, {"b64_json": "b"}, {"b64_json": "c"}]}, {"data": [{"b64_json": "a"}]}])
+        counted = ImageModelRunner(
+            ImageModelConfig(provider=ModelProvider.XAI, model="grok-image-test", api_key="key", n=3),
+            transport=transport,
+        )
+        default = ImageModelRunner(
+            ImageModelConfig(provider=ModelProvider.XAI, model="grok-image-test", api_key="key"),
+            transport=transport,
+        )
+
+        counted.run("draw")
+        default.run("draw")
+
+        self.assertEqual(transport.requests[0]["json_body"]["n"], 3)
+        self.assertNotIn("n", transport.requests[1]["json_body"])
+
     def test_openai_video_runner_creates_and_checks_jobs(self) -> None:
         transport = FakeTransport(
             [
@@ -72,6 +89,20 @@ class ImageVideoRunnerTests(unittest.TestCase):
         self.assertEqual(checked.status, "completed")
         self.assertEqual(transport.requests[0]["url"], "https://api.openai.com/v1/videos")
         self.assertEqual(transport.requests[1]["url"], "https://api.openai.com/v1/videos/job_1")
+
+    def test_openai_video_runner_sends_seconds_as_a_string(self) -> None:
+        transport = FakeTransport([{"id": "job_1", "status": "queued"}])
+        runner = VideoModelRunner(
+            VideoModelConfig(provider=ModelProvider.OPENAI, model="sora-2", api_key="key", seconds=8, size="1280x720"),
+            transport=transport,
+        )
+
+        runner.run("make a video")
+
+        body = transport.requests[0]["json_body"]
+        self.assertEqual(body["seconds"], "8")
+        self.assertIsInstance(body["seconds"], str)
+        self.assertEqual(body["size"], "1280x720")
 
 
 if __name__ == "__main__":

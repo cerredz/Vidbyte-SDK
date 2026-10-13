@@ -6,7 +6,7 @@ from typing import Mapping
 
 from vidbyte.lib.config import EmbeddingModelConfig
 from vidbyte.lib.enums import ModelProvider
-from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.errors import ConfigurationError, ProviderResponseError
 from vidbyte.lib.http import HttpResponse
 from vidbyte.lib.runners import EmbeddingModelRunner
 
@@ -73,6 +73,22 @@ class EmbeddingRunnerTests(unittest.TestCase):
         self.assertAlmostEqual(response.embeddings[0][0], 1.0)
         self.assertAlmostEqual(response.embeddings[1][0], 2.0)
         self.assertAlmostEqual(response.embeddings[2][0], 3.0)
+
+    def test_openai_malformed_embedding_item_raises_instead_of_dropping(self) -> None:
+        # A null or base64-string embedding must fail loudly, never shorten the result.
+        malformed_cases = {
+            "null": {"data": [{"index": 0, "embedding": [1.0]}, {"index": 1, "embedding": None}, {"index": 2, "embedding": [3.0]}]},
+            "base64": {"data": [{"index": 0, "embedding": "AACAPw=="}, {"index": 1, "embedding": "AAAAQA=="}, {"index": 2, "embedding": "AABAQA=="}]},
+        }
+        for label, body in malformed_cases.items():
+            with self.subTest(case=label):
+                runner = EmbeddingModelRunner(
+                    EmbeddingModelConfig(provider=ModelProvider.OPENAI, model="text-embedding-3-small", api_key="key"),
+                    transport=FakeTransport([body]),
+                )
+
+                with self.assertRaisesRegex(ProviderResponseError, "missing embedding list"):
+                    runner.run(["a", "b", "c"])
 
     def test_openai_embedding_sends_correct_url(self) -> None:
         transport = FakeTransport([_make_openai_embedding_response([[0.1]])])
@@ -144,6 +160,27 @@ class EmbeddingRunnerTests(unittest.TestCase):
         runner.run("hello")
 
         self.assertEqual(transport.requests[0]["headers"].get("x-goog-api-key"), "goog_key")
+
+    def test_gemini_embedding_includes_output_dimensionality_when_set(self) -> None:
+        transport = FakeTransport([_make_gemini_embedding_response([[0.1], [0.2]]), _make_gemini_embedding_response([[0.3], [0.4]])])
+        sized = EmbeddingModelRunner(
+            EmbeddingModelConfig(provider=ModelProvider.GEMINI, model="gemini-embedding-001", api_key="key", dimensions=768),
+            transport=transport,
+        )
+        unsized = EmbeddingModelRunner(
+            EmbeddingModelConfig(provider=ModelProvider.GEMINI, model="gemini-embedding-001", api_key="key"),
+            transport=transport,
+        )
+
+        sized.run(["query", "document"])
+        unsized.run(["query", "document"])
+
+        sized_requests = transport.requests[0]["json_body"]["requests"]
+        unsized_requests = transport.requests[1]["json_body"]["requests"]
+        self.assertEqual(len(sized_requests), 2)
+        self.assertTrue(all(entry.get("outputDimensionality") == 768 for entry in sized_requests))
+        self.assertEqual(len(unsized_requests), 2)
+        self.assertTrue(all("outputDimensionality" not in entry for entry in unsized_requests))
 
     # --- Edge cases ---
 

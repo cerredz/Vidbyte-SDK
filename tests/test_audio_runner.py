@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import unittest
 from typing import Mapping
+from urllib.parse import parse_qs, urlsplit
 
 from vidbyte.lib.config import AudioModelConfig
 from vidbyte.lib.enums import ModelProvider
@@ -165,6 +166,22 @@ class AudioRunnerTests(unittest.TestCase):
         runner.text_to_speech("Test")
 
         self.assertIn("abc123", transport.requests[0]["url"])
+
+    def test_elevenlabs_tts_sends_output_format_as_query_parameter(self) -> None:
+        # @intent elevenlabs-output-format-is-a-query-parameter
+        transport = FakeTransport()
+        transport.push_bytes(b"pcm")
+        transport.push_bytes(b"mp3")
+        base = {"provider": ModelProvider.ELEVENLABS, "model": "eleven_multilingual_v2", "api_key": "key", "voice": "abc123"}
+
+        AudioModelRunner(AudioModelConfig(**base, response_format="pcm_16000"), transport=transport).text_to_speech("Test")
+        AudioModelRunner(AudioModelConfig(**base), transport=transport).text_to_speech("Test")
+
+        formatted, unset = transport.requests
+        self.assertEqual(parse_qs(urlsplit(formatted["url"]).query), {"output_format": ["pcm_16000"]})
+        self.assertNotIn("output_format", formatted["json_body"])
+        self.assertEqual(urlsplit(unset["url"]).query, "")
+        self.assertNotIn("output_format", unset["json_body"])
 
     def test_elevenlabs_tts_raises_when_voice_missing(self) -> None:
         with self.assertRaises(ConfigurationError):

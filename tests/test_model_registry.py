@@ -6,6 +6,7 @@ Purpose:
     Verifies API key and endpoint validation/resolution, supported provider and model listings, and exception mapping.
 Architecture:
     - ModelRegistryTests: unittest.TestCase suite.
+    - ProviderPrefixedModelTests: Provider-prefixed ids and OpenRouter vendor slugs in normalization and validation.
 Key Functions:
     - test_get_api_key_env_var: Verifies env var mappings.
     - test_get_default_endpoint: Verifies default URLs.
@@ -29,6 +30,7 @@ from unittest.mock import patch
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.registries.models import ProviderModelRegistry
+from vidbyte.lib.registries.pricing import ModelPricingRegistry
 
 
 class ModelRegistryTests(unittest.TestCase):
@@ -95,6 +97,59 @@ class ModelRegistryTests(unittest.TestCase):
         for name in ProviderModelRegistry.get_supported_providers():
             self.assertTrue(ProviderModelRegistry.is_valid_provider(name))
             ProviderModelRegistry.validate_provider(name)
+
+
+class ProviderPrefixedModelTests(unittest.TestCase):
+    SLUG = "openrouter/anthropic/claude-sonnet-5"
+
+    def test_normalize_model_drops_the_providers_own_prefix_without_an_alias(self) -> None:
+        # @intent normalized-model-drops-its-own-provider-prefix
+        # 'openai/gpt-5.5' has no alias but must still normalize to the bare catalog name.
+        self.assertEqual(ProviderModelRegistry.normalize_model("openai", "openai/gpt-5.5"), "gpt-5.5")
+        self.assertEqual(ProviderModelRegistry.normalize_model("openai", "openai/gpt-5.6"), "gpt-5.6-sol")
+        self.assertEqual(ProviderModelRegistry.normalize_model("openrouter", "openrouter/auto"), "auto")
+        self.assertEqual(ProviderModelRegistry.normalize_model("anthropic", "openai/gpt-5.5"), "openai/gpt-5.5")
+
+    def test_is_supported_model_agrees_for_prefixed_and_bare_names(self) -> None:
+        for provider, model in (("openai", "gpt-5.5"), ("openai", "gpt-5.6")):
+            with self.subTest(model=model):
+                self.assertTrue(ProviderModelRegistry.is_supported_model(provider, model))
+                self.assertTrue(ProviderModelRegistry.is_supported_model(provider, f"{provider}/{model}"))
+        self.assertFalse(ProviderModelRegistry.is_supported_model("anthropic", "openai/gpt-5.5"))
+
+    def test_openrouter_default_model_is_supported_by_its_own_provider(self) -> None:
+        default = ProviderModelRegistry.DEFAULT_PROVIDER_MODELS[ModelProvider.OPENROUTER]
+        self.assertTrue(ProviderModelRegistry.is_supported_model("openrouter", default))
+
+    def test_prefixed_name_prices_like_its_bare_name(self) -> None:
+        pricing = ModelPricingRegistry.default()
+        bare = pricing.resolve(ModelProvider.OPENAI, "gpt-5.5")
+        self.assertIsNotNone(bare)
+        self.assertEqual(pricing.resolve(ModelProvider.OPENAI, "openai/gpt-5.5"), bare)
+
+    def test_openrouter_vendor_slug_validates_under_openrouter(self) -> None:
+        # @intent openrouter-slug-validates-as-its-vendor-model
+        # The Runner strips 'openrouter/' before a vendor slug, so validation must accept the same id.
+        ProviderModelRegistry.validate_model(self.SLUG)
+        ProviderModelRegistry.validate_provider_model_pair("openrouter", self.SLUG)
+        ProviderModelRegistry.validate_provider_models_map({"openrouter": self.SLUG})
+        ProviderModelRegistry.validate_provider_model_pair("openrouter", "openrouter/auto")
+        with self.assertRaisesRegex(ConfigurationError, "no registered runner"):
+            ProviderModelRegistry.validate_model("openrouter/meta-llama/llama-4-maverick")
+
+    def test_openrouter_vendor_slug_stays_rejected_under_other_providers(self) -> None:
+        # @intent openrouter-routed-ids-stay-with-openrouter
+        # Another vendor would receive the 'openrouter/' prefix verbatim, so the slug is OpenRouter's alone.
+        for provider in ("anthropic", "openai", "deepseek"):
+            with self.subTest(provider=provider):
+                with self.assertRaisesRegex(ConfigurationError, "registered under provider 'openrouter'"):
+                    ProviderModelRegistry.validate_provider_model_pair(provider, self.SLUG)
+                with self.assertRaisesRegex(ConfigurationError, "registered under provider 'openrouter'"):
+                    ProviderModelRegistry.validate_provider_models_map({provider: self.SLUG})
+        with self.assertRaisesRegex(ConfigurationError, "registered under provider 'openrouter'"):
+            ProviderModelRegistry.require_openrouter_for_routed_model(ModelProvider.ANTHROPIC, self.SLUG)
+        ProviderModelRegistry.require_openrouter_for_routed_model("openrouter", self.SLUG)
+        ProviderModelRegistry.require_openrouter_for_routed_model("anthropic", "anthropic/claude-sonnet-5")
 
 
 if __name__ == "__main__":

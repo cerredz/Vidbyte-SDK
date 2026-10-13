@@ -3,7 +3,7 @@
 PURPOSE: Pin CodingAgent's environment section: the OS family and version, date, working directory, project files with their languages and package managers, declared dependencies, installed dependency folders, git branch, shell, and what bash reports reach the model as an EnvironmentContextItem after AGENTS.md and before the user message, and a missing bash, a failed probe, or a malformed manifest never raises.
 ROLE IN CODEBASE: Drives vidbyte.CodingAgent through BaseAgent's real run loop with the offline scripted model from conftest.py; calls EnvironmentLoader (vidbyte/agents/coding_context/environment.py) directly where sys.platform must be simulated, and builds EnvironmentContextItem (vidbyte/context/primitives/documents.py) and CodingContextSectionItem (vidbyte/lib/dataclasses/coding.py) on their own for their checks.
 ARCHITECTURE NOTE: Most tests replace bash with this Python interpreter and the probe script with a short Python program that prints the probe's raw tab-separated records, so the real subprocess, temporary-file, parsing, and timeout path runs on every OS without depending on which tools the host has. The probe cache in vidbyte/agents/coding_context/environment_probe.py is reset for those tests. One test runs the host's real bash.
-FUNCTION INVENTORY: test_environment_is_shown_* (position and facts in the request); test_windows_* (Git Bash line); test_missing_bash_* (no bash); test_failed_probe_* (timeout, non-zero exit); test_probe_keeps_only_finished_records (cut output); test_load_environment_false_* and test_load_environment_must_be_* (the switch); test_planted_secret_* (secrecy); test_project_files_* (markers, languages, package managers); test_declared_dependencies_* and test_malformed_manifests_* (manifests); test_installed_dependency_folders_* ; test_git_head_* (branches); test_probe_runs_once_* (cache); test_caller_environment_item_* and test_environment_item_rejects_* (the primitive alone); test_section_item_* (CodingContextSectionItem); test_real_bash_* (integration).
+FUNCTION INVENTORY: test_environment_is_shown_* (position and facts in the request); test_windows_* (Git Bash line); test_missing_bash_* (no bash); test_failed_probe_* (timeout, non-zero exit); test_probe_keeps_only_finished_records (cut output); test_load_environment_false_* and test_load_environment_must_be_* (the switch); test_planted_secret_* (secrecy); test_project_files_* (markers, languages, package managers); test_declared_dependencies_*, test_malformed_manifests_*, test_deeply_nested_manifests_*, and test_blank_manifest_keys_* (manifests); test_installed_dependency_folders_* ; test_git_head_* (branches); test_probe_runs_once_* (cache); test_caller_environment_item_* and test_environment_item_rejects_* (the primitive alone); test_section_item_* (CodingContextSectionItem); test_real_bash_* (integration).
 COMMON MODIFICATION PATTERNS: A new fact adds one field assertion and one rendered-line assertion to the first test; a new failure path adds a case to test_failed_probe_*; a new manifest adds a file to test_declared_dependencies_*.
 WHAT NOT TO DO IN THIS FILE: 1. Do not depend on which tools the host has outside the real-bash test. 2. Do not patch sys.platform while a CodingAgent is built; patch it only around EnvironmentLoader.load.
 KNOWN EDGE CASES: The date assertion could fail if the test runs across midnight. The timeout case leaves the fake probe sleeping for a few seconds after the call returns, because killing it is not waited on.
@@ -258,6 +258,48 @@ def test_declared_dependencies_come_from_every_manifest_once(tmp_path, no_bash, 
     assert "- Declared dependencies: httpx, pydantic, pytest, ruff, requests, rich, react, vitest, serde, insta\n" in item.to_context_text()
 
 
+def test_declared_dependencies_read_parenthesized_versions_and_inline_comments(tmp_path, no_bash, monkeypatch) -> None:
+    # Regression: Poetry 2 writes "name (>=1)" into PEP 621 lists, and pip allows "name  # comment"; both forms used to drop the name.
+    pyproject = '[project]\ndependencies = ["requests (>=2.32.3,<3.0.0)", "pydantic(>=2.7)", "httpx[http2] (>=0.27)", "rich"]\n[dependency-groups]\ndev = ["ruff (>=0.6)", "mypy ; python_version >= \'3.11\'"]\n'
+    requirements = "# tools\npytest  # test runner\nhypothesis==6.100  # property tests\ncoverage\t# tab before the comment\n    # indented comment\nblack\n"
+    _write_files(tmp_path, {"pyproject.toml": pyproject, "requirements.txt": requirements})
+
+    item = _load_as(sys.platform, tmp_path, monkeypatch)
+
+    assert item.dependencies == ("requests", "pydantic", "httpx", "rich", "ruff", "mypy", "pytest", "hypothesis", "coverage", "black")
+    assert "- Declared dependencies: requests, pydantic, httpx, rich, ruff, mypy, pytest, hypothesis, coverage, black\n" in item.to_context_text()
+
+
+def test_declared_dependencies_read_manifests_with_a_byte_order_mark(tmp_path, no_bash, monkeypatch) -> None:
+    # Regression: Windows PowerShell writes UTF-8 with a BOM, which npm and pip accept; the BOM used to break TOML and JSON parsing and hide the first requirements.txt name.
+    bom = b"\xef\xbb\xbf"
+    pyproject = bom + b'[project]\ndependencies = ["httpx>=0.27"]\n'
+    requirements = bom + b"flask\nrich\n"
+    package_json = bom + json.dumps({"dependencies": {"react": "^19"}, "devDependencies": {"vitest": "^2"}}).encode("utf-8")
+    _write_files(tmp_path, {"pyproject.toml": pyproject, "requirements.txt": requirements, "package.json": package_json})
+
+    assert _load_as(sys.platform, tmp_path, monkeypatch).dependencies == ("httpx", "flask", "rich", "react", "vitest")
+
+
+def test_declared_dependencies_read_a_utf16_requirements_file(tmp_path, no_bash, monkeypatch) -> None:
+    # Regression: Windows PowerShell 5.1's > (as in pip freeze > requirements.txt) writes UTF-16 with a BOM, which pip reads; decoding it as UTF-8 gave no names.
+    _write_files(tmp_path, {"requirements.txt": b"\xff\xfe" + "flask\r\nrich\r\n".encode("utf-16-le")})
+
+    assert _load_as(sys.platform, tmp_path, monkeypatch).dependencies == ("flask", "rich")
+
+
+@pytest.mark.parametrize(
+    "line",
+    ["https://example.com/pkg-1.0-py3-none-any.whl", "git+https://example.com/pkg.git", "git+https://example.com/pkg.git  # pinned fork", "./local/path", "../sibling/pkg", "pkg-1.0.tar.gz#sha256=abc", "--index-url https://example.com/simple"],
+    ids=["url", "vcs", "vcs-with-comment", "relative-path", "parent-path", "archive-with-fragment", "option"],
+)
+def test_requirement_lines_that_are_not_names_give_no_names(tmp_path, no_bash, monkeypatch, line) -> None:
+    # Edge case: widening what may follow a name must not turn a URL, a VCS link, a path, or an option into a name such as "git" or "https".
+    _write_files(tmp_path, {"requirements.txt": f"{line}\n"})
+
+    assert _load_as(sys.platform, tmp_path, monkeypatch).dependencies == ()
+
+
 def test_declared_dependencies_are_capped(tmp_path, no_bash, monkeypatch) -> None:
     # Edge case: a huge manifest cannot fill the context; only the first names up to the cap are kept.
     monkeypatch.setattr(dependencies_module, "CODING_ENVIRONMENT_MAX_DEPENDENCIES", 3)
@@ -295,6 +337,36 @@ def test_malformed_manifests_give_no_names_and_never_raise(tmp_path, no_bash, mo
     assert "Declared dependencies" not in item.to_context_text()
 
 
+@pytest.mark.parametrize(
+    "files",
+    [{"pyproject.toml": "x = " + "[" * 5000 + "]" * 5000 + "\n"}, {"package.json": "[" * 50000 + "]" * 50000}],
+    ids=["deep-toml", "deep-json"],
+)
+def test_deeply_nested_manifests_give_no_names_and_never_raise(coding_agent_cls, tmp_path, no_bash, monkeypatch, files) -> None:
+    # Regression: the TOML and JSON parsers raise RecursionError on deep nesting, which used to escape CodingAgent construction.
+    _write_files(tmp_path, files)
+
+    assert _load_as(sys.platform, tmp_path, monkeypatch).dependencies == ()
+    assert _item(_agent(coding_agent_cls, tmp_path, progress_notes=False)).dependencies == ()
+
+
+@pytest.mark.parametrize(
+    ("files", "names"),
+    [
+        ({"package.json": json.dumps({"dependencies": {"": "1.0", "react": "18"}, "devDependencies": {"   ": "1"}})}, ("react",)),
+        ({"Cargo.toml": '[package]\nname = "c"\n[dependencies]\n" " = "1"\nserde = "1"\n'}, ("serde",)),
+        ({"pyproject.toml": '[tool.poetry.dependencies]\n"" = "*"\nrequests = "*"\n'}, ("requests",)),
+    ],
+    ids=["package-json", "cargo", "poetry"],
+)
+def test_blank_manifest_keys_give_no_names_and_never_raise(coding_agent_cls, tmp_path, no_bash, monkeypatch, files, names) -> None:
+    # Regression: a blank or whitespace table key used to reach EnvironmentContextItem, whose check made CodingAgent construction raise.
+    _write_files(tmp_path, files)
+
+    assert _load_as(sys.platform, tmp_path, monkeypatch).dependencies == names
+    assert _item(_agent(coding_agent_cls, tmp_path, progress_notes=False)).dependencies == names
+
+
 def test_installed_dependency_folders_are_listed(tmp_path, no_bash, monkeypatch) -> None:
     # Edge case: a dependency folder tells the model the install step already ran; a file with a folder's name does not count.
     (tmp_path / ".venv").mkdir()
@@ -315,8 +387,10 @@ def test_installed_dependency_folders_are_listed(tmp_path, no_bash, monkeypatch)
         ({"repo/.git/HEAD": "3f2c1e0d9b8a7f6e5d4c3b2a1f0e9d8c7b6a5f4e\n"}, GitHeadState.DETACHED, "3f2c1e0d9b8a7f6e5d4c3b2a1f0e9d8c7b6a5f4e", "- Git: inside a git repository, detached at commit 3f2c1e0d9b8a7f6e5d4c3b2a1f0e9d8c7b6a5f4e."),
         ({"repo/.git": "gitdir: \0broken\n"}, GitHeadState.UNREADABLE, None, "- Git: inside a git repository; its branch could not be read."),
         ({"repo/.git/HEAD": "\n"}, GitHeadState.UNREADABLE, None, "- Git: inside a git repository; its branch could not be read."),
+        ({"repo/.git/HEAD": "ref: refs/heads/\n"}, GitHeadState.UNREADABLE, None, "- Git: inside a git repository; its branch could not be read."),
+        ({"repo/.git/HEAD": "ref: refs/heads/.invalid\n"}, GitHeadState.UNREADABLE, None, "- Git: inside a git repository; its branch could not be read."),
     ],
-    ids=["branch-from-a-subfolder", "worktree-gitdir-file", "detached", "broken-gitdir", "empty-head"],
+    ids=["branch-from-a-subfolder", "worktree-gitdir-file", "detached", "broken-gitdir", "empty-head", "empty-branch-name", "reftable-placeholder"],
 )
 def test_git_head_is_read_from_git_files(tmp_path, no_bash, monkeypatch, layout, state, ref, line) -> None:
     # Hidden assumption: the root may be a subfolder, a worktree whose .git is a file, a detached checkout, or a broken .git that must not raise.
@@ -328,6 +402,15 @@ def test_git_head_is_read_from_git_files(tmp_path, no_bash, monkeypatch, layout,
 
     assert (item.git_state, item.git_ref) == (state, ref)
     assert line in item.to_context_text()
+
+
+def test_git_head_with_an_empty_branch_name_does_not_break_construction(coding_agent_cls, tmp_path, no_bash) -> None:
+    # Regression: "ref: refs/heads/" used to give a branch with an empty name, which EnvironmentContextItem rejected at construction.
+    _write_files(tmp_path, {".git/HEAD": "ref: refs/heads/\n"})
+
+    item = _item(_agent(coding_agent_cls, tmp_path, progress_notes=False))
+
+    assert (item.git_state, item.git_ref) == (GitHeadState.UNREADABLE, None)
 
 
 def test_probe_runs_once_per_bash_and_path(coding_agent_cls, tmp_path, fake_bash, monkeypatch) -> None:

@@ -1,12 +1,12 @@
 """FILE: vidbyte/lib/usage_ledger.py
 
 PURPOSE: Names the usage ledger the current agent run records into, so model calls made below the agent layer reach the run's one ledger.
-ROLE IN CODEBASE: JevRuntime opens a scope over its agent's UsageTracker for the whole run; BaseAgent.generate_reply nests a helper agent's own tracker inside it; DecisionModelRunner.arun records every Jev call into whichever ledger is active.
+ROLE IN CODEBASE: BaseAgent.generate_reply opens a scope over a top-level agent's own UsageTracker for its whole run (JevRuntime, MultiAgent, and AggregateAgent open one over theirs too) and nests a helper agent's own tracker inside it, merging the helper's run into the parent once; DecisionModelRunner.arun records every Jev call into whichever ledger is active.
 ARCHITECTURE NOTE: The ledger is a structural Protocol satisfied by vidbyte.agents.pricing.UsageTracker, so this shared substrate never imports the agents layer; a ContextVar keeps concurrent runs, and the tasks they spawn, isolated from each other.
 COMMON MODIFICATION PATTERNS: A new lib-level model call site records through active_usage_ledger() with its UsageKind; a new recording method is added to the Protocol and UsageTracker together.
-KNOWN EDGE CASES: No ledger is active outside a JevAgent run, so plain agents and direct runner use record nothing new; asyncio tasks copy the ledger in effect when they were created.
+KNOWN EDGE CASES: Every BaseAgent.generate_reply run is metered, so a plain top-level agent's get_usage() includes its sub-agent tools, continual-trace agent, auto handoff, and lib-level decision calls, while each nested agent's own get_usage() stays its own; only a DecisionModelRunner called outside any agent run records nothing; asyncio tasks copy the ledger in effect when they were created.
 RELATED DOCS: docs/design/jev-run-usage-ledger.md.
-TESTS: tests/test_jev_usage_ledger.py.
+TESTS: tests/test_jev_usage_ledger.py and tests/features/sdk_model_usage/test_nested_usage_bill.py.
 """
 
 from __future__ import annotations

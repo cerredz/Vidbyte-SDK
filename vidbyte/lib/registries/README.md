@@ -7,14 +7,16 @@ prompt, tool, actor, and declarable-component lookups for the SDK.
 
 Per-provider first-party documentation for cache-pricing mechanics behind
 `PROVIDER_PRICING`'s `cache_read_per_million` / `cache_write_per_million`
-rates in `pricing.py`, checked 2026-08-29.
+rates in `pricing.py`, checked 2026-08-29; the Meta and Mistral rows were
+added 2026-10-11.
 
-`ModelProvider.META` is deliberately absent: no first-party Meta Model API
-documentation page could be located for Muse Spark's cache pricing despite
-the `$0.15/M` `cache_read_per_million` rate in `PROVIDER_PRICING` being
-corroborated by multiple independent third-party sources. Omitted rather
-than guessed, per the same discipline `docs/design/openai-gpt-5-6-catalog-pricing.md`
-applies to the rate table itself.
+Meta's cached-input rates come from its own pricing page,
+https://dev.meta.ai/docs/pricing-rate-limits, which replaced the
+third-party corroboration this section used to rely on. Mistral publishes a
+cached rate only on some model pages (Mistral Large 4); its other rows
+leave `cache_read_per_million` unset, so cached tokens bill at the input
+rate. Each rate's own source URL is cited in the comment above its block in
+`pricing.py`.
 
 | Provider | Source |
 |---|---|
@@ -26,4 +28,6 @@ applies to the rate table itself.
 | GLM | https://docs.z.ai/guides/capabilities/cache |
 | MiniMax | https://platform.minimax.io/docs/api-reference/text-prompt-caching |
 | Kimi | https://platform.moonshot.ai/docs/guide/use-context-caching-feature-of-kimi-api |
+| Meta | https://dev.meta.ai/docs/prompt-caching |
+| Mistral | https://docs.mistral.ai/studio/conversations/advanced/prompt-caching |
 | OpenRouter | https://openrouter.ai/docs/guides/best-practices/prompt-caching |

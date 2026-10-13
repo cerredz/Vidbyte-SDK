@@ -184,10 +184,11 @@ class _ActivityBoundTool(_ToolWrapper):
 
     def validate_call(self, call: ToolCall) -> str | None:
         """Reject a missing or malformed annotation before delegating to the wrapped tool."""
-        activity_error = ActivityToolFormatter.validation_error(self._activity, call)
-        if activity_error:
-            return activity_error
-        return self._tool.validate_call(ActivityToolFormatter.prepare_call(self, call))
+        # @intent activity-validate-call-prepares-first
+        # Capture a valid wire-shaped annotation before validating, so only a missing or malformed one is rejected.
+        prepared = ActivityToolFormatter.prepare_call(self, call)
+        activity_error = ActivityToolFormatter.validation_error(self._activity, prepared)
+        return activity_error or self._tool.validate_call(prepared)
 
     async def execute(self, call: ToolCall) -> ToolResult:
         """Run the wrapped tool against business arguments with the annotation removed."""

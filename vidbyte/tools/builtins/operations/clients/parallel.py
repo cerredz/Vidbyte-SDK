@@ -48,7 +48,9 @@ class ParallelClient(WebOperationClient):
 
     async def extract(self, urls: Sequence[str]) -> FetchPayload:
         """Extract a bounded URL batch and return the pages Parallel retrieved."""
-        payload, attempts = await self.request_json("fetch", "POST", path="extract", headers=self._headers(), json_body={"urls": list(urls)[:_MAX_URLS]})
+        # @intent parallel-extract-requests-full-content
+        # Beta Extract returns only excerpts unless full_content is true (it defaults to false), and this client reads the full page text.
+        payload, attempts = await self.request_json("fetch", "POST", path="extract", headers=self._headers(), json_body={"urls": list(urls)[:_MAX_URLS], "full_content": True})
         pages = self._pages_from_payload(payload)
         return FetchPayload(provider=self.provider, pages=pages, attempts=attempts, billable_units=len(pages))
 

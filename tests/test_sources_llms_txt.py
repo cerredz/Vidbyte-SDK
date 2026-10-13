@@ -93,6 +93,16 @@ class LlmsTxtParserTests(unittest.TestCase):
                 link = parse_llms_txt(raw, url="u").sections[0].links[0]
                 self.assertEqual((link.title, link.url, link.note), ("Guide", "https://ex.com/g.md", "Read this first"))
 
+    def test_parse_link_url_keeps_balanced_parentheses(self) -> None:
+        # [Regression] CommonMark link destinations may hold a balanced "(...)" pair, as real doc URLs do.
+        msdn = "https://learn.microsoft.com/en-us/previous-versions/windows/desktop/ms682411(v=vs.85)"
+        wiki = "https://en.wikipedia.org/wiki/Mutex_(computing)"
+        raw = f"# T\n## S\n- [CreateMutex]({msdn}): create a mutex\n- [Mutex]({wiki})\n".encode()
+        links = parse_llms_txt(raw, url="u").sections[0].links
+        self.assertEqual([(link.url, link.note) for link in links], [(msdn, "create a mutex"), (wiki, None)])
+        with self.assertRaises(SourceParseError):
+            parse_llms_txt(b"# T\n## S\n- [x](https://ex.com/a_(b)", url="u")
+
     def test_parse_link_without_note_unchanged(self) -> None:
         # [Edge Case] A bare link, or one with only trailing whitespace, has no note.
         doc = parse_llms_txt(b"# T\n## S\n- [a](https://ex.com/a.md)\n- [b](https://ex.com/b.md)   \n", url="u")
@@ -167,6 +177,19 @@ class LlmsTxtSourceTests(unittest.TestCase):
         result = _source().load(ArtifactRef(url="https://ex.com/llms.txt"), selection=Selection(expand=True))
         self.assertNotIn("changelog", " ".join(item.document_id for item in result.items))
 
+    def test_deny_only_selection_still_excludes_optional(self) -> None:
+        # [Regression] A deny glob narrows the set; it must not opt the Optional section into expansion or fetching.
+        # The changelog URL is unregistered, so any attempt to fetch it would raise SourceFetchError.
+        fetcher = InMemoryFetcher({"https://ex.com/llms.txt": _INDEX, "https://ex.com/quick.md": b"# Quickstart\nget started"})
+        result = _source(fetcher=fetcher).load(
+            ArtifactRef(url="https://ex.com/llms.txt"),
+            selection=Selection(deny=("Docs/Guide",), expand=True),
+        )
+        ids = [item.document_id for item in result.items]
+        self.assertEqual(len(ids), 2)  # index + quickstart only
+        self.assertIn("quickstart", ids[1])
+        self.assertNotIn("changelog", " ".join(ids))
+
     def test_expand_respects_allow_deny_globs(self) -> None:
         # [Edge Case] A link-level allow glob expands only the matching link.
         result = _source().load(
@@ -175,6 +198,27 @@ class LlmsTxtSourceTests(unittest.TestCase):
         )
         self.assertEqual(len(result.items), 2)  # index + quickstart only
         self.assertIn("quickstart", result.items[1].document_id)
+
+    def test_expand_resolves_relative_links_against_the_index_url(self) -> None:
+        # [Regression] Site- and path-relative links resolve against the llms.txt URL; absolute links load unchanged.
+        fetcher = InMemoryFetcher(
+            {
+                "https://docs.acme.dev/llms.txt": b"# Acme\n## Docs\n- [Quickstart](/guide/quickstart.md)\n- [Limits](reference/limits.md)\n- [Status](https://docs.acme.dev/status.md)\n",
+                "https://docs.acme.dev/guide/quickstart.md": b"# Quickstart\nrelative quickstart body",
+                "https://docs.acme.dev/reference/limits.md": b"# Limits\nrelative limits body",
+                "https://docs.acme.dev/status.md": b"# Status\nabsolute status body",
+            }
+        )
+        source = LlmsTxtSource(fetcher=fetcher, allowlist=UrlAllowlist(allowed_hosts=frozenset({"docs.acme.dev"})))
+        result = source.load(ArtifactRef(url="https://docs.acme.dev/llms.txt"), selection=Selection(expand=True))
+        expanded = {item.source: item.content for item in result.items[1:]}
+        self.assertEqual(
+            set(expanded),
+            {"https://docs.acme.dev/guide/quickstart.md", "https://docs.acme.dev/reference/limits.md", "https://docs.acme.dev/status.md"},
+        )
+        self.assertIn("relative quickstart body", expanded["https://docs.acme.dev/guide/quickstart.md"])
+        self.assertIn("relative limits body", expanded["https://docs.acme.dev/reference/limits.md"])
+        self.assertIn("absolute status body", expanded["https://docs.acme.dev/status.md"])
 
     def test_expand_failed_link_fails_closed_by_default(self) -> None:
         # [Hidden Assumption] A link host outside the allowlist fails the whole expansion.

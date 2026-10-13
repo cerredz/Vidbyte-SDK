@@ -13,7 +13,7 @@ from vidbyte.lib.tracing import SpanContext, TracerBase
 from vidbyte.trace.controller import TraceController
 from vidbyte.trace.profiles import TraceProfile
 from vidbyte.trace.providers import ProviderTraceTranslator
-from vidbyte.trace.schema import ParentPolicy, SpanKind, SpanSpec, TraceDetail
+from vidbyte.trace.schema import ParentPolicy, SemanticSpanContext, SpanKind, SpanSpec, TraceDetail
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,21 +177,22 @@ class SessionTraceController(TraceController):
         finally:
             self._session_root.set(None)
 
-    def start_trace(self, name: str, **attributes: Any) -> SpanContext:
-        # Converts agent root traces into child spans while a session is active.
+    @property
+    def _live_root(self) -> SpanContext | None:
+        # Returns the active session root only when it reached the backend.
         root = self.root_context
+        # @intent session-suppressed-root-keeps-agent-roots
+        # A profile-filtered session root was never emitted, so agent runs must stay real root traces, not parentless spans.
+        return None if isinstance(root, SemanticSpanContext) and root.suppressed else root
+
+    def start_trace(self, name: str, **attributes: Any) -> SpanContext:
+        # Converts agent root traces into child spans while an emitted session root is active.
+        root = self._live_root
         if root is not None and name == "agent.run":
             # @intent session-keeps-nested-agent-runs-nested
             # Attach to the innermost open span: the session root for a top-level run, the caller's tool span for a nested one.
             return self.start_span(name, **attributes)
         return super().start_trace(name, **attributes)
-
-    def end_trace(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None) -> None:
-        # Ends child agent traces as spans while the session root remains open.
-        root = self.root_context
-        if root is None or context is root:
-            return super().end_trace(context, output=output, error=error)
-        return super().end_span(context, output=output, error=error)
 
     def session(self, name: str | None = None, **attributes: Any) -> _SessionContext:
         # Returns a sync context manager for one active session root.

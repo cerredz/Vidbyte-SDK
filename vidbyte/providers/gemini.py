@@ -65,27 +65,34 @@ class GeminiProvider:
     def _create_contents(self, config: TextModelConfig, prompt: str) -> list[Mapping[str, Any]]:
         # Gemini supports alternating user/model turns through the contents array.
         history = [self._gemini_turn(message) for message in config.messages]
-        history.insert(self._prompt_index(history), {"role": "user", "parts": [{"text": prompt}]})
+        history.insert(self._prompt_index(history, config.prompt_index), {"role": "user", "parts": [{"text": prompt}]})
         # A model note followed by a model call is one model step, so they travel as one model turn.
         history = self._merge_model_turns(history)
         # Answers to one parallel function-call turn must travel together in a single user turn.
         return self._merge_function_responses(history)
 
-    def _prompt_index(self, history: list[Mapping[str, Any]]) -> int:
+    def _prompt_index(self, history: list[Mapping[str, Any]], boundary: int | None = None) -> int:
+        # @intent prompt-sits-at-the-run-boundary
+        # The runtime's run boundary wins as it does in PromptPlacement, unless the history opens with a model turn.
+        if boundary is not None and boundary <= len(history) and not (history and history[0].get("role") == "model"):
+            return boundary
         # The runtime appends this run's tool exchange to whatever history it was handed, but
         # the prompt that provoked that exchange arrives separately and would otherwise land
         # after it, leaving the functionCall turn with nothing in front of it. Gemini rejects
         # that outright: "function call turn comes immediately after a user turn or after a
         # function response turn". Slot the prompt in as that missing opening turn. A model turn
         # at the very start, text or call, has nothing in front of it either and gets the same
-        # treatment. A history whose model turns are already introduced is left alone and the
-        # prompt simply appends.
+        # treatment. A call right after a user turn (a function response is one too) belongs to
+        # an exchange that is already introduced, such as a replayed one or a later round, so
+        # scanning goes on past it; with no unintroduced model turn the prompt simply appends.
         # @intent gemini-prompt-opens-a-model-led-history
         # A rejected plain-text draft now opens this run's exchange, and Gemini refuses contents that start with a model turn.
         for index, turn in enumerate(history):
             if not (self._has_part(turn, "functionCall") or (index == 0 and turn.get("role") == "model")):
                 continue
-            return len(history) if index and history[index - 1].get("role") == "user" else index
+            if index and history[index - 1].get("role") == "user":
+                continue
+            return index
         return len(history)
 
     def _merge_model_turns(self, history: list[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
@@ -201,6 +208,11 @@ class GeminiProvider:
         model = quote(config.model, safe="")
         task_type = config.input_type or "RETRIEVAL_DOCUMENT"
         payload: dict[str, Any] = {"requests": [{"model": f"models/{model}", "content": {"parts": [{"text": t}]}, "taskType": task_type} for t in texts]}
+        # @intent embedding-dimensions-reach-every-provider
+        # The shared dimensions setting becomes Gemini's per-request outputDimensionality, the way input_type becomes taskType.
+        if config.dimensions is not None:
+            for request in payload["requests"]:
+                request["outputDimensionality"] = config.dimensions
         url = f"{config.resolved_endpoint()}/models/{model}:batchEmbedContents"
         response = transport.request(method="POST", url=url, headers=self._create_embedding_headers(config), json_body=payload, timeout_seconds=config.timeout_seconds)
         parsed = self._parser.parse_json_response(response, provider=self.provider.value)
@@ -243,7 +255,10 @@ class GeminiProvider:
         parts = content.get("parts") if isinstance(content, dict) else None
         if not isinstance(parts, list):
             raise ProviderResponseError("Gemini response did not include text parts.", provider=self.provider.value, response_excerpt=str(parsed))
-        chunks = [part["text"] for part in parts if isinstance(part, dict) and isinstance(part.get("text"), str)]
+        # @intent thought-parts-are-not-the-answer
+        # With thinkingConfig.includeThoughts, Gemini sends thought summaries as parts marked "thought": true
+        # ahead of the answer; the answer is the other text parts, never the thinking.
+        chunks = [part["text"] for part in parts if isinstance(part, dict) and isinstance(part.get("text"), str) and part.get("thought") is not True]
         if not chunks:
             if any(isinstance(part, dict) and ("functionCall" in part or "function_call" in part) for part in parts):
                 return ""

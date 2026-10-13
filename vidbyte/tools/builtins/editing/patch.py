@@ -13,7 +13,6 @@ Relations:
 
 from __future__ import annotations
 
-import difflib
 from pathlib import Path
 
 from vidbyte.lib.tools.filesystem import LineEndings
@@ -57,6 +56,9 @@ class PatchTool(BaseTool):
             newline = LineEndings.detect(path.read_bytes().decode(self.encoding))
         except (OSError, UnicodeDecodeError, ValueError) as exc:
             return ToolResult.error(self.name, str(exc), metadata={"error": "read_error"})
+        # @intent model-crlf-text-keeps-file-endings
+        # The file reads back as LF and is written in its own endings, so CRLF the model spelled is made LF to match and land once.
+        search_block, replace_block = LineEndings.to_lf(search_block), LineEndings.to_lf(replace_block)
 
         # @intent unique-edit-counts-overlapping-matches
         count = SubstringCounter.count_overlapping(before, search_block)
@@ -79,14 +81,8 @@ class PatchTool(BaseTool):
                 handle.write(after)
         except OSError as exc:
             return ToolResult.error(self.name, str(exc), metadata={"error": "write_error"})
-        diff = "".join(
-            difflib.unified_diff(
-                before.splitlines(keepends=True),
-                after.splitlines(keepends=True),
-                fromfile=f"a/{file_path}",
-                tofile=f"b/{file_path}",
-            )
-        )
+        # Split at "\n" only and mark a missing final newline, so each diff line stays on its own line.
+        diff = LineEndings.unified_diff(before, after, fromfile=f"a/{file_path}", tofile=f"b/{file_path}")
         return ToolResult.success(
             self.name,
             diff or "Patch applied with no line-level diff.",
