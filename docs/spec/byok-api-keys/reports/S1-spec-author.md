@@ -151,3 +151,20 @@ Spec r3 is committed at 74f0b83d with `status: approved`. All nine round-2 findi
 - AC-32 was rewritten, because under D-29 a deepseek agent with a lone unproven key and a kimi fallback now binds the key to deepseek.
 
 **Self-check.** No undefined IDs. No gaps except the struck NG-13, A-2, A-3, Q-1, Q-2, and Q-7. Every EC is guarded, and table columns are consistent. There is one CREATE row against a budget of one new file. New names appear in both §8.5 and §12.3.
+
+## Addendum r4 (2026-10-12): the orchestrator's rulings on the r3 open items
+
+Spec r4 keeps `status: approved`. It applies two orchestrator rulings and nothing else.
+
+- **Ruling r4-1: `AQ.` routes to gemini.** Table F row 5 is now `(?:AIza[A-Za-z0-9_-]{35}|AQ\.[A-Za-z0-9_-]+)`.
+  - Sources: the `google-gemini` cookbook (tools/README.md, "legacy `AIza...` and new `AQ.Ab8...` formats"), plus two Google staff replies on discuss.ai.google.dev (threads 171575 and 170415: "AI Studio will now only generate Authentication Key (AQ) keys"). S1 re-read all three on 2026-10-12.
+  - No source shows the characters after `AQ.`. The rule takes the same URL-safe set as the other rows. A key with any other character stays reserved to gemini and is refused, never sent elsewhere (A-11).
+  - A-13 records the 401 `ACCESS_TOKEN_TYPE_UNSUPPORTED` reports and cites thread 179102. In that thread, Google staff say the failures are not due to the `AQ.` format. The 179102 citation is S1's own find; neither ruling-cited thread mentions that error code.
+  - Updated: AC-29 (the `AQ.` sample now expects gemini), D-19, A-1, A-6, A-11, NFR-12, and §13 (`AQ.` fakes are built at run time). §9.4 item 10 is withdrawn.
+- **Ruling r4-2: `RESERVED_PREFIXES` holds only `sk-svcacct-`.** D-28 says it is a refuse-only guard that closes a wrong-vendor path.
+  - In r3 the list also held every table F prefix, which reserved a near-miss key: one that starts with a table F prefix but does not fully match the rule.
+  - Dropping that guard would let unique assignment bind, for example, a dotted `xai-` token to deepseek. So it now comes from `KEY_FORMATS`, whose rows list their literal prefixes.
+  - No new name is added. `KEY_FORMATS`'s element type gains the prefixes, in §8.5 and row 4.
+  - AC-29 gains a dotted `xai-` sample. NFR-3 now counts 8 prefix checks.
+
+**Self-check.** No undefined IDs. No gaps, except the struck NG-13, A-2, A-3, Q-1, Q-2, and Q-7. A now runs 1 to 13. Table columns are consistent. File paths appear only where the template allows them; the only other paths sit inside §0's verbatim text, lint commands, and URLs.
