@@ -10,6 +10,7 @@ Architecture:
     - PricingBaseTests: nested_int + uncached_input_tokens on ProviderUsage.
     - CompatibleProviderTests: xai/glm/minimax/deepseek route through one class.
     - PricingRegistryStrictnessTests: resolve/register take only ModelProvider.
+    - PricingPrefixFallbackTests: prefix pricing covers releases, not variant SKUs.
     - AnthropicCacheRateTests: Anthropic cache buckets use the shared rate rules.
     - FreeModelCacheRateTests: a 0.0 base input rate never divides cache rates.
     - OperationPricingTableTests: no operation rate is off by a per-1,000 factor.
@@ -41,7 +42,7 @@ from vidbyte.lib.registries.operation_pricing import (
     OPERATION_PRICING,
     OperationPricingRegistry,
 )
-from vidbyte.lib.registries.pricing import ModelPricing, ModelPricingRegistry
+from vidbyte.lib.registries.pricing import PROVIDER_PRICING, ModelPricing, ModelPricingRegistry
 
 # Floor for any non-zero operation rate. Vendors publish per-1,000-unit figures, so
 # the recurring defect is dividing by 1,000,000 instead of 1,000. The smallest real
@@ -203,6 +204,40 @@ class PricingRegistryStrictnessTests(unittest.TestCase):
             registry.register("openai", "custom-model", pricing)  # type: ignore[arg-type]
         registry.register(ModelProvider.OPENAI, "custom-model", pricing)
         self.assertIs(registry.resolve(ModelProvider.OPENAI, "custom-model"), pricing)
+
+
+class PricingPrefixFallbackTests(unittest.TestCase):
+    # @intent prefix-pricing-covers-releases-not-variants
+    # A dated snapshot, -latest, or a patch version prices like its base key; a
+    # lettered suffix such as -flash names a different SKU and resolves to None.
+
+    def test_unpriced_variant_does_not_inherit_its_siblings_rate(self) -> None:
+        registry = ModelPricingRegistry.default()
+        self.assertIsNone(registry.resolve(ModelProvider.GLM, "glm-4.7-flash"))
+        self.assertIsNone(registry.resolve(ModelProvider.GLM, "glm-4.7-flashx"))
+
+    def test_release_markers_still_price_like_their_base_key(self) -> None:
+        registry = ModelPricingRegistry.default()
+        for provider, release, base in (
+            (ModelProvider.ANTHROPIC, "claude-haiku-4-5-20251001", "claude-haiku-4-5"),
+            (ModelProvider.XAI, "grok-4.5-latest", "grok-4.5"),
+            (ModelProvider.TYPESAFE, "jev-1.13.0", "jev-1.13"),
+        ):
+            expected = registry.resolve(provider, base)
+            self.assertIsNotNone(expected, base)
+            self.assertIs(registry.resolve(provider, release), expected, release)
+
+    def test_priced_variants_keep_their_own_rows(self) -> None:
+        registry = ModelPricingRegistry.default()
+        self.assertIs(registry.resolve(ModelProvider.GLM, "glm-4.7"), PROVIDER_PRICING[ModelProvider.GLM]["glm-4.7"])
+        self.assertIs(registry.resolve(ModelProvider.GLM, "glm-5.3-flash"), PROVIDER_PRICING[ModelProvider.GLM]["glm-5.3-flash"])
+
+    def test_custom_table_prices_releases_by_prefix_but_not_variants(self) -> None:
+        pricing = ModelPricing(input_per_million=1.0, output_per_million=2.0)
+        registry = ModelPricingRegistry(table={ModelProvider.OPENAI: {"m-1": pricing}})
+        self.assertIs(registry.resolve(ModelProvider.OPENAI, "m-1-20260101"), pricing)
+        self.assertIs(registry.resolve(ModelProvider.OPENAI, "m-1.2"), pricing)
+        self.assertIsNone(registry.resolve(ModelProvider.OPENAI, "m-1-mini"))
 
 
 class AnthropicCacheRateTests(unittest.TestCase):
