@@ -77,6 +77,7 @@ from vidbyte.lib.enums.failure import (
     FailureStatus,
     RuleErrorMode,
 )
+from vidbyte.lib.enums.harness_backends import BackendFeature, HarnessBackendName
 from vidbyte.lib.enums.jev import (
     JevBoundaryKind,
     JevClaimKind,
@@ -108,7 +109,20 @@ from vidbyte.lib.enums.multi_agent import (
     OrchestratorAction,
     TaskStatus,
 )
+from vidbyte.lib.enums.native_hosts import (
+    AcpToolKind,
+    ApprovalOutcome,
+    GrokPermissionMode,
+    InterruptSource,
+    MuseReasoningEffort,
+    MuseViewDirection,
+    NativeHarness,
+    NativeTurnStatus,
+    OpencodeMcpKind,
+    OpencodePermissionAction,
+)
 from vidbyte.lib.enums.platform import Platform
+from vidbyte.lib.enums.process import ProcessLaunchFailure
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.enums.reasoning_strategies import (
     AbsenceEvidenceSignificance,
@@ -141,11 +155,14 @@ from vidbyte.lib.enums.usage import UsageAccountingFailure, UsageKind
 
 __all__ = [
     "AbsenceEvidenceSignificance",
+    "AcpToolKind",
     "AgentRuntimeStateKey",
     "AgentRuntimeType",
     "AgentSpeedRecordingIntegrity",
     "AgentType",
+    "ApprovalOutcome",
     "AssumptionAction",
+    "BackendFeature",
     "BasisType",
     "BudgetPreset",
     "BurdenOfProofVerdict",
@@ -174,9 +191,12 @@ __all__ = [
     "FailureSeverity",
     "FailureStatus",
     "GitHeadState",
+    "GrokPermissionMode",
+    "HarnessBackendName",
     "HypothesisStatus",
     "IdentityVerdict",
     "ImpactLevel",
+    "InterruptSource",
     "JevBoundaryKind",
     "JevClaimKind",
     "JevCompletionStatus",
@@ -204,7 +224,13 @@ __all__ = [
     "ModelNameModality",
     "ModelProvider",
     "MultiAgentStopReason",
+    "MuseReasoningEffort",
+    "MuseViewDirection",
+    "NativeHarness",
+    "NativeTurnStatus",
     "NecessarySufficientVerdict",
+    "OpencodeMcpKind",
+    "OpencodePermissionAction",
     "OperatingSystemFamily",
     "OrchestratorAction",
     "PartitionVerdict",
@@ -212,6 +238,7 @@ __all__ = [
     "PinPolicy",
     "Platform",
     "PredictMatch",
+    "ProcessLaunchFailure",
     "ProgressState",
     "Prompt",
     "QuantifierKind",
