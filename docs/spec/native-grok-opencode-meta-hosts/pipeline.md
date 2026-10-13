@@ -252,6 +252,11 @@ started: 2026-10-13 01:30 UTC
   - keep spec ids out of SDK comments, 72 columns (R-14, R-15, R-M11);
   - enum parameter descriptions name every value (R-4);
   - key moot interrupts on the turn's recorded completion (R-18..R-21).
+- 2026-10-13 19:50 UTC — **Post-S6 verifier done.** The verdict stays SOUND. It appended review.md lines 152-178 (+27/−0, the only change; checked by me).
+  - **R-22 (A), Minor `trivial`:** a failed Muse turn that nobody waits on logs "Task exception was never retrieved". No error is lost.
+  - **R-24 [verifier], Minor `trivial`:** a Grok host closed during spawn or continue leaves the `session/prompt` answer future unretrieved.
+  - **(B), candidate R-23, refuted:** EC-127 requires the literal.
+  - **Decision: route R-22 and R-24 to S2 addendum 4, then S5 iteration 7.** Why: both have deterministic public-API recipes, and the fixes are 1–2 lines. Tests first keeps the pattern every earlier fix followed.
 
 ## User replies (verbatim)
 (none during the run)
