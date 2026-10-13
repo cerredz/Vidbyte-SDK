@@ -26,8 +26,8 @@ started: 2026-10-13 01:30 UTC
 
 ## Counters and caps
 - S1 review rounds: 2/2 (round 2 focused on the r2 changes)
-- S5 repair iterations: 3/8 (converged)
-- S5 re-review rounds: 1/2 (launched)
+- S5 repair iterations: 4/8 (converged again after re-review round 1)
+- S5 re-review rounds: 2/2 (round 2 launched; last allowed)
 
 ## Decisions the orchestrator made
 
@@ -161,6 +161,15 @@ started: 2026-10-13 01:30 UTC
   - My run of the new files: `11 failed, 34 passed`.
   - The test diff only adds; the few removed lines are A001 header fields, rewritten.
   - **Open note from the author:** no test pins opencode's exact id comparison. Iteration 4 is briefed that opencode must stay exact (INV-14), and re-review round 2 checks it.
+- 2026-10-14 02:00 — **S5 iteration 4 is DONE and verified by me.** Commits: R-16 1768c3d5 (`NativeTurnTable._session_key` lower-cases ids for GROK and MUSE only; opencode stays exact), R-17 1a9bc056 (scrub, then cap), R-M11 45ad54ec (header and docstring text only). HEAD is 44545f3f.
+  - **My checks:**
+    - the tests are byte-identical to S2_HEAD 5ce6e85d;
+    - `lint/` matches main, and main has not moved;
+    - the R-16, R-17 and R-M11 rows read `fixed @sha`;
+    - `ci.yml` 38432650695 and `static-policy.yml` 38432655274 passed on 45ad54ec;
+    - my own `run_ci --stage source` gave `5664 passed, 32 skipped in 186.28s` / `CI passed.`;
+    - INV-19 holds.
+  - **Harness behaviour to note:** the harness refused the repair agent's report file (`reports/S5-repair-4.md`) with "Subagents should return findings as text, not write report files". The agent did not work around it; the full record is in verify-log.md under Iteration 4. Later briefings say: if the report write is refused, return the content inline.
 
 ## User replies (verbatim)
 (none during the run)
