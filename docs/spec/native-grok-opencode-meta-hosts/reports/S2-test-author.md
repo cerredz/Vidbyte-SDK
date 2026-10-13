@@ -291,3 +291,51 @@ The 20 failures are exactly the new non-lock tests, each red for its stated reas
 - **R-8 EC-32 case-insensitive equality** is not written: it is a near-duplicate of (iii)'s EC-36 coverage under the same INV-14 rule, and may already be green (a lock).
 - **R-6 rests on an implicit spec rule.** The spec does not state an abort-before-local-failure rule for opencode; R-6 binds to INV-10/INV-13 intent and the review's fix (`turn.py`), as `FEATURE.md` records. Flagged as a spec gap.
 - **R-8 (iv)** turned out green rather than the brief's expected red: the current code already compares the EC-39 target ignoring case. It is kept as a lock, not a regression test.
+
+## Addendum 2 (re-review round 1) (commit `5ce6e85d`)
+
+The post-repair re-review confirmed two Majors with no regression test: R-16 (INV-14, the vendor-returned-id half) and R-17 (§9.1 title "scrubbed", INV-6). This addendum adds 11 cases in 5 functions, bound to the r8 names and run through the §13 fakes. No `vidbyte/` source was read, and no real `grok`, `muse` or `wsl.exe` ran. No existing assertion or fixture changed. (This report already has a section called "Addendum 2" for D-4 to D-6; the brief named this one too.)
+
+### What was added (per finding)
+
+- **R-16, Grok** (`tests/features/grok_host/test_grok_host_session_id_case.py`):
+  - **The scenario.** `VENDOR_UPPER_SCENARIO` makes `session/new` answer `ABCDEF01-2345-4678-89AB-CDEF01234567`, holds the turn, and lists that id in Grok's own spelling. A missed busy check therefore reaches a real second turn or the paid fork CLI.
+  - **`test_continue_on_a_live_session_whose_vendor_id_is_upper_case_is_busy[handle-id, lower-cased-handle-id]`.** It needs `grok.session_busy`, one `peer` launch and one `session/prompt`.
+  - **`test_fork_of_a_live_session_whose_vendor_id_is_upper_case_is_busy[handle-id, lower-cased-handle-id]`.** It needs `grok.session_busy` (EC-34), no `oneshot` launch and one `peer` launch, so the check must fire before the listing peer.
+- **R-16, Muse** (`tests/features/muse_host/test_muse_host_turns.py`): the same two tests, with `new_session_id` `0192F0C4-ABCD-7EF0-8123-456789ABCDEF` and `sessions` holding both spellings.
+  - **Continue** needs `muse.session_busy`, one `peer` start and one `turn/start`.
+  - **Fork** needs `muse.session_busy`, no `session/fork` frame and one `peer` start, matching the EC-112 `fork_busy` row.
+- **The R-16 bound-id check.** Each R-16 test first asserts that `handle.session_id.lower()` equals the scenario's id lower-cased. The fakes' default ids differ from it, so a scenario that silently failed to apply cannot give a vacuous pass. The handle's spelling itself is never asserted, so either fix the verifier named passes: folding case in `NativeTurnTable`, or lower-casing the id at parse.
+- **R-17, Grok** (`test_grok_host_turns.py`): `test_a_credential_in_a_permission_title_is_scrubbed_from_the_result_and_the_wait_tool`.
+  - **Input.** A permission is titled `Run: export OPENAI_API_KEY=<sk-proj-FAKE + uuid4 hex> && make deploy`.
+  - **Checks.** One `acp.permission:execute` decision is recorded, and the `wait_grok_turn` tool succeeds. The value is absent from the decision title, the tool output and the tool metadata, and the title contains `<redacted>`.
+  - **Not duplicated.** The plain-title case stays pinned at `test_grok_host_turns.py:64`.
+- **R-17, Muse** (`test_muse_host_turns.py`): `test_a_credential_in_a_request_title_is_scrubbed_from_the_result_and_the_wait_tool[approval-requested, user-input-requested]`. These are the same checks, for the `toolName` of both record sites, through `wait_muse_turn`.
+
+### Proof the tests can go green (scratch only, not committed)
+
+The scratch files are in `scratchpad/s2-addendum2-control/`.
+- **R-16.** Copies of the new tests with the vendor id lower-cased pass against the current code: Grok 4/4 and Muse 4/4. Every post-raise assertion (peer, prompt, turn/start, fork and oneshot counts) is reachable, and the red comes from letter case alone.
+- **R-17.** A control recorded the title through the current host, then applied `NativeErrorFactory.scrub` and the `NATIVE_APPROVAL_TITLE_MAX_CHARS` cap, which is the review's fix shape. It gave `Run: export OPENAI_API_KEY=<redacted> && make deploy` for Grok and `shell OPENAI_API_KEY=<redacted>` for both Muse kinds. Every committed assertion holds on that text, and on the tool output with the title swapped in.
+
+### Red run
+
+`PYTHONPATH=$(pwd) python -m pytest -p no:cacheprovider -q tests/features/grok_host tests/features/opencode_host tests/features/muse_host tests/features/native_backends` →
+
+```
+11 failed, 1638 passed, 19 skipped in 149.26s (0:02:29)
+```
+
+- **The 11 failures are exactly the new cases:**
+  - R-16 (8): `Failed: DID NOT RAISE NativeHostError`;
+  - R-17 (3): `AssertionError: INV-6: the credential leaked into ['decision title', 'tool output']`.
+- **The baseline is unchanged:** 1638 passed and 19 skipped.
+- **No generated secret value appears anywhere in the run output.**
+- **Lint:** `python lint/run.py` (files staged) → `SDK-LINT: PASS`. A007 stays at 255, S062 at 889 and S024 at 25.
+
+### Not written, and gaps
+
+- **No opencode exact-comparison lock.** INV-14 keeps opencode `ses…` ids exact, and the brief scopes R-16 to Grok and Muse. No test in `opencode_host` exercises a case variant of a live opencode session, so a repair that folded case for all three harnesses would pass every pack. This is an open item.
+- **No test pins the scrub-then-cap order.** A secret straddling the 200-character cap would test the mechanism, not a §9.1 outcome, so it was left out.
+- **R-M10 and R-M11 get no tests,** by orchestrator decision.
+- **Spec defects:** none found. §9.1, INV-6, INV-14, §8.5 and EC-29, EC-34 and EC-112 were enough to bind every test.
