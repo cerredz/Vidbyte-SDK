@@ -265,3 +265,15 @@
 - The `grok.not_installed` default and EC-157's next step both contain `GrokHostSettings.grok_command`.
 - AC-1 is one criterion with two observable outcomes, and both can be met on every platform.
 - §8.4 counts are unchanged, with no new code, field, constant, file or dependency.
+
+**r8, second commit (S4-6, orchestrator decision on the EC-39 observation above).**
+- EC-39 now records the target clause: it raises `grok.protocol_mismatch` when the caller passed `new_session_id` and the returned `sessionId` differs from it. The guard is kept, because without it a fork naming the wrong session would be accepted after money is spent.
+- INV-14 now says that Grok and Muse session-id comparisons ignore letter case. That covers the busy check and the fork checks EC-32, EC-35, EC-36 and EC-39. It matches `require_uuid`, which accepts upper case (`tests/features/grok_host/test_grok_host_records.py:66`). opencode `ses…` ids are compared exactly.
+- Also updated:
+  - the comment on §8.5 `NativeTurnTable.reserve`;
+  - §12.3 rows 30, 32 and 41, all citing INV-14;
+  - §16 S4-6;
+  - §17 deviation 10 (`GrokWire.check_fork_result`, `grok/wire.py:337-340`);
+  - the r8 row.
+- `revision: 8` and `status: reviewed` are unchanged.
+- Self-check re-run: 0 tables with a wrong cell count, and every new reference resolves.
