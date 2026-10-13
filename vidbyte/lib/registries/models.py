@@ -11,9 +11,8 @@ Key Functions:
     - get_api_key_env_var: Retrieves the API key environment variable name.
     - get_default_endpoint: Retrieves the default endpoint for a provider.
     - resolve_api_key: Resolves explicit API key or retrieves environment variable.
-    - find_vidbyte_api_key: Returns the Vidbyte key the text key fall-through selects, or None for BYOK.
-    - vidbyte_key_follows_provider: Reports whether a key is a Vidbyte key the gateway serves for a provider.
-    - resolve_vidbyte_api_key: Resolves and checks the live Vidbyte key a managed call sends.
+    - find_provider_api_key: Returns a provider's key from the matched api_keys record, then its environment variable, or None.
+    - resolve_vidbyte_api_key: Resolves and checks the live Vidbyte key a gateway call sends; callers may pass their own remedy.
     - resolve_endpoint: Resolves explicit endpoint or defaults to standard URL.
     - get_supported_providers: Gets list of supported provider strings.
     - is_valid_provider: Reports whether a provider string is one the SDK offers.
@@ -43,7 +42,7 @@ from __future__ import annotations
 import os
 import re
 from collections.abc import Mapping
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from vidbyte.lib.agents.modality_detector import ModalityDetector
 from vidbyte.lib.constants.jev import (
@@ -51,11 +50,14 @@ from vidbyte.lib.constants.jev import (
     VIDBYTE_API_KEY_PATTERN,
     VIDBYTE_API_KEY_PREFIX,
     VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND,
-    VIDBYTE_MANAGED_TEXT_PROVIDERS,
+    VIDBYTE_PROVIDER_KEY_PATTERN,
 )
 from vidbyte.lib.constants.runners import MODEL_PROVIDER_RUNNER_TYPE_MAP, MODEL_RUNNER_TYPE_MAP
 from vidbyte.lib.enums import ModelModality, ModelProvider
 from vidbyte.lib.errors import ConfigurationError
+
+if TYPE_CHECKING:
+    from vidbyte.lib.dataclasses.agents import ProviderKeys
 
 
 class ProviderModelRegistry:
@@ -177,48 +179,43 @@ class ProviderModelRegistry:
         raise ConfigurationError(f"Missing API key for provider {p_name}. Pass api_key or set {env_var}.")
 
     @classmethod
-    def find_vidbyte_api_key(cls, provider: ModelProvider | str, explicit_key: str | None) -> str | None:
-        """Return the Vidbyte key the text key fall-through selects, or None when the call stays on the caller's own provider key."""
-        # @intent byok-key-wins-and-vidbyte-key-fills-in-last
-        # A provider key the caller holds keeps that provider
-        # unbilled, so steps 1-2 are managed only for a
-        # Vidbyte-prefixed key, and VIDBYTE_API_KEY fills in
-        # only for a provider the gateway serves.
-        if explicit_key is not None and not isinstance(explicit_key, str):
-            return None
-        explicit = (explicit_key or "").strip()
-        if explicit:
-            return explicit if explicit.startswith(VIDBYTE_API_KEY_PREFIX) else None
-        env_value = os.environ.get(cls.get_api_key_env_var(provider), "").strip()
-        if env_value:
-            return env_value if env_value.startswith(VIDBYTE_API_KEY_PREFIX) else None
-        p_enum = provider if isinstance(provider, ModelProvider) else ModelProvider(provider)
-        if p_enum not in VIDBYTE_MANAGED_TEXT_PROVIDERS:
-            return None
-        return os.environ.get(VIDBYTE_API_KEY_ENV_VAR, "").strip() or None
+    def find_provider_api_key(cls, provider: ModelProvider | str, keys: ProviderKeys) -> str | None:
+        """Return the key a call to provider sends: the matched key, else the provider's variable, or None when there is neither."""
+        # @intent matched-key-first-then-the-provider-variable
+        # The developer's matched key wins over the environment. A
+        # variable's name says which provider it serves, so its value is
+        # never matched; a Vidbyte value is refused, because it would
+        # reach a vendor. Every key must be sendable in a header.
+        env_var = cls.get_api_key_env_var(provider)
+        member = provider if isinstance(provider, ModelProvider) else ModelProvider(provider)
+        key, source = keys.key_for(member), "api_keys"
+        if key is None:
+            key, source = os.environ.get(env_var, "").strip() or None, env_var
+            if key is not None and key.startswith(VIDBYTE_API_KEY_PREFIX):
+                raise ConfigurationError(
+                    f"{env_var} holds a Vidbyte API key; set it as {VIDBYTE_API_KEY_ENV_VAR} (or pass vidbyte_api_key) and keep {env_var} for your own {member.value} key.",
+                    details={"provider": member.value, "error_kind": VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND},
+                )
+        if key is not None and re.fullmatch(VIDBYTE_PROVIDER_KEY_PATTERN, key) is None:
+            raise ConfigurationError(
+                f"The {member.value} key from {source} ({len(key)} characters) contains spaces, line breaks, or characters outside printable ASCII, so it cannot be sent.",
+                details={"provider": member.value, "source": source, "length": len(key)},
+            )
+        return key
 
     @classmethod
-    def vidbyte_key_follows_provider(cls, api_key: object, provider: str) -> bool:
-        """Return True when api_key is a Vidbyte key and the Vidbyte gateway serves provider, so the key may follow a vendor switch."""
-        # @intent vidbyte-key-may-cross-to-a-managed-provider
-        # A Vidbyte key is not a vendor secret: it only ever goes to the
-        # gateway, which serves every managed provider with it. A vendor
-        # key, or any key for a provider the gateway does not serve, stays put.
-        if not isinstance(api_key, str) or not api_key.strip().startswith(VIDBYTE_API_KEY_PREFIX):
-            return False
-        return cls.resolve_provider(provider) in VIDBYTE_MANAGED_TEXT_PROVIDERS
-
-    @classmethod
-    def resolve_vidbyte_api_key(cls, explicit_key: str | None) -> str:
-        """Return the live Vidbyte key a managed call sends: the explicit key, otherwise VIDBYTE_API_KEY, both stripped."""
+    def resolve_vidbyte_api_key(cls, explicit_key: str | None, *, remedy: str | None = None) -> str:
+        """Return the live Vidbyte key a gateway call sends: the explicit key, otherwise VIDBYTE_API_KEY, both stripped."""
         # @intent managed-key-is-a-checked-live-vidbyte-key
         # The gateway admits only live keys, so a missing or malformed
-        # key fails here, before any request, with the messages the
-        # managed Jev path has always raised; text and Jev share it.
+        # key fails here, before any request. Without a remedy the
+        # message is the one the managed Jev path has always raised;
+        # text passes its own remedy, which names its own ways out.
         key = ((explicit_key or "").strip() or os.environ.get(VIDBYTE_API_KEY_ENV_VAR, "")).strip()
         details = {"error_kind": VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND}
         if not key:
-            raise ConfigurationError(f"Missing Vidbyte API key. Pass api_key or set {VIDBYTE_API_KEY_ENV_VAR}.", details=details)
+            way_out = f"Pass api_key or set {VIDBYTE_API_KEY_ENV_VAR}." if remedy is None else remedy
+            raise ConfigurationError(f"Missing Vidbyte API key. {way_out}", details=details)
         if re.fullmatch(VIDBYTE_API_KEY_PATTERN, key) is None:
             raise ConfigurationError(f"The managed Vidbyte API key must be a live key in the {VIDBYTE_API_KEY_PREFIX} format.", details=details)
         return key
