@@ -363,6 +363,7 @@ class RecordPassThroughTests(KeySafeAssertions):
 
     def test_a_hand_built_record_whose_key_does_not_fit_its_provider_is_refused_at_construction(self) -> None:
         # AC-39, EC-55, T-5: a proven key at another provider, a line break, an unproven key at a format-bound provider, a non-sk key at openai.
+        # INV-13 (review R-2): a Vidbyte key filed as deepseek's key would otherwise be sent to DeepSeek in DIRECT.
         from vidbyte.lib.dataclasses.agents import ProviderKeys
 
         records = (
@@ -370,6 +371,7 @@ class RecordPassThroughTests(KeySafeAssertions):
             ("line break", ProviderKeys(providers=(ModelProvider.DEEPSEEK,), keys=("d-a\nb",)), "deepseek", "d-a\nb"),
             ("unproven at anthropic", ProviderKeys(providers=(ModelProvider.ANTHROPIC,), keys=(K_UNPROVEN,)), "anthropic", K_UNPROVEN),
             ("non-sk at openai", ProviderKeys(providers=(ModelProvider.OPENAI,), keys=(K_UNPROVEN,)), "openai", K_UNPROVEN),
+            ("vidbyte key at deepseek", ProviderKeys(providers=(ModelProvider.DEEPSEEK,), keys=(VIDBYTE_KEY,)), "deepseek", VIDBYTE_KEY),
         )
         for name, record, provider, key in records:
             for root, build in (
