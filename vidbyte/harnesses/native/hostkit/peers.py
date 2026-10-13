@@ -114,7 +114,9 @@ class NativePeer:
             await self._transport.close()
 
     def stderr_tail(self) -> str:
-        # The retained stderr, scrubbed and capped, for error context.
+        # @intent native-peer-stderr-is-scrubbed
+        # The retained stderr, scrubbed and capped, for error context: a
+        # vendor CLI may print an injected key or token there.
         return self._errors.scrub(self._transport.stderr_snapshot())
 
 

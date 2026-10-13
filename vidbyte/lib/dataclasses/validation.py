@@ -3,7 +3,7 @@
 PURPOSE: Defines RecordFieldValidator, the one canonical field validator for validated records: text, optional text, positive finite numbers, bounded ints, optional counts, strict bools, enum members, enum sets, argv tuples, text mappings, UUIDs, absolute directories and non-negative decimals.
 ROLE IN CODEBASE: Called from the __post_init__ of the records in vidbyte/lib/dataclasses/native_hosts.py, grok.py, opencode.py, muse.py, harness_backends.py and process.py, by McpStdioTransport in vidbyte/tools/mcp/transport.py for its new options, and by the native tool argument parser in vidbyte/tools/builtins/native_host_tool.py.
 ARCHITECTURE NOTE: A class of static methods, each taking the checked value first and the field name second, returning the checked (and for sets, converted) value or raising ConfigurationError. The checked variable is always named value, so the bool guards here are the single owner lint rules C002, C006, C007 and C008 point at. Messages name the field and the expected type or range, and quote a value only when it is a short, non-secret scalar or text. Every ConfigurationError also carries details["field"], so a tool can name the bad parameter without reading the message text.
-FUNCTION INVENTORY: require_text, require_optional_text, require_number, require_int, require_optional_count, require_bool, require_enum, require_enum_set, require_argv, require_text_mapping, require_uuid, require_directory, require_decimal; _received renders the received value safely for a message.
+FUNCTION INVENTORY: require_text, require_optional_text, require_number, require_int, require_optional_count, require_bool, require_enum, require_enum_set, require_argv, require_text_mapping, require_uuid, require_directory, require_decimal; _received renders the received value safely for a message. RecordFieldConverter: to_tuple, to_mapping, to_enum (a member or its exact value string), to_decimal (a decimal string), require_instance.
 COMMON MODIFICATION PATTERNS: Add a new check as one more static method with value first and field_name second, and call it from a record's __post_init__; never copy a check into a record.
 WHAT NOT TO DO IN THIS FILE: 1. Do not convert values silently, except a set to a frozenset in require_enum_set. 2. Do not quote mapping values or long text in a message; they can hold secrets. 3. Do not import from a layer above vidbyte.lib.
 KNOWN EDGE CASES: bool is an int subclass, so every numeric check refuses bool first. A field whose last name segment reads as a credential (password, token, secret) is never quoted, whatever its length. require_argv refuses a list on purpose, because argv fields must be immutable tuples.
@@ -135,6 +135,7 @@ class RecordFieldValidator:
 
     @staticmethod
     def _received(value: Any, field_name: str) -> str:
+        # @intent validator-messages-never-quote-secrets
         # Quotes a short non-secret scalar or text; otherwise names only the type, so secrets and long text never reach a message.
         secret = CredentialKeyPolicy.is_secret_key(field_name.rsplit(".", 1)[-1])
         quotable = value is None or isinstance(value, (bool, int, float, Decimal, Enum, str))
@@ -161,6 +162,29 @@ class RecordFieldConverter:
         if not isinstance(value, Mapping) or not all(isinstance(key, str) and isinstance(item, str) for key, item in value.items()):
             raise ConfigurationError(f"{field_name} must be a mapping of text keys to text values; got a value of type {type(value).__name__}.", details={"field": field_name})
         return MappingProxyType(dict(value))
+
+    @staticmethod
+    def to_enum(value: Any, enum_type: type[EnumT], field_name: str) -> EnumT:
+        # A member of enum_type, or the exact value string of one, returned as the member; case is not folded.
+        if isinstance(value, enum_type):
+            return value
+        members = {str(member.value): member for member in enum_type}
+        if isinstance(value, str) and value in members:
+            return members[value]
+        raise ConfigurationError(f"{field_name} must be one of {', '.join(members)}; got {RecordFieldValidator._received(value, field_name)}.", details={"field": field_name})
+
+    @staticmethod
+    def to_decimal(value: Any, field_name: str) -> Decimal:
+        # A decimal string parsed to a finite Decimal; a JSON number is refused because it may already have lost digits.
+        parsed: Decimal | None = None
+        if isinstance(value, str):
+            try:
+                parsed = Decimal(value)
+            except ArithmeticError:
+                parsed = None
+        if parsed is None or not parsed.is_finite():
+            raise ConfigurationError(f"{field_name} must be a finite decimal written as text; got {RecordFieldValidator._received(value, field_name)}.", details={"field": field_name})
+        return parsed
 
     @staticmethod
     def require_instance(value: Any, field_name: str, expected: type[Any] | tuple[type[Any], ...], *, optional: bool = False) -> Any:
