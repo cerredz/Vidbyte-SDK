@@ -139,6 +139,14 @@ class OpenAICompatibleProvider:
         if not isinstance(choices, list) or not choices:
             raise ProviderResponseError(f"{self.provider.value} response did not include choices.", provider=self.provider.value, response_excerpt=str(parsed))
         first = choices[0]
+        # @intent error-finish-reason-is-not-an-answer
+        # OpenRouter reports a failure after its 200 as finish_reason "error" beside the partial text, which is
+        # not the answer, so raise like the streaming error events (#999) and keep the billed usage.
+        if isinstance(first, dict) and first.get("finish_reason") == "error":
+            raw_error = first.get("error")
+            error = raw_error if isinstance(raw_error, dict) else {}
+            reason = ": ".join(str(part) for part in (error.get("code"), error.get("message")) if isinstance(part, (int, str)) and not isinstance(part, bool))
+            raise ProviderResponseError(f"{self.provider.value} reply ended with an error{': ' + reason if reason else '.'}", provider=self.provider.value, response_excerpt=str(parsed))
         message = first.get("message") if isinstance(first, dict) else None
         content = message.get("content") if isinstance(message, dict) else None
         # @intent empty-tool-calls-is-a-text-turn

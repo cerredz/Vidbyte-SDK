@@ -12,6 +12,7 @@ Key Functions:
     - test_invalid_response_status: Verifies [Hidden Failure] HTTP error translation.
     - test_corrupted_json_response: Verifies [Hidden Failure] JSON parse failure handling.
     - test_empty_response_content: Verifies [Silent Failure] missing content handling.
+    - test_error_finish_reason_raises_with_usage: Verifies [Silent Failure] a finish_reason "error" reply raises with its usage.
     - test_headers_injection: Verifies [Silent Failure] client attribution headers.
     - test_default_routing_modality_fallback: Verifies [Hidden Assumption] fallback modality mapping.
     - test_vendor_slug_ids_resolve_and_keep_wire_name: Verifies [Hidden Assumption] vendor/model ids resolve and openrouter/auto stays intact.
@@ -107,6 +108,26 @@ class OpenRouterProviderTests(unittest.TestCase):
         )
         with self.assertRaises(ProviderResponseError):
             runner.run("Hello")
+
+    def test_error_finish_reason_raises_with_usage(self) -> None:
+        # [Silent Failure] A reply that failed mid-generation (finish_reason "error") raises instead of returning its partial text.
+        usage = {"prompt_tokens": 1200, "completion_tokens": 6}
+        choice = {"index": 0, "message": {"role": "assistant", "content": "The refund window is "}, "finish_reason": "error", "error": {"code": 502, "message": "Provider returned error"}}
+        transport = FakeTransport(json.dumps({"choices": [choice], "usage": usage}), status_code=200)
+        runner = TextModelRunner(
+            TextModelConfig(provider=ModelProvider.OPENROUTER, model="openai/gpt-4o-mini", api_key="key"),
+            transport=transport,
+        )
+        with self.assertRaises(ProviderResponseError) as caught:
+            runner.run("Hello")
+        self.assertIn("Provider returned error", str(caught.exception))
+        self.assertEqual(caught.exception.details["usage"], usage)
+        stopped = FakeTransport(json.dumps({"choices": [{**choice, "finish_reason": "stop"}], "usage": usage}), status_code=200)
+        runner = TextModelRunner(
+            TextModelConfig(provider=ModelProvider.OPENROUTER, model="openai/gpt-4o-mini", api_key="key"),
+            transport=stopped,
+        )
+        self.assertEqual(runner.run("Hello").text, "The refund window is ")
 
     def test_headers_injection(self) -> None:
         # [Silent Failure] Verifies that HTTP-Referer and X-OpenRouter-Title client headers are set.
