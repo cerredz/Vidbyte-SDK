@@ -257,6 +257,41 @@ class SourcesBaseTests(unittest.TestCase):
             cache.put(sha256_hex(_DATA), _DATA)
             self.assertEqual(cache.get(sha256_hex(_DATA)), _DATA)
 
+    def test_filesnapshotcache_tolerates_concurrent_writers(self) -> None:
+        # @intent snapshot-cache-tolerates-concurrent-writers
+        # [Race Condition] An existing entry is never rewritten, and concurrent put/get of one hash never fails.
+        content_hash = sha256_hex(_DATA)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "snaps"
+            cache = FileSnapshotCache(root)
+            cache.put(content_hash, _DATA)
+            cache.put(content_hash, b"different bytes under the same hash")
+            self.assertEqual(cache.get(content_hash), _DATA)
+            self.assertEqual(list(root.glob("*.tmp")), [])
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "snaps"
+            cache = FileSnapshotCache(root)
+            barrier = threading.Barrier(8)
+            errors: list[BaseException] = []
+
+            def worker() -> None:
+                try:
+                    barrier.wait()
+                    for _ in range(20):
+                        cache.put(content_hash, _DATA)
+                        self.assertIn(cache.get(content_hash), (None, _DATA))
+                except BaseException as exc:  # noqa: BLE001 - collected and asserted below
+                    errors.append(exc)
+
+            threads = [threading.Thread(target=worker) for _ in range(8)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+            self.assertEqual(errors, [])
+            self.assertEqual(cache.get(content_hash), _DATA)
+            self.assertEqual(list(root.glob("*.tmp")), [])
+
     def test_filesnapshotcache_end_to_end_no_refetch(self) -> None:
         # [Hidden Failure] A pinned reload from the file cache reads from disk with no network.
         with tempfile.TemporaryDirectory() as tmp:

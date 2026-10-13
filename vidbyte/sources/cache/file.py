@@ -12,7 +12,9 @@ Relations:
 
 from __future__ import annotations
 
+import contextlib
 import os
+import tempfile
 from pathlib import Path
 
 
@@ -24,19 +26,34 @@ class FileSnapshotCache:
         self._root = Path(root)
 
     def get(self, content_hash: str) -> bytes | None:
-        # Returns snapshot bytes for the hash, or None when absent.
-        path = self._root / f"{content_hash}.bin"
-        if not path.exists():
+        # @intent snapshot-cache-tolerates-concurrent-writers
+        # Returns snapshot bytes for the hash, or None when absent or unreadable this instant (a miss).
+        try:
+            return (self._root / f"{content_hash}.bin").read_bytes()
+        except OSError:
             return None
-        return path.read_bytes()
 
     def put(self, content_hash: str, data: bytes) -> None:
-        # Writes the snapshot atomically to avoid torn reads.
-        self._root.mkdir(parents=True, exist_ok=True)
+        # @intent snapshot-cache-tolerates-concurrent-writers
+        # Content-addressed and shared by concurrent loads: an existing entry already holds these bytes.
         path = self._root / f"{content_hash}.bin"
-        tmp = self._root / f"{content_hash}.bin.tmp"
-        tmp.write_bytes(data)
-        os.replace(tmp, path)
+        if path.exists():
+            return
+        # Write through a temp file unique to this writer, then replace atomically to avoid torn reads.
+        self._root.mkdir(parents=True, exist_ok=True)
+        handle, tmp = tempfile.mkstemp(dir=self._root, prefix=f"{content_hash}.", suffix=".tmp")
+        try:
+            with os.fdopen(handle, "wb") as stream:
+                stream.write(data)
+            try:
+                os.replace(tmp, path)
+            except OSError:
+                # Losing the race to another writer of the same hash is success.
+                if not path.exists():
+                    raise
+        finally:
+            with contextlib.suppress(FileNotFoundError):
+                os.remove(tmp)
 
 
 __all__ = [
