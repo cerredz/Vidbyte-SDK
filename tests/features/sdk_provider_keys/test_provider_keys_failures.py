@@ -119,6 +119,23 @@ class GatewayErrorWordingTests(FailureAssertions):
                             self.assertNotIn(forbidden.lower(), message.lower())
                     self.assertEqual(len(call.transport.requests), 3 if status in RESENT else 1)
 
+    def test_a_vidbyte_managed_402_names_the_wallet_and_offers_a_provider_key_only_as_an_auto_option(self) -> None:
+        # Review R-17, INV-5, D-15: VIDBYTE_MANAGED ignores api_keys, so "add your key to api_keys" alone is advice that cannot work in this mode.
+        # The transport never learns the mode (R-17 ruling), so any api_keys advice must say it applies with TextModelMode.AUTO.
+        from vidbyte.lib.config import TextModelConfig, TextModelMode
+
+        transport = ScriptedGateway(gateway_error(402))
+        with patch.dict(os.environ, {"VIDBYTE_API_KEY": VIDBYTE_KEY}, clear=True), patch(SLEEP_TARGET, new=BackoffRecorder()):
+            runner = TextModelRunner(TextModelConfig(provider="openai", model=MANAGED_MODELS[ModelProvider.OPENAI], mode=TextModelMode.VIDBYTE_MANAGED), transport=transport)
+            with self.assertRaises(ProviderRequestError) as caught:
+                runner.run("Hi")
+        message = self.assert_credential_safe(caught.exception, status=402, provider=ModelProvider.OPENAI)
+        [sent] = transport.requests
+        self.assertIsNone(provider_key_header(sent))
+        self.assertRegex(message, re.compile("wallet", re.IGNORECASE))
+        if "api_keys" in message:
+            self.assertIn("TextModelMode.AUTO", message)
+
 
 class RelayedProviderRefusalTests(FailureAssertions):
     """AC-14, EC-24: a relayed provider 401, 402 or 403 says the caller's own key or account was refused."""
