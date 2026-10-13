@@ -4,8 +4,8 @@ PURPOSE: Defines GrokWire, the Grok codec: it builds the ACP request params Grok
 ROLE IN CODEBASE: Owned by GrokHost (vidbyte/harnesses/native/grok/host.py) and shared with each GrokTurnDriver (turn.py). Neither of them reads a raw vendor field; they call one parse or check method here and get a record or a NativeHostError.
 ARCHITECTURE NOTE: Pure functions over plain mappings and CliOutcome records, plus the host's NativeErrorFactory for building errors. A wrong shape is never smoothed over: missing optional fields become None or empty, but a field of the wrong type raises grok.protocol_mismatch. Open vocabularies (stop reasons, update kinds, tool kinds) are kept verbatim or mapped by the spec's own rule.
 FUNCTION INVENTORY: Params: initialize_params, new_session_params, resume_session_params, list_sessions_params, prompt_params, cancel_params, permission_answer, method_not_found. ACP answers: check_initialize, require_session_capability, parse_model_catalog, require_model, parse_readiness, parse_session_id, parse_session_page, vendor_error, is_cancel_answer. Turn frames: parse_permission_request, parse_session_update, parse_prompt_result. CLI: check_cli, parse_version, parse_one_shot, check_fork_result. Private single-step helpers: _mismatch, _meta, _model, _tool_kind, _chunk_text, _cost, _usage, _signed_out.
-COMMON MODIFICATION PATTERNS: A new JSON-RPC code row is one branch in vendor_error; a new ACP field is read in the parse method of its record; a new CLI failure text is a marker in GROK_NOT_SIGNED_IN_MARKERS.
-WHAT NOT TO DO IN THIS FILE: 1. Do not copy exception text into an error; vendor text goes only into context values, which the factory scrubs and caps. 2. Do not start processes or await anything here. 3. Do not answer a permission with an allow_always or reject_always option.
+COMMON MODIFICATION PATTERNS: A new JSON-RPC code row is one branch in vendor_error; a new ACP field is read in the parse method of its record; a new CLI sign-in failure text is a marker in GROK_NOT_SIGNED_IN_MARKERS, because every marker there raises grok.not_signed_in; any other new CLI failure is a branch in check_cli.
+WHAT NOT TO DO IN THIS FILE: 1. Do not copy exception text into an error; vendor text goes into context values, except Grok's currentModelId, which require_model names in its message. The factory scrubs and caps both. 2. Do not start processes or await anything here. 3. Do not answer a permission with an allow_always or reject_always option.
 KNOWN EDGE CASES: Grok answers an unknown --model by silently using its default, so the model check compares currentModelId with the requested id. A JSON number cost is read through its text form so no binary float reaches the Decimal. A -32602 answer means a stale cursor only when a cursor was sent.
 RELATED DOCS: docs/spec/native-grok-opencode-meta-hosts/spec.md §8.5 (Grok host), §6.3.3, §9.1, D-11, D-12, D-14, EC-6, EC-7
 TESTS: tests/features/grok_host/test_grok_host_errors.py, tests/features/grok_host/test_grok_host_reads.py, tests/features/grok_host/test_grok_host_turns.py
@@ -60,7 +60,7 @@ _ONE_SHOT_TIMEOUT_NEXT_STEP = "The one-shot run was stopped at max_turn_seconds;
 
 
 class GrokWire:
-    """Builds Grok ACP params and turns Grok answers, frames and CLI outcomes into records or grok.* errors."""
+    """Builds Grok ACP params and turns Grok answers, frames and CLI outcomes into records or grok.* errors; a cursor Grok refuses is configuration.invalid_argument."""
 
     INITIALIZE: ClassVar[str] = "initialize"
     NEW_SESSION: ClassVar[str] = "session/new"
