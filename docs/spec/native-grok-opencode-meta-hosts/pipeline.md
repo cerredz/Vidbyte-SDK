@@ -27,7 +27,7 @@ started: 2026-10-13 01:30 UTC
 
 ## Counters and caps
 - S1 review rounds: 2/2 (round 2 focused on the r2 changes)
-- S5 repair iterations: 7/8
+- S5 repair iterations: 8/8 (cap reached)
 - S5 re-review rounds: 2/2 (round 2 launched; last allowed)
 
 ## Decisions the orchestrator made
@@ -287,6 +287,20 @@ started: 2026-10-13 01:30 UTC
   - **In scope:** the bounded drain sites `:323` and `:423` (one helper that keeps `asyncio.wait_for`, a `cancelling()` check, and `_send` popping and cancelling the pending future) and the answer wait `:349` (the same `cancelling()` check inside `_answer`'s existing try).
   - **Out of scope, a follow-up:** the close-path waits `:473`, `:499` and `:509`. Why: cleanup should finish, and re-raising mid-close could leave a child process unreaped.
   - Also passed to iteration 8: my unexplained 1-in-62 timeout of the R-22/R-24 pair at 19582f13. It should loop those tests too.
+- 2026-10-13 22:20 UTC — **Iteration 8 (last) done for R-25.** Fixes f5a2c74a (the drain helper `_drain_within` plus `_send` cleanup) and 3917b49a (the answer-wait check); docs in 04f412d1. It returned BLOCKED, but only on a test-fake question.
+  - **My verification:**
+    - only `transport.py` changed (+53/−15); frozen files unchanged; INV-19 holds; local = remote = 04f412d1;
+    - ci 38475662280 and 38475671014 on 3917b49a both succeeded on attempt 1; static-policy 38475673751 succeeded;
+    - R-25 is `fixed @f5a2c74a`;
+    - my runs: the R-25 cases plus AC-4, 11 passed ×3; main's transport tests (stdio, studio, bridge), 59 passed (INV-18); RACE-1, 12 passed.
+- 2026-10-13 22:20 UTC — **Decision: grant the Muse test-fake fix and route it to the addendum-4 test author.**
+  - The cause, from iteration 8: `fake_muse_peer.py:87-95` writes the frame and then logs it outside the lock, and `:258-265` calls `os._exit(0)` on stdin EOF. When the host closes the peer on `turn/completed`, the exit can beat the log write, so R-22's precondition misses its record. It fails about 1 in 30 runs at 3917b49a and 1 in 62 at 19582f13. No product code is involved.
+  - Why: it is a fixture change, not an assertion change, which the S2 rules allow; it does not count against the S5 cap; and a known flaky test this pipeline added would ship otherwise.
+  - The author also checks the Grok fake (`fake_grok_peer.py:74-76`) for the same exit-before-log race, and fixes it only with evidence.
+- 2026-10-13 22:20 UTC — **Follow-ups for S6:**
+  - the close-path waits `transport.py:473`, `:499` and `:509`;
+  - an INV-18 nuance: the default `request()` differs from main only on a cancelled call (the pending future is popped and cancelled), and main's 59 transport tests pass unchanged;
+  - the inherited main flake `test_cancelled_waiter_does_not_break_transport`.
 
 ## User replies (verbatim)
 (none during the run)
