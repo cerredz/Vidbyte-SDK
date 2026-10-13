@@ -62,6 +62,12 @@ class CodexToolTranslator:
                 "Codex harness agent tools require codex.client.experimental_api=True."
             )
         catalog = Tools(settings.tools)
+        CodexToolTranslator.validate_names(catalog)
+        return CodexToolBridge(catalog, settings.tool_permission_policy)
+
+    @staticmethod
+    def validate_names(catalog: Tools) -> None:
+        # Checks every tool name against the app-server's naming rules and the MCP-reserved names.
         for name in catalog.names():
             if len(name) > CODEX_DYNAMIC_TOOL_NAME_MAX_LENGTH or not _TOOL_NAME.fullmatch(name):
                 raise ConfigurationError(
@@ -70,7 +76,6 @@ class CodexToolTranslator:
                 )
             if name == CODEX_RESERVED_DYNAMIC_TOOL_NAME or name.startswith(CODEX_RESERVED_DYNAMIC_TOOL_PREFIX):
                 raise ConfigurationError(f"Codex tool name {name!r} is reserved for MCP tools.")
-        return CodexToolBridge(catalog, settings.tool_permission_policy)
 
 
 class CodexToolBridge:
@@ -87,10 +92,17 @@ class CodexToolBridge:
         # AsyncCodex exposes neither dynamicTools nor a server-request handler, so
         # both are installed on its sync client before the thread is opened.
         client = self._sync_client(request)
-        handler = CodexToolCallHandler(self._executor, request.loop, client._approval_handler)
+        handler = self.handler(request.loop, client._approval_handler)
         client._approval_handler = handler.handle
         client.request = self._with_dynamic_tools(client.request)
         return handler
+
+    def handler(self, loop: asyncio.AbstractEventLoop, fallback: ServerRequestHandler) -> CodexToolCallHandler:
+        # @intent one-tool-call-handler-per-thread
+        # Each connection or thread gets its own handler over this bridge's
+        # executor, so closing one cancels only its own running tool calls;
+        # server requests that are not tool calls go to the fallback.
+        return CodexToolCallHandler(self._executor, loop, fallback)
 
     @staticmethod
     def _sync_client(request: CodexToolAttachRequest) -> Any:
