@@ -128,11 +128,17 @@ class TextModelConfig:
         match self.mode:
             case TextModelMode.DIRECT:
                 # Straight to the provider with the developer's own
-                # key: no Vidbyte key and no Vidbyte fee, so a provider
-                # key is required.
+                # key: no Vidbyte key and no Vidbyte fee, so a missing
+                # provider key stops here and names the keys the list
+                # does hold (M-8).
                 provider_key = ProviderModelRegistry.find_provider_api_key(provider, self.api_keys)
                 if provider_key is None:
-                    self._refuse_missing_provider_key(provider)
+                    held = ", ".join(member.value for member in self.api_keys.providers)
+                    hint = f" (api_keys holds keys for: {held})" if held else ""
+                    raise ConfigurationError(
+                        f"Missing API key for provider {provider.value}. Pass api_keys or set {ProviderModelRegistry.get_api_key_env_var(provider)}.{hint}",
+                        details={"provider": provider.value, "mode": self.mode.value},
+                    )
                 return TextCredentials(TextModelMode.DIRECT, provider_api_key=provider_key)
             case TextModelMode.VIDBYTE_MANAGED:
                 # Through the gateway on Vidbyte's own provider account,
@@ -145,8 +151,17 @@ class TextModelConfig:
                 # when there is one, and is Vidbyte-paid otherwise.
                 vidbyte_key = ProviderModelRegistry.resolve_vidbyte_api_key(self.vidbyte_api_key, remedy=TEXT_REMEDY)
                 provider_key = ProviderModelRegistry.find_provider_api_key(provider, self.api_keys)
-                if provider_key is not None:
-                    self._require_relayable_length(provider, provider_key)
+                # @intent relayed-key-fits-the-gateway-header
+                # The gateway refuses a provider-key header over
+                # its limit, so the call fails here, before any
+                # request; DIRECT sends the key straight to the
+                # vendor, which has no such limit.
+                if provider_key is not None and len(provider_key) > VIDBYTE_PROVIDER_KEY_MAX_LENGTH:
+                    source = "api_keys" if self.api_keys.key_for(provider) is not None else ProviderModelRegistry.get_api_key_env_var(provider)
+                    raise ConfigurationError(
+                        f"The {provider.value} key from {source} has {len(provider_key)} characters, and the Vidbyte gateway relays keys of at most {VIDBYTE_PROVIDER_KEY_MAX_LENGTH} characters. Use mode=TextModelMode.DIRECT to send it straight to {provider.value}.",
+                        details={"provider": provider.value, "source": source, "length": len(provider_key)},
+                    )
                 return TextCredentials(TextModelMode.AUTO, provider_api_key=provider_key, vidbyte_api_key=vidbyte_key)
             case _:
                 raise ConfigurationError("mode must be a TextModelMode value.")
@@ -188,30 +203,6 @@ class TextModelConfig:
                 f"The Vidbyte gateway serves only: {supported}. Use mode=TextModelMode.DIRECT to call {provider.value} with your own key.",
                 details={"provider": provider.value, "mode": self.mode.value},
             )
-
-    def _refuse_missing_provider_key(self, provider: ModelProvider) -> None:
-        """Raise the DIRECT error for a provider with no key, naming the providers the list does hold (M-8)."""
-        env_var = ProviderModelRegistry.get_api_key_env_var(provider)
-        held = ", ".join(member.value for member in self.api_keys.providers)
-        hint = f" (api_keys holds keys for: {held})" if held else ""
-        raise ConfigurationError(
-            f"Missing API key for provider {provider.value}. Pass api_keys or set {env_var}.{hint}",
-            details={"provider": provider.value, "mode": self.mode.value},
-        )
-
-    def _require_relayable_length(self, provider: ModelProvider, provider_key: str) -> None:
-        """Refuse a provider key longer than the gateway relays (M-21)."""
-        # @intent relayed-key-fits-the-gateway-header
-        # The gateway refuses a provider-key header over its limit, so
-        # the call fails here, before any request; DIRECT sends the key
-        # straight to the vendor, which has no such limit.
-        if len(provider_key) <= VIDBYTE_PROVIDER_KEY_MAX_LENGTH:
-            return
-        source = "api_keys" if self.api_keys.key_for(provider) is not None else ProviderModelRegistry.get_api_key_env_var(provider)
-        raise ConfigurationError(
-            f"The {provider.value} key from {source} has {len(provider_key)} characters, and the Vidbyte gateway relays keys of at most {VIDBYTE_PROVIDER_KEY_MAX_LENGTH} characters. Use mode=TextModelMode.DIRECT to send it straight to {provider.value}.",
-            details={"provider": provider.value, "source": source, "length": len(provider_key)},
-        )
 
     def _validate_temperature(self) -> None:
         # Most provider APIs accept temperature values in the inclusive 0-2 range.
