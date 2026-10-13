@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Every live turn runs on its own `grok agent --no-leader ... s
 FUNCTION INVENTORY: __aenter__ resolves the launcher and refuses a Windows batch launcher; __aexit__ stops every live turn; the ten public methods are narrated main functions. Helpers: _require_open, _reserve, _new_peer, _initialize, _check_model, _call, _list_pages, _check_fork_listing, _launch and the _forget done-callback. Module function run_grok_once.
 COMMON MODIFICATION PATTERNS: A new Grok call is one public method here, its parsing and rows in wire.py, its argv in cli.py and one tool in vidbyte/tools/builtins/grok/tools.py. A new row next step that the catalog does not give is a module constant here or in wire.py.
 WHAT NOT TO DO IN THIS FILE: 1. Do not read ~/.grok credentials or set approve-everything flags; Grok authenticates itself and permissions follow GrokPermissionMode and allowed_tool_kinds only. 2. Do not await between the busy check and the reservation of a turn. 3. Do not leave a short-lived peer running after its method returns, on any path.
-KNOWN EDGE CASES: A host is single use: a second __aenter__ raises invalid_argument. fork_grok_session spends money, so it first finds the source session in the workspace listing, refuses a taken new id and checks the model, all before the CLI run. A turn whose host closed ends INTERRUPTED with source HOST_CLOSED.
+KNOWN EDGE CASES: A host is single use: a second __aenter__ raises invalid_argument. fork_grok_session spends money, so it first finds the source session in the workspace listing, refuses a taken new id and checks the model, all before the CLI run. A turn whose host closed ends INTERRUPTED with source HOST_CLOSED. interrupt_grok_turn reports was_running=False and sends nothing for a turn Grok has answered, even while its driver is still closing the peer.
 RELATED DOCS: docs/spec/native-grok-opencode-meta-hosts/spec.md §8.5 (Grok host), §6.3.3, D-2, D-9 to D-12, D-19, EC-1 to EC-11, EC-24 to EC-53, FR-17
 TESTS: tests/features/grok_host/test_grok_host_acceptance.py, tests/features/grok_host/test_grok_host_errors.py, tests/features/grok_host/test_grok_host_reads.py, tests/features/grok_host/test_grok_host_turns.py, tests/features/grok_host/test_grok_host_process_bounds.py
 """
@@ -451,8 +451,10 @@ class GrokHost:
             self._require_open(operation)
             turn = self._turns.lookup(handle, operation=operation)
             driver = self._drivers.get(handle.turn_id)
-            # A finished turn is not touched and nothing is sent.
-            if turn.done() or driver is None:
+            # A finished turn is not touched and nothing is sent. A
+            # turn Grok has answered is finished, even while its
+            # driver is still closing the peer.
+            if turn.done() or driver is None or driver.ended:
                 return NativeInterruptResult(handle=handle, was_running=False)
             # Send session/cancel and return; the driver stops the peer
             # if Grok ignores it.
