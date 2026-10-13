@@ -483,3 +483,93 @@ The A001 headers of all five files were updated where they described behaviour t
 | invariants | INV-19 / INV-22 / frozen files | PASS | sha256 `0374a2c8…497a`; INV-22 diff empty; `failure.py`, `tests/`, `lint/`, `.semgrep/`, `pyproject.toml` and spec.md unchanged since 68cc1a9e; `git status` clean |
 
 **Still open:** nothing from this packet. R-18, R-19, R-20 and R-21 are fixed. The two observations above are recorded for the orchestrator and were not fixed. Follow-ups R-M4, R-M5, R-M7, R-M8 and R-M10 are unchanged.
+
+## Iteration 7 — 2026-10-13 21:01 UTC — agent report: none (see below)
+
+**Report file:** none, as in iterations 4 to 6. Subagent report files are refused, so this entry and the agent's STATUS block are the full record.
+
+**Defects in:** R-22 and R-24 [Minor, `trivial`], from review.md's "Post-S6 findings". The blind tests from c1599d0b were red at 5228f3a3, reproduced here: `2 failed in 1.61s` (R-24's record is `Future exception was never retrieved … McpProtocolError('MCP transport closed')`). origin/main 8387d666 was already an ancestor, so no merge was needed.
+
+**Hypotheses and attempts:**
+- **R-22 (Muse `_forget_driver`).** This is the verifier's smallest fix, taken as written.
+  - `_task` was renamed to `task`. After the pop, the method runs `if not task.cancelled(): task.exception()`, and Grok's `_forget` comment was copied word for word.
+  - `exception()` does not consume the error, so `wait_muse_turn` still raises `muse.api_error`.
+  - The `cancelled()` guard stays, because `exception()` raises on a cancelled task.
+  - The header's KNOWN EDGE CASES gained one sentence.
+  - Results: the R-22 test is green, and the Muse pack gives `471 passed, 5 skipped`.
+- **R-24 (Grok `_launch`).**
+  - **Fix.** `answer.cancel()` now runs just before the closed-host raise, with a 2-line comment of at most 72 columns. Only that raise path is touched; nothing changes on success.
+  - **Transport, checked first.** A cancelled pending future is tolerated:
+    - `:329` cancels its own future on a failed write;
+    - `:525` only clears the map;
+    - `:546` (`_fail_all_pending`) and `:613` (answer dispatch) skip done futures.
+  - **`_closed` check.** It stays after `peer.send`, so no driver outlives `__aexit__`. The header's KNOWN EDGE CASES gained one sentence.
+  - Results: the R-24 test is green, and the Grok pack gives `470 passed, 13 skipped`.
+- **Not tried, on purpose:**
+  - the wider single retrieval in `NativeTurnTable._finish`, which the review offered as an alternative;
+  - moving `_closed` before the send.
+- **Left as is, a narrower edge.** `answer.cancel()` is a no-op on a future that is already done. If the reader failed the answer during the drain and the host also closed, that exception stays unread. No test reaches this window.
+- **Gate 5, first run red (inherited; not fixed; new item for the orchestrator).**
+  - **The failure.** `tests/features/grok_host/test_grok_host_process_bounds.py::test_cancelling_a_call_propagates_and_stops_what_it_started[list_grok_sessions]` failed with "The Grok Build process did not answer in time." The run was `1 failed, 5675 passed, 32 skipped in 269.14s`, about 60 s over the usual time.
+  - **Not R-24's change.** `list_grok_sessions` never reaches `_launch`.
+  - **Cause: CPython 3.11's `wait_for` swallows a cancel (gh-86296).**
+    1. Every NativePeer write names a deadline, so `McpStdioTransport._send` drains with `await asyncio.wait_for(stdin.drain(), seconds)` (`transport.py:323`; `_write_frame:423` does the same).
+    2. On 3.11, `wait_for` wraps the drain in a task. If `task.cancel()` lands after that inner task finished but before the caller resumes, `wait_for` takes the `except CancelledError: if fut.done(): return fut.result()` branch, and the cancel is lost.
+    3. `request` then waits the full control timeout (60 s in this test) on a silent fake, and raises `process_exited` instead of `CancelledError`. This breaks AC-4 and INV-2 in that window.
+    4. 3.12+ builds `wait_for` on `asyncio.timeout` and is not affected.
+  - **Evidence:**
+    - **Rate.** Alone, the test failed 1 of 15 runs at 19582f13.
+    - **Inherited.** It failed 1 of 40 runs with grok/host.py and muse/host.py restored to e4210fc3. `git diff e4210fc3 5228f3a3 -- vidbyte/` is empty, so the code under test was the iteration-6 head. That failure was the `[spawn_grok_session]` case.
+    - **Mechanism.** A scratch pytest plugin outside the worktree wrapped `asyncio.wait_for` and logged any call that returned normally while `current_task().cancelling()` rose. Over 288 cases it logged exactly one event, `SWALLOWED cancel in wait_for(StreamWriter.drain, timeout=60.0) … cancelling 0->1`. That event came in the one failing case (60.4 s); no passing case had one.
+  - **Remedy, validated but not applied.** The same plugin in "re-raise" mode raises `CancelledError` after such a call. Over 82 runs (328 cases) it saw 3 swallow events, in the spawn, continue and list cases. All three cases passed in 0.4 to 0.6 s, and there were 0 failures.
+  - **Why not applied here:**
+    - the brief limited this iteration to R-22 and R-24;
+    - it touches the shared transport;
+    - the obvious alternative, `async with asyncio.timeout(seconds)` in place of `wait_for`, would break R-19's contract seam. `cancel_drain_gate` in `test_grok_host_turns.py` wraps `asyncio.wait_for` and asserts `seam: no bounded wait followed the session/cancel write`.
+  - **Proposed for iteration 8,** after S2 adds a deterministic test, for example a delegating `wait_for` seam that cancels the caller right after the inner drain completes:
+    1. Move the bounded branch of both drain sites into one helper (`_drain(process, seconds)`) that keeps `asyncio.wait_for`, so the R-19 seam still engages.
+    2. Before the drain the helper reads `task.cancelling()`. After it, it raises `asyncio.CancelledError` when the count rose, then makes the existing `is_closing()` check.
+    3. `_send` adds `except asyncio.CancelledError:`, which pops and cancels the pending future, then re-raises. Without that, a cancel during a write leaves the future for `_fail_all_pending` to fail unseen, which is R-24's class.
+    4. The default unbounded drain is untouched (INV-18).
+- **Remote 3.11, attempt 1 red (inherited from main; not this branch's).**
+  - **The failure.** `tests/test_mcp_stdio_transport.py::McpStdioTransportHardeningTests::test_cancelled_waiter_does_not_break_transport` raised "MCP request timed out" on `request("second")`.
+  - **Cause.** The test sleeps 0.05 s and then cancels "first". On a slow runner the cancel lands inside `start()`'s `create_subprocess_exec`, so "first" is never written. "second" is then the child's first line, which the child ignores.
+  - **Same as main.** This path is main's: with no `timeout_seconds` and `stop_process_tree=False`, `_send` uses the plain drain and the spawn arguments are main's. The test file is unedited (`git diff origin/main -- tests/test_mcp_stdio_transport.py` is empty).
+  - **History.** `gh run view <id> --log-failed` over the 36 most recent failed `ci.yml` runs of other branches found this same test with the same message in 17 runs on 15 main-based branches, from 2026-10-12 13:07 to 2026-10-13 01:41. Examples: `fix/eval-json-suite-reads-utf8-bom` 38333341120, `fix/mistral-top-level-error-message` 38323438129 and `fix/chat-missing-call-id` 38305915438.
+  - **Rerun.** `gh run rerun 38465574661 --failed`: attempt 2 is green.
+
+**Changes:**
+- R-22: 48e9343a (`muse/host.py`, +6/−4)
+- R-24: 19582f13 (`grok/host.py`, +4/−1)
+- review.md statuses and this entry: in the verify-log commit
+- The push 4ecd4012..19582f13 also carried c1599d0b (the tests) and 5228f3a3 (docs), which had not been on the remote.
+
+**Determinism:**
+- The two new tests, 10 runs in a loop: `2 passed` every time (20/20).
+- The RACE-1 command, once: `12 passed, 63 deselected in 3.27s`. This is 61 + the 2 new tests in those files, deselected.
+
+**Gate matrix out (code HEAD 19582f13).** One sequential script ran gates 1 and 4 to 7 with nothing alongside; gate 5 was rerun alone after its first-run failure above. Gates 2 and 3 were not run on their own; the source stage runs the full suite.
+
+| Gate | Command | Result | Final lines |
+|---|---|---|---|
+| new tests | the two Addendum 4 tests | PASS 10/10 | `2 passed in 1.22s` (run 10) |
+| RACE-1 | the orchestrator's `-k` command | PASS | `12 passed, 63 deselected in 3.27s` |
+| packs | gate 1 | PASS | `1661 passed, 19 skipped in 161.44s (0:02:41)` (1659 + 2) |
+| lint | gate 4 | PASS (A001 643/643, A002 577/703, A007 255/255, S006 0 CLEAN, S024 25/25, S062 889/889; no count rose) | `S064 RATCHETED: 4 known finding(s).` / `SDK-LINT: PASS` |
+| source stage | gate 5 | first run FAIL (1, the inherited 3.11 swallowed-cancel race above); rerun PASS | first: `1 failed, 5675 passed, 32 skipped in 269.14s`; rerun: `5676 passed, 32 skipped in 204.12s (0:03:24)` / `CI passed.` |
+| package stage | gate 6 | PASS | `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` |
+| semgrep | gate 7 | PASS | `Ran 1 rule on 949 files: 0 findings.` |
+| public API | `python scripts/generate-sdk-public-api.py --check` | PASS | `contracts/sdk-public-api.json is current at f7a02bae… (vidbyte-sdk 0.2.1, 606 exports).` |
+| remote CI | `gh run view 38465574661` (head 19582f13) | attempt 1: 3.11 FAIL (inherited main flake above), 3.12 success; attempt 2 (`rerun --failed`): 3.11, 3.12 and Package all success | attempt 1, 3.11: `1 failed, 5668 passed, 39 skipped in 177.31s`; attempt 2, 3.11: `5669 passed, 39 skipped in 186.42s` / `CI passed.`; 3.12: `5669 passed, 39 skipped, 19 warnings in 189.93s` / `CI passed.`; Package: `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` |
+| remote static policy | `gh run view 38465578419` (head 19582f13) | PASS | `Ran 1 rule on 949 files: 0 findings.` (conclusion success) |
+| PR | `gh pr view 1036 --json isDraft` | n/a | still a draft; dispatch-only workflows, so `gh pr checks` lists none |
+| invariants | INV-19 / INV-22 / frozen files | PASS | sha256 `0374a2c8…497a`; INV-22 diff empty; `failure.py`, `tests/`, `lint/`, `.semgrep/`, `pyproject.toml`, `contracts/` and spec.md unchanged since 5228f3a3; `git status` clean after the code commits |
+
+**Still open:**
+- R-22 and R-24 are fixed.
+- **New, not routed:** the CPython 3.11 swallowed cancel in the bounded drain (`transport.py:323` and `:423`), above.
+  - It is a real host defect (AC-4 and INV-2 on 3.11), it predates this iteration, and it makes `test_cancelling_a_call_propagates_and_stops_what_it_started` fail in about 1 of 12 to 1 of 40 local file runs.
+  - The remote 3.11 leg can hit it too.
+  - The validated remedy and its constraint, the R-19 seam, are recorded above.
+- **Inherited from main:** `test_cancelled_waiter_does_not_break_transport` on slow runners.
+- Follow-ups R-M4, R-M5, R-M7, R-M8 and R-M10 are unchanged.
