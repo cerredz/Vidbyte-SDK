@@ -20,7 +20,7 @@ started: 2026-10-13 00:45 UTC
 | S4 adversarial review | done | 2026-10-13 21:15 UTC | 2026-10-14 02:00 UTC | reports/S4-review-conformance.md, reports/S4-review-conventions.md, reports/S4-review-engineering.md, reports/S4-findings-verifier.md, review.md | MERGEABLE AFTER FIXES; confirmed 3 Blockers (R-1..R-3) / 4 Majors (R-4..R-7) / 14 Minors (R-8..R-21); refuted 2 (R-E1, R-V2 interrupt chain); downgraded 4; remote CI on d9c5fea2 green; spec status: reviewed |
 | S5 repair loop | done | 2026-10-14 02:15 UTC | 2026-10-14 06:35 UTC | reports/S5-repair-1.md, reports/S5-repair-2.md, verify-log.md | iteration 2 (R-22 @b5989730, R-23 @2c537b1a, R-24 by spec r6 9211d4ef) converged at 490e627b: orchestrator gate source 4182 passed / 27 skipped, package CI passed; remote 38519522362 + 38519524093 green. Iteration 1 converged at 615fc54a: fixed R-1,R-2,R-3,R-5,R-6,R-7,R-10..R-14 (R-4,R-8,R-9,R-19 by spec r5 3c1f9e4c); 12 new tests (granted file); merge origin/main 8387d666 at 15124156; orchestrator full gate green (source 4178 passed / 27 skipped, package CI passed); remote CI 38502267522 + static 38502269091 green on 615fc54a |
 | S5 re-review | done | 2026-10-14 03:50 UTC | 2026-10-14 07:15 UTC | reports/S5-rereview.md, reports/S5-findings-verifier-r1.md, reports/S5-rereview-2.md | round 2 (final) at 490e627b: SOUND, 0B/0M/2m (R-C4 test gap: the R-23 test asserts only one kept field; R-C5 spec text: row 7 omits R-23's reset); both Minors are follow-ups; spec status: verified. Round 1: | round 1: MERGEABLE AFTER FIXES 0B/1M/2m; scoped verifier confirmed R-22 Major (steer taken one pass before the send; INV-18), R-23 Minor code (stale result fields after a steered prompt dies, D-3), R-24 Minor spec-change (EC-52 unknown values, CLAUDE_STEER_YIELD_SECONDS, deviation 14); refuted R-C1's aclose ordering and INV-11 citation |
-| S6 PR | in progress | 2026-10-14 07:20 UTC | | reports/S6-pr-author.md, pr-body.md | |
+| S6 PR | done | 2026-10-14 07:20 UTC | 2026-10-14 08:45 UTC | reports/S6-pr-author.md, pr-body.md | title `feat(harnesses): add ClaudeHost with one agent tool per Claude Code function`, draft, base main; body with Summary/Motivation/Compatibility/usage/mermaid flow/AC proof/verification/review/deviations/follow-ups; spec status pr-open; checks 4/4 green on 1760a669 (CI 38524670716 attempt 2, static 38524673297) |
 
 ## Counters and caps
 - S1 review rounds: 2/2 · S5 repair iterations: 2/8 · S5 re-review rounds: 2/2
@@ -221,6 +221,19 @@ started: 2026-10-13 00:45 UTC
 - 2026-10-14 07:15 UTC — **The three Minors become follow-ups, not repairs.**
   *Why:* the skill sends only a new Blocker or Major back into the loop. Both re-review rounds are used, so any further code change would ship unreviewed. The PR author lists the three Minors under Follow-ups.
 - 2026-10-14 07:15 UTC — **The S5 loop converged.** Spec status is set to `verified` with a docs commit. S6 PR author launched.
+
+- 2026-10-14 08:05 UTC — **S6, first result, sent back once.**
+  - The posted body had no `## Compatibility` section, although my briefing asked for one.
+  - Spec §5 still showed the planned flow, because my briefing had limited spec edits to the frontmatter and §17. The stage template allows a §5 redraw, so I lifted the limit.
+  - The report was not committed.
+  - The title, draft state, base, mermaid block, 🤖 line, 3 spot-checked AC proofs and the checks on a6245d5a all held.
+- 2026-10-14 08:45 UTC — **S6 spot-check passed.**
+  - `gh pr view` shows the title without `[WIP]`, OPEN, draft, base main, head 1760a669.
+  - The body has Summary, Motivation, Compatibility, How to use, Flow (1 mermaid block), What changed, Acceptance criteria → proof, Verification, Adversarial review, Deviations and Follow-ups, and it ends with the 🤖 line.
+  - The check runs on 1760a669 are Package, Source 3.12, Source 3.11 and Static policy, all success.
+  - `git status` is clean, and nothing is unpushed.
+  - The spec on origin reads `status: pr-open` with `pr:` set.
+- 2026-10-14 08:45 UTC — **Flaky CI test, outside this PR.** CI 38524670716 attempt 1 failed `test_coding_agent_environment.py::test_real_bash_reports_its_version_and_git` on Python 3.11 ("bash did not finish within 15 seconds"). The PR author reran only the failed job, unchanged, and attempt 2 passed. 1760a669 changes only `docs/spec/claude-host/`.
 
 ## User replies (verbatim)
 - none yet
@@ -435,3 +448,4 @@ started: 2026-10-13 00:45 UTC
 - **P4 (the time budget in the steer window) has no committed test.** Reaching it needs `session._watch(client, 0)` started by hand; the probe is in the scratchpad at `repair2/probe_fixed.py`. *source:* S5 repair 2.
 - **Additions-only trap.** Changing the last FEATURE.md bullet's `.` to `;` counts as a deletion in `--numstat`. *source:* S5 repair 2.
 - **A002 and `replace()`.** A002 does not fire on `permission_denials=()` as a `replace()` keyword, so no `@intent` line is needed there. *source:* S5 repair 2.
+- **A flaky CI test.** `test_coding_agent_environment.py::test_real_bash_reports_its_version_and_git` can time out on the Python 3.11 runner (bash > 15 s). Rerun only the failed job, with `gh run rerun <id> --failed`. *source:* S6 PR author.
