@@ -1,7 +1,7 @@
 ---
 spec: codex-host
 title: CodexHost: small atomic Codex functions with one agent tool per function
-status: verified
+status: pr-open
 revision: 6
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-codex-host
@@ -144,55 +144,73 @@ The developer gets a running Codex turn back as a handle, and its validated resu
 
 ## §5 Flow diagram
 
+Redrawn in S6 to match the code as shipped (§17). Three things changed from the r1 to r6 drawing: the local input, tool and schema checks run before preflight (R-2, EC-82); a start that outlives its caller or its bound is handed over and still owned (INV-11, R-10); and each turn sends its own one stop (R-4, R-27).
+
 ```mermaid
 flowchart TD
-  T["SpawnCodexThreadTool.execute"] -->|"cap check + spawn_defaults"| B
-  P["Python caller"] --> B
-  B["CodexSpawnRequest.__post_init__"] -->|"validated request"| A["CodexHost.spawn_codex_thread"]
-  A --> C["CodexPreflight: account, rate limits, sandbox, model"]
-  C -->|problem| X["CodexErrorMapper: CodexAgentError with next_step"]
-  C -->|ok| D["CodexParamsTranslator: thread/start + turn/start params"]
-  D --> E["CodexConnection: host executor + bounded wait"]
-  E -->|"JSON-RPC over stdio"| F["codex app-server"]
-  F -->|"thread id, turn id"| G["CodexTurnRegistry: CodexLiveTurn + CodexTurnWatcher"]
-  G -->|CodexTurnHandle| A
-  F -->|"item, usage, turn/completed"| H["CodexTurnWatcher daemon thread"]
-  H -->|call_soon_threadsafe| I["CodexLiveTurn: items, usage, caps"]
-  I -->|"cap or timeout"| J["one turn/interrupt via CodexConnection"]
-  I -->|terminal| K["CodexResponseTranslator: CodexTurnSnapshot"]
-  K --> L["wait_codex_turn / get_codex_turn_result"]
-  E -->|exception| X
-  X -->|"tool path"| N["ToolResult.error: code, message, next step"]
+  T["SpawnCodexThreadTool: the model's values over spawn_defaults"] -->|"CodexToolScope.reserve: live-turn cap"| R
+  P["Python caller"] --> R["CodexSpawnRequest.__post_init__: field checks, USER reviewer refused"]
+  R --> A["CodexHost.spawn_codex_thread"]
+  A --> G["CodexHost._guard: host open, same event loop, process alive"]
+  G --> L["Local checks: input items, tool names and experimental_api, output_schema serializes to JSON"]
+  L --> C["CodexPreflight.run: account/read, account/rateLimits/read, windowsSandbox/readiness on win32, model/list when a model is named"]
+  C --> O["CodexHost._open_thread: thread/start, D-32 reviewer check, tool handler registered, thread/name/set"]
+  O -->|prompt| S["CodexHost._start_turn: CodexConnection.start sends turn/start, shielded, 300 s bound"]
+  O -->|goal| Q["CodexHost._start_goal: start_goal_operation, then thread/goal/set and the budget echo check"]
+  S --> K["CodexTurnRegistry.track: CodexLiveTurn registered"]
+  Q --> K
+  K --> AC{"CodexHost._accept: close begun or process dead?"}
+  AC -->|yes| XD["turn ends FAILED with codex.process_exited, and the caller gets that code"]
+  AC -->|no| WA["CodexLiveTurn.watch: one CodexTurnWatcher thread and one timeout timer"]
+  WA -->|CodexTurnHandle| OUT["handle returned to the caller or tool"]
+  S -.->|"caller cancelled or bound elapsed"| HO["CodexConnection._hand_over: a queued start is withdrawn; a running one keeps its thread busy, is adopted when it lands, and is stopped once"]
+  WT["CodexTurnWatcher thread: next_turn_notification or next_goal_notification"] -->|call_soon_threadsafe| EV["CodexHost._on_turn_event: CodexLiveTurn.observe keeps items and usage"]
+  EV -->|"output cap passed, or the timer fires"| ST["CodexLiveTurn.stop: one turn/interrupt, or cancel_goal_operation for a goal run"]
+  EV -->|"turn/completed, or the goal finish rule"| FN["CodexTurnRegistry.finish: CodexResponseTranslator snapshot, usage priced once"]
+  FN --> W["wait_codex_turn / get_codex_turn_result"]
+  C -->|"problem or exception"| X["CodexErrorMapper: CodexAgentError with code and next_step"]
+  O -->|exception| X
+  S -->|exception| X
+  X -->|"tool path"| TR["_CodexHostTool._run: ToolResult.error with code, message and next step"]
+```
+
+```mermaid
+flowchart LR
+  E["CodexHost.__aexit__, or the liveness monitor sees the process die"] --> S1["1. remove every tool handler from the router and cancel its running tool calls"]
+  S1 --> S2["2. end every running turn as FAILED with codex.process_exited"]
+  S2 -->|"close, process alive"| S3["3. one interrupt per ended turn, all at once, each bounded by 5 s"]
+  S3 --> S4["4. close each goal run's stream in openai-codex's order"]
+  S2 -->|"process died"| S4
+  S4 --> S5["5. client.close on the codex-host-close daemon thread, waited at most 10 s"]
+  S5 --> S6["6. the host executor shuts down without waiting (at close only)"]
 ```
 
 ```mermaid
 sequenceDiagram
-  participant Agent
-  participant Tool as SpawnCodexThreadTool
-  participant Host as CodexHost
-  participant Conn as CodexConnection
-  participant App as codex app-server
-  participant W as CodexTurnWatcher
-  Agent->>Tool: spawn_codex_thread(prompt)
-  Tool->>Host: spawn_codex_thread(CodexSpawnRequest)
-  Host->>Conn: account/read, account/rateLimits/read, sandbox readiness, model/list
-  Host->>Conn: thread/start, turn/start
-  Conn->>App: JSON-RPC over stdio
-  App-->>Conn: thread id and turn id
-  Host->>W: register turn and start watcher
-  Host-->>Tool: CodexTurnHandle
-  Tool-->>Agent: handle JSON
-  App-->>W: item/completed, thread/tokenUsage/updated, turn/completed
-  W-->>Host: post to the event loop
-  Agent->>Tool: wait_codex_turn(thread_id, turn_id)
-  Tool->>Host: wait_codex_turn(handle, timeout_seconds)
-  Host-->>Tool: CodexTurnSnapshot
+  participant C as Caller or tool on the event loop
+  participant H as CodexHost on the event loop
+  participant P as Host worker pool
+  participant A as codex app-server
+  participant W as CodexTurnWatcher thread
+  C->>H: spawn_codex_thread(request)
+  H->>H: local checks of input, tools and output_schema
+  H->>P: account/read, account/rateLimits/read, sandbox readiness, model/list
+  P->>A: JSON-RPC over stdio
+  H->>P: thread/start, then the D-32 reviewer check on its answer
+  H->>P: turn/start, shielded and bounded
+  A-->>P: thread id and turn id
+  H->>W: register the CodexLiveTurn, start its watcher and timer
+  H-->>C: CodexTurnHandle
+  A-->>W: item/completed, thread/tokenUsage/updated, turn/completed
+  W-->>H: call_soon_threadsafe(_on_turn_event)
+  C->>H: wait_codex_turn(handle, timeout_seconds)
+  H-->>C: CodexTurnSnapshot, RUNNING if the wait timed out first
 ```
 
-The diagrams follow one spawn from the tool or caller to its result.
-- **Validation** happens in the request record's constructor and in `CodexPreflight`, and both run before any spending request. The D-32 reviewer check then runs on the `thread/start` or `thread/resume` response, before any turn starts.
-- **State changes** in `CodexTurnRegistry`. A turn is registered before its handle is returned, and the loop-side `CodexLiveTurn` changes it exactly once, to a terminal status.
-- **Failures** are caught in one place, `CodexErrorMapper`. It turns them into `CodexAgentError` for Python callers and into an error `ToolResult` on the tool path.
+The diagrams follow one spawn from the tool or caller to its result, and then the close.
+- **Validation** happens before any spending request, in three places: the request record's constructor; the host's local checks of the input, the tool names and the answer schema; and `CodexPreflight`. The D-32 reviewer check then runs on the `thread/start` or `thread/resume` response, before any name, turn or goal request.
+- **State changes** only on the event loop. `CodexTurnRegistry` registers a turn before its handle is returned. `CodexConnection` keeps a thread busy while a handed-over start is still in flight. `CodexLiveTurn.finish` ends a turn exactly once, so the first outcome wins.
+- **Failures** are caught where Codex is called, in `CodexConnection`, and built in one place, `CodexErrorMapper`. Python callers get `CodexAgentError`. On the tool path, `_CodexHostTool._run` turns it into an error `ToolResult`, and only cancellation propagates.
 
 ---
 
@@ -1563,6 +1581,7 @@ Hosts for the coding agents that vendors ship as their own executables, kept apa
 | r4 | 2026-10-13 | S3 implement | All 28 §12.3 rows built in §12.6 phase order, one commit per row (rows 1 and 4 together), on draft PR #1055. The pack passes 101 of 101, and 35 passed with 66 skipped when openai-codex cannot be imported. Lint, Semgrep, the public-API check and both local CI stages pass. The §8.4 budget is used exactly: 18 files, 30 classes, 15 records, 13 enums, 0 dependencies. |
 | r5 | 2026-10-14 | S1 revision (S4 findings R-8, R-12) | Applied R-12 (Major, spec-change): INV-21 now says that a mapping `output_schema` is only parsed as JSON locally and its shape is left to Codex's `outputSchema`, while a Pydantic model type is fully validated. Added D-36, EC-82, EC-83 and Q-10 (R-25, the local validator, default no); EC-32 and the `codex.schema_violation` row follow. Applied R-8 (Major, deviation-entry): S3's deviation 1 is withdrawn, and deviation 2 stays. §8.4, §8.5, §9.1, the §12.3 rows and the shared-file contract are unchanged. Status stays reviewed. |
 | r6 | 2026-10-14 | S1 revision (S5 finding R-29) | Recorded the 11 method-name constants from R-11 in §9.3, with their values, so §9.3 is again the full constant list that §12.3 row 4 points to. No requirement ID, behaviour rule, §12.3 row or shared-file contract line changed. Status stays reviewed. |
+| r6 | 2026-10-14 | S6 PR | Finalized for review on draft PR #1055; status set to pr-open. §5 drifted from the code, so it was redrawn to match the PR's flow chart: the local input, tool and schema checks run before preflight (R-2, EC-82), a start that outlives its caller or bound is handed over and still owned (INV-11, R-10), each turn sends its own one stop (R-4, R-27), and a close chart now shows INV-7's six steps and the death path. No requirement ID, behaviour rule, §12.3 row or shared-file contract line changed. |
 
 ### Implementation deviations (S3)
 
