@@ -135,3 +135,18 @@
 - **A-9 (GitHub creates a missing `vidbyte:<key>` label on issue create).** If it is wrong, one-issue-per-key creates a new issue every run until the user creates the label by hand.
 - **A-13 (HubSpot v3 tasks without associations).** HubSpot's own two references disagree.
 - **Body choice in Typefully drafts.** `content.body` is the post text and the title becomes `draft_title`. That is a judgment call, not a vendor fact.
+
+## Revision r2 addendum (S1 review round 1)
+
+The review found 0 Blocker, 3 Major, and 5 Minor issues. All eight are accepted. The scope-adding parts became optional questions, each defaulting to no, and none is built. Every finding is recorded in spec §16, and §17 has an r2 row.
+
+- **R-1 (Major), accepted.** Every `<` in Telegram Markdown becomes `＜` before the cap. This adds INV-18, EC-43, and EC-44, and changes D-8, AC-5, FR-8, the §9.2 row, T-2(c), the row 11 `@intent`, A-4, and the README. Personal `tg://user?id=` mentions notify, as documented. `skip_entity_detection` is Q-6.
+- **R-2 (Major), accepted.** NFR-7 now bounds each attempt and states honestly what a deadline cut means. EC-45 covers a cut during the write, including the duplicate comment it can cause in keyed-issue mode. Row 3 keeps the header line 7 invariant and adds a note. D-15 and the README footgun are aligned. The budget check is Q-7.
+- **R-3 (Major), accepted.** §13 now lists the four new `WIRE_ROWS`, a Confluence site distinct from Jira's, a missing-directory `S3CRET` path for the job-summary credential, and the job-summary repr. `dispatch.py:315` moved to "still passes".
+- **R-4 (Minor), accepted.** NFR-6 and §12.4 require `--rule A002 --all` and `--rule S061 --all` to be clean on every touched file.
+- **R-5 (Minor), accepted.** Row 29 lists the README lines the change makes false: :19, :37, :44, :46-49, :50, :98-102, and :137.
+- **R-6 (Minor), accepted.** Row 3 gives exact regex values, with the fullmatch-after-`rstrip()` rule and the fence rules. They were checked locally against the stated examples. EC-14 is aligned.
+- **R-7 (Minor), accepted.** EC-42 and the README footgun cover both planted-marker branches. The author filter is Q-8.
+- **R-8 (Minor), accepted.** `signing_key` requires 24–64 decoded bytes, using `WEBHOOK_KEY_MIN_BYTES` and `WEBHOOK_KEY_MAX_BYTES`. D-5, AC-14, §8.5, and §9.2(b) are updated. The §4 example key decodes to 24 bytes.
+
+Self-check rerun: 18 `## §` headings; INV-1…18, EC-1…45, Q-1…8, AC-1…36, and FR-1…35 have no gaps; every referenced ID is defined; D-24 is still Google Chat. No blocking questions.
