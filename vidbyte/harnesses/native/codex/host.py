@@ -229,10 +229,11 @@ class CodexHost:
         # soon as Codex accepted it.
         operation = CodexHostOperation.SPAWN_CODEX_THREAD
         self._guard(operation, talks=True)
-        # Build the input and the tools first, so a bad prompt or tool
-        # fails before anything is sent.
+        # Build the input, the tools and the answer schema first, so a bad
+        # prompt, tool or schema fails before anything is sent.
         items = [] if request.goal is not None else self._params.input_items(request.prompt)
         bridge = self._tool_bridge(request)
+        self._params.reject_unusable_schema(request)
         # Check the account, usage, sandbox and models before spending.
         await self._preflight.run(operation, request)
         # Start the thread with its tools, and stop if its approvals would
@@ -250,10 +251,12 @@ class CodexHost:
         # Start one more turn on an existing thread, by id.
         operation = CodexHostOperation.CONTINUE_CODEX_THREAD
         self._guard(operation, talks=True)
-        # Refuse fields continue cannot apply, and a bad input, first.
+        # Refuse fields continue cannot apply, a bad input and an unusable
+        # answer schema first.
         request = overrides or CodexSpawnRequest()
         CodexPreflight.reject_unusable_fields(request, operation)
         items = self._params.input_items(input)
+        self._params.reject_unusable_schema(request)
         # Reserve the thread before the first await, so a second continue
         # on it is refused rather than racing this one (INV-24).
         self._preflight.require_idle(operation, thread_id)
@@ -410,6 +413,7 @@ class CodexHost:
         CodexPreflight.reject_unusable_fields(spawn, operation)
         batch = self._launch_items(prompts, limit)
         bridge = self._tool_bridge(spawn)
+        self._params.reject_unusable_schema(spawn)
         await self._preflight.run(operation, spawn)
         started: list[CodexLiveTurn] = []
         try:

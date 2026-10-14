@@ -54,6 +54,8 @@ from openai_codex.generated.v2_all import (
     TurnStatus,
 )
 from openai_codex.models import InitializeResponse
+from pydantic import PydanticUserError
+from pydantic_core import to_jsonable_python
 
 from vidbyte.agents.codex.config import CodexContentTranslator, CodexVidbyteTranslator
 from vidbyte.agents.codex.result import CodexResultSerializer
@@ -121,6 +123,7 @@ SANDBOX_NOT_READY = frozenset({CodexSandboxReadiness.NOT_CONFIGURED, CodexSandbo
 SIGNED_OUT_MESSAGE = "Codex has no signed-in account, and this runtime requires one."
 NO_FINAL_ANSWER_MESSAGE = "Codex completed the turn without a final answer."
 SCHEMA_MESSAGE = "Codex's final answer is not JSON that matches output_schema."
+UNUSABLE_SCHEMA_MESSAGE = "output_schema must be a Pydantic model type or a mapping that serializes to JSON."
 NO_GOAL_MODE_MESSAGE = "The Codex runtime completed a goal turn without activating goal mode."
 NO_COMPLETION_MESSAGE = "Codex ended the turn without reporting its completion."
 EXITED_MESSAGE = "CodexHost closed, or its Codex app-server exited, while the turn was running."
@@ -239,6 +242,18 @@ class CodexParamsTranslator:
         if not isinstance(run_input, CodexRunInput) or run_input.context_items or run_input.context_manager is not None or run_input.context_placements:
             raise ConfigurationError("A Codex prompt must be a str or a CodexRunInput without context_items, a context_manager or context_placements.")
         return [{**asdict(item), "type": item.type.value} for item in run_input.items]
+
+    def reject_unusable_schema(self, request: CodexSpawnRequest) -> None:
+        # @intent an-unusable-schema-fails-before-any-request
+        # The answer schema is turned into JSON now, as the turn would
+        # send it, so a type that is not a Pydantic model, or a mapping
+        # that is not JSON, fails before anything is sent (EC-82).
+        if request.output_schema is None:
+            return
+        try:
+            to_jsonable_python(self._schemas.output_schema(request.output_schema))
+        except (PydanticUserError, TypeError, ValueError) as exc:
+            raise ConfigurationError(f"{UNUSABLE_SCHEMA_MESSAGE} {exc}") from exc
 
     @staticmethod
     def thread_list(

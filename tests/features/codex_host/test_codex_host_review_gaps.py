@@ -13,11 +13,27 @@ from __future__ import annotations
 
 import asyncio
 import unittest
+from dataclasses import dataclass
+from typing import Any
 
 from tests.features.codex_host.codex_host_support import (
     WAIT_SECONDS,
     HostTestCase,
     requires_sdk,
+)
+
+
+@dataclass(frozen=True)
+class _DataclassAnswer:
+    """A record type a developer might pass as output_schema, which is not a Pydantic model."""
+
+    summary: str
+
+
+# EC-82: a type that is not a Pydantic model, and a mapping that cannot be serialized to JSON.
+UNUSABLE_SCHEMAS: tuple[tuple[str, Any], ...] = (
+    ("a dataclass type", _DataclassAnswer),
+    ("a mapping that is not JSON", {"type": "object", "properties": {"summary": object()}}),
 )
 
 
@@ -49,6 +65,32 @@ class CodexHostReviewReadBackCancellationTests(HostTestCase):
         # The ended review frees the thread, so the next turn on it is accepted.
         handle = await asyncio.wait_for(host.continue_codex_thread(seeded.thread_id, "Apply the review."), WAIT_SECONDS)
         self.assertEqual(handle.thread_id, seeded.thread_id)
+
+
+@requires_sdk
+class CodexHostOutputSchemaRefusalTests(HostTestCase):
+    """R-2, EC-82 and INV-8: an output_schema that cannot be used is refused before any request."""
+
+    async def test_spawn_continue_and_launch_refuse_an_unusable_schema_before_any_request(self) -> None:
+        from vidbyte.lib.dataclasses.codex_host import CodexSpawnRequest
+        from vidbyte.lib.errors import ConfigurationError
+
+        host = await self.open_host()
+        seeded = self.server.seed_thread(completed_turns=1)
+        calls = (
+            ("spawn", lambda schema: host.spawn_codex_thread(CodexSpawnRequest(prompt="Answer in JSON.", output_schema=schema))),
+            ("continue", lambda schema: host.continue_codex_thread(seeded.thread_id, "Answer in JSON.", overrides=CodexSpawnRequest(output_schema=schema))),
+            ("launch", lambda schema: host.launch_codex_subagents(["Answer in JSON."], request=CodexSpawnRequest(output_schema=schema))),
+        )
+        for label, schema in UNUSABLE_SCHEMAS:
+            for name, call in calls:
+                with self.subTest(schema=label, operation=name):
+                    before = len(self.server.requests)
+                    with self.assertRaises(ConfigurationError) as caught:
+                        await asyncio.wait_for(call(schema), WAIT_SECONDS)
+                    self.assertIn("output_schema", str(caught.exception))
+                    # Nothing was sent, so no thread was created or resumed for a turn that could never start.
+                    self.assertEqual(self.server.methods()[before:], [])
 
 
 if __name__ == "__main__":
