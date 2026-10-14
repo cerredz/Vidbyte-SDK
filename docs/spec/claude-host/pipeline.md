@@ -18,12 +18,12 @@ started: 2026-10-13 00:45 UTC
 | S2 tests | done | 2026-10-13 08:20 UTC | 2026-10-13 15:40 UTC | reports/S2-test-author.md | S2_HEAD 9a8ecc3c (tests 8e116bc7, proof 9a8ecc3c); 165 tests in tests/features/claude_host/, all red on `ModuleNotFoundError: vidbyte.harnesses.native`; spec r4 55c233bf pins the S2 open items; spec status: tests-written |
 | S3 implement | done | 2026-10-13 15:45 UTC | 2026-10-13 21:05 UTC | reports/S3-implementer.md | S3_HEAD d9c5fea2; draft PR https://github.com/cerredz/Vidbyte-SDK/pull/1044 ([WIP] title); 36 commits; 31/31 §12.3 rows; budget 22/22 files, 69/69 classes, 1/1 optional dependency, 0 root exports; pack 165/165 with and without claude_agent_sdk (orchestrator re-run); source gate 4100 passed / 27 skipped; package stage PASS; SDK-LINT PASS; semgrep 0; public API unchanged; spec status: implemented |
 | S4 adversarial review | done | 2026-10-13 21:15 UTC | 2026-10-14 02:00 UTC | reports/S4-review-conformance.md, reports/S4-review-conventions.md, reports/S4-review-engineering.md, reports/S4-findings-verifier.md, review.md | MERGEABLE AFTER FIXES; confirmed 3 Blockers (R-1..R-3) / 4 Majors (R-4..R-7) / 14 Minors (R-8..R-21); refuted 2 (R-E1, R-V2 interrupt chain); downgraded 4; remote CI on d9c5fea2 green; spec status: reviewed |
-| S5 repair loop | done | 2026-10-14 02:15 UTC | 2026-10-14 03:45 UTC | reports/S5-repair-1.md, verify-log.md | converged in 1 iteration at 615fc54a: fixed R-1,R-2,R-3,R-5,R-6,R-7,R-10..R-14 (R-4,R-8,R-9,R-19 by spec r5 3c1f9e4c); 12 new tests (granted file); merge origin/main 8387d666 at 15124156; orchestrator full gate green (source 4178 passed / 27 skipped, package CI passed); remote CI 38502267522 + static 38502269091 green on 615fc54a |
-| S5 re-review | in progress (round 1 done; round 2 of 2 pending) | 2026-10-14 03:50 UTC | | reports/S5-rereview.md, reports/S5-findings-verifier-r1.md | round 1: MERGEABLE AFTER FIXES 0B/1M/2m; scoped verifier confirmed R-22 Major (steer taken one pass before the send; INV-18), R-23 Minor code (stale result fields after a steered prompt dies, D-3), R-24 Minor spec-change (EC-52 unknown values, CLAUDE_STEER_YIELD_SECONDS, deviation 14); refuted R-C1's aclose ordering and INV-11 citation |
+| S5 repair loop | done | 2026-10-14 02:15 UTC | 2026-10-14 06:35 UTC | reports/S5-repair-1.md, reports/S5-repair-2.md, verify-log.md | iteration 2 (R-22 @b5989730, R-23 @2c537b1a, R-24 by spec r6 9211d4ef) converged at 490e627b: orchestrator gate source 4182 passed / 27 skipped, package CI passed; remote 38519522362 + 38519524093 green. Iteration 1 converged at 615fc54a: fixed R-1,R-2,R-3,R-5,R-6,R-7,R-10..R-14 (R-4,R-8,R-9,R-19 by spec r5 3c1f9e4c); 12 new tests (granted file); merge origin/main 8387d666 at 15124156; orchestrator full gate green (source 4178 passed / 27 skipped, package CI passed); remote CI 38502267522 + static 38502269091 green on 615fc54a |
+| S5 re-review | in progress (round 1 done; iteration 2 done at 490e627b; round 2 of 2 running) | 2026-10-14 03:50 UTC | | reports/S5-rereview.md, reports/S5-findings-verifier-r1.md | round 1: MERGEABLE AFTER FIXES 0B/1M/2m; scoped verifier confirmed R-22 Major (steer taken one pass before the send; INV-18), R-23 Minor code (stale result fields after a steered prompt dies, D-3), R-24 Minor spec-change (EC-52 unknown values, CLAUDE_STEER_YIELD_SECONDS, deviation 14); refuted R-C1's aclose ordering and INV-11 citation |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 1/8 · S5 re-review rounds: 1/2
+- S1 review rounds: 2/2 · S5 repair iterations: 2/8 · S5 re-review rounds: 2/2 (round 2 running; last allowed)
 
 ## Parallel run
 - **Sibling pipeline:** `codex-host`, in worktree `C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-codex-host` on branch `feat/codex-host`, from the same base commit. Each run follows the shared-file contract in its request.md §C.
@@ -194,6 +194,24 @@ started: 2026-10-13 00:45 UTC
   - **Then the final re-review, round 2 of 2,** which is the last one the cap allows.
   *Why:* a spec edit lands before the code that follows it. The verifier's "write (b) after R-22 lands" was about wording; r6 states the target placement, so the order does not change the text.
 - 2026-10-14 05:40 UTC — **The test grant carries into iteration 2.** New tests still go only in `test_claude_host_review_gaps.py`, with README.md and FEATURE.md extended by addition only. The 165 original tests stay byte-identical.
+
+- 2026-10-14 06:05 UTC — **Spec r6 spot-check passed.**
+  - 9211d4ef changes only spec.md (+8/-5) and the author report (+15).
+  - The frontmatter reads `revision: 6`, `status: reviewed`.
+  - There is no test diff, and the native blob hash is unchanged.
+- 2026-10-14 06:35 UTC — **S5 iteration 2 spot-check passed.**
+  - `git status` is clean, and HEAD equals origin at 490e627b.
+  - Fix commits: b5989730 [R-22] and 2c537b1a [R-23], plus the verify-log commit 490e627b.
+  - `git diff --numstat 9a8ecc3c..HEAD -- tests/features/claude_host` shows only the granted files: test_claude_host_review_gaps.py +377/-0, README.md +4/-0 and FEATURE.md +23/-0. Nothing outside claude_host differs from origin/main under tests/.
+  - The new tests are `StopInSteerWindowTests` (P1, P2b, P3) and `SteeredResultFieldsTests`. All 4 fail against 615fc54a's session.py, as quoted in verify-log.
+  - verify-log.md has "## Iteration 2". review.md marks R-22 `fixed @b5989730`, R-23 `fixed @2c537b1a` and R-24 `fixed @9211d4ef (spec r6)`.
+  - The native blob hash is unchanged.
+  - My own full gate on 490e627b: `4182 passed, 27 skipped in 40.15s` / `CI passed.` (source), and `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` (package).
+  - Remote: ci.yml 38519522362 succeeded (Source 3.12, Source 3.11, Package) and static-policy 38519524093 succeeded, both on 490e627b.
+  *Why:* the skill's convergence test (DONE, my gate green, remote green, no open confirmed finding).
+- 2026-10-14 06:35 UTC — **Final conformance re-review, round 2 of 2, launched.** This is the last round the cap allows.
+  - FOCUS: the iteration-2 commits b5989730 and 2c537b1a, the 4 new tests, and how spec r6 (deviation 14, EC-52, rows 7/12/14) matches the code. It also checks that iteration 1's fixes still hold beside them.
+  - If it finds a new Blocker or Major, the verifier confirms it, and then I stop and report to the user rather than open a round 3.
 
 ## User replies (verbatim)
 - none yet
@@ -405,3 +423,6 @@ started: 2026-10-13 00:45 UTC
 - **Scope the test-tree diff after the main merge.** The unscoped `git diff 9a8ecc3c..HEAD -- tests/` now includes main's own test changes. Scope it to `tests/features/claude_host`, or compare against origin/main. *source:* S5 repair 1.
 - **Reaching R-22's window in a test.** Call `steer_claude_session` directly, not through `asyncio.wait_for`, `self.raises` or `eventually`. Wrapped, the steer starts after the pump has read the result and the case cannot fail. For the aclose case, schedule `aclose` before `finish()`; `aclose` runs each session's `close()` through `asyncio.gather`, a new task. *source:* scoped verifier r1.
 - **R-22 then R-23, both in `_take_steer`.** Make `_take_steer` async and yield (`CLAUDE_STEER_YIELD_SECONDS`) while `self._steer is not None`, before the take. Then, inside `if steer is not None:` after `self._steered = self._steers`, reset the result fields with `replace()`: result_text, structured_output, num_turns, duration_ms, stop_reason, terminal_reason and permission_denials. Keep session_id, hooks_applied and total_cost_usd. The verifier ran this combined shape in memory: 177 passed, and lint shows no difference. *source:* scoped verifier r1.
+- **P4 (the time budget in the steer window) has no committed test.** Reaching it needs `session._watch(client, 0)` started by hand; the probe is in the scratchpad at `repair2/probe_fixed.py`. *source:* S5 repair 2.
+- **Additions-only trap.** Changing the last FEATURE.md bullet's `.` to `;` counts as a deletion in `--numstat`. *source:* S5 repair 2.
+- **A002 and `replace()`.** A002 does not fire on `permission_denials=()` as a `replace()` keyword, so no `@intent` line is needed there. *source:* S5 repair 2.
