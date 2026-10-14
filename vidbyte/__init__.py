@@ -17,7 +17,7 @@ Architecture:
     - Context exports: context contracts plus general problem-solving challenge records.
     - Preset exports: BudgetPreset, PermissionPreset.
     - Pipeline exports: BasePipeline, ConditionalPipeline, ParallelPipeline, PipelineNode, SequentialPipeline.
-    - Output exports: OutputConnector, OutputDispatcher (sends any AgentMessage to a list of connectors), the eleven destination connectors (SlackOutput through WebhookOutput), and the OutputContent, DeliveryReceipt, OutputDestination, DeliveryStatus, and OutputDeliveryError records they use.
+    - Output exports: OutputConnector, OutputDispatcher (sends any AgentMessage to a list of connectors), the sixteen destination connectors (SlackOutput through HubSpotTaskOutput) and TypefullyPlatform, and the OutputContent, DeliveryReceipt, OutputDestination, DeliveryStatus, and OutputDeliveryError records they use.
     - Harness exports: the Harness base class, specifications, run manifests, trajectory collection/sinks, and typed failures.
     - Multi-agent exports: MultiAgent, MagenticOneOrchestrator, TaskLedger, AgentBinding, AgentTransfer, and immutable ledger contracts.
     - Workflow exports: StateGraph, StateMachine, stages, validators, routers, policies, records, and typed errors.
@@ -264,12 +264,16 @@ from vidbyte.agents import (
     UsageTracker,
 )
 from vidbyte.agents.output import (
+    ConfluencePageOutput,
     DeliveryReceipt,
     DeliveryStatus,
     DiscordOutput,
     EmailOutput,
     GitHubIssueOutput,
+    GitHubJobSummaryOutput,
+    GitLabIssueOutput,
     GoogleChatOutput,
+    HubSpotTaskOutput,
     JiraIssueOutput,
     LinearIssueOutput,
     NotionPageOutput,
@@ -281,6 +285,8 @@ from vidbyte.agents.output import (
     SlackOutput,
     TeamsOutput,
     TelegramOutput,
+    TypefullyDraftOutput,
+    TypefullyPlatform,
     WebhookOutput,
 )
 from vidbyte.agents.pricing import ProviderUsage
@@ -992,12 +998,16 @@ __all__ = [
     "UsageRecord",
     "UsageRollup",
     "UsageTracker",
+    "ConfluencePageOutput",
     "DeliveryReceipt",
     "DeliveryStatus",
     "DiscordOutput",
     "EmailOutput",
     "GitHubIssueOutput",
+    "GitHubJobSummaryOutput",
+    "GitLabIssueOutput",
     "GoogleChatOutput",
+    "HubSpotTaskOutput",
     "JiraIssueOutput",
     "LinearIssueOutput",
     "NotionPageOutput",
@@ -1009,6 +1019,8 @@ __all__ = [
     "SlackOutput",
     "TeamsOutput",
     "TelegramOutput",
+    "TypefullyDraftOutput",
+    "TypefullyPlatform",
     "WebhookOutput",
     "AlternativeChallengeContextItem",
     "AmbiguityContextItem",
