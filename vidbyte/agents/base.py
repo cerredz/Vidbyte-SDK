@@ -54,7 +54,7 @@ from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.dataclasses.trace import TraceField, TraceOption, TraceSchema
 from vidbyte.lib.constants import RUNNER_TYPE_TEXT
 from vidbyte.lib.enums import AgentRuntimeType, ModelProvider
-from vidbyte.lib.errors import AgentExecutionError, ConfigurationError, FailureRaisedError, OutputSchemaViolationError, UsageAccountingError
+from vidbyte.lib.errors import AgentExecutionError, AllModelsFailedError, ConfigurationError, FailureRaisedError, OutputSchemaViolationError, UsageAccountingError
 from vidbyte.lib.runners import Runner
 from vidbyte.lib.tracing import NullTracer, TracerBase
 from vidbyte.lib.usage_ledger import UsageLedger, active_usage_ledger, usage_ledger_scope
@@ -909,11 +909,14 @@ class BaseAgent(McpAttachableMixin):
             self._speed_tracker.record_run_end()
         except Exception as exc:
             self._close_failed_reply(exc, trace_ctx)
-            if isinstance(exc, (UsageAccountingError, FailureRaisedError)):
+            if isinstance(exc, (UsageAccountingError, FailureRaisedError, AllModelsFailedError)):
                 # @intent usage-accounting-error-reaches-the-user
                 # A run that failed closed on usage must tell the user so, not surface as a generic reply failure.
                 # @intent raise-disposition-reaches-the-caller
                 # A Session rule that escalated to raise keeps its typed error, which is the caller's contract.
+                # @intent spent-fallback-chain-reaches-the-caller
+                # A spent fallback chain keeps its typed error with every attempt, which is the caller's documented
+                # contract; it is an AgentExecutionError, so `except AgentExecutionError` still catches it.
                 raise
             raise AgentExecutionError(
                 f"Agent '{self.name}' failed to generate a reply.",
