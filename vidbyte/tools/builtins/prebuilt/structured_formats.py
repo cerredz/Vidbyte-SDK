@@ -5,8 +5,8 @@ ROLE IN CODEBASE: Re-exported by vidbyte/tools/builtins/prebuilt/__init__.py and
 ARCHITECTURE NOTE: Every parser is a standard-library one (xml.etree.ElementTree, configparser, tomllib, urllib.parse), and each tool wraps it with the guards INV-19 and INV-20 need: XML text is refused before parsing when it declares a document type, an entity, or a namespace URI longer than PREBUILT_MAX_NAME_CHARS, converted values are measured with work stacks instead of recursion, and xml_to_json counts its keys and texts while building. Parser exceptions are converted from their attributes, never from their text.
 FUNCTION INVENTORY: xml_to_json, verify_xml_wellformed, xml_find_elements, ini_to_json, toml_to_json, parse_url, resolve_relative_url, parse_query_string, and parse_dotenv_text are the tools; _CaseKeepingConfigParser keeps INI key case; _CountedElement counts the elements a path reads, and _counted_element builds one for the tree builder; _unsafe_xml_problem names a refused declaration; _parse_xml parses XML or fails naming xml_text; _element_level measures element nesting; _element_value converts elements to JSON under the output cap; _ini_error_line reads a configparser error's line; _has_long_dotted_key finds a TOML key with too many dotted segments; _plain_toml_values turns TOML dates into text and checks numbers; _dotenv_value reads one .env value; tool_functions lists the tools in catalogue order.
 COMMON MODIFICATION PATTERNS: A new format tool adds a static method with a 4 to 5 sentence description, its row in the spec's Appendix A.20, and its entry in tool_functions, and catches its parser's exceptions where they occur. A new XML tool runs _unsafe_xml_problem before _parse_xml.
-WHAT NOT TO DO IN THIS FILE: 1. Do not let any XML parser see text before _unsafe_xml_problem has accepted it. 2. Do not format a parser exception with str or repr; read code, position, lineno, or errors, and give tomllib errors the fixed message. 3. Do not walk a converted value with recursion; the nesting cap must hold before anything reaches the output serializer. 4. Do not repeat a .env line in an error, because it may hold a credential.
-KNOWN EDGE CASES: Expat reports 0-based columns, so a reported column is one more than the parser's. The ElementPath engine of Python 3.11 raises TypeError, SyntaxError, or KeyError for a bad path, and all three are errors on path. Its descendant step can yield one element many times, and a positional predicate lists every sibling of each candidate, so xml_find_elements builds its tree from _CountedElement, which counts every element the evaluation reads and refuses the path past PREBUILT_MAX_XML_PATH_VISITS, and it lists each distinct match once in document order. _CountedElement overrides find and findall too, because the C element answers a plain tag without calling the counting methods. tomllib accepts infinite and NaN floats and integers of any size, which are refused here because the output must be finite JSON. tomllib takes time quadratic in the segments of one dotted key, so a run of more than 100 dotted key segments is refused before parsing; the scan does not track strings or comments, so such a run inside a multi-line string or a comment is refused too.
+WHAT NOT TO DO IN THIS FILE: 1. Do not let any XML parser see text before _unsafe_xml_problem has accepted it. 2. Do not format a parser exception with str or repr; read code, position, lineno, or errors, and give tomllib errors the fixed message. 3. Do not walk a converted value with recursion; the nesting cap must hold before anything reaches the output serializer. 4. Do not repeat a .env line in an error, because it may hold a credential. 5. Do not write the content of a multi-line string in the TOML scan as a possessive repeat, because Python 3.11.0's re mis-matches it; keep the atomic group, and keep its plain characters in single-character runs, or every character of a long string holds a backtracking entry (about 120 MB at the cap).
+KNOWN EDGE CASES: Expat reports 0-based columns, so a reported column is one more than the parser's. The ElementPath engine of Python 3.11 raises TypeError, SyntaxError, or KeyError for a bad path, and all three are errors on path. Its descendant step can yield one element many times, and a positional predicate lists every sibling of each candidate, so xml_find_elements builds its tree from _CountedElement, which counts every element the evaluation reads and refuses the path past PREBUILT_MAX_XML_PATH_VISITS, and it lists each distinct match once in document order. _CountedElement overrides find and findall too, because the C element answers a plain tag without calling the counting methods. tomllib accepts infinite and NaN floats and integers of any size, which are refused here because the output must be finite JSON. tomllib takes time quadratic in the segments of one dotted key, so a run of more than 100 dotted key segments is refused before parsing. The scan skips comments and multi-line strings whole, so a long run inside one is parsed, and a one-line quoted segment left open ends at its line end, so each character is read once. On Python 3.11.0 a run's match can also take the dot and spaces after its last segment, which start no piece, so the result is the same on every interpreter.
 RELATED DOCS: docs/spec/prebuilt-agent-tools/spec.md (Appendix A.20, section 9.2 items 3, 12, and 13, INV-19, INV-20); vidbyte/tools/builtins/prebuilt/README.md
 TESTS: tests/features/prebuilt_tools/test_prebuilt_rows_formats_encoding.py and the catalogue-wide tests in tests/features/prebuilt_tools/
 """
@@ -58,8 +58,21 @@ _INI_EXPECTED = "INI text with a section header first, no repeated section, no r
 _TOML_PROBLEM = "the text is not valid TOML 1.0"
 _TOML_NESTING_PROBLEM = f"the TOML is nested deeper than {PREBUILT_MAX_JSON_NESTING} levels"
 _TOML_NESTING_EXPECTED = "TOML nested at most that deep"
-_TOML_KEY_SEGMENT = r"""[A-Za-z0-9_-]++|"(?:[^"\\\n]|\\.)*+"|'[^'\n]*+'"""
-_TOML_DOTTED_RUN = re.compile(rf"(?:{_TOML_KEY_SEGMENT})(?:[ \t]*+\.[ \t]*+(?:{_TOML_KEY_SEGMENT}))*+")
+# One scan piece is a comment, a multi-line string, or a dotted run
+# of key segments, and a quoted segment left open ends at its line
+# end, so each character is read once. Multi-line content is an
+# atomic group, not a possessive repeat: Python 3.11.0 mis-matches
+# a possessive repeat whose body ends in a failing lookahead. Inside
+# it, plain characters are read as runs, so only an escape or a
+# lone quote holds a backtracking entry while the string is read.
+_TOML_KEY_SEGMENT = r"""[A-Za-z0-9_-]++|"(?:[^"\\\n]|\\.)*+"?|'[^'\n]*+'?"""
+_TOML_DOTTED_RUN = rf"(?:{_TOML_KEY_SEGMENT})(?:[ \t]*+\.[ \t]*+(?:{_TOML_KEY_SEGMENT}))*+"
+_TOML_SCAN_PIECE = re.compile(
+    r"""#[^\n]*+"""
+    + r"""|"{3}(?>[^"\\]*+(?:(?:\\[\s\S]|"(?!""))[^"\\]*+)*)(?:"{3,5}+)?"""
+    + r"""|'{3}(?>[^']*+(?:'(?!'')[^']*+)*)(?:'{3,5}+)?"""
+    + rf"|(?P<run>{_TOML_DOTTED_RUN})"
+)
 _TOML_SEGMENT = re.compile(_TOML_KEY_SEGMENT)
 _INTEGER_RESULT_BOUND = 10**PREBUILT_MAX_INTEGER_DIGITS
 _DOTENV_ASSIGNMENT = re.compile(r"(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*=(.*)")
@@ -420,11 +433,14 @@ class StructuredFormatsToolFunctions:
 
     @staticmethod
     def _has_long_dotted_key(toml_text: str) -> bool:
-        """Say whether a run of key segments joined by dots has more segments than the nesting cap, scanning the text once."""
-        # Only a run with enough dots can be too long, so the exact
-        # count, which skips dots inside quoted segments, is rare.
-        for run in _TOML_DOTTED_RUN.finditer(toml_text):
-            if run.group().count(".") >= PREBUILT_MAX_JSON_NESTING and len(_TOML_SEGMENT.findall(run.group())) > PREBUILT_MAX_JSON_NESTING:
+        """Say whether a run of key segments joined by dots, outside comments and multi-line strings, has more segments than the nesting cap, scanning the text once."""
+        # Comments and multi-line strings are skipped whole, so a quote
+        # inside one cannot hide a key later on its line. Only a run
+        # with enough dots can be too long, so the exact count, which
+        # skips dots inside quoted segments, is rare.
+        for piece in _TOML_SCAN_PIECE.finditer(toml_text):
+            run = piece["run"]
+            if run and run.count(".") >= PREBUILT_MAX_JSON_NESTING and len(_TOML_SEGMENT.findall(run)) > PREBUILT_MAX_JSON_NESTING:
                 return True
         return False
 
