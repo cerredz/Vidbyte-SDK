@@ -5,7 +5,7 @@ worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-prebuilt-agent-tool
 branch: feat/prebuilt-agent-tools
 base_commit: 8387d66680951766f02b0d740d78eb6450cb6419
 pr:
-s2_head: 5dac4319
+s2_head: bc238128
 test_tree: tests/features/prebuilt_tools/
 until: none
 started: 2026-10-14 02:46
@@ -17,7 +17,7 @@ started: 2026-10-14 02:46
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 02:46 | 03:20 | reports/S0-scout.md, reports/S0-research.md | base_commit 8387d666; code-map.md; research.md |
 | S1 spec + review | done | 03:25 | 07:40 | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | spec r3 approved; r1 review SOUND WITH FIXES (12 applied), r2 review SOUND WITH FIXES (10 applied); 265 tools |
-| S2 tests | done | 07:45 | 08:45 | reports/S2-test-author.md | 4,284 cases / 101 test fns in tests/features/prebuilt_tools/ (26 files); red: 102 failed, 4182 errors; S2_HEAD 5dac4319 | | |
+| S2 tests | done | 07:45 | 08:45 | reports/S2-test-author.md | 4,284 cases / 101 test fns in tests/features/prebuilt_tools/ (26 files); red: 102 failed, 4182 errors; tightened to r4 (f49db5db): 102 failed, 4208 errors, 0 passed; S2_HEAD bc238128 | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
@@ -38,6 +38,8 @@ started: 2026-10-14 02:46
 - 2026-10-14 — Told the S2 test author NOT to run `pip install -e .`: the global editable install points at the canonical checkout C:/Users/422mi/vidbyte-repos/vidbyte-sdk, and reinstalling from the worktree would repoint it for other sessions; bootstrap is `PYTHONPATH=$(pwd)` per field guide local-ci-verification.md.
 - 2026-10-14 — Told the S2 test author that every Appendix A tool should get ≥1 exact-output case (parametrized tables), since 265 independent behaviors exceed the usual 8–25-test shape; exceptions must be listed under 'Tests deliberately NOT written'.
 - 2026-10-14 — S2 OPEN ITEMS name spec defects (unreachable EC-14/utf8_hex null; uncapped add_business_days.holidays/weekend_days and critical_path_schedule dependency lists; dead domain_too_long; base64url padding stated only on hash_text; ElementPath '[' TypeError; null byte ValueError/SyntaxError across versions; 3 error rows naming no parameter; ~50 loose rows pinned to one reading in S2 report §5). Routed to the S1 spec author in Revision mode (r4) before S3, with the rule: the tests are now the contract, so the spec adopts each pinned reading unless it contradicts §9.2 or another row. No review round (S1 cap 2/2 reached); changes are row-level, not §8/§8.5 architecture.
+- 2026-10-14 — Global `semgrep` is broken on this machine (semgrep's `mcp` import fails against the globally installed mcp 2.x). Built an isolated venv with semgrep==1.170.1 (the CI-pinned version) in the session scratchpad instead of changing global packages. Baseline scan at 476f9e07: 893 files, 0 findings, exit 0.
+- 2026-10-14 — Spec r4 (5d93fe88) resolved all S2 defects; no test disagrees with the spec; §6.2 Proof column verified byte-identical. Resumed the S2 test author (the only agent allowed to edit tests) to tighten ANY-value assertions to r4's chosen values and cover the new r4 caps, before S3, so S4 does not flag vacuous assertions.
 
 ## User replies (verbatim)
 - none
@@ -103,3 +105,13 @@ started: 2026-10-14 02:46
 - Count tools must compute counts by formula, never enumerate: the count tests HANG (not fail) against an enumerating implementation — *source:* S2
 - `SchemaArgumentFactory` raising 'add one to the pools' → add a sample to `PATTERN_SAMPLES` (a fixture change, test-author/adjudicated only) — *source:* S2
 - base64url is unpadded for every `DigestFormat` user incl. `compute_hmac` — *source:* S2
+- Semgrep locally: global `semgrep` is BROKEN (mcp 2.x import error) — use the isolated venv with a POSIX-style PATH prefix (Git Bash splits PATH on ':', so `C:/...` breaks): `PATH="/c/Users/422mi/AppData/Local/Temp/claude/C--Users-422mi-vidbyte-repos/c033bb4d-236f-4839-b20c-c5c2bef451e8/scratchpad/semgrep-venv/Scripts:$PATH" semgrep scan --error --config .semgrep/typed-mapping-boundary-policy.yml vidbyte` (after `git add`); baseline 0 findings on 893 files — *source:* orchestrator
+- Lint final line is `SDK-LINT: PASS`; at base, rules A002, C011, C012, S001, S010, S017, S025, S061 already report IMPROVED — not this PR's to ratchet — *source:* spec r3 §11
+- Source stage at base: `PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source` → `4015 passed, 13 skipped`, `CI passed.` — *source:* spec r3 §11
+- Public API check: `python scripts/generate-sdk-public-api.py --check`; typecheck `python lint/run.py --rule S009` (mypy over vidbyte) — *source:* spec r3 §11
+- r4: Python 3.11 ElementPath `[`→TypeError, `/b`→SyntaxError, `@`→KeyError; null byte → `ast.parse` ValueError without line number — tools must catch all and map to the tool's own argument error — *source:* S1 author r4
+- r4: `verify_email_syntax` check order differs from the enum declaration order on purpose (row gives check order); `join_records` keeps the right join field, `csv_join_tables` drops it (deliberate, test-pinned) — *source:* S1 author r4
+- r4: where a test accepts ANY value, the spec picks one — implement the spec's value — *source:* S1 author r4
+- `UtcOffset` needs `max_length=PREBUILT_MAX_UTC_OFFSET_CHARS` (6) beside its pattern; over-cap tests look for 'at most N' in the parameter's own `loc` (`param` or `param.0`) — *source:* S2 r4 tightening
+- Exact caps pinned by tests: holidays 1000, weekend_days 7, both critical_path dependency lists 10000 — *source:* S2 r4 tightening
+- Signature text without a return annotation is `def run(self)` (no arrow) — test-author reading where r4 is silent — *source:* S2 r4 tightening
