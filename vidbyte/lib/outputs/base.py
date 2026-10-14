@@ -1,7 +1,7 @@
 """FILE: vidbyte/lib/outputs/base.py
 
 PURPOSE: Defines BaseOutput, the provider base every connector subclasses, and OutputArguments, the checks for connector constructor arguments.
-ROLE IN CODEBASE: Subclassed by the eleven connectors in this package; the agent-side OutputConnector Protocol is satisfied structurally, with no import.
+ROLE IN CODEBASE: Subclassed by the sixteen connectors in this package; the agent-side OutputConnector Protocol is satisfied structurally, with no import.
 ARCHITECTURE NOTE: Provider work only. The skip rule, the reply shaping, and the render call live in vidbyte/agents/output/, never here.
 COMMON MODIFICATION PATTERNS: Add a static check to OutputArguments when a new connector argument needs one; keep every error naming the parameter.
 KNOWN EDGE CASES: Errors never echo a credential or a URL, because a webhook URL is itself the secret.
@@ -11,22 +11,32 @@ TESTS: tests/features/agent_output_connectors/test_output_connectors_configurati
 
 from __future__ import annotations
 
+import base64
 import os
 import re
 import uuid
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from enum import Enum
+from typing import TypeVar
 from urllib.parse import urlsplit
 
 from vidbyte.lib.constants.outputs import (
     OUTPUT_CREDENTIAL_ENV_VARS,
     OUTPUT_EMAIL_ADDRESS_PATTERN,
+    OUTPUT_HEADER_NAME_PATTERN,
     OUTPUT_HTTPS_PREFIX,
+    WEBHOOK_KEY_MAX_BYTES,
+    WEBHOOK_KEY_MIN_BYTES,
+    WEBHOOK_KEY_PREFIX,
 )
 from vidbyte.lib.dataclasses.agents import AgentMessage
 from vidbyte.lib.dataclasses.outputs import DeliveryReceipt, OutputContent
 from vidbyte.lib.enums.outputs import OutputDestination
 from vidbyte.lib.errors import ConfigurationError
+
+CallableT = TypeVar("CallableT", bound=Callable[..., object])
+EnumT = TypeVar("EnumT", bound=Enum)
 
 
 class OutputArguments:
@@ -86,7 +96,7 @@ class OutputArguments:
             raise ConfigurationError(f"{parameter} must be a UUID, got {value!r}.", details={"parameter": parameter}) from None
 
     @staticmethod
-    def optional_callable(value: Callable[[AgentMessage], OutputContent] | None, *, parameter: str) -> Callable[[AgentMessage], OutputContent] | None:
+    def optional_callable(value: CallableT | None, *, parameter: str) -> CallableT | None:
         """Require None or a callable."""
         if value is None or callable(value):
             return value
@@ -105,6 +115,91 @@ class OutputArguments:
         if isinstance(value, str) and re.fullmatch(OUTPUT_EMAIL_ADDRESS_PATTERN, value):
             return value
         raise ConfigurationError(f"{parameter} must be one email address, got {value!r}.", details={"parameter": parameter})
+
+    @staticmethod
+    def flag(value: object, *, parameter: str) -> bool:
+        """Require a real bool, so a truthy string such as "no" is refused."""
+        if isinstance(value, bool):
+            return value
+        raise ConfigurationError(f"{parameter} must be True or False, got {value!r}.", details={"parameter": parameter})
+
+    @staticmethod
+    def number(value: object, *, parameter: str) -> int:
+        """Require a positive int that is not a bool."""
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            return value
+        raise ConfigurationError(f"{parameter} must be a positive int, got {value!r}.", details={"parameter": parameter})
+
+    @staticmethod
+    def reference(value: object, pattern: str, *, parameter: str) -> str:
+        """Require a positive int, returned as text, or a string that fully matches pattern, as given."""
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            return str(value)
+        if isinstance(value, str) and re.fullmatch(pattern, value):
+            return value
+        raise ConfigurationError(f"{parameter} must be a positive int or a string matching {pattern}, got {value!r}.", details={"parameter": parameter})
+
+    @staticmethod
+    def members(values: object, kind: type[EnumT], *, parameter: str) -> tuple[EnumT, ...]:
+        """Require a list of one or more kind members or their values; duplicates are dropped in order."""
+        allowed = ", ".join(str(member.value) for member in kind)
+        message = f"{parameter} must list one or more of {allowed}, got {values!r}."
+        if isinstance(values, Sequence) and not isinstance(values, (str, bytes)):
+            try:
+                members = tuple(dict.fromkeys(kind(value) for value in values))
+            except ValueError:
+                raise ConfigurationError(message, details={"parameter": parameter}) from None
+            if members:
+                return members
+        raise ConfigurationError(message, details={"parameter": parameter})
+
+    @staticmethod
+    def headers(value: object, *, parameter: str) -> Mapping[str, str]:
+        """Require a mapping of HTTP header names to values; return it with lowercase names."""
+        # @intent header-errors-never-echo-a-value
+        # A header value is often a credential, and a bad name can be a
+        # whole pasted line ("Authorization: Bearer ..."), so an error
+        # names a valid header name or a bad name's position, never a
+        # value and never the bad name itself.
+        if isinstance(value, Mapping):
+            lowered: dict[str, str] = {}
+            for position, (name, text) in enumerate(value.items(), start=1):
+                if not (isinstance(name, str) and re.fullmatch(OUTPUT_HEADER_NAME_PATTERN, name)):
+                    raise ConfigurationError(f"{parameter} entry {position} does not have a valid HTTP header name.", details={"parameter": parameter, "position": position})
+                header = name.lower()
+                if not isinstance(text, str) or any(mark in text for mark in "\r\n\x00"):
+                    raise ConfigurationError(f"{parameter} value for {header} must be a string with no line break or NUL.", details={"parameter": parameter, "header": header})
+                if header in lowered:
+                    raise ConfigurationError(f"{parameter} names {header} more than once; header names ignore case.", details={"parameter": parameter, "header": header})
+                lowered[header] = text
+            return lowered
+        raise ConfigurationError(f"{parameter} must be a mapping of header names to values, got {type(value).__name__}.", details={"parameter": parameter})
+
+    @staticmethod
+    def signing_key(value: object, *, parameter: str) -> bytes:
+        """Require a Standard Webhooks secret, an optional whsec_ prefix and then strict base64, and return the decoded key."""
+        # @intent signing-secret-is-never-echoed
+        # The secret signs every request, so an error names only the
+        # parameter and the rule, never the value or any part of it.
+        message = f"{parameter} must be a {WEBHOOK_KEY_PREFIX} secret: base64 of {WEBHOOK_KEY_MIN_BYTES} to {WEBHOOK_KEY_MAX_BYTES} bytes."
+        if isinstance(value, str):
+            try:
+                key = base64.b64decode(value.strip().removeprefix(WEBHOOK_KEY_PREFIX), validate=True)
+            except ValueError:
+                raise ConfigurationError(message, details={"parameter": parameter}) from None
+            if WEBHOOK_KEY_MIN_BYTES <= len(key) <= WEBHOOK_KEY_MAX_BYTES:
+                return key
+        raise ConfigurationError(message, details={"parameter": parameter})
+
+    @staticmethod
+    def exclusive(values: Mapping[str, object], *, required: bool = False) -> None:
+        """Allow at most one of the named arguments to be set, and, when required, exactly one; None and an empty list count as not set."""
+        chosen = [name for name, value in values.items() if value is not None and not (isinstance(value, Sequence) and not value)]
+        names = " and ".join(values)
+        if len(chosen) > 1:
+            raise ConfigurationError(f"Pass at most one of {names}, not both.", details={"parameters": list(values)})
+        if required and not chosen:
+            raise ConfigurationError(f"Pass one of {names}.", details={"parameters": list(values)})
 
 
 class BaseOutput(ABC):
