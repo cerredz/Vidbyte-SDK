@@ -1,3 +1,14 @@
+"""FILE: tests/test_tool_registry_thread_safety.py
+
+PURPOSE: Regression tests that ToolRegistry readers never see a half-registered tool.
+ROLE IN CODEBASE: Guards ToolRegistry.subset() and add() against reading the tool tuple and the name index out of step while register() runs on another thread.
+ARCHITECTURE NOTE: A writer thread holds the registry lock between the two index assignments, coordinated with threading.Event, so the interleaving is deterministic with no stress loop.
+COMMON MODIFICATION PATTERNS: Add a case here when ToolRegistry gains another inherited reader that consults both _tools and _by_name.
+KNOWN EDGE CASES: Single-attribute readers such as names() and get() read one immutable snapshot and need no lock, so they are not tested here.
+RELATED DOCS: vidbyte/lib/registries/README.md.
+TESTS: python -m pytest tests/test_tool_registry_thread_safety.py.
+"""
+
 from __future__ import annotations
 
 import threading
