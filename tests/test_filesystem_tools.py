@@ -241,6 +241,19 @@ class FileSystemToolHappyPathTests(unittest.TestCase):
                 self.assertEqual(target.read_bytes(), new)
                 self.assertNotIn("-a = 1", result.output)
 
+    def test_write_text_new_file_with_crlf_spelled_content_matches_lf_spelling(self) -> None:
+        # @intent model-crlf-text-keeps-file-endings
+        # A new file gets the platform default whichever way the model spelled its line endings, never CR CR LF.
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            for name, content in (("lf.txt", "a = 1\nb = 2\n"), ("crlf.txt", "a = 1\r\nb = 2\r\n")):
+                result = run(WriteTextTool(config).execute(ToolCall("write_text", {"path": name, "content": content})))
+                self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+            lf_bytes, crlf_bytes = Path(tmp, "lf.txt").read_bytes(), Path(tmp, "crlf.txt").read_bytes()
+            self.assertEqual(crlf_bytes, lf_bytes)
+            self.assertNotIn(b"\r\r\n", lf_bytes)
+            self.assertNotIn(b"\r\r\n", crlf_bytes)
+
     def test_replace_text_with_crlf_spelled_search_and_replacement_on_crlf_file(self) -> None:
         # @intent model-crlf-text-keeps-file-endings
         with TemporaryDirectory() as tmp:
@@ -394,6 +407,19 @@ class FileSystemToolHappyPathTests(unittest.TestCase):
                 result = run(AppendTool(config).execute(ToolCall("append_text", {"path": name, "content": "b\r\nc\r\n"})))
                 self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
                 self.assertEqual(target.read_bytes(), expected, name)
+
+    def test_append_text_new_file_with_crlf_spelled_content_matches_lf_spelling(self) -> None:
+        # @intent model-crlf-text-keeps-file-endings
+        # Appending to a new file gives it the platform default whichever way the model spelled its line endings, never CR CR LF.
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            for name, content in (("lf.txt", "b\nc\n"), ("crlf.txt", "b\r\nc\r\n")):
+                result = run(AppendTool(config).execute(ToolCall("append_text", {"path": name, "content": content})))
+                self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+            lf_bytes, crlf_bytes = Path(tmp, "lf.txt").read_bytes(), Path(tmp, "crlf.txt").read_bytes()
+            self.assertEqual(crlf_bytes, lf_bytes)
+            self.assertNotIn(b"\r\r\n", lf_bytes)
+            self.assertNotIn(b"\r\r\n", crlf_bytes)
 
     def test_append_text_tolerates_undecodable_bytes_in_existing_file(self) -> None:
         with TemporaryDirectory() as tmp:
