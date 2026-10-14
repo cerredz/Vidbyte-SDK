@@ -31,7 +31,7 @@ class ClaudeToolServer:
     @staticmethod
     def build(tools: tuple[BaseTool, ...], sdk: ClaudeSdkTypes) -> object:
         """Return the SDK server config for these tools, each one run by a handler over one shared ToolExecutor."""
-        # @intent request-tools-ride-the-vidbyte-mcp-server
+        # @intent claude-code-approves-before-vidbyte-runs
         # Claude Code asks its own permission layer before it calls a
         # tool, so the executor allows every permission and only looks
         # up, validates and runs the call; a stricter policy here would

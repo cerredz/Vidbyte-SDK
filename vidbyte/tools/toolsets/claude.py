@@ -42,7 +42,7 @@ class ClaudeTools(Tools):
     """Catalog of the fifteen Claude Code tools, all over one host and one base request."""
 
     def __init__(self, host: ClaudeHost, request: ClaudeSpawnRequest | None = None) -> None:
-        # @intent the-base-request-defaults-to-an-empty-request
+        # @intent the-developer-fixes-every-spawn-setting
         # Without a base request the tools spawn with
         # ClaudeSpawnRequest's own defaults; either way the model adds
         # only prompts and ids to it, never a setting of its own (D-13).

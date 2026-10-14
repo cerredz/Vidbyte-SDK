@@ -38,7 +38,7 @@ class SpawnClaudeSessionTool(_ClaudeBuiltinTool):
         return self._spec("spawn_claude_session", SPAWN_CLAUDE_SESSION_DESCRIPTION, ToolPermission.WRITE, properties, ("prompt",))
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # @intent the-model-sets-only-the-prompt
+        # @intent the-developer-fixes-every-spawn-setting
         # The model's prompt replaces only the prompt of the developer's
         # base request; a wrong JSON type for it fails the request's own
         # check and comes back as configuration.invalid_argument.
@@ -108,7 +108,7 @@ class LaunchClaudeSubagentsTool(_ClaudeBuiltinTool):
         return self._spec("launch_claude_subagents", LAUNCH_CLAUDE_SUBAGENTS_DESCRIPTION, ToolPermission.WRITE, properties, ("prompts", "limit"))
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # @intent the-model-sets-only-the-prompts
+        # @intent the-developer-fixes-every-spawn-setting
         # Every launched session is the developer's base request with
         # one of the model's prompts; a JSON array becomes the tuple the
         # host takes, and any other value goes on for the host to

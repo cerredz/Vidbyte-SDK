@@ -506,21 +506,22 @@ class ClaudeSpawnRequest:
             raise _ClaudeFieldRules.invalid("resume_drops_turn needs resume_session_at.")
 
     def _check_prompting(self) -> None:
-        # @intent permission-prompts-have-exactly-one-answerer
-        # With NONE the CLI denies every prompt itself, so a callback
-        # would never be asked; with HOST and no callback a prompt would
-        # wait for an answer nobody sends. The system prompt options and
-        # images must fit too.
+        # The system prompt options must fit the system prompt's mode.
         mode = self.system_prompt.mode
         if self.exclude_dynamic_system_prompt_sections and mode is not ClaudeSystemPromptMode.PRESET:
             raise _ClaudeFieldRules.conflict(f"exclude_dynamic_system_prompt_sections applies only to the preset system prompt, not {mode.value}.")
         if self.system_prompt_snapshot is not None and mode is ClaudeSystemPromptMode.FILE:
             raise _ClaudeFieldRules.conflict("system_prompt_snapshot does not apply to a system prompt file.")
+        # @intent permission-prompts-have-exactly-one-answerer
+        # With NONE the CLI denies every prompt itself, so a callback
+        # would never be asked; with HOST and no callback a prompt would
+        # wait for an answer nobody sends.
         hosted = self.permission_prompts is ClaudePermissionPrompts.HOST
         if hosted and self.can_use_tool is None:
             raise _ClaudeFieldRules.invalid("permission_prompts host needs a can_use_tool callback.")
         if not hosted and self.can_use_tool is not None:
             raise _ClaudeFieldRules.conflict("can_use_tool needs permission_prompts host.")
+        # Images go out inside the prompt's message, so they need one.
         if self.images and not self.prompt:
             raise _ClaudeFieldRules.invalid("images need a non-empty prompt.")
 
