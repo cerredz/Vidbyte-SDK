@@ -12,6 +12,7 @@ TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/codex_host/test_code
 from __future__ import annotations
 
 import asyncio
+import json
 import unittest
 from dataclasses import dataclass
 from typing import Any
@@ -19,6 +20,7 @@ from typing import Any
 from tests.features.codex_host.codex_host_support import (
     WAIT_SECONDS,
     HostTestCase,
+    StubCodexHost,
     requires_sdk,
 )
 
@@ -276,6 +278,52 @@ class CodexHostLateStopTests(HostTestCase):
         snapshot = await self.wait_done(host, CodexTurnHandle(thread_id=thread_id, turn_id=turn_id))
         # D-35: the interrupt is the late acceptance's, not the turn's timeout, so no problem is reported.
         self.assert_problem(snapshot, "interrupted", None)
+
+
+class CodexHostLaunchToolSlotTests(unittest.IsolatedAsyncioTestCase):
+    """R-14 and INV-32: the launch tool frees every cap slot it held when a launch fails or is cancelled."""
+
+    async def _launch(self, tools: Any, prompts: list[str]) -> Any:
+        from vidbyte.lib.dataclasses.tools import ToolCall
+
+        tool = next(tool for tool in tools if tool.spec().name == "launch_codex_subagents")
+        return await asyncio.wait_for(tool.execute(ToolCall(tool_name="launch_codex_subagents", arguments={"prompts": prompts})), WAIT_SECONDS)
+
+    async def _fail(self, host: StubCodexHost, tools: Any, prompts: list[str]) -> None:
+        from vidbyte.lib.dataclasses.tools import ToolStatus
+        from vidbyte.lib.errors import CodexAgentError
+
+        host.raises["launch_codex_subagents"] = CodexAgentError("Codex is overloaded.", failure_code="codex.api_error", operation="launch_codex_subagents")
+        self.assertEqual((await self._launch(tools, prompts)).status, ToolStatus.ERROR)
+        del host.raises["launch_codex_subagents"]
+
+    async def _cancel(self, host: StubCodexHost, tools: Any, prompts: list[str]) -> None:
+        host.gates["launch_codex_subagents"] = asyncio.Event()
+        task = asyncio.ensure_future(self._launch(tools, prompts))
+        for _ in range(10_000):
+            if "launch_codex_subagents" in host.names():
+                break
+            await asyncio.sleep(0)
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+        del host.gates["launch_codex_subagents"]
+
+    async def test_a_failed_or_cancelled_launch_frees_every_slot_it_held(self) -> None:
+        from vidbyte.lib.dataclasses.tools import ToolStatus
+        from vidbyte.tools.toolsets import CodexHostTools
+
+        prompts = ["Review module A.", "Review module B."]
+        for label, end_early in (("failed", self._fail), ("cancelled", self._cancel)):
+            with self.subTest(launch=label):
+                host = StubCodexHost()
+                tools = CodexHostTools(host, max_live_turns=len(prompts))
+                await end_early(host, tools, prompts)
+                # The first launch held the whole cap, so this one fits only if every slot came back.
+                launched = await self._launch(tools, prompts)
+                self.assertEqual(launched.status, ToolStatus.SUCCESS, launched.output)
+                self.assertEqual(len(json.loads(launched.output)), len(prompts))
+                self.assertEqual(host.names().count("launch_codex_subagents"), 2)
 
 
 if __name__ == "__main__":
