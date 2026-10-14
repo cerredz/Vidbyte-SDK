@@ -1,9 +1,9 @@
 """FILE: vidbyte/lib/constants/prebuilt_tools.py
 
 PURPOSE: Holds every length cap, resource bound, fixed precision, and reference table the prebuilt tool library uses, so each limit has one name and one value.
-ROLE IN CODEBASE: Imported by vidbyte/tools/builtins/prebuilt/_support.py and the 31 category modules beside it, which use the caps in their pydantic Field constraints and the tables in their parsing and formatting. Imports enums from vidbyte/lib/enums/prebuilt_tools.py to key two tables.
+ROLE IN CODEBASE: Imported by vidbyte/tools/builtins/prebuilt/_support.py and the 31 category modules beside it, which use the caps in their pydantic Field constraints and the tables in their parsing and formatting. Imports enums from vidbyte/lib/enums/prebuilt_tools.py to key three tables.
 ARCHITECTURE NOTE: Every value is immutable: an int, a float, a str, a tuple, a frozenset, or a read-only MappingProxyType. The caps are sized for the slowest algorithm that reads them (spec NFR-7), so raising one can make a tool call run far longer than two seconds.
-FUNCTION INVENTORY: No functions. Caps and budgets (PREBUILT_MAX_*), fixed numeric settings (PREBUILT_FINANCE_PRECISION, the PREBUILT_IRR_* search settings, PREBUILT_EARTH_RADIUS_KILOMETERS), and reference tables (sentence abbreviations, GSM-7 alphabets, currency codes and symbols, diacritic fallbacks, number words, size and duration words, month names, HTML block tags, invisible code points, comment syntax).
+FUNCTION INVENTORY: No functions. Caps and budgets (PREBUILT_MAX_*), fixed numeric settings (PREBUILT_FINANCE_PRECISION, the PREBUILT_IRR_* search settings, PREBUILT_EARTH_RADIUS_KILOMETERS), and reference tables (sentence abbreviations, GSM-7 alphabets, currency codes and symbols, diacritic fallbacks, CSV delimiter characters, number words, size and duration words, month names, HTML block tags, invisible code points, comment syntax).
 COMMON MODIFICATION PATTERNS: A new bound gets a PREBUILT_ name here before any tool uses it, and that name goes into __all__. A reference table changes together with the Appendix A row that names its contents.
 WHAT NOT TO DO IN THIS FILE: 1. Do not use a name that holds an A007 token (timeout, token, char, byte, limit, depth, interval, and the rest) as a whole underscore-separated word, because tool signatures read these names. 2. Do not store mutable lists, sets, or dicts. 3. Do not import anything above vidbyte.lib.
 KNOWN EDGE CASES: PREBUILT_MAX_INTEGER_DIGITS stays below Python's default 4,300-digit int-to-text limit, so an allowed integer always converts to text. PREBUILT_MAX_UTC_OFFSET_CHARS is the longest text the UtcOffset pattern accepts.
@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from types import MappingProxyType
 
-from vidbyte.lib.enums.prebuilt_tools import CodeLanguage, SizeStandard
+from vidbyte.lib.enums.prebuilt_tools import CodeLanguage, CsvDelimiter, SizeStandard
 
 # Text and list caps.
 PREBUILT_MAX_TEXT_CHARS = 1_000_000
@@ -210,6 +210,12 @@ PREBUILT_DATA_SIZE_SUFFIXES: MappingProxyType[str, str] = MappingProxyType(
     }
 )
 
+# The character each CsvDelimiter member stands for, in reading and
+# in writing CSV.
+PREBUILT_CSV_DELIMITER_CHARACTERS: MappingProxyType[CsvDelimiter, str] = MappingProxyType(
+    {CsvDelimiter.COMMA: ",", CsvDelimiter.SEMICOLON: ";", CsvDelimiter.TAB: "\t", CsvDelimiter.PIPE: "|"}
+)
+
 # Display labels of byte sizes, from bytes up, one power of the base
 # (1000 for si, 1024 for iec) apart.
 PREBUILT_SIZE_UNIT_LABELS: MappingProxyType[SizeStandard, tuple[str, ...]] = MappingProxyType(
@@ -288,6 +294,7 @@ __all__ = [
     "PREBUILT_APPROXIMATION_DIGITS",
     "PREBUILT_BIDI_CONTROL_CODE_POINTS",
     "PREBUILT_COMMENT_SYNTAX",
+    "PREBUILT_CSV_DELIMITER_CHARACTERS",
     "PREBUILT_CURRENCY_CODES",
     "PREBUILT_CURRENCY_SYMBOLS",
     "PREBUILT_DATA_SIZE_SUFFIXES",

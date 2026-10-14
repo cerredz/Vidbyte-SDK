@@ -28,6 +28,7 @@ from typing import Annotated, Any
 from pydantic import Field
 
 from vidbyte.lib.constants.prebuilt_tools import (
+    PREBUILT_CSV_DELIMITER_CHARACTERS,
     PREBUILT_MAX_NAME_CHARS,
     PREBUILT_MAX_RECORDS,
     PREBUILT_MAX_SHORT_TEXT_CHARS,
@@ -50,7 +51,6 @@ from vidbyte.tools.builtins.prebuilt._support import (
     PrebuiltToolSupport,
 )
 
-_DELIMITER_CHARACTERS = MappingProxyType({CsvDelimiter.COMMA: ",", CsvDelimiter.SEMICOLON: ";", CsvDelimiter.TAB: "\t", CsvDelimiter.PIPE: "|"})
 _SNIFF_DELIMITERS = ",;\t|"
 _DEFAULT_QUOTE = '"'
 _HEADER_VOTE_ROWS = 21
@@ -132,7 +132,7 @@ class CsvTablesToolFunctions:
             sniffed, quote = dialect.delimiter, dialect.quotechar or _DEFAULT_QUOTE
         except csv.Error:
             sniffed, quote = ",", _DEFAULT_QUOTE
-        chosen = next((member for member, character in _DELIMITER_CHARACTERS.items() if character == sniffed), CsvDelimiter.COMMA)
+        chosen = next((member for member, character in PREBUILT_CSV_DELIMITER_CHARACTERS.items() if character == sniffed), CsvDelimiter.COMMA)
 
         # Read every row with that delimiter, then guess the header from
         # the first rows.
@@ -319,9 +319,9 @@ class CsvTablesToolFunctions:
     def _write_csv(header: list[str], rows: Iterable[list[str]], delimiter: CsvDelimiter) -> str:
         """Write a header and rows as CSV with minimal quoting and line-feed line endings."""
         buffer = io.StringIO()
-        writer = csv.writer(buffer, delimiter=_DELIMITER_CHARACTERS[delimiter], quoting=csv.QUOTE_MINIMAL, lineterminator="\n")
-        writer.writerow(header)
-        writer.writerows(rows)
+        write_row = PrebuiltToolSupport.csv_row_writer(buffer, delimiter)
+        for row in chain([header], rows):
+            write_row(row)
         return buffer.getvalue()
 
     @staticmethod
@@ -338,7 +338,7 @@ class CsvTablesToolFunctions:
     @staticmethod
     def _read_rows(text: str, delimiter: CsvDelimiter) -> list[list[str]]:
         """Read every non-blank row of CSV text with one delimiter, reporting a parse failure by line."""
-        reader = csv.reader(io.StringIO(text, newline=""), delimiter=_DELIMITER_CHARACTERS[delimiter])
+        reader = csv.reader(io.StringIO(text, newline=""), delimiter=PREBUILT_CSV_DELIMITER_CHARACTERS[delimiter])
         try:
             return [row for row in reader if row]
         except csv.Error as exc:

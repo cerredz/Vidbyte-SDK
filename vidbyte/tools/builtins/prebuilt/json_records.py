@@ -13,7 +13,6 @@ TESTS: tests/features/prebuilt_tools/test_prebuilt_rows_json_csv.py and the cata
 
 from __future__ import annotations
 
-import csv
 import io
 import json
 import math
@@ -73,7 +72,6 @@ _NUMERIC_AGGREGATES: MappingProxyType[AggregateFunction, Callable[[list[float]],
         AggregateFunction.MEDIAN: statistics.median,
     }
 )
-_DELIMITER_CHARACTERS = MappingProxyType({CsvDelimiter.COMMA: ",", CsvDelimiter.SEMICOLON: ";", CsvDelimiter.TAB: "\t", CsvDelimiter.PIPE: "|"})
 
 _RECORDS_PARAMETER_DESCRIPTION = "The records, given as the text of a JSON array whose elements are all objects. Each object is one record, and its top-level keys are its fields. An element that is not an object fails with an error naming its index. The array may hold at most 10,000 records in at most one million characters."
 _FIELD_PARAMETER_DESCRIPTION = "The name of the field to read, matched exactly against each record's top-level keys. Nested fields are not reached, so a dotted name is simply a key that contains a dot. A record that lacks the key counts as missing, which is distinct from a null value. The name must hold 1 to 200 characters."
@@ -244,10 +242,10 @@ class JsonRecordsToolFunctions:
         # Write the header and then one row per record, counting the
         # characters written so far.
         buffer = io.StringIO()
-        writer = csv.writer(buffer, delimiter=_DELIMITER_CHARACTERS[delimiter], quoting=csv.QUOTE_MINIMAL, lineterminator="\n")
-        written: int = writer.writerow(list(names))
+        write_row = PrebuiltToolSupport.csv_row_writer(buffer, delimiter)
+        written = write_row(list(names))
         for record in records:
-            written += writer.writerow([JsonRecordsToolFunctions._csv_cell(record.get(name)) for name in names])
+            written += write_row([JsonRecordsToolFunctions._csv_cell(record.get(name)) for name in names])
             # @intent prebuilt-output-text-cap
             # Short records under many columns can turn into far more
             # text than the input, so writing stops as soon as the CSV

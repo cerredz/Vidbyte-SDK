@@ -3,7 +3,7 @@
 PURPOSE: Holds PrebuiltToolSupport, the shared helpers every prebuilt tool category uses: the one argument-error builder, JSON and record parsing, exact number text, numeric text, nesting level, item capping under the character budget, paired lists, weights, dates and offsets, lines, words, sentences, syllables, CSV tables, and text encoding. Also defines the PrebuiltToolOutput and PrebuiltToolFunction type aliases.
 ROLE IN CODEBASE: Imported by the 31 category modules in vidbyte/tools/builtins/prebuilt/ and by vidbyte/tools/toolsets/prebuilt.py (for the PrebuiltToolFunction alias). Builds on vidbyte/lib/constants/prebuilt_tools.py, vidbyte/lib/enums/prebuilt_tools.py, and ToolExecutionError from vidbyte/lib/errors/.
 ARCHITECTURE NOTE: A static-method-only class (the class-bound helper pattern of vidbyte/lib/util/math.py). Each helper does one job. Helpers may call argument_error and nesting_level, which call nothing else in the class, and no other helper calls another helper, so a caller composes them: a records tool passes the value parse_json_text returns to records_from_json. Every error a helper raises is a ToolExecutionError whose message names the tool parameter the caller passed in, so FunctionTool turns it into a failure the model can act on.
-FUNCTION INVENTORY: argument_error builds the INV-15 error. parse_json_text and json_pointer_tokens read JSON input, and records_from_json checks a parsed value as a list of records. parse_integer_text, parse_decimal_text, integer_text, decimal_text, fraction_text, float_result, and parse_numeric_text convert exact and numeric text. decimal_context opens the fresh, fully specified decimal context of section 9.2 item 18. nesting_level measures container depth without recursion. cap_items applies the item cap and character budget. paired_values and weight_total check parallel lists and weights. as_utc, parse_utc_offset, and parse_date_text read times and dates. split_lines, line_and_column, split_words, split_sentences, and count_syllables implement the line, position, word, sentence, and syllable rules. natural_sort_key and numeric_order implement the natural and numeric SortMode orders. parse_csv_table reads a CSV table. base64_bytes reads tolerant Base64 in a chosen or detected alphabet. parse_html feeds HTML to a parser and drops markup left open at the end before closing it. encode_text encodes text in a TextEncoding.
+FUNCTION INVENTORY: argument_error builds the INV-15 error. parse_json_text and json_pointer_tokens read JSON input, and records_from_json checks a parsed value as a list of records. parse_integer_text, parse_decimal_text, integer_text, decimal_text, fraction_text, float_result, and parse_numeric_text convert exact and numeric text. decimal_context opens the fresh, fully specified decimal context of section 9.2 item 18. nesting_level measures container depth without recursion. cap_items applies the item cap and character budget. paired_values and weight_total check parallel lists and weights. as_utc, parse_utc_offset, and parse_date_text read times and dates. split_lines, line_and_column, split_words, split_sentences, and count_syllables implement the line, position, word, sentence, and syllable rules. natural_sort_key and numeric_order implement the natural and numeric SortMode orders. parse_csv_table reads a CSV table, and csv_row_writer writes CSV rows in the output dialect. base64_bytes reads tolerant Base64 in a chosen or detected alphabet. parse_html feeds HTML to a parser and drops markup left open at the end before closing it. encode_text encodes text in a TextEncoding.
 COMMON MODIFICATION PATTERNS: Add a helper here only when two or more category modules need the same job; logic for one category stays in its own module. Keep every new helper free of calls to other helpers except argument_error and nesting_level.
 WHAT NOT TO DO IN THIS FILE: 1. Do not raise anything but argument_error's ToolExecutionError. 2. Do not put str(exc) or repr(exc) in a message; read structured attributes such as msg, lineno, colno, and pos. 3. Do not touch global state: no decimal.getcontext, csv.field_size_limit, or sys.set_int_max_str_digits. 4. Do not import vidbyte.tools.toolsets or anything above the tools layer.
 KNOWN EDGE CASES: Python refuses to turn text of more than 4,300 digits into an int, leading zeros included, so parse_numeric_text reads integers through their float value. A sentence terminator run is only matched at its first character, which keeps sentence splitting linear on long runs of punctuation. JSON nesting is checked after parsing, and json.loads itself raises RecursionError for extreme nesting, which is caught.
@@ -40,6 +40,7 @@ from html.parser import HTMLParser
 from typing import NoReturn, TypeVar
 
 from vidbyte.lib.constants.prebuilt_tools import (
+    PREBUILT_CSV_DELIMITER_CHARACTERS,
     PREBUILT_MAX_INTEGER_DIGITS,
     PREBUILT_MAX_JSON_NESTING,
     PREBUILT_MAX_RECORDS,
@@ -71,7 +72,6 @@ _WORD_BEFORE_END = re.compile(r"[\"'“‘(\[]*+(\S+)\Z")
 _ABBREVIATION_WINDOW = 16
 _SYLLABLE_VOWELS = re.compile(r"[aeiouy]+")
 _CONSONANT_LE_ENDING = re.compile(r"[^aeiouy]le\Z")
-_DELIMITER_CHARACTERS = {CsvDelimiter.COMMA: ",", CsvDelimiter.SEMICOLON: ";", CsvDelimiter.TAB: "\t", CsvDelimiter.PIPE: "|"}
 _WEEKDAY_PREFIX = re.compile(r"\A(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tues|tue|wed|thurs|thur|thu|fri|sat|sun)\.?,?\s+", re.IGNORECASE)
 _ISO_DATE = re.compile(r"(?P<year>\d{4})(?P<separator>[-/.])(?P<month>\d{1,2})(?P=separator)(?P<day>\d{1,2})(?:[T ]\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?", re.IGNORECASE)
 _COMPACT_DATE = re.compile(r"(?P<year>\d{4})(?P<month>\d{2})(?P<day>\d{2})")
@@ -425,9 +425,9 @@ class PrebuiltToolSupport:
                 sniffed = csv.Sniffer().sniff(text[:PREBUILT_MAX_SNIFF_CHARS], delimiters=",;\t|").delimiter
             except csv.Error:
                 sniffed = ","
-            chosen = next((member for member, character in _DELIMITER_CHARACTERS.items() if character == sniffed), CsvDelimiter.COMMA)
+            chosen = next((member for member, character in PREBUILT_CSV_DELIMITER_CHARACTERS.items() if character == sniffed), CsvDelimiter.COMMA)
         # Read every non-blank row, reporting a parse failure by line.
-        reader = csv.reader(io.StringIO(text, newline=""), delimiter=_DELIMITER_CHARACTERS[chosen])
+        reader = csv.reader(io.StringIO(text, newline=""), delimiter=PREBUILT_CSV_DELIMITER_CHARACTERS[chosen])
         expected = f"CSV text whose first row names up to {PREBUILT_MAX_TABLE_COLUMNS} distinct columns, followed by at most {PREBUILT_MAX_RECORDS} rows no wider than the header"
         try:
             table = [row for row in reader if row]
@@ -453,6 +453,11 @@ class PrebuiltToolSupport:
                 raise PrebuiltToolSupport.argument_error(parameter_name, f"row {row_number} has {len(row)} cells but the header has {len(header)}", expected)
             padded.append(row + [""] * (len(header) - len(row)))
         return header, padded, chosen
+
+    @staticmethod
+    def csv_row_writer(buffer: io.StringIO, delimiter: CsvDelimiter) -> Callable[[Iterable[object]], int]:
+        """Return a function that writes one row to buffer as CSV with minimal quoting and a line feed, and returns the characters it wrote."""
+        return csv.writer(buffer, delimiter=PREBUILT_CSV_DELIMITER_CHARACTERS[delimiter], quoting=csv.QUOTE_MINIMAL, lineterminator="\n").writerow
 
     @staticmethod
     def natural_sort_key(text: str) -> tuple[tuple[int, int, str], ...]:
