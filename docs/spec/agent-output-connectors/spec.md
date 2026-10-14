@@ -853,6 +853,21 @@ The helpers in the table are these:
 | Zulip Slack-compatible webhook | Chat | **Qualifies; below the cut (D-17 f).** It accepts Slack JSON, so it could reuse `SlackOutput`'s body later. | https://zulip.com/integrations/slack_incoming |
 | Resend / SendGrid / Postmark / SES HTTP APIs | Email | **Near-duplicates.** Their SMTP endpoints are covered by `EmailOutput` (D-12). Resend's HTTP API also needs a `User-Agent` header or it returns 403. | https://resend.com/docs/api-reference/emails/send-email |
 
+**Catalog (b) corrections** (r9, 2026-10-14, per `docs/spec/output-connector-followups/spec.md`; each source read 2026-10-14):
+
+- **HubSpot tasks qualify**, with a legacy private-app token: https://developers.hubspot.com/docs/api-reference/crm-tasks-v3/guide · https://developers.hubspot.com/docs/apps/legacy-apps/private-apps/overview
+- **X, LinkedIn, Bluesky, Mastodon, and Threads** are reachable through Typefully (built in the follow-ups) or Buffer: https://typefully.com/docs/api · https://buffer.com/ (API keys at https://buffer.com/developers/api)
+- **Pushover and ntfy** are reachable through Apprise: https://github.com/caronc/apprise
+- **Eight JSON-body SMS providers are verified**, Telnyx, Plivo, Vonage Messages, Sinch, Infobip, ClickSend, Bird, and Textmagic; the checklist's "nine" is corrected, because Telesign's send call is form-encoded: https://developers.telnyx.com/api/messaging/send-message · https://www.plivo.com/docs/messaging/api/message/send-a-message · https://developer.vonage.com/en/messages/technical-details · https://developers.sinch.com/docs/sms/api-reference/ · https://www.infobip.com/docs/essentials/api-essentials/api-authentication · https://developers.clicksend.com/docs/messaging/sms/other/send-sms · https://docs.bird.com/api · https://docs.textmagic.com/ · https://developer.telesign.com/enterprise/reference/sendsms
+- **Zendesk API tokens:** no new tokens from 2026-10-27; all deactivated on 2027-04-30: https://developer.zendesk.com/documentation/authentication/oauth-migration/
+- **Shopify:** custom apps created from 2026-01-01 use the client-credentials grant: https://help.shopify.com/en/manual/apps/install-setup-apps
+- **Greenhouse:** Harvest v1 and v2 are unavailable after 2026-08-31; v3 is OAuth: https://support.greenhouse.io/hc/en-us/articles/360029266032-Harvest-API-overview
+- **Bandwidth:** legacy API-user authentication is removed on 2026-12-02: https://dev.bandwidth.com/docs/account/credentials/management/
+- **Bitbucket Cloud:** the issue tracker was removed on 2026-08-20: https://developer.atlassian.com/cloud/bitbucket/changelog/
+- **Relay.app:** shut down in September 2026: https://docs.relay.app/
+- **OneNote:** me@onenote was removed in March 2025: https://support.microsoft.com/en-us/onenote/use-email-to-send-notes-to-onenote-notebooks
+- **LINE Notify:** ended on 2025-03-31: https://notify-bot.line.me/en/
+
 ### 9.3 Configuration and flags
 | Variable / key | Required | Default | Purpose | Lives in |
 |---|---|---|---|---|
@@ -1401,6 +1416,7 @@ New-file count: rows 1–23, which is 23 files (21 `.py` and 2 READMEs). That ma
 | r6 | 2026-10-12 | S6 PR | Finalized for review. The PR body (`pr-body.md`) is written from the code; §5 still matches the code, so it is unchanged. Status set to `pr-open`. |
 | r7 | 2026-10-12 | S6 follow-ups (orchestrator-directed alignment) | Named `OutputArguments.non_empty` (S6-1, 5b437f24) in §8.5 and §12.3 rows 5 and 13, and reworded the TelegramOutput deviation bullet so it stays true. Aligned row 25's paraphrase of the `OutputDeliveryError` resend hint with the §9.2 zip recipe (S6-2, 2334385b). Added §16 rows S6-1 and S6-2. No test, Proof cell, or code changed; status stays `pr-open`. |
 | r8 | 2026-10-12 | Re-review 2 and repair 3 follow-ups (orchestrator-directed alignment) | RR2-C1 (563efc51): the resend caution in §9.2, AC-24, EC-42, and row 25 now names `network`, `invalid_response`, `smtp_error`, `smtp_recipients_refused`, and codes starting with `http_5`, as the code's hint does. EC-46 now expects FAILED `smtp_error`, which the code gives, instead of `network`. Added §16 rows RR2-C1 and the EC-46 fix. No test, Proof cell, or code changed; status stays `pr-open`. |
+| r9 | 2026-10-14 | follow-ups | §9.2(b) corrected per docs/spec/output-connector-followups/spec.md; NG-7/NG-8/NG-10/NG-12 superseded there where the follow-ups build them. |
 
 **Implementation deviations** (S3; none changes the public API or a tested behavior):
 
