@@ -16,7 +16,8 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from vidbyte.lib.errors import SourceParseError, SourceSecurityError
+from vidbyte.lib.dataclasses.sources import FetchResponse
+from vidbyte.lib.errors import SourceFetchError, SourceParseError, SourceSecurityError
 from vidbyte.sources import (
     ArtifactRef,
     InMemoryFetcher,
@@ -52,6 +53,19 @@ def _fetcher() -> InMemoryFetcher:
             "https://ex.com/changelog.md": b"# Changelog\nv1",
         }
     )
+
+
+class _MovedDocsFetcher:
+    """Fake fetcher mapping a requested URL to (final URL, bytes), as after a redirect; any other URL is a 404."""
+
+    def __init__(self, responses: dict[str, tuple[str, bytes]]) -> None:
+        self._responses = responses
+
+    def fetch(self, url: str) -> FetchResponse:
+        if url not in self._responses:
+            raise SourceFetchError("Not found.", details={"url": url, "status_code": 404})
+        final_url, body = self._responses[url]
+        return FetchResponse(status_code=200, body_bytes=body, content_type="text/markdown", url=final_url)
 
 
 def _source(**kwargs) -> LlmsTxtSource:
@@ -219,6 +233,26 @@ class LlmsTxtSourceTests(unittest.TestCase):
         self.assertIn("relative quickstart body", expanded["https://docs.acme.dev/guide/quickstart.md"])
         self.assertIn("relative limits body", expanded["https://docs.acme.dev/reference/limits.md"])
         self.assertIn("absolute status body", expanded["https://docs.acme.dev/status.md"])
+
+    def test_expand_resolves_relative_links_against_the_redirect_target(self) -> None:
+        # @intent snapshot-url-is-where-the-bytes-came-from
+        # [Regression] Verify relative links resolve against the URL the index bytes came from after a redirect.
+        fetcher = _MovedDocsFetcher(
+            {
+                "https://acme.dev/llms.txt": (
+                    "https://docs.acme.dev/v2/llms.txt",
+                    b"# Acme\n## Docs\n- [Quickstart](guide/quickstart.md)\n- [Limits](/reference/limits.md)\n",
+                ),
+                "https://docs.acme.dev/v2/guide/quickstart.md": ("https://docs.acme.dev/v2/guide/quickstart.md", b"# Quickstart\nmoved quickstart body"),
+                "https://docs.acme.dev/reference/limits.md": ("https://docs.acme.dev/reference/limits.md", b"# Limits\nmoved limits body"),
+            }
+        )
+        source = LlmsTxtSource(fetcher=fetcher, allowlist=UrlAllowlist(allowed_hosts=frozenset({"acme.dev", "docs.acme.dev"})))
+        result = source.load(ArtifactRef(url="https://acme.dev/llms.txt"), selection=Selection(expand=True))
+        expanded = {item.source: item.content for item in result.items[1:]}
+        self.assertEqual(set(expanded), {"https://docs.acme.dev/v2/guide/quickstart.md", "https://docs.acme.dev/reference/limits.md"})
+        self.assertIn("moved quickstart body", expanded["https://docs.acme.dev/v2/guide/quickstart.md"])
+        self.assertIn("moved limits body", expanded["https://docs.acme.dev/reference/limits.md"])
 
     def test_expand_failed_link_fails_closed_by_default(self) -> None:
         # [Hidden Assumption] A link host outside the allowlist fails the whole expansion.
