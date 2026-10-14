@@ -20,7 +20,7 @@ started: 2026-10-14 02:46
 | S1 spec + review | done | 03:25 | 07:40 | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | spec r3 approved; r1 review SOUND WITH FIXES (12 applied), r2 review SOUND WITH FIXES (10 applied); 265 tools |
 | S2 tests | done | 07:45 | 08:45 | reports/S2-test-author.md | 4,284 cases / 101 test fns in tests/features/prebuilt_tools/ (26 files); red: 102 failed, 4182 errors; tightened to r4 (f49db5db): 102 failed, 4208 errors, 0 passed; S2_HEAD bc238128 | | |
 | S3 implement | done | 10:05 | 14:30 | reports/S3-implementer.md | S3_HEAD 0fd73086; draft PR #1072; 39/39 planned files, 0/12 split modules; pack 4310 passed; source + package stages CI passed | | |
-| S4 adversarial review | pending | | | | |
+| S4 adversarial review | running | 14:40 | | | |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
@@ -130,3 +130,10 @@ started: 2026-10-14 02:46
 - Use `pytest -p no:cacheprovider`; on Windows, runs can hang idle under heavy concurrency — *source:* S3
 - S3 deviations: helpers `split_lines`, `line_and_column` added to `_support.py`; JSON reading refuses ints > 4,300 digits and non-finite floats; private nested `ConfigParser` subclass in structured_formats.py; tolerant base64 reader duplicated in encoding.py and hashing.py; `seeded_weighted_choice` output can reach ~10M chars (row sets no output cap) — *source:* S3 report §5
 - Remote CI is disabled repo-wide (workflow_dispatch only); there are no required remote checks — local gate is authoritative — *source:* orchestrator check of .github/workflows
+- S4 reviews at 0fd73086: conformance MERGEABLE AFTER FIXES 2B/1M/1m; conventions MERGEABLE AFTER FIXES 1B/3M/3m; engineering MERGEABLE AFTER FIXES 5B/4M — *source:* S4 reviewers
+- `FunctionTool` runs sync tools via `asyncio.to_thread` (function_tool.py:72), which copies contextvars: the caller's `decimal.getcontext()` (traps, Emax) reaches every `localcontext(prec=...)` site; slow calls also starve the loop's default executor — *source:* S4 engineering
+- HTMLParser quadratic slowness also on Python 3.13.1 (35.7 s at 40k chars of '<a '), matches CVE-2025-6069 / gh-135462 — *source:* S4 engineering
+- `ipaddress.IPv6Address('fe80::1%eth0').exploded` raises on 3.11.0 (`.compressed` works); rebuild via `type(parsed)(int(parsed)).exploded` then re-append `%scope` — *source:* S4 conformance
+- `_support.parse_json_text` (lines ~80–120) already has the float guard (`_read_json_float` via functools.partial); reuse it for `JSONDecoder` in extract_json_from_text and in verify_json_syntax — *source:* S4 conformance
+- Reviewer probe harnesses live OUTSIDE the worktree under the session scratchpad (`s4e/` sweep); use `python -u` so output survives `timeout`; Git Bash collapses `\` — use `chr(92)` in Python probes — *source:* S4 reviewers
+- C006/C008 flag helper name prefixes validate/require/ensure/normalize/coerce/check; C005 flags names containing 'price'/'rate' in multiplication (`_PRICE_MARKERS` in lint/rules/c005_cost_arithmetic_site_parity.py) — *source:* S4 conventions
