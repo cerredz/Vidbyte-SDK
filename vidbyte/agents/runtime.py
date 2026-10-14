@@ -673,6 +673,13 @@ class AgentRuntime:
                     return await self._finish_result(final, state)
 
             if finish_attempt_continued or contract_rejected:
+                # @intent refused-finish-still-adopts-added-tools
+                # A refused finish still ends this turn's tool calls, so tools they added reach the next model call, as on a
+                # normal iteration. Its after-iteration hooks already ran with the finish attempt, so it skips them below.
+                catalog = self.tools
+                self._adopt_agent_catalog()
+                if self.tools is not catalog:
+                    tool_schemas = self._resolve_tool_schemas(state.provider)
                 continue
 
             decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state, provider_messages=messages))
