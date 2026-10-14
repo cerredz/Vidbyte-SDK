@@ -18,12 +18,12 @@ started: 2026-10-13 00:45 UTC
 | S2 tests | done | 2026-10-13 08:20 UTC | 2026-10-13 15:40 UTC | reports/S2-test-author.md | S2_HEAD 9a8ecc3c (tests 8e116bc7, proof 9a8ecc3c); 165 tests in tests/features/claude_host/, all red on `ModuleNotFoundError: vidbyte.harnesses.native`; spec r4 55c233bf pins the S2 open items; spec status: tests-written |
 | S3 implement | done | 2026-10-13 15:45 UTC | 2026-10-13 21:05 UTC | reports/S3-implementer.md | S3_HEAD d9c5fea2; draft PR https://github.com/cerredz/Vidbyte-SDK/pull/1044 ([WIP] title); 36 commits; 31/31 §12.3 rows; budget 22/22 files, 69/69 classes, 1/1 optional dependency, 0 root exports; pack 165/165 with and without claude_agent_sdk (orchestrator re-run); source gate 4100 passed / 27 skipped; package stage PASS; SDK-LINT PASS; semgrep 0; public API unchanged; spec status: implemented |
 | S4 adversarial review | done | 2026-10-13 21:15 UTC | 2026-10-14 02:00 UTC | reports/S4-review-conformance.md, reports/S4-review-conventions.md, reports/S4-review-engineering.md, reports/S4-findings-verifier.md, review.md | MERGEABLE AFTER FIXES; confirmed 3 Blockers (R-1..R-3) / 4 Majors (R-4..R-7) / 14 Minors (R-8..R-21); refuted 2 (R-E1, R-V2 interrupt chain); downgraded 4; remote CI on d9c5fea2 green; spec status: reviewed |
-| S5 repair loop | pending | | | | |
-| S5 re-review | pending | | | | |
+| S5 repair loop | done | 2026-10-14 02:15 UTC | 2026-10-14 03:45 UTC | reports/S5-repair-1.md, verify-log.md | converged in 1 iteration at 615fc54a: fixed R-1,R-2,R-3,R-5,R-6,R-7,R-10..R-14 (R-4,R-8,R-9,R-19 by spec r5 3c1f9e4c); 12 new tests (granted file); merge origin/main 8387d666 at 15124156; orchestrator full gate green (source 4178 passed / 27 skipped, package CI passed); remote CI 38502267522 + static 38502269091 green on 615fc54a |
+| S5 re-review | in progress | 2026-10-14 03:50 UTC | | reports/S5-rereview.md | |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 · S5 repair iterations: 1/8 · S5 re-review rounds: 1/2
 
 ## Parallel run
 - **Sibling pipeline:** `codex-host`, in worktree `C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-codex-host` on branch `feat/codex-host`, from the same base commit. Each run follows the shared-file contract in its request.md §C.
@@ -159,6 +159,25 @@ started: 2026-10-13 00:45 UTC
   - It does not weaken the contract.
   - The S2 author's blindness is less valuable here than tests aimed at the known mutants.
   - My S5 spot-check will accept a test-tree diff since S2_HEAD only if it consists of additions to that file plus README/FEATURE additions.
+
+- 2026-10-14 02:15 UTC — **Spec r5 spot-check passed.**
+  - 3c1f9e4c changes only spec.md and the author report.
+  - There is no test diff.
+  - The frontmatter reads `revision: 5`, `status: reviewed`.
+  - No frozen test pins the old per-model rule.
+- 2026-10-14 03:45 UTC — **S5 iteration 1 spot-check passed. The loop converged.**
+  - `git status` is clean, and HEAD equals origin at 615fc54a.
+  - `git diff --numstat 9a8ecc3c..HEAD -- tests/features/claude_host` shows only the granted file: test_claude_host_review_gaps.py +301/-0, README.md +2/-0 and FEATURE.md +17/-0.
+  - The tests/ diff against origin/main contains only claude_host files.
+  - verify-log.md has "## Iteration 1".
+  - review.md R-1..R-7 are all `fixed @<sha>`.
+  - The native blob hash is unchanged.
+  - My own full gate on 615fc54a: `4178 passed, 27 skipped in 39.30s` / `CI passed.` (source), and `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` (package).
+  - Remote: ci.yml 38502267522 succeeded (Source 3.11, Source 3.12, Package) and static-policy 38502269091 succeeded.
+  *Why:* the skill's convergence test (DONE, my gate green, remote green, no open confirmed finding).
+- 2026-10-14 03:50 UTC — **Final conformance re-review (round 1 of 2) launched.**
+  - FOCUS: the eleven fix commits dc9d1734..04e0254b, plus the R-7 test file.
+  - The merge commit 15124156 brings in main's 41 commits, which are out of scope.
 
 ## User replies (verbatim)
 - none yet
@@ -361,3 +380,10 @@ started: 2026-10-13 00:45 UTC
   *source:* the verifier.
 - **Which claude.exe build to cite.** `~/.local/bin/claude.exe` auto-updated to 2.1.299 during S4. The reviewers' byte offsets refer to `~/.local/share/claude/versions/2.1.296`. Never execute either. *source:* the verifier.
 - **`_stopping=True` at session.py:180** is what makes publishing after the close safe. Do not move it below the close. *source:* S4 conformance.
+- **Semgrep PATH form in Git Bash.** A PATH prefix written `C:/...:$PATH` splits at the drive colon, and semgrep falls back to the broken global install. Use `PATH="/c/Users/422mi/vidbyte-repos/.venvs/semgrep-1.170.1/Scripts:$PATH"`. *source:* S5 repair 1.
+- **Lint traps met in S5.**
+  - An inline `isinstance(x, sdk_cls)` on an `Any` value narrows it to `object` and regresses S009. Bind the check to a bool first.
+  - The literal `asyncio.sleep(0)` fails A007; use a named constant.
+  - `message.permission_denials` triggers A002. Reuse the D-28 slug `only-the-prompts-own-result-ends-the-turn`.
+  *source:* S5 repair 1.
+- **Scope the test-tree diff after the main merge.** The unscoped `git diff 9a8ecc3c..HEAD -- tests/` now includes main's own test changes. Scope it to `tests/features/claude_host`, or compare against origin/main. *source:* S5 repair 1.
