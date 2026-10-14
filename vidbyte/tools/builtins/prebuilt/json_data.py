@@ -24,6 +24,7 @@ from typing import Annotated
 from pydantic import Field
 
 from vidbyte.lib.constants.prebuilt_tools import (
+    PREBUILT_JSON_TYPES,
     PREBUILT_MAX_INDENT,
     PREBUILT_MAX_JSON_NESTING,
     PREBUILT_MAX_JSON_SCAN_STARTS,
@@ -46,7 +47,6 @@ _ABSENT = object()
 _ARRAY_INDEX = re.compile(r"0|[1-9][0-9]{0,8}")
 _BAD_POINTER = re.compile(r"\A[^/]|~(?![01])")
 _OPENING_BRACKET = re.compile(r"[\[{]")
-_JSON_TYPES = MappingProxyType({dict: JsonType.OBJECT, list: JsonType.ARRAY, str: JsonType.STRING, bool: JsonType.BOOLEAN, int: JsonType.NUMBER, float: JsonType.NUMBER, type(None): JsonType.NULL})
 _PATCH_POINTERS = MappingProxyType({"add": ("path",), "remove": ("path",), "replace": ("path",), "move": ("from", "path"), "copy": ("from", "path"), "test": ("path",)})
 _VALUE_OPERATIONS = frozenset({"add", "replace", "test"})
 _TAKING_OPERATIONS = frozenset({"remove", "move"})
@@ -96,7 +96,7 @@ class JsonDataToolFunctions:
             problem = _TOO_DEEP_MESSAGE
         if problem is not None:
             return {"valid": False, "error": problem, "line": None, "column": None, "position": None, "top_level_type": None}
-        return {"valid": True, "error": None, "line": None, "column": None, "position": None, "top_level_type": _JSON_TYPES[type(value)].value}
+        return {"valid": True, "error": None, "line": None, "column": None, "position": None, "top_level_type": PREBUILT_JSON_TYPES[type(value)].value}
 
     @staticmethod
     def format_json(
@@ -135,7 +135,7 @@ class JsonDataToolFunctions:
         found, value = JsonDataToolFunctions._lookup(document, segments)
         if not found:
             return {"found": False, "value": None, "type": None}
-        return {"found": True, "value": value, "type": _JSON_TYPES[type(value)].value}
+        return {"found": True, "value": value, "type": PREBUILT_JSON_TYPES[type(value)].value}
 
     @staticmethod
     def json_set_value(
@@ -255,7 +255,7 @@ class JsonDataToolFunctions:
         """Describe the shape of a JSON document: its top-level type, how deeply it nests, how many values it holds, and a merged outline of its keys and types. Use it to understand an unfamiliar or very large document before reading parts of it. In the outline a scalar becomes its type name, an object maps each key to the outline of its value, and an array becomes one merged outline of its items, where a key that some items lack ends in a question mark and mixed types are joined with a vertical bar. Invalid JSON or nesting deeper than 100 levels fails naming json_text."""
         document = PrebuiltToolSupport.parse_json_text(json_text, "json_text")
         return {
-            "top_level_type": _JSON_TYPES[type(document)].value,
+            "top_level_type": PREBUILT_JSON_TYPES[type(document)].value,
             "max_nesting": PrebuiltToolSupport.nesting_level(document),
             "value_count": JsonDataToolFunctions._value_count(document),
             "shape": JsonDataToolFunctions._merged_shape(document),
@@ -464,7 +464,7 @@ class JsonDataToolFunctions:
         pending: list[tuple[object, object]] = [(first, second)]
         while pending:
             left, right = pending.pop()
-            if _JSON_TYPES.get(type(left)) is not _JSON_TYPES.get(type(right)):
+            if PREBUILT_JSON_TYPES.get(type(left)) is not PREBUILT_JSON_TYPES.get(type(right)):
                 return False
             if isinstance(left, dict) and isinstance(right, dict):
                 if left.keys() != right.keys():
@@ -508,7 +508,7 @@ class JsonDataToolFunctions:
         """Write one listed value as its pointer and JSON type."""
         prefix, segment, value = step
         pointer = prefix if segment is None else prefix + "/" + segment.replace("~", "~0").replace("/", "~1")
-        return {"pointer": pointer, "type": _JSON_TYPES[type(value)].value}
+        return {"pointer": pointer, "type": PREBUILT_JSON_TYPES[type(value)].value}
 
     @staticmethod
     def _change_steps(original: object, modified: object) -> Iterator[tuple[str, str | None, JsonChangeKind, object, object]]:
@@ -535,7 +535,7 @@ class JsonDataToolFunctions:
             # Anything else is one replacement unless the values are the
             # same type and equal.
             else:
-                if _JSON_TYPES[type(old)] is not _JSON_TYPES[type(new)] or old != new:
+                if PREBUILT_JSON_TYPES[type(old)] is not PREBUILT_JSON_TYPES[type(new)] or old != new:
                     yield prefix, segment, JsonChangeKind.REPLACE, old, new
                 continue
             pending.extend(reversed(steps))
@@ -568,7 +568,7 @@ class JsonDataToolFunctions:
         pending: list[tuple[list[object], Callable[[object], None]]] = [([document], partial(root.__setitem__, 0))]
         while pending:
             values, store = pending.pop()
-            names = sorted({_JSON_TYPES[type(value)].value for value in values})
+            names = sorted({PREBUILT_JSON_TYPES[type(value)].value for value in values})
             # Objects merge key by key, and a key that some of them lack
             # gets a question mark.
             if names == [JsonType.OBJECT.value]:

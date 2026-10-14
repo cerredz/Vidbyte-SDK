@@ -25,6 +25,7 @@ from typing import Annotated, Any
 from pydantic import Field
 
 from vidbyte.lib.constants.prebuilt_tools import (
+    PREBUILT_JSON_TYPES,
     PREBUILT_MAX_NAME_CHARS,
     PREBUILT_MAX_RECORDS,
     PREBUILT_MAX_SHORT_TEXT_CHARS,
@@ -46,7 +47,6 @@ from vidbyte.tools.builtins.prebuilt._support import (
 )
 
 _COMPACT_SEPARATORS = (",", ":")
-_JSON_TYPES = MappingProxyType({dict: JsonType.OBJECT, list: JsonType.ARRAY, str: JsonType.STRING, bool: JsonType.BOOLEAN, int: JsonType.NUMBER, float: JsonType.NUMBER, type(None): JsonType.NULL})
 _SORT_RANKS = MappingProxyType({JsonType.NUMBER: 0, JsonType.STRING: 1, JsonType.BOOLEAN: 2, JsonType.OBJECT: 3, JsonType.ARRAY: 3})
 _BOOLEAN_TEXTS = frozenset({"true", "false"})
 _TEXT_OPERATORS = frozenset({FilterOperator.CONTAINS, FilterOperator.STARTS_WITH, FilterOperator.ENDS_WITH})
@@ -269,7 +269,7 @@ class JsonRecordsToolFunctions:
         # under the text operators.
         if isinstance(field_value, list) and comparison is FilterOperator.CONTAINS:
             return value in field_value
-        if _JSON_TYPES[type(field_value)] is JsonType.NUMBER:
+        if PREBUILT_JSON_TYPES[type(field_value)] is JsonType.NUMBER:
             if number is None:
                 return False
             if comparison not in _TEXT_OPERATORS:
@@ -281,7 +281,7 @@ class JsonRecordsToolFunctions:
     @staticmethod
     def _group_key(value: object) -> tuple[JsonType, object]:
         """Build a hashable type-aware key: the JSON type with the value, or with the compact JSON text of an object or array."""
-        kind = _JSON_TYPES[type(value)]
+        kind = PREBUILT_JSON_TYPES[type(value)]
         if kind in {JsonType.OBJECT, JsonType.ARRAY}:
             return kind, json.dumps(value, separators=_COMPACT_SEPARATORS, ensure_ascii=False)
         return kind, value
@@ -294,7 +294,7 @@ class JsonRecordsToolFunctions:
         if function is AggregateFunction.DISTINCT_COUNT:
             return len(set(keys)), len(values), 0
         # The numeric functions use JSON numbers only, never booleans.
-        numbers = [value for value in values if _JSON_TYPES[type(value)] is JsonType.NUMBER and isinstance(value, (int, float))]
+        numbers = [value for value in values if PREBUILT_JSON_TYPES[type(value)] is JsonType.NUMBER and isinstance(value, (int, float))]
         if not numbers:
             return None, 0, len(values)
         expected = "numbers whose aggregate is a finite floating-point number"
@@ -307,7 +307,7 @@ class JsonRecordsToolFunctions:
     @staticmethod
     def _sort_key(value: object) -> tuple[int, object]:
         """Order mixed JSON values: numbers, strings, booleans, then objects and arrays by compact JSON text."""
-        kind = _JSON_TYPES[type(value)]
+        kind = PREBUILT_JSON_TYPES[type(value)]
         if kind in {JsonType.OBJECT, JsonType.ARRAY}:
             return _SORT_RANKS[kind], json.dumps(value, separators=_COMPACT_SEPARATORS, ensure_ascii=False)
         return _SORT_RANKS[kind], value
