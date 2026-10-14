@@ -16,8 +16,8 @@ started: 2026-10-13
 | S0 worktree + capture + recon | done | 2026-10-13 | 2026-10-13 | reports/S0-scout.md | base_commit 336d6c78 (merge of origin/main 8387d666 into 4ee040b7) |
 | S1 spec + review | done | 2026-10-13 | 2026-10-14 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-2.md | r1 09f7c42d → review 1 (0B/3M/5m, 7c670413) → r2 0dca4e0c → review 2 (1B/2M/7m, c0b83578) → **r3 8cabad5e, status approved** (FR 35, NFR 10, AC 36, EC 46, D 26, INV 18, Q-1…Q-8 all default No; 7 new files) |
 | S2 tests | done | 2026-10-14 | 2026-10-14 | reports/S2-test-author.md | **S2_HEAD f0167c13** (c621f180 §13 updates + factories.py · 59fb5a87 7 new files, 291 cases · f0167c13 spec §6.2 Proof). Red verified by orchestrator: pack `334 failed, 326 passed`; retry test 3 passed; `SDK-LINT: PASS` |
-| S3 implement | blocked → test fix | 2026-10-14 | | reports/S3-implementer.md | 34 commits a5a50002..8f1fc73e pushed (all 33 rows; contract regen d421b6b9); pack 659/660; lint PASS; semgrep 0; package gate `CI passed.`; source gate fails only on the frozen test below. `git diff --stat f0167c13..HEAD -- tests/` empty (verified) |
-| S4 adversarial review | pending | | | | |
+| S3 implement | done | 2026-10-14 | 2026-10-14 | reports/S3-implementer.md | **S3 HEAD d5611f25 (pushed; PR head verified via ls-remote)**. Code a5a50002..4991370c (all 33 rows; contract regen d421b6b9); test fix 3d974a1f (S2). Source gate `4675 passed, 13 skipped` `CI passed.`; package `CI passed.`; lint PASS; semgrep 0; contract current. Orchestrator verified: tests frozen since 3d974a1f; no lint/ci/semgrep config change; no suppressions; 7/7 new files; pack 660 passed. CI dispatched on d5611f25: ci.yml run 38540755703, static-policy run 38540758273 |
+| S4 adversarial review | running | 2026-10-14 | | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md | diff `336d6c78...d5611f25` (code + tests + first-batch spec row 33) |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
@@ -78,6 +78,10 @@ started: 2026-10-13
 - `lint/run.py --rule X --all` crashes on Windows cp1252: set `PYTHONIOENCODING=utf-8` — *source:* S2
 - Highest-value test: `test_marker_is_neutralized_before_truncation_and_appended_after_it` (wrong order → 7 chars over the 65,536 cap, or the sticky marker truncated away) — *source:* S2
 - 12 new cases are green by design (AC-34 header cases ×10, Slack 12,001-char escaped-text case, OutputRequest list-body refusal) — regression guards for unchanged behavior — *source:* S2
+- S009 (mypy) is at 350/350 — `webhook.py`'s `dict` vs `Mapping` typing pushed it to 351; fixed by declaring `body: object` (4991370c). Any repair touching typed code must re-check S009 — *source:* S3
+- `gh pr view` can return the old head right after a push; confirm with `git ls-remote origin refs/heads/feat/agent-output-connectors` — *source:* S3
+- `scripts/test-async-http-transport.py` crash at line 293 (`runner` kwarg) is pre-existing at the start commit; not part of run_ci — *source:* S3
+- Implementation deviations are listed in spec §17 (8f1fc73e) and reports/S3-implementer.md; `TELEGRAM_TEXT_MAX_CHARS` removed as dead (row 11); six README receiver links (ntfy, Gotify, Home Assistant, Inngest, incident.io, Jira Automation) came from public vendor doc pages — *source:* S3
 - Least-sure assumptions for live checks: A-1 (Slack webhook accepts `markdown` block; L-1 before ready), A-9 (GitHub auto-creates a missing label), A-13 (HubSpot v3 tasks without associations); L-2 decides the Telegram `<` rule — *source:* S1 author r3
 - `test_output_connectors_agent_wiring.py:62` and `dispatch.py:315` pass unchanged (one-line replies); env-var test iterates `HTTP_DESTINATION_KEYS`, missing-credential test iterates `ALL_DESTINATION_KEYS`; `vidbyte/lib/outputs/README.md:140-148` Deadline footgun needs `file_error` — *source:* S1 reviewer r2
 
