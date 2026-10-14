@@ -23,7 +23,8 @@ from pydantic import Field
 
 from vidbyte.lib.constants.prebuilt_tools import (
     PREBUILT_MAX_NGRAM_SIZE,
-    PREBUILT_MAX_SHORT_TEXT_CHARS,
+    PREBUILT_MAX_RESULT_ITEMS,
+    PREBUILT_MAX_SEARCH_STRING_CHARS,
     PREBUILT_MAX_TEXT_CHARS,
     PREBUILT_MAX_TOP_ITEMS,
 )
@@ -79,7 +80,7 @@ class TextCountingToolFunctions:
     @staticmethod
     def find_substring_positions(
         text: Annotated[str, Field(description=_TEXT_PARAMETER_DESCRIPTION, max_length=PREBUILT_MAX_TEXT_CHARS)],
-        substring: Annotated[str, Field(description="The literal text to search for, which is never read as a pattern. It must hold at least one character and at most ten thousand. Characters that are special in regular expressions only match themselves. Case folding applies only when case_sensitive is false.", min_length=1, max_length=PREBUILT_MAX_SHORT_TEXT_CHARS)],
+        substring: Annotated[str, Field(description="The literal text to search for, which is never read as a pattern. It must hold at least one character and at most five hundred. Characters that are special in regular expressions only match themselves. Case folding applies only when case_sensitive is false.", min_length=1, max_length=PREBUILT_MAX_SEARCH_STRING_CHARS)],
         case_sensitive: Annotated[bool, Field(description="Whether uppercase and lowercase must match exactly. When false, the match folds case one code point at a time, so positions still point into the original text. The default is true. Folding never matches one character against two.")] = True,
         allow_overlap: Annotated[bool, Field(description="Whether matches may overlap one another. When true, the search steps forward one position after each match start. When false, the search continues after the end of each match. The default is true.")] = True,
     ) -> PrebuiltToolOutput:
@@ -91,10 +92,18 @@ class TextCountingToolFunctions:
         flags = 0 if case_sensitive else re.IGNORECASE
         pattern = re.compile(f"(?={literal})" if allow_overlap else literal, flags)
 
-        # Count every match, then list positions up to the item cap.
-        count = sum(1 for _ in pattern.finditer(text))
-        positions, truncated = PrebuiltToolSupport.cap_items(match.start() for match in pattern.finditer(text))
-        return {"count": count, "positions": positions, "truncated": truncated}
+        # @intent prebuilt-search-string-cap
+        # An overlapping or case-insensitive search compares the
+        # substring at every position, so the substring is capped and
+        # one pass over the text both counts every match and keeps the
+        # positions up to the item cap.
+        positions: list[int] = []
+        count = 0
+        for match in pattern.finditer(text):
+            if count < PREBUILT_MAX_RESULT_ITEMS:
+                positions.append(match.start())
+            count += 1
+        return {"count": count, "positions": positions, "truncated": count > len(positions)}
 
     @staticmethod
     def count_words(text: Annotated[str, Field(description=_TEXT_PARAMETER_DESCRIPTION, max_length=PREBUILT_MAX_TEXT_CHARS)]) -> PrebuiltToolOutput:

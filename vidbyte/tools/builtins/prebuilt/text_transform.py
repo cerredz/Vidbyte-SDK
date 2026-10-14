@@ -25,6 +25,7 @@ from vidbyte.lib.constants.prebuilt_tools import (
     PREBUILT_HTML_BLOCK_TAGS,
     PREBUILT_MAX_NAME_CHARS,
     PREBUILT_MAX_REPORTED_NAMES,
+    PREBUILT_MAX_SEARCH_STRING_CHARS,
     PREBUILT_MAX_SHORT_TEXT_CHARS,
     PREBUILT_MAX_TEXT_CHARS,
     PREBUILT_MIN_CHUNK_CHARS,
@@ -195,12 +196,21 @@ class TextTransformToolFunctions:
     @staticmethod
     def replace_all_occurrences(
         text: Annotated[str, Field(description=_TEXT_PARAMETER_DESCRIPTION, max_length=PREBUILT_MAX_TEXT_CHARS)],
-        find: Annotated[str, Field(description="The literal text to find, which is never read as a pattern. It must hold at least one character and at most ten thousand. Matches are found from left to right without overlapping. Characters that are special in regular expressions only match themselves.", min_length=1, max_length=PREBUILT_MAX_SHORT_TEXT_CHARS)],
+        find: Annotated[str, Field(description="The literal text to find, which is never read as a pattern. It must hold at least one character and at most ten thousand, or at most five hundred when case_sensitive is false. Matches are found from left to right without overlapping. Characters that are special in regular expressions only match themselves.", min_length=1, max_length=PREBUILT_MAX_SHORT_TEXT_CHARS)],
         replacement: Annotated[str, Field(description="The literal text that replaces each match, which may be empty. Backslashes and group references have no special meaning here. It may hold at most ten thousand characters. A result longer than one million characters fails with an error naming this parameter.", max_length=PREBUILT_MAX_SHORT_TEXT_CHARS)],
         case_sensitive: Annotated[bool, Field(description="Whether uppercase and lowercase must match exactly. When false, the match folds case one code point at a time, so a sharp s never matches a double s. The replacement is inserted as given either way. The default is true.")] = True,
         max_replacements: Annotated[int | None, Field(description="The largest number of matches to replace, counting from the start of the text. Matches past this number are left unchanged. Null means that every match is replaced. The value must be at least 1 when given.", ge=1)] = None,
     ) -> PrebuiltToolOutput:
         """Replace every occurrence of a literal string in a text, optionally ignoring case or capping how many are replaced, and report the number of replacements. Use it for exact find-and-replace edits instead of rewriting a text by hand. Matching is literal, left to right, and non-overlapping, and the replacement is inserted exactly as given. A result longer than one million characters is refused before it is built, with an error naming replacement."""
+        # @intent prebuilt-search-string-cap
+        # A case-insensitive search compares the find text at every
+        # position, so its cost is the text length times the length of
+        # find, while a case-sensitive search is linear and keeps the
+        # full cap.
+        if not case_sensitive and len(find) > PREBUILT_MAX_SEARCH_STRING_CHARS:
+            problem = f"it holds {len(find)} characters, too many for a search that ignores case"
+            raise PrebuiltToolSupport.argument_error("find", problem, f"at most {PREBUILT_MAX_SEARCH_STRING_CHARS} characters when case_sensitive is false")
+
         # Count the matches that will be replaced and the characters
         # they cover, without building any output yet.
         pattern = re.compile(re.escape(find), 0 if case_sensitive else re.IGNORECASE)
