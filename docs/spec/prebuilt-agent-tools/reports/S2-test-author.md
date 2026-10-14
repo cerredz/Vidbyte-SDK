@@ -233,3 +233,72 @@ The binding names and the error-message regex are in `test-plan.md` § Notes for
 - For outputs of 20 MB or more, the peak traced memory must stay under 5 MB, so predict the size; do not build the output and then measure it.
 - A schema pattern that `SchemaArgumentFactory` has no sample for raises "add one to the pools". The fix is a new sample in `PATTERN_SAMPLES`. That is a fixture change, and it is allowed; changing an assertion is not.
 - Once green, the pack runs for about one to several minutes. The sweeps make about 28 calls per tool (13 in the error contract, 6 in the side-effect tests, and 3 in each of three determinism interpreters), and `find_unicode_character` costs about 1 s per call (EC-37).
+
+## Addendum: r4 tightening
+
+Trigger: the coordinator's follow-up after spec r4 (`5d93fe88`) and the S1 r4 addendum (`deed7463`) resolved this report's open items. Commit: `f49db5db` test(prebuilt-tools): tighten assertions to spec r4 readings [AC-7, AC-11, INV-16]. Every value below was read from its r4 Appendix A row, §9.2, or the S1 addendum, then checked by script where it is computed (quartiles, the 1/2^1001 digits, domain lengths, `ast.unparse` text, and usage columns).
+
+**Contradictions: none.** No existing assertion disagreed with r4. Every change replaces an `ANY`, a range, a "non-empty" check, or a "cap only needs to exist" sentinel with r4's exact value, or adds a case for behavior r4 newly states.
+
+### What changed
+
+- **AC-7 and INV-16.** `prebuilt_parameter_data.py` gives the four `UtcOffset` parameters `maxLength` 6 beside the pattern. It also makes `add_business_days.holidays` 1,000, `weekend_days` 7, and both `critical_path_schedule` dependency lists 10,000. The `ANY_CAP` and `PATTERN_BOUND` sentinels are gone. The schema test compares every cap exactly and requires `maxLength` on every plain string. The one-over-cap test sends a list with an item cap twice: once with one over-long item (loc `param.0`), and once with one item too many. A scratch fake plugin passed AC-7 with the exact `add_business_days` caps.
+- **AC-11, tightened to exact values.**
+  - Markdown: the Setext `line` (10), autolink `text`, all three fenced blocks, and named columns for a malformed table.
+  - CSV and JSON: `units_per_segment` 160 for empty text, the `detect_csv_dialect` fallback `quote_character` and `rows`, null positions in `verify_json_syntax` and `verify_xml_wellformed`, and `profile_csv_columns` distinct by text.
+  - Code: `list_python_imports` plain-import fields, `find_python_name_usages` columns, and `get_python_function_signature` text.
+  - Messages and text: `verify_regex_pattern` `re.error.msg` and `pos`, `extract_numbers` `"45%"`, exact `csv_to_markdown_table` and `strip_html_tags` text, and `format_duration` long form.
+  - Top-level `ANY` values fall from 37 to 12, and no nested `ANY` remains (r3 had 23). A new `NON_EMPTY_TEXT` marker covers the six errors r4 fixes as non-empty text without giving words.
+- **New cases (28 tests, a net 26 after the removals).**
+  - A.30 null character: error(`literal`) and five error(`source`) cases. The existing `verify_python_syntax` case is now exact.
+  - `xml_find_elements` `"@"` → error(`path`) (`KeyError` on 3.11), and `verify_xml_wellformed` with a plain DOCTYPE.
+  - `verify_email_syntax`: a 254-character domain gives `domain_too_long` before `address_too_long`.
+  - `fiscal_quarter` at year 1 and year 9999 → error(`target_date`).
+  - `bitwise_operation` missing or 4,097 shift → error(`right`); seven weekend days → error(`weekend_days`).
+  - Value cases: padded `base64` digest, ISBN lowercase `x`, `fraction_to_decimal` past 1,000 digits, two-value quartiles, `version2Beta`, numeric descending sort, two `extract_line_range` break cases, non-Latin marks kept, and CR, LF, and TAB kept.
+  - Two more AC-7 tools: `convert_utc_offset` and `unix_timestamp_to_datetime`.
+- **Removed.**
+  - The parametrized `test_verify_xml_wellformed_reports_rejected_markup_with_a_message` (2 tests): the row cases now state the same outputs exactly.
+  - `csv_to_markdown_table-counts`: renamed to `-auto-exact-text` with exact text.
+  - Two `add_business_days` over-cap `invalid` cases drafted in this pass: AC-7 now covers them.
+  - A drafted lone-surrogate case: `FunctionTool` rejects `"\ud800"` under loc `arguments` before any tool runs (r4 EC-14), so it could never fail because of prebuilt code.
+
+### Proof
+
+Pack: 4,310 tests (was 4,284); row files 1,353 success and 523 failure cases; 265 of 265 tools have a success case. Every file still has 0 passed; the per-file lines are in `test-plan.md` § Red run.
+
+```
+PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider tests/features/prebuilt_tools -rfE
+ERROR tests/features/prebuilt_tools/test_prebuilt_toolset_contract.py::test_every_text_and_list_parameter_is_capped[convert_ip_address_integer]
+ERROR tests/features/prebuilt_tools/test_prebuilt_toolset_contract.py::test_every_text_and_list_parameter_is_capped[convert_ipv4_netmask]
+102 failed, 4208 errors in 17.61s
+```
+
+Tally: 4,208 errors are all `AttributeError: module 'vidbyte.tools.toolsets' has no attribute 'PrebuiltTools'`. The 102 failures are 68 enum exports, 31 `ModuleNotFoundError: vidbyte.tools.builtins.prebuilt`, 2 acceptance returncodes, and 1 static-scan missing-module assertion.
+
+```
+PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider tests/test_tools_catalog.py tests/test_function_tool_parameter_types.py tests/test_tool_core.py tests/features/coding_agent
+........................................................................ [ 61%]
+........................................................................ [ 82%]
+..............................................................           [100%]
+338 passed, 12 skipped in 14.87s
+
+PYTHONPATH=$(pwd) python -m pytest --collect-only -q -p no:cacheprovider
+8338 tests collected in 1.63s
+
+PYTHONPATH=$(pwd) python lint/run.py        (tests and test-plan.md staged)
+S063 RATCHETED: 4 known finding(s). Inspect with: python lint/run.py --rule S063 --all
+
+S064 RATCHETED: 4 known finding(s). Inspect with: python lint/run.py --rule S064 --all
+
+SDK-LINT: PASS
+```
+
+Lint exited 0, and its output matches the pre-tightening run line for line, apart from timings.
+
+### Residual readings
+
+These readings are S2's own, because r4 is silent. They are not spec defects.
+- `get_python_function_signature` without a return annotation is `def run(self)`, with no arrow. r4 gives the form only as `def name(...) -> ...`.
+- `detect_csv_dialect` `has_header` stays `ANY` in two cases, because the row does not say how the header is detected.
+- The count tests (2^128 subnets, 10^15 integers, C(39,20)) hang rather than fail against an enumerating implementation; the pack sets no timeout.
