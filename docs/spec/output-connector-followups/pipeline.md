@@ -14,7 +14,7 @@ started: 2026-10-13
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-13 | 2026-10-13 | reports/S0-scout.md | base_commit 336d6c78 (merge of origin/main 8387d666 into 4ee040b7) |
-| S1 spec + review | running | 2026-10-13 | | reports/S1-spec-author.md, S1-spec-review.md | spec r1 (09f7c42d), review round 1 running |
+| S1 spec + review | done | 2026-10-13 | 2026-10-14 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-2.md | r1 09f7c42d → review 1 (0B/3M/5m, 7c670413) → r2 0dca4e0c → review 2 (1B/2M/7m, c0b83578) → **r3 8cabad5e, status approved** (FR 35, NFR 10, AC 36, EC 46, D 26, INV 18, Q-1…Q-8 all default No; 7 new files) |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -23,7 +23,7 @@ started: 2026-10-13
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 1/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 (cap reached; r3 is the last revision, disputes become Q-n) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-13 — Build on the existing PR #882 branch, not a new branch from main — the user said "implement these things on the pr" (request.md §A Prompt 10).
@@ -32,6 +32,9 @@ started: 2026-10-13
 - 2026-10-13 — Scope = every checkbox of request.md §B sections 0–5, EXCEPT: "Mark the PR ready" (user's call); "Next, if you want them"; "Linear and Jira versions, only if you ask"; the "Don't build" list; bot tokens (Q3 default no); HTML email (Q4 default no). INCLUDED: optional Telegram `topic_id=`; all five §4 connectors (user did not narrow "pick 3–5"); Google Chat Markdown only if official docs confirm the field on the webhook's create call.
 - 2026-10-13 — New slug folder `docs/spec/output-connector-followups/` instead of revising the first batch's spec in place — keeps the closed run's review/verify-log intact; the first spec gets only its §9.2(b) corrections.
 - 2026-10-14 — S1 author was stopped by a session restart before writing anything; resumed via SendMessage (not relaunched) to keep its vendor-doc research; it then wrote and committed r1 (09f7c42d). Its report was left uncommitted; orchestrator committed it (bb4491c3).
+- 2026-10-14 — S1 reviewer round 1 hit a 429 usage limit after its report skeleton; resumed via SendMessage after the reset (not relaunched). Verdict SOUND WITH FIXES; all 8 findings forwarded; author applied all in r2 (0dca4e0c).
+- 2026-10-14 — Ran a scoped round 2 (focus: r2 edits + dependents) because R-1/R-8 fixes changed §10 security controls and a public field (`signing_key` bounds). Verdict SOUND WITH FIXES, 1 Blocker / 2 Major / 7 Minor, none scope-adding; all 10 forwarded verbatim (report path) to the same author with instruction to freeze r3 as `status: approved` (the two review rounds are the approval; no user gate per skill rule 8).
+- 2026-10-14 — S2 exception to the test-author template's hard rule 5 ("never modify an existing test's assertions"): the test author MAY update exactly the first-batch expectations listed in spec §13 (wire bodies, counts, ordered lists, env-var map, README date pin), each logged in test-plan.md with its spec ID; nothing else may change, nothing may be weakened, skipped, or deleted — the spec changes those default wire shapes on purpose, so the old pins assert superseded behavior. S3's no-test-edit check then runs against S2_HEAD.
 
 ## User replies (verbatim)
 - 2026-10-13 — "great, implement these things on the pr"
@@ -56,6 +59,15 @@ started: 2026-10-13
 - Spec §13 lists the first-batch test expectations that must change (Slack ≤ 12,000 chars → `markdown` block; Telegram → `sendRichMessage` `rich_message.markdown`; Teams card two blocks; WIRE_ROWS/CAPPED, mention test, dispatch.py:125/148/315, acceptance.py:97, agent_wiring.py:62; ROOT_NAMES 18→24; LIB_OUTPUT_MODULES +7; README date pin 2026-10-11 vs new rows 2026-10-14; OUTPUT_ENV_VARS gains GITHUB_STEP_SUMMARY) — *source:* S1 author r1
 - Notion append = PATCH `{"type":"insert_content","insert_content":{"content":...}}`, no `url` in response → SENT with url=None; Confluence create returns 200; GitLab MR note has no link; §9.2(b) SMS count is 8 (Telesign is form-encoded) — *source:* S1 author r1
 - Never add an A001 header to `vidbyte/lib/http/transport.py` (predates this PR) — *source:* S1 author r1
+- r2 design deltas: Telegram replaces every `<` with fullwidth `＜` before the cap (INV-18, EC-43/44); NFR-7 deadline is honest (one request can take ~31.5 s; a cut during the write is ambiguous, EC-45); webhook `signing_key` must decode to 24–64 bytes (`WEBHOOK_KEY_MIN_BYTES`/`MAX`); exact regexes in §12.3 row 3; Q-6 (Telegram skip_entity_detection), Q-7 (write-budget check), Q-8 (sticky-marker author filter) all default No — *source:* S1 author r2
+- Lint is count-ratcheted: a plain `SDK-LINT: PASS` can hide new violations in rules with room. Check touched files with `python lint/run.py --rule <R> --all` for A002 (579/703), S061 (5/6), S001 (56/59), S017 (78/79), S025 (261/263), C011 (1/2), C012 (23/24). S054 is 3/3 (no room). S008 = Ruff C901/PLR0912/PLR0915 at 10/12/50; S024 max depth 3 — *source:* S1 reviewers r1+r2
+- `OutputHttp.post` calls `_error_code` (delivery.py:85) and `_link` (:90) directly; a shared `_write` must not add a second hop in the same class (Style 1) — move the readers to a second class (R-9) — *source:* S1 reviewer r2
+- Wire test asserts exact `json_body` equality (test_output_connectors_wire_contract.py:101); HubSpot `hs_timestamp` needs `unittest.mock.ANY`; Confluence `body.value` is a JSON string sensitive to key order — *source:* S1 reviewer r2
+- Teams cap test sends `OutputContent("Load test", "x"*7000)` (body does not open with its title): title-line stripping must be conditional (R-11) — *source:* S1 reviewer r2
+- Telegram Rich Markdown `![](https…)` posts media as the bot (R-10 → neutralize `![`); httpx 0.28.1 accepts port 99999 in a URL, only `urlsplit().port` raises (R-17) — *source:* S1 reviewer r2
+- r3 design deltas: `_error_code`/`_link` move unchanged into a new static `OutputResponses` class in `delivery.py` (in its `__all__`, NOT re-exported from `vidbyte.lib.outputs`); Telegram makes exactly two length-preserving `str.replace` calls before the 32,768 cap (`<` → U+FF1C, `[` after `!` → U+FF3B, `TELEGRAM_MEDIA_*` constants); Teams drops the first body line only when `first_line(body) == title`; `ADF_BREAK_PATTERN = r"[ \t]*[-*_][-*_ \t]*"` checked before bullets, a lone `-` stays a paragraph (EC-14); GitLab port pattern `[1-9][0-9]{0,4}` then `urlsplit` range check (no numeric literal, A007); webhook header errors name only the position, non-mapping `headers` only the type name; AC-10 uses `S3CRET` inputs — *source:* S1 author r3
+- Least-sure assumptions for live checks: A-1 (Slack webhook accepts `markdown` block; L-1 before ready), A-9 (GitHub auto-creates a missing label), A-13 (HubSpot v3 tasks without associations); L-2 decides the Telegram `<` rule — *source:* S1 author r3
+- `test_output_connectors_agent_wiring.py:62` and `dispatch.py:315` pass unchanged (one-line replies); env-var test iterates `HTTP_DESTINATION_KEYS`, missing-credential test iterates `ALL_DESTINATION_KEYS`; `vidbyte/lib/outputs/README.md:140-148` Deadline footgun needs `file_error` — *source:* S1 reviewer r2
 
 ### Carried from the first batch (docs/spec/agent-output-connectors/pipeline.md)
 - The credential sibling is `ProviderModelRegistry.resolve_api_key` (vidbyte/lib/registries/models.py:151-161); `ModelRegistry` does not exist — *source:* S0 scout
