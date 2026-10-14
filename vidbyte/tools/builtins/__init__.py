@@ -8,6 +8,7 @@ Purpose:
 Architecture:
     - Minimal subprocess bash tool from builtins.bash.
     - Code search tools from builtins.code_search.
+    - Codex host tools from builtins.codex.
     - Patch/edit tools from builtins.editing.
     - Context compaction tools from builtins.context.
     - MCP discovery tools from builtins.mcp.
@@ -28,6 +29,23 @@ from __future__ import annotations
 from vidbyte.tools.builtins.bash import BashTool
 from vidbyte.tools.builtins.code_execution import CodeExecutionTool
 from vidbyte.tools.builtins.code_search import GlobTool, GrepTool, SemanticSearchTool
+from vidbyte.tools.builtins.codex import (
+    CheckCodexReadyTool,
+    ContinueCodexThreadTool,
+    ForkCodexThreadTool,
+    GetCodexRateLimitsTool,
+    GetCodexTurnResultTool,
+    InterruptCodexTurnTool,
+    LaunchCodexSubagentsTool,
+    ListCodexModelsTool,
+    ListCodexThreadsTool,
+    ReadCodexThreadTool,
+    SpawnCodexThreadTool,
+    StartCodexReviewTool,
+    SteerCodexTurnTool,
+    TrackCodexThreadUsageTool,
+    WaitCodexTurnTool,
+)
 from vidbyte.tools.builtins.context import (
     CompactionMode,
     ContextCompactionTool,
@@ -198,6 +216,7 @@ __all__ = [
     "BrowserbaseSearchTool",
     "BurdenOfProofTool",
     "CausalChainTool",
+    "CheckCodexReadyTool",
     "CheckpointTool",
     "CircularityTool",
     "CodeExecutionTool",
@@ -219,6 +238,7 @@ __all__ = [
     "ContextStatsTool",
     "ContextUpsertTool",
     "ContextWindowFactory",
+    "ContinueCodexThreadTool",
     "CotEventParser",
     "CounterexampleTool",
     "CreateContextPrimitiveTool",
@@ -237,20 +257,27 @@ __all__ = [
     "FalsifyTool",
     "FermiEstimateTool",
     "FirecrawlFetchTool",
+    "ForkCodexThreadTool",
     "ForkConversationTool",
     "ForkTool",
+    "GetCodexRateLimitsTool",
+    "GetCodexTurnResultTool",
     "GlobTool",
     "GrepTool",
     "HypothesisTool",
     "IdentityTool",
     "InduceTool",
     "InstantiateTool",
+    "InterruptCodexTurnTool",
+    "LaunchCodexSubagentsTool",
     "LettaAddArchivalMemoryTool",
     "LettaDeleteArchivalMemoryTool",
     "LettaGetMemoryBlockTool",
     "LettaSearchArchivalMemoryTool",
     "LinkupFetchTool",
     "LinkupSearchTool",
+    "ListCodexModelsTool",
+    "ListCodexThreadsTool",
     "Mem0AddMemoryTool",
     "Mem0DeleteMemoryTool",
     "Mem0GetMemoriesTool",
@@ -283,6 +310,7 @@ __all__ = [
     "ProviderSelectRowsTool",
     "ProviderUpdateRowsTool",
     "QuantifierTool",
+    "ReadCodexThreadTool",
     "ReasoningTraceCatalog",
     "ReasoningTraceDefinition",
     "ReasoningTraceTool",
@@ -298,8 +326,11 @@ __all__ = [
     "SemanticSearchTool",
     "SessionTool",
     "SocraticTool",
+    "SpawnCodexThreadTool",
+    "StartCodexReviewTool",
     "StatisticalSyllogismTool",
     "SteelmanTool",
+    "SteerCodexTurnTool",
     "StrawmanTool",
     "SupermemoryAddMemoryTool",
     "SupermemoryDeleteMemoryTool",
@@ -308,9 +339,11 @@ __all__ = [
     "TavilySearchTool",
     "TestimonyTool",
     "ThoughtExperimentTool",
+    "TrackCodexThreadUsageTool",
     "TrajectoryCheckpointTool",
     "TransitivityTool",
     "UncertaintyTool",
+    "WaitCodexTurnTool",
     "ZepAddMemoryTool",
     "ZepDeleteSessionTool",
     "ZepGetMemoryTool",
