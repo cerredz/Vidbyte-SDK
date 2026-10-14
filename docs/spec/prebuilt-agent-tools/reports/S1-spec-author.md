@@ -147,3 +147,50 @@ The reviewer's verdict was SOUND WITH FIXES (3 Blocker, 6 Major, 3 Minor). I acc
 **Least sure in r2:**
 - The INV-20 cap equals the 1M text cap, so a CSV or XML near 1M characters can now fail with an error. I chose this for composability: such an output could not be passed to another tool anyway.
 - The 10^47 money ceiling for `compound_interest_future_value` is a consequence of the 50-digit precision, not a business limit.
+
+## Addendum — r3 (S1 round-2 review applied; status approved)
+
+This was the final revision, with no third review round. I accepted all ten round-2 findings (R-13 to R-22) and disputed none, so no new Q-n was needed. The one judgment call that goes to the owner is Q-6, which now states D-7 honestly. Spec commit: `3ee4bbfd`.
+
+**How each finding was closed:**
+- **R-13:** New §9.2 item 17 sets the rule for rounding a float into exact output. Convert with `Decimal(repr(x))`, scale exactly in `Decimal`, `quantize` once in the row's mode, and round the whole value before splitting it into parts. The rule covers these rows:
+  - `format_duration` rounds to milliseconds, so 59.9996 s is `1m`.
+  - `parse_duration_text` sums its parts exactly in `Decimal`. Its `iso8601` is `format_duration` of the resulting float.
+  - `decimal_degrees_to_dms` rounds the total arc-seconds, writes a fixed number of digits, and uses the sign rule for the hemisphere.
+  - `unix_timestamp_to_datetime` uses `timedelta(microseconds=...)`.
+  - I checked the three worked examples (0.012 s, 3.2″, 60.000 s) in Python.
+- **R-14:** §9.2 item 16 now pins the evaluation order of money math.
+  - Rational money steps are computed exactly in `Fraction`: period interest, the level payment, the net of tax, and shares.
+  - A `Fraction` becomes money by a written half-up formula. I checked the reviewer's 1740.00 at 6.1% case: it gives 8.85.
+  - Only `compound_interest_future_value` uses the 50-digit context, with the operation order written out.
+  - 10^47 is now described as an overflow guard, not a cents claim.
+- **R-15:** The IRR row now states the NPV formula, the skip rule, a single ordered scan, the bisection step, and that it returns the midpoint. `irr_percent` has its own 1e-9 absolute precision, which item 5 names. I kept the 600-flow cap. My probe: 600 flows solve in 0.015 s with 30 grid points skipped, and [-100, 100.01] gives 0.00999999998.
+- **R-16:**
+  - `ini_to_json`: `sections` never holds `DEFAULT`. I did not add "file order", because `_stringify_output` sorts keys.
+  - `format_number_with_separators`: the row now fixes the input form, leading zeros, the sign of zero, exact places (added to item 5's list), and the separator characters, which `parse_formatted_number` shares.
+  - `parse_data_size`: the item 15 number form, with an exact factor product.
+  - `profile_csv_columns`: among equal values, the first in row order.
+- **R-17 / R-6 (decided):** I kept dict outputs. D-7 is rewritten as a deliberate exception to the letter of AGENTS.md principle 4. It no longer claims a carve-out; the principle's only exemption is for small private helpers. NG-13, A-7, FR-5 ("internal" is documentation only), and §11 now match. Q-6 asks the owner, default no (keep dicts). Switching would cost about 265 single-use dataclasses, and an input dataclass would nest the model-facing schema.
+- **R-18:** INV-20 now opens with "These tools", and new EC-45 accepts bounded expansion of up to about 23×. INV-12 and NFR-10 no longer promise cross-OS byte identity for floats that come from the platform C math library; those agree within item 5.
+- **R-19:** I took option (b). §12.4 B covers parameters and the vocabularies a tool chooses from. Recognition tables and display-label tables stay reference tables (new `PREBUILT_SIZE_UNIT_LABELS`), so the count stays at 68 enums.
+  - Five constants are now named: `PREBUILT_APPROXIMATION_DIGITS`, `PREBUILT_MAX_REPORTED_NAMES`, `PREBUILT_PROFILE_EXAMPLES`, `PREBUILT_MAX_KEY_CHARS`, and `PREBUILT_MAX_MOJIBAKE_ROUNDS`.
+  - `fraction_to_decimal` cites `PREBUILT_MAX_DECIMAL_PLACES`.
+  - FR-8 lists the SMS and email limits as fixed by their standards.
+- **R-20:** §14 now says to run the pack after P3 and after each later change.
+- **R-21:** Row 40 and §12.4 E say to backtick only the folder's direct children inside `## File Index`.
+- **R-22:** Row 6 adds `paired_values` and `weight_total`. §12.4 C requires them in place of inline checks.
+
+**Counts in r3:** 265 tools in 31 categories (6 to 12 each), 68 enums, 101 classes, and 39 planned files plus 0 to 12 conditional split modules. FR 11, NFR 11, AC 21, INV 26, EC 45, D 18, T 6, W 38. 0 blocking questions.
+
+**Stage E self-check (r3):**
+- Traceability script: all IDs defined. The only flags are G-1 to G-4, which are defined in the §1 table; the script misses them.
+- Table pipes: 0 problems.
+- 18 `## §` headings.
+- Appendix: 265 rows in 31 tables, every category between 6 and 12.
+- Enum table: 68 rows.
+- No "carve-out" claim remains outside the §16 log.
+- spec.md is LF.
+
+**Least sure in r3:**
+- The 1e-9 IRR tolerance is a stated contract. A badly conditioned series (very flat NPV near the root) could still miss it, because NPV is evaluated in floats.
+- EC-45 accepts outputs up to about 23 million characters from a capped input. The runtime's result truncation is the only control on them.
