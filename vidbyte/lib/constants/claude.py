@@ -49,6 +49,9 @@ CLAUDE_MIN_EXCLUSIVE_AMOUNT = 0.0
 # How long a turn waits for Claude Code to answer an interrupt before
 # closing it.
 CLAUDE_INTERRUPT_GRACE_SECONDS = 30.0
+# How long a steered prompt waits before it is sent: one pass of the
+# event loop, so the steer's own interrupt reaches Claude Code first.
+CLAUDE_STEER_YIELD_SECONDS = 0
 # Sent when the developer's live-session cap refuses a new turn.
 CLAUDE_LIVE_CAP_NEXT_STEP = "Wait for a running session to finish, or interrupt one, then spawn again."
 # Sent when Claude Code fails to start, because a respawn would fail the
