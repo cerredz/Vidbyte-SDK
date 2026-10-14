@@ -106,14 +106,15 @@ class ClaudeHistory:
         parts: list[str] = []
         for block in blocks:
             kind = block.get("type", "")
-            if kind == "text":
-                parts.append(block.get("text", ""))
-            elif kind == "tool_use":
-                parts.append(f"[tool call: {block.get('name', '')}]")
-            elif kind == "tool_result":
-                parts.append("[tool result]")
-            else:
-                parts.append(f"[{kind}]")
+            match kind:
+                case "text":
+                    parts.append(block.get("text", ""))
+                case "tool_use":
+                    parts.append(f"[tool call: {block.get('name', '')}]")
+                case "tool_result":
+                    parts.append("[tool result]")
+                case _:
+                    parts.append(f"[{kind}]")
         return ClaudeSessionMessage(uuid=raw.uuid, session_id=raw.session_id, kind=ClaudeMessageKind(raw.type), text="\n".join(parts))
 
 
