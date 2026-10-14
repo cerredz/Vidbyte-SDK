@@ -19,7 +19,7 @@ started: 2026-10-13 00:45 UTC
 | S3 implement | done | 2026-10-13 15:45 UTC | 2026-10-13 21:05 UTC | reports/S3-implementer.md | S3_HEAD d9c5fea2; draft PR https://github.com/cerredz/Vidbyte-SDK/pull/1044 ([WIP] title); 36 commits; 31/31 §12.3 rows; budget 22/22 files, 69/69 classes, 1/1 optional dependency, 0 root exports; pack 165/165 with and without claude_agent_sdk (orchestrator re-run); source gate 4100 passed / 27 skipped; package stage PASS; SDK-LINT PASS; semgrep 0; public API unchanged; spec status: implemented |
 | S4 adversarial review | done | 2026-10-13 21:15 UTC | 2026-10-14 02:00 UTC | reports/S4-review-conformance.md, reports/S4-review-conventions.md, reports/S4-review-engineering.md, reports/S4-findings-verifier.md, review.md | MERGEABLE AFTER FIXES; confirmed 3 Blockers (R-1..R-3) / 4 Majors (R-4..R-7) / 14 Minors (R-8..R-21); refuted 2 (R-E1, R-V2 interrupt chain); downgraded 4; remote CI on d9c5fea2 green; spec status: reviewed |
 | S5 repair loop | done | 2026-10-14 02:15 UTC | 2026-10-14 03:45 UTC | reports/S5-repair-1.md, verify-log.md | converged in 1 iteration at 615fc54a: fixed R-1,R-2,R-3,R-5,R-6,R-7,R-10..R-14 (R-4,R-8,R-9,R-19 by spec r5 3c1f9e4c); 12 new tests (granted file); merge origin/main 8387d666 at 15124156; orchestrator full gate green (source 4178 passed / 27 skipped, package CI passed); remote CI 38502267522 + static 38502269091 green on 615fc54a |
-| S5 re-review | in progress | 2026-10-14 03:50 UTC | | reports/S5-rereview.md | |
+| S5 re-review | in progress (round 1 done; round 2 of 2 pending) | 2026-10-14 03:50 UTC | | reports/S5-rereview.md, reports/S5-findings-verifier-r1.md | round 1: MERGEABLE AFTER FIXES 0B/1M/2m; scoped verifier confirmed R-22 Major (steer taken one pass before the send; INV-18), R-23 Minor code (stale result fields after a steered prompt dies, D-3), R-24 Minor spec-change (EC-52 unknown values, CLAUDE_STEER_YIELD_SECONDS, deviation 14); refuted R-C1's aclose ordering and INV-11 citation |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
@@ -178,6 +178,22 @@ started: 2026-10-13 00:45 UTC
 - 2026-10-14 03:50 UTC — **Final conformance re-review (round 1 of 2) launched.**
   - FOCUS: the eleven fix commits dc9d1734..04e0254b, plus the R-7 test file.
   - The merge commit 15124156 brings in main's 41 commits, which are out of scope.
+
+- 2026-10-14 ~05:30 UTC — **Session restart.** The orchestrator's session ended while the scoped verifier and the codex repair agent were running. No completion notice came for the verifier, but its report has all seven sections and review.md has R-22..R-24 appended.
+- 2026-10-14 05:40 UTC — **Scoped-verifier spot-check passed.**
+  - The review.md diff deletes only the old verdict line and the two section-count headings. Rows R-1..R-21 are unchanged.
+  - R-22, R-23 and R-24 each carry a path:line, probe evidence, a fix and a fix-kind.
+  - `git status` had only review.md and the new report.
+  *Why:* the S4 spot-check rule, applied to the scoped round.
+- 2026-10-14 05:40 UTC — **Routing.**
+  - **To the spec author first, in Revision mode r6, for R-24:**
+    - (a) EC-52 and §12.3 row 12: skip an unknown `status` or `overage_status`;
+    - (b) §17 deviation 14: the yield sits once, before the take, and only while a steer is pending. This is R-22's fixed placement, written ahead of the code;
+    - (c) §12.3 row 14 lists `CLAUDE_STEER_YIELD_SECONDS`, and row 7 gets the pump's yield step.
+  - **To S5 repair iteration 2 after r6:** R-22 (code, plus regression tests P1 and P3 in the granted file) and R-23 (code, plus one test).
+  - **Then the final re-review, round 2 of 2,** which is the last one the cap allows.
+  *Why:* a spec edit lands before the code that follows it. The verifier's "write (b) after R-22 lands" was about wording; r6 states the target placement, so the order does not change the text.
+- 2026-10-14 05:40 UTC — **The test grant carries into iteration 2.** New tests still go only in `test_claude_host_review_gaps.py`, with README.md and FEATURE.md extended by addition only. The 165 original tests stay byte-identical.
 
 ## User replies (verbatim)
 - none yet
@@ -387,3 +403,5 @@ started: 2026-10-13 00:45 UTC
   - `message.permission_denials` triggers A002. Reuse the D-28 slug `only-the-prompts-own-result-ends-the-turn`.
   *source:* S5 repair 1.
 - **Scope the test-tree diff after the main merge.** The unscoped `git diff 9a8ecc3c..HEAD -- tests/` now includes main's own test changes. Scope it to `tests/features/claude_host`, or compare against origin/main. *source:* S5 repair 1.
+- **Reaching R-22's window in a test.** Call `steer_claude_session` directly, not through `asyncio.wait_for`, `self.raises` or `eventually`. Wrapped, the steer starts after the pump has read the result and the case cannot fail. For the aclose case, schedule `aclose` before `finish()`; `aclose` runs each session's `close()` through `asyncio.gather`, a new task. *source:* scoped verifier r1.
+- **R-22 then R-23, both in `_take_steer`.** Make `_take_steer` async and yield (`CLAUDE_STEER_YIELD_SECONDS`) while `self._steer is not None`, before the take. Then, inside `if steer is not None:` after `self._steered = self._steers`, reset the result fields with `replace()`: result_text, structured_output, num_turns, duration_ms, stop_reason, terminal_reason and permission_denials. Keep session_id, hooks_applied and total_cost_usd. The verifier ran this combined shape in memory: 177 passed, and lint shows no difference. *source:* scoped verifier r1.
