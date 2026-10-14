@@ -231,3 +231,21 @@ r4 pins the ten open items in the S2 report (S2-1 to S2-10), which the orchestra
 **Least-sure choices:**
 - **D-29 with a success result.** A turn that succeeded after a refusing window ends FAILED with `usage_limited`. An example is a `seven_day_opus` window while the turn ran on Sonnet. The alternative would add a condition to row 5.
 - **D-32's code.** `session_not_found` reads oddly for a failed list. The reason names the operation and the exception class, and the next step names the real fix.
+
+## Addendum: r5 (2026-10-14)
+
+r5 applies five S4 findings from the verified `review.md`. It changes the spec only. The status stays `reviewed`, which the orchestrator set.
+
+| Finding | Change |
+|---|---|
+| R-6 | D-29 now leaves out the per-model types, `ClaudeRateLimitType.SEVEN_DAY_OPUS` and `SEVEN_DAY_SONNET`. Such a window is recorded and returned by `get_claude_rate_limits`, but it never refuses a spawn and never sets `rate_limit_rejected`. A request that its model's limit refuses still fails through row 5's assistant error `rate_limit`. D-8, EC-7, EC-8, row 5, AC-16's Then text and T-1 now say the same. No field, option, control or constant is added; the check compares the window type with two existing enum members. Matching the window to the request's model is optional Q-12, default no. |
+| R-4 | New §17 deviation 12: the pump chain `run` → `_read` → `_on_<kind>` stays. S024 rejects the folded shape, and §8.4's budget rejects a reader class. There is no entry for the interrupt chain, because row 7 prescribes it. |
+| R-8 | Deviation 1 now says which strings stay in the harness: SDK field keys at their read sites, private vocabulary and operation names, and the probe's `"get_server_info"`. The move to constants is follow-up R-15, not done. |
+| R-9 | New deviation 13. Row 25's anchors are not adjacent on `main`, and the class sits directly after `AggregateExecutionError`. The shared lines do not move. |
+| R-19 | T-2 now states that a continue started from a tool with the default `cwd` runs Claude Code in the session's own recorded folder. The refusal is optional Q-13, default no. |
+
+**Checks.**
+- `grep -n "seven_day_opus\|seven_day_sonnet\|SEVEN_DAY_OPUS\|SEVEN_DAY_SONNET" tests/features/claude_host/*.py` finds only the enum contract row in `test_claude_host_contract.py:192`. Every other rate-limit case in the pack uses `five_hour`, `seven_day`, `seven_day_overage_included` or an unknown type, so no frozen test pins the old per-model behaviour, and there are no open items.
+- R-E1 is not reopened. An account-wide refusing window still fails a turn whose own result is a success.
+- The self-check passes: 18 sections, contiguous IDs (Q-1 to Q-13, D-1 to D-33, EC-1 to EC-61), consistent tables, no `<br>`, and the same file-path count outside §11–§13 as at `8ffcd5e1`.
+- No §12.3 row and no shared-file contract line changed.
