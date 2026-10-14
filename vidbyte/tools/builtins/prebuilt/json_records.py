@@ -91,7 +91,7 @@ class JsonRecordsToolFunctions:
         value: Annotated[str, Field(description="The value to compare each field with, given as text. For a number field it must be numeric text, and for a boolean field it must be true or false, or the record does not match. For text, arrays, and objects it is compared as written. The default is the empty string.", max_length=PREBUILT_MAX_SHORT_TEXT_CHARS)] = "",
     ) -> PrebuiltToolOutput:
         """Keep the records whose field satisfies a comparison with a value, in their original order, and report how many matched. Use it to select records by an exact value, a numeric range, a text prefix or suffix, a substring, or whether a field is empty. The value is read as the type of each record's field: numeric text for number fields, true or false for boolean fields, and text otherwise, while contains on an array field tests membership. A missing or null field matches only is_empty, and a records_json that is not a JSON array of objects fails with an error."""
-        records = PrebuiltToolSupport.parse_records_json(records_json, "records_json")
+        records = PrebuiltToolSupport.records_from_json(PrebuiltToolSupport.parse_json_text(records_json, "records_json"), "records_json")
         number = PrebuiltToolSupport.parse_numeric_text(value)
         kept = [record for record in records if JsonRecordsToolFunctions._field_matches(record.get(field), operator, value, number)]
         return {"records": kept, "matched": len(kept)}
@@ -102,7 +102,7 @@ class JsonRecordsToolFunctions:
         field: Annotated[str, Field(description=_FIELD_PARAMETER_DESCRIPTION, min_length=1, max_length=PREBUILT_MAX_NAME_CHARS)],
     ) -> PrebuiltToolOutput:
         """Extract one field from every record into a list, in record order, with null in place of each missing field. Use it to get a single column of values out of a record set before counting, summing, or comparing them. A present null and a missing field both appear as null, but only missing fields are counted in missing. A records_json that is not a JSON array of objects fails with an error naming records_json."""
-        records = PrebuiltToolSupport.parse_records_json(records_json, "records_json")
+        records = PrebuiltToolSupport.records_from_json(PrebuiltToolSupport.parse_json_text(records_json, "records_json"), "records_json")
         return {"values": [record.get(field) for record in records], "missing": sum(1 for record in records if field not in record)}
 
     @staticmethod
@@ -111,7 +111,7 @@ class JsonRecordsToolFunctions:
         field: Annotated[str, Field(description=_FIELD_PARAMETER_DESCRIPTION, min_length=1, max_length=PREBUILT_MAX_NAME_CHARS)],
     ) -> PrebuiltToolOutput:
         """Group records by the value of one field and return each group's key, size, and records, in order of first appearance. Use it to split a record set into categories before summarizing or comparing them. Keys compare type-aware, so a number and a string never share a group while an integer and a float of the same value do, and objects and arrays compare by their compact JSON text. Records that lack the field share the null group with records whose field is null, and invalid records fail naming records_json."""
-        records = PrebuiltToolSupport.parse_records_json(records_json, "records_json")
+        records = PrebuiltToolSupport.records_from_json(PrebuiltToolSupport.parse_json_text(records_json, "records_json"), "records_json")
         # Each group keeps the first key value seen and its records.
         groups: dict[tuple[JsonType, object], tuple[object, list[dict[str, object]]]] = {}
         for record in records:
@@ -126,7 +126,7 @@ class JsonRecordsToolFunctions:
         function: Annotated[AggregateFunction, Field(description=_FUNCTION_PARAMETER_DESCRIPTION)],
     ) -> PrebuiltToolOutput:
         """Compute the count, sum, mean, minimum, maximum, median, or distinct count of one field across records, with how many values were used and skipped. Use it for totals and averages over a record set instead of adding numbers by reading them. Count and distinct_count use every present non-null value and return integers, while the numeric functions use JSON numbers only and skip strings, booleans, and other values. With no usable values the result is null, and a sum that is not finite fails naming field."""
-        records = PrebuiltToolSupport.parse_records_json(records_json, "records_json")
+        records = PrebuiltToolSupport.records_from_json(PrebuiltToolSupport.parse_json_text(records_json, "records_json"), "records_json")
         # Missing fields and null values take no part in any aggregate.
         values = [record[field] for record in records if record.get(field) is not None]
         keys = [JsonRecordsToolFunctions._group_key(value) for value in values]
@@ -141,7 +141,7 @@ class JsonRecordsToolFunctions:
         function: Annotated[AggregateFunction, Field(description=_FUNCTION_PARAMETER_DESCRIPTION)],
     ) -> PrebuiltToolOutput:
         """Group records by one field and compute an aggregate of another field within each group, in order of first appearance. Use it for per-category totals, averages, or counts, the way a grouped database query would. Grouping follows group_records_by_field, so missing and null keys share the null group, and each aggregate follows aggregate_field. A group with no usable values gets a null result, and a sum that is not finite fails naming value_field."""
-        records = PrebuiltToolSupport.parse_records_json(records_json, "records_json")
+        records = PrebuiltToolSupport.records_from_json(PrebuiltToolSupport.parse_json_text(records_json, "records_json"), "records_json")
         # Collect each group's present non-null values, keeping the
         # first key value seen for the group.
         groups: dict[tuple[JsonType, object], tuple[object, list[object]]] = {}
@@ -166,7 +166,7 @@ class JsonRecordsToolFunctions:
         descending: Annotated[bool, Field(description="Whether to sort from the highest value to the lowest. When true, the type order is reversed as well, so objects and arrays come first and numbers last. Records whose field is missing or null stay at the end either way. The default is false.")] = False,
     ) -> PrebuiltToolOutput:
         """Sort records by one field with a fixed order across mixed types, keeping records with equal values in their original order. Use it to rank or order a record set when the field may hold numbers, text, or other JSON values. Numbers come first, then strings by code point, then booleans with false before true, then objects and arrays by compact JSON text, and missing or null fields always come last. Descending order reverses everything except the missing and null records, and invalid records fail naming records_json."""
-        records = PrebuiltToolSupport.parse_records_json(records_json, "records_json")
+        records = PrebuiltToolSupport.records_from_json(PrebuiltToolSupport.parse_json_text(records_json, "records_json"), "records_json")
         # Sort the records that have a value with a stable sort, then
         # put the missing and null ones after them in input order.
         present = [record for record in records if record.get(field) is not None]
@@ -180,7 +180,7 @@ class JsonRecordsToolFunctions:
         top: Annotated[int, Field(description="How many of the most frequent values to list. Values are ranked by count, highest first, and ties keep the order in which the values first appear. The total and distinct counts in the result still cover every value. The value must be between 1 and 1,000.", ge=1, le=PREBUILT_MAX_TOP_ITEMS)] = 100,
     ) -> PrebuiltToolOutput:
         """Count how often each value of one field occurs across records, listing the most frequent values first. Use it to find the distribution of a category field or to spot duplicate values. Values compare type-aware, a missing field counts as null, ties keep the order of first appearance, and the totals cover every value even when the list is shortened. Only the top entries are listed, and invalid records fail naming records_json."""
-        records = PrebuiltToolSupport.parse_records_json(records_json, "records_json")
+        records = PrebuiltToolSupport.records_from_json(PrebuiltToolSupport.parse_json_text(records_json, "records_json"), "records_json")
         # Tally each type-aware value, keeping the first spelling seen.
         tallies: dict[tuple[JsonType, object], tuple[object, int]] = {}
         for record in records:
@@ -202,8 +202,8 @@ class JsonRecordsToolFunctions:
         kind: Annotated[JoinKind, Field(description="Whether to keep only matched records or every left record. An inner join returns one merged record for each matching pair. A left join also returns each unmatched left record unchanged. The default is inner.")] = JoinKind.INNER,
     ) -> PrebuiltToolOutput:
         """Join two record lists on matching field values, as an inner join or a left join, returning merged records in left order and then right order. Use it to combine related data, such as attaching the details in one list to the matching entries of another. Keys compare type-aware, missing and null keys never match, and a right key that the left record already has is stored as right_ followed by the key name. At most 10,000 joined records are returned while count covers every one, and records that are not JSON arrays of objects fail naming their parameter."""
-        left = PrebuiltToolSupport.parse_records_json(left_json, "left_json")
-        right = PrebuiltToolSupport.parse_records_json(right_json, "right_json")
+        left = PrebuiltToolSupport.records_from_json(PrebuiltToolSupport.parse_json_text(left_json, "left_json"), "left_json")
+        right = PrebuiltToolSupport.records_from_json(PrebuiltToolSupport.parse_json_text(right_json, "right_json"), "right_json")
 
         # Index the right records by type-aware key, in their order;
         # missing and null keys never match.
@@ -229,7 +229,7 @@ class JsonRecordsToolFunctions:
         delimiter: Annotated[CsvDelimiter, Field(description="The character that separates cells in the output: comma, semicolon, tab, or pipe. Cells holding the delimiter, a quote, or a line feed are quoted. Lines end with a single line feed. The default is comma.")] = CsvDelimiter.COMMA,
     ) -> PrebuiltToolOutput:
         """Write a list of records as CSV text with a header row, using the chosen columns or every field in order of first appearance. Use it to turn JSON records into a spreadsheet-ready table or a file another program reads as CSV. Strings are written as they are, numbers as JSON, booleans as true or false, missing and null values as empty cells, and objects and arrays as compact JSON, with quoting only where needed. More than 500 columns, or CSV text longer than one million characters, fails naming records_json."""
-        records = PrebuiltToolSupport.parse_records_json(records_json, "records_json")
+        records = PrebuiltToolSupport.records_from_json(PrebuiltToolSupport.parse_json_text(records_json, "records_json"), "records_json")
 
         # Use the chosen columns, or every key in order of first
         # appearance, refusing more columns than the table cap.
