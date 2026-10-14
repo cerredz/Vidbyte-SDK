@@ -56,7 +56,13 @@ class _DuplicateKeySafeLoader(yaml.SafeLoader):
         self._own_pair_counts: dict[yaml.nodes.MappingNode, int] = {}
 
     def flatten_mapping(self, node: yaml.nodes.MappingNode) -> None:
-        # Records how many pairs the mapping wrote itself before its merge keys are flattened away.
+        # Rejects a second merge key, then records how many pairs the mapping wrote itself before its merge keys are flattened away.
+        if node not in self._own_pair_counts:
+            # @intent one-merge-key-per-mapping
+            # `<<` is a mapping key too, so a second one would let a later merge silently override an earlier one (the list form `<<: [*a, *b]` is the way to merge several).
+            merge_keys = [key_node for key_node, _ in node.value if key_node.tag == "tag:yaml.org,2002:merge"]
+            if len(merge_keys) > 1:
+                raise yaml.constructor.ConstructorError(None, None, "Duplicate key '<<' is not allowed", merge_keys[1].start_mark)
         self._own_pair_counts.setdefault(node, sum(1 for key_node, _ in node.value if key_node.tag != "tag:yaml.org,2002:merge"))
         super().flatten_mapping(node)
 

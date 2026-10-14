@@ -91,6 +91,18 @@ class LibConfigLoaderMergeKeyTests(unittest.TestCase):
         with self.assertRaisesRegex(yaml.constructor.ConstructorError, "Duplicate key 'y' is not allowed"):
             yaml.load("a: &a {x: 1, y: 2}\nb: {<<: *a, y: 1, y: 2}\n", Loader=_DuplicateKeySafeLoader)
 
+    def test_two_merge_keys_in_one_mapping_are_rejected(self) -> None:
+        # Verify a second `<<` in one mapping is rejected instead of letting the later merge hide the earlier one.
+        # @intent one-merge-key-per-mapping
+        documents = (
+            "a: &a {x: 1}\nb: &b {x: 2}\nc: {<<: *a, <<: *b}\n",
+            "a: &a {x: 1}\nb: &b {x: 2}\nc:\n  <<: *a\n  <<: *b\n",
+        )
+        for text in documents:
+            with self.subTest(text=text):
+                with self.assertRaisesRegex(yaml.constructor.ConstructorError, "Duplicate key '<<' is not allowed"):
+                    yaml.load(text, Loader=_DuplicateKeySafeLoader)
+
 
 class LibConfigLoaderReadErrorTests(unittest.TestCase):
     def test_non_utf8_file_is_a_configuration_error_with_path(self) -> None:
