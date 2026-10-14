@@ -179,9 +179,11 @@ class CodexLiveTurn:
     async def send_stop(self, connection: CodexConnection, operation: CodexHostOperation, *, quiet: bool = False) -> None:
         # @intent a-stop-turns-others-away-only-while-in-flight
         # Send the interrupt the caller marked pending, and clear the
-        # mark when the request ends, failed or not. A stop in flight
-        # turns a second interrupt away, but a failed one blocks
-        # nothing, so the caller can still stop the turn (AC-16).
+        # mark when this await ends: answered, failed, timed out or
+        # cancelled. A timed-out or cancelled await can leave the
+        # request on a worker (EC-70), so a retry may send a second
+        # interrupt. A stop in flight turns a second interrupt away,
+        # but a failed one blocks nothing (AC-16).
         try:
             await connection.interrupt(operation, self.handle, self.state, quiet=quiet)
         finally:

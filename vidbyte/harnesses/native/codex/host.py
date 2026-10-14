@@ -398,10 +398,12 @@ class CodexHost:
         return handle
 
     async def interrupt_codex_turn(self, handle: CodexTurnHandle) -> None:
+        # @intent the-caller-can-always-retry-a-failed-stop
         # Stop a running turn with one interrupt and no stop reason
         # (AC-16). A finished turn gets nothing (EC-25), and so does a
-        # turn whose earlier stop is still in flight. A stop that
-        # already failed blocks nothing, so the caller can retry.
+        # turn whose earlier stop is still being awaited. A stop whose
+        # await failed, timed out or was cancelled blocks nothing, so
+        # the caller can retry.
         operation = CodexHostOperation.INTERRUPT_CODEX_TURN
         self._guard(operation, talks=True)
         turn = self._owned(operation, handle)
