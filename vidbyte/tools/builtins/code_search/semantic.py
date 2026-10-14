@@ -14,8 +14,10 @@ Relations:
 
 from __future__ import annotations
 
+import asyncio
 import math
 import re
+import threading
 from collections.abc import Sequence
 from typing import Protocol
 
@@ -48,6 +50,7 @@ class SemanticSearchTool(BaseCodeSearchTool):
         self.chunk_lines = max(10, chunk_lines)
         self.overlap_lines = max(0, min(overlap_lines, self.chunk_lines - 1))
         self._chunks: tuple[_CodeChunk, ...] = ()
+        self._index_lock = threading.Lock()
 
     def spec(self) -> ToolSpec:
         """Return the model-facing semantic search declaration."""
@@ -72,13 +75,15 @@ class SemanticSearchTool(BaseCodeSearchTool):
         max_chars = max(200, min(int(self._optional_argument(call, "max_chars_per_result", default=1200)), 5000))
         total_max_chars = max(500, min(int(self._optional_argument(call, "max_chars", default=12000)), 50000))
         try:
-            self.rebuild_index(subdir=subdir)
+            # @intent semantic-search-runs-off-the-event-loop
+            # Embedding providers are synchronous (EmbeddingModelRunner sends through urllib), so index and rank in a
+            # worker thread like a sync @tool: the loop keeps serving other tasks and tool_timeout_seconds can fire.
+            ranked, indexed = await asyncio.to_thread(self._index_and_rank, query, subdir)
         except ValueError as exc:
             return ToolResult.error(self.name, str(exc), metadata={"error": "unsafe_path"})
-        if not self._chunks:
+        if not indexed:
             return ToolResult.success(self.name, "No indexable code chunks found.", metadata={"count": 0})
 
-        ranked = self._rank(query)
         blocks: list[str] = []
         for score, chunk in ranked[:max_results]:
             text = chunk.text[:max_chars]
@@ -95,7 +100,7 @@ class SemanticSearchTool(BaseCodeSearchTool):
         return ToolResult.success(
             self.name,
             output,
-            metadata={"count": len(blocks), "indexed_chunks": len(self._chunks), "truncated": truncated},
+            metadata={"count": len(blocks), "indexed_chunks": indexed, "truncated": truncated},
         )
 
     def rebuild_index(self, *, subdir: str = ".") -> None:
@@ -132,6 +137,14 @@ class SemanticSearchTool(BaseCodeSearchTool):
                 for chunk, vector in zip(chunks, vectors, strict=True)
             ]
         self._chunks = tuple(chunks)
+
+    def _index_and_rank(self, query: str, subdir: str) -> tuple[list[tuple[float, _CodeChunk]], int]:
+        """Rebuild the index and rank it as one step, so a concurrent search never ranks another call's index."""
+        with self._index_lock:
+            self.rebuild_index(subdir=subdir)
+            if not self._chunks:
+                return [], 0
+            return self._rank(query), len(self._chunks)
 
     def _rank(self, query: str) -> list[tuple[float, _CodeChunk]]:
         """Rank chunks using embeddings when present, otherwise token overlap."""
