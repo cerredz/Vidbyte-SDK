@@ -448,3 +448,101 @@ The pack collects 4,352 tests: the 4,310 earlier tests, plus 23 hostile cases an
   - The `def run(self)` reading and the `has_header` `ANY` reading are both unchanged.
   - Flat-list `minItems` is still not compared.
   - `pipeline.md` was not touched.
+
+## Addendum: re-review round 1 regression cases (spec r7)
+
+**Task.** The orchestrator asked for failing regression cases for the post-repair re-review findings R-15, R-16, and R-17 (`review.md`, "Post-repair re-review round 1"). The cases were encoded from spec r7 (`70df9458`, with D-19 and EC-51) and proved red against HEAD `7fa8dd9c`, whose code last changed at `c8eefe53`. No production file was edited, and no test-pinned change was granted this round. The tests are in commit `225ab221`; this addendum is a separate commit.
+
+### What was added (45 cases)
+
+- **R-15 and R-17, cap-sized.** 9 `toml_to_json` cases in `test_prebuilt_hostile_inputs.py`, run under the existing 30 s child watchdog. Each asserts the exact r7 value, or error(`toml_text`) with the message that tells the two errors apart.
+  - R-15: escaped quotes in a comment; an open basic string of escaped quotes; runs of `"""` and of `'''` openers.
+  - R-17: the three bypass shapes; a dotted run of 499,991 segments inside a comment, and the same run inside a multi-line basic string.
+- **R-15 and R-17, small.** 8 cases in the A.20 tables of `test_prebuilt_rows_formats_encoding.py`:
+  - the run merge (R-15 c);
+  - the small odd-quote shape (R-17 d);
+  - 101 segments inside a comment, and inside a basic and a literal multi-line string (e, f);
+  - a `#` inside a string (h);
+  - an open quoted segment as the 101st and as the 100th segment (i).
+- **R-16.** 9 `parse_data_size` inputs (`FAR_EXPONENT_ZERO_SIZES` and `FAR_EXPONENT_REFUSED_SIZES`) as A.27 row cases in `test_prebuilt_rows_geometry_bits_markdown.py`. The hostile file runs the same 9 inputs again under `Context(traps=[])` and under the R-12 `HOSTILE_HOST_CONTEXT`, which makes 18 cases. A parametrized fixture, `host_decimal_context`, sets the context in the test thread and restores the caller's context in `finally`.
+- **A.29 consistency.** `extract_numbers("0e5000")` gives one entry with value `"0"`. Its reasoning is under "Readings".
+- **Docs.** FEATURE.md (revision 7, failure modes 17 and 18, the suite map) and README.md (the file index and the log) were updated. test-plan.md gains:
+  - 4 coverage rows and 1 not-written row;
+  - the sections "Post-re-review round 1 regression cases (spec r7)" and "Red run (post-re-review round 1)";
+  - two implementer notes.
+
+### How the expectations were checked
+
+Each value was read from the r7 rows: A.20, A.27, A.29, EC-51, D-19, and §9.2 item 18. Then:
+- **Against HEAD.** A scratch probe (`scratchpad/s6/probe_s6.py`) ran every input against HEAD, with a 40 s child limit for the cap-sized ones.
+- **With the verifier's prototypes.** `s5v_toml_lexer.py` and `s5v_data_size_patch.py` were loaded only in memory; neither was copied into the worktree.
+  - Every cap-sized TOML input matched its expectation in at most 0.15 s.
+  - With both prototypes loaded as pytest plugins, 35 of the 36 new in-process cases pass. The exception is the A.29 case, which no prototype covers.
+
+### Readings
+
+- **The nesting message's words.** A.20 fixes the invalid-TOML message ("the text is not valid TOML 1.0", EC-31). For a long run it says only "the nesting message". R-15 c and R-17 i must tell the two apart, so the cases look for `TOML_NESTING_MESSAGE = "the TOML is nested deeper than 100 levels"`, which is the orchestrator's NEST and the S1 r7 table's wording.
+- **A.29 `0e5000`: encoded.** I judged the row unambiguous:
+  - The row reads "A number in scientific notation is expanded exactly. A run of more than 4,000 digits is skipped."
+  - Item 18 (r7) says the row "gives the result for a farther exponent without building one".
+  - Zero expanded exactly is the one digit `"0"` (§9.2 rule 5).
+  - Neither the written text nor the expansion has a run of more than 4,000 digits.
+  - HEAD lists `0e4002` as `"0"` but drops `0e5000`.
+- **R-15 c depends on the Python version.** It is red only on Python 3.11.0, whose `re` merges the two runs across the open quote. On 3.13, HEAD already gives the invalid-TOML message.
+
+### Green guards (12)
+
+These cases pass today on purpose; each pins an r7 result that the fix must keep:
+- R-15: `r15-multi-line-basic-openers` and `r15-multi-line-literal-openers`.
+- R-17:
+  - `r17-key-after-literal-string`, which R-15's constant alone, without R-17's fix, would let through;
+  - `r17-dotted-run-in-multi-line-string`;
+  - the six row cases `key-after-odd-quote-multi-line-string`, `long-run-in-multi-line-basic-string`, `long-run-in-multi-line-literal-string`, `hash-inside-string-hides-no-key`, `open-quote-is-the-101st-segment`, and `open-quote-is-the-100th-segment`.
+- R-16: the `host-traps-nothing` refusals `r16-huge-positive` and `r16-huge-negative`. With no traps, HEAD's float check already refuses them.
+
+### Proof
+
+```
+PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider -o faulthandler_timeout=120 tests/features/prebuilt_tools        (at 7fa8dd9c plus the uncommitted test changes)
+FAILED tests/features/prebuilt_tools/test_prebuilt_rows_geometry_bits_markdown.py::test_geometry_bits_markdown_rows_reject_bad_input[parse_data_size-far-exponent-huge-negative]
+FAILED tests/features/prebuilt_tools/test_prebuilt_rows_geometry_bits_markdown.py::test_geometry_bits_markdown_rows_reject_bad_input[parse_data_size-far-exponent-tiny-negative-is-negative]
+33 failed, 4364 passed in 161.72s (0:02:41)
+
+PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider tests/test_tools_catalog.py tests/test_function_tool_parameter_types.py tests/test_tool_core.py tests/features/coding_agent
+........................................................................ [ 82%]
+..............................................................           [100%]
+338 passed, 12 skipped in 15.77s
+
+PYTHONPATH=$(pwd) python lint/run.py        (test files and test-plan.md staged)
+S063 RATCHETED: 4 known finding(s). Inspect with: python lint/run.py --rule S063 --all
+
+S064 RATCHETED: 4 known finding(s). Inspect with: python lint/run.py --rule S064 --all
+
+SDK-LINT: PASS
+```
+
+The pack collected 4,397 tests, and lint exited 0. A001 stays at its baseline of 643, and `--rule A001 --all` lists no file in the pack. The run went one pytest at a time and did not stall, so no rerun was needed.
+
+**Failing ids by finding.** All 33 were read in the run output, and each fails for the reason given here. 4 hit the watchdog; the other 29 returned a result other than r7's.
+- **R-15 (3):**
+  - hostile `r15-escaped-quotes-in-comment` and `r15-open-string-of-escaped-quotes` (watchdog);
+  - formats `open-quote-run-of-61-segments` (the nesting message instead of the invalid-TOML one).
+- **R-17 (4):**
+  - hostile `r17-key-after-literal-string-and-quote` and `r17-key-after-basic-string-and-quote` (watchdog);
+  - hostile `r17-dotted-run-in-comment` and formats `long-run-in-comment-is-parsed` (refused with the nesting message instead of parsed, D-19).
+- **R-16 (25):**
+  - the 9 geometry `parse_data_size-far-exponent-*` cases (`InvalidOperation`);
+  - hostile `host-traps-nothing`: all 6 zero cases and `r16-tiny-negative-is-negative` (`ValueError`, "cannot convert NaN to integer ratio");
+  - hostile `host-hostile`: all 9 cases (`InvalidOperation`).
+- **A.29 consistency (1):** extraction `extract_numbers-zero-with-far-exponent-is-zero` (count 0).
+
+### Residuals
+
+- `TOML_NESTING_MESSAGE` binds 5 cases to the wording "the TOML is nested deeper than 100 levels", which the A.20 row does not spell out. If the repair rewords the message, the constant must change with it.
+- R-15 c fails on HEAD only under Python 3.11.0's `re`. On a newer interpreter it passes at HEAD, but it still pins the r7 result.
+- The A.29 case is outside the three findings. No prototype fixes it, so the repair must change `extract_numbers` too.
+- Unchanged from earlier rounds:
+  - The count tests still have no watchdog.
+  - `def run(self)` and `has_header` `ANY` are still open readings.
+  - Flat-list `minItems` is still not compared.
+  - `pipeline.md` was not touched.
