@@ -321,10 +321,13 @@ class CodexConnection:
     async def close(self) -> None:
         # INV-7 steps 5 and 6: wait for the close thread at most the close
         # bound, then shut the executor down without waiting, dropping
-        # anything still queued, so no worker outlives the host.
-        with suppress(TimeoutError):
-            await asyncio.wait_for(asyncio.shield(self.reap()), CODEX_HOST_CLOSE_WAIT_SECONDS)
-        self._executor.shutdown(wait=False, cancel_futures=True)
+        # anything still queued, so no worker outlives the host, even when
+        # the wait is cancelled.
+        try:
+            with suppress(TimeoutError):
+                await asyncio.wait_for(asyncio.shield(self.reap()), CODEX_HOST_CLOSE_WAIT_SECONDS)
+        finally:
+            self._executor.shutdown(wait=False, cancel_futures=True)
 
 
 __all__ = ["CodexConnection", "CodexServerRequestRouter"]

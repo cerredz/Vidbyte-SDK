@@ -120,5 +120,23 @@ class CodexHostLaunchCancellationTests(HostTestCase):
         self.assert_problem(snapshot, "interrupted", None)
 
 
+@requires_sdk
+class CodexHostCloseCancellationTests(HostTestCase):
+    """R-7, INV-7 and NFR-9: a close cancelled while it interrupts still closes the client."""
+
+    async def test_a_close_cancelled_during_its_interrupts_still_closes_the_client(self) -> None:
+        host = await self.open_host()
+        await self.spawn(host)
+        held = self.server.hold("turn/interrupt")
+        closing = asyncio.ensure_future(host.__aexit__(None, None, None))
+        await asyncio.to_thread(held.wait_arrived)
+        closing.cancel()
+        held.release()
+        with self.assertRaises(asyncio.CancelledError):
+            await asyncio.wait_for(closing, WAIT_SECONDS)
+        # The client still closes once, so no app-server process outlives the host.
+        await self.wait_until(lambda: self.server.closed == 1, "the client to close")
+
+
 if __name__ == "__main__":
     unittest.main()

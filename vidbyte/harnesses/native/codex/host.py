@@ -181,21 +181,24 @@ class CodexHost:
         # Cancel the running tool calls, then end every running turn as
         # exited, so nobody waits on a turn that can no longer report.
         ended = self._end_running_turns()
-        # Unless the process already died, send each of those turns one
-        # interrupt, all at once, each bounded by the close bound.
-        if ended and not connection.is_dead():
-            stops = [
-                asyncio.ensure_future(connection.interrupt(CodexHostOperation.INTERRUPT_CODEX_TURN, turn.handle, turn.state, cleanup=True, quiet=True))
-                for turn in ended
-            ]
-            done, _ = await asyncio.wait(stops)
-            for stop in done:
-                stop.result()
-        # Close each goal run's stream in openai-codex's order, then close
-        # the client on its own thread and shut the executor down.
-        for turn in ended:
-            turn.close_goal_stream(connection.client)
-        await connection.close()
+        try:
+            # Unless the process already died, send each of those turns one
+            # interrupt, all at once, each bounded by the close bound.
+            if ended and not connection.is_dead():
+                stops = [
+                    asyncio.ensure_future(connection.interrupt(CodexHostOperation.INTERRUPT_CODEX_TURN, turn.handle, turn.state, cleanup=True, quiet=True))
+                    for turn in ended
+                ]
+                done, _ = await asyncio.wait(stops)
+                for stop in done:
+                    stop.result()
+        finally:
+            # Close each goal run's stream in openai-codex's order, then
+            # close the client on its own thread and shut the executor
+            # down, even when this close was cancelled, so no process leaks.
+            for turn in ended:
+                turn.close_goal_stream(connection.client)
+            await connection.close()
 
     async def check_codex_ready(self) -> CodexReadiness:
         # Read the account and, on Windows, the sandbox readiness; every
