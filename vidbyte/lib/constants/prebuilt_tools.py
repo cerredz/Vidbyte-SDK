@@ -160,8 +160,9 @@ PREBUILT_DIACRITIC_FALLBACKS: MappingProxyType[str, str] = MappingProxyType(
     }
 )
 
-# English number words: ONES is indexed by value (0 to 19), TENS by the
-# tens digit (2 to 9), and SCALES by the power of one thousand (1 to 11).
+# English number words: ONES is indexed by value (0 to 19), TENS by
+# the tens digit (2 to 9), and SCALES by the power of one thousand
+# (1 to 11).
 PREBUILT_NUMBER_WORDS_ONES = (
     "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
     "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen",
