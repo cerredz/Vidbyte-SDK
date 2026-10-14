@@ -44,3 +44,28 @@ Gate set (from context/code-map.md §1.3). Every gate runs locally except where 
 CI covered `8d8ba811`, which holds every code fix. The verify-log/report commit that follows is docs-only and was not dispatched.
 
 **Still open:** none from this iteration's list. R-3, R-4, and R-7 are deferred as follow-ups (orchestrator decision; R-3 → Q-9, R-7 → Q-10, both default No).
+
+## Iteration 2 — 2026-10-14 — agent report: reports/S5-repair-2.md
+**Defects in:** R-RR1, R-RR2, R-RR3, all Minor and docs-only, from the final re-review (reports/S5-rereview.md, verdict SOUND). No failing gate: every gate was green at `8d8ba811`, and no code changed after it.
+
+**Hypotheses and attempts:**
+- **R-RR1.** Fix: one "Links in this section retrieved 2026-10-14." line at the end of the Footguns list, in the R-9 style (47696121). One line covers the four links at :242, :244, :248, and :280. In the same commit I rewrapped the 94-column line R-13 left in step 3 of How To Add A Destination, without changing its words. A `grep` over `tests/` found no assertion on either phrase. Pack `664 passed`. The README is 32,180 characters. First try; no false starts.
+- **R-RR2.** Added two §17 bullets: `OutputHttp.basic_authorization` (efb2c26b, R-8) and the approved `vidbyte/agents/README.md` edit (bde205cd, R-11). The bullet list opens with "none changes a public name or a tested behavior", so the first bullet says the helper adds a name and changes none, and that the contract is unaffected (`OutputHttp` is not a root export).
+- **R-RR3.** Added one §17 bullet with the count from `wc -l`: 326 lines now, 160 at `336d6c78`. While checking it I found that the re-review's "max 249, `delivery.py`" names a modified module, not a new one. The largest new modules are `adf.py` and `github_api.py`, at 109 lines each. Of the touched modules, two others are over 300, both from before this batch: `vidbyte/__init__.py` (1,336 → 1,348, the six budgeted root exports) and `errors/base.py` (552, unchanged). The bullet records all of this. The file is not split (§8.4 budget of 7 new files).
+- **review.md.** Added a "Final re-review (S5) Minors — 3" table. The existing tables are unchanged.
+
+**Changes:** 44b71741 (R-RR1) · 42018c13 (R-RR2) · b1c32edd (R-RR3) · this docs commit (verify-log, review.md table, S5 report)
+
+**Gate matrix out:**
+| Gate | Command | Result | Final lines |
+|---|---|---|---|
+| new tests (pack) | `PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider tests/features/agent_output_connectors` | PASS | `664 passed in 5.18s` (on `b1c32edd`) |
+| lint | `PYTHONIOENCODING=utf-8 python lint/run.py` | PASS | `S063 RATCHETED: 4 known finding(s)` · `S064 RATCHETED: 4 known finding(s)` · `SDK-LINT: PASS` (exit 0). A009 `0 0 CLEAN`; A002 `577 703 IMPROVED`; S009 `350 350 RATCHETED`. No baseline edited |
+| full local gate, source | `PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source` | PASS | `4679 passed, 13 skipped in 36.69s` · `CI passed.` exit 0 |
+| full local gate, package | `python scripts/run_ci.py --stage package` | SKIPPED | docs-only; last run at 8d8ba811: green |
+| NFR-6 seven rules, I001, Semgrep, contract | as in iteration 1 | SKIPPED | docs-only; last run at 8d8ba811: green. `git diff 7a12530d..b1c32edd --name-only -- vidbyte` → only `vidbyte/lib/outputs/README.md` |
+| remote checks | `gh workflow run ci.yml` (run 38550257344) and `static-policy.yml` (run 38550260311) on `b1c32edd`; read through `gh api …/commits/b1c32edd…/check-runs` | PASS 4/4 | `Package completed success` · `Static policy completed success` · `Source / Python 3.12 completed success` · `Source / Python 3.11 completed success` |
+
+CI covered `b1c32edd`, the last commit that touches the README or the spec. This verify-log commit is docs-only and was not dispatched.
+
+**Still open:** none. R-3, R-4, and R-7 remain deferred follow-ups (orchestrator decision; R-3 → Q-9, R-7 → Q-10, both default No).

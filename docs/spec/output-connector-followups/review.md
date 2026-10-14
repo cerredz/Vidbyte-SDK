@@ -35,6 +35,15 @@ MERGEABLE AFTER FIXES — There are no Blockers and two confirmed Majors. (1) Th
 | R-13 | `vidbyte/lib/outputs/README.md:220-222` | Step 3 says "private static helpers", but `github.py:79/86/93/114` defines its mode helpers as private async instance methods. Fix: "private helpers (static, or async methods when they need the connector's settings)". | docs | trivial | fixed @9fb29e3b |
 | R-14 | `vidbyte/lib/outputs/teams.py:48` | The intent name `teams-text-is-plain` no longer matches its comment or the bold-title card. Rename it to `# @intent teams-text-cannot-mention`. Only the code map and the review cite the old name. | code | trivial | fixed @a1405d71 |
 
+## Final re-review (S5) Minors — 3
+Source: reports/S5-rereview.md (verdict SOUND, reviewed at `7cab8990`). All three are docs-only.
+
+| ID | Where | Finding | Owner | Status |
+|---|---|---|---|---|
+| R-RR1 | `vidbyte/lib/outputs/README.md` Footguns (:242, :244, :248, :280) | The four vendor links this batch added to Footguns had no retrieval date (NFR-8). Fix: one "Links in this section retrieved 2026-10-14." line, as R-9 did. | docs | fixed @44b71741 |
+| R-RR2 | `docs/spec/output-connector-followups/spec.md` §17 | Two repair-1 deviations were not recorded: `OutputHttp.basic_authorization` (R-8, not in §8.5 or D-2) and the approved `vidbyte/agents/README.md` edit (R-11, outside §12.3). Fix: two §17 bullets. | docs | fixed @42018c13 |
+| R-RR3 | `vidbyte/lib/constants/outputs.py` (326 lines); spec §17 | Over NFR-2's 300-line target, within AGENTS.md's 1,000; not split, because a new module would exceed the §8.4 budget of 7 files. Fix: one §17 bullet. | docs | fixed @b1c32edd |
+
 ## What the implementation gets right (so nobody "fixes" it)
 - §4 is reproduced verbatim in the follow-up acceptance test, which checks exactly the five printed lines (AC-1), and §5 matches the real call path. Pack: `660 passed` (verifier rerun `660 passed in 5.14s`). GitHub CI on `d5611f25`: all four check runs `success`.
 - INV-8 holds end to end. `webhook.py:87-89` serializes once, signs `"{id}.{ts}."` plus the wire bytes, and sends that same object as `content=`. `_signed_headers` runs once per send, so 429 retries in `HttpTransport.request` repeat the same bytes and the same three headers. `_send_once` adds no content-type to `content=`. D-4 signing headers are set after the caller's headers.
