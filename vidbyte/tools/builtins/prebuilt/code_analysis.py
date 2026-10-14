@@ -34,7 +34,6 @@ from vidbyte.lib.constants.prebuilt_tools import (
     PREBUILT_MAX_LIST_ITEMS,
     PREBUILT_MAX_MEDIUM_TEXT_CHARS,
     PREBUILT_MAX_NAME_CHARS,
-    PREBUILT_MAX_REPORTED_NAMES,
     PREBUILT_MAX_SHORT_TEXT_CHARS,
     PREBUILT_MAX_SOURCE_CHARS,
     PREBUILT_MAX_TEXT_CHARS,
@@ -54,7 +53,6 @@ _FUNCTION_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef)
 _DEFINITION_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
 _COMPACT_SEPARATORS = (",", ":")
 _INTEGER_RESULT_BOUND = 10**PREBUILT_MAX_INTEGER_DIGITS
-_REPORTED_NAME_CHARS = 60
 _ENCODED_LINE_BREAK = re.compile(rb"\r\n|\n|\r")
 _IDENTIFIER_BEFORE = rb"(?<![0-9A-Za-z_\x80-\xff])"
 _IDENTIFIER_AFTER = rb"(?![0-9A-Za-z_\x80-\xff])"
@@ -232,7 +230,7 @@ class CodeAnalysisToolFunctions:
         chosen = next((node for qualified, node in functions if qualified == name), None)
         bare = [(qualified, node) for qualified, node in functions if node.name == name]
         if chosen is None and len(bare) != 1:
-            candidates = [qualified if len(qualified) <= _REPORTED_NAME_CHARS else qualified[:_REPORTED_NAME_CHARS] + "…" for qualified, _ in (bare or functions)[:PREBUILT_MAX_REPORTED_NAMES]]
+            candidates = PrebuiltToolSupport.shortened_names([qualified for qualified, _ in bare or functions])
             problem = f"the bare name matches {len(bare)} functions" if bare else "no function in the source has that qualified or bare name"
             expected = f"the qualified or bare name of one function, from candidates such as {', '.join(candidates)}" if candidates else "the name of a function, but the source defines none"
             raise PrebuiltToolSupport.argument_error("name", problem, expected)

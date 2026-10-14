@@ -24,7 +24,6 @@ from pydantic import Field
 from vidbyte.lib.constants.prebuilt_tools import (
     PREBUILT_HTML_BLOCK_TAGS,
     PREBUILT_MAX_NAME_CHARS,
-    PREBUILT_MAX_REPORTED_NAMES,
     PREBUILT_MAX_SEARCH_STRING_CHARS,
     PREBUILT_MAX_SHORT_TEXT_CHARS,
     PREBUILT_MAX_TEXT_CHARS,
@@ -48,7 +47,6 @@ _SKIPPED_ELEMENTS = frozenset({"script", "style"})
 _SPACE_RUN = re.compile(r"[ \t]+")
 _EXTRA_LINE_BREAKS = re.compile(r"\n{3,}")
 _TEMPLATE_FIELD = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)*)\s*\}\}")
-_REPORTED_NAME_LENGTH = 60
 _MISSING = object()
 _OVERLAP_DIVISOR = 4
 _WINDOW_DIVISOR = 2
@@ -358,7 +356,7 @@ class TextTransformToolFunctions:
         # Refuse missing names under the error policy, naming at most
         # PREBUILT_MAX_REPORTED_NAMES of them, each shortened.
         if missing_names and missing is MissingPlaceholderPolicy.ERROR:
-            listed = ", ".join(name if len(name) <= _REPORTED_NAME_LENGTH else name[:_REPORTED_NAME_LENGTH] + "…" for name in missing_names[:PREBUILT_MAX_REPORTED_NAMES])
+            listed = ", ".join(PrebuiltToolSupport.shortened_names(missing_names))
             problem = f"the values have no entry for {len(missing_names)} placeholder names: {listed}"
             raise PrebuiltToolSupport.argument_error("values_json", problem, "a value for every placeholder name, or the keep or empty policy")
 

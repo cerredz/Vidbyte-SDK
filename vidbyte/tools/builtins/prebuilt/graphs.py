@@ -34,8 +34,6 @@ from vidbyte.tools.builtins.prebuilt._support import (
 )
 
 _CRITICAL_SLACK_TOLERANCE = 1e-9
-_SHOWN_CYCLE_NAMES = 20
-_SHOWN_NAME_LENGTH = 40
 
 _NodeName = Annotated[str, Field(min_length=1, max_length=PREBUILT_MAX_NAME_CHARS)]
 
@@ -266,7 +264,7 @@ class GraphsToolFunctions:
     @staticmethod
     def _cycle_text(cycle: Sequence[str]) -> str:
         """Write a cycle for an error message, shortening long names and long cycles so no argument is echoed at length."""
-        shown = [name if len(name) <= _SHOWN_NAME_LENGTH else name[:_SHOWN_NAME_LENGTH] + "…" for name in cycle[:_SHOWN_CYCLE_NAMES]]
+        shown = PrebuiltToolSupport.shortened_names(cycle)
         hidden = len(cycle) - len(shown)
         text = " -> ".join(shown)
         return text if hidden == 0 else f"{text} and {hidden} more"

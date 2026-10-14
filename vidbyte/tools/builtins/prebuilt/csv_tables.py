@@ -31,6 +31,7 @@ from vidbyte.lib.constants.prebuilt_tools import (
     PREBUILT_CSV_DELIMITER_CHARACTERS,
     PREBUILT_MAX_NAME_CHARS,
     PREBUILT_MAX_RECORDS,
+    PREBUILT_MAX_REPORTED_NAMES,
     PREBUILT_MAX_SHORT_TEXT_CHARS,
     PREBUILT_MAX_SNIFF_CHARS,
     PREBUILT_MAX_TEXT_CHARS,
@@ -55,8 +56,6 @@ _SNIFF_DELIMITERS = ",;\t|"
 _DEFAULT_QUOTE = '"'
 _HEADER_VOTE_ROWS = 21
 _NUMBER_KIND = "number"
-_REPORTED_COLUMNS = 20
-_REPORTED_NAME_LENGTH = 40
 _BOOLEAN_WORDS = MappingProxyType({"true": True, "false": False})
 _ISO_DAY = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 _CELL_LINE_BREAK = re.compile(r"\r\n|\r|\n")
@@ -311,8 +310,8 @@ class CsvTablesToolFunctions:
         """Return the position of a header name, or fail naming the parameter and listing a few shortened column names."""
         if name in header:
             return header.index(name)
-        listed = ", ".join(f'"{column[:_REPORTED_NAME_LENGTH]}"' for column in header[:_REPORTED_COLUMNS])
-        more = f", and {len(header) - _REPORTED_COLUMNS} more" if len(header) > _REPORTED_COLUMNS else ""
+        listed = ", ".join(f'"{column}"' for column in PrebuiltToolSupport.shortened_names(header))
+        more = f", and {len(header) - PREBUILT_MAX_REPORTED_NAMES} more" if len(header) > PREBUILT_MAX_REPORTED_NAMES else ""
         raise PrebuiltToolSupport.argument_error(parameter_name, "the table has no column with that name", f"one of the columns {listed}{more}")
 
     @staticmethod
