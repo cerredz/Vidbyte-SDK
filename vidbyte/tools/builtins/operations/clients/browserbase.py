@@ -28,6 +28,7 @@ from vidbyte.lib.http.transport import HttpTransport
 from vidbyte.tools.builtins.operations.clients._base import RetryPolicy, WebOperationClient
 
 _MAX_RESULTS = 25
+_MAX_QUERY_CHARS = 200
 
 
 class BrowserbaseClient(WebOperationClient):
@@ -55,8 +56,10 @@ class BrowserbaseClient(WebOperationClient):
 
     @staticmethod
     def _search_body(query: str, num_results: int) -> dict[str, object]:
-        # Clamps the requested result count to Browserbase's documented maximum.
-        return {"query": query, "numResults": min(max(1, num_results), _MAX_RESULTS)}
+        # Clamps the query and result count to Browserbase's documented request limits.
+        # @intent browserbase-query-stays-in-the-documented-range
+        # Browserbase's search parameter table documents "query | string | Yes | The search query (1–200 characters)", beside the numResults row that sets _MAX_RESULTS.
+        return {"query": query[:_MAX_QUERY_CHARS], "numResults": min(max(1, num_results), _MAX_RESULTS)}
 
     def _hits_from_payload(self, payload: Mapping[str, Any]) -> tuple[SearchHit, ...]:
         # Reads the results array, raising when Browserbase returns it in an unusable shape.
