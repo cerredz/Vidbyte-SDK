@@ -26,7 +26,13 @@ great, using the spec-pipeline skill file do you think that you can implement th
 
 ### 0.2 User replies during the run
 
-None yet. The orchestrator appends any reply the user sends during the run here verbatim, labeled with the revision it produced.
+The orchestrator appends any reply the user sends during the run here verbatim, labeled with the revision it produced.
+
+- 2026-10-14, at the S5 re-review cap. S5 iteration 3 had converged at 19bc9931, and its only change since re-review round 2 was the comment-only commit 888db88f. The orchestrator recommended going on to S6 without a third re-review. The user replied:
+  ```
+  continue
+  ```
+  The orchestrator read this as the recommended option. No spec revision followed; r6 stands.
 
 ---
 

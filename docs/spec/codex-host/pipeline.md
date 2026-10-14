@@ -20,7 +20,7 @@ started: 2026-10-13 00:45 UTC
 | S4 adversarial review | done | 2026-10-14 02:50 UTC | 2026-10-14 04:05 UTC | reports/S4-review-conformance.md, reports/S4-review-conventions.md, reports/S4-review-engineering.md, reports/S4-findings-verifier.md, review.md | MERGEABLE AFTER FIXES; confirmed 5 Blockers (R-1..R-5) / 9 Majors (R-6..R-14) / 11 Minors (R-15..R-25, R-25 scope-adding); refuted 0; every fix within the exhausted §8.4 budget; spec status: reviewed |
 | S5 repair loop | done | 2026-10-14 04:40 UTC | 2026-10-14 11:05 UTC | reports/S5-repair-1.md, reports/S5-repair-2.md, reports/S5-repair-3.md, verify-log.md | iteration 3 (R-30 + R-31 @888db88f, comment-only: 0 non-comment lines under vidbyte/ vs 7b05e68b) converged at 19bc9931: orchestrator gate source 4122 passed / 22 skipped, package CI passed, A002 0 rows under branch files; remote 38530861705 + 38530864005 green on 780c26f4. Iteration 2 (R-26 @30109e89 + @736d4a58, R-27 @ad363725, R-28 @3d26abfe, R-29 by spec r6 130dd828) converged at 7b05e68b (code at 77c92838): orchestrator gate 4122 passed, 22 skipped in 38.58s (source), Installed vidbyte-sdk 0.2.1 passed smoke checks. (package); remote 38526282824 + 38526285681 green on 77c92838. Iteration 1 converged at bbaa5a8b (code at fb76e558): fixed R-1..R-18 (R-12 also by spec r5 bbe9672f); 10 new tests (granted file); merge origin/main 8387d666 at fb76e558; orchestrator gate: 4117 passed, 22 skipped in 38.55s (source), Installed vidbyte-sdk 0.2.1 passed smoke checks. (package); remote ci.yml 38519843721 + static 38519846158 green on fb76e558; R-19..R-25 follow-ups |
 | S5 re-review | done (cap reached; user said continue) | 2026-10-14 06:50 UTC | 2026-10-14 18:55 UTC | reports/S5-rereview.md, reports/S5-findings-verifier-r1.md | round 1 at bbaa5a8b: MERGEABLE AFTER FIXES 0B/2M/2m — R-C1 Major (R-16 regression: after any failed stop, a user interrupt sends nothing, host.py:407), R-C2 Major (R-2's refusal puts pydantic exception text in the harness error and chains it, wire.py:262, §12.4/INV-9), R-C3 Minor (title/instructions descriptions), R-C4 Minor (spec §9.3 lacks R-11's constants) |
-| S6 PR | in progress | 2026-10-14 18:55 UTC | | reports/S6-pr-author.md, pr-body.md | |
+| S6 PR | done | 2026-10-14 18:55 UTC | 2026-10-14 19:45 UTC | reports/S6-pr-author.md, pr-body.md | 601daff9 (finalize) + b0de2561 (remote checks); PR #1055 draft, title without [WIP]; ci.yml 38622473663 + static-policy 38622477946 green on b0de2561 |
 
 ## Counters and caps
 - S1 review rounds: 2/2 · S5 repair iterations: 3/8 · S5 re-review rounds: 2/2 (cap reached)
@@ -279,6 +279,22 @@ started: 2026-10-13 00:45 UTC
   - The spec status is set to `verified` with a docs commit.
   - S6 PR author launched.
 
+- 2026-10-14 19:45 UTC — **S6 spot-check passed.**
+  - `gh pr view 1055`: the title is `feat(harnesses): add CodexHost with one agent tool per Codex function`, it is a draft, the base is `main`, and the head is b0de2561.
+  - The GitHub body has 2 mermaid blocks plus Motivation, Compatibility and the four ticked checkboxes, and its last line is the attribution line.
+  - The body names 888db88f as comment-only and not re-reviewed, and says that going on without a third round was the user's decision.
+  - Check-runs on b0de2561: Package, Static policy, Source / Python 3.11 and Source / Python 3.12 all succeeded.
+  - The spec reads `status: pr-open`, `pr:` #1055 and `updated: 2026-10-14`. The tree is clean and HEAD equals origin.
+  - Every non-file test name the body cites matches a `def` under `tests/`.
+- 2026-10-14 19:45 UTC — **The S6 author's OPEN ITEMS are all in the PR body, so none goes back to repair.**
+  - The six unread `CODEX_*_NOTIFICATION` constants (codex.py:366-371) appear in Deviations and Follow-ups.
+  - R-32's overclaim (FEATURE.md:100, test_codex_host_review_gaps.py:395) is in Follow-ups.
+  - Remote CI skipping the 80 host tests (`.[dev]` has no `codex` extra) is under Verification.
+  - 888db88f being unreviewed is under Adversarial review.
+  *Why:* each is a Minor (dead constants, or a test or doc claim). The re-review cap is used up, so a repair now would ship unreviewed code. The user decides on the PR.
+- 2026-10-14 19:45 UTC — **The first remote run on 601daff9 (38621314395) failed on Python 3.11** with timeouts in `test_mcp_stdio_transport.py` and the known bash flake. The single `--failed` rerun failed the same way, with wall time 70.76 s against about 45 s. 601daff9 differs from the green 780c26f4 only under `docs/spec/codex-host/`, and the re-dispatch on b0de2561 was green. I read it as runner slowness. It is recorded in the PR body's Verification table.
+- 2026-10-14 19:45 UTC — **Appended the user's `continue` to spec §0.2**, which the skill allows as an orchestrator docs commit. It produced no spec revision.
+
 ## User replies (verbatim)
 - 2026-10-14 ~18:50 UTC, after the stop at the re-review cap (S5 iteration 3 converged at 19bc9931; the only change since re-review round 2 is the comment-only commit 888db88f):
   ```
@@ -488,3 +504,5 @@ started: 2026-10-13 00:45 UTC
 - **Set the flag before the spawn.** `stop()` must set `stop_pending` before it spawns `send_stop`, because a spawned task's first step runs one loop iteration later. *source:* S5 repair 2.
 - **The A002 text output hides per-file findings when the verdict is IMPROVED.** Always confirm "A002 clean under the branch's paths" with `lint/run.py --rule A002 --all --format json`, filtered by path. *source:* re-review r2 and verifier r2.
 - **Do not rename `send_stop` or reshape the call to hide the `send` token.** That would repeat R-8's Major, dodging a lint rule. *source:* verifier r2.
+- **`gh pr checks` always prints "no checks reported" on this dispatch-only repo.** Read the results with `gh run view` or the commit check-runs API. *source:* S6 author.
+- **A slow 3.11 runner.** When the 3.11 job fails on child-process timeouts (`test_mcp_stdio_transport.py`) and the code equals a green head, compare wall time and the diff before blaming the branch. *source:* S6 author.
