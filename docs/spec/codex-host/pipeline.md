@@ -19,11 +19,11 @@ started: 2026-10-13 00:45 UTC
 | S3 implement | done | 2026-10-13 16:40 UTC | 2026-10-14 02:40 UTC | reports/S3-implementer.md | S3_HEAD 099fac83; draft PR https://github.com/cerredz/Vidbyte-SDK/pull/1055 ([WIP] title); 30 commits; 28/28 §12.3 rows; budget 18/18 files, 30/30 classes, 15/15 records, 13/13 enums, 0 deps (no headroom); pack 101 passed, CI view 35 passed / 66 skipped (orchestrator re-run); full suite 4041 passed / 22 skipped; run_ci source+package PASS; SDK-LINT PASS; semgrep 0; public API --check 0; spec status: implemented |
 | S4 adversarial review | done | 2026-10-14 02:50 UTC | 2026-10-14 04:05 UTC | reports/S4-review-conformance.md, reports/S4-review-conventions.md, reports/S4-review-engineering.md, reports/S4-findings-verifier.md, review.md | MERGEABLE AFTER FIXES; confirmed 5 Blockers (R-1..R-5) / 9 Majors (R-6..R-14) / 11 Minors (R-15..R-25, R-25 scope-adding); refuted 0; every fix within the exhausted §8.4 budget; spec status: reviewed |
 | S5 repair loop | done | 2026-10-14 04:40 UTC | 2026-10-14 09:30 UTC | reports/S5-repair-1.md, reports/S5-repair-2.md, verify-log.md | iteration 2 (R-26 @30109e89 + @736d4a58, R-27 @ad363725, R-28 @3d26abfe, R-29 by spec r6 130dd828) converged at 7b05e68b (code at 77c92838): orchestrator gate 4122 passed, 22 skipped in 38.58s (source), Installed vidbyte-sdk 0.2.1 passed smoke checks. (package); remote 38526282824 + 38526285681 green on 77c92838. Iteration 1 converged at bbaa5a8b (code at fb76e558): fixed R-1..R-18 (R-12 also by spec r5 bbe9672f); 10 new tests (granted file); merge origin/main 8387d666 at fb76e558; orchestrator gate: 4117 passed, 22 skipped in 38.55s (source), Installed vidbyte-sdk 0.2.1 passed smoke checks. (package); remote ci.yml 38519843721 + static 38519846158 green on fb76e558; R-19..R-25 follow-ups |
-| S5 re-review | in progress (round 1 done; iteration 2 done at 7b05e68b; round 2 of 2 running) | 2026-10-14 06:50 UTC | | reports/S5-rereview.md, reports/S5-findings-verifier-r1.md | round 1 at bbaa5a8b: MERGEABLE AFTER FIXES 0B/2M/2m — R-C1 Major (R-16 regression: after any failed stop, a user interrupt sends nothing, host.py:407), R-C2 Major (R-2's refusal puts pydantic exception text in the harness error and chains it, wire.py:262, §12.4/INV-9), R-C3 Minor (title/instructions descriptions), R-C4 Minor (spec §9.3 lacks R-11's constants) |
+| S5 re-review | cap reached (round 2 of 2 done: MERGEABLE AFTER FIXES 0B/1M/2m; scoped verifier r2 running) | 2026-10-14 06:50 UTC | | reports/S5-rereview.md, reports/S5-findings-verifier-r1.md | round 1 at bbaa5a8b: MERGEABLE AFTER FIXES 0B/2M/2m — R-C1 Major (R-16 regression: after any failed stop, a user interrupt sends nothing, host.py:407), R-C2 Major (R-2's refusal puts pydantic exception text in the harness error and chains it, wire.py:262, §12.4/INV-9), R-C3 Minor (title/instructions descriptions), R-C4 Minor (spec §9.3 lacks R-11's constants) |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 2/8 · S5 re-review rounds: 2/2 (round 2 running; last allowed)
+- S1 review rounds: 2/2 · S5 repair iterations: 2/8 · S5 re-review rounds: 2/2 (cap reached)
 
 ## Parallel run
 - **Sibling pipeline:** `claude-host`, in worktree `C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-claude-host` on branch `feat/claude-host`, from the same base commit. Each run follows the shared-file contract in its request.md §C.
@@ -239,6 +239,15 @@ started: 2026-10-13 00:45 UTC
 - 2026-10-14 09:35 UTC — **Final conformance re-review, round 2 of 2, launched.** This is the last round the cap allows.
   - FOCUS: 30109e89, 736d4a58, ad363725 and 3d26abfe, the new tests and spec r6. It also checks that iteration 1's fixes still hold beside them.
   - If it finds a new Blocker or Major, the verifier confirms it, and then I stop and report to the user.
+
+- 2026-10-14 10:00 UTC — **Final re-review, round 2 of 2, returned MERGEABLE AFTER FIXES:** 0 Blocker, 1 Major, 2 Minor (`reports/S5-rereview-2.md`).
+  - **R-C5, Major:** R-27's commit ad363725 made `interrupt_codex_turn` (host.py:400) call `turn.send_stop`. The token `send` triggers A002, and there is no `# @intent` line, so R-9 is back. A002's baseline slack (580 against 703) hides it, and the repair-2 claim that "A002 lists nothing under the branch's paths" is false. The fix is one comment block, with no behaviour change.
+  - **R-C6, Minor:** if a caller cancels a user interrupt while its request is on a worker, a second call sends a second `turn/interrupt`. No spec ID is broken, but the comments at turns.py:182-183 and host.py:402-403 describe the case wrongly.
+  - **R-C7, Minor:** no test kills a mutant that removes `turn.stop_pending = True` at host.py:414.
+- 2026-10-14 10:00 UTC — **Launched a scoped findings verifier (r2) on R-C5..R-C7.** It appends R-30 onward to review.md.
+  - **The plan, per the skill:** a confirmed Major goes back into the loop as repair iteration 3 (3 of 8 is within the cap). Re-review rounds are capped at 2, and both are used.
+  - **So after iteration 3 converges,** I stop and report to the user rather than open a third re-review. Proceeding to S6 without one is the user's call.
+  *Why:* rule 7, caps are hard. The iteration cap is not reached; only the re-review cap is.
 
 ## User replies (verbatim)
 - none yet
