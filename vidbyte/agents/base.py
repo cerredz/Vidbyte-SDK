@@ -76,6 +76,8 @@ if TYPE_CHECKING:
 # Runtimes that execute the direct model/tool loop and so accept its usage, speed, output-contract,
 # fallback, and session-failure wiring. JEV is the opinionated JevAgent's linear-loop subclass.
 _LINEAR_LOOP_RUNTIMES = frozenset({AgentRuntimeType.LINEAR, AgentRuntimeType.JEV})
+# Metadata key for the developer diagnostic a restore records when the re-supplied tools differ from the checkpoint's.
+_RESUME_TOOL_MISMATCH_KEY = "__resume_tool_mismatch__"
 
 
 class BaseAgent(McpAttachableMixin):
@@ -795,11 +797,11 @@ class BaseAgent(McpAttachableMixin):
         # Record a non-fatal marker when restored tools differ from the persisted set.
         got = tuple(child._tool_name(tool) for tool in child._agent_tool_items)
         if set(expected) != set(got):
-            child.metadata["__resume_tool_mismatch__"] = {"expected": list(expected), "got": list(got)}
+            child.metadata[_RESUME_TOOL_MISMATCH_KEY] = {"expected": list(expected), "got": list(got)}
         else:
             # @intent resume-tool-marker-describes-this-restore
             # Drop a marker copied in from an earlier checkpoint, so a matching restore no longer reports a mismatch.
-            child.metadata.pop("__resume_tool_mismatch__", None)
+            child.metadata.pop(_RESUME_TOOL_MISMATCH_KEY, None)
 
     async def receive(self, message: AgentMessage) -> None:
         self.history.append(message)
@@ -1209,12 +1211,16 @@ class BaseAgent(McpAttachableMixin):
         input_context_items: Sequence[ContextItem] = (),
         input_context_manager: ContextManager | None = None,
     ) -> BaseAgentContext:
+        # @intent resume-marker-stays-out-of-the-prompt
+        # The resume tool-mismatch marker is a developer diagnostic about the restore, not run context, so the model
+        # never sees it, and in particular never sees the names of tools it was not given. It stays in self.metadata.
+        agent_metadata = {key: value for key, value in self.metadata.items() if key != _RESUME_TOOL_MISMATCH_KEY}
         return self._runtime().build_context(
             message,
             base_context=context,
             history=history,
             agent_history=self.history,
-            agent_metadata=self.metadata,
+            agent_metadata=agent_metadata,
             existing_tool_calls=self._tool_call_contexts,
             input_metadata=input_metadata,
             agentic_loop=agentic_loop,
