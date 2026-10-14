@@ -108,12 +108,12 @@ class FinanceToolFunctions:
         """Compute the fixed monthly payment of an amortizing loan with its final payment, total paid, and total interest, as money texts with two decimals. Use it for mortgage and loan questions that need exact cents, because the final payment and the totals come from the full month-by-month schedule rather than the payment times the term. The payment uses the standard annuity formula in exact rational arithmetic, rounded half-up to cents, and a zero rate divides the principal evenly. Inputs outside the schema bounds fail validation, and no valid input fails otherwise."""
         # Round the principal to cents and find the level payment.
         principal_cents = FinanceToolFunctions._half_up(Fraction(repr(principal)) * _CENTS_PER_UNIT)
-        monthly_rate = Fraction(repr(annual_rate_percent)) / _MONTHLY_RATE_DIVISOR
-        payment_cents = FinanceToolFunctions._half_up(FinanceToolFunctions._level_payment(principal_cents, monthly_rate, term_months))
+        monthly_interest = Fraction(repr(annual_rate_percent)) / _MONTHLY_RATE_DIVISOR
+        payment_cents = FinanceToolFunctions._half_up(FinanceToolFunctions._level_payment(principal_cents, monthly_interest, term_months))
 
         # Walk the schedule so the final payment and the totals are the
         # ones the loan really has.
-        rows = FinanceToolFunctions._amortize(principal_cents, monthly_rate, term_months, payment_cents)
+        rows = FinanceToolFunctions._amortize(principal_cents, monthly_interest, term_months, payment_cents)
         total_cents = sum(row[1] for row in rows)
         return {
             "monthly_payment": FinanceToolFunctions._money_text(payment_cents),
@@ -131,12 +131,12 @@ class FinanceToolFunctions:
         """List every monthly payment of an amortizing loan with its principal part, interest part, and remaining balance, plus the level monthly payment. Use it to show how a loan is paid down or to read the balance after a given month. Each month's interest is the balance times the monthly rate, computed exactly and rounded half-up to cents, and the last payment absorbs the cent rounding so the balance ends at exactly zero. The schedule has at most 600 rows and ends early when cent rounding pays the loan off sooner, and inputs outside the schema bounds fail validation."""
         # Round the principal to cents and find the level payment.
         principal_cents = FinanceToolFunctions._half_up(Fraction(repr(principal)) * _CENTS_PER_UNIT)
-        monthly_rate = Fraction(repr(annual_rate_percent)) / _MONTHLY_RATE_DIVISOR
-        payment_cents = FinanceToolFunctions._half_up(FinanceToolFunctions._level_payment(principal_cents, monthly_rate, term_months))
+        monthly_interest = Fraction(repr(annual_rate_percent)) / _MONTHLY_RATE_DIVISOR
+        payment_cents = FinanceToolFunctions._half_up(FinanceToolFunctions._level_payment(principal_cents, monthly_interest, term_months))
 
         # Walk the months in whole cents and write every row as money.
         money = FinanceToolFunctions._money_text
-        rows = FinanceToolFunctions._amortize(principal_cents, monthly_rate, term_months, payment_cents)
+        rows = FinanceToolFunctions._amortize(principal_cents, monthly_interest, term_months, payment_cents)
         schedule = [
             {"month": month, "payment": money(paid), "principal": money(repaid), "interest": money(interest), "balance": money(balance)}
             for month, paid, repaid, interest, balance in rows
@@ -181,16 +181,16 @@ class FinanceToolFunctions:
         npv = partial(FinanceToolFunctions._npv_at, cash_flows)
         previous: tuple[float, float] | None = None
         for step in range(PREBUILT_IRR_GRID_POINTS):
-            rate = PREBUILT_IRR_GRID_START + step * PREBUILT_IRR_GRID_STEP
-            value = npv(rate)
+            guess = PREBUILT_IRR_GRID_START + step * PREBUILT_IRR_GRID_STEP
+            value = npv(guess)
             if value is None:
                 continue
             if value == 0:
-                return {"irr_percent": rate * _PERCENT}
+                return {"irr_percent": guess * _PERCENT}
             if previous is not None and (value > 0) != (previous[1] > 0):
                 # Bisect between the two grid points around the root.
-                return {"irr_percent": FinanceToolFunctions._bisect_root(npv, previous[0], previous[1], rate) * _PERCENT}
-            previous = (rate, value)
+                return {"irr_percent": FinanceToolFunctions._bisect_root(npv, previous[0], previous[1], guess) * _PERCENT}
+            previous = (guess, value)
         raise PrebuiltToolSupport.argument_error("cash_flows", "the net present value never changes sign on the search grid", expected)
 
     @staticmethod
@@ -296,14 +296,14 @@ class FinanceToolFunctions:
         """Return the cent-rounded principal and future value in whole cents, growing in the 50-digit context in the section 9.2 item 16 order."""
         with localcontext(prec=PREBUILT_FINANCE_PRECISION, rounding=ROUND_HALF_EVEN):
             start = Decimal(repr(principal)).quantize(_CENT, ROUND_HALF_UP)
-            rate = Decimal(repr(annual_rate_percent)) / _PERCENT
+            yearly = Decimal(repr(annual_rate_percent)) / _PERCENT
             span = Decimal(repr(years))
             periods = _PERIODS_PER_YEAR.get(compounding)
             try:
                 if periods is None:
-                    grown = start * (rate * span).exp()
+                    grown = start * (yearly * span).exp()
                 else:
-                    base = 1 + rate / periods
+                    base = 1 + yearly / periods
                     exponent = periods * span
                     grown = start * base**exponent
             except DecimalException as exc:
@@ -317,21 +317,21 @@ class FinanceToolFunctions:
             return int(start.scaleb(_MONEY_PLACES)), int(final.scaleb(_MONEY_PLACES))
 
     @staticmethod
-    def _level_payment(principal_cents: int, monthly_rate: Fraction, term_months: int) -> Fraction:
+    def _level_payment(principal_cents: int, monthly_interest: Fraction, term_months: int) -> Fraction:
         """Return the exact level payment in cents: P*i / (1 - (1 + i)^-n), or P / n at a zero rate."""
-        if monthly_rate == 0:
+        if monthly_interest == 0:
             return Fraction(principal_cents, term_months)
-        return principal_cents * monthly_rate / (1 - (1 + monthly_rate) ** -term_months)
+        return principal_cents * monthly_interest / (1 - (1 + monthly_interest) ** -term_months)
 
     @staticmethod
-    def _amortize(principal_cents: int, monthly_rate: Fraction, term_months: int, payment_cents: int) -> list[tuple[int, int, int, int, int]]:
+    def _amortize(principal_cents: int, monthly_interest: Fraction, term_months: int, payment_cents: int) -> list[tuple[int, int, int, int, int]]:
         """Walk a loan month by month in whole cents and return (month, payment, principal, interest, balance) rows up to a zero balance."""
         rows: list[tuple[int, int, int, int, int]] = []
         balance = principal_cents
         for month in range(1, term_months + 1):
             # The interest is rounded half-up to cents; the last month,
             # or a month that can clear the balance, pays it all off.
-            interest = math.floor(balance * monthly_rate + _HALF)
+            interest = math.floor(balance * monthly_interest + _HALF)
             owed = balance + interest
             paid = owed if month == term_months or owed <= payment_cents else payment_cents
             balance -= paid - interest
