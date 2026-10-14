@@ -238,3 +238,49 @@ r4 fixes the defects the S2 test author found, and writes the readings the tests
 - Appendix: 265 rows in 31 tables, every category between 6 and 12.
 - Enum table: 68 rows.
 - spec.md is LF.
+
+## Addendum — r5 (S3-found NFR-7 gap resolved; status tests-written)
+
+r5 settles the gaps the S3 implementer measured. Spec commit: `ce32c0a6`. The tests do not time any call, since `test_prebuilt_resource_bounds.py` forbids timing assertions. They do pin these caps:
+- `diff_words`: 2,000 tokens is accepted and 2,002 is rejected.
+- `closest_string_matches`: 1,000 candidates of 100 characters each.
+- `unified_diff_text`: 4,000 lines.
+- `seeded_weighted_choice`: the key set `picks`.
+
+So r5 changes none of these values.
+
+**S3-1 (NFR-7).**
+- **Measurements.** I re-measured on the dev machine (Python 3.11.0) with plain `difflib`, shaped like the rows. S3's numbers held:
+  - `diff_words` at 2,000 tokens: 14.4 s and 21.4 s. Time grows about 8× per doubling: 0.23 s at 500 tokens, 1.8 s at 1,000.
+  - `closest_string_matches` at 1,000 candidates: 3.1 s.
+  - Casefolded ligatures: 8.5 s at 100 candidates, about 85 s at 1,000.
+- **A third slow tool.** `unified_diff_text` also misses NFR-7. With 4,000 lines that cycle through 98 short lines, against a version where every second line is unique, it takes 4.2 s. Each repeated line stays within the junk heuristic's popularity limit, so `difflib` keeps it in the matching.
+- **Not slow.** `longest_common_substring` stays within NFR-7. It makes one `find_longest_match` call, which is worst on a single repeated character: 0.25 s at its cap.
+- **Decision.** New EC-46 makes this a documented limitation, like EC-10. The call always finishes because the caps bound the work. `tool_timeout_seconds` bounds how long the agent waits (A-4, EC-28). NFR-7 now names the two accepted cases and no longer claims S1's unified-diff pattern was the worst. A-9, T-2, §12.3 rows 23 and 40, and the three A.16 rows cite EC-46.
+- **Rejected options:**
+  - **Lower caps.** These are pinned by tests. `diff_words` would need roughly 800 tokens to meet 2 s on a CI runner 2× slower than the dev machine.
+  - **Fold per code point.** This breaks the §9.2 item 7 case rule, and it still leaves 3–5 s.
+
+**S3-2 (`seeded_weighted_choice`).** INV-17 applies only to rows with a `truncated` key, and INV-20 is a closed list, so neither covered this tool. Adding `truncated` would change the pinned key set. I recorded the bound instead, in EC-45 and the row:
+- The output is at most `PREBUILT_MAX_RANDOM_PICKS` × `PREBUILT_MAX_SHORT_TEXT_CHARS` = 10,000,000 characters.
+- That is a tenth of the tool's capped input, and less than `seeded_shuffle_list` may already return.
+
+**S3-3 (`intersect_lists`).** I logged it as a test defect, as the orchestrator ruled. The spec row stands, and the S2 test author fixes `prebuilt_parameter_data.py:257`.
+
+**What must change outside the spec:**
+- **Code:**
+  - No tool code changes.
+  - The folder README (§12.3 row 40, `vidbyte/tools/builtins/prebuilt/README.md`) must add a short EC-46 paragraph next to the EC-10 one.
+- **Tests:**
+  - No test must change for r5.
+  - The `intersect_lists` parameter data is already routed to S2 (S3-3).
+
+**Unchanged:** no tool, parameter, return key, default, or cap changed. `diff_contract.py` found no parameter or return cell that differs between r4 and r5. The §6.2 table is byte-identical to r4.
+
+**Stage E self-check (r5):**
+- ID counts: FR 11, NFR 11, AC 21, INV 26, EC 46, W 38, T 6, D 18.
+- Every ID is defined. G-1 to G-4 show up as false positives of the script, as before.
+- Table problems: 0.
+- 18 `## §` headings.
+- Appendix: 265 rows in 31 tables, with 0 bad rows.
+- spec.md is LF.
