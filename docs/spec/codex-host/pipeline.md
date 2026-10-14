@@ -19,7 +19,7 @@ started: 2026-10-13 00:45 UTC
 | S3 implement | done | 2026-10-13 16:40 UTC | 2026-10-14 02:40 UTC | reports/S3-implementer.md | S3_HEAD 099fac83; draft PR https://github.com/cerredz/Vidbyte-SDK/pull/1055 ([WIP] title); 30 commits; 28/28 §12.3 rows; budget 18/18 files, 30/30 classes, 15/15 records, 13/13 enums, 0 deps (no headroom); pack 101 passed, CI view 35 passed / 66 skipped (orchestrator re-run); full suite 4041 passed / 22 skipped; run_ci source+package PASS; SDK-LINT PASS; semgrep 0; public API --check 0; spec status: implemented |
 | S4 adversarial review | done | 2026-10-14 02:50 UTC | 2026-10-14 04:05 UTC | reports/S4-review-conformance.md, reports/S4-review-conventions.md, reports/S4-review-engineering.md, reports/S4-findings-verifier.md, review.md | MERGEABLE AFTER FIXES; confirmed 5 Blockers (R-1..R-5) / 9 Majors (R-6..R-14) / 11 Minors (R-15..R-25, R-25 scope-adding); refuted 0; every fix within the exhausted §8.4 budget; spec status: reviewed |
 | S5 repair loop | done | 2026-10-14 04:40 UTC | 2026-10-14 06:45 UTC | reports/S5-repair-1.md, verify-log.md | converged in 1 iteration at bbaa5a8b (code at fb76e558): fixed R-1..R-18 (R-12 also by spec r5 bbe9672f); 10 new tests (granted file); merge origin/main 8387d666 at fb76e558; orchestrator gate: 4117 passed, 22 skipped in 38.55s (source), Installed vidbyte-sdk 0.2.1 passed smoke checks. (package); remote ci.yml 38519843721 + static 38519846158 green on fb76e558; R-19..R-25 follow-ups |
-| S5 re-review | in progress | 2026-10-14 06:50 UTC | | reports/S5-rereview.md | |
+| S5 re-review | in progress (round 1 done; scoped verifier running) | 2026-10-14 06:50 UTC | | reports/S5-rereview.md, reports/S5-findings-verifier-r1.md | round 1 at bbaa5a8b: MERGEABLE AFTER FIXES 0B/2M/2m — R-C1 Major (R-16 regression: after any failed stop, a user interrupt sends nothing, host.py:407), R-C2 Major (R-2's refusal puts pydantic exception text in the harness error and chains it, wire.py:262, §12.4/INV-9), R-C3 Minor (title/instructions descriptions), R-C4 Minor (spec §9.3 lacks R-11's constants) |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
@@ -193,6 +193,17 @@ started: 2026-10-13 00:45 UTC
 - 2026-10-14 06:50 UTC — **Final conformance re-review (round 1 of 2) launched.**
   - FOCUS: the 18 fix commits 2f098372..08d498d8, plus the granted test file.
   - The merge commit fb76e558 brings in main's 41 commits, which are out of scope.
+
+- 2026-10-14 ~06:25 UTC — **Sixth HTTP 429 session limit.** It stopped the re-reviewer before it had written a report. After the reset I checked that the tree was clean and unchanged at fbe64628, and resumed the agent through SendMessage. No work was lost.
+- 2026-10-14 07:35 UTC — **Re-review round 1 returned MERGEABLE AFTER FIXES:** 0 Blocker, 2 Major, 2 Minor. 16 of the 18 fixes hold.
+  - **R-C1, Major:** a regression from R-16 (host.py:407). The guard `turn.snapshot is not None or turn.stop_sent` turns every later user interrupt into a no-op once any earlier stop failed.
+  - **R-C2, Major:** R-2's refusal (wire.py:262) puts library exception text into a harness error and chains it with `from exc`, against §12.4, row 10 and INV-9.
+  - **R-C3, Minor:** the title and instructions descriptions.
+  - **R-C4, Minor:** the R-11 constants are missing from §9.3.
+- 2026-10-14 07:35 UTC — **Launched a scoped findings verifier** on R-C1..R-C4. It appends R-26 onward to review.md and leaves R-1..R-25 unchanged.
+  - A confirmed Blocker or Major goes back into the loop as repair iteration 2, and a spec-text row goes to the spec author first.
+  - Re-review round 2 of 2 is the last one the cap allows.
+  *Why:* the skill's final re-review rule: any new Blocker or Major gets a scoped verifier, then returns to the loop.
 
 ## User replies (verbatim)
 - none yet
