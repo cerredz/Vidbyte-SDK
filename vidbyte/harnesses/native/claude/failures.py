@@ -5,7 +5,7 @@ ROLE IN CODEBASE: The one place ClaudeHost chooses a failure code. The session p
 ARCHITECTURE NOTE: from_exception walks one ordered table of exception classes, each subclass before its base, so CLINotFoundError wins over CLIConnectionError and ResultError over ProcessError. The guarded try lives at each SDK call site, which passes what it caught here. classify_turn checks a fixed precedence and returns at the first match, so a turn carries exactly one code.
 COMMON MODIFICATION PATTERNS: A new SDK exception adds one row to _rows, placed before its base class. A new turn condition adds one ClaudeTurnOutcome field and one check at its place in the precedence.
 WHAT NOT TO DO IN THIS FILE: 1. Do not catch BaseException; only an Exception reaches the mapper, so a cancellation always propagates. 2. Do not format the exception's text, its stderr or any message text into a reason; a reason names the operation and the exception class, or CLI vocabulary such as a result subtype.
-KNOWN EDGE CASES: MessageParseError is not exported by the SDK, so it maps through its ClaudeSDKError base. A ValueError or TypeError is an argument the SDK rejected only from connect, which builds the options and starts the process, or from fork; from any other operation, such as converting a malformed SDK record, it is a protocol mismatch. A refusing rate-limit window or an assistant rate_limit error fails a turn even when its result is a success. A steered prompt whose output ends before its own result is classified by how the output ended, never by the result of the prompt the steer interrupted. A caller's interrupt is never a failure, but the time budget's own interrupt is.
+KNOWN EDGE CASES: MessageParseError is not exported by the SDK, so it maps through its ClaudeSDKError base. A ValueError or TypeError is an argument the SDK rejected only from connect, which builds the options and starts the process, or from fork; from any other operation, such as converting a malformed SDK record, it is a protocol mismatch. A refusing rate-limit window or an assistant rate_limit error fails a turn even when its result is a success. A rejected per-model window (seven_day_opus or seven_day_sonnet) is recorded but never refuses a spawn or fails a turn; a request its model's limit refuses fails through the assistant rate_limit error. A steered prompt whose output ends before its own result is classified by how the output ended, never by the result of the prompt the steer interrupted. A caller's interrupt is never a failure, but the time budget's own interrupt is.
 RELATED DOCS: https://platform.claude.com/docs/en/agent-sdk/python; vidbyte/harnesses/README.md.
 TESTS: tests/features/claude_host/
 """
@@ -29,7 +29,11 @@ from vidbyte.lib.dataclasses.claude_host import (
     ClaudeSdkTypes,
     ClaudeTurnOutcome,
 )
-from vidbyte.lib.enums.claude import ClaudeRateLimitStatus, ClaudeTurnStatus
+from vidbyte.lib.enums.claude import (
+    ClaudeRateLimitStatus,
+    ClaudeRateLimitType,
+    ClaudeTurnStatus,
+)
 from vidbyte.lib.enums.failure import FailureCode
 from vidbyte.lib.errors import ClaudeOperationError
 
@@ -115,9 +119,15 @@ class ClaudeFailureMapper:
 
     @staticmethod
     def usage_limited(window: ClaudeRateLimitWindow) -> bool:
-        """Return whether a window refuses new sessions: rejected, resetting later than now, and with no allowed overage (D-29)."""
+        """Return whether a window refuses new sessions: not per-model, rejected, resetting later than now, and with no allowed overage (D-29)."""
+        # @intent a-per-model-window-never-refuses
+        # A weekly Opus or Sonnet limit stops only that model, and
+        # Claude Code still serves the others; counting it would refuse
+        # every spawn for up to a week, because windows update only
+        # from live streams.
+        per_model = window.rate_limit_type in (ClaudeRateLimitType.SEVEN_DAY_OPUS, ClaudeRateLimitType.SEVEN_DAY_SONNET)
         overage_allowed = window.overage_status in (ClaudeRateLimitStatus.ALLOWED, ClaudeRateLimitStatus.ALLOWED_WARNING)
-        return window.status is ClaudeRateLimitStatus.REJECTED and window.resets_at is not None and window.resets_at > time.time() and not overage_allowed
+        return not per_model and window.status is ClaudeRateLimitStatus.REJECTED and window.resets_at is not None and window.resets_at > time.time() and not overage_allowed
 
     @staticmethod
     def _rows(operation: str, sdk: ClaudeSdkTypes | None) -> dict[type, FailureCode]:
