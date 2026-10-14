@@ -1,9 +1,9 @@
 """FILE: vidbyte/tools/builtins/prebuilt/_support.py
 
-PURPOSE: Holds PrebuiltToolSupport, the shared helpers every prebuilt tool category uses: the one argument-error builder, JSON and record parsing, exact number text, numeric text, nesting level, item capping under the character budget, paired lists, weights, dates and offsets, words, sentences, syllables, CSV tables, and text encoding. Also defines the PrebuiltToolOutput and PrebuiltToolFunction type aliases.
+PURPOSE: Holds PrebuiltToolSupport, the shared helpers every prebuilt tool category uses: the one argument-error builder, JSON and record parsing, exact number text, numeric text, nesting level, item capping under the character budget, paired lists, weights, dates and offsets, lines, words, sentences, syllables, CSV tables, and text encoding. Also defines the PrebuiltToolOutput and PrebuiltToolFunction type aliases.
 ROLE IN CODEBASE: Imported by the 31 category modules in vidbyte/tools/builtins/prebuilt/ and by vidbyte/tools/toolsets/prebuilt.py (for the PrebuiltToolFunction alias). Builds on vidbyte/lib/constants/prebuilt_tools.py, vidbyte/lib/enums/prebuilt_tools.py, and ToolExecutionError from vidbyte/lib/errors/.
 ARCHITECTURE NOTE: A static-method-only class (the class-bound helper pattern of vidbyte/lib/util/math.py). Each helper does one job. Helpers may call argument_error and nesting_level, which call nothing else in the class; parse_records_json also reuses parse_json_text so the JSON decoder exists once. Every error a helper raises is a ToolExecutionError whose message names the tool parameter the caller passed in, so FunctionTool turns it into a failure the model can act on.
-FUNCTION INVENTORY: argument_error builds the INV-15 error. parse_json_text, parse_records_json, and json_pointer_tokens read JSON input. parse_integer_text, parse_decimal_text, integer_text, decimal_text, fraction_text, float_result, and parse_numeric_text convert exact and numeric text. nesting_level measures container depth without recursion. cap_items applies the item cap and character budget. paired_values and weight_total check parallel lists and weights. as_utc, parse_utc_offset, and parse_date_text read times and dates. split_words, split_sentences, and count_syllables implement the word, sentence, and syllable rules. parse_csv_table reads a CSV table. encode_text encodes text in a TextEncoding.
+FUNCTION INVENTORY: argument_error builds the INV-15 error. parse_json_text, parse_records_json, and json_pointer_tokens read JSON input. parse_integer_text, parse_decimal_text, integer_text, decimal_text, fraction_text, float_result, and parse_numeric_text convert exact and numeric text. nesting_level measures container depth without recursion. cap_items applies the item cap and character budget. paired_values and weight_total check parallel lists and weights. as_utc, parse_utc_offset, and parse_date_text read times and dates. split_lines, line_and_column, split_words, split_sentences, and count_syllables implement the line, position, word, sentence, and syllable rules. parse_csv_table reads a CSV table. encode_text encodes text in a TextEncoding.
 COMMON MODIFICATION PATTERNS: Add a helper here only when two or more category modules need the same job; logic for one category stays in its own module. Keep every new helper free of calls to other helpers except argument_error and nesting_level.
 WHAT NOT TO DO IN THIS FILE: 1. Do not raise anything but argument_error's ToolExecutionError. 2. Do not put str(exc) or repr(exc) in a message; read structured attributes such as msg, lineno, colno, and pos. 3. Do not touch global state: no decimal.getcontext, csv.field_size_limit, or sys.set_int_max_str_digits. 4. Do not import vidbyte.tools.toolsets or anything above the tools layer.
 KNOWN EDGE CASES: Python refuses to turn text of more than 4,300 digits into an int, leading zeros included, so parse_numeric_text reads integers through their float value. A sentence terminator run is only matched at its first character, which keeps sentence splitting linear on long runs of punctuation. JSON nesting is checked after parsing, and json.loads itself raises RecursionError for extreme nesting, which is caught.
@@ -50,6 +50,7 @@ _FLOAT_EXACT_INTEGER_BOUND = 2**53
 _INTEGER_TEXT = re.compile(r"[+-]?[0-9]+")
 _DECIMAL_TEXT = re.compile(r"[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)")
 _NUMERIC_TEXT = re.compile(r"[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([eE][+-]?[0-9]+)?")
+_LINE_BREAK = re.compile(r"\r\n|\n|\r")
 _WORD = re.compile(r"[^\W_]+(?:['’-][^\W_]+)*")
 _SENTENCE_END = re.compile(r"(?<![.!?…])[.!?…]++[\"'”’)\]]*+(?=\s|\Z)")
 _WORD_BEFORE_END = re.compile(r"[\"'“‘(\[]*+(\S+)\Z")
@@ -299,6 +300,25 @@ class PrebuiltToolSupport:
             return date(year, month, day), ambiguous
         except ValueError:
             return None
+
+    @staticmethod
+    def split_lines(text: str) -> list[str]:
+        """Split text at CRLF, LF, and CR under the section 9.2 item 6 rule; a trailing break starts no line, and empty text has none."""
+        if not text:
+            return []
+        lines = _LINE_BREAK.split(text)
+        if text.endswith(("\n", "\r")):
+            lines.pop()
+        return lines
+
+    @staticmethod
+    def line_and_column(text: str, position: int) -> tuple[int, int]:
+        """Return the 1-based line and column of a code-point position; a line feed that completes a CRLF pair stays on the line it ends."""
+        line, line_start = 1, 0
+        for match in _LINE_BREAK.finditer(text, 0, position + 1):
+            if match.end() <= position:
+                line, line_start = line + 1, match.end()
+        return line, position - line_start + 1
 
     @staticmethod
     def split_words(text: str) -> list[tuple[int, str]]:
