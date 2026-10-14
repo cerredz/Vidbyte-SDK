@@ -58,7 +58,7 @@ _ABBREVIATION_WINDOW = 16
 _SYLLABLE_VOWELS = re.compile(r"[aeiouy]+")
 _CONSONANT_LE_ENDING = re.compile(r"[^aeiouy]le\Z")
 _DELIMITER_CHARACTERS = {CsvDelimiter.COMMA: ",", CsvDelimiter.SEMICOLON: ";", CsvDelimiter.TAB: "\t", CsvDelimiter.PIPE: "|"}
-_WEEKDAY_PREFIX = re.compile(r"(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tues|tue|wed|thurs|thur|thu|fri|sat|sun)\.?,?\s+", re.IGNORECASE)
+_WEEKDAY_PREFIX = re.compile(r"\A(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tues|tue|wed|thurs|thur|thu|fri|sat|sun)\.?,?\s+", re.IGNORECASE)
 _ISO_DATE = re.compile(r"(?P<year>\d{4})(?P<separator>[-/.])(?P<month>\d{1,2})(?P=separator)(?P<day>\d{1,2})(?:[T ]\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?", re.IGNORECASE)
 _COMPACT_DATE = re.compile(r"(?P<year>\d{4})(?P<month>\d{2})(?P<day>\d{2})")
 _MONTH_FIRST_DATE = re.compile(r"(?P<month>[a-z]+)\.?\s+(?P<day>\d{1,2})(?:st|nd|rd|th)?,?\s+(?P<year>\d{4})", re.IGNORECASE)
@@ -215,7 +215,9 @@ class PrebuiltToolSupport:
             else:
                 continue
             deepest = max(deepest, level)
-            pending.extend((child, level + 1) for child in children)
+            # Only containers can go deeper, so scalars are never queued;
+            # this keeps the stack small for long flat arrays.
+            pending.extend((child, level + 1) for child in children if isinstance(child, (dict, list, tuple, set, frozenset)))
         return deepest
 
     @staticmethod
