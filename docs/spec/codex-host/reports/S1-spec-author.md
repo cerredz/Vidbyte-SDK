@@ -221,3 +221,24 @@ This addendum is not committed; I staged only the spec.
 **Scope.** No pin adds a guard, flag, field or code path, so there is no new stated limitation. INV-11's "exactly one interrupt" already ruled out a second interrupt. No AC row, Proof cell, name, §9 signature or §12.3 row changed. The orchestrator's FYI, that late acceptance on goal start, continue and launch has no test of its own, goes to S4; I left the spec alone for it.
 
 **Vendor read.** I read `generated/v2_all.py` in the CLI venv as text only, at `RateLimitReachedType` 3639, `RateLimitSnapshot` 9038 and `GetAccountRateLimitsResponse` 10965. §11 now cites the first two as well. Nothing was imported or run from there.
+
+## Addendum r5: S4 findings R-8 and R-12 (2026-10-14)
+
+**Inputs.** The orchestrator forwarded two rows of the verified S4 review, `review.md`: R-12 (Major, spec-change plus tests-only) and R-8 (Major, code plus deviation-entry). I read `review.md`, the R-2, R-8 and R-12 sections of `reports/S4-findings-verifier.md`, request.md's R2 schema lines (304, 330), and, read-only, `OutputSchemaFormatter` (`vidbyte/providers/output_schema.py`), `descriptions.py:40`, the schema branch of `wire.py` (around line 569) and the record check at `codex_host.py:205`. I also read the vendor's `TurnStartParams.outputSchema` description in the CLI venv as text. The spec is at revision 5, `status: reviewed`, `updated: 2026-10-14`. §16 has rows R-8 and R-12, and §17 has the r5 row.
+
+**Dispositions:**
+- **R-12, accepted (new D-36).** INV-21 is now one sentence. It says that `turn/start` sends the schema to Codex as `outputSchema`, and that the completed answer is checked locally with `OutputSchemaFormatter.validate`, the check `CodexHarnessAgent` also uses. A Pydantic model type must accept the whole answer. A mapping only requires the answer to parse as JSON, and its shape is left to Codex.
+  - EC-32 now covers only non-JSON answers and model rejections.
+  - New EC-83 accepts the undetected mapping mismatch (COMPLETED, no problem, `structured` = the parsed JSON).
+  - The `codex.schema_violation` "Detected by" cell follows; its next-step text is unchanged.
+  - D-36 says what the `output_schema` tool description and the `CodexSpawnRequest` docstring must state, so the repair agent can reword `descriptions.py:40` and the docstring.
+  - New EC-82 keeps the rule that an unusable schema is refused before any request: a type that is not a Pydantic model, or a mapping that cannot be serialized to JSON. That is what R-2's code fix does. I changed neither §8.5 nor §9.1 for R-2.
+  - R-25, the real local validator, is Q-10, non-blocking, default no. It is not built.
+- **R-8, accepted.** §17 deviation 1 is struck through and marked withdrawn, citing R-8: its budget reason was wrong, because `_reject_bad_seconds` and `_reject_small_int` already own both rules. Deviation 2 stays; the S4 review confirms that INV-25 needs it.
+
+**Judgement calls:**
+- **One sentence for INV-21.** The orchestrator asked for INV-21's text in one sentence, so the refusal rule moved to EC-82 and the wording rule to D-36, rather than into INV-21 bullets.
+- **AC-13 unchanged.** Its "invalid" case still holds for non-JSON answers, and the pack passes, so its test does not rely on a mapping shape mismatch. I did not open the test.
+- **§12.3 row 11 untouched.** It says the translator "validates structured output through" the helper, which names the helper correctly. The orchestrator's rules forbid editing it.
+
+**Scope.** No validator, dependency, option or field was added. The §8.4 budget, every §12.3 row, §8.5, §9.1, every AC row and the shared-file contract are unchanged. The self-check is clean: 18 sections, no ID gaps (D-36, EC-83, Q-10), 28 §12.3 rows, names unchanged. The only new path hit outside §11–§13 is D-36's request.md citation.
