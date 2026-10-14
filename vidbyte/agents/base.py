@@ -534,7 +534,11 @@ class BaseAgent(McpAttachableMixin):
             runtime_type=self.runtime_type.value,
             runtime_config=self._export_runtime_config(),
             algorithm=self.algorithm.name,
-            metadata=dict(self.metadata),
+            # @intent run-state-snapshot-owns-its-data
+            # A checkpoint must not share mutable objects with the live agent: InMemorySessionStore keeps this RunState
+            # as written, so a later in-place edit of the agent would rewrite an already-written checkpoint on that
+            # backend only. Mirrors the deep copy _restore_output_schema makes on the read side.
+            metadata=copy.deepcopy(dict(self.metadata)),
             agent_metadata=self._export_agent_metadata(),
             tool_names=tuple(self._tool_name(tool) for tool in self._agent_tool_items),
             history=tuple(serializer.message_to_dict(message) for message in self.history),
@@ -572,7 +576,8 @@ class BaseAgent(McpAttachableMixin):
             capabilities=tuple(state.capabilities),
             agent_metadata=agent_metadata,
             algorithm=None if state.algorithm in ("", "default") else state.algorithm,
-            metadata=dict(state.metadata),
+            # @intent run-state-snapshot-owns-its-data: the restored agent gets its own copy, so editing it cannot rewrite the checkpoint.
+            metadata=copy.deepcopy(dict(state.metadata)),
             tracer=tracer,
             trace=trace,
             output_schema=cls._restore_output_schema(state, output_schema),
@@ -704,7 +709,7 @@ class BaseAgent(McpAttachableMixin):
         if self.output_schema is None:
             return None
         if isinstance(self.output_schema, Mapping):
-            return {"kind": "mapping", "schema": dict(self.output_schema)}
+            return {"kind": "mapping", "schema": copy.deepcopy(dict(self.output_schema))}
         return {"kind": "type", "name": getattr(self.output_schema, "__name__", type(self.output_schema).__name__)}
 
     @staticmethod
