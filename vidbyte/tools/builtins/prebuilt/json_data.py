@@ -33,6 +33,7 @@ from vidbyte.lib.constants.prebuilt_tools import (
     PREBUILT_MAX_TEXT_CHARS,
 )
 from vidbyte.lib.enums.prebuilt_tools import JsonChangeKind, JsonType
+from vidbyte.lib.errors import ToolExecutionError
 from vidbyte.tools.builtins.prebuilt._support import (
     PrebuiltToolFunction,
     PrebuiltToolOutput,
@@ -244,9 +245,11 @@ class JsonDataToolFunctions:
     def extract_json_from_text(text: Annotated[str, Field(description="The text to search for embedded JSON, given as plain characters. Positions in the result count Unicode code points from 0, and each end position is just past its document. Only objects and arrays are extracted, never bare numbers or strings. The text may hold at most one hundred thousand characters.", max_length=PREBUILT_MAX_MEDIUM_TEXT_CHARS)]) -> PrebuiltToolOutput:
         """Find the JSON objects and arrays embedded in surrounding text, such as a model reply or a log line, and return each parsed value with its start and end positions. Use it to recover structured data from text that mixes prose and JSON. Candidates are tried at each opening brace or bracket from left to right, scalars are never extracted, documents never overlap, and a candidate that is invalid, holds NaN or Infinity, or nests deeper than 100 levels is skipped. At most 1,000 start positions are tried before truncated is set, and the tool has no failure case beyond the text length cap."""
         # Decode at each opening bracket, left to right, noting any
-        # non-finite constant instead of accepting it.
+        # non-finite constant instead of accepting it; the shared float
+        # hook refuses a number too large for a float.
         constants: list[str] = []
-        decoder = json.JSONDecoder(parse_constant=constants.append)
+        read_float = partial(PrebuiltToolSupport._read_json_float, "text")
+        decoder = json.JSONDecoder(parse_float=read_float, parse_constant=constants.append)
         found: list[dict[str, object]] = []
         position, starts, scan_truncated = 0, 0, False
         while (match := _OPENING_BRACKET.search(text, position)) is not None:
@@ -257,7 +260,7 @@ class JsonDataToolFunctions:
             constants.clear()
             try:
                 value, end = decoder.raw_decode(text, match.start())
-            except (ValueError, RecursionError):
+            except (ValueError, RecursionError, ToolExecutionError):
                 position = match.start() + 1
                 continue
 
