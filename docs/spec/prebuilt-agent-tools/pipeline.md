@@ -6,7 +6,7 @@ branch: feat/prebuilt-agent-tools
 base_commit: 8387d66680951766f02b0d740d78eb6450cb6419
 pr: https://github.com/cerredz/Vidbyte-SDK/pull/1072
 s3_head: 0fd73086
-s2_head: f421047e
+s2_head: 0c055c40
 test_tree: tests/features/prebuilt_tools/
 until: none
 started: 2026-10-14 02:46
@@ -62,6 +62,7 @@ started: 2026-10-14 02:46
 - 2026-10-14 — Not granted: a change to tests/features/prebuilt_tools/prebuilt_tool_harness.py:214 for the Windows-only asyncio socketpair accept() stall the verifier saw in 3 of 9 local runs under concurrent load. Environment flake (S3 saw the same), my sequential runs never stalled, CI runs on ubuntu; recorded as a known local flake with the workaround `-o faulthandler_timeout=60` + one rerun.
 - 2026-10-14 — Spec r7 (70df9458 + addendum e1c24bfb), status reviewed. D-19: the TOML dotted-key scan skips comments and multi-line strings whole (R-17). A.27 now pins parse_data_size huge/tiny exponents (sign from the exact value; zero with any exponent → 0.0). New EC-51; M-6 row fixed. No new constant/tool/parameter. Spot-check passed: revision 7; §6.2 byte-identical (8,847 chars); only spec.md + author report changed; tests and code untouched.
 - 2026-10-14 — Spec author's open item: `extract_numbers('0e5000')` returns no number, but the A.29 row ('expanded exactly'; 'a run of more than 4,000 digits is skipped') lists it as value '0', and r7's R-16 rule (zero with any exponent → 0) is the same exponent-bound path that R-16 copies from text_extraction.py:218-220. Added it to the S2 regression task as a consistency case (R-16 family) instead of a separate verifier round — the spec row pins it and the test author encodes the spec.
+- 2026-10-14 — S2 regression cases for re-review round 1 accepted (225ab221 tests, 0c055c40 report): 45 new cases (9 cap-sized TOML [watchdog], 8 A.20 rows, 9 A.27 rows, 18 R-16 host-context cases, 1 A.29 `0e5000` case). Red at 7fa8dd9c: 33 failed, 4364 passed (4,397 collected) — my own rerun identical. Spot-check: only tests/, test-plan.md and the S2 report changed; pushed; trailer present. Test baseline moved f421047e → 0c055c40. Launching S5 iteration 2.
 
 ## User replies (verbatim)
 - none
@@ -167,3 +168,5 @@ started: 2026-10-14 02:46
 - Build escaped-quote hostile inputs as `(chr(92) + '"') * k` — `chr(92)+'"' * k` is one backslash then k quotes and scans linearly — *source:* S1 author r7
 - `Decimal()` exponent limits are MAX_EMAX (10^18−1) and MIN_ETINY (about −2×10^18); regression cases use 20-digit exponents — *source:* S1 author r7
 - The watchdog child interpreter does not load `-p` pytest plugins; a prototype loaded via `-p` is not what [W] cases run — *source:* S1 author r7
+- Five TOML cases match `TOML_NESTING_MESSAGE = 'the TOML is nested deeper than 100 levels'` (formats row file); rewording the code's message breaks them — *source:* S2 r7 round
+- 12 green guards for round 2 must stay green, incl. `r17-key-after-literal-string` (fails if R-15's constant lands without R-17's fix) — *source:* S2 r7 round
