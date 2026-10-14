@@ -11,7 +11,6 @@ TESTS: tests/features/agent_output_connectors/test_output_connectors_new_destina
 
 from __future__ import annotations
 
-import base64
 import json
 from collections.abc import Callable
 
@@ -65,7 +64,7 @@ class ConfluencePageOutput(BaseOutput):
 
     async def send(self, reply: AgentMessage, content: OutputContent) -> DeliveryReceipt:
         """Create one published page titled with the reply title, holding the body as rich text."""
-        headers = {"authorization": "Basic " + base64.b64encode(f"{self._email}:{self._api_token}".encode()).decode()}
+        headers = {"authorization": OutputHttp.basic_authorization(self._email, self._api_token)}
         # The body keeps its headings, lists, and code blocks as ADF,
         # which Confluence takes as a JSON string.
         document = OutputAdf.document(OutputText.truncate(content.body, CONFLUENCE_BODY_MAX_CHARS))

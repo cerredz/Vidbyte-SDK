@@ -11,7 +11,6 @@ TESTS: tests/features/agent_output_connectors/test_output_connectors_wire_contra
 
 from __future__ import annotations
 
-import base64
 from collections.abc import Callable, Sequence
 
 from vidbyte.lib.constants.outputs import (
@@ -74,7 +73,7 @@ class JiraIssueOutput(BaseOutput):
 
     async def send(self, reply: AgentMessage, content: OutputContent) -> DeliveryReceipt:
         """Create one issue with a one-line summary and a rich-text description, or comment on the configured issue."""
-        headers = {"authorization": "Basic " + base64.b64encode(f"{self._email}:{self._api_token}".encode()).decode()}
+        headers = {"authorization": OutputHttp.basic_authorization(self._email, self._api_token)}
         # @intent jira-comment-link-is-built-from-its-id
         # A comment has no title field, so it carries the chat text.
         # Jira returns only the comment's id, so the link is built from

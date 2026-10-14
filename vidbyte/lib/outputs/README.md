@@ -42,7 +42,8 @@ is sent.
   document for Jira and Confluence.
 - `delivery.py`: `OutputHttp`, which sends one JSON or exact-bytes `POST` or
   `PATCH`, or reads one JSON `GET`, through `HttpTransport` and maps the
-  response to a receipt; `OutputResponses`, which reads an error code or a
+  response to a receipt, and builds the HTTP Basic header value that Jira
+  and Confluence share; `OutputResponses`, which reads an error code or a
   link from a response; and `OutputSmtp`, the single SMTP send.
 - `slack.py`: `SlackOutput`, an incoming-webhook message.
 - `discord.py`: `DiscordOutput`, a channel-webhook message or forum post with

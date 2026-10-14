@@ -3,7 +3,7 @@
 PURPOSE: Defines OutputHttp, OutputResponses, and OutputSmtp, which send a connector's requests and map each outcome to a DeliveryReceipt or an OutputRead.
 ROLE IN CODEBASE: Called by every connector's send in this package; HTTP goes through vidbyte/lib/http/transport.py, email through stdlib smtplib.
 ARCHITECTURE NOTE: Turns every HTTP and SMTP outcome into a receipt error code and owns the retry policy; the dispatcher adds only the deadline's network code and unexpected:<Type> for a connector bug.
-COMMON MODIFICATION PATTERNS: A new HTTP connector builds an OutputRequest and calls OutputHttp.post, patch, or read; it never calls HttpTransport itself.
+COMMON MODIFICATION PATTERNS: A new HTTP connector builds an OutputRequest and calls OutputHttp.post, patch, or read; it never calls HttpTransport itself. A connector that signs in with HTTP Basic builds its header value with OutputHttp.basic_authorization.
 KNOWN EDGE CASES: A 2xx without a usable https link is FAILED invalid_response; a read whose body is not JSON is FAILED invalid_response, and a read larger than OUTPUT_MAX_READ_BYTES is FAILED network; a partial SMTP refusal is FAILED, since a retry would duplicate the mail; a QUIT reply after the send never changes the receipt.
 RELATED DOCS: vidbyte/lib/outputs/README.md
 TESTS: tests/features/agent_output_connectors/test_output_connectors_http_failures.py and test_output_connectors_email.py
@@ -11,6 +11,7 @@ TESTS: tests/features/agent_output_connectors/test_output_connectors_http_failur
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import json
 import logging
@@ -106,6 +107,11 @@ class OutputHttp:
         except ValueError:
             return OutputRead(failure=DeliveryReceipt(destination, DeliveryStatus.FAILED, error_code=OUTPUT_ERROR_INVALID_RESPONSE))
         return OutputRead(data=data)
+
+    @staticmethod
+    def basic_authorization(username: str, password: str) -> str:
+        """Return the HTTP Basic authorization header value for one username and password."""
+        return "Basic " + base64.b64encode(f"{username}:{password}".encode()).decode()
 
     @staticmethod
     async def _write(destination: OutputDestination, request: OutputRequest, method: OutputMethod) -> DeliveryReceipt:
