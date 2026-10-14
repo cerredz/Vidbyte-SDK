@@ -80,14 +80,19 @@ class PrebuiltToolSupport:
     def parse_json_text(text: str, parameter_name: str) -> object:
         """Parse one JSON document, refusing non-finite constants and nesting deeper than the cap."""
         reject_constant = partial(PrebuiltToolSupport._reject_json_constant, parameter_name)
+        read_float = partial(PrebuiltToolSupport._read_json_float, parameter_name)
         try:
-            value = json.loads(text, parse_constant=reject_constant)
+            value = json.loads(text, parse_float=read_float, parse_constant=reject_constant)
         except json.JSONDecodeError as exc:
             problem = f"parsing stopped at line {exc.lineno}, column {exc.colno}: {exc.msg}"
             raise PrebuiltToolSupport.argument_error(parameter_name, problem, "the text of one valid JSON document") from exc
         except RecursionError as exc:
             problem = f"the JSON is nested deeper than {PREBUILT_MAX_JSON_NESTING} levels"
             raise PrebuiltToolSupport.argument_error(parameter_name, problem, "JSON nested at most that deep") from exc
+        except ValueError as exc:
+            # Python refuses to read an integer of over 4,300 digits.
+            problem = "it holds an integer with more digits than Python reads from text"
+            raise PrebuiltToolSupport.argument_error(parameter_name, problem, "JSON whose integers have at most 4,300 digits") from exc
         # @intent prebuilt-json-nesting-cap
         # A document nested past the cap would make the output
         # serializer recurse too deep after the tool returns, where
@@ -103,6 +108,16 @@ class PrebuiltToolSupport:
         # are not JSON and would break the finite-number output rule.
         problem = f"the JSON contains the non-finite constant {constant}"
         raise PrebuiltToolSupport.argument_error(parameter_name, problem, "JSON whose numbers are all finite")
+
+    @staticmethod
+    def _read_json_float(parameter_name: str, number_text: str) -> float:
+        # json.loads calls this for every number with a fraction or an
+        # exponent; one such as 1e400 overflows to infinity, which
+        # would break the finite-number output rule.
+        value = float(number_text)
+        if not math.isfinite(value):
+            raise PrebuiltToolSupport.argument_error(parameter_name, "the JSON contains a number too large for a float", "JSON whose numbers are all finite")
+        return value
 
     @staticmethod
     def parse_records_json(text: str, parameter_name: str) -> list[dict[str, object]]:
@@ -215,8 +230,8 @@ class PrebuiltToolSupport:
             else:
                 continue
             deepest = max(deepest, level)
-            # Only containers can go deeper, so scalars are never queued;
-            # this keeps the stack small for long flat arrays.
+            # Only containers can go deeper, so scalars are never
+            # queued; this keeps the stack small for long flat arrays.
             pending.extend((child, level + 1) for child in children if isinstance(child, (dict, list, tuple, set, frozenset)))
         return deepest
 
