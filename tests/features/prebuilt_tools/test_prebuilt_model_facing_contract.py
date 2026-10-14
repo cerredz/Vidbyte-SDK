@@ -4,7 +4,7 @@ PURPOSE: Model-facing contract of every prebuilt tool: description depth and the
 ROLE IN CODEBASE: Reads tool.spec() and Tools.provider_schemas of the session library built from vidbyte.tools.toolsets.PrebuiltTools, counts sentences with the repository's own lint SentenceCounter, and sends over-cap calls through FunctionTool.execute.
 ARCHITECTURE NOTE: The sentence counter is imported from lint/rules/s025_model_facing_description_depth.py so the tests and the S025 lint rule can never disagree about what a sentence is. Caps come from the hand-copied parameter table, never from the live schema; since spec r4 every capped parameter states its value.
 FUNCTION INVENTORY: test_tool_description_has_four_or_five_sentences_and_no_example; test_parameter_descriptions_have_four_or_five_sentences_and_no_example; test_provider_schemas_declare_every_tool_once; test_one_over_cap_argument_fails_validation_naming_the_parameter; over_cap_values builds each argument that is exactly one unit over a cap (a list's item cap and its item-count cap separately, and each TextList cap inside a list of lists) while still matching any pattern.
-COMMON MODIFICATION PATTERNS: Add an example marker to EXAMPLE_MARKERS only when it is precise enough not to flag ordinary prose; add a provider to PROVIDERS when the SDK formatter gains one.
+COMMON MODIFICATION PATTERNS: Add an example marker to EXAMPLE_MARKERS only when it is precise enough not to flag ordinary prose (ILLUSTRATIVE_LITERAL follows the r6 INV-9 wording and flags only a literal that illustrates a rule); add a provider to PROVIDERS when the SDK formatter gains one.
 WHAT NOT TO DO IN THIS FILE: 1. Do not reimplement sentence counting; import SentenceCounter. 2. Do not loosen the one-over-cap check to "any validation error"; the error must name the capped parameter and its cap.
 KNOWN EDGE CASES: Pydantic reports every failing field, so the cap test sends only the capped argument and looks for that argument's own "at most" message among the parts. A capped string with a pattern needs a fill character that matches the pattern, or the error would be about the pattern instead of the length; no fill matches the UtcOffset pattern, which works only because pydantic reports a string's length before its pattern. A list with an item cap is checked twice, once one item too long and once one item too many. The list of lists intersect_lists.lists is checked three times: one list too many, one inner list one item too long (loc lists.0), and one inner string one character too long (loc lists.0.0); the inner cases send min_lists lists so the outer minimum never fails beside them.
 RELATED DOCS: tests/features/prebuilt_tools/FEATURE.md; docs/spec/prebuilt-agent-tools/spec.md (INV-9, INV-16, INV-21, AC-7, AC-8, AC-9); lint/rules/s025_model_facing_description_depth.py
@@ -25,7 +25,10 @@ from tests.features.prebuilt_tools.prebuilt_parameter_data import TOOL_PARAMETER
 from tests.features.prebuilt_tools.prebuilt_tool_harness import SchemaArgumentFactory, ToolRunner, describe_result
 from vidbyte.tools.types import ToolStatus
 
-EXAMPLE_MARKERS = re.compile(r"\bfor example\b|\bfor instance\b|\be\.g\.|\b\d{4}-\d{2}-\d{2}\b", re.IGNORECASE)
+# INV-9 (spec r6) also counts a literal value that illustrates a rule as an example: a type word followed by a literal
+# ("the number 1") or a literal compared with a literal ("true never equals 1", "1 equals 1.0").
+ILLUSTRATIVE_LITERAL = r"\b(?:number|string|integer|float|boolean) (?:-?\d|true\b|false\b|null\b)|\b(?:-?\d+(?:\.\d+)?|true|false|null) (?:never |does not |do not )?(?:equals?|matche?s?) (?:-?\d|true\b|false\b|null\b)"
+EXAMPLE_MARKERS = re.compile(r"\bfor example\b|\bfor instance\b|\be\.g\.|\b\d{4}-\d{2}-\d{2}\b|" + ILLUSTRATIVE_LITERAL, re.IGNORECASE)
 PROVIDERS = ("openai", "anthropic", "gemini")
 FILL_CHARACTERS = ("1", "a", "0")
 

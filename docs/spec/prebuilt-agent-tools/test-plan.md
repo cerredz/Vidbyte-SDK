@@ -1,8 +1,8 @@
 # Test plan: A library of 250+ prebuilt agent tools in vidbyte-sdk
 
-Spec: `docs/spec/prebuilt-agent-tools/spec.md` r4 (the pack was written against r3 and tightened to r4; see "Spec r4 tightening") · Framework: pytest 8.3.5 with pytest-asyncio 1.3.0 (strict mode; the pack uses `asyncio.run` inside plain tests, so no marker is needed) on Python 3.11.0 · Prior art copied: `tests/features/sdk_operation_costs/test_operation_cost_contract.py` (pack and header shape), `tests/features/coding_agent/conftest.py` (lazy feature import inside fixtures), `tests/test_function_tool_parameter_types.py` (the `FunctionTool` validation seam)
+Spec: `docs/spec/prebuilt-agent-tools/spec.md` r6 (the pack was written against r3, tightened to r4, and given the S4 regression cases from r6; see "Spec r4 tightening" and "Post-S4 regression cases") · Framework: pytest 8.3.5 with pytest-asyncio 1.3.0 (strict mode; the pack uses `asyncio.run` inside plain tests, so no marker is needed) on Python 3.11.0 · Prior art copied: `tests/features/sdk_operation_costs/test_operation_cost_contract.py` (pack and header shape), `tests/features/coding_agent/conftest.py` (lazy feature import inside fixtures), `tests/test_function_tool_parameter_types.py` (the `FunctionTool` validation seam)
 
-Pack: `tests/features/prebuilt_tools/`. It has 19 test files, 4,310 collected tests, and 4 support modules (`conftest.py`, `prebuilt_tool_harness.py`, `prebuilt_catalogue_data.py`, `prebuilt_parameter_data.py`), plus `FEATURE.md` and `README.md`. Each Appendix A tool has at least one exact-output case at the model seam. The row files hold 1,353 success cases and 523 failure cases, and each row-group file adds a few property tests.
+Pack: `tests/features/prebuilt_tools/`. It has 20 test files, 4,352 collected tests, and 4 support modules (`conftest.py`, `prebuilt_tool_harness.py`, `prebuilt_catalogue_data.py`, `prebuilt_parameter_data.py`), plus `FEATURE.md` and `README.md`. Each Appendix A tool has at least one exact-output case at the model seam. The row files hold 1,370 success cases and 525 failure cases, and each row-group file adds a few property tests. `test_prebuilt_hostile_inputs.py` adds 15 cap-sized hostile cases under a liveness watchdog and 8 hostile-host decimal-context cases.
 
 ## Coverage map
 
@@ -42,6 +42,18 @@ Pack: `tests/features/prebuilt_tools/`. It has 19 test files, 4,310 collected te
 | EC-14 | the row files (`count_bytes_in_encoding` with "€" in latin_1 or ascii; encoding tools erroring on unencodable text) | unit | `UnicodeEncodeError` escapes. | r4 EC-14 states that a lone surrogate fails pydantic validation before any tool runs, so that route is in "not written"; unencodable text uses real characters. |
 | EC-15 to EC-19, EC-21 to EC-23, EC-34 to EC-36 | the row files (CRLF and CR lines; ß, İ, ﬁ positions; 03/04/2025; clamping; naive is UTC; float overflow; a single value; divide by zero; mixed-type sort; CSV long row and duplicate header; `-86400` on Windows) | unit | Each edge row's specific wrong output. | — |
 | r4 error mappings: A.30 null character, ElementPath, `domain_too_long`, `fiscal_quarter`, `bitwise_operation`, `business_days_between` | `test_prebuilt_rows_code_network.py` → `verify_python_syntax-null-character` and six `*-null-character` bad cases; `test_prebuilt_rows_formats_encoding.py` → `xml_find_elements-bare-attribute-key-error` (beside the `[` and `/b` cases); `test_prebuilt_rows_identifiers_lists_graphs.py` → `verify_email_syntax-domain-254-before-address-length`; `test_prebuilt_rows_time.py` → `fiscal_quarter-quarter-ends-after-9999`, `fiscal_quarter-quarter-starts-before-year-1`, `business_days_between-all-days-weekend`; `test_prebuilt_rows_geometry_bits_markdown.py` → `bitwise_operation-shift-without-amount`, `bitwise_operation-shift-past-bit-width` | unit | `ValueError: source code string cannot contain null bytes` escapes from `ast.parse` or `ast.literal_eval`, or names the wrong parameter; `KeyError` from `findall("@")` escapes; the address-length check runs first, so `domain_too_long` is never returned; `OverflowError` at the year-1 and year-9999 quarter edges escapes; a missing shift amount leaks `TypeError`, or a shift past the bit width is accepted, instead of error(`right`); seven weekend days give 0 business days instead of error(`weekend_days`). | Each case names the parameter r4 assigns (`source`, `literal`, `path`, `target_date`, `right`, `weekend_days`) and must have the INV-15 form; `verify_python_syntax` must return `valid: false` with a non-empty error and null line and column. The stdlib behavior was probed on Python 3.11: `ast.parse("a\0")` raises `ValueError`, `findall("@")` raises `KeyError`. The email address is 256 characters with a 254-character domain, so both problems apply and only r4's order picks `domain_too_long`; the existing 253-character-domain case still expects `address_too_long`. |
+| S4 R-1, NFR-7 | `test_prebuilt_hostile_inputs.py` → `test_hostile_input_returns_documented_output[extract_markdown_headings-r1-space-run-before-hash-text]` | hostile input under the watchdog | `# a`, 450,000 spaces, and `#x` takes minutes, because the closing-hash pattern starts a new scan at every space. | The call runs in a child interpreter that is killed at 30 s, and the exact heading is compared: the text keeps the spaces and `#x`, and the anchor has 450,000 hyphens. Neither a hang nor a fix that drops `#x` passes. |
+| S4 R-2 | hostile: `extract_numbers-r2-comma-chain-ending-in-a-digit`, `extract_money_amounts-r2-comma-chain-without-currency`; `test_prebuilt_rows_extraction.py` → `extract_numbers-comma-list-keeps-every-item`, `extract_numbers-group-followed-by-digit-splits` | hostile under the watchdog; unit | A comma chain that fails at its end is scanned again from every comma, which takes minutes at the cap. A fix that drops list items, as the rejected reviewer guard does (`1,2,3` → `1`), is also caught. | The chain case pins count 250,000 and the first 1,000 entries. The two row cases pin the A.29 preamble's split. They pass today, so they guard the fix rather than the bug. |
+| S4 R-3, INV-14 | `test_prebuilt_rows_code_network.py` → `verify_ip_address-ipv6-zone-suffix-kept` | unit | `fe80::1%eth0` leaks `AddressValueError`. | The output is exact, with the zone after the zone-free exploded address. |
+| S4 R-4, INV-9 (r6) | `test_prebuilt_model_facing_contract.py` → `EXAMPLE_MARKERS` gains `ILLUSTRATIVE_LITERAL`, used by both description tests | contract | A description illustrates a rule with literal values ("the number 1", "true never equals 1", "1 equals 1.0"). | Scanned over all 910 built descriptions, it flags exactly the 3 that R-4 names and nothing else. It also misses the review's general rewordings. |
+| S4 R-5, M-1, INV-19 | `test_prebuilt_rows_json_csv.py` → `extract_json_from_text-float-overflow-candidate-skipped`, `-negative-and-capital-e-overflow-skipped`, `-scan-continues-after-overflow`; `verify_json_syntax-float-overflow-invalid`, `-integer-of-4400-digits-invalid` | unit | `1e400` reaches the output as `Infinity`, or `verify_json_syntax` calls `1e400` valid. | `parse_tool_output` rejects non-finite constants, and the document lists are exact. The 4,400-digit case already holds and guards the M-1 fix. |
+| S4 R-6 | hostile: `toml_to_json-r6-dotted-bare-key`, `-r6-dotted-table-header`, `-r6-dotted-inline-table-key`, `-r6-exactly-100-segments-still-accepted` | hostile under the watchdog | `tomllib` is quadratic in the segments of one dotted key, which takes minutes at the cap in all three key forms. A pre-scan that refuses exactly 100 segments is also caught. | Today each form still ends in the right error after the delay, so only the watchdog turns it red. The 100-segment case pins the exact 100-level value. |
+| S4 R-7, EC-48 | formats rows `xml_find_elements-repeated-descendant-listed-once`, `-chain-of-60-has-58-distinct-matches`; hostile `-r7-six-descendant-steps`, `-r7-five-steps-matching-nothing`, `-r7-positional-predicate-over-siblings`, `-r7-many-siblings-counted-in-full` | unit; hostile under the watchdog | The stdlib's repeated descendant matches leak into the output (3 instead of 2, 1,711 instead of 58), 45,057,474 raw matches are built, a path that matches nothing reads millions of elements, `b[1]` over 249,998 siblings is quadratic, or the visit cap refuses an ordinary path. | The inputs sit far past or far under the 2,000,000-visit cap (spec §13 r6), so ElementPath internals cannot move a case across it. |
+| S4 R-8, EC-47 | text rows `strip_html_tags-open-tag-at-end-dropped`, `-open-comment-at-end-dropped`; geometry rows `extract_html_links-open-anchor-at-end-adds-no-link`, `-open-tag-at-end-not-in-link-text`, `html_table_to_records-open-cell-at-end-adds-no-cell`, `-open-tag-at-end-not-in-cell-text`; hostile `*-r8-open-tags-to-the-cap` (3 tools) | unit; hostile under the watchdog | `close()` scans an open tail again for every `<`, which takes hours at the cap on unpatched CPython (CVE-2025-6069). The tail also leaks into text, so the output depends on the patch release. | The outputs follow EC-47's rule, which gives the same result on every patch release. Two row cases, the spec's own `<a href="u"` and `<td` examples, pass today and guard the fix. |
+| S4 R-9, EC-49 | hostile `apply_json_patch-r9-work-total-at-operation-49` | hostile under the watchdog | 1,000 operations that each copy or remove a 200,001-character value succeed after about 13 s of work. | It requires error(`patch_json`) containing `operation 49`, the index at which the r6 work total passes 10,000,000. Today the call succeeds. |
+| S4 R-10, EC-50 | `prebuilt_parameter_data.py` `substring` cap 500 (the AC-7 schema and over-cap tests); text rows `find_substring_positions-substring-over-search-cap`, `replace_all_occurrences-case-insensitive-find-over-search-cap`, `-case-sensitive-find-keeps-short-text-cap` | contract; unit | An overlapping or case-insensitive search with a 10,000-character search string costs the text length times that length. | The cap is checked as a number and with one-over input. The case-sensitive 10,000-character case passes today and guards against over-refusal. |
+| S4 R-12, §9.2 item 18 | `test_prebuilt_hostile_inputs.py` → `test_hostile_host_decimal_context_cannot_change_a_result` (8 cases) | integration (host state) | A host decimal context that traps `Inexact` and `Rounded` at `Emax=5` makes tools refuse or leak `Inexact` and `Overflow`. | The context is set in the test thread before `asyncio.run`, so `asyncio.to_thread` copies it into the worker, and it is restored in `finally`. The 8 cases reach all 8 sites R-12 lists: finance growth, arc-seconds, timestamp scaling, the three duration parsers, JWT claim times, and money suffixes. |
+| S4 R-14 | all of the above | — | The pack was green with every finding present. | Every new case is red at `c225debf` apart from the listed guards (see "Red run (post-S4)"). |
 
 ### Row files (AC-11): provenance of expected values
 
@@ -85,9 +97,12 @@ Spec r4 (commit `5d93fe88`) fixed the values r3 left open. **No existing asserti
 | Cross-version pins (EC-24 seeded draws, EC-25 PEP 695 grammar, EC-26 `ipaddress` flags of 100.64.0.1, EC-38 new Unicode characters) | They would fail on one of the two CI Pythons. Seeded tools are tested for same-seed identity, seed sensitivity, structure, and the row's documented generator calls in the running interpreter. |
 | EC-10 catastrophic regex backtracking | It is an accepted limitation, and a test would hang. |
 | EC-28 timeout, EC-27 parallel threads, EC-40 hot-loop rebuild cost | These are runtime or performance behavior with no tool-side contract to observe deterministically. Statelessness is covered by INV-6, INV-13, and the repeated-call determinism test. |
-| A meta-test that every Appendix A tool has a success case | It would pass before implementation, which is not red. Coverage was verified by script instead: 265 of 265 tools, 1,353 success cases, 523 failure cases. |
+| A meta-test that every Appendix A tool has a success case | It would pass before implementation, which is not red. Coverage was verified by script instead: 265 of 265 tools, 1,370 success cases, 525 failure cases. |
 | Row-level over-cap cases for `add_business_days` (1,001 holidays, 8 weekend days) | AC-7 sends exactly these arguments for every capped list, so a row copy would only duplicate it. |
 | Random (unseeded) fuzzing or hypothesis | Failures would not reproduce. The schema-derived sweep is deterministic and edge-biased. |
+| S4 R-11 (helper call chain) and R-13 (shared rules written several times) | Neither changes any output, so a behavior test would pass before and after the repair. A structure test would pin private helper names, and the orchestrator ruled those out. |
+| A watchdog for the three count tests (2^128 subnets, 10^15 integers, C(39,20)) | The orchestrator granted the watchdog for the hostile-input regression cases only. A regressed count test still hangs instead of failing, as before. |
+| A liveness case for `find_substring_positions` at the new 500-character cap | At 500 characters both the current and the fixed code finish in about 1 s, so the case could not fail. The cap itself is the fix, and AC-7 checks it. |
 
 ## Red run (before implementation)
 
@@ -182,6 +197,89 @@ PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider tests/test_tools_catal
 338 passed, 12 skipped in 15.30s
 ```
 
+## Post-S4 regression cases (spec r6)
+
+The S4 review (`review.md`) confirmed 14 findings, R-1 to R-14, while the pack was green: that is R-14 itself. Spec r6 (`f9e83a65`) turned each finding into exact row behavior. These cases went in before the repair, against `c225debf`, with no production file edited. Each value was read from its r6 row, EC-47 to EC-50, §9.2 item 18, or §13, and probed on the current code (Python 3.11.0).
+
+**Where the cases live.**
+- Fast row cases sit in the matching row file under a `# S4 R-n` comment. They cover R-2, R-3, R-5, M-1, R-7, R-8, and R-10.
+- Cap-sized hostile inputs and the R-12 host-context cases are in the new `test_prebuilt_hostile_inputs.py`, and each case label starts with its R-id.
+- R-4 extends `EXAMPLE_MARKERS` in the model-facing contract with `ILLUSTRATIVE_LITERAL`. It goes only as far as INV-9's r6 wording: a type word followed by a literal ("the number 1"), or a literal compared with a literal ("true never equals 1", "1 equals 1.0").
+- R-10's granted cap change, `find_substring_positions.substring` from 10,000 to 500, is in `prebuilt_parameter_data.py`, so the existing AC-7 schema and over-cap tests check it.
+- R-11 and R-13 change no output, so they get no case (see "Tests deliberately NOT written").
+
+**Watchdog decision (R-14).** The orchestrator allowed a liveness watchdog for the hostile-input regression cases only. I chose one child interpreter per call: `subprocess.run([sys.executable, "-c", CHILD_PROGRAM], input=request, timeout=30, env=...)`, with the worktree first on `PYTHONPATH`.
+- When the timeout passes, `subprocess.run` kills the child: `TerminateProcess` on Windows, `SIGKILL` on Linux. A hung call stops using CPU. A daemon thread could not be stopped, and it would slow the rest of the run.
+- The request goes to the child as JSON on stdin, because a 1,000,000-character argument does not fit on a Windows command line.
+- The child builds only the tool's own category and calls `FunctionTool.execute`, the same seam as every other case. The parent rebuilds a `ToolResult` and reuses `ToolRunner.check_success` and `check_failure`, so the exact-output rules are the same as in the row files.
+- 30 s is about 15 times NFR-7's 2 s, and no test asserts a speed. Each input is sized so the current code needs minutes or hours by S4's growth figures, while the S4 and r6 prototypes of the fix took at most 0.2 s (0.64 s for R-9's work cap).
+- Once green, the file costs one interpreter start per hostile case, 15 in all.
+
+| Hostile case | Input size (characters) | Current code (S4 and r6 figures) | Expected (r6) |
+|---|---|---|---|
+| R-1 `extract_markdown_headings` | 450,005 | 3.8 s at 100,000 spaces, four times as long per doubling: minutes | one level-1 heading on line 1; text keeps the 450,000 spaces and `#x`; anchor `a`, 450,000 hyphens, `x` |
+| R-2 `extract_numbers` | 1,000,000 | 3.3 s at 80,002, quadratic: minutes | count 250,000, truncated, the first 1,000 entries (`1`, then `000` at 2, 6, 10, …) |
+| R-2 `extract_money_amounts` | 999,997 | 6.5 s at 80,001, quadratic: minutes | count 0 |
+| R-6 `toml_to_json`, bare key, table header, inline table | 999,999 each | 4.6 s at 30,000 segments (bare) and 17 s at 160,000 (other forms), quadratic | error(`toml_text`) |
+| R-6 `toml_to_json`, exactly 100 segments | 201 | passes today (guard) | the 100-level value |
+| R-7 `xml_find_elements` `.` + `//a` × 6 on the 60-deep chain | 420 | 2.6 s and 366 MB, then success with 45,057,474 matches | error(`path`) |
+| R-7 `.` + `//a` × 5 + `//zzz` on the chain | 420 | 0.86 s, then success with 0 matches | error(`path`) |
+| R-7 `b[1]` over 249,998 siblings | 999,999 | 2.6 s at 20,000 siblings, quadratic: minutes | error(`path`) |
+| R-7 `.//b` over the same siblings | 999,999 | passes today (guard) | count 249,998, truncated, 1,000 `b` elements |
+| R-8 `strip_html_tags`, `extract_html_links`, `html_table_to_records` with `<a ` repeated to the cap | 999,997 to 1,000,000 | 11.4 s at 24,000, faster than quadratic: hours | `x`; the one closed link; the one-cell table |
+| R-9 `apply_json_patch`, 500 × (copy `/a` to `/b`, remove `/b`) on `{"a":[0 × 100,000]}` | 200,007 and 38,000 | 13.1 s, then success | error(`patch_json`) containing `operation 49` |
+
+**Green guards.** Eight new cases pass today on purpose. Each pins an r6 output the current code already gives, so a repair cannot over-correct:
+- `extract_numbers-comma-list-keeps-every-item` and `-group-followed-by-digit-splits` (R-2; the rejected reviewer guard breaks the first);
+- `toml_to_json-r6-exactly-100-segments-still-accepted` (R-6);
+- `xml_find_elements-r7-many-siblings-counted-in-full` (R-7);
+- `extract_html_links-open-anchor-at-end-adds-no-link` and `html_table_to_records-open-cell-at-end-adds-no-cell` (R-8; the spec's own examples);
+- `replace_all_occurrences-case-sensitive-find-keeps-short-text-cap` (R-10);
+- `verify_json_syntax-integer-of-4400-digits-invalid` (M-1).
+
+**Pre-existing test ids that turn red.** Five existing ids change result, all on purpose. The granted cap change turns two red: `test_tool_schema_matches_its_appendix_row[find_substring_positions]` ("maxLength is 10000, Appendix A says 500") and `test_one_over_cap_argument_fails_validation_naming_the_parameter[find_substring_positions]` (a 501-character `substring` passes validation). The R-4 marker, an addition to this pack's own `EXAMPLE_MARKERS`, turns three red: the two description tests for `diff_json_documents` and `group_records_by_field`, and the parameter test for `join_records`. No other existing id changed result, and no assertion in a test outside this pack was edited.
+
+## Red run (post-S4)
+
+Run against `c225debf` (Python 3.11.0, Windows 11), with the granted cap change as the only edit outside the test files and no production file edited. Collection: 4,352 tests, which is the 4,310 earlier tests plus 23 hostile cases and 19 row cases.
+
+```
+PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider tests/features/prebuilt_tools -rfE
+FAILED tests/features/prebuilt_tools/test_prebuilt_rows_text.py::test_text_rows_reject_bad_input[find_substring_positions-substring-over-search-cap]
+FAILED tests/features/prebuilt_tools/test_prebuilt_rows_text.py::test_text_rows_reject_bad_input[replace_all_occurrences-case-insensitive-find-over-search-cap]
+FAILED tests/features/prebuilt_tools/test_prebuilt_toolset_contract.py::test_tool_schema_matches_its_appendix_row[find_substring_positions]
+39 failed, 4313 passed in 357.24s (0:05:57)
+```
+
+The 39 failures, grouped by finding. "Watchdog" means the child was stopped at 30 s with "gave no result within the 30 s liveness watchdog". "Output" means the call returned and the exact r6 output or error did not match.
+
+| R-id | Failing test ids | Reason today |
+|---|---|---|
+| R-1 | hostile `extract_markdown_headings-r1-space-run-before-hash-text` | watchdog |
+| R-2 | hostile `extract_numbers-r2-comma-chain-ending-in-a-digit`, `extract_money_amounts-r2-comma-chain-without-currency` | watchdog |
+| R-3 | code_network `verify_ip_address-ipv6-zone-suffix-kept` | output: error `AddressValueError` ("Only hex digits permitted in '1%eth0'") |
+| R-4 | contract `test_tool_description_has_four_or_five_sentences_and_no_example[diff_json_documents]` and `[group_records_by_field]`, `test_parameter_descriptions_have_four_or_five_sentences_and_no_example[join_records]` | output: markers `true never equals 1` and `number 1` |
+| R-5 | json_csv `extract_json_from_text-float-overflow-candidate-skipped`, `-negative-and-capital-e-overflow-skipped`, `-scan-continues-after-overflow` | output: the overflowing candidate reaches the output as `Infinity` ("tool output contains the non-finite JSON constant Infinity") |
+| M-1 | json_csv `verify_json_syntax-float-overflow-invalid` | output: `valid` true |
+| R-6 | hostile `toml_to_json-r6-dotted-bare-key`, `-r6-dotted-table-header`, `-r6-dotted-inline-table-key` | watchdog |
+| R-7 | formats `xml_find_elements-repeated-descendant-listed-once` (count 3, expected 2), `-chain-of-60-has-58-distinct-matches` (count 1,711, expected 58); hostile `-r7-six-descendant-steps` (success, count 45,057,474), `-r7-five-steps-matching-nothing` (success, count 0); hostile `-r7-positional-predicate-over-siblings` | output, output; output, output; watchdog |
+| R-8 | hostile `strip_html_tags-r8-open-tags-to-the-cap`, `extract_html_links-r8-open-tags-to-the-cap`, `html_table_to_records-r8-open-tags-to-the-cap`; text `strip_html_tags-open-tag-at-end-dropped` (`x <b`), `-open-comment-at-end-dropped` (`a <!--x`); geometry `extract_html_links-open-tag-at-end-not-in-link-text` (`t<b`), `html_table_to_records-open-tag-at-end-not-in-cell-text` (`a<b`) | watchdog ×3; output ×4 |
+| R-9 | hostile `apply_json_patch-r9-work-total-at-operation-49` | output: success with `applied_operations` 1000 |
+| R-10 | text `test_text_rows_reject_bad_input[find_substring_positions-substring-over-search-cap]`, `[replace_all_occurrences-case-insensitive-find-over-search-cap]`; contract `test_one_over_cap_argument_fails_validation_naming_the_parameter[find_substring_positions]`; toolset `test_tool_schema_matches_its_appendix_row[find_substring_positions]` | output: success; success; 501 characters accepted; maxLength 10000 |
+| R-12 | hostile `test_hostile_host_decimal_context_cannot_change_a_result[...]`: `compound_interest_future_value-r12-growth`, `decimal_degrees_to_dms-r12-arc-seconds`, `unix_timestamp_to_datetime-r12-scaled-microseconds`, `parse_duration_text-r12-unit-phrase`, `-r12-iso-fraction`, `-r12-clock-fraction`, `decode_jwt_payload-r12-claim-times`, `extract_money_amounts-r12-magnitude-suffix` | output: `ToolExecutionError` ("leaves the decimal range") for the growth case, `Inexact` for arc-seconds, `Overflow` for the other six |
+
+That is 10 watchdog failures and 29 output failures. R-11 and R-13 have no case. The 8 green guards listed above all pass, and no other test changed result. Every new case was checked against its stated reason in the `-rfE` output; none fails on collection, a fixture, or a typo.
+
+```
+PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider tests/test_tools_catalog.py tests/test_function_tool_parameter_types.py tests/test_tool_core.py tests/features/coding_agent
+........................................................................ [ 61%]
+........................................................................ [ 82%]
+..............................................................           [100%]
+338 passed, 12 skipped in 19.97s
+```
+
+The neighbouring suites are unchanged. The lint result with these files staged is in the S2 report's post-S4 addendum.
+
 ## Notes for the implementer
 
 - The pack binds to exactly these names: `vidbyte.tools.toolsets.PrebuiltTools`, defined in `vidbyte.tools.toolsets.prebuilt` (the test checks `__module__`), with static methods `select_categories` and `get_tools`; `vidbyte.lib.enums.PrebuiltToolCategory` and the other 67 enums, defined in `vidbyte.lib.enums.prebuilt_tools` or `vidbyte.lib.enums.units` and listed in `vidbyte.lib.enums.__all__`; and `vidbyte.tools.builtins.prebuilt.<Category>ToolFunctions.tool_functions()`, whose functions live in `vidbyte.tools.builtins.prebuilt.<category value>` with `__qualname__` `<Category>ToolFunctions.<tool>`.
@@ -192,4 +290,6 @@ PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider tests/test_tools_catal
 - `SchemaArgumentFactory` builds argument sets from your live schemas. A string schema with a pattern that none of its samples match makes it raise "add one to the pools". Fix that by adding a sample to `PATTERN_SAMPLES` in `prebuilt_tool_harness.py`, which is a fixture change, not an assertion change.
 - r4 now states every interpretation the r3 pack had pinned on a loose row: unpadded `base64url` for all three `DigestFormat` users, single spaces in `number_to_english_words`, `time.isoformat()` for `time` keys, distinct-key `count` in `parse_dotenv_text`, distinct-value `count` in the `extract_*` rows, exclusive `end` in `extract_json_from_text`, and in-place replacement in `json_set_value`. Two readings remain the pack's own where r4 is silent, and reviewers should confirm them against the spec rather than change the tests casually. First, `get_python_function_signature` writes a function without a return annotation as `def run(self)`, with no arrow. Second, `detect_csv_dialect` `has_header` stays `ANY` in two cases, because the row does not say how the header is detected.
 - `NON_EMPTY_TEXT` in an expectation accepts any non-empty string and nothing else. It stands only where r4 fixes an error as non-empty text without giving its words, such as a rejected DOCTYPE or a JSON depth error.
-- The pack's runtime once green is dominated by the sweep tests: 13 calls per tool in the error contract, 6 in the side-effect tests, 3 in each of three determinism interpreters, and `find_unicode_character` at about 1 s per call (EC-37). The count tests (2^128 subnets, 10^15 integers, C(39,20) combinations) have no timeout of their own, so an implementation that enumerates hangs rather than fails; stop the run and read the test name.
+- The pack's runtime once green is dominated by the sweep tests: 13 calls per tool in the error contract, 6 in the side-effect tests, 3 in each of three determinism interpreters, and `find_unicode_character` at about 1 s per call (EC-37). The count tests (2^128 subnets, 10^15 integers, C(39,20) combinations) have no timeout of their own, so an implementation that enumerates hangs rather than fails; stop the run and read the test name. `test_prebuilt_hostile_inputs.py` starts one child interpreter per hostile case, 15 in all, and a regressed case costs its full 30 s watchdog.
+- For the S4 repair: every hostile case states the exact r6 output, so a repair that is fast but changes the output still fails. A watchdog failure reads "gave no result within the 30 s liveness watchdog"; run the call by hand at a smaller size to see the growth. Do not lower `WATCHDOG_SECONDS` or shrink an input to make a case pass.
+- R-12 sets the hostile decimal context with `decimal.setcontext` in the test thread, and `asyncio.to_thread` copies it into the worker. A tool passes only if every `Decimal` operation runs in its own fully specified `Context` (§9.2 item 18); `localcontext(prec=...)` alone inherits the host's traps and `Emax`.

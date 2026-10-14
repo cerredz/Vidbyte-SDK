@@ -3,10 +3,10 @@
 PURPOSE: Exact-output and error-behavior cases for every Appendix A row of the text_extraction category (A.29), run through FunctionTool.execute the way a model calls them.
 ROLE IN CODEBASE: One of the AC-11 row files in tests/features/prebuilt_tools/; it uses the tool_runner fixture from conftest.py and the ok and invalid case builders from prebuilt_tool_harness.py.
 ARCHITECTURE NOTE: Every expected value is hand-derived from the row text and §9.2, with positions recomputed by str.find on the same text rather than read back from the implementation.
-FUNCTION INVENTORY: test_extraction_rows_return_documented_output checks SUCCESS_CASES; test_extraction_rows_reject_bad_input checks FAILURE_CASES; counting_numbers builds the long extract_numbers expectation by arithmetic.
+FUNCTION INVENTORY: test_extraction_rows_return_documented_output checks SUCCESS_CASES; test_extraction_rows_reject_bad_input checks FAILURE_CASES; counting_numbers builds the long extract_numbers expectation by arithmetic; number_entry builds one extract_numbers entry.
 COMMON MODIFICATION PATTERNS: Add an ok(...) entry beside the tool's existing cases and recompute its positions with str.find before pinning them.
 WHAT NOT TO DO IN THIS FILE: 1. Do not pin an output detail a row leaves open; use ANY instead (spec r4 fixed the last one here: a percent match's text includes the % sign). 2. Do not add character-budget or quadratic-scan inputs here; test_prebuilt_resource_bounds.py owns them.
-KNOWN EDGE CASES: count keys beside unique-value lists count distinct values, not occurrences; a sign belongs to a number only after whitespace or an opening mark; "999.1.1.1" must not yield its tail "99.1.1.1".
+KNOWN EDGE CASES: count keys beside unique-value lists count distinct values, not occurrences; a sign belongs to a number only after whitespace or an opening mark; "999.1.1.1" must not yield its tail "99.1.1.1". Spec r6 (S4 R-2) splits a malformed comma chain at its commas: "1,2,3" gives 1, 2, and 3, and "1,000,0000" gives 1, 000, and 0000; the cap-sized chains live in test_prebuilt_hostile_inputs.py.
 RELATED DOCS: tests/features/prebuilt_tools/FEATURE.md; docs/spec/prebuilt-agent-tools/spec.md Appendix A.29 and §9.2 items 6, 9, 12, 15
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/prebuilt_tools/test_prebuilt_rows_extraction.py
 """
@@ -29,6 +29,11 @@ def counting_numbers(total: int) -> tuple[str, list[dict[str, Any]]]:
         entries.append({"text": word, "value": word, "position": position, "is_percent": False})
         position += len(word) + 1
     return " ".join(words), entries
+
+
+def number_entry(text: str, value: str, position: int) -> dict[str, Any]:
+    """One extract_numbers entry for a number written without a percent sign."""
+    return {"text": text, "value": value, "position": position, "is_percent": False}
 
 
 COUNTING_TEXT, COUNTING_ENTRIES = counting_numbers(1001)
@@ -106,6 +111,19 @@ SUCCESS_CASES = [
         {"text": COUNTING_TEXT},
         {"numbers": COUNTING_ENTRIES[:1000], "count": 1001, "truncated": True},
         "item-cap-1000",
+    ),
+    # S4 R-2 (spec r6 A.29 preamble): a malformed comma chain splits at its commas, and list items stay separate.
+    ok(
+        "extract_numbers",
+        {"text": "1,2,3"},
+        {"numbers": [number_entry("1", "1", 0), number_entry("2", "2", 2), number_entry("3", "3", 4)], "count": 3, "truncated": False},
+        "comma-list-keeps-every-item",
+    ),
+    ok(
+        "extract_numbers",
+        {"text": "1,000,0000"},
+        {"numbers": [number_entry("1", "1", 0), number_entry("000", "0", 2), number_entry("0000", "0", 6)], "count": 3, "truncated": False},
+        "group-followed-by-digit-splits",
     ),
     ok(
         "extract_dates",

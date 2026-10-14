@@ -69,6 +69,9 @@ JSON_DATA_CASES = [
     ok("verify_json_syntax", {"json_text": "[1, NaN]"}, {"valid": False, "error": NON_EMPTY_TEXT, "line": None, "column": None, "position": None, "top_level_type": None}, "nan-constant-invalid"),
     ok("verify_json_syntax", {"json_text": "[" * 100 + "]" * 100}, {"valid": True, "error": None, "line": None, "column": None, "position": None, "top_level_type": "array"}, "depth-100-valid"),
     ok("verify_json_syntax", {"json_text": "[" * 101 + "]" * 101}, {"valid": False, "error": NON_EMPTY_TEXT, "line": None, "column": None, "position": None, "top_level_type": None}, "depth-101-invalid"),
+    # S4 M-1 (spec r6 A.17): valid means every JSON tool here accepts the text, so a float overflow and a 4,400-digit integer are invalid.
+    ok("verify_json_syntax", {"json_text": '{"a":1e400}'}, {"valid": False, "error": NON_EMPTY_TEXT, "line": None, "column": None, "position": None, "top_level_type": None}, "float-overflow-invalid"),
+    ok("verify_json_syntax", {"json_text": "1" * 4400}, {"valid": False, "error": NON_EMPTY_TEXT, "line": None, "column": None, "position": None, "top_level_type": None}, "integer-of-4400-digits-invalid"),
     ok("format_json", {"json_text": '{"b": 1, "a": [1, 2], "c": {}}'}, {"json": '{\n  "b": 1,\n  "a": [\n    1,\n    2\n  ],\n  "c": {}\n}'}, "default-indent-2"),
     ok("format_json", {"json_text": '{"b": {"d": 1, "c": 2}, "a": []}', "sort_keys": True}, {"json": '{\n  "a": [],\n  "b": {\n    "c": 2,\n    "d": 1\n  }\n}'}, "sort-keys"),
     ok("format_json", {"json_text": '{ "a" : 1 , "b" : [ 1.0 , "é" ] }', "indent": 0}, {"json": '{"a":1,"b":[1.0,"é"]}'}, "indent-0-compact"),
@@ -116,6 +119,10 @@ JSON_DATA_CASES = [
     ok("extract_json_from_text", {"text": '[1, {"x": 2}] {"y": [3]}'}, {"documents": [{"start": 0, "end": 13, "value": [1, {"x": 2}]}, {"start": 14, "end": 24, "value": {"y": [3]}}], "count": 2, "truncated": False}, "continues-after-document"),
     ok("extract_json_from_text", {"text": "[" * 101 + "]" * 101 + ' {"a": 1}'}, {"documents": [{"start": 1, "end": 201, "value": nested_empty_lists(100)}, {"start": 203, "end": 211, "value": {"a": 1}}], "count": 2, "truncated": False}, "too-deep-candidate-skipped"),
     ok("extract_json_from_text", {"text": "no json here 1 2 3"}, {"documents": [], "count": 0, "truncated": False}, "nothing-found"),
+    # S4 R-5 (spec r6 A.17, INV-19): a float overflow makes a candidate invalid, so it is skipped and the scan goes on.
+    ok("extract_json_from_text", {"text": 'x {"a":1e400} y'}, {"documents": [], "count": 0, "truncated": False}, "float-overflow-candidate-skipped"),
+    ok("extract_json_from_text", {"text": '{"a":-1e999,"b":[1E309]}'}, {"documents": [], "count": 0, "truncated": False}, "negative-and-capital-e-overflow-skipped"),
+    ok("extract_json_from_text", {"text": 'x {"a":1e400} {"b":2} y'}, {"documents": [{"start": 14, "end": 21, "value": {"b": 2}}], "count": 1, "truncated": False}, "scan-continues-after-overflow"),
 ]
 
 JSON_RECORDS_CASES = [

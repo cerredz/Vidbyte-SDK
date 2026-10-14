@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Every expected value was computed without the implementation:
 FUNCTION INVENTORY: SUCCESS_CASES and FAILURE_CASES are the parametrized tables; test_geometry_bits_markdown_rows_return_documented_output and test_geometry_bits_markdown_rows_reject_bad_input check them; test_fenced_code_block_code_and_lines checks the exact code and fence lines of extract_fenced_code_blocks on a document that ends with a line break; test_malformed_html_table_never_raises checks the HTML parser rule and the column names of a table with no header row.
 COMMON MODIFICATION PATTERNS: Add a row case as one ok(...), bad(...), or invalid(...) entry with a hand-computed expectation and a label that says what it proves.
 WHAT NOT TO DO IN THIS FILE: 1. Do not compute expectations by calling the tool functions or copying their algorithm; use a different route. 2. Do not add over-output-cap cases here; the resource-bounds module owns INV-20.
-KNOWN EDGE CASES: decimal_degrees_to_dms must round 0.000875 degrees to 3.2 arc-seconds, while float rounding of 0.000875 * 3600 gives 3.1. Spec r4 fixes the setext heading line (its text line, not the underline), the autolink text (the URL between the angle brackets), and the fenced block lines (the fence lines; an unclosed block ends at the last line), so none of them is left open.
+KNOWN EDGE CASES: decimal_degrees_to_dms must round 0.000875 degrees to 3.2 arc-seconds, while float rounding of 0.000875 * 3600 gives 3.1. Spec r4 fixes the setext heading line (its text line, not the underline), the autolink text (the URL between the angle brackets), and the fenced block lines (the fence lines; an unclosed block ends at the last line), so none of them is left open. Spec r6 EC-47 (S4 R-8) drops markup left open at the end of HTML input before close(), so the output is the same on every CPython patch release.
 RELATED DOCS: tests/features/prebuilt_tools/FEATURE.md; docs/spec/prebuilt-agent-tools/spec.md Appendix A.26, A.27, A.28 and §9.2
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/prebuilt_tools/test_prebuilt_rows_geometry_bits_markdown.py
 """
@@ -376,6 +376,32 @@ SUCCESS_CASES = [
             "truncated": False,
         },
         "no-base",
+    ),
+    # S4 R-8 (spec r6 A.28, EC-47): markup left open at the end of the input adds no link and no cell, and does not
+    # leak into the text of the link or cell before it.
+    ok(
+        "extract_html_links",
+        {"html_text": '<a href="x">t</a> <a href="u"'},
+        {"links": [{"url": "x", "text": "t", "rel": None}], "count": 1, "truncated": False},
+        "open-anchor-at-end-adds-no-link",
+    ),
+    ok(
+        "extract_html_links",
+        {"html_text": '<a href="u">t<b'},
+        {"links": [{"url": "u", "text": "t", "rel": None}], "count": 1, "truncated": False},
+        "open-tag-at-end-not-in-link-text",
+    ),
+    ok(
+        "html_table_to_records",
+        {"html_text": "<table><tr><td>a</td><td"},
+        {"columns": ["column_1"], "records": [{"column_1": "a"}], "table_count": 1},
+        "open-cell-at-end-adds-no-cell",
+    ),
+    ok(
+        "html_table_to_records",
+        {"html_text": "<table><tr><td>a<b"},
+        {"columns": ["column_1"], "records": [{"column_1": "a"}], "table_count": 1},
+        "open-tag-at-end-not-in-cell-text",
     ),
 ]
 

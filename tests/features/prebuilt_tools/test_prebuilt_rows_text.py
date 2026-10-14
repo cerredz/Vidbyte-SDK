@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Cases are plain data built with ok, bad, and invalid from pre
 FUNCTION INVENTORY: test_text_rows_return_documented_output checks SUCCESS_CASES; test_text_rows_reject_bad_input checks FAILURE_CASES; test_strip_html_tags_turns_block_tags_into_line_breaks checks the exact text the spec r4 block-tag rule gives; test_fill_text_template_reports_at_most_twenty_missing_names checks the reported-name cap.
 COMMON MODIFICATION PATTERNS: Add a case to SUCCESS_CASES or FAILURE_CASES when a row gains an edge; compute the expectation by hand from the row and §9.2, never by running the tool.
 WHAT NOT TO DO IN THIS FILE: 1. Do not copy an output of the implementation into an expectation; a copy cannot catch its mistakes. 2. Do not add the 1,000,000-character INV-20 amplification inputs here; test_prebuilt_resource_bounds.py owns them.
-KNOWN EDGE CASES: Positions are code-point indices into the original text, so astral characters count once and case-insensitive matches of ß and İ never shift positions (EC-16). Line breaks are \r\n, \n, and \r, a trailing break does not start a line, and rebuilt text joins lines with \n and keeps one trailing \n (EC-15).
+KNOWN EDGE CASES: Positions are code-point indices into the original text, so astral characters count once and case-insensitive matches of ß and İ never shift positions (EC-16). Line breaks are \r\n, \n, and \r, a trailing break does not start a line, and rebuilt text joins lines with \n and keeps one trailing \n (EC-15). Spec r6 caps find_substring_positions.substring and a case-insensitive find at 500 characters (S4 R-10, EC-50), and strip_html_tags drops markup left open at the end (S4 R-8, EC-47).
 RELATED DOCS: tests/features/prebuilt_tools/FEATURE.md; docs/spec/prebuilt-agent-tools/spec.md (Appendix A.12, Appendix A.13, §9.2 items 6 to 10)
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/prebuilt_tools/test_prebuilt_rows_text.py
 """
@@ -404,6 +404,13 @@ SUCCESS_CASES = [
         "max-replacements-left-to-right",
     ),
     ok("replace_all_occurrences", {"text": "aaa", "find": "aa", "replacement": "x"}, {"text": "xa", "replacements": 1}, "non-overlapping"),
+    # S4 R-10 (spec r6 A.13, EC-50): a case-sensitive search is linear, so it keeps the full ShortText cap for find.
+    ok(
+        "replace_all_occurrences",
+        {"text": "a" * 20000 + "a" * 9999 + "b", "find": "a" * 9999 + "b", "replacement": "x"},
+        {"text": "a" * 20000 + "x", "replacements": 1},
+        "case-sensitive-find-keeps-short-text-cap",
+    ),
     ok(
         "replace_all_occurrences",
         {"text": "Straße STRASSE", "find": "SS", "replacement": "_", "case_sensitive": False},
@@ -456,6 +463,9 @@ SUCCESS_CASES = [
     ),
     ok("strip_html_tags", {"html_text": "<div><p>unclosed <b>bold"}, {"text": "unclosed bold"}, "malformed-never-raises"),
     ok("strip_html_tags", {"html_text": "&lt;tag&gt; &#169; &copy;"}, {"text": "<tag> © ©"}, "entities"),
+    # S4 R-8 (spec r6 A.13, EC-47): a tail left open after feed() that starts with "<" is dropped before close().
+    ok("strip_html_tags", {"html_text": "x <b"}, {"text": "x"}, "open-tag-at-end-dropped"),
+    ok("strip_html_tags", {"html_text": "a <!--x"}, {"text": "a"}, "open-comment-at-end-dropped"),
     # A.13 split_text_into_chunks: break-point kinds in order, the open lower bound, overlap.
     ok(
         "split_text_into_chunks",
@@ -545,6 +555,8 @@ FAILURE_CASES = [
     invalid("count_character_occurrences", {"text": "abc", "character": "ab"}, "character", "two-characters"),
     invalid("count_character_occurrences", {"text": "abc", "character": ""}, "character", "empty-character"),
     invalid("find_substring_positions", {"text": "abc", "substring": ""}, "substring", "empty-substring"),
+    # S4 R-10 (spec r6 A.12, EC-50): substring is capped at PREBUILT_MAX_SEARCH_STRING_CHARS (500).
+    invalid("find_substring_positions", {"text": "abc", "substring": "a" * 501}, "substring", "substring-over-search-cap"),
     invalid("word_frequencies", {"text": "a b", "top": 0}, "top", "top-zero"),
     invalid("word_frequencies", {"text": "a b", "top": 1001}, "top", "top-over-cap"),
     invalid("character_frequencies", {"text": "a b", "top": 0}, "top", "top-zero"),
@@ -565,6 +577,8 @@ FAILURE_CASES = [
     invalid("replace_all_occurrences", {"text": "abc", "find": "", "replacement": "x"}, "find", "empty-find"),
     invalid("replace_all_occurrences", {"text": "abc", "find": "a", "replacement": "x", "max_replacements": 0}, "max_replacements", "zero-max"),
     bad("replace_all_occurrences", {"text": "a" * 1000, "find": "a", "replacement": "x" * 10000}, "replacement", "predicted-result-over-cap"),
+    # S4 R-10 (spec r6 A.13, EC-50): a case-insensitive find longer than PREBUILT_MAX_SEARCH_STRING_CHARS is refused.
+    bad("replace_all_occurrences", {"text": "abc", "find": "a" * 501, "replacement": "x", "case_sensitive": False}, "find", "case-insensitive-find-over-search-cap"),
     invalid("sort_text_lines", {"text": "b\na", "mode": "alphabetical"}, "mode", "unknown-mode"),
     invalid("split_text_into_chunks", {"text": "abc", "chunk_size": 99}, "chunk_size", "below-minimum-chunk"),
     invalid("split_text_into_chunks", {"text": "abc", "chunk_size": 100, "overlap": -1}, "overlap", "negative-overlap"),

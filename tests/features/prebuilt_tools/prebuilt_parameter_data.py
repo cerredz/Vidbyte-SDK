@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Each entry is (parameter, json type, maxLength or maxItems, i
 FUNCTION INVENTORY: Data only: the REQUIRED sentinel, the TextListsShape record with its one value LIST_OF_TEXT_LISTS, and TOOL_PARAMETERS.
 COMMON MODIFICATION PATTERNS: When an Appendix A parameters cell changes, edit its entry here in the same commit as the spec.
 WHAT NOT TO DO IN THIS FILE: 1. Do not read FunctionTool schemas to fill this table; it must stay an independent transcription. 2. Do not add helpers here.
-KNOWN EDGE CASES: A utc_offset parameter carries both the §9.2 UtcOffset pattern and the spec r4 cap PREBUILT_MAX_UTC_OFFSET_CHARS (6). The weekend_days cap of 7 is a literal in the rows, not a constant. intersect_lists.lists is list[TextList] len 2..PREBUILT_MAX_LISTS, so its items are arrays of at most 10,000 strings of at most 10,000 characters each, not strings (S3-3). Enum defaults are written as their value strings and tuple defaults as lists, which is how the JSON schema shows them.
+KNOWN EDGE CASES: A utc_offset parameter carries both the §9.2 UtcOffset pattern and the spec r4 cap PREBUILT_MAX_UTC_OFFSET_CHARS (6). The weekend_days cap of 7 is a literal in the rows, not a constant. intersect_lists.lists is list[TextList] len 2..PREBUILT_MAX_LISTS, so its items are arrays of at most 10,000 strings of at most 10,000 characters each, not strings (S3-3). Spec r6 lowers find_substring_positions.substring to PREBUILT_MAX_SEARCH_STRING_CHARS (500) (R-10, EC-50). Enum defaults are written as their value strings and tuple defaults as lists, which is how the JSON schema shows them.
 RELATED DOCS: docs/spec/prebuilt-agent-tools/spec.md (Appendix A, §9.2 item 2)
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/prebuilt_tools/test_prebuilt_toolset_contract.py
 """
@@ -146,7 +146,7 @@ TOOL_PARAMETERS: MappingProxyType[str, tuple[ParameterRow, ...]] = MappingProxyT
         # A.12 text_counting
         'count_characters': (('text', 'string', 1000000, None, REQUIRED),),
         'count_character_occurrences': (('text', 'string', 1000000, None, REQUIRED), ('character', 'string', 1, None, REQUIRED), ('case_sensitive', 'boolean', None, None, True)),
-        'find_substring_positions': (('text', 'string', 1000000, None, REQUIRED), ('substring', 'string', 10000, None, REQUIRED), ('case_sensitive', 'boolean', None, None, True), ('allow_overlap', 'boolean', None, None, True)),
+        'find_substring_positions': (('text', 'string', 1000000, None, REQUIRED), ('substring', 'string', 500, None, REQUIRED), ('case_sensitive', 'boolean', None, None, True), ('allow_overlap', 'boolean', None, None, True)),
         'count_words': (('text', 'string', 1000000, None, REQUIRED),),
         'count_sentences': (('text', 'string', 1000000, None, REQUIRED),),
         'count_lines': (('text', 'string', 1000000, None, REQUIRED),),

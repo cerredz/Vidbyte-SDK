@@ -380,6 +380,13 @@ SUCCESS_CASES = [
     ok("verify_ip_address", {"address": "256.1.1.1"}, invalid_address("ipv4_octet_out_of_range"), "octet-range"),
     ok("verify_ip_address", {"address": "1.2.3.a"}, invalid_address("invalid_characters"), "letters"),
     ok("verify_ip_address", {"address": "1:2"}, invalid_address("invalid_ipv6"), "colon-means-ipv6"),
+    # S4 R-3 (spec r6 A.31): a zone suffix is kept, and exploded gets it back after the zone-free exploded address.
+    ok(
+        "verify_ip_address",
+        {"address": "fe80::1%eth0"},
+        {"valid": True, "version": 6, "compressed": "fe80::1%eth0", "exploded": "fe80:0000:0000:0000:0000:0000:0000:0001%eth0", "reason": None},
+        "ipv6-zone-suffix-kept",
+    ),
     ok(
         "cidr_network_details",
         {"cidr": "192.168.1.77/24"},

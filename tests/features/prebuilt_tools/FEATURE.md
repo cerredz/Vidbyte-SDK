@@ -2,7 +2,7 @@
 
 ## High-Level Feature Description
 
-The SDK ships a library of 265 small, deterministic, standard-library-only tools, grouped into 31 categories, that a developer attaches to an agent with `PrebuiltTools([...categories])`. Each tool is an ordinary `FunctionTool` the model calls with JSON arguments. It returns one JSON object on success, or a failure whose `error_type` is `validation` (schema) or `ToolExecutionError` (domain). The tools give the agent exact arithmetic, counting, date arithmetic, parsing, encoding, hashing, and structured-data work that a model does badly in tokens. Source of truth: `docs/spec/prebuilt-agent-tools/spec.md` revision 4, especially §4, §6, §8.5, §9.2, and Appendix A.
+The SDK ships a library of 265 small, deterministic, standard-library-only tools, grouped into 31 categories, that a developer attaches to an agent with `PrebuiltTools([...categories])`. Each tool is an ordinary `FunctionTool` the model calls with JSON arguments. It returns one JSON object on success, or a failure whose `error_type` is `validation` (schema) or `ToolExecutionError` (domain). The tools give the agent exact arithmetic, counting, date arithmetic, parsing, encoding, hashing, and structured-data work that a model does badly in tokens. Source of truth: `docs/spec/prebuilt-agent-tools/spec.md` revision 6, especially §4, §6, §8.5, §9.2, and Appendix A.
 
 ## Contract
 
@@ -73,10 +73,12 @@ This is the failure inventory the tests were chosen from. Each entry is input pl
 14. XML entities or DOCTYPE are parsed (EC-11). Conversion returns a value nested more than 100 deep, so `_stringify_output` raises outside the tool's error handling (EC-42).
 15. A tool reads the clock, the environment, or files, uses the global random generator, or changes the decimal context, the recursion limit, the int digit limit, or the csv field limit (INV-13).
 16. An error message echoes a long argument or the HMAC key (INV-15, T-3).
+17. A cap-sized hostile input makes a tool run for minutes or hours although every argument is within its cap: a long space run in a heading, a failing comma chain, a long dotted TOML key, repeating ElementPath steps, HTML left open at the end, or a JSON patch that copies a large value hundreds of times (S4 R-1, R-2, R-6 to R-9; EC-47 to EC-49).
+18. A host that traps `Inexact` or lowers `Emax` in its decimal context changes a tool's result or makes it raise, because the worker thread copies that context (S4 R-12; §9.2 item 18).
 
 ## Historical Regressions
 
-None yet. The pack was written red before implementation from spec revision 3, then tightened to revision 4, which fixed the values revision 3 left open.
+The pack was written red before implementation from spec revision 3, then tightened to revision 4, which fixed the values revision 3 left open. The S4 review then found 14 defects while the pack was green (R-14). Revision 6 turned them into exact row behavior, and the pack gained their regression cases before the repair: the R-ids are in the case labels of `test_prebuilt_hostile_inputs.py` and in the comments above the row cases.
 
 ## Test Suite Map
 
@@ -90,10 +92,11 @@ None yet. The pack was written red before implementation from spec revision 3, t
 | `test_prebuilt_side_effects.py` | Instrumented socket, subprocess, environment, clock, and open calls are never made from tool frames. Global state is unchanged. A static source scan finds no banned calls. | AC-13, INV-13, INV-19, T-5, T-6 |
 | `test_prebuilt_resource_bounds.py` | Item cap and character budget, arithmetic counts, 4,001-digit refusals, every INV-20 tool refusing over-cap output (with peak memory for predicted outputs), deep nesting, and the EC-39 scan cap. | AC-14, AC-15, AC-20, AC-21, INV-17 to INV-20 |
 | `test_prebuilt_rows_*.py` (12 files) | Exact-output and error cases for every Appendix A row, by category group. | AC-11, plus the row-level edge cases |
+| `test_prebuilt_hostile_inputs.py` | Cap-sized hostile inputs, run in a child interpreter under a liveness watchdog, return their exact r6 output or error; a hostile host decimal context changes no result. | S4 R-1, R-2, R-6 to R-9, R-12, R-14; NFR-7; EC-47 to EC-49; §9.2 item 18 |
 
 ## Omitted Testing Strategies
 
-- Wall-clock limits (AC-15's 1 second, AC-20's 2 seconds, NFR-7's build time) are not asserted, because tests must not depend on the wall clock. Peak-memory checks and infeasible-if-enumerated counts prove the same design properties structurally.
+- Wall-clock limits (AC-15's 1 second, AC-20's 2 seconds, NFR-7's build time) are not asserted, because tests must not depend on the wall clock. Peak-memory checks and infeasible-if-enumerated counts prove the same design properties structurally. The one exception, granted by the orchestrator after S4 R-14, is the liveness watchdog in `test_prebuilt_hostile_inputs.py`: a hostile call gets 30 s, about 15 times NFR-7, in a child interpreter that is killed when it overruns. It asserts no speed; it turns a hang into a red test.
 - Cross-version pins of seeded draws, `ast` grammar, `ipaddress` flags, and Unicode data (EC-24, EC-25, EC-26, EC-38) are not asserted. Seeded tools are checked for determinism within one interpreter and against the generator calls their rows document.
 - INV-23 (root `vidbyte.__all__` and the public API contract), INV-24 (`vidbyte.tools.builtins.__all__`), INV-25 (dependencies), and INV-26 (runtime treatment) would pass before implementation. Existing gates own them: `scripts/generate-sdk-public-api.py --check`, `scripts/check_reasoning_trace_contracts.py`, and the runtime's own tests.
 - The EC-14 lone-surrogate path never reaches a tool body, because FunctionTool's JSON decoding rejects lone surrogates first. A case for it would test the framework, not the tools, so unencodable text is tested with real characters instead.

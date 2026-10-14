@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Expected values come from published vectors (RFC 3986, RFC 42
 FUNCTION INVENTORY: test_formats_encoding_rows_return_documented_output checks SUCCESS_CASES; test_formats_encoding_rows_reject_bad_input checks FAILURE_CASES; test_compute_hmac_errors_never_repeat_the_key checks T-3; test_parse_dotenv_text_error_omits_line_content checks T-3 for .env text; test_encoding_round_trips_restore_the_text checks base64 and hex round trips.
 COMMON MODIFICATION PATTERNS: Add a row case as one ok(...) or bad(...) entry in the matching table, with every output key listed and the source of the expected value obvious from a published vector or a short hand derivation.
 WHAT NOT TO DO IN THIS FILE: 1. Do not compute expected values by calling hashlib, base64, or the tool under test at test time; use literal vectors. 2. Do not add nesting-depth or output-cap cases here; test_prebuilt_resource_bounds.py owns them.
-KNOWN EDGE CASES: An unpaired surrogate cannot reach a tool through FunctionTool.execute (pydantic JSON mode rejects it), so EC-14 is exercised with characters a codec cannot encode, such as the euro sign in latin_1 or ascii. Expat reports the column of the mismatched end-tag name, and the row makes it 1-based. The codec utf_16 adds a byte-order mark in native order, so byte-exact cases use utf_16_le and utf_16_be. Spec r4 gives a rejected DOCTYPE or long namespace URI a fixed non-empty error with null line and column, and maps every findall exception for a path, KeyError for "@" included, to error(path).
+KNOWN EDGE CASES: An unpaired surrogate cannot reach a tool through FunctionTool.execute (pydantic JSON mode rejects it), so EC-14 is exercised with characters a codec cannot encode, such as the euro sign in latin_1 or ascii. Expat reports the column of the mismatched end-tag name, and the row makes it 1-based. The codec utf_16 adds a byte-order mark in native order, so byte-exact cases use utf_16_le and utf_16_be. Spec r4 gives a rejected DOCTYPE or long namespace URI a fixed non-empty error with null line and column, and maps every findall exception for a path, KeyError for "@" included, to error(path). Spec r6 (S4 R-7) lists each matching element once, in document order; the hostile path inputs live in test_prebuilt_hostile_inputs.py.
 RELATED DOCS: tests/features/prebuilt_tools/FEATURE.md; docs/spec/prebuilt-agent-tools/spec.md (Appendix A.20, A.21, A.22; §9.2; §10 T-3 and T-6)
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/prebuilt_tools/test_prebuilt_rows_formats_encoding.py
 """
@@ -162,6 +162,19 @@ STRUCTURED_FORMAT_CASES = [
         "attribute-predicate",
     ),
     ok("xml_find_elements", {"xml_text": "<a><b/></a>", "path": "zzz"}, {"elements": [], "count": 0, "truncated": False}, "no-match"),
+    # S4 R-7 (spec r6 A.20): matches are distinct elements in document order, although the stdlib's descendant step repeats them.
+    ok(
+        "xml_find_elements",
+        {"xml_text": "<r><a x='1'><a x='2'><a x='3'/></a></a></r>", "path": ".//a//a"},
+        {"elements": [{"tag": "a", "attributes": {"x": "2"}, "text": None}, {"tag": "a", "attributes": {"x": "3"}, "text": None}], "count": 2, "truncated": False},
+        "repeated-descendant-listed-once",
+    ),
+    ok(
+        "xml_find_elements",
+        {"xml_text": "<a>" * 60 + "</a>" * 60, "path": ".//a//a"},
+        {"elements": [{"tag": "a", "attributes": {}, "text": None}] * 58, "count": 58, "truncated": False},
+        "chain-of-60-has-58-distinct-matches",
+    ),
     ok(
         "ini_to_json",
         {"ini_text": "[DEFAULT]\nbase = 1\n\n[server]\nHost = example.com\nport = 8080\nflag\n"},
