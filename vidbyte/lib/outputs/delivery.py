@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Turns every HTTP and SMTP outcome into a receipt error code a
 COMMON MODIFICATION PATTERNS: A new HTTP connector builds an OutputRequest and calls OutputHttp.post, patch, or read; it never calls HttpTransport itself. A connector that signs in with HTTP Basic builds its header value with OutputHttp.basic_authorization.
 KNOWN EDGE CASES: A 2xx without a usable https link is FAILED invalid_response; a read whose body is not JSON is FAILED invalid_response, and a read larger than OUTPUT_MAX_READ_BYTES is FAILED network; a partial SMTP refusal is FAILED, since a retry would duplicate the mail; a QUIT reply after the send never changes the receipt.
 RELATED DOCS: vidbyte/lib/outputs/README.md
-TESTS: tests/features/agent_output_connectors/test_output_connectors_http_failures.py and test_output_connectors_email.py
+TESTS: tests/features/agent_output_connectors/test_output_connectors_http_failures.py, test_output_connectors_email.py, test_output_connectors_update_in_place.py (read and patch), test_output_connectors_followup_contract.py (OutputResponses), and test_output_connectors_webhook_options.py (exact-bytes posts)
 """
 
 from __future__ import annotations

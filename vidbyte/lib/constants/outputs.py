@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: This module contains immutable constants only; delivery behav
 COMMON MODIFICATION PATTERNS: Add a named constant here before introducing another delivery limit, version, or endpoint literal.
 KNOWN EDGE CASES: The delivery deadline must stay above three request timeouts plus the 429 backoff, or a rate-limited send is cut short. A send that makes several requests (GitHub key=) can still be cut by the deadline, during its reads or during its one write.
 RELATED DOCS: vidbyte/lib/outputs/README.md
-TESTS: tests/features/agent_output_connectors/test_output_connectors_contract.py
+TESTS: tests/features/agent_output_connectors/test_output_connectors_contract.py; the follow-up caps, URLs, and patterns are pinned through written-out wire values in test_output_connectors_rendering.py, test_output_connectors_comments.py, test_output_connectors_new_destinations.py, test_output_connectors_update_in_place.py, and test_output_connectors_webhook_options.py
 """
 
 from __future__ import annotations

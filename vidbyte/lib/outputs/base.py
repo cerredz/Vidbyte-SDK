@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Provider work only. The skip rule, the reply shaping, and the
 COMMON MODIFICATION PATTERNS: Add a static check to OutputArguments when a new connector argument needs one; keep every error naming the parameter.
 KNOWN EDGE CASES: Errors never echo a credential or a URL, because a webhook URL is itself the secret.
 RELATED DOCS: vidbyte/lib/outputs/README.md
-TESTS: tests/features/agent_output_connectors/test_output_connectors_configuration.py
+TESTS: tests/features/agent_output_connectors/test_output_connectors_configuration.py, plus the follow-up OutputArguments checks in test_output_connectors_rendering.py, test_output_connectors_comments.py, test_output_connectors_webhook_options.py, and test_output_connectors_new_destinations.py
 """
 
 from __future__ import annotations

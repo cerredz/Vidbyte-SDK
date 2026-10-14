@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Frozen, slotted records that check themselves in __post_init_
 COMMON MODIFICATION PATTERNS: Add a field here with its check, then fill it in the connector or dispatcher that builds the record.
 KNOWN EDGE CASES: Secret-bearing fields are repr=False and their errors never echo the value.
 RELATED DOCS: vidbyte/lib/outputs/README.md
-TESTS: tests/features/agent_output_connectors/test_output_connectors_contract.py
+TESTS: tests/features/agent_output_connectors/test_output_connectors_contract.py, test_output_connectors_followup_contract.py, and test_output_connectors_update_in_place.py (OutputRead)
 """
 
 from __future__ import annotations

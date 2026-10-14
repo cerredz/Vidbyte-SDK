@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Builds one full-width Adaptive Card OutputRequest, a bold tit
 COMMON MODIFICATION PATTERNS: Change the card here only to follow the Workflows "When a Teams webhook request is received" trigger.
 KNOWN EDGE CASES: The host is never checked, because Microsoft has moved Workflows URLs between hosts; a 202 means accepted, not posted.
 RELATED DOCS: vidbyte/lib/outputs/README.md; https://learn.microsoft.com/en-us/connectors/teams/
-TESTS: tests/features/agent_output_connectors/test_output_connectors_wire_contract.py
+TESTS: tests/features/agent_output_connectors/test_output_connectors_wire_contract.py and test_output_connectors_rendering.py
 """
 
 from __future__ import annotations

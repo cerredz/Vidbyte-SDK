@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Builds one OutputRequest and hands it to OutputHttp; the webh
 COMMON MODIFICATION PATTERNS: Change the message body here only to follow Discord's Execute Webhook reference.
 KNOWN EDGE CASES: Discord answers 204 with no body by default, so the receipt carries no link; it rejects thread_name on a channel that is not a forum, so forum=True is opt-in.
 RELATED DOCS: vidbyte/lib/outputs/README.md; https://docs.discord.com/developers/resources/webhook
-TESTS: tests/features/agent_output_connectors/test_output_connectors_wire_contract.py
+TESTS: tests/features/agent_output_connectors/test_output_connectors_wire_contract.py and test_output_connectors_rendering.py
 """
 
 from __future__ import annotations

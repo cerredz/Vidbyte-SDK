@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: send chooses one of four modes; each mode builds its requests
 COMMON MODIFICATION PATTERNS: Bump GITHUB_API_VERSION in vidbyte/lib/constants/outputs.py after checking the REST changelog.
 KNOWN EDGE CASES: GitHub silently drops labels unless the token has push access, so with key= a new issue opens on every run; an @user in the body notifies that user; two runs with one key at once can each write.
 RELATED DOCS: vidbyte/lib/outputs/README.md; https://docs.github.com/en/rest/issues/issues#create-an-issue; https://docs.github.com/en/rest/issues/comments
-TESTS: tests/features/agent_output_connectors/test_output_connectors_wire_contract.py and test_output_connectors_update_in_place.py
+TESTS: tests/features/agent_output_connectors/test_output_connectors_wire_contract.py, test_output_connectors_comments.py, and test_output_connectors_update_in_place.py
 """
 
 from __future__ import annotations

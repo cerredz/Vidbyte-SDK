@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Plain value enums with no behavior; re-exported from vidbyte/
 COMMON MODIFICATION PATTERNS: A new destination adds one OutputDestination member, one connector module, and one credential environment variable.
 KNOWN EDGE CASES: Member values appear in receipts and error messages, so renaming one is a breaking change.
 RELATED DOCS: vidbyte/lib/outputs/README.md
-TESTS: tests/features/agent_output_connectors/test_output_connectors_contract.py
+TESTS: tests/features/agent_output_connectors/test_output_connectors_contract.py, test_output_connectors_followup_contract.py (OutputMethod, TypefullyPlatform), test_output_connectors_new_destinations.py, and test_output_connectors_update_in_place.py
 """
 
 from __future__ import annotations

@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Builds one OutputRequest and hands it to OutputHttp; the webh
 COMMON MODIFICATION PATTERNS: Change the message body here only to follow Slack's incoming-webhook reference.
 KNOWN EDGE CASES: Slack answers errors with plain-text tokens such as no_service, which become http_<status>:<token> codes.
 RELATED DOCS: vidbyte/lib/outputs/README.md; https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks/
-TESTS: tests/features/agent_output_connectors/test_output_connectors_wire_contract.py
+TESTS: tests/features/agent_output_connectors/test_output_connectors_wire_contract.py and test_output_connectors_rendering.py
 """
 
 from __future__ import annotations

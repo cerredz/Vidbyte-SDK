@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Builds one sendRichMessage OutputRequest and hands it to Outp
 COMMON MODIFICATION PATTERNS: Change the message body here only to follow the Bot API sendRichMessage reference.
 KNOWN EDGE CASES: Every < shows as ＜ and every ![ as !［, so no HTML tag, button, or media block opens, and code containing < will not run when copied; an @username or a tg://user?id= link still notifies that user.
 RELATED DOCS: vidbyte/lib/outputs/README.md; https://core.telegram.org/bots/api
-TESTS: tests/features/agent_output_connectors/test_output_connectors_wire_contract.py
+TESTS: tests/features/agent_output_connectors/test_output_connectors_wire_contract.py and test_output_connectors_rendering.py
 """
 
 from __future__ import annotations
