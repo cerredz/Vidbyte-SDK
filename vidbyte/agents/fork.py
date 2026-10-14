@@ -18,6 +18,7 @@ Relations:
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 from vidbyte.agents.base import BaseAgent
@@ -41,6 +42,7 @@ class AgentForker:
     def fork(cls, agent: BaseAgent, settings: AgentForkSettings) -> BaseAgent:
         # Builds an isolated child agent branch with resolved config, copied state, and fresh lineage.
         child_run_id = cls._run_id(agent, settings.run_id)
+        settings = cls._settings_on_parent_vendor(agent, settings)
         # The child edits its own copy of the parent's managed context window, so branch edits never reach the parent.
         child_manager = cls._context_manager(agent, settings)
         # Read the vendor the parent really runs on, so the key and backup checks below see a provider-prefixed model's vendor.
@@ -89,6 +91,19 @@ class AgentForker:
             child._pending_mcp_configs.extend(agent._mcp_configs_for_fork())
         cls._copy_run_state(agent, child, settings)
         return child
+
+    @classmethod
+    def _settings_on_parent_vendor(cls, agent: BaseAgent, settings: AgentForkSettings) -> AgentForkSettings:
+        # @intent fork-inherits-the-parent-vendor
+        # Inheriting the provider means the vendor the parent runs on. A parent built as model_name="deepseek/deepseek-chat"
+        # has no raw provider, so a bare model override such as "deepseek-reasoner" names DeepSeek, as it does under
+        # provider="deepseek"; a model that names its own vendor ("gemini/gemini-3.5-flash") still picks that vendor.
+        if settings.provider is not None or settings.model_name is None or agent.runner_config.provider is not None:
+            return settings
+        if cls._resolved_provider(None, settings.model_name):
+            return settings
+        parent_provider = cls._resolved_provider(None, agent.runner_config.model_name)
+        return replace(settings, provider=parent_provider) if parent_provider else settings
 
     @staticmethod
     def _context_manager(agent: BaseAgent, settings: AgentForkSettings) -> ContextManager | None:
