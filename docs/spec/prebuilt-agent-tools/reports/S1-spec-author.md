@@ -78,3 +78,72 @@ Spec: `docs/spec/prebuilt-agent-tools/spec.md`, revision 1, committed as `d7cc52
 - **NFR-7 / A-9:** the per-call target of ≤ 2 s at maximum input. It is least certain for `closest_string_matches` (1,000 candidates), `find_unicode_character` (a full scan of about 1.1 million code points), `diff_words` at 20,000 tokens, and `levenshtein_distance` at 1,000 × 1,000.
 - **Heuristic tools** (syllables, sentence splitting, script detection, mojibake repair, `count_lines_of_code`): the spec defines exact algorithms so tests can bind to them. Their usefulness on real text is the part that has not been measured.
 - **FR-8 wording:** domain-fixed bounds (months, bases 2–36, percent and coordinate ranges) are allowed as literal `Field` constraints, while every length cap and resource bound is a named constant. A strict reviewer may prefer constants for everything.
+
+## Addendum — r2 (S1 review applied)
+
+The reviewer's verdict was SOUND WITH FIXES (3 Blocker, 6 Major, 3 Minor). I accepted all twelve findings. R-2 and R-4 were widened after I probed the same failure classes, and R-9 and R-10 took their optional drops. §16 records each disposition.
+
+**Changes by finding:**
+- **R-1, exactness:**
+  - §9.2 item 5 now has a float precision rule: `rel=1e-9, abs=1e-12`, or 10^-k for floats a row rounds to k places. Everything else is exact.
+  - New item 15 is the numeric text rule. New item 16 covers money and shares: `Decimal(repr(x))`, `localcontext(prec=50, rounding=ROUND_HALF_EVEN)`, one `ROUND_HALF_UP` quantize per money output, and `Fraction` for largest-remainder shares.
+  - I settled 11 rows. Reasons became three ordered enums.
+  - Amortization now defines early payoff, and `total_paid` is the sum of the schedule.
+- **R-2, growth:**
+  - INV-20 now lists 14 tools that amplify their input, all capped at `PREBUILT_MAX_TEXT_CHARS`. I found the extra cases by reading each row for repetition:
+    - `[DEFAULT]` copied into every INI section (fixed by changing the output shape)
+    - header names repeated in every CSV record
+    - `colspan`
+    - qualified names in `list_python_*`
+    - XML namespace URIs (also capped at 200 characters before parsing)
+    - indentation in `format_json`
+    - groups in `regex_match`
+  - INV-17 adds a character budget for every enumerating output, and `cap_items` now consumes a lazy iterable.
+- **R-3:** every raise inside `except` uses `from exc`, following the S002 repair text. Security guards carry `# @intent` blocks.
+- **R-4, measured locally on Python 3.11.0:**
+
+  | Case | Time | Change |
+  |---|---|---|
+  | `closest_string_matches`, 1,000 × 200 characters | 2.43 s | candidate cap 200 → 100 (0.59 s) |
+  | unified diff, 10,000 lines | 4.63 s | cap 10,000 → 4,000 lines |
+  | unified diff, 5,000 lines | 0.88 s | — |
+  | levenshtein, 1,000 × 1,000 | 0.14 s | — |
+  | sieve to 10^7 | 0.20 s | — |
+  | tomllib, 1M characters | ≤ 0.53 s | — |
+  | HTMLParser, 1M characters | ≤ 0.86 s | — |
+
+  I also applied the reviewer's caps:
+  - sequence matching and diff tokens: 2,000
+  - modular operands: 2,001 characters
+  - CSV sniffing: 10,000 characters
+  - `split_text_into_chunks`: `chunk_size ≥ 100` and `overlap ≤ chunk_size // 4`, so counting every chunk stays linear
+- **R-5:** the nesting cap now applies to converted XML, TOML, and Python-literal output, and depth is measured with a work stack.
+- **R-6:** D-7 is kept and is now argued on principle 4's purpose. I verified that `_build_args_model` turns each signature parameter into a schema field, so a single dataclass parameter would wrap the schema. The category classes are now internal (FR-5). The flip condition and the residual owner risk are stated in D-7 and Q-6.
+- **R-7:** `categories: Iterable[PrebuiltToolCategory] | PrebuiltToolCategory`. Plain strings are rejected. New enums `IpVersion` and `WeekdayOccurrence`.
+- **R-8:** helpers may call the leaves `argument_error` and `nesting_level`.
+- **R-9:** D-18 allows up to 12 conditional `_<category>_<part>.py` split modules outside the BLOCKED rule. Row 7 is reused as CREATE-IF-NEEDED.
+- **R-10:**
+  - The calculator description is corrected.
+  - I dropped 12 weak or near-duplicate tools: is_leap_year, days_in_month, collapse_whitespace, html_escape, both Roman numeral tools, sort_list, deduplicate_list, similarity_ratio, jaro_winkler_similarity, verify_json_against_schema (with `_json_schema.py`), and semver_satisfies_range.
+  - I kept `generate_seeded_uuid4`, because seeded_random needs 6 tools.
+- **R-11:** AC-2 now checks that every Appendix A name is present, AC-9 expects one declaration per tool, and INV-6 covers constructions only.
+- **R-12:** §11 lists only the two split gate stages.
+
+**Counts in r2:**
+- 265 tools in 31 categories, 6 to 12 each
+- 68 enums (58 + 10)
+- 101 classes
+- 39 planned files plus 0 to 12 conditional split modules
+- FR 11, NFR 11, AC 21, INV 26, EC 44, D 18, T 6, W 38
+- 0 blocking questions
+
+**Sections that changed shape and need the scoped second review:**
+- §8: D-2, D-7, D-9, D-12, D-16, the new D-18, §8.4, and §8.5
+- §9.2: items 5, 12, 15, and 16, the enum table, and the caps table
+- §10: T-1 and T-2
+- §12: row 6 helpers, row 7 conditional, the budget, the §12.4 group C items, and §12.6 order
+- Appendix A rows for finance, CSV, XML, INI, URL, email, IP, and chunking
+
+**Least sure in r2:**
+- The INV-20 cap equals the 1M text cap, so a CSV or XML near 1M characters can now fail with an error. I chose this for composability: such an output could not be passed to another tool anyway.
+- The 10^47 money ceiling for `compound_interest_future_value` is a consequence of the 50-digit precision, not a business limit.
