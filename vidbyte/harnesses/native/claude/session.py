@@ -262,9 +262,8 @@ class ClaudeLiveSession:
             self._steered = self._steers
         return steer
 
-    def _on_result(self, message: object) -> bool:
+    def _on_result(self, message: Any) -> bool:
         """Record a result's cumulative usage; for the prompt's own result, also record its fields and return True (D-28)."""
-        fields = vars(message)
         # Every result carries the session's cumulative cost and
         # per-model usage, an injected turn's result too (INV-20).
         models = tuple(
@@ -277,34 +276,38 @@ class ClaudeLiveSession:
                 web_search_requests=usage["webSearchRequests"],
                 cost_usd=usage["costUSD"],
             )
-            for name, usage in (fields.get("model_usage") or {}).items()
+            for name, usage in (message.model_usage or {}).items()
         )
-        self._cost, self._models = fields.get("total_cost_usd"), models
-        origin = fields.get("origin")
+        self._cost, self._models = message.total_cost_usd, models
+        # @intent only-the-prompts-own-result-ends-the-turn
+        # A result whose origin names another kind answers a turn that
+        # Claude Code injected, such as a background task waking the
+        # session, so it never ends or classifies this prompt (D-28).
+        origin = message.origin
         if origin is not None and origin.get("kind") != _HUMAN_ORIGIN:
             return False
         # The prompt's own result: build its records first, so a
         # malformed result changes nothing.
-        is_error = fields["is_error"]
-        denials = tuple(ClaudePermissionDenial(tool_name=denial["tool_name"], tool_use_id=denial["tool_use_id"]) for denial in fields.get("permission_denials") or ())
+        is_error = message.is_error
+        denials = tuple(ClaudePermissionDenial(tool_name=denial["tool_name"], tool_use_id=denial["tool_use_id"]) for denial in message.permission_denials or ())
         result = replace(
             self._result,
-            session_id=fields["session_id"] or self._result.session_id,
-            result_text=fields.get("result") or "",
-            structured_output=fields.get("structured_output"),
-            num_turns=fields["num_turns"],
-            duration_ms=fields["duration_ms"],
+            session_id=message.session_id or self._result.session_id,
+            result_text=message.result or "",
+            structured_output=message.structured_output,
+            num_turns=message.num_turns,
+            duration_ms=message.duration_ms,
             total_cost_usd=self._cost,
-            stop_reason=fields.get("stop_reason") or "",
-            terminal_reason=fields.get("terminal_reason") or "",
+            stop_reason=message.stop_reason or "",
+            terminal_reason=message.terminal_reason or "",
             permission_denials=denials,
         )
         outcome = replace(
             self._outcome,
             is_error=is_error,
-            subtype=fields["subtype"],
+            subtype=message.subtype,
             terminal_reason=result.terminal_reason,
-            api_error_status=fields.get("api_error_status"),
+            api_error_status=message.api_error_status,
             structured_output_missing=self._spawn.output_schema is not None and not is_error and result.structured_output is None,
             permission_denials=denials,
         )
@@ -317,41 +320,44 @@ class ClaudeLiveSession:
             self._grace = None
         return True
 
-    def _on_assistant(self, message: object) -> None:
+    def _on_assistant(self, message: Any) -> None:
         """Record the error kind an assistant message carries, such as rate_limit or billing_error."""
-        kind = vars(message).get("error")
+        kind = message.error
         if kind:
             self._outcome = replace(self._outcome, assistant_errors=(*self._outcome.assistant_errors, str(kind)))
 
-    def _on_rate_limit(self, message: object) -> None:
+    def _on_rate_limit(self, message: Any) -> None:
         """Hand a keyed rate-limit window to the host, and mark the turn when the window refuses new sessions (D-29)."""
-        info = vars(vars(message)["rate_limit_info"])
-        kind = info.get("rate_limit_type")
+        info = message.rate_limit_info
+        kind = info.rate_limit_type
         if kind not in _WINDOW_TYPES:
             return
-        overage = info.get("overage_status")
+        overage = info.overage_status
         window = ClaudeRateLimitWindow(
             rate_limit_type=ClaudeRateLimitType(kind),
-            status=ClaudeRateLimitStatus(info["status"]),
-            resets_at=info.get("resets_at"),
-            utilization=info.get("utilization"),
+            status=ClaudeRateLimitStatus(info.status),
+            resets_at=info.resets_at,
+            utilization=info.utilization,
             overage_status=None if overage is None else ClaudeRateLimitStatus(overage),
-            overage_resets_at=info.get("overage_resets_at"),
-            overage_disabled_reason=info.get("overage_disabled_reason") or "",
+            overage_resets_at=info.overage_resets_at,
+            overage_disabled_reason=info.overage_disabled_reason or "",
         )
         self._on_window(window)
         if ClaudeFailureMapper.usage_limited(window):
             self._outcome = replace(self._outcome, rate_limit_rejected=True)
 
-    def _on_task(self, message: object) -> None:
+    def _on_task(self, message: Any) -> None:
         """Record a background task's latest figures: progress names the task, and a notification without usage keeps the last figures."""
-        fields = vars(message)
-        task_id = fields["task_id"]
+        task_id = message.task_id
         earlier = self._tasks.get(task_id) or ClaudeTaskUsage(task_id=task_id, description="", total_tokens=0, tool_uses=0, duration_ms=0)
-        usage = fields.get("usage") or {}
+        usage = message.usage or {}
+        # Only a progress message declares a description; a
+        # notification carries a summary instead, so it keeps the name.
+        progress = isinstance(message, self._sdk.task_progress_message)
+        named = message.description if progress else ""
         self._tasks[task_id] = ClaudeTaskUsage(
             task_id=task_id,
-            description=fields.get("description") or earlier.description,
+            description=named or earlier.description,
             total_tokens=usage.get("total_tokens", earlier.total_tokens),
             tool_uses=usage.get("tool_uses", earlier.tool_uses),
             duration_ms=usage.get("duration_ms", earlier.duration_ms),

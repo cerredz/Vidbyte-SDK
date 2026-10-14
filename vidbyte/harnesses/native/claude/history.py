@@ -4,7 +4,7 @@ PURPOSE: Lists, reads and forks Claude Code's saved sessions offline, converting
 ROLE IN CODEBASE: Called by ClaudeHost (host.py) for list_claude_sessions, get_claude_session_info, get_claude_session_messages and fork_claude_session, and by continue_claude_session to look up the session it resumes. None of these starts a claude process.
 ARCHITECTURE NOTE: The SDK's history functions read and write session files with blocking calls, so each runs in a worker thread through asyncio.to_thread. Each function maps what the SDK raised, and any failure to convert its records, through ClaudeFailureMapper, so a caller only ever sees a ClaudeOperationError.
 COMMON MODIFICATION PATTERNS: A new history function adds one static method that calls the SDK through asyncio.to_thread inside one guarded try. A new content block kind gets its rendering in message.
-KNOWN EDGE CASES: The SDK's session records are plain dataclasses, so the converters read their fields through vars(), and a malformed record reports claude.protocol_mismatch. The SDK returns None from get_session_info for an unknown id, a subagent transcript and a session without a summary alike, so all three report claude.session_not_found. An empty transcript cannot tell an unknown session from a known empty one, so the host asks session_info to decide. Fork writes a new session file and is allowed while the source session is live.
+KNOWN EDGE CASES: The converters read each field the pinned SDK's session records declare by name, never through vars() with empty defaults, so a record from a release that renamed or dropped a field reports claude.protocol_mismatch instead of empty text. The SDK returns None from get_session_info for an unknown id, a subagent transcript and a session without a summary alike, so all three report claude.session_not_found. An empty transcript cannot tell an unknown session from a known empty one, so the host asks session_info to decide. Fork writes a new session file and is allowed while the source session is live.
 RELATED DOCS: https://platform.claude.com/docs/en/agent-sdk/python; vidbyte/harnesses/README.md.
 TESTS: tests/features/claude_host/
 """
@@ -12,6 +12,7 @@ TESTS: tests/features/claude_host/
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 from vidbyte.harnesses.native.claude.failures import ClaudeFailureMapper
 from vidbyte.lib.constants.claude import (
@@ -80,27 +81,27 @@ class ClaudeHistory:
         return forked
 
     @staticmethod
-    def summary(info: object) -> ClaudeSessionSummary:
-        """Return the host's record of one SDKSessionInfo, with absent text as empty text."""
-        fields = vars(info)
+    def summary(info: Any) -> ClaudeSessionSummary:
+        """Return the host's record of one SDKSessionInfo, reading each field it declares, with an absent optional text as empty text."""
         return ClaudeSessionSummary(
-            session_id=fields["session_id"],
-            summary=fields.get("summary") or "",
-            last_modified=fields["last_modified"],
-            file_size=fields.get("file_size"),
-            custom_title=fields.get("custom_title") or "",
-            first_prompt=fields.get("first_prompt") or "",
-            git_branch=fields.get("git_branch") or "",
-            cwd=fields.get("cwd") or "",
-            tag=fields.get("tag") or "",
-            created_at=fields.get("created_at"),
+            session_id=info.session_id,
+            summary=info.summary,
+            last_modified=info.last_modified,
+            file_size=info.file_size,
+            custom_title=info.custom_title or "",
+            first_prompt=info.first_prompt or "",
+            git_branch=info.git_branch or "",
+            cwd=info.cwd or "",
+            tag=info.tag or "",
+            created_at=info.created_at,
         )
 
     @staticmethod
-    def message(raw: object) -> ClaudeSessionMessage:
+    def message(raw: Any) -> ClaudeSessionMessage:
         """Return one transcript message as text: text blocks verbatim, tool calls and results as short tags, other blocks by type."""
-        fields = vars(raw)
-        content = fields["message"].get("content", "")
+        # The SessionMessage fields are read directly; its message is
+        # the raw API message dict, so its keys are looked up.
+        content = raw.message.get("content", "")
         blocks = [{"type": "text", "text": content}] if isinstance(content, str) else content
         parts: list[str] = []
         for block in blocks:
@@ -113,7 +114,7 @@ class ClaudeHistory:
                 parts.append("[tool result]")
             else:
                 parts.append(f"[{kind}]")
-        return ClaudeSessionMessage(uuid=fields["uuid"], session_id=fields["session_id"], kind=ClaudeMessageKind(fields["type"]), text="\n".join(parts))
+        return ClaudeSessionMessage(uuid=raw.uuid, session_id=raw.session_id, kind=ClaudeMessageKind(raw.type), text="\n".join(parts))
 
 
 __all__ = ["ClaudeHistory"]
