@@ -194,3 +194,47 @@ This was the final revision, with no third review round. I accepted all ten roun
 **Least sure in r3:**
 - The 1e-9 IRR tolerance is a stated contract. A badly conditioned series (very flat NPV near the root) could still miss it, because NPV is evaluated in floats.
 - EC-45 accepts outputs up to about 23 million characters from a capped input. The runtime's result truncation is the only control on them.
+
+## Addendum — r4 (S2-found spec defects resolved; status approved)
+
+r4 fixes the defects the S2 test author found, and writes the readings the tests pinned into the rows they belong to. Spec commit: `5d93fe88`. The tests are part of the contract now, so before writing each row I checked it against the exact assertions. Five read-only helpers mapped every item in S2 report §5 to its `file:line` assertion and its current spec text. No pinned reading contradicts §9.2, an INV-, another row, or the request, so there are no "test disagrees with spec" items.
+
+**Defects (§16 S2-1 to S2-10):**
+- **S2-1:** EC-14 now describes characters the chosen encoding cannot represent. It also says a lone surrogate fails pydantic validation before any tool runs. `unicode_character_info.utf8_hex` is now `str` instead of `str?`; the key set is unchanged, and no test checks whether it can be null. The `count_bytes_in_encoding` surrogate clause is removed.
+- **S2-2:** The missing caps are now stated:
+  - `add_business_days.holidays` is capped at `PREBUILT_MAX_HOLIDAYS`, and `weekend_days` at 7. Both match the sibling `business_days_between`, where the tests pin 1,000 and 7. FR-8 keeps an enum-sized bound as a literal, so `weekend_days` gets the literal 7 rather than a new constant.
+  - The two `critical_path_schedule` dependency lists are capped at `PREBUILT_MAX_GRAPH_EDGES`.
+- **S2-3:** `UtcOffset` gets `max_length=PREBUILT_MAX_UTC_OFFSET_CHARS` (6). The tests accept it, and they keep checking the exact pattern string.
+- **S2-4:** `verify_email_syntax` now checks `domain_too_long` immediately before `address_too_long`. The enum's declaration order is unchanged, because the tests pin it. The test with a 253-character domain still gets `address_too_long`.
+- **S2-5:** The `DigestFormat` rule is now in the §9.2 enum table and applies to all three users: lowercase hex, padded `base64`, unpadded `base64url`.
+- **S2-6:** In `xml_find_elements`, any `SyntaxError`, `TypeError`, or `KeyError` from `findall` becomes error(`path`), and a parse error becomes error(`xml_text`). I probed this on 3.11: `[` raises `TypeError`, `/b` raises `SyntaxError`, and `@` raises `KeyError`.
+- **S2-7:** The A.30 rule rejects a null character before `ast.parse`, so the result no longer depends on the Python version. `verify_python_syntax` returns `valid: false` with null line and column.
+- **S2-8:** EC-26 and `classify_ip_address` now say which parts of an IPv4-mapped result depend on the Python version.
+- **S2-9:** Each of the three error rows now names its parameter: `fiscal_quarter` → `target_date`, the shift amount → `right`, and seven weekend days → `weekend_days`.
+- **S2-10:** The `list_combinations` count is computed with `math.comb` arithmetic.
+
+**Loose rows (S2-11).** Each reading the tests pinned is now in its row. Where a test leaves a value open with `ANY`, I picked one value that test accepts, and S2 may tighten the test later:
+- **Picked values:**
+  - a Setext heading's `line` is the text line, not the underline
+  - an autolink's `text` is its URL
+  - fenced blocks use the fence lines as their line numbers
+  - `list_python_imports` gives `module: null` for a plain `import`
+  - `find_python_name_usages` columns point at the name itself
+  - `sms_segment_count` reports 160 units per segment for empty text
+  - `verify_json_syntax` and `verify_xml_wellformed` give null positions for their fixed-message cases
+  - `profile_csv_columns` counts distinct values by text
+  - `format_duration` `long` also leaves out zero parts
+- **New §9.2 rules:** the `code_point` form (item 6), the `time` form (item 11), and the negative-money form (item 16).
+- **`strip_html_tags`:** the row now lists what `PREBUILT_HTML_BLOCK_TAGS` contains.
+- **`remove_diacritics`:** marks are now dropped only after Latin letters. The old row said "non-Latin scripts are left as they are" but its NFD rule changed Greek and Devanagari text; the new rule keeps the old intent. The tests cover only Latin and CJK, so both readings pass them.
+- **Two rows that differ on purpose:** `join_records` keeps the right join field and `csv_join_tables` drops it. Each row says so, and the tests pin both.
+
+**Unchanged:** no tool, parameter, return key, default, or test-pinned cap changed. I checked this by diffing every Appendix A parameter and return cell between r3 and r4. The only differences are the four new list caps and the `utf8_hex` type. The §6.2 Proof column is byte-identical to what S2 wrote.
+
+**Stage E self-check (r4):**
+- Traceability script: all IDs defined. The only flags are G-1 to G-4, which are defined in the §1 table; the script misses them.
+- Table pipes: 0 problems.
+- 18 `## §` headings.
+- Appendix: 265 rows in 31 tables, every category between 6 and 12.
+- Enum table: 68 rows.
+- spec.md is LF.
