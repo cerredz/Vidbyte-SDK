@@ -1,18 +1,12 @@
-"""Context Protocol Header
+"""FILE: tests/test_mcp_attach_start_failure.py
 
-Description:
-    Tests that attach_mcp_server reports an MCP server that cannot start as a connection
-    failure, not as a failed handshake.
-Purpose:
-    Verifies the documented contract of attach_mcp_server: a subprocess that fails to start
-    raises McpConnectionError, while a program that starts but does not speak MCP still raises
-    McpInitializeError, so callers can tell the two apart.
-Architecture:
-    - McpAttachStartFailureTests: IsolatedAsyncioTestCase driving the real McpStdioTransport
-      (no mocks) with a missing executable and with a real program that exits at once.
-Relations:
-    - vidbyte/tools/mcp/attach.py
-    - vidbyte/tools/mcp/transport.py
+PURPOSE: Prove attach_mcp_server reports an MCP server that cannot start as McpConnectionError, not as a failed handshake.
+ROLE IN CODEBASE: Drives the public vidbyte.tools.mcp.attach.attach_mcp_server with the real McpStdioTransport and no mocks.
+ARCHITECTURE NOTE: The subprocess is spawned lazily by McpStdioTransport.start(), which attach now calls before the handshake.
+COMMON MODIFICATION PATTERNS: Add a case when attach gains another documented failure; keep the McpInitializeError control.
+KNOWN EDGE CASES: A program that starts and exits at once without speaking MCP must still raise McpInitializeError.
+RELATED DOCS: vidbyte/tools/mcp/README.md
+TESTS: This module; full source gate via scripts/run_ci.py.
 """
 
 from __future__ import annotations

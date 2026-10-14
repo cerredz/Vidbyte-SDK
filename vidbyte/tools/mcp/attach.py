@@ -53,11 +53,8 @@ async def attach_mcp_server(config: McpServerConfig) -> McpServerHandle:
         ) from e
 
     try:
-        # Start the server process before the handshake, so a server that never starts is
-        # reported as a connection failure rather than as a failed handshake.
         # @intent mcp-spawn-failure-is-a-connection-error
-        # The subprocess is spawned lazily by start(), so it is started here, where a failure can
-        # be reported as the documented McpConnectionError instead of a handshake failure.
+        # start() spawns the subprocess lazily; start it here so a spawn failure is the documented McpConnectionError, not a handshake failure.
         try:
             await transport.start()
         except Exception as e:
