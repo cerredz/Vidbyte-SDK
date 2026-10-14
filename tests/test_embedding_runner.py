@@ -139,6 +139,37 @@ class EmbeddingRunnerTests(unittest.TestCase):
         self.assertAlmostEqual(response.embeddings[0][0], 0.1)
         self.assertAlmostEqual(response.embeddings[1][0], 0.8)
 
+    def test_gemini_embedding_splits_more_than_100_texts_into_capped_batches(self) -> None:
+        # Gemini rejects a batchEmbedContents call with more than 100 requests, so 250 texts must go as 100, 100 and 50.
+        vectors = [[float(index), 0.5] for index in range(250)]
+        transport = FakeTransport([_make_gemini_embedding_response(vectors[:100]), _make_gemini_embedding_response(vectors[100:200]), _make_gemini_embedding_response(vectors[200:])])
+        runner = EmbeddingModelRunner(
+            EmbeddingModelConfig(provider=ModelProvider.GEMINI, model="text-embedding-004", api_key="key"),
+            transport=transport,
+        )
+
+        response = runner.run([f"text {index}" for index in range(250)])
+
+        self.assertEqual([len(sent["json_body"]["requests"]) for sent in transport.requests], [100, 100, 50])
+        self.assertEqual(response.embeddings, tuple(tuple(vector) for vector in vectors))
+        sent_texts = [entry["content"]["parts"][0]["text"] for sent in transport.requests for entry in sent["json_body"]["requests"]]
+        self.assertEqual(sent_texts, [f"text {index}" for index in range(250)])
+        for sent in transport.requests:
+            self.assertTrue(all(entry["taskType"] == "RETRIEVAL_DOCUMENT" and entry["model"] == "models/text-embedding-004" for entry in sent["json_body"]["requests"]))
+
+    def test_gemini_embedding_dimensions_reach_every_capped_batch(self) -> None:
+        transport = FakeTransport([_make_gemini_embedding_response([[0.1]] * 100), _make_gemini_embedding_response([[0.2]] * 5)])
+        runner = EmbeddingModelRunner(
+            EmbeddingModelConfig(provider=ModelProvider.GEMINI, model="gemini-embedding-001", api_key="key", dimensions=768),
+            transport=transport,
+        )
+
+        runner.run([f"text {index}" for index in range(105)])
+
+        self.assertEqual([len(sent["json_body"]["requests"]) for sent in transport.requests], [100, 5])
+        for sent in transport.requests:
+            self.assertTrue(all(entry.get("outputDimensionality") == 768 for entry in sent["json_body"]["requests"]))
+
     def test_gemini_embedding_sends_to_batch_endpoint(self) -> None:
         transport = FakeTransport([_make_gemini_embedding_response([[0.5]])])
         runner = EmbeddingModelRunner(
