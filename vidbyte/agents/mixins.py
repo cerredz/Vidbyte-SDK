@@ -44,6 +44,8 @@ class McpAttachableMixin:
     _fork_dropped_tool_names: frozenset[str] = frozenset()
     # Set only while one run is connecting pending servers; resolved and cleared when that attach ends.
     _mcp_attach_in_flight: asyncio.Future[None] | None = None
+    # The batch an in-flight lazy attach is connecting: out of the queue, not yet among the handles.
+    _mcp_attaching_configs: tuple[McpServerConfig, ...] = ()
     tools: list[BaseTool]
 
     async def attach_mcp_server(
@@ -225,6 +227,8 @@ class McpAttachableMixin:
         # Mark the attach as in flight so overlapping runs wait for it instead of running without its tools.
         attach_done: asyncio.Future[None] = asyncio.get_running_loop().create_future()
         self._mcp_attach_in_flight = attach_done
+        # Remember the batch while it boots, so a fork taken meanwhile still inherits these servers.
+        self._mcp_attaching_configs = tuple(configs)
         try:
             await self.attach_mcp_servers(configs)
         except BaseException:
@@ -236,6 +240,7 @@ class McpAttachableMixin:
         finally:
             # Release the waiting runs; the marker never outlives this loop's attach.
             self._mcp_attach_in_flight = None
+            self._mcp_attaching_configs = ()
             attach_done.set_result(None)
 
     async def _run_releasing_mcp(self, run: Awaitable[ResultT]) -> ResultT:
@@ -271,7 +276,14 @@ class McpAttachableMixin:
 
     def _mcp_configs_for_fork(self) -> tuple[McpServerConfig, ...]:
         # Returns replayable MCP server configs for child agents without sharing live handles.
-        return tuple(handle.config for handle in self._mcp_handles) + tuple(self._pending_mcp_configs)
+        # @intent forks-inherit-servers-still-connecting
+        # A lazy attach takes its batch out of the queue before the servers boot, so a fork taken meanwhile
+        # must still see that batch: connected servers first, then the ones connecting, then the queued ones.
+        return (
+            tuple(handle.config for handle in self._mcp_handles)
+            + self._mcp_attaching_configs
+            + tuple(self._pending_mcp_configs)
+        )
 
     def _mcp_bridged_tools_for_fork(self) -> tuple[BaseTool, ...]:
         # Returns parent-owned bridged tool objects that must not be copied into forked agents.
