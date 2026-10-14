@@ -318,7 +318,7 @@ Tool contracts, the decorator used to define one, agent-local tool catalogs, aut
 
 ##### `vidbyte/tools/builtins/`
 
-The shipped tool library available out of the box, covering calculation, code execution, code search, document retrieval, direct context manipulation, handoff and trajectory-related actions, and integration with external memory providers. These cover the great majority of capabilities most agents actually need, and they arrive already schema-correct and already tagged with the appropriate permission level. Checking here before writing a new custom tool is worthwhile, since an equivalent capability likely already exists. This is, by file count, one of the largest folders in the entire package.
+The shipped tool library available out of the box, covering calculation, code execution, code search, document retrieval, direct context manipulation, handoff and trajectory-related actions, and integration with external memory providers. It also holds a large library of small deterministic utility tools grouped by category, for exact jobs such as arithmetic, dates, text counting, parsing, and encoding, which run on the standard library alone and touch nothing outside their arguments. These cover the great majority of capabilities most agents actually need, and they arrive already schema-correct and already tagged with the appropriate permission level. Checking here before writing a new custom tool is worthwhile, since an equivalent capability likely already exists. This is, by file count, one of the largest folders in the entire package.
 
 ##### `vidbyte/tools/filesystem/`
 
@@ -334,7 +334,7 @@ The authorization boundary that all tool execution passes through: the policy mo
 
 ##### `vidbyte/tools/toolsets/`
 
-Named, pre-assembled bundles of tools that ship together for a particular use case, so a caller can attach a coherent, related set of capabilities in a single call rather than assembling them one at a time. It currently holds one such bundle, assembled for a specific paradigm shipped elsewhere in the package. A new toolset is worth adding whenever the same combination of individual tools keeps being assembled by hand across more than one place. This folder is about convenience and consistency rather than introducing any new tool capability itself.
+Named, pre-assembled bundles of tools that ship together for a particular use case, so a caller can attach a coherent, related set of capabilities in a single call rather than assembling them one at a time. One kind of bundle equips a specific agent shipped elsewhere in the package with the tools it starts with. Another kind builds a bundle from the categories of utility tools a caller chooses, so an agent receives only the deterministic helpers it needs instead of the whole library. A new toolset is worth adding whenever the same combination of individual tools keeps being assembled by hand across more than one place. This folder is about convenience and consistency rather than introducing any new tool capability itself.
 
 #### `vidbyte/trace/`
 
