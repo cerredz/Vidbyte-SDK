@@ -54,6 +54,7 @@ class HttpTransport:
 
     async def request(self, *, method: str, url: str, headers: Mapping[str, str], json_body: Mapping[str, object] | None = None, timeout_seconds: float = 60.0, retry_count: int = 0, backoff_seconds: float = 0.5, backoff_multiplier: float = 2.0, retry_status_codes: tuple[int, ...] = (408, 409, 425, 429, 500, 502, 503, 504), max_response_bytes: int | None = None, idempotency_key: str | None = None, follow_redirects: bool = False, content: bytes | None = None) -> HttpResponse:
         # Send one async HTTP request with optional non-blocking exponential backoff.
+        # @intent json-body-or-content-never-both
         # A JSON body and exact bytes together is a caller bug, refused
         # before anything is sent.
         if json_body is not None and content is not None:
@@ -77,6 +78,7 @@ class HttpTransport:
 
     async def _send_once(self, client: httpx.AsyncClient, *, method: str, url: str, headers: Mapping[str, str], json_body: Mapping[str, object] | None, timeout_seconds: float, max_response_bytes: int | None = None, content: bytes | None = None) -> HttpResponse:
         # Execute a single httpx request and return HTTP errors as responses rather than exceptions.
+        # @intent content-bytes-go-out-verbatim
         # Caller bytes go out verbatim with no content-type added, so a
         # signature over them still matches the wire.
         request_headers = dict(headers)
