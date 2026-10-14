@@ -1,7 +1,7 @@
 ---
 spec: prebuilt-agent-tools
 title: A library of 250+ prebuilt agent tools in vidbyte-sdk
-status: tests-written
+status: implemented
 revision: 5
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-prebuilt-agent-tools
@@ -9,7 +9,7 @@ branch: feat/prebuilt-agent-tools
 base_commit: 8387d66680951766f02b0d740d78eb6450cb6419
 created: 2026-10-14
 updated: 2026-10-14
-pr:
+pr: https://github.com/cerredz/Vidbyte-SDK/pull/1072
 ---
 
 # Spec: A library of 250+ prebuilt agent tools in vidbyte-sdk
