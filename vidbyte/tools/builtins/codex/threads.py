@@ -105,8 +105,10 @@ class SpawnCodexThreadTool(_CodexHostTool):
         return await self._run(SPAWN.value, self._perform(call))
 
     async def _perform(self, call: ToolCall) -> str:
-        # Read the model's values; exactly one of a prompt and a goal
-        # objective, and a goal budget only with an objective.
+        # @intent one-instruction-per-spawn
+        # Read the model's values: exactly one of a prompt and a goal
+        # objective, because a goal replaces the prompt, and a goal
+        # budget only with an objective.
         prompt = self._resolve_text(call, "prompt")
         objective = self._resolve_text(call, "goal_objective")
         budget = self._resolve_count(call, "goal_token_budget")
@@ -200,8 +202,10 @@ class ContinueCodexThreadTool(_CodexHostTool):
 
     @staticmethod
     def _continue_defaults(defaults: CodexSpawnRequest) -> CodexSpawnRequest:
-        # Continue rejects a prompt, a goal, tools, a name, and the thread
-        # fields only a new thread takes (section 9.2 field rules).
+        # @intent continue-drops-new-thread-fields
+        # Continue rejects a prompt, a goal, tools, a name, and the
+        # thread fields only a new thread takes (section 9.2 field
+        # rules), so the developer's spawn defaults are cleared of them.
         thread = replace(
             defaults.thread,
             ephemeral=False,
@@ -275,7 +279,9 @@ class ListCodexThreadsTool(_CodexHostTool):
         return await self._run(LIST.value, self._perform(call))
 
     async def _perform(self, call: ToolCall) -> str:
-        # Read each filter, then list one page.
+        # @intent omitted-filters-keep-codex-defaults
+        # Read each filter, then list one page; a filter the model left
+        # out keeps Codex's own default.
         page = await self._host.list_codex_threads(
             cwd=self._resolve_text(call, "cwd"),
             search=self._resolve_text(call, "search"),

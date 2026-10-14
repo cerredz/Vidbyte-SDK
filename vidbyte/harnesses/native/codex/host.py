@@ -331,7 +331,9 @@ class CodexHost:
         sort_direction: CodexSortDirection = CodexSortDirection.PROVIDER_DEFAULT,
         cursor: str = "",
     ) -> CodexThreadPage:
-        # One page of stored threads; empty arguments are left out.
+        # @intent list-one-page-without-empty-filters
+        # One page of stored threads. Empty arguments are left out, so
+        # Codex applies its own default for each filter not given.
         operation = CodexHostOperation.LIST_CODEX_THREADS
         self._guard(operation, talks=True)
         connection = self._connection

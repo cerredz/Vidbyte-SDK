@@ -168,6 +168,7 @@ class CodexPreflight:
 
     @staticmethod
     def reject_unusable_fields(request: CodexSpawnRequest, operation: CodexHostOperation) -> None:
+        # @intent no-setting-is-silently-ignored
         # A field the operation does not use fails before any request, so
         # a setting is never silently ignored (INV-27).
         for name in REJECTED_FIELDS.get(operation, ()):

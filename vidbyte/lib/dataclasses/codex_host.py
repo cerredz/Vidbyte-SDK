@@ -390,6 +390,10 @@ class CodexThreadInfo:
     turns: tuple[CodexTurnSummary, ...] = ()
 
     def __post_init__(self) -> None:
+        # @intent thread-info-is-checked-where-it-is-built
+        # Codex's thread record is checked field by field when it is
+        # built, so a malformed answer fails at the wire edge with the
+        # field named, not later in a caller.
         _require_text("Codex thread info", "thread_id", self.thread_id)
         text = {"name": self.name, "preview": self.preview, "cwd": self.cwd, "model": self.model, "model_provider": self.model_provider, "forked_from_id": self.forked_from_id}
         _reject_non_str("Codex thread info", text)

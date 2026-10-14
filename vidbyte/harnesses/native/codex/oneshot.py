@@ -79,6 +79,9 @@ async def list_codex_threads(
     settings: CodexClientSettings | None = None,
 ) -> CodexThreadPage:
     """Open a CodexHost, list one page of stored Codex threads, and close it."""
+    # @intent a-one-shot-listing-owns-its-host
+    # The host opens for this one page and closes on return, so a caller
+    # that lists once never keeps an app-server process alive.
     async with CodexHost(settings) as host:
         return await host.list_codex_threads(cwd, search, archived, source_kinds, sort, sort_direction, cursor)
 
