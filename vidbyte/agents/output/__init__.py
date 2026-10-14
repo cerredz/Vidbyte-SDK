@@ -14,7 +14,11 @@ from __future__ import annotations
 from vidbyte.agents.output.connector import OutputConnector
 from vidbyte.agents.output.dispatcher import OutputDispatcher
 from vidbyte.lib.dataclasses.outputs import DeliveryReceipt, OutputContent
-from vidbyte.lib.enums.outputs import DeliveryStatus, OutputDestination, TypefullyPlatform
+from vidbyte.lib.enums.outputs import (
+    DeliveryStatus,
+    OutputDestination,
+    TypefullyPlatform,
+)
 from vidbyte.lib.errors import OutputDeliveryError
 from vidbyte.lib.outputs import (
     ConfluencePageOutput,

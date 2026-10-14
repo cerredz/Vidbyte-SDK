@@ -40,7 +40,12 @@ from vidbyte.lib.constants.outputs import (
     OUTPUT_TIMEOUT_SECONDS,
     SMTP_IMPLICIT_TLS_PORT,
 )
-from vidbyte.lib.dataclasses.outputs import DeliveryReceipt, OutputRead, OutputRequest, SmtpSettings
+from vidbyte.lib.dataclasses.outputs import (
+    DeliveryReceipt,
+    OutputRead,
+    OutputRequest,
+    SmtpSettings,
+)
 from vidbyte.lib.enums.outputs import DeliveryStatus, OutputDestination, OutputMethod
 from vidbyte.lib.errors import ProviderRequestError
 from vidbyte.lib.http.transport import HttpResponse, HttpTransport
