@@ -302,3 +302,54 @@ These readings are S2's own, because r4 is silent. They are not spec defects.
 - `get_python_function_signature` without a return annotation is `def run(self)`, with no arrow. r4 gives the form only as `def name(...) -> ...`.
 - `detect_csv_dialect` `has_header` stays `ANY` in two cases, because the row does not say how the header is detected.
 - The count tests (2^128 subnets, 10^15 integers, C(39,20)) hang rather than fail against an enumerating implementation; the pack sets no timeout.
+
+## Addendum: post-S3 fix (S3-3, `intersect_lists`)
+
+Trigger: a granted test change from the coordinator. S3 reported a contradiction, and the orchestrator ruled for the spec. Commit: `0708d57d` test(prebuilt-tools): bind intersect_lists contract data to spec A.24 nested lists [AC-7].
+
+**The defect was mine.** My r3 transcription gave `intersect_lists.lists` the row `('lists', 'array', 100, 10000, REQUIRED)`. That reads `list[TextList]` as a list of strings, but A.24 and §9.2 make each item a `TextList`, which is a list of up to 10,000 strings of up to 10,000 characters each. The row cases always sent lists of lists, so only the two schema-level contract tests were wrong.
+
+**What changed** (details in `test-plan.md` § Post-S3 fix):
+- `prebuilt_parameter_data.py` gains `TextListsShape(min_lists, list_items, item_chars)` and `LIST_OF_TEXT_LISTS = (2, 10000, 10000)`. The row's item field is now that record, and the outer cap of 100 stays an int.
+- `test_prebuilt_toolset_contract.py`:
+  - `schema_problems` checks a `TextListsShape` exactly: `minItems` 2, inner `array`, inner `maxItems` 10,000, and inner string `maxLength` 10,000.
+  - The capped test now descends one level into lists of lists.
+- `test_prebuilt_model_facing_contract.py`:
+  - `over_cap_values` adds two cases: an inner list one item over (`lists.0`) and an inner string one character over (`lists.0.0`), each beside enough valid lists to meet the minimum.
+  - `capped_rows` accepts the record.
+- The int path, used by the other 264 tools, is unchanged.
+- No other tool is affected: Appendix A has no other list-of-lists parameter, and the live schemas agree.
+
+**Proof.** A scratch script ran the three contract tests against `FunctionTool` variants of `intersect_lists`.
+- The A.24 schema passes all three.
+- Dropping or loosening any cap (outer 100, inner 10,000 items, or inner 10,000 characters) fails the schema test and the over-cap test.
+- Dropping the minimum of 2 fails the schema test.
+- The old list-of-strings shape fails both.
+
+Against the implementation at `f618559e` (production code not edited):
+
+```
+PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider tests/features/prebuilt_tools/test_prebuilt_toolset_contract.py -k intersect_lists
+...                                                                      [100%]
+3 passed, 940 deselected in 0.31s
+
+PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider tests/features/prebuilt_tools
+........................................................................ [ 98%]
+..............................................................           [100%]
+4310 passed in 20.87s
+
+PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider tests/test_tools_catalog.py tests/test_function_tool_parameter_types.py tests/test_tool_core.py tests/features/coding_agent
+..............................................................           [100%]
+338 passed, 12 skipped in 15.30s
+
+PYTHONPATH=$(pwd) python lint/run.py        (test files and test-plan.md staged)
+S063 RATCHETED: 4 known finding(s). Inspect with: python lint/run.py --rule S063 --all
+
+S064 RATCHETED: 4 known finding(s). Inspect with: python lint/run.py --rule S064 --all
+
+SDK-LINT: PASS
+```
+
+Lint exited 0, and its output matches the previous run line for line.
+
+**Still uncovered.** Minimum list lengths elsewhere (`len 1..` and `len 2..` on flat lists such as `greatest_common_divisor.values`) are still not compared against `minItems`. That was true before this fix too. It was left alone because this change was granted for `intersect_lists` only.
