@@ -13,8 +13,8 @@ started: 2026-10-13
 
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
-| S0 worktree + capture + recon | running | 2026-10-13 | | reports/S0-scout.md | base_commit 336d6c78 (merge of origin/main 8387d666 into 4ee040b7) |
-| S1 spec + review | pending | | | | |
+| S0 worktree + capture + recon | done | 2026-10-13 | 2026-10-13 | reports/S0-scout.md | base_commit 336d6c78 (merge of origin/main 8387d666 into 4ee040b7) |
+| S1 spec + review | running | | | | |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -42,6 +42,15 @@ started: 2026-10-13
 - At every S5 convergence check `gh pr view 882 --json mergeable,mergeStateStatus`; SDK main moves ~1 commit/10 min, so stop at MERGEABLE/BEHIND — *source:* memory
 - vidbyte-cli draft PR #166 depends on `SlackOutput`, `GitHubIssueOutput`, `LinearIssueOutput` constructors and the root `OutputDispatcher` export (commit 4272c308): no breaking changes — *source:* memory
 - No-test-edit check across merge commits: `git show --cc --format= <merge> -- tests/` is empty; plain diffs from BASE_COMMIT include only this run's work — *source:* memory
+- The SDK lint pass line is `SDK-LINT: PASS` (lint/core/report.py:58), not `AGENT-LINT: PASS` — *source:* S0 scout
+- `OutputHttp.post` is POST-only and returns only a receipt (no response JSON); `OutputRequest` has no method field and takes only a JSON-object body; `_link` walks dicts only and only prepends a prefix — *source:* S0 scout
+- `HttpTransport._send_once` serializes `json_body` itself (transport.py:79); no raw-bytes parameter exists; `idempotency_key` is local only and PATCH needs one before it can be retried — *source:* S0 scout
+- Changing default chat wire shapes (Slack, Teams, Telegram, Jira, Google Chat) breaks first-batch tests that pin exact bodies; five new connectors break the 18-name export count, the ordered destination list, the env-var map test, and the docs test requiring "2026-10-11" in every env-var row — *source:* S0 scout
+- No Markdown, ADF, or HMAC helper exists in vidbyte/lib; the only S061-approved file writer is the synchronous `LocalFileSystemBackend.append_text` — *source:* S0 scout
+- `OutputArguments.text/texts/matching/address/identifier` echo the bad value in errors — never pass secret header values or `secret=` through them; only `credential` and `https_url` hide values — *source:* S0 scout
+- `OutputRequest.headers` rejects non-lowercase keys; S105 flags constants with `token`/`secret` name segments; A002 needs `# @intent` on functions mentioning secret/request/send/fetch — *source:* S0 scout
+- Test fake `HttpScript` always returns `headers={}` (no Link pagination yet); every `_send_once` fake takes `**kwargs`; autouse `isolated_output_env` clears only the 11 output env vars (not GITHUB_STEP_SUMMARY); the layering test globs only direct children of vidbyte/lib/outputs/*.py — *source:* S0 scout
+- Job-summary file write can trip S047 (blocking open in async), S061 (non-literal paths), S041 (explicit encoding); first batch forbade asyncio.to_thread for SMTP and used a dedicated executor — *source:* S0 scout
 
 ### Carried from the first batch (docs/spec/agent-output-connectors/pipeline.md)
 - The credential sibling is `ProviderModelRegistry.resolve_api_key` (vidbyte/lib/registries/models.py:151-161); `ModelRegistry` does not exist — *source:* S0 scout
