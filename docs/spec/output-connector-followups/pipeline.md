@@ -14,7 +14,7 @@ started: 2026-10-13
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-13 | 2026-10-13 | reports/S0-scout.md | base_commit 336d6c78 (merge of origin/main 8387d666 into 4ee040b7) |
-| S1 spec + review | running | | | | |
+| S1 spec + review | running | 2026-10-13 | | reports/S1-spec-author.md, S1-spec-review.md | spec r1 (09f7c42d), review round 1 running |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -23,7 +23,7 @@ started: 2026-10-13
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 0/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 1/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-13 — Build on the existing PR #882 branch, not a new branch from main — the user said "implement these things on the pr" (request.md §A Prompt 10).
@@ -31,6 +31,7 @@ started: 2026-10-13
 - 2026-10-13 — Merged origin/main (8387d666) into the branch at S0 as merge commit 336d6c78 (conflict-free; branch was 15 behind) — checklist §0 "merge main into the branch"; catch-up by merge, never rebase. This is BASE_COMMIT; reviewers diff `336d6c78..HEAD`.
 - 2026-10-13 — Scope = every checkbox of request.md §B sections 0–5, EXCEPT: "Mark the PR ready" (user's call); "Next, if you want them"; "Linear and Jira versions, only if you ask"; the "Don't build" list; bot tokens (Q3 default no); HTML email (Q4 default no). INCLUDED: optional Telegram `topic_id=`; all five §4 connectors (user did not narrow "pick 3–5"); Google Chat Markdown only if official docs confirm the field on the webhook's create call.
 - 2026-10-13 — New slug folder `docs/spec/output-connector-followups/` instead of revising the first batch's spec in place — keeps the closed run's review/verify-log intact; the first spec gets only its §9.2(b) corrections.
+- 2026-10-14 — S1 author was stopped by a session restart before writing anything; resumed via SendMessage (not relaunched) to keep its vendor-doc research; it then wrote and committed r1 (09f7c42d). Its report was left uncommitted; orchestrator committed it (bb4491c3).
 
 ## User replies (verbatim)
 - 2026-10-13 — "great, implement these things on the pr"
@@ -51,6 +52,10 @@ started: 2026-10-13
 - `OutputRequest.headers` rejects non-lowercase keys; S105 flags constants with `token`/`secret` name segments; A002 needs `# @intent` on functions mentioning secret/request/send/fetch — *source:* S0 scout
 - Test fake `HttpScript` always returns `headers={}` (no Link pagination yet); every `_send_once` fake takes `**kwargs`; autouse `isolated_output_env` clears only the 11 output env vars (not GITHUB_STEP_SUMMARY); the layering test globs only direct children of vidbyte/lib/outputs/*.py — *source:* S0 scout
 - Job-summary file write can trip S047 (blocking open in async), S061 (non-literal paths), S041 (explicit encoding); first batch forbade asyncio.to_thread for SMTP and used a dedicated executor — *source:* S0 scout
+- Spec r1 design: 7 new files (adf.py, github_api.py, gitlab.py, github_job_summary.py, confluence.py, typefully.py, hubspot.py); `HttpTransport.request(content=)` for exact signed bytes; `OutputHttp.patch`/`.read` with `OutputRead`/`OutputMethod`; `OutputRequest.json_body` may be None plus a `content` field; GitHub `key=` drives sticky comment and one-issue-per-key via list endpoints, ≤ 10 pages; Google Chat Markdown NOT built (D-24, live check L-3) — *source:* S1 author r1
+- Spec §13 lists the first-batch test expectations that must change (Slack ≤ 12,000 chars → `markdown` block; Telegram → `sendRichMessage` `rich_message.markdown`; Teams card two blocks; WIRE_ROWS/CAPPED, mention test, dispatch.py:125/148/315, acceptance.py:97, agent_wiring.py:62; ROOT_NAMES 18→24; LIB_OUTPUT_MODULES +7; README date pin 2026-10-11 vs new rows 2026-10-14; OUTPUT_ENV_VARS gains GITHUB_STEP_SUMMARY) — *source:* S1 author r1
+- Notion append = PATCH `{"type":"insert_content","insert_content":{"content":...}}`, no `url` in response → SENT with url=None; Confluence create returns 200; GitLab MR note has no link; §9.2(b) SMS count is 8 (Telesign is form-encoded) — *source:* S1 author r1
+- Never add an A001 header to `vidbyte/lib/http/transport.py` (predates this PR) — *source:* S1 author r1
 
 ### Carried from the first batch (docs/spec/agent-output-connectors/pipeline.md)
 - The credential sibling is `ProviderModelRegistry.resolve_api_key` (vidbyte/lib/registries/models.py:151-161); `ModelRegistry` does not exist — *source:* S0 scout
