@@ -5,7 +5,7 @@ ROLE IN CODEBASE: Re-exported by vidbyte/tools/builtins/prebuilt/__init__.py and
 ARCHITECTURE NOTE: Money follows spec section 9.2 item 16. Float inputs enter exact arithmetic through their shortest text, every rational money step is exact in Fraction and kept in whole cents, and only compound growth runs in a 50-digit decimal context in the stated operation order. Each money output is rounded half-up to cents exactly once and written from an integer cent count, so -0.00 can never appear. The rate formulas (net present value, internal rate of return, growth rate, percentage change) are float formulas.
 FUNCTION INVENTORY: compound_interest_future_value, loan_payment_amount, amortization_schedule, net_present_value, internal_rate_of_return, compound_annual_growth_rate, percentage_change, percentage_breakdown, allocate_amount, and split_tax_inclusive_amount are the tools; _future_value runs the decimal growth; _level_payment, _amortize, _half_up, and _money_text build loan money; _npv_at and _bisect_root drive the rate search; _largest_remainder and _unit_text build exact shares; tool_functions lists the tools in catalogue order.
 COMMON MODIFICATION PATTERNS: A new money tool adds a static method with a 4 to 5 sentence description, its row in the spec's Appendix A.7, and its entry in tool_functions; it keeps money in integer cents and writes it through _money_text. A change to a rounding rule changes section 9.2 item 16 first.
-WHAT NOT TO DO IN THIS FILE: 1. Do not build a Decimal or Fraction from a float directly; use repr(x) so a value such as 2.675 stays exact. 2. Do not round a money value twice or round with float arithmetic or round(). 3. Do not use the host's decimal context; every decimal step runs inside localcontext with PREBUILT_FINANCE_PRECISION. 4. Do not compute loan totals as payment times term; they come from the schedule.
+WHAT NOT TO DO IN THIS FILE: 1. Do not build a Decimal or Fraction from a float directly; use repr(x) so a value such as 2.675 stays exact. 2. Do not round a money value twice or round with float arithmetic or round(). 3. Do not use the host's decimal context; every decimal step runs inside PrebuiltToolSupport.decimal_context with PREBUILT_FINANCE_PRECISION. 4. Do not compute loan totals as payment times term; they come from the schedule.
 KNOWN EDGE CASES: 1740.00 at 6.1 percent has a first-month interest of exactly 8.845, which half-up rounding makes 8.85. Cent rounding of the level payment can pay a loan off before its term, so the schedule ends at the first zero balance. A principal that rounds to 0.00 gives a single zero row. The rate search skips grid points whose powers overflow or vanish, which long series hit near both ends of the grid.
 RELATED DOCS: docs/spec/prebuilt-agent-tools/spec.md (Appendix A.7, section 9.2 items 5, 13, and 16, D-16); vidbyte/tools/builtins/prebuilt/README.md
 TESTS: tests/features/prebuilt_tools/test_prebuilt_rows_finance_units.py and the catalogue-wide tests in tests/features/prebuilt_tools/
@@ -17,11 +17,9 @@ import math
 import sys
 from collections.abc import Callable, Sequence
 from decimal import (
-    ROUND_HALF_EVEN,
     ROUND_HALF_UP,
     Decimal,
     DecimalException,
-    localcontext,
 )
 from fractions import Fraction
 from functools import partial
@@ -294,7 +292,7 @@ class FinanceToolFunctions:
     @staticmethod
     def _future_value(principal: float, annual_rate_percent: float, years: float, compounding: CompoundingFrequency) -> tuple[int, int]:
         """Return the cent-rounded principal and future value in whole cents, growing in the 50-digit context in the section 9.2 item 16 order."""
-        with localcontext(prec=PREBUILT_FINANCE_PRECISION, rounding=ROUND_HALF_EVEN):
+        with PrebuiltToolSupport.decimal_context(PREBUILT_FINANCE_PRECISION):
             start = Decimal(repr(principal)).quantize(_CENT, ROUND_HALF_UP)
             yearly = Decimal(repr(annual_rate_percent)) / _PERCENT
             span = Decimal(repr(years))

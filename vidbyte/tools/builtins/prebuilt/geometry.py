@@ -16,7 +16,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Sequence
-from decimal import ROUND_HALF_EVEN, Decimal, localcontext
+from decimal import Decimal
 from fractions import Fraction
 from typing import Annotated
 
@@ -176,15 +176,15 @@ class GeometryToolFunctions:
 
         # Round the whole angle once, in arc-seconds, exactly from the
         # value's shortest text, and split it into parts afterwards.
-        with localcontext(prec=PREBUILT_FINANCE_PRECISION, rounding=ROUND_HALF_EVEN):
+        with PrebuiltToolSupport.decimal_context(PREBUILT_FINANCE_PRECISION):
             total = (abs(Decimal(repr(decimal_degrees))) * _SECONDS_PER_DEGREE).quantize(Decimal(1).scaleb(-seconds_decimal_places))
             degrees, remainder = divmod(total, _SECONDS_PER_DEGREE)
             minutes, seconds = divmod(remainder, _SECONDS_PER_MINUTE)
+            seconds_text = f"{seconds:.{seconds_decimal_places}f}"
 
         # Pick the hemisphere and write the parts without zero padding.
         letters = ("S", "N") if axis is CoordinateAxis.LATITUDE else ("W", "E")
         hemisphere = letters[0] if decimal_degrees < 0 and total != 0 else letters[1]
-        seconds_text = f"{seconds:.{seconds_decimal_places}f}"
         return {
             "dms": f"{int(degrees)}°{int(minutes)}′{seconds_text}″{hemisphere}",
             "degrees": int(degrees),

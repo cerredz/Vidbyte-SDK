@@ -19,7 +19,7 @@ import html
 import json
 import re
 from datetime import datetime, timedelta, timezone
-from decimal import ROUND_HALF_EVEN, Decimal, localcontext
+from decimal import Decimal
 from types import MappingProxyType
 from typing import Annotated
 from urllib.parse import quote, quote_plus, unquote
@@ -266,11 +266,11 @@ class EncodingToolFunctions:
         """Turn a numeric seconds-since-epoch claim into a UTC ISO datetime, or None for anything else."""
         numeric = isinstance(value, (int, float)) and not isinstance(value, bool)
         seconds = Decimal(repr(value)) if numeric else None
-        if seconds is None or abs(seconds) > _MAX_CLAIM_SECONDS:
+        if seconds is None or seconds.copy_abs() > _MAX_CLAIM_SECONDS:
             return None
         # Round once to whole microseconds from the number's own text,
         # so a fractional claim never picks up float error.
-        with localcontext(prec=PREBUILT_FINANCE_PRECISION, rounding=ROUND_HALF_EVEN):
+        with PrebuiltToolSupport.decimal_context(PREBUILT_FINANCE_PRECISION):
             microseconds = int((seconds * _MICROSECONDS_PER_SECOND).to_integral_value())
         try:
             return (_UNIX_EPOCH + timedelta(microseconds=microseconds)).isoformat()

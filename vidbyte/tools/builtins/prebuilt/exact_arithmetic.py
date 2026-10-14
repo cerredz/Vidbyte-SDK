@@ -2,10 +2,10 @@
 
 PURPOSE: Defines ExactArithmeticToolFunctions, the ten prebuilt tools that do arithmetic a model cannot do reliably in its head: exact decimal arithmetic, rounding to places or significant figures, exact sums, fraction arithmetic, conversions between decimals, repeating decimals, and fractions, integer square roots, and quadratic equations.
 ROLE IN CODEBASE: Re-exported by vidbyte/tools/builtins/prebuilt/__init__.py and wrapped in FunctionTool objects by PrebuiltTools in vidbyte/tools/toolsets/prebuilt.py when the EXACT_ARITHMETIC category is chosen. Builds on PrebuiltToolSupport in _support.py for exact number text, the float guard, and the argument error.
-ARCHITECTURE NOTE: Every tool is a static method whose docstring's first paragraph is the model-facing description and whose parameters carry their own Field descriptions and caps, so FunctionTool builds the whole schema from the signature. Decimal work runs in a private decimal.localcontext wide enough that adding, subtracting, and multiplying never round, and every rounding that a row asks for happens exactly once, either with Decimal.quantize or with integer division of an exact Fraction.
-FUNCTION INVENTORY: decimal_arithmetic, round_decimal, round_significant_figures, sum_decimal_list, fraction_arithmetic, decimal_to_fraction, repeating_decimal_to_fraction, fraction_to_decimal, integer_square_root, and solve_quadratic_equation are the tools; _exact_context opens the wide decimal context; _round_half_even rounds an exact Fraction to fixed places; _round_to_figures rounds a Decimal to significant figures; _parse_fraction reads fraction text under the digit cap; _expand_digits runs the long division with cycle detection; _quadratic_roots solves the equation in floats; tool_functions lists the tools in catalogue order.
+ARCHITECTURE NOTE: Every tool is a static method whose docstring's first paragraph is the model-facing description and whose parameters carry their own Field descriptions and caps, so FunctionTool builds the whole schema from the signature. Decimal work runs in the fresh, fully specified context of PrebuiltToolSupport.decimal_context, wide enough that adding, subtracting, and multiplying never round, and every rounding that a row asks for happens exactly once, either with Decimal.quantize or with integer division of an exact Fraction.
+FUNCTION INVENTORY: decimal_arithmetic, round_decimal, round_significant_figures, sum_decimal_list, fraction_arithmetic, decimal_to_fraction, repeating_decimal_to_fraction, fraction_to_decimal, integer_square_root, and solve_quadratic_equation are the tools; _round_half_even rounds an exact Fraction to fixed places; _round_to_figures rounds a Decimal to significant figures; _parse_fraction reads fraction text under the digit cap; _expand_digits runs the long division with cycle detection; _quadratic_roots solves the equation in floats; tool_functions lists the tools in catalogue order.
 COMMON MODIFICATION PATTERNS: A new exact tool adds a static method with a 4 to 5 sentence description, its row in the spec's Appendix A.1, and its entry in tool_functions. A new rounding mode adds a RoundingMode member and its entry in _ROUNDING_MODES.
-WHAT NOT TO DO IN THIS FILE: 1. Do not convert decimal text through float or call round(); every exact result must come from Decimal or Fraction. 2. Do not use or change the thread's default decimal context; open _exact_context instead. 3. Do not turn an integer of more than 4,000 digits into text; check the digit cap first, because Python refuses such conversions.
+WHAT NOT TO DO IN THIS FILE: 1. Do not convert decimal text through float or call round(); every exact result must come from Decimal or Fraction. 2. Do not use or change the thread's default decimal context; open PrebuiltToolSupport.decimal_context with _EXACT_PRECISION instead. 3. Do not turn an integer of more than 4,000 digits into text; check the digit cap first, because Python refuses such conversions.
 KNOWN EDGE CASES: Division rounds an exact Fraction with integer arithmetic, so a tie is a true tie and never a double rounding. A carry into a new leading digit is rounded again one place higher, so significant figures never grow. A rounded zero is written without a sign. Long division stops after 1,000 fractional digits, and whether a fraction terminates is decided from its denominator, not from the digits shown.
 RELATED DOCS: docs/spec/prebuilt-agent-tools/spec.md (Appendix A.1, section 9.2 items 2, 5, and 13); vidbyte/tools/builtins/prebuilt/README.md
 TESTS: tests/features/prebuilt_tools/test_prebuilt_rows_numbers.py and the catalogue-wide tests in tests/features/prebuilt_tools/
@@ -17,10 +17,7 @@ import math
 import operator
 import re
 from collections.abc import Callable
-from contextlib import AbstractContextManager
 from decimal import (
-    MAX_EMAX,
-    MIN_EMIN,
     ROUND_CEILING,
     ROUND_DOWN,
     ROUND_FLOOR,
@@ -28,12 +25,7 @@ from decimal import (
     ROUND_HALF_EVEN,
     ROUND_HALF_UP,
     ROUND_UP,
-    Context,
     Decimal,
-    DivisionByZero,
-    InvalidOperation,
-    Overflow,
-    localcontext,
 )
 from fractions import Fraction
 from types import MappingProxyType
@@ -64,7 +56,6 @@ from vidbyte.tools.builtins.prebuilt._support import (
 # Wide enough that two operands of the largest decimal text can be
 # added or multiplied, or rounded to the most places, without rounding.
 _EXACT_PRECISION = 4 * PREBUILT_MAX_DECIMAL_TEXT_CHARS
-_DECIMAL_TRAPS = (InvalidOperation, DivisionByZero, Overflow)
 _INTEGER_RESULT_BOUND = 10**PREBUILT_MAX_INTEGER_DIGITS
 _DECIMAL_BASE = 10
 _DECIMAL_TEXT_PATTERN = r"^[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)$"
@@ -120,7 +111,7 @@ class ExactArithmeticToolFunctions:
 
         # Divide exactly as fractions and round once; the other three
         # operations fit the wide context and never round.
-        with ExactArithmeticToolFunctions._exact_context():
+        with PrebuiltToolSupport.decimal_context(_EXACT_PRECISION):
             if operation is ArithmeticOperation.DIVIDE:
                 quotient = Fraction(left_value) / Fraction(right_value)
                 result, exact = ExactArithmeticToolFunctions._round_half_even(quotient, decimal_places)
@@ -142,7 +133,7 @@ class ExactArithmeticToolFunctions:
     ) -> PrebuiltToolOutput:
         """Round an exact decimal number to a fixed number of decimal places with a chosen rounding mode and return it as text. Use it whenever a value must be rounded correctly, because exact ties are decided on the decimal digits as written rather than on a binary approximation. The result keeps exactly decimal_places fractional digits, trailing zeros included, and has no decimal point when decimal_places is zero. A value that rounds to zero is written without a sign, and the tool has no failure case beyond its schema caps."""
         number = PrebuiltToolSupport.parse_decimal_text(value, "value")
-        with ExactArithmeticToolFunctions._exact_context():
+        with PrebuiltToolSupport.decimal_context(_EXACT_PRECISION):
             rounded = number.quantize(Decimal((0, (1,), -decimal_places)), rounding=_ROUNDING_MODES[mode])
         return {"result": format(rounded.copy_abs() if rounded.is_zero() else rounded, "f")}
 
@@ -156,7 +147,7 @@ class ExactArithmeticToolFunctions:
         number = PrebuiltToolSupport.parse_decimal_text(value, "value")
         if number.is_zero():
             return {"result": "0"}
-        with ExactArithmeticToolFunctions._exact_context():
+        with PrebuiltToolSupport.decimal_context(_EXACT_PRECISION):
             rounded = ExactArithmeticToolFunctions._round_to_figures(number, significant_figures, _ROUNDING_MODES[mode])
         return {"result": format(rounded, "f")}
 
@@ -169,7 +160,7 @@ class ExactArithmeticToolFunctions:
     ) -> PrebuiltToolOutput:
         """Add a list of exact decimal numbers and return the sum as canonical decimal text together with how many values were added. Use it to total amounts, scores, or measurements where floating-point addition would drift in the last digits. The sum is exact for any mix of signs and decimal places, and trailing fractional zeros are removed from the result. A sum of 10 to the power 4,000 or more in magnitude fails with an error naming values."""
         numbers = [PrebuiltToolSupport.parse_decimal_text(text, "values") for text in values]
-        with ExactArithmeticToolFunctions._exact_context():
+        with PrebuiltToolSupport.decimal_context(_EXACT_PRECISION):
             total = sum(numbers, Decimal(0))
         # @intent prebuilt-integer-digit-cap
         # A sum of 10^4000 or more would flood the model's context, so
@@ -202,7 +193,7 @@ class ExactArithmeticToolFunctions:
             raise PrebuiltToolSupport.argument_error("left", f"the result has a numerator or denominator of more than {PREBUILT_MAX_INTEGER_DIGITS} digits", f"operands whose result has at most {PREBUILT_MAX_INTEGER_DIGITS} digits above and below the line")
 
         # Round the exact result once for the decimal approximation.
-        with ExactArithmeticToolFunctions._exact_context():
+        with PrebuiltToolSupport.decimal_context(_EXACT_PRECISION):
             approximation, _ = ExactArithmeticToolFunctions._round_half_even(result, PREBUILT_APPROXIMATION_DIGITS)
         return {"result": PrebuiltToolSupport.fraction_text(result), "decimal_approximation": PrebuiltToolSupport.decimal_text(approximation)}
 
@@ -279,11 +270,6 @@ class ExactArithmeticToolFunctions:
         roots = ExactArithmeticToolFunctions._quadratic_roots(a, b, c, discriminant)
         listed = [{"real": PrebuiltToolSupport.float_result(real, "a") + 0.0, "imaginary": PrebuiltToolSupport.float_result(imaginary, "a") + 0.0} for real, imaginary in roots]
         return {"discriminant": discriminant + 0.0, "root_count": len(listed), "roots": listed}
-
-    @staticmethod
-    def _exact_context() -> AbstractContextManager[Context]:
-        """Open a private decimal context wide enough for exact work, independent of the thread's own settings."""
-        return localcontext(Context(prec=_EXACT_PRECISION, rounding=ROUND_HALF_EVEN, Emin=MIN_EMIN, Emax=MAX_EMAX, traps=list(_DECIMAL_TRAPS)))
 
     @staticmethod
     def _round_half_even(value: Fraction, places: int) -> tuple[Decimal, bool]:

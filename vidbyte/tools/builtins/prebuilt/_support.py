@@ -3,7 +3,7 @@
 PURPOSE: Holds PrebuiltToolSupport, the shared helpers every prebuilt tool category uses: the one argument-error builder, JSON and record parsing, exact number text, numeric text, nesting level, item capping under the character budget, paired lists, weights, dates and offsets, lines, words, sentences, syllables, CSV tables, and text encoding. Also defines the PrebuiltToolOutput and PrebuiltToolFunction type aliases.
 ROLE IN CODEBASE: Imported by the 31 category modules in vidbyte/tools/builtins/prebuilt/ and by vidbyte/tools/toolsets/prebuilt.py (for the PrebuiltToolFunction alias). Builds on vidbyte/lib/constants/prebuilt_tools.py, vidbyte/lib/enums/prebuilt_tools.py, and ToolExecutionError from vidbyte/lib/errors/.
 ARCHITECTURE NOTE: A static-method-only class (the class-bound helper pattern of vidbyte/lib/util/math.py). Each helper does one job. Helpers may call argument_error and nesting_level, which call nothing else in the class; parse_records_json also reuses parse_json_text so the JSON decoder exists once. Every error a helper raises is a ToolExecutionError whose message names the tool parameter the caller passed in, so FunctionTool turns it into a failure the model can act on.
-FUNCTION INVENTORY: argument_error builds the INV-15 error. parse_json_text, parse_records_json, and json_pointer_tokens read JSON input. parse_integer_text, parse_decimal_text, integer_text, decimal_text, fraction_text, float_result, and parse_numeric_text convert exact and numeric text. nesting_level measures container depth without recursion. cap_items applies the item cap and character budget. paired_values and weight_total check parallel lists and weights. as_utc, parse_utc_offset, and parse_date_text read times and dates. split_lines, line_and_column, split_words, split_sentences, and count_syllables implement the line, position, word, sentence, and syllable rules. parse_csv_table reads a CSV table. parse_html feeds HTML to a parser and drops markup left open at the end before closing it. encode_text encodes text in a TextEncoding.
+FUNCTION INVENTORY: argument_error builds the INV-15 error. parse_json_text, parse_records_json, and json_pointer_tokens read JSON input. parse_integer_text, parse_decimal_text, integer_text, decimal_text, fraction_text, float_result, and parse_numeric_text convert exact and numeric text. decimal_context opens the fresh, fully specified decimal context of section 9.2 item 18. nesting_level measures container depth without recursion. cap_items applies the item cap and character budget. paired_values and weight_total check parallel lists and weights. as_utc, parse_utc_offset, and parse_date_text read times and dates. split_lines, line_and_column, split_words, split_sentences, and count_syllables implement the line, position, word, sentence, and syllable rules. parse_csv_table reads a CSV table. parse_html feeds HTML to a parser and drops markup left open at the end before closing it. encode_text encodes text in a TextEncoding.
 COMMON MODIFICATION PATTERNS: Add a helper here only when two or more category modules need the same job; logic for one category stays in its own module. Keep every new helper free of calls to other helpers except argument_error and nesting_level.
 WHAT NOT TO DO IN THIS FILE: 1. Do not raise anything but argument_error's ToolExecutionError. 2. Do not put str(exc) or repr(exc) in a message; read structured attributes such as msg, lineno, colno, and pos. 3. Do not touch global state: no decimal.getcontext, csv.field_size_limit, or sys.set_int_max_str_digits. 4. Do not import vidbyte.tools.toolsets or anything above the tools layer.
 KNOWN EDGE CASES: Python refuses to turn text of more than 4,300 digits into an int, leading zeros included, so parse_numeric_text reads integers through their float value. A sentence terminator run is only matched at its first character, which keeps sentence splitting linear on long runs of punctuation. JSON nesting is checked after parsing, and json.loads itself raises RecursionError for extreme nesting, which is caught.
@@ -19,8 +19,19 @@ import json
 import math
 import re
 from collections.abc import Callable, Iterable, Sequence
+from contextlib import AbstractContextManager
 from datetime import date, datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import (
+    MAX_EMAX,
+    MIN_EMIN,
+    ROUND_HALF_EVEN,
+    Context,
+    Decimal,
+    DivisionByZero,
+    InvalidOperation,
+    Overflow,
+    localcontext,
+)
 from fractions import Fraction
 from functools import partial
 from html.parser import HTMLParser
@@ -179,8 +190,22 @@ class PrebuiltToolSupport:
         return str(value)
 
     @staticmethod
+    def decimal_context(precision: int) -> AbstractContextManager[Context]:
+        """Open a fresh decimal context with every field given and half-even rounding, so the host's own context never reaches a result."""
+        # @intent prebuilt-fresh-decimal-context
+        # FunctionTool runs a tool through asyncio.to_thread, which
+        # copies the host's decimal context into the worker, and a
+        # Context field left out is copied from DefaultContext, which a
+        # host can change too, so every field is given (section 9.2
+        # item 18).
+        context = Context(prec=precision, rounding=ROUND_HALF_EVEN, Emin=MIN_EMIN, Emax=MAX_EMAX, capitals=1, clamp=0, flags=[], traps=[InvalidOperation, DivisionByZero, Overflow])
+        return localcontext(context)
+
+    @staticmethod
     def decimal_text(value: Decimal) -> str:
         """Write a Decimal in canonical plain notation: no exponent, no trailing fractional zeros, and 0 for any zero."""
+        # The f format without a precision reads nothing from the
+        # decimal context, so the text never depends on the host's.
         if value.is_zero():
             return "0"
         text = format(value, "f")

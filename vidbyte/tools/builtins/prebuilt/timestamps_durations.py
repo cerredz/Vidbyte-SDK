@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, time, timedelta, timezone
-from decimal import ROUND_HALF_EVEN, Decimal, localcontext
+from decimal import Decimal
 from types import MappingProxyType
 from typing import Annotated
 
@@ -250,7 +250,7 @@ class TimestampsDurationsToolFunctions:
     @staticmethod
     def _rounded_units(value: float, scale: Decimal) -> int:
         """Scale a float's shortest text exactly by scale and round it once, half to even, to a whole number."""
-        with localcontext(prec=PREBUILT_FINANCE_PRECISION, rounding=ROUND_HALF_EVEN):
+        with PrebuiltToolSupport.decimal_context(PREBUILT_FINANCE_PRECISION):
             return int((Decimal(repr(value)) * scale).to_integral_value())
 
     @staticmethod
@@ -293,7 +293,7 @@ class TimestampsDurationsToolFunctions:
         if match.group("years") or match.group("months"):
             problem = "the ISO 8601 duration has a year or month part, whose length in seconds varies"
             raise PrebuiltToolSupport.argument_error("text", problem, "an ISO 8601 duration that uses weeks, days, hours, minutes, and seconds only")
-        with localcontext(prec=_PHRASE_SUM_DIGITS):
+        with PrebuiltToolSupport.decimal_context(_PHRASE_SUM_DIGITS):
             return sum((Decimal(match.group(name)) * Decimal(PREBUILT_DURATION_UNIT_WORDS[name]) for name in _ISO_PART_NAMES if match.group(name)), Decimal(0))
 
     @staticmethod
@@ -302,7 +302,7 @@ class TimestampsDurationsToolFunctions:
         match = _CLOCK_DURATION.fullmatch(text)
         if match is None:
             return None
-        with localcontext(prec=_PHRASE_SUM_DIGITS):
+        with PrebuiltToolSupport.decimal_context(_PHRASE_SUM_DIGITS):
             return sum((Decimal(match.group(name)) * Decimal(PREBUILT_DURATION_UNIT_WORDS[name]) for name in ("hour", "minute", "second") if match.group(name)), Decimal(0))
 
     @staticmethod
@@ -310,7 +310,7 @@ class TimestampsDurationsToolFunctions:
         """Read numbers with unit words, joined by spaces, commas, or and, as exact seconds, or return None."""
         total = Decimal(0)
         position = 0
-        with localcontext(prec=_PHRASE_SUM_DIGITS):
+        with PrebuiltToolSupport.decimal_context(_PHRASE_SUM_DIGITS):
             while position < len(text):
                 # Each part is an optional separator, a number, and a
                 # unit word; the first part may not start with one.

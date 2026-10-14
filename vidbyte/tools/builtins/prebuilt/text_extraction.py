@@ -5,7 +5,7 @@ ROLE IN CODEBASE: Re-exported by vidbyte/tools/builtins/prebuilt/__init__.py and
 ARCHITECTURE NOTE: Every tool is a static method whose docstring's first paragraph is the model-facing description and whose parameters carry their own Field descriptions and caps, so FunctionTool builds the whole schema from the signature. Each tool scans the text with one precompiled pattern whose repeated parts are bounded or possessive, so a million-character text is scanned in linear time, and then checks or converts each candidate in a private helper. Tools that list every occurrence count in one pass and build items lazily in a second, while tools that list distinct values tally them in order of first appearance.
 FUNCTION INVENTORY: extract_urls, extract_email_addresses, extract_numbers, extract_dates, extract_ip_addresses, extract_money_amounts, extract_key_value_pairs, and extract_sentences are the tools; _url_text trims a web address; _email_text checks an email candidate; _number_entry, _date_entry, and _money_entry convert one match into an output item; _ip_address checks an address candidate with ipaddress; _key_value_pairs splits lines into pairs; _tally_unique counts distinct values; tool_functions lists the tools in catalogue order.
 COMMON MODIFICATION PATTERNS: A new extraction tool adds a static method with a 4 to 5 sentence description, its row in the spec's Appendix A.29, and its entry in tool_functions. A new currency, magnitude suffix, or month name goes into its table in vidbyte/lib/constants/prebuilt_tools.py, and the patterns here pick it up when the module loads.
-WHAT NOT TO DO IN THIS FILE: 1. Do not add a pattern with an unbounded repeat that a later part can force to backtrack; keep every repeat bounded or possessive so scanning stays linear. 2. Do not multiply or scale a Decimal outside a localcontext with enough precision; the default context rounds to 28 digits. 3. Do not split lines or sentences with a local rule; use PrebuiltToolSupport so every category agrees. 4. Do not build every item before capping; count first and build items lazily so the item cap and the character budget stop the work.
+WHAT NOT TO DO IN THIS FILE: 1. Do not add a pattern with an unbounded repeat that a later part can force to backtrack; keep every repeat bounded or possessive so scanning stays linear. 2. Do not multiply or scale a Decimal outside PrebuiltToolSupport.decimal_context with enough precision; the host's context may round to 28 digits or trap. 3. Do not split lines or sentences with a local rule; use PrebuiltToolSupport so every category agrees. 4. Do not build every item before capping; count first and build items lazily so the item cap and the character budget stop the work.
 KNOWN EDGE CASES: A number, an amount, or a date that runs into a longer run of digits is skipped rather than cut, so a run of more than 4,000 digits never yields part of itself. A value whose exact plain text would pass the DecText length cap of 4,002 characters, such as a huge exponent, is skipped. Currency codes are matched in uppercase only, so ordinary words that spell a code in lowercase are not amounts. An IP candidate that ipaddress rejects is skipped whole, so an invalid address never yields a shorter valid tail.
 RELATED DOCS: docs/spec/prebuilt-agent-tools/spec.md (Appendix A.29, section 9.2 items 5, 6, 7, 9, and 12, section 12.3 row 36); vidbyte/tools/builtins/prebuilt/README.md
 TESTS: tests/features/prebuilt_tools/test_prebuilt_rows_extraction.py and the catalogue-wide tests in tests/features/prebuilt_tools/
@@ -16,7 +16,7 @@ from __future__ import annotations
 import ipaddress
 import re
 from collections.abc import Iterable, Iterator
-from decimal import Decimal, localcontext
+from decimal import Decimal
 from types import MappingProxyType
 from typing import Annotated, TypeVar
 
@@ -251,7 +251,7 @@ class TextExtractionToolFunctions:
         # The context is wide enough that multiplying by a magnitude
         # suffix never rounds.
         multiplier = PREBUILT_ABBREVIATED_NUMBER_SUFFIXES[suffix.lower()] if suffix else 1
-        with localcontext(prec=_PRODUCT_PRECISION):
+        with PrebuiltToolSupport.decimal_context(_PRODUCT_PRECISION):
             value = PrebuiltToolSupport.decimal_text(Decimal(f"{found['sign'] or ''}{number.replace(',', '')}") * multiplier)
         if len(value) > PREBUILT_MAX_DECIMAL_TEXT_CHARS:
             return None

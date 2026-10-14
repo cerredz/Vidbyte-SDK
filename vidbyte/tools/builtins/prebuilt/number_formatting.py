@@ -3,9 +3,9 @@
 PURPOSE: Defines NumberFormattingToolFunctions, the seven prebuilt tools that write and read numbers in human forms: base conversion, English number words in both directions, abbreviated amounts with magnitude suffixes, digit grouping in six separator styles, formatted amounts with currency, percent, and accounting marks, and scientific or engineering notation.
 ROLE IN CODEBASE: Re-exported by vidbyte/tools/builtins/prebuilt/__init__.py and wrapped in FunctionTool objects by PrebuiltTools in vidbyte/tools/toolsets/prebuilt.py when the NUMBER_FORMATTING category is chosen. Builds on PrebuiltToolSupport in _support.py for exact number text and the argument error, and on the number word, suffix, and currency tables in vidbyte/lib/constants/prebuilt_tools.py.
 ARCHITECTURE NOTE: Every tool is a static method whose docstring's first paragraph is the model-facing description and whose parameters carry their own Field descriptions and caps, so FunctionTool builds the whole schema from the signature. Numbers stay exact throughout: digit text is regrouped as text, rounding uses Decimal.quantize in a private wide decimal context, and English words are read by a small left-to-right state machine over one word table.
-FUNCTION INVENTORY: convert_number_base, number_to_english_words, english_words_to_number, parse_abbreviated_number, format_number_with_separators, parse_formatted_number, and to_scientific_notation are the tools; _exact_context opens the wide decimal context; _integer_in_base writes a non-negative integer in a base; _cardinal_words and _ordinal_words spell an integer; _read_number_words runs the word state machine; _decimal_parts splits a decimal into sign, integer digits, and fractional digits; _strip_number_marks removes currency, percent, sign, and accounting marks; _read_grouped_digits checks digit groups in a separator style; tool_functions lists the tools in catalogue order.
+FUNCTION INVENTORY: convert_number_base, number_to_english_words, english_words_to_number, parse_abbreviated_number, format_number_with_separators, parse_formatted_number, and to_scientific_notation are the tools; _integer_in_base writes a non-negative integer in a base; _cardinal_words and _ordinal_words spell an integer; _read_number_words runs the word state machine; _decimal_parts splits a decimal into sign, integer digits, and fractional digits; _strip_number_marks removes currency, percent, sign, and accounting marks; _read_grouped_digits checks digit groups in a separator style; tool_functions lists the tools in catalogue order.
 COMMON MODIFICATION PATTERNS: A new formatting tool adds a static method with a 4 to 5 sentence description, its row in the spec's Appendix A.3, and its entry in tool_functions. A new separator style adds a SeparatorStyle member and its pair in _SEPARATORS; new number words or suffixes change only the constants module.
-WHAT NOT TO DO IN THIS FILE: 1. Do not convert number text through float; every value must stay exact. 2. Do not turn an integer of more than 4,000 digits into text or read one from text; check the digit cap first, because Python refuses such conversions outside the power-of-two bases. 3. Do not use or change the thread's default decimal context; open _exact_context instead.
+WHAT NOT TO DO IN THIS FILE: 1. Do not convert number text through float; every value must stay exact. 2. Do not turn an integer of more than 4,000 digits into text or read one from text; check the digit cap first, because Python refuses such conversions outside the power-of-two bases. 3. Do not use or change the thread's default decimal context; open PrebuiltToolSupport.decimal_context with _EXACT_PRECISION instead.
 KNOWN EDGE CASES: A value whose digits are all zero is written without a sign in every tool. An ordinal changes only the last word, inside a hyphenated tens word too. Hundred may multiply a group up to ninety-nine, so a teen or tens word before hundred reads as a year-style number. A space separator style means U+0020 only, not a no-break space.
 RELATED DOCS: docs/spec/prebuilt-agent-tools/spec.md (Appendix A.3, section 9.2 items 2, 5, and 13); vidbyte/tools/builtins/prebuilt/README.md
 TESTS: tests/features/prebuilt_tools/test_prebuilt_rows_numbers.py and the catalogue-wide tests in tests/features/prebuilt_tools/
@@ -14,18 +14,7 @@ TESTS: tests/features/prebuilt_tools/test_prebuilt_rows_numbers.py and the catal
 from __future__ import annotations
 
 import re
-from contextlib import AbstractContextManager
-from decimal import (
-    MAX_EMAX,
-    MIN_EMIN,
-    ROUND_HALF_EVEN,
-    Context,
-    Decimal,
-    DivisionByZero,
-    InvalidOperation,
-    Overflow,
-    localcontext,
-)
+from decimal import ROUND_HALF_EVEN, Decimal
 from types import MappingProxyType
 from typing import Annotated
 
@@ -57,7 +46,6 @@ from vidbyte.tools.builtins.prebuilt._support import (
 # Wide enough that the largest decimal text can be rounded to the most
 # places, or scaled to any power of ten, without rounding.
 _EXACT_PRECISION = 4 * PREBUILT_MAX_DECIMAL_TEXT_CHARS
-_DECIMAL_TRAPS = (InvalidOperation, DivisionByZero, Overflow)
 _INTEGER_RESULT_BOUND = 10**PREBUILT_MAX_INTEGER_DIGITS
 _NUMBER_WORD_BOUND = 10**PREBUILT_MAX_NUMBER_WORD_DIGITS
 _MIN_BASE = 2
@@ -215,9 +203,9 @@ class NumberFormattingToolFunctions:
             raise PrebuiltToolSupport.argument_error("text", "the text is not a number with an optional magnitude suffix", "an optional sign and currency symbol, digits, and an optional suffix from k, m, mm, mn, b, bn, t, tn, or their words")
 
         # Multiply exactly, then apply the sign.
-        with NumberFormattingToolFunctions._exact_context():
+        with PrebuiltToolSupport.decimal_context(_EXACT_PRECISION):
             amount = Decimal(match.group("number").replace(",", "")) * PREBUILT_ABBREVIATED_NUMBER_SUFFIXES.get(suffix, 1)
-        return {"value": PrebuiltToolSupport.decimal_text(-amount if match.group("sign") == "-" else amount)}
+        return {"value": PrebuiltToolSupport.decimal_text(amount.copy_negate() if match.group("sign") == "-" else amount)}
 
     @staticmethod
     def format_number_with_separators(
@@ -229,7 +217,7 @@ class NumberFormattingToolFunctions:
         # Split the value into sign, integer digits, and fraction
         # digits, rounding first when a number of places is given.
         number = PrebuiltToolSupport.parse_decimal_text(value, "value")
-        with NumberFormattingToolFunctions._exact_context():
+        with PrebuiltToolSupport.decimal_context(_EXACT_PRECISION):
             negative, integer_digits, fraction_digits = NumberFormattingToolFunctions._decimal_parts(value, number, decimal_places)
 
         # Group the integer digits in threes from the right.
@@ -253,7 +241,7 @@ class NumberFormattingToolFunctions:
         # the chosen separator style.
         body, negative, is_percent = NumberFormattingToolFunctions._strip_number_marks(text)
         magnitude = NumberFormattingToolFunctions._read_grouped_digits(body, style)
-        return {"value": PrebuiltToolSupport.decimal_text(-magnitude if negative else magnitude), "is_percent": is_percent}
+        return {"value": PrebuiltToolSupport.decimal_text(magnitude.copy_negate() if negative else magnitude), "is_percent": is_percent}
 
     @staticmethod
     def to_scientific_notation(
@@ -269,18 +257,13 @@ class NumberFormattingToolFunctions:
 
         # Round to the requested figures, then move the decimal point to
         # the exponent the style allows.
-        with NumberFormattingToolFunctions._exact_context():
+        with PrebuiltToolSupport.decimal_context(_EXACT_PRECISION):
             rounded = number
             if significant_figures is not None:
                 rounded = number.quantize(Decimal((0, (1,), number.adjusted() - significant_figures + 1)), rounding=ROUND_HALF_EVEN)
             exponent = rounded.adjusted() if style is NotationStyle.SCIENTIFIC else rounded.adjusted() // _ENGINEERING_STEP * _ENGINEERING_STEP
             mantissa = PrebuiltToolSupport.decimal_text(rounded.scaleb(-exponent))
         return {"mantissa": mantissa, "exponent": exponent, "text": f"{mantissa}e{exponent}"}
-
-    @staticmethod
-    def _exact_context() -> AbstractContextManager[Context]:
-        """Open a private decimal context wide enough for exact work, independent of the thread's own settings."""
-        return localcontext(Context(prec=_EXACT_PRECISION, rounding=ROUND_HALF_EVEN, Emin=MIN_EMIN, Emax=MAX_EMAX, traps=list(_DECIMAL_TRAPS)))
 
     @staticmethod
     def _integer_in_base(magnitude: int, base: int) -> str:
