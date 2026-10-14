@@ -242,22 +242,22 @@ class ProbabilityToolFunctions:
         )
 
     @staticmethod
-    def _poisson_mass(rate: float, first: int, last: int | None) -> float:
+    def _poisson_mass(mean: float, first: int, last: int | None) -> float:
         """Add the Poisson probabilities of first through last events, where None leaves the range open above."""
-        log_rate = math.log(rate)
+        log_mean = math.log(mean)
         if last is not None:
-            return math.fsum(math.exp(count * log_rate - rate - math.lgamma(count + 1)) for count in range(first, last + 1))
-        # An open range starting at or below the rate holds most of the
+            return math.fsum(math.exp(count * log_mean - mean - math.lgamma(count + 1)) for count in range(first, last + 1))
+        # An open range starting at or below the mean holds most of the
         # mass, so it is one minus the short closed range below it.
-        if first <= rate:
-            return 1.0 - math.fsum(math.exp(count * log_rate - rate - math.lgamma(count + 1)) for count in range(first))
-        # Above the rate every term is smaller than the one before, so
+        if first <= mean:
+            return 1.0 - math.fsum(math.exp(count * log_mean - mean - math.lgamma(count + 1)) for count in range(first))
+        # Above the mean every term is smaller than the one before, so
         # adding stops once a term no longer changes the sum.
         terms: list[float] = []
         running = 0.0
         count = first
         while True:
-            term = math.exp(count * log_rate - rate - math.lgamma(count + 1))
+            term = math.exp(count * log_mean - mean - math.lgamma(count + 1))
             terms.append(term)
             running += term
             if term <= running * _TAIL_RELATIVE_TOLERANCE:
