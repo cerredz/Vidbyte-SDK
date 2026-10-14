@@ -14,7 +14,7 @@ started: 2026-10-14 02:46
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 02:46 | 03:20 | reports/S0-scout.md, reports/S0-research.md | base_commit 8387d666; code-map.md; research.md |
-| S1 spec + review | running | 03:25 | | | |
+| S1 spec + review | done | 03:25 | 07:40 | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | spec r3 approved; r1 review SOUND WITH FIXES (12 applied), r2 review SOUND WITH FIXES (10 applied); 265 tools |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -23,7 +23,7 @@ started: 2026-10-14 02:46
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 (round 1 SOUND WITH FIXES, 12 findings applied in r2; round 2 scoped review launched) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 (round 1 SOUND WITH FIXES, 12 findings applied in r2; round 2 SOUND WITH FIXES 0B/4M/6m, r3 applied all 10; status: approved — cap reached, no further rounds) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-14 02:46 — Unset the branch upstream (`git branch --unset-upstream`) after `git worktree add` set it to `origin/main` — prevents any agent's bare `git push` from targeting main; pushes must be `git push -u origin feat/prebuilt-agent-tools`.
@@ -32,6 +32,7 @@ started: 2026-10-14 02:46
 
 - 2026-10-14 — Passed the S1 review to the author by path (reports/S1-spec-review.md, read in full) instead of pasting the findings into the message — keeps the orchestrator context lean; the author reads the file verbatim. Told the author not to set status: approved until it is known whether a scoped round 2 is needed.
 - 2026-10-14 — Ran a scoped S1 round-2 review: r2's accepted fixes changed §8 (D-2/7/9/12/16/18, §8.4, §8.5), §9.2, §10 (T-1/T-2), the shape of §12 (rows 6–7, budget, §12.4, §12.6) and Appendix A — the playbook requires a second round when those change.
+- 2026-10-14 — Spec r3 approved after 2 review rounds (the review rounds are the approval; no user stop per playbook). Applied every Q-n default: Q-1 no tzdata/IANA zones (fixed UTC offsets only); Q-2 no root vidbyte exports; Q-3 no tool-search meta-tool; Q-4 no YAML discovery; Q-5 no killable regex worker (caps + EC-10 limitation); Q-6 keep dict outputs as a recorded exception to the letter of AGENTS.md principle 4 (D-7). Q-6 is surfaced to the user in the spec summary.
 
 ## User replies (verbatim)
 - none
@@ -74,3 +75,14 @@ started: 2026-10-14 02:46
 - Spec r2: 265 tools / 31 categories (6–12 each); 68 enums; 101 classes; 39 planned files + 0–12 conditional split modules (D-18); category classes are internal (FR-5); `categories` param is enum-only (plain str rejected) — *source:* S1 author r2
 - r2 constants: `PREBUILT_MAX_MODULAR_TEXT_CHARS`=2_001, `PREBUILT_MAX_SNIFF_CHARS`=10_000, `PREBUILT_FINANCE_PRECISION`=50, `PREBUILT_MIN_CHUNK_CHARS`=100; sequence-match/diff-token caps 2_000; diff lines 4_000; INV-17/INV-20 both use `PREBUILT_MAX_TEXT_CHARS`; `cap_items(items, cap) -> tuple[list[T], bool]` — *source:* S1 author r2
 - Every raise inside `except` uses `from exc` (S002); security guards carry `# @intent` comments — *source:* spec r2 (R-3)
+- `configparser.ConfigParser(default_section='
+')` lists 'DEFAULT' in `sections()` — `ini_to_json` must state whether it is excluded — *source:* S1 reviewer r2
+- Python `round()` vs `Decimal(repr(x)).quantize(ROUND_HALF_EVEN)` differ on 0.0125, 0.0375, 2.0035; `timedelta(seconds=float)` differs from the Decimal path on ~10% of half-microsecond inputs — *source:* S1 reviewer r2
+- Lint S020 treats any backticked `name.ext` inside a README `## File Index` as an entry; mentioning a file not present in the folder is reported stale (blocking) — *source:* S1 reviewer r2
+- `Tools.subset` returns a plain `Tools`, not the subclass — *source:* S1 reviewer r2
+- Bounded-factor expansions outside INV-20's list: NFKC/NFKD of U+FDFA → 18 chars; `hex_encode` utf_32 + separator → 23 chars per astral char; `escape_json_string` ensure_ascii → 12 chars per astral char — *source:* S1 reviewer r2
+- Spec r3 final: 265 tools / 31 categories; 68 enums; 101 classes; 39 planned files + ≤12 D-18 split modules; files ≤ 800 lines; test pack `tests/features/prebuilt_tools/` (FEATURE.md + README.md + test_*.py, no __init__.py) — *source:* S1 author r3
+- Money: exact `Fraction` with one half-up rounding to cents, except compound growth in 50-digit `Decimal` in the §9.2 item 16 order; float→text/int/datetime rounding per §9.2 item 17 (`Decimal(repr(x))`, exact scaling, one quantize, total before parts) — never `round()` or `timedelta(seconds=float)` — *source:* S1 author r3
+- `_stringify_output` sorts keys at every level, so output dict key order never matters — *source:* S1 author r3
+- pytest strict mode: no `asyncio_mode`, so async tests need `@pytest.mark.asyncio` or `asyncio.run(...)`; `--strict-markers` fails unregistered markers — *source:* spec r3 §13
+- Repo uses feature test packs: all 15 packs under tests/features/ have FEATURE.md — *source:* orchestrator check
