@@ -223,11 +223,12 @@ Links in this section retrieved 2026-10-14.
 2. Add its environment variable to `OUTPUT_CREDENTIAL_ENV_VARS`, and any cap,
    URL, or version to `vidbyte/lib/constants/outputs.py`.
 3. Add one module here with one `BaseOutput` subclass that has `__init__`,
-   `send`, and, when `send` has several modes, private static helpers that
-   `send` calls. Check every argument in `__init__` with `OutputArguments`,
-   and send through `OutputHttp.post`, `OutputHttp.patch`, `OutputHttp.read`,
-   or `OutputSmtp.send` so status codes, timeouts, and secrets are handled in
-   one place. Blocking work, such as SMTP or a file append, runs on the
+   `send`, and, when `send` has several modes, private helpers that `send`
+   calls (static, or async methods when they need the connector's
+   settings, as in `github.py`). Check every argument in `__init__` with
+   `OutputArguments`, and send through `OutputHttp.post`, `OutputHttp.patch`,
+   `OutputHttp.read`, or `OutputSmtp.send` so status codes, timeouts, and
+   secrets are handled in one place. Blocking work, such as SMTP or a file append, runs on the
    module's own executor, as `email.py` and `github_job_summary.py` do.
 4. Export it from this folder's `__init__.py`, from `vidbyte.agents.output`,
    and from the root `vidbyte` package, then regenerate the public API
