@@ -122,8 +122,8 @@ class SpawnCodexThreadTool(_CodexHostTool):
         max_output_tokens = self._resolve_count(call, "max_output_tokens")
         timeout_seconds = self._resolve_seconds(call, "timeout_seconds")
         output_schema = self._resolve_schema(call, "output_schema")
-        # Lay the model's values over the developer's posture; an omitted
-        # value keeps the developer's default.
+        # Lay the model's values over the developer's posture; an
+        # omitted value keeps the developer's default.
         defaults = self._scope.spawn_defaults
         request = replace(
             defaults,
@@ -220,7 +220,8 @@ class ForkCodexThreadTool(_CodexHostTool):
     """Copies a Codex thread into a new thread through one of its completed turns."""
 
     def spec(self) -> ToolSpec:
-        # The thread, the fork point and the answer's shape; no overrides.
+        # The thread, the fork point and the answer's shape; no
+        # overrides.
         return ToolSpec(
             name=FORK.value,
             description=FORK_CODEX_THREAD_DESCRIPTION,

@@ -67,7 +67,8 @@ class CodexToolTranslator:
 
     @staticmethod
     def validate_names(catalog: Tools) -> None:
-        # Checks every tool name against the app-server's naming rules and the MCP-reserved names.
+        # Checks every tool name against the app-server's naming rules
+        # and the MCP-reserved names.
         for name in catalog.names():
             if len(name) > CODEX_DYNAMIC_TOOL_NAME_MAX_LENGTH or not _TOOL_NAME.fullmatch(name):
                 raise ConfigurationError(
@@ -99,9 +100,10 @@ class CodexToolBridge:
 
     def handler(self, loop: asyncio.AbstractEventLoop, fallback: ServerRequestHandler) -> CodexToolCallHandler:
         # @intent one-tool-call-handler-per-thread
-        # Each connection or thread gets its own handler over this bridge's
-        # executor, so closing one cancels only its own running tool calls;
-        # server requests that are not tool calls go to the fallback.
+        # Each connection or thread gets its own handler over this
+        # bridge's executor, so closing one cancels only its own running
+        # tool calls; server requests that are not tool calls go to the
+        # fallback.
         return CodexToolCallHandler(self._executor, loop, fallback)
 
     @staticmethod

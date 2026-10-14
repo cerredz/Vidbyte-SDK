@@ -27,14 +27,17 @@ from vidbyte.lib.enums.codex import CodexGoalStatus, CodexHostOperation
 from vidbyte.lib.enums.failure import FailureCode
 from vidbyte.lib.errors import CodexAgentError
 
-# The SDK call whose plain CodexError means its goal start window elapsed (D-13).
+# The SDK call whose plain CodexError means its goal start window
+# elapsed (D-13).
 GOAL_START_CALL = "start_goal_operation"
-# The message of each stop reason Vidbyte itself sends an interrupt for (D-7).
+# The message of each stop reason Vidbyte itself sends an interrupt for
+# (D-7).
 STOP_MESSAGES = {
     FailureCode.CODEX_TURN_TIMED_OUT: "Vidbyte interrupted the turn because its timeout_seconds elapsed.",
     FailureCode.CODEX_BUDGET_EXHAUSTED: "Vidbyte interrupted the turn because its output tokens passed max_output_tokens.",
 }
-# The goal statuses that stop a goal run for a limit, as a failure (9.2).
+# The goal statuses that stop a goal run for a limit, as a failure
+# (9.2).
 GOAL_PROBLEM_CODES = {
     CodexGoalStatus.BUDGET_LIMITED: FailureCode.CODEX_BUDGET_EXHAUSTED,
     CodexGoalStatus.USAGE_LIMITED: FailureCode.CODEX_USAGE_LIMITED,
@@ -56,23 +59,24 @@ class CodexErrorMapper:
 
     @staticmethod
     def error(code: FailureCode, message: str, operation: CodexHostOperation, thread_id: str = "") -> CodexAgentError:
-        # Name a thread that already exists, so the caller can find it again.
+        # Name a thread that already exists, so the caller can find it
+        # again.
         text = f"{message} Thread: {thread_id}." if thread_id else message
         return CodexAgentError(text, failure_code=code.value, operation=operation.value, next_step=CODEX_NEXT_STEPS[code.value])
 
     @classmethod
     def from_exception(cls, exc: Exception, operation: CodexHostOperation, method: str, *, dead: bool, bound_seconds: float, thread_id: str = "") -> CodexAgentError:
-        # Map one exception raised while talking to Codex, in the section
-        # 9.2 order. The SDK is imported here only, so importing this
-        # module never loads it.
+        # Map one exception raised while talking to Codex, in the
+        # section 9.2 order. The SDK is imported here only, so importing
+        # this module never loads it.
         from openai_codex import errors as sdk
 
-        # Once the app-server died, every failure is that death, whatever
-        # the SDK raised, and its text is never shown.
+        # Once the app-server died, every failure is that death,
+        # whatever the SDK raised, and its text is never shown.
         if dead or isinstance(exc, sdk.TransportClosedError):
             return cls.error(FailureCode.CODEX_PROCESS_EXITED, f"The Codex app-server exited during {method}.", operation, thread_id)
-        # A JSON-RPC error carries Codex's own message and code, which are
-        # safe to show; the method decides what the error means.
+        # A JSON-RPC error carries Codex's own message and code, which
+        # are safe to show; the method decides what the error means.
         if isinstance(exc, sdk.JsonRpcError):
             malformed = isinstance(exc, (sdk.InvalidParamsError, sdk.MethodNotFoundError, sdk.ParseError))
             refused = isinstance(exc, (sdk.InvalidRequestError, sdk.InvalidParamsError))
@@ -84,8 +88,8 @@ class CodexErrorMapper:
             window = type(exc) is sdk.CodexError and method == GOAL_START_CALL
             code = FailureCode.CODEX_API_ERROR if window else FailureCode.CODEX_PROTOCOL_MISMATCH
             return cls.error(code, f"openai-codex could not complete {method}.", operation, thread_id)
-        # Everything else is local: an answer the SDK model rejected, the
-        # time bound elapsing, or an error nobody expected.
+        # Everything else is local: an answer the SDK model rejected,
+        # the time bound elapsing, or an error nobody expected.
         code, message = cls._local_failure(exc, method, bound_seconds)
         return cls.error(code, message, operation, thread_id)
 
@@ -104,7 +108,8 @@ class CodexErrorMapper:
 
     @staticmethod
     def _local_failure(exc: Exception, method: str, bound_seconds: float) -> tuple[FailureCode, str]:
-        # Only the method, the bound and the exception's type name are shown.
+        # Only the method, the bound and the exception's type name are
+        # shown.
         if isinstance(exc, ValidationError):
             return FailureCode.CODEX_PROTOCOL_MISMATCH, f"Codex's answer to {method} did not match the openai-codex response model."
         if isinstance(exc, TimeoutError):
@@ -113,7 +118,8 @@ class CodexErrorMapper:
 
     @staticmethod
     def missing_sdk() -> CodexAgentError:
-        # The Python extra is what is missing, so the next step installs it.
+        # The Python extra is what is missing, so the next step installs
+        # it.
         return CodexAgentError(
             "openai-codex is not installed, so CodexHost cannot talk to Codex.",
             failure_code=FailureCode.CODEX_NOT_INSTALLED.value,
@@ -134,27 +140,31 @@ class CodexErrorMapper:
 
     @classmethod
     def reviewer_refusal(cls, operation: CodexHostOperation, thread_id: str) -> CodexAgentError:
-        # Codex would route approvals to a person nothing in this release
-        # answers, so the operation stops before the thread spends (D-32).
+        # Codex would route approvals to a person nothing in this
+        # release answers, so the operation stops before the thread
+        # spends (D-32).
         message = "Codex routes this thread's approval requests to a user reviewer, and CodexHost cannot answer them."
         return cls.error(FailureCode.CONFIGURATION_UNSUPPORTED_COMBINATION, message, operation, thread_id)
 
     @classmethod
     def process_exited(cls, operation: CodexHostOperation, thread_id: str = "") -> CodexAgentError:
-        # A closed or dead host sends nothing, so this needs no exception.
+        # A closed or dead host sends nothing, so this needs no
+        # exception.
         return cls.error(FailureCode.CODEX_PROCESS_EXITED, "CodexHost is closed or its Codex app-server exited.", operation, thread_id)
 
     @classmethod
     def goal_problem(cls, status: CodexGoalStatus) -> CodexProblem | None:
-        # A goal Codex stopped for its token budget or the account's usage
-        # limit is a failure; every other final goal status is not.
+        # A goal Codex stopped for its token budget or the account's
+        # usage limit is a failure; every other final goal status is
+        # not.
         code = GOAL_PROBLEM_CODES.get(status)
         return None if code is None else cls.problem(code, f"Codex stopped the goal run with status {status.value}.")
 
     @staticmethod
     def turn_problem(error: CodexTurnError | None) -> CodexProblem:
-        # The key is the codexErrorInfo string, or the one key of an object
-        # variant; every key the table does not name means codex.api_error.
+        # The key is the codexErrorInfo string, or the one key of an
+        # object variant; every key the table does not name means
+        # codex.api_error.
         info = error.codex_error_info if error is not None else None
         key = ""
         if isinstance(info, str):

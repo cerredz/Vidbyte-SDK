@@ -46,7 +46,8 @@ if TYPE_CHECKING:
 WINDOWS_PLATFORM = "win32"
 # The request every rejected field is compared with.
 DEFAULT_REQUEST = CodexSpawnRequest()
-# The fields each operation rejects when they differ from the default (INV-27).
+# The fields each operation rejects when they differ from the default
+# (INV-27).
 REJECTED_FIELDS: dict[CodexHostOperation, tuple[str, ...]] = {
     CodexHostOperation.CONTINUE_CODEX_THREAD: (
         "prompt",
@@ -87,7 +88,8 @@ class CodexPreflight:
         responses: CodexResponseTranslator,
         registry: CodexTurnRegistry,
     ) -> None:
-        # The model list is fetched once, with hidden models, and reused.
+        # The model list is fetched once, with hidden models, and
+        # reused.
         self._connection = connection
         self._params = params
         self._responses = responses
@@ -98,14 +100,15 @@ class CodexPreflight:
         # @intent check-before-anything-spends
         # The checks run in the section 9.2 order and stop at the first
         # failure, before any request that spends (D-28).
-        # 1. The account must be signed in. The client method is looked up
-        #    now, so a patched or replaced reader is the one used.
+        # 1. The account must be signed in. The client method is looked
+        #    up now, so a patched or replaced reader is the one used.
         account = await self._connection.call(operation, CODEX_ACCOUNT_READ_METHOD, self._connection.client.account_read)
         problem = self._responses.sign_in_problem(account)
         if problem is not None:
             raise CodexErrorMapper.error(problem.code, problem.message, operation)
         # 2. Ordinary usage must not be used up. A read error or a None
-        #    allowance passes, so neither exhaustion nor recovery is guessed.
+        #    allowance passes, so neither exhaustion nor recovery is
+        #    guessed.
         allowed = None
         with suppress(CodexAgentError):
             limits = await self._connection.call(operation, CODEX_RATE_LIMITS_READ_METHOD, self._connection.raw(CODEX_RATE_LIMITS_READ_METHOD, None))
@@ -119,8 +122,9 @@ class CodexPreflight:
             problem = self._responses.sandbox_problem(await self.sandbox_status(operation))
             if problem is not None:
                 raise CodexErrorMapper.error(problem.code, problem.message, operation)
-        # 4. Every model named must be listed, hidden ones included, unless
-        #    a custom provider is set, whose models the list does not show.
+        # 4. Every model named must be listed, hidden ones included,
+        #    unless a custom provider is set, whose models the list does
+        #    not show.
         names = {request.thread.model, request.turn.model} - {""}
         if not check_model or not names or request.thread.model_provider:
             return
@@ -156,21 +160,23 @@ class CodexPreflight:
                 return tuple(models)
 
     def require_idle(self, operation: CodexHostOperation, thread_id: str) -> None:
-        # A thread with a running or reserved turn, or with a start still
-        # in flight after its caller left, takes no second one (INV-24).
+        # A thread with a running or reserved turn, or with a start
+        # still in flight after its caller left, takes no second one
+        # (INV-24).
         if self._registry.busy(thread_id) or self._connection.starting(thread_id):
             raise CodexErrorMapper.error(FailureCode.CODEX_SESSION_BUSY, BUSY_MESSAGE, operation, thread_id)
 
     async def require_thread(self, operation: CodexHostOperation, thread_id: str, include_turns: bool = False) -> Thread:
-        # The thread must exist; a failed read maps to session_not_found.
+        # The thread must exist; a failed read maps to
+        # session_not_found.
         response = await self._connection.call(operation, CODEX_THREAD_READ_METHOD, self._connection.client.thread_read, thread_id, include_turns, thread_id=thread_id)
         return response.thread
 
     @staticmethod
     def reject_unusable_fields(request: CodexSpawnRequest, operation: CodexHostOperation) -> None:
         # @intent no-setting-is-silently-ignored
-        # A field the operation does not use fails before any request, so
-        # a setting is never silently ignored (INV-27).
+        # A field the operation does not use fails before any request,
+        # so a setting is never silently ignored (INV-27).
         for name in REJECTED_FIELDS.get(operation, ()):
             read = operator.attrgetter(name)
             if read(request) != read(DEFAULT_REQUEST):

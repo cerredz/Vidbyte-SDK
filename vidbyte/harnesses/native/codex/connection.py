@@ -71,7 +71,8 @@ RAW_RESPONSES: Mapping[str, type[BaseModel]] = {
     CODEX_REVIEW_START_METHOD: ReviewStartResponse,
     CODEX_GOAL_SET_METHOD: ThreadGoalSetResponse,
 }
-# Raw calls that spend usage, so each is sent once and never retried (D-2).
+# Raw calls that spend usage, so each is sent once and never retried
+# (D-2).
 SPENDING_RAW_METHODS = frozenset({CODEX_REVIEW_START_METHOD, CODEX_GOAL_SET_METHOD})
 # How a failed process start is named in the messages the mapper builds.
 PROCESS_START = "the app-server start"
@@ -81,11 +82,13 @@ class CodexServerRequestRouter:
     """Answers every server request of one host's client: approvals, and tool calls by thread."""
 
     def __init__(self) -> None:
-        # Each thread with Vidbyte tools has its own tool-call handler (D-18).
+        # Each thread with Vidbyte tools has its own tool-call handler
+        # (D-18).
         self._handlers: dict[str, CodexToolCallHandler] = {}
 
     def register(self, thread_id: str, handler: CodexToolCallHandler) -> None:
-        # A fork registers its parent's handler, as it inherits the tools (D-29).
+        # A fork registers its parent's handler, as it inherits the
+        # tools (D-29).
         self._handlers[thread_id] = handler
 
     def handler_for(self, thread_id: str) -> CodexToolCallHandler | None:
@@ -94,7 +97,8 @@ class CodexServerRequestRouter:
 
     def remove_all(self) -> tuple[CodexToolCallHandler, ...]:
         # At close every thread's handler is removed and handed back, so
-        # the host can cancel the tool calls still running (INV-7 step 1).
+        # the host can cancel the tool calls still running (INV-7 step
+        # 1).
         handlers = tuple(self._handlers.values())
         self._handlers = {}
         return handlers
@@ -103,8 +107,9 @@ class CodexServerRequestRouter:
         # @intent answer-every-server-request-without-raising
         # Runs on openai-codex's reader thread, so one try spans it all
         # and nothing escapes: approvals are accepted as the SDK's own
-        # default handler does, a tool call goes to its thread's handler,
-        # and every other request gets an empty answer (D-16, D-18).
+        # default handler does, a tool call goes to its thread's
+        # handler, and every other request gets an empty answer (D-16,
+        # D-18).
         try:
             if method in CODEX_ACCEPTED_APPROVAL_METHODS:
                 return {"decision": CODEX_APPROVAL_ACCEPT_DECISION}
@@ -120,7 +125,8 @@ class CodexServerRequestRouter:
 
     @staticmethod
     def _unregistered() -> dict[str, Any]:
-        # The failed tool result Codex gets for a thread with no tools here.
+        # The failed tool result Codex gets for a thread with no tools
+        # here.
         return {"success": False, "contentItems": [{"type": "inputText", "text": CODEX_UNREGISTERED_TOOL_TEXT}]}
 
 
@@ -128,10 +134,10 @@ class CodexConnection:
     """One host's openai-codex client, its call executor, its liveness monitor and its close thread."""
 
     def __init__(self, config: CodexConfig, loop: asyncio.AbstractEventLoop) -> None:
-        # The router answers the client's server requests. The executor is
-        # the host's own, sized when it is built, so no call ever uses the
-        # loop's default executor (D-1). The monitor sets the death flag
-        # before it tells the loop (D-27).
+        # The router answers the client's server requests. The executor
+        # is the host's own, sized when it is built, so no call ever
+        # uses the loop's default executor (D-1). The monitor sets the
+        # death flag before it tells the loop (D-27).
         self.router = CodexServerRequestRouter()
         self.client = CodexClient(config, approval_handler=self.router.handle)
         self._loop = loop
@@ -145,9 +151,9 @@ class CodexConnection:
     async def launch(self, target: str) -> InitializeResponse:
         # @intent start-and-initialize-on-host-workers
         # The process starts on a host worker, bounded by the request
-        # timeout. A process that cannot start means Codex is not installed
-        # at target; a stalled start is an API error (D-3). Initializing
-        # the session then reports the runtime version.
+        # timeout. A process that cannot start means Codex is not
+        # installed at target; a stalled start is an API error (D-3).
+        # Initializing the session then reports the runtime version.
         bound = CODEX_HOST_REQUEST_TIMEOUT_SECONDS
         try:
             await asyncio.wait_for(self._loop.run_in_executor(self._executor, self.client.start), bound)
@@ -167,11 +173,12 @@ class CodexConnection:
         cleanup: bool = False,
     ) -> ResultT:
         # @intent every-call-is-bounded-on-host-workers
-        # Every app-server call runs on the host's own executor, bounded by
-        # the request timeout, or by the close bound for cleanup calls
-        # (D-1, D-3). Once close began only cleanup is sent, and after a
-        # death nothing is (INV-6). A failure is mapped and raised from
-        # None, so no openai-codex text travels with it (INV-9).
+        # Every app-server call runs on the host's own executor, bounded
+        # by the request timeout, or by the close bound for cleanup
+        # calls (D-1, D-3). Once close began only cleanup is sent, and
+        # after a death nothing is (INV-6). A failure is mapped and
+        # raised from None, so no openai-codex text travels with it
+        # (INV-9).
         if self._dead.is_set() or (self._closing and not cleanup):
             raise CodexErrorMapper.process_exited(operation, thread_id)
         bound = CODEX_HOST_CLOSE_INTERRUPT_SECONDS if cleanup else CODEX_HOST_REQUEST_TIMEOUT_SECONDS
@@ -182,16 +189,16 @@ class CodexConnection:
 
     def raw(self, method: str, params: Mapping[str, Any] | None) -> Callable[[], Any]:
         # @intent raw-calls-that-spend-are-sent-once
-        # The raw path, for the calls openai-codex has no typed method for.
-        # A call that spends usage gets a single attempt; the others keep
-        # the SDK's own overload retries (D-2).
+        # The raw path, for the calls openai-codex has no typed method
+        # for. A call that spends usage gets a single attempt; the
+        # others keep the SDK's own overload retries (D-2).
         payload = dict(params) if params is not None else None
         send = partial(self.client.request_with_retry_on_overload, method, payload, response_model=RAW_RESPONSES[method])
         return partial(send, max_attempts=CODEX_HOST_SINGLE_ATTEMPT) if method in SPENDING_RAW_METHODS else send
 
     async def sandbox_status(self, operation: CodexHostOperation) -> CodexSandboxReadiness:
-        # The Windows sandbox readiness, or NOT_CHECKED when this runtime
-        # cannot report it, which is not a failure (D-28).
+        # The Windows sandbox readiness, or NOT_CHECKED when this
+        # runtime cannot report it, which is not a failure (D-28).
         return await self.call(operation, CODEX_SANDBOX_READINESS_METHOD, self._sandbox_status_now)
 
     def _sandbox_status_now(self) -> CodexSandboxReadiness:
@@ -214,11 +221,12 @@ class CodexConnection:
         thread_id: str,
     ) -> ResultT:
         # @intent own-every-start-codex-accepts
-        # A spending start runs on a host worker and is awaited through a
-        # shield, bounded by the request timeout read now. If the caller
-        # is cancelled or the bound elapses, the start is handed over: one
-        # still queued is withdrawn, so nothing was sent, and one already
-        # running reports to on_late on the loop when it returns (INV-11).
+        # A spending start runs on a host worker and is awaited through
+        # a shield, bounded by the request timeout read now. If the
+        # caller is cancelled or the bound elapses, the start is handed
+        # over: one still queued is withdrawn, so nothing was sent, and
+        # one already running reports to on_late on the loop when it
+        # returns (INV-11).
         if self._dead.is_set() or self._closing:
             raise CodexErrorMapper.process_exited(operation, thread_id)
         bound = CODEX_HOST_REQUEST_TIMEOUT_SECONDS
@@ -248,8 +256,8 @@ class CodexConnection:
         future.add_done_callback(partial(self._post_late, on_late, thread_id))
 
     def _post_late(self, on_late: Callable[[ResultT], None], thread_id: str, future: Future[ResultT]) -> None:
-        # Runs on the worker that finished the start, and never raises: a
-        # closed loop takes no post.
+        # Runs on the worker that finished the start, and never raises:
+        # a closed loop takes no post.
         with suppress(RuntimeError):
             self._loop.call_soon_threadsafe(self._land, on_late, thread_id, future)
 
@@ -269,10 +277,11 @@ class CodexConnection:
         cleanup: bool = False,
         quiet: bool = False,
     ) -> None:
-        # One interrupt per stop. A goal run is paused and interrupted the
-        # way openai-codex cancels its own goal operations; any other turn
-        # gets one turn/interrupt. A quiet interrupt ignores its failure,
-        # because no caller waits on it, and it is never retried (D-7).
+        # One interrupt per stop. A goal run is paused and interrupted
+        # the way openai-codex cancels its own goal operations; any
+        # other turn gets one turn/interrupt. A quiet interrupt ignores
+        # its failure, because no caller waits on it, and it is never
+        # retried (D-7).
         with suppress(*((CodexAgentError,) if quiet else ())):
             if state is not None:
                 await self.call(operation, CODEX_GOAL_CANCEL_CALL, self.client.cancel_goal_operation, state, thread_id=handle.thread_id, cleanup=cleanup)
@@ -280,8 +289,9 @@ class CodexConnection:
                 await self.call(operation, CODEX_TURN_INTERRUPT_METHOD, self.client.turn_interrupt, handle.thread_id, handle.turn_id, thread_id=handle.thread_id, cleanup=cleanup)
 
     def watch_liveness(self, on_death: Callable[[], None]) -> None:
-        # One daemon thread reads openai-codex's global notifications until
-        # they fail, which is how the host learns the process died (D-27).
+        # One daemon thread reads openai-codex's global notifications
+        # until they fail, which is how the host learns the process died
+        # (D-27).
         threading.Thread(target=self._monitor, args=(on_death,), name="codex-host-monitor", daemon=True).start()
 
     def _monitor(self, on_death: Callable[[], None]) -> None:
@@ -307,14 +317,16 @@ class CodexConnection:
         return self._closing or self._dead.is_set()
 
     def spawn_task(self, work: Coroutine[Any, Any, Any]) -> None:
-        # Background work is kept until it ends, so it is never collected.
+        # Background work is kept until it ends, so it is never
+        # collected.
         task = asyncio.ensure_future(work)
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
     def reap(self) -> asyncio.Future[None]:
-        # The client closes once, on its own daemon thread, so close never
-        # blocks the loop; the future completes when the thread is done.
+        # The client closes once, on its own daemon thread, so close
+        # never blocks the loop; the future completes when the thread is
+        # done.
         if self._closed is None:
             self._closing = True
             self._closed = self._loop.create_future()
@@ -322,8 +334,8 @@ class CodexConnection:
         return self._closed
 
     def _close_client(self) -> None:
-        # Runs on the close thread; a failing close is ignored, because the
-        # process is being let go either way.
+        # Runs on the close thread; a failing close is ignored, because
+        # the process is being let go either way.
         with suppress(Exception):
             self.client.close()
         with suppress(RuntimeError):
@@ -335,10 +347,10 @@ class CodexConnection:
             self._closed.set_result(None)
 
     async def close(self) -> None:
-        # INV-7 steps 5 and 6: wait for the close thread at most the close
-        # bound, then shut the executor down without waiting, dropping
-        # anything still queued, so no worker outlives the host, even when
-        # the wait is cancelled.
+        # INV-7 steps 5 and 6: wait for the close thread at most the
+        # close bound, then shut the executor down without waiting,
+        # dropping anything still queued, so no worker outlives the
+        # host, even when the wait is cancelled.
         try:
             with suppress(TimeoutError):
                 await asyncio.wait_for(asyncio.shield(self.reap()), CODEX_HOST_CLOSE_WAIT_SECONDS)

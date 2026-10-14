@@ -88,14 +88,15 @@ class CodexLiveTurn:
         self.timer: asyncio.TimerHandle | None = None
         self.snapshot: CodexTurnSnapshot | None = None
         self.ended: asyncio.Future[CodexTurnSnapshot] = loop.create_future()
-        # Only a goal run carries openai-codex's goal state, and its goal
-        # stream is closed once, when the run ends or the host closes.
+        # Only a goal run carries openai-codex's goal state, and its
+        # goal stream is closed once, when the run ends or the host
+        # closes.
         self.state: _GoalOperationState | None = None
         self.stream_closed = False
 
     def observe(self, note: Notification) -> bool:
-        # Keep every completed item and the latest usage, and say whether
-        # this notification ends the turn.
+        # Keep every completed item and the latest usage, and say
+        # whether this notification ends the turn.
         payload = note.payload
         if isinstance(payload, ItemCompletedNotification):
             self.items.append(payload.item)
@@ -111,8 +112,9 @@ class CodexLiveTurn:
         return isinstance(payload, TurnCompletedNotification)
 
     def usage_delta(self) -> CodexUsage | None:
-        # This turn's own tokens: the latest thread totals minus the totals
-        # the thread had before this turn's first report (INV-19).
+        # This turn's own tokens: the latest thread totals minus the
+        # totals the thread had before this turn's first report
+        # (INV-19).
         if self.first_usage is None or self.latest_usage is None:
             return None
         counters = set(USAGE_COUNTERS)
@@ -142,11 +144,12 @@ class CodexLiveTurn:
 
     def watch(self, connection: CodexConnection, on_event: Callable[[CodexLiveTurn, Notification], None]) -> None:
         # @intent one-watcher-and-one-timer-per-turn
-        # One daemon thread reads this turn's notifications for its whole
-        # life, so no host worker is held by a running turn (D-6). A goal
-        # run reads its goal state; any other turn reads its own route and
-        # releases it when the watcher ends. Vidbyte's time limit is one
-        # timer on the loop, cancelled when the turn ends (D-7).
+        # One daemon thread reads this turn's notifications for its
+        # whole life, so no host worker is held by a running turn (D-6).
+        # A goal run reads its goal state; any other turn reads its own
+        # route and releases it when the watcher ends. Vidbyte's time
+        # limit is one timer on the loop, cancelled when the turn ends
+        # (D-7).
         loop = self.ended.get_loop()
         client = connection.client
         if self.state is not None:
@@ -161,10 +164,10 @@ class CodexLiveTurn:
 
     def stop(self, connection: CodexConnection, reason: FailureCode | None) -> None:
         # @intent the-first-stop-wins-and-is-sent-once
-        # Vidbyte's timeout, its output cap and late acceptance each stop a
-        # turn with one interrupt. The first stop wins, its reason labels
-        # the turn only if Codex reports it interrupted, and a failed
-        # interrupt is not retried (D-7, D-35).
+        # Vidbyte's timeout, its output cap and late acceptance each
+        # stop a turn with one interrupt. The first stop wins, its
+        # reason labels the turn only if Codex reports it interrupted,
+        # and a failed interrupt is not retried (D-7, D-35).
         if self.stop_sent or self.snapshot is not None or connection.stopped():
             return
         self.stop_sent = True
@@ -189,14 +192,15 @@ class CodexGoalTurn(CodexLiveTurn):
     def __init__(self, handle: CodexTurnHandle, request: CodexSpawnRequest, pricing: CodexAgentSettings, loop: asyncio.AbstractEventLoop, state: _GoalOperationState) -> None:
         # @intent goal-run-keeps-its-own-limits-and-pricing
         # The goal state is openai-codex's own route for this thread's
-        # goal events; the rule decides when the run is over. The request
-        # and pricing are kept as for any other turn.
+        # goal events; the rule decides when the run is over. The
+        # request and pricing are kept as for any other turn.
         super().__init__(handle, request, pricing, loop)
         self.state = state
         self.rule = CodexGoalFinishRule()
 
     def ends(self, payload: object) -> bool:
-        # A goal run ends by the goal finish rule, not by one completion.
+        # A goal run ends by the goal finish rule, not by one
+        # completion.
         return self.rule.process(payload)
 
 
@@ -204,8 +208,8 @@ class CodexGoalFinishRule:
     """Decides when a goal run is over, as openai-codex's private goal stream cursor does."""
 
     def __init__(self) -> None:
-        # The goal's last reported status (NONE while unknown), whether it
-        # was cleared, whether a physical turn is running, the last
+        # The goal's last reported status (NONE while unknown), whether
+        # it was cleared, whether a physical turn is running, the last
         # completion, a remembered failure, and a runtime that never
         # activated goal mode.
         self.status = CodexGoalStatus.NONE
@@ -229,12 +233,14 @@ class CodexGoalFinishRule:
         over = self.cleared or self.status in CODEX_GOAL_TERMINAL_STATUSES
         if isinstance(payload, TurnCompletedNotification):
             return self._completed(payload.turn, over)
-        # A goal update or clear after the last completion ends an idle run.
+        # A goal update or clear after the last completion ends an idle
+        # run.
         return over and not self.active and self.last_completed is not None
 
     def _completed(self, turn: Turn, over: bool) -> bool:
-        # An interrupted turn ends the run, a failed one is remembered, and a
-        # completed one while goal mode never showed a status is a mismatch.
+        # An interrupted turn ends the run, a failed one is remembered,
+        # and a completed one while goal mode never showed a status is a
+        # mismatch.
         self.active = False
         self.last_completed = turn
         status = turn.status.value
@@ -267,7 +273,8 @@ class CodexTurnWatcher(threading.Thread):
 
     def run(self) -> None:
         # Read and post until the turn ends, its stream closes, the
-        # process dies or the loop is gone; then release the turn's route.
+        # process dies or the loop is gone; then release the turn's
+        # route.
         try:
             while self._relay():
                 continue
@@ -278,7 +285,8 @@ class CodexTurnWatcher(threading.Thread):
 
     def _relay(self) -> bool:
         # One read and one post; any failure ends the watcher silently,
-        # because the host learns of closes and deaths on its own (D-27).
+        # because the host learns of closes and deaths on its own
+        # (D-27).
         try:
             note = self._read()
             self._loop.call_soon_threadsafe(self._on_event, note)
@@ -301,11 +309,13 @@ class CodexTurnRegistry:
         self._ledgers: dict[str, list[CodexTurnUsage]] = {}
 
     def busy(self, thread_id: str) -> bool:
-        # A thread with a running or reserved turn takes no second one (INV-24).
+        # A thread with a running or reserved turn takes no second one
+        # (INV-24).
         return thread_id in self._running or thread_id in self._reserved
 
     def reserve(self, thread_id: str) -> None:
-        # Reserved synchronously, before the caller awaits anything (EC-16).
+        # Reserved synchronously, before the caller awaits anything
+        # (EC-16).
         self._reserved.add(thread_id)
 
     def release(self, thread_id: str) -> None:
@@ -336,7 +346,8 @@ class CodexTurnRegistry:
         return turn
 
     def get(self, handle: CodexTurnHandle) -> CodexLiveTurn | None:
-        # Handles are owned by value, so a rebuilt handle finds its turn (D-33).
+        # Handles are owned by value, so a rebuilt handle finds its turn
+        # (D-33).
         return self._turns.get(handle)
 
     def running(self) -> tuple[CodexLiveTurn, ...]:
@@ -353,9 +364,9 @@ class CodexTurnRegistry:
 
     def _record(self, turn: CodexLiveTurn, snapshot: CodexTurnSnapshot) -> None:
         # @intent price-each-terminal-turn-once
-        # File an ended turn's own token delta once, and price it with the
-        # model Codex resolved; a turn with no usage report is listed as
-        # unavailable rather than as zero (INV-36, D-19).
+        # File an ended turn's own token delta once, and price it with
+        # the model Codex resolved; a turn with no usage report is
+        # listed as unavailable rather than as zero (INV-36, D-19).
         thread_id = turn.handle.thread_id
         if self._running.get(thread_id) is turn:
             del self._running[thread_id]

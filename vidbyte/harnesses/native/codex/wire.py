@@ -120,7 +120,8 @@ MINIMUM_VERSION = tuple(int(part) for part in CODEX_HOST_MINIMUM_VERSION.split("
 APPROVAL_FIELDS = ("approval_policy", "approvals_reviewer")
 # The Windows sandbox states that keep turns from running (D-28).
 SANDBOX_NOT_READY = frozenset({CodexSandboxReadiness.NOT_CONFIGURED, CodexSandboxReadiness.UPDATE_REQUIRED})
-# The fixed messages of problems the translator finds in Codex's answers.
+# The fixed messages of problems the translator finds in Codex's
+# answers.
 SIGNED_OUT_MESSAGE = "Codex has no signed-in account, and this runtime requires one."
 NO_FINAL_ANSWER_MESSAGE = "Codex completed the turn without a final answer."
 SCHEMA_MESSAGE = "Codex's final answer is not JSON that matches output_schema."
@@ -181,9 +182,10 @@ class CodexParamsTranslator:
     def thread_start(self, request: CodexSpawnRequest, dynamic_tools: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         # @intent new-threads-always-carry-an-approval-posture
         # A new thread gets the explicit approval fields as given, else
-        # its approval_mode, else on-request with the auto reviewer, so no
-        # approval request ever waits on a person (INV-28). Dynamic tools
-        # are added after validation, because the params model lacks them.
+        # its approval_mode, else on-request with the auto reviewer, so
+        # no approval request ever waits on a person (INV-28). Dynamic
+        # tools are added after validation, because the params model
+        # lacks them.
         values = CodexContentTranslator.thread_start_kwargs(request.developer_instructions, self._agent(request), self._sdk)
         self._approvals(values, self._explicit(request), CODEX_HOST_DEFAULT_APPROVAL_MODE)
         self._thread_sandbox(values)
@@ -195,8 +197,9 @@ class CodexParamsTranslator:
 
     def thread_resume(self, thread_id: str, request: CodexSpawnRequest) -> dict[str, Any]:
         # @intent resume-keeps-the-threads-own-approvals
-        # Resume sends approval fields only when the caller set them, so a
-        # thread keeps its own posture, and never asks for earlier turns.
+        # Resume sends approval fields only when the caller set them, so
+        # a thread keeps its own posture, and never asks for earlier
+        # turns.
         values = CodexContentTranslator.thread_resume_kwargs(request.developer_instructions, self._agent(request), self._sdk)
         self._approvals(values, self._explicit(request), CodexApprovalMode.PROVIDER_DEFAULT)
         self._thread_sandbox(values)
@@ -207,7 +210,8 @@ class CodexParamsTranslator:
     def thread_fork(self, thread_id: str, last_turn_id: str, exclude_turns: bool, request: CodexSpawnRequest) -> dict[str, Any]:
         # @intent fork-through-one-completed-turn
         # A fork copies the thread through last_turn_id; excludeTurns is
-        # sent only when asked for, and only shapes Codex's answer (D-29).
+        # sent only when asked for, and only shapes Codex's answer
+        # (D-29).
         values = CodexContentTranslator.thread_fork_kwargs(request.developer_instructions, self._agent(request), self._sdk)
         self._approvals(values, self._explicit(request), CodexApprovalMode.PROVIDER_DEFAULT)
         self._thread_sandbox(values)
@@ -219,10 +223,11 @@ class CodexParamsTranslator:
 
     def turn_start(self, thread_id: str, request: CodexSpawnRequest) -> dict[str, Any]:
         # @intent a-turn-sends-only-its-own-posture
-        # The turn's approval_mode, sandbox, plugins and output schema go
-        # on the turn. The explicit approval fields belong to the thread,
-        # so a turn never repeats them (INV-28). The input items are set
-        # by openai-codex's turn_start, so an empty list stands in here.
+        # The turn's approval_mode, sandbox, plugins and output schema
+        # go on the turn. The explicit approval fields belong to the
+        # thread, so a turn never repeats them (INV-28). The input items
+        # are set by openai-codex's turn_start, so an empty list stands
+        # in here.
         output_schema = self._schemas.output_schema(request.output_schema)
         values = CodexContentTranslator.turn_kwargs(self._agent(request), output_schema, self._sdk)
         self._approvals(values, {}, CodexApprovalMode.PROVIDER_DEFAULT)
@@ -236,9 +241,9 @@ class CodexParamsTranslator:
 
     @staticmethod
     def input_items(prompt: str | CodexRunInput) -> list[dict[str, Any]]:
-        # Only the input items are sent, as the wire's typed inputs: text
-        # becomes one text item, and context that would be dropped is
-        # refused (section 9.1).
+        # Only the input items are sent, as the wire's typed inputs:
+        # text becomes one text item, and context that would be dropped
+        # is refused (section 9.1).
         run_input = CodexRunInput.text(prompt) if isinstance(prompt, str) else prompt
         if not isinstance(run_input, CodexRunInput) or run_input.context_items or run_input.context_manager is not None or run_input.context_placements:
             raise ConfigurationError("A Codex prompt must be a str or a CodexRunInput without context_items, a context_manager or context_placements.")
@@ -288,18 +293,21 @@ class CodexParamsTranslator:
 
     @staticmethod
     def goal_budget(thread_id: str, budget: int) -> dict[str, Any]:
-        # The goal's token budget is set on its own, after the goal starts (INV-25).
+        # The goal's token budget is set on its own, after the goal
+        # starts (INV-25).
         return {"threadId": thread_id, "tokenBudget": budget}
 
     @staticmethod
     def model_page(include_hidden: bool, cursor: str) -> dict[str, Any]:
-        # One page of the model list; the first page has no cursor (D-20).
+        # One page of the model list; the first page has no cursor
+        # (D-20).
         return {"includeHidden": include_hidden, **({"cursor": cursor} if cursor else {})}
 
     def _agent(self, request: CodexSpawnRequest) -> CodexAgentSettings:
         # @intent one-settings-record-per-request
         # CodexContentTranslator reads one agent settings record; unset
-        # subagents mean its defaults, which _agents_config then removes.
+        # subagents mean its defaults, which _agents_config then
+        # removes.
         return CodexAgentSettings(
             client=self._settings,
             thread=request.thread,
@@ -315,9 +323,9 @@ class CodexParamsTranslator:
 
     @staticmethod
     def _approvals(values: dict[str, Any], explicit: Mapping[str, str], default_mode: CodexApprovalMode) -> None:
-        # Explicit fields replace approval_mode; otherwise the mode, or the
-        # default mode of a new thread, maps to the wire pair, and an empty
-        # reviewer stays unsent (INV-28).
+        # Explicit fields replace approval_mode; otherwise the mode, or
+        # the default mode of a new thread, maps to the wire pair, and
+        # an empty reviewer stays unsent (INV-28).
         mode = values.pop("approval_mode", None)
         chosen = {key: value for key, value in explicit.items() if value}
         if not chosen:
@@ -327,7 +335,8 @@ class CodexParamsTranslator:
 
     @staticmethod
     def _thread_sandbox(values: dict[str, Any]) -> None:
-        # The SDK's sandbox preset becomes the thread's wire sandbox mode.
+        # The SDK's sandbox preset becomes the thread's wire sandbox
+        # mode.
         sandbox = values.pop("sandbox", None)
         if sandbox is not None:
             values["sandbox"] = CODEX_SANDBOX_THREAD_MODE[sandbox.value]
@@ -336,8 +345,9 @@ class CodexParamsTranslator:
     def _agents_config(values: dict[str, Any], request: CodexSpawnRequest) -> None:
         # @intent agents-config-only-for-subagents
         # CodexContentTranslator always writes config["agents"]. Without
-        # subagents, the caller's own agents entry is put back or the key
-        # is dropped, and a config left empty is not sent (INV-30, D-17).
+        # subagents, the caller's own agents entry is put back or the
+        # key is dropped, and a config left empty is not sent (INV-30,
+        # D-17).
         if request.subagents is not None:
             return
         config = dict(values.pop("config", {}))
@@ -352,14 +362,15 @@ class CodexResponseTranslator:
     """Turns openai-codex answers into CodexHost records, snapshots and results."""
 
     def __init__(self) -> None:
-        # Structured output is checked with the repo's own schema formatter.
+        # Structured output is checked with the repo's own schema
+        # formatter.
         self._schemas = OutputSchemaFormatter()
 
     @staticmethod
     def version(response: InitializeResponse) -> tuple[str, bool]:
-        # The server's version, or the one in its user agent, and whether
-        # it reaches the SDK's floor; an unreadable version is refused
-        # (INV-4, D-5).
+        # The server's version, or the one in its user agent, and
+        # whether it reaches the SDK's floor; an unreadable version is
+        # refused (INV-4, D-5).
         info = response.serverInfo
         raw = (info.version if info is not None else None) or response.userAgent or ""
         match = VERSION_PATTERN.search(raw)
@@ -391,8 +402,9 @@ class CodexResponseTranslator:
         return None
 
     def readiness(self, version: str, response: GetAccountResponse, sandbox: CodexSandboxReadiness) -> CodexReadiness:
-        # The account maps to its kind and ChatGPT plan only; the email is
-        # never read (INV-9). Each problem found is reported, not raised.
+        # The account maps to its kind and ChatGPT plan only; the email
+        # is never read (INV-9). Each problem found is reported, not
+        # raised.
         account = response.account.root if response.account is not None else None
         problems = tuple(problem for problem in (self.sign_in_problem(response), self.sandbox_problem(sandbox)) if problem is not None)
         return CodexReadiness(
@@ -471,13 +483,15 @@ class CodexResponseTranslator:
         )
 
     def page(self, response: ThreadListResponse) -> CodexThreadPage:
-        # One page of threads and the cursor of the next one ("" at the end).
+        # One page of threads and the cursor of the next one ("" at the
+        # end).
         return CodexThreadPage(threads=tuple(self.thread_info(thread) for thread in response.data), next_cursor=response.next_cursor or "")
 
     @staticmethod
     def fork_point(thread: Thread, from_turn_id: str) -> str:
-        # D-29: a fork goes through a completed turn; an empty from_turn_id
-        # means the last completed one, and "" means there is none.
+        # D-29: a fork goes through a completed turn; an empty
+        # from_turn_id means the last completed one, and "" means there
+        # is none.
         completed = [turn.id for turn in thread.turns if turn.status.value == CodexTurnStatus.COMPLETED.value]
         if from_turn_id:
             return from_turn_id if from_turn_id in completed else ""
@@ -535,10 +549,10 @@ class CodexResponseTranslator:
 
     @staticmethod
     def _goal_outcome(turn: CodexGoalTurn, reported: Turn) -> tuple[CodexTurnStatus, CodexProblem | None]:
-        # The goal table's rows in order: a cleared goal ends as its last
-        # turn, a remembered failure fails the run, an interrupted turn
-        # or a paused goal carries Vidbyte's stop reason if it sent one,
-        # and the two limit statuses are failures of their own.
+        # The goal table's rows in order: a cleared goal ends as its
+        # last turn, a remembered failure fails the run, an interrupted
+        # turn or a paused goal carries Vidbyte's stop reason if it sent
+        # one, and the two limit statuses are failures of their own.
         rule = turn.rule
         last = CodexTurnStatus(reported.status.value)
         stop = CodexErrorMapper.stop_problem(turn.stop_reason) if turn.stop_reason is not None else None
@@ -561,7 +575,8 @@ class CodexResponseTranslator:
         # copied by the repo's own serializer with this turn's own token
         # delta. A completed turn without a final answer has no result
         # (INV-20); a failed one maps its error (INV-22); an answer that
-        # misses output_schema stays COMPLETED with its raw text (INV-21).
+        # misses output_schema stays COMPLETED with its raw text
+        # (INV-21).
         collected = TurnResult(
             id=turn.handle.turn_id,
             status=TurnStatus(status.value),

@@ -63,8 +63,9 @@ class LaunchCodexSubagentsTool(_CodexHostTool):
         return await self._run(LAUNCH.value, self._perform(call))
 
     async def _perform(self, call: ToolCall) -> str:
-        # Hold one cap slot per prompt while the host starts the threads,
-        # so a batch that would pass the cap starts nothing (INV-32).
+        # Hold one cap slot per prompt while the host starts the
+        # threads, so a batch that would pass the cap starts nothing
+        # (INV-32).
         prompts = self._resolve_texts(call, "prompts")
         await self._scope.reserve(self._host, len(prompts), LAUNCH)
         try:
@@ -79,7 +80,8 @@ class StartCodexReviewTool(_CodexHostTool):
     """Starts a Codex code review of any thread's work."""
 
     def spec(self) -> ToolSpec:
-        # The thread and the target are required; the rest fill the target.
+        # The thread and the target are required; the rest fill the
+        # target.
         return ToolSpec(
             name=REVIEW.value,
             description=START_CODEX_REVIEW_DESCRIPTION,
@@ -105,8 +107,8 @@ class StartCodexReviewTool(_CodexHostTool):
         return await self._run(REVIEW.value, self._perform(call))
 
     async def _perform(self, call: ToolCall) -> str:
-        # Build the target from the model's fields; the record checks that
-        # they fit the target kind.
+        # Build the target from the model's fields; the record checks
+        # that they fit the target kind.
         thread_id = self._resolve_text(call, "thread_id", required=True)
         kind = self._resolve_choice(call, "target_kind", CodexReviewTargetKind)
         if kind is None:

@@ -175,9 +175,10 @@ CODEX_FAILURE_CLASSIFICATION: Mapping[str, tuple[str, str, str, str]] = {
         FailureSeverity.ERROR.value,
         FailureDisposition.RAISE.value,
     ),
-    # CodexHost codes. Setup problems are terminal until the developer fixes
-    # them; usage windows, overload and a dead process pass with time or a
-    # new host; Vidbyte's own stops are warnings that end the turn.
+    # CodexHost codes. Setup problems are terminal until the developer
+    # fixes them; usage windows, overload and a dead process pass with
+    # time or a new host; Vidbyte's own stops are warnings that end the
+    # turn.
     FailureCode.CODEX_NOT_INSTALLED.value: (
         CodexFailureClass.TERMINAL.value,
         FailurePhase.CONFIGURATION.value,
@@ -345,7 +346,8 @@ CODEX_HOST_USER_REVIEWER_TEXT = "Set approvals_reviewer=AUTO_REVIEW or GUARDIAN_
 CODEX_HOST_MINIMUM_VERSION = "0.151.0"
 # The executable name the host resolves on PATH (D-4).
 CODEX_HOST_BINARY_NAME = "codex"
-# max_attempts for raw calls that spend usage, so none is sent twice (D-2).
+# max_attempts for raw calls that spend usage, so none is sent twice
+# (D-2).
 CODEX_HOST_SINGLE_ATTEMPT = 1
 # Lower bounds for max_live_turns, token_budget and max_output_tokens.
 CODEX_HOST_MIN_LIVE_TURNS = 1

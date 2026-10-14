@@ -49,8 +49,8 @@ class CodexToolScope:
 
     def __init__(self, *, max_live_turns: int, spawn_defaults: CodexSpawnRequest | None = None) -> None:
         # The cap is a whole number of turns, at least one. The defaults
-        # are the developer's posture, so they carry no prompt and no goal,
-        # which the model supplies (D-11, EC-57).
+        # are the developer's posture, so they carry no prompt and no
+        # goal, which the model supplies (D-11, EC-57).
         if isinstance(max_live_turns, bool) or not isinstance(max_live_turns, int) or max_live_turns < CODEX_HOST_MIN_LIVE_TURNS:
             raise ConfigurationError(f"CodexToolScope max_live_turns must be an int of at least {CODEX_HOST_MIN_LIVE_TURNS}.")
         if spawn_defaults is not None and not isinstance(spawn_defaults, CodexSpawnRequest):
@@ -69,9 +69,10 @@ class CodexToolScope:
     async def reserve(self, host: CodexHost, count: int, operation: CodexHostOperation) -> None:
         # @intent the-cap-counts-running-and-reserved-turns
         # Drop the live turns that ended, by a local read that sends
-        # nothing to Codex, then check the cap and reserve the slots with
-        # no await in between, so two calls can never pass it together
-        # (INV-32). The caller releases the slots when its start ends.
+        # nothing to Codex, then check the cap and reserve the slots
+        # with no await in between, so two calls can never pass it
+        # together (INV-32). The caller releases the slots when its
+        # start ends.
         for handle in tuple(self._live):
             snapshot = await host.get_codex_turn_result(handle)
             if snapshot.status is not CodexTurnStatus.RUNNING:
@@ -87,8 +88,8 @@ class CodexToolScope:
         self._reserved -= count
 
     def own(self, handles: Iterable[CodexTurnHandle]) -> None:
-        # New turns count against the cap until a check sees them end, and
-        # only this scope's handle tools accept them (INV-33).
+        # New turns count against the cap until a check sees them end,
+        # and only this scope's handle tools accept them (INV-33).
         for handle in handles:
             self._owned.add(handle)
             self._live.add(handle)
@@ -124,7 +125,8 @@ class _CodexHostTool(BaseTool):
 
     @staticmethod
     def _failure(name: str, code: str, message: str, next_step: str) -> ToolResult:
-        # The error text leads with the code and ends with the next step.
+        # The error text leads with the code and ends with the next
+        # step.
         return ToolResult.error(name, f"{code}: {message} Next step: {next_step}", metadata={"code": code, "next_step": next_step})
 
     @staticmethod
@@ -200,9 +202,10 @@ class _CodexHostTool(BaseTool):
     @staticmethod
     def _json(record: Any, *, without_items: bool = False) -> str:
         # @intent tool-output-is-the-record-json
-        # A record, or a tuple of records, becomes its JSON: enums as their
-        # values and nested records as objects (INV-35). Wait and get leave
-        # out result.items, which the final answer already sums up.
+        # A record, or a tuple of records, becomes its JSON: enums as
+        # their values and nested records as objects (INV-35). Wait and
+        # get leave out result.items, which the final answer already
+        # sums up.
         data: Any = [asdict(item) for item in record] if isinstance(record, tuple) else asdict(record)
         if without_items and isinstance(data, dict) and isinstance(data.get("result"), dict):
             data["result"].pop("items", None)

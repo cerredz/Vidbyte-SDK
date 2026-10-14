@@ -55,7 +55,8 @@ if TYPE_CHECKING:
 
 
 def _reject_small_int(owner: str, field_name: str, value: object, minimum: int) -> None:
-    # Accepts None or an integer at or above the minimum; bool is an int, so it is refused first.
+    # Accepts None or an integer at or above the minimum; bool is an
+    # int, so it is refused first.
     if value is None:
         return
     if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
@@ -63,7 +64,8 @@ def _reject_small_int(owner: str, field_name: str, value: object, minimum: int) 
 
 
 def _reject_bad_seconds(owner: str, field_name: str, value: object) -> None:
-    # Accepts None or a finite number of seconds above the exclusive minimum; bool, NaN and infinity are refused first.
+    # Accepts None or a finite number of seconds above the exclusive
+    # minimum; bool, NaN and infinity are refused first.
     if value is None:
         return
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= CODEX_HOST_MIN_EXCLUSIVE_SECONDS:
@@ -78,14 +80,16 @@ def _reject_non_str(owner: str, fields: Mapping[str, object]) -> None:
 
 
 def _reject_optional_count(owner: str, fields: Mapping[str, object]) -> None:
-    # Timestamps and counts Codex may leave out are None or non-negative integers.
+    # Timestamps and counts Codex may leave out are None or non-negative
+    # integers.
     for field_name, value in fields.items():
         if value is not None:
             _require_non_negative_int(owner, field_name, value)
 
 
 def _reject_wrong_type(owner: str, field_name: str, value: object, expected: type, *, optional: bool = False) -> None:
-    # One isinstance check with a message naming the field and the expected type.
+    # One isinstance check with a message naming the field and the
+    # expected type.
     if optional and value is None:
         return
     if not isinstance(value, expected):
@@ -94,7 +98,8 @@ def _reject_wrong_type(owner: str, field_name: str, value: object, expected: typ
 
 
 def _reject_bad_tuple(owner: str, field_name: str, value: object, expected: type) -> None:
-    # A tuple, never a list, so the frozen record cannot be changed through it.
+    # A tuple, never a list, so the frozen record cannot be changed
+    # through it.
     if not isinstance(value, tuple) or any(not isinstance(item, expected) for item in value):
         raise ConfigurationError(f"{owner} {field_name} must be a tuple of {expected.__name__}.")
 
@@ -149,8 +154,8 @@ class CodexSpawnRequest:
     name: str = ""
 
     def __post_init__(self) -> None:
-        # Check each group of fields in turn, so a bad request fails where
-        # it is built and the error names the field that is wrong.
+        # Check each group of fields in turn, so a bad request fails
+        # where it is built and the error names the field that is wrong.
         self._reject_bad_prompt()
         self._reject_bad_settings()
         self._reject_bad_approvals()
@@ -163,7 +168,8 @@ class CodexSpawnRequest:
         _reject_bad_seconds("Codex spawn request", "timeout_seconds", self.timeout_seconds)
 
     def _reject_bad_prompt(self) -> None:
-        # Only the input items are sent, so context that would be dropped is refused instead.
+        # Only the input items are sent, so context that would be
+        # dropped is refused instead.
         if isinstance(self.prompt, str):
             return
         if not isinstance(self.prompt, CodexRunInput):
@@ -172,7 +178,8 @@ class CodexSpawnRequest:
             raise ConfigurationError("Codex spawn request prompt cannot carry context_items, a context_manager or context_placements.")
 
     def _reject_bad_settings(self) -> None:
-        # The nested settings records validated themselves; only their types are checked here.
+        # The nested settings records validated themselves; only their
+        # types are checked here.
         _reject_wrong_type("Codex spawn request", "thread", self.thread, CodexThreadSettings)
         _reject_wrong_type("Codex spawn request", "turn", self.turn, CodexTurnSettings)
         _reject_wrong_type("Codex spawn request", "subagents", self.subagents, CodexSubagentSettings, optional=True)
@@ -181,10 +188,11 @@ class CodexSpawnRequest:
 
     def _reject_bad_approvals(self) -> None:
         # @intent refuse-unanswerable-approvals
-        # A USER reviewer sends approval requests to a human that nothing on
-        # the host can answer, so the request is refused with the code and
-        # next step the host's tools report. The explicit approval fields
-        # replace approval_mode, so the two ways are never mixed.
+        # A USER reviewer sends approval requests to a human that
+        # nothing on the host can answer, so the request is refused with
+        # the code and next step the host's tools report. The explicit
+        # approval fields replace approval_mode, so the two ways are
+        # never mixed.
         _reject_wrong_type("Codex spawn request", "approval_policy", self.approval_policy, CodexApprovalPolicy)
         _reject_wrong_type("Codex spawn request", "approvals_reviewer", self.approvals_reviewer, CodexApprovalsReviewer)
         if self.approvals_reviewer is CodexApprovalsReviewer.USER:
@@ -201,9 +209,9 @@ class CodexSpawnRequest:
 
     def _reject_bad_tools(self) -> None:
         # @intent reject-non-tool-declarations-at-construction
-        # Duck-typed because vidbyte.lib may not import BaseTool, the same
-        # check CodexHarnessAgentSettings applies; the permission policy is
-        # the allow-list every dynamic tool call runs under.
+        # Duck-typed because vidbyte.lib may not import BaseTool, the
+        # same check CodexHarnessAgentSettings applies; the permission
+        # policy is the allow-list every dynamic tool call runs under.
         if not isinstance(self.tools, tuple) or any(not callable(value) and not _is_tool_shaped(value) for value in self.tools):
             raise ConfigurationError("Codex spawn request tools must be a tuple of BaseTool instances or @tool functions.")
         _reject_wrong_type("Codex spawn request", "tool_permission_policy", self.tool_permission_policy, PermissionPolicy)
@@ -214,7 +222,8 @@ class CodexSpawnRequest:
             raise ConfigurationError("Codex spawn request output_schema must be None, a type or a mapping.")
 
     def _reject_bad_goal(self) -> None:
-        # A goal is its own run: it replaces the prompt, and Codex keeps goals only on stored threads.
+        # A goal is its own run: it replaces the prompt, and Codex keeps
+        # goals only on stored threads.
         _reject_wrong_type("Codex spawn request", "goal", self.goal, CodexGoal, optional=True)
         if self.goal is None:
             return
@@ -266,8 +275,8 @@ class CodexTurnSnapshot:
         _reject_wrong_type("Codex turn snapshot", "result", self.result, CodexRunResult, optional=True)
         _reject_wrong_type("Codex turn snapshot", "problem", self.problem, CodexProblem, optional=True)
         _reject_wrong_type("Codex turn snapshot", "goal_status", self.goal_status, CodexGoalStatus)
-        # A running turn has no outcome yet, a completed one always has its
-        # result, and a failed one always says what went wrong.
+        # A running turn has no outcome yet, a completed one always has
+        # its result, and a failed one always says what went wrong.
         if self.status is CodexTurnStatus.RUNNING and (self.result is not None or self.problem is not None):
             raise ConfigurationError("Codex turn snapshot status RUNNING cannot carry a result or a problem.")
         if self.status is CodexTurnStatus.COMPLETED and self.result is None:
@@ -467,9 +476,9 @@ class CodexReviewTarget:
         values = {"branch": self.branch, "sha": self.sha, "title": self.title, "instructions": self.instructions}
         for field_name, value in values.items():
             _optional_text("Codex review target", field_name, value)
-        # Each kind needs one field (COMMIT may also carry a title), and a
-        # field the kind does not use would be silently ignored, so it must
-        # stay empty.
+        # Each kind needs one field (COMMIT may also carry a title), and
+        # a field the kind does not use would be silently ignored, so it
+        # must stay empty.
         needed = {
             CodexReviewTargetKind.UNCOMMITTED_CHANGES: (),
             CodexReviewTargetKind.BASE_BRANCH: ("branch",),
