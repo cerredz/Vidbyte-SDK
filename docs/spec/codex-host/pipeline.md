@@ -17,7 +17,7 @@ started: 2026-10-13 00:45 UTC
 | S1 spec + review | done | 2026-10-13 01:35 UTC | 2026-10-13 11:25 UTC | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | spec r3 81a71d00, status: approved; 2 review rounds (SOUND WITH FIXES ×2), 18 findings applied, 0 disputed |
 | S2 tests | done | 2026-10-13 11:30 UTC | 2026-10-13 16:35 UTC | reports/S2-test-author.md | S2_HEAD 1d110811 (tests 46f1a9db, proof 55f01f44, report 1d110811); 101 tests in tests/features/codex_host/, all red (`101 failed` in the [dev,codex] venv; CI view `35 failed, 66 skipped`); spec r4 38e3a820 pins the S2 spec defects; spec status: tests-written |
 | S3 implement | done | 2026-10-13 16:40 UTC | 2026-10-14 02:40 UTC | reports/S3-implementer.md | S3_HEAD 099fac83; draft PR https://github.com/cerredz/Vidbyte-SDK/pull/1055 ([WIP] title); 30 commits; 28/28 §12.3 rows; budget 18/18 files, 30/30 classes, 15/15 records, 13/13 enums, 0 deps (no headroom); pack 101 passed, CI view 35 passed / 66 skipped (orchestrator re-run); full suite 4041 passed / 22 skipped; run_ci source+package PASS; SDK-LINT PASS; semgrep 0; public API --check 0; spec status: implemented |
-| S4 adversarial review | in progress | 2026-10-14 02:50 UTC | | reports/S4-review-conformance.md, reports/S4-review-conventions.md, reports/S4-review-engineering.md, reports/S4-findings-verifier.md | |
+| S4 adversarial review | done | 2026-10-14 02:50 UTC | 2026-10-14 04:05 UTC | reports/S4-review-conformance.md, reports/S4-review-conventions.md, reports/S4-review-engineering.md, reports/S4-findings-verifier.md, review.md | MERGEABLE AFTER FIXES; confirmed 5 Blockers (R-1..R-5) / 9 Majors (R-6..R-14) / 11 Minors (R-15..R-25, R-25 scope-adding); refuted 0; every fix within the exhausted §8.4 budget; spec status: reviewed |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
@@ -136,6 +136,38 @@ started: 2026-10-13 00:45 UTC
     - the riskiest test, `test_codex_host_turns.py::test_the_output_cap_counts_only_the_turns_own_tokens_and_interrupts_once`;
     - the race paths the implementer is least sure of: `connection.py` start/_hand_over/_post_late, `host.py` `__aexit__`, `_on_death`'s reap and `CodexToolScope.reserve`.
   *Why:* the S2 routing decisions and the implementer's "Tricky parts".
+
+- 2026-10-14 03:05–03:20 UTC — **The three S4 reviewers finished,** each with the verdict MERGEABLE AFTER FIXES:
+  - conformance: 0 Blocker, 1 Major, 1 Minor;
+  - conventions: 3 Blocker, 3 Major, 4 Minor;
+  - engineering: 2 Blocker, 6 Major, 5 Minor.
+- 2026-10-14 04:05 UTC — **S4 spot-check passed.**
+  - review.md exists, with 14 confirmed rows. Each has a path:line, evidence, a fix kind and a budget note.
+  - Every fix is within budget.
+  - Nothing was refuted. 3 sub-claims were trimmed, with reasons.
+  - I read only the verifier's SUMMARY and the row tags.
+  *Why:* the S4 spot-check rule.
+- 2026-10-14 04:05 UTC — **Routing.**
+  - **To the spec author first, in Revision mode r5**, because the escalation table says to revise the spec through its author when a later stage finds a spec defect:
+    - R-12: amend INV-21 (spec.md:289) and EC-32 (:447) so a mapping `output_schema` is not claimed to be validated. A real validator is R-25, which is scope-adding and never built.
+    - R-8: withdraw §17 deviation 1 (spec.md:1561). S3 wrote it to excuse a C002-evasion shape, and its budget reason is wrong.
+    - R-2 stays `code`: the verifier preferred a record-check method over its spec-change alternative.
+  - **To S5 repair iteration 1**, after r5:
+    - the code rows R-1..R-11, plus R-12's description fix and its test;
+    - the tests-only rows R-13 and R-14;
+    - the trivial Minors R-15..R-18.
+  - **Left as follow-ups:** R-19..R-24, and R-25 (scope-adding).
+  *Why:* a spec edit lands before the code that follows it, and one agent at a time commits in this worktree.
+- 2026-10-14 04:05 UTC — **Granted new tests to the codex S5 repair agent.**
+  - The new tests go in one new file, `tests/features/codex_host/test_codex_host_review_gaps.py`. The pack's README.md and FEATURE.md may be extended only by addition, to list it.
+  - The 101 existing tests and the fakes/support modules stay byte-identical. A missing fixture is defined inside the new file.
+  - Scope of the new tests:
+    - R-13: the surviving mutants M1 (late goal not stopped) and M2 (late label timed_out);
+    - R-14: M3 (launch slots released on success only);
+    - R-12's test;
+    - regression tests for R-1, R-2, R-6, R-7 and R-10.
+  - Each new test must be shown failing for the right reason against the pre-fix code or its mutant, quoted in verify-log.md.
+  *Why:* every row is a confirmed gap, and adding tests does not weaken the contract.
 
 ## User replies (verbatim)
 - none yet
@@ -301,3 +333,19 @@ started: 2026-10-13 00:45 UTC
 - **The tool cap check.** `CodexToolScope.reserve` refreshes the live handles through `get_codex_turn_result`, which only reads locally, then checks and reserves with no await in between (INV-32). Cancellation frees the slot in the callers' `finally`. *source:* S3 implementer.
 - **Running the pack from outside the worktree.** Use `PYTHONPATH=$W $PY -P -m pytest $W/tests/features/codex_host -q -p no:cacheprovider --rootdir=$W -c $W/pyproject.toml`. Without `-P` and `--rootdir`, the cwd's `tests` package shadows `tests.features.codex_host`. *source:* orchestrator.
 - **Drift from main.** The branch is 41 commits behind origin/main (8387d666), and `git merge-tree` is clean. In this area main touched only `vidbyte/harnesses/stores/file.py`. Catch up by merge, never rebase, in S5. *source:* S3 implementer.
+- **The probe harness.**
+  - Probes are inline `PYTHONPATH=$W $PY -P -` heredocs that subclass `tests.features.codex_host.codex_host_support.HostTestCase`. They use `server.hold(method, predicate)`, then `hold.wait_arrived`/`release` and `self.count(method)`.
+  - The fake server scripts errors with `server.fail(method, FakeRpcError(code, msg), times=, predicate=)`.
+  - `_stop` sends interrupts in the background. Count them after `asyncio.to_thread(server.wait_for, "turn/interrupt", None, n)`.
+  *source:* S4 reviewers and verifier.
+- **Reproducing R-10.** Release the hold only after the second `thread/resume`. openai-codex queues a second `turn/start` behind a held first one, so awaiting a second continue deadlocks. *source:* verifier.
+- **Fix order and interactions.**
+  - R-1 goes before R-4, because both edit `_accept_review`.
+  - R-2 goes before or with R-6. Otherwise R-6's BaseException path re-raises without INV-37's "k turns" text.
+  - R-6 and R-14 both touch launch slots. R-16 and R-24/M5 share host.py:385.
+  - R-3 and R-11 both edit lib/constants/codex.py, so append to the end of `__all__`.
+  *source:* verifier.
+- **Comment passes, in order.** First R-4's header, then R-9's and R-21's intent blocks, then R-5's 72-column rewrap last. Keep `# @intent` first, inside the A002 window. Most over-wide lines were wrapped at 72 counted from the `#`, not from column 1. *source:* verifier and S4 conventions.
+- **R-8's in-budget fix.** `_reject_small_int` and `_reject_bad_seconds` in codex_host.py guard a variable named `value`, which C002 skips. They can replace the evasion shapes at host.py:346 and :495. *source:* S4 conventions.
+- **Do not change OutputSchemaFormatter.** It is shared with CodexHarnessAgent (NG-5). *source:* verifier.
+- **R-6's hidden lint findings.** The gate's "A002 IMPROVED 703 -> 607" line hides this PR's seven new A002 findings. See them with `lint/run.py --all --format json`, filtered by path. C011 is now at its baseline of 2, with no slack. *source:* S4 conventions.
