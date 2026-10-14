@@ -5,7 +5,7 @@ ROLE IN CODEBASE: ClaudeHost (host.py) builds one ClaudeLiveSession for each spa
 ARCHITECTURE NOTE: run is the pump, one task per turn. The client is closed by one close task that runs disconnect() and that nothing cancels; the pump waits for it through asyncio.shield, and only then publishes the terminal status, fires done and frees its launch slot, so the session id stays busy until the process is gone. The watchdog, a caller's interrupt and a steer each send interrupt() from a task the session owns, and every interrupt() that returns arms one grace task aimed at the prompt it stopped.
 COMMON MODIFICATION PATTERNS: A new stream message kind adds one isinstance branch in _read and one small _on_<kind> helper. A new turn condition records one ClaudeTurnOutcome field where it is seen, and ClaudeFailureMapper.classify_turn (failures.py) gives it its code.
 WHAT NOT TO DO IN THIS FILE: 1. Do not cancel the close task, or wrap disconnect() or a read in asyncio.wait_for or asyncio.timeout; the SDK warns that a cancelled close skips its terminate and kill and leaves claude running. 2. Do not send a steer while a prompt is open; it waits for the interrupted prompt's result, so Claude Code never holds two prompts. 3. Do not copy CLAUDE_INTERRUPT_GRACE_SECONDS into a local or a default argument; the grace reads this module's name when it starts.
-KNOWN EDGE CASES: Only a result whose origin is absent or human ends the turn; an injected turn's result only updates usage. An interrupt can return after the pump has already read that prompt's result and sent a steer, so the grace is aimed at the prompt number noted when the interrupt was sent. A steer can also arrive after the prompt's result was emitted but before the pump read it; the pump then yields once before it sends the steered prompt, so the steer's own interrupt is written first and finds nothing to stop. The stream can end while the close is still running, because the SDK sends its end marker before it terminates the process. The time budget's stop is recorded apart from the caller's, so it ends the turn FAILED with claude.budget_exhausted rather than INTERRUPTED.
+KNOWN EDGE CASES: Only a result whose origin is absent or human ends the turn; an injected turn's result only updates usage. An interrupt can return after the pump has already read that prompt's result and sent a steer, so the grace is aimed at the prompt number noted when the interrupt was sent. A steer can also arrive after the prompt's result was emitted but before the pump read it; the pump then yields once before it takes the steer from its slot, so the steer's own interrupt is written first and finds nothing to stop, and a stop or a failed interrupt in that pass still withdraws the message. The stream can end while the close is still running, because the SDK sends its end marker before it terminates the process. The time budget's stop is recorded apart from the caller's, so it ends the turn FAILED with claude.budget_exhausted rather than INTERRUPTED.
 RELATED DOCS: https://platform.claude.com/docs/en/agent-sdk/python; vidbyte/harnesses/README.md.
 TESTS: tests/features/claude_host/
 """
@@ -170,7 +170,7 @@ class ClaudeLiveSession:
             stream = client.receive_messages()
             while prompt is not None:
                 await self._query(client, prompt)
-                prompt = self._take_steer() if await self._read(stream) else None
+                prompt = await self._take_steer() if await self._read(stream) else None
         except ClaudeOperationError as error:
             # A failed start or a broken stream becomes the turn's
             # failure; the classification decides whether it wins.
@@ -228,13 +228,6 @@ class ClaudeLiveSession:
     async def _query(self, client: _ClaudeClient, prompt: str | AsyncIterable[dict[str, Any]]) -> None:
         """Send one prompt, counting it first, so an interrupt sent meanwhile is aimed at it."""
         self._prompts_sent += 1
-        # A steer that arrived after the last result was emitted, but
-        # before the pump read it, has its interrupt task scheduled
-        # behind the pump. Yielding once lets that interrupt reach
-        # Claude Code before the steered prompt, which it would
-        # otherwise abort (EC-19).
-        if self._steered:
-            await asyncio.sleep(CLAUDE_STEER_YIELD_SECONDS)
         try:
             await client.query(prompt)
         except Exception as exc:
@@ -257,8 +250,16 @@ class ClaudeLiveSession:
             raise ClaudeFailureMapper.from_exception(exc, operation=_READ_OPERATION, sdk=sdk) from exc
         return False
 
-    def _take_steer(self) -> str | None:
-        """Hand the pending steer to the pump as its next prompt and note its number as sent, or return None to end the turn."""
+    async def _take_steer(self) -> str | None:
+        """Yield once while a steer is pending, then hand it to the pump as its next prompt with its number noted as sent, or return None to end the turn."""
+        # A steer that arrived after the last result was emitted, but
+        # before the pump read it, has its interrupt task scheduled
+        # behind the pump. Yielding once while the message is still in
+        # its slot lets that interrupt reach Claude Code before the
+        # steered prompt, and lets a stop or a failed interrupt in that
+        # pass still withdraw the message.
+        if self._steer is not None:
+            await asyncio.sleep(CLAUDE_STEER_YIELD_SECONDS)
         steer, self._steer = self._steer, None
         if steer is not None:
             self._steered = self._steers

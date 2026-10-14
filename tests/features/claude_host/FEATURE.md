@@ -119,6 +119,9 @@ None yet. Add one line per fixed bug with the test that protects it.
 - R-6: a rejected per-model window (`seven_day_opus`, `seven_day_sonnet`) refused every spawn of every model → `RateLimitRuleTests`.
 - R-7: D-29's `allowed_warning` overage and absent reset time, a steer's withdrawal of its unsent message, and the re-wait of a cancelled close were unguarded → `RateLimitRuleTests`, `SteerWithdrawalTests`, `CancelledCloseTests`.
 - R-12: an unknown rate-limit status or overage value failed the whole turn as `claude.protocol_mismatch` → `RateLimitRuleTests`.
+- R-22: a caller interrupt that landed while the pump yielded before a steered prompt could not discard the message, which went out after the stop while the steer returned None → `StopInSteerWindowTests.test_an_interrupt_in_the_steer_window_discards_the_steer`.
+- R-22: an `aclose` whose session close landed in that same pass also let the steered prompt go out after the stop → `StopInSteerWindowTests.test_an_aclose_in_the_steer_window_discards_the_steer`.
+- R-22: a steer whose own interrupt raised in that pass could not withdraw its unsent message, which went out anyway → `StopInSteerWindowTests.test_a_failed_steer_interrupt_in_the_window_withdraws_the_message`.
 
 ## Test Suite Map
 
@@ -200,6 +203,7 @@ None yet. Add one line per fixed bug with the test that protects it.
   - an unknown rate-limit status or overage value skipped (EC-52);
   - a steer whose interrupt fails (§12.3 row 7, INV-18);
   - a cancelled `aclose` (INV-8, D-4).
+  - a stop or a failed steer interrupt while the pump yields before a steered prompt (INV-18, §9.2 steer row).
 - `claude_host_fixtures.py`: the fake SDK, the message factories, the history fakes, `TicketTool` and the `ClaudeHostCase` base class.
 
 Run `PYTHONPATH=$(pwd) python -m pytest tests/features/claude_host` from the worktree root.

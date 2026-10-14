@@ -297,5 +297,60 @@ class CancelledCloseTests(ReviewGapCase):
         self.assertEqual(self.fake.connected_now, 0)
 
 
+class StopInSteerWindowTests(ReviewGapCase):
+    """INV-18 and the section 9.2 steer row (review R-22): a stop or a failed steer interrupt that lands while the pump yields before a steered prompt still withdraws the message."""
+
+    async def window_steer(self, host: Any, handle: Any) -> str | None:
+        """Steer directly and return the failure code it raised, or None; wrapped, the steer would start after the pump read the result."""
+        from vidbyte.lib.errors import ClaudeOperationError
+
+        try:
+            await host.steer_claude_session(handle, STEER_MESSAGE)
+        except ClaudeOperationError as error:
+            return error.failure_code
+        return None
+
+    async def test_an_interrupt_in_the_steer_window_discards_the_steer(self) -> None:
+        self.fake.hold(DEFAULT_PROMPT, STEER_MESSAGE)
+        host = await self.open_host()
+        handle, client = await self.running_turn(host)
+        # Queue the first result, the caller's interrupt and the steer
+        # in one step, so the interrupt runs while the pump yields.
+        client.finish("The first answer.")
+        stopping = asyncio.ensure_future(host.interrupt_claude_turn(handle))
+        self.assertEqual(await self.window_steer(host, handle), PRECONDITION_FAILED)
+        await asyncio.wait_for(stopping, HANG_GUARD_SECONDS)
+        result = await self.finished(host, handle)
+        self.assertEqual(client.queries, [DEFAULT_PROMPT])
+        self.assertEqual(result.status.value, "interrupted")
+
+    async def test_an_aclose_in_the_steer_window_discards_the_steer(self) -> None:
+        self.fake.hold(DEFAULT_PROMPT, STEER_MESSAGE)
+        host = await self.open_host()
+        handle, client = await self.running_turn(host)
+        # aclose is scheduled before the result is queued, so the
+        # session's own close runs while the pump yields; scheduled
+        # after it, that close starts only after the send.
+        self.closed_hosts.append(host)
+        closing = asyncio.ensure_future(host.aclose())
+        client.finish("The first answer.")
+        self.assertEqual(await self.window_steer(host, handle), PRECONDITION_FAILED)
+        await asyncio.wait_for(closing, HANG_GUARD_SECONDS)
+        self.assertEqual(client.queries, [DEFAULT_PROMPT])
+        self.assertEqual((client.disconnect_calls, self.fake.connected_now), (1, 0))
+
+    async def test_a_failed_steer_interrupt_in_the_window_withdraws_the_message(self) -> None:
+        self.fake.hold(DEFAULT_PROMPT, STEER_MESSAGE)
+        host = await self.open_host()
+        handle, client = await self.running_turn(host)
+        client.finish("The first answer.")
+        self.fake.interrupt_error = lambda: CLIConnectionError("control channel closed")
+        self.assertEqual(await self.window_steer(host, handle), "claude.process_exited")
+        await settle()
+        self.assertEqual(client.queries, [DEFAULT_PROMPT])
+        result = await self.finished(host, handle)
+        self.assertEqual((result.status.value, result.result_text), ("completed", "The first answer."))
+
+
 if __name__ == "__main__":
     unittest.main()
