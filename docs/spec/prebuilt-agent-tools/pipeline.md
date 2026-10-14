@@ -23,12 +23,15 @@ started: 2026-10-14 02:46
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 1/2 (round 1 launched) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 (round 1 SOUND WITH FIXES, 12 findings applied in r2; round 2 scoped review launched) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-14 02:46 — Unset the branch upstream (`git branch --unset-upstream`) after `git worktree add` set it to `origin/main` — prevents any agent's bare `git push` from targeting main; pushes must be `git push -u origin feat/prebuilt-agent-tools`.
 - 2026-10-14 02:48 — Launched a second S0 agent (research scout) in parallel with the code scout, writing `context/research.md` — the user offered to "ground your ideas in recent agentic research"; separating the catalogue research from repo recon keeps the spec author's context on design. It touched no repo code.
 - 2026-10-14 02:46 — Assumption recorded in request.md §C (for the spec author to confirm as an A- item): tools are deterministic, local, standard-library only, no network/keys/new deps.
+
+- 2026-10-14 — Passed the S1 review to the author by path (reports/S1-spec-review.md, read in full) instead of pasting the findings into the message — keeps the orchestrator context lean; the author reads the file verbatim. Told the author not to set status: approved until it is known whether a scoped round 2 is needed.
+- 2026-10-14 — Ran a scoped S1 round-2 review: r2's accepted fixes changed §8 (D-2/7/9/12/16/18, §8.4, §8.5), §9.2, §10 (T-1/T-2), the shape of §12 (rows 6–7, budget, §12.4, §12.6) and Appendix A — the playbook requires a second round when those change.
 
 ## User replies (verbatim)
 - none
@@ -62,3 +65,12 @@ started: 2026-10-14 02:46
 - A007 checks every name in a function signature against tokens (`interval`, `token`, `char`, `byte`, `limit`, `depth`) when a numeric literal is in an annotation; C006/C008 flag `validate*`-style and `finite_float`-style helper names; pydantic warns on params named `schema_json`, `json`, `copy` (BaseModel attributes) — *source:* S1 author
 - New files must be `git add`-ed before `python lint/run.py` and semgrep: they read tracked files only (S020 checks the README file index) — *source:* S1 author
 - Integer outputs capped at 4,000 digits (INV-18); exact numbers travel as text (`IntText`, `DecText`) — *source:* S1 author
+- S1 review r1 verdict SOUND WITH FIXES (3 Blocker / 6 Major / 3 Minor); report reports/S1-spec-review.md — *source:* S1 reviewer
+- `FunctionTool._stringify_output` runs at `vidbyte/tools/function_tool.py:85`, outside the try at :68-81: a deeply nested return (≈5,000 levels) makes `execute` raise RecursionError instead of returning a failure; depth 900 is fine — *source:* S1 reviewer
+- Ruff B904 is enforced via lint S002 (`lint/rules/s002_exception_cause_chaining.py:23`, baseline 0 at `lint/baseline.json:31`): every raise inside `except` needs `from None`/`from exc` — *source:* S1 reviewer
+- Measured locally: difflib (autojunk=False) 10k chars 6.5–8 s, 20k-token word diff 36 s, ~2k ≈0.3 s; `pow` with three 4,000-digit operands 3.15 s (2,000 digits 0.44 s); `csv.Sniffer().sniff` 7.09 s on adversarial 300k chars even with `delimiters=` (10k: 0.22 s); `tomllib.loads` RecursionError at ~500-deep arrays — *source:* S1 reviewer
+- `calculator.py` exposes `round`, `pow`, `/` (handles floats) — spec r1's "whole-number arithmetic" description of it is wrong — *source:* S1 reviewer
+- `Agent(provider="openai")` constructs without an API key; pydantic `datetime` params accept an int as UTC but `date` params reject ints; `vidbyte/lib/enums/__init__.py` `__all__` already out of alphabetical order in two places — *source:* S1 reviewer
+- Spec r2: 265 tools / 31 categories (6–12 each); 68 enums; 101 classes; 39 planned files + 0–12 conditional split modules (D-18); category classes are internal (FR-5); `categories` param is enum-only (plain str rejected) — *source:* S1 author r2
+- r2 constants: `PREBUILT_MAX_MODULAR_TEXT_CHARS`=2_001, `PREBUILT_MAX_SNIFF_CHARS`=10_000, `PREBUILT_FINANCE_PRECISION`=50, `PREBUILT_MIN_CHUNK_CHARS`=100; sequence-match/diff-token caps 2_000; diff lines 4_000; INV-17/INV-20 both use `PREBUILT_MAX_TEXT_CHARS`; `cap_items(items, cap) -> tuple[list[T], bool]` — *source:* S1 author r2
+- Every raise inside `except` uses `from exc` (S002); security guards carry `# @intent` comments — *source:* spec r2 (R-3)
