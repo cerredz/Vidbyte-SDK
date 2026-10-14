@@ -5,7 +5,7 @@ ROLE IN CODEBASE: The one place ClaudeHost chooses a failure code. The session p
 ARCHITECTURE NOTE: from_exception walks one ordered table of exception classes, each subclass before its base, so CLINotFoundError wins over CLIConnectionError and ResultError over ProcessError. The guarded try lives at each SDK call site, which passes what it caught here. classify_turn checks a fixed precedence and returns at the first match, so a turn carries exactly one code.
 COMMON MODIFICATION PATTERNS: A new SDK exception adds one row to _rows, placed before its base class. A new turn condition adds one ClaudeTurnOutcome field and one check at its place in the precedence.
 WHAT NOT TO DO IN THIS FILE: 1. Do not catch BaseException; only an Exception reaches the mapper, so a cancellation always propagates. 2. Do not format the exception's text, its stderr or any message text into a reason; a reason names the operation and the exception class, or CLI vocabulary such as a result subtype.
-KNOWN EDGE CASES: MessageParseError is not exported by the SDK, so it maps through its ClaudeSDKError base. A ValueError or TypeError is an argument the SDK rejected only from connect, which builds the options and starts the process, or from fork; from any other operation, such as converting a malformed SDK record, it is a protocol mismatch. A refusing rate-limit window or an assistant rate_limit error fails a turn even when its result is a success. A caller's interrupt is never a failure, but the time budget's own interrupt is.
+KNOWN EDGE CASES: MessageParseError is not exported by the SDK, so it maps through its ClaudeSDKError base. A ValueError or TypeError is an argument the SDK rejected only from connect, which builds the options and starts the process, or from fork; from any other operation, such as converting a malformed SDK record, it is a protocol mismatch. A refusing rate-limit window or an assistant rate_limit error fails a turn even when its result is a success. A steered prompt whose output ends before its own result is classified by how the output ended, never by the result of the prompt the steer interrupted. A caller's interrupt is never a failure, but the time budget's own interrupt is.
 RELATED DOCS: https://platform.claude.com/docs/en/agent-sdk/python; vidbyte/harnesses/README.md.
 TESTS: tests/features/claude_host/
 """
@@ -161,12 +161,17 @@ class ClaudeFailureMapper:
 
     @staticmethod
     def _reported(outcome: ClaudeTurnOutcome) -> tuple[FailureCode, str] | None:
-        """Return the code and reason for what the stream and the latest result reported, or None when neither failed."""
+        """Return the code and reason for what the stream and the turn's own result reported, or None when neither failed."""
         if outcome.rate_limit_rejected:
             return FailureCode.CLAUDE_USAGE_LIMITED, "A rate-limit window that refuses new sessions arrived during the turn."
         for kind, code in _ASSISTANT_ERROR_CODES:
             if kind in outcome.assistant_errors:
                 return code, f"Claude Code reported the assistant error {kind} during the turn."
+        # The checks below read the turn's own result. A steered prompt
+        # that never got one still holds the interrupted prompt's
+        # result, which must not decide the code (D-3).
+        if not outcome.result_seen:
+            return None
         if outcome.subtype in _BUDGET_SUBTYPES:
             return FailureCode.CLAUDE_BUDGET_EXHAUSTED, f"The turn's result ended with subtype {outcome.subtype}."
         if outcome.subtype == _SCHEMA_SUBTYPE or outcome.structured_output_missing:
