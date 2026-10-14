@@ -53,7 +53,11 @@ step entirely and its reply has no `"deliveries"` key.
   agent's name is the fallback title.
 - **Concurrency and deadline.** Every connector sends at once, and each one
   has `OUTPUT_DELIVERY_DEADLINE_SECONDS` to finish; one that does not is
-  FAILED `network` without holding back the others.
+  FAILED `network` without holding back the others. One connector's `send`
+  may make several requests, such as GitHub's `key=` mode, which reads
+  comments or issues and then writes once. The deadline covers them all and
+  may cut the send during its reads, when nothing was written, or during its
+  write, which may still have been applied.
 - **Receipts.** `reply.metadata["deliveries"]` holds one `DeliveryReceipt` per
   connector, in configured order.
 
@@ -99,6 +103,7 @@ except OutputDeliveryError as err:
 ```
 
 If a FAILED receipt's `error_code` is `network` (which includes a send that
-passed the deadline), `invalid_response`, `smtp_error`, or
-`smtp_recipients_refused`, or starts with `http_5`, that output may already
-have been delivered, so check its destination before resending it.
+passed the deadline), `invalid_response`, `smtp_error`,
+`smtp_recipients_refused`, or `file_error`, or starts with `http_5`, that
+output may already have been delivered, so check its destination before
+resending it.
