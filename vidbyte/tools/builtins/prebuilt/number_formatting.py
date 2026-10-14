@@ -23,6 +23,8 @@ from pydantic import Field
 from vidbyte.lib.constants.prebuilt_tools import (
     PREBUILT_ABBREVIATED_NUMBER_SUFFIXES,
     PREBUILT_CURRENCY_SYMBOLS,
+    PREBUILT_DECIMAL_TEXT_PATTERN,
+    PREBUILT_INTEGER_TEXT_PATTERN,
     PREBUILT_MAX_DECIMAL_PLACES,
     PREBUILT_MAX_DECIMAL_TEXT_CHARS,
     PREBUILT_MAX_EXPRESSION_CHARS,
@@ -59,8 +61,6 @@ _TEEN_START = 10
 _TENS_START = 20
 _DECIMAL_BASE = 10
 _REPORTED_WORD_LENGTH = 40
-_DECIMAL_TEXT_PATTERN = r"^[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)$"
-_INTEGER_TEXT_PATTERN = r"^[+-]?[0-9]+$"
 _BASE_TEXT_PATTERN = r"^[+-]?[0-9A-Za-z]+$"
 _BASE_TEXT = re.compile(r"([+-]?)([0-9A-Za-z]+)")
 _WORD_SEPARATORS = re.compile(r"[\s,-]+")
@@ -154,7 +154,7 @@ class NumberFormattingToolFunctions:
 
     @staticmethod
     def number_to_english_words(
-        value: Annotated[str, Field(description=_INTEGER_VALUE_DESCRIPTION, pattern=_INTEGER_TEXT_PATTERN, max_length=PREBUILT_MAX_INTEGER_TEXT_CHARS)],
+        value: Annotated[str, Field(description=_INTEGER_VALUE_DESCRIPTION, pattern=PREBUILT_INTEGER_TEXT_PATTERN, max_length=PREBUILT_MAX_INTEGER_TEXT_CHARS)],
         ordinal: Annotated[bool, Field(description="Whether to write the ordinal form instead of the cardinal form. Only the last word changes, so the words before it stay cardinal. The default is false. A negative value with this set to true fails with an error naming value.")] = False,
     ) -> PrebuiltToolOutput:
         """Spell out an integer in English words, as a cardinal number or as an ordinal. Use it to write amounts on cheques, numbers in prose, or ranks such as a position in a list. The words are lowercase, separated by single spaces, with hyphenated tens, no and, no commas, and scale words up to decillion, and a negative number starts with minus. A magnitude of 10 to the power 36 or more, or a negative number with ordinal set, fails with an error naming value."""
@@ -209,7 +209,7 @@ class NumberFormattingToolFunctions:
 
     @staticmethod
     def format_number_with_separators(
-        value: Annotated[str, Field(description=_DECIMAL_VALUE_DESCRIPTION, pattern=_DECIMAL_TEXT_PATTERN, max_length=PREBUILT_MAX_DECIMAL_TEXT_CHARS)],
+        value: Annotated[str, Field(description=_DECIMAL_VALUE_DESCRIPTION, pattern=PREBUILT_DECIMAL_TEXT_PATTERN, max_length=PREBUILT_MAX_DECIMAL_TEXT_CHARS)],
         style: Annotated[SeparatorStyle, Field(description=_SEPARATOR_STYLE_DESCRIPTION)] = SeparatorStyle.COMMA_PERIOD,
         decimal_places: Annotated[int | None, Field(description="How many fractional digits to show after rounding half to even, or null to keep the fractional digits exactly as written. When set, the fraction always has exactly this many digits, padded with zeros. Zero places gives a whole number with no decimal separator. The value must be between 0 and 1,000, and the default is null.", ge=0, le=PREBUILT_MAX_DECIMAL_PLACES)] = None,
     ) -> PrebuiltToolOutput:
@@ -245,7 +245,7 @@ class NumberFormattingToolFunctions:
 
     @staticmethod
     def to_scientific_notation(
-        value: Annotated[str, Field(description=_DECIMAL_VALUE_DESCRIPTION, pattern=_DECIMAL_TEXT_PATTERN, max_length=PREBUILT_MAX_DECIMAL_TEXT_CHARS)],
+        value: Annotated[str, Field(description=_DECIMAL_VALUE_DESCRIPTION, pattern=PREBUILT_DECIMAL_TEXT_PATTERN, max_length=PREBUILT_MAX_DECIMAL_TEXT_CHARS)],
         significant_figures: Annotated[int | None, Field(description="How many significant digits the mantissa keeps after rounding half to even, or null to keep every significant digit. A rounding carry moves the exponent instead of adding a digit. Trailing zeros are dropped from the mantissa either way. The value must be between 1 and 100, and the default is null.", ge=1, le=PREBUILT_MAX_SIGNIFICANT_FIGURES)] = None,
         style: Annotated[NotationStyle, Field(description="Whether to use scientific or engineering notation. Scientific notation keeps the absolute mantissa at least one and below ten. Engineering notation uses an exponent that is a multiple of three and keeps the absolute mantissa at least one and below one thousand. The default is scientific.")] = NotationStyle.SCIENTIFIC,
     ) -> PrebuiltToolOutput:

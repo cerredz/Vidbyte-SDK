@@ -26,6 +26,7 @@ from pydantic import Field
 
 from vidbyte.lib.constants.prebuilt_tools import (
     PREBUILT_DATA_SIZE_SUFFIXES,
+    PREBUILT_INTEGER_TEXT_PATTERN,
     PREBUILT_MAX_BIT_WIDTH,
     PREBUILT_MAX_DATA_SIZE_BYTES,
     PREBUILT_MAX_INTEGER_TEXT_CHARS,
@@ -45,7 +46,6 @@ from vidbyte.tools.builtins.prebuilt._support import (
     PrebuiltToolSupport,
 )
 
-_INTEGER_PATTERN = r"^[+-]?[0-9]+$"
 _NUMBER_PREFIX = re.compile(r"[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([eE][+-]?[0-9]+)?")
 _SMALLEST_SIZE_EXPONENT = -400
 _BITS_PER_BYTE = 8
@@ -154,9 +154,9 @@ class BitsBytesToolFunctions:
 
     @staticmethod
     def bitwise_operation(
-        left: Annotated[str, Field(description="The first operand, written as " + _INTEGER_OPERAND_DESCRIPTION + " With width it is reduced to that many bits first, so a negative value becomes its two's complement pattern. Without width it keeps its sign.", pattern=_INTEGER_PATTERN, max_length=PREBUILT_MAX_INTEGER_TEXT_CHARS)],
+        left: Annotated[str, Field(description="The first operand, written as " + _INTEGER_OPERAND_DESCRIPTION + " With width it is reduced to that many bits first, so a negative value becomes its two's complement pattern. Without width it keeps its sign.", pattern=PREBUILT_INTEGER_TEXT_PATTERN, max_length=PREBUILT_MAX_INTEGER_TEXT_CHARS)],
         operation: Annotated[BitwiseOperation, Field(description="The operation to apply. The values and, or, and xor combine left and right bit by bit, not inverts left and needs width, and shift_left and shift_right move left by right bits. A right shift without width keeps the sign, while with width it shifts in zeros. This parameter is required.")],
-        right: Annotated[str | None, Field(description="The second operand for and, or, and xor, or the shift amount from 0 to 4,096 for the two shifts, written as " + _INTEGER_OPERAND_DESCRIPTION + " It is ignored by not and required by every other operation. A shift amount is never reduced to the width.", pattern=_INTEGER_PATTERN, max_length=PREBUILT_MAX_INTEGER_TEXT_CHARS)] = None,
+        right: Annotated[str | None, Field(description="The second operand for and, or, and xor, or the shift amount from 0 to 4,096 for the two shifts, written as " + _INTEGER_OPERAND_DESCRIPTION + " It is ignored by not and required by every other operation. A shift amount is never reduced to the width.", pattern=PREBUILT_INTEGER_TEXT_PATTERN, max_length=PREBUILT_MAX_INTEGER_TEXT_CHARS)] = None,
         width: Annotated[int | None, Field(description="The bit width to work at, or null for unlimited signed integers. With a width the operands and the result are reduced modulo two to that power and treated as unsigned, and the binary and hexadecimal outputs are zero-padded to it. The not operation needs a width. " + _WIDTH_BOUND_DESCRIPTION, ge=1, le=PREBUILT_MAX_BIT_WIDTH)] = None,
     ) -> PrebuiltToolOutput:
         """Apply a bitwise AND, OR, XOR, NOT, left shift, or right shift to exact integers, optionally at a fixed bit width, and return the result in decimal, binary, and hexadecimal. Use it for flag masks, register values, and protocol fields, where bit arithmetic done by hand goes wrong. With width the operands and the result are reduced to that many bits and treated as unsigned, and without it a negative result keeps a minus sign and a right shift keeps the sign. A missing right operand or a shift amount outside 0 to 4,096 fails naming right, not without width fails naming width, and a result of 10^4000 or more fails naming right."""
@@ -180,7 +180,7 @@ class BitsBytesToolFunctions:
 
     @staticmethod
     def integer_to_twos_complement(
-        value: Annotated[str, Field(description="The signed integer to write, as " + _INTEGER_OPERAND_DESCRIPTION + " It must fit the signed range of the width, from minus two to the power width minus one up to that power minus one. A negative value is written as its two's complement pattern.", pattern=_INTEGER_PATTERN, max_length=PREBUILT_MAX_INTEGER_TEXT_CHARS)],
+        value: Annotated[str, Field(description="The signed integer to write, as " + _INTEGER_OPERAND_DESCRIPTION + " It must fit the signed range of the width, from minus two to the power width minus one up to that power minus one. A negative value is written as its two's complement pattern.", pattern=PREBUILT_INTEGER_TEXT_PATTERN, max_length=PREBUILT_MAX_INTEGER_TEXT_CHARS)],
         width: Annotated[int, Field(description="The number of bits in the pattern. It sets both the signed range of the value and the number of output digits. The hexadecimal output has one digit for every four bits, rounded up. " + _WIDTH_BOUND_DESCRIPTION, ge=1, le=PREBUILT_MAX_BIT_WIDTH)],
     ) -> PrebuiltToolOutput:
         """Write a signed integer as a two's complement bit pattern of a given width, in binary and hexadecimal, with the unsigned value of that pattern. Use it to see how a negative number is stored in a register, a file format, or a network field. The binary text has exactly width digits and the hexadecimal text has width divided by four digits, rounded up, both without a prefix. A value outside the signed range of the width fails with an error naming value."""

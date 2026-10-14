@@ -28,6 +28,7 @@ from vidbyte.lib.constants.prebuilt_tools import (
     PREBUILT_MAX_DURATION_SECONDS,
     PREBUILT_MAX_PHRASE_CHARS,
     PREBUILT_MAX_UTC_OFFSET_CHARS,
+    PREBUILT_UTC_OFFSET_PATTERN,
 )
 from vidbyte.lib.enums.prebuilt_tools import DurationStyle, TimestampUnit, Weekday
 from vidbyte.tools.builtins.prebuilt._support import (
@@ -38,7 +39,6 @@ from vidbyte.tools.builtins.prebuilt._support import (
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 _WEEKDAYS = tuple(Weekday)
-_UTC_OFFSET_PATTERN = r"^(Z|[+-](0[0-9]|1[0-9]|2[0-3]):[0-5][0-9])$"
 
 _MICROSECONDS_PER_SECOND = 1_000_000
 _MICROSECONDS_PER_MINUTE = 60 * _MICROSECONDS_PER_SECOND
@@ -105,7 +105,7 @@ class TimestampsDurationsToolFunctions:
     def unix_timestamp_to_datetime(
         timestamp: Annotated[float, Field(description="The Unix timestamp to convert, counted in the chosen unit from the start of 1970 in UTC. It may be negative for moments before 1970 and may carry a fractional part. It is rounded half to even to whole microseconds, and digits beyond what a float holds are lost. A result outside years 1 through 9999 fails with an error.", allow_inf_nan=False)],
         unit: Annotated[TimestampUnit, Field(description="The unit the timestamp counts in: seconds, milliseconds, microseconds, or nanoseconds. Most systems count seconds, while JavaScript and many logs count milliseconds. Nanoseconds are rounded to whole microseconds. The default is seconds.")] = TimestampUnit.SECONDS,
-        utc_offset: Annotated[str, Field(description="The fixed UTC offset at which to show the result, written as Z or as a plus or minus sign followed by HH:MM. Hours run from 00 to 23 and minutes from 00 to 59. Daylight-saving rules are not applied, because the offset is fixed. The default is UTC itself.", pattern=_UTC_OFFSET_PATTERN, max_length=PREBUILT_MAX_UTC_OFFSET_CHARS)] = "+00:00",
+        utc_offset: Annotated[str, Field(description="The fixed UTC offset at which to show the result, written as Z or as a plus or minus sign followed by HH:MM. Hours run from 00 to 23 and minutes from 00 to 59. Daylight-saving rules are not applied, because the offset is fixed. The default is UTC itself.", pattern=PREBUILT_UTC_OFFSET_PATTERN, max_length=PREBUILT_MAX_UTC_OFFSET_CHARS)] = "+00:00",
     ) -> PrebuiltToolOutput:
         """Convert a Unix timestamp into an ISO 8601 date and time, its date, its time of day, and its weekday, shown at a fixed UTC offset. Use it to read epoch values from logs, databases, and APIs instead of working out calendar dates by hand. The timestamp may be in seconds, milliseconds, microseconds, or nanoseconds, may be negative or fractional, and is rounded half to even to whole microseconds. A result outside years 1 through 9999 fails with an error naming timestamp."""
         # Scale the timestamp's shortest text exactly to microseconds
@@ -138,7 +138,7 @@ class TimestampsDurationsToolFunctions:
     @staticmethod
     def convert_utc_offset(
         moment: Annotated[datetime, Field(description=_DATETIME_PARAMETER_DESCRIPTION)],
-        to_offset: Annotated[str, Field(description="The fixed UTC offset to show the moment at, written as Z or as a plus or minus sign followed by HH:MM. Hours run from 00 to 23 and minutes from 00 to 59. Daylight-saving rules are not applied, because the offset is fixed. A result outside years 1 through 9999 fails with an error.", pattern=_UTC_OFFSET_PATTERN, max_length=PREBUILT_MAX_UTC_OFFSET_CHARS)],
+        to_offset: Annotated[str, Field(description="The fixed UTC offset to show the moment at, written as Z or as a plus or minus sign followed by HH:MM. Hours run from 00 to 23 and minutes from 00 to 59. Daylight-saving rules are not applied, because the offset is fixed. A result outside years 1 through 9999 fails with an error.", pattern=PREBUILT_UTC_OFFSET_PATTERN, max_length=PREBUILT_MAX_UTC_OFFSET_CHARS)],
     ) -> PrebuiltToolOutput:
         """Show a moment in time at a different fixed UTC offset, with the new date, the new time of day, and the change in calendar day. Use it to translate a meeting time or a log timestamp into another region's clock when that region's offset is known. Offsets are fixed, so daylight-saving rules are not applied, and day_shift is the new local date minus the original local date in days. A result outside years 1 through 9999 fails with an error naming to_offset."""
         # Move the wall clock by the difference between the two offsets

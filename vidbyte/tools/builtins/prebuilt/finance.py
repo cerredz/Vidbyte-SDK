@@ -29,6 +29,7 @@ from typing import Annotated
 from pydantic import Field
 
 from vidbyte.lib.constants.prebuilt_tools import (
+    PREBUILT_DECIMAL_TEXT_PATTERN,
     PREBUILT_FINANCE_PRECISION,
     PREBUILT_IRR_BISECTION_STEPS,
     PREBUILT_IRR_GRID_POINTS,
@@ -52,7 +53,6 @@ from vidbyte.tools.builtins.prebuilt._support import (
     PrebuiltToolSupport,
 )
 
-_DECIMAL_TEXT_PATTERN = r"^[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)$"
 _LOWEST_RATE_PERCENT = -100
 _PERCENT = 100
 _CENTS_PER_UNIT = 100
@@ -247,7 +247,7 @@ class FinanceToolFunctions:
 
     @staticmethod
     def allocate_amount(
-        amount: Annotated[str, Field(description="The exact amount to split, written as plain decimal text with no exponent. It must be zero or more and must not be finer than the decimal places allow. The text may hold at most 4,002 characters. It is never converted to a binary float.", pattern=_DECIMAL_TEXT_PATTERN, max_length=PREBUILT_MAX_DECIMAL_TEXT_CHARS)],
+        amount: Annotated[str, Field(description="The exact amount to split, written as plain decimal text with no exponent. It must be zero or more and must not be finer than the decimal places allow. The text may hold at most 4,002 characters. It is never converted to a binary float.", pattern=PREBUILT_DECIMAL_TEXT_PATTERN, max_length=PREBUILT_MAX_DECIMAL_TEXT_CHARS)],
         weights: Annotated[list[_FINITE_NUMBER], Field(description="The relative weight of each part, in the order the parts are returned. Each weight must be zero or more, and their sum must be above zero. Weights are read exactly from their shortest decimal text. The list needs at least one weight and at most 10,000.", min_length=1, max_length=PREBUILT_MAX_LIST_ITEMS)],
         decimal_places: Annotated[int, Field(description="How many decimal places each part has, from 0 to 10. Every part has exactly this many fractional digits, and zero places gives whole units with no point. The default is 2, which suits most currencies. The parts always add up to exactly the amount.", ge=0, le=PREBUILT_MAX_SHARE_PLACES)] = 2,
     ) -> PrebuiltToolOutput:
@@ -269,7 +269,7 @@ class FinanceToolFunctions:
 
     @staticmethod
     def split_tax_inclusive_amount(
-        gross_amount: Annotated[str, Field(description="The tax-inclusive total, written as plain decimal text with no exponent. It must be zero or more, at most one quadrillion, and have at most two fractional digits. The text may hold at most 4,002 characters. It is never converted to a binary float.", pattern=_DECIMAL_TEXT_PATTERN, max_length=PREBUILT_MAX_DECIMAL_TEXT_CHARS)],
+        gross_amount: Annotated[str, Field(description="The tax-inclusive total, written as plain decimal text with no exponent. It must be zero or more, at most one quadrillion, and have at most two fractional digits. The text may hold at most 4,002 characters. It is never converted to a binary float.", pattern=PREBUILT_DECIMAL_TEXT_PATTERN, max_length=PREBUILT_MAX_DECIMAL_TEXT_CHARS)],
         tax_rate_percent: Annotated[float, Field(description="The tax rate in percent, not as a fraction of one, from zero to 1,000. The net amount is the gross divided by one plus this rate over 100. A rate of zero leaves the whole gross as net. The rate is read exactly from its shortest decimal text.", allow_inf_nan=False, ge=0, le=PREBUILT_MAX_RATE_PERCENT)],
     ) -> PrebuiltToolOutput:
         """Split a gross amount that already includes tax into its net amount and its tax amount, as money texts with two decimals. Use it for invoices and receipts where only the tax-inclusive total is known. The net amount is the gross divided by one plus the rate, computed exactly and rounded half-up to cents, and the tax is the gross minus the net, so the two always add up to the gross. A negative gross, one with more than two decimals, or one above one quadrillion fails with an error naming gross_amount."""

@@ -1,9 +1,9 @@
 """FILE: vidbyte/lib/constants/prebuilt_tools.py
 
-PURPOSE: Holds every length cap, resource bound, fixed precision, and reference table the prebuilt tool library uses, so each limit has one name and one value.
+PURPOSE: Holds every length cap, resource bound, fixed precision, shorthand pattern, and reference table the prebuilt tool library uses, so each limit has one name and one value.
 ROLE IN CODEBASE: Imported by vidbyte/tools/builtins/prebuilt/_support.py and the 31 category modules beside it, which use the caps in their pydantic Field constraints and the tables in their parsing and formatting. Imports enums from vidbyte/lib/enums/prebuilt_tools.py for four tables.
 ARCHITECTURE NOTE: Every value is immutable: an int, a float, a str, a tuple, a frozenset, or a read-only MappingProxyType. The caps are sized for the slowest algorithm that reads them (spec NFR-7), so raising one can make a tool call run far longer than two seconds.
-FUNCTION INVENTORY: No functions. Caps and budgets (PREBUILT_MAX_*), fixed numeric settings (PREBUILT_FINANCE_PRECISION, the PREBUILT_IRR_* search settings, PREBUILT_EARTH_RADIUS_KILOMETERS), and reference tables (sentence abbreviations, GSM-7 alphabets, currency codes and symbols, diacritic fallbacks, CSV delimiter characters, JSON value types, number words, size and duration words, month names, HTML block tags, invisible code points, comment syntax).
+FUNCTION INVENTORY: No functions. Caps and budgets (PREBUILT_MAX_*), the field patterns of the IntText, DecText, and UtcOffset shorthands (PREBUILT_*_PATTERN), fixed numeric settings (PREBUILT_FINANCE_PRECISION, the PREBUILT_IRR_* search settings, PREBUILT_EARTH_RADIUS_KILOMETERS), and reference tables (sentence abbreviations, GSM-7 alphabets, currency codes and symbols, diacritic fallbacks, CSV delimiter characters, JSON value types, number words, size and duration words, month names, HTML block tags, invisible code points, comment syntax).
 COMMON MODIFICATION PATTERNS: A new bound gets a PREBUILT_ name here before any tool uses it, and that name goes into __all__. A reference table changes together with the Appendix A row that names its contents.
 WHAT NOT TO DO IN THIS FILE: 1. Do not use a name that holds an A007 token (timeout, token, char, byte, limit, depth, interval, and the rest) as a whole underscore-separated word, because tool signatures read these names. 2. Do not store mutable lists, sets, or dicts. 3. Do not import anything above vidbyte.lib.
 KNOWN EDGE CASES: PREBUILT_MAX_INTEGER_DIGITS stays below Python's default 4,300-digit int-to-text limit, so an allowed integer always converts to text. PREBUILT_MAX_UTC_OFFSET_CHARS is the longest text the UtcOffset pattern accepts.
@@ -45,6 +45,12 @@ PREBUILT_MAX_DECIMAL_PLACES = 1_000
 PREBUILT_DEFAULT_DIVISION_PLACES = 28
 PREBUILT_APPROXIMATION_DIGITS = 20
 PREBUILT_MAX_SIGNIFICANT_FIGURES = 100
+
+# Field patterns of the IntText, DecText, and UtcOffset shorthands
+# (section 9.2).
+PREBUILT_INTEGER_TEXT_PATTERN = r"^[+-]?[0-9]+$"
+PREBUILT_DECIMAL_TEXT_PATTERN = r"^[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)$"
+PREBUILT_UTC_OFFSET_PATTERN = r"^(Z|[+-](0[0-9]|1[0-9]|2[0-3]):[0-5][0-9])$"
 
 # Patterns, comparison, and source code.
 PREBUILT_MAX_PATTERN_CHARS = 1_000
@@ -317,6 +323,7 @@ __all__ = [
     "PREBUILT_CURRENCY_CODES",
     "PREBUILT_CURRENCY_SYMBOLS",
     "PREBUILT_DATA_SIZE_SUFFIXES",
+    "PREBUILT_DECIMAL_TEXT_PATTERN",
     "PREBUILT_DEFAULT_DIVISION_PLACES",
     "PREBUILT_DIACRITIC_FALLBACKS",
     "PREBUILT_DURATION_UNIT_WORDS",
@@ -326,6 +333,7 @@ __all__ = [
     "PREBUILT_GSM7_EXTENSION_CHARACTERS",
     "PREBUILT_HEX_PREVIEW_SIZE",
     "PREBUILT_HTML_BLOCK_TAGS",
+    "PREBUILT_INTEGER_TEXT_PATTERN",
     "PREBUILT_IRR_BISECTION_STEPS",
     "PREBUILT_IRR_GRID_POINTS",
     "PREBUILT_IRR_GRID_START",
@@ -426,5 +434,6 @@ __all__ = [
     "PREBUILT_PROFILE_EXAMPLES",
     "PREBUILT_SENTENCE_ABBREVIATIONS",
     "PREBUILT_SIZE_UNIT_LABELS",
+    "PREBUILT_UTC_OFFSET_PATTERN",
     "PREBUILT_ZERO_WIDTH_CODE_POINTS",
 ]

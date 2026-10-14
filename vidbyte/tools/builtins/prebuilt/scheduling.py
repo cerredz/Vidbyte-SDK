@@ -33,6 +33,7 @@ from vidbyte.lib.constants.prebuilt_tools import (
     PREBUILT_MAX_RECURRENCE_STEP,
     PREBUILT_MAX_RESULT_ITEMS,
     PREBUILT_MAX_UTC_OFFSET_CHARS,
+    PREBUILT_UTC_OFFSET_PATTERN,
 )
 from vidbyte.lib.enums.prebuilt_tools import RecurrenceFrequency, Weekday
 from vidbyte.tools.builtins.prebuilt._support import (
@@ -48,7 +49,6 @@ _LAST_ORDINAL = date.max.toordinal()
 _ONE_MINUTE = timedelta(minutes=1)
 _ONE_MICROSECOND = timedelta(microseconds=1)
 _MICROSECONDS_PER_MINUTE = _ONE_MINUTE // _ONE_MICROSECOND
-_UTC_OFFSET_PATTERN = r"^(Z|[+-](0[0-9]|1[0-9]|2[0-3]):[0-5][0-9])$"
 _DEFAULT_WEEKEND = (Weekday.SATURDAY, Weekday.SUNDAY)
 _EVERY_WEEKDAY = frozenset(range(_DAYS_IN_WEEK))
 _WEEKDAY_NUMBERS = MappingProxyType({member: number for number, member in enumerate(Weekday)})
@@ -181,7 +181,7 @@ class SchedulingToolFunctions:
     def merge_time_intervals(
         starts: Annotated[list[datetime], Field(description="The start of each interval as an ISO 8601 date and time, paired by position with ends. A value without a UTC offset is read as UTC, and an offset is honored when present. The list must hold between 1 and 10,000 items. Each start must not come after its paired end.", min_length=1, max_length=PREBUILT_MAX_LIST_ITEMS)],
         ends: Annotated[list[datetime], Field(description="The end of each interval as an ISO 8601 date and time, paired by position with starts. A value without a UTC offset is read as UTC. The list must have exactly as many items as starts, or the tool fails with an error naming this parameter. An end that comes before its paired start fails with an error naming this parameter and the index.", min_length=1, max_length=PREBUILT_MAX_LIST_ITEMS)],
-        output_offset: Annotated[str, Field(description=_OUTPUT_OFFSET_DESCRIPTION, pattern=_UTC_OFFSET_PATTERN, max_length=PREBUILT_MAX_UTC_OFFSET_CHARS)] = "+00:00",
+        output_offset: Annotated[str, Field(description=_OUTPUT_OFFSET_DESCRIPTION, pattern=PREBUILT_UTC_OFFSET_PATTERN, max_length=PREBUILT_MAX_UTC_OFFSET_CHARS)] = "+00:00",
     ) -> PrebuiltToolOutput:
         """Merge time intervals that overlap or touch into the fewest separate intervals, and total their length in minutes. Use it to combine calendar entries, work sessions, or outage windows before measuring them. Times without a UTC offset are read as UTC, and the merged intervals are sorted by start and written at output_offset. A length mismatch between starts and ends, or a start after its end, fails with an error naming ends."""
         # Pair each start with its end and read times without an offset
@@ -203,7 +203,7 @@ class SchedulingToolFunctions:
         window_start: Annotated[datetime, Field(description="The beginning of the window in which free time is searched, as an ISO 8601 date and time. A value without a UTC offset is read as UTC. Free slots never start before this moment. It must come before window_end.")],
         window_end: Annotated[datetime, Field(description="The end of the window in which free time is searched, as an ISO 8601 date and time. A value without a UTC offset is read as UTC. Free slots never end after this moment. A window end at or before the window start fails with an error naming this parameter.")],
         minimum_minutes: Annotated[float, Field(description="The shortest free gap, in minutes, that counts as a slot. A gap exactly this long is kept. It must be greater than zero and at most 525,600, the minutes of a common year. The default is thirty minutes.", gt=0, le=PREBUILT_MAX_FREE_SLOT_MINUTES, allow_inf_nan=False)] = 30,
-        output_offset: Annotated[str, Field(description=_OUTPUT_OFFSET_DESCRIPTION, pattern=_UTC_OFFSET_PATTERN, max_length=PREBUILT_MAX_UTC_OFFSET_CHARS)] = "+00:00",
+        output_offset: Annotated[str, Field(description=_OUTPUT_OFFSET_DESCRIPTION, pattern=PREBUILT_UTC_OFFSET_PATTERN, max_length=PREBUILT_MAX_UTC_OFFSET_CHARS)] = "+00:00",
     ) -> PrebuiltToolOutput:
         """Find the free time slots inside a window that are at least a minimum number of minutes long, given busy intervals from any number of participants. Use it to propose meeting times that suit everyone. Busy intervals are merged first, times without a UTC offset are read as UTC, and slots are written at output_offset in time order. At most 1,000 slots are listed while count covers all of them, a window end at or before its start fails with an error naming window_end, and a busy length mismatch or a busy start after its end fails with an error naming busy_ends."""
         # Read the window as aware times and refuse one with no length.

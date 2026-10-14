@@ -35,7 +35,9 @@ from pydantic import Field
 
 from vidbyte.lib.constants.prebuilt_tools import (
     PREBUILT_APPROXIMATION_DIGITS,
+    PREBUILT_DECIMAL_TEXT_PATTERN,
     PREBUILT_DEFAULT_DIVISION_PLACES,
+    PREBUILT_INTEGER_TEXT_PATTERN,
     PREBUILT_MAX_DECIMAL_PLACES,
     PREBUILT_MAX_DECIMAL_TEXT_CHARS,
     PREBUILT_MAX_DENOMINATOR,
@@ -58,9 +60,7 @@ from vidbyte.tools.builtins.prebuilt._support import (
 _EXACT_PRECISION = 4 * PREBUILT_MAX_DECIMAL_TEXT_CHARS
 _INTEGER_RESULT_BOUND = 10**PREBUILT_MAX_INTEGER_DIGITS
 _DECIMAL_BASE = 10
-_DECIMAL_TEXT_PATTERN = r"^[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)$"
 _FRACTION_TEXT_PATTERN = r"^[+-]?[0-9]+(/[0-9]+)?$"
-_INTEGER_TEXT_PATTERN = r"^[+-]?[0-9]+$"
 _REPEATING_DECIMAL_PATTERN = r"^[+-]?[0-9]*\.[0-9]*\([0-9]+\)$"
 _FRACTION_TEXT = re.compile(r"([+-]?)([0-9]+)(?:/([0-9]+))?")
 _REPEATING_DECIMAL = re.compile(r"([+-]?)([0-9]*)\.([0-9]*)\(([0-9]+)\)")
@@ -97,8 +97,8 @@ class ExactArithmeticToolFunctions:
 
     @staticmethod
     def decimal_arithmetic(
-        left: Annotated[str, Field(description=_DECIMAL_OPERAND_DESCRIPTION, pattern=_DECIMAL_TEXT_PATTERN, max_length=PREBUILT_MAX_DECIMAL_TEXT_CHARS)],
-        right: Annotated[str, Field(description=_DECIMAL_OPERAND_DESCRIPTION, pattern=_DECIMAL_TEXT_PATTERN, max_length=PREBUILT_MAX_DECIMAL_TEXT_CHARS)],
+        left: Annotated[str, Field(description=_DECIMAL_OPERAND_DESCRIPTION, pattern=PREBUILT_DECIMAL_TEXT_PATTERN, max_length=PREBUILT_MAX_DECIMAL_TEXT_CHARS)],
+        right: Annotated[str, Field(description=_DECIMAL_OPERAND_DESCRIPTION, pattern=PREBUILT_DECIMAL_TEXT_PATTERN, max_length=PREBUILT_MAX_DECIMAL_TEXT_CHARS)],
         operation: Annotated[ArithmeticOperation, Field(description=_OPERATION_DESCRIPTION)],
         decimal_places: Annotated[int, Field(description="How many fractional digits a division keeps before it rounds half to even. Add, subtract, and multiply are always exact and ignore this value. The default is 28 places. The value must be between 0 and 1,000.", ge=0, le=PREBUILT_MAX_DECIMAL_PLACES)] = PREBUILT_DEFAULT_DIVISION_PLACES,
     ) -> PrebuiltToolOutput:
@@ -127,7 +127,7 @@ class ExactArithmeticToolFunctions:
 
     @staticmethod
     def round_decimal(
-        value: Annotated[str, Field(description=_DECIMAL_OPERAND_DESCRIPTION, pattern=_DECIMAL_TEXT_PATTERN, max_length=PREBUILT_MAX_DECIMAL_TEXT_CHARS)],
+        value: Annotated[str, Field(description=_DECIMAL_OPERAND_DESCRIPTION, pattern=PREBUILT_DECIMAL_TEXT_PATTERN, max_length=PREBUILT_MAX_DECIMAL_TEXT_CHARS)],
         decimal_places: Annotated[int, Field(description="How many fractional digits the result keeps. The result always shows exactly this many fractional digits, padding with zeros when needed. Zero places gives a whole number with no decimal point. The value must be between 0 and 1,000, and the default is 0.", ge=0, le=PREBUILT_MAX_DECIMAL_PLACES)] = 0,
         mode: Annotated[RoundingMode, Field(description=_ROUNDING_MODE_DESCRIPTION)] = RoundingMode.HALF_EVEN,
     ) -> PrebuiltToolOutput:
@@ -139,7 +139,7 @@ class ExactArithmeticToolFunctions:
 
     @staticmethod
     def round_significant_figures(
-        value: Annotated[str, Field(description=_DECIMAL_OPERAND_DESCRIPTION, pattern=_DECIMAL_TEXT_PATTERN, max_length=PREBUILT_MAX_DECIMAL_TEXT_CHARS)],
+        value: Annotated[str, Field(description=_DECIMAL_OPERAND_DESCRIPTION, pattern=PREBUILT_DECIMAL_TEXT_PATTERN, max_length=PREBUILT_MAX_DECIMAL_TEXT_CHARS)],
         significant_figures: Annotated[int, Field(description="How many significant digits the result shows, counted from the first non-zero digit. Zeros are added after the decimal point when the value has too few digits, and zeros that only hold place before the point are written out. The value must be between 1 and 100. There is no default, so it must always be given.", ge=1, le=PREBUILT_MAX_SIGNIFICANT_FIGURES)],
         mode: Annotated[RoundingMode, Field(description=_ROUNDING_MODE_DESCRIPTION)] = RoundingMode.HALF_EVEN,
     ) -> PrebuiltToolOutput:
@@ -154,7 +154,7 @@ class ExactArithmeticToolFunctions:
     @staticmethod
     def sum_decimal_list(
         values: Annotated[
-            list[Annotated[str, Field(pattern=_DECIMAL_TEXT_PATTERN, max_length=PREBUILT_MAX_DECIMAL_TEXT_CHARS)]],
+            list[Annotated[str, Field(pattern=PREBUILT_DECIMAL_TEXT_PATTERN, max_length=PREBUILT_MAX_DECIMAL_TEXT_CHARS)]],
             Field(description="The exact decimal numbers to add, each written as plain digits with an optional leading sign and an optional decimal point. Exponents, digit grouping, and spaces are not accepted in any item. The list must hold between 1 and 10,000 items. Each item may hold at most 4,002 characters.", min_length=1, max_length=PREBUILT_MAX_LIST_ITEMS),
         ],
     ) -> PrebuiltToolOutput:
@@ -199,7 +199,7 @@ class ExactArithmeticToolFunctions:
 
     @staticmethod
     def decimal_to_fraction(
-        value: Annotated[str, Field(description=_DECIMAL_OPERAND_DESCRIPTION, pattern=_DECIMAL_TEXT_PATTERN, max_length=PREBUILT_MAX_DECIMAL_TEXT_CHARS)],
+        value: Annotated[str, Field(description=_DECIMAL_OPERAND_DESCRIPTION, pattern=PREBUILT_DECIMAL_TEXT_PATTERN, max_length=PREBUILT_MAX_DECIMAL_TEXT_CHARS)],
         max_denominator: Annotated[int | None, Field(description="The largest denominator the fraction may have, or null for the exact fraction. When set, the result is the closest fraction whose denominator does not exceed this bound. The bound must be between 1 and one trillion. The default is null.", ge=1, le=PREBUILT_MAX_DENOMINATOR)] = None,
     ) -> PrebuiltToolOutput:
         """Convert an exact decimal number to a fraction in lowest terms, optionally the closest fraction whose denominator stays within a bound. Use it to turn a decimal into an exact ratio or to find a simple fraction that approximates a measured value. Without a bound the fraction equals the decimal exactly, and with a bound it is the best approximation with that largest denominator. The exact flag says whether the fraction still equals the decimal, and the tool has no failure case beyond its schema caps."""
@@ -244,7 +244,7 @@ class ExactArithmeticToolFunctions:
 
     @staticmethod
     def integer_square_root(
-        value: Annotated[str, Field(description="The non-negative integer whose square root is wanted, written as decimal digits with an optional plus sign. Leading zeros are allowed. It may hold at most 4,001 characters. A negative value fails with an error naming value.", pattern=_INTEGER_TEXT_PATTERN, max_length=PREBUILT_MAX_INTEGER_TEXT_CHARS)],
+        value: Annotated[str, Field(description="The non-negative integer whose square root is wanted, written as decimal digits with an optional plus sign. Leading zeros are allowed. It may hold at most 4,001 characters. A negative value fails with an error naming value.", pattern=PREBUILT_INTEGER_TEXT_PATTERN, max_length=PREBUILT_MAX_INTEGER_TEXT_CHARS)],
     ) -> PrebuiltToolOutput:
         """Compute the exact integer square root of a non-negative integer, the remainder left over, and whether the integer is a perfect square. Use it for exact square roots of large integers, where a floating-point square root loses digits. The root is the largest integer whose square does not exceed the value, and the remainder is the value minus the square of the root. A negative value fails with an error naming value."""
         number = PrebuiltToolSupport.parse_integer_text(value, "value")

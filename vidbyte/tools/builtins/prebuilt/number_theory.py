@@ -20,6 +20,7 @@ from typing import Annotated
 from pydantic import Field
 
 from vidbyte.lib.constants.prebuilt_tools import (
+    PREBUILT_INTEGER_TEXT_PATTERN,
     PREBUILT_MAX_FACTORIZE_VALUE,
     PREBUILT_MAX_INTEGER_DIGITS,
     PREBUILT_MAX_INTEGER_TEXT_CHARS,
@@ -36,7 +37,6 @@ from vidbyte.tools.builtins.prebuilt._support import (
     PrebuiltToolSupport,
 )
 
-_INTEGER_TEXT_PATTERN = r"^[+-]?[0-9]+$"
 _INTEGER_RESULT_BOUND = 10**PREBUILT_MAX_INTEGER_DIGITS
 _MILLER_RABIN_BASES = (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41)
 _SMALLEST_PRIME = 2
@@ -55,7 +55,7 @@ class NumberTheoryToolFunctions:
 
     @staticmethod
     def is_prime(
-        value: Annotated[str, Field(description="The integer to test, written as decimal digits with an optional sign. Leading zeros are allowed and do not change the value. Values of one or less are reported as not prime. A value above 3,317,044,064,679,887,385,961,980 fails with an error.", pattern=_INTEGER_TEXT_PATTERN, max_length=PREBUILT_MAX_INTEGER_TEXT_CHARS)],
+        value: Annotated[str, Field(description="The integer to test, written as decimal digits with an optional sign. Leading zeros are allowed and do not change the value. Values of one or less are reported as not prime. A value above 3,317,044,064,679,887,385,961,980 fails with an error.", pattern=PREBUILT_INTEGER_TEXT_PATTERN, max_length=PREBUILT_MAX_INTEGER_TEXT_CHARS)],
     ) -> PrebuiltToolOutput:
         """Tell whether an integer is prime, using a deterministic Miller-Rabin test with the thirteen prime bases from 2 through 41. Use it whenever primality matters, because checking divisibility by reading is unreliable for large numbers. The answer is exact for every value up to 3,317,044,064,679,887,385,961,980, and zero, one, and negative values are never prime. A value above that bound fails with an error naming value."""
         number = PrebuiltToolSupport.parse_integer_text(value, "value")
@@ -102,7 +102,7 @@ class NumberTheoryToolFunctions:
 
     @staticmethod
     def next_prime(
-        value: Annotated[str, Field(description="The integer to start from, written as decimal digits with an optional sign. The value itself is never returned, even when it is prime. Leading zeros are allowed and do not change the value. It must not be above 3,317,044,064,679,887,385,961,980.", pattern=_INTEGER_TEXT_PATTERN, max_length=PREBUILT_MAX_INTEGER_TEXT_CHARS)],
+        value: Annotated[str, Field(description="The integer to start from, written as decimal digits with an optional sign. The value itself is never returned, even when it is prime. Leading zeros are allowed and do not change the value. It must not be above 3,317,044,064,679,887,385,961,980.", pattern=PREBUILT_INTEGER_TEXT_PATTERN, max_length=PREBUILT_MAX_INTEGER_TEXT_CHARS)],
         direction: Annotated[SearchDirection, Field(description="Which way to search from value. Next looks for the smallest prime above value, and previous looks for the largest prime below it. The default is next. A previous search from 2 or less finds nothing and gives null.")] = SearchDirection.NEXT,
     ) -> PrebuiltToolOutput:
         """Find the nearest prime strictly above or strictly below an integer. Use it to round a value to a prime, size a hash table, or step through the primes one at a time. The search uses the same exact Miller-Rabin test as is_prime, and searching downward from 2 or less gives null. A value above 3,317,044,064,679,887,385,961,980, or an upward search that would pass that bound, fails with an error naming value."""
@@ -129,7 +129,7 @@ class NumberTheoryToolFunctions:
 
     @staticmethod
     def greatest_common_divisor(
-        values: Annotated[list[Annotated[str, Field(pattern=_INTEGER_TEXT_PATTERN, max_length=PREBUILT_MAX_INTEGER_TEXT_CHARS)]], Field(description=_INTEGER_LIST_DESCRIPTION, min_length=2, max_length=PREBUILT_MAX_LIST_ITEMS)],
+        values: Annotated[list[Annotated[str, Field(pattern=PREBUILT_INTEGER_TEXT_PATTERN, max_length=PREBUILT_MAX_INTEGER_TEXT_CHARS)]], Field(description=_INTEGER_LIST_DESCRIPTION, min_length=2, max_length=PREBUILT_MAX_LIST_ITEMS)],
     ) -> PrebuiltToolOutput:
         """Compute the greatest common divisor of two or more integers. Use it to simplify ratios, find a shared step size, or check whether numbers are coprime. Signs are ignored, the result is never negative, and a list of only zeros gives zero. A result of more than 4,000 digits fails with an error naming values."""
         numbers = [PrebuiltToolSupport.parse_integer_text(text, "values") for text in values]
@@ -137,7 +137,7 @@ class NumberTheoryToolFunctions:
 
     @staticmethod
     def least_common_multiple(
-        values: Annotated[list[Annotated[str, Field(pattern=_INTEGER_TEXT_PATTERN, max_length=PREBUILT_MAX_INTEGER_TEXT_CHARS)]], Field(description=_INTEGER_LIST_DESCRIPTION, min_length=2, max_length=PREBUILT_MAX_LIST_ITEMS)],
+        values: Annotated[list[Annotated[str, Field(pattern=PREBUILT_INTEGER_TEXT_PATTERN, max_length=PREBUILT_MAX_INTEGER_TEXT_CHARS)]], Field(description=_INTEGER_LIST_DESCRIPTION, min_length=2, max_length=PREBUILT_MAX_LIST_ITEMS)],
     ) -> PrebuiltToolOutput:
         """Compute the least common multiple of two or more integers. Use it to find a common denominator, a shared period, or the first time several cycles line up. Signs are ignored, the result is never negative, and any zero in the list gives zero. A running result of more than 4,000 digits fails with an error naming values, checked after each value is folded in."""
         # Any zero makes the whole result zero, so it wins before the
@@ -177,9 +177,9 @@ class NumberTheoryToolFunctions:
 
     @staticmethod
     def modular_exponentiation(
-        base: Annotated[str, Field(description="The integer to raise to a power, written as decimal digits with an optional sign. A negative base is reduced into the range of the modulus first. Leading zeros are allowed and do not change the value. It may have at most 2,001 characters.", pattern=_INTEGER_TEXT_PATTERN, max_length=PREBUILT_MAX_MODULAR_TEXT_CHARS)],
-        exponent: Annotated[str, Field(description="The power to raise base to, written as decimal digits with an optional sign. A negative exponent raises the modular inverse of base instead, which needs base and modulus to share no factor. Leading zeros are allowed and do not change the value. It may have at most 2,001 characters.", pattern=_INTEGER_TEXT_PATTERN, max_length=PREBUILT_MAX_MODULAR_TEXT_CHARS)],
-        modulus: Annotated[str, Field(description="The modulus to reduce by, written as decimal digits with an optional sign. It must be at least one, and a modulus of one always gives zero. Leading zeros are allowed and do not change the value. It may have at most 2,001 characters.", pattern=_INTEGER_TEXT_PATTERN, max_length=PREBUILT_MAX_MODULAR_TEXT_CHARS)],
+        base: Annotated[str, Field(description="The integer to raise to a power, written as decimal digits with an optional sign. A negative base is reduced into the range of the modulus first. Leading zeros are allowed and do not change the value. It may have at most 2,001 characters.", pattern=PREBUILT_INTEGER_TEXT_PATTERN, max_length=PREBUILT_MAX_MODULAR_TEXT_CHARS)],
+        exponent: Annotated[str, Field(description="The power to raise base to, written as decimal digits with an optional sign. A negative exponent raises the modular inverse of base instead, which needs base and modulus to share no factor. Leading zeros are allowed and do not change the value. It may have at most 2,001 characters.", pattern=PREBUILT_INTEGER_TEXT_PATTERN, max_length=PREBUILT_MAX_MODULAR_TEXT_CHARS)],
+        modulus: Annotated[str, Field(description="The modulus to reduce by, written as decimal digits with an optional sign. It must be at least one, and a modulus of one always gives zero. Leading zeros are allowed and do not change the value. It may have at most 2,001 characters.", pattern=PREBUILT_INTEGER_TEXT_PATTERN, max_length=PREBUILT_MAX_MODULAR_TEXT_CHARS)],
     ) -> PrebuiltToolOutput:
         """Compute base raised to exponent and reduced modulo modulus, without ever building the full power. Use it for modular arithmetic, cryptography exercises, and checking large congruences. The result lies between zero and one less than the modulus, and a negative exponent uses the modular inverse of base. A modulus below one fails with an error naming modulus, and a negative exponent with a base that has no inverse fails with an error naming base."""
         # Read the three operands and refuse a modulus below one.
@@ -199,8 +199,8 @@ class NumberTheoryToolFunctions:
 
     @staticmethod
     def modular_inverse(
-        value: Annotated[str, Field(description="The integer to invert, written as decimal digits with an optional sign. A negative value is reduced into the range of the modulus first. Leading zeros are allowed and do not change the value. It may have at most 4,001 characters.", pattern=_INTEGER_TEXT_PATTERN, max_length=PREBUILT_MAX_INTEGER_TEXT_CHARS)],
-        modulus: Annotated[str, Field(description="The modulus to work in, written as decimal digits with an optional sign. It must be at least two, and smaller values fail with an error. Leading zeros are allowed and do not change the value. It may have at most 4,001 characters.", pattern=_INTEGER_TEXT_PATTERN, max_length=PREBUILT_MAX_INTEGER_TEXT_CHARS)],
+        value: Annotated[str, Field(description="The integer to invert, written as decimal digits with an optional sign. A negative value is reduced into the range of the modulus first. Leading zeros are allowed and do not change the value. It may have at most 4,001 characters.", pattern=PREBUILT_INTEGER_TEXT_PATTERN, max_length=PREBUILT_MAX_INTEGER_TEXT_CHARS)],
+        modulus: Annotated[str, Field(description="The modulus to work in, written as decimal digits with an optional sign. It must be at least two, and smaller values fail with an error. Leading zeros are allowed and do not change the value. It may have at most 4,001 characters.", pattern=PREBUILT_INTEGER_TEXT_PATTERN, max_length=PREBUILT_MAX_INTEGER_TEXT_CHARS)],
     ) -> PrebuiltToolOutput:
         """Find the inverse of an integer modulo a modulus, the number that times the integer leaves a remainder of one. Use it to divide in modular arithmetic, solve linear congruences, or work through key-generation exercises. The inverse lies between zero and one less than the modulus, and when the integer shares a factor with the modulus no inverse exists, so inverse is null and exists is false. A modulus below two fails with an error naming modulus."""
         # Read both integers and refuse a modulus below two.
