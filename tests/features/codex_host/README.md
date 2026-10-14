@@ -36,3 +36,4 @@ The implementation belongs in `vidbyte/harnesses/native/codex/` (the host, conne
 
 - 2026-10-13 - Pack added red, ahead of the implementation, from spec r3 (S2 test author). The seven modules from `test_codex_host_lifecycle.py` to `test_codex_host_sdk_contract.py` need the `codex` extra, so CI, which installs only `.[dev]`, skips them; run them locally with the extra installed.
 - 2026-10-14 - Added `test_codex_host_review_gaps.py` for the S4 review findings (S5 repair). Its host classes need the `codex` extra, so CI skips them; its launch tool class runs over a stub host on CI.
+- 2026-10-14 - Added classes to `test_codex_host_review_gaps.py` for the S5 re-review findings R-26 and R-27 (S5 repair 2): the unusable-schema refusal's text and cause, a schema whose walk never ends, and a user interrupt after a failed or in-flight stop. They need the `codex` extra, so CI skips them.

@@ -75,6 +75,9 @@ Each line reads input + state → wrong output.
 - The router raises on a bad server request → the SDK reader thread dies, and with it the host.
 - A fork of a thread with dynamic tools gets no tool handler → Codex's tool calls on the fork fail with the unregistered-tool text.
 - The wait tool waits 300 s or more → the calling bridge cuts it off first.
+- The refusal of an unusable `output_schema` carries the library's exception text or chains it → pydantic's text reaches the caller and, through the tool result, the model.
+- An `output_schema` mapping with a cycle under `properties` or `items` → a RecursionError escapes the host and the spawn tool instead of a refusal.
+- A stop that failed blocks every later `interrupt_codex_turn` → the turn the caller asked to stop keeps running and spending.
 
 ## Historical Regressions
 
@@ -94,6 +97,7 @@ None yet. Add one line per fixed bug, with the test that protects it.
 - `test_codex_host_router.py` covers the server-request router on the real reader thread.
 - `test_codex_host_sdk_contract.py` pins the openai-codex surface that the host reaches outside the public API.
 - `test_codex_host_review_gaps.py` covers the windows the S4 review found open (review.md R-1, R-2, R-6, R-7, R-10, R-12, R-13 and R-14): a review cancelled during its read-back, a cancelled launch or close, an unusable `output_schema`, a start still in flight when its caller left, the problem a late-accepted turn or goal run ends with, and a mapping `output_schema` that is only parsed as JSON. Its host classes need the `codex` extra; its launch tool class runs over a stub host and is CI-visible.
+- `test_codex_host_review_gaps.py` also covers the S5 re-review findings (review.md R-26 and R-27): an unusable `output_schema` refused with no library text and no cause, a schema whose walk never ends refused before any request, and a user interrupt after a stop that failed or while one is in flight. These classes need the `codex` extra, so CI skips them.
 - The seven modules from `test_codex_host_lifecycle.py` to `test_codex_host_sdk_contract.py` need the `codex` extra, so CI skips them.
 - `codex_host_support.py` holds the spec literals, canaries, `HostTestCase` and `StubCodexHost`. `codex_host_fakes.py` holds the in-memory app-server.
 
