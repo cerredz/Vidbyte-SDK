@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: HTTP connectors are driven over the scripted HttpTransport._s
 FUNCTION INVENTORY: test_gitlab_* (AC-21, EC-26, EC-27, D-21); test_job_summary_* (AC-22, EC-28, EC-30, EC-31, INV-12, D-18); test_delivery_error_lists_file_error_* (AC-36, FR-35); test_confluence_* (AC-23, D-10); test_typefully_* (AC-24, INV-7, D-19); test_hubspot_* (AC-25, D-20); test_new_connector_titles_* (INV-13); _watch_opens and _record_open (audit-hook helpers).
 COMMON MODIFICATION PATTERNS: Add a bad argument as one row of the matching INVALID_* table; add a destination's title location to TITLE_FIELDS.
 WHAT NOT TO DO IN THIS FILE: 1. Do not mock LocalFileSystemBackend or the summary executor; the file and the worker thread are real (spec §13). 2. Do not compare wall-clock times beyond the bracket around one send. 3. Do not build an expected body from the constants module; the values are written out from §9.2.
-KNOWN EDGE CASES: The audit hook cannot be removed once added, so it is added once per process and records only files registered by _watch_opens, matched by a unique file name. The job summary appends with newline=None, so on Windows each "\n" is written as CRLF; read_text turns it back, so the tests compare text, not bytes. A wrong implementation that writes on the event loop is caught by the recorded thread id; one that uses two worker threads is caught when the two sends overlap, which large bodies make the usual case.
+KNOWN EDGE CASES: The audit hook cannot be removed once added, so it is added once per process and records only files registered by _watch_opens, matched by a unique file name. The hook also records the test's own read of the file, which runs on the loop thread, so the thread checks use a snapshot taken right after the sends and before any read. The job summary appends with newline=None, so on Windows each "\n" is written as CRLF; read_text turns it back, so the tests compare text, not bytes. A wrong implementation that writes on the event loop is caught by the recorded thread id; one that uses two worker threads is caught when the two sends overlap, which large bodies make the usual case.
 RELATED DOCS: tests/features/agent_output_connectors/FEATURE.md; docs/spec/output-connector-followups/spec.md (§6.2 AC-21 to AC-25, AC-36; §6.3 EC-26 to EC-31; §8.1 D-18 to D-21; §9.2 tables (a) and (b); §13)
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/agent_output_connectors/test_output_connectors_new_destinations.py
 """
@@ -225,7 +225,8 @@ async def test_job_summary_path_comes_from_github_step_summary(output_api, tmp_p
 
 @pytest.mark.asyncio
 async def test_job_summary_concurrent_appends_run_off_the_loop_one_after_the_other(output_api, tmp_path) -> None:
-    # AC-22 / EC-31 / INV-12 / D-18: two sends at once; each block stays whole, on one worker thread, never the loop's.
+    # AC-22 / EC-31 / INV-12 / D-18: two sends at once; each block
+    # stays whole, on one worker thread, never the loop's.
     path = tmp_path / f"summary-{uuid.uuid4().hex}.md"
     path.write_text("", encoding="utf-8")
     opened = _watch_opens(path)
@@ -235,14 +236,17 @@ async def test_job_summary_concurrent_appends_run_off_the_loop_one_after_the_oth
     loop_thread = threading.get_ident()
 
     receipts = await asyncio.gather(connector.send(build_reply(first.body), first), connector.send(build_reply(second.body), second))
+    # Snapshot the appends' opens now: reading the file back below is
+    # itself an open on the loop thread, and the hook records it too.
+    appends = list(opened)
 
     assert receipt_rows(receipts) == [("github_job_summary", "sent", None, None)] * 2
+    assert len(appends) == 2, "each send must open the summary file once"
+    assert loop_thread not in appends, "the append ran on the event-loop thread"
+    assert len(set(appends)) == 1, "the appends ran on more than one thread, so they could interleave"
     first_block = f"First review\n\n{'a' * 200_000}" + SEPARATOR
     second_block = f"Second review\n\n{'b' * 200_000}" + SEPARATOR
     assert path.read_text(encoding="utf-8") in (first_block + second_block, second_block + first_block)
-    assert len(opened) == 2, "each send must open the summary file once"
-    assert loop_thread not in opened, "the append ran on the event-loop thread"
-    assert len(set(opened)) == 1, "the appends ran on more than one thread, so they could interleave"
 
 
 @pytest.mark.asyncio
