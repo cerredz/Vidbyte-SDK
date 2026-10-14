@@ -122,7 +122,7 @@ async def test_default_shaping_turns_each_reply_into_one_title_and_one_body(outp
     [github] = fake_http.sends_to("api.github.com")
     [slack] = fake_http.sends_to("hooks.slack.com")
     assert github["json_body"] == {"title": title, "body": body, "labels": []}
-    assert slack["json_body"] == {"text": slack_text}
+    assert slack["json_body"] == {"text": title, "blocks": [{"type": "markdown", "text": slack_text}]}
 
 
 @pytest.mark.asyncio
@@ -145,7 +145,7 @@ async def test_render_replaces_the_shaping_rule_for_its_own_connector_only(outpu
     [github] = fake_http.sends_to("api.github.com")
     [slack] = fake_http.sends_to("hooks.slack.com")
     assert github["json_body"] == {"title": "X", "body": "Y", "labels": []}
-    assert slack["json_body"] == {"text": "# Heading\nrest"}
+    assert slack["json_body"] == {"text": "Heading", "blocks": [{"type": "markdown", "text": "# Heading\nrest"}]}
 
 
 @pytest.mark.asyncio

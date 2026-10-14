@@ -15,17 +15,23 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from unittest.mock import ANY
 
 import pytest
 from pydantic import BaseModel
 
 from tests.features.agent_output_connectors.factories import (
+    CONFLUENCE_BASIC,
+    CONFLUENCE_PAGE_URL,
     CONNECTOR_CASES,
     DISCORD_URL,
     GITHUB_CREATED,
     GITHUB_TOKEN,
+    GITLAB_ISSUE_URL,
+    GITLAB_KEY,
     GOOGLE_CHAT_URL,
     HTTP_DESTINATION_KEYS,
+    HUBSPOT_KEY,
     JIRA_BASIC,
     LINEAR_ISSUE_URL,
     LINEAR_KEY,
@@ -38,6 +44,8 @@ from tests.features.agent_output_connectors.factories import (
     TEAMS_URL,
     TELEGRAM_CHAT_ID,
     TELEGRAM_TOKEN,
+    TYPEFULLY_DRAFT_URL,
+    TYPEFULLY_KEY,
     WEBHOOK_URL,
     build_reply,
     receipt_rows,
@@ -51,25 +59,29 @@ LINEAR_MUTATION = "mutation($input: IssueCreateInput!) { issueCreate(input: $inp
 
 # One row per HTTP destination, written from spec §9.2 table (a): URL, required headers, exact JSON body, receipt URL.
 WIRE_ROWS = {
-    "slack": (SLACK_URL, {"content-type": "application/json"}, {"text": CHAT}, None),
+    "slack": (SLACK_URL, {"content-type": "application/json"}, {"text": TITLE, "blocks": [{"type": "markdown", "text": CHAT}]}, None),
     "discord": (DISCORD_URL, {}, {"content": CHAT, "allowed_mentions": {"parse": []}}, None),
-    "teams": (TEAMS_URL, {}, {"type": "message", "attachments": [{"contentType": "application/vnd.microsoft.card.adaptive", "contentUrl": None, "content": {"type": "AdaptiveCard", "version": "1.2", "body": [{"type": "TextBlock", "text": CHAT, "wrap": True}]}}]}, None),
+    "teams": (TEAMS_URL, {}, {"type": "message", "attachments": [{"contentType": "application/vnd.microsoft.card.adaptive", "contentUrl": None, "content": {"type": "AdaptiveCard", "version": "1.2", "body": [{"type": "TextBlock", "text": TITLE, "weight": "Bolder", "size": "Medium", "wrap": True}, {"type": "TextBlock", "text": BODY, "wrap": True}], "msteams": {"width": "Full"}}}]}, None),
     "google_chat": (GOOGLE_CHAT_URL, {"content-type": "application/json; charset=UTF-8"}, {"text": CHAT}, None),
-    "telegram": (f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", {}, {"chat_id": TELEGRAM_CHAT_ID, "text": CHAT}, None),
+    "telegram": (f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendRichMessage", {}, {"chat_id": TELEGRAM_CHAT_ID, "rich_message": {"markdown": CHAT}}, None),
     "github_issue": ("https://api.github.com/repos/acme/shop/issues", {"authorization": f"Bearer {GITHUB_TOKEN}", "accept": "application/vnd.github+json", "x-github-api-version": "2026-03-10"}, {"title": TITLE, "body": BODY, "labels": ["bug"]}, "https://github.com/acme/shop/issues/412"),
     "linear_issue": ("https://api.linear.app/graphql", {"authorization": LINEAR_KEY}, {"query": LINEAR_MUTATION, "variables": {"input": {"teamId": LINEAR_TEAM_ID, "title": TITLE, "description": BODY}}}, LINEAR_ISSUE_URL),
     "jira_issue": ("https://acme.atlassian.net/rest/api/3/issue", {"authorization": JIRA_BASIC}, {"fields": {"project": {"key": "PROJ"}, "issuetype": {"name": "Task"}, "summary": TITLE, "description": {"type": "doc", "version": 1, "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Applying SAVE10 leaves the total unchanged."}]}, {"type": "paragraph", "content": [{"type": "text", "text": "Steps: add ten items, apply SAVE10."}]}]}}}, "https://acme.atlassian.net/browse/PROJ-1"),
     "notion_page": ("https://api.notion.com/v1/pages", {"authorization": f"Bearer {NOTION_KEY}", "notion-version": "2026-03-11"}, {"parent": {"type": "page_id", "page_id": NOTION_PARENT_PAGE_ID}, "properties": {"title": {"title": [{"text": {"content": TITLE}}]}}, "markdown": BODY}, NOTION_PAGE_URL),
     "webhook": (WEBHOOK_URL, {}, {"agent": "checkout-scout", "title": TITLE, "body": BODY, "structured": None}, None),
+    "gitlab_issue": ("https://gitlab.com/api/v4/projects/acme%2Fshop/issues", {"private-token": GITLAB_KEY}, {"title": TITLE, "description": BODY, "labels": "bug"}, GITLAB_ISSUE_URL),
+    "confluence_page": ("https://acme-wiki.atlassian.net/wiki/api/v2/pages", {"authorization": CONFLUENCE_BASIC}, {"spaceId": "98304", "status": "current", "title": TITLE, "parentId": "12345", "body": {"representation": "atlas_doc_format", "value": ANY}}, CONFLUENCE_PAGE_URL),
+    "typefully_draft": ("https://api.typefully.com/v2/social-sets/123/drafts", {"authorization": f"Bearer {TYPEFULLY_KEY}"}, {"draft_title": TITLE, "platforms": {"x": {"enabled": True, "posts": [{"text": BODY}]}, "linkedin": {"enabled": True, "posts": [{"text": BODY}]}}}, TYPEFULLY_DRAFT_URL),
+    "hubspot_task": ("https://api.hubapi.com/crm/v3/objects/tasks", {"authorization": f"Bearer {HUBSPOT_KEY}"}, {"properties": {"hs_task_subject": TITLE, "hs_task_body": BODY, "hs_timestamp": ANY}}, None),
 }
 
 # Where each capped destination puts its text, and that text's cap (spec §9.2 table (a), "Body cap").
 CAPPED = {
     "slack": (40_000, lambda body: body["text"], True),
     "discord": (2_000, lambda body: body["content"], True),
-    "teams": (7_000, lambda body: body["attachments"][0]["content"]["body"][0]["text"], True),
+    "teams": (7_000, lambda body: body["attachments"][0]["content"]["body"][1]["text"], False),
     "google_chat": (8_000, lambda body: body["text"], True),
-    "telegram": (4_096, lambda body: body["text"], True),
+    "telegram": (32_768, lambda body: body["rich_message"]["markdown"], True),
     "github_issue": (65_536, lambda body: body["body"], False),
 }
 UNCAPPED = {
@@ -149,12 +161,12 @@ async def test_channel_wide_mentions_are_neutralized_for_each_chat_destination(o
     [discord] = fake_http.sends_to("discord.com")
     [google_chat] = fake_http.sends_to("chat.googleapis.com")
     [telegram] = fake_http.sends_to("api.telegram.org")
-    assert slack["json_body"] == {"text": "&lt;!channel&gt; &amp; @everyone &lt;users/all&gt;"}
+    assert slack["json_body"] == {"text": "&lt;!channel&gt; &amp; @everyone &lt;users/all&gt;", "blocks": [{"type": "markdown", "text": "＜!channel> & @everyone <users/all>"}]}
     assert discord["json_body"]["allowed_mentions"] == {"parse": []}
     assert "＜users/all>" in google_chat["json_body"]["text"]
     assert "<users/" not in google_chat["json_body"]["text"]
     assert "parse_mode" not in telegram["json_body"]
-    assert set(telegram["json_body"]) == {"chat_id", "text"}
+    assert set(telegram["json_body"]) == {"chat_id", "rich_message"}
 
 
 @pytest.mark.asyncio

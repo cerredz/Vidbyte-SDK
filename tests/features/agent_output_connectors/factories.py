@@ -1,13 +1,13 @@
 """FILE: tests/features/agent_output_connectors/factories.py
 
-PURPOSE: Domain-shaped test data and offline fakes for the agent-output-connectors pack: placeholder credentials, the eleven-destination table, a scripted HTTP destination, a scripted SMTP server, scripted model turns, a caller-written connector, and reply and receipt helpers.
+PURPOSE: Domain-shaped test data and offline fakes for the agent-output-connectors pack: placeholder credentials, the sixteen-destination table, a scripted HTTP destination, a scripted SMTP server, scripted model turns, a caller-written connector, and reply and receipt helpers.
 ROLE IN CODEBASE: Imported by conftest.py (which turns these into fixtures) and by the pack's test modules as tests.features.agent_output_connectors.factories; builds on vidbyte.lib.http.transport.HttpResponse and the AgentMessage record.
 ARCHITECTURE NOTE: Nothing here imports a feature module at module level; ScriptedConnector imports the receipt record lazily, so a missing feature fails each test instead of aborting collection. The HTTP fake JSON-encodes each body exactly as the real _send_once does, so a body that cannot reach the wire fails here too.
-FUNCTION INVENTORY: ConnectorCase.build / build_without_credential construct one destination; CONNECTOR_CASES maps each OutputDestination value to its case; HttpScript.answer / respond / sends_to script and record HTTP attempts; HttpxRequests.handle records and answers requests that reach an httpx.MockTransport; SmtpScript.fail / hold / check / answer_quit script SMTP failures, a stalled step, and the QUIT reply, with ScriptedSmtp and ScriptedSmtpSsl mirroring smtplib's constructors, __exit__, and quit; AnswerRunner replays isDone turns (optionally repeating the last one); ScriptedConnector is a structural OutputConnector whose send can return any value; build_reply builds a finished AgentMessage; receipt_rows flattens receipts.
-COMMON MODIFICATION PATTERNS: Add a destination by adding one ConnectorCase row and its key to HTTP_DESTINATION_KEYS; keep wire expectations in the test module that asserts them, not here.
+FUNCTION INVENTORY: ConnectorCase.build / build_without_credential construct one destination; CONNECTOR_CASES maps each OutputDestination value to its case; HttpScript.answer / respond / sends_to script and record HTTP attempts; HttpxRequests.handle records and answers requests that reach an httpx.MockTransport, from a fixed response or a per-request callable; SmtpScript.fail / hold / check / answer_quit script SMTP failures, a stalled step, and the QUIT reply, with ScriptedSmtp and ScriptedSmtpSsl mirroring smtplib's constructors, __exit__, and quit; AnswerRunner replays isDone turns (optionally repeating the last one); ScriptedConnector is a structural OutputConnector whose send can return any value; build_reply builds a finished AgentMessage; receipt_rows flattens receipts.
+COMMON MODIFICATION PATTERNS: Add a destination by adding one ConnectorCase row, its key to HTTP_DESTINATION_KEYS (or, with no HTTP request, to ALL_DESTINATION_KEYS only), and its variable to OUTPUT_ENV_VARS; keep wire expectations in the test module that asserts them, not here.
 WHAT NOT TO DO IN THIS FILE: 1. Do not stub or re-implement OutputDispatcher, OutputShaping, OutputText, OutputArguments, a connector, or a record. 2. Do not open sockets or read real credentials. 3. Do not import this module as a bare `factories`; always use the dotted path so there is one module object.
-KNOWN EDGE CASES: Every placeholder credential contains SECRET_MARKER, so one substring scan finds any leaked fragment. Response queues do not repeat unless asked, so an unexpected retry fails loudly. The SMTP fakes mirror the real constructor signatures, so passing context= to plain SMTP fails as it would in production; like smtplib, the fake __exit__ raises SMTPResponseException when QUIT is not answered 221, while quit() returns the reply. A held SMTP step gives up after HOLD_SAFETY_SECONDS, so a run that waits for the worker thread fails slowly instead of hanging. Telegram's wire secret is the token inside the URL path; Jira's is the Basic header built from email and token.
-RELATED DOCS: tests/features/agent_output_connectors/FEATURE.md; docs/spec/agent-output-connectors/spec.md (§9.2, §9.3, §13)
+KNOWN EDGE CASES: Every placeholder credential contains SECRET_MARKER, so one substring scan finds any leaked fragment. Response queues do not repeat unless asked, so an unexpected retry fails loudly. The SMTP fakes mirror the real constructor signatures, so passing context= to plain SMTP fails as it would in production; like smtplib, the fake __exit__ raises SMTPResponseException when QUIT is not answered 221, while quit() returns the reply. A held SMTP step gives up after HOLD_SAFETY_SECONDS, so a run that waits for the worker thread fails slowly instead of hanging. Telegram's wire secret is the token inside the URL path; Jira's and Confluence's are the Basic header built from email and token; GitLab's is the private-token header value. Confluence uses its own site (acme-wiki.atlassian.net), so its host fragment never matches Jira's requests. The job summary has no HTTP request: its credential is a file path in a directory that does not exist, so a send is FAILED file_error and creates nothing.
+RELATED DOCS: tests/features/agent_output_connectors/FEATURE.md; docs/spec/agent-output-connectors/spec.md (§9.2, §9.3, §13); docs/spec/output-connector-followups/spec.md (§9.2, §9.3, §13)
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/agent_output_connectors
 """
 
@@ -18,10 +18,12 @@ import base64
 import importlib
 import json
 import smtplib
+import tempfile
 import threading
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from email.message import EmailMessage
+from pathlib import Path
 from types import ModuleType
 from typing import Any
 
@@ -45,6 +47,13 @@ JIRA_TOKEN = "S3CRETjira"
 NOTION_KEY = "ntn_S3CRETnotion"
 WEBHOOK_URL = "https://hook.eu1.make.com/S3CRETwebhook"
 SMTP_PASSWORD = "S3CRETsmtp"
+GITLAB_KEY = "glpat-S3CRETgitlab"
+CONFLUENCE_KEY = "S3CRETconfluence"
+TYPEFULLY_KEY = "S3CRETtypefully"
+HUBSPOT_KEY = "pat-na1-S3CREThubspot"
+# The job summary's credential is a path. Its directory does not exist,
+# so an append fails (create_parents=False) and leaves no file behind.
+SUMMARY_PATH = str(Path(tempfile.gettempdir()) / "S3CRET-no-such-dir-vidbyte" / "summary.md")
 
 LINEAR_TEAM_ID = "9cfb482a-81e3-4154-b5b9-2c805e70a02d"
 NOTION_PARENT_PAGE_ID = "1f2e3d4c-5b6a-4789-8abc-def012345678"
@@ -54,6 +63,10 @@ GITHUB_CREATED = json.dumps({"number": 412, "html_url": GITHUB_ISSUE_URL})
 LINEAR_ISSUE_URL = "https://linear.app/acme/issue/ENG-7/checkout-total-ignores-coupons"
 JIRA_BASIC = "Basic " + base64.b64encode(f"bot@acme.com:{JIRA_TOKEN}".encode()).decode()
 NOTION_PAGE_URL = "https://www.notion.so/Checkout-total-ignores-coupons-1f2e3d4c"
+GITLAB_ISSUE_URL = "https://gitlab.com/acme/shop/-/issues/7"
+CONFLUENCE_BASIC = "Basic " + base64.b64encode(f"bot@acme.com:{CONFLUENCE_KEY}".encode()).decode()
+CONFLUENCE_PAGE_URL = "https://acme-wiki.atlassian.net/wiki/spaces/ENG/pages/557060/Checkout"
+TYPEFULLY_DRAFT_URL = "https://typefully.com/?d=9001"
 
 # The §9.3 variables, literally: these names are part of the user-facing contract.
 OUTPUT_ENV_VARS = (
@@ -68,6 +81,13 @@ OUTPUT_ENV_VARS = (
     "JIRA_API_TOKEN",
     "NOTION_API_KEY",
     "VIDBYTE_OUTPUT_WEBHOOK_URL",
+    # Added by the follow-ups (docs/spec/output-connector-followups §9.3).
+    # GitHub Actions sets GITHUB_STEP_SUMMARY, so it is cleared too.
+    "GITLAB_TOKEN",
+    "GITHUB_STEP_SUMMARY",
+    "CONFLUENCE_API_TOKEN",
+    "TYPEFULLY_API_KEY",
+    "HUBSPOT_ACCESS_TOKEN",
 )
 
 
@@ -107,9 +127,15 @@ CONNECTOR_CASES: dict[str, ConnectorCase] = {
     "notion_page": ConnectorCase("notion_page", "NotionPageOutput", "api_key", "NOTION_API_KEY", NOTION_KEY, {"parent_page_id": NOTION_PARENT_PAGE_ID}, "api.notion.com", (200, json.dumps({"object": "page", "url": NOTION_PAGE_URL})), f"Bearer {NOTION_KEY}"),
     "webhook": ConnectorCase("webhook", "WebhookOutput", "url", "VIDBYTE_OUTPUT_WEBHOOK_URL", WEBHOOK_URL, {}, "hook.eu1.make.com", (200, "Accepted"), WEBHOOK_URL),
     "email": ConnectorCase("email", "EmailOutput", "password", "SMTP_PASSWORD", SMTP_PASSWORD, {"to": "ops@acme.com", "host": "smtp.gmail.com", "username": "bot@acme.com"}, "smtp.gmail.com", (250, "OK"), SMTP_PASSWORD),
+    "gitlab_issue": ConnectorCase("gitlab_issue", "GitLabIssueOutput", "token", "GITLAB_TOKEN", GITLAB_KEY, {"project": "acme/shop", "labels": ("bug",)}, "gitlab.com", (201, json.dumps({"iid": 7, "web_url": GITLAB_ISSUE_URL})), GITLAB_KEY),
+    # No HTTP request: the host fragment matches no URL, and (0, "") stands for no response.
+    "github_job_summary": ConnectorCase("github_job_summary", "GitHubJobSummaryOutput", "path", "GITHUB_STEP_SUMMARY", SUMMARY_PATH, {}, "github-step-summary.invalid", (0, ""), SUMMARY_PATH),
+    "confluence_page": ConnectorCase("confluence_page", "ConfluencePageOutput", "api_token", "CONFLUENCE_API_TOKEN", CONFLUENCE_KEY, {"site": "acme-wiki.atlassian.net", "space_id": "98304", "email": "bot@acme.com", "parent_id": "12345"}, "acme-wiki.atlassian.net", (200, json.dumps({"id": "557060", "_links": {"webui": "/spaces/ENG/pages/557060/Checkout"}})), CONFLUENCE_BASIC),
+    "typefully_draft": ConnectorCase("typefully_draft", "TypefullyDraftOutput", "api_key", "TYPEFULLY_API_KEY", TYPEFULLY_KEY, {"social_set_id": 123, "platforms": ("x", "linkedin")}, "api.typefully.com", (201, json.dumps({"id": 9001, "private_url": TYPEFULLY_DRAFT_URL})), f"Bearer {TYPEFULLY_KEY}"),
+    "hubspot_task": ConnectorCase("hubspot_task", "HubSpotTaskOutput", "access_token", "HUBSPOT_ACCESS_TOKEN", HUBSPOT_KEY, {}, "api.hubapi.com", (201, json.dumps({"id": "512", "properties": {}})), f"Bearer {HUBSPOT_KEY}"),
 }
-HTTP_DESTINATION_KEYS = ("slack", "discord", "teams", "google_chat", "telegram", "github_issue", "linear_issue", "jira_issue", "notion_page", "webhook")
-ALL_DESTINATION_KEYS = (*HTTP_DESTINATION_KEYS, "email")
+HTTP_DESTINATION_KEYS = ("slack", "discord", "teams", "google_chat", "telegram", "github_issue", "linear_issue", "jira_issue", "notion_page", "webhook", "gitlab_issue", "confluence_page", "typefully_draft", "hubspot_task")
+ALL_DESTINATION_KEYS = (*HTTP_DESTINATION_KEYS, "email", "github_job_summary")
 
 
 class HttpScript:
@@ -153,12 +179,14 @@ class HttpxRequests(list):
 
     def __init__(self) -> None:
         super().__init__()
-        self.routes: dict[str, httpx.Response] = {}
+        self.routes: dict[str, httpx.Response | Callable[[httpx.Request], httpx.Response]] = {}
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         # Records the request, then answers with its host's scripted response, or 599 for a host no test expected.
+        # A route may be a callable that builds the answer from the request, for a host that gets a read and then a write.
         self.append(request)
-        return self.routes.get(request.url.host, httpx.Response(599, text="unexpected host"))
+        route = self.routes.get(request.url.host, httpx.Response(599, text="unexpected host"))
+        return route(request) if callable(route) else route
 
 
 @dataclass

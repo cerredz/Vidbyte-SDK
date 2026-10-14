@@ -94,7 +94,7 @@ def test_spec_snippet_delivers_one_validated_reply_to_slack_and_a_github_issue_a
     [slack] = fake_http.sends_to("hooks.slack.com")
     [github] = fake_http.sends_to("api.github.com")
     assert slack["url"] == SLACK_URL
-    assert slack["json_body"] == {"text": f"{BUG_TITLE}\n\n{BUG_BODY}"}
+    assert slack["json_body"] == {"text": BUG_TITLE, "blocks": [{"type": "markdown", "text": f"{BUG_TITLE}\n\n{BUG_BODY}"}]}
     assert github["url"] == "https://api.github.com/repos/acme/shop/issues"
     assert github["headers"]["authorization"] == f"Bearer {GITHUB_TOKEN}"
     assert github["json_body"] == {"title": BUG_TITLE, "body": BUG_BODY, "labels": ["bug"]}

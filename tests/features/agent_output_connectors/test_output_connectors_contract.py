@@ -38,6 +38,7 @@ ROOT_NAMES = (
     "DeliveryReceipt",
     "DeliveryStatus",
     "OutputDestination",
+    "TypefullyPlatform",
     "OutputDeliveryError",
     "OutputDispatcher",
     "SlackOutput",
@@ -51,10 +52,15 @@ ROOT_NAMES = (
     "JiraIssueOutput",
     "NotionPageOutput",
     "WebhookOutput",
+    "GitLabIssueOutput",
+    "GitHubJobSummaryOutput",
+    "ConfluencePageOutput",
+    "TypefullyDraftOutput",
+    "HubSpotTaskOutput",
 )
-CONNECTOR_NAMES = ROOT_NAMES[7:]
+CONNECTOR_NAMES = ROOT_NAMES[8:]
 NOT_ROOT_NAMES = ("OutputShaping", "BaseOutput", "OutputArguments", "OutputText", "OutputHttp", "OutputSmtp", "OutputRequest", "SmtpSettings")
-LIB_OUTPUT_MODULES = ("__init__", "base", "text", "delivery", "slack", "discord", "teams", "google_chat", "telegram", "email", "github", "linear", "jira", "notion", "webhook")
+LIB_OUTPUT_MODULES = ("__init__", "base", "text", "delivery", "slack", "discord", "teams", "google_chat", "telegram", "email", "github", "linear", "jira", "notion", "webhook", "adf", "github_api", "gitlab", "github_job_summary", "confluence", "typefully", "hubspot")
 AGENT_OUTPUT_MODULES = ("__init__", "connector", "dispatcher")
 
 
@@ -63,9 +69,9 @@ def _names(pattern: str, message: str) -> bool:
 
 
 def test_public_names_are_exported_from_the_agent_output_package_and_the_root(output_api) -> None:
-    # FR-18 / D-16 / §9.2: 18 root names, OutputDispatcher included, the same objects in vidbyte.agents.output.
+    # FR-18 / D-16 / §9.2: 24 root names (follow-ups FR-29), OutputDispatcher included, the same objects in vidbyte.agents.output.
     assert sorted(output_api.__all__) == sorted(ROOT_NAMES)
-    assert len(output_api.__all__) == 18
+    assert len(output_api.__all__) == 24
     assert "OutputShaping" not in output_api.__all__
     for name in ROOT_NAMES:
         assert name in vidbyte.__all__, name
@@ -95,7 +101,7 @@ def test_public_names_live_in_their_placement_modules(output_api) -> None:
 def test_destination_and_status_values_are_the_documented_strings(output_api) -> None:
     # §8.5: these values appear in receipts, error messages, and the missing-credential message.
     assert issubclass(output_api.OutputDestination, str) and issubclass(output_api.DeliveryStatus, str)
-    assert [member.value for member in output_api.OutputDestination] == ["slack", "discord", "teams", "google_chat", "telegram", "email", "github_issue", "linear_issue", "jira_issue", "notion_page", "webhook"]
+    assert [member.value for member in output_api.OutputDestination] == ["slack", "discord", "teams", "google_chat", "telegram", "email", "github_issue", "linear_issue", "jira_issue", "notion_page", "webhook", "gitlab_issue", "github_job_summary", "confluence_page", "typefully_draft", "hubspot_task"]
     assert [member.value for member in output_api.DeliveryStatus] == ["sent", "failed", "skipped"]
 
 
@@ -308,7 +314,7 @@ def test_docs_provider_reference_has_one_dated_row_with_an_official_link_per_des
     # AC-26 / FR-19 / NFR-8: one row per destination, found by its credential variable, with a link and the retrieval date.
     text = _read("vidbyte/lib/outputs/README.md")
     rows = [line for line in text.splitlines() if line.lstrip().startswith("|")]
-    undocumented = [name for name in OUTPUT_ENV_VARS if not any(name in row and "https://" in row and "2026-10-11" in row for row in rows)]
+    undocumented = [name for name in OUTPUT_ENV_VARS if not any(name in row and "https://" in row and ("2026-10-11" in row or "2026-10-14" in row) for row in rows)]
     assert undocumented == []
     assert "Retrieved" in text
 
