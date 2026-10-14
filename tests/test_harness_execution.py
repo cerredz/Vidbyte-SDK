@@ -41,12 +41,13 @@ from __future__ import annotations
 import asyncio
 import json
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from typing import Any
 
 from tests.agent_test_support import build_test_agent
-from vidbyte.harnesses import FileTrajectorySink, Harness, HarnessClient, HarnessConfigurationError, InMemoryTrajectorySink, TrajectoryRecord
+from vidbyte.harnesses import FileTrajectorySink, Harness, HarnessClient, HarnessConfigurationError, HarnessRunStatus, HarnessTimeoutError, InMemoryTrajectorySink, TrajectoryRecord
 from vidbyte.sessions.stores.memory import InMemorySessionStore
 
 CONFIG = {"schema_version": 1, "harness": {"type": "triage"}, "agents": [{"name": "triager"}]}
@@ -113,6 +114,25 @@ class HarnessNonFiniteScoreTests(unittest.TestCase):
                 lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
                 self.assertEqual(len(lines), 1)
                 self.assertIsNone(json.loads(lines[0])["reward"])
+
+
+class _BlockingTriage:
+    def run(self, request: Any) -> Any:
+        time.sleep(0.2)   # a synchronous body: the asyncio deadline timer cannot run until it returns
+        return {"echo": request["q"]}
+
+
+class HarnessBlockingRunDeadlineTests(unittest.TestCase):
+    def test_blocking_run_that_outlasts_its_deadline_is_timed_out(self) -> None:
+        # @intent blocking-run-past-deadline-times-out: a late synchronous run() is not recorded as succeeded.
+        sink = InMemoryTrajectorySink()
+        harness = HarnessClient().load(CONFIG, implementation=_BlockingTriage(), sink=sink, collect=True)
+
+        with self.assertRaises(HarnessTimeoutError) as caught:
+            asyncio.run(harness.execute({"q": "A"}, timeout_seconds=0.05))
+
+        self.assertEqual(caught.exception.run.status, HarnessRunStatus.TIMED_OUT)
+        self.assertEqual([record.status for record in sink.records()], ["timed_out"])
 
 
 class FileTrajectorySinkUndecodableFileNameTests(unittest.TestCase):
