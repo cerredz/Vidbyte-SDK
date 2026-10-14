@@ -5,6 +5,8 @@ worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-prebuilt-agent-tool
 branch: feat/prebuilt-agent-tools
 base_commit: 8387d66680951766f02b0d740d78eb6450cb6419
 pr:
+s2_head: 5dac4319
+test_tree: tests/features/prebuilt_tools/
 until: none
 started: 2026-10-14 02:46
 ---
@@ -15,7 +17,7 @@ started: 2026-10-14 02:46
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 02:46 | 03:20 | reports/S0-scout.md, reports/S0-research.md | base_commit 8387d666; code-map.md; research.md |
 | S1 spec + review | done | 03:25 | 07:40 | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | spec r3 approved; r1 review SOUND WITH FIXES (12 applied), r2 review SOUND WITH FIXES (10 applied); 265 tools |
-| S2 tests | pending | | | | |
+| S2 tests | done | 07:45 | 08:45 | reports/S2-test-author.md | 4,284 cases / 101 test fns in tests/features/prebuilt_tools/ (26 files); red: 102 failed, 4182 errors; S2_HEAD 5dac4319 | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
@@ -33,6 +35,9 @@ started: 2026-10-14 02:46
 - 2026-10-14 — Passed the S1 review to the author by path (reports/S1-spec-review.md, read in full) instead of pasting the findings into the message — keeps the orchestrator context lean; the author reads the file verbatim. Told the author not to set status: approved until it is known whether a scoped round 2 is needed.
 - 2026-10-14 — Ran a scoped S1 round-2 review: r2's accepted fixes changed §8 (D-2/7/9/12/16/18, §8.4, §8.5), §9.2, §10 (T-1/T-2), the shape of §12 (rows 6–7, budget, §12.4, §12.6) and Appendix A — the playbook requires a second round when those change.
 - 2026-10-14 — Spec r3 approved after 2 review rounds (the review rounds are the approval; no user stop per playbook). Applied every Q-n default: Q-1 no tzdata/IANA zones (fixed UTC offsets only); Q-2 no root vidbyte exports; Q-3 no tool-search meta-tool; Q-4 no YAML discovery; Q-5 no killable regex worker (caps + EC-10 limitation); Q-6 keep dict outputs as a recorded exception to the letter of AGENTS.md principle 4 (D-7). Q-6 is surfaced to the user in the spec summary.
+- 2026-10-14 — Told the S2 test author NOT to run `pip install -e .`: the global editable install points at the canonical checkout C:/Users/422mi/vidbyte-repos/vidbyte-sdk, and reinstalling from the worktree would repoint it for other sessions; bootstrap is `PYTHONPATH=$(pwd)` per field guide local-ci-verification.md.
+- 2026-10-14 — Told the S2 test author that every Appendix A tool should get ≥1 exact-output case (parametrized tables), since 265 independent behaviors exceed the usual 8–25-test shape; exceptions must be listed under 'Tests deliberately NOT written'.
+- 2026-10-14 — S2 OPEN ITEMS name spec defects (unreachable EC-14/utf8_hex null; uncapped add_business_days.holidays/weekend_days and critical_path_schedule dependency lists; dead domain_too_long; base64url padding stated only on hash_text; ElementPath '[' TypeError; null byte ValueError/SyntaxError across versions; 3 error rows naming no parameter; ~50 loose rows pinned to one reading in S2 report §5). Routed to the S1 spec author in Revision mode (r4) before S3, with the rule: the tests are now the contract, so the spec adopts each pinned reading unless it contradicts §9.2 or another row. No review round (S1 cap 2/2 reached); changes are row-level, not §8/§8.5 architecture.
 
 ## User replies (verbatim)
 - none
@@ -86,3 +91,15 @@ started: 2026-10-14 02:46
 - `_stringify_output` sorts keys at every level, so output dict key order never matters — *source:* S1 author r3
 - pytest strict mode: no `asyncio_mode`, so async tests need `@pytest.mark.asyncio` or `asyncio.run(...)`; `--strict-markers` fails unregistered markers — *source:* spec r3 §13
 - Repo uses feature test packs: all 15 packs under tests/features/ have FEATURE.md — *source:* orchestrator check
+- Do not `pip install -e .` in the worktree; use `PYTHONPATH=$(pwd)` for pytest and `run_ci.py --stage source`; run `--stage package` WITHOUT PYTHONPATH; verify with `PYTHONPATH=$(pwd) python -c "import vidbyte,inspect;print(inspect.getfile(vidbyte))"` — *source:* field guide local-ci-verification.md + orchestrator check
+- Semgrep must be `semgrep==1.170.1`: `git add -A` then `semgrep scan --error --config .semgrep/typed-mapping-boundary-policy.yml vidbyte` (scans tracked files only) — *source:* field guide local-ci-verification.md
+- Known CI flake: `tests/test_mcp_stdio_transport.py::test_cancelled_waiter_does_not_break_transport` on Python 3.11 — `gh run rerun <id> --failed` before investigating — *source:* field guide local-ci-verification.md
+- S051 import sorting: check with `python -m ruff check vidbyte --config lint/ruff.toml --select I001 --no-cache` over the whole tree, not single files — *source:* field guide local-ci-verification.md
+- Test pack: `PYTHONPATH=$(pwd) python -m pytest -q tests/features/prebuilt_tools` (minutes once green: ~28 sweep calls per tool; `find_unicode_character` ~1 s/call) — *source:* S2
+- Tests bind: `vidbyte.tools.toolsets.PrebuiltTools` (`__module__` `vidbyte.tools.toolsets.prebuilt`); `toolsets.__all__` sorted == ['CodingAgentTools','ParadigmMinimalToolset','PrebuiltTools']; enums in `vidbyte.lib.enums.prebuilt_tools` or `.units`, all in `__all__`; `vidbyte/tools/builtins/prebuilt/` with `__init__.py`, `_support.py`, one `<category value>.py` per category; each function `__qualname__` == `<Category>ToolFunctions.<tool>` — *source:* S2
+- Error text must match `\AInvalid value for '<param>': <problem>\. Expected <form>\.\Z`; never echo > 100 chars of an argument; never echo the HMAC key — *source:* S2
+- Static scan bans `eval`, `exec`, `compile`, `open`, `time.*()`, `os.*()` except `os.path`, `.now()`, `.today()`, `strptime`, `getcontext`, `field_size_limit`, `uuid4`, global `random.*`; `literal_eval` only in `code_analysis.py`; md5/sha1 need `usedforsecurity=False` — *source:* S2
+- INV-20 tools must predict output size BEFORE building it: tests assert peak traced memory < 5 MB for would-be outputs ≥ 20 MB — *source:* S2
+- Count tools must compute counts by formula, never enumerate: the count tests HANG (not fail) against an enumerating implementation — *source:* S2
+- `SchemaArgumentFactory` raising 'add one to the pools' → add a sample to `PATTERN_SAMPLES` (a fixture change, test-author/adjudicated only) — *source:* S2
+- base64url is unpadded for every `DigestFormat` user incl. `compute_hmac` — *source:* S2
