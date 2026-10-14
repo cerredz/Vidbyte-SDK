@@ -18,12 +18,12 @@ started: 2026-10-13 00:45 UTC
 | S2 tests | done | 2026-10-13 11:30 UTC | 2026-10-13 16:35 UTC | reports/S2-test-author.md | S2_HEAD 1d110811 (tests 46f1a9db, proof 55f01f44, report 1d110811); 101 tests in tests/features/codex_host/, all red (`101 failed` in the [dev,codex] venv; CI view `35 failed, 66 skipped`); spec r4 38e3a820 pins the S2 spec defects; spec status: tests-written |
 | S3 implement | done | 2026-10-13 16:40 UTC | 2026-10-14 02:40 UTC | reports/S3-implementer.md | S3_HEAD 099fac83; draft PR https://github.com/cerredz/Vidbyte-SDK/pull/1055 ([WIP] title); 30 commits; 28/28 §12.3 rows; budget 18/18 files, 30/30 classes, 15/15 records, 13/13 enums, 0 deps (no headroom); pack 101 passed, CI view 35 passed / 66 skipped (orchestrator re-run); full suite 4041 passed / 22 skipped; run_ci source+package PASS; SDK-LINT PASS; semgrep 0; public API --check 0; spec status: implemented |
 | S4 adversarial review | done | 2026-10-14 02:50 UTC | 2026-10-14 04:05 UTC | reports/S4-review-conformance.md, reports/S4-review-conventions.md, reports/S4-review-engineering.md, reports/S4-findings-verifier.md, review.md | MERGEABLE AFTER FIXES; confirmed 5 Blockers (R-1..R-5) / 9 Majors (R-6..R-14) / 11 Minors (R-15..R-25, R-25 scope-adding); refuted 0; every fix within the exhausted §8.4 budget; spec status: reviewed |
-| S5 repair loop | done | 2026-10-14 04:40 UTC | 2026-10-14 06:45 UTC | reports/S5-repair-1.md, verify-log.md | converged in 1 iteration at bbaa5a8b (code at fb76e558): fixed R-1..R-18 (R-12 also by spec r5 bbe9672f); 10 new tests (granted file); merge origin/main 8387d666 at fb76e558; orchestrator gate: 4117 passed, 22 skipped in 38.55s (source), Installed vidbyte-sdk 0.2.1 passed smoke checks. (package); remote ci.yml 38519843721 + static 38519846158 green on fb76e558; R-19..R-25 follow-ups |
-| S5 re-review | in progress (round 1 done; scoped verifier running) | 2026-10-14 06:50 UTC | | reports/S5-rereview.md, reports/S5-findings-verifier-r1.md | round 1 at bbaa5a8b: MERGEABLE AFTER FIXES 0B/2M/2m — R-C1 Major (R-16 regression: after any failed stop, a user interrupt sends nothing, host.py:407), R-C2 Major (R-2's refusal puts pydantic exception text in the harness error and chains it, wire.py:262, §12.4/INV-9), R-C3 Minor (title/instructions descriptions), R-C4 Minor (spec §9.3 lacks R-11's constants) |
+| S5 repair loop | done | 2026-10-14 04:40 UTC | 2026-10-14 09:30 UTC | reports/S5-repair-1.md, reports/S5-repair-2.md, verify-log.md | iteration 2 (R-26 @30109e89 + @736d4a58, R-27 @ad363725, R-28 @3d26abfe, R-29 by spec r6 130dd828) converged at 7b05e68b (code at 77c92838): orchestrator gate 4122 passed, 22 skipped in 38.58s (source), Installed vidbyte-sdk 0.2.1 passed smoke checks. (package); remote 38526282824 + 38526285681 green on 77c92838. Iteration 1 converged at bbaa5a8b (code at fb76e558): fixed R-1..R-18 (R-12 also by spec r5 bbe9672f); 10 new tests (granted file); merge origin/main 8387d666 at fb76e558; orchestrator gate: 4117 passed, 22 skipped in 38.55s (source), Installed vidbyte-sdk 0.2.1 passed smoke checks. (package); remote ci.yml 38519843721 + static 38519846158 green on fb76e558; R-19..R-25 follow-ups |
+| S5 re-review | in progress (round 1 done; iteration 2 done at 7b05e68b; round 2 of 2 running) | 2026-10-14 06:50 UTC | | reports/S5-rereview.md, reports/S5-findings-verifier-r1.md | round 1 at bbaa5a8b: MERGEABLE AFTER FIXES 0B/2M/2m — R-C1 Major (R-16 regression: after any failed stop, a user interrupt sends nothing, host.py:407), R-C2 Major (R-2's refusal puts pydantic exception text in the harness error and chains it, wire.py:262, §12.4/INV-9), R-C3 Minor (title/instructions descriptions), R-C4 Minor (spec §9.3 lacks R-11's constants) |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 1/8 · S5 re-review rounds: 1/2
+- S1 review rounds: 2/2 · S5 repair iterations: 2/8 · S5 re-review rounds: 2/2 (round 2 running; last allowed)
 
 ## Parallel run
 - **Sibling pipeline:** `claude-host`, in worktree `C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-claude-host` on branch `feat/claude-host`, from the same base commit. Each run follows the shared-file contract in its request.md §C.
@@ -219,6 +219,26 @@ started: 2026-10-13 00:45 UTC
   - **Then the final re-review, round 2 of 2,** the last one the cap allows.
   *Why:* a spec edit lands before the code that follows it.
 - 2026-10-14 08:05 UTC — **The test grant carries into iteration 2.** New tests still go only in `test_codex_host_review_gaps.py`, by appending, with README.md and FEATURE.md extended by addition only. The 101 original tests and the fakes/support files stay byte-identical.
+
+- 2026-10-14 08:20 UTC — **Spec r6 spot-check passed.**
+  - 130dd828 changes only spec.md (+4/-1) and the author report (+17).
+  - The frontmatter reads `revision: 6`, `status: reviewed`.
+  - There is no test diff.
+- 2026-10-14 09:30 UTC — **S5 iteration 2 spot-check passed.**
+  - `git status` is clean, and HEAD equals origin at 7b05e68b. origin/main is still 8387d666, so no merge was needed.
+  - Fix commits: 30109e89 and 736d4a58 [R-26], ad363725 [R-27] and 3d26abfe [R-28]. 77c92838 and 7b05e68b are docs only.
+  - `git diff --numstat 1d110811..HEAD -- tests/features/codex_host` shows only the granted files: test_codex_host_review_gaps.py +440/-0, README.md +3/-0 and FEATURE.md +5/-0.
+  - verify-log.md has "## Iteration 2". review.md marks R-26..R-28 `fixed @<sha>` and R-29 `fixed @130dd828 (spec r6)`.
+  - The native blob hash is unchanged.
+  - My own run: pack `116 passed in 7.42s`, CI view `36 passed, 80 skipped in 1.69s`, `4122 passed, 22 skipped in 38.58s` / `CI passed.` (source), and `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` (package).
+  - Remote: ci.yml 38526282824 succeeded (Source 3.12, Source 3.11, Package) and static-policy 38526285681 succeeded, both on 77c92838.
+  *Why:* the skill's convergence test.
+- 2026-10-14 09:30 UTC — **Accepted one defect fixed beyond the packet.** Commit 736d4a58 [R-26] fixes a mapping `output_schema` with a cycle under `properties` or `items`: `OutputSchemaFormatter.annotate` recursed until `RecursionError`, which escaped spawn, continue and launch, against INV-8, INV-10 and EC-82. The fix adds `RecursionError` to the types the refusal catches, and the formatter is untouched (NG-5).
+  *Why:* it is the same EC-82 refusal R-26 owns, not a new feature, and the agent proved its test red against bbaa5a8b. The re-reviewer checks it.
+- 2026-10-14 09:30 UTC — **R-27 residual, noted by the repair agent and not raised as a finding.** If a user interrupt's caller is cancelled while the request is already on a worker, the mark clears early and a second call sends a second interrupt. That is the pre-R-16 behaviour, and the probe is `scratchpad/codex-repair2/probe_cancelled_interrupt.py`. The re-reviewer is told about it.
+- 2026-10-14 09:35 UTC — **Final conformance re-review, round 2 of 2, launched.** This is the last round the cap allows.
+  - FOCUS: 30109e89, 736d4a58, ad363725 and 3d26abfe, the new tests and spec r6. It also checks that iteration 1's fixes still hold beside them.
+  - If it finds a new Blocker or Major, the verifier confirms it, and then I stop and report to the user.
 
 ## User replies (verbatim)
 - none yet
@@ -421,3 +441,6 @@ started: 2026-10-13 00:45 UTC
   *source:* scoped verifier r1.
 - **R-26's fix.** `raise ConfigurationError(f"{UNUSABLE_SCHEMA_MESSAGE} Got {type(exc).__name__}.") from None`. Add `assertIsNone(caught.exception.__cause__)` in the new test; the mapping case fails it today. The probe is `$S/probe_rc2.py`. *source:* scoped verifier r1.
 - **R-24 (M5, open follow-up) shares the `interrupt_codex_turn` lines with R-27.** Keep `turn.stop_sent = True` on the user path. *source:* scoped verifier r1.
+- **Running mutants in memory.** `scratchpad/codex-repair2/mutant_run.py <mutant> <TestClass>` runs one mutant: text_kept, no_recursion, revert_guard or pending_sticks. *source:* S5 repair 2.
+- **Schema cycles fail two ways.** A cycle at a key the formatter skips (`schema["self"]`) fails as ValueError; one under `properties` or `items` fails as RecursionError. *source:* S5 repair 2.
+- **Set the flag before the spawn.** `stop()` must set `stop_pending` before it spawns `send_stop`, because a spawned task's first step runs one loop iteration later. *source:* S5 repair 2.
