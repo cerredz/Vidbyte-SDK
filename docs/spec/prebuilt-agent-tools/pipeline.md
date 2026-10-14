@@ -6,7 +6,7 @@ branch: feat/prebuilt-agent-tools
 base_commit: 8387d66680951766f02b0d740d78eb6450cb6419
 pr: https://github.com/cerredz/Vidbyte-SDK/pull/1072
 s3_head: 0fd73086
-s2_head: 69a1970a
+s2_head: f421047e
 test_tree: tests/features/prebuilt_tools/
 until: none
 started: 2026-10-14 02:46
@@ -21,7 +21,7 @@ started: 2026-10-14 02:46
 | S2 tests | done | 07:45 | 08:45 | reports/S2-test-author.md | 4,284 cases / 101 test fns in tests/features/prebuilt_tools/ (26 files); red: 102 failed, 4182 errors; tightened to r4 (f49db5db): 102 failed, 4208 errors, 0 passed; S2_HEAD bc238128 | | |
 | S3 implement | done | 10:05 | 14:30 | reports/S3-implementer.md | S3_HEAD 0fd73086; draft PR #1072; 39/39 planned files, 0/12 split modules; pack 4310 passed; source + package stages CI passed | | |
 | S4 adversarial review | done | 14:40 | 16:10 | reports/S4-review-*.md, reports/S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES — 14 confirmed (8 Blocker / 6 Major), 5 Minor, 1 refuted, 1 downgraded | | |
-| S5 repair loop | pending | | | | |
+| S5 repair loop | running | 16:15 | | reports/S1-spec-author.md (r6 addendum), reports/S2-test-author.md (post-S4 addendum), reports/S5-repair-<n>.md | pre-steps done: spec r6 f9e83a65 (status reviewed); S2 regression cases c9710ed2/f421047e — red 39 failed, 4313 passed; test baseline f421047e |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
 
@@ -51,6 +51,10 @@ started: 2026-10-14 02:46
 - 2026-10-14 — Remote CI: every workflow in .github/workflows has automatic triggers TEMPORARILY DISABLED (workflow_dispatch only; claude.yml fires on reviews/comments). `gh pr checks` reports no checks. Decided NOT to dispatch CI manually (the owner disabled it deliberately; dispatching is an outward action not requested). Verification of record = the local gate (identical scripts/run_ci.py source + package stages) + semgrep 1.170.1 (CI's pinned version). Will state this in the PR body and final report.
 - 2026-10-14 — S4 verifier confirmed 14 findings (R-1..R-14). Several need spec edits first (R-7 new xml match cap A.20; R-9 apply_json_patch total-work cap A.17; R-8 HTMLParser CVE-2025-6069 handling A.13/A.28/README; R-10 cap-or-EC decision; R-12 fresh decimal Context rule) and regression tests that only the S2 test author may write (R-14 and per-finding cases). Ordering S5 as TDD: (1) spec author r6 for spec-affecting findings, (2) S2 test author adds failing regression cases, (3) repair iteration 1 makes them green. These pre-steps do not count as repair iterations.
 - 2026-10-14 — Adjudicated the R-14 liveness-guard question (test-plan rule 3, no wall-clock dependence): ALLOWED a generous thread-join watchdog (~30 s, about 15× NFR-7) for hostile-input regression cases only, sized so fixed code runs well under 1 s; it converts a hang into a red test and asserts no speed. Exact-output regression cases are required alongside it.
+- 2026-10-14 — Spec r6 (f9e83a65 + report addendum c225debf), status reviewed, no review round (post-S4 defect fix; S1 cap does not apply). New constants PREBUILT_MAX_XML_PATH_VISITS=2_000_000, PREBUILT_MAX_PATCH_WORK_CHARS=10_000_000, PREBUILT_MAX_SEARCH_STRING_CHARS=500, PREBUILT_MAX_ECHO_CHARS=100; §9.2 item 18 (fresh fully specified decimal Context per Decimal operation); EC-47 (HTMLParser unparsed '<' tail dropped); TOML >100 dotted segments rejected; R-11/R-13 helper consolidation (`records_from_json`). Spot-check passed: revision 6, §6.2 Proof column identical, tests untouched.
+- 2026-10-14 — Granted the S2 test author (the only agent allowed to edit tests) one test-pinned change: `prebuilt_parameter_data.py:149` find_substring_positions.substring cap 10000 → 500 (spec r6 moved it). The schema test for the same tool also turned red from that change — same fix clears both; accepted.
+- 2026-10-14 — S2 test author interrupted by an API session limit (HTTP 429) before writing any file (tree clean at c225debf); resumed the same agent after the reset.
+- 2026-10-14 — S2 post-S4 regression cases accepted (c9710ed2 tests, f421047e report): 42 new tests (23 in test_prebuilt_hostile_inputs.py, 19 row cases), watchdog = child process `subprocess.run(..., timeout=30)`. Red at c225debf: 39 failed, 4313 passed (10 watchdog, 29 output). Spot-check: 0 production files changed, pushed, trailer present. Test baseline moved 69a1970a → f421047e. Not granted (left as follow-ups): watchdogs on the three count tests; flat-list minItems check.
 
 ## User replies (verbatim)
 - none
@@ -141,3 +145,8 @@ started: 2026-10-14 02:46
 - C006/C008 flag helper name prefixes validate/require/ensure/normalize/coerce/check; C005 flags names containing 'price'/'rate' in multiplication (`_PRICE_MARKERS` in lint/rules/c005_cost_arithmetic_site_parity.py) — *source:* S4 conventions
 - R-2 fix trap: the reviewers' lookbehind in front of the whole `_AMOUNT` drops comma lists ('1,2,3' → only '1'); guard only the grouped-chain alternative. R-6 must also cover TOML inline tables `x={a.a…=1}`. R-5 and Minor M-1 share one `parse_float` hook. R-12's `decimal_context` helper replaces `_exact_context` copies in exact_arithmetic.py:284 and number_formatting.py:281 (overlaps R-13) — *source:* S4 verifier
 - New PREBUILT_* constants for R-7/R-9 must avoid A007 tokens `budget`, `limit`, `depth` in their names — *source:* S4 verifier
+- Spec r6 regression expectations live in the r6 rows and §13; the R-7 fix must override `findall`/`find` as well as iteration on a private Element subclass (positional predicates call `parent.findall` in C); `decimal.Context()` copies omitted fields from DefaultContext, so set every field; README must add EC-47 (row 40) and fix M-4 — *source:* S1 author r6
+- Hostile-input watchdog: child Python via `subprocess.run(..., timeout=30)`, request as JSON on stdin; failure text "gave no result within the 30 s liveness watchdog". Never lower `WATCHDOG_SECONDS` or shrink an input. While red the pack takes ~6 min — *source:* S2 post-S4
+- R-12 test sets `decimal.Context(Emax=5, traps=[InvalidOperation, DivisionByZero, Overflow, Inexact, Rounded])` before `asyncio.run`; `localcontext(prec=...)` alone still inherits host traps — *source:* S2 post-S4
+- R-9 expects `error(patch_json)` whose message contains "operation 49" (index where the work total passes 10,000,000) — *source:* S2 post-S4
+- 8 green guard cases must stay green after repair: extract_numbers ×2, toml 100 segments, xml many siblings, extract_html_links open anchor, html_table_to_records open cell, replace_all case-sensitive find, verify_json_syntax 4,400 digits — *source:* S2 post-S4
