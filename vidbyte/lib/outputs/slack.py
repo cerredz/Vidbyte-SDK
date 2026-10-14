@@ -66,7 +66,7 @@ class SlackOutput(BaseOutput):
 
     @staticmethod
     def _escape(text: str) -> str:
-        # Slack's three control characters, as its formatting guide says.
+        # Slack's three control characters, per its formatting guide.
         return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 

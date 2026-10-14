@@ -110,8 +110,9 @@ class OutputHttp:
     @staticmethod
     async def _write(destination: OutputDestination, request: OutputRequest, method: OutputMethod) -> DeliveryReceipt:
         # @intent output-post-retries-only-rate-limits
-        # Every write, POST or PATCH, retries only a 429: the destination
-        # did not process it, so a retry cannot write a reply twice.
+        # Every write, POST or PATCH, retries only a 429: the
+        # destination did not process it, so a retry cannot write a
+        # reply twice.
         # Redirects are refused, so a credential header never reaches a
         # second host. The body is JSON or the caller's exact bytes.
         # Mark the send so httpx's request log line, whose URL can be
