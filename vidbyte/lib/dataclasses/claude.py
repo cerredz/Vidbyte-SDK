@@ -116,12 +116,6 @@ class _ClaudeFieldRules:
             raise _ClaudeFieldRules.invalid(f"{name} must be true or false.")
 
     @staticmethod
-    def whole(value: object, name: str) -> None:
-        """Reject a value that is not a whole number; a bool is not one."""
-        if isinstance(value, bool) or not isinstance(value, int):
-            raise _ClaudeFieldRules.invalid(f"{name} must be a whole number.")
-
-    @staticmethod
     def count(value: object, name: str, *, low: int = CLAUDE_MIN_COUNT, high: int | None = None) -> None:
         """Reject a value that is not a whole number from low to high; a bool is not one."""
         if isinstance(value, bool) or not isinstance(value, int):
