@@ -284,3 +284,86 @@ So r5 changes none of these values.
 - 18 `## §` headings.
 - Appendix: 265 rows in 31 tables, with 0 bad rows.
 - spec.md is LF.
+
+## Addendum — r6 (spec edits for the S4 confirmed findings; status reviewed)
+
+This revision makes the spec edits that the S4 confirmed findings in `review.md` require. Spec commit: `f9e83a65`. Each spec-affecting finding was re-checked on Python 3.11.0 before it was decided. The §16 entries S4-1 to S4-16 map one-to-one to R-1 to R-14, M-1, and M-2 to M-5.
+
+**R-7 (`xml_find_elements`): widened beyond the verifier's fix.**
+- Re-confirmed: `.//a//a` gives `x=2, x=3, x=3`.
+- The verifier's bound counts only final matches, and two inputs get past it:
+  - `.//a` × 5 + `//zzz` on the 60-deep chain matches nothing but takes 0.86 s, and each added step costs about 9 times more.
+  - `b[1]` over 20,000 siblings takes 2.6 s, growing quadratically. ElementPath lists the parent's children once for each candidate, inside C.
+- New constant `PREBUILT_MAX_XML_PATH_VISITS` = 2,000,000. It counts every element that path evaluation reads: children, descendants, the parent map, text-predicate subtrees, and the children a positional predicate compares.
+- The tree is built from a private `Element` subclass whose `__iter__`, `iter`, `itertext`, `find`, and `findall` do the counting. `findall` must be included, because the positional predicate calls it and the C fast path would otherwise hide that work.
+- An r6 prototype refused every hostile shape in under 0.2 s: the 6-step chain, the `//zzz` chain, `b[1]` over 249,998 siblings, and `.//a[.='x']` on a chain 125,000 deep. `.//b` over 249,998 siblings succeeds in 0.05 s.
+- Matches are distinct and in document order.
+- Positional predicates are refused when one parent has more than about 1,400 children.
+
+**R-8 (HTML tools): new EC-47.**
+- Re-confirmed on 3.11.0: `close()` takes 0.33, 1.97, and 11.36 s at 6,000, 12,000, and 24,000 characters.
+- After `feed()`, the unprocessed tail is `<b`, `<!--c`, or `<!doctype`, and 3.11.0 emits it as text.
+- The rule: after `feed()`, drop an unprocessed tail that starts with `<` and is neither `<` nor `</`, then call `close()`.
+- The three rows, rows 20, 35, and 40, INV-12, and NFR-10 cite EC-47.
+- INV-12 and NFR-10 now also say that other malformed markup follows the running `html.parser`.
+
+**R-9 (`apply_json_patch`): new `PREBUILT_MAX_PATCH_WORK_CHARS` = 10,000,000.**
+- The work total adds the compact JSON length of each value an operation reads or writes. Passing it gives error(`patch_json`) with the operation index.
+- I did not re-measure; at the verifier's 64 ns per character, the bound is about 0.64 s.
+
+**R-10 (literal search).** I measured both tools through `FunctionTool.execute` on 1,000,000 `a` characters.
+
+| Search string | Default overlap | Case-insensitive find (two passes) | Case-insensitive replace | Case-sensitive non-overlap, or case-sensitive replace |
+|---|---|---|---|---|
+| 10,000 (old cap) | 10.3 s | 26.7 s | 13.3 s | 0.01 s |
+| 1,000 | 1.03–1.12 s | 2.70–2.78 s | 1.36 s | — |
+| 500 | 0.53–0.61 s | 1.36–1.44 s | 0.69 s | — |
+
+- 13–27 s is not modest, so this was not added to the EC-46 list.
+- New constant `PREBUILT_MAX_SEARCH_STRING_CHARS` = 500. It becomes the schema cap of `find_substring_positions.substring`, and that tool reads its text in one pass, which halves the case-insensitive time.
+- `replace_all_occurrences` keeps `find` at the `ShortText` cap, because its default case-sensitive search is linear. Only `case_sensitive: false` with a `find` over 500 characters gives error(`find`).
+- This is the one test-pinned value that changes: `prebuilt_parameter_data.py:149` `substring` goes from 10000 to 500.
+
+**R-12 (decimal contexts): new §9.2 item 18.**
+- Re-confirmed:
+  - `localcontext(prec=50)` inherits `Emax=5` and the `Inexact` trap.
+  - `Context()` copies `DefaultContext.prec`.
+- Every `Decimal` operation must run in a new `Context` with every field given:
+  - `prec` and `rounding`;
+  - `Emin=MIN_EMIN` and `Emax=MAX_EMAX`;
+  - `capitals=1`, `clamp=0`, and `flags=[]`;
+  - traps on `InvalidOperation`, `DivisionByZero`, and `Overflow`.
+- Items 16 and 17, INV-13, EC-27, rows 8 and 14, and `decimal_arithmetic` cite item 18.
+
+**Other findings that needed spec text:**
+- **R-2:** the A.29 preamble now states the grouped-amount rule. The verifier's guard implements it. Checked against that regex:
+  - `1,2,3` gives `1`, `2`, `3`.
+  - `1,000,0000` gives `1`, `000`, `0000`.
+  - `-9467,8,109e9` gives `-9467`, `8`, `109e9`.
+  - The 1,000,002-character hostile chain takes 0.08 s and finds 250,001 numbers.
+- **R-3:** the row says how `exploded` writes a zone suffix.
+- **R-4:** INV-9 now treats a literal that illustrates a rule as an example value.
+- **R-5 and M-1:** INV-19 lists float overflow and integers of more than 4,300 digits among the refused JSON numbers, as S3 deviation 3 already does.
+  - `extract_json_from_text` skips such a candidate.
+  - `verify_json_syntax` reports such text as invalid, with a fixed message and `null` positions.
+- **R-6:** the `toml_to_json` row states the verifier's dotted-run pre-scan. It also refuses such a run when it appears inside a multi-line string or a comment.
+- **R-11:** row 6 replaces `parse_records_json(text, …)` with `records_from_json(value, …)`. No test calls the helper.
+- **R-13:** row 6 now says each shared rule is one helper (D-14). New `PREBUILT_MAX_ECHO_CHARS` = 100 names the INV-15 echo length. INV-15 applies to each contiguous run, as the verifier confirmed under R-V2.
+
+**No spec change:** R-1 (the row already fixes the output), R-14 (test author), and M-2 to M-5 (code or doc).
+
+**What S5 must change:** every finding needs code except R-14, and the folder README must add EC-47.
+
+**Unchanged:**
+- No tool, parameter, or return key was added, dropped, or renamed. 265 tools, 68 enums.
+- `diff_contract.py` shows one changed parameter cell: `find_substring_positions.substring`.
+- The §6.2 table is byte-identical to r5.
+
+**Stage E self-check (r6):**
+- ID counts: FR 11, NFR 11, AC 21, INV 26, EC 50, W 38, T 6, D 18.
+- Every ID is defined; G-1 to G-4 are the script's usual false positives.
+- Table problems: 0.
+- 18 `## §` headings.
+- 265 Appendix rows in 31 tables.
+- spec.md is LF.
+- The new constants have no A007 tokens.
