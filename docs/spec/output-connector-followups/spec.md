@@ -1,7 +1,7 @@
 ---
 spec: output-connector-followups
 title: Output connector follow-ups — Markdown rendering, webhook headers and signing, comments, five new connectors, update in place
-status: implemented
+status: reviewed
 revision: 3
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-output-connector-followups
