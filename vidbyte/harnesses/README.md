@@ -175,6 +175,7 @@ the same `TrajectorySink` protocol with zero harness changes.
 - `stores/`: `TrajectorySink` port (`base.py`) plus in-memory and atomic-JSONL file
   sinks (`memory.py`, `file.py`), mirroring the `vidbyte/sessions/stores/` layout.
 - `serialization.py`: the single redaction pass and shared secret-key policy.
+- `native/`: hosts for native coding-harness executables, one subpackage per harness, each wrapping that harness's official SDK in small, atomic functions on a host class; unrelated to the `Harness` envelope above.
 
 The full architecture and rejected alternatives are recorded in
 [`docs/design/harness-execution-contract.md`](../../docs/design/harness-execution-contract.md).
