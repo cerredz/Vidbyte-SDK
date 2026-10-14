@@ -202,7 +202,7 @@ A namespace reserved for model metadata that currently holds no real content. It
 
 ##### `vidbyte/lib/outputs/`
 
-The provider side of delivering a finished agent reply to the outside world: chat channels, email, issue trackers, a docs workspace, and generic webhooks. Each destination takes one pasted credential, read from an argument or its environment variable, and never an interactive sign-in. This layer owns each service's request shape, its length limits, the suppression of channel-wide mentions, and the translation of every response into a delivery outcome. It sits below the agent layer and never decides when or whether a reply is sent. Add a new destination here alongside its provider reference, which records where its credential comes from and when its limits were last checked.
+The provider side of delivering a finished agent reply to the outside world: chat channels, email, issue trackers and code hosts (new items, comments, and update-in-place), docs workspaces, CI job summaries, social-post drafts, CRM tasks, and signed generic webhooks. Each destination takes one pasted credential, or none for the job summary, read from an argument or its environment variable, and never an interactive sign-in. This layer owns each service's request shapes, its length limits, the suppression of channel-wide mentions, and the translation of every response into a delivery outcome. It sits below the agent layer and never decides when or whether a reply is sent. Add a new destination here alongside its provider reference, which records where its credential comes from and when its limits were last checked.
 
 ##### `vidbyte/lib/providers/`
 
