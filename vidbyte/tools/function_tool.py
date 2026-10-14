@@ -177,9 +177,14 @@ def _null_means_default_fields(args_model: type[BaseModel]) -> frozenset[str]:
 def _parameter_type_label(prop: Mapping[str, Any]) -> str:
     # @intent function-tool-parameter-type-is-a-name
     # The label is a type name, never a Python repr of the schema: Optional[str] reads "string | null", and a
-    # $ref, enum or model argument reads "any", as it does for a tool declared only by input_schema.
-    if isinstance(prop.get("type"), str):
-        return prop["type"]
+    # $ref, enum or model argument reads "any", as it does for a tool declared only by input_schema. A JSON-Schema
+    # type array such as ["string", "null"] reads "string | null", like the matching anyOf; pydantic never emits one,
+    # but an MCP server's schema may.
+    kind = prop.get("type")
+    if isinstance(kind, str):
+        return kind
+    if isinstance(kind, list) and kind and all(isinstance(item, str) for item in kind):
+        return " | ".join(kind)
     branches = prop.get("anyOf")
     if isinstance(branches, list) and branches and all(isinstance(branch, Mapping) and isinstance(branch.get("type"), str) for branch in branches):
         return " | ".join(branch["type"] for branch in branches)
