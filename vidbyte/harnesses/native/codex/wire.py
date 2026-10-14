@@ -253,12 +253,14 @@ class CodexParamsTranslator:
         # @intent an-unusable-schema-fails-before-any-request
         # The answer schema is turned into JSON now, as the turn would
         # send it, so a type that is not a Pydantic model, or a mapping
-        # that is not JSON, fails before anything is sent (EC-82).
+        # that is not JSON, fails before anything is sent (EC-82). A
+        # cycle under a schema keyword fails as a recursion error, and
+        # only the error's type name is passed on (INV-9).
         if request.output_schema is None:
             return
         try:
             to_jsonable_python(self._schemas.output_schema(request.output_schema))
-        except (PydanticUserError, TypeError, ValueError) as exc:
+        except (PydanticUserError, RecursionError, TypeError, ValueError) as exc:
             raise ConfigurationError(f"{UNUSABLE_SCHEMA_MESSAGE} Got {type(exc).__name__}.") from None
 
     @staticmethod

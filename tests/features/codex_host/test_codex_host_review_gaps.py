@@ -362,6 +362,33 @@ class CodexHostSchemaRefusalTextTests(HostTestCase):
                 self.assertIn("output_schema", result.output)
                 self.assertNotIn(library_text, result.output)
 
+    async def test_a_schema_with_a_cycle_under_a_schema_keyword_is_refused_before_any_request(self) -> None:
+        from vidbyte.lib.dataclasses.codex_host import CodexSpawnRequest
+        from vidbyte.lib.dataclasses.tools import ToolCall, ToolStatus
+        from vidbyte.lib.errors import ConfigurationError
+        from vidbyte.tools.toolsets import CodexHostTools
+
+        under_properties: dict[str, Any] = {"type": "object"}
+        under_properties["properties"] = {"summary": under_properties}
+        under_items: dict[str, Any] = {"type": "array"}
+        under_items["items"] = under_items
+        host = await self.open_host()
+        for label, schema in (("a cycle under properties", under_properties), ("a cycle under items", under_items)):
+            with self.subTest(schema=label):
+                # INV-8: the walk over the schema never ends, so the refusal is a ConfigurationError, not a RecursionError.
+                before = len(self.server.requests)
+                with self.assertRaises(ConfigurationError) as caught:
+                    await asyncio.wait_for(host.spawn_codex_thread(CodexSpawnRequest(prompt="Answer in JSON.", output_schema=schema)), WAIT_SECONDS)
+                self.assertIn("output_schema", caught.exception.message)
+                self.assertIsNone(caught.exception.__cause__)
+                self.assertEqual(self.server.methods()[before:], [])
+                # INV-10: the spawn tool reports the refusal as a result and never raises.
+                tools = CodexHostTools(host, max_live_turns=1, spawn_defaults=CodexSpawnRequest(output_schema=schema))
+                spawn = next(tool for tool in tools if tool.spec().name == "spawn_codex_thread")
+                result = await asyncio.wait_for(spawn.execute(ToolCall(tool_name="spawn_codex_thread", arguments={"prompt": "Answer in JSON."})), WAIT_SECONDS)
+                self.assertEqual(result.status, ToolStatus.ERROR)
+                self.assertTrue(result.output.startswith("configuration.invalid_argument: "), result.output)
+
 
 if __name__ == "__main__":
     unittest.main()
