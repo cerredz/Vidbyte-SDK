@@ -226,5 +226,57 @@ class CodexHostMappingSchemaTests(HostTestCase):
                 self.assertEqual(snapshot.result.final_response, answer)
 
 
+@requires_sdk
+class CodexHostLateStopTests(HostTestCase):
+    """R-13, D-35 and INV-11: a late turn or goal run gets one stop and ends with no problem."""
+
+    async def test_a_goal_spawn_cancelled_during_its_goal_start_is_cancelled_once_without_a_problem(self) -> None:
+        from vidbyte.lib.dataclasses.codex_host import CodexGoal, CodexSpawnRequest, CodexTurnHandle
+
+        self.patch_connection("CODEX_HOST_WORKER_THREADS", 1)
+        host = await self.open_host()
+        goal_start = self.server.hold("thread/goal/set", lambda params: params.get("objective") is not None)
+        request = CodexSpawnRequest(goal=CodexGoal(objective="Ship the release notes."))
+        task = asyncio.ensure_future(host.spawn_codex_thread(request))
+        thread_id = (await asyncio.to_thread(goal_start.wait_arrived)).params["threadId"]
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await asyncio.wait_for(task, WAIT_SECONDS)
+        goal_start.release()
+
+        def cancels() -> int:
+            return sum(1 for entry in self.server.kinds("cancel_goal_operation") if entry[1] == thread_id)
+
+        await self.wait_until(lambda: cancels() >= 1, "the late goal run's cancel")
+        # Barrier: with one host worker, this read returns only after any stop queued before it was sent.
+        await asyncio.wait_for(host.read_codex_thread(thread_id), WAIT_SECONDS)
+        self.assertEqual(cancels(), 1)
+        turn_id = self.server.threads[thread_id].turns[0].turn_id
+        snapshot = await self.wait_done(host, CodexTurnHandle(thread_id=thread_id, turn_id=turn_id))
+        # D-35: late acceptance is not one of Vidbyte's stop reasons, so the run carries no problem.
+        self.assert_problem(snapshot, "interrupted", None)
+
+    async def test_a_late_turn_is_interrupted_once_without_a_stop_reason(self) -> None:
+        from vidbyte.lib.dataclasses.codex_host import CodexSpawnRequest, CodexTurnHandle
+
+        self.patch_connection("CODEX_HOST_WORKER_THREADS", 1)
+        host = await self.open_host()
+        turn_start = self.server.hold("turn/start")
+        task = asyncio.ensure_future(host.spawn_codex_thread(CodexSpawnRequest(prompt="Fix the failing test.", timeout_seconds=600.0)))
+        thread_id = (await asyncio.to_thread(turn_start.wait_arrived)).params["threadId"]
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await asyncio.wait_for(task, WAIT_SECONDS)
+        turn_start.release()
+        await self.wait_until(lambda: bool(self.server.threads[thread_id].turns), "Codex to accept the late turn")
+        turn_id = self.server.threads[thread_id].turns[0].turn_id
+        await self.wait_for_request("turn/interrupt", lambda params: params["turnId"] == turn_id)
+        await asyncio.wait_for(host.read_codex_thread(thread_id), WAIT_SECONDS)
+        self.assertEqual(self.count("turn/interrupt", lambda params: params["turnId"] == turn_id), 1)
+        snapshot = await self.wait_done(host, CodexTurnHandle(thread_id=thread_id, turn_id=turn_id))
+        # D-35: the interrupt is the late acceptance's, not the turn's timeout, so no problem is reported.
+        self.assert_problem(snapshot, "interrupted", None)
+
+
 if __name__ == "__main__":
     unittest.main()
