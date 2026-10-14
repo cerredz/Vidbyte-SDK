@@ -2,7 +2,7 @@
 
 ## High-Level Feature Description
 
-A developer adds `outputs=[SlackOutput(), GitHubIssueOutput(repo="acme/shop")]` to `BaseAgent`, `Agent`, `CodingAgent`, or `JevAgentSettings`, and supplies one credential per destination (a constructor argument or an environment variable). After every finished, validated reply, the SDK itself sends the reply to each destination: Slack, Discord, Microsoft Teams, Google Chat, Telegram, email over SMTP, GitHub issues, Linear, Jira, Notion, or a generic webhook. The model never sees the credential and never chooses the destination. The caller gets one receipt per destination in `reply.metadata["deliveries"]`, and an `OutputDeliveryError` naming every failed destination.
+A developer adds `outputs=[SlackOutput(), GitHubIssueOutput(repo="acme/shop")]` to `BaseAgent`, `Agent`, `CodingAgent`, or `JevAgentSettings`, and supplies one credential per destination (a constructor argument or an environment variable). After every finished, validated reply, the SDK itself sends the reply to each destination: Slack, Discord, Microsoft Teams, Google Chat, Telegram, email over SMTP, GitHub issues, Linear, Jira, Notion, or a generic webhook; since the follow-ups also GitLab, the GitHub Actions job summary, Confluence, Typefully drafts, and HubSpot tasks, plus comment, append, and update-in-place modes. The model never sees the credential and never chooses the destination. The caller gets one receipt per destination in `reply.metadata["deliveries"]`, and an `OutputDeliveryError` naming every failed destination.
 
 If this regressed, the damage is external and often irreversible: a post goes out twice, an unvalidated or "Agent runtime stopped …" notice is posted to a channel, `@everyone` pings a whole server, a webhook URL or token appears in a log, an exception, or a checkpoint, a credential is forwarded to another host, or a revoked webhook fails silently for weeks.
 
@@ -10,7 +10,7 @@ If this regressed, the damage is external and often irreversible: a post goes ou
 
 - **One line, one key.** Adding a connector to `outputs` and setting its documented environment variable (or passing the credential) is the whole integration. A missing credential, a non-`https://` URL, a malformed addressing argument, or an invalid `outputs` value raises `ConfigurationError` at construction, naming the parameter and never echoing a credential.
 - **When.** Delivery runs only after the reply has passed `output_schema` validation and has been recorded (history, `last_reply`, bound session), and before queued follow-up prompts drain. A reply whose content is blank, or whose `stop_reason` is anything other than absent, `final_response`, or `is_done`, is SKIPPED for every connector, and no request is made.
-- **What.** Each connector receives one `OutputContent(title, body)`: the connector's `render(reply)` when it has one, or else the structured `title` and `body` fields, falling back to the first line of the text and the agent's name. Each destination receives exactly one request in its documented wire shape, with channel-wide mentions neutralized, bodies cut to the destination's cap with a `[truncated]` marker, and titles collapsed to one line of at most 250 characters.
+- **What.** Each connector receives one `OutputContent(title, body)`: the connector's `render(reply)` when it has one, or else the structured `title` and `body` fields, falling back to the first line of the text and the agent's name. Each destination receives exactly one write request in its documented wire shape (since the follow-ups, GitHub `key=` first makes up to ten GET reads, and the job summary writes a file instead), with channel-wide mentions neutralized, bodies cut to the destination's cap with a `[truncated]` marker, and titles collapsed to one line of at most 250 characters.
 - **How often.** Each configured connector is attempted once per reply, concurrently with the others. Only HTTP 429 is retried, at most twice. Every connector's send is bounded by `OUTPUT_DELIVERY_DEADLINE_SECONDS`.
 - **Outcome.** `reply.metadata["deliveries"]` holds one receipt per connector, in configured order. If any receipt is FAILED, `OutputDeliveryError` is raised after every connector finished, carrying `.reply`, `.receipts`, and `.failed`. Error codes follow a fixed grammar and never contain a URL, header, credential, or response text beyond one validated token.
 - **Never.** Forks and `as_tool()` children never deliver. Outputs are never serialized. Cancellation propagates unchanged.
@@ -24,7 +24,7 @@ If this regressed, the damage is external and often irreversible: a post goes ou
 
 ## Inputs and Preconditions
 
-- Credentials come from the connector's constructor argument or one environment variable per destination: `SLACK_WEBHOOK_URL`, `DISCORD_WEBHOOK_URL`, `TEAMS_WEBHOOK_URL`, `GOOGLE_CHAT_WEBHOOK_URL`, `TELEGRAM_BOT_TOKEN`, `SMTP_PASSWORD`, `GITHUB_TOKEN`, `LINEAR_API_KEY`, `JIRA_API_TOKEN`, `NOTION_API_KEY`, `VIDBYTE_OUTPUT_WEBHOOK_URL`.
+- Credentials come from the connector's constructor argument or one environment variable per destination: `SLACK_WEBHOOK_URL`, `DISCORD_WEBHOOK_URL`, `TEAMS_WEBHOOK_URL`, `GOOGLE_CHAT_WEBHOOK_URL`, `TELEGRAM_BOT_TOKEN`, `SMTP_PASSWORD`, `GITHUB_TOKEN`, `LINEAR_API_KEY`, `JIRA_API_TOKEN`, `NOTION_API_KEY`, `VIDBYTE_OUTPUT_WEBHOOK_URL`, and since the follow-ups `GITLAB_TOKEN`, `GITHUB_STEP_SUMMARY` (a file path), `CONFLUENCE_API_TOKEN`, `TYPEFULLY_API_KEY`, `HUBSPOT_ACCESS_TOKEN`.
 - Addressing arguments: `repo`, `labels`, `team_id`, `site`, `project`, `email`, `issue_type`, `parent_page_id`, `chat_id`, `to`, `host`, `username`, `sender`, `port`.
 - The tests need no network and no real credential. The autouse fixture clears every variable above, so a developer's real `GITHUB_TOKEN` never reaches a test.
 
@@ -98,7 +98,7 @@ None in code yet: this pack was written red, before the implementation, from spe
 - `test_output_connectors_security.py`: the secret scan across every surface (AC-3), record reprs, cross-destination credential isolation, httpx's request log (EC-41), model output cannot steer the destination (INV-3), addressing arguments cannot steer credentials (D-19).
 - `test_output_connectors_contract.py`: public names (FR-18), destination values, the protocol and base, receipt record rules (§9.1), layering (NFR-7), provider README and maps (AC-26).
 
-Run everything with `PYTHONPATH=$(pwd) python -m pytest -q tests/features/agent_output_connectors`.
+Run everything with `PYTHONPATH=$(pwd) python -m pytest -q tests/features/agent_output_connectors`. The follow-up files are mapped under Follow-ups below.
 
 ## Omitted Testing Strategies
 
@@ -109,3 +109,52 @@ Run everything with `PYTHONPATH=$(pwd) python -m pytest -q tests/features/agent_
 - **Stress and fuzz.** One reply fans out to at most a handful of connectors; nothing grows at runtime.
 - **Accepted behaviors with no new code:** a specialist or aggregate proposer delivering on its own runs (EC-44, EC-45), receipts dropped from checkpoints (EC-28), `run_sequentially` stopping (EC-39), SES port 2465 (EC-46), a Teams 202 that never posts (EC-30).
 - **Gates.** Lint, mypy, Semgrep, the public-API contract file, and `pyproject.toml` dependencies (AC-22, INV-27, INV-28) are proven by `python lint/run.py`, `scripts/run_ci.py`, and `scripts/generate-sdk-public-api.py --check`, not by pytest.
+
+## Follow-ups (docs/spec/output-connector-followups, 2026-10-14)
+
+### Feature Boundary
+
+The follow-ups change what a connector puts on the wire and add five destinations, but not when or how often delivery runs: the dispatcher's skip rule, shaping, concurrency, receipt order, deadline, and error behave as above (INV-15). In scope:
+
+- **Rendering:** Discord forum posts (`forum`, `forum_tags`), the Slack `markdown` block up to 12,000 characters, Telegram `sendRichMessage` with `topic_id`, the two-block Teams card, and Jira descriptions built by `OutputAdf.document`.
+- **Webhook options:** fixed `headers=`, a `payload=` callable, and Standard Webhooks signing with `secret=`, which sends exact bytes through the new `HttpTransport` `content=` keyword.
+- **Comment and append modes:** GitHub, Linear, and Jira `comment_on`; Linear and Jira `labels`; Notion `append_to`; and construction errors for every forbidden or missing combination.
+- **New destinations:** `GitLabIssueOutput`, `GitHubJobSummaryOutput`, `ConfluencePageOutput`, `TypefullyDraftOutput`, and `HubSpotTaskOutput`.
+- **GitHub update-in-place:** a sticky comment marked `<!-- vidbyte:<key> -->`, one issue per `vidbyte:<key>` label, reads before the single write, and marker neutralization.
+
+Out of scope: every open question Q-1 to Q-8 (none is built, so no test expects a plain-text fallback after a Telegram 400 or a Slack 4xx, an author filter on markers, or a deadline budget check), Google Chat Markdown (D-24), OAuth, and any real vendor call.
+
+### Failure Inventory
+
+Each line is input + state → wrong output. The guarding test is in `docs/spec/output-connector-followups/test-plan.md`.
+
+- **Rendering.** A long reply → a Slack `markdown` block over 12,000 characters, rejected on every send. `<!channel>` inside the block → a channel-wide ping. `<tg-button>` or `![](…)` in reply text → a real Telegram button or a fetched file. A Discord thread name with newlines or over 100 characters → 400. Forum tags on a non-forum webhook → accepted, then 400 on every send. A Teams body that repeats its title, or an empty body block. A Jira body with a heading or list sent as raw `#` and `-`, or an empty ADF text node, which Jira rejects.
+- **Webhook options.** A header value or an invalid header name echoed in an error. `content-type` overridden by a caller header. A signature computed over a re-serialized body, which never verifies. A 429 retry that re-signs with a new id or timestamp. A short or non-base64 secret accepted. `json_body` and `content` both sent.
+- **Comments and modes.** A comment on a PR and a new issue both created. Linear `errors[]` on 200 reported as SENT. A Jira comment link without `focusedCommentId`. A Notion append that replaces the page. `team_id` and `comment_on` both accepted, so the target is ambiguous.
+- **New destinations.** A GitLab path not URL-encoded → 404. `host="gitlab.com/evil"` or `"bot@gitlab.com"` sends the token elsewhere. A job summary written on the event loop, interleaved by two threads, or into a newly created directory. A Confluence `value` sent as an object instead of a JSON string. A Typefully draft with `publish_at`, so it is published. A HubSpot `hs_timestamp` in local time or without milliseconds.
+- **Update in place.** A write before the reads finish, or a second write after a failed PATCH. An eleventh page read. A read failure followed by a POST, which duplicates the comment. A read retried on 500. A forged marker in model output that another key's search then edits. A marker appended before truncation, so the cap cuts it off. A 1 MB page refused by the write ceiling. A redirect followed on a read. The httpx request log left on during reads and patches.
+
+### Strategies Selected
+
+- **Exact wire values at the real seam.** Every new request is asserted whole at `HttpTransport._send_once` (`fake_http`). Signed bytes, size ceilings, redirects, and the request log use the real `_send_once` over `httpx.MockTransport` (`httpx_destination`), whose route may be a callable when a host gets a GET and then a PATCH.
+- **Boundary tables instead of property generators.** These cover the Slack 12,000/12,001 switch, every new cap at and one past its limit, and key length 42/43. Validation tables cover each new argument, and `OutputAdf.document` gets a block-rule table.
+- **A real file and real threads for the job summary.** The file lives under `tmp_path` and goes through the real `LocalFileSystemBackend`. Which thread opened the file is recorded by a Python audit hook on the `open` event, so nothing in the write path is replaced. Two concurrent 200,000-character appends must use one non-loop thread and leave whole blocks.
+- **Signatures recomputed with the standard library** from the recorded bytes and headers; the timestamp is bracketed, never frozen.
+- **Regression guards, green by design:** the exact first-batch headers and no `content` for the ten first-batch HTTP connectors (AC-34), and the Slack escaped-text path above 12,000 characters.
+
+### Strategies Omitted
+
+- **Property-based generators.** Not a dependency; the tables above stand in.
+- **Live checks L-1 to L-n.** These cover Slack mentions in the block, Telegram channel posting, Google Chat markup, and the other vendor behaviors marked A-n. They need real workspaces, so they stay manual.
+- **Documented limits with no code:** the sticky and per-key races (EC-35, EC-36), labels dropped without push access (EC-37), the planted-marker branches (EC-42), the deadline cutting a read, a write, or a job-summary append (EC-38, EC-45, EC-46), and vendor-side rejections (EC-32 to EC-34). The deadline itself is already covered for every connector above.
+- **Gates.** `scripts/generate-sdk-public-api.py --check` (AC-26), Semgrep, and lint are proven by their own commands, not by pytest.
+
+### Follow-up Test Suite Map
+
+- `test_output_connectors_followup_acceptance.py`: the follow-up §4 snippet run as written (AC-1), and the first-batch header guard (AC-34).
+- `test_output_connectors_rendering.py`: Discord forum posts (AC-2, AC-3), Slack Markdown (AC-4, EC-6), Telegram rich messages (AC-5, AC-6, INV-18), Teams cards (AC-7), Jira ADF (AC-8) and the `OutputAdf.document` block table (D-10, EC-12 to EC-14).
+- `test_output_connectors_webhook_options.py`: `headers=` (AC-10), `payload=` (AC-11, EC-18, EC-19), signing and retries (AC-12, AC-13, INV-8, EC-17), secret validation (AC-14), and the transport's `content=` (AC-15).
+- `test_output_connectors_comments.py`: GitHub, Linear, and Jira `comment_on`, Linear and Jira `labels`, Notion `append_to` (AC-16 to AC-19, EC-22 to EC-25), and the forbidden combinations (AC-20, EC-41).
+- `test_output_connectors_new_destinations.py`: GitLab (AC-21, EC-26, EC-27), the job summary (AC-22, EC-28 to EC-31), Confluence (AC-23), Typefully (AC-24), HubSpot (AC-25), titles (INV-13), and the `file_error` caution (AC-36).
+- `test_output_connectors_update_in_place.py`: sticky comments (AC-27, AC-29, EC-39), marker rules (AC-31, FR-33, D-16), read failures (AC-28), keyed issues (AC-30), key and number checks (AC-32), read and patch transport rules (AC-33, EC-40), and the `OutputRead` and `OutputRequest` records.
+- `test_output_connectors_followup_contract.py`: the new enums and class placement, `OutputResponses`, and the README, REPO_MAP, and first-spec documentation (AC-35).

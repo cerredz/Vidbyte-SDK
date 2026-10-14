@@ -50,7 +50,7 @@ def isolated_output_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def output_api() -> ModuleType:
-    # Red until vidbyte/agents/output/__init__.py exports the 18 public names (spec §9.2, §12.3 row 20).
+    # Red until vidbyte/agents/output/__init__.py exports the 24 public names (first spec §9.2; follow-ups FR-29).
     return importlib.import_module("vidbyte.agents.output")
 
 
