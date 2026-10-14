@@ -1402,12 +1402,15 @@ class BaseAgent(McpAttachableMixin):
         middleware = self.middleware
         active_session = getattr(self, "_active_session", None)
         session_failures = getattr(active_session, "failures", None)
-        if self.runtime_type in _LINEAR_LOOP_RUNTIMES and session_failures is not None and getattr(session_failures, "has_rules", False):
-            from vidbyte.middleware.builtins import FailureMiddleware
-            middleware = (*middleware, FailureMiddleware(session_failures))
+        # @intent session-rules-judge-the-result-after-policy-retries
+        # The retry policy runs before Session rules, so a silently retried attempt never trips a rule;
+        # the rule sees the tool result once the policy has finished with that call.
         if self.agent_loop_settings.tool_error_policy is not None:
             from vidbyte.middleware.builtins import ToolErrorPolicyMiddleware
             middleware = (*middleware, ToolErrorPolicyMiddleware(self.agent_loop_settings.tool_error_policy))
+        if self.runtime_type in _LINEAR_LOOP_RUNTIMES and session_failures is not None and getattr(session_failures, "has_rules", False):
+            from vidbyte.middleware.builtins import FailureMiddleware
+            middleware = (*middleware, FailureMiddleware(session_failures))
         if self._trace_option is None or not self._trace_option.enabled:
             return middleware
         from vidbyte.middleware.continual_trace import ContinualTraceMiddleware
