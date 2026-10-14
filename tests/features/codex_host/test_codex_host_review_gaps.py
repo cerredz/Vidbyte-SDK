@@ -326,5 +326,42 @@ class CodexHostLaunchToolSlotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(host.names().count("launch_codex_subagents"), 2)
 
 
+@requires_sdk
+class CodexHostSchemaRefusalTextTests(HostTestCase):
+    """R-26, INV-9 and EC-82: refusing an unusable output_schema passes on no library text and no cause."""
+
+    async def test_an_unusable_mapping_schema_is_refused_without_the_library_text_or_its_cause(self) -> None:
+        from pydantic_core import to_jsonable_python
+
+        from tests.features.codex_host.codex_host_support import error_texts
+        from vidbyte.lib.dataclasses.codex_host import CodexSpawnRequest
+        from vidbyte.lib.dataclasses.tools import ToolCall, ToolStatus
+        from vidbyte.lib.errors import ConfigurationError
+        from vidbyte.tools.toolsets import CodexHostTools
+
+        cyclic: dict[str, Any] = {"type": "object"}
+        cyclic["self"] = cyclic
+        host = await self.open_host()
+        for label, schema in (("a mapping with an object value", UNUSABLE_SCHEMAS[1][1]), ("a cyclic mapping", cyclic)):
+            with self.subTest(schema=label):
+                # The text the JSON conversion fails with is the library's own, so it must reach no one.
+                with self.assertRaises((TypeError, ValueError)) as converting:
+                    to_jsonable_python(schema)
+                library_text = str(converting.exception)
+                with self.assertRaises(ConfigurationError) as caught:
+                    await asyncio.wait_for(host.spawn_codex_thread(CodexSpawnRequest(prompt="Answer in JSON.", output_schema=schema)), WAIT_SECONDS)
+                self.assertIn("output_schema", caught.exception.message)
+                self.assertIsNone(caught.exception.__cause__)
+                for text in error_texts(caught.exception):
+                    self.assertNotIn(library_text, text)
+                # The tool result is what the model reads, so it carries the same text and nothing more.
+                tools = CodexHostTools(host, max_live_turns=1, spawn_defaults=CodexSpawnRequest(output_schema=schema))
+                spawn = next(tool for tool in tools if tool.spec().name == "spawn_codex_thread")
+                result = await asyncio.wait_for(spawn.execute(ToolCall(tool_name="spawn_codex_thread", arguments={"prompt": "Answer in JSON."})), WAIT_SECONDS)
+                self.assertEqual(result.status, ToolStatus.ERROR)
+                self.assertIn("output_schema", result.output)
+                self.assertNotIn(library_text, result.output)
+
+
 if __name__ == "__main__":
     unittest.main()

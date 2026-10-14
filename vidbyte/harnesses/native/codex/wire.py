@@ -259,7 +259,7 @@ class CodexParamsTranslator:
         try:
             to_jsonable_python(self._schemas.output_schema(request.output_schema))
         except (PydanticUserError, TypeError, ValueError) as exc:
-            raise ConfigurationError(f"{UNUSABLE_SCHEMA_MESSAGE} {exc}") from exc
+            raise ConfigurationError(f"{UNUSABLE_SCHEMA_MESSAGE} Got {type(exc).__name__}.") from None
 
     @staticmethod
     def thread_list(
