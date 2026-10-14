@@ -3,7 +3,7 @@
 PURPOSE: Holds PrebuiltToolSupport, the shared helpers every prebuilt tool category uses: the one argument-error builder, JSON and record parsing, exact number text, numeric text, nesting level, item capping under the character budget, paired lists, weights, dates and offsets, lines, words, sentences, syllables, CSV tables, and text encoding. Also defines the PrebuiltToolOutput and PrebuiltToolFunction type aliases.
 ROLE IN CODEBASE: Imported by the 31 category modules in vidbyte/tools/builtins/prebuilt/ and by vidbyte/tools/toolsets/prebuilt.py (for the PrebuiltToolFunction alias). Builds on vidbyte/lib/constants/prebuilt_tools.py, vidbyte/lib/enums/prebuilt_tools.py, and ToolExecutionError from vidbyte/lib/errors/.
 ARCHITECTURE NOTE: A static-method-only class (the class-bound helper pattern of vidbyte/lib/util/math.py). Each helper does one job. Helpers may call argument_error and nesting_level, which call nothing else in the class; parse_records_json also reuses parse_json_text so the JSON decoder exists once. Every error a helper raises is a ToolExecutionError whose message names the tool parameter the caller passed in, so FunctionTool turns it into a failure the model can act on.
-FUNCTION INVENTORY: argument_error builds the INV-15 error. parse_json_text, parse_records_json, and json_pointer_tokens read JSON input. parse_integer_text, parse_decimal_text, integer_text, decimal_text, fraction_text, float_result, and parse_numeric_text convert exact and numeric text. nesting_level measures container depth without recursion. cap_items applies the item cap and character budget. paired_values and weight_total check parallel lists and weights. as_utc, parse_utc_offset, and parse_date_text read times and dates. split_lines, line_and_column, split_words, split_sentences, and count_syllables implement the line, position, word, sentence, and syllable rules. parse_csv_table reads a CSV table. encode_text encodes text in a TextEncoding.
+FUNCTION INVENTORY: argument_error builds the INV-15 error. parse_json_text, parse_records_json, and json_pointer_tokens read JSON input. parse_integer_text, parse_decimal_text, integer_text, decimal_text, fraction_text, float_result, and parse_numeric_text convert exact and numeric text. nesting_level measures container depth without recursion. cap_items applies the item cap and character budget. paired_values and weight_total check parallel lists and weights. as_utc, parse_utc_offset, and parse_date_text read times and dates. split_lines, line_and_column, split_words, split_sentences, and count_syllables implement the line, position, word, sentence, and syllable rules. parse_csv_table reads a CSV table. parse_html feeds HTML to a parser and drops markup left open at the end before closing it. encode_text encodes text in a TextEncoding.
 COMMON MODIFICATION PATTERNS: Add a helper here only when two or more category modules need the same job; logic for one category stays in its own module. Keep every new helper free of calls to other helpers except argument_error and nesting_level.
 WHAT NOT TO DO IN THIS FILE: 1. Do not raise anything but argument_error's ToolExecutionError. 2. Do not put str(exc) or repr(exc) in a message; read structured attributes such as msg, lineno, colno, and pos. 3. Do not touch global state: no decimal.getcontext, csv.field_size_limit, or sys.set_int_max_str_digits. 4. Do not import vidbyte.tools.toolsets or anything above the tools layer.
 KNOWN EDGE CASES: Python refuses to turn text of more than 4,300 digits into an int, leading zeros included, so parse_numeric_text reads integers through their float value. A sentence terminator run is only matched at its first character, which keeps sentence splitting linear on long runs of punctuation. JSON nesting is checked after parsing, and json.loads itself raises RecursionError for extreme nesting, which is caught.
@@ -23,6 +23,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from fractions import Fraction
 from functools import partial
+from html.parser import HTMLParser
 from typing import NoReturn, TypeVar
 
 from vidbyte.lib.constants.prebuilt_tools import (
@@ -65,6 +66,7 @@ _MONTH_FIRST_DATE = re.compile(r"(?P<month>[a-z]+)\.?\s+(?P<day>\d{1,2})(?:st|nd
 _DAY_FIRST_DATE = re.compile(r"(?P<day>\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(?P<month>[a-z]+)\.?,?\s+(?P<year>\d{4})", re.IGNORECASE)
 _NUMERIC_DATE = re.compile(r"(?P<first>\d{1,2})(?P<separator>[/.-])(?P<second>\d{1,2})(?P=separator)(?P<year>\d{4})")
 _MONTHS_IN_YEAR = 12
+_BARE_TAG_OPENERS = frozenset({"<", "</"})
 
 
 class PrebuiltToolSupport:
@@ -414,6 +416,20 @@ class PrebuiltToolSupport:
                 raise PrebuiltToolSupport.argument_error(parameter_name, f"row {row_number} has {len(row)} cells but the header has {len(header)}", expected)
             padded.append(row + [""] * (len(header) - len(row)))
         return header, padded, chosen
+
+    @staticmethod
+    def parse_html(parser: HTMLParser, html_text: str) -> None:
+        """Feed HTML to a parser and close it, dropping markup left open at the end of the input first (EC-47)."""
+        parser.feed(html_text)
+        # @intent prebuilt-html-open-tail
+        # Before CPython 3.11.13, close() re-scans markup left open at
+        # the end once for every "<" in it (CVE-2025-6069), and fixed
+        # releases give these tools nothing from such a tail, so it is
+        # dropped to keep the time short and the output the same on
+        # every release.
+        if parser.rawdata.startswith("<") and parser.rawdata not in _BARE_TAG_OPENERS:
+            parser.rawdata = ""
+        parser.close()
 
     @staticmethod
     def encode_text(text: str, encoding: TextEncoding, parameter_name: str) -> bytes:

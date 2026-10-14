@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Every tool is a static method whose docstring's first paragra
 FUNCTION INVENTORY: reverse_text, convert_identifier_case, shorten_text, replace_all_occurrences, deduplicate_lines, sort_text_lines, strip_html_tags, split_text_into_chunks, extract_line_range, and fill_text_template are the tools; _rebuilt_text joins lines under the line rule; _identifier_words splits an identifier into words; _cut_characters makes a character cut; _natural_key and _numeric_order serve the natural and numeric sorts; _chunk_end finds a chunk's break point; _template_values, _filled_size, and _filled_text render a template; _HtmlTextCollector gathers the text of HTML; tool_functions lists the tools in catalogue order.
 COMMON MODIFICATION PATTERNS: A new transform tool adds a static method with a 4 to 5 sentence description, its row in the spec's Appendix A.13, and its entry in tool_functions. A tool whose output can grow past its input predicts the output length and refuses it before building it.
 WHAT NOT TO DO IN THIS FILE: 1. Do not split words or lines with a local rule; use PrebuiltToolSupport so every category agrees. 2. Do not pass replacement text to re.sub unescaped, because backslashes and group references would be read as template syntax. 3. Do not build an amplified output before its predicted length has been checked against PREBUILT_MAX_TEXT_CHARS. 4. Do not iterate a set or a hash-ordered container when building an output.
-KNOWN EDGE CASES: Rebuilt text joins lines with LF and keeps one trailing LF only when the input ended with a line break. A case-insensitive replacement folds one code point at a time, so a sharp s never matches a double s. Python 3.11's HTMLParser raises AssertionError on a marked section with an unknown keyword, so the collector reads such a section as a bogus comment instead. A character cut that lands right before whitespace is already at a word boundary and does not move back.
+KNOWN EDGE CASES: Rebuilt text joins lines with LF and keeps one trailing LF only when the input ended with a line break. A case-insensitive replacement folds one code point at a time, so a sharp s never matches a double s. Python 3.11's HTMLParser raises AssertionError on a marked section with an unknown keyword, so the collector reads such a section as a bogus comment instead. Markup left open at the end of the input is dropped by PrebuiltToolSupport.parse_html before the parser closes (EC-47), because unpatched CPython re-scans it once for every < (CVE-2025-6069) and the fixed releases give nothing from it. A character cut that lands right before whitespace is already at a word boundary and does not move back.
 RELATED DOCS: docs/spec/prebuilt-agent-tools/spec.md (Appendix A.13, section 9.2 items 6, 8, 12, and 15); vidbyte/tools/builtins/prebuilt/README.md
 TESTS: tests/features/prebuilt_tools/test_prebuilt_rows_text.py, tests/features/prebuilt_tools/test_prebuilt_resource_bounds.py, and the catalogue-wide tests in tests/features/prebuilt_tools/
 """
@@ -275,10 +275,9 @@ class TextTransformToolFunctions:
     ) -> PrebuiltToolOutput:
         """Turn HTML into readable plain text by removing tags, scripts, styles, and comments and decoding character entities. Use it to read the text of a web page or an HTML email without its markup. Block elements such as paragraphs, list items, and table cells become line breaks, runs of spaces collapse, each line is trimmed, and at most one blank line is kept between blocks. Malformed HTML never causes an error, so the tool has no failure case beyond the text length cap."""
         # Collect the text outside scripts and styles, with a line break
-        # for each block tag.
+        # for each block tag; markup left open at the end gives nothing.
         collector = TextTransformToolFunctions._HtmlTextCollector()
-        collector.feed(html_text)
-        collector.close()
+        PrebuiltToolSupport.parse_html(collector, html_text)
         collected = "".join(collector.pieces).replace("\r\n", "\n").replace("\r", "\n")
 
         # Collapse spaces and tabs, strip each line, keep at most one

@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Markdown is read line by line with anchored regular expressio
 FUNCTION INVENTORY: extract_markdown_headings, extract_markdown_tasks, parse_markdown_table, extract_markdown_links, extract_fenced_code_blocks, html_table_to_records, and extract_html_links are the tools. _fence_spans and _fenced_lines find fenced code; _heading_entries and _unique_anchors build headings and anchors; _table_spans and _split_table_row read pipe tables; _column_names and _bounded_records build table output under the cap; _link_definitions, _link_matches, and _link_item read Markdown links; _joined_url resolves an HTML link; _TableParser and _LinkParser are the HTML parsers; tool_functions lists the tools in catalogue order.
 COMMON MODIFICATION PATTERNS: A new Markdown tool splits lines with PrebuiltToolSupport.split_lines, marks fenced lines with _fence_spans and _fenced_lines, and skips them unless its row says otherwise. A new HTML tool adds its own private HTMLParser subclass that only records what it needs, and adds its row in the spec's Appendix A.28 and its entry in tool_functions.
 WHAT NOT TO DO IN THIS FILE: 1. Do not build a whole table output before measuring it; records are measured as they are built so a huge colspan or a wide padded table fails early. 2. Do not let an HTML parser error escape; malformed HTML is read as far as possible. 3. Do not write a regular expression with two adjacent runs that can match the same characters, because a long line would then take quadratic time.
-KNOWN EDGE CASES: A Setext heading takes only the line directly above its underline as its text. Python's HTMLParser gives up with an AssertionError on a few malformed marked sections, so parsing stops there and the content read so far is kept. A colspan is read from its leading digits, zero or junk counts as one, and a huge value is clamped to the output cap, which never changes an accepted result. Repeated HTML header names get the same numeric suffixes as repeated Markdown column names, so no record silently loses a cell.
+KNOWN EDGE CASES: A Setext heading takes only the line directly above its underline as its text. Python's HTMLParser gives up with an AssertionError on a few malformed marked sections, so parsing stops there and the content read so far is kept. Markup left open at the end of the input is dropped by PrebuiltToolSupport.parse_html before the parser closes (EC-47), because unpatched CPython re-scans it once for every < (CVE-2025-6069) and the fixed releases give nothing from it. A colspan is read from its leading digits, zero or junk counts as one, and a huge value is clamped to the output cap, which never changes an accepted result. Repeated HTML header names get the same numeric suffixes as repeated Markdown column names, so no record silently loses a cell.
 RELATED DOCS: docs/spec/prebuilt-agent-tools/spec.md (Appendix A.28, section 9.2 items 6, 12, and 13); vidbyte/tools/builtins/prebuilt/README.md
 TESTS: tests/features/prebuilt_tools/test_prebuilt_rows_geometry_bits_markdown.py, tests/features/prebuilt_tools/test_prebuilt_resource_bounds.py, and the catalogue-wide tests in tests/features/prebuilt_tools/
 """
@@ -179,11 +179,11 @@ class MarkdownHtmlToolFunctions:
         """Convert one HTML table into records keyed by its header cells, with the column names and the number of top-level tables in the document. Use it to read tabular data out of a web page or an HTML report so it can be filtered or compared reliably. A first row made only of header cells names the columns, otherwise the columns are numbered, colspan repeats a cell, and a nested table's text joins its enclosing cell. Malformed or unclosed tags never cause a failure, and tables are numbered from zero in document order. A document with no table, an index past the last table, or records longer than one million characters in total fail with an error."""
         # Parse the HTML into top-level tables of rows of cells; the
         # parser gives up only on a few broken marked sections, and the
-        # tables read before that point are kept.
+        # tables read before that point are kept. Markup left open at
+        # the end adds no cell.
         parser = MarkdownHtmlToolFunctions._TableParser()
         with contextlib.suppress(AssertionError):
-            parser.feed(html_text)
-            parser.close()
+            PrebuiltToolSupport.parse_html(parser, html_text)
         tables = parser.finish()
         if not tables:
             raise PrebuiltToolSupport.argument_error("html_text", "the HTML holds no table", "HTML with at least one table element")
@@ -222,11 +222,11 @@ class MarkdownHtmlToolFunctions:
                 raise PrebuiltToolSupport.argument_error("base_url", "the URL cannot be parsed", "an absolute URL such as a page address") from exc
 
         # Read the href, text, and rel of every anchor element; the
-        # parser gives up only on a few broken marked sections.
+        # parser gives up only on a few broken marked sections, and
+        # markup left open at the end adds no link.
         parser = MarkdownHtmlToolFunctions._LinkParser()
         with contextlib.suppress(AssertionError):
-            parser.feed(html_text)
-            parser.close()
+            PrebuiltToolSupport.parse_html(parser, html_text)
         anchors = parser.finish()
 
         # List the links up to the item cap and the character budget,
