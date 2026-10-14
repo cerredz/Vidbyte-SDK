@@ -1,11 +1,11 @@
 # S3 implementer report: output-connector-followups
 
-Status: BLOCKED on one frozen test (details under "Blocker"); every §12.3
-row is built, committed, and pushed to `feat/agent-output-connectors`
-(PR #882, still a draft).
+Status: DONE. Every §12.3 row is built, committed, and pushed to
+`feat/agent-output-connectors` (PR #882, still a draft). The one test-defect
+block was resolved by the S2 fix in 3d974a1f (see "Resolved").
 
 Start HEAD `a286bdb4`, BASE_COMMIT `336d6c78`, tests frozen at S2_HEAD
-`f0167c13`. No drift: `git rev-list --count HEAD..origin/main` was 0.
+`f0167c13`, then at 3d974a1f after the fix. No drift: `git rev-list --count HEAD..origin/main` was 0.
 
 ## Rows (spec §12.3)
 
@@ -105,7 +105,8 @@ Spec bookkeeping: frontmatter `status: implemented` (8e51f8ab); §17 row
 ## Files outside §12.3
 
 None. `docs/spec/output-connector-followups/pipeline.md` is the
-orchestrator's and was never staged.
+orchestrator's; S3 never staged it (the orchestrator committed it in
+26591cd7).
 
 ## Budget (§8.4)
 
@@ -117,33 +118,34 @@ orchestrator's and was never staged.
 - Dependencies: 0. Environment variables: 5 of 5.
 - Diff: 33 files, +1,708 / −231 (before the spec-status commits).
 
-## Blocker
+## Resolved
 
-`tests/features/agent_output_connectors/test_output_connectors_new_destinations.py::test_job_summary_concurrent_appends_run_off_the_loop_one_after_the_other`
-cannot pass with any implementation. Its audit hook (`_watch_opens`)
-records every `open` of the summary file, including the test's own
-`path.read_text(...)` at line 242, which runs on the event-loop thread
-before `assert len(opened) == 2` (line 243) and
-`assert loop_thread not in opened` (line 244). Observed:
-`len([17584, 17584, 7848]) == 3`: both appends on one worker thread
-(17584), then the test's read on the loop thread (7848). The
-implementation meets D-18, INV-12, and AC-22 (one worker thread, never the
-loop, blocks whole). Tests are frozen, so it was not edited.
-
-Options: (a) S2/orchestrator moves the `read_text` after the `opened`
-asserts, or snapshots `opened` before it (one-line test fix;
-recommended); (b) accept it as a known red test and re-scope AC-22's proof;
-(c) change the implementation to avoid `open` (impossible: any append must
-open the file).
+The S3 block on
+`test_job_summary_concurrent_appends_run_off_the_loop_one_after_the_other`
+was a test defect: the test counted its own `read_text` as a third open on
+the loop thread. The orchestrator chose option (a), and the S2 test author
+fixed it in 3d974a1f: the test now snapshots `opened` right after `gather`
+and asserts on the snapshot, as strictly as before. No product code changed
+for it, and `git diff --stat 3d974a1f..HEAD -- tests/` is empty.
 
 ## Gates (final lines)
 
-All run on the code at 4991370c (the two later commits touch only the
-spec).
+Final gates, run at HEAD 8dc1087e (the code is unchanged since 4991370c;
+later commits touch only the spec, the reports, `pipeline.md`, and the S2
+test fix):
+
+- `PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source`:
+  `====================== 4675 passed, 13 skipped in 36.45s ======================`
+  then `CI passed.`
+- `env -u PYTHONPATH python scripts/run_ci.py --stage package`:
+  `Installed vidbyte-sdk 0.2.1 passed smoke checks.` then `CI passed.`
+- The orchestrator's pack re-run after 3d974a1f: `660 passed in 5.07s`.
+
+Earlier runs, at 4991370c, before the test fix:
 
 - Feature pack, `PYTHONPATH=$(pwd) python -m pytest -q tests/features/agent_output_connectors`:
-  `1 failed, 659 passed in 5.24s` (the blocker test; no regression against
-  the S2_HEAD pass list).
+  `1 failed, 659 passed in 5.24s` (the test now fixed in 3d974a1f; no
+  regression against the S2_HEAD pass list).
 - `tests/test_web_operation_client_retry.py tests/features/coding_agent`:
   `300 passed, 12 skipped in 14.54s`.
 - `scripts/test-async-http-transport.py`: every HttpTransport line `PASS`;
@@ -162,22 +164,18 @@ spec).
 - Semgrep `.semgrep/typed-mapping-boundary-policy.yml`:
   `Ran 1 rule on 921 files: 0 findings.` `exit=0`.
 - `PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source`: lint,
-  compileall, and the three check scripts pass; pytest ends
-  `1 failed, 4674 passed, 13 skipped in 37.16s` then
-  `CI failed: Command failed with exit code 1: … -m pytest`. The one failure
-  is the blocker test.
+  compileall, and the three check scripts passed; pytest ended
+  `1 failed, 4674 passed, 13 skipped in 37.16s`, the one failure being the
+  test now fixed in 3d974a1f.
 - `python scripts/run_ci.py --stage package` (no PYTHONPATH):
   `Installed vidbyte-sdk 0.2.1 passed smoke checks.` `CI passed.`
-- Push: `8e51f8ab..8f1fc73e  HEAD -> feat/agent-output-connectors`;
-  `gh pr view 882`: `draft=true head=8f1fc73edfa33595291b912b252ed4d7146ceaa3`.
+- Earlier push: `8e51f8ab..8f1fc73e  HEAD -> feat/agent-output-connectors`.
+  The final push carries this report's commit on top of 8dc1087e.
 
 ## Open items
 
-- The blocker test above.
 - §12.5 asks for `ci.yml` and `static-policy.yml` to be dispatched on the
-  branch after the push; left to the orchestrator, because this stage's
-  procedure does not include a workflow dispatch. The source job would show
-  the same one red test.
+  branch after the push; the orchestrator will do it.
 - Live checks L-1…L-15 (spec §15) need real credentials; none was run.
 
 ## Tricky parts
