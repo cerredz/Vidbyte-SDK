@@ -1,7 +1,7 @@
 ---
 spec: claude-host
 title: "ClaudeHost: small atomic Claude Code functions with one agent tool per function"
-status: verified
+status: pr-open
 revision: 6
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-claude-host
@@ -1479,6 +1479,7 @@ No question blocks this spec.
 | r4 | 2026-10-13 | S3 implement | All 31 §12.3 rows built in 34 commits (`b0d6c4c3..5edf1a4d`), draft PR #1044. Pack 165/165; source gate 4100 passed, 27 skipped; package gate, `lint/run.py`, semgrep and the public-API check pass; tests unchanged since `9a8ecc3c`. Budget used: 22 of 22 files, 69 of 69 classes, 1 optional dependency. The spec text is unchanged; the deviations are listed below. Status: implemented. |
 | r5 | 2026-10-14 | S1 revision | S4 review findings R-4, R-6, R-8, R-9 and R-19. R-6: per-model windows (`seven_day_opus`, `seven_day_sonnet`) are recorded but never refuse a spawn or fail a turn (D-29, D-8, EC-7, EC-8, row 5, AC-16, T-1; optional Q-12). R-4: new deviation 12 (pump call depth). R-8: deviation 1 now states which strings stay literals. R-9: new deviation 13 (error placement). R-19: T-2 states the continue-from-a-tool limitation, with optional Q-13. Status stays reviewed. |
 | r6 | 2026-10-14 | S1 revision | S5 re-review finding R-24, routed by the findings verifier. EC-52 and row 12: a rate-limit event whose status or overage status is outside the SDK's three values is skipped, not mapped to `claude.protocol_mismatch` and not read as overage not allowed (D-29). Row 7, row 14 and new deviation 14: the pump's one `CLAUDE_STEER_YIELD_SECONDS` yield, at the placement repair iteration 2 makes for R-22 (inside `_take_steer`, before the take, only while a steer is pending). R-22's and R-23's rules are unchanged. Status stays reviewed. |
+| r6 | 2026-10-14 | S6 PR | Finalized for review: PR #1044 body in `pr-body.md`, status pr-open. §5 left as written; its diagrams simplify three steps the code orders differently (the turn is classified after its close task finishes, inside `_publish`; a steered prompt is preceded by the one yield and the clearing of the interrupted result's fields, R-23; every `interrupt()` is sent from a task the session owns). The PR body's flow chart shows the code's order. |
 
 ### Implementation deviations
 
