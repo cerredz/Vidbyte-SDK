@@ -1453,6 +1453,8 @@ Auth, by connector:
 | Q-6 | [scope-adding, R-1] Send `skip_entity_detection: true` to Telegram, so URLs, emails, and `@username` mentions in reply text are not auto-linked? | non-blocking | **No.** Today's plain `sendMessage` also auto-detects them |
 | Q-7 | [scope-adding, R-2] Before a multi-request send's write, skip it and return FAILED `network` when the remaining deadline is below one write's worst case? | non-blocking | **No.** The cut stays ambiguous (EC-45) |
 | Q-8 | [scope-adding, R-7] Match sticky markers only on comments whose `user.type` is `Bot`, or whose author is the token's own login? | non-blocking | **No.** The oldest marked comment wins (EC-42) |
+| Q-9 | [scope-adding, S4] Check `headers=` values and credentials when the connector is built: refuse non-ASCII, leading or trailing whitespace, and a `content-length` override, so they fail as `ConfigurationError` instead of `unexpected:` or `network` at send time (review R-3)? | non-blocking | **No.** A value is checked only for CR, LF, and NUL (§9.2(b), AC-10) |
+| Q-10 | [scope-adding, S4] Map a reply holding a lone surrogate to `file_error` in the job summary instead of `unexpected:UnicodeEncodeError` (review R-7)? | non-blocking | **No.** Only `OSError` is `file_error` (EC-30); anything else is `unexpected:` (INV-15) |
 
 ## §16 Review log
 
