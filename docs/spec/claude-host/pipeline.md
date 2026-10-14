@@ -17,7 +17,7 @@ started: 2026-10-13 00:45 UTC
 | S1 spec + review | done | 2026-10-13 01:45 UTC | 2026-10-13 08:15 UTC | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | spec r3 ba522bba, status: approved; 2 review rounds (SOUND WITH FIXES ×2), 18 findings applied, 0 disputed |
 | S2 tests | done | 2026-10-13 08:20 UTC | 2026-10-13 15:40 UTC | reports/S2-test-author.md | S2_HEAD 9a8ecc3c (tests 8e116bc7, proof 9a8ecc3c); 165 tests in tests/features/claude_host/, all red on `ModuleNotFoundError: vidbyte.harnesses.native`; spec r4 55c233bf pins the S2 open items; spec status: tests-written |
 | S3 implement | done | 2026-10-13 15:45 UTC | 2026-10-13 21:05 UTC | reports/S3-implementer.md | S3_HEAD d9c5fea2; draft PR https://github.com/cerredz/Vidbyte-SDK/pull/1044 ([WIP] title); 36 commits; 31/31 §12.3 rows; budget 22/22 files, 69/69 classes, 1/1 optional dependency, 0 root exports; pack 165/165 with and without claude_agent_sdk (orchestrator re-run); source gate 4100 passed / 27 skipped; package stage PASS; SDK-LINT PASS; semgrep 0; public API unchanged; spec status: implemented |
-| S4 adversarial review | in progress | 2026-10-13 21:15 UTC | | reports/S4-review-conformance.md, reports/S4-review-conventions.md, reports/S4-review-engineering.md, reports/S4-findings-verifier.md | |
+| S4 adversarial review | done | 2026-10-13 21:15 UTC | 2026-10-14 02:00 UTC | reports/S4-review-conformance.md, reports/S4-review-conventions.md, reports/S4-review-engineering.md, reports/S4-findings-verifier.md, review.md | MERGEABLE AFTER FIXES; confirmed 3 Blockers (R-1..R-3) / 4 Majors (R-4..R-7) / 14 Minors (R-8..R-21); refuted 2 (R-E1, R-V2 interrupt chain); downgraded 4; remote CI on d9c5fea2 green; spec status: reviewed |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
@@ -128,6 +128,37 @@ started: 2026-10-13 00:45 UTC
     - the riskiest test `test_claude_host_stops.py::CloseTests::test_the_turn_ends_only_after_its_one_disconnect_finishes`.
   Reviewers must not start a live `claude` process: the AC-1 snippet runs only through the fake-SDK seam.
   *Why:* the user's account must not be spent, and the tests prove behaviour through the fake SDK.
+
+- 2026-10-13 21:40-22:20 UTC — **The three S4 reviewers finished,** each with the verdict MERGEABLE AFTER FIXES:
+  - conformance: 1 Blocker, 2 Major, 2 Minor;
+  - conventions: 2 Blocker, 2 Major, 5 Minor;
+  - engineering: 2 Blocker, 3 Major, 3 Minor.
+
+  Remote CI on d9c5fea2 is green: ci.yml 38468157942 (Source on Python 3.12 and 3.11, Package) and static-policy 38468160731.
+- 2026-10-13 ~22:30 UTC — **Fifth HTTP 429 session-limit interruption,** this time in the findings verifier, before it wrote anything. I resumed it through SendMessage at 01:41 UTC and told it to bound its search of the claude.exe bundle.
+- 2026-10-14 02:00 UTC — **S4 spot-check passed.**
+  - review.md exists: 7 confirmed findings, each with a path:line, evidence and a `fix-kind`.
+  - The 6 refuted or downgraded rows each carry evidence.
+  - I read only the verifier's SUMMARY and the row headers.
+  - **S2-7/D-29 is closed.** R-E1, the case where a turn whose own result is a success but which saw a refusing window ends FAILED, was refuted with medium confidence. The CLI's wrap-up note is flag-gated (`off` by default), and R3's accepted error table lists usage_limited. Its per-model case was absorbed into R-6.
+  *Why:* the S4 spot-check rule.
+- 2026-10-14 02:00 UTC — **Routing.**
+  - **To the spec author first, in Revision mode r5**, because the escalation table says to revise the spec through its author when a later stage finds a spec defect:
+    - R-6: the D-29/D-8/EC-7/EC-8/§9.2 row 5 rule for the per-model windows `seven_day_opus` and `seven_day_sonnet`;
+    - R-4: the §17 deviation 12 entry for the two-level pump chain, forced by S024 and the 69-class budget;
+    - the trivial spec-text Minors: R-8 (deviation 1 wording), R-9 (record where `ClaudeOperationError` sits; do not move the shared lines), and R-19 (state T-2's continue-from-tool reach as a limitation, not a new refusal).
+  - **To S5 repair iteration 1**, after r5: the code findings R-1, R-2, R-3, R-5, R-6 (code, after the spec edit) and R-7 (new tests), plus the trivial Minors R-10..R-14 and R-21 only where trivial.
+  - **Left as follow-ups:** R-15..R-18 and R-20, the scope-adding README edit excluded by NG-8.
+  *Why:* a spec edit has to land before the code that follows it, and one agent at a time commits in this worktree.
+- 2026-10-14 02:00 UTC — **Granted R-7 new tests to the S5 repair agent.**
+  - The new tests go in one new file, `tests/features/claude_host/test_claude_host_review_gaps.py`. The pack's README.md/FEATURE.md may be extended only by addition, to list it.
+  - The 165 existing tests stay byte-identical.
+  - Each new test must be shown failing for the right reason against the pre-fix code (R-2) or against the verifier's mutant (M1-M4). The red run is quoted in verify-log.md.
+
+  *Why:* R-7 is a confirmed coverage gap with concrete mutants, and the change only adds tests.
+  - It does not weaken the contract.
+  - The S2 author's blindness is less valuable here than tests aimed at the known mutants.
+  - My S5 spot-check will accept a test-tree diff since S2_HEAD only if it consists of additions to that file plus README/FEATURE additions.
 
 ## User replies (verbatim)
 - none yet
@@ -310,3 +341,23 @@ started: 2026-10-13 00:45 UTC
   - the claude.exe lookup on Windows.
   *source:* S3 implementer, open items.
 - **Drift from main.** The branch is 41 commits behind origin/main, and `git merge-tree` shows a clean merge. Among the touched paths, main changed only `vidbyte/harnesses/stores/file.py`. Catch up by merge (never rebase) when the repair loop or S6 pushes. *source:* S3 implementer.
+- **Reproducing S4 findings.**
+  - The S4 findings reproduce with inline probes, sent by heredoc to `$PY -P -`, that use `import claude_host_fixtures as fx` and `fake.patched()`. The scripts are in reports/S4-findings-verifier.md.
+  - To run the pack in-process, load each module with `unittest.TestLoader().loadTestsFromName("tests.features.claude_host.test_claude_host_<area>")`. Discovery fails because the folder has no `__init__.py`.
+  - The fixtures' own fake SDK error classes are at `claude_host_fixtures.py:191-199`. A real `CLIConnectionError` maps to protocol_mismatch.
+  *source:* S4 reviewers and verifier.
+- **Lint without caches.** `PYTHONDONTWRITEBYTECODE=1 MYPY_CACHE_DIR=nul` runs lint without writing caches into the worktree. It takes about 70 s and ends `SDK-LINT: PASS`. *source:* S4 conventions.
+- **R-2 fix shape.**
+  - The reviewer's `if self._prompts_sent > 1: await asyncio.sleep(0)` trips A007 twice.
+  - Use `if self._steered: await asyncio.sleep(CLAUDE_STEER_YIELD_SECONDS)` instead, with the constant set to 0 in vidbyte/lib/constants/claude.py.
+  - Do not await the interrupt task before the query: that breaks `InterruptGraceTests::test_d_...` (AC-37 d).
+  *source:* the verifier.
+- **R-5 fix placement.** Put `self._guard(operation)` in `continue_claude_session` right after the await at host.py:196, not inside `_admit`. A helper calling a helper breaks AGENTS.md principle 1. *source:* the verifier.
+- **R-3 fix shape.**
+  - Read SDK dataclass fields directly.
+  - Keep `.get` for dict payloads: the initialize answer, `usage`, `origin` and `SessionMessage.message`.
+  - Keep it also for `description`, which `TaskNotificationMessage` lacks.
+  - Re-read field-guide class-bound-helpers.md:24-28 before changing these.
+  *source:* the verifier.
+- **Which claude.exe build to cite.** `~/.local/bin/claude.exe` auto-updated to 2.1.299 during S4. The reviewers' byte offsets refer to `~/.local/share/claude/versions/2.1.296`. Never execute either. *source:* the verifier.
+- **`_stopping=True` at session.py:180** is what makes publishing after the close safe. Do not move it below the close. *source:* S4 conformance.
