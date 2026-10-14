@@ -69,6 +69,7 @@ class WebhookOutput(BaseOutput):
         # Receivers get the full title and body plus the agent's
         # structured output in JSON form, or the caller's own mapping;
         # nothing is cut.
+        body: object
         if self._payload is None:
             body = {"agent": reply.sender, "title": content.title, "body": content.body, "structured": WebhookOutput._structured_json(reply.structured)}
         else:
