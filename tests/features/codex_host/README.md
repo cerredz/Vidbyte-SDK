@@ -30,7 +30,9 @@ The implementation belongs in `vidbyte/harnesses/native/codex/` (the host, conne
 - `test_codex_host_failures.py` checks late acceptance, the withdrawn queued start, a start accepted after close, and the privacy canaries.
 - `test_codex_host_router.py` checks that the server-request router answers every request on the real reader thread and never raises.
 - `test_codex_host_sdk_contract.py` pins the openai-codex surface that the host reaches outside the SDK's public API.
+- `test_codex_host_review_gaps.py` pins the windows the S4 review found open: a cancellation during a review's read-back, a launch, a close or an in-flight start; an unusable `output_schema`; the problem of a late-accepted turn or goal run; a mapping `output_schema` that is only parsed as JSON; and the launch tool's cap slots.
 
 ## Logs
 
 - 2026-10-13 - Pack added red, ahead of the implementation, from spec r3 (S2 test author). The seven modules from `test_codex_host_lifecycle.py` to `test_codex_host_sdk_contract.py` need the `codex` extra, so CI, which installs only `.[dev]`, skips them; run them locally with the extra installed.
+- 2026-10-14 - Added `test_codex_host_review_gaps.py` for the S4 review findings (S5 repair). Its host classes need the `codex` extra, so CI skips them; its launch tool class runs over a stub host on CI.

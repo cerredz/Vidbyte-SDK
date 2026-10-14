@@ -93,6 +93,7 @@ None yet. Add one line per fixed bug, with the test that protects it.
 - `test_codex_host_failures.py` covers late acceptance, the queued start that is withdrawn, a start accepted after close, and privacy canaries.
 - `test_codex_host_router.py` covers the server-request router on the real reader thread.
 - `test_codex_host_sdk_contract.py` pins the openai-codex surface that the host reaches outside the public API.
+- `test_codex_host_review_gaps.py` covers the windows the S4 review found open (review.md R-1, R-2, R-6, R-7, R-10, R-12, R-13 and R-14): a review cancelled during its read-back, a cancelled launch or close, an unusable `output_schema`, a start still in flight when its caller left, the problem a late-accepted turn or goal run ends with, and a mapping `output_schema` that is only parsed as JSON. Its host classes need the `codex` extra; its launch tool class runs over a stub host and is CI-visible.
 - The seven modules from `test_codex_host_lifecycle.py` to `test_codex_host_sdk_contract.py` need the `codex` extra, so CI skips them.
 - `codex_host_support.py` holds the spec literals, canaries, `HostTestCase` and `StubCodexHost`. `codex_host_fakes.py` holds the in-memory app-server.
 

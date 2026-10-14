@@ -626,7 +626,14 @@ class CodexHost:
         handle = CodexTurnHandle(thread_id=response.review_thread_id, turn_id=response.turn.id)
         client.register_turn_notifications(handle.turn_id)
         turn = self._registry.track(handle, REVIEW_REQUEST, pricing, review=True)
-        stored = None if self._stopped() else await self._read_back(operation, handle)
+        # A caller cancelled during the read-back leaves the review
+        # owned: it is watched and stopped with one interrupt (INV-11).
+        try:
+            stored = None if self._stopped() else await self._read_back(operation, handle)
+        except BaseException:
+            turn.watch(client, self._on_turn_event, self._stop)
+            self._stop(turn, None)
+            raise
         # Close wins: the turn ends as exited and nothing more is sent.
         if self._stopped():
             client.unregister_turn_notifications(handle.turn_id)
