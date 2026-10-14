@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Every tool is a static method whose docstring's first paragra
 FUNCTION INVENTORY: verify_json_syntax, format_json, json_get_value, json_set_value, list_json_paths, diff_json_documents, apply_json_patch, summarize_json_structure, and extract_json_from_text are the tools. _formatted_length predicts formatted output length; _lookup reads a pointer target; _parent_slot, _slot_value, and _slot_insert find, read, and change one member or item; _patch_operations, _operation_fields, and _measured_insertion read JSON Patch operations and account for their size; _same_json compares values type-aware; _path_steps and _path_entry list paths; _change_steps and _change_entry list differences; _value_count and _merged_shape describe structure; tool_functions lists the tools in catalogue order.
 COMMON MODIFICATION PATTERNS: A new JSON tool adds a static method with a 4 to 5 sentence description, its row in the spec's Appendix A.17, and its entry in tool_functions. A new pointer-based edit reuses _parent_slot and _slot_insert from the tool itself rather than from another helper.
 WHAT NOT TO DO IN THIS FILE: 1. Do not recurse over a document; use a work stack, as every walk here does. 2. Do not write pointer text for every value up front, because a long key would be copied once per value below it. 3. Do not call json.dumps on an edited document before its nesting is known to be within the cap, because json.dumps recurses and its RecursionError would escape as the wrong error type. 4. Do not compare JSON values with == alone, which treats true as 1; use _same_json. 5. Do not iterate a set or a hash-ordered container when building an output.
-KNOWN EDGE CASES: An integer literal of more than 4,300 digits is valid JSON that Python refuses to read, so verify_json_syntax reports it as invalid with a fixed message. A move to its own path takes the value out and puts it back, so an object member moves to the end of its object. When merged shapes give two keys the same label, such as a key ending in a question mark next to an optional key of the same stem, the later one wins. An array index of more than nine digits can never point into a list a document of one million characters holds, so it is treated as past the end.
+KNOWN EDGE CASES: An integer literal of more than 4,300 digits is valid JSON that Python refuses to read, and a number such as 1e400 overflows a float, so verify_json_syntax reports both as invalid with a fixed message, because no JSON tool here accepts them. A move to its own path takes the value out and puts it back, so an object member moves to the end of its object. When merged shapes give two keys the same label, such as a key ending in a question mark next to an optional key of the same stem, the later one wins. An array index of more than nine digits can never point into a list a document of one million characters holds, so it is treated as past the end.
 RELATED DOCS: docs/spec/prebuilt-agent-tools/spec.md (Appendix A.17, section 9.2 items 3, 12, 13, and 14); vidbyte/tools/builtins/prebuilt/README.md
 TESTS: tests/features/prebuilt_tools/test_prebuilt_rows_json_csv.py and the catalogue-wide tests in tests/features/prebuilt_tools/
 """
@@ -54,6 +54,7 @@ _REMOVING_OPERATIONS = frozenset({"remove", "replace"})
 _TOO_DEEP_MESSAGE = f"the JSON is nested deeper than {PREBUILT_MAX_JSON_NESTING} levels of arrays and objects"
 _CONSTANT_MESSAGE = "the JSON contains NaN, Infinity, or -Infinity, which are not valid JSON numbers"
 _LONG_INTEGER_MESSAGE = "the JSON contains an integer with more digits than the parser accepts"
+_FLOAT_OVERFLOW_MESSAGE = "the JSON contains a number too large for a float, which no JSON tool here accepts"
 _PATCH_EXPECTED = "an array of RFC 6902 operations whose paths exist and whose tests pass"
 
 _JSON_TEXT_PARAMETER_DESCRIPTION = "The text of one JSON document, given as a string rather than as a JSON value. When an object repeats a key, the last value wins. The constants NaN, Infinity, and -Infinity are refused, and nesting may reach at most 100 levels of arrays and objects. The text may hold at most one million characters."
@@ -65,20 +66,25 @@ class JsonDataToolFunctions:
 
     @staticmethod
     def verify_json_syntax(json_text: Annotated[str, Field(description="The text to check as JSON, given as a plain string. It may be empty, which is reported as invalid. Line and column numbers in the result start at 1, and the position counts code points from 0. The text may hold at most one million characters.", max_length=PREBUILT_MAX_TEXT_CHARS)]) -> PrebuiltToolOutput:
-        """Check whether a text is valid JSON and, when it is not, report the parser's message with the line, column, and 0-based position where parsing stopped. Use it before handing JSON to another tool or system, or to find the exact spot where a hand-written document breaks. The constants NaN, Infinity, and -Infinity count as invalid, and so does nesting deeper than 100 levels, both with a fixed message and null positions. Invalid JSON is a normal result with valid set to false, so the tool fails only when the text is over its length cap."""
+        """Check whether a text is valid JSON and, when it is not, report the parser's message with the line, column, and 0-based position where parsing stopped. Use it before handing JSON to another tool or system, or to find the exact spot where a hand-written document breaks. The constants NaN, Infinity, and -Infinity count as invalid, and so do a number too large for a float, an integer the parser cannot read, and nesting deeper than 100 levels, all with a fixed message and null positions. Invalid JSON is a normal result with valid set to false, so the tool fails only when the text is over its length cap."""
         # Parse the text, noting any non-finite constant instead of
         # accepting it; a syntax error is reported where it happened.
+        # The shared float hook refuses a number too large for a float,
+        # so valid means every JSON tool here accepts the text.
         constants: list[str] = []
+        read_float = partial(PrebuiltToolSupport._read_json_float, "json_text")
         problem: str | None = None
         value: object = None
         try:
-            value = json.loads(json_text, parse_constant=constants.append)
+            value = json.loads(json_text, parse_float=read_float, parse_constant=constants.append)
         except json.JSONDecodeError as exc:
             return {"valid": False, "error": exc.msg, "line": exc.lineno, "column": exc.colno, "position": exc.pos, "top_level_type": None}
         except RecursionError:
             problem = _TOO_DEEP_MESSAGE
         except ValueError:
             problem = _LONG_INTEGER_MESSAGE
+        except ToolExecutionError:
+            problem = _FLOAT_OVERFLOW_MESSAGE
 
         # Non-finite constants and nesting past the cap make otherwise
         # readable text invalid, with a fixed message and no position.
