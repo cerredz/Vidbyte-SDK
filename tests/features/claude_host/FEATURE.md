@@ -118,6 +118,7 @@ None yet. Add one line per fixed bug with the test that protects it.
 - R-5: a continue still reading its session file during `aclose` started a turn after `aclose` returned → `ContinueRacingCloseTests`.
 - R-6: a rejected per-model window (`seven_day_opus`, `seven_day_sonnet`) refused every spawn of every model → `RateLimitRuleTests`.
 - R-7: D-29's `allowed_warning` overage and absent reset time, a steer's withdrawal of its unsent message, and the re-wait of a cancelled close were unguarded → `RateLimitRuleTests`, `SteerWithdrawalTests`, `CancelledCloseTests`.
+- R-12: an unknown rate-limit status or overage value failed the whole turn as `claude.protocol_mismatch` → `RateLimitRuleTests`.
 
 ## Test Suite Map
 
@@ -196,6 +197,7 @@ None yet. Add one line per fixed bug with the test that protects it.
   - a continue racing `aclose` (FR-1);
   - SDK record drift reported as `claude.protocol_mismatch`;
   - per-model windows, `allowed_warning` overage and an absent reset time (D-29, EC-7, EC-8);
+  - an unknown rate-limit status or overage value skipped (EC-52);
   - a steer whose interrupt fails (§12.3 row 7, INV-18);
   - a cancelled `aclose` (INV-8, D-4).
 - `claude_host_fixtures.py`: the fake SDK, the message factories, the history fakes, `TicketTool` and the `ClaudeHostCase` base class.

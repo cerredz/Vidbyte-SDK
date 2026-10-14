@@ -1,7 +1,7 @@
 """FILE: tests/features/claude_host/test_claude_host_review_gaps.py
 
-PURPOSE: Pins the behaviours the S4 review of ClaudeHost found broken or unguarded: a steered prompt is classified by its own result, a steer that starts while the previous result is still unread is interrupted before its prompt is sent, a continue racing aclose starts nothing, an SDK record missing a declared field fails as a protocol mismatch, a rejected per-model window never refuses, D-29's overage and reset-time conditions hold, a steer whose interrupt fails withdraws its message, and a cancelled aclose still waits for its close.
-ROLE IN CODEBASE: Regression layer of tests/features/claude_host/ (spec D-3, D-4, D-29, EC-7, EC-8, EC-19, FR-1, INV-8, AC-9, AC-16, section 9.2 rows 5 and 12, section 12.3 row 7; review R-1, R-2, R-3, R-5, R-6 and R-7). Exercises vidbyte/harnesses/native/claude/{host,session,failures,history}.py.
+PURPOSE: Pins the behaviours the S4 review of ClaudeHost found broken or unguarded: a steered prompt is classified by its own result, a steer that starts while the previous result is still unread is interrupted before its prompt is sent, a continue racing aclose starts nothing, an SDK record missing a declared field fails as a protocol mismatch, a rejected per-model window never refuses, D-29's overage and reset-time conditions hold, an unknown rate-limit status or overage value is skipped, a steer whose interrupt fails withdraws its message, and a cancelled aclose still waits for its close.
+ROLE IN CODEBASE: Regression layer of tests/features/claude_host/ (spec D-3, D-4, D-29, EC-7, EC-8, EC-19, EC-52, FR-1, INV-8, AC-9, AC-16, section 9.2 rows 5 and 12, section 12.3 row 7; review R-1, R-2, R-3, R-5, R-6, R-7 and R-12). Exercises vidbyte/harnesses/native/claude/{host,session,failures,history}.py.
 ARCHITECTURE NOTE: Every test drives a real ClaudeHost over the fake SDK from claude_host_fixtures.py, through the one seam the spec names. A drifted SDK record is a local dataclass that lacks a field a later 0.2.x release could rename, patched into ClaudeSdkTypes in place of the fake class. The continue race blocks the fake history read on a threading.Event, because that read runs in a worker thread.
 COMMON MODIFICATION PATTERNS: Add one test per review finding, named for the behaviour it protects, and add one line for it under Historical Regressions in FEATURE.md.
 WHAT NOT TO DO IN THIS FILE: 1. Do not sleep for a fixed time; wait on recorded fake calls with eventually(). 2. Do not change claude_host_fixtures.py; define a missing fake here. 3. Do not call aclose on a host without adding it to closed_hosts. 4. Do not wrap the EC-19 steer in asyncio.wait_for: on Python 3.11 that runs the steer in a new task, after the pump has already read the result.
@@ -207,7 +207,7 @@ class SdkRecordDriftTests(ReviewGapCase):
 
 
 class RateLimitRuleTests(ReviewGapCase):
-    """D-29, EC-7 and EC-8 as revised in spec r5 (review R-6 and R-7): only a live, account-wide rejection without allowed overage refuses."""
+    """D-29, EC-7, EC-8 and EC-52 as revised in spec r5 (review R-6, R-7 and R-12): only a live, account-wide rejection without allowed overage refuses."""
 
     async def test_a_rejected_window_with_allowed_warning_overage_or_no_reset_time_refuses_nothing(self) -> None:
         cases = (
@@ -240,6 +240,20 @@ class RateLimitRuleTests(ReviewGapCase):
                 result = await self.turn_seeing(host, f"Finish the work ({kind}).", rate_limit_event(kind, "rejected", resets_at=FAR_FUTURE_RESET))
                 self.assertEqual((result.status.value, None if result.failure is None else result.failure.code.value), (status, code))
                 self.assertEqual(result.result_text, "Parser fixed.")
+
+    async def test_a_window_with_an_unknown_status_or_overage_value_is_skipped(self) -> None:
+        # EC-52 (review R-12): a value this host cannot key is skipped,
+        # like an unknown window type, and never fails the turn.
+        cases = (
+            ("unknown status", rate_limit_event("five_hour", "throttled", resets_at=FAR_FUTURE_RESET)),
+            ("unknown overage status", rate_limit_event("five_hour", "rejected", resets_at=FAR_FUTURE_RESET, overage_status="blocked")),
+        )
+        for label, event in cases:
+            with self.subTest(window=label):
+                host = await self.open_host()
+                result = await self.turn_seeing(host, f"Read the window ({label}).", event)
+                self.assertEqual((result.status.value, result.failure, result.result_text), ("completed", None, "Parser fixed."))
+                self.assertEqual(await host.get_claude_rate_limits(), ())
 
 
 class SteerWithdrawalTests(ReviewGapCase):

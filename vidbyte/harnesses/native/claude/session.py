@@ -59,9 +59,11 @@ from vidbyte.lib.errors import ClaudeOperationError
 # The origin kind of a result that answers the caller's own prompt; any
 # other kind is a turn Claude Code injected (D-28).
 _HUMAN_ORIGIN = "human"
-# The window types a rate-limit window can be kept under; an event with
-# any other type is skipped (EC-52).
+# The window types and statuses a rate-limit window can be kept under;
+# an event with any other type, status or overage status is skipped
+# (EC-52).
 _WINDOW_TYPES = frozenset(kind.value for kind in ClaudeRateLimitType)
+_WINDOW_STATUSES = frozenset(status.value for status in ClaudeRateLimitStatus)
 # The operations a turn's failures name, besides connect.
 _INFO_OPERATION = "get_server_info"
 _QUERY_OPERATION = "query"
@@ -329,13 +331,13 @@ class ClaudeLiveSession:
     def _on_rate_limit(self, message: Any) -> None:
         """Hand a keyed rate-limit window to the host, and mark the turn when the window refuses new sessions (D-29)."""
         info = message.rate_limit_info
-        kind = info.rate_limit_type
-        if kind not in _WINDOW_TYPES:
+        kind, status, overage = info.rate_limit_type, info.status, info.overage_status
+        unknown_overage = overage is not None and overage not in _WINDOW_STATUSES
+        if kind not in _WINDOW_TYPES or status not in _WINDOW_STATUSES or unknown_overage:
             return
-        overage = info.overage_status
         window = ClaudeRateLimitWindow(
             rate_limit_type=ClaudeRateLimitType(kind),
-            status=ClaudeRateLimitStatus(info.status),
+            status=ClaudeRateLimitStatus(status),
             resets_at=info.resets_at,
             utilization=info.utilization,
             overage_status=None if overage is None else ClaudeRateLimitStatus(overage),

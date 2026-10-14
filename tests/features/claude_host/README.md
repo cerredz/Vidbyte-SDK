@@ -19,9 +19,9 @@ This folder holds the feature tests for `ClaudeHost`, the host that wraps claude
 - `test_claude_host_readiness.py` covers the missing extra, version and auth-mode checks, models, the CLI lookup, start failures, and the sign-in and version rules.
 - `test_claude_host_tools.py` covers the per-tool contract, the toolset order and permissions, wrong JSON types, the MCP listing, and success rendering.
 - `test_claude_host_security.py` covers secret and error-text markers, validation that never echoes values, extra model arguments against the bound request, and foreign handle ids.
-- `test_claude_host_review_gaps.py` covers what the S4 review found broken or unguarded: a steered prompt's own outcome, a steer that starts while the previous result is unread, a continue racing `aclose`, SDK record drift, per-model rate-limit windows, D-29's overage and reset-time conditions, a steer whose interrupt fails, and a cancelled `aclose`.
+- `test_claude_host_review_gaps.py` covers what the S4 review found broken or unguarded: a steered prompt's own outcome, a steer that starts while the previous result is unread, a continue racing `aclose`, SDK record drift, per-model rate-limit windows, D-29's overage and reset-time conditions, unknown rate-limit values, a steer whose interrupt fails, and a cancelled `aclose`.
 
 ## Logs
 
 - 2026-10-13 - Pack added red, ahead of the implementation, from spec r3 (S2 test author).
-- 2026-10-13 - Added `test_claude_host_review_gaps.py` for the S4 review findings R-1, R-2, R-3, R-5, R-6 and R-7, against spec r5 (S5 repair). The 165 earlier tests are unchanged.
+- 2026-10-13 - Added `test_claude_host_review_gaps.py` for the S4 review findings R-1, R-2, R-3, R-5, R-6, R-7 and R-12, against spec r5 (S5 repair). The 165 earlier tests are unchanged.
