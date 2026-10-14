@@ -3,10 +3,10 @@
 PURPOSE: Defines StructuredFormatsToolFunctions, the nine prebuilt tools that read structured text formats: XML to JSON, XML well-formedness, XML element search, INI, TOML, URL parts, relative URL resolution, query strings, and .env files.
 ROLE IN CODEBASE: Re-exported by vidbyte/tools/builtins/prebuilt/__init__.py and wrapped in FunctionTool objects by PrebuiltTools in vidbyte/tools/toolsets/prebuilt.py when the STRUCTURED_FORMATS category is chosen. Builds on PrebuiltToolSupport in _support.py for the argument error, nesting level, item cap, and line splitting.
 ARCHITECTURE NOTE: Every parser is a standard-library one (xml.etree.ElementTree, configparser, tomllib, urllib.parse), and each tool wraps it with the guards INV-19 and INV-20 need: XML text is refused before parsing when it declares a document type, an entity, or a namespace URI longer than PREBUILT_MAX_NAME_CHARS, converted values are measured with work stacks instead of recursion, and xml_to_json counts its keys and texts while building. Parser exceptions are converted from their attributes, never from their text.
-FUNCTION INVENTORY: xml_to_json, verify_xml_wellformed, xml_find_elements, ini_to_json, toml_to_json, parse_url, resolve_relative_url, parse_query_string, and parse_dotenv_text are the tools; _CaseKeepingConfigParser keeps INI key case; _unsafe_xml_problem names a refused declaration; _parse_xml parses XML or fails naming xml_text; _element_level measures element nesting; _element_value converts elements to JSON under the output cap; _ini_error_line reads a configparser error's line; _plain_toml_values turns TOML dates into text and checks numbers; _dotenv_value reads one .env value; tool_functions lists the tools in catalogue order.
+FUNCTION INVENTORY: xml_to_json, verify_xml_wellformed, xml_find_elements, ini_to_json, toml_to_json, parse_url, resolve_relative_url, parse_query_string, and parse_dotenv_text are the tools; _CaseKeepingConfigParser keeps INI key case; _unsafe_xml_problem names a refused declaration; _parse_xml parses XML or fails naming xml_text; _element_level measures element nesting; _element_value converts elements to JSON under the output cap; _ini_error_line reads a configparser error's line; _has_long_dotted_key finds a TOML key with too many dotted segments; _plain_toml_values turns TOML dates into text and checks numbers; _dotenv_value reads one .env value; tool_functions lists the tools in catalogue order.
 COMMON MODIFICATION PATTERNS: A new format tool adds a static method with a 4 to 5 sentence description, its row in the spec's Appendix A.20, and its entry in tool_functions, and catches its parser's exceptions where they occur. A new XML tool runs _unsafe_xml_problem before _parse_xml.
 WHAT NOT TO DO IN THIS FILE: 1. Do not let any XML parser see text before _unsafe_xml_problem has accepted it. 2. Do not format a parser exception with str or repr; read code, position, lineno, or errors, and give tomllib errors the fixed message. 3. Do not walk a converted value with recursion; the nesting cap must hold before anything reaches the output serializer. 4. Do not repeat a .env line in an error, because it may hold a credential.
-KNOWN EDGE CASES: Expat reports 0-based columns, so a reported column is one more than the parser's. The ElementPath engine of Python 3.11 raises TypeError, SyntaxError, or KeyError for a bad path, and all three are errors on path. tomllib accepts infinite and NaN floats and integers of any size, which are refused here because the output must be finite JSON.
+KNOWN EDGE CASES: Expat reports 0-based columns, so a reported column is one more than the parser's. The ElementPath engine of Python 3.11 raises TypeError, SyntaxError, or KeyError for a bad path, and all three are errors on path. tomllib accepts infinite and NaN floats and integers of any size, which are refused here because the output must be finite JSON. tomllib takes time quadratic in the segments of one dotted key, so a run of more than 100 dotted key segments is refused before parsing; the scan does not track strings or comments, so such a run inside a multi-line string or a comment is refused too.
 RELATED DOCS: docs/spec/prebuilt-agent-tools/spec.md (Appendix A.20, section 9.2 items 3, 12, and 13, INV-19, INV-20); vidbyte/tools/builtins/prebuilt/README.md
 TESTS: tests/features/prebuilt_tools/test_prebuilt_rows_formats_encoding.py and the catalogue-wide tests in tests/features/prebuilt_tools/
 """
@@ -52,6 +52,11 @@ _INI_HIDDEN_DEFAULT_SECTION = "\n"
 _INI_DEFAULT_HEADER = "DEFAULT"
 _INI_EXPECTED = "INI text with a section header first, no repeated section, no repeated key in a section, and no continuation of a key without a value"
 _TOML_PROBLEM = "the text is not valid TOML 1.0"
+_TOML_NESTING_PROBLEM = f"the TOML is nested deeper than {PREBUILT_MAX_JSON_NESTING} levels"
+_TOML_NESTING_EXPECTED = "TOML nested at most that deep"
+_TOML_KEY_SEGMENT = r"""[A-Za-z0-9_-]++|"(?:[^"\\\n]|\\.)*+"|'[^'\n]*+'"""
+_TOML_DOTTED_RUN = re.compile(rf"(?:{_TOML_KEY_SEGMENT})(?:[ \t]*+\.[ \t]*+(?:{_TOML_KEY_SEGMENT}))*+")
+_TOML_SEGMENT = re.compile(_TOML_KEY_SEGMENT)
 _INTEGER_RESULT_BOUND = 10**PREBUILT_MAX_INTEGER_DIGITS
 _DOTENV_ASSIGNMENT = re.compile(r"(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*=(.*)")
 _DOTENV_SINGLE_QUOTED = re.compile(r"'([^']*)'\s*(?:#.*)?")
@@ -162,6 +167,13 @@ class StructuredFormatsToolFunctions:
     @staticmethod
     def toml_to_json(toml_text: Annotated[str, Field(description="The TOML 1.0 text to parse. Tables, arrays of tables, inline tables, and every TOML value type are accepted. A key may not be defined twice. The text may hold at most one million characters.", max_length=PREBUILT_MAX_TEXT_CHARS)]) -> PrebuiltToolOutput:
         """Parse TOML text into the equivalent JSON object. Use it to read a TOML configuration or manifest file as structured data. Dates, times, and datetimes become ISO 8601 text, and tables and arrays keep their structure. Invalid TOML fails with a fixed message and no position, and nesting deeper than 100 levels, an infinite or NaN float, or an integer of more than 4,000 digits fails too, each with an error naming toml_text."""
+        # @intent prebuilt-toml-dotted-key-cap
+        # tomllib takes time quadratic in the segments of one dotted
+        # key, and a key of more segments than the nesting cap always
+        # nests too deep, so such a key is refused before parsing.
+        if StructuredFormatsToolFunctions._has_long_dotted_key(toml_text):
+            raise PrebuiltToolSupport.argument_error("toml_text", _TOML_NESTING_PROBLEM, _TOML_NESTING_EXPECTED)
+
         # Parse the text; the decoder's error has no position to report,
         # so every invalid document gets the same message.
         try:
@@ -169,16 +181,14 @@ class StructuredFormatsToolFunctions:
         except (tomllib.TOMLDecodeError, ValueError) as exc:
             raise PrebuiltToolSupport.argument_error("toml_text", _TOML_PROBLEM, "TOML 1.0 text") from exc
         except RecursionError as exc:
-            problem = f"the TOML is nested deeper than {PREBUILT_MAX_JSON_NESTING} levels"
-            raise PrebuiltToolSupport.argument_error("toml_text", problem, "TOML nested at most that deep") from exc
+            raise PrebuiltToolSupport.argument_error("toml_text", _TOML_NESTING_PROBLEM, _TOML_NESTING_EXPECTED) from exc
 
         # @intent prebuilt-toml-nesting-cap
         # A value nested past the cap would make the output serializer
         # recurse too deep after the tool returns, where the failure can
         # no longer become a result.
         if PrebuiltToolSupport.nesting_level(value) > PREBUILT_MAX_JSON_NESTING:
-            problem = f"the TOML is nested deeper than {PREBUILT_MAX_JSON_NESTING} levels"
-            raise PrebuiltToolSupport.argument_error("toml_text", problem, "TOML nested at most that deep")
+            raise PrebuiltToolSupport.argument_error("toml_text", _TOML_NESTING_PROBLEM, _TOML_NESTING_EXPECTED)
 
         # Turn dates and times into text and check every number.
         StructuredFormatsToolFunctions._plain_toml_values(value)
@@ -347,6 +357,16 @@ class StructuredFormatsToolFunctions:
         if recorded:
             return int(recorded[0][0])
         return None
+
+    @staticmethod
+    def _has_long_dotted_key(toml_text: str) -> bool:
+        """Say whether a run of key segments joined by dots has more segments than the nesting cap, scanning the text once."""
+        # Only a run with enough dots can be too long, so the exact
+        # count, which skips dots inside quoted segments, is rare.
+        for run in _TOML_DOTTED_RUN.finditer(toml_text):
+            if run.group().count(".") >= PREBUILT_MAX_JSON_NESTING and len(_TOML_SEGMENT.findall(run.group())) > PREBUILT_MAX_JSON_NESTING:
+                return True
+        return False
 
     @staticmethod
     def _plain_toml_values(document: dict[str, Any]) -> None:
