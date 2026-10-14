@@ -242,3 +242,20 @@ This addendum is not committed; I staged only the spec.
 - **§12.3 row 11 untouched.** It says the translator "validates structured output through" the helper, which names the helper correctly. The orchestrator's rules forbid editing it.
 
 **Scope.** No validator, dependency, option or field was added. The §8.4 budget, every §12.3 row, §8.5, §9.1, every AC row and the shared-file contract are unchanged. The self-check is clean: 18 sections, no ID gaps (D-36, EC-83, Q-10), 28 §12.3 rows, names unchanged. The only new path hit outside §11–§13 is D-36's request.md citation.
+
+## Addendum r6: S5 finding R-29 (2026-10-14)
+
+**Input.** R-29 (Minor, spec-change), raised by the S5 re-review and routed by the findings verifier. R-11's repair added 11 method-name constants to `vidbyte/lib/constants/codex.py:446-457`, and §9.3 did not record them. I read rows R-27 and R-29 of `review.md`, and the constants, read-only, at lines 443-457 of that module.
+
+**Change.** §9.3 gains one row after the raw-method row. It names the 11 constants and gives their values as written in the code:
+- ten app-server JSON-RPC methods: `initialize`, `account/read`, `thread/resume`, `thread/fork`, `thread/name/set`, `thread/list`, `thread/read`, `turn/start`, `turn/steer` and `turn/interrupt`;
+- `CODEX_GOAL_CANCEL_CALL = "cancel_goal_operation"`.
+
+The row says the host's mapped errors and the D-13 overrides use these names, so no method name is an inline literal (R-11; A007), and that `thread/start` reuses the existing `CODEX_THREAD_START_METHOD`.
+
+**Judgement calls:**
+- **Not every name is a JSON-RPC method.** `CODEX_GOAL_CANCEL_CALL` names openai-codex's client call, not a JSON-RPC method, so the row says so rather than calling all 11 JSON-RPC methods.
+- **A007, not AGENTS.md.** I cited A007 rather than an AGENTS.md line, because AGENTS.md:63 is about closed sets typed as enums, and these names stay `str` constants.
+- **Row 4 unchanged.** §12.3 row 4 adds "every §9.3 constant" and names none, so it needs no edit.
+
+**Scope.** Spec text only. No requirement ID, behaviour rule (R-26, R-27), §12.3 row or shared-file contract line changed, and `review.md` is untouched. The self-check is clean: 18 sections, no ID gaps, 28 §12.3 rows, names and path hits unchanged.
