@@ -249,8 +249,10 @@ machines; use `MultiAgent` when the manager must own progress and recovery.
 
 ## Output Connectors
 
-Send each finished reply to Slack, email, an issue tracker, Notion, or any
-HTTPS webhook by passing connectors as `outputs=`:
+Send each finished reply to chat channels, email, issue trackers and code
+hosts (including comments and update-in-place), docs workspaces, CI job
+summaries, social-post drafts, CRM tasks, or any HTTPS webhook (optionally
+signed) by passing connectors as `outputs=`:
 
 ```python
 from vidbyte import Agent, GitHubIssueOutput, OutputDeliveryError, SlackOutput
