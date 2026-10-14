@@ -456,7 +456,7 @@ class CodexHost:
             # Check the account, usage and sandbox; a review names no model.
             await self._preflight.run(operation, REVIEW_REQUEST, check_model=False)
             thread = await self._preflight.require_thread(operation, thread_id)
-            pricing = self._responses.pricing(thread.model or "", thread.model_provider, "")
+            pricing = self._responses.pricing(thread.model or "", thread.model_provider, turn_model="")
             connection = self._connection
             review_call = connection.raw(CODEX_REVIEW_START_METHOD, self._params.review(thread_id, target, delivery))
             adopt = partial(self._adopt_late_review, operation, pricing)

@@ -363,7 +363,17 @@ class CodexTurnRegistry:
         entry = CodexTurnUsage(turn_id=turn.handle.turn_id, status=snapshot.status, usage=delta or CodexUsage(), usage_available=delta is not None)
         self._ledgers[thread_id].append(entry)
         if delta is not None:
-            result = CodexRunResult(thread_id, turn.handle.turn_id, snapshot.status.value, None, None, delta, (), last_usage=delta, usage_available=True)
+            result = CodexRunResult(
+                thread_id=thread_id,
+                turn_id=turn.handle.turn_id,
+                status=snapshot.status.value,
+                final_response=None,
+                duration_ms=None,
+                usage=delta,
+                items=(),
+                last_usage=delta,
+                usage_available=True,
+            )
             CodexMetricsTranslator.record_usage(CodexUsageTranslationRequest(result=result, settings=turn.pricing, tracker=self._trackers[thread_id]))
 
     def usage(self, thread_id: str) -> CodexThreadUsage | None:

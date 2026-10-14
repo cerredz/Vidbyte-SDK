@@ -156,7 +156,11 @@ class CodexErrorMapper:
         # The key is the codexErrorInfo string, or the one key of an object
         # variant; every key the table does not name means codex.api_error.
         info = error.codex_error_info if error is not None else None
-        key = info if isinstance(info, str) else next(iter(info), "") if isinstance(info, dict) else ""
+        key = ""
+        if isinstance(info, str):
+            key = info
+        elif isinstance(info, dict):
+            key = next(iter(info), "")
         code = FailureCode(CODEX_ERROR_INFO_CODES.get(key, FailureCode.CODEX_API_ERROR.value))
         message = f"Codex failed the turn: {error.message}" if error is not None else "Codex failed the turn without an error."
         return CodexProblem(code=code, message=message, next_step=CODEX_NEXT_STEPS[code.value])
