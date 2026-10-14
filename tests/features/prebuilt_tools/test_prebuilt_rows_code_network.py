@@ -3,10 +3,10 @@
 PURPOSE: Exact-output and error-behavior cases for every Appendix A row of the code_analysis and network_addresses categories (A.30, A.31), run through FunctionTool.execute the way a model calls them.
 ROLE IN CODEBASE: One of the AC-11 row files in tests/features/prebuilt_tools/; it uses the tool_runner fixture from conftest.py and the ok, bad, and invalid case builders from prebuilt_tool_harness.py.
 ARCHITECTURE NOTE: Every expected value is hand-derived from the row text, a published fact (IPv4 and IPv6 CIDR arithmetic, POSIX shell quoting), or a different route (integer arithmetic for subnets); none is read back from the implementation.
-FUNCTION INVENTORY: test_code_network_rows_return_documented_output checks SUCCESS_CASES; test_code_network_rows_reject_bad_input checks FAILURE_CASES; test_verify_python_syntax_reports_error_text checks the open error text; dotted_ipv4 and invalid_address build expectations.
+FUNCTION INVENTORY: test_code_network_rows_return_documented_output checks SUCCESS_CASES; test_code_network_rows_reject_bad_input checks FAILURE_CASES; test_verify_python_syntax_reports_error_text checks that the version-dependent SyntaxError text is not empty; dotted_ipv4 and invalid_address build expectations.
 COMMON MODIFICATION PATTERNS: Add an ok(...) or bad(...) entry beside the tool's existing cases; keep Python samples valid on both 3.11 and 3.12.
 WHAT NOT TO DO IN THIS FILE: 1. Do not pin values that change between Python 3.11 and 3.12 (ipaddress flags of mapped or reserved ranges, SyntaxError wording, PEP 695 syntax); use ANY instead. 2. Do not add 100-level nesting, output-cap, or infeasible-enumeration inputs here; test_prebuilt_resource_bounds.py owns them.
-KNOWN EDGE CASES: ast reports col_offset in UTF-8 bytes, so the find_python_name_usages case puts a two-byte character before a name; ast.walk visits breadth first, so the list_python_functions case puts a class before a function to tell source order apart; IPv6 hosts() skips only the subnet-router address.
+KNOWN EDGE CASES: ast reports col_offset in UTF-8 bytes, so the find_python_name_usages case puts a two-byte character before a name; ast.walk visits breadth first, so the list_python_functions case puts a class before a function to tell source order apart; IPv6 hosts() skips only the subnet-router address. Spec r4 rejects a null character before ast.parse (verify_python_syntax gives null line and column, python_literal_to_json error(literal), every other parser error(source)), and fixes plain-import fields, name-usage columns at the name itself, and the bare-name signature text.
 RELATED DOCS: tests/features/prebuilt_tools/FEATURE.md; docs/spec/prebuilt-agent-tools/spec.md Appendix A.30 and A.31
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/prebuilt_tools/test_prebuilt_rows_code_network.py
 """
@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 
-from tests.features.prebuilt_tools.prebuilt_tool_harness import ANY, FailureCase, SuccessCase, ToolRunner, bad, invalid, ok
+from tests.features.prebuilt_tools.prebuilt_tool_harness import ANY, NON_EMPTY_TEXT, FailureCase, SuccessCase, ToolRunner, bad, invalid, ok
 
 PYTHON_VERSION = f"{sys.version_info.major}.{sys.version_info.minor}"
 
@@ -110,6 +110,8 @@ USAGE_SOURCE = "\n".join(
 PYTHON_LINES_SOURCE = "# header comment\n\ndef f():\n    \"\"\"Docstring.\"\"\"\n    x = 1  # trailing\n\n    # inner comment\n    return x\n"
 JAVASCRIPT_LINES_SOURCE = "// line comment\n/* block\n   still block */\nlet a = 1; // trailing\n\n/* one-line block */\nlet b = 2;\n"
 
+# Spec r4: the bare name, `async def` for a coroutine, and ast.unparse's argument text, which writes no spaces around a default after an annotation.
+REPO_GET_SIGNATURE = "async def get(self, key: str, *, default: int | None=None, **extra) -> dict"
 REPO_GET_PARAMETERS = [
     {"name": "self", "kind": "positional_or_keyword", "annotation": None, "default": None},
     {"name": "key", "kind": "positional_or_keyword", "annotation": "str", "default": None},
@@ -141,7 +143,7 @@ SUCCESS_CASES = [
     ok(
         "verify_python_syntax",
         {"source": "x = 1\u0000"},
-        {"valid": False, "error": ANY, "line": ANY, "column": ANY, "python_version": PYTHON_VERSION},
+        {"valid": False, "error": NON_EMPTY_TEXT, "line": None, "column": None, "python_version": PYTHON_VERSION},
         "null-character",
     ),
     ok(
@@ -230,11 +232,11 @@ SUCCESS_CASES = [
         {"source": IMPORT_SOURCE},
         {
             "imports": [
-                {"module": ANY, "names": ANY, "line": 1, "from_import": False, "level": 0},
+                {"module": None, "names": ["json"], "line": 1, "from_import": False, "level": 0},
                 {"module": "collections", "names": ["OrderedDict as OD", "deque"], "line": 2, "from_import": True, "level": 0},
                 {"module": None, "names": ["sibling"], "line": 3, "from_import": True, "level": 1},
                 {"module": "pkg.mod", "names": ["thing"], "line": 4, "from_import": True, "level": 2},
-                {"module": ANY, "names": ANY, "line": 5, "from_import": False, "level": 0},
+                {"module": None, "names": ["xml.etree.ElementTree as ET"], "line": 5, "from_import": False, "level": 0},
             ],
             "modules": ["collections", "json", "xml"],
         },
@@ -278,20 +280,20 @@ SUCCESS_CASES = [
     ok(
         "get_python_function_signature",
         {"source": SIGNATURE_SOURCE, "name": "Repo.get"},
-        {"signature": ANY, "parameters": REPO_GET_PARAMETERS, "returns": "dict", "docstring": "Fetch one item.", "line": 2},
+        {"signature": REPO_GET_SIGNATURE, "parameters": REPO_GET_PARAMETERS, "returns": "dict", "docstring": "Fetch one item.", "line": 2},
         "qualified-async-method",
     ),
     ok(
         "get_python_function_signature",
         {"source": SIGNATURE_SOURCE, "name": "get"},
-        {"signature": ANY, "parameters": REPO_GET_PARAMETERS, "returns": "dict", "docstring": "Fetch one item.", "line": 2},
+        {"signature": REPO_GET_SIGNATURE, "parameters": REPO_GET_PARAMETERS, "returns": "dict", "docstring": "Fetch one item.", "line": 2},
         "unique-bare-name",
     ),
     ok(
         "get_python_function_signature",
         {"source": TWO_RUN_SOURCE, "name": "B.run"},
         {
-            "signature": ANY,
+            "signature": "def run(self)",
             "parameters": [{"name": "self", "kind": "positional_or_keyword", "annotation": None, "default": None}],
             "returns": None,
             "docstring": None,
@@ -309,7 +311,7 @@ SUCCESS_CASES = [
                 {"line": 3, "column": 21, "context": "load"},
                 {"line": 4, "column": 17, "context": "store"},
                 {"line": 5, "column": 9, "context": "delete"},
-                {"line": 6, "column": ANY, "context": "attribute"},
+                {"line": 6, "column": 16, "context": "attribute"},
                 {"line": 6, "column": 26, "context": "keyword"},
             ],
             "count": 7,
@@ -320,13 +322,13 @@ SUCCESS_CASES = [
     ok(
         "find_python_name_usages",
         {"source": USAGE_SOURCE, "name": "add"},
-        {"usages": [{"line": 3, "column": ANY, "context": "definition"}], "count": 1, "truncated": False},
+        {"usages": [{"line": 3, "column": 5, "context": "definition"}], "count": 1, "truncated": False},
         "definition",
     ),
     ok(
         "find_python_name_usages",
         {"source": "import os\nos.sep\n", "name": "os"},
-        {"usages": [{"line": 1, "column": ANY, "context": "import"}, {"line": 2, "column": 1, "context": "load"}], "count": 2, "truncated": False},
+        {"usages": [{"line": 1, "column": 8, "context": "import"}, {"line": 2, "column": 1, "context": "load"}], "count": 2, "truncated": False},
         "import-and-load",
     ),
     ok(
@@ -603,6 +605,13 @@ FAILURE_CASES = [
     bad("python_literal_to_json", {"literal": "__import__('os')"}, "literal", "not-a-literal"),
     bad("python_literal_to_json", {"literal": "1e999"}, "literal", "infinite-float"),
     bad("python_literal_to_json", {"literal": "[1, 2"}, "literal", "unparseable"),
+    # Spec r4 (A.30): a null character is rejected before ast.parse, so 3.11's ValueError and 3.12's SyntaxError never decide the result.
+    bad("python_literal_to_json", {"literal": "[1]\u0000"}, "literal", "null-character"),
+    bad("list_python_functions", {"source": "x = 1\u0000"}, "source", "null-character"),
+    bad("list_python_classes", {"source": "x = 1\u0000"}, "source", "null-character"),
+    bad("list_python_imports", {"source": "import os\u0000"}, "source", "null-character"),
+    bad("get_python_function_signature", {"source": "def f():\n    pass\n\u0000", "name": "f"}, "source", "null-character"),
+    bad("find_python_name_usages", {"source": "x = 1\u0000", "name": "x"}, "source", "null-character"),
     bad("shell_split_command", {"command": "echo 'oops"}, "command", "unbalanced-quote"),
     invalid("shell_quote_arguments", {"arguments": []}, "arguments", "empty-list"),
     # A.31 network_addresses

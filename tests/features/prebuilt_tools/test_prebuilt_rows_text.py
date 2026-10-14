@@ -3,7 +3,7 @@
 PURPOSE: Exact-output checks for every Appendix A row of the text_counting (A.12) and text_transform (A.13) categories, called the way a model calls them.
 ROLE IN CODEBASE: Row tests of the prebuilt tool pack; runs each tool through FunctionTool.execute with the tool_runner fixture from tests/features/prebuilt_tools/conftest.py and compares parsed JSON with hand-computed expectations.
 ARCHITECTURE NOTE: Cases are plain data built with ok, bad, and invalid from prebuilt_tool_harness; two parametrized functions run them, so each case reports under its own id `<tool>-<label>`.
-FUNCTION INVENTORY: test_text_rows_return_documented_output checks SUCCESS_CASES; test_text_rows_reject_bad_input checks FAILURE_CASES; test_strip_html_tags_turns_block_tags_into_line_breaks checks the block-tag rule without fixing the number of breaks; test_fill_text_template_reports_at_most_twenty_missing_names checks the reported-name cap.
+FUNCTION INVENTORY: test_text_rows_return_documented_output checks SUCCESS_CASES; test_text_rows_reject_bad_input checks FAILURE_CASES; test_strip_html_tags_turns_block_tags_into_line_breaks checks the exact text the spec r4 block-tag rule gives; test_fill_text_template_reports_at_most_twenty_missing_names checks the reported-name cap.
 COMMON MODIFICATION PATTERNS: Add a case to SUCCESS_CASES or FAILURE_CASES when a row gains an edge; compute the expectation by hand from the row and §9.2, never by running the tool.
 WHAT NOT TO DO IN THIS FILE: 1. Do not copy an output of the implementation into an expectation; a copy cannot catch its mistakes. 2. Do not add the 1,000,000-character INV-20 amplification inputs here; test_prebuilt_resource_bounds.py owns them.
 KNOWN EDGE CASES: Positions are code-point indices into the original text, so astral characters count once and case-insensitive matches of ß and İ never shift positions (EC-16). Line breaks are \r\n, \n, and \r, a trailing break does not start a line, and rebuilt text joins lines with \n and keeps one trailing \n (EC-15).
@@ -12,8 +12,6 @@ TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/prebuilt_tools/test_
 """
 
 from __future__ import annotations
-
-import re
 
 import pytest
 
@@ -351,6 +349,8 @@ SUCCESS_CASES = [
         "pascal",
     ),
     ok("convert_identifier_case", {"text": "user id", "target": "dot"}, {"text": "user.id", "words": ["user", "id"]}, "dot"),
+    # Spec r4: an uppercase letter after a digit starts a new word, and capitalizing uppercases only the first character.
+    ok("convert_identifier_case", {"text": "version2Beta", "target": "pascal"}, {"text": "Version2Beta", "words": ["version2", "beta"]}, "digit-then-uppercase"),
     ok(
         "convert_identifier_case",
         {"text": "max_retry_count", "target": "title"},
@@ -444,6 +444,8 @@ SUCCESS_CASES = [
     ),
     ok("sort_text_lines", {"text": "ccc\na\nbb\nb", "mode": "length"}, {"text": "a\nb\nbb\nccc", "lines": 4}, "length-then-code-point"),
     ok("sort_text_lines", {"text": "b\na\nc", "descending": True}, {"text": "c\nb\na", "lines": 3}, "descending"),
+    # Spec r4: descending is a stable sort on reversed keys (1.0 stays before 1), and non-numeric lines stay last in input order.
+    ok("sort_text_lines", {"text": "1.0\n2\nx\n1\n3\nw", "mode": "numeric", "descending": True}, {"text": "3\n2\n1.0\n1\nx\nw", "lines": 6}, "numeric-descending-stable"),
     ok("sort_text_lines", {"text": "b\r\na\r\nb\r\na\r\n", "unique": True}, {"text": "a\nb\n", "lines": 2}, "unique-crlf-trailing-break"),
     # A.13 strip_html_tags.
     ok(
@@ -515,6 +517,9 @@ SUCCESS_CASES = [
         {"text": "2: two\n3: three", "start_line": 2, "end_line": 3, "total_lines": 4},
         "numbered",
     ),
+    # Spec r4: a trailing line break is kept only when the range ends at the last line and the input ended with one.
+    ok("extract_line_range", {"text": "a\nb\nc\n", "start_line": 1, "end_line": 2}, {"text": "a\nb", "start_line": 1, "end_line": 2, "total_lines": 3}, "middle-range-no-break"),
+    ok("extract_line_range", {"text": "a\nb\nc\n", "start_line": 3}, {"text": "c\n", "start_line": 3, "end_line": 3, "total_lines": 3}, "last-line-keeps-break"),
     # A.13 fill_text_template.
     ok(
         "fill_text_template",
@@ -586,10 +591,12 @@ def test_text_rows_reject_bad_input(tool_runner: ToolRunner, case: FailureCase) 
 
 
 def test_strip_html_tags_turns_block_tags_into_line_breaks(tool_runner: ToolRunner) -> None:
-    # PREBUILT_HTML_BLOCK_TAGS has no listed members, so only `p` and `div` are assumed, and one or two breaks are accepted.
+    # Spec r4 lists PREBUILT_HTML_BLOCK_TAGS: each start and end tag inserts a break, three or more breaks become two, and the result is trimmed.
     output = tool_runner.output("strip_html_tags", {"html_text": "<p>first</p><div>second</div>"})
-    assert set(output) == {"text"}
-    assert re.fullmatch(r"first\n{1,2}second", output["text"]), output
+    assert output == {"text": "first\n\nsecond"}
+    # A void br is one start tag, so it inserts one break; inline tags insert nothing, and each line is stripped of spaces.
+    output = tool_runner.output("strip_html_tags", {"html_text": "a <br> b<b>c</b>  <li> d </li>"})
+    assert output == {"text": "a\nbc\nd"}
 
 
 def test_fill_text_template_reports_at_most_twenty_missing_names(tool_runner: ToolRunner) -> None:

@@ -107,6 +107,8 @@ SUCCESS_CASES = [
     # A.4 compute_quartiles: the row's own worked values for 1 through 8.
     ok("compute_quartiles", {"values": [8, 1, 7, 2, 6, 3, 5, 4]}, {"q1": 2.25, "q2": 4.5, "q3": 6.75, "iqr": 4.5}, "exclusive-default"),
     ok("compute_quartiles", {"values": [1, 2, 3, 4, 5, 6, 7, 8], "method": "inclusive"}, {"q1": 2.75, "q2": 4.5, "q3": 6.25, "iqr": 3.5}, "inclusive"),
+    # Spec r4: two values are enough, and exclusive quartiles may fall outside the data.
+    ok("compute_quartiles", {"values": [2, 1]}, {"q1": 0.75, "q2": 1.5, "q3": 2.25, "iqr": 1.5}, "two-values-outside-data"),
     # A.4 weighted_mean: (1*3 + 2*2 + 3*1) / 6.
     ok("weighted_mean", {"values": [1, 2, 3], "weights": [3, 2, 1]}, {"weighted_mean": 10 / 6, "total_weight": 6.0}, "basic"),
     ok("weighted_mean", {"values": [10, 20], "weights": [0, 1]}, {"weighted_mean": 20.0, "total_weight": 1.0}, "zero-weight-allowed"),

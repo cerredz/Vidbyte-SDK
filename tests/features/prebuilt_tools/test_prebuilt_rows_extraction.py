@@ -5,7 +5,7 @@ ROLE IN CODEBASE: One of the AC-11 row files in tests/features/prebuilt_tools/; 
 ARCHITECTURE NOTE: Every expected value is hand-derived from the row text and §9.2, with positions recomputed by str.find on the same text rather than read back from the implementation.
 FUNCTION INVENTORY: test_extraction_rows_return_documented_output checks SUCCESS_CASES; test_extraction_rows_reject_bad_input checks FAILURE_CASES; counting_numbers builds the long extract_numbers expectation by arithmetic.
 COMMON MODIFICATION PATTERNS: Add an ok(...) entry beside the tool's existing cases and recompute its positions with str.find before pinning them.
-WHAT NOT TO DO IN THIS FILE: 1. Do not pin an output detail the row leaves open (the text of a percent match); use ANY instead. 2. Do not add character-budget or quadratic-scan inputs here; test_prebuilt_resource_bounds.py owns them.
+WHAT NOT TO DO IN THIS FILE: 1. Do not pin an output detail a row leaves open; use ANY instead (spec r4 fixed the last one here: a percent match's text includes the % sign). 2. Do not add character-budget or quadratic-scan inputs here; test_prebuilt_resource_bounds.py owns them.
 KNOWN EDGE CASES: count keys beside unique-value lists count distinct values, not occurrences; a sign belongs to a number only after whitespace or an opening mark; "999.1.1.1" must not yield its tail "99.1.1.1".
 RELATED DOCS: tests/features/prebuilt_tools/FEATURE.md; docs/spec/prebuilt-agent-tools/spec.md Appendix A.29 and §9.2 items 6, 9, 12, 15
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/prebuilt_tools/test_prebuilt_rows_extraction.py
@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from tests.features.prebuilt_tools.prebuilt_tool_harness import ANY, FailureCase, SuccessCase, ToolRunner, invalid, ok
+from tests.features.prebuilt_tools.prebuilt_tool_harness import FailureCase, SuccessCase, ToolRunner, invalid, ok
 
 
 def counting_numbers(total: int) -> tuple[str, list[dict[str, Any]]]:
@@ -98,7 +98,7 @@ SUCCESS_CASES = [
     ok(
         "extract_numbers",
         {"text": "Done 45% so far"},
-        {"numbers": [{"text": ANY, "value": "45", "position": 5, "is_percent": True}], "count": 1, "truncated": False},
+        {"numbers": [{"text": "45%", "value": "45", "position": 5, "is_percent": True}], "count": 1, "truncated": False},
         "percent-not-divided",
     ),
     ok(

@@ -3,10 +3,10 @@
 PURPOSE: Exact-output and error cases for every Appendix A row of the json_data, json_records, and csv_tables categories (A.17-A.19), run through FunctionTool.execute as a model would call them.
 ROLE IN CODEBASE: Row-level acceptance (AC-11) for 27 prebuilt tools; reaches each tool through the session ToolRunner in tests/features/prebuilt_tools/conftest.py and compares with tests/features/prebuilt_tools/prebuilt_tool_harness.OutputMatcher.
 ARCHITECTURE NOTE: Expected values are hand-computed from the rows, RFC 6901 and RFC 6902 published examples, or the stdlib json and csv modules the rows themselves name; nothing is read from the implementation.
-FUNCTION INVENTORY: test_json_csv_rows_return_documented_output checks SUCCESS_CASES; test_json_csv_rows_reject_bad_input checks FAILURE_CASES; test_csv_to_records_infers_integer_and_float_types pins JSON number types; test_csv_to_markdown_table_escapes_cells_and_aligns_columns checks the table structure the row fixes.
+FUNCTION INVENTORY: test_json_csv_rows_return_documented_output checks SUCCESS_CASES; test_json_csv_rows_reject_bad_input checks FAILURE_CASES; test_csv_to_records_infers_integer_and_float_types pins JSON number types; test_csv_to_markdown_table_escapes_cells_and_aligns_columns checks the exact table text for every alignment and the left default.
 COMMON MODIFICATION PATTERNS: Add a row case as one ok(...) or bad(...) entry; keep each expected object complete, because the matcher demands the row's exact key set.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import vidbyte.tools.toolsets or the prebuilt package at module level; the conftest fixtures import them so a missing feature fails at setup. 2. Do not add output-amplification or 100,000-bracket cases here; test_prebuilt_resource_bounds.py owns INV-19 and INV-20 limits.
-KNOWN EDGE CASES: JSON depth counts [] as one level, so 100 nested arrays are allowed and 101 are not. CSV cells holding only whitespace are empty. Pydantic rejects a JSON array sent for a *_json text parameter (EC-30). The Markdown table text is checked by structure because the row fixes escaping and alignment but not cell padding.
+KNOWN EDGE CASES: JSON depth counts [] as one level, so 100 nested arrays are allowed and 101 are not. CSV cells holding only whitespace are empty. Pydantic rejects a JSON array sent for a *_json text parameter (EC-30). Spec r4 fixes the Markdown table text exactly, the null positions of the fixed verify_json_syntax messages, the fallback quote character and row count of detect_csv_dialect, and distinct-by-text profiling; has_header stays ANY because the row does not say how a header is detected.
 RELATED DOCS: tests/features/prebuilt_tools/FEATURE.md; docs/spec/prebuilt-agent-tools/spec.md (Appendix A.17, A.18, A.19; §9.2 items 3, 12, 14, 15)
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/prebuilt_tools/test_prebuilt_rows_json_csv.py
 """
@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 
-from tests.features.prebuilt_tools.prebuilt_tool_harness import ANY, FailureCase, SuccessCase, ToolRunner, bad, invalid, ok
+from tests.features.prebuilt_tools.prebuilt_tool_harness import ANY, NON_EMPTY_TEXT, FailureCase, SuccessCase, ToolRunner, bad, invalid, ok
 
 
 def nested_empty_lists(depth: int) -> list[Any]:
@@ -66,9 +66,9 @@ JSON_DATA_CASES = [
     ok("verify_json_syntax", {"json_text": '{"a": 1,}'}, {"valid": False, "error": "Expecting property name enclosed in double quotes", "line": 1, "column": 9, "position": 8, "top_level_type": None}, "trailing-comma"),
     ok("verify_json_syntax", {"json_text": '{\n  "a": 1\n  "b": 2\n}'}, {"valid": False, "error": "Expecting ',' delimiter", "line": 3, "column": 3, "position": 13, "top_level_type": None}, "multiline-error"),
     ok("verify_json_syntax", {"json_text": ""}, {"valid": False, "error": "Expecting value", "line": 1, "column": 1, "position": 0, "top_level_type": None}, "empty-text"),
-    ok("verify_json_syntax", {"json_text": "[1, NaN]"}, {"valid": False, "error": ANY, "line": ANY, "column": ANY, "position": ANY, "top_level_type": None}, "nan-constant-invalid"),
+    ok("verify_json_syntax", {"json_text": "[1, NaN]"}, {"valid": False, "error": NON_EMPTY_TEXT, "line": None, "column": None, "position": None, "top_level_type": None}, "nan-constant-invalid"),
     ok("verify_json_syntax", {"json_text": "[" * 100 + "]" * 100}, {"valid": True, "error": None, "line": None, "column": None, "position": None, "top_level_type": "array"}, "depth-100-valid"),
-    ok("verify_json_syntax", {"json_text": "[" * 101 + "]" * 101}, {"valid": False, "error": ANY, "line": ANY, "column": ANY, "position": None, "top_level_type": None}, "depth-101-invalid"),
+    ok("verify_json_syntax", {"json_text": "[" * 101 + "]" * 101}, {"valid": False, "error": NON_EMPTY_TEXT, "line": None, "column": None, "position": None, "top_level_type": None}, "depth-101-invalid"),
     ok("format_json", {"json_text": '{"b": 1, "a": [1, 2], "c": {}}'}, {"json": '{\n  "b": 1,\n  "a": [\n    1,\n    2\n  ],\n  "c": {}\n}'}, "default-indent-2"),
     ok("format_json", {"json_text": '{"b": {"d": 1, "c": 2}, "a": []}', "sort_keys": True}, {"json": '{\n  "a": [],\n  "b": {\n    "c": 2,\n    "d": 1\n  }\n}'}, "sort-keys"),
     ok("format_json", {"json_text": '{ "a" : 1 , "b" : [ 1.0 , "é" ] }', "indent": 0}, {"json": '{"a":1,"b":[1.0,"é"]}'}, "indent-0-compact"),
@@ -159,7 +159,7 @@ CSV_TABLES_CASES = [
     ok("csv_to_records", {"csv_text": "a;b;c\n1;2;3\n4;5;6\n"}, {"records": [{"a": "1", "b": "2", "c": "3"}, {"a": "4", "b": "5", "c": "6"}], "columns": ["a", "b", "c"], "rows": 2}, "detects-semicolon"),
     ok("detect_csv_dialect", {"csv_text": "a;b;c\n1;2;3\n4;5;6\n"}, {"delimiter": "semicolon", "has_header": True, "quote_character": "\"", "columns": 3, "rows": 2}, "semicolon"),
     ok("detect_csv_dialect", {"csv_text": "a\tb\n1\t2\n"}, {"delimiter": "tab", "has_header": ANY, "quote_character": "\"", "columns": 2, "rows": 1}, "tab"),
-    ok("detect_csv_dialect", {"csv_text": "abc\n"}, {"delimiter": "comma", "has_header": ANY, "quote_character": ANY, "columns": 1, "rows": ANY}, "falls-back-to-comma"),
+    ok("detect_csv_dialect", {"csv_text": "abc\n"}, {"delimiter": "comma", "has_header": ANY, "quote_character": "\"", "columns": 1, "rows": 0}, "falls-back-to-comma"),
     ok("profile_csv_columns", {"csv_text": PROFILE_CSV, "delimiter": "comma"}, {"rows": 3, "columns": [
         {"name": "id", "inferred_type": "integer", "non_empty": 3, "empty": 0, "distinct": 2, "min": "3", "max": "10", "mean": 16 / 3, "examples": ["3", "10"]},
         {"name": "price", "inferred_type": "number", "non_empty": 3, "empty": 0, "distinct": 3, "min": "-1", "max": "7", "mean": 8.5 / 3, "examples": ["2.5", "-1", "7"]},
@@ -168,7 +168,7 @@ CSV_TABLES_CASES = [
         {"name": "name", "inferred_type": "text", "non_empty": 3, "empty": 0, "distinct": 2, "min": "Bob", "max": "alice", "mean": None, "examples": ["Bob", "alice"]},
         {"name": "blank", "inferred_type": "empty", "non_empty": 0, "empty": 3, "distinct": 0, "min": None, "max": None, "mean": None, "examples": []},
     ]}, "all-column-types"),
-    ok("profile_csv_columns", {"csv_text": "q\n02\n2\n5\n", "delimiter": "comma"}, {"rows": 3, "columns": [{"name": "q", "inferred_type": "integer", "non_empty": 3, "empty": 0, "distinct": ANY, "min": "02", "max": "5", "mean": 3.0, "examples": ANY}]}, "equal-values-first-in-row-order"),
+    ok("profile_csv_columns", {"csv_text": "q\n02\n2\n5\n", "delimiter": "comma"}, {"rows": 3, "columns": [{"name": "q", "inferred_type": "integer", "non_empty": 3, "empty": 0, "distinct": 3, "min": "02", "max": "5", "mean": 3.0, "examples": ["02", "2", "5"]}]}, "equal-values-first-in-row-order"),
     ok("csv_filter_rows", {"csv_text": FILTER_CSV, "column": "qty", "operator": "greater_than", "value": "9", "delimiter": "comma"}, {"csv": "name,qty\nA,10\nC,x\n", "matched": 2}, "numeric-then-text-comparison"),
     ok("csv_filter_rows", {"csv_text": FILTER_CSV, "column": "qty", "operator": "is_empty", "delimiter": "comma"}, {"csv": "name,qty\nD,\nE, \n", "matched": 2}, "whitespace-cell-is-empty"),
     ok("csv_filter_rows", {"csv_text": "v\n1.0\n1\n01\nx\n", "column": "v", "operator": "equals", "value": "1", "delimiter": "comma"}, {"csv": "v\n1.0\n1\n01\n", "matched": 3}, "numeric-equality"),
@@ -188,7 +188,12 @@ CSV_TABLES_CASES = [
     ok("csv_group_by", {"csv_text": GROUP_CSV, "group_column": "g", "value_column": "v", "function": "count", "delimiter": "comma"}, {"groups": [{"key": "x", "result": 2, "values_used": 2}, {"key": "y", "result": 2, "values_used": 2}, {"key": "", "result": 1, "values_used": 1}]}, "count"),
     ok("csv_join_tables", {"left_csv": JOIN_LEFT_CSV, "right_csv": JOIN_RIGHT_CSV, "left_column": "id", "right_column": "id", "delimiter": "comma"}, {"csv": JOINED_CSV, "rows": 2, "truncated": False}, "inner-text-keys"),
     ok("csv_join_tables", {"left_csv": JOIN_LEFT_CSV, "right_csv": JOIN_RIGHT_CSV, "left_column": "id", "right_column": "id", "kind": "left", "delimiter": "comma"}, {"csv": JOINED_CSV + "2,b,,\n01,c,,\n", "rows": 4, "truncated": False}, "left-pads-empty"),
-    ok("csv_to_markdown_table", {"csv_text": "name,qty\nA|B,10\n\"x\ny\",2\n", "delimiter": "comma", "alignment": "auto"}, {"markdown": ANY, "rows": 2, "columns": 2}, "counts"),
+    ok(
+        "csv_to_markdown_table",
+        {"csv_text": "name,qty\nA|B,10\n\"x\ny\",2\n", "delimiter": "comma", "alignment": "auto"},
+        {"markdown": "| name | qty |\n| :--- | ---: |\n| A\\|B | 10 |\n| x<br>y | 2 |", "rows": 2, "columns": 2},
+        "auto-exact-text",
+    ),
 ]
 
 SUCCESS_CASES = JSON_DATA_CASES + JSON_RECORDS_CASES + CSV_TABLES_CASES
@@ -255,19 +260,11 @@ def test_csv_to_records_infers_integer_and_float_types(tool_runner: ToolRunner) 
 
 def test_csv_to_markdown_table_escapes_cells_and_aligns_columns(tool_runner: ToolRunner) -> None:
     text = "name,qty\nA|B,10\n\"x\ny\",2\n"
-    auto = tool_runner.output("csv_to_markdown_table", {"csv_text": text, "delimiter": "comma", "alignment": "auto"})
-    lines = auto["markdown"].strip("\n").split("\n")
-    assert len(lines) == 4, auto["markdown"]
-    assert markdown_cells(lines[0]) == ["name", "qty"]
-    assert markdown_cells(lines[2]) == ["A\\|B", "10"]
-    assert markdown_cells(lines[3]) == ["x<br>y", "2"]
-    # auto right-aligns the all-numeric column and left-aligns the text column.
-    name_rule, qty_rule = markdown_cells(lines[1])
-    assert re.fullmatch(r":?-+", name_rule), lines[1]
-    assert re.fullmatch(r"-+:", qty_rule), lines[1]
-    centered = tool_runner.output("csv_to_markdown_table", {"csv_text": text, "delimiter": "comma", "alignment": "center"})
-    center_rules = markdown_cells(centered["markdown"].strip("\n").split("\n")[1])
-    assert all(re.fullmatch(r":-+:", rule) for rule in center_rules), center_rules
-    right = tool_runner.output("csv_to_markdown_table", {"csv_text": text, "delimiter": "comma", "alignment": "right"})
-    right_rules = markdown_cells(right["markdown"].strip("\n").split("\n")[1])
-    assert all(re.fullmatch(r"-+:", rule) for rule in right_rules), right_rules
+    body = "| A\\|B | 10 |\n| x<br>y | 2 |"
+    # Spec r4 fixes the whole text: one space around each cell, no other padding, and no trailing line break.
+    separators = {"left": "| :--- | :--- |", "center": "| :---: | :---: |", "right": "| ---: | ---: |", "auto": "| :--- | ---: |"}
+    for alignment, separator in separators.items():
+        output = tool_runner.output("csv_to_markdown_table", {"csv_text": text, "delimiter": "comma", "alignment": alignment})
+        assert output["markdown"] == f"| name | qty |\n{separator}\n{body}", (alignment, output["markdown"])
+    default = tool_runner.output("csv_to_markdown_table", {"csv_text": text, "delimiter": "comma"})
+    assert markdown_cells(default["markdown"].split("\n")[1]) == [":---", ":---"], default["markdown"]

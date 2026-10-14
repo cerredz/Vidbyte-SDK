@@ -3,10 +3,10 @@
 PURPOSE: Exact-output and error-behavior cases for every Appendix A row of the geometry, bits_bytes, and markdown_html categories (20 tools), called through FunctionTool.execute the way a model calls them.
 ROLE IN CODEBASE: Row-level proof of AC-11 for spec Appendix A.26, A.27, and A.28; uses the tool_runner fixture from conftest.py and the case builders in prebuilt_tool_harness.py.
 ARCHITECTURE NOTE: Every expected value was computed without the implementation: geometry by unit-vector algebra (a different route from the haversine and bearing formulas) cross-checked against the classic formulas, rounding by Decimal(repr(x)) under spec §9.2 item 17, bit patterns and sizes by hand.
-FUNCTION INVENTORY: SUCCESS_CASES and FAILURE_CASES are the parametrized tables; test_geometry_bits_markdown_rows_return_documented_output and test_geometry_bits_markdown_rows_reject_bad_input check them; test_fenced_code_block_code_and_lines checks the parts of extract_fenced_code_blocks the row leaves loosely worded; test_malformed_html_table_never_raises checks the HTML parser rule.
+FUNCTION INVENTORY: SUCCESS_CASES and FAILURE_CASES are the parametrized tables; test_geometry_bits_markdown_rows_return_documented_output and test_geometry_bits_markdown_rows_reject_bad_input check them; test_fenced_code_block_code_and_lines checks the exact code and fence lines of extract_fenced_code_blocks on a document that ends with a line break; test_malformed_html_table_never_raises checks the HTML parser rule and the column names of a table with no header row.
 COMMON MODIFICATION PATTERNS: Add a row case as one ok(...), bad(...), or invalid(...) entry with a hand-computed expectation and a label that says what it proves.
 WHAT NOT TO DO IN THIS FILE: 1. Do not compute expectations by calling the tool functions or copying their algorithm; use a different route. 2. Do not add over-output-cap cases here; the resource-bounds module owns INV-20.
-KNOWN EDGE CASES: decimal_degrees_to_dms must round 0.000875 degrees to 3.2 arc-seconds, while float rounding of 0.000875 * 3600 gives 3.1. The setext heading line, the autolink text, and the fenced block lines are worded loosely in the rows, so those values are ANY or checked as ranges.
+KNOWN EDGE CASES: decimal_degrees_to_dms must round 0.000875 degrees to 3.2 arc-seconds, while float rounding of 0.000875 * 3600 gives 3.1. Spec r4 fixes the setext heading line (its text line, not the underline), the autolink text (the URL between the angle brackets), and the fenced block lines (the fence lines; an unclosed block ends at the last line), so none of them is left open.
 RELATED DOCS: tests/features/prebuilt_tools/FEATURE.md; docs/spec/prebuilt-agent-tools/spec.md Appendix A.26, A.27, A.28 and §9.2
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/prebuilt_tools/test_prebuilt_rows_geometry_bits_markdown.py
 """
@@ -17,7 +17,7 @@ import math
 
 import pytest
 
-from tests.features.prebuilt_tools.prebuilt_tool_harness import ANY, FailureCase, SuccessCase, ToolRunner, bad, invalid, ok
+from tests.features.prebuilt_tools.prebuilt_tool_harness import FailureCase, SuccessCase, ToolRunner, bad, invalid, ok
 
 EARTH_RADIUS_KILOMETERS = 6371.0088
 QUARTER_CIRCLE_KILOMETERS = math.pi / 2 * EARTH_RADIUS_KILOMETERS
@@ -235,7 +235,7 @@ SUCCESS_CASES = [
                 {"level": 1, "text": "Hello World!", "line": 1, "anchor": "hello-world"},
                 {"level": 2, "text": "Setup & Install", "line": 3, "anchor": "setup--install"},
                 {"level": 3, "text": "Hello World!", "line": 8, "anchor": "hello-world-1"},
-                {"level": 1, "text": "Plain Title", "line": ANY, "anchor": "plain-title"},
+                {"level": 1, "text": "Plain Title", "line": 10, "anchor": "plain-title"},
                 {"level": 6, "text": "Six", "line": 15, "anchor": "six"},
             ],
             "count": 5,
@@ -298,7 +298,7 @@ SUCCESS_CASES = [
             "links": [
                 {"text": "Docs", "url": "https://example.com/docs", "title": "Guide", "kind": "inline", "line": 1},
                 {"text": "Logo", "url": "img/logo.png", "title": None, "kind": "image", "line": 1},
-                {"text": ANY, "url": "https://auto.example.org/x", "title": None, "kind": "autolink", "line": 2},
+                {"text": "https://auto.example.org/x", "url": "https://auto.example.org/x", "title": None, "kind": "autolink", "line": 2},
                 {"text": "Home", "url": "https://home.example", "title": "Home Page", "kind": "reference", "line": 3},
             ],
             "count": 4,
@@ -313,9 +313,9 @@ SUCCESS_CASES = [
         {"markdown": CODE_MARKDOWN},
         {
             "blocks": [
-                {"language": "Python", "code": ANY, "start_line": ANY, "end_line": ANY},
-                {"language": "js", "code": ANY, "start_line": ANY, "end_line": ANY},
-                {"language": None, "code": ANY, "start_line": ANY, "end_line": 10},
+                {"language": "Python", "code": "print(\"hi\")", "start_line": 2, "end_line": 4},
+                {"language": "js", "code": "let a = 1;", "start_line": 5, "end_line": 7},
+                {"language": None, "code": "plain\nunclosed", "start_line": 8, "end_line": 10},
             ],
             "count": 3,
         },
@@ -324,7 +324,7 @@ SUCCESS_CASES = [
     ok(
         "extract_fenced_code_blocks",
         {"markdown": CODE_MARKDOWN, "language": "PYTHON"},
-        {"blocks": [{"language": "Python", "code": ANY, "start_line": ANY, "end_line": ANY}], "count": 1},
+        {"blocks": [{"language": "Python", "code": "print(\"hi\")", "start_line": 2, "end_line": 4}], "count": 1},
         "language-filter-ignores-case",
     ),
     ok("extract_fenced_code_blocks", {"markdown": CODE_MARKDOWN, "language": "go"}, {"blocks": [], "count": 0}, "language-not-present"),
@@ -411,6 +411,9 @@ FAILURE_CASES = [
     bad("bitwise_operation", {"left": "12", "operation": "xor"}, "right", "xor-needs-right"),
     bad("bitwise_operation", {"left": "12", "operation": "not"}, "width", "not-needs-width"),
     bad("bitwise_operation", {"left": "1", "operation": "shift_left", "right": "-1"}, "right", "negative-shift"),
+    # Spec r4 names `right` for a missing or out-of-range shift amount; PREBUILT_MAX_BIT_WIDTH is 4096.
+    bad("bitwise_operation", {"left": "1", "operation": "shift_left"}, "right", "shift-without-amount"),
+    bad("bitwise_operation", {"left": "1", "operation": "shift_right", "right": "4097"}, "right", "shift-past-bit-width"),
     bad("bitwise_operation", {"left": "9" * 4000, "operation": "shift_left", "right": "1"}, "right", "result-over-4000-digits"),
     invalid("bitwise_operation", {"left": "1", "operation": "or", "right": "1", "width": 4097}, "width", "width-over-cap"),
     bad("integer_to_twos_complement", {"value": "128", "width": 8}, "value", "above-range"),
@@ -443,15 +446,16 @@ def test_geometry_bits_markdown_rows_reject_bad_input(tool_runner: ToolRunner, c
 
 
 def test_fenced_code_block_code_and_lines(tool_runner: ToolRunner) -> None:
-    blocks = tool_runner.output("extract_fenced_code_blocks", {"markdown": CODE_MARKDOWN})["blocks"]
-    # The code excludes the fence lines; a single trailing line break is the only difference the row leaves open.
-    assert [block["code"].rstrip("\n") for block in blocks] == ["print(\"hi\")", "let a = 1;", "plain\nunclosed"]
-    # Lines are 1-based: a block starts at its opening fence or first code line and ends at its closing fence or last code line.
-    assert blocks[0]["start_line"] in (2, 3) and blocks[0]["end_line"] in (3, 4)
-    assert blocks[1]["start_line"] in (5, 6) and blocks[1]["end_line"] in (6, 7)
-    assert blocks[2]["start_line"] in (8, 9)
+    blocks = tool_runner.output("extract_fenced_code_blocks", {"markdown": CODE_MARKDOWN + "\n"})["blocks"]
+    # Spec r4: code is the lines between the fences joined with a line break and no trailing break, even when the document ends with one.
+    assert [block["code"] for block in blocks] == ["print(\"hi\")", "let a = 1;", "plain\nunclosed"]
+    # Lines are 1-based fence lines; an unclosed block ends at the document's last line, and a trailing break starts no new line.
+    assert [(block["start_line"], block["end_line"]) for block in blocks] == [(2, 4), (5, 7), (8, 10)]
 
 
 def test_malformed_html_table_never_raises(tool_runner: ToolRunner) -> None:
     output = tool_runner.output("html_table_to_records", {"html_text": "<table><tr><td>a<td>b</tr><tr><td>c"})
     assert output["table_count"] == 1
+    # Spec r4: with no th header row, the longest row sets how many columns are named.
+    assert output["columns"] == ["column_1", "column_2"]
+    assert output["records"][0] == {"column_1": "a", "column_2": "b"}

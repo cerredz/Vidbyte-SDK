@@ -3,10 +3,10 @@
 PURPOSE: Exact-output and error cases for every Appendix A row of the structured_formats, encoding, and hashing categories (A.20 to A.22, 26 tools), run through FunctionTool.execute as a model would call them.
 ROLE IN CODEBASE: Row-level proof of AC-11 for these three categories; uses the ToolRunner fixture from tests/features/prebuilt_tools/conftest.py and the case builders in prebuilt_tool_harness.py.
 ARCHITECTURE NOTE: Expected values come from published vectors (RFC 3986, RFC 4231, RFC 2202, RFC 4648, FIPS and BLAKE2 test vectors, git's empty blob, the jwt.io sample token), from hand derivation, or from an independent pure-Python CRC-32 and Adler-32; nothing is copied from the implementation.
-FUNCTION INVENTORY: test_formats_encoding_rows_return_documented_output checks SUCCESS_CASES; test_formats_encoding_rows_reject_bad_input checks FAILURE_CASES; test_compute_hmac_errors_never_repeat_the_key checks T-3; test_parse_dotenv_text_error_omits_line_content checks T-3 for .env text; test_verify_xml_wellformed_reports_rejected_markup_with_a_message checks EC-11; test_encoding_round_trips_restore_the_text checks base64 and hex round trips.
+FUNCTION INVENTORY: test_formats_encoding_rows_return_documented_output checks SUCCESS_CASES; test_formats_encoding_rows_reject_bad_input checks FAILURE_CASES; test_compute_hmac_errors_never_repeat_the_key checks T-3; test_parse_dotenv_text_error_omits_line_content checks T-3 for .env text; test_encoding_round_trips_restore_the_text checks base64 and hex round trips.
 COMMON MODIFICATION PATTERNS: Add a row case as one ok(...) or bad(...) entry in the matching table, with every output key listed and the source of the expected value obvious from a published vector or a short hand derivation.
 WHAT NOT TO DO IN THIS FILE: 1. Do not compute expected values by calling hashlib, base64, or the tool under test at test time; use literal vectors. 2. Do not add nesting-depth or output-cap cases here; test_prebuilt_resource_bounds.py owns them.
-KNOWN EDGE CASES: An unpaired surrogate cannot reach a tool through FunctionTool.execute (pydantic JSON mode rejects it), so EC-14 is exercised with characters a codec cannot encode, such as the euro sign in latin_1 or ascii. Expat reports the column of the mismatched end-tag name, and the row makes it 1-based. The codec utf_16 adds a byte-order mark in native order, so byte-exact cases use utf_16_le and utf_16_be.
+KNOWN EDGE CASES: An unpaired surrogate cannot reach a tool through FunctionTool.execute (pydantic JSON mode rejects it), so EC-14 is exercised with characters a codec cannot encode, such as the euro sign in latin_1 or ascii. Expat reports the column of the mismatched end-tag name, and the row makes it 1-based. The codec utf_16 adds a byte-order mark in native order, so byte-exact cases use utf_16_le and utf_16_be. Spec r4 gives a rejected DOCTYPE or long namespace URI a fixed non-empty error with null line and column, and maps every findall exception for a path, KeyError for "@" included, to error(path).
 RELATED DOCS: tests/features/prebuilt_tools/FEATURE.md; docs/spec/prebuilt-agent-tools/spec.md (Appendix A.20, A.21, A.22; §9.2; §10 T-3 and T-6)
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/prebuilt_tools/test_prebuilt_rows_formats_encoding.py
 """
@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.features.prebuilt_tools.prebuilt_tool_harness import ANY, FailureCase, SuccessCase, ToolRunner, bad, invalid, ok
+from tests.features.prebuilt_tools.prebuilt_tool_harness import NON_EMPTY_TEXT, FailureCase, SuccessCase, ToolRunner, bad, invalid, ok
 
 ABC_SHA256 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
 EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -120,14 +120,20 @@ STRUCTURED_FORMAT_CASES = [
     ok(
         "verify_xml_wellformed",
         {"xml_text": ENTITY_BOMB},
-        {"wellformed": False, "error": ANY, "line": ANY, "column": ANY, "root_tag": None},
+        {"wellformed": False, "error": NON_EMPTY_TEXT, "line": None, "column": None, "root_tag": None},
         "entity-bomb",
     ),
     ok(
         "verify_xml_wellformed",
         {"xml_text": LONG_NAMESPACE_XML},
-        {"wellformed": False, "error": ANY, "line": ANY, "column": ANY, "root_tag": None},
+        {"wellformed": False, "error": NON_EMPTY_TEXT, "line": None, "column": None, "root_tag": None},
         "long-namespace-uri",
+    ),
+    ok(
+        "verify_xml_wellformed",
+        {"xml_text": "<!DOCTYPE a>\n<a/>"},
+        {"wellformed": False, "error": NON_EMPTY_TEXT, "line": None, "column": None, "root_tag": None},
+        "plain-doctype",
     ),
     ok(
         "xml_find_elements",
@@ -425,6 +431,12 @@ HASHING_CASES = [
         "url-safe-detected",
     ),
     ok("hash_base64_content", {"data_base64": ""}, {"digest": EMPTY_SHA256, "algorithm": "sha256", "size_bytes": 0}, "empty"),
+    ok(
+        "hash_base64_content",
+        {"data_base64": "YWJj", "digest_format": "base64"},
+        {"digest": "ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=", "algorithm": "sha256", "size_bytes": 3},
+        "base64-digest-keeps-padding",
+    ),
     ok("compute_hmac", {"message": JEFE_MESSAGE, "key": "Jefe"}, {"digest": JEFE_HMAC_SHA256, "algorithm": "sha256"}, "rfc4231-sha256"),
     *[
         ok("compute_hmac", {"message": JEFE_MESSAGE, "key": "Jefe", "algorithm": name}, {"digest": digest, "algorithm": name}, f"rfc-{name}")
@@ -519,6 +531,8 @@ FAILURE_CASES = [
     bad("xml_to_json", {"xml_text": "<a><b></a>"}, "xml_text", "parse-error", contains="mismatched tag"),
     bad("xml_find_elements", {"xml_text": "<a><b/></a>", "path": "["}, "path", "unbalanced-bracket"),
     bad("xml_find_elements", {"xml_text": "<a><b/></a>", "path": "/b"}, "path", "absolute-path"),
+    # Spec r4: every exception findall raises for the path is error(path); the stdlib raises KeyError for "@".
+    bad("xml_find_elements", {"xml_text": "<a><b/></a>", "path": "@"}, "path", "bare-attribute-key-error"),
     bad("xml_find_elements", {"xml_text": ENTITY_BOMB, "path": "x"}, "xml_text", "doctype-entity"),
     bad("xml_find_elements", {"xml_text": "<a><b></a>", "path": "b"}, "xml_text", "parse-error"),
     invalid("xml_find_elements", {"xml_text": "<a/>", "path": ""}, "path", "empty-path"),
@@ -598,15 +612,6 @@ def test_parse_dotenv_text_error_omits_line_content(tool_runner: ToolRunner) -> 
     result = tool_runner.check_failure(FailureCase("parse_dotenv_text", arguments, "dotenv_text", "ToolExecutionError"))
     assert "SECRETVALUE" not in result.output
     assert "this line holds" not in result.output
-
-
-@pytest.mark.parametrize("xml_text", [ENTITY_BOMB, LONG_NAMESPACE_XML], ids=["entity-bomb", "long-namespace-uri"])
-def test_verify_xml_wellformed_reports_rejected_markup_with_a_message(tool_runner: ToolRunner, xml_text: str) -> None:
-    # EC-11: rejected markup is a successful result with wellformed false and a fixed, non-empty explanation.
-    output = tool_runner.output("verify_xml_wellformed", {"xml_text": xml_text})
-    assert output["wellformed"] is False
-    assert isinstance(output["error"], str) and output["error"].strip()
-    assert output["root_tag"] is None
 
 
 @pytest.mark.parametrize("text_encoding", ["utf_8", "utf_16_le", "utf_16_be", "utf_32", "cp1252"])

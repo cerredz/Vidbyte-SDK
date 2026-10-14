@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Each case is a pytest.param built by the harness helpers ok, 
 FUNCTION INVENTORY: test_identifiers_lists_graphs_rows_return_documented_output checks SUCCESS_CASES; test_identifiers_lists_graphs_rows_reject_bad_input checks FAILURE_CASES.
 COMMON MODIFICATION PATTERNS: Add a row case as one ok, bad, or invalid entry beside the other cases of the same tool, and verify its expected value by a route that does not reuse the implementation.
 WHAT NOT TO DO IN THIS FILE: 1. Do not compute expectations by calling vidbyte code; a copy of the implementation cannot catch its mistakes. 2. Do not import vidbyte.tools.toolsets or vidbyte.tools.builtins.prebuilt at module level; a missing feature must fail at setup, not at collection.
-KNOWN EDGE CASES: Check digits come from published vectors (Luhn 79927398713, ISBN 978-0-306-40615-7, IBAN GB82 WEST 1234 5698 7654 32, GTIN 4006381333931) and the RFC 4122 name-based UUIDs of python.org. The two-step float chain in critical_path_schedule leaves a slack of about 3e-17, which the 1e-9 rule must still call critical.
+KNOWN EDGE CASES: Check digits come from published vectors (Luhn 79927398713, ISBN 978-0-306-40615-7, IBAN GB82 WEST 1234 5698 7654 32, GTIN 4006381333931) and the RFC 4122 name-based UUIDs of python.org. The two-step float chain in critical_path_schedule leaves a slack of about 3e-17, which the 1e-9 rule must still call critical. Spec r4 checks domain_too_long before address_too_long, so a 253-character domain still gives address_too_long while a 254-character one gives domain_too_long.
 RELATED DOCS: tests/features/prebuilt_tools/FEATURE.md; docs/spec/prebuilt-agent-tools/spec.md Appendix A.23, A.24, A.25 and §9.2
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/prebuilt_tools/test_prebuilt_rows_identifiers_lists_graphs.py
 """
@@ -47,6 +47,7 @@ IDENTIFIER_SUCCESS_CASES = [
     ok("verify_isbn", {"isbn": "978-0-306-40615-7"}, {"valid": True, "isbn10": "0306406152", "isbn13": "9780306406157", "input_length": 13}, "isbn13-978"),
     ok("verify_isbn", {"isbn": "0 306 40615 2"}, {"valid": True, "isbn10": "0306406152", "isbn13": "9780306406157", "input_length": 10}, "isbn10-spaces"),
     ok("verify_isbn", {"isbn": "0-8044-2957-X"}, {"valid": True, "isbn10": "080442957X", "isbn13": "9780804429573", "input_length": 10}, "isbn10-x"),
+    ok("verify_isbn", {"isbn": "0-8044-2957-x"}, {"valid": True, "isbn10": "080442957X", "isbn13": "9780804429573", "input_length": 10}, "isbn10-lowercase-x-written-upper"),
     ok("verify_isbn", {"isbn": "979-10-90636-07-1"}, {"valid": True, "isbn10": None, "isbn13": "9791090636071", "input_length": 13}, "isbn13-979"),
     ok("verify_isbn", {"isbn": "978-0-306-40615-8"}, {"valid": False, "isbn10": None, "isbn13": None, "input_length": 13}, "wrong-check"),
     ok("verify_isbn", {"isbn": "12345"}, {"valid": False, "isbn10": None, "isbn13": None, "input_length": 5}, "wrong-length"),
@@ -91,6 +92,13 @@ IDENTIFIER_SUCCESS_CASES = [
         {"email": "a@" + LONG_DOMAIN},
         {"valid": False, "reason": "address_too_long", "local_part": "a", "domain": LONG_DOMAIN},
         "address-255",
+    ),
+    # Spec r4 checks domain_too_long (over 253) before address_too_long, so a 254-character domain reports the domain.
+    ok(
+        "verify_email_syntax",
+        {"email": "a@" + LONG_DOMAIN + "e"},
+        {"valid": False, "reason": "domain_too_long", "local_part": "a", "domain": LONG_DOMAIN + "e"},
+        "domain-254-before-address-length",
     ),
     ok("verify_email_syntax", {"email": "@example.com"}, {"valid": False, "reason": "local_part_empty", "local_part": "", "domain": "example.com"}, "local-empty"),
     ok(

@@ -2,11 +2,11 @@
 
 PURPOSE: Hand-copied parameter table of every prebuilt tool from spec Appendix A and the §9.2 shorthand types: names in order, JSON type, length caps, item caps, and defaults.
 ROLE IN CODEBASE: Expected values for the schema contract test in tests/features/prebuilt_tools/test_prebuilt_toolset_contract.py; it imports nothing from vidbyte.
-ARCHITECTURE NOTE: Each entry is (parameter, json type, maxLength or maxItems, item maxLength, default). The type is a JSON Schema type, a JSON Schema format (date, date-time, time), or enum:<EnumName>.
-FUNCTION INVENTORY: Data only: the REQUIRED, ANY_CAP, and PATTERN_BOUND sentinels and TOOL_PARAMETERS.
+ARCHITECTURE NOTE: Each entry is (parameter, json type, maxLength or maxItems, item maxLength, default). The type is a JSON Schema type, a JSON Schema format (date, date-time, time), utc_offset for the §9.2 UtcOffset string, or enum:<EnumName>.
+FUNCTION INVENTORY: Data only: the REQUIRED sentinel and TOOL_PARAMETERS.
 COMMON MODIFICATION PATTERNS: When an Appendix A parameters cell changes, edit its entry here in the same commit as the spec.
 WHAT NOT TO DO IN THIS FILE: 1. Do not read FunctionTool schemas to fill this table; it must stay an independent transcription. 2. Do not add helpers here.
-KNOWN EDGE CASES: ANY_CAP marks a list whose row requires a cap (INV-16) without stating its value; PATTERN_BOUND marks a UtcOffset string bounded by its pattern instead of a length cap. Enum defaults are written as their value strings and tuple defaults as lists, which is how the JSON schema shows them.
+KNOWN EDGE CASES: A utc_offset parameter carries both the §9.2 UtcOffset pattern and the spec r4 cap PREBUILT_MAX_UTC_OFFSET_CHARS (6). The weekend_days cap of 7 is a literal in the rows, not a constant. Enum defaults are written as their value strings and tuple defaults as lists, which is how the JSON schema shows them.
 RELATED DOCS: docs/spec/prebuilt-agent-tools/spec.md (Appendix A, §9.2 item 2)
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/prebuilt_tools/test_prebuilt_toolset_contract.py
 """
@@ -16,8 +16,6 @@ from __future__ import annotations
 from types import MappingProxyType
 
 REQUIRED = "<required>"
-ANY_CAP = "<any cap>"
-PATTERN_BOUND = "<pattern bound>"
 
 ParameterRow = tuple[str, str, object, object, object]
 
@@ -117,17 +115,17 @@ TOOL_PARAMETERS: MappingProxyType[str, tuple[ParameterRow, ...]] = MappingProxyT
         'fiscal_quarter': (('target_date', 'date', None, None, REQUIRED), ('fiscal_year_start_month', 'integer', None, None, 1)),
         # A.10 scheduling
         'business_days_between': (('start_date', 'date', None, None, REQUIRED), ('end_date', 'date', None, None, REQUIRED), ('holidays', 'array', 1000, None, []), ('weekend_days', 'array', 7, None, ['saturday', 'sunday'])),
-        'add_business_days': (('start_date', 'date', None, None, REQUIRED), ('business_days', 'integer', None, None, REQUIRED), ('holidays', 'array', ANY_CAP, None, []), ('weekend_days', 'array', ANY_CAP, None, ['saturday', 'sunday'])),
+        'add_business_days': (('start_date', 'date', None, None, REQUIRED), ('business_days', 'integer', None, None, REQUIRED), ('holidays', 'array', 1000, None, []), ('weekend_days', 'array', 7, None, ['saturday', 'sunday'])),
         'list_dates_in_range': (('start_date', 'date', None, None, REQUIRED), ('end_date', 'date', None, None, REQUIRED), ('step_days', 'integer', None, None, 1), ('weekdays', 'array', 7, None, [])),
         'count_weekday_occurrences': (('start_date', 'date', None, None, REQUIRED), ('end_date', 'date', None, None, REQUIRED), ('weekday', 'enum:Weekday', None, None, REQUIRED)),
         'generate_recurring_dates': (('start_date', 'date', None, None, REQUIRED), ('frequency', 'enum:RecurrenceFrequency', None, None, REQUIRED), ('repeat_every', 'integer', None, None, 1), ('occurrences', 'integer', None, None, None), ('until_date', 'date', None, None, None)),
-        'merge_time_intervals': (('starts', 'array', 10000, None, REQUIRED), ('ends', 'array', 10000, None, REQUIRED), ('output_offset', 'string', PATTERN_BOUND, None, '+00:00')),
-        'find_common_free_slots': (('busy_starts', 'array', 10000, None, REQUIRED), ('busy_ends', 'array', 10000, None, REQUIRED), ('window_start', 'date-time', None, None, REQUIRED), ('window_end', 'date-time', None, None, REQUIRED), ('minimum_minutes', 'number', None, None, 30), ('output_offset', 'string', PATTERN_BOUND, None, '+00:00')),
+        'merge_time_intervals': (('starts', 'array', 10000, None, REQUIRED), ('ends', 'array', 10000, None, REQUIRED), ('output_offset', 'utc_offset', 6, None, '+00:00')),
+        'find_common_free_slots': (('busy_starts', 'array', 10000, None, REQUIRED), ('busy_ends', 'array', 10000, None, REQUIRED), ('window_start', 'date-time', None, None, REQUIRED), ('window_end', 'date-time', None, None, REQUIRED), ('minimum_minutes', 'number', None, None, 30), ('output_offset', 'utc_offset', 6, None, '+00:00')),
         'sort_date_strings': (('dates', 'array', 10000, 200, REQUIRED), ('day_first', 'boolean', None, None, False), ('descending', 'boolean', None, None, False)),
         # A.11 timestamps_durations
-        'unix_timestamp_to_datetime': (('timestamp', 'number', None, None, REQUIRED), ('unit', 'enum:TimestampUnit', None, None, 'seconds'), ('utc_offset', 'string', PATTERN_BOUND, None, '+00:00')),
+        'unix_timestamp_to_datetime': (('timestamp', 'number', None, None, REQUIRED), ('unit', 'enum:TimestampUnit', None, None, 'seconds'), ('utc_offset', 'utc_offset', 6, None, '+00:00')),
         'datetime_to_unix_timestamp': (('moment', 'date-time', None, None, REQUIRED), ('unit', 'enum:TimestampUnit', None, None, 'seconds')),
-        'convert_utc_offset': (('moment', 'date-time', None, None, REQUIRED), ('to_offset', 'string', PATTERN_BOUND, None, REQUIRED)),
+        'convert_utc_offset': (('moment', 'date-time', None, None, REQUIRED), ('to_offset', 'utc_offset', 6, None, REQUIRED)),
         'duration_between_datetimes': (('start', 'date-time', None, None, REQUIRED), ('end', 'date-time', None, None, REQUIRED)),
         'add_duration_to_datetime': (('moment', 'date-time', None, None, REQUIRED), ('days', 'integer', None, None, 0), ('hours', 'integer', None, None, 0), ('minutes', 'integer', None, None, 0), ('seconds', 'number', None, None, 0)),
         'format_duration': (('seconds', 'number', None, None, REQUIRED), ('style', 'enum:DurationStyle', None, None, 'compact')),
@@ -266,7 +264,7 @@ TOOL_PARAMETERS: MappingProxyType[str, tuple[ParameterRow, ...]] = MappingProxyT
         'shortest_path': (('sources', 'array', 10000, 200, REQUIRED), ('targets', 'array', 10000, 200, REQUIRED), ('start', 'string', 200, None, REQUIRED), ('goal', 'string', 200, None, REQUIRED), ('directed', 'boolean', None, None, True)),
         'shortest_weighted_path': (('sources', 'array', 10000, 200, REQUIRED), ('targets', 'array', 10000, 200, REQUIRED), ('weights', 'array', 10000, None, REQUIRED), ('start', 'string', 200, None, REQUIRED), ('goal', 'string', 200, None, REQUIRED), ('directed', 'boolean', None, None, True)),
         'connected_components': (('sources', 'array', 10000, 200, REQUIRED), ('targets', 'array', 10000, 200, REQUIRED), ('nodes', 'array', 10000, 200, [])),
-        'critical_path_schedule': (('tasks', 'array', 1000, 200, REQUIRED), ('durations', 'array', 10000, None, REQUIRED), ('dependency_sources', 'array', ANY_CAP, 200, []), ('dependency_targets', 'array', ANY_CAP, 200, [])),
+        'critical_path_schedule': (('tasks', 'array', 1000, 200, REQUIRED), ('durations', 'array', 10000, None, REQUIRED), ('dependency_sources', 'array', 10000, 200, []), ('dependency_targets', 'array', 10000, 200, [])),
         # A.26 geometry
         'haversine_distance': (('latitude1', 'number', None, None, REQUIRED), ('longitude1', 'number', None, None, REQUIRED), ('latitude2', 'number', None, None, REQUIRED), ('longitude2', 'number', None, None, REQUIRED), ('unit', 'enum:LengthUnit', None, None, 'kilometer')),
         'initial_bearing': (('latitude1', 'number', None, None, REQUIRED), ('longitude1', 'number', None, None, REQUIRED), ('latitude2', 'number', None, None, REQUIRED), ('longitude2', 'number', None, None, REQUIRED)),

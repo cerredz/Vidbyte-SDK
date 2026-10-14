@@ -3,10 +3,10 @@
 PURPOSE: Exact-output and error cases for every Appendix A row of the unicode (A.14), regex (A.15), and text_comparison (A.16) categories, run through FunctionTool.execute as a model would call them.
 ROLE IN CODEBASE: Row-level acceptance tests (AC-11) for 23 prebuilt tools; reaches each tool through the session ToolRunner over PrebuiltTools(PrebuiltToolCategory) built in tests/features/prebuilt_tools/conftest.py.
 ARCHITECTURE NOTE: Cases are data (ok, bad, invalid from prebuilt_tool_harness) checked by two parametrized functions; a few extra functions cover properties that one expected object cannot state, such as the text of a compile error.
-FUNCTION INVENTORY: char_info builds one unicode_character_info entry; found builds one find_unicode_character entry; test_unicode_regex_rows_return_documented_output checks SUCCESS_CASES; test_unicode_regex_rows_reject_bad_input checks FAILURE_CASES; test_verify_regex_pattern_reports_compile_error_text checks the error text; test_find_unicode_character_without_exact_name_lists_word_matches checks a query with no exact name.
+FUNCTION INVENTORY: char_info builds one unicode_character_info entry; found builds one find_unicode_character entry; test_unicode_regex_rows_return_documented_output checks SUCCESS_CASES; test_unicode_regex_rows_reject_bad_input checks FAILURE_CASES; test_verify_regex_pattern_reports_compile_error_text checks that the error is re.error.msg without the position suffix; test_find_unicode_character_without_exact_name_lists_word_matches checks a query with no exact name.
 COMMON MODIFICATION PATTERNS: Add a row case as one ok(...) or bad(...) entry with a hand-computed expectation; keep every key of the row in the expected object.
 WHAT NOT TO DO IN THIS FILE: 1. Do not pin characters added after Unicode 14.0 or names that changed between Python 3.11 and 3.12 (EC-38). 2. Do not add catastrophic regex patterns (EC-10) or million-character amplification inputs; test_prebuilt_resource_bounds.py owns INV-20.
-KNOWN EDGE CASES: Positions are code-point indices, so an astral character counts once. An unknown group name in a replacement template raises IndexError, not re.error, inside the re module. utf_16 and utf_32 sizes include the byte-order mark even for empty text. An unpaired surrogate cannot reach a tool through pydantic JSON mode, so unencodable text uses real characters.
+KNOWN EDGE CASES: Positions are code-point indices, so an astral character counts once. An unknown group name in a replacement template raises IndexError, not re.error, inside the re module. utf_16 and utf_32 sizes include the byte-order mark even for empty text. An unpaired surrogate cannot reach a tool through pydantic JSON mode (spec r4 EC-14), and no prebuilt code can change that, so unencodable text uses real characters. Spec r4 fixes verify_regex_pattern's error to re.error.msg, 160 units per segment for empty SMS text, and Latin-only mark removal.
 RELATED DOCS: tests/features/prebuilt_tools/FEATURE.md; docs/spec/prebuilt-agent-tools/spec.md Appendix A.14, A.15, A.16 and §9.2
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/prebuilt_tools/test_prebuilt_rows_unicode_regex.py
 """
@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from tests.features.prebuilt_tools.prebuilt_tool_harness import ANY, Close, FailureCase, SuccessCase, ToolRunner, bad, invalid, ok
+from tests.features.prebuilt_tools.prebuilt_tool_harness import Close, FailureCase, SuccessCase, ToolRunner, bad, invalid, ok
 
 
 def char_info(character: str, code_point: str, name: str | None, category: str, utf8_hex: str, is_combining: bool = False) -> dict[str, Any]:
@@ -126,6 +126,8 @@ UNICODE_SUCCESS_CASES = [
         "fallback-table-and-sharp-s",
     ),
     ok("remove_diacritics", {"text": "日本語 abc"}, {"text": "日本語 abc", "changed_characters": 0}, "nothing-to-remove"),
+    # Spec r4: only marks after a Latin letter are dropped, so Greek tonos and Cyrillic diaeresis stay.
+    ok("remove_diacritics", {"text": "ά Ё é"}, {"text": "ά Ё e", "changed_characters": 1}, "non-latin-marks-stay"),
     ok("remove_diacritics", {"text": ""}, {"text": "", "changed_characters": 0}, "empty"),
     # A.14 find_invisible_characters: kinds, 1-based line and column, cleaned text with unusual spaces turned into U+0020.
     ok(
@@ -171,6 +173,18 @@ UNICODE_SUCCESS_CASES = [
         "listed-cf-characters-keep-their-kind-and-tab-is-not-reported",
     ),
     ok("find_invisible_characters", {"text": "plain text"}, {"count": 0, "findings": [], "truncated": False, "cleaned_text": "plain text"}, "clean"),
+    # Spec r4: carriage returns are not findings and line breaks are never rewritten; CRLF is one line break for line numbers.
+    ok(
+        "find_invisible_characters",
+        {"text": "a\r\n\u200bb\rc"},
+        {
+            "count": 1,
+            "findings": [{"position": 3, "line": 2, "column": 1, "code_point": "U+200B", "name": "ZERO WIDTH SPACE", "kind": "zero_width"}],
+            "truncated": False,
+            "cleaned_text": "a\r\nb\rc",
+        },
+        "crlf-and-cr-kept",
+    ),
     ok(
         "find_invisible_characters",
         {"text": "​" * 1500},
@@ -318,7 +332,7 @@ UNICODE_SUCCESS_CASES = [
         {"encoding": "ucs_2", "segments": 1, "units_used": 8, "units_per_segment": 70, "non_gsm_characters": ["ę", "ą"]},
         "distinct-offenders-in-order",
     ),
-    ok("sms_segment_count", {"text": ""}, {"encoding": "gsm_7", "segments": 0, "units_used": 0, "units_per_segment": ANY, "non_gsm_characters": []}, "empty"),
+    ok("sms_segment_count", {"text": ""}, {"encoding": "gsm_7", "segments": 0, "units_used": 0, "units_per_segment": 160, "non_gsm_characters": []}, "empty"),
     # A.14 repair_mojibake_text: cp1252 with Latin-1 fallback for 0x81/0x8D/0x8F/0x90/0x9D, strict UTF-8, at most 2 rounds.
     ok("repair_mojibake_text", {"text": "cafÃ©"}, {"text": "café", "repaired": True, "rounds": 1}, "one-round"),
     ok("repair_mojibake_text", {"text": "cafÃƒÂ©"}, {"text": "café", "repaired": True, "rounds": 2}, "two-rounds"),
@@ -488,8 +502,19 @@ REGEX_SUCCESS_CASES = [
         {"valid": True, "error": None, "error_position": None, "group_count": 0, "group_names": []},
         "verbose-flag",
     ),
-    ok("verify_regex_pattern", {"pattern": "(abc"}, {"valid": False, "error": ANY, "error_position": 0, "group_count": 0, "group_names": []}, "unterminated-group"),
-    ok("verify_regex_pattern", {"pattern": "abc)"}, {"valid": False, "error": ANY, "error_position": 3, "group_count": 0, "group_names": []}, "unbalanced"),
+    # Spec r4: error is re.error.msg and error_position is re.error.pos, never str(exc), which would append the position.
+    ok(
+        "verify_regex_pattern",
+        {"pattern": "(abc"},
+        {"valid": False, "error": "missing ), unterminated subpattern", "error_position": 0, "group_count": 0, "group_names": []},
+        "unterminated-group",
+    ),
+    ok(
+        "verify_regex_pattern",
+        {"pattern": "abc)"},
+        {"valid": False, "error": "unbalanced parenthesis", "error_position": 3, "group_count": 0, "group_names": []},
+        "unbalanced",
+    ),
     # A.15 regex_test_samples: failures in input order, should-match samples first.
     ok(
         "regex_test_samples",
@@ -744,10 +769,10 @@ def test_unicode_regex_rows_reject_bad_input(tool_runner: ToolRunner, case: Fail
 
 
 def test_verify_regex_pattern_reports_compile_error_text(tool_runner: ToolRunner) -> None:
-    # The row leaves the wording open, but the error must carry the re.error message, not an empty or generic text.
-    output = tool_runner.output("verify_regex_pattern", {"pattern": "(abc"})
-    assert isinstance(output["error"], str)
-    assert "unterminated subpattern" in output["error"]
+    # Spec r4 (S017): the error is re.error.msg alone, so str(exc) with its " at position N" suffix is wrong.
+    output = tool_runner.output("verify_regex_pattern", {"pattern": "a{2,1}"})
+    assert output["error"] == "min repeat greater than max repeat"
+    assert output["error_position"] == 2
 
 
 def test_find_unicode_character_without_exact_name_lists_word_matches(tool_runner: ToolRunner) -> None:

@@ -3,7 +3,7 @@
 PURPOSE: Shared helpers for the prebuilt tool feature pack: run a tool through FunctionTool.execute the way a model would, compare outputs with hand-computed expectations, build schema-valid argument sets, and count tool constructions.
 ROLE IN CODEBASE: Imported by conftest.py and the test modules in tests/features/prebuilt_tools/; it calls the real seam (vidbyte.tools.types.ToolCall into FunctionTool.execute) and never imports the prebuilt package itself.
 ARCHITECTURE NOTE: Nothing here mocks FunctionTool, pydantic, or the standard library. Every call runs asyncio.run(tool.execute(ToolCall(...))), exactly as spec §13 prescribes, so validation and the worker thread stay real.
-FUNCTION INVENTORY: ok, bad, and invalid build parametrized cases; parse_tool_output parses success text and rejects NaN and Infinity; OutputMatcher lists differences between an expectation and an output; ToolRunner executes calls and checks cases; SchemaArgumentFactory builds deterministic argument sets from a tool's JSON input schema; ConstructionCounter counts FunctionTool and Tools constructions.
+FUNCTION INVENTORY: ok, bad, and invalid build parametrized cases; parse_tool_output parses success text and rejects NaN and Infinity; OutputMatcher lists differences between an expectation and an output, honoring the ANY, NON_EMPTY_TEXT, and Close markers; ToolRunner executes calls and checks cases; SchemaArgumentFactory builds deterministic argument sets from a tool's JSON input schema; ConstructionCounter counts FunctionTool and Tools constructions.
 COMMON MODIFICATION PATTERNS: Add a sample to a SchemaArgumentFactory pool when a new input format appears; add a matcher marker only when a row states its own tolerance; keep every helper free of knowledge about one particular tool.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import vidbyte.tools.toolsets or vidbyte.tools.builtins.prebuilt at module level; a missing feature must fail each test at setup, not abort collection. 2. Do not loosen FLOAT_RELATIVE_TOLERANCE or FLOAT_ABSOLUTE_TOLERANCE; spec §9.2 item 5 fixes them.
 KNOWN EDGE CASES: JSON integers parse as int, so an expected float accepts an int while an expected int rejects a float and a bool. A validation failure names its parameter as the first segment of each "loc: message" part. ConstructionCounter only sees the thread that enters it.
@@ -45,6 +45,16 @@ class AnyValue:
 
 
 ANY = AnyValue()
+
+
+class NonEmptyText:
+    """Marker for a fixed message whose row requires non-empty text without stating its words."""
+
+    def __repr__(self) -> str:
+        return "NON_EMPTY_TEXT"
+
+
+NON_EMPTY_TEXT = NonEmptyText()
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,6 +138,8 @@ class OutputMatcher:
         """Return one message per difference; an empty list means the output matches."""
         if isinstance(expected, AnyValue):
             return []
+        if isinstance(expected, NonEmptyText):
+            return [] if isinstance(actual, str) and actual.strip() else [f"{path}: expected non-empty text, got {actual!r}"]
         if isinstance(expected, Close):
             return self._compare_close(expected, actual, path)
         if expected is None or isinstance(expected, (bool, str)):

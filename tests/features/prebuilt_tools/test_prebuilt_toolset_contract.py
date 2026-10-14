@@ -22,7 +22,7 @@ from typing import Any
 import pytest
 
 from tests.features.prebuilt_tools.prebuilt_catalogue_data import ALL_TOOL_NAMES, CATEGORY_TABLE, CATEGORY_TOOL_NAMES, ENUM_TABLE
-from tests.features.prebuilt_tools.prebuilt_parameter_data import ANY_CAP, PATTERN_BOUND, REQUIRED, TOOL_PARAMETERS
+from tests.features.prebuilt_tools.prebuilt_parameter_data import REQUIRED, TOOL_PARAMETERS
 from tests.features.prebuilt_tools.prebuilt_tool_harness import ConstructionCounter
 from vidbyte.lib.errors import ToolRegistrationError, ToolRegistryError
 from vidbyte.tools.catalog import Tools
@@ -34,7 +34,7 @@ UTC_OFFSET_PATTERN = "^(Z|[+-](0[0-9]|1[0-9]|2[0-3]):[0-5][0-9])$"
 TOOL_NAME_PATTERN = re.compile(r"\A[a-z][a-z0-9_]*\Z")
 RESERVED_TOOL_NAMES = frozenset({"isDone", "updateTrace", "mcp"})
 JSON_TYPES = {"string": ("string", None), "integer": ("integer", None), "number": ("number", None), "boolean": ("boolean", None), "array": ("array", None)}
-JSON_TYPES.update({"date": ("string", "date"), "date-time": ("string", "date-time"), "time": ("string", "time")})
+JSON_TYPES.update({"date": ("string", "date"), "date-time": ("string", "date-time"), "time": ("string", "time"), "utc_offset": ("string", None)})
 
 
 def category(api: Any, value: str) -> Any:
@@ -301,11 +301,9 @@ def schema_problems(name: str, row: tuple[Any, ...], prop: dict[str, Any], defin
     elif (resolved.get("type"), resolved.get("format")) != JSON_TYPES[type_code]:
         problems.append(f"{parameter}: expected {JSON_TYPES[type_code]}, schema has type {resolved.get('type')!r} format {resolved.get('format')!r}")
     cap_key = "maxItems" if resolved.get("type") == "array" else "maxLength"
-    if cap == PATTERN_BOUND and resolved.get("pattern") != UTC_OFFSET_PATTERN:
+    if type_code == "utc_offset" and resolved.get("pattern") != UTC_OFFSET_PATTERN:
         problems.append(f"{parameter}: a UtcOffset needs the pattern {UTC_OFFSET_PATTERN!r}, schema has {resolved.get('pattern')!r}")
-    elif cap == ANY_CAP and cap_key not in resolved:
-        problems.append(f"{parameter}: INV-16 needs a {cap_key} cap")
-    elif isinstance(cap, int) and resolved.get(cap_key) != cap:
+    if isinstance(cap, int) and resolved.get(cap_key) != cap:
         problems.append(f"{parameter}: {cap_key} is {resolved.get(cap_key)!r}, Appendix A says {cap}")
     if isinstance(item_cap, int):
         items, _ = resolve_schema(resolved.get("items", {}), definitions)
@@ -331,7 +329,7 @@ def test_tool_schema_matches_its_appendix_row(prebuilt_library: Any, name: str) 
 
 @pytest.mark.parametrize("name", ALL_TOOL_NAMES)
 def test_every_text_and_list_parameter_is_capped(prebuilt_library: Any, name: str) -> None:
-    """INV-16: every str parameter has maxLength (UtcOffset is bounded by its pattern) and every list has maxItems and capped string items."""
+    """INV-16: every str parameter has maxLength (spec r4 gives UtcOffset one too) and every list has maxItems and capped string items."""
     schema = dict(library_tool(prebuilt_library, name).spec().input_schema or {})
     definitions = schema.get("$defs", {})
     for parameter, prop in schema.get("properties", {}).items():
@@ -342,4 +340,4 @@ def test_every_text_and_list_parameter_is_capped(prebuilt_library: Any, name: st
             plain_string_items = items.get("type") == "string" and "enum" not in items and "format" not in items
             assert not plain_string_items or "maxLength" in items, f"{name}.{parameter} items have no maxLength"
         elif resolved.get("type") == "string" and "enum" not in resolved and "format" not in resolved:
-            assert "maxLength" in resolved or resolved.get("pattern") == UTC_OFFSET_PATTERN, f"{name}.{parameter} has no maxLength"
+            assert "maxLength" in resolved, f"{name}.{parameter} has no maxLength"

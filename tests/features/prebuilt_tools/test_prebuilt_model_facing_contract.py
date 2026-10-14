@@ -2,11 +2,11 @@
 
 PURPOSE: Model-facing contract of every prebuilt tool: description depth and the no-example rule (AC-8, INV-9), provider schemas for three providers (AC-9, INV-21), and schema caps that reject one-over-cap input before the body runs (AC-7, INV-16).
 ROLE IN CODEBASE: Reads tool.spec() and Tools.provider_schemas of the session library built from vidbyte.tools.toolsets.PrebuiltTools, counts sentences with the repository's own lint SentenceCounter, and sends over-cap calls through FunctionTool.execute.
-ARCHITECTURE NOTE: The sentence counter is imported from lint/rules/s025_model_facing_description_depth.py so the tests and the S025 lint rule can never disagree about what a sentence is. Caps come from the hand-copied parameter table, not from the live schema, except where the row states no value (ANY_CAP).
-FUNCTION INVENTORY: test_tool_description_has_four_or_five_sentences_and_no_example; test_parameter_descriptions_have_four_or_five_sentences_and_no_example; test_provider_schemas_declare_every_tool_once; test_one_over_cap_argument_fails_validation_naming_the_parameter; over_cap_value builds an argument that is exactly one unit over a cap while still matching any pattern.
+ARCHITECTURE NOTE: The sentence counter is imported from lint/rules/s025_model_facing_description_depth.py so the tests and the S025 lint rule can never disagree about what a sentence is. Caps come from the hand-copied parameter table, never from the live schema; since spec r4 every capped parameter states its value.
+FUNCTION INVENTORY: test_tool_description_has_four_or_five_sentences_and_no_example; test_parameter_descriptions_have_four_or_five_sentences_and_no_example; test_provider_schemas_declare_every_tool_once; test_one_over_cap_argument_fails_validation_naming_the_parameter; over_cap_values builds each argument that is exactly one unit over a cap (a list's item cap and its item-count cap separately) while still matching any pattern.
 COMMON MODIFICATION PATTERNS: Add an example marker to EXAMPLE_MARKERS only when it is precise enough not to flag ordinary prose; add a provider to PROVIDERS when the SDK formatter gains one.
 WHAT NOT TO DO IN THIS FILE: 1. Do not reimplement sentence counting; import SentenceCounter. 2. Do not loosen the one-over-cap check to "any validation error"; the error must name the capped parameter and its cap.
-KNOWN EDGE CASES: Pydantic reports every failing field, so the cap test sends only the capped argument and looks for that argument's own "at most" message among the parts. A capped string with a pattern needs a fill character that matches the pattern, or the error would be about the pattern instead of the length.
+KNOWN EDGE CASES: Pydantic reports every failing field, so the cap test sends only the capped argument and looks for that argument's own "at most" message among the parts. A capped string with a pattern needs a fill character that matches the pattern, or the error would be about the pattern instead of the length; no fill matches the UtcOffset pattern, which works only because pydantic reports a string's length before its pattern. A list with an item cap is checked twice, once one item too long and once one item too many.
 RELATED DOCS: tests/features/prebuilt_tools/FEATURE.md; docs/spec/prebuilt-agent-tools/spec.md (INV-9, INV-16, INV-21, AC-7, AC-8, AC-9); lint/rules/s025_model_facing_description_depth.py
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/prebuilt_tools/test_prebuilt_model_facing_contract.py
 """
@@ -21,7 +21,7 @@ import pytest
 
 from lint.rules.s025_model_facing_description_depth import SentenceCounter
 from tests.features.prebuilt_tools.prebuilt_catalogue_data import ALL_TOOL_NAMES
-from tests.features.prebuilt_tools.prebuilt_parameter_data import ANY_CAP, TOOL_PARAMETERS
+from tests.features.prebuilt_tools.prebuilt_parameter_data import TOOL_PARAMETERS
 from tests.features.prebuilt_tools.prebuilt_tool_harness import SchemaArgumentFactory, ToolRunner, describe_result
 from vidbyte.tools.types import ToolStatus
 
@@ -100,24 +100,23 @@ def over_cap_string(prop: dict[str, Any], length: int) -> str:
     return FILL_CHARACTERS[0] * length
 
 
-def over_cap_value(schema: dict[str, Any], parameter: str, cap: object, item_cap: object) -> tuple[Any, str, int]:
-    """Build (value, expected loc, cap) for one argument that is exactly one unit over a cap."""
+def over_cap_values(schema: dict[str, Any], parameter: str, cap: object, item_cap: object) -> list[tuple[Any, str, int]]:
+    """Build (value, expected loc, cap) for each argument that is exactly one unit over one of the parameter's caps."""
     prop = resolved_property(schema, parameter)
+    values = []
     if isinstance(item_cap, int):
         items = prop.get("items", {})
-        return [over_cap_string(items, item_cap + 1)], f"{parameter}.0", item_cap
-    if prop.get("type") == "array":
-        limit = prop.get("maxItems") if cap == ANY_CAP else cap
-        assert isinstance(limit, int), f"{parameter} has no list cap (INV-16)"
+        values.append(([over_cap_string(items, item_cap + 1)], f"{parameter}.0", item_cap))
+    if isinstance(cap, int) and prop.get("type") == "array":
         item = SchemaArgumentFactory().pool(prop.get("items", {"type": "string"}), schema.get("$defs", {}), parameter)[0]
-        return [item] * (limit + 1), parameter, limit
-    limit = prop.get("maxLength") if cap == ANY_CAP else cap
-    assert isinstance(limit, int), f"{parameter} has no length cap (INV-16)"
-    return over_cap_string(prop, limit + 1), parameter, limit
+        values.append(([item] * (cap + 1), parameter, cap))
+    elif isinstance(cap, int):
+        values.append((over_cap_string(prop, cap + 1), parameter, cap))
+    return values
 
 
 def capped_rows(name: str) -> list[tuple[Any, ...]]:
-    return [row for row in TOOL_PARAMETERS[name] if isinstance(row[2], int) or row[2] == ANY_CAP or isinstance(row[3], int)]
+    return [row for row in TOOL_PARAMETERS[name] if isinstance(row[2], int) or isinstance(row[3], int)]
 
 
 @pytest.mark.parametrize("name", [name for name in ALL_TOOL_NAMES if capped_rows(name)])
@@ -126,11 +125,11 @@ def test_one_over_cap_argument_fails_validation_naming_the_parameter(tool_runner
     schema = dict(tool_runner.tool(name).spec().input_schema or {})
     problems = []
     for parameter, _, cap, item_cap, _ in capped_rows(name):
-        value, location, limit = over_cap_value(schema, parameter, cap, item_cap)
-        result = tool_runner.result(name, {parameter: value})
-        parts = result.output.split("; ")
-        own = [part for part in parts if part.split(": ", 1)[0] == location]
-        rejected = result.status is ToolStatus.ERROR and result.metadata.get("error_type") == "validation"
-        if not (rejected and any("at most" in part and str(limit) in part for part in own)):
-            problems.append(f"{parameter} over its cap {limit}: {describe_result(result)[:300]}")
+        for value, location, limit in over_cap_values(schema, parameter, cap, item_cap):
+            result = tool_runner.result(name, {parameter: value})
+            parts = result.output.split("; ")
+            own = [part for part in parts if part.split(": ", 1)[0] == location]
+            rejected = result.status is ToolStatus.ERROR and result.metadata.get("error_type") == "validation"
+            if not (rejected and any("at most" in part and str(limit) in part for part in own)):
+                problems.append(f"{location} over its cap {limit}: {describe_result(result)[:300]}")
     assert not problems, problems

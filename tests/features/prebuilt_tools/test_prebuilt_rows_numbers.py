@@ -50,6 +50,8 @@ def divisors_from_factors(factors: list[tuple[int, int]]) -> list[int]:
 TERA_DIVISORS = divisors_from_factors([(2, 12), (5, 12)])
 HIGHLY_COMPOSITE_DIVISORS = divisors_from_factors([(2, 6), (3, 4), (5, 2), (7, 1), (11, 1), (13, 1), (17, 1), (19, 1), (23, 1)])
 ONE_OVER_1019_DIGITS = str(10**1000 // 1019).zfill(1000)
+# 1/2^1001 = 5^1001 / 10^1001 terminates after 1,001 fractional digits; spec r4 cuts it to the first 1,000.
+ONE_OVER_TWO_TO_1001_DIGITS = str(5**1001).zfill(1001)[:1000]
 
 EXACT_ARITHMETIC_SUCCESS = [
     ok("decimal_arithmetic", {"left": "0.1", "right": "0.2", "operation": "add"}, {"result": "0.3", "exact": True}, "add-no-float-error"),
@@ -122,6 +124,12 @@ EXACT_ARITHMETIC_SUCCESS = [
     ok("fraction_to_decimal", {"fraction": "1/12"}, {"decimal": "0.08(3)", "terminates": False, "repeating_digits": "3", "truncated": False}, "two-digit-prefix"),
     ok("fraction_to_decimal", {"fraction": "1/11"}, {"decimal": "0.(09)", "terminates": False, "repeating_digits": "09", "truncated": False}, "block-with-leading-zero"),
     ok("fraction_to_decimal", {"fraction": "1/1019"}, {"decimal": "0." + ONE_OVER_1019_DIGITS, "terminates": False, "repeating_digits": "", "truncated": True}, "period-1018-truncated"),
+    ok(
+        "fraction_to_decimal",
+        {"fraction": f"1/{2**1001}"},
+        {"decimal": "0." + ONE_OVER_TWO_TO_1001_DIGITS, "terminates": True, "repeating_digits": "", "truncated": True},
+        "terminating-past-1000-digits-truncated",
+    ),
     ok("integer_square_root", {"value": "17"}, {"root": "4", "is_perfect_square": False, "remainder": "1"}, "not-square"),
     ok("integer_square_root", {"value": "0"}, {"root": "0", "is_perfect_square": True, "remainder": "0"}, "zero"),
     ok("integer_square_root", {"value": "+0016"}, {"root": "4", "is_perfect_square": True, "remainder": "0"}, "sign-and-leading-zeros"),

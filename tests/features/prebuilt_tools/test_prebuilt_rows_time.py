@@ -373,6 +373,9 @@ DURATION_SUCCESS = [
     ok("format_duration", {"seconds": 0.0125, "style": "iso8601"}, {"text": "PT0.012S"}, "iso8601-fraction"),
     ok("format_duration", {"seconds": -0.0004}, {"text": "0s"}, "negative-rounds-to-zero-no-sign"),
     ok("format_duration", {"seconds": 0, "style": "long"}, {"text": "0 seconds"}, "zero-long"),
+    # Spec r4: long leaves out zero parts too.
+    ok("format_duration", {"seconds": 3600, "style": "long"}, {"text": "1 hour"}, "long-skips-zero-parts"),
+    ok("format_duration", {"seconds": 86401, "style": "long"}, {"text": "1 day, 1 second"}, "long-skips-inner-zero-parts"),
     ok("format_duration", {"seconds": 0, "style": "clock"}, {"text": "0:00:00"}, "zero-clock"),
     ok("format_duration", {"seconds": 0, "style": "iso8601"}, {"text": "PT0S"}, "zero-iso8601"),
     # parse_duration_text: exact Decimal sum, and iso8601 is format_duration's iso8601 text of that sum.
@@ -414,8 +417,17 @@ FAILURE_CASES = [
     bad("parse_date_to_iso", {"text": "02/30/2024"}, "text", "impossible-slashed"),
     bad("parse_date_to_iso", {"text": "yesterday"}, "text", "unknown-form"),
     invalid("fiscal_quarter", {"target_date": "2024-01-01", "fiscal_year_start_month": 0}, "fiscal_year_start_month", "month-zero"),
+    # Spec r4 names target_date when the quarter would leave years 1 to 9999 (November to January quarters with a February start).
+    bad("fiscal_quarter", {"target_date": "9999-12-31", "fiscal_year_start_month": 2}, "target_date", "quarter-ends-after-9999"),
+    bad("fiscal_quarter", {"target_date": "0001-01-01", "fiscal_year_start_month": 2}, "target_date", "quarter-starts-before-year-1"),
     # A.10 scheduling
     invalid("business_days_between", {"start_date": "2024-01-01", "end_date": "2024-01-31", "weekend_days": ["monday"] * 8}, "weekend_days", "eight-weekend-days"),
+    bad(
+        "business_days_between",
+        {"start_date": "2024-01-01", "end_date": "2024-01-31", "weekend_days": ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]},
+        "weekend_days",
+        "all-days-weekend",
+    ),
     bad(
         "add_business_days",
         {"start_date": "2024-01-01", "business_days": 1, "weekend_days": ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]},

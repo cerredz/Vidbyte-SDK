@@ -2,7 +2,7 @@
 
 ## High-Level Feature Description
 
-The SDK ships a library of 265 small, deterministic, standard-library-only tools, grouped into 31 categories, that a developer attaches to an agent with `PrebuiltTools([...categories])`. Each tool is an ordinary `FunctionTool` the model calls with JSON arguments. It returns one JSON object on success, or a failure whose `error_type` is `validation` (schema) or `ToolExecutionError` (domain). The tools give the agent exact arithmetic, counting, date arithmetic, parsing, encoding, hashing, and structured-data work that a model does badly in tokens. Source of truth: `docs/spec/prebuilt-agent-tools/spec.md` revision 3, especially §4, §6, §8.5, §9.2, and Appendix A.
+The SDK ships a library of 265 small, deterministic, standard-library-only tools, grouped into 31 categories, that a developer attaches to an agent with `PrebuiltTools([...categories])`. Each tool is an ordinary `FunctionTool` the model calls with JSON arguments. It returns one JSON object on success, or a failure whose `error_type` is `validation` (schema) or `ToolExecutionError` (domain). The tools give the agent exact arithmetic, counting, date arithmetic, parsing, encoding, hashing, and structured-data work that a model does badly in tokens. Source of truth: `docs/spec/prebuilt-agent-tools/spec.md` revision 4, especially §4, §6, §8.5, §9.2, and Appendix A.
 
 ## Contract
 
@@ -26,7 +26,7 @@ The SDK ships a library of 265 small, deterministic, standard-library-only tools
 
 - Category members only; no API key, network, file, or environment is needed to build or run any tool.
 - Tool arguments arrive as model JSON. Pydantic JSON mode validates them: `"2"` and `2.0` pass for an int, while `2.5` does not, undeclared arguments are ignored, and `null` for an optional argument means its default.
-- Every `str` and `list` parameter has a schema cap (`PREBUILT_MAX_*` constants). A `UtcOffset` string is bounded by its pattern instead.
+- Every `str` and `list` parameter has a schema cap (`PREBUILT_MAX_*` constants, or the literal 7 for `weekend_days`). A `UtcOffset` string carries both its pattern and `PREBUILT_MAX_UTC_OFFSET_CHARS` (6).
 
 ## Observable Outcomes
 
@@ -76,7 +76,7 @@ This is the failure inventory the tests were chosen from. Each entry is input pl
 
 ## Historical Regressions
 
-None yet. The pack was written red before implementation, from spec revision 3.
+None yet. The pack was written red before implementation from spec revision 3, then tightened to revision 4, which fixed the values revision 3 left open.
 
 ## Test Suite Map
 
@@ -96,5 +96,5 @@ None yet. The pack was written red before implementation, from spec revision 3.
 - Wall-clock limits (AC-15's 1 second, AC-20's 2 seconds, NFR-7's build time) are not asserted, because tests must not depend on the wall clock. Peak-memory checks and infeasible-if-enumerated counts prove the same design properties structurally.
 - Cross-version pins of seeded draws, `ast` grammar, `ipaddress` flags, and Unicode data (EC-24, EC-25, EC-26, EC-38) are not asserted. Seeded tools are checked for determinism within one interpreter and against the generator calls their rows document.
 - INV-23 (root `vidbyte.__all__` and the public API contract), INV-24 (`vidbyte.tools.builtins.__all__`), INV-25 (dependencies), and INV-26 (runtime treatment) would pass before implementation. Existing gates own them: `scripts/generate-sdk-public-api.py --check`, `scripts/check_reasoning_trace_contracts.py`, and the runtime's own tests.
-- The EC-14 lone-surrogate path is not reachable through `FunctionTool.execute`, because pydantic JSON mode rejects lone surrogates first. Unencodable text is tested with real characters instead.
+- The EC-14 lone-surrogate path never reaches a tool body, because FunctionTool's JSON decoding rejects lone surrogates first. A case for it would test the framework, not the tools, so unencodable text is tested with real characters instead.
 - There is no mutation testing and no random fuzzing. The schema-derived sweep is deterministic by design so a failure always reproduces.

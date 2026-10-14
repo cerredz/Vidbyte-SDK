@@ -44,3 +44,4 @@ Run the pack with `PYTHONPATH=$(pwd) python -m pytest -q tests/features/prebuilt
 ## Logs
 
 - 2026-10-14 - The pack was written red before implementation from spec revision 3. Every test fails or errors until `PrebuiltTools`, `PrebuiltToolCategory`, the enums, and `vidbyte/tools/builtins/prebuilt/` exist.
+- 2026-10-14 - The pack was tightened to spec revision 4: values revision 3 left open are now exact, every list and `UtcOffset` cap is an exact number, and the new error mappings have cases.
