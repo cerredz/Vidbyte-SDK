@@ -14,7 +14,7 @@ started: 2026-10-14 02:46
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 02:46 | 03:20 | reports/S0-scout.md, reports/S0-research.md | base_commit 8387d666; code-map.md; research.md |
-| S1 spec + review | pending | | | | |
+| S1 spec + review | running | 03:25 | | | |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -23,7 +23,7 @@ started: 2026-10-14 02:46
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 0/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 1/2 (round 1 launched) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-14 02:46 — Unset the branch upstream (`git branch --unset-upstream`) after `git worktree add` set it to `origin/main` — prevents any agent's bare `git push` from targeting main; pushes must be `git push -u origin feat/prebuilt-agent-tools`.
@@ -55,3 +55,10 @@ started: 2026-10-14 02:46
 - Possible overlap with existing built-ins: `calculator` (exact arithmetic) and `reasoning/{bayesian_update, expected_value_trace, decision_matrix_trace, fermi_estimate}` — verify before selecting — *source:* S0 research
 - research.md has 461 candidates in 30 categories, each category marks its "Drop first" rows; 7 categories exceed ~15–20 tools — *source:* S0 research
 - Only time-dependent candidate: `current_datetime_in_timezone` — needs an injectable clock for tests — *source:* S0 research
+- Contract names (spec r1 §8.5): `PrebuiltTools(Tools)` in `vidbyte/tools/toolsets/prebuilt.py` with static `select_categories`/`get_tools`; `PrebuiltToolCategory` enum (31 members, `values()`); `<Category>ToolFunctions` classes with `tool_functions()`; `PrebuiltToolSupport.argument_error(parameter_name, problem, expected)`; `PrebuiltJsonSchemaValidator.find_violations`; aliases `PrebuiltToolOutput`, `PrebuiltToolFunction` — *source:* S1 author
+- Design r1: each tool is a typed `@staticmethod` on a `<Category>ToolFunctions` class wrapped by existing `FunctionTool`; 277 tools / 31 categories (6–12 each); 40 new files; 0 deps; returns dicts; errors via `ToolExecutionError` — *source:* S1 author
+- Test seam: call like a model — `await tool.execute(ToolCall(name, args))` then `json.loads(result.output)`; failure kind in `result.metadata["error_type"]` ("validation" / "ToolExecutionError"); no `tests/conftest.py`; test file basenames must be unique across `tests/` — *source:* S1 author
+- Seeded RNG sequences, `ipaddress` flags, and `unicodedata` can differ between Python 3.11 and 3.12 (CI runs both): tests must not pin them — *source:* S1 author
+- A007 checks every name in a function signature against tokens (`interval`, `token`, `char`, `byte`, `limit`, `depth`) when a numeric literal is in an annotation; C006/C008 flag `validate*`-style and `finite_float`-style helper names; pydantic warns on params named `schema_json`, `json`, `copy` (BaseModel attributes) — *source:* S1 author
+- New files must be `git add`-ed before `python lint/run.py` and semgrep: they read tracked files only (S020 checks the README file index) — *source:* S1 author
+- Integer outputs capped at 4,000 digits (INV-18); exact numbers travel as text (`IntText`, `DecText`) — *source:* S1 author
