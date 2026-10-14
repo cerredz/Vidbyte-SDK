@@ -46,6 +46,8 @@ from vidbyte.lib.dataclasses.codex_host import (
     CodexThreadUsage,
     CodexTurnHandle,
     CodexTurnSnapshot,
+    _reject_bad_seconds,
+    _reject_small_int,
 )
 from vidbyte.lib.enums.codex import (
     CodexHostOperation,
@@ -88,9 +90,7 @@ STEER_FINISHED_MESSAGE = "The turn already ended, so it cannot be steered; conti
 NEVER_RAN_MESSAGE = "This host never ran a turn on the thread."
 NO_FORK_POINT_MESSAGE = "The thread has no completed turn to fork through at from_turn_id."
 BUDGET_ECHO_MESSAGE = "Codex did not keep the goal token budget it was sent."
-BAD_TIMEOUT_MESSAGE = "wait_codex_turn timeout_seconds must be None or a finite number above 0."
 LAUNCH_PROMPTS_MESSAGE = "launch_codex_subagents needs a non-empty sequence of prompts, not one string."
-LAUNCH_LIMIT_MESSAGE = "launch_codex_subagents limit must be None or an int of at least 1."
 # The request a review turn is registered with: Vidbyte sets no limits on it.
 REVIEW_REQUEST = CodexSpawnRequest()
 
@@ -345,12 +345,9 @@ class CodexHost:
         # comes back as a RUNNING snapshot.
         operation = CodexHostOperation.WAIT_CODEX_TURN
         self._guard(operation, talks=False)
-        # A wait takes exactly the timeouts a turn does, so the spawn
-        # request's own seconds rule checks it.
-        try:
-            CodexSpawnRequest(timeout_seconds=timeout_seconds)
-        except ConfigurationError:
-            raise ConfigurationError(BAD_TIMEOUT_MESSAGE) from None
+        # A wait takes exactly the timeouts a turn does, so the turn's own
+        # seconds rule checks it.
+        _reject_bad_seconds("wait_codex_turn", "timeout_seconds", timeout_seconds)
         turn = self._owned(operation, handle)
         try:
             return await asyncio.wait_for(asyncio.shield(turn.ended), timeout_seconds)
@@ -495,8 +492,7 @@ class CodexHost:
         # becomes its own thread's input.
         if isinstance(prompts, str) or not prompts:
             raise ConfigurationError(LAUNCH_PROMPTS_MESSAGE)
-        if limit is not None and (type(limit) is not int or limit < CODEX_HOST_MIN_LIVE_TURNS):
-            raise ConfigurationError(LAUNCH_LIMIT_MESSAGE)
+        _reject_small_int("launch_codex_subagents", "limit", limit, CODEX_HOST_MIN_LIVE_TURNS)
         if limit is not None and len(prompts) > limit:
             raise ConfigurationError(f"launch_codex_subagents got {len(prompts)} prompts, over its limit of {limit}.")
         return [self._params.input_items(prompt) for prompt in prompts]
