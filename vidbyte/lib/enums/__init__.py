@@ -108,6 +108,12 @@ from vidbyte.lib.enums.multi_agent import (
     OrchestratorAction,
     TaskStatus,
 )
+from vidbyte.lib.enums.outputs import (
+    DeliveryStatus,
+    OutputDestination,
+    OutputMethod,
+    TypefullyPlatform,
+)
 from vidbyte.lib.enums.platform import Platform
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.enums.reasoning_strategies import (
@@ -165,6 +171,7 @@ __all__ = [
     "ContextMinimalFanoutSkill",
     "CotEventEnum",
     "DefeasibleRuleApplies",
+    "DeliveryStatus",
     "DocumentType",
     "DecisionModelMode",
     "EquivocationFallacy",
@@ -207,6 +214,8 @@ __all__ = [
     "NecessarySufficientVerdict",
     "OperatingSystemFamily",
     "OrchestratorAction",
+    "OutputDestination",
+    "OutputMethod",
     "PartitionVerdict",
     "PermissionPreset",
     "PinPolicy",
@@ -230,6 +239,7 @@ __all__ = [
     "TestimonyTrust",
     "TextModelMode",
     "TransitivityConsistency",
+    "TypefullyPlatform",
     "UsageAccountingFailure",
     "UsageKind",
 ]

@@ -88,6 +88,10 @@ The opinionated JEV agent: its facade, its single public settings object, and a 
 
 Multi-agent machinery that sits below the pipeline layer, providing the aggregate-agent behavior, dispatch, and cleanup handling that let several agents participate in a single logical run. Cleanup in particular guarantees that resources are released even when one participant in a shared run fails partway through. This folder is for shared-run semantics specifically — coordinating participants that belong to one run — rather than for defining the shape of a multi-stage topology, which is a separate concern handled elsewhere. Reach here when several agents must share failure and resource semantics, not merely execute in some sequence.
 
+##### `vidbyte/agents/output/`
+
+Where a finished agent reply goes after the run, beyond being returned to the caller. This layer defines what counts as a delivery destination, decides which replies are worth delivering, and shapes each reply into the title and body a destination receives. It runs every configured destination together once per run, after the reply is validated and recorded, and reports one outcome per destination on the reply. The destination-specific work of talking to each external service deliberately lives lower in the shared substrate, so this layer holds only the agent-facing rules. Agents the SDK builds internally never deliver, so only an agent the caller runs posts anywhere.
+
 ##### `vidbyte/agents/pricing/`
 
 Per-provider token and cost accounting, with one implementation per model vendor built over a shared base contract. It normalizes each provider's raw usage reporting into consistent token counts and dollar costs, so an agent can report its usage and cost regardless of which underlying model actually ran. This normalization is what makes budget-aware middleware and any kind of spend tracking upstream possible at all. Without it, cost accounting would need to be reimplemented per provider everywhere it is needed.
@@ -195,6 +199,10 @@ The JEV agent's capability substrate, placed below the agent layer so the agent,
 ##### `vidbyte/lib/models/`
 
 A namespace reserved for model metadata that currently holds no real content. It is listed here specifically so that its emptiness is a documented, known fact rather than something a reader has to go looking for and wonder if they are missing. Model discovery and configuration actually live in a registries layer elsewhere in the shared substrate today. This folder exists as a placeholder for where that responsibility may eventually move.
+
+##### `vidbyte/lib/outputs/`
+
+The provider side of delivering a finished agent reply to the outside world: chat channels, email, issue trackers and code hosts (new items, comments, and update-in-place), docs workspaces, CI job summaries, social-post drafts, CRM tasks, and signed generic webhooks. Each destination takes one pasted credential, or none for the job summary, read from an argument or its environment variable, and never an interactive sign-in. This layer owns each service's request shapes, its length limits, the suppression of channel-wide mentions, and the translation of every response into a delivery outcome. It sits below the agent layer and never decides when or whether a reply is sent. Add a new destination here alongside its provider reference, which records where its credential comes from and when its limits were last checked.
 
 ##### `vidbyte/lib/providers/`
 

@@ -79,6 +79,9 @@ class AgentForker:
             trace_option=settings.trace_option if settings.trace_option is not None else agent._trace_option,
             # Backups the parent named by bare model name keep the parent's provider, even when the child switches.
             fallback=cls._fallback(agent, settings, child_provider, parent_provider),
+            # @intent forks-never-deliver
+            # SDK-built forks never post to the parent's outputs.
+            outputs=(),
         )
         # A dropped tool stays dropped for every later fork, including tools the child bridges from MCP servers.
         child._fork_dropped_tool_names = agent._fork_dropped_tool_names | frozenset(settings.drop_tools)
