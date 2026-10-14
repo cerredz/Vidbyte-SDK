@@ -430,7 +430,8 @@ class YamlLoader:
         return ContinualTraceAgentDescriptor(
             name=YamlLoader._text(raw, "name", "continual-trace"),
             schema=schema,
-            max_trace_iterations=int(raw.get("max_trace_iterations", 3)),
+            # @intent loader-passes-iterations-to-the-descriptor-check: the descriptor owns the type check; do not coerce.
+            max_trace_iterations=raw.get("max_trace_iterations", 3),
             source_provider=source.get("provider") if source else None,
             source_model_name=source.get("model_name") if source else None,
             metadata=dict(raw.get("metadata", {})),
