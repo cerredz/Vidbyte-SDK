@@ -367,3 +367,71 @@ This revision makes the spec edits that the S4 confirmed findings in `review.md`
 - 265 Appendix rows in 31 tables.
 - spec.md is LF.
 - The new constants have no A007 tokens.
+
+## Addendum — r7 (spec edits for re-review round 1: R-15, R-16, R-17, M-6; status reviewed)
+
+This revision makes the spec edits that the post-repair re-review round 1 findings in `review.md` require. Spec commit: `70df9458`. The §16 entries S5-1 to S5-4 map to R-15, R-16, R-17, and M-6. I re-ran every expected output below through `FunctionTool.execute` on Python 3.11.0: once with the verifier's prototypes `s5v_toml_lexer` and `s5v_data_size_patch` loaded, and once against HEAD for the cases that are cheap there (probe `scratchpad/r7/probe_r7.py`).
+
+**Was the expected behavior already pinned?**
+- **R-15: yes, confirmed.** NFR-7 (`spec.md:266` in r6) reads "Each call at the largest input its schema allows takes ≤ 2 s on the CI runner, except in two accepted cases" (EC-10 and EC-46). The A.20 row gives the comment case `tomllib.loads` → `{"value": {"a": 1}}`. The run-merge text has no run of more than 100 segments, so it gets "the text is not valid TOML 1.0". r7 also states the unclosed-quote rule (a quoted segment that is not closed on its line ends at the line end and counts once). Under that rule the run-merge text is one run of 61 segments, so its output does not change.
+- **R-16: yes in substance, but not written out.** INV-14, item 15 ("`float()` of it is finite"), and the A.27 row ("computed exactly in `Fraction`", "a negative value … → error(`text`)") together fix every result. The row did not say what an exponent of 19 or more digits gives, so r7 adds the readings. They match `text_extraction._number_entry` (`:218-220`), which bounds the exponent before it builds a `Decimal`.
+- **Correction to the briefing:** "19+ digits" is only approximate. `Decimal()` fails above `decimal.MAX_EMAX` (999,999,999,999,999,999) and below `decimal.MIN_ETINY` (−1,999,999,999,999,999,997). `1e-1000000000000000000 B` already gives 0.0 bytes at HEAD. The regression cases use 20-digit exponents.
+
+**R-17 decision (D-19): yes.** The scan matches comments and multi-line strings whole and skips them. A long dotted run inside one is accepted when `tomllib` accepts it. The reasons:
+- Only a key makes `tomllib` quadratic. With the prototype, a 999,989-character comment of `a.` pairs takes 0.007 s, and multi-line basic and literal strings of the same run take 0.151 s and 0.112 s.
+- The scan has to recognize multi-line strings to close the bypass in any case. Skipping them is then the smallest correct code, and keeping the r6 refusal would turn away valid text.
+- No pack test pins the r6 over-refusal: grepping `tests/features/prebuilt_tools` finds no comment or multi-line case.
+- The runner-up (scan the content of each skipped piece too) and the flip conditions are recorded in D-19.
+
+Edits for R-17: the A.20 row now describes the piece scan; new EC-51 records the R-6, R-15, and R-17 shapes; EC-31 says that invalid text with a long run gets the nesting message. NFR-7, T-2, §13, and row 27 are updated, and row 27 records the Python 3.11.0 `re` trap: `re.match('x(?:"(?!""))*+', 'x""""')` gives `'x"""'`, and an atomic group gives `'x'`.
+
+**Edits for R-16:**
+- The A.27 row now states the results for an exponent of any length.
+- §9.2 item 18 now says that building a `Decimal` from text needs no context only within the exponent limits, so a tool first compares the exponent with `PREBUILT_MAX_DECIMAL_TEXT_CHARS`.
+- That constant's caps row now lists `parse_data_size` and `extract_numbers`, and row 34 cites item 18.
+
+**M-6:** `git grep -n PREBUILT_MAX_REPORTED_NAMES vidbyte` and `git grep -n shortened_names vidbyte` confirm four users through the shared shortener: `code_analysis.py:233`, `csv_tables.py:313-314`, `graphs.py:267`, and `text_transform.py:359`. The caps row now names all four. The value stays 20.
+
+**A correction to the briefing's R-15 input.** `"# " + '"' + chr(92)+'"' * 20000 + "\na = 1"` is one backslash followed by 20,000 quotes, because `*` binds tighter than `+`. Every version scans that in linear time: 0.004 s at HEAD. The quadratic input groups the pair: `(chr(92) + '"') * 20000`, which takes 2.234 s at HEAD at 40,009 characters. §13 says this too.
+
+**Regression expectations for the test author.** "Watchdog" means a case for the 30 s child of `test_prebuilt_hostile_inputs.py`; "in-process" means a case that takes about 0.001 s. `NEST` is the message "the TOML is nested deeper than 100 levels", and `INVALID` is "the text is not valid TOML 1.0".
+
+| Case | Input | Expected | Where it runs | Prototype time |
+|---|---|---|---|---|
+| R-15 a | `"# " + '"' + (chr(92) + '"') * 499_995 + "\na = 1"` (999,999 characters) | `{"value": {"a": 1}}` | watchdog | 0.012 s |
+| R-15 b | `"x = " + '"' + (chr(92) + '"') * 499_990` | error(`toml_text`) containing INVALID | watchdog | 0.127 s |
+| R-15 c | `"k" + ".k" * 59 + '."' + "k" + ".k" * 60 + " = 1"` | error(`toml_text`) containing INVALID; HEAD on 3.11.0 gives NEST | in-process | 0.001 s |
+| R-15 d, optional | `'"""' * 333_333`, and `"'''" * 333_333` | error(`toml_text`) containing INVALID | watchdog | 0.024 s and 0.022 s |
+| R-17 a | `"t = { s = '''it's''', " + "a." * 499_900 + "a = 1, u = 'v' }"` (999,838 characters) | error(`toml_text`) containing NEST | watchdog | 0.047 s |
+| R-17 b | the same text without `, u = 'v'` (999,829 characters) | error(`toml_text`) containing NEST | watchdog | 0.047 s |
+| R-17 c | `'t = { s = """a"b""", ' + "a." * 499_900 + 'a = 1, u = "v" }'` | error(`toml_text`) containing NEST | watchdog | 0.048 s |
+| R-17 d | `"t = { s = '''it's''', a.b.c = 1, u = 'v' }"` | `{"value": {"t": {"s": "it's", "a": {"b": {"c": 1}}, "u": "v"}}}` | in-process | 0.001 s |
+| R-17 e (D-19) | `"# " + "a." * 101 + "a\nb = 1"` | `{"value": {"b": 1}}`; HEAD gives NEST | in-process | 0.001 s |
+| R-17 f (D-19) | `'s = """' + "a." * 101 + 'a"""'`, and `"s = '''" + "a." * 101 + "a'''"` | `{"value": {"s": "a." * 101 + "a"}}`; HEAD already gives this | in-process | 0.001 s |
+| R-17 g (D-19) | `"# " + "a." * 499_990 + "a\nb = 1"`, and `'s = """' + "a." * 499_990 + 'a"""'` | `{"value": {"b": 1}}`, and `{"value": {"s": "a." * 499_990 + "a"}}` | watchdog | 0.007 s and 0.151 s |
+| R-17 h (row) | `'s = """# x"""\n' + "a" + ".a" * 100 + "=1"` | error(`toml_text`) containing NEST, because a `#` inside a string hides nothing | in-process | 0.001 s |
+| R-17 i (row) | `"a" + ".a" * 99 + '."b'`, and `"a" + ".a" * 98 + '."b'` | NEST (101 segments, the unclosed one counted once), and INVALID (100 segments) | in-process | 0.001 s |
+| R-16 a | `parse_data_size("1e99999999999999999999 B")` and `"-1e99999999999999999999 B"` | error(`text`) | in-process | 0.001 s |
+| R-16 b | `"1e-99999999999999999999 B"`, `"0e99999999999999999999 B"`, `"0e-99999999999999999999 B"`, `"-0e99999999999999999999 B"`, `"1E-99999999999999999999"`, and `".5e-99999999999999999999 kib"` | `{"size_bytes": 0.0, "size_bits": 0.0}` | in-process | 0.001 s |
+| R-16 c | `"-1e-99999999999999999999 B"` | error(`text`): negative, although its float is −0.0 | in-process | 0.001 s |
+| R-16 d | every R-16 input again, under `decimal.Context(traps=[])` and under a hostile context (prec 3, Emax 5, every trap on), each set before `asyncio.run` and restored in `finally` | the same results; never `InvalidOperation` or `ValueError` | in-process | 0.001 s |
+| Controls (unchanged) | `"a" + ".a" * 99 + "=1"` | accepted | in-process | 0.001 s |
+| Controls (unchanged) | the R-6 bare, header, and inline forms at the cap | NEST | watchdog | 0.047 s |
+
+Against HEAD, every R-16 a to c input gives `error_type: InvalidOperation`.
+
+**Unchanged:**
+- No new constant.
+- No tool, parameter, return key, default, or cap was added, dropped, or renamed. `diff_contract.py` shows no changed contract cell.
+- Still 265 tools in 31 tables and 68 enums.
+- The §6.2 table is byte-identical to r6.
+- No test-pinned value changes.
+
+**Stage E self-check (r7):**
+- ID counts: FR 11, NFR 11, AC 21, INV 26, EC 51, W 38, T 6, D 19.
+- Every ID is defined; G-1 to G-4 are the script's usual false positives.
+- Table problems: 0.
+- 18 `## §` headings.
+- spec.md is LF.
+
+**Open item for the orchestrator (no spec change).** `extract_numbers("0e5000")` gives no number at HEAD, while `"0e4002"` gives value `"0"`. Read literally, the A.29 row says "expanded exactly" and skips only "a run of more than 4,000 digits", so it would list `0e5000` with the value `"0"`. This is a possible Minor finding outside this round; I left both the row and the code as they are.
