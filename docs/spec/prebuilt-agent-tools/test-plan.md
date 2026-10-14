@@ -14,7 +14,7 @@ Pack: `tests/features/prebuilt_tools/`. It has 19 test files, 4,310 collected te
 | AC-4, INV-5, EC-3 | `test_plain_string_equal_to_a_member_value_is_rejected_before_building`, `test_mixed_valid_and_invalid_items_name_every_bad_value`, `test_bare_plain_string_is_rejected_whole_and_never_iterated`, `test_select_categories_rejects_plain_strings_too` | contract | `"dates"` is accepted as a member; the error lacks the bad values or the valid list; a bare string is iterated into characters; a tool is built before the error. | `ConstructionCounter` (a profile hook on `FunctionTool.__init__`) must read 0. The message checks use values (`7`, `None`, `calendar`) that cannot appear in the valid list. The test also asserts the error is not a `ToolRegistrationError`. |
 | AC-5, INV-7 | `test_prebuilt_acceptance.py` → `test_importing_the_sdk_builds_no_tool` | acceptance (fresh interpreter) | Importing `vidbyte`, `vidbyte.tools.toolsets`, or `vidbyte.tools.builtins.prebuilt` builds a `FunctionTool` or a `Tools` (a module-level catalogue or cache). | Counting zero is only meaningful if the package exists, so the probe also requires `PrebuiltTools` and the 31 `*ToolFunctions` classes. The probe was verified in scratch to count 1 when a tool is built. |
 | AC-6, INV-14, INV-10, INV-11 | `test_prebuilt_error_contract.py` → `test_any_schema_valid_call_keeps_the_result_contract` (265 params) | property sweep | Any of 13 deterministic, schema-derived argument sets makes a tool leak `KeyError`, `ValueError`, `OverflowError`, `RecursionError`, `TypeError`, `IndexError`, and the like; return NaN or Infinity; return extra or missing keys; or make `execute` itself raise. | The argument sets come from each tool's own schema, so most pass validation and reach the body. Edge pools cover year 1 and 9999, 1e300, empty text, 150-deep brackets, CRLF, and astral characters. Checked in scratch against a fake 5-tool library: 85 tests passed and the harness ran clean. |
-| AC-7, INV-16 | `test_prebuilt_model_facing_contract.py` → `test_one_over_cap_argument_fails_validation_naming_the_parameter`; `test_prebuilt_toolset_contract.py` → `test_tool_schema_matches_its_appendix_row`, `test_every_text_and_list_parameter_is_capped` | contract | A `str` or `list` parameter has no cap, the wrong cap, or an off-by-one cap; a list lacks its item cap or its item-count cap; a `UtcOffset` lacks its pattern or its `maxLength` 6. Over-cap input reaches the body. | Since r4 every cap in the hand-copied parameter table is an exact number, including `PREBUILT_MAX_HOLIDAYS` (1,000), the `weekend_days` literal 7, `PREBUILT_MAX_GRAPH_EDGES` (10,000) on both `critical_path_schedule` dependency lists, and `PREBUILT_MAX_UTC_OFFSET_CHARS` (6) on the four `UtcOffset` parameters, and the schema test compares each cap exactly and requires `maxLength` on every plain string. The behavioral test requires the capped argument's own `loc` part (`param`, or `param.0` for an over-long list item) to say "at most <cap>", so another field's validation error cannot satisfy it; a list with an item cap is sent twice, once with one over-long item and once with one item too many. The fill character matches the pattern where one can; none matches the `UtcOffset` pattern, which works because pydantic reports length before pattern (verified). A scratch fake plugin with the exact `add_business_days` caps passed. |
+| AC-7, INV-16 | `test_prebuilt_model_facing_contract.py` → `test_one_over_cap_argument_fails_validation_naming_the_parameter`; `test_prebuilt_toolset_contract.py` → `test_tool_schema_matches_its_appendix_row`, `test_every_text_and_list_parameter_is_capped` | contract | A `str` or `list` parameter has no cap, the wrong cap, or an off-by-one cap; a list lacks its item cap or its item-count cap; a `UtcOffset` lacks its pattern or its `maxLength` 6. Over-cap input reaches the body. | Since r4 every cap in the hand-copied parameter table is an exact number, including `PREBUILT_MAX_HOLIDAYS` (1,000), the `weekend_days` literal 7, `PREBUILT_MAX_GRAPH_EDGES` (10,000) on both `critical_path_schedule` dependency lists, and `PREBUILT_MAX_UTC_OFFSET_CHARS` (6) on the four `UtcOffset` parameters, and the schema test compares each cap exactly and requires `maxLength` on every plain string. The behavioral test requires the capped argument's own `loc` part (`param`, or `param.0` for an over-long list item) to say "at most <cap>", so another field's validation error cannot satisfy it; a list with an item cap is sent twice, once with one over-long item and once with one item too many. The fill character matches the pattern where one can; none matches the `UtcOffset` pattern, which works because pydantic reports length before pattern (verified). A scratch fake plugin with the exact `add_business_days` caps passed. The one list of lists, `intersect_lists.lists` (`list[TextList] len 2..PREBUILT_MAX_LISTS`), carries a `TextListsShape` instead of an int item cap. For it, the schema test also checks `minItems` 2, each inner list's `maxItems` 10,000, and the inner strings' `maxLength` 10,000. The over-cap test also sends one inner list one item too long (loc `lists.0`) and one inner string one character too long (loc `lists.0.0`); see "Post-S3 fix". |
 | AC-8, INV-9 | `test_tool_description_has_four_or_five_sentences_and_no_example`, `test_parameter_descriptions_have_four_or_five_sentences_and_no_example` (265 params each) | contract | A description or parameter description has fewer than 4 or more than 5 sentences, is empty, or contains "for example", "for instance", "e.g.", or an ISO date. | It uses the repository's own lint `SentenceCounter`, so the tests and S025 agree. Parameter names are also checked against Appendix A, so a missing parameter cannot skip the check. |
 | AC-9, INV-21 | `test_provider_schemas_declare_every_tool_once` (openai, anthropic, gemini) | contract | A formatter raises on one schema, drops or merges declarations, or reorders names. | It requires `len == len(catalogue)`, names in catalogue order, and a payload that serializes with `json.dumps`. |
 | AC-10, INV-12 | `test_prebuilt_determinism.py` → `test_outputs_match_across_hash_seeds_and_environments`, `test_repeated_calls_in_one_process_are_identical` | integration (two child interpreters plus in-process) | Output depends on `PYTHONHASHSEED` (set or dict order), cwd, TZ, locale, or earlier calls. | The battery uses 40+ distinct strings, 45-edge graphs, many record keys, and many imports. It was verified that `set(SOUP_WORDS)` iterates differently under seeds 0 and 4242. Each tool is called with three argument sets plus targeted calls. The plumbing was verified with the scratch fake. |
@@ -134,6 +134,53 @@ PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider tests/test_tools_catal
 ```
 
 The neighbouring suites match the pre-S2 baseline (338 passed, 12 skipped), so the red is confined to the new pack. The whole-suite collection (`python -m pytest --collect-only -q`) collects 8,338 tests (8,312 before the r4 tightening) with no collection error. With the pack staged, `PYTHONPATH=$(pwd) python lint/run.py` ends `SDK-LINT: PASS`: A001, S002, S003, S034, S041, S050, S053, and S062 show no new findings, and no baseline number rose.
+
+## Post-S3 fix (S3-3: `intersect_lists` nested lists)
+
+**Defect.** S3 built all 265 tools and found a defect in the S2 test data, and the orchestrator ruled for the spec. `prebuilt_parameter_data.py` gave `intersect_lists.lists` an int item cap of 10,000, which treats each item as a string. Appendix A.24 types it as `list[TextList] len 2..PREBUILT_MAX_LISTS`, so each item is a list. Two contract cases failed against the row-following implementation: `test_tool_schema_matches_its_appendix_row[intersect_lists]` ("item maxLength is None") and `test_one_over_cap_argument_fails_validation_naming_the_parameter[intersect_lists]` ("lists.0: Input should be a valid array").
+
+**Decision: teach both tests about nested arrays.** I chose this over setting the item cap to `None` plus a one-off check, because `None` would have dropped the inner caps from the behavioral test.
+- The data module gains a `TextListsShape(min_lists, list_items, item_chars)` record. `LIST_OF_TEXT_LISTS = (2, 10000, 10000)` is read from A.24, §9.2 `TextList` (`PREBUILT_MAX_LIST_ITEMS` items, `PREBUILT_MAX_SHORT_TEXT_CHARS` per string) and `PREBUILT_MAX_LISTS` (100).
+- The row is now `('lists', 'array', 100, LIST_OF_TEXT_LISTS, REQUIRED)`.
+- `schema_problems` checks five things for a `TextListsShape`: outer `minItems`, inner type `array`, inner `maxItems`, string type, and string `maxLength`. The outer `maxItems` 100 is still checked by the existing cap line.
+- `test_every_text_and_list_parameter_is_capped` now descends one level into a list whose items are lists.
+- `over_cap_values` adds two cases for a `TextListsShape`: one inner list of 10,001 items (loc `lists.0`), and one inner string of 10,001 characters (loc `lists.0.0`). Each sends `min_lists` lists, so the outer minimum never fails beside them. The 101-list case is unchanged.
+
+The int-item-cap path, used by every other tool, is untouched.
+
+**Other nested lists: none.** Searching Appendix A for `list[TextList]`, `list[NumberList]`, `list[IntegerList]`, `list[list`, `list[tuple`, and `list[dict` finds only A.24 `intersect_lists`. The other hits are the `_support.py` helper signatures in §12.3 row 6 and the S3-3 entry in the §16 review log, and none of them is a tool parameter. The live schemas agree: `intersect_lists.lists` is the only array parameter whose items are not scalars.
+
+**Can each test fail?** A scratch script ran the three contract tests against `FunctionTool`s built from `intersect_lists` variants (`scratchpad/nested/mutants.py`).
+
+| Variant | Schema test | Capped test | Over-cap test |
+|---|---|---|---|
+| As A.24 (min 2, max 100, inner 10,000 items of 10,000 characters) | pass | pass | pass |
+| Outer max dropped | FAIL | FAIL | FAIL |
+| Outer max 101 | FAIL | pass | FAIL |
+| Outer min 2 dropped | FAIL | pass | pass |
+| Inner list max dropped | FAIL | FAIL | FAIL |
+| Inner list max 10,001 | FAIL | pass | FAIL |
+| Inner string max dropped | FAIL | FAIL | FAIL |
+| Old wrong shape (list of strings) | FAIL | pass | FAIL |
+
+The over-cap test is red for every dropped or loosened cap and green for the A.24 schema. The minimum of 2 is a lower bound, not a cap, so only the schema test owns it.
+
+Proof against the implementation at `f618559e`, whose production code was not edited:
+
+```
+PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider tests/features/prebuilt_tools/test_prebuilt_toolset_contract.py -k intersect_lists
+...                                                                      [100%]
+3 passed, 940 deselected in 0.31s
+
+PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider tests/features/prebuilt_tools
+........................................................................ [ 98%]
+..............................................................           [100%]
+4310 passed in 20.87s
+
+PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider tests/test_tools_catalog.py tests/test_function_tool_parameter_types.py tests/test_tool_core.py tests/features/coding_agent
+..............................................................           [100%]
+338 passed, 12 skipped in 15.30s
+```
 
 ## Notes for the implementer
 

@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Expected values come from the hand-copied tables in prebuilt_
 FUNCTION INVENTORY: Floor and order tests (AC-2, AC-3, AC-12, INV-1, INV-2, INV-3); category validation tests (AC-4, AC-19, INV-4, INV-5); construction identity tests (INV-6, AC-18); FunctionTool shape (INV-8); export lists (INV-22, §8.5); enum tables; per-tool schema contract (INV-16, Appendix A parameters).
 COMMON MODIFICATION PATTERNS: When Appendix A changes, update the data modules first and let these tests follow; add a new construction rule as its own test with its spec ID in the name or docstring.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import PrebuiltTools or the prebuilt package at module level; collection must survive a missing feature. 2. Do not compare against values read from the implementation's own constants.
-KNOWN EDGE CASES: ToolRegistrationError subclasses ToolRegistryError, so category rejection tests also check the message. A bare PrebuiltToolCategory member is a str, so it must be treated as one category, while a bare plain string must be rejected without being iterated.
+KNOWN EDGE CASES: ToolRegistrationError subclasses ToolRegistryError, so category rejection tests also check the message. A bare PrebuiltToolCategory member is a str, so it must be treated as one category, while a bare plain string must be rejected without being iterated. The one list of lists, intersect_lists.lists (list[TextList]), is checked one level down: its minItems, each inner list's maxItems, and the inner strings' maxLength.
 RELATED DOCS: tests/features/prebuilt_tools/FEATURE.md; docs/spec/prebuilt-agent-tools/spec.md (§6.1, §6.2, §8.5, §9.2, Appendix A)
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/prebuilt_tools/test_prebuilt_toolset_contract.py
 """
@@ -22,7 +22,7 @@ from typing import Any
 import pytest
 
 from tests.features.prebuilt_tools.prebuilt_catalogue_data import ALL_TOOL_NAMES, CATEGORY_TABLE, CATEGORY_TOOL_NAMES, ENUM_TABLE
-from tests.features.prebuilt_tools.prebuilt_parameter_data import REQUIRED, TOOL_PARAMETERS
+from tests.features.prebuilt_tools.prebuilt_parameter_data import REQUIRED, TOOL_PARAMETERS, TextListsShape
 from tests.features.prebuilt_tools.prebuilt_tool_harness import ConstructionCounter
 from vidbyte.lib.errors import ToolRegistrationError, ToolRegistryError
 from vidbyte.tools.catalog import Tools
@@ -309,6 +309,13 @@ def schema_problems(name: str, row: tuple[Any, ...], prop: dict[str, Any], defin
         items, _ = resolve_schema(resolved.get("items", {}), definitions)
         if items.get("maxLength") != item_cap:
             problems.append(f"{parameter}: item maxLength is {items.get('maxLength')!r}, Appendix A says {item_cap}")
+    if isinstance(item_cap, TextListsShape):
+        items, _ = resolve_schema(resolved.get("items", {}), definitions)
+        strings, _ = resolve_schema(items.get("items", {}), definitions)
+        found = (resolved.get("minItems"), items.get("type"), items.get("maxItems"), strings.get("type"), strings.get("maxLength"))
+        wanted = (item_cap.min_lists, "array", item_cap.list_items, "string", item_cap.item_chars)
+        if found != wanted:
+            problems.append(f"{parameter}: (minItems, item type, item maxItems, string type, string maxLength) is {found!r}, Appendix A says {wanted!r}")
     return problems
 
 
@@ -329,7 +336,7 @@ def test_tool_schema_matches_its_appendix_row(prebuilt_library: Any, name: str) 
 
 @pytest.mark.parametrize("name", ALL_TOOL_NAMES)
 def test_every_text_and_list_parameter_is_capped(prebuilt_library: Any, name: str) -> None:
-    """INV-16: every str parameter has maxLength (spec r4 gives UtcOffset one too) and every list has maxItems and capped string items."""
+    """INV-16: every str parameter has maxLength (spec r4 gives UtcOffset one too), and every list, and every list inside a list, has maxItems and capped string items."""
     schema = dict(library_tool(prebuilt_library, name).spec().input_schema or {})
     definitions = schema.get("$defs", {})
     for parameter, prop in schema.get("properties", {}).items():
@@ -337,6 +344,9 @@ def test_every_text_and_list_parameter_is_capped(prebuilt_library: Any, name: st
         if resolved.get("type") == "array":
             assert "maxItems" in resolved, f"{name}.{parameter} has no maxItems"
             items, _ = resolve_schema(resolved.get("items", {}), definitions)
+            if items.get("type") == "array":
+                assert "maxItems" in items, f"{name}.{parameter} inner lists have no maxItems"
+                items, _ = resolve_schema(items.get("items", {}), definitions)
             plain_string_items = items.get("type") == "string" and "enum" not in items and "format" not in items
             assert not plain_string_items or "maxLength" in items, f"{name}.{parameter} items have no maxLength"
         elif resolved.get("type") == "string" and "enum" not in resolved and "format" not in resolved:

@@ -2,11 +2,11 @@
 
 PURPOSE: Hand-copied parameter table of every prebuilt tool from spec Appendix A and the §9.2 shorthand types: names in order, JSON type, length caps, item caps, and defaults.
 ROLE IN CODEBASE: Expected values for the schema contract test in tests/features/prebuilt_tools/test_prebuilt_toolset_contract.py; it imports nothing from vidbyte.
-ARCHITECTURE NOTE: Each entry is (parameter, json type, maxLength or maxItems, item maxLength, default). The type is a JSON Schema type, a JSON Schema format (date, date-time, time), utc_offset for the §9.2 UtcOffset string, or enum:<EnumName>.
-FUNCTION INVENTORY: Data only: the REQUIRED sentinel and TOOL_PARAMETERS.
+ARCHITECTURE NOTE: Each entry is (parameter, json type, maxLength or maxItems, item maxLength, default). The item field is a TextListsShape instead of an int for the one list whose items are themselves lists (A.24 intersect_lists, list[TextList]). The type is a JSON Schema type, a JSON Schema format (date, date-time, time), utc_offset for the §9.2 UtcOffset string, or enum:<EnumName>.
+FUNCTION INVENTORY: Data only: the REQUIRED sentinel, the TextListsShape record with its one value LIST_OF_TEXT_LISTS, and TOOL_PARAMETERS.
 COMMON MODIFICATION PATTERNS: When an Appendix A parameters cell changes, edit its entry here in the same commit as the spec.
 WHAT NOT TO DO IN THIS FILE: 1. Do not read FunctionTool schemas to fill this table; it must stay an independent transcription. 2. Do not add helpers here.
-KNOWN EDGE CASES: A utc_offset parameter carries both the §9.2 UtcOffset pattern and the spec r4 cap PREBUILT_MAX_UTC_OFFSET_CHARS (6). The weekend_days cap of 7 is a literal in the rows, not a constant. Enum defaults are written as their value strings and tuple defaults as lists, which is how the JSON schema shows them.
+KNOWN EDGE CASES: A utc_offset parameter carries both the §9.2 UtcOffset pattern and the spec r4 cap PREBUILT_MAX_UTC_OFFSET_CHARS (6). The weekend_days cap of 7 is a literal in the rows, not a constant. intersect_lists.lists is list[TextList] len 2..PREBUILT_MAX_LISTS, so its items are arrays of at most 10,000 strings of at most 10,000 characters each, not strings (S3-3). Enum defaults are written as their value strings and tuple defaults as lists, which is how the JSON schema shows them.
 RELATED DOCS: docs/spec/prebuilt-agent-tools/spec.md (Appendix A, §9.2 item 2)
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/prebuilt_tools/test_prebuilt_toolset_contract.py
 """
@@ -14,8 +14,20 @@ TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/prebuilt_tools/test_
 from __future__ import annotations
 
 from types import MappingProxyType
+from typing import NamedTuple
 
 REQUIRED = "<required>"
+
+
+class TextListsShape(NamedTuple):
+    """The parts of a list[TextList] parameter that its outer maxItems does not state: the least number of lists, and each list's §9.2 TextList caps."""
+
+    min_lists: int
+    list_items: int
+    item_chars: int
+
+
+LIST_OF_TEXT_LISTS = TextListsShape(min_lists=2, list_items=10000, item_chars=10000)
 
 ParameterRow = tuple[str, str, object, object, object]
 
@@ -254,7 +266,7 @@ TOOL_PARAMETERS: MappingProxyType[str, tuple[ParameterRow, ...]] = MappingProxyT
         'count_item_frequencies': (('items', 'array', 10000, 10000, REQUIRED), ('case_sensitive', 'boolean', None, None, True), ('top', 'integer', None, None, 100)),
         'find_duplicate_items': (('items', 'array', 10000, 10000, REQUIRED), ('case_sensitive', 'boolean', None, None, True)),
         'compare_two_lists': (('first', 'array', 10000, 10000, REQUIRED), ('second', 'array', 10000, 10000, REQUIRED), ('case_sensitive', 'boolean', None, None, True)),
-        'intersect_lists': (('lists', 'array', 100, 10000, REQUIRED), ('case_sensitive', 'boolean', None, None, True)),
+        'intersect_lists': (('lists', 'array', 100, LIST_OF_TEXT_LISTS, REQUIRED), ('case_sensitive', 'boolean', None, None, True)),
         'find_missing_integers': (('values', 'array', 10000, None, REQUIRED), ('start', 'integer', None, None, None), ('end', 'integer', None, None, None)),
         'compress_integer_ranges': (('values', 'array', 10000, None, REQUIRED),),
         'expand_integer_ranges': (('text', 'string', 100000, None, REQUIRED),),
