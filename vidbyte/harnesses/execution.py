@@ -235,7 +235,11 @@ class Harness:
             if deadline.expired():
                 raise _HarnessDeadlineExpired from exc
             raise
-        if deadline.expired():
+        # @intent blocking-run-past-deadline-times-out
+        # A body that blocks (sync run(), or async code that never suspends) returns before the timer callback can run,
+        # so expired() stays False; the deadline itself still passed, and the run must not be recorded as succeeded.
+        deadline_at = deadline.when()
+        if deadline.expired() or (deadline_at is not None and asyncio.get_running_loop().time() >= deadline_at):
             raise _HarnessDeadlineExpired
         return result
 
