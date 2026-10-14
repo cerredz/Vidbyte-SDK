@@ -1,19 +1,24 @@
-"""Context Protocol Header
+"""FILE: tests/test_refused_finish_adopts_catalog.py
 
-Description:
-    Tests that a tool the agent adds to itself mid-run reaches the next model call even when the same turn's
-    isDone is refused.
-Purpose:
-    A turn of [a tool that calls agent.add_tool, isDone] whose isDone an output contract rejects, or whose
-    review_finish asks to continue, must still offer the added tool on the next request, as a plain tool turn does.
-Architecture:
-    - AddThenUseRunner: scripted runner that records the tool names offered per request, adds a tool in turn 1
-      (optionally beside isDone), calls the added tool in turn 2, and finishes in turn 3.
-    - RefuseFirstFinish: middleware whose review_finish continues the run once, then accepts.
-    - RefusedFinishAdoptsCatalogTests: the contract-rejected, review-continued, and plain (control) cases.
-Relations:
-    - vidbyte/agents/runtime.py
-    - vidbyte/agents/base.py
+PURPOSE:
+    Proves a tool the agent adds to itself mid-run reaches the next model call even when the same turn's isDone
+    is refused, by an output contract or by a review_finish that asks to continue.
+ROLE IN CODEBASE:
+    Regression test for @intent refused-finish-still-adopts-added-tools in AgentRuntime's linear loop, beside
+    @intent a-tool-the-agent-adds-mid-run-reaches-the-next-iteration.
+ARCHITECTURE NOTE:
+    AddThenUseRunner is a scripted offline runner that records the tool names offered per request: turn 1 calls
+    unlock_catalog (which calls agent.add_tool) optionally beside isDone, turn 2 calls the added tool, turn 3
+    finishes. RefuseFirstFinish continues the run once from review_finish, then accepts.
+COMMON MODIFICATION PATTERNS:
+    Add another refusal shape as a new test that builds the agent with _agent and asserts with
+    _assert_added_tool_offered_next.
+KNOWN EDGE CASES:
+    The plain tool turn (no isDone) is the control case and must keep offering the added tool on request 2.
+RELATED DOCS:
+    vidbyte/agents/README.md
+TESTS:
+    python -m pytest tests/test_refused_finish_adopts_catalog.py -q
 """
 
 from __future__ import annotations
