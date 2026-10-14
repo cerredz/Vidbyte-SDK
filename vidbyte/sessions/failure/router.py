@@ -258,6 +258,8 @@ class FailureRouter:
         self._bindings: dict[FailureCode, RecoveryBinding] = {}
         self._recovery_attempts: list[RecoveryAttempt] = []
         self._routed_ids: set[str] = set()
+        # Failures whose recovery handler is running right now; failures recorded meanwhile are never routed.
+        self._recovering_ids: set[str] = set()
 
     @property
     def max_history(self) -> int:
@@ -286,6 +288,11 @@ class FailureRouter:
         if not self.enabled:
             return failure
         self._history.append(failure)
+        if self._recovering_ids:
+            # @intent recovery-failures-never-re-enter-their-handler
+            # A failure raised while a recovery handler runs belongs to that attempt: keep it in the ledger, but mark it
+            # routed so a handler that retries through the same Session cannot re-enter itself.
+            self._routed_ids.add(failure.id)
         if len(self._history) > self.max_history:
             evicted = self._history[: len(self._history) - self.max_history]
             del self._history[: len(evicted)]
@@ -443,9 +450,14 @@ class FailureRouter:
         recovering = Failure(code=failure.code, source=failure.source, phase=failure.phase, status=FailureStatus.RECOVERING, disposition=failure.disposition, severity=failure.severity, summary=failure.summary, details=failure.details, handled_by=binding.handler.name, parent_id=failure.parent_id, iteration=failure.iteration, step=failure.step, id=failure.id, occurred_at=failure.occurred_at)
         self._replace(recovering)
         try:
-            result = binding.handler.recover(recovering, session=self.session)
-            if inspect.isawaitable(result):
-                result = await result
+            # Mark the handler as running so any failure it causes is recorded but not routed back into it.
+            self._recovering_ids.add(failure.id)
+            try:
+                result = binding.handler.recover(recovering, session=self.session)
+                if inspect.isawaitable(result):
+                    result = await result
+            finally:
+                self._recovering_ids.discard(failure.id)
             if not isinstance(result, RecoveryResult):
                 raise TypeError(f"Recovery handler {binding.handler.name!r} must return RecoveryResult, got {type(result).__name__}.")
         except FailureRaisedError:

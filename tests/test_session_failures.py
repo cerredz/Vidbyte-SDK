@@ -513,6 +513,37 @@ class SessionFailureIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(session.failures.history()), 2)
         self.assertEqual(len(set(calls)), 2)
 
+    async def test_handler_retrying_through_session_runs_once(self) -> None:  # [Hidden Failure]
+        # @intent recovery-failures-never-re-enter-their-handler
+        # Verify a handler that retries through the same Session runs once, and the retry's failure is recorded but not routed.
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=_FailingRunner())
+        session = Session(agent)
+        calls: list[str] = []
+
+        class Handler:
+            name = "retry"
+            on_error = "closed"
+
+            async def recover(self, failure, *, session):
+                calls.append(failure.id)
+                # The cap only keeps a regression from recursing without end; one call is the contract.
+                if len(calls) > 3:
+                    return RecoveryResult(False)
+                try:
+                    await session.arun("retry once")
+                except AgentExecutionError:
+                    return RecoveryResult(False)
+                return RecoveryResult(True)
+
+        session.failures.on(FailureCode.RUNTIME_ERROR, Handler())
+        with self.assertRaises(AgentExecutionError):
+            await session.arun("work")
+        history = session.failures.history()
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(history), 2)
+        self.assertEqual([attempt.failure_id for attempt in session.failures.recovery_attempts], [history[0].id])
+        self.assertIsNone(history[1].handled_by)
+
     async def test_in_loop_raise_rule_surfaces_typed_error(self) -> None:  # [Hidden Failure]
         # @intent raise-disposition-reaches-the-caller
         # Verify a matched, fail-closed crashing, or RaiseRecovery-routed rule raises FailureRaisedError, blocks the tool, and leaves one ledger record.
