@@ -41,7 +41,9 @@ from vidbyte.tools.builtins.prebuilt._support import (
 _FENCE_OPEN = re.compile(r" {0,3}(?P<fence>`{3,}+|~{3,}+)(?P<info>.*)")
 _FENCE_CLOSE = re.compile(r" {0,3}(?P<fence>`{3,}+|~{3,}+)[ \t]*+")
 _ATX_HEADING = re.compile(r" {0,3}(?P<hashes>#{1,6})(?:[ \t]++(?P<text>.*))?")
-_ATX_CLOSING = re.compile(r"(?:^|[ \t]++)#++[ \t]*+$")
+# A closing run may start only where a run of spaces starts, so a
+# long run of spaces is scanned once rather than once per space.
+_ATX_CLOSING = re.compile(r"(?:^|(?<![ \t])[ \t]++)#++[ \t]*+$")
 _SETEXT_UNDERLINE = re.compile(r" {0,3}(?:=++|-++)[ \t]*+")
 _TASK_ITEM = re.compile(r"\s*+(?:[-*+]|\d++[.)])\s++\[( |x|X)\]\s++(.*)")
 _UNESCAPED_PIPE = re.compile(r"(?<!\\)\|")
