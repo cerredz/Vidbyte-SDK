@@ -334,7 +334,7 @@ The authorization boundary that all tool execution passes through: the policy mo
 
 ##### `vidbyte/tools/toolsets/`
 
-Named, pre-assembled bundles of tools that ship together for a particular use case, so a caller can attach a coherent, related set of capabilities in a single call rather than assembling them one at a time. One kind of bundle equips a specific agent shipped elsewhere in the package with the tools it starts with. Another kind builds a bundle from the categories of utility tools a caller chooses, so an agent receives only the deterministic helpers it needs instead of the whole library. A new toolset is worth adding whenever the same combination of individual tools keeps being assembled by hand across more than one place. This folder is about convenience and consistency rather than introducing any new tool capability itself.
+Named, pre-assembled bundles of tools that ship together for a particular use case, so a caller can attach a coherent, related set of capabilities in a single call rather than assembling them one at a time. One kind of bundle equips a specific agent or paradigm harness shipped elsewhere in the package with the tools it starts with. Another kind builds a bundle from the categories of utility tools a caller chooses, so an agent receives only the deterministic helpers it needs instead of the whole library. A new toolset is worth adding whenever the same combination of individual tools keeps being assembled by hand across more than one place. This folder is about convenience and consistency rather than introducing any new tool capability itself.
 
 #### `vidbyte/trace/`
 
