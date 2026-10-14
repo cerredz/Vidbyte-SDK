@@ -564,10 +564,14 @@ class CodexHost:
                 if echoed.goal.token_budget != goal.token_budget:
                     raise CodexErrorMapper.error(FailureCode.CODEX_PROTOCOL_MISMATCH, BUDGET_ECHO_MESSAGE, operation, thread_id)
         except BaseException:
-            with suppress(CodexAgentError):
-                await connection.call(operation, CODEX_GOAL_CANCEL_CALL, connection.client.cancel_goal_operation, state, thread_id=thread_id, cleanup=True)
-            state.finish()
-            connection.client.unregister_goal_operation(state)
+            # The stream is released even if a second cancellation lands
+            # while the cancel is awaited (INV-25).
+            try:
+                with suppress(CodexAgentError):
+                    await connection.call(operation, CODEX_GOAL_CANCEL_CALL, connection.client.cancel_goal_operation, state, thread_id=thread_id, cleanup=True)
+            finally:
+                state.finish()
+                connection.client.unregister_goal_operation(state)
             raise
         return self._registry.track_goal(CodexTurnHandle(thread_id=thread_id, turn_id=turn_id), request, pricing, state)
 
