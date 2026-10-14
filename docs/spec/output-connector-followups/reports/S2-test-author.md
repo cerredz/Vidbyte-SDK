@@ -68,3 +68,14 @@ Before implementation:
 3. **Record error type.** §9.1 does not name the exception for `OutputRequest` and `OutputRead` validation. The tests expect `ConfigurationError` naming the field, as every record in `vidbyte/lib/dataclasses/outputs.py` raises through `_require` today.
 4. **Job-summary serialization** is proven with large concurrent appends. A wrong two-thread implementation is caught whenever the two writes overlap, which 200,000-character bodies make the usual case, but this is not guaranteed on every run. The off-loop half of the check is deterministic.
 5. **`test_output_connectors_security.py:110`.** The wire-secret scan joins `url`, `headers`, and `json_body`, but not `content` (spec §13). It was not edited, because the default webhook case is unsigned. Secret hiding for signed webhooks is proven in `test_output_connectors_webhook_options.py`.
+
+## S3 follow-up (2026-10-14)
+
+- **Defect.** S3 reported, and the orchestrator verified, a defect in `test_job_summary_concurrent_appends_run_off_the_loop_one_after_the_other`: no implementation could pass it. The test read the file back with `path.read_text` before its thread assertions. That read runs on the loop thread, and the audit hook recorded it as a third open, so the test always saw `3 == 2`.
+- **Why my scratch check missed it.** The red-run check called the hook harness directly and never read the file back, so it was not the committed test.
+- **Fix** (commit `3d974a1f`, this test only): the test takes `appends = list(opened)` right after the `gather` and runs the three thread assertions on that snapshot before reading the file. They are as strict as before: exactly 2 opens, never the loop thread, one thread. The content assertion follows unchanged. The file header's KNOWN EDGE CASES now mentions the snapshot.
+- **Mutation proof.** Two scratch runs, not committed, used a throwaway pytest plugin. It replaced `GitHubJobSummaryOutput.send` at runtime, so no production file was edited, and `git status --short` showed only the test file.
+  - Appending on the loop thread → FAILED, "the append ran on the event-loop thread".
+  - `asyncio.to_thread` → FAILED, "the appends ran on more than one thread, so they could interleave".
+  - In both runs, the single-send append test still passed, so each wrong variant still wrote correctly.
+- **Results after the fix:** the file is `67 passed`, the pack is `660 passed`, and `python lint/run.py` gives `SDK-LINT: PASS`.
