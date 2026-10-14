@@ -194,6 +194,9 @@ class ClaudeHost:
         # Read the session's summary in a worker thread; an unknown
         # session is claude.session_not_found.
         info = await ClaudeHistory.session_info(sdk, session_id)
+        # aclose can run while the file is read, so check again that
+        # the host is open, or a turn would start after aclose returned.
+        self._guard(operation)
         # A turn already writing to this session would collide with a
         # second writer (INV-4).
         if any(session.snapshot().status in _LIVE_STATUSES and session.snapshot().session_id == session_id for session in self._sessions.values()):
