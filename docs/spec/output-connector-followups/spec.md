@@ -1,7 +1,7 @@
 ---
 spec: output-connector-followups
 title: Output connector follow-ups — Markdown rendering, webhook headers and signing, comments, five new connectors, update in place
-status: verified
+status: pr-open
 revision: 3
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-output-connector-followups
@@ -245,13 +245,16 @@ The developer does not write GitHub pagination, an HMAC, a forum-post body, or T
 flowchart TD
   A[Agent reply validated: BaseAgent] -->|AgentMessage| B[OutputDispatcher.deliver]
   B -->|reply, OutputContent| C{connector.send}
-  C -->|chat / issue / page / draft / task| D[connector builds OutputRequest]
+  C -->|chat / new issue / page / draft / task / plain comment| D[connector builds OutputRequest]
+  C -->|NotionPageOutput append_to=| P[connector builds the insert_content OutputRequest]
   C -->|WebhookOutput secret=| E[WebhookOutput: payload -> bytes -> HMAC headers]
   C -->|GitHubIssueOutput key=| F[OutputHttp.read GET pages]
   C -->|GitHubJobSummaryOutput| G[single-worker executor: LocalFileSystemBackend.append_text]
   F -->|OutputRead data| H[GitHubResponses: marker or issue match]
-  H -->|found id| I[OutputHttp.patch]
-  H -->|none| J[OutputHttp.post]
+  F -->|OutputRead failure, no write| M
+  H -->|sticky comment: marked comment id| I[OutputHttp.patch]
+  H -->|sticky comment: none, or key issue: comment on the match or create it| J[OutputHttp.post]
+  P --> I
   D --> J
   E -->|OutputRequest content=bytes| J
   I --> K[HttpTransport.request]
@@ -1487,6 +1490,7 @@ Auth, by connector:
 | r2 | 2026-10-14 | S1 revision | Applied S1 review round 1 R-1…R-8 (3 Major and 5 Minor, all accepted). Telegram HTML neutralization (INV-18, EC-43, EC-44). Honest deadline semantics (NFR-7, EC-45). §13 factory and `WIRE_ROWS` facts. A002 and S061 `--all` checks. README stale-line fixes. Exact patterns. Both planted-marker branches. 24–64-byte webhook keys. The scope-adding parts became optional Q-6, Q-7, and Q-8 (default no) |
 | r3 | 2026-10-14 | S1 revision (final) | Applied S1 review round 2, R-9…R-18 (1 Blocker, 2 Major, 7 Minor; all accepted, R-17 with a no-literal variant). `OutputResponses` keeps `OutputHttp` one level deep. Telegram also neutralizes `![` media. The Teams body rule is defined. ADF loose lists and breaks. Exact §13 assertions. README Deadline footgun and EC-46. GitLab port range. Header errors never echo a name. Seven `--rule --all` lint checks. Status set to approved: the two review rounds are the approval |
 | r3 | 2026-10-14 | S3 implement | All 33 §12.3 rows built in phase order (a5a50002…4991370c; contract regenerated in d421b6b9, `--check` current); 659/660 feature tests, `python lint/run.py` (SDK-LINT: PASS), the seven NFR-6 rule checks, Semgrep, and `run_ci.py --stage package` pass. The one red test, `test_job_summary_concurrent_appends_run_off_the_loop_one_after_the_other`, counts its own `read_text` as a third open on the loop thread, so it needs an S2 fix; the source stage fails only on it. Status set to `implemented`. |
+| r3 | 2026-10-14 | S6 PR | finalized for review. `pr-body.md` describes the whole of PR #882 (both batches) and replaces the first batch's body. §5's flow chart corrected to the code (see the last bullet below). Status set to `pr-open`. |
 
 **Implementation deviations** (S3; none changes a public name or a tested behavior):
 
@@ -1503,3 +1507,4 @@ Auth, by connector:
 - `OutputHttp` has one method that §8.5 and D-2 do not list: the public static `basic_authorization(username: str, password: str) -> str` (S5 repair 1, efb2c26b, review R-8). Jira and Confluence both build their HTTP Basic header with it, so the header logic exists once (AGENTS.md Style 5). Jira's header bytes are unchanged (AC-34). It calls only `base64`, so Style 1 holds. It adds a name and changes none, and the public API contract is unaffected because `OutputHttp` is not a root export.
 - `vidbyte/agents/README.md` is edited although §12.3 does not list it (S5 repair 1, bde205cd, review R-11). Its "Output Connectors" sentence listed only first-batch categories; it now uses the category list from `vidbyte/lib/README.md:42`. The orchestrator approved the edit as a docs-only truthfulness fix, which satisfies §14 "Ask first" (pipeline.md, S4 routing decisions).
 - `vidbyte/lib/constants/outputs.py` is 326 lines (160 at `336d6c78`), over NFR-2's 300-line module target but well within AGENTS.md Style 3's 1,000-line ceiling (S5 final re-review R-RR3). §12.3 row 3 puts every new cap, URL, version, and pattern in this one module, and A007 forbids moving them inline. It is not split, because a second constants module would be an eighth new file, over the §8.4 budget of 7. Every new module stays under 300 lines (the largest, `adf.py` and `github_api.py`, are 109). The two other touched modules over 300 were over it before this change: `vidbyte/__init__.py` (1,336 → 1,348, the root exports) and `vidbyte/lib/errors/base.py` (552, unchanged).
+- §5's flow chart drifted from the code in two details, and S6 corrected it to match the PR body's flow chart. A Notion `append_to` send makes one `OutputHttp.patch` with no read; the old chart sent every non-GitHub-key connector to `post`. In one-issue-per-key mode a found issue gets a POSTed comment, not a PATCH; only the sticky comment is edited in place. The chart also now shows a failed read ending the send with its receipt. The code, §8.5's pseudocode, and the tests were already right; only the chart changed.
