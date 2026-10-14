@@ -19,11 +19,11 @@ started: 2026-10-13 00:45 UTC
 | S3 implement | done | 2026-10-13 15:45 UTC | 2026-10-13 21:05 UTC | reports/S3-implementer.md | S3_HEAD d9c5fea2; draft PR https://github.com/cerredz/Vidbyte-SDK/pull/1044 ([WIP] title); 36 commits; 31/31 §12.3 rows; budget 22/22 files, 69/69 classes, 1/1 optional dependency, 0 root exports; pack 165/165 with and without claude_agent_sdk (orchestrator re-run); source gate 4100 passed / 27 skipped; package stage PASS; SDK-LINT PASS; semgrep 0; public API unchanged; spec status: implemented |
 | S4 adversarial review | done | 2026-10-13 21:15 UTC | 2026-10-14 02:00 UTC | reports/S4-review-conformance.md, reports/S4-review-conventions.md, reports/S4-review-engineering.md, reports/S4-findings-verifier.md, review.md | MERGEABLE AFTER FIXES; confirmed 3 Blockers (R-1..R-3) / 4 Majors (R-4..R-7) / 14 Minors (R-8..R-21); refuted 2 (R-E1, R-V2 interrupt chain); downgraded 4; remote CI on d9c5fea2 green; spec status: reviewed |
 | S5 repair loop | done | 2026-10-14 02:15 UTC | 2026-10-14 06:35 UTC | reports/S5-repair-1.md, reports/S5-repair-2.md, verify-log.md | iteration 2 (R-22 @b5989730, R-23 @2c537b1a, R-24 by spec r6 9211d4ef) converged at 490e627b: orchestrator gate source 4182 passed / 27 skipped, package CI passed; remote 38519522362 + 38519524093 green. Iteration 1 converged at 615fc54a: fixed R-1,R-2,R-3,R-5,R-6,R-7,R-10..R-14 (R-4,R-8,R-9,R-19 by spec r5 3c1f9e4c); 12 new tests (granted file); merge origin/main 8387d666 at 15124156; orchestrator full gate green (source 4178 passed / 27 skipped, package CI passed); remote CI 38502267522 + static 38502269091 green on 615fc54a |
-| S5 re-review | in progress (round 1 done; iteration 2 done at 490e627b; round 2 of 2 running) | 2026-10-14 03:50 UTC | | reports/S5-rereview.md, reports/S5-findings-verifier-r1.md | round 1: MERGEABLE AFTER FIXES 0B/1M/2m; scoped verifier confirmed R-22 Major (steer taken one pass before the send; INV-18), R-23 Minor code (stale result fields after a steered prompt dies, D-3), R-24 Minor spec-change (EC-52 unknown values, CLAUDE_STEER_YIELD_SECONDS, deviation 14); refuted R-C1's aclose ordering and INV-11 citation |
-| S6 PR | pending | | | | |
+| S5 re-review | done | 2026-10-14 03:50 UTC | 2026-10-14 07:15 UTC | reports/S5-rereview.md, reports/S5-findings-verifier-r1.md, reports/S5-rereview-2.md | round 2 (final) at 490e627b: SOUND, 0B/0M/2m (R-C4 test gap: the R-23 test asserts only one kept field; R-C5 spec text: row 7 omits R-23's reset); both Minors are follow-ups; spec status: verified. Round 1: | round 1: MERGEABLE AFTER FIXES 0B/1M/2m; scoped verifier confirmed R-22 Major (steer taken one pass before the send; INV-18), R-23 Minor code (stale result fields after a steered prompt dies, D-3), R-24 Minor spec-change (EC-52 unknown values, CLAUDE_STEER_YIELD_SECONDS, deviation 14); refuted R-C1's aclose ordering and INV-11 citation |
+| S6 PR | in progress | 2026-10-14 07:20 UTC | | reports/S6-pr-author.md, pr-body.md | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 2/8 · S5 re-review rounds: 2/2 (round 2 running; last allowed)
+- S1 review rounds: 2/2 · S5 repair iterations: 2/8 · S5 re-review rounds: 2/2
 
 ## Parallel run
 - **Sibling pipeline:** `codex-host`, in worktree `C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-codex-host` on branch `feat/codex-host`, from the same base commit. Each run follows the shared-file contract in its request.md §C.
@@ -212,6 +212,15 @@ started: 2026-10-13 00:45 UTC
 - 2026-10-14 06:35 UTC — **Final conformance re-review, round 2 of 2, launched.** This is the last round the cap allows.
   - FOCUS: the iteration-2 commits b5989730 and 2c537b1a, the 4 new tests, and how spec r6 (deviation 14, EC-52, rows 7/12/14) matches the code. It also checks that iteration 1's fixes still hold beside them.
   - If it finds a new Blocker or Major, the verifier confirms it, and then I stop and report to the user rather than open a round 3.
+
+- 2026-10-14 ~06:25 UTC — **Sixth HTTP 429 session limit.** It stopped both final re-reviewers before either had written a report. After the reset, I checked that both trees were clean and unchanged, and resumed each agent through SendMessage. No work was lost.
+- 2026-10-14 07:15 UTC — **Final re-review round 2 returned SOUND,** with 0 Blocker, 0 Major and 2 Minor.
+  - **R-C4:** the R-23 test asserts only one of the three fields the reset keeps. A mutant that also clears session_id passes 181/181. HEAD behaves correctly.
+  - **R-C5:** §12.3 row 7 does not mention R-23's reset of the result fields. D-3 already implies it.
+  - **Out of lens:** the gaps test file's header lists only R-1..R-12.
+- 2026-10-14 07:15 UTC — **The three Minors become follow-ups, not repairs.**
+  *Why:* the skill sends only a new Blocker or Major back into the loop. Both re-review rounds are used, so any further code change would ship unreviewed. The PR author lists the three Minors under Follow-ups.
+- 2026-10-14 07:15 UTC — **The S5 loop converged.** Spec status is set to `verified` with a docs commit. S6 PR author launched.
 
 ## User replies (verbatim)
 - none yet

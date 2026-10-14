@@ -1,7 +1,7 @@
 ---
 spec: claude-host
 title: "ClaudeHost: small atomic Claude Code functions with one agent tool per function"
-status: reviewed
+status: verified
 revision: 6
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-claude-host
