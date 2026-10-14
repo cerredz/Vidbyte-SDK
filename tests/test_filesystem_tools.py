@@ -506,6 +506,34 @@ def test_copy_refuses_a_directory_whose_link_leads_outside_the_root(tmp_path: Pa
     assert not any(path.name == "secret.txt" for path in root.rglob("*"))
 
 
+def test_copy_refuses_a_link_outside_the_root_reached_through_an_in_root_directory_link(tmp_path: Path) -> None:
+    # Verify copy refuses a tree whose in-root directory link leads to a folder holding a link outside the root.
+    # @intent copied-trees-check-what-copytree-follows
+    root = make_project_with_outside_secret(tmp_path)
+    (root / "vault").mkdir()
+    make_link(root / "vault" / "shared", tmp_path / "outside")
+    make_link(root / "project" / "alias", root / "vault")
+    tool = CopyTool(FileSystemToolConfig(root=str(root), allow_write=True))
+    result = run(tool.execute(ToolCall("copy", {"source": "project", "destination": "project_copy"})))
+    assert result.status == ToolStatus.ERROR, result.output
+    assert "escaped the configured root" in result.output
+    assert not (root / "project_copy").exists()
+    assert not any(path.name == "secret.txt" for path in root.rglob("*"))
+    (root / "vault" / "shared").unlink()
+    make_link(root / "vault" / "key.txt", tmp_path / "outside" / "secret.txt")
+    file_link = run(tool.execute(ToolCall("copy", {"source": "project", "destination": "project_copy"})))
+    assert file_link.status == ToolStatus.ERROR, file_link.output
+    assert "escaped the configured root" in file_link.output
+    assert not (root / "project_copy").exists()
+    (root / "vault" / "key.txt").unlink()
+    (root / "vault" / "docs").mkdir()
+    (root / "vault" / "docs" / "guide.md").write_text("guide")
+    make_link(root / "vault" / "current", root / "vault" / "docs")
+    kept = run(tool.execute(ToolCall("copy", {"source": "project", "destination": "project_copy"})))
+    assert kept.status == ToolStatus.SUCCESS, kept.output
+    assert (root / "project_copy" / "alias" / "current" / "guide.md").read_text() == "guide"
+
+
 def test_zip_refuses_a_directory_whose_link_leads_outside_the_root(tmp_path: Path) -> None:
     root = make_project_with_outside_secret(tmp_path)
     make_link(root / "project" / "key.txt", tmp_path / "outside" / "secret.txt")
