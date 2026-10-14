@@ -122,6 +122,14 @@ class CodexSpawnRequest:
     while Codex waits, and a running tool call blocks every other event and
     response on the same host, so keep tools short, or give tool-using
     threads their own ``CodexHost``.
+
+    ``output_schema`` is sent to Codex with the turn, so Codex is asked to
+    answer in that shape. A Pydantic model type is also validated against
+    the completed answer. A mapping is checked only for being valid JSON
+    and is not compared with the schema. An answer that is not valid JSON,
+    or that the model type rejects, gets a schema problem and keeps its raw
+    text. A type that is not a Pydantic model, or a mapping that cannot be
+    serialized to JSON, is refused before any request.
     """
 
     prompt: str | CodexRunInput = ""

@@ -203,5 +203,28 @@ class CodexHostInFlightStartTests(HostTestCase):
         self.assertEqual(self.count("turn/interrupt"), 0)
 
 
+@requires_sdk
+class CodexHostMappingSchemaTests(HostTestCase):
+    """R-12, D-36, EC-83 and EC-32: a mapping output_schema's answer is only parsed as JSON locally."""
+
+    async def test_a_mapping_schema_answer_is_parsed_as_json_and_not_compared_with_the_schema(self) -> None:
+        schema = {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]}
+        cases = (
+            # EC-83: valid JSON that misses the schema is not detected, so the parsed JSON is kept as returned.
+            ("valid JSON that misses the schema", '{"verdict": 1}', None, {"verdict": 1}),
+            # EC-32: an answer that is not JSON gets the schema problem and keeps its raw text.
+            ("text that is not JSON", "The summary is short.", "codex.schema_violation", None),
+        )
+        host = await self.open_host()
+        for label, answer, code, structured in cases:
+            with self.subTest(answer=label):
+                handle = await self.spawn(host, output_schema=schema)
+                self.server.complete_turn(handle.thread_id, handle.turn_id, final=answer)
+                snapshot = await self.wait_done(host, handle)
+                self.assert_problem(snapshot, "completed", code)
+                self.assertEqual(snapshot.result.structured, structured)
+                self.assertEqual(snapshot.result.final_response, answer)
+
+
 if __name__ == "__main__":
     unittest.main()
