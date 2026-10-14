@@ -18,8 +18,10 @@ from typing import TYPE_CHECKING
 
 from vidbyte.harnesses.native.codex.errors import CodexErrorMapper
 from vidbyte.lib.constants.codex import (
+    CODEX_ACCOUNT_READ_METHOD,
     CODEX_MODEL_LIST_METHOD,
     CODEX_RATE_LIMITS_READ_METHOD,
+    CODEX_THREAD_READ_METHOD,
 )
 from vidbyte.lib.dataclasses.codex_host import CodexModelInfo, CodexSpawnRequest
 from vidbyte.lib.enums.codex import (
@@ -98,7 +100,7 @@ class CodexPreflight:
         # failure, before any request that spends (D-28).
         # 1. The account must be signed in. The client method is looked up
         #    now, so a patched or replaced reader is the one used.
-        account = await self._connection.call(operation, "account/read", self._connection.client.account_read)
+        account = await self._connection.call(operation, CODEX_ACCOUNT_READ_METHOD, self._connection.client.account_read)
         problem = self._responses.sign_in_problem(account)
         if problem is not None:
             raise CodexErrorMapper.error(problem.code, problem.message, operation)
@@ -161,7 +163,7 @@ class CodexPreflight:
 
     async def require_thread(self, operation: CodexHostOperation, thread_id: str, include_turns: bool = False) -> Thread:
         # The thread must exist; a failed read maps to session_not_found.
-        response = await self._connection.call(operation, "thread/read", self._connection.client.thread_read, thread_id, include_turns, thread_id=thread_id)
+        response = await self._connection.call(operation, CODEX_THREAD_READ_METHOD, self._connection.client.thread_read, thread_id, include_turns, thread_id=thread_id)
         return response.thread
 
     @staticmethod

@@ -18,6 +18,8 @@ from vidbyte.lib.constants.codex import (
     CODEX_HOST_MINIMUM_VERSION,
     CODEX_NEXT_STEPS,
     CODEX_SDK_EXTRA,
+    CODEX_THREAD_FORK_METHOD,
+    CODEX_THREAD_READ_METHOD,
 )
 from vidbyte.lib.dataclasses.codex import CodexTurnError
 from vidbyte.lib.dataclasses.codex_host import CodexProblem
@@ -27,9 +29,6 @@ from vidbyte.lib.errors import CodexAgentError
 
 # The SDK call whose plain CodexError means its goal start window elapsed (D-13).
 GOAL_START_CALL = "start_goal_operation"
-# Methods whose JSON-RPC errors carry a context meaning of their own (D-13).
-THREAD_READ_METHOD = "thread/read"
-THREAD_FORK_METHOD = "thread/fork"
 # The message of each stop reason Vidbyte itself sends an interrupt for (D-7).
 STOP_MESSAGES = {
     FailureCode.CODEX_TURN_TIMED_OUT: "Vidbyte interrupted the turn because its timeout_seconds elapsed.",
@@ -92,11 +91,12 @@ class CodexErrorMapper:
 
     @staticmethod
     def _rpc_code(method: str, *, malformed: bool, refused: bool) -> FailureCode:
-        # A failed thread read means the thread is unknown, and a refused
-        # fork means the fork point is wrong (D-13).
-        if method == THREAD_READ_METHOD:
+        # Two methods' JSON-RPC errors carry a context meaning of their
+        # own: a failed thread read means the thread is unknown, and a
+        # refused fork means the fork point is wrong (D-13).
+        if method == CODEX_THREAD_READ_METHOD:
             return FailureCode.CODEX_SESSION_NOT_FOUND
-        if method == THREAD_FORK_METHOD and refused:
+        if method == CODEX_THREAD_FORK_METHOD and refused:
             return FailureCode.CODEX_FORK_FAILED
         if malformed:
             return FailureCode.CODEX_PROTOCOL_MISMATCH

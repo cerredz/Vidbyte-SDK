@@ -22,12 +22,21 @@ from vidbyte.agents.codex.tools import CodexToolBridge, CodexToolTranslator
 from vidbyte.harnesses.native.codex.errors import GOAL_START_CALL, CodexErrorMapper
 from vidbyte.harnesses.native.codex.preflight import CodexPreflight
 from vidbyte.lib.constants.codex import (
+    CODEX_ACCOUNT_READ_METHOD,
+    CODEX_GOAL_CANCEL_CALL,
     CODEX_GOAL_SET_METHOD,
     CODEX_HOST_BINARY_NAME,
     CODEX_HOST_EXPERIMENTAL_API_TEXT,
     CODEX_HOST_MIN_LIVE_TURNS,
     CODEX_RATE_LIMITS_READ_METHOD,
     CODEX_REVIEW_START_METHOD,
+    CODEX_THREAD_FORK_METHOD,
+    CODEX_THREAD_LIST_METHOD,
+    CODEX_THREAD_NAME_SET_METHOD,
+    CODEX_THREAD_RESUME_METHOD,
+    CODEX_THREAD_START_METHOD,
+    CODEX_TURN_START_METHOD,
+    CODEX_TURN_STEER_METHOD,
 )
 from vidbyte.lib.dataclasses.codex import (
     CodexAgentSettings,
@@ -206,7 +215,7 @@ class CodexHost:
         operation = CodexHostOperation.CHECK_CODEX_READY
         self._guard(operation, talks=True)
         connection = self._connection
-        account = await connection.call(operation, "account/read", connection.client.account_read)
+        account = await connection.call(operation, CODEX_ACCOUNT_READ_METHOD, connection.client.account_read)
         sandbox = await self._preflight.sandbox_status(operation)
         return self._responses.readiness(self._version, account, sandbox)
 
@@ -269,7 +278,7 @@ class CodexHost:
             await self._preflight.require_thread(operation, thread_id)
             connection = self._connection
             resume = self._params.thread_resume(thread_id, request)
-            resumed = await connection.call(operation, "thread/resume", connection.client.thread_resume, thread_id, resume, thread_id=thread_id)
+            resumed = await connection.call(operation, CODEX_THREAD_RESUME_METHOD, connection.client.thread_resume, thread_id, resume, thread_id=thread_id)
             if self._responses.routes_to_user(resumed):
                 raise CodexErrorMapper.reviewer_refusal(operation, thread_id)
             # Start the turn, priced as the model the thread resumed with.
@@ -302,14 +311,14 @@ class CodexHost:
             raise CodexErrorMapper.error(FailureCode.CODEX_FORK_FAILED, NO_FORK_POINT_MESSAGE, operation, thread_id)
         connection = self._connection
         fork = self._params.thread_fork(thread_id, point, exclude_turns, request)
-        forked = await connection.call(operation, "thread/fork", connection.client.thread_fork, thread_id, fork, thread_id=thread_id)
+        forked = await connection.call(operation, CODEX_THREAD_FORK_METHOD, connection.client.thread_fork, thread_id, fork, thread_id=thread_id)
         # The fork inherits the parent's tools, so it shares its handler.
         fork_id = forked.thread.id
         handler = connection.router.handler_for(thread_id)
         if handler is not None:
             connection.router.register(fork_id, handler)
         if request.name:
-            await connection.call(operation, "thread/name/set", connection.client.thread_set_name, fork_id, request.name, thread_id=fork_id)
+            await connection.call(operation, CODEX_THREAD_NAME_SET_METHOD, connection.client.thread_set_name, fork_id, request.name, thread_id=fork_id)
         return self._responses.thread_info(forked.thread)
 
     async def list_codex_threads(
@@ -327,7 +336,7 @@ class CodexHost:
         self._guard(operation, talks=True)
         connection = self._connection
         listing = self._params.thread_list(cwd, search, archived, source_kinds, sort, sort_direction, cursor)
-        page = await connection.call(operation, "thread/list", connection.client.thread_list, listing)
+        page = await connection.call(operation, CODEX_THREAD_LIST_METHOD, connection.client.thread_list, listing)
         return self._responses.page(page)
 
     async def read_codex_thread(self, thread_id: str, include_turns: bool = False) -> CodexThreadInfo:
@@ -372,7 +381,7 @@ class CodexHost:
             raise CodexErrorMapper.error(FailureCode.CODEX_SESSION_NOT_FOUND, STEER_FINISHED_MESSAGE, operation, handle.thread_id)
         expected = (turn.state.current_turn() if turn.state is not None else None) or handle.turn_id
         connection = self._connection
-        await connection.call(operation, "turn/steer", connection.client.turn_steer, handle.thread_id, expected, items, thread_id=handle.thread_id)
+        await connection.call(operation, CODEX_TURN_STEER_METHOD, connection.client.turn_steer, handle.thread_id, expected, items, thread_id=handle.thread_id)
         return handle
 
     async def interrupt_codex_turn(self, handle: CodexTurnHandle) -> None:
@@ -505,14 +514,14 @@ class CodexHost:
         # and its provider (D-19).
         connection = self._connection
         dynamic_tools = bridge.dynamic_tools if bridge is not None else ()
-        started = await connection.call(operation, "thread/start", connection.client.thread_start, self._params.thread_start(request, dynamic_tools))
+        started = await connection.call(operation, CODEX_THREAD_START_METHOD, connection.client.thread_start, self._params.thread_start(request, dynamic_tools))
         thread_id = started.thread.id
         if self._responses.routes_to_user(started):
             raise CodexErrorMapper.reviewer_refusal(operation, thread_id)
         if bridge is not None:
             connection.router.register(thread_id, bridge.handler(asyncio.get_running_loop(), connection.router.handle))
         if request.name:
-            await connection.call(operation, "thread/name/set", connection.client.thread_set_name, thread_id, request.name, thread_id=thread_id)
+            await connection.call(operation, CODEX_THREAD_NAME_SET_METHOD, connection.client.thread_set_name, thread_id, request.name, thread_id=thread_id)
         return thread_id, self._responses.pricing(started.model, started.model_provider, request.turn.model)
 
     async def _start_turn(
@@ -529,7 +538,7 @@ class CodexHost:
         connection = self._connection
         start = partial(connection.client.turn_start, thread_id, items, self._params.turn_start(thread_id, request))
         adopt = partial(self._adopt_late_turn, thread_id, request, pricing)
-        response = await connection.start(operation, "turn/start", start, adopt, thread_id=thread_id)
+        response = await connection.start(operation, CODEX_TURN_START_METHOD, start, adopt, thread_id=thread_id)
         return self._registry.track(CodexTurnHandle(thread_id=thread_id, turn_id=response.turn.id), request, pricing)
 
     async def _start_goal(
@@ -556,7 +565,7 @@ class CodexHost:
                     raise CodexErrorMapper.error(FailureCode.CODEX_PROTOCOL_MISMATCH, BUDGET_ECHO_MESSAGE, operation, thread_id)
         except BaseException:
             with suppress(CodexAgentError):
-                await connection.call(operation, "cancel_goal_operation", connection.client.cancel_goal_operation, state, thread_id=thread_id, cleanup=True)
+                await connection.call(operation, CODEX_GOAL_CANCEL_CALL, connection.client.cancel_goal_operation, state, thread_id=thread_id, cleanup=True)
             state.finish()
             connection.client.unregister_goal_operation(state)
             raise

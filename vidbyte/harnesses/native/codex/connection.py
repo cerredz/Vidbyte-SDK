@@ -35,17 +35,20 @@ from vidbyte.harnesses.native.codex.errors import CodexErrorMapper
 from vidbyte.lib.constants.codex import (
     CODEX_ACCEPTED_APPROVAL_METHODS,
     CODEX_APPROVAL_ACCEPT_DECISION,
+    CODEX_GOAL_CANCEL_CALL,
     CODEX_GOAL_SET_METHOD,
     CODEX_HOST_CLOSE_INTERRUPT_SECONDS,
     CODEX_HOST_CLOSE_WAIT_SECONDS,
     CODEX_HOST_REQUEST_TIMEOUT_SECONDS,
     CODEX_HOST_SINGLE_ATTEMPT,
     CODEX_HOST_WORKER_THREADS,
+    CODEX_INITIALIZE_METHOD,
     CODEX_MODEL_LIST_METHOD,
     CODEX_RATE_LIMITS_READ_METHOD,
     CODEX_REVIEW_START_METHOD,
     CODEX_SANDBOX_READINESS_METHOD,
     CODEX_TOOL_CALL_METHOD,
+    CODEX_TURN_INTERRUPT_METHOD,
     CODEX_UNREGISTERED_TOOL_TEXT,
 )
 from vidbyte.lib.enums.codex import CodexHostOperation, CodexSandboxReadiness
@@ -152,7 +155,7 @@ class CodexConnection:
             missing = isinstance(exc, OSError) and not isinstance(exc, TimeoutError)
             error = CodexErrorMapper.not_installed(target) if missing else CodexErrorMapper.from_exception(exc, CodexHostOperation.OPEN_HOST, PROCESS_START, dead=False, bound_seconds=bound)
             raise error from None
-        return await self.call(CodexHostOperation.OPEN_HOST, "initialize", self.client.initialize)
+        return await self.call(CodexHostOperation.OPEN_HOST, CODEX_INITIALIZE_METHOD, self.client.initialize)
 
     async def call(
         self,
@@ -272,9 +275,9 @@ class CodexConnection:
         # because no caller waits on it, and it is never retried (D-7).
         with suppress(*((CodexAgentError,) if quiet else ())):
             if state is not None:
-                await self.call(operation, "cancel_goal_operation", self.client.cancel_goal_operation, state, thread_id=handle.thread_id, cleanup=cleanup)
+                await self.call(operation, CODEX_GOAL_CANCEL_CALL, self.client.cancel_goal_operation, state, thread_id=handle.thread_id, cleanup=cleanup)
             else:
-                await self.call(operation, "turn/interrupt", self.client.turn_interrupt, handle.thread_id, handle.turn_id, thread_id=handle.thread_id, cleanup=cleanup)
+                await self.call(operation, CODEX_TURN_INTERRUPT_METHOD, self.client.turn_interrupt, handle.thread_id, handle.turn_id, thread_id=handle.thread_id, cleanup=cleanup)
 
     def watch_liveness(self, on_death: Callable[[], None]) -> None:
         # One daemon thread reads openai-codex's global notifications until

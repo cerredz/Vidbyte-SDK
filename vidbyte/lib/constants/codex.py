@@ -438,6 +438,21 @@ CODEX_NEXT_STEPS: Mapping[str, str] = {
 }
 # The router's answer to a tool call on a thread with no Vidbyte tools.
 CODEX_UNREGISTERED_TOOL_TEXT = "No Vidbyte tool is registered for this thread on this host."
+# App-server methods the host calls through openai-codex's typed
+# client methods, named in its mapped errors (D-13); thread/start is
+# CODEX_THREAD_START_METHOD above.
+CODEX_INITIALIZE_METHOD = "initialize"
+CODEX_ACCOUNT_READ_METHOD = "account/read"
+CODEX_THREAD_RESUME_METHOD = "thread/resume"
+CODEX_THREAD_FORK_METHOD = "thread/fork"
+CODEX_THREAD_NAME_SET_METHOD = "thread/name/set"
+CODEX_THREAD_LIST_METHOD = "thread/list"
+CODEX_THREAD_READ_METHOD = "thread/read"
+CODEX_TURN_START_METHOD = "turn/start"
+CODEX_TURN_STEER_METHOD = "turn/steer"
+CODEX_TURN_INTERRUPT_METHOD = "turn/interrupt"
+# openai-codex's own goal cancel call, named in its mapped errors.
+CODEX_GOAL_CANCEL_CALL = "cancel_goal_operation"
 
 
 __all__ = [
@@ -512,4 +527,15 @@ __all__ = [
     "CODEX_GOAL_TERMINAL_STATUSES",
     "CODEX_NEXT_STEPS",
     "CODEX_UNREGISTERED_TOOL_TEXT",
+    "CODEX_INITIALIZE_METHOD",
+    "CODEX_ACCOUNT_READ_METHOD",
+    "CODEX_THREAD_RESUME_METHOD",
+    "CODEX_THREAD_FORK_METHOD",
+    "CODEX_THREAD_NAME_SET_METHOD",
+    "CODEX_THREAD_LIST_METHOD",
+    "CODEX_THREAD_READ_METHOD",
+    "CODEX_TURN_START_METHOD",
+    "CODEX_TURN_STEER_METHOD",
+    "CODEX_TURN_INTERRUPT_METHOD",
+    "CODEX_GOAL_CANCEL_CALL",
 ]
