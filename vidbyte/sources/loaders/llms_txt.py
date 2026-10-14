@@ -14,6 +14,7 @@ Relations:
 from __future__ import annotations
 
 from dataclasses import replace
+from urllib.parse import urljoin
 
 from vidbyte.context.primitives.documents import DocumentContextItem
 from vidbyte.lib.dataclasses.sources import ArtifactRef, LlmsTxtDocument, LlmsTxtLink, LlmsTxtSection, Selection, SourceSnapshot
@@ -94,7 +95,9 @@ class LlmsTxtSource(Source[LlmsTxtDocument]):
         )
         expanded: list[DocumentContextItem] = []
         for s_idx, l_idx, link, section in self._selected_links(ir, selection):
-            result = doc_source.load(ArtifactRef(url=link.url, pin=ref.pin))
+            # @intent llms-txt-relative-links-resolve-against-the-index
+            # A markdown link resolves against its document, and generators such as VuePress's llms plugin write /path.md links.
+            result = doc_source.load(ArtifactRef(url=urljoin(ref.url, link.url), pin=ref.pin))
             item = result.items[0]
             document_id = (
                 f"llms-txt:{parent_hash[:12]}:{s_idx:03d}-{SourcesRegex.slugify(section.name)}:"

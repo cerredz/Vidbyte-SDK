@@ -22,6 +22,7 @@ from collections.abc import Mapping
 
 from tests.agent_test_support import build_test_agent
 from vidbyte.lib.config import ModelProvider, TextModelConfig
+from vidbyte.lib.errors import ProviderResponseError
 from vidbyte.lib.http import HttpResponse
 from vidbyte.lib.runners import TextModelRunner
 from vidbyte.providers.compatible import DeepSeekProvider, GLMProvider
@@ -50,6 +51,21 @@ class DeepSeekToolCallTextTests(unittest.TestCase):
         response = asyncio.run(provider.run_text(prompt="ping", system=None, metadata=None, transport=transport))
 
         self.assertEqual(response.text, "")
+
+    def test_insufficient_system_resource_reply_raises_and_keeps_usage(self) -> None:
+        """A reply DeepSeek cut off for insufficient_system_resource raises with its billed usage; "length" still returns the text."""
+        usage = {"prompt_tokens": 1200, "completion_tokens": 6}
+        message = {"role": "assistant", "content": "The refund window is "}
+        interrupted = _ScriptedTransport({"choices": [{"message": message, "finish_reason": "insufficient_system_resource"}], "usage": usage})
+        truncated = _ScriptedTransport({"choices": [{"message": message, "finish_reason": "length"}], "usage": usage})
+        provider = DeepSeekProvider(model="deepseek-v4-pro", api_key="test-key")
+
+        with self.assertRaises(ProviderResponseError) as caught:
+            asyncio.run(provider.run_text(prompt="q", system=None, metadata=None, transport=interrupted))
+        self.assertIn("insufficient_system_resource", caught.exception.message)
+        self.assertEqual(caught.exception.details["usage"], usage)
+        response = asyncio.run(provider.run_text(prompt="q", system=None, metadata=None, transport=truncated))
+        self.assertEqual(response.text, "The refund window is ")
 
 
 class DeepSeekFenceTests(unittest.TestCase):

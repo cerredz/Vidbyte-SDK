@@ -199,6 +199,27 @@ class LlmsTxtSourceTests(unittest.TestCase):
         self.assertEqual(len(result.items), 2)  # index + quickstart only
         self.assertIn("quickstart", result.items[1].document_id)
 
+    def test_expand_resolves_relative_links_against_the_index_url(self) -> None:
+        # [Regression] Site- and path-relative links resolve against the llms.txt URL; absolute links load unchanged.
+        fetcher = InMemoryFetcher(
+            {
+                "https://docs.acme.dev/llms.txt": b"# Acme\n## Docs\n- [Quickstart](/guide/quickstart.md)\n- [Limits](reference/limits.md)\n- [Status](https://docs.acme.dev/status.md)\n",
+                "https://docs.acme.dev/guide/quickstart.md": b"# Quickstart\nrelative quickstart body",
+                "https://docs.acme.dev/reference/limits.md": b"# Limits\nrelative limits body",
+                "https://docs.acme.dev/status.md": b"# Status\nabsolute status body",
+            }
+        )
+        source = LlmsTxtSource(fetcher=fetcher, allowlist=UrlAllowlist(allowed_hosts=frozenset({"docs.acme.dev"})))
+        result = source.load(ArtifactRef(url="https://docs.acme.dev/llms.txt"), selection=Selection(expand=True))
+        expanded = {item.source: item.content for item in result.items[1:]}
+        self.assertEqual(
+            set(expanded),
+            {"https://docs.acme.dev/guide/quickstart.md", "https://docs.acme.dev/reference/limits.md", "https://docs.acme.dev/status.md"},
+        )
+        self.assertIn("relative quickstart body", expanded["https://docs.acme.dev/guide/quickstart.md"])
+        self.assertIn("relative limits body", expanded["https://docs.acme.dev/reference/limits.md"])
+        self.assertIn("absolute status body", expanded["https://docs.acme.dev/status.md"])
+
     def test_expand_failed_link_fails_closed_by_default(self) -> None:
         # [Hidden Assumption] A link host outside the allowlist fails the whole expansion.
         fetcher = InMemoryFetcher(

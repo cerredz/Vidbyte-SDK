@@ -20,6 +20,10 @@ class LocalFileSystemBackend(BaseFileSystemBackend):
         return path.read_bytes()
 
     def write_text(self, path: Path, content: str, *, encoding: str, create_parents: bool, newline: str | None = None) -> None:
+        # @intent failed-edit-leaves-file-untouched
+        # Opening for writing empties the file at once, so text the encoding
+        # cannot hold must fail here, before the file is opened.
+        content.encode(encoding)
         if create_parents:
             path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w", encoding=encoding, newline=newline) as handle:
@@ -51,6 +55,11 @@ class LocalFileSystemBackend(BaseFileSystemBackend):
         shutil.move(str(source), str(destination))
 
     def copy(self, source: Path, destination: Path) -> None:
+        # @intent copy-never-copies-into-itself
+        # A destination inside the source directory would be copied into itself until the path is too
+        # deep, so it is refused before anything is written, the way `cp -r` and `shutil.move` refuse it.
+        if source.is_dir() and destination.resolve().is_relative_to(source.resolve()):
+            raise ToolExecutionError("Cannot copy a directory into itself.", details={"source": str(source), "destination": str(destination)})
         destination.parent.mkdir(parents=True, exist_ok=True)
         if source.is_dir():
             shutil.copytree(source, destination, dirs_exist_ok=True)
@@ -89,10 +98,14 @@ class LocalFileSystemBackend(BaseFileSystemBackend):
         destination.mkdir(parents=True, exist_ok=True)
         extracted: list[str] = []
         with zipfile.ZipFile(source) as archive:
+            # @intent refused-archive-extracts-nothing
+            # An archive with a member outside the extraction root is refused as a whole, so check
+            # every member before writing any; otherwise earlier members would already be extracted.
             for member in archive.infolist():
                 target = (destination / member.filename).resolve()
                 if target != destination and destination not in target.parents:
                     raise ToolExecutionError("Zip archive contains a path outside the extraction root.", details={"member": member.filename})
+            for member in archive.infolist():
                 archive.extract(member, destination)
                 extracted.append(member.filename)
         return tuple(extracted)

@@ -45,6 +45,24 @@ class ContextDataclassTests(unittest.TestCase):
         self.assertIn("Memory summary", built)
         self.assertIn("Run metadata", built)
 
+    def test_non_utf8_context_file_renders_placeholder_like_missing_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            readable = Path(tmp) / "runbook.txt"
+            readable.write_text("runbook body", encoding="utf-8")
+            windows_export = Path(tmp) / "customers.csv"
+            windows_export.write_bytes("Jürgen Müller,€ 612.40".encode("cp1252"))
+            missing = Path(tmp) / "missing.txt"
+            context = BaseContext(
+                file_paths=[str(readable), str(windows_export), str(missing)],
+                permissions=ContextPermissions.from_preset(PermissionPreset.READ_ONLY),
+            )
+
+            built = context.build_context()
+
+        self.assertIn("runbook body", built)
+        self.assertIn(f"File: {windows_export}\n<unable to read file: UnicodeDecodeError>", built)
+        self.assertIn(f"File: {missing}\n<unable to read file:", built)
+
     def test_context_items_are_included_in_compatibility_context_build(self) -> None:
         context = BaseContext(context_items=[TaskContextItem(goal="document the public API")])
 

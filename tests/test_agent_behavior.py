@@ -33,6 +33,7 @@ from vidbyte.lib.config import ModelProvider
 from vidbyte.lib.dataclasses.agents import AgentMessage
 from vidbyte.lib.dataclasses.tools import ToolCallContext, ToolCallState, ToolResult, ToolStatus
 from vidbyte.lib.runners import TextModelResponse
+from vidbyte.tools import FunctionTool, ToolCall
 
 
 def make_call(name: str, state: ToolCallState = ToolCallState.SUCCEEDED, args: dict[str, Any] | None = None, result_output: str | None = "ok") -> ToolCallContext:
@@ -41,6 +42,11 @@ def make_call(name: str, state: ToolCallState = ToolCallState.SUCCEEDED, args: d
     if result_output is not None:
         result = ToolResult(tool_name=name, status=ToolStatus.SUCCESS, output=result_output)
     return ToolCallContext(tool_name=name, arguments=dict(args or {}), state=state, result=result)
+
+
+def zurich_weather() -> dict[str, Any]:
+    # A function tool that returns non-ASCII text inside a dict.
+    return {"city": "Zürich", "temp_c": 4}
 
 
 def make_reply(content: str = "reply", metadata: dict[str, Any] | None = None) -> AgentMessage:
@@ -339,6 +345,13 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(b.tool.tool_returned_matching("search", r"\d{3}-\d{2}"))
         self.assertFalse(b.tool.tool_returned_matching("search", r"\d{5}"))
 
+    async def test_tool_returned_containing_sees_non_ascii_in_a_dict_return(self) -> None:
+        # [Hidden Assumption] a function tool's dict return keeps "Zürich" as characters, not a \u escape.
+        result = await FunctionTool(zurich_weather).execute(ToolCall("zurich_weather", {}))
+        call = ToolCallContext(tool_name="zurich_weather", arguments={}, state=ToolCallState.SUCCEEDED, result=result)
+        b = behavior_from_probe(RunProbe(tool_calls=(call,)))
+        self.assertTrue(b.tool.tool_returned_containing("zurich_weather", "Zürich"))
+
     # --- ToolArgumentBehavior Category C ---
 
     def test_tool_called_with_subset(self) -> None:
@@ -554,6 +567,23 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         b = behavior_from_probe(RunProbe(output="See https://a.test and http://b.test plus www.c.test"))
         self.assertTrue(b.output.contains_url())
         self.assertTrue(b.output.url_count(at_least=3, at_most=3))
+
+    def test_output_url_glued_to_cjk_text_counts(self) -> None:
+        # [Silent Failure] Japanese, Chinese and Korean text glues a URL to the word before it; it must still count.
+        glued = (
+            "詳細はhttps://jreast.jp/info をご確認ください。",
+            "文档见https://docs.python.org/zh-cn/3/",
+            "자세한 내용은https://example.kr/a",
+            "詳しくはwww.jr-east.co.jp へ",
+        )
+        for output in glued:
+            with self.subTest(output=output):
+                self.assertEqual(behavior_from_probe(RunProbe(output=output)).output.url_count(), 1)
+        self.assertEqual(behavior_from_probe(RunProbe(output=glued[0])).output.citation_count("url"), 1)
+        # A scheme or www glued to a Latin word is still not a URL start.
+        for output in ("seehttps://docs.python.org/3/", "awww.example.com is not a link"):
+            with self.subTest(output=output):
+                self.assertEqual(behavior_from_probe(RunProbe(output=output)).output.url_count(), 0)
 
     def test_output_citations(self) -> None:
         # [Edge Case / Silent Failure] citation detection supports markdown, bracket, footnote, url, and any.

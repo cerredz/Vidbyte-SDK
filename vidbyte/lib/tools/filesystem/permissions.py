@@ -22,6 +22,22 @@ class FileSystemPermissions:
         return requested
 
     @staticmethod
+    def require_tree_inside_root(config: FileSystemToolConfig, path: Path) -> None:
+        # @intent copied-trees-stay-inside-root
+        # Copy and zip read every file under a directory and follow links, so a link inside it that
+        # leads outside the root would carry outside content in, which a direct read refuses.
+        if not path.is_dir():
+            return
+        root = config.resolved_root()
+        for entry in path.rglob("*"):
+            resolved = entry.resolve()
+            if resolved != root and root not in resolved.parents:
+                raise ToolExecutionError(
+                    "Filesystem tool path escaped the configured root.",
+                    details={"root": str(root), "path": str(entry)},
+                )
+
+    @staticmethod
     def require_pattern_inside_root(pattern: str) -> None:
         # @intent find-pattern-stays-inside-root
         # pathlib globs treat ".." literally, so a pattern with a ".." segment or an anchor would

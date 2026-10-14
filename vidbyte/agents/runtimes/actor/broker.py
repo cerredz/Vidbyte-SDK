@@ -243,6 +243,9 @@ class BaseActorRuntime(ABC):
                 await self._completion_future
 
             output_text = self._completion_future.result()
+            # @intent actor-count-is-read-before-cleanup
+            # The cleanup below clears the actor table, so count the run's actors now or every run reports zero.
+            active_actors = len(self._actors)
             self._end_semantic_span(span, output=output_text)
         except BaseException as exc:
             self._end_semantic_span(span, error=exc)
@@ -258,7 +261,7 @@ class BaseActorRuntime(ABC):
             output=output_text,
             strategy_name=f"actor_model_{self.__class__.__name__}",
             calls=(),
-            metadata={"message_count": self._message_count, "active_actors": len(self._actors)},
+            metadata={"message_count": self._message_count, "active_actors": active_actors},
         )
 
     def _start_semantic_span(self, name: str, parent: Any = None, **attributes: Any) -> Any:

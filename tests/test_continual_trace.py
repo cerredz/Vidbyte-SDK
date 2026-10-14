@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import unittest
 from collections.abc import Iterable, Mapping, Sequence
@@ -14,6 +15,7 @@ from vidbyte.lib.dataclasses.trace import TraceField, TraceFieldType
 from vidbyte.lib.enums.continual_trace import GoalSuccessVerdict
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.tools import BaseTool, ToolCall, ToolResult, ToolSpec
+from vidbyte.trace import continual as continual_package
 from vidbyte.trace.continual import ActionTrace, ContinualTraceAgent, ContinualTraceMiddleware
 from vidbyte.trace.continual.middleware import RESULT_METADATA_KEY, _TraceRunState
 from vidbyte.trace.continual.tools import UPDATE_TRACE_TOOL_NAME, UpdateTraceTool
@@ -184,6 +186,18 @@ class TraceOptionTests(unittest.TestCase):
     def test_single_field_schema(self) -> None:  # [Edge Case]
         schema = TraceSchema(name="solo", fields={"only": TraceField(description="d")})
         self.assertEqual(list(schema.fields), ["only"])
+
+    def test_prebuilt_schema_descriptions_carry_no_mojibake(self) -> None:  # [Silent Failure]
+        # U+0393 U+00C7 is how a UTF-8 em dash reads after a cp437 round trip; the trace model sees it verbatim.
+        mojibake = chr(0x0393) + chr(0x00C7)
+        names = [name for name in continual_package.__all__ if name.endswith("Trace")]
+        schemas = {name: getattr(continual_package, name) for name in names}
+        schemas = {name: schema for name, schema in schemas.items() if isinstance(schema, TraceSchema)}
+        self.assertGreater(len(schemas), 1)
+        for name, schema in schemas.items():
+            dumped = {key: spec.model_dump(mode="json", exclude_none=True) for key, spec in schema.fields.items()}
+            text = schema.description + json.dumps(dumped, ensure_ascii=False)
+            self.assertFalse(mojibake in text, f"{name} has mojibake in its field descriptions")
 
 
 # ---------------------------------------------------------------------------

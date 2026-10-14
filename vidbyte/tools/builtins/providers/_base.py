@@ -32,8 +32,10 @@ class ProviderOperationTool(BaseTool):
 
     def _result(self, tool_name: str, operation: Callable[[], Any]) -> ToolResult:
         # Convert provider output to JSON and provider errors to tool errors.
+        # @intent tool-output-keeps-non-ascii-readable
+        # Stored rows and documents reach the model and the tool-output predicates as characters, not \u escapes.
         try:
-            return ToolResult.success(tool_name, json.dumps(operation(), default=str))
+            return ToolResult.success(tool_name, json.dumps(operation(), default=str, ensure_ascii=False))
         except (SessionError, ToolExecutionError, ValueError, TypeError) as exc:
             return ToolResult.error(tool_name, f"{type(exc).__name__}: {exc}")
 
