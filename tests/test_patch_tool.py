@@ -132,6 +132,25 @@ class PatchToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.output, f"--- a/demo.py\n+++ b/demo.py\n{hunk}")
         self.assertEqual(self.file.read_bytes(), b"[app]\nname = demo\ndebug = true")
 
+    async def test_patch_the_encoding_cannot_hold_returns_write_error_and_leaves_file_untouched(self) -> None:
+        """An unencodable replacement is a write_error result, and the file keeps every byte."""
+        # @intent failed-edit-leaves-file-untouched
+        # "€" does not exist in latin-1, and a lone surrogate from the model's JSON arguments
+        # cannot be UTF-8, so each patch must fail before the file is emptied by opening it.
+        for encoding, original, replace_block in (
+            ("latin-1", b"name = 'caf\xe9'\nprice = 5\n", "price = '€5'"),
+            ("utf-8", b"name = 'cafe'\nprice = 5\n", "price = 5 # \ud83d"),
+        ):
+            with self.subTest(encoding=encoding):
+                self.file.write_bytes(original)
+                result = await PatchTool(self.root, encoding=encoding).execute(
+                    ToolCall("patch_file", {"file_path": "demo.py", "search_block": "price = 5", "replace_block": replace_block})
+                )
+                self.assertEqual(result.status.value, "error")
+                self.assertEqual(result.metadata["error"], "write_error")
+                self.assertIn("can't encode", result.output)
+                self.assertEqual(self.file.read_bytes(), original)
+
     async def test_diff_keeps_form_feed_line_as_one_line(self) -> None:
         """A form-feed page-break line stays one diff line, so hunk counts match the file's real lines."""
         self.file.write_bytes(b"a = 1\n\f\nb = 2\n")

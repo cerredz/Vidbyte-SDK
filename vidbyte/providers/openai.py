@@ -6,7 +6,7 @@ from typing import Any, Mapping
 
 from vidbyte.lib.config import AudioModelConfig, EmbeddingModelConfig, ImageModelConfig, TextModelConfig, VideoModelConfig
 from vidbyte.lib.enums import ModelProvider
-from vidbyte.lib.errors import ProviderConfigurationError, ProviderResponseError
+from vidbyte.lib.errors import ProviderConfigurationError, ProviderRequestError, ProviderResponseError
 from vidbyte.lib.http import HttpResponseParser, HttpTransport, SyncHttpTransport
 from vidbyte.lib.runners.types import AudioModelResponse, EmbeddingResponse, GeneratedImage, ImageModelResponse, TextModelResponse, VideoModelJob
 from vidbyte.lib.util import PromptPlacement
@@ -151,6 +151,16 @@ class OpenAIProvider:
         if not isinstance(event, dict):
             return None
         event_type = event.get("type", "")
+        # @intent stream-error-event-raises
+        # An error or response.failed event ends a started stream (the streaming form of an HTTP error), so raise instead of returning the text so far as the whole answer.
+        if event_type in ("error", "response.failed"):
+            response = event.get("response")
+            error = event if event_type == "error" else (response.get("error") if isinstance(response, dict) else None)
+            error_code = error.get("code") if isinstance(error, dict) else None
+            error_message = error.get("message") if isinstance(error, dict) else None
+            detail = ": ".join(part for part in (error_code, error_message) if isinstance(part, str))
+            message = f"OpenAI stream ended with a {event_type!r} event: {detail}" if detail else f"OpenAI stream ended with a {event_type!r} event."
+            raise ProviderRequestError(message, provider=self.provider.value, response_excerpt=raw_line)
         if event_type == "response.text.delta":
             delta = event.get("delta")
             return delta if isinstance(delta, str) else None
@@ -292,7 +302,9 @@ class OpenAIProvider:
         if config.size:
             payload["size"] = config.size
         if config.seconds:
-            payload["seconds"] = config.seconds
+            # @intent openai-video-seconds-is-a-string
+            # The Videos API types seconds as the string enum "4" | "8" | "12" and rejects an integer; the config keeps an int for validation.
+            payload["seconds"] = str(config.seconds)
         if config.extra_body:
             payload.update(dict(config.extra_body))
         return payload
@@ -316,6 +328,10 @@ class OpenAIProvider:
     def _collect_output_text(self, chunks: list[str], item: object) -> None:
         # Collect text leaves from one Responses API output item.
         if not isinstance(item, dict):
+            return
+        # @intent reasoning-items-are-not-the-answer
+        # A "reasoning" item's content is the model's chain of thought (reasoning_text), never the answer; streaming yields only output_text.
+        if item.get("type") == "reasoning":
             return
         content = item.get("content")
         if not isinstance(content, list):

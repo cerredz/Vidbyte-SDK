@@ -257,6 +257,41 @@ class SourcesBaseTests(unittest.TestCase):
             cache.put(sha256_hex(_DATA), _DATA)
             self.assertEqual(cache.get(sha256_hex(_DATA)), _DATA)
 
+    def test_filesnapshotcache_tolerates_concurrent_writers(self) -> None:
+        # @intent snapshot-cache-tolerates-concurrent-writers
+        # [Race Condition] An existing entry is never rewritten, and concurrent put/get of one hash never fails.
+        content_hash = sha256_hex(_DATA)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "snaps"
+            cache = FileSnapshotCache(root)
+            cache.put(content_hash, _DATA)
+            cache.put(content_hash, b"different bytes under the same hash")
+            self.assertEqual(cache.get(content_hash), _DATA)
+            self.assertEqual(list(root.glob("*.tmp")), [])
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "snaps"
+            cache = FileSnapshotCache(root)
+            barrier = threading.Barrier(8)
+            errors: list[BaseException] = []
+
+            def worker() -> None:
+                try:
+                    barrier.wait()
+                    for _ in range(20):
+                        cache.put(content_hash, _DATA)
+                        self.assertIn(cache.get(content_hash), (None, _DATA))
+                except BaseException as exc:  # noqa: BLE001 - collected and asserted below
+                    errors.append(exc)
+
+            threads = [threading.Thread(target=worker) for _ in range(8)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+            self.assertEqual(errors, [])
+            self.assertEqual(cache.get(content_hash), _DATA)
+            self.assertEqual(list(root.glob("*.tmp")), [])
+
     def test_filesnapshotcache_end_to_end_no_refetch(self) -> None:
         # [Hidden Failure] A pinned reload from the file cache reads from disk with no network.
         with tempfile.TemporaryDirectory() as tmp:
@@ -337,6 +372,27 @@ class SourcesBaseTests(unittest.TestCase):
             result = DocumentSource(fetcher=fetcher).load(ArtifactRef(url=url))
         self.assertEqual(result.items[0].title, "Title")
 
+    def test_httpfetcher_sends_iris_as_percent_encoded_uris(self) -> None:
+        # @intent http-fetcher-sends-iris-as-uris
+        # [Edge Case] http.client writes the request line as ASCII, so a non-ASCII path or query must be sent as UTF-8 percent escapes.
+        cases = {
+            "https://de.example.test/wiki/Müller": "https://de.example.test/wiki/M%C3%BCller",
+            "https://ja.example.test/wiki/東京駅": "https://ja.example.test/wiki/%E6%9D%B1%E4%BA%AC%E9%A7%85",
+            "https://shop.example.test/suche?q=größe&x=1": "https://shop.example.test/suche?q=gr%C3%B6%C3%9Fe&x=1",
+            "https://de.example.test/wiki/M%C3%BCller?a=1&b=%2F": "https://de.example.test/wiki/M%C3%BCller?a=1&b=%2F",
+        }
+        for url, expected in cases.items():
+            with self.subTest(url=url):
+                requested: list[str] = []
+                response = mock.MagicMock(status=200, url=expected)
+                response.__enter__.return_value = response
+                response.read.return_value = _DATA
+                response.headers.items.return_value = [("Content-Type", "text/markdown")]
+                with mock.patch("vidbyte.lib.http.transport.urlopen", side_effect=lambda request, timeout: requested.append(request.full_url) or response):
+                    result = HttpFetcher().fetch(url)
+                self.assertEqual(requested, [expected])
+                self.assertEqual(result.body_bytes, _DATA)
+
     def test_redirect_off_the_allowlist_is_refused(self) -> None:
         # @intent redirect-target-is-allowlisted
         # [Hidden Assumption] An allowlisted URL that redirects to an unlisted host must not load that host's bytes.
@@ -372,6 +428,34 @@ class SourcesBaseTests(unittest.TestCase):
         self.assertEqual(result.status.value, "error")
         self.assertEqual(result.metadata["error"], "fetch_failed")
         self.assertNotIn("# Title", result.output)
+
+    def test_direct_http_fetch_tool_decodes_pages_with_their_declared_charset(self) -> None:
+        # [Hidden Assumption] Pages declare their encoding in the Content-Type charset or a <meta charset>; reading
+        # every page as UTF-8 turns windows-1252, Shift_JIS and GBK pages into U+FFFD for the model.
+        german = "<html><body>Öffnungszeiten: Müllabfuhr am Dienstag – 5 €</body></html>"
+        japanese = "<html><body>東京駅から品川駅まで</body></html>"
+        meta_only = '<html><head><meta charset="Shift_JIS"></head><body>東京駅から品川駅まで</body></html>'
+        cases = (
+            (german.encode("cp1252"), "text/html; charset=windows-1252", german),
+            (japanese.encode("shift_jis"), 'text/html; Charset="Shift_JIS"', japanese),
+            (meta_only.encode("shift_jis"), "text/html", meta_only),
+            ("<p>ünïcode ✓</p>".encode("utf-8"), "text/html; charset=x-bogus", "<p>ünïcode ✓</p>"),
+            ("<p>ünïcode ✓</p>".encode("utf-8"), None, "<p>ünïcode ✓</p>"),
+            # Codecs that codecs.lookup knows but that cannot decode text under errors="replace" must fall back too:
+            # bytes-to-bytes codecs raise LookupError, and idna and punycode raise UnicodeError.
+            ("<p>ünïcode ✓</p>".encode("utf-8"), "text/html; charset=base64", "<p>ünïcode ✓</p>"),
+            ('<meta charset="hex"><p>ünïcode ✓</p>'.encode("utf-8"), "text/html", '<meta charset="hex"><p>ünïcode ✓</p>'),
+            ("<p>ünïcode ✓</p>".encode("utf-8"), "text/html; charset=idna", "<p>ünïcode ✓</p>"),
+            ('<meta charset="punycode"><p>ünïcode ✓</p>'.encode("utf-8"), "text/html", '<meta charset="punycode"><p>ünïcode ✓</p>'),
+        )
+        for body, content_type, expected in cases:
+            with self.subTest(content_type=content_type, expected=expected[:40]):
+                response = FetchResponse(status_code=200, body_bytes=body, content_type=content_type, url="https://example.com/")
+                with mock.patch.object(HttpFetcher, "fetch", return_value=response):
+                    result = asyncio.run(DirectHttpFetchTool().execute(ToolCall("direct_http_fetch", {"url": "https://example.com/"})))
+                self.assertEqual(result.status.value, "success")
+                self.assertEqual(result.output, expected)
+                self.assertNotIn("�", result.output)
 
 
 if __name__ == "__main__":

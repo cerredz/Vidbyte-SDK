@@ -7,6 +7,7 @@ Purpose:
 Architecture:
     - FakeTransport: Deterministic MCP transport.
     - PagedFakeTransport / McpClientPaginationTests: tools/list follows nextCursor across pages.
+    - RaisingFakeTransport / McpClientProtocolErrorTests: a JSON-RPC error's message reaches the model.
     - McpBridgeTests: Discovery, registration, execution, and permission tests.
     - McpBridgeSchemaTests: Remote input schemas reach provider tool declarations intact.
 Relations:
@@ -19,7 +20,8 @@ import unittest
 from collections.abc import Mapping
 from typing import Any
 
-from vidbyte.tools import ToolCall, ToolPermission, ToolRegistry, ToolsFormatter
+from vidbyte.lib.errors import McpProtocolError
+from vidbyte.tools import ToolCall, ToolPermission, ToolRegistry, ToolsFormatter, ToolStatus
 from vidbyte.tools.executor import ToolExecutor
 from vidbyte.tools.mcp import McpBridgedTool, McpClient, McpToolBridge, McpToolDefinition
 from vidbyte.tools.security import PermissionPolicy
@@ -83,6 +85,47 @@ class PagedFakeTransport(FakeTransport):
         self.methods.append(method)
         self.list_params.append(params)
         return self.pages[(params or {}).get("cursor")]
+
+
+class RaisingFakeTransport(FakeTransport):
+    """Fake transport whose tools/call raises a given error; other methods fall back to FakeTransport."""
+
+    def __init__(self, error: Exception) -> None:
+        """Store the error that tools/call raises."""
+        super().__init__()
+        self.error = error
+
+    async def request(
+        self,
+        method: str,
+        params: Mapping[str, Any] | None = None,
+    ) -> Mapping[str, Any]:
+        """Raise the stored error for tools/call."""
+        if method == "tools/call":
+            raise self.error
+        return await super().request(method, params)
+
+
+class McpClientProtocolErrorTests(unittest.IsolatedAsyncioTestCase):
+    """A JSON-RPC error's message reaches the model; other transport failures read as before."""
+
+    async def test_protocol_error_reason_reaches_the_model(self) -> None:
+        reason = "MCP error -32602: Invalid arguments for tool lookup: order_id: Expected string, received number"
+        error = McpProtocolError(
+            "MCP server returned an error",
+            details={"error": {"code": -32602, "message": reason}},
+        )
+        result = await McpClient(RaisingFakeTransport(error)).call_tool("lookup", {"order_id": 42})
+        self.assertIs(result.status, ToolStatus.ERROR)
+        self.assertIn("MCP server returned an error", result.output)
+        self.assertIn("order_id: Expected string, received number", result.output)
+        self.assertEqual(result.metadata.get("error"), "mcp_error")
+
+    async def test_error_without_server_message_is_unchanged(self) -> None:
+        error = McpProtocolError("MCP request timed out", details={"reason": "timeout"})
+        result = await McpClient(RaisingFakeTransport(error)).call_tool("lookup", {"order_id": "A1"})
+        self.assertIs(result.status, ToolStatus.ERROR)
+        self.assertEqual(result.output, "MCP tool call failed: MCP request timed out")
 
 
 class McpClientPaginationTests(unittest.IsolatedAsyncioTestCase):
@@ -161,6 +204,26 @@ class McpBridgeTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(text, f"exported\n[resource: file:///r.pdf, application/pdf, {len(blob)} base64 chars omitted]")
         self.assertNotIn(blob, text)
+
+    def test_text_embedded_resource_is_shown_as_its_text(self) -> None:
+        """An embedded resource's text reaches the prompt under its uri, not as a dict repr."""
+        client = McpClient(FakeTransport())
+        text = client._content_to_text(
+            {
+                "content": [
+                    {"type": "text", "text": "fetched"},
+                    {
+                        "type": "resource",
+                        "resource": {
+                            "uri": "file:///notes.md",
+                            "mimeType": "text/markdown",
+                            "text": "# Notes\n- it's \"quoted\"",
+                        },
+                    },
+                ]
+            }
+        )
+        self.assertEqual(text, "fetched\n[resource: file:///notes.md, text/markdown]\n# Notes\n- it's \"quoted\"")
 
 
 class McpBridgeSchemaTests(unittest.TestCase):

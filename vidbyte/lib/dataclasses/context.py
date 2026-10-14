@@ -257,9 +257,11 @@ class BaseContext:
         sections: list[str] = []
         for raw_path in self.file_paths:
             path = Path(raw_path)
+            # @intent unreadable-context-file-is-a-placeholder
+            # A file that exists but is not UTF-8 text is unreadable like a missing one, so it gets the placeholder instead of failing the run.
             try:
                 content = path.read_text(encoding="utf-8")
-            except OSError as exc:
+            except (OSError, UnicodeError) as exc:
                 content = f"<unable to read file: {type(exc).__name__}>"
             sections.append(f"File: {raw_path}\n{content}")
         return "Files:\n\n" + "\n\n".join(sections)

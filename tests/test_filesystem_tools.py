@@ -10,6 +10,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+import pytest
+
 from vidbyte.lib.tools.filesystem import FileSystemPermissions
 from vidbyte.lib.tools.filesystem.backends.local import LocalFileSystemBackend
 from vidbyte.lib.errors import ConfigurationError
@@ -281,6 +283,25 @@ class FileSystemToolHappyPathTests(unittest.TestCase):
             self.assertEqual(unzip_result.status, ToolStatus.SUCCESS)
             self.assertIn("src/file.txt", unzip_result.output)
 
+    def test_unzip_refusing_a_zip_slip_member_extracts_nothing(self) -> None:
+        # @intent refused-archive-extracts-nothing
+        # The escaping member comes last, so the members before it must not already be
+        # extracted, overwriting README.md, when the refusal is reported.
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            readme = Path(tmp, "pkg", "notes", "README.md")
+            readme.parent.mkdir(parents=True)
+            readme.write_text("original", encoding="utf-8")
+            with zipfile.ZipFile(Path(tmp, "bad.zip"), "w") as archive:
+                archive.writestr("notes/README.md", "from archive")
+                archive.writestr("new.txt", "new")
+                archive.writestr("../escape.txt", "escaped")
+            result = run(UnzipTool(config).execute(ToolCall("unzip", {"source": "bad.zip", "destination": "pkg"})))
+            self.assertEqual(result.status, ToolStatus.ERROR)
+            self.assertIn("outside the extraction root", result.output)
+            self.assertEqual(readme.read_text(encoding="utf-8"), "original")
+            self.assertFalse(Path(tmp, "pkg", "new.txt").exists())
+
     def test_read_lines_returns_selected_lines_newline_joined(self) -> None:
         with TemporaryDirectory() as tmp:
             config = FileSystemToolConfig(root=tmp, allow_write=True)
@@ -440,6 +461,77 @@ class FileSystemToolHappyPathTests(unittest.TestCase):
             self.assertEqual(exists.output, "true")
 
 
+def test_copy_refuses_to_copy_a_directory_into_itself(tmp_path: Path) -> None:
+    (tmp_path / "handbook" / "sub").mkdir(parents=True)
+    (tmp_path / "handbook" / "a.md").write_text("a")
+    (tmp_path / "handbook" / "sub" / "b.md").write_text("b")
+    tool = CopyTool(FileSystemToolConfig(root=str(tmp_path), allow_write=True))
+    into_subfolder = run(tool.execute(ToolCall("copy", {"source": "handbook", "destination": "handbook/archive/today"})))
+    assert into_subfolder.status == ToolStatus.ERROR
+    assert "Cannot copy a directory into itself" in into_subfolder.output
+    assert not (tmp_path / "handbook" / "archive").exists()
+    root_into_subfolder = run(tool.execute(ToolCall("copy", {"source": ".", "destination": "backups/x"})))
+    assert root_into_subfolder.status == ToolStatus.ERROR
+    assert "Cannot copy a directory into itself" in root_into_subfolder.output
+    assert not (tmp_path / "backups").exists()
+    sibling = run(tool.execute(ToolCall("copy", {"source": "handbook", "destination": "handbook_copy"})))
+    assert sibling.status == ToolStatus.SUCCESS, sibling.output
+    assert (tmp_path / "handbook_copy" / "a.md").read_text() == "a"
+    assert (tmp_path / "handbook_copy" / "sub" / "b.md").read_text() == "b"
+
+
+def make_link(link: Path, target: Path) -> None:
+    try:
+        os.symlink(target, link, target_is_directory=target.is_dir())
+    except OSError as exc:
+        pytest.skip(f"symlinks are not available here: {exc}")
+
+
+def make_project_with_outside_secret(tmp_path: Path) -> Path:
+    (tmp_path / "outside").mkdir()
+    (tmp_path / "outside" / "secret.txt").write_text("outside secret")
+    (tmp_path / "root" / "project").mkdir(parents=True)
+    (tmp_path / "root" / "project" / "README.md").write_text("readme")
+    return tmp_path / "root"
+
+
+def test_copy_refuses_a_directory_whose_link_leads_outside_the_root(tmp_path: Path) -> None:
+    root = make_project_with_outside_secret(tmp_path)
+    make_link(root / "project" / "shared", tmp_path / "outside")
+    tool = CopyTool(FileSystemToolConfig(root=str(root), allow_write=True))
+    result = run(tool.execute(ToolCall("copy", {"source": "project", "destination": "project_copy"})))
+    assert result.status == ToolStatus.ERROR, result.output
+    assert "escaped the configured root" in result.output
+    assert not (root / "project_copy").exists()
+    assert not any(path.name == "secret.txt" for path in root.rglob("*"))
+
+
+def test_zip_refuses_a_directory_whose_link_leads_outside_the_root(tmp_path: Path) -> None:
+    root = make_project_with_outside_secret(tmp_path)
+    make_link(root / "project" / "key.txt", tmp_path / "outside" / "secret.txt")
+    tool = ZipTool(FileSystemToolConfig(root=str(root), allow_write=True))
+    result = run(tool.execute(ToolCall("zip", {"source": "project", "destination": "project.zip"})))
+    assert result.status == ToolStatus.ERROR, result.output
+    assert "escaped the configured root" in result.output
+    assert not (root / "project.zip").exists()
+    assert not any(path.suffix == ".zip" for path in root.rglob("*"))
+
+
+def test_copy_and_zip_keep_links_that_stay_inside_the_root(tmp_path: Path) -> None:
+    root = make_project_with_outside_secret(tmp_path)
+    (root / "project" / "docs").mkdir()
+    (root / "project" / "docs" / "guide.md").write_text("guide")
+    make_link(root / "project" / "current", root / "project" / "docs")
+    config = FileSystemToolConfig(root=str(root), allow_write=True)
+    copied = run(CopyTool(config).execute(ToolCall("copy", {"source": "project", "destination": "project_copy"})))
+    assert copied.status == ToolStatus.SUCCESS, copied.output
+    assert (root / "project_copy" / "current" / "guide.md").read_text() == "guide"
+    zipped = run(ZipTool(config).execute(ToolCall("zip", {"source": "project", "destination": "project.zip"})))
+    assert zipped.status == ToolStatus.SUCCESS, zipped.output
+    with zipfile.ZipFile(root / "project.zip") as archive:
+        assert "project/docs/guide.md" in archive.namelist()
+
+
 class FileSystemToolErrorPathTests(unittest.TestCase):
     def test_path_traversal_returns_error_not_raises(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -577,6 +669,28 @@ class FileSystemToolErrorPathTests(unittest.TestCase):
                 self.assertEqual(result.status, ToolStatus.ERROR)
                 self.assertIn(f"ReplaceTextTool requires the search text to appear exactly once, {expected}", result.output)
                 self.assertEqual(target.read_bytes(), b"aa\naa\naa\n")
+
+    def test_edit_the_encoding_cannot_hold_returns_error_and_leaves_file_untouched(self) -> None:
+        # @intent failed-edit-leaves-file-untouched
+        # "€" does not exist in latin-1, and a lone surrogate from the model's JSON arguments
+        # cannot be UTF-8, so each edit must fail before the file is emptied by opening it.
+        original = b"<?php\n$name = 'caf\xe9';\n"
+        cases = (
+            ("latin-1", ReplaceTextTool, {"search": "caf\xe9", "replacement": "€5"}),
+            ("latin-1", WriteTextTool, {"content": "<?php\n$price = '€5';\n"}),
+            ("utf-8", ReplaceTextTool, {"search": "$name", "replacement": "$name\ud83d"}),
+            ("utf-8", WriteTextTool, {"content": "print('hi \ud83d')\n"}),
+        )
+        for encoding, tool_class, arguments in cases:
+            with self.subTest(encoding=encoding, tool=tool_class.__name__), TemporaryDirectory() as tmp:
+                content = original if encoding == "latin-1" else original.replace(b"\xe9", b"e")
+                target = Path(tmp) / "app.php"
+                target.write_bytes(content)
+                tool = tool_class(FileSystemToolConfig(root=tmp, allow_write=True, encoding=encoding))
+                result = run(tool.execute(ToolCall(tool.name, {"path": "app.php", **arguments})))
+                self.assertEqual(result.status, ToolStatus.ERROR)
+                self.assertIn("can't encode", result.output)
+                self.assertEqual(target.read_bytes(), content)
 
     def test_read_lines_start_less_than_one_returns_error(self) -> None:
         with TemporaryDirectory() as tmp:

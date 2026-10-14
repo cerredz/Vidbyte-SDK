@@ -5,7 +5,9 @@ PURPOSE:
     executions on one harness instance each keep their own run_id, tag their
     own sessions with it, and report only those sessions in their manifest.
     A non-finite score() is treated as no label: the trajectory is still
-    written to a file sink with reward None. HarnessClient.load() uses a
+    written to a file sink with reward None. A file sink writes a task holding
+    an undecodable file name (a lone surrogate) as a JSON \\u escape while
+    keeping readable non-ASCII text as characters. HarnessClient.load() uses a
     Harness subclass (passed directly or built by a registered factory) as is,
     so its self.session() works and lands in the client-supplied store/sink,
     while a foreign run(request) object is still wrapped. A .json config file
@@ -44,7 +46,7 @@ from pathlib import Path
 from typing import Any
 
 from tests.agent_test_support import build_test_agent
-from vidbyte.harnesses import FileTrajectorySink, Harness, HarnessClient, HarnessConfigurationError, InMemoryTrajectorySink
+from vidbyte.harnesses import FileTrajectorySink, Harness, HarnessClient, HarnessConfigurationError, InMemoryTrajectorySink, TrajectoryRecord
 from vidbyte.sessions.stores.memory import InMemorySessionStore
 
 CONFIG = {"schema_version": 1, "harness": {"type": "triage"}, "agents": [{"name": "triager"}]}
@@ -111,6 +113,23 @@ class HarnessNonFiniteScoreTests(unittest.TestCase):
                 lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
                 self.assertEqual(len(lines), 1)
                 self.assertIsNone(json.loads(lines[0])["reward"])
+
+
+class FileTrajectorySinkUndecodableFileNameTests(unittest.TestCase):
+    def test_lone_surrogate_from_a_file_name_is_written_as_a_json_escape(self) -> None:
+        # POSIX hands a non-UTF-8 file name such as b"report-\xff.txt" to Python as "report-\udcff.txt".
+        task = "Summarize report-\udcff.txt"
+        record = TrajectoryRecord(schema_version=1, run_id="hrun_surrogate", task=task, spec={}, agents=(), output={"greeting": "Grüße"}, status="succeeded", reward=None, created_at="2026-01-01T00:00:00+00:00")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "trajectories.jsonl"
+
+            asyncio.run(FileTrajectorySink(path).write(record))
+
+            lines = path.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(json.loads(lines[0])["task"], task)
+        self.assertIn("Grüße", lines[0])
+        self.assertNotIn("\\u00fc", lines[0])
 
 
 class _TriageFactory:

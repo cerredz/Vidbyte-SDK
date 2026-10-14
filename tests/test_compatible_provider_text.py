@@ -3,7 +3,7 @@
 PURPOSE: Regression tests for OpenAICompatibleProvider chat-completion text extraction and error messages.
 ROLE IN CODEBASE: Keeps a plain text turn sent with "tool_calls": [] from losing its text, and Mistral's error message from being dropped.
 ARCHITECTURE NOTE: Drives run_text() through an async scripted transport with one canned body.
-FUNCTION INVENTORY: _ScriptedTransport fakes HTTP; CompatibleToolCallTextTests checks text vs tool-call turns; CompatibleErrorMessageTests checks error bodies.
+FUNCTION INVENTORY: _ScriptedTransport fakes HTTP; CompatibleToolCallTextTests checks text vs tool-call turns; CompatibleErrorMessageTests checks error bodies, including non-JSON error pages.
 COMMON MODIFICATION PATTERNS: Add a canned message per OpenAI-compatible response shape worth pinning.
 WHAT NOT TO DO: Do not call real provider endpoints or require API keys from the environment.
 KNOWN EDGE CASES: vLLM-style servers and some OpenRouter upstreams send "tool_calls": [] on text turns.
@@ -18,9 +18,9 @@ import json
 import unittest
 from collections.abc import Mapping
 
-from vidbyte.lib.errors import ProviderRequestError
+from vidbyte.lib.errors import ProviderRequestError, ProviderResponseError
 from vidbyte.lib.http import HttpResponse, HttpResponseParser
-from vidbyte.providers.compatible import MiniMaxProvider, MistralProvider
+from vidbyte.providers.compatible import GLMProvider, MiniMaxProvider, MistralProvider
 from vidbyte.providers.openrouter import OpenRouterProvider
 from vidbyte.providers.xai import XAIProvider
 
@@ -73,6 +73,20 @@ class CompatibleToolCallTextTests(unittest.TestCase):
         self.assertEqual(self._text(MiniMaxProvider, {"role": "assistant", "content": mid_answer}), mid_answer)
         self.assertEqual(self._text(MiniMaxProvider, call_turn), "")
 
+    def test_glm_network_error_reply_raises_and_keeps_usage(self) -> None:
+        """A GLM reply cut off by network_error raises with its billed usage; "stop" and "model_context_window_exceeded" return the text."""
+        usage = {"prompt_tokens": 1200, "completion_tokens": 6}
+        message = {"role": "assistant", "content": "The refund window is "}
+        provider = GLMProvider(model="glm-5", api_key="test-key")
+        with self.assertRaises(ProviderResponseError) as caught:
+            asyncio.run(provider.run_text(prompt="q", system=None, metadata=None, transport=_ScriptedTransport({"choices": [{"message": message, "finish_reason": "network_error"}], "usage": usage})))
+        self.assertIn("network_error", caught.exception.message)
+        self.assertEqual(caught.exception.details["usage"], usage)
+        for finish_reason in ("stop", "model_context_window_exceeded"):
+            with self.subTest(finish_reason=finish_reason):
+                transport = _ScriptedTransport({"choices": [{"message": message, "finish_reason": finish_reason}], "usage": usage})
+                self.assertEqual(asyncio.run(provider.run_text(prompt="q", system=None, metadata=None, transport=transport)).text, "The refund window is ")
+
 
 class CompatibleErrorMessageTests(unittest.TestCase):
     """Verify a failed response's vendor message reaches ProviderRequestError."""
@@ -89,6 +103,23 @@ class CompatibleErrorMessageTests(unittest.TestCase):
         self.assertEqual(self._message(mistral), "Invalid model: mistral-nope")
         self.assertEqual(self._message({"error": {"message": "X"}, "message": "Y"}), "X")
         self.assertEqual(self._message({"message": {"detail": []}}), "Provider request failed.")
+
+    def test_non_json_error_page_is_a_failed_request_not_invalid_json(self) -> None:
+        """An HTML 503 or a text/plain 400 is a failed request with its status; a 200 HTML body is still invalid JSON."""
+        error_pages = (
+            HttpResponse(status_code=503, body="<html><body><h1>503 Service Temporarily Unavailable</h1></body></html>", headers={"content-type": "text/html"}),
+            HttpResponse(status_code=400, body="Failed to parse the request body as JSON: messages[3].content: lone leading surrogate in hex escape", headers={"content-type": "text/plain"}),
+        )
+        for response in error_pages:
+            with self.subTest(status_code=response.status_code):
+                with self.assertRaises(ProviderRequestError) as caught:
+                    HttpResponseParser().parse_json_response(response, provider="xai")
+                self.assertEqual(caught.exception.message, "Provider request failed.")
+                self.assertEqual(caught.exception.status_code, response.status_code)
+        ok_html = HttpResponse(status_code=200, body="<html><body>hello</body></html>", headers={"content-type": "text/html"})
+        with self.assertRaises(ProviderRequestError) as caught:
+            HttpResponseParser().parse_json_response(ok_html, provider="xai")
+        self.assertEqual(caught.exception.message, "Provider returned invalid JSON.")
 
 
 if __name__ == "__main__":
