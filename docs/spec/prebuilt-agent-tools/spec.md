@@ -1123,6 +1123,23 @@ Rows 8–38 share the **category-module standard set** written out in §12.4 gro
 | r3 | 2026-10-14 | S1 spec (approved) | Applied S1 round-2 review R-13 to R-22: §9.2 item 17 (float-to-exact rounding); exact `Fraction` money steps and a fixed compound-growth order; IRR skip, bisection, and precision rules; four rows settled; D-7 recorded as an exception to principle 4 (Q-6); INV-20, INV-12, and NFR-10 narrowed, with EC-45; §12.4 B narrowed and five constants named; §14 test timing; S020 File Index rule; two shared check helpers. Still 265 tools and 68 enums. Status approved. |
 | r4 | 2026-10-14 | S1 spec (post-S2 fix; approved) | Resolved the S2-found spec defects S2-1 to S2-10 (unreachable surrogate paths, four list caps, a `UtcOffset` cap, the email check order, `DigestFormat` padding, ElementPath and null-byte error mapping, IPv4-mapped flags, three error parameters, arithmetic combination counts) and wrote about 50 test-pinned readings into their rows (S2-11). Still 265 tools and 68 enums; no tool, parameter, return key, default, or test-pinned cap changed; the §6.2 Proof column is as S2 wrote it. |
 | r5 | 2026-10-14 | S1 spec (post-S3 fix; tests-written) | Resolved the S3-found NFR-7 gap: new EC-46 accepts slow, highly repetitive input to `diff_words`, `closest_string_matches`, and `unified_diff_text` as a documented limitation, and NFR-7, A-9, T-2, rows 23 and 40, and the three A.16 rows cite it (S3-1). Recorded the `seeded_weighted_choice` output bound under EC-45 (S3-2) and the orchestrator's `intersect_lists` test-defect ruling (S3-3). No tool, parameter, return key, default, or cap changed; the §6.2 Proof column is as S2 wrote it. |
+| r5 | 2026-10-14 | S3 implement | Built every §12.3 row on r5 with no change to any tool, parameter, return key, default, or cap: 39 planned files (no D-18 split module), 265 tools in 31 categories, `PrebuiltTools`, and 68 enums. Added the r5 EC-46 README paragraph (row 40). The pack has 4,310 passed. Lint, semgrep, and the public API check pass, and both CI stages pass. Draft PR #1072. Deviations are listed below. |
+
+### Implementation deviations (S3)
+
+None of these changes a tool name, parameter, return key, default, or cap, and none touches a file outside §12.3.
+
+1. **Lint C005 renames.** C005 (cost-arithmetic-site-parity) matches any multiplication operand whose name contains `rate` or `price`. Private locals in `finance.py` were renamed (`monthly_interest`, `guess`, `yearly`), and in `probability.py` the Poisson helper's argument became `mean`. The §12.4 naming checklist names A002 and A007 but not C005.
+2. **Two `_support.py` helpers beyond row 6.** `split_lines` and `line_and_column` serve the categories that report lines and positions. `parse_json_text` passes the private hooks `_reject_json_constant` and `_read_json_float` to `json.loads` through `functools.partial`. The JSON parser calls these hooks; no helper calls another helper directly.
+3. **Stricter JSON reading in `parse_json_text`.** An integer longer than 4,300 digits and a non-finite float such as `1e400` fail as error(parameter). The interpreter's digit limit is left unchanged. `nesting_level` skips scalar children, which keeps `format_json` within its peak-memory test. The weekday prefix pattern is anchored at the start of the text.
+4. **A third private nested class.** Besides the `HTMLParser` subclasses that rows 20 and 35 require, `structured_formats.py` has a private nested `ConfigParser` subclass whose `optionxform` keeps key case. The A.20 row writes this as `optionxform = str`.
+5. **Duplicated Base64 reader.** The tolerant Base64 reader is written in both `encoding.py` and `hashing.py`. It could move to `_support.py` in a later change.
+6. **Choices the rows left open.**
+   - A bare non-iterable `categories` value counts as one non-member item, so it raises `ToolRegistryError` (INV-5).
+   - The implementer chose the shapes of the reference tables: comment syntax per language, English number words, irregular ordinals, and duration words including plurals.
+   - `markdown_html` checks column names against the output cap. An `HTMLParser` `AssertionError` on an unknown marked section such as `<![foo[` ends parsing at that point, and `strip_html_tags` treats such a section as a comment.
+   - Errors from `get_python_function_signature`, `fill_text_template`, and the graph cycle checks shorten the names they echo, so no message repeats more than 100 characters of input.
+   - `fiscal_quarter` reports fiscal year 10000 for a quarter in 9999 whose fiscal year ends in 10000. The row fails only when the quarter itself leaves the calendar.
 
 
 ## Appendix A — Tool catalogue
