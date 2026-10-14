@@ -2,7 +2,7 @@
 
 PURPOSE: CodexHost, one Codex app-server process that many threads and turns share for one async with block: it starts threads and turns, goal runs, forks, reviews and subagent launches, returns a handle as soon as Codex accepts a turn, and answers waits, results, steering, interrupts and per-thread usage from the turns it registered.
 ROLE IN CODEBASE: The main class of vidbyte/harnesses/native/codex/; the module functions in oneshot.py and the CodexHostTools toolset in vidbyte/tools/ both drive it.
-ARCHITECTURE NOTE: Importing this module never loads openai-codex: __aenter__ imports connection, wire and turns, the modules that do (D-21). Each public method is one narrated main function over a flat list of leaf helpers; CodexConnection sends every call, CodexPreflight runs every check, the translators in wire.py build params and records, and CodexTurnRegistry owns every turn.
+ARCHITECTURE NOTE: Importing this module never loads openai-codex: __aenter__ imports connection, wire and turns, the modules that do (D-21). Each public method is one narrated main function over a flat list of leaf helpers; CodexConnection sends every call and keeps background tasks, CodexPreflight runs every check, the translators in wire.py build params and records, CodexTurnRegistry owns every turn, and each CodexLiveTurn sends its own one stop.
 COMMON MODIFICATION PATTERNS: A new operation is one public method: guard, field rules, preflight, the calls through CodexConnection, then a record from CodexResponseTranslator. A new way a turn can end goes through CodexTurnRegistry.finish, so the first outcome still wins.
 KNOWN EDGE CASES: Close wins over a turn still starting (EC-79); a start whose caller left is still owned and gets one interrupt (INV-11); a goal run registers only after its budget echo matches (INV-25); a user reviewer that Codex reports stops the operation before the thread spends (D-32); a review is read back after registration, because its first events can be dropped (D-23).
 RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.1, 8.5 and 9.2)
@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import shutil
-from collections.abc import Coroutine, Sequence
+from collections.abc import Sequence
 from contextlib import suppress
 from functools import partial
 from typing import TYPE_CHECKING, Any, cast
@@ -65,7 +65,6 @@ if TYPE_CHECKING:
     from openai_codex._goal import _GoalOperationState
     from openai_codex.generated.v2_all import (
         ReviewStartResponse,
-        Turn,
         TurnStartResponse,
     )
     from openai_codex.models import Notification
@@ -109,7 +108,6 @@ class CodexHost:
         self._connected = False
         self._closing = False
         self._version = ""
-        self._tasks: set[asyncio.Future[Any]] = set()
         self._connection: CodexConnection
         self._params: CodexParamsTranslator
         self._responses: CodexResponseTranslator
@@ -426,7 +424,7 @@ class CodexHost:
             if not started:
                 raise
             for turn in started:
-                self._stop(turn, None)
+                turn.stop(self._connection, None)
             message = f"{exc.message} {len(started)} turns were started before this failure and were interrupted."
             raise CodexAgentError(message, failure_code=exc.failure_code, operation=exc.operation, next_step=exc.next_step) from None
         return tuple(turn.handle for turn in started)
@@ -455,8 +453,9 @@ class CodexHost:
             response = await connection.start(operation, CODEX_REVIEW_START_METHOD, review_call, adopt, thread_id=thread_id)
         finally:
             self._registry.release(thread_id)
-        # Register the review turn and read it back before returning.
-        return await self._accept_review(operation, response, pricing, late=False)
+        # Register the review turn, then read it back before returning.
+        turn = self._track_review(response, pricing)
+        return await self._accept_review(operation, turn, late=False)
 
     def _guard(self, operation: CodexHostOperation, *, talks: bool) -> None:
         # Every method needs an open host and the loop that opened it; a
@@ -474,10 +473,6 @@ class CodexHost:
         if turn is None:
             raise CodexErrorMapper.error(FailureCode.CODEX_SESSION_NOT_FOUND, UNKNOWN_HANDLE_MESSAGE, operation)
         return turn
-
-    def _stopped(self) -> bool:
-        # Close began or the process died, so nothing new may start.
-        return self._closing or self._connection.is_dead()
 
     def _tool_bridge(self, request: CodexSpawnRequest) -> CodexToolBridge | None:
         # @intent tools-are-checked-before-any-call
@@ -554,7 +549,7 @@ class CodexHost:
         adopt = partial(self._adopt_late_goal, thread_id, request, pricing)
         state, turn_id = await connection.start(operation, GOAL_START_CALL, start, adopt, thread_id=thread_id)
         try:
-            if goal.token_budget is not None and not self._stopped():
+            if goal.token_budget is not None and not connection.stopped():
                 budget_call = connection.raw(CODEX_GOAL_SET_METHOD, self._params.goal_budget(thread_id, goal.token_budget))
                 echoed = await connection.call(operation, CODEX_GOAL_SET_METHOD, budget_call, thread_id=thread_id)
                 if echoed.goal.token_budget != goal.token_budget:
@@ -572,14 +567,14 @@ class CodexHost:
         # A turn accepted after close began or the process died ends as
         # exited, and its caller gets process_exited naming the thread
         # (EC-79). Otherwise one watcher and the turn's timer start.
-        client = self._connection.client
-        if self._stopped():
+        connection = self._connection
+        if connection.stopped():
             self._registry.finish(turn, self._responses.exited(turn.handle))
             if turn.state is None:
-                client.unregister_turn_notifications(turn.handle.turn_id)
-            turn.close_goal_stream(client)
+                connection.client.unregister_turn_notifications(turn.handle.turn_id)
+            turn.close_goal_stream(connection.client)
             raise CodexErrorMapper.process_exited(operation, turn.handle.thread_id)
-        turn.watch(client, self._on_turn_event, self._stop)
+        turn.watch(connection, self._on_turn_event)
         return turn.handle
 
     def _adopt_late_turn(self, thread_id: str, request: CodexSpawnRequest, pricing: CodexAgentSettings, response: TurnStartResponse) -> None:
@@ -588,12 +583,13 @@ class CodexHost:
         # The turn is registered, so a get finds it, and stopped with one
         # interrupt that carries no stop reason (D-35); close wins (EC-79).
         turn = self._registry.track(CodexTurnHandle(thread_id=thread_id, turn_id=response.turn.id), request, pricing)
-        if self._stopped():
-            self._connection.client.unregister_turn_notifications(turn.handle.turn_id)
+        connection = self._connection
+        if connection.stopped():
+            connection.client.unregister_turn_notifications(turn.handle.turn_id)
             self._registry.finish(turn, self._responses.exited(turn.handle))
             return
-        turn.watch(self._connection.client, self._on_turn_event, self._stop)
-        self._stop(turn, None)
+        turn.watch(connection, self._on_turn_event)
+        turn.stop(connection, None)
 
     def _adopt_late_goal(
         self,
@@ -607,39 +603,49 @@ class CodexHost:
         # with one cancel, or ended as exited when close came first.
         state, turn_id = started
         turn = self._registry.track_goal(CodexTurnHandle(thread_id=thread_id, turn_id=turn_id), request, pricing, state)
-        if self._stopped():
+        connection = self._connection
+        if connection.stopped():
             self._registry.finish(turn, self._responses.exited(turn.handle))
-            turn.close_goal_stream(self._connection.client)
+            turn.close_goal_stream(connection.client)
             return
-        turn.watch(self._connection.client, self._on_turn_event, self._stop)
-        self._stop(turn, None)
+        turn.watch(connection, self._on_turn_event)
+        turn.stop(connection, None)
 
     def _adopt_late_review(self, operation: CodexHostOperation, pricing: CodexAgentSettings, response: ReviewStartResponse) -> None:
         # @intent a-late-review-is-owned-then-stopped
-        # A review accepted after its caller left is registered and read
-        # back like any other, then stopped with one interrupt.
-        self._spawn_task(self._accept_review(operation, response, pricing, late=True))
+        # A review accepted after its caller left is registered at once,
+        # then read back like any other and stopped with one interrupt.
+        turn = self._track_review(response, pricing)
+        self._connection.spawn_task(self._accept_review(operation, turn, late=True))
 
-    async def _accept_review(self, operation: CodexHostOperation, response: ReviewStartResponse, pricing: CodexAgentSettings, *, late: bool) -> CodexTurnHandle:
-        # @intent register-a-review-then-read-it-back
-        # Register the review turn right away, then read its thread back,
-        # because openai-codex drops a review turn's events that arrive
-        # before registration (D-23).
+    def _track_review(self, response: ReviewStartResponse, pricing: CodexAgentSettings) -> CodexLiveTurn:
+        # Register the review turn the moment Codex accepted it, so its
+        # events are routed to it from now on (D-23).
+        handle = CodexTurnHandle(thread_id=response.review_thread_id, turn_id=response.turn.id)
+        self._connection.client.register_turn_notifications(handle.turn_id)
+        return self._registry.track(handle, REVIEW_REQUEST, pricing, review=True)
+
+    async def _accept_review(self, operation: CodexHostOperation, turn: CodexLiveTurn, *, late: bool) -> CodexTurnHandle:
+        # @intent read-a-registered-review-back
+        # Read the review thread back, because openai-codex drops a review
+        # turn's events that arrive before registration (D-23). A failed
+        # read, or one refused after close began, finds nothing stored.
         connection = self._connection
         client = connection.client
-        handle = CodexTurnHandle(thread_id=response.review_thread_id, turn_id=response.turn.id)
-        client.register_turn_notifications(handle.turn_id)
-        turn = self._registry.track(handle, REVIEW_REQUEST, pricing, review=True)
+        handle = turn.handle
+        stored = None
         # A caller cancelled during the read-back leaves the review
         # owned: it is watched and stopped with one interrupt (INV-11).
         try:
-            stored = None if self._stopped() else await self._read_back(operation, handle)
+            with suppress(CodexAgentError):
+                thread = await self._preflight.require_thread(operation, handle.thread_id, include_turns=True)
+                stored = self._responses.stored_turn(thread, handle.turn_id)
         except BaseException:
-            turn.watch(client, self._on_turn_event, self._stop)
-            self._stop(turn, None)
+            turn.watch(connection, self._on_turn_event)
+            turn.stop(connection, None)
             raise
         # Close wins: the turn ends as exited and nothing more is sent.
-        if self._stopped():
+        if connection.stopped():
             client.unregister_turn_notifications(handle.turn_id)
             self._registry.finish(turn, self._responses.exited(handle))
             if late:
@@ -651,26 +657,21 @@ class CodexHost:
             self._registry.finish(turn, self._responses.turn_snapshot(turn, stored.items, stored))
             return handle
         # Otherwise watch it; a late review also gets its one interrupt.
-        turn.watch(client, self._on_turn_event, self._stop)
+        turn.watch(connection, self._on_turn_event)
         if late:
-            self._stop(turn, None)
+            turn.stop(connection, None)
         return handle
-
-    async def _read_back(self, operation: CodexHostOperation, handle: CodexTurnHandle) -> Turn | None:
-        # The review turn as Codex stored it, or None when the read fails
-        # or the turn is not stored yet.
-        connection = self._connection
-        with suppress(CodexAgentError):
-            stored = await connection.call(operation, "thread/read", connection.client.thread_read, handle.thread_id, True, thread_id=handle.thread_id)
-            return self._responses.stored_turn(stored.thread, handle.turn_id)
-        return None
 
     async def _complete_review(self, turn: CodexLiveTurn) -> None:
         # @intent build-a-review-from-its-stored-items
         # When a review turn completes, its result comes from the review
         # thread read back with its turns, since its last item can be lost;
         # the items seen live are used when the read fails (D-23).
-        stored = await self._read_back(CodexHostOperation.START_CODEX_REVIEW, turn.handle)
+        handle = turn.handle
+        stored = None
+        with suppress(CodexAgentError):
+            thread = await self._preflight.require_thread(CodexHostOperation.START_CODEX_REVIEW, handle.thread_id, include_turns=True)
+            stored = self._responses.stored_turn(thread, handle.turn_id)
         items = stored.items if stored is not None else turn.items
         self._registry.finish(turn, self._responses.turn_snapshot(turn, items, turn.completed))
 
@@ -683,36 +684,18 @@ class CodexHost:
             return
         ended = turn.observe(note)
         if turn.over_cap():
-            self._stop(turn, FailureCode.CODEX_BUDGET_EXHAUSTED)
+            turn.stop(self._connection, FailureCode.CODEX_BUDGET_EXHAUSTED)
         if not ended:
             return
         # The end builds the snapshot: a review from its read-back, a goal
         # run by the goal table, any other turn from its completion.
         if turn.review:
-            self._spawn_task(self._complete_review(turn))
+            self._connection.spawn_task(self._complete_review(turn))
         elif turn.state is not None:
             self._registry.finish(turn, self._responses.goal_snapshot(cast("CodexGoalTurn", turn)))
             turn.close_goal_stream(self._connection.client)
         else:
             self._registry.finish(turn, self._responses.turn_snapshot(turn, turn.items, turn.completed))
-
-    def _stop(self, turn: CodexLiveTurn, reason: FailureCode | None) -> None:
-        # @intent the-first-stop-wins-and-is-sent-once
-        # Vidbyte's timeout, its output cap and late acceptance each stop a
-        # turn with one interrupt. The first stop wins, its reason labels
-        # the turn only if Codex reports it interrupted, and a failed
-        # interrupt is not retried (D-7, D-35).
-        if turn.stop_sent or turn.snapshot is not None or self._closing:
-            return
-        turn.stop_sent = True
-        turn.stop_reason = reason
-        self._spawn_task(self._connection.interrupt(CodexHostOperation.INTERRUPT_CODEX_TURN, turn.handle, turn.state, quiet=True))
-
-    def _spawn_task(self, work: Coroutine[Any, Any, Any]) -> None:
-        # Background work is kept until it ends, so it is never collected.
-        task = asyncio.ensure_future(work)
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
 
     def _end_running_turns(self) -> list[CodexLiveTurn]:
         # Cancel every running tool call, release each plain turn's route

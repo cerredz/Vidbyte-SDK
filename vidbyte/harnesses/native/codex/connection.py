@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Coroutine, Mapping
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import suppress
 from functools import partial
@@ -136,6 +136,7 @@ class CodexConnection:
         self._dead = threading.Event()
         self._closing = False
         self._closed: asyncio.Future[None] | None = None
+        self._tasks: set[asyncio.Future[Any]] = set()
 
     async def launch(self, target: str) -> InitializeResponse:
         # @intent start-and-initialize-on-host-workers
@@ -284,6 +285,16 @@ class CodexConnection:
     def begin_close(self) -> None:
         # From now on only cleanup calls are sent (INV-7).
         self._closing = True
+
+    def stopped(self) -> bool:
+        # Close began or the process died, so nothing new may start.
+        return self._closing or self._dead.is_set()
+
+    def spawn_task(self, work: Coroutine[Any, Any, Any]) -> None:
+        # Background work is kept until it ends, so it is never collected.
+        task = asyncio.ensure_future(work)
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
 
     def reap(self) -> asyncio.Future[None]:
         # The client closes once, on its own daemon thread, so close never

@@ -1,7 +1,7 @@
 """FILE: vidbyte/harnesses/native/codex/turns.py
 
 PURPOSE: Holds the live state of every turn a CodexHost started: what Codex reported so far (items, usage, the completion), how the turn ended, the goal finish rule of goal runs, the daemon thread that reads each turn's notifications, and the per-host registry with each thread's usage ledger.
-ROLE IN CODEBASE: The live-state layer of vidbyte/harnesses/native/codex/; CodexHost creates turns here, its watchers feed them, and the response translator in wire.py turns them into snapshots.
+ROLE IN CODEBASE: The live-state layer of vidbyte/harnesses/native/codex/; CodexHost creates turns here, its watchers feed them, each turn sends its own one stop through CodexConnection, and the response translator in wire.py turns them into snapshots.
 ARCHITECTURE NOTE: openai-codex's notification models are imported at module level, so only CodexHost.__aenter__ imports this module (D-21). Everything except CodexTurnWatcher runs on the host's event loop; a watcher only reads and posts with call_soon_threadsafe, so no state here needs a lock.
 COMMON MODIFICATION PATTERNS: Collect a new notification kind in CodexLiveTurn.observe; change goal finishing only together with openai-codex's private _GoalStreamCursor.process, which CodexGoalFinishRule mirrors.
 KNOWN EDGE CASES: Usage notifications carry the thread's cumulative totals, so a turn's own tokens are its latest totals minus the totals before its first report; a goal run spans several physical turns, so its items and usage cover all of them.
@@ -48,12 +48,18 @@ from vidbyte.lib.dataclasses.codex_host import (
     CodexTurnSnapshot,
     CodexTurnUsage,
 )
-from vidbyte.lib.enums.codex import CodexGoalStatus, CodexTurnStatus
+from vidbyte.lib.enums.codex import (
+    CodexGoalStatus,
+    CodexHostOperation,
+    CodexTurnStatus,
+)
 from vidbyte.lib.enums.failure import FailureCode
 
 if TYPE_CHECKING:
     from openai_codex._goal import _GoalOperationState
     from openai_codex.client import CodexClient
+
+    from vidbyte.harnesses.native.codex.connection import CodexConnection
 
 # The token counters a usage delta subtracts, named as on CodexUsage.
 USAGE_COUNTERS = frozenset(
@@ -134,12 +140,7 @@ class CodexLiveTurn:
         self.ended.set_result(snapshot)
         return True
 
-    def watch(
-        self,
-        client: CodexClient,
-        on_event: Callable[[CodexLiveTurn, Notification], None],
-        on_timeout: Callable[[CodexLiveTurn, FailureCode | None], None],
-    ) -> None:
+    def watch(self, connection: CodexConnection, on_event: Callable[[CodexLiveTurn, Notification], None]) -> None:
         # @intent one-watcher-and-one-timer-per-turn
         # One daemon thread reads this turn's notifications for its whole
         # life, so no host worker is held by a running turn (D-6). A goal
@@ -147,6 +148,7 @@ class CodexLiveTurn:
         # releases it when the watcher ends. Vidbyte's time limit is one
         # timer on the loop, cancelled when the turn ends (D-7).
         loop = self.ended.get_loop()
+        client = connection.client
         if self.state is not None:
             read = partial(client.next_goal_notification, self.state)
             cleanup = None
@@ -155,7 +157,19 @@ class CodexLiveTurn:
             cleanup = partial(client.unregister_turn_notifications, self.handle.turn_id)
         CodexTurnWatcher(read, partial(on_event, self), loop, cleanup, until_completed=self.state is None).start()
         if self.request.timeout_seconds is not None:
-            self.timer = loop.call_later(self.request.timeout_seconds, on_timeout, self, FailureCode.CODEX_TURN_TIMED_OUT)
+            self.timer = loop.call_later(self.request.timeout_seconds, self.stop, connection, FailureCode.CODEX_TURN_TIMED_OUT)
+
+    def stop(self, connection: CodexConnection, reason: FailureCode | None) -> None:
+        # @intent the-first-stop-wins-and-is-sent-once
+        # Vidbyte's timeout, its output cap and late acceptance each stop a
+        # turn with one interrupt. The first stop wins, its reason labels
+        # the turn only if Codex reports it interrupted, and a failed
+        # interrupt is not retried (D-7, D-35).
+        if self.stop_sent or self.snapshot is not None or connection.stopped():
+            return
+        self.stop_sent = True
+        self.stop_reason = reason
+        connection.spawn_task(connection.interrupt(CodexHostOperation.INTERRUPT_CODEX_TURN, self.handle, self.state, quiet=True))
 
     def close_goal_stream(self, client: CodexClient) -> None:
         # A goal run's stream closes once, in openai-codex's own order:
