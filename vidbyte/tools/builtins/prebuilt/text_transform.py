@@ -3,7 +3,7 @@
 PURPOSE: Defines TextTransformToolFunctions, the ten prebuilt tools that rewrite a text: reversing it, converting identifier case, shortening it, replacing a literal string, removing duplicate lines, sorting lines, stripping HTML tags, splitting it into chunks, extracting a line range, and filling a template.
 ROLE IN CODEBASE: Re-exported by vidbyte/tools/builtins/prebuilt/__init__.py and wrapped in FunctionTool objects by PrebuiltTools in vidbyte/tools/toolsets/prebuilt.py when the TEXT_TRANSFORM category is chosen. Builds on PrebuiltToolSupport in _support.py for the line, word, and numeric text rules, JSON parsing, the item cap, and the argument error.
 ARCHITECTURE NOTE: Every tool is a static method whose docstring's first paragraph is the model-facing description and whose parameters carry their own Field descriptions and caps, so FunctionTool builds the whole schema from the signature. Tools that can grow their input, replace_all_occurrences and fill_text_template, first predict the output length from the matches and refuse an output over the text cap before building anything. HTML is read by a private HTMLParser subclass, the only class that needs inheritance here.
-FUNCTION INVENTORY: reverse_text, convert_identifier_case, shorten_text, replace_all_occurrences, deduplicate_lines, sort_text_lines, strip_html_tags, split_text_into_chunks, extract_line_range, and fill_text_template are the tools; _rebuilt_text joins lines under the line rule; _identifier_words splits an identifier into words; _cut_characters makes a character cut; _natural_key and _numeric_order serve the natural and numeric sorts; _chunk_end finds a chunk's break point; _template_values, _filled_size, and _filled_text render a template; _HtmlTextCollector gathers the text of HTML; tool_functions lists the tools in catalogue order.
+FUNCTION INVENTORY: reverse_text, convert_identifier_case, shorten_text, replace_all_occurrences, deduplicate_lines, sort_text_lines, strip_html_tags, split_text_into_chunks, extract_line_range, and fill_text_template are the tools; _rebuilt_text joins lines under the line rule; _identifier_words splits an identifier into words; _cut_characters makes a character cut; _chunk_end finds a chunk's break point; _template_values, _filled_size, and _filled_text render a template; _HtmlTextCollector gathers the text of HTML; tool_functions lists the tools in catalogue order.
 COMMON MODIFICATION PATTERNS: A new transform tool adds a static method with a 4 to 5 sentence description, its row in the spec's Appendix A.13, and its entry in tool_functions. A tool whose output can grow past its input predicts the output length and refuses it before building it.
 WHAT NOT TO DO IN THIS FILE: 1. Do not split words or lines with a local rule; use PrebuiltToolSupport so every category agrees. 2. Do not pass replacement text to re.sub unescaped, because backslashes and group references would be read as template syntax. 3. Do not build an amplified output before its predicted length has been checked against PREBUILT_MAX_TEXT_CHARS. 4. Do not iterate a set or a hash-ordered container when building an output.
 KNOWN EDGE CASES: Rebuilt text joins lines with LF and keeps one trailing LF only when the input ended with a line break. A case-insensitive replacement folds one code point at a time, so a sharp s never matches a double s. Python 3.11's HTMLParser raises AssertionError on a marked section with an unknown keyword, so the collector reads such a section as a bogus comment instead. Markup left open at the end of the input is dropped by PrebuiltToolSupport.parse_html before the parser closes (EC-47), because unpatched CPython re-scans it once for every < (CVE-2025-6069) and the fixed releases give nothing from it. A character cut that lands right before whitespace is already at a word boundary and does not move back.
@@ -44,8 +44,6 @@ from vidbyte.tools.builtins.prebuilt._support import (
 
 _LINE_BREAK_ENDINGS = ("\n", "\r")
 _LETTER_OR_DIGIT_RUN = re.compile(r"[^\W_]+")
-_NATURAL_RUN = re.compile(r"[0-9]+|[^0-9]+")
-_ASCII_DIGITS = "0123456789"
 _SKIPPED_ELEMENTS = frozenset({"script", "style"})
 _SPACE_RUN = re.compile(r"[ \t]+")
 _EXTRA_LINE_BREAKS = re.compile(r"\n{3,}")
@@ -264,9 +262,9 @@ class TextTransformToolFunctions:
         lines = PrebuiltToolSupport.split_lines(text)
         match mode:
             case SortMode.NUMERIC:
-                ordered = TextTransformToolFunctions._numeric_order(lines, descending)
+                ordered = PrebuiltToolSupport.numeric_order([(PrebuiltToolSupport.parse_numeric_text(line), line) for line in lines], descending)
             case SortMode.NATURAL:
-                ordered = sorted(lines, key=TextTransformToolFunctions._natural_key, reverse=descending)
+                ordered = sorted(lines, key=PrebuiltToolSupport.natural_sort_key, reverse=descending)
             case SortMode.CASE_INSENSITIVE:
                 ordered = sorted(lines, key=lambda line: (line.casefold(), line), reverse=descending)
             case SortMode.LENGTH:
@@ -401,25 +399,6 @@ class TextTransformToolFunctions:
         # already sits at a word boundary, so it is searched as well.
         boundary = next((index for index in range(allowed, -1, -1) if text[index].isspace()), allowed)
         return text[:boundary].rstrip()
-
-    @staticmethod
-    def _natural_key(line: str) -> tuple[tuple[int, int, str], ...]:
-        """Key a line by its runs: a digit run by its value without leading zeros, any other run by its case fold, digits first."""
-        return tuple((0, len(run.lstrip("0")), run.lstrip("0")) if run[0] in _ASCII_DIGITS else (1, 0, run.casefold()) for run in _NATURAL_RUN.findall(line))
-
-    @staticmethod
-    def _numeric_order(lines: list[str], descending: bool) -> list[str]:
-        """Sort the numeric lines by value, stably, and keep the other lines after them in input order."""
-        valued: list[tuple[int | float, str]] = []
-        others: list[str] = []
-        for line in lines:
-            value = PrebuiltToolSupport.parse_numeric_text(line)
-            if value is None:
-                others.append(line)
-            else:
-                valued.append((value, line))
-        valued.sort(key=lambda pair: pair[0], reverse=descending)
-        return [line for _, line in valued] + others
 
     @staticmethod
     def _chunk_end(text: str, start: int, chunk_size: int) -> int:

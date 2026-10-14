@@ -3,7 +3,7 @@
 PURPOSE: Defines CsvTablesToolFunctions, the nine prebuilt tools that work on CSV text: converting it to records, detecting its dialect, profiling its columns, filtering, sorting, aggregating, grouping, and joining its rows, and rendering it as a Markdown table.
 ROLE IN CODEBASE: Re-exported by vidbyte/tools/builtins/prebuilt/__init__.py and wrapped in FunctionTool objects by PrebuiltTools in vidbyte/tools/toolsets/prebuilt.py when the CSV_TABLES category is chosen. Builds on PrebuiltToolSupport in _support.py for reading CSV tables, the numeric text rule, the item cap, and the argument error.
 ARCHITECTURE NOTE: Every tool except detect_csv_dialect reads its table through PrebuiltToolSupport.parse_csv_table, which sniffs only the first PREBUILT_MAX_SNIFF_CHARS characters, pads short rows, and checks the header, so the tools agree on what a valid table is. Output CSV is written by one private helper with QUOTE_MINIMAL and line feeds, cells compare as numbers only when both sides are numeric, sums and means run in exact fractions, and the two INV-20 tools count their output while building it.
-FUNCTION INVENTORY: csv_to_records, detect_csv_dialect, profile_csv_columns, csv_filter_rows, csv_sort_rows, csv_aggregate_column, csv_group_by, csv_join_tables, and csv_to_markdown_table are the tools; _column_index finds a column or lists the available ones; _write_csv writes output CSV; _typed_cell converts one cell for infer_types; _read_rows and _header_vote serve dialect detection; _column_type and _column_profile describe one column; _cell_matches applies a filter comparison; _sort_key and _numeric_order order rows; _aggregate summarizes cells; _alignment_markers and _table_line build Markdown lines; tool_functions lists the tools in catalogue order.
+FUNCTION INVENTORY: csv_to_records, detect_csv_dialect, profile_csv_columns, csv_filter_rows, csv_sort_rows, csv_aggregate_column, csv_group_by, csv_join_tables, and csv_to_markdown_table are the tools; _column_index finds a column or lists the available ones; _write_csv writes output CSV; _typed_cell converts one cell for infer_types; _read_rows and _header_vote serve dialect detection; _column_type and _column_profile describe one column; _cell_matches applies a filter comparison; _sort_key keys rows for every sort mode but numeric; _aggregate summarizes cells; _alignment_markers and _table_line build Markdown lines; tool_functions lists the tools in catalogue order.
 COMMON MODIFICATION PATTERNS: A new CSV tool adds a static method with a 4 to 5 sentence description, its row in the spec's Appendix A.19, and its entry in tool_functions, and reads its table through parse_csv_table. A new comparison or summary extends the operator tables or _aggregate together with its enum member.
 WHAT NOT TO DO IN THIS FILE: 1. Do not call csv.field_size_limit or change any other csv module setting; a cell over the default limit is reported as an error on the CSV parameter. 2. Do not sniff more than PREBUILT_MAX_SNIFF_CHARS characters, because csv.Sniffer slows down sharply on long input. 3. Do not echo a requested column name or long header text in an error; list at most a few shortened column names.
 KNOWN EDGE CASES: A cell holding only whitespace counts as empty, yet keeps its text in output CSV. Natural order compares digit runs by their length without leading zeros and then digit by digit, so no integer conversion runs on long digit strings. Single-column output writes an empty cell as two quote characters, so the row is not read back as a blank line.
@@ -59,9 +59,6 @@ _REPORTED_COLUMNS = 20
 _REPORTED_NAME_LENGTH = 40
 _BOOLEAN_WORDS = MappingProxyType({"true": True, "false": False})
 _ISO_DAY = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
-_NATURAL_RUNS = re.compile(r"[0-9]+|[^0-9]+")
-_DIGIT_RUN_RANK = 0
-_TEXT_RUN_RANK = 1
 _CELL_LINE_BREAK = re.compile(r"\r\n|\r|\n")
 _NUMERIC_TYPES = frozenset({ColumnType.INTEGER, ColumnType.NUMBER})
 _EMPTINESS_TESTS = MappingProxyType({FilterOperator.IS_EMPTY: True, FilterOperator.IS_NOT_EMPTY: False})
@@ -202,7 +199,7 @@ class CsvTablesToolFunctions:
         # Numeric mode sorts the numeric cells and appends the rest in
         # input order; every other mode sorts all rows by one key.
         if mode is SortMode.NUMERIC:
-            ordered = CsvTablesToolFunctions._numeric_order(rows, index, descending)
+            ordered = PrebuiltToolSupport.numeric_order([(PrebuiltToolSupport.parse_numeric_text(row[index]), row) for row in rows], descending)
         else:
             ordered = sorted(rows, key=lambda row: CsvTablesToolFunctions._sort_key(row[index], mode), reverse=descending)
         return {"csv": CsvTablesToolFunctions._write_csv(header, ordered, chosen), "rows": len(rows)}
@@ -433,20 +430,9 @@ class CsvTablesToolFunctions:
             case SortMode.LENGTH:
                 return (len(cell), cell)
             case SortMode.NATURAL:
-                # A digit run compares by its length without leading
-                # zeros and then digit by digit, which is numeric order.
-                runs = _NATURAL_RUNS.findall(cell)
-                return tuple((_DIGIT_RUN_RANK, len(run.lstrip("0")), run.lstrip("0")) if "0" <= run[0] <= "9" else (_TEXT_RUN_RANK, run.casefold()) for run in runs)
+                return PrebuiltToolSupport.natural_sort_key(cell)
             case _:
                 return (cell,)
-
-    @staticmethod
-    def _numeric_order(rows: list[list[str]], index: int, descending: bool) -> list[list[str]]:
-        """Sort the rows whose cell is numeric by value and append the other rows in input order."""
-        keyed = [(PrebuiltToolSupport.parse_numeric_text(row[index]), row) for row in rows]
-        numeric = [(number, row) for number, row in keyed if number is not None]
-        numeric.sort(key=lambda pair: pair[0], reverse=descending)
-        return [row for _, row in numeric] + [row for number, row in keyed if number is None]
 
     @staticmethod
     def _aggregate(cells: list[str], function: AggregateFunction, parameter_name: str) -> tuple[int | float | None, int, int]:

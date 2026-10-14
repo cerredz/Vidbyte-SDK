@@ -3,7 +3,7 @@
 PURPOSE: Holds PrebuiltToolSupport, the shared helpers every prebuilt tool category uses: the one argument-error builder, JSON and record parsing, exact number text, numeric text, nesting level, item capping under the character budget, paired lists, weights, dates and offsets, lines, words, sentences, syllables, CSV tables, and text encoding. Also defines the PrebuiltToolOutput and PrebuiltToolFunction type aliases.
 ROLE IN CODEBASE: Imported by the 31 category modules in vidbyte/tools/builtins/prebuilt/ and by vidbyte/tools/toolsets/prebuilt.py (for the PrebuiltToolFunction alias). Builds on vidbyte/lib/constants/prebuilt_tools.py, vidbyte/lib/enums/prebuilt_tools.py, and ToolExecutionError from vidbyte/lib/errors/.
 ARCHITECTURE NOTE: A static-method-only class (the class-bound helper pattern of vidbyte/lib/util/math.py). Each helper does one job. Helpers may call argument_error and nesting_level, which call nothing else in the class, and no other helper calls another helper, so a caller composes them: a records tool passes the value parse_json_text returns to records_from_json. Every error a helper raises is a ToolExecutionError whose message names the tool parameter the caller passed in, so FunctionTool turns it into a failure the model can act on.
-FUNCTION INVENTORY: argument_error builds the INV-15 error. parse_json_text and json_pointer_tokens read JSON input, and records_from_json checks a parsed value as a list of records. parse_integer_text, parse_decimal_text, integer_text, decimal_text, fraction_text, float_result, and parse_numeric_text convert exact and numeric text. decimal_context opens the fresh, fully specified decimal context of section 9.2 item 18. nesting_level measures container depth without recursion. cap_items applies the item cap and character budget. paired_values and weight_total check parallel lists and weights. as_utc, parse_utc_offset, and parse_date_text read times and dates. split_lines, line_and_column, split_words, split_sentences, and count_syllables implement the line, position, word, sentence, and syllable rules. parse_csv_table reads a CSV table. base64_bytes reads tolerant Base64 in a chosen or detected alphabet. parse_html feeds HTML to a parser and drops markup left open at the end before closing it. encode_text encodes text in a TextEncoding.
+FUNCTION INVENTORY: argument_error builds the INV-15 error. parse_json_text and json_pointer_tokens read JSON input, and records_from_json checks a parsed value as a list of records. parse_integer_text, parse_decimal_text, integer_text, decimal_text, fraction_text, float_result, and parse_numeric_text convert exact and numeric text. decimal_context opens the fresh, fully specified decimal context of section 9.2 item 18. nesting_level measures container depth without recursion. cap_items applies the item cap and character budget. paired_values and weight_total check parallel lists and weights. as_utc, parse_utc_offset, and parse_date_text read times and dates. split_lines, line_and_column, split_words, split_sentences, and count_syllables implement the line, position, word, sentence, and syllable rules. natural_sort_key and numeric_order implement the natural and numeric SortMode orders. parse_csv_table reads a CSV table. base64_bytes reads tolerant Base64 in a chosen or detected alphabet. parse_html feeds HTML to a parser and drops markup left open at the end before closing it. encode_text encodes text in a TextEncoding.
 COMMON MODIFICATION PATTERNS: Add a helper here only when two or more category modules need the same job; logic for one category stays in its own module. Keep every new helper free of calls to other helpers except argument_error and nesting_level.
 WHAT NOT TO DO IN THIS FILE: 1. Do not raise anything but argument_error's ToolExecutionError. 2. Do not put str(exc) or repr(exc) in a message; read structured attributes such as msg, lineno, colno, and pos. 3. Do not touch global state: no decimal.getcontext, csv.field_size_limit, or sys.set_int_max_str_digits. 4. Do not import vidbyte.tools.toolsets or anything above the tools layer.
 KNOWN EDGE CASES: Python refuses to turn text of more than 4,300 digits into an int, leading zeros included, so parse_numeric_text reads integers through their float value. A sentence terminator run is only matched at its first character, which keeps sentence splitting linear on long runs of punctuation. JSON nesting is checked after parsing, and json.loads itself raises RecursionError for extreme nesting, which is caught.
@@ -80,6 +80,10 @@ _DAY_FIRST_DATE = re.compile(r"(?P<day>\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(?P<
 _NUMERIC_DATE = re.compile(r"(?P<first>\d{1,2})(?P<separator>[/.-])(?P<second>\d{1,2})(?P=separator)(?P<year>\d{4})")
 _MONTHS_IN_YEAR = 12
 _BARE_TAG_OPENERS = frozenset({"<", "</"})
+_NATURAL_RUNS = re.compile(r"[0-9]+|[^0-9]+")
+_ASCII_DIGITS = "0123456789"
+_DIGIT_RUN_RANK = 0
+_TEXT_RUN_RANK = 1
 _BASE64_GROUP = 4
 _URL_SAFE_ALTCHARS = b"-_"
 _STANDARD_BASE64 = re.compile(r"[A-Za-z0-9+/]*")
@@ -449,6 +453,20 @@ class PrebuiltToolSupport:
                 raise PrebuiltToolSupport.argument_error(parameter_name, f"row {row_number} has {len(row)} cells but the header has {len(header)}", expected)
             padded.append(row + [""] * (len(header) - len(row)))
         return header, padded, chosen
+
+    @staticmethod
+    def natural_sort_key(text: str) -> tuple[tuple[int, int, str], ...]:
+        """Key text by its runs for the natural SortMode: a digit run by its value without leading zeros, any other run by its case fold, digits first."""
+        # A digit run compares by its length without leading zeros and
+        # then digit by digit, which is numeric order.
+        return tuple((_DIGIT_RUN_RANK, len(run.lstrip("0")), run.lstrip("0")) if run[0] in _ASCII_DIGITS else (_TEXT_RUN_RANK, 0, run.casefold()) for run in _NATURAL_RUNS.findall(text))
+
+    @staticmethod
+    def numeric_order(keyed: Sequence[tuple[int | float | None, T]], descending: bool) -> list[T]:
+        """Order the numeric SortMode way: items with a value sorted by it, stably, then the items without one in input order."""
+        valued = [(value, item) for value, item in keyed if value is not None]
+        valued.sort(key=lambda pair: pair[0], reverse=descending)
+        return [item for _, item in valued] + [item for value, item in keyed if value is None]
 
     @staticmethod
     def base64_bytes(text: str, url_safe: bool | None, parameter_name: str) -> bytes:
