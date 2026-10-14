@@ -1,6 +1,6 @@
 """FILE: vidbyte/lib/dataclasses/outputs.py
 
-PURPOSE: Defines the validated records that carry a reply's content, one delivery's outcome, one HTTP request, and one SMTP session.
+PURPOSE: Defines the validated records that carry a reply's content, one delivery's outcome, one HTTP request, the result of one HTTP read, and one SMTP session.
 ROLE IN CODEBASE: Built by the dispatcher in vidbyte/agents/output/ and the connectors in vidbyte/lib/outputs/; read by OutputDeliveryError.
 ARCHITECTURE NOTE: Frozen, slotted records that check themselves in __post_init__; sending and shaping live in the layers that use them.
 COMMON MODIFICATION PATTERNS: Add a field here with its check, then fill it in the connector or dispatcher that builds the record.
@@ -73,22 +73,38 @@ class DeliveryReceipt:
 
 @dataclass(frozen=True, slots=True)
 class OutputRequest:
-    """One HTTPS JSON POST to a destination; the URL and headers can carry the credential."""
+    """One HTTPS request to a destination, with a JSON body, exact bytes, or no body; the URL and headers can carry the credential."""
 
     url: str = field(repr=False)
     headers: Mapping[str, str] = field(repr=False)
-    json_body: Mapping[str, object] = field(repr=False)
+    json_body: Mapping[str, object] | None = field(repr=False)
     link_path: tuple[str, ...] = ()
     link_prefix: str = ""
+    content: bytes | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         _require(isinstance(self.url, str) and self.url.startswith(OUTPUT_HTTPS_PREFIX), "url", "must start with https://.")
         valid_headers = isinstance(self.headers, Mapping) and all(isinstance(key, str) and key == key.lower() and isinstance(value, str) for key, value in self.headers.items())
         _require(valid_headers, "headers", "must map lowercase string names to string values.")
-        _require(isinstance(self.json_body, Mapping), "json_body", "must be a mapping.")
+        _require(self.json_body is None or isinstance(self.json_body, Mapping), "json_body", "must be a mapping or None.")
+        _require(self.content is None or isinstance(self.content, bytes), "content", "must be bytes or None.")
+        _require(self.json_body is None or self.content is None, "json_body", "and content cannot both be set.")
         valid_path = isinstance(self.link_path, tuple) and all(_is_text(part) for part in self.link_path)
         _require(valid_path, "link_path", f"must be a tuple of non-blank strings, got {self.link_path!r}.")
         _require(isinstance(self.link_prefix, str), "link_prefix", f"must be a string, got {self.link_prefix!r}.")
+
+
+@dataclass(frozen=True, slots=True)
+class OutputRead:
+    """The result of one HTTP read: the parsed JSON, or the FAILED receipt that ends the send."""
+
+    failure: DeliveryReceipt | None = None
+    data: object = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        valid_failure = self.failure is None or (isinstance(self.failure, DeliveryReceipt) and self.failure.status is DeliveryStatus.FAILED)
+        _require(valid_failure, "failure", f"must be None or a failed DeliveryReceipt, got {self.failure!r}.")
+        _require(self.failure is None or self.data is None, "data", "must be None when failure is set.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,4 +129,4 @@ class SmtpSettings:
         _require(valid_recipients, "recipients", f"must be a non-empty tuple of email addresses, got {self.recipients!r}.")
 
 
-__all__ = ["DeliveryReceipt", "OutputContent", "OutputRequest", "SmtpSettings"]
+__all__ = ["DeliveryReceipt", "OutputContent", "OutputRead", "OutputRequest", "SmtpSettings"]
