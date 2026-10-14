@@ -18,12 +18,12 @@ started: 2026-10-13 00:45 UTC
 | S2 tests | done | 2026-10-13 11:30 UTC | 2026-10-13 16:35 UTC | reports/S2-test-author.md | S2_HEAD 1d110811 (tests 46f1a9db, proof 55f01f44, report 1d110811); 101 tests in tests/features/codex_host/, all red (`101 failed` in the [dev,codex] venv; CI view `35 failed, 66 skipped`); spec r4 38e3a820 pins the S2 spec defects; spec status: tests-written |
 | S3 implement | done | 2026-10-13 16:40 UTC | 2026-10-14 02:40 UTC | reports/S3-implementer.md | S3_HEAD 099fac83; draft PR https://github.com/cerredz/Vidbyte-SDK/pull/1055 ([WIP] title); 30 commits; 28/28 §12.3 rows; budget 18/18 files, 30/30 classes, 15/15 records, 13/13 enums, 0 deps (no headroom); pack 101 passed, CI view 35 passed / 66 skipped (orchestrator re-run); full suite 4041 passed / 22 skipped; run_ci source+package PASS; SDK-LINT PASS; semgrep 0; public API --check 0; spec status: implemented |
 | S4 adversarial review | done | 2026-10-14 02:50 UTC | 2026-10-14 04:05 UTC | reports/S4-review-conformance.md, reports/S4-review-conventions.md, reports/S4-review-engineering.md, reports/S4-findings-verifier.md, review.md | MERGEABLE AFTER FIXES; confirmed 5 Blockers (R-1..R-5) / 9 Majors (R-6..R-14) / 11 Minors (R-15..R-25, R-25 scope-adding); refuted 0; every fix within the exhausted §8.4 budget; spec status: reviewed |
-| S5 repair loop | pending | | | | |
-| S5 re-review | pending | | | | |
+| S5 repair loop | done | 2026-10-14 04:40 UTC | 2026-10-14 06:45 UTC | reports/S5-repair-1.md, verify-log.md | converged in 1 iteration at bbaa5a8b (code at fb76e558): fixed R-1..R-18 (R-12 also by spec r5 bbe9672f); 10 new tests (granted file); merge origin/main 8387d666 at fb76e558; orchestrator gate: 4117 passed, 22 skipped in 38.55s (source), Installed vidbyte-sdk 0.2.1 passed smoke checks. (package); remote ci.yml 38519843721 + static 38519846158 green on fb76e558; R-19..R-25 follow-ups |
+| S5 re-review | in progress | 2026-10-14 06:50 UTC | | reports/S5-rereview.md | |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 · S5 repair iterations: 1/8 · S5 re-review rounds: 1/2
 
 ## Parallel run
 - **Sibling pipeline:** `claude-host`, in worktree `C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-claude-host` on branch `feat/claude-host`, from the same base commit. Each run follows the shared-file contract in its request.md §C.
@@ -168,6 +168,31 @@ started: 2026-10-13 00:45 UTC
     - regression tests for R-1, R-2, R-6, R-7 and R-10.
   - Each new test must be shown failing for the right reason against the pre-fix code or its mutant, quoted in verify-log.md.
   *Why:* every row is a confirmed gap, and adding tests does not weaken the contract.
+
+- 2026-10-14 04:35 UTC — **Spec r5 spot-check passed.**
+  - bbe9672f changes only spec.md and the author report.
+  - There is no test diff.
+  - INV-21 now says a mapping `output_schema` is only parsed as JSON (D-36). EC-82 refuses an unusable schema before any request, and EC-83 records that a mapping mismatch goes undetected.
+  - Q-10 (a validator) is optional, default no. Deviation 1 is withdrawn.
+- 2026-10-14 ~05:30 UTC — **Session restart.** The orchestrator's session ended while S5 repair iteration 1 was running. The tree was clean at 8f6975e8, with R-1..R-3 committed and the granted test file +97. I resumed the same agent through SendMessage from R-4 and told it to commit each row as soon as it went green. No work was lost.
+- 2026-10-14 06:45 UTC — **S5 iteration 1 spot-check passed. The loop converged.**
+  - `git status` is clean, and HEAD equals origin at bbaa5a8b. origin/main is still 8387d666, merged at fb76e558.
+  - There are 18 fix commits (2f098372..08d498d8), one per finding, plus 5 review-status checkpoint commits.
+  - `git diff --numstat 1d110811..HEAD -- tests/features/codex_host` shows only the granted file: test_codex_host_review_gaps.py +330/-0, README.md +2/-0 and FEATURE.md +1/-0. Nothing outside codex_host differs from origin/main under tests/.
+  - The branch's own commits since 099fac83 add no file except that test file, so the budget holds.
+  - verify-log.md has "## Iteration 1". review.md marks R-1..R-18 `fixed @<sha>`, and R-19..R-25 stay open as follow-ups.
+  - The native blob hash is unchanged.
+  - My own run: pack `111 passed in 7.13s`, CI view `36 passed, 75 skipped in 1.82s`, `4117 passed, 22 skipped in 38.55s` / `CI passed.` (source), and `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` (package).
+  - Remote: ci.yml 38519843721 succeeded (Source 3.11, Source 3.12, Package) and static-policy 38519846158 succeeded, both on fb76e558. bbaa5a8b adds only docs.
+  *Why:* the skill's convergence test (DONE, my gate green, remote green, no open confirmed finding).
+- 2026-10-14 06:45 UTC — **The repair agent departed from the reviewers' wording on two fixes.**
+  - R-4: `stop` went on CodexLiveTurn, not CodexConnection, because on the connection it would form a new stop → interrupt → call chain.
+  - R-10: a set of in-flight starts on the connection, instead of keeping the registry reservation, which would have needed three release sites.
+
+  I accepted both, because the rows ask for the outcome (no helper calling a helper; a busy thread while a start is in flight), not that exact shape. The re-reviewer checks both.
+- 2026-10-14 06:50 UTC — **Final conformance re-review (round 1 of 2) launched.**
+  - FOCUS: the 18 fix commits 2f098372..08d498d8, plus the granted test file.
+  - The merge commit fb76e558 brings in main's 41 commits, which are out of scope.
 
 ## User replies (verbatim)
 - none yet
@@ -349,3 +374,8 @@ started: 2026-10-13 00:45 UTC
 - **R-8's in-budget fix.** `_reject_small_int` and `_reject_bad_seconds` in codex_host.py guard a variable named `value`, which C002 skips. They can replace the evasion shapes at host.py:346 and :495. *source:* S4 conventions.
 - **Do not change OutputSchemaFormatter.** It is shared with CodexHarnessAgent (NG-5). *source:* verifier.
 - **R-6's hidden lint findings.** The gate's "A002 IMPROVED 703 -> 607" line hides this PR's seven new A002 findings. See them with `lint/run.py --all --format json`, filtered by path. C011 is now at its baseline of 2, with no slack. *source:* S4 conventions.
+- **`PydanticUserError` subclasses RuntimeError, not TypeError,** so R-2's check catches it by name. *source:* S5 repair 1.
+- **Counting the branch's own lines after the main merge.** Two-dot `git diff origin/main -- vidbyte` shows main's newer lines as `+`. Count the branch's own lines against `git merge-base origin/main HEAD`. *source:* S5 repair 1.
+- **`W=$(pwd)` in Git Bash gives `/c/...`,** which breaks paths inside `python -c` strings. Use the `C:/...` form. *source:* S5 repair 1.
+- **Holding on a request count.** Fake hold predicates run under the fake's lock, but `server.matching()` takes no lock, so a hold can be keyed on a request count. *source:* S5 repair 1.
+- **Accepted R-1 residual.** A review that finished before registration, and whose caller is also cancelled during the read-back, stays RUNNING until close. The S4 verifier accepted this. *source:* S5 repair 1.
