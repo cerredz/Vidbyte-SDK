@@ -26,3 +26,4 @@ This folder holds the feature tests for `ClaudeHost`, the host that wraps claude
 - 2026-10-13 - Pack added red, ahead of the implementation, from spec r3 (S2 test author).
 - 2026-10-13 - Added `test_claude_host_review_gaps.py` for the S4 review findings R-1, R-2, R-3, R-5, R-6, R-7 and R-12, against spec r5 (S5 repair). The 165 earlier tests are unchanged.
 - 2026-10-14 - Added `StopInSteerWindowTests` to `test_claude_host_review_gaps.py` for review R-22, against spec r6 (S5 repair iteration 2): a caller interrupt, an `aclose` or a failed steer interrupt in the pump's yield before a steered prompt. Earlier tests are unchanged.
+- 2026-10-14 - Added `SteeredResultFieldsTests` to `test_claude_host_review_gaps.py` for review R-23, against spec r6 (S5 repair iteration 2): a steered prompt that ends before its own result shows none of the interrupted prompt's result fields. Earlier tests are unchanged.

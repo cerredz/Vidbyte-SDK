@@ -251,7 +251,7 @@ class ClaudeLiveSession:
         return False
 
     async def _take_steer(self) -> str | None:
-        """Yield once while a steer is pending, then hand it to the pump as its next prompt with its number noted as sent, or return None to end the turn."""
+        """Yield once while a steer is pending, then hand it to the pump as its next prompt with its number noted as sent and the earlier result's fields cleared, or return None to end the turn."""
         # A steer that arrived after the last result was emitted, but
         # before the pump read it, has its interrupt task scheduled
         # behind the pump. Yielding once while the message is still in
@@ -263,6 +263,10 @@ class ClaudeLiveSession:
         steer, self._steer = self._steer, None
         if steer is not None:
             self._steered = self._steers
+            # Only the steered prompt's own result is the handle's, so
+            # the interrupted prompt's result fields are cleared; the
+            # session id, the hooks flag and the cumulative cost stay.
+            self._result = replace(self._result, result_text="", structured_output=None, num_turns=None, duration_ms=None, stop_reason="", terminal_reason="", permission_denials=())
         return steer
 
     def _on_result(self, message: Any) -> bool:

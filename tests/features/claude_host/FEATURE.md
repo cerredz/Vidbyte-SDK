@@ -122,6 +122,7 @@ None yet. Add one line per fixed bug with the test that protects it.
 - R-22: a caller interrupt that landed while the pump yielded before a steered prompt could not discard the message, which went out after the stop while the steer returned None → `StopInSteerWindowTests.test_an_interrupt_in_the_steer_window_discards_the_steer`.
 - R-22: an `aclose` whose session close landed in that same pass also let the steered prompt go out after the stop → `StopInSteerWindowTests.test_an_aclose_in_the_steer_window_discards_the_steer`.
 - R-22: a steer whose own interrupt raised in that pass could not withdraw its unsent message, which went out anyway → `StopInSteerWindowTests.test_a_failed_steer_interrupt_in_the_window_withdraws_the_message`.
+- R-23: a steered prompt that ended before its own result published the interrupted prompt's text, structured output, turn count, duration, stop and terminal reasons and permission denials → `SteeredResultFieldsTests.test_a_steered_prompt_without_its_own_result_shows_no_earlier_result_fields`.
 
 ## Test Suite Map
 
@@ -204,6 +205,7 @@ None yet. Add one line per fixed bug with the test that protects it.
   - a steer whose interrupt fails (§12.3 row 7, INV-18);
   - a cancelled `aclose` (INV-8, D-4).
   - a stop or a failed steer interrupt while the pump yields before a steered prompt (INV-18, §9.2 steer row).
+  - a steered prompt's snapshot without the interrupted prompt's result fields (D-3).
 - `claude_host_fixtures.py`: the fake SDK, the message factories, the history fakes, `TicketTool` and the `ClaudeHostCase` base class.
 
 Run `PYTHONPATH=$(pwd) python -m pytest tests/features/claude_host` from the worktree root.

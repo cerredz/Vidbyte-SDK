@@ -352,5 +352,26 @@ class StopInSteerWindowTests(ReviewGapCase):
         self.assertEqual((result.status.value, result.result_text), ("completed", "The first answer."))
 
 
+class SteeredResultFieldsTests(ReviewGapCase):
+    """D-3 (review R-23): a steered prompt that ends before its own result publishes none of the interrupted prompt's result fields."""
+
+    async def test_a_steered_prompt_without_its_own_result_shows_no_earlier_result_fields(self) -> None:
+        # The interrupted prompt's result fills every result field, and
+        # the steered prompt's output ends before its own result.
+        denial = {"tool_name": "Bash", "tool_use_id": "toolu_01", "tool_input": {"command": "git push"}}
+        self.fake.interrupt_reply = lambda: result_message(result="The parser bug is fixed.", structured_output={"summary": "Parser fixed."}, permission_denials=[denial], total_cost_usd=0.008)
+        self.fake.reply(STEER_MESSAGE, init_message(), END_OF_STREAM)
+        host = await self.open_host()
+        handle, client = await self.running_turn(host)
+        await asyncio.wait_for(host.steer_claude_session(handle, STEER_MESSAGE), HANG_GUARD_SECONDS)
+        result = await self.finished(host, handle)
+        self.assertEqual(client.queries, [DEFAULT_PROMPT, STEER_MESSAGE])
+        self.assertEqual(result.failure.code.value, "claude.process_exited", result.failure.reason)
+        fields = (result.result_text, result.structured_output, result.num_turns, result.duration_ms, result.stop_reason, result.terminal_reason, result.permission_denials)
+        self.assertEqual(fields, ("", None, None, None, "", "", ()))
+        # The cost is cumulative, so the interrupted prompt's figure stays.
+        self.assertEqual(result.total_cost_usd, 0.008)
+
+
 if __name__ == "__main__":
     unittest.main()
