@@ -391,7 +391,12 @@ class FailureRouter:
         # The same exception object reaches both the agent and the Session boundary, so it must record once;
         # id() is only a memory address that CPython reuses once an earlier exception is freed, which made a
         # new, unrelated exception match an old record and skip both the ledger and its handler. The failure
-        # id is therefore tagged onto the exception object itself, so only that very object (or one chained to it) matches.
+        # id is therefore tagged onto the exception object itself, so only that very object, or an exception that
+        # explicitly wraps it (`raise ... from`), matches.
+        # @intent later-failure-is-not-its-handled-context
+        # Python sets __context__ on any exception raised while another is handled, so following it would merge a later,
+        # independent failure (e.g. a retry inside `except`) into the earlier record and skip its handler; the SDK's own
+        # wrapper between the agent and Session boundaries uses `from exc`.
         tagged_ids = self._tagged_failure_ids(exc)
         existing = next((failure for failure in reversed(self._history) if failure.id in tagged_ids), None)
         if existing is not None:
@@ -403,7 +408,7 @@ class FailureRouter:
 
     @classmethod
     def _tagged_failure_ids(cls, exc: BaseException) -> set[str]:
-        # Collect the failure ids tagged onto the exception and its __cause__/__context__ chain.
+        # Collect the failure ids tagged onto the exception and its explicit __cause__ chain (never implicit __context__).
         tagged: set[str] = set()
         seen: set[int] = set()
         current: BaseException | None = exc
@@ -411,7 +416,7 @@ class FailureRouter:
         while current is not None and id(current) not in seen:
             seen.add(id(current))
             tagged.update(getattr(current, cls._FAILURE_IDS_ATTRIBUTE, ()))
-            current = current.__cause__ or current.__context__
+            current = current.__cause__
         return tagged
 
     @classmethod

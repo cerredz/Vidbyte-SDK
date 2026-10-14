@@ -101,6 +101,10 @@ class _FailingRunner:
         raise RuntimeError("runner failed")
 
 
+class _DeskError(Exception):
+    """Caller-owned error that re-raises an SDK failure the way application code wraps it."""
+
+
 class _RefundCallRunner:
     """Offline runner that asks for one refund tool call, then finishes."""
 
@@ -180,6 +184,37 @@ class FailureContractsTests(unittest.TestCase):
         self.assertIs(router.capture_exception(original, source="session"), first)
         self.assertIs(router.capture_exception(wrapper, source="session"), first)
         self.assertEqual(len(router.history()), 6)
+
+    def test_capture_exception_records_failure_raised_while_handling_another(self) -> None:  # [Silent Failure]
+        # @intent later-failure-is-not-its-handled-context
+        # Verify a new exception raised inside an except block gets its own record, while an explicit wrapper still records once.
+        router = FailureRouter(object())
+        first_exc = RuntimeError("turn 1")
+        first = router.capture_exception(first_exc)
+        try:
+            raise first_exc
+        except RuntimeError:
+            try:
+                raise RuntimeError("turn 2")
+            except RuntimeError as second_exc:
+                second = router.capture_exception(second_exc)
+        self.assertIsNot(second, first)
+        self.assertEqual(len(router.history()), 2)
+        try:
+            try:
+                raise _DeskError("desk failed") from first_exc
+            except _DeskError:
+                raise RuntimeError("turn 3")
+        except RuntimeError as third_exc:
+            third = router.capture_exception(third_exc)
+        self.assertIsNot(third, first)
+        self.assertIsNot(third, second)
+        self.assertEqual(len(router.history()), 3)
+        try:
+            raise RuntimeError("session wrapper") from first_exc
+        except RuntimeError as wrapper:
+            self.assertIs(router.capture_exception(wrapper), first)
+        self.assertEqual(len(router.history()), 3)
 
     def test_disabled_router_does_not_record(self) -> None:  # [Hidden Assumption]
         # Verify disabled instrumentation has no policy side effects.
@@ -453,6 +488,30 @@ class SessionFailureIntegrationTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(AgentExecutionError):
             await agent.arun("work")
         self.assertEqual(session.failures.history()[0].code, FailureCode.RUNTIME_ERROR)
+
+    async def test_turn_failing_inside_except_of_earlier_turn_routes_again(self) -> None:  # [Hidden Failure]
+        # @intent later-failure-is-not-its-handled-context
+        # Verify a fallback turn run inside the except block of a failed turn gets its own record and handler call.
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=_FailingRunner())
+        session = Session(agent)
+        calls: list[str] = []
+
+        class Handler:
+            name = "counter"
+            on_error = "closed"
+
+            def recover(self, failure, *, session):
+                calls.append(failure.id)
+                return RecoveryResult(True)
+
+        session.failures.on(FailureCode.RUNTIME_ERROR, Handler())
+        with self.assertRaises(AgentExecutionError):
+            try:
+                await session.arun("first question")
+            except AgentExecutionError:
+                await session.arun("simpler question")
+        self.assertEqual(len(session.failures.history()), 2)
+        self.assertEqual(len(set(calls)), 2)
 
     async def test_in_loop_raise_rule_surfaces_typed_error(self) -> None:  # [Hidden Failure]
         # @intent raise-disposition-reaches-the-caller
