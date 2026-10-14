@@ -77,6 +77,9 @@ class WebhookOutput(BaseOutput):
         # A payload that is not a JSON object fails only this output.
         if not isinstance(body, Mapping):
             raise TypeError(f"payload must return a mapping, got {type(body).__name__}.")
+        # Any mapping, not only a dict, is copied into a plain dict,
+        # which JSON can encode.
+        body = dict(body)
         # Without a secret, the JSON goes out as today, with the fixed
         # headers.
         if self._key is None:
