@@ -20,7 +20,7 @@ started: 2026-10-14 02:46
 | S1 spec + review | done | 03:25 | 07:40 | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | spec r3 approved; r1 review SOUND WITH FIXES (12 applied), r2 review SOUND WITH FIXES (10 applied); 265 tools |
 | S2 tests | done | 07:45 | 08:45 | reports/S2-test-author.md | 4,284 cases / 101 test fns in tests/features/prebuilt_tools/ (26 files); red: 102 failed, 4182 errors; tightened to r4 (f49db5db): 102 failed, 4208 errors, 0 passed; S2_HEAD bc238128 | | |
 | S3 implement | done | 10:05 | 14:30 | reports/S3-implementer.md | S3_HEAD 0fd73086; draft PR #1072; 39/39 planned files, 0/12 split modules; pack 4310 passed; source + package stages CI passed | | |
-| S4 adversarial review | running | 14:40 | | | |
+| S4 adversarial review | done | 14:40 | 16:10 | reports/S4-review-*.md, reports/S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES — 14 confirmed (8 Blocker / 6 Major), 5 Minor, 1 refuted, 1 downgraded | | |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
@@ -49,6 +49,8 @@ started: 2026-10-14 02:46
 - 2026-10-14 — S2 test author applied the granted intersect_lists fix (0708d57d): nested-list shape `TextListsShape`; mutant-checked; pack now 4310 passed, 0 failed against the S3 code. Test baseline moved from bc238128 to 69a1970a (granted change). Noted gap left as-is (not granted): flat-list minItems (e.g. greatest_common_divisor.values len 2..) not checked by the schema test.
 - 2026-10-14 — S3 spot-check passed (clean tree; 50 feature commits all cite W-/R- IDs; test diff vs 69a1970a empty; draft PR #1072 `[WIP]`; frontmatter implemented + pr; pushed; my rerun of the pack: 4310 passed in 21.16s).
 - 2026-10-14 — Remote CI: every workflow in .github/workflows has automatic triggers TEMPORARILY DISABLED (workflow_dispatch only; claude.yml fires on reviews/comments). `gh pr checks` reports no checks. Decided NOT to dispatch CI manually (the owner disabled it deliberately; dispatching is an outward action not requested). Verification of record = the local gate (identical scripts/run_ci.py source + package stages) + semgrep 1.170.1 (CI's pinned version). Will state this in the PR body and final report.
+- 2026-10-14 — S4 verifier confirmed 14 findings (R-1..R-14). Several need spec edits first (R-7 new xml match cap A.20; R-9 apply_json_patch total-work cap A.17; R-8 HTMLParser CVE-2025-6069 handling A.13/A.28/README; R-10 cap-or-EC decision; R-12 fresh decimal Context rule) and regression tests that only the S2 test author may write (R-14 and per-finding cases). Ordering S5 as TDD: (1) spec author r6 for spec-affecting findings, (2) S2 test author adds failing regression cases, (3) repair iteration 1 makes them green. These pre-steps do not count as repair iterations.
+- 2026-10-14 — Adjudicated the R-14 liveness-guard question (test-plan rule 3, no wall-clock dependence): ALLOWED a generous thread-join watchdog (~30 s, about 15× NFR-7) for hostile-input regression cases only, sized so fixed code runs well under 1 s; it converts a hang into a red test and asserts no speed. Exact-output regression cases are required alongside it.
 
 ## User replies (verbatim)
 - none
@@ -137,3 +139,5 @@ started: 2026-10-14 02:46
 - `_support.parse_json_text` (lines ~80–120) already has the float guard (`_read_json_float` via functools.partial); reuse it for `JSONDecoder` in extract_json_from_text and in verify_json_syntax — *source:* S4 conformance
 - Reviewer probe harnesses live OUTSIDE the worktree under the session scratchpad (`s4e/` sweep); use `python -u` so output survives `timeout`; Git Bash collapses `\` — use `chr(92)` in Python probes — *source:* S4 reviewers
 - C006/C008 flag helper name prefixes validate/require/ensure/normalize/coerce/check; C005 flags names containing 'price'/'rate' in multiplication (`_PRICE_MARKERS` in lint/rules/c005_cost_arithmetic_site_parity.py) — *source:* S4 conventions
+- R-2 fix trap: the reviewers' lookbehind in front of the whole `_AMOUNT` drops comma lists ('1,2,3' → only '1'); guard only the grouped-chain alternative. R-6 must also cover TOML inline tables `x={a.a…=1}`. R-5 and Minor M-1 share one `parse_float` hook. R-12's `decimal_context` helper replaces `_exact_context` copies in exact_arithmetic.py:284 and number_formatting.py:281 (overlaps R-13) — *source:* S4 verifier
+- New PREBUILT_* constants for R-7/R-9 must avoid A007 tokens `budget`, `limit`, `depth` in their names — *source:* S4 verifier
