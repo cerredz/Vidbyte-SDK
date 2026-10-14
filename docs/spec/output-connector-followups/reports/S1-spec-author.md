@@ -150,3 +150,27 @@ The review found 0 Blocker, 3 Major, and 5 Minor issues. All eight are accepted.
 - **R-8 (Minor), accepted.** `signing_key` requires 24–64 decoded bytes, using `WEBHOOK_KEY_MIN_BYTES` and `WEBHOOK_KEY_MAX_BYTES`. D-5, AC-14, §8.5, and §9.2(b) are updated. The §4 example key decodes to 24 bytes.
 
 Self-check rerun: 18 `## §` headings; INV-1…18, EC-1…45, Q-1…8, AC-1…36, and FR-1…35 have no gaps; every referenced ID is defined; D-24 is still Google Chat. No blocking questions.
+
+## Revision r3 addendum (S1 review round 2, final)
+
+The review found 1 Blocker, 2 Major, and 7 Minor issues, none scope-adding. All ten are accepted; R-17 uses a variant that has the same effect. Every finding is recorded in spec §16, and §17 has an r3 row. The frontmatter is now `status: approved`, `revision: 3`.
+
+- **R-9 (Blocker), accepted.** `OutputHttp._error_code` and `_link` move unchanged into a static `OutputResponses` class in `delivery.py` (the D-23 pattern), so `post`/`patch` → `_write` stays one level deep. The class budget goes from 11 to 12; new files stay at 7. Changed D-2, §8 intro, §8.2, §8.4, §8.5, §11, row 6 (now cites Style 1), §5, and §13.
+- **R-10 (Major), accepted.** INV-18 also turns every `![` into `!［` (U+FF3B, one code point, so the length is unchanged), using `TELEGRAM_MEDIA_PREFIX` and `TELEGRAM_MEDIA_REPLACEMENT`. Only two characters ever change: every `<` becomes U+FF1C, and every `[` directly after `!` becomes U+FF3B. EC-44 now gives literal text. AC-5, D-8, FR-8, §9.2, T-2(c), A-4, the row 11 `@intent`, and the README are updated.
+- **R-11 (Major), accepted.** D-9 rule: when `OutputText.first_line(body) == title`, drop the lines through that first non-blank line, then leading blank lines; otherwise keep the body unchanged. AC-7 has three cases. In §13, the Teams `WIRE_ROWS` body block is exactly `BODY`, and `CAPPED["teams"]` is `(7_000, body[1].text, False)`.
+- **R-12 (Minor), accepted.** The rule is kept. D-8 and the README footgun state its cost. L-2 adds a probe reply. The tag-start rule `<(?=[A-Za-z/!?])` is recorded as the D-8 runner-up, to be decided by L-2.
+- **R-13 (Minor), accepted.** In D-10, a loose list stays one list, and a line made only of `-`, `*`, `_`, and spaces is a paragraph (`ADF_BREAK_PATTERN`). AC-8 gains both cases.
+- **R-14 (Minor), accepted.** HubSpot `hs_timestamp` uses `unittest.mock.ANY`, with its format asserted separately. Confluence compares `json.loads(value)`. `agent_wiring.py:62` moved to "still passes", and the parametrization names are corrected.
+- **R-15 (Minor), accepted.** Row 29 edits the README Deadline footgun (:140-148: adds `file_error` and the job-summary-after-deadline case). The two repeated footguns become edits of :115-116 and :119-120. EC-46 is added.
+- **R-16 (Minor), accepted.** Row 30 now cites EC-45 and drops the count, which does not exist. Because of that, FR-5 no longer lists row 30, row 30 serves W-15 and W-21, and row 7 gains W-3. NFR-7 now says the timeout is per phase. §8.2 lists Slack and Telegram as the fullwidth cases and the GitHub marker separately.
+- **R-17 (Minor), accepted with a variant.** The port in `GITLAB_HOST_PATTERN` is now `[1-9][0-9]{0,4}`, which refuses `0` and leading zeros. `gitlab.py` then reads `urlsplit("https://" + host).port`, which raises above 65,535. The result equals the reviewer's "None or 1–65535" without a numeric literal (A007). EC-27 gains the bad hosts, and the README says "dashed UUID".
+- **R-18 (Minor), accepted.** An invalid header name is reported only by its position, and a non-mapping `headers` only by its type name. AC-10 adds the `S3CRET` inputs. INV-11, T-1, NFR-5, D-26, §8.5, and §9.2(b) are updated.
+- **Lint.** NFR-6, §12.4, and §12.5 name the seven rules that have room: A002, S061, S001, S017, S025, C011, and C012. S054 has no room; S010 does not cover outputs.
+
+**Final sweep, as checked by script:**
+- 18 `## §` headings. FR 35, NFR 10, AC 36, EC 46, D 26, Q 8, INV 18, A 18, L 15, T 6, W 22, with no gaps; every referenced ID is defined.
+- The §4 names and keyword arguments match §8.5, and every §8.5 helper is in §12.3.
+- 7 CREATE rows equal the 7-file budget.
+- Every FR maps to a row through W. FR-34 is the exception: it is covered by a new cross-cutting §C traceability row. Row 6 gains W-11, and row 29 gains W-19 and W-21.
+- The regexes pass their stated examples, including the new port and break cases.
+- No stale r1 or r2 phrasing remains.
