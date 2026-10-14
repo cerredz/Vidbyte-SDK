@@ -4,7 +4,7 @@ PURPOSE: Prove GitHub update-in-place: a sticky comment found by its marker acro
 ROLE IN CODEBASE: Contract tests of vidbyte/lib/outputs/github.py with github_api.py (GitHubRequests, GitHubResponses), OutputHttp.read and OutputHttp.patch in vidbyte/lib/outputs/delivery.py, and OutputRequest and OutputRead in vidbyte/lib/dataclasses/outputs.py, against docs/spec/output-connector-followups/spec.md §8.5 and §9.2.
 ARCHITECTURE NOTE: Most tests script HttpTransport._send_once (fake_http) and assert the ordered (method, URL) list it recorded. The size-ceiling, redirect, and log tests keep the real _send_once over httpx.MockTransport (httpx_destination), whose route here is a callable that answers a GET and a PATCH differently.
 FUNCTION INVENTORY: test_sticky_* (AC-27, AC-29, D-15, EC-39); test_marker_* (D-14, D-16, AC-31, FR-33); test_read_failure_* (AC-28, INV-1); test_keyed_issue_* (AC-30, FR-32); test_invalid_key_or_comment_on_* (AC-32); test_reads_and_patches_* (AC-33, INV-4, D-22, EC-40); test_output_http_* (FR-30); test_output_request_* and test_output_read_* (§9.1); _wire, _page, _network_error.
-COMMON MODIFICATION PATTERNS: Add a read outcome as one READ_FAILURES row; add a marker case as one MARKER_CASES row with the write it must cause.
+COMMON MODIFICATION PATTERNS: Add a read outcome as one READ_FAILURES row, and a failure of a later page's read as one LATER_PAGE_FAILURES row; add a marker case as one MARKER_CASES row with the write it must cause.
 WHAT NOT TO DO IN THIS FILE: 1. Do not answer the comments-page fragment and the edit fragment with one route: "/issues/412/comments" is not part of "/issues/comments/99", and the POST to "/issues/412/comments" has no "?". 2. Do not assert the order of keys inside a JSON body; compare whole values.
 KNOWN EDGE CASES: The fake returns headers={} on every response, so paging can only stop on a short page or after 10 pages (D-15). A 500 on a read is not retried, unlike the transport default, because reads retry only 429 (INV-4). The 16,000,001-byte page is not valid JSON, so a read with no ceiling would answer invalid_response instead of network.
 RELATED DOCS: tests/features/agent_output_connectors/FEATURE.md; docs/spec/output-connector-followups/spec.md (§6.2 AC-27 to AC-33; §6.3 EC-35 to EC-40; §8.1 D-14 to D-16, D-22; §8.5 pseudocode; §9.1; §13)
@@ -228,6 +228,29 @@ async def test_read_failure_is_that_reads_receipt_and_nothing_is_written(output_
 
     assert receipt_rows([receipt]) == [("github_issue", "failed", None, error_code)]
     assert [method for method, _ in _wire(fake_http)] == ["GET"] * reads
+
+
+LATER_PAGE_FAILURES = [
+    pytest.param((500, ""), "http_500", id="500"),
+    pytest.param(_network_error(), "network", id="network"),
+    pytest.param((200, "<html>rate limited</html>"), "invalid_response", id="non-json"),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("failure", "error_code"), LATER_PAGE_FAILURES)
+async def test_read_failure_on_a_later_page_is_that_reads_receipt_and_nothing_is_written(output_api, fake_http, failure, error_code) -> None:
+    # AC-28 / INV-1 / R-5: page 1 is full, so page 2 is read; a
+    # failure there ends the send with no write, not a POST as if
+    # the list had ended. The POST is answered so that a wrong
+    # write shows on the wire instead of raising.
+    fake_http.answer(READ_FRAGMENT, _page(1001), failure)
+    fake_http.answer("/issues/412/comments", POSTED)
+
+    receipt = await _send(output_api, _sticky(output_api))
+
+    assert receipt_rows([receipt]) == [("github_issue", "failed", None, error_code)]
+    assert _wire(fake_http) == [("GET", _page_url(1)), ("GET", _page_url(2))]
 
 
 # --- One issue per key -----------------------------------------------------

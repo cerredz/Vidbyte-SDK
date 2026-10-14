@@ -236,6 +236,13 @@ async def test_telegram_sends_rich_markdown_with_no_html_tag_and_no_media_block(
         pytest.param("!![x](https://e.com/a.png)", "!!［x](https://e.com/a.png)", id="double-bang"),
         pytest.param("! [x](https://e.com/a.png)", "! [x](https://e.com/a.png)", id="bang-space-untouched"),
         pytest.param("[Ann](tg://user?id=42) costs $5 and $10", "[Ann](tg://user?id=42) costs $5 and $10", id="mention-and-dollars-untouched"),
+        # R-1 / INV-18: several blocks and tags in one reply, so a
+        # replacement of only the first one fails.
+        pytest.param(
+            "<b>one</b> ![a](https://x/1.png) text ![b](https://x/2.png) and ![c][ref]",
+            "＜b>one＜/b> !［a](https://x/1.png) text !［b](https://x/2.png) and !［c][ref]",
+            id="every-media-block-and-tag",
+        ),
     ],
 )
 async def test_telegram_neutralization_changes_only_tag_starts_and_media_brackets(output_api, fake_http, text, expected) -> None:
