@@ -16,8 +16,8 @@ started: 2026-10-13 00:45 UTC
 | S0 worktree + capture + recon | done | 2026-10-13 00:45 UTC | 2026-10-13 01:27 UTC | reports/S0-scout.md | base_commit 678136bd; code-map.md, 4 sections |
 | S1 spec + review | done | 2026-10-13 01:35 UTC | 2026-10-13 11:25 UTC | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | spec r3 81a71d00, status: approved; 2 review rounds (SOUND WITH FIXES ×2), 18 findings applied, 0 disputed |
 | S2 tests | done | 2026-10-13 11:30 UTC | 2026-10-13 16:35 UTC | reports/S2-test-author.md | S2_HEAD 1d110811 (tests 46f1a9db, proof 55f01f44, report 1d110811); 101 tests in tests/features/codex_host/, all red (`101 failed` in the [dev,codex] venv; CI view `35 failed, 66 skipped`); spec r4 38e3a820 pins the S2 spec defects; spec status: tests-written |
-| S3 implement | in progress | 2026-10-13 16:40 UTC | | reports/S3-implementer.md | |
-| S4 adversarial review | pending | | | | |
+| S3 implement | done | 2026-10-13 16:40 UTC | 2026-10-14 02:40 UTC | reports/S3-implementer.md | S3_HEAD 099fac83; draft PR https://github.com/cerredz/Vidbyte-SDK/pull/1055 ([WIP] title); 30 commits; 28/28 §12.3 rows; budget 18/18 files, 30/30 classes, 15/15 records, 13/13 enums, 0 deps (no headroom); pack 101 passed, CI view 35 passed / 66 skipped (orchestrator re-run); full suite 4041 passed / 22 skipped; run_ci source+package PASS; SDK-LINT PASS; semgrep 0; public API --check 0; spec status: implemented |
+| S4 adversarial review | in progress | 2026-10-14 02:50 UTC | | reports/S4-review-conformance.md, reports/S4-review-conventions.md, reports/S4-review-engineering.md, reports/S4-findings-verifier.md | |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
@@ -112,6 +112,30 @@ started: 2026-10-13 00:45 UTC
   - The test author covered INV-11 through spawn and review (AC-32), following the doctrine's "single test per inventory entry".
   - The two tests it flagged as able to pass without exercising their case (the EC-78 queued start, and the goal update after completion with its 0.2 s wait) go to S4 as well.
   *Why:* S4 engineering exists to find "plausible bugs no test catches". Reopening S2 would delay S3 for a path that shares the spawn mechanism. If S4 confirms a defect, the test change goes to the test author then.
+
+- 2026-10-13/14 — **Two more HTTP 429 session-limit interruptions hit the S3 implementer.**
+  - The first came at about 18:20 UTC, at e0187887 with a clean tree.
+  - The second came at about 22:30 UTC. HEAD was still e0187887, with about 74 KB of `vidbyte/harnesses/native/codex/` files untracked and not committed.
+  - Each time, after the reset, I checked the tree, an empty test diff since 1d110811 and the native blob hash. I resumed the same agent through SendMessage, at 20:32 UTC and at 01:41 UTC. On the second resume I told it to commit each row as soon as it went green.
+  - No work was lost.
+- 2026-10-14 02:40 UTC — **S3 spot-check passed.**
+  - `git status --porcelain` is empty.
+  - There are 30 commits since 51dd290b. Every code commit cites W-/FR-/AC- ids, and the three `docs(spec)` commits need none.
+  - `git diff 1d110811..HEAD --stat -- tests/` is empty.
+  - I re-ran the pack: `101 passed in 7.40s`. The CI view (`sys.modules['openai_codex']=None`) gave `35 passed, 66 skipped in 2.12s`.
+  - `gh pr view` shows draft PR #1055, title "[WIP] feat(harnesses): add CodexHost with one agent tool per Codex function", head 099fac83.
+  - The spec reads `status: implemented` with `pr:` set, and the native blob hash 0374a2c8… is correct.
+  *Why:* the S3 spot-check rule.
+- 2026-10-14 02:42 UTC — **Dispatched remote CI on 099fac83:** ci.yml run 38500042527 and static-policy.yml run 38500046011.
+- 2026-10-14 02:50 UTC — **Chose the S4 focus for each lens.**
+  - Conformance: the request.md §D weighted words, AC-1 (run against the fakes only, because a live run spends the user's plan, NG-13) and the two deviations.
+  - Conventions: the spec §11 field-guide entries, the §12.4 obligations and the two C002 workaround shapes.
+  - Engineering:
+    - INV-11 late acceptance on goal start (`cancel_goal_operation` exactly once), continue and launch, which no test covers (logged at S2);
+    - the weak tests: the EC-78 queued start, and goal update-after-completion with its 0.2 s wait;
+    - the riskiest test, `test_codex_host_turns.py::test_the_output_cap_counts_only_the_turns_own_tokens_and_interrupts_once`;
+    - the race paths the implementer is least sure of: `connection.py` start/_hand_over/_post_late, `host.py` `__aexit__`, `_on_death`'s reap and `CodexToolScope.reserve`.
+  *Why:* the S2 routing decisions and the implementer's "Tricky parts".
 
 ## User replies (verbatim)
 - none yet
@@ -270,3 +294,10 @@ started: 2026-10-13 00:45 UTC
   - D-34: `limit_reached` comes from `GetAccountRateLimitsResponse.rate_limits.rate_limit_reached_type`, which is optional, or `""`.
   - D-35: a late-acceptance interrupt records no stop reason, so the turn ends INTERRUPTED with `problem=None`, and a later timeout or cap adds no label and sends no second interrupt.
   *source:* spec r4.
+- **No budget headroom.** The §8.4 budget is used exactly: 18 files, 18 modules, 30 classes, 15 records, 13 enums and 0 dependencies. Any S4/S5 fix that adds a class, record, file or enum goes over it, and needs a spec revision or a deviation. *source:* S3 implementer.
+- **Run the ruff I001 fixer on explicit file paths only.** Run on a directory, it rewraps imports in untouched files; it hit `toolsets/paradigm_minimal.py`. *source:* S3 implementer.
+- **IMPROVED is not a reason to lower the baseline.** The lint prints IMPROVED for A002 (703→607), C012, S001, S010 and S025. The baseline stays untouched (request.md §C). *source:* S3 implementer.
+- **Comparing the shared texts.** Working copies are CRLF and blobs are LF. Compare the REPO_MAP and README fixed texts against `git show HEAD:<path>`. *source:* S3 implementer.
+- **The tool cap check.** `CodexToolScope.reserve` refreshes the live handles through `get_codex_turn_result`, which only reads locally, then checks and reserves with no await in between (INV-32). Cancellation frees the slot in the callers' `finally`. *source:* S3 implementer.
+- **Running the pack from outside the worktree.** Use `PYTHONPATH=$W $PY -P -m pytest $W/tests/features/codex_host -q -p no:cacheprovider --rootdir=$W -c $W/pyproject.toml`. Without `-P` and `--rootdir`, the cwd's `tests` package shadows `tests.features.codex_host`. *source:* orchestrator.
+- **Drift from main.** The branch is 41 commits behind origin/main (8387d666), and `git merge-tree` is clean. In this area main touched only `vidbyte/harnesses/stores/file.py`. Catch up by merge, never rebase, in S5. *source:* S3 implementer.
