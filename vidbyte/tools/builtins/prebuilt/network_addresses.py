@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Everything is computed with the standard ipaddress module, wi
 FUNCTION INVENTORY: verify_ip_address, cidr_network_details, ip_in_networks, split_cidr_into_subnets, ip_range_to_cidrs, classify_ip_address, convert_ip_address_integer, and convert_ipv4_netmask are the tools; _ipv4_problem finds the first failing IPv4 rule; _read_address and _read_network parse an address or network and name the parameter on failure; tool_functions lists the tools in catalogue order.
 COMMON MODIFICATION PATTERNS: A new network tool adds a static method with a 4 to 5 sentence description, its row in the spec's Appendix A.31, and its entry in tool_functions. A new IPv4 validation reason adds an IpAddressProblem member and its check in _ipv4_problem, in the order the row gives.
 WHAT NOT TO DO IN THIS FILE: 1. Do not resolve host names or open sockets; only address text is read. 2. Do not put an ipaddress exception message into an error; write the problem in the tool's own words. 3. Do not enumerate subnets or addresses to count them; compute counts from prefix lengths.
-KNOWN EDGE CASES: The is_private, is_global, and is_reserved flags, and the text of an IPv4-mapped IPv6 address, follow the running Python's tables, which change between releases (EC-26). IPv6 hosts skip only the subnet-router anycast address, so an IPv6 network has one fewer usable host than addresses. An IPv6 address may carry a zone suffix, which its text forms keep.
+KNOWN EDGE CASES: The is_private, is_global, and is_reserved flags, and the text of an IPv4-mapped IPv6 address, follow the running Python's tables, which change between releases (EC-26). IPv6 hosts skip only the subnet-router anycast address, so an IPv6 network has one fewer usable host than addresses. An IPv6 address may carry a zone suffix, which its text forms keep; the standard library raises when it explodes such an address, so verify_ip_address explodes the address without its zone and appends the zone.
 RELATED DOCS: docs/spec/prebuilt-agent-tools/spec.md (Appendix A.31, section 9.2 items 5, 12, and 13, EC-26); vidbyte/tools/builtins/prebuilt/README.md
 TESTS: tests/features/prebuilt_tools/test_prebuilt_rows_code_network.py and the catalogue-wide tests in tests/features/prebuilt_tools/
 """
@@ -74,7 +74,13 @@ class NetworkAddressesToolFunctions:
             if problem is not None:
                 return {"valid": False, "version": None, "compressed": None, "exploded": None, "reason": problem.value}
             parsed = ipaddress.IPv4Address(address)
-        return {"valid": True, "version": parsed.version, "compressed": parsed.compressed, "exploded": parsed.exploded, "reason": None}
+        # The standard library cannot explode an IPv6 address with a
+        # zone, so the address is exploded without it and the zone is
+        # added back.
+        exploded = type(parsed)(int(parsed)).exploded
+        if isinstance(parsed, ipaddress.IPv6Address) and parsed.scope_id is not None:
+            exploded = f"{exploded}%{parsed.scope_id}"
+        return {"valid": True, "version": parsed.version, "compressed": parsed.compressed, "exploded": exploded, "reason": None}
 
     @staticmethod
     def cidr_network_details(
