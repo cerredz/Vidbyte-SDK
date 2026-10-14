@@ -138,5 +138,70 @@ class CodexHostCloseCancellationTests(HostTestCase):
         await self.wait_until(lambda: self.server.closed == 1, "the client to close")
 
 
+@requires_sdk
+class CodexHostInFlightStartTests(HostTestCase):
+    """R-10, INV-24, INV-11 and EC-36: a start still in flight after its caller left keeps its thread busy."""
+
+    async def test_a_continue_whose_start_is_in_flight_keeps_the_thread_busy_until_it_lands(self) -> None:
+        from vidbyte.lib.dataclasses.codex_host import CodexTurnHandle
+        from vidbyte.lib.errors import CodexAgentError
+
+        host = await self.open_host()
+        seeded = self.server.seed_thread(completed_turns=1)
+        start = self.server.hold("turn/start")
+        first = asyncio.ensure_future(host.continue_codex_thread(seeded.thread_id, "Fix the failing test."))
+        await asyncio.to_thread(start.wait_arrived)
+        first.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await asyncio.wait_for(first, WAIT_SECONDS)
+        # The retry runs as a task, because openai-codex would queue its turn/start behind the held one.
+        second = asyncio.ensure_future(host.continue_codex_thread(seeded.thread_id, "Fix the failing test."))
+        await asyncio.wait({second}, timeout=WAIT_SECONDS)
+        self.assertEqual(self.count("thread/resume"), 1)
+        self.assertTrue(second.done())
+        refused = second.exception()
+        self.assertIsInstance(refused, CodexAgentError)
+        assert isinstance(refused, CodexAgentError)
+        self.assertEqual(refused.failure_code, "codex.session_busy")
+        # Once the held start lands, its turn is owned and stopped, and the thread is free again.
+        start.release()
+        late = await self.wait_for_request("turn/interrupt", lambda params: params["threadId"] == seeded.thread_id)
+        snapshot = await self.wait_done(host, CodexTurnHandle(thread_id=seeded.thread_id, turn_id=late.params["turnId"]))
+        self.assert_problem(snapshot, "interrupted", None)
+        handle = await asyncio.wait_for(host.continue_codex_thread(seeded.thread_id, "Fix the failing test."), WAIT_SECONDS)
+        self.assertEqual(handle.thread_id, seeded.thread_id)
+        self.assertEqual(self.count("turn/start"), 2)
+
+    async def test_a_failed_in_flight_start_frees_its_thread_when_it_returns(self) -> None:
+        from vidbyte.lib.errors import CodexAgentError
+
+        host = await self.open_host()
+        seeded = self.server.seed_thread(completed_turns=1)
+        start = self.server.hold("turn/start")
+        self.server.fail("turn/start", self.fakes.FakeRpcError(-32603, "Codex could not start the turn."), times=1)
+        first = asyncio.ensure_future(host.continue_codex_thread(seeded.thread_id, "Fix the failing test."))
+        await asyncio.to_thread(start.wait_arrived)
+        first.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await asyncio.wait_for(first, WAIT_SECONDS)
+        start.release()
+        await asyncio.to_thread(start.wait_responded)
+        # The failed start accepted nothing, so its thread frees once the failure reaches the loop.
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + WAIT_SECONDS
+        handle = None
+        while handle is None:
+            try:
+                handle = await asyncio.wait_for(host.continue_codex_thread(seeded.thread_id, "Fix the failing test."), WAIT_SECONDS)
+            except CodexAgentError as error:
+                self.assertEqual(error.failure_code, "codex.session_busy")
+                if loop.time() > deadline:
+                    self.fail("the thread stayed busy after its failed start returned")
+                await asyncio.sleep(0.05)
+        self.assertEqual(handle.thread_id, seeded.thread_id)
+        self.assertEqual(self.count("turn/start"), 2)
+        self.assertEqual(self.count("turn/interrupt"), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

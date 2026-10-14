@@ -154,8 +154,9 @@ class CodexPreflight:
                 return tuple(models)
 
     def require_idle(self, operation: CodexHostOperation, thread_id: str) -> None:
-        # A thread with a running or reserved turn takes no second one (INV-24).
-        if self._registry.busy(thread_id):
+        # A thread with a running or reserved turn, or with a start still
+        # in flight after its caller left, takes no second one (INV-24).
+        if self._registry.busy(thread_id) or self._connection.starting(thread_id):
             raise CodexErrorMapper.error(FailureCode.CODEX_SESSION_BUSY, BUSY_MESSAGE, operation, thread_id)
 
     async def require_thread(self, operation: CodexHostOperation, thread_id: str, include_turns: bool = False) -> Thread:

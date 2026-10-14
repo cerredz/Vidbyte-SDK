@@ -137,6 +137,7 @@ class CodexConnection:
         self._closing = False
         self._closed: asyncio.Future[None] | None = None
         self._tasks: set[asyncio.Future[Any]] = set()
+        self._starting: set[str] = set()
 
     async def launch(self, target: str) -> InitializeResponse:
         # @intent start-and-initialize-on-host-workers
@@ -222,27 +223,39 @@ class CodexConnection:
         try:
             return await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(future)), bound)
         except asyncio.CancelledError:
-            self._hand_over(future, on_late)
+            self._hand_over(future, on_late, thread_id)
             raise
         except Exception as exc:
             if isinstance(exc, TimeoutError):
-                self._hand_over(future, on_late)
+                self._hand_over(future, on_late, thread_id)
             raise CodexErrorMapper.from_exception(exc, operation, method, dead=self._dead.is_set(), bound_seconds=bound, thread_id=thread_id) from None
 
-    def _hand_over(self, future: Future[ResultT], on_late: Callable[[ResultT], None]) -> None:
+    def starting(self, thread_id: str) -> bool:
+        # Whether a start on the thread outlived its caller and is still
+        # in flight, which keeps the thread busy (INV-24).
+        return thread_id in self._starting
+
+    def _hand_over(self, future: Future[ResultT], on_late: Callable[[ResultT], None], thread_id: str) -> None:
         # A start still queued is withdrawn, so it is never sent; one
-        # already running posts its outcome when it returns.
+        # already running keeps its thread busy and posts its outcome
+        # when it returns.
         if future.cancel():
             return
-        future.add_done_callback(partial(self._post_late, on_late))
+        self._starting.add(thread_id)
+        future.add_done_callback(partial(self._post_late, on_late, thread_id))
 
-    def _post_late(self, on_late: Callable[[ResultT], None], future: Future[ResultT]) -> None:
+    def _post_late(self, on_late: Callable[[ResultT], None], thread_id: str, future: Future[ResultT]) -> None:
         # Runs on the worker that finished the start, and never raises: a
-        # failed start accepted nothing, and a closed loop takes no post.
-        if future.cancelled() or future.exception() is not None:
-            return
+        # closed loop takes no post.
         with suppress(RuntimeError):
-            self._loop.call_soon_threadsafe(on_late, future.result())
+            self._loop.call_soon_threadsafe(self._land, on_late, thread_id, future)
+
+    def _land(self, on_late: Callable[[ResultT], None], thread_id: str, future: Future[ResultT]) -> None:
+        # Runs on the loop: the thread is free again, and a start Codex
+        # accepted is adopted at once; a failed start accepted nothing.
+        self._starting.discard(thread_id)
+        if not future.cancelled() and future.exception() is None:
+            on_late(future.result())
 
     async def interrupt(
         self,
