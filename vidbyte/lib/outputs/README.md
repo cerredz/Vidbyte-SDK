@@ -145,6 +145,8 @@ body as the text.
 | Evernote | Account settings, then the address to email notes to | [Save emails](https://help.evernote.com/hc/en-us/articles/209005347-Save-emails-into-Evernote) |
 | Basecamp | The project's "Email content to this project" link; this is the Basecamp 2 guide, the only one found | [Email-In](https://basecamp.com/help/2/guides/projects/email-in) |
 
+Links in this section retrieved 2026-10-14.
+
 - **Subject commands:** Trello reads `#label` and `@member` in the subject,
   Todoist reads priority, label, and date words, ClickUp reads `<tag>`
   commands, and Evernote reads `@notebook #tag !reminder +`. A model-written
@@ -212,6 +214,8 @@ One recipe per receiver; each needs its URL served over https:
 | Rocket.Chat | `WebhookOutput(url="<incoming webhook URL>", payload=lambda reply, content: {"text": content.body})` | [Integrations](https://docs.rocket.chat/docs/integrations) |
 | n8n | `WebhookOutput(url="<webhook node URL>", headers={"x-api-key": api_key})`: the Webhook node's Header Auth checks the header | [Webhook node](https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.webhook/) |
 | Jira Automation | `WebhookOutput(url="<incoming webhook URL>", headers={"X-Automation-Webhook-Token": webhook_secret})`: the rule reads the body as `{{webhookData}}` | [Automation triggers](https://support.atlassian.com/cloud-automation/docs/jira-automation-triggers/) |
+
+Links in this section retrieved 2026-10-14.
 
 ## How To Add A Destination
 
