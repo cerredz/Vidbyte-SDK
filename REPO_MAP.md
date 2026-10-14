@@ -148,6 +148,10 @@ Reusable, prepackaged evaluation suites that can be pointed at an agent without 
 
 The base abstraction for wrapping an existing agent workflow so that every run produces a durable, structured record suitable for use as reinforcement-learning training data — the task given, the full trajectory taken, the resolved configuration used, and a scalar reward. Configuration is treated as the source of truth for a harness's identity, and every run is captured through the session layer rather than through ad hoc logging. Consent and redaction are part of the contract rather than an afterthought bolted on separately. This is the shared contract that executed harnesses elsewhere in the workspace, and example harnesses built for demonstration, both build against.
 
+##### `vidbyte/harnesses/native/`
+
+Hosts for the coding agents that vendors ship as their own executables, kept apart from the trajectory envelope above even though both use the word harness. Each coding harness gets its own host class, which owns the live processes it starts and wraps the vendor's official SDK in small, atomic functions such as starting, continuing, forking, steering and waiting on a session. Every failure comes back as a semantic error code that names the problem and the next step to take, so an agent that calls these functions as tools can recover without reading a stack trace. Importing the package never requires a vendor SDK: each host loads its SDK only when it is first used, and that SDK comes from the harness's own optional extra.
+
 ##### `vidbyte/harnesses/stores/`
 
 Persistence backends for captured trajectory data, all implementing one common interface so the storage mechanism can be swapped without touching the harness itself. One backend is intended for use in tests, another for local export to disk, and additional backends can be added following the same pattern. Keeping the store swappable behind one interface is what lets a harness behave identically whether it is run in a notebook or in production. A new storage destination should be added as a backend here rather than taught to the harness abstraction directly.
