@@ -1,7 +1,7 @@
 ---
 spec: codex-host
 title: CodexHost: small atomic Codex functions with one agent tool per function
-status: reviewed
+status: verified
 revision: 6
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-codex-host
