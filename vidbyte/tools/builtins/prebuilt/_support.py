@@ -3,7 +3,7 @@
 PURPOSE: Holds PrebuiltToolSupport, the shared helpers every prebuilt tool category uses: the one argument-error builder, JSON and record parsing, exact number text, numeric text, nesting level, item capping under the character budget, paired lists, weights, dates and offsets, lines, words, sentences, syllables, CSV tables, and text encoding. Also defines the PrebuiltToolOutput and PrebuiltToolFunction type aliases.
 ROLE IN CODEBASE: Imported by the 31 category modules in vidbyte/tools/builtins/prebuilt/ and by vidbyte/tools/toolsets/prebuilt.py (for the PrebuiltToolFunction alias). Builds on vidbyte/lib/constants/prebuilt_tools.py, vidbyte/lib/enums/prebuilt_tools.py, and ToolExecutionError from vidbyte/lib/errors/.
 ARCHITECTURE NOTE: A static-method-only class (the class-bound helper pattern of vidbyte/lib/util/math.py). Each helper does one job. Helpers may call argument_error and nesting_level, which call nothing else in the class, and no other helper calls another helper, so a caller composes them: a records tool passes the value parse_json_text returns to records_from_json. Every error a helper raises is a ToolExecutionError whose message names the tool parameter the caller passed in, so FunctionTool turns it into a failure the model can act on.
-FUNCTION INVENTORY: argument_error builds the INV-15 error. parse_json_text and json_pointer_tokens read JSON input, and records_from_json checks a parsed value as a list of records. parse_integer_text, parse_decimal_text, integer_text, decimal_text, fraction_text, float_result, and parse_numeric_text convert exact and numeric text. decimal_context opens the fresh, fully specified decimal context of section 9.2 item 18. nesting_level measures container depth without recursion. cap_items applies the item cap and character budget. paired_values and weight_total check parallel lists and weights. as_utc, parse_utc_offset, and parse_date_text read times and dates. split_lines, line_and_column, split_words, split_sentences, and count_syllables implement the line, position, word, sentence, and syllable rules. parse_csv_table reads a CSV table. parse_html feeds HTML to a parser and drops markup left open at the end before closing it. encode_text encodes text in a TextEncoding.
+FUNCTION INVENTORY: argument_error builds the INV-15 error. parse_json_text and json_pointer_tokens read JSON input, and records_from_json checks a parsed value as a list of records. parse_integer_text, parse_decimal_text, integer_text, decimal_text, fraction_text, float_result, and parse_numeric_text convert exact and numeric text. decimal_context opens the fresh, fully specified decimal context of section 9.2 item 18. nesting_level measures container depth without recursion. cap_items applies the item cap and character budget. paired_values and weight_total check parallel lists and weights. as_utc, parse_utc_offset, and parse_date_text read times and dates. split_lines, line_and_column, split_words, split_sentences, and count_syllables implement the line, position, word, sentence, and syllable rules. parse_csv_table reads a CSV table. base64_bytes reads tolerant Base64 in a chosen or detected alphabet. parse_html feeds HTML to a parser and drops markup left open at the end before closing it. encode_text encodes text in a TextEncoding.
 COMMON MODIFICATION PATTERNS: Add a helper here only when two or more category modules need the same job; logic for one category stays in its own module. Keep every new helper free of calls to other helpers except argument_error and nesting_level.
 WHAT NOT TO DO IN THIS FILE: 1. Do not raise anything but argument_error's ToolExecutionError. 2. Do not put str(exc) or repr(exc) in a message; read structured attributes such as msg, lineno, colno, and pos. 3. Do not touch global state: no decimal.getcontext, csv.field_size_limit, or sys.set_int_max_str_digits. 4. Do not import vidbyte.tools.toolsets or anything above the tools layer.
 KNOWN EDGE CASES: Python refuses to turn text of more than 4,300 digits into an int, leading zeros included, so parse_numeric_text reads integers through their float value. A sentence terminator run is only matched at its first character, which keeps sentence splitting linear on long runs of punctuation. JSON nesting is checked after parsing, and json.loads itself raises RecursionError for extreme nesting, which is caught.
@@ -13,6 +13,8 @@ TESTS: tests/features/prebuilt_tools/ (every category's row file exercises these
 
 from __future__ import annotations
 
+import base64
+import binascii
 import csv
 import io
 import json
@@ -78,6 +80,13 @@ _DAY_FIRST_DATE = re.compile(r"(?P<day>\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(?P<
 _NUMERIC_DATE = re.compile(r"(?P<first>\d{1,2})(?P<separator>[/.-])(?P<second>\d{1,2})(?P=separator)(?P<year>\d{4})")
 _MONTHS_IN_YEAR = 12
 _BARE_TAG_OPENERS = frozenset({"<", "</"})
+_BASE64_GROUP = 4
+_URL_SAFE_ALTCHARS = b"-_"
+_STANDARD_BASE64 = re.compile(r"[A-Za-z0-9+/]*")
+_URL_SAFE_BASE64 = re.compile(r"[A-Za-z0-9_-]*")
+_URL_SAFE_MARKS = re.compile(r"[-_]")
+_STANDARD_MARKS = re.compile(r"[+/]")
+_BASE64_EXPECTED = "Base64 text in one alphabet, with whitespace ignored and padding optional"
 
 
 class PrebuiltToolSupport:
@@ -440,6 +449,26 @@ class PrebuiltToolSupport:
                 raise PrebuiltToolSupport.argument_error(parameter_name, f"row {row_number} has {len(row)} cells but the header has {len(header)}", expected)
             padded.append(row + [""] * (len(header) - len(row)))
         return header, padded, chosen
+
+    @staticmethod
+    def base64_bytes(text: str, url_safe: bool | None, parameter_name: str) -> bytes:
+        """Decode Base64 with whitespace removed and padding optional, in the chosen alphabet or, when url_safe is None, the one its marks show."""
+        compact = "".join(text.split())
+        core = compact.rstrip("=")
+        detected = _URL_SAFE_MARKS.search(core) is not None
+        if detected and _STANDARD_MARKS.search(core) is not None:
+            raise PrebuiltToolSupport.argument_error(parameter_name, "the text mixes characters of the standard and the URL-safe Base64 alphabets", _BASE64_EXPECTED)
+        chosen = detected if url_safe is None else url_safe
+        alphabet_name = "URL-safe" if chosen else "standard"
+        if (_URL_SAFE_BASE64 if chosen else _STANDARD_BASE64).fullmatch(core) is None:
+            raise PrebuiltToolSupport.argument_error(parameter_name, f"the text holds a character outside the {alphabet_name} Base64 alphabet", _BASE64_EXPECTED)
+        missing = -len(core) % _BASE64_GROUP
+        if len(core) % _BASE64_GROUP == 1 or len(compact) - len(core) > missing:
+            raise PrebuiltToolSupport.argument_error(parameter_name, f"the text has {len(core)} Base64 digits with a padding of {len(compact) - len(core)}, which no Base64 text can have", _BASE64_EXPECTED)
+        try:
+            return base64.b64decode(core + "=" * missing, altchars=_URL_SAFE_ALTCHARS if chosen else None, validate=True)
+        except binascii.Error as exc:
+            raise PrebuiltToolSupport.argument_error(parameter_name, f"the text is not valid {alphabet_name} Base64", _BASE64_EXPECTED) from exc
 
     @staticmethod
     def parse_html(parser: HTMLParser, html_text: str) -> None:

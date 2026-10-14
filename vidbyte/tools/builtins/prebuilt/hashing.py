@@ -3,7 +3,7 @@
 PURPOSE: Defines HashingToolFunctions, the seven prebuilt tools that compute digests and checksums: a hash of a text, a hash of Base64 content, an HMAC signature, a digest check, CRC-32 and Adler-32 checksums, a Git blob object ID, and a stable bucket assignment.
 ROLE IN CODEBASE: Re-exported by vidbyte/tools/builtins/prebuilt/__init__.py and wrapped in FunctionTool objects by PrebuiltTools in vidbyte/tools/toolsets/prebuilt.py when the HASHING category is chosen. Builds on PrebuiltToolSupport in _support.py for strict text encoding and the argument error.
 ARCHITECTURE NOTE: Every tool is a static method whose docstring's first paragraph is the model-facing description and whose parameters carry their own Field descriptions and caps, so FunctionTool builds the whole schema from the signature. Every digest object comes from hashlib.new with usedforsecurity=False, including the ones HMAC builds through a partial constructor, so md5 and sha1 work as checksums on hosts that restrict them for security use.
-FUNCTION INVENTORY: hash_text, hash_base64_content, compute_hmac, verify_hash, crc32_checksum, git_blob_hash, and assign_stable_bucket are the tools; _digest_text writes digest bytes in a DigestFormat, _hex_bytes and _base64_bytes read hexadecimal and Base64 text or return None; tool_functions lists the tools in catalogue order.
+FUNCTION INVENTORY: hash_text, hash_base64_content, compute_hmac, verify_hash, crc32_checksum, git_blob_hash, and assign_stable_bucket are the tools; _digest_text writes digest bytes in a DigestFormat, _hex_bytes reads hexadecimal text and _base64_bytes reads Base64 with PrebuiltToolSupport.base64_bytes, each returning None for text it cannot read; tool_functions lists the tools in catalogue order.
 COMMON MODIFICATION PATTERNS: A new hashing tool adds a static method with a 4 to 5 sentence description, its row in the spec's Appendix A.22, and its entry in tool_functions. A new algorithm is a new HashAlgorithm member whose value hashlib.new accepts.
 WHAT NOT TO DO IN THIS FILE: 1. Do not create a digest without usedforsecurity=False; T-6 and the source scan require it for md5 and sha1. 2. Do not put any part of an HMAC key in an output or an error message. 3. Do not describe md5 or sha1 as secure. 4. Do not compare digests with ==; verify_hash uses hmac.compare_digest.
 KNOWN EDGE CASES: Base64 content follows the base64_decode rules, so whitespace is ignored, padding is optional, and a minus sign or underscore selects the URL-safe alphabet. A hexadecimal string is also valid Base64, so verify_hash tries both readings and only the one with the digest's length can match. The utf_16 and utf_32 codecs add a byte-order mark, which changes every digest.
@@ -14,7 +14,6 @@ TESTS: tests/features/prebuilt_tools/test_prebuilt_rows_formats_encoding.py and 
 from __future__ import annotations
 
 import base64
-import binascii
 import hashlib
 import hmac
 import re
@@ -38,17 +37,13 @@ from vidbyte.lib.enums.prebuilt_tools import (
     KeyFormat,
     TextEncoding,
 )
+from vidbyte.lib.errors import ToolExecutionError
 from vidbyte.tools.builtins.prebuilt._support import (
     PrebuiltToolFunction,
     PrebuiltToolOutput,
     PrebuiltToolSupport,
 )
 
-_BASE64_GROUP = 4
-_URL_SAFE_ALTCHARS = b"-_"
-_STANDARD_BASE64 = re.compile(r"[A-Za-z0-9+/]*")
-_URL_SAFE_BASE64 = re.compile(r"[A-Za-z0-9_-]*")
-_URL_SAFE_MARKS = re.compile(r"[-_]")
 _HEX_DIGITS = re.compile(r"[0-9A-Fa-f]*")
 _BUCKET_PREFIX_DIGITS = 16
 _HEX_BASE = 16
@@ -191,17 +186,12 @@ class HashingToolFunctions:
 
     @staticmethod
     def _base64_bytes(text: str) -> bytes | None:
-        """Read Base64 the way base64_decode does with alphabet detection, or return None when the text is not Base64."""
-        compact = "".join(text.split())
-        core = compact.rstrip("=")
-        url_safe = _URL_SAFE_MARKS.search(core) is not None
-        missing = -len(core) % _BASE64_GROUP
-        alphabet = _URL_SAFE_BASE64 if url_safe else _STANDARD_BASE64
-        if alphabet.fullmatch(core) is None or len(core) % _BASE64_GROUP == 1 or len(compact) - len(core) > missing:
-            return None
+        """Read Base64 with the shared reader and its alphabet detection, or return None when the text is not Base64."""
+        # The shared reader's error is dropped, because each caller
+        # reports its own, and a key's error must not describe the key.
         try:
-            return base64.b64decode(core + "=" * missing, altchars=_URL_SAFE_ALTCHARS if url_safe else None, validate=True)
-        except binascii.Error:
+            return PrebuiltToolSupport.base64_bytes(text, None, "text")
+        except ToolExecutionError:
             return None
 
     @classmethod

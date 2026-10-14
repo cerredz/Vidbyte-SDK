@@ -3,7 +3,7 @@
 PURPOSE: Defines EncodingToolFunctions, the ten prebuilt tools that encode and decode text: Base64 and hexadecimal in both directions, URL percent-encoding in both directions, HTML entity decoding, JSON Web Token inspection without verification, and JSON string escaping in both directions.
 ROLE IN CODEBASE: Re-exported by vidbyte/tools/builtins/prebuilt/__init__.py and wrapped in FunctionTool objects by PrebuiltTools in vidbyte/tools/toolsets/prebuilt.py when the ENCODING category is chosen. Builds on PrebuiltToolSupport in _support.py for strict text encoding, JSON parsing with the nesting cap, and the argument error.
 ARCHITECTURE NOTE: Every tool is a static method whose docstring's first paragraph is the model-facing description and whose parameters carry their own Field descriptions and caps, so FunctionTool builds the whole schema from the signature. Text becomes bytes only through PrebuiltToolSupport.encode_text, and decoded bytes become text only when they decode strictly, so no tool ever invents a replacement character the row does not ask for.
-FUNCTION INVENTORY: base64_encode, base64_decode, hex_encode, hex_decode, url_encode, url_decode, html_unescape, decode_jwt_payload, escape_json_string, and unescape_json_string are the tools; _base64_bytes reads tolerant Base64, _decoded_text reads bytes strictly as text, _jwt_object decodes one JSON Web Token part, and _claim_time turns a numeric claim into a UTC datetime; tool_functions lists the tools in catalogue order.
+FUNCTION INVENTORY: base64_encode, base64_decode, hex_encode, hex_decode, url_encode, url_decode, html_unescape, decode_jwt_payload, escape_json_string, and unescape_json_string are the tools; _decoded_text reads bytes strictly as text, _jwt_object decodes one JSON Web Token part, and _claim_time turns a numeric claim into a UTC datetime; tool_functions lists the tools in catalogue order.
 COMMON MODIFICATION PATTERNS: A new encoding tool adds a static method with a 4 to 5 sentence description, its row in the spec's Appendix A.21, and its entry in tool_functions. A new codec is a new TextEncoding member, and every tool here picks it up through encode_text and _decoded_text.
 WHAT NOT TO DO IN THIS FILE: 1. Do not encode text with str.encode directly; PrebuiltToolSupport.encode_text names the first character a codec cannot represent. 2. Do not decode bytes with a replacing error handler except in url_decode, whose row asks for U+FFFD. 3. Do not report a JSON Web Token signature as verified; this library holds no keys. 4. Do not echo the input in an error message.
 KNOWN EDGE CASES: The utf_16 and utf_32 codecs write a byte-order mark even for empty text, so their round trips hold bytes even when the text is empty. Python reads a JSON number with an overlong exponent as infinity and refuses integers longer than 4,300 digits, so a JSON Web Token part holding either fails as a bad part. A JSON Web Token time claim outside the datetime range, or one that is not a number, is null rather than an error.
@@ -41,11 +41,6 @@ from vidbyte.tools.builtins.prebuilt._support import (
 )
 
 _BASE64_GROUP = 4
-_URL_SAFE_ALTCHARS = b"-_"
-_STANDARD_BASE64 = re.compile(r"[A-Za-z0-9+/]*")
-_URL_SAFE_BASE64 = re.compile(r"[A-Za-z0-9_-]*")
-_URL_SAFE_MARKS = re.compile(r"[-_]")
-_STANDARD_MARKS = re.compile(r"[+/]")
 _HEX_IGNORED = re.compile(r"[\s:]+")
 _HEX_PREFIX = re.compile(r"\A0[xX]")
 _HEX_DIGITS = re.compile(r"[0-9A-Fa-f]*")
@@ -90,7 +85,7 @@ class EncodingToolFunctions:
         text_encoding: Annotated[TextEncoding, Field(description=_DECODE_ENCODING_DESCRIPTION)] = TextEncoding.UTF_8,
     ) -> PrebuiltToolOutput:
         """Decode Base64 text into bytes and return them as text when they decode strictly in text_encoding, with the byte count and a lowercase hexadecimal preview of the first 64 bytes. Use it to read an encoded payload, an attachment, or an opaque field whose contents are unknown. Whitespace is ignored, missing padding is tolerated, and the alphabet is detected from the characters unless url_safe is set. Invalid Base64, or a mix of characters from both alphabets, fails with an error naming data."""
-        raw = EncodingToolFunctions._base64_bytes(data, url_safe)
+        raw = PrebuiltToolSupport.base64_bytes(data, url_safe, "data")
         decoded = EncodingToolFunctions._decoded_text(raw, text_encoding)
         return {"text": decoded, "is_text": decoded is not None, "size_bytes": len(raw), "hex_preview": raw[:PREBUILT_HEX_PREVIEW_SIZE].hex()}
 
@@ -213,27 +208,6 @@ class EncodingToolFunctions:
             position = max(exc.pos - shift, 0)
             raise PrebuiltToolSupport.argument_error("escaped", f"{exc.msg} at position {position}", "the content of one JSON string literal with valid escapes and no raw control characters") from exc
         return {"text": decoded}
-
-    @staticmethod
-    def _base64_bytes(data: str, url_safe: bool | None) -> bytes:
-        """Decode Base64 with whitespace removed and padding optional, in the chosen or detected alphabet."""
-        compact = "".join(data.split())
-        core = compact.rstrip("=")
-        expected = "Base64 text in one alphabet, with whitespace ignored and padding optional"
-        detected = _URL_SAFE_MARKS.search(core) is not None
-        if detected and _STANDARD_MARKS.search(core) is not None:
-            raise PrebuiltToolSupport.argument_error("data", "the text mixes characters of the standard and the URL-safe Base64 alphabets", expected)
-        chosen = detected if url_safe is None else url_safe
-        alphabet_name = "URL-safe" if chosen else "standard"
-        if (_URL_SAFE_BASE64 if chosen else _STANDARD_BASE64).fullmatch(core) is None:
-            raise PrebuiltToolSupport.argument_error("data", f"the text holds a character outside the {alphabet_name} Base64 alphabet", expected)
-        missing = -len(core) % _BASE64_GROUP
-        if len(core) % _BASE64_GROUP == 1 or len(compact) - len(core) > missing:
-            raise PrebuiltToolSupport.argument_error("data", f"the text has {len(core)} Base64 digits with a padding of {len(compact) - len(core)}, which no Base64 text can have", expected)
-        try:
-            return base64.b64decode(core + "=" * missing, altchars=_URL_SAFE_ALTCHARS if chosen else None, validate=True)
-        except binascii.Error as exc:
-            raise PrebuiltToolSupport.argument_error("data", f"the text is not valid {alphabet_name} Base64", expected) from exc
 
     @staticmethod
     def _decoded_text(raw: bytes, text_encoding: TextEncoding) -> str | None:
