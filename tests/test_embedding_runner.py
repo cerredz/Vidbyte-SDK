@@ -29,6 +29,21 @@ def _make_gemini_embedding_response(vectors: list[list[float]]) -> dict:
     return {"embeddings": [{"values": v} for v in vectors]}
 
 
+class EchoOpenAIEmbeddingTransport:
+    # Records each request's input list and answers with one numbered vector per input, counting on across requests.
+    def __init__(self) -> None:
+        self.inputs: list[list[str]] = []
+        self.bodies: list[dict] = []
+
+    def request(self, *, method: str, url: str, headers: Mapping[str, str], json_body: Mapping[str, object] | None = None, timeout_seconds: float = 60.0) -> HttpResponse:
+        sent = list((json_body or {})["input"])
+        start = sum(len(batch) for batch in self.inputs)
+        self.inputs.append(sent)
+        body = {"data": [{"index": i, "embedding": [float(start + i)]} for i in range(len(sent))], "usage": {"prompt_tokens": len(sent), "total_tokens": len(sent)}}
+        self.bodies.append(body)
+        return HttpResponse(status_code=200, body=json.dumps(body), headers={})
+
+
 class EmbeddingRunnerTests(unittest.TestCase):
     # --- OpenAI happy path ---
 
@@ -122,6 +137,72 @@ class EmbeddingRunnerTests(unittest.TestCase):
         runner.run("test")
 
         self.assertEqual(transport.requests[0]["json_body"]["dimensions"], 512)
+
+    def test_openai_embedding_splits_more_than_2048_texts_into_capped_batches(self) -> None:
+        # OpenAI rejects more than 2048 inputs in one request, so 2500 texts must go as 2048 and 452, in order.
+        transport = EchoOpenAIEmbeddingTransport()
+        runner = EmbeddingModelRunner(
+            EmbeddingModelConfig(provider=ModelProvider.OPENAI, model="text-embedding-3-small", api_key="key"),
+            transport=transport,
+        )
+        texts = [f"text {index}" for index in range(2500)]
+
+        response = runner.run(texts)
+
+        self.assertEqual([len(sent) for sent in transport.inputs], [2048, 452])
+        self.assertEqual([text for sent in transport.inputs for text in sent], texts)
+        self.assertEqual(response.embeddings, tuple((float(index),) for index in range(2500)))
+        # Several requests report the whole call: their token counts are added up, and raw lists every body in order.
+        self.assertEqual(response.usage, {"prompt_tokens": 2500, "total_tokens": 2500})
+        self.assertEqual(response.raw, {"batches": transport.bodies})
+
+    def test_openai_embedding_splits_texts_whose_bytes_pass_the_token_cap(self) -> None:
+        # Four 100,000-byte texts fit the 2048-input cap but not 300,000 tokens per request, which bytes bound from above.
+        transport = EchoOpenAIEmbeddingTransport()
+        runner = EmbeddingModelRunner(
+            EmbeddingModelConfig(provider=ModelProvider.OPENAI, model="text-embedding-3-small", api_key="key"),
+            transport=transport,
+        )
+        texts = [letter * 100_000 for letter in "abcd"]
+
+        response = runner.run(texts)
+
+        self.assertGreater(len(transport.inputs), 1)
+        for sent in transport.inputs:
+            self.assertLessEqual(sum(len(text.encode("utf-8")) for text in sent), 300_000)
+        self.assertEqual([text for sent in transport.inputs for text in sent], texts)
+        self.assertEqual(len(response.embeddings), 4)
+
+    def test_openai_embedding_sends_a_text_over_the_byte_cap_alone(self) -> None:
+        # One text past 300,000 bytes is the vendor's to judge, so it goes untouched in a request of its own.
+        transport = EchoOpenAIEmbeddingTransport()
+        runner = EmbeddingModelRunner(
+            EmbeddingModelConfig(provider=ModelProvider.OPENAI, model="text-embedding-3-small", api_key="key"),
+            transport=transport,
+        )
+        oversized = "y" * 300_001
+
+        response = runner.run(["x", oversized, "z"])
+
+        self.assertEqual(transport.inputs, [["x"], [oversized], ["z"]])
+        self.assertEqual(len(response.embeddings), 3)
+
+    def test_openai_embedding_under_both_caps_sends_one_unchanged_request(self) -> None:
+        # 2048 texts under the byte cap stay one request with exactly the fields a single request always had.
+        body = _make_openai_embedding_response([[0.1]] * 2048)
+        transport = FakeTransport([body])
+        runner = EmbeddingModelRunner(
+            EmbeddingModelConfig(provider=ModelProvider.OPENAI, model="text-embedding-3-small", api_key="key", dimensions=256, extra_body={"user": "u-1"}),
+            transport=transport,
+        )
+        texts = [f"text {index}" for index in range(2048)]
+
+        response = runner.run(texts)
+
+        self.assertEqual(len(transport.requests), 1)
+        self.assertEqual(transport.requests[0]["json_body"], {"model": "text-embedding-3-small", "input": texts, "dimensions": 256, "user": "u-1"})
+        self.assertEqual(response.raw, body)
+        self.assertEqual(response.usage, {"total_tokens": 10})
 
     # --- Gemini happy path ---
 
