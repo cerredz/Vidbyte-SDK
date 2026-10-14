@@ -3,10 +3,10 @@
 PURPOSE: Defines StructuredFormatsToolFunctions, the nine prebuilt tools that read structured text formats: XML to JSON, XML well-formedness, XML element search, INI, TOML, URL parts, relative URL resolution, query strings, and .env files.
 ROLE IN CODEBASE: Re-exported by vidbyte/tools/builtins/prebuilt/__init__.py and wrapped in FunctionTool objects by PrebuiltTools in vidbyte/tools/toolsets/prebuilt.py when the STRUCTURED_FORMATS category is chosen. Builds on PrebuiltToolSupport in _support.py for the argument error, nesting level, item cap, and line splitting.
 ARCHITECTURE NOTE: Every parser is a standard-library one (xml.etree.ElementTree, configparser, tomllib, urllib.parse), and each tool wraps it with the guards INV-19 and INV-20 need: XML text is refused before parsing when it declares a document type, an entity, or a namespace URI longer than PREBUILT_MAX_NAME_CHARS, converted values are measured with work stacks instead of recursion, and xml_to_json counts its keys and texts while building. Parser exceptions are converted from their attributes, never from their text.
-FUNCTION INVENTORY: xml_to_json, verify_xml_wellformed, xml_find_elements, ini_to_json, toml_to_json, parse_url, resolve_relative_url, parse_query_string, and parse_dotenv_text are the tools; _CaseKeepingConfigParser keeps INI key case; _unsafe_xml_problem names a refused declaration; _parse_xml parses XML or fails naming xml_text; _element_level measures element nesting; _element_value converts elements to JSON under the output cap; _ini_error_line reads a configparser error's line; _has_long_dotted_key finds a TOML key with too many dotted segments; _plain_toml_values turns TOML dates into text and checks numbers; _dotenv_value reads one .env value; tool_functions lists the tools in catalogue order.
+FUNCTION INVENTORY: xml_to_json, verify_xml_wellformed, xml_find_elements, ini_to_json, toml_to_json, parse_url, resolve_relative_url, parse_query_string, and parse_dotenv_text are the tools; _CaseKeepingConfigParser keeps INI key case; _CountedElement counts the elements a path reads, and _counted_element builds one for the tree builder; _unsafe_xml_problem names a refused declaration; _parse_xml parses XML or fails naming xml_text; _element_level measures element nesting; _element_value converts elements to JSON under the output cap; _ini_error_line reads a configparser error's line; _has_long_dotted_key finds a TOML key with too many dotted segments; _plain_toml_values turns TOML dates into text and checks numbers; _dotenv_value reads one .env value; tool_functions lists the tools in catalogue order.
 COMMON MODIFICATION PATTERNS: A new format tool adds a static method with a 4 to 5 sentence description, its row in the spec's Appendix A.20, and its entry in tool_functions, and catches its parser's exceptions where they occur. A new XML tool runs _unsafe_xml_problem before _parse_xml.
 WHAT NOT TO DO IN THIS FILE: 1. Do not let any XML parser see text before _unsafe_xml_problem has accepted it. 2. Do not format a parser exception with str or repr; read code, position, lineno, or errors, and give tomllib errors the fixed message. 3. Do not walk a converted value with recursion; the nesting cap must hold before anything reaches the output serializer. 4. Do not repeat a .env line in an error, because it may hold a credential.
-KNOWN EDGE CASES: Expat reports 0-based columns, so a reported column is one more than the parser's. The ElementPath engine of Python 3.11 raises TypeError, SyntaxError, or KeyError for a bad path, and all three are errors on path. tomllib accepts infinite and NaN floats and integers of any size, which are refused here because the output must be finite JSON. tomllib takes time quadratic in the segments of one dotted key, so a run of more than 100 dotted key segments is refused before parsing; the scan does not track strings or comments, so such a run inside a multi-line string or a comment is refused too.
+KNOWN EDGE CASES: Expat reports 0-based columns, so a reported column is one more than the parser's. The ElementPath engine of Python 3.11 raises TypeError, SyntaxError, or KeyError for a bad path, and all three are errors on path. Its descendant step can yield one element many times, and a positional predicate lists every sibling of each candidate, so xml_find_elements builds its tree from _CountedElement, which counts every element the evaluation reads and refuses the path past PREBUILT_MAX_XML_PATH_VISITS, and it lists each distinct match once in document order. _CountedElement overrides find and findall too, because the C element answers a plain tag without calling the counting methods. tomllib accepts infinite and NaN floats and integers of any size, which are refused here because the output must be finite JSON. tomllib takes time quadratic in the segments of one dotted key, so a run of more than 100 dotted key segments is refused before parsing; the scan does not track strings or comments, so such a run inside a multi-line string or a comment is refused too.
 RELATED DOCS: docs/spec/prebuilt-agent-tools/spec.md (Appendix A.20, section 9.2 items 3, 12, and 13, INV-19, INV-20); vidbyte/tools/builtins/prebuilt/README.md
 TESTS: tests/features/prebuilt_tools/test_prebuilt_rows_formats_encoding.py and the catalogue-wide tests in tests/features/prebuilt_tools/
 """
@@ -18,11 +18,14 @@ import json
 import math
 import re
 import tomllib
+from collections.abc import Generator, Iterator
 from datetime import date, time
+from functools import partial
+from itertools import count
 from types import MappingProxyType
 from typing import Annotated, Any
 from urllib.parse import parse_qsl, urljoin, urlsplit
-from xml.etree import ElementTree
+from xml.etree import ElementPath, ElementTree
 from xml.parsers import expat
 
 from pydantic import Field
@@ -36,6 +39,7 @@ from vidbyte.lib.constants.prebuilt_tools import (
     PREBUILT_MAX_PATTERN_CHARS,
     PREBUILT_MAX_SHORT_TEXT_CHARS,
     PREBUILT_MAX_TEXT_CHARS,
+    PREBUILT_MAX_XML_PATH_VISITS,
 )
 from vidbyte.tools.builtins.prebuilt._support import (
     PrebuiltToolFunction,
@@ -78,6 +82,45 @@ class StructuredFormatsToolFunctions:
             """Return the key exactly as written."""
             return optionstr
 
+    class _CountedElement(ElementTree.Element):
+        """An Element whose tree shares one visit counter, so path evaluation fails once it reads too many elements."""
+
+        __slots__ = ("visits",)
+        visits: Iterator[int]
+
+        def __iter__(self) -> Iterator[ElementTree.Element]:
+            """Step to each child, counting it."""
+            for child in self[:]:
+                self._note_visit()
+                yield child
+
+        def iter(self, tag: str | None = None) -> Generator[ElementTree.Element, None, None]:
+            """Walk this element and its descendants in document order, counting each one and yielding those with the tag."""
+            for element in ElementTree.Element.iter(self):
+                self._note_visit()
+                if tag is None or tag == "*" or element.tag == tag:
+                    yield element
+
+        def itertext(self) -> Generator[str, None, None]:
+            """Count every element of this subtree, then give its text as the standard element does."""
+            for _ in ElementTree.Element.iter(self):
+                self._note_visit()
+            yield from ElementTree.Element.itertext(self)
+
+        def find(self, path: str, namespaces: dict[str, str] | None = None) -> ElementTree.Element | None:
+            """Find the first match with the Python ElementPath, whose steps run through the counting methods."""
+            return ElementPath.find(self, path, namespaces)
+
+        def findall(self, path: str, namespaces: dict[str, str] | None = None) -> list[ElementTree.Element]:
+            """Find every match with the Python ElementPath, whose steps run through the counting methods."""
+            return ElementPath.findall(self, path, namespaces)
+
+        def _note_visit(self) -> None:
+            """Count one element read, refusing the path once the count passes the cap."""
+            if next(self.visits) > PREBUILT_MAX_XML_PATH_VISITS:
+                problem = f"evaluating the path reads more than {PREBUILT_MAX_XML_PATH_VISITS} elements"
+                raise PrebuiltToolSupport.argument_error("path", problem, "a path whose evaluation reads at most that many elements")
+
     @staticmethod
     def xml_to_json(xml_text: Annotated[str, Field(description=_XML_TEXT_DESCRIPTION, max_length=PREBUILT_MAX_TEXT_CHARS)]) -> PrebuiltToolOutput:
         """Convert an XML document into an equivalent JSON value and report the tag of its root element. Use it to read an XML feed, export, or configuration file with JSON tools. Attributes become keys starting with an at sign, non-blank text becomes a key named #text, repeated child tags become arrays, a text-only element becomes its string, and an empty element becomes null. Nesting deeper than 100 elements, a value longer than one million characters, a document type or entity declaration, a namespace URI longer than 200 characters, or malformed XML fails with an error naming xml_text."""
@@ -88,7 +131,7 @@ class StructuredFormatsToolFunctions:
             raise PrebuiltToolSupport.argument_error("xml_text", problem, _XML_EXPECTED)
 
         # Parse the document and refuse one nested too deep to return.
-        root = StructuredFormatsToolFunctions._parse_xml(xml_text)
+        root = StructuredFormatsToolFunctions._parse_xml(xml_text, ElementTree.TreeBuilder())
         # @intent prebuilt-xml-nesting-cap
         # A converted value as deep as the document would make the
         # output serializer recurse past its limit after the tool has
@@ -122,23 +165,31 @@ class StructuredFormatsToolFunctions:
         xml_text: Annotated[str, Field(description=_XML_TEXT_DESCRIPTION, max_length=PREBUILT_MAX_TEXT_CHARS)],
         path: Annotated[str, Field(description="The ElementPath expression to evaluate, relative to the root element. It supports child and descendant steps, wildcards, parent steps, and predicates on attributes, child text, and position. An absolute path, an unbalanced bracket, or another unsupported form fails with an error. It must hold between 1 and 1,000 characters.", min_length=1, max_length=PREBUILT_MAX_PATTERN_CHARS)],
     ) -> PrebuiltToolOutput:
-        """Find the XML elements that match an ElementPath expression and list the tag, attributes, and stripped text of each. Use it to pull specific records or values out of an XML document without converting all of it. Paths are relative to the root element, matches are listed in document order, and at most 1,000 elements are listed while count covers every match. An unsupported or absolute path fails with an error naming path, and malformed or refused XML fails with an error naming xml_text."""
-        # Refuse unsafe text, then parse the document.
+        """Find the XML elements that match an ElementPath expression and list the tag, attributes, and stripped text of each. Use it to pull specific records or values out of an XML document without converting all of it. Paths are relative to the root element, each matching element is listed once in document order, and at most 1,000 elements are listed while count covers every match. An unsupported or absolute path, or one whose evaluation reads more than two million elements, fails with an error naming path, and malformed or refused XML fails with an error naming xml_text."""
+        # Refuse unsafe text, then parse the document into elements
+        # that share one counter of the elements the path reads.
         problem = StructuredFormatsToolFunctions._unsafe_xml_problem(xml_text)
         if problem is not None:
             raise PrebuiltToolSupport.argument_error("xml_text", problem, _XML_EXPECTED)
-        root = StructuredFormatsToolFunctions._parse_xml(xml_text)
+        element_factory = partial(StructuredFormatsToolFunctions._counted_element, count(1))
+        root = StructuredFormatsToolFunctions._parse_xml(xml_text, ElementTree.TreeBuilder(element_factory=element_factory))
 
-        # Evaluate the path; the engine raises several exception types
-        # for paths it cannot read, and every one is the path's fault.
+        # @intent prebuilt-xml-path-visit-cap
+        # The standard descendant step can yield one element many times
+        # and a positional predicate compares every sibling, so the
+        # path runs lazily and fails once its element reads pass the
+        # cap. The engine raises several exception types for paths it
+        # cannot read, and every one is the path's fault.
         try:
-            found = root.findall(path)
+            matched = dict.fromkeys(root.iterfind(path))
         except (SyntaxError, TypeError, KeyError, ValueError) as exc:
             raise PrebuiltToolSupport.argument_error("path", "the path is not an ElementPath expression this parser supports", "a relative ElementPath expression with balanced brackets") from exc
 
-        # List the matches up to the item cap while count covers all.
-        elements, truncated = PrebuiltToolSupport.cap_items({"tag": element.tag, "attributes": dict(element.attrib), "text": (element.text or "").strip() or None} for element in found)
-        return {"elements": elements, "count": len(found), "truncated": truncated}
+        # List each distinct match once, in document order, up to the
+        # item cap while count covers all.
+        in_order = (element for element in ElementTree.Element.iter(root) if element in matched)
+        elements, truncated = PrebuiltToolSupport.cap_items({"tag": element.tag, "attributes": dict(element.attrib), "text": (element.text or "").strip() or None} for element in in_order)
+        return {"elements": elements, "count": len(matched), "truncated": truncated}
 
     @staticmethod
     def ini_to_json(ini_text: Annotated[str, Field(description="The INI text to parse, with section headers in square brackets and one key per line. Keys and values are separated by an equals sign or a colon, and lines starting with a hash or a semicolon are comments. Indented lines continue the previous value. The text may hold at most one million characters.", max_length=PREBUILT_MAX_TEXT_CHARS)]) -> PrebuiltToolOutput:
@@ -297,14 +348,23 @@ class StructuredFormatsToolFunctions:
         return None
 
     @staticmethod
-    def _parse_xml(text: str) -> ElementTree.Element:
-        """Parse accepted XML text, failing with the parser's error text, line, and 1-based column."""
+    def _parse_xml(text: str, builder: ElementTree.TreeBuilder) -> ElementTree.Element:
+        """Parse accepted XML text into the builder's elements, failing with the parser's error text, line, and 1-based column."""
+        parser = ElementTree.XMLParser(target=builder)
         try:
-            return ElementTree.fromstring(text)
+            parser.feed(text)
+            return parser.close()
         except ElementTree.ParseError as exc:
             line, column = exc.position
             problem = f"the XML is not well-formed at line {line}, column {column + 1}: {expat.ErrorString(exc.code)}"
             raise PrebuiltToolSupport.argument_error("xml_text", problem, _XML_EXPECTED) from exc
+
+    @staticmethod
+    def _counted_element(visits: Iterator[int], tag: str, attributes: dict[str, str]) -> ElementTree.Element:
+        """Build one element of a tree whose elements share the visit counter."""
+        element = StructuredFormatsToolFunctions._CountedElement(tag, attributes)
+        element.visits = visits
+        return element
 
     @staticmethod
     def _element_level(root: ElementTree.Element) -> int:
