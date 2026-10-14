@@ -93,5 +93,32 @@ class CodexHostOutputSchemaRefusalTests(HostTestCase):
                     self.assertEqual(self.server.methods()[before:], [])
 
 
+@requires_sdk
+class CodexHostLaunchCancellationTests(HostTestCase):
+    """R-6, INV-37 and INV-11: a cancelled launch still stops every turn it already started."""
+
+    async def test_a_launch_cancelled_after_its_first_turn_interrupts_that_turn_once(self) -> None:
+        from vidbyte.lib.dataclasses.codex_host import CodexTurnHandle
+
+        self.patch_connection("CODEX_HOST_WORKER_THREADS", 1)
+        host = await self.open_host()
+        second_thread = self.server.hold("thread/start", lambda params: len(self.server.matching("thread/start")) >= 2)
+        task = asyncio.ensure_future(host.launch_codex_subagents(["Fix the first bug.", "Fix the second bug."]))
+        await asyncio.to_thread(second_thread.wait_arrived)
+        thread_id = self.server.matching("turn/start")[0].params["threadId"]
+        first_turn = self.server.threads[thread_id].turns[-1].turn_id
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await asyncio.wait_for(task, WAIT_SECONDS)
+        second_thread.release()
+        await self.wait_for_request("turn/interrupt", lambda params: params["turnId"] == first_turn)
+        # Barrier: with one host worker, this read returns only after any interrupt queued before it was sent.
+        await asyncio.wait_for(host.read_codex_thread(thread_id), WAIT_SECONDS)
+        self.assertEqual(self.count("turn/interrupt"), 1)
+        self.assertEqual(self.count("turn/start"), 1)
+        snapshot = await self.wait_done(host, CodexTurnHandle(thread_id=thread_id, turn_id=first_turn))
+        self.assert_problem(snapshot, "interrupted", None)
+
+
 if __name__ == "__main__":
     unittest.main()

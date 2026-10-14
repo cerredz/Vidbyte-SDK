@@ -403,8 +403,9 @@ class CodexHost:
     ) -> tuple[CodexTurnHandle, ...]:
         # @intent launch-in-order-and-stop-what-a-failure-leaves
         # Start one thread and turn per prompt, in order, after a single
-        # preflight. If one fails, every turn already started gets one
-        # interrupt and the error says how many there were (INV-37).
+        # preflight. If one fails, or the caller leaves, every turn
+        # already started gets one interrupt, and a failure says how many
+        # there were (INV-37, INV-11).
         operation = CodexHostOperation.LAUNCH_CODEX_SUBAGENTS
         self._guard(operation, talks=True)
         spawn = request or CodexSpawnRequest()
@@ -420,11 +421,11 @@ class CodexHost:
                 turn = await self._start_turn(operation, thread_id, spawn, items, pricing)
                 self._accept(operation, turn)
                 started.append(turn)
-        except CodexAgentError as exc:
-            if not started:
-                raise
+        except BaseException as exc:
             for turn in started:
                 turn.stop(self._connection, None)
+            if not started or not isinstance(exc, CodexAgentError):
+                raise
             message = f"{exc.message} {len(started)} turns were started before this failure and were interrupted."
             raise CodexAgentError(message, failure_code=exc.failure_code, operation=exc.operation, next_step=exc.next_step) from None
         return tuple(turn.handle for turn in started)
