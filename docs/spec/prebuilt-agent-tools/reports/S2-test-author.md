@@ -353,3 +353,98 @@ SDK-LINT: PASS
 Lint exited 0, and its output matches the previous run line for line.
 
 **Still uncovered.** Minimum list lengths elsewhere (`len 1..` and `len 2..` on flat lists such as `greatest_common_divisor.values`) are still not compared against `minItems`. That was true before this fix too. It was left alone because this change was granted for `intersect_lists` only.
+
+## Addendum: post-S4 regression cases (spec r6)
+
+**Task.** The orchestrator asked for failing regression cases for the S4 confirmed findings (`review.md`, R-1 to R-14), bound to spec r6 (`f9e83a65`), and proved red against `c225debf` without editing any production file. It also granted one cap change. Commit `c9710ed2` holds the tests and the plan update; this addendum is a separate commit.
+
+### What was added
+
+- **`tests/features/prebuilt_tools/test_prebuilt_hostile_inputs.py`** (new, 23 tests):
+  - 15 cap-sized hostile cases run under a liveness watchdog. They cover R-1, R-2 ×2, R-6 ×4, R-7 ×4, R-8 ×3, and R-9. Every case asserts the exact r6 output, or the exact error parameter, as well as liveness.
+  - 8 R-12 cases run in-process under a hostile host decimal context, one for each site R-12 lists.
+- **19 row cases** in the existing row files, each under a `# S4 R-n` comment: code_network (R-3), json_csv (R-5 ×3, M-1 ×2), formats_encoding (R-7 ×2), text (R-8 ×2, R-10 ×3), geometry_bits_markdown (R-8 ×4), and extraction (R-2 ×2, plus a `number_entry` helper).
+- **R-4.** `EXAMPLE_MARKERS` in `test_prebuilt_model_facing_contract.py` gains `ILLUSTRATIVE_LITERAL`, which matches a type word followed by a literal, or a literal compared with a literal (INV-9 r6). Scanned over all 910 built descriptions, it flags exactly the three that R-4 names, and none of the review's fixed rewordings.
+- **R-10 (granted).** `prebuilt_parameter_data.py` sets `find_substring_positions.substring` to 500 (`PREBUILT_MAX_SEARCH_STRING_CHARS`), so the existing AC-7 schema and over-cap tests check the new cap.
+- **R-11 and R-13 get no case.** Neither changes an output, and a structure test would pin private helper names.
+- **Docs.** FEATURE.md (r6, failure modes 17 and 18, the watchdog exception) and README.md (file index, log) were updated. test-plan.md gains 12 coverage rows, three not-written rows, a "Post-S4 regression cases (spec r6)" section with the watchdog decision and input sizes, a "Red run (post-S4)" section, and two implementer notes.
+
+### Watchdog choice
+
+- Each hostile case starts one child interpreter: `subprocess.run([sys.executable, "-c", CHILD_PROGRAM], input=<JSON request>, capture_output=True, encoding="utf-8", timeout=30, env=<PYTHONPATH with the worktree first>)`.
+- When the timeout passes, `subprocess.run` kills the child (`TerminateProcess` on Windows, `SIGKILL` on Linux), and the test calls `pytest.fail("<tool> gave no result within the 30 s liveness watchdog ...")`. A daemon thread could not be stopped and would slow the rest of the run.
+- The request goes in on stdin, because a 1,000,000-character argument does not fit on a Windows command line.
+- The child builds only the tool's category and calls `FunctionTool.execute`, the same seam as every other case. The parent rebuilds the `ToolResult` and reuses `ToolRunner`'s exact checks.
+- 30 s is about 15 times NFR-7's 2 s. No test asserts a speed. The inputs are sized so the current code needs minutes or more, while the S4 and r6 fix prototypes take at most 0.64 s.
+
+### R-12 context
+
+`decimal.Context(Emax=5, traps=[InvalidOperation, DivisionByZero, Overflow, Inexact, Rounded])` is set with `decimal.setcontext` in the test thread before `asyncio.run`, and the previous context is restored in `finally`. The context reaches the tool's worker thread because `asyncio.to_thread` copies context variables, and the red run confirms it does: each case fails with a trap or a refusal.
+
+### Green guards
+
+Eight new cases pass today on purpose. They pin r6 outputs that the current code already gives, so the repair cannot over-correct:
+- `extract_numbers-comma-list-keeps-every-item` and `-group-followed-by-digit-splits`;
+- `toml_to_json-r6-exactly-100-segments-still-accepted`;
+- `xml_find_elements-r7-many-siblings-counted-in-full`;
+- `extract_html_links-open-anchor-at-end-adds-no-link`;
+- `html_table_to_records-open-cell-at-end-adds-no-cell`;
+- `replace_all_occurrences-case-sensitive-find-keeps-short-text-cap`;
+- `verify_json_syntax-integer-of-4400-digits-invalid`.
+
+### Proof
+
+```
+PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider tests/features/prebuilt_tools -rfE        (at c225debf plus the uncommitted test changes)
+FAILED tests/features/prebuilt_tools/test_prebuilt_rows_text.py::test_text_rows_reject_bad_input[find_substring_positions-substring-over-search-cap]
+FAILED tests/features/prebuilt_tools/test_prebuilt_rows_text.py::test_text_rows_reject_bad_input[replace_all_occurrences-case-insensitive-find-over-search-cap]
+FAILED tests/features/prebuilt_tools/test_prebuilt_toolset_contract.py::test_tool_schema_matches_its_appendix_row[find_substring_positions]
+39 failed, 4313 passed in 357.24s (0:05:57)
+
+PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider tests/test_tools_catalog.py tests/test_function_tool_parameter_types.py tests/test_tool_core.py tests/features/coding_agent
+........................................................................ [ 82%]
+..............................................................           [100%]
+338 passed, 12 skipped in 19.97s
+
+PYTHONPATH=$(pwd) python lint/run.py        (test files and test-plan.md staged)
+S063 RATCHETED: 4 known finding(s). Inspect with: python lint/run.py --rule S063 --all
+
+S064 RATCHETED: 4 known finding(s). Inspect with: python lint/run.py --rule S064 --all
+
+SDK-LINT: PASS
+```
+
+The pack collects 4,352 tests: the 4,310 earlier tests, plus 23 hostile cases and 19 row cases. Lint exited 0. A001 stays at its baseline of 643, and `--rule A001 --all` lists no file in the pack.
+
+**Failing ids, by finding.** All 39 were read in the `-rfE` output and fail for the stated reason. Ten hit the watchdog; the other 29 returned a result that differs from r6.
+- R-1: hostile `extract_markdown_headings-r1-space-run-before-hash-text` (watchdog).
+- R-2: hostile `extract_numbers-r2-comma-chain-ending-in-a-digit` and `extract_money_amounts-r2-comma-chain-without-currency` (watchdog).
+- R-3: code_network `verify_ip_address-ipv6-zone-suffix-kept` (`AddressValueError`).
+- R-4: contract description test `[diff_json_documents]` and `[group_records_by_field]`, and parameter test `[join_records]` (marker matched).
+- R-5: json_csv `extract_json_from_text-float-overflow-candidate-skipped`, `-negative-and-capital-e-overflow-skipped`, and `-scan-continues-after-overflow` (`Infinity` or `-Infinity` in the output).
+- M-1: json_csv `verify_json_syntax-float-overflow-invalid` (`valid` true).
+- R-6: hostile `toml_to_json-r6-dotted-bare-key`, `-r6-dotted-table-header`, and `-r6-dotted-inline-table-key` (watchdog).
+- R-7:
+  - formats `xml_find_elements-repeated-descendant-listed-once` (count 3) and `-chain-of-60-has-58-distinct-matches` (count 1,711);
+  - hostile `-r7-six-descendant-steps` (success with 45,057,474 matches) and `-r7-five-steps-matching-nothing` (success with 0 matches);
+  - hostile `-r7-positional-predicate-over-siblings` (watchdog).
+- R-8:
+  - hostile `strip_html_tags`, `extract_html_links`, and `html_table_to_records` `-r8-open-tags-to-the-cap` (watchdog);
+  - text `strip_html_tags-open-tag-at-end-dropped` and `-open-comment-at-end-dropped`, and geometry `extract_html_links-open-tag-at-end-not-in-link-text` and `html_table_to_records-open-tag-at-end-not-in-cell-text` (the open tail leaks into the text).
+- R-9: hostile `apply_json_patch-r9-work-total-at-operation-49` (success, 1,000 operations applied).
+- R-10:
+  - text `find_substring_positions-substring-over-search-cap` and `replace_all_occurrences-case-insensitive-find-over-search-cap` (success);
+  - two existing ids, red because of the granted cap change: `test_one_over_cap_argument_fails_validation_naming_the_parameter[find_substring_positions]` and `test_tool_schema_matches_its_appendix_row[find_substring_positions]`.
+- R-12: hostile `compound_interest_future_value-r12-growth` (`ToolExecutionError`), `decimal_degrees_to_dms-r12-arc-seconds` (`Inexact`), and `Overflow` for `unix_timestamp_to_datetime-r12-scaled-microseconds`, `parse_duration_text-r12-unit-phrase`, `-r12-iso-fraction`, `-r12-clock-fraction`, `decode_jwt_payload-r12-claim-times`, and `extract_money_amounts-r12-magnitude-suffix`.
+
+### Residuals
+
+- **Schema test.** The orchestrator named only the over-cap test as turning red from the cap change. `test_tool_schema_matches_its_appendix_row[find_substring_positions]` is red for the same reason ("maxLength is 10000, Appendix A says 500"), and the fix is the same: the implementation's cap.
+- **R-9 timing.** R-9 is red by its output, because the current code succeeds after about 13 s. On a CI machine more than twice as slow, it would instead fail on the watchdog. It is red either way.
+- **R-7 visit count.** ElementPath internals determine the visit count, so each R-7 input sits far past or far under the 2,000,000-visit cap, and a different counting method cannot move a case across it.
+- **Count tests.** The three count tests (2^128 subnets, 10^15 integers, C(39,20)) still have no watchdog, because the grant covers only the hostile-input cases. A regression there still hangs.
+- **Runtime.** The pack took 5 min 57 s while red, because each of the 10 watchdog cases costs 30 s. Once green, the hostile file costs one interpreter start per case.
+- **Earlier residuals still open.**
+  - The `def run(self)` reading and the `has_header` `ANY` reading are both unchanged.
+  - Flat-list `minItems` is still not compared.
+  - `pipeline.md` was not touched.
