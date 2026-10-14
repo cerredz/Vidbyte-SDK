@@ -1484,3 +1484,16 @@ Auth, by connector:
 | r1 | 2026-10-14 | S1 spec | Initial spec: request §B 0–5 scope, organized as work groups G0–G5 (docs; rendering; webhook; comments and labels; five new connectors; GitHub update-in-place). Vendor facts checked against official docs read 2026-10-14; unconfirmed facts are A-1…A-18 with live checks L-1…L-15 |
 | r2 | 2026-10-14 | S1 revision | Applied S1 review round 1 R-1…R-8 (3 Major and 5 Minor, all accepted). Telegram HTML neutralization (INV-18, EC-43, EC-44). Honest deadline semantics (NFR-7, EC-45). §13 factory and `WIRE_ROWS` facts. A002 and S061 `--all` checks. README stale-line fixes. Exact patterns. Both planted-marker branches. 24–64-byte webhook keys. The scope-adding parts became optional Q-6, Q-7, and Q-8 (default no) |
 | r3 | 2026-10-14 | S1 revision (final) | Applied S1 review round 2, R-9…R-18 (1 Blocker, 2 Major, 7 Minor; all accepted, R-17 with a no-literal variant). `OutputResponses` keeps `OutputHttp` one level deep. Telegram also neutralizes `![` media. The Teams body rule is defined. ADF loose lists and breaks. Exact §13 assertions. README Deadline footgun and EC-46. GitLab port range. Header errors never echo a name. Seven `--rule --all` lint checks. Status set to approved: the two review rounds are the approval |
+| r3 | 2026-10-14 | S3 implement | All 33 §12.3 rows built in phase order (a5a50002…4991370c; contract regenerated in d421b6b9, `--check` current); 659/660 feature tests, `python lint/run.py` (SDK-LINT: PASS), the seven NFR-6 rule checks, Semgrep, and `run_ci.py --stage package` pass. The one red test, `test_job_summary_concurrent_appends_run_off_the_loop_one_after_the_other`, counts its own `read_text` as a third open on the loop thread, so it needs an S2 fix; the source stage fails only on it. Status set to `implemented`. |
+
+**Implementation deviations** (S3; none changes a public name or a tested behavior):
+
+- Row 11 removed the now-dead `TELEGRAM_TEXT_MAX_CHARS` constant; only the old `sendMessage` path used it.
+- `OutputHttp.read` sends no body and returns any parsed JSON value; the list-of-objects check lives in `GitHubResponses.items`, which yields FAILED `invalid_response` otherwise.
+- `OutputAdf` keeps each paragraph's raw line (INV-2) and runs the patterns on the `rstrip()`ed line; blank lines add no node, so an empty fence between two items of one list kind keeps one list.
+- A few literals stay inline because no operational name sits next to them (A007 clean): the marker separator `"\n\n"`, the GitHub query words `open`, `created`, and `asc`, Slack's three escape characters, the header-value characters `"\r\n\x00"`, and HubSpot's `"+00:00"` → `"Z"`.
+- Discord's `forum_tags` without `forum=True` raises an inline `ConfigurationError` in `discord.py`, not through a new `OutputArguments` helper.
+- `GitHubRequests.issue` makes the title one line itself; `OutputArguments.signing_key` strips surrounding whitespace before the prefix and base64 steps.
+- The GitHub mode methods and a few helpers carry their own `@intent` blocks, so A002 stays clean.
+- `WebhookOutput.send` declares `body: object` before its mapping check (4991370c), so mypy (S009) does not regress.
+- The import blocks of `vidbyte/agents/output/__init__.py` and `delivery.py` were wrapped for I001 (1be7319e); untouched blocks were left alone.
