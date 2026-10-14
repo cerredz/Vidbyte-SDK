@@ -1,13 +1,13 @@
 """FILE: tests/features/prebuilt_tools/test_prebuilt_hostile_inputs.py
 
-PURPOSE: Regression cases for the S4 review findings that only hostile input or a hostile host exposes: cap-sized inputs on which a tool ran for minutes or hours (R-1, R-2, R-6, R-7, R-8, R-9, closing R-14), and a host decimal context that leaked into tool arithmetic (R-12).
+PURPOSE: Regression cases for the review findings that only hostile input or a hostile host exposes: cap-sized inputs on which a tool ran for minutes or hours (S4 R-1, R-2, R-6 to R-9, closing R-14; re-review R-15 and R-17, the TOML dotted-key scan), and a host decimal context that leaked into tool arithmetic or a far exponent (S4 R-12; re-review R-16).
 ROLE IN CODEBASE: Runs each cap-sized call through FunctionTool.execute in a child interpreter under a liveness watchdog, and runs the decimal-context cases in this process through the ToolRunner fixture of tests/features/prebuilt_tools/conftest.py.
-ARCHITECTURE NOTE: The watchdog is the orchestrator's one exception to the pack's no-wall-clock rule, granted for these hostile cases only. It asserts no speed: a call gets WATCHDOG_SECONDS (about 15 times NFR-7's 2 s), and a child that outlives it is killed, so a hang becomes a red test and leaves no work running. Every case still asserts the exact output or error its spec r6 row defines.
-FUNCTION INVENTORY: WatchdogToolRunner runs one call in a child interpreter and turns the reply into a ToolResult; child_environment builds the child's environment; comma_chain_entries and nested_keys build two long expectations; HOSTILE_SUCCESS_CASES and HOSTILE_FAILURE_CASES hold the cap-sized inputs checked by test_hostile_input_returns_documented_output and test_hostile_input_fails_with_documented_error; DECIMAL_CONTEXT_CASES are checked by test_hostile_host_decimal_context_cannot_change_a_result.
+ARCHITECTURE NOTE: The watchdog is the orchestrator's one exception to the pack's no-wall-clock rule, granted for these hostile cases only. It asserts no speed: a call gets WATCHDOG_SECONDS (about 15 times NFR-7's 2 s), and a child that outlives it is killed, so a hang becomes a red test and leaves no work running. Every case still asserts the exact output or error its spec r6 or r7 row defines.
+FUNCTION INVENTORY: WatchdogToolRunner runs one call in a child interpreter and turns the reply into a ToolResult; child_environment builds the child's environment; comma_chain_entries and nested_keys build two long expectations; HOSTILE_SUCCESS_CASES and HOSTILE_FAILURE_CASES hold the cap-sized inputs checked by test_hostile_input_returns_documented_output and test_hostile_input_fails_with_documented_error; DECIMAL_CONTEXT_CASES are checked by test_hostile_host_decimal_context_cannot_change_a_result; host_decimal_context sets one host context per test for FAR_EXPONENT_SUCCESS_CASES and FAR_EXPONENT_FAILURE_CASES, checked by test_far_exponent_data_size_is_zero_under_any_host_context and test_far_exponent_data_size_refusal_holds_under_any_host_context.
 COMMON MODIFICATION PATTERNS: Size a new hostile input so the fixed tool finishes far under one second and a regressed one runs far past the watchdog, keep its expected value exact, and start its label with the review ID.
 WHAT NOT TO DO IN THIS FILE: 1. Do not assert a duration or lower WATCHDOG_SECONDS; the watchdog only turns a hang into a failure. 2. Do not run a cap-sized hostile call in the test process, where a regression would hang the whole run.
-KNOWN EDGE CASES: The child reads its request from stdin, because a 1,000,000-character argument does not fit on a Windows command line. FunctionTool runs a tool through asyncio.to_thread, which copies the caller's context variables, so the hostile decimal context is set in the test's own thread before asyncio.run and restored in finally. PREBUILT_MAX_XML_PATH_VISITS counts ElementPath reads, whose number depends on stdlib internals, so the XML inputs sit far past or far under its 2,000,000.
-RELATED DOCS: tests/features/prebuilt_tools/FEATURE.md; docs/spec/prebuilt-agent-tools/review.md (R-1 to R-14); docs/spec/prebuilt-agent-tools/spec.md (§9.2 item 18, EC-47 to EC-50, §13); docs/spec/prebuilt-agent-tools/test-plan.md
+KNOWN EDGE CASES: The child reads its request from stdin, because a 1,000,000-character argument does not fit on a Windows command line. FunctionTool runs a tool through asyncio.to_thread, which copies the caller's context variables, so the hostile decimal context is set in the test's own thread before asyncio.run and restored in finally. PREBUILT_MAX_XML_PATH_VISITS counts ElementPath reads, whose number depends on stdlib internals, so the XML inputs sit far past or far under its 2,000,000. R-15's slow input repeats the pair (backslash + quote) * k; a backslash followed by k quotes scans in linear time and proves nothing.
+RELATED DOCS: tests/features/prebuilt_tools/FEATURE.md; docs/spec/prebuilt-agent-tools/review.md (R-1 to R-17); docs/spec/prebuilt-agent-tools/spec.md (§9.2 item 18, EC-47 to EC-51, D-19, §13); docs/spec/prebuilt-agent-tools/test-plan.md
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/prebuilt_tools/test_prebuilt_hostile_inputs.py
 """
 
@@ -18,7 +18,7 @@ import json
 import os
 import subprocess
 import sys
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +26,8 @@ import pytest
 
 from tests.features.prebuilt_tools.prebuilt_catalogue_data import CATEGORY_TABLE
 from tests.features.prebuilt_tools.prebuilt_tool_harness import FailureCase, SuccessCase, ToolRunner, bad, ok
-from tests.features.prebuilt_tools.test_prebuilt_rows_formats_encoding import JWT_SAMPLE, JWT_SAMPLE_OUTPUT
+from tests.features.prebuilt_tools.test_prebuilt_rows_formats_encoding import JWT_SAMPLE, JWT_SAMPLE_OUTPUT, TOML_INVALID_MESSAGE, TOML_NESTING_MESSAGE
+from tests.features.prebuilt_tools.test_prebuilt_rows_geometry_bits_markdown import FAR_EXPONENT_REFUSED_SIZES, FAR_EXPONENT_ZERO_SIZES, ZERO_DATA_SIZE
 from vidbyte.tools.types import ToolResult, ToolStatus
 
 WATCHDOG_SECONDS = 30
@@ -94,6 +95,9 @@ DOTTED_SEGMENTS = 499_998
 CHAIN_OF_60 = "<a>" * 60 + "</a>" * 60
 SIBLINGS = "<r>" + "<b/>" * 249_998 + "</r>"
 PATCH_DOCUMENT = '{"a":[' + ",".join(["0"] * 100_000) + "]}"
+ESCAPED_QUOTE = chr(92) + '"'
+DOTTED_RUN = "a." * 499_990 + "a"
+INLINE_TABLE_KEY = "a." * 499_900 + "a = 1"
 PATCH_COPY_AND_REMOVE = json.dumps([{"op": "copy", "from": "/a", "path": "/b"}, {"op": "remove", "path": "/b"}] * 500)
 
 
@@ -150,6 +154,11 @@ HOSTILE_SUCCESS_CASES = [
         {"columns": ["column_1"], "records": [{"column_1": "a"}], "table_count": 1},
         "r8-open-tags-to-the-cap",
     ),
+    # S5 R-15 (A.20, EC-51): a one-line quoted segment left open ends at its line end, so a comment of escaped quotes is read once.
+    ok("toml_to_json", {"toml_text": "# " + '"' + ESCAPED_QUOTE * 499_995 + "\na = 1"}, {"value": {"a": 1}}, "r15-escaped-quotes-in-comment"),
+    # S5 R-17 (A.20, D-19): comments and multi-line strings are skipped whole, so a cap-sized run inside one is parsed.
+    ok("toml_to_json", {"toml_text": "# " + DOTTED_RUN + "\nb = 1"}, {"value": {"b": 1}}, "r17-dotted-run-in-comment"),
+    ok("toml_to_json", {"toml_text": 's = """' + DOTTED_RUN + '"""'}, {"value": {"s": DOTTED_RUN}}, "r17-dotted-run-in-multi-line-string"),
 ]
 
 HOSTILE_FAILURE_CASES = [
@@ -163,18 +172,38 @@ HOSTILE_FAILURE_CASES = [
     bad("xml_find_elements", {"xml_text": SIBLINGS, "path": "b[1]"}, "path", "r7-positional-predicate-over-siblings"),
     # R-9 (A.17, EC-49): each operation reads 200,001 characters, so the work total passes 10,000,000 at index 49.
     bad("apply_json_patch", {"json_text": PATCH_DOCUMENT, "patch_json": PATCH_COPY_AND_REMOVE}, "patch_json", "r9-work-total-at-operation-49", contains="operation 49"),
+    # S5 R-15 (A.20, EC-51): an open basic string of escaped quotes is invalid TOML, and runs of multi-line openers are read once.
+    bad("toml_to_json", {"toml_text": "x = " + '"' + ESCAPED_QUOTE * 499_990}, "toml_text", "r15-open-string-of-escaped-quotes", contains=TOML_INVALID_MESSAGE),
+    bad("toml_to_json", {"toml_text": '"""' * 333_333}, "toml_text", "r15-multi-line-basic-openers", contains=TOML_INVALID_MESSAGE),
+    bad("toml_to_json", {"toml_text": "'''" * 333_333}, "toml_text", "r15-multi-line-literal-openers", contains=TOML_INVALID_MESSAGE),
+    # S5 R-17 (A.20, EC-51): a multi-line string holding an odd number of quotes must not hide the long inline-table key after it.
+    bad(
+        "toml_to_json",
+        {"toml_text": "t = { s = '''it's''', " + INLINE_TABLE_KEY + ", u = 'v' }"},
+        "toml_text",
+        "r17-key-after-literal-string-and-quote",
+        contains=TOML_NESTING_MESSAGE,
+    ),
+    bad("toml_to_json", {"toml_text": "t = { s = '''it's''', " + INLINE_TABLE_KEY + " }"}, "toml_text", "r17-key-after-literal-string", contains=TOML_NESTING_MESSAGE),
+    bad(
+        "toml_to_json",
+        {"toml_text": 't = { s = """a"b""", ' + INLINE_TABLE_KEY + ', u = "v" }'},
+        "toml_text",
+        "r17-key-after-basic-string-and-quote",
+        contains=TOML_NESTING_MESSAGE,
+    ),
 ]
 
 
 @pytest.mark.parametrize("case", HOSTILE_SUCCESS_CASES)
 def test_hostile_input_returns_documented_output(case: SuccessCase) -> None:
-    """R-1, R-2, R-6, R-7, R-8 (closing R-14): a cap-sized hostile input returns its exact r6 output within the watchdog."""
+    """R-1, R-2, R-6, R-7, R-8, R-15, R-17 (closing R-14): a cap-sized hostile input returns its exact r6 or r7 output within the watchdog."""
     WATCHDOG_RUNNER.check_success(case)
 
 
 @pytest.mark.parametrize("case", HOSTILE_FAILURE_CASES)
 def test_hostile_input_fails_with_documented_error(case: FailureCase) -> None:
-    """R-6, R-7, R-9 (closing R-14): a cap-sized hostile input fails with its r6 error, naming its parameter, within the watchdog."""
+    """R-6, R-7, R-9, R-15, R-17 (closing R-14): a cap-sized hostile input fails with its r6 or r7 error, naming its parameter, within the watchdog."""
     WATCHDOG_RUNNER.check_failure(case)
 
 
@@ -218,3 +247,33 @@ def test_hostile_host_decimal_context_cannot_change_a_result(tool_runner: ToolRu
         tool_runner.check_success(case)
     finally:
         decimal.setcontext(host_context)
+
+
+# S5 R-16 (A.27, §9.2 item 18): an exponent past decimal.MAX_EMAX gives the same result whatever the host's decimal context traps.
+FAR_EXPONENT_SUCCESS_CASES = [ok("parse_data_size", {"text": text}, ZERO_DATA_SIZE, f"r16-{label}") for text, label in FAR_EXPONENT_ZERO_SIZES]
+FAR_EXPONENT_FAILURE_CASES = [bad("parse_data_size", {"text": text}, "text", f"r16-{label}") for text, label in FAR_EXPONENT_REFUSED_SIZES]
+
+
+@pytest.fixture(params=[decimal.Context(traps=[]), HOSTILE_HOST_CONTEXT], ids=["host-traps-nothing", "host-hostile"])
+def host_decimal_context(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Give the test's thread one host decimal context for the whole test, then restore the caller's context."""
+    caller_context = decimal.getcontext()
+    decimal.setcontext(request.param.copy())
+    try:
+        yield
+    finally:
+        decimal.setcontext(caller_context)
+
+
+@pytest.mark.usefixtures("host_decimal_context")
+@pytest.mark.parametrize("case", FAR_EXPONENT_SUCCESS_CASES)
+def test_far_exponent_data_size_is_zero_under_any_host_context(tool_runner: ToolRunner, case: SuccessCase) -> None:
+    """R-16: a tiny positive or zero size with a far exponent is 0 bytes whether the host traps nothing or everything R-12 traps."""
+    tool_runner.check_success(case)
+
+
+@pytest.mark.usefixtures("host_decimal_context")
+@pytest.mark.parametrize("case", FAR_EXPONENT_FAILURE_CASES)
+def test_far_exponent_data_size_refusal_holds_under_any_host_context(tool_runner: ToolRunner, case: FailureCase) -> None:
+    """R-16: a huge or negative size with a far exponent is error(text) under either host context, never InvalidOperation or ValueError."""
+    tool_runner.check_failure(case)

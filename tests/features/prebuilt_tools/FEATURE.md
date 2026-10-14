@@ -2,7 +2,7 @@
 
 ## High-Level Feature Description
 
-The SDK ships a library of 265 small, deterministic, standard-library-only tools, grouped into 31 categories, that a developer attaches to an agent with `PrebuiltTools([...categories])`. Each tool is an ordinary `FunctionTool` the model calls with JSON arguments. It returns one JSON object on success, or a failure whose `error_type` is `validation` (schema) or `ToolExecutionError` (domain). The tools give the agent exact arithmetic, counting, date arithmetic, parsing, encoding, hashing, and structured-data work that a model does badly in tokens. Source of truth: `docs/spec/prebuilt-agent-tools/spec.md` revision 6, especially §4, §6, §8.5, §9.2, and Appendix A.
+The SDK ships a library of 265 small, deterministic, standard-library-only tools, grouped into 31 categories, that a developer attaches to an agent with `PrebuiltTools([...categories])`. Each tool is an ordinary `FunctionTool` the model calls with JSON arguments. It returns one JSON object on success, or a failure whose `error_type` is `validation` (schema) or `ToolExecutionError` (domain). The tools give the agent exact arithmetic, counting, date arithmetic, parsing, encoding, hashing, and structured-data work that a model does badly in tokens. Source of truth: `docs/spec/prebuilt-agent-tools/spec.md` revision 7, especially §4, §6, §8.5, §9.2, and Appendix A.
 
 ## Contract
 
@@ -73,12 +73,12 @@ This is the failure inventory the tests were chosen from. Each entry is input pl
 14. XML entities or DOCTYPE are parsed (EC-11). Conversion returns a value nested more than 100 deep, so `_stringify_output` raises outside the tool's error handling (EC-42).
 15. A tool reads the clock, the environment, or files, uses the global random generator, or changes the decimal context, the recursion limit, the int digit limit, or the csv field limit (INV-13).
 16. An error message echoes a long argument or the HMAC key (INV-15, T-3).
-17. A cap-sized hostile input makes a tool run for minutes or hours although every argument is within its cap: a long space run in a heading, a failing comma chain, a long dotted TOML key, repeating ElementPath steps, HTML left open at the end, or a JSON patch that copies a large value hundreds of times (S4 R-1, R-2, R-6 to R-9; EC-47 to EC-49).
-18. A host that traps `Inexact` or lowers `Emax` in its decimal context changes a tool's result or makes it raise, because the worker thread copies that context (S4 R-12; §9.2 item 18).
+17. A cap-sized hostile input makes a tool run for minutes or hours although every argument is within its cap: a long space run in a heading, a failing comma chain, a long dotted TOML key, repeating ElementPath steps, HTML left open at the end, or a JSON patch that copies a large value hundreds of times (S4 R-1, R-2, R-6 to R-9; EC-47 to EC-49). The TOML dotted-key scan itself can be slow on a line of escaped quotes, or can be misled by a multi-line string with an odd number of quotes into passing a long key to `tomllib` (re-review R-15, R-17; EC-51, D-19).
+18. A host that traps `Inexact` or lowers `Emax` in its decimal context changes a tool's result or makes it raise, because the worker thread copies that context (S4 R-12; §9.2 item 18). An exponent past `decimal.MAX_EMAX` makes `Decimal()` signal `InvalidOperation` through that same context (re-review R-16).
 
 ## Historical Regressions
 
-The pack was written red before implementation from spec revision 3, then tightened to revision 4, which fixed the values revision 3 left open. The S4 review then found 14 defects while the pack was green (R-14). Revision 6 turned them into exact row behavior, and the pack gained their regression cases before the repair: the R-ids are in the case labels of `test_prebuilt_hostile_inputs.py` and in the comments above the row cases.
+The pack was written red before implementation from spec revision 3, then tightened to revision 4, which fixed the values revision 3 left open. The S4 review then found 14 defects while the pack was green (R-14). Revision 6 turned them into exact row behavior, and the pack gained their regression cases before the repair: the R-ids are in the case labels of `test_prebuilt_hostile_inputs.py` and in the comments above the row cases. The post-repair re-review found three more (R-15 to R-17), and revision 7 pinned them. Their cases went in the same way, with `S5 R-n` comments in the row files.
 
 ## Test Suite Map
 
@@ -92,7 +92,7 @@ The pack was written red before implementation from spec revision 3, then tighte
 | `test_prebuilt_side_effects.py` | Instrumented socket, subprocess, environment, clock, and open calls are never made from tool frames. Global state is unchanged. A static source scan finds no banned calls. | AC-13, INV-13, INV-19, T-5, T-6 |
 | `test_prebuilt_resource_bounds.py` | Item cap and character budget, arithmetic counts, 4,001-digit refusals, every INV-20 tool refusing over-cap output (with peak memory for predicted outputs), deep nesting, and the EC-39 scan cap. | AC-14, AC-15, AC-20, AC-21, INV-17 to INV-20 |
 | `test_prebuilt_rows_*.py` (12 files) | Exact-output and error cases for every Appendix A row, by category group. | AC-11, plus the row-level edge cases |
-| `test_prebuilt_hostile_inputs.py` | Cap-sized hostile inputs, run in a child interpreter under a liveness watchdog, return their exact r6 output or error; a hostile host decimal context changes no result. | S4 R-1, R-2, R-6 to R-9, R-12, R-14; NFR-7; EC-47 to EC-49; §9.2 item 18 |
+| `test_prebuilt_hostile_inputs.py` | Cap-sized hostile inputs, run in a child interpreter under a liveness watchdog, return their exact r6 or r7 output or error; a hostile host decimal context changes no result, and a far exponent gives the same result under any host context. | S4 R-1, R-2, R-6 to R-9, R-12, R-14; re-review R-15 to R-17; NFR-7; EC-47 to EC-51; D-19; §9.2 item 18 |
 
 ## Omitted Testing Strategies
 

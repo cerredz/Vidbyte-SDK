@@ -1,8 +1,8 @@
 # Test plan: A library of 250+ prebuilt agent tools in vidbyte-sdk
 
-Spec: `docs/spec/prebuilt-agent-tools/spec.md` r6 (the pack was written against r3, tightened to r4, and given the S4 regression cases from r6; see "Spec r4 tightening" and "Post-S4 regression cases") · Framework: pytest 8.3.5 with pytest-asyncio 1.3.0 (strict mode; the pack uses `asyncio.run` inside plain tests, so no marker is needed) on Python 3.11.0 · Prior art copied: `tests/features/sdk_operation_costs/test_operation_cost_contract.py` (pack and header shape), `tests/features/coding_agent/conftest.py` (lazy feature import inside fixtures), `tests/test_function_tool_parameter_types.py` (the `FunctionTool` validation seam)
+Spec: `docs/spec/prebuilt-agent-tools/spec.md` r7 (the pack was written against r3, tightened to r4, given the S4 regression cases from r6, and given the re-review round 1 cases from r7; see "Spec r4 tightening", "Post-S4 regression cases", and "Post-re-review round 1 regression cases") · Framework: pytest 8.3.5 with pytest-asyncio 1.3.0 (strict mode; the pack uses `asyncio.run` inside plain tests, so no marker is needed) on Python 3.11.0 · Prior art copied: `tests/features/sdk_operation_costs/test_operation_cost_contract.py` (pack and header shape), `tests/features/coding_agent/conftest.py` (lazy feature import inside fixtures), `tests/test_function_tool_parameter_types.py` (the `FunctionTool` validation seam)
 
-Pack: `tests/features/prebuilt_tools/`. It has 20 test files, 4,352 collected tests, and 4 support modules (`conftest.py`, `prebuilt_tool_harness.py`, `prebuilt_catalogue_data.py`, `prebuilt_parameter_data.py`), plus `FEATURE.md` and `README.md`. Each Appendix A tool has at least one exact-output case at the model seam. The row files hold 1,370 success cases and 525 failure cases, and each row-group file adds a few property tests. `test_prebuilt_hostile_inputs.py` adds 15 cap-sized hostile cases under a liveness watchdog and 8 hostile-host decimal-context cases.
+Pack: `tests/features/prebuilt_tools/`. It has 20 test files, 4,397 collected tests, and 4 support modules (`conftest.py`, `prebuilt_tool_harness.py`, `prebuilt_catalogue_data.py`, `prebuilt_parameter_data.py`), plus `FEATURE.md` and `README.md`. Each Appendix A tool has at least one exact-output case at the model seam. The row files hold 1,381 success cases and 532 failure cases, and each row-group file adds a few property tests. `test_prebuilt_hostile_inputs.py` adds 24 cap-sized hostile cases under a liveness watchdog, 8 hostile-host decimal-context cases, and 18 far-exponent cases under two host decimal contexts.
 
 ## Coverage map
 
@@ -54,6 +54,10 @@ Pack: `tests/features/prebuilt_tools/`. It has 20 test files, 4,352 collected te
 | S4 R-10, EC-50 | `prebuilt_parameter_data.py` `substring` cap 500 (the AC-7 schema and over-cap tests); text rows `find_substring_positions-substring-over-search-cap`, `replace_all_occurrences-case-insensitive-find-over-search-cap`, `-case-sensitive-find-keeps-short-text-cap` | contract; unit | An overlapping or case-insensitive search with a 10,000-character search string costs the text length times that length. | The cap is checked as a number and with one-over input. The case-sensitive 10,000-character case passes today and guards against over-refusal. |
 | S4 R-12, §9.2 item 18 | `test_prebuilt_hostile_inputs.py` → `test_hostile_host_decimal_context_cannot_change_a_result` (8 cases) | integration (host state) | A host decimal context that traps `Inexact` and `Rounded` at `Emax=5` makes tools refuse or leak `Inexact` and `Overflow`. | The context is set in the test thread before `asyncio.run`, so `asyncio.to_thread` copies it into the worker, and it is restored in `finally`. The 8 cases reach all 8 sites R-12 lists: finance growth, arc-seconds, timestamp scaling, the three duration parsers, JWT claim times, and money suffixes. |
 | S4 R-14 | all of the above | — | The pack was green with every finding present. | Every new case is red at `c225debf` apart from the listed guards (see "Red run (post-S4)"). |
+| S5 R-15, EC-51, NFR-7 | hostile `toml_to_json-r15-escaped-quotes-in-comment`, `-r15-open-string-of-escaped-quotes`, `-r15-multi-line-basic-openers`, `-r15-multi-line-literal-openers`; formats rows `toml_to_json-open-quote-run-of-61-segments` | hostile under the watchdog; unit | The dotted-key pre-scan restarts at every quote on a line of escaped quotes, which takes about 23 minutes at the cap. Or, on Python 3.11.0, it merges two short runs across an open quote and gives invalid TOML the nesting message. | Each case asserts the exact r7 result: `{"value": {"a": 1}}`, or error(`toml_text`) with the invalid-TOML message. The two opener cases pass today. They guard against a multi-line string pattern that is slow on runs of `"""` or `'''`. |
+| S5 R-17, EC-51, D-19 | hostile `toml_to_json-r17-key-after-literal-string-and-quote`, `-r17-key-after-literal-string`, `-r17-key-after-basic-string-and-quote`, `-r17-dotted-run-in-comment`, `-r17-dotted-run-in-multi-line-string`; formats rows `toml_to_json-key-after-odd-quote-multi-line-string`, `-long-run-in-comment-is-parsed`, `-long-run-in-multi-line-basic-string`, `-long-run-in-multi-line-literal-string`, `-open-quote-is-the-101st-segment`, `-open-quote-is-the-100th-segment`, `-hash-inside-string-hides-no-key` | hostile under the watchdog; unit | A multi-line string with an odd number of quotes shifts the scan's quote pairing, so a cap-sized inline-table key reaches `tomllib`, which takes minutes. A scan that still refuses a long run inside a comment breaks D-19. | The three bypass shapes need the nesting message, and the comment cases need the parsed value. Eight cases pass today and pin r7 behavior that the fix must keep. |
+| S5 R-16, §9.2 item 18, INV-14 | geometry rows `parse_data_size-far-exponent-*` (6 success, 3 failure); hostile `test_far_exponent_data_size_is_zero_under_any_host_context` and `test_far_exponent_data_size_refusal_holds_under_any_host_context` (the same 9 inputs under 2 host contexts) | unit; integration (host state) | `Decimal()` of an exponent past `decimal.MAX_EMAX` leaks `InvalidOperation`, or `ValueError` when the host traps nothing. A fix that takes the sign from the float would make `-1e-99999999999999999999 B` zero bytes. | The 9 inputs carry the r7 A.27 results. They run again under `Context(traps=[])` and under the R-12 hostile context, which the `host_decimal_context` fixture sets for the test and restores after it. |
+| A.29 consistency (R-16 family) | extraction rows `extract_numbers-zero-with-far-exponent-is-zero` | unit | `0e5000` is dropped because its exponent is past 4,002, although zero expands exactly to `"0"`. | The output is exact: one entry with text `0e5000`, value `0`, and position 0. |
 
 ### Row files (AC-11): provenance of expected values
 
@@ -97,11 +101,12 @@ Spec r4 (commit `5d93fe88`) fixed the values r3 left open. **No existing asserti
 | Cross-version pins (EC-24 seeded draws, EC-25 PEP 695 grammar, EC-26 `ipaddress` flags of 100.64.0.1, EC-38 new Unicode characters) | They would fail on one of the two CI Pythons. Seeded tools are tested for same-seed identity, seed sensitivity, structure, and the row's documented generator calls in the running interpreter. |
 | EC-10 catastrophic regex backtracking | It is an accepted limitation, and a test would hang. |
 | EC-28 timeout, EC-27 parallel threads, EC-40 hot-loop rebuild cost | These are runtime or performance behavior with no tool-side contract to observe deterministically. Statelessness is covered by INV-6, INV-13, and the repeated-call determinism test. |
-| A meta-test that every Appendix A tool has a success case | It would pass before implementation, which is not red. Coverage was verified by script instead: 265 of 265 tools, 1,370 success cases, 525 failure cases. |
+| A meta-test that every Appendix A tool has a success case | It would pass before implementation, which is not red. Coverage was verified by script instead: 265 of 265 tools, 1,381 success cases, 532 failure cases. |
 | Row-level over-cap cases for `add_business_days` (1,001 holidays, 8 weekend days) | AC-7 sends exactly these arguments for every capped list, so a row copy would only duplicate it. |
 | Random (unseeded) fuzzing or hypothesis | Failures would not reproduce. The schema-derived sweep is deterministic and edge-biased. |
 | S4 R-11 (helper call chain) and R-13 (shared rules written several times) | Neither changes any output, so a behavior test would pass before and after the repair. A structure test would pin private helper names, and the orchestrator ruled those out. |
 | A watchdog for the three count tests (2^128 subnets, 10^15 integers, C(39,20)) | The orchestrator granted the watchdog for the hostile-input regression cases only. A regressed count test still hangs instead of failing, as before. |
+| A liveness watchdog for `parse_data_size` | Every R-16 input has 25 characters or fewer, and each call takes about 0.001 s, so a liveness case could not fail. |
 | A liveness case for `find_substring_positions` at the new 500-character cap | At 500 characters both the current and the fixed code finish in about 1 s, so the case could not fail. The cap itself is the fix, and AC-7 checks it. |
 
 ## Red run (before implementation)
@@ -280,6 +285,89 @@ PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider tests/test_tools_catal
 
 The neighbouring suites are unchanged. The lint result with these files staged is in the S2 report's post-S4 addendum.
 
+## Post-re-review round 1 regression cases (spec r7)
+
+The post-repair re-review confirmed three Blockers: R-15, R-16, and R-17 in `review.md`. Spec r7 (`70df9458`, with D-19 and EC-51) pinned their outputs. These cases went in before the repair, against `7fa8dd9c`, whose code last changed at `c8eefe53`. No production file was edited.
+
+Each expected value was read from these r7 sources: the A.20 `toml_to_json` row, the A.27 `parse_data_size` row, the A.29 `extract_numbers` row, EC-51, D-19, and §9.2 item 18. Each was then checked on Python 3.11.0 in two ways:
+- against HEAD;
+- with the verifier's in-memory prototypes `s5v_toml_lexer.py` and `s5v_data_size_patch.py` loaded (from the session scratchpad; neither was copied into the worktree).
+
+With the prototypes loaded as pytest plugins, 35 of the 36 new in-process cases pass. The one left is `extract_numbers-zero-with-far-exponent-is-zero`, which no prototype covers. A probe ran all 9 cap-sized TOML inputs with the prototypes, and each gave its expected result in at most 0.15 s.
+
+**Where the cases live.**
+- The 9 cap-sized TOML inputs are in `test_prebuilt_hostile_inputs.py`, under the existing 30 s watchdog, with labels that start `r15-` or `r17-`.
+- The 8 small TOML scan cases are in the A.20 tables of `test_prebuilt_rows_formats_encoding.py`, under `# S5 R-15` and `# S5 R-17` comments.
+- The 9 R-16 inputs are `FAR_EXPONENT_ZERO_SIZES` and `FAR_EXPONENT_REFUSED_SIZES` in `test_prebuilt_rows_geometry_bits_markdown.py`. They run once there as A.27 row cases. The hostile file runs them again under 2 host decimal contexts, which makes 18 cases.
+- The A.29 consistency case is in `test_prebuilt_rows_extraction.py`.
+
+**Message words.** For invalid TOML, the A.20 row fixes the message: "the text is not valid TOML 1.0" (EC-31). For a long run, it says only "the nesting message". Telling those two messages apart is the point of R-15 c and R-17 i. So the cases look for `TOML_NESTING_MESSAGE = "the TOML is nested deeper than 100 levels"`, the wording that the spec author's r7 regression table and the orchestrator call NEST. Both message constants live in the formats row file.
+
+**Input shapes.**
+- R-15's slow input repeats the pair `(chr(92) + '"') * k`. By contrast, `chr(92) + '"' * k` is one backslash followed by k quotes, which every scan reads in linear time.
+- R-15 c, `"k" + ".k" * 59 + '."' + "k" + ".k" * 60 + " = 1"`, is red only on Python 3.11.0. There, `re` merges the two runs across the open quote (review R-15). On 3.13, HEAD already gives the invalid-TOML message.
+- R-17 a to c use `"a." * 499_900 + "a = 1"` as the inline-table key, at 999,829 to 999,838 characters.
+
+**R-16 host contexts.** `host_decimal_context` is a fixture with two parameters: `decimal.Context(traps=[])`, and the R-12 `HOSTILE_HOST_CONTEXT` (`Emax=5`, trapping `InvalidOperation`, `DivisionByZero`, `Overflow`, `Inexact`, and `Rounded`).
+- It sets the context in the test thread before the call, and `asyncio.to_thread` copies it into the worker.
+- It restores the caller's context in `finally`.
+- `tool_runner` is session-scoped, so the library is never built under a hostile context.
+- The red run confirms that the context reaches the tool: with no traps, HEAD fails with `ValueError` ("cannot convert NaN to integer ratio") instead of `InvalidOperation`.
+
+**A.29 consistency case: encoded.** The row reads: "A number in scientific notation is expanded exactly. A run of more than 4,000 digits is skipped." §9.2 item 18 (r7) adds that `extract_numbers` "compares the exponent's absolute value with `PREBUILT_MAX_DECIMAL_TEXT_CHARS` before it builds a `Decimal` from the text, and its row gives the result for a farther exponent without building one".
+- `0e5000` expanded exactly is zero. §9.2 rule 5 writes zero as the one digit `"0"`.
+- Neither the written text (`0` and `5000`) nor the expansion holds a run of more than 4,000 digits, so no reading of the row skips it.
+- The other fields follow the row: `text` is the match `0e5000`, `position` is 0, `is_percent` is false, `count` is 1 (every occurrence is listed), and `truncated` is false.
+
+HEAD gives `0e4002` the value `"0"` but drops `0e5000`. The S1 r7 report flagged the same gap.
+
+**Green guards.** Twelve new cases pass today on purpose. Each pins an r7 result that the fix must keep:
+- R-15: `toml_to_json-r15-multi-line-basic-openers` and `-r15-multi-line-literal-openers`. A multi-line string pattern that is slow on runs of openers would fail them.
+- R-17, guarding against a partial fix: `-r17-key-after-literal-string`. HEAD refuses it in 0.05 s, but the review measured that R-15's constant without R-17's fix lets it through to `tomllib`.
+- R-17, cases that already behave as r7 says: `-r17-dotted-run-in-multi-line-string` and the row cases `-key-after-odd-quote-multi-line-string`, `-long-run-in-multi-line-basic-string`, `-long-run-in-multi-line-literal-string`, `-hash-inside-string-hides-no-key`, `-open-quote-is-the-101st-segment`, and `-open-quote-is-the-100th-segment`.
+- R-16: the `host-traps-nothing` failure cases `r16-huge-positive` and `r16-huge-negative`. With no traps, HEAD's float check already refuses them.
+
+**Pre-existing tests.** No existing test or assertion changed.
+
+## Red run (post-re-review round 1)
+
+This run was against `7fa8dd9c` on Python 3.11.0 and Windows 11, with no production file edited, and no other pytest ran at the same time. It collected 4,397 tests: the 4,352 earlier tests plus 45 new cases. The new cases are 9 cap-sized TOML cases, 18 R-16 host-context cases, 8 TOML row cases, 9 A.27 row cases, and 1 A.29 row case.
+
+```
+PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider -o faulthandler_timeout=120 tests/features/prebuilt_tools
+FAILED tests/features/prebuilt_tools/test_prebuilt_rows_geometry_bits_markdown.py::test_geometry_bits_markdown_rows_reject_bad_input[parse_data_size-far-exponent-huge-negative]
+FAILED tests/features/prebuilt_tools/test_prebuilt_rows_geometry_bits_markdown.py::test_geometry_bits_markdown_rows_reject_bad_input[parse_data_size-far-exponent-tiny-negative-is-negative]
+33 failed, 4364 passed in 161.72s (0:02:41)
+```
+
+The table groups the 33 failures by finding. In the reason column, "watchdog" means the child was stopped at 30 s ("gave no result within the 30 s liveness watchdog"). "Output" means the call returned, but its result was not the exact r7 result.
+
+| R-id | Failing test ids | Reason today |
+|---|---|---|
+| R-15 | hostile `toml_to_json-r15-escaped-quotes-in-comment`, `-r15-open-string-of-escaped-quotes` | watchdog |
+| R-15 | formats `toml_to_json-open-quote-run-of-61-segments` | output: the nesting message instead of "the text is not valid TOML 1.0" (the Python 3.11.0 run merge) |
+| R-17 | hostile `toml_to_json-r17-key-after-literal-string-and-quote`, `-r17-key-after-basic-string-and-quote` | watchdog |
+| R-17 (D-19) | hostile `toml_to_json-r17-dotted-run-in-comment`; formats `toml_to_json-long-run-in-comment-is-parsed` | output: error(`toml_text`) with the nesting message instead of `{"value": {"b": 1}}` |
+| R-16 | geometry `parse_data_size-far-exponent-` + `tiny-positive-is-zero`, `zero-with-huge-exponent`, `zero-with-tiny-exponent`, `minus-zero-with-huge-exponent`, `capital-e-without-unit`, `half-kibibyte-tiny`, `huge-positive`, `huge-negative`, `tiny-negative-is-negative` | output: `error_type` `InvalidOperation` |
+| R-16 | hostile `test_far_exponent_data_size_is_zero_under_any_host_context[host-traps-nothing-…]` (all 6), `test_far_exponent_data_size_refusal_holds_under_any_host_context[host-traps-nothing-parse_data_size-r16-tiny-negative-is-negative]` | output: `ValueError` ("cannot convert NaN to integer ratio") |
+| R-16 | hostile `test_far_exponent_data_size_is_zero_under_any_host_context[host-hostile-…]` (all 6), `test_far_exponent_data_size_refusal_holds_under_any_host_context[host-hostile-…]` (all 3) | output: `InvalidOperation` |
+| A.29 consistency | extraction `extract_numbers-zero-with-far-exponent-is-zero` | output: no number (count 0) |
+
+That is 4 watchdog failures and 29 output failures. By finding, they are R-15 3, R-17 4, R-16 25, and the A.29 case 1.
+
+Every case was checked against the reason the table gives for it. None fails on collection, a fixture, or a typo.
+
+The 12 green guards listed above pass. Every one of the 4,352 earlier tests passes too: 4,364 passed is the 4,352 earlier tests plus the 12 guards.
+
+```
+PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider tests/test_tools_catalog.py tests/test_function_tool_parameter_types.py tests/test_tool_core.py tests/features/coding_agent
+........................................................................ [ 82%]
+..............................................................           [100%]
+338 passed, 12 skipped in 15.77s
+```
+
+The neighbouring suites are unchanged. The lint result with these files staged is in the S2 report's re-review round 1 addendum.
+
 ## Notes for the implementer
 
 - The pack binds to exactly these names: `vidbyte.tools.toolsets.PrebuiltTools`, defined in `vidbyte.tools.toolsets.prebuilt` (the test checks `__module__`), with static methods `select_categories` and `get_tools`; `vidbyte.lib.enums.PrebuiltToolCategory` and the other 67 enums, defined in `vidbyte.lib.enums.prebuilt_tools` or `vidbyte.lib.enums.units` and listed in `vidbyte.lib.enums.__all__`; and `vidbyte.tools.builtins.prebuilt.<Category>ToolFunctions.tool_functions()`, whose functions live in `vidbyte.tools.builtins.prebuilt.<category value>` with `__qualname__` `<Category>ToolFunctions.<tool>`.
@@ -290,6 +378,8 @@ The neighbouring suites are unchanged. The lint result with these files staged i
 - `SchemaArgumentFactory` builds argument sets from your live schemas. A string schema with a pattern that none of its samples match makes it raise "add one to the pools". Fix that by adding a sample to `PATTERN_SAMPLES` in `prebuilt_tool_harness.py`, which is a fixture change, not an assertion change.
 - r4 now states every interpretation the r3 pack had pinned on a loose row: unpadded `base64url` for all three `DigestFormat` users, single spaces in `number_to_english_words`, `time.isoformat()` for `time` keys, distinct-key `count` in `parse_dotenv_text`, distinct-value `count` in the `extract_*` rows, exclusive `end` in `extract_json_from_text`, and in-place replacement in `json_set_value`. Two readings remain the pack's own where r4 is silent, and reviewers should confirm them against the spec rather than change the tests casually. First, `get_python_function_signature` writes a function without a return annotation as `def run(self)`, with no arrow. Second, `detect_csv_dialect` `has_header` stays `ANY` in two cases, because the row does not say how the header is detected.
 - `NON_EMPTY_TEXT` in an expectation accepts any non-empty string and nothing else. It stands only where r4 fixes an error as non-empty text without giving its words, such as a rejected DOCTYPE or a JSON depth error.
-- The pack's runtime once green is dominated by the sweep tests: 13 calls per tool in the error contract, 6 in the side-effect tests, 3 in each of three determinism interpreters, and `find_unicode_character` at about 1 s per call (EC-37). The count tests (2^128 subnets, 10^15 integers, C(39,20) combinations) have no timeout of their own, so an implementation that enumerates hangs rather than fails; stop the run and read the test name. `test_prebuilt_hostile_inputs.py` starts one child interpreter per hostile case, 15 in all, and a regressed case costs its full 30 s watchdog.
+- The pack's runtime once green is dominated by the sweep tests: 13 calls per tool in the error contract, 6 in the side-effect tests, 3 in each of three determinism interpreters, and `find_unicode_character` at about 1 s per call (EC-37). The count tests (2^128 subnets, 10^15 integers, C(39,20) combinations) have no timeout of their own, so an implementation that enumerates hangs rather than fails; stop the run and read the test name. `test_prebuilt_hostile_inputs.py` starts one child interpreter per hostile case, 24 in all, and a regressed case costs its full 30 s watchdog.
 - For the S4 repair: every hostile case states the exact r6 output, so a repair that is fast but changes the output still fails. A watchdog failure reads "gave no result within the 30 s liveness watchdog"; run the call by hand at a smaller size to see the growth. Do not lower `WATCHDOG_SECONDS` or shrink an input to make a case pass.
 - R-12 sets the hostile decimal context with `decimal.setcontext` in the test thread, and `asyncio.to_thread` copies it into the worker. A tool passes only if every `Decimal` operation runs in its own fully specified `Context` (§9.2 item 18); `localcontext(prec=...)` alone inherits the host's traps and `Emax`.
+- For the R-15 and R-17 repair: TOML cases tell the nesting message from the invalid-TOML message by the words "the TOML is nested deeper than 100 levels" (`TOML_NESTING_MESSAGE`). The A.20 row names only "the nesting message", so if you change those words, change the constant with them and say so in your report. R-15 c (`open-quote-run-of-61-segments`) fails at HEAD only on Python 3.11.0. Write the multi-line string content as an atomic group, as row 27 says; a possessive repeat whose body ends in a lookahead mis-matches on 3.11.0.
+- For the R-16 repair, the 18 host-context cases set the context with a fixture, not inside the test body. A pass needs the exponent compared before any `Decimal` is built, and the sign taken from the exact value, not from the float.

@@ -3,10 +3,10 @@
 PURPOSE: Exact-output and error-behavior cases for every Appendix A row of the geometry, bits_bytes, and markdown_html categories (20 tools), called through FunctionTool.execute the way a model calls them.
 ROLE IN CODEBASE: Row-level proof of AC-11 for spec Appendix A.26, A.27, and A.28; uses the tool_runner fixture from conftest.py and the case builders in prebuilt_tool_harness.py.
 ARCHITECTURE NOTE: Every expected value was computed without the implementation: geometry by unit-vector algebra (a different route from the haversine and bearing formulas) cross-checked against the classic formulas, rounding by Decimal(repr(x)) under spec §9.2 item 17, bit patterns and sizes by hand.
-FUNCTION INVENTORY: SUCCESS_CASES and FAILURE_CASES are the parametrized tables; test_geometry_bits_markdown_rows_return_documented_output and test_geometry_bits_markdown_rows_reject_bad_input check them; test_fenced_code_block_code_and_lines checks the exact code and fence lines of extract_fenced_code_blocks on a document that ends with a line break; test_malformed_html_table_never_raises checks the HTML parser rule and the column names of a table with no header row.
+FUNCTION INVENTORY: SUCCESS_CASES and FAILURE_CASES are the parametrized tables, and FAR_EXPONENT_ZERO_SIZES and FAR_EXPONENT_REFUSED_SIZES hold the parse_data_size far-exponent inputs that test_prebuilt_hostile_inputs.py reuses; test_geometry_bits_markdown_rows_return_documented_output and test_geometry_bits_markdown_rows_reject_bad_input check them; test_fenced_code_block_code_and_lines checks the exact code and fence lines of extract_fenced_code_blocks on a document that ends with a line break; test_malformed_html_table_never_raises checks the HTML parser rule and the column names of a table with no header row.
 COMMON MODIFICATION PATTERNS: Add a row case as one ok(...), bad(...), or invalid(...) entry with a hand-computed expectation and a label that says what it proves.
 WHAT NOT TO DO IN THIS FILE: 1. Do not compute expectations by calling the tool functions or copying their algorithm; use a different route. 2. Do not add over-output-cap cases here; the resource-bounds module owns INV-20.
-KNOWN EDGE CASES: decimal_degrees_to_dms must round 0.000875 degrees to 3.2 arc-seconds, while float rounding of 0.000875 * 3600 gives 3.1. Spec r4 fixes the setext heading line (its text line, not the underline), the autolink text (the URL between the angle brackets), and the fenced block lines (the fence lines; an unclosed block ends at the last line), so none of them is left open. Spec r6 EC-47 (S4 R-8) drops markup left open at the end of HTML input before close(), so the output is the same on every CPython patch release.
+KNOWN EDGE CASES: decimal_degrees_to_dms must round 0.000875 degrees to 3.2 arc-seconds, while float rounding of 0.000875 * 3600 gives 3.1. Spec r4 fixes the setext heading line (its text line, not the underline), the autolink text (the URL between the angle brackets), and the fenced block lines (the fence lines; an unclosed block ends at the last line), so none of them is left open. Spec r6 EC-47 (S4 R-8) drops markup left open at the end of HTML input before close(), so the output is the same on every CPython patch release. Spec r7 (S5 R-16) gives parse_data_size a result for an exponent of any length; past decimal.MAX_EMAX, Decimal() cannot build the number, so those results follow the row's exact-value rules.
 RELATED DOCS: tests/features/prebuilt_tools/FEATURE.md; docs/spec/prebuilt-agent-tools/spec.md Appendix A.26, A.27, A.28 and §9.2
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/prebuilt_tools/test_prebuilt_rows_geometry_bits_markdown.py
 """
@@ -22,6 +22,21 @@ from tests.features.prebuilt_tools.prebuilt_tool_harness import FailureCase, Suc
 EARTH_RADIUS_KILOMETERS = 6371.0088
 QUARTER_CIRCLE_KILOMETERS = math.pi / 2 * EARTH_RADIUS_KILOMETERS
 TEN_DEGREES_KILOMETERS = math.pi / 18 * EARTH_RADIUS_KILOMETERS
+# Spec r7 A.27 (S5 R-16): exponents past decimal.MAX_EMAX, which Decimal() cannot build from text; test_prebuilt_hostile_inputs.py reuses them.
+FAR_EXPONENT_ZERO_SIZES = (
+    ("1e-99999999999999999999 B", "tiny-positive-is-zero"),
+    ("0e99999999999999999999 B", "zero-with-huge-exponent"),
+    ("0e-99999999999999999999 B", "zero-with-tiny-exponent"),
+    ("-0e99999999999999999999 B", "minus-zero-with-huge-exponent"),
+    ("1E-99999999999999999999", "capital-e-without-unit"),
+    (".5e-99999999999999999999 kib", "half-kibibyte-tiny"),
+)
+FAR_EXPONENT_REFUSED_SIZES = (
+    ("1e99999999999999999999 B", "huge-positive"),
+    ("-1e99999999999999999999 B", "huge-negative"),
+    ("-1e-99999999999999999999 B", "tiny-negative-is-negative"),
+)
+ZERO_DATA_SIZE = {"size_bytes": 0.0, "size_bits": 0.0}
 METERS_PER_MILE = 1609.344
 LONDON_NEW_YORK = {"latitude1": 51.5007, "longitude1": -0.1246, "latitude2": 40.6892, "longitude2": -74.0445}
 SQUARE_X = [0.0, 1.0, 1.0, 0.0]
@@ -185,6 +200,8 @@ SUCCESS_CASES = [
     ok("parse_data_size", {"text": "0.3 KiB"}, {"size_bytes": 307.2, "size_bits": 2457.6}, "fraction-of-kibibyte"),
     ok("parse_data_size", {"text": "8 bits"}, {"size_bytes": 1.0, "size_bits": 8.0}, "bits"),
     ok("parse_data_size", {"text": "3 TB"}, {"size_bytes": 3e12, "size_bits": 2.4e13}, "terabytes"),
+    # S5 R-16 (spec r7 A.27): an exponent may have any number of digits; a positive value too small for a float, or zero, is 0 bytes.
+    *[ok("parse_data_size", {"text": text}, ZERO_DATA_SIZE, f"far-exponent-{label}") for text, label in FAR_EXPONENT_ZERO_SIZES],
     # A.27 format_bytes_human: below the base, rounding up into the next unit, half-even ties, and the largest unit.
     ok("format_bytes_human", {"size_bytes": 512}, {"text": "512 B", "value": 512.0, "unit": "B"}, "below-base"),
     ok("format_bytes_human", {"size_bytes": 0}, {"text": "0 B", "value": 0.0, "unit": "B"}, "zero"),
@@ -431,6 +448,8 @@ FAILURE_CASES = [
     bad("parse_data_size", {"text": "-5 MB"}, "text", "negative"),
     bad("parse_data_size", {"text": "5 zb"}, "text", "unknown-unit"),
     bad("parse_data_size", {"text": "MB"}, "text", "no-number"),
+    # S5 R-16 (spec r7 A.27): a non-zero value whose float is infinite, or an exact value below zero however small, is error(text).
+    *[bad("parse_data_size", {"text": text}, "text", f"far-exponent-{label}") for text, label in FAR_EXPONENT_REFUSED_SIZES],
     invalid("format_bytes_human", {"size_bytes": -1}, "size_bytes", "negative-size"),
     invalid("format_bytes_human", {"size_bytes": 1, "decimal_places": 7}, "decimal_places", "too-many-places"),
     bad("bitwise_operation", {"left": "12", "operation": "and"}, "right", "and-needs-right"),

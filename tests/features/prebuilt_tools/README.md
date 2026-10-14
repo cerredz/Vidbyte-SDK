@@ -40,7 +40,7 @@ Run the pack with `PYTHONPATH=$(pwd) python -m pytest -q tests/features/prebuilt
 - `test_prebuilt_rows_geometry_bits_markdown.py` covers rows A.26 to A.28: geometry, bits and bytes, and Markdown and HTML.
 - `test_prebuilt_rows_extraction.py` covers row group A.29: text extraction.
 - `test_prebuilt_rows_code_network.py` covers rows A.30 and A.31: code analysis and network addresses.
-- `test_prebuilt_hostile_inputs.py` runs cap-sized hostile inputs in a child interpreter under a 30 s liveness watchdog and checks their exact output, and checks that a hostile host decimal context changes no result (S4 R-1 to R-14).
+- `test_prebuilt_hostile_inputs.py` runs cap-sized hostile inputs in a child interpreter under a 30 s liveness watchdog and checks their exact output, and checks that a hostile host decimal context changes no result (S4 R-1 to R-14, re-review R-15 to R-17).
 
 ## Logs
 
@@ -48,3 +48,4 @@ Run the pack with `PYTHONPATH=$(pwd) python -m pytest -q tests/features/prebuilt
 - 2026-10-14 - The pack was tightened to spec revision 4: values revision 3 left open are now exact, every list and `UtcOffset` cap is an exact number, and the new error mappings have cases.
 - 2026-10-14 - S3 found that the parameter table typed `intersect_lists.lists` as a list of strings, while Appendix A.24 makes it `list[TextList]`. The table now describes it with `TextListsShape`, and the schema and over-cap tests check the inner lists too.
 - 2026-10-14 - Regression cases for the S4 findings went in before the repair, from spec revision 6. Cap-sized hostile inputs run in `test_prebuilt_hostile_inputs.py` under a liveness watchdog, row-level cases sit in the matching row files, INV-9's illustrative literals are flagged, and `find_substring_positions.substring` is capped at 500.
+- 2026-10-14 - Regression cases for the re-review findings R-15 to R-17 went in before the repair, from spec revision 7: cap-sized TOML scan inputs under the watchdog, small scan cases in the A.20 tables, `parse_data_size` far exponents in the A.27 tables and again under two host decimal contexts, and `extract_numbers` of `0e5000`.

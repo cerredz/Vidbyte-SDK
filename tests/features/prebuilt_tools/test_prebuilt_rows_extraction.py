@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Every expected value is hand-derived from the row text and §
 FUNCTION INVENTORY: test_extraction_rows_return_documented_output checks SUCCESS_CASES; test_extraction_rows_reject_bad_input checks FAILURE_CASES; counting_numbers builds the long extract_numbers expectation by arithmetic; number_entry builds one extract_numbers entry.
 COMMON MODIFICATION PATTERNS: Add an ok(...) entry beside the tool's existing cases and recompute its positions with str.find before pinning them.
 WHAT NOT TO DO IN THIS FILE: 1. Do not pin an output detail a row leaves open; use ANY instead (spec r4 fixed the last one here: a percent match's text includes the % sign). 2. Do not add character-budget or quadratic-scan inputs here; test_prebuilt_resource_bounds.py owns them.
-KNOWN EDGE CASES: count keys beside unique-value lists count distinct values, not occurrences; a sign belongs to a number only after whitespace or an opening mark; "999.1.1.1" must not yield its tail "99.1.1.1". Spec r6 (S4 R-2) splits a malformed comma chain at its commas: "1,2,3" gives 1, 2, and 3, and "1,000,0000" gives 1, 000, and 0000; the cap-sized chains live in test_prebuilt_hostile_inputs.py.
+KNOWN EDGE CASES: count keys beside unique-value lists count distinct values, not occurrences; a sign belongs to a number only after whitespace or an opening mark; "999.1.1.1" must not yield its tail "99.1.1.1". Spec r6 (S4 R-2) splits a malformed comma chain at its commas: "1,2,3" gives 1, 2, and 3, and "1,000,0000" gives 1, 000, and 0000; the cap-sized chains live in test_prebuilt_hostile_inputs.py. Spec r7 §9.2 item 18 compares a far exponent before any Decimal is built, and zero with any exponent still expands exactly to 0.
 RELATED DOCS: tests/features/prebuilt_tools/FEATURE.md; docs/spec/prebuilt-agent-tools/spec.md Appendix A.29 and §9.2 items 6, 9, 12, 15
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/prebuilt_tools/test_prebuilt_rows_extraction.py
 """
@@ -125,6 +125,8 @@ SUCCESS_CASES = [
         {"numbers": [number_entry("1", "1", 0), number_entry("000", "0", 2), number_entry("0000", "0", 6)], "count": 3, "truncated": False},
         "group-followed-by-digit-splits",
     ),
+    # Spec r7 §9.2 item 18 and A.29: a far exponent is compared before any Decimal is built, and zero expanded exactly is the one digit "0".
+    ok("extract_numbers", {"text": "0e5000"}, {"numbers": [number_entry("0e5000", "0", 0)], "count": 1, "truncated": False}, "zero-with-far-exponent-is-zero"),
     ok(
         "extract_dates",
         {"text": "Due 2024-03-15, moved to March 20, 2024 or 03/04/2025; not 2024-02-30, ref 20240315."},

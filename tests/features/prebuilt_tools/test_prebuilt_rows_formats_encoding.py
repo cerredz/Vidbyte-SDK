@@ -3,11 +3,11 @@
 PURPOSE: Exact-output and error cases for every Appendix A row of the structured_formats, encoding, and hashing categories (A.20 to A.22, 26 tools), run through FunctionTool.execute as a model would call them.
 ROLE IN CODEBASE: Row-level proof of AC-11 for these three categories; uses the ToolRunner fixture from tests/features/prebuilt_tools/conftest.py and the case builders in prebuilt_tool_harness.py.
 ARCHITECTURE NOTE: Expected values come from published vectors (RFC 3986, RFC 4231, RFC 2202, RFC 4648, FIPS and BLAKE2 test vectors, git's empty blob, the jwt.io sample token), from hand derivation, or from an independent pure-Python CRC-32 and Adler-32; nothing is copied from the implementation.
-FUNCTION INVENTORY: test_formats_encoding_rows_return_documented_output checks SUCCESS_CASES; test_formats_encoding_rows_reject_bad_input checks FAILURE_CASES; test_compute_hmac_errors_never_repeat_the_key checks T-3; test_parse_dotenv_text_error_omits_line_content checks T-3 for .env text; test_encoding_round_trips_restore_the_text checks base64 and hex round trips.
+FUNCTION INVENTORY: test_formats_encoding_rows_return_documented_output checks SUCCESS_CASES; test_formats_encoding_rows_reject_bad_input checks FAILURE_CASES; test_compute_hmac_errors_never_repeat_the_key checks T-3; test_parse_dotenv_text_error_omits_line_content checks T-3 for .env text; test_encoding_round_trips_restore_the_text checks base64 and hex round trips; TOML_INVALID_MESSAGE and TOML_NESTING_MESSAGE are the two toml_to_json error texts the cases look for.
 COMMON MODIFICATION PATTERNS: Add a row case as one ok(...) or bad(...) entry in the matching table, with every output key listed and the source of the expected value obvious from a published vector or a short hand derivation.
-WHAT NOT TO DO IN THIS FILE: 1. Do not compute expected values by calling hashlib, base64, or the tool under test at test time; use literal vectors. 2. Do not add nesting-depth or output-cap cases here; test_prebuilt_resource_bounds.py owns them.
-KNOWN EDGE CASES: An unpaired surrogate cannot reach a tool through FunctionTool.execute (pydantic JSON mode rejects it), so EC-14 is exercised with characters a codec cannot encode, such as the euro sign in latin_1 or ascii. Expat reports the column of the mismatched end-tag name, and the row makes it 1-based. The codec utf_16 adds a byte-order mark in native order, so byte-exact cases use utf_16_le and utf_16_be. Spec r4 gives a rejected DOCTYPE or long namespace URI a fixed non-empty error with null line and column, and maps every findall exception for a path, KeyError for "@" included, to error(path). Spec r6 (S4 R-7) lists each matching element once, in document order; the hostile path inputs live in test_prebuilt_hostile_inputs.py.
-RELATED DOCS: tests/features/prebuilt_tools/FEATURE.md; docs/spec/prebuilt-agent-tools/spec.md (Appendix A.20, A.21, A.22; §9.2; §10 T-3 and T-6)
+WHAT NOT TO DO IN THIS FILE: 1. Do not compute expected values by calling hashlib, base64, or the tool under test at test time; use literal vectors. 2. Do not add nesting-depth or output-cap cases here; test_prebuilt_resource_bounds.py owns them. The small toml_to_json dotted-key scan cases stay here, because the A.20 row itself says which runs are refused.
+KNOWN EDGE CASES: An unpaired surrogate cannot reach a tool through FunctionTool.execute (pydantic JSON mode rejects it), so EC-14 is exercised with characters a codec cannot encode, such as the euro sign in latin_1 or ascii. Expat reports the column of the mismatched end-tag name, and the row makes it 1-based. The codec utf_16 adds a byte-order mark in native order, so byte-exact cases use utf_16_le and utf_16_be. Spec r4 gives a rejected DOCTYPE or long namespace URI a fixed non-empty error with null line and column, and maps every findall exception for a path, KeyError for "@" included, to error(path). Spec r6 (S4 R-7) lists each matching element once, in document order; the hostile path inputs live in test_prebuilt_hostile_inputs.py. Spec r7 (S5 R-15, R-17, D-19) has the TOML dotted-key scan skip comments and multi-line strings whole and end a one-line quoted segment left open at its line end; the cap-sized scan inputs live in test_prebuilt_hostile_inputs.py too.
+RELATED DOCS: tests/features/prebuilt_tools/FEATURE.md; docs/spec/prebuilt-agent-tools/spec.md (Appendix A.20, A.21, A.22; §9.2; §10 T-3 and T-6; EC-51 and D-19)
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/prebuilt_tools/test_prebuilt_rows_formats_encoding.py
 """
 
@@ -35,6 +35,9 @@ JWT_SAMPLE_OUTPUT = {
 }
 ENTITY_BOMB = "<!DOCTYPE r [<!ENTITY e \"x\">]><r>&e;</r>"
 LONG_NAMESPACE_XML = "<r xmlns:p=\"urn:" + "u" * 200 + "\"><p:i/></r>"
+# Spec r7 A.20 and EC-31 fix the invalid-TOML message. The row names only "the nesting message", so its words come from the r7 regression table.
+TOML_INVALID_MESSAGE = "the text is not valid TOML 1.0"
+TOML_NESTING_MESSAGE = "the TOML is nested deeper than 100 levels"
 DOTENV_SAMPLE = "export A=1\n# comment\n\nB=\" x\\ty\\n\"\nC='lit $X\\n'\nD=plain value # note\nmy.key-1=v\nF=\"q\\\"x\\\\y\"\nG=a#b\nA=2\n"
 
 # Published "abc" vectors (FIPS 180-4, FIPS 202, RFC 1321, RFC 3174, RFC 7693, and the BLAKE2s reference).
@@ -214,6 +217,16 @@ STRUCTURED_FORMAT_CASES = [
         "array-of-tables",
     ),
     ok("toml_to_json", {"toml_text": ""}, {"value": {}}, "empty"),
+    # S5 R-17 (spec r7 A.20, D-19): the dotted-key scan skips comments and multi-line strings whole, so a long run inside one is parsed.
+    ok(
+        "toml_to_json",
+        {"toml_text": "t = { s = '''it's''', a.b.c = 1, u = 'v' }"},
+        {"value": {"t": {"s": "it's", "a": {"b": {"c": 1}}, "u": "v"}}},
+        "key-after-odd-quote-multi-line-string",
+    ),
+    ok("toml_to_json", {"toml_text": "# " + "a." * 101 + "a\nb = 1"}, {"value": {"b": 1}}, "long-run-in-comment-is-parsed"),
+    ok("toml_to_json", {"toml_text": 's = """' + "a." * 101 + 'a"""'}, {"value": {"s": "a." * 101 + "a"}}, "long-run-in-multi-line-basic-string"),
+    ok("toml_to_json", {"toml_text": "s = '''" + "a." * 101 + "a'''"}, {"value": {"s": "a." * 101 + "a"}}, "long-run-in-multi-line-literal-string"),
     ok(
         "parse_url",
         {"url": "https://User:secret@Example.COM:8080/a/b?x=1&y=&x=3#frag"},
@@ -554,6 +567,24 @@ FAILURE_CASES = [
     bad("ini_to_json", {"ini_text": "[a]\nk=1\nk=2\n"}, "ini_text", "duplicate-key"),
     bad("toml_to_json", {"toml_text": "a = \n"}, "toml_text", "missing-value", contains="the text is not valid TOML 1.0"),
     bad("toml_to_json", {"toml_text": "a = 1\na = 2\n"}, "toml_text", "duplicate-key", contains="the text is not valid TOML 1.0"),
+    # S5 R-15 and R-17 (spec r7 A.20, EC-51): a one-line quoted segment left open ends at its line end and counts once.
+    bad(
+        "toml_to_json",
+        {"toml_text": "k" + ".k" * 59 + '."' + "k" + ".k" * 60 + " = 1"},
+        "toml_text",
+        "open-quote-run-of-61-segments",
+        contains=TOML_INVALID_MESSAGE,
+    ),
+    bad("toml_to_json", {"toml_text": "a" + ".a" * 99 + '."b'}, "toml_text", "open-quote-is-the-101st-segment", contains=TOML_NESTING_MESSAGE),
+    bad("toml_to_json", {"toml_text": "a" + ".a" * 98 + '."b'}, "toml_text", "open-quote-is-the-100th-segment", contains=TOML_INVALID_MESSAGE),
+    # S5 R-17 (spec r7 A.20): a "#" inside a string starts no comment, so the long key on the next line is still refused.
+    bad(
+        "toml_to_json",
+        {"toml_text": 's = """# x"""\n' + "a" + ".a" * 100 + "=1"},
+        "toml_text",
+        "hash-inside-string-hides-no-key",
+        contains=TOML_NESTING_MESSAGE,
+    ),
     bad("parse_url", {"url": "http://example.com:99999/"}, "url", "port-out-of-range"),
     bad("parse_url", {"url": "http://example.com:abc/"}, "url", "port-not-a-number"),
     bad("parse_url", {"url": "http://[::1/"}, "url", "unbalanced-ipv6-bracket"),
