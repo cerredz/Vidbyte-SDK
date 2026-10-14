@@ -112,6 +112,13 @@ Each line is input + state → wrong output.
 
 None yet. Add one line per fixed bug with the test that protects it.
 
+- R-1: a steered prompt whose output ended before its own result failed `claude.api_error`, classified from the interrupted prompt's result → `SteeredTurnOwnResultTests`.
+- R-2: a steer that started while the previous result was unread had its prompt written before its own interrupt, which then aborted it → `SteerInResultWindowTests`.
+- R-3: SDK records read through `vars()` with empty defaults turned a renamed field into empty text → `SdkRecordDriftTests`.
+- R-5: a continue still reading its session file during `aclose` started a turn after `aclose` returned → `ContinueRacingCloseTests`.
+- R-6: a rejected per-model window (`seven_day_opus`, `seven_day_sonnet`) refused every spawn of every model → `RateLimitRuleTests`.
+- R-7: D-29's `allowed_warning` overage and absent reset time, a steer's withdrawal of its unsent message, and the re-wait of a cancelled close were unguarded → `RateLimitRuleTests`, `SteerWithdrawalTests`, `CancelledCloseTests`.
+
 ## Test Suite Map
 
 - `test_claude_host_acceptance.py`:
@@ -183,6 +190,14 @@ None yet. Add one line per fixed bug with the test that protects it.
   - validation that never echoes values (T-3);
   - extra model arguments never reaching the options (T-2, D-13);
   - foreign handle ids (T-4, EC-48).
+- `test_claude_host_review_gaps.py`:
+  - a steered prompt classified by its own result (D-3, §9.2 row 12);
+  - a steer that starts while the previous result is unread (EC-19, AC-9);
+  - a continue racing `aclose` (FR-1);
+  - SDK record drift reported as `claude.protocol_mismatch`;
+  - per-model windows, `allowed_warning` overage and an absent reset time (D-29, EC-7, EC-8);
+  - a steer whose interrupt fails (§12.3 row 7, INV-18);
+  - a cancelled `aclose` (INV-8, D-4).
 - `claude_host_fixtures.py`: the fake SDK, the message factories, the history fakes, `TicketTool` and the `ClaudeHostCase` base class.
 
 Run `PYTHONPATH=$(pwd) python -m pytest tests/features/claude_host` from the worktree root.
