@@ -37,8 +37,8 @@ STOP_MESSAGES = {
 }
 # The goal statuses that stop a goal run for a limit, as a failure (9.2).
 GOAL_PROBLEM_CODES = {
-    CodexGoalStatus.BUDGET_LIMITED.value: FailureCode.CODEX_BUDGET_EXHAUSTED,
-    CodexGoalStatus.USAGE_LIMITED.value: FailureCode.CODEX_USAGE_LIMITED,
+    CodexGoalStatus.BUDGET_LIMITED: FailureCode.CODEX_BUDGET_EXHAUSTED,
+    CodexGoalStatus.USAGE_LIMITED: FailureCode.CODEX_USAGE_LIMITED,
 }
 
 
@@ -145,11 +145,11 @@ class CodexErrorMapper:
         return cls.error(FailureCode.CODEX_PROCESS_EXITED, "CodexHost is closed or its Codex app-server exited.", operation, thread_id)
 
     @classmethod
-    def goal_problem(cls, status: str) -> CodexProblem | None:
+    def goal_problem(cls, status: CodexGoalStatus) -> CodexProblem | None:
         # A goal Codex stopped for its token budget or the account's usage
         # limit is a failure; every other final goal status is not.
         code = GOAL_PROBLEM_CODES.get(status)
-        return None if code is None else cls.problem(code, f"Codex stopped the goal run with status {status}.")
+        return None if code is None else cls.problem(code, f"Codex stopped the goal run with status {status.value}.")
 
     @staticmethod
     def turn_problem(error: CodexTurnError | None) -> CodexProblem:

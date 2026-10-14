@@ -48,7 +48,7 @@ from vidbyte.lib.constants.codex import (
     CODEX_TOOL_CALL_METHOD,
     CODEX_UNREGISTERED_TOOL_TEXT,
 )
-from vidbyte.lib.enums.codex import CodexHostOperation
+from vidbyte.lib.enums.codex import CodexHostOperation, CodexSandboxReadiness
 from vidbyte.lib.errors import CodexAgentError
 
 if TYPE_CHECKING:
@@ -184,20 +184,20 @@ class CodexConnection:
         send = partial(self.client.request_with_retry_on_overload, method, payload, response_model=RAW_RESPONSES[method])
         return partial(send, max_attempts=CODEX_HOST_SINGLE_ATTEMPT) if method in SPENDING_RAW_METHODS else send
 
-    async def sandbox_status(self, operation: CodexHostOperation) -> str:
-        # The Windows sandbox readiness, or "" when this runtime cannot
-        # report it, which is not a failure (D-28).
+    async def sandbox_status(self, operation: CodexHostOperation) -> CodexSandboxReadiness:
+        # The Windows sandbox readiness, or NOT_CHECKED when this runtime
+        # cannot report it, which is not a failure (D-28).
         return await self.call(operation, CODEX_SANDBOX_READINESS_METHOD, self._sandbox_status_now)
 
-    def _sandbox_status_now(self) -> str:
+    def _sandbox_status_now(self) -> CodexSandboxReadiness:
         # @intent unknown-sandbox-readiness-is-not-checked
         # Runs on a host worker. A JSON-RPC error means the runtime does
         # not offer the readiness check, so the sandbox is not checked.
         try:
             response = self.client.request_with_retry_on_overload(CODEX_SANDBOX_READINESS_METHOD, None, response_model=WindowsSandboxReadinessResponse)
         except JsonRpcError:
-            return ""
-        return response.status.value
+            return CodexSandboxReadiness.NOT_CHECKED
+        return CodexSandboxReadiness(response.status.value)
 
     async def start(
         self,

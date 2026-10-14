@@ -190,11 +190,11 @@ class CodexGoalFinishRule:
     """Decides when a goal run is over, as openai-codex's private goal stream cursor does."""
 
     def __init__(self) -> None:
-        # The goal's last reported status ("" while unknown), whether it
+        # The goal's last reported status (NONE while unknown), whether it
         # was cleared, whether a physical turn is running, the last
         # completion, a remembered failure, and a runtime that never
         # activated goal mode.
-        self.status = ""
+        self.status = CodexGoalStatus.NONE
         self.cleared = False
         self.active = False
         self.last_completed: Turn | None = None
@@ -208,8 +208,8 @@ class CodexGoalFinishRule:
             self.active = True
             return False
         if isinstance(payload, ThreadGoalUpdatedNotification):
-            self.status = payload.goal.status.value
-            self.cleared = self.cleared and self.status != CodexGoalStatus.ACTIVE.value
+            self.status = CodexGoalStatus(payload.goal.status.value)
+            self.cleared = self.cleared and self.status is not CodexGoalStatus.ACTIVE
         if isinstance(payload, ThreadGoalClearedNotification):
             self.cleared = True
         over = self.cleared or self.status in CODEX_GOAL_TERMINAL_STATUSES
@@ -226,7 +226,7 @@ class CodexGoalFinishRule:
         status = turn.status.value
         if status == CodexTurnStatus.FAILED.value:
             self.failed = turn
-        self.mismatch = status == CodexTurnStatus.COMPLETED.value and not self.status and not self.cleared
+        self.mismatch = status == CodexTurnStatus.COMPLETED.value and self.status is CodexGoalStatus.NONE and not self.cleared
         return status == CodexTurnStatus.INTERRUPTED.value or over or self.mismatch
 
 

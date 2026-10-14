@@ -95,6 +95,7 @@ from vidbyte.lib.dataclasses.codex_host import (
 )
 from vidbyte.lib.enums.codex import (
     CodexAccountKind,
+    CodexApprovalMode,
     CodexApprovalPolicy,
     CodexApprovalsReviewer,
     CodexGoalStatus,
@@ -197,7 +198,7 @@ class CodexParamsTranslator:
         # Resume sends approval fields only when the caller set them, so a
         # thread keeps its own posture, and never asks for earlier turns.
         values = CodexContentTranslator.thread_resume_kwargs(request.developer_instructions, self._agent(request), self._sdk)
-        self._approvals(values, self._explicit(request), "")
+        self._approvals(values, self._explicit(request), CodexApprovalMode.PROVIDER_DEFAULT)
         self._thread_sandbox(values)
         self._agents_config(values, request)
         values.update(thread_id=thread_id, exclude_turns=True)
@@ -208,7 +209,7 @@ class CodexParamsTranslator:
         # A fork copies the thread through last_turn_id; excludeTurns is
         # sent only when asked for, and only shapes Codex's answer (D-29).
         values = CodexContentTranslator.thread_fork_kwargs(request.developer_instructions, self._agent(request), self._sdk)
-        self._approvals(values, self._explicit(request), "")
+        self._approvals(values, self._explicit(request), CodexApprovalMode.PROVIDER_DEFAULT)
         self._thread_sandbox(values)
         self._agents_config(values, request)
         values.update(thread_id=thread_id, last_turn_id=last_turn_id)
@@ -224,7 +225,7 @@ class CodexParamsTranslator:
         # by openai-codex's turn_start, so an empty list stands in here.
         output_schema = self._schemas.output_schema(request.output_schema)
         values = CodexContentTranslator.turn_kwargs(self._agent(request), output_schema, self._sdk)
-        self._approvals(values, {}, "")
+        self._approvals(values, {}, CodexApprovalMode.PROVIDER_DEFAULT)
         sandbox = values.pop("sandbox", None)
         if sandbox is not None:
             values["sandbox_policy"] = {"type": CODEX_SANDBOX_TURN_POLICY[sandbox.value]}
@@ -313,14 +314,14 @@ class CodexParamsTranslator:
         return {"approval_policy": request.approval_policy.value, "approvals_reviewer": request.approvals_reviewer.value}
 
     @staticmethod
-    def _approvals(values: dict[str, Any], explicit: Mapping[str, str], default_mode: str) -> None:
+    def _approvals(values: dict[str, Any], explicit: Mapping[str, str], default_mode: CodexApprovalMode) -> None:
         # Explicit fields replace approval_mode; otherwise the mode, or the
         # default mode of a new thread, maps to the wire pair, and an empty
         # reviewer stays unsent (INV-28).
         mode = values.pop("approval_mode", None)
         chosen = {key: value for key, value in explicit.items() if value}
         if not chosen:
-            pair = CODEX_APPROVAL_MODE_WIRE.get(mode.value if mode is not None else default_mode, ("", ""))
+            pair = CODEX_APPROVAL_MODE_WIRE.get(mode.value if mode is not None else default_mode.value, ("", ""))
             chosen = {key: value for key, value in zip(APPROVAL_FIELDS, pair, strict=True) if value}
         values.update(chosen)
 
@@ -382,19 +383,18 @@ class CodexResponseTranslator:
         return None
 
     @staticmethod
-    def sandbox_problem(status: str) -> CodexProblem | None:
+    def sandbox_problem(readiness: CodexSandboxReadiness) -> CodexProblem | None:
         # A Windows sandbox that is not configured or needs an update
         # keeps turns from running (D-28).
-        readiness = CodexSandboxReadiness(status)
         if readiness in SANDBOX_NOT_READY:
             return CodexErrorMapper.problem(FailureCode.CODEX_SANDBOX_NOT_READY, f"The Codex Windows sandbox reports {readiness.value}.")
         return None
 
-    def readiness(self, version: str, response: GetAccountResponse, sandbox_status: str) -> CodexReadiness:
+    def readiness(self, version: str, response: GetAccountResponse, sandbox: CodexSandboxReadiness) -> CodexReadiness:
         # The account maps to its kind and ChatGPT plan only; the email is
         # never read (INV-9). Each problem found is reported, not raised.
         account = response.account.root if response.account is not None else None
-        problems = tuple(problem for problem in (self.sign_in_problem(response), self.sandbox_problem(sandbox_status)) if problem is not None)
+        problems = tuple(problem for problem in (self.sign_in_problem(response), self.sandbox_problem(sandbox)) if problem is not None)
         return CodexReadiness(
             ready=not problems,
             version=version,
@@ -402,7 +402,7 @@ class CodexResponseTranslator:
             signed_in=account is not None,
             account=CodexAccountKind(account.type) if account is not None else CodexAccountKind.NONE,
             plan_type=account.plan_type.value if isinstance(account, ChatgptAccount) else "",
-            sandbox=CodexSandboxReadiness(sandbox_status),
+            sandbox=sandbox,
             problems=problems,
         )
 
@@ -531,7 +531,7 @@ class CodexResponseTranslator:
             return CodexTurnSnapshot(handle=turn.handle, status=CodexTurnStatus.FAILED, problem=CodexErrorMapper.problem(FailureCode.CODEX_PROTOCOL_MISMATCH, NO_GOAL_MODE_MESSAGE))
         status, problem = self._goal_outcome(turn, reported)
         snapshot = self._snapshot(turn, reported, status, problem, turn.items)
-        return replace(snapshot, goal_status=CodexGoalStatus.NONE if rule.cleared else CodexGoalStatus(rule.status))
+        return replace(snapshot, goal_status=CodexGoalStatus.NONE if rule.cleared else rule.status)
 
     @staticmethod
     def _goal_outcome(turn: CodexGoalTurn, reported: Turn) -> tuple[CodexTurnStatus, CodexProblem | None]:
@@ -548,10 +548,10 @@ class CodexResponseTranslator:
             return CodexTurnStatus.FAILED, None
         if last is CodexTurnStatus.INTERRUPTED:
             return last, stop
-        if rule.status == CodexGoalStatus.COMPLETE.value:
+        if rule.status is CodexGoalStatus.COMPLETE:
             return CodexTurnStatus.COMPLETED, None
         limit = CodexErrorMapper.goal_problem(rule.status)
-        if limit is not None or rule.status == CodexGoalStatus.BLOCKED.value:
+        if limit is not None or rule.status is CodexGoalStatus.BLOCKED:
             return CodexTurnStatus.INTERRUPTED, limit
         return CodexTurnStatus.INTERRUPTED, stop
 

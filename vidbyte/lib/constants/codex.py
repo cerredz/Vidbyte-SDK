@@ -13,7 +13,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from vidbyte.lib.enums.codex import CodexFailureClass
+from vidbyte.lib.enums.codex import (
+    CodexApprovalMode,
+    CodexFailureClass,
+    CodexGoalStatus,
+)
 from vidbyte.lib.enums.failure import (
     FailureCode,
     FailureDisposition,
@@ -349,7 +353,7 @@ CODEX_HOST_MIN_TOKEN_LIMIT = 1
 # Timeouts must be strictly greater than this.
 CODEX_HOST_MIN_EXCLUSIVE_SECONDS = 0.0
 # The approval_mode thread/start sends when nothing is set (D-16).
-CODEX_HOST_DEFAULT_APPROVAL_MODE = "auto_review"
+CODEX_HOST_DEFAULT_APPROVAL_MODE = CodexApprovalMode.AUTO_REVIEW
 # App-server methods the host calls through the SDK's raw request path.
 CODEX_RATE_LIMITS_READ_METHOD = "account/rateLimits/read"
 CODEX_SANDBOX_READINESS_METHOD = "windowsSandbox/readiness"
@@ -402,7 +406,13 @@ CODEX_ERROR_INFO_CODES: Mapping[str, str] = {
 }
 # Goal statuses that end a goal run, as openai-codex's goal stream ends.
 CODEX_GOAL_TERMINAL_STATUSES = frozenset(
-    {"paused", "blocked", "usageLimited", "budgetLimited", "complete"}
+    {
+        CodexGoalStatus.PAUSED,
+        CodexGoalStatus.BLOCKED,
+        CodexGoalStatus.USAGE_LIMITED,
+        CodexGoalStatus.BUDGET_LIMITED,
+        CodexGoalStatus.COMPLETE,
+    }
 )
 # The next step each CodexHost failure tells its caller to take.
 CODEX_NEXT_STEPS: Mapping[str, str] = {

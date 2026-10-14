@@ -22,7 +22,11 @@ from vidbyte.lib.constants.codex import (
     CODEX_RATE_LIMITS_READ_METHOD,
 )
 from vidbyte.lib.dataclasses.codex_host import CodexModelInfo, CodexSpawnRequest
-from vidbyte.lib.enums.codex import CodexHostOperation, CodexSandbox
+from vidbyte.lib.enums.codex import (
+    CodexHostOperation,
+    CodexSandbox,
+    CodexSandboxReadiness,
+)
 from vidbyte.lib.enums.failure import FailureCode
 from vidbyte.lib.errors import CodexAgentError, ConfigurationError
 
@@ -126,11 +130,11 @@ class CodexPreflight:
             message = f"Codex lists no model named {', '.join(unknown)}. Listed models: {visible}."
             raise CodexErrorMapper.error(FailureCode.CODEX_MODEL_UNKNOWN, message, operation)
 
-    async def sandbox_status(self, operation: CodexHostOperation) -> str:
+    async def sandbox_status(self, operation: CodexHostOperation) -> CodexSandboxReadiness:
         # The readiness check exists only on Windows, read at call time;
         # elsewhere the sandbox is not checked.
         if sys.platform != WINDOWS_PLATFORM:
-            return ""
+            return CodexSandboxReadiness.NOT_CHECKED
         return await self._connection.sandbox_status(operation)
 
     async def models(self, operation: CodexHostOperation, include_hidden: bool) -> tuple[CodexModelInfo, ...]:
