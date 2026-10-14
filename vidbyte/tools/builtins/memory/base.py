@@ -99,8 +99,12 @@ class BaseMemoryTool(BaseTool):
 
     def _error_output(self, status: int, body: dict) -> str:
         # Formats an HTTP error dict into a human-readable error string.
-        return json.dumps({"error": True, "status": status, "body": body})
+        # @intent tool-output-keeps-non-ascii-readable
+        # The vendor's error text reaches the model as characters, not \u escapes.
+        return json.dumps({"error": True, "status": status, "body": body}, ensure_ascii=False)
 
     def _success_output(self, data: dict | list | str) -> str:
         # Serializes a successful response payload to a JSON string.
-        return json.dumps(data, default=str)
+        # @intent tool-output-keeps-non-ascii-readable
+        # Stored memories reach the model and the tool-output predicates as characters, not \u escapes.
+        return json.dumps(data, default=str, ensure_ascii=False)

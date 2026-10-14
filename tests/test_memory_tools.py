@@ -84,6 +84,14 @@ class SupermemoryAddTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status, ToolStatus.SUCCESS)
         self.assertIn("doc_abc", result.output)
 
+    async def test_add_memory_success_keeps_non_ascii_readable(self) -> None:
+        """[Hidden Assumption] vendor text reaches the model as characters, not \\u escapes."""
+        tool = _inject_transport(SupermemoryAddMemoryTool("key123"), MockTransport(200, {"id": "doc_abc", "city": "Zürich"}))
+        result = await tool.execute(ToolCall("supermemory_add_memory", {"content": "Alice lives in Zürich"}))
+        self.assertEqual(result.status, ToolStatus.SUCCESS)
+        self.assertIn("Zürich", result.output)
+        self.assertEqual(json.loads(result.output), {"id": "doc_abc", "city": "Zürich"})
+
     async def test_add_memory_missing_content_returns_error(self) -> None:
         """[Hidden Assumption] content is always supplied."""
         tool = SupermemoryAddMemoryTool("key123")

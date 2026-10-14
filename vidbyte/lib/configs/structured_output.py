@@ -9,6 +9,7 @@ Purpose:
     capability from provider names.
 Architecture:
     - PROVIDER_SUPPORT and MODEL_SUPPORT: Fixed endpoint capability declarations.
+    - NATIVE_SCHEMA_WITHOUT_TOOLS: Model prefixes whose native schema cannot travel beside functions.
     - StructuredOutputDescription: Explains one enforcement tier and its safe fallback path.
     - STRUCTURED_OUTPUT_DESCRIPTIONS: Complete tier catalog for developer-facing discovery.
 Key Functions:
@@ -54,6 +55,14 @@ MODEL_SUPPORT: dict[ModelProvider, dict[str, StructuredOutputSupport]] = {
         "claude-4-sonnet": StructuredOutputSupport.STRICT_TOOLS,
         "claude-4-haiku": StructuredOutputSupport.STRICT_TOOLS,
     },
+}
+
+# @intent gemini-2-schema-cannot-ride-with-function-calls
+# Gemini 2.x answers 400 "Function calling with a response mime type: 'application/json' is unsupported"
+# when a request declares functions, and every agent request declares isDone. Models with these
+# prefixes keep native schema for tool-free requests but receive it as instructions beside functions.
+NATIVE_SCHEMA_WITHOUT_TOOLS: dict[ModelProvider, tuple[str, ...]] = {
+    ModelProvider.GEMINI: ("gemini-1", "gemini-2"),
 }
 
 
@@ -129,6 +138,7 @@ STRUCTURED_OUTPUT_DESCRIPTIONS: dict[StructuredOutputSupport, StructuredOutputDe
 
 __all__ = [
     "MODEL_SUPPORT",
+    "NATIVE_SCHEMA_WITHOUT_TOOLS",
     "PROVIDER_SUPPORT",
     "STRUCTURED_OUTPUT_AS_OF",
     "STRUCTURED_OUTPUT_DESCRIPTIONS",

@@ -50,6 +50,7 @@ class GlobTool(BaseCodeSearchTool):
             return ToolResult.success(self.name, "No files matched.", metadata={"count": 0})
 
         matches: list[str] = []
+        seen: set[str] = set()
         truncated = False
         for path in start.glob(pattern):
             resolved = Path(path).resolve()
@@ -59,6 +60,11 @@ class GlobTool(BaseCodeSearchTool):
                 relative = self.relative_path(resolved)
             except ValueError:
                 continue
+            # See @intent code-search-reports-each-file-once: skip a file already listed under
+            # another link spelling before the limit check, so a repeat never causes truncation.
+            if relative in seen:
+                continue
+            seen.add(relative)
             # @intent code-search-truncation-means-hits-were-cut
             # Only a match arriving after the list is already full proves results were cut.
             if len(matches) >= max_results:
