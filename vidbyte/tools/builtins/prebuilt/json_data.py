@@ -3,7 +3,7 @@
 PURPOSE: Defines JsonDataToolFunctions, the nine prebuilt tools that work on JSON documents: checking syntax, formatting, reading and setting a value at a JSON Pointer, listing every path, diffing two documents, applying a JSON Patch, summarizing the shape of a document, and pulling JSON out of surrounding text.
 ROLE IN CODEBASE: Re-exported by vidbyte/tools/builtins/prebuilt/__init__.py and wrapped in FunctionTool objects by PrebuiltTools in vidbyte/tools/toolsets/prebuilt.py when the JSON_DATA category is chosen. Builds on PrebuiltToolSupport in _support.py for JSON parsing under the nesting cap, JSON Pointer splitting, nesting measurement, the item cap, and the argument error.
 ARCHITECTURE NOTE: Every tool is a static method whose docstring's first paragraph is the model-facing description and whose parameters carry their own Field descriptions and caps, so FunctionTool builds the whole schema from the signature. Documents are walked with explicit work stacks instead of recursion, and pointer text is written only for the items a result keeps, so a long key is never copied once for every value below it. A document being edited sits in a one-member holder object, so even the root has a parent and every edit changes one member or one item.
-FUNCTION INVENTORY: verify_json_syntax, format_json, json_get_value, json_set_value, list_json_paths, diff_json_documents, apply_json_patch, summarize_json_structure, and extract_json_from_text are the tools. _formatted_length predicts formatted output length; _lookup reads a pointer target; _parent_slot, _slot_value, and _slot_insert find, read, and change one member or item; _patch_operations, _operation_fields, and _measured_insertion read JSON Patch operations and account for their size; _same_json compares values type-aware; _path_steps and _path_entry list paths; _change_steps and _change_entry list differences; _value_count and _merged_shape describe structure; tool_functions lists the tools in catalogue order.
+FUNCTION INVENTORY: verify_json_syntax, format_json, json_get_value, json_set_value, list_json_paths, diff_json_documents, apply_json_patch, summarize_json_structure, and extract_json_from_text are the tools. _formatted_length predicts formatted output length; _lookup reads a pointer target; _parent_slot, _slot_value, and _slot_insert find, read, and change one member or item; _patch_operations, _operation_fields, _operation_lengths, and _measured_insertion read JSON Patch operations and account for their size and their work; _same_json compares values type-aware; _path_steps and _path_entry list paths; _change_steps and _change_entry list differences; _value_count and _merged_shape describe structure; tool_functions lists the tools in catalogue order.
 COMMON MODIFICATION PATTERNS: A new JSON tool adds a static method with a 4 to 5 sentence description, its row in the spec's Appendix A.17, and its entry in tool_functions. A new pointer-based edit reuses _parent_slot and _slot_insert from the tool itself rather than from another helper.
 WHAT NOT TO DO IN THIS FILE: 1. Do not recurse over a document; use a work stack, as every walk here does. 2. Do not write pointer text for every value up front, because a long key would be copied once per value below it. 3. Do not call json.dumps on an edited document before its nesting is known to be within the cap, because json.dumps recurses and its RecursionError would escape as the wrong error type. 4. Do not compare JSON values with == alone, which treats true as 1; use _same_json. 5. Do not iterate a set or a hash-ordered container when building an output.
 KNOWN EDGE CASES: An integer literal of more than 4,300 digits is valid JSON that Python refuses to read, and a number such as 1e400 overflows a float, so verify_json_syntax reports both as invalid with a fixed message, because no JSON tool here accepts them. A move to its own path takes the value out and puts it back, so an object member moves to the end of its object. When merged shapes give two keys the same label, such as a key ending in a question mark next to an optional key of the same stem, the later one wins. An array index of more than nine digits can never point into a list a document of one million characters holds, so it is treated as past the end.
@@ -29,6 +29,7 @@ from vidbyte.lib.constants.prebuilt_tools import (
     PREBUILT_MAX_JSON_SCAN_STARTS,
     PREBUILT_MAX_MEDIUM_TEXT_CHARS,
     PREBUILT_MAX_PATCH_OPERATIONS,
+    PREBUILT_MAX_PATCH_WORK_CHARS,
     PREBUILT_MAX_SHORT_TEXT_CHARS,
     PREBUILT_MAX_TEXT_CHARS,
 )
@@ -51,6 +52,7 @@ _VALUE_OPERATIONS = frozenset({"add", "replace", "test"})
 _TAKING_OPERATIONS = frozenset({"remove", "move"})
 _INSERTING_OPERATIONS = frozenset({"add", "replace", "copy"})
 _REMOVING_OPERATIONS = frozenset({"remove", "replace"})
+_READING_OPERATIONS = frozenset({"remove", "replace", "move", "copy"})
 _TOO_DEEP_MESSAGE = f"the JSON is nested deeper than {PREBUILT_MAX_JSON_NESTING} levels of arrays and objects"
 _CONSTANT_MESSAGE = "the JSON contains NaN, Infinity, or -Infinity, which are not valid JSON numbers"
 _LONG_INTEGER_MESSAGE = "the JSON contains an integer with more digits than the parser accepts"
@@ -202,12 +204,14 @@ class JsonDataToolFunctions:
         json_text: Annotated[str, Field(description=_JSON_TEXT_PARAMETER_DESCRIPTION, max_length=PREBUILT_MAX_TEXT_CHARS)],
         patch_json: Annotated[str, Field(description="The JSON Patch to apply, given as the text of a JSON array of operation objects. Each operation has an op member and a path member, plus from for move and copy and value for add, replace, and test. At most 1,000 operations are allowed, and they run in order. The text may hold at most one million characters.", max_length=PREBUILT_MAX_TEXT_CHARS)],
     ) -> PrebuiltToolOutput:
-        """Apply an RFC 6902 JSON Patch to a document, all or nothing, and return the patched document as compact JSON. Use it to make several precise edits in one step, or to apply a patch that another system produced. The supported operations are add, remove, replace, move, copy, and test, and at most 1,000 operations are allowed. Any failing operation, a failed test included, fails naming patch_json with the operation index and reason, and so does a result that would grow past one million characters or 100 levels of nesting."""
+        """Apply an RFC 6902 JSON Patch to a document, all or nothing, and return the patched document as compact JSON. Use it to make several precise edits in one step, or to apply a patch that another system produced. The supported operations are add, remove, replace, move, copy, and test, and at most 1,000 operations are allowed. Any failing operation, a failed test included, fails naming patch_json with the operation index and reason, and so does a result that would grow past one million characters or 100 levels of nesting, or a patch whose operations together read and write more than ten million characters of JSON."""
         # Read the document into a one-member holder so even the root
-        # has a parent, and start the running size at its length.
+        # has a parent, start the running size at its length, and
+        # start the work total at zero.
         holder: dict[str, object] = {"": PrebuiltToolSupport.parse_json_text(json_text, "json_text")}
         operations = JsonDataToolFunctions._patch_operations(patch_json)
         size = len(json.dumps(holder[""], separators=_COMPACT_SEPARATORS, ensure_ascii=False))
+        work = 0
         for index, operation in enumerate(operations):
             # Check the operation's members and split its paths.
             kind, target, source, value = JsonDataToolFunctions._operation_fields(operation, index)
@@ -220,6 +224,16 @@ class JsonDataToolFunctions:
                 source_parent, source_key = JsonDataToolFunctions._parent_slot(holder, source, False, "patch_json", context)
                 current = JsonDataToolFunctions._slot_value(source_parent, source_key, kind in _TAKING_OPERATIONS, context)
 
+            # @intent prebuilt-patch-work-cap
+            # Each operation serializes, copies, or walks the values it
+            # gives and reads, so their total length across the patch is
+            # capped as well as the document's size.
+            lengths = JsonDataToolFunctions._operation_lengths(kind, current, value)
+            work += sum(lengths)
+            if work > PREBUILT_MAX_PATCH_WORK_CHARS:
+                problem = f"{context} brings the JSON the patch reads and writes past {PREBUILT_MAX_PATCH_WORK_CHARS} characters"
+                raise PrebuiltToolSupport.argument_error("patch_json", problem, "a patch whose operations together read and write at most that much JSON")
+
             # A test only compares the value it read.
             if kind == "test":
                 if not JsonDataToolFunctions._same_json(current, value):
@@ -228,7 +242,7 @@ class JsonDataToolFunctions:
 
             # Work out the value to insert while keeping the running
             # size and the nesting under their caps, then insert it.
-            inserted, size = JsonDataToolFunctions._measured_insertion(kind, current, value, size, len(target) - 1, index)
+            inserted, size = JsonDataToolFunctions._measured_insertion(kind, current, value, lengths, size, len(target) - 1, index)
             if inserted is not _ABSENT:
                 parent, key = JsonDataToolFunctions._parent_slot(holder, target, False, "patch_json", context)
                 JsonDataToolFunctions._slot_insert(parent, key, inserted, kind != "replace", kind == "replace", "patch_json", context)
@@ -413,11 +427,19 @@ class JsonDataToolFunctions:
         return kind, target, None if kind == "add" else origin, value
 
     @staticmethod
-    def _measured_insertion(kind: str, current: object, value: object, size: int, path_length: int, index: int) -> tuple[object, int]:
+    def _operation_lengths(kind: str, current: object, value: object) -> tuple[int, int]:
+        """Measure as compact JSON the value an operation gives and the value it takes out or reads at its source."""
+        given_length = len(json.dumps(value, separators=_COMPACT_SEPARATORS, ensure_ascii=False)) if kind in _VALUE_OPERATIONS else 0
+        current_length = len(json.dumps(current, separators=_COMPACT_SEPARATORS, ensure_ascii=False)) if kind in _READING_OPERATIONS else 0
+        return given_length, current_length
+
+    @staticmethod
+    def _measured_insertion(kind: str, current: object, value: object, lengths: tuple[int, int], size: int, path_length: int, index: int) -> tuple[object, int]:
         """Return the value an operation inserts and the new running size, refusing growth past the size or nesting cap."""
+        given_length, current_length = lengths
         inserted = current if kind in {"move", "copy"} else value
-        added = len(json.dumps(inserted, separators=_COMPACT_SEPARATORS, ensure_ascii=False)) if kind in _INSERTING_OPERATIONS else 0
-        removed = len(json.dumps(current, separators=_COMPACT_SEPARATORS, ensure_ascii=False)) if kind in _REMOVING_OPERATIONS else 0
+        added = (current_length if kind == "copy" else given_length) if kind in _INSERTING_OPERATIONS else 0
+        removed = current_length if kind in _REMOVING_OPERATIONS else 0
 
         # @intent prebuilt-output-text-cap
         # The running size grows by each inserted value and shrinks by
