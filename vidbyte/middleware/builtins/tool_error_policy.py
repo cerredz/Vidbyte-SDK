@@ -56,9 +56,14 @@ class ToolErrorPolicyMiddleware(AgentMiddleware):
         # This hook is policy-only: retry decisions happen before the failed
         # result reaches the model, while terminal errors fall through so the
         # formatter can always render the full tool-error details.
-        if ctx.tool_call is None or ctx.tool_result is None or ctx.tool_result.status is not ToolStatus.ERROR:
+        if ctx.tool_call is None or ctx.tool_result is None:
             return MiddlewareDecision.continue_()
         state = self._state_for(ctx)
+        # @intent retry-budget-is-per-call
+        # The key only names one call's retry loop (ids repeat across turns on some servers and Gemini sends none, so name+args stands in); release it when the loop ends so a later call with the same key gets its own budget.
+        if ctx.tool_result.status is not ToolStatus.ERROR:
+            state.retry_attempts.pop(self._call_key(ctx), None)
+            return MiddlewareDecision.continue_()
         kind = self._error_kind(ctx.tool_result.metadata)
         # @intent refused-calls-are-not-tool-errors
         # A call refused by policy never ran, so it neither counts toward the error budget nor aborts the run, and is never retried.
@@ -67,12 +72,16 @@ class ToolErrorPolicyMiddleware(AgentMiddleware):
         retryable = self._retryable(ctx.tool_result.metadata)
         state.total_errors += 1
         if self._circuit_breaker_tripped(state):
-            return self._abort_for_circuit(ctx, kind, state)
-        if self._should_retry(ctx, kind, retryable, state):
+            decision = self._abort_for_circuit(ctx, kind, state)
+        elif self._should_retry(ctx, kind, retryable, state):
             return self._retry_decision(ctx, kind, state)
-        if self.policy.on_unrecoverable is UnrecoverableAction.ABORT_RUN:
-            return self._abort_for_unrecoverable(ctx, kind, state)
-        return self._continue_with_error_metadata(kind, state)
+        elif self.policy.on_unrecoverable is UnrecoverableAction.ABORT_RUN:
+            decision = self._abort_for_unrecoverable(ctx, kind, state)
+        else:
+            decision = self._continue_with_error_metadata(kind, state)
+        # This call's retry loop ends here, so free its key for the next call.
+        state.retry_attempts.pop(self._call_key(ctx), None)
+        return decision
 
     def _state_for(self, ctx: MiddlewareContext) -> _ToolErrorPolicyRunState:
         # Returns existing run state or creates it for direct hook-level tests.
