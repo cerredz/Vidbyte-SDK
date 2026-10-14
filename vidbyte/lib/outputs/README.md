@@ -228,8 +228,9 @@ Links in this section retrieved 2026-10-14.
    settings, as in `github.py`). Check every argument in `__init__` with
    `OutputArguments`, and send through `OutputHttp.post`, `OutputHttp.patch`,
    `OutputHttp.read`, or `OutputSmtp.send` so status codes, timeouts, and
-   secrets are handled in one place. Blocking work, such as SMTP or a file append, runs on the
-   module's own executor, as `email.py` and `github_job_summary.py` do.
+   secrets are handled in one place. Blocking work, such as SMTP or a file
+   append, runs on the module's own executor, as `email.py` and
+   `github_job_summary.py` do.
 4. Export it from this folder's `__init__.py`, from `vidbyte.agents.output`,
    and from the root `vidbyte` package, then regenerate the public API
    contract.
@@ -319,3 +320,5 @@ Links in this section retrieved 2026-10-14.
   delivered, so check its destination before resending it.
 - **Restored sessions:** `Session.resume` and `fork_from` return agents with
   `outputs=()`; pass `outputs=` to `BaseAgent.restore` to deliver again.
+
+Links in this section retrieved 2026-10-14.
