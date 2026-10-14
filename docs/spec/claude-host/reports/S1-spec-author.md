@@ -249,3 +249,18 @@ r5 applies five S4 findings from the verified `review.md`. It changes the spec o
 - R-E1 is not reopened. An account-wide refusing window still fails a turn whose own result is a success.
 - The self-check passes: 18 sections, contiguous IDs (Q-1 to Q-13, D-1 to D-33, EC-1 to EC-61), consistent tables, no `<br>`, and the same file-path count outside §11–§13 as at `8ffcd5e1`.
 - No §12.3 row and no shared-file contract line changed.
+
+## Addendum: r6 (2026-10-14)
+
+r6 applies one finding, R-24, which the findings verifier routed from the S5 re-review (R-C3). It changes the spec only, and adds no feature, field, option or control. The status stays `reviewed`.
+
+| Part | Change |
+|---|---|
+| Unknown rate-limit values | EC-52 now covers an event whose `status` or `overage_status` is outside its enum, besides a missing or unknown type. It states that the pinned SDK declares only `allowed`, `allowed_warning` and `rejected` for both fields (`RateLimitStatus` in the SDK's types module). Such an event is skipped and the turn goes on. A window with any other overage value is skipped, not read as "overage not allowed" under D-29. Only an absent overage status is read that way. §12.3 row 12 names this skip as the one exception to its `claude.protocol_mismatch` mapping. |
+| Steer yield | New §17 deviation 14 describes the pump's one `await asyncio.sleep(CLAUDE_STEER_YIELD_SECONDS)` (value 0) at the target placement for R-22: once, inside `_take_steer`, before the pending steer leaves its slot, and only while a steer is pending. It explains why the yield exists (R-2, EC-19), why the message must still be in its slot (INV-18, the §9.2 steer row, row 7), and why it is a constant (A007). It also says that today's placement in `_query`, after the take, is the defect R-22 moves. Row 7's pump sequence gains the yield step, and row 14 lists `CLAUDE_STEER_YIELD_SECONDS = 0`. |
+| §9.3 | Unchanged. It lists configuration (the extra, the host arguments, the CLI version floor and the interrupt grace), not the pump's awaits, and the yield is not meant to be tuned. |
+
+**Checks.**
+- The code matches EC-52 as written: `_on_rate_limit` returns early for an unknown type, an unknown status, or an overage status that is present but unknown, and keeps a window whose overage status is absent. The frozen case `test_a_window_with_an_unknown_status_or_overage_value_is_skipped` expects `completed` and no recorded window for both unknown values.
+- R-22's and R-23's rules, INV-18, D-3 and the §9.2 steer row are unchanged. No requirement ID changed.
+- The self-check passes: 18 sections, contiguous IDs (D-1 to D-33, EC-1 to EC-61, Q-1 to Q-13, AC-1 to AC-40, INV-1 to INV-26), consistent tables, no `<br>`, and the same file-path counts outside §11–§13 as at `c6039bb7` (§6 73, §8 12, §17 2).
