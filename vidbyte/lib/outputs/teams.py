@@ -45,7 +45,7 @@ class TeamsOutput(BaseOutput):
 
     async def send(self, reply: AgentMessage, content: OutputContent) -> DeliveryReceipt:
         """Post one full-width Adaptive Card: the title in bold, then the body without a repeated title."""
-        # @intent teams-text-is-plain
+        # @intent teams-text-cannot-mention
         # TextBlocks carry no mention entities, so model-written text
         # cannot mention a person or the whole channel.
         title = {"type": "TextBlock", "text": OutputText.single_line(content.title, OUTPUT_TITLE_MAX_CHARS), "weight": TEAMS_TITLE_WEIGHT, "size": TEAMS_TITLE_SIZE, "wrap": True}
