@@ -399,15 +399,20 @@ class CodexHost:
 
     async def interrupt_codex_turn(self, handle: CodexTurnHandle) -> None:
         # Stop a running turn with one interrupt and no stop reason
-        # (AC-16); a finished turn, or one already sent its one stop,
-        # gets nothing.
+        # (AC-16). A finished turn gets nothing (EC-25), and so does a
+        # turn whose earlier stop is still in flight. A stop that
+        # already failed blocks nothing, so the caller can retry.
         operation = CodexHostOperation.INTERRUPT_CODEX_TURN
         self._guard(operation, talks=True)
         turn = self._owned(operation, handle)
-        if turn.snapshot is not None or turn.stop_sent:
+        if turn.snapshot is not None or turn.stop_pending:
             return
+        # Mark the stop as sent, so a later timeout or output cap
+        # crossing adds no interrupt (D-7), and as pending until this
+        # interrupt returns.
         turn.stop_sent = True
-        await self._connection.interrupt(operation, handle, turn.state)
+        turn.stop_pending = True
+        await turn.send_stop(self._connection, operation)
 
     async def track_codex_thread_usage(self, thread_id: str) -> CodexThreadUsage:
         # The usage of every turn this host saw end on the thread.

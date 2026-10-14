@@ -85,6 +85,7 @@ class CodexLiveTurn:
         self.completed: Turn | None = None
         self.stop_reason: FailureCode | None = None
         self.stop_sent = False
+        self.stop_pending = False
         self.timer: asyncio.TimerHandle | None = None
         self.snapshot: CodexTurnSnapshot | None = None
         self.ended: asyncio.Future[CodexTurnSnapshot] = loop.create_future()
@@ -172,7 +173,19 @@ class CodexLiveTurn:
             return
         self.stop_sent = True
         self.stop_reason = reason
-        connection.spawn_task(connection.interrupt(CodexHostOperation.INTERRUPT_CODEX_TURN, self.handle, self.state, quiet=True))
+        self.stop_pending = True
+        connection.spawn_task(self.send_stop(connection, CodexHostOperation.INTERRUPT_CODEX_TURN, quiet=True))
+
+    async def send_stop(self, connection: CodexConnection, operation: CodexHostOperation, *, quiet: bool = False) -> None:
+        # @intent a-stop-turns-others-away-only-while-in-flight
+        # Send the interrupt the caller marked pending, and clear the
+        # mark when the request ends, failed or not. A stop in flight
+        # turns a second interrupt away, but a failed one blocks
+        # nothing, so the caller can still stop the turn (AC-16).
+        try:
+            await connection.interrupt(operation, self.handle, self.state, quiet=quiet)
+        finally:
+            self.stop_pending = False
 
     def close_goal_stream(self, client: CodexClient) -> None:
         # A goal run's stream closes once, in openai-codex's own order:

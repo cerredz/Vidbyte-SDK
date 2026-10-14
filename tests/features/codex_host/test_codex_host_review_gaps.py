@@ -390,5 +390,51 @@ class CodexHostSchemaRefusalTextTests(HostTestCase):
                 self.assertTrue(result.output.startswith("configuration.invalid_argument: "), result.output)
 
 
+@requires_sdk
+class CodexHostInterruptAfterFailedStopTests(HostTestCase):
+    """R-27, AC-16, EC-25, EC-27 and D-7: a user interrupt is skipped only while another stop is in flight."""
+
+    async def test_a_user_interrupt_that_failed_is_sent_again_when_retried(self) -> None:
+        host = await self.open_host()
+        handle = await self.spawn(host)
+        self.server.fail("turn/interrupt", self.fakes.FakeRpcError(-32603, "Codex could not interrupt the turn."), times=1)
+        await self.assert_codex_error(host.interrupt_codex_turn(handle), "codex.api_error")
+        # The failed stop is over, so the retry the next step asks for is sent.
+        await asyncio.wait_for(host.interrupt_codex_turn(handle), WAIT_SECONDS)
+        self.assertEqual(self.count("turn/interrupt"), 2)
+        snapshot = await self.wait_done(host, handle)
+        self.assert_problem(snapshot, "interrupted", None)
+
+    async def test_a_user_interrupt_after_a_failed_timeout_stop_is_sent_and_the_timeout_label_stays(self) -> None:
+        self.patch_connection("CODEX_HOST_WORKER_THREADS", 1)
+        host = await self.open_host()
+        self.server.fail("turn/interrupt", self.fakes.FakeRpcError(-32603, "Codex could not interrupt the turn."), times=1)
+        handle = await self.spawn(host, timeout_seconds=0.2)
+        await self.wait_for_request("turn/interrupt", lambda params: params["turnId"] == handle.turn_id)
+        # Barrier: with one host worker, this read returns only after the failed timeout stop has returned.
+        await asyncio.wait_for(host.read_codex_thread(handle.thread_id), WAIT_SECONDS)
+        # EC-27: the failed timeout stop is not retried, and the turn keeps running.
+        running = await asyncio.wait_for(host.get_codex_turn_result(handle), WAIT_SECONDS)
+        self.assertEqual(running.status.value, "inProgress")
+        await asyncio.wait_for(host.interrupt_codex_turn(handle), WAIT_SECONDS)
+        self.assertEqual(self.count("turn/interrupt"), 2)
+        snapshot = await self.wait_done(host, handle)
+        # D-7: the timeout's stop came first, so its label stays once Codex reports the turn interrupted.
+        self.assert_problem(snapshot, "interrupted", "codex.turn_timed_out")
+
+    async def test_a_user_interrupt_while_the_timeout_stop_is_in_flight_sends_nothing_more(self) -> None:
+        host = await self.open_host()
+        held = self.server.hold("turn/interrupt")
+        handle = await self.spawn(host, timeout_seconds=0.2)
+        await asyncio.to_thread(held.wait_arrived)
+        # R-16: Vidbyte's own stop has not returned yet, so the user's call returns at once and sends nothing.
+        await asyncio.wait_for(host.interrupt_codex_turn(handle), WAIT_SECONDS)
+        self.assertEqual(self.count("turn/interrupt"), 1)
+        held.release()
+        snapshot = await self.wait_done(host, handle)
+        self.assert_problem(snapshot, "interrupted", "codex.turn_timed_out")
+        self.assertEqual(self.count("turn/interrupt"), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
