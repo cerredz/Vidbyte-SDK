@@ -233,3 +233,61 @@ Other checks on `1461ddf4`:
 - No confirmed finding is open. R-19 to R-25 are follow-ups and were not handed in. R-24 (mutant M5) still survives, because `turn.stop_sent = True` stays on the user path and no new test crosses a cap after a user interrupt.
 - R-27 residual, which the verifier considered and did not raise: if the caller of a user interrupt is cancelled while its request is already running on a worker, `finally` clears `stop_pending` before the request ends, so an immediate second call can send a second interrupt. That is the pre-R-16 behaviour, in a narrower window. Probe `scratchpad/codex-repair2/probe_cancelled_interrupt.py`: `turn/interrupt count after retry while first still held: 2` / `final: interrupted problem=None`.
 - R-1 residual, accepted in S4: a review that finished before its registration, and whose caller is also cancelled during the read-back, stays RUNNING until close.
+
+## Iteration 3 — 2026-10-14 03:50 — agent report: reports/S5-repair-3.md
+
+**Defects in.** The S5 re-review round 2 (reports/S5-rereview-2.md) and its scoped verifier (reports/S5-findings-verifier-r2.md) confirmed two findings for this iteration. R-30 (Major, comment-only): since R-27's commit `ad363725`, `interrupt_codex_turn` (host.py:400) calls `turn.send_stop`. A002 therefore sees the `send` token, and the function had no `# @intent` line. A002's slack (580 against 703) hid the gap, so R-9 was reopened at a new site. R-31 (Minor, trivial, comment-only): the in-flight interrupt mark clears when the await ends, not when the request ends. The comments at turns.py:181-184 and host.py:402-404 said otherwise. R-32 (Minor, tests-only) is a follow-up and was not handed in. Failing gates in: none. Every gate was green on `7b05e68b`.
+
+**Correction to iteration 2.** Iteration 2 said "`lint/run.py --rule A002 --all` lists nothing under the branch's paths" (this file, line 229; also reports/S5-repair-2.md:34). That was false. From `ad363725` to `7b05e68b`, A002 listed `host.py:400 interrupt_codex_turn ['external boundaries']`. The claim came from the text form of the command. When a rule's verdict is IMPROVED, the text form prints only the summary row and no per-path findings. At `888db88f` it prints 7 lines and leaves out even main's four `lib/errors/base.py` rows. Per-path findings appear only with `--format json`. So read A002, and every other ratcheted rule, through the JSON form, filtered to the branch's files: `git diff --name-only $(git merge-base origin/main HEAD) HEAD -- vidbyte` (27 files).
+
+**Hypotheses and attempts.**
+- R-30 and R-31: the verifier's text in the two review rows was applied unchanged, and it worked the first time. The host.py block now starts with `# @intent the-caller-can-always-retry-a-failed-stop` (def at :400, marker at :401, inside A002's 20-line window). The turns.py block keeps its existing `@intent` slug. Only its four narrative lines changed, and they became six.
+- One commit carries both findings, because R-31's host.py wording is part of R-30's block.
+- Rejected without trying, on R-8's precedent: renaming `send_stop`, or reshaping the call to hide the `send` token from A002.
+- `git diff 7b05e68b -- vidbyte` has 9 added and 5 removed lines, and every one of them is a `#` comment. The widest is 70 columns, counted from column 1. host.py has 771 lines, as the verifier predicted, and turns.py has 419. No file header changed (A001 is 643 of 643).
+- A002 JSON before, at `0c6a5a8e`: found 580, and five rows in branch files, host.py:400 plus main's four base.py `__init__`s. After, at `888db88f`: found 579, the four base.py rows only, and 0 rows under `vidbyte/harnesses/native/` or `vidbyte/tools/builtins/codex/`. The four rows are main's. A002's own `IntentAnalyzer` over `git show 8387d666:vidbyte/lib/errors/base.py` gives the same four `__init__`s at lines 160, 250, 265 and 274. The branch's one added line at 151 shifts them by one.
+- No new test. R-30 and R-31 are comment-only, and this stage forbids test changes. R-32 is still the open test gap for `stop_pending` on the user path.
+
+**Red run.** R-30's reproducer at `0c6a5a8e` is `lint/run.py --rule A002 --all --format json`, filtered to the 27 branch files:
+```
+found 580 baseline 703 verdict IMPROVED
+vidbyte/harnesses/native/codex/host.py 400 interrupt_codex_turn external boundaries
+rows in branch files: 5
+```
+At `888db88f`: `found 579 baseline 703 verdict IMPROVED` / `rows in branch files: 4`, all in base.py. R-31 is a comment fix and has no red run. The verifier's probe `codex-verifier-r2/probe_interrupt_windows.py` shows its windows.
+
+**Changes.**
+
+| Commit | Subject |
+|---|---|
+| `888db88f` | fix(codex-host): add the intent line to interrupt_codex_turn and say when the stop mark clears [R-30, R-31] |
+| `780c26f4` | docs(spec): mark codex-host R-30 and R-31 fixed in review.md |
+
+`780c26f4` was pushed to `origin/feat/codex-host` after `7b05e68b`, together with the three docs commits `4b9935d7`, `b1cca482` and `0c6a5a8e`. `origin/main` is still `8387d666` (`git rev-list --count HEAD..origin/main` printed `0`), so no merge was needed. This log and the report are committed after it.
+
+**Gate matrix out** (local runs on `780c26f4`, whose code equals `888db88f`):
+
+| Gate | Command | Result | Final lines |
+|---|---|---|---|
+| New tests | none; this iteration is comment-only | n/a | — |
+| Feature pack | `PYTHONPATH=$W python -P -m pytest tests/features/codex_host -q` | pass | `116 passed in 7.74s` |
+| Feature pack, CI view | same, with `sys.modules['openai_codex'] = None` | pass | `36 passed, 80 skipped in 1.78s` |
+| A002, branch paths | `lint/run.py --rule A002 --all --format json`, filtered | pass | `found 579 baseline 703 verdict IMPROVED` / `rows in branch files: 4` (main's base.py only) |
+| run_ci source | `PYTHONPATH=$W python scripts/run_ci.py --stage source` | pass | `SDK-LINT: PASS` … `4122 passed, 22 skipped in 40.47s` / `CI passed.` |
+| run_ci package | `python scripts/run_ci.py --stage package` (no `PYTHONPATH`) | pass | `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` |
+| Lint | `PYTHONPATH=$W python lint/run.py` | pass | `A002 IMPROVED 703 -> 579.` … `S064 RATCHETED: 4 known finding(s).` / `SDK-LINT: PASS` |
+| Semgrep | `semgrep scan --error --config .semgrep/typed-mapping-boundary-policy.yml vidbyte` | pass | `Ran 1 rule on 911 files: 0 findings.` |
+| Public API | `PYTHONPATH=$W python scripts/generate-sdk-public-api.py --check` | pass | `contracts/sdk-public-api.json is current at f7a02bae… (vidbyte-sdk 0.2.1, 606 exports).` |
+| Remote CI | `gh workflow run ci.yml --ref feat/codex-host` → run 38530861705 on `780c26f4` | success | Source 3.11: `4045 passed, 99 skipped in 45.26s` / `CI passed.`; Source 3.12: `4045 passed, 99 skipped, 19 warnings in 50.02s` / `CI passed.`; Package: `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` |
+| Remote static policy | `gh workflow run static-policy.yml --ref feat/codex-host` → run 38530864005 on `780c26f4` | success | `Ran 1 rule on 911 files: 0 findings.` |
+
+Other checks on `780c26f4`:
+- The shared-file blob SHA-256 is `0374a2c899318e4fdb31c065d951266feaffff5aa736ecde616c4a66942f497a`.
+- `git diff --stat 7b05e68b HEAD -- tests lint` is empty. Under `vidbyte/`, the only changes are 4/2 lines in host.py and 5/3 in turns.py, and 0 of them are code.
+
+**Still open.**
+- No confirmed finding is open.
+- R-32 (tests-only) and R-19 to R-25 are follow-ups. R-24's mutant M5 still survives.
+- Accepted residuals:
+  - R-1, accepted in S4: a review that finished before its registration, and whose caller is also cancelled during the read-back, stays RUNNING until close.
+  - R-31's window, accepted by the verifier. It replaces iteration 2's "R-27 residual" and widens it. The in-flight mark clears when the await ends. The request can still be running on a worker (EC-70) in three cases: the user's interrupt call is cancelled (INV-11), its 300 s bound elapses (D-3), or Vidbyte's own timeout stop outlives that bound. In each case, a later `interrupt_codex_turn` sends a second `turn/interrupt`. The turn still ends INTERRUPTED, and the first stop's label stays (the verifier's case C6c). Closing the window would mean tracking the worker future past cancellation inside `CodexConnection.call`, which is out of proportion for a Minor. S6 should list it beside R-1's in the PR body's residuals.
