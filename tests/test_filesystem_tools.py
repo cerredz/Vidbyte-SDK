@@ -831,6 +831,20 @@ class EditToolDiffTests(unittest.TestCase):
             self.assertEqual(changed_lines(result.output), ["-    return 2", "+    return 3"])
             self.assertEqual(target.read_bytes(), b"def f():\r\n    x = 1\r\n    return 3\r\n\r\nprint(f())\r\n")
 
+    def test_diff_tool_treats_crlf_spelled_content_like_write_text(self) -> None:
+        # @intent model-crlf-text-keeps-file-endings
+        # The diff previews a write, so CRLF the model spelled matches the file as write_text sees it: no changes.
+        for file_bytes in (b"[a]\r\nx=1\r\n", b"[a]\nx=1\n"):
+            with self.subTest(file_bytes=file_bytes), TemporaryDirectory() as tmp:
+                config = FileSystemToolConfig(root=tmp, allow_write=True)
+                Path(tmp, "cfg.ini").write_bytes(file_bytes)
+                call = {"path": "cfg.ini", "content": "[a]\r\nx=1\r\n"}
+                diffed = run(DiffTool(config).execute(ToolCall("diff", call)))
+                self.assertEqual(diffed.status, ToolStatus.SUCCESS, diffed.output)
+                self.assertEqual(diffed.output, "")
+                written = run(WriteTextTool(config).execute(ToolCall("write_text", call)))
+                self.assertTrue(written.output.endswith("no changes"), written.output)
+
     def test_replace_text_diff_shows_which_of_two_similar_blocks_was_hit(self) -> None:
         with TemporaryDirectory() as tmp:
             config = FileSystemToolConfig(root=tmp, allow_write=True)
