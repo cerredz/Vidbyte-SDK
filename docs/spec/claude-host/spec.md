@@ -146,57 +146,67 @@ async def compare_reviews() -> str:
 
 ```mermaid
 flowchart TD
-  A[caller or tool: ClaudeHost.spawn_claude_session] -->|ClaudeSpawnRequest| B[host preconditions: loop, closed, extra, cli_path, cap, busy, rate window]
-  B -->|ClaudeOperationError| X[raised to caller / error ToolResult]
-  B -->|register handle, no await| C[ClaudeLiveSession created, status QUEUED]
-  C -->|ClaudeSessionHandle| R[returned immediately]
-  C --> D[pump task: ClaudeOptionsTranslator.to_options]
-  D -->|options, cli_path| E[client.connect]
-  E -->|initialize dict| F[process preconditions: version, auth mode, hooks_applied]
-  F -->|fail| G[ClaudeFailureMapper.classify_turn]
-  F -->|ok, status RUNNING| H[client.query prompt]
-  H --> I[receive_messages loop]
-  I -->|RateLimitEvent| W[host rate windows]
-  I -->|assistant error, task usage, injected-turn result| I
-  I -->|own result, steer pending| H
-  I -->|own result, nothing pending| G
-  I -->|interrupt acknowledged, no result within grace: close started, stream ends| G
-  G -->|classified status| K[the session's one close task: client.disconnect, awaited under shield, never cancelled, process ends]
-  K --> J[status published, done event set, session id and slot freed]
-  L[wait_claude_turn / get_claude_turn_result] -->|snapshot| J
-  M[steer_claude_session] -->|pending message + interrupt| I
-  N[interrupt_claude_turn] -->|interrupt| I
-  O[history and fork] -->|asyncio.to_thread| P[session files, no process]
+  A["spawn / continue / launch<br/>(ClaudeHost method or its tool)"] --> G["ClaudeHost._guard<br/>entered, not closed, same event loop"]
+  G --> L["ClaudeSdkLoader.load<br/>the one claude_agent_sdk import"]
+  L --> V["argument checks<br/>continue: ClaudeHistory.session_info, _guard again, busy, cwd"]
+  V --> AD["ClaudeHost._admit, no await inside<br/>cli_path, live cap, busy session id, rate window"]
+  G -. refused .-> X["ClaudeOperationError raised<br/>a tool returns an error ToolResult"]
+  L -. refused .-> X
+  V -. refused .-> X
+  AD -. refused .-> X
+  AD -->|register every handle, start each pump| H["ClaudeSessionHandle returned, QUEUED"]
+  AD --> P["ClaudeLiveSession.run, the pump task"]
+  P --> SL["launch only: wait for a semaphore slot"]
+  SL --> C["_connect: ClaudeToolServer.build,<br/>ClaudeOptionsTranslator.to_options, client.connect"]
+  C --> CP["_check_process: get_server_info,<br/>version, API-key source for betas or bare"]
+  CP -->|ok: RUNNING, watchdog armed| Q["_query: client.query"]
+  Q --> R["_read: receive_messages to the prompt's own result<br/>_on_result, _on_assistant, _on_rate_limit, _on_task"]
+  R -->|own result, steer pending| T["_take_steer: yield once, take the message,<br/>clear the interrupted result's fields"]
+  T --> Q
+  R -->|own result with no steer, or stream ended| F
+  CP -->|version or auth-mode failure| F
+  C -->|exception mapped by ClaudeFailureMapper| F
+  F["finally: stopping, drop any steer,<br/>cancel watchdog, grace and interrupt tasks"] --> CL["one close task: client.disconnect,<br/>awaited under asyncio.shield, never cancelled"]
+  CL --> PB["_publish: ClaudeFailureMapper.classify_turn,<br/>terminal status and failure, done set, slot released"]
+  W["wait_claude_turn / get_claude_turn_result"] -.->|snapshot| PB
+  S["steer_claude_session"] -->|store message, interrupt task| R
+  I["interrupt_claude_turn / watchdog"] -->|interrupt task, then 30 s grace| R
+  HI["list / info / messages / fork"] -->|asyncio.to_thread| FS["session files, no claude process"]
 ```
 
 ```mermaid
 sequenceDiagram
   participant T as caller or tool
   participant H as ClaudeHost
-  participant S as ClaudeLiveSession pump
+  participant S as ClaudeLiveSession and its pump task
+  participant K as interrupt task the session owns
   participant C as claude process
   T->>H: spawn_claude_session(request)
+  H->>H: _admit, no await: checks, then register the handle and start the pump
   H-->>T: ClaudeSessionHandle (QUEUED)
-  S->>C: connect + initialize
-  S->>C: query(prompt)
+  S->>C: connect, then get_server_info (version, auth mode)
+  S->>C: query(prompt), status RUNNING
   T->>H: steer_claude_session(handle, message)
-  H->>S: store pending message
-  H->>C: interrupt()
-  C-->>S: ResultMessage (aborted turn)
-  S->>C: query(pending message)
-  C-->>S: ResultMessage (steered turn)
-  S->>S: classify
-  S->>C: disconnect (close task, awaited under shield)
-  S->>S: publish status, set done
+  H->>S: steer(message): store the numbered message in its slot
+  S->>K: start the interrupt task, and wait for it without cancelling it
+  K->>C: interrupt()
+  K->>K: interrupt() returned: arm the 30 s grace for the interrupted prompt
+  C-->>S: ResultMessage (interrupted prompt), grace cancelled
+  S->>S: _take_steer: yield once with the message still in its slot, take it, clear the earlier result's fields
+  S->>C: query(message)
+  C-->>S: ResultMessage (steered prompt)
+  S->>C: disconnect, in the one close task, awaited under asyncio.shield, never cancelled
+  S->>S: _publish after the close: classify_turn, terminal status, done set
   T->>H: wait_claude_turn(handle, timeout_seconds)
   H-->>T: ClaudeTurnResult (final)
 ```
 
 How the flow works:
 
-- **Validation** happens in two places. The request record checks itself on construction. The host's preconditions then run synchronously, with no await between the check and the registry insert, so the cap and the busy guard cannot race.
-- **State changes** happen only inside the host's registry and the `ClaudeLiveSession` that owns each turn. Status moves from QUEUED to RUNNING and then to exactly one terminal state.
-- **Failures** are caught at two points. Host preconditions raise `ClaudeOperationError` before any process starts. Everything after the process starts lands in the turn result through `ClaudeFailureMapper`, so a dead process or a refused precondition is a result, never a hang. An interrupt that the CLI acknowledges but never answers with a result ends the turn after `CLAUDE_INTERRUPT_GRACE_SECONDS` (D-4). Every disconnect runs in the session's one close task, which nothing ever cancels, and the pump publishes the terminal status only after that close has completed. So a finished turn never leaves its process running (INV-8).
+- **Validation** happens in two places. The request record checks itself on construction. The host's checks then run in `_admit`, with no await between the checks and the registry insert, so the cap and the busy guard cannot race. `continue_claude_session` reads the session file first and runs `_guard` again after that await, so a continue cannot start a turn after `aclose`.
+- **State changes** happen only inside the host's registry and the `ClaudeLiveSession` that owns each turn. Status moves from QUEUED to RUNNING and then to exactly one terminal state. When the pump takes a steer, it first yields once while the message is still in its slot, so a stop in that pass can still withdraw it, and then clears the interrupted prompt's result fields, keeping the session id, `hooks_applied` and the cumulative cost.
+- **Interrupts** are never sent by the host. A caller's interrupt, a steer and the time-budget watchdog each send `interrupt()` from a task the session owns. Every `interrupt()` that returns arms one grace task aimed at the prompt it stopped; if that prompt's result does not arrive within `CLAUDE_INTERRUPT_GRACE_SECONDS`, the grace starts the close (D-4).
+- **Failures** are caught at two points. Host checks raise `ClaudeOperationError` before any process starts. Everything after the pump starts lands in the session's `ClaudeTurnOutcome`, so a dead process or a refused precondition is a result, never a hang. Every disconnect runs in the session's one close task, which nothing ever cancels. Only after that close has completed does `_publish` classify the turn through `ClaudeFailureMapper.classify_turn`, publish the terminal status, set done and free the launch slot. So a finished turn never leaves its process running (INV-8).
 
 ---
 
@@ -1479,7 +1489,7 @@ No question blocks this spec.
 | r4 | 2026-10-13 | S3 implement | All 31 §12.3 rows built in 34 commits (`b0d6c4c3..5edf1a4d`), draft PR #1044. Pack 165/165; source gate 4100 passed, 27 skipped; package gate, `lint/run.py`, semgrep and the public-API check pass; tests unchanged since `9a8ecc3c`. Budget used: 22 of 22 files, 69 of 69 classes, 1 optional dependency. The spec text is unchanged; the deviations are listed below. Status: implemented. |
 | r5 | 2026-10-14 | S1 revision | S4 review findings R-4, R-6, R-8, R-9 and R-19. R-6: per-model windows (`seven_day_opus`, `seven_day_sonnet`) are recorded but never refuse a spawn or fail a turn (D-29, D-8, EC-7, EC-8, row 5, AC-16, T-1; optional Q-12). R-4: new deviation 12 (pump call depth). R-8: deviation 1 now states which strings stay literals. R-9: new deviation 13 (error placement). R-19: T-2 states the continue-from-a-tool limitation, with optional Q-13. Status stays reviewed. |
 | r6 | 2026-10-14 | S1 revision | S5 re-review finding R-24, routed by the findings verifier. EC-52 and row 12: a rate-limit event whose status or overage status is outside the SDK's three values is skipped, not mapped to `claude.protocol_mismatch` and not read as overage not allowed (D-29). Row 7, row 14 and new deviation 14: the pump's one `CLAUDE_STEER_YIELD_SECONDS` yield, at the placement repair iteration 2 makes for R-22 (inside `_take_steer`, before the take, only while a steer is pending). R-22's and R-23's rules are unchanged. Status stays reviewed. |
-| r6 | 2026-10-14 | S6 PR | Finalized for review: PR #1044 body in `pr-body.md`, status pr-open. §5 left as written; its diagrams simplify three steps the code orders differently (the turn is classified after its close task finishes, inside `_publish`; a steered prompt is preceded by the one yield and the clearing of the interrupted result's fields, R-23; every `interrupt()` is sent from a task the session owns). The PR body's flow chart shows the code's order. |
+| r6 | 2026-10-14 | S6 PR | Finalized for review: PR #1044 body in `pr-body.md`, status pr-open. §5 redrawn to match the code and the PR body's flow chart: the turn is classified inside `_publish`, after its close task finishes; before a steered prompt the pump yields once with the message still in its slot, then clears the interrupted result's fields (deviation 14, R-23); every `interrupt()` is sent from a task the session owns, never by the host. No behaviour or requirement changed. |
 
 ### Implementation deviations
 

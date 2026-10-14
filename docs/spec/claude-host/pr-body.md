@@ -6,6 +6,17 @@ This PR adds `ClaudeHost`, an async context manager in `vidbyte.harnesses.native
 ## Motivation
 The request was a vocabulary of small Claude Code functions ("launch a claude session", "fork", "launch with x tools") under `vidbyte/harnesses`, each also wired to `vidbyte/tools` so agents get them as tools instead of improvising them during a run, and each handling its own errors with semantic messages (request.md §A, Prompts 1–3). Today nothing in vidbyte-sdk wraps Claude Code, so a caller either shells out to `claude -p` and parses text or learns `claude-agent-sdk`'s client lifecycle, message types and failure shapes. This PR builds only the fifteen ★ functions of the accepted design reply (R3). The unstarred functions, a shared base with CodexHost (built in parallel as #1055), and root `vidbyte` exports are left for later PRs (spec §3, NG-1, NG-3, NG-4).
 
+## Compatibility
+- **New optional extra `vidbyte-sdk[claude]`.** The only `pyproject.toml` change adds `claude = ["claude-agent-sdk>=0.2.165,<0.3.0"]` under `[project.optional-dependencies]`, before `codex`. The base dependencies, `requires-python = ">=3.11"`, `codex` and `dev` are unchanged. Without the extra, `import vidbyte` and every new module still import, because `claude_agent_sdk` is imported only inside `ClaudeSdkLoader.load`. Only a `ClaudeHost` call then fails, with `claude.sdk_unavailable` and the next step `Install the extra: pip install "vidbyte-sdk[claude]".` CI installs `.[dev]` only, so CI never imports the SDK.
+- **Installed `claude` CLI, version 2.1.296 or later.** `ClaudeHost` starts the user's own `claude` executable: the `cli_path` given, else the one found on the PATH or in the SDK's install locations. It never uses the CLI bundled inside `claude-agent-sdk`. On Windows only a native `claude.exe` is started; an npm `.cmd`/`.bat` shim counts as not installed (`claude.not_installed`). The floor is `CLAUDE_MIN_CLI_VERSION = "2.1.296"`. Readiness and every turn check it before any prompt is sent, and an older or unreported version gives `claude.version_unsupported` ("Run claude update."). The CLI must also be signed in or have an API key (`claude.not_signed_in`), and `betas` or `bare` need an API-key login (`claude.auth_mode_unsupported`).
+- **No existing export changes or breaks.** The diff deletes no line under `vidbyte/` or in `pyproject.toml`. `vidbyte/__init__.py` and `contracts/sdk-public-api.json` are untouched, and `generate-sdk-public-api.py --check` reports the contract current (606 exports). The PR adds, and removes nothing from, four export lists:
+  - `vidbyte.lib.enums`: 17 enums;
+  - `vidbyte.lib.errors`: `ClaudeOperationError`;
+  - `vidbyte.tools.builtins`: the 15 tools;
+  - `vidbyte.tools.toolsets`: `ClaudeTools`.
+
+  `FailureCode` gains 16 `claude.*` members in one block before `CODEX_*`, and every existing member keeps its name and value. The agent base class, the MCP server package and `CodexHarnessAgent` are not changed.
+
 ## How to use what this PR introduces
 ```python
 import asyncio
@@ -76,7 +87,7 @@ flowchart TD
 Validation happens twice before any process starts: the request record checks itself in `__post_init__`, and the host runs its checks in `_admit` with no await between them and the registration, so two calls can never both pass the cap or the busy check. State changes only in the host's registry, written in `_admit`, and in the session, which replaces its frozen `ClaudeTurnResult` as the turn moves from QUEUED to RUNNING to one terminal status. A refusal before the pump starts raises `ClaudeOperationError`; after that, exceptions and stream facts land in the session's `ClaudeTurnOutcome`, and `classify_turn` picks one code only after the close task has finished. An interrupt that Claude Code acknowledges but never answers ends the turn after `CLAUDE_INTERRUPT_GRACE_SECONDS` (30 s) through the same close.
 
 ## What changed
-All 67 files are additions only (17,816 lines added, 0 deleted).
+All 69 files are additions only (18,221 lines added, 0 deleted).
 
 | File | Change |
 |---|---|
@@ -124,7 +135,7 @@ All 67 files are additions only (17,816 lines added, 0 deleted).
 | `tests/features/claude_host/test_claude_host_stops.py` (+518) | Steer, interrupt, grace, time budget, `aclose` and the one close (23 tests). |
 | `tests/features/claude_host/test_claude_host_tools.py` (+332) | Tool contracts, toolset under the default policy, argument types, MCP listing (10 tests). |
 | `tests/features/claude_host/test_claude_host_turns.py` (+504) | Spawn snapshot, wait, failure detection, exception mapping, usage, injected results (22 tests). |
-| `docs/spec/claude-host/` (22 files, +7505; plus this `pr-body.md`) | The spec (r6), request capture, test plan, code map, review, verification log, pipeline state and each stage's report. |
+| `docs/spec/claude-host/` (24 files, +7910, this `pr-body.md` and the S6 report included) | The spec (r6), request capture, test plan, code map, review, verification log, pipeline state and each stage's report. |
 
 ## Acceptance criteria → proof
 `<file>::` stands for `tests/features/claude_host/test_claude_host_<file>.py::`. Every test named below exists on this branch and passes.
@@ -173,7 +184,7 @@ All 67 files are additions only (17,816 lines added, 0 deleted).
 | AC-40 | A steer whose caller timed out still ends the turn through the grace, with one close and no steered query. | `stops::InterruptGraceTests::test_a_steer_whose_caller_timed_out_still_ends_through_the_grace` |
 
 ## Verification
-`W` is the worktree and `PY` the `sdk-claude-host` venv's Python 3.11, with the `dev` and `claude` extras (`claude-agent-sdk` 0.2.165). Local gates ran at 3ff4479d; the commit that adds this file changes only `docs/spec/claude-host/`, so the code is the same as at 490e627b, the last code commit.
+`W` is the worktree and `PY` the `sdk-claude-host` venv's Python 3.11, with the `dev` and `claude` extras (`claude-agent-sdk` 0.2.165). Local gates ran at 3ff4479d; the two later commits change only `docs/spec/claude-host/`, so the code is the same as at 490e627b, the last code commit.
 
 | Gate | Command | Result |
 |---|---|---|
@@ -187,7 +198,8 @@ All 67 files are additions only (17,816 lines added, 0 deleted).
 | semgrep | `semgrep scan --error --config .semgrep/typed-mapping-boundary-policy.yml vidbyte` (semgrep 1.170.1) | verify-log iteration 2, at 2c537b1a: `Ran 1 rule on 915 files: 0 findings.`; run remotely again by static-policy below |
 | shared marker | `git show HEAD:vidbyte/harnesses/native/__init__.py \| sha256sum` | `0374a2c899318e4fdb31c065d951266feaffff5aa736ecde616c4a66942f497a` |
 | remote CI, last code commit | `gh workflow run ci.yml` and `static-policy.yml --ref feat/claude-host` | at 490e627b: CI 38519522362 `success` (Source / Python 3.12, Source / Python 3.11, Package); Static policy 38519524093 `success` |
-| remote CI, PR head | the same two dispatches on the head that carries this file | Dispatched after the commit that adds this file, so its run ids and job results appear only in the PR description. |
+| remote CI, first docs head | the same two dispatches | at a6245d5a: CI 38523773941 `success`: Source / Python 3.12 `4190 passed, 19 skipped, 19 warnings in 48.36s` / `CI passed.`; Source / Python 3.11 `4190 passed, 19 skipped in 46.00s` / `CI passed.`; Package `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` · Static policy 38523776541 `success`: `Ran 1 rule on 915 files: 0 findings.` |
+| remote CI, PR head | the same two dispatches on the head that carries this file | Dispatched after the commit that adds this text, so its run ids and job results appear only in the PR description. |
 
 Both workflows run only on `workflow_dispatch`, so `gh pr checks` lists nothing for this PR; the runs above are read with `gh run view`.
 
@@ -229,9 +241,7 @@ The spec records fourteen implementation deviations in §17; none adds behaviour
 13. **Error placement.** `ClaudeOperationError` sits directly after `AggregateExecutionError` (`vidbyte/lib/errors/base.py:198`), not directly before `ConfigurationError`, because the spec's two anchors are not adjacent on `main`.
 14. **Steer yield.** Before a steered prompt, the pump yields once (`CLAUDE_STEER_YIELD_SECONDS = 0`) inside `_take_steer`, before it takes the message, so the steer's interrupt reaches Claude Code first and a stop in that pass can still withdraw the message.
 
-Spec text that trails the code (no behaviour difference):
-- §12.3 row 7 and §17 do not describe R-23's reset: when the pump takes a steer, it clears the interrupted prompt's result fields and keeps the session id, `hooks_applied` and the cumulative cost (R-C5).
-- §5's diagrams simplify three steps: the code classifies the turn after the close task finishes (inside `_publish`), not before it; the steer path yields and clears the earlier result before the next query; and every `interrupt()` is sent from a task the session owns, not by the host. The flow chart above shows the code's order.
+Spec text that trails the code (no behaviour difference): §12.3 row 7 and the §17 deviations do not describe R-23's reset. When the pump takes a steer, it clears the interrupted prompt's result fields and keeps the session id, `hooks_applied` and the cumulative cost (R-C5); spec §5, redrawn for this PR to match the flow chart above, does show it.
 
 ## Follow-ups
 - **R-15:** move the classification vocabularies and the duplicated operation names into `CLAUDE_*` constants.
