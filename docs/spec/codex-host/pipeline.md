@@ -205,6 +205,21 @@ started: 2026-10-13 00:45 UTC
   - Re-review round 2 of 2 is the last one the cap allows.
   *Why:* the skill's final re-review rule: any new Blocker or Major gets a scoped verifier, then returns to the loop.
 
+- 2026-10-14 08:05 UTC — **Scoped-verifier spot-check passed.**
+  - It confirmed R-26 (from R-C2) and R-27 (from R-C1), both Major, and passed through R-28 (R-C3, trivial code) and R-29 (R-C4, spec-change).
+  - 0 refuted.
+  - The review.md diff changes only the verdict line, the two section-count headings and one sentence in the refuted section. Rows R-1..R-25 are unchanged.
+  *Why:* the S4 spot-check rule, applied to the scoped round.
+- 2026-10-14 08:05 UTC — **Routing.**
+  - **To the spec author first, in Revision mode r6, for R-29:** a §9.3 row for R-11's 11 method-name constants (constants/codex.py:446-457).
+  - **To S5 repair iteration 2 after r6:**
+    - R-26: the refusal's text becomes the type name only, raised `from None`, with a test asserting no `__cause__`;
+    - R-27: a `stop_pending` flag plus `CodexLiveTurn.send_stop`, leaving `over_cap()` and `stop()` untouched, with regression tests;
+    - R-28: two description strings.
+  - **Then the final re-review, round 2 of 2,** the last one the cap allows.
+  *Why:* a spec edit lands before the code that follows it.
+- 2026-10-14 08:05 UTC — **The test grant carries into iteration 2.** New tests still go only in `test_codex_host_review_gaps.py`, by appending, with README.md and FEATURE.md extended by addition only. The 101 original tests and the fakes/support files stay byte-identical.
+
 ## User replies (verbatim)
 - none yet
 
@@ -390,3 +405,19 @@ started: 2026-10-13 00:45 UTC
 - **`W=$(pwd)` in Git Bash gives `/c/...`,** which breaks paths inside `python -c` strings. Use the `C:/...` form. *source:* S5 repair 1.
 - **Holding on a request count.** Fake hold predicates run under the fake's lock, but `server.matching()` takes no lock, so a hold can be keyed on a request count. *source:* S5 repair 1.
 - **Accepted R-1 residual.** A review that finished before registration, and whose caller is also cancelled during the read-back, stays RUNNING until close. The S4 verifier accepted this. *source:* S5 repair 1.
+- **Reproducing R-27.** Run `VARIANT=current PYTHONPATH="$W;$S" $PY -P -m unittest probe_rc1` with `S=.../scratchpad/codex-verifier-r1`.
+  - The current code sends 1 interrupt in cases A–C, and the turn stays inProgress.
+  - `VARIANT=pending` (recommended) sends 2 in A–C and 1 in D–E, which keeps R-16.
+  - `VARIANT=revert` sends 2 in A–E, so R-16 regresses.
+  - All three keep the pack at 111/111.
+  *source:* scoped verifier r1.
+- **R-27's fix shape.**
+  - Add `self.stop_pending = False` at turns.py:87.
+  - Add an async `CodexLiveTurn.send_stop(connection, operation, *, quiet=False)` that clears the flag in a `finally`; `stop()` sets the flag and spawns it.
+  - host.py:407 returns on `snapshot is not None or stop_pending`.
+  - Leave `over_cap()` and `stop()`'s `stop_sent` check untouched (D-7, EC-30).
+  - `send_stop` needs a `# @intent` line within 20 lines (A002).
+  - Regression test B (the timeout interrupt fails, then the user interrupts) expects INTERRUPTED with `codex.turn_timed_out` (EC-27). Test A expects problem None.
+  *source:* scoped verifier r1.
+- **R-26's fix.** `raise ConfigurationError(f"{UNUSABLE_SCHEMA_MESSAGE} Got {type(exc).__name__}.") from None`. Add `assertIsNone(caught.exception.__cause__)` in the new test; the mapping case fails it today. The probe is `$S/probe_rc2.py`. *source:* scoped verifier r1.
+- **R-24 (M5, open follow-up) shares the `interrupt_codex_turn` lines with R-27.** Keep `turn.stop_sent = True` on the user path. *source:* scoped verifier r1.
