@@ -212,7 +212,7 @@ class OutputDeliveryError(AgentExecutionError):
         self.repair_approaches = (
             "Read each failed receipt's error_code.",
             "Fix the credential or target of the failed output.",
-            "Resend only the failed connectors, not err.failed (those are receipts): failed_connectors = [c for c, r in zip(agent.outputs, err.receipts, strict=True) if r.status is DeliveryStatus.FAILED], then await OutputDispatcher.deliver(failed_connectors, err.reply, {}); if a failed receipt's error_code is network, invalid_response, smtp_error, or smtp_recipients_refused, or starts with http_5, that output may already have been delivered, so check its destination first.",
+            "Resend only the failed connectors, not err.failed (those are receipts): failed_connectors = [c for c, r in zip(agent.outputs, err.receipts, strict=True) if r.status is DeliveryStatus.FAILED], then await OutputDispatcher.deliver(failed_connectors, err.reply, {}); if a failed receipt's error_code is network, invalid_response, smtp_error, smtp_recipients_refused, or file_error, or starts with http_5, that output may already have been delivered, so check its destination first.",
         )
         self.related_docs = ("vidbyte/lib/outputs/README.md", "vidbyte/agents/output/README.md")
         self.relevant_tests = ("python scripts/run_ci.py",)
