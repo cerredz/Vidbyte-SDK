@@ -5,7 +5,7 @@ worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-prebuilt-agent-tool
 branch: feat/prebuilt-agent-tools
 base_commit: 8387d66680951766f02b0d740d78eb6450cb6419
 pr:
-s2_head: bc238128
+s2_head: 69a1970a
 test_tree: tests/features/prebuilt_tools/
 until: none
 started: 2026-10-14 02:46
@@ -44,6 +44,8 @@ started: 2026-10-14 02:46
 - 2026-10-14 — S3 implementer was terminated by an API usage limit (HTTP 429 session limit) at row 43, with 8 commits and 37 uncommitted entries (most category modules written but not committed). After the reset, resumed the SAME agent via SendMessage (its context holds the uncommitted work) rather than a fresh one; told it to reconcile status, restore per-row commits without discarding anything, then continue. Verified before resuming: test tree diff vs bc238128 empty; nothing pushed.
 - 2026-10-14 — S3 BLOCKED on a spec/test contradiction for `intersect_lists`: spec A.24 (spec.md:1491) says `lists: list[TextList]`; S2 data `prebuilt_parameter_data.py:257` treats items as strings with maxLength 10000; 2 contract cases fail. Adjudicated from the spec (the row tests already agree with A.24): this is a TEST defect — granted a test change, to be made by the S2 test author only.
 - 2026-10-14 — S3 surfaced an NFR-7 spec gap: `diff_words` 14.6–22.4 s at 2,000 tokens/side and `closest_string_matches` 3.1–4.9 s at 1,000 candidates (87 s on 'ﬃ'*100 vs 'ﬄ'*100 with casefolding) on adversarial repetitive input; NFR-7's ≤ 2 s target was measured on non-adversarial patterns. Routed to the S1 spec author for an r5 decision before S3 resumes (S1 review cap does not apply to a post-S2 defect fix; no review round).
+- 2026-10-14 — Spec r5 (ce32c0a6): NFR-7 adversarial slowness accepted as limitation EC-46 (diff_words, closest_string_matches, unified_diff_text; bounded by caps + runtime tool_timeout_seconds); lowering caps rejected because tests pin them. seeded_weighted_choice bound stated (≤ 10,000,000 chars). No test change from r5; implementation adds one EC-46 README paragraph (row 40). Granted the S2 test author the intersect_lists data fix (prebuilt_parameter_data.py:257) — the test contradicts spec A.24.
+- 2026-10-14 — S2 test author applied the granted intersect_lists fix (0708d57d): nested-list shape `TextListsShape`; mutant-checked; pack now 4310 passed, 0 failed against the S3 code. Test baseline moved from bc238128 to 69a1970a (granted change). Noted gap left as-is (not granted): flat-list minItems (e.g. greatest_common_divisor.values len 2..) not checked by the schema test.
 
 ## User replies (verbatim)
 - none
