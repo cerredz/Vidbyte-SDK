@@ -243,8 +243,12 @@ class ClaudeHost:
     async def get_claude_session_info(self, session_id: str) -> ClaudeSessionSummary:
         """Return one session's summary, or raise claude.session_not_found when Claude Code has none for it (EC-29)."""
         operation = "get_claude_session_info"
+        # Refuse a host that is not open on this event loop, and check
+        # that the claude extra is installed.
         self._guard(operation)
         sdk = ClaudeSdkLoader.load()
+        # Check the id, then read the session's summary in a worker
+        # thread; an unknown session is claude.session_not_found.
         _ClaudeFieldRules.text(session_id, "session_id")
         return await ClaudeHistory.session_info(sdk, session_id)
 
@@ -267,16 +271,24 @@ class ClaudeHost:
     async def wait_claude_turn(self, handle: ClaudeSessionHandle, *, timeout_seconds: float) -> ClaudeTurnResult:
         """Wait up to timeout_seconds for the turn to end and return its snapshot; on timeout the live snapshot comes back and the turn goes on (INV-9)."""
         operation = "wait_claude_turn"
+        # Refuse a host that is not open on this event loop, and check
+        # that the claude extra is installed.
         self._guard(operation)
         ClaudeSdkLoader.load()
         _ClaudeFieldRules.amount(timeout_seconds, "timeout_seconds")
+        # Wait on the turn's done signal only, so a timeout returns the
+        # live snapshot and leaves the turn running.
         return await self._session(handle.handle_id, operation).wait(timeout_seconds)
 
     async def get_claude_turn_result(self, handle: ClaudeSessionHandle) -> ClaudeTurnResult:
         """Return the turn's current snapshot without waiting: live while it runs, then its terminal result."""
         operation = "get_claude_turn_result"
+        # Refuse a host that is not open on this event loop, and check
+        # that the claude extra is installed.
         self._guard(operation)
         ClaudeSdkLoader.load()
+        # Return the turn's snapshot as it is now; reading it never
+        # changes the turn.
         return self._session(handle.handle_id, operation).snapshot()
 
     async def steer_claude_session(self, handle: ClaudeSessionHandle, message: str) -> None:
@@ -294,15 +306,23 @@ class ClaudeHost:
     async def interrupt_claude_turn(self, handle: ClaudeSessionHandle) -> ClaudeTurnResult:
         """Stop the turn and return its snapshot at once; it ends INTERRUPTED once Claude Code answers or the grace runs out (D-26)."""
         operation = "interrupt_claude_turn"
+        # Refuse a host that is not open on this event loop, and check
+        # that the claude extra is installed.
         self._guard(operation)
         ClaudeSdkLoader.load()
+        # Ask the turn to stop and return its snapshot at once; the
+        # turn's own task sends interrupt() and bounds the answer.
         return self._session(handle.handle_id, operation).interrupt()
 
     async def track_claude_session_usage(self, handle: ClaudeSessionHandle) -> ClaudeUsageSnapshot:
         """Return the session's latest cumulative cost and per-model usage, and the latest figures of each background task (INV-20)."""
         operation = "track_claude_session_usage"
+        # Refuse a host that is not open on this event loop, and check
+        # that the claude extra is installed.
         self._guard(operation)
         ClaudeSdkLoader.load()
+        # Return the latest cumulative figures the turn's results
+        # reported, never a sum of them.
         return self._session(handle.handle_id, operation).usage()
 
     async def launch_claude_subagents(self, prompts: tuple[str, ...], request: ClaudeSpawnRequest, limit: int) -> tuple[ClaudeSessionHandle, ...]:
