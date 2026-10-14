@@ -386,11 +386,11 @@ class CodexHost:
 
     async def interrupt_codex_turn(self, handle: CodexTurnHandle) -> None:
         # Stop a running turn with one interrupt and no stop reason (AC-16);
-        # a finished turn gets nothing.
+        # a finished turn, or one already sent its one stop, gets nothing.
         operation = CodexHostOperation.INTERRUPT_CODEX_TURN
         self._guard(operation, talks=True)
         turn = self._owned(operation, handle)
-        if turn.snapshot is not None:
+        if turn.snapshot is not None or turn.stop_sent:
             return
         turn.stop_sent = True
         await self._connection.interrupt(operation, handle, turn.state)
