@@ -53,7 +53,11 @@ _SEPARATOR_MARKS = MappingProxyType({KeyValueSeparator.AUTO: ":=", KeyValueSepar
 # A digit run is bounded by the 4,000-digit rule and possessive, so a
 # longer run fails at once instead of matching a part of itself.
 _DIGITS = f"[0-9]{{1,{PREBUILT_MAX_INTEGER_DIGITS}}}+"
-_AMOUNT = rf"(?:(?>[0-9]{{1,3}}(?:,[0-9]{{3}})++)|{_DIGITS})(?:\.{_DIGITS})?|\.{_DIGITS}"
+# A grouped amount never starts right after three digits and a comma,
+# so a comma chain that fails at its end is scanned once, not once
+# per comma; the guard covers only the grouped form, so 1,2,3 still
+# gives three numbers.
+_AMOUNT = rf"(?:(?<![0-9]{{3}},)(?>[0-9]{{1,3}}(?:,[0-9]{{3}})++)|{_DIGITS})(?:\.{_DIGITS})?|\.{_DIGITS}"
 _SIGN = r"(?P<sign>(?<![^\s(\[=:,])[+-])?"
 _MONTHS = "|".join(sorted(PREBUILT_MONTH_NAMES, key=lambda name: (-len(name), name)))
 _SYMBOLS = "|".join(re.escape(symbol) for symbol in PREBUILT_CURRENCY_SYMBOLS)
