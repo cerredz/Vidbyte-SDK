@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from typing import Any, Generic, TypeVar
+from urllib.parse import unquote
 
 from vidbyte.context.primitives.documents import DocumentContextItem
 from vidbyte.lib.config.sources import (
@@ -86,8 +87,12 @@ class Source(ABC, Generic[T]):
                 "Fetched artifact exceeds the maximum allowed size.",
                 details={"url": ref.url, "size_bytes": len(response.body_bytes), "max_bytes": self._max_bytes},
             )
+        # @intent snapshot-url-is-where-the-bytes-came-from
+        # After a redirect the document lives at the final URL (RFC 3986 5.1.3), so relative links and provenance use it;
+        # the percent-encoded request form of an IRI is not a redirect, so it keeps the URL exactly as the caller wrote it.
+        final_url = ref.url if response.url is None or unquote(response.url) == unquote(ref.url) else response.url
         return SourceSnapshot(
-            url=ref.url,
+            url=final_url,
             raw_bytes=response.body_bytes,
             content_hash=sha256_hex(response.body_bytes),
             content_type=response.content_type,
