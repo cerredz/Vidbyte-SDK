@@ -43,7 +43,25 @@ All 78 test names in spec §6.2's proof column exist on the branch. Per file: br
 
 ## Remote checks and the PR
 
-Filled in by the second docs commit, after the push. See "After the push" at the end.
+The first commit, `601daff9`, was pushed (`19bc9931..601daff9`). Then:
+
+- `gh pr edit` set the title from line 1 of `pr-body.md` and the body from `tail -n +2`. `gh pr view --json title,isDraft,baseRefName,url` printed `{"baseRefName":"main","isDraft":true,"title":"feat(harnesses): add CodexHost with one agent tool per Codex function","url":"https://github.com/cerredz/Vidbyte-SDK/pull/1055"}`. There is no `[WIP]`, the PR is still a draft, and the base is `main`.
+- `gh pr checks` printed `no checks reported on the 'feat/codex-host' branch` (exit 1), because both workflows run only on dispatch.
+- `static-policy.yml` run 38621318168, headSha `601daff95405b2fa83bbdebe5cc17f945f4b792a`: success, `Ran 1 rule on 911 files: 0 findings.`
+- `ci.yml` run 38621314395, same headSha: failure. `Source / Python 3.12` passed with `4045 passed, 99 skipped, 19 warnings in 43.35s` / `CI passed.` `Package` was skipped, because it needs both source jobs.
+  - `Source / Python 3.11`, attempt 1: `1 failed, 4044 passed, 99 skipped in 44.45s`. `tests/test_mcp_stdio_transport.py::McpStdioTransportHardeningTests::test_cancelled_waiter_does_not_break_transport` raised `MCP request timed out`: the child Python did not answer within the test's 5 s `request_timeout`.
+  - `gh run rerun 38621314395 --failed`, attempt 2: `2 failed, 4043 passed, 99 skipped in 70.76s`. It hit the same MCP test, and also the known flake `test_coding_agent_environment.py::test_real_bash_reports_its_version_and_git` ("bash did not finish within 15 seconds").
+- **Why I read this as the runner, not the branch.**
+  - `git diff --name-only 780c26f4 601daff9` lists only `docs/spec/codex-host/` files.
+  - `ci.yml` run 38530861705 on `780c26f4` passed 3.11 on the same Python, 3.11.17.
+  - The branch touches no MCP or stdio file.
+  - Attempt 2 took 70.76 s against about 45 s, and both failures are timeouts on a child process.
+  - Other branches' 3.11 jobs passed today, for example runs 38612263492 and 38607162300.
+  - Locally, on Python 3.11.0, I ran the pack's CI view and then `tests/test_mcp_stdio_transport.py` in one process (`sys.modules['openai_codex'] = None`). This looked for an order dependency, and it passed 3 times out of 3 with `58 passed, 80 skipped`. The MCP file alone gives `22 passed`.
+
+  I did not rerun the run a second time. The second docs commit gets a fresh dispatch instead.
+
+`pr-body.md` cites the runs on `601daff9`, because the file cannot cite runs on the head that contains it. The GitHub description is regenerated after the second commit's runs finish, and its Verification rows cite that head's run ids.
 
 ## §5 drift
 
@@ -80,4 +98,6 @@ Filled in by the second docs commit, after the push. See "After the push" at the
 
 ## After the push
 
-Filled in by the second docs commit.
+The second docs commit adds the results above to this report and to `pr-body.md`. Both workflows are then dispatched again on its head. The final head, its run ids and their conclusions are in the STATUS block this stage returns, and in the PR description on GitHub.
+
+A further candidate lesson, from this stage: **when** `ci.yml`'s 3.11 job fails only on a test that waits on a child process under a fixed timeout (`test_mcp_stdio_transport.py`'s 5 s, the bash probe's 15 s), and the code equals a head that passed, **do** compare the job's wall time and the diff to that head before suspecting the branch. **Because** a slow runner fails several of these tests at once. Attempt 2 here took 70.76 s against about 45 s.
