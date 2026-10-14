@@ -50,6 +50,19 @@ class ToolRegistry(Tools):
         with self._lock:
             return super().all()
 
+    # @intent registry-readers-never-see-a-half-registered-tool
+    # register() replaces _tools and _by_name one after the other under the lock,
+    # so any reader that consults both indexes must hold the same lock.
+    def subset(self, names: Iterable[str]) -> Tools:
+        """Return a new catalog with exactly the requested names, read under the lock."""
+        with self._lock:
+            return super().subset(names)
+
+    def add(self, tool: Any, *, replace: bool = False) -> Tools:
+        """Return a new catalog with one tool added, read under the lock."""
+        with self._lock:
+            return super().add(tool, replace=replace)
+
     def specs(self) -> tuple[ToolSpec, ...]:
         """Return tool specs for all registered tools."""
         return tuple(tool.spec() for tool in self.all())
