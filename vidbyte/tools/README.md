@@ -55,6 +55,46 @@ strategy by a fixed SDK-owned slug. Direct class construction remains available
 through the generated exports, and every generated class is `SAFE` for the
 existing permission policy and component registry discovery paths.
 
+## Prebuilt Tools
+
+`vidbyte.tools.toolsets.PrebuiltTools` attaches a library of 265 small,
+deterministic utility tools in 31 categories: exact arithmetic, number theory,
+statistics, finance, unit conversion, dates and durations, text counting and
+transformation, Unicode, regular expressions, JSON, CSV, encodings, hashing,
+identifiers, lists, graphs, geometry, Markdown and HTML, text extraction, code
+analysis, and network addresses. Every tool runs on the Python standard
+library alone, uses no network, files, processes, environment, or clock, and
+returns a JSON object, so the model gets exact answers to the jobs it is bad at
+doing in its head, such as counting letters or adding days to a date.
+
+```python
+import asyncio
+
+from vidbyte import Agent
+from vidbyte.lib.enums import PrebuiltToolCategory
+from vidbyte.tools.toolsets import PrebuiltTools
+from vidbyte.tools.types import ToolCall
+
+# Attach two whole categories to an agent.
+tools = PrebuiltTools([PrebuiltToolCategory.DATES, PrebuiltToolCategory.TEXT_COUNTING])
+agent = Agent(name="assistant", system_prompt="Use tools for exact answers.", provider="openai", model_name="gpt-4.1", tools=tools)
+
+# Or pick individual tools by name from the full library.
+picked = PrebuiltTools(PrebuiltToolCategory).subset(["days_between_dates", "count_character_occurrences"])
+print(picked.names())
+
+# Every tool is an ordinary FunctionTool and returns JSON text.
+result = asyncio.run(picked[1].execute(ToolCall("count_character_occurrences", {"text": "strawberry", "character": "r"})))
+print(result.status.value, result.output)
+```
+
+Attach only the categories an agent needs, or pick single tools with
+`subset`. Do not attach the whole library to one agent: the schemas of all 265
+tools travel with every model request, which costs more and makes the model
+choose the right tool less often. The category list, the output and error
+contract, and the version-dependent behavior are documented in
+`builtins/prebuilt/README.md`.
+
 ## Usage
 
 ```python
@@ -88,7 +128,8 @@ print(catalog.provider_schemas("openai"))
 - `mcp/`: MCP clients, transports, presets, and bridged tools.
 - `builtins/`: a minimal subprocess bash tool, code search, context, context primitives, editing, memory, MCP, handoff, pause, reasoning traces, and utility tools.
 - `builtins/operations/`: priced search and fetch tools plus the executing provider clients.
-- `toolsets/`: pre-assembled tool catalogs, including `CodingAgentTools`, the seven tools a `CodingAgent` starts with.
+- `builtins/prebuilt/`: 265 deterministic standard-library utility tools in 31 categories, attached through `PrebuiltTools`.
+- `toolsets/`: pre-assembled tool catalogs, including `CodingAgentTools`, the seven tools a `CodingAgent` starts with, and `PrebuiltTools`, which attaches the prebuilt utility tools of the chosen categories.
 
 ## Cooperative Pause
 
