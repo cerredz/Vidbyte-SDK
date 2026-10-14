@@ -249,6 +249,16 @@ started: 2026-10-13 00:45 UTC
   - **So after iteration 3 converges,** I stop and report to the user rather than open a third re-review. Proceeding to S6 without one is the user's call.
   *Why:* rule 7, caps are hard. The iteration cap is not reached; only the re-review cap is.
 
+- 2026-10-14 10:20 UTC — **Scoped-verifier r2 spot-check passed.**
+  - It confirmed **R-30, Major** (from R-C5): `interrupt_codex_turn`, host.py:400, has no `# @intent` while it calls `send_stop`, so R-9 reopens at a new site. The tier follows R-9's precedent, and the fix is comment-only.
+  - It passed through **R-31, Minor, trivial, comment-only** (from R-C6, widened to cover the timeout stop once it outlives its 300 s bound). No spec ID is broken.
+  - It passed through **R-32, Minor, tests-only, follow-up** (from R-C7): the `user_no_pending` mutant passes 116/116.
+  - The review.md diff changes only the verdict line, the two section-count headings and one sentence in the refuted section. Rows R-1..R-29 are unchanged.
+- 2026-10-14 10:20 UTC — **Routing to S5 repair iteration 3 (3 of 8):** R-30 and R-31, as one comment edit at host.py:401-404 plus turns.py:181-184.
+  - The iteration-3 verify-log entry corrects the false claim "A002 lists nothing" (verify-log.md:229, S5-repair-2.md:34).
+  - R-32 stays a follow-up, because the skill routes only `trivial` Minors to repair, and a change made after the last re-review ships unreviewed.
+  - After iteration 3 converges, I stop and ask the user whether to go on to S6 without a third re-review. The re-review cap (2/2) is reached.
+
 ## User replies (verbatim)
 - none yet
 
@@ -453,3 +463,5 @@ started: 2026-10-13 00:45 UTC
 - **Running mutants in memory.** `scratchpad/codex-repair2/mutant_run.py <mutant> <TestClass>` runs one mutant: text_kept, no_recursion, revert_guard or pending_sticks. *source:* S5 repair 2.
 - **Schema cycles fail two ways.** A cycle at a key the formatter skips (`schema["self"]`) fails as ValueError; one under `properties` or `items` fails as RecursionError. *source:* S5 repair 2.
 - **Set the flag before the spawn.** `stop()` must set `stop_pending` before it spawns `send_stop`, because a spawned task's first step runs one loop iteration later. *source:* S5 repair 2.
+- **The A002 text output hides per-file findings when the verdict is IMPROVED.** Always confirm "A002 clean under the branch's paths" with `lint/run.py --rule A002 --all --format json`, filtered by path. *source:* re-review r2 and verifier r2.
+- **Do not rename `send_stop` or reshape the call to hide the `send` token.** That would repeat R-8's Major, dodging a lint rule. *source:* verifier r2.
