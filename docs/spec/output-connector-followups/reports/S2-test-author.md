@@ -79,3 +79,13 @@ Before implementation:
   - `asyncio.to_thread` → FAILED, "the appends ran on more than one thread, so they could interleave".
   - In both runs, the single-send append test still passed, so each wrong variant still wrote correctly.
 - **Results after the fix:** the file is `67 passed`, the pack is `660 passed`, and `python lint/run.py` gives `SDK-LINT: PASS`.
+
+## S4 follow-up (2026-10-14)
+
+- **Findings.** The verified review (`review.md`) assigned R-1 and R-5 to tests. Both were gaps: a mutant survived the whole pack (`660 passed`).
+- **R-1 (INV-18), commit `05fbe43e`.** Added one row, `every-media-block-and-tag`, to `test_telegram_neutralization_changes_only_tag_starts_and_media_brackets`. Its input holds three media blocks (two inline images and one reference image) and two tag starts. The expected text is written out, and the existing assertion compares the markdown whole, so every `![` and every `<` must change and the length must stay the same. The review suggested two media blocks with no tags; this row adds a third block and the tags, which costs nothing and pins "every" for both replacements.
+- **R-5 (AC-28, INV-1), commit `05fbe43e`.** Added `test_read_failure_on_a_later_page_is_that_reads_receipt_and_nothing_is_written`, parametrized over `LATER_PAGE_FAILURES`: a 500, a network error, and a non-JSON page. Page 1 is a full page, so page 2 is read and fails. The test asserts the failure's receipt and the exact wire `GET page 1, GET page 2`. A POST answer is scripted, so a wrong write shows as a `sent` receipt and a third wire entry instead of an `AssertionError` from the fake. The header's COMMON MODIFICATION PATTERNS names the new table. No existing assertion or row changed, and no existing comment was rewrapped (R-4 stays open on purpose).
+- **Mutation proof** (scratch plugins, not committed; no production file edited):
+  - `VMUT=media_once` (first `![` only): `660 passed` → `1 failed, 663 passed` (the new row). Control `VMUT=media_none`: `7 failed, 657 passed` (was 6).
+  - `MUT=sticky_later_read_failure_ignored` (a failed later read ends the list, then POST): `660 passed` → `3 failed, 661 passed` (all three new cases; each got a `sent` receipt).
+- **Results:** both new tests pass against the current implementation; the pack is `664 passed`; `python lint/run.py` gives `SDK-LINT: PASS`; `ruff check` on the two files passes.
