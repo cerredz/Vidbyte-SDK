@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: All data is plain files under the root (spec section 9.1): en
 FUNCTION INVENTORY: __init__ and commit_entry are narrated main functions. usage, entries, check_entry, write_note, edit_file, and map_text are the public operations. _file_tokens counts every file's tokens from disk; _text reads one bookkeeping file; _entry_lines parses a bookkeeping file into entries; _entry_rules applies the sparse-entry rules; _note_path applies the note path rules; _room applies the workspace caps to a set of new file texts; _descriptions reads files.jsonl leniently for the map; _replace writes one file atomically; _entry_json and _stamp format one entry line and one UTC stamp.
 COMMON MODIFICATION PATTERNS: A new guardrail is one more check in the operation it guards, with an @intent comment and a ToolExecutionError message that says what to fix. A new bookkeeping file adds its name to vidbyte/lib/constants/infinite.py, to the setup loop in __init__, and to the reserved paths in _note_path.
 WHAT NOT TO DO IN THIS FILE: 1. Do not cache file counts, entries, or descriptions; bash can change the folder between any two calls. 2. Do not write outside the lock or write a file in place; use _replace. 3. Do not apply max_file_tokens to the bookkeeping files; only max_tokens bounds them (INV-19). 4. Do not raise from map_text on bad file content.
-KNOWN EDGE CASES: A malformed line in entries.jsonl or superseded.jsonl makes every entry operation fail with the file and line number until it is fixed, while map_text keeps working. A supersede writes the old line to superseded.jsonl before it rewrites entries.jsonl, so a crash between the two leaves the line in both files rather than in neither. Token counts are TokenEstimate's character estimate of the utf-8 text, with undecodable bytes counted as replacement characters.
+KNOWN EDGE CASES: A malformed line in entries.jsonl or superseded.jsonl makes every entry operation fail with the file and line number until it is fixed, while map_text keeps working. A supersede writes the old line to superseded.jsonl before it rewrites entries.jsonl, so a crash between the two leaves the line in both files rather than in neither. Token counts are TokenEstimate's character estimate of the utf-8 text, with undecodable bytes counted as replacement characters. Seeds are copied through LocalFileSystemBackend.copy, which keeps their permission bits, so a read-only seed leaves a read-only copy and the next setup over the same folder fails with PermissionError until that copy is made writable.
 RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 6.1 INV-16 to INV-24, and 9.1); vidbyte/agents/infinite/README.md
 TESTS: tests/features/infinite_memory_agent/test_infinite_memory_workspace.py, tests/features/infinite_memory_agent/test_infinite_memory_verification.py, and tests/features/infinite_memory_agent/test_infinite_memory_contract.py
 """
@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import tempfile
 import threading
 from collections.abc import Mapping
@@ -46,6 +45,7 @@ from vidbyte.lib.dataclasses.infinite import (
 from vidbyte.lib.enums.infinite import InfiniteEntryKind
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import ConfigurationError, ToolExecutionError
+from vidbyte.lib.tools.filesystem.backends.local import LocalFileSystemBackend
 from vidbyte.lib.tools.filesystem.permissions import FileSystemPermissions
 from vidbyte.lib.util.text import (
     TOKEN_ESTIMATE_CHARS_PER_TOKEN,
@@ -64,6 +64,7 @@ class InfiniteWorkspace:
         self.settings = settings
         self.root = Path(settings.root)
         self._scope = FileSystemToolConfig(root=self.root)
+        self.backend = LocalFileSystemBackend()
 
         # @intent the-workspace-is-ready-before-any-agent-starts
         # Create the folder and the three bookkeeping files, empty when
@@ -75,8 +76,7 @@ class InfiniteWorkspace:
             for name in (INFINITE_ENTRIES_FILE, INFINITE_SUPERSEDED_FILE, INFINITE_FILES_FILE):
                 (self.root / name).touch(exist_ok=True)
             for seed in settings.seed_files:
-                (self.root / INFINITE_SEED_DIRNAME).mkdir(exist_ok=True)
-                shutil.copyfile(seed, self.root / INFINITE_SEED_DIRNAME / Path(seed).name)
+                self.backend.copy(Path(seed), self.root / INFINITE_SEED_DIRNAME / Path(seed).name)
 
         # Refuse a workspace that already breaks a cap, so no agent
         # starts in a workspace where every write would be refused.

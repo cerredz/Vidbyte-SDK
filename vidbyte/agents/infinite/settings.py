@@ -38,6 +38,7 @@ from vidbyte.lib.dataclasses.security import PermissionPolicy
 from vidbyte.lib.enums.infinite import InfiniteMemoryPreset
 from vidbyte.lib.enums.model_provider import ModelProvider
 from vidbyte.lib.errors import ConfigurationError, ToolRegistrationError
+from vidbyte.lib.registries.models import ProviderModelRegistry
 from vidbyte.tools.adapters import ToolInput
 from vidbyte.tools.catalog import Tools
 
@@ -163,6 +164,14 @@ class InfiniteMemoryAgentSettings:
 
         # Accept the provider's value as text too, and keep the enum.
         object.__setattr__(self, "provider", self._provider())
+
+        # @intent the-model-runs-under-its-provider
+        # Every agent in the tree uses this model, so one the SDK cannot
+        # run under the provider is refused here, not at a child's call.
+        try:
+            ProviderModelRegistry.validate_provider_model_pair(self.provider, self.model_name)
+        except ConfigurationError as exc:
+            raise ConfigurationError(f"InfiniteMemoryAgentSettings.model_name must be a model the SDK can run under the given provider; {exc.message}", details={"field": "model_name"}) from exc
 
         # Bash runs in the project folder, so it must exist; keep its
         # absolute path.
