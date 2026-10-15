@@ -479,13 +479,19 @@ class FailureRouter:
         if not self.enabled:
             return ()
         results: list[RecoveryResult] = []
-        for failure in tuple(self._history):
+        pending = tuple(self._history)
+        # @intent evicted-snapshot-entry-is-skipped
+        # A handler's own failures can evict a later entry of this snapshot, and eviction drops its routed mark, so only
+        # route entries still in the ledger; ids are refreshed only after a handler ran, the one thing that changes it.
+        live_ids = {failure.id for failure in pending}
+        for failure in pending:
             eligible = failure.status is FailureStatus.EXHAUSTED or failure.disposition is FailureDisposition.ROUTE
-            if not eligible or failure.id in self._routed_ids:
+            if not eligible or failure.id in self._routed_ids or failure.id not in live_ids:
                 continue
             result = await self.route(failure)
             if result is not None:
                 results.append(result)
+                live_ids = {item.id for item in self._history}
         return tuple(results)
 
     async def _handle_recovery_error(self, failure: Failure, binding: RecoveryBinding, exc: BaseException) -> RecoveryResult | None:
@@ -537,6 +543,10 @@ class FailureRouter:
                 self._history[index] = failure
                 return
         self.record(failure)
+        # @intent evicted-failure-stays-routed
+        # Only route() replaces records, after marking the id routed; evicting the id dropped that mark, so restore it,
+        # or route_pending would hand the re-recorded failure to its handler a second time.
+        self._routed_ids.add(failure.id)
 
 
 __all__ = ["FailureMetadataNormalizer", "FailureRouter"]
