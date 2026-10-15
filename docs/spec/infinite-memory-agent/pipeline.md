@@ -20,7 +20,7 @@ started: 2026-10-15 02:49
 | S1 spec + review | done | 2026-10-15 03:06 | 2026-10-15 04:52 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-2.md | spec r3 approved @a375758f (33 §12.3 rows: 18 CREATE, 15 MODIFY; 17 FR, 39 INV, 42 AC, 49 EC, 28 D, 9 A, 8 Q) |
 | S2 tests | done | 2026-10-15 04:55 | 2026-10-15 05:52 | reports/S2-test-author.md | S2_HEAD d8bcdf14 (c2f91ebd before rebase); 89 red cases in 7 modules under tests/features/infinite_memory_agent/; AC-1..AC-42 all mapped; spec r4 @ff634998 fixed the 2 S2 open items |
 | S3 implement | done | 2026-10-15 05:59 | 2026-10-15 07:22 | reports/S3-implementer.md | S3_HEAD def85360; draft PR #1084; 89/89 new green; source gate 5262 passed/14 skipped "CI passed"; package gate "CI passed"; lint PASS; budget 18/18 new files; test diff vs d8bcdf14 empty |
-| S4 adversarial review | pending | | | | |
+| S4 adversarial review | running | 2026-10-15 07:31 | | | |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
