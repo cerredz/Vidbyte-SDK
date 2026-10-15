@@ -1,13 +1,13 @@
 """FILE: vidbyte/tools/builtins/prebuilt/bits_bytes.py
 
 PURPOSE: Defines BitsBytesToolFunctions, the six prebuilt tools for bits and bytes: reading a data size with units, writing a byte count in human units, bitwise operations on exact integers, two's complement in both directions, and Unix permission conversion.
-ROLE IN CODEBASE: Re-exported by vidbyte/tools/builtins/prebuilt/__init__.py and wrapped in FunctionTool objects by PrebuiltTools in vidbyte/tools/toolsets/prebuilt.py when the BITS_BYTES category is chosen. Builds on PrebuiltToolSupport in _support.py for exact integer text, the integer digit cap, and the argument error, and on PREBUILT_DATA_SIZE_SUFFIXES, PREBUILT_SIZE_UNIT_LABELS, and PREBUILT_MAX_BIT_WIDTH in vidbyte/lib/constants/prebuilt_tools.py.
+ROLE IN CODEBASE: Re-exported by vidbyte/tools/builtins/prebuilt/__init__.py and wrapped in FunctionTool objects by PrebuiltTools in vidbyte/tools/toolsets/prebuilt.py when the BITS_BYTES category is chosen. Builds on PrebuiltToolSupport in _support.py for exact integer text, the integer digit cap, and the argument error, and on PREBUILT_DATA_SIZE_SUFFIXES, PREBUILT_SIZE_UNIT_LABELS, PREBUILT_MAX_BIT_WIDTH, and PREBUILT_MAX_DECIMAL_TEXT_CHARS in vidbyte/lib/constants/prebuilt_tools.py.
 ARCHITECTURE NOTE: Every tool is a static method whose docstring's first paragraph is the model-facing description and whose parameters carry their own Field descriptions and caps, so FunctionTool builds the whole schema from the signature. Sizes are computed exactly in Fraction and converted to float once, bit patterns use Python's unbounded integers masked to the requested width, and permissions go through one table of symbolic letters read in both directions.
 FUNCTION INVENTORY: parse_data_size, format_bytes_human, bitwise_operation, integer_to_twos_complement, twos_complement_to_integer, and convert_unix_permissions are the tools; _second_operand reads what an operation needs besides left, _apply_bitwise runs one operation, _bit_texts writes binary and hexadecimal text, _symbolic_mode reads symbolic permissions, and _symbolic_text writes them; tool_functions lists the tools in catalogue order.
 COMMON MODIFICATION PATTERNS: A new bits tool adds a static method with a 4 to 5 sentence description, its row in the spec's Appendix A.27, and its entry in tool_functions. A new size unit goes into PREBUILT_DATA_SIZE_SUFFIXES or PREBUILT_SIZE_UNIT_LABELS, never into this file.
-WHAT NOT TO DO IN THIS FILE: 1. Do not compute a data size in float before the final conversion; the row requires the exact value rounded once. 2. Do not build a Fraction from number text before bounding its exponent; a tiny exponent would build an enormous power of ten. 3. Do not format an integer result as decimal text without PrebuiltToolSupport.integer_text, which enforces the digit cap. 4. Do not round byte sizes with float arithmetic; ties must go to the even digit.
-KNOWN EDGE CASES: Mb means megabyte, not megabit, because units are matched without regard to case. A right shift without width keeps the sign, while with width it shifts the unsigned pattern in zeros, and a shift amount is never reduced to the width. A bit pattern with leading zeros counts them toward its width, so a width smaller than the written pattern fails even when the value would fit.
-RELATED DOCS: docs/spec/prebuilt-agent-tools/spec.md (Appendix A.27, section 9.2 items 2, 5, 13, and 15); vidbyte/tools/builtins/prebuilt/README.md
+WHAT NOT TO DO IN THIS FILE: 1. Do not compute a data size in float before the final conversion; the row requires the exact value rounded once. 2. Do not build a Fraction from number text before bounding its exponent; a tiny exponent would build an enormous power of ten. Do not build a Decimal from the whole number text before comparing its exponent with PREBUILT_MAX_DECIMAL_TEXT_CHARS; past about 10^18 Decimal signals InvalidOperation, and a host context that traps nothing turns it into NaN. 3. Do not format an integer result as decimal text without PrebuiltToolSupport.integer_text, which enforces the digit cap. 4. Do not round byte sizes with float arithmetic; ties must go to the even digit.
+KNOWN EDGE CASES: Mb means megabyte, not megabit, because units are matched without regard to case. A right shift without width keeps the sign, while with width it shifts the unsigned pattern in zeros, and a shift amount is never reduced to the width. A bit pattern with leading zeros counts them toward its width, so a width smaller than the written pattern fails even when the value would fit. A data size exponent may have any number of digits: past PREBUILT_MAX_DECIMAL_TEXT_CHARS a value other than zero with a positive exponent is refused, zero or a tiny positive value is zero bytes, and a tiny negative value such as -1e-99999999999999999999 is refused as negative although its float is -0.0.
+RELATED DOCS: docs/spec/prebuilt-agent-tools/spec.md (Appendix A.27, section 9.2 items 2, 5, 13, 15, and 18); vidbyte/tools/builtins/prebuilt/README.md
 TESTS: tests/features/prebuilt_tools/test_prebuilt_rows_geometry_bits_markdown.py and the catalogue-wide tests in tests/features/prebuilt_tools/
 """
 
@@ -29,6 +29,7 @@ from vidbyte.lib.constants.prebuilt_tools import (
     PREBUILT_INTEGER_TEXT_PATTERN,
     PREBUILT_MAX_BIT_WIDTH,
     PREBUILT_MAX_DATA_SIZE_BYTES,
+    PREBUILT_MAX_DECIMAL_TEXT_CHARS,
     PREBUILT_MAX_INTEGER_TEXT_CHARS,
     PREBUILT_MAX_PHRASE_CHARS,
     PREBUILT_MAX_SHORT_TEXT_CHARS,
@@ -46,7 +47,7 @@ from vidbyte.tools.builtins.prebuilt._support import (
     PrebuiltToolSupport,
 )
 
-_NUMBER_PREFIX = re.compile(r"[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([eE][+-]?[0-9]+)?")
+_NUMBER_PREFIX = re.compile(r"(?P<mantissa>[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+))(?:[eE](?P<exponent>[+-]?[0-9]+))?")
 _SMALLEST_SIZE_EXPONENT = -400
 _BITS_PER_BYTE = 8
 _DECIMAL_BASE = 10
@@ -102,16 +103,24 @@ class BitsBytesToolFunctions:
         if factor is None:
             raise PrebuiltToolSupport.argument_error("text", "the unit after the number is not a known data size unit", expected)
 
-        # The number must be finite as a float and not negative.
-        number = Decimal(number_match.group())
+        # @intent prebuilt-data-size-far-exponent
+        # Decimal cannot be built from an exponent past about 10^18,
+        # and the host's decimal context would decide what happens
+        # instead, so a far exponent keeps only the mantissa. Its sign
+        # still decides whether the size is negative.
+        far = abs(int(number_match["exponent"] or 0)) > PREBUILT_MAX_DECIMAL_TEXT_CHARS
+        number = Decimal(number_match["mantissa"] if far else number_match.group())
+
+        # The number must be finite as a float and not negative. A far
+        # positive exponent on a value other than zero is infinite.
         if not math.isfinite(float(number_match.group())) or number < 0:
             raise PrebuiltToolSupport.argument_error("text", "the number is negative or outside the floating-point range", expected)
 
         # @intent prebuilt-data-size-exponent-bound
         # An exact fraction of a tiny exponent would build an enormous
-        # power of ten, and any size that small is zero bytes as a
-        # float.
-        tiny = number.is_zero() or number.adjusted() < _SMALLEST_SIZE_EXPONENT
+        # power of ten, and any size that small, a far exponent left
+        # here included, is zero bytes as a float.
+        tiny = far or number.is_zero() or number.adjusted() < _SMALLEST_SIZE_EXPONENT
         exact = Fraction(0) if tiny else Fraction(number) * Fraction(factor)
 
         # Convert the exact size to float once for bytes and once for
