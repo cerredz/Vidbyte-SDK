@@ -1,7 +1,7 @@
 ---
 spec: prebuilt-agent-tools
 title: A library of 250+ prebuilt agent tools in vidbyte-sdk
-status: verified
+status: pr-open
 revision: 7
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-prebuilt-agent-tools
@@ -1159,6 +1159,7 @@ Rows 8–38 share the **category-module standard set** written out in §12.4 gro
 | r5 | 2026-10-14 | S3 implement | Built every §12.3 row on r5 with no change to any tool, parameter, return key, default, or cap: 39 planned files (no D-18 split module), 265 tools in 31 categories, `PrebuiltTools`, and 68 enums. Added the r5 EC-46 README paragraph (row 40). The pack has 4,310 passed. Lint, semgrep, and the public API check pass, and both CI stages pass. Draft PR #1072. Deviations are listed below. |
 | r6 | 2026-10-14 | S1 spec (post-S4 fix; reviewed) | Spec edits for the S4 confirmed findings (S4-1 to S4-16). New work caps `PREBUILT_MAX_XML_PATH_VISITS` (R-7, EC-48) and `PREBUILT_MAX_PATCH_WORK_CHARS` (R-9, EC-49). `PREBUILT_MAX_SEARCH_STRING_CHARS` caps literal search (R-10, EC-50). EC-47 fixes the HTML end-of-input rule (R-8). §9.2 item 18 requires a fresh decimal context (R-12). Row 6 drops the helper chain (R-11) and keeps shared rules in one place, with `PREBUILT_MAX_ECHO_CHARS` (R-13). Rows now state exact outputs for R-2, R-3, R-5, R-6, and M-1. INV-9, INV-12, INV-15, INV-19, NFR-7, NFR-10, and T-2 updated. Still 265 tools and 68 enums. One test-pinned cap changed: `find_substring_positions.substring`, 10,000 → 500. The §6.2 Proof column is unchanged. |
 | r7 | 2026-10-14 | S1 spec (post-S5 re-review fix; reviewed) | Spec edits for re-review round 1 (S5-1 to S5-4). New D-19: the `toml_to_json` dotted-key scan skips comments and multi-line strings whole and accepts a long run inside them (R-17). The A.20 row states the one-pass scan, including an unclosed quoted segment (R-15). New EC-51 records the TOML shapes; EC-31, NFR-7, T-2, §13, and rows 27 and 34 updated. The A.27 `parse_data_size` row writes out the results for an exponent of any length, and §9.2 item 18 says when building a `Decimal` from text needs a bound first (R-16). The `PREBUILT_MAX_REPORTED_NAMES` row lists its four users (M-6). No new constant, tool, parameter, or return key, and no test-pinned value changes. The §6.2 Proof column is unchanged. |
+| r7 | 2026-10-14 | S6 PR | finalized for review |
 
 ### Implementation deviations (S3)
 
