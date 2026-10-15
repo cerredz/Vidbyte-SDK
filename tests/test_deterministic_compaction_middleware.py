@@ -8,6 +8,7 @@ from vidbyte.lib.dataclasses.context import ContextMessage
 from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareHook
 from vidbyte.lib.dataclasses.tools import ToolCall as RuntimeToolCall
 from vidbyte.lib.dataclasses.tools import ToolResult as RuntimeToolResult
+from vidbyte.lib.tools import ToolsFormatter
 from vidbyte.middleware.builtins import MessageHistoryCompactionMiddleware, ToolResultCompactionMiddleware
 from vidbyte.tools.builtins.context import ContextCompactionTool
 from vidbyte.tools.types import ToolCall
@@ -28,6 +29,35 @@ def _parallel_tool_history() -> tuple[dict[str, object], ...]:
         {"role": "tool", "tool_call_id": "c2", "content": "b"},
         {"role": "assistant", "content": None, "tool_calls": [{"id": "c3", "type": "function", "function": {"name": "read_file", "arguments": "{}"}}]},
         {"role": "tool", "tool_call_id": "c3", "content": "c"},
+    )
+
+
+def _lookup_pair(provider: str, key: str, output: str) -> tuple[dict[str, object], dict[str, object]]:
+    # Returns one lookup call turn and its result, id-less in Gemini shape or matched by tool_call id in OpenAI shape.
+    if provider == "gemini":
+        return {"role": "model", "parts": [{"functionCall": {"name": "lookup", "args": {"key": key}}}]}, {"role": "user", "parts": [{"functionResponse": {"name": "lookup", "response": {"output": output}}}]}
+    call = {"id": f"call_{key}", "type": "function", "function": {"name": "lookup", "arguments": f'{{"key": "{key}"}}'}}
+    return {"role": "assistant", "content": None, "tool_calls": [call]}, {"role": "tool", "tool_call_id": f"call_{key}", "content": output}
+
+
+def _city_lookup_history(provider: str) -> tuple[dict[str, object], ...]:
+    # Returns three city lookups where only Ruritania's call and every city's result share terms with "Ruritania population".
+    return tuple(message for city in ("Zembla", "Ruritania", "Lilliput") for message in _lookup_pair(provider, city, f"{city} population report"))
+
+
+def _two_lookup_history(provider: str) -> tuple[dict[str, object], ...]:
+    # Returns a user turn followed by lookups A and B, so deleting indexes 2-3 leaves A's call beside B's result.
+    ask = {"role": "user", "parts": [{"text": "look up A and B"}]} if provider == "gemini" else {"role": "user", "content": "look up A and B"}
+    return (ask, *_lookup_pair(provider, "A", "out A"), *_lookup_pair(provider, "B", "out B"))
+
+
+def _gemini_tool_history(result: RuntimeToolResult) -> tuple[dict[str, object], ...]:
+    # Returns a Gemini history whose one tool result is written by ToolsFormatter, so a failure has the real error-response shape.
+    call = RuntimeToolCall(result.tool_name, {"q": result.tool_name})
+    return (
+        {"role": "user", "parts": [{"text": "look it up"}]},
+        {"role": "model", "parts": [{"functionCall": {"name": call.tool_name, "args": dict(call.arguments)}}]},
+        dict(ToolsFormatter.format_tool_result(call, result, "gemini")),
     )
 
 
@@ -98,6 +128,27 @@ class DeterministicStrategyTests(unittest.IsolatedAsyncioTestCase):
         messages = (msg("assistant", "call", "tool_call"), msg("tool", "result", "tool_result"))
         after, _ = await ContextCompactionEngine().compact_messages(messages, mode=CompactionMode.TRIM_WITH_PROVIDER_BOUNDARIES, options={"max_messages": 1})
         self.assertEqual(tuple(m.kind for m in after), ("tool_call", "tool_result"))
+
+    async def test_query_relevance_keeps_gemini_pair_beside_orphaned_results(self) -> None:
+        # [Silent Failure] An id-less Gemini result whose call was evicted is not counted against the kept call before it, so that complete pair survives.
+        history = _city_lookup_history("gemini")
+        after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.QUERY_RELEVANCE_FILTER, options={"query": "Ruritania population"})
+        self.assertEqual(list(after), [history[2], history[3]])
+
+    async def test_delete_range_never_pairs_a_gemini_call_with_another_calls_result(self) -> None:
+        # [Silent Failure] With A's result and B's call deleted, B's id-less result is not sent to Gemini as A's answer; both halves are dropped.
+        history = _two_lookup_history("gemini")
+        after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.DELETE_MESSAGES_BY_ID_OR_RANGE, options={"start": 2, "end": 3})
+        self.assertEqual(list(after), [history[0]])
+
+    async def test_id_matched_pair_repair_is_unchanged_by_gemini_adjacency(self) -> None:
+        # [Hidden Assumption] OpenAI results still pair by tool_call id, keeping the complete pair and refusing a mismatched one.
+        history = _city_lookup_history("openai")
+        after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.QUERY_RELEVANCE_FILTER, options={"query": "Ruritania population"})
+        self.assertEqual(list(after), [history[2], history[3]])
+        history = _two_lookup_history("openai")
+        after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.DELETE_MESSAGES_BY_ID_OR_RANGE, options={"start": 2, "end": 3})
+        self.assertEqual(list(after), [history[0]])
 
     async def test_trim_with_provider_boundaries_keeps_newer_group(self) -> None:
         # [Silent Failure] Newer tool groups are preferred over older groups.
@@ -247,6 +298,43 @@ class DeterministicStrategyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(scrubbed.count("line"), 1)
         self.assertLess(len(scrubbed), len(output))
         self.assertEqual(after[0], history[0])
+
+    async def test_clearing_replaces_gemini_error_message_and_keeps_error_markers(self) -> None:
+        # [Silent Failure] A failed Gemini call carries its text in response.message, so clearing must replace that text, not add "output" beside it.
+        error_text = "ERROR-MARK Oz is not in the census"
+        failure = RuntimeToolResult.failure("lookup", error_text, metadata={"error": "not_found", "hint": "Try a real place."})
+        history = _gemini_tool_history(failure)
+        for mode in (CompactionMode.TOOL_RESULT_CLEARING_WITH_EXCLUSIONS, CompactionMode.STRIP_TOOL_RESULT_BODIES):
+            with self.subTest(mode=mode.value):
+                after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=mode, options={"placeholder": "[cleared]"})
+                response = after[2]["parts"][0]["functionResponse"]["response"]
+                self.assertNotIn(error_text, str(after[2]))
+                self.assertEqual(response["message"], "[cleared]")
+                self.assertNotIn("output", response)
+                self.assertEqual((response["status"], response["error"], response["hint"]), ("error", "not_found", "Try a real place."))
+
+    async def test_head_tail_preview_cuts_gemini_error_message_not_part_repr(self) -> None:
+        # [Silent Failure] The preview of a failed Gemini call is cut from its error message, not from the functionResponse part's dict repr.
+        error_text = "ERROR-MARK traceback\n" + "frame line\n" * 60
+        history = _gemini_tool_history(RuntimeToolResult.failure("lookup", error_text))
+        after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.HEAD_TAIL_TOOL_PREVIEW, options={"head_chars": 20, "tail_chars": 10})
+        response = after[2]["parts"][0]["functionResponse"]["response"]
+        self.assertNotIn("functionResponse", str(response))
+        self.assertNotIn("{'", "".join(str(value) for value in response.values()))
+        self.assertNotIn("output", response)
+        preview = response["message"]
+        self.assertTrue(preview.startswith("ERROR-MARK traceback"))
+        self.assertLess(len(preview), len(error_text))
+        self.assertEqual(response["status"], "error")
+
+    async def test_clearing_still_writes_gemini_success_output_and_keeps_excluded_error(self) -> None:
+        # [Edge Case] A successful Gemini result is still cleared through response.output, and an excluded failed result is handed back unchanged.
+        success = RuntimeToolResult.success("lookup", "Paris has 2.1 million people")
+        failure = RuntimeToolResult.failure("audit_log", "ERROR-MARK audit store offline")
+        history = (*_gemini_tool_history(success), *_gemini_tool_history(failure)[1:])
+        after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.TOOL_RESULT_CLEARING_WITH_EXCLUSIONS, options={"exclude_tools": ("audit_log",), "placeholder": "[cleared]"})
+        self.assertEqual(after[2]["parts"][0]["functionResponse"]["response"], {"output": "[cleared]", "status": "success"})
+        self.assertEqual(after[4], history[4])
 
     async def test_delete_messages_empty_keeps_all(self) -> None:
         # [Edge Case] No IDs and no range leaves messages unchanged.
