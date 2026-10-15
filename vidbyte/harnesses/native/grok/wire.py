@@ -14,7 +14,6 @@ TESTS: tests/features/harness_threads/test_harness_threads_errors.py, tests/feat
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Mapping
 
 from vidbyte.harnesses.native.hostkit import NativeErrorFactory
@@ -24,6 +23,7 @@ from vidbyte.lib.dataclasses.native_threads import (
     NativeThreadResult,
 )
 from vidbyte.lib.dataclasses.process import CliOutcome
+from vidbyte.lib.dataclasses.validation import RecordFieldValidator
 from vidbyte.lib.enums.native_threads import (
     NativeHarness,
     NativeThreadProblem,
@@ -62,7 +62,7 @@ class GrokWire:
         if answer is None:
             raise errors.failure(NativeThreadProblem.PROTOCOL_MISMATCH, request=request, outcome=outcome)
         session = answer.get(native_threads.GROK_SESSION_FIELD)
-        if not isinstance(session, str) or len(session) > native_threads.NATIVE_THREAD_ID_MAX_CHARS or re.fullmatch(native_threads.NATIVE_THREAD_ID_PATTERN, session) is None:
+        if not isinstance(session, str) or not RecordFieldValidator.accepts_text(session, max_chars=native_threads.NATIVE_THREAD_ID_MAX_CHARS, pattern=native_threads.NATIVE_THREAD_ID_PATTERN):
             raise errors.failure(NativeThreadProblem.PROTOCOL_MISMATCH, request=request, outcome=outcome, missing_member=native_threads.GROK_SESSION_FIELD)
         text = answer.get(native_threads.GROK_TEXT_FIELD)
         if not isinstance(text, str):
@@ -70,16 +70,14 @@ class GrokWire:
 
         # A continue must answer on the thread it was given; a fork must
         # answer on a new one.
-        requested = request.thread_id or ""
-        if request.verb is NativeThreadVerb.CONTINUE and session.casefold() != requested.casefold():
-            detail = native_threads.NATIVE_OTHER_THREAD_DETAIL.format(answered=session, requested=requested)
-            raise errors.failure(NativeThreadProblem.THREAD_NOT_FOUND, request=request, thread_id=session, outcome=outcome, searched=detail)
-        if request.verb is NativeThreadVerb.FORK and session.casefold() == requested.casefold():
-            raise errors.failure(NativeThreadProblem.PROTOCOL_MISMATCH, request=request, thread_id=session, outcome=outcome, searched=native_threads.NATIVE_FORK_RETURNED_SOURCE_DETAIL)
+        wrong = NativeErrorFactory.wrong_thread(request, session)
+        if wrong is not None:
+            detail = native_threads.NATIVE_WRONG_THREAD_DETAILS[wrong].format(answered=session, requested=request.thread_id)
+            raise errors.failure(wrong, request=request, thread_id=session, outcome=outcome, searched=detail)
 
-        # Return the caller's own id on a continue, the new one otherwise,
-        # with the text cut at the result cap.
-        thread_id = requested if request.verb is NativeThreadVerb.CONTINUE else session
+        # Return the caller's own id on a continue, the new one
+        # otherwise, with the text cut at the result cap.
+        thread_id = request.thread_id if request.verb is NativeThreadVerb.CONTINUE and request.thread_id is not None else session
         cap = native_threads.NATIVE_RESULT_TEXT_MAX_CHARS
         return NativeThreadResult(harness=NativeHarness.GROK, thread_id=thread_id, text=text[:cap], text_truncated=len(text) > cap)
 

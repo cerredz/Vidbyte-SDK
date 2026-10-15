@@ -304,6 +304,14 @@ MUSE_DISTRO_MISSING_DETAIL = "WSL has no distro named {distro}; {program} lists 
 MUSE_NOT_IN_DISTRO_DETAIL = "The SDK looked for {muse_path} inside the WSL distro {distro}."
 NATIVE_FORK_RETURNED_SOURCE_DETAIL = "The fork answered with its source thread, so the vendor continued the source thread instead of forking it."
 NATIVE_OTHER_THREAD_DETAIL = "The vendor answered on thread {answered} instead of {requested}."
+# The detail of each wrong-thread problem of a Grok or opencode answer;
+# both are formatted with the answered and the requested id.
+NATIVE_WRONG_THREAD_DETAILS: MappingProxyType[NativeThreadProblem, str] = MappingProxyType(
+    {
+        NativeThreadProblem.THREAD_NOT_FOUND: NATIVE_OTHER_THREAD_DETAIL,
+        NativeThreadProblem.PROTOCOL_MISMATCH: NATIVE_FORK_RETURNED_SOURCE_DETAIL,
+    }
+)
 # The vendor text of an opencode error event: its name, its HTTP
 # status when it has one, and its message.
 OPENCODE_ERROR_EVENT_TEXT = "{name}: {message}"

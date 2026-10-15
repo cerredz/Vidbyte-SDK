@@ -3,7 +3,7 @@
 PURPOSE: Defines CliRunner, the canonical way to run one command-line program to completion with a time bound, capped output and no inherited standard input, and ProcessStopper, which stops a child's whole process tree (process group on POSIX, taskkill /T on Windows) and reaps it within a bound.
 ROLE IN CODEBASE: CliRunner runs every vendor process of the harness thread functions under vidbyte/harnesses/native/: the grok, opencode and muse exec runs, the muse serve exchange, the WSL distro listing and the Muse in-distro reap. ProcessStopper is the tree stop CliRunner uses on timeout and cancellation.
 ARCHITECTURE NOTE: Canonical lib helper (AGENTS.md principle 5). Every failure is a field of the returned CliOutcome; only asyncio.CancelledError is raised, after the tree is stopped. Children start with start_new_session=True on POSIX so their process group id is their pid, which is what lets ProcessStopper reach grandchildren even after the leader exited. The child starts with the caller's environment minus the invocation's env_remove names, with env_overlay on top. Timing constants are read through the native_threads constants module at call time so tests can shrink them.
-FUNCTION INVENTORY: CliRunner.run is the narrated main function; CliRunner.launch starts the child with its environment, returning the child or the launch failure; _feed_stdin writes stdin_text and closes the pipe; _drain reads one stream into a capped buffer while counting the rest; _finish_readers bounds and cancels the drain tasks; _outcome builds the CliOutcome. ProcessStopper.stop_tree is the narrated main function; _signal_group, _start_taskkill, _wait_taskkill, _kill_leader, _bounded_wait and _close_pipes are its single-step helpers.
+FUNCTION INVENTORY: CliRunner.run is the narrated main function; CliRunner.launch starts the child with its environment, returning the child or the launch failure; json_objects reads the JSON objects a CLI printed one per line; _feed_stdin writes stdin_text and closes the pipe; _drain reads one stream into a capped buffer while counting the rest; _finish_readers bounds and cancels the drain tasks; _outcome builds the CliOutcome. ProcessStopper.stop_tree is the narrated main function; _signal_group, _start_taskkill, _wait_taskkill, _kill_leader, _bounded_wait and _close_pipes are its single-step helpers.
 COMMON MODIFICATION PATTERNS: A new process option adds a CliInvocation field and its use in run or launch; keep the stop path in ProcessStopper so every caller gets it.
 WHAT NOT TO DO IN THIS FILE: 1. Do not pass shell=True or build a command string; argv goes to create_subprocess_exec (lint S055). 2. Do not let a child inherit the caller's stdin; it is a pipe or DEVNULL. 3. Do not wait without a bound after a kill; a grandchild can hold the pipes open forever.
 KNOWN EDGE CASES: On Windows, taskkill /T cannot reach a grandchild of a leader that already exited. A program name is looked up through PATH and PATHEXT on Windows; the harness launchers refuse batch files before they get here. Output is decoded as UTF-8 and trimmed to whole characters within max_output_bytes.
@@ -15,10 +15,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import os
 import shutil
 import signal
 import sys
+from collections.abc import Mapping
 
 from vidbyte.lib.constants import native_threads
 from vidbyte.lib.dataclasses.process import CliInvocation, CliOutcome
@@ -214,6 +216,22 @@ class CliRunner:
         except (OSError, ValueError):
             return None, ProcessLaunchFailure.OS_ERROR
         return process, None
+
+    @staticmethod
+    def json_objects(text: str) -> list[Mapping[str, object]]:
+        # @intent cli-json-lines-are-read-in-one-place
+        # A CLI that prints one JSON object per line also prints log,
+        # banner and cut lines; every reader skips them the same way,
+        # so each line that is one JSON object is kept, in order.
+        objects: list[Mapping[str, object]] = []
+        for line in text.splitlines():
+            try:
+                value = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(value, dict):
+                objects.append(value)
+        return objects
 
     async def _feed_stdin(self, process: asyncio.subprocess.Process, stdin_text: str | None) -> None:
         # @intent cli-stdin-closes-after-the-text

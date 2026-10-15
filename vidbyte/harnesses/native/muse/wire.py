@@ -3,7 +3,7 @@
 PURPOSE: Defines the two Muse codecs of one call: MuseWire speaks the batch `muse serve` exchange (MSP frames on stdin, the answer to request id 2 on stdout) that checks or forks a thread before exec runs, and MuseExecOutput reads the JSON records of one `muse exec --json` run into a NativeThreadResult, or into the NativeThreadError that names what went wrong.
 ROLE IN CODEBASE: Called by MuseThreadRun.execute in vidbyte/harnesses/native/muse/threads.py: MuseWire builds the serve stdin and reads its answer, MuseExecOutput reads the exec outcome. Both raise through the call's NativeErrorFactory (hostkit/errors.py).
 ARCHITECTURE NOTE: Two classes because writing an MSP batch and reading exec records are two jobs (spec D-17). Pure: no process, no file and no await. Every member name, request id and marker comes from vidbyte/lib/constants/native_threads.py (spec INV-15). The checks run in the INV-6 order: timeout, output cap, then the vendor's own answer.
-FUNCTION INVENTORY: MuseWire.new_command_id mints a UUIDv7; batch_frames joins the initialize request, the initialized notification and the session request; session_read_params and session_fork_params build the request parameters; read_answer is the narrated reader of the serve answer; _answer finds the line answering request id 2. MuseExecOutput.read is the narrated reader of exec records; _records parses the JSON lines; _session finds the first session stream id; _terminal finds the terminal record's payload.
+FUNCTION INVENTORY: MuseWire.new_command_id mints a UUIDv7; batch_frames joins the initialize request, the initialized notification and the session request; session_read_params and session_fork_params build the request parameters; read_answer is the narrated reader of the serve answer; _answer finds the line answering request id 2. MuseExecOutput.read is the narrated reader of exec records, read through CliRunner.json_objects; _session finds the first session stream id; _terminal finds the terminal record's payload.
 COMMON MODIFICATION PATTERNS: A new MSP request is one MuseMethod member and one params builder here; a new exec failure text is one more marker in MUSE_KEY_REJECTED_MARKERS or one more check in MuseExecOutput.read.
 WHAT NOT TO DO IN THIS FILE: 1. Do not copy vidbyte.__version__ at import time; batch_frames reads it on every call. 2. Do not send a commandId that is not from new_command_id. 3. Do not copy vendor text into an error unscrubbed; pass it as vendor_text and the factory scrubs and caps it.
 KNOWN EDGE CASES: `muse exec --session-id <unknown>` silently starts a new thread, so a continue checks the id with session/read first, and an exec whose session stream is not the id it was given is thread_not_found carrying the stream's id. A fork whose serve answer is its source id is protocol_mismatch before exec starts. The session stream id is looked for before the runner checks, so a timed-out or cut run still reports it (spec INV-5). Lines that are not JSON objects are skipped.
@@ -14,7 +14,6 @@ TESTS: tests/features/harness_threads/test_harness_threads_threads.py, tests/fea
 from __future__ import annotations
 
 import json
-import re
 import secrets
 import time
 import uuid
@@ -28,12 +27,14 @@ from vidbyte.lib.dataclasses.native_threads import (
     NativeThreadResult,
 )
 from vidbyte.lib.dataclasses.process import CliOutcome
+from vidbyte.lib.dataclasses.validation import RecordFieldValidator
 from vidbyte.lib.enums.native_threads import (
     MuseMethod,
     NativeHarness,
     NativeThreadProblem,
     NativeThreadVerb,
 )
+from vidbyte.lib.process import CliRunner
 
 
 class MuseWire:
@@ -120,7 +121,7 @@ class MuseWire:
         result = answer.get(native_threads.JSONRPC_RESULT_FIELD)
         session = result.get(native_threads.MUSE_SESSION_FIELD) if isinstance(result, dict) else None
         forked = session.get(native_threads.MUSE_SESSION_ID_FIELD) if isinstance(session, dict) else None
-        if not isinstance(forked, str) or len(forked) > native_threads.NATIVE_THREAD_ID_MAX_CHARS or re.fullmatch(native_threads.NATIVE_THREAD_ID_PATTERN, forked) is None:
+        if not isinstance(forked, str) or not RecordFieldValidator.accepts_text(forked, max_chars=native_threads.NATIVE_THREAD_ID_MAX_CHARS, pattern=native_threads.NATIVE_THREAD_ID_PATTERN):
             raise errors.failure(NativeThreadProblem.PROTOCOL_MISMATCH, request=request, outcome=outcome, missing_member=native_threads.MUSE_FORK_SESSION_MEMBER)
         if forked == source:
             raise errors.failure(NativeThreadProblem.PROTOCOL_MISMATCH, request=request, thread_id=forked, outcome=outcome, searched=native_threads.NATIVE_FORK_RETURNED_SOURCE_DETAIL)
@@ -129,14 +130,8 @@ class MuseWire:
     @staticmethod
     def _answer(stdout: str) -> Mapping[str, object] | None:
         # The JSON object on its own line that answers request id 2.
-        for line in stdout.splitlines():
-            try:
-                value = json.loads(line)
-            except ValueError:
-                continue
-            if isinstance(value, dict) and value.get(native_threads.JSONRPC_ID_FIELD) == native_threads.MUSE_SESSION_REQUEST_ID:
-                return value
-        return None
+        answers = (frame for frame in CliRunner.json_objects(stdout) if frame.get(native_threads.JSONRPC_ID_FIELD) == native_threads.MUSE_SESSION_REQUEST_ID)
+        return next(answers, None)
 
 
 class MuseExecOutput:
@@ -147,7 +142,7 @@ class MuseExecOutput:
         # Read the records and the session stream first, so every
         # failure below carries the newest thread id: the stream's,
         # else the one exec was given (the fork's new id on a fork).
-        records = MuseExecOutput._records(outcome.stdout)
+        records = CliRunner.json_objects(outcome.stdout)
         session = MuseExecOutput._session(records)
         known = session if session is not None else thread_id
 
@@ -192,20 +187,6 @@ class MuseExecOutput:
         return NativeThreadResult(harness=NativeHarness.MUSE, thread_id=session, text=text[:cap], text_truncated=len(text) > cap)
 
     @staticmethod
-    def _records(stdout: str) -> list[Mapping[str, object]]:
-        # Every stdout line that is one JSON object; banner lines and
-        # cut lines are skipped.
-        records: list[Mapping[str, object]] = []
-        for line in stdout.splitlines():
-            try:
-                value = json.loads(line)
-            except ValueError:
-                continue
-            if isinstance(value, dict):
-                records.append(value)
-        return records
-
-    @staticmethod
     def _session(records: list[Mapping[str, object]]) -> str | None:
         # The id of the first record on a session stream, when it is a
         # thread id the result record accepts.
@@ -213,7 +194,7 @@ class MuseExecOutput:
             stream = record.get(native_threads.MUSE_STREAM_FIELD)
             if isinstance(stream, dict) and stream.get(native_threads.MUSE_STREAM_KIND_FIELD) == native_threads.MUSE_SESSION_STREAM_KIND:
                 session = stream.get(native_threads.MUSE_STREAM_ID_FIELD)
-                usable = isinstance(session, str) and len(session) <= native_threads.NATIVE_THREAD_ID_MAX_CHARS and re.fullmatch(native_threads.NATIVE_THREAD_ID_PATTERN, session) is not None
+                usable = isinstance(session, str) and RecordFieldValidator.accepts_text(session, max_chars=native_threads.NATIVE_THREAD_ID_MAX_CHARS, pattern=native_threads.NATIVE_THREAD_ID_PATTERN)
                 return session if usable else None
         return None
 

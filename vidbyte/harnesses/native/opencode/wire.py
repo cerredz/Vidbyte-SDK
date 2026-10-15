@@ -3,7 +3,7 @@
 PURPOSE: Defines OpencodeWire, the codec of one `opencode run --format=json` call: it builds the inline config that binds the caller's key to the provider its model names, and turns the run's CliOutcome into a NativeThreadResult, or into the NativeThreadError that names what went wrong.
 ROLE IN CODEBASE: Called by OpencodeThreadRun.execute in vidbyte/harnesses/native/opencode/threads.py: config_content before the run, read after CliRunner returns. It raises through the call's NativeErrorFactory (hostkit/errors.py).
 ARCHITECTURE NOTE: Pure: no process, no file and no await. opencode prints one JSON event per line, each with "type" and "sessionID"; "text" events carry part.text and part.messageID, "error" events carry error.name and error.data.message/statusCode; an unknown session is "Session not found" on stderr with exit 1. Every member name and marker comes from vidbyte/lib/constants/native_threads.py (spec INV-15). The checks run in the INV-6 order: timeout, output cap, a refused key, an unknown session, a failed run, then the shape of the answer and the thread id.
-FUNCTION INVENTORY: config_content builds the OPENCODE_CONFIG_CONTENT value; read is the narrated main function; _events parses the JSON lines; _session finds the first usable sessionID; _error classifies the first error event and builds its vendor text; _text joins the text parts of the last message.
+FUNCTION INVENTORY: config_content builds the OPENCODE_CONFIG_CONTENT value; read is the narrated main function, reading the JSON lines through CliRunner.json_objects; _session finds the first usable sessionID; _error classifies the first error event and builds its vendor text; _text joins the text parts of the last message.
 COMMON MODIFICATION PATTERNS: A new key-refusal signal from opencode is one more name in OPENCODE_KEY_REJECTED_ERROR_NAMES or status in OPENCODE_KEY_REJECTED_STATUSES; a new config member is one more key in config_content.
 WHAT NOT TO DO IN THIS FILE: 1. Do not return the config value anywhere but the child's environment; it holds the key, and the caller registers it as a secret. 2. Do not copy vendor text into an error unscrubbed; pass it as vendor_text and the factory scrubs and caps it. 3. Do not start processes or await anything here.
 KNOWN EDGE CASES: The thread id is looked for before the runner checks, so a timed-out or cut stream still reports the session opencode printed (spec INV-5). Lines that are not JSON objects, such as plugin log lines, are skipped. The answer text is only the last message's text parts, so earlier narration ("Let me look at the files first.") is left out; a run whose last message has no text returns "". A continue is matched case-insensitively and returns the id the caller gave; a fork whose answer is its source is protocol_mismatch.
@@ -14,7 +14,6 @@ TESTS: tests/features/harness_threads/test_harness_threads_errors.py, tests/feat
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Mapping
 
 from vidbyte.harnesses.native.hostkit import NativeErrorFactory
@@ -24,12 +23,14 @@ from vidbyte.lib.dataclasses.native_threads import (
     NativeThreadResult,
 )
 from vidbyte.lib.dataclasses.process import CliOutcome
+from vidbyte.lib.dataclasses.validation import RecordFieldValidator
 from vidbyte.lib.enums.native_threads import (
     NativeHarness,
     NativeThreadProblem,
     NativeThreadVerb,
     OpencodeEventType,
 )
+from vidbyte.lib.process import CliRunner
 
 
 class OpencodeWire:
@@ -52,7 +53,7 @@ class OpencodeWire:
     def read(outcome: CliOutcome, request: NativeThreadRequest, errors: NativeErrorFactory, *, timeout_seconds: float) -> NativeThreadResult:
         # Read the events and the session they name first, so every
         # failure below carries the thread opencode already created.
-        events = OpencodeWire._events(outcome.stdout)
+        events = CliRunner.json_objects(outcome.stdout)
         session = OpencodeWire._session(events)
 
         # The run passed its time bound, or printed more than the cap:
@@ -83,33 +84,17 @@ class OpencodeWire:
 
         # A continue must answer on the thread it was given; a fork must
         # answer on a new one.
-        requested = request.thread_id or ""
-        if request.verb is NativeThreadVerb.CONTINUE and session.casefold() != requested.casefold():
-            detail = native_threads.NATIVE_OTHER_THREAD_DETAIL.format(answered=session, requested=requested)
-            raise errors.failure(NativeThreadProblem.THREAD_NOT_FOUND, request=request, thread_id=session, outcome=outcome, searched=detail)
-        if request.verb is NativeThreadVerb.FORK and session.casefold() == requested.casefold():
-            raise errors.failure(NativeThreadProblem.PROTOCOL_MISMATCH, request=request, thread_id=session, outcome=outcome, searched=native_threads.NATIVE_FORK_RETURNED_SOURCE_DETAIL)
+        wrong = NativeErrorFactory.wrong_thread(request, session)
+        if wrong is not None:
+            detail = native_threads.NATIVE_WRONG_THREAD_DETAILS[wrong].format(answered=session, requested=request.thread_id)
+            raise errors.failure(wrong, request=request, thread_id=session, outcome=outcome, searched=detail)
 
         # Return the caller's own id on a continue, the new one
         # otherwise, with the last message's text cut at the result cap.
-        thread_id = requested if request.verb is NativeThreadVerb.CONTINUE else session
+        thread_id = request.thread_id if request.verb is NativeThreadVerb.CONTINUE and request.thread_id is not None else session
         text = OpencodeWire._text(events)
         cap = native_threads.NATIVE_RESULT_TEXT_MAX_CHARS
         return NativeThreadResult(harness=NativeHarness.OPENCODE, thread_id=thread_id, text=text[:cap], text_truncated=len(text) > cap)
-
-    @staticmethod
-    def _events(stdout: str) -> list[Mapping[str, object]]:
-        # Every stdout line that is one JSON object; log lines and cut
-        # lines are skipped.
-        events: list[Mapping[str, object]] = []
-        for line in stdout.splitlines():
-            try:
-                value = json.loads(line)
-            except ValueError:
-                continue
-            if isinstance(value, dict):
-                events.append(value)
-        return events
 
     @staticmethod
     def _session(events: list[Mapping[str, object]]) -> str | None:
@@ -118,7 +103,7 @@ class OpencodeWire:
         for event in events:
             session = event.get(native_threads.OPENCODE_SESSION_FIELD)
             if isinstance(session, str):
-                usable = len(session) <= native_threads.NATIVE_THREAD_ID_MAX_CHARS and re.fullmatch(native_threads.NATIVE_THREAD_ID_PATTERN, session) is not None
+                usable = RecordFieldValidator.accepts_text(session, max_chars=native_threads.NATIVE_THREAD_ID_MAX_CHARS, pattern=native_threads.NATIVE_THREAD_ID_PATTERN)
                 return session if usable else None
         return None
 
