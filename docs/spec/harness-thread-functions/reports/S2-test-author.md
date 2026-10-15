@@ -138,3 +138,33 @@ Deterministic, with these limits:
 - R-24 uses no grace. On Windows, `TerminateProcess` is asynchronous, so a loaded machine could in principle see a grandchild still exiting for a few milliseconds. No run here did.
 - R-11 compares a 7 s bound (4 kill waits plus slack) with 12 s and 20 s timeouts. Each test ends its own grandchild, because a tree stop cannot reach it on Windows once the leader has exited.
 - R-9 on POSIX also locks a folder (`0o555`), since a read-only file alone does not block removal there. That branch was not run here (Windows only).
+
+## Addendum: re-review findings (review.md, commit c376bfb7)
+
+Regression tests for R-27 to R-30, and the R-31 fixture fix. Commits: `4b5eacad` (tests), `675f4ecc` (test plan). No file under `vidbyte/` was opened. The proof runs used four scratch pytest plugins that simulate each fix: the S5 verifier's `rr2_sysroot`, and my `rr27_fixed_runner`, `rr29_units30000` and `rr30_shielded_discard` (in the session scratchpad's `rr-proof/`). They are not in the pack.
+
+| Finding | Test | Red line at HEAD (Python 3.11 and 3.13, win32) |
+|---|---|---|
+| R-31 | the `decoy_log` fixture in `test_harness_threads_launcher.py` now removes `NoDefaultCurrentDirectoryInExePath` | not a new test. At HEAD the 9 R-4 cases pass on 3.11 and 3.13. On a copy of the pre-repair code (`d5581a24`), run from a shell that sets the variable: `9 failed` on 3.11 and on 3.13 (`AssertionError: R-4: the grok program in the current folder was launched` …). With the `delenv` taken out, 3.13 gives `9 passed`, which is the vacuous pass the verifier found |
+| R-28 | `test_harness_threads_launcher.py::test_tree_stop_never_runs_a_taskkill_from_the_current_folder[timeout/cancel]` (win32) | `AssertionError: R-28: the taskkill.exe in the current folder was launched` / `assert [WindowsPath(...00001.claim')] == []` |
+| R-27 | `test_harness_threads_runner.py::test_cancel_after_the_leader_exits_stops_the_tree_and_its_readers` | `AssertionError: R-27: the run's reader tasks are still running after the cancel` / `assert [<Task pendin...k_wakeup()]>>] == []` |
+| R-29 | `test_harness_threads_arguments.py::test_prose_prompt_within_the_argv_cap_still_runs[prose-24000/one-space-23999 × grok/muse]` | `NativeThreadError: run_grok_thread failed with configuration.invalid_argument. … prompt must take at most 24000 UTF-16 code units once quoted for the Windows command line; got 24002.` (23,999 case: `got 24001`) |
+| R-29 (changed test) | `test_harness_threads_arguments.py::test_prompt_whose_quoted_form_passes_the_argv_cap_is_refused[quotes/astral × grok/muse]` (win32) | `AssertionError: R-29: vidbyte.lib.constants.native_threads defines no NATIVE_WINDOWS_ARGV_PROMPT_MAX_UNITS` |
+| R-30 | `test_harness_threads_process_bounds.py::test_muse_cancelled_twice_while_preparing_its_config_folder_leaves_no_temp_folder` | `AssertionError: INV-9 / R-30: the temp config folder outlived a twice-cancelled call: ['tmpm33llg2y', 'tmpm33llg2y/muse', 'tmpm33llg2y/muse/skills', 'tmpm33llg2y/muse/skills/slow-skill', 'tmpm33llg2y/muse/skills/slow-skill/SKILL.md']` |
+
+Pack at HEAD plus these tests: `12 failed, 424 passed, 2 skipped in 57.57s`. The 12 failures are the 8 new cases and the 4 dense-prompt cases whose observation R-29 changed. With all four simulated fixes loaded: `436 passed, 2 skipped in 46.91s`. Three runs of the new and changed tests with the fixes, on 3.11, all gave `22 passed`. One run on 3.13 gave `12 failed, 10 passed` at HEAD and `22 passed` with the fixes. Lint: exit 0, no finding in the pack. New comments are at most 72 columns.
+
+Changes to existing tests (no assertion weakened):
+- The dense-prompt test's message observation was the literal "24000", the 24,000-character cap. It is now the value of `NATIVE_WINDOWS_ARGV_PROMPT_MAX_UNITS`, read from `vidbyte.lib.constants.native_threads` at test time, followed by "command line". This swaps a literal for the constant the spec's fix defines. The four cases still require `configuration.invalid_argument` naming `prompt`, with no process and no file written.
+- The R-10 test's hold on `os.makedirs` moved into a `held_copy` fixture that the R-30 test shares. Its assertions are unchanged.
+- `decoy_log` now removes `NoDefaultCurrentDirectoryInExePath` (R-31), which makes every current-folder test stricter.
+
+Platform notes:
+- Win32 only: the R-28 test, and the dense-prompt cases, as before.
+- R-27: the grandchild is checked only on POSIX. On win32 a tree stop cannot reach a grandchild once its leader has exited; with the simulated fix the grandchild was still alive there when `CancelledError` arrived. On win32 the test therefore checks the run's tasks only. That check needs no task names: every task started since the run began must be done within 1 s of `CancelledError`.
+- The POSIX branch of the R-27 grandchild check was not run here (Windows only).
+- R-29's prose cases run on every platform. On POSIX nothing should refuse them, so they pass there even at HEAD.
+
+Deterministic, with these limits:
+- R-27 waits for the leader's pid to be gone, then cancels 0.3 s into a 5 s kill wait. The 0.3 s only gives the event loop time to see the exit; the 5 s window is what makes the timing safe.
+- R-30 spaces its two cancels 0.1 s apart while the copy is held, so the window stays open however slow the machine is. The gate opens before the test awaits the call, so a fix that waits for the cleanup cannot deadlock.
