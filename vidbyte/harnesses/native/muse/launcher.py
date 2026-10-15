@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: In WSL mode every muse child carries a fresh VIDBYTE_PEER_MAR
 FUNCTION INVENTORY: MusePathTranslator.to_wsl maps a drive path to /mnt/<drive>/... MuseLauncher: wsl_mode says whether WSL launches muse; resolve finds the launcher prefix or raises; visible_path gives a path as muse sees it; new_mark mints a peer mark; environment adds the mark and WSLENV to an overlay; launch_failure turns WSL failure text into its error; list_distros runs `wsl.exe -l -q`; reap runs the in-distro reap.
 COMMON MODIFICATION PATTERNS: A new launch mode is one more branch in resolve and, if it crosses an OS boundary, a forwarding rule in environment; a new WSL failure text is one more marker in launch_failure.
 WHAT NOT TO DO IN THIS FILE: 1. Do not run anything through a shell; argv goes to CliRunner as a tuple built by CliArgv (S055). 2. Do not forward a variable into WSL that the overlay does not hold. 3. Do not read or log the value of META_API_KEY.
-KNOWN EDGE CASES: `wsl.exe -l -q` prints UTF-16-LE, which CliRunner decodes as UTF-8; dropping the NUL characters keeps ASCII distro names intact. WSL's own error text may also arrive as UTF-16-LE, so NUL characters are dropped before the markers are searched. A UNC or drive-less path has no /mnt form and is refused naming workspace, before anything is written. A reap with a mark that does not match MUSE_PEER_MARK_PATTERN, or outside WSL mode, does nothing. On Windows, muse is never looked up on PATH.
+KNOWN EDGE CASES: `wsl.exe -l -q` prints UTF-16-LE, which CliRunner decodes as UTF-8; dropping the NUL characters keeps ASCII distro names intact. WSL's own error text may also arrive as UTF-16-LE, so NUL characters are dropped before the markers are searched. A UNC or drive-less path has no /mnt form and is refused naming workspace, before anything is written. A reap with a mark that does not match MUSE_PEER_MARK_PATTERN, or outside WSL mode, does nothing. On Windows, muse is never looked up on PATH, and wsl.exe is looked up in the PATH folders only, never in the current folder.
 RELATED DOCS: vidbyte/harnesses/README.md
 TESTS: tests/features/harness_threads/test_harness_threads_wsl.py, tests/features/harness_threads/test_harness_threads_launcher.py
 """
@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
 import sys
 import uuid
 from collections.abc import Mapping
@@ -77,7 +76,7 @@ class MuseLauncher:
             return NativeLauncher.resolve(config.muse_command, program=native_threads.MUSE_PROGRAM, fallback=None, errors=self._errors, request=request)
         if config.wsl_distro is None:
             raise self._errors.failure(NativeThreadProblem.WSL_UNAVAILABLE, request=request, searched=native_threads.MUSE_NO_WSL_DETAIL)
-        found = shutil.which(native_threads.WSL_PROGRAM)
+        found = CliRunner.find_program(native_threads.WSL_PROGRAM)
         if found is None:
             raise self._errors.failure(NativeThreadProblem.WSL_UNAVAILABLE, request=request, searched=native_threads.MUSE_NO_WSL_PROGRAM_DETAIL.format(program=native_threads.WSL_PROGRAM))
         self._wsl_program = found

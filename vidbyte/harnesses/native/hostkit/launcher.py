@@ -2,7 +2,7 @@
 
 PURPOSE: Defines NativeLauncher, the one way the thread functions find the program to start: an explicit <harness>_command, then the program on PATH, then a fallback install path, refusing a Windows batch launcher wherever it is found.
 ROLE IN CODEBASE: Called by GrokThreadRun (grok/threads.py), OpencodeThreadRun (opencode/threads.py) and MuseLauncher (muse/launcher.py) before anything is written or started; it raises the NativeThreadError that NativeErrorFactory (hostkit/errors.py) builds.
-ARCHITECTURE NOTE: Synchronous and read-only: it looks at PATH and at the fallback file and never writes. The platform and every name it compares come from vidbyte/lib/constants/native_threads.py (spec INV-15). On Windows the explicit program is looked up through PATH and PATHEXT exactly as a launch would look it up, so the batch check sees the file that would really run.
+ARCHITECTURE NOTE: Synchronous and read-only: it looks at PATH and at the fallback file and never writes. The platform and every name it compares come from vidbyte/lib/constants/native_threads.py (spec INV-15). Programs are found by CliRunner.find_program, the lookup CliRunner itself launches with: the absolute PATH folders (with PATHEXT on Windows) and never the current folder, so a program a cloned repository ships under a vendor's name never runs (spec T-6), and on Windows the batch check sees the file that would really run.
 FUNCTION INVENTORY: resolve is the narrated main function; _is_batch says whether a program is a Windows batch file.
 COMMON MODIFICATION PATTERNS: A new harness passes its program name and, when its installer has one, its fallback path; the order and the batch refusal stay here.
 WHAT NOT TO DO IN THIS FILE: 1. Do not return a .cmd or .bat launcher on Windows; cmd.exe re-reads its arguments as a command line and would run parts of a prompt. 2. Do not check an explicit command on POSIX; a missing or non-executable file is reported when the launch fails. 3. Do not write anything.
@@ -13,7 +13,6 @@ TESTS: tests/features/harness_threads/test_harness_threads_launcher.py
 
 from __future__ import annotations
 
-import shutil
 import sys
 from pathlib import Path
 
@@ -21,6 +20,7 @@ from vidbyte.harnesses.native.hostkit.errors import NativeErrorFactory
 from vidbyte.lib.constants import native_threads
 from vidbyte.lib.dataclasses.native_threads import NativeThreadRequest
 from vidbyte.lib.enums.native_threads import NativeThreadProblem
+from vidbyte.lib.process import CliRunner
 
 
 class NativeLauncher:
@@ -38,14 +38,15 @@ class NativeLauncher:
             # POSIX starts it as given.
             first, *rest = command
             if sys.platform == native_threads.NATIVE_WINDOWS_PLATFORM:
-                first = shutil.which(first) or first
+                first = CliRunner.find_program(first) or first
             if NativeLauncher._is_batch(first):
                 raise errors.failure(NativeThreadProblem.LAUNCHER_REFUSED, request=request, searched=native_threads.NATIVE_REFUSED_LAUNCHER.format(program=first))
             return (first, *rest)
 
-        # Look on PATH; a batch hit there is set aside so the fallback
-        # install gets its chance first.
-        found = shutil.which(program)
+        # Look in the PATH folders, never the current folder; a batch
+        # hit there is set aside so the fallback install gets its
+        # chance first.
+        found = CliRunner.find_program(program)
         refused = found if found is not None and NativeLauncher._is_batch(found) else None
         if refused is not None:
             found = None

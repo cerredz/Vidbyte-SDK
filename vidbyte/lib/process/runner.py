@@ -3,10 +3,10 @@
 PURPOSE: Defines CliRunner, the canonical way to run one command-line program to completion with a time bound, capped output and no inherited standard input, and ProcessStopper, which stops a child's whole process tree (process group on POSIX, taskkill /T on Windows) and reaps it within a bound.
 ROLE IN CODEBASE: CliRunner runs every vendor process of the harness thread functions under vidbyte/harnesses/native/: the grok, opencode and muse exec runs, the muse serve exchange, the WSL distro listing and the Muse in-distro reap. ProcessStopper is the tree stop CliRunner uses on timeout and cancellation.
 ARCHITECTURE NOTE: Canonical lib helper (AGENTS.md principle 5). Every failure is a field of the returned CliOutcome; only asyncio.CancelledError is raised, after the tree is stopped. Children start with start_new_session=True on POSIX so their process group id is their pid, which is what lets ProcessStopper reach grandchildren even after the leader exited. The child starts with the caller's environment minus the invocation's env_remove names, with env_overlay on top. Timing constants are read through the native_threads constants module at call time so tests can shrink them.
-FUNCTION INVENTORY: CliRunner.run is the narrated main function; CliRunner.launch starts the child with its environment, returning the child or the launch failure; json_objects reads the JSON objects a CLI printed one per line; _feed_stdin writes stdin_text and closes the pipe; _drain reads one stream into a capped buffer while counting the rest; _finish_readers bounds and cancels the drain tasks; _outcome builds the CliOutcome. ProcessStopper.stop_tree is the narrated main function; _signal_group, _start_taskkill, _wait_taskkill, _kill_leader, _bounded_wait and _close_pipes are its single-step helpers.
+FUNCTION INVENTORY: CliRunner.run is the narrated main function; CliRunner.find_program finds the file a bare program name starts, never in the current folder; CliRunner.launch starts the child with its environment, returning the child or the launch failure; json_objects reads the JSON objects a CLI printed one per line; _feed_stdin writes stdin_text and closes the pipe; _drain reads one stream into a capped buffer while counting the rest; _finish_readers bounds and cancels the drain tasks; _outcome builds the CliOutcome. ProcessStopper.stop_tree is the narrated main function; _signal_group, _start_taskkill, _wait_taskkill, _kill_leader, _bounded_wait and _close_pipes are its single-step helpers.
 COMMON MODIFICATION PATTERNS: A new process option adds a CliInvocation field and its use in run or launch; keep the stop path in ProcessStopper so every caller gets it.
 WHAT NOT TO DO IN THIS FILE: 1. Do not pass shell=True or build a command string; argv goes to create_subprocess_exec (lint S055). 2. Do not let a child inherit the caller's stdin; it is a pipe or DEVNULL. 3. Do not wait without a bound after a kill; a grandchild can hold the pipes open forever.
-KNOWN EDGE CASES: On Windows, taskkill /T cannot reach a grandchild of a leader that already exited. A program name is looked up through PATH and PATHEXT on Windows; the harness launchers refuse batch files before they get here. Output is decoded as UTF-8 and trimmed to whole characters within max_output_bytes.
+KNOWN EDGE CASES: On Windows, taskkill /T cannot reach a grandchild of a leader that already exited. On Windows a bare program name is looked up only in the absolute PATH folders with PATHEXT, and one found in none of them is not started, because CreateProcess would search the current folder; the harness launchers refuse batch files before they get here. Output is decoded as UTF-8 and trimmed to whole characters within max_output_bytes.
 RELATED DOCS: vidbyte/lib/README.md
 TESTS: tests/features/harness_threads/test_harness_threads_runner.py, tests/features/harness_threads/test_harness_threads_process_bounds.py
 """
@@ -17,7 +17,6 @@ import asyncio
 import contextlib
 import json
 import os
-import shutil
 import signal
 import sys
 from collections.abc import Mapping
@@ -144,8 +143,12 @@ class CliRunner:
         # cancellation propagates.
         # Start the program in its own session, with stdin as a pipe
         # or the null device.
+        # Windows finds a bare program name only in the PATH folders,
+        # never in the current folder; POSIX starts it as given.
+        program, *_arguments = invocation.argv
+        found = CliRunner.find_program(program) if sys.platform == "win32" else program
         stdin = asyncio.subprocess.PIPE if invocation.stdin_text is not None else asyncio.subprocess.DEVNULL
-        process, launch_failure = await CliRunner.launch(invocation, stdin=stdin)
+        process, launch_failure = await CliRunner.launch(invocation, program=found, stdin=stdin)
         if process is None:
             return CliOutcome(exit_code=None, stdout="", stderr="", stdout_truncated=False, stderr_truncated=False, timed_out=False, launch_failure=launch_failure)
         stdout, stderr = bytearray(), bytearray()
@@ -179,16 +182,37 @@ class CliRunner:
         return self._outcome(process, stdout, stderr, invocation.max_output_bytes, timed_out)
 
     @staticmethod
-    async def launch(invocation: CliInvocation, *, stdin: int) -> tuple[asyncio.subprocess.Process | None, ProcessLaunchFailure | None]:
+    def find_program(program: str) -> str | None:
+        # @intent program-lookup-skips-the-current-folder
+        # Windows, and shutil.which on Python 3.11, look in the current
+        # folder before PATH, so a program a cloned repository ships
+        # under a vendor's name would run with the caller's key. A bare
+        # name is looked up only in the absolute PATH folders, with the
+        # PATHEXT suffixes on Windows; a name with a folder part is used
+        # as given. None when no PATH folder holds the program.
+        if os.path.dirname(program):
+            return program
+        names = [program]
+        if sys.platform == "win32":
+            suffixes = [suffix for suffix in (os.environ.get(native_threads.NATIVE_PATHEXT_VARIABLE) or native_threads.NATIVE_WINDOWS_DEFAULT_PATHEXT).split(os.pathsep) if suffix]
+            if not program.casefold().endswith(tuple(suffix.casefold() for suffix in suffixes)):
+                names = [program + suffix for suffix in suffixes]
+        folders = [folder for folder in os.environ.get(native_threads.NATIVE_PATH_VARIABLE, "").split(os.pathsep) if os.path.isabs(folder)]
+        candidates = (os.path.join(folder, name) for folder in folders for name in names)
+        return next((path for path in candidates if os.path.isfile(path) and os.access(path, os.X_OK)), None)
+
+    @staticmethod
+    async def launch(invocation: CliInvocation, *, program: str | None, stdin: int) -> tuple[asyncio.subprocess.Process | None, ProcessLaunchFailure | None]:
         # @intent process-launch-is-shared-and-never-inherits-stdin
-        # The one way a helper here starts a child. stdin is a pipe or
-        # the null device, never the caller's stream, which a child
-        # could read and so corrupt a stdio MCP session. Windows looks
-        # the program up through PATH and PATHEXT so a .cmd shim
-        # starts; POSIX puts the child in a new session so
-        # ProcessStopper reaches its whole group. A failed launch is
-        # returned, never raised.
-        program, *arguments = invocation.argv
+        # The one way a helper here starts a child, as program, the
+        # file find_program chose (None when it found none). stdin is
+        # a pipe or the null device, never the caller's stream, which
+        # a child could read and so corrupt a stdio MCP session. POSIX
+        # puts the child in a new session so ProcessStopper reaches its
+        # whole group. A failed launch is returned, never raised.
+        if program is None:
+            return None, ProcessLaunchFailure.NOT_FOUND
+        _program, *arguments = invocation.argv
         # @intent cli-child-env-inherits-the-callers-environment
         # The child keeps the caller's PATH, home, proxy and locale
         # settings, so a vendor CLI behaves as it does in a terminal;
@@ -196,8 +220,6 @@ class CliRunner:
         # harness sets (its key, its private folders) wins.
         environment = {name: value for name, value in os.environ.items() if name not in invocation.env_remove}
         environment.update(invocation.env_overlay)
-        if sys.platform == "win32":
-            program = shutil.which(program) or program
         try:
             process = await asyncio.create_subprocess_exec(
                 program,
