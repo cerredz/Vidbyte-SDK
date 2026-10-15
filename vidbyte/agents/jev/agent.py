@@ -100,6 +100,7 @@ class JevAgent(BaseAgent):
             temperature=settings.temperature,
             timeout_seconds=settings.timeout_seconds,
             outputs=settings.outputs,
+            system_prompt_presets=settings.system_prompt_presets,
         )
 
     @property

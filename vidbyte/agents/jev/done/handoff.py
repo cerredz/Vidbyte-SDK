@@ -165,6 +165,10 @@ class JevHandoff(BaseAgent):
             temperature=settings.temperature,
             timeout_seconds=settings.timeout_seconds,
             output_schema=payload,
+            # @intent handoff-writer-keeps-its-fixed-prompt
+            # This agent's prompt is fixed, so it opts out of the
+            # presets of the run it serves.
+            system_prompt_presets=(),
         )
         self.checks = continual.checks
         self.payload = payload

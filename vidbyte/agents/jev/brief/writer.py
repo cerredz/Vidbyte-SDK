@@ -58,6 +58,10 @@ class JevRunBriefWriter(BaseAgent):
             temperature=brief.temperature,
             timeout_seconds=settings.timeout_seconds,
             output_schema=JevRunBriefAppendPayload,
+            # @intent brief-writer-keeps-its-fixed-prompt
+            # This agent's prompt is fixed, so it opts out of the
+            # presets of the run it serves.
+            system_prompt_presets=(),
         )
         self._update_prompt = Prompts().get(Prompt.JEV_RUN_BRIEF_UPDATE_PROMPT)
 
