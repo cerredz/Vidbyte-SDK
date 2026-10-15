@@ -156,7 +156,9 @@ class TrajectoryCheckpointAlgorithm(InnerContextWindowAlgorithm):
         lines = []
         for msg in messages:
             role = msg.get("role", "unknown")
-            content = msg.get("content")
+            # @intent algorithm-history-reads-every-provider-shape
+            # A Gemini turn carries its content as parts; its function calls and responses, like Anthropic tool_use blocks, render as tool calls and outputs instead of empty text.
+            content = msg.get("content", msg.get("parts"))
             if role == "tool":
                 if not self.include_tool_outputs:
                     text = "[Tool output omitted]"
@@ -166,14 +168,14 @@ class TrajectoryCheckpointAlgorithm(InnerContextWindowAlgorithm):
                 parts = []
                 for part in content:
                     if isinstance(part, dict):
-                        if part.get("type") == "tool_result":
+                        if part.get("type") == "tool_result" or "functionResponse" in part:
                             if not self.include_tool_outputs:
                                 parts.append("[Tool output omitted]")
                             else:
-                                raw_val = str(part.get("content") or part.get("output") or "")
+                                raw_val = str(part.get("content") or part.get("output") or part.get("functionResponse") or "")
                                 parts.append(_truncate(raw_val, self.max_field_chars))
                         else:
-                            parts.append(part.get("text", ""))
+                            parts.append(f"[Tool Call: {part}]" if part.get("type") == "tool_use" or "functionCall" in part else part.get("text", ""))
                     else:
                         parts.append(str(part))
                 text = " ".join(parts)
