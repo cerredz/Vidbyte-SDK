@@ -97,7 +97,13 @@ class ContextCompactionEngine:
         steps: list[tuple[ContextMessage | None, tuple[str | None, frozenset[str] | None, int]]] = [*zip(messages, tags, strict=True), (None, (None, None, 0))]
         for message, (role, ids, parts) in steps:
             if role == "result":
-                if message is not None and call_at is not None and (wanted is None or ids is None or ids <= wanted - answered):
+                # @intent id-less-results-stay-with-their-own-call
+                # Without ids, a result belongs to the open call turn only if it directly followed that turn (or the turn's earlier
+                # result) in the original history; an orphan whose call was evicted would otherwise count against an earlier call.
+                before = kept[-1].metadata.get("provider_index") if kept and isinstance(kept[-1].metadata, Mapping) else None
+                position = message.metadata.get("provider_index") if message is not None and isinstance(message.metadata, Mapping) else None
+                adjacent = (wanted is not None and ids is not None) or not isinstance(before, int) or not isinstance(position, int) or position == before + 1
+                if message is not None and call_at is not None and adjacent and (wanted is None or ids is None or ids <= wanted - answered):
                     kept.append(message)
                     answered |= ids or set()
                     responses += parts
