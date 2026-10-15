@@ -104,6 +104,10 @@ The execution strategies an agent can run under, beyond the default linear loop.
 
 The tunable knobs of an agent run, deliberately factored out of the agent class itself rather than buried in constructor arguments. This covers iteration limits and termination conditions, tool execution and failure policy, and what happens when the primary model becomes unavailable. Keeping these as explicit, structured settings objects is what makes an agent's behavior inspectable and serializable rather than implicit in code. A new configurable behavior for agents should be added as a setting here rather than as another constructor parameter.
 
+##### `vidbyte/agents/skills/`
+
+The agent-agnostic machinery that turns a developer's declarative skill entries, such as inline text, a local folder, a skills.sh install, a GitHub repository, or a skill hosted by Anthropic or OpenAI, into resolved skill documents an agent can use. Each source has its own small resolver behind one shared loader, which reads nothing until the first run, remembers every document and permanent failure for the agent's lifetime, and turns every expected failure into a reason and a detail instead of an exception. It builds only on the shared substrate layer and never imports a specific agent, so any agent can reuse it, and today JevAgent's skill preload is its only consumer. It is not the packaged skill catalog and holds no skill content: it is the fourth similarly-named skills location, beside the repository-level guidance, the prompt-asset skills, and the package-internal skill runtime, so decide which one a change belongs to before adding to any of them.
+
 #### `vidbyte/cli/`
 
 The package's own developer-facing command-line surface, deliberately minimal and currently limited to a single small area of functionality. This is not the separate product command-line tool that end users interact with to run research against the backend — that lives entirely outside this repository. This one exposes only local, SDK-specific developer utilities, and it is not intended to grow into a general-purpose interface. Anyone looking for the product's user-facing command-line tool should look elsewhere in the wider workspace.
@@ -270,7 +274,7 @@ The prompt assets themselves, organized into families grouped by the specific su
 
 ##### `vidbyte/prompts/skills/`
 
-Skill documents shipped specifically as prompt assets — instruction sets meant to be handed to an agent at runtime as part of its prompt material. These are distributed through the prompt layer rather than through the repository-level skills folder, which serves a different purpose and audience. This folder is also distinct from a similarly-named folder deeper in the package that holds runtime machinery rather than content, and the distinction between all three similarly-named locations is worth being deliberate about before adding to any of them. Anyone adding a new skill document should first decide which of these surfaces is actually the right one.
+Skill documents shipped specifically as prompt assets — instruction sets meant to be handed to an agent at runtime as part of its prompt material. These are distributed through the prompt layer rather than through the repository-level skills folder, which serves a different purpose and audience. This folder is also distinct from a similarly-named folder deeper in the package that holds runtime machinery rather than content, and the distinction between all four similarly-named locations is worth being deliberate about before adding to any of them. Anyone adding a new skill document should first decide which of these surfaces is actually the right one.
 
 #### `vidbyte/providers/`
 
@@ -294,7 +298,7 @@ A reserved namespace intended for genuinely cross-cutting shared code, currently
 
 #### `vidbyte/skills/`
 
-Package-internal, importable code that lets an agent load and make use of a skill document at runtime as part of its own execution. This is intentionally small, and it is easily confused with two other similarly-named locations elsewhere in the package and repository — one holding the distributed skill source content itself, and another holding skill documents packaged specifically as prompt assets. This folder is the machinery that loads and applies a skill; the other two are the content that gets loaded. Keeping the distinction clear matters because all three share a name that invites confusion.
+Package-internal, importable code that lets an agent load and make use of a skill document at runtime as part of its own execution. This is intentionally small, and it is easily confused with three other similarly-named locations elsewhere in the package and repository — one holding the distributed skill source content itself, another holding skill documents packaged specifically as prompt assets, and a third in the agents layer that resolves developer-declared skill entries for an agent's run. This folder is the machinery that loads and applies a packaged skill; the agents-layer location fetches skills from outside sources, and the other two are the content that gets loaded. Keeping the distinction clear matters because all four share a name that invites confusion.
 
 #### `vidbyte/sources/`
 
