@@ -46,6 +46,8 @@ started: 2026-10-15
 
 - 2026-10-16 — Spec r4 (90265f78) resolved the four S2 defects; the S2 author added the four r4 tests (e3dcb214, proof 5a1813da, report 8e5e65ec). Orchestrator re-ran the four: `4 errors` (ModuleNotFoundError vidbyte.lib.dataclasses.native_threads). New S2_HEAD = 8e5e65ec: `git diff 8e5e65ec..HEAD -- tests` must stay empty from S3 on.
 
+- 2026-10-16 — S3 returned BLOCKED at Phase 5 (all 49 rows committed through 4c072c1c; lint, package stage and Semgrep green): 4 pack failures were TypeErrors inside S2 helpers (T-D1 `call` fixture spread a wrong-type config with `**`; T-D2 `invocation(api, argv, **fields)` got argv twice). Orchestrator reproduced both and chose option 1 (test ownership stays with S2): the S2 author fixed them blind to the implementation in 14ec6702 (3 test files, no assertion changed; report 4da73cf3). Orchestrator re-ran the pack: `395 passed, 2 skipped`. New S2_HEAD = 4da73cf3; S3 resumed to finish Phases 5–7.
+
 ## User replies (verbatim)
 - (none yet)
 
