@@ -1,23 +1,27 @@
 """FILE: tests/features/infinite_memory_agent/test_infinite_memory_workspace.py
 
-PURPOSE: Proves the workspace guardrails the model meets through its memory tools: remember's sparse-entry rules and quota, supersede as a move, write_note's path, suffix, description, new-file and size rules, the file and token caps recomputed from disk (bash writes included), edit_file's single-match rule, bookkeeping files bounded only by the workspace total, grep over a large entries.jsonl, and the workspace map in every system string.
-ROLE IN CODEBASE: Workspace layer of tests/features/infinite_memory_agent/ (spec AC-14..AC-18, AC-34, AC-42; INV-17..INV-22, INV-32; EC-18..EC-25, EC-42). Exercises vidbyte/agents/infinite/workspace.py and vidbyte/agents/infinite/memory.py through the root agent's tools, and InfiniteWorkspace directly for the map and usage checks.
+PURPOSE: Proves the workspace guardrails the model meets through its memory tools: remember's sparse-entry rules and quota, supersede as a move, write_note's path, suffix, description, new-file and size rules, the file and token caps recomputed from disk (bash writes included), edit_file's single-match rule, bookkeeping files bounded only by the workspace total, grep over a large entries.jsonl, and the workspace map in every system string. Since the S4 review it also proves edit_file's caps, that a write the disk refuses becomes a clean refusal with no temp file left, and that a refused paste tells the model to keep it in a note.
+ROLE IN CODEBASE: Workspace layer of tests/features/infinite_memory_agent/ (spec AC-14..AC-18, AC-34, AC-42; INV-17..INV-22, INV-32; EC-18..EC-25, EC-42; S4 review findings R-6, R-8, R-11). Exercises vidbyte/agents/infinite/workspace.py and vidbyte/agents/infinite/memory.py through the root agent's tools, and InfiniteWorkspace directly for the map and usage checks.
 ARCHITECTURE NOTE: The root's scripted calls each observe the workspace bytes before answering, so a rejected tool call is proven to change nothing by comparing the snapshot taken at the call that issued it with the one taken at the next call. Tool results are read from the root's last call's history, in order.
-FUNCTION INVENTORY: test_root_remember_rejects_each_rule_breaking_entry_and_enforces_the_quota (AC-14, EC-18, EC-19, INV-17, INV-32); test_root_supersede_moves_the_old_entry_out_of_entries_and_out_of_grep (AC-15, INV-15, INV-18, D-15); test_write_note_refuses_every_path_and_size_breach_and_changes_nothing (AC-16, EC-20..EC-22, INV-19, INV-20); test_write_note_refuses_a_new_file_at_the_file_cap / test_write_note_counts_files_bash_wrote_toward_the_token_cap (AC-16, EC-23, INV-19); test_edit_file_replaces_a_unique_match_and_refuses_an_ambiguous_one (AC-17, EC-25); test_entries_file_is_bounded_by_the_workspace_total_not_the_note_cap (AC-34); test_grep_finds_a_live_entry_in_an_entries_file_over_one_megabyte (AC-42); test_every_agent_sees_the_map_and_the_roots_map_refreshes_after_each_tool_iteration (AC-18, INV-22); test_a_map_over_its_cap_ends_with_the_remaining_file_count (AC-18, EC-42, D-16); test_map_labels_and_usage_read_the_disk_and_never_fail_on_bad_lines (INV-19, INV-22, EC-24); test_grep_hides_superseded_entries_and_journals (D-15).
+FUNCTION INVENTORY: test_root_remember_rejects_each_rule_breaking_entry_and_enforces_the_quota (AC-14, EC-18, EC-19, INV-17, INV-32); test_root_supersede_moves_the_old_entry_out_of_entries_and_out_of_grep (AC-15, INV-15, INV-18, D-15); test_write_note_refuses_every_path_and_size_breach_and_changes_nothing (AC-16, EC-20..EC-22, INV-19, INV-20); test_write_note_refuses_a_new_file_at_the_file_cap / test_write_note_counts_files_bash_wrote_toward_the_token_cap (AC-16, EC-23, INV-19); test_edit_file_replaces_a_unique_match_and_refuses_an_ambiguous_one (AC-17, EC-25); test_entries_file_is_bounded_by_the_workspace_total_not_the_note_cap (AC-34); test_grep_finds_a_live_entry_in_an_entries_file_over_one_megabyte (AC-42); test_every_agent_sees_the_map_and_the_roots_map_refreshes_after_each_tool_iteration (AC-18, INV-22); test_a_map_over_its_cap_ends_with_the_remaining_file_count (AC-18, EC-42, D-16); test_map_labels_and_usage_read_the_disk_and_never_fail_on_bad_lines (INV-19, INV-22, EC-24); test_grep_hides_superseded_entries_and_journals (D-15); test_edit_file_refuses_an_edit_that_would_pass_a_cap_and_changes_nothing (R-11, INV-19, INV-32); test_a_memory_write_that_fails_on_disk_is_a_refusal_and_leaves_no_temp_file (R-8, INV-32, INV-19); test_a_note_path_with_a_colon_is_saved_or_refused_without_leaving_stray_files (R-8, INV-32, INV-20); test_remember_tells_the_model_to_keep_a_long_paste_in_a_note_or_a_pointer (R-6, EC-18). _recorder, _results, _seed_file and _failing_write are small builders and readers.
 COMMON MODIFICATION PATTERNS: Add a rejected remember or write_note case to the ordered call list of its test, and keep it before the valid calls so a rejection that wrongly consumed quota shows up.
-WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level. 2. Do not fake bash; AC-16's bypass case needs a real file written outside the tools. 3. Do not compare map text to a hand-written rendering; only paths, descriptions, the catalog labels, and the cap are spec.
-KNOWN EDGE CASES: The ../x.md and absolute-path cases resolve outside the workspace, so the test also checks that nothing appeared there. Bash needs a POSIX bash or Git for Windows bash on the host, as the coding-agent bash tests do.
+WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level. 2. Do not fake bash; AC-16's bypass case needs a real file written outside the tools. 3. Do not compare map text to a hand-written rendering; only paths, descriptions, the catalog labels, and the cap are spec. 4. Do not fake the filesystem anywhere else: the R-8 test's one-shot os.replace failure is the pack's only fault injection on that seam, granted for that finding alone.
+KNOWN EDGE CASES: The ../x.md and absolute-path cases resolve outside the workspace, so the test also checks that nothing appeared there. Bash needs a POSIX bash or Git for Windows bash on the host, as the coding-agent bash tests do. A colon in a note path is legal on POSIX, so the colon test can only fail on NTFS, where the colon names a data stream.
 RELATED DOCS: tests/features/infinite_memory_agent/FEATURE.md; docs/spec/infinite-memory-agent/spec.md sections 6.1, 6.2, 6.3, 9.1 and 9.2.
 TESTS: PYTHONPATH=$(pwd) python -m pytest tests/features/infinite_memory_agent/test_infinite_memory_workspace.py -q
 """
 
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
+from string import Formatter
 from typing import Any
+
+import pytest
 
 from tests.features.infinite_memory_agent.infinite_memory_fixtures import (
     MAP_HEADER,
@@ -396,9 +400,7 @@ def test_map_labels_and_usage_read_the_disk_and_never_fail_on_bad_lines(tmp_path
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8", newline="\n")
     (root / "files.jsonl").write_text(
-        '{"path": "notes/described.md", "description": "Described pricing note", "by": "root", "run": "20261015T024900Z-1a2b3c4d", "at": "2026-10-15T02:51:07Z"}\n'
-        "{oops\n"
-        '["notes/broken.md", "Broken description"]\n',
+        '{"path": "notes/described.md", "description": "Described pricing note", "by": "root", "run": "20261015T024900Z-1a2b3c4d", "at": "2026-10-15T02:51:07Z"}\n{oops\n["notes/broken.md", "Broken description"]\n',
         encoding="utf-8",
         newline="\n",
     )
@@ -437,3 +439,160 @@ def test_grep_hides_superseded_entries_and_journals(tmp_path: Path) -> None:
     tree.assert_complete()
     (found,) = _results(tree)
     assert found.strip() == "No matches found.", found
+
+
+# ---------------------------------------------------------------- S4 review: edit_file caps (R-11)
+
+
+EDIT_CAPS = (
+    pytest.param("max_file_tokens", {"max_file_tokens": 50}, None, id="note-over-max-file-tokens"),
+    pytest.param("max_tokens", {"max_tokens": 200, "max_file_tokens": 150}, "o" * 400, id="workspace-over-max-tokens"),
+)
+
+
+@pytest.mark.parametrize(("cap", "limits", "other"), EDIT_CAPS)
+def test_edit_file_refuses_an_edit_that_would_pass_a_cap_and_changes_nothing(tmp_path: Path, cap: str, limits: dict[str, int], other: str | None) -> None:
+    """R-11, INV-19, INV-32, AC-17: under FULL, an edit that would grow the note past max_file_tokens, or the workspace past max_tokens, is refused with the quota line and changes no byte; a small edit afterwards still works."""
+    from vidbyte.lib.enums import InfiniteMemoryPreset
+
+    root = workspace_root(tmp_path)
+    note = root / "notes" / "prices.md"
+    note.parent.mkdir(parents=True)
+    note.write_text("Acme Pro is 49 USD per seat.\n", encoding="utf-8", newline="\n")
+    if other is not None:
+        # 100 tokens in another note, so an edited note under max_file_tokens still takes the workspace past max_tokens.
+        (root / "notes" / "other.md").write_text(other, encoding="utf-8", newline="\n")
+    agent = build_agent(tmp_path, workspace={"preset": InfiniteMemoryPreset.FULL, **limits})
+    # The grown note is about 128 tokens: over 50, under 150, and about 228 with other.md beside it.
+    grown = "49 USD per seat, " + "with the yearly plan billed up front " * 13
+    states: list[dict[str, bytes]] = []
+    watch = _recorder(root, states)
+    tree = ScriptedTree(
+        {
+            ROOT: [
+                observe(watch, tool_call("edit_file", {"path": "notes/prices.md", "old_text": "49 USD per seat.", "new_text": grown})),
+                observe(watch, tool_call("edit_file", {"path": "notes/prices.md", "old_text": "Acme Pro", "new_text": "Acme Pro plan"})),
+                observe(watch, reply("done")),
+            ]
+        }
+    )
+    with tree.install():
+        agent.run(TASK)
+    tree.assert_complete()
+    refused, edited = _results(tree)
+    assert is_error(refused), f"the edit over {cap} was applied: {refused}"
+    assert template_regex(prompt_text("memory_rejected_prompt")).search(refused) and template_regex(prompt_text("quota_line")).search(refused), refused
+    assert cap in refused or int_token(limits[cap]).search(refused), f"the refusal names neither {cap} nor its value: {refused}"
+    assert states[0] == states[1], f"the refused edit over {cap} changed the workspace"
+    assert not is_error(edited), edited
+    assert note.read_text(encoding="utf-8") == "Acme Pro plan is 49 USD per seat.\n"
+
+
+# ---------------------------------------------------------------- S4 review: failed disk writes (R-8)
+
+
+def _failing_write(tool_name: str, bad: str) -> tuple[str, dict[str, Any], dict[str, Any]]:
+    """The file name the tool's write replaces, a call whose new text ends with `bad`, and a clean call of the same tool."""
+    if tool_name == "remember":
+        return "entries.jsonl", {"kind": "fact", "text": f"Globex Team costs 59 USD per seat{bad}"}, {"kind": "fact", "text": "Initech costs 30 USD per seat"}
+    if tool_name == "write_note":
+        return "prices.md", {"path": "notes/prices.md", "text": f"Globex Team is 59 USD per seat.{bad}\n"}, {"path": "notes/prices.md", "text": "Initech is 30 USD per seat.\n"}
+    return "prices.md", {"path": "notes/prices.md", "old_text": "49", "new_text": f"52{bad}"}, {"path": "notes/prices.md", "old_text": "Acme Pro", "new_text": "Acme Pro plan"}
+
+
+@pytest.mark.parametrize("fault", ("replace-fails", "lone-surrogate"))
+@pytest.mark.parametrize("tool_name", ("remember", "write_note", "edit_file"))
+def test_a_memory_write_that_fails_on_disk_is_a_refusal_and_leaves_no_temp_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tool_name: str, fault: str) -> None:
+    """R-8, INV-32, INV-19, spec 12.4: when the atomic replace fails (OSError) or the text cannot be encoded as UTF-8 (ValueError), remember, write_note and edit_file return a refusal with the quota line, leave no temp file or other change, and the same tool works on the next call."""
+    from vidbyte.lib.enums import InfiniteMemoryPreset
+
+    root = workspace_root(tmp_path)
+    note = root / "notes" / "prices.md"
+    note.parent.mkdir(parents=True)
+    note.write_text("Acme Pro is 49 USD per seat.\n", encoding="utf-8", newline="\n")
+    agent = build_agent(tmp_path, workspace={"preset": InfiniteMemoryPreset.FULL})
+    # A lone surrogate is what a provider's escaped "\ud83d" decodes to; UTF-8 cannot encode it.
+    target, failing, clean = _failing_write(tool_name, " \ud83d" if fault == "lone-surrogate" else "")
+    fired: list[str] = []
+    if fault == "replace-fails":
+        # Fault injection on the filesystem seam, allowed for this R-8 case only: the first os.replace onto
+        # the tool's target raises, as it does on Windows while another process holds that file open.
+        real_replace = os.replace
+
+        def replace_once(source: Any, destination: Any, *args: Any, **kwargs: Any) -> None:
+            if not fired and Path(destination).name == target:
+                fired.append(str(destination))
+                raise PermissionError(13, "Access is denied", str(destination))
+            real_replace(source, destination, *args, **kwargs)
+
+        monkeypatch.setattr(os, "replace", replace_once)
+    states: list[dict[str, bytes]] = []
+    watch = _recorder(root, states)
+    tree = ScriptedTree({ROOT: [observe(watch, tool_call(tool_name, failing)), observe(watch, tool_call(tool_name, clean)), observe(watch, reply("done"))]})
+    with tree.install():
+        agent.run(TASK)
+    tree.assert_complete()
+    if fault == "replace-fails":
+        assert fired, f"precondition: the injected failure never reached a replace of {target}"
+    refused, accepted = _results(tree)
+    assert is_error(refused), ascii(refused[:300])
+    assert template_regex(prompt_text("memory_rejected_prompt")).search(refused) and template_regex(prompt_text("quota_line")).search(refused), f"{tool_name} let the failed write out as a raw error: {ascii(refused[:300])}"
+    leftovers = sorted(path.relative_to(root).as_posix() for path in root.rglob("*.tmp"))
+    assert not leftovers, f"the failed write left temp files behind: {leftovers}"
+    assert states[0] == states[1], "the refused call changed the workspace"
+    assert not is_error(accepted), f"{tool_name} stopped working after the refusal: {accepted}"
+
+
+def test_a_note_path_with_a_colon_is_saved_or_refused_without_leaving_stray_files(tmp_path: Path) -> None:
+    """R-8, INV-32, INV-19, INV-20: write_note("notes/standup 10:30.md") either saves exactly that note, where the filesystem allows a colon, or is refused with the quota line and leaves every byte as it was; on NTFS the colon names a data stream, so a careless write leaves a stray file."""
+    root = workspace_root(tmp_path)
+    agent = build_agent(tmp_path)
+    states: list[dict[str, bytes]] = []
+    watch = _recorder(root, states)
+    args = {"path": "notes/standup 10:30.md", "text": "Standup summary.", "description": "Standup summary"}
+    tree = ScriptedTree({ROOT: [observe(watch, tool_call("write_note", args)), observe(watch, reply("done"))]})
+    with tree.install():
+        agent.run(TASK)
+    tree.assert_complete()
+    (content,) = _results(tree)
+    if is_error(content):
+        assert template_regex(prompt_text("memory_rejected_prompt")).search(content) and template_regex(prompt_text("quota_line")).search(content), f"the failed write escaped as a raw error: {ascii(content[:300])}"
+        assert states[0] == states[1], f"the refused call left files behind: {sorted(set(states[1]) - set(states[0]))}"
+    else:
+        assert template_regex(prompt_text("note_saved_prompt")).search(content), content
+        assert (root / "notes" / "standup 10:30.md").read_text(encoding="utf-8") == "Standup summary."
+
+
+# ---------------------------------------------------------------- S4 review: EC-18 guidance (R-6)
+
+
+EC18_PASTES = (
+    pytest.param("\n".join(f"2026-10-15 ERROR worker {index} failed: connection reset by peer at stage {index % 7}" for index in range(200)), id="multi-line-log"),
+    pytest.param(("Worker failure detail from the overnight batch " * 8).strip(), id="one-line-over-the-cap"),
+)
+ADVICE = re.compile(r"pointer|note", re.IGNORECASE)
+
+
+@pytest.mark.parametrize("paste", EC18_PASTES)
+def test_remember_tells_the_model_to_keep_a_long_paste_in_a_note_or_a_pointer(tmp_path: Path, paste: str) -> None:
+    """R-6, EC-18, INV-17, INV-32: a pasted multi-line log, or one line over max_entry_tokens, is refused with the quota line and changes nothing, and the problem text itself tells the model to store a pointer or a note instead."""
+    assert not ADVICE.search(paste), "precondition: the paste holds no advice word, so an echo of it cannot pass"
+    root = workspace_root(tmp_path)
+    agent = build_agent(tmp_path)
+    states: list[dict[str, bytes]] = []
+    watch = _recorder(root, states)
+    tree = ScriptedTree({ROOT: [observe(watch, tool_call("remember", {"kind": "fact", "text": paste})), observe(watch, reply("done"))]})
+    with tree.install():
+        agent.run(TASK)
+    tree.assert_complete()
+    (content,) = _results(tree)
+    assert is_error(content), content[:300]
+    assert template_regex(prompt_text("memory_rejected_prompt")).search(content) and template_regex(prompt_text("quota_line")).search(content), content[:300]
+    assert states[0] == states[1], "the refused paste changed the workspace"
+    # Only the problem text counts: strip the rejection template's and the quota line's own words first.
+    problem = content
+    for template in (prompt_text("memory_rejected_prompt"), prompt_text("quota_line")):
+        for literal, _, _, _ in Formatter().parse(template):
+            if literal.strip():
+                problem = problem.replace(literal, " ")
+    assert ADVICE.search(problem), f"the refusal does not tell the model to store a pointer or a note: {ascii(problem[:300])}"

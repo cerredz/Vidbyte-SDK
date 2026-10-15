@@ -1,12 +1,12 @@
 """FILE: tests/features/infinite_memory_agent/test_infinite_memory_delegation.py
 
-PURPOSE: Proves what launch_subagent promises the root and every generator: pairs in one call run at the same time, each verifier follows its own generator, the parent sees only capped cards in task order, a bad batch starts nothing, depth and role decide who may delegate, max_agents bounds the run, one failing pair never sinks its siblings, extras reach children only by name, context entries are pasted, finished names replay, and the loop's tool limits never cut a batch.
-ROLE IN CODEBASE: Delegation layer of tests/features/infinite_memory_agent/ (spec AC-5..AC-8, AC-12, AC-13, AC-26, AC-28, AC-29, AC-31, AC-32, AC-35, AC-36; INV-4, INV-6..INV-13, INV-24, INV-26, INV-29, INV-30, INV-38; EC-4..EC-11, EC-38, EC-43). Exercises vidbyte/agents/infinite/launch.py through a real InfiniteMemoryAgent run.
+PURPOSE: Proves what launch_subagent promises the root and every generator: pairs in one call run at the same time, each verifier follows its own generator, the parent sees only capped cards in task order, a bad batch starts nothing, depth and role decide who may delegate, max_agents bounds the run, one failing pair never sinks its siblings, extras reach children only by name, context entries are pasted, finished names replay, and the loop's tool limits never cut a batch. It also holds the S4 review's regression tests for this layer: a card or journal record that cannot be written as given, the card bound of NFR-7 as amended in r5, and replay of a pair whose context entry was superseded.
+ROLE IN CODEBASE: Delegation layer of tests/features/infinite_memory_agent/ (spec AC-5..AC-8, AC-12, AC-13, AC-26, AC-28, AC-29, AC-31, AC-32, AC-35, AC-36; INV-4, INV-6..INV-13, INV-24, INV-26, INV-29, INV-30, INV-38; NFR-7; EC-4..EC-11, EC-12, EC-38, EC-43; S4 review findings R-1, R-3, R-4). Exercises vidbyte/agents/infinite/launch.py through a real InfiniteMemoryAgent run.
 ARCHITECTURE NOTE: Every agent in the tree is driven by one ScriptedTree routed by agent name. What the parent saw is read from the tool messages in its next model call; what happened on disk is read from the journal and entries.jsonl. Concurrency is proven with a Gate that opens only when both generators are inside a model call at once, never with timing.
-FUNCTION INVENTORY: test_two_tasks_run_concurrently_and_each_verifier_follows_its_own_generator (AC-5, INV-4, INV-9, INV-12, INV-24); test_an_invalid_batch_starts_nothing_and_the_tool_stays_usable (AC-6, EC-4..EC-7, EC-38, EC-43); test_depth_cap_and_role_decide_who_holds_launch_subagent_and_drop_entry (AC-7, INV-8, INV-13, AC-17 SPARSE clause); test_a_batch_that_would_pass_max_agents_is_refused_whole (AC-8, INV-10, EC-8); test_a_failed_or_blank_generator_skips_its_verifier_and_its_sibling_still_reports (AC-12, EC-9, EC-10, INV-29); test_a_generator_stopped_by_max_iterations_is_partial_and_still_verified (AC-13, EC-11, INV-30); test_a_long_generator_reply_is_cut_in_its_card_and_the_rest_never_reaches_the_root (AC-26, INV-4, NFR-7); test_a_task_card_grants_exactly_the_extras_it_names (AC-28, AC-36, INV-6, INV-7); test_context_pastes_named_entries_and_lists_named_paths (AC-29, D-14); test_relaunching_a_finished_name_replays_its_card_without_building_agents (AC-31, INV-26); test_the_verifier_gets_the_generators_outcome_but_never_its_transcript (AC-32, INV-12); test_launch_subagent_is_exempt_from_the_tool_timeout_and_result_cap (AC-35, INV-38).
+FUNCTION INVENTORY: test_two_tasks_run_concurrently_and_each_verifier_follows_its_own_generator (AC-5, INV-4, INV-9, INV-12, INV-24); test_an_invalid_batch_starts_nothing_and_the_tool_stays_usable (AC-6, EC-4..EC-7, EC-38, EC-43); test_depth_cap_and_role_decide_who_holds_launch_subagent_and_drop_entry (AC-7, INV-8, INV-13, AC-17 SPARSE clause); test_a_batch_that_would_pass_max_agents_is_refused_whole (AC-8, INV-10, EC-8); test_a_failed_or_blank_generator_skips_its_verifier_and_its_sibling_still_reports (AC-12, EC-9, EC-10, INV-29); test_a_generator_stopped_by_max_iterations_is_partial_and_still_verified (AC-13, EC-11, INV-30); test_a_long_generator_reply_is_cut_in_its_card_and_the_rest_never_reaches_the_root (AC-26, INV-4, NFR-7); test_a_task_card_grants_exactly_the_extras_it_names (AC-28, AC-36, INV-6, INV-7); test_context_pastes_named_entries_and_lists_named_paths (AC-29, D-14); test_relaunching_a_finished_name_replays_its_card_without_building_agents (AC-31, INV-26); test_the_verifier_gets_the_generators_outcome_but_never_its_transcript (AC-32, INV-12); test_launch_subagent_is_exempt_from_the_tool_timeout_and_result_cap (AC-35, INV-38); test_a_pair_whose_card_or_record_cannot_be_written_as_given_still_finishes_beside_its_sibling (R-1, INV-29, INV-32); test_an_unchecked_card_with_long_dropped_and_files_lists_stays_inside_the_nfr7_bound (R-3, NFR-7, INV-4, EC-12); test_a_finished_pair_replays_after_its_context_entry_was_superseded_and_new_pairs_still_run (R-4, INV-26, INV-9).
 COMMON MODIFICATION PATTERNS: Add a rejected-batch case as one INVALID_BATCHES row naming the token the error must contain. Keep private markers (GEN-*-PRIVATE, VER-*-PRIVATE) unique strings so a leak check cannot match by accident.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level. 2. Do not prove concurrency or ordering with sleeps or wall-clock time; use Gate, Signal, and ScriptedTree.events. 3. Do not assert card wording beyond the catalog templates and the field values the spec fixes.
-KNOWN EDGE CASES: A runner AssertionError inside a child may be turned into a tool error by the parent, so every test ends with ScriptedTree.assert_complete, which also fails on unscripted calls. The result-card template is matched with its literal text only, so a template of bare placeholders would make renderings() weak.
+KNOWN EDGE CASES: A runner AssertionError inside a child may be turned into a tool error by the parent, so every test ends with ScriptedTree.assert_complete, which also fails on unscripted calls. The result-card template is matched with its literal text only, so a template of bare placeholders would make renderings() weak. The R-1 path cases accept both spec-conformant outcomes: the path refused at write time, or accepted with the card error turned into an unchecked card; either way every key finishes and every card returns.
 RELATED DOCS: tests/features/infinite_memory_agent/FEATURE.md; docs/spec/infinite-memory-agent/spec.md sections 6.1, 6.2, 6.3, 9.2 and 13.
 TESTS: PYTHONPATH=$(pwd) python -m pytest tests/features/infinite_memory_agent/test_infinite_memory_delegation.py -q
 """
@@ -430,3 +430,134 @@ async def test_launch_subagent_is_exempt_from_the_tool_timeout_and_result_cap(tm
     assert summary_a in result and summary_b in result
     assert "truncated" not in result
     assert set(finished_cards(workspace_root(tmp_path))) == {pair_key("a"), pair_key("b")}
+
+
+# ---------------------------------------------------------------- S4 review regressions: R-1 (INV-29)
+
+
+CARD_BUILD_TRIGGERS = (
+    pytest.param("path", "\u2028", id="u2028-in-a-note-path"),
+    pytest.param("path", "\u0085", id="u0085-in-a-note-path"),
+    pytest.param("reply", "\ud83d", id="lone-surrogate-in-the-reply"),
+)
+
+
+@pytest.mark.parametrize(("trigger", "character"), CARD_BUILD_TRIGGERS)
+def test_a_pair_whose_card_or_record_cannot_be_written_as_given_still_finishes_beside_its_sibling(tmp_path: Path, trigger: str, character: str) -> None:
+    """R-1, INV-29, INV-32: a note path that splitlines() breaks, or a lone surrogate in the generator's reply, stays inside its pair: both keys get pair_finished, both cards reach the root, and launch_subagent returns no error."""
+    root = workspace_root(tmp_path)
+    agent = build_agent(tmp_path)
+    # U+2028 and U+0085 are legal in file names on NTFS and POSIX alike, so the write itself succeeds on every host.
+    odd_path = f"notes/acme{character}prices.md"
+    if trigger == "path":
+        steps_a = [tool_call("write_note", {"path": odd_path, "text": "Acme Pro is 49 USD.", "description": "Acme prices"}), reply("A-SUMMARY")]
+    else:
+        # A provider's JSON may carry "\ud83d" escaped; it decodes to a lone surrogate, which UTF-8 cannot encode.
+        steps_a = [reply(f"A-SUMMARY found {character}")]
+    tree = ScriptedTree(
+        {
+            ROOT: [launch(task("a"), task("b")), reply("ROOT-FINAL")],
+            generator("a"): steps_a,
+            verifier("a"): [reply(PASSED_REVIEW)],
+            **simple_pair("b", "B-SUMMARY"),
+        }
+    )
+    with tree.install():
+        answer = agent.run(TASK)
+    result = _root_launch_result(tree)
+    assert not is_error(result), f"launch_subagent failed instead of returning both cards: {ascii(result[:300])}"
+    assert "A-SUMMARY" in result and "B-SUMMARY" in result, ascii(result[:600])
+    records = journal_records(root)
+    finished = sorted(str(record["key"]) for record in records if record["event"] == "pair_finished")
+    assert finished == [pair_key("a"), pair_key("b")], f"every reserved key needs exactly one pair_finished: {events(records)}"
+    tree.assert_complete()
+    assert answer.content == "ROOT-FINAL"
+    card = finished_cards(root)[pair_key("a")]
+    assert card["summary"].startswith("A-SUMMARY"), ascii(card)
+    if trigger != "path":
+        return
+    written = tool_result(tree.calls_by(generator("a"))[-1], "write_note")
+    if is_error(written):
+        # The path was refused at write time: a refusal with the quota line that wrote nothing (INV-32).
+        assert template_regex(prompt_text("memory_rejected_prompt")).search(written) and template_regex(prompt_text("quota_line")).search(written), ascii(written)
+        assert not [path for path in root.rglob("*") if path.name.startswith("acme")], "a refused note path left a file behind"
+    elif card["verdict"] == "unchecked":
+        # The path was accepted and the error came after the generator returned, so INV-29 keeps its status.
+        assert card["status"] == "done", ascii(card)
+
+
+# ---------------------------------------------------------------- S4 review regressions: R-3 (NFR-7 as amended in r5)
+
+
+def test_an_unchecked_card_with_long_dropped_and_files_lists_stays_inside_the_nfr7_bound(tmp_path: Path) -> None:
+    """R-3, NFR-7, INV-4, EC-12: with summary, review, dropped and files all far over the card cap, the rendered card holds at most 4 x INFINITE_CARD_TEXT_MAX_TOKENS of field text, one marker per cut field, and the fixed template; the journal's card keeps both lists whole."""
+    from string import Formatter
+
+    from vidbyte.lib.constants.infinite import INFINITE_CARD_TEXT_MAX_TOKENS, INFINITE_TRUNCATION_MARKER
+    from vidbyte.lib.util import TokenEstimate
+
+    root = workspace_root(tmp_path)
+    notes = [f"notes/competitor-{index:02d}-list-price-history.md" for index in range(60)]
+    for relative in notes:
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("Seed line.\n", encoding="utf-8")
+    # Ten distinct one-line entries of about 185 tokens each, under the raised max_entry_tokens of 200.
+    facts = [(f"Competitor {index:02d} lists " + "tier-price-detail " * 40).strip() for index in range(10)]
+    agent = build_agent(tmp_path, workspace={"max_entry_tokens": 200, "max_entries_per_agent": 10})
+    steps = [tool_call("remember", {"kind": "fact", "text": fact}) for fact in facts]
+    steps += [tool_call("write_note", {"path": relative, "text": "One more price point.\n"}) for relative in notes]
+    long_summary = "Summary of the competitor pricing research. " * 60
+    # EC-12: the review has no VERDICT line, so the verdict is unchecked and every staged entry is dropped.
+    long_review = "Reviewed the pricing notes and their sources line by line. " * 50
+    tree = ScriptedTree({ROOT: [launch(task("a")), reply("done")], generator("a"): [*steps, reply(long_summary)], verifier("a"): [reply(long_review)]})
+    with tree.install():
+        agent.run(TASK)
+    tree.assert_complete()
+    assert not any(is_error(content) for _, content in tool_results(tree.calls_by(generator("a"))[-1])), "precondition: every remember and write_note succeeded"
+    stored = finished_cards(root)[pair_key("a")]
+    assert (stored["status"], stored["verdict"]) == ("done", "unchecked")
+    for fact in facts:
+        assert any(fact in item for item in stored["dropped"]), "the journal's card must keep every dropped entry whole"
+    assert sorted(stored["files"]) == sorted(notes), "the journal's card must keep every written path"
+    card = _root_launch_result(tree)
+    literal = "".join(text for text, _, _, _ in Formatter().parse(prompt_text("result_card")))
+    short_fields = ("a", pair_key("a"), "done", "unchecked", "-")
+    bound = TokenEstimate.count(literal) + sum(TokenEstimate.count(value) for value in short_fields) + 4 * (INFINITE_CARD_TEXT_MAX_TOKENS + TokenEstimate.count(INFINITE_TRUNCATION_MARKER))
+    assert TokenEstimate.count(card) <= bound, f"the card is {TokenEstimate.count(card)} tokens, over the NFR-7 bound of {bound}"
+    assert card.count(INFINITE_TRUNCATION_MARKER) == 4, "summary, review, dropped and files are each cut once, with one marker"
+
+
+# ---------------------------------------------------------------- S4 review regressions: R-4 (INV-26)
+
+
+def test_a_finished_pair_replays_after_its_context_entry_was_superseded_and_new_pairs_still_run(tmp_path: Path) -> None:
+    """R-4, INV-26, INV-9: pair a names #1 and supersedes it; relaunching a alone, then a beside a new task b, replays a's card each time, runs b, and refuses nothing."""
+    root = workspace_root(tmp_path)
+    write_jsonl(root / "entries.jsonl", [entry_record(1, "Acme Pro costs 49 USD")])
+    agent = build_agent(tmp_path)
+    card_a = task("a", context=["#1"], gen="Check the Acme Pro price in entry #1 and update it.")
+    tree = ScriptedTree(
+        {
+            ROOT: [launch(card_a), launch(card_a), launch(card_a, task("b")), reply("ROOT-FINAL")],
+            generator("a"): [tool_call("remember", {"kind": "fact", "text": "Acme Pro costs 59 USD", "supersedes": 1}), reply("A-SUMMARY")],
+            verifier("a"): [reply(PASSED_REVIEW)],
+            **simple_pair("b", "B-SUMMARY"),
+        }
+    )
+    with tree.install():
+        agent.run(TASK)
+    first, alone, mixed = (_root_launch_result(tree, index) for index in (1, 2, 3))
+    assert not is_error(first) and [entry["id"] for entry in read_jsonl(root / "entries.jsonl")] == [2], "precondition: pair a replaced #1 with #2"
+    replayed = template_regex(prompt_text("replayed_label"))
+    assert not is_error(alone), f"relaunching the finished pair a was refused: {ascii(alone[:300])}"
+    assert replayed.search(alone) and "A-SUMMARY" in alone, alone[:300]
+    assert not is_error(mixed), f"a batch of finished a plus new b was refused: {ascii(mixed[:300])}"
+    assert len(replayed.findall(mixed)) == 1 and "A-SUMMARY" in mixed and "B-SUMMARY" in mixed, mixed[:600]
+    assert mixed.index("A-SUMMARY") < mixed.index("B-SUMMARY"), "cards come back in task order"
+    tree.assert_complete()
+    records = journal_records(root)
+    for name in ("a", "b"):
+        started = [record for record in records if record["event"] == "pair_started" and record["key"] == pair_key(name)]
+        ended = [record for record in records if record["event"] == "pair_finished" and record["key"] == pair_key(name)]
+        assert len(started) == len(ended) == 1, f"pair {name} must start and finish exactly once: {events(records)}"

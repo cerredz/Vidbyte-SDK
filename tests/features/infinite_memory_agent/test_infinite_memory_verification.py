@@ -1,10 +1,10 @@
 """FILE: tests/features/infinite_memory_agent/test_infinite_memory_verification.py
 
-PURPOSE: Proves how a pair's verdict decides what reaches memory: the last VERDICT line wins in any Markdown wrapping or case, a missing verdict or a failing verifier commits nothing, drop_entry removes exactly the named staged entry, and a corrupted entries.jsonl at commit time drops each pair's entries with a message instead of crashing the batch.
-ROLE IN CODEBASE: Verification and commit layer of tests/features/infinite_memory_agent/ (spec AC-10, AC-11, AC-37, AC-38; INV-14..INV-16, INV-19, INV-29, INV-32; EC-12, EC-13, EC-17, EC-24). Exercises vidbyte/agents/infinite/launch.py (InfinitePair), vidbyte/agents/infinite/memory.py and vidbyte/agents/infinite/workspace.py through a real InfiniteMemoryAgent run.
+PURPOSE: Proves how a pair's verdict decides what reaches memory: the last VERDICT line wins in any Markdown wrapping or case, a missing verdict or a failing verifier commits nothing, drop_entry removes exactly the named staged entry, and a corrupted entries.jsonl at commit time drops each pair's entries with a message instead of crashing the batch. Since the S4 review it also pins two rules no earlier test caught when deleted: the entry rules a pair agent's remember meets when it stages, and the by stamp on an entry the verifier staged.
+ROLE IN CODEBASE: Verification and commit layer of tests/features/infinite_memory_agent/ (spec AC-10, AC-11, AC-37, AC-38; INV-14..INV-17, INV-19, INV-29, INV-32; EC-12, EC-13, EC-17, EC-24; S4 review finding R-11). Exercises vidbyte/agents/infinite/launch.py (InfinitePair), vidbyte/agents/infinite/memory.py and vidbyte/agents/infinite/workspace.py through a real InfiniteMemoryAgent run.
 ARCHITECTURE NOTE: Each test scripts one or two pairs whose generators stage entries with remember, then reads the verdict and dropped list from the pair_finished card in the journal and the committed lines from entries.jsonl.
-FUNCTION INVENTORY: test_no_verdict_or_a_failing_verifier_drops_every_staged_entry (AC-10, EC-12); test_drop_entry_removes_only_the_named_staged_entry (AC-11); test_a_malformed_entries_line_drops_each_pairs_entries_but_the_run_finishes (AC-37, EC-24, INV-16); test_an_entry_that_no_longer_fits_at_commit_is_dropped_with_the_cap_reason (EC-17, INV-19); test_verdict_is_read_from_the_last_matching_line_in_any_markdown_or_case (AC-38, EC-13, INV-14, INV-15).
-COMMON MODIFICATION PATTERNS: Add a verdict spelling as one VERDICT_REPLIES row with the verdict it must give.
+FUNCTION INVENTORY: test_no_verdict_or_a_failing_verifier_drops_every_staged_entry (AC-10, EC-12); test_drop_entry_removes_only_the_named_staged_entry (AC-11); test_a_malformed_entries_line_drops_each_pairs_entries_but_the_run_finishes (AC-37, EC-24, INV-16); test_an_entry_that_no_longer_fits_at_commit_is_dropped_with_the_cap_reason (EC-17, INV-19); test_verdict_is_read_from_the_last_matching_line_in_any_markdown_or_case (AC-38, EC-13, INV-14, INV-15); test_a_pair_agents_remember_is_checked_against_the_entry_rules_when_it_stages (R-11, INV-17, INV-15, INV-32); test_an_entry_the_verifier_stages_is_committed_under_the_verifiers_own_key (R-11, INV-16). _names_any checks that a refusal names one of its expected tokens.
+COMMON MODIFICATION PATTERNS: Add a verdict spelling as one VERDICT_REPLIES row with the verdict it must give. Add a stage-time entry rule as one STAGE_REFUSALS row naming the tokens its refusal may carry.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level. 2. Do not write the malformed line before the generators have staged; AC-37 is about the commit-time re-check.
 KNOWN EDGE CASES: In AC-37 whichever verifier is called first writes the malformed line, once; both commits come after it, because a pair commits only after its verifier returns.
 RELATED DOCS: tests/features/infinite_memory_agent/FEATURE.md; docs/spec/infinite-memory-agent/spec.md sections 6.1, 6.2 and 8.5.
@@ -13,7 +13,9 @@ TESTS: PYTHONPATH=$(pwd) python -m pytest tests/features/infinite_memory_agent/t
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -40,6 +42,7 @@ from tests.features.infinite_memory_agent.infinite_memory_fixtures import (
     template_regex,
     tool_call,
     tool_result,
+    tool_results,
     verifier,
     workspace_root,
     write_jsonl,
@@ -192,3 +195,82 @@ def test_verdict_is_read_from_the_last_matching_line_in_any_markdown_or_case(tmp
     committed = read_jsonl(workspace_root(tmp_path) / "entries.jsonl")
     assert [(entry["text"], entry["verified_by"]) for entry in committed] == [(STAGED_TEXT, "root/p/ver")]
     assert card["entries"] == [committed[0]["id"]]
+
+
+# ---------------------------------------------------------------- S4 review: guardrails no test pinned (R-11)
+
+
+STAGE_REFUSALS: tuple[tuple[str, dict[str, Any], tuple[Any, ...]], ...] = (
+    ("text over max_entry_tokens", {"kind": "fact", "text": "Globex pricing detail " * 15}, ("max_entry_tokens", 60)),
+    ("text of a live entry", {"kind": "fact", "text": "  acme pro COSTS 49 usd   per seat "}, ("already recorded as #7",)),
+    ("supersedes a missing id", {"kind": "fact", "text": "Initech costs 30 USD per seat", "supersedes": 99}, (99,)),
+)
+
+
+def _names_any(content: str, tokens: tuple[Any, ...]) -> bool:
+    """True when the content names at least one token: an int as a standalone number, anything else as text."""
+    return any((int_token(token) if isinstance(token, int) else re.compile(re.escape(str(token)))).search(content) for token in tokens)
+
+
+def test_a_pair_agents_remember_is_checked_against_the_entry_rules_when_it_stages(tmp_path: Path) -> None:
+    """R-11, INV-17, INV-15, INV-32: a generator's over-cap text, a live entry's text, a missing supersedes id, and a reworded repeat of its own staged entry are each refused at stage time with the quota line; the verifier repeating that entry is refused as already staged as s1; only s1 is staged and committed."""
+    root = workspace_root(tmp_path)
+    write_jsonl(root / "entries.jsonl", [entry_record(7, "Acme Pro costs 49 USD per seat")])
+    agent = build_agent(tmp_path)
+    tree = ScriptedTree(
+        {
+            ROOT: [launch(task("p")), reply("done")],
+            generator("p"): [
+                *(tool_call("remember", args) for _, args, _ in STAGE_REFUSALS),
+                _remember(STAGED_TEXT),
+                _remember("  initech CHARGES 30 usd   per SEAT "),
+                reply("P-SUMMARY"),
+            ],
+            verifier("p"): [_remember(STAGED_TEXT), reply("Checked.\nVERDICT: passed")],
+        }
+    )
+    with tree.install():
+        agent.run(TASK)
+    tree.assert_complete()
+    results = [content for name, content in tool_results(tree.calls_by(generator("p"))[-1]) if name == "remember"]
+    assert len(results) == len(STAGE_REFUSALS) + 2
+    rejected = template_regex(prompt_text("memory_rejected_prompt"))
+    quota = template_regex(prompt_text("quota_line"))
+    for (label, _, named), content in zip(STAGE_REFUSALS, results, strict=False):
+        assert is_error(content), f"{label} was staged instead of refused: {content}"
+        assert rejected.search(content) and quota.search(content), f"{label}: {content}"
+        assert _names_any(content, named), f"{label} does not name any of {named}: {content}"
+    staged, repeated = results[-2:]
+    assert not is_error(staged) and template_regex(prompt_text("remember_staged_prompt"), key="s1").search(staged), staged
+    assert is_error(repeated) and "already staged as s1" in repeated, repeated
+    # Refused calls cost nothing: after one accepted call the generator still has 4 of its 5 entries.
+    assert template_regex(prompt_text("quota_line"), entries_left=4, entries_max=5).search(repeated), repeated
+    checked = tool_result(tree.calls_by(verifier("p"))[-1], "remember")
+    assert is_error(checked) and "already staged as s1" in checked, checked
+    assert not re.search(r"(?<![\w-])s2(?![\w-])", tree.first_call(verifier("p")).prompt), "only s1 may reach the verifier as staged"
+    committed = read_jsonl(root / "entries.jsonl")
+    assert [(entry["id"], entry["text"], entry["by"]) for entry in committed] == [(7, "Acme Pro costs 49 USD per seat", "root"), (8, STAGED_TEXT, "root/p/gen")]
+    card = finished_cards(root)[pair_key("p")]
+    assert (card["verdict"], card["entries"], card["dropped"]) == ("passed", [8], [])
+
+
+def test_an_entry_the_verifier_stages_is_committed_under_the_verifiers_own_key(tmp_path: Path) -> None:
+    """R-11, INV-16, INV-15: the generator's entry commits first with by=root/p/gen, the verifier's own entry next with by=root/p/ver, and both carry verified_by=root/p/ver."""
+    fee = "Initech's 30 USD price excludes a 99 USD setup fee"
+    agent = build_agent(tmp_path)
+    tree = ScriptedTree(
+        {
+            ROOT: [launch(task("p")), reply("done")],
+            generator("p"): [_remember(STAGED_TEXT), reply("P-SUMMARY")],
+            verifier("p"): [_remember(fee), reply("Added the missing setup fee.\nVERDICT: fixed")],
+        }
+    )
+    with tree.install():
+        agent.run(TASK)
+    tree.assert_complete()
+    staged = tool_result(tree.calls_by(verifier("p"))[-1], "remember")
+    assert not is_error(staged) and template_regex(prompt_text("remember_staged_prompt"), key="s2").search(staged), staged
+    committed = read_jsonl(workspace_root(tmp_path) / "entries.jsonl")
+    assert [(entry["text"], entry["by"], entry["verified_by"]) for entry in committed] == [(STAGED_TEXT, "root/p/gen", "root/p/ver"), (fee, "root/p/ver", "root/p/ver")]
+    card = finished_cards(workspace_root(tmp_path))[pair_key("p")]
+    assert (card["verdict"], card["entries"]) == ("fixed", [entry["id"] for entry in committed])

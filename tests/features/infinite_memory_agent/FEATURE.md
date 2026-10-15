@@ -35,7 +35,7 @@ Entry: staged (in a pair's memory) → live (`entries.jsonl`) → superseded (`s
 
 ## Invariants
 
-- The parent's conversation receives only result cards; a card's summary and review are each at most `INFINITE_CARD_TEXT_MAX_TOKENS` tokens, cut text ending in `INFINITE_TRUNCATION_MARKER`.
+- The parent's conversation receives only result cards; a card's summary and review are each at most `INFINITE_CARD_TEXT_MAX_TOKENS` tokens, cut text ending in `INFINITE_TRUNCATION_MARKER`, and the rendered card cuts its joined `dropped` and `files` text the same way (NFR-7 as amended in spec r5), while the journal keeps both lists whole.
 - Nothing a pair stages reaches disk before its verifier returns; nothing reaches disk on `unchecked`.
 - No tool write leaves the workspace above `max_files` or `max_tokens`, or a note above `max_file_tokens`; usage is recomputed from disk, so files `bash` wrote count. The bookkeeping files are bounded only by `max_tokens`.
 - A rejected tool call writes nothing and the tool stays usable.
@@ -79,12 +79,22 @@ Each line is *input + state → wrong output if unguarded*, with the test that c
 - A second `run()` on the same object replays the first run's tool calls and reply in the system string (`test_a_second_run_on_the_same_agent_starts_from_a_clean_context`).
 - `launch_subagent` cut by `tool_timeout_seconds` or `result_max_chars` → whole batches lost (`test_launch_subagent_is_exempt_from_the_tool_timeout_and_result_cap`).
 - The API key in a settings `repr`, the journal, or a workspace file (`test_api_key_stays_out_of_the_settings_repr_the_journal_and_the_workspace`).
+- A note path holding U+2028 or U+0085, or a lone surrogate in a reply, makes building the card or writing `pair_finished` raise outside the pair's guard → `launch_subagent` fails, every sibling's card is lost, and the key re-runs on relaunch (`test_a_pair_whose_card_or_record_cannot_be_written_as_given_still_finishes_beside_its_sibling`).
+- `dropped` and `files` rendered uncapped → one unchecked pair puts thousands of tokens into the parent's context (`test_an_unchecked_card_with_long_dropped_and_files_lists_stays_inside_the_nfr7_bound`).
+- Replayed keys checked like new ones → a finished pair whose context entry was since superseded is refused instead of replayed, and the new tasks beside it never start (`test_a_finished_pair_replays_after_its_context_entry_was_superseded_and_new_pairs_still_run`).
+- A pair agent's `remember` staged without the entry rules → over-cap text, live duplicates and repeats wait in the pair until commit, using quota and misleading the verifier (`test_a_pair_agents_remember_is_checked_against_the_entry_rules_when_it_stages`).
+- A verifier's own entry stamped with the generator's key → memory misattributes who wrote it (`test_an_entry_the_verifier_stages_is_committed_under_the_verifiers_own_key`).
+- `edit_file` without the size caps → one edit grows a note or the workspace past its cap (`test_edit_file_refuses_an_edit_that_would_pass_a_cap_and_changes_nothing`).
+- A failed atomic replace, or text UTF-8 cannot encode, leaks a `.tmp` copy that counts toward the caps and escapes the tool as a raw error with no quota line (`test_a_memory_write_that_fails_on_disk_is_a_refusal_and_leaves_no_temp_file`); a colon in a note path leaves a stray NTFS stream base file (`test_a_note_path_with_a_colon_is_saved_or_refused_without_leaving_stray_files`).
+- A pasted log refused without saying where the content belongs → the model retries the paste instead of writing a note (`test_remember_tells_the_model_to_keep_a_long_paste_in_a_note_or_a_pointer`).
 
 What an easy generated test would miss: concurrency proven by timing instead of a gate; "no leak" checked only on the final reply instead of every root call; quota checked without interleaved rejections; resume tested only from a journal the implementation wrote itself (never hand-written in the documented shape); a torn line without its missing trailing newline.
 
 ## Historical Regressions
 
-None yet; the pack was written red before the implementation (spec r3, S2). Spec review rounds R-1…R-23 shaped several tests: R-16 (AC-40 second run), R-17 (AC-37 malformed line), R-18 (AC-42 grep over 1 MB), R-19 (AC-38 upper-case verdict), R-20 (AC-31 replay-only batch), R-21 (AC-33 equal-size groups), R-23 (AC-41 reserved name at run time).
+The pack was written red before the implementation (spec r3, S2). Spec review rounds R-1…R-23 shaped several tests: R-16 (AC-40 second run), R-17 (AC-37 malformed line), R-18 (AC-42 grep over 1 MB), R-19 (AC-38 upper-case verdict), R-20 (AC-31 replay-only batch), R-21 (AC-33 equal-size groups), R-23 (AC-41 reserved name at run time).
+
+The S4 code review (`docs/spec/infinite-memory-agent/review.md`, a separate R- numbering) found bugs that the 89 original tests let through, and the tests named above now pin them: R-1 (card build and `pair_finished` outside the pair guard), R-3 (uncapped `dropped` and `files`), R-4 (replay refused by the context check), R-6 (EC-18 refusal without advice), R-8 (leaked temp files and raw write errors), and R-11 (stage-time entry rules, `edit_file` caps, and the verifier's `by` stamp could each be deleted with the pack still green).
 
 ## Test Suite Map
 
@@ -110,3 +120,4 @@ Run: `PYTHONPATH=$(pwd) python -m pytest tests/features/infinite_memory_agent -q
 - Sibling commit races (EC-15 duplicate text, EC-16 double supersede): no hook runs between one pair's commit and another's, so forcing the order would need polling. Both go through the commit re-check that the AC-37 and EC-17 tests drive, and the duplicate and supersede rules themselves are pinned by the AC-14 and AC-15 tests.
 - Rubber-stamp verifiers (EC-14), a root that never delegates (EC-40), and an explicit `system=` option (EC-32): accepted behaviors with nothing to assert.
 - Accessibility, browser, migration: no UI and no earlier on-disk format.
+- Case-folded protected names (S4 R-2, macOS): Windows `resolve()` returns the on-disk case, so `Entries.jsonl` or `SEED/brief.md` is already refused here and a test would pass at HEAD for the wrong reason. Making it fail would mean replacing `FileSystemPermissions.resolve_scoped_path`, which is not a seam this pack fakes.
