@@ -17,7 +17,7 @@ started: 2026-10-15
 | S1 spec + review | done | 2026-10-15 | 2026-10-15 | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | spec r3 approved 8d1ee6d9 (2 review rounds, 21 findings applied) |
 | S2 tests | done | 2026-10-15 | 2026-10-16 | reports/S2-test-author.md | 397 tests red in tests/features/harness_threads/; spec r4 90265f78; S2_HEAD 8e5e65ec |
 | S3 implement | done | 2026-10-16 | 2026-10-16 | reports/S3-implementer.md | 49 rows; HEAD d5581a24 pushed; pack 395/2 skip; run_ci source+package PASS; lint PASS; Semgrep 0; PR retitled [WIP]; ci.yml 38754831930 dispatched |
-| S4 adversarial review | running | 2026-10-16 | | reports/S4-review-{conformance,conventions,engineering}.md | |
+| S4 adversarial review | done | 2026-10-16 | 2026-10-16 | reports/S4-review-{conformance,conventions,engineering}.md, reports/S4-findings-verifier.md | review.md: 11 confirmed (5 Blocker R-1..R-5, 6 Major R-6..R-11), 15 Minor, 0 refuted |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
@@ -47,6 +47,8 @@ started: 2026-10-15
 - 2026-10-16 — Spec r4 (90265f78) resolved the four S2 defects; the S2 author added the four r4 tests (e3dcb214, proof 5a1813da, report 8e5e65ec). Orchestrator re-ran the four: `4 errors` (ModuleNotFoundError vidbyte.lib.dataclasses.native_threads). New S2_HEAD = 8e5e65ec: `git diff 8e5e65ec..HEAD -- tests` must stay empty from S3 on.
 
 - 2026-10-16 — S3 returned BLOCKED at Phase 5 (all 49 rows committed through 4c072c1c; lint, package stage and Semgrep green): 4 pack failures were TypeErrors inside S2 helpers (T-D1 `call` fixture spread a wrong-type config with `**`; T-D2 `invocation(api, argv, **fields)` got argv twice). Orchestrator reproduced both and chose option 1 (test ownership stays with S2): the S2 author fixed them blind to the implementation in 14ec6702 (3 test files, no assertion changed; report 4da73cf3). Orchestrator re-ran the pack: `395 passed, 2 skipped`. New S2_HEAD = 4da73cf3; S3 resumed to finish Phases 5–7.
+
+- 2026-10-16 — S4 verifier routed the test parts of R-1 (124 over-72-column comment lines in 16 test files), R-4, R-6, R-7, R-8, R-9, R-10, R-11 and Minor R-24 to S2. Decision: S2 (the test author, resumed) writes those regression tests first, red against HEAD, and rewraps the test comments (comment-only); then S5 iteration 1 fixes the code against them. Sequential, not parallel, because both agents commit in the one worktree. S2 may read review.md, the verifier report and the S4 repro scripts (stand-ins only) to pin behavior at the public boundary; it still does not read vidbyte/ source.
 
 ## User replies (verbatim)
 - (none yet)
