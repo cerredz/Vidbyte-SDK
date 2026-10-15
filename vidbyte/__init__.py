@@ -21,7 +21,7 @@ Architecture:
     - Harness exports: the Harness base class, specifications, run manifests, trajectory collection/sinks, and typed failures.
     - Multi-agent exports: MultiAgent, MagenticOneOrchestrator, TaskLedger, AgentBinding, AgentTransfer, and immutable ledger contracts.
     - Workflow exports: StateGraph, StateMachine, stages, validators, routers, policies, records, and typed errors.
-    - Error exports: MCP, pipeline, workflow, multi-agent execution, task-ledger, and agent-transfer error families.
+    - Error exports: MCP, pipeline, workflow, multi-agent execution, task-ledger, and agent-transfer error families, plus the general ConfigurationError raised for invalid configuration.
 Key Functions / Exports:
     - VidbyteSDK: Main SDK entry point.
     - BaseAgent: Base class for building agents.
@@ -299,6 +299,7 @@ from vidbyte.agents.output import (
     WebhookOutput,
 )
 from vidbyte.agents.pricing import ProviderUsage
+from vidbyte.agents.skills.loader import SkillLoader
 from vidbyte.client import VidbyteSDK
 from vidbyte.config import (
     AgentSettings,
@@ -464,6 +465,7 @@ from vidbyte.lib.dataclasses.prosecutor_defender_judge import (
     ProsecutorDefenderJudgeReport,
     ProsecutorReportPayload,
 )
+from vidbyte.lib.dataclasses.skills import SkillResolution
 from vidbyte.lib.enums import (
     BudgetPreset,
     PermissionPreset,
@@ -474,6 +476,7 @@ from vidbyte.lib.enums.config import AgentType
 from vidbyte.lib.errors import (
     AgentTransferError,
     CodexAgentError,
+    ConfigurationError,
     McpAttachmentError,
     McpConnectionError,
     McpError,
@@ -874,6 +877,9 @@ __all__ = [
     "SkillsShSkill",
     "SkillSourceType",
     "SkillUnavailableReason",
+    "SkillLoader",
+    "SkillResolution",
+    "ConfigurationError",
     "JevTargetOutcome",
     "JevTargetOutcomeEvidence",
     "JevTargetOutcomeEvidenceItem",
