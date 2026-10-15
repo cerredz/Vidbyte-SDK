@@ -8,19 +8,21 @@ PURPOSE:
 ROLE IN CODEBASE:
     Re-exports MathHelper from vidbyte/lib/util/math.py,
     CredentialKeyPolicy from vidbyte/lib/util/credential_keys.py,
-    SubstringCounter from vidbyte/lib/util/text.py, PromptPlacement from
+    SubstringCounter and TokenEstimate from vidbyte/lib/util/text.py,
+    PromptPlacement from
     vidbyte/lib/util/prompt_placement.py, and SupportedKwargs from
     vidbyte/lib/util/call_options.py. Imported by
-    vidbyte/agents/speed/tracker.py and any future SDK code that needs the
-    same general-purpose statistics.
+    vidbyte/agents/speed/tracker.py, by vidbyte/agents/infinite/ for
+    TokenEstimate, and by any future SDK code that needs the same
+    general-purpose helpers.
 
 ARCHITECTURE NOTE:
     A thin package export, mirroring how vidbyte/lib/enums/__init__.py and
     vidbyte/lib/dataclasses/__init__.py re-export their sibling modules.
 
 FUNCTION INVENTORY:
-    No functions of its own; re-exports MathHelper, CredentialKeyPolicy, and
-    SubstringCounter. See
+    No functions of its own; re-exports MathHelper, CredentialKeyPolicy,
+    SubstringCounter, TokenEstimate, PromptPlacement, and SupportedKwargs. See
     vidbyte/lib/util/math.py for MathHelper's own inventory.
 
 COMMON MODIFICATION PATTERNS:
@@ -40,7 +42,9 @@ RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/agent-speed-tracking.md
 
 TESTS:
-    tests/test_agent_speed.py (MathHelperTests) covers the sole current export.
+    tests/test_agent_speed.py (MathHelperTests) covers MathHelper, and
+    tests/features/infinite_memory_agent/test_infinite_memory_contract.py
+    imports TokenEstimate from here.
 """
 
 from __future__ import annotations
@@ -49,6 +53,6 @@ from vidbyte.lib.util.call_options import SupportedKwargs
 from vidbyte.lib.util.credential_keys import CredentialKeyPolicy
 from vidbyte.lib.util.math import MathHelper
 from vidbyte.lib.util.prompt_placement import PromptPlacement
-from vidbyte.lib.util.text import SubstringCounter
+from vidbyte.lib.util.text import SubstringCounter, TokenEstimate
 
-__all__ = ["CredentialKeyPolicy", "MathHelper", "PromptPlacement", "SubstringCounter", "SupportedKwargs"]
+__all__ = ["CredentialKeyPolicy", "MathHelper", "PromptPlacement", "SubstringCounter", "SupportedKwargs", "TokenEstimate"]
