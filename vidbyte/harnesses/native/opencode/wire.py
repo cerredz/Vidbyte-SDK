@@ -59,9 +59,9 @@ class OpencodeWire:
         # The run passed its time bound, or printed more than the cap:
         # the stream cannot be trusted, so the process outcome decides.
         if outcome.timed_out:
-            raise errors.failure(NativeThreadProblem.TIMED_OUT, request=request, thread_id=session, outcome=outcome, seconds=timeout_seconds)
+            raise errors.failure(NativeThreadProblem.TIMED_OUT, request=request, thread_id=session, outcome=outcome, vendor_text=outcome.stderr, seconds=timeout_seconds)
         if outcome.stdout_truncated:
-            raise errors.failure(NativeThreadProblem.OUTPUT_TOO_LARGE, request=request, thread_id=session, outcome=outcome, cap_bytes=native_threads.NATIVE_PROCESS_MAX_OUTPUT_BYTES)
+            raise errors.failure(NativeThreadProblem.OUTPUT_TOO_LARGE, request=request, thread_id=session, outcome=outcome, vendor_text=outcome.stderr, cap_bytes=native_threads.NATIVE_PROCESS_MAX_OUTPUT_BYTES)
 
         # An auth error event means the provider refused the key.
         refused, vendor = OpencodeWire._error(events)

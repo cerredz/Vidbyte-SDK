@@ -39,9 +39,9 @@ class GrokWire:
         # The run passed its time bound, or printed more than the cap:
         # the answer cannot be trusted, so the process outcome decides.
         if outcome.timed_out:
-            raise errors.failure(NativeThreadProblem.TIMED_OUT, request=request, outcome=outcome, seconds=timeout_seconds)
+            raise errors.failure(NativeThreadProblem.TIMED_OUT, request=request, outcome=outcome, vendor_text=outcome.stderr, seconds=timeout_seconds)
         if outcome.stdout_truncated:
-            raise errors.failure(NativeThreadProblem.OUTPUT_TOO_LARGE, request=request, outcome=outcome, cap_bytes=native_threads.GROK_CLI_MAX_OUTPUT_BYTES)
+            raise errors.failure(NativeThreadProblem.OUTPUT_TOO_LARGE, request=request, outcome=outcome, vendor_text=outcome.stderr, cap_bytes=native_threads.GROK_CLI_MAX_OUTPUT_BYTES)
 
         # Grok's own error object: a sign-in failure means the key was
         # refused, anything else is a failed run.

@@ -94,9 +94,9 @@ class MuseWire:
         # The serve exchange passed the control timeout, or printed more
         # than the cap: the answer cannot be trusted.
         if outcome.timed_out:
-            raise errors.failure(NativeThreadProblem.TIMED_OUT, request=request, outcome=outcome, seconds=timeout_seconds)
+            raise errors.failure(NativeThreadProblem.TIMED_OUT, request=request, outcome=outcome, vendor_text=outcome.stderr, seconds=timeout_seconds)
         if outcome.stdout_truncated:
-            raise errors.failure(NativeThreadProblem.OUTPUT_TOO_LARGE, request=request, outcome=outcome, cap_bytes=native_threads.NATIVE_PROCESS_MAX_OUTPUT_BYTES)
+            raise errors.failure(NativeThreadProblem.OUTPUT_TOO_LARGE, request=request, outcome=outcome, vendor_text=outcome.stderr, cap_bytes=native_threads.NATIVE_PROCESS_MAX_OUTPUT_BYTES)
 
         # Muse must have answered the session request.
         answer = MuseWire._answer(outcome.stdout)
@@ -149,9 +149,9 @@ class MuseExecOutput:
         # The run passed its time bound, or printed more than the cap:
         # the records cannot be trusted, so the process outcome decides.
         if outcome.timed_out:
-            raise errors.failure(NativeThreadProblem.TIMED_OUT, request=request, thread_id=known, outcome=outcome, seconds=timeout_seconds)
+            raise errors.failure(NativeThreadProblem.TIMED_OUT, request=request, thread_id=known, outcome=outcome, vendor_text=outcome.stderr, seconds=timeout_seconds)
         if outcome.stdout_truncated:
-            raise errors.failure(NativeThreadProblem.OUTPUT_TOO_LARGE, request=request, thread_id=known, outcome=outcome, cap_bytes=native_threads.NATIVE_PROCESS_MAX_OUTPUT_BYTES)
+            raise errors.failure(NativeThreadProblem.OUTPUT_TOO_LARGE, request=request, thread_id=known, outcome=outcome, vendor_text=outcome.stderr, cap_bytes=native_threads.NATIVE_PROCESS_MAX_OUTPUT_BYTES)
 
         # Muse says on stderr when the provider refused the key.
         if any(marker in outcome.stderr.casefold() for marker in native_threads.MUSE_KEY_REJECTED_MARKERS):
