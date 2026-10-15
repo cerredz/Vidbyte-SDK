@@ -368,8 +368,14 @@ class InfinitePair(BasePipeline):
 
     @staticmethod
     def render(card: InfiniteResultCard) -> str:
-        """Return a result card as the text its parent reads."""
-        return Prompts().get(Prompt.INFINITE_MEMORY_RESULT_CARD).format(name=card.name, key=card.key, status=card.status.value, verdict=card.verdict.value, summary=card.summary or "-", review=card.review or "-", entries=", ".join(f"#{number}" for number in card.entries) or "-", dropped="; ".join(card.dropped) or "-", files=", ".join(card.files) or "-")
+        """Return a result card as the text its parent reads, with the joined dropped entries and files each cut to the card cap."""
+        # @intent a-rendered-card-stays-small
+        # The journal keeps both lists whole, but the parent reads each
+        # joined list cut like the summary and the review, so a card
+        # never grows with the number of entries or files.
+        lists = {"dropped": "; ".join(card.dropped) or "-", "files": ", ".join(card.files) or "-"}
+        cut = {field: text if TokenEstimate.count(text) <= INFINITE_CARD_TEXT_MAX_TOKENS else f"{TokenEstimate.cut(text, INFINITE_CARD_TEXT_MAX_TOKENS)}{INFINITE_TRUNCATION_MARKER}" for field, text in lists.items()}
+        return Prompts().get(Prompt.INFINITE_MEMORY_RESULT_CARD).format(name=card.name, key=card.key, status=card.status.value, verdict=card.verdict.value, summary=card.summary or "-", review=card.review or "-", entries=", ".join(f"#{number}" for number in card.entries) or "-", **cut)
 
     @staticmethod
     def finished_lines(cards: tuple[InfiniteResultCard, ...]) -> str:

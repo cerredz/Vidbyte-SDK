@@ -64,7 +64,7 @@ Every agent sees a map of the workspace at the top of its context: the file and 
 - Memory: entries of at most `max_entry_tokens` (60) tokens, `max_entries_per_agent` (5) accepted `remember` calls per agent, and one new file per agent.
 - Every agent stops after 100 model turns and cuts each ordinary tool result at 100,000 characters, unless you pass another `loop`; one `loop` applies to every agent in the tree.
 - Each agent's history is trimmed to 60,000 tokens, newest tool exchanges first; the task, the rules, and the map are never trimmed.
-- A card's summary and review are each cut to 400 tokens.
+- A card's summary and review are each cut to 400 tokens, and so are its dropped entries and its files in the text the parent reads; the journal keeps both lists whole.
 - Tokens are estimated as characters divided by four everywhere (`TokenEstimate`).
 
 The caps are checked against the files on disk before every tool write, so files that `bash` wrote count too; a refused write changes nothing.
