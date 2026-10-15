@@ -66,6 +66,7 @@ Every agent sees a map of the workspace at the top of its context: the file and 
 - Each agent's history is trimmed to 60,000 tokens by dropping the oldest tool exchanges first; the task, the rules, and the map are never trimmed.
 - A card's summary and review are each cut to 400 tokens, and so are its dropped entries and its files in the text the parent reads; the journal keeps both lists whole.
 - Tokens are estimated as characters divided by four everywhere (`TokenEstimate`).
+- `model_name` must be in `ProviderModelRegistry`'s catalog under `provider`, as for the SDK's other agents; set `ProviderModelRegistry.STRICT_MODEL_VALIDATION = False` to use a model released after this SDK version.
 
 The caps are checked against the files on disk before every tool write, so files that `bash` wrote count too; a refused write changes nothing.
 
