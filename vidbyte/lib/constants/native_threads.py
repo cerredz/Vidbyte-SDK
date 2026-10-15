@@ -25,6 +25,11 @@ NATIVE_CONTROL_TIMEOUT_SECONDS = 30.0
 NATIVE_KILL_WAIT_SECONDS = 1.0
 MUSE_REAP_TIMEOUT_SECONDS = 10.0
 NATIVE_ARGV_PROMPT_MAX_CHARS = 24000
+# A Windows command line holds at most 32,766 UTF-16 units (measured).
+# A Grok or Muse prompt may take 30,000 of them once quoted; the 2,766
+# left are for the program, options, paths and ids, whose measured
+# worst case is 608 units.
+NATIVE_WINDOWS_ARGV_PROMPT_MAX_UNITS = 30000
 NATIVE_PROMPT_MAX_CHARS = 200000
 NATIVE_API_KEY_MAX_CHARS = 4096
 NATIVE_THREAD_MAX_SKILLS = 32
