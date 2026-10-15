@@ -284,7 +284,11 @@ class InfiniteWorkspace:
         if target.suffix not in INFINITE_NOTE_SUFFIXES:
             raise ToolExecutionError(f"{path} must end in one of {', '.join(INFINITE_NOTE_SUFFIXES)}.")
         relative = target.relative_to(self.root)
-        if target.is_dir() or relative.parts[0] in (INFINITE_SEED_DIRNAME, INFINITE_RUNS_DIRNAME) or relative.as_posix() in (INFINITE_ENTRIES_FILE, INFINITE_SUPERSEDED_FILE, INFINITE_FILES_FILE):
+        # A case-insensitive disk, such as macOS's default, keeps the
+        # caller's spelling, so the protected names are matched with
+        # case ignored.
+        folded = relative.as_posix().casefold()
+        if target.is_dir() or folded.split("/")[0] in (INFINITE_SEED_DIRNAME, INFINITE_RUNS_DIRNAME) or folded in (INFINITE_ENTRIES_FILE, INFINITE_SUPERSEDED_FILE, INFINITE_FILES_FILE):
             raise ToolExecutionError(f"{relative.as_posix()} is a seed file, a run journal, a memory file, or a folder, which no note may replace; write another path.")
         return target, relative.as_posix()
 
