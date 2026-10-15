@@ -43,7 +43,7 @@ Architecture:
     - SourcePinMismatchError: Raised when fetched content does not match the pinned hash.
     - SourceParseError: Raised when an artifact cannot be parsed into a valid typed IR.
     - SourceSecurityError: Raised when a URL is disallowed or a response violates a guard.
-    - NativeHostError: Raised by the native Grok, opencode and Muse hosts and the backend profiles with a failure code and a next step.
+    - NativeThreadError: Raised by the Grok, opencode and Muse thread functions with a failure code, a likely cause and a next step.
     - FailureRaisedError: Raised when a Session recovery policy escalates a deterministic failure to raise.
     - AgentSpeedError: Base exception for agent speed-tracking failures.
     - AgentSpeedValidationError: Raised when a speed-tracking dataclass has an invalid shape.
@@ -54,16 +54,15 @@ Relations:
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
-from vidbyte.lib.constants.native_hosts import NATIVE_HOST_NEXT_STEPS
-from vidbyte.lib.enums.failure import FailureCode
 from vidbyte.lib.enums.outputs import DeliveryStatus
 
 if TYPE_CHECKING:
     from vidbyte.lib.dataclasses.agents import AgentMessage
     from vidbyte.lib.dataclasses.outputs import DeliveryReceipt
+    from vidbyte.lib.enums.failure import FailureCode
+    from vidbyte.lib.enums.native_threads import NativeHarness, NativeThreadOperation
 
 
 class VidbyteSdkError(Exception):
@@ -556,8 +555,8 @@ class SourceSecurityError(SourceError):
     """Raised when a URL is disallowed or a response violates a size/scheme guard."""
 
 
-class NativeHostError(AgentExecutionError):
-    """Carries one native host or backend failure: a closed failure code, the public operation, and a next step."""
+class NativeThreadError(AgentExecutionError):
+    """Carries one harness thread function failure: a closed failure code, the harness and function, the likely cause and the next step."""
 
     DIAGNOSTIC_FIELDS = (
         "error_kind",
@@ -575,29 +574,40 @@ class NativeHostError(AgentExecutionError):
         message: str,
         *,
         failure_code: FailureCode,
-        operation: str,
-        next_step: str | None = None,
+        harness: NativeHarness,
+        operation: NativeThreadOperation,
+        next_step: str,
+        likely_cause: str,
+        thread_id: str | None = None,
+        exit_code: int | None = None,
+        vendor_message: str | None = None,
         error_type: str = "",
-        context: Mapping[str, str] | None = None,
     ) -> None:
-        # @intent native-host-error-always-has-a-next-step
-        # Every native failure reaches the model as a code, a message
-        # and a next step, so the next step is never empty: an explicit
-        # one wins, then the catalog entry for the code, then the
-        # runtime.error text for a code without an entry.
-        fallback = NATIVE_HOST_NEXT_STEPS[FailureCode.RUNTIME_ERROR.value]
-        default_step = NATIVE_HOST_NEXT_STEPS.get(getattr(failure_code, "value", ""), fallback)
+        # The factory in vidbyte/harnesses/native/hostkit/errors.py has
+        # already composed and scrubbed the message and picked the texts
+        # written for this code, so this class only stores them.
         self.failure_code = failure_code
+        self.harness = harness
         self.operation = operation
-        self.next_step = next_step if next_step else default_step
+        self.next_step = next_step
+        self.likely_cause = likely_cause
+        self.thread_id = thread_id
+        self.exit_code = exit_code
+        self.vendor_message = vendor_message
         self.error_type = error_type
-        self.context: Mapping[str, str] = MappingProxyType(dict(context or {}))
-        self.error_kind = getattr(failure_code, "value", "")
-        self.expected = f"Native host operation {operation!r} completing successfully"
+        self.error_kind = failure_code.value
+        self.expected = f"{operation.value} returning a NativeThreadResult"
         self.actual = message
-        self.safe_runtime_details = {"operation": operation, "error_type": error_type, **self.context}
-        self.likely_causes = ("The native agent CLI or server is missing, signed out, out of date, or answered with an error the host classified as this code.",)
-        self.repair_approaches = (self.next_step,)
-        self.related_docs = ("docs/spec/native-grok-opencode-meta-hosts/spec.md",)
-        self.relevant_tests = ("tests/features/grok_host", "tests/features/opencode_host", "tests/features/muse_host", "tests/features/native_backends")
+        self.safe_runtime_details = {
+            "harness": harness.value,
+            "operation": operation.value,
+            "thread_id": "" if thread_id is None else thread_id,
+            "exit_code": "" if exit_code is None else str(exit_code),
+            "vendor_message": "" if vendor_message is None else vendor_message,
+            "error_type": error_type,
+        }
+        self.likely_causes = (likely_cause,)
+        self.repair_approaches = (next_step,)
+        self.related_docs = ("vidbyte/harnesses/README.md",)
+        self.relevant_tests = ("tests/features/harness_threads",)
         super().__init__(message, details={"error_kind": self.error_kind, "expected": self.expected, "actual": self.actual, "safe_runtime_details": self.safe_runtime_details, "likely_causes": self.likely_causes, "repair_approaches": self.repair_approaches, "related_docs": self.related_docs, "relevant_tests": self.relevant_tests})

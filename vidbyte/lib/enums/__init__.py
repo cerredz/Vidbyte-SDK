@@ -108,17 +108,21 @@ from vidbyte.lib.enums.multi_agent import (
     OrchestratorAction,
     TaskStatus,
 )
-from vidbyte.lib.enums.native_hosts import (
-    AcpToolKind,
-    ApprovalOutcome,
+from vidbyte.lib.enums.native_threads import (
+    GrokFlag,
     GrokPermissionMode,
-    InterruptSource,
+    GrokReasoningEffort,
+    MuseFlag,
+    MuseMethod,
     MuseReasoningEffort,
-    MuseViewDirection,
+    NativeEnvironmentVariable,
     NativeHarness,
-    NativeTurnStatus,
-    OpencodeMcpKind,
-    OpencodePermissionAction,
+    NativeThreadOperation,
+    NativeThreadProblem,
+    NativeThreadVerb,
+    OpencodeEventType,
+    OpencodeFlag,
+    WslFlag,
 )
 from vidbyte.lib.enums.outputs import (
     DeliveryStatus,
@@ -127,7 +131,7 @@ from vidbyte.lib.enums.outputs import (
     TypefullyPlatform,
 )
 from vidbyte.lib.enums.platform import Platform
-from vidbyte.lib.enums.process import ProcessLaunchFailure
+from vidbyte.lib.enums.process import CliOptionStyle, ProcessLaunchFailure
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.enums.reasoning_strategies import (
     AbsenceEvidenceSignificance,
@@ -166,17 +170,16 @@ from vidbyte.lib.enums.usage import UsageAccountingFailure, UsageKind
 
 __all__ = [
     "AbsenceEvidenceSignificance",
-    "AcpToolKind",
     "AgentRuntimeStateKey",
     "AgentRuntimeType",
     "AgentSpeedRecordingIntegrity",
     "AgentType",
-    "ApprovalOutcome",
     "AssumptionAction",
     "BasisType",
     "BudgetPreset",
     "BurdenOfProofVerdict",
     "CircularityVerdict",
+    "CliOptionStyle",
     "CodexApprovalMode",
     "CodexContextAnchor",
     "CodexInputType",
@@ -202,11 +205,12 @@ __all__ = [
     "FailureSeverity",
     "FailureStatus",
     "GitHeadState",
+    "GrokFlag",
     "GrokPermissionMode",
+    "GrokReasoningEffort",
     "HypothesisStatus",
     "IdentityVerdict",
     "ImpactLevel",
-    "InterruptSource",
     "JevBoundaryKind",
     "JevClaimKind",
     "JevCompletionStatus",
@@ -234,13 +238,17 @@ __all__ = [
     "ModelNameModality",
     "ModelProvider",
     "MultiAgentStopReason",
+    "MuseFlag",
+    "MuseMethod",
     "MuseReasoningEffort",
-    "MuseViewDirection",
+    "NativeEnvironmentVariable",
     "NativeHarness",
-    "NativeTurnStatus",
+    "NativeThreadOperation",
+    "NativeThreadProblem",
+    "NativeThreadVerb",
     "NecessarySufficientVerdict",
-    "OpencodeMcpKind",
-    "OpencodePermissionAction",
+    "OpencodeEventType",
+    "OpencodeFlag",
     "OperatingSystemFamily",
     "OrchestratorAction",
     "OutputDestination",
@@ -275,4 +283,5 @@ __all__ = [
     "TypefullyPlatform",
     "UsageAccountingFailure",
     "UsageKind",
+    "WslFlag",
 ]

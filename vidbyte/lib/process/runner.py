@@ -1,14 +1,14 @@
 """FILE: vidbyte/lib/process/runner.py
 
 PURPOSE: Defines CliRunner, the canonical way to run one command-line program to completion with a time bound, capped output and no inherited standard input, and ProcessStopper, which stops a child's whole process tree (process group on POSIX, taskkill /T on Windows) and reaps it within a bound.
-ROLE IN CODEBASE: CliRunner runs grok --version, grok models, the Grok one-shot and fork runs, and the Muse in-distro reap and WSL distro listing (vidbyte/harnesses/native/). ProcessStopper is also used by ManagedProcess (vidbyte/lib/process/managed.py) and by McpStdioTransport when stop_process_tree is set (vidbyte/tools/mcp/transport.py).
-ARCHITECTURE NOTE: Canonical lib helper (AGENTS.md principle 5). Every failure is a field of the returned CliOutcome; only asyncio.CancelledError is raised, after the tree is stopped. Children start with start_new_session=True on POSIX so their process group id is their pid, which is what lets ProcessStopper reach grandchildren even after the leader exited. Timing constants are read through the native_hosts constants module at call time so tests can shrink them.
-FUNCTION INVENTORY: CliRunner.run is the narrated main function; CliRunner.launch is the shared static launch that run and ManagedProcess.start use, returning the child or the launch failure; _feed_stdin writes stdin_text and closes the pipe; _drain reads one stream into a capped buffer while counting the rest; _finish_readers bounds and cancels the drain tasks; _outcome builds the CliOutcome. ProcessStopper.stop_tree is the narrated main function; _signal_group, _start_taskkill, _wait_taskkill, _kill_leader, _bounded_wait and _close_pipes are its single-step helpers.
+ROLE IN CODEBASE: CliRunner runs every vendor process of the harness thread functions under vidbyte/harnesses/native/: the grok, opencode and muse exec runs, the muse serve exchange, the WSL distro listing and the Muse in-distro reap. ProcessStopper is the tree stop CliRunner uses on timeout and cancellation.
+ARCHITECTURE NOTE: Canonical lib helper (AGENTS.md principle 5). Every failure is a field of the returned CliOutcome; only asyncio.CancelledError is raised, after the tree is stopped. Children start with start_new_session=True on POSIX so their process group id is their pid, which is what lets ProcessStopper reach grandchildren even after the leader exited. The child starts with the caller's environment minus the invocation's env_remove names, with env_overlay on top. Timing constants are read through the native_threads constants module at call time so tests can shrink them.
+FUNCTION INVENTORY: CliRunner.run is the narrated main function; CliRunner.launch starts the child with its environment, returning the child or the launch failure; _feed_stdin writes stdin_text and closes the pipe; _drain reads one stream into a capped buffer while counting the rest; _finish_readers bounds and cancels the drain tasks; _outcome builds the CliOutcome. ProcessStopper.stop_tree is the narrated main function; _signal_group, _start_taskkill, _wait_taskkill, _kill_leader, _bounded_wait and _close_pipes are its single-step helpers.
 COMMON MODIFICATION PATTERNS: A new process option adds a CliInvocation field and its use in run or launch; keep the stop path in ProcessStopper so every caller gets it.
 WHAT NOT TO DO IN THIS FILE: 1. Do not pass shell=True or build a command string; argv goes to create_subprocess_exec (lint S055). 2. Do not let a child inherit the caller's stdin; it is a pipe or DEVNULL. 3. Do not wait without a bound after a kill; a grandchild can hold the pipes open forever.
-KNOWN EDGE CASES: On Windows, taskkill /T cannot reach a grandchild of a leader that already exited. A program name is looked up through PATH and PATHEXT on Windows so .cmd shims start. Output is decoded as UTF-8 and trimmed to whole characters within max_output_bytes.
-RELATED DOCS: docs/spec/native-grok-opencode-meta-hosts/spec.md §8.5 (Process helpers, Standard input), D-4, D-21, D-23; vidbyte/lib/README.md
-TESTS: tests/features/grok_host/test_grok_host_process_helpers.py
+KNOWN EDGE CASES: On Windows, taskkill /T cannot reach a grandchild of a leader that already exited. A program name is looked up through PATH and PATHEXT on Windows; the harness launchers refuse batch files before they get here. Output is decoded as UTF-8 and trimmed to whole characters within max_output_bytes.
+RELATED DOCS: vidbyte/lib/README.md
+TESTS: tests/features/harness_threads/test_harness_threads_runner.py, tests/features/harness_threads/test_harness_threads_process_bounds.py
 """
 
 from __future__ import annotations
@@ -20,11 +20,9 @@ import shutil
 import signal
 import sys
 
-from vidbyte.lib.constants import native_hosts as native_host_constants
+from vidbyte.lib.constants import native_threads
 from vidbyte.lib.dataclasses.process import CliInvocation, CliOutcome
 from vidbyte.lib.enums.process import ProcessLaunchFailure
-
-_TASKKILL_ARGUMENTS = ("taskkill", "/T", "/F", "/PID")
 
 
 class ProcessStopper:
@@ -84,7 +82,7 @@ class ProcessStopper:
         # Starts taskkill /T /F on the tree with no inherited streams;
         # None when it cannot start, so the leader kill still runs.
         try:
-            return await asyncio.create_subprocess_exec(*_TASKKILL_ARGUMENTS, str(pid), stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+            return await asyncio.create_subprocess_exec(*native_threads.NATIVE_TASKKILL_ARGUMENTS, str(pid), stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
         except OSError:
             return None
 
@@ -150,8 +148,8 @@ class CliRunner:
             return CliOutcome(exit_code=None, stdout="", stderr="", stdout_truncated=False, stderr_truncated=False, timed_out=False, launch_failure=launch_failure)
         stdout, stderr = bytearray(), bytearray()
         readers = (
-            asyncio.create_task(self._drain(process.stdout, stdout, invocation.max_output_bytes), name="cli-runner-stdout"),
-            asyncio.create_task(self._drain(process.stderr, stderr, invocation.max_output_bytes), name="cli-runner-stderr"),
+            asyncio.create_task(self._drain(process.stdout, stdout, invocation.max_output_bytes), name=native_threads.NATIVE_STDOUT_TASK_NAME),
+            asyncio.create_task(self._drain(process.stderr, stderr, invocation.max_output_bytes), name=native_threads.NATIVE_STDERR_TASK_NAME),
         )
         timed_out = False
         try:
@@ -166,11 +164,11 @@ class CliRunner:
             # The run passed its bound: stop and reap the whole tree,
             # keeping the output read so far.
             timed_out = True
-            await ProcessStopper.stop_tree(process, grace_seconds=native_host_constants.NATIVE_KILL_WAIT_SECONDS)
+            await ProcessStopper.stop_tree(process, grace_seconds=native_threads.NATIVE_KILL_WAIT_SECONDS)
         except asyncio.CancelledError:
             # The caller gave up: stop and reap the tree before the
             # cancellation goes on.
-            await ProcessStopper.stop_tree(process, grace_seconds=native_host_constants.NATIVE_KILL_WAIT_SECONDS)
+            await ProcessStopper.stop_tree(process, grace_seconds=native_threads.NATIVE_KILL_WAIT_SECONDS)
             await self._finish_readers(readers)
             raise
         # Collect whatever the readers still hold, then
@@ -189,6 +187,13 @@ class CliRunner:
         # ProcessStopper reaches its whole group. A failed launch is
         # returned, never raised.
         program, *arguments = invocation.argv
+        # @intent cli-child-env-inherits-the-callers-environment
+        # The child keeps the caller's PATH, home, proxy and locale
+        # settings, so a vendor CLI behaves as it does in a terminal;
+        # only the env_remove names are left out, and the overlay the
+        # harness sets (its key, its private folders) wins.
+        environment = {name: value for name, value in os.environ.items() if name not in invocation.env_remove}
+        environment.update(invocation.env_overlay)
         if sys.platform == "win32":
             program = shutil.which(program) or program
         try:
@@ -199,7 +204,7 @@ class CliRunner:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=invocation.cwd,
-                env=dict(invocation.env),
+                env=environment,
                 start_new_session=sys.platform != "win32",
             )
         except FileNotFoundError:
@@ -219,7 +224,7 @@ class CliRunner:
             return
         with contextlib.suppress(BrokenPipeError, ConnectionResetError, OSError):
             if stdin_text is not None:
-                process.stdin.write(stdin_text.encode("utf-8"))
+                process.stdin.write(stdin_text.encode(native_threads.NATIVE_TEXT_ENCODING))
                 await process.stdin.drain()
             process.stdin.close()
 
@@ -230,13 +235,13 @@ class CliRunner:
         if stream is None:
             return
         with contextlib.suppress(OSError, ValueError):
-            while chunk := await stream.read(native_host_constants.NATIVE_PROCESS_READ_CHUNK_BYTES):
-                buffer.extend(chunk[: limit_bytes + native_host_constants.NATIVE_PROCESS_TRUNCATION_PROBE_BYTES - len(buffer)])
+            while chunk := await stream.read(native_threads.NATIVE_PROCESS_READ_CHUNK_BYTES):
+                buffer.extend(chunk[: limit_bytes + native_threads.NATIVE_PROCESS_TRUNCATION_PROBE_BYTES - len(buffer)])
 
     async def _finish_readers(self, readers: tuple[asyncio.Task[None], ...]) -> None:
         # Gives the readers one kill-wait to reach EOF, then cancels any
         # that a surviving grandchild keeps open.
-        _done, pending = await asyncio.wait(readers, timeout=native_host_constants.NATIVE_KILL_WAIT_SECONDS)
+        _done, pending = await asyncio.wait(readers, timeout=native_threads.NATIVE_KILL_WAIT_SECONDS)
         for task in pending:
             task.cancel()
         if pending:
@@ -247,8 +252,8 @@ class CliRunner:
         # Decodes each stream within the byte cap, trimming a partly
         # kept character, so the text is valid and never longer than the
         # cap; the truncated flags say whether more was read.
-        out_text = bytes(stdout[:limit_bytes]).decode("utf-8", errors="replace").encode("utf-8")[:limit_bytes].decode("utf-8", errors="ignore")
-        err_text = bytes(stderr[:limit_bytes]).decode("utf-8", errors="replace").encode("utf-8")[:limit_bytes].decode("utf-8", errors="ignore")
+        out_text = bytes(stdout[:limit_bytes]).decode(native_threads.NATIVE_TEXT_ENCODING, errors=native_threads.NATIVE_DECODE_REPLACE).encode(native_threads.NATIVE_TEXT_ENCODING)[:limit_bytes].decode(native_threads.NATIVE_TEXT_ENCODING, errors=native_threads.NATIVE_DECODE_IGNORE)
+        err_text = bytes(stderr[:limit_bytes]).decode(native_threads.NATIVE_TEXT_ENCODING, errors=native_threads.NATIVE_DECODE_REPLACE).encode(native_threads.NATIVE_TEXT_ENCODING)[:limit_bytes].decode(native_threads.NATIVE_TEXT_ENCODING, errors=native_threads.NATIVE_DECODE_IGNORE)
         return CliOutcome(
             exit_code=process.returncode,
             stdout=out_text,
