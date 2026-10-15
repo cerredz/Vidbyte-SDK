@@ -18,12 +18,12 @@ started: 2026-10-15
 | S2 tests | done | 2026-10-15 | 2026-10-16 | reports/S2-test-author.md | 397 tests red in tests/features/harness_threads/; spec r4 90265f78; S2_HEAD 8e5e65ec |
 | S3 implement | done | 2026-10-16 | 2026-10-16 | reports/S3-implementer.md | 49 rows; HEAD d5581a24 pushed; pack 395/2 skip; run_ci source+package PASS; lint PASS; Semgrep 0; PR retitled [WIP]; ci.yml 38754831930 dispatched |
 | S4 adversarial review | done | 2026-10-16 | 2026-10-16 | reports/S4-review-{conformance,conventions,engineering}.md, reports/S4-findings-verifier.md | review.md: 11 confirmed (5 Blocker R-1..R-5, 6 Major R-6..R-11), 15 Minor, 0 refuted |
-| S5 repair loop | running | 2026-10-16 | | reports/S5-repair-1.md | |
-| S5 re-review | pending | | | | |
+| S5 repair loop | done | 2026-10-16 | 2026-10-16 | reports/S5-repair-1.md, verify-log.md | converged at iteration 1: R-1..R-11 + trivial R-15/16/17 fixed (74114bd1..b8305b44); pack 428/2 skip; run_ci source 5601 passed (orchestrator re-run) ; remote 4/4 green on bb7d78bb |
+| S5 re-review | running | 2026-10-16 | | reports/S5-rereview.md | |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 — CAP REACHED (round 1 SOUND WITH FIXES 1B/8M/4m → r2 65f6b95d; round 2 SOUND WITH FIXES 2B/3M/3m → r3 final, approved) · S5 repair iterations: 1/8 (running) · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 — CAP REACHED (round 1 SOUND WITH FIXES 1B/8M/4m → r2 65f6b95d; round 2 SOUND WITH FIXES 2B/3M/3m → r3 final, approved) · S5 repair iterations: 1/8 (converged) · S5 re-review rounds: 1/2 (running)
 
 ## Decisions the orchestrator made
 - 2026-10-15 — Work on the existing PR branch `feat/native-grok-opencode-meta-hosts` in a new worktree, not a new `feat/<slug>` branch — the owner said "update the pr" (request.md §A Prompt 4).
@@ -78,3 +78,4 @@ started: 2026-10-15
 - GLM Coding Plan allowlist names OpenCode, not Grok or Muse; Muse has no GLM/DeepSeek route (`--provider echo|meta` only). — *source:* vendor-facts.md
 - S2 r4: native Muse serve `CliInvocation` passes `env_remove=(META_API_KEY,)`; `CliRunner` starts the child with os.environ minus env_remove, then env_overlay on top. Muse exec thread id = `stream.id` of the first record whose `stream.kind` is "session"; a different id from the sent `--session-id` → `muse.thread_not_found` with that stream id. A Muse fork answered with the source id fails as `muse.protocol_mismatch` before any exec starts. Red baseline now `7 failed, 2 skipped, 388 errors` (pack), whole suite `7 failed, 5173 passed, 16 skipped, 388 errors`. — *source:* S2 r4 addendum
 - S3: 12 implementation deviations listed under spec §17 (main: `NativeThreadRequest.workspace: Path | str`, `skills: Sequence[str | Path]` forced by S009). S009 must stay ≤ 350; improved ratchets not re-baselined (lint/ off limits). Ruff I001 on `vidbyte/lib/errors/__init__.py` is pre-existing on main. A007 flags literal indexes near request/status/limit names → use unpacking. Semgrep: scratch venv `…/scratchpad/semgrep-venv` with its Scripts first on PATH and PYTHONUTF8=1. `wsl -l -q` is UTF-16 → drop NULs. tests/test_mcp_stdio_transport.py cancel-waiter flake can fail locally under load too (main's code, byte-identical). AC-20 fixing commits for S6's thread replies are in spec §6.2 Proof; `grok/cli.py` was removed in 8d6e643c. — *source:* S3 implementer
+- S5-1: Semgrep must run from the scratch venv with a POSIX-style PATH entry (`/c/Users/.../semgrep-venv/Scripts`); a `C:/...` entry falls through to the broken global semgrep. PATH/PATHEXT names are plain constants (NativeEnvironmentVariable members are pinned by a surface test). R-8 now refuses (win32) a Grok/Muse prompt whose quoted form exceeds 24,000 UTF-16 units — stricter than raw length (a 15,000-char backslash/quote mix that used to run is refused); re-review checks it against EC-3. R-11 verified on 3.11/3.13 locally and 3.12 remotely. Spec §17 deviations now 1–22. — *source:* S5 repair 1
