@@ -299,6 +299,10 @@ MUSE_DISTRO_MISSING_DETAIL = "WSL has no distro named {distro}; {program} lists 
 MUSE_NOT_IN_DISTRO_DETAIL = "The SDK looked for {muse_path} inside the WSL distro {distro}."
 NATIVE_FORK_RETURNED_SOURCE_DETAIL = "The fork answered with its source thread, so the vendor continued the source thread instead of forking it."
 NATIVE_OTHER_THREAD_DETAIL = "The vendor answered on thread {answered} instead of {requested}."
+# The vendor text of an opencode error event: its name, its HTTP
+# status when it has one, and its message.
+OPENCODE_ERROR_EVENT_TEXT = "{name}: {message}"
+OPENCODE_ERROR_EVENT_STATUS_TEXT = "{name} (status {status}): {message}"
 
 # The failure code of each harness and problem, a closed table, so the
 # error factory never builds a code from text.
