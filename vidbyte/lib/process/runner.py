@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Canonical lib helper (AGENTS.md principle 5). Every failure i
 FUNCTION INVENTORY: CliExitProtocol.process_exited sets the run's exited event. CliRunner.run is the narrated main function; CliRunner.find_program finds the file a bare program name starts, never in the current folder; CliRunner.launch starts the child with its environment, returning the child or the launch failure; json_objects reads the JSON objects a CLI printed one per line; _feed_stdin writes stdin_text and closes the pipe; _drain reads one stream into a capped buffer while counting the rest; _finish_readers bounds and cancels the drain tasks and says whether one was still open; _outcome builds the CliOutcome. ProcessStopper.stop_tree is the narrated main function; _signal_group, _start_taskkill, _wait_taskkill, _kill_leader, _bounded_wait and _close_pipes are its single-step helpers.
 COMMON MODIFICATION PATTERNS: A new process option adds a CliInvocation field and its use in run or launch; keep the stop path in ProcessStopper so every caller gets it.
 WHAT NOT TO DO IN THIS FILE: 1. Do not pass shell=True or build a command string; argv goes to create_subprocess_exec (lint S055). 2. Do not let a child inherit the caller's stdin; it is a pipe or DEVNULL. 3. Do not wait without a bound after a kill; a grandchild can hold the pipes open forever. 4. Do not learn of the exit from Process.wait() in run; on Python 3.12+ it resolves only after every pipe closes, which a grandchild can delay for good.
-KNOWN EDGE CASES: A run ends when the leader exits, not when its pipes close: the readers then get one kill wait, and a descendant still holding the pipes gets the tree stop. On Windows, taskkill /T cannot reach a grandchild of a leader that already exited, and taskkill itself starts by its full path in the System32 folder under the SystemRoot variable (the C: drive's Windows folder when it is unset), never by its bare name; a root that is not absolute leaves only the leader kill. On Windows a bare program name is looked up only in the absolute PATH folders with PATHEXT, and one found in none of them is not started, because CreateProcess would search the current folder; the harness launchers refuse batch files before they get here. Output is decoded as UTF-8 and trimmed to whole characters within max_output_bytes.
+KNOWN EDGE CASES: A run ends when the leader exits, not when its pipes close: the readers then get one kill wait, a descendant still holding the pipes gets the tree stop, and a cancel during that wait stops the tree too. On Windows, taskkill /T cannot reach a grandchild of a leader that already exited, and taskkill itself starts by its full path in the System32 folder under the SystemRoot variable (the C: drive's Windows folder when it is unset), never by its bare name; a root that is not absolute leaves only the leader kill. On Windows a bare program name is looked up only in the absolute PATH folders with PATHEXT, and one found in none of them is not started, because CreateProcess would search the current folder; the harness launchers refuse batch files before they get here. Output is decoded as UTF-8 and trimmed to whole characters within max_output_bytes.
 RELATED DOCS: vidbyte/lib/README.md
 TESTS: tests/features/harness_threads/test_harness_threads_runner.py, tests/features/harness_threads/test_harness_threads_process_bounds.py
 """
@@ -195,23 +195,25 @@ class CliRunner:
             async with asyncio.timeout(invocation.timeout_seconds):
                 await self._feed_stdin(process, invocation.stdin_text)
                 await exited.wait()
+            # Give the readers one kill wait to reach the end of the
+            # output. A reader still open after it means a descendant
+            # holds the pipes, so the whole tree is stopped; a cancel
+            # that lands in this wait is handled below like any other.
+            if await self._finish_readers(readers):
+                await ProcessStopper.stop_tree(process, grace_seconds=native_threads.NATIVE_KILL_WAIT_SECONDS)
         except TimeoutError:
             # The run passed its bound: stop and reap the whole tree,
-            # keeping the output read so far.
+            # then collect the output read so far.
             timed_out = True
             await ProcessStopper.stop_tree(process, grace_seconds=native_threads.NATIVE_KILL_WAIT_SECONDS)
+            await self._finish_readers(readers)
         except asyncio.CancelledError:
             # The caller gave up: stop and reap the tree before the
             # cancellation goes on.
             await ProcessStopper.stop_tree(process, grace_seconds=native_threads.NATIVE_KILL_WAIT_SECONDS)
             await self._finish_readers(readers)
             raise
-        # Give the readers one kill wait to reach the end of the
-        # output. A reader still open after it means a descendant holds
-        # the pipes, so the whole tree is stopped; the outcome keeps
-        # what was read.
-        if await self._finish_readers(readers) and not timed_out:
-            await ProcessStopper.stop_tree(process, grace_seconds=native_threads.NATIVE_KILL_WAIT_SECONDS)
+        # The outcome keeps what was read.
         return self._outcome(process, stdout, stderr, invocation.max_output_bytes, timed_out)
 
     @staticmethod
