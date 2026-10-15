@@ -67,6 +67,10 @@ NATIVE_PROCESS_READ_CHUNK_BYTES = 65536
 # asyncio's own buffer limit for a child's stream readers.
 NATIVE_PROCESS_STREAM_LIMIT_BYTES = 65536
 NATIVE_PROCESS_TRUNCATION_PROBE_BYTES = 1
+# How often a POSIX tree stop checks whether the killed group is gone,
+# and the signal number that only checks a group exists (signal 0).
+NATIVE_PROCESS_GROUP_POLL_SECONDS = 0.01
+NATIVE_PROCESS_GROUP_PROBE_SIGNAL = 0
 NATIVE_SUCCESS_EXIT_CODE = 0
 # taskkill starts by its full path in the Windows system folder, so
 # Windows never runs a taskkill.exe from the current folder.

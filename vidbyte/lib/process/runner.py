@@ -3,10 +3,10 @@
 PURPOSE: Defines CliRunner, the canonical way to run one command-line program to completion with a time bound, capped output and no inherited standard input; CliExitProtocol, the child's stream protocol that also signals the child's own exit; and ProcessStopper, which stops a child's whole process tree (process group on POSIX, taskkill /T on Windows) and reaps it within a bound.
 ROLE IN CODEBASE: CliRunner runs every vendor process of the harness thread functions under vidbyte/harnesses/native/: the grok, opencode and muse exec runs, the muse serve exchange, the WSL distro listing and the Muse in-distro reap. ProcessStopper is the tree stop CliRunner uses on timeout and cancellation.
 ARCHITECTURE NOTE: Canonical lib helper (AGENTS.md principle 5). Every failure is a field of the returned CliOutcome; only asyncio.CancelledError is raised, after the tree is stopped. Children start with start_new_session=True on POSIX so their process group id is their pid, which is what lets ProcessStopper reach grandchildren even after the leader exited. The child starts with the caller's environment minus the invocation's env_remove names, with env_overlay on top. Timing constants are read through the native_threads constants module at call time so tests can shrink them.
-FUNCTION INVENTORY: CliExitProtocol.process_exited sets the run's exited event. CliRunner.run is the narrated main function; CliRunner.find_program finds the file a bare program name starts, never in the current folder; CliRunner.launch starts the child with its environment, returning the child or the launch failure; json_objects reads the JSON objects a CLI printed one per line; _feed_stdin writes stdin_text and closes the pipe; _drain reads one stream into a capped buffer while counting the rest; _finish_readers bounds and cancels the drain tasks and says whether one was still open; _outcome builds the CliOutcome. ProcessStopper.stop_tree is the narrated main function; _signal_group, _start_taskkill, _wait_taskkill, _kill_leader, _bounded_wait and _close_pipes are its single-step helpers.
+FUNCTION INVENTORY: CliExitProtocol.process_exited sets the run's exited event. CliRunner.run is the narrated main function; CliRunner.find_program finds the file a bare program name starts, never in the current folder; CliRunner.launch starts the child with its environment, returning the child or the launch failure; json_objects reads the JSON objects a CLI printed one per line; _feed_stdin writes stdin_text and closes the pipe; _drain reads one stream into a capped buffer while counting the rest; _finish_readers bounds and cancels the drain tasks and says whether one was still open; _outcome builds the CliOutcome. ProcessStopper.stop_tree is the narrated main function; _signal_group, _wait_group_gone, _start_taskkill, _wait_taskkill, _kill_leader, _bounded_wait and _close_pipes are its single-step helpers.
 COMMON MODIFICATION PATTERNS: A new process option adds a CliInvocation field and its use in run or launch; keep the stop path in ProcessStopper so every caller gets it.
 WHAT NOT TO DO IN THIS FILE: 1. Do not pass shell=True or build a command string; argv goes to create_subprocess_exec (lint S055). 2. Do not let a child inherit the caller's stdin; it is a pipe or DEVNULL. 3. Do not wait without a bound after a kill; a grandchild can hold the pipes open forever. 4. Do not learn of the exit from Process.wait() in run; on Python 3.12+ it resolves only after every pipe closes, which a grandchild can delay for good.
-KNOWN EDGE CASES: A run ends when the leader exits, not when its pipes close: the readers then get one kill wait, a descendant still holding the pipes gets the tree stop, and a cancel during that wait stops the tree too. On Windows, taskkill /T cannot reach a grandchild of a leader that already exited, and taskkill itself starts by its full path in the System32 folder under the SystemRoot variable (the C: drive's Windows folder when it is unset), never by its bare name; a root that is not absolute leaves only the leader kill. On Windows a bare program name is looked up only in the absolute PATH folders with PATHEXT, and one found in none of them is not started, because CreateProcess would search the current folder; the harness launchers refuse batch files before they get here. Output is decoded as UTF-8 and trimmed to whole characters within max_output_bytes.
+KNOWN EDGE CASES: A run ends when the leader exits, not when its pipes close: the readers then get one kill wait, a descendant still holding the pipes gets the tree stop, and a cancel during that wait stops the tree too. On POSIX a tree stop ends once the killed group has no process left, within the grace period; a zombie that its new parent never reaps (no init in a container) holds that wait to its bound. On Windows, taskkill /T cannot reach a grandchild of a leader that already exited, and taskkill itself starts by its full path in the System32 folder under the SystemRoot variable (the C: drive's Windows folder when it is unset), never by its bare name; a root that is not absolute leaves only the leader kill. On Windows a bare program name is looked up only in the absolute PATH folders with PATHEXT, and one found in none of them is not started, because CreateProcess would search the current folder; the harness launchers refuse batch files before they get here. Output is decoded as UTF-8 and trimmed to whole characters within max_output_bytes.
 RELATED DOCS: vidbyte/lib/README.md
 TESTS: tests/features/harness_threads/test_harness_threads_runner.py, tests/features/harness_threads/test_harness_threads_process_bounds.py
 """
@@ -53,6 +53,10 @@ class ProcessStopper:
                 ProcessStopper._signal_group(process.pid, signal.SIGTERM)
                 await ProcessStopper._bounded_wait(process, grace_seconds)
                 ProcessStopper._signal_group(process.pid, signal.SIGKILL)
+                # A killed process takes a moment to go, so wait,
+                # within the bound, until no process of the group is
+                # left.
+                await ProcessStopper._wait_group_gone(process.pid, grace_seconds)
             # Kill the leader itself if it is somehow still running,
             # then reap it within the bound.
             ProcessStopper._kill_leader(process)
@@ -77,6 +81,23 @@ class ProcessStopper:
             return
         with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(pid, signal_number)
+
+    @staticmethod
+    async def _wait_group_gone(pid: int, seconds: float) -> None:
+        # @intent stop-tree-waits-until-the-group-is-gone
+        # A KILL takes effect only when the kernel next runs the
+        # process, and tearing it down takes time, so a descendant can
+        # still run just after killpg returns, when its leader exited
+        # long before and nothing else is waited for. Polls, at most
+        # seconds, until the group has no process left; a zombie that
+        # its new parent never reaps holds the wait to the bound.
+        if sys.platform == "win32":
+            return
+        with contextlib.suppress(TimeoutError, ProcessLookupError, PermissionError):
+            async with asyncio.timeout(seconds):
+                while True:
+                    os.killpg(pid, native_threads.NATIVE_PROCESS_GROUP_PROBE_SIGNAL)
+                    await asyncio.sleep(native_threads.NATIVE_PROCESS_GROUP_POLL_SECONDS)
 
     @staticmethod
     async def _start_taskkill(pid: int) -> asyncio.subprocess.Process | None:
