@@ -15,8 +15,8 @@ started: 2026-10-15
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-15 | 2026-10-15 | reports/S0-scout.md, reports/S0-vendor-scout.md | merge of origin/main; code-map.md; vendor-facts.md |
 | S1 spec + review | done | 2026-10-15 | 2026-10-15 | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | spec r3 approved 8d1ee6d9 (2 review rounds, 21 findings applied) |
-| S2 tests | done (spec gaps being resolved) | 2026-10-15 | 2026-10-16 | reports/S2-test-author.md | 393 tests red in tests/features/harness_threads/; S2_HEAD 634b1954 |
-| S3 implement | pending | | | | |
+| S2 tests | done | 2026-10-15 | 2026-10-16 | reports/S2-test-author.md | 397 tests red in tests/features/harness_threads/; spec r4 90265f78; S2_HEAD 8e5e65ec |
+| S3 implement | running | 2026-10-16 | | reports/S3-implementer.md | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
@@ -44,6 +44,8 @@ started: 2026-10-15
 - 2026-10-16 — S2_HEAD = 634b1954 (tests 2a712138 + proof 634b1954). From here on `git diff 634b1954..HEAD -- tests` must stay empty unless the orchestrator re-opens S2. The S2 agent hit a usage limit once (2026-10-15) before writing anything and was resumed with SendMessage.
 - 2026-10-16 — S2 open items naming spec defects are sent to the spec author (Revision mode, r4) before S3: WSLENV order mismatch (§9.2 vs row 44); no failure code for a Muse fork that returns its source id; AC-5 says agent/variant/distro are refused at call time but §9.1 refuses them at config construction; native Muse serve may inherit the caller's own META_API_KEY under D-13. The spec aligns to the tests where they already pin a behavior; any new behavior gets its test from the S2 author, not the implementer.
 
+- 2026-10-16 — Spec r4 (90265f78) resolved the four S2 defects; the S2 author added the four r4 tests (e3dcb214, proof 5a1813da, report 8e5e65ec). Orchestrator re-ran the four: `4 errors` (ModuleNotFoundError vidbyte.lib.dataclasses.native_threads). New S2_HEAD = 8e5e65ec: `git diff 8e5e65ec..HEAD -- tests` must stay empty from S3 on.
+
 ## User replies (verbatim)
 - (none yet)
 
@@ -67,3 +69,4 @@ started: 2026-10-15
 - Round-2 review facts: `RecordFieldValidator` uses `re.fullmatch` (vidbyte/lib/dataclasses/validation.py:146) — every pattern must describe the whole value. `require_directory` refuses relative paths only when it runs before `Path.resolve()`. `shutil.copytree` (copy2) keeps source mtimes; only st_ino changes. Grok project `.grok/config.toml` can add only `[mcp_servers]`, `[plugins]`, `[permission]`, `[mcp] max_output_bytes`; models/auth load only from `$GROK_HOME`. S061 also flags `read_text`/`read_bytes` with a positional arg and `shutil.copy`/`copy2`/`copyfile`/`move` (not `copytree`, `rmtree`, `mkdir`, `filecmp`). On this console `python -I` ignores PYTHONIOENCODING → use `-X utf8`; a bash heredoc combined with `< /dev/null` loses the script → put scripts in the scratchpad. — *source:* S1 reviewer round 2
 - S2 tests: pack `tests/features/harness_threads/` (conftest.py, fake_harness.py, FEATURE.md, README.md, 14 test files); run `PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider tests/features/harness_threads`; red baseline `7 failed, 5173 passed, 16 skipped, 384 errors`. `NativeThreadError.relevant_tests == ("tests/features/harness_threads",)`. Timing knobs monkeypatched on `vidbyte.lib.constants.native_threads` (read at call time). Muse temp dir via `tempfile.mkdtemp()` with no `dir` (tests redirect tempfile.tempdir). `OPENCODE_CONFIG_CONTENT` compared exactly; omit `skills` when none. AC-16 holds a hard link to the copied SKILL.md — never remove and re-copy a matching skills folder. WSL: `WSLENV` starts with the caller's value; serve never forwards META_API_KEY. Reap finishes before CancelledError propagates. `check_error` in conftest defines the INV-5 message order and observation spellings (test-plan "Notes for the implementer"). CRLF working tree; stage new files before lint. — *source:* S2 test author
 - GLM Coding Plan allowlist names OpenCode, not Grok or Muse; Muse has no GLM/DeepSeek route (`--provider echo|meta` only). — *source:* vendor-facts.md
+- S2 r4: native Muse serve `CliInvocation` passes `env_remove=(META_API_KEY,)`; `CliRunner` starts the child with os.environ minus env_remove, then env_overlay on top. Muse exec thread id = `stream.id` of the first record whose `stream.kind` is "session"; a different id from the sent `--session-id` → `muse.thread_not_found` with that stream id. A Muse fork answered with the source id fails as `muse.protocol_mismatch` before any exec starts. Red baseline now `7 failed, 2 skipped, 388 errors` (pack), whole suite `7 failed, 5173 passed, 16 skipped, 388 errors`. — *source:* S2 r4 addendum
