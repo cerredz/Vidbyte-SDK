@@ -1,7 +1,7 @@
 ---
 spec: public-skill-loader
 title: "Public skill loader: resolve every #904 skill source without JevAgent (SDK 0.3.1)"
-status: tests-written
+status: implemented
 revision: 3
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-public-skill-loader
@@ -9,7 +9,7 @@ branch: feat/public-skill-loader
 base_commit: c9d31a7fb4128d1a609ce9702b0a55c71fcb1a3f
 created: 2026-10-15
 updated: 2026-10-15
-pr:
+pr: https://github.com/cerredz/Vidbyte-SDK/pull/1099
 ---
 
 # Spec: Public skill loader: resolve every #904 skill source without JevAgent (SDK 0.3.1)
