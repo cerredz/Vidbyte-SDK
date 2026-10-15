@@ -68,11 +68,12 @@ class NamesAndConstantsTests(unittest.TestCase):
 
         rows = ProviderKeyMatcher.KEY_FORMATS
         self.assertEqual([ModelProvider(provider) for provider, _, _ in rows], [ModelProvider.ANTHROPIC, ModelProvider.OPENROUTER, ModelProvider.OPENAI, ModelProvider.XAI, ModelProvider.GEMINI, ModelProvider.META])
-        self.assertEqual([set(prefixes) for _, prefixes, _ in rows], [{"sk-ant-"}, {"sk-or-"}, {"sk-proj-", "sk-admin-"}, {"xai-"}, {"AIza", "AQ."}, {"LLM|"}])
+        self.assertEqual([set(prefixes) for _, prefixes, _ in rows], [{"sk-ant-"}, {"sk-or-"}, {"sk-proj-", "sk-svcacct-", "sk-admin-"}, {"xai-"}, {"AIza", "AQ."}, {"LLM|"}])
         for _, _, pattern in rows:
             self.assertIsInstance(pattern, re.Pattern)
         self.assertEqual(set(ProviderKeyMatcher.FORMAT_BOUND_PROVIDERS), {ModelProvider.ANTHROPIC, ModelProvider.XAI, ModelProvider.GEMINI, ModelProvider.OPENROUTER, ModelProvider.META})
-        self.assertEqual(tuple(ProviderKeyMatcher.RESERVED_PREFIXES), (("sk-svcacct-", ModelProvider.OPENAI),))
+        self.assertEqual(tuple(ProviderKeyMatcher.RESERVED_PREFIXES), ())
+        self.assertEqual((ProviderKeyMatcher.OPENAI_KEY_PREFIX, ProviderKeyMatcher.OPENAI_JWT_PREFIX), ("sk-", "eyJ"))
 
     def test_the_removed_methods_are_gone(self) -> None:
         # Section 9.2 "Removed": no alias survives (D-20).

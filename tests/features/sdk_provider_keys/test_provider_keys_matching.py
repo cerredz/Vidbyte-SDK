@@ -25,6 +25,7 @@ from tests.features.sdk_provider_keys.provider_keys_fixtures import (
     K_OPENAI,
     K_OPENAI_2,
     K_OPENAI_ADMIN,
+    K_OPENAI_JWT,
     K_OPENROUTER,
     K_SK_UNPROVEN,
     K_UNPROVEN,
@@ -129,13 +130,14 @@ class TableFAndATests(unittest.TestCase):
     """AC-29, D-19, D-28, NG-18: which prefixes prove a provider and which providers take an unproven key."""
 
     def test_each_table_f_sample_proves_its_provider_and_every_unsourced_shape_is_unproven(self) -> None:
-        # AC-29: provider_of is the first full-matching rule; the legacy, hex, 48-character, service-account and dotted xai shapes prove nothing.
+        # AC-29: provider_of is the first full-matching rule; the legacy, hex, 48-character, JWT and dotted xai shapes prove nothing.
         alnum = "Ab1" * 20
         proven = (
             ("sk-ant-", "sk-ant-" + "api" + "Z" * 30, ModelProvider.ANTHROPIC),
             ("sk-or-", K_OPENROUTER, ModelProvider.OPENROUTER),
             ("sk-proj-", K_OPENAI, ModelProvider.OPENAI),
             ("sk-admin-", K_OPENAI_ADMIN, ModelProvider.OPENAI),
+            ("sk-svcacct-", "sk-svcacct-" + "w" * 24, ModelProvider.OPENAI),
             ("xai-", K_XAI, ModelProvider.XAI),
             ("AIza+35", "AIza" + "g" * 35, ModelProvider.GEMINI),
             ("AQ.", K_GEMINI_AQ, ModelProvider.GEMINI),
@@ -149,7 +151,8 @@ class TableFAndATests(unittest.TestCase):
             ("legacy openai", "sk-" + alnum[:20] + "T3Blbk" + "FJ" + alnum[:20]),
             ("sk- + 32 hex", "sk-" + "0123456789abcdef" * 2),
             ("sk- + 48 alnum", "sk-" + alnum[:48]),
-            ("sk-svcacct-", "sk-svcacct-" + "w" * 24),
+            ("dotted sk-svcacct-", "sk-svcacct-" + "a.b"),
+            ("openai access token", K_OPENAI_JWT),
             ("dotted xai-", "xai-client-secret." + "c" * 16),
             ("plain", K_UNPROVEN),
             ("AIza too short", "AIza" + "g" * 10),
@@ -171,6 +174,7 @@ class TableFAndATests(unittest.TestCase):
         bad_anthropic = "sk-ant-" + "a.b"
         bad_openai = "sk-proj-" + "a.b"
         bad_meta = "LLM" + "|" + "app" + "|" + "m" * 8
+        jwt = K_OPENAI_JWT
         for provider in ALL_PROVIDERS:
             with self.subTest(provider=provider.value):
                 open_provider = provider not in FORMAT_BOUND and provider is not ModelProvider.OPENAI
@@ -182,6 +186,8 @@ class TableFAndATests(unittest.TestCase):
                 self.assertEqual(matcher().accepts_unproven(provider, bad_openai), provider is ModelProvider.OPENAI)
                 # LLM| is reserved to meta, and meta takes no unproven key, so nothing takes a malformed Meta key.
                 self.assertFalse(matcher().accepts_unproven(provider, bad_meta))
+                # OpenAI's workload identity token is a JWT, so openai takes eyJ as well as sk- (table A).
+                self.assertEqual(matcher().accepts_unproven(provider, jwt), open_provider or provider is ModelProvider.OPENAI)
                 # A provider name works as well as the enum member.
                 self.assertEqual(matcher().accepts_unproven(provider.value, plain), open_provider)
 
@@ -241,6 +247,17 @@ class UniqueAssignmentTests(KeySafeAssertions):
         # With the primary holding a key already, the lone rule does not apply and unique assignment decides.
         record = matcher().match([K_ANTHROPIC, K_UNPROVEN], primary="anthropic", others=("deepseek",))
         self.assertEqual(key_view(record)[0], {"anthropic": K_ANTHROPIC, "deepseek": K_UNPROVEN})
+
+    def test_an_openai_access_token_beside_a_deepseek_key_is_refused_not_swapped(self) -> None:
+        # Table A: when openai refused eyJ, the token's one owner was deepseek, so elimination sent the DeepSeek key to openai and the token to DeepSeek.
+        deepseek_key = "sk-" + "0123456789abcdef" * 2
+        for entries in ([K_OPENAI_JWT, deepseek_key], [deepseek_key, K_OPENAI_JWT]):
+            with self.subTest(first=entries[0][:3]):
+                message, _details = self.refused(lambda entries=entries: matcher().match(entries, primary="openai", others=("deepseek",)), K_OPENAI_JWT, deepseek_key)
+                for fact in ("openai", "deepseek", "OPENAI_API_KEY", "DEEPSEEK_API_KEY"):
+                    self.assertIn(fact, message)
+        # Alone, the token is the keyless openai primary's credential (D-29).
+        self.assertEqual(key_view(matcher().match([K_OPENAI_JWT], primary="openai", others=("deepseek",)))[0], {"openai": K_OPENAI_JWT})
 
     def test_a_meta_key_proves_meta_in_any_order_and_meta_never_takes_an_unproven_key(self) -> None:
         # Table F/A: an LLM| key is meta's wherever it sits, so a Muse agent with a DeepSeek backup splits the list without guessing.

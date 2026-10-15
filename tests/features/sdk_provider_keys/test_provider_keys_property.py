@@ -26,6 +26,7 @@ from tests.features.sdk_provider_keys.provider_keys_fixtures import (
     K_META,
     K_OPENAI,
     K_OPENAI_2,
+    K_OPENAI_JWT,
     K_OPENROUTER,
     K_SK_UNPROVEN,
     K_SK_UNPROVEN_2,
@@ -43,7 +44,7 @@ MAX_ENTRIES = 5
 # Every kind of entry the matcher must handle; None and blanks are skipped, padded copies strip to their key.
 POOL: tuple[str | None, ...] = (
     K_ANTHROPIC, K_XAI, K_OPENAI, K_OPENAI_2, K_OPENROUTER, K_GEMINI_AQ, K_META,
-    K_UNPROVEN, K_UNPROVEN_2, K_SK_UNPROVEN, K_SK_UNPROVEN_2, VIDBYTE_KEY,
+    K_UNPROVEN, K_UNPROVEN_2, K_SK_UNPROVEN, K_SK_UNPROVEN_2, K_OPENAI_JWT, VIDBYTE_KEY,
     None, "", "   ", f"  {K_XAI}\n", f"\t{K_UNPROVEN} ",
 )
 KEYS = tuple(entry.strip() for entry in POOL if entry is not None and entry.strip())

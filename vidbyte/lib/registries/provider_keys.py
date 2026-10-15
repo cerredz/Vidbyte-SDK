@@ -42,7 +42,9 @@ class ProviderKeyMatcher:
         (ModelProvider.OPENROUTER, ("sk-or-",), re.compile(r"sk-or-[A-Za-z0-9_-]+")),
         # https://github.com/openai/plugins (an sk-proj key)
         # https://raw.githubusercontent.com/openai/openai-openapi/master/openapi.yaml
-        (ModelProvider.OPENAI, ("sk-proj-", "sk-admin-"), re.compile(r"sk-(?:proj|admin)-[A-Za-z0-9_-]+")),
+        # sk-svcacct-: OPENAI_API_KEY_PREFIXES in OpenAI's own codex,
+        # codex-rs/network-proxy/src/credential_broker/providers/openai.rs
+        (ModelProvider.OPENAI, ("sk-proj-", "sk-svcacct-", "sk-admin-"), re.compile(r"sk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]+")),
         # https://docs.x.ai/build/overview
         (ModelProvider.XAI, ("xai-",), re.compile(r"xai-[A-Za-z0-9_-]+")),
         # https://docs.cloud.google.com/docs/authentication/api-keys
@@ -62,10 +64,14 @@ class ProviderKeyMatcher:
     # https://github.com/openai/plugins (/^sk-[A-Za-z0-9_-]+$/)
     OPENAI_KEY_PREFIX: ClassVar[str] = "sk-"
 
+    # Table A: OpenAI also takes a short-lived workload identity access
+    # token, a JWT ("access_token": "eyJ..."), as the bearer credential:
+    # https://developers.openai.com/api/reference/workload-identity-federation
+    OPENAI_JWT_PREFIX: ClassVar[str] = "eyJ"
+
     # Refuse-only: a prefix reserved to one provider beyond table F. It
-    # never proves a key. Secondary source, the gitleaks openai rule:
-    # https://raw.githubusercontent.com/gitleaks/gitleaks/master/config/gitleaks.toml
-    RESERVED_PREFIXES: ClassVar[tuple[tuple[str, ModelProvider], ...]] = (("sk-svcacct-", ModelProvider.OPENAI),)
+    # never proves a key. Empty since sk-svcacct- moved to table F.
+    RESERVED_PREFIXES: ClassVar[tuple[tuple[str, ModelProvider], ...]] = ()
     DUPLICATE_KEY_MESSAGE: ClassVar[str] = "{field}[{first}] and {field}[{second}] are both {provider} keys; pass one key per provider."  # M-7
 
     @classmethod
@@ -92,7 +98,11 @@ class ProviderKeyMatcher:
         # set never decides its provider.
         if member in cls.FORMAT_BOUND_PROVIDERS:
             return False
-        return key.startswith(cls.OPENAI_KEY_PREFIX) if member is ModelProvider.OPENAI else True
+        # @intent openai-takes-its-access-tokens
+        # Refusing OpenAI's own JWT would leave another vendor as its
+        # only owner, and unique assignment would then push a second
+        # key to openai by elimination: two keys sent to wrong vendors.
+        return key.startswith((cls.OPENAI_KEY_PREFIX, cls.OPENAI_JWT_PREFIX)) if member is ModelProvider.OPENAI else True
 
     @classmethod
     def normalize(cls, api_keys: Iterable[str | None] | None, *, field_name: str = "api_keys") -> tuple[str, ...]:

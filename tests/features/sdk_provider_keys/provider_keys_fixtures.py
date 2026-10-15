@@ -41,6 +41,9 @@ K_META = "LLM" + "|" + "1" * 15 + "|" + "m" * 32
 # Unproven fakes: no table F prefix and no reserved prefix, so only table A and unique assignment decide their owner.
 K_UNPROVEN = "d-mock-" + "u" * 16
 K_UNPROVEN_2 = "k-mock-" + "v" * 16
+# An OpenAI workload identity access token fake: a JWT (eyJ header, payload, signature), unproven but takeable by openai.
+K_OPENAI_JWT = "eyJ" + "hbGciOiJSUzI1NiJ9" + "." + "eyJ" + "zdWIiOiJ3b3JrbG9hZCJ9" + "." + "j" * 24
+
 # Unproven fakes that start with sk-: openai can take them as well as deepseek, kimi and the other open providers.
 K_SK_UNPROVEN = "sk-" + "s" * 32
 K_SK_UNPROVEN_2 = "sk-" + "t" * 32
@@ -167,6 +170,7 @@ __all__ = [
     "K_OPENAI",
     "K_OPENAI_2",
     "K_OPENAI_ADMIN",
+    "K_OPENAI_JWT",
     "K_OPENROUTER",
     "K_SK_UNPROVEN",
     "K_SK_UNPROVEN_2",
