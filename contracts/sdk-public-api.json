@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "source": {"repository": "cerredz/Vidbyte-SDK", "commit": "998dc0da01d5f4519e76a3d92f08c4cd9d59d0df", "generator": "scripts/generate-sdk-public-api.py"},
+  "source": {"repository": "cerredz/Vidbyte-SDK", "commit": "56541481fbb32624aa70ff26b9f4feeb496ea273", "generator": "scripts/generate-sdk-public-api.py"},
   "distribution": "vidbyte-sdk",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "exports": [
     "ActionTrace",
     "AdversarialAgentDescriptor",
@@ -120,6 +120,7 @@
     "CompletionGateContextItem",
     "ConciseGroundedAnswerTemplate",
     "ConditionalPipeline",
+    "ConfigurationError",
     "ConfluencePageOutput",
     "ConfusedDeputyGuardMiddleware",
     "ContainsAllGrader",
@@ -524,6 +525,8 @@
     "ShortAnswerFactTemplate",
     "SkillDocument",
     "SkillEntry",
+    "SkillLoader",
+    "SkillResolution",
     "SkillSourceType",
     "SkillUnavailableReason",
     "SkillsShSkill",
