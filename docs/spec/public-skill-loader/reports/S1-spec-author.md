@@ -1,6 +1,6 @@
 # S1 spec author report: public-skill-loader
 
-Status: **DONE (r2)**. Spec r1 was committed at `db1786a2`, which is `eba57e6c` after the orchestrator rebased onto `c9d31a7f`. Spec r2 (review round 1) and this updated report are committed together on `feat/public-skill-loader`; see §6. The "Answers to consumer requirements" section at the end matches r2.
+Status: **DONE (r3, approved)**. Spec r1 was committed at `db1786a2` (`eba57e6c` after the orchestrator rebased onto `c9d31a7f`), and r2 at `3a793017`. Spec r3 (review round 2, final, `status: approved`) and this updated report are committed together on `feat/public-skill-loader`; see §6 and §7. The "Answers to consumer requirements" section at the end matches r3.
 
 ## 1. What I read
 
@@ -102,12 +102,26 @@ New facts I verified in r2:
 - **`v0.3.0` has no loader names.** None of `SkillLoader`, `SkillResolution`, or `ConfigurationError` is a root export there, so a CLI floor of `>=0.3.0` would fail at import.
 - **Correction on the count.** The version lives in nine places: eight hand-edited literals plus the contract. r1's "nine version literals" in G-4 was loose, and r2 states it exactly.
 
+## 7. Revision r3 (S1 review round 2, final; status approved)
+
+All five round-2 findings and the orchestrator's notes are applied. Frontmatter is `status: approved`, `revision: 3`, and `base_commit` stays `c9d31a7f`.
+
+- **R-7.** §13 now names the three reusable `DUPLICATES` cases and explains why `entry-named-like-a-string` is excluded: the public door raises `{"position": 0, "entry_type": "str"}`, while the Jev door raises `{"names": ["inline_skill_2"]}`. EC-28 now says a dict keyed by entries is accepted as the tuple of its keys. Rows 1 and 2 now serve FR-12, INV-18, AC-17, and AC-18.
+- **R-8.** §13 notes that `VersionResolver.resolve()` and `vidbyte --version` read metadata first. The fallback at `vidbyte/cli/__init__.py:58` shows only with `vidbyte.cli.metadata.version` patched to raise `PackageNotFoundError`, or by reading the file. `vidbyte/cli/__init__.py:21` is `from importlib import metadata`.
+- **R-9.** After the contract commit, updates from main are by approved merge only. After any update or repair, run the generator, commit only if it wrote the file (it prints "already current … nothing written" otherwise, `scripts/generate-sdk-public-api.py:112`), and always run `--check`. Step 3's command carries "W-5, row 11" and the Co-Authored-By trailer. §14 Ask first and Never now agree, and §9.4 matches.
+- **R-10.** Row 2(d) rewords the loader's ARCHITECTURE NOTE to "(per agent, for JevAgent)". Row 14 rewords `REPO_MAP.md:109` to "until it is first loaded … for the loader's lifetime (an agent's, for JevAgent)". AC-16 checks for unqualified per-agent memory.
+- **R-11, with one deviation from the instruction.** The reviewer's sentence is added to §9.2 row 7 and Q-8, and the decision is unchanged. But its first clause, "The CLI's pin comment requires verifying a new minor", is stale for CLI `origin/main`. `64b04b3` (#166, 15:48) already pins `vidbyte-sdk[codex]>=0.3.0,<0.4` at `pyproject.toml:46,53`, with the comment "stay within 0.3.x until a newer minor is verified". Only the CLI pipeline's branch (`b8af987`) still has `>=0.2.1,<0.3` (`:45,52`). So I scoped the clause to that branch, and added that 0.3.1 needs only a floor raise on CLI main, and that a 0.2.2 would fall outside CLI main's `>=0.3.0` floor (also added to D-13 as support). The reviewer's other two sentences are kept as given. I verified that the export sets at `179d8adc` and `c9d31a7f` are equal, not just their counts (639 names each).
+- **Stale-fact notes.** EC-2 now reads `KeyError: 's'`, reproduced with `SkillLoader('skills/pdf')`.
+  - The CLI's `strict = true` is not at `:123` in any ref I could read. It is at `:126` on CLI `origin/main` `64b04b3` (now cited in D-14), `:124` in the CLI pipeline worktree, and `:122` in the local CLI checkout.
+  - §11 Baseline: the base stays `c9d31a7f`, with no rebase before S3. `origin/main` was at `9aaf662a` at review time. It has since reached `3b879c67` (#1091 to #1093, after the orchestrator's note).
+  - None of #1089 to #1093 touches a file this PR edits, the area suites, `lint/`, `scripts/`, or `contracts/`. #1091 changed `vidbyte/agents/base.py`, which D-2 cites only as a precedent; `BaseAgent.run` moved one line there.
+
 ## Answers to consumer requirements
 
-These are the answers the vidbyte-cli pipeline (`agent-skill-sources`) should resume from. They match spec r2, §9.2, "Consumer contract": version 0.3.1, tuples and lists accepted, the constructor's preconditions, the GitHub request cost, and the corrected oversize detail.
+These are the answers the vidbyte-cli pipeline (`agent-skill-sources`) should resume from. They match spec r3, §9.2, "Consumer contract": version 0.3.1, tuples and lists accepted, the constructor's preconditions, the GitHub request cost, the corrected oversize detail, and CLI main's current SDK pin.
 
 1. **The callable, its preconditions, and the result shape.**
-   - Build `SkillLoader(entries)`. `entries` may be a **tuple or a list** of entry objects and/or `SkillDocument`s. The annotation is `Sequence[SkillEntry | SkillDocument]`, and at runtime any iterable except `str` or `bytes` is accepted and turned into a tuple once, in iteration order. So the list a repeatable option collects can be passed as is.
+   - Build `SkillLoader(entries)`. `entries` may be a **tuple or a list** of entry objects and/or `SkillDocument`s. The annotation is `Sequence[SkillEntry | SkillDocument]`, and at runtime any iterable except `str` or `bytes` is accepted and turned into a tuple once, in iteration order. So the list a repeatable option collects can be passed as is. A set gives its own iteration order. A dict gives its keys: a key that is not an entry is rejected at its position, and a dict keyed by entries is accepted as the tuple of its keys. Pass a sequence if you pair results with entries.
    - **Preconditions, checked at construction with no I/O:** every element is one of the six entry classes or a `SkillDocument`, and no two share a `name`. Names compare exactly and case-sensitively, the same rule as `JevAlignmentSettings.skills`. A violation raises `ConfigurationError`, whose `details` has exactly one of three shapes:
      - `{"entries_type": <type name>}`: the argument is text (`str` or `bytes`) or not a collection;
      - `{"position": <0-based index>, "entry_type": <type name>}`: the first element that is not an entry or a document;
@@ -157,5 +171,9 @@ These are the answers the vidbyte-cli pipeline (`agent-skill-sources`) should re
 7. **Version: 0.3.1, not 0.2.2.** `main` released 0.3.0 at 15:34 (tag `v0.3.0` = `a7ed9cde`, the latest on PyPI), so the first release that can carry the loader is 0.3.1. This is orchestrator decision 2026-10-15 16:20 (spec D-13), and the user may override it through Q-8.
    - **Where it appears:** `0.3.1` is in `pyproject.toml`, `vidbyte/__init__.py` (`__version__`), `vidbyte/cli/__init__.py`, `vidbyte/mcp_server/server/core.py`, `vidbyte/tools/mcp/client.py`, `README.md`, `llms.txt`, `.github/ISSUE_TEMPLATE/bug_report.yml`, and the regenerated contract (`"version": "0.3.1"`).
    - **Contract provenance:** the contract is regenerated in its own commit after the source commit, so its `source.commit` names this PR's source commit.
-   - **Pin fact for the CLI** (the SDK spec specifies no CLI change): the CLI pins `vidbyte-sdk[codex]>=0.2.1,<0.3` (vidbyte-cli `pyproject.toml:45,52`). That excludes every 0.3.x release, so its floor must become `>=0.3.1,<0.4`. 0.3.0 has no `SkillLoader`, `SkillResolution`, or `ConfigurationError` root export, so `>=0.3.0` would fail at import.
+   - **Pin facts for the CLI** (the SDK spec specifies no CLI change):
+     - CLI `origin/main` (`64b04b3`, #166) already pins `vidbyte-sdk[codex]>=0.3.0,<0.4` (`pyproject.toml:46,53`), with the comment "stay within 0.3.x until a newer minor is verified". So 0.3.1 needs only a floor raise to `>=0.3.1,<0.4`, with no minor crossing.
+     - The CLI pipeline's branch (`b8af987`) still has the older `>=0.2.1,<0.3` (`:45,52`), which excludes every 0.3.x release. It must take CLI main's pin or set the same `>=0.3.1,<0.4`.
+     - 0.3.0 has no `SkillLoader`, `SkillResolution`, or `ConfigurationError` root export, so a floor of `>=0.3.0` would fail at import.
+   - **Trade-off behind Q-8:** the older pin comment asked for a new minor to be verified before crossing, and CLI main has since made that crossing itself. 0.3.0 (#1085) changed only version literals, and its root export list equals `179d8adc`'s (the same 639 names). As built from this branch, 0.3.1 differs from a 0.2.2 cut from `179d8adc` only by #1086 to #1088 plus this PR. Released from `main` after merge, it also carries whatever `main` has gained by then (#1089 to #1093 so far). A 0.2.2 would fall outside CLI main's `>=0.3.0` floor.
    - **Publishing:** releasing to PyPI is the user's call after review.
