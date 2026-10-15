@@ -46,7 +46,7 @@ class InfiniteMemoryAgent(BaseAgent):
         # the runtime, the preset tools, the provider settings, and the
         # permission policy stay owned by this package.
         if not isinstance(settings, InfiniteMemoryAgentSettings):
-            raise ConfigurationError(f"InfiniteMemoryAgent requires an InfiniteMemoryAgentSettings instance; got {type(settings).__name__}: {settings!r}.", details={"settings": type(settings).__name__})
+            raise ConfigurationError(f"InfiniteMemoryAgent requires an InfiniteMemoryAgentSettings instance; got {type(settings).__name__}.", details={"settings": type(settings).__name__})
         self.settings = settings
 
         # Set up the shared workspace once: the folder, the bookkeeping
