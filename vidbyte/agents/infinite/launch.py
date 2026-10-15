@@ -233,10 +233,11 @@ class InfinitePair(BasePipeline):
             summary = self._capped(reply.content.strip())
             status = self._status(reply)
 
-            # @intent sibling-generators-finish-before-verifiers-judge
-            # Give the sibling pairs a turn first, so the pairs of one
-            # batch move forward together even when a model answers at
-            # once, and every generator has staged before a verdict.
+            # @intent a-fair-turn-between-generator-and-verifier
+            # Yield once between this pair's generator and its verifier,
+            # so a pair whose model answers at once does not run to its
+            # end before its siblings get a turn. This is fairness only:
+            # it gives no ordering guarantee across pairs.
             await asyncio.sleep(INFINITE_PAIR_TURN_SECONDS)
 
             # Unless the generator failed, a fresh verifier gets the
