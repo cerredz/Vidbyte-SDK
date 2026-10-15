@@ -50,7 +50,8 @@ class RuntimeRegistry:
         runtime_cls = _registry.get(runtime_type)
         if runtime_cls is None:
             raise ConfigurationError(
-                f"Unknown runtime type '{runtime_type.value}'. Supported: {cls.supported_runtimes()}"
+                f"Unknown runtime type '{runtime_type.value}'. "
+                f"Supported: {cls.supported_runtimes()}"
             )
         return runtime_cls
 
