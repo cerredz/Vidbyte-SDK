@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Every call gets a fresh temp folder as XDG_CONFIG_HOME, holdi
 FUNCTION INVENTORY: MuseThreads.run_muse_thread, continue_muse_thread and fork_muse_thread are the public functions; MuseThreads._call is the one guarded try they share. MuseThreadRun.execute is the narrated main function of one call; _prepare_config creates the private config folder and its skills; _discard removes the folder of a preparation whose caller was cancelled; _overlay builds the environment shared by serve and exec; _serve_invocation and _exec_invocation build the two children; _run runs one child, reaps it on a timeout or cancellation and reports launch failures.
 COMMON MODIFICATION PATTERNS: A new Muse option is a MuseThreadConfig field (vidbyte/lib/dataclasses/native_threads.py), a MuseFlag member and one CliOption in _exec_invocation. A new failure condition goes in MuseExecOutput.read or MuseWire.read_answer.
 WHAT NOT TO DO IN THIS FILE: 1. Do not put the key on argv or in a file, and do not give it to `muse serve`. 2. Do not start exec for a continue or fork whose serve answer failed; `muse exec --session-id <unknown>` would silently create a thread. 3. Do not give the temp folder a fixed location; tempfile.mkdtemp picks it (S054).
-KNOWN EDGE CASES: The temp folder is removed in a finally block, after the reap, so a cancelled call still cleans up before CancelledError propagates (spec INV-9); a cancel that lands while the folder is still being prepared waits for that work, then removes it. On Windows the temp folder and the workspace reach muse in their /mnt form; a workspace with no /mnt form is refused naming workspace before anything is written. A fork that fails after session/fork answered carries the fork's new id (spec INV-5).
+KNOWN EDGE CASES: The temp folder is removed in a finally block, after the reap, so a cancelled call still cleans up before CancelledError propagates (spec INV-9); a cancel that lands while the folder is still being prepared waits for that work, then removes it, and a second cancel stops only that waiting, never the removal, which then ends in the background. On Windows the temp folder and the workspace reach muse in their /mnt form; a workspace with no /mnt form is refused naming workspace before anything is written. A fork that fails after session/fork answered carries the fork's new id (spec INV-5).
 RELATED DOCS: vidbyte/harnesses/README.md
 TESTS: tests/features/harness_threads/
 """
@@ -110,7 +110,10 @@ class MuseThreadRun:
         try:
             folder = await asyncio.shield(preparing)
         except asyncio.CancelledError:
-            await MuseThreadRun._discard(preparing)
+            # The wait and the removal run as one shielded task, so a
+            # second cancel cannot stop the removal half-way; it only
+            # stops this call from waiting for it.
+            await asyncio.shield(asyncio.ensure_future(MuseThreadRun._discard(preparing)))
             raise
         try:
             # One mark for every child of this call, so a reap finds
