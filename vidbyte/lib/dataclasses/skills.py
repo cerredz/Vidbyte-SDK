@@ -11,7 +11,7 @@ FUNCTION INVENTORY:
     InlineSkill, LocalSkill, SkillsShSkill, GitHubSkill, AnthropicSkill, OpenAISkill._validate_source() -> None: per-source field checks (section 9.1 of the spec).
     SkillEntries.__post_init__() -> None: requires a tuple, then an entry or document at every position, then unique names; each error carries only a type name, a position, or the repeated names.
     SkillResolution.__post_init__() -> None: exactly one of a document, or a reason with a non-blank detail; `transient` is derived from the reason.
-COMMON MODIFICATION PATTERNS: A new source adds its `SkillSourceType` member, one entry subclass here that redeclares `type` with `init=False` and its member as default and overrides `_validate_source`, its resolver module in vidbyte/agents/skills/, the loader map entry, and the exports. A new field on an entry validates in that entry's `_validate_source`.
+COMMON MODIFICATION PATTERNS: A new source adds its `SkillSourceType` member, one entry subclass here that redeclares `type` with `init=False` and its member as default and overrides `_validate_source`, its resolver module in vidbyte/agents/skills/, the loader map entry, and the exports. A new field on an entry validates in that entry's `_validate_source`. The unique-name rule in `SkillEntries.__post_init__` has a twin in `JevAlignmentSettings._normalized_skills` (vidbyte/agents/jev/settings.py), kept separate on purpose (spec NG-10, Q-9): change both together, and tests/features/public_skill_loader/test_public_skill_loader_both_doors.py fails when they drift (INV-18).
 WHAT NOT TO DO:
     1. Do not normalize, trim, or rewrite a SkillDocument body or an inline entry's text.
     2. Do not read files, environment variables, or the network from a record; resolution belongs to vidbyte/agents/skills/.
@@ -256,9 +256,11 @@ class SkillEntries:
                 raise ConfigurationError(f"SkillLoader entries[{position}] is a {type(entry).__name__}, not a skill entry or SkillDocument; wrap skill text in InlineSkill.", details={"position": position, "entry_type": type(entry).__name__})
         # @intent skill-entries-unique-names
         # A name identifies one skill to callers through both doors,
-        # and JevAlignmentSettings applies the same rule. Two equal
-        # entries would also share one single-entry resolver group and
-        # abort the whole load.
+        # and JevAlignmentSettings._normalized_skills applies the same
+        # rule, so change both together; the both-doors test in
+        # tests/features/public_skill_loader/ fails when they drift.
+        # Two equal entries would also share one single-entry resolver
+        # group and abort the whole load.
         repeated = sorted(name for name, count in Counter(entry.name for entry in self.entries).items() if count > 1)
         if repeated:
             raise ConfigurationError("SkillLoader entries must have unique names; rename or remove the entries listed in details['names'].", details={"names": repeated})
