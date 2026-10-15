@@ -14,7 +14,7 @@ started: 2026-10-15 02:49
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-15 02:49 | 2026-10-15 03:05 | reports/S0-scout.md | base_commit d9c01461; code-map.md (4 sections) |
-| S1 spec + review | pending | | | | |
+| S1 spec + review | running | 2026-10-15 03:06 | | reports/S1-spec-author.md | spec r1 @45d3cc9d (32 §12.3 rows, budget 18 new files) |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -45,3 +45,8 @@ started: 2026-10-15 02:49
 - Fake models in tests: patch `BaseAgent._runner_for_model` and route by agent name (`tests/features/jev_bulk_work/test_jev_bulk_work.py:186-193`); this reaches child agents built inside tools; async tests need `@pytest.mark.asyncio`. — *source:* S0 scout
 - Lint: A001 header on every new .py (tests too); S025 tool descriptions ≥ 4 sentences or loaded via `Prompts().get`; C016 requires regenerating the public-API contract (`sdk-public-api.json`); prompt enum keys and JSON prompt assets must match. — *source:* S0 scout
 - Gates in this worktree: install `python -m pip install -e ".[dev]"`; `PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source`, then `python scripts/run_ci.py --stage package` without PYTHONPATH; semgrep is CI-only and scans tracked files only (stage new files first). — *source:* S0 scout / field guide local-ci-verification.md
+- Contract names (spec r1): `InfiniteMemoryAgent(settings)` with `.resume()`/`.aresume()`; `InfiniteMemoryAgentSettings`, `InfiniteWorkspaceSettings` (agents/infinite/settings.py); `InfiniteMemoryPreset`; `InfiniteMemoryRuntime`; `InfiniteMemoryAgentTools`; `AgentRuntimeType.INFINITE_MEMORY`; tools bash, grep, read_lines, launch_subagent, remember, write_note, edit_file (FULL preset only), drop_entry (verifiers only). — *source:* S1 author
+- Agent names are `<settings.name>/<key>` (e.g. `analyst/root/a/gen`, `analyst/root/a/ver`); root = settings.name; the map appears in the runner's `system=` kwarg as `### [infinite_memory_map] …`. — *source:* S1 author
+- The registry must import through the facade (`from vidbyte.agents.infinite import InfiniteMemoryRuntime`) — a concrete-module import trips lint A006; toolsets may not import from vidbyte.agents. — *source:* S1 author
+- A007: every limit/default must be a named `INFINITE_` constant; S025: tool text via `Prompts().get`; prompt enum ↔ JSON leaves one-to-one (header counts 98→131 assets, 33→34 families); C016 regenerate public-API contract after committing `vidbyte/__init__.py`; `TokenEstimate` goes into existing `vidbyte/lib/util/text.py` (AGENTS.md principle 5). — *source:* S1 author
+- Journal at `<workspace>/.runs/<run_id>.jsonl`; resume replays finished pairs by key. — *source:* S1 author
