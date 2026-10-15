@@ -156,6 +156,10 @@ Reusable, prepackaged evaluation suites that can be pointed at an agent without 
 
 The base abstraction for wrapping an existing agent workflow so that every run produces a durable, structured record suitable for use as reinforcement-learning training data — the task given, the full trajectory taken, the resolved configuration used, and a scalar reward. Configuration is treated as the source of truth for a harness's identity, and every run is captured through the session layer rather than through ad hoc logging. Consent and redaction are part of the contract rather than an afterthought bolted on separately. This is the shared contract that executed harnesses elsewhere in the workspace, and example harnesses built for demonstration, both build against.
 
+##### `vidbyte/harnesses/native/`
+
+Module functions that run, continue and fork Grok Build, opencode and Muse Code threads by driving each vendor's installed command-line tool headless once per call with the caller's own API key, and return the thread id and the final answer. Each harness has its own subpackage with three functions, one small config record and the codec that reads that tool's output; Muse runs through WSL on Windows, and GLM and DeepSeek are reached through the opencode functions' model argument. The key reaches only the vendor child, through a private Grok home, an inline opencode config or a private Muse config folder, so a stored login never wins. Plumbing the three share, the scrubbed error factory, launcher resolution and skills folders, lives once in a `hostkit` subfolder. There are no host objects, model-facing tools or servers here; argv building and process runs go through the canonical helpers in `vidbyte/lib/process/`.
+
 ##### `vidbyte/harnesses/stores/`
 
 Persistence backends for captured trajectory data, all implementing one common interface so the storage mechanism can be swapped without touching the harness itself. One backend is intended for use in tests, another for local export to disk, and additional backends can be added following the same pattern. Keeping the store swappable behind one interface is what lets a harness behave identically whether it is run in a notebook or in production. A new storage destination should be added as a backend here rather than taught to the harness abstraction directly.
@@ -207,6 +211,10 @@ A namespace reserved for model metadata that currently holds no real content. It
 ##### `vidbyte/lib/outputs/`
 
 The provider side of delivering a finished agent reply to the outside world: chat channels, email, issue trackers and code hosts (new items, comments, and update-in-place), docs workspaces, CI job summaries, social-post drafts, CRM tasks, and signed generic webhooks. Each destination takes one pasted credential, or none for the job summary, read from an argument or its environment variable, and never an interactive sign-in. This layer owns each service's request shapes, its length limits, the suppression of channel-wide mentions, and the translation of every response into a delivery outcome. It sits below the agent layer and never decides when or whether a reply is sent. Add a new destination here alongside its provider reference, which records where its credential comes from and when its limits were last checked.
+
+##### `vidbyte/lib/process/`
+
+The canonical helpers for running local processes: a one-shot command runner with a deadline and capped output capture, whose child inherits the caller's environment plus an overlay, one argv builder that turns flag records into a command line in a joined or separate style so no value can become a flag, and a stopper that ends a whole process tree, the process group on POSIX and the taskkill tree on Windows. Every failure comes back as a field of the returned record instead of an exception, except cancellation, which stops and reaps the tree before propagating. New code that needs to start a child process should use these helpers rather than the asyncio subprocess API directly, so the timeout, the output caps and the tree stop exist in one place.
 
 ##### `vidbyte/lib/providers/`
 
