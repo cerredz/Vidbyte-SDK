@@ -14,7 +14,7 @@ started: 2026-10-15 02:49
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-15 02:49 | 2026-10-15 03:05 | reports/S0-scout.md | base_commit d9c01461; code-map.md (4 sections) |
-| S1 spec + review | running | 2026-10-15 03:06 | | reports/S1-spec-author.md | spec r1 @45d3cc9d (32 §12.3 rows, budget 18 new files) |
+| S1 spec + review | done | 2026-10-15 03:06 | 2026-10-15 04:52 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-2.md | spec r3 approved @a375758f (33 §12.3 rows: 18 CREATE, 15 MODIFY; 17 FR, 39 INV, 42 AC, 49 EC, 28 D, 9 A, 8 Q) |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -23,7 +23,7 @@ started: 2026-10-15 02:49
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 (round 2 running: scoped to §8, §8.5, §9, §12 and dependents) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 (both SOUND WITH FIXES; R-1..R-23 all dispositioned in §16) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-15 02:49 — Unset the upstream of `feat/infinite-memory-agent` (git worktree add had set it to track origin/main) — a bare `git push` could otherwise target main; agents push with `git push -u origin feat/infinite-memory-agent`.
@@ -32,6 +32,7 @@ started: 2026-10-15 02:49
 - 2026-10-15 03:58 — Resumed the S1 author with the reviewer's findings by path (reports/S1-spec-review.md lines 1–266) plus a summary, instead of pasting the 26 KB block inline — same verbatim content on disk, keeps the orchestrator context lean.
 
 - 2026-10-15 04:20 — Launched S1 review round 2 (the last allowed): r2 accepted all 15 round-1 findings but changed §8 (D-28 history trimming, D-29 internal launch tool), §8.5 (extras from live catalog), §9 (caps) and the shape of §12 (row 33, P4 order), which the playbook says requires a scoped re-review.
+- 2026-10-15 04:53 — Applied every open-question default from spec r3 §15 (none blocking): Q-1 no `middleware` settings field; Q-2 no bash-bypass scan/restore; Q-3 verifiers cannot launch; Q-4 no run-wide skills/extras for children; Q-6 no run-wide USD/token cap; Q-7 no per-run cross-process lock; Q-8 no "compaction for file policy" (over-cap writes are refused, D-26); Q-9 no separate root/child loop settings. Q-5 was withdrawn in r2. Spec summary printed to the user; continuing to S2 without waiting (playbook rule 8).
 
 ## User replies (verbatim)
 - (none yet)
