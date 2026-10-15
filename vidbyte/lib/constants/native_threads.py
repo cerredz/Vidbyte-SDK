@@ -92,7 +92,8 @@ MUSE_CONFIG_SKILLS_PARTS = ("muse", "skills")
 MUSE_AUTH_FILE_PARTS = ("muse", "auth.json")
 NATIVE_SKILL_FILE_NAME = "SKILL.md"
 MUSE_WSL_MOUNT_ROOT = "/mnt"
-MUSE_WSL_PATH_SEPARATOR = "/"
+MUSE_WINDOWS_DRIVE_PATTERN = r"[A-Za-z]:"
+NATIVE_WINDOWS_ROOT = "\\"
 
 # Fixed option values and separators.
 GROK_JSON_OUTPUT_FORMAT = "json"
@@ -168,6 +169,10 @@ MUSE_NO_SUCH_FILE_MARKER = "No such file or directory"
 NATIVE_COMMAND_NOT_FOUND_EXIT_CODE = 127
 MUSE_SESSION_NOT_FOUND_CODE = -32020
 MUSE_TERMINAL_PREFIX = "run.terminal."
+# The members a Muse protocol_mismatch names when they are missing.
+MUSE_SESSION_STREAM_MEMBER = "stream.id"
+MUSE_TERMINAL_RECORD_MEMBER = "run.terminal.*"
+MUSE_FORK_SESSION_MEMBER = "result.session.sessionId"
 MUSE_COMPLETED_TERMINAL = "completed"
 MUSE_SESSION_STREAM_KIND = "session"
 
@@ -243,6 +248,8 @@ NATIVE_REDACTED = "<redacted>"
 NATIVE_FIELD_DETAIL_KEY = "field"
 NATIVE_UNNAMED_ARGUMENT = "argument"
 NATIVE_CONFIG_ARGUMENT = "config"
+NATIVE_WORKSPACE_ARGUMENT = "workspace"
+MUSE_WSL_WORKSPACE_RULE = "workspace must be an absolute Windows path on a drive letter; UNC and drive-less paths have no /mnt form inside WSL."
 NATIVE_MESSAGE_HEAD = "{operation} failed with {code}."
 NATIVE_WORKSPACE_SENTENCE = "The workspace was {workspace}."
 NATIVE_THREAD_ID_SENTENCE = "The thread id was {thread_id}."
