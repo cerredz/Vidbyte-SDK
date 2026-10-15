@@ -20,7 +20,7 @@ started: 2026-10-15 02:49
 | S1 spec + review | done | 2026-10-15 03:06 | 2026-10-15 04:52 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-2.md | spec r3 approved @a375758f (33 §12.3 rows: 18 CREATE, 15 MODIFY; 17 FR, 39 INV, 42 AC, 49 EC, 28 D, 9 A, 8 Q) |
 | S2 tests | done | 2026-10-15 04:55 | 2026-10-15 05:52 | reports/S2-test-author.md | S2_HEAD d8bcdf14 (c2f91ebd before rebase); 89 red cases in 7 modules under tests/features/infinite_memory_agent/; AC-1..AC-42 all mapped; spec r4 @ff634998 fixed the 2 S2 open items |
 | S3 implement | done | 2026-10-15 05:59 | 2026-10-15 07:22 | reports/S3-implementer.md | S3_HEAD def85360; draft PR #1084; 89/89 new green; source gate 5262 passed/14 skipped "CI passed"; package gate "CI passed"; lint PASS; budget 18/18 new files; test diff vs d8bcdf14 empty |
-| S4 adversarial review | running | 2026-10-15 07:31 | | | |
+| S4 adversarial review | done | 2026-10-15 07:31 | 2026-10-15 08:37 | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES — confirmed 1 Blocker / 10 Major / 14 Minor; refuted 2 partial; downgraded 1 |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
@@ -42,6 +42,10 @@ started: 2026-10-15 02:49
 
 - 2026-10-15 07:23 — Remote checks: every GitHub Actions workflow in the repo is "TEMPORARILY DISABLED" (`workflow_dispatch` only; `claude.yml` runs only on review/comment events), so `gh pr checks` reports none. Did not dispatch workflows manually (outward-facing; the owner disabled them on purpose). The local `run_ci.py` source + package stages are the gate of record for S4–S6.
 - 2026-10-15 07:23 — Flagged for S4 (not declined, just pointed at): S3 offset a lint ratchet (S062 implicit string concatenation, 890 vs 889, caused by the S2 test file) by merging adjacent f-strings in `vidbyte/lib/registries/runtimes.py`; and S3 added `await asyncio.sleep(INFINITE_PAIR_TURN_SECONDS)` between generator and verifier in `InfinitePair.run`, which it calls load-bearing for AC-5/AC-37. Both go to the reviewers as claims to check.
+
+- 2026-10-15 08:38 — S4 "needs:" adjudication. R-3 (card bound): adopt the verifier's recommended spec edit — amend NFR-7 to bound the four capped card fields (summary, review, dropped, files: 4 × `INFINITE_CARD_TEXT_MAX_TOKENS` + template), with the 2-line production fix (`_capped` on joined `dropped`/`files` in `render`); rejected the runner-up (drop entry text / files as a count) because it changes D-14 and AC-10/11/37 wording. R-13: keep the `asyncio.sleep(0)` yield, reword its `@intent` comment to "fairness yield; no ordering guarantee" (production, trivial); correct the false S3 §17 claim via the spec author; rejected the test-change alternative (`Gate(2)` in AC-37) — no test churn for a comment-level issue. Both spec edits go to the S1 author as r5.
+- 2026-10-15 08:38 — Test-pack work routed to the S2 test author (the only agent allowed to touch `tests/`, which keeps the S2_HEAD diff audit meaningful): R-5 (remove its own implicit string concatenation at test_infinite_memory_workspace.py:399-401 so S3's offset reflow in runtimes.py can be reverted), R-11 (tests that kill the surviving mutants: `check_entry`, `edit_file` caps, verifier `by=` stamp), R-18 (stale tests README line 7), plus regression tests for the confirmed behavior bugs where a spec ID backs them and they can be deterministic (R-1 INV-29, R-3 NFR-7 as amended in r5, R-4 INV-26, R-8, and R-2/R-6 if deterministic). This is test *addition* tied to confirmed findings, not weakening; existing assertions stay untouched. New S2_HEAD recorded after it.
+- 2026-10-15 08:38 — Sequencing: spec author r5 → test author additions → S5 repair iteration 1 (serial; agents share one worktree index, so no concurrent committers).
 
 ## User replies (verbatim)
 - (none yet)
