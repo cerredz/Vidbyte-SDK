@@ -21,6 +21,7 @@ from tests.features.sdk_managed_text.managed_text_fixtures import OTHER_VIDBYTE_
 from tests.features.sdk_provider_keys.provider_keys_fixtures import (
     K_ANTHROPIC,
     K_GEMINI_AQ,
+    K_META,
     K_OPENAI,
     K_OPENAI_2,
     K_OPENAI_ADMIN,
@@ -39,7 +40,7 @@ from vidbyte.lib.errors import ConfigurationError
 
 CREDENTIAL_ERROR_KIND = "vidbyte_managed_credentials"
 ALL_PROVIDERS = tuple(ModelProvider)
-FORMAT_BOUND = {ModelProvider.ANTHROPIC, ModelProvider.XAI, ModelProvider.GEMINI, ModelProvider.OPENROUTER}
+FORMAT_BOUND = {ModelProvider.ANTHROPIC, ModelProvider.XAI, ModelProvider.GEMINI, ModelProvider.OPENROUTER, ModelProvider.META}
 
 
 def matcher() -> Any:
@@ -138,6 +139,8 @@ class TableFAndATests(unittest.TestCase):
             ("xai-", K_XAI, ModelProvider.XAI),
             ("AIza+35", "AIza" + "g" * 35, ModelProvider.GEMINI),
             ("AQ.", K_GEMINI_AQ, ModelProvider.GEMINI),
+            ("LLM|", K_META, ModelProvider.META),
+            ("LLM| short app ID", "LLM" + "|" + "7" + "|" + "m" * 8, ModelProvider.META),
         )
         for name, key, provider in proven:
             with self.subTest(sample=name):
@@ -150,6 +153,10 @@ class TableFAndATests(unittest.TestCase):
             ("dotted xai-", "xai-client-secret." + "c" * 16),
             ("plain", K_UNPROVEN),
             ("AIza too short", "AIza" + "g" * 10),
+            ("LLM| word app ID", "LLM" + "|" + "app" + "|" + "m" * 20),
+            ("LLM| dotted secret", "LLM" + "|" + "1" * 15 + "|" + "a.b"),
+            ("LLM| no secret", "LLM" + "|" + "1" * 15),
+            ("lowercase llm|", "llm" + "|" + "1" * 15 + "|" + "m" * 20),
         )
         for name, key in unproven:
             with self.subTest(sample=name):
@@ -163,6 +170,7 @@ class TableFAndATests(unittest.TestCase):
         dotted_xai = "xai-client-secret." + "c" * 16
         bad_anthropic = "sk-ant-" + "a.b"
         bad_openai = "sk-proj-" + "a.b"
+        bad_meta = "LLM" + "|" + "app" + "|" + "m" * 8
         for provider in ALL_PROVIDERS:
             with self.subTest(provider=provider.value):
                 open_provider = provider not in FORMAT_BOUND and provider is not ModelProvider.OPENAI
@@ -172,6 +180,8 @@ class TableFAndATests(unittest.TestCase):
                 self.assertFalse(matcher().accepts_unproven(provider, dotted_xai))
                 self.assertFalse(matcher().accepts_unproven(provider, bad_anthropic))
                 self.assertEqual(matcher().accepts_unproven(provider, bad_openai), provider is ModelProvider.OPENAI)
+                # LLM| is reserved to meta, and meta takes no unproven key, so nothing takes a malformed Meta key.
+                self.assertFalse(matcher().accepts_unproven(provider, bad_meta))
                 # A provider name works as well as the enum member.
                 self.assertEqual(matcher().accepts_unproven(provider.value, plain), open_provider)
 
@@ -231,6 +241,21 @@ class UniqueAssignmentTests(KeySafeAssertions):
         # With the primary holding a key already, the lone rule does not apply and unique assignment decides.
         record = matcher().match([K_ANTHROPIC, K_UNPROVEN], primary="anthropic", others=("deepseek",))
         self.assertEqual(key_view(record)[0], {"anthropic": K_ANTHROPIC, "deepseek": K_UNPROVEN})
+
+    def test_a_meta_key_proves_meta_in_any_order_and_meta_never_takes_an_unproven_key(self) -> None:
+        # Table F/A: an LLM| key is meta's wherever it sits, so a Muse agent with a DeepSeek backup splits the list without guessing.
+        for entries in ([K_UNPROVEN, K_META, K_ANTHROPIC], [K_ANTHROPIC, K_META, K_UNPROVEN], [K_META, K_UNPROVEN, K_ANTHROPIC]):
+            with self.subTest(order=[entries.index(K_META), entries.index(K_UNPROVEN)]):
+                record = matcher().match(entries, primary="meta", others=("deepseek", "anthropic"))
+                self.assertEqual(key_view(record)[0], {"meta": K_META, "deepseek": K_UNPROVEN, "anthropic": K_ANTHROPIC})
+        # Meta issues only LLM| keys, so a lone unproven key is never sent to it: before this rule it bound to meta by D-29.
+        message, details = self.refused(lambda: matcher().match([K_UNPROVEN], primary="meta"), K_UNPROVEN)
+        self.assertIn("meta", message)
+        self.assertEqual(details.get("index"), 0)
+        # A meta root with a DeepSeek backup gives the unproven key to deepseek and still asks for meta's own key (M-18).
+        message, _details = self.refused(lambda: matcher().match([K_UNPROVEN], primary="meta", others=("deepseek",)), K_UNPROVEN)
+        for fact in ("deepseek", "meta", "META_API_KEY"):
+            self.assertIn(fact, message)
 
     def test_two_unproven_keys_two_providers_could_take_are_refused_naming_every_candidate_and_variable(self) -> None:
         # EC-35, M-19: the lowest failing index, its length, the candidates and their environment variables.

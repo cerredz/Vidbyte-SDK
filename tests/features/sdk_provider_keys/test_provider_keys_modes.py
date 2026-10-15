@@ -29,6 +29,7 @@ from tests.features.sdk_managed_text.managed_text_fixtures import (
 )
 from tests.features.sdk_provider_keys.provider_keys_fixtures import (
     K_ANTHROPIC,
+    K_META,
     K_OPENAI,
     K_UNPROVEN,
     K_XAI,
@@ -373,6 +374,19 @@ class UnsendableKeyTests(unittest.TestCase):
         with patch.dict(os.environ, {"VIDBYTE_API_KEY": VIDBYTE_KEY}, clear=True):
             TextModelRunner(TextModelConfig(provider="deepseek", model="deepseek-v4-pro", api_keys=[key]), transport=gateway).run("Hi")
         self.assertEqual(provider_key_header(gateway.requests[0]), key)
+
+    def test_a_meta_key_from_a_mixed_list_reaches_meta_unchanged_in_direct(self) -> None:
+        # Table F: the gateway does not serve meta, so a Muse call is DIRECT; the LLM| key's pipes are printable ASCII and reach Meta as the bearer token.
+        from vidbyte.lib.config import TextModelMode
+
+        vendor = ScriptedGateway(provider_answer(ModelProvider.META))
+        with patch.dict(os.environ, {}, clear=True):
+            TextModelRunner(TextModelConfig(provider="meta", model="muse-spark-1.1", api_keys=[K_ANTHROPIC, K_META], mode=TextModelMode.DIRECT), transport=vendor).run("Hi")
+        [sent] = vendor.requests
+        self.assertTrue(str(sent["url"]).startswith("https://api.meta.ai/v1/"), sent["url"])
+        self.assertEqual(header(sent, "authorization"), f"Bearer {K_META}")
+        # The Anthropic key in the same list never leaves for Meta.
+        self.assertNotIn(K_ANTHROPIC, flat(sent))
 
 
 if __name__ == "__main__":

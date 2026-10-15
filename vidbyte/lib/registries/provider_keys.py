@@ -4,7 +4,7 @@ PURPOSE: Matches a developer's list of API keys to the providers an agent or tex
 ROLE IN CODEBASE: The roots (TextModelConfig, BaseAgent and AggregateAgent, JevAgentSettings, BaseAgent.restore, Runner.__init__, ModalityDetector._config_options, and JevRunBriefWriter when its brief has its own list) call ProviderKeyMatcher.match once and hand the returned ProviderKeys record to every child unchanged; JevRunBriefSettings and AgentRoleSettings call normalize. ProviderModelRegistry.find_provider_api_key reads a provider's key from the record.
 ARCHITECTURE NOTE: A static lookup class in the lib layer. At module level it imports only re, collections.abc, typing, vidbyte.lib.constants.jev, vidbyte.lib.enums, and vidbyte.lib.errors; ProviderKeys is imported inside match, because vidbyte.lib.dataclasses.agents is reached through this package's own __init__ (spec D-21). The provider variable names in its messages come from PROVIDER_API_KEY_ENV_VARS in vidbyte.lib.constants.jev, which ProviderModelRegistry.API_KEY_ENV_VARS also is, so the matcher never imports the models registry (lint A006). It reads no environment and makes no request.
 COMMON MODIFICATION PATTERNS: Add a KEY_FORMATS rule only for a prefix the vendor documents first-party, with its source in a comment here and in the registries README's "Provider Key Format Sources"; its literal prefixes become reserved automatically. A refuse-only prefix goes in RESERVED_PREFIXES and may rest on a secondary source.
-KNOWN EDGE CASES: A key that starts with a KEY_FORMATS prefix but does not fully match the rule (an xai- key with a dot) is unproven and reserved to that provider, which takes no unproven key, so nothing takes it. Entries are named by their index in the developer's list, counting skipped None and blank entries, and no message ever quotes a key.
+KNOWN EDGE CASES: A key that starts with a KEY_FORMATS prefix but does not fully match the rule (an xai- key with a dot, an LLM| key whose app ID is not digits) is unproven and reserved to that provider, which takes no unproven key, so nothing takes it. A Meta key's "|" is printable ASCII, so it passes VIDBYTE_PROVIDER_KEY_PATTERN and the relay header unchanged. Entries are named by their index in the developer's list, counting skipped None and blank entries, and no message ever quotes a key.
 RELATED DOCS: docs/spec/byok-api-keys/spec.md (section 9.2 "Matching", tables F, A, and M; D-2, D-21, D-28, D-29, D-31) and vidbyte/lib/registries/README.md.
 TESTS: tests/features/sdk_provider_keys/test_provider_keys_matching.py and tests/features/sdk_provider_keys/test_provider_keys_property.py.
 """
@@ -48,11 +48,14 @@ class ProviderKeyMatcher:
         # https://docs.cloud.google.com/docs/authentication/api-keys
         # https://github.com/google-gemini/cookbook/blob/main/tools/README.md
         (ModelProvider.GEMINI, ("AIza", "AQ."), re.compile(r"(?:AIza[A-Za-z0-9_-]{35}|AQ\.[A-Za-z0-9_-]+)")),
+        # Meta Model API (Muse Spark, Muse Code): an LLM| tag, the numeric
+        # app ID, then the secret. https://dev.meta.ai/docs/authentication
+        (ModelProvider.META, ("LLM|",), re.compile(r"LLM\|[0-9]+\|[A-Za-z0-9_-]+")),
     )
 
     # Table A: these providers issue only keys that carry their table F
     # prefix, so they never take an unproven key.
-    FORMAT_BOUND_PROVIDERS: ClassVar[frozenset[ModelProvider]] = frozenset({ModelProvider.ANTHROPIC, ModelProvider.XAI, ModelProvider.GEMINI, ModelProvider.OPENROUTER})
+    FORMAT_BOUND_PROVIDERS: ClassVar[frozenset[ModelProvider]] = frozenset({ModelProvider.ANTHROPIC, ModelProvider.XAI, ModelProvider.GEMINI, ModelProvider.OPENROUTER, ModelProvider.META})
 
     # Table A: every OpenAI key starts with sk-, so openai takes an
     # unproven key only with that prefix. OpenAI's own key check:

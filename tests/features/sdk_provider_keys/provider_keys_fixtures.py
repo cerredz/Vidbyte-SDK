@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: ProviderRouter records a deep copy of every inner request(...
 FUNCTION INVENTORY: responses_done / anthropic_done / chat_done / done_answer(provider, text) build a 200 whose only content is an isDone tool call; ProviderRouter(answers) records and answers per provider; RecordingEnviron(values) records environment reads; flat(value) renders requests or errors as one searchable string; key_view(record) is the order-free view of a ProviderKeys record; provider_key_header(request) reads the relay header; RELAY_HEADER is the header name spelled as the wire contract fixes it.
 COMMON MODIFICATION PATTERNS: Add a fake key here when a provider gains a key-format rule (spec section 9.2 table F); build it by concatenation so no full key shape sits in the tree. Add a vendor base URL to VENDOR_BASES when an agent test drives a new provider in DIRECT.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import symbols the feature adds (TextModelMode.DIRECT, ProviderKeyMatcher, ProviderKeys, TextCredentials, the new constants) at module level: the pack must still collect while it is red. 2. Do not write a full secret-scanner shape as one literal (AIza + 35, sk-ant-api03- + 93 + AA, T3BlbkFJ-signed OpenAI keys, vb_live_ keys); build them by concatenation at the test that needs them. 3. Do not touch the network.
-KNOWN EDGE CASES: The fakes deliberately avoid each other's reserved prefixes (sk-ant-, sk-or-, sk-proj-, sk-admin-, sk-svcacct-, xai-, AIza, AQ.), so an unproven fake can bind to deepseek, kimi or mistral. ProviderRouter raises KeyError for a provider it has no answer for, which surfaces as a test failure, never as a silent pass.
+KNOWN EDGE CASES: The fakes deliberately avoid each other's reserved prefixes (sk-ant-, sk-or-, sk-proj-, sk-admin-, sk-svcacct-, xai-, AIza, AQ., LLM|), so an unproven fake can bind to deepseek, kimi or mistral. ProviderRouter raises KeyError for a provider it has no answer for, which surfaces as a test failure, never as a silent pass.
 RELATED DOCS: tests/features/sdk_provider_keys/FEATURE.md; docs/spec/byok-api-keys/spec.md sections 9.2 (tables F, A, R, M, G) and 13.
 TESTS: python -m pytest tests/features/sdk_provider_keys
 """
@@ -35,6 +35,8 @@ K_XAI = "xai-" + "X" * 24
 K_OPENROUTER = "sk-or-v1-" + "R" * 24
 # A Gemini fake in the AQ. form (ruling r4-1), built from parts so no literal looks like a real Gemini key.
 K_GEMINI_AQ = "AQ" + "." + "x" * 40
+# A Meta Model API fake (LLM|<app id>|<secret>), built from parts so no literal looks like a real Meta key.
+K_META = "LLM" + "|" + "1" * 15 + "|" + "m" * 32
 
 # Unproven fakes: no table F prefix and no reserved prefix, so only table A and unique assignment decide their owner.
 K_UNPROVEN = "d-mock-" + "u" * 16
@@ -52,6 +54,7 @@ VENDOR_BASES: dict[str, ModelProvider] = {
     "https://api.moonshot.ai/": ModelProvider.KIMI,
     "https://api.mistral.ai/": ModelProvider.MISTRAL,
     "https://generativelanguage.googleapis.com/": ModelProvider.GEMINI,
+    "https://api.meta.ai/": ModelProvider.META,
 }
 
 _USAGE_CHAT = {"prompt_tokens": 40, "completion_tokens": 5, "total_tokens": 45}
@@ -160,6 +163,7 @@ __all__ = [
     "K_ANTHROPIC",
     "K_ANTHROPIC_2",
     "K_GEMINI_AQ",
+    "K_META",
     "K_OPENAI",
     "K_OPENAI_2",
     "K_OPENAI_ADMIN",

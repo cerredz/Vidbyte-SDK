@@ -67,11 +67,11 @@ class NamesAndConstantsTests(unittest.TestCase):
         from vidbyte.lib.registries.provider_keys import ProviderKeyMatcher
 
         rows = ProviderKeyMatcher.KEY_FORMATS
-        self.assertEqual([ModelProvider(provider) for provider, _, _ in rows], [ModelProvider.ANTHROPIC, ModelProvider.OPENROUTER, ModelProvider.OPENAI, ModelProvider.XAI, ModelProvider.GEMINI])
-        self.assertEqual([set(prefixes) for _, prefixes, _ in rows], [{"sk-ant-"}, {"sk-or-"}, {"sk-proj-", "sk-admin-"}, {"xai-"}, {"AIza", "AQ."}])
+        self.assertEqual([ModelProvider(provider) for provider, _, _ in rows], [ModelProvider.ANTHROPIC, ModelProvider.OPENROUTER, ModelProvider.OPENAI, ModelProvider.XAI, ModelProvider.GEMINI, ModelProvider.META])
+        self.assertEqual([set(prefixes) for _, prefixes, _ in rows], [{"sk-ant-"}, {"sk-or-"}, {"sk-proj-", "sk-admin-"}, {"xai-"}, {"AIza", "AQ."}, {"LLM|"}])
         for _, _, pattern in rows:
             self.assertIsInstance(pattern, re.Pattern)
-        self.assertEqual(set(ProviderKeyMatcher.FORMAT_BOUND_PROVIDERS), {ModelProvider.ANTHROPIC, ModelProvider.XAI, ModelProvider.GEMINI, ModelProvider.OPENROUTER})
+        self.assertEqual(set(ProviderKeyMatcher.FORMAT_BOUND_PROVIDERS), {ModelProvider.ANTHROPIC, ModelProvider.XAI, ModelProvider.GEMINI, ModelProvider.OPENROUTER, ModelProvider.META})
         self.assertEqual(tuple(ProviderKeyMatcher.RESERVED_PREFIXES), (("sk-svcacct-", ModelProvider.OPENAI),))
 
     def test_the_removed_methods_are_gone(self) -> None:
