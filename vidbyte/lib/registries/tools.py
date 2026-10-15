@@ -36,9 +36,14 @@ class ToolRegistry(Tools):
             self._by_name = {tool.name: tool for tool in self._tools}
 
     def register_many(self, tools: Iterable[Any], *, replace: bool = False) -> None:
-        """Register multiple tools at once."""
-        for tool in tools:
-            self.register(tool, replace=replace)
+        """Register multiple tools at once, or none of them when one is refused."""
+        # @intent refused-batch-registers-nothing
+        # The whole batch is built into a new catalog before it replaces this one, so a duplicate
+        # late in the batch leaves the registry as it was, the way Tools.extend does.
+        with self._lock:
+            updated = self.extend(tools, replace=replace)
+            self._tools = updated.all()
+            self._by_name = {tool.name: tool for tool in self._tools}
 
     def get(self, name: str):
         """Return a registered tool by name or raise a registry error."""
