@@ -35,14 +35,17 @@ BAD_CONFIG_FIELDS = [
 
 @pytest.mark.parametrize(("record", "field", "bad"), BAD_CONFIG_FIELDS, ids=[f"{record}.{field}={bad!r}"[:60] for record, field, bad in BAD_CONFIG_FIELDS])
 def test_config_record_refuses_a_bad_field_when_built(lib_api, record, field, bad) -> None:
-    # §9.1: enums by to_enum, timeout by require_number(max 14400), commands by require_argv, names, distro and path by their patterns.
+    # §9.1: enums by to_enum, timeout by require_number(max 14400),
+    # commands by require_argv, names, distro and path by their
+    # patterns.
     with pytest.raises(lib_api.ConfigurationError) as caught:
         getattr(lib_api, record)(**{field: bad})
     assert field in str(caught.value), str(caught.value)
 
 
 def test_config_records_accept_members_exact_values_and_the_bounds(lib_api) -> None:
-    # §9.1 to_enum: a member or its exact value; timeout up to NATIVE_THREAD_MAX_SECONDS; names at 64 characters.
+    # §9.1 to_enum: a member or its exact value; timeout up to
+    # NATIVE_THREAD_MAX_SECONDS; names at 64 characters.
     enums = lib_api.enums
     grok = lib_api.GrokThreadConfig(permission_mode="acceptEdits", reasoning_effort="max", timeout_seconds=14400, grok_command=("grok-bin",))
     assert grok.permission_mode is enums.GrokPermissionMode.ACCEPT_EDITS and grok.reasoning_effort is enums.GrokReasoningEffort.MAX
@@ -54,7 +57,8 @@ def test_config_records_accept_members_exact_values_and_the_bounds(lib_api) -> N
 
 
 def test_request_checks_paths_as_given_then_stores_them_resolved(lib_api, sandbox, monkeypatch) -> None:
-    # D-26 / R-14 / EC-40: the workspace and each skill must be absolute and exist as given; the record stores Path.resolve().
+    # D-26 / R-14 / EC-40: the workspace and each skill must be absolute
+    # and exist as given; the record stores Path.resolve().
     enums = lib_api.enums
     skill = sandbox.make_skill("style-guide")
     (sandbox.workspace / "sub").mkdir()
@@ -86,7 +90,8 @@ def test_request_needs_a_thread_id_exactly_for_continue_and_fork(lib_api, sandbo
 
 
 def test_result_record_refuses_a_malformed_id_or_flag(lib_api) -> None:
-    # §9.1 NativeThreadResult: harness enum, thread_id pattern, text str, text_truncated bool.
+    # §9.1 NativeThreadResult: harness enum, thread_id pattern, text
+    # str, text_truncated bool.
     good = lib_api.NativeThreadResult(harness="opencode", thread_id="ses_01abc", text="done", text_truncated=False)
     assert good.harness is lib_api.enums.NativeHarness.OPENCODE
     for field, bad in (("thread_id", "--yolo"), ("thread_id", ""), ("text_truncated", "no"), ("harness", "claude_code"), ("text", None)):
@@ -97,7 +102,8 @@ def test_result_record_refuses_a_malformed_id_or_flag(lib_api) -> None:
 
 
 def test_cli_option_takes_a_dash_flag_and_a_nul_free_value(lib_api) -> None:
-    # §9.1 / R-15: flag ^-[^\s=]*$ under fullmatch (a leading dash, no whitespace, no "="); value without NUL.
+    # §9.1 / R-15: flag ^-[^\s=]*$ under fullmatch (a leading dash, no
+    # whitespace, no "="); value without NUL.
     enums = lib_api.enums
     assert lib_api.CliOption(enums.GrokFlag.MODEL, "grok-code-fast-1").flag == "--model"
     assert lib_api.CliOption("--fork").value is None

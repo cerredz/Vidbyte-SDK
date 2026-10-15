@@ -33,7 +33,8 @@ def native_modules(*, require_named: bool = True) -> dict[str, ast.Module]:
 
 
 def imported_modules(name: str, node: ast.AST) -> list[str]:
-    # Absolute module names an import statement reaches; relative imports are resolved against the module's package.
+    # Absolute module names an import statement reaches; relative
+    # imports are resolved against the module's package.
     if isinstance(node, ast.Import):
         return [alias.name for alias in node.names]
     if not isinstance(node, ast.ImportFrom):
@@ -79,7 +80,8 @@ def module_level_problem(statement: ast.stmt, index: int, is_init: bool) -> str 
 
 
 def test_module_level_holds_only_docstring_imports_classes_all_and_init_bindings() -> None:
-    # INV-15 rule 1 / FR-14: no module-level constants, functions or statements in any harness module.
+    # INV-15 rule 1 / FR-14: no module-level constants, functions or
+    # statements in any harness module.
     problems = []
     for name, tree in native_modules().items():
         is_init = name.endswith("__init__.py")
@@ -88,7 +90,8 @@ def test_module_level_holds_only_docstring_imports_classes_all_and_init_bindings
 
 
 def test_only_docstrings_all_entries_and_empty_zero_one_are_literals() -> None:
-    # INV-15 rule 2 / AC-14: every other str, bytes, int or float comes from an enum or vidbyte.lib.constants.native_threads.
+    # INV-15 rule 2 / AC-14: every other str, bytes, int or float comes
+    # from an enum or vidbyte.lib.constants.native_threads.
     problems = []
     for name, tree in native_modules().items():
         allowed = docstring_nodes(tree) | all_strings(tree)
@@ -102,7 +105,8 @@ def test_only_docstrings_all_entries_and_empty_zero_one_are_literals() -> None:
 
 
 def test_harness_modules_never_import_the_tools_layer() -> None:
-    # INV-20: vidbyte.harnesses.native.* imports nothing from vidbyte.tools (the stdio peer transport is gone, D-1).
+    # INV-20: vidbyte.harnesses.native.* imports nothing from
+    # vidbyte.tools (the stdio peer transport is gone, D-1).
     problems = []
     for name, tree in native_modules(require_named=False).items():
         for node in ast.walk(tree):

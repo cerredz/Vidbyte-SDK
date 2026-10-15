@@ -41,7 +41,8 @@ WRONG_CONFIGS = {"grok": "OpencodeThreadConfig", "opencode": "MuseThreadConfig",
 @pytest.fixture
 def refuse(api, sandbox, call, check_error):
     async def run(harness: str, field: str, *, verb: str = "run", observations=(), unquoted: str | None = None, **arguments):
-        # INV-4: refused before any process or file; the message names the argument; the key value is never quoted.
+        # INV-4: refused before any process or file; the message names
+        # the argument; the key value is never quoted.
         command = sandbox.command(harness)
         before = sandbox.snapshot(include_fake=True)
         if verb != "run":
@@ -63,7 +64,8 @@ def refuse(api, sandbox, call, check_error):
 @pytest.mark.parametrize("harness", HARNESSES)
 @pytest.mark.parametrize(("case", "key"), KEY_CASES, ids=[case for case, _ in KEY_CASES])
 async def test_invalid_api_key_is_refused_without_quoting_it(refuse, harness, case, key) -> None:
-    # EC-1 / EC-38 / D-25: printable ASCII without space, { or }, at most NATIVE_API_KEY_MAX_CHARS; a non-str is refused too.
+    # EC-1 / EC-38 / D-25: printable ASCII without space, { or }, at
+    # most NATIVE_API_KEY_MAX_CHARS; a non-str is refused too.
     quoted = key.strip() if isinstance(key, str) and len(key.strip()) >= 4 else None
     await refuse(harness, "api_key", api_key=key, unquoted=quoted)
 
@@ -72,7 +74,8 @@ async def test_invalid_api_key_is_refused_without_quoting_it(refuse, harness, ca
 @pytest.mark.parametrize("harness", HARNESSES)
 @pytest.mark.parametrize("case", WORKSPACE_CASES)
 async def test_invalid_workspace_is_refused(refuse, sandbox, monkeypatch, harness, case) -> None:
-    # EC-2 / R-14: relative (even when it exists relative to the current folder), missing, a file, or not a path.
+    # EC-2 / R-14: relative (even when it exists relative to the current
+    # folder), missing, a file, or not a path.
     monkeypatch.chdir(sandbox.root)
     a_file = sandbox.root / "a-file.txt"
     a_file.write_text("not a folder\n", encoding="utf-8")
@@ -84,14 +87,16 @@ async def test_invalid_workspace_is_refused(refuse, sandbox, monkeypatch, harnes
 @pytest.mark.parametrize("harness", HARNESSES)
 @pytest.mark.parametrize(("case", "prompt"), [("empty", ""), ("blank", "  \n\t "), ("nul", "list\x00files"), ("not-text", 3)], ids=["empty", "blank", "nul", "not-text"])
 async def test_invalid_prompt_is_refused(refuse, harness, case, prompt) -> None:
-    # EC-3: empty, blank, NUL-holding or non-text prompts never reach the vendor.
+    # EC-3: empty, blank, NUL-holding or non-text prompts never reach
+    # the vendor.
     await refuse(harness, "prompt", prompt=prompt)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("harness", HARNESSES)
 async def test_prompt_over_the_harness_cap_is_refused_naming_the_cap(refuse, harness) -> None:
-    # EC-3 / D-20: 24,000 characters on argv for Grok and Muse, 200,000 on stdin for opencode.
+    # EC-3 / D-20: 24,000 characters on argv for Grok and Muse, 200,000
+    # on stdin for opencode.
     cap = PROMPT_CAPS[harness]
     await refuse(harness, "prompt", prompt="p" * (cap + 1), observations=[("prompt cap", (str(cap), f"{cap:,}"))])
 
@@ -110,7 +115,8 @@ async def test_prompt_whose_quoted_form_passes_the_argv_cap_is_refused(refuse, h
 @pytest.mark.asyncio
 @pytest.mark.parametrize("harness", HARNESSES)
 async def test_prompt_at_the_harness_cap_still_runs(sandbox, call, harness) -> None:
-    # §9.1 boundary: exactly the cap is allowed, so opencode is not held to the argv cap.
+    # §9.1 boundary: exactly the cap is allowed, so opencode is not
+    # held to the argv cap.
     cap = PROMPT_CAPS[harness]
     result = await call(harness, prompt="p" * cap)
     assert result.thread_id
@@ -124,14 +130,16 @@ async def test_prompt_at_the_harness_cap_still_runs(sandbox, call, harness) -> N
 @pytest.mark.parametrize("verb", ["continue", "fork"])
 @pytest.mark.parametrize(("case", "thread_id"), THREAD_CASES, ids=[case for case, _ in THREAD_CASES])
 async def test_invalid_thread_id_is_refused(refuse, harness, verb, case, thread_id) -> None:
-    # EC-5 / INV-7: no leading dash, no whitespace or path characters, at most 160 characters.
+    # EC-5 / INV-7: no leading dash, no whitespace or path characters,
+    # at most 160 characters.
     await refuse(harness, "thread_id", verb=verb, thread_id=thread_id)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("harness", "case", "model"), [(harness, case, model) for harness, cases in MODEL_CASES.items() for case, model in cases], ids=[f"{harness}-{case}" for harness, cases in MODEL_CASES.items() for case, _ in cases])
 async def test_invalid_model_is_refused(refuse, harness, case, model) -> None:
-    # EC-5 / FR-8: opencode needs "<provider>/<model>"; Grok and Muse take a bare id; no leading dash or whitespace; at most 160.
+    # EC-5 / FR-8: opencode needs "<provider>/<model>"; Grok and Muse
+    # take a bare id; no leading dash or whitespace; at most 160.
     await refuse(harness, "model", model=model)
 
 
@@ -139,7 +147,8 @@ async def test_invalid_model_is_refused(refuse, harness, case, model) -> None:
 @pytest.mark.parametrize("harness", HARNESSES)
 @pytest.mark.parametrize("case", SKILL_CASES)
 async def test_invalid_skill_list_is_refused_naming_the_item(refuse, sandbox, monkeypatch, harness, case) -> None:
-    # EC-6: each skill an absolute existing folder holding a SKILL.md file, named lowercase-hyphenated (<= 64), unique, at most 32.
+    # EC-6: each skill an absolute existing folder holding a SKILL.md
+    # file, named lowercase-hyphenated (<= 64), unique, at most 32.
     monkeypatch.chdir(sandbox.root)
     good = sandbox.make_skill("good-skill")
     if case == "missing":
@@ -184,14 +193,16 @@ async def test_skill_list_at_the_count_and_name_caps_still_runs(sandbox, call) -
 @pytest.mark.asyncio
 @pytest.mark.parametrize("harness", HARNESSES)
 async def test_config_of_the_wrong_type_is_refused(api, refuse, sandbox, harness) -> None:
-    # EC-33: another harness's config record, or a plain mapping, names config.
+    # EC-33: another harness's config record, or a plain mapping, names
+    # config.
     await refuse(harness, "config", raw_config=getattr(api, WRONG_CONFIGS[harness])())
     await refuse(harness, "config", raw_config={"timeout_seconds": 5})
 
 
 @pytest.mark.asyncio
 async def test_argument_check_comes_before_launcher_resolution(api, sandbox, call) -> None:
-    # INV-4: an invalid argument is reported even when the launcher is also missing.
+    # INV-4: an invalid argument is reported even when the launcher is
+    # also missing.
     with pytest.raises(api.NativeThreadError) as caught:
         await call("grok", api_key="", command=(str(sandbox.root / "no-such-folder" / "grok"),))
     assert caught.value.failure_code.value == "configuration.invalid_argument"
@@ -199,7 +210,8 @@ async def test_argument_check_comes_before_launcher_resolution(api, sandbox, cal
 
 @pytest.mark.asyncio
 async def test_widest_allowed_key_still_runs(sandbox, call, pack) -> None:
-    # D-25 boundary: every printable ASCII character except space, { and }, up to NATIVE_API_KEY_MAX_CHARS.
+    # D-25 boundary: every printable ASCII character except space, { and
+    # }, up to NATIVE_API_KEY_MAX_CHARS.
     alphabet = "".join(chr(code) for code in range(0x21, 0x7F) if chr(code) not in "{}")
     key = (alphabet * 50)[:4096]
     await call("grok", api_key=key)

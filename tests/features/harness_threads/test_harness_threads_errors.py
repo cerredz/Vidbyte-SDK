@@ -35,7 +35,8 @@ def printed_session(sandbox) -> str:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("harness", HARNESSES)
 async def test_missing_launcher_is_not_installed_naming_it(api, sandbox, call, check_error, pack, harness) -> None:
-    # INV-6 not_installed / EC-11: an explicit command that does not exist.
+    # INV-6 not_installed / EC-11: an explicit command that does not
+    # exist.
     missing = sandbox.root / "no-such-folder" / f"{harness}-bin"
     with pytest.raises(api.NativeThreadError) as caught:
         await call(harness, command=(str(missing),))
@@ -46,7 +47,8 @@ async def test_missing_launcher_is_not_installed_naming_it(api, sandbox, call, c
 @pytest.mark.asyncio
 @pytest.mark.parametrize("harness", HARNESSES)
 async def test_launcher_the_os_refuses_is_launch_failed(api, sandbox, call, check_error, pack, harness) -> None:
-    # INV-6 launch_failed / EC-13: the file exists but the OS will not start it; the message names the program and the failure kind.
+    # INV-6 launch_failed / EC-13: the file exists but the OS will not
+    # start it; the message names the program and the failure kind.
     if sys.platform == "win32":
         target, kind = sandbox.root / f"{harness}-not-a-program.txt", "os_error"
         target.write_text("this file is not a program\n", encoding="utf-8")
@@ -67,7 +69,8 @@ async def test_launcher_the_os_refuses_is_launch_failed(api, sandbox, call, chec
     ("muse", "key_rejected", "authentication failed"),
 ])
 async def test_vendor_refusing_the_key_is_key_rejected(api, sandbox, call, check_error, harness, mode, vendor) -> None:
-    # INV-6 key_rejected / EC-9: Grok "Not signed in", opencode ProviderAuthError or status 401/403, Muse "authentication failed".
+    # INV-6 key_rejected / EC-9: Grok "Not signed in", opencode
+    # ProviderAuthError or status 401/403, Muse "authentication failed".
     with pytest.raises(api.NativeThreadError) as caught:
         await call(harness, fake={"mode": mode})
     thread_id = printed_session(sandbox) if harness == "opencode" else None
@@ -81,7 +84,9 @@ async def test_vendor_refusing_the_key_is_key_rejected(api, sandbox, call, check
     ("muse", "terminal_failed", True), ("muse", "fail", False),
 ])
 async def test_vendor_reported_failure_is_run_failed_with_exit_status_and_text(api, sandbox, call, check_error, harness, mode, printed) -> None:
-    # INV-6 run_failed / EC-23: a Grok error object, an opencode error event, a Muse terminal state other than completed, or a bare non-zero exit.
+    # INV-6 run_failed / EC-23: a Grok error object, an opencode error
+    # event, a Muse terminal state other than completed, or a bare
+    # non-zero exit.
     vendor = "the model refused because the workspace is read only"
     with pytest.raises(api.NativeThreadError) as caught:
         await call(harness, fake={"mode": mode, "vendor_text": vendor, "exit_code": EXIT})
@@ -96,7 +101,8 @@ async def test_vendor_reported_failure_is_run_failed_with_exit_status_and_text(a
     ("muse", "no_terminal", None, True), ("muse", "no_session", None, False),
 ])
 async def test_unreadable_success_output_is_protocol_mismatch(api, sandbox, call, check_error, harness, mode, member, printed) -> None:
-    # INV-6 protocol_mismatch / EC-18: exit 0 but no readable answer, no thread id, or no terminal record; the missing member is named.
+    # INV-6 protocol_mismatch / EC-18: exit 0 but no readable answer, no
+    # thread id, or no terminal record; the missing member is named.
     with pytest.raises(api.NativeThreadError) as caught:
         await call(harness, fake={"mode": mode})
     thread_id = printed_session(sandbox) if printed else None
@@ -106,7 +112,8 @@ async def test_unreadable_success_output_is_protocol_mismatch(api, sandbox, call
 
 @pytest.mark.asyncio
 async def test_muse_serve_error_other_than_not_found_is_run_failed_and_no_exec_starts(api, sandbox, call, check_error) -> None:
-    # §12.3 row 43: an error answer other than -32020 to session/read is run_failed; exec never starts.
+    # §12.3 row 43: an error answer other than -32020 to session/read
+    # is run_failed; exec never starts.
     with pytest.raises(api.NativeThreadError) as caught:
         await call("muse", "continue", "Again.", thread_id=UNKNOWN_ID, fake={"serve_mode": "other_error"})
     check_error(caught.value, harness="muse", verb="continue", code="muse.run_failed", workspace=sandbox.workspace, thread_id=UNKNOWN_ID, vendor="the session store is locked")
@@ -115,7 +122,8 @@ async def test_muse_serve_error_other_than_not_found_is_run_failed_and_no_exec_s
 
 @pytest.mark.asyncio
 async def test_muse_serve_that_never_answers_the_request_is_protocol_mismatch(api, sandbox, call, check_error) -> None:
-    # §12.3 row 43: no answer with id 2 before the serve child exits is protocol_mismatch; exec never starts.
+    # §12.3 row 43: no answer with id 2 before the serve child exits is
+    # protocol_mismatch; exec never starts.
     with pytest.raises(api.NativeThreadError) as caught:
         await call("muse", "fork", "Branch.", thread_id=UNKNOWN_ID, fake={"serve_mode": "no_answer"})
     check_error(caught.value, harness="muse", verb="fork", code="muse.protocol_mismatch", workspace=sandbox.workspace, thread_id=UNKNOWN_ID)
@@ -125,7 +133,8 @@ async def test_muse_serve_that_never_answers_the_request_is_protocol_mismatch(ap
 @pytest.mark.asyncio
 @pytest.mark.parametrize("harness", HARNESSES)
 async def test_unexpected_defect_is_runtime_error_naming_only_the_class(api, sandbox, call, check_error, monkeypatch, harness) -> None:
-    # EC-32 / INV-5: an exception inside the SDK becomes runtime.error; its text never reaches the error.
+    # EC-32 / INV-5: an exception inside the SDK becomes runtime.error;
+    # its text never reaches the error.
     secret_detail = "internal-detail-that-must-not-leak"
 
     async def broken_run(self, invocation):
@@ -164,7 +173,8 @@ async def test_unexpected_defect_names_the_workspace_and_the_callers_thread(api,
 
 @pytest.mark.asyncio
 async def test_error_class_carries_the_diagnostic_packet_for_this_feature(api, sandbox, call) -> None:
-    # D-10 / §12.3 row 24: literal DIAGNOSTIC_FIELDS, the harnesses README, this pack, and likely cause and next step as the packet.
+    # D-10 / §12.3 row 24: literal DIAGNOSTIC_FIELDS, the harnesses
+    # README, this pack, and likely cause and next step as the packet.
     with pytest.raises(api.NativeThreadError) as caught:
         await call("grok", api_key="")
     error = caught.value
@@ -181,7 +191,8 @@ async def test_error_class_carries_the_diagnostic_packet_for_this_feature(api, s
 
 
 def test_every_code_has_its_own_likely_cause_and_next_step(lib_api) -> None:
-    # D-10 / comment 1: texts written per code, for the 28 harness codes plus invalid_argument and runtime.error.
+    # D-10 / comment 1: texts written per code, for the 28 harness codes
+    # plus invalid_argument and runtime.error.
     codes = lib_api.FailureCode
     harness_codes = [codes(f"{harness}.{problem}") for harness in HARNESSES for problem in PROBLEMS] + [codes("muse.wsl_unavailable")]
     expected = {*harness_codes, codes.CONFIGURATION_INVALID_ARGUMENT, codes.RUNTIME_ERROR}

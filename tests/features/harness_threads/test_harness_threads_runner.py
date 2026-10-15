@@ -47,7 +47,8 @@ def child(source: str) -> tuple[str, ...]:
 
 
 def invocation(api: Any, argv: tuple[str, ...], /, **fields: Any) -> Any:
-    # argv is positional-only, so a test can pass a bad argv through **fields to replace it.
+    # argv is positional-only, so a test can pass a bad argv through
+    # **fields to replace it.
     values: dict[str, Any] = {"argv": argv, "env_overlay": {}, "timeout_seconds": 20.0, "max_output_bytes": 1_000_000}
     values.update(fields)
     return api.CliInvocation(**values)
@@ -67,7 +68,8 @@ def never_ending_stdin() -> Iterator[None]:
 
 
 def test_cli_invocation_validates_and_hides_the_overlay_and_stdin(lib_api, tmp_path: Path) -> None:
-    # §8.5 / §12.3 row 27: env_overlay (a str mapping, repr=False), timeout up to NATIVE_THREAD_MAX_SECONDS, stdin_text repr=False.
+    # §8.5 / §12.3 row 27: env_overlay (a str mapping, repr=False),
+    # timeout up to NATIVE_THREAD_MAX_SECONDS, stdin_text repr=False.
     good = invocation(lib_api, ("grok", "--version"), env_overlay={"VIDBYTE_HIDDEN_ENV": "hidden-env-value"}, stdin_text="hidden-stdin-text", cwd=tmp_path, timeout_seconds=14400.0)
     assert "hidden-env-value" not in repr(good) and "hidden-stdin-text" not in repr(good)
     bad_values = [
@@ -84,7 +86,8 @@ def test_cli_invocation_validates_and_hides_the_overlay_and_stdin(lib_api, tmp_p
 
 @pytest.mark.asyncio
 async def test_child_inherits_the_environment_plus_the_overlay(lib_api, tmp_path: Path, monkeypatch) -> None:
-    # D-13: the child starts with {**os.environ, **env_overlay}; the overlay wins; cwd is honoured; os.environ is unchanged.
+    # D-13: the child starts with {**os.environ, **env_overlay}; the
+    # overlay wins; cwd is honoured; os.environ is unchanged.
     monkeypatch.setenv("VIDBYTE_PARENT_PROBE", "from-parent")
     monkeypatch.setenv("VIDBYTE_SHADOWED_PROBE", "parent-value")
     before = dict(os.environ)
@@ -99,7 +102,9 @@ async def test_child_inherits_the_environment_plus_the_overlay(lib_api, tmp_path
 
 @pytest.mark.asyncio
 async def test_env_remove_drops_an_inherited_name_before_the_overlay(lib_api, monkeypatch) -> None:
-    # D-13 exception / rows 27, 30: the child starts with os.environ minus env_remove, then env_overlay on top; os.environ is unchanged.
+    # D-13 exception / rows 27, 30: the child starts with os.environ
+    # minus env_remove, then env_overlay on top; os.environ is
+    # unchanged.
     monkeypatch.setenv("VIDBYTE_PARENT_PROBE", "from-parent")
     monkeypatch.setenv("VIDBYTE_KEPT_PROBE", "kept")
     before = dict(os.environ)
@@ -118,7 +123,8 @@ async def test_runner_returns_exit_code_and_output(lib_api) -> None:
 
 @pytest.mark.asyncio
 async def test_runner_writes_stdin_text_then_closes_the_pipe(lib_api) -> None:
-    # INV-10: stdin is a pipe that receives stdin_text and is then closed; the child reads to EOF.
+    # INV-10: stdin is a pipe that receives stdin_text and is then
+    # closed; the child reads to EOF.
     source = "import sys; data = sys.stdin.read(); print(len(data), data.splitlines()[-1])"
     outcome = await lib_api.CliRunner().run(invocation(lib_api, child(source), stdin_text="line one\nline two\n", timeout_seconds=10.0))
     assert outcome.timed_out is False
@@ -127,7 +133,8 @@ async def test_runner_writes_stdin_text_then_closes_the_pipe(lib_api) -> None:
 
 @pytest.mark.asyncio
 async def test_runner_never_lets_the_child_inherit_the_callers_stdin(lib_api) -> None:
-    # INV-10: with no stdin_text the child gets DEVNULL, so a read returns at once.
+    # INV-10: with no stdin_text the child gets DEVNULL, so a read
+    # returns at once.
     with never_ending_stdin():
         outcome = await lib_api.CliRunner().run(invocation(lib_api, child("import sys; print(len(sys.stdin.read()))"), timeout_seconds=5.0))
     assert outcome.timed_out is False, "the child blocked on an inherited stdin"
@@ -136,7 +143,8 @@ async def test_runner_never_lets_the_child_inherit_the_callers_stdin(lib_api) ->
 
 @pytest.mark.asyncio
 async def test_runner_caps_output_and_keeps_draining(lib_api) -> None:
-    # INV-8: stdout and stderr are each kept up to max_output_bytes; the child never blocks on a full pipe.
+    # INV-8: stdout and stderr are each kept up to max_output_bytes; the
+    # child never blocks on a full pipe.
     source = "import sys; sys.stdout.write('o' * 300000); sys.stderr.write('e' * 300000); print('done', file=sys.stderr)"
     outcome = await lib_api.CliRunner().run(invocation(lib_api, child(source), max_output_bytes=100, timeout_seconds=15.0))
     assert outcome.timed_out is False and outcome.exit_code == 0
@@ -146,7 +154,8 @@ async def test_runner_caps_output_and_keeps_draining(lib_api) -> None:
 
 @pytest.mark.asyncio
 async def test_runner_timeout_stops_the_whole_tree_within_the_bound(lib_api, fast_stop, alive, wait_until) -> None:
-    # INV-8: the run's timeout holds and its whole tree (grandchild included) is stopped.
+    # INV-8: the run's timeout holds and its whole tree (grandchild
+    # included) is stopped.
     started = time.monotonic()
     outcome = await lib_api.CliRunner().run(invocation(lib_api, child(GRANDCHILD_SOURCE), timeout_seconds=1.0))
     assert time.monotonic() - started < 1.0 + 4 * fast_stop.kill_wait + fast_stop.slack

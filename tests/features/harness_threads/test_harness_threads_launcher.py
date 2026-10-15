@@ -71,7 +71,8 @@ async def test_grok_falls_back_to_the_home_install(sandbox, call) -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("harness", ["grok", "opencode"])
 async def test_missing_program_is_not_installed_naming_what_was_searched(api, sandbox, call, check_error, pack, harness) -> None:
-    # EC-11: the program, PATH and (for Grok) the fallback path that were searched; nothing is written first.
+    # EC-11: the program, PATH and (for Grok) the fallback path that
+    # were searched; nothing is written first.
     before = sandbox.snapshot()
     with pytest.raises(api.NativeThreadError) as caught:
         await call(harness, config=no_command(harness))
@@ -97,7 +98,8 @@ async def test_muse_is_found_on_path_and_missing_muse_is_not_installed(api, sand
 @pytest.mark.asyncio
 @win32_only
 async def test_muse_on_windows_without_distro_or_command_is_wsl_unavailable(api, sandbox, call, check_error) -> None:
-    # EC-29: Muse on win32 never searches PATH; a muse.exe on PATH is not used.
+    # EC-29: Muse on win32 never searches PATH; a muse.exe on PATH is
+    # not used.
     sandbox.stand_in(sandbox.bin, "muse", "muse")
     with pytest.raises(api.NativeThreadError) as caught:
         await call("muse", config=no_command("muse"))
@@ -109,7 +111,8 @@ async def test_muse_on_windows_without_distro_or_command_is_wsl_unavailable(api,
 @win32_only
 @pytest.mark.parametrize("harness", ["grok", "opencode"])
 async def test_batch_launcher_found_on_path_is_refused(api, sandbox, call, check_error, pack, harness) -> None:
-    # AC-12 / INV-14: grok.cmd or opencode.cmd first on PATH, no Grok fallback in the empty home.
+    # AC-12 / INV-14: grok.cmd or opencode.cmd first on PATH, no Grok
+    # fallback in the empty home.
     batch, marker = sandbox.batch_file(sandbox.bin, f"{harness}.cmd")
     with pytest.raises(api.NativeThreadError) as caught:
         await call(harness, config=no_command(harness))
@@ -122,7 +125,8 @@ async def test_batch_launcher_found_on_path_is_refused(api, sandbox, call, check
 @pytest.mark.parametrize("harness", ["grok", "opencode", "muse"])
 @pytest.mark.parametrize(("name", "suffix"), [("launcher.cmd", ""), ("launcher.bat", ""), ("launcher.CMD", ""), ("launcher.bat", "."), ("launcher.cmd", " ")], ids=["cmd", "bat", "upper-cmd", "bat-trailing-dot", "cmd-trailing-space"])
 async def test_batch_file_passed_as_the_command_is_refused(api, sandbox, call, check_error, pack, harness, name, suffix) -> None:
-    # AC-12 / INV-14 / EC-12: .cmd or .bat, case-insensitive, ignoring trailing dots and spaces, for all three harnesses.
+    # AC-12 / INV-14 / EC-12: .cmd or .bat, case-insensitive, ignoring
+    # trailing dots and spaces, for all three harnesses.
     batch, marker = sandbox.batch_file(sandbox.root / "batch", f"{harness}-{name}")
     with pytest.raises(api.NativeThreadError) as caught:
         await call(harness, command=(str(batch) + suffix,))
@@ -133,7 +137,8 @@ async def test_batch_file_passed_as_the_command_is_refused(api, sandbox, call, c
 @pytest.mark.asyncio
 @win32_only
 async def test_grok_batch_on_path_falls_through_to_the_home_install(sandbox, call) -> None:
-    # EC-12 / D-16: the npm grok.cmd first on PATH is skipped in favour of ~/.grok/bin/grok.exe.
+    # EC-12 / D-16: the npm grok.cmd first on PATH is skipped in favour
+    # of ~/.grok/bin/grok.exe.
     batch, marker = sandbox.batch_file(sandbox.bin, "grok.cmd")
     sandbox.stand_in(sandbox.home / ".grok" / "bin", "grok", "grok")
     result = await call("grok", config=no_command("grok"))
@@ -193,7 +198,8 @@ async def test_wsl_exe_on_path_runs_and_a_current_folder_decoy_never_does(sandbo
 @pytest.mark.asyncio
 @pytest.mark.parametrize("blocker", [".vidbyte", ".vidbyte/grok-homes"])
 async def test_unpreparable_private_home_is_launch_failed(api, sandbox, call, check_error, pack, blocker) -> None:
-    # EC-14: a file where the private home's parent folder must be is grok.launch_failed naming the home; nothing runs.
+    # EC-14: a file where the private home's parent folder must be is
+    # grok.launch_failed naming the home; nothing runs.
     target = sandbox.home / blocker
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("a file, not a folder\n", encoding="utf-8")
@@ -205,7 +211,9 @@ async def test_unpreparable_private_home_is_launch_failed(api, sandbox, call, ch
 
 @pytest.mark.asyncio
 async def test_undeterminable_user_home_is_launch_failed(api, sandbox, call, monkeypatch) -> None:
-    # EC-14 / R-20: Path.home() raising RuntimeError (no HOME/USERPROFILE, no passwd entry) is grok.launch_failed, not runtime.error.
+    # EC-14 / R-20: Path.home() raising RuntimeError (no
+    # HOME/USERPROFILE, no passwd entry) is grok.launch_failed, not
+    # runtime.error.
     def no_home(cls):
         raise RuntimeError("Could not determine home directory.")
 

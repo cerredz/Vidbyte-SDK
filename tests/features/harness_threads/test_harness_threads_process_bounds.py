@@ -50,7 +50,8 @@ def stop_grandchildren(sandbox, alive) -> None:
     ("muse", "hold", False), ("muse", "session_then_hold", True),
 ])
 async def test_run_past_its_timeout_is_timed_out_with_its_tree_stopped(api, sandbox, call, check_error, fast_stop, alive, wait_until, harness, mode, printed) -> None:
-    # AC-9 / INV-8 / EC-15 / AC-21: timed_out within timeout + stop bound; leader and grandchild gone; the printed thread id is kept.
+    # AC-9 / INV-8 / EC-15 / AC-21: timed_out within timeout + stop
+    # bound; leader and grandchild gone; the printed thread id is kept.
     started = time.monotonic()
     with pytest.raises(api.NativeThreadError) as caught:
         await call(harness, fake={"mode": mode, "grandchild": True}, config={"timeout_seconds": TIMEOUT})
@@ -64,7 +65,8 @@ async def test_run_past_its_timeout_is_timed_out_with_its_tree_stopped(api, sand
 
 @pytest.mark.asyncio
 async def test_grok_continue_that_times_out_carries_the_callers_thread(api, sandbox, call, check_error, fast_stop) -> None:
-    # INV-5 / D-27: Grok prints its id only at exit, so a failed continue carries the caller's id.
+    # INV-5 / D-27: Grok prints its id only at exit, so a failed
+    # continue carries the caller's id.
     first = await call("grok")
     with pytest.raises(api.NativeThreadError) as caught:
         await call("grok", "continue", "Again.", thread_id=first.thread_id, fake={"mode": "hold"}, config={"timeout_seconds": TIMEOUT})
@@ -73,7 +75,8 @@ async def test_grok_continue_that_times_out_carries_the_callers_thread(api, sand
 
 @pytest.mark.asyncio
 async def test_muse_fork_that_times_out_in_exec_carries_the_new_thread(api, sandbox, call, check_error, fast_stop) -> None:
-    # AC-21 / INV-5: once session/fork answered, a failure carries the fork's new id.
+    # AC-21 / INV-5: once session/fork answered, a failure carries the
+    # fork's new id.
     first = await call("muse")
     with pytest.raises(api.NativeThreadError) as caught:
         await call("muse", "fork", "Branch.", thread_id=first.thread_id, fake={"mode": "hold"}, config={"timeout_seconds": TIMEOUT})
@@ -84,7 +87,9 @@ async def test_muse_fork_that_times_out_in_exec_carries_the_new_thread(api, sand
 
 @pytest.mark.asyncio
 async def test_muse_serve_exchange_is_bounded_by_the_control_timeout(api, sandbox, call, check_error, fast_stop, alive, wait_until, monkeypatch) -> None:
-    # INV-8 / INV-6: the serve exchange passing NATIVE_CONTROL_TIMEOUT_SECONDS is muse.timed_out, even with a long run timeout; no exec starts.
+    # INV-8 / INV-6: the serve exchange passing
+    # NATIVE_CONTROL_TIMEOUT_SECONDS is muse.timed_out, even with a long
+    # run timeout; no exec starts.
     monkeypatch.setattr(api.constants, "NATIVE_CONTROL_TIMEOUT_SECONDS", TIMEOUT)
     started = time.monotonic()
     with pytest.raises(api.NativeThreadError) as caught:
@@ -103,7 +108,8 @@ async def test_muse_serve_exchange_is_bounded_by_the_control_timeout(api, sandbo
     ("muse", "flood", "NATIVE_PROCESS_MAX_OUTPUT_BYTES", True),
 ])
 async def test_stdout_past_its_cap_is_output_too_large(api, sandbox, call, check_error, harness, mode, cap_name, printed) -> None:
-    # EC-17 / INV-8 / AC-21: the cut stream is never parsed as an answer; the cap is named; a printed thread id is kept.
+    # EC-17 / INV-8 / AC-21: the cut stream is never parsed as an
+    # answer; the cap is named; a printed thread id is kept.
     cap = getattr(api.constants, cap_name)
     with pytest.raises(api.NativeThreadError) as caught:
         await call(harness, fake={"mode": mode, "flood_bytes": cap + FLOOD_EXTRA_BYTES})
@@ -114,7 +120,8 @@ async def test_stdout_past_its_cap_is_output_too_large(api, sandbox, call, check
 @pytest.mark.asyncio
 @pytest.mark.parametrize("harness", HARNESSES)
 async def test_answer_text_past_the_cap_is_cut_and_flagged(api, call, harness) -> None:
-    # EC-31 / INV-8: text cut at NATIVE_RESULT_TEXT_MAX_CHARS with text_truncated True; exactly the cap is not truncated.
+    # EC-31 / INV-8: text cut at NATIVE_RESULT_TEXT_MAX_CHARS with
+    # text_truncated True; exactly the cap is not truncated.
     cap = api.constants.NATIVE_RESULT_TEXT_MAX_CHARS
     letter = harness[0]
     over = await call(harness, fake={"mode": "long_text", "text_chars": cap + 5})
@@ -126,7 +133,9 @@ async def test_answer_text_past_the_cap_is_cut_and_flagged(api, call, harness) -
 @pytest.mark.asyncio
 @pytest.mark.parametrize("harness", HARNESSES)
 async def test_cancellation_propagates_after_the_tree_is_stopped(sandbox, call, fast_stop, alive, wait_until, harness) -> None:
-    # AC-11 / INV-9 / EC-16: CancelledError reaches the caller unchanged, no process from the call is left, the Muse temp folder is gone.
+    # AC-11 / INV-9 / EC-16: CancelledError reaches the caller
+    # unchanged, no process from the call is left, the Muse temp folder
+    # is gone.
     task = asyncio.create_task(call(harness, fake={"mode": "hold", "grandchild": True}))
     assert await wait_until(lambda: bool(sandbox.records("grandchild")), 30.0), "the stand-in never started"
     pids = tree_pids(sandbox, EXEC_ROLES[harness])

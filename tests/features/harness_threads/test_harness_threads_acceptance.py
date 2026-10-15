@@ -54,7 +54,8 @@ asyncio.run(main())
 
 
 def test_developer_snippet_runs_as_written_against_stand_ins_on_path(sandbox, pack) -> None:
-    # AC-1: stand-in grok and opencode first on PATH, placeholder keys in the caller's environment, the user home redirected.
+    # AC-1: stand-in grok and opencode first on PATH, placeholder keys
+    # in the caller's environment, the user home redirected.
     sandbox.stand_in(sandbox.bin, "grok", "grok")
     sandbox.stand_in(sandbox.bin, "opencode", "opencode")
     skill = sandbox.make_skill("python-style")
@@ -86,7 +87,8 @@ def test_developer_snippet_runs_as_written_against_stand_ins_on_path(sandbox, pa
 @pytest.mark.asyncio
 @pytest.mark.parametrize("harness", HARNESSES)
 async def test_run_returns_the_vendors_new_thread_id_and_final_text(api, sandbox, call, pack, harness) -> None:
-    # AC-2 / FR-4 / D-21: harness set, the id the vendor created, the vendor's final text, not truncated.
+    # AC-2 / FR-4 / D-21: harness set, the id the vendor created, the
+    # vendor's final text, not truncated.
     result = await call(harness)
     assert isinstance(result, api.NativeThreadResult)
     assert result.harness is api.enums.NativeHarness(harness)
@@ -99,7 +101,8 @@ async def test_run_returns_the_vendors_new_thread_id_and_final_text(api, sandbox
 
 @pytest.mark.asyncio
 async def test_opencode_final_text_is_the_last_messages_text_parts(sandbox, call, api) -> None:
-    # D-21 / §12.3 row 40: the text parts of the last text event's message, joined by a newline; earlier narration is left out.
+    # D-21 / §12.3 row 40: the text parts of the last text event's
+    # message, joined by a newline; earlier narration is left out.
     result = await call("opencode", fake={"final_parts": ["First finding.", "Second finding."]})
     assert result.text == "First finding.\nSecond finding."
     assert "Let me look at the files first." not in result.text
@@ -108,7 +111,8 @@ async def test_opencode_final_text_is_the_last_messages_text_parts(sandbox, call
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("model", "provider"), [("zai-coding-plan/glm-5.3", "zai-coding-plan"), ("deepseek/deepseek-v4-pro", "deepseek")])
 async def test_opencode_binds_the_key_to_the_models_provider(sandbox, call, pack, model, provider) -> None:
-    # AC-17 / FR-8: --model=<model>, and the inline config binds api_key to exactly that provider.
+    # AC-17 / FR-8: --model=<model>, and the inline config binds api_key
+    # to exactly that provider.
     result = await call("opencode", model=model)
     start = sandbox.only_start("opencode")
     assert start["options"]["--model"] == model

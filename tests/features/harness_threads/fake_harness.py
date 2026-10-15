@@ -52,7 +52,8 @@ def digest(value: str) -> dict[str, Any]:
 
 
 def claim_launch_number(log_dir: Path) -> int:
-    # The lowest free number, claimed with an exclusive create (atomic on Windows and POSIX), so no clock is involved.
+    # The lowest free number, claimed with an exclusive create (atomic
+    # on Windows and POSIX), so no clock is involved.
     number = 1
     while True:
         try:
@@ -107,7 +108,8 @@ def visible_environment(via_wsl: bool) -> dict[str, str]:
 
 
 def host_path(value: str | None, via_wsl: bool) -> Path | None:
-    # Inside WSL a Windows folder is seen as /mnt/<drive>/...; map it back so the fake can look at it.
+    # Inside WSL a Windows folder is seen as /mnt/<drive>/...; map it
+    # back so the fake can look at it.
     if value is None:
         return None
     if via_wsl:
@@ -189,7 +191,8 @@ def hold(scenario: dict[str, Any]) -> str:
 
 
 def start_grandchild(log: FakeLog) -> None:
-    # A grandchild that inherits the pipes, so only a whole-tree stop ends it.
+    # A grandchild that inherits the pipes, so only a whole-tree stop
+    # ends it.
     child = subprocess.Popen([sys.executable, "-c", f"import time; time.sleep({GRANDCHILD_SECONDS})"])
     log.write("grandchild", grandchild_pid=child.pid)
 
@@ -231,9 +234,10 @@ def flood(total_bytes: int) -> None:
 
 
 def echo_text(scenario: dict[str, Any], args: list[str], stdin_text: str, env: dict[str, str]) -> str:
-    # AC-4: everything the child was given, credentials included, as one vendor error text. The first copy of the
-    # key sits near the start; a run of back-to-back copies straddles the vendor-text cap, so capping before
-    # scrubbing would leave a fragment of the key behind.
+    # AC-4: everything the child was given, credentials included, as one
+    # vendor error text. The first copy of the key sits near the start;
+    # a run of back-to-back copies straddles the vendor-text cap, so
+    # capping before scrubbing would leave a fragment of the key behind.
     key = scenario["echo_key"]
     cap = scenario.get("echo_cap", 1000)
     head = f"echo key {key} argv {' '.join(args)} stdin {stdin_text} env {' '.join(env.get(name, '') for name in CREDENTIAL_NAMES)} "
@@ -610,7 +614,8 @@ def run_muse(scenario: dict[str, Any], args: list[str], *, via_wsl: bool, launch
 
 
 def reap(scenario: dict[str, Any], args: list[str]) -> None:
-    # `wsl.exe -d <distro> -e sh -s <mark>` with the reap script on stdin: log it and end the processes carrying the mark.
+    # `wsl.exe -d <distro> -e sh -s <mark>` with the reap script on
+    # stdin: log it and end the processes carrying the mark.
     script = read_stdin_text()
     mark = args[1] if len(args) > 1 else None
     log = FakeLog(scenario["log_dir"], "wsl-reap")

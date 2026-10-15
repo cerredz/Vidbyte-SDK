@@ -60,7 +60,8 @@ def key_digest(text: str) -> dict[str, Any]:
 
 
 def private_home(home: Path, workspace: Path) -> Path:
-    # INV-13 / D-24: <home>/.vidbyte/grok-homes/<first 16 hex of sha256(normcase(resolved workspace))>.
+    # INV-13 / D-24: <home>/.vidbyte/grok-homes/<first 16 hex of
+    # sha256(normcase(resolved workspace))>.
     key = hashlib.sha256(os.path.normcase(str(workspace.resolve())).encode("utf-8")).hexdigest()[:16]
     return home / ".vidbyte" / "grok-homes" / key
 
@@ -77,7 +78,8 @@ def path_spellings(path: Path | str) -> tuple[str, ...]:
 
 
 def launcher_bytes() -> bytes | None:
-    # pip's console-script launcher: runs `<python from the shebang> <this exe>`, where the exe ends with a zipped __main__.
+    # pip's console-script launcher: runs `<python from the shebang>
+    # <this exe>`, where the exe ends with a zipped __main__.
     try:
         pip = importlib.import_module("pip")
     except ImportError:
@@ -115,7 +117,8 @@ class Sandbox:
         return (sys.executable, "-u", str(FAKE), str(self.scenario(program, **fields)))
 
     def stand_in(self, folder: Path, name: str, program: str, *, as_wsl: bool = False, **fields: Any) -> Path:
-        # An executable named like the vendor program that runs fake_harness.py: an `.exe` on win32, a script on POSIX.
+        # An executable named like the vendor program that runs
+        # fake_harness.py: an `.exe` on win32, a script on POSIX.
         scenario = self.scenario(program, **fields)
         extra = ["--as-wsl"] if as_wsl else []
         body = f"import runpy, sys\nsys.argv = [{str(FAKE)!r}, {str(scenario)!r}, *{extra!r}, *sys.argv[1:]]\nrunpy.run_path({str(FAKE)!r}, run_name='__main__')\n"
@@ -136,7 +139,8 @@ class Sandbox:
         return target
 
     def batch_file(self, folder: Path, name: str) -> tuple[Path, Path]:
-        # A Windows batch launcher that would leave a marker file if anything ever ran it.
+        # A Windows batch launcher that would leave a marker file if
+        # anything ever ran it.
         folder.mkdir(parents=True, exist_ok=True)
         marker = self.fake_root / f"{name}.ran"
         target = folder / name
@@ -180,7 +184,8 @@ class Sandbox:
         return self.records("answer", role)
 
     def snapshot(self, *, include_fake: bool = False) -> dict[str, tuple[str, int, str]]:
-        # Every file and folder under the sandbox root, except the stand-in's own logs, scenarios and vendor state.
+        # Every file and folder under the sandbox root, except the
+        # stand-in's own logs, scenarios and vendor state.
         entries: dict[str, tuple[str, int, str]] = {}
         for path in sorted(self.root.rglob("*")):
             relative = path.relative_to(self.root).as_posix()
@@ -201,7 +206,8 @@ class Sandbox:
 
 @pytest.fixture
 def lib_api() -> SimpleNamespace:
-    # vidbyte.lib names only (spec §8.5), imported lazily so a missing module fails setup, not collection.
+    # vidbyte.lib names only (spec §8.5), imported lazily so a missing
+    # module fails setup, not collection.
     records = importlib.import_module("vidbyte.lib.dataclasses.native_threads")
     process_records = importlib.import_module("vidbyte.lib.dataclasses.process")
     process = importlib.import_module("vidbyte.lib.process")
@@ -234,7 +240,8 @@ def lib_api() -> SimpleNamespace:
 
 @pytest.fixture
 def api(lib_api: SimpleNamespace) -> SimpleNamespace:
-    # The nine public functions (spec §8.5), imported lazily from vidbyte.harnesses.native.
+    # The nine public functions (spec §8.5), imported lazily from
+    # vidbyte.harnesses.native.
     native = importlib.import_module("vidbyte.harnesses.native")
     functions = {(harness, verb): getattr(native, f"{verb}_{harness}_thread") for harness in HARNESSES for verb in VERBS}
     return SimpleNamespace(**vars(lib_api), native=native, functions=functions, configs={harness: getattr(lib_api, CONFIG_NAMES[harness]) for harness in HARNESSES})
@@ -242,7 +249,8 @@ def api(lib_api: SimpleNamespace) -> SimpleNamespace:
 
 @pytest.fixture
 def sandbox(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> Sandbox:
-    # Spec §13 user-home seam: USERPROFILE (win32) and HOME (POSIX) point at the sandbox home, a sibling of the workspace.
+    # Spec §13 user-home seam: USERPROFILE (win32) and HOME (POSIX)
+    # point at the sandbox home, a sibling of the workspace.
     box = Sandbox(tmp_path_factory.mktemp("case").resolve())
     monkeypatch.setenv("USERPROFILE", str(box.home))
     monkeypatch.setenv("HOME", str(box.home))
@@ -254,8 +262,10 @@ def sandbox(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.Monkey
 @pytest.fixture
 def call(api: SimpleNamespace, sandbox: Sandbox) -> Callable[..., Awaitable[Any]]:
     async def run(harness: str, verb: str = "run", prompt: str = PROMPT, *, thread_id: str | None = None, command: tuple[str, ...] | None = None, fake: dict[str, Any] | None = None, config: dict[str, Any] | None = None, raw_config: Any = BUILT_CONFIG, **arguments: Any) -> Any:
-        # One thread function against the stand-in; `fake` is the stand-in scenario, `config` extra config fields;
-        # `raw_config` is handed to the function as `config=` unchanged (EC-33: a value of the wrong type).
+        # One thread function against the stand-in; `fake` is the
+        # stand-in scenario, `config` extra config fields; `raw_config`
+        # is handed to the function as `config=` unchanged (EC-33: a
+        # value of the wrong type).
         function = api.functions[(harness, verb)]
         launcher = command if command is not None else sandbox.command(harness, **(fake or {}))
         config_fields = {COMMAND_FIELDS[harness]: launcher, "timeout_seconds": CALL_TIMEOUT_SECONDS, **(config or {})}
@@ -270,7 +280,8 @@ def call(api: SimpleNamespace, sandbox: Sandbox) -> Callable[..., Awaitable[Any]
 
 
 def find_in_order(message: str, parts: Iterable[tuple[str, tuple[str, ...]]], *, fold: bool = False) -> None:
-    # INV-5: each element must appear after the previous one; any spelling in a tuple counts.
+    # INV-5: each element must appear after the previous one; any
+    # spelling in a tuple counts.
     haystack = message.lower() if fold else message
     position = 0
     for label, spellings in parts:
@@ -284,7 +295,8 @@ def find_in_order(message: str, parts: Iterable[tuple[str, tuple[str, ...]]], *,
 @pytest.fixture
 def check_error(api: SimpleNamespace, sandbox: Sandbox) -> Callable[..., None]:
     def check(error: BaseException, *, harness: str, verb: str, code: str, workspace: Path | None = None, thread_id: str | None | bool = False, observations: Iterable[tuple[str, tuple[str, ...]]] = (), vendor: str | None = None, exit_code: int | None | bool = False) -> None:
-        # INV-5 attributes and message order; thread_id/exit_code False means "do not check".
+        # INV-5 attributes and message order; thread_id/exit_code False
+        # means "do not check".
         assert isinstance(error, api.NativeThreadError), f"expected NativeThreadError, got {type(error).__name__}: {error}"
         assert isinstance(error, api.AgentExecutionError)
         assert error.failure_code.value == code, f"expected {code}, got {error.failure_code.value}: {error}"
@@ -318,7 +330,8 @@ def check_error(api: SimpleNamespace, sandbox: Sandbox) -> Callable[..., None]:
 
 @pytest.fixture
 def fast_stop(lib_api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
-    # Spec §13 timing knobs: read through vidbyte.lib.constants.native_threads at call time.
+    # Spec §13 timing knobs: read through
+    # vidbyte.lib.constants.native_threads at call time.
     monkeypatch.setattr(lib_api.constants, "NATIVE_KILL_WAIT_SECONDS", FAST_KILL_WAIT_SECONDS)
     return SimpleNamespace(kill_wait=FAST_KILL_WAIT_SECONDS, slack=SLACK_SECONDS)
 
@@ -381,7 +394,8 @@ def alive() -> Callable[[int], bool]:
 
 @pytest.fixture
 def wsl_ready(sandbox: Sandbox) -> None:
-    # Muse WSL mode exists only on win32, and the wsl.exe stand-in needs pip's launcher.
+    # Muse WSL mode exists only on win32, and the wsl.exe stand-in needs
+    # pip's launcher.
     if sys.platform != "win32":
         pytest.skip("Muse WSL mode exists only on win32 (spec §9.2, EC-29)")
     if launcher_bytes() is None:
@@ -390,7 +404,8 @@ def wsl_ready(sandbox: Sandbox) -> None:
 
 @pytest.fixture
 def pack() -> SimpleNamespace:
-    # Pack constants and pure helpers; test modules cannot import conftest by name (no __init__.py in pack folders).
+    # Pack constants and pure helpers; test modules cannot import
+    # conftest by name (no __init__.py in pack folders).
     return SimpleNamespace(
         API_KEY=API_KEY, PROMPT=PROMPT, LABELS=LABELS, HARNESSES=HARNESSES, VERBS=VERBS, OPENCODE_MODEL=OPENCODE_MODEL,
         FAKE_DISTRO=FAKE_DISTRO, OTHER_DISTRO=OTHER_DISTRO, REPO_ROOT=REPO_ROOT, FAKE=FAKE, CALL_TIMEOUT_SECONDS=CALL_TIMEOUT_SECONDS,

@@ -45,7 +45,9 @@ def wslenv_entries(value: str | None) -> list[str]:
 
 @pytest.mark.asyncio
 async def test_wsl_run_launches_muse_in_the_distro_with_translated_paths_and_forwarded_names(sandbox, call, pack, wsl_ready, monkeypatch) -> None:
-    # §9.2 / D-16 / INV-2 / INV-18: wsl.exe -d <distro> -e <muse_path>; /mnt paths; the key only through WSLENV; the caller's WSLENV kept first.
+    # §9.2 / D-16 / INV-2 / INV-18: wsl.exe -d <distro> -e <muse_path>;
+    # /mnt paths; the key only through WSLENV; the caller's WSLENV kept
+    # first.
     monkeypatch.setenv("WSLENV", CALLER_WSLENV)
     wsl_stand_in(sandbox, pack)
     skill = sandbox.make_skill("alpha-skill")
@@ -79,7 +81,9 @@ async def test_wsl_custom_muse_path_is_the_program_inside_the_distro(sandbox, ca
 
 @pytest.mark.asyncio
 async def test_wsl_serve_check_never_forwards_a_key_and_each_call_gets_a_fresh_mark(sandbox, call, pack, wsl_ready, monkeypatch) -> None:
-    # §9.2 Muse serve / row 42: forwarded names come from the overlay, not os.environ, so a caller's own META_API_KEY never reaches serve.
+    # §9.2 Muse serve / row 42: forwarded names come from the overlay,
+    # not os.environ, so a caller's own META_API_KEY never reaches
+    # serve.
     monkeypatch.setenv("META_API_KEY", "caller-own-meta-key-value")
     wsl_stand_in(sandbox, pack)
     first = await call("muse", config=wsl_config(pack.FAKE_DISTRO))
@@ -98,7 +102,8 @@ async def test_wsl_serve_check_never_forwards_a_key_and_each_call_gets_a_fresh_m
 
 @pytest.mark.asyncio
 async def test_wsl_run_past_its_timeout_is_reaped_with_the_calls_mark(api, sandbox, call, check_error, pack, wsl_ready, fast_stop, alive, wait_until) -> None:
-    # AC-9 / INV-8 / EC-15: timed_out within the bound, and the reap ran with the exec's mark (script on stdin, no carriage return).
+    # AC-9 / INV-8 / EC-15: timed_out within the bound, and the reap ran
+    # with the exec's mark (script on stdin, no carriage return).
     wsl_stand_in(sandbox, pack, mode="hold", grandchild=True)
     started = time.monotonic()
     with pytest.raises(api.NativeThreadError) as caught:
@@ -115,7 +120,8 @@ async def test_wsl_run_past_its_timeout_is_reaped_with_the_calls_mark(api, sandb
 
 @pytest.mark.asyncio
 async def test_wsl_serve_past_the_control_timeout_is_reaped(api, sandbox, call, check_error, pack, wsl_ready, fast_stop, monkeypatch) -> None:
-    # INV-8 / row 44 step 7: a timed-out serve exchange is reaped too ("timed_out (any process)").
+    # INV-8 / row 44 step 7: a timed-out serve exchange is reaped too
+    # ("timed_out (any process)").
     monkeypatch.setattr(api.constants, "NATIVE_CONTROL_TIMEOUT_SECONDS", TIMEOUT)
     wsl_stand_in(sandbox, pack, serve_mode="hold")
     with pytest.raises(api.NativeThreadError) as caught:
@@ -129,7 +135,8 @@ async def test_wsl_serve_past_the_control_timeout_is_reaped(api, sandbox, call, 
 
 @pytest.mark.asyncio
 async def test_wsl_cancellation_reaps_before_it_propagates(sandbox, call, pack, wsl_ready, fast_stop, wait_until) -> None:
-    # AC-11 / INV-9: CancelledError reaches the caller only after the reap ran with the call's mark and the temp folder is gone.
+    # AC-11 / INV-9: CancelledError reaches the caller only after the
+    # reap ran with the call's mark and the temp folder is gone.
     wsl_stand_in(sandbox, pack, mode="hold")
     task = asyncio.create_task(call("muse", config=wsl_config(pack.FAKE_DISTRO)))
     assert await wait_until(lambda: bool(sandbox.starts("muse-exec")), 30.0), "the stand-in never started"
@@ -143,7 +150,8 @@ async def test_wsl_cancellation_reaps_before_it_propagates(sandbox, call, pack, 
 
 @pytest.mark.asyncio
 async def test_unknown_distro_is_wsl_unavailable_listing_the_distros(api, sandbox, call, check_error, pack, wsl_ready) -> None:
-    # EC-29: WSL_E_DISTRO_NOT_FOUND -> muse.wsl_unavailable listing what `wsl.exe -l -q` reports.
+    # EC-29: WSL_E_DISTRO_NOT_FOUND -> muse.wsl_unavailable listing what
+    # `wsl.exe -l -q` reports.
     wsl_stand_in(sandbox, pack)
     with pytest.raises(api.NativeThreadError) as caught:
         await call("muse", config=wsl_config("VidbyteMissingDistro"))
@@ -154,7 +162,8 @@ async def test_unknown_distro_is_wsl_unavailable_listing_the_distros(api, sandbo
 
 @pytest.mark.asyncio
 async def test_missing_muse_inside_the_distro_is_not_installed_naming_distro_and_path(api, sandbox, call, check_error, pack, wsl_ready) -> None:
-    # EC-30: the distro exists but muse_path does not -> muse.not_installed naming both.
+    # EC-30: the distro exists but muse_path does not ->
+    # muse.not_installed naming both.
     wsl_stand_in(sandbox, pack, muse_path="/opt/elsewhere/muse")
     with pytest.raises(api.NativeThreadError) as caught:
         await call("muse", config=wsl_config(pack.FAKE_DISTRO))
@@ -165,7 +174,8 @@ async def test_missing_muse_inside_the_distro_is_not_installed_naming_distro_and
 
 @pytest.mark.asyncio
 async def test_missing_wsl_exe_is_wsl_unavailable(api, sandbox, call, check_error, pack) -> None:
-    # EC-29: wsl_distro set but no wsl.exe on PATH; nothing starts and nothing is written.
+    # EC-29: wsl_distro set but no wsl.exe on PATH; nothing starts and
+    # nothing is written.
     before = sandbox.snapshot()
     with pytest.raises(api.NativeThreadError) as caught:
         await call("muse", config=wsl_config(pack.FAKE_DISTRO))

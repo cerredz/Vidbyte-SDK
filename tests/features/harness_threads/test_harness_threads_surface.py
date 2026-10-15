@@ -120,7 +120,9 @@ def importable(module: str, name: str) -> bool:
 
 
 def test_native_package_exports_exactly_the_nine_functions_and_their_records(api) -> None:
-    # INV-1 / D-22: one literal __all__ with the nine functions plus the records, error and config enums; the subpackages export their three.
+    # INV-1 / D-22: one literal __all__ with the nine functions plus the
+    # records, error and config enums; the subpackages export their
+    # three.
     native = api.native
     assert sorted(native.__all__) == sorted(EXPECTED_EXPORTS) and len(native.__all__) == len(EXPECTED_EXPORTS)
     assert native.NativeThreadResult is api.NativeThreadResult
@@ -136,7 +138,8 @@ def test_native_package_exports_exactly_the_nine_functions_and_their_records(api
 
 
 def test_thread_functions_are_coroutines_with_the_contract_signature(api) -> None:
-    # §8.5: prompt (after thread_id for continue and fork), then keyword-only api_key, workspace, model, skills, config.
+    # §8.5: prompt (after thread_id for continue and fork), then
+    # keyword-only api_key, workspace, model, skills, config.
     positional = (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
     for name in FUNCTIONS:
         function = getattr(api.native, name)
@@ -156,7 +159,8 @@ def test_thread_functions_are_coroutines_with_the_contract_signature(api) -> Non
 
 
 def test_vocabularies_are_str_enums_carrying_the_vendor_values(lib_api) -> None:
-    # D-11 / R-3: every enum is a StrEnum exported from vidbyte.lib.enums, and its values match the CLIs exactly.
+    # D-11 / R-3: every enum is a StrEnum exported from
+    # vidbyte.lib.enums, and its values match the CLIs exactly.
     for name, values in EXPECTED_ENUMS.items():
         cls = getattr(lib_api.enums, name)
         assert issubclass(cls, enum.StrEnum), f"{name} must be a StrEnum (Python 3.11 formats a (str, Enum) member as Class.MEMBER)"
@@ -170,7 +174,9 @@ def test_vocabularies_are_str_enums_carrying_the_vendor_values(lib_api) -> None:
 
 
 def test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes(lib_api) -> None:
-    # INV-22 / D-10: main's members unchanged in name, value and order; then GROK_, OPENCODE_, MUSE_ x 9 problems and MUSE_WSL_UNAVAILABLE.
+    # INV-22 / D-10: main's members unchanged in name, value and order;
+    # then GROK_, OPENCODE_, MUSE_ x 9 problems and
+    # MUSE_WSL_UNAVAILABLE.
     members = list(lib_api.FailureCode)
     names = [member.name for member in members]
     tail = members[names.index("RULE_EVALUATION_FAILED") + 1 :]
@@ -190,7 +196,8 @@ def test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes(lib_api
 
 
 def test_contract_constants_hold_the_spec_values(lib_api) -> None:
-    # §8.5: the constants the spec names as contract, which tests read or monkeypatch.
+    # §8.5: the constants the spec names as contract, which tests read
+    # or monkeypatch.
     for name, value in CONTRACT_CONSTANTS.items():
         assert getattr(lib_api.constants, name) == value, name
     assert lib_api.GrokThreadConfig().timeout_seconds == lib_api.constants.NATIVE_THREAD_DEFAULT_SECONDS
@@ -198,14 +205,16 @@ def test_contract_constants_hold_the_spec_values(lib_api) -> None:
 
 
 def test_old_public_names_no_longer_import(lib_api) -> None:
-    # AC-13 / INV-19: the hosts, tools, backends, the old error and the managed process are gone.
+    # AC-13 / INV-19: the hosts, tools, backends, the old error and the
+    # managed process are gone.
     still_there = [f"{module}.{name}" for module, name in OLD_NAMES if importable(module, name)]
     assert still_there == []
     assert sorted(lib_api.process.__all__) == ["CliArgv", "CliRunner", "ProcessStopper"]
 
 
 def test_rejected_design_files_are_deleted() -> None:
-    # AC-13 / §12.3 rows 1-6, 9, 11-19, 23, 28, 36: the files of the rejected design are gone from the tree.
+    # AC-13 / §12.3 rows 1-6, 9, 11-19, 23, 28, 36: the files of the
+    # rejected design are gone from the tree.
     left = [path for path in DELETED_FILES if (REPO_ROOT / path).exists()]
     left += [path for path in DELETED_PACKAGES if any((REPO_ROOT / path).rglob("*.py"))]
     left += [OLD_SPEC_FOLDER] if any(path.is_file() for path in (REPO_ROOT / OLD_SPEC_FOLDER).rglob("*")) else []
@@ -213,7 +222,8 @@ def test_rejected_design_files_are_deleted() -> None:
 
 
 def test_branch_leaves_the_tools_and_configs_packages_as_main_has_them() -> None:
-    # AC-13 / INV-21: no file of vidbyte.tools or vidbyte.lib.configs, and nothing of the old spec folder, differs from main.
+    # AC-13 / INV-21: no file of vidbyte.tools or vidbyte.lib.configs,
+    # and nothing of the old spec folder, differs from main.
     base = merge_base()
     scoped = ("vidbyte/tools", "vidbyte/lib/configs", OLD_SPEC_FOLDER)
     changed = git("diff", "--name-only", base, "--", *scoped)
@@ -223,7 +233,8 @@ def test_branch_leaves_the_tools_and_configs_packages_as_main_has_them() -> None
 
 
 def test_import_vidbyte_starts_no_process_and_leaves_the_native_package_unloaded() -> None:
-    # INV-23: a fresh `import vidbyte` starts nothing, does not import vidbyte.harnesses.native, and keeps main's root __all__.
+    # INV-23: a fresh `import vidbyte` starts nothing, does not import
+    # vidbyte.harnesses.native, and keeps main's root __all__.
     probe = textwrap.dedent(
         """
         import json, subprocess, sys

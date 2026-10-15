@@ -31,7 +31,8 @@ def fragments(secret: str, width: int = 8) -> list[str]:
 
 
 def spy_runner(api, monkeypatch) -> list:
-    # Records every CliInvocation the call hands to CliRunner.run, then runs it for real.
+    # Records every CliInvocation the call hands to CliRunner.run, then
+    # runs it for real.
     seen: list = []
     real_run = api.CliRunner.run
 
@@ -46,7 +47,8 @@ def spy_runner(api, monkeypatch) -> list:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("harness", HARNESSES)
 async def test_child_authenticates_with_the_callers_key(sandbox, call, pack, monkeypatch, harness) -> None:
-    # AC-3 / INV-3 / EC-7 / EC-8: the caller's environment holds other keys and a MUSE_AUTH_PATH; the child still gets api_key.
+    # AC-3 / INV-3 / EC-7 / EC-8: the caller's environment holds other
+    # keys and a MUSE_AUTH_PATH; the child still gets api_key.
     saved_auth = sandbox.root / "saved-muse-auth.json"
     saved_auth.write_text('{"note": "a saved login the run must not use"}', encoding="utf-8")
     for name, value in (("XAI_API_KEY", "xai-env-other-key"), ("GROK_CODE_XAI_API_KEY", "xai-env-alias-key"), ("META_API_KEY", "meta-env-other-key"), ("DEEPSEEK_API_KEY", "sk-env-other-key"), ("MUSE_AUTH_PATH", str(saved_auth))):
@@ -77,7 +79,8 @@ async def test_child_authenticates_with_the_callers_key(sandbox, call, pack, mon
 
 @pytest.mark.asyncio
 async def test_muse_serve_never_sees_a_key_even_the_callers_own(sandbox, call, pack, monkeypatch) -> None:
-    # AC-3 / INV-3 / §9.2 / D-13 exception: serve gets no META_API_KEY (env_remove drops the caller's own); every exec gets api_key.
+    # AC-3 / INV-3 / §9.2 / D-13 exception: serve gets no META_API_KEY
+    # (env_remove drops the caller's own); every exec gets api_key.
     monkeypatch.setenv("META_API_KEY", "caller-own-meta-key-value")
     first = await call("muse")
     await call("muse", "continue", "Again.", thread_id=first.thread_id)
@@ -90,7 +93,8 @@ async def test_muse_serve_never_sees_a_key_even_the_callers_own(sandbox, call, p
 @pytest.mark.asyncio
 @pytest.mark.parametrize("harness", HARNESSES)
 async def test_key_echoed_by_the_vendor_is_redacted_everywhere(api, sandbox, call, pack, monkeypatch, caplog, harness) -> None:
-    # AC-4 / INV-2 / EC-10 / NFR-3: the stand-in echoes argv, stdin and its credentials into its error output and exits 1.
+    # AC-4 / INV-2 / EC-10 / NFR-3: the stand-in echoes argv, stdin and
+    # its credentials into its error output and exits 1.
     key = f"vbk-{uuid.uuid4().hex}{uuid.uuid4().hex[:8]}"
     invocations = spy_runner(api, monkeypatch)
     caplog.set_level(logging.DEBUG)
@@ -124,7 +128,8 @@ def test_request_record_repr_hides_the_key(lib_api, sandbox, pack) -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("harness", HARNESSES)
 async def test_child_gets_its_documented_switches_stdin_and_folder(sandbox, call, pack, monkeypatch, harness) -> None:
-    # INV-10 / INV-17 / INV-18: self-update off, stdin as documented, and the workspace chosen explicitly (an inherited PWD never wins).
+    # INV-10 / INV-17 / INV-18: self-update off, stdin as documented,
+    # and the workspace chosen explicitly (an inherited PWD never wins).
     elsewhere = sandbox.root / "elsewhere"
     elsewhere.mkdir()
     monkeypatch.setenv("PWD", str(elsewhere))
@@ -157,7 +162,8 @@ async def test_child_gets_its_documented_switches_stdin_and_folder(sandbox, call
 @pytest.mark.asyncio
 @pytest.mark.parametrize("harness", HARNESSES)
 async def test_os_environ_never_holds_the_key_while_the_child_runs(sandbox, call, pack, wait_until, harness) -> None:
-    # INV-2: the key travels only in the child's environment; the SDK never writes os.environ, even for a moment.
+    # INV-2: the key travels only in the child's environment; the SDK
+    # never writes os.environ, even for a moment.
     before = dict(os.environ)
     task = asyncio.create_task(call(harness, fake={"mode": "hold"}))
     try:
@@ -174,7 +180,9 @@ async def test_os_environ_never_holds_the_key_while_the_child_runs(sandbox, call
 @pytest.mark.asyncio
 @pytest.mark.parametrize("harness", HARNESSES)
 async def test_successful_call_writes_only_where_the_spec_allows(sandbox, call, pack, harness) -> None:
-    # AC-19 / INV-12 / INV-13: nothing in the workspace, the skill folders or the user home except the private Grok home; Muse's temp folder is gone.
+    # AC-19 / INV-12 / INV-13: nothing in the workspace, the skill
+    # folders or the user home except the private Grok home; Muse's temp
+    # folder is gone.
     skill = sandbox.make_skill("review-notes", extra_files={"references/checklist.md": "Check the edges.\n"})
     before_files = sandbox.snapshot()
     before_environ = dict(os.environ)

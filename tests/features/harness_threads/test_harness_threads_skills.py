@@ -47,7 +47,8 @@ def unlock_tree(root: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_grok_skills_folder_holds_exactly_the_passed_skills_and_is_rebuilt_only_on_change(sandbox, call) -> None:
-    # AC-16 / INV-12 / EC-27: [A, B] then [A] leaves only A; a third [A] keeps the same files; a changed source rebuilds; () empties it.
+    # AC-16 / INV-12 / EC-27: [A, B] then [A] leaves only A; a third [A]
+    # keeps the same files; a changed source rebuilds; () empties it.
     alpha = sandbox.make_skill("alpha-skill", extra_files={"references/notes.md": "Alpha notes.\n"})
     beta = sandbox.make_skill("beta-skill")
     sources_before = sandbox.snapshot()
@@ -75,7 +76,8 @@ async def test_grok_skills_folder_holds_exactly_the_passed_skills_and_is_rebuilt
 
 @pytest.mark.asyncio
 async def test_opencode_lists_exactly_the_passed_folders_without_copying(sandbox, call, pack) -> None:
-    # AC-16 / INV-12: skills.paths lists the passed folders (resolved, in order); nothing is copied anywhere.
+    # AC-16 / INV-12: skills.paths lists the passed folders (resolved,
+    # in order); nothing is copied anywhere.
     alpha = sandbox.make_skill("alpha-skill")
     beta = sandbox.make_skill("beta-skill")
     before = sandbox.snapshot()
@@ -90,7 +92,8 @@ async def test_opencode_lists_exactly_the_passed_folders_without_copying(sandbox
 
 @pytest.mark.asyncio
 async def test_muse_skills_live_in_a_fresh_config_folder_that_is_removed(sandbox, call) -> None:
-    # AC-16 / INV-12: XDG_CONFIG_HOME/muse/skills/ held exactly the passed folders, and the folder is gone after the call.
+    # AC-16 / INV-12: XDG_CONFIG_HOME/muse/skills/ held exactly the
+    # passed folders, and the folder is gone after the call.
     alpha = sandbox.make_skill("alpha-skill", extra_files={"scripts/run.sh": "echo alpha\n"})
     beta = sandbox.make_skill("beta-skill")
     await call("muse", skills=[alpha, beta])
@@ -102,7 +105,8 @@ async def test_muse_skills_live_in_a_fresh_config_folder_that_is_removed(sandbox
 
 @pytest.mark.asyncio
 async def test_links_inside_a_skill_are_copied_as_links(sandbox, call) -> None:
-    # T-5: copytree(symlinks=True); the SDK never follows a link out of the skill folder.
+    # T-5: copytree(symlinks=True); the SDK never follows a link out of
+    # the skill folder.
     outside = sandbox.root / "outside-secret.txt"
     outside.write_text("outside the skill\n", encoding="utf-8")
     skill = sandbox.make_skill("linked-skill")

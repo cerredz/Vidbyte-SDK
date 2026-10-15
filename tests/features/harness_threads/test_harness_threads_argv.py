@@ -56,7 +56,8 @@ def expected_argv(harness: str, verb: str, *, workspace: str, prompt: str, threa
 
 
 def test_joined_style_makes_one_element_per_option(lib_api) -> None:
-    # D-12 / INV-16: JOINED gives flag=value as one plain str; a switch is its flag; the order is kept; a dash value stays inside.
+    # D-12 / INV-16: JOINED gives flag=value as one plain str; a switch
+    # is its flag; the order is kept; a dash value stays inside.
     enums, option = lib_api.enums, lib_api.CliOption
     argv = lib_api.CliArgv.build(
         ("opencode-bin",),
@@ -69,7 +70,8 @@ def test_joined_style_makes_one_element_per_option(lib_api) -> None:
 
 
 def test_separate_style_keeps_values_apart_and_operands_last(lib_api) -> None:
-    # D-12 / INV-16: SEPARATE gives flag, value; operands follow the options, enum operands become plain str.
+    # D-12 / INV-16: SEPARATE gives flag, value; operands follow the
+    # options, enum operands become plain str.
     enums, option = lib_api.enums, lib_api.CliOption
     argv = lib_api.CliArgv.build(
         ("muse-bin",),
@@ -83,7 +85,8 @@ def test_separate_style_keeps_values_apart_and_operands_last(lib_api) -> None:
 
 
 def test_separate_style_refuses_a_value_that_starts_with_a_dash(lib_api) -> None:
-    # INV-7: a separate value starting with "-" would be read as a flag, so CliArgv refuses it and names the flag.
+    # INV-7: a separate value starting with "-" would be read as a flag,
+    # so CliArgv refuses it and names the flag.
     option = lib_api.CliOption
     for value in ("--yolo", "-e"):
         with pytest.raises(lib_api.ConfigurationError) as caught:
@@ -107,7 +110,8 @@ async def test_argv_matches_the_documented_form_without_options(sandbox, call, p
 @pytest.mark.parametrize("verb", VERBS)
 @pytest.mark.parametrize("harness", HARNESSES)
 async def test_every_option_keeps_its_style_and_a_flag_like_prompt_stays_text(api, sandbox, call, pack, harness, verb) -> None:
-    # AC-15 / AC-14 / INV-7 / EC-4: joined --flag=value for Grok and opencode, separate elements for Muse; "--yolo" never its own flag.
+    # AC-15 / AC-14 / INV-7 / EC-4: joined --flag=value for Grok and
+    # opencode, separate elements for Muse; "--yolo" never its own flag.
     thread = (await call(harness)).thread_id if verb != "run" else None
     enums = api.enums
     if harness == "grok":
@@ -137,7 +141,8 @@ async def test_every_option_keeps_its_style_and_a_flag_like_prompt_stays_text(ap
 @pytest.mark.asyncio
 @pytest.mark.parametrize("harness", HARNESSES)
 async def test_runner_gets_plain_strings_the_call_timeout_and_the_harness_cap(api, sandbox, call, pack, monkeypatch, harness) -> None:
-    # INV-16 plain str argv and environment; INV-8 timeout and stdout caps; INV-10 stdin; §9.2 environment names per child.
+    # INV-16 plain str argv and environment; INV-8 timeout and stdout
+    # caps; INV-10 stdin; §9.2 environment names per child.
     invocations = spy_runner(api, monkeypatch)
     constants = api.constants
     first = await call(harness, config={"timeout_seconds": 45.5})
