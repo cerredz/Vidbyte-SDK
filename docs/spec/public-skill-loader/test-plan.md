@@ -56,6 +56,17 @@ AC-8, AC-12, and AC-15 rest on existing tests, because spec §12.3 row 2(c) keep
 
 Bootstrap: none needed (dev tools present; PYTHONPATH=$(pwd))
 
+`PYTHONPATH=$(pwd) python -c "import vidbyte,inspect;print(inspect.getfile(vidbyte))"` prints the worktree's `vidbyte\__init__.py`.
+
+Baseline at `c9d31a7f` (before any new test was written):
+
+```
+$ PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider
+5176 passed, 14 skipped in 58.83s
+```
+
+No pre-existing failure.
+
 ```
 $ PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider tests/features/public_skill_loader
 ...
