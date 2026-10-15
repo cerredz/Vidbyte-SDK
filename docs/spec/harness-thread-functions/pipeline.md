@@ -19,11 +19,11 @@ started: 2026-10-15
 | S3 implement | done | 2026-10-16 | 2026-10-16 | reports/S3-implementer.md | 49 rows; HEAD d5581a24 pushed; pack 395/2 skip; run_ci source+package PASS; lint PASS; Semgrep 0; PR retitled [WIP]; ci.yml 38754831930 dispatched |
 | S4 adversarial review | done | 2026-10-16 | 2026-10-16 | reports/S4-review-{conformance,conventions,engineering}.md, reports/S4-findings-verifier.md | review.md: 11 confirmed (5 Blocker R-1..R-5, 6 Major R-6..R-11), 15 Minor, 0 refuted |
 | S5 repair loop | done | 2026-10-16 | 2026-10-16 | reports/S5-repair-1.md, verify-log.md | converged at iteration 1: R-1..R-11 + trivial R-15/16/17 fixed (74114bd1..b8305b44); pack 428/2 skip; run_ci source 5601 passed (orchestrator re-run) ; remote 4/4 green on bb7d78bb |
-| S5 re-review | running | 2026-10-16 | | reports/S5-rereview.md | |
+| S5 re-review | round 1 done → back to repair | 2026-10-16 | | reports/S5-rereview.md | round 1: 14/14 fixes confirmed; new 2 Major (R-RR1 runner post-exit cancel hole, R-RR2 bare taskkill cwd lookup), 2 Minor (R-RR3 R-8 cap stricter than spec, R-RR4 Muse double-cancel) |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 — CAP REACHED (round 1 SOUND WITH FIXES 1B/8M/4m → r2 65f6b95d; round 2 SOUND WITH FIXES 2B/3M/3m → r3 final, approved) · S5 repair iterations: 1/8 (converged) · S5 re-review rounds: 1/2 (running)
+- S1 review rounds: 2/2 — CAP REACHED (round 1 SOUND WITH FIXES 1B/8M/4m → r2 65f6b95d; round 2 SOUND WITH FIXES 2B/3M/3m → r3 final, approved) · S5 repair iterations: 1/8 (converged) · S5 re-review rounds: 1/2
 
 ## Decisions the orchestrator made
 - 2026-10-15 — Work on the existing PR branch `feat/native-grok-opencode-meta-hosts` in a new worktree, not a new `feat/<slug>` branch — the owner said "update the pr" (request.md §A Prompt 4).
@@ -52,6 +52,8 @@ started: 2026-10-15
 
 - 2026-10-16 — S2 regression tests landed (73016a87 tests, 1f6fc22e comment rewrap, cbf574d7 test-plan, 91625f11 report). Orchestrator re-ran the pack: `33 failed, 395 passed, 2 skipped` (the 33 = exactly the new R-4/R-6..R-11 tests; R-24 tightened and green); no vidbyte/ or lint/ change in those commits. New S2_HEAD = 91625f11. R-8 outcome pinned per spec EC-3: `configuration.invalid_argument` naming `prompt`, no process started (win32-only test).
 - 2026-10-16 — S5 iteration 1 pre-authorized, to avoid a BLOCKED round trip: at most one new `ShellFlag` StrEnum (R-2; `-s` is sh's flag, and WslFlag members are pinned by a surface test) and at most one asyncio protocol subclass inside `vidbyte/lib/process/runner.py` (R-11, leader-exit signal via `process_exited`). No new files (budget stays 24 added Python files), and each is recorded under spec §17 "Implementation deviations". Signature changes that the verifier marked "needs spec deviation note" (R-7 `from_unexpected(exc, request)`, R-4 lookup replacing `shutil.which`) are likewise allowed with a §17 note. Reason: the verifier confirmed these as the smallest fixes of INV-/AC- violations, and §8.4's class list is a ceiling meant to stop scope growth, not to block repairs of confirmed defects.
+
+- 2026-10-16 — Re-review round 1 found 2 new Majors → fresh findings verifier scoped to R-RR1..R-RR4, then S2 regression tests, then S5 iteration 2 (counts toward the 8). R-RR3 adjudicated by the orchestrator: spec §9.1/EC-3 allow a 24,000-character prompt, and the real constraint is the Windows 32,767-unit command line; the S5-1 rule (24,000 quoted UTF-16 units) refuses spec-valid prompts, and a spec-conforming fix exists (refuse only when the quoted command line would exceed the OS limit). So the code must conform to the spec, not the spec to the code: include R-RR3 in iteration 2 (S2 adds "a 24,000-character prose prompt runs on win32" + keeps the quotes/astral refusals). Niche: the agent shell sets `NoDefaultCurrentDirectoryInExePath`, which hides the Windows current-folder search; cwd-lookup tests must `monkeypatch.delenv` it or they cannot fail.
 
 ## User replies (verbatim)
 - (none yet)
