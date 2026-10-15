@@ -23,6 +23,10 @@ INFINITE_DEFAULT_MAX_AGENTS = 200
 # allow at least one pair, and each new pair counts as this many agents.
 INFINITE_MIN_AGENTS = 2
 
+# The smallest value of every workspace cap and of the depth and batch
+# caps, so no cap can be switched off by setting it to 0.
+INFINITE_MIN_CAP = 1
+
 # The root agent's depth, and how much deeper each pair's generator is
 # than the agent that launched it.
 INFINITE_ROOT_DEPTH = 0
@@ -140,6 +144,7 @@ __all__ = [
     "INFINITE_MAX_REFS",
     "INFINITE_MAX_TAGS",
     "INFINITE_MIN_AGENTS",
+    "INFINITE_MIN_CAP",
     "INFINITE_MORE_FILES",
     "INFINITE_NEW_FILES_PER_AGENT",
     "INFINITE_NOTE_SUFFIXES",

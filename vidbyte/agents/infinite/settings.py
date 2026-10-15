@@ -31,6 +31,7 @@ from vidbyte.lib.constants.infinite import (
     INFINITE_DEFAULT_MAX_PARALLEL,
     INFINITE_DEFAULT_MAX_TOKENS,
     INFINITE_MIN_AGENTS,
+    INFINITE_MIN_CAP,
     INFINITE_RESERVED_TOOL_NAMES,
     INFINITE_TOOL_RESULT_MAX_CHARS,
 )
@@ -81,8 +82,8 @@ class InfiniteWorkspaceSettings:
         # be larger than the whole workspace.
         for name in ("max_files", "max_tokens", "max_file_tokens", "max_entry_tokens", "max_entries_per_agent"):
             value = getattr(self, name)
-            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-                raise ConfigurationError(f"InfiniteWorkspaceSettings.{name} must be a whole number of at least 1; got {value!r}.", details={"field": name})
+            if isinstance(value, bool) or not isinstance(value, int) or value < INFINITE_MIN_CAP:
+                raise ConfigurationError(f"InfiniteWorkspaceSettings.{name} must be a whole number of at least {INFINITE_MIN_CAP}; got {value!r}.", details={"field": name})
         if self.max_file_tokens > self.max_tokens:
             raise ConfigurationError(f"InfiniteWorkspaceSettings.max_file_tokens must be at most max_tokens ({self.max_tokens}); got {self.max_file_tokens}.", details={"field": "max_file_tokens"})
 
@@ -202,7 +203,7 @@ class InfiniteMemoryAgentSettings:
         # The depth and batch caps allow at least one level and one
         # task, and the agent cap at least one generator and verifier
         # pair.
-        for name, minimum in (("max_depth", 1), ("max_parallel", 1), ("max_agents", INFINITE_MIN_AGENTS)):
+        for name, minimum in (("max_depth", INFINITE_MIN_CAP), ("max_parallel", INFINITE_MIN_CAP), ("max_agents", INFINITE_MIN_AGENTS)):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
                 raise ConfigurationError(f"InfiniteMemoryAgentSettings.{name} must be a whole number of at least {minimum}; got {value!r}.", details={"field": name})
