@@ -24,7 +24,12 @@ from vidbyte.agents.skills.local import LocalSkillResolver
 from vidbyte.agents.skills.openai import OpenAISkillResolver
 from vidbyte.agents.skills.resolver import SkillResolver
 from vidbyte.agents.skills.skills_sh import SkillsShSkillResolver
-from vidbyte.lib.dataclasses.skills import SkillDocument, SkillEntries, SkillEntry, SkillResolution
+from vidbyte.lib.dataclasses.skills import (
+    SkillDocument,
+    SkillEntries,
+    SkillEntry,
+    SkillResolution,
+)
 from vidbyte.lib.enums.skills import SkillSourceType
 
 
