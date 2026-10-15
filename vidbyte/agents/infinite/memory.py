@@ -3,7 +3,7 @@
 PURPOSE: Defines InfiniteAgentMemory, one agent's handle on the shared workspace with its role, its remember quota, its new-file allowance, and its pair's staged entries; and the four memory tools built on it: remember, write_note, edit_file (FULL preset only), and drop_entry (verifiers only).
 ROLE IN CODEBASE: Built by InfiniteMemoryRuntime (runtime.py) for the root and by InfinitePair (launch.py) for each generator and verifier, whose two memories share one staged list and one dropped list. Calls InfiniteWorkspace (workspace.py) for every rule and write; InfinitePair reads files_written and the staged and dropped lists after each agent returns.
 ARCHITECTURE NOTE: The root's remember commits at once, while a pair agent's remember only stages the entry in memory, after the same rule check, so nothing a pair wrote reaches entries.jsonl before its verifier has judged it. Every tool returns ToolResult.error with what to fix and the remaining quota instead of raising, so a refused call changes nothing and the tool stays usable. Every model-facing description and reply comes from the infinite_memory prompt family.
-FUNCTION INVENTORY: InfiniteAgentMemory.tools picks the tools for the role and preset; remember, write_note, edit_file, and drop carry out one tool call each and return its message; answer and refusal add the quota line to a message or a problem; _quota renders the quota line. InfiniteRememberTool, InfiniteWriteNoteTool, InfiniteEditFileTool, and InfiniteDropEntryTool each have spec and execute; InfiniteRememberTool._draft turns the model's arguments into an InfiniteEntryDraft.
+FUNCTION INVENTORY: InfiniteAgentMemory.tools picks the tools for the role and preset; remember, write_note, edit_file, and drop carry out one tool call each and return its message; answer and refusal add the quota line to a message or a problem; quota renders the quota line, which InfinitePair also puts in a pair agent's first message. InfiniteRememberTool, InfiniteWriteNoteTool, InfiniteEditFileTool, and InfiniteDropEntryTool each have spec and execute; InfiniteRememberTool._draft turns the model's arguments into an InfiniteEntryDraft.
 COMMON MODIFICATION PATTERNS: A new memory tool is one BaseTool subclass here, one method on InfiniteAgentMemory, one case in tools, its name in vidbyte/lib/constants/infinite.py (and INFINITE_RESERVED_TOOL_NAMES), and its description leaves in the prompt family.
 WHAT NOT TO DO IN THIS FILE: 1. Do not write to entries.jsonl from a pair agent; stage instead. 2. Do not count a refused call against the quota. 3. Do not raise out of execute for a rule violation; return ToolResult.error. 4. Do not put module-level constants here; they live in vidbyte/lib/constants/infinite.py.
 KNOWN EDGE CASES: A staged key is s<staged + dropped + 1>, so keys never repeat within a pair even after drops. A generator and its verifier have separate quotas but share the staged list, so a verifier sees and can drop the generator's entries. write_note records a path once per agent in files_written even when the agent writes it several times.
@@ -118,14 +118,14 @@ class InfiniteAgentMemory:
 
     def answer(self, message: str) -> str:
         """Return a success message followed by this agent's quota line."""
-        return f"{message}\n{self._quota()}"
+        return f"{message}\n{self.quota()}"
 
     def refusal(self, problem: str) -> str:
         """Return the rejection message for a problem, followed by this agent's quota line."""
-        return f"{Prompts().get(Prompt.INFINITE_MEMORY_MEMORY_REJECTED_PROMPT).format(problem=problem)}\n{self._quota()}"
+        return f"{Prompts().get(Prompt.INFINITE_MEMORY_MEMORY_REJECTED_PROMPT).format(problem=problem)}\n{self.quota()}"
 
-    def _quota(self) -> str:
-        # How many entries and new files this agent may still add.
+    def quota(self) -> str:
+        """Return the quota line: how many entries and new files this agent may still add."""
         entries_max = self.workspace.settings.max_entries_per_agent
         return Prompts().get(Prompt.INFINITE_MEMORY_QUOTA_LINE).format(entries_left=entries_max - self.accepted, entries_max=entries_max, files_left=INFINITE_NEW_FILES_PER_AGENT - self.created, files_max=INFINITE_NEW_FILES_PER_AGENT)
 

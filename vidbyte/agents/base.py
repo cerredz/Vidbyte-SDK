@@ -11,7 +11,7 @@ Architecture:
       exposing shared async execution and pause behavior.
     - Owns one UsageTracker (cost) and one AgentSpeedTracker (latency) for its
       lifetime, both reset at the top of every generate_reply() and threaded
-      into the AgentRuntime it constructs for the linear-loop runtimes (LINEAR and JEV).
+      into the AgentRuntime it constructs for the linear-loop runtimes (LINEAR, JEV, and INFINITE_MEMORY).
     - Inside a metered run (an active vidbyte.lib.usage_ledger ledger, opened by
       JevRuntime, a team agent, or a top-level agent over its own tracker), a
       nested agent records into its own tracker and merges that run's usage into
@@ -74,8 +74,9 @@ if TYPE_CHECKING:
     from vidbyte.sessions.store import SessionStore
 
 # Runtimes that execute the direct model/tool loop and so accept its usage, speed, output-contract,
-# fallback, and session-failure wiring. JEV is the opinionated JevAgent's linear-loop subclass.
-_LINEAR_LOOP_RUNTIMES = frozenset({AgentRuntimeType.LINEAR, AgentRuntimeType.JEV})
+# fallback, and session-failure wiring. JEV is the opinionated JevAgent's linear-loop subclass, and
+# INFINITE_MEMORY is InfiniteMemoryAgent's.
+_LINEAR_LOOP_RUNTIMES = frozenset({AgentRuntimeType.LINEAR, AgentRuntimeType.JEV, AgentRuntimeType.INFINITE_MEMORY})
 # Metadata key for the developer diagnostic a restore records when the re-supplied tools differ from the checkpoint's.
 _RESUME_TOOL_MISMATCH_KEY = "__resume_tool_mismatch__"
 

@@ -28,6 +28,10 @@ INFINITE_MIN_AGENTS = 2
 INFINITE_ROOT_DEPTH = 0
 INFINITE_DEPTH_STEP = 1
 
+# How long a pair waits between its generator and its verifier: no
+# time at all, only a turn for the sibling pairs of its batch.
+INFINITE_PAIR_TURN_SECONDS = 0
+
 # Workspace defaults: total files, total tokens, tokens per note or
 # seed, tokens per entry or file description, and accepted remember
 # calls per agent.
@@ -140,6 +144,7 @@ __all__ = [
     "INFINITE_NEW_FILES_PER_AGENT",
     "INFINITE_NOTE_SUFFIXES",
     "INFINITE_NO_DESCRIPTION",
+    "INFINITE_PAIR_TURN_SECONDS",
     "INFINITE_REMEMBER_TOOL_NAME",
     "INFINITE_RESERVED_TOOL_NAMES",
     "INFINITE_ROOT_DEPTH",

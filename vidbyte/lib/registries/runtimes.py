@@ -30,6 +30,7 @@ class RuntimeRegistry:
     @classmethod
     def resolve(cls, runtime_type: AgentRuntimeType) -> type:
         # Returns the runtime class for the given AgentRuntimeType; lazy-imports avoid circular deps.
+        from vidbyte.agents.infinite import InfiniteMemoryRuntime
         from vidbyte.agents.jev import JevRuntime
         from vidbyte.agents.runtimes import (
             LinearAgentRuntime,
@@ -44,12 +45,12 @@ class RuntimeRegistry:
             AgentRuntimeType.ACTOR_MODEL_P2P: PointToPointActorRuntime,
             AgentRuntimeType.ACTOR_MODEL_BROADCAST: BroadcastActorRuntime,
             AgentRuntimeType.JEV: JevRuntime,
+            AgentRuntimeType.INFINITE_MEMORY: InfiniteMemoryRuntime,
         }
         runtime_cls = _registry.get(runtime_type)
         if runtime_cls is None:
             raise ConfigurationError(
-                f"Unknown runtime type '{runtime_type.value}'. "
-                f"Supported: {cls.supported_runtimes()}"
+                f"Unknown runtime type '{runtime_type.value}'. Supported: {cls.supported_runtimes()}"
             )
         return runtime_cls
 
