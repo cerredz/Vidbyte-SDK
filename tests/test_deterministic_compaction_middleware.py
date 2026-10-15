@@ -31,6 +31,25 @@ def _parallel_tool_history() -> tuple[dict[str, object], ...]:
     )
 
 
+def _lookup_pair(provider: str, key: str, output: str) -> tuple[dict[str, object], dict[str, object]]:
+    # Returns one lookup call turn and its result, id-less in Gemini shape or matched by tool_call id in OpenAI shape.
+    if provider == "gemini":
+        return {"role": "model", "parts": [{"functionCall": {"name": "lookup", "args": {"key": key}}}]}, {"role": "user", "parts": [{"functionResponse": {"name": "lookup", "response": {"output": output}}}]}
+    call = {"id": f"call_{key}", "type": "function", "function": {"name": "lookup", "arguments": f'{{"key": "{key}"}}'}}
+    return {"role": "assistant", "content": None, "tool_calls": [call]}, {"role": "tool", "tool_call_id": f"call_{key}", "content": output}
+
+
+def _city_lookup_history(provider: str) -> tuple[dict[str, object], ...]:
+    # Returns three city lookups where only Ruritania's call and every city's result share terms with "Ruritania population".
+    return tuple(message for city in ("Zembla", "Ruritania", "Lilliput") for message in _lookup_pair(provider, city, f"{city} population report"))
+
+
+def _two_lookup_history(provider: str) -> tuple[dict[str, object], ...]:
+    # Returns a user turn followed by lookups A and B, so deleting indexes 2-3 leaves A's call beside B's result.
+    ask = {"role": "user", "parts": [{"text": "look up A and B"}]} if provider == "gemini" else {"role": "user", "content": "look up A and B"}
+    return (ask, *_lookup_pair(provider, "A", "out A"), *_lookup_pair(provider, "B", "out B"))
+
+
 def _assert_valid_tool_transcript(test: unittest.TestCase, messages: Sequence[dict[str, object]]) -> None:
     # Asserts every tool reply follows its call turn and every issued tool_call id is answered.
     pending: set[str] = set()
@@ -98,6 +117,27 @@ class DeterministicStrategyTests(unittest.IsolatedAsyncioTestCase):
         messages = (msg("assistant", "call", "tool_call"), msg("tool", "result", "tool_result"))
         after, _ = await ContextCompactionEngine().compact_messages(messages, mode=CompactionMode.TRIM_WITH_PROVIDER_BOUNDARIES, options={"max_messages": 1})
         self.assertEqual(tuple(m.kind for m in after), ("tool_call", "tool_result"))
+
+    async def test_query_relevance_keeps_gemini_pair_beside_orphaned_results(self) -> None:
+        # [Silent Failure] An id-less Gemini result whose call was evicted is not counted against the kept call before it, so that complete pair survives.
+        history = _city_lookup_history("gemini")
+        after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.QUERY_RELEVANCE_FILTER, options={"query": "Ruritania population"})
+        self.assertEqual(list(after), [history[2], history[3]])
+
+    async def test_delete_range_never_pairs_a_gemini_call_with_another_calls_result(self) -> None:
+        # [Silent Failure] With A's result and B's call deleted, B's id-less result is not sent to Gemini as A's answer; both halves are dropped.
+        history = _two_lookup_history("gemini")
+        after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.DELETE_MESSAGES_BY_ID_OR_RANGE, options={"start": 2, "end": 3})
+        self.assertEqual(list(after), [history[0]])
+
+    async def test_id_matched_pair_repair_is_unchanged_by_gemini_adjacency(self) -> None:
+        # [Hidden Assumption] OpenAI results still pair by tool_call id, keeping the complete pair and refusing a mismatched one.
+        history = _city_lookup_history("openai")
+        after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.QUERY_RELEVANCE_FILTER, options={"query": "Ruritania population"})
+        self.assertEqual(list(after), [history[2], history[3]])
+        history = _two_lookup_history("openai")
+        after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.DELETE_MESSAGES_BY_ID_OR_RANGE, options={"start": 2, "end": 3})
+        self.assertEqual(list(after), [history[0]])
 
     async def test_trim_with_provider_boundaries_keeps_newer_group(self) -> None:
         # [Silent Failure] Newer tool groups are preferred over older groups.
