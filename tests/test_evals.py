@@ -536,6 +536,14 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue((await numeric.agrade(EvalCase(prompt="t", expected=-5), "The low is −5.")).passed)
         self.assertFalse((await numeric.agrade(EvalCase(prompt="t", expected=5), "The low is −5.")).passed)
 
+    async def test_numeric_grader_reads_unicode_minus_in_the_exponent(self) -> None:
+        # Tests that an exponent typeset with the Unicode minus sign stays part of the number instead of being dropped.
+        # @intent unicode-minus-is-a-sign
+        precise = NumericMatchGrader(tolerance=1e-21)
+        self.assertTrue((await precise.agrade(EvalCase(prompt="t", expected=-1.602e-19), "The charge is −1.602e−19 C.")).passed)
+        loose = NumericMatchGrader(tolerance=0.01)
+        self.assertFalse((await loose.agrade(EvalCase(prompt="t", expected=2.0), "The rate is 2.0e−3 per second.")).passed)
+
     async def test_json_graders_do_not_treat_booleans_as_numbers(self) -> None:
         # Tests that JSON true/false never match 1/0 while 1 and 1.0 stay the same JSON number.
         # @intent json-bool-is-not-number

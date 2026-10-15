@@ -374,10 +374,13 @@ class ForkConversationTool(BaseTool):
             raise ValueError(f"actor_runtime.topology must be one of: {allowed}.") from exc
         if runtime_type not in (AgentRuntimeType.ACTOR_MODEL, AgentRuntimeType.ACTOR_MODEL_P2P, AgentRuntimeType.ACTOR_MODEL_BROADCAST):
             raise ValueError("actor_runtime can only be used with actor runtime topologies.")
+        # @intent null-optional-arg-means-default
+        # A null max_loop means "not given", exactly like an omitted key, so the child gets the default of 20.
+        max_loop = actor_settings.get("max_loop")
         return ActorRuntime(
             topology=runtime_type,
             dynamic_actors=self._resolve_bool(actor_settings.get("dynamic_actors"), default=False, field_name="actor_runtime.dynamic_actors"),
-            max_loop=self._coerce_positive_int(actor_settings.get("max_loop", 20), "actor_runtime.max_loop"),
+            max_loop=self._coerce_positive_int(20 if max_loop is None else max_loop, "actor_runtime.max_loop"),
             termination_mode=self._optional_string(actor_settings.get("termination_mode")) or "coordinator",
             worker_model=self._optional_string(actor_settings.get("worker_model")),
         )

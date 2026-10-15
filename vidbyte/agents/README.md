@@ -258,6 +258,43 @@ as completed but unverified evidence. Use a report validator to mark evidence
 verified. Use pipelines for fixed text flow and workflows for code-owned state
 machines; use `MultiAgent` when the manager must own progress and recovery.
 
+## Output Connectors
+
+Send each finished reply to chat channels, email, issue trackers and code
+hosts (including comments and update-in-place), docs workspaces, CI job
+summaries, social-post drafts, CRM tasks, or any HTTPS webhook (optionally
+signed) by passing connectors as `outputs=`:
+
+```python
+from vidbyte import Agent, GitHubIssueOutput, OutputDeliveryError, SlackOutput
+
+agent = Agent(
+    name="checkout-scout",
+    system_prompt="Find the worst bug in the checkout flow.",
+    provider="openai",
+    model_name="gpt-4.1",
+    output_schema=BugReport,  # a model with title and body fields
+    outputs=[
+        SlackOutput(),                                         # reads SLACK_WEBHOOK_URL
+        GitHubIssueOutput(repo="acme/shop", labels=("bug",)),  # reads GITHUB_TOKEN
+    ],
+)
+try:
+    reply = agent.run("Scan checkout")
+except OutputDeliveryError as err:
+    reply = err.reply  # recorded already; err.failed lists what did not send
+print(reply.metadata["deliveries"])
+```
+
+Delivery runs once per run, after the reply passes the output-schema check and
+before queued follow-ups, with every connector sending at once. A blank reply
+or a run stopped by a budget, guard, or middleware sends nothing. Forks never
+deliver, but a user agent that carries its own outputs delivers on its own
+runs even as a Jev specialist, an AggregateAgent proposer, or a pipeline
+stage. See [`output/README.md`](output/README.md) for the delivery rules and
+[`../lib/outputs/README.md`](../lib/outputs/README.md) for each provider's
+credential and limits.
+
 ## Key Modules
 
 - `base.py`: `BaseAgent`, inferred runner construction, tool binding, context assembly, trace setup, and runtime dispatch.
@@ -268,7 +305,9 @@ machines; use `MultiAgent` when the manager must own progress and recovery.
 - `handoff.py`: structured handoff generation from a completed agent run.
 - `coding.py`: `CodingAgent`, a `BaseAgent` preloaded with bash, read, write, edit, glob, grep, and one web-fetch tool over one root folder; its checks live in `CodingAgentSettings` and its tools in `CodingAgentTools`.
 - `coding_context/`: `CodingContextWindow` and one loader per section (`AgentsMdLoader`), which build the context a `CodingAgent` shows after its system prompt.
+- `skills/`: `SkillLoader` and one resolver per source, the agent-agnostic loader that turns declarative skill entries into `SkillDocument`s for `JevAgent`'s skill preload.
 - `multi/`: ledger-driven manager/worker orchestration and transfer controls.
+- `output/`: the `OutputConnector` contract, reply shaping, and `OutputDispatcher`, which delivers each finished reply to the configured `outputs`.
 - `types.py`: agent messages, input envelopes, cards, and specs.
 
 ## Related Layers

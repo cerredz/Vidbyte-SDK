@@ -56,7 +56,13 @@ class _DuplicateKeySafeLoader(yaml.SafeLoader):
         self._own_pair_counts: dict[yaml.nodes.MappingNode, int] = {}
 
     def flatten_mapping(self, node: yaml.nodes.MappingNode) -> None:
-        # Records how many pairs the mapping wrote itself before its merge keys are flattened away.
+        # Rejects a second merge key, then records how many pairs the mapping wrote itself before its merge keys are flattened away.
+        if node not in self._own_pair_counts:
+            # @intent one-merge-key-per-mapping
+            # `<<` is a mapping key too, so a second one would let a later merge silently override an earlier one (the list form `<<: [*a, *b]` is the way to merge several).
+            merge_keys = [key_node for key_node, _ in node.value if key_node.tag == "tag:yaml.org,2002:merge"]
+            if len(merge_keys) > 1:
+                raise yaml.constructor.ConstructorError(None, None, "Duplicate key '<<' is not allowed", merge_keys[1].start_mark)
         self._own_pair_counts.setdefault(node, sum(1 for key_node, _ in node.value if key_node.tag != "tag:yaml.org,2002:merge"))
         super().flatten_mapping(node)
 
@@ -156,6 +162,14 @@ class YamlLoader:
         return dict(raw)
 
     @staticmethod
+    def _text(mapping: dict[str, Any], key: str, default: str = "") -> str:
+        # Reads one text field, treating a blank value exactly like an omitted key.
+        # @intent yaml-blank-value-is-not-the-text-none
+        # YAML parses `key:`, `key: ~` and `key: null` as None, and str(None) is the text "None", which would slip past the descriptors' non-empty checks.
+        value = mapping.get(key)
+        return default if value is None else str(value)
+
+    @staticmethod
     def _build_agent(raw: dict[str, Any], path: str | Path) -> AgentDescriptor:
         # Constructs an AgentDescriptor from raw YAML, validating via __post_init__.
         return YamlLoader._build_agent_from_raw(raw, path, top_level=True)
@@ -222,9 +236,9 @@ class YamlLoader:
         )
         agent_metadata_raw = raw.get("agent_metadata", {})
         agent_metadata = AgentMetadata(
-            name=str(agent_metadata_raw.get("name", "")),
-            description=str(agent_metadata_raw.get("description", "")),
-            use_cases=str(agent_metadata_raw.get("use_cases", "")),
+            name=YamlLoader._text(agent_metadata_raw, "name"),
+            description=YamlLoader._text(agent_metadata_raw, "description"),
+            use_cases=YamlLoader._text(agent_metadata_raw, "use_cases"),
         ) if agent_metadata_raw else AgentMetadata()
         trace_option = None
         if "trace_option" in raw:
@@ -237,9 +251,9 @@ class YamlLoader:
             )
         descriptor = AgentDescriptor(
             type=AgentType.BASE,
-            name=str(raw.get("name", "")),
-            system_prompt=str(raw.get("system_prompt", "")),
-            description=str(raw.get("description", "")),
+            name=YamlLoader._text(raw, "name"),
+            system_prompt=YamlLoader._text(raw, "system_prompt"),
+            description=YamlLoader._text(raw, "description"),
             provider=raw.get("provider"),
             model_name=raw.get("model_name"),
             temperature=raw.get("temperature"),
@@ -290,8 +304,8 @@ class YamlLoader:
             agent_raw = raw.get("agent")
             agent = YamlLoader._build_agent_from_raw(agent_raw, path) if agent_raw else None
             return HarnessDescriptor(
-                name=str(raw.get("name", "")),
-                description=str(raw.get("description", "")),
+                name=YamlLoader._text(raw, "name"),
+                description=YamlLoader._text(raw, "description"),
                 params=params,
                 agent=agent,
             )
@@ -317,7 +331,7 @@ class YamlLoader:
                 from vidbyte.paradigms.context_minimal_fanout.types import ContextMinimalFanoutSettings
                 settings = ContextMinimalFanoutSettings(**settings_raw)
             return EnvironmentDescriptor(
-                name=str(raw.get("name", "")),
+                name=YamlLoader._text(raw, "name"),
                 context=context,
                 splitter=splitter,
                 adversarial=adversarial,
@@ -343,9 +357,9 @@ class YamlLoader:
         from vidbyte.lib.dataclasses.multi_agent import MultiAgentSettings
         settings = MultiAgentSettings(**settings_raw) if settings_raw else MultiAgentSettings()
         return MultiAgentDescriptor(
-            name=str(raw.get("name", "")),
-            system_prompt=str(raw.get("system_prompt", "")),
-            description=str(raw.get("description", "")),
+            name=YamlLoader._text(raw, "name"),
+            system_prompt=YamlLoader._text(raw, "system_prompt"),
+            description=YamlLoader._text(raw, "description"),
             orchestrator=orchestrator,
             agents=agents,
             settings=settings,
@@ -367,9 +381,9 @@ class YamlLoader:
         config_raw = raw.get("config", {})
         config = AggregateConfig(**config_raw) if config_raw else AggregateConfig()
         return AggregateAgentDescriptor(
-            name=str(raw.get("name", "")),
-            system_prompt=str(raw.get("system_prompt", "")),
-            description=str(raw.get("description", "")),
+            name=YamlLoader._text(raw, "name"),
+            system_prompt=YamlLoader._text(raw, "system_prompt"),
+            description=YamlLoader._text(raw, "description"),
             proposers=proposers,
             aggregator=aggregator,
             config=config,
@@ -387,9 +401,9 @@ class YamlLoader:
         settings_raw = raw.get("settings", {})
         settings = AdversarialSettings(**settings_raw) if settings_raw else AdversarialSettings()
         return AdversarialAgentDescriptor(
-            name=str(raw.get("name", "")),
-            system_prompt=str(raw.get("system_prompt", "")),
-            description=str(raw.get("description", "")),
+            name=YamlLoader._text(raw, "name"),
+            system_prompt=YamlLoader._text(raw, "system_prompt"),
+            description=YamlLoader._text(raw, "description"),
             worker=worker,
             adversary=adversary,
             settings=settings,
@@ -405,9 +419,9 @@ class YamlLoader:
         sections = tuple(sections_raw.keys()) if isinstance(sections_raw, dict) else tuple(str(s) for s in sections_raw) if sections_raw else ()
         source = raw.get("source", {})
         return HandoffAgentDescriptor(
-            name=str(raw.get("name", "handoff")),
-            handoff_title=str(handoff_raw.get("title", "Handoff")),
-            handoff_instructions=str(handoff_raw.get("instructions", "")),
+            name=YamlLoader._text(raw, "name", "handoff"),
+            handoff_title=YamlLoader._text(handoff_raw, "title", "Handoff"),
+            handoff_instructions=YamlLoader._text(handoff_raw, "instructions"),
             sections=sections,
             source_provider=source.get("provider") if source else None,
             source_model_name=source.get("model_name") if source else None,
@@ -420,9 +434,10 @@ class YamlLoader:
         schema = dict(raw.get("schema", {}))
         source = raw.get("source", {})
         return ContinualTraceAgentDescriptor(
-            name=str(raw.get("name", "continual-trace")),
+            name=YamlLoader._text(raw, "name", "continual-trace"),
             schema=schema,
-            max_trace_iterations=int(raw.get("max_trace_iterations", 3)),
+            # @intent loader-passes-iterations-to-the-descriptor-check: the descriptor owns the type check; do not coerce.
+            max_trace_iterations=raw.get("max_trace_iterations", 3),
             source_provider=source.get("provider") if source else None,
             source_model_name=source.get("model_name") if source else None,
             metadata=dict(raw.get("metadata", {})),

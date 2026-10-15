@@ -19,6 +19,7 @@ from copy import deepcopy
 from typing import Any
 
 from vidbyte.tools.base import BaseTool
+from vidbyte.tools.function_tool import _parameter_type_label
 from vidbyte.tools.mcp.client import McpClient
 from vidbyte.tools.mcp.types import McpToolDefinition
 from vidbyte.lib.registries.tools import ToolRegistry
@@ -43,17 +44,18 @@ class McpBridgedTool(BaseTool):
     def spec(self) -> ToolSpec:
         """Convert MCP JSON Schema metadata into a native ToolSpec."""
         remote_schema = self.remote_tool.input_schema
+        # @intent mcp-bridge-keeps-remote-input-schema
+        # Send the server's own schema to the model, because the flat argument list
+        # drops array items, enums, and nested objects that providers need to see.
+        input_schema = self._input_schema(remote_schema)
         return ToolSpec(
             name=self.remote_tool.name,
             description=self.remote_tool.description,
             # Keep the flat argument list so required-argument checks and prompt text work as before.
-            parameters=self._parameters(remote_schema),
+            parameters=self._parameters(remote_schema, sends_remote_schema=input_schema is not None),
             permission=self.permission,
             metadata={"source": "mcp"},
-            # @intent mcp-bridge-keeps-remote-input-schema
-            # Send the server's own schema to the model, because the flat argument list
-            # drops array items, enums, and nested objects that providers need to see.
-            input_schema=self._input_schema(remote_schema),
+            input_schema=input_schema,
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
@@ -77,7 +79,7 @@ class McpBridgedTool(BaseTool):
         copied["type"] = "object"
         return copied
 
-    def _parameters(self, schema: Mapping[str, Any]) -> tuple[ToolParameter, ...]:
+    def _parameters(self, schema: Mapping[str, Any], *, sends_remote_schema: bool) -> tuple[ToolParameter, ...]:
         """Translate basic JSON Schema properties into ToolParameter values."""
         properties = schema.get("properties", {})
         required = set(schema.get("required", ()))
@@ -87,10 +89,19 @@ class McpBridgedTool(BaseTool):
         for name, raw_property in properties.items():
             if not isinstance(raw_property, Mapping):
                 raw_property = {}
+            # @intent mcp-bridge-parameter-type-is-a-name
+            # Label each argument by the same rule as @tool, so the prompt doc agrees with the remote schema
+            # sent beside it: int | None reads "integer | null" and a $ref reads "any", never "object" or a
+            # Python list repr. Without a usable remote schema the provider schema is built from these labels,
+            # so there they stay plain JSON-Schema types.
+            if sends_remote_schema:
+                label = _parameter_type_label(raw_property)
+            else:
+                label = raw_property["type"] if isinstance(raw_property.get("type"), str) else "object"
             parameters.append(
                 ToolParameter(
                     name=str(name),
-                    type=str(raw_property.get("type", "object")),
+                    type=label,
                     description=str(raw_property.get("description", "")) or "MCP tool parameter.",
                     required=str(name) in required,
                 )

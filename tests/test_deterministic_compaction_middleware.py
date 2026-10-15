@@ -397,6 +397,29 @@ class DeterministicStrategyTests(unittest.IsolatedAsyncioTestCase):
         after, _ = await ContextCompactionEngine().compact_messages(messages, mode=CompactionMode.SALIENCE_SCORE_EVICTION, options={"max_messages": 5})
         self.assertEqual(after, messages)
 
+    async def test_salience_eviction_keeps_error_result_with_its_call(self) -> None:
+        # [Silent Failure] The error boost keeps the failed call together with its result, not two results the engine would drop as orphans.
+        messages = (msg("assistant", "call oz", "tool_call"), msg("tool", "oz failed", "tool_result", status="error"), msg("assistant", "call lilliput", "tool_call"), msg("tool", "lilliput ok", "tool_result"))
+        after, _ = await ContextCompactionEngine().compact_messages(messages, mode=CompactionMode.SALIENCE_SCORE_EVICTION, options={"max_messages": 2})
+        self.assertEqual(after, messages[:2])
+
+    async def test_salience_eviction_odd_cap_never_splits_a_tool_pair(self) -> None:
+        # [Edge Case] An odd cap keeps the newest whole pair rather than spending its last slot on half of an older pair.
+        messages = tuple(m for i in (1, 2, 3) for m in (msg("assistant", f"call {i}", "tool_call"), msg("tool", f"out {i}", "tool_result")))
+        after, _ = await ContextCompactionEngine().compact_messages(messages, mode=CompactionMode.SALIENCE_SCORE_EVICTION, options={"max_messages": 3})
+        # Each call here has exactly one result, so whole pairs read call, result, call, result with nothing left over.
+        self.assertEqual([m.kind for m in after], ["tool_call", "tool_result"] * (len(after) // 2), "a call or result was kept without its partner")
+        self.assertEqual(after, messages[-2:])
+
+    async def test_salience_eviction_spends_token_budget_on_whole_pairs_only(self) -> None:
+        # [Hidden Failure] A result whose call is too large to fit no longer spends the token budget the older whole pair needs.
+        def call(call_id: str, text: str) -> dict[str, object]:
+            return {"role": "assistant", "content": text, "tool_calls": [{"id": call_id, "type": "function", "function": {"name": "lookup", "arguments": "{}"}}]}
+        history = ({"role": "user", "content": "go"}, call("c1", "a"), {"role": "tool", "tool_call_id": "c1", "content": "ok"}, call("c2", "x" * 50), {"role": "tool", "tool_call_id": "c2", "content": "fact"})
+        after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.SALIENCE_SCORE_EVICTION, options={"max_messages": 10, "max_tokens": 8, "token_counter": len})
+        self.assertEqual(list(after), list(history[:3]))
+        _assert_valid_tool_transcript(self, after)
+
     async def test_query_relevance_empty_query_and_lexical_matching(self) -> None:
         # [Hidden Assumption] Empty queries keep system/recent only, and punctuation/case tokenization is stable.
         messages = (msg("system", "rules"), msg("user", "Billing, invoice!"), msg("assistant", "shipping"), msg("assistant", "recent"))

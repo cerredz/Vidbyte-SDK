@@ -97,7 +97,7 @@ class RecordLayoutTests(unittest.TestCase):
         layouts = {
             AgentRunnerConfig: (["api_keys", "provider", "model_name", "temperature", "run_id", "timeout_seconds", "model_mode"], ["api_keys"]),
             FallbackModel: (["provider", "model", "temperature"], []),
-            JevAgentSettings: (["name", "system_prompt", "provider", "model_name", "api_keys", "temperature", "timeout_seconds", "tools", "permission_policy", "loop", "agents", "bulk_work", "alignment", "vidbyte_api_key", "model_mode"], ["api_keys", "vidbyte_api_key"]),
+            JevAgentSettings: (["name", "system_prompt", "provider", "model_name", "api_keys", "temperature", "timeout_seconds", "tools", "permission_policy", "loop", "agents", "bulk_work", "alignment", "outputs", "vidbyte_api_key", "model_mode"], ["api_keys", "vidbyte_api_key"]),
             JevRunBriefSettings: (["provider", "model_name", "api_keys", "temperature", "every_iterations", "max_iterations", "max_tokens"], ["api_keys"]),
             AgentRoleSettings: (["name", "system_prompt", "runner", "provider", "model_name", "api_keys", "temperature", "tools", "middleware", "agent_options", "max_tokens", "vidbyte_api_key"], ["api_keys", "vidbyte_api_key"]),
         }

@@ -16,6 +16,7 @@ from vidbyte.lib.dataclasses.agents import AgentMetadata
 from vidbyte.lib.dataclasses.trace import TraceOption
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.registries.models import ProviderModelRegistry
+from vidbyte.lib.runners import Runner
 from vidbyte.lib.tracing import SpanContext, TracerBase
 from vidbyte.tools.agent_tool import AgentTool
 from vidbyte.tools.builtins.context_primitives import context_window_tools
@@ -538,6 +539,18 @@ class AgentForkIsolationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(switched_keys, [None, "PARENTKEY"])
         self.assertEqual(stays.runner_config.provider, "deepseek")
         self.assertEqual(stays.runner_config.api_keys.key_for(stays.runner_config.provider), "PARENTKEY")
+
+    def test_bare_model_fork_of_provider_prefixed_parent_stays_on_parent_vendor(self) -> None:
+        # @intent fork-inherits-the-parent-vendor: a bare "deepseek-reasoner" on a "deepseek/deepseek-chat" parent stays on DeepSeek.
+        parent = BaseAgent(name="router", system_prompt="Route.", model_name="deepseek/deepseek-chat", api_keys=["PARENTKEY"], fallback=["deepseek-v4-flash"])
+
+        with patch.dict(os.environ):
+            os.environ.pop("DEEPSEEK_API_KEY", None)
+            child = parent.fork(AgentForkSettings(model_name="deepseek-reasoner"))
+
+        self.assertEqual(Runner._normalize_provider_and_model(child.runner_config.provider, child.runner_config.model_name)[:2], ("deepseek", "deepseek-reasoner"))
+        self.assertEqual(child.runner_config.api_keys.key_for(child.runner_config.provider), "PARENTKEY")
+        self.assertEqual([model.identity() for model in child.fallback.models], ["deepseek/deepseek-reasoner", "deepseek/deepseek-v4-flash"])
 
     def test_cross_provider_fork_keeps_parent_fallback_providers(self) -> None:
         # @intent fork-keeps-resolved-fallback-providers: a bare DeepSeek backup must not become an Anthropic model.

@@ -19,6 +19,7 @@ from vidbyte import Agent, Trace, TraceProfile
 from vidbyte.agents import AgentForkSettings, BaseAgent
 from vidbyte.agents.contracts import MinCostSpent, MinToolCalls, MinToolCallsById
 from vidbyte.agents.settings import AgentLoopSettings, ToolErrorPolicy, ToolSettings
+from vidbyte.context.algorithms import ContextWindowAlgorithm, ToolResultAdmission
 from vidbyte.lib.dataclasses.trace import TraceField, TraceOption
 from vidbyte.tools import tool
 from vidbyte.agents.types import AgentMessage
@@ -147,6 +148,17 @@ class FetchThenDoneRunner:
             source = self.sources[(self.calls - 1) // 2]
             return _Resp(_fc("fetch", '{"source": "%s"}' % source, "f%d" % self.calls))
         return _Resp(_fc("isDone", '{"final_answer": "done-%d"}' % self.calls, "d%d" % self.calls))
+
+
+class RecordingDoneRunner:
+    """Scripted runner that finishes at once and records the prompt and every keyword it was sent."""
+
+    def __init__(self) -> None:
+        self.requests: list[str] = []
+
+    def run(self, prompt: str, **kwargs: object) -> _Resp:
+        self.requests.append(f"{prompt} {kwargs}")
+        return _Resp(_fc("isDone", '{"final_answer": "done"}', "d%d" % len(self.requests)))
 
 
 @tool
@@ -366,6 +378,32 @@ class AgentStateSeamTests(unittest.TestCase):
             algorithm="default", metadata={}, agent_metadata={}, tool_names=("grep",), history=())
         restored = Agent.restore(state)
         self.assertIn("__resume_tool_mismatch__", restored.metadata)
+
+    def test_restore_tool_mismatch_marker_stays_out_of_the_model_request(self) -> None:  # [Hidden Assumption]
+        @tool
+        def lookup_order(order_id: str) -> str:
+            """Look up an order."""
+            return "found"
+
+        @tool
+        def issue_refund(order_id: str) -> str:
+            """Refund an order."""
+            return "refunded"
+
+        agent = build_test_agent(name="desk", system_prompt="Help.", runner=EchoRunner(), tools=[lookup_order, issue_refund], metadata={"tenant": "acme"})
+        restored = BaseAgent.restore(agent.export_state(), tools=[lookup_order])
+        runner = RecordingDoneRunner()
+        bind_test_runner(restored, runner)
+        restored.run("where is order o-1?")
+
+        # The developer diagnostic stays on the agent, but the model never sees it or the withheld tool's name.
+        self.assertIn("__resume_tool_mismatch__", restored.metadata)
+        self.assertGreaterEqual(len(runner.requests), 1)
+        sent = "\n".join(runner.requests)
+        self.assertNotIn("__resume_tool_mismatch__", sent)
+        self.assertNotIn("issue_refund", sent)
+        # Caller metadata still reaches the model after the same restore.
+        self.assertIn("acme", sent)
 
 
 # ---------------------------------------------------------------------------
@@ -1133,6 +1171,27 @@ class SessionFacadeTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(config.api_keys, agent.runner_config.api_keys)
                 self.assertEqual(config.api_keys.key_for("deepseek"), "sk-tenant-acme")
                 self.assertEqual(ProviderModelRegistry.find_provider_api_key(config.provider, config.api_keys), "sk-tenant-acme")
+
+    def test_resume_and_fork_keep_a_custom_context_window_algorithm(self) -> None:  # [Silent Failure]
+        # @intent live-fork-keeps-agent-algorithm
+        # A user-named algorithm is not a preset, so a live branch must reuse the live agent's own algorithm and a cold path the re-supplied one.
+        custom = ContextWindowAlgorithm(name="custom_compact", tool_result_admission=ToolResultAdmission.COMPACT, max_tool_result_chars=200)
+        expected = ("custom_compact", ToolResultAdmission.COMPACT, 200)
+        store = InMemorySessionStore()
+        agent = BaseAgent(name="triage", system_prompt="Work.", provider="deepseek", model_name="deepseek-chat", api_keys=["sk-test-fake"], algorithm=custom)
+        session = Session(agent, store=store)
+        session.checkpoint()
+
+        branches = [session.fork(), *(outcome.session for outcome in session.batch_fork(2))]
+        cold = [Session.resume(store, session.id, api_keys=["sk-test-fake"], algorithm=custom).agent, BaseAgent.restore(agent.export_state(), api_keys=["sk-test-fake"], algorithm=custom)]
+
+        live = [branch.agent for branch in branches]
+        for restored in live + cold:
+            self.assertEqual((restored.algorithm.name, restored.algorithm.tool_result_admission, restored.algorithm.max_tool_result_chars), expected)
+        preset = BaseAgent(name="triage", system_prompt="Work.", provider="deepseek", model_name="deepseek-chat", api_keys=["sk-test-fake"], algorithm="compact_tool_outputs")
+        self.assertEqual(BaseAgent.restore(preset.export_state(), api_keys=["sk-test-fake"]).algorithm.name, "compact_tool_outputs")
+        with self.assertRaisesRegex(ValueError, "custom_compact"):
+            BaseAgent.restore(agent.export_state(), api_keys=["sk-test-fake"])
 
     def test_fork_at_foreign_checkpoint_raises(self) -> None:  # [Hidden Assumption]
         store = InMemorySessionStore()

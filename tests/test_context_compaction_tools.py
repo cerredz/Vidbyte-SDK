@@ -15,6 +15,7 @@ Functions:
     - ContextCompactionToolTests.test_truncate_tool_results_invalid_bounds: Tests handling of bad/negative bounds.
     - ContextCompactionToolTests.test_truncate_tool_results_boundary_length: Verifies exact boundary values are not mutated.
     - ContextCompactionToolTests.test_truncate_tool_results_no_placeholder: Tests indicators without dynamic placeholders.
+    - ContextCompactionToolTests.test_null_optional_arguments_behave_like_omitted: Verifies null optionals fall back to defaults.
 Relations:
     Directly tests the implementation within vidbyte.tools.builtins.context.compaction.
 """
@@ -329,3 +330,23 @@ class ContextCompactionToolTests(unittest.IsolatedAsyncioTestCase):
         )
         messages = state.messages()
         self.assertEqual(messages[0].content, "12345 [truncated]")
+
+    async def test_null_optional_arguments_behave_like_omitted(self) -> None:
+        # [Hidden Failure] Strict-schema models send null for every unused optional; each null must act exactly like an omitted argument.
+        cases = (
+            ({"mode": CompactionMode.STRIP_TOOL_RESULT_BODIES.value}, "placeholder"),
+            ({"mode": CompactionMode.KEEP_LAST_N_MESSAGES.value}, "n"),
+            ({"mode": CompactionMode.REMOVE_TOOL_CALL_PERCENTAGE.value, "percentage": 0.5}, "order"),
+            ({"mode": CompactionMode.TRUNCATE_TOOL_RESULTS.value, "max_chars": 2}, "truncation_indicator"),
+        )
+        for arguments, null_key in cases:
+            with self.subTest(mode=arguments["mode"], null_key=null_key):
+                omitted_state = self._state()
+                null_state = self._state()
+                omitted = await ContextCompactionTool(omitted_state).execute(ToolCall("compact_context", arguments))
+                nulled = await ContextCompactionTool(null_state).execute(
+                    ToolCall("compact_context", {**arguments, null_key: None})
+                )
+                self.assertEqual(omitted.status.value, "success")
+                self.assertEqual(nulled.status.value, omitted.status.value)
+                self.assertEqual(null_state.messages(), omitted_state.messages())

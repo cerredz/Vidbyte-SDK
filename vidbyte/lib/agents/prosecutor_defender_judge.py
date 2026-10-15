@@ -42,8 +42,17 @@ def dump_payload(payload: Mapping[str, Any]) -> str:
 
 def runner_model_name(runner: object) -> str | None:
     # Reads a model label for provenance without copying runner configuration.
-    config = getattr(runner, "config", None)
+    # @intent stage-provenance-names-the-inherited-model
+    # The SDK's TextModelRunner keeps its config private and names its model through model_name(), so read
+    # those shapes too; otherwise every stage that inherits the producer transport records model None.
+    config = getattr(runner, "config", None) or getattr(runner, "_config", None)
     value = getattr(config, "model", None) or getattr(config, "model_name", None) or getattr(runner, "model", None)
+    model_name = getattr(runner, "model_name", None)
+    if value is None and model_name is not None:
+        try:
+            value = model_name() if callable(model_name) else model_name
+        except Exception:
+            value = None
     return str(value) if value is not None else None
 
 
