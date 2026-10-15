@@ -169,7 +169,7 @@ The code last changed at `53d9f45a`. Every commit after it changes only `docs/`.
 | Semgrep test | `semgrep --test --config .semgrep/typed-mapping-boundary-policy.yml .semgrep/typed-mapping-boundary-policy.py` | `1/1: ✓ All tests passed` |
 | Semgrep scan | `semgrep scan --error --config .semgrep/typed-mapping-boundary-policy.yml vidbyte` | `Ran 1 rule on 958 files: 0 findings.` |
 | Usage snippet | the snippet above against stand-ins on `PATH` | exit 0, three lines, fork id differs, workspace untouched |
-| GitHub CI | `ci.yml` and `static-policy.yml` dispatched by hand (auto-triggers are off), read with `gh api repos/cerredz/Vidbyte-SDK/commits/<sha>/check-runs` | 4/4 success on `53d9f45a` (runs 38785332849, 38785337323) and on `ac8c8cdb` (runs 38786523313, 38786527220): Package, Source / Python 3.11, Source / Python 3.12, Static policy. The final head's runs are on this PR's checks. |
+| GitHub CI | `ci.yml` and `static-policy.yml` dispatched by hand (auto-triggers are off), read with `gh api repos/cerredz/Vidbyte-SDK/commits/<sha>/check-runs` | 4/4 success (Package, Source / Python 3.11, Source / Python 3.12, Static policy) on `6910d89b` (runs 38791963789, 38791967127), on `53d9f45a` (38785332849, 38785337323) and on `ac8c8cdb` (38786523313, 38786527220). On `6910d89b`, 3.12 needed one rerun: the first attempt hit the known `test_coding_agent_environment.py::test_real_bash_reports_its_version_and_git` timeout, in code this PR does not touch. The final head adds only the S6 report, and its own runs are on this PR's checks. |
 
 GitHub CI runs on Ubuntu only, so the Windows-only tests (batch launchers, the WSL mode, the command-line limit) run only in the local win32 runs above.
 
