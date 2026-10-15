@@ -1,13 +1,13 @@
 """FILE: tests/features/harness_threads/test_harness_threads_runner.py
 
-PURPOSE: The canonical process helper every thread function runs through (§8.5 CliRunner, CliInvocation; D-13, FR-12): the child inherits the caller's environment, minus the env_remove names, plus an env_overlay that wins, the overlay and stdin text stay out of repr, stdin is a pipe that closes or DEVNULL, output is capped while draining continues, the timeout stops the whole tree within its bound, a run ends when its leader exits even while a grandchild holds the pipes (AC-2, review R-11), launch failures are fields, and cancellation stops the tree and re-raises.
+PURPOSE: The canonical process helper every thread function runs through (§8.5 CliRunner, CliInvocation; D-13, FR-12): the child inherits the caller's environment, minus the env_remove names, plus an env_overlay that wins, the overlay and stdin text stay out of repr, stdin is a pipe that closes or DEVNULL, output is capped while draining continues, the timeout stops the whole tree within its bound, a run ends when its leader exits even while a grandchild holds the pipes (AC-2, review R-11), a cancel during the wait that follows still stops the tree and leaves no reader task running (INV-9, review R-27), launch failures are fields, and cancellation stops the tree and re-raises.
 ROLE IN CODEBASE: Start here when a CLI run hangs, leaks a process, reads the caller's stdin, loses the caller's environment, or raises instead of reporting. Carried over from the deleted grok_host pack's process-helper tests, rewritten for env_overlay (the ManagedProcess tests went with ManagedProcess).
 ARCHITECTURE NOTE: Children are small inline Python programs run with sys.executable. The stdin test points this process's fd 0 at a pipe that never reaches EOF, so a child that inherited stdin would block and the test would see a timeout. Liveness is checked on win32 and POSIX.
-FUNCTION INVENTORY: child builds an argv for an inline program; invocation builds a CliInvocation; never_ending_stdin swaps fd 0 for an open pipe; the test_* functions are one behaviour each.
+FUNCTION INVENTORY: child builds an argv for an inline program; invocation builds a CliInvocation; running_tasks lists the tasks a cancelled run left unfinished; never_ending_stdin swaps fd 0 for an open pipe; the test_* functions are one behaviour each.
 COMMON MODIFICATION PATTERNS: Keep children self-contained and bounded (each exits by itself within CHILD_LIMIT_SECONDS).
 WHAT NOT TO DO IN THIS FILE: 1. Do not mock asyncio subprocesses; the helper's job is real process handling. 2. Do not assert exact exit codes after a kill; they differ by platform.
-KNOWN EDGE CASES: On win32 os.dup2 onto fd 0 also replaces the Win32 standard input handle, so an inheriting child does block there too (checked on Windows 11 with Python 3.11). On win32 a tree stop cannot reach a grandchild once its leader has exited, so the leader-exit test ends the grandchild itself.
-RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §8.5 (CliInvocation, CliRunner), D-13 and its r4 exception, §12.3 rows 27, 30; docs/spec/harness-thread-functions/review.md R-11
+KNOWN EDGE CASES: On win32 os.dup2 onto fd 0 also replaces the Win32 standard input handle, so an inheriting child does block there too (checked on Windows 11 with Python 3.11). On win32 a tree stop cannot reach a grandchild once its leader has exited, so the leader-exit test ends the grandchild itself, and the R-27 cancel test checks the grandchild only on POSIX (on win32 it checks the run's tasks).
+RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §8.5 (CliInvocation, CliRunner), D-13 and its r4 exception, §12.3 rows 27, 30; docs/spec/harness-thread-functions/review.md R-11, R-27
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads/test_harness_threads_runner.py
 """
 
@@ -40,6 +40,17 @@ grandchild = subprocess.Popen([sys.executable, "-c", "import time; time.sleep({C
 print(grandchild.pid, flush=True)
 print("answer: done", flush=True)
 """
+MARKED_EXIT_SOURCE = """
+import os, subprocess, sys
+grandchild = subprocess.Popen([sys.executable, "-c", "import time; time.sleep({limit})"])
+print("answer: done", flush=True)
+with open({staging!r}, "w") as handle:
+    handle.write("%d %d" % (os.getpid(), grandchild.pid))
+os.replace({staging!r}, {marker!r})
+"""
+HELD_KILL_WAIT_SECONDS = 5.0
+CANCEL_DELAY_SECONDS = 0.3
+SETTLE_SECONDS = 1.0
 
 
 def child(source: str) -> tuple[str, ...]:
@@ -52,6 +63,12 @@ def invocation(api: Any, argv: tuple[str, ...], /, **fields: Any) -> Any:
     values: dict[str, Any] = {"argv": argv, "env_overlay": {}, "timeout_seconds": 20.0, "max_output_bytes": 1_000_000}
     values.update(fields)
     return api.CliInvocation(**values)
+
+
+def running_tasks(before: set[asyncio.Task], run: asyncio.Task) -> list[asyncio.Task]:
+    # Tasks started since `before` (other than the run itself) that
+    # have not finished: what a cancelled run left behind.
+    return [task for task in asyncio.all_tasks() if task not in before and task is not run and not task.done()]
 
 
 @contextlib.contextmanager
@@ -179,6 +196,43 @@ async def test_runner_returns_when_the_leader_exits_while_a_grandchild_holds_the
     assert outcome.exit_code == 0
     assert lines[1:] == ["answer: done"]
     assert elapsed < 4 * fast_stop.kill_wait + fast_stop.slack
+
+
+@pytest.mark.asyncio
+async def test_cancel_after_the_leader_exits_stops_the_tree_and_its_readers(lib_api, monkeypatch, tmp_path: Path, alive, wait_until) -> None:
+    # INV-9 / AC-11 / R-27: a cancel that lands while the runner waits
+    # on a grandchild's pipes after the leader exited still stops the
+    # tree, and no task the run started is left running.
+    monkeypatch.setattr(lib_api.constants, "NATIVE_KILL_WAIT_SECONDS", HELD_KILL_WAIT_SECONDS)
+    marker = tmp_path / "pids.txt"
+    source = MARKED_EXIT_SOURCE.format(limit=CHILD_LIMIT_SECONDS, staging=str(marker) + ".tmp", marker=str(marker))
+    before = asyncio.all_tasks()
+    task = asyncio.create_task(lib_api.CliRunner().run(invocation(lib_api, child(source), timeout_seconds=60.0)))
+    pids: list[int] = []
+    try:
+        assert await wait_until(marker.exists, 20.0), "the leader never wrote its marker"
+        pids = [int(part) for part in marker.read_text().split()]
+        assert await wait_until(lambda: not alive(pids[0]), 10.0)
+        # The leader is gone; the runner now waits up to the kill wait
+        # for the grandchild's pipes, and the cancel lands in that wait.
+        await asyncio.sleep(CANCEL_DELAY_SECONDS)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        grandchild_alive = alive(pids[1])
+        await wait_until(lambda: not running_tasks(before, task), SETTLE_SECONDS)
+        assert running_tasks(before, task) == [], "R-27: the run's reader tasks are still running after the cancel"
+        # On win32 a tree stop cannot reach a grandchild once its leader
+        # has exited, so only POSIX can check the grandchild here.
+        if sys.platform != "win32":
+            assert not grandchild_alive, "INV-9 / R-27: the grandchild outlived the cancelled run"
+    finally:
+        for pid in pids[1:]:
+            if alive(pid):
+                os.kill(pid, signal.SIGTERM)
+        await wait_until(lambda: not running_tasks(before, task), SETTLE_SECONDS)
+        for leftover in running_tasks(before, task):
+            leftover.cancel()
 
 
 @pytest.mark.asyncio

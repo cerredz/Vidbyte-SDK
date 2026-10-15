@@ -1,13 +1,13 @@
 """FILE: tests/features/harness_threads/test_harness_threads_process_bounds.py
 
-PURPOSE: Every run is bounded and leaves nothing behind: a run past config.timeout_seconds raises <harness>.timed_out within the stop bound with its whole process tree gone (AC-9, INV-8, EC-15), the Muse serve exchange is bounded by NATIVE_CONTROL_TIMEOUT_SECONDS, stdout past its cap raises <harness>.output_too_large (EC-17), answer text past NATIVE_RESULT_TEXT_MAX_CHARS is cut and flagged (EC-31), caller cancellation propagates unchanged after the tree is stopped and the Muse temp folder removed (AC-11, INV-9, EC-16), even when it lands while Muse is still copying skills into that folder (review R-10), a timeout or output cap still reports what the vendor printed on stderr, without the key (INV-5 element 6, review R-6), a vendor that exits with its answer while a grandchild holds its pipes still returns that answer at once (AC-2, review R-11), and each failure carries the newest thread id the vendor had printed (AC-21, INV-5, D-27).
+PURPOSE: Every run is bounded and leaves nothing behind: a run past config.timeout_seconds raises <harness>.timed_out within the stop bound with its whole process tree gone (AC-9, INV-8, EC-15), the Muse serve exchange is bounded by NATIVE_CONTROL_TIMEOUT_SECONDS, stdout past its cap raises <harness>.output_too_large (EC-17), answer text past NATIVE_RESULT_TEXT_MAX_CHARS is cut and flagged (EC-31), caller cancellation propagates unchanged after the tree is stopped and the Muse temp folder removed (AC-11, INV-9, EC-16), even when it lands while Muse is still copying skills into that folder (review R-10), also when a second cancel follows (review R-30), a timeout or output cap still reports what the vendor printed on stderr, without the key (INV-5 element 6, review R-6), a vendor that exits with its answer while a grandchild holds its pipes still returns that answer at once (AC-2, review R-11), and each failure carries the newest thread id the vendor had printed (AC-21, INV-5, D-27).
 ROLE IN CODEBASE: Start here when a call hangs, outlives its timeout, leaks a vendor process, or reports the wrong thread for a failed run.
 ARCHITECTURE NOTE: The stand-in holds until a release file appears or its 30-second limit passes, and can start a grandchild that inherits its pipes, so only a whole-tree stop ends it. Liveness is checked on win32 too (OpenProcess/GetExitCodeProcess). NATIVE_KILL_WAIT_SECONDS and NATIVE_CONTROL_TIMEOUT_SECONDS are shrunk through the constants module, as spec §13 allows.
-FUNCTION INVENTORY: tree_pids lists the stand-in leader and grandchild pids; stop_grandchildren ends any grandchild that outlived its leader; the test_* functions are one behaviour each.
+FUNCTION INVENTORY: tree_pids lists the stand-in leader and grandchild pids; stop_grandchildren ends any grandchild that outlived its leader; held_copy holds the Muse skill copy at os.makedirs until the test opens its gate; the test_* functions are one behaviour each.
 COMMON MODIFICATION PATTERNS: Keep every bound as timeout + a few kill waits + SLACK_SECONDS; never a fixed sleep.
 WHAT NOT TO DO IN THIS FILE: Do not raise the stand-in's hold limit; a broken stop should fail the elapsed-time assertion, not hang the suite.
-KNOWN EDGE CASES: The cap tests write just past the real caps (4 MiB for Grok, 64 MiB for opencode and Muse), because only the three timing knobs are documented as monkeypatchable. The cancellation test reads liveness once, right as CancelledError arrives, with no grace (review R-24). The cancel-during-preparation test holds the skill copy at os.makedirs, the standard-library call copytree makes for each copied folder, and opens that gate right after cancelling, so a fix that waits for the copy cannot deadlock. On win32 a grandchild that outlives its leader cannot be reached by a tree stop, so the R-11 test ends it itself.
-RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §6.1 INV-5, INV-8, INV-9, §6.2 AC-2, AC-9, AC-11, AC-21, §6.3 EC-15 to EC-17, EC-31, §13; docs/spec/harness-thread-functions/review.md R-6, R-10, R-11, R-24
+KNOWN EDGE CASES: The cap tests write just past the real caps (4 MiB for Grok, 64 MiB for opencode and Muse), because only the three timing knobs are documented as monkeypatchable. The cancellation test reads liveness once, right as CancelledError arrives, with no grace (review R-24). The cancel-during-preparation test holds the skill copy at os.makedirs, the standard-library call copytree makes for each copied folder, and opens that gate right after cancelling, so a fix that waits for the copy cannot deadlock. On win32 a grandchild that outlives its leader cannot be reached by a tree stop, so the R-11 test ends it itself. The double-cancel test polls for the folder to go, because CancelledError may reach the caller before the removal ends (review R-30).
+RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §6.1 INV-5, INV-8, INV-9, §6.2 AC-2, AC-9, AC-11, AC-21, §6.3 EC-15 to EC-17, EC-31, §13; docs/spec/harness-thread-functions/review.md R-6, R-10, R-11, R-24, R-30
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads/test_harness_threads_process_bounds.py
 """
 
@@ -18,7 +18,9 @@ import os
 import signal
 import threading
 import time
+from collections.abc import Iterator
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -28,12 +30,34 @@ CAP_NAMES = {"grok": "GROK_CLI_MAX_OUTPUT_BYTES", "opencode": "NATIVE_PROCESS_MA
 TIMEOUT = 1.5
 HELD_PIPE_TIMEOUT = 12.0
 GATE_SECONDS = 30.0
+HELD_SKILL = "slow-skill"
+CANCEL_SPACING_SECONDS = 0.1
+REMOVAL_SECONDS = 5.0
 FLOOD_EXTRA_BYTES = 65536
 DEVICE_LOGIN = "Waiting for the device login at https://accounts.example/device"
 
 
 def tree_pids(sandbox, role: str) -> list[int]:
     return [record["pid"] for record in sandbox.starts(role)] + [record["grandchild_pid"] for record in sandbox.records("grandchild")]
+
+
+@pytest.fixture
+def held_copy(monkeypatch) -> Iterator[SimpleNamespace]:
+    # R-10 / R-30: copytree makes each copied folder through
+    # os.makedirs, looked up when it runs, so the copy of HELD_SKILL
+    # waits for the gate. The gate is always opened at teardown.
+    hold = SimpleNamespace(entered=threading.Event(), gate=threading.Event())
+    real_makedirs = os.makedirs
+
+    def held_makedirs(name, *args, **kwargs):
+        if Path(name).name == HELD_SKILL:
+            hold.entered.set()
+            hold.gate.wait(GATE_SECONDS)
+        return real_makedirs(name, *args, **kwargs)
+
+    monkeypatch.setattr(os, "makedirs", held_makedirs)
+    yield hold
+    hold.gate.set()
 
 
 def stop_grandchildren(sandbox, alive) -> None:
@@ -154,34 +178,47 @@ async def test_cancellation_propagates_after_the_tree_is_stopped(sandbox, call, 
 
 
 @pytest.mark.asyncio
-async def test_muse_cancelled_while_preparing_its_config_folder_leaves_no_temp_folder(sandbox, call, monkeypatch, wait_until) -> None:
+async def test_muse_cancelled_while_preparing_its_config_folder_leaves_no_temp_folder(sandbox, call, held_copy, wait_until) -> None:
     # AC-11 / INV-9 / R-10: a cancel that lands while the skills are
     # copied into the temp config folder still removes that folder
     # before CancelledError reaches the caller, and nothing starts.
-    skill = sandbox.make_skill("slow-skill")
-    entered, gate = threading.Event(), threading.Event()
-    real_makedirs = os.makedirs
-
-    def held_makedirs(name, *args, **kwargs):
-        # copytree makes each copied folder through os.makedirs, looked
-        # up when it runs, so the copy of this skill waits for the gate.
-        if Path(name).name == "slow-skill":
-            entered.set()
-            gate.wait(GATE_SECONDS)
-        return real_makedirs(name, *args, **kwargs)
-
-    monkeypatch.setattr(os, "makedirs", held_makedirs)
+    skill = sandbox.make_skill(HELD_SKILL)
     task = asyncio.create_task(call("muse", skills=[skill]))
     try:
-        assert await wait_until(entered.is_set, 30.0), "the skill copy never started"
+        assert await wait_until(held_copy.entered.is_set, 30.0), "the skill copy never started"
         task.cancel()
     finally:
-        gate.set()
+        held_copy.gate.set()
     with pytest.raises(asyncio.CancelledError) as caught:
         await task
     left = sorted(path.relative_to(sandbox.tmp).as_posix() for path in sandbox.tmp.rglob("*"))
     assert left == [], "INV-9 / R-10: the temp config folder outlived the cancelled call"
     assert type(caught.value) is asyncio.CancelledError
+    assert sandbox.starts() == []
+
+
+@pytest.mark.asyncio
+async def test_muse_cancelled_twice_while_preparing_its_config_folder_leaves_no_temp_folder(sandbox, call, held_copy, wait_until) -> None:
+    # AC-11 / INV-9 / R-30: a second cancel, landing while the first
+    # waits for the skill copy, must not stop the folder's removal.
+    # CancelledError may arrive before the removal ends, so the test
+    # polls for the folder to go instead of reading it at that moment.
+    skill = sandbox.make_skill(HELD_SKILL)
+    task = asyncio.create_task(call("muse", skills=[skill]))
+    try:
+        assert await wait_until(held_copy.entered.is_set, 30.0), "the skill copy never started"
+        for _ in range(2):
+            task.cancel()
+            # The held copy keeps the window open, so this pause only
+            # lets each cancel reach the call before the next one.
+            await asyncio.sleep(CANCEL_SPACING_SECONDS)
+    finally:
+        held_copy.gate.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    removed = await wait_until(lambda: not any(sandbox.tmp.iterdir()), REMOVAL_SECONDS)
+    left = sorted(path.relative_to(sandbox.tmp).as_posix() for path in sandbox.tmp.rglob("*"))
+    assert removed, f"INV-9 / R-30: the temp config folder outlived a twice-cancelled call: {left}"
     assert sandbox.starts() == []
 
 

@@ -1,13 +1,13 @@
 """FILE: tests/features/harness_threads/test_harness_threads_arguments.py
 
-PURPOSE: Argument refusal through the nine public functions: every invalid key, workspace, prompt, thread id, model, skill list or config raises configuration.invalid_argument naming the argument, never quotes the key, and happens before any process starts or any file or folder is created (AC-5, INV-4, INV-7, EC-1 to EC-6, EC-33, EC-38, D-25); the boundary values the spec allows still run (§9.1).
+PURPOSE: Argument refusal through the nine public functions: every invalid key, workspace, prompt, thread id, model, skill list or config raises configuration.invalid_argument naming the argument, never quotes the key, and happens before any process starts or any file or folder is created (AC-5, INV-4, INV-7, EC-1 to EC-6, EC-33, EC-38, D-25); the boundary values the spec allows still run (§9.1), including Grok and Muse prose prompts of 24,000 and 23,999 characters (review R-29).
 ROLE IN CODEBASE: Start here when a bad argument reaches a vendor process, a refusal names the wrong argument, or a valid boundary value is refused.
 ARCHITECTURE NOTE: Each refusal case builds the stand-in command first, snapshots the whole sandbox including the stand-in's log folder, calls the function, and compares; a stand-in that started would have claimed a launch number in that folder, and a Grok home or Muse temp folder would show as a new path.
 FUNCTION INVENTORY: refuse runs one call that must be refused and checks the INV-4 and INV-5 shape; the test_* functions are one behaviour each.
 COMMON MODIFICATION PATTERNS: A new argument rule is one more row in the case table for its argument.
 WHAT NOT TO DO IN THIS FILE: Do not compare refusal wording beyond the argument name, the cap and the INV-5 elements.
-KNOWN EDGE CASES: The relative-path cases chdir into the sandbox so the relative path exists; it must still be refused (R-14). Non-text values are passed on purpose. The quote-dense and astral prompt cases run only on win32, where the quoted command line is what the 32,767-unit CreateProcess limit counts (review R-8).
-RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §6.1 INV-4, INV-7, §6.2 AC-5, §6.3 EC-1 to EC-6, EC-33, EC-38, §9.1; docs/spec/harness-thread-functions/review.md R-8
+KNOWN EDGE CASES: The relative-path cases chdir into the sandbox so the relative path exists; it must still be refused (R-14). Non-text values are passed on purpose. The quote-dense and astral prompt cases run only on win32, where the quoted command line is what the 32,767-unit CreateProcess limit counts (review R-8); their refusal names NATIVE_WINDOWS_ARGV_PROMPT_MAX_UNITS, read from the constants module, and the Windows command line (review R-29).
+RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §6.1 INV-4, INV-7, §6.2 AC-5, §6.3 EC-1 to EC-6, EC-33, EC-38, §9.1; docs/spec/harness-thread-functions/review.md R-8, R-29
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads/test_harness_threads_arguments.py
 """
 
@@ -20,6 +20,8 @@ import pytest
 HARNESSES = ("grok", "opencode", "muse")
 PROMPT_CAPS = {"grok": 24000, "opencode": 200000, "muse": 24000}
 DENSE_PROMPTS = [("quotes", '"' * 20000), ("astral", chr(0x1F600) * 20000)]
+PROSE_PROMPTS = [("prose-24000", ("word " * 4800)[:23999] + "."), ("one-space-23999", "p" * 11999 + " " + "p" * 11999)]
+WINDOWS_UNITS_NAME = "NATIVE_WINDOWS_ARGV_PROMPT_MAX_UNITS"
 VALID_THREAD = "valid-thread-0001"
 KEY_CASES = [
     ("empty", ""), ("blank", "   "), ("inner-space", "vbk key with space"), ("nul", "vbk-key\x00tail"), ("bell", "vbk-key\x07tail"),
@@ -105,11 +107,29 @@ async def test_prompt_over_the_harness_cap_is_refused_naming_the_cap(refuse, har
 @pytest.mark.skipif(sys.platform != "win32", reason="the 32,767-unit command-line limit exists only on win32 (EC-3, review R-8)")
 @pytest.mark.parametrize("harness", ["grok", "muse"])
 @pytest.mark.parametrize(("case", "prompt"), DENSE_PROMPTS, ids=[case for case, _ in DENSE_PROMPTS])
-async def test_prompt_whose_quoted_form_passes_the_argv_cap_is_refused(refuse, harness, case, prompt) -> None:
+async def test_prompt_whose_quoted_form_passes_the_argv_cap_is_refused(api, refuse, harness, case, prompt) -> None:
     # EC-3 / R-8: 20,000 characters, within the 24,000 cap, but quoting
     # each " or counting UTF-16 units doubles it on the command line;
-    # it is refused naming the cap, never launched as not_installed.
-    await refuse(harness, "prompt", prompt=prompt, observations=[("prompt cap", ("24000", "24,000"))])
+    # it is refused, never launched as not_installed.
+    # R-29: the refusal names the Windows command-line ceiling, read
+    # from the constants module, not the 24,000-character cap.
+    ceiling = getattr(api.constants, WINDOWS_UNITS_NAME, None)
+    assert isinstance(ceiling, int), f"R-29: vidbyte.lib.constants.native_threads defines no {WINDOWS_UNITS_NAME}"
+    observations = [("unit ceiling", (str(ceiling), f"{ceiling:,}")), ("Windows command line", ("command line", "command-line"))]
+    await refuse(harness, "prompt", prompt=prompt, observations=observations)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("harness", ["grok", "muse"])
+@pytest.mark.parametrize(("case", "prompt"), PROSE_PROMPTS, ids=[case for case, _ in PROSE_PROMPTS])
+async def test_prose_prompt_within_the_argv_cap_still_runs(sandbox, call, harness, case, prompt) -> None:
+    # §9.1 / EC-3 / R-29: a prose prompt of 24,000 or 23,999 characters
+    # is allowed; quoting it adds two units, which must not refuse it.
+    result = await call(harness, prompt=prompt)
+    assert result.thread_id
+    start = sandbox.starts()[-1]
+    sent = start["options"]["--single"] if harness == "grok" else start["operands"][0]
+    assert sent == prompt
 
 
 @pytest.mark.asyncio
