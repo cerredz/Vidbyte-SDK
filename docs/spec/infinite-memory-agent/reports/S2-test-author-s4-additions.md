@@ -123,3 +123,52 @@ Scratch files are in `C:/Users/422mi/AppData/Local/Temp/claude/C--Users-422mi-vi
 
 - `9af96d42` test(infinite-memory): add S4 regression and mutation-killing tests [R-1, R-3, R-4, R-5, R-8, R-11, R-18]
 - (this report) docs(spec): record S2 test additions for S4 findings
+
+## Re-review additions (R-26, R-27)
+
+After S5 fixed R-1 to R-13, all 107 cases passed at HEAD `52eaafe8`. The S5 re-review (`reports/S5-rereview-verifier.md`) confirmed two Majors that those cases missed. Four tests were added; no existing assertion changed.
+
+| Finding | Spec IDs | Test | At `52eaafe8` | Under `apply_fixes.py both` |
+|---|---|---|---|---|
+| R-26 | INV-21, §9.2, AC-30 | contract → `test_a_read_only_seed_is_copied_again_each_time_an_agent_attaches` | RED | GREEN |
+| R-27 | INV-19, INV-32, INV-18 | workspace → `test_a_supersede_whose_new_text_cannot_be_written_changes_neither_entry_file` | RED | GREEN |
+| R-27 | INV-20, INV-19, INV-32 | workspace → `test_a_new_note_whose_description_cannot_be_written_leaves_no_note_and_keeps_the_allowance` | RED | GREEN |
+| R-27 | INV-16, INV-29, INV-17 | verification → `test_an_entry_text_that_cannot_be_written_never_costs_the_pair_its_verdict_or_other_entries` | RED | GREEN |
+
+Red at HEAD (`--tb=line`, whole pack `4 failed, 107 passed`):
+
+```
+R-26:            shutil.py:258: PermissionError: [Errno 13] Permission denied: '...\project\memory\seed\brief.md'
+R-27 supersede:  a refused supersede changed ['superseded.jsonl'] although the model was told nothing was saved
+R-27 new note:   a refused new note changed ['notes/a.md'] although the model was told nothing was saved
+R-27 pair:       an unwritable staged entry turned the verdict into 'unchecked':
+                 "'utf-8' codec can't encode character '\\ud83d' in position 301: surrogates not allowed"
+```
+
+Green under the trial fix. `git archive HEAD` was extracted to the S2 scratch folder `s2-additions/fix-rr` (LF, as `apply_fixes.py` asserts), the four edited test modules were copied in, and `python $V/apply_fixes.py <dir> both` was run. With `PYTHONPATH=<dir>`, `-k "read_only_seed or cannot_be_written"` gives `7 passed` (the 4 new tests plus the 3 R-1 cases the filter also matches), and the whole pack gives `111 passed`.
+
+Gates: `python lint/run.py` gives `SDK-LINT: PASS` (`S062 889 889`, `S041 0 0`, `S047 0 0`, `A001 642 642`). `ruff check --select F,E9,B,ASYNC,DTZ` on the pack is clean. The full suite gives `4 failed, 5280 passed, 14 skipped`, and the 4 failures are the new tests. `ruff format --check` reports 8 pack files, the same 8 it reports at HEAD; it is not part of the gate.
+
+### Judgment calls
+
+1. **R-26 uses three builds, not two.** Before the third build the source is edited and made read-only again. A fix that skipped an identical copy would pass two builds, but the third fails it, because the old read-only copy must be overwritten with new bytes. A `finally` block makes every file under `tmp_path` writable again, so cleanup works on Windows.
+2. **The R-27 supersede case sends the refused call twice.** At HEAD the first refusal already changes `superseded.jsonl`, and the second would duplicate #1 there. The test compares the snapshot before the first call with the one after the second, then requires a clean supersede to move #1 exactly once.
+3. **The R-27 new-note case makes only the description unwritable.** The note's own text is valid, so the failure can only come from `files.jsonl`. The test also proves the new-file allowance (1) stays unspent: the clean retry creates the note, and a second new note is then refused.
+4. **The pair case accepts either fix.** A lone-surrogate entry may be refused when staged (an error with the quota line) or listed as `s2` in `dropped` at commit. Either way the verdict must stay `passed` and both valid entries must commit, matching the card's ids. The case was cheap and deterministic, so it was written rather than deferred.
+5. **The lone surrogate is written as a `\ud83d` escape in the source.** No raw surrogate or line-separator character is in any edited file. A provider's escaped `"\ud83d"` decodes to this value, so the model can send it.
+
+### Not written
+
+- **R-29 (a Windows lock on the second file).** The re-review downgraded it to a Minor follow-up and left its fix open. Holding the lock needs a second file handle from the test, which is a filesystem fake this pack was not granted. The test would also pin one fix before either is chosen. It is listed under "Tests deliberately NOT written" in test-plan.md.
+- **R-28.** It is a spec and documentation finding, with nothing to assert.
+
+### Notes for S5
+
+- The R-26 copy must match the source byte for byte after every attach, including after the source changes while both are read-only.
+- Every R-27 refusal must render `memory_rejected_prompt` and the quota line, and leave the snapshot unchanged. Check that the text can be encoded before the first of the two writes, not between them.
+- For a pair, an unwritable staged entry must not raise out of the commit. Refuse it at stage time, or drop it with a reason in `dropped`.
+
+### Commits
+
+- `11b19a7d` test(infinite-memory): add regression tests for re-review findings [R-26, R-27]
+- (this section) docs(spec): record S2 test additions for re-review findings
