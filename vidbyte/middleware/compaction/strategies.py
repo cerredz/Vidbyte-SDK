@@ -839,17 +839,25 @@ class SalienceScoreEvictionCompaction(BaseCompaction):
         self.token_counter = token_counter
 
     async def compact(self, messages: Sequence[ContextMessage]) -> tuple[ContextMessage, ...]:
-        # Selects the highest-scoring messages and returns them in original order.
-        ranked = sorted(enumerate(messages), key=lambda item: (-self._score(item[1], item[0], len(messages)), item[0]))
+        # Selects the highest-scoring call/result groups and returns their messages in original order.
+        # @intent salience-keeps-tool-pairs-whole
+        # The engine drops a tool result whose call was evicted (and a call missing its results), so a call and its results are ranked by their best member and kept as one unit: an error result keeps its call, and no slot goes to half a pair.
+        spans: list[range] = []
+        for group in _provider_groups(messages):
+            start = spans[-1].stop if spans else 0
+            spans.append(range(start, start + len(group)))
+        ranked = sorted(spans, key=lambda span: (-max(self._score(messages[i], i, len(messages)) for i in span), span.start))
         keep_indexes: set[int] = set()
         remaining_tokens = self.max_tokens
-        for index, message in ranked:
-            if len(keep_indexes) >= self.max_messages:
-                break
-            cost = _message_tokens(message, self.token_counter)
-            if remaining_tokens is not None and cost > remaining_tokens and message.role != "system":
+        for span in ranked:
+            # Skip a group that would overflow the message cap, so a smaller lower-ranked group can still use the slot.
+            if len(keep_indexes) + len(span) > self.max_messages:
                 continue
-            keep_indexes.add(index)
+            # Charge the whole group against the token budget; system messages stay exempt as before.
+            cost = sum(_message_tokens(messages[i], self.token_counter) for i in span)
+            if remaining_tokens is not None and cost > remaining_tokens and all(messages[i].role != "system" for i in span):
+                continue
+            keep_indexes.update(span)
             if remaining_tokens is not None:
                 remaining_tokens -= cost
         return tuple(message for index, message in enumerate(messages) if index in keep_indexes)
