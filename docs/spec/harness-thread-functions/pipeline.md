@@ -14,7 +14,7 @@ started: 2026-10-15
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-15 | 2026-10-15 | reports/S0-scout.md, reports/S0-vendor-scout.md | merge of origin/main; code-map.md; vendor-facts.md |
-| S1 spec + review | running | 2026-10-15 | | reports/S1-spec-author.md, reports/S1-spec-review.md | spec r1 a174bcb6 (929 lines, 18 §, 53 rows) |
+| S1 spec + review | done | 2026-10-15 | 2026-10-15 | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | spec r3 approved 8d1ee6d9 (2 review rounds, 21 findings applied) |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -36,6 +36,10 @@ started: 2026-10-15
 - 2026-10-15 — Accepted spec r1 frontmatter `base_commit: 179d8adc` (origin/main at merge time) instead of the merge SHA 1c0d264b — it is the correct base for diffs against main and for the S3 drift check; branch grounding is 1c0d264b.
 
 - 2026-10-15 — vendor-facts.md Muse Gaps 10 and 13 are superseded by spec A-20/A-23 (the author's free echo-provider probe verified continue/fork across fresh config folders and the exec success record). Left vendor-facts.md unedited (it is the scout's artifact); later briefings point at the spec as authoritative on those two points.
+
+- 2026-10-15 — Spec r3 Q-n defaults applied (none blocking; the owner may interrupt): Q-1 edit-by-default no; Q-2 sync variants no; Q-3 Grok model pre-check no; Q-4 opencode/Muse permission controls no; Q-5 tools over the nine functions no; Q-6 trust workspace no; Q-7 Grok home `~/.vidbyte/grok-homes/<key>` (settled); Q-8 Meta naming `*_muse_thread`; Q-9 OPENCODE_DISABLE_PROJECT_CONFIG no; Q-10 bound Grok-home growth no; Q-11 copy ~/.grok guard rails no.
+- 2026-10-15 — S2 test-tree authority: the 49 test files under tests/features/{grok_host,opencode_host,muse_host,native_backends}/ were added by this PR (git diff origin/main..HEAD -- tests: 49 files, 14023 insertions, 0 deletions). The S2 test author may delete or rewrite exactly those files per spec §13 (overriding the template's "never delete" rule for them only); no test file that exists on origin/main may change. S3+ may change no test file.
+- 2026-10-15 — No `pip install -e` in the worktree: it would repoint the shared global editable install away from the canonical checkout for every other session. All Python runs use `PYTHONPATH=$(pwd)` from the worktree root (the S0 merge agent ran 1668 tests this way).
 
 ## User replies (verbatim)
 - (none yet)
