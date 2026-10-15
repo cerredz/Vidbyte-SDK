@@ -107,7 +107,8 @@ class NativeThreadRequest:
         self._checked_model()
         object.__setattr__(self, "skills", self._checked_skills())
 
-        # A run starts a new thread; continue and fork need the one to use.
+        # A run starts a new thread; continue and fork need the one to
+        # use.
         self._checked_thread_id()
 
     def _checked_workspace(self) -> Path:

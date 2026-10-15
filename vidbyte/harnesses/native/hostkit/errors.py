@@ -176,7 +176,8 @@ class NativeErrorFactory:
 
     @staticmethod
     def _context_sentences(workspace: str | None, thread_id: str | None) -> list[str]:
-        # The scrubbed workspace and thread id, when the call knows them.
+        # The scrubbed workspace and thread id, when the call knows
+        # them.
         sentences = []
         if workspace is not None:
             sentences.append(native_threads.NATIVE_WORKSPACE_SENTENCE.format(workspace=workspace))

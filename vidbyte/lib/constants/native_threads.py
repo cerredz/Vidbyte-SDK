@@ -72,7 +72,8 @@ NATIVE_DECODE_IGNORE = "ignore"
 NATIVE_WINDOWS_PLATFORM = "win32"
 NATIVE_PATH_VARIABLE = "PATH"
 NATIVE_PATHEXT_VARIABLE = "PATHEXT"
-# Python's own fallback when PATHEXT is unset (shutil._WIN_DEFAULT_PATHEXT).
+# Python's own fallback when PATHEXT is unset
+# (shutil._WIN_DEFAULT_PATHEXT).
 NATIVE_WINDOWS_DEFAULT_PATHEXT = ".COM;.EXE;.BAT;.CMD;.VBS;.JS;.WS;.MSC"
 # Windows counts a command line in UTF-16 code units, and reports one
 # past its limit as a missing file with this error number.
@@ -118,7 +119,8 @@ NATIVE_LISTING_SEPARATOR = ", "
 OPENCODE_MODEL_PROVIDER_SEPARATOR = "/"
 NATIVE_NUL_CHARACTER = "\x00"
 
-# JSON member names of the vendor output and of the inputs the SDK sends.
+# JSON member names of the vendor output and of the inputs the SDK
+# sends.
 GROK_TYPE_FIELD = "type"
 GROK_ERROR_TYPE = "error"
 GROK_MESSAGE_FIELD = "message"

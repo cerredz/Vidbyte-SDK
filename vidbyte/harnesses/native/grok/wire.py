@@ -83,7 +83,8 @@ class GrokWire:
 
     @staticmethod
     def _answer(stdout: str) -> Mapping[str, object] | None:
-        # The whole stdout as one JSON object, or None when it is not one.
+        # The whole stdout as one JSON object, or None when it is not
+        # one.
         try:
             value = json.loads(stdout)
         except ValueError:
