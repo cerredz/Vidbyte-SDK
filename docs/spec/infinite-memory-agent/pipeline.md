@@ -21,12 +21,12 @@ started: 2026-10-15 02:49
 | S2 tests | done | 2026-10-15 04:55 | 2026-10-15 05:52 | reports/S2-test-author.md | S2_HEAD d8bcdf14 (c2f91ebd before rebase); 89 red cases in 7 modules under tests/features/infinite_memory_agent/; AC-1..AC-42 all mapped; spec r4 @ff634998 fixed the 2 S2 open items |
 | S3 implement | done | 2026-10-15 05:59 | 2026-10-15 07:22 | reports/S3-implementer.md | S3_HEAD def85360; draft PR #1084; 89/89 new green; source gate 5262 passed/14 skipped "CI passed"; package gate "CI passed"; lint PASS; budget 18/18 new files; test diff vs d8bcdf14 empty |
 | S4 adversarial review | done | 2026-10-15 07:31 | 2026-10-15 08:37 | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES — confirmed 1 Blocker / 10 Major / 14 Minor; refuted 2 partial; downgraded 1 |
-| S5 repair loop | running | 2026-10-15 09:20 | | | |
-| S5 re-review | pending | | | | |
+| S5 repair loop | done | 2026-10-15 09:20 | 2026-10-15 10:02 | reports/S5-repair-1.md | converged in 1/8 iterations @da338f59; R-1..R-11 fixed + trivial Minors; 6 follow-up Minors left open; orchestrator re-ran gate: source 5280 passed/14 skipped "CI passed", package "CI passed", lint PASS |
+| S5 re-review | running | 2026-10-15 10:03 | | | |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 (both SOUND WITH FIXES; R-1..R-23 all dispositioned in §16) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 (both SOUND WITH FIXES; R-1..R-23 all dispositioned in §16) · S5 repair iterations: 1/8 · S5 re-review rounds: 1/2 (running)
 
 ## Decisions the orchestrator made
 - 2026-10-15 02:49 — Unset the upstream of `feat/infinite-memory-agent` (git worktree add had set it to track origin/main) — a bare `git push` could otherwise target main; agents push with `git push -u origin feat/infinite-memory-agent`.
@@ -48,6 +48,9 @@ started: 2026-10-15 02:49
 - 2026-10-15 08:38 — Sequencing: spec author r5 → test author additions → S5 repair iteration 1 (serial; agents share one worktree index, so no concurrent committers).
 
 - 2026-10-15 09:19 — Spec r5 @8d6c230a (NFR-7 bounds the four capped card fields; §17 sleep claim corrected). S2 author added 18 cases in 9 tests @9af96d42 (+report @ac1518da): 14 red at HEAD on purpose (R-1 ×3, R-3, R-4, R-6 ×2, R-8 ×7 incl. colon path), 4 R-11 mutation-killers green at HEAD and red under V1/V2/V3. Orchestrator audit: no assertion line removed in `git diff d8bcdf14..HEAD -- tests/` (removed lines = module-header text, README/FEATURE rows, the R-5 literal joined byte-identically); no production change. Accepted the author's R-1 deviation: the test accepts a write-time refusal OR an unchecked/done card (my requested FAILED/UNCHECKED-only assertion would have rejected the verifier's recommended fix). R-2 not written (Windows `resolve()` normalizes case → would pass vacuously). New S2_HEAD = 9af96d42.
+
+- 2026-10-15 10:02 — Treated `tests/test_mcp_stdio_transport.py::McpStdioTransportHardeningTests::test_cancelled_waiter_does_not_break_transport` as a pre-existing flake, not a PR failure: my first source-gate run failed only on it (1 failed / 5279 passed); the PR touches no MCP code (`git diff --name-only origin/main...HEAD | grep -i mcp` empty); it passed 5/5 alone; the immediate full re-run was green (5280 passed, 14 skipped, "CI passed."). Flagged independently by the S4 conformance reviewer, the S4 verifier, and S5 repair 1.
+- 2026-10-15 10:03 — Final re-review FOCUS includes two possible regressions S5 repair 1 itself reported (not in review.md): (a) R-7's switch to `LocalFileSystemBackend.copy` (`shutil.copy2`) preserves a read-only seed's mode, so a second setup over the same workspace raises PermissionError; (b) a multi-file memory write (root `remember` with `supersedes`, or `write_note` with a new description) can be left half-done when a lone surrogate fails on a later file. Routed to the re-reviewer + verifier rather than straight to repair, per the playbook (new findings go through a scoped verifier).
 
 ## User replies (verbatim)
 - (none yet)
@@ -83,3 +86,4 @@ started: 2026-10-15 02:49
 - S2 additions: R-1 triggers are U+2028/U+0085 (Windows refuses `
 ` in file names) and a lone surrogate; the journal is read as strict UTF-8. R-8 lone-surrogate cases require a refusal (silent cleaning fails). A colon path must be refused before `mkstemp` or a stray NTFS file stays. R-8 fault = one-shot `os.replace` failure on the tool's target file. — *source:* S2 test author (S4 additions)
 - S4 verifier: R-1, R-2 and part of R-8 all change `InfiniteWorkspace._note_path` (workspace.py:272-286) — refuse paths `splitlines()` breaks, compare protected names case-folded, refuse `:`; one flat edit. Remove `ensure_ascii=False` only at journal.py:187 (keep workspace.py:170/329 for grep, D-3/AC-15/AC-42). R-4: duplicate-name check over all cards; tools/context/max_agents checks over new cards only. R-7: `self.backend = LocalFileSystemBackend()` (S061 exempts only `<x>.backend.` calls), drop `import shutil`, registry import after `vidbyte.lib.errors` (else S051 259→260); never `--update-baseline`. R-8: do not catch OSError in `_commit` (INV-29); unlink temp in `_replace`; convert OSError/ValueError to refusals in remember/write_note/edit_file `execute`. Main's lint counts via `git archive origin/main | tar -x -C <dir>` + `git init && git add -A` there. — *source:* S4 findings verifier
+- S5-1: S008 (C901 ≤ 10) trips when a try/except is added to a settings `__post_init__` — put checks in a helper and run the whole `python lint/run.py`. Local semgrep 1.170.1 fails to import with mcp 2.x; the repair agent used a scratchpad launcher `s5-1/semgrep_launch.py` stubbing the unused `mcp` subcommand. S051 reports 223 both here and on main. — *source:* S5 repair 1
