@@ -14,7 +14,7 @@ TESTS: tests/features/harness_threads/
 from __future__ import annotations
 
 import asyncio
-import shutil
+import contextlib
 import tempfile
 from collections.abc import Sequence
 from pathlib import Path
@@ -129,7 +129,10 @@ class MuseThreadRun:
             # Read the records: the session stream and the final text.
             return MuseExecOutput.read(outcome, request, errors, thread_id=thread_id, timeout_seconds=config.timeout_seconds)
         finally:
-            await asyncio.to_thread(shutil.rmtree, folder, ignore_errors=True)
+            # The private folder goes however the call ends; a removal
+            # that fails leaves it behind (spec EC-34).
+            with contextlib.suppress(OSError):
+                await asyncio.to_thread(NativeSkillFolders.remove, folder)
 
     @staticmethod
     def _prepare_config(request: NativeThreadRequest, errors: NativeErrorFactory) -> Path:
@@ -142,7 +145,8 @@ class MuseThreadRun:
             NativeSkillFolders.replace(tuple(Path(skill) for skill in request.skills), folder.joinpath(*native_threads.MUSE_CONFIG_SKILLS_PARTS))
         except OSError as exc:
             if folder is not None:
-                shutil.rmtree(folder, ignore_errors=True)
+                with contextlib.suppress(OSError):
+                    NativeSkillFolders.remove(folder)
             detail = native_threads.MUSE_CONFIG_FAILURE_DETAIL.format(error_type=type(exc).__name__, reason=exc.strerror or type(exc).__name__)
             raise errors.failure(NativeThreadProblem.LAUNCH_FAILED, request=request, searched=detail) from exc
         return folder
