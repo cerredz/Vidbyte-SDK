@@ -55,7 +55,7 @@ class VersionResolver:
         try:
             return metadata.version("vidbyte-sdk")
         except metadata.PackageNotFoundError:
-            return "0.2.1"
+            return "0.3.0"
 
 
 class VidbyteCli:

@@ -19,6 +19,7 @@ from vidbyte import Agent, Trace, TraceProfile
 from vidbyte.agents import AgentForkSettings, BaseAgent
 from vidbyte.agents.contracts import MinCostSpent, MinToolCalls, MinToolCallsById
 from vidbyte.agents.settings import AgentLoopSettings, ToolErrorPolicy, ToolSettings
+from vidbyte.context.algorithms import ContextWindowAlgorithm, ToolResultAdmission
 from vidbyte.lib.dataclasses.trace import TraceField, TraceOption
 from vidbyte.tools import tool
 from vidbyte.agents.types import AgentMessage
@@ -1157,6 +1158,27 @@ class SessionFacadeTests(unittest.IsolatedAsyncioTestCase):
                 config = live.agent.runner_config
                 self.assertEqual(config.api_key, "sk-tenant-acme")
                 self.assertEqual(ProviderModelRegistry.resolve_api_key(config.provider, config.api_key), "sk-tenant-acme")
+
+    def test_resume_and_fork_keep_a_custom_context_window_algorithm(self) -> None:  # [Silent Failure]
+        # @intent live-fork-keeps-agent-algorithm
+        # A user-named algorithm is not a preset, so a live branch must reuse the live agent's own algorithm and a cold path the re-supplied one.
+        custom = ContextWindowAlgorithm(name="custom_compact", tool_result_admission=ToolResultAdmission.COMPACT, max_tool_result_chars=200)
+        expected = ("custom_compact", ToolResultAdmission.COMPACT, 200)
+        store = InMemorySessionStore()
+        agent = BaseAgent(name="triage", system_prompt="Work.", provider="deepseek", model_name="deepseek-chat", api_key="sk-test-fake", algorithm=custom)
+        session = Session(agent, store=store)
+        session.checkpoint()
+
+        branches = [session.fork(), *(outcome.session for outcome in session.batch_fork(2))]
+        cold = [Session.resume(store, session.id, api_key="sk-test-fake", algorithm=custom).agent, BaseAgent.restore(agent.export_state(), api_key="sk-test-fake", algorithm=custom)]
+
+        live = [branch.agent for branch in branches]
+        for restored in live + cold:
+            self.assertEqual((restored.algorithm.name, restored.algorithm.tool_result_admission, restored.algorithm.max_tool_result_chars), expected)
+        preset = BaseAgent(name="triage", system_prompt="Work.", provider="deepseek", model_name="deepseek-chat", api_key="sk-test-fake", algorithm="compact_tool_outputs")
+        self.assertEqual(BaseAgent.restore(preset.export_state(), api_key="sk-test-fake").algorithm.name, "compact_tool_outputs")
+        with self.assertRaisesRegex(ValueError, "custom_compact"):
+            BaseAgent.restore(agent.export_state(), api_key="sk-test-fake")
 
     def test_fork_at_foreign_checkpoint_raises(self) -> None:  # [Hidden Assumption]
         store = InMemorySessionStore()

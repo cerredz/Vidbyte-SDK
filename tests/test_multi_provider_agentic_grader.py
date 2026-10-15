@@ -13,7 +13,9 @@ Key Functions / Test Cases:
     - test_single_provider_configured: Validates single active provider fallback.
     - test_empty_or_blank_responses_all_providers: Assures error handling when all endpoints are dead.
     - test_grader_filler_parsing: Assures meta-grader verbatim output matching works correctly.
+    - test_grader_keeps_the_winners_structured_output: Assures the selected trial's output_schema instance is returned.
     - test_select_winner_prefers_faithful_match: Assures the grader's exact choice is not overridden by substring candidates.
+    - test_isdone_trials_are_graded_on_their_final_answers: Assures an isDone finish is graded on its final_answer, not its tool-call text.
 Relations:
     Validates MultiProviderAgenticGraderAlgorithm and MultiProviderAgenticGraderRuntimeAlgorithm within the test framework.
 Similar Files:
@@ -22,10 +24,13 @@ Similar Files:
 
 from __future__ import annotations
 
+import json
 import os
 import unittest
 from unittest.mock import MagicMock, patch
 from typing import Any
+
+from pydantic import BaseModel
 
 from vidbyte import ContextWindow, ContextWindowAlgorithm, MultiProviderAgenticGraderAlgorithm
 from vidbyte.agents.algorithms.multi_provider_agentic_grader import MultiProviderAgenticGraderRuntimeAlgorithm
@@ -44,28 +49,37 @@ from vidbyte.lib.dataclasses.strategies import AgentResult as StrategyResult
 class FakeResponse:
     """Mock model response carrier."""
 
-    def __init__(self, text: str) -> None:
-        # Carrier for mock response text content.
+    def __init__(self, text: str, raw: Any = None) -> None:
+        # Carrier for mock response text content and an optional provider-native payload.
         self.text = text
+        self.raw = raw
 
 
 class FakeRunner:
     """Mock model runner."""
 
-    def __init__(self, output: str) -> None:
+    def __init__(self, output: str, raw: Any = None) -> None:
         # Initializes a fake runner with specified output.
         self.output = output
+        self.raw = raw
         self.calls: list[dict[str, Any]] = []
 
     async def arun(self, prompt: str, **kwargs: Any) -> FakeResponse:
         # Simulates a runner execution and tracks arguments.
         self.calls.append({"prompt": prompt, "kwargs": kwargs})
-        return FakeResponse(self.output)
+        return FakeResponse(self.output, self.raw)
 
 
 async def _invoke_runner_helper(runner: Any, prompt: str, **kwargs: Any) -> Any:
     # Awaits the fake runner's arun implementation for test execution.
     return await runner.arun(prompt, **kwargs)
+
+
+class Ticket(BaseModel):
+    """Small output_schema used to check the grader keeps the winner's validated instance."""
+
+    title: str
+    urgency: int
 
 
 class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
@@ -281,6 +295,48 @@ class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.output, "candidate answer")
         self.assertEqual(result.metadata["multi_provider_agentic_grader"]["grader_decision"]["selected_provider"], "openai")
 
+    @patch("vidbyte.agents.algorithms.multi_provider_agentic_grader.ModalityDetector.create_runner")
+    async def test_grader_keeps_the_winners_structured_output(self, mock_create_runner: MagicMock) -> None:
+        # [Silent Failure] BaseAgent raises OutputSchemaViolationError when structured is None, so the winner's instance must survive.
+        os.environ["OPENAI_API_KEY"] = "fake-openai-key"
+        os.environ["ANTHROPIC_API_KEY"] = "fake-anthropic-key"
+        openai_json = '{"title": "Payment failed", "urgency": 3}'
+        anthropic_json = '{"title": "Card declined", "urgency": 2}'
+        runners = {
+            ("openai", "gpt-4o"): FakeRunner(openai_json),
+            ("anthropic", "claude-sonnet-5"): FakeRunner(anthropic_json),
+            ("openai", "gpt-4.1-mini"): FakeRunner(anthropic_json),
+        }
+        mock_create_runner.side_effect = lambda modality, provider, model, **kwargs: runners[(provider, model)]
+
+        algorithm = MultiProviderAgenticGraderAlgorithm(provider_models={"openai": "gpt-4o", "anthropic": "claude-sonnet-5"}, grader_model="gpt-4.1-mini")
+        runtime = AgentRuntime(
+            agent_name="worker",
+            system_prompt="Work.",
+            tools=Tools(),
+            permission_policy=PermissionPolicy(),
+            config=AgentRuntimeConfig(max_iterations=1),
+            algorithm=ContextWindowAlgorithm(name="multi_provider_agentic_grader", multi_provider_agentic_grader=algorithm),
+            output_schema=Ticket,
+        )
+        context = runtime.build_context(
+            "task",
+            base_context=None,
+            history=(),
+            agent_history=(),
+            agent_metadata={},
+            existing_tool_calls=(),
+        )
+
+        result = await runtime.arun(
+            "task",
+            handle=RunnerHandle(runner=FakeRunner("ignored"), provider="openai", invoke=_invoke_runner_helper, extract_text=lambda r: getattr(r, "text", str(r)), extract_metadata=lambda r: {}),
+            context=context,
+        )
+
+        self.assertEqual(result.metadata["multi_provider_agentic_grader"]["grader_decision"]["selected_provider"], "anthropic")
+        self.assertEqual(result.structured, Ticket(title="Card declined", urgency=2))
+
     async def test_default_execution_with_zero_api_keys(self) -> None:
         # [Hidden Assumption] Default execution with zero API keys: Throws ConfigurationError.
         for provider_enum in API_KEY_ENV_VARS.keys():
@@ -380,6 +436,44 @@ class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(selector._select_winner({"openai": "", "deepseek": "42 is it", "anthropic": long_answer}, FakeResponse("42"), handle), ("42 is it", "deepseek"))
         # With no match at all, the grader's own text is returned.
         self.assertEqual(selector._select_winner({"openai": "  ", "deepseek": "7"}, FakeResponse("unrelated"), handle), ("unrelated", "grader_raw"))
+
+    @patch("vidbyte.agents.algorithms.multi_provider_agentic_grader.ModalityDetector.create_runner")
+    async def test_isdone_trials_are_graded_on_their_final_answers(self, mock_create_runner: MagicMock) -> None:
+        # [Silent Failure] A trial that finishes through isDone is graded on its final_answer, not on its tool-call turn's text.
+        os.environ["DEEPSEEK_API_KEY"] = "fake-deepseek-key"
+        os.environ["GEMINI_API_KEY"] = "fake-gemini-key"
+        deepseek_answer = "Canberra (from deepseek)."
+        gemini_answer = "Canberra (from gemini)."
+        # DeepSeek's OpenAI-compatible wire reads the tool-call arguments JSON as the turn's text; Gemini's reads as empty.
+        deepseek_arguments = json.dumps({"final_answer": deepseek_answer})
+        runner_deepseek = FakeRunner(deepseek_arguments, raw={"choices": [{"message": {"role": "assistant", "content": None, "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "isDone", "arguments": deepseek_arguments}}]}}]})
+        runner_gemini = FakeRunner("", raw={"candidates": [{"content": {"role": "model", "parts": [{"functionCall": {"name": "isDone", "args": {"final_answer": gemini_answer}}}]}}]})
+        runner_grader = FakeRunner(gemini_answer)
+        mock_create_runner.side_effect = lambda modality, provider, model, **kwargs: {"deepseek": runner_deepseek, "gemini": runner_gemini}.get(provider, runner_grader)
+
+        algorithm = MultiProviderAgenticGraderAlgorithm(provider_models={"deepseek": "deepseek-chat", "gemini": "gemini-3.5-flash"}, grader_provider="openai", grader_model="gpt-4o")
+        runtime = AgentRuntime(
+            agent_name="worker",
+            system_prompt="Work.",
+            tools=Tools(),
+            permission_policy=PermissionPolicy(),
+            config=AgentRuntimeConfig(max_iterations=1),
+            algorithm=ContextWindowAlgorithm(name="multi_provider_agentic_grader", multi_provider_agentic_grader=algorithm),
+        )
+        context = runtime.build_context("task", base_context=None, history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+
+        result = await runtime.arun(
+            "task",
+            handle=RunnerHandle(runner=FakeRunner("ignored"), provider="openai", invoke=_invoke_runner_helper, extract_text=lambda r: getattr(r, "text", str(r)), extract_metadata=lambda r: {}),
+            context=context,
+        )
+
+        grader_metadata = result.metadata["multi_provider_agentic_grader"]
+        self.assertEqual(grader_metadata["candidates"], {"deepseek": deepseek_answer, "gemini": gemini_answer})
+        self.assertIn(deepseek_answer, runner_grader.calls[0]["prompt"])
+        self.assertIn(gemini_answer, runner_grader.calls[0]["prompt"])
+        self.assertEqual(grader_metadata["grader_decision"]["selected_provider"], "gemini")
+        self.assertEqual(result.output, gemini_answer)
 
 if __name__ == "__main__":
     unittest.main()

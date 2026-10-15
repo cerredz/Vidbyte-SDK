@@ -272,7 +272,24 @@ class ContextCompactionEngine:
         # Anthropic and Gemini keep tool names in content blocks and parts (a tool_result only by call id); unnamed, every per-tool strategy treats all tools as one.
         tool_name = self._provider_tool_name(raw)
         tool_name = self._provider_block_tool_name(raw, tool_names or {}) if tool_name is None else tool_name
-        return ContextMessage(role=role, content=content, kind=kind, metadata={"provider_message": raw, "provider_index": index, "provider_id": self._provider_message_id(raw, index), "tool_name": tool_name})
+        metadata: dict[str, Any] = {"provider_message": raw, "provider_index": index, "provider_id": self._provider_message_id(raw, index), "tool_name": tool_name}
+        # @intent provider-error-results-carry-error-status
+        # Error-aware strategies (keep_errors, salience) read status, and each provider marks a failed tool result in its own shape.
+        if kind == "tool_result" and self._provider_tool_error(raw):
+            metadata["status"] = "error"
+        return ContextMessage(role=role, content=content, kind=kind, metadata=metadata)
+
+    @staticmethod
+    def _provider_tool_error(message: Mapping[str, Any]) -> bool:
+        # Reads ToolsFormatter's error markers: Anthropic is_error blocks, Gemini error responses, and the text envelope's first line.
+        content, parts = message.get("content"), message.get("parts")
+        if isinstance(content, list) and any(isinstance(block, Mapping) and block.get("type") == "tool_result" and block.get("is_error") is True for block in content):
+            return True
+        for part in parts if isinstance(parts, list) else ():
+            response = part.get("functionResponse", part.get("function_response")) if isinstance(part, Mapping) else None
+            if isinstance(response, Mapping) and isinstance(response.get("response"), Mapping) and response["response"].get("status") == "error":
+                return True
+        return isinstance(content, str) and content.startswith("[tool_error ")
 
     def _context_message_to_provider(self, message: ContextMessage) -> dict[str, Any]:
         # Converts a compacted ContextMessage back to a provider message dictionary.
@@ -282,7 +299,8 @@ class ContextCompactionEngine:
             if message.content == self._provider_message_content(original):
                 return dict(original)
             return self._replace_provider_content(dict(original), message.content)
-        return {"role": "assistant" if message.role != "system" else "system", "content": message.content}
+        # A strategy-built user message (the synthetic_user trace placement) stays a user turn.
+        return {"role": message.role if message.role in ("system", "user") else "assistant", "content": message.content}
 
     def _provider_message_kind(self, message: Mapping[str, Any]) -> str:
         # Classifies provider message dictionaries for compaction decisions.

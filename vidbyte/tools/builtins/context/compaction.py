@@ -99,7 +99,9 @@ class ContextCompactionTool(BaseTool):
 
     def _options(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         # Copies call arguments into engine options without exposing the mapping for mutation.
-        return dict(arguments)
+        # @intent null-optional-arg-means-default
+        # Strict-schema models send null for every unused optional, which must mean the default, never "None" text or a TypeError.
+        return {key: value for key, value in arguments.items() if value is not None}
 
     def _mode_error(self, message: str) -> ToolResult:
         # Converts shared-engine validation failures into legacy ToolResult errors.
