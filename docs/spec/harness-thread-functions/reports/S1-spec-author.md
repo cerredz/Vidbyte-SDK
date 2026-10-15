@@ -177,3 +177,52 @@ The review asks that the probe evidence for R-9(b) and R-9(e) be copied into `co
 - A-22: opencode providers that sign in through a plugin.
 - Whether the owner prefers `meta` (Q-8).
 - Whether the owner wants Q-9's opencode project-config switch, given the documented key-exposure risk.
+
+---
+
+## Addendum — r3 (S1 review round 2; approved, 2026-10-15)
+
+**Input:** `reports/S1-spec-review-r2.md` (committed at 1df20485), verdict SOUND WITH FIXES (2 Blocker, 3 Major, 3 Minor), read in full.
+- All of R-14 to R-21 were accepted; none was rejected and none reverses a KD.
+- The round-1 partials (R-10, R-13) are recorded in §16 as completed through R-14 and R-18.
+- Following the coordinator's instruction, the spec is now `status: approved`, revision 3. The review cap of two rounds is reached.
+
+### Changes per finding
+
+- **R-14, Blocker.** §9.1, D-26 and row 28 now run `to_path`, then `require_directory` on the path as given (absolute and existing), then store `Path.resolve()`. Skill paths follow the same order. A relative workspace is refused again, as EC-2 and AC-5 require.
+- **R-15, Blocker.**
+  - `NATIVE_PROCESS_FLAG_PATTERN = ^-[^\s=]*$`, because the r1 `^-` under `re.fullmatch` accepted only "-".
+  - §9.1 now says every pattern is applied with `re.fullmatch`.
+  - The prompt and option-value patterns are spelled out as whole-value patterns (`[^\x00]+`, `[^\x00]*`).
+  - I re-checked every other §9.1 pattern against full-match; each already describes the whole value.
+- **R-16.** Added EC-43 (per-workspace homes grow and are never pruned) as an accepted limitation, with a README sentence. Added A-24, the fresh-home footprint: 976 KB measured from the r1 probe home, with `docs/` 748 KB, `README.md` 112 KB, `logs/` 72 KB and `sessions/` 36 KB. The signed-in footprint is unverified. D-24's runner-up is now one shared home, with its cost (the skills race spans every workspace) and its flip condition. Q-10 covers a bound on growth, default not built (scope rule).
+- **R-17.** "Except EC-42" added to INV-12, AC-3 and AC-19. §13 now requires the redirected home and the workspace to be sibling temporary folders.
+- **R-18.**
+  - INV-5 now says plainly that Grok's id is known only at exit.
+  - Row 43 takes the first record whose `stream.kind` is `session`, before the runner checks; this adds the constant `MUSE_SESSION_STREAM_KIND`.
+  - AC-21 now covers a timed-out `run_muse_thread`.
+  - New D-27 records the rule. Its runner-up is minting Grok ids with the documented `--session-id`, which is unverified together with `--fork-session`.
+- **R-19.** AC-16 now proves the no-op by the copied `SKILL.md` keeping its `st_ino`, because `copytree` copies modification times.
+- **R-20.** Added EC-44: SDK Grok runs ignore `~/.grok` permission rules, hooks and admin policy files. It is an accepted limitation with a README sentence, and Q-11 offers copying them (default no). EC-14 and row 36 map a `Path.home()` `RuntimeError` to `grok.launch_failed` with a next step; the step-1 launcher fallback is skipped in that case.
+- **R-21.** §8.2 and D-11 now say `StrEnum`, and `ProcessLaunchFailure` is re-declared `StrEnum` (row 20, §8.5). Q-9 states its coverage, and A-25 records that `.opencode/` folders may not be covered.
+- **Coordinator request.** §15 opens with "Vendor facts this spec settles". It lists vendor-facts gaps 10 and 13, Muse resume and fork across config folders, the `--name=value` refusal and the -32020 answers, each with its probe. A-20 and A-23 say the spec is authoritative over vendor-facts on those points. vendor-facts.md is not edited.
+
+### Probes
+
+No new probe. A-24 uses the measurement of the r1 probe home: `du` of the scratchpad `grokhome/`, a read-only command.
+
+### Stage E self-check (r3)
+
+- **IDs:** contiguous, none renumbered. INV 1–23, AC 1–21, EC 1–44, FR 1–17, NFR 1–7, D 1–27, T 1–6, W 1–11, A 1–25, Q 1–11 (0 blocking).
+- **Guards:** the new EC-43 and EC-44 are accepted limitations tied to D-24 and Q-10/Q-11.
+- **Coverage:** the new D-27 is cited by INV-5. The new constants (`MUSE_SESSION_STREAM_KIND`, `NATIVE_PROMPT_PATTERN`, `NATIVE_PROCESS_VALUE_PATTERN`, `NATIVE_PROCESS_FLAG_PATTERN`) live in the constants module per row 23 ("the patterns of §9.1").
+- **Budget and contract:** no new file, class or enum, so the §8.4 budget and the §4/§8.5 public names are unchanged.
+- **No stale text:** no stale `^-`, "never lost" or modification-time proof remains. The remaining `(str, Enum)` mentions are explanatory notes, or refer to main's unchanged `FailureCode`.
+
+### Least-sure points after r3
+
+- A-20 and A-23 for provider `meta`.
+- A-19 and A-24: the Grok home after a successful sign-in.
+- A-22: opencode providers that sign in through a plugin.
+- A-25: whether `OPENCODE_DISABLE_PROJECT_CONFIG` covers `.opencode/`.
+- The owner's answers to Q-8 (the Meta name) and Q-9 (the opencode project-config switch).
