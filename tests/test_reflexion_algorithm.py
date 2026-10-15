@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import unittest
 
+from pydantic import BaseModel
+
 from vidbyte import ContextWindow, ReflexionAlgorithm
 from vidbyte.agents.algorithms import ReflexionRuntimeAlgorithm
 from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
@@ -45,6 +47,11 @@ def runner_output_text(response: object) -> str:
 
 def runner_output_metadata(response: object) -> dict:
     return dict(getattr(response, "metadata", {}))
+
+
+class Ticket(BaseModel):
+    title: str
+    urgency: int
 
 
 class ReflexionAlgorithmTests(unittest.IsolatedAsyncioTestCase):
@@ -154,6 +161,35 @@ class ReflexionAlgorithmTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(runner.calls), 1)
         self.assertEqual(result.metadata["reflexion"]["trial_count"], 1)
         self.assertEqual(result.metadata["reflexion"]["reflection_count"], 0)
+
+    async def test_runtime_keeps_validated_structured_output(self) -> None:
+        # BaseAgent raises OutputSchemaViolationError when structured is None, so Reflexion must carry it through.
+        runner = FakeRunner([FakeResponse('{"title": "Card declined", "urgency": 2}')])
+        runtime = AgentRuntime(
+            agent_name="worker",
+            system_prompt="Work.",
+            tools=Tools(),
+            permission_policy=PermissionPolicy(),
+            algorithm=ContextWindow.preset.reflexion,
+            output_schema=Ticket,
+        )
+        context = runtime.build_context(
+            "task",
+            base_context=None,
+            history=(),
+            agent_history=(),
+            agent_metadata={},
+            existing_tool_calls=(),
+        )
+
+        result = await runtime.arun(
+            "task",
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
+            context=context,
+        )
+
+        self.assertEqual(result.structured, Ticket(title="Card declined", urgency=2))
+        self.assertEqual(result.metadata["reflexion"]["trial_count"], 1)
 
     def test_format_failed_attempt_includes_tool_context(self) -> None:
         algorithm = ReflexionAlgorithm()

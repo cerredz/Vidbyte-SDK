@@ -13,6 +13,7 @@ Key Functions / Test Cases:
     - test_single_provider_configured: Validates single active provider fallback.
     - test_empty_or_blank_responses_all_providers: Assures error handling when all endpoints are dead.
     - test_grader_filler_parsing: Assures meta-grader verbatim output matching works correctly.
+    - test_grader_keeps_the_winners_structured_output: Assures the selected trial's output_schema instance is returned.
     - test_select_winner_prefers_faithful_match: Assures the grader's exact choice is not overridden by substring candidates.
     - test_isdone_trials_are_graded_on_their_final_answers: Assures an isDone finish is graded on its final_answer, not its tool-call text.
 Relations:
@@ -28,6 +29,8 @@ import os
 import unittest
 from unittest.mock import MagicMock, patch
 from typing import Any
+
+from pydantic import BaseModel
 
 from vidbyte import ContextWindow, ContextWindowAlgorithm, MultiProviderAgenticGraderAlgorithm
 from vidbyte.agents.algorithms.multi_provider_agentic_grader import MultiProviderAgenticGraderRuntimeAlgorithm
@@ -70,6 +73,13 @@ class FakeRunner:
 async def _invoke_runner_helper(runner: Any, prompt: str, **kwargs: Any) -> Any:
     # Awaits the fake runner's arun implementation for test execution.
     return await runner.arun(prompt, **kwargs)
+
+
+class Ticket(BaseModel):
+    """Small output_schema used to check the grader keeps the winner's validated instance."""
+
+    title: str
+    urgency: int
 
 
 class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
@@ -284,6 +294,48 @@ class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.output, "candidate answer")
         self.assertEqual(result.metadata["multi_provider_agentic_grader"]["grader_decision"]["selected_provider"], "openai")
+
+    @patch("vidbyte.agents.algorithms.multi_provider_agentic_grader.ModalityDetector.create_runner")
+    async def test_grader_keeps_the_winners_structured_output(self, mock_create_runner: MagicMock) -> None:
+        # [Silent Failure] BaseAgent raises OutputSchemaViolationError when structured is None, so the winner's instance must survive.
+        os.environ["OPENAI_API_KEY"] = "fake-openai-key"
+        os.environ["ANTHROPIC_API_KEY"] = "fake-anthropic-key"
+        openai_json = '{"title": "Payment failed", "urgency": 3}'
+        anthropic_json = '{"title": "Card declined", "urgency": 2}'
+        runners = {
+            ("openai", "gpt-4o"): FakeRunner(openai_json),
+            ("anthropic", "claude-sonnet-5"): FakeRunner(anthropic_json),
+            ("openai", "gpt-4.1-mini"): FakeRunner(anthropic_json),
+        }
+        mock_create_runner.side_effect = lambda modality, provider, model, **kwargs: runners[(provider, model)]
+
+        algorithm = MultiProviderAgenticGraderAlgorithm(provider_models={"openai": "gpt-4o", "anthropic": "claude-sonnet-5"}, grader_model="gpt-4.1-mini")
+        runtime = AgentRuntime(
+            agent_name="worker",
+            system_prompt="Work.",
+            tools=Tools(),
+            permission_policy=PermissionPolicy(),
+            config=AgentRuntimeConfig(max_iterations=1),
+            algorithm=ContextWindowAlgorithm(name="multi_provider_agentic_grader", multi_provider_agentic_grader=algorithm),
+            output_schema=Ticket,
+        )
+        context = runtime.build_context(
+            "task",
+            base_context=None,
+            history=(),
+            agent_history=(),
+            agent_metadata={},
+            existing_tool_calls=(),
+        )
+
+        result = await runtime.arun(
+            "task",
+            handle=RunnerHandle(runner=FakeRunner("ignored"), provider="openai", invoke=_invoke_runner_helper, extract_text=lambda r: getattr(r, "text", str(r)), extract_metadata=lambda r: {}),
+            context=context,
+        )
+
+        self.assertEqual(result.metadata["multi_provider_agentic_grader"]["grader_decision"]["selected_provider"], "anthropic")
+        self.assertEqual(result.structured, Ticket(title="Card declined", urgency=2))
 
     async def test_default_execution_with_zero_api_keys(self) -> None:
         # [Hidden Assumption] Default execution with zero API keys: Throws ConfigurationError.
