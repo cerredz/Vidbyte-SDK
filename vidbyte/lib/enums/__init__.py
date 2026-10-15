@@ -77,7 +77,6 @@ from vidbyte.lib.enums.failure import (
     FailureStatus,
     RuleErrorMode,
 )
-from vidbyte.lib.enums.harness_backends import BackendFeature, HarnessBackendName
 from vidbyte.lib.enums.jev import (
     JevBoundaryKind,
     JevClaimKind,
@@ -174,7 +173,6 @@ __all__ = [
     "AgentType",
     "ApprovalOutcome",
     "AssumptionAction",
-    "BackendFeature",
     "BasisType",
     "BudgetPreset",
     "BurdenOfProofVerdict",
@@ -205,7 +203,6 @@ __all__ = [
     "FailureStatus",
     "GitHeadState",
     "GrokPermissionMode",
-    "HarnessBackendName",
     "HypothesisStatus",
     "IdentityVerdict",
     "ImpactLevel",
