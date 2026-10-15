@@ -22,11 +22,11 @@ started: 2026-10-15 02:49
 | S3 implement | done | 2026-10-15 05:59 | 2026-10-15 07:22 | reports/S3-implementer.md | S3_HEAD def85360; draft PR #1084; 89/89 new green; source gate 5262 passed/14 skipped "CI passed"; package gate "CI passed"; lint PASS; budget 18/18 new files; test diff vs d8bcdf14 empty |
 | S4 adversarial review | done | 2026-10-15 07:31 | 2026-10-15 08:37 | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES — confirmed 1 Blocker / 10 Major / 14 Minor; refuted 2 partial; downgraded 1 |
 | S5 repair loop | done | 2026-10-15 09:20 | 2026-10-15 11:31 | reports/S5-repair-1.md, S5-repair-2.md | converged in 2/8 iterations @149fea25; R-1..R-13, R-15..R-18, R-21, R-23, R-26..R-28 fixed; follow-ups R-14, R-19, R-20, R-22, R-24, R-25, R-29 open by design; orchestrator gate @149fea25: source 5284 passed/14 skipped "CI passed", package "CI passed", lint PASS |
-| S5 re-review | running (round 2) | 2026-10-15 10:03 | | reports/S5-rereview.md (round 1: 2 Major → R-26, R-27) | |
+| S5 re-review | done | 2026-10-15 10:03 | 2026-10-15 11:52 | reports/S5-rereview.md, S5-rereview-verifier.md, S5-rereview-2.md | round 1: 2 Major (R-26, R-27, fixed in iter 2); round 2: SOUND, 0 Blocker / 0 Major / 2 Minor |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 (both SOUND WITH FIXES; R-1..R-23 all dispositioned in §16) · S5 repair iterations: 2/8 · S5 re-review rounds: 2/2 (round 2 running; last allowed)
+- S1 review rounds: 2/2 (both SOUND WITH FIXES; R-1..R-23 all dispositioned in §16) · S5 repair iterations: 2/8 · S5 re-review rounds: 2/2 (round 2 SOUND)
 
 ## Decisions the orchestrator made
 - 2026-10-15 02:49 — Unset the upstream of `feat/infinite-memory-agent` (git worktree add had set it to track origin/main) — a bare `git push` could otherwise target main; agents push with `git push -u origin feat/infinite-memory-agent`.
@@ -53,6 +53,8 @@ started: 2026-10-15 02:49
 - 2026-10-15 10:03 — Final re-review FOCUS includes two possible regressions S5 repair 1 itself reported (not in review.md): (a) R-7's switch to `LocalFileSystemBackend.copy` (`shutil.copy2`) preserves a read-only seed's mode, so a second setup over the same workspace raises PermissionError; (b) a multi-file memory write (root `remember` with `supersedes`, or `write_note` with a new description) can be left half-done when a lone surrogate fails on a later file. Routed to the re-reviewer + verifier rather than straight to repair, per the playbook (new findings go through a scoped verifier).
 
 - 2026-10-15 10:48 — Re-review round 1 → scoped verifier: confirmed R-26 (Major, regression from R-7 @29760f65: `shutil.copy2` keeps a read-only seed's mode, second build over the same memory/ raises PermissionError; INV-21, §9.2) and R-27 (Major, a refused two-file write leaves the first file written; INV-19/20/32); R-28 Minor trivial (record the repair's new rules in spec §17; stale runtimes.py bullet); R-29 Minor follow-up (Windows-lock part of R-C2). Observations A (two `pair_finished` under an injected fault) and B (R-7 model strictness) adjudicated, not filed. Granted: regression tests for R-26 and R-27 by the S2 test author (red at HEAD) before repair iteration 2 — a regression no test caught should not be fixable silently a second time. Granted: S5 repair 2 may add an "Implementation deviations (S5)" list to spec §17 and fix the stale bullet (R-28) — the same narrow §17 permission the S3 implementer template grants; no contract text changes.
+
+- 2026-10-15 11:53 — Re-review round 2 (last): SOUND. Two Minors, no verifier needed (Minors pass through): R-C1 trivial docs — spec §17 S5 bullet 2 (spec.md:1246) and vidbyte/agents/infinite/README.md:69 falsely say the model check matches `BaseAgent`/"the SDK's other agents" (a plain BaseAgent runs names the settings refuse); §17 omits R-2's casefold protected-name rule. R-C2 follow-up — the R-27 refusal is raw `UnicodeEncodeError` text (no field named; nothing written; no surrogate leak). Decision: run a docs-only repair iteration 3 for R-C1 (a false sentence must not ship in a README; no re-review needed for a docs-only change and the re-review cap is reached); leave R-C2 as a follow-up. The repair agent records both in review.md as R-30 (trivial) and R-31 (follow-up).
 
 ## User replies (verbatim)
 - (none yet)
