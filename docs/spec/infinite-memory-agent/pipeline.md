@@ -23,13 +23,15 @@ started: 2026-10-15 02:49
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 1/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 (round 2 running: scoped to §8, §8.5, §9, §12 and dependents) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-15 02:49 — Unset the upstream of `feat/infinite-memory-agent` (git worktree add had set it to track origin/main) — a bare `git push` could otherwise target main; agents push with `git push -u origin feat/infinite-memory-agent`.
 - 2026-10-15 02:49 — Scope rule for the spec: the user's explicit choices (request.md §C "Key decisions") are REQUIRED; the assistant's v1-cut suggestions (request.md §C "The v1 cut …") are in scope only in their simplest form and may be simplified or deferred with a stated reason, because the user's last instruction is "try to keep implementation of all features … very simple and elegant, dont overengineer anthing". Everything outside the v1 cut (lists I, J, K, consolidation, read tracking, final run verifier, multi-round verification) is a non-goal.
 
 - 2026-10-15 03:58 — Resumed the S1 author with the reviewer's findings by path (reports/S1-spec-review.md lines 1–266) plus a summary, instead of pasting the 26 KB block inline — same verbatim content on disk, keeps the orchestrator context lean.
+
+- 2026-10-15 04:20 — Launched S1 review round 2 (the last allowed): r2 accepted all 15 round-1 findings but changed §8 (D-28 history trimming, D-29 internal launch tool), §8.5 (extras from live catalog), §9 (caps) and the shape of §12 (row 33, P4 order), which the playbook says requires a scoped re-review.
 
 ## User replies (verbatim)
 - (none yet)
@@ -55,3 +57,4 @@ started: 2026-10-15 02:49
 - Lint runs pinned mypy as S009 (ceiling 350, `lint/mypy.ini`, `disallow_any_generics`, `check_untyped_defs`); S041 = 0 (`open()` needs `encoding=`), S047 = 0 (no `open()` inside `async def`), S004 = 1 (naive datetime). — *source:* S1 reviewer
 - `ToolSpec(metadata={"internal": True})` exempts a tool from `tool_timeout_seconds`, `result_max_chars`, tool budgets and `allowed_tools` (runtime.py:1405-1414, 1469-1476, 1780-1783, 1926-1931); `JevBulkWorkTool` uses it. — *source:* S1 reviewer
 - One agent's tool calls run sequentially (runtime.py:607-608); `ParallelPipeline.run` uses `asyncio.gather` without `return_exceptions` (parallel.py:43); MCP tools from `with_mcp_server` land in the agent's own catalog (mixins.py:371-382), not `settings.tools`; `AgentForker._clone_tool(tool, None, None)` returns ordinary tools unchanged (fork.py:199-216). — *source:* S1 reviewer
+- r2 facts: every agent trims its own history via `MessageHistoryCompactionMiddleware.trim_with_provider_boundaries(max_tokens=INFINITE_HISTORY_MAX_TOKENS)` (60,000); `INFINITE_DEFAULT_MAX_ITERATIONS` = 100; `launch_subagent` is `metadata={"internal": True}`; extras come from the root's live catalog at run start minus reserved/internal tools; run deadline ends the loop normally with stop reason `timeout` (runtime.py:2015-2018); `AgentLoopSettings.compaction_trigger_tokens/target_tokens` are stored but never acted on. — *source:* S1 author r2
