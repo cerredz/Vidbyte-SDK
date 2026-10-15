@@ -83,3 +83,27 @@ Because S3 may not edit tests, the tooling was exercised without the feature:
 6. §9.2 says Muse serve runs "without `META_API_KEY`", but D-13's `{**os.environ, **overlay}` lets a native serve inherit a caller's own `META_API_KEY`. Only WSL mode (where `WSLENV` decides) is tested for absence; the native test checks that serve never gets `api_key`.
 7. EC-30 says "exit 127 or 'No such file or directory'"; the stand-in reproduces WSL's real `execvpe(...) failed: No such file or directory` text with exit 1.
 8. INV-15 rule 2 is stated over `ast.Constant`, so `-1` (a unary minus on 1) passes it; noted in the test's KNOWN EDGE CASES.
+
+## Addendum: spec r4 (commit 90265f78)
+
+The spec author resolved defects 1, 3, 4 and 6 above in r4 (§16 rows S2-1 to S2-8, EC-45, the D-13 exception, §12.3 rows 27, 30, 42 to 44). Four tests follow from r4, all red for the same reason as the rest of the pack (`ModuleNotFoundError: No module named 'vidbyte.lib.dataclasses.native_threads'` at fixture setup):
+
+| Test | Spec | Catches |
+|---|---|---|
+| `test_harness_threads_threads.py::test_muse_fork_answered_with_its_source_is_protocol_mismatch_before_any_exec` | EC-45, INV-6, INV-11 | a `session/fork` answer equal to the source id accepted, or decided only after an exec ran; `thread_id` must be the source id |
+| `test_harness_threads_threads.py::test_muse_continue_answered_on_another_stream_is_thread_not_found` | EC-45, INV-11, INV-5 | a Muse exec answering on another session stream returned as the caller's thread; `thread_id` must be the stream id Muse answered |
+| `test_harness_threads_credentials.py::test_muse_serve_never_sees_a_key_even_the_callers_own` | AC-3, INV-3, §9.2, D-13 exception | a native serve inheriting the caller's own `META_API_KEY` (no `env_remove`); every exec still gets `api_key` |
+| `test_harness_threads_runner.py::test_env_remove_drops_an_inherited_name_before_the_overlay` | D-13 exception, rows 27, 30 | `env_remove` ignored, applied after the overlay, or written into `os.environ` |
+
+Stand-in change: Muse exec gained `mode=continue_other_id` (answers an existing `--session-id` on a new stream, like the Grok and opencode modes). The fork case uses the existing `serve_mode=fork_returns_source`. Both modes were driven directly with the §9.2 argv, and the `env_remove` test passed against the branch's current `CliRunner` through a scratch adapter that applies `env_remove` itself (9 passed, 1 POSIX skip).
+
+Red lines:
+```
+4 errors in 1.04s                                  (the four new tests)
+test_harness_threads_threads.py: 20 errors in 1.32s
+test_harness_threads_credentials.py: 17 errors in 1.25s
+test_harness_threads_runner.py: 1 skipped, 10 errors in 1.11s
+pack:  7 failed, 2 skipped, 388 errors in 10.97s
+suite: 7 failed, 5173 passed, 16 skipped, 388 errors in 61.54s (0:01:01)
+```
+Lint: exit 0, no finding in the pack. Commits: `e3dcb214` (tests, stand-in mode, test plan), `5a1813da` (AC-3 Proof cell, the only spec edit). The existing WSL tests already matched r4's `WSLENV` wording (caller's value first, names in any order; serve without `META_API_KEY`), so they were not changed.
