@@ -80,6 +80,10 @@ Reusable multi-agent reasoning strategies packaged as ready-to-use agent behavio
 
 The invariants an agent's configuration must satisfy before it is allowed to run. This spans both the shape a structured output must conform to and the minimum acceptable settings below which a configuration is considered actively misconfigured rather than merely unusual. The folder is small, but its effect is outsized: it turns a bad configuration into an error raised at construction time instead of a confusing failure partway through a run. Anyone adding a new class of agent configuration should consider whether it needs a floor defined here.
 
+##### `vidbyte/agents/infinite/`
+
+A delegating agent for long tasks of any kind, built to treat its own context window as scarce. Its root hands work to fresh subagents that run in pairs, a generator that does one task and a verifier that checks and fixes it, and gets back only a short, capped result card per pair. Every agent in the tree shares one memory folder guarded by fixed limits on files, tokens, entry size, and per-agent writes, and a pair's memory entries are saved only after its verifier gives a verdict. Each run is journaled, so an interrupted run resumes without redoing finished pairs. Its records, enums, constants, and prompt text live lower in the shared substrate, and its preset tools in the toolsets folder.
+
 ##### `vidbyte/agents/jev/`
 
 The opinionated JEV agent: its facade, its single public settings object, and a dedicated runtime that runs named, Jev-backed preflights before handing off to the ordinary linear loop. The preflight gate asks every enabled fixed-question preset's questions in one Jev request and decides whether the generative agent runs at all. A clarification agent turns an unclear request into structured questions for the user, and a tool selector narrows the tool catalog before the loop starts. One response writer is the only place a run's JEV outcomes are recorded. The question text, records, enums, and constants this agent uses deliberately live lower in the shared substrate; see [JEV File Locations](#jev-file-locations) for every file.
@@ -346,7 +350,7 @@ The authorization boundary that all tool execution passes through: the policy mo
 
 ##### `vidbyte/tools/toolsets/`
 
-Named, pre-assembled bundles of tools that ship together for a particular use case, so a caller can attach a coherent, related set of capabilities in a single call rather than assembling them one at a time. It currently holds one such bundle, assembled for a specific paradigm shipped elsewhere in the package. A new toolset is worth adding whenever the same combination of individual tools keeps being assembled by hand across more than one place. This folder is about convenience and consistency rather than introducing any new tool capability itself.
+Named, pre-assembled bundles of tools that ship together for a particular use case, so a caller can attach a coherent, related set of capabilities in a single call rather than assembling them one at a time. It holds three such bundles: a minimal set assembled for a paradigm shipped elsewhere in the package, the coding agent's shell, file, search, and web-fetch tools over one project folder, and the delegating memory agent's shell over the project plus search and read tools over its memory folder. A new toolset is worth adding whenever the same combination of individual tools keeps being assembled by hand across more than one place. This folder is about convenience and consistency rather than introducing any new tool capability itself.
 
 #### `vidbyte/trace/`
 

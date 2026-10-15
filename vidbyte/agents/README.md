@@ -138,6 +138,38 @@ The agent also keeps its own notes file, `<root_dir>/.vidbyte/coding-agent/progr
 - When `AGENTS.md` is loaded and you pass `context_manager`, tools bound to your manager object, such as `ContextWindowFactory` tools, write to a manager the agent no longer renders.
 - On Windows, `bash` needs Git for Windows, and a timed-out or cancelled command is not stopped (only Git's launcher is killed), so it may keep running after the call returns.
 
+## InfiniteMemory Agent
+
+`InfiniteMemoryAgent` takes one long task of any kind and treats its own context as scarce: the root delegates the work to fresh subagent pairs and keeps what matters in one shared workspace folder.
+
+```python
+from vidbyte import InfiniteMemoryAgent, InfiniteMemoryAgentSettings, InfiniteWorkspaceSettings
+
+# brief.md is an existing file next to this script.
+agent = InfiniteMemoryAgent(
+    InfiniteMemoryAgentSettings(
+        name="analyst",
+        system_prompt="You research markets and report sourced findings.",
+        provider="openai",
+        model_name="gpt-4.1",
+        root_dir=".",
+        workspace=InfiniteWorkspaceSettings(root="memory", seed_files=("brief.md",)),
+    )
+)
+
+try:
+    reply = agent.run("Compare the list prices of our five competitors.")
+except KeyboardInterrupt:
+    reply = agent.resume()  # continues that run; finished pairs are not run again
+print(reply.content)        # the root agent's final answer
+```
+
+Every agent holds `bash` in `root_dir`, `grep` and `read_lines` in the workspace, and the memory tools `remember` and `write_note` (plus `edit_file` under the FULL preset). The root calls `launch_subagent` with task cards; each card runs as a fresh generator followed by a fresh verifier that checks and fixes its work, up to `max_parallel` pairs at once and `max_depth` levels deep, and the parent gets back one capped result card per pair. The root holds every tool you give it, including `add_tool` and MCP tools; a pair gets only the extras its card names.
+
+The workspace holds `entries.jsonl` (short typed memory entries, committed for a pair only after its verifier's verdict), `superseded.jsonl`, `files.jsonl` (one description per note), the notes, the seeds under `seed/`, and one journal per run under `.runs/`. Every tool write is checked against the file count, total tokens, and per-note tokens recounted from disk, and every agent sees a map of the workspace at the top of its context; each agent's history is trimmed past 60,000 tokens while the task, rules, and map stay.
+
+`resume()` and `aresume()` continue the newest unfinished run, or the one named, from its journal: finished pairs are replayed from their recorded cards and interrupted ones run again. `Session` persistence and `fork()` are not supported. See `vidbyte/agents/infinite/README.md` for the layout, the limits, and the known edge cases.
+
 ## Model Fallback
 
 An agent can declare an ordered chain of backup models. Array index sets precedence:
@@ -293,6 +325,7 @@ credential and limits.
 - `runtimes/`: linear, search, and actor-model runtime components.
 - `handoff.py`: structured handoff generation from a completed agent run.
 - `coding.py`: `CodingAgent`, a `BaseAgent` preloaded with bash, read, write, edit, glob, grep, and one web-fetch tool over one root folder; its checks live in `CodingAgentSettings` and its tools in `CodingAgentTools`.
+- `infinite/`: `InfiniteMemoryAgent`, a root agent that delegates work to generator and verifier subagent pairs through `launch_subagent` and keeps memory in one guarded workspace folder; resumable from its run journal.
 - `coding_context/`: `CodingContextWindow` and one loader per section (`AgentsMdLoader`), which build the context a `CodingAgent` shows after its system prompt.
 - `skills/`: `SkillLoader` and one resolver per source, the agent-agnostic loader that turns declarative skill entries into `SkillDocument`s for `JevAgent`'s skill preload.
 - `multi/`: ledger-driven manager/worker orchestration and transfer controls.
