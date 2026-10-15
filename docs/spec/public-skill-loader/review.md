@@ -1,0 +1,74 @@
+# Adversarial review: Public skill loader: resolve every #904 skill source without JevAgent (SDK 0.3.1)
+
+Diff reviewed: `c9d31a7f...c691c176` · Lenses: conformance, conventions, engineering · Verifier: reports/S4-findings-verifier.md
+
+## Verdict
+MERGEABLE AFTER FIXES — The production change is correct, and JevAgent is untouched. One confirmed Major remains: the release test pins `0.3.1` permanently, so the next routine version bump will turn 8 cases red. Fixing it needs a spec-text change and an approved test edit, not a code change.
+
+## Confirmed findings (must fix) — 1
+| ID | Severity | Lens | Where (path:line) | Finding (claim) | Evidence | Smallest fix | Status |
+|---|---|---|---|---|---|---|---|
+| R-1 | Major | engineering (R-E1) | `tests/features/public_skill_loader/test_public_skill_loader_release.py:35`, `:113` | The release test compares all eight version places with the literal `RELEASE_VERSION = "0.3.1"`. So the next correct version bump fails 8 cases in a skill-loader pack the release author never touched. The obvious way back to green, editing or deleting the test, also removes the repo's only check that the eight literals agree. A feature pack is meant to pin a durable behavior, and "the version is 0.3.1" stops being true by design. | **Simulated the next bump.** I made a `git archive c691c176` copy in scratch and moved the eight literals to `0.3.2`, the way `a7ed9cde` moved them to `0.3.0`. Result: `8 failed in 0.38s`, each `'0.3.2' == '0.3.1'`.<br>**Precedent.** None of the last three bumps (`90f36272`, `29fbfd28`, `a7ed9cde`) touched a version test. The one test file in `29fbfd28` is `tests/test_codex_tools.py`, and none of its added lines mention a version. At base, `git grep -E '__version__ *==\|RELEASE_VERSION\|"0\.[23]\.[0-9]"' c9d31a7f -- tests` finds nothing.<br>**The durable form works.** Each place compared with `pyproject_version()`, plus a floor of `(0, 3, 1)`: on the bumped copy, `8 passed`. With `llms.txt` left at 0.3.1, `1 failed, 7 passed`. | **Fix requires a test edit. Does the test contradict a spec ID? No.** AC-11 and INV-16 name `0.3.1` literally, and the test asserts exactly that. So the repair loop cannot make this edit on its own authority.<br>**Route:**<br>(1) **Spec-text fix: AC-11's Proof column.** Change it to: "test: each of the eight places equals `pyproject.toml`'s version, which is at least 0.3.1 (EC-29); the contract's `version` is C016's". Nothing is lost at this head: `--check` compares the committed contract's `"version": "0.3.1"` with pyproject's (`scripts/generate-sdk-public-api.py:95`), so the two checks together still prove all nine places read 0.3.1.<br>(2) **Then the approved test edit.** At `:34-35` replace the literal with a floor, `(0, 3, 1)`. At `:113` assert `read(monkeypatch) == pyproject_version(monkeypatch)` and that the floor holds; `pyproject_version` already exists at `:54`. Update the header's PURPOSE (`:3`) and COMMON MODIFICATION PATTERNS (`:7`).<br>**Alternative:** the orchestrator waives R-1 to a follow-up for the next release PR. Header `:7` already says "The next bump changes RELEASE_VERSION". | open |
+
+## Refuted or downgraded by the verifier — 1
+| ID | Original severity | Why refuted / downgraded (evidence) |
+|---|---|---|
+| R-2 (conformance R-C1) | Major | **Downgraded to Minor (spec-text clarity).**<br>**The gap is real.** My probe, run from an empty folder: `GetItemOnly([inl])` gives `ConfigurationError {'entries_type': 'GetItemOnly'}` from `SkillLoader`, but the Jev door accepts it. An `__iter__` that raises `TypeError`, or one that returns a non-iterator, lets a raw `TypeError` escape from `SkillLoader`, while the Jev door raises `ConfigurationError details={}`.<br>**It is not a code defect.**<br>(a) `loader.py:45` is the exact expression prescribed by §8.5 and row 2(b). §12.4 forbids any `raise`, or any logic beyond that one expression, in `__init__`.<br>(b) Every argument the public annotation admits passes the guard. `mypy --strict` on a scratch consumer rejects both odd shapes, and even a generator, with `[arg-type] … expected "Sequence[SkillEntry \| SkillDocument]"`, while `list[SkillEntry]` and a tuple type-check. A `__getitem__`-only class registered with `Sequence.register` is accepted (`('InlineSkill',)`). The CLI collects a list and type-checks with `mypy --strict` (D-14), so neither corner can reach it.<br>(c) A `TypeError` from iterating the caller's own object is the caller's programming error. The spec lets such errors propagate unchanged (INV-6, EC-18). The Jev door handles it differently only for objects outside INV-18's scope (tuples and lists of entries).<br>**What remains is wording.** "Any iterable" in INV-2, §9.2 row 1, and the S1 consumer answer 1 is broader than D-14 and §8.5 define it, and §17 does not record S3's narrower reading. No human reviewer of the public API would ask for different behavior; at most they would ask for the sentence to be made exact. See the Minor table for the fix. |
+
+## Minor findings (fix if trivial, otherwise follow-ups)
+| ID | Where | Finding | Status |
+|---|---|---|---|
+| R-2 | spec.md INV-2 (`:163`), §9.2 row 1 (`:430`), §17; `reports/S1-spec-author.md` "Answers to consumer requirements" item 1 | (conformance R-C1, downgraded.) "Any iterable except str or bytes is accepted … a violation raises ConfigurationError" is broader than the guard §8.5 prescribes.<br>**Spec-text fix (both places the CLI resumes from):** in INV-2 and §9.2 row 1, say "any `collections.abc.Iterable` except `str` or `bytes`; every `Sequence`, including one registered with `Sequence.register`, qualifies. An object that iterates only through `__getitem__` and is not registered is rejected as `entries_type`. An exception raised while iterating the caller's argument propagates unchanged". Put the same sentence in S1 answer 1, and record the reading in §17 "Implementation deviations (S3)".<br>**Optional:** the same clause in `loader.py:9` KNOWN EDGE CASES.<br>**Code alternative (not smaller):** fall back to the raw value when `tuple(entries)` raises `TypeError`. That needs §12.4 and row 2(b) changed first, and it would hide a caller's own `TypeError`. | open · trivial (spec-text; batch with R-1's AC-11 edit in one spec-author pass) |
+| R-3 | `vidbyte/lib/dataclasses/skills.py:14` (COMMON MODIFICATION PATTERNS), `:258-261` (`@intent`) | (conventions R-V1.) No maintainer note says the unique-name rule has a twin in `JevAlignmentSettings._normalized_skills` (`vidbyte/agents/jev/settings.py:89-122`) that must change with it. Checked: a grep for `_normalized_skills\|jev/settings` over `skills.py`, `loader.py`, and the skills README finds nothing. Fix: add one sentence to `:14` naming the twin, NG-10 and Q-9, and the both-doors test that fails on drift. This is a docstring only and touches nothing under `vidbyte/agents/jev/`. | open · trivial |
+| R-4 | `vidbyte/agents/skills/loader.py:9`; `vidbyte/agents/skills/README.md:23`, `:48` | (conventions R-V4.) Lines this PR edited still say "settings order", "on every run", "on the next run", and "later runs", which are JevAgent's terms; a root-door caller has only `load()`. The phrases were already there at base, and AC-16 does not pin them. Fix: "input order (settings order, for JevAgent)", "on every load", "on the next `load()` (for JevAgent, its next run)". Leave the comments in the bodies of `load()` and `documents()` alone (row 2(c)). | open · trivial |
+| R-5 | `tests/features/public_skill_loader/test_public_skill_loader_docs.py:46` | (engineering R-E2.) `split(heading, 1)[-1]` returns the whole map when the heading is gone. Probe: with the heading kept, a reinserted "only consumer" clause is caught (`caught=True`). With the heading at level 4, or renamed to `skill_sources/`, the guard passes and the stale clause is missed: the rule then reads the map's preamble (`caught=False`). Fix: `head, found, tail = text.partition(heading); return tail.split("\n#", 1)[0] if found else ""`. This is a test edit, and no spec ID is contradicted (the claim comes from the test plan, not AC-16), so it is outside the repair loop's rights without approval. | open · follow-up |
+| R-6 | `tests/features/public_skill_loader/*.py` (for example `conftest.py:106`, `test_public_skill_loader_boundary.py:45-46`) | (conventions R-V2.) 69 comment lines are wider than 72 columns. By file: conftest 8, acceptance 11, both_doors 9, boundary 13, contract 9, docs 10, release 3, security 6. The production lines this PR adds have 0. The jev pack carries 198, so the owner has not enforced the rule in tests. Fix: rewrap comments only. These are test-file edits. | open · follow-up |
+| R-7 | `tests/features/public_skill_loader/` | (conventions R-V3.) The pack has `FEATURE.md` but no `README.md`, so the `@claude` review workflow has no Notes for agents to append to. The precedent is mixed: 9 of 17 packs have a README, and the 8 without are the seven `jev_*` packs plus this one, which copied `jev_skills_preload`. Fix: a short README modeled on `tests/features/coding_agent/README.md`, or a note in the S2 report that the pack follows the jev precedent. | open · follow-up |
+
+## What the implementation gets right (so nobody "fixes" it)
+- **The public door works end to end.** The §4 snippet, extracted from the spec and run from an empty folder, prints exactly `house-review loaded 22 bytes` / `pdf not_found False` / `rejected: ['house-review']`. The verifier ran it, and so did all three lenses.
+  - `vidbyte.SkillLoader`, `SkillResolution`, and `ConfigurationError` are the defining-module objects (`is`). There is exactly one `ConfigurationError` class (`vidbyte/lib/errors/base.py:284`).
+  - The contract records names only, so the loader's attributes stay off the contract (NG-15).
+- **The contract was regenerated correctly.**
+  - It adds exactly three names (639 → 642), removes nothing, and reads `0.3.1`.
+  - It was committed alone in `46c074c3` (1 file), directly on the commit it stamps (`56541481`), and no later commit touches the generator's inputs.
+  - `--check` reports it current, and C016 is clean.
+  - Remote CI `38811100780` (source and package) and Static policy `38811104841` both passed on `46c074c3`.
+- **The argument is converted once, and memory is built from that conversion.** `loader.py:45` makes the tuple, and `loader.py:49` builds the memory from `self.entries`. So a generator, a list the caller clears later, and a dict keyed by entries all resolve. Do not point the memory comprehension back at the raw argument (mutants M1 and M14 are killed).
+- **`SkillLoader.__init__` is the thin adapter the field guide asks for** (`strict-config-dataclasses.md`). It contains no `raise`, makes one inline conversion that keeps mypy's narrowing (clean under `lint/mypy.ini` and `--strict`), and has its narration comment updated in the same commit.
+  - Every `Sequence` passes the guard, including one registered through `Sequence.register` with only `__getitem__`.
+  - A strict consumer passing `list[SkillEntry]` type-checks (D-14's purpose).
+- **`SkillEntries` is placed and shaped as AGENTS.md §4 and the Placement Rules require.**
+  - It is frozen and slotted in `vidbyte/lib/dataclasses/skills.py`, directly above `SkillResolution`.
+  - All checks are in `__post_init__`, which calls no helper, so the call chain stays one level deep.
+  - Its module imports only the standard library and `vidbyte.lib` (A006 stays 34).
+  - It is exported only in its module's `__all__`: not from `vidbyte.lib.dataclasses`, `vidbyte.agents`, `vidbyte.agents.skills` (still `[]`), or the root.
+- **The checks run in the specified order and never echo a value.** The order is: tuple, then the first non-entry by 0-based position, then repeated names (sorted, each listed once, in one `Counter` pass).
+  - Every message names `SkillLoader`.
+  - `details` carries only a type name, a position, or names, as in the `CodingAgentSettings` precedent.
+  - Probes with fake tokens and keys, in the argument, in an element, and in credentialed entries with a repeated name, found no marker in `str`, `repr`, `.message`, `.details`, `.args`, `__cause__`, or `__context__`. None appeared in the reprs of the record or the loader either.
+- **The name rule also closes the crash it was meant to close.** The default `group_key` is the entry itself, and the single-entry resolvers unpack `(entry,) = entries`. So only equal entries could share such a group, and equal entries have equal names. Unique names also make the memory dict, keyed by entry equality, unambiguous.
+- **Both doors agree (INV-18).**
+  - A 6,000-case seeded sweep (conformance) found 0 disagreements, and so did the pack's own 300-case sweep.
+  - The same entry twice gives `{'names': ['pdf']}` from both doors.
+  - Names compare exactly: `pdf`, `PDF`, `pdf `, and the two Unicode forms of `café` are distinct.
+- **`load()` is byte-identical and holds up for an outside caller.**
+  - It needs no running loop: a new `httpx.AsyncClient` and a new `asyncio.timeout` are made per call.
+  - Two `asyncio.run(loader.load())` calls return the same remembered objects, and overlapping `gather` loads agree.
+  - Cancellation propagates and nothing is remembered.
+  - Construction is O(n): 100,000 entries are accepted in 18.7 ms.
+  - Paths with NUL or invalid characters come back as `NOT_FOUND` or `NOT_INSTALLED` data, not as exceptions.
+  - Every resolver URL field is `quote(..., safe='')` encoded.
+- **JevAgent and the boundaries are untouched.**
+  - `git diff` over `vidbyte/agents/jev/` and over `lint/` is empty.
+  - The production diff is exactly the 15 files in §12.3.
+  - The Jev area suite passes unedited: verifier run `493 passed, 1 skipped` with the new pack.
+  - There is no suppression in production code, and no baseline was raised. The verifier's `python lint/run.py` gives `SDK-LINT: PASS`.
+  - The root import order has no hazard, because the root already reached the loader through JEV at base (`alignment/skills.py:37`).
+- **Version and conventions are clean.**
+  - All nine INV-16 places read `0.3.1`, and none reads `0.3.0` outside `docs/` except a test comment.
+  - Every new production comment is 72 columns or narrower, and `# @intent skill-entries-unique-names` sits on its own first line.
+  - Edited headers keep every A001 field, the `REPO_MAP.md` entry stays general intent, both READMEs are under A009, and `## Notes for agents` is still last.
+  - Committed blobs are LF with no generated files.
+  - Every work commit carries its spec IDs and the trailer.
+- **The tests can fail.** Five mutants (conformance) and fifteen (engineering), each applied alone in memory, all turn the pack red: positions, check order, case folding, a missing name check, memory from the raw argument, a dropped str or bytes guard, `Sequence` instead of `Iterable`, a value echoed in `details`, I/O at construction, an empty collection rejected, and others.
