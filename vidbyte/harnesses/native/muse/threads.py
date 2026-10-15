@@ -3,10 +3,10 @@
 PURPOSE: Defines the three public Muse Code thread functions (MuseThreads: run_muse_thread, continue_muse_thread, fork_muse_thread) and the flow of one call (MuseThreadRun): find muse (directly or through WSL), prepare a private config folder with the caller's skills, check or fork the thread over one batch `muse serve` exchange, run `muse exec --json` headless once with the caller's key, and read its records.
 ROLE IN CODEBASE: The functions are bound as module names in vidbyte/harnesses/native/muse/__init__.py and re-exported from vidbyte.harnesses.native. MuseThreadRun uses MuseLauncher (muse/launcher.py), NativeSkillFolders and NativeErrorFactory from hostkit, CliArgv and CliRunner from vidbyte.lib.process, and MuseWire and MuseExecOutput (muse/wire.py).
 ARCHITECTURE NOTE: Every call gets a fresh temp folder as XDG_CONFIG_HOME, holding only the caller's skills, and MUSE_AUTH_PATH points at a file in it that is never created, so no saved Muse login or setting is read and the key reaches muse only as META_API_KEY in the exec child's environment. `muse serve` needs no credential and gets none, not even a META_API_KEY of the caller's own (env_remove). In WSL mode every child carries the call's peer mark, and a timeout or a cancellation reaps the marked processes inside the distro before the call ends. The module holds no literals of its own (spec INV-15): flags are MuseFlag members and every other value comes from vidbyte/lib/constants/native_threads.py.
-FUNCTION INVENTORY: MuseThreads.run_muse_thread, continue_muse_thread and fork_muse_thread are the public functions; MuseThreads._call is the one guarded try they share. MuseThreadRun.execute is the narrated main function of one call; _prepare_config creates the private config folder and its skills; _overlay builds the environment shared by serve and exec; _serve_invocation and _exec_invocation build the two children; _run runs one child, reaps it on a timeout or cancellation and reports launch failures.
+FUNCTION INVENTORY: MuseThreads.run_muse_thread, continue_muse_thread and fork_muse_thread are the public functions; MuseThreads._call is the one guarded try they share. MuseThreadRun.execute is the narrated main function of one call; _prepare_config creates the private config folder and its skills; _discard removes the folder of a preparation whose caller was cancelled; _overlay builds the environment shared by serve and exec; _serve_invocation and _exec_invocation build the two children; _run runs one child, reaps it on a timeout or cancellation and reports launch failures.
 COMMON MODIFICATION PATTERNS: A new Muse option is a MuseThreadConfig field (vidbyte/lib/dataclasses/native_threads.py), a MuseFlag member and one CliOption in _exec_invocation. A new failure condition goes in MuseExecOutput.read or MuseWire.read_answer.
 WHAT NOT TO DO IN THIS FILE: 1. Do not put the key on argv or in a file, and do not give it to `muse serve`. 2. Do not start exec for a continue or fork whose serve answer failed; `muse exec --session-id <unknown>` would silently create a thread. 3. Do not give the temp folder a fixed location; tempfile.mkdtemp picks it (S054).
-KNOWN EDGE CASES: The temp folder is removed in a finally block, after the reap, so a cancelled call still cleans up before CancelledError propagates (spec INV-9). On Windows the temp folder and the workspace reach muse in their /mnt form; a workspace with no /mnt form is refused naming workspace before anything is written. A fork that fails after session/fork answered carries the fork's new id (spec INV-5).
+KNOWN EDGE CASES: The temp folder is removed in a finally block, after the reap, so a cancelled call still cleans up before CancelledError propagates (spec INV-9); a cancel that lands while the folder is still being prepared waits for that work, then removes it. On Windows the temp folder and the workspace reach muse in their /mnt form; a workspace with no /mnt form is refused naming workspace before anything is written. A fork that fails after session/fork answered carries the fork's new id (spec INV-5).
 RELATED DOCS: vidbyte/harnesses/README.md
 TESTS: tests/features/harness_threads/
 """
@@ -102,8 +102,16 @@ class MuseThreadRun:
         # @intent muse-key-and-skills-through-a-private-config-home
         # A fresh private config folder holds only the caller's skills,
         # so muse reads no saved login or setting; it is removed when
-        # the call ends, however it ends.
-        folder = await asyncio.to_thread(MuseThreadRun._prepare_config, request, errors)
+        # the call ends, however it ends. Cancelling the await does not
+        # stop the worker thread that fills it, so a cancel that lands
+        # mid-way waits for that work and removes the folder before it
+        # goes on (spec INV-9).
+        preparing = asyncio.ensure_future(asyncio.to_thread(MuseThreadRun._prepare_config, request, errors))
+        try:
+            folder = await asyncio.shield(preparing)
+        except asyncio.CancelledError:
+            await MuseThreadRun._discard(preparing)
+            raise
         try:
             # One mark for every child of this call, so a reap finds
             # exactly this call's processes inside WSL.
@@ -150,6 +158,17 @@ class MuseThreadRun:
             detail = native_threads.MUSE_CONFIG_FAILURE_DETAIL.format(error_type=type(exc).__name__, reason=exc.strerror or type(exc).__name__)
             raise errors.failure(NativeThreadProblem.LAUNCH_FAILED, request=request, searched=detail) from exc
         return folder
+
+    @staticmethod
+    async def _discard(preparing: asyncio.Future[Path]) -> None:
+        # Waits for a preparation whose caller was cancelled, then
+        # removes the folder it made. A preparation that failed has
+        # already removed its own folder, and a removal that fails
+        # leaves it behind (spec EC-34).
+        await asyncio.wait({preparing})
+        if preparing.exception() is None:
+            with contextlib.suppress(OSError):
+                await asyncio.to_thread(NativeSkillFolders.remove, preparing.result())
 
     @staticmethod
     def _overlay(launcher: MuseLauncher, folder: Path) -> dict[str, str]:
