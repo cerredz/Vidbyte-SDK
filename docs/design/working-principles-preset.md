@@ -446,6 +446,8 @@ All tests are offline. Generative runners are faked (a recording runner bound th
 - `BaseAgent` → `the scope is gone after a run, so a later plain agent gets nothing` — [Hidden Failure]
 - `BaseAgent` → `a run that raises still restores the scope` — [Hidden Failure]
 - `Propagation` → `an as_tool() specialist run by the parent gets the preset` — [Hidden Assumption]
+- `Propagation` → `a fork_conversation child with its own system prompt gets the preset once` — [Hidden Failure]
+- `Runtimes` → `MCTS and both actor runtimes receive the composed prompt` — [Hidden Assumption]
 - `Propagation` → `a BaseAgent started inside a custom @tool gets it` — [Hidden Assumption]
 - `Propagation` → `a child with system_prompt_presets=() does not, nor do its own children` — [Edge Case]
 - `Propagation` → `a child whose own prompt already holds the paragraph is not given a second copy` — [Silent Failure]
@@ -455,6 +457,8 @@ All tests are offline. Generative runners are faked (a recording runner bound th
 - `Jev` → `JevAgentSettings validates and passes the field; JevAgent's own calls carry the paragraph` — [Hidden Assumption]
 - `Jev` → `JevCloneAgent, JevSwarmAgent, JevBulkWorker's agent, and the fresh-continuation agent inherit inside a preset run` — [Hidden Assumption]
 - `Jev` → `a CLONE launch through a real JevAgent loop reaches the clones' runners with the paragraph` — [Hidden Failure] (end to end through `JevRuntime`)
+- `Jev` → `a specialist the gate chooses inherits the preset` — [Hidden Assumption] (end to end through the preflight gate)
+- `Uncovered` → `MultiAgent/AggregateAgent take no keyword and replace generate_reply; CodexHarnessAgent is not a BaseAgent; a child run after its parent's run and a raw thread inherit nothing` — [Hidden Assumption] (pins the documented limits)
 - `Machinery` → `JevRunState, JevHandoff, JevReviewer, JevRunBriefWriter, JevClarificationAgent, ContinualTraceAgent, and HandoffAgent never get it inside a preset run` — [Silent Failure]
 - `Paradigm` → `fan-out agents get nothing under an active scope by default, and get it when agent_options opts in` — [Edge Case]
 

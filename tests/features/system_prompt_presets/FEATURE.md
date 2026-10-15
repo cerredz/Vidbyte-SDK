@@ -31,7 +31,7 @@ A system-prompt preset is a fixed, reviewed paragraph that a developer attaches 
 ## Test Suite Map
 
 - `test_system_prompt_presets_units.py`: the verbatim asset, the enum, `SystemPromptPresetSelection`, `SystemPromptPresetScope` (nesting, exceptions, tasks, threads, concurrency), and `SystemPromptPresetComposer`.
-- `test_system_prompt_presets_propagation.py`: BaseAgent on and off, multi-turn runs, scope cleanup, the MCTS runtime, `as_tool()` specialists, agents started in tools, opt-out children, duplicate prevention, forks, persistence, JevAgent and its children (including a CLONE launch through the real Jev loop), the opted-out machinery, the fan-out paradigm, and the documented uncovered paths.
+- `test_system_prompt_presets_propagation.py`: BaseAgent on and off, multi-turn runs, scope cleanup, the search and actor runtimes, `as_tool()` specialists, agents started in tools, `fork_conversation` children, opt-out children, duplicate prevention, forks, persistence, JevAgent and its children (a gate-chosen specialist and a CLONE launch through the real Jev loop, plus clones, swarm helpers, bulk workers, and fresh continuations), the opted-out machinery, the fan-out paradigm, and the documented uncovered paths (team facades, the Codex harness, late-run children, raw threads).
 - `fakes.py`: the pack's own copy of the paragraph, the recording model, and the offline safety net.
 - Run `python scripts/test-working-principles-preset.py` for the whole pack with PASS/FAIL lines.
 

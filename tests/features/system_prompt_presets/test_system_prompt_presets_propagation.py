@@ -20,9 +20,11 @@ from unittest.mock import AsyncMock, patch
 from tests.agent_test_support import bind_test_runner
 from tests.features.system_prompt_presets.fakes import WORKING_PRINCIPLES, OfflineAgentTest, OfflineAsyncAgentTest, RecordingModel
 from tests.test_jev_compute_situations import REQUEST, ScriptedJev, _helper, lookup
+from tests.test_jev_preflight import ScriptedDecisionRunner, _runner_class
 from vidbyte import tool
 from vidbyte.agents.aggregation import AggregateAgent
 from vidbyte.agents.base import BaseAgent
+from vidbyte.agents.codex.agent import CodexHarnessAgent
 from vidbyte.agents.continual_trace import ContinualTraceAgent
 from vidbyte.agents.handoff import HandoffAgent
 from vidbyte.agents.jev import JevAgent, JevAgentSettings, JevComputeSettings, JevRuntimeSettings
@@ -37,21 +39,24 @@ from vidbyte.agents.jev.settings import JevContinualSettings, JevRunBriefSetting
 from vidbyte.agents.multi.agent import MultiAgent
 from vidbyte.lib.config import DecisionModelConfig
 from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentMetadata
-from vidbyte.lib.dataclasses.jev import JevRunBriefAppendPayload, JevSwarmAssignment
+from vidbyte.lib.constants.jev import JEV_SPECIALIST_NONE
+from vidbyte.lib.dataclasses.jev import JevRunBriefAppendPayload, JevSpecialist, JevSwarmAssignment
 from vidbyte.lib.enums import DecisionModelMode, JevContinuationGate, JevDoneCheck, JevDynamicComputeOption, SystemPromptPreset
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.jev.compute import JevComputeRegistry
 from vidbyte.lib.system_prompt_presets import SystemPromptPresetScope
 from vidbyte.paradigms.context_minimal_fanout.paradigm import ContextMinimalFanoutParadigm
 from vidbyte.paradigms.context_minimal_fanout.types import AgentRoleSettings, ContextMinimalFanoutSettings, SplitPrompt
-from vidbyte.prompts import Prompt, Prompts
+from vidbyte.prompts import Prompt, Prompts, SystemPromptPresetComposer
 from vidbyte.sessions.serialization import SessionSerializer
+from vidbyte.tools.builtins import ForkConversationTool
 from vidbyte.tools.builtins.output_schema import OutputSchemaBuilder
 
 WP = SystemPromptPreset.WORKING_PRINCIPLES
 MODEL = {"provider": "openai", "model_name": "gpt-4.1-mini"}
 LOOP_NOTE = Prompts().get(Prompt.AGENTIC_LOOP_CONTEXT_PROMPT).strip()
 _JEV_HELPER = "vidbyte.agents.jev.compute.recognizer.DecisionModelHelper"
+_JEV_GATE_HELPER = "vidbyte.agents.jev.gate.gate.DecisionModelHelper"
 CLONE_KEYS = {key.value for key in JevComputeRegistry.question_keys(JevDynamicComputeOption.CLONE)}
 
 
@@ -135,9 +140,10 @@ class BaseAgentPresetTests(OfflineAsyncAgentTest):
             await agent.arun("Go.")
         self.assertEqual(SystemPromptPresetScope.active(), ())
 
-    async def test_the_mcts_runtime_gets_the_composed_prompt_too(self) -> None:
-        agent, _ = _agent("searcher", "Search.", runtime="mcts_search", system_prompt_presets=[WP])
-        self.assertIn(WORKING_PRINCIPLES, _composed(agent))
+    def test_the_search_and_actor_runtimes_get_the_composed_prompt_too(self) -> None:
+        for runtime in ("mcts_search", "actor_model_p2p", "actor_model_broadcast"):
+            agent, _ = _agent("searcher", "Search.", runtime=runtime, system_prompt_presets=[WP])
+            self.assertEqual(_composed(agent), f"Search.\n\n{WORKING_PRINCIPLES}", runtime)
 
 
 class ChildPropagationTests(OfflineAsyncAgentTest):
@@ -193,6 +199,14 @@ class ChildPropagationTests(OfflineAsyncAgentTest):
         await parent.arun("Go.")
         self.assertEqual(self.models.systems("child")[0].count(WORKING_PRINCIPLES), 1)
 
+    async def test_a_fork_conversation_child_with_its_own_prompt_gets_them(self) -> None:
+        call = ("fork_conversation", {"prompt": "Format the findings.", "name": "formatter", "system_prompt": "Only format the output."})
+        parent, _ = _agent("lead", "Lead.", call, tools=[ForkConversationTool()], system_prompt_presets=[WP])
+        await parent.arun("Go.")
+        system = self.models.systems("formatter")[0]
+        self.assertIn(f"Only format the output.\n\n{WORKING_PRINCIPLES}", system)
+        self.assertEqual(system.count(WORKING_PRINCIPLES), 1)
+
     def test_a_fork_keeps_the_field_even_with_a_replaced_prompt(self) -> None:
         parent, _ = _agent("lead", "Lead.", system_prompt_presets=[WP])
         child = parent.fork(AgentForkSettings(system_prompt="Only format the output."))
@@ -239,6 +253,20 @@ class JevPresetTests(OfflineAsyncAgentTest):
         self.assertEqual(agent.system_prompt_presets, (WP,))
         self.assertEqual(model.systems[0].count(WORKING_PRINCIPLES), 1)
         self.assertEqual(reply.metadata["system_prompt_presets"], ["working_principles"])
+
+    async def test_a_specialist_the_gate_chooses_gets_the_presets(self) -> None:
+        specialist_model = RecordingModel("database")
+        specialist = bind_test_runner(BaseAgent(name="database", system_prompt="Change the schema.", **MODEL), specialist_model)
+        main = RecordingModel("researcher")
+        settings = _jev_settings(system_prompt_presets=[WP], agents=(JevSpecialist("database", "Changes to the database schema and its migrations.", specialist),))
+        agent = bind_test_runner(JevAgent(settings, _managed()), main)
+        decision = ScriptedDecisionRunner({}, choice={"database": 0.8, JEV_SPECIALIST_NONE: 0.2})
+        with patch(_JEV_GATE_HELPER, new=_runner_class(decision)):
+            await agent.arun("Add a migration that adds an email column to the users table.")
+        self.assertEqual(agent.response.specialist, "database")
+        self.assertEqual(main.systems, [])
+        self.assertIsNone(specialist.system_prompt_presets)
+        self.assertEqual(specialist_model.systems[0].count(WORKING_PRINCIPLES), 1)
 
     def test_clones_helpers_bulk_workers_and_fresh_agents_inherit_inside_a_run(self) -> None:
         settings = _jev_settings()
@@ -338,6 +366,13 @@ class UncoveredPathTests(OfflineAsyncAgentTest):
         self.assertNotIn("system_prompt_presets", inspect.signature(AggregateAgent.__init__).parameters)
         self.assertIsNot(MultiAgent.generate_reply, BaseAgent.generate_reply)
         self.assertIsNot(AggregateAgent.generate_reply, BaseAgent.generate_reply)
+
+    def test_the_codex_harness_is_not_a_base_agent_so_its_prompt_is_composed_by_hand(self) -> None:
+        # Documented: CodexHarnessAgent takes no preset keyword; pass the composed text as its
+        # system_prompt, and Codex's own subagents only see the preset through sentence 8.
+        self.assertFalse(issubclass(CodexHarnessAgent, BaseAgent))
+        self.assertNotIn("system_prompt_presets", inspect.signature(CodexHarnessAgent.__init__).parameters)
+        self.assertEqual(SystemPromptPresetComposer.compose("Review the diff.", [WP]), f"Review the diff.\n\n{WORKING_PRINCIPLES}")
 
     async def test_a_child_built_in_a_run_but_run_after_it_inherits_nothing(self) -> None:
         built: list[BaseAgent] = []
