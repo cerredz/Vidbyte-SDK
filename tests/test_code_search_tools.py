@@ -12,6 +12,7 @@ Relations:
 
 from __future__ import annotations
 
+import asyncio
 import os
 import tempfile
 import unittest
@@ -20,6 +21,21 @@ from pathlib import Path
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.tools.builtins.code_search import GlobTool, GrepTool, SemanticSearchTool
 from vidbyte.tools.types import ToolCall
+
+
+class _LoopRecordingEmbeddings:
+    """Embedding provider that records whether each embed() call ran on the event loop thread."""
+
+    def __init__(self) -> None:
+        self.on_loop: list[bool] = []
+
+    def embed(self, texts):
+        try:
+            asyncio.get_running_loop()
+            self.on_loop.append(True)
+        except RuntimeError:
+            self.on_loop.append(False)
+        return [[1.0, float("jwt" in text)] for text in texts]
 
 
 class CodeSearchToolTests(unittest.IsolatedAsyncioTestCase):
@@ -92,6 +108,17 @@ class CodeSearchToolTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("pkg/auth.py", result.output)
         self.assertIn("check_jwt", result.output)
+
+    async def test_semantic_search_embeds_off_the_event_loop(self) -> None:
+        """Semantic search calls its synchronous embedding provider from a worker thread."""
+        # @intent semantic-search-runs-off-the-event-loop: a blocking embed() must not stall the loop or defeat tool timeouts.
+        embeddings = _LoopRecordingEmbeddings()
+        result = await SemanticSearchTool(str(self.root), embedding_provider=embeddings).execute(
+            ToolCall("semantic_search", {"query": "jwt expiration", "max_results": 1})
+        )
+        self.assertIn("pkg/auth.py", result.output)
+        self.assertEqual(embeddings.on_loop, [False, False])
+        self.assertEqual(result.metadata["indexed_chunks"], 2)
 
     async def test_root_under_ignored_ancestor_still_searches_its_files(self) -> None:
         """Ignore patterns apply below the root, not to the root's own ancestors."""

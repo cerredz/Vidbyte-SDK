@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import shutil
+import uuid
 import zipfile
 from pathlib import Path
 
@@ -30,6 +32,10 @@ class LocalFileSystemBackend(BaseFileSystemBackend):
             handle.write(content)
 
     def append_text(self, path: Path, content: str, *, encoding: str, create_parents: bool, newline: str | None = None) -> None:
+        # @intent failed-edit-leaves-file-untouched
+        # Opening for appending creates a missing file at once, so text the
+        # encoding cannot hold must fail here, before any folder or file is made.
+        content.encode(encoding)
         if create_parents:
             path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding=encoding, newline=newline) as handle:
@@ -81,18 +87,33 @@ class LocalFileSystemBackend(BaseFileSystemBackend):
 
     def zip_path(self, source: Path, destination: Path) -> None:
         destination.parent.mkdir(parents=True, exist_ok=True)
-        with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            if source.is_file():
-                archive.write(source, arcname=source.name)
-                return
-            # @intent zip-never-archives-itself
-            # The archive file already exists once opened, so a destination inside the source
-            # would otherwise be added to itself as a half-written member.
-            archive_path = destination.resolve()
-            for path in source.rglob("*"):
-                if path.resolve() == archive_path:
-                    continue
-                archive.write(path, arcname=path.relative_to(source.parent))
+        # @intent failed-zip-keeps-existing-archive
+        # Opening an archive for writing empties it at once, so a source file that cannot be read
+        # would destroy the archive already there. Build the new one in a file beside it and swap it
+        # in only after every member is written. Mode "x" creates that file like any new file, so the
+        # archive keeps the usual permissions (mkstemp would make it owner-only).
+        partial = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            with zipfile.ZipFile(partial, "x", compression=zipfile.ZIP_DEFLATED) as archive:
+                self._write_members(archive, source, skipped={partial.resolve(), destination.resolve()})
+            os.replace(partial, destination)
+        except Exception:
+            partial.unlink(missing_ok=True)
+            raise
+
+    @staticmethod
+    def _write_members(archive: zipfile.ZipFile, source: Path, *, skipped: set[Path]) -> None:
+        # A file is one member; a folder adds every entry under it, named from the folder's parent.
+        if source.is_file():
+            archive.write(source, arcname=source.name)
+            return
+        # @intent zip-never-archives-itself
+        # The archive being built, and the one it replaces, can sit inside the source,
+        # so neither is added to the new archive as a member.
+        for path in source.rglob("*"):
+            if path.resolve() in skipped:
+                continue
+            archive.write(path, arcname=path.relative_to(source.parent))
 
     def unzip_path(self, source: Path, destination: Path) -> tuple[str, ...]:
         destination.mkdir(parents=True, exist_ok=True)

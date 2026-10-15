@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from vidbyte.lib.errors import ToolExecutionError
-from vidbyte.lib.tools.filesystem import FileSystemPermissions
+from vidbyte.lib.tools.filesystem import FileSystemPermissions, LineEndings
 from vidbyte.tools.filesystem._base_tool import FileSystemTool
 from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
 
@@ -39,7 +39,9 @@ class DiffTool(FileSystemTool):
                 label = str(other)
             else:
                 label = "proposed"
-            diff = self.backend.diff_text(target, content or "", encoding=self._config.encoding, label=label)
+            # @intent model-crlf-text-keeps-file-endings
+            # The file side is read as LF and write_text treats CRLF the model spelled as LF, so the preview compares the same text the write would.
+            diff = self.backend.diff_text(target, LineEndings.to_lf(content or ""), encoding=self._config.encoding, label=label)
             return ToolResult.success(self.name, diff, metadata={"path": str(target), "other_path": other_path})
         except Exception as exc:
             return ToolResult.error(self.name, str(exc))

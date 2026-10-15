@@ -129,6 +129,15 @@ class AnthropicPromptOrderTests(unittest.TestCase):
         wire = _anthropic_wire([{"role": "user", "content": "earlier"}, {"role": "assistant", "content": "prior reply"}])
         self.assertTrue(_is_prompt(wire[-1]))
 
+    def test_history_system_turn_is_sent_as_a_user_turn(self) -> None:
+        # The system_suffix trace placement puts a system turn in the history; Anthropic rejects that role in messages.
+        earlier, reply = {"role": "user", "content": "earlier"}, {"role": "assistant", "content": "prior reply"}
+        wire = _anthropic_wire([earlier, reply, ANTHROPIC_CALL, ANTHROPIC_RESULT, {"role": "system", "content": "TRACE"}])
+        self.assertNotIn("system", [turn["role"] for turn in wire])
+        self.assertIn({"role": "user", "content": "TRACE"}, wire)
+        self.assertEqual(wire[:2], [earlier, reply])
+        self.assertEqual(wire[3:5], [ANTHROPIC_CALL, ANTHROPIC_RESULT])
+
     def test_streaming_uses_the_same_order(self) -> None:
         transport = FakeStreamingTransport([])
         runner = StreamingTextModelRunner(TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-test", api_key="key"), transport=transport)

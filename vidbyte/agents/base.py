@@ -35,6 +35,8 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from vidbyte.agents.mixins import McpAttachableMixin
+from vidbyte.agents.output.connector import OutputConnector
+from vidbyte.agents.output.dispatcher import OutputDispatcher
 from vidbyte.agents.pricing import UsageRollup, UsageTracker
 from vidbyte.agents.speed import AgentSpeedHistory, AgentSpeedRollup, AgentSpeedTracker
 from vidbyte.agents.contracts import floors as contract_floors
@@ -52,7 +54,7 @@ from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.dataclasses.trace import TraceField, TraceOption, TraceSchema
 from vidbyte.lib.constants import RUNNER_TYPE_TEXT
 from vidbyte.lib.enums import AgentRuntimeType, ModelProvider
-from vidbyte.lib.errors import AgentExecutionError, ConfigurationError, FailureRaisedError, OutputSchemaViolationError, UsageAccountingError
+from vidbyte.lib.errors import AgentExecutionError, AllModelsFailedError, ConfigurationError, FailureRaisedError, OutputSchemaViolationError, UsageAccountingError
 from vidbyte.lib.runners import Runner
 from vidbyte.lib.tracing import NullTracer, TracerBase
 from vidbyte.lib.usage_ledger import UsageLedger, active_usage_ledger, usage_ledger_scope
@@ -74,6 +76,8 @@ if TYPE_CHECKING:
 # Runtimes that execute the direct model/tool loop and so accept its usage, speed, output-contract,
 # fallback, and session-failure wiring. JEV is the opinionated JevAgent's linear-loop subclass.
 _LINEAR_LOOP_RUNTIMES = frozenset({AgentRuntimeType.LINEAR, AgentRuntimeType.JEV})
+# Metadata key for the developer diagnostic a restore records when the re-supplied tools differ from the checkpoint's.
+_RESUME_TOOL_MISMATCH_KEY = "__resume_tool_mismatch__"
 
 
 class BaseAgent(McpAttachableMixin):
@@ -113,6 +117,7 @@ class BaseAgent(McpAttachableMixin):
         handoff: Handoff | None = None,
         trace_option: TraceOption | None = None,
         fallback: Sequence[str | FallbackModel] | AgentFallbackSettings | None = None,
+        outputs: Sequence[OutputConnector] = (),
     ) -> None:
         if not name:
             raise AgentExecutionError("Agent name cannot be empty.")
@@ -230,6 +235,7 @@ class BaseAgent(McpAttachableMixin):
         self.max_tool_rounds = self.agent_loop_settings.max_iterations
         self.system_prompt = system_prompt
         self.middleware = tuple(middleware)
+        self.outputs = OutputDispatcher.connectors(outputs)
         self.description = description or "General purpose agent."
         # @intent name-lists-reject-bare-strings
         # A bare string is itself a sequence, so tuple() would hand the manager one capability per character.
@@ -528,7 +534,11 @@ class BaseAgent(McpAttachableMixin):
             runtime_type=self.runtime_type.value,
             runtime_config=self._export_runtime_config(),
             algorithm=self.algorithm.name,
-            metadata=dict(self.metadata),
+            # @intent run-state-snapshot-owns-its-data
+            # A checkpoint must not share mutable objects with the live agent: InMemorySessionStore keeps this RunState
+            # as written, so a later in-place edit of the agent would rewrite an already-written checkpoint on that
+            # backend only. Mirrors the deep copy _restore_output_schema makes on the read side.
+            metadata=copy.deepcopy(dict(self.metadata)),
             agent_metadata=self._export_agent_metadata(),
             tool_names=tuple(self._tool_name(tool) for tool in self._agent_tool_items),
             history=tuple(serializer.message_to_dict(message) for message in self.history),
@@ -542,8 +552,8 @@ class BaseAgent(McpAttachableMixin):
         )
 
     @classmethod
-    def restore(cls, state: RunState, *, tools: Sequence[object] = (), middleware: Sequence[AgentMiddleware] = (), tracer: object | None = None, trace: object | None = None, output_schema: object | None = None, api_key: str | None = None) -> BaseAgent:
-        """Rebuild a live agent from a RunState, re-supplying non-serializable parts (the rehydration contract)."""
+    def restore(cls, state: RunState, *, tools: Sequence[object] = (), middleware: Sequence[AgentMiddleware] = (), tracer: object | None = None, trace: object | None = None, output_schema: object | None = None, api_key: str | None = None, outputs: Sequence[OutputConnector] = (), algorithm: ContextWindowAlgorithm | str | None = None) -> BaseAgent:
+        """Rebuild a live agent from a RunState, re-supplying non-serializable parts such as tools, API key and algorithm (the rehydration contract)."""
         from vidbyte.sessions.serialization import SessionSerializer
         serializer = SessionSerializer()
         agent_metadata = AgentMetadata(**{key: str(state.agent_metadata.get(key, "")) for key in ("name", "description", "use_cases")})
@@ -565,12 +575,15 @@ class BaseAgent(McpAttachableMixin):
             description=state.description,
             capabilities=tuple(state.capabilities),
             agent_metadata=agent_metadata,
-            algorithm=None if state.algorithm in ("", "default") else state.algorithm,
-            metadata=dict(state.metadata),
+            # @intent restore-takes-the-agent-algorithm: a user-named algorithm is not a preset, so a re-supplied one wins over the stored name.
+            algorithm=algorithm if algorithm is not None else (None if state.algorithm in ("", "default") else state.algorithm),
+            # @intent run-state-snapshot-owns-its-data: the restored agent gets its own copy, so editing it cannot rewrite the checkpoint.
+            metadata=copy.deepcopy(dict(state.metadata)),
             tracer=tracer,
             trace=trace,
             output_schema=cls._restore_output_schema(state, output_schema),
             permission_policy=cls._restore_permission_policy(state),
+            outputs=outputs,
         )
         child.history = [serializer.message_from_dict(item) for item in state.history]
         cls._record_resume_tool_mismatch(child, state.tool_names)
@@ -697,7 +710,7 @@ class BaseAgent(McpAttachableMixin):
         if self.output_schema is None:
             return None
         if isinstance(self.output_schema, Mapping):
-            return {"kind": "mapping", "schema": dict(self.output_schema)}
+            return {"kind": "mapping", "schema": copy.deepcopy(dict(self.output_schema))}
         return {"kind": "type", "name": getattr(self.output_schema, "__name__", type(self.output_schema).__name__)}
 
     @staticmethod
@@ -790,11 +803,11 @@ class BaseAgent(McpAttachableMixin):
         # Record a non-fatal marker when restored tools differ from the persisted set.
         got = tuple(child._tool_name(tool) for tool in child._agent_tool_items)
         if set(expected) != set(got):
-            child.metadata["__resume_tool_mismatch__"] = {"expected": list(expected), "got": list(got)}
+            child.metadata[_RESUME_TOOL_MISMATCH_KEY] = {"expected": list(expected), "got": list(got)}
         else:
             # @intent resume-tool-marker-describes-this-restore
             # Drop a marker copied in from an earlier checkpoint, so a matching restore no longer reports a mismatch.
-            child.metadata.pop("__resume_tool_mismatch__", None)
+            child.metadata.pop(_RESUME_TOOL_MISMATCH_KEY, None)
 
     async def receive(self, message: AgentMessage) -> None:
         self.history.append(message)
@@ -902,11 +915,14 @@ class BaseAgent(McpAttachableMixin):
             self._speed_tracker.record_run_end()
         except Exception as exc:
             self._close_failed_reply(exc, trace_ctx)
-            if isinstance(exc, (UsageAccountingError, FailureRaisedError)):
+            if isinstance(exc, (UsageAccountingError, FailureRaisedError, AllModelsFailedError)):
                 # @intent usage-accounting-error-reaches-the-user
                 # A run that failed closed on usage must tell the user so, not surface as a generic reply failure.
                 # @intent raise-disposition-reaches-the-caller
                 # A Session rule that escalated to raise keeps its typed error, which is the caller's contract.
+                # @intent spent-fallback-chain-reaches-the-caller
+                # A spent fallback chain keeps its typed error with every attempt, which is the caller's documented
+                # contract; it is an AgentExecutionError, so `except AgentExecutionError` still catches it.
                 raise
             raise AgentExecutionError(
                 f"Agent '{self.name}' failed to generate a reply.",
@@ -938,9 +954,7 @@ class BaseAgent(McpAttachableMixin):
         self.history.append(reply)
         self.last_prompt = prompt
         self.last_reply = reply
-        if self._trace_option is not None and self._trace_option.enabled:
-            trace_artifact = metadata.get("trace")
-            self.last_trace = dict(trace_artifact) if isinstance(trace_artifact, Mapping) else None
+        self._record_last_trace(metadata)
         if self._handoff_spec is not None:
             try:
                 await self._run_auto_handoff(metadata)
@@ -953,9 +967,31 @@ class BaseAgent(McpAttachableMixin):
         # @intent failed-run-leaves-no-queued-prompts
         # A run that fails its schema raises before the drain, so its queued follow-ups never run.
         self._assert_schema_satisfied(result)
+        # Deliver the validated reply to the agent's outputs, if any.
+        if self.outputs:
+            await self._deliver_outputs(reply, metadata)
         if self._queued_prompts and not self._draining_queued_prompts:
             await self._drain_queued_prompts(metadata)
         return reply
+
+    def _record_last_trace(self, metadata: dict[str, Any]) -> None:
+        # Keep this run's trace artifact when tracing is enabled.
+        if self._trace_option is not None and self._trace_option.enabled:
+            trace_artifact = metadata.get("trace")
+            self.last_trace = dict(trace_artifact) if isinstance(trace_artifact, Mapping) else None
+
+    async def _deliver_outputs(self, reply: AgentMessage, metadata: dict[str, Any]) -> None:
+        # Send the reply to every output; any failure is re-raised.
+        try:
+            await OutputDispatcher.deliver(self.outputs, reply, metadata)
+        except BaseException as exc:
+            # @intent failed-run-leaves-no-queued-prompts
+            # A failed or cancelled delivery skips the drain, so its
+            # queued follow-ups never run. The runtime try has closed
+            # by now, so the session hears of the error only here.
+            self._queued_prompts.clear()
+            self._notify_session_exception(exc)
+            raise
 
     def _close_failed_reply(self, exc: BaseException, trace_ctx: Any) -> None:
         # Notifies the session, finalizes the root trace and speed run, and clears the active prompt for a failed reply.
@@ -1184,12 +1220,16 @@ class BaseAgent(McpAttachableMixin):
         input_context_items: Sequence[ContextItem] = (),
         input_context_manager: ContextManager | None = None,
     ) -> BaseAgentContext:
+        # @intent resume-marker-stays-out-of-the-prompt
+        # The resume tool-mismatch marker is a developer diagnostic about the restore, not run context, so the model
+        # never sees it, and in particular never sees the names of tools it was not given. It stays in self.metadata.
+        agent_metadata = {key: value for key, value in self.metadata.items() if key != _RESUME_TOOL_MISMATCH_KEY}
         return self._runtime().build_context(
             message,
             base_context=context,
             history=history,
             agent_history=self.history,
-            agent_metadata=self.metadata,
+            agent_metadata=agent_metadata,
             existing_tool_calls=self._tool_call_contexts,
             input_metadata=input_metadata,
             agentic_loop=agentic_loop,
@@ -1368,12 +1408,15 @@ class BaseAgent(McpAttachableMixin):
         middleware = self.middleware
         active_session = getattr(self, "_active_session", None)
         session_failures = getattr(active_session, "failures", None)
-        if self.runtime_type in _LINEAR_LOOP_RUNTIMES and session_failures is not None and getattr(session_failures, "has_rules", False):
-            from vidbyte.middleware.builtins import FailureMiddleware
-            middleware = (*middleware, FailureMiddleware(session_failures))
+        # @intent session-rules-judge-the-result-after-policy-retries
+        # The retry policy runs before Session rules, so a silently retried attempt never trips a rule;
+        # the rule sees the tool result once the policy has finished with that call.
         if self.agent_loop_settings.tool_error_policy is not None:
             from vidbyte.middleware.builtins import ToolErrorPolicyMiddleware
             middleware = (*middleware, ToolErrorPolicyMiddleware(self.agent_loop_settings.tool_error_policy))
+        if self.runtime_type in _LINEAR_LOOP_RUNTIMES and session_failures is not None and getattr(session_failures, "has_rules", False):
+            from vidbyte.middleware.builtins import FailureMiddleware
+            middleware = (*middleware, FailureMiddleware(session_failures))
         if self._trace_option is None or not self._trace_option.enabled:
             return middleware
         from vidbyte.middleware.continual_trace import ContinualTraceMiddleware

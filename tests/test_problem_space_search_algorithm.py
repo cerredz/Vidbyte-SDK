@@ -23,6 +23,7 @@ from typing import Any
 from vidbyte import ContextWindow, ContextWindowAlgorithm, ProblemSpaceSearchAlgorithm, ProblemSpaceSearchContextItem, ReflexionAlgorithm
 from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
 from vidbyte.agents.runtime import AgentRuntime
+from vidbyte.context.manager import ContextManager
 from vidbyte.context.runtime import ContextWindowPlacement
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.templates import ProblemSpaceSearchContextWindowTemplate
@@ -181,6 +182,22 @@ class ProblemSpaceSearchAlgorithmTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("- one", algorithm._format_field(["one", "two"]))
         self.assertEqual(algorithm._format_field(None), "")
 
+    def test_format_history_reads_gemini_and_anthropic_tool_turns(self) -> None:
+        # [Hidden Failure] Gemini parts and Anthropic tool_use turns reach the side-call history instead of empty lines.
+        gemini = [{"role": "model", "parts": [{"functionCall": {"name": "lookup_population", "args": {"city": "Paris"}}}]}, {"role": "user", "parts": [{"functionResponse": {"name": "lookup_population", "response": {"population": 2100000}}}]}]
+        anthropic = [{"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_1", "name": "lookup_population", "input": {"city": "Paris"}}]}, {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": "2100000"}]}]
+        for include_tool_outputs in (True, False):
+            algorithm = ProblemSpaceSearchAlgorithm(include_tool_outputs=include_tool_outputs)
+            for provider, messages in (("gemini", gemini), ("anthropic", anthropic)):
+                with self.subTest(provider=provider, include_tool_outputs=include_tool_outputs):
+                    history = algorithm._format_history(messages)
+                    self.assertIn("lookup_population", history)
+                    if include_tool_outputs:
+                        self.assertIn("2100000", history)
+                    else:
+                        self.assertIn("[Tool output omitted]", history)
+                        self.assertNotIn("2100000", history)
+
     def test_dispatcher_detects_algorithm(self) -> None:
         # [Hidden Failure] The dispatcher detects and returns the inner-loop algorithm.
         runtime = algo_runtime(ProblemSpaceSearchAlgorithm())
@@ -232,6 +249,20 @@ class ProblemSpaceSearchAlgorithmTests(unittest.IsolatedAsyncioTestCase):
         runtime = algo_runtime(ProblemSpaceSearchAlgorithm(interval=1), tools=_secret_tools())
         await runtime.arun("task", handle=runner_handle(runner), context=base_context())
         self.assertFalse(any("very sensitive raw tool output" in c["prompt"] for c in runner.calls))
+
+    async def test_runtime_note_never_overwrites_note_already_in_manager(self) -> None:
+        # [Silent Failure] A note on a shared manager skips an id already registered instead of replacing that note.
+        manager = ContextManager()
+        existing = ProblemSpaceSearchContextItem(primitive_id="problem_space_search:1", iteration=1, note_index=1, unconsidered="earlier run", blind_spots="b", next_directions="n")
+        manager.upsert(existing)
+        runner = FakeRunner([tool_response(), FakeResponse(_JSON_OUTPUT), is_done_response()])
+        runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=_lookup_tools(), permission_policy=PermissionPolicy(), algorithm=ContextWindowAlgorithm(name="problem_space_search", problem_space_search=ProblemSpaceSearchAlgorithm(interval=1)), context_manager=manager)
+        result = await runtime.arun("task", handle=runner_handle(runner), context=base_context())
+        self.assertIs(manager.get_by_id("problem_space_search:1"), existing)
+        added = manager.get_by_id("problem_space_search:2")
+        self.assertIsInstance(added, ProblemSpaceSearchContextItem)
+        self.assertIn("alt approach", added.unconsidered)
+        self.assertEqual(result.metadata["problem_space_search"]["notes"][0]["primitive_id"], "problem_space_search:2")
 
 
 def _lookup_tools() -> Tools:

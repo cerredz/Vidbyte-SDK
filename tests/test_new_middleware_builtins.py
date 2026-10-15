@@ -20,6 +20,7 @@ from vidbyte.lib.dataclasses.middleware import (
 )
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.tools import ToolCall, ToolResult, ToolStatus
+from vidbyte.lib.errors import ToolExecutionError
 from vidbyte.middleware.builtins import (
     CircuitBreakerMiddleware,
     CircuitState,
@@ -307,6 +308,28 @@ class TestToolErrorPolicyMiddleware(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertEqual(decision.action, MiddlewareAction.RETRY)
                 self.assertEqual(decision.metadata["error"], "invalid_arguments")
+
+    async def test_rate_limited_function_tool_is_retried(self) -> None:
+        # @intent function-tool-errors-share-the-runtime-error-kind
+        # [Silent Failure] A @tool function that raises a rate_limited ToolExecutionError is retried like a BaseTool.
+        executions: list[int] = []
+
+        @tool(name="lookup", permission=ToolPermission.READ)
+        def lookup() -> str:
+            """Lookup a value."""
+            executions.append(1)
+            if len(executions) == 1:
+                raise ToolExecutionError("quota hit", details={"error": "rate_limited", "error_type": "RateLimited"})
+            return "42"
+
+        retry = ToolErrorPolicyMiddleware(ToolErrorPolicy(max_retries_per_tool_call=1, retry_backoff_base_seconds=0))
+        runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=Tools([lookup]), permission_policy=PermissionPolicy(), middleware=(retry,))
+        context = runtime.build_context("task", base_context=BaseContext(), history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+        handle = RunnerHandle(runner=_ScriptedLookupRunner(1), provider="openai", invoke=_invoke_scripted_lookup, extract_text=lambda response: response.text, extract_metadata=lambda response: {"raw": response.raw})
+        result = await runtime.arun("task", handle=handle, context=context)
+
+        self.assertEqual(result.metadata["stop_reason"], "final_response")
+        self.assertEqual(len(executions), 2)
 
     async def test_refused_calls_do_not_trip_error_budget_or_abort(self) -> None:
         # [Silent Failure] A refused call is not a tool error, so repeated denials must not trip the breaker or abort the run.

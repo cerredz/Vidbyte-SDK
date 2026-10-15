@@ -152,6 +152,39 @@ async def test_parallel_extract_requests_full_content_and_returns_the_page(fake_
     assert [(page.url, page.content) for page in payload.pages] == [(FINAL_URL, PAGE_TEXT)]
 
 
+def _tavily_extract_every_url(send: dict) -> tuple[int, dict]:
+    # Tavily Extract answers one result per requested URL, carrying that URL back.
+    return 200, {"results": [{"url": url, "raw_content": f"page {url}"} for url in send["json_body"]["urls"]]}
+
+
+@pytest.mark.asyncio
+async def test_tavily_extract_sends_more_than_20_urls_in_batches_under_the_cap(fake_provider_http) -> None:
+    # Tavily accepts at most 20 URLs per Extract request, so 25 URLs go as 20 then 5 and every page comes back in order.
+    sends = fake_provider_http(_tavily_extract_every_url)
+    urls = [f"https://docs.example.com/page-{index}" for index in range(25)]
+
+    payload = await TavilyClient(_secret_key("tavily_api_key")).extract(urls, extract_depth="advanced")
+
+    assert [send["json_body"]["urls"] for send in sends] == [urls[:20], urls[20:]]
+    assert all(send["json_body"] == {"urls": send["json_body"]["urls"], "extract_depth": "advanced"} for send in sends)
+    assert [page.url for page in payload.pages] == urls
+    assert payload.billable_units == 25
+    # Attempts are the most any one request needed, as FirecrawlClient.scrape counts them, not a sum over requests.
+    assert payload.attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_tavily_extract_sends_20_urls_as_one_request(fake_provider_http) -> None:
+    # At the cap the request is unchanged: one body carrying every URL.
+    sends = fake_provider_http(_tavily_extract_every_url)
+    urls = [f"https://docs.example.com/page-{index}" for index in range(20)]
+
+    payload = await TavilyClient(_secret_key("tavily_api_key")).extract(urls)
+
+    assert [send["json_body"] for send in sends] == [{"urls": urls, "extract_depth": "basic"}]
+    assert payload.billable_units == 20
+
+
 @pytest.mark.parametrize(
     "metadata",
     [{"sourceURL": PAGE_URL, "url": FINAL_URL}, {"sourceURL": FINAL_URL}],

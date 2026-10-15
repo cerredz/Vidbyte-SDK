@@ -17,6 +17,7 @@ Architecture:
     - Context exports: context contracts plus general problem-solving challenge records.
     - Preset exports: BudgetPreset, PermissionPreset.
     - Pipeline exports: BasePipeline, ConditionalPipeline, ParallelPipeline, PipelineNode, SequentialPipeline.
+    - Output exports: OutputConnector, OutputDispatcher (sends any AgentMessage to a list of connectors), the sixteen destination connectors (SlackOutput through HubSpotTaskOutput) and TypefullyPlatform, and the OutputContent, DeliveryReceipt, OutputDestination, DeliveryStatus, and OutputDeliveryError records they use.
     - Harness exports: the Harness base class, specifications, run manifests, trajectory collection/sinks, and typed failures.
     - Multi-agent exports: MultiAgent, MagenticOneOrchestrator, TaskLedger, AgentBinding, AgentTransfer, and immutable ledger contracts.
     - Workflow exports: StateGraph, StateMachine, stages, validators, routers, policies, records, and typed errors.
@@ -36,7 +37,7 @@ Similar files:
 
 from __future__ import annotations
 
-__version__ = "0.2.1"
+__version__ = "0.3.0"
 
 from vidbyte.agents import (
     Agent,
@@ -61,6 +62,7 @@ from vidbyte.agents import (
     AggregateAgent,
     AggregateConfig,
     AggregateResult,
+    AnthropicSkill,
     BaseAgent,
     CallSpeedRecord,
     CallSpeedStats,
@@ -99,7 +101,9 @@ from vidbyte.agents import (
     CodexUsageResponse,
     CodingAgent,
     FinalizationContext,
+    GitHubSkill,
     HandoffAgent,
+    InlineSkill,
     JevAgent,
     JevAgentResponse,
     JevAgentSettings,
@@ -220,6 +224,7 @@ from vidbyte.agents import (
     JevTargetOutcomeEvidenceItem,
     JevTargetOutcomeItem,
     LedgerEvent,
+    LocalSkill,
     MagenticOneOrchestrator,
     ModelSpeedStats,
     MultiAgent,
@@ -228,6 +233,7 @@ from vidbyte.agents import (
     MultiAgentSettings,
     MultiAgentStopReason,
     MultiProviderAggregator,
+    OpenAISkill,
     OrchestrationContext,
     OrchestratorAction,
     OrchestratorDecision,
@@ -243,6 +249,10 @@ from vidbyte.agents import (
     RunSpeedSnapshot,
     RunSpeedStats,
     SkillDocument,
+    SkillEntry,
+    SkillSourceType,
+    SkillsShSkill,
+    SkillUnavailableReason,
     StepSpeedRecord,
     StepSpeedStats,
     StreamSpeedRecord,
@@ -261,6 +271,32 @@ from vidbyte.agents import (
     UsageRecord,
     UsageRollup,
     UsageTracker,
+)
+from vidbyte.agents.output import (
+    ConfluencePageOutput,
+    DeliveryReceipt,
+    DeliveryStatus,
+    DiscordOutput,
+    EmailOutput,
+    GitHubIssueOutput,
+    GitHubJobSummaryOutput,
+    GitLabIssueOutput,
+    GoogleChatOutput,
+    HubSpotTaskOutput,
+    JiraIssueOutput,
+    LinearIssueOutput,
+    NotionPageOutput,
+    OutputConnector,
+    OutputContent,
+    OutputDeliveryError,
+    OutputDestination,
+    OutputDispatcher,
+    SlackOutput,
+    TeamsOutput,
+    TelegramOutput,
+    TypefullyDraftOutput,
+    TypefullyPlatform,
+    WebhookOutput,
 )
 from vidbyte.agents.pricing import ProviderUsage
 from vidbyte.client import VidbyteSDK
@@ -829,6 +865,15 @@ __all__ = [
     "JevSkillsOutcome",
     "JevSkillStatus",
     "SkillDocument",
+    "AnthropicSkill",
+    "GitHubSkill",
+    "InlineSkill",
+    "LocalSkill",
+    "OpenAISkill",
+    "SkillEntry",
+    "SkillsShSkill",
+    "SkillSourceType",
+    "SkillUnavailableReason",
     "JevTargetOutcome",
     "JevTargetOutcomeEvidence",
     "JevTargetOutcomeEvidenceItem",
@@ -971,6 +1016,30 @@ __all__ = [
     "UsageRecord",
     "UsageRollup",
     "UsageTracker",
+    "ConfluencePageOutput",
+    "DeliveryReceipt",
+    "DeliveryStatus",
+    "DiscordOutput",
+    "EmailOutput",
+    "GitHubIssueOutput",
+    "GitHubJobSummaryOutput",
+    "GitLabIssueOutput",
+    "GoogleChatOutput",
+    "HubSpotTaskOutput",
+    "JiraIssueOutput",
+    "LinearIssueOutput",
+    "NotionPageOutput",
+    "OutputConnector",
+    "OutputContent",
+    "OutputDeliveryError",
+    "OutputDestination",
+    "OutputDispatcher",
+    "SlackOutput",
+    "TeamsOutput",
+    "TelegramOutput",
+    "TypefullyDraftOutput",
+    "TypefullyPlatform",
+    "WebhookOutput",
     "AlternativeChallengeContextItem",
     "AmbiguityContextItem",
     "AgentType",

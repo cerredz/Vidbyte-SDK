@@ -406,6 +406,22 @@ class SourcesBaseTests(unittest.TestCase):
         result = source.load(ArtifactRef(url="https://good.com/start"))
         self.assertEqual(result.items[0].title, "x")
 
+    def test_snapshot_url_names_the_redirect_target(self) -> None:
+        # @intent snapshot-url-is-where-the-bytes-came-from
+        # [Regression] Verify that after a redirect the snapshot names the final URL the bytes were read from.
+        source = DocumentSource(fetcher=RedirectingFetcher("https://good.com/moved"), allowlist=UrlAllowlist(allowed_hosts=frozenset({"good.com"})))
+        result = source.load(ArtifactRef(url="https://good.com/start"))
+        self.assertEqual(result.snapshot.url, "https://good.com/moved")
+        self.assertEqual(result.ref.url, "https://good.com/start")
+
+    def test_percent_encoded_request_form_is_not_a_redirect(self) -> None:
+        # @intent snapshot-url-is-where-the-bytes-came-from
+        # [Edge Case] Verify the percent-encoded request form of an IRI is not mistaken for a redirect target.
+        iri = "https://good.com/文档/a.md"
+        source = DocumentSource(fetcher=RedirectingFetcher("https://good.com/%E6%96%87%E6%A1%A3/a.md"), allowlist=UrlAllowlist(allowed_hosts=frozenset({"good.com"})))
+        result = source.load(ArtifactRef(url=iri))
+        self.assertEqual(result.snapshot.url, iri)
+
     def test_httpfetcher_reports_the_final_url_after_a_redirect(self) -> None:
         # [Hidden Assumption] urllib follows the 302 itself; FetchResponse.url must name where the bytes came from.
         server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _RedirectHandler)

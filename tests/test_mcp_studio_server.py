@@ -25,6 +25,7 @@ from unittest import mock
 
 from tests.agent_test_support import build_test_agent
 from vidbyte.agents import BaseAgent
+from vidbyte.agents.types import AgentMessage
 from vidbyte.mcp_server import McpStudioServer
 from vidbyte.mcp_server.server import (
     JSONRPC_METHOD_NOT_FOUND,
@@ -71,6 +72,16 @@ class FakeRunner:
     """A fake runner with arun method for BaseAgent to invoke."""
     async def arun(self, message: str, **kwargs: object) -> object:
         return FakeRunnerResult(text=f"ECHO: {message}")
+
+
+class RecordingRunner(FakeRunner):
+    """A FakeRunner that records every request it receives, prompt plus options such as system and messages."""
+    def __init__(self) -> None:
+        self.messages: list[str] = []
+
+    async def arun(self, message: str, **kwargs: object) -> object:
+        self.messages.append(f"{message}\n{kwargs!r}")
+        return await super().arun(message, **kwargs)
 
 
 class FakeRunnerResult:
@@ -147,6 +158,47 @@ class McpStudioServerTests(unittest.IsolatedAsyncioTestCase):
         })
         self.assertIn("result", response)
         self.assertNotIn("isError", response["result"])
+
+    async def test_tools_call_agents_run_does_not_share_history_between_calls(self) -> None:
+        runner = RecordingRunner()
+        agent = build_test_agent(
+            name="test-agent",
+            system_prompt="You are a test agent.",
+            runner=runner,
+            max_tool_rounds=1,
+            max_iterations=1,
+        )
+        server = McpStudioServer(agents={"test-agent": agent})
+        for request_id, prompt in ((1, "client A secret ALPHA-4417"), (2, "client B asks BRAVO")):
+            response = await self._dispatch(server, "tools/call", {
+                "name": "studio.agents.run",
+                "arguments": {"agent_name": "test-agent", "prompt": prompt},
+            }, request_id=request_id)
+            self.assertIn("result", response)
+            self.assertNotIn("isError", response["result"])
+        self.assertEqual(len(runner.messages), 2)
+        self.assertNotIn("ALPHA-4417", runner.messages[1])
+        self.assertEqual(agent.history, [])
+
+    async def test_tools_call_agents_run_keeps_preloaded_history(self) -> None:
+        runner = RecordingRunner()
+        agent = build_test_agent(
+            name="test-agent",
+            system_prompt="You are a test agent.",
+            runner=runner,
+            max_tool_rounds=1,
+            max_iterations=1,
+        )
+        agent.history.append(AgentMessage(sender="user", recipient="test-agent", content="preloaded PRELOAD-77"))
+        server = McpStudioServer(agents={"test-agent": agent})
+        response = await self._dispatch(server, "tools/call", {
+            "name": "studio.agents.run",
+            "arguments": {"agent_name": "test-agent", "prompt": "hello"},
+        })
+        self.assertNotIn("isError", response["result"])
+        self.assertEqual(len(agent.history), 1)
+        self.assertEqual(agent.history[0].content, "preloaded PRELOAD-77")
+        self.assertIn("PRELOAD-77", runner.messages[0])
 
     async def test_tools_call_unknown_agent(self) -> None:
         agent = self._make_agent("test-agent")
