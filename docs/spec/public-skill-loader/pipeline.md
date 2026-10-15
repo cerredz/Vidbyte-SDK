@@ -17,7 +17,7 @@ started: 2026-10-15 15:04
 | S1 spec + review | done | 15:22 | 17:35 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | r3 approved; 2 rounds SOUND WITH FIXES; 11 findings applied; spec-summary.md |
 | S2 tests | done | 17:40 | 18:15 | reports/S2-test-author.md | 20 tests (67 cases) in tests/features/public_skill_loader/; red confirmed (17 failed, 50 errors); S2_HEAD 467555d9 |
 | S3 implement | done | 18:20 | 21:40 | reports/S3-implementer.md | S3_HEAD c691c176; draft PR #1099; 67/67 new green; source stage 5243 passed 14 skipped; package stage passed; budget 0/0 files, 1/1 class, 3/3 root names |
-| S4 adversarial review | pending | | | | |
+| S4 adversarial review | running (3 reviews done; verifier running) | 21:45 | | reports/S4-review-{conformance,conventions,engineering}.md | C: 0/1/0 · V: 0/0/4 · E: 0/1/1 (Blocker/Major/Minor) |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
