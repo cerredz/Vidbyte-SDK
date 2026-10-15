@@ -3,7 +3,7 @@ slug: public-skill-loader
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-public-skill-loader
 branch: feat/public-skill-loader
-base_commit: 179d8adc8872d9a616f190c93c75b0169ec719c4
+base_commit: c9d31a7fb4128d1a609ce9702b0a55c71fcb1a3f  # rebased 2026-10-15 16:20 from 179d8adc (see Decisions)
 pr:
 until: none
 started: 2026-10-15 15:04
@@ -14,7 +14,7 @@ started: 2026-10-15 15:04
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 15:04 | 15:20 | reports/S0-scout.md | base_commit 179d8adc; context/code-map.md (4 sections, 18 files) |
-| S1 spec + review | running | 15:22 | | reports/S1-spec-author.md | |
+| S1 spec + review | running (round 1 reviewed; revision pending) | 15:22 | | reports/S1-spec-author.md, reports/S1-spec-review.md | r1, SOUND WITH FIXES |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -23,7 +23,7 @@ started: 2026-10-15 15:04
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 0/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 1/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Environment facts (carried into every briefing)
 - PR repo `cerredz/Vidbyte-SDK` (origin `https://github.com/cerredz/Vidbyte-SDK.git`), base `main`. Worktree `C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-public-skill-loader`, branch `feat/public-skill-loader`, created from `origin/main` `179d8adc`. The branch has NO upstream (orchestrator unset the auto-tracked `origin/main`); first push must be `git push -u origin feat/public-skill-loader`.
@@ -52,6 +52,10 @@ started: 2026-10-15 15:04
 - 2026-10-15 15:04 — Did not `git fetch` in the main checkout: `git ls-remote origin refs/heads/main` already equals local `origin/main` (`179d8adc`), so no fetch was needed and the main checkout's refs stay untouched.
 - 2026-10-15 15:04 — Unset the branch's auto-configured upstream (`origin/main`) so no later `git push` can target main.
 - 2026-10-15 15:05 — Recorded the parent session's seven consumer requirements in request.md §C and here as design inputs (not user decisions); item 5 (parser) carried with default "not built" unless the spec justifies it, per pipeline rule 11.
+
+- 2026-10-15 16:20 — S1 review round 1 (verdict SOUND WITH FIXES; 1 Blocker R-1, 2 Major, 3 Minor). R-1: `origin/main` moved after the base: `a7ed9cde` "release: bump vidbyte-sdk to 0.3.0 with the output connectors (#1085)" landed 15:34, then #1086–#1088 (`origin/main` = `c9d31a7f`). Orchestrator verified: tag `v0.3.0` = `a7ed9cde` exists on origin and PyPI's latest vidbyte-sdk is 0.3.0 (releases 0.1.0, 0.2.0, 0.2.1, 0.3.0). The S1 reviewer ran a `git fetch` (updated remote-tracking refs only; main checkout's working tree and branch untouched).
+- 2026-10-15 16:20 — DECIDED (orchestrator, from request.md §C, not a new user decision; user may override): the version target becomes **0.3.1**, not 0.2.2, on a branch rebased onto current `origin/main`. Reasons: (1) 0.3.0 is tagged and published, so a 0.2.2 literal on main would lower main's version (and `publish.yml` checks tag == `v{version}`); (2) request.md §C states the reason for the bump: "because the CLI will raise its floor to the first release that contains the loader" — with 0.3.0 published, that first release is the next patch, 0.3.1 (the user's choice of a patch bump for an additive export is preserved); (3) the only literal-0.2.2 path is a new `release/0.2.x` maintenance line cut from `179d8adc`, which is a release-process addition nobody asked for (pipeline rule 11) and keeps the loader off main; (4) the version phase is isolated and mechanical, so a user correction is cheap. Surfaced as Q-8 in the spec and prominently in spec-summary.md and the final report. Consequence for the CLI run: its pin `>=0.2.1,<0.3` must become `>=0.3.1,<0.4` and it must absorb 0.3.0.
+- 2026-10-15 16:20 — Rebased `feat/public-skill-loader` (4 docs-only commits, unpushed) onto `origin/main` `c9d31a7f` before S2, so tests and code target current main. The 4 new main commits touch no skills code: version literals (now `0.3.0` in the same nine places), `docs/design/release-0-3-0.md`, and compaction/provider fixes with their tests.
 
 ## User replies (verbatim)
 - none yet
