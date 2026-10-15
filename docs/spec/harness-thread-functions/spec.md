@@ -1,7 +1,7 @@
 ---
 spec: harness-thread-functions
 title: "Harness thread functions: run, continue and fork Grok, opencode and Muse threads with the caller's API key"
-status: approved
+status: implemented
 revision: 4
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-harness-thread-functions
