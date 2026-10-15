@@ -226,3 +226,41 @@ No new probe. A-24 uses the measurement of the r1 probe home: `du` of the scratc
 - A-22: opencode providers that sign in through a plugin.
 - A-25: whether `OPENCODE_DISABLE_PROJECT_CONFIG` covers `.opencode/`.
 - The owner's answers to Q-8 (the Meta name) and Q-9 (the opencode project-config switch).
+
+## Addendum — r4 (S2 consistency fixes; approved, 2026-10-15)
+
+The coordinator sent four spec defects from `reports/S2-test-author.md` ("Spec defects that made tests hard", items 1, 3, 4 and 6). The tests are the interface contract, so the spec was aligned to them. No test contradicts KD-1…KD-9. No test was edited. `status: approved`, revision 4. All eight S2 items are logged in §16 as S2-1…S2-8.
+
+### Changes per finding
+
+- **S2-1, `WSLENV` order.** §9.2 (exec and serve), §9.3 and rows 42 and 44 now say the same thing: the caller's own `WSLENV` value comes first (when it has one), then each overlay name and the mark name with `/u`, in any order, joined by `:` with no empty entry. Exec forwards five names. Serve forwards four and never `META_API_KEY`. This matches `test_harness_threads_wsl.py`: the first entry equals the caller's value, and the rest are compared as a set.
+- **S2-3, a Muse fork answering its source id.** New EC-45. When `session/fork` answers with the source id, the call raises `muse.protocol_mismatch` (as EC-22 does for Grok and opencode). `MuseWire.read_answer` decides this, so `muse exec` never starts, and `thread_id` is the source id. A Muse `exec` whose session stream is not the id it was given raises `muse.thread_not_found`, which matches the Grok and opencode continue rule that `test_continue_answered_on_another_thread_is_thread_not_found` pins. That error carries the answered stream id (INV-5). Both cases use existing codes, so `FailureCode` still has exactly 28 appended members. INV-6, INV-11, the §5 sequence diagram, §9.2 and rows 43 and 44 were updated.
+- **S2-4, config fields.** AC-5, INV-4, EC-5, EC-33, §5 and §9.1 now say:
+  - A malformed config field (agent, variant, distro, command, timeout or an enum value) is refused when the caller builds the record. The constructor raises `ConfigurationError` naming the field, which `test_config_record_refuses_a_bad_field_when_built` already tests.
+  - A function refuses only a `config` of the wrong record type, or a mapping, with `configuration.invalid_argument` naming `config`.
+- **S2-6, native serve and the caller's `META_API_KEY`.** Decision: serve gets no `META_API_KEY` natively either.
+  - Why: under KD-2's derived rule (INV-3), a run uses the caller's key even when the machine holds an environment key. Probes 12 and 13 show that serve needs no credential, but not that it ignores one it is given.
+  - Mechanism: a new `CliInvocation.env_remove: tuple[str, ...] = ()` field (row 27), which `CliRunner` leaves out of the inherited environment before it adds the overlay (row 30). This is a D-13 exception, and only Muse serve sets it (row 44, §9.2, §9.3).
+  - INV-3 and AC-3 now say this.
+  - Rejected: setting an empty `META_API_KEY` in serve's overlay. Muse's handling of an empty value is unverified, and in WSL mode it would put `META_API_KEY/u` into `WSLENV`, which the WSL serve test forbids.
+  - No public name, class, file or enum is added, so the §8.4 budget is unchanged. The new field has a default, and no test pins `CliInvocation`'s field list, so every existing test still builds the record unchanged.
+- **No change** (S2-2, S2-5, S2-7, S2-8):
+  - S2-2: the hard-link `samefile` proof is a stronger form of AC-16.
+  - S2-5: row 40 already omits `skills` when none are given.
+  - S2-7: EC-30's "or" covers the `execvpe` text with exit 1.
+  - S2-8: `-1` passes INV-15 rule 2 by design of the mechanical rule.
+
+### Stage E self-check (r4)
+
+- **IDs:** contiguous, none renumbered. INV 1–23, AC 1–21, EC 1–45 (new EC-45), FR 1–17, NFR 1–7, D 1–27, T 1–6, W 1–11, A 1–25, Q 1–11 (0 blocking).
+- **Guards and coverage:** EC-45 is cited by INV-6, INV-11, §9.2 and rows 43 and 44. The D-13 exception is cited by INV-3, AC-3, §8.5, §9.2, §9.3 and rows 27, 30 and 44.
+- **Budget and contract:** no new file, class, enum, public name or `FailureCode` member. §4 and the public names in §8.5 are unchanged. `CliInvocation` gains one defaulted field.
+- **No stale text:** no `<existing>:` `WSLENV` form, no "or a config field", and no "agent, variant or distro" in AC-5. `META_API_KEY` in §9.3 is scoped to the `muse exec` child.
+- **Paths:** the edits add no file path outside §11, §12 and the AC Proof column.
+
+### Test additions S2 must make (also in the STATUS block)
+
+1. `tests/features/harness_threads/test_harness_threads_threads.py`: a native `fork_muse_thread` whose serve answers `session/fork` with the source id raises `muse.protocol_mismatch`. `thread_id` equals the source id, and no `muse-exec` start is logged (EC-45, INV-6, INV-11).
+2. `tests/features/harness_threads/test_harness_threads_threads.py`: a native `continue_muse_thread` whose `exec` answers on another session stream raises `muse.thread_not_found` carrying that stream's id (EC-45, INV-11, INV-5). The Muse exec stand-in needs a `continue_other_id`-style mode, like the Grok and opencode roles have.
+3. `tests/features/harness_threads/test_harness_threads_credentials.py`: with the caller's environment holding its own `META_API_KEY`, native Muse continue and fork. Every `muse-serve` start has `credentials["META_API_KEY"] is None`, and every `muse-exec` start carries the digest of the call's `api_key` (AC-3, INV-3, §9.2, D-13 exception). Add it to AC-3's Proof column.
+4. `tests/features/harness_threads/test_harness_threads_runner.py`: `CliInvocation(..., env_remove=("VIDBYTE_PARENT_PROBE",))` starts a child that does not see that inherited name. The overlay still applies, and `os.environ` is unchanged (D-13 exception, §12.3 rows 27 and 30).
