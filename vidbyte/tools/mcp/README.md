@@ -160,26 +160,6 @@ text blocks silently drops image, audio, and structured results.
 5. **Process exit fails all pending requests.** Never leave a waiter unresolved.
 6. **Non-JSON stdout lines are a protocol violation**, and must not crash the reader.
 
-## Native Peer Options
-
-`McpStdioTransport` also carries the JSON-RPC peers of the native Grok and Muse hosts in
-`vidbyte/harnesses/native/`. Those hosts use options that MCP clients leave at their defaults:
-
-- `on_message` is called with each incoming frame that has a `method` (server requests and
-  notifications); such a frame never resolves a pending request.
-- `send_request` returns the pending answer as a future, `notify` sends a notification, and
-  `respond` answers a server request with exactly one of `result` or `error`.
-- `request(..., timeout_seconds=...)` sets the deadline for one call.
-- `exit_grace_seconds` lets the peer exit by itself after stdin closes, and
-  `stop_process_tree=True` starts it in its own process group and always stops the whole tree
-  through `ProcessStopper.stop_tree`, with bounded waits before the pipes are closed.
-- `returncode` is the child's exit code once it has exited, and `None` while it runs. It is
-  kept after `close()`, so a host can tell why a peer stopped before it answered.
-
-With the defaults (`on_message=None`, `exit_grace_seconds=None`, `stop_process_tree=False`) MCP
-behaviour is unchanged. Native peers pass the caller's environment as the `env` overlay, because
-the vendor CLI needs its own login state; MCP servers keep the restricted environment above.
-
 ## Adding A Transport
 
 1. Implement the `McpTransport` protocol in `transport.py`.

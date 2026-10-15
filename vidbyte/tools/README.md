@@ -86,9 +86,9 @@ print(catalog.provider_schemas("openai"))
 - `executor.py`: local tool call execution.
 - `security/`: permission policies and sandbox contracts.
 - `mcp/`: MCP clients, transports, presets, and bridged tools.
-- `builtins/`: a minimal subprocess bash tool, code search, context, context primitives, editing, memory, MCP, handoff, pause, reasoning traces, and utility tools; `native_host_tool.py` is the base of the native host tools, with one tool per host function in the `grok/`, `opencode/`, `muse/` and `harness_backends/` subpackages.
+- `builtins/`: a minimal subprocess bash tool, code search, context, context primitives, editing, memory, MCP, handoff, pause, reasoning traces, and utility tools.
 - `builtins/operations/`: priced search and fetch tools plus the executing provider clients.
-- `toolsets/`: pre-assembled tool catalogs, including `CodingAgentTools`, the seven tools a `CodingAgent` starts with, and `GrokTools`, `OpencodeTools`, `MuseTools` and `HarnessBackendTools` over the native hosts and backend profiles. The MCP server runs tools without a `PermissionPolicy`, so expose a host over MCP with its toolset's `read_only(host)`, which holds the READ tools only.
+- `toolsets/`: pre-assembled tool catalogs, including `CodingAgentTools`, the seven tools a `CodingAgent` starts with.
 
 ## Cooperative Pause
 
