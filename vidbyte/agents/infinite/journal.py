@@ -175,7 +175,9 @@ class InfiniteRunJournal:
     def _append(self, event: InfiniteJournalEvent, fields: Mapping[str, object]) -> None:
         # @intent every-record-is-durable-before-it-counts
         # Each record is flushed and fsynced before the caller moves on,
-        # so resume can trust every whole line on disk.
+        # so resume can trust every whole line on disk. Records are
+        # ASCII JSON, so text UTF-8 cannot encode, such as a lone
+        # surrogate in a model's reply, is escaped instead of failing.
         record = {"event": event.value, "at": datetime.now(timezone.utc).isoformat(timespec="seconds"), **fields}
         with self._lock:
             prefix = ""
@@ -184,7 +186,7 @@ class InfiniteRunJournal:
                 os.truncate(self.path, offset)
                 self._repair = None
             with self.path.open("a", encoding="utf-8", newline="\n") as handle:
-                handle.write(f"{prefix}{json.dumps(record, ensure_ascii=False)}\n")
+                handle.write(f"{prefix}{json.dumps(record)}\n")
                 handle.flush()
                 os.fsync(handle.fileno())
 

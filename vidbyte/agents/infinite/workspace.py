@@ -273,7 +273,10 @@ class InfiniteWorkspace:
         # @intent notes-stay-in-their-lane
         # A note lives inside the workspace, has a text suffix, and is
         # never a seed, a run journal, or a bookkeeping file, which only
-        # the memory tools and the journal write.
+        # the memory tools and the journal write. Its path is one line,
+        # because the pair's result card lists it as one.
+        if path and path.splitlines() != [path]:
+            raise ToolExecutionError(f"{path!r} breaks across lines; give a note path on one line.")
         try:
             target = FileSystemPermissions.resolve_scoped_path(self._scope, path)
         except ToolExecutionError as exc:
