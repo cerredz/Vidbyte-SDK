@@ -1,7 +1,7 @@
 ---
 spec: infinite-memory-agent
 title: InfiniteMemory agent — a delegating agent with a shared, guarded file workspace for memory
-status: tests-written
+status: implemented
 revision: 4
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-infinite-memory-agent
@@ -9,7 +9,7 @@ branch: feat/infinite-memory-agent
 base_commit: d9c01461b9e5d8a1265ee85128416b986841ce90
 created: 2026-10-15
 updated: 2026-10-15
-pr:
+pr: https://github.com/cerredz/Vidbyte-SDK/pull/1084
 ---
 
 # Spec: InfiniteMemory agent — a delegating agent with a shared, guarded file workspace for memory
