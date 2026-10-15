@@ -1,13 +1,13 @@
 """FILE: tests/features/harness_threads/test_harness_threads_runner.py
 
-PURPOSE: The canonical process helper every thread function runs through (§8.5 CliRunner, CliInvocation; D-13, FR-12): the child inherits the caller's environment plus an env_overlay that wins, the overlay and stdin text stay out of repr, stdin is a pipe that closes or DEVNULL, output is capped while draining continues, the timeout stops the whole tree within its bound, launch failures are fields, and cancellation stops the tree and re-raises.
+PURPOSE: The canonical process helper every thread function runs through (§8.5 CliRunner, CliInvocation; D-13, FR-12): the child inherits the caller's environment, minus the env_remove names, plus an env_overlay that wins, the overlay and stdin text stay out of repr, stdin is a pipe that closes or DEVNULL, output is capped while draining continues, the timeout stops the whole tree within its bound, launch failures are fields, and cancellation stops the tree and re-raises.
 ROLE IN CODEBASE: Start here when a CLI run hangs, leaks a process, reads the caller's stdin, loses the caller's environment, or raises instead of reporting. Carried over from the deleted grok_host pack's process-helper tests, rewritten for env_overlay (the ManagedProcess tests went with ManagedProcess).
 ARCHITECTURE NOTE: Children are small inline Python programs run with sys.executable. The stdin test points this process's fd 0 at a pipe that never reaches EOF, so a child that inherited stdin would block and the test would see a timeout. Liveness is checked on win32 and POSIX.
 FUNCTION INVENTORY: child builds an argv for an inline program; invocation builds a CliInvocation; never_ending_stdin swaps fd 0 for an open pipe; the test_* functions are one behaviour each.
 COMMON MODIFICATION PATTERNS: Keep children self-contained and bounded (each exits by itself within CHILD_LIMIT_SECONDS).
 WHAT NOT TO DO IN THIS FILE: 1. Do not mock asyncio subprocesses; the helper's job is real process handling. 2. Do not assert exact exit codes after a kill; they differ by platform.
 KNOWN EDGE CASES: On win32 os.dup2 onto fd 0 also replaces the Win32 standard input handle, so an inheriting child does block there too (checked on Windows 11 with Python 3.11).
-RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §8.5 (CliInvocation, CliRunner), D-13, §12.3 rows 27, 30
+RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §8.5 (CliInvocation, CliRunner), D-13 and its r4 exception, §12.3 rows 27, 30
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads/test_harness_threads_runner.py
 """
 
@@ -87,6 +87,18 @@ async def test_child_inherits_the_environment_plus_the_overlay(lib_api, tmp_path
     assert Path(lines[3]).resolve() == tmp_path.resolve()
     assert dict(os.environ) == before
 
+
+
+@pytest.mark.asyncio
+async def test_env_remove_drops_an_inherited_name_before_the_overlay(lib_api, monkeypatch) -> None:
+    # D-13 exception / rows 27, 30: the child starts with os.environ minus env_remove, then env_overlay on top; os.environ is unchanged.
+    monkeypatch.setenv("VIDBYTE_PARENT_PROBE", "from-parent")
+    monkeypatch.setenv("VIDBYTE_KEPT_PROBE", "kept")
+    before = dict(os.environ)
+    source = "import os; print(os.environ.get('VIDBYTE_PARENT_PROBE', '<absent>')); print(os.environ.get('VIDBYTE_KEPT_PROBE')); print(os.environ.get('VIDBYTE_OVERLAY_PROBE'))"
+    outcome = await lib_api.CliRunner().run(invocation(lib_api, child(source), env_overlay={"VIDBYTE_OVERLAY_PROBE": "from-overlay"}, env_remove=("VIDBYTE_PARENT_PROBE",)))
+    assert outcome.stdout.splitlines()[:3] == ["<absent>", "kept", "from-overlay"]
+    assert dict(os.environ) == before
 
 @pytest.mark.asyncio
 async def test_runner_returns_exit_code_and_output(lib_api) -> None:

@@ -462,7 +462,7 @@ def run_muse_exec(scenario: dict[str, Any], args: list[str], env: dict[str, str]
     state.mkdir(parents=True, exist_ok=True)
     requested = options.get("--session-id")
     if requested is not None and (state / requested).is_file():
-        session = requested
+        session = new_id() if mode == "continue_other_id" else requested
     else:
         session = new_id()
         if requested is not None:

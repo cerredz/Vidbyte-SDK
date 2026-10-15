@@ -1,13 +1,13 @@
 """FILE: tests/features/harness_threads/test_harness_threads_credentials.py
 
-PURPOSE: The caller's key and the child process contract: the key wins over every stored or environment credential (AC-3, INV-3, EC-7, EC-8, D-6), it never reaches argv, stdin, an error, a repr or a log and `os.environ` is never written (AC-4, INV-2, EC-10, NFR-3), each child gets its documented variables, standard input and folder (INV-10, INV-17, INV-18, §9.2), and a successful call writes only where the spec allows and starts only the expected processes (AC-19, INV-12, INV-13).
+PURPOSE: The caller's key and the child process contract: the key wins over every stored or environment credential (AC-3, INV-3, EC-7, EC-8, D-6) and the Muse serve exchange gets no META_API_KEY at all, not even the caller's own (§9.2, D-13 exception), it never reaches argv, stdin, an error, a repr or a log and `os.environ` is never written (AC-4, INV-2, EC-10, NFR-3), each child gets its documented variables, standard input and folder (INV-10, INV-17, INV-18, §9.2), and a successful call writes only where the spec allows and starts only the expected processes (AC-19, INV-12, INV-13).
 ROLE IN CODEBASE: Start here when a run bills the wrong account, a key shows up anywhere, or a call leaves files behind.
 ARCHITECTURE NOTE: The stand-in logs credential digests, never values. The AC-4 stand-in echoes everything it was given (argv, stdin, the raw credential variables) into its own error output, with copies of the key straddling NATIVE_VENDOR_MESSAGE_MAX_CHARS, so a factory that caps before it scrubs leaves a key fragment behind. A spy around CliRunner.run records each CliInvocation and delegates to the real runner, so the reprs the call built can be checked without replacing the seam.
 FUNCTION INVENTORY: fragments lists the 8-character windows of a key; spy_runner wraps CliRunner.run; the test_* functions are one behaviour each.
 COMMON MODIFICATION PATTERNS: A new credential variable is one more entry in fake_harness.CREDENTIAL_NAMES and one more check in test_child_authenticates_with_the_callers_key.
 WHAT NOT TO DO IN THIS FILE: Do not log or print the key; compare digests from the stand-in log.
 KNOWN EDGE CASES: The sandbox redirects tempfile.tempdir, so the Muse per-call config folder is created, and must be removed, inside the sandbox. The Grok stand-in writes its own sessions/ folder into GROK_HOME, as Grok does; AC-19 allows that and nothing else there.
-RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §6.1 INV-2, INV-3, INV-10, INV-12, INV-13, INV-17, INV-18, §6.2 AC-3, AC-4, AC-19, §9.2, §9.3
+RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §6.1 INV-2, INV-3, INV-10, INV-12, INV-13, INV-17, INV-18, §6.2 AC-3, AC-4, AC-19, §8.1 D-13, §9.2, §9.3
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads/test_harness_threads_credentials.py
 """
 
@@ -73,6 +73,19 @@ async def test_child_authenticates_with_the_callers_key(sandbox, call, pack, mon
         assert sandbox.starts("muse-exec")[1]["plain"]["XDG_CONFIG_HOME"] != str(config_home), "each call gets a fresh folder"
     assert dict(os.environ) == before
 
+
+
+@pytest.mark.asyncio
+async def test_muse_serve_never_sees_a_key_even_the_callers_own(sandbox, call, pack, monkeypatch) -> None:
+    # AC-3 / INV-3 / §9.2 / D-13 exception: serve gets no META_API_KEY (env_remove drops the caller's own); every exec gets api_key.
+    monkeypatch.setenv("META_API_KEY", "caller-own-meta-key-value")
+    first = await call("muse")
+    await call("muse", "continue", "Again.", thread_id=first.thread_id)
+    await call("muse", "fork", "Branch.", thread_id=first.thread_id)
+    serves, execs = sandbox.starts("muse-serve"), sandbox.starts("muse-exec")
+    assert len(serves) == 2 and len(execs) == 3
+    assert [record["credentials"]["META_API_KEY"] for record in serves] == [None, None]
+    assert [record["credentials"]["META_API_KEY"] for record in execs] == [pack.key_digest(pack.API_KEY)] * 3
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("harness", HARNESSES)

@@ -1,13 +1,13 @@
 """FILE: tests/features/harness_threads/test_harness_threads_threads.py
 
-PURPOSE: Thread ids across the verbs: continue sends each vendor's resume form and keeps the id (AC-6, FR-5), fork sends the fork form and returns a new id (AC-7, FR-6, D-9), Muse checks a thread over batch `muse serve` before it runs `exec` (AC-8, INV-11, D-17, EC-19), unknown ids fail as each vendor reports them (EC-20, EC-21), a fork that returns its source fails (EC-22), Grok compares the answered id case-insensitively (INV-11), and two spellings of one workspace reach the same Grok thread (EC-40, D-26).
+PURPOSE: Thread ids across the verbs: continue sends each vendor's resume form and keeps the id (AC-6, FR-5), fork sends the fork form and returns a new id (AC-7, FR-6, D-9), Muse checks a thread over batch `muse serve` before it runs `exec` (AC-8, INV-11, D-17, EC-19), unknown ids fail as each vendor reports them (EC-20, EC-21), a fork that returns its source fails (EC-22; for Muse on the serve answer, before any exec, EC-45), a Muse exec answering on another stream is thread_not_found (EC-45), Grok compares the answered id case-insensitively (INV-11), and two spellings of one workspace reach the same Grok thread (EC-40, D-26).
 ROLE IN CODEBASE: Start here when continue or fork reaches the wrong thread, or when Muse starts a billed run on an id it never checked.
 ARCHITECTURE NOTE: The stand-in keeps threads as files (Grok under GROK_HOME keyed by --cwd, as Grok does; opencode and Muse in the scenario state folder), so continue and fork are checked against real vendor-side state rather than canned answers. `muse exec --session-id <unknown>` silently starts a new thread in the stand-in, as Muse 1.0.1 does, and logs that it did.
 FUNCTION INVENTORY: serve_frames returns what the batch `muse serve` stand-in received; the test_* functions are one behaviour each.
 COMMON MODIFICATION PATTERNS: A new verb is a spec change first (D-2), then one more parametrized case here.
 WHAT NOT TO DO IN THIS FILE: Do not fabricate thread ids that a stand-in never created for the success paths; read them from the stand-in's answer records.
 KNOWN EDGE CASES: The Muse fork's new id comes from the serve exchange (the stand-in's `forked` record), not from exec.
-RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §6.1 INV-5, INV-11, §6.2 AC-6 to AC-8, §6.3 EC-19 to EC-22, EC-40, §9.2
+RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §6.1 INV-5, INV-11, §6.2 AC-6 to AC-8, §6.3 EC-19 to EC-22, EC-40, EC-45, §9.2
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads/test_harness_threads_threads.py
 """
 
@@ -166,3 +166,27 @@ async def test_grok_continue_reaches_the_thread_through_another_spelling_of_the_
     run_start, continue_start = sandbox.starts("grok")
     assert continue_start["plain"]["GROK_HOME"] == run_start["plain"]["GROK_HOME"]
     assert continue_start["options"]["--cwd"] == run_start["options"]["--cwd"] == str(sandbox.workspace)
+
+
+@pytest.mark.asyncio
+async def test_muse_fork_answered_with_its_source_is_protocol_mismatch_before_any_exec(api, sandbox, call, check_error) -> None:
+    # EC-45 / INV-6 / INV-11: session/fork answering the source id is decided on the serve answer, so exec never starts.
+    first = await call("muse")
+    with pytest.raises(api.NativeThreadError) as caught:
+        await call("muse", "fork", "Branch.", thread_id=first.thread_id, fake={"serve_mode": "fork_returns_source"})
+    assert [record["session"] for record in sandbox.records("forked")] == [first.thread_id]
+    check_error(caught.value, harness="muse", verb="fork", code="muse.protocol_mismatch", workspace=sandbox.workspace, thread_id=first.thread_id)
+    assert len(sandbox.starts("muse-exec")) == 1, "only the first run's exec; the fork never reached exec"
+
+
+@pytest.mark.asyncio
+async def test_muse_continue_answered_on_another_stream_is_thread_not_found(api, sandbox, call, check_error) -> None:
+    # EC-45 / INV-11 / INV-5: the exec's session stream is not the id sent with --session-id; the error carries the stream id Muse answered.
+    first = await call("muse")
+    with pytest.raises(api.NativeThreadError) as caught:
+        await call("muse", "continue", "Again.", thread_id=first.thread_id, fake={"mode": "continue_other_id"})
+    execs = sandbox.starts("muse-exec")
+    assert len(execs) == 2 and execs[-1]["options"]["--session-id"] == first.thread_id
+    answered = sandbox.records("session", "muse-exec")[-1]["session"]
+    assert answered != first.thread_id
+    check_error(caught.value, harness="muse", verb="continue", code="muse.thread_not_found", workspace=sandbox.workspace, thread_id=answered)
