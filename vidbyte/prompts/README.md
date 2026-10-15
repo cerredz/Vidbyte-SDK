@@ -64,9 +64,9 @@ prompt text.
 | Failure Pattern Repair | `failure_pattern_repair` | rulebook_feedback_loop, dependency_shape_triage, stage_gate_controller, evaluator_red_team, selective_regeneration_loop | [failure_pattern_repair/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/failure_pattern_repair) |
 | Goal Behavior | `goals` | goal_prompt | [goals/goal_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/goals/goal_prompt.md) |
 | Handoff | `handoff` | system_prompt | [handoff/handoff.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/handoff/handoff.md) |
+| InfiniteMemory Agent | `infinite_memory` | root_system_prompt, generator_system_prompt, verifier_system_prompt, task_prompt, verifier_task_prompt, resume_prompt, result_card, replayed_label, launch_rejected_prompt, memory_rejected_prompt, remember_saved_prompt, remember_staged_prompt, note_saved_prompt, entry_dropped_prompt, quota_line, map_header, launch_tool_description, launch_tasks_description, launch_name_description, launch_goal_description, launch_done_criteria_description, launch_generator_prompt_description, launch_verifier_prompt_description, launch_context_description, launch_tools_description, remember_tool_description, remember_kind_description, remember_text_description, remember_tags_description, remember_refs_description, remember_supersedes_description, write_note_tool_description, note_path_description, write_note_text_description, write_note_file_description, edit_file_tool_description, edit_file_old_text_description, edit_file_new_text_description, drop_entry_tool_description, drop_entry_id_description | [infinite_memory/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory) |
 | Jev Clarification | `jev_clarification` | system_prompt | [jev_clarification/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_clarification/system_prompt.md) |
 | Jev Bulk Work | `jev_bulk_work` | tool_description, tasks_description, task_prompt, worker_system_prompt, synthesis_prompt, rejected_prompt, closed_prompt | [jev_bulk_work/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_bulk_work) |
-| InfiniteMemory Agent | `infinite_memory` | root_system_prompt, generator_system_prompt, verifier_system_prompt, task_prompt, verifier_task_prompt, resume_prompt, result_card, replayed_label, launch_rejected_prompt, memory_rejected_prompt, remember_saved_prompt, remember_staged_prompt, note_saved_prompt, entry_dropped_prompt, quota_line, map_header, launch_tool_description, launch_tasks_description, launch_name_description, launch_goal_description, launch_done_criteria_description, launch_generator_prompt_description, launch_verifier_prompt_description, launch_context_description, launch_tools_description, remember_tool_description, remember_kind_description, remember_text_description, remember_tags_description, remember_refs_description, remember_supersedes_description, write_note_tool_description, note_path_description, write_note_text_description, write_note_file_description, edit_file_tool_description, edit_file_old_text_description, edit_file_new_text_description, drop_entry_tool_description, drop_entry_id_description | [infinite_memory/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory) |
 | Jev Clone | `jev_clone` | clone_prompt, results_prompt | [jev_clone/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_clone) |
 | Jev Continuation | `jev_continuation` | continue_prompt | [jev_continuation/continue_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_continuation/continue_prompt.md) |
 | Jev Fresh Continuation | `jev_fresh_continuation` | fresh_prompt | [jev_fresh_continuation/fresh_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_fresh_continuation/fresh_prompt.md) |
@@ -225,6 +225,23 @@ the work cold.
 
 Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/handoff/handoff.md>
 
+#### InfiniteMemory Agent — `infinite_memory`
+
+Instructions for InfiniteMemoryAgent, a root agent that delegates its work to
+generator and verifier pairs and keeps memory in one shared workspace folder.
+`root_system_prompt`, `generator_system_prompt`, and `verifier_system_prompt` are
+the rules each role's system prompt carries; the verifier's ends with the
+`VERDICT:` line it must write. `task_prompt`, `verifier_task_prompt`, and
+`resume_prompt` brief a generator, a verifier, and a resumed root, and
+`result_card` and `replayed_label` are what a parent receives for each pair. The
+`*_saved_prompt`, `*_rejected_prompt`, `remember_staged_prompt`,
+`entry_dropped_prompt`, and `quota_line` leaves are the memory and launch tools'
+replies, `map_header` opens the workspace map, and the `*_description` leaves are
+the model-facing descriptions of `launch_subagent`, `remember`, `write_note`,
+`edit_file`, and `drop_entry` and of their parameters.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory>
+
 #### Jev Clarification — `jev_clarification`
 
 The system prompt for JevClarificationAgent, the small generative agent a JevAgent
@@ -255,23 +272,6 @@ check them and finish. `rejected_prompt` and `closed_prompt` answer invalid task
 and a second call.
 
 Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_bulk_work>
-
-#### InfiniteMemory Agent — `infinite_memory`
-
-Instructions for InfiniteMemoryAgent, a root agent that delegates its work to
-generator and verifier pairs and keeps memory in one shared workspace folder.
-`root_system_prompt`, `generator_system_prompt`, and `verifier_system_prompt` are
-the rules each role's system prompt carries; the verifier's ends with the
-`VERDICT:` line it must write. `task_prompt`, `verifier_task_prompt`, and
-`resume_prompt` brief a generator, a verifier, and a resumed root, and
-`result_card` and `replayed_label` are what a parent receives for each pair. The
-`*_saved_prompt`, `*_rejected_prompt`, `remember_staged_prompt`,
-`entry_dropped_prompt`, and `quota_line` leaves are the memory and launch tools'
-replies, `map_header` opens the workspace map, and the `*_description` leaves are
-the model-facing descriptions of `launch_subagent`, `remember`, `write_note`,
-`edit_file`, and `drop_entry` and of their parameters.
-
-Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory>
 
 #### Jev Clone — `jev_clone`
 

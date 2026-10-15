@@ -216,7 +216,7 @@ class InfinitePair(BasePipeline):
         # Each child gets its own memory tools over this pair's shared
         # staged and dropped lists, and the card lists the files both
         # wrote.
-        writer =InfiniteAgentMemory(launch.workspace, key=f"{self.key}/{INFINITE_GENERATOR_KEY}", role=InfiniteAgentRole.GENERATOR, run_id=launch.journal.run_id, staged=self.staged, dropped=self.dropped)
+        writer = InfiniteAgentMemory(launch.workspace, key=f"{self.key}/{INFINITE_GENERATOR_KEY}", role=InfiniteAgentRole.GENERATOR, run_id=launch.journal.run_id, staged=self.staged, dropped=self.dropped)
         checker = InfiniteAgentMemory(launch.workspace, key=f"{self.key}/{INFINITE_VERIFIER_KEY}", role=InfiniteAgentRole.VERIFIER, run_id=launch.journal.run_id, staged=self.staged, dropped=self.dropped)
         # @intent one-failed-pair-never-sinks-its-siblings
         # Every SDK, disk, or decode error, up to and including the card
