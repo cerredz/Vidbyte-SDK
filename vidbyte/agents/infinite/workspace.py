@@ -110,9 +110,9 @@ class InfiniteWorkspace:
     def commit_entry(self, draft: InfiniteEntryDraft, *, by: str, verified_by: str | None, run: str) -> InfiniteEntry:
         """Append the draft as a new live entry, moving the entry it supersedes to superseded.jsonl, and return it."""
         with self._lock:
-            # Read the live and the replaced entries again under the lock,
-            # because other agents may have committed since this entry
-            # was staged.
+            # Read the live and the replaced entries again under the
+            # lock, because other agents may have committed since this
+            # entry was staged.
             live_text = self._text(INFINITE_ENTRIES_FILE)
             live = self._entry_lines(INFINITE_ENTRIES_FILE, live_text)
             retired_text = self._text(INFINITE_SUPERSEDED_FILE)
@@ -129,9 +129,9 @@ class InfiniteWorkspace:
             line = self._entry_json(entry)
 
             # @intent supersede-is-a-move
-            # A superseded entry leaves entries.jsonl unchanged in form and
-            # lands, byte for byte, in superseded.jsonl, so grep over the
-            # live memory no longer finds it.
+            # A superseded entry leaves entries.jsonl unchanged in form
+            # and lands, byte for byte, in superseded.jsonl, so grep
+            # over the live memory no longer finds it.
             kept = [raw for old, raw in live if old.id != draft.supersedes]
             moved = [raw for old, raw in live if old.id == draft.supersedes]
             changed = {INFINITE_ENTRIES_FILE: "".join(f"{raw}\n" for raw in (*kept, line))}
@@ -180,8 +180,8 @@ class InfiniteWorkspace:
             if not target.is_file():
                 raise ToolExecutionError(f"{relative} does not exist; create it with write_note first.")
             # @intent edits-replace-exactly-one-match
-            # An edit must name one place in the file, so zero or several
-            # matches are refused with the count found.
+            # An edit must name one place in the file, so zero or
+            # several matches are refused with the count found.
             content = target.read_text(encoding="utf-8", errors="replace")
             matches = SubstringCounter.count_overlapping(content, old_text) if old_text else 0
             if matches != 1:
@@ -195,8 +195,9 @@ class InfiniteWorkspace:
     def map_text(self) -> str:
         """Render the workspace map: the totals against their caps, then one line per file with its tokens and description."""
         # @intent the-map-never-fails-on-content
-        # Every agent needs the map, so a malformed bookkeeping line only
-        # costs that file its description; it never stops the render.
+        # Every agent needs the map, so a malformed bookkeeping line
+        # only costs that file its description; it never stops the
+        # render.
         counts = self._file_tokens()
         descriptions = self._descriptions(self._text(INFINITE_FILES_FILE))
         live = sum(1 for line in self._text(INFINITE_ENTRIES_FILE).split("\n") if line.strip())
@@ -308,9 +309,9 @@ class InfiniteWorkspace:
 
     def _replace(self, relative: str, text: str) -> None:
         # Write to a temporary file beside the target and swap it in, so
-        # no reader ever sees a half-written file. A failed write or swap
-        # removes the temporary file, which would otherwise count toward
-        # the caps, and leaves the target as it was.
+        # no reader ever sees a half-written file. A failed write or
+        # swap removes the temporary file, which would otherwise count
+        # toward the caps, and leaves the target as it was.
         target = self.root / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         handle, temporary = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")

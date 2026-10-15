@@ -64,7 +64,8 @@ class InfiniteWorkspaceSettings:
 
     def __post_init__(self) -> None:
         # Keep the workspace folder as an absolute path. The folder may
-        # not exist yet; the workspace creates it when the agent is built.
+        # not exist yet; the workspace creates it when the agent is
+        # built.
         object.__setattr__(self, "root", self._resolved_root())
 
         # Accept the preset's value as text too, and keep the enum.
@@ -156,7 +157,8 @@ class InfiniteMemoryAgentSettings:
         # These settings configure the root and every subagent it
         # starts, so a bad value is refused here, before any agent or
         # workspace exists, and names the field that must change. The
-        # provider, policy, and loop are applied to every agent as given.
+        # provider, policy, and loop are applied to every agent as
+        # given.
         for name in ("name", "system_prompt", "model_name"):
             value = getattr(self, name)
             if not isinstance(value, str) or not value.strip():
@@ -184,7 +186,8 @@ class InfiniteMemoryAgentSettings:
                 raise ConfigurationError(f"InfiniteMemoryAgentSettings.{name} must be a {kind.__name__}; got {type(getattr(self, name)).__name__}.", details={"field": name})
 
         # The key is text or None and never shown; the temperature and
-        # timeout are numbers or None, and BaseAgent checks their ranges.
+        # timeout are numbers or None, and BaseAgent checks their
+        # ranges.
         if self.api_key is not None and not isinstance(self.api_key, str):
             raise ConfigurationError(f"InfiniteMemoryAgentSettings.api_key must be text or None; got a {type(self.api_key).__name__}.", details={"field": "api_key"})
         for name in ("temperature", "timeout_seconds"):
@@ -196,8 +199,9 @@ class InfiniteMemoryAgentSettings:
         object.__setattr__(self, "tools", self._extra_tools())
 
         # @intent delegation-caps-are-whole-numbers
-        # The depth and batch caps allow at least one level and one task,
-        # and the agent cap at least one generator and verifier pair.
+        # The depth and batch caps allow at least one level and one
+        # task, and the agent cap at least one generator and verifier
+        # pair.
         for name, minimum in (("max_depth", 1), ("max_parallel", 1), ("max_agents", INFINITE_MIN_AGENTS)):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
@@ -213,7 +217,8 @@ class InfiniteMemoryAgentSettings:
             raise ConfigurationError(f"InfiniteMemoryAgentSettings.provider must be a ModelProvider or its value; got {self.provider!r}.", details={"field": "provider"}) from exc
 
     def _resolved_root_dir(self) -> Path:
-        # The project folder is where bash runs, so it must already exist.
+        # The project folder is where bash runs, so it must already
+        # exist.
         root_dir = Path(self.root_dir).expanduser().resolve() if isinstance(self.root_dir, (str, Path)) and str(self.root_dir).strip() else None
         if root_dir is None or not root_dir.is_dir():
             raise ConfigurationError(f"InfiniteMemoryAgentSettings.root_dir must be an existing folder; got {self.root_dir}.", details={"field": "root_dir"})

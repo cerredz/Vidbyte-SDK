@@ -129,8 +129,9 @@ class InfiniteRunJournal:
     def _whole_lines(path: Path) -> tuple[str, tuple[int, str] | None]:
         # @intent a-torn-tail-is-not-a-broken-journal
         # A crash can cut the last record short. A last line without its
-        # newline that does not parse is left out here and cut off before
-        # the next write; one that parses is kept and gets its newline.
+        # newline that does not parse is left out here and cut off
+        # before the next write; one that parses is kept and gets its
+        # newline.
         data = path.read_bytes()
         head, newline, tail = data.rpartition(b"\n")
         if not tail.strip():
@@ -143,8 +144,8 @@ class InfiniteRunJournal:
 
     @classmethod
     def _parse(cls, path: Path, text: str, repair: tuple[int, str] | None) -> InfiniteRunJournal:
-        # Every whole line must be a record in the documented shape, so a
-        # bad line refuses the journal with its line number.
+        # Every whole line must be a record in the documented shape, so
+        # a bad line refuses the journal with its line number.
         task: str | None = None
         started: list[str] = []
         cards: dict[str, InfiniteResultCard] = {}

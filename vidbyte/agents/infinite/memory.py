@@ -163,8 +163,9 @@ class InfiniteRememberTool(BaseTool):
 
     @staticmethod
     def _draft(arguments: Mapping[str, Any]) -> InfiniteEntryDraft:
-        # The model sends JSON lists; the record takes tuples and refuses
-        # anything else, so a bare string is never split into tags.
+        # The model sends JSON lists; the record takes tuples and
+        # refuses anything else, so a bare string is never split into
+        # tags.
         kind, text, tags, refs = arguments.get("kind"), arguments.get("text", ""), arguments.get("tags"), arguments.get("refs")
         if kind not in [item.value for item in InfiniteEntryKind]:
             raise ToolExecutionError(f"kind must be one of {', '.join(item.value for item in InfiniteEntryKind)}; got {kind!r}.")

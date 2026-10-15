@@ -104,8 +104,9 @@ class InfiniteLaunchTool(BaseTool):
             input_schema={"type": "object", "properties": {"tasks": tasks}, "required": ["tasks"], "additionalProperties": False},
             permission=ToolPermission.SAFE,
             # @intent a-batch-is-never-cut-by-tool-limits
-            # A batch lasts as long as its pairs and returns capped cards,
-            # so the loop's tool timeout and result cap must not apply.
+            # A batch lasts as long as its pairs and returns capped
+            # cards, so the loop's tool timeout and result cap must not
+            # apply.
             metadata={"internal": True},
         )
 
@@ -119,8 +120,8 @@ class InfiniteLaunchTool(BaseTool):
             keys = tuple(f"{self.key}/{card.name}" for card in cards)
             # @intent finished-pairs-are-replayed-not-rerun
             # A name that already finished in this run returns its
-            # recorded card, so a resumed or repeated launch never redoes
-            # finished work.
+            # recorded card, so a resumed or repeated launch never
+            # redoes finished work.
             pairs = {key: InfinitePair(self, card, key) for card, key in zip(cards, keys, strict=True) if self.journal.finished(key) is None}
             self._check(cards, tuple(pair.card for pair in pairs.values()))
         except (ConfigurationError, ToolExecutionError) as exc:
@@ -137,7 +138,8 @@ class InfiniteLaunchTool(BaseTool):
         if pairs:
             await ParallelPipeline(tuple(pairs.values())).run("")
 
-        # Return every card in task order, replayed ones under their label.
+        # Return every card in task order, replayed ones under their
+        # label.
         replayed = prompts.get(Prompt.INFINITE_MEMORY_REPLAYED_LABEL)
         texts = []
         for key in keys:
@@ -147,8 +149,8 @@ class InfiniteLaunchTool(BaseTool):
         return ToolResult.success(INFINITE_LAUNCH_TOOL_NAME, "\n\n".join(texts))
 
     def _cards(self, tasks: object) -> tuple[InfiniteTaskCard, ...]:
-        # Reads the model's tasks into validated task cards, turning JSON
-        # lists into tuples; any problem raises with what to fix.
+        # Reads the model's tasks into validated task cards, turning
+        # JSON lists into tuples; any problem raises with what to fix.
         if not isinstance(tasks, list) or not tasks:
             raise ConfigurationError("tasks must be a list of task objects.")
         if len(tasks) > self.settings.max_parallel:
@@ -212,7 +214,8 @@ class InfinitePair(BasePipeline):
         launch = self.launch
         status, verdict, summary, review = InfiniteResultStatus.FAILED, InfiniteVerdict.UNCHECKED, "", ""
         # Each child gets its own memory tools over this pair's shared
-        # staged and dropped lists, and the card lists the files both wrote.
+        # staged and dropped lists, and the card lists the files both
+        # wrote.
         writer =InfiniteAgentMemory(launch.workspace, key=f"{self.key}/{INFINITE_GENERATOR_KEY}", role=InfiniteAgentRole.GENERATOR, run_id=launch.journal.run_id, staged=self.staged, dropped=self.dropped)
         checker = InfiniteAgentMemory(launch.workspace, key=f"{self.key}/{INFINITE_VERIFIER_KEY}", role=InfiniteAgentRole.VERIFIER, run_id=launch.journal.run_id, staged=self.staged, dropped=self.dropped)
         # @intent one-failed-pair-never-sinks-its-siblings
@@ -363,8 +366,9 @@ class InfinitePair(BasePipeline):
 
     @staticmethod
     def _error_text(error: BaseException) -> str:
-        # A runner's failure arrives wrapped, with the provider's message
-        # as its cause, so the cause is the most useful text to report.
+        # A runner's failure arrives wrapped, with the provider's
+        # message as its cause, so the cause is the most useful text to
+        # report.
         cause = str(error.__cause__ or "").strip()
         return cause or str(error).strip() or type(error).__name__
 

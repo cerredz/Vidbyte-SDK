@@ -100,7 +100,8 @@ class InfiniteTaskCard:
             raise ConfigurationError(f"InfiniteTaskCard.done_criteria must hold at least one criterion; got {self.done_criteria!r}.", details={"field": "InfiniteTaskCard.done_criteria"})
 
         # Context items are entry ids such as "#42" or relative paths of
-        # workspace files, and there is a cap on how many a task carries.
+        # workspace files, and there is a cap on how many a task
+        # carries.
         _text_items(self, "context", most=INFINITE_CONTEXT_MAX_ITEMS)
         for item in self.context:
             number = item.removeprefix("#")
@@ -125,7 +126,8 @@ class InfiniteEntryDraft:
 
     def __post_init__(self) -> None:
         # An entry is one line of a known kind with a few short labels,
-        # so memory stays sparse; the token cap is the workspace's check.
+        # so memory stays sparse; the token cap is the workspace's
+        # check.
         _choice_field(self, "kind", InfiniteEntryKind)
         _text_field(self, "text", one_line=True)
         _text_items(self, "tags", most=INFINITE_MAX_TAGS, pattern=INFINITE_TAG_PATTERN)
