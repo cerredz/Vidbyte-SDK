@@ -552,8 +552,8 @@ class BaseAgent(McpAttachableMixin):
         )
 
     @classmethod
-    def restore(cls, state: RunState, *, tools: Sequence[object] = (), middleware: Sequence[AgentMiddleware] = (), tracer: object | None = None, trace: object | None = None, output_schema: object | None = None, api_key: str | None = None, outputs: Sequence[OutputConnector] = ()) -> BaseAgent:
-        """Rebuild a live agent from a RunState, re-supplying non-serializable parts (the rehydration contract)."""
+    def restore(cls, state: RunState, *, tools: Sequence[object] = (), middleware: Sequence[AgentMiddleware] = (), tracer: object | None = None, trace: object | None = None, output_schema: object | None = None, api_key: str | None = None, outputs: Sequence[OutputConnector] = (), algorithm: ContextWindowAlgorithm | str | None = None) -> BaseAgent:
+        """Rebuild a live agent from a RunState, re-supplying non-serializable parts such as tools, API key and algorithm (the rehydration contract)."""
         from vidbyte.sessions.serialization import SessionSerializer
         serializer = SessionSerializer()
         agent_metadata = AgentMetadata(**{key: str(state.agent_metadata.get(key, "")) for key in ("name", "description", "use_cases")})
@@ -575,7 +575,8 @@ class BaseAgent(McpAttachableMixin):
             description=state.description,
             capabilities=tuple(state.capabilities),
             agent_metadata=agent_metadata,
-            algorithm=None if state.algorithm in ("", "default") else state.algorithm,
+            # @intent restore-takes-the-agent-algorithm: a user-named algorithm is not a preset, so a re-supplied one wins over the stored name.
+            algorithm=algorithm if algorithm is not None else (None if state.algorithm in ("", "default") else state.algorithm),
             # @intent run-state-snapshot-owns-its-data: the restored agent gets its own copy, so editing it cannot rewrite the checkpoint.
             metadata=copy.deepcopy(dict(state.metadata)),
             tracer=tracer,
