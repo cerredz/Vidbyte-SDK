@@ -83,7 +83,7 @@ class GrokThreads:
         except ConfigurationError as exc:
             raise errors.from_configuration_error(exc, request) from exc
         except Exception as exc:
-            raise errors.from_unexpected(exc) from exc
+            raise errors.from_unexpected(exc, request) from exc
 
 
 class GrokThreadRun:

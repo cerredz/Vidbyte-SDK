@@ -125,17 +125,22 @@ class NativeErrorFactory:
         ]
         return self._error(FailureCode.CONFIGURATION_INVALID_ARGUMENT, sentences, thread_id=thread_id)
 
-    def from_unexpected(self, exc: Exception) -> NativeThreadError:
+    def from_unexpected(self, exc: Exception, request: NativeThreadRequest | None) -> NativeThreadError:
         # @intent native-errors-defects-name-only-the-class
         # A defect reports only the exception's class name; its text may
         # hold paths, payloads or secrets and is never copied into the
-        # error.
+        # error. The workspace and the caller's thread id still appear
+        # once the request exists, as for every other failure (INV-5).
         error_type = type(exc).__name__
+        thread_id = None if request is None else request.thread_id
+        workspace = None if request is None else self.scrub(str(request.workspace))
+        shown_id = None if thread_id is None else self.scrub(thread_id)
         sentences = [
             native_threads.NATIVE_RUNTIME_ERROR_SUMMARY.format(harness=self._label),
+            *self._context_sentences(workspace, shown_id),
             native_threads.NATIVE_RUNTIME_ERROR_OBSERVATION.format(error_type=error_type),
         ]
-        return self._error(FailureCode.RUNTIME_ERROR, sentences, error_type=error_type)
+        return self._error(FailureCode.RUNTIME_ERROR, sentences, thread_id=thread_id, error_type=error_type)
 
     def from_launch_failure(self, failure: ProcessLaunchFailure, program: str, *, request: NativeThreadRequest, thread_id: str | None = None) -> NativeThreadError:
         # A missing executable means not installed; any other launch
