@@ -42,8 +42,10 @@ def part(prefix: str) -> Callable[[str], str]:
 
 
 def repo_map_skills_entry(text: str) -> str:
-    # The File Index entry for vidbyte/agents/skills/, up to the next heading.
-    return text.split("##### `vidbyte/agents/skills/`", 1)[-1].split("\n#", 1)[0]
+    # The File Index entry for vidbyte/agents/skills/, up to the next
+    # heading; empty when the heading is gone, so the guard fails.
+    _, found, entry = text.partition("##### `vidbyte/agents/skills/`")
+    return entry.split("\n#", 1)[0] if found else ""
 
 
 def intro_paragraph(text: str) -> str:
