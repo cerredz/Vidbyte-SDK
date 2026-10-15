@@ -4,7 +4,7 @@ repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-public-skill-loader
 branch: feat/public-skill-loader
 base_commit: c9d31a7fb4128d1a609ce9702b0a55c71fcb1a3f  # rebased 2026-10-15 16:20 from 179d8adc (see Decisions)
-pr:
+pr: https://github.com/cerredz/Vidbyte-SDK/pull/1099
 until: none
 started: 2026-10-15 15:04
 ---
@@ -16,7 +16,7 @@ started: 2026-10-15 15:04
 | S0 worktree + capture + recon | done | 15:04 | 15:20 | reports/S0-scout.md | base_commit 179d8adc; context/code-map.md (4 sections, 18 files) |
 | S1 spec + review | done | 15:22 | 17:35 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | r3 approved; 2 rounds SOUND WITH FIXES; 11 findings applied; spec-summary.md |
 | S2 tests | done | 17:40 | 18:15 | reports/S2-test-author.md | 20 tests (67 cases) in tests/features/public_skill_loader/; red confirmed (17 failed, 50 errors); S2_HEAD 467555d9 |
-| S3 implement | pending | | | | |
+| S3 implement | done | 18:20 | 21:40 | reports/S3-implementer.md | S3_HEAD c691c176; draft PR #1099; 67/67 new green; source stage 5243 passed 14 skipped; package stage passed; budget 0/0 files, 1/1 class, 3/3 root names |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
@@ -65,6 +65,8 @@ started: 2026-10-15 15:04
 
 - 2026-10-15 18:15 — S2 done. **S2_HEAD = `467555d9`.** Test tree path for the no-test-edits check: `tests/` (`git diff 467555d9..HEAD --stat -- tests/` must stay empty). Orchestrator re-ran `tests/features/public_skill_loader/test_public_skill_loader_boundary.py` → 23 errors (ImportError), red confirmed. AC coverage of test-plan.md equals spec §6.2. Spec diff limited to §6.2 Proof column. Set spec `status: tests-written`. Noted: the test author proved satisfiability by applying a reference change to a scratch copy of the tree (deleted, never committed) and ran 10 single-bug mutants — accepted; no production code entered the branch.
 
+- 2026-10-15 21:40 — S3 done. **S3_HEAD = `c691c176`**, PR https://github.com/cerredz/Vidbyte-SDK/pull/1099 (draft, `[WIP]`). Orchestrator verified: tree clean; everything pushed; `git diff 467555d9..HEAD --stat -- tests/` empty; new tests 67 passed; contract commit `46c074c3` holds only `contracts/sdk-public-api.json`; `generate-sdk-public-api.py --check` → "current at 56541481 (vidbyte-sdk 0.3.1, 642 exports)". Remote: Static policy run 38811104841 success; CI run 38811100780 in progress. `gh pr checks` reports nothing because dispatched runs are not attached to the PR (expected); use `gh run list --branch feat/public-skill-loader` as the remote-check source.
+
 ## User replies (verbatim)
 - none yet
 
@@ -102,3 +104,8 @@ started: 2026-10-15 15:04
 - Docs tests pin phrases: a `- **Public door.**` bullet in the skills README naming SkillLoader, SkillResolution, ConfigurationError, contracts/sdk-public-api.json and "tenant"; README intro says "package root"; loader ARCHITECTURE NOTE must not say "(per agent)" alone ("(per agent, for JevAgent)" passes); REPO_MAP must not contain "only consumer", "for the agent's lifetime", "until the first run" — *source:* S2
 - Release tests read README `^pip install vidbyte-sdk==(\S+)$`, llms.txt "identifies the package as version `…`", and the CLI fallback with `cli_module.metadata.version` patched to raise — *source:* S2
 - Pytest does not check the contract JSON; AC-10/AC-11 also need `python scripts/generate-sdk-public-api.py --check` and `python lint/run.py --rule C016` after the contract commit — *source:* S2
+- Repo uses `core.autocrlf=true`: Git Bash `sed -i` and Python `write_text` rewrite working copies to LF; use the Edit tool or byte-level edits on source files (S3 restored CRLF where needed) — *source:* S3
+- Local semgrep 1.170.1 fails at import because the shared install has `mcp` 2.3.0; S3 ran the real scan via a scratchpad wrapper that stubs only semgrep's unused `mcp` subcommand: `python -I <scratchpad>/run_semgrep_without_mcp.py scan --error --config .semgrep/typed-mapping-boundary-policy.yml vidbyte` (0 findings, 934 files). Remote Static policy passed — *source:* S3
+- Contract stamped `source.commit` = `56541481`; repairs touching `__all__`/version must rerun the generator, commit only if written, then `--check`; never amend — *source:* S3
+- Lint ratchets held: S009 350, S015 13, S051 259, A001 642, A006 34, S060 32; IMPROVED rules (A002, C011, C012, S001, S010, S025, S061) were IMPROVED before this change and were not ratcheted — *source:* S3
+- Disk: C: at ~5.4 GB free after S3. Avoid extra package-stage runs outside S5; clean only build artifacts you create — *source:* S3/orchestrator
