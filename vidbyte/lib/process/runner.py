@@ -231,8 +231,11 @@ class CliRunner:
                 env=environment,
                 start_new_session=sys.platform != "win32",
             )
-        except FileNotFoundError:
-            return None, ProcessLaunchFailure.NOT_FOUND
+        except FileNotFoundError as exc:
+            # Windows reports a command line past its length limit as a
+            # missing file (WinError 206), although the program exists.
+            too_long = getattr(exc, "winerror", None) == native_threads.NATIVE_COMMAND_LINE_TOO_LONG_WINERROR
+            return None, ProcessLaunchFailure.OS_ERROR if too_long else ProcessLaunchFailure.NOT_FOUND
         except PermissionError:
             return None, ProcessLaunchFailure.PERMISSION_DENIED
         except (OSError, ValueError):

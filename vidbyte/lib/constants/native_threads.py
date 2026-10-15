@@ -72,6 +72,11 @@ NATIVE_PATH_VARIABLE = "PATH"
 NATIVE_PATHEXT_VARIABLE = "PATHEXT"
 # Python's own fallback when PATHEXT is unset (shutil._WIN_DEFAULT_PATHEXT).
 NATIVE_WINDOWS_DEFAULT_PATHEXT = ".COM;.EXE;.BAT;.CMD;.VBS;.JS;.WS;.MSC"
+# Windows counts a command line in UTF-16 code units, and reports one
+# past its limit as a missing file with this error number.
+NATIVE_WINDOWS_COMMAND_LINE_ENCODING = "utf-16-le"
+NATIVE_UTF16_UNIT_BYTES = 2
+NATIVE_COMMAND_LINE_TOO_LONG_WINERROR = 206
 
 # Programs, subcommands, files and folders.
 GROK_PROGRAM = "grok"

@@ -3,7 +3,7 @@
 PURPOSE: Defines RecordFieldValidator, the one canonical field validator for validated records (text, optional text, positive finite numbers, bounded ints, strict bools, enum members, argv tuples and absolute directories), and RecordFieldConverter, the canonical conversions and checks records apply beside it (tuples, read-only mappings, enum members, paths and plain instance checks).
 ROLE IN CODEBASE: Called from the __post_init__ of the records in vidbyte/lib/dataclasses/native_threads.py and process.py, and by the output readers GrokWire, OpencodeWire and MuseWire under vidbyte/harnesses/native/.
 ARCHITECTURE NOTE: Two classes of static methods, each taking the checked value first and the field name second, returning the checked or converted value or raising ConfigurationError. The checked variable is always named value, so the bool guards here are the single owner lint rules C002, C006, C007 and C008 point at. Messages name the field and the expected type or range, and quote a value only when it is a short, non-secret scalar or text. Every ConfigurationError also carries details["field"], so a caller can name the bad argument without reading the message text.
-FUNCTION INVENTORY: require_text, accepts_text (require_text's rule as a bool), require_optional_text, require_number, require_int, require_bool, require_enum, require_argv, require_directory; _text_problem words what a text value fails, and _received renders the received value safely for a message. RecordFieldConverter: to_tuple, to_mapping, to_enum (a member or its exact value string), to_path (a str or os.PathLike, unchecked), require_instance.
+FUNCTION INVENTORY: require_text, accepts_text (require_text's rule as a bool), require_optional_text, require_command_line_units (a value's quoted Windows command-line length), require_number, require_int, require_bool, require_enum, require_argv, require_directory; _text_problem words what a text value fails, and _received renders the received value safely for a message. RecordFieldConverter: to_tuple, to_mapping, to_enum (a member or its exact value string), to_path (a str or os.PathLike, unchecked), require_instance.
 COMMON MODIFICATION PATTERNS: Add a new check as one more static method with value first and field_name second, and call it from a record's __post_init__; never copy a check into a record.
 WHAT NOT TO DO IN THIS FILE: 1. Do not convert values silently; to_path only wraps a path in Path and never checks or resolves it. 2. Do not quote mapping values or long text in a message; they can hold secrets. 3. Do not import from a layer above vidbyte.lib.
 KNOWN EDGE CASES: bool is an int subclass, so every numeric check refuses bool first. A field whose last name segment reads as a credential (password, token, secret, api_key) is never quoted, whatever its length. require_argv refuses a list on purpose, because argv fields must be immutable tuples. require_directory must run on the path as given, before Path.resolve(), or a relative path would pass.
@@ -16,13 +16,18 @@ from __future__ import annotations
 import math
 import os
 import re
+import subprocess
 from collections.abc import Mapping
 from enum import Enum
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, TypeVar
 
-from vidbyte.lib.constants.native_threads import NATIVE_QUOTED_VALUE_MAX_CHARS
+from vidbyte.lib.constants.native_threads import (
+    NATIVE_QUOTED_VALUE_MAX_CHARS,
+    NATIVE_UTF16_UNIT_BYTES,
+    NATIVE_WINDOWS_COMMAND_LINE_ENCODING,
+)
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.util.credential_keys import CredentialKeyPolicy
 
@@ -53,6 +58,19 @@ class RecordFieldValidator:
         problem = None if value is None else RecordFieldValidator._text_problem(value, max_chars=max_chars, pattern=pattern, allow_blank=False)
         if problem is not None:
             raise ConfigurationError(f"{field_name} must {problem}; got {RecordFieldValidator._received(value, field_name)}.", details={"field": field_name})
+        return value
+
+    @staticmethod
+    def require_command_line_units(value: str, field_name: str, *, max_units: int) -> str:
+        # @intent windows-command-line-counts-quoted-utf16-units
+        # Windows quotes each argument (a " becomes \", and the whole
+        # value is wrapped when it holds a space) and counts the command
+        # line in UTF-16 code units, so a value within its character cap
+        # can still pass the CreateProcess limit; the quoted form, built
+        # as subprocess builds it, must fit max_units.
+        units = len(subprocess.list2cmdline([value]).encode(NATIVE_WINDOWS_COMMAND_LINE_ENCODING)) // NATIVE_UTF16_UNIT_BYTES
+        if units > max_units:
+            raise ConfigurationError(f"{field_name} must take at most {max_units} UTF-16 code units once quoted for the Windows command line; got {units}.", details={"field": field_name})
         return value
 
     @staticmethod

@@ -6,13 +6,14 @@ ARCHITECTURE NOTE: Every check lives in __post_init__ and goes through RecordFie
 FUNCTION INVENTORY: NativeThreadRequest.__post_init__ is the narrated main function; _checked_workspace checks and resolves the workspace; _checked_model checks the model for the harness; _checked_thread_id ties the thread id to the verb; _checked_skills checks, resolves and names each skill folder. GrokThreadConfig, OpencodeThreadConfig, MuseThreadConfig and NativeThreadResult have only __post_init__.
 COMMON MODIFICATION PATTERNS: A new config field adds one field and one validator call to its record, and its bound or pattern to vidbyte/lib/constants/native_threads.py. A config record never gets a model field: the model is an argument of every call.
 WHAT NOT TO DO IN THIS FILE: 1. Do not read keys from environment variables. 2. Do not put a key value in an error message or its details; name the parameter instead. 3. Do not drop repr=False from a key field. 4. Do not import from vidbyte.harnesses; vidbyte/lib is the bottom layer.
-KNOWN EDGE CASES: The prompt cap is NATIVE_PROMPT_MAX_CHARS for opencode, which reads the prompt from stdin, and NATIVE_ARGV_PROMPT_MAX_CHARS for Grok and Muse, which take it on argv. A skill item that is not a path is refused naming skills[<i>], while a skill list that is a str or holds too many items is refused naming skills. Two skill folders with the same folder name are refused, because each harness finds a skill by its folder name.
+KNOWN EDGE CASES: The prompt cap is NATIVE_PROMPT_MAX_CHARS for opencode, which reads the prompt from stdin, and NATIVE_ARGV_PROMPT_MAX_CHARS for Grok and Muse, which take it on argv; on Windows the Grok and Muse prompt must also fit that cap once quoted and counted in UTF-16 units, the way CreateProcess counts it. A skill item that is not a path is refused naming skills[<i>], while a skill list that is a str or holds too many items is refused naming skills. Two skill folders with the same folder name are refused, because each harness finds a skill by its folder name.
 RELATED DOCS: vidbyte/harnesses/README.md
 TESTS: tests/features/harness_threads/test_harness_threads_records.py, tests/features/harness_threads/test_harness_threads_arguments.py
 """
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -40,6 +41,7 @@ from vidbyte.lib.constants.native_threads import (
     NATIVE_THREAD_ID_PATTERN,
     NATIVE_THREAD_MAX_SECONDS,
     NATIVE_THREAD_MAX_SKILLS,
+    NATIVE_WINDOWS_PLATFORM,
     OPENCODE_MODEL_PATTERN,
 )
 from vidbyte.lib.dataclasses.validation import (
@@ -87,6 +89,14 @@ class NativeThreadRequest:
         # smaller cap; opencode reads it from stdin.
         prompt_cap = NATIVE_PROMPT_MAX_CHARS if self.harness is NativeHarness.OPENCODE else NATIVE_ARGV_PROMPT_MAX_CHARS
         RecordFieldValidator.require_text(self.prompt, "prompt", max_chars=prompt_cap, pattern=NATIVE_PROMPT_PATTERN)
+
+        # @intent argv-prompt-fits-the-windows-command-line
+        # On Windows a prompt of quotes or emoji within the cap can
+        # double once quoted and counted in UTF-16 units, pass the
+        # CreateProcess limit and fail as if the CLI were missing, so
+        # the quoted argv prompt must fit the same cap (spec EC-3).
+        if self.harness is not NativeHarness.OPENCODE and sys.platform == NATIVE_WINDOWS_PLATFORM:
+            RecordFieldValidator.require_command_line_units(self.prompt, "prompt", max_units=NATIVE_ARGV_PROMPT_MAX_CHARS)
 
         # The key is checked under its public name, which the validator
         # never quotes, and the pattern keeps it printable ASCII.
