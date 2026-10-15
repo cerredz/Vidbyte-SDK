@@ -93,14 +93,14 @@ Four small pieces, layered bottom-up:
 
 1. **Asset and keys (prompts layer + lib enums).** A new family `working_principles` with one Markdown leaf, `system_prompt.md`, holding the verbatim paragraph. `Prompt.WORKING_PRINCIPLES_SYSTEM_PROMPT` keys it. A new enum `SystemPromptPreset` names attachable presets; each member's value is the family key, and its text is that family's `system_prompt` leaf, so adding a future preset is one enum member plus one family.
 2. **Validation record (lib dataclasses).** `SystemPromptPresetSelection` in `vidbyte/lib/dataclasses/prompts.py` turns the loose caller value into a validated tuple. `BaseAgent` and `JevAgentSettings` both use it, so the rule exists once.
-3. **Run scope (lib canonical helper).** `SystemPromptPresetScope` in `vidbyte/lib/system_prompt_presets.py` owns one `ContextVar`: `active()`, `resolve(own)` (own value if set, else active), and `scope(presets)` (a context manager that restores on exit). It is the prompt counterpart of `usage_ledger.py` and #1005's `permission_ceiling.py`, and it holds enum values only, so `vidbyte/lib/` never imports the prompts layer.
+3. **Run scope (lib canonical helper).** `SystemPromptPresetScope` in `vidbyte/lib/system_prompt_presets.py` owns one `ContextVar`: `active()`, `resolve(own)` (own value if set, else active), `enter(presets)` / `exit(token)` (set and restore, for a method that already has a `finally`), and `scope(presets)` (a context manager over the same pair). It is the prompt counterpart of `usage_ledger.py` and #1005's `permission_ceiling.py`, and it holds enum values only, so `vidbyte/lib/` never imports the prompts layer.
 4. **Composer (prompts layer) and one composition point (agents layer).** `SystemPromptPresetComposer` in `vidbyte/prompts/system_prompt_presets.py` (beside `agentic_loop.py`) renders preset text and composes it into a prompt idempotently. `BaseAgent._runtime()` passes the composed prompt as the runtime's `system_prompt`, so every runtime type gets it with one change, and `BaseAgent.generate_reply` opens the scope around the whole run.
 
 ```
 BaseAgent.generate_reply(message)                         # parent, own = (WORKING_PRINCIPLES,)
   effective = SystemPromptPresetScope.resolve(own)         # own if set, else active
-  with SystemPromptPresetScope.scope(effective):           # ContextVar, copied into tasks
-      with usage_ledger_scope(...):                        # unchanged
+  token = SystemPromptPresetScope.enter(effective)          # ContextVar, copied into tasks
+  try / with usage_ledger_scope(...):                      # unchanged body, no new nesting
           _generate_reply
             _runtime(): system_prompt = Composer.compose(self.system_prompt, effective)
               AgentRuntime.build_context -> + agentic-loop note -> zone 1 "System prompt:"
@@ -211,6 +211,10 @@ class SystemPromptPresetScope:
     @staticmethod
     def resolve(own: tuple[SystemPromptPreset, ...] | None) -> tuple[SystemPromptPreset, ...]: ...
     @staticmethod
+    def enter(presets: tuple[SystemPromptPreset, ...]) -> Token[tuple[SystemPromptPreset, ...]]: ...
+    @staticmethod
+    def exit(token: Token[tuple[SystemPromptPreset, ...]]) -> None: ...
+    @staticmethod
     @contextmanager
     def scope(presets: tuple[SystemPromptPreset, ...]) -> Iterator[tuple[SystemPromptPreset, ...]]: ...
 ```
@@ -218,7 +222,7 @@ class SystemPromptPresetScope:
 #### Logic / Algorithm
 1. A module-level `ContextVar[tuple[SystemPromptPreset, ...]]` defaults to `()`.
 2. `resolve(own)` returns `own` when it is not `None`, else `active()`.
-3. `scope(presets)` sets the variable, yields, and resets the token in `finally`.
+3. `enter(presets)` sets the variable and returns the token; `exit(token)` resets it. `scope(presets)` does the same around a `with` block, resetting in `finally`.
 
 #### Edge Cases & Error Handling
 - Nested scopes restore in LIFO order, including on exceptions and cancellation.
@@ -261,9 +265,9 @@ self.system_prompt_presets: tuple[SystemPromptPreset, ...] | None
 
 #### Logic / Algorithm
 1. `__init__` stores `SystemPromptPresetSelection.parse(system_prompt_presets, "BaseAgent.system_prompt_presets")`.
-2. `generate_reply` resolves the run's effective presets before anything else and wraps the existing body (queue claim, usage-ledger branches) in `SystemPromptPresetScope.scope(effective)`.
+2. `generate_reply` resolves the run's effective presets right after the queue claim, calls `SystemPromptPresetScope.enter(effective)`, and calls `exit(token)` first in its existing `finally`, beside the queue-token reset. The body keeps its indentation, so the change adds no control-flow nesting (lint S024) to a method already at the limit.
 3. `_runtime()` passes `system_prompt=SystemPromptPresetComposer.compose(self.system_prompt, SystemPromptPresetScope.resolve(self.system_prompt_presets))`. Inside a run, `resolve` returns the scope the run opened.
-4. `_generate_reply` adds `metadata["system_prompt_presets"] = [p.value for p in effective]` only when non-empty.
+4. `_generate_reply` spreads `self._applied_preset_metadata()` into its metadata literal; the helper returns `{"system_prompt_presets": [p.value for p in effective]}` when non-empty and `{}` otherwise, which keeps `_generate_reply` under its complexity and statement limits (lint S008).
 5. `export_state()` writes `system_prompt_presets=None if own is None else tuple(p.value for p in own)`; `restore()` passes `state.system_prompt_presets` back to the constructor.
 
 #### Edge Cases & Error Handling

@@ -43,6 +43,7 @@ print(default_model, api_key_env, openai_models, gpt56_luna_price)
 - `runners/`: runner handles, concrete model runners, and runner inference helpers.
 - `tools/`: provider-specific tool schema formatting.
 - `tracing/`: tracer base classes and null tracer.
+- `system_prompt_presets.py`: `SystemPromptPresetScope`, the run-scoped ContextVar that hands an agent's system-prompt presets to every agent its run starts.
 
 ## Related Layers
 
