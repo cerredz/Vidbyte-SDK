@@ -106,7 +106,6 @@ NATIVE_LINE_SEPARATOR = "\n"
 NATIVE_SENTENCE_SEPARATOR = " "
 NATIVE_LISTING_SEPARATOR = ", "
 OPENCODE_MODEL_PROVIDER_SEPARATOR = "/"
-NATIVE_WSL_LIST_ENCODING = "utf-16-le"
 NATIVE_NUL_CHARACTER = "\x00"
 
 # JSON member names of the vendor output and of the inputs the SDK sends.
