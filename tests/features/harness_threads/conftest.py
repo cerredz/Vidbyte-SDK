@@ -44,6 +44,7 @@ PROMPT = "List the top-level folders."
 FAKE_DISTRO = "VidbyteFakeDistro"
 OTHER_DISTRO = "VidbyteOtherDistro"
 CALL_TIMEOUT_SECONDS = 60.0
+BUILT_CONFIG = object()
 FAST_KILL_WAIT_SECONDS = 0.5
 SLACK_SECONDS = 5.0
 POLL_SECONDS = 0.05
@@ -252,12 +253,13 @@ def sandbox(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.Monkey
 
 @pytest.fixture
 def call(api: SimpleNamespace, sandbox: Sandbox) -> Callable[..., Awaitable[Any]]:
-    async def run(harness: str, verb: str = "run", prompt: str = PROMPT, *, thread_id: str | None = None, command: tuple[str, ...] | None = None, fake: dict[str, Any] | None = None, config: dict[str, Any] | None = None, **arguments: Any) -> Any:
-        # One thread function against the stand-in; `fake` is the stand-in scenario, `config` extra config fields.
+    async def run(harness: str, verb: str = "run", prompt: str = PROMPT, *, thread_id: str | None = None, command: tuple[str, ...] | None = None, fake: dict[str, Any] | None = None, config: dict[str, Any] | None = None, raw_config: Any = BUILT_CONFIG, **arguments: Any) -> Any:
+        # One thread function against the stand-in; `fake` is the stand-in scenario, `config` extra config fields;
+        # `raw_config` is handed to the function as `config=` unchanged (EC-33: a value of the wrong type).
         function = api.functions[(harness, verb)]
         launcher = command if command is not None else sandbox.command(harness, **(fake or {}))
         config_fields = {COMMAND_FIELDS[harness]: launcher, "timeout_seconds": CALL_TIMEOUT_SECONDS, **(config or {})}
-        keywords: dict[str, Any] = {"api_key": API_KEY, "workspace": sandbox.workspace, "config": api.configs[harness](**config_fields)}
+        keywords: dict[str, Any] = {"api_key": API_KEY, "workspace": sandbox.workspace, "config": api.configs[harness](**config_fields) if raw_config is BUILT_CONFIG else raw_config}
         if harness == "opencode":
             keywords["model"] = OPENCODE_MODEL
         keywords.update(arguments)

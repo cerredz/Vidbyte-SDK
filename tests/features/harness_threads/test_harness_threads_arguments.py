@@ -171,8 +171,8 @@ async def test_skill_list_at_the_count_and_name_caps_still_runs(sandbox, call) -
 @pytest.mark.parametrize("harness", HARNESSES)
 async def test_config_of_the_wrong_type_is_refused(api, refuse, sandbox, harness) -> None:
     # EC-33: another harness's config record, or a plain mapping, names config.
-    await refuse(harness, "config", config=getattr(api, WRONG_CONFIGS[harness])())
-    await refuse(harness, "config", config={"timeout_seconds": 5})
+    await refuse(harness, "config", raw_config=getattr(api, WRONG_CONFIGS[harness])())
+    await refuse(harness, "config", raw_config={"timeout_seconds": 5})
 
 
 @pytest.mark.asyncio

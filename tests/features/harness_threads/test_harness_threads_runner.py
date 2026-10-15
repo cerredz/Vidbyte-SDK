@@ -39,7 +39,8 @@ def child(source: str) -> tuple[str, ...]:
     return (sys.executable, "-u", "-c", textwrap.dedent(source))
 
 
-def invocation(api: Any, argv: tuple[str, ...], **fields: Any) -> Any:
+def invocation(api: Any, argv: tuple[str, ...], /, **fields: Any) -> Any:
+    # argv is positional-only, so a test can pass a bad argv through **fields to replace it.
     values: dict[str, Any] = {"argv": argv, "env_overlay": {}, "timeout_seconds": 20.0, "max_output_bytes": 1_000_000}
     values.update(fields)
     return api.CliInvocation(**values)
