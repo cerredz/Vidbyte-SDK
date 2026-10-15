@@ -1,7 +1,7 @@
 ---
 spec: infinite-memory-agent
 title: InfiniteMemory agent — a delegating agent with a shared, guarded file workspace for memory
-status: verified
+status: pr-open
 revision: 5
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-infinite-memory-agent
@@ -119,47 +119,57 @@ The developer does not assemble tools, build subagents, write delegation prompts
 
 ```mermaid
 flowchart TD
-  A["InfiniteMemoryAgent.run(task)"] -->|"settings, workspace"| B["InfiniteMemoryRuntime.arun"]
-  B -->|"task text"| J[("InfiniteRunJournal: .runs/run_id.jsonl")]
-  B -->|"map text"| M["ContextManager copy: map at top of context"]
-  B --> L["AgentRuntime loop: root model + tools"]
-  L -->|"remember / write_note"| W[("InfiniteWorkspace: entries.jsonl, notes")]
-  L -->|"launch_subagent tasks"| T["InfiniteLaunchTool.execute: validate batch"]
-  T -->|"pair_started per key"| J
-  T -->|"InfinitePair x N"| P["ParallelPipeline.run"]
-  P --> G["generator BaseAgent: fresh context"]
-  G -->|"status, summary, staged entries, files"| V["verifier BaseAgent: checks and fixes"]
-  V -->|"VERDICT line"| C["InfinitePair: commit staged entries"]
-  C --> W
-  C -->|"InfiniteResultCard"| J
-  C -->|"card text only"| L
-  L -->|"after each tool iteration: new map"| M
-  L -->|"final answer, stop_reason"| F["run_finished"]
+  S["InfiniteMemoryAgentSettings.__post_init__: validate every field"] --> A["InfiniteMemoryAgent.__init__"]
+  A --> WS["InfiniteWorkspace.__init__: folder, 3 bookkeeping files, seed copies, refuse if over a cap"]
+  R["agent.run(task) or agent.resume(run_id)"] --> RT["InfiniteMemoryRuntime.arun"]
+  RT -->|"a tool already uses a run-bound name"| X["ConfigurationError, nothing journaled"]
+  RT -->|"InfiniteRunJournal.start, or the journal resume() found"| J[(".runs/run_id.jsonl")]
+  RT -->|"add launch_subagent and memory tools, clear old history, map at top of context"| L["AgentRuntime loop: root model and tools"]
+  L -->|"remember commits at once, write_note"| W[("workspace: entries.jsonl, superseded.jsonl, files.jsonl, notes")]
+  L -->|"_after_tool_iteration"| M["map re-rendered from disk"]
+  L -->|"launch_subagent tasks"| T["InfiniteLaunchTool.execute: _cards, _check"]
+  T -->|"bad batch: ToolResult.error, nothing started"| L
+  T -->|"name already finished: recorded card, marked replayed"| L
+  T -->|"pair_started for each new pair"| J
+  T --> P["ParallelPipeline: one InfinitePair.run per new task"]
+  P --> G["generator BaseAgent: fresh context, map, staging memory tools, launch_subagent below max_depth"]
+  G -->|"blank reply or error"| F["InfinitePair._finish: drop what is still staged, build InfiniteResultCard, pair_finished"]
+  G -->|"done or partial: summary, staged entries, files"| V["verifier BaseAgent: same tools plus drop_entry, no launch_subagent"]
+  V -->|"last VERDICT line"| C{"verdict"}
+  C -->|"passed, fixed or failed"| CM["InfinitePair._commit: re-check each staged entry, append to entries.jsonl"]
+  C -->|"unchecked"| F
+  CM --> W
+  CM --> F
   F --> J
+  F -->|"capped card text only"| L
+  L -->|"loop returns"| RF["InfiniteRunJournal.finish: run_finished"]
+  RF --> J
 ```
 
 ```mermaid
 sequenceDiagram
-  participant R as Root agent
+  participant R as Root
   participant T as launch_subagent
   participant J as Journal
   participant G as Generator
   participant V as Verifier
   participant W as Workspace
-  R->>T: tasks [card...]
-  T->>T: validate whole batch (caps, names, tools, context)
-  T->>J: pair_started(key) for each new key (before any await)
-  par each pair
-    T->>G: generator_prompt + goal + criteria + context + map
+  R->>T: tasks
+  T->>T: check the whole batch, split off finished names
+  T->>J: pair_started for each new pair
+  par each new pair
+    T->>G: goal, criteria, generator_prompt, context, quota
     G->>W: write_note (direct), remember (staged in memory)
     G-->>T: final reply, stop_reason
-    T->>V: preamble + verifier_prompt + status + summary + staged + files
-    V->>W: fixes, drop_entry, remember (staged)
-    V-->>T: reply ending "VERDICT: passed|fixed|failed"
-    T->>W: commit remaining staged entries (re-checked)
-    T->>J: pair_finished(key, card)
+    alt generator status is not failed
+      T->>V: verifier_prompt, goal, criteria, status, summary, staged entries, files
+      V->>W: fixes, drop_entry, remember (staged)
+      V-->>T: reply ending in a VERDICT line
+    end
+    T->>W: commit staged entries unless the verdict is unchecked
+    T->>J: pair_finished with the card
   end
-  T-->>R: result cards (capped), nothing else
+  T-->>R: one capped card per task, in task order
 ```
 
 The trigger is `run()`, which reaches `InfiniteMemoryRuntime.arun` through `BaseAgent.generate_reply`. The runtime opens the journal, adds the run-bound tools to the root, clears what earlier runs of the same agent left in the context, and places the workspace map at the top of a run-local context manager. Then the inherited loop runs. It re-sends the task on every call, and the message-history middleware drops old tool exchanges once the history passes its cap. Validation happens in three places:
@@ -168,7 +178,7 @@ The trigger is `run()`, which reaches `InfiniteMemoryRuntime.arun` through `Base
 - on every model tool call, in `InfiniteLaunchTool` and the memory tools, which turn a bad call into a `ToolResult.error`;
 - once more at commit, where each staged entry is re-checked against the live workspace.
 
-State changes only in the workspace files, which hold entries, notes, and descriptions, and in the journal. Failures are caught inside each `InfinitePair`, so one pair's `VidbyteSdkError` becomes that pair's FAILED or UNCHECKED card and never reaches its siblings or the parent.
+State changes only in the workspace files, which hold entries, notes, and descriptions, and in the journal. A generator that fails or answers blank skips its verifier, and a pair's staged entries are committed only when the verdict is not UNCHECKED (INV-12, INV-15). Failures are caught inside each `InfinitePair`, so one pair's `VidbyteSdkError`, `OSError`, or `ValueError` becomes that pair's FAILED or UNCHECKED card and never reaches its siblings or the parent (INV-29).
 
 ---
 
@@ -1226,6 +1236,7 @@ The four open questions in request.md §C are resolved by their stated defaults:
 | r4 | 2026-10-15 | S1 spec (S2 open items) | AC-41 and its rows now say a run-time `ConfigurationError` reaches `run()` callers as the `__cause__` of `AgentExecutionError`, which is unchanged `BaseAgent` behavior. INV-29's review holds the error's `__cause__` text when present; the guard already catches `AgentExecutionError`. Status stays approved. |
 | r4 | 2026-10-15 | S3 implement | All 33 rows of §12.3 implemented in phase order on `feat/infinite-memory-agent` (draft PR #1084); the S2 pack passes 89/89, `python lint/run.py` passes, and both stages of `scripts/run_ci.py` pass. Deviations are listed below. |
 | r5 | 2026-10-15 | S1 spec (S4 R-3, R-13) | NFR-7 now bounds a card by four capped fields (4 × `INFINITE_CARD_TEXT_MAX_TOKENS` + markers + template), and INV-4 and row 20 cut the joined `dropped` and `files` text at render. S3 deviation 1 is corrected: the pair yield is a fairness yield with no cross-pair ordering, which only AC-37 relies on. Status stays reviewed. |
+| r5 | 2026-10-15 | S6 PR | finalized for review. §5's two diagrams are replaced by the PR's flow chart and sequence. They had shown the commit as unconditional and left out the skipped verifier, and §5's last paragraph named only `VidbyteSdkError` for the pair guard. The code matches INV-12, INV-15, and INV-29, so only §5 changed. Status `pr-open`; PR body in `pr-body.md`. |
 
 ### Implementation deviations (S3)
 
