@@ -99,8 +99,13 @@ class ProblemSpaceSearchAlgorithm(InnerContextWindowAlgorithm):
             response = await ctx.invoke_runner(ctx.runner, combined_prompt, **dict(ctx.options or {}))
             response_text = ctx.runner_output_text(response)
             parsed = self._parse_json_response(response_text)
+            # @intent algorithm-note-ids-never-overwrite
+            # Earlier runs on a shared manager use this id shape, so skip registered ids.
+            counter = note_index
+            while ctx.context_manager.get_by_id(f"problem_space_search:{counter}") is not None:
+                counter += 1
             return ProblemSpaceSearchContextItem(
-                primitive_id=f"problem_space_search:{note_index}",
+                primitive_id=f"problem_space_search:{counter}",
                 iteration=snapshot.iteration_count,
                 note_index=note_index,
                 unconsidered=self._format_field(parsed.get("unconsidered")),

@@ -125,8 +125,13 @@ class TrajectoryCheckpointAlgorithm(InnerContextWindowAlgorithm):
                     score = round(float(score), 2)
                 except (ValueError, TypeError):
                     score = None
+            # @intent algorithm-note-ids-never-overwrite
+            # The trajectory_checkpoint tool and earlier runs on a shared manager use this id shape, so skip registered ids.
+            counter = checkpoint_index
+            while ctx.context_manager.get_by_id(f"trajectory_checkpoint:{counter}") is not None:
+                counter += 1
             return TrajectoryCheckpointContextItem(
-                primitive_id=f"trajectory_checkpoint:{checkpoint_index}",
+                primitive_id=f"trajectory_checkpoint:{counter}",
                 iteration=snapshot.iteration_count,
                 checkpoint_index=checkpoint_index,
                 reasoning_summary=parsed.get("reasoning_summary", ""),

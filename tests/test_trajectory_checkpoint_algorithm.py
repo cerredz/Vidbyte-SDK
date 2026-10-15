@@ -27,6 +27,7 @@ from typing import Any
 from vidbyte import ContextWindow, ContextWindowAlgorithm, ContextWindowPlacement, ReflexionAlgorithm, TrajectoryCheckpointAlgorithm
 from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
 from vidbyte.agents.runtime import AgentRuntime
+from vidbyte.context.manager import ContextManager
 from vidbyte.context.runtime import ContextWindowRunContext
 from vidbyte.context.primitives import TrajectoryCheckpointContextItem
 from vidbyte.context.templates import ContextWindowRecorder
@@ -253,6 +254,20 @@ class TrajectoryCheckpointAlgorithmTests(unittest.IsolatedAsyncioTestCase):
         await runtime.arun("task", handle=runner_handle(runner), context=base_context())
         template = TrajectoryCheckpointContextWindowTemplate(iterations=2, interval=2)
         self.assertEqual(template.validate(recorder), [])
+
+    async def test_runtime_checkpoint_never_overwrites_note_already_in_manager(self) -> None:
+        # Verify a checkpoint skips an id already registered in a shared manager instead of replacing that note.
+        manager = ContextManager()
+        existing = TrajectoryCheckpointContextItem(primitive_id="trajectory_checkpoint:1", iteration=1, checkpoint_index=1, reasoning_summary="model note", trajectory="t", output="o", score=None, feedback="f")
+        manager.upsert(existing)
+        runner = FakeRunner([FakeResponse("one"), FakeResponse(_JSON_OUTPUT), is_done_response()])
+        runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=Tools(), permission_policy=PermissionPolicy(), algorithm=ContextWindowAlgorithm(name="trajectory_checkpoints", trajectory_checkpoints=TrajectoryCheckpointAlgorithm(interval=1)), context_manager=manager)
+        result = await runtime.arun("task", handle=runner_handle(runner), context=base_context())
+        self.assertIs(manager.get_by_id("trajectory_checkpoint:1"), existing)
+        added = manager.get_by_id("trajectory_checkpoint:2")
+        self.assertIsInstance(added, TrajectoryCheckpointContextItem)
+        self.assertEqual(added.reasoning_summary, "res")
+        self.assertEqual(result.metadata["trajectory_checkpoints"]["checkpoints"][0]["primitive_id"], "trajectory_checkpoint:2")
 
     async def test_inner_context_window_private_manager_created_when_missing(self) -> None:
         # Verify private context manager initialization works when none is specified.
