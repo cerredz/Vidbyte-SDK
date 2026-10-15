@@ -48,7 +48,9 @@ from vidbyte.lib.system_prompt_presets import SystemPromptPresetScope
 from vidbyte.paradigms.context_minimal_fanout.paradigm import ContextMinimalFanoutParadigm
 from vidbyte.paradigms.context_minimal_fanout.types import AgentRoleSettings, ContextMinimalFanoutSettings, SplitPrompt
 from vidbyte.prompts import Prompt, Prompts, SystemPromptPresetComposer
+from vidbyte.sessions import Session
 from vidbyte.sessions.serialization import SessionSerializer
+from vidbyte.sessions.stores.memory import InMemorySessionStore
 from vidbyte.tools.builtins import ForkConversationTool
 from vidbyte.tools.builtins.output_schema import OutputSchemaBuilder
 
@@ -230,6 +232,16 @@ class PersistenceTests(OfflineAgentTest):
             state = agent.export_state()
             self.assertEqual(state.system_prompt_presets, None if expected is None else tuple(preset.value for preset in expected))
             self.assertEqual(BaseAgent.restore(state).system_prompt_presets, expected)
+
+    def test_a_resumed_and_a_forked_session_keep_the_presets(self) -> None:
+        store = InMemorySessionStore()
+        agent, _ = _agent("writer", "Write.", system_prompt_presets=[WP])
+        session = agent.persist(store=store)
+        agent.run("Go.")
+        resumed = Session.resume(store, session.id)
+        self.assertEqual(resumed.agent.system_prompt_presets, (WP,))
+        self.assertEqual(_composed(resumed.agent).count(WORKING_PRINCIPLES), 1)
+        self.assertEqual(session.fork().agent.system_prompt_presets, (WP,))
 
     def test_the_serializer_round_trips_the_field_and_reads_old_states_as_inherit(self) -> None:
         serializer = SessionSerializer()

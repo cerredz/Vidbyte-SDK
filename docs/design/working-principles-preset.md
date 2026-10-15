@@ -455,6 +455,7 @@ All tests are offline. Generative runners are faked (a recording runner bound th
 - `Propagation` → `fork() copies the field (also for a replaced system prompt)` — [Hidden Failure]
 - `Persistence` → `export_state/restore round-trips None, (), and (WORKING_PRINCIPLES,)` — [Hidden Failure]
 - `Persistence` → `the session serializer round-trips the field and an old dict without it reads None` — [Hidden Assumption]
+- `Persistence` → `Session.resume and Session.fork keep the presets` — [Hidden Failure]
 - `Jev` → `JevAgentSettings validates and passes the field; JevAgent's own calls carry the paragraph` — [Hidden Assumption]
 - `Jev` → `JevCloneAgent, JevSwarmAgent, JevBulkWorker's agent, and the fresh-continuation agent inherit inside a preset run` — [Hidden Assumption]
 - `Jev` → `a CLONE launch through a real JevAgent loop reaches the clones' runners with the paragraph` — [Hidden Failure] (end to end through `JevRuntime`)
