@@ -106,3 +106,74 @@ Date: 2026-10-15. Branch `feat/native-grok-opencode-meta-hosts`, worktree `C:/Us
 - **No test cases:** §13 holds facts only.
 - **Paths:** file paths appear only in §11, §12, §13 (the test files the briefing asks for) and §14 (the worktree); §8 uses module names.
 - **Rows by section:** FR 17, NFR 7, INV 23, AC 20, EC 37, D 24, T 5, W 11, A 18, Q 7 (0 blocking).
+
+---
+
+## Addendum — r2 (S1 review round 1, 2026-10-15)
+
+**Input:** `reports/S1-spec-review.md`, verdict SOUND WITH FIXES (1 Blocker, 8 Major, 4 Minor), read in full. All 13 findings were **accepted**. None was rejected, and none reverses a KD. R-7 was carried as a question (Q-8) instead of a silent rename. Each disposition is in spec §16.
+
+### Changes per finding
+
+- **R-1, Blocker.** The Grok private home moves from `<workspace>/.vidbyte/grok` to `~/.vidbyte/grok-homes/<first 16 hex chars of sha256(normcase(resolved workspace))>` (D-24 flipped, INV-13 replaced, Q-7 settled).
+  - Why: Grok trusts everything under `GROK_HOME` as user scope without a prompt (its `config.toml` endpoints, hooks, plugins and `auth.json`). A home inside a cloned repo would let the repo steal or redirect the key, or run code.
+  - Still holds: KD-2's invariant, since the private home holds no stored login. continue and fork still find the thread, because the key is a stable function of the workspace.
+  - No SDK write into the workspace remains, so the `.gitignore` handling is gone.
+  - Added T-6 (malicious workspace content) and EC-42 (the workspace contains the user home).
+- **R-2.** D-25: the key must match `^[!-z|~]+$`, which is printable ASCII without space, `{` or `}`. This refuses opencode `{env:…}`/`{file:…}` substitution tokens and NUL. EC-1 and AC-5 widened, and EC-38 added. The `{env:VAR}` indirection was not taken, because whether opencode substitutes a second time is unverified.
+- **R-3.** Every enum in `native_threads`, and `CliOptionStyle`, is now a `StrEnum`. INV-16 now requires plain `str` argv and environment entries, and row 29 emits `str(member)`.
+- **R-4.** AC-12 no longer expects a Muse batch file on PATH to be refused; the batch file is passed through `muse_command`, and the user home is redirected. §13 names `Path.home()` (`USERPROFILE`/`HOME`) as a seam tests must redirect, so no test can reach the real `C:\Users\422mi\.grok\bin\grok.exe`.
+- **R-5.** §12.6 now requires that after every phase `python -c "import vidbyte, vidbyte.harnesses.native"` works.
+  - P1 removes the `harness_backends` enum import and the `ManagedProcess` export in the same commits that delete those modules.
+  - P1 also cuts the five native `__init__` files to empty exports.
+  - P2 is a single commit, and row 21 is now in its order. §14 adjusted.
+- **R-6.** INV-15 is now two `ast` rules: what the module level may hold, and which constants may appear (docstrings, `__all__` strings, `""`, 0, 1, `None`, `True`, `False`). AC-14 names the scan. The factory takes observations as keyword arguments, and `NATIVE_LINE_SEPARATOR` was added.
+- **R-7.** Q-8 (non-blocking): `*_muse_thread` or `*_meta_thread`? The default stays `muse`, with D-3's reasoning written out.
+- **R-8.** `NativeSkillFolders.replace` does nothing when the folder already holds the same skills with identical files (`filecmp`, `shallow=False`). EC-27 now states the real failure (a spurious `launch_failed`, or a skill lost mid-run) as an accepted limitation. No locking added.
+- **R-9.** A-19 to A-23 added. `MUSE_AUTH_PATH` is now set to a never-created file inside the temp folder (INV-3, D-6, §9.2, §9.3, the enum, row 44). FR-8 is narrowed to API-key providers, plus EC-39.
+- **R-10.** D-26: workspace and skill paths are stored as `Path.resolve()`; EC-40 added.
+- **R-11.** NFR-2 lets `vidbyte.lib.constants.native_threads` reach 1,000 lines, and the implementer stops BLOCKED beyond that.
+- **R-12.** §12.5: this run's `docs/spec/harness-thread-functions/` is KEPT as the design record, because the pipeline reads the spec from the branch at S6–S7. It gets its own line in the PR-body stat.
+- **R-13.** INV-5: a failure carries the newest thread id learned (the fork's new id, or the first id in a cut stream). Rows 32, 40 and 44 updated, and AC-21 added.
+- **Author addition (not from the review).** opencode merges a workspace `opencode.json` below `OPENCODE_CONFIG_CONTENT`, so a repo-set `baseURL` combines with the SDK's `apiKey`. This is R-1's analogue, but vendor-native: running `opencode run` in that folder yourself has the same exposure. Recorded as T-6(b) and EC-41, with Q-9 (`OPENCODE_DISABLE_PROJECT_CONFIG=1`, default no, scope rule 9).
+
+### New probe (free: echo provider, no credential, no model call)
+
+**Probe 14:** `muse_probe5.sh`, run in WSL `MuseUbuntu1` with `XDG_DATA_HOME=/tmp/vbprobe/data`, `MUSE_NO_AUTO_UPDATE=1` and `META_API_KEY` unset. Each step used a fresh `mktemp -d` config folder.
+
+| Step | Config | Action | Result |
+|---|---|---|---|
+| 1 | A | `exec --json --provider echo` | session `01a13ed4-f936-7f70-8e10-0a559afb597d`, `run.terminal.completed` |
+| 2 | B | `exec --session-id <that id>` | exit 0, same `stream.id`, `run.terminal.completed` |
+| 3 | C | batch `muse serve` `session/fork {excludeItems:true}`, no credential | exit 0, new id `01a13ed4-fc64-79a2-8532-b4ee8f27e8ff`, `forkedFrom.sessionId` = source, cut at turn 2 |
+| 4 | D | `exec --session-id <new id>` | exit 0, same new `stream.id`, `run.terminal.completed`, `text` "echo: third" |
+| 5 | C | `session/read` of the source | `providerId` "echo", `turnCount` 2 |
+
+- No step printed a "refusing"/"identity" line.
+- All four config folders were empty afterwards: Muse keeps sessions under `XDG_DATA_HOME`, and wrote nothing to `XDG_CONFIG_HOME`.
+- Verbatim terminal record from step 4: `{"schema_version":1,"id":"018f0000-0000-7000-8000-000011e26695","stream":{"kind":"session","id":"01a13ed4-fc64-79a2-8532-b4ee8f27e8ff"},"sequence":36,"recorded_at":1780531700000069,"record_type":"event","durability":"durable","causation_id":"a2ae9853-9402-4fc7-9685-ef5a14d15271","payload_type":"run.terminal.completed","payload_schema_version":1,"payload":{"command_id":"a2ae9853-9402-4fc7-9685-ef5a14d15271","kind":"run_terminal","reason":null,"run_stream":{"id":"a2ae9853-9402-4fc7-9685-ef5a14d15271","kind":"run"},"terminal":"completed","text":"echo: third"}}`
+
+**What it settles:** R-9(b) and R-9(e) are VERIFIED for the echo provider (A-20, A-23). They are still unverified for provider `meta`.
+
+**Side effects:** WSL `/tmp/vbprobe/p5/` (o1, o2, o4 JSONL, s3 serve output, e1–e4 stderr); two new echo sessions and one fork under `/tmp/vbprobe/data`; temp config folders removed. Scratchpad: `muse_probe5.sh` and `s1tools/r2_part1.py`, `r2_part2.py`, `r2_part3.py` (edit scripts).
+
+### Not done, outside S1's write set
+
+The review asks that the probe evidence for R-9(b) and R-9(e) be copied into `context/vendor-facts.md`. S1 may write only the spec and this report, so the evidence is in spec A-20, A-23 and above, and the copy is left to the orchestrator.
+
+### Stage E self-check (r2)
+
+- **IDs:** contiguous, none renumbered. INV 1–23, AC 1–21, EC 1–42, FR 1–17, NFR 1–7, D 1–26, T 1–6, W 1–11, A 1–23, Q 1–9 (0 blocking).
+- **Guards:** every new EC is guarded or accepted. EC-38 → INV-4/D-25; EC-39 → accepted (A-22); EC-40 → INV-18/D-26; EC-41 → accepted (T-6, Q-9); EC-42 → accepted (INV-13).
+- **Coverage:** the new AC-21 traces to INV-5 and rows 32, 40 and 44. T-6 names its controls.
+- **Budget:** no new file, class or enum, so §8.4 is unchanged. The only addition is stdlib `hashlib`/`filecmp`/`os`.
+- **Contract:** the §4 and §8.5 public names are unchanged. The `NativeEnvironmentVariable` member `MUSE_AUTH_PATH` was added, and the enums became `StrEnum`.
+- **No stale text:** no reference to the r1 in-workspace home remains outside D-24's runner-up, INV-13's revision note, Q-7 and §16.
+
+### Least-sure points after r2
+
+- A-20 and A-23 for provider `meta`.
+- A-19: the first Grok run in an empty home after a successful sign-in.
+- A-22: opencode providers that sign in through a plugin.
+- Whether the owner prefers `meta` (Q-8).
+- Whether the owner wants Q-9's opencode project-config switch, given the documented key-exposure risk.
