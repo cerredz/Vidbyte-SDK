@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Canonical lib helper (AGENTS.md principle 5). Every failure i
 FUNCTION INVENTORY: CliExitProtocol.process_exited sets the run's exited event. CliRunner.run is the narrated main function; CliRunner.find_program finds the file a bare program name starts, never in the current folder; CliRunner.launch starts the child with its environment, returning the child or the launch failure; json_objects reads the JSON objects a CLI printed one per line; _feed_stdin writes stdin_text and closes the pipe; _drain reads one stream into a capped buffer while counting the rest; _finish_readers bounds and cancels the drain tasks and says whether one was still open; _outcome builds the CliOutcome. ProcessStopper.stop_tree is the narrated main function; _signal_group, _start_taskkill, _wait_taskkill, _kill_leader, _bounded_wait and _close_pipes are its single-step helpers.
 COMMON MODIFICATION PATTERNS: A new process option adds a CliInvocation field and its use in run or launch; keep the stop path in ProcessStopper so every caller gets it.
 WHAT NOT TO DO IN THIS FILE: 1. Do not pass shell=True or build a command string; argv goes to create_subprocess_exec (lint S055). 2. Do not let a child inherit the caller's stdin; it is a pipe or DEVNULL. 3. Do not wait without a bound after a kill; a grandchild can hold the pipes open forever. 4. Do not learn of the exit from Process.wait() in run; on Python 3.12+ it resolves only after every pipe closes, which a grandchild can delay for good.
-KNOWN EDGE CASES: A run ends when the leader exits, not when its pipes close: the readers then get one kill wait, and a descendant still holding the pipes gets the tree stop. On Windows, taskkill /T cannot reach a grandchild of a leader that already exited. On Windows a bare program name is looked up only in the absolute PATH folders with PATHEXT, and one found in none of them is not started, because CreateProcess would search the current folder; the harness launchers refuse batch files before they get here. Output is decoded as UTF-8 and trimmed to whole characters within max_output_bytes.
+KNOWN EDGE CASES: A run ends when the leader exits, not when its pipes close: the readers then get one kill wait, and a descendant still holding the pipes gets the tree stop. On Windows, taskkill /T cannot reach a grandchild of a leader that already exited, and taskkill itself starts by its full path in the System32 folder under the SystemRoot variable (the C: drive's Windows folder when it is unset), never by its bare name; a root that is not absolute leaves only the leader kill. On Windows a bare program name is looked up only in the absolute PATH folders with PATHEXT, and one found in none of them is not started, because CreateProcess would search the current folder; the harness launchers refuse batch files before they get here. Output is decoded as UTF-8 and trimmed to whole characters within max_output_bytes.
 RELATED DOCS: vidbyte/lib/README.md
 TESTS: tests/features/harness_threads/test_harness_threads_runner.py, tests/features/harness_threads/test_harness_threads_process_bounds.py
 """
@@ -80,11 +80,21 @@ class ProcessStopper:
 
     @staticmethod
     async def _start_taskkill(pid: int) -> asyncio.subprocess.Process | None:
+        # @intent stop-tree-taskkill-from-the-system-folder
+        # Windows looks for a bare program name in the current folder
+        # first, so a taskkill.exe there would run with the caller's
+        # environment and leave the tree alive. taskkill starts by its
+        # full path in the system folder (SystemRoot, else C:\Windows);
+        # a root that is not absolute starts nothing.
+        root = os.environ.get(native_threads.NATIVE_SYSTEM_ROOT_VARIABLE) or native_threads.NATIVE_WINDOWS_DEFAULT_SYSTEM_ROOT
+        program = os.path.join(root, *native_threads.NATIVE_TASKKILL_PATH_PARTS)
+        if not os.path.isabs(program):
+            return None
         # @intent stop-tree-taskkill-may-fail-to-start
         # Starts taskkill /T /F on the tree with no inherited streams;
         # None when it cannot start, so the leader kill still runs.
         try:
-            return await asyncio.create_subprocess_exec(*native_threads.NATIVE_TASKKILL_ARGUMENTS, str(pid), stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+            return await asyncio.create_subprocess_exec(program, *native_threads.NATIVE_TASKKILL_ARGUMENTS, str(pid), stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
         except OSError:
             return None
 

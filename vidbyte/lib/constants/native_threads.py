@@ -63,7 +63,12 @@ NATIVE_PROCESS_READ_CHUNK_BYTES = 65536
 NATIVE_PROCESS_STREAM_LIMIT_BYTES = 65536
 NATIVE_PROCESS_TRUNCATION_PROBE_BYTES = 1
 NATIVE_SUCCESS_EXIT_CODE = 0
-NATIVE_TASKKILL_ARGUMENTS = ("taskkill", "/T", "/F", "/PID")
+# taskkill starts by its full path in the Windows system folder, so
+# Windows never runs a taskkill.exe from the current folder.
+NATIVE_SYSTEM_ROOT_VARIABLE = "SystemRoot"
+NATIVE_WINDOWS_DEFAULT_SYSTEM_ROOT = "C:\\Windows"
+NATIVE_TASKKILL_PATH_PARTS = ("System32", "taskkill.exe")
+NATIVE_TASKKILL_ARGUMENTS = ("/T", "/F", "/PID")
 NATIVE_STDOUT_TASK_NAME = "cli-runner-stdout"
 NATIVE_STDERR_TASK_NAME = "cli-runner-stderr"
 NATIVE_TEXT_ENCODING = "utf-8"
