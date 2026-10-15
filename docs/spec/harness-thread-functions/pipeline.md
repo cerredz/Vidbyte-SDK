@@ -23,7 +23,7 @@ started: 2026-10-15
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 — CAP REACHED (round 1 SOUND WITH FIXES 1B/8M/4m → r2 65f6b95d; round 2 SOUND WITH FIXES 2B/3M/3m → r3 final, approved) · S5 repair iterations: 1/8 (converged) · S5 re-review rounds: 1/2
+- S1 review rounds: 2/2 — CAP REACHED (round 1 SOUND WITH FIXES 1B/8M/4m → r2 65f6b95d; round 2 SOUND WITH FIXES 2B/3M/3m → r3 final, approved) · S5 repair iterations: 2/8 (iteration 2 running after re-review round 1) · S5 re-review rounds: 1/2
 
 ## Decisions the orchestrator made
 - 2026-10-15 — Work on the existing PR branch `feat/native-grok-opencode-meta-hosts` in a new worktree, not a new `feat/<slug>` branch — the owner said "update the pr" (request.md §A Prompt 4).
@@ -56,6 +56,8 @@ started: 2026-10-15
 - 2026-10-16 — Re-review round 1 found 2 new Majors → fresh findings verifier scoped to R-RR1..R-RR4, then S2 regression tests, then S5 iteration 2 (counts toward the 8). R-RR3 adjudicated by the orchestrator: spec §9.1/EC-3 allow a 24,000-character prompt, and the real constraint is the Windows 32,767-unit command line; the S5-1 rule (24,000 quoted UTF-16 units) refuses spec-valid prompts, and a spec-conforming fix exists (refuse only when the quoted command line would exceed the OS limit). So the code must conform to the spec, not the spec to the code: include R-RR3 in iteration 2 (S2 adds "a 24,000-character prose prompt runs on win32" + keeps the quotes/astral refusals). Niche: the agent shell sets `NoDefaultCurrentDirectoryInExePath`, which hides the Windows current-folder search; cwd-lookup tests must `monkeypatch.delenv` it or they cannot fail.
 
 - 2026-10-16 — Re-review verifier (reports/S5-findings-verifier-rr1.md) confirmed 4/4: R-27 Major (runner post-exit cancel hole), R-28 Blocker (bare taskkill runs a planted taskkill.exe with the caller env incl. key), R-29 Major (spec-valid 24,000-char prose prompts refused on win32; fix NATIVE_WINDOWS_ARGV_PROMPT_MAX_UNITS = 30000, measured OS limit 32,766), R-30 Minor (Muse double cancel leaks temp folder; scheduled); plus [verifier] R-31 Minor test-only (R-4 tests blind on 3.12+ while NoDefaultCurrentDirectoryInExePath is set) and R-32 follow-up (WSL reap cancellable). Routing: S2 writes R-27/R-28/R-29/R-30 regression tests, fixes R-31 (delenv in decoy_log fixture) and switches the R-8 refusal observation from "24000" to the new units constant; then S5 iteration 2 fixes R-27..R-30. R-28 fix uses %SystemRoot%\System32	askkill.exe (find_program would break 9 tree-stop tests whose sandbox PATH is one empty folder).
+
+- 2026-10-16 — S2 re-review tests landed (4b5eacad tests, 675f4ecc test-plan, b737f57f report). Orchestrator re-ran the pack: `12 failed, 424 passed, 2 skipped` (8 new cases + 4 dense-prompt cases whose message observation now reads NATIVE_WINDOWS_ARGV_PROMPT_MAX_UNITS from the constants module — a literal swapped for the constant the fix defines, not a weakening). R-31 fixture fix (delenv NoDefaultCurrentDirectoryInExePath) proven: R-4 tests fail on pre-repair code. New S2_HEAD = b737f57f. S5 iteration 2 launched for R-27..R-30.
 
 ## User replies (verbatim)
 - (none yet)
