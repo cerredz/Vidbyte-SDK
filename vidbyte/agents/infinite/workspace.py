@@ -274,7 +274,8 @@ class InfiniteWorkspace:
         # A note lives inside the workspace, has a text suffix, and is
         # never a seed, a run journal, or a bookkeeping file, which only
         # the memory tools and the journal write. Its path is one line,
-        # because the pair's result card lists it as one.
+        # because the pair's result card lists it as one, and holds no
+        # colon, which on Windows names a hidden stream of another file.
         if path and path.splitlines() != [path]:
             raise ToolExecutionError(f"{path!r} breaks across lines; give a note path on one line.")
         try:
@@ -284,6 +285,8 @@ class InfiniteWorkspace:
         if target.suffix not in INFINITE_NOTE_SUFFIXES:
             raise ToolExecutionError(f"{path} must end in one of {', '.join(INFINITE_NOTE_SUFFIXES)}.")
         relative = target.relative_to(self.root)
+        if ":" in relative.as_posix():
+            raise ToolExecutionError(f"{relative.as_posix()} holds a colon; write the note path without one.")
         # A case-insensitive disk, such as macOS's default, keeps the
         # caller's spelling, so the protected names are matched with
         # case ignored.
@@ -305,13 +308,19 @@ class InfiniteWorkspace:
 
     def _replace(self, relative: str, text: str) -> None:
         # Write to a temporary file beside the target and swap it in, so
-        # no reader ever sees a half-written file.
+        # no reader ever sees a half-written file. A failed write or swap
+        # removes the temporary file, which would otherwise count toward
+        # the caps, and leaves the target as it was.
         target = self.root / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         handle, temporary = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
-        with os.fdopen(handle, "w", encoding="utf-8", newline="") as file:
-            file.write(text)
-        os.replace(temporary, target)
+        try:
+            with os.fdopen(handle, "w", encoding="utf-8", newline="") as file:
+                file.write(text)
+            os.replace(temporary, target)
+        except BaseException:
+            os.unlink(temporary)
+            raise
 
     @staticmethod
     def _descriptions(text: str) -> dict[str, str]:
