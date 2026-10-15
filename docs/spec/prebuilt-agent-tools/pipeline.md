@@ -26,7 +26,7 @@ started: 2026-10-14 02:46
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 (round 1 SOUND WITH FIXES, 12 findings applied in r2; round 2 SOUND WITH FIXES 0B/4M/6m, r3 applied all 10; status: approved — cap reached, no further rounds) · S5 repair iterations: 1/8 (iteration 1 converged) · S5 re-review rounds: 1/2 (round 1 MERGEABLE AFTER FIXES: R-15..R-17 Blockers + M-6; iteration 2 pending)
+- S1 review rounds: 2/2 (round 1 SOUND WITH FIXES, 12 findings applied in r2; round 2 SOUND WITH FIXES 0B/4M/6m, r3 applied all 10; status: approved — cap reached, no further rounds) · S5 repair iterations: 2/8 (iterations 1 and 2 converged) · S5 re-review rounds: 1/2 (round 1 MERGEABLE AFTER FIXES: R-15..R-17 + M-6, fixed in iteration 2; round 2 — the last — launching)
 
 ## Decisions the orchestrator made
 - 2026-10-14 02:46 — Unset the branch upstream (`git branch --unset-upstream`) after `git worktree add` set it to `origin/main` — prevents any agent's bare `git push` from targeting main; pushes must be `git push -u origin feat/prebuilt-agent-tools`.
@@ -63,6 +63,8 @@ started: 2026-10-14 02:46
 - 2026-10-14 — Spec r7 (70df9458 + addendum e1c24bfb), status reviewed. D-19: the TOML dotted-key scan skips comments and multi-line strings whole (R-17). A.27 now pins parse_data_size huge/tiny exponents (sign from the exact value; zero with any exponent → 0.0). New EC-51; M-6 row fixed. No new constant/tool/parameter. Spot-check passed: revision 7; §6.2 byte-identical (8,847 chars); only spec.md + author report changed; tests and code untouched.
 - 2026-10-14 — Spec author's open item: `extract_numbers('0e5000')` returns no number, but the A.29 row ('expanded exactly'; 'a run of more than 4,000 digits is skipped') lists it as value '0', and r7's R-16 rule (zero with any exponent → 0) is the same exponent-bound path that R-16 copies from text_extraction.py:218-220. Added it to the S2 regression task as a consistency case (R-16 family) instead of a separate verifier round — the spec row pins it and the test author encodes the spec.
 - 2026-10-14 — S2 regression cases for re-review round 1 accepted (225ab221 tests, 0c055c40 report): 45 new cases (9 cap-sized TOML [watchdog], 8 A.20 rows, 9 A.27 rows, 18 R-16 host-context cases, 1 A.29 `0e5000` case). Red at 7fa8dd9c: 33 failed, 4364 passed (4,397 collected) — my own rerun identical. Spot-check: only tests/, test-plan.md and the S2 report changed; pushed; trailer present. Test baseline moved f421047e → 0c055c40. Launching S5 iteration 2.
+- 2026-10-14 — S5 iteration 2 DONE at 985460fd: R-15+R-17 202ef85f (one-pass TOML piece scan; unrolled multi-line content to avoid 122.7 MB at the cap), R-16 9f7b70ac (exponent bounded before Decimal), A.29 case 70298784 [gate:pack], M-6 marked fixed @70df9458 (spec author r7). Spot-check passed: porcelain empty; tests/spec/test-plan/lint/.semgrep/scripts/pyproject/.github diff vs 0c055c40 empty; verify-log `## Iteration 2` present; review.md 0 open rows; 4/4 commits carry the trailer; pushed. My own gate rerun: source `SDK-LINT: PASS`, `8412 passed, 13 skipped`, `CI passed.`; semgrep 931 files 0 findings; public API current (606); package `CI passed.`; remote: no checks reported. Converged.
+- 2026-10-14 — Launching re-review round 2 (the last one allowed). Scoped FOCUS: the iteration-2 fixes and all code changed since c8eefe53, plus a regression sweep of R-1..R-14 touch points; the repair agent's residual-memory observation (~62.8 MB transient worst case inside one multi-line TOML string) is passed in for a ruling.
 
 ## User replies (verbatim)
 - none
@@ -170,3 +172,6 @@ started: 2026-10-14 02:46
 - The watchdog child interpreter does not load `-p` pytest plugins; a prototype loaded via `-p` is not what [W] cases run — *source:* S1 author r7
 - Five TOML cases match `TOML_NESTING_MESSAGE = 'the TOML is nested deeper than 100 levels'` (formats row file); rewording the code's message breaks them — *source:* S2 r7 round
 - 12 green guards for round 2 must stay green, incl. `r17-key-after-literal-string` (fails if R-15's constant lands without R-17's fix) — *source:* S2 r7 round
+- core.autocrlf=true: the index holds LF, the working copy CRLF for some prebuilt files; edit with byte-level scripts and check `git ls-files --eol` — *source:* S5 iteration 2
+- A greedy group repeat, even inside `(?>...)`, holds ~120-155 bytes per repetition in Python `re`; measure peak memory with tracemalloc before adopting one at a 1M cap — *source:* S5 iteration 2
+- Source-stage flake: tests/test_mcp_stdio_transport.py::...test_cancelled_waiter_does_not_break_transport can time out once under load (5 s); run the file alone, then rerun the stage — *source:* S5 iteration 2
