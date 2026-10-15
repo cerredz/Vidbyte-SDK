@@ -19,11 +19,11 @@ started: 2026-10-15
 | S3 implement | done | 2026-10-16 | 2026-10-16 | reports/S3-implementer.md | 49 rows; HEAD d5581a24 pushed; pack 395/2 skip; run_ci source+package PASS; lint PASS; Semgrep 0; PR retitled [WIP]; ci.yml 38754831930 dispatched |
 | S4 adversarial review | done | 2026-10-16 | 2026-10-16 | reports/S4-review-{conformance,conventions,engineering}.md, reports/S4-findings-verifier.md | review.md: 11 confirmed (5 Blocker R-1..R-5, 6 Major R-6..R-11), 15 Minor, 0 refuted |
 | S5 repair loop | done | 2026-10-16 | 2026-10-16 | reports/S5-repair-1.md, verify-log.md | converged at iteration 1: R-1..R-11 + trivial R-15/16/17 fixed (74114bd1..b8305b44); pack 428/2 skip; run_ci source 5601 passed (orchestrator re-run) ; remote 4/4 green on bb7d78bb |
-| S5 re-review | round 1 done → back to repair | 2026-10-16 | | reports/S5-rereview.md | round 1: 14/14 fixes confirmed; new 2 Major (R-RR1 runner post-exit cancel hole, R-RR2 bare taskkill cwd lookup), 2 Minor (R-RR3 R-8 cap stricter than spec, R-RR4 Muse double-cancel) |
-| S6 PR | pending | | | | |
+| S5 re-review | done | 2026-10-16 | 2026-10-16 | reports/S5-rereview.md, reports/S5-rereview-2.md | round 1: 4 new (R-27..R-30) → iteration 2; round 2: SOUND (0 B/0 M, 2 Minor follow-ups R-RRB1 doc-only, R-RRB2 win32 ~0.1 s cancel-during-timeout window) |
+| S6 PR | running | 2026-10-16 | | reports/S6-pr-author.md | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 — CAP REACHED (round 1 SOUND WITH FIXES 1B/8M/4m → r2 65f6b95d; round 2 SOUND WITH FIXES 2B/3M/3m → r3 final, approved) · S5 repair iterations: 2/8 (converged) · S5 re-review rounds: 2/2 (round 2 running — last allowed)
+- S1 review rounds: 2/2 — CAP REACHED (round 1 SOUND WITH FIXES 1B/8M/4m → r2 65f6b95d; round 2 SOUND WITH FIXES 2B/3M/3m → r3 final, approved) · S5 repair iterations: 2/8 (converged) · S5 re-review rounds: 2/2 (round 2 SOUND)
 
 ## Decisions the orchestrator made
 - 2026-10-15 — Work on the existing PR branch `feat/native-grok-opencode-meta-hosts` in a new worktree, not a new `feat/<slug>` branch — the owner said "update the pr" (request.md §A Prompt 4).
@@ -60,6 +60,8 @@ started: 2026-10-15
 - 2026-10-16 — S2 re-review tests landed (4b5eacad tests, 675f4ecc test-plan, b737f57f report). Orchestrator re-ran the pack: `12 failed, 424 passed, 2 skipped` (8 new cases + 4 dense-prompt cases whose message observation now reads NATIVE_WINDOWS_ARGV_PROMPT_MAX_UNITS from the constants module — a literal swapped for the constant the fix defines, not a weakening). R-31 fixture fix (delenv NoDefaultCurrentDirectoryInExePath) proven: R-4 tests fail on pre-repair code. New S2_HEAD = b737f57f. S5 iteration 2 launched for R-27..R-30.
 
 - 2026-10-16 — S5 iteration 2 converged: R-27 (4a352946, 53d9f45a POSIX group-gone wait after CI caught a 3.11/3.12 race), R-28 (7ec71ec7 SystemRoot taskkill), R-29 (5ee16c7d units ceiling 30000), R-30 (5f016773 shielded wait+remove). Orchestrator re-ran run_ci source at ac8c8cdb: `5609 passed, 16 skipped` / `CI passed.`; remote 4/4 on ac8c8cdb; tests unchanged since b737f57f; 0 open. Recorded owner-facing limitations (spec §17 dev. 20, 24): under a second cancel the Muse temp removal finishes in the background after CancelledError; an unreaped zombie (Python as PID 1, no init) makes a POSIX stop wait out the bounded grace. Re-review round 2 (last allowed) launched on bb7d78bb..ac8c8cdb.
+
+- 2026-10-16 — Re-review round 2 SOUND. Routing of its two Minors: R-RRB1 (deviation 20 says the removal "ends in the background", but asyncio.run shutdown cancels the shielded task and the folder stays) → S6 corrects the deviation 20 wording in §17 (doc-only, S6 edits §17 anyway) and lists it as a follow-up; R-RRB2 (win32: a cancel during the timeout handler's taskkill kills taskkill; pre-existing, same class as R-32) → follow-up. review.md:55 still shows R-31 "open" though S2 did it in 4b5eacad → S6 marks it `fixed @4b5eacad (S2)`. Spec `status: verified` is skipped as a separate commit because S6 sets `pr-open` immediately; S6 adds a §17 row noting the verification.
 
 ## User replies (verbatim)
 - (none yet)
