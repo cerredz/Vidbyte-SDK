@@ -24,12 +24,14 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from vidbyte.lib.config import ModelProvider, TextModelConfig
+from vidbyte.lib.config import ModelProvider, TextModelConfig, TextModelMode
 from vidbyte.providers.anthropic import AnthropicProvider
 from vidbyte.providers.compatible import MistralProvider
 from vidbyte.providers.gemini import GeminiProvider
 from vidbyte.providers.openai import OpenAIProvider
 from vidbyte.providers.output_schema import OutputSchemaFormatter
+
+GEMINI_TEST_KEY = "AQ" + "." + "x" * 40
 
 
 class Priority(str, Enum):
@@ -114,7 +116,7 @@ class OpenAIStrictDialectTests(unittest.TestCase):
         # @intent strict-mode-closes-every-object
         # OpenAI rejects strict json_schema with 400 invalid_json_schema unless both rules hold everywhere.
         config = TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-5.4-mini", response_format=_wire_schema(Ticket))
-        payload = OpenAIProvider(model="gpt-5.4-mini", api_key="k")._create_text_payload(config, "triage", None, None)
+        payload = OpenAIProvider(model="gpt-5.4-mini", api_keys=["sk-k"], mode=TextModelMode.DIRECT)._create_text_payload(config, "triage", None, None)
         fmt = payload["text"]["format"]
 
         self.assertIs(fmt["strict"], True)
@@ -124,8 +126,8 @@ class OpenAIStrictDialectTests(unittest.TestCase):
 
     def test_compatible_native_schema_payload_closes_every_object(self) -> None:
         """The compatible adapter's NATIVE_SCHEMA tier sends the same strict dialect."""
-        config = TextModelConfig(provider=ModelProvider.MISTRAL, model="mistral-large-latest", response_format=_wire_schema(Ticket))
-        payload = MistralProvider(model="mistral-large-latest", api_key="k")._create_payload(config, "triage", None, None)
+        config = TextModelConfig(provider=ModelProvider.MISTRAL, model="mistral-large-latest", response_format=_wire_schema(Ticket), mode=TextModelMode.DIRECT)
+        payload = MistralProvider(model="mistral-large-latest", api_keys=["k"], mode=TextModelMode.DIRECT)._create_payload(config, "triage", None, None)
         json_schema = payload["response_format"]["json_schema"]
 
         self.assertIs(json_schema["strict"], True)
@@ -138,7 +140,7 @@ class OpenAIStrictDialectTests(unittest.TestCase):
         schema = _wire_schema(Ticket)
         before = json.dumps(schema, sort_keys=True)
         config = TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-sonnet-4-5", response_format=schema)
-        payload = AnthropicProvider(model="claude-sonnet-4-5", api_key="k")._create_payload(config, "triage", None, None)
+        payload = AnthropicProvider(model="claude-sonnet-4-5", api_keys=["sk-ant-" + "k"], mode=TextModelMode.DIRECT)._create_payload(config, "triage", None, None)
         sent = payload["output_config"]["format"]["schema"]
 
         self.assertEqual(payload["output_config"]["format"]["type"], "json_schema")
@@ -174,7 +176,7 @@ class OpenAIStrictDialectTests(unittest.TestCase):
         schema = _wire_schema(AnnotatedTicket)
         before = json.dumps(schema, sort_keys=True)
         config = TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-5.4-mini", response_format=schema)
-        payload = OpenAIProvider(model="gpt-5.4-mini", api_key="k")._create_text_payload(config, "triage", None, None)
+        payload = OpenAIProvider(model="gpt-5.4-mini", api_keys=["sk-k"], mode=TextModelMode.DIRECT)._create_text_payload(config, "triage", None, None)
         sent = payload["text"]["format"]["schema"]
 
         self.assert_strict(sent)
@@ -224,7 +226,7 @@ class GeminiResponseSchemaTests(unittest.TestCase):
         """Nested models and Enums are inlined instead of sent as $defs/$ref, which Gemini rejects."""
         # @intent response-schema-speaks-gemini-openapi-subset
         config = TextModelConfig(provider=ModelProvider.GEMINI, model="gemini-3.5-flash", response_format=_wire_schema(Ticket))
-        payload = GeminiProvider(model="gemini-3.5-flash", api_key="k")._create_payload(config, "triage", None, None)
+        payload = GeminiProvider(model="gemini-3.5-flash", api_keys=[GEMINI_TEST_KEY], mode=TextModelMode.DIRECT)._create_payload(config, "triage", None, None)
         schema = payload["generationConfig"]["responseSchema"]
         wire = json.dumps(schema)
 
@@ -240,7 +242,7 @@ _GEMINI_FUNCTION_TOOL = {"function_declarations": [{"name": "isDone", "descripti
 def _gemini_payload(model: str, *, tools: tuple[dict[str, Any], ...] = (), system: str | None = "Be brief.") -> dict[str, Any]:
     # Builds the Gemini request body an output_schema agent would send, optionally with functions declared.
     config = TextModelConfig(provider=ModelProvider.GEMINI, model=model, response_format=_wire_schema(Ticket), tools=tools)
-    return GeminiProvider(model=model, api_key="k")._create_payload(config, "triage", system, None)
+    return GeminiProvider(model=model, api_keys=[GEMINI_TEST_KEY], mode=TextModelMode.DIRECT)._create_payload(config, "triage", system, None)
 
 
 class GeminiSchemaWithFunctionsTests(unittest.TestCase):

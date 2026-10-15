@@ -227,14 +227,20 @@ asyncio.run(_t_connect_error_raises_provider_request_error())
 
 print("\n-- TextModelRunner ---------------------------------------------------")
 
-from vidbyte.lib.config import TextModelConfig, ModelProvider
+from vidbyte.lib.config import ModelProvider, TextModelConfig, TextModelMode
 from vidbyte.lib.runners import TextModelRunner
+
+# Fake provider keys for the fake transports, built from parts so no
+# literal here looks like a real key. Each carries the prefix its
+# provider's key format needs, and DIRECT sends it straight to the
+# fake transport.
+FAKE_OPENAI_KEY = "sk-" + "proj-" + "fake"
 
 
 def _make_text_runner(responses: list[dict]) -> tuple[TextModelRunner, AsyncFakeTransport]:
     transport = AsyncFakeTransport(responses)
     runner = TextModelRunner(
-        TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-test", api_key="key"),
+        TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-test", api_keys=[FAKE_OPENAI_KEY], mode=TextModelMode.DIRECT),
         transport=transport,
     )
     return runner, transport
@@ -445,7 +451,7 @@ async def _t_concurrent_arun_calls() -> None:
             await asyncio.sleep(LATENCY)
             return HttpResponse(200, json.dumps({"output_text": "done"}), {})
 
-    config = TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-test", api_key="key")
+    config = TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-test", api_keys=[FAKE_OPENAI_KEY], mode=TextModelMode.DIRECT)
     r1 = TextModelRunner(config, transport=DelayedTransport())
     r2 = TextModelRunner(config, transport=DelayedTransport())
 

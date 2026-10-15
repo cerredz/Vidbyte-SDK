@@ -93,8 +93,11 @@ def test_default_embedding_runner_returns_vectors(monkeypatch: pytest.MonkeyPatc
     ],
 )
 def test_default_streaming_runner_yields_chunks(monkeypatch: pytest.MonkeyPatch, provider: str, model: str, event: dict[str, Any]) -> None:
-    _fake_urlopen(monkeypatch, f"data: {json.dumps(event)}\n\ndata: [DONE]\n".encode())
+    from vidbyte.lib.config import TextModelMode
 
-    chunks = list(StreamingTextModelRunner(provider=provider, model=model, api_key="k").stream("hi"))
+    _fake_urlopen(monkeypatch, f"data: {json.dumps(event)}\n\ndata: [DONE]\n".encode())
+    provider_key = {"anthropic": "sk-ant-k", "openai": "sk-k"}[provider]
+
+    chunks = list(StreamingTextModelRunner(provider=provider, model=model, api_keys=[provider_key], mode=TextModelMode.DIRECT).stream("hi"))
 
     assert chunks == ["hi"]

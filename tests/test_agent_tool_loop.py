@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from vidbyte import Agent, AgentMiddleware, MiddlewareDecision, OutputSchemaViolationError, tool
 from tests.test_text_model_runner import FakeTransport
 from vidbyte.agents import AgentLoopSettings, AgentRuntime, MinCompactions, MinIterations, MinToolCalls, MinToolCallsById, ToolSettings
-from vidbyte.lib.config import ModelProvider, TextModelConfig
+from vidbyte.lib.config import ModelProvider, TextModelConfig, TextModelMode
 from vidbyte.lib.runners import TextModelRunner
 from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareEvent, MiddlewareHook
 from vidbyte.middleware.builtins import AuditLogMiddleware, MessageHistoryCompactionMiddleware, RuntimeLimitMiddleware, ToolPolicyMiddleware
@@ -443,7 +443,7 @@ class AssistantToolCallHistoryTests(unittest.IsolatedAsyncioTestCase):
 
         second = runner.calls[1]
         transport = FakeTransport({"output_text": "ok"})
-        openai_runner = TextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-test", api_key="key"), transport=transport)
+        openai_runner = TextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-test", api_keys=["sk-key"], mode=TextModelMode.DIRECT), transport=transport)
         await openai_runner.arun(second["prompt"], messages=second["kwargs"]["messages"])
         wire_input = transport.requests[0]["json_body"]["input"]
 
