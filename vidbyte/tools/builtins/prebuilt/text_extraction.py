@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Every tool is a static method whose docstring's first paragra
 FUNCTION INVENTORY: extract_urls, extract_email_addresses, extract_numbers, extract_dates, extract_ip_addresses, extract_money_amounts, extract_key_value_pairs, and extract_sentences are the tools; _url_text trims a web address; _email_text checks an email candidate; _number_entry, _date_entry, and _money_entry convert one match into an output item; _ip_address checks an address candidate with ipaddress; _key_value_pairs splits lines into pairs; _tally_unique counts distinct values; tool_functions lists the tools in catalogue order.
 COMMON MODIFICATION PATTERNS: A new extraction tool adds a static method with a 4 to 5 sentence description, its row in the spec's Appendix A.29, and its entry in tool_functions. A new currency, magnitude suffix, or month name goes into its table in vidbyte/lib/constants/prebuilt_tools.py, and the patterns here pick it up when the module loads.
 WHAT NOT TO DO IN THIS FILE: 1. Do not add a pattern with an unbounded repeat that a later part can force to backtrack; keep every repeat bounded or possessive so scanning stays linear. 2. Do not multiply or scale a Decimal outside PrebuiltToolSupport.decimal_context with enough precision; the host's context may round to 28 digits or trap. 3. Do not split lines or sentences with a local rule; use PrebuiltToolSupport so every category agrees. 4. Do not build every item before capping; count first and build items lazily so the item cap and the character budget stop the work.
-KNOWN EDGE CASES: A number, an amount, or a date that runs into a longer run of digits is skipped rather than cut, so a run of more than 4,000 digits never yields part of itself. A value whose exact plain text would pass the DecText length cap of 4,002 characters, such as a huge exponent, is skipped. Currency codes are matched in uppercase only, so ordinary words that spell a code in lowercase are not amounts. An IP candidate that ipaddress rejects is skipped whole, so an invalid address never yields a shorter valid tail.
+KNOWN EDGE CASES: A number, an amount, or a date that runs into a longer run of digits is skipped rather than cut, so a run of more than 4,000 digits never yields part of itself. A value whose exact plain text would pass the DecText length cap of 4,002 characters, such as a value other than zero with a huge exponent, is skipped, while zero with any exponent is 0; an exponent past that cap is compared before any Decimal is built, because Decimal cannot be built from one past about 10^18. Currency codes are matched in uppercase only, so ordinary words that spell a code in lowercase are not amounts. An IP candidate that ipaddress rejects is skipped whole, so an invalid address never yields a shorter valid tail.
 RELATED DOCS: docs/spec/prebuilt-agent-tools/spec.md (Appendix A.29, section 9.2 items 5, 6, 7, 9, and 12, section 12.3 row 36); vidbyte/tools/builtins/prebuilt/README.md
 TESTS: tests/features/prebuilt_tools/test_prebuilt_rows_extraction.py and the catalogue-wide tests in tests/features/prebuilt_tools/
 """
@@ -216,9 +216,16 @@ class TextExtractionToolFunctions:
     def _number_entry(found: re.Match[str]) -> dict[str, object] | None:
         """Turn a number match into its output item with the exact value, or None when the value is too long to write out."""
         exponent = int(found["exponent"]) if found["exponent"] else 0
-        if abs(exponent) > PREBUILT_MAX_DECIMAL_TEXT_CHARS:
+        mantissa = f"{found['sign'] or ''}{found['mantissa'].replace(',', '')}"
+        # @intent prebuilt-number-far-exponent
+        # Decimal cannot be built from a far exponent, so only the
+        # mantissa is read: zero stays zero under any exponent, and any
+        # other value would be too long to write out.
+        far = abs(exponent) > PREBUILT_MAX_DECIMAL_TEXT_CHARS
+        number = Decimal(mantissa if far else f"{mantissa}E{exponent}")
+        if far and not number.is_zero():
             return None
-        value = PrebuiltToolSupport.decimal_text(Decimal(f"{found['sign'] or ''}{found['mantissa'].replace(',', '')}E{exponent}"))
+        value = PrebuiltToolSupport.decimal_text(number)
         if len(value) > PREBUILT_MAX_DECIMAL_TEXT_CHARS:
             return None
         return {"text": found.group(), "value": value, "position": found.start(), "is_percent": found["percent"] is not None}
