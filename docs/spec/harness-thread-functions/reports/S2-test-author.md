@@ -107,3 +107,5 @@ pack:  7 failed, 2 skipped, 388 errors in 10.97s
 suite: 7 failed, 5173 passed, 16 skipped, 388 errors in 61.54s (0:01:01)
 ```
 Lint: exit 0, no finding in the pack. Commits: `e3dcb214` (tests, stand-in mode, test plan), `5a1813da` (AC-3 Proof cell, the only spec edit). The existing WSL tests already matched r4's `WSLENV` wording (caller's value first, names in any order; serve without `META_API_KEY`), so they were not changed.
+
+Post-S3 fix (`14ec6702`): two test helpers raised TypeError before the code under test ran. `call` now takes `raw_config`, which it hands to the function as `config=` unchanged, so EC-33 really passes another harness's record or a dict. The runner helper `invocation` takes `argv` positional-only, so a bad `argv` can replace it. No assertion changed. The pack now gives `395 passed, 2 skipped in 37.26s`.
