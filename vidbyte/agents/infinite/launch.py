@@ -225,8 +225,11 @@ class InfinitePair(BasePipeline):
         # caught, so stopping the run stops every pair.
         try:
             # Build the generator with a fresh context and send it the
-            # task card, the entries and paths it names, and its quota.
-            reply = await self._agent(writer).arun(self._task_message(writer))
+            # task card, the entries and paths it names, one line per
+            # child of its own that already finished (after a resume),
+            # and its quota.
+            finished = self.finished_lines(launch.journal.finished_children(writer.key))
+            reply = await self._agent(writer).arun(self._task_message(writer, finished))
             summary = self._capped(reply.content.strip())
             status = self._status(reply)
 
@@ -293,16 +296,15 @@ class InfinitePair(BasePipeline):
             middleware=(MessageHistoryCompactionMiddleware.trim_with_provider_boundaries(max_tokens=INFINITE_HISTORY_MAX_TOKENS),),
         )
 
-    def _task_message(self, memory: InfiniteAgentMemory) -> str:
+    def _task_message(self, memory: InfiniteAgentMemory, finished: str) -> str:
         # The generator's first message: the card, the named entries
-        # pasted in, the named paths listed, its own finished children
-        # (after a resume), and its quota.
+        # pasted in, the named paths listed, the lines for its own
+        # finished children, and its quota.
         launch, card = self.launch, self.card
         ids = tuple(int(item.removeprefix("#")) for item in card.context if item.startswith("#"))
         entries = launch.workspace.entries(ids) if ids else ()
         pasted = "\n".join(f"#{entry.id}: {entry.draft.text}" for entry in entries) or "-"
         paths = "\n".join(f"- {item}" for item in card.context if not item.startswith("#")) or "-"
-        finished = self.finished_lines(launch.journal.finished_children(memory.key))
         return Prompts().get(Prompt.INFINITE_MEMORY_TASK_PROMPT).format(goal=card.goal, criteria=self.criteria, instructions=card.generator_prompt, entries=pasted, paths=paths, finished=finished, quota=memory.quota())
 
     def _verifier_message(self, memory: InfiniteAgentMemory, status: InfiniteResultStatus, summary: str, written: tuple[str, ...]) -> str:
