@@ -1,3 +1,25 @@
+"""FILE: tests/test_pdj_stage_model_provenance.py
+
+PURPOSE:
+    Proves a prosecutor/defender/judge stage that inherits the producer's
+    transport records the producer's model, not None, in its stage record.
+ROLE IN CODEBASE:
+    Regression tests for runner_model_name in
+    vidbyte/lib/agents/prosecutor_defender_judge.py and for
+    DebateStageRuntimeFactory._stage_handle, which passes its result on.
+ARCHITECTURE NOTE:
+    A real TextModelRunner with a dummy BYOK key is built offline; no request
+    is sent, so no provider network call or real key is needed.
+COMMON MODIFICATION PATTERNS:
+    Add a case here when runner_model_name learns a new runner shape.
+KNOWN EDGE CASES:
+    A runner whose model_name() raises must still yield None, not an error.
+RELATED DOCS:
+    vidbyte/lib/agents/prosecutor_defender_judge.py header.
+TESTS:
+    Run with python -m pytest tests/test_pdj_stage_model_provenance.py.
+"""
+
 from __future__ import annotations
 
 import unittest
