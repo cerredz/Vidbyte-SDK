@@ -7,6 +7,7 @@ from typing import Any
 from tests.agent_test_support import build_test_agent
 from tests.test_agent_fork_isolation import TwoToolMcpTransport
 from vidbyte.agents import AgentForkSettings, AgentMessage, BaseAgent
+from vidbyte.agents.runtimes.configs import ActorRuntime
 from vidbyte.agents.settings import AgentLoopSettings, ToolErrorPolicy, ToolSettings
 from vidbyte.context.handoff import EngineeringHandoff
 from vidbyte.lib.config import ModelProvider
@@ -114,8 +115,9 @@ class ForkConversationToolTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_model_chosen_provider_swap_does_not_pass_parent_api_key(self) -> None:
         # A model-requested provider swap must not carry the parent's vendor key to the new provider.
+        # byok-api-keys D-13, EC-47: the child keeps the parent's record, where the key is bound to deepseek, so the openai child has no key from it.
         tool = ForkConversationTool()
-        agent = build_test_agent(name="parent", system_prompt="Work.", runner=DoneRunner(), tools=[tool], provider="deepseek", model_name="deepseek-v4-flash", api_key="sk-deepseek-SECRET")
+        agent = build_test_agent(name="parent", system_prompt="Work.", runner=DoneRunner(), tools=[tool], provider="deepseek", model_name="deepseek-v4-flash", api_keys=["sk-deepseek-SECRET"])
         children: list[BaseAgent] = []
         real_fork = agent.fork
 
@@ -131,7 +133,9 @@ class ForkConversationToolTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.status, ToolStatus.SUCCESS)
         self.assertEqual(children[0].runner_config.provider, "openai")
-        self.assertIsNone(children[0].runner_config.api_key)
+        self.assertEqual(children[0].runner_config.api_keys, agent.runner_config.api_keys)
+        self.assertIsNone(children[0].runner_config.api_keys.key_for("openai"))
+        self.assertEqual(children[0].runner_config.api_keys.key_for("deepseek"), "sk-deepseek-SECRET")
 
     async def test_history_last_n_and_tool_names_translate_to_fork_kwargs(self) -> None:
         # The tool should slice history and resolve tool_names before calling parent.fork().
@@ -380,6 +384,29 @@ class ForkConversationToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(settings.allowed_tools, ("alpha",))
         self.assertEqual(settings.max_tokens, 4000)
         self.assertEqual(settings.max_iterations, 2)
+
+    async def test_null_actor_runtime_max_loop_uses_default(self) -> None:
+        # @intent null-optional-arg-means-default
+        # A null actor_runtime.max_loop failed the whole fork; it now means "not given", like an omitted key.
+        for actor_runtime in ({"topology": "actor_model_p2p"}, {"topology": "actor_model_p2p", "max_loop": None}):
+            with self.subTest(actor_runtime=actor_runtime):
+                agent = StubAgent()
+                tool = ForkConversationTool()
+                tool.bind_agent(agent)
+
+                result = await tool.execute(_call(prompt="branch", actor_runtime=actor_runtime))
+
+                self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+                self.assertIsInstance(agent.captured.runtime, ActorRuntime)
+                self.assertEqual(agent.captured.runtime.max_loop, 20)
+        agent = StubAgent()
+        tool = ForkConversationTool()
+        tool.bind_agent(agent)
+
+        result = await tool.execute(_call(prompt="branch", actor_runtime={"topology": "actor_model_p2p", "max_loop": 0}))
+
+        self.assertEqual(result.status, ToolStatus.ERROR)
+        self.assertIn("actor_runtime.max_loop must be a positive integer.", result.output)
 
     async def test_depth_cap_prevents_recursive_fork_construction(self) -> None:
         # Depth cap should be checked before parent.fork is called.

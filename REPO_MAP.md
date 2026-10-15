@@ -88,6 +88,10 @@ The opinionated JEV agent: its facade, its single public settings object, and a 
 
 Multi-agent machinery that sits below the pipeline layer, providing the aggregate-agent behavior, dispatch, and cleanup handling that let several agents participate in a single logical run. Cleanup in particular guarantees that resources are released even when one participant in a shared run fails partway through. This folder is for shared-run semantics specifically — coordinating participants that belong to one run — rather than for defining the shape of a multi-stage topology, which is a separate concern handled elsewhere. Reach here when several agents must share failure and resource semantics, not merely execute in some sequence.
 
+##### `vidbyte/agents/output/`
+
+Where a finished agent reply goes after the run, beyond being returned to the caller. This layer defines what counts as a delivery destination, decides which replies are worth delivering, and shapes each reply into the title and body a destination receives. It runs every configured destination together once per run, after the reply is validated and recorded, and reports one outcome per destination on the reply. The destination-specific work of talking to each external service deliberately lives lower in the shared substrate, so this layer holds only the agent-facing rules. Agents the SDK builds internally never deliver, so only an agent the caller runs posts anywhere.
+
 ##### `vidbyte/agents/pricing/`
 
 Per-provider token and cost accounting, with one implementation per model vendor built over a shared base contract. It normalizes each provider's raw usage reporting into consistent token counts and dollar costs, so an agent can report its usage and cost regardless of which underlying model actually ran. This normalization is what makes budget-aware middleware and any kind of spend tracking upstream possible at all. Without it, cost accounting would need to be reimplemented per provider everywhere it is needed.
@@ -99,6 +103,10 @@ The execution strategies an agent can run under, beyond the default linear loop.
 ##### `vidbyte/agents/settings/`
 
 The tunable knobs of an agent run, deliberately factored out of the agent class itself rather than buried in constructor arguments. This covers iteration limits and termination conditions, tool execution and failure policy, and what happens when the primary model becomes unavailable. Keeping these as explicit, structured settings objects is what makes an agent's behavior inspectable and serializable rather than implicit in code. A new configurable behavior for agents should be added as a setting here rather than as another constructor parameter.
+
+##### `vidbyte/agents/skills/`
+
+The agent-agnostic machinery that turns a developer's declarative skill entries, such as inline text, a local folder, a skills.sh install, a GitHub repository, or a skill hosted by Anthropic or OpenAI, into resolved skill documents an agent can use. Each source has its own small resolver behind one shared loader, which reads nothing until the first run, remembers every document and permanent failure for the agent's lifetime, and turns every expected failure into a reason and a detail instead of an exception. It builds only on the shared substrate layer and never imports a specific agent, so any agent can reuse it, and today JevAgent's skill preload is its only consumer. It is not the packaged skill catalog and holds no skill content: it is the fourth similarly-named skills location, beside the repository-level guidance, the prompt-asset skills, and the package-internal skill runtime, so decide which one a change belongs to before adding to any of them.
 
 #### `vidbyte/cli/`
 
@@ -150,7 +158,9 @@ The base abstraction for wrapping an existing agent workflow so that every run p
 
 ##### `vidbyte/harnesses/native/`
 
-Hosts for the coding agents that vendors ship as their own executables, kept apart from the trajectory envelope above even though both use the word harness. Each coding harness gets its own host class, which owns the live processes it starts and wraps the vendor's official SDK in small, atomic functions such as starting, continuing, forking, steering and waiting on a session. Every failure comes back as a semantic error code that names the problem and the next step to take, so an agent that calls these functions as tools can recover without reading a stack trace. Importing the package never requires a vendor SDK: each host loads its SDK only when it is first used, and that SDK comes from the harness's own optional extra.
+Code for the coding agents that vendors ship as their own executables, kept apart from the trajectory envelope above even though both use the word harness, in two shapes. The first is a host: Codex gets its own host class, which owns the live processes it starts and wraps the vendor's official SDK in small, atomic functions such as starting, continuing, forking, steering and waiting on a session. Every failure comes back as a semantic error code that names the problem and the next step to take, so an agent that calls these functions as tools can recover without reading a stack trace. Importing the package never requires a vendor SDK: the host loads its SDK only when it is first used, and that SDK comes from the harness's own optional extra.
+
+The second is module functions that run, continue and fork Grok Build, opencode and Muse Code threads by driving each vendor's installed command-line tool headless once per call with the caller's own API key, and return the thread id and the final answer. Each harness has its own subpackage with three functions, one small config record and the codec that reads that tool's output; Muse runs through WSL on Windows, and GLM and DeepSeek are reached through the opencode functions' model argument. The key reaches only the vendor child, through a private Grok home, an inline opencode config or a private Muse config folder, so a stored login never wins. Plumbing the three share, the scrubbed error factory, launcher resolution and skills folders, lives once in a `hostkit` subfolder. Those three harnesses have no host objects, model-facing tools or servers; their argv building and process runs go through the canonical helpers in `vidbyte/lib/process/`.
 
 ##### `vidbyte/harnesses/stores/`
 
@@ -199,6 +209,14 @@ The JEV agent's capability substrate, placed below the agent layer so the agent,
 ##### `vidbyte/lib/models/`
 
 A namespace reserved for model metadata that currently holds no real content. It is listed here specifically so that its emptiness is a documented, known fact rather than something a reader has to go looking for and wonder if they are missing. Model discovery and configuration actually live in a registries layer elsewhere in the shared substrate today. This folder exists as a placeholder for where that responsibility may eventually move.
+
+##### `vidbyte/lib/outputs/`
+
+The provider side of delivering a finished agent reply to the outside world: chat channels, email, issue trackers and code hosts (new items, comments, and update-in-place), docs workspaces, CI job summaries, social-post drafts, CRM tasks, and signed generic webhooks. Each destination takes one pasted credential, or none for the job summary, read from an argument or its environment variable, and never an interactive sign-in. This layer owns each service's request shapes, its length limits, the suppression of channel-wide mentions, and the translation of every response into a delivery outcome. It sits below the agent layer and never decides when or whether a reply is sent. Add a new destination here alongside its provider reference, which records where its credential comes from and when its limits were last checked.
+
+##### `vidbyte/lib/process/`
+
+The canonical helpers for running local processes: a one-shot command runner with a deadline and capped output capture, whose child inherits the caller's environment plus an overlay, one argv builder that turns flag records into a command line in a joined or separate style so no value can become a flag, and a stopper that ends a whole process tree, the process group on POSIX and the taskkill tree on Windows. Every failure comes back as a field of the returned record instead of an exception, except cancellation, which stops and reaps the tree before propagating. New code that needs to start a child process should use these helpers rather than the asyncio subprocess API directly, so the timeout, the output caps and the tree stop exist in one place.
 
 ##### `vidbyte/lib/providers/`
 
@@ -266,7 +284,7 @@ The prompt assets themselves, organized into families grouped by the specific su
 
 ##### `vidbyte/prompts/skills/`
 
-Skill documents shipped specifically as prompt assets — instruction sets meant to be handed to an agent at runtime as part of its prompt material. These are distributed through the prompt layer rather than through the repository-level skills folder, which serves a different purpose and audience. This folder is also distinct from a similarly-named folder deeper in the package that holds runtime machinery rather than content, and the distinction between all three similarly-named locations is worth being deliberate about before adding to any of them. Anyone adding a new skill document should first decide which of these surfaces is actually the right one.
+Skill documents shipped specifically as prompt assets — instruction sets meant to be handed to an agent at runtime as part of its prompt material. These are distributed through the prompt layer rather than through the repository-level skills folder, which serves a different purpose and audience. This folder is also distinct from a similarly-named folder deeper in the package that holds runtime machinery rather than content, and the distinction between all four similarly-named locations is worth being deliberate about before adding to any of them. Anyone adding a new skill document should first decide which of these surfaces is actually the right one.
 
 #### `vidbyte/providers/`
 
@@ -290,7 +308,7 @@ A reserved namespace intended for genuinely cross-cutting shared code, currently
 
 #### `vidbyte/skills/`
 
-Package-internal, importable code that lets an agent load and make use of a skill document at runtime as part of its own execution. This is intentionally small, and it is easily confused with two other similarly-named locations elsewhere in the package and repository — one holding the distributed skill source content itself, and another holding skill documents packaged specifically as prompt assets. This folder is the machinery that loads and applies a skill; the other two are the content that gets loaded. Keeping the distinction clear matters because all three share a name that invites confusion.
+Package-internal, importable code that lets an agent load and make use of a skill document at runtime as part of its own execution. This is intentionally small, and it is easily confused with three other similarly-named locations elsewhere in the package and repository — one holding the distributed skill source content itself, another holding skill documents packaged specifically as prompt assets, and a third in the agents layer that resolves developer-declared skill entries for an agent's run. This folder is the machinery that loads and applies a packaged skill; the agents-layer location fetches skills from outside sources, and the other two are the content that gets loaded. Keeping the distinction clear matters because all four share a name that invites confusion.
 
 #### `vidbyte/sources/`
 

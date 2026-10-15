@@ -4,7 +4,9 @@ import unittest
 
 from vidbyte.lib.dataclasses.context import ContextMessage
 from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareHook
-from vidbyte.middleware.compaction import CompactionMode, ReplaceWithTraceCompaction, TraceArtifactRenderer
+from vidbyte.lib.dataclasses.tools import ToolCall, ToolResult
+from vidbyte.lib.tools import ToolsFormatter
+from vidbyte.middleware.compaction import CompactionMode, ContextCompactionEngine, ReplaceWithTraceCompaction, TraceArtifactRenderer
 from vidbyte.middleware.builtins import TraceReplacementCompactionMiddleware, TraceSummaryTailCompactionMiddleware
 
 
@@ -25,6 +27,26 @@ def _provider_history():
 
 
 _ARTIFACT = {"goal": "ship it", "actions_taken": ["a", "b", "c"], "mistakes": [], "current_status": "in progress"}
+
+# One assistant tool-call turn per wire format; the tool results come from ToolsFormatter itself.
+_CALL_TURNS = {
+    "openai": lambda call: {"role": "assistant", "content": None, "tool_calls": [{"id": call.call_id, "type": "function", "function": {"name": call.tool_name, "arguments": "{}"}}]},
+    "anthropic": lambda call: {"role": "assistant", "content": [{"type": "tool_use", "id": call.call_id, "name": call.tool_name, "input": {}}]},
+    "gemini": lambda call: {"role": "model", "parts": [{"functionCall": {"name": call.tool_name, "args": {}}}]},
+}
+
+
+def _formatted_tool_history(provider):
+    # Returns a user ask, a successful call/result pair, then a failed pair, with results in the exact shape a real run writes.
+    ok_call, err_call = ToolCall("lookup", call_id="c_ok"), ToolCall("lookup", call_id="c_err")
+    call_turn = _CALL_TURNS[ToolsFormatter.wire_format(provider)]
+    return [
+        {"role": "user", "content": "look up both"},
+        call_turn(ok_call),
+        dict(ToolsFormatter.format_tool_result(ok_call, ToolResult.success("lookup", "OK-MARK"), provider)),
+        call_turn(err_call),
+        dict(ToolsFormatter.format_tool_result(err_call, ToolResult.error("lookup", "ERROR-MARK"), provider)),
+    ]
 
 
 class FakeSummarizer:
@@ -290,6 +312,18 @@ class TraceReplacementMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         TraceReplacementCompactionMiddleware.replace_keep_errors()
         TraceReplacementCompactionMiddleware.replace_keep_active_branch("b1")
 
+    async def test_synthetic_user_trace_reaches_provider_as_user_role(self) -> None:
+        # [Hidden Failure] the synthetic_user trace must leave the engine as a user turn, not be rewritten to assistant.
+        user_mw = TraceReplacementCompactionMiddleware.trace_as_synthetic_user(keep_last_user=False, artifact=_ARTIFACT)
+        user_decision = await user_mw.before_model_call(_ctx(_provider_history()))
+        user_trace = user_decision.transform.provider_messages[-1]
+        self.assertTrue(user_trace["content"].startswith("Continual trace (state so far):"))
+        self.assertEqual(user_trace["role"], "user")
+        # The default summary placement still reaches the model as an assistant turn.
+        summary_mw = TraceReplacementCompactionMiddleware.trace_as_summary(keep_last_user=False, artifact=_ARTIFACT)
+        summary_decision = await summary_mw.before_model_call(_ctx(_provider_history()))
+        self.assertEqual(summary_decision.transform.provider_messages[-1]["role"], "assistant")
+
     async def test_parallel_tool_turn_is_never_split(self) -> None:
         # [Hidden Failure] a parallel call turn is one group, so kept tails never orphan a sibling tool result.
         history = [
@@ -324,6 +358,36 @@ class TraceReplacementMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         decision = await mw.before_model_call(_ctx(_provider_history()))
         trace_msg = decision.transform.provider_messages[-1]["content"]
         self.assertLessEqual(len(trace_msg), 40)
+
+    async def test_keep_errors_protects_provider_error_results_on_every_provider(self) -> None:
+        # [Silent Failure] each provider marks a failed tool result in its own shape; unread, keep_errors replaced the failure the agent still has to handle.
+        for provider in ("openai", "deepseek", "anthropic", "gemini"):
+            with self.subTest(provider=provider):
+                history = _formatted_tool_history(provider)
+                mw = TraceReplacementCompactionMiddleware.replace_keep_errors(artifact=_ARTIFACT)
+                decision = await mw.before_model_call(_ctx(history))
+                after = list(decision.transform.provider_messages)
+                # The ask and the successful pair fold into the trace; the failed pair survives verbatim, in order, after it.
+                self.assertEqual(len(after), 3)
+                self.assertIn("ship it", str(after[0].get("content")))
+                self.assertEqual(after[1:], history[3:5])
+
+
+class ProviderErrorStatusTests(unittest.TestCase):
+    def test_engine_marks_only_failed_tool_results_as_errors(self) -> None:
+        # [Silent Failure] keep_errors and salience read metadata status, so every provider's failed result must carry it and a success must not.
+        for provider in ("openai", "deepseek", "anthropic", "gemini"):
+            with self.subTest(provider=provider):
+                messages = ContextCompactionEngine().to_context_messages(_formatted_tool_history(provider))
+                statuses = [m.metadata.get("status") for m in messages]
+                self.assertEqual([m.kind for m in messages], ["message", "tool_call", "tool_result", "tool_call", "tool_result"])
+                self.assertEqual(statuses, [None, None, None, None, "error"])
+
+    def test_engine_reads_snake_case_gemini_error_response(self) -> None:
+        # [Edge Case] a functionResponse keyed in snake_case still marks the failure, as tool pairing already accepts that key.
+        raw = {"role": "user", "parts": [{"functionResponse": {"name": "lookup", "response": {"output": "x"}}}, {"function_response": {"name": "lookup", "response": {"error": "execution_error", "message": "boom", "status": "error"}}}]}
+        (message,) = ContextCompactionEngine().to_context_messages([raw])
+        self.assertEqual(message.metadata.get("status"), "error")
 
 
 class TraceSummaryTailMiddlewareTests(unittest.IsolatedAsyncioTestCase):

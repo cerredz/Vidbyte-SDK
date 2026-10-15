@@ -258,7 +258,7 @@ def _call(name: str, arguments: dict[str, Any], call_id: str) -> SimpleNamespace
 
 class JevComputeCheckpointRecognitionTests(unittest.IsolatedAsyncioTestCase):
     def _agent(self, dynamic_compute: tuple[JevDynamicComputeOption, ...] = OPTIONS) -> JevAgent:
-        settings = JevAgentSettings(name="researcher", system_prompt="Research.", provider="openai", model_name="gpt-4.1", api_key="main-key", tools=(lookup,))
+        settings = JevAgentSettings(name="researcher", system_prompt="Research.", provider="openai", model_name="gpt-4.1", api_keys=["sk-main-key"], tools=(lookup,))
         runtime = JevRuntimeSettings(decision=DecisionModelConfig(mode=DecisionModelMode.VIDBYTE_MANAGED), compute=JevComputeSettings(dynamic_compute=dynamic_compute))
         runner = ScriptedRunner(*(_call("lookup", {"topic": topic}, f"c{index}") for index, topic in enumerate(("a", "b", "c", "d"))), _call("isDone", {"final_answer": "done"}, "end"))
         return bind_test_runner(JevAgent(settings, runtime), runner)

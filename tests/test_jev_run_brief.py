@@ -44,7 +44,7 @@ def _settings(**overrides: Any) -> JevAgentSettings:
         "system_prompt": "Do the work.",
         "provider": "openai",
         "model_name": "gpt-4.1",
-        "api_key": "main-key",
+        "api_keys": ["sk-main-key"],
     }
     values.update(overrides)
     return JevAgentSettings(**values)
@@ -71,7 +71,7 @@ def _reply(payload: object) -> SimpleNamespace:
 
 class JevRunBriefSettingsTests(unittest.TestCase):
     def test_defaults_and_provider_validation(self) -> None:
-        settings = JevRunBriefSettings(model_name="cheap-model", api_key="secret")
+        settings = JevRunBriefSettings(model_name="cheap-model", api_keys=["secret"])
         self.assertIsNone(settings.provider)
         self.assertEqual(settings.every_iterations, 10)
         self.assertNotIn("secret", repr(settings))
@@ -116,12 +116,12 @@ class JevRunBriefWriterTests(unittest.IsolatedAsyncioTestCase):
         self.writer = JevRunBriefWriter(_settings(), JevRunBriefSettings())
 
     def test_uses_main_provider_by_default_and_allows_an_independent_provider(self) -> None:
-        self.assertEqual((self.writer.runner_config.model_name, self.writer.runner_config.api_key), ("gpt-4.1", "main-key"))
+        self.assertEqual((self.writer.runner_config.model_name, self.writer.runner_config.api_keys.key_for("openai")), ("gpt-4.1", "sk-main-key"))
         other = JevRunBriefWriter(
             _settings(),
-            JevRunBriefSettings(provider="anthropic", model_name="claude-haiku-4-5-20251001", api_key="brief-key"),
+            JevRunBriefSettings(provider="anthropic", model_name="claude-haiku-4-5-20251001", api_keys=["sk-ant-brief-key"]),
         )
-        self.assertEqual((str(other.runner_config.provider), other.runner_config.api_key), (ModelProvider.ANTHROPIC.value, "brief-key"))
+        self.assertEqual((str(other.runner_config.provider), other.runner_config.api_keys.key_for("anthropic")), (ModelProvider.ANTHROPIC.value, "sk-ant-brief-key"))
         self.assertEqual(len(other.tools), 0)
 
     def test_window_reuses_event_log_ids_and_keeps_full_fresh_events(self) -> None:

@@ -9,7 +9,7 @@ from typing import Any, Mapping
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from vidbyte.agents.runtime import AgentRuntime
-from vidbyte.lib.config import ModelProvider, TextModelConfig
+from vidbyte.lib.config import ModelProvider, TextModelConfig, TextModelMode
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.dataclasses.context import BaseAgentContext
 from vidbyte.lib.dataclasses.runner import RunnerHandle
@@ -19,6 +19,12 @@ from vidbyte.lib.tracing import SpanContext, TracerBase
 from vidbyte.providers.xai import XAIProvider
 from vidbyte.tools import Tools
 from vidbyte.tools.security import PermissionPolicy
+
+# Fake provider keys for the fake transports, built from parts so no
+# literal here looks like a real key. Each carries the prefix its
+# provider's key format needs, and DIRECT sends it straight to the
+# fake transport.
+FAKE_XAI_KEY = "xai" + "-" + "fake"
 
 
 class FakeTransport:
@@ -150,7 +156,7 @@ class VerificationRunner:
 
     def test_provider_uses_config_system(self) -> None:
         # Verifies configured system text is used when call-level system is absent.
-        config = TextModelConfig(provider=ModelProvider.XAI, model="grok-test", api_key="key", system="Configured", messages=({"role": "assistant", "content": "draft"},))
+        config = TextModelConfig(provider=ModelProvider.XAI, model="grok-test", api_keys=[FAKE_XAI_KEY], mode=TextModelMode.DIRECT, system="Configured", messages=({"role": "assistant", "content": "draft"},))
         messages = XAIProvider()._create_messages(config, "Task", None)
         self._assert_equal(messages[0], {"role": "system", "content": "Configured"})
 
@@ -175,7 +181,7 @@ class VerificationRunner:
     async def test_text_runner_xai_payload_includes_system_on_followup(self) -> None:
         # Verifies the actual xAI chat payload keeps system text when history exists.
         transport = FakeTransport()
-        runner = TextModelRunner(TextModelConfig(provider=ModelProvider.XAI, model="grok-test", api_key="key"), transport=transport)
+        runner = TextModelRunner(TextModelConfig(provider=ModelProvider.XAI, model="grok-test", api_keys=[FAKE_XAI_KEY], mode=TextModelMode.DIRECT), transport=transport)
         await runner.arun("Task", system="System", messages=({"role": "assistant", "content": "draft"},))
         messages = transport.requests[0]["json_body"]["messages"]
         self._assert_equal(messages[0], {"role": "system", "content": "System"})
@@ -200,7 +206,7 @@ class VerificationRunner:
     async def test_existing_payload_fields_still_pass_through(self) -> None:
         # Verifies tools, tool choice, response format, and metadata still pass through.
         transport = FakeTransport()
-        runner = TextModelRunner(TextModelConfig(provider=ModelProvider.XAI, model="grok-test", api_key="key"), transport=transport)
+        runner = TextModelRunner(TextModelConfig(provider=ModelProvider.XAI, model="grok-test", api_keys=[FAKE_XAI_KEY], mode=TextModelMode.DIRECT), transport=transport)
         tool = {"type": "function", "function": {"name": "isDone", "parameters": {"type": "object"}}}
         response_format = {"type": "json_object"}
         await runner.arun("Task", system="System", tools=(tool,), tool_choice="auto", response_format=response_format, metadata={"eval_suite": "mbpp"})
@@ -212,7 +218,7 @@ class VerificationRunner:
 
     def _provider_messages(self, prompt: str, system: str | None, messages: tuple[Mapping[str, Any], ...]) -> list[Mapping[str, Any]]:
         # Builds provider messages through the OpenAI-compatible provider helper.
-        config = TextModelConfig(provider=ModelProvider.XAI, model="grok-test", api_key="key", messages=messages)
+        config = TextModelConfig(provider=ModelProvider.XAI, model="grok-test", api_keys=[FAKE_XAI_KEY], mode=TextModelMode.DIRECT, messages=messages)
         return XAIProvider()._create_messages(config, prompt, system)
 
     def _trace_inputs(self, metadata: Mapping[str, Any]) -> dict[str, Any]:

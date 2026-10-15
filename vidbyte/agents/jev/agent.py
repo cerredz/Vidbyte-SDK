@@ -3,10 +3,10 @@
 PURPOSE: Exposes the narrow JevAgent facade backed by JevRuntime, JevAgentSettings, and JevRuntimeSettings, and owns everything its opinionated features need for a run.
 ROLE IN CODEBASE: Maps the immutable JevAgentSettings into established BaseAgent state, fixes the runtime to AgentRuntimeType.JEV (which RuntimeRegistry resolves to JevRuntime), and builds the JevPreflightGate, the JevRunState that runs the enabled done checks, the JevDoneContinuation that sends the main agent back to work when one fails, and the JevResponse writer that each run-local JevRuntime receives as parameters. With JevRuntimeSettings.compute set, it also builds the JevComputeController that runs the mid-run compute checkpoint.
 ARCHITECTURE NOTE: JevAgent is opinionated by design; callers cannot replace its runtime or pass arbitrary BaseAgent customization kwargs. Every fixed-question preset and threshold is fixed here at construction in the gate, and every done check in JevRunState; the runtime still reads JevRuntimeSettings only for the tool selector, which keeps its own path. A JevSpecialist the gate chooses runs its own agent instead of this one.
-COMMON MODIFICATION PATTERNS: Build a new feature's run-time object here from JevAgentSettings and pass it through _runtime_extension_kwargs; report its outcome through JevResponse so it appears on `response`.
+COMMON MODIFICATION PATTERNS: Build a new feature's run-time object here from JevAgentSettings and pass it through _runtime_extension_kwargs; report its outcome through JevResponse so it appears on `response`. Output connectors come only from JevAgentSettings.outputs; the bulk-work, clone, swarm, and continuation agents built here never get them.
 KNOWN EDGE CASES: Jev's TypeSafe model is not the reply-generating model; settings validation prevents that provider mix-up. A specialist must reply through BaseAgent.generate_reply, the hook that adds its usage to this agent's run total, so any other agent is rejected at construction. `response` describes only the most recent run and is replaced when the next run starts.
 RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-specialist-routing.md, docs/design/jev-multipart-done-criteria.md, and skills/jev-agent/SKILL.md.
-TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_done.py, tests/test_jev_compute.py, and scripts/test-jev-agent-scaffold.py.
+TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_done.py, tests/test_jev_compute.py, tests/features/agent_output_connectors/test_output_connectors_agent_wiring.py, and scripts/test-jev-agent-scaffold.py.
 """
 
 from __future__ import annotations
@@ -65,7 +65,8 @@ class JevAgent(BaseAgent):
                 system_prompt=settings.system_prompt,
                 provider=settings.provider,
                 model_name=settings.model_name,
-                api_key=settings.api_key,
+                api_keys=settings.api_keys,
+                model_mode=settings.model_mode,
                 temperature=settings.temperature,
                 timeout_seconds=settings.timeout_seconds,
                 # @intent jev-children-never-steal-main-agent-tools
@@ -94,11 +95,13 @@ class JevAgent(BaseAgent):
             tools=settings.tools,
             permission_policy=settings.permission_policy,
             agent_loop_settings=settings.loop,
-            api_key=settings.api_key,
+            api_keys=settings.api_keys,
+            model_mode=settings.model_mode,
             provider=settings.provider,
             model_name=settings.model_name,
             temperature=settings.temperature,
             timeout_seconds=settings.timeout_seconds,
+            outputs=settings.outputs,
         )
 
     @property

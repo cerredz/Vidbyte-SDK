@@ -171,7 +171,7 @@ session = Session(agent, store=store)   # auto-binds the tools
 - `Session(MultiAgent(...))` and `multi_agent.persist(...)` fail before any store write; persist individual workers separately when that is the desired boundary.
 - The agent's state seam is `BaseAgent.export_state()` / `BaseAgent.restore(state, *, tools, runner, middleware)` - pure, no I/O. `agent.persist()` and `agent.session` are entry points into the external `Session` wrapper.
 - Persist raw history; re-supply tools/runner/middleware at resume.
-- Never persist secrets; the serializer scrubs credential-like keys and `api_key`.
+- Never persist secrets; the serializer scrubs credential-like keys, `api_key` and `api_keys`.
 - Remote/DB stores are adapters behind `SessionStore`; add new ones under `vidbyte/lib/providers/`.
 - Use tags for human/model-friendly lookup, but store raw ids when durable references matter.
 - Use `BatchForkTool` to create branches only; running or comparing the children remains explicit caller work.

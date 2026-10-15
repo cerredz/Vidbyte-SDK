@@ -50,53 +50,78 @@ class FallbackModelsBareStringTests(unittest.TestCase):
         # @intent agent-fallback-rejects-a-bare-string
         # fallback="gemini/gemini-3.5-flash" must fail like the settings do, not become 23 one-letter models.
         with self.assertRaisesRegex(ConfigurationError, "models must be a sequence of models, not a string"):
-            Agent(**BASE, provider="deepseek", model_name="deepseek-chat", api_key="k", fallback="gemini/gemini-3.5-flash")
+            Agent(**BASE, provider="deepseek", model_name="deepseek-chat", api_keys=["k"], fallback="gemini/gemini-3.5-flash")
 
 
 
 class FallbackApiKeyInheritanceTests(unittest.TestCase):
-    PRIMARY = FallbackModel(provider="openai", model="gpt-x", api_key="sk-openai", temperature=0.3)
+    # byok-api-keys D-13, D-26, INV-15: FallbackModel has no key; every runner in a chain takes its key from the agent's one matched ProviderKeys record.
+    PRIMARY = FallbackModel(provider="openai", model="gpt-x", temperature=0.3)
+    OPENAI_KEY = "sk-proj-" + "agent"
+    VIDBYTE_KEY = VIDBYTE_API_KEY_PREFIX + "A1b2C3d4" * 5
 
     def resolve(self, *entries: str | FallbackModel, primary: FallbackModel | None = None) -> tuple[FallbackModel, ...]:
         # Resolves the declared entries against the primary and drops the primary itself from the result.
         return AgentFallbackSettings(models=entries).resolved_models(primary=primary or self.PRIMARY)[1:]
 
+    def chain_provider_keys(self, agent: Agent) -> list[str | None]:
+        # The provider key each runner in the agent's chain would relay, read from that runner's own config in a cleared environment.
+        with patch.dict(os.environ, {}, clear=True):
+            return [agent.fallback.build_runner(index)._config.credentials().provider_api_key for index in range(len(agent.fallback.models))]
+
     def test_same_provider_entries_inherit_the_agent_key(self) -> None:
         bare, prefixed = self.resolve("gpt-y", "openai/gpt-y")
-        self.assertEqual((bare.provider, bare.api_key), ("openai", "sk-openai"))
-        self.assertEqual((prefixed.provider, prefixed.api_key), ("openai", "sk-openai"))
+        self.assertEqual((bare.provider, prefixed.provider), ("openai", "openai"))
+        agent = Agent(**BASE, provider="openai", model_name="gpt-5.5", api_keys=[self.OPENAI_KEY], vidbyte_api_key=self.VIDBYTE_KEY, fallback=["gpt-5.4-mini", "openai/gpt-5.4-mini"])
+        self.assertEqual(self.chain_provider_keys(agent), [self.OPENAI_KEY] * 3)
 
     def test_other_provider_prefix_does_not_receive_the_agent_key(self) -> None:
         (entry,) = self.resolve("anthropic/claude-z")
-        self.assertEqual((entry.provider, entry.model, entry.api_key, entry.temperature), ("anthropic", "claude-z", None, 0.3))
+        self.assertEqual((entry.provider, entry.model, entry.temperature), ("anthropic", "claude-z", 0.3))
+        agent = Agent(**BASE, provider="openai", model_name="gpt-5.5", api_keys=[self.OPENAI_KEY], vidbyte_api_key=self.VIDBYTE_KEY, fallback=["anthropic/claude-sonnet-5"])
+        self.assertEqual(self.chain_provider_keys(agent), [self.OPENAI_KEY, None])
 
     def test_a_vidbyte_key_follows_a_prefixed_backup_only_to_a_managed_provider(self) -> None:
         # @intent vidbyte-key-may-cross-to-a-managed-provider: the gateway serves Kimi with the same Vidbyte key, but not GLM.
-        vidbyte_key = VIDBYTE_API_KEY_PREFIX + "A1b2C3d4" * 5
-        primary = FallbackModel(provider="deepseek", model="deepseek-chat", api_key=vidbyte_key)
+        # byok-api-keys D-23, INV-13: the Vidbyte key rides in the record to every backup but is only ever the gateway bearer; a glm backup in AUTO is refused before any request.
+        from vidbyte.lib.errors import UnsupportedProviderError
+
         with patch.dict(os.environ, {}, clear=True):
-            managed, unmanaged = self.resolve("kimi/kimi-k2.7-code", "glm/glm-5.2", primary=primary)
-            (vendor,) = self.resolve("kimi/kimi-k2.7-code")
-        self.assertEqual((managed.provider, managed.api_key), ("kimi", vidbyte_key))
-        self.assertEqual((unmanaged.provider, unmanaged.api_key), ("glm", None))
-        self.assertEqual((vendor.provider, vendor.api_key), ("kimi", None))
+            agent = Agent(**BASE, provider="deepseek", model_name="deepseek-chat", api_keys=[self.VIDBYTE_KEY], fallback=["kimi/kimi-k2.7-code", "glm/glm-5.2"])
+            managed = agent.fallback.build_runner(1)._config.credentials()
+            with self.assertRaises(UnsupportedProviderError) as refused:
+                agent.fallback.build_runner(2)
+            vendor = Agent(**BASE, provider="openai", model_name="gpt-5.5", api_keys=[self.OPENAI_KEY, self.VIDBYTE_KEY], fallback=["kimi/kimi-k2.7-code"])
+            kimi = vendor.fallback.build_runner(1)._config.credentials()
+        self.assertEqual((managed.vidbyte_api_key, managed.provider_api_key, managed.uses_gateway), (self.VIDBYTE_KEY, None, True))
+        self.assertEqual(agent.fallback.models[2].provider, "glm")
+        self.assertNotIn(self.VIDBYTE_KEY, str(refused.exception))
+        self.assertIn("TextModelMode.DIRECT", str(refused.exception))
+        self.assertEqual((kimi.vidbyte_api_key, kimi.provider_api_key), (self.VIDBYTE_KEY, None))
 
     def test_enum_or_cased_primary_provider_still_counts_as_same_provider(self) -> None:
+        from vidbyte.lib.registries.provider_keys import ProviderKeyMatcher
+
         for provider in (ModelProvider.OPENAI, "OpenAI"):
             with self.subTest(provider=provider):
-                primary = FallbackModel(provider=provider, model="gpt-x", api_key="sk-openai")
+                primary = FallbackModel(provider=provider, model="gpt-x")
                 same, other = self.resolve("openai/gpt-y", "gemini/gemini-z", primary=primary)
-                self.assertEqual(same.api_key, "sk-openai")
-                self.assertIsNone(other.api_key)
+                self.assertEqual((same.provider, other.provider), ("openai", "gemini"))
+                keys = ProviderKeyMatcher.match([self.OPENAI_KEY], primary=primary.provider, others=(same.provider, other.provider))
+                self.assertEqual(keys.key_for(same.provider), self.OPENAI_KEY)
+                self.assertIsNone(keys.key_for(other.provider))
 
     def test_enum_provider_is_stored_and_labelled_as_its_string_value(self) -> None:
         # A typed ModelProvider entry must not leak 'ModelProvider.ANTHROPIC' into identity() and run metadata.
         entry = FallbackModel(provider=ModelProvider.ANTHROPIC, model="m")
         self.assertEqual((type(entry.provider), entry.provider, entry.identity()), (str, "anthropic", "anthropic/m"))
 
-    def test_explicit_fallback_model_keeps_its_own_key(self) -> None:
-        explicit = FallbackModel(provider="anthropic", model="claude-z", api_key="sk-ant")
+    def test_explicit_fallback_model_is_kept_as_given_and_takes_no_key_of_its_own(self) -> None:
+        explicit = FallbackModel(provider="anthropic", model="claude-z")
         self.assertEqual(self.resolve(explicit), (explicit,))
+        # byok-api-keys D-26: a per-model key would be a second root; the anthropic key belongs in the agent's api_keys.
+        with self.assertRaises(TypeError):
+            FallbackModel(provider="anthropic", model="claude-z", api_key="sk-ant")  # type: ignore[call-arg]
 
     def test_openrouter_auto_keeps_its_full_id(self) -> None:
         auto, slug = self.resolve("openrouter/auto", "openrouter/anthropic/claude-sonnet-5")
@@ -107,21 +132,36 @@ class FallbackApiKeyInheritanceTests(unittest.TestCase):
 class FallbackRunnerTimeoutTests(unittest.TestCase):
     def test_fallback_runner_inherits_the_agent_timeout(self) -> None:
         # A backup model must get the agent's per-request timeout, not the 60-second library default.
-        config = AgentRunnerConfig(provider="deepseek", model_name="deepseek-v4-pro", api_key="k", timeout_seconds=300.0)
-        backup = FallbackModel(provider="anthropic", model="claude-sonnet-4-6", api_key="sk-ant")
+        # byok-api-keys D-13, D-26: the chain also carries the agent's record and mode. DIRECT keeps the 300 s (a gateway runner would floor it at 630 s).
+        from vidbyte.lib.config import TextModelMode
+        from vidbyte.lib.registries.provider_keys import ProviderKeyMatcher
+
+        anthropic_key = "sk-ant-" + "backup"
+        keys = ProviderKeyMatcher.match(["k", anthropic_key], primary="deepseek", others=("anthropic",))
+        config = AgentRunnerConfig(provider="deepseek", model_name="deepseek-v4-pro", api_keys=keys, timeout_seconds=300.0, model_mode=TextModelMode.DIRECT)
+        backup = FallbackModel(provider="anthropic", model="claude-sonnet-4-6")
         chain = AgentFallback.from_spec([backup], runner_config=config, agent_name="researcher")
-        self.assertEqual(chain.build_runner(1)._config.timeout_seconds, 300.0)
+        with patch.dict(os.environ, {}, clear=True):
+            runner = chain.build_runner(1)
+            self.assertEqual(runner._config.resolved_api_key(), anthropic_key)
+        self.assertEqual(runner._config.timeout_seconds, 300.0)
+        self.assertIs(runner._config.mode, TextModelMode.DIRECT)
 
 
 class FallbackPrefixedPrimaryTests(unittest.TestCase):
     def test_provider_prefixed_primary_model_builds_a_chain(self) -> None:
         # @intent fallback-primary-reads-prefixed-model
         # 'deepseek/deepseek-chat' with no provider runs on DeepSeek, so a fallback chain must read it the same way.
-        agent = Agent(**BASE, model_name="deepseek/deepseek-chat", api_key="sk-deepseek", fallback=["deepseek-reasoner", "gemini/gemini-3.5-flash"])
+        vidbyte_key = VIDBYTE_API_KEY_PREFIX + "A1b2C3d4" * 5
+        agent = Agent(**BASE, model_name="deepseek/deepseek-chat", api_keys=["sk-deepseek"], vidbyte_api_key=vidbyte_key, fallback=["deepseek-reasoner", "gemini/gemini-3.5-flash"])
         primary, bare, prefixed = agent.fallback.models
-        self.assertEqual((primary.provider, primary.model, primary.api_key), ("deepseek", "deepseek-chat", "sk-deepseek"))
-        self.assertEqual((bare.provider, bare.model, bare.api_key), ("deepseek", "deepseek-reasoner", "sk-deepseek"))
+        self.assertEqual((primary.provider, primary.model), ("deepseek", "deepseek-chat"))
+        self.assertEqual((bare.provider, bare.model), ("deepseek", "deepseek-reasoner"))
         self.assertEqual((prefixed.provider, prefixed.model), ("gemini", "gemini-3.5-flash"))
+        # byok-api-keys D-27, D-13: the list is matched against the prefixed primary's provider, so both DeepSeek runners relay the key and Gemini gets none.
+        with patch.dict(os.environ, {}, clear=True):
+            keys = [agent.fallback.build_runner(index)._config.credentials().provider_api_key for index in range(3)]
+        self.assertEqual(keys, ["sk-deepseek", "sk-deepseek", None])
 
 
 def build(**overrides: object) -> AgentSettings:
@@ -619,6 +659,18 @@ class YamlMergeKeyTests(unittest.TestCase):
     def test_own_duplicate_beside_a_merge_is_still_rejected(self) -> None:
         with self.assertRaisesRegex(yaml.constructor.ConstructorError, "found duplicate key 'y'"):
             yaml.load("a: &a {x: 1, y: 2}\nb: {<<: *a, y: 1, y: 2}\n", Loader=_DuplicateKeySafeLoader)
+
+    def test_two_merge_keys_in_one_mapping_are_rejected(self) -> None:
+        # Verify a second `<<` in one mapping is rejected instead of letting the later merge hide the earlier one.
+        # @intent one-merge-key-per-mapping
+        documents = (
+            "a: &a {x: 1}\nb: &b {x: 2}\nc: {<<: *a, <<: *b}\n",
+            "a: &a {x: 1}\nb: &b {x: 2}\nc:\n  <<: *a\n  <<: *b\n",
+        )
+        for text in documents:
+            with self.subTest(text=text):
+                with self.assertRaisesRegex(yaml.constructor.ConstructorError, "found duplicate key '<<'"):
+                    yaml.load(text, Loader=_DuplicateKeySafeLoader)
 
 
 class SystemPromptFileContainmentTests(unittest.TestCase):

@@ -20,6 +20,7 @@ from typing import Any
 import pytest
 
 from vidbyte import Agent
+from vidbyte.lib.config import TextModelMode
 from vidbyte.lib.dataclasses.agents import FallbackModel
 from vidbyte.lib.errors import ProviderResponseError
 from vidbyte.lib.http import HttpResponse, HttpTransport
@@ -35,6 +36,8 @@ GEMINI_THINKING_ONLY = {"candidates": [{"content": {"role": "model"}, "finishRea
 GEMINI_OK = {"candidates": [{"content": {"role": "model", "parts": [{"text": "ok"}]}, "finishReason": "STOP", "index": 0}], "usageMetadata": {"promptTokenCount": 1000, "candidatesTokenCount": 5, "totalTokenCount": 1005}}
 CHAT_EMPTY = {"choices": [{"index": 0, "message": {"role": "assistant", "content": None}, "finish_reason": "length"}], "usage": {"prompt_tokens": 1000, "completion_tokens": 7}}
 RESPONSES_EMPTY = {"id": "r1", "output": [{"type": "reasoning", "summary": []}], "usage": {"input_tokens": 1000, "output_tokens": 7}}
+# A Gemini key in the AQ. form (its prefix proves gemini); built at runtime so no key-shaped literal sits in the source.
+GEMINI_TEST_KEY = "AQ" + "." + "x" * 40
 
 
 class _ScriptedTransport:
@@ -47,15 +50,17 @@ class _ScriptedTransport:
         return HttpResponse(status_code=200, body=json.dumps(self._body), headers={"content-type": "application/json"})
 
 
-@pytest.mark.parametrize(("provider", "body", "usage_key"), [
-    (AnthropicProvider(model="claude-sonnet-5", api_key="sk-mock"), ANTHROPIC_REFUSAL, "usage"),
-    (GeminiProvider(model="gemini-3.5-flash", api_key="g-mock"), GEMINI_THINKING_ONLY, "usageMetadata"),
-    (XAIProvider(model="grok-4", api_key="x-mock"), CHAT_EMPTY, "usage"),
-    (DeepSeekProvider(model="deepseek-v4-flash", api_key="d-mock"), CHAT_EMPTY, "usage"),
-    (OpenRouterProvider(model="openai/gpt-5.4-mini", api_key="o-mock"), CHAT_EMPTY, "usage"),
-    (OpenAIProvider(model="gpt-5.4-mini", api_key="sk-mock"), RESPONSES_EMPTY, "usage"),
-])
-def test_unusable_reply_error_carries_billed_usage(provider: Any, body: dict[str, Any], usage_key: str) -> None:
+@pytest.mark.parametrize(("provider_type", "model", "provider_key", "body", "usage_key"), [
+    (AnthropicProvider, "claude-sonnet-5", "sk-ant-mock", ANTHROPIC_REFUSAL, "usage"),
+    (GeminiProvider, "gemini-3.5-flash", GEMINI_TEST_KEY, GEMINI_THINKING_ONLY, "usageMetadata"),
+    (XAIProvider, "grok-4", "xai-mock", CHAT_EMPTY, "usage"),
+    (DeepSeekProvider, "deepseek-v4-flash", "d-mock", CHAT_EMPTY, "usage"),
+    (OpenRouterProvider, "openai/gpt-5.4-mini", "sk-or-v1-mock", CHAT_EMPTY, "usage"),
+    (OpenAIProvider, "gpt-5.4-mini", "sk-mock", RESPONSES_EMPTY, "usage"),
+], ids=["anthropic", "gemini", "xai", "deepseek", "openrouter", "openai"])
+def test_unusable_reply_error_carries_billed_usage(provider_type: Any, model: str, provider_key: str, body: dict[str, Any], usage_key: str) -> None:
+    # Each adapter talks to its own vendor directly with a key shaped like that vendor's keys.
+    provider = provider_type(model=model, api_keys=[provider_key], mode=TextModelMode.DIRECT)
     # The adapter still rejects the reply, but the error keeps the usage the provider billed for it.
     with pytest.raises(ProviderResponseError) as caught:
         asyncio.run(provider.run_text(prompt="hi", system=None, metadata=None, transport=_ScriptedTransport(body)))
@@ -69,7 +74,7 @@ def test_billed_refusal_then_fallback_bills_both_calls(monkeypatch: pytest.Monke
         return HttpResponse(status_code=200, body=json.dumps(body), headers={"content-type": "application/json"})
 
     monkeypatch.setattr(HttpTransport, "request", scripted)
-    agent = Agent(name="a", system_prompt="Answer.", max_iterations=3, provider="anthropic", model_name="claude-sonnet-5", api_key="sk-mock", fallback=[FallbackModel(provider="gemini", model="gemini-3.5-flash", api_key="g-mock")])
+    agent = Agent(name="a", system_prompt="Answer.", max_iterations=3, provider="anthropic", model_name="claude-sonnet-5", api_keys=["sk-ant-mock", GEMINI_TEST_KEY], model_mode=TextModelMode.DIRECT, fallback=[FallbackModel(provider="gemini", model="gemini-3.5-flash")])
     result = asyncio.run(agent.arun("hi"))
     rollup = agent.get_usage()
 

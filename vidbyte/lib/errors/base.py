@@ -43,6 +43,7 @@ Architecture:
     - SourcePinMismatchError: Raised when fetched content does not match the pinned hash.
     - SourceParseError: Raised when an artifact cannot be parsed into a valid typed IR.
     - SourceSecurityError: Raised when a URL is disallowed or a response violates a guard.
+    - NativeThreadError: Raised by the Grok, opencode and Muse thread functions with a failure code, a likely cause and a next step.
     - FailureRaisedError: Raised when a Session recovery policy escalates a deterministic failure to raise.
     - AgentSpeedError: Base exception for agent speed-tracking failures.
     - AgentSpeedValidationError: Raised when a speed-tracking dataclass has an invalid shape.
@@ -53,7 +54,15 @@ Relations:
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from vidbyte.lib.enums.outputs import DeliveryStatus
+
+if TYPE_CHECKING:
+    from vidbyte.lib.dataclasses.agents import AgentMessage
+    from vidbyte.lib.dataclasses.outputs import DeliveryReceipt
+    from vidbyte.lib.enums.failure import FailureCode
+    from vidbyte.lib.enums.native_threads import NativeHarness, NativeThreadOperation
 
 
 class VidbyteSdkError(Exception):
@@ -174,6 +183,49 @@ class OutputSchemaViolationError(AgentExecutionError):
         self.validation_error = validation_error
         self.stop_reason = stop_reason
         super().__init__(message, details={"validation_error": validation_error, "stop_reason": stop_reason, "output_chars": len(raw_output)})
+
+
+class OutputDeliveryError(AgentExecutionError):
+    """Raised after a finished reply when one or more of the agent's outputs failed to deliver it."""
+
+    DIAGNOSTIC_FIELDS = (
+        "error_kind",
+        "expected",
+        "actual",
+        "safe_runtime_details",
+        "likely_causes",
+        "repair_approaches",
+        "related_docs",
+        "relevant_tests",
+    )
+
+    def __init__(self, message: str, *, reply: AgentMessage, receipts: tuple[DeliveryReceipt, ...]) -> None:
+        # Keep the reply and every receipt; the packet names only
+        # destinations and error codes, never a credential.
+        self.reply = reply
+        self.receipts = receipts
+        self.error_kind = "output_delivery_failed"
+        self.expected = "every configured output delivered or skipped"
+        self.actual = message
+        self.safe_runtime_details = {"failed": [[receipt.destination.value, receipt.error_code] for receipt in self.failed], "receipt_count": len(receipts)}
+        self.likely_causes = (
+            "A credential or webhook URL was revoked or mistyped.",
+            "The destination rejected or rate-limited the request.",
+            "The network or SMTP server was unreachable.",
+        )
+        self.repair_approaches = (
+            "Read each failed receipt's error_code.",
+            "Fix the credential or target of the failed output.",
+            "Resend only the failed connectors, not err.failed (those are receipts): failed_connectors = [c for c, r in zip(agent.outputs, err.receipts, strict=True) if r.status is DeliveryStatus.FAILED], then await OutputDispatcher.deliver(failed_connectors, err.reply, {}); if a failed receipt's error_code is network, invalid_response, smtp_error, smtp_recipients_refused, or file_error, or starts with http_5, that output may already have been delivered, so check its destination first.",
+        )
+        self.related_docs = ("vidbyte/lib/outputs/README.md", "vidbyte/agents/output/README.md")
+        self.relevant_tests = ("python scripts/run_ci.py",)
+        super().__init__(message, details={"error_kind": self.error_kind, "expected": self.expected, "actual": self.actual, "safe_runtime_details": self.safe_runtime_details, "likely_causes": self.likely_causes, "repair_approaches": self.repair_approaches, "related_docs": self.related_docs, "relevant_tests": self.relevant_tests})
+
+    @property
+    def failed(self) -> tuple[DeliveryReceipt, ...]:
+        """The receipts whose delivery failed, in configured order."""
+        return tuple(receipt for receipt in self.receipts if receipt.status is DeliveryStatus.FAILED)
 
 
 class MultiAgentExecutionError(AgentExecutionError):
@@ -502,3 +554,61 @@ class SourceParseError(SourceError):
 
 class SourceSecurityError(SourceError):
     """Raised when a URL is disallowed or a response violates a size/scheme guard."""
+
+
+class NativeThreadError(AgentExecutionError):
+    """Carries one harness thread function failure: a closed failure code, the harness and function, the likely cause and the next step."""
+
+    DIAGNOSTIC_FIELDS = (
+        "error_kind",
+        "expected",
+        "actual",
+        "safe_runtime_details",
+        "likely_causes",
+        "repair_approaches",
+        "related_docs",
+        "relevant_tests",
+    )
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        failure_code: FailureCode,
+        harness: NativeHarness,
+        operation: NativeThreadOperation,
+        next_step: str,
+        likely_cause: str,
+        thread_id: str | None = None,
+        exit_code: int | None = None,
+        vendor_message: str | None = None,
+        error_type: str = "",
+    ) -> None:
+        # The factory in vidbyte/harnesses/native/hostkit/errors.py has
+        # already composed and scrubbed the message and picked the texts
+        # written for this code, so this class only stores them.
+        self.failure_code = failure_code
+        self.harness = harness
+        self.operation = operation
+        self.next_step = next_step
+        self.likely_cause = likely_cause
+        self.thread_id = thread_id
+        self.exit_code = exit_code
+        self.vendor_message = vendor_message
+        self.error_type = error_type
+        self.error_kind = failure_code.value
+        self.expected = f"{operation.value} returning a NativeThreadResult"
+        self.actual = message
+        self.safe_runtime_details = {
+            "harness": harness.value,
+            "operation": operation.value,
+            "thread_id": "" if thread_id is None else thread_id,
+            "exit_code": "" if exit_code is None else str(exit_code),
+            "vendor_message": "" if vendor_message is None else vendor_message,
+            "error_type": error_type,
+        }
+        self.likely_causes = (likely_cause,)
+        self.repair_approaches = (next_step,)
+        self.related_docs = ("vidbyte/harnesses/README.md",)
+        self.relevant_tests = ("tests/features/harness_threads",)
+        super().__init__(message, details={"error_kind": self.error_kind, "expected": self.expected, "actual": self.actual, "safe_runtime_details": self.safe_runtime_details, "likely_causes": self.likely_causes, "repair_approaches": self.repair_approaches, "related_docs": self.related_docs, "relevant_tests": self.relevant_tests})

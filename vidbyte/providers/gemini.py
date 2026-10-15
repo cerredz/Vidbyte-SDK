@@ -11,6 +11,9 @@ from vidbyte.lib.registries.structured_output import StructuredOutputRegistry
 from vidbyte.lib.runners.types import EmbeddingResponse, TextModelResponse
 from vidbyte.lib.tools.formatter import ToolsFormatter
 
+# Gemini refuses a larger batchEmbedContents call with 400 "at most 100 requests can be in one batch".
+_GEMINI_EMBEDDING_BATCH_LIMIT = 100
+
 
 class GeminiProvider:
     provider = ModelProvider.GEMINI
@@ -220,6 +223,32 @@ class GeminiProvider:
         # POST to batchEmbedContents and return one float vector per input text.
         config = self._embedding_config_for(config)
         model = quote(config.model, safe="")
+        url = f"{config.resolved_endpoint()}/models/{model}:batchEmbedContents"
+        # @intent gemini-embedding-batches-stay-under-the-cap
+        # Gemini answers more than 100 requests in one batch with 400 "BatchEmbedContentsRequest.requests: at most
+        # 100 requests can be in one batch", so the texts go out in consecutive slices of at most that many.
+        embeddings: list[tuple[float, ...]] = []
+        bodies: list[Mapping[str, Any]] = []
+        for batch in self._embedding_batches(texts):
+            # Each slice is one ordinary batch call, built exactly as a single call always was.
+            payload = self._create_embedding_payload(config, model, batch)
+            response = transport.request(method="POST", url=url, headers=self._create_embedding_headers(config), json_body=payload, timeout_seconds=config.timeout_seconds)
+            parsed = self._parser.parse_json_response(response, provider=self.provider.value)
+            # Check each slice against its own size, then keep its vectors in input order.
+            embeddings.extend(self._extract_batch_embeddings(parsed, expected_count=len(batch)))
+            bodies.append(parsed)
+        # One slice keeps its body as raw, as before; several are listed in order, since no single body covers them all.
+        raw = bodies[0] if len(bodies) == 1 else {"batches": bodies}
+        return EmbeddingResponse(provider=self.provider, model=config.model, embeddings=tuple(embeddings), raw=raw)
+
+    @staticmethod
+    def _embedding_batches(texts: list[str]) -> list[list[str]]:
+        # Consecutive slices of at most the vendor cap; an empty input stays one empty call, as before.
+        return [texts[start : start + _GEMINI_EMBEDDING_BATCH_LIMIT] for start in range(len(texts))[::_GEMINI_EMBEDDING_BATCH_LIMIT]] or [texts]
+
+    @staticmethod
+    def _create_embedding_payload(config: EmbeddingModelConfig, model: str, texts: list[str]) -> dict[str, Any]:
+        # One batchEmbedContents body whose requests carry the model path and task type for each text.
         task_type = config.input_type or "RETRIEVAL_DOCUMENT"
         payload: dict[str, Any] = {"requests": [{"model": f"models/{model}", "content": {"parts": [{"text": t}]}, "taskType": task_type} for t in texts]}
         # @intent embedding-dimensions-reach-every-provider
@@ -227,11 +256,7 @@ class GeminiProvider:
         if config.dimensions is not None:
             for request in payload["requests"]:
                 request["outputDimensionality"] = config.dimensions
-        url = f"{config.resolved_endpoint()}/models/{model}:batchEmbedContents"
-        response = transport.request(method="POST", url=url, headers=self._create_embedding_headers(config), json_body=payload, timeout_seconds=config.timeout_seconds)
-        parsed = self._parser.parse_json_response(response, provider=self.provider.value)
-        embeddings = self._extract_batch_embeddings(parsed, expected_count=len(texts))
-        return EmbeddingResponse(provider=self.provider, model=config.model, embeddings=embeddings, raw=parsed)
+        return payload
 
     def _embedding_config_for(self, config: EmbeddingModelConfig | None) -> EmbeddingModelConfig:
         # Resolve embedding config from call argument or stored instance config.

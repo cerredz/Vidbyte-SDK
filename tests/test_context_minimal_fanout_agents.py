@@ -44,7 +44,7 @@ class ScriptedRunner:
 
 
 def _settings(runner: object | None = None) -> ContextMinimalFanoutSettings:
-    role = AgentRoleSettings(name="role", provider="deepseek", model_name="deepseek-v4-flash", api_key="sk-test", runner=runner)
+    role = AgentRoleSettings(name="role", provider="deepseek", model_name="deepseek-v4-flash", api_keys=["sk-test"], runner=runner)
     return ContextMinimalFanoutSettings(context=role, splitter=role, adversarial=role, implementation=role, include_minimal_toolset=False)
 
 

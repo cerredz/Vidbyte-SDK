@@ -14,6 +14,7 @@ Relations:
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -121,13 +122,16 @@ class SessionSerializer:
 
     def message_from_dict(self, data: Mapping[str, Any]) -> AgentMessage:
         # Rebuild an AgentMessage from a persisted dict; structured returns as plain data, not a model.
+        # @intent resumed-history-owns-its-data
+        # Deep-copy so the rebuilt message shares no objects with the stored checkpoint: InMemorySessionStore
+        # hands out its stored objects, so an edit to a resumed entry would otherwise rewrite a written checkpoint on that backend only.
         return AgentMessage(
             sender=data.get("sender", ""),
             recipient=data.get("recipient", ""),
             content=data.get("content", ""),
             message_type=data.get("message_type", "response"),
-            metadata=dict(data.get("metadata", {}) or {}),
-            structured=data.get("structured"),
+            metadata=copy.deepcopy(dict(data.get("metadata", {}) or {})),
+            structured=copy.deepcopy(data.get("structured")),
         )
 
     def _run_state_to_dict(self, state: RunState) -> dict[str, Any]:

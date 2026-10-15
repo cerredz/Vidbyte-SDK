@@ -45,7 +45,7 @@ class NumericMatchGrader(BaseGrader):
         # @intent scientific-notation-parse-as-one-number
         # An exponent with digits ("1e-05", "6.02E23") belongs to the number; a bare word like "5 eggs" does not.
         # @intent unicode-minus-is-a-sign
-        # Models typeset negatives with U+2212, which float() rejects; it must not be dropped, or "-5" would read as 5.
-        match = re.search(r"[-+−]?(?:\d{1,3}(?:,\d{3})+(?!\d)(?:\.\d*)?|\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?", str(value))
+        # Models typeset negatives and exponent signs with U+2212, which float() rejects; it must not be dropped, or "-5" would read as 5.
+        match = re.search(r"[-+−]?(?:\d{1,3}(?:,\d{3})+(?!\d)(?:\.\d*)?|\d+(?:\.\d*)?|\.\d+)(?:[eE][-+−]?\d+)?", str(value))
         return float(match.group(0).replace(",", "").replace("−", "-")) if match else None
 

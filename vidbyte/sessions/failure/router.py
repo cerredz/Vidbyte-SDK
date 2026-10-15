@@ -258,6 +258,8 @@ class FailureRouter:
         self._bindings: dict[FailureCode, RecoveryBinding] = {}
         self._recovery_attempts: list[RecoveryAttempt] = []
         self._routed_ids: set[str] = set()
+        # Failures whose recovery handler is running right now; failures recorded meanwhile are never routed.
+        self._recovering_ids: set[str] = set()
 
     @property
     def max_history(self) -> int:
@@ -286,6 +288,11 @@ class FailureRouter:
         if not self.enabled:
             return failure
         self._history.append(failure)
+        if self._recovering_ids:
+            # @intent recovery-failures-never-re-enter-their-handler
+            # A failure raised while a recovery handler runs belongs to that attempt: keep it in the ledger, but mark it
+            # routed so a handler that retries through the same Session cannot re-enter itself.
+            self._routed_ids.add(failure.id)
         if len(self._history) > self.max_history:
             evicted = self._history[: len(self._history) - self.max_history]
             del self._history[: len(evicted)]
@@ -391,7 +398,12 @@ class FailureRouter:
         # The same exception object reaches both the agent and the Session boundary, so it must record once;
         # id() is only a memory address that CPython reuses once an earlier exception is freed, which made a
         # new, unrelated exception match an old record and skip both the ledger and its handler. The failure
-        # id is therefore tagged onto the exception object itself, so only that very object (or one chained to it) matches.
+        # id is therefore tagged onto the exception object itself, so only that very object, or an exception that
+        # explicitly wraps it (`raise ... from`), matches.
+        # @intent later-failure-is-not-its-handled-context
+        # Python sets __context__ on any exception raised while another is handled, so following it would merge a later,
+        # independent failure (e.g. a retry inside `except`) into the earlier record and skip its handler; the SDK's own
+        # wrapper between the agent and Session boundaries uses `from exc`.
         tagged_ids = self._tagged_failure_ids(exc)
         existing = next((failure for failure in reversed(self._history) if failure.id in tagged_ids), None)
         if existing is not None:
@@ -403,7 +415,7 @@ class FailureRouter:
 
     @classmethod
     def _tagged_failure_ids(cls, exc: BaseException) -> set[str]:
-        # Collect the failure ids tagged onto the exception and its __cause__/__context__ chain.
+        # Collect the failure ids tagged onto the exception and its explicit __cause__ chain (never implicit __context__).
         tagged: set[str] = set()
         seen: set[int] = set()
         current: BaseException | None = exc
@@ -411,7 +423,7 @@ class FailureRouter:
         while current is not None and id(current) not in seen:
             seen.add(id(current))
             tagged.update(getattr(current, cls._FAILURE_IDS_ATTRIBUTE, ()))
-            current = current.__cause__ or current.__context__
+            current = current.__cause__
         return tagged
 
     @classmethod
@@ -438,9 +450,14 @@ class FailureRouter:
         recovering = Failure(code=failure.code, source=failure.source, phase=failure.phase, status=FailureStatus.RECOVERING, disposition=failure.disposition, severity=failure.severity, summary=failure.summary, details=failure.details, handled_by=binding.handler.name, parent_id=failure.parent_id, iteration=failure.iteration, step=failure.step, id=failure.id, occurred_at=failure.occurred_at)
         self._replace(recovering)
         try:
-            result = binding.handler.recover(recovering, session=self.session)
-            if inspect.isawaitable(result):
-                result = await result
+            # Mark the handler as running so any failure it causes is recorded but not routed back into it.
+            self._recovering_ids.add(failure.id)
+            try:
+                result = binding.handler.recover(recovering, session=self.session)
+                if inspect.isawaitable(result):
+                    result = await result
+            finally:
+                self._recovering_ids.discard(failure.id)
             if not isinstance(result, RecoveryResult):
                 raise TypeError(f"Recovery handler {binding.handler.name!r} must return RecoveryResult, got {type(result).__name__}.")
         except FailureRaisedError:
@@ -462,13 +479,19 @@ class FailureRouter:
         if not self.enabled:
             return ()
         results: list[RecoveryResult] = []
-        for failure in tuple(self._history):
+        pending = tuple(self._history)
+        # @intent evicted-snapshot-entry-is-skipped
+        # A handler's own failures can evict a later entry of this snapshot, and eviction drops its routed mark, so only
+        # route entries still in the ledger; ids are refreshed only after a handler ran, the one thing that changes it.
+        live_ids = {failure.id for failure in pending}
+        for failure in pending:
             eligible = failure.status is FailureStatus.EXHAUSTED or failure.disposition is FailureDisposition.ROUTE
-            if not eligible or failure.id in self._routed_ids:
+            if not eligible or failure.id in self._routed_ids or failure.id not in live_ids:
                 continue
             result = await self.route(failure)
             if result is not None:
                 results.append(result)
+                live_ids = {item.id for item in self._history}
         return tuple(results)
 
     async def _handle_recovery_error(self, failure: Failure, binding: RecoveryBinding, exc: BaseException) -> RecoveryResult | None:
@@ -520,6 +543,10 @@ class FailureRouter:
                 self._history[index] = failure
                 return
         self.record(failure)
+        # @intent evicted-failure-stays-routed
+        # Only route() replaces records, after marking the id routed; evicting the id dropped that mark, so restore it,
+        # or route_pending would hand the re-recorded failure to its handler a second time.
+        self._routed_ids.add(failure.id)
 
 
 __all__ = ["FailureMetadataNormalizer", "FailureRouter"]

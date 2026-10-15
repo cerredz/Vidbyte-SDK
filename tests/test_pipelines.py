@@ -339,6 +339,10 @@ class StubMcpTransport:
         self.closed = False
         StubMcpTransport.instances.append(self)
 
+    async def start(self) -> None:
+        # Mirrors McpStdioTransport.start, which attach_mcp_server now calls before the handshake.
+        return None
+
     async def request(self, method: str, params: dict[str, object] | None = None) -> dict[str, object]:
         if method == "tools/list":
             return {"tools": [{"name": "remote_stub", "description": "Stub.", "inputSchema": {"type": "object", "properties": {}}}]}

@@ -50,6 +50,8 @@ class StubRunnerUtility:
 
 class AgentModalityRoutingTests(unittest.IsolatedAsyncioTestCase):
     async def test_model_identity_routes_to_image_runner(self) -> None:
+        from vidbyte.lib.enums import TextModelMode
+
         image_runner = RecordingRunner(
             ImageModelResponse(
                 provider=ModelProvider.OPENAI,
@@ -72,7 +74,8 @@ class AgentModalityRoutingTests(unittest.IsolatedAsyncioTestCase):
         from_model.assert_called_once_with(
             provider="openai",
             model_name="gpt-image-1",
-            api_key=None,
+            api_keys=agent.runner_config.api_keys,
+            model_mode=TextModelMode.AUTO,
             temperature=None,
             options={},
         )

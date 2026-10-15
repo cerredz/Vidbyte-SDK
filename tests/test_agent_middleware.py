@@ -6,7 +6,7 @@ from tests.agent_test_support import build_test_agent
 from vidbyte.agents import AgentLoopSettings, AgentRuntime, BaseAgent, ToolErrorPolicy
 from vidbyte.agents.fallback import AgentFallback
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig, FallbackModel
-from vidbyte.lib.errors import ProviderRequestError
+from vidbyte.lib.errors import AgentExecutionError, AllModelsFailedError, ProviderRequestError
 from vidbyte.lib.dataclasses.middleware import MiddlewareAction, MiddlewareContext, MiddlewareDecision
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.middleware import AgentMiddleware
@@ -36,6 +36,13 @@ async def invoke_runner(runner: FakeRunner, prompt: str, **kwargs: object) -> Fa
     if isinstance(response, Exception):
         raise response
     return response
+
+
+class AgentFakeRunner(FakeRunner):
+    """FakeRunner a BaseAgent can call directly, since the agent invokes a runner through arun()."""
+
+    async def arun(self, prompt: str, **kwargs: object) -> FakeResponse:
+        return await invoke_runner(self, prompt, **kwargs)
 
 
 def runner_output_text(response: object) -> str:
@@ -350,6 +357,35 @@ class AgentMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.output, "from flash")
         self.assertEqual((len(primary.calls), len(backup.calls)), (3, 1))
         self.assertTrue(result.metadata["fallback"]["used"])
+
+    async def test_spent_fallback_chain_raises_all_models_failed_to_the_caller(self) -> None:
+        # @intent spent-fallback-chain-reaches-the-caller
+        # A spent chain keeps its typed error with every attempt; a chain that never switched still gets the generic wrap.
+        for chain, expect_all_failed in ((["deepseek-reasoner"], True), (None, False)):
+            primary = AgentFakeRunner([ProviderRequestError("400 Bad Request", provider="deepseek", status_code=400)])
+            backup = AgentFakeRunner([ProviderRequestError("400 Bad Request", provider="deepseek", status_code=400)])
+
+            class _FakeChain(AgentFallback):
+                def build_runner(self, index: int) -> object:
+                    return backup
+
+            agent = build_test_agent(
+                name="worker", system_prompt="Work.", runner=primary, provider="deepseek", model_name="deepseek-chat", fallback=chain
+            )
+            if agent.fallback is not None:
+                agent.fallback = _FakeChain(agent.fallback.models)
+
+            if expect_all_failed:
+                with self.assertRaises(AllModelsFailedError) as spent:
+                    await agent.arun("task")
+                self.assertEqual(len(spent.exception.attempts), 1)
+                self.assertIsInstance(spent.exception, AgentExecutionError)
+            else:
+                with self.assertRaises(AgentExecutionError) as wrapped:
+                    await agent.arun("task")
+                self.assertNotIsInstance(wrapped.exception, AllModelsFailedError)
+                self.assertIsInstance(wrapped.exception.__cause__, ProviderRequestError)
+            self.assertEqual((len(primary.calls), len(backup.calls)), (1, 1 if expect_all_failed else 0))
 
     async def test_fallback_switch_keeps_the_runs_model_call_count(self) -> None:
         # @intent model-call-count-survives-fallback-switch

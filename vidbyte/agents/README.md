@@ -48,6 +48,16 @@ reply = await agent.arun("Summarize user 42.")
 print(reply.content)
 ```
 
+Agents take `vidbyte_api_key`, `api_keys`, and `model_mode`. `api_keys` is a
+plain list of your provider keys in any order. The agent matches the list
+once, at construction, against its own model and every fallback model, and
+refuses a list it cannot match without guessing. Fallbacks, forks, handoffs,
+aggregate children, and Jev children carry that one matching, and each call
+sends only its own provider's key. In the default `TextModelMode.AUTO`, calls
+go through the Vidbyte gateway with the Vidbyte key and relay the matched
+provider key; `model_mode=TextModelMode.DIRECT` calls the provider directly.
+The root README's "Vidbyte-managed text calls" section has the full rules.
+
 For a cooperative, bounded wait, add the built-in to the agent that should
 pause and choose its developer-owned maximum:
 
@@ -153,13 +163,13 @@ agent = Agent(
     provider="openai",
     model_name="gpt-5.2",
     fallback=[
-        "gpt-5-mini",                 # bare name inherits provider, api_key, temperature
+        "gpt-5-mini",                 # bare name inherits provider and temperature; keys come from the agent's api_keys
         "anthropic/claude-sonnet-5",  # provider-prefixed, overrides the provider
     ],
 )
 ```
 
-Entries may also be `FallbackModel` objects when a backup needs its own credentials,
+Entries may also be `FallbackModel` objects when a backup needs its own temperature,
 and the whole chain can be passed as a settings object alongside `AgentLoopSettings`:
 
 ```python
@@ -171,8 +181,9 @@ agent = Agent(
     system_prompt="Answer directly.",
     provider="openai",
     model_name="gpt-5.2",
+    api_keys=[OPENAI_KEY, ANTHROPIC_KEY],  # any order; the backup's key goes here too
     fallback=AgentFallbackSettings(
-        models=[FallbackModel(provider="anthropic", model="claude-sonnet-5", api_key=ANTHROPIC_KEY)],
+        models=[FallbackModel(provider="anthropic", model="claude-sonnet-5", temperature=0.2)],
         enabled=True,
     ),
 )
@@ -247,6 +258,43 @@ as completed but unverified evidence. Use a report validator to mark evidence
 verified. Use pipelines for fixed text flow and workflows for code-owned state
 machines; use `MultiAgent` when the manager must own progress and recovery.
 
+## Output Connectors
+
+Send each finished reply to chat channels, email, issue trackers and code
+hosts (including comments and update-in-place), docs workspaces, CI job
+summaries, social-post drafts, CRM tasks, or any HTTPS webhook (optionally
+signed) by passing connectors as `outputs=`:
+
+```python
+from vidbyte import Agent, GitHubIssueOutput, OutputDeliveryError, SlackOutput
+
+agent = Agent(
+    name="checkout-scout",
+    system_prompt="Find the worst bug in the checkout flow.",
+    provider="openai",
+    model_name="gpt-4.1",
+    output_schema=BugReport,  # a model with title and body fields
+    outputs=[
+        SlackOutput(),                                         # reads SLACK_WEBHOOK_URL
+        GitHubIssueOutput(repo="acme/shop", labels=("bug",)),  # reads GITHUB_TOKEN
+    ],
+)
+try:
+    reply = agent.run("Scan checkout")
+except OutputDeliveryError as err:
+    reply = err.reply  # recorded already; err.failed lists what did not send
+print(reply.metadata["deliveries"])
+```
+
+Delivery runs once per run, after the reply passes the output-schema check and
+before queued follow-ups, with every connector sending at once. A blank reply
+or a run stopped by a budget, guard, or middleware sends nothing. Forks never
+deliver, but a user agent that carries its own outputs delivers on its own
+runs even as a Jev specialist, an AggregateAgent proposer, or a pipeline
+stage. See [`output/README.md`](output/README.md) for the delivery rules and
+[`../lib/outputs/README.md`](../lib/outputs/README.md) for each provider's
+credential and limits.
+
 ## Key Modules
 
 - `base.py`: `BaseAgent`, inferred runner construction, tool binding, context assembly, trace setup, and runtime dispatch.
@@ -257,7 +305,9 @@ machines; use `MultiAgent` when the manager must own progress and recovery.
 - `handoff.py`: structured handoff generation from a completed agent run.
 - `coding.py`: `CodingAgent`, a `BaseAgent` preloaded with bash, read, write, edit, glob, grep, and one web-fetch tool over one root folder; its checks live in `CodingAgentSettings` and its tools in `CodingAgentTools`.
 - `coding_context/`: `CodingContextWindow` and one loader per section (`AgentsMdLoader`), which build the context a `CodingAgent` shows after its system prompt.
+- `skills/`: `SkillLoader` and one resolver per source, the agent-agnostic loader that turns declarative skill entries into `SkillDocument`s for `JevAgent`'s skill preload.
 - `multi/`: ledger-driven manager/worker orchestration and transfer controls.
+- `output/`: the `OutputConnector` contract, reply shaping, and `OutputDispatcher`, which delivers each finished reply to the configured `outputs`.
 - `types.py`: agent messages, input envelopes, cards, and specs.
 
 ## Related Layers

@@ -101,6 +101,10 @@ class _FailingRunner:
         raise RuntimeError("runner failed")
 
 
+class _DeskError(Exception):
+    """Caller-owned error that re-raises an SDK failure the way application code wraps it."""
+
+
 class _RefundCallRunner:
     """Offline runner that asks for one refund tool call, then finishes."""
 
@@ -180,6 +184,37 @@ class FailureContractsTests(unittest.TestCase):
         self.assertIs(router.capture_exception(original, source="session"), first)
         self.assertIs(router.capture_exception(wrapper, source="session"), first)
         self.assertEqual(len(router.history()), 6)
+
+    def test_capture_exception_records_failure_raised_while_handling_another(self) -> None:  # [Silent Failure]
+        # @intent later-failure-is-not-its-handled-context
+        # Verify a new exception raised inside an except block gets its own record, while an explicit wrapper still records once.
+        router = FailureRouter(object())
+        first_exc = RuntimeError("turn 1")
+        first = router.capture_exception(first_exc)
+        try:
+            raise first_exc
+        except RuntimeError:
+            try:
+                raise RuntimeError("turn 2")
+            except RuntimeError as second_exc:
+                second = router.capture_exception(second_exc)
+        self.assertIsNot(second, first)
+        self.assertEqual(len(router.history()), 2)
+        try:
+            try:
+                raise _DeskError("desk failed") from first_exc
+            except _DeskError:
+                raise RuntimeError("turn 3")
+        except RuntimeError as third_exc:
+            third = router.capture_exception(third_exc)
+        self.assertIsNot(third, first)
+        self.assertIsNot(third, second)
+        self.assertEqual(len(router.history()), 3)
+        try:
+            raise RuntimeError("session wrapper") from first_exc
+        except RuntimeError as wrapper:
+            self.assertIs(router.capture_exception(wrapper), first)
+        self.assertEqual(len(router.history()), 3)
 
     def test_disabled_router_does_not_record(self) -> None:  # [Hidden Assumption]
         # Verify disabled instrumentation has no policy side effects.
@@ -307,6 +342,62 @@ class FailureRuleTests(unittest.IsolatedAsyncioTestCase):
         await router.evaluate("after_tool_call", object())
         self.assertEqual(calls, 1)
         self.assertEqual(router.history()[0].status, FailureStatus.RECOVERED)
+
+    async def test_failure_evicted_during_its_recovery_routes_once(self) -> None:  # [Hidden Failure]
+        # Verify a failure the full ledger evicts while its handler runs is not routed again by the next route_pending.
+        router = FailureRouter(object(), max_history=2)
+        calls = 0
+
+        class Handler:
+            name = "retry"
+            on_error = "closed"
+
+            def recover(self, failure, *, session):
+                nonlocal calls
+                calls += 1
+                router.emit(FailureCode.TOOL_EXECUTION_FAILED, phase=FailurePhase.RECOVERY, source="retry")
+                return RecoveryResult(False)
+
+        stale = router.emit(FailureCode.TOOL_RETRY_EXHAUSTED, phase=FailurePhase.TOOL, source="tool", status=FailureStatus.EXHAUSTED)
+        router.emit(FailureCode.TOOL_EXECUTION_FAILED, phase=FailurePhase.TOOL, source="tool")
+        router.on(FailureCode.TOOL_RETRY_EXHAUSTED, Handler())
+        await router.route_pending()
+        await router.route_pending()
+        self.assertEqual(calls, 1)
+        self.assertEqual([failure.id for failure in router.history()].count(stale.id), 1)
+
+    async def test_failure_evicted_by_another_recovery_is_not_routed_again(self) -> None:  # [Hidden Failure]
+        # Verify an entry a nested pass already routed, then another handler evicted, is skipped by the outer pass.
+        router = FailureRouter(object(), max_history=2)
+        calls = 0
+
+        class Retry:
+            name = "retry"
+            on_error = "closed"
+
+            def recover(self, failure, *, session):
+                nonlocal calls
+                calls += 1
+                return RecoveryResult(False)
+
+        class RetryThroughSession:
+            name = "retry_through_session"
+            on_error = "closed"
+
+            async def recover(self, failure, *, session):
+                # A retry through Session.arun ends with its own route_pending pass, then reports two new failures.
+                await router.route_pending()
+                router.emit(FailureCode.TOOL_EXECUTION_FAILED, phase=FailurePhase.RECOVERY, source="retry")
+                router.emit(FailureCode.TOOL_EXECUTION_FAILED, phase=FailurePhase.RECOVERY, source="retry")
+                return RecoveryResult(False)
+
+        router.emit(FailureCode.OUTPUT_INVALID, phase=FailurePhase.TOOL, source="tool", status=FailureStatus.EXHAUSTED)
+        stale = router.emit(FailureCode.TOOL_RETRY_EXHAUSTED, phase=FailurePhase.TOOL, source="tool", status=FailureStatus.EXHAUSTED)
+        router.on(FailureCode.OUTPUT_INVALID, RetryThroughSession())
+        router.on(FailureCode.TOOL_RETRY_EXHAUSTED, Retry())
+        await router.route_pending()
+        self.assertEqual(calls, 1)
+        self.assertNotIn(stale.id, [failure.id for failure in router.history()])
 
     async def test_rule_middleware_blocks_before_tool_execution(self) -> None:  # [Hidden Failure]
         # Verify a fail-closed before-tool rule uses the existing middleware decision contract.
@@ -454,6 +545,61 @@ class SessionFailureIntegrationTests(unittest.IsolatedAsyncioTestCase):
             await agent.arun("work")
         self.assertEqual(session.failures.history()[0].code, FailureCode.RUNTIME_ERROR)
 
+    async def test_turn_failing_inside_except_of_earlier_turn_routes_again(self) -> None:  # [Hidden Failure]
+        # @intent later-failure-is-not-its-handled-context
+        # Verify a fallback turn run inside the except block of a failed turn gets its own record and handler call.
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=_FailingRunner())
+        session = Session(agent)
+        calls: list[str] = []
+
+        class Handler:
+            name = "counter"
+            on_error = "closed"
+
+            def recover(self, failure, *, session):
+                calls.append(failure.id)
+                return RecoveryResult(True)
+
+        session.failures.on(FailureCode.RUNTIME_ERROR, Handler())
+        with self.assertRaises(AgentExecutionError):
+            try:
+                await session.arun("first question")
+            except AgentExecutionError:
+                await session.arun("simpler question")
+        self.assertEqual(len(session.failures.history()), 2)
+        self.assertEqual(len(set(calls)), 2)
+
+    async def test_handler_retrying_through_session_runs_once(self) -> None:  # [Hidden Failure]
+        # @intent recovery-failures-never-re-enter-their-handler
+        # Verify a handler that retries through the same Session runs once, and the retry's failure is recorded but not routed.
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=_FailingRunner())
+        session = Session(agent)
+        calls: list[str] = []
+
+        class Handler:
+            name = "retry"
+            on_error = "closed"
+
+            async def recover(self, failure, *, session):
+                calls.append(failure.id)
+                # The cap only keeps a regression from recursing without end; one call is the contract.
+                if len(calls) > 3:
+                    return RecoveryResult(False)
+                try:
+                    await session.arun("retry once")
+                except AgentExecutionError:
+                    return RecoveryResult(False)
+                return RecoveryResult(True)
+
+        session.failures.on(FailureCode.RUNTIME_ERROR, Handler())
+        with self.assertRaises(AgentExecutionError):
+            await session.arun("work")
+        history = session.failures.history()
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(history), 2)
+        self.assertEqual([attempt.failure_id for attempt in session.failures.recovery_attempts], [history[0].id])
+        self.assertIsNone(history[1].handled_by)
+
     async def test_in_loop_raise_rule_surfaces_typed_error(self) -> None:  # [Hidden Failure]
         # @intent raise-disposition-reaches-the-caller
         # Verify a matched, fail-closed crashing, or RaiseRecovery-routed rule raises FailureRaisedError, blocks the tool, and leaves one ledger record.
@@ -572,14 +718,16 @@ class SessionFailureIntegrationTests(unittest.IsolatedAsyncioTestCase):
     def test_fork_recovery_keeps_live_agent_key(self) -> None:  # [Silent Failure]
         # @intent fork-recovery-keeps-agent-key
         # Verify both the plain and the tagged fork branch authenticate with the live agent's explicit key.
-        agent = build_test_agent(name="tenant", system_prompt="Work.", runner=_FailingRunner(), api_key="sk-tenant-live")
+        # byok-api-keys FR-11, INV-15: fork recovery passes the live agent's matched record, not a re-matched or empty one.
+        agent = build_test_agent(name="tenant", system_prompt="Work.", runner=_FailingRunner(), api_keys=["sk-tenant-live"])
         session = Session(agent)
         session.checkpoint()
         failure = Failure(code=FailureCode.RUNTIME_MAX_ITERATIONS, source="test", phase=FailurePhase.LOOP)
         for handler in (ForkRecovery(), ForkRecovery(tags=["repair"])):
             with self.subTest(tags=handler._fork_settings.tags):
                 child = handler.recover(failure, session=session).value
-                self.assertEqual(child.agent.runner_config.api_key, "sk-tenant-live")
+                self.assertEqual(child.agent.runner_config.api_keys, agent.runner_config.api_keys)
+                self.assertEqual(child.agent.runner_config.api_keys.key_for("openai"), "sk-tenant-live")
 
     def test_fork_recovery_refuses_bare_string_tags(self) -> None:  # [Hidden Assumption]
         # Verify tags="incident" is refused instead of tagging the branch with its characters.

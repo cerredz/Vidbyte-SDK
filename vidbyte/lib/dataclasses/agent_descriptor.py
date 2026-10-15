@@ -56,7 +56,7 @@ _REF_PATTERN = re.compile(r"^[a-z][a-z0-9_.-]*$")
 _NAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
 _INTERPOLATION_PATTERN = re.compile(r"\$\{[^}]*\}")
 _SECRET_KEY_SUFFIXES = (
-    "api_key", "token", "password", "secret", "credential",
+    "api_key", "api_keys", "token", "password", "secret", "credential",
 )
 _SECRET_KEY_PREFIXES = (
     "api_key_", "token_", "password_", "secret_", "credential_",
@@ -184,7 +184,9 @@ class AgentDescriptor:
                 "Agent name must not contain environment interpolation patterns.",
                 details={"field": "name", "expected": "no ${...} patterns"},
             )
-        if not _NAME_PATTERN.match(self.name):
+        # @intent descriptor-patterns-match-the-whole-value
+        # `$` also matches before one trailing newline (a YAML `|` block scalar), so the whole value must match.
+        if not _NAME_PATTERN.fullmatch(self.name):
             raise ConfigurationError(
                 f"Agent name '{self.name}' should use kebab-case (lowercase letters, digits, hyphens) for tool-name compatibility.",
                 details={"field": "name", "actual": self.name, "pattern": _NAME_PATTERN.pattern},
@@ -299,7 +301,7 @@ class AgentDescriptor:
                     f"Tool ref '{ref}' must be at most {_MAX_REF_CHARS} characters.",
                     details={"field": f"tools[{index}].ref", "max_chars": _MAX_REF_CHARS, "actual_chars": len(ref)},
                 )
-            if not _REF_PATTERN.match(ref):
+            if not _REF_PATTERN.fullmatch(ref):
                 raise ConfigurationError(
                     f"Tool ref '{ref}' must match pattern '{_REF_PATTERN.pattern}'.",
                     details={"field": f"tools[{index}].ref", "actual": ref, "expected": "lowercase identifier with dots, hyphens, underscores"},
@@ -335,7 +337,7 @@ class AgentDescriptor:
                     f"Middleware ref '{ref}' must be at most {_MAX_REF_CHARS} characters.",
                     details={"field": f"middleware[{index}]", "max_chars": _MAX_REF_CHARS, "actual_chars": len(ref)},
                 )
-            if not _REF_PATTERN.match(ref):
+            if not _REF_PATTERN.fullmatch(ref):
                 raise ConfigurationError(
                     f"Middleware ref '{ref}' must match pattern '{_REF_PATTERN.pattern}'.",
                     details={"field": f"middleware[{index}]", "actual": ref, "expected": "lowercase identifier with dots, hyphens, underscores"},

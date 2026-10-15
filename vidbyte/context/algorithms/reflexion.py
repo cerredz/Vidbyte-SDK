@@ -78,7 +78,9 @@ class ReflexionAlgorithm:
         """Return whether the failed attempt should produce reflection and retry."""
         if trial_index >= self.max_trials - 1:
             return False
-        return self.stop_reason(result) is not AgentStopReason.IS_DONE
+        # @intent isdone-is-a-normal-stop
+        # A plain-text final answer is a normal completion just like isDone, so only other stops are failed trials.
+        return self.stop_reason(result) not in (AgentStopReason.IS_DONE, AgentStopReason.FINAL_RESPONSE)
 
     def render_reflection_prompt(
         self,
