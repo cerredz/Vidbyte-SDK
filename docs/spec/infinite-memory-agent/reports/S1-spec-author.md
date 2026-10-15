@@ -189,3 +189,38 @@ The S1 review of r1 returned SOUND WITH FIXES with 15 findings: 1 Blocker, 7 Maj
 - Every FR and AC appears in §12. The §4, §8.5, and §12.3 names match.
 - Paths appear only where allowed, and all 17 weighted words appear.
 - The prompt family has 41 leaves, which brings the enum header to 139 assets across 34 families.
+
+## Addendum — r3 (review round 2, final)
+
+Round 2 returned SOUND WITH FIXES. It found 14 round-1 findings resolved and 1 partly resolved (R-5), plus 8 new findings: 4 Major (R-16 – R-19) and 4 Minor (R-20 – R-23). I checked the evidence in the repo, accepted all 8, and added no new questions. Status is now `approved`, at revision 3.
+
+**Changes in r3:**
+- **R-16, a clean context per run.** Row 21 replaces the context with `tool_calls=()` and `history=()`, which adds INV-39, AC-40, and EC-50.
+  - I extended the reviewer's fix to cover `history` too. `BaseAgentContext.build_context_body` also renders the agent's earlier prompts and replies as `History:` in the system string, which trimming cannot reach.
+- **R-17.** `map_text` never raises on file content, and a commit's `ToolExecutionError` now drops only that entry (INV-16). EC-24 is restated, and AC-37 now uses `entries.jsonl` and checks that the run continues.
+- **R-18.**
+  - Grep's `max_file_bytes` is now derived from `max_tokens`, using `INFINITE_UTF8_MAX_BYTES_PER_CHAR`.
+  - The `loop` default now cuts tool results with the existing `result_max_chars` at `INFINITE_TOOL_RESULT_MAX_CHARS` (100,000).
+  - EC-48 and D-3 are restated, AC-39 is extended, and AC-42 is added.
+- **R-19.** The pair guard now catches `(VidbyteSdkError, OSError, ValueError)`, a wrong-shape line raises `ToolExecutionError`, and the verdict value is lowercased. EC-41 and D-22 now state the duplicate-key consequence.
+- **R-20.** No pipeline is built for a batch that holds only replays.
+- **R-21.** The map item holds only the map again. The `context_item` leaf is dropped, giving 40 leaves and 138 assets. INV-23 and D-28 now state the real reasons: the task is the re-sent prompt, and the trim scans newest to oldest.
+- **R-22.** `edit_file` now follows INV-20's path rules.
+- **R-23.** The runtime checks for reserved names before the journal starts (AC-41).
+- **D-9.** Its limits are now counted in loop iterations rather than model calls.
+
+**Self-check (r3):**
+- The spec has 18 sections and 33 rows in §12.3: 18 CREATE and 15 MODIFY.
+- The ID counts below are live IDs. The only gaps are the struck-through withdrawals EC-35, D-19, and Q-5.
+
+  | Prefix | Count |
+  |---|---|
+  | INV | 39 |
+  | AC | 42 |
+  | EC | 49 live of 50 |
+  | FR | 17 |
+  | D | 28 live of 29 |
+  | A | 9 |
+  | Q | 8 live of 9 |
+
+- Every FR and AC appears in §12. The §4, §8.5, and §12.3 names match, and all paths sit where they are allowed.
