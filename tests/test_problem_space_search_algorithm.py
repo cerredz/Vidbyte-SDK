@@ -181,6 +181,22 @@ class ProblemSpaceSearchAlgorithmTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("- one", algorithm._format_field(["one", "two"]))
         self.assertEqual(algorithm._format_field(None), "")
 
+    def test_format_history_reads_gemini_and_anthropic_tool_turns(self) -> None:
+        # [Hidden Failure] Gemini parts and Anthropic tool_use turns reach the side-call history instead of empty lines.
+        gemini = [{"role": "model", "parts": [{"functionCall": {"name": "lookup_population", "args": {"city": "Paris"}}}]}, {"role": "user", "parts": [{"functionResponse": {"name": "lookup_population", "response": {"population": 2100000}}}]}]
+        anthropic = [{"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_1", "name": "lookup_population", "input": {"city": "Paris"}}]}, {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": "2100000"}]}]
+        for include_tool_outputs in (True, False):
+            algorithm = ProblemSpaceSearchAlgorithm(include_tool_outputs=include_tool_outputs)
+            for provider, messages in (("gemini", gemini), ("anthropic", anthropic)):
+                with self.subTest(provider=provider, include_tool_outputs=include_tool_outputs):
+                    history = algorithm._format_history(messages)
+                    self.assertIn("lookup_population", history)
+                    if include_tool_outputs:
+                        self.assertIn("2100000", history)
+                    else:
+                        self.assertIn("[Tool output omitted]", history)
+                        self.assertNotIn("2100000", history)
+
     def test_dispatcher_detects_algorithm(self) -> None:
         # [Hidden Failure] The dispatcher detects and returns the inner-loop algorithm.
         runtime = algo_runtime(ProblemSpaceSearchAlgorithm())
