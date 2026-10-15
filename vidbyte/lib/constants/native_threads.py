@@ -240,6 +240,9 @@ NATIVE_HARNESS_LABELS: MappingProxyType[NativeHarness, str] = MappingProxyType(
     }
 )
 NATIVE_REDACTED = "<redacted>"
+NATIVE_FIELD_DETAIL_KEY = "field"
+NATIVE_UNNAMED_ARGUMENT = "argument"
+NATIVE_CONFIG_ARGUMENT = "config"
 NATIVE_MESSAGE_HEAD = "{operation} failed with {code}."
 NATIVE_WORKSPACE_SENTENCE = "The workspace was {workspace}."
 NATIVE_THREAD_ID_SENTENCE = "The thread id was {thread_id}."

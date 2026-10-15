@@ -1,61 +1,49 @@
 """FILE: vidbyte/harnesses/native/hostkit/errors.py
 
-PURPOSE: Defines NativeErrorFactory, which builds every NativeHostError a native host raises: it scrubs vendor text (the shared HarnessRedactor plus every value the host injected), caps it, and maps launch failures, transport failures and unexpected exceptions to the spec's failure codes.
-ROLE IN CODEBASE: One factory per host (GrokHost, OpencodeHost, MuseHost), shared with that host's NativeTurnTable and NativePeer. Hosts and their wire codecs call build for every failure they raise.
-ARCHITECTURE NOTE: Lives in hostkit, not vidbyte.lib, because scrubbing reuses HarnessRedactor from vidbyte.harnesses.serialization and lib may not import upward. Codes are looked up as "<harness>.<problem>" so one factory serves all three hosts.
-FUNCTION INVENTORY: register_secret remembers an injected value; scrub redacts and caps text; listing joins ids for a context value; build makes a NativeHostError with scrubbed message and context; invalid_argument makes configuration.invalid_argument naming the argument; from_configuration_error maps a validator or record refusal to the same code; from_unexpected maps a defect to runtime.error; from_launch_failure maps a process launch failure; from_protocol_error maps a McpProtocolError reason.
-COMMON MODIFICATION PATTERNS: A new transport reason gets one entry in _EXITED_REASONS or its own branch in from_protocol_error; a new harness needs its codes in FailureCode and a label in _LABELS.
-WHAT NOT TO DO IN THIS FILE: 1. Do not put raw exception text into a message or context; only class names and scrubbed vendor text. 2. Do not add a context key of your own; the keys are a fixed set that callers read. 3. Do not raise from build; a builder that fails would hide the original error.
-KNOWN EDGE CASES: A registered value is replaced before the redactor runs and before the cap, so a cap cannot cut a secret in half and leave its prefix. Empty text stays empty instead of becoming the redactor's "raised without a message" fallback.
-RELATED DOCS: docs/spec/native-grok-opencode-meta-hosts/spec.md §8.5 (Shared host plumbing), §6.3.1, EC-5, EC-11 to EC-13, INV-6
-TESTS: tests/features/grok_host/test_grok_host_shared_contract.py
+PURPOSE: Defines NativeErrorFactory, which builds every NativeThreadError a thread function raises: it looks the failure code up in a closed table, composes the message from the INV-5 sentences in order, scrubs every dynamic part (the values the call injected, then the shared HarnessRedactor) and caps the vendor text.
+ROLE IN CODEBASE: One factory per call, built by the public functions in vidbyte/harnesses/native/grok/threads.py, opencode/threads.py and muse/threads.py with the harness and the function, and handed to their flow classes, wire readers and launchers.
+ARCHITECTURE NOTE: Lives in hostkit, not vidbyte.lib, because scrubbing reuses HarnessRedactor from vidbyte.harnesses.serialization and lib may not import upward. Every fixed word comes from vidbyte/lib/constants/native_threads.py (spec INV-15): the sentence templates, the harness labels, the failure code of each harness and problem, and the likely cause and next step of each code. The code is looked up in NATIVE_THREAD_FAILURE_CODES, never built from text, so a code that is not a FailureCode member cannot occur.
+FUNCTION INVENTORY: register_secret remembers an injected value; scrub redacts and caps text; listing joins names for a sentence; failure is the narrated main function that builds the error for a problem; from_configuration_error, from_unexpected and from_launch_failure build the invalid-argument, runtime and launch errors; _context_sentences gives the workspace and thread id sentences; _observed_sentences gives what the SDK saw; _error assembles the message and the error.
+COMMON MODIFICATION PATTERNS: A new problem adds its NativeThreadProblem member, its summary and observation templates, its codes in NATIVE_THREAD_FAILURE_CODES and their texts; this file needs no change unless the problem brings a new kind of observation, which becomes one more keyword argument of failure.
+WHAT NOT TO DO IN THIS FILE: 1. Do not put raw exception text into a message; only class names, the SDK's own validator text and scrubbed vendor text. 2. Do not scrub or cut the likely cause and the next step; they must appear exactly as the constants hold them. 3. Do not raise from a builder; a builder that fails would hide the original error.
+KNOWN EDGE CASES: A registered value is replaced before the redactor runs and before the cap, so a cap cannot cut a secret in half and leave its prefix. Empty text stays empty instead of becoming the redactor's "raised without a message" fallback. A timed-out outcome reports no exit code, because the status then comes from the tree stop, not from the vendor.
+RELATED DOCS: vidbyte/harnesses/README.md
+TESTS: tests/features/harness_threads/test_harness_threads_errors.py, tests/features/harness_threads/test_harness_threads_credentials.py
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
-from types import MappingProxyType
+from collections.abc import Iterable
 
 from vidbyte.harnesses.serialization import HarnessRedactor
-from vidbyte.lib.constants import native_hosts as native_host_constants
+from vidbyte.lib.constants import native_threads
+from vidbyte.lib.dataclasses.native_threads import NativeThreadRequest
+from vidbyte.lib.dataclasses.process import CliOutcome
 from vidbyte.lib.enums.failure import FailureCode
-from vidbyte.lib.enums.native_hosts import NativeHarness
-from vidbyte.lib.enums.process import ProcessLaunchFailure
-from vidbyte.lib.errors import ConfigurationError, McpProtocolError, NativeHostError
-
-REDACTED = "<redacted>"
-_LABELS: Mapping[NativeHarness, str] = MappingProxyType(
-    {
-        NativeHarness.GROK: "Grok Build",
-        NativeHarness.OPENCODE: "opencode",
-        NativeHarness.MUSE: "Muse Code",
-        NativeHarness.CLAUDE_CODE: "Claude Code",
-        NativeHarness.CODEX: "Codex",
-    }
+from vidbyte.lib.enums.native_threads import (
+    NativeHarness,
+    NativeThreadOperation,
+    NativeThreadProblem,
 )
-_EXITED_REASONS = frozenset({"process_exited", "closed", "stdin_write_failed", "reader_failed", "process_unavailable"})
-_SEPARATOR = ", "
+from vidbyte.lib.enums.process import ProcessLaunchFailure
+from vidbyte.lib.errors import ConfigurationError, NativeThreadError
 
 
 class NativeErrorFactory:
-    """Builds scrubbed NativeHostError values for one harness."""
+    """Builds the scrubbed, detailed NativeThreadError values of one call to one thread function."""
 
-    def __init__(self, harness: NativeHarness) -> None:
+    def __init__(self, harness: NativeHarness, operation: NativeThreadOperation) -> None:
         self._harness = harness
-        self._label = _LABELS[harness]
+        self._operation = operation
+        self._label = native_threads.NATIVE_HARNESS_LABELS[harness]
         self._secrets: set[str] = set()
         self._redactor = HarnessRedactor()
 
-    @property
-    def harness(self) -> NativeHarness:
-        # The harness whose codes this factory builds.
-        return self._harness
-
     def register_secret(self, value: str) -> None:
         # @intent native-errors-scrub-injected-secrets
-        # Every value the host injected (server password, API keys, MCP
-        # env and header values) is replaced in all vendor text, because
-        # a vendor may echo it back in an error.
+        # Every value the call injected (the caller's API key, the
+        # inline opencode config that holds it) is replaced in all
+        # vendor text, because a vendor may echo it back in an error.
         if isinstance(value, str) and value:
             self._secrets.add(value)
 
@@ -65,79 +53,141 @@ class NativeErrorFactory:
         # cannot cut one in half; then the shared redactor scrubs
         # credential assignments and the result is capped at
         # NATIVE_VENDOR_MESSAGE_MAX_CHARS.
-        limit = native_host_constants.NATIVE_VENDOR_MESSAGE_MAX_CHARS
+        limit = native_threads.NATIVE_VENDOR_MESSAGE_MAX_CHARS
         for secret in sorted(self._secrets, key=len, reverse=True):
-            text = text.replace(secret, REDACTED)
+            text = text.replace(secret, native_threads.NATIVE_REDACTED)
         if not text.strip():
             return text[:limit]
         return self._redactor.safe_error_message(text, max_chars=limit)
 
     @staticmethod
     def listing(items: Iterable[str]) -> str:
-        # Joins ids or names for a context value, keeping the first
-        # NATIVE_CONTEXT_LIST_MAX_ITEMS in their given order.
-        kept = [str(item) for item in items][: native_host_constants.NATIVE_CONTEXT_LIST_MAX_ITEMS]
-        return _SEPARATOR.join(kept)
+        # Joins names for a sentence, keeping the first
+        # NATIVE_LISTING_MAX_ITEMS in their given order.
+        kept = [str(item) for item in items][: native_threads.NATIVE_LISTING_MAX_ITEMS]
+        return native_threads.NATIVE_LISTING_SEPARATOR.join(kept)
 
-    def code(self, problem: str) -> FailureCode:
-        # The "<harness>.<problem>" member, for example
-        # grok.not_installed.
-        return FailureCode(f"{self._harness.value}.{problem}")
+    def failure(
+        self,
+        problem: NativeThreadProblem,
+        *,
+        request: NativeThreadRequest | None,
+        thread_id: str | None = None,
+        outcome: CliOutcome | None = None,
+        vendor_text: str | None = None,
+        seconds: float | None = None,
+        cap_bytes: int | None = None,
+        missing_member: str | None = None,
+        searched: str | None = None,
+    ) -> NativeThreadError:
+        # The code comes from the closed table of harness and problem,
+        # so every code this builds is a FailureCode member.
+        code = native_threads.NATIVE_THREAD_FAILURE_CODES[(self._harness, problem)]
 
-    def build(self, code: FailureCode, message: str, *, operation: str, next_step: str | None = None, context: Mapping[str, str] | None = None) -> NativeHostError:
-        # Scrubs the message and every context value, then builds the
-        # error; never raises.
-        safe_context = {key: self.scrub(str(value)) for key, value in (context or {}).items()}
-        return NativeHostError(self.scrub(message), failure_code=code, operation=operation, next_step=next_step, context=safe_context)
+        # The newest thread id the call learned wins over the caller's.
+        newest_id = thread_id if thread_id is not None else (None if request is None else request.thread_id)
 
-    def invalid_argument(self, field: str, message: str, *, operation: str, next_step: str | None = None) -> NativeHostError:
-        # An argument failed its check before any I/O: the next step
-        # names the argument unless the caller passes its own text;
-        # context["field"] carries the name too.
-        step = next_step or native_host_constants.NATIVE_INVALID_ARGUMENT_NEXT_STEP.format(field=field)
-        return self.build(FailureCode.CONFIGURATION_INVALID_ARGUMENT, message, operation=operation, next_step=step, context={"field": field})
+        # A timed-out run reports no exit code: the status then comes
+        # from the tree stop, not from the vendor.
+        exit_code = None if outcome is None or outcome.timed_out else outcome.exit_code
 
-    def from_configuration_error(self, exc: ConfigurationError, *, operation: str) -> NativeHostError:
-        # A validator or record refusal names its field in
-        # details["field"] ("GrokTurnRequest.model" names the argument
-        # "model"); the message is the SDK's own text, which quotes only
-        # short non-secret values.
-        field = str(exc.details.get("field", "argument")).rsplit(".", 1)[-1]
-        next_step = native_host_constants.NATIVE_INVALID_ARGUMENT_NEXT_STEP.format(field=field)
-        return self.build(FailureCode.CONFIGURATION_INVALID_ARGUMENT, exc.message, operation=operation, next_step=next_step, context={"field": field})
+        # Vendor text is scrubbed and capped before it goes anywhere.
+        vendor = None if vendor_text is None or not vendor_text.strip() else self.scrub(vendor_text.strip())
 
-    def from_unexpected(self, exc: Exception, *, operation: str) -> NativeHostError:
+        # Say who failed, where, what the SDK saw and what the vendor
+        # printed, in the INV-5 order; the factory adds the likely
+        # cause and the next step written for the code.
+        sentences = [
+            native_threads.NATIVE_THREAD_SUMMARIES[problem].format(harness=self._label),
+            *self._context_sentences(request, newest_id),
+            *self._observed_sentences(problem, exit_code=exit_code, seconds=seconds, cap_bytes=cap_bytes, missing_member=missing_member, searched=searched),
+        ]
+        if vendor is not None:
+            sentences.append(native_threads.NATIVE_VENDOR_TEXT_SENTENCE.format(vendor_text=vendor))
+        return self._error(code, sentences, thread_id=newest_id, exit_code=exit_code, vendor_message=vendor)
+
+    def from_configuration_error(self, exc: ConfigurationError, request: NativeThreadRequest | None) -> NativeThreadError:
+        # A record or validator refusal names its argument in
+        # details["field"]; its message is the SDK's own text, which
+        # never quotes the key.
+        argument = str(exc.details.get(native_threads.NATIVE_FIELD_DETAIL_KEY, native_threads.NATIVE_UNNAMED_ARGUMENT))
+        sentences = [
+            native_threads.NATIVE_INVALID_ARGUMENT_SUMMARY.format(harness=self._label),
+            *self._context_sentences(request, None if request is None else request.thread_id),
+            native_threads.NATIVE_INVALID_ARGUMENT_OBSERVATION.format(argument=self.scrub(argument), rule=self.scrub(exc.message)),
+        ]
+        return self._error(FailureCode.CONFIGURATION_INVALID_ARGUMENT, sentences, thread_id=None if request is None else request.thread_id)
+
+    def from_unexpected(self, exc: Exception) -> NativeThreadError:
         # @intent native-errors-defects-name-only-the-class
-        # A defect reports only the exception's class name; its
-        # text may hold paths, payloads or secrets and is never
-        # copied into the error.
+        # A defect reports only the exception's class name; its text may
+        # hold paths, payloads or secrets and is never copied into the
+        # error.
         error_type = type(exc).__name__
-        message = f"{operation} failed with an unexpected {error_type}."
-        return NativeHostError(message, failure_code=FailureCode.RUNTIME_ERROR, operation=operation, error_type=error_type, context={"error_type": error_type})
+        sentences = [
+            native_threads.NATIVE_RUNTIME_ERROR_SUMMARY.format(harness=self._label),
+            native_threads.NATIVE_RUNTIME_ERROR_OBSERVATION.format(error_type=error_type),
+        ]
+        return self._error(FailureCode.RUNTIME_ERROR, sentences, error_type=error_type)
 
-    def from_launch_failure(self, failure: ProcessLaunchFailure, *, operation: str) -> NativeHostError:
+    def from_launch_failure(self, failure: ProcessLaunchFailure, program: str, *, request: NativeThreadRequest, thread_id: str | None = None) -> NativeThreadError:
         # A missing executable means not installed; any other launch
-        # failure means the process could not run.
+        # failure means the operating system refused to start it.
         if failure is ProcessLaunchFailure.NOT_FOUND:
-            return self.build(self.code("not_installed"), f"The {self._label} executable was not found.", operation=operation)
-        return self.build(self.code("process_exited"), f"The {self._label} executable could not be started ({failure.value}).", operation=operation, context={"reason": failure.value})
+            problem, searched = NativeThreadProblem.NOT_INSTALLED, native_threads.NATIVE_SEARCHED_COMMAND.format(program=program)
+        else:
+            problem, searched = NativeThreadProblem.LAUNCH_FAILED, native_threads.NATIVE_LAUNCH_FAILURE_DETAIL.format(program=program, kind=failure.value)
+        newest_id = thread_id if thread_id is not None else request.thread_id
+        sentences = [
+            native_threads.NATIVE_THREAD_SUMMARIES[problem].format(harness=self._label),
+            *self._context_sentences(request, newest_id),
+            *self._observed_sentences(problem, exit_code=None, seconds=None, cap_bytes=None, missing_member=None, searched=searched),
+        ]
+        return self._error(native_threads.NATIVE_THREAD_FAILURE_CODES[(self._harness, problem)], sentences, thread_id=newest_id)
 
-    def from_protocol_error(self, exc: McpProtocolError, *, operation: str) -> NativeHostError:
-        # @intent native-errors-transport-reason-to-failure
-        # A timeout means the peer did not answer in time
-        # (server_unreachable); a closed or dead pipe means it stopped
-        # (process_exited). A vendor error answer is normally mapped by
-        # the host's wire codec first.
-        details = exc.details
-        reason = str(details.get("reason", ""))
-        if reason == "timeout":
-            return self.build(self.code("server_unreachable"), f"The {self._label} process did not answer in time.", operation=operation, context={"reason": reason})
-        if reason in _EXITED_REASONS:
-            return self.build(self.code("process_exited"), f"The {self._label} process stopped before it answered.", operation=operation, context={"reason": reason})
-        vendor = details.get("error")
-        if isinstance(vendor, Mapping):
-            return self.build(self.code("api_error"), f"{self._label} answered with an error.", operation=operation, context={"vendor_code": str(vendor.get("code", "")), "vendor_error": str(vendor.get("message", ""))})
-        return self.build(self.code("protocol_mismatch"), f"{self._label} sent an answer this SDK cannot read.", operation=operation, context={"reason": reason or "invalid_answer"})
+    def _context_sentences(self, request: NativeThreadRequest | None, thread_id: str | None) -> list[str]:
+        # The workspace and the thread id, when the call knows them.
+        sentences = []
+        if request is not None:
+            sentences.append(native_threads.NATIVE_WORKSPACE_SENTENCE.format(workspace=self.scrub(str(request.workspace))))
+        if thread_id is not None:
+            sentences.append(native_threads.NATIVE_THREAD_ID_SENTENCE.format(thread_id=self.scrub(thread_id)))
+        return sentences
+
+    def _observed_sentences(self, problem: NativeThreadProblem, *, exit_code: int | None, seconds: float | None, cap_bytes: int | None, missing_member: str | None, searched: str | None) -> list[str]:
+        # What the SDK observed: the problem's own observation, then the
+        # launcher detail, the missing member and the exit status that
+        # apply.
+        version = native_threads.NATIVE_TESTED_VERSIONS[self._harness]
+        sentences = [native_threads.NATIVE_THREAD_OBSERVATIONS[problem].format(harness=self._label, version=version, seconds=seconds, cap_bytes=cap_bytes)]
+        if searched is not None:
+            sentences.append(self.scrub(searched))
+        if missing_member is not None:
+            sentences.append(native_threads.NATIVE_MISSING_MEMBER_SENTENCE.format(member=missing_member))
+        if exit_code is not None:
+            sentences.append(native_threads.NATIVE_EXIT_STATUS_SENTENCE.format(exit_code=exit_code))
+        return sentences
+
+    def _error(self, code: FailureCode, sentences: list[str], *, thread_id: str | None = None, exit_code: int | None = None, vendor_message: str | None = None, error_type: str = "") -> NativeThreadError:
+        # Puts the head first and the likely cause and next step last,
+        # then builds the error with every INV-5 attribute.
+        likely_cause = native_threads.NATIVE_THREAD_LIKELY_CAUSES[code]
+        next_step = native_threads.NATIVE_THREAD_NEXT_STEPS[code]
+        head = native_threads.NATIVE_MESSAGE_HEAD.format(operation=self._operation.value, code=code.value)
+        tail = [native_threads.NATIVE_LIKELY_CAUSE_SENTENCE.format(likely_cause=likely_cause), native_threads.NATIVE_NEXT_STEP_SENTENCE.format(next_step=next_step)]
+        message = native_threads.NATIVE_SENTENCE_SEPARATOR.join([head, *sentences, *tail])
+        return NativeThreadError(
+            message,
+            failure_code=code,
+            harness=self._harness,
+            operation=self._operation,
+            next_step=next_step,
+            likely_cause=likely_cause,
+            thread_id=thread_id,
+            exit_code=exit_code,
+            vendor_message=vendor_message,
+            error_type=error_type,
+        )
 
 
-__all__ = ["REDACTED", "NativeErrorFactory"]
+__all__ = ["NativeErrorFactory"]
