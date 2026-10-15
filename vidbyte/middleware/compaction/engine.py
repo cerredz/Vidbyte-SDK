@@ -349,7 +349,9 @@ class ContextCompactionEngine:
             for part in parts:
                 function_response = (part.get("functionResponse") or part.get("function_response")) if isinstance(part, Mapping) else None
                 response = function_response.get("response") if isinstance(function_response, Mapping) else None
-                output = response.get("output") if isinstance(response, Mapping) else None
+                # @intent gemini-error-responses-compact-their-message
+                # A failed call's response carries its text in "message" (ToolsFormatter._gemini_error_response), not "output".
+                output = response.get("output", response.get("message")) if isinstance(response, Mapping) else None
                 text = part.get("text") if isinstance(part, Mapping) else None
                 part_values.append(output if isinstance(output, str) else text if isinstance(text, str) else str(part))
             return "\n".join(part_values)
@@ -419,7 +421,7 @@ class ContextCompactionEngine:
                 if isinstance(part, Mapping) and isinstance(part.get("functionResponse"), Mapping):
                     raw_response = dict(part["functionResponse"])
                     response = dict(raw_response.get("response", {}))
-                    response["output"] = content
+                    response["output" if "output" in response or "message" not in response else "message"] = content
                     raw_response["response"] = response
                     replaced.append({"functionResponse": raw_response})
                 else:
