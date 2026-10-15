@@ -5,7 +5,7 @@ worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-infinite-memory-age
 branch: feat/infinite-memory-agent
 base_commit: d9c01461b9e5d8a1265ee85128416b986841ce90
 rebased_onto: 179d8adc (origin/main after #904; branch rebased before S3)
-s2_head: d8bcdf14
+s2_head: 9af96d42 (S4 additions by the S2 author; original d8bcdf14)
 s3_head: def85360
 pr: https://github.com/cerredz/Vidbyte-SDK/pull/1084
 until: none
@@ -21,7 +21,7 @@ started: 2026-10-15 02:49
 | S2 tests | done | 2026-10-15 04:55 | 2026-10-15 05:52 | reports/S2-test-author.md | S2_HEAD d8bcdf14 (c2f91ebd before rebase); 89 red cases in 7 modules under tests/features/infinite_memory_agent/; AC-1..AC-42 all mapped; spec r4 @ff634998 fixed the 2 S2 open items |
 | S3 implement | done | 2026-10-15 05:59 | 2026-10-15 07:22 | reports/S3-implementer.md | S3_HEAD def85360; draft PR #1084; 89/89 new green; source gate 5262 passed/14 skipped "CI passed"; package gate "CI passed"; lint PASS; budget 18/18 new files; test diff vs d8bcdf14 empty |
 | S4 adversarial review | done | 2026-10-15 07:31 | 2026-10-15 08:37 | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES — confirmed 1 Blocker / 10 Major / 14 Minor; refuted 2 partial; downgraded 1 |
-| S5 repair loop | pending | | | | |
+| S5 repair loop | running | 2026-10-15 09:20 | | | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
 
@@ -46,6 +46,8 @@ started: 2026-10-15 02:49
 - 2026-10-15 08:38 — S4 "needs:" adjudication. R-3 (card bound): adopt the verifier's recommended spec edit — amend NFR-7 to bound the four capped card fields (summary, review, dropped, files: 4 × `INFINITE_CARD_TEXT_MAX_TOKENS` + template), with the 2-line production fix (`_capped` on joined `dropped`/`files` in `render`); rejected the runner-up (drop entry text / files as a count) because it changes D-14 and AC-10/11/37 wording. R-13: keep the `asyncio.sleep(0)` yield, reword its `@intent` comment to "fairness yield; no ordering guarantee" (production, trivial); correct the false S3 §17 claim via the spec author; rejected the test-change alternative (`Gate(2)` in AC-37) — no test churn for a comment-level issue. Both spec edits go to the S1 author as r5.
 - 2026-10-15 08:38 — Test-pack work routed to the S2 test author (the only agent allowed to touch `tests/`, which keeps the S2_HEAD diff audit meaningful): R-5 (remove its own implicit string concatenation at test_infinite_memory_workspace.py:399-401 so S3's offset reflow in runtimes.py can be reverted), R-11 (tests that kill the surviving mutants: `check_entry`, `edit_file` caps, verifier `by=` stamp), R-18 (stale tests README line 7), plus regression tests for the confirmed behavior bugs where a spec ID backs them and they can be deterministic (R-1 INV-29, R-3 NFR-7 as amended in r5, R-4 INV-26, R-8, and R-2/R-6 if deterministic). This is test *addition* tied to confirmed findings, not weakening; existing assertions stay untouched. New S2_HEAD recorded after it.
 - 2026-10-15 08:38 — Sequencing: spec author r5 → test author additions → S5 repair iteration 1 (serial; agents share one worktree index, so no concurrent committers).
+
+- 2026-10-15 09:19 — Spec r5 @8d6c230a (NFR-7 bounds the four capped card fields; §17 sleep claim corrected). S2 author added 18 cases in 9 tests @9af96d42 (+report @ac1518da): 14 red at HEAD on purpose (R-1 ×3, R-3, R-4, R-6 ×2, R-8 ×7 incl. colon path), 4 R-11 mutation-killers green at HEAD and red under V1/V2/V3. Orchestrator audit: no assertion line removed in `git diff d8bcdf14..HEAD -- tests/` (removed lines = module-header text, README/FEATURE rows, the R-5 literal joined byte-identically); no production change. Accepted the author's R-1 deviation: the test accepts a write-time refusal OR an unchecked/done card (my requested FAILED/UNCHECKED-only assertion would have rejected the verifier's recommended fix). R-2 not written (Windows `resolve()` normalizes case → would pass vacuously). New S2_HEAD = 9af96d42.
 
 ## User replies (verbatim)
 - (none yet)
@@ -78,3 +80,6 @@ started: 2026-10-15 02:49
 - r4: errors before a run starts (construction, `resume` journal checks) reach the caller as raised; errors inside a run arrive as `AgentExecutionError` with the original as `__cause__`; `CancelledError`/`KeyboardInterrupt` are not wrapped. `AgentExecutionError` subclasses `VidbyteSdkError` (vidbyte/lib/errors/base.py:131); `AllModelsFailedError` is an `AgentExecutionError` with `__cause__` = first error. — *source:* S1 author r4
 - S3: lint and semgrep read `git ls-files` — `git add` new files before linting, commit before the source gate. A007 judges number literals by names up to 7 parent nodes away, so new literals near names like `status`/`depth`/`sleep` get flagged — use `INFINITE_ROOT_DEPTH`, `INFINITE_DEPTH_STEP`, `INFINITE_PAIR_TURN_SECONDS`. The runtime refusal text is fixed by spec row 21 / AC-3. ANN401 on runtime.py `**kwargs: Any` matches JevRuntime and is not counted by S007. Python heredocs through Bash mangle `"
 "` literals — use Edit. — *source:* S3 implementer
+- S2 additions: R-1 triggers are U+2028/U+0085 (Windows refuses `
+` in file names) and a lone surrogate; the journal is read as strict UTF-8. R-8 lone-surrogate cases require a refusal (silent cleaning fails). A colon path must be refused before `mkstemp` or a stray NTFS file stays. R-8 fault = one-shot `os.replace` failure on the tool's target file. — *source:* S2 test author (S4 additions)
+- S4 verifier: R-1, R-2 and part of R-8 all change `InfiniteWorkspace._note_path` (workspace.py:272-286) — refuse paths `splitlines()` breaks, compare protected names case-folded, refuse `:`; one flat edit. Remove `ensure_ascii=False` only at journal.py:187 (keep workspace.py:170/329 for grep, D-3/AC-15/AC-42). R-4: duplicate-name check over all cards; tools/context/max_agents checks over new cards only. R-7: `self.backend = LocalFileSystemBackend()` (S061 exempts only `<x>.backend.` calls), drop `import shutil`, registry import after `vidbyte.lib.errors` (else S051 259→260); never `--update-baseline`. R-8: do not catch OSError in `_commit` (INV-29); unlink temp in `_replace`; convert OSError/ValueError to refusals in remember/write_note/edit_file `execute`. Main's lint counts via `git archive origin/main | tar -x -C <dir>` + `git init && git add -A` there. — *source:* S4 findings verifier
