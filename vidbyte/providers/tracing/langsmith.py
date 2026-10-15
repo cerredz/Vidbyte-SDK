@@ -90,14 +90,17 @@ class LangSmithTracer(TracerBase):
                 raise TracerConfigurationError(f"LangSmith {action} failed: {self._last_error}") from exc
 
     def start_trace(self, name: str, **attributes: Any) -> LangSmithSpanContext:
-        # Opens a root LangSmith chain run and returns its run context.
+        # Opens a root LangSmith run (a chain unless run_type says otherwise) and returns its run context.
         run_id = str(uuid.uuid4())
+        # @intent root-run-type-from-attributes
+        # The root run honours a translator or caller run_type like start_span does, instead of leaking it into inputs under a hard-coded "chain".
+        run_type = self._resolve_run_type(name, attributes.pop("run_type", None))
         self._call_langsmith(
             "create_run",
             self._client.create_run,
             id=run_id,
             name=name,
-            run_type="chain",
+            run_type=run_type,
             inputs=attributes,
             project_name=self._project,
         )

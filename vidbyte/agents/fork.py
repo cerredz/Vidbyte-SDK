@@ -18,6 +18,7 @@ Relations:
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 from vidbyte.agents.base import BaseAgent
@@ -41,6 +42,7 @@ class AgentForker:
     def fork(cls, agent: BaseAgent, settings: AgentForkSettings) -> BaseAgent:
         # Builds an isolated child agent branch with resolved config, copied state, and fresh lineage.
         child_run_id = cls._run_id(agent, settings.run_id)
+        settings = cls._settings_on_parent_vendor(agent, settings)
         # The child edits its own copy of the parent's managed context window, so branch edits never reach the parent.
         child_manager = cls._context_manager(agent, settings)
         # Read the vendor the parent really runs on, so the key and backup checks below see a provider-prefixed model's vendor.
@@ -79,6 +81,9 @@ class AgentForker:
             trace_option=settings.trace_option if settings.trace_option is not None else agent._trace_option,
             # Backups the parent named by bare model name keep the parent's provider, even when the child switches.
             fallback=cls._fallback(agent, settings, child_provider, parent_provider),
+            # @intent forks-never-deliver
+            # SDK-built forks never post to the parent's outputs.
+            outputs=(),
         )
         # A dropped tool stays dropped for every later fork, including tools the child bridges from MCP servers.
         child._fork_dropped_tool_names = agent._fork_dropped_tool_names | frozenset(settings.drop_tools)
@@ -86,6 +91,19 @@ class AgentForker:
             child._pending_mcp_configs.extend(agent._mcp_configs_for_fork())
         cls._copy_run_state(agent, child, settings)
         return child
+
+    @classmethod
+    def _settings_on_parent_vendor(cls, agent: BaseAgent, settings: AgentForkSettings) -> AgentForkSettings:
+        # @intent fork-inherits-the-parent-vendor
+        # Inheriting the provider means the vendor the parent runs on. A parent built as model_name="deepseek/deepseek-chat"
+        # has no raw provider, so a bare model override such as "deepseek-reasoner" names DeepSeek, as it does under
+        # provider="deepseek"; a model that names its own vendor ("gemini/gemini-3.5-flash") still picks that vendor.
+        if settings.provider is not None or settings.model_name is None or agent.runner_config.provider is not None:
+            return settings
+        if cls._resolved_provider(None, settings.model_name):
+            return settings
+        parent_provider = cls._resolved_provider(None, agent.runner_config.model_name)
+        return replace(settings, provider=parent_provider) if parent_provider else settings
 
     @staticmethod
     def _context_manager(agent: BaseAgent, settings: AgentForkSettings) -> ContextManager | None:
@@ -165,8 +183,8 @@ class AgentForker:
         # A Tools catalog inside the list adds its own tools in place, as BaseAgent does, so cloning and drop_tools reach them.
         selected = tools.all() if isinstance(tools, Tools) else (agent._agent_tool_items if tools is None else cls._flat_tools(tools))
         parent_mcp_tools = set(agent._mcp_bridged_tools_for_fork())
-        child_items = [cls._clone_tool(tool, agent.context_manager, child_manager) for tool in selected if tool not in parent_mcp_tools]
-        child_items.extend(cls._clone_tool(tool, agent.context_manager, child_manager) for tool in cls._flat_tools(settings.add_tools))
+        child_items = [cls._clone_tool(tool, agent.context_manager, child_manager, parent=agent) for tool in selected if tool not in parent_mcp_tools]
+        child_items.extend(cls._clone_tool(tool, agent.context_manager, child_manager, parent=agent) for tool in cls._flat_tools(settings.add_tools))
         if not settings.drop_tools:
             return tuple(child_items)
         dropped = {str(name) for name in settings.drop_tools}
@@ -178,12 +196,18 @@ class AgentForker:
         return tuple(tool for item in items for tool in (item.all() if isinstance(item, Tools) else (item,)))
 
     @classmethod
-    def _clone_tool(cls, tool: object, parent_manager: ContextManager | None, child_manager: ContextManager | None) -> object:
+    def _clone_tool(cls, tool: object, parent_manager: ContextManager | None, child_manager: ContextManager | None, *, parent: object | None = None) -> object:
         # Clones SDK tools that carry mutable agent bindings, preserving custom tools by identity.
         if isinstance(tool, _ToolWrapper):
             # A customize() or with_activity() view clones the tool it wraps and keeps the same view over the copy.
-            inner = cls._clone_tool(tool.wrapped_tool, parent_manager, child_manager)
+            inner = cls._clone_tool(tool.wrapped_tool, parent_manager, child_manager, parent=parent)
             return tool if inner is tool.wrapped_tool else tool._rewrap(inner)
+        # @intent fork-never-inherits-another-agents-session-grants
+        # A session tool another agent carries holds that agent's session grants, so the child gets the
+        # configured-scope copy BaseAgent gives a sibling; only the parent's own tools keep the parent's scope.
+        owner, for_agent = getattr(tool, "_owner", None), getattr(tool, "clone_for_agent", None)
+        if callable(for_agent) and parent is not None and owner is not None and owner is not parent:
+            return for_agent()
         clone = getattr(tool, "clone_for_fork", None)
         if callable(clone):
             return clone()

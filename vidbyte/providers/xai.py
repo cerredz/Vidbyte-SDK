@@ -37,6 +37,10 @@ class XAIProvider(OpenAICompatibleProvider):
             payload["size"] = config.size
         if config.response_format:
             payload["response_format"] = config.response_format
+        # @intent image-count-reaches-xai
+        # xAI documents n (1-10) on image generation like OpenAI, so the shared image count is sent rather than dropped.
+        if config.n is not None:
+            payload["n"] = config.n
         if config.extra_body:
             payload.update(dict(config.extra_body))
         return payload

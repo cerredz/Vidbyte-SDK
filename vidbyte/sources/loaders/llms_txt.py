@@ -14,6 +14,7 @@ Relations:
 from __future__ import annotations
 
 from dataclasses import replace
+from urllib.parse import urljoin
 
 from vidbyte.context.primitives.documents import DocumentContextItem
 from vidbyte.lib.dataclasses.sources import ArtifactRef, LlmsTxtDocument, LlmsTxtLink, LlmsTxtSection, Selection, SourceSnapshot
@@ -34,7 +35,7 @@ class LlmsTxtSource(Source[LlmsTxtDocument]):
         # Always emits the index item, then optionally the deterministically ordered expanded items.
         items: list[DocumentContextItem] = [self._build_index_item(ir, snapshot)]
         if self._should_expand(selection):
-            items.extend(self._expand_sections(ir, selection, snapshot.content_hash, ref))
+            items.extend(self._expand_sections(ir, selection, snapshot.content_hash, snapshot.url, ref))
         return tuple(items)
 
     def _should_expand(self, selection: Selection) -> bool:
@@ -73,7 +74,9 @@ class LlmsTxtSource(Source[LlmsTxtDocument]):
         # Returns selected link tuples in document order.
         selected: list[tuple[int, int, LlmsTxtLink, LlmsTxtSection]] = []
         for s_idx, section in enumerate(ir.sections):
-            if section.optional and selection.is_trivial:
+            # @intent llms-txt-optional-needs-explicit-allow
+            # Only an explicit allow glob opts into Optional links; a deny glob narrows and never widens the set.
+            if section.optional and selection.allow == ("*",):
                 continue
             for l_idx, link in enumerate(section.links):
                 key = f"{section.name}/{link.title}"
@@ -81,7 +84,7 @@ class LlmsTxtSource(Source[LlmsTxtDocument]):
                     selected.append((s_idx, l_idx, link, section))
         return tuple(selected)
 
-    def _expand_sections(self, ir: LlmsTxtDocument, selection: Selection, parent_hash: str, ref: ArtifactRef) -> tuple[DocumentContextItem, ...]:
+    def _expand_sections(self, ir: LlmsTxtDocument, selection: Selection, parent_hash: str, base_url: str, ref: ArtifactRef) -> tuple[DocumentContextItem, ...]:
         # Fetches each selected link via a shared DocumentSource and returns sorted, re-stamped items.
         doc_source = DocumentSource(
             fetcher=self._fetcher,
@@ -92,7 +95,10 @@ class LlmsTxtSource(Source[LlmsTxtDocument]):
         )
         expanded: list[DocumentContextItem] = []
         for s_idx, l_idx, link, section in self._selected_links(ir, selection):
-            result = doc_source.load(ArtifactRef(url=link.url, pin=ref.pin))
+            # @intent llms-txt-relative-links-resolve-against-the-index
+            # A markdown link resolves against its document, and generators such as VuePress's llms plugin write /path.md links.
+            # The index's own location is where its bytes came from, after any redirect, not the URL that was requested.
+            result = doc_source.load(ArtifactRef(url=urljoin(base_url, link.url), pin=ref.pin))
             item = result.items[0]
             document_id = (
                 f"llms-txt:{parent_hash[:12]}:{s_idx:03d}-{SourcesRegex.slugify(section.name)}:"

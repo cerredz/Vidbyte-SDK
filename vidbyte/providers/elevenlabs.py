@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Mapping
+from urllib.parse import urlencode
 
 from vidbyte.lib.config import AudioModelConfig
 from vidbyte.lib.enums import ModelProvider
@@ -23,6 +24,10 @@ class ElevenLabsProvider:
         config = self._config(config)
         voice_id = self._require_voice(config)
         url = f"{config.resolved_endpoint()}/text-to-speech/{voice_id}"
+        # @intent elevenlabs-output-format-is-a-query-parameter
+        # ElevenLabs reads the audio format from the query string, not the body.
+        if config.response_format:
+            url = f"{url}?{urlencode({'output_format': config.response_format})}"
         headers = self._create_headers(config)
         headers["accept"] = "audio/mpeg"
         payload = self._create_tts_payload(config, text)
@@ -53,10 +58,8 @@ class ElevenLabsProvider:
         return {"xi-api-key": config.resolved_api_key(), "content-type": "application/json"}
 
     def _create_tts_payload(self, config: AudioModelConfig, text: str) -> dict[str, Any]:
-        # Build the ElevenLabs TTS request body with model and optional output format.
+        # Build the ElevenLabs TTS request body; the output format travels in the URL query.
         payload: dict[str, Any] = {"text": text, "model_id": config.model}
-        if config.response_format:
-            payload["output_format"] = config.response_format
         if config.extra_body:
             payload.update(dict(config.extra_body))
         return payload

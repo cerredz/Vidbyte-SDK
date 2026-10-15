@@ -21,8 +21,10 @@ class PhoenixSpanContext(SpanContext):
 class PhoenixTracer(TracerBase):
     """Tracing adapter for Arize Phoenix via OpenTelemetry.
 
-    The endpoint is read from the constructor kwarg first, then from the
-    environment variable PHOENIX_COLLECTOR_ENDPOINT (default: http://localhost:6006/v1/traces).
+    The endpoint is read from the constructor kwarg first (used verbatim), then from the
+    environment variable PHOENIX_COLLECTOR_ENDPOINT, which is the Phoenix server URL
+    (e.g. http://localhost:6006); /v1/traces is appended unless it is already present
+    (default: http://localhost:6006/v1/traces).
 
     Requires: pip install arize-phoenix opentelemetry-sdk opentelemetry-exporter-otlp-proto-http
     """
@@ -39,7 +41,12 @@ class PhoenixTracer(TracerBase):
                 "pip install opentelemetry-sdk opentelemetry-exporter-otlp-proto-http"
             ) from exc
 
-        resolved_endpoint = endpoint or os.environ.get("PHOENIX_COLLECTOR_ENDPOINT", _DEFAULT_ENDPOINT)
+        resolved_endpoint = endpoint or _DEFAULT_ENDPOINT
+        env_server = os.environ.get("PHOENIX_COLLECTOR_ENDPOINT", "").rstrip("/")
+        if not endpoint and env_server:
+            # @intent phoenix-collector-env-is-the-server-url
+            # Phoenix documents this variable as the server URL and its own client appends /v1/traces, so do the same.
+            resolved_endpoint = env_server if env_server.endswith("/v1/traces") else f"{env_server}/v1/traces"
         exporter = OTLPSpanExporter(endpoint=resolved_endpoint)
         provider = TracerProvider()
         provider.add_span_processor(SimpleSpanProcessor(exporter))

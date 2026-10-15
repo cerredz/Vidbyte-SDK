@@ -7,6 +7,7 @@ from typing import Any
 from tests.agent_test_support import build_test_agent
 from tests.test_agent_fork_isolation import TwoToolMcpTransport
 from vidbyte.agents import AgentForkSettings, AgentMessage, BaseAgent
+from vidbyte.agents.runtimes.configs import ActorRuntime
 from vidbyte.agents.settings import AgentLoopSettings, ToolErrorPolicy, ToolSettings
 from vidbyte.context.handoff import EngineeringHandoff
 from vidbyte.lib.config import ModelProvider
@@ -380,6 +381,29 @@ class ForkConversationToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(settings.allowed_tools, ("alpha",))
         self.assertEqual(settings.max_tokens, 4000)
         self.assertEqual(settings.max_iterations, 2)
+
+    async def test_null_actor_runtime_max_loop_uses_default(self) -> None:
+        # @intent null-optional-arg-means-default
+        # A null actor_runtime.max_loop failed the whole fork; it now means "not given", like an omitted key.
+        for actor_runtime in ({"topology": "actor_model_p2p"}, {"topology": "actor_model_p2p", "max_loop": None}):
+            with self.subTest(actor_runtime=actor_runtime):
+                agent = StubAgent()
+                tool = ForkConversationTool()
+                tool.bind_agent(agent)
+
+                result = await tool.execute(_call(prompt="branch", actor_runtime=actor_runtime))
+
+                self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+                self.assertIsInstance(agent.captured.runtime, ActorRuntime)
+                self.assertEqual(agent.captured.runtime.max_loop, 20)
+        agent = StubAgent()
+        tool = ForkConversationTool()
+        tool.bind_agent(agent)
+
+        result = await tool.execute(_call(prompt="branch", actor_runtime={"topology": "actor_model_p2p", "max_loop": 0}))
+
+        self.assertEqual(result.status, ToolStatus.ERROR)
+        self.assertIn("actor_runtime.max_loop must be a positive integer.", result.output)
 
     async def test_depth_cap_prevents_recursive_fork_construction(self) -> None:
         # Depth cap should be checked before parent.fork is called.

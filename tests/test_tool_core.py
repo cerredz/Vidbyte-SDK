@@ -136,6 +136,27 @@ class ToolActivityTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             ToolActivity(schema=dict, description="Not a model.")
 
+    def test_prompt_doc_lists_activity_argument_like_native_schema(self) -> None:
+        """System-prompt tool docs list the activity argument the native schema requires."""
+        # @intent prompt-doc-lists-activity-argument
+        _, bound = self._bound_echo()
+        self.assertIn(
+            "Parameters:\n- text (string, required): Text to echo.\n- activity (object, required): Explain the user-visible action this echo advances.\nPermission: safe",
+            bound.spec().to_prompt_str(),
+        )
+        _, optional = self._bound_echo(required=False)
+        self.assertIn("- activity (object, optional): ", optional.spec().to_prompt_str())
+        no_args = ToolSpec(
+            name="helper",
+            description="Zero-parameter tool.",
+            activity=ToolActivity(schema=EchoActivity, description="Why you call it."),
+        )
+        rendered = no_args.to_prompt_str()
+        self.assertNotIn("Parameters: none", rendered)
+        self.assertIn("Parameters:\n- activity (object, required): Why you call it.", rendered)
+        # The native schema sent in the same request requires the same argument the prompt now lists.
+        self.assertEqual(ToolsFormatter.to_openai_tool(no_args)["function"]["parameters"]["required"], ["activity"])
+
     def test_prepared_call_separates_activity_from_arguments(self) -> None:
         """Preparation removes the reserved key and normalizes the annotation payload."""
         tool, bound = self._bound_echo()
@@ -238,6 +259,22 @@ class ToolActivityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rejected.metadata["error"], "validation_error")
         self.assertIn("at", rejected.output)
         self.assertEqual(tool.executed_arguments, [{"text": "hi"}])
+
+    def test_direct_validate_call_accepts_a_wire_shaped_annotation(self) -> None:
+        """A valid annotation still inside the arguments passes direct validation, bound or customized."""
+        # @intent activity-validate-call-prepares-first
+        _, bound = self._bound_echo()
+        customized = bound.customize(description="Custom echo.", parameter_descriptions={})
+
+        for wrapped in (bound, customized):
+            self.assertIsNone(
+                wrapped.validate_call(ToolCall("echo", {"text": "hi", "activity": {"reason": "greet"}}))
+            )
+            malformed = wrapped.validate_call(ToolCall("echo", {"text": "hi", "activity": {"nope": 1}}))
+            self.assertIn("Invalid 'activity' annotation", malformed)
+            self.assertIn("reason", malformed)
+            missing = wrapped.validate_call(ToolCall("echo", {"text": "hi"}))
+            self.assertEqual(missing, "Missing required parameters: activity")
 
 
 class ToolCustomizationTests(unittest.IsolatedAsyncioTestCase):
@@ -427,6 +464,28 @@ class ToolCoreTests(unittest.IsolatedAsyncioTestCase):
             ToolsFormatter.parse_anthropic_tool_call({"name": "ping", "input": [1, 2]})
         with self.assertRaises(ValueError):
             ToolsFormatter.parse_gemini_tool_call({"functionCall": {"name": "ping", "args": [1, 2]}})
+
+    def test_tools_formatter_keeps_gemini_call_id_from_function_call(self) -> None:
+        """A Gemini call id inside functionCall survives parsing of a whole response."""
+        # @intent gemini-call-id-comes-from-the-function-call
+        # Gemini puts the id inside functionCall and a Part has none, so the parser must read it there.
+        response = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {"functionCall": {"id": "fc-1", "name": "a", "args": {}}},
+                            {"functionCall": {"id": "fc-2", "name": "b", "args": {}}},
+                            {"functionCall": {"name": "c", "args": {}}},
+                        ]
+                    }
+                }
+            ]
+        }
+
+        calls = ToolsFormatter.parse_tool_calls(response, "gemini")
+
+        self.assertEqual([(call.tool_name, call.call_id) for call in calls], [("a", "fc-1"), ("b", "fc-2"), ("c", None)])
 
 
 class LookupOrderTool(BaseTool):

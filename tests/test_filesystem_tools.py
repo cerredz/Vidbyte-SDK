@@ -10,6 +10,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+import pytest
+
 from vidbyte.lib.tools.filesystem import FileSystemPermissions
 from vidbyte.lib.tools.filesystem.backends.local import LocalFileSystemBackend
 from vidbyte.lib.errors import ConfigurationError
@@ -225,6 +227,44 @@ class FileSystemToolHappyPathTests(unittest.TestCase):
                 self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
                 self.assertEqual(target.read_bytes(), new)
 
+    def test_write_text_with_crlf_spelled_content_keeps_file_line_endings(self) -> None:
+        # @intent model-crlf-text-keeps-file-endings
+        # Content the model spells with CRLF lands in the file's own endings once:
+        # a CRLF file never gets CR CR LF, and an LF file stays LF.
+        for old, new in ((b"a = 1\r\nb = 2\r\n", b"a = 1\r\nb = 22\r\n"), (b"a = 1\nb = 2\n", b"a = 1\nb = 22\n")):
+            with self.subTest(old=old), TemporaryDirectory() as tmp:
+                config = FileSystemToolConfig(root=tmp, allow_write=True)
+                target = Path(tmp) / "f.txt"
+                target.write_bytes(old)
+                result = run(WriteTextTool(config).execute(ToolCall("write_text", {"path": "f.txt", "content": "a = 1\r\nb = 22\r\n"})))
+                self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+                self.assertEqual(target.read_bytes(), new)
+                self.assertNotIn("-a = 1", result.output)
+
+    def test_write_text_new_file_with_crlf_spelled_content_matches_lf_spelling(self) -> None:
+        # @intent model-crlf-text-keeps-file-endings
+        # A new file gets the platform default whichever way the model spelled its line endings, never CR CR LF.
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            for name, content in (("lf.txt", "a = 1\nb = 2\n"), ("crlf.txt", "a = 1\r\nb = 2\r\n")):
+                result = run(WriteTextTool(config).execute(ToolCall("write_text", {"path": name, "content": content})))
+                self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+            lf_bytes, crlf_bytes = Path(tmp, "lf.txt").read_bytes(), Path(tmp, "crlf.txt").read_bytes()
+            self.assertEqual(crlf_bytes, lf_bytes)
+            self.assertNotIn(b"\r\r\n", lf_bytes)
+            self.assertNotIn(b"\r\r\n", crlf_bytes)
+
+    def test_replace_text_with_crlf_spelled_search_and_replacement_on_crlf_file(self) -> None:
+        # @intent model-crlf-text-keeps-file-endings
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            target = Path(tmp) / "f.ini"
+            target.write_bytes(b"[a]\r\nx=1\r\ny=2\r\n")
+            call = ToolCall("replace_text", {"path": "f.ini", "search": "[a]\r\nx=1", "replacement": "[a]\r\nx=10\r\nz=3"})
+            result = run(ReplaceTextTool(config).execute(call))
+            self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+            self.assertEqual(target.read_bytes(), b"[a]\r\nx=10\r\nz=3\r\ny=2\r\n")
+
     def test_write_text_over_non_utf8_crlf_file_still_writes_and_keeps_crlf(self) -> None:
         with TemporaryDirectory() as tmp:
             config = FileSystemToolConfig(root=tmp, allow_write=True)
@@ -255,6 +295,25 @@ class FileSystemToolHappyPathTests(unittest.TestCase):
             unzip_result = run(UnzipTool(config).execute(ToolCall("unzip", {"source": "out.zip", "destination": "extracted"})))
             self.assertEqual(unzip_result.status, ToolStatus.SUCCESS)
             self.assertIn("src/file.txt", unzip_result.output)
+
+    def test_unzip_refusing_a_zip_slip_member_extracts_nothing(self) -> None:
+        # @intent refused-archive-extracts-nothing
+        # The escaping member comes last, so the members before it must not already be
+        # extracted, overwriting README.md, when the refusal is reported.
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            readme = Path(tmp, "pkg", "notes", "README.md")
+            readme.parent.mkdir(parents=True)
+            readme.write_text("original", encoding="utf-8")
+            with zipfile.ZipFile(Path(tmp, "bad.zip"), "w") as archive:
+                archive.writestr("notes/README.md", "from archive")
+                archive.writestr("new.txt", "new")
+                archive.writestr("../escape.txt", "escaped")
+            result = run(UnzipTool(config).execute(ToolCall("unzip", {"source": "bad.zip", "destination": "pkg"})))
+            self.assertEqual(result.status, ToolStatus.ERROR)
+            self.assertIn("outside the extraction root", result.output)
+            self.assertEqual(readme.read_text(encoding="utf-8"), "original")
+            self.assertFalse(Path(tmp, "pkg", "new.txt").exists())
 
     def test_read_lines_returns_selected_lines_newline_joined(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -338,6 +397,30 @@ class FileSystemToolHappyPathTests(unittest.TestCase):
                 self.assertEqual(result.status, ToolStatus.SUCCESS)
                 self.assertEqual(target.read_bytes(), expected, name)
 
+    def test_append_text_with_crlf_spelled_content_keeps_file_line_endings(self) -> None:
+        # @intent model-crlf-text-keeps-file-endings
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            for name, initial, expected in (("lf.txt", b"a\n", b"a\nb\nc\n"), ("crlf.txt", b"a\r\n", b"a\r\nb\r\nc\r\n")):
+                target = Path(tmp) / name
+                target.write_bytes(initial)
+                result = run(AppendTool(config).execute(ToolCall("append_text", {"path": name, "content": "b\r\nc\r\n"})))
+                self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+                self.assertEqual(target.read_bytes(), expected, name)
+
+    def test_append_text_new_file_with_crlf_spelled_content_matches_lf_spelling(self) -> None:
+        # @intent model-crlf-text-keeps-file-endings
+        # Appending to a new file gives it the platform default whichever way the model spelled its line endings, never CR CR LF.
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            for name, content in (("lf.txt", "b\nc\n"), ("crlf.txt", "b\r\nc\r\n")):
+                result = run(AppendTool(config).execute(ToolCall("append_text", {"path": name, "content": content})))
+                self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+            lf_bytes, crlf_bytes = Path(tmp, "lf.txt").read_bytes(), Path(tmp, "crlf.txt").read_bytes()
+            self.assertEqual(crlf_bytes, lf_bytes)
+            self.assertNotIn(b"\r\r\n", lf_bytes)
+            self.assertNotIn(b"\r\r\n", crlf_bytes)
+
     def test_append_text_tolerates_undecodable_bytes_in_existing_file(self) -> None:
         with TemporaryDirectory() as tmp:
             config = FileSystemToolConfig(root=tmp, allow_write=True)
@@ -404,6 +487,105 @@ class FileSystemToolHappyPathTests(unittest.TestCase):
             self.assertEqual(exists.output, "true")
 
 
+def test_copy_refuses_to_copy_a_directory_into_itself(tmp_path: Path) -> None:
+    (tmp_path / "handbook" / "sub").mkdir(parents=True)
+    (tmp_path / "handbook" / "a.md").write_text("a")
+    (tmp_path / "handbook" / "sub" / "b.md").write_text("b")
+    tool = CopyTool(FileSystemToolConfig(root=str(tmp_path), allow_write=True))
+    into_subfolder = run(tool.execute(ToolCall("copy", {"source": "handbook", "destination": "handbook/archive/today"})))
+    assert into_subfolder.status == ToolStatus.ERROR
+    assert "Cannot copy a directory into itself" in into_subfolder.output
+    assert not (tmp_path / "handbook" / "archive").exists()
+    root_into_subfolder = run(tool.execute(ToolCall("copy", {"source": ".", "destination": "backups/x"})))
+    assert root_into_subfolder.status == ToolStatus.ERROR
+    assert "Cannot copy a directory into itself" in root_into_subfolder.output
+    assert not (tmp_path / "backups").exists()
+    sibling = run(tool.execute(ToolCall("copy", {"source": "handbook", "destination": "handbook_copy"})))
+    assert sibling.status == ToolStatus.SUCCESS, sibling.output
+    assert (tmp_path / "handbook_copy" / "a.md").read_text() == "a"
+    assert (tmp_path / "handbook_copy" / "sub" / "b.md").read_text() == "b"
+
+
+def make_link(link: Path, target: Path) -> None:
+    try:
+        os.symlink(target, link, target_is_directory=target.is_dir())
+    except OSError as exc:
+        pytest.skip(f"symlinks are not available here: {exc}")
+
+
+def make_project_with_outside_secret(tmp_path: Path) -> Path:
+    (tmp_path / "outside").mkdir()
+    (tmp_path / "outside" / "secret.txt").write_text("outside secret")
+    (tmp_path / "root" / "project").mkdir(parents=True)
+    (tmp_path / "root" / "project" / "README.md").write_text("readme")
+    return tmp_path / "root"
+
+
+def test_copy_refuses_a_directory_whose_link_leads_outside_the_root(tmp_path: Path) -> None:
+    root = make_project_with_outside_secret(tmp_path)
+    make_link(root / "project" / "shared", tmp_path / "outside")
+    tool = CopyTool(FileSystemToolConfig(root=str(root), allow_write=True))
+    result = run(tool.execute(ToolCall("copy", {"source": "project", "destination": "project_copy"})))
+    assert result.status == ToolStatus.ERROR, result.output
+    assert "escaped the configured root" in result.output
+    assert not (root / "project_copy").exists()
+    assert not any(path.name == "secret.txt" for path in root.rglob("*"))
+
+
+def test_copy_refuses_a_link_outside_the_root_reached_through_an_in_root_directory_link(tmp_path: Path) -> None:
+    # Verify copy refuses a tree whose in-root directory link leads to a folder holding a link outside the root.
+    # @intent copied-trees-check-what-copytree-follows
+    root = make_project_with_outside_secret(tmp_path)
+    (root / "vault").mkdir()
+    make_link(root / "vault" / "shared", tmp_path / "outside")
+    make_link(root / "project" / "alias", root / "vault")
+    tool = CopyTool(FileSystemToolConfig(root=str(root), allow_write=True))
+    result = run(tool.execute(ToolCall("copy", {"source": "project", "destination": "project_copy"})))
+    assert result.status == ToolStatus.ERROR, result.output
+    assert "escaped the configured root" in result.output
+    assert not (root / "project_copy").exists()
+    assert not any(path.name == "secret.txt" for path in root.rglob("*"))
+    (root / "vault" / "shared").unlink()
+    make_link(root / "vault" / "key.txt", tmp_path / "outside" / "secret.txt")
+    file_link = run(tool.execute(ToolCall("copy", {"source": "project", "destination": "project_copy"})))
+    assert file_link.status == ToolStatus.ERROR, file_link.output
+    assert "escaped the configured root" in file_link.output
+    assert not (root / "project_copy").exists()
+    (root / "vault" / "key.txt").unlink()
+    (root / "vault" / "docs").mkdir()
+    (root / "vault" / "docs" / "guide.md").write_text("guide")
+    make_link(root / "vault" / "current", root / "vault" / "docs")
+    kept = run(tool.execute(ToolCall("copy", {"source": "project", "destination": "project_copy"})))
+    assert kept.status == ToolStatus.SUCCESS, kept.output
+    assert (root / "project_copy" / "alias" / "current" / "guide.md").read_text() == "guide"
+
+
+def test_zip_refuses_a_directory_whose_link_leads_outside_the_root(tmp_path: Path) -> None:
+    root = make_project_with_outside_secret(tmp_path)
+    make_link(root / "project" / "key.txt", tmp_path / "outside" / "secret.txt")
+    tool = ZipTool(FileSystemToolConfig(root=str(root), allow_write=True))
+    result = run(tool.execute(ToolCall("zip", {"source": "project", "destination": "project.zip"})))
+    assert result.status == ToolStatus.ERROR, result.output
+    assert "escaped the configured root" in result.output
+    assert not (root / "project.zip").exists()
+    assert not any(path.suffix == ".zip" for path in root.rglob("*"))
+
+
+def test_copy_and_zip_keep_links_that_stay_inside_the_root(tmp_path: Path) -> None:
+    root = make_project_with_outside_secret(tmp_path)
+    (root / "project" / "docs").mkdir()
+    (root / "project" / "docs" / "guide.md").write_text("guide")
+    make_link(root / "project" / "current", root / "project" / "docs")
+    config = FileSystemToolConfig(root=str(root), allow_write=True)
+    copied = run(CopyTool(config).execute(ToolCall("copy", {"source": "project", "destination": "project_copy"})))
+    assert copied.status == ToolStatus.SUCCESS, copied.output
+    assert (root / "project_copy" / "current" / "guide.md").read_text() == "guide"
+    zipped = run(ZipTool(config).execute(ToolCall("zip", {"source": "project", "destination": "project.zip"})))
+    assert zipped.status == ToolStatus.SUCCESS, zipped.output
+    with zipfile.ZipFile(root / "project.zip") as archive:
+        assert "project/docs/guide.md" in archive.namelist()
+
+
 class FileSystemToolErrorPathTests(unittest.TestCase):
     def test_path_traversal_returns_error_not_raises(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -434,6 +616,31 @@ class FileSystemToolErrorPathTests(unittest.TestCase):
                 names = archive.namelist()
             self.assertFalse(any(name.endswith("backup.zip") for name in names), names)
             self.assertTrue(any(name.endswith("notes/a.md") for name in names), names)
+
+    def test_zip_that_fails_midway_keeps_the_existing_archive(self) -> None:
+        # @intent failed-zip-keeps-existing-archive
+        # A source file that cannot be read (another program holds a lock on it) fails the zip after
+        # other members were written, so the archive already at the destination must survive unchanged.
+        with TemporaryDirectory() as tmp:
+            Path(tmp, "report").mkdir()
+            Path(tmp, "report", "a.txt").write_text("alpha\n", encoding="utf-8")
+            Path(tmp, "report", "b.log").write_text("beta\n", encoding="utf-8")
+            with zipfile.ZipFile(Path(tmp, "backup.zip"), "w") as archive:
+                archive.writestr("report/summary.txt", "last week's report\n")
+            original = Path(tmp, "backup.zip").read_bytes()
+            real_write = zipfile.ZipFile.write
+
+            def write(archive, filename, *args, **kwargs):
+                if Path(filename).name == "b.log":
+                    raise PermissionError(13, "Permission denied", str(filename))
+                return real_write(archive, filename, *args, **kwargs)
+
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            with patch.object(zipfile.ZipFile, "write", write):
+                result = run(ZipTool(config).execute(ToolCall("zip", {"source": "report", "destination": "backup.zip"})))
+            self.assertEqual(result.status, ToolStatus.ERROR)
+            self.assertEqual(Path(tmp, "backup.zip").read_bytes(), original)
+            self.assertEqual(sorted(path.name for path in Path(tmp).iterdir()), ["backup.zip", "report"])
 
     def test_write_without_allow_write_returns_error(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -542,6 +749,45 @@ class FileSystemToolErrorPathTests(unittest.TestCase):
                 self.assertIn(f"ReplaceTextTool requires the search text to appear exactly once, {expected}", result.output)
                 self.assertEqual(target.read_bytes(), b"aa\naa\naa\n")
 
+    def test_edit_the_encoding_cannot_hold_returns_error_and_leaves_file_untouched(self) -> None:
+        # @intent failed-edit-leaves-file-untouched
+        # "€" does not exist in latin-1, and a lone surrogate from the model's JSON arguments
+        # cannot be UTF-8, so each edit must fail before the file is emptied by opening it.
+        original = b"<?php\n$name = 'caf\xe9';\n"
+        cases = (
+            ("latin-1", ReplaceTextTool, {"search": "caf\xe9", "replacement": "€5"}),
+            ("latin-1", WriteTextTool, {"content": "<?php\n$price = '€5';\n"}),
+            ("utf-8", ReplaceTextTool, {"search": "$name", "replacement": "$name\ud83d"}),
+            ("utf-8", WriteTextTool, {"content": "print('hi \ud83d')\n"}),
+        )
+        for encoding, tool_class, arguments in cases:
+            with self.subTest(encoding=encoding, tool=tool_class.__name__), TemporaryDirectory() as tmp:
+                content = original if encoding == "latin-1" else original.replace(b"\xe9", b"e")
+                target = Path(tmp) / "app.php"
+                target.write_bytes(content)
+                tool = tool_class(FileSystemToolConfig(root=tmp, allow_write=True, encoding=encoding))
+                result = run(tool.execute(ToolCall(tool.name, {"path": "app.php", **arguments})))
+                self.assertEqual(result.status, ToolStatus.ERROR)
+                self.assertIn("can't encode", result.output)
+                self.assertEqual(target.read_bytes(), content)
+
+    def test_append_the_encoding_cannot_hold_creates_no_file_or_folder(self) -> None:
+        # @intent failed-edit-leaves-file-untouched
+        # Opening for appending creates a missing file, so an append the encoding cannot hold
+        # must fail before the new file, or with create_parents its folders, are made.
+        cases = (
+            ("latin-1", "price: €5\n"),
+            ("utf-8", "hi \ud83d\n"),
+        )
+        for encoding, content in cases:
+            with self.subTest(encoding=encoding), TemporaryDirectory() as tmp:
+                tool = AppendTool(FileSystemToolConfig(root=tmp, allow_write=True, encoding=encoding))
+                for path, create_parents in (("today.txt", False), ("notes/today.txt", True)):
+                    result = run(tool.execute(ToolCall(tool.name, {"path": path, "content": content, "create_parents": create_parents})))
+                    self.assertEqual(result.status, ToolStatus.ERROR)
+                    self.assertIn("can't encode", result.output)
+                self.assertEqual(list(Path(tmp).iterdir()), [])
+
     def test_read_lines_start_less_than_one_returns_error(self) -> None:
         with TemporaryDirectory() as tmp:
             config = FileSystemToolConfig(root=tmp, allow_write=True)
@@ -626,6 +872,20 @@ class EditToolDiffTests(unittest.TestCase):
             self.assertEqual(result.output.split("\n")[0], result.metadata["path"])
             self.assertEqual(changed_lines(result.output), ["-    return 2", "+    return 3"])
             self.assertEqual(target.read_bytes(), b"def f():\r\n    x = 1\r\n    return 3\r\n\r\nprint(f())\r\n")
+
+    def test_diff_tool_treats_crlf_spelled_content_like_write_text(self) -> None:
+        # @intent model-crlf-text-keeps-file-endings
+        # The diff previews a write, so CRLF the model spelled matches the file as write_text sees it: no changes.
+        for file_bytes in (b"[a]\r\nx=1\r\n", b"[a]\nx=1\n"):
+            with self.subTest(file_bytes=file_bytes), TemporaryDirectory() as tmp:
+                config = FileSystemToolConfig(root=tmp, allow_write=True)
+                Path(tmp, "cfg.ini").write_bytes(file_bytes)
+                call = {"path": "cfg.ini", "content": "[a]\r\nx=1\r\n"}
+                diffed = run(DiffTool(config).execute(ToolCall("diff", call)))
+                self.assertEqual(diffed.status, ToolStatus.SUCCESS, diffed.output)
+                self.assertEqual(diffed.output, "")
+                written = run(WriteTextTool(config).execute(ToolCall("write_text", call)))
+                self.assertTrue(written.output.endswith("no changes"), written.output)
 
     def test_replace_text_diff_shows_which_of_two_similar_blocks_was_hit(self) -> None:
         with TemporaryDirectory() as tmp:

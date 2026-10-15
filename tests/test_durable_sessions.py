@@ -12,8 +12,10 @@ from io import BytesIO
 from pathlib import Path
 from unittest import mock
 
+from pydantic import BaseModel
+
 from tests.agent_test_support import bind_test_runner, build_test_agent
-from vidbyte import Agent
+from vidbyte import Agent, Trace, TraceProfile
 from vidbyte.agents import AgentForkSettings, BaseAgent
 from vidbyte.agents.contracts import MinCostSpent, MinToolCalls, MinToolCallsById
 from vidbyte.agents.settings import AgentLoopSettings, ToolErrorPolicy, ToolSettings
@@ -35,6 +37,7 @@ from vidbyte.sessions.errors import (
     CheckpointNotFoundError,
     SessionError,
     SessionNotFoundError,
+    SessionSerializationError,
     SessionStoreError,
     SessionVersionError,
 )
@@ -59,6 +62,13 @@ from vidbyte.tools.types import ToolCall
 # ---------------------------------------------------------------------------
 # Test doubles
 # ---------------------------------------------------------------------------
+class _WebhookConfig(BaseModel):
+    # A pydantic value whose field names look like credentials, as a developer might put in metadata.
+    url: str
+    api_key: str
+    auth_token: str
+
+
 class FakeAgent:
     """Minimal stand-in implementing the surface Session uses."""
 
@@ -139,6 +149,17 @@ class FetchThenDoneRunner:
         return _Resp(_fc("isDone", '{"final_answer": "done-%d"}' % self.calls, "d%d" % self.calls))
 
 
+class RecordingDoneRunner:
+    """Scripted runner that finishes at once and records the prompt and every keyword it was sent."""
+
+    def __init__(self) -> None:
+        self.requests: list[str] = []
+
+    def run(self, prompt: str, **kwargs: object) -> _Resp:
+        self.requests.append(f"{prompt} {kwargs}")
+        return _Resp(_fc("isDone", '{"final_answer": "done"}', "d%d" % len(self.requests)))
+
+
 @tool
 def fetch(source: str) -> str:
     """Fetch a source by name."""
@@ -216,6 +237,16 @@ class SerializerTests(unittest.TestCase):
         out = self.s.message_to_dict(message)
         self.assertNotIn("auth_token", out["metadata"])
         self.assertEqual(out["metadata"]["ok"], 1)
+
+    def test_pydantic_model_fields_get_the_same_secret_filter_as_a_dict(self) -> None:  # [Silent Failure]
+        # A model in metadata must lose its credential fields exactly like the same data as a dict,
+        # while a structured reply (scrub_keys=False) still keeps every field name.
+        config = _WebhookConfig(url="https://hooks.example", api_key="SECRET-KEY", auth_token="SECRET-TOKEN")
+        out = self.s.message_to_dict(AgentMessage(sender="a", recipient="o", content="c", metadata={"as_model": config, "as_dict": config.model_dump()}, structured=config))
+        self.assertEqual(out["metadata"]["as_model"], {"url": "https://hooks.example"})
+        self.assertEqual(out["metadata"]["as_model"], out["metadata"]["as_dict"])
+        self.assertNotIn("SECRET-KEY", json.dumps(out["metadata"]))
+        self.assertEqual(out["structured"], config.model_dump(mode="json"))
 
     def test_marks_non_json_metadata_without_raising(self) -> None:  # [Hidden Failure]
         message = AgentMessage(sender="a", recipient="o", content="c", metadata={"obj": object()})
@@ -338,6 +369,32 @@ class AgentStateSeamTests(unittest.TestCase):
         restored = Agent.restore(state)
         self.assertIn("__resume_tool_mismatch__", restored.metadata)
 
+    def test_restore_tool_mismatch_marker_stays_out_of_the_model_request(self) -> None:  # [Hidden Assumption]
+        @tool
+        def lookup_order(order_id: str) -> str:
+            """Look up an order."""
+            return "found"
+
+        @tool
+        def issue_refund(order_id: str) -> str:
+            """Refund an order."""
+            return "refunded"
+
+        agent = build_test_agent(name="desk", system_prompt="Help.", runner=EchoRunner(), tools=[lookup_order, issue_refund], metadata={"tenant": "acme"})
+        restored = BaseAgent.restore(agent.export_state(), tools=[lookup_order])
+        runner = RecordingDoneRunner()
+        bind_test_runner(restored, runner)
+        restored.run("where is order o-1?")
+
+        # The developer diagnostic stays on the agent, but the model never sees it or the withheld tool's name.
+        self.assertIn("__resume_tool_mismatch__", restored.metadata)
+        self.assertGreaterEqual(len(runner.requests), 1)
+        sent = "\n".join(runner.requests)
+        self.assertNotIn("__resume_tool_mismatch__", sent)
+        self.assertNotIn("issue_refund", sent)
+        # Caller metadata still reaches the model after the same restore.
+        self.assertIn("acme", sent)
+
 
 # ---------------------------------------------------------------------------
 # Stores
@@ -405,6 +462,12 @@ class FileStoreTests(unittest.TestCase):
         leftovers = list(Path(self._dir).glob("se/checkpoints/*"))
         self.assertEqual(leftovers, [])
 
+    def test_tag_holding_an_undecodable_file_name_is_written_and_read_back(self) -> None:  # [Hidden Failure]
+        # POSIX hands a non-UTF-8 file name such as b"report-\xff.txt" to Python as "report-\udcff.txt".
+        session = Session(FakeAgent(), store=self.store, tags=("report-\udcff.txt", "Grüße"))
+        self.assertEqual(FileSessionStore(self._dir).get_meta(session.id).tags, ("report-\udcff.txt", "Grüße"))
+        self.assertIn("Grüße", (Path(self._dir) / session.id / "meta.json").read_text(encoding="utf-8"))
+
     def test_get_meta_missing_raises(self) -> None:  # [Edge Case]
         with self.assertRaises(SessionNotFoundError):
             self.store.get_meta("ghost")
@@ -417,6 +480,23 @@ class FileStoreTests(unittest.TestCase):
         remaining = {c.id for c in self.store.history("se")}
         self.assertIn(head_id, remaining)
         self.assertLessEqual(len(remaining), 2)
+
+
+class SqliteStoreCorruptionTests(unittest.TestCase):
+    def test_corrupt_rows_raise_session_store_error(self) -> None:  # [Hidden Failure]
+        # @intent provider-store-corrupt-payload-is-session-store-error
+        # A truncated row must fail as SessionStoreError, the same as a truncated file in the file store.
+        from vidbyte.lib.providers import SqliteSessionStore
+        store = SqliteSessionStore(path=":memory:")
+        self.addCleanup(store._conn.close)
+        store.put(_checkpoint("se", "c1"))
+        store._conn.execute("UPDATE vidbyte_sessions SET payload='{not json'")
+        store._conn.execute("UPDATE vidbyte_checkpoints SET payload='{not json'")
+        for read in (lambda: store.get_meta("se"), lambda: store.list_sessions(), lambda: store.get("c1"), lambda: store.history("se")):
+            with self.assertRaises(SessionStoreError) as caught:
+                read()
+            self.assertIsInstance(caught.exception, SessionError)
+            self.assertIsInstance(caught.exception.__cause__, json.JSONDecodeError)
 
 
 class PruneHeadChainTests(unittest.IsolatedAsyncioTestCase):
@@ -582,6 +662,18 @@ class PortableBundleTests(unittest.IsolatedAsyncioTestCase):
         exporter_type.assert_called_once_with(target)
         exporter_type.return_value.export.assert_called_once_with(imported_id)
 
+    async def test_export_and_import_keep_a_tag_holding_an_undecodable_file_name(self) -> None:  # [Hidden Failure]
+        # POSIX hands a non-UTF-8 file name to Python as a lone surrogate; the bundle must carry it, not raise.
+        source = InMemorySessionStore()
+        client = SessionClient()
+        session = Session(FakeAgent(), store=source, tags=("report-\udcff.txt",))
+        await session.arun("one")
+        target = InMemorySessionStore()
+
+        imported_id = client.import_(target, client.export(source, session.id))
+
+        self.assertEqual(target.get_meta(imported_id).tags, ("report-\udcff.txt",))
+
     def test_import_without_new_id_rejects_existing_session(self) -> None:  # [Hidden Assumption]
         # Verify same-id imports fail loudly rather than clobbering existing metadata.
         source = InMemorySessionStore()
@@ -625,6 +717,24 @@ class PortableBundleTests(unittest.IsolatedAsyncioTestCase):
         SessionBundleImporter(target).import_bundle(SessionBundleExporter(source).export("se"), new_id="copy")
 
         self.assertEqual(target.history("copy")[0].seq, 0)
+
+    def test_import_of_damaged_compressed_member_raises_serialization_error(self) -> None:  # [Hidden Failure]
+        # @intent bundle-corrupt-member-is-session-serialization-error
+        # A damaged byte inside a checkpoint's deflate data must fail as SessionSerializationError, not raw zlib.error.
+        source = InMemorySessionStore()
+        source.put(_checkpoint("se", "c1"))
+        bundle = bytearray(SessionBundleExporter(source).export("se"))
+        with zipfile.ZipFile(BytesIO(bytes(bundle)), mode="r") as archive:
+            info = next(item for item in archive.infolist() if item.filename.startswith("checkpoints/"))
+        bundle[info.header_offset + 30 + len(info.filename.encode("utf-8")) + len(info.extra)] ^= 0xFF
+        target = InMemorySessionStore()
+
+        with self.assertRaises(SessionSerializationError) as caught:
+            SessionBundleImporter(target).import_bundle(bytes(bundle))
+
+        self.assertEqual(caught.exception.details, {"path": info.filename})
+        with self.assertRaises(SessionNotFoundError):
+            target.get_meta("se")
 
     def test_export_scrubs_secret_keys_inside_trace_payloads(self) -> None:  # [Hidden Assumption]
         # Verify trace payloads reuse serializer secret scrubbing before entering a bundle.
@@ -1103,6 +1213,29 @@ class SessionIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(store.history(session.id)), 1)
         self.assertEqual(store.get(session.head).run_state.history[-1]["content"], "answer-1")
 
+    async def test_full_trace_captures_events_through_wrapped_debug_tracer(self) -> None:  # [Silent Failure]
+        # Verify trace="full" finds DebugTracer events under Trace.profile / Trace.session wrappers, and bare debug is unchanged.
+        builders = {
+            "bare": lambda ev: Trace.debug(ev),
+            "profile": lambda ev: Trace.profile(Trace.debug(ev), TraceProfile.default()),
+            "session": lambda ev: Trace.session(Trace.debug(ev), name="workflow"),
+        }
+        for label, build in builders.items():
+            with self.subTest(tracer=label):
+                events: list = []
+                store = InMemorySessionStore()
+                agent = build_test_agent(name="worker", system_prompt="Work.", runner=EchoRunner(), trace=build(events))
+                session = agent.persist(store=store, trace="full")
+
+                await agent.arun("first")
+                await agent.arun("second")
+
+                captured = [checkpoint.trace_events for checkpoint in store.history(session.id)]
+                self.assertTrue(events)
+                self.assertEqual(len(captured), 2)
+                self.assertTrue(all(captured), captured)
+                self.assertTrue(all(dict(event) in events for event in captured[-1]))
+
     async def test_session_arun_does_not_double_persist_agent_hook(self) -> None:  # [Silent Failure]
         # Verify Session.arun() delegates to the agent hook without writing a second checkpoint.
         store = InMemorySessionStore()
@@ -1520,6 +1653,27 @@ class SessionToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNot(child_tool, tool)
         self.assertTrue(child_tool._scope.permits(second.id))
 
+    async def test_fork_given_another_agents_session_tool_gets_configured_scope(self) -> None:  # [Silent Failure]
+        # @intent fork-never-inherits-another-agents-session-grants
+        # A fork handed a session tool that another agent carries must not reach that agent's session; the owner's fork still does.
+        store = InMemorySessionStore()
+        shared = SessionTool(store)
+        acme = build_test_agent(name="acme", system_prompt="Work.", runner=EchoRunner(), tools=[shared])
+        acme_session = Session(acme, store=store)
+        await acme.arun("acme")
+        globex = build_test_agent(name="globex", system_prompt="Work.", runner=EchoRunner())
+        added = globex.fork(AgentForkSettings(name="added", add_tools=[shared]))
+        listed = globex.fork(AgentForkSettings(name="listed", tools=[shared.customize(description="Sessions.")]))
+        acme_child = acme.fork(AgentForkSettings(name="acme-child"))
+        list_call = ToolCall(tool_name="session", arguments={"operation": "list_my_runs"})
+
+        for child in (added, listed):
+            child_tool = child.tools._get("session")
+            self.assertFalse(getattr(child_tool, "wrapped_tool", child_tool)._scope.permits(acme_session.id))
+            self.assertEqual(json.loads((await child_tool.execute(list_call)).output), [])
+        self.assertEqual(listed.tools._get("session").spec().description, "Sessions.")
+        self.assertTrue(acme_child.tools._get("session")._scope.permits(acme_session.id))
+
 
 # ---------------------------------------------------------------------------
 # BatchForkTool
@@ -1673,6 +1827,18 @@ class PostgresSessionStoreRecoveryTests(unittest.TestCase):
         meta = SessionMeta(session_id="se", head_id=None, parent_session_id=None, agent_name="a", status=SessionStatus.ACTIVE, created_at="t", updated_at="t")
         store.put_meta(meta)
         self.assertEqual(store.get_meta("se"), meta)
+
+    def test_corrupt_meta_row_raises_session_store_error(self) -> None:  # [Hidden Failure]
+        # @intent provider-store-corrupt-payload-is-session-store-error
+        # A truncated text payload must fail as SessionStoreError rather than a raw JSONDecodeError.
+        fake_psycopg = mock.MagicMock(spec=["connect"])
+        fake_psycopg.connect.side_effect = lambda dsn, autocommit=False: _FakePgConnection(autocommit)
+        with mock.patch.dict(sys.modules, {"psycopg": fake_psycopg}):
+            from vidbyte.lib.providers import PostgresSessionStore
+            store = PostgresSessionStore(dsn="postgresql://fake/db")
+        store._conn.rows["se"] = "{not json"
+        with self.assertRaises(SessionStoreError):
+            store.get_meta("se")
 
 
 if __name__ == "__main__":

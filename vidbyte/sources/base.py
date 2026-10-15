@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from typing import Any, Generic, TypeVar
+from urllib.parse import unquote
 
 from vidbyte.context.primitives.documents import DocumentContextItem
 from vidbyte.lib.config.sources import (
@@ -68,20 +69,30 @@ class Source(ABC, Generic[T]):
         return SourceResult(ref=ref, snapshot=snapshot, ir=ir, items=items)
 
     def _fetch_snapshot(self, ref: ArtifactRef) -> SourceSnapshot:
-        # Guards the URL, serves a pinned warm cache hit without network, else fetches under the size cap.
+        # Guards the URL, serves a pinned warm cache hit without network, else fetches under the size cap
+        # and guards the final URL the fetch was redirected to.
         self._allowlist.check(ref.url)
         if ref.pin is PinPolicy.PINNED and ref.expected_hash and self._cache is not None:
             cached = self._cache.get(ref.expected_hash)
             if cached is not None:
                 return SourceSnapshot(url=ref.url, raw_bytes=cached, content_hash=ref.expected_hash)
         response = self._fetcher.fetch(ref.url)
+        # @intent redirect-target-is-allowlisted
+        # urllib follows redirects on its own, to any host and from https to http, so the URL the bytes
+        # actually came from must pass the allowlist too; otherwise its bytes never load, cache, or parse.
+        if response.url is not None and response.url != ref.url:
+            self._allowlist.check(response.url)
         if len(response.body_bytes) > self._max_bytes:
             raise SourceSecurityError(
                 "Fetched artifact exceeds the maximum allowed size.",
                 details={"url": ref.url, "size_bytes": len(response.body_bytes), "max_bytes": self._max_bytes},
             )
+        # @intent snapshot-url-is-where-the-bytes-came-from
+        # After a redirect the document lives at the final URL (RFC 3986 5.1.3), so relative links and provenance use it;
+        # the percent-encoded request form of an IRI is not a redirect, so it keeps the URL exactly as the caller wrote it.
+        final_url = ref.url if response.url is None or unquote(response.url) == unquote(ref.url) else response.url
         return SourceSnapshot(
-            url=ref.url,
+            url=final_url,
             raw_bytes=response.body_bytes,
             content_hash=sha256_hex(response.body_bytes),
             content_type=response.content_type,

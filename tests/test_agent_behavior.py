@@ -33,6 +33,7 @@ from vidbyte.lib.config import ModelProvider
 from vidbyte.lib.dataclasses.agents import AgentMessage
 from vidbyte.lib.dataclasses.tools import ToolCallContext, ToolCallState, ToolResult, ToolStatus
 from vidbyte.lib.runners import TextModelResponse
+from vidbyte.tools import FunctionTool, ToolCall
 
 
 def make_call(name: str, state: ToolCallState = ToolCallState.SUCCEEDED, args: dict[str, Any] | None = None, result_output: str | None = "ok") -> ToolCallContext:
@@ -41,6 +42,11 @@ def make_call(name: str, state: ToolCallState = ToolCallState.SUCCEEDED, args: d
     if result_output is not None:
         result = ToolResult(tool_name=name, status=ToolStatus.SUCCESS, output=result_output)
     return ToolCallContext(tool_name=name, arguments=dict(args or {}), state=state, result=result)
+
+
+def zurich_weather() -> dict[str, Any]:
+    # A function tool that returns non-ASCII text inside a dict.
+    return {"city": "Zürich", "temp_c": 4}
 
 
 def make_reply(content: str = "reply", metadata: dict[str, Any] | None = None) -> AgentMessage:
@@ -339,6 +345,13 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(b.tool.tool_returned_matching("search", r"\d{3}-\d{2}"))
         self.assertFalse(b.tool.tool_returned_matching("search", r"\d{5}"))
 
+    async def test_tool_returned_containing_sees_non_ascii_in_a_dict_return(self) -> None:
+        # [Hidden Assumption] a function tool's dict return keeps "Zürich" as characters, not a \u escape.
+        result = await FunctionTool(zurich_weather).execute(ToolCall("zurich_weather", {}))
+        call = ToolCallContext(tool_name="zurich_weather", arguments={}, state=ToolCallState.SUCCEEDED, result=result)
+        b = behavior_from_probe(RunProbe(tool_calls=(call,)))
+        self.assertTrue(b.tool.tool_returned_containing("zurich_weather", "Zürich"))
+
     # --- ToolArgumentBehavior Category C ---
 
     def test_tool_called_with_subset(self) -> None:
@@ -373,6 +386,15 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(b.tool_args.tool_called_with("create_user", name="Eve"))
         self.assertTrue(b.tool_args.tool_never_called_with("create_user", name="Eve"))
         self.assertFalse(b.tool_args.tool_never_called_with("create_user", name="Ada", role="admin"))
+
+    def test_tool_called_with_omitted_argument_does_not_match_none(self) -> None:
+        # [Silent Failure] An argument the model never sent does not match None; an explicit null does.
+        omitted = behavior_from_probe(RunProbe(tool_calls=(make_call("search", args={"query": "refund"}),)))
+        self.assertFalse(omitted.tool_args.tool_called_with("search", cursor=None))
+        self.assertTrue(omitted.tool_args.tool_never_called_with("search", cursor=None))
+        explicit = behavior_from_probe(RunProbe(tool_calls=(make_call("search", args={"query": "refund", "cursor": None}),)))
+        self.assertTrue(explicit.tool_args.tool_called_with("search", cursor=None))
+        self.assertFalse(explicit.tool_args.tool_never_called_with("search", cursor=None))
 
     def test_tool_called_with_matching(self) -> None:
         # [Hidden Assumption] tool_called_with_matching calls predicate on arg value.
@@ -510,12 +532,58 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(behavior_from_probe(RunProbe(output="```python\nx")).output.contains_code_block())
         self.assertTrue(behavior_from_probe(RunProbe(output="plain")).output.code_block_count(at_least=0, at_most=0))
 
+    def test_output_code_blocks_indented_list_item_fences(self) -> None:
+        # [Hidden Failure / Silent Failure] fences indented under list items count, each with its own language.
+        output = "1. Install:\n   ```bash\n   pip install x\n   ```\n2. Run:\n   ```python\n   print('x')\n   ```\n"
+        b = behavior_from_probe(RunProbe(output=output))
+        self.assertEqual(b.output.code_block_count(), 2)
+        self.assertTrue(b.output.contains_code_block("bash"))
+        self.assertTrue(b.output.contains_code_block("python"))
+
+    def test_output_code_blocks_empty_block_does_not_swallow_next(self) -> None:
+        # [Hidden Failure / Silent Failure] an empty block ends at its own fence instead of eating the next block's opener.
+        output = "```bash\n```\n\n```python\nprint('x')\n```\n"
+        b = behavior_from_probe(RunProbe(output=output))
+        self.assertEqual(b.output.code_block_count(), 2)
+        self.assertEqual(b.output.code_block_count("bash"), 1)
+        self.assertEqual(b.output.code_block_count("python"), 1)
+
+    def test_output_code_blocks_crlf_line_endings(self) -> None:
+        # [Hidden Failure / Silent Failure] CRLF answers count the same fenced blocks as their LF spelling.
+        output = "Run:\r\n```python\r\nprint('x')\r\n```\r\nThen:\r\n```bash\r\nls\r\n```\r\nDone.\r\n"
+        b = behavior_from_probe(RunProbe(output=output))
+        self.assertTrue(b.output.contains_code_block())
+        self.assertEqual(b.output.code_block_count(), 2)
+        self.assertEqual(b.output.code_block_count("python"), 1)
+        self.assertEqual(b.output.code_block_count("bash"), 1)
+        tilde = behavior_from_probe(RunProbe(output="~~~js\r\nconsole.log(1)\r\n~~~\r\nDone.\r\n"))
+        self.assertEqual(tilde.output.code_block_count("js"), 1)
+        indented = "1. Install:\r\n   ```bash\r\n   pip install x\r\n   ```\r\n2. Done.\r\n"
+        self.assertEqual(behavior_from_probe(RunProbe(output=indented)).output.code_block_count("bash"), 1)
+
     def test_output_urls(self) -> None:
         # [Edge Case / Silent Failure] URL detection handles http, https, and www forms.
         self.assertFalse(behavior_from_probe(RunProbe(output="no link")).output.contains_url())
         b = behavior_from_probe(RunProbe(output="See https://a.test and http://b.test plus www.c.test"))
         self.assertTrue(b.output.contains_url())
         self.assertTrue(b.output.url_count(at_least=3, at_most=3))
+
+    def test_output_url_glued_to_cjk_text_counts(self) -> None:
+        # [Silent Failure] Japanese, Chinese and Korean text glues a URL to the word before it; it must still count.
+        glued = (
+            "詳細はhttps://jreast.jp/info をご確認ください。",
+            "文档见https://docs.python.org/zh-cn/3/",
+            "자세한 내용은https://example.kr/a",
+            "詳しくはwww.jr-east.co.jp へ",
+        )
+        for output in glued:
+            with self.subTest(output=output):
+                self.assertEqual(behavior_from_probe(RunProbe(output=output)).output.url_count(), 1)
+        self.assertEqual(behavior_from_probe(RunProbe(output=glued[0])).output.citation_count("url"), 1)
+        # A scheme or www glued to a Latin word is still not a URL start.
+        for output in ("seehttps://docs.python.org/3/", "awww.example.com is not a link"):
+            with self.subTest(output=output):
+                self.assertEqual(behavior_from_probe(RunProbe(output=output)).output.url_count(), 0)
 
     def test_output_citations(self) -> None:
         # [Edge Case / Silent Failure] citation detection supports markdown, bracket, footnote, url, and any.
@@ -549,6 +617,10 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(behavior_from_probe(RunProbe(output="I can't help with that.")).output.refused())
         self.assertTrue(behavior_from_probe(RunProbe(output="I cannot comply.")).output.refused())
         self.assertTrue(behavior_from_probe(RunProbe(output="I'm unable to do that.")).output.refused())
+        # @intent refusal-contractions-accept-typographic-apostrophe
+        self.assertTrue(behavior_from_probe(RunProbe(output="I can’t help with that.")).output.refused())
+        self.assertTrue(behavior_from_probe(RunProbe(output="I’m unable to do that.")).output.refused())
+        self.assertTrue(behavior_from_probe(RunProbe(output="I won’t do that.")).output.refused())
         self.assertFalse(behavior_from_probe(RunProbe(output="I can help with that.")).output.refused())
         self.assertTrue(behavior_from_probe(RunProbe(output="Maybe this is likely correct.")).output.contains_hedging())
         self.assertTrue(behavior_from_probe(RunProbe(output="I think it works.")).output.contains_hedging())

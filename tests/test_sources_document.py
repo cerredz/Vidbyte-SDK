@@ -15,7 +15,7 @@ from __future__ import annotations
 import unittest
 
 from vidbyte.lib.errors import SourceParseError
-from vidbyte.sources import ArtifactRef, DocumentSource, InMemoryFetcher, sha256_hex
+from vidbyte.sources import ArtifactRef, DocumentRegex, DocumentSource, InMemoryFetcher, sha256_hex
 
 
 class DocumentSourceTests(unittest.TestCase):
@@ -45,6 +45,16 @@ class DocumentSourceTests(unittest.TestCase):
         self.assertEqual(item.title, "Quickstart")
         self.assertEqual(item.content, "# Quickstart\nbody")
         self.assertEqual(item.metadata["content_sha256"], sha256_hex(body))
+
+    def test_h1_title_skips_headings_inside_code_fences(self) -> None:
+        # [Silent Failure] A "# ..." shell comment inside a ``` or ~~~ fence is code, not the page title.
+        install = b"Get started.\n\n```bash\n# install the CLI\npip install fly\n```\n"
+        self.assertIsNone(DocumentRegex.first_h1_title(install.decode()))
+        self.assertEqual(self._load(install).items[0].title, "https://ex.com/x.md")
+        deploy = "```sh\n# set the region\nfly regions set ord\n```\n# Deploying to Fly\nbody"
+        self.assertEqual(DocumentRegex.first_h1_title(deploy), "Deploying to Fly")
+        self.assertEqual(DocumentRegex.first_h1_title(deploy.replace("```", "~~~")), "Deploying to Fly")
+        self.assertEqual(DocumentRegex.first_h1_title("# Quickstart\n```bash\n# not this\n```"), "Quickstart")
 
     def test_non_utf8_body_fails_closed(self) -> None:
         # [Hidden Assumption] Undecodable bytes raise rather than lossily decode.

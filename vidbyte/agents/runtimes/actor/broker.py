@@ -36,6 +36,7 @@ from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.security import PermissionPolicy
 from vidbyte.lib.tracing import TracerBase
+from vidbyte.lib.usage_ledger import active_usage_ledger
 from vidbyte.context.window import ContextWindowAlgorithm
 from vidbyte.middleware import AgentMiddleware
 
@@ -84,6 +85,9 @@ class BaseActorRuntime(ABC):
         self._tasks: list[asyncio.Task] = []
         self._message_count = 0
         self._completion_future: asyncio.Future[str] | None = None
+        self._boot_pending = False
+        # Actors currently handling a message; quiescence waits for this to reach zero.
+        self.busy_actors = 0
 
         # RunnerHandle and options populated at execution time
         self._handle: RunnerHandle | None = None
@@ -103,9 +107,11 @@ class BaseActorRuntime(ABC):
         """Registers an instantiated AgentActor and schedules its reactive loop."""
         span = self._start_semantic_span("runtime.actor.spawn", actor_id=actor.actor_id, actor_type=actor.__class__.__name__)
         self._actors[actor.actor_id] = actor
+        # @intent spans-never-open-under-a-closed-parent
+        # Close the spawn span before creating the task: the task copies the current span stack, so its spans must see the open run span.
+        self._end_semantic_span(span, output=actor.actor_id)
         task = asyncio.create_task(actor.start())
         self._tasks.append(task)
-        self._end_semantic_span(span, output=actor.actor_id)
         return actor
 
     def build_context(
@@ -165,6 +171,11 @@ class BaseActorRuntime(ABC):
         assert self._handle is not None
         try:
             raw_result = await self._handle.invoke(prompt, context=actor_context, **call_options)
+            # @intent actor-calls-are-metered
+            # Every actor call is billed, so it lands on the run's usage ledger; the actor task copied that ledger when it was spawned.
+            ledger = active_usage_ledger()
+            if ledger is not None:
+                ledger.record_call(raw_result)
             output = self._handle.extract_text(raw_result)
             self._end_semantic_span(span, output=output)
             return output
@@ -214,7 +225,8 @@ class BaseActorRuntime(ABC):
             # Root orchestrator actor
             await self.spawn(self.agent_name, self.system_prompt, model_name=None)
 
-            # Boot message
+            # Boot message: mark it so it reaches the root actor even when the root is named like a completion address.
+            self._boot_pending = True
             await self.send("system", self.agent_name, message)
 
             # Execution tracking and termination safeguards
@@ -231,6 +243,9 @@ class BaseActorRuntime(ABC):
                 await self._completion_future
 
             output_text = self._completion_future.result()
+            # @intent actor-count-is-read-before-cleanup
+            # The cleanup below clears the actor table, so count the run's actors now or every run reports zero.
+            active_actors = len(self._actors)
             self._end_semantic_span(span, output=output_text)
         except BaseException as exc:
             self._end_semantic_span(span, error=exc)
@@ -246,7 +261,7 @@ class BaseActorRuntime(ABC):
             output=output_text,
             strategy_name=f"actor_model_{self.__class__.__name__}",
             calls=(),
-            metadata={"message_count": self._message_count, "active_actors": len(self._actors)},
+            metadata={"message_count": self._message_count, "active_actors": active_actors},
         )
 
     def _start_semantic_span(self, name: str, parent: Any = None, **attributes: Any) -> Any:
@@ -260,11 +275,34 @@ class BaseActorRuntime(ABC):
         if span is not None and _is_semantic_tracer(self.tracer):
             self.tracer.end_span(span, output=output, error=error)
 
+    def _take_boot_message(self) -> bool:
+        # @intent boot-message-reaches-root-actor-whatever-its-name
+        # Reports, once, that this send is the boot message, so a root actor named "system" or
+        # "orchestrator" receives the user's prompt instead of the prompt becoming the run's answer.
+        is_boot = self._boot_pending
+        self._boot_pending = False
+        return is_boot
+
     def _check_quiescence(self) -> bool:
         """Returns True if all mailboxes are empty and no worker tasks are active."""
         if self._message_count == 0:
             return False
+        if self.busy_actors > 0:
+            return False
         return all(actor.inbox.empty() for actor in self._actors.values())
+
+    def mark_busy(self) -> None:
+        """Records that an actor has started handling a message."""
+        self.busy_actors += 1
+
+    def mark_idle(self) -> None:
+        """Records that an actor has finished handling a message."""
+        self.busy_actors -= 1
+
+    def fail(self, exc: BaseException) -> None:
+        """Ends the run with an actor's error so both termination modes raise it."""
+        if self._completion_future is not None and not self._completion_future.done():
+            self._completion_future.set_exception(exc)
 
     @abstractmethod
     async def send(self, sender: str, recipient: str, content: str, parent_task_id: str | None = None) -> None:
@@ -278,14 +316,21 @@ class PointToPointActorRuntime(BaseActorRuntime):
         self._message_count += 1
         span = self._start_semantic_span("runtime.actor.message", sender=sender, recipient=recipient, content=content)
 
-        # Max loop safety gate
-        if self._message_count >= self.max_loop:
+        # @intent max-loop-allows-exactly-max-loop-messages
+        # Max loop safety gate: route up to max_loop messages and refuse the one after, so max_loop=2 still delivers the prompt and returns its answer.
+        if self._message_count > self.max_loop:
             if self._completion_future and not self._completion_future.done():
                 self._completion_future.set_result(f"Execution terminated. Max loops ({self.max_loop}) reached.")
             self._end_semantic_span(span, output="max_loop")
             return
 
-        if recipient == "system" or recipient == "orchestrator":
+        is_boot = self._take_boot_message()
+        if not is_boot and (recipient == "system" or recipient == "orchestrator"):
+            # @intent coordinator-completes-only-from-the-root
+            # In coordinator mode only the root actor's reply is the run's answer; another actor answering the boot message is dropped.
+            if self.termination_mode == "coordinator" and sender != self.agent_name:
+                self._end_semantic_span(span, output="ignored_non_root_completion")
+                return
             if self._completion_future and not self._completion_future.done():
                 self._completion_future.set_result(content)
             self._end_semantic_span(span, output="completion")
@@ -311,23 +356,30 @@ class BroadcastActorRuntime(BaseActorRuntime):
         self._message_count += 1
         span = self._start_semantic_span("runtime.actor.message", sender=sender, recipient=recipient, content=content)
 
-        # Max loop safety gate
-        if self._message_count >= self.max_loop:
+        # @intent max-loop-allows-exactly-max-loop-messages
+        # Max loop safety gate: route up to max_loop messages and refuse the one after, so max_loop=2 still delivers the prompt and returns its answer.
+        if self._message_count > self.max_loop:
             if self._completion_future and not self._completion_future.done():
                 self._completion_future.set_result(f"Execution terminated. Max loops ({self.max_loop}) reached.")
             self._end_semantic_span(span, output="max_loop")
             return
 
-        if recipient == "system" or recipient == "orchestrator":
+        is_boot = self._take_boot_message()
+        if not is_boot and (recipient == "system" or recipient == "orchestrator"):
+            # @intent coordinator-completes-only-from-the-root
+            # In coordinator mode only the root actor's reply is the run's answer; another actor answering the boot message is dropped.
+            if self.termination_mode == "coordinator" and sender != self.agent_name:
+                self._end_semantic_span(span, output="ignored_non_root_completion")
+                return
             if self._completion_future and not self._completion_future.done():
                 self._completion_future.set_result(content)
             self._end_semantic_span(span, output="completion")
             return
 
-        # Broadcast to all registered actors (excluding the sender)
+        # Broadcast to all registered actors (excluding the sender, unless it is the boot message to a root named "system")
         msg_id = str(uuid.uuid4())
         for actor_id, actor in self._actors.items():
-            if actor_id != sender:
+            if actor_id != sender or is_boot:
                 msg = ActorMessage(
                     message_id=msg_id,
                     sender=sender,

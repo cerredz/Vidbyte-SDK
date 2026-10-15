@@ -68,23 +68,36 @@ class AgentActor:
         try:
             while True:
                 msg = await self.inbox.get()
-                self.history.append(msg)
-                response = await self.on_receive(msg)
-                if response:
-                    # Send response back to the sender
-                    await self.broker.send(
-                        sender=self.actor_id,
-                        recipient=msg.sender,
-                        content=response,
-                        parent_task_id=msg.parent_task_id,
-                    )
+                # @intent quiescence-waits-for-busy-actors
+                # Count this actor as busy until its reply is sent, so an empty inbox mid-call is not mistaken for quiescence.
+                self.broker.mark_busy()
+                try:
+                    self.history.append(msg)
+                    response = await self.on_receive(msg)
+                    if response:
+                        # Send response back to the sender
+                        await self.broker.send(
+                            sender=self.actor_id,
+                            recipient=msg.sender,
+                            content=response,
+                            parent_task_id=msg.parent_task_id,
+                        )
+                finally:
+                    self.broker.mark_idle()
         except asyncio.CancelledError:
             pass  # Task was cleanly stopped
+        except Exception as exc:
+            # @intent failed-actor-fails-the-run
+            # A failed model call ends the whole run with that error instead of leaving the run waiting or reporting success.
+            self.broker.fail(exc)
 
     async def on_receive(self, message: ActorMessage) -> str | None:
         """Invoked when a new message is received. Formulates a prompt and invokes completion."""
         # Check for task completion signals or exit signals to prevent infinite execution.
-        if "terminate_task" in message.state or message.content.strip().lower() == "exit":
+        # @intent user-prompt-exit-is-answered-not-swallowed
+        # The caller's own prompt (sent by "system") is always answered, even "exit", so the run never waits forever.
+        is_exit_signal = message.sender != "system" and message.content.strip().lower() == "exit"
+        if "terminate_task" in message.state or is_exit_signal:
             return None
 
         prompt = self.compile_prompt(message)

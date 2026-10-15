@@ -134,12 +134,14 @@ class MathHelper:
         """Return the greatest number of intervals active at one time, or None when empty."""
         if not intervals:
             return None
-        events = [(start, 1) for start, _ in intervals] + [(end, -1) for _, end in intervals]
+        # @intent touching-intervals-are-sequential
+        # Ends sort before starts at one timestamp so back-to-back intervals never count as concurrent; a zero-length interval (delta 0) is active only at its own instant.
+        events = [(start, 1) for start, end in intervals if end > start] + [(end, -1) for start, end in intervals if end > start] + [(start, 0) for start, end in intervals if end <= start]
         active = 0
         maximum = 0
-        for _, delta in sorted(events, key=lambda event: (event[0], -event[1])):
+        for _, delta in sorted(events):
             active += delta
-            maximum = max(maximum, active)
+            maximum = max(maximum, active + (delta == 0))
         return maximum
 
 

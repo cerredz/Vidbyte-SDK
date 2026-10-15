@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
 import sys
 from collections.abc import Mapping, Sequence
 from typing import Any, Protocol
@@ -61,6 +62,10 @@ _WINDOWS_ENV_KEYS: tuple[str, ...] = (
 )
 
 _DEFAULT_STDERR_MAX_BYTES = 64 * 1024
+# @intent mcp-stdio-reads-large-lines
+# One JSON-RPC response is one stdout line, and image/audio results carry base64 payloads that can run to
+# megabytes, so asyncio's 64 KiB default line limit would kill the reader; allow lines up to 64 MiB.
+_STDOUT_LINE_LIMIT_BYTES = 64 * 1024 * 1024
 _DEFAULT_REQUEST_TIMEOUT = 30.0
 _DEFAULT_SHUTDOWN_TIMEOUT = 5.0
 
@@ -188,12 +193,22 @@ class McpStdioTransport:
             child_env = build_child_env(self.env)
             # Subprocess pipes only work on the loop that opens them, so remember which one that is.
             self._loop = asyncio.get_running_loop()
+            program, *arguments = self.command
+            # @intent windows-launchers-resolve-like-a-shell
+            # Windows only appends .exe to a bare program name, but npm launchers such as npx are
+            # .cmd files, so look the name up through PATH and PATHEXT first, as a shell would.
+            if sys.platform == "win32":
+                program = shutil.which(program) or program
             self._process = await asyncio.create_subprocess_exec(
-                *self.command,
+                program,
+                *arguments,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=child_env,
+                # @intent mcp-stdio-reads-large-lines
+                # Raise the stdout line limit so one large result does not close the transport for good.
+                limit=_STDOUT_LINE_LIMIT_BYTES,
             )
             self._stdout_task = asyncio.create_task(
                 self._stdout_reader(),
@@ -287,6 +302,40 @@ class McpStdioTransport:
             current = self._pending.get(request_id)
             if current is future and future.done():
                 self._pending.pop(request_id, None)
+
+    async def notify(
+        self,
+        method: str,
+        params: Mapping[str, Any] | None = None,
+    ) -> None:
+        """Send a JSON-RPC notification: no id, and no response is awaited."""
+        if self._closed:
+            raise McpProtocolError(
+                "MCP transport is closed",
+                details={"reason": "closed", "method": method},
+            )
+        await self.start()
+        async with self._write_lock:
+            if self._closed or self._process is None or self._process.stdin is None:
+                raise McpProtocolError(
+                    "MCP transport is closed",
+                    details={"reason": "closed", "method": method},
+                )
+            payload: dict[str, Any] = {"jsonrpc": "2.0", "method": method}
+            if params is not None:
+                payload["params"] = dict(params)
+            try:
+                self._process.stdin.write((json.dumps(payload) + "\n").encode("utf-8"))
+                await self._process.stdin.drain()
+            except (BrokenPipeError, ConnectionResetError, OSError) as exc:
+                raise McpProtocolError(
+                    "MCP process stdin is not writable",
+                    details={
+                        "method": method,
+                        "stderr_tail": self.stderr_snapshot(),
+                        "reason": "stdin_write_failed",
+                    },
+                ) from exc
 
     async def close(self) -> None:
         """Idempotently fail pendings, terminate the child, and detach state."""

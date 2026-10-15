@@ -51,6 +51,7 @@ class MultiProviderAgenticGraderAlgorithm:
         _validate_grader_chars(self.max_grader_chars)
         ProviderModelRegistry.validate_provider(self.grader_provider)
         ProviderModelRegistry.validate_model(self.grader_model)
+        ProviderModelRegistry.require_openrouter_for_routed_model(self.grader_provider, self.grader_model)
         if self.provider_models is not None:
             ProviderModelRegistry.validate_provider_models_map(self.provider_models)
         _validate_prompt_override(self.agent_system_prompt, "agent_system_prompt")

@@ -751,6 +751,26 @@ class LangSmithTracerDiagnosticsTests(unittest.TestCase):
             tracer.end_trace(context, output="ok")
         self.assertTrue(hasattr(captured[0], "isoformat"))
 
+    def test_langsmith_root_run_type_is_resolved_not_sent_as_input(self) -> None:
+        # [Hidden Failure] The root run must take run_type from its attributes, like child spans, not leak it into inputs.
+        created: list[dict[str, Any]] = []
+
+        class Client:
+            def __init__(self, **kwargs: Any) -> None:
+                pass
+
+            def create_run(self, **kwargs: Any) -> None:
+                created.append(kwargs)
+
+        from vidbyte.providers.tracing.langsmith import LangSmithTracer
+        with patch.dict("sys.modules", {"langsmith": self._module_with_client(Client)}):
+            tracer = LangSmithTracer(api_key="test-key")
+            tracer.start_trace("agent.run", agent_name="a")
+            tracer.start_trace("agent.run", agent_name="a", run_type="chain")
+            tracer.start_trace("custom.root", query="q", run_type="retriever")
+        self.assertEqual([run["run_type"] for run in created], ["chain", "chain", "retriever"])
+        self.assertEqual([run["inputs"] for run in created], [{"agent_name": "a"}, {"agent_name": "a"}, {"query": "q"}])
+
 
 # ---------------------------------------------------------------------------
 # Cancellation / BaseException trace-closure tests  (#142)
@@ -1007,6 +1027,51 @@ class PhoenixErrorStatusTests(unittest.TestCase):
         self._tracer().end_span(PhoenixSpanContext(span=span), output="ok")
         self.assertEqual(span.statuses, [])
         self.assertTrue(span.ended)
+
+
+class PhoenixCollectorEndpointTests(unittest.TestCase):
+    def _exporter_endpoint(self, env: dict[str, str], endpoint: str | None = None) -> str:
+        # Builds a PhoenixTracer against fake OpenTelemetry modules and returns the URL its exporter was given.
+        from vidbyte.providers.tracing.phoenix import PhoenixTracer
+        seen: list[str] = []
+
+        class FakeExporter:
+            def __init__(self, *, endpoint: str) -> None:
+                seen.append(endpoint)
+
+        class FakeProvider:
+            def add_span_processor(self, processor: Any) -> None:
+                pass
+
+        trace_module = types.SimpleNamespace(get_tracer=lambda *args, **kwargs: object())
+        fake_modules = {
+            "opentelemetry": types.SimpleNamespace(trace=trace_module),
+            "opentelemetry.trace": trace_module,
+            "opentelemetry.exporter.otlp.proto.http.trace_exporter": types.SimpleNamespace(OTLPSpanExporter=FakeExporter),
+            "opentelemetry.sdk.trace": types.SimpleNamespace(TracerProvider=FakeProvider),
+            "opentelemetry.sdk.trace.export": types.SimpleNamespace(SimpleSpanProcessor=lambda exporter: exporter),
+        }
+        environ = {key: value for key, value in os.environ.items() if key != "PHOENIX_COLLECTOR_ENDPOINT"}
+        environ.update(env)
+        with patch.dict("sys.modules", fake_modules), patch.dict(os.environ, environ, clear=True):
+            PhoenixTracer(endpoint=endpoint)
+        return seen[0]
+
+    def test_collector_env_is_the_phoenix_server_url(self) -> None:
+        # [Silent Failure] Phoenix's documented server URL must export to /v1/traces, not the UI root.
+        key = "PHOENIX_COLLECTOR_ENDPOINT"
+        cases = {
+            "http://phoenix.internal:6006": "http://phoenix.internal:6006/v1/traces",
+            "http://phoenix.internal:6006/": "http://phoenix.internal:6006/v1/traces",
+            "https://app.phoenix.arize.com/s/acme": "https://app.phoenix.arize.com/s/acme/v1/traces",
+            "http://phoenix.internal:6006/v1/traces": "http://phoenix.internal:6006/v1/traces",
+        }
+        for env_value, expected in cases.items():
+            with self.subTest(env=env_value):
+                self.assertEqual(self._exporter_endpoint({key: env_value}), expected)
+        explicit = "http://collector:4318/custom"
+        self.assertEqual(self._exporter_endpoint({key: "http://phoenix.internal:6006"}, endpoint=explicit), explicit)
+        self.assertEqual(self._exporter_endpoint({}), "http://localhost:6006/v1/traces")
 
 
 def _otel_sdk_available() -> bool:

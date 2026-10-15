@@ -152,6 +152,11 @@ class ToolSpec:
         lines = ["<tool>", f"Tool: {self.name}", f"Description: {self.description}"]
         # Describe the same arguments the provider schema advertises, typed or raw.
         parameter_lines = self._parameter_lines(frozenset(self.required_parameter_names()))
+        # @intent prompt-doc-lists-activity-argument
+        # An activity-bound tool's native schema also takes the reserved activity argument, so list it too.
+        if self.activity is not None:
+            requirement = "required" if self.activity.required else "optional"
+            parameter_lines.append(f"- {ACTIVITY_ARGUMENT_KEY} (object, {requirement}): {self.activity.description}")
         if parameter_lines:
             lines.append("Parameters:")
             lines.extend(parameter_lines)

@@ -85,6 +85,38 @@ class HarnessRedactorFreeTextTests(unittest.TestCase):
         self.assertEqual(redactor.redact('{"password": "S7-json", "n": 1}'), '{"password=<redacted>, "n": 1}')
         self.assertEqual(redactor.redact("tokens used: 42"), "tokens used: 42")
 
+    def test_token_and_api_key_auth_schemes_are_redacted(self) -> None:
+        cases = {
+            "Authorization: Token S9-token": "S9-token",
+            "authorization: token ghp_S10": "ghp_S10",
+            "Authorization: Api-Key S11-zep": "S11-zep",
+        }
+        redactor = HarnessRedactor()
+
+        for text, secret in cases.items():
+            self.assertNotIn(secret, redactor.redact(text), text)
+            self.assertNotIn(secret, redactor.safe_error_message(text), text)
+        self.assertEqual(redactor.redact("Authorization: Token S9-token"), "Authorization=<redacted>")
+        for text in ("token budget: 5 tokens", "api-key rotation is due"):
+            self.assertEqual(redactor.redact(text), text)
+
+    def test_prefixed_credential_names_are_redacted(self) -> None:
+        cases = {
+            "OPENAI_API_KEY=sk-proj-1": "sk-proj-1",
+            "export GITHUB_TOKEN=ghp_2": "ghp_2",
+            "DATABASE_PASSWORD: pg-3": "pg-3",
+            '{"client_secret": "cs-4"}': "cs-4",
+            '{"githubToken": "gho-5"}': "gho-5",
+        }
+        redactor = HarnessRedactor()
+
+        for text, secret in cases.items():
+            self.assertNotIn(secret, redactor.redact(text), text)
+            self.assertNotIn(secret, redactor.safe_error_message(text), text)
+        self.assertEqual(redactor.redact("OPENAI_API_KEY=sk-proj-1"), "OPENAI_API_KEY=<redacted>")
+        for text in ("token_estimate: 5", "max_tokens: 5", "nosecret: x", "maxTokens: 5"):
+            self.assertEqual(redactor.redact(text), text)
+
     def test_error_message_scrub_matches_value_scrub(self) -> None:
         text = "Connect with api_key=sk-live-9f8e7d6c5b4a and password: hunter2 then retry"
         redactor = HarnessRedactor()

@@ -29,6 +29,7 @@ Key Functions:
     - models_for_provider: Returns the catalogued model identifiers for one provider.
     - provider_for_model: Returns the provider a catalogued model belongs to, or None.
     - validate_provider_model_pair: Raises unless a model is catalogued under its provider.
+    - require_openrouter_for_routed_model: Raises when an 'openrouter/<vendor>/<model>' slug names another provider.
 Relations:
     Used by MultiProviderAgenticGraderRuntimeAlgorithm, MultiProviderAgenticGraderAlgorithm,
     and client configurations (TextModelConfig, ImageModelConfig, VideoModelConfig).
@@ -267,7 +268,10 @@ class ProviderModelRegistry:
         raw_model = model.strip()
         provider_prefix = f"{p_enum.value}/"
         lookup_model = raw_model[len(provider_prefix):] if raw_model.lower().startswith(provider_prefix) else raw_model
-        return cls.MODEL_ALIASES.get(p_enum, {}).get(lookup_model.lower(), raw_model)
+        # @intent normalized-model-drops-its-own-provider-prefix
+        # The provider's catalog holds bare names, so an unaliased 'openai/gpt-5.5' must come back as
+        # 'gpt-5.5' too, or is_supported_model rejects it (and 'openrouter/auto', the provider's own default).
+        return cls.MODEL_ALIASES.get(p_enum, {}).get(lookup_model.lower(), lookup_model)
 
     @classmethod
     def is_supported_model(cls, provider: ModelProvider | str, model: str) -> bool:
@@ -361,6 +365,8 @@ class ProviderModelRegistry:
         # another provider owns; the runner accepts them, so the vendor prefix is not a conflict here.
         if name == ModelProvider.OPENROUTER.value and "/" in model:
             return
+        # Refuse an 'openrouter/<vendor>/<model>' slug declared under another vendor, which would reach that vendor verbatim.
+        cls.require_openrouter_for_routed_model(name, model)
         owner = cls.provider_for_model(model)
         if owner is not None and owner != name:
             raise ConfigurationError(
@@ -368,11 +374,32 @@ class ProviderModelRegistry:
                 details={"model": model.strip(), "declared_provider": name, "registered_provider": owner},
             )
 
+    @classmethod
+    def require_openrouter_for_routed_model(cls, provider: ModelProvider | str, model: str) -> None:
+        """Raise when an 'openrouter/<vendor>/<model>' slug is declared under any provider other than OpenRouter."""
+        # @intent openrouter-routed-ids-stay-with-openrouter
+        # Validation now accepts 'openrouter/<vendor>/<model>', but only OpenRouter strips that prefix;
+        # declared under another vendor the Runner would send the prefixed id to it, so it stays rejected.
+        name = (provider.value if isinstance(provider, ModelProvider) else str(provider)).strip().lower()
+        openrouter = ModelProvider.OPENROUTER.value
+        lowered = str(model or "").strip().lower()
+        if name != openrouter and lowered.startswith(f"{openrouter}/") and "/" in lowered[len(openrouter) + 1:]:
+            raise ConfigurationError(
+                f"Model '{model.strip()}' is registered under provider '{openrouter}', not '{name}'.",
+                details={"model": model.strip(), "declared_provider": name, "registered_provider": openrouter},
+            )
+
     @staticmethod
     def _catalog_name(model: str) -> str:
         # Normalizes a model identifier to its catalog form, matching ModalityDetector's convention.
         name = (model or "").strip().lower()
-        return name.split("/", 1)[1] if "/" in name and not name.startswith("openrouter/") else name
+        # @intent openrouter-slug-validates-as-its-vendor-model
+        # Like the Runner, drop 'openrouter/' only when a vendor/model slug follows it, so
+        # 'openrouter/anthropic/claude-sonnet-5' checks as 'claude-sonnet-5' while 'openrouter/auto' stays whole.
+        openrouter_prefix = f"{ModelProvider.OPENROUTER.value}/"
+        if name.startswith(openrouter_prefix) and "/" in name[len(openrouter_prefix):]:
+            name = name[len(openrouter_prefix):]
+        return name.split("/", 1)[1] if "/" in name and not name.startswith(openrouter_prefix) else name
 
     @classmethod
     def validate_provider_models_map(cls, provider_models: Mapping[str, str]) -> None:
@@ -380,6 +407,8 @@ class ProviderModelRegistry:
         for provider, model in provider_models.items():
             cls.validate_provider(provider)
             cls.validate_model(model)
+            # Keep an 'openrouter/<vendor>/<model>' slug from being mapped to another vendor's runner.
+            cls.require_openrouter_for_routed_model(provider, model)
 
     @classmethod
     def _resolve_explicit(cls, provider_models: Mapping[str, str], opts: Mapping[str, Any]) -> dict[str, str]:

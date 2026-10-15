@@ -56,6 +56,9 @@ class PatchTool(BaseTool):
             newline = LineEndings.detect(path.read_bytes().decode(self.encoding))
         except (OSError, UnicodeDecodeError, ValueError) as exc:
             return ToolResult.error(self.name, str(exc), metadata={"error": "read_error"})
+        # @intent model-crlf-text-keeps-file-endings
+        # The file reads back as LF and is written in its own endings, so CRLF the model spelled is made LF to match and land once.
+        search_block, replace_block = LineEndings.to_lf(search_block), LineEndings.to_lf(replace_block)
 
         # @intent unique-edit-counts-overlapping-matches
         count = SubstringCounter.count_overlapping(before, search_block)
@@ -74,9 +77,13 @@ class PatchTool(BaseTool):
 
         after = before.replace(search_block, replace_block, 1)
         try:
+            # @intent failed-edit-leaves-file-untouched
+            # Opening for writing empties the file at once, so text the encoding
+            # cannot hold must fail here, before the file is opened.
+            after.encode(self.encoding)
             with path.open("w", encoding=self.encoding, newline=newline) as handle:
                 handle.write(after)
-        except OSError as exc:
+        except (OSError, UnicodeEncodeError) as exc:
             return ToolResult.error(self.name, str(exc), metadata={"error": "write_error"})
         # Split at "\n" only and mark a missing final newline, so each diff line stays on its own line.
         diff = LineEndings.unified_diff(before, after, fromfile=f"a/{file_path}", tofile=f"b/{file_path}")

@@ -140,12 +140,15 @@ class PrimitiveToolRegistryBuilder:
         text = str(value).strip()
         return text or None
 
-    def _required_string(self, args: Mapping[str, Any], name: str) -> str:
-        """Return a required non-empty string argument or raise ValueError."""
-        text = str(args.get(name, "")).strip()
+    def _required_string(self, args: Mapping[str, Any], name: str, *, verbatim: bool = False) -> str:
+        """Return a required non-blank string argument, stripped unless verbatim, or raise ValueError."""
+        # @intent create-tools-store-payload-bodies-verbatim
+        # Strip only to test for blankness; payload bodies (verbatim=True) keep indentation and trailing lines.
+        raw = str(args.get(name, ""))
+        text = raw.strip()
         if not text:
             raise ValueError(f"{name} must be a non-empty string.")
-        return text
+        return raw if verbatim else text
 
     def _string_tuple(self, args: Mapping[str, Any], name: str) -> tuple[str, ...]:
         """Coerce a JSON array argument into a tuple of strings."""
@@ -176,17 +179,17 @@ class PrimitiveToolRegistryBuilder:
     def _build_text(self, args: Mapping[str, Any]) -> ContextItem:
         """Build a TextContextItem from validated create-tool arguments."""
         primitive_id, title = self._common_args(args, self._default_title(TextContextItem, "Text"))
-        return TextContextItem(primitive_id=primitive_id, title=title, content=self._required_string(args, "content"), source=self._optional_string(args, "source"))
+        return TextContextItem(primitive_id=primitive_id, title=title, content=self._required_string(args, "content", verbatim=True), source=self._optional_string(args, "source"))
 
     def _build_document(self, args: Mapping[str, Any]) -> ContextItem:
         """Build a DocumentContextItem from validated create-tool arguments."""
         primitive_id, title = self._common_args(args, self._default_title(DocumentContextItem, "Document"))
-        return DocumentContextItem(primitive_id=primitive_id, title=title, source=self._required_string(args, "source"), content=self._required_string(args, "content"), document_id=self._optional_string(args, "document_id"))
+        return DocumentContextItem(primitive_id=primitive_id, title=title, source=self._required_string(args, "source"), content=self._required_string(args, "content", verbatim=True), document_id=self._optional_string(args, "document_id"))
 
     def _build_memory(self, args: Mapping[str, Any]) -> ContextItem:
         """Build a MemoryContextItem from validated create-tool arguments."""
         primitive_id, title = self._common_args(args, self._default_title(MemoryContextItem, "Memory"))
-        return MemoryContextItem(primitive_id=primitive_id, title=title, content=self._required_string(args, "content"), source=self._optional_string(args, "source"))
+        return MemoryContextItem(primitive_id=primitive_id, title=title, content=self._required_string(args, "content", verbatim=True), source=self._optional_string(args, "source"))
 
     def _build_plan(self, args: Mapping[str, Any]) -> ContextItem:
         """Build a PlanContextItem from validated create-tool arguments."""
@@ -206,7 +209,7 @@ class PrimitiveToolRegistryBuilder:
     def _build_artifact(self, args: Mapping[str, Any]) -> ContextItem:
         """Build an ArtifactContextItem from validated create-tool arguments."""
         primitive_id, title = self._common_args(args, self._default_title(ArtifactContextItem, "Artifact"))
-        return ArtifactContextItem(primitive_id=primitive_id, title=title, name=self._required_string(args, "name"), content=self._required_string(args, "content"), artifact_type=str(args.get("artifact_type") or "text"))
+        return ArtifactContextItem(primitive_id=primitive_id, title=title, name=self._required_string(args, "name"), content=self._required_string(args, "content", verbatim=True), artifact_type=str(args.get("artifact_type") or "text"))
 
     def _build_environment(self, args: Mapping[str, Any]) -> ContextItem:
         """Build an EnvironmentContextItem from validated create-tool arguments."""
@@ -216,7 +219,7 @@ class PrimitiveToolRegistryBuilder:
     def _build_git_diff(self, args: Mapping[str, Any]) -> ContextItem:
         """Build a GitDiffContextItem from validated create-tool arguments."""
         primitive_id, title = self._common_args(args, self._default_title(GitDiffContextItem, "Git Diff"))
-        return GitDiffContextItem(primitive_id=primitive_id, title=title, diff=self._required_string(args, "diff"), files=self._string_tuple(args, "files"), repo_root=self._optional_string(args, "repo_root"), branch=self._optional_string(args, "branch"), base_ref=self._optional_string(args, "base_ref"), head_ref=self._optional_string(args, "head_ref"))
+        return GitDiffContextItem(primitive_id=primitive_id, title=title, diff=self._required_string(args, "diff", verbatim=True), files=self._string_tuple(args, "files"), repo_root=self._optional_string(args, "repo_root"), branch=self._optional_string(args, "branch"), base_ref=self._optional_string(args, "base_ref"), head_ref=self._optional_string(args, "head_ref"))
 
 
 CREATE_TOOL_REGISTRY = PrimitiveToolRegistryBuilder().build()

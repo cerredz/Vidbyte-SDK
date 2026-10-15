@@ -33,6 +33,9 @@ class AppendTool(FileSystemTool):
             # Append in the existing file's own line endings so it never ends up mixed; a new file keeps the platform default.
             # Bytes the encoding cannot read are replaced only for this check, so detection never makes the append fail.
             newline = LineEndings.detect(self.backend.read_binary(target).decode(self._config.encoding, errors="replace")) if target.is_file() else None
+            # @intent model-crlf-text-keeps-file-endings
+            # CRLF the model spelled is made LF first, so the file's own endings, or a new file's platform default, land once rather than as CR CR LF.
+            content = LineEndings.to_lf(content)
             self.backend.append_text(target, content, encoding=self._config.encoding, create_parents=create_parents, newline=newline)
             return ToolResult.success(self.name, str(target), metadata={"path": str(target), "encoding": self._config.encoding})
         except Exception as exc:

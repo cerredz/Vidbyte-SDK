@@ -30,6 +30,8 @@ class ZipTool(FileSystemTool):
             destination_path = self._path(destination)
             if source_path.is_dir():
                 FileSystemPermissions.require_existing_directory(source_path)
+                # Refuse a directory holding a link that leads outside the root, so the archive cannot carry outside files.
+                FileSystemPermissions.require_tree_inside_root(self._config, source_path)
             else:
                 FileSystemPermissions.require_existing_file(source_path)
             self.backend.zip_path(source_path, destination_path)

@@ -3,7 +3,7 @@
 PURPOSE: Detects the newline style (CRLF or LF) a text file already uses, splits text into lines at "\\n" only, and diffs two texts by those lines.
 ROLE IN CODEBASE: Lets in-place edit tools (PatchTool, ReplaceTextTool) write a file back with its own line endings instead of the platform default, and gives PatchTool and LocalFileSystemBackend.diff_text one diff format.
 ARCHITECTURE NOTE: Pure string helper in the lib layer; callers read the raw text and pass the result as open(..., newline=...).
-FUNCTION INVENTORY: LineEndings.detect() returns "\\r\\n" or "\\n". LineEndings.split_lines() splits after each "\\n", keeping it. LineEndings.split_bare_lines() splits the same way but drops each "\\n" or "\\r\\n". LineEndings.unified_diff() returns a unified diff with git's no-newline marker.
+FUNCTION INVENTORY: LineEndings.detect() returns "\\r\\n" or "\\n". LineEndings.to_lf() turns each "\\r\\n" into "\\n" before such a write. LineEndings.split_lines() splits after each "\\n", keeping it. LineEndings.split_bare_lines() splits the same way but drops each "\\n" or "\\r\\n". LineEndings.unified_diff() returns a unified diff with git's no-newline marker.
 COMMON MODIFICATION PATTERNS: Change the detection rule here only and keep both edit tools using it.
 WHAT NOT TO DO: Do not pass universal-newline-translated text; it never contains CRLF.
 KNOWN EDGE CASES: Mixed-ending files are treated as CRLF when any CRLF is present; old-Mac lone CR is treated as LF.
@@ -27,6 +27,14 @@ class LineEndings:
     def detect(raw_text: str) -> str:
         """Return CRLF when the untranslated text contains any CRLF, otherwise LF."""
         return LineEndings.CRLF if LineEndings.CRLF in raw_text else LineEndings.LF
+
+    @staticmethod
+    def to_lf(text: str) -> str:
+        """Return text with each "\\r\\n" turned into "\\n"; a lone "\\r" is left alone."""
+        # @intent model-crlf-text-keeps-file-endings
+        # Text written through open(newline="\r\n") must hold "\n" only,
+        # or each "\r\n" the caller already spelled lands as "\r\r\n".
+        return text.replace(LineEndings.CRLF, LineEndings.LF)
 
     @staticmethod
     def split_lines(text: str) -> list[str]:

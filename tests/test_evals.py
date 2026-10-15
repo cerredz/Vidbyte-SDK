@@ -26,6 +26,7 @@ from typing import Any
 from tests.agent_test_support import bind_test_runner, build_test_agent
 from vidbyte.agents.types import AgentForkSettings, AgentInput
 from vidbyte.agents.base import BaseAgent
+from vidbyte.lib.errors import ConfigurationError
 from vidbyte.evals import (
     AllOfGrader,
     AnyOfGrader,
@@ -177,6 +178,34 @@ class ClosableRunner(MockRunner):
         self.closed += 1
 
 
+class KeywordOnlyJudgeRunner:
+    """Judge runner shaped like TextModelRunner: keyword-only options, no temperature, no **kwargs."""
+
+    def __init__(self, response_text: str) -> None:
+        # Starts with the fixed reply and no recorded prompts.
+        self.response_text = response_text
+        self.prompts: list[str] = []
+
+    async def arun(self, prompt: str, *, system: str | None = None, metadata: dict[str, object] | None = None) -> str:
+        # Records the prompt; any unexpected keyword such as temperature raises TypeError here.
+        self.prompts.append(prompt)
+        return self.response_text
+
+
+class KwargsRecordingJudgeRunner:
+    """Judge runner whose arun takes **kwargs and records the options it was given."""
+
+    def __init__(self, response_text: str) -> None:
+        # Starts with the fixed reply and no recorded options.
+        self.response_text = response_text
+        self.options: list[dict[str, Any]] = []
+
+    async def arun(self, prompt: str, **kwargs: Any) -> str:
+        # Records the keyword options so the test can check temperature still arrives.
+        self.options.append(kwargs)
+        return self.response_text
+
+
 class EvalTests(unittest.IsolatedAsyncioTestCase):
     """Main unit and integration test suite validating all evaluation components."""
 
@@ -279,6 +308,24 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         res_malformed = await grader.agrade(case, "not a json string")
         self.assertFalse(res_malformed.passed)
         self.assertEqual(res_malformed.score, 0.0)
+
+    async def test_json_schema_grader_enforces_type_arrays_and_null(self) -> None:
+        # Tests that an array-form type passes a value matching any listed name, and that "null" is checked.
+        # @intent json-schema-type-may-be-an-array
+        # [Silent Failure] Array-form and "null" types fell through to a pass, so any value graded as valid.
+        case = EvalCase(prompt="t")
+
+        nullable_string = JSONSchemaGrader({"type": ["string", "null"]})
+        self.assertTrue((await nullable_string.agrade(case, '"x"')).passed)
+        self.assertTrue((await nullable_string.agrade(case, "null")).passed)
+        self.assertFalse((await nullable_string.agrade(case, "42")).passed)
+
+        nullable_object = JSONSchemaGrader({"type": ["object", "null"], "required": ["id"]})
+        self.assertFalse((await nullable_object.agrade(case, "{}")).passed)
+        self.assertTrue((await nullable_object.agrade(case, "null")).passed)
+
+        null_only = JSONSchemaGrader({"type": "null"})
+        self.assertFalse((await null_only.agrade(case, "5")).passed)
 
     async def test_eval_template_data_model(self) -> None:
         # Tests EvalCase template fields and structured expected payloads.
@@ -401,6 +448,27 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         template = T.concise_grounded_answer(required_terms="30 days", forbidden_terms="password")
         self.assertFalse((await template.build_grader().agrade(case, wrong)).passed)
         self.assertTrue((await template.build_grader().agrade(case, "Refunds within 30 days.")).passed)
+
+    async def test_caseless_graders_casefold(self) -> None:
+        # @intent caseless-graders-casefold
+        # [Silent Failure] lower() kept "ß" while "Hauptstraße 5".upper() is "HAUPTSTRASSE 5", so a correct German
+        # answer in capitals failed, though OutputBehavior's case_sensitive=False (casefold) matched the same pair.
+        expected = "Hauptstraße 5"
+        case = EvalCase(prompt="t", expected=expected)
+        checks = [
+            (ExactMatchGrader(), case, "HAUPTSTRASSE 5", True),
+            (ContainsGrader(), case, "Wohnt in der HAUPTSTRASSE 5.", True),
+            (ContainsAllGrader(["Straße"]), EvalCase(prompt="t"), "STRASSE", True),
+            (ForbiddenContentGrader(["Straße"]), EvalCase(prompt="t"), "STRASSE", False),
+            (ExactMatchGrader(), case, expected.upper(), True),
+            (ContainsGrader(), case, expected.upper(), True),
+            (ContainsAllGrader([expected]), EvalCase(prompt="t"), expected.upper(), True),
+            (ForbiddenContentGrader([expected]), EvalCase(prompt="t"), expected.upper(), False),
+        ]
+        for grader, grader_case, output, should_pass in checks:
+            with self.subTest(grader=type(grader).__name__, output=output):
+                result = await grader.agrade(grader_case, output)
+                self.assertEqual(result.passed, should_pass, result.reason)
         support = T.safe_customer_support(forbidden_terms="password")
         self.assertTrue((await support.build_grader().agrade(EvalCase(prompt="t", expected="30 days"), "Refunds within 30 days.")).passed)
 
@@ -460,6 +528,21 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse((await numeric.agrade(EvalCase(prompt="t", expected=1200), "1300")).passed)
         self.assertEqual(numeric._parse_number("5 eggs"), 5.0)
         self.assertEqual(numeric._parse_number("3em"), 3.0)
+
+    async def test_numeric_grader_reads_unicode_minus_sign(self) -> None:
+        # Tests that a negative number typeset with the Unicode minus sign keeps its sign.
+        # @intent unicode-minus-is-a-sign
+        numeric = NumericMatchGrader()
+        self.assertTrue((await numeric.agrade(EvalCase(prompt="t", expected=-5), "The low is −5.")).passed)
+        self.assertFalse((await numeric.agrade(EvalCase(prompt="t", expected=5), "The low is −5.")).passed)
+
+    async def test_numeric_grader_reads_unicode_minus_in_the_exponent(self) -> None:
+        # Tests that an exponent typeset with the Unicode minus sign stays part of the number instead of being dropped.
+        # @intent unicode-minus-is-a-sign
+        precise = NumericMatchGrader(tolerance=1e-21)
+        self.assertTrue((await precise.agrade(EvalCase(prompt="t", expected=-1.602e-19), "The charge is −1.602e−19 C.")).passed)
+        loose = NumericMatchGrader(tolerance=0.01)
+        self.assertFalse((await loose.agrade(EvalCase(prompt="t", expected=2.0), "The rate is 2.0e−3 per second.")).passed)
 
     async def test_json_graders_do_not_treat_booleans_as_numbers(self) -> None:
         # Tests that JSON true/false never match 1/0 while 1 and 1.0 stay the same JSON number.
@@ -636,6 +719,65 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         runner = EvalRunner(MockRunner("ok"), default_grader=ContainsGrader(), concurrency=1)
         self.assertEqual(len((await runner.arun(EvalSuite("nulls", suite.cases[:6]))).results), 6)
 
+    def test_eval_suite_csv_with_excel_bom_keeps_prompt_column(self) -> None:
+        # @intent csv-bom-is-not-part-of-the-header
+        # [Silent] Excel's "CSV UTF-8" BOM became part of the "prompt" header, so every prompt loaded as "".
+        rows = 'prompt,expected,tags\n"Capital of France?",Paris,"geo, easy"\n"2 + 2?",4,math\n'
+        loaded = {}
+        with tempfile.TemporaryDirectory() as temp_dir:
+            for encoding in ("utf-8-sig", "utf-8"):
+                path = os.path.join(temp_dir, f"suite_{encoding}.csv")
+                with open(path, "w", encoding=encoding, newline="") as f:
+                    f.write(rows)
+                loaded[encoding] = [(case.prompt, case.expected, case.tags) for case in EvalSuite.from_csv(path).cases]
+
+        expected = [("Capital of France?", "Paris", ("geo", "easy")), ("2 + 2?", "4", ("math",))]
+        self.assertEqual(loaded["utf-8-sig"], expected)
+        self.assertEqual(loaded["utf-8"], expected)
+
+    def test_eval_suite_csv_without_prompt_column_raises(self) -> None:
+        # @intent missing-prompt-column-fails-loudly
+        # [Silent] A ";" Excel export or a "Question" header loaded every prompt as "" and ran the suite on empty prompts.
+        files = {
+            "semicolon.csv": 'prompt;expected;tags\n"Capital of France?";Paris;geo\n"2 + 2?";4;math\n',
+            "question.csv": 'Question,expected\n"Capital of France?",Paris\n"2 + 2?",4\n',
+            "empty.csv": "",
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = {}
+            for name, text in files.items():
+                paths[name] = os.path.join(temp_dir, name)
+                with open(paths[name], "w", encoding="utf-8", newline="") as f:
+                    f.write(text)
+            for name in ("semicolon.csv", "question.csv"):
+                with self.assertRaisesRegex(ConfigurationError, "prompt"):
+                    EvalSuite.from_csv(paths[name])
+            renamed = EvalSuite.from_csv(paths["question.csv"], prompt_col="Question")
+            empty = EvalSuite.from_csv(paths["empty.csv"])
+
+        self.assertEqual([case.prompt for case in renamed.cases], ["Capital of France?", "2 + 2?"])
+        self.assertEqual(len(empty), 0)
+
+    def test_eval_suite_json_with_powershell_bom_loads_like_plain_utf8(self) -> None:
+        # @intent json-suite-bom-is-not-content
+        # [Crash] PowerShell 5.1's -Encoding utf8 BOM made json.load reject an otherwise valid suite file.
+        suite_json = json.dumps({"name": "bom-suite", "cases": [
+            {"prompt": "Capital of France?", "expected": "Paris", "tags": ["geo", "easy"]},
+            {"prompt": "2 + 2?", "expected": "4", "tags": "math"},
+        ]})
+        loaded = {}
+        with tempfile.TemporaryDirectory() as temp_dir:
+            for encoding in ("utf-8-sig", "utf-8"):
+                path = os.path.join(temp_dir, f"suite_{encoding}.json")
+                with open(path, "w", encoding=encoding) as f:
+                    f.write(suite_json)
+                suite = EvalSuite.from_json(path)
+                loaded[encoding] = (suite.name, [(case.prompt, case.expected, case.tags) for case in suite.cases])
+
+        expected = ("bom-suite", [("Capital of France?", "Paris", ("geo", "easy")), ("2 + 2?", "4", ("math",))])
+        self.assertEqual(loaded["utf-8-sig"], expected)
+        self.assertEqual(loaded["utf-8"], expected)
+
     async def test_eval_registry_structured_expected_roundtrip(self) -> None:
         # Tests SQLite registry persistence for structured expected payloads.
         temp_dir = tempfile.mkdtemp()
@@ -802,6 +944,22 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         res_bad_dim = await RubricGrader(judge_runner=MockRunner('{"scores": {"accuracy": "abc"}}'), rubric=rubric).agrade(case, "4")
         self.assertFalse(res_bad_dim.passed)
         self.assertIn("Failed to parse rubric response JSON", res_bad_dim.reason)
+
+    async def test_judge_graders_accept_runner_without_temperature(self) -> None:
+        # @intent judge-runners-get-only-kwargs-they-accept
+        # A TextModelRunner-shaped judge has no temperature parameter, so both graders must call it with the prompt alone.
+        case = EvalCase(prompt="2 + 2?", expected="4")
+        reply = '{"score": 1.0, "passed": true, "reason": "ok", "scores": {"accuracy": 1.0}}'
+        make_graders = (lambda judge: LLMJudgeGrader(judge_runner=judge), lambda judge: RubricGrader(judge_runner=judge, rubric={"accuracy": 1.0}))
+        for make_grader in make_graders:
+            strict = KeywordOnlyJudgeRunner(reply)
+            result = await make_grader(strict).agrade(case, "4")
+            self.assertEqual((result.score, result.passed), (1.0, True), result.reason)
+            self.assertEqual(len(strict.prompts), 1)
+            # A runner that does take extra options still gets the deterministic temperature.
+            loose = KwargsRecordingJudgeRunner(reply)
+            await make_grader(loose).agrade(case, "4")
+            self.assertEqual(loose.options, [{"temperature": 0.0}])
 
     async def test_agent_judge_does_not_carry_verdicts_across_cases(self) -> None:
         # Grading several cases with one BaseAgent judge must not grow its history or leak earlier verdicts.

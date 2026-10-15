@@ -185,14 +185,18 @@ class ToolsFormatter:
 
         Two things break otherwise, and both fail the whole request rather than degrading:
         `$defs`/`$ref`, which Pydantic emits for any nested model, and `additionalProperties`,
-        which ``_parameters_schema`` stamps on every spec-declared tool. Refs are expanded in
-        place and unsupported keywords are dropped. A list-valued ``type`` (for example
+        which ``_parameters_schema`` stamps on every spec-declared tool. Refs into `$defs` or
+        draft-07 `definitions` are expanded in place and unsupported keywords are dropped. A list-valued ``type`` (for example
         ``["string", "null"]``) is also rejected, so it is collapsed to a single type, and an
         array without ``items`` is rejected, so it gets ``items: {}`` (any item). ``enum`` is a
         list of strings, so int, float and bool enum values are written as their JSON text.
         """
-        defs = dict(schema.get("$defs") or {})
-        root = {key: value for key, value in schema.items() if key != "$defs"}
+        # @intent gemini-schema-expands-draft07-definitions
+        # Pydantic v1, zod-to-json-schema and hand-written schemas keep shared models under
+        # draft-07 `definitions` instead of `$defs`; read both so their refs still expand,
+        # letting `$defs` win when a name appears in both blocks.
+        defs = {**dict(schema.get("definitions") or {}), **dict(schema.get("$defs") or {})}
+        root = {key: value for key, value in schema.items() if key not in ("$defs", "definitions")}
         return ToolsFormatter._gemini_node(root, defs, ())
 
     @staticmethod
@@ -337,8 +341,19 @@ class ToolsFormatter:
             return None
         message = choices[0].get("message") if isinstance(choices[0], Mapping) else None
         if isinstance(message, Mapping) and isinstance(message.get("tool_calls"), list):
-            return dict(message)
+            # @intent id-less-tool-call-pairs-by-name
+            # An echoed call and its result must carry the same id, so an id-less call falls back
+            # to the id format_tool_result uses: the parsed call id, else the tool name.
+            return {**message, "tool_calls": [ToolsFormatter._echoed_chat_tool_call(call) for call in message["tool_calls"]]}
         return None
+
+    @staticmethod
+    def _echoed_chat_tool_call(raw_call: Any) -> Any:
+        if not isinstance(raw_call, Mapping) or raw_call.get("id"):
+            return raw_call
+        function = raw_call.get("function", raw_call)
+        name = function.get("name", "") if isinstance(function, Mapping) else ""
+        return {**raw_call, "id": str(raw_call.get("call_id") or name)}
 
     @staticmethod
     def _assistant_turn_openai_responses(output: list[Any]) -> Mapping[str, Any] | None:
@@ -638,10 +653,12 @@ class ToolsFormatter:
             args = {}
         if not isinstance(args, Mapping):
             raise ValueError("Gemini function call args must be an object")
+        # @intent gemini-call-id-comes-from-the-function-call
+        # Gemini puts the call id inside functionCall, not on the Part, so read it there first.
         return ToolCall(
             str(function_call.get("name", "")),
             dict(args),
-            call_id=str(raw_call.get("id") or "") or None,
+            call_id=str(function_call.get("id") or raw_call.get("id") or "") or None,
         )
 
     @staticmethod

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import http.client
 import json
 import time
 import uuid
@@ -45,20 +46,26 @@ class HttpResponse:
     headers: Mapping[str, str]
     raw_bytes: bytes | None = None
     attempts: int = 1
+    url: str | None = None  # URL the body was finally read from, after any redirects; None when not tracked.
 
 
 class HttpTransport:
     """Async HTTP transport using httpx; releases the event loop during all I/O."""
 
-    async def request(self, *, method: str, url: str, headers: Mapping[str, str], json_body: Mapping[str, object] | None = None, timeout_seconds: float = 60.0, retry_count: int = 0, backoff_seconds: float = 0.5, backoff_multiplier: float = 2.0, retry_status_codes: tuple[int, ...] = (408, 409, 425, 429, 500, 502, 503, 504), max_response_bytes: int | None = None, idempotency_key: str | None = None, follow_redirects: bool = False) -> HttpResponse:
+    async def request(self, *, method: str, url: str, headers: Mapping[str, str], json_body: Mapping[str, object] | None = None, timeout_seconds: float = 60.0, retry_count: int = 0, backoff_seconds: float = 0.5, backoff_multiplier: float = 2.0, retry_status_codes: tuple[int, ...] = (408, 409, 425, 429, 500, 502, 503, 504), max_response_bytes: int | None = None, idempotency_key: str | None = None, follow_redirects: bool = False, content: bytes | None = None) -> HttpResponse:
         # Send one async HTTP request with optional non-blocking exponential backoff.
+        # @intent json-body-or-content-never-both
+        # A JSON body and exact bytes together is a caller bug, refused
+        # before anything is sent.
+        if json_body is not None and content is not None:
+            raise ProviderRequestError("Pass json_body or content, not both.", provider="http")
         _require_idempotency_guard(method=method, retry_count=retry_count, idempotency_key=idempotency_key)
         attempts = max(0, retry_count) + 1
         delay = max(0.0, backoff_seconds)
         try:
             async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=follow_redirects) as client:
                 for attempt in range(attempts):
-                    response = await self._send_once(client, method=method, url=url, headers=headers, json_body=json_body, timeout_seconds=timeout_seconds, max_response_bytes=max_response_bytes)
+                    response = await self._send_once(client, method=method, url=url, headers=headers, json_body=json_body, timeout_seconds=timeout_seconds, max_response_bytes=max_response_bytes, content=content)
                     if response.status_code not in retry_status_codes or attempt == attempts - 1:
                         return replace(response, attempts=attempt + 1)
                     await asyncio.sleep(delay)
@@ -69,14 +76,17 @@ class HttpTransport:
             raise ProviderRequestError("HTTP request failed before receiving a provider response.", provider="http", response_excerpt=str(exc)) from exc
         raise ProviderRequestError("HTTP retry loop exited unexpectedly.", provider="http")
 
-    async def _send_once(self, client: httpx.AsyncClient, *, method: str, url: str, headers: Mapping[str, str], json_body: Mapping[str, object] | None, timeout_seconds: float, max_response_bytes: int | None = None) -> HttpResponse:
+    async def _send_once(self, client: httpx.AsyncClient, *, method: str, url: str, headers: Mapping[str, str], json_body: Mapping[str, object] | None, timeout_seconds: float, max_response_bytes: int | None = None, content: bytes | None = None) -> HttpResponse:
         # Execute a single httpx request and return HTTP errors as responses rather than exceptions.
+        # @intent content-bytes-go-out-verbatim
+        # Caller bytes go out verbatim with no content-type added, so a
+        # signature over them still matches the wire.
         request_headers = dict(headers)
-        content: bytes | None = None
+        body = content
         if json_body is not None:
-            content = json.dumps(json_body).encode("utf-8")
+            body = json.dumps(json_body).encode("utf-8")
             request_headers = _json_request_headers(request_headers)
-        request = client.build_request(method, url, headers=request_headers, content=content)
+        request = client.build_request(method, url, headers=request_headers, content=body)
         if max_response_bytes is not None:
             return await self._send_bounded(client, request, max_response_bytes=max_response_bytes)
         try:
@@ -137,12 +147,16 @@ class SyncHttpTransport:
                 raw = response.read()
                 if response.status < 200 or response.status >= 300:
                     raise ProviderRequestError("Provider returned non-2xx for binary request.", provider="http", status_code=response.status, response_excerpt=raw.decode("utf-8", errors="replace")[:500])
-                return HttpResponse(status_code=response.status, body="", headers=dict(response.headers.items()), raw_bytes=raw)
+                return HttpResponse(status_code=response.status, body="", headers=dict(response.headers.items()), raw_bytes=raw, url=getattr(response, "url", None))
         except HTTPError as exc:
             error_body = exc.read().decode("utf-8", errors="replace")
             raise ProviderRequestError("Provider request failed.", provider="http", status_code=exc.code, response_excerpt=error_body[:500]) from exc
         except URLError as exc:
             raise ProviderRequestError("HTTP request failed before receiving a provider response.", provider="http", response_excerpt=str(exc.reason)) from exc
+        # @intent sync-request-bytes-normalizes-socket-errors
+        # urllib wraps only send errors in URLError; read timeouts, dropped connections and URLs http.client cannot encode must not escape raw.
+        except (OSError, http.client.HTTPException, UnicodeError) as exc:
+            raise ProviderRequestError("HTTP response failed before completion.", provider="http", response_excerpt=f"{type(exc).__name__}: {exc}") from exc
 
     def upload_multipart(self, *, url: str, headers: Mapping[str, str], fields: Mapping[str, str], file_field: str, file_bytes: bytes, file_name: str, file_content_type: str, timeout_seconds: float = 120.0) -> HttpResponse:
         # Send a multipart/form-data POST with text fields and one binary file field.
@@ -158,6 +172,10 @@ class SyncHttpTransport:
             return HttpResponse(status_code=exc.code, body=exc.read().decode("utf-8", errors="replace"), headers=dict(exc.headers.items()) if exc.headers else {})
         except URLError as exc:
             raise ProviderRequestError("HTTP multipart upload failed.", provider="http", response_excerpt=str(exc.reason)) from exc
+        # @intent sync-upload-multipart-normalizes-socket-errors
+        # urllib wraps only send errors in URLError; a read timeout or dropped connection during the upload must not escape raw.
+        except (OSError, http.client.HTTPException) as exc:
+            raise ProviderRequestError("HTTP multipart upload failed before completion.", provider="http", response_excerpt=f"{type(exc).__name__}: {exc}") from exc
 
     def stream_request(self, *, method: str, url: str, headers: Mapping[str, str], json_body: Mapping[str, object] | None = None, timeout_seconds: float = 120.0) -> Iterator[str]:
         # Open an SSE connection and yield each data-line payload, stopping at [DONE].
@@ -176,6 +194,10 @@ class SyncHttpTransport:
             raise ProviderRequestError("Provider SSE request failed.", provider="http", status_code=exc.code, response_excerpt=error_body[:500]) from exc
         except URLError as exc:
             raise ProviderRequestError("HTTP SSE connection failed.", provider="http", response_excerpt=str(exc.reason)) from exc
+        # @intent sync-stream-request-normalizes-socket-errors
+        # urllib wraps only send errors in URLError; a timeout or dropped connection while waiting for or reading the stream must not escape raw.
+        except (OSError, http.client.HTTPException, UnicodeError) as exc:
+            raise ProviderRequestError("HTTP SSE stream failed before completion.", provider="http", response_excerpt=f"{type(exc).__name__}: {exc}") from exc
 
     def _send_once(self, *, method: str, url: str, headers: Mapping[str, str], json_body: Mapping[str, object] | None, timeout_seconds: float) -> HttpResponse:
         # Execute a single stdlib urllib request and return HTTP errors as responses.
@@ -192,6 +214,10 @@ class SyncHttpTransport:
             return HttpResponse(status_code=exc.code, body=exc.read().decode("utf-8", errors="replace"), headers=dict(exc.headers.items()) if exc.headers else {})
         except URLError as exc:
             raise ProviderRequestError("HTTP request failed before receiving a provider response.", provider="http", response_excerpt=str(exc.reason)) from exc
+        # @intent sync-request-normalizes-socket-errors
+        # urllib wraps only send errors in URLError; a read timeout or dropped connection must not escape raw.
+        except (OSError, http.client.HTTPException, UnicodeError) as exc:
+            raise ProviderRequestError("HTTP response failed before completion.", provider="http", response_excerpt=f"{type(exc).__name__}: {exc}") from exc
 
     def _build_multipart_body(self, *, boundary: str, fields: Mapping[str, str], file_field: str, file_bytes: bytes, file_name: str, file_content_type: str) -> bytes:
         # Build an RFC 2046 multipart/form-data body from text fields and one file.
@@ -210,8 +236,10 @@ class SyncHttpTransport:
             line = raw_line.decode("utf-8").rstrip("\r\n") if isinstance(raw_line, bytes) else raw_line.rstrip("\r\n")
             if not line or line.startswith(":") or line.startswith("event:"):
                 continue
-            if line.startswith("data: "):
-                payload = line[6:]
+            # @intent sse-space-after-colon-is-optional
+            # The SSE standard strips one optional space after the colon; compatible servers such as Kimi for Coding send "data:{...}".
+            if line.startswith("data:"):
+                payload = line[5:].removeprefix(" ")
                 if payload == "[DONE]":
                     return
                 yield payload

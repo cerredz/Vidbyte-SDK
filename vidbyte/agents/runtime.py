@@ -75,6 +75,7 @@ CONCURRENCY MODEL:
 from __future__ import annotations
 
 import asyncio
+import copy
 import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -184,12 +185,15 @@ class BaseAgentRuntimeLoopState:
 class AgentRuntime:
     """Internal runtime for direct agent execution."""
 
-    def __init__(self, *, agent_name: str, system_prompt: str, tools: Tools, permission_policy: PermissionPolicy, config: AgentRuntimeConfig | None = None, tracer: TracerBase | None = None, middleware: Sequence[AgentMiddleware] = (), run_id: str | None = None, algorithm: ContextWindowAlgorithm | str | None = None, context_manager: ContextManager | None = None, recorder: RecorderBase | None = None, output_schema: type | Mapping[str, Any] | None = None, output_contract: "AgentLoopSettingsOutputContract | None" = None, include_internal_tools: bool = True, usage_tracker: UsageTracker | None = None, speed_tracker: AgentSpeedTracker | None = None, fallback: "AgentFallback | None" = None) -> None:
+    def __init__(self, *, agent_name: str, system_prompt: str, tools: Tools, permission_policy: PermissionPolicy, config: AgentRuntimeConfig | None = None, tracer: TracerBase | None = None, middleware: Sequence[AgentMiddleware] = (), run_id: str | None = None, algorithm: ContextWindowAlgorithm | str | None = None, context_manager: ContextManager | None = None, recorder: RecorderBase | None = None, output_schema: type | Mapping[str, Any] | None = None, output_contract: "AgentLoopSettingsOutputContract | None" = None, include_internal_tools: bool = True, usage_tracker: UsageTracker | None = None, speed_tracker: AgentSpeedTracker | None = None, fallback: "AgentFallback | None" = None, agent_catalog: Callable[[], Tools] | None = None) -> None:
         # Configure one direct runtime; isolated review child runtimes may disable implicit internal tools.
         self.agent_name = agent_name
         self.system_prompt = system_prompt
         self.user_tools = tools
         self.tools = with_internal_agent_tools(tools) if include_internal_tools else tools
+        # Reads the owning agent's live catalog, so a tool it adds mid-run (attach_mcp_server) joins this run.
+        self._agent_catalog = agent_catalog
+        self._agent_catalog_seen = tools
         self.permission_policy = permission_policy
         self.config = config or AgentRuntimeConfig()
         self.run_id = run_id
@@ -326,6 +330,7 @@ class AgentRuntime:
         fallback_index = 0
         fallback_attempts: list[dict[str, str]] = []
         fallback_errors: list[BaseException] = []
+        fallback_context_reset = False
 
         decision = await self.middleware.before_run(self._middleware_context(MiddlewareHook.BEFORE_RUN, state))
         if decision.action is not MiddlewareAction.CONTINUE:
@@ -402,6 +407,7 @@ class AgentRuntime:
             call_dispatched_at = self.speed_tracker.now()
             model_call_count_before = state.model_call_count
             state.run_state["_speed_fallback_index"] = fallback_index
+            state.run_state["_speed_call_dispatched_at"] = call_dispatched_at
             try:
                 raw_result, state.model_call_count, compaction_count = await self._invoke_with_middleware(
                     handle,
@@ -438,10 +444,13 @@ class AgentRuntime:
                 tool_schemas, messages = transition.tool_schemas, transition.messages
                 state.messages = messages
                 fallback_index = transition.index
+                # @intent fallback-context-reset-is-sticky
+                # Once any switch reset the transcript this run, a later same-wire switch cannot undo it.
+                fallback_context_reset = fallback_context_reset or transition.context_reset
                 # A non-None transition proves self.fallback is set, so this needs no further guard.
                 self._publish_fallback_metadata(
                     state.run_state,
-                    self.fallback.result_metadata(fallback_attempts, context_reset=transition.context_reset),
+                    self.fallback.result_metadata(fallback_attempts, context_reset=fallback_context_reset),
                 )
                 continue
             self._end_semantic_span(iteration_span, output=handle.extract_text(raw_result))
@@ -465,7 +474,7 @@ class AgentRuntime:
             self.speed_tracker.record_call(
                 RecordModelCallInput(
                     response=raw_result,
-                    dispatched_at=call_dispatched_at,
+                    dispatched_at=state.run_state.pop("_speed_call_dispatched_at", call_dispatched_at),
                     input_tokens=usage_record.usage.input_tokens if usage_record is not None else None,
                     output_tokens=usage_record.usage.output_tokens if usage_record is not None else None,
                     retry_count=max(AGENT_SPEED_ZERO_COUNT, state.model_call_count - model_call_count_before - AGENT_SPEED_FIRST_INDEX),
@@ -665,6 +674,13 @@ class AgentRuntime:
                     return await self._finish_result(final, state)
 
             if finish_attempt_continued or contract_rejected:
+                # @intent refused-finish-still-adopts-added-tools
+                # A refused finish still ends this turn's tool calls, so tools they added reach the next model call, as on a
+                # normal iteration. Its after-iteration hooks already ran with the finish attempt, so it skips them below.
+                catalog = self.tools
+                self._adopt_agent_catalog()
+                if self.tools is not catalog:
+                    tool_schemas = self._resolve_tool_schemas(state.provider)
                 continue
 
             decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state, provider_messages=messages))
@@ -678,10 +694,12 @@ class AgentRuntime:
                 return await self._finish_result(result, state)
             catalog = self.tools
             await self._after_tool_iteration(state, messages)
+            # Bring in tools the agent added to or removed from its own catalog during this iteration.
+            self._adopt_agent_catalog()
             if self.tools is not catalog:
                 # @intent a-replaced-catalog-reaches-the-next-model-call
-                # Schemas are resolved once per run, so a hook that replaced the catalog (JevRuntime adding launch_swarm)
-                # needs them resolved again; an untouched catalog keeps the schemas already resolved.
+                # Schemas are resolved once per run, so a hook that replaced the catalog (JevRuntime adding launch_swarm,
+                # or the agent attaching an MCP server) needs them resolved again; an untouched catalog keeps them.
                 tool_schemas = self._resolve_tool_schemas(state.provider)
 
     async def _invoke_with_middleware(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], *, context: BaseAgentContext, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, metadata: Mapping[str, Any], run_state: dict[type, Any] | None = None, trace_context: SpanContext | None = None, compaction_count: int = 0) -> tuple[object | AgentResult, int, int]:
@@ -756,7 +774,9 @@ class AgentRuntime:
                         dispatched_at=attempt_dispatched_at,
                         retry_count=retry_ordinal,
                         fallback_index=int(state.run_state.get("_speed_fallback_index", AGENT_SPEED_ZERO_COUNT)) or None,
-                        iteration_index=iteration_count or None,
+                        # @intent failed-attempt-shares-its-iteration-index
+                        # iteration_count is not yet counted here, so +1 names the 1-based iteration the success record will carry.
+                        iteration_index=iteration_count + AGENT_SPEED_FIRST_INDEX,
                         error_type=type(exc).__name__,
                     )
                 )
@@ -773,6 +793,9 @@ class AgentRuntime:
                 if decision.action is MiddlewareAction.RETRY:
                     if decision.sleep_seconds:
                         await self._sleep_for_model_retry(decision.sleep_seconds, retry_index=retry_ordinal + AGENT_SPEED_FIRST_RETRY_INDEX)
+                    # @intent retried-success-times-its-own-attempt
+                    # The retried attempt starts after the backoff, so its success record never overlaps the failure or the wait.
+                    state.run_state["_speed_call_dispatched_at"] = self.speed_tracker.now()
                     retry_ordinal += AGENT_SPEED_FIRST_INDEX
                     continue
                 if decision.action is MiddlewareAction.ABORT_RUN:
@@ -803,7 +826,8 @@ class AgentRuntime:
                         dispatched_at=attempt_dispatched_at,
                         retry_count=retry_ordinal,
                         fallback_index=int(state.run_state.get("_speed_fallback_index", AGENT_SPEED_ZERO_COUNT)) or None,
-                        iteration_index=iteration_count or None,
+                        # @intent failed-attempt-shares-its-iteration-index
+                        iteration_index=iteration_count + AGENT_SPEED_FIRST_INDEX,
                         error_type=type(exc).__name__,
                         cancelled=True,
                     )
@@ -896,6 +920,18 @@ class AgentRuntime:
         # @intent iterations-can-be-observed-mid-run
         # A decision made while the agent works (JevRuntime's compute checkpoint) needs the live loop state after each
         # iteration's tool calls, and must run only once the middleware has let the loop continue, so it is called last.
+
+    def _adopt_agent_catalog(self) -> None:
+        """Apply the agent's own catalog changes since the last look to this run's catalog."""
+        # @intent a-tool-the-agent-adds-mid-run-reaches-the-next-iteration
+        # attach_mcp_server promises its tools from the next iteration, so the run applies the agent's adds and removals as
+        # a difference, keeping its own additions (isDone, Jev's tools) and any tool selection, and never replacing a name it has.
+        current = self._agent_catalog() if self._agent_catalog is not None else self._agent_catalog_seen
+        if current is self._agent_catalog_seen:
+            return
+        previous, self._agent_catalog_seen = self._agent_catalog_seen, current
+        catalog = self.tools.without(tool for tool in previous if tool not in current)
+        self.tools = catalog.extend(tool for tool in current if tool not in previous and tool.name not in catalog)
 
     async def _finish_result(self, result: AgentResult, state: BaseAgentRuntimeLoopState) -> AgentResult:
         """Run after_run middleware and attach final middleware metadata."""
@@ -1246,6 +1282,9 @@ class AgentRuntime:
             succeeded = result.status.value == "success"
             if not succeeded:
                 error_type = str(dict(result.metadata).get("error_type") or dict(result.metadata).get("error") or "ToolExecutionError")
+                # @intent count-returned-tool-timeouts
+                # A tool that returns a timeout error (bash at its limit) counts as timed out, the same as a raised one.
+                timed_out = dict(result.metadata).get("error") == "timeout"
             self._tracer.end_span(tool_span, output=result.output)
         except ToolRegistryError as exc:
             result = ToolResult.error(call.tool_name, str(exc), metadata={"error": "unknown_tool", "detail": str(exc)})
@@ -1404,8 +1443,12 @@ class AgentRuntime:
 
     async def _execute_tool(self, tool: object, call: ToolCall, *, tool_is_internal: bool = False) -> ToolResult:
         # Executes the tool, optionally under tool_timeout_seconds, raising ToolExecutionError on failure.
+        # @intent tool-code-gets-its-own-arguments
+        # The runtime validates, retries, prices and records the model's call after the tool ran,
+        # so the tool gets its own copy of the arguments and cannot change the SDK's copy of the call.
+        tool_call = self._tool_owned_call(call)
         try:
-            return await self._run_tool_execute(tool, call, tool_is_internal=tool_is_internal)
+            return await self._run_tool_execute(tool, tool_call, tool_is_internal=tool_is_internal)
         except ToolExecutionError:
             raise
         except Exception as exc:
@@ -1413,6 +1456,15 @@ class AgentRuntime:
                 f"Tool execution failed: {exc}",
                 details={"tool_name": call.tool_name, "error_type": type(exc).__name__},
             ) from exc
+
+    @staticmethod
+    def _tool_owned_call(call: ToolCall) -> ToolCall:
+        # A call built in code may hold values deepcopy rejects; a shallow copy still protects pop and assignment.
+        try:
+            arguments = copy.deepcopy(dict(call.arguments))
+        except Exception:
+            arguments = dict(call.arguments)
+        return replace(call, arguments=arguments)
 
     async def _run_tool_execute(self, tool: object, call: ToolCall, *, tool_is_internal: bool) -> ToolResult:
         # Runs tool.execute, wrapping non-internal calls with ToolSettings.tool_timeout_seconds when set.
@@ -1701,7 +1753,9 @@ class AgentRuntime:
         if after_decision.action is not MiddlewareAction.ABORT_RUN and not (call.tool_name == IS_DONE_TOOL_NAME and result.status.value == "success"):
             # Show the model its view of the result, and remember that view on the record
             # so later runs replay what the model saw rather than the raw, unprotected output.
-            visible_result = self._append_tool_result_message(messages, call, result, state.provider, after_decision)
+            # @intent denials-are-never-truncated
+            # A permission or middleware denial never ran, so result_max_chars must not cut its reason off.
+            visible_result = self._append_tool_result_message(messages, call, result, state.provider, after_decision, truncate=context_record.state is not ToolCallState.DENIED)
             context_record = self._with_model_visible_result(context_record, result, visible_result)
         state.call_contexts.append(context_record)
         if after_decision.action is MiddlewareAction.ABORT_RUN:

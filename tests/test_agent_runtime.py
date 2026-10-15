@@ -23,8 +23,10 @@ Similar Files:
 
 from __future__ import annotations
 
+import asyncio
 import unittest
 from typing import Literal
+from unittest.mock import patch
 
 from pydantic import BaseModel, Field
 
@@ -32,6 +34,7 @@ from vidbyte.agents import AgentRuntime
 from vidbyte.agents.runtimes.configs import ActorRuntime
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.agents.settings.tool import ToolSettings
+from vidbyte.agents.speed import AgentSpeedTracker
 from vidbyte.lib.dataclasses.middleware import MiddlewareDecision
 from vidbyte.middleware.base import AgentMiddleware
 from vidbyte.tools import ToolActivity, ToolParameter
@@ -41,6 +44,7 @@ from vidbyte.context import ContextArtifact, ContextManager, ContextPermissions,
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.enums import AgentRuntimeType, ModelModality
+from vidbyte.lib.errors import AgentExecutionError
 from vidbyte.lib.dataclasses.context import BaseContext as StrategyContext
 from vidbyte.tools import BaseTool, ToolCall, ToolCallContext, ToolPermission, ToolResult, ToolSpec, Tools, tool
 from vidbyte.tools.security import PermissionPolicy
@@ -927,6 +931,60 @@ class SlowTool(BaseTool):
         return ToolResult.success("slow_tool", "should not reach here")
 
 
+class ReturnedTimeoutTool(BaseTool):
+    """Tool that returns a timeout error instead of raising, the way BashTool reports a command stopped at its limit."""
+
+    def spec(self) -> ToolSpec:
+        return ToolSpec(name="returned_timeout", description="Returns a timeout error.")
+
+    async def execute(self, call: ToolCall) -> ToolResult:
+        return ToolResult.error("returned_timeout", "command timed out", metadata={"error": "timeout"})
+
+
+class RetryOnceMiddleware(AgentMiddleware):
+    """Retry the first model error after a fixed backoff, then let later errors propagate."""
+
+    def __init__(self, sleep_seconds: float) -> None:
+        self._sleep_seconds = sleep_seconds
+        self.retried = False
+
+    async def on_model_error(self, ctx) -> MiddlewareDecision:
+        if self.retried:
+            return MiddlewareDecision.continue_()
+        self.retried = True
+        return MiddlewareDecision.retry("transient", sleep_seconds=self._sleep_seconds)
+
+
+class FlakyModelOnFakeClock:
+    """Model whose ``fail_on_attempt``-th attempt fails; every attempt and sleep advances a manual clock instead of wall time.
+
+    The first ``tool_turns`` successful replies call ``slow_tool`` so the failure can land in a later iteration.
+    """
+
+    def __init__(self, attempt_seconds: float, *, fail_on_attempt: int = 1, tool_turns: int = 0) -> None:
+        self._attempt_seconds = attempt_seconds
+        self._fail_on_attempt = fail_on_attempt
+        self._tool_turns = tool_turns
+        self._now = 0.0
+        self.attempts = 0
+
+    def now(self) -> float:
+        return self._now
+
+    async def sleep(self, seconds: float) -> None:
+        self._now += seconds
+
+    async def invoke(self, runner: object, prompt: str, **kwargs: object) -> FakeResponse:
+        self._now += self._attempt_seconds
+        self.attempts += 1
+        if self.attempts == self._fail_on_attempt:
+            raise RuntimeError("transient provider failure")
+        if self._tool_turns:
+            self._tool_turns -= 1
+            return _ProviderTaggedResponse("", {"output": [{"type": "function_call", "name": "slow_tool", "arguments": "{}", "call_id": f"call_{self.attempts}"}]})
+        return _ProviderTaggedResponse("", {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}'}]})
+
+
 class AgentSpeedTrackingRuntimeTests(unittest.IsolatedAsyncioTestCase):
     """Verifies AgentRuntime records model-call and tool-call speed through the real loop."""
 
@@ -983,6 +1041,31 @@ class AgentSpeedTrackingRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(timed_out_calls), 1)
         self.assertEqual(timed_out_calls[0].tool_name, "slow_tool")
 
+    async def test_returned_tool_timeout_is_recorded_with_timed_out_true(self) -> None:
+        """A tool that returns metadata error=timeout counts as timed out, like one stopped by ToolSettings."""
+        runner = FakeRunner(
+            [
+                _ProviderTaggedResponse("", {"output": [{"type": "function_call", "name": "returned_timeout", "arguments": "{}", "call_id": "call_1"}]}),
+                _ProviderTaggedResponse("", {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}'}]}),
+            ]
+        )
+        runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=Tools([ReturnedTimeoutTool()]), permission_policy=PermissionPolicy())
+        context = runtime.build_context("task", base_context=None, history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+
+        await runtime.arun(
+            "task",
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
+            context=context,
+        )
+
+        record = next(call for call in runtime.speed_tracker.tool_calls if call.tool_name == "returned_timeout")
+        self.assertTrue(record.timed_out)
+        self.assertEqual(record.error_type, "timeout")
+        rollup = runtime.speed_tracker.rollup()
+        self.assertEqual(rollup.tool_call_stats.timed_out_count, 1)
+        tool_stats = next(stats for stats in rollup.tool_stats if stats.tool_name == "returned_timeout")
+        self.assertEqual(tool_stats.timed_out_count, 1)
+
     async def test_settings_denials_are_recorded_like_a_middleware_denial(self) -> None:
         """A ToolSettings or allowed_tools refusal reaches speed stats as one failed call, exactly like a middleware denial."""
         guardrails = {
@@ -1012,6 +1095,66 @@ class AgentSpeedTrackingRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 write_stats = next(stats for stats in runtime.speed_tracker.rollup().tool_stats if stats.tool_name == "write")
                 self.assertEqual((write_stats.tool_call_count, write_stats.failed_tool_call_count), (1, 1))
 
+    async def test_retried_success_is_timed_from_its_own_attempt_after_the_backoff(self) -> None:
+        """[Regression] The success after a retry was timed from the first attempt, overlapping the failure and backoff."""
+        model = FlakyModelOnFakeClock(attempt_seconds=0.2)
+        runtime = AgentRuntime(
+            agent_name="worker",
+            system_prompt="Work.",
+            tools=Tools([]),
+            permission_policy=PermissionPolicy(),
+            middleware=[RetryOnceMiddleware(sleep_seconds=0.5)],
+            speed_tracker=AgentSpeedTracker(clock=model.now),
+        )
+        context = runtime.build_context("task", base_context=None, history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+
+        # The retry backoff advances the fake clock instead of sleeping for real.
+        with patch.object(runtime.middleware, "sleep", model.sleep):
+            await runtime.arun(
+                "task",
+                handle=RunnerHandle(runner=model, provider="openai", invoke=model.invoke, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
+                context=context,
+            )
+
+        stats = runtime.speed_tracker.rollup()
+        failed = next(call for call in runtime.speed_tracker.calls if not call.succeeded)
+        succeeded = next(call for call in runtime.speed_tracker.calls if call.succeeded)
+        self.assertGreaterEqual(succeeded.dispatched_at, failed.completed_at)
+        self.assertGreaterEqual(succeeded.dispatched_at, stats.retry_waits[0].completed_at)
+        self.assertAlmostEqual(succeeded.duration_ms, 200.0)
+        self.assertAlmostEqual(stats.run_stats.overlap_ms, 0.0)
+
+    async def test_failed_attempt_carries_the_iteration_index_of_its_retry_success(self) -> None:
+        """[Regression] A failed attempt was stamped with the previous iteration's index (None in iteration 1)."""
+        # Each case: the attempt that fails, how many tool turns come first, and the iteration both records belong to.
+        cases = {"iteration 1": (1, 0, 1), "iteration 2": (2, 1, 2)}
+        for name, (fail_on_attempt, tool_turns, expected_iteration) in cases.items():
+            with self.subTest(failure_in=name):
+                model = FlakyModelOnFakeClock(attempt_seconds=0.1, fail_on_attempt=fail_on_attempt, tool_turns=tool_turns)
+                runtime = AgentRuntime(
+                    agent_name="worker",
+                    system_prompt="Work.",
+                    tools=Tools([SlowTool(sleep_seconds=0)]),
+                    permission_policy=PermissionPolicy(),
+                    middleware=[RetryOnceMiddleware(sleep_seconds=0.5)],
+                    speed_tracker=AgentSpeedTracker(clock=model.now),
+                )
+                context = runtime.build_context("task", base_context=None, history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+
+                with patch.object(runtime.middleware, "sleep", model.sleep):
+                    await runtime.arun(
+                        "task",
+                        handle=RunnerHandle(runner=model, provider="openai", invoke=model.invoke, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
+                        context=context,
+                    )
+
+                calls = runtime.speed_tracker.calls
+                failed_index = next(index for index, call in enumerate(calls) if not call.succeeded)
+                retry_success = calls[failed_index + 1]
+                self.assertTrue(retry_success.succeeded)
+                self.assertEqual(calls[failed_index].iteration_index, expected_iteration)
+                self.assertEqual(retry_success.iteration_index, expected_iteration)
+
 
 class AnswerRunner:
     """Offline runner that returns one fixed answer for every actor or search call."""
@@ -1022,6 +1165,16 @@ class AnswerRunner:
     def run(self, prompt: str, **_: object) -> FakeResponse:
         self.calls += 1
         return FakeResponse("ANSWER", {})
+
+
+class UsageAnswerRunner(AnswerRunner):
+    """AnswerRunner whose replies carry provider usage, so each billed call can be metered."""
+
+    def run(self, prompt: str, **_: object) -> FakeResponse:
+        self.calls += 1
+        response = _ProviderTaggedResponse("ANSWER", {}, provider="openai", model="fake")
+        response.usage = {"input_tokens": 100, "output_tokens": 20, "total_tokens": 120}
+        return response
 
 
 class NonLinearRuntimeRegressionTests(unittest.TestCase):
@@ -1054,6 +1207,114 @@ class NonLinearRuntimeRegressionTests(unittest.TestCase):
         # [Regression] A reply that completed the run during the quiescence poll was set again.
         result, _ = self._run(ActorRuntime(termination_mode="quiescence", include_actors=[]))
         self.assertEqual(result.content, "ANSWER")
+
+    def test_actor_model_calls_reach_the_run_usage_ledger(self) -> None:
+        # @intent actor-calls-are-metered
+        # [Regression] Actor calls were billed but never recorded, so get_usage() of an actor-runtime agent was empty.
+        runner = UsageAnswerRunner()
+        agent = build_test_agent(name="r", system_prompt="s", runtime=ActorRuntime(include_actors=[]), runner=runner)
+        agent.run("q")
+        usage = agent.get_usage()
+        self.assertEqual(runner.calls, 1)
+        self.assertEqual(len(usage.calls), 1)
+        self.assertEqual((usage.input_tokens, usage.output_tokens, usage.total_tokens), (100, 20, 120))
+
+    def test_actor_root_named_like_a_completion_address_still_runs(self) -> None:
+        # [Regression] The boot message to a root named "orchestrator" or "system" became the run's answer unrun.
+        for name in ("orchestrator", "system"):
+            for topology in (AgentRuntimeType.ACTOR_MODEL_P2P, AgentRuntimeType.ACTOR_MODEL_BROADCAST):
+                with self.subTest(name=name, topology=topology):
+                    runner = AnswerRunner()
+                    runtime = ActorRuntime(topology=topology, include_actors=[])
+                    agent = build_test_agent(name=name, system_prompt="s", runtime=runtime, runner=runner)
+                    result = agent.run("q")
+                    self.assertEqual(result.content, "ANSWER")
+                    self.assertEqual(runner.calls, 1)
+
+    def test_actor_answers_a_user_prompt_of_exit_instead_of_hanging(self) -> None:
+        # [Regression] A user prompt of "exit" was dropped as an exit signal, so coordinator mode waited forever.
+        for prompt in ("exit", " Exit\n"):
+            for topology in (AgentRuntimeType.ACTOR_MODEL_P2P, AgentRuntimeType.ACTOR_MODEL_BROADCAST):
+                with self.subTest(prompt=prompt, topology=topology):
+                    runner = AnswerRunner()
+                    runtime = ActorRuntime(topology=topology, include_actors=[])
+                    agent = build_test_agent(name="r", system_prompt="s", runtime=runtime, runner=runner)
+                    result = asyncio.run(asyncio.wait_for(agent.arun(prompt), timeout=5))
+                    self.assertEqual(result.content, "ANSWER")
+                    self.assertEqual(runner.calls, 1)
+
+    def test_actor_max_loop_allows_exactly_max_loop_messages(self) -> None:
+        # @intent max-loop-allows-exactly-max-loop-messages
+        # [Regression] The ceiling refused the max_loop-th message, so max_loop=2 billed the answer and then replaced it.
+        result, runner = self._run(ActorRuntime(include_actors=[], max_loop=2))
+        self.assertEqual(result.content, "ANSWER")
+        self.assertEqual(runner.calls, 1)
+
+    def test_actor_broadcast_coordinator_returns_the_root_answer(self) -> None:
+        # @intent coordinator-completes-only-from-the-root
+        # [Regression] In broadcast coordinator mode the first actor to answer the boot message ended the run with its text.
+        from vidbyte.agents.runtimes.actor.actor import PlannerActor
+
+        runtime = ActorRuntime(topology=AgentRuntimeType.ACTOR_MODEL_BROADCAST, include_actors=[PlannerActor])
+        agent = build_test_agent(name="root", system_prompt="s", runtime=runtime, runner=PerActorRunner(slow_actor="root"))
+        result = asyncio.run(asyncio.wait_for(agent.arun("q"), timeout=5))
+        self.assertEqual(result.content, "ANSWER FROM root")
+
+    def test_actor_run_reports_its_actor_count(self) -> None:
+        # @intent actor-count-is-read-before-cleanup
+        # [Regression] The count was read after the cleanup cleared the actor table, so every run reported active_actors=0.
+        from vidbyte.agents.runtimes.actor.actor import CriticActor, PlannerActor
+
+        agent = build_test_agent(name="r", system_prompt="s", runtime=ActorRuntime(include_actors=[PlannerActor, CriticActor]), runner=AnswerRunner())
+        runtime = agent._runtime()
+        with patch.object(agent, "_runtime", return_value=runtime):
+            result = asyncio.run(asyncio.wait_for(agent.arun("q"), timeout=5))
+        self.assertEqual(result.content, "ANSWER")
+        self.assertEqual(result.metadata["active_actors"], 3)
+        self.assertEqual(runtime._actors, {})
+
+    def test_actor_quiescence_waits_for_an_actor_that_is_still_working(self) -> None:
+        # [Regression] Quiescence ended the run while the root actor was still awaiting its model call.
+        agent = build_test_agent(name="r", system_prompt="s", runtime=ActorRuntime(termination_mode="quiescence", include_actors=[]), runner=SlowAnswerRunner())
+        result = asyncio.run(asyncio.wait_for(agent.arun("q"), timeout=5))
+        self.assertEqual(result.content, "SLOW ANSWER")
+
+    def test_actor_run_raises_when_an_actor_model_call_fails(self) -> None:
+        # [Regression] A failed actor model call hung coordinator mode and reported success in quiescence mode.
+        for mode in ("coordinator", "quiescence"):
+            with self.subTest(termination_mode=mode):
+                agent = build_test_agent(name="r", system_prompt="s", runtime=ActorRuntime(termination_mode=mode, include_actors=[]), runner=FailingRunner())
+                with self.assertRaises(AgentExecutionError) as caught:
+                    asyncio.run(asyncio.wait_for(agent.arun("q"), timeout=5))
+                self.assertIsInstance(caught.exception.__cause__, RuntimeError)
+
+
+class SlowAnswerRunner:
+    """Offline runner that yields to the event loop before answering, like a real model call."""
+
+    async def arun(self, prompt: str, **_: object) -> FakeResponse:
+        await asyncio.sleep(0.05)
+        return FakeResponse("SLOW ANSWER", {})
+
+
+class PerActorRunner:
+    """Offline runner that names the answering actor, and makes one actor answer after the others."""
+
+    def __init__(self, *, slow_actor: str) -> None:
+        self.slow_actor = slow_actor
+
+    async def arun(self, prompt: str, **_: object) -> FakeResponse:
+        actor_id = prompt.split("Your Actor ID is: ", 1)[1].split("\n", 1)[0]
+        await asyncio.sleep(0.05 if actor_id == self.slow_actor else 0)
+        return FakeResponse(f"ANSWER FROM {actor_id}", {})
+
+
+class FailingRunner:
+    """Offline runner whose model call always fails, like a provider rejecting the request."""
+
+    async def arun(self, prompt: str, **_: object) -> FakeResponse:
+        await asyncio.sleep(0)
+        raise RuntimeError("provider rejected the request")
 
 if __name__ == "__main__":
     unittest.main()

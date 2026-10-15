@@ -68,7 +68,9 @@ def _has_secret_like_keys(mapping: Mapping[str, Any]) -> bool:
     # Returns True if any key in the mapping looks like a secret or credential.
     for key in mapping:
         lower = key.lower().replace("-", "_")
-        if lower in _SECRET_KEY_SUFFIXES:
+        # @intent secret-key-suffixes-match-as-suffixes
+        # A suffix matches the whole key or its last underscore-separated part (openai_api_key, db_password).
+        if any(lower == suffix or lower.endswith("_" + suffix) for suffix in _SECRET_KEY_SUFFIXES):
             return True
         if any(lower.startswith(prefix) for prefix in _SECRET_KEY_PREFIXES):
             return True
@@ -182,7 +184,9 @@ class AgentDescriptor:
                 "Agent name must not contain environment interpolation patterns.",
                 details={"field": "name", "expected": "no ${...} patterns"},
             )
-        if not _NAME_PATTERN.match(self.name):
+        # @intent descriptor-patterns-match-the-whole-value
+        # `$` also matches before one trailing newline (a YAML `|` block scalar), so the whole value must match.
+        if not _NAME_PATTERN.fullmatch(self.name):
             raise ConfigurationError(
                 f"Agent name '{self.name}' should use kebab-case (lowercase letters, digits, hyphens) for tool-name compatibility.",
                 details={"field": "name", "actual": self.name, "pattern": _NAME_PATTERN.pattern},
@@ -242,6 +246,8 @@ class AgentDescriptor:
             ) from exc
         try:
             ProviderModelRegistry.validate_model(self.model_name)
+            # An 'openrouter/<vendor>/<model>' slug only runs through OpenRouter, never through the declared vendor.
+            ProviderModelRegistry.require_openrouter_for_routed_model(self.provider, self.model_name)
         except ConfigurationError as exc:
             raise ConfigurationError(
                 f"Invalid model_name: {exc}",
@@ -295,7 +301,7 @@ class AgentDescriptor:
                     f"Tool ref '{ref}' must be at most {_MAX_REF_CHARS} characters.",
                     details={"field": f"tools[{index}].ref", "max_chars": _MAX_REF_CHARS, "actual_chars": len(ref)},
                 )
-            if not _REF_PATTERN.match(ref):
+            if not _REF_PATTERN.fullmatch(ref):
                 raise ConfigurationError(
                     f"Tool ref '{ref}' must match pattern '{_REF_PATTERN.pattern}'.",
                     details={"field": f"tools[{index}].ref", "actual": ref, "expected": "lowercase identifier with dots, hyphens, underscores"},
@@ -331,7 +337,7 @@ class AgentDescriptor:
                     f"Middleware ref '{ref}' must be at most {_MAX_REF_CHARS} characters.",
                     details={"field": f"middleware[{index}]", "max_chars": _MAX_REF_CHARS, "actual_chars": len(ref)},
                 )
-            if not _REF_PATTERN.match(ref):
+            if not _REF_PATTERN.fullmatch(ref):
                 raise ConfigurationError(
                     f"Middleware ref '{ref}' must match pattern '{_REF_PATTERN.pattern}'.",
                     details={"field": f"middleware[{index}]", "actual": ref, "expected": "lowercase identifier with dots, hyphens, underscores"},

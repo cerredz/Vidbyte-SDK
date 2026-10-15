@@ -13,6 +13,7 @@ TESTS: tests/features/coding_agent/test_coding_agent_environment.py
 
 from __future__ import annotations
 
+import codecs
 import json
 import os
 import re
@@ -49,6 +50,11 @@ class ProjectDependencies:
         # and build tools are what the model most often needs to know.
         names = [*cls._python_names(pyproject), *cls._requirement_names(requirements), *cls._node_names(package_json), *cls._rust_names(cargo)]
 
+        # @intent blank-manifest-key-gives-no-name
+        # A table key such as "" or " " is malformed, not a name, and
+        # EnvironmentContextItem rejects a blank one.
+        names = [name.strip() for name in names if isinstance(name, str) and name.strip()]
+
         # Keep each name once, in the order it first appeared, and cap
         # the list so a huge manifest cannot fill the context.
         return tuple(dict.fromkeys(names))[:CODING_ENVIRONMENT_MAX_DEPENDENCIES]
@@ -64,24 +70,33 @@ class ProjectDependencies:
                 raw = handle.read(CODING_ENVIRONMENT_MANIFEST_MAX_BYTES)
         except OSError:
             return ""
-        # "utf-8-sig" drops the byte-order mark Windows PowerShell writes,
-        # which npm and pip accept but tomllib, json, and the name match do not.
-        return "" if total_bytes > CODING_ENVIRONMENT_MANIFEST_MAX_BYTES else raw.decode("utf-8-sig", errors="replace")
+        # @intent powershell-utf16-manifests-are-read
+        # Windows PowerShell 5.1's > and Out-File write UTF-16 with a
+        # byte-order mark, as in pip freeze > requirements.txt, which pip
+        # reads; "utf-16" reads that mark and drops it. "utf-8-sig" drops
+        # the UTF-8 mark it writes for -Encoding utf8, which npm and pip
+        # accept but tomllib, json, and the name match do not.
+        encoding = "utf-16" if raw.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)) else "utf-8-sig"
+        return "" if total_bytes > CODING_ENVIRONMENT_MANIFEST_MAX_BYTES else raw.decode(encoding, errors="replace")
 
     @staticmethod
     def _toml(text: str) -> dict[str, Any]:
         """Return text parsed as TOML, or an empty table when it is not valid TOML."""
+        # @intent deeply-nested-manifest-gives-no-name
+        # The parser raises RecursionError on input nested thousands deep; that is malformed too.
         try:
             return tomllib.loads(text)
-        except tomllib.TOMLDecodeError:
+        except (tomllib.TOMLDecodeError, RecursionError):
             return {}
 
     @staticmethod
     def _json(text: str) -> dict[str, Any]:
         """Return text parsed as a JSON object, or an empty table when it is not one."""
+        # @intent deeply-nested-manifest-gives-no-name
+        # The parser raises RecursionError on input nested thousands deep; that is malformed too.
         try:
             data = json.loads(text) if text else {}
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, RecursionError):
             return {}
         return data if isinstance(data, dict) else {}
 

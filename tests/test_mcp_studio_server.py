@@ -25,9 +25,11 @@ from unittest import mock
 
 from tests.agent_test_support import build_test_agent
 from vidbyte.agents import BaseAgent
+from vidbyte.agents.types import AgentMessage
 from vidbyte.mcp_server import McpStudioServer
 from vidbyte.mcp_server.server import (
     JSONRPC_METHOD_NOT_FOUND,
+    JSONRPC_PARSE_ERROR,
 )
 from vidbyte.mcp_server.schema import McpSchema
 from vidbyte.mcp_server.server import core as server_core
@@ -51,10 +53,35 @@ class FakeEchoTool(BaseTool):
         return ToolResult.success("echo", f"ECHO: {text}")
 
 
+class FakeErrorTextTool(BaseTool):
+    """A tool that succeeds with output that happens to start with "Error:"."""
+
+    def spec(self) -> ToolSpec:
+        return ToolSpec(
+            name="read_log",
+            description="Returns a log whose first line is an error.",
+            parameters=(),
+            permission=ToolPermission.READ,
+        )
+
+    async def execute(self, call: ToolCall) -> ToolResult:
+        return ToolResult.success("read_log", "Error: disk full on /var\nretrying")
+
+
 class FakeRunner:
     """A fake runner with arun method for BaseAgent to invoke."""
     async def arun(self, message: str, **kwargs: object) -> object:
         return FakeRunnerResult(text=f"ECHO: {message}")
+
+
+class RecordingRunner(FakeRunner):
+    """A FakeRunner that records every request it receives, prompt plus options such as system and messages."""
+    def __init__(self) -> None:
+        self.messages: list[str] = []
+
+    async def arun(self, message: str, **kwargs: object) -> object:
+        self.messages.append(f"{message}\n{kwargs!r}")
+        return await super().arun(message, **kwargs)
 
 
 class FakeRunnerResult:
@@ -132,6 +159,47 @@ class McpStudioServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("result", response)
         self.assertNotIn("isError", response["result"])
 
+    async def test_tools_call_agents_run_does_not_share_history_between_calls(self) -> None:
+        runner = RecordingRunner()
+        agent = build_test_agent(
+            name="test-agent",
+            system_prompt="You are a test agent.",
+            runner=runner,
+            max_tool_rounds=1,
+            max_iterations=1,
+        )
+        server = McpStudioServer(agents={"test-agent": agent})
+        for request_id, prompt in ((1, "client A secret ALPHA-4417"), (2, "client B asks BRAVO")):
+            response = await self._dispatch(server, "tools/call", {
+                "name": "studio.agents.run",
+                "arguments": {"agent_name": "test-agent", "prompt": prompt},
+            }, request_id=request_id)
+            self.assertIn("result", response)
+            self.assertNotIn("isError", response["result"])
+        self.assertEqual(len(runner.messages), 2)
+        self.assertNotIn("ALPHA-4417", runner.messages[1])
+        self.assertEqual(agent.history, [])
+
+    async def test_tools_call_agents_run_keeps_preloaded_history(self) -> None:
+        runner = RecordingRunner()
+        agent = build_test_agent(
+            name="test-agent",
+            system_prompt="You are a test agent.",
+            runner=runner,
+            max_tool_rounds=1,
+            max_iterations=1,
+        )
+        agent.history.append(AgentMessage(sender="user", recipient="test-agent", content="preloaded PRELOAD-77"))
+        server = McpStudioServer(agents={"test-agent": agent})
+        response = await self._dispatch(server, "tools/call", {
+            "name": "studio.agents.run",
+            "arguments": {"agent_name": "test-agent", "prompt": "hello"},
+        })
+        self.assertNotIn("isError", response["result"])
+        self.assertEqual(len(agent.history), 1)
+        self.assertEqual(agent.history[0].content, "preloaded PRELOAD-77")
+        self.assertIn("PRELOAD-77", runner.messages[0])
+
     async def test_tools_call_unknown_agent(self) -> None:
         agent = self._make_agent("test-agent")
         server = McpStudioServer(agents={"test-agent": agent})
@@ -161,6 +229,15 @@ class McpStudioServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("result", response)
         content_text = response["result"]["content"][0]["text"]
         self.assertIn("ECHO: hello", content_text)
+
+    async def test_tools_call_success_starting_with_error_text_is_not_is_error(self) -> None:
+        server = McpStudioServer(tools=[FakeErrorTextTool()])
+        response = await self._dispatch(server, "tools/call", {
+            "name": "read_log", "arguments": {},
+        })
+        self.assertNotIn("isError", response["result"], response)
+        content_text = response["result"]["content"][0]["text"]
+        self.assertEqual(content_text, "Error: disk full on /var\nretrying")
 
     async def test_unknown_method_returns_error(self) -> None:
         server = McpStudioServer()
@@ -217,6 +294,21 @@ class McpStudioServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]["name"], "agent-alpha")
 
+    async def test_listed_agent_name_runs_and_filters_when_key_differs_from_agent_name(self) -> None:
+        server = McpStudioServer(agents={"analyst": self._make_agent("Research Bot")})
+        listed = await self._dispatch(server, "tools/call", {"name": "studio.agents.list", "arguments": {}})
+        name = json.loads(listed["result"]["content"][0]["text"])[0]["name"]
+        ran = await self._dispatch(server, "tools/call", {
+            "name": "studio.agents.run",
+            "arguments": {"agent_name": name, "prompt": "echo hello"},
+        })
+        self.assertNotIn("isError", ran["result"], ran)
+        filtered = await self._dispatch(server, "tools/call", {
+            "name": "studio.agents.list",
+            "arguments": {"filter_name": name[:4]},
+        })
+        self.assertEqual([card["name"] for card in json.loads(filtered["result"]["content"][0]["text"])], [name])
+
     async def test_server_close_sets_shutdown_flag(self) -> None:
         server = McpStudioServer()
         self.assertFalse(server._shutdown)
@@ -272,6 +364,40 @@ class McpStudioServerTests(unittest.IsolatedAsyncioTestCase):
         responses = [json.loads(line) for line in stdout.getvalue().decode("utf-8").splitlines()]
         self.assertEqual([response["id"] for response in responses], [1, 2])
         self.assertNotIn("error", responses[1])
+
+    async def test_run_answers_undecodable_line_with_parse_error_and_keeps_serving(self) -> None:
+        lines = [
+            b'{"jsonrpc":"2.0","id":1,"method":"ping"}\n',
+            b'{"jsonrpc":"2.0","id":2,"method":"ping","params":{"x":"\xff\xfe"}}\n',
+            b'{"jsonrpc":"2.0","id":3,"method":"ping"}\n',
+        ]
+        stdin = io.BytesIO(b"".join(lines))
+        stdout = io.BytesIO()
+        fake_sys = SimpleNamespace(platform="win32", stdin=SimpleNamespace(buffer=stdin), stdout=SimpleNamespace(buffer=stdout))
+        with mock.patch.object(server_core, "sys", fake_sys):
+            await McpStudioServer().run()
+        responses = [json.loads(line) for line in stdout.getvalue().decode("utf-8").splitlines()]
+        self.assertEqual([response["id"] for response in responses], [1, None, 3])
+        self.assertEqual(responses[1]["error"]["code"], JSONRPC_PARSE_ERROR)
+        self.assertEqual(responses[2]["result"], {})
+
+    async def test_run_answers_too_deeply_nested_line_with_parse_error_and_keeps_serving(self) -> None:
+        depth = 100_000
+        nested = b"[" * depth + b"]" * depth
+        lines = [
+            b'{"jsonrpc":"2.0","id":1,"method":"ping"}\n',
+            b'{"jsonrpc":"2.0","id":2,"method":"ping","params":{"x":' + nested + b"}}\n",
+            b'{"jsonrpc":"2.0","id":3,"method":"ping"}\n',
+        ]
+        stdin = io.BytesIO(b"".join(lines))
+        stdout = io.BytesIO()
+        fake_sys = SimpleNamespace(platform="win32", stdin=SimpleNamespace(buffer=stdin), stdout=SimpleNamespace(buffer=stdout))
+        with mock.patch.object(server_core, "sys", fake_sys):
+            await McpStudioServer().run()
+        responses = [json.loads(line) for line in stdout.getvalue().decode("utf-8").splitlines()]
+        self.assertEqual([response["id"] for response in responses], [1, None, 3])
+        self.assertEqual(responses[1]["error"]["code"], JSONRPC_PARSE_ERROR)
+        self.assertEqual(responses[2]["result"], {})
 
     async def test_ping_returns_empty_result(self) -> None:
         response = await self._dispatch(McpStudioServer(), "ping", request_id=9)

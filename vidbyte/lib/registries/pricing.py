@@ -17,7 +17,7 @@ Architecture:
     - PROVIDER_PRICING: Built-in rate table keyed by provider then model string.
     - PRICING_SOURCE_URL / PRICING_AS_OF: Audit metadata for the live source.
     - ModelPricingRegistry: Resolves (provider, model) to rates with prefix
-      matching and supports caller overrides.
+      matching limited to release suffixes and supports caller overrides.
 Key Functions:
     - default: Builds a registry over the built-in PROVIDER_PRICING table.
     - resolve: Returns the ModelPricing for a provider/model, or None.
@@ -331,7 +331,8 @@ class ModelPricingRegistry:
         return cls(PROVIDER_PRICING)
 
     def resolve(self, provider: ModelProvider, model: str) -> ModelPricing | None:
-        # Returns exact or longest-prefix pricing for the model, else None. The
+        # Returns exact pricing for the model, else the longest key it is a
+        # release of (dated snapshot, -latest, or patch version), else None. The
         # provider is strictly a ModelProvider (the enum's frozen set of keys);
         # callers coerce any raw provider string once, at the ingestion boundary.
         if not isinstance(provider, ModelProvider) or not isinstance(model, str) or not model.strip():
@@ -345,10 +346,26 @@ class ModelPricingRegistry:
         exact = models.get(canonical_model)
         if exact is not None:
             return exact
-        prefix_matches = [(key, pricing) for key, pricing in models.items() if canonical_model.startswith(key)]
+        # Fall back to the longest priced key the model is a release of, so a
+        # differently named variant with no row of its own stays unpriced.
+        prefix_matches = [
+            (key, pricing)
+            for key, pricing in models.items()
+            if canonical_model.startswith(key) and self._is_release_suffix(canonical_model[len(key):])
+        ]
         if not prefix_matches:
             return None
         return max(prefix_matches, key=lambda item: len(item[0]))[1]
+
+    @staticmethod
+    def _is_release_suffix(remainder: str) -> bool:
+        # @intent prefix-pricing-covers-releases-not-variants
+        # A dated snapshot (-20251001), -latest, or a patch version (.0) is the same
+        # SKU; a lettered suffix (-flash, -mini, -pro) names a different SKU, which
+        # this table omits rather than guesses, so its cost resolves to None.
+        if remainder == "-latest":
+            return True
+        return not (len(remainder) >= 2 and remainder[0] == "-" and remainder[1].isalpha())
 
     def register(self, provider: ModelProvider, model: str, pricing: ModelPricing) -> None:
         # Adds or overrides one provider/model entry after validating inputs; the

@@ -235,6 +235,12 @@ class TestCalculatorBoundedEval(unittest.IsolatedAsyncioTestCase):
         self.assertIn("name 'x' is not permitted", (await self._run("x + 1")).output)
         self.assertIn("exceeds the calculator bound", (await self._run("2**1e3")).output)
 
+    async def test_whitespace_between_digits_is_an_error_not_a_merged_number(self) -> None:
+        for expression in ("2 3", "1 000 * 3", "12 34 + 1"):
+            result = await self._run(expression)
+            self.assertEqual(result.status, ToolStatus.ERROR, (expression, result.output))
+        self.assertEqual((await self._run("2 +\n2")).output, "4")
+
 
 class TestPrompts(unittest.TestCase):
     """Verifies JSON-backed prompt loading."""

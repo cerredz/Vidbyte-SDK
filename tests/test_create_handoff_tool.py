@@ -51,6 +51,20 @@ class CreateHandoffToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(agent.handoffs[0].title, "My Report")
         self.assertEqual(agent.handoffs[0].sections, {"Summary": "All done.", "Next Steps": "Deploy it."})
 
+    async def test_written_handoff_is_marked_filled_like_an_auto_handoff(self) -> None:
+        # @intent tool-written-handoff-is-filled: sections the model wrote are produced content, not a spec.
+        agent = StubAgent()
+        tool = CreateHandoffTool()
+        tool.bind_agent(agent)
+        sections = {"Issue": "refund dispute", "Tried": "reset password"}
+        result = await tool.execute(_call(title="Escalation", sections=sections, audience="Tier 2"))
+        self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+        handoff = agent.last_handoff
+        self.assertTrue(handoff.is_filled)
+        self.assertEqual(handoff.is_filled, MinimalHandoff().fill(sections).is_filled)
+        self.assertEqual((handoff.title, handoff.sections, handoff.primitive_id), ("Escalation", sections, "handoff:1"))
+        self.assertEqual(handoff.instructions, "Audience: Tier 2")
+
     async def test_error_missing_title(self) -> None:
         agent = StubAgent()
         tool = CreateHandoffTool()

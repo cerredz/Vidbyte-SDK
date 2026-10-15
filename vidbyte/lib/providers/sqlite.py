@@ -153,7 +153,14 @@ class SqliteSessionStore(ProviderSessionStore):
         if row is None:
             return None
         value = row[0]
-        return json.loads(value) if isinstance(value, (str, bytes, bytearray)) else value
+        if not isinstance(value, (str, bytes, bytearray)):
+            return value
+        # @intent provider-store-corrupt-payload-is-session-store-error
+        # A truncated or garbled stored row is a store corruption, so raise the typed session error like the file store does.
+        try:
+            return json.loads(value)
+        except ValueError as exc:
+            raise SessionStoreError("Failed to read session row.", details={"provider": "sqlite"}) from exc
 
     @staticmethod
     def _quote_identifier(identifier: str) -> str:

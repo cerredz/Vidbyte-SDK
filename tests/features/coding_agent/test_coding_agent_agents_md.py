@@ -3,7 +3,7 @@
 PURPOSE: Pin CodingAgent's AGENTS.md loading and the shared coding context window: the root folder's AGENTS.md reaches the model after the system prompt and before the user message, read once, capped at 32 KiB without splitting a character, and placed ahead of the caller's own context manager without changing it.
 ROLE IN CODEBASE: Drives vidbyte.CodingAgent through BaseAgent's real run loop with the offline scripted model from conftest.py, and calls CodingContextWindow (vidbyte/agents/coding_context/window.py) and CodingContextSectionText (vidbyte/lib/dataclasses/coding.py) directly.
 ARCHITECTURE NOTE: Assertions read the system string and the prompt the scripted model actually received, so a section that is built but never rendered fails here. PromptRecorder wraps the conftest runner only to keep the user prompt, which the runner receives positionally and does not record.
-FUNCTION INVENTORY: test_agents_md_is_shown_* (FR-10); test_without_agents_md_* (byte-identical request); test_load_agents_false_* (FR-3); test_lowercase_* / test_exact_name_* / test_parent_folder_* (FR-4, FR-5); test_large_file_* / test_file_of_exactly_* (FR-8); test_blank_file_* / test_file_bytes_* (FR-8, FR-9); test_agents_md_directory_* / test_unreadable_* (FR-7); test_load_agents_must_be_* (FR-2); test_caller_context_manager_* (FR-11, FR-12); test_fork_* (FR-13); test_cwd_change_* / test_edits_after_* (read once); test_window_* and test_section_record_* (the shared helper's contract, FR-11, FR-14).
+FUNCTION INVENTORY: test_agents_md_is_shown_* (FR-10); test_without_agents_md_* (byte-identical request); test_load_agents_false_* (FR-3); test_lowercase_* / test_exact_name_* / test_parent_folder_* (FR-4, FR-5); test_large_file_* / test_file_of_exactly_* (FR-8); test_blank_file_* / test_file_bytes_* (FR-8, FR-9); test_powershell_utf16_* / test_utf16_file_is_cut_* (UTF-16 with a BOM); test_agents_md_directory_* / test_unreadable_* (FR-7); test_load_agents_must_be_* (FR-2); test_caller_context_manager_* (FR-11, FR-12); test_fork_* (FR-13); test_cwd_change_* / test_edits_after_* (read once); test_window_* and test_section_record_* (the shared helper's contract, FR-11, FR-14).
 COMMON MODIFICATION PATTERNS: A sibling section adds its own test module; extend the window tests here only when the window's contract changes.
 WHAT NOT TO DO IN THIS FILE: 1. Do not monkeypatch the loader or the window; build real files under tmp_path. 2. Do not open sockets or use real keys. 3. Do not assert private CodingAgent attributes; use the request, agent.context_manager, and agent.tools.
 KNOWN EDGE CASES: The exact-name-wins case needs a case-sensitive filesystem and is skipped elsewhere (Windows, default macOS). The truncation cases build files whose 32,768th byte falls inside a multibyte character.
@@ -14,6 +14,7 @@ TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/coding_agent/test_co
 from __future__ import annotations
 
 import asyncio
+import codecs
 from pathlib import Path
 from typing import Any
 
@@ -233,6 +234,38 @@ def test_file_bytes_are_decoded_leniently(coding_agent_cls, tmp_path, raw, expec
     (tmp_path / "AGENTS.md").write_bytes(raw)
 
     assert _shown(_agent(coding_agent_cls, tmp_path)) == expected
+
+
+PS_RULES = "# Rules\r\nUse pnpm.\r\n"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [PS_RULES.encode("utf-16"), codecs.BOM_UTF16_LE + PS_RULES.encode("utf-16-le"), codecs.BOM_UTF16_BE + PS_RULES.encode("utf-16-be"), PS_RULES.encode("utf-8")],
+    ids=["utf-16-native-bom", "utf-16-le-bom", "utf-16-be-bom", "utf-8"],
+)
+def test_powershell_utf16_file_is_read_as_text(coding_agent_cls, script_model, tmp_path, raw) -> None:
+    # Windows PowerShell 5.1's > and Out-File write UTF-16 with a BOM; the model must see the rules, not NUL-interleaved mojibake.
+    (tmp_path / "AGENTS.md").write_bytes(raw)
+    agent = _agent(coding_agent_cls, tmp_path)
+
+    shown = _shown(agent)
+    assert shown == PS_RULES
+    assert "\x00" not in shown and "�" not in shown
+    assert "Use pnpm." in _system(agent, script_model)
+
+
+def test_utf16_file_is_cut_at_the_cap_without_splitting_a_surrogate_pair(coding_agent_cls, tmp_path) -> None:
+    # A UTF-16 file over the cap whose cut falls between the halves of a surrogate pair shows only whole characters.
+    cap = CODING_AGENTS_MD_MAX_BYTES
+    head = (("a" * 63 + "\n") * (cap // 64))[: (cap - 4) // 2]
+    raw = codecs.BOM_UTF16_LE + (head + "\U0001f600" + "b" * 4000).encode("utf-16-le")
+    (tmp_path / "AGENTS.md").write_bytes(raw)
+
+    shown = _shown(_agent(coding_agent_cls, tmp_path))
+    note = f'[AGENTS.md was truncated at {cap - 2} of {len(raw)} bytes. Read the rest with the read_lines tool (path "AGENTS.md"), starting at line 256.]'
+    assert shown == f"{head}\n\n{note}"
+    assert "\x00" not in shown and "�" not in shown
 
 
 def test_agents_md_directory_fails_construction_naming_the_path(coding_agent_cls, tmp_path) -> None:

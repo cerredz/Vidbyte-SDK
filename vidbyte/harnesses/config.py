@@ -135,8 +135,10 @@ class HarnessConfigLoader:
 
     def _read_config_text(self, path: Path) -> str:
         # Reads one config file while converting OS/encoding failures into typed context.
+        # @intent config-bom-is-not-content
+        # PowerShell 5.1's -Encoding utf8 writes a byte-order mark that json.loads rejects (YAML skips it); a .json config must load like its .yaml form.
         try:
-            return path.read_text(encoding="utf-8")
+            return path.read_text(encoding="utf-8-sig")
         except (OSError, UnicodeError) as exc:
             raise HarnessConfigurationError("Harness config file is not readable UTF-8 text.", details={"path": str(path)}) from exc
 

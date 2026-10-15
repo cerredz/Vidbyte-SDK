@@ -21,7 +21,9 @@ ARCHITECTURE NOTE:
 PUBLIC API INVENTORY:
     Harness.load(), execute(), session(agent), run(request) [override], score()
     [optional override], and the spec/store/run_id properties.
-    wrap_implementation() adapts a foreign object with run(request) into a Harness.
+    wrap_implementation() adapts a foreign object with run(request) into a Harness,
+    and returns a Harness instance itself, bound to any supplied store/sink and
+    collect=True.
 
 WHAT NOT TO DO IN THIS FILE:
     1. Do not build a second event/store system; bind a SessionStore instead.
@@ -109,6 +111,7 @@ class Harness:
         self._collect = bool(collect)                                # opt-in consent, default off
         self._redactor = HarnessRedactor()
         self._spec: HarnessSpec | None = None
+        self._code_version: str = type(self).version   # folded into spec_id; a registered factory may override it
         # @intent overlapping-executions-keep-their-own-run-id
         # Each execute() (asyncio Task) sees only its own run_id, so overlapping trials on one
         # instance never tag, list, or collect each other's sessions.
@@ -118,8 +121,21 @@ class Harness:
     # --- configuration & identity ------------------------------------------------
 
     def load(self, config: Mapping[str, Any] | str | Path, *, base_path: str | Path | None = None) -> "Harness":
-        # Validates/resolves the YAML and computes spec_id, folding in this class's code version.
-        self._spec = HarnessConfigLoader().load(config, base_path=base_path, code_version=type(self).version)
+        # Validates/resolves the YAML and computes spec_id, folding in this harness's code version.
+        self._spec = HarnessConfigLoader().load(config, base_path=base_path, code_version=self._code_version)
+        return self
+
+    def _bind(self, *, store: SessionStore | None, sink: TrajectorySink | None, collect: bool, code_version: str | None) -> "Harness":
+        # Points this harness at a caller's surfaces and identity; None keeps what it was built with.
+        # collect=True grants consent; the default False cannot be told apart from "not supplied",
+        # so it keeps the instance's own consent rather than silently withdrawing it.
+        if store is not None:
+            self._store = store
+        if sink is not None:
+            self._sink = sink
+        self._collect = self._collect or bool(collect)
+        if code_version is not None:
+            self._code_version = str(code_version)
         return self
 
     @property
@@ -188,12 +204,16 @@ class Harness:
         except Exception as exc:
             run = await self._finalize(run_id, request, None, HarnessRunStatus.FAILED, started_at)
             raise HarnessExecutionError("Harness implementation execution failed.", run=run) from exc
+        else:
+            # @intent score-sees-its-own-run-id
+            # score() and trajectory collection are part of the execution, so they run before this
+            # execution's run_id is released, exactly as the failure paths already do; otherwise
+            # score() sees None or, with overlapping executions, the lone other in-flight run's id.
+            run = await self._finalize(run_id, request, output, HarnessRunStatus.SUCCEEDED, started_at)
         finally:
-            # The run is over, so session() stops tagging with this run_id.
+            # execute() is over, so session() stops tagging with this run_id.
             self._active_run_ids.remove(run_id)
             self._run_id_var.reset(token)
-        # Finalize the successful run with the run_id captured above, not shared state.
-        run = await self._finalize(run_id, request, output, HarnessRunStatus.SUCCEEDED, started_at)
         return HarnessExecutionResult(output=output, run=run)
 
     def _current_run_id(self) -> str | None:
@@ -215,7 +235,11 @@ class Harness:
             if deadline.expired():
                 raise _HarnessDeadlineExpired from exc
             raise
-        if deadline.expired():
+        # @intent blocking-run-past-deadline-times-out
+        # A body that blocks (sync run(), or async code that never suspends) returns before the timer callback can run,
+        # so expired() stays False; the deadline itself still passed, and the run must not be recorded as succeeded.
+        deadline_at = deadline.when()
+        if deadline.expired() or (deadline_at is not None and asyncio.get_running_loop().time() >= deadline_at):
             raise _HarnessDeadlineExpired
         return result
 
@@ -290,6 +314,11 @@ class Harness:
 
 def wrap_implementation(implementation: object, *, store: SessionStore | None = None, sink: TrajectorySink | None = None, collect: bool = False, harness_type: str | None = None, harness_version: str | None = None) -> Harness:
     # Adapts a foreign object exposing run(request) into the Harness execution envelope.
+    # @intent harness-subclass-is-used-not-rewrapped
+    # A Harness already owns execute() and session(); wrapping it would run its run() outside its own
+    # execute(), so session() would fail and its sessions would miss the caller's store and sink.
+    if isinstance(implementation, Harness):
+        return implementation._bind(store=store, sink=sink, collect=collect, code_version=harness_version)
     foreign_run = getattr(implementation, "run", None)
     if not callable(foreign_run):
         raise HarnessConfigurationError("Harness implementation must expose callable run(request).", details={"actual_type": type(implementation).__name__})

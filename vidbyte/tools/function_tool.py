@@ -10,6 +10,7 @@ from typing import Annotated, Any, get_type_hints
 from pydantic import BaseModel, TypeAdapter, ValidationError, create_model
 from pydantic_core import to_jsonable_python
 
+from vidbyte.lib.errors import ToolExecutionError
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.types import (
     ToolCall,
@@ -75,9 +76,17 @@ class FunctionTool(BaseTool):
                     value = await value
         except Exception as exc:
             # @intent function-tool-errors-share-the-runtime-error-kind
-            # A raising function tool reports the same execution_error kind the runtime gives a raising
-            # BaseTool, so the model and ToolErrorPolicy treat both ways of writing a tool alike.
-            metadata = {"error": "execution_error", "error_type": exc.__class__.__name__}
+            # A raising function tool reports the same error kind the runtime gives a raising BaseTool, so the
+            # model and ToolErrorPolicy treat both ways of writing a tool alike: a raised ToolExecutionError keeps
+            # the kind it declares in its details (rate_limited, timeout, ...), and every other exception is
+            # execution_error.
+            if isinstance(exc, ToolExecutionError):
+                metadata = {
+                    "error": str(exc.details.get("error", "execution_error")),
+                    "error_type": exc.details.get("error_type", exc.__class__.__name__),
+                }
+            else:
+                metadata = {"error": "execution_error", "error_type": exc.__class__.__name__}
             return ToolResult.failure(self.name, str(exc), metadata=metadata)
 
         return ToolResult.success(
@@ -109,10 +118,11 @@ class FunctionTool(BaseTool):
         signature = inspect.signature(self.func)
         for param_name, parameter in signature.parameters.items():
             prop = properties.get(param_name, {})
+            # Label each argument with a readable type name for the tool docs the model reads with every request.
             parameters.append(
                 ToolParameter(
                     name=param_name,
-                    type=str(prop.get("type") or prop.get("anyOf") or "any"),
+                    type=_parameter_type_label(prop),
                     description=str(prop.get("description") or ""),
                     required=param_name in required,
                     default=None if parameter.default is inspect.Parameter.empty else parameter.default,
@@ -164,6 +174,23 @@ def _null_means_default_fields(args_model: type[BaseModel]) -> frozenset[str]:
     return frozenset(names)
 
 
+def _parameter_type_label(prop: Mapping[str, Any]) -> str:
+    # @intent function-tool-parameter-type-is-a-name
+    # The label is a type name, never a Python repr of the schema: Optional[str] reads "string | null", and a
+    # $ref, enum or model argument reads "any", as it does for a tool declared only by input_schema. A JSON-Schema
+    # type array such as ["string", "null"] reads "string | null", like the matching anyOf; pydantic never emits one,
+    # but an MCP server's schema may.
+    kind = prop.get("type")
+    if isinstance(kind, str):
+        return kind
+    if isinstance(kind, list) and kind and all(isinstance(item, str) for item in kind):
+        return " | ".join(kind)
+    branches = prop.get("anyOf")
+    if isinstance(branches, list) and branches and all(isinstance(branch, Mapping) and isinstance(branch.get("type"), str) for branch in branches):
+        return " | ".join(branch["type"] for branch in branches)
+    return "any"
+
+
 def _validate_arguments(args_model: type[BaseModel], arguments: dict[str, Any]) -> BaseModel:
     # @intent tool-arguments-validate-in-json-mode
     # A model sends its arguments as JSON, so they validate in Pydantic's JSON mode: a strict=True model's Python mode
@@ -193,8 +220,12 @@ def _validation_message(exc: ValidationError) -> str:
 def _stringify_output(value: object) -> str:
     if isinstance(value, str):
         return value
+    # @intent tool-output-keeps-non-ascii-readable
+    # The model and the tool-output predicates read this text, so non-ASCII stays as characters, like a str return
+    # and like the SDK's other JSON (isDone answer, session/harness stores); the HTTP transport still escapes the
+    # wire body itself.
     try:
-        return json.dumps(value, default=_json_default, sort_keys=True)
+        return json.dumps(value, default=_json_default, sort_keys=True, ensure_ascii=False)
     except (TypeError, ValueError):
         pass
     # @intent tool-model-output-is-json
@@ -203,7 +234,7 @@ def _stringify_output(value: object) -> str:
     # unknown leaves into str(), and fall back to a repr only if that still fails. Nested models dump by alias here
     # too (see _json_default).
     try:
-        return json.dumps(to_jsonable_python(value, by_alias=True, fallback=_json_default), sort_keys=True)
+        return json.dumps(to_jsonable_python(value, by_alias=True, fallback=_json_default), sort_keys=True, ensure_ascii=False)
     except (TypeError, ValueError):
         return str(value)
 

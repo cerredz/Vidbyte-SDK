@@ -45,6 +45,8 @@ class ToolsCallHandler(_BaseHandler):
         except Exception as exc:
             return McpSchema.mcp_tool_error_result(request_id, f"Tool execution failed: {exc}")
         content = McpSchema.tool_result_to_mcp_content(result)
-        if result.status == "error" or result.output.startswith("Error:"):
+        # @intent tool-status-decides-mcp-is-error
+        # Tools report failure via ToolResult.error, so only the status sets isError; a successful output may start with "Error:".
+        if result.status == "error":
             return McpSchema.mcp_tool_error_result(request_id, result.output)
         return McpSchema.mcp_tool_success_result(request_id, content)

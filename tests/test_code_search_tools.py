@@ -12,6 +12,8 @@ Relations:
 
 from __future__ import annotations
 
+import asyncio
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,6 +21,21 @@ from pathlib import Path
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.tools.builtins.code_search import GlobTool, GrepTool, SemanticSearchTool
 from vidbyte.tools.types import ToolCall
+
+
+class _LoopRecordingEmbeddings:
+    """Embedding provider that records whether each embed() call ran on the event loop thread."""
+
+    def __init__(self) -> None:
+        self.on_loop: list[bool] = []
+
+    def embed(self, texts):
+        try:
+            asyncio.get_running_loop()
+            self.on_loop.append(True)
+        except RuntimeError:
+            self.on_loop.append(False)
+        return [[1.0, float("jwt" in text)] for text in texts]
 
 
 class CodeSearchToolTests(unittest.IsolatedAsyncioTestCase):
@@ -92,6 +109,17 @@ class CodeSearchToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("pkg/auth.py", result.output)
         self.assertIn("check_jwt", result.output)
 
+    async def test_semantic_search_embeds_off_the_event_loop(self) -> None:
+        """Semantic search calls its synchronous embedding provider from a worker thread."""
+        # @intent semantic-search-runs-off-the-event-loop: a blocking embed() must not stall the loop or defeat tool timeouts.
+        embeddings = _LoopRecordingEmbeddings()
+        result = await SemanticSearchTool(str(self.root), embedding_provider=embeddings).execute(
+            ToolCall("semantic_search", {"query": "jwt expiration", "max_results": 1})
+        )
+        self.assertIn("pkg/auth.py", result.output)
+        self.assertEqual(embeddings.on_loop, [False, False])
+        self.assertEqual(result.metadata["indexed_chunks"], 2)
+
     async def test_root_under_ignored_ancestor_still_searches_its_files(self) -> None:
         """Ignore patterns apply below the root, not to the root's own ancestors."""
         for ancestor in ("node_modules", "venv"):
@@ -147,6 +175,25 @@ class CodeSearchToolTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Results truncated; narrow the pattern.", result.output)
             self.assertTrue(result.metadata["truncated"])
             self.assertEqual(result.metadata["count"], 3)
+
+    async def test_file_reached_through_links_is_reported_once(self) -> None:
+        """A file reached through a file symlink or a directory alias is listed once, not once per spelling."""
+        root = self.root / "linked"
+        (root / "docs" / "v2").mkdir(parents=True)
+        (root / "README.md").write_text("needle in the readme\n", encoding="utf-8")
+        (root / "docs" / "v2" / "a.md").write_text("# a\n", encoding="utf-8")
+        try:
+            os.symlink(os.path.join("..", "README.md"), root / "docs" / "README.md")
+            os.symlink("v2", root / "docs" / "latest", target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"symlinks unavailable: {exc}")
+        self.assertTrue((root / "docs" / "README.md").is_file())
+        grep = await GrepTool(root).execute(ToolCall("grep", {"pattern": "needle", "context_lines": 0}))
+        self.assertEqual(grep.output.count("README.md:1"), 1, grep.output)
+        readme = await GlobTool(root).execute(ToolCall("glob", {"pattern": "**/README.md"}))
+        self.assertEqual(readme.output.splitlines(), ["README.md"])
+        alias = await GlobTool(root).execute(ToolCall("glob", {"pattern": "docs/*/*.md"}))
+        self.assertEqual(alias.output.splitlines(), ["docs/v2/a.md"])
 
     async def test_null_subdir_searches_from_root(self) -> None:
         """A null subdir means the root, not a folder named "None"."""

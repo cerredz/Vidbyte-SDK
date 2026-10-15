@@ -33,7 +33,11 @@ result = await h.execute({"topic": "durable agent runtimes"})
 `type`/`version` are class attributes on the code, not YAML fields: version tracks
 *implementation code*, so bumping it is a code edit, not a config edit. A foreign
 object exposing `run(request)` still works via `HarnessClient.load(implementation=...)`
-or `wrap_implementation(...)` — no inheritance required.
+or `wrap_implementation(...)` — no inheritance required. A `Harness` subclass passed
+there (or built by a registered factory) is used as is rather than wrapped, so
+`self.session(agent)` keeps working; a supplied `store`/`sink` replaces its own and
+`collect=True` turns collection on (`None`/`False` keep what it was built with), and a
+factory's `harness_version` stays the code version.
 
 ## Configuration is the single source of truth
 

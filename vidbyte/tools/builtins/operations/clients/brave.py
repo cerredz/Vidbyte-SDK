@@ -28,6 +28,7 @@ from vidbyte.tools.builtins.operations.clients._base import RetryPolicy, WebOper
 _MAX_RESULTS = 20
 _MAX_QUERY_WORDS = 50
 _MAX_QUERY_CHARS = 400
+_BRAVE_SUBTAG_LANGS = frozenset({"en-gb", "pt-br", "pt-pt", "zh-hans", "zh-hant"})
 
 
 class BraveClient(WebOperationClient):
@@ -50,7 +51,11 @@ class BraveClient(WebOperationClient):
         # Clamps the query and result count to Brave's documented request limits.
         words = " ".join(query.split()[:_MAX_QUERY_WORDS])[:_MAX_QUERY_CHARS]
         bounded = min(max(1, count), _MAX_RESULTS)
-        return {"q": words, "count": str(bounded), "offset": "0", "search_lang": language.split("-", 1)[0].lower(), "safesearch": "moderate"}
+        # @intent brave-keeps-its-own-subtag-codes
+        # Brave's search_lang enum has these region/script codes and no bare "zh"/"pt", so they are sent whole; other locales ("en-US") still reduce to the primary subtag.
+        lowered = language.lower()
+        search_lang = lowered if lowered in _BRAVE_SUBTAG_LANGS else lowered.split("-", 1)[0]
+        return {"q": words, "count": str(bounded), "offset": "0", "search_lang": search_lang, "safesearch": "moderate"}
 
     def _hits_from_payload(self, payload: Mapping[str, Any]) -> tuple[SearchHit, ...]:
         # Reads the web result block, raising when Brave returns it in an unusable shape.

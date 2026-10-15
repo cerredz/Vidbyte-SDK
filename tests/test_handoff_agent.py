@@ -17,6 +17,7 @@ from vidbyte.context import ContextManager
 from vidbyte.context.primitives import ContextItem
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.prompts import Prompts
+from vidbyte.tools.builtins.handoff import CreateHandoffTool
 from vidbyte.trace.continual import ActionTrace, ContinualTraceAgent
 
 
@@ -51,6 +52,20 @@ class ExplodingRunner:
 
     def run(self, prompt: str, *, system: str | None = None, **_: object) -> FakeResponse:
         raise RuntimeError("runner boom")
+
+
+class CreateHandoffThenDoneRunner:
+    """Fake runner whose model calls create_handoff once, then finishes with isDone."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def run(self, prompt: str, *, system: str | None = None, **_: object) -> FakeResponse:
+        self.calls += 1
+        if self.calls == 1:
+            arguments = json.dumps({"title": "Mid-run notes", "sections": {"Status": "half done"}})
+            return FakeResponse("", {"output": [{"type": "function_call", "name": "create_handoff", "arguments": arguments, "call_id": "fc_handoff"}]})
+        return _is_done_response("done")
 
 
 _ENGINEERING_BODY = (
@@ -180,6 +195,16 @@ class HandoffAgentTests(unittest.IsolatedAsyncioTestCase):
         sections = agent.parse_sections(json.dumps({"sections": {"Notes": "keep", "Risks": None}}))
         self.assertEqual(sections, {"Notes": "keep"})
 
+    async def test_free_form_handoff_keeps_markdown_sections_like_json(self) -> None:
+        # A free-form spec keeps every markdown section the model wrote, exactly as it keeps JSON ones.
+        body = "## Status\nTests pass.\n\n## Next\nShip it."
+        agent = build_test_agent(Handoff(title="Run handoff"), agent_type=HandoffAgent, runner=HandoffRunner(body))
+        doc = await agent.generate_handoff("digest")
+        self.assertEqual(doc.sections, {"Status": "Tests pass.", "Next": "Ship it."})
+        self.assertNotIn("extra_sections", doc.metadata)
+        self.assertIn("Ship it.", doc.to_context_text())
+        self.assertEqual(agent.parse_sections(body), agent.parse_sections(json.dumps({"sections": doc.sections})))
+
     def test_defaults_to_minimal_handoff(self) -> None:
         agent = build_test_agent(agent_type=HandoffAgent, runner=HandoffRunner("x"))
         self.assertIsInstance(agent.spec, MinimalHandoff)
@@ -233,6 +258,25 @@ class BaseAgentHandoffIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("handoff_error", reply.metadata)
             self.assertIsNone(agent.last_handoff)
             self.assertTrue(reply.content)
+        finally:
+            HandoffAgent.run_auto_handoff = original  # type: ignore[method-assign]
+
+    async def test_auto_handoff_failure_keeps_handoff_recorded_during_run(self) -> None:
+        # @intent failed-auto-handoff-keeps-run-handoff
+        # The model writes a handoff mid-run, then the post-run auto-handoff fails; the run's handoff must survive.
+        agent = build_test_agent(name="w", system_prompt="Work.", runner=CreateHandoffThenDoneRunner(), tools=[CreateHandoffTool()], handoff=MinimalHandoff())
+
+        original = HandoffAgent.run_auto_handoff
+
+        async def boom(cls: type[HandoffAgent], source_agent: BaseAgent, spec: Handoff | None) -> Handoff:
+            raise RuntimeError("handoff boom")
+
+        HandoffAgent.run_auto_handoff = classmethod(boom)  # type: ignore[method-assign]
+        try:
+            reply = await agent.generate_reply("task")
+            self.assertIn("handoff_error", reply.metadata)
+            self.assertEqual([handoff.title for handoff in agent.handoffs], ["Mid-run notes"])
+            self.assertIs(agent.last_handoff, agent.handoffs[-1])
         finally:
             HandoffAgent.run_auto_handoff = original  # type: ignore[method-assign]
 

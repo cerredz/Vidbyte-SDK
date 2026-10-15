@@ -17,6 +17,7 @@ from __future__ import annotations
 import io
 import json
 import zipfile
+import zlib
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -66,7 +67,9 @@ class SessionBundleExporter:
     @staticmethod
     def _write_json(bundle: zipfile.ZipFile, name: str, payload: Mapping[str, Any]) -> None:
         # Serialize a payload as formatted UTF-8 JSON inside the bundle.
-        bundle.writestr(name, json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"))
+        # @intent trajectory-file-keeps-undecodable-file-names
+        # A tag may hold a POSIX non-UTF-8 file name (a lone surrogate); write it as a JSON \udcff escape, not fail.
+        bundle.writestr(name, json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8", errors="backslashreplace"))
 
     @staticmethod
     def _checkpoint_name(checkpoint: Checkpoint) -> str:
@@ -135,6 +138,10 @@ class SessionBundleImporter:
                 payload = json.loads(stream.read().decode("utf-8"))
         except KeyError as exc:
             raise SessionSerializationError(f"Session bundle missing required file: {name}.", details={"path": name}) from exc
+        # @intent bundle-corrupt-member-is-session-serialization-error
+        # Damaged compressed bytes surface from zipfile as zlib.error or EOFError, not BadZipFile.
+        except (zlib.error, EOFError) as exc:
+            raise SessionSerializationError(f"Session bundle file is corrupt: {name}.", details={"path": name}) from exc
         except (OSError, UnicodeDecodeError, ValueError) as exc:
             raise SessionSerializationError(f"Session bundle file is not valid JSON: {name}.", details={"path": name}) from exc
         if not isinstance(payload, Mapping):

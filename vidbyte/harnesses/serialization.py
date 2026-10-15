@@ -67,7 +67,10 @@ class HarnessRedactor:
 
     # @intent quoted-and-scheme-credentials-are-redacted
     # JSON/repr keys ("api_key": "x") and "Authorization: Bearer x" are the same assignment, so the value itself must be scrubbed.
-    _ERROR_ASSIGNMENT = re.compile(r"(?i)\b(api[_-]?key|private[_-]?key|secret[_-]?key|access[_-]?key|access[_-]?token|refresh[_-]?token|token|password|secret|credential|authorization)[\"']?\s*[:=]\s*(?:(?:bearer|basic)\s+)?(\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*'|[^\s,;]+)")
+    # The scheme words skipped are the ones the SDK itself sends (Bearer, Basic, mem0's Token, zep's Api-Key), so the credential after any of them is scrubbed.
+    # @intent prefixed-credential-names-are-redacted
+    # HarnessSecretPolicy treats OPENAI_API_KEY, GITHUB_TOKEN, client_secret, githubToken as credentials, so the scrub also matches a credential word after "_"/"-" or at a camelCase hump, but not one glued to a lowercase run (notoken=5).
+    _ERROR_ASSIGNMENT = re.compile(r"(?i)(?:(?<![A-Za-z0-9])|(?-i:(?<=[a-z0-9])(?=[A-Z])))(api[_-]?key|private[_-]?key|secret[_-]?key|access[_-]?key|access[_-]?token|refresh[_-]?token|token|password|secret|credential|authorization)[\"']?\s*[:=]\s*(?:(?:bearer|basic|token|api[_-]?key)\s+)?(\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*'|[^\s,;]+)")
 
     def redact(self, value: Any) -> Any:
         # Projects arbitrary capture data into a recursively scrubbed JSON-safe value.

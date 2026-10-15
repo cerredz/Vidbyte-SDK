@@ -7,7 +7,7 @@ from typing import Mapping
 
 from vidbyte.lib.config import TextModelConfig
 from vidbyte.lib.enums import ModelProvider
-from vidbyte.lib.errors import UnsupportedProviderError
+from vidbyte.lib.errors import ProviderRequestError, UnsupportedProviderError
 from vidbyte.lib.http import HttpResponse
 from vidbyte.lib.runners import StreamingTextModelRunner
 
@@ -226,6 +226,69 @@ class StreamingTextRunnerTests(unittest.TestCase):
         chunks = list(runner.stream("Test"))
 
         self.assertEqual(chunks, ["valid"])
+
+    def test_valid_json_that_is_not_an_object_is_silently_skipped(self) -> None:
+        # Hidden failure: an SSE payload such as null, 42 or [] parses as JSON but is not an
+        # event object, so it must be skipped like malformed JSON instead of crashing the stream
+        odd_lines = ["null", "42", "[]"]
+        cases = [
+            (ModelProvider.OPENAI, "gpt-4o", _openai_delta),
+            (ModelProvider.ANTHROPIC, "claude-3-haiku-20240307", _anthropic_delta),
+        ]
+        for provider, model, delta in cases:
+            with self.subTest(provider=provider.value):
+                transport = FakeStreamingTransport([delta("first"), *odd_lines, delta("second")])
+                runner = StreamingTextModelRunner(
+                    TextModelConfig(provider=provider, model=model, api_key="key"),
+                    transport=transport,
+                )
+
+                chunks = list(runner.stream("Test"))
+
+                self.assertEqual(chunks, ["first", "second"])
+
+    # --- In-stream error events ---
+
+    def test_anthropic_error_event_mid_stream_raises_provider_request_error(self) -> None:
+        # Hidden failure: an overloaded_error event after the 200 must raise, not end the
+        # stream quietly and leave the caller holding a truncated answer
+        error_event = json.dumps({"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}})
+        transport = FakeStreamingTransport([_anthropic_delta("The refund window is "), error_event])
+        runner = StreamingTextModelRunner(
+            TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-3-haiku-20240307", api_key="key"),
+            transport=transport,
+        )
+
+        with self.assertRaises(ProviderRequestError) as caught:
+            list(runner.stream("Test"))
+
+        self.assertIn("overloaded_error", str(caught.exception))
+
+    def test_openai_error_event_mid_stream_raises_provider_request_error(self) -> None:
+        error_event = json.dumps({"type": "error", "code": "server_error", "message": "boom", "param": None, "sequence_number": 3})
+        transport = FakeStreamingTransport([_openai_delta("The refund window is "), error_event])
+        runner = StreamingTextModelRunner(
+            TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_key="key"),
+            transport=transport,
+        )
+
+        with self.assertRaises(ProviderRequestError) as caught:
+            list(runner.stream("Test"))
+
+        self.assertIn("server_error", str(caught.exception))
+
+    def test_openai_response_failed_mid_stream_raises_provider_request_error(self) -> None:
+        failed_event = json.dumps({"type": "response.failed", "response": {"status": "failed", "error": {"code": "server_error", "message": "failed"}}})
+        transport = FakeStreamingTransport([_openai_delta("The refund window is "), failed_event])
+        runner = StreamingTextModelRunner(
+            TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4o", api_key="key"),
+            transport=transport,
+        )
+
+        with self.assertRaises(ProviderRequestError) as caught:
+            list(runner.stream("Test"))
+
+        self.assertIn("server_error", str(caught.exception))
 
 
 if __name__ == "__main__":

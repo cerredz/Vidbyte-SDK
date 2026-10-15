@@ -21,7 +21,7 @@ from vidbyte.lib.errors import SourceSecurityError
 
 @dataclass(frozen=True, slots=True)
 class UrlAllowlist:
-    """Scheme + optional host allowlist enforced before every network call."""
+    """Scheme + optional host allowlist enforced before every fetch and on the final URL after redirects."""
 
     allowed_schemes: tuple[str, ...] = ("https",)
     allowed_hosts: frozenset[str] | None = None
