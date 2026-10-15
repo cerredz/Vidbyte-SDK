@@ -89,3 +89,36 @@ Gate set (from context/code-map.md §1): new-test pack `PYTHONPATH=$(pwd) python
 | Remote checks | `gh pr checks https://github.com/cerredz/Vidbyte-SDK/pull/1084` | none (workflows disabled repo-wide) | `no checks reported on the 'feat/infinite-memory-agent' branch` (PR head 5c5b7d33, draft) |
 
 **Still open:** R-29, a Windows second-process lock between the two `os.replace` calls (`follow-up`, left open by instruction). Also the follow-up Minors R-14, R-19, R-20, R-22, R-24 and R-25. No confirmed must-fix finding is open, and no gate is red.
+
+## Iteration 3 — 2026-10-15 10:46 — agent report: reports/S5-repair-3.md
+
+**Defects in:** the two Minors from re-review round 2 (reports/S5-rereview-2.md, verdict SOUND), recorded in review.md as "Re-review round 2 (final) — Minors": R-30 (`trivial`, round-2 R-C1, docs only) and R-31 (`follow-up`, round-2 R-C2, left open by instruction). No gate was red: the orchestrator's run at 149fea25 gave the pack `111 passed`, source `5284 passed, 14 skipped` and "CI passed.", package "CI passed.", and `SDK-LINT: PASS`.
+
+**Hypotheses and attempts:**
+- R-30, the model sentence: before writing, I checked the code, not only the review.
+  - `InfiniteMemoryAgentSettings._validate_model` calls `ProviderModelRegistry.validate_provider_model_pair`. That function calls `validate_model` (non-empty, then the catalog when strict) and then, when strict, the OpenRouter-slug and owner checks. With `STRICT_MODEL_VALIDATION = False`, only the non-empty check remains.
+  - `BaseAgentSettings._validated_model` (`vidbyte/lib/dataclasses/config.py:505-517`) makes the same call, so "like `BaseAgentSettings`" is true.
+  - `$W/p2_escape_hatch.py $W/w5` reproduced: strict, the settings refuse `gpt-4.1-2025-04-14`, `gpt-7` and `claude-opus-9` ("Unrecognized model … no registered runner") while a plain `BaseAgent` gets a `TextModelRunner`. Not strict, every row matches `BaseAgent`, including the shared "No runner mapping" for `o9-mini`. So the README's escape-hatch sentence was true and stays; only the parity claim was false.
+  - §9.3's "same meaning as `BaseAgent`" (`spec.md:760`) is outside the grant and was not edited. The §17 bullet now says that phrase covers what the fields mean, not which names are accepted.
+- R-30, the casefold rule: `_note_path` casefolds the relative path and compares its first segment with `seed`/`.runs` and the whole path with the three bookkeeping names, so the bookkeeping match is at the workspace root only (`notes/Entries.jsonl` is a normal note). I checked the three cited examples on a real workspace: `SEED/brief.md`, `Seed/new.md`, `.Runs/x.md`, `Entries.jsonl` and `FILES.jsonl` are each refused, and `notes/ok.md` is allowed. The bullet sits directly after the note-path bullet, since both extend INV-20.
+- A grep for the parity wording (`other agents`, `same meaning as`, `as for the SDK`) over `vidbyte/agents/infinite/`, the spec and `REPO_MAP.md` found it only at README:69 and spec:1246 (plus §9.3 at :760).
+- The `fixed @<sha>` status went into the verify-log commit, as in iteration 2, because a commit cannot name its own SHA. The rows themselves landed in the R-30 commit with status `open`.
+- R-31 was not touched: no code changes this iteration, by the briefing.
+
+**Changes:**
+- 6932c936 fix(docs): correct the model-check sentence and record the casefold rule [R-30]
+- `git diff 11b19a7d..HEAD -- tests/` and `git diff origin/main...HEAD -- lint/` are both empty. No file under `vidbyte/` other than the README changed.
+
+**Gate matrix out (at 6932c936):**
+
+| Gate | Command | Result | Final lines |
+|---|---|---|---|
+| New tests | `PYTHONPATH=$(pwd) python -m pytest tests/features/infinite_memory_agent -q -p no:cacheprovider` | PASS | `.......................................  [100%]` / `111 passed in 3.03s` |
+| Lint | `PYTHONIOENCODING=utf-8 python lint/run.py` | PASS | `S064 RATCHETED: 4 known finding(s). Inspect with: python lint/run.py --rule S064 --all` / `SDK-LINT: PASS` (A009 0 CLEAN, C012 23, S008 19, S061 5, S062 889, as in iteration 2) |
+| Import order (S051) | `python -m ruff check vidbyte --config lint/ruff.toml --select I001 --no-cache` | PASS (no new finding) | `Found 223 errors.` / `[*] 223 fixable with the --fix option.` (223 = origin/main) |
+| Semgrep | `python scratchpad/s5-1/semgrep_launch.py scan --error --config .semgrep/typed-mapping-boundary-policy.yml vidbyte --metrics=off` | PASS | `Findings: 0 (0 blocking)` / `Ran 1 rule on 946 files: 0 findings.` / exit 0 |
+| Full local gate, source | `PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source` | PASS | `5284 passed, 14 skipped in 49.13s` / `CI passed.` / exit 0 (the flaky MCP stdio test did not fail) |
+| Full local gate, package | `python scripts/run_ci.py --stage package` (PYTHONPATH unset) | PASS | `No broken requirements found.` / `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` / exit 0 |
+| Remote checks | `gh pr checks https://github.com/cerredz/Vidbyte-SDK/pull/1084` | none (workflows disabled repo-wide; not dispatched) | `no checks reported on the 'feat/infinite-memory-agent' branch` (PR head 6932c936, draft; the push also carried the orchestrator's 274e54d0 and dee01423, which had not been pushed) |
+
+**Still open:** R-31 (`follow-up`, by instruction), and the earlier follow-ups R-14, R-19, R-20, R-22, R-24, R-25 and R-29. No must-fix finding is open, and no gate is red.
