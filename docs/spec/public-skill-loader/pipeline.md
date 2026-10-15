@@ -15,7 +15,7 @@ started: 2026-10-15 15:04
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 15:04 | 15:20 | reports/S0-scout.md | base_commit 179d8adc; context/code-map.md (4 sections, 18 files) |
 | S1 spec + review | done | 15:22 | 17:35 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | r3 approved; 2 rounds SOUND WITH FIXES; 11 findings applied; spec-summary.md |
-| S2 tests | pending | | | | |
+| S2 tests | done | 17:40 | 18:15 | reports/S2-test-author.md | 20 tests (67 cases) in tests/features/public_skill_loader/; red confirmed (17 failed, 50 errors); S2_HEAD 467555d9 |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
@@ -63,6 +63,8 @@ started: 2026-10-15 15:04
 
 - 2026-10-15 17:35 — S1 done: spec r3 `status: approved` (`843e2852`). Q-n defaults applied: Q-1 yes (ConfigurationError root export built); Q-2..Q-7, Q-9 no (not built); Q-8 version 0.3.1. Wrote spec-summary.md (the parent cannot see orchestrator text). Noted the S1 author's deviation on R-11's first sentence (CLI origin/main `64b04b3` #166 already pins `>=0.3.0,<0.4`) — accepted, it is a fact correction.
 
+- 2026-10-15 18:15 — S2 done. **S2_HEAD = `467555d9`.** Test tree path for the no-test-edits check: `tests/` (`git diff 467555d9..HEAD --stat -- tests/` must stay empty). Orchestrator re-ran `tests/features/public_skill_loader/test_public_skill_loader_boundary.py` → 23 errors (ImportError), red confirmed. AC coverage of test-plan.md equals spec §6.2. Spec diff limited to §6.2 Proof column. Set spec `status: tests-written`. Noted: the test author proved satisfiability by applying a reference change to a scratch copy of the tree (deleted, never committed) and ran 10 single-bug mutants — accepted; no production code entered the branch.
+
 ## User replies (verbatim)
 - none yet
 
@@ -93,3 +95,10 @@ started: 2026-10-15 15:04
 - Generator prints "already current … nothing written" when data is unchanged (`scripts/generate-sdk-public-api.py:65-67`, `:112`); C016/`--check` never check `source.commit` reachability — *source:* S1 reviewer r2
 - `VersionResolver.resolve()` / `vidbyte --version` read distribution metadata first (0.2.1 locally via the shared editable install); the fallback literal at `vidbyte/cli/__init__.py:58` is observable only with `vidbyte.cli.metadata.version` patched to raise `PackageNotFoundError`, or by reading the file — *source:* S1 reviewer r2
 - Per-entry credentials exist and are public: `GitHubSkill(token=...)`, `AnthropicSkill(api_key=...)`, `OpenAISkill(api_key=...)`; the loader reads `GITHUB_TOKEN` / provider keys only inside `load()` when the field is None — *source:* S1 author r3
+- New tests: `tests/features/public_skill_loader/` (FEATURE.md, own conftest.py with FakeHttp/record_io/env isolation/chdir tmp_path; 7 modules: acceptance, boundary, security, both_doors, contract, release, docs). Run: `PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider tests/features/public_skill_loader` — *source:* S2
+- Baseline at c9d31a7f: `5176 passed, 14 skipped in 58.83s`, no pre-existing failures; area suite `426 passed, 1 skipped` — *source:* S2
+- `details` compared as whole dicts with exact keys; element check before name check (`(local pdf, local pdf, None)` → `{"position": 2, "entry_type": "NoneType"}`); every rejection message contains `SkillLoader`; the element message contains `InlineSkill` for every element type — *source:* S2
+- Loader memory must be built from `self.entries` (tests call `loader.documents()` right after construction on a generator, and on a list cleared afterwards) — *source:* S2
+- Docs tests pin phrases: a `- **Public door.**` bullet in the skills README naming SkillLoader, SkillResolution, ConfigurationError, contracts/sdk-public-api.json and "tenant"; README intro says "package root"; loader ARCHITECTURE NOTE must not say "(per agent)" alone ("(per agent, for JevAgent)" passes); REPO_MAP must not contain "only consumer", "for the agent's lifetime", "until the first run" — *source:* S2
+- Release tests read README `^pip install vidbyte-sdk==(\S+)$`, llms.txt "identifies the package as version `…`", and the CLI fallback with `cli_module.metadata.version` patched to raise — *source:* S2
+- Pytest does not check the contract JSON; AC-10/AC-11 also need `python scripts/generate-sdk-public-api.py --check` and `python lint/run.py --rule C016` after the contract commit — *source:* S2
