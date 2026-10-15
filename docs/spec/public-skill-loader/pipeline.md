@@ -14,7 +14,7 @@ started: 2026-10-15 15:04
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 15:04 | 15:20 | reports/S0-scout.md | base_commit 179d8adc; context/code-map.md (4 sections, 18 files) |
-| S1 spec + review | pending | | | | |
+| S1 spec + review | running | 15:22 | | reports/S1-spec-author.md | |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -67,3 +67,9 @@ started: 2026-10-15 15:04
 - Root import rule S015: every public name imported in `vidbyte/__init__.py` must be in `__all__`. `vidbyte/__init__.py` is already 1,366 lines and its `__all__` is unsorted. The import-order hazard (no `from vidbyte.agents import …` inside the loader package) applies only to imports written inside `vidbyte/agents/skills/` — *source:* S0 scout
 - The contract currently records `source.commit` `2bb5a8e9`, not `179d8adc`; regenerating stamps the new HEAD — *source:* S0 scout
 - Test commands: one file `PYTHONPATH=$(pwd) python -m pytest -q tests/features/jev_skills_preload/test_skill_sources_contract.py`; area `PYTHONPATH=$(pwd) python -m pytest -q tests/features/jev_skills_preload tests/test_jev_skill_preload.py`; framework pytest 8.3.5 + pytest-asyncio 1.3.0 — *source:* S0 scout (code-map §1, §3)
+- Contract names (spec r1): `SkillLoader(entries)`, `await loader.load()` → `tuple[SkillResolution, ...]` in input order, `loader.documents()`, `SkillResolution.document/.reason/.detail/.transient`, `SkillDocument.text`, `ConfigurationError.details`, new record `SkillEntries` (`vidbyte/lib/dataclasses/skills.py`); new root names `SkillLoader`, `SkillResolution`, `ConfigurationError` — *source:* S1 author
+- `ConfigurationError.details` keys fixed: `{"entries_type"}` non-tuple; `{"position" (0-based), "entry_type"}` bad element; `{"names": sorted}` repeated names; never the rejected value or a credential. Only a tuple accepted (list rejected) — *source:* S1 author
+- Fake network seam is `HttpTransport._send_once`; `tests/features/jev_skills_preload/` conftest fixtures apply only in that folder, so a new test pack needs its own `conftest.py` — *source:* S1 author
+- Root import placement: loader import after `vidbyte.agents.pricing`; `SkillResolution` after the prosecutor_defender_judge block; `ConfigurationError` inside the existing `vidbyte.lib.errors` block; the three names in `__all__` right after "SkillUnavailableReason"; check S051 over the whole tree — *source:* S1 author
+- C016 reports the contract stale between the source commit and the contract commit; run the full gate only after the contract commit — *source:* S1 author
+- Disk: C: briefly hit 0 bytes free during S1; ~17 GB free at 15:45. If a write fails, check `df -h /c` first — *source:* S1 author / orchestrator
