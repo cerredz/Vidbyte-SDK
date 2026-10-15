@@ -156,6 +156,16 @@ class ReplaceWithTraceCompactionTests(unittest.IsolatedAsyncioTestCase):
         kinds = [m.kind for m in out]
         self.assertEqual(kinds.count("tool_call"), kinds.count("tool_result"))
 
+    async def test_keep_last_user_skips_user_role_tool_results(self) -> None:
+        # [Hidden Assumption] a role="user" tool result (Anthropic, Gemini) is tool output, not the user's newest turn.
+        messages = [
+            ContextMessage(role="user", content="now Y"),
+            ContextMessage(role="assistant", content="", kind="tool_call"),
+            ContextMessage(role="user", content="RESULT", kind="tool_result"),
+        ]
+        out = await ReplaceWithTraceCompaction("TRACE", keep_last_user=True).compact(messages)
+        self.assertEqual([(m.role, m.content) for m in out], [("user", "now Y"), ("assistant", "TRACE")])
+
     async def test_oldest_n_groups_replaces_only_oldest(self) -> None:
         # [Edge Case] oldest_n_groups replaces the first group only.
         out = await ReplaceWithTraceCompaction("TRACE", scope="oldest_n_groups", n=1).compact(self._messages())
@@ -371,6 +381,30 @@ class TraceReplacementMiddlewareTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(len(after), 3)
                 self.assertIn("ship it", str(after[0].get("content")))
                 self.assertEqual(after[1:], history[3:5])
+
+    async def test_keep_last_user_keeps_the_user_turn_not_a_tool_result_on_every_provider(self) -> None:
+        # [Hidden Assumption] Anthropic and Gemini carry tool results on role="user" turns; read as the user, they displaced the real last user message.
+        for provider in ("openai", "deepseek", "anthropic", "gemini"):
+            for preset in ("replace_keep_last_user", "replace_all_with_trace"):
+                with self.subTest(provider=provider, preset=preset):
+                    first, second = ToolCall("lookup", call_id="c1"), ToolCall("lookup", call_id="c2")
+                    call_turn = _CALL_TURNS[ToolsFormatter.wire_format(provider)]
+                    history = [
+                        {"role": "user", "content": "look up Ruritania"},
+                        {"role": "assistant", "content": "done"},
+                        {"role": "user", "content": "You cannot finish yet: call a tool first."},
+                        call_turn(first),
+                        dict(ToolsFormatter.format_tool_result(first, ToolResult.success("lookup", "R1"), provider)),
+                        call_turn(second),
+                        dict(ToolsFormatter.format_tool_result(second, ToolResult.success("lookup", "R2"), provider)),
+                    ]
+                    mw = getattr(TraceReplacementCompactionMiddleware, preset)(artifact=_ARTIFACT)
+                    decision = await mw.before_model_call(_ctx(history))
+                    after = list(decision.transform.provider_messages)
+                    # Everything folds into the trace except the user's latest real message, which survives verbatim after it.
+                    self.assertEqual(len(after), 2)
+                    self.assertIn("ship it", str(after[0].get("content")))
+                    self.assertEqual(after[1], history[2])
 
 
 class ProviderErrorStatusTests(unittest.TestCase):
