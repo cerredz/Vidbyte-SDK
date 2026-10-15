@@ -59,6 +59,10 @@ class JevClarificationAgent(BaseAgent):
             temperature=settings.temperature,
             timeout_seconds=settings.timeout_seconds,
             output_schema=JevClarificationPayload,
+            # @intent clarifier-keeps-its-fixed-prompt
+            # This agent's prompt is fixed, so it opts out of the
+            # presets of the run it serves.
+            system_prompt_presets=(),
         )
 
     async def clarify(self, request: str, result: JevPresetResult) -> JevClarification | None:

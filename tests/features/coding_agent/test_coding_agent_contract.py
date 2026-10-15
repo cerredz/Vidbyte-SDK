@@ -68,6 +68,7 @@ PARITY_KEYWORDS = {
     "metadata": {"team": "sdk"},
     "run_id": "run-coding-parity",
     "output_schema": {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]},
+    "system_prompt_presets": ("working_principles",),
 }
 
 OFFLINE_MODEL = {"provider": "openai", "model_name": "gpt-4.1-mini"}

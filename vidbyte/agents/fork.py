@@ -88,6 +88,10 @@ class AgentForker:
             # @intent forks-never-deliver
             # SDK-built forks never post to the parent's outputs.
             outputs=(),
+            # @intent forks-keep-the-parents-presets
+            # Presets are separate from the prompt text, so a fork keeps
+            # them even when its system prompt is replaced.
+            system_prompt_presets=agent.system_prompt_presets,
         )
         # A dropped tool stays dropped for every later fork, including tools the child bridges from MCP servers.
         child._fork_dropped_tool_names = agent._fork_dropped_tool_names | frozenset(settings.drop_tools)

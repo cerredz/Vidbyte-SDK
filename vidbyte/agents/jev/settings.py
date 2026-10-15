@@ -49,6 +49,7 @@ from vidbyte.lib.constants.jev import (
 from vidbyte.lib.dataclasses.agents import ProviderKeys
 from vidbyte.lib.dataclasses.jev import JevProbability, JevSpecialist
 from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
+from vidbyte.lib.dataclasses.prompts import SystemPromptPresetSelection
 from vidbyte.lib.dataclasses.skills import SkillDocument, SkillEntry
 from vidbyte.lib.enums import (
     DecisionModelMode,
@@ -57,6 +58,7 @@ from vidbyte.lib.enums import (
     JevDynamicComputeOption,
     JevPreflightPreset,
     ModelProvider,
+    SystemPromptPreset,
     TextModelMode,
 )
 from vidbyte.lib.errors import ConfigurationError
@@ -146,6 +148,7 @@ class JevAgentSettings:
     outputs: tuple[OutputConnector, ...] = ()
     vidbyte_api_key: str | None = field(default=None, repr=False)
     model_mode: TextModelMode = TextModelMode.AUTO
+    system_prompt_presets: tuple[SystemPromptPreset, ...] | None = None
 
     def __post_init__(self) -> None:
         # Normalizes immutable inputs and rejects invalid agent configuration before runtime construction.
@@ -183,6 +186,9 @@ class JevAgentSettings:
             raise ConfigurationError("JevAgentSettings.alignment must be a JevAlignmentSettings instance.")
         self._validate_agents()
         object.__setattr__(self, "outputs", OutputDispatcher.connectors(self.outputs))
+        # None keeps "inherit from the run this agent runs in"; a list
+        # becomes a validated tuple of preset members.
+        object.__setattr__(self, "system_prompt_presets", SystemPromptPresetSelection.parse(self.system_prompt_presets, "JevAgentSettings.system_prompt_presets"))
 
     def _validate_agents(self) -> None:
         # Freezes the specialists in the order given, which is also the order Jev reads their options.
