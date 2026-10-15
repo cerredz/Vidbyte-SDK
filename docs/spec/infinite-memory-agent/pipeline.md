@@ -4,6 +4,8 @@ repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-infinite-memory-agent
 branch: feat/infinite-memory-agent
 base_commit: d9c01461b9e5d8a1265ee85128416b986841ce90
+rebased_onto: 179d8adc (origin/main after #904; branch rebased before S3)
+s2_head: d8bcdf14
 pr:
 until: none
 started: 2026-10-15 02:49
@@ -15,8 +17,8 @@ started: 2026-10-15 02:49
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-15 02:49 | 2026-10-15 03:05 | reports/S0-scout.md | base_commit d9c01461; code-map.md (4 sections) |
 | S1 spec + review | done | 2026-10-15 03:06 | 2026-10-15 04:52 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-2.md | spec r3 approved @a375758f (33 §12.3 rows: 18 CREATE, 15 MODIFY; 17 FR, 39 INV, 42 AC, 49 EC, 28 D, 9 A, 8 Q) |
-| S2 tests | done | 2026-10-15 04:55 | 2026-10-15 05:52 | reports/S2-test-author.md | S2_HEAD c2f91ebd; 89 red cases in 7 modules under tests/features/infinite_memory_agent/; AC-1..AC-42 all mapped; spec r4 @ff634998 fixed the 2 S2 open items |
-| S3 implement | pending | | | | |
+| S2 tests | done | 2026-10-15 04:55 | 2026-10-15 05:52 | reports/S2-test-author.md | S2_HEAD d8bcdf14 (c2f91ebd before rebase); 89 red cases in 7 modules under tests/features/infinite_memory_agent/; AC-1..AC-42 all mapped; spec r4 @ff634998 fixed the 2 S2 open items |
+| S3 implement | running | 2026-10-15 05:59 | | | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
@@ -35,6 +37,7 @@ started: 2026-10-15 02:49
 - 2026-10-15 04:53 — Applied every open-question default from spec r3 §15 (none blocking): Q-1 no `middleware` settings field; Q-2 no bash-bypass scan/restore; Q-3 verifiers cannot launch; Q-4 no run-wide skills/extras for children; Q-6 no run-wide USD/token cap; Q-7 no per-run cross-process lock; Q-8 no "compaction for file policy" (over-cap writes are refused, D-26); Q-9 no separate root/child loop settings. Q-5 was withdrawn in r2. Spec summary printed to the user; continuing to S2 without waiting (playbook rule 8).
 - 2026-10-15 05:53 — Routed the two S2 OPEN ITEMS (AC-41 wrapping; INV-29 review text) to the S1 author in Revision mode per the playbook, instead of leaving them for the implementer. r4: AC-41 callers see `AgentExecutionError` with the `ConfigurationError` as `__cause__` (no BaseAgent change); INV-29 had no hole (`AgentExecutionError` subclasses `VidbyteSdkError`), review = `__cause__` text → own text → class name. No re-review: wording-only, no §8/§9/§10 or §12-shape change.
 - 2026-10-15 05:53 — Accepted the S2 author's bootstrap deviation (no `pip install -e` from the worktree): the global editable install points at the canonical checkout and other sessions share it. Gates run with `PYTHONPATH=$(pwd)`; `run_ci.py --stage package` builds its own wheel into a temp venv, so it needs no editable install.
+- 2026-10-15 05:58 — Rebased `feat/infinite-memory-agent` (unpushed; docs + tests only) onto origin/main 179d8adc before S3. Upstream #904 (JevAgent skills) changed 7 files the spec's §12.3 also edits: REPO_MAP.md, contracts/sdk-public-api.json, vidbyte/__init__.py, vidbyte/agents/README.md, vidbyte/agents/__init__.py, vidbyte/agents/jev/__init__.py, vidbyte/lib/enums/__init__.py. Rebasing now avoids merge conflicts later and lets S3 build on current main. Clean rebase; SHAs changed (S2_HEAD c2f91ebd → d8bcdf14). Re-ran the pack after the rebase: 89 failed, all on the missing feature (ModuleNotFound/ImportError/missing folder/missing catalog keys).
 
 ## User replies (verbatim)
 - (none yet)
