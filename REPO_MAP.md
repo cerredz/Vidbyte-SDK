@@ -158,7 +158,7 @@ The base abstraction for wrapping an existing agent workflow so that every run p
 
 ##### `vidbyte/harnesses/native/`
 
-Hosts that drive vendor coding-agent command-line tools installed on the machine as local child processes: Grok Build over its stdio agent protocol, opencode over an owned or attached local HTTP server, and Muse Code over its stdio protocol (through WSL on Windows), plus the GLM and DeepSeek backend profiles that point Claude Code or opencode at an Anthropic-compatible endpoint. Each host is an async context manager that spawns, continues, waits on and interrupts turns, leaves sessions in the vendor's own history, and raises one error type carrying a closed failure code and a next step. Plumbing the three hosts share, such as scrubbed errors, the live-turn table and the stdio peer, lives once in a `hostkit` subfolder that only the hosts import. The model-facing tools over these hosts live with the other builtins and toolsets in the tools layer, and the hosts never import them.
+Module functions that run, continue and fork Grok Build, opencode and Muse Code threads by driving each vendor's installed command-line tool headless once per call with the caller's own API key, and return the thread id and the final answer. Each harness has its own subpackage with three functions, one small config record and the codec that reads that tool's output; Muse runs through WSL on Windows, and GLM and DeepSeek are reached through the opencode functions' model argument. The key reaches only the vendor child, through a private Grok home, an inline opencode config or a private Muse config folder, so a stored login never wins. Plumbing the three share, the scrubbed error factory, launcher resolution and skills folders, lives once in a `hostkit` subfolder. There are no host objects, model-facing tools or servers here; argv building and process runs go through the canonical helpers in `vidbyte/lib/process/`.
 
 ##### `vidbyte/harnesses/stores/`
 
@@ -214,7 +214,7 @@ The provider side of delivering a finished agent reply to the outside world: cha
 
 ##### `vidbyte/lib/process/`
 
-The canonical helpers for running local processes: a one-shot command runner with a deadline and capped output capture, a managed long-running process that waits for a readiness line and keeps draining its output, and a stopper that ends a whole process tree, the process group on POSIX and the taskkill tree on Windows. Every failure comes back as a field of the returned record instead of an exception, except cancellation, which stops and reaps the tree before propagating. New code that needs to start a child process should use these helpers rather than the asyncio subprocess API directly, so the timeout, the output caps and the tree stop exist in one place.
+The canonical helpers for running local processes: a one-shot command runner with a deadline and capped output capture, whose child inherits the caller's environment plus an overlay, one argv builder that turns flag records into a command line in a joined or separate style so no value can become a flag, and a stopper that ends a whole process tree, the process group on POSIX and the taskkill tree on Windows. Every failure comes back as a field of the returned record instead of an exception, except cancellation, which stops and reaps the tree before propagating. New code that needs to start a child process should use these helpers rather than the asyncio subprocess API directly, so the timeout, the output caps and the tree stop exist in one place.
 
 ##### `vidbyte/lib/providers/`
 
