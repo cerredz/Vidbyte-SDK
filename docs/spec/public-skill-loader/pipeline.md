@@ -14,7 +14,7 @@ started: 2026-10-15 15:04
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 15:04 | 15:20 | reports/S0-scout.md | base_commit 179d8adc; context/code-map.md (4 sections, 18 files) |
-| S1 spec + review | running (round 1 reviewed; revision pending) | 15:22 | | reports/S1-spec-author.md, reports/S1-spec-review.md | r1, SOUND WITH FIXES |
+| S1 spec + review | done | 15:22 | 17:35 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | r3 approved; 2 rounds SOUND WITH FIXES; 11 findings applied; spec-summary.md |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -61,6 +61,8 @@ started: 2026-10-15 15:04
 - 2026-10-15 17:10 — `origin/main` moved again to `9aaf662a` (#1089, #1090: only `vidbyte/context/algorithms/*` and four tests; no overlap with any cited file or `lint/`). Decided NOT to rebase again: base stays `c9d31a7f`; avoids churn; GitHub merges cleanly. After the contract commit, any update from main is by merge with Ask-first approval (spec §12.6/§14 per R-9).
 - 2026-10-15 17:10 — Notified the parent session (SendMessage to main) of the 0.3.1 version decision so the user can override; no reply yet.
 
+- 2026-10-15 17:35 — S1 done: spec r3 `status: approved` (`843e2852`). Q-n defaults applied: Q-1 yes (ConfigurationError root export built); Q-2..Q-7, Q-9 no (not built); Q-8 version 0.3.1. Wrote spec-summary.md (the parent cannot see orchestrator text). Noted the S1 author's deviation on R-11's first sentence (CLI origin/main `64b04b3` #166 already pins `>=0.3.0,<0.4`) — accepted, it is a fact correction.
+
 ## User replies (verbatim)
 - none yet
 
@@ -86,3 +88,8 @@ started: 2026-10-15 15:04
 - Version 0.3.1 lives in eight hand-edited literals plus the regenerated contract; S009 (mypy) ratchet is 350 — *source:* S1 author r2
 - `vidbyte/agents/skills/`, `vidbyte/lib/dataclasses/skills.py`, `vidbyte/agents/jev/`, `lint/baseline.json`, `lint/mypy.ini` are byte-identical between 179d8adc and c9d31a7f — *source:* S1 author r2
 - INV-18/AC-18/FR-12: `JevAlignmentSettings(skills=t)` and `SkillLoader(t)` raise equal `details` for repeated names (drift guard); `test_skill_sources_entries.py:216-229` DUPLICATES table is reusable — *source:* S1 author r2
+- CLI origin/main (`64b04b3`, #166) already pins `vidbyte-sdk[codex]>=0.3.0,<0.4`; only the paused CLI branch (`b8af987`) has `>=0.2.1,<0.3`. So 0.3.1 is a floor raise for CLI main, and 0.2.2 would sit below CLI main's floor — *source:* S1 author r3
+- `origin/main` keeps moving (3b879c67 at 17:30, #1089–#1093); none touch files this PR edits, area tests, lint/, scripts/ or contracts/. Branch stays on `c9d31a7f` — *source:* S1 author r3
+- Generator prints "already current … nothing written" when data is unchanged (`scripts/generate-sdk-public-api.py:65-67`, `:112`); C016/`--check` never check `source.commit` reachability — *source:* S1 reviewer r2
+- `VersionResolver.resolve()` / `vidbyte --version` read distribution metadata first (0.2.1 locally via the shared editable install); the fallback literal at `vidbyte/cli/__init__.py:58` is observable only with `vidbyte.cli.metadata.version` patched to raise `PackageNotFoundError`, or by reading the file — *source:* S1 reviewer r2
+- Per-entry credentials exist and are public: `GitHubSkill(token=...)`, `AnthropicSkill(api_key=...)`, `OpenAISkill(api_key=...)`; the loader reads `GITHUB_TOKEN` / provider keys only inside `load()` when the field is None — *source:* S1 author r3
