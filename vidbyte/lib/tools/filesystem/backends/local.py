@@ -30,6 +30,10 @@ class LocalFileSystemBackend(BaseFileSystemBackend):
             handle.write(content)
 
     def append_text(self, path: Path, content: str, *, encoding: str, create_parents: bool, newline: str | None = None) -> None:
+        # @intent failed-edit-leaves-file-untouched
+        # Opening for appending creates a missing file at once, so text the
+        # encoding cannot hold must fail here, before any folder or file is made.
+        content.encode(encoding)
         if create_parents:
             path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding=encoding, newline=newline) as handle:

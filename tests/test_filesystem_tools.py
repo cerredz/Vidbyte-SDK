@@ -746,6 +746,23 @@ class FileSystemToolErrorPathTests(unittest.TestCase):
                 self.assertIn("can't encode", result.output)
                 self.assertEqual(target.read_bytes(), content)
 
+    def test_append_the_encoding_cannot_hold_creates_no_file_or_folder(self) -> None:
+        # @intent failed-edit-leaves-file-untouched
+        # Opening for appending creates a missing file, so an append the encoding cannot hold
+        # must fail before the new file, or with create_parents its folders, are made.
+        cases = (
+            ("latin-1", "price: €5\n"),
+            ("utf-8", "hi \ud83d\n"),
+        )
+        for encoding, content in cases:
+            with self.subTest(encoding=encoding), TemporaryDirectory() as tmp:
+                tool = AppendTool(FileSystemToolConfig(root=tmp, allow_write=True, encoding=encoding))
+                for path, create_parents in (("today.txt", False), ("notes/today.txt", True)):
+                    result = run(tool.execute(ToolCall(tool.name, {"path": path, "content": content, "create_parents": create_parents})))
+                    self.assertEqual(result.status, ToolStatus.ERROR)
+                    self.assertIn("can't encode", result.output)
+                self.assertEqual(list(Path(tmp).iterdir()), [])
+
     def test_read_lines_start_less_than_one_returns_error(self) -> None:
         with TemporaryDirectory() as tmp:
             config = FileSystemToolConfig(root=tmp, allow_write=True)
