@@ -126,6 +126,35 @@ class ReflexionAlgorithmTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.metadata["reflexion"]["trial_count"], 2)
         self.assertEqual(result.metadata["reflexion"]["reflection_count"], 1)
 
+    async def test_runtime_accepts_plain_text_final_answer_without_reflecting(self) -> None:
+        runner = FakeRunner([FakeResponse("Paris.")])
+        runtime = AgentRuntime(
+            agent_name="worker",
+            system_prompt="Work.",
+            tools=Tools(),
+            permission_policy=PermissionPolicy(),
+            algorithm=ContextWindow.preset.reflexion,
+        )
+        context = runtime.build_context(
+            "task",
+            base_context=None,
+            history=(),
+            agent_history=(),
+            agent_metadata={},
+            existing_tool_calls=(),
+        )
+
+        result = await runtime.arun(
+            "task",
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
+            context=context,
+        )
+
+        self.assertEqual(result.output, "Paris.")
+        self.assertEqual(len(runner.calls), 1)
+        self.assertEqual(result.metadata["reflexion"]["trial_count"], 1)
+        self.assertEqual(result.metadata["reflexion"]["reflection_count"], 0)
+
     def test_format_failed_attempt_includes_tool_context(self) -> None:
         algorithm = ReflexionAlgorithm()
         context_record = ToolCallContext(
