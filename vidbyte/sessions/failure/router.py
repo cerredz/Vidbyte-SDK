@@ -537,6 +537,10 @@ class FailureRouter:
                 self._history[index] = failure
                 return
         self.record(failure)
+        # @intent evicted-failure-stays-routed
+        # Only route() replaces records, after marking the id routed; evicting the id dropped that mark, so restore it,
+        # or route_pending would hand the re-recorded failure to its handler a second time.
+        self._routed_ids.add(failure.id)
 
 
 __all__ = ["FailureMetadataNormalizer", "FailureRouter"]

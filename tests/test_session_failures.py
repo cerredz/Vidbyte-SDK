@@ -343,6 +343,29 @@ class FailureRuleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls, 1)
         self.assertEqual(router.history()[0].status, FailureStatus.RECOVERED)
 
+    async def test_failure_evicted_during_its_recovery_routes_once(self) -> None:  # [Hidden Failure]
+        # Verify a failure the full ledger evicts while its handler runs is not routed again by the next route_pending.
+        router = FailureRouter(object(), max_history=2)
+        calls = 0
+
+        class Handler:
+            name = "retry"
+            on_error = "closed"
+
+            def recover(self, failure, *, session):
+                nonlocal calls
+                calls += 1
+                router.emit(FailureCode.TOOL_EXECUTION_FAILED, phase=FailurePhase.RECOVERY, source="retry")
+                return RecoveryResult(False)
+
+        stale = router.emit(FailureCode.TOOL_RETRY_EXHAUSTED, phase=FailurePhase.TOOL, source="tool", status=FailureStatus.EXHAUSTED)
+        router.emit(FailureCode.TOOL_EXECUTION_FAILED, phase=FailurePhase.TOOL, source="tool")
+        router.on(FailureCode.TOOL_RETRY_EXHAUSTED, Handler())
+        await router.route_pending()
+        await router.route_pending()
+        self.assertEqual(calls, 1)
+        self.assertEqual([failure.id for failure in router.history()].count(stale.id), 1)
+
     async def test_rule_middleware_blocks_before_tool_execution(self) -> None:  # [Hidden Failure]
         # Verify a fail-closed before-tool rule uses the existing middleware decision contract.
         router = FailureRouter(object())
