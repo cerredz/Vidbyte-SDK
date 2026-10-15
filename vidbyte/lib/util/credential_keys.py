@@ -23,7 +23,9 @@ FUNCTION INVENTORY:
 
 COMMON MODIFICATION PATTERNS:
     Add a credential name to _SECRET_KEYS or a suffix to _SECRET_SUFFIXES;
-    both harness capture and session trace artifacts pick it up.
+    both harness capture and session trace artifacts pick it up. A name
+    that holds a list of credentials needs its plural too, as api_keys and
+    _api_keys sit beside api_key and _api_key.
 
 WHAT NOT TO DO IN THIS FILE:
     1. Do not switch to substring matching; it deletes field names such as
@@ -52,7 +54,9 @@ class CredentialKeyPolicy:
 
     _SECRET_KEYS = frozenset({
         "api_key",
+        "api_keys",
         "apikey",
+        "provider_key",
         "access_token",
         "refresh_token",
         "token",
@@ -70,7 +74,10 @@ class CredentialKeyPolicy:
         "authorization",
         "auth",
     })
-    _SECRET_SUFFIXES = ("_api_key", "_private_key", "_secret_key", "_access_key", "_access_key_id", "_token", "_secret", "_password")
+    # "_provider_key" covers the relay header X-Vidbyte-Provider-Key,
+    # which carries the caller's own provider key; "provider_key" in
+    # _SECRET_KEYS covers the bare name, as the free-text redactor does.
+    _SECRET_SUFFIXES = ("_api_key", "_api_keys", "_provider_key", "_private_key", "_secret_key", "_access_key", "_access_key_id", "_token", "_secret", "_password")
 
     @classmethod
     def is_secret_key(cls, key: str) -> bool:

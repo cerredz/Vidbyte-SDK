@@ -348,7 +348,7 @@ class BaseAgentHandoffIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     def test_side_agents_keep_source_fallback_chain_and_timeout(self) -> None:
         # A source run that only succeeded on a fallback model must leave its side agents able to reach that model too.
-        source = BaseAgent(name="eng", system_prompt="Engineer.", provider="deepseek", model_name="deepseek-v4-pro", api_key="k", timeout_seconds=12.5, fallback=["anthropic/claude-sonnet-4-6"])
+        source = BaseAgent(name="eng", system_prompt="Engineer.", provider="deepseek", model_name="deepseek-v4-pro", api_keys=["k"], timeout_seconds=12.5, fallback=["anthropic/claude-sonnet-4-6"])
         side_agents = (HandoffAgent.from_source_agent(source, EngineeringHandoff()), ContinualTraceAgent.from_source_agent(source, ActionTrace))
         for side in side_agents:
             self.assertIs(side._fallback_spec, source._fallback_spec)

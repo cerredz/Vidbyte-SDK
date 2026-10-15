@@ -24,7 +24,7 @@ from vidbyte import tool
 from vidbyte.agents.jev import JevAgent, JevAgentSettings, JevComputeSettings, JevRunBriefSettings, JevRuntimeSettings, JevSpecialist
 from vidbyte.agents.jev.compute import JevComputeController
 from vidbyte.lib.dataclasses.jev import JevRunBriefAppendPayload
-from vidbyte.lib.enums import JevRunBriefUpdateStatus, ModelProvider
+from vidbyte.lib.enums import JevRunBriefUpdateStatus, ModelProvider, TextModelMode
 from vidbyte.lib.errors import ConfigurationError, VidbyteSdkError
 from vidbyte.lib.runners import TextModelResponse
 
@@ -61,7 +61,7 @@ def lookup(topic: str) -> str:
 
 
 def _settings(**overrides: Any) -> JevAgentSettings:
-    values: dict[str, Any] = {"name": "researcher", "system_prompt": "Research carefully.", "provider": "openai", "model_name": "gpt-4.1", "api_key": "main-key", "tools": (lookup,)}
+    values: dict[str, Any] = {"name": "researcher", "system_prompt": "Research carefully.", "provider": "openai", "model_name": "gpt-4.1", "api_keys": ["sk-main-key"], "tools": (lookup,)}
     values.update(overrides)
     return JevAgentSettings(**values)
 
@@ -164,7 +164,8 @@ class JevComputeCheckpointTests(unittest.IsolatedAsyncioTestCase):
     async def test_a_chosen_specialist_runs_without_a_checkpoint(self) -> None:
         specialist_agent = SimpleNamespace(arun=AsyncMock(return_value=SimpleNamespace(content="specialist answer", metadata={}, structured=None)))
         specialist = Mock(spec=JevSpecialist, agent=specialist_agent, title="schema")
-        agent = JevAgent(_settings(), _compute())
+        # byok-api-keys INV-7: this agent builds its own runner, and AUTO needs a Vidbyte key; DIRECT keeps the test about checkpoints.
+        agent = JevAgent(_settings(model_mode=TextModelMode.DIRECT), _compute())
         assert agent.compute is not None
         with (
             patch.object(agent.preflight, "pass_", new=AsyncMock(return_value=True)),

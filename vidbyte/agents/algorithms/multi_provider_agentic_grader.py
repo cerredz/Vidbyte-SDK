@@ -66,7 +66,11 @@ class MultiProviderAgenticGraderRuntimeAlgorithm:
             return raw_result
         selected_output, selected_provider = self._select_winner(candidates, raw_result, handle)
         res_metadata = self._build_result_metadata(metadata, active_models, selected_provider, candidates, total_tokens, call_contexts)
-        return AgentResult(output=selected_output, strategy_name="multi_provider_agentic_grader", calls=tuple(call_contexts), metadata=res_metadata)
+        # @intent grader-keeps-the-winners-structured-output
+        # Carry the winning trial's validated schema instance; the grader's own text has none.
+        winner = dict(zip(active_models, results, strict=True)).get(selected_provider)
+        structured = None if winner is None or isinstance(winner, BaseException) else winner.structured
+        return AgentResult(output=selected_output, strategy_name="multi_provider_agentic_grader", calls=tuple(call_contexts), metadata=res_metadata, structured=structured)
 
     async def _run_provider_trials(self, message: str, context: BaseAgentContext, handle: RunnerHandle, metadata: Mapping[str, Any] | None, options: Mapping[str, Any] | None, trace_context: SpanContext | None, active_models: dict[str, str]) -> list[Any]:
         # Launches all provider loops concurrently and returns their results, including exceptions.

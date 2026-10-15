@@ -132,6 +132,11 @@ class JevRuntime(AgentRuntime):
             sequence_instructions = self.run_state.agent_instructions()
             if sequence_instructions:
                 context = replace(context, system_prompt=f"{context.system_prompt or ''}\n\n{sequence_instructions}")
+                # @intent explicit-system-option-carries-the-stage-order
+                # An explicit system option replaces the context prompt on the wire, so the stage order joins it too.
+                explicit_system = (options or {}).get("system")
+                if isinstance(explicit_system, str):
+                    options = {**dict(options or {}), "system": f"{explicit_system}\n\n{sequence_instructions}"}
         context, options, selector_metadata = await self._select_tools(message, context, options)
         context, options = self._offer_bulk_work(message, context, options)
         result = await super().arun(

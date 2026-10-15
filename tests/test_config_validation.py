@@ -4,22 +4,22 @@ import unittest
 from unittest.mock import patch
 
 from vidbyte.agents import AgentLoopSettings, ToolErrorPolicy
-from vidbyte.lib.config import ImageModelConfig, ModelProvider, TextModelConfig, VideoModelConfig
+from vidbyte.lib.config import ImageModelConfig, ModelProvider, TextModelConfig, TextModelMode, VideoModelConfig
 from vidbyte.lib.errors import ConfigurationError, UnsupportedProviderError
 
 
 class ConfigValidationTests(unittest.TestCase):
     def test_text_config_resolves_explicit_api_key(self) -> None:
-        config = TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-test", api_key=" key ")
+        config = TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-test", api_keys=[" sk-key "], mode=TextModelMode.DIRECT)
 
-        self.assertEqual(config.resolved_api_key(), "key")
+        self.assertEqual(config.resolved_api_key(), "sk-key")
         self.assertEqual(config.resolved_endpoint(), "https://api.openai.com/v1")
 
     def test_text_config_resolves_env_api_key(self) -> None:
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "env-key"}, clear=True):
-            config = TextModelConfig(provider="anthropic", model="claude-test")
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-ant-env-key"}, clear=True):
+            config = TextModelConfig(provider="anthropic", model="claude-test", mode=TextModelMode.DIRECT)
 
-            self.assertEqual(config.resolved_api_key(), "env-key")
+            self.assertEqual(config.resolved_api_key(), "sk-ant-env-key")
 
     def test_text_config_rejects_missing_api_key(self) -> None:
         with patch.dict("os.environ", {}, clear=True):
@@ -32,7 +32,8 @@ class ConfigValidationTests(unittest.TestCase):
         config = TextModelConfig(
             provider=ModelProvider.OPENAI,
             model="gpt-test",
-            api_key="key",
+            api_keys=["sk-key"],
+            mode=TextModelMode.DIRECT,
             temperature=3,
         )
 

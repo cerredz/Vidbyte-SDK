@@ -11,7 +11,8 @@ Architecture:
     - AgentFallbackSettings: Plain class with __init__-level validation,
       including a strict boolean enabled switch so false-like strings cannot enable fallback.
     - resolved_models(): Normalizes every entry against the agent's primary model.
-    - to_fallback(): Converts to the internal AgentFallback contract.
+    - named_providers(): The providers the entries name, which the agent matches its keys against.
+    - to_fallback(): Converts to the internal AgentFallback contract, with the agent's matched keys and mode.
 Relations:
     Imported by vidbyte.agents.base. Exported from vidbyte.agents.settings.
 Similar Files:
@@ -24,10 +25,9 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-from vidbyte.lib.dataclasses.agents import FallbackModel
-from vidbyte.lib.enums import ModelProvider
+from vidbyte.lib.dataclasses.agents import FallbackModel, ProviderKeys
+from vidbyte.lib.enums import ModelProvider, TextModelMode
 from vidbyte.lib.errors import ConfigurationError
-from vidbyte.lib.registries.models import ProviderModelRegistry
 
 if TYPE_CHECKING:
     from vidbyte.agents.fallback import AgentFallback
@@ -95,16 +95,45 @@ class AgentFallbackSettings:
         """Return the full chain with the primary first and every entry normalized against it."""
         return (primary, *(self._resolve_entry(entry, primary, position) for position, entry in enumerate(self.models)))
 
-    def to_fallback(self, *, primary: FallbackModel, timeout_seconds: float | None = None) -> AgentFallback | None:
+    def named_providers(self) -> tuple[str, ...]:
+        """Return the providers this chain's entries name, in order and without repeats; bare names and a disabled chain name none."""
+        # @intent backup-providers-are-matched-with-the-agent
+        # The agent matches its key list against these names, so a key
+        # for a backup's provider binds to that provider. A bare name
+        # runs on the agent's own provider, already matched, and a
+        # disabled chain makes no call, so neither adds a name.
+        if not self.enabled:
+            return ()
+        names: list[str] = []
+        for position, entry in enumerate(self.models):
+            provider = entry.provider if isinstance(entry, FallbackModel) else self._split_provider_prefix(entry.strip(), position)[0]
+            if provider is not None and provider not in names:
+                names.append(provider)
+        return tuple(names)
+
+    def to_fallback(
+        self,
+        *,
+        primary: FallbackModel,
+        timeout_seconds: float | None = None,
+        api_keys: ProviderKeys = ProviderKeys(),
+        model_mode: TextModelMode = TextModelMode.AUTO,
+    ) -> AgentFallback | None:
         """Convert these settings into the internal AgentFallback, or None when disabled."""
         from vidbyte.agents.fallback import DEFAULT_FALLBACK_ERRORS, AgentFallback
 
         if not self.enabled:
             return None
+        # @intent children-carry-the-matched-keys
+        # The chain gets the agent's matched record and mode as they
+        # are, so each backup sends only the key matched to its own
+        # provider; the entries themselves hold no key.
         return AgentFallback(
             self.resolved_models(primary=primary),
             fallback_on=self.fallback_on if self.fallback_on is not None else DEFAULT_FALLBACK_ERRORS,
             timeout_seconds=timeout_seconds,
+            api_keys=api_keys,
+            model_mode=model_mode,
         )
 
     def _resolve_entry(self, entry: str | FallbackModel, primary: FallbackModel, position: int) -> FallbackModel:
@@ -114,13 +143,7 @@ class AgentFallbackSettings:
         provider, model = self._split_provider_prefix(entry.strip(), position)
         # A bare name stays on the agent's provider; a prefixed name switches to the provider it names.
         resolved_provider = provider if provider is not None else self._inherited_provider(primary, entry, position)
-        return FallbackModel(
-            provider=resolved_provider,
-            model=model,
-            # The agent's key belongs to its own vendor, so another provider resolves its own credential.
-            api_key=self._inherited_api_key(primary, resolved_provider),
-            temperature=primary.temperature,
-        )
+        return FallbackModel(provider=resolved_provider, model=model, temperature=primary.temperature)
 
     @staticmethod
     def _split_provider_prefix(entry: str, position: int) -> tuple[str | None, str]:
@@ -145,24 +168,16 @@ class AgentFallbackSettings:
 
     @staticmethod
     def _inherited_provider(primary: FallbackModel, entry: str, position: int) -> str:
-        # A bare model name only works when the agent itself declares a provider to inherit.
+        # @intent bare-backup-name-needs-the-agent-provider
+        # A bare model name runs on the agent's own provider and so on
+        # the key matched to it. With no provider to inherit there is
+        # no route and no key to choose, so the entry is refused here.
         if not primary.provider:
             raise ConfigurationError(
                 f"AgentFallbackSettings.models[{position}] ({entry!r}) has no provider and the agent declares none; "
                 "use 'provider/model' or a FallbackModel."
             )
         return primary.provider
-
-    @staticmethod
-    def _inherited_api_key(primary: FallbackModel, provider: str) -> str | None:
-        # @intent fallback-key-never-crosses-providers
-        # Sending the primary vendor's secret to another vendor leaks it and fails auth exactly
-        # when the fallback is needed; None lets the target provider read its own env key. A Vidbyte key
-        # is no vendor's secret and the gateway serves every managed provider, so it follows such a backup.
-        primary_provider = primary.provider.value if isinstance(primary.provider, ModelProvider) else str(primary.provider)
-        if primary_provider.strip().lower() != provider.strip().lower() and not ProviderModelRegistry.vidbyte_key_follows_provider(primary.api_key, provider):
-            return None
-        return primary.api_key
 
     def __repr__(self) -> str:
         # Returns a compact developer-readable string showing declared entries without credentials.

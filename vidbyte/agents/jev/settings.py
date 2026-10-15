@@ -1,7 +1,7 @@
 """FILE: vidbyte/agents/jev/settings.py
 
 PURPOSE: Defines JevAgent's two opinionated public configuration objects: JevAgentSettings for the agents that generate, and JevRuntimeSettings for Jev's own decision policy, whose `continual` field holds JevContinualSettings for the done checks and continuations. JevRunBriefSettings configures the mid-run brief: the separate writer's model and limits and the brief's refresh cadence.
-ROLE IN CODEBASE: JevAgent maps JevAgentSettings into BaseAgent and builds its preflight gate from both objects at construction, so JevRuntime never reads settings to decide what to ask.
+ROLE IN CODEBASE: JevAgent maps JevAgentSettings into BaseAgent and builds its preflight gate from both objects at construction, so JevRuntime never reads settings to decide what to ask. JevAgentSettings matches its api_keys list once (ProviderKeyMatcher) and every Jev child carries that ProviderKeys record and the text-model mode; JevRunBriefSettings only normalizes its own list, which the brief writer matches against its provider.
 ARCHITECTURE NOTE: The surface is intentionally closed; named Jev capabilities belong here as explicit settings instead of a generic decisions collection. JevAgentSettings holds the main agent and the JevSpecialist candidates Jev may hand a run to; JevRuntimeSettings holds the decision model, the preflight flags, the continuation settings (the done checks and their limits), and the tool-selector threshold.
 COMMON MODIFICATION PATTERNS: Add a generative-agent field to JevAgentSettings or a Jev policy setting to JevRuntimeSettings, then implement its fixed policy in vidbyte/agents/jev/gate/ without exposing runtime replacement hooks.
 KNOWN EDGE CASES: The generative provider cannot be TypeSafe because Jev is a decision model; neither generative nor decision API keys appear in repr output. Specialist titles must be unique because each one is a Choice option name. Preflight presets are validated by JevPreflightRegistry and done checks by JevDoneRegistry at construction, every continuation limit rejects booleans and non-integers, so no TypeSafe key is needed until a run asks Jev; the tool-selector threshold rejects booleans, non-finite values, and out-of-range probabilities. JevAlignmentSettings.skills accepts SkillEntry, SkillDocument, and str values in one list: strings become inline_skill_<position> documents counted over the whole list, entries pass through unchanged and are resolved later by the preload's SkillLoader (no I/O here), and names must be unique across every kind.
@@ -12,6 +12,7 @@ TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 
 from vidbyte.agents.output.connector import OutputConnector
@@ -45,6 +46,7 @@ from vidbyte.lib.constants.jev import (
     JEV_TOOL_SELECTOR_MAX_THRESHOLD,
     JEV_TOOL_SELECTOR_MIN_THRESHOLD,
 )
+from vidbyte.lib.dataclasses.agents import ProviderKeys
 from vidbyte.lib.dataclasses.jev import JevProbability, JevSpecialist
 from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
 from vidbyte.lib.dataclasses.prompts import SystemPromptPresetSelection
@@ -57,10 +59,12 @@ from vidbyte.lib.enums import (
     JevPreflightPreset,
     ModelProvider,
     SystemPromptPreset,
+    TextModelMode,
 )
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.jev import JevDoneRegistry, JevPreflightRegistry
 from vidbyte.lib.jev.compute import JevComputeRegistry
+from vidbyte.lib.registries.provider_keys import ProviderKeyMatcher
 from vidbyte.tools.security import PermissionPolicy
 
 
@@ -132,7 +136,7 @@ class JevAgentSettings:
     system_prompt: str
     provider: ModelProvider | str
     model_name: str
-    api_key: str | None = field(default=None, repr=False)
+    api_keys: ProviderKeys | Iterable[str | None] | None = field(default_factory=ProviderKeys, repr=False)
     temperature: float | None = None
     timeout_seconds: float | None = None
     tools: tuple[object, ...] = ()
@@ -142,6 +146,8 @@ class JevAgentSettings:
     bulk_work: JevBulkSettings = field(default_factory=JevBulkSettings)
     alignment: JevAlignmentSettings = field(default_factory=JevAlignmentSettings)
     outputs: tuple[OutputConnector, ...] = ()
+    vidbyte_api_key: str | None = field(default=None, repr=False)
+    model_mode: TextModelMode = TextModelMode.AUTO
     system_prompt_presets: tuple[SystemPromptPreset, ...] | None = None
 
     def __post_init__(self) -> None:
@@ -155,6 +161,13 @@ class JevAgentSettings:
         if provider is ModelProvider.TYPESAFE:
             raise ConfigurationError("JevAgentSettings.provider must be a generative model provider, not TypeSafe.")
         object.__setattr__(self, "provider", provider)
+        # Match the developer's keys once against the agent's provider;
+        # the main agent and every Jev child carry this one record.
+        matched = ProviderKeyMatcher.match(self.api_keys, primary=provider, vidbyte_api_key=self.vidbyte_api_key, field_name="JevAgentSettings.api_keys")
+        object.__setattr__(self, "api_keys", matched)
+        object.__setattr__(self, "vidbyte_api_key", matched.vidbyte_api_key)
+        if not isinstance(self.model_mode, TextModelMode):
+            raise ConfigurationError("JevAgentSettings.model_mode must be a TextModelMode value.")
         if isinstance(self.tools, (str, bytes)):
             raise ConfigurationError("JevAgentSettings.tools must be an iterable of tool objects, not a string.")
         try:
@@ -274,13 +287,15 @@ class JevRunBriefSettings:
     """Validated settings for the run brief: the writer's model, its loop limits, and how often the brief is refreshed.
 
     The writer is a separate, tool-free agent. Leave `provider` and `model_name` unset to reuse the main agent's
-    model and key, set only `model_name` for a cheaper model from the same provider, or set both for another
-    provider, which then uses `api_key` or that provider's environment variable instead of the main agent's key.
+    model and matched keys, set only `model_name` for a cheaper model from the same provider, or set both for
+    another provider. With its own `api_keys`, the writer matches that list against its provider as a root of its
+    own; without one, it carries the main agent's matched record, and a provider with no key there uses its
+    environment variable or goes Vidbyte-paid.
     """
 
     provider: ModelProvider | str | None = None
     model_name: str | None = None
-    api_key: str | None = field(default=None, repr=False)
+    api_keys: Sequence[str | None] = field(default=(), repr=False)
     temperature: float | None = None
     every_iterations: int = JEV_RUN_BRIEF_EVERY_ITERATIONS
     max_iterations: int = JEV_RUN_BRIEF_MAX_ITERATIONS
@@ -289,6 +304,9 @@ class JevRunBriefSettings:
     def __post_init__(self) -> None:
         self._validate_model()
         self._validate_temperature()
+        # Only the list's shape and characters are checked here; the
+        # writer matches it against its own provider when it is built.
+        object.__setattr__(self, "api_keys", ProviderKeyMatcher.normalize(self.api_keys, field_name="JevRunBriefSettings.api_keys"))
         for field_name in ("every_iterations", "max_iterations", "max_tokens"):
             value = getattr(self, field_name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:

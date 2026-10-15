@@ -10,8 +10,11 @@ from typing import Literal, Optional
 from pydantic import BaseModel
 
 from vidbyte import tool
+from vidbyte.lib.config import TextModelMode
 from vidbyte.lib.dataclasses.tools import ToolCall, ToolParameter, ToolResult, ToolSpec
 from vidbyte.lib.tools import ToolsFormatter
+
+GEMINI_TEST_KEY = "AQ" + "." + "x" * 40
 
 
 def _spec_with_schema(schema: dict) -> ToolSpec:
@@ -215,7 +218,7 @@ def _first_gemini_request(**agent_options: object) -> dict:
         sent.append(json_body or {})
         return HttpResponse(status_code=200, body=json.dumps(done), headers={})
 
-    agent = Agent(name="r", system_prompt="s", provider="gemini", model_name="gemini-3.5-flash", api_key="g", **agent_options)
+    agent = Agent(name="r", system_prompt="s", provider="gemini", model_name="gemini-3.5-flash", api_keys=[GEMINI_TEST_KEY], model_mode=TextModelMode.DIRECT, **agent_options)
     with patch.object(HttpTransport, "request", fake_gemini):
         agent.run("go")
     return sent[0]
@@ -513,7 +516,7 @@ class GeminiParallelCallAgentTests(unittest.IsolatedAsyncioTestCase):
                 return HttpResponse(status_code=400, body=json.dumps(body), headers={})
             return HttpResponse(status_code=200, body=json.dumps(replies.pop(0)), headers={})
 
-        agent = Agent(name="r", system_prompt="s", tools=[search], provider="gemini", model_name="gemini-3.5-flash", api_key="g")
+        agent = Agent(name="r", system_prompt="s", tools=[search], provider="gemini", model_name="gemini-3.5-flash", api_keys=[GEMINI_TEST_KEY], model_mode=TextModelMode.DIRECT)
         with patch.object(HttpTransport, "request", strict_gemini):
             await agent.arun("go")
             await agent.arun("again")
@@ -531,7 +534,7 @@ class AgentRequestTimeoutTests(unittest.TestCase):
     def _runner(self, **kwargs):
         from vidbyte.agents import BaseAgent
 
-        agent = BaseAgent(name="w", system_prompt="s", provider="xai", model_name="grok-4.5", api_key="k", **kwargs)
+        agent = BaseAgent(name="w", system_prompt="s", provider="xai", model_name="grok-4.5", api_keys=["xai-k"], model_mode=TextModelMode.DIRECT, **kwargs)
         runner, _ = agent._runner_for_model()
         return runner
 

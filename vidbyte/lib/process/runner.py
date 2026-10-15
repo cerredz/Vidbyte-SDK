@@ -1,0 +1,372 @@
+"""FILE: vidbyte/lib/process/runner.py
+
+PURPOSE: Defines CliRunner, the canonical way to run one command-line program to completion with a time bound, capped output and no inherited standard input; CliExitProtocol, the child's stream protocol that also signals the child's own exit; and ProcessStopper, which stops a child's whole process tree (process group on POSIX, taskkill /T on Windows) and reaps it within a bound.
+ROLE IN CODEBASE: CliRunner runs every vendor process of the harness thread functions under vidbyte/harnesses/native/: the grok, opencode and muse exec runs, the muse serve exchange, the WSL distro listing and the Muse in-distro reap. ProcessStopper is the tree stop CliRunner uses on timeout and cancellation.
+ARCHITECTURE NOTE: Canonical lib helper (AGENTS.md principle 5). Every failure is a field of the returned CliOutcome; only asyncio.CancelledError is raised, after the tree is stopped. Children start with start_new_session=True on POSIX so their process group id is their pid, which is what lets ProcessStopper reach grandchildren even after the leader exited. The child starts with the caller's environment minus the invocation's env_remove names, with env_overlay on top. Timing constants are read through the native_threads constants module at call time so tests can shrink them.
+FUNCTION INVENTORY: CliExitProtocol.process_exited sets the run's exited event. CliRunner.run is the narrated main function; CliRunner.find_program finds the file a bare program name starts, never in the current folder; CliRunner.launch starts the child with its environment, returning the child or the launch failure; json_objects reads the JSON objects a CLI printed one per line; _feed_stdin writes stdin_text and closes the pipe; _drain reads one stream into a capped buffer while counting the rest; _finish_readers bounds and cancels the drain tasks and says whether one was still open; _outcome builds the CliOutcome. ProcessStopper.stop_tree is the narrated main function; _signal_group, _wait_group_gone, _start_taskkill, _wait_taskkill, _kill_leader, _bounded_wait and _close_pipes are its single-step helpers.
+COMMON MODIFICATION PATTERNS: A new process option adds a CliInvocation field and its use in run or launch; keep the stop path in ProcessStopper so every caller gets it.
+WHAT NOT TO DO IN THIS FILE: 1. Do not pass shell=True or build a command string; argv goes to create_subprocess_exec (lint S055). 2. Do not let a child inherit the caller's stdin; it is a pipe or DEVNULL. 3. Do not wait without a bound after a kill; a grandchild can hold the pipes open forever. 4. Do not learn of the exit from Process.wait() in run; on Python 3.12+ it resolves only after every pipe closes, which a grandchild can delay for good.
+KNOWN EDGE CASES: A run ends when the leader exits, not when its pipes close: the readers then get one kill wait, a descendant still holding the pipes gets the tree stop, and a cancel during that wait stops the tree too. On POSIX a tree stop ends once the killed group has no process left, within the grace period; a zombie that its new parent never reaps (no init in a container) holds that wait to its bound. On Windows, taskkill /T cannot reach a grandchild of a leader that already exited, and taskkill itself starts by its full path in the System32 folder under the SystemRoot variable (the C: drive's Windows folder when it is unset), never by its bare name; a root that is not absolute leaves only the leader kill. On Windows a bare program name is looked up only in the absolute PATH folders with PATHEXT, and one found in none of them is not started, because CreateProcess would search the current folder; the harness launchers refuse batch files before they get here. Output is decoded as UTF-8 and trimmed to whole characters within max_output_bytes.
+RELATED DOCS: vidbyte/lib/README.md
+TESTS: tests/features/harness_threads/test_harness_threads_runner.py, tests/features/harness_threads/test_harness_threads_process_bounds.py
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import functools
+import json
+import os
+import signal
+import sys
+from collections.abc import Mapping
+
+from vidbyte.lib.constants import native_threads
+from vidbyte.lib.dataclasses.process import CliInvocation, CliOutcome
+from vidbyte.lib.enums.process import ProcessLaunchFailure
+
+
+class ProcessStopper:
+    """Stops a child's whole process tree and reaps it, never raising anything but cancellation."""
+
+    @staticmethod
+    async def stop_tree(process: asyncio.subprocess.Process, *, grace_seconds: float) -> int | None:
+        # @intent stop-tree-always-reaches-the-group
+        # The leader may already have exited while a grandchild in
+        # its group still runs and holds the pipes, so the group is
+        # always signalled, whatever returncode says. A
+        # cancellation part-way still sends the KILL and closes the
+        # pipes in the finally block.
+        finished = False
+        killer: asyncio.subprocess.Process | None = None
+        try:
+            if sys.platform == "win32":
+                # Windows follows parent ids from the live leader to
+                # stop the tree; a taskkill that cannot start or hangs
+                # is skipped.
+                killer = await ProcessStopper._start_taskkill(process.pid)
+                await ProcessStopper._wait_taskkill(killer, grace_seconds)
+            else:
+                # Ask the whole group to stop, give it the grace
+                # period, then kill it.
+                ProcessStopper._signal_group(process.pid, signal.SIGTERM)
+                await ProcessStopper._bounded_wait(process, grace_seconds)
+                ProcessStopper._signal_group(process.pid, signal.SIGKILL)
+                # A killed process takes a moment to go, so wait,
+                # within the bound, until no process of the group is
+                # left.
+                await ProcessStopper._wait_group_gone(process.pid, grace_seconds)
+            # Kill the leader itself if it is somehow still running,
+            # then reap it within the bound.
+            ProcessStopper._kill_leader(process)
+            await ProcessStopper._bounded_wait(process, grace_seconds)
+            finished = True
+        finally:
+            if not finished and sys.platform != "win32":
+                ProcessStopper._signal_group(process.pid, signal.SIGKILL)
+            if not finished:
+                ProcessStopper._kill_leader(process)
+            # Release our end of the pipes even if a grandchild still
+            # holds the other end.
+            ProcessStopper._close_pipes(process)
+            ProcessStopper._close_pipes(killer)
+        return process.returncode
+
+    @staticmethod
+    def _signal_group(pid: int, signal_number: int) -> None:
+        # The group id is the leader's pid because every helper starts
+        # children in a new session; Windows has no process groups.
+        if sys.platform == "win32":
+            return
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(pid, signal_number)
+
+    @staticmethod
+    async def _wait_group_gone(pid: int, seconds: float) -> None:
+        # @intent stop-tree-waits-until-the-group-is-gone
+        # A KILL takes effect only when the kernel next runs the
+        # process, and tearing it down takes time, so a descendant can
+        # still run just after killpg returns, when its leader exited
+        # long before and nothing else is waited for. Polls, at most
+        # seconds, until the group has no process left; a zombie that
+        # its new parent never reaps holds the wait to the bound.
+        if sys.platform == "win32":
+            return
+        with contextlib.suppress(TimeoutError, ProcessLookupError, PermissionError):
+            async with asyncio.timeout(seconds):
+                while True:
+                    os.killpg(pid, native_threads.NATIVE_PROCESS_GROUP_PROBE_SIGNAL)
+                    await asyncio.sleep(native_threads.NATIVE_PROCESS_GROUP_POLL_SECONDS)
+
+    @staticmethod
+    async def _start_taskkill(pid: int) -> asyncio.subprocess.Process | None:
+        # @intent stop-tree-taskkill-from-the-system-folder
+        # Windows looks for a bare program name in the current folder
+        # first, so a taskkill.exe there would run with the caller's
+        # environment and leave the tree alive. taskkill starts by its
+        # full path in the system folder (SystemRoot, else C:\Windows);
+        # a root that is not absolute starts nothing.
+        root = os.environ.get(native_threads.NATIVE_SYSTEM_ROOT_VARIABLE) or native_threads.NATIVE_WINDOWS_DEFAULT_SYSTEM_ROOT
+        program = os.path.join(root, *native_threads.NATIVE_TASKKILL_PATH_PARTS)
+        if not os.path.isabs(program):
+            return None
+        # @intent stop-tree-taskkill-may-fail-to-start
+        # Starts taskkill /T /F on the tree with no inherited streams;
+        # None when it cannot start, so the leader kill still runs.
+        try:
+            return await asyncio.create_subprocess_exec(program, *native_threads.NATIVE_TASKKILL_ARGUMENTS, str(pid), stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+        except OSError:
+            return None
+
+    @staticmethod
+    async def _wait_taskkill(killer: asyncio.subprocess.Process | None, grace_seconds: float) -> None:
+        # @intent stop-tree-taskkill-has-its-own-deadline
+        # Waits for taskkill at most grace_seconds and kills one that
+        # hangs, so a stuck taskkill never holds up the stop.
+        if killer is None:
+            return
+        try:
+            await asyncio.wait_for(killer.wait(), grace_seconds)
+        except TimeoutError:
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                killer.kill()
+
+    @staticmethod
+    def _kill_leader(process: asyncio.subprocess.Process) -> None:
+        # @intent stop-tree-kills-a-live-leader
+        # The group stop may not reach the leader (on Windows the
+        # taskkill can fail to start or time out), so the leader is
+        # killed directly while it has not been reaped. A failed kill
+        # is ignored, because the stop must never raise.
+        if process.returncode is None:
+            with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+                process.kill()
+
+    @staticmethod
+    async def _bounded_wait(process: asyncio.subprocess.Process, seconds: float) -> None:
+        # @intent stop-tree-exit-wait-is-bounded
+        # Waits for the exit at most seconds, so a process that ignores
+        # its kill can never hang a stop; Python 3.12+ also waits for
+        # the pipes here.
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(process.wait(), seconds)
+
+    @staticmethod
+    def _close_pipes(process: asyncio.subprocess.Process | None) -> None:
+        # Closes the subprocess transport. None, when no taskkill
+        # started, has none; getattr degrades to a pipe leak on a
+        # Python without it.
+        transport = getattr(process, "_transport", None)
+        if transport is not None:
+            with contextlib.suppress(PermissionError, ProcessLookupError, OSError, RuntimeError):
+                transport.close()
+
+
+class CliExitProtocol(asyncio.subprocess.SubprocessStreamProtocol):
+    """The stream protocol of one CLI child that also signals the moment the child itself exits."""
+
+    def __init__(self, exited: asyncio.Event, *, limit: int, loop: asyncio.AbstractEventLoop) -> None:
+        super().__init__(limit=limit, loop=loop)
+        self._exited = exited
+
+    def process_exited(self) -> None:
+        # @intent cli-run-ends-at-the-leaders-exit
+        # Python 3.12+ wakes Process.wait() only after every pipe has
+        # closed, and a grandchild that inherited the pipes can keep
+        # them open for good, so the run learns of the exit here, where
+        # Python 3.11 and 3.12 both report it.
+        super().process_exited()
+        self._exited.set()
+
+
+class CliRunner:
+    """Runs one command-line program to completion within its invocation's bounds."""
+
+    async def run(self, invocation: CliInvocation) -> CliOutcome:
+        # @intent cli-run-is-bounded-and-never-raises
+        # A CLI run can hang, flood its output or leave a grandchild
+        # behind, so every run is time-bounded, its output capped while
+        # still read to the end, and its whole tree stopped on timeout
+        # or cancellation. Failures are fields of the outcome; only
+        # cancellation propagates.
+        # Windows finds a bare program name only in the PATH folders,
+        # never in the current folder; POSIX starts it as given.
+        program, *_arguments = invocation.argv
+        found = CliRunner.find_program(program) if sys.platform == "win32" else program
+
+        # Start the program in its own session, with stdin as a pipe
+        # or the null device, and learn the moment it exits.
+        stdin = asyncio.subprocess.PIPE if invocation.stdin_text is not None else asyncio.subprocess.DEVNULL
+        exited = asyncio.Event()
+        process, launch_failure = await CliRunner.launch(invocation, program=found, stdin=stdin, exited=exited)
+        if process is None:
+            return CliOutcome(exit_code=None, stdout="", stderr="", stdout_truncated=False, stderr_truncated=False, timed_out=False, launch_failure=launch_failure)
+        stdout, stderr = bytearray(), bytearray()
+        readers = (
+            asyncio.create_task(self._drain(process.stdout, stdout, invocation.max_output_bytes), name=native_threads.NATIVE_STDOUT_TASK_NAME),
+            asyncio.create_task(self._drain(process.stderr, stderr, invocation.max_output_bytes), name=native_threads.NATIVE_STDERR_TASK_NAME),
+        )
+        timed_out = False
+        try:
+            # Hand over the standard-input text, then wait for the
+            # program itself to exit, within the time bound; a
+            # grandchild that still holds the pipes does not hold
+            # the run.
+            async with asyncio.timeout(invocation.timeout_seconds):
+                await self._feed_stdin(process, invocation.stdin_text)
+                await exited.wait()
+            # Give the readers one kill wait to reach the end of the
+            # output. A reader still open after it means a descendant
+            # holds the pipes, so the whole tree is stopped; a cancel
+            # that lands in this wait is handled below like any other.
+            if await self._finish_readers(readers):
+                await ProcessStopper.stop_tree(process, grace_seconds=native_threads.NATIVE_KILL_WAIT_SECONDS)
+        except TimeoutError:
+            # The run passed its bound: stop and reap the whole tree,
+            # then collect the output read so far.
+            timed_out = True
+            await ProcessStopper.stop_tree(process, grace_seconds=native_threads.NATIVE_KILL_WAIT_SECONDS)
+            await self._finish_readers(readers)
+        except asyncio.CancelledError:
+            # The caller gave up: stop and reap the tree before the
+            # cancellation goes on.
+            await ProcessStopper.stop_tree(process, grace_seconds=native_threads.NATIVE_KILL_WAIT_SECONDS)
+            await self._finish_readers(readers)
+            raise
+        # The outcome keeps what was read.
+        return self._outcome(process, stdout, stderr, invocation.max_output_bytes, timed_out)
+
+    @staticmethod
+    def find_program(program: str) -> str | None:
+        # @intent program-lookup-skips-the-current-folder
+        # Windows, and shutil.which on Python 3.11, look in the current
+        # folder before PATH, so a program a cloned repository ships
+        # under a vendor's name would run with the caller's key. A bare
+        # name is looked up only in the absolute PATH folders, with the
+        # PATHEXT suffixes on Windows; a name with a folder part is used
+        # as given. None when no PATH folder holds the program.
+        if os.path.dirname(program):
+            return program
+        names = [program]
+        if sys.platform == "win32":
+            suffixes = [suffix for suffix in (os.environ.get(native_threads.NATIVE_PATHEXT_VARIABLE) or native_threads.NATIVE_WINDOWS_DEFAULT_PATHEXT).split(os.pathsep) if suffix]
+            if not program.casefold().endswith(tuple(suffix.casefold() for suffix in suffixes)):
+                names = [program + suffix for suffix in suffixes]
+        folders = [folder for folder in os.environ.get(native_threads.NATIVE_PATH_VARIABLE, "").split(os.pathsep) if os.path.isabs(folder)]
+        candidates = (os.path.join(folder, name) for folder in folders for name in names)
+        return next((path for path in candidates if os.path.isfile(path) and os.access(path, os.X_OK)), None)
+
+    @staticmethod
+    async def launch(invocation: CliInvocation, *, program: str | None, stdin: int, exited: asyncio.Event) -> tuple[asyncio.subprocess.Process | None, ProcessLaunchFailure | None]:
+        # @intent process-launch-is-shared-and-never-inherits-stdin
+        # The one way a helper here starts a child, as program, the
+        # file find_program chose (None when it found none). stdin is
+        # a pipe or the null device, never the caller's stream, which
+        # a child could read and so corrupt a stdio MCP session. POSIX
+        # puts the child in a new session so ProcessStopper reaches its
+        # whole group, and CliExitProtocol sets exited when the child
+        # exits. A failed launch is returned, never raised.
+        if program is None:
+            return None, ProcessLaunchFailure.NOT_FOUND
+        _program, *arguments = invocation.argv
+        # @intent cli-child-env-inherits-the-callers-environment
+        # The child keeps the caller's PATH, home, proxy and locale
+        # settings, so a vendor CLI behaves as it does in a terminal;
+        # only the env_remove names are left out, and the overlay the
+        # harness sets (its key, its private folders) wins.
+        environment = {name: value for name, value in os.environ.items() if name not in invocation.env_remove}
+        environment.update(invocation.env_overlay)
+        loop = asyncio.get_running_loop()
+        protocol_factory = functools.partial(CliExitProtocol, exited, limit=native_threads.NATIVE_PROCESS_STREAM_LIMIT_BYTES, loop=loop)
+        try:
+            transport, protocol = await loop.subprocess_exec(
+                protocol_factory,
+                program,
+                *arguments,
+                stdin=stdin,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=invocation.cwd,
+                env=environment,
+                start_new_session=sys.platform != "win32",
+            )
+        except FileNotFoundError as exc:
+            # Windows reports a command line past its length limit as a
+            # missing file (WinError 206), although the program exists.
+            too_long = getattr(exc, "winerror", None) == native_threads.NATIVE_COMMAND_LINE_TOO_LONG_WINERROR
+            return None, ProcessLaunchFailure.OS_ERROR if too_long else ProcessLaunchFailure.NOT_FOUND
+        except PermissionError:
+            return None, ProcessLaunchFailure.PERMISSION_DENIED
+        except (OSError, ValueError):
+            return None, ProcessLaunchFailure.OS_ERROR
+        return asyncio.subprocess.Process(transport, protocol, loop), None
+
+    @staticmethod
+    def json_objects(text: str) -> list[Mapping[str, object]]:
+        # @intent cli-json-lines-are-read-in-one-place
+        # A CLI that prints one JSON object per line also prints log,
+        # banner and cut lines; every reader skips them the same way,
+        # so each line that is one JSON object is kept, in order.
+        objects: list[Mapping[str, object]] = []
+        for line in text.splitlines():
+            try:
+                value = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(value, dict):
+                objects.append(value)
+        return objects
+
+    async def _feed_stdin(self, process: asyncio.subprocess.Process, stdin_text: str | None) -> None:
+        # @intent cli-stdin-closes-after-the-text
+        # Writes the text and closes the pipe, so the child reads to EOF
+        # instead of waiting for more input. A child that exits early is
+        # not an error here, because the outcome reports its exit.
+        if process.stdin is None:
+            return
+        with contextlib.suppress(BrokenPipeError, ConnectionResetError, OSError):
+            if stdin_text is not None:
+                process.stdin.write(stdin_text.encode(native_threads.NATIVE_TEXT_ENCODING))
+                await process.stdin.drain()
+            process.stdin.close()
+
+    async def _drain(self, stream: asyncio.StreamReader | None, buffer: bytearray, limit_bytes: int) -> None:
+        # Keeps the first limit_bytes plus a one-byte truncation
+        # probe and reads past them until EOF, so the child never
+        # blocks on a full pipe.
+        if stream is None:
+            return
+        with contextlib.suppress(OSError, ValueError):
+            while chunk := await stream.read(native_threads.NATIVE_PROCESS_READ_CHUNK_BYTES):
+                buffer.extend(chunk[: limit_bytes + native_threads.NATIVE_PROCESS_TRUNCATION_PROBE_BYTES - len(buffer)])
+
+    async def _finish_readers(self, readers: tuple[asyncio.Task[None], ...]) -> bool:
+        # Gives the readers one kill-wait to reach EOF, then cancels any
+        # that a surviving grandchild keeps open; True when one was.
+        _done, pending = await asyncio.wait(readers, timeout=native_threads.NATIVE_KILL_WAIT_SECONDS)
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.wait(pending)
+        return bool(pending)
+
+    def _outcome(self, process: asyncio.subprocess.Process, stdout: bytearray, stderr: bytearray, limit_bytes: int, timed_out: bool) -> CliOutcome:
+        # @intent cli-outcome-text-stays-within-the-cap
+        # Decodes each stream within the byte cap, trimming a partly
+        # kept character, so the text is valid and never longer than the
+        # cap; the truncated flags say whether more was read.
+        out_text = bytes(stdout[:limit_bytes]).decode(native_threads.NATIVE_TEXT_ENCODING, errors=native_threads.NATIVE_DECODE_REPLACE).encode(native_threads.NATIVE_TEXT_ENCODING)[:limit_bytes].decode(native_threads.NATIVE_TEXT_ENCODING, errors=native_threads.NATIVE_DECODE_IGNORE)
+        err_text = bytes(stderr[:limit_bytes]).decode(native_threads.NATIVE_TEXT_ENCODING, errors=native_threads.NATIVE_DECODE_REPLACE).encode(native_threads.NATIVE_TEXT_ENCODING)[:limit_bytes].decode(native_threads.NATIVE_TEXT_ENCODING, errors=native_threads.NATIVE_DECODE_IGNORE)
+        return CliOutcome(
+            exit_code=process.returncode,
+            stdout=out_text,
+            stderr=err_text,
+            stdout_truncated=len(stdout) > limit_bytes,
+            stderr_truncated=len(stderr) > limit_bytes,
+            timed_out=timed_out,
+            launch_failure=None,
+        )
+
+
+__all__ = ["CliRunner", "ProcessStopper"]

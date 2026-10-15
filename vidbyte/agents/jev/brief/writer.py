@@ -37,6 +37,7 @@ from vidbyte.lib.dataclasses.jev import (
 from vidbyte.lib.dataclasses.tools import ToolCallContext
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import ConfigurationError, VidbyteSdkError
+from vidbyte.lib.registries.provider_keys import ProviderKeyMatcher
 from vidbyte.prompts.catalog import Prompts
 
 
@@ -44,16 +45,22 @@ class JevRunBriefWriter(BaseAgent):
     """A tool-free agent that proposes append-only notes and verifies them against the recorded run."""
 
     def __init__(self, settings: JevAgentSettings, brief: JevRunBriefSettings) -> None:
-        # The separate writer may use a cheaper model; a provider override requires its own model and key.
+        # The separate writer may use a cheaper model; a provider
+        # override requires its own model.
         # @intent writer-provider-fallback
-        # The writer follows the main provider/key unless configured independently, preserving a valid model/key pair.
-        own_provider = brief.provider is not None
+        # The writer follows the main provider unless configured on its
+        # own. Its own api_keys list makes it a root of its own, matched
+        # against its provider; otherwise it carries the main agent's
+        # matched record and mode, like every other Jev child.
+        provider = brief.provider if brief.provider is not None else settings.provider
+        api_keys = ProviderKeyMatcher.match(brief.api_keys, primary=provider, vidbyte_api_key=settings.vidbyte_api_key, field_name="JevRunBriefSettings.api_keys") if brief.api_keys else settings.api_keys
         super().__init__(
             name=f"{settings.name}-run-brief",
             system_prompt=Prompts().get(Prompt.JEV_RUN_BRIEF_SYSTEM_PROMPT),
             agent_loop_settings=AgentLoopSettings(max_iterations=brief.max_iterations, max_tokens=brief.max_tokens),
-            api_key=brief.api_key if own_provider else (brief.api_key or settings.api_key),
-            provider=brief.provider if own_provider else settings.provider,
+            api_keys=api_keys,
+            model_mode=settings.model_mode,
+            provider=provider,
             model_name=brief.model_name or settings.model_name,
             temperature=brief.temperature,
             timeout_seconds=settings.timeout_seconds,

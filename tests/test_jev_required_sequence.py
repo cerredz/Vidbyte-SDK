@@ -12,17 +12,23 @@ TESTS: This file.
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 from types import SimpleNamespace
+from typing import Any
+from unittest.mock import AsyncMock
 
+from tests.agent_test_support import bind_test_runner
 from vidbyte import (
     JevAgent,
     JevAgentSettings,
+    JevAlignmentSettings,
     JevContinualSettings,
     JevDoneCheck,
     JevRuntimeSettings,
 )
 from vidbyte.agents.jev.done.event_log import JevRunEventLog
 from vidbyte.context.primitives import ResponseContextItem, TextContextItem
+from vidbyte.lib.dataclasses.context import BaseAgentContext
 from vidbyte.lib.dataclasses.jev import (
     JevAnswer,
     JevContinuationEvidence,
@@ -40,7 +46,7 @@ from vidbyte.lib.jev.done import (
     RequiredSequenceWorkShownQuestion,
 )
 from vidbyte.lib.jev.done.state import DONE_STATE
-from vidbyte.lib.runners.types import DecisionModelResponse
+from vidbyte.lib.runners.types import DecisionModelResponse, TextModelResponse
 
 REQUEST = "First research the topic, then write a draft from your research."
 STAGES = [
@@ -80,6 +86,17 @@ def _stage_evidence(stage_id: str, event_id: str, *, inputs: tuple[str, ...] = (
         failures=(),
         missing_or_uncertain=(),
     )
+
+
+class CapturingGenerativeRunner:
+    """Records the system prompt the main generative call actually receives."""
+
+    def __init__(self) -> None:
+        self.systems: list[str | None] = []
+
+    def run(self, prompt: str, **kwargs: Any) -> TextModelResponse:
+        self.systems.append(kwargs.get("system"))
+        return TextModelResponse(provider=ModelProvider.OPENAI, model="gpt-5.4-mini", text="completed", raw={}, usage={"input_tokens": 100, "output_tokens": 20})
 
 
 class JevRequiredSequenceTests(unittest.IsolatedAsyncioTestCase):
@@ -533,6 +550,77 @@ class JevRequiredSequenceTests(unittest.IsolatedAsyncioTestCase):
             event_ids=frozenset({"E2", "E3"}),
         )
         self.assertIsNone(record)
+
+
+class JevRequiredSequenceExplicitSystemTests(unittest.IsolatedAsyncioTestCase):
+    """An explicit system run option still carries the required stage order to the main agent."""
+
+    def _agent(self, skills: tuple[str, ...] = ()) -> tuple[JevAgent, CapturingGenerativeRunner]:
+        # Builds a sequence-checked agent whose run-state writer returns the shared two-stage state without a model call.
+        settings = JevAgentSettings(
+            name="jev",
+            system_prompt="Agent base prompt.",
+            provider="openai",
+            model_name="gpt-4.1-mini",
+            alignment=JevAlignmentSettings(skills=skills),
+        )
+        agent = JevAgent(settings, JevRuntimeSettings(continual=JevContinualSettings(checks=(JevDoneCheck.REQUIRED_SEQUENCE,))))
+        runner = CapturingGenerativeRunner()
+        bind_test_runner(agent, runner)
+        run_state = agent.run_state
+        assert run_state is not None
+
+        async def begin(message: str, prior_user_turns: object = ()) -> None:
+            run_state.request = message
+            payload = run_state.payload(
+                goal="Research the topic and produce a draft.",
+                objective="A draft based on research.",
+                mission="Complete the stages in order.",
+                hard_part="Complete the ordered research and draft stages.",
+                what_not_to_do=[],
+                required_sequence={"stages": STAGES},
+            )
+            run_state.record = run_state._record(payload)
+
+        run_state.begin = begin  # type: ignore[method-assign]
+        run_state.check = AsyncMock(return_value=())  # type: ignore[method-assign]
+        return agent, runner
+
+    async def test_explicit_system_option_receives_the_stage_order(self) -> None:
+        # [Silent Failure] the caller's system option replaces the agent prompt on the wire, so the stage order must join it.
+        agent, runner = self._agent()
+        await agent.arun(REQUEST, system="Caller baseline.")
+
+        assert agent.run_state is not None
+        instructions = agent.run_state.agent_instructions()
+        self.assertIn("Stage 2 (Draft)", instructions)
+        self.assertEqual(runner.systems[0], f"Caller baseline.\n\n{instructions}")
+        self.assertEqual(agent.system_prompt, "Agent base prompt.")
+
+    async def test_explicit_system_option_with_selected_skills_receives_the_stage_order(self) -> None:
+        # [Hidden Failure] selected skill text and the stage order both extend the caller's baseline, in that order.
+        agent, runner = self._agent(skills=("Skill guidance.",))
+        assert agent.skill_preload is not None
+
+        async def preload(_message: str, context: BaseAgentContext) -> BaseAgentContext:
+            return replace(context, system_prompt=f"{context.system_prompt}\n\nSKILL TEXT")
+
+        agent.skill_preload.run = preload  # type: ignore[method-assign]
+        await agent.arun(REQUEST, system="Caller baseline.")
+
+        assert agent.run_state is not None
+        self.assertEqual(runner.systems[0], f"Caller baseline.\n\nSKILL TEXT\n\n{agent.run_state.agent_instructions()}")
+
+    async def test_agent_prompt_still_receives_the_stage_order_without_an_explicit_system(self) -> None:
+        # [Hidden Assumption] the default path keeps the agent's own prompt and adds the stage order exactly once.
+        agent, runner = self._agent()
+        await agent.arun(REQUEST)
+
+        assert agent.run_state is not None
+        system = runner.systems[0]
+        assert system is not None
+        self.assertIn("Agent base prompt.", system)
+        self.assertEqual(system.count(agent.run_state.agent_instructions()), 1)
 
 
 if __name__ == "__main__":

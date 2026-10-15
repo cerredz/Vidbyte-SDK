@@ -70,7 +70,7 @@ def _agent(name: str, prompt: str, *calls: tuple[str, dict[str, object]], **opti
 
 def _jev_settings(**options: Any) -> JevAgentSettings:
     # The main Jev agent used across the Jev tests; options add fields such as system_prompt_presets.
-    return JevAgentSettings(name="researcher", system_prompt="Research.", provider="openai", model_name="gpt-4.1", api_key="main-key", tools=(lookup,), **options)
+    return JevAgentSettings(name="researcher", system_prompt="Research.", provider="openai", model_name="gpt-4.1", api_keys=["sk-main-key"], tools=(lookup,), **options)
 
 
 def _managed(**options: Any) -> JevRuntimeSettings:

@@ -2,7 +2,7 @@
 
 ## Folder Description / Intent
 
-This folder holds the feature tests for Vidbyte-managed text calls. With only `VIDBYTE_API_KEY` set, or with `mode=TextModelMode.VIDBYTE_MANAGED`, a `TextModelRunner` call goes to one Vidbyte gateway route instead of the vendor, while BYOK calls stay byte-identical. The tests are offline: the only fakes are the inner HTTP transport and the retry wait. The behavior itself lives in `vidbyte/lib/` (`dataclasses/model_configs.py`, `registries/models.py`, `http/vidbyte_gateway.py`, `runners/text.py`, `runners/streaming_text.py`), not here. The contract comes from `docs/spec/managed-generative-models/spec.md`.
+This folder holds the feature tests for Vidbyte-managed text calls. With only `VIDBYTE_API_KEY` set, or with `mode=TextModelMode.VIDBYTE_MANAGED`, a `TextModelRunner` call goes to one Vidbyte gateway route instead of the vendor. Since byok-api-keys, a provider key in the default `AUTO` mode is relayed through that route in `X-Vidbyte-Provider-Key`, and only `mode=TextModelMode.DIRECT` calls the vendor directly, byte-identical to the base commit; the relay itself is tested in `tests/features/sdk_provider_keys/`. The tests are offline: the only fakes are the inner HTTP transport and the retry wait. The behavior itself lives in `vidbyte/lib/` (`dataclasses/model_configs.py`, `registries/models.py`, `http/vidbyte_gateway.py`, `runners/text.py`, `runners/streaming_text.py`), not here. The contract comes from `docs/spec/managed-generative-models/spec.md`.
 
 ## File Index
 
@@ -18,3 +18,4 @@ This folder holds the feature tests for Vidbyte-managed text calls. With only `V
 ## Logs
 
 - 2026-10-10 - Pack added red, ahead of the implementation, from spec r4 (S2 test author).
+- 2026-10-13 - byok-api-keys S2: superseded rows from docs/spec/byok-api-keys/spec.md section 13 applied (api_keys / vidbyte_api_key, relay in AUTO, DIRECT oracles and goldens, construction-time refusals, M-9 and M-15 wording); contract text updated per G-1, INV-1, INV-2.

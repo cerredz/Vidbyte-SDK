@@ -23,12 +23,17 @@ from pydantic import BaseModel, Field
 
 from vidbyte import Agent
 from vidbyte.agents.base import BaseAgent
+from vidbyte.lib.config import TextModelMode
 from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentMetadata
 from vidbyte.lib.dataclasses.trace import TraceOption
 from vidbyte.lib.http import HttpResponse, HttpTransport
 
-KW: dict[str, Any] = {"provider": "deepseek", "model_name": "deepseek-v4-flash", "api_key": "d-mock"}
 USAGE = {"prompt_tokens": 100, "completion_tokens": 10, "total_tokens": 110}
+
+
+def _kw() -> dict[str, Any]:
+    # Every agent here talks to DeepSeek directly with a fake key, so the scripted wire sees vendor chat calls.
+    return {"provider": "deepseek", "model_name": "deepseek-v4-flash", "api_keys": ["d-mock"], "model_mode": TextModelMode.DIRECT}
 
 
 class Notes(BaseModel):
@@ -77,7 +82,7 @@ class _Wire:
 def _agent(name: str, tools: list[object] | None = None, trace: bool = False) -> _ForkRecordingAgent:
     meta = AgentMetadata(name=name, description=f"The {name} agent.", use_cases=f"{name} work")
     option = TraceOption.continual(Notes, every_n_iterations=1) if trace else None
-    return _ForkRecordingAgent(name=name, system_prompt=f"You are {name}.", agent_metadata=meta, tools=tools or [], max_iterations=4, trace_option=option, **KW)
+    return _ForkRecordingAgent(name=name, system_prompt=f"You are {name}.", agent_metadata=meta, tools=tools or [], max_iterations=4, trace_option=option, **_kw())
 
 
 def _run(monkeypatch: pytest.MonkeyPatch, top: BaseAgent) -> _Wire:
@@ -118,7 +123,7 @@ def test_continual_trace_calls_reach_the_top_level_bill(monkeypatch: pytest.Monk
 def test_two_levels_of_sub_agents_bill_every_call_once(monkeypatch: pytest.MonkeyPatch) -> None:
     # boss -> researcher-as-tool -> helper-as-tool: each level merges its run into its parent exactly once.
     researcher = _agent("researcher", [_agent("helper").as_tool()])
-    boss = Agent(name="boss", system_prompt="You are boss.", tools=[researcher.as_tool()], max_iterations=4, **KW)
+    boss = Agent(name="boss", system_prompt="You are boss.", tools=[researcher.as_tool()], max_iterations=4, **_kw())
     wire = _run(monkeypatch, boss)
     rollup = boss.get_usage()
     researcher_run, helper_run = _ForkRecordingAgent.forks

@@ -25,7 +25,6 @@ from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.settings import AgentFallbackSettings, AgentLoopSettings
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ConfigurationError
-from vidbyte.lib.registries.models import ProviderModelRegistry
 from vidbyte.lib.runners import Runner
 from vidbyte.tools.base import _ToolWrapper
 from vidbyte.tools.catalog import Tools
@@ -45,7 +44,8 @@ class AgentForker:
         settings = cls._settings_on_parent_vendor(agent, settings)
         # The child edits its own copy of the parent's managed context window, so branch edits never reach the parent.
         child_manager = cls._context_manager(agent, settings)
-        # Read the vendor the parent really runs on, so the key and backup checks below see a provider-prefixed model's vendor.
+        # Read the vendor the parent really runs on, so the backup
+        # check below sees a provider-prefixed model's vendor.
         parent_provider = cls._resolved_provider(agent.runner_config.provider, agent.runner_config.model_name)
         # @intent fork-reads-prefixed-child-provider
         # Read the child's vendor the same way: model_name="gemini/gemini-3.5-flash" with no provider runs on Gemini.
@@ -61,8 +61,12 @@ class AgentForker:
             agent_loop_settings=cls._loop_settings(agent, settings),
             middleware=agent.middleware if settings.middleware is None else settings.middleware,
             system_prompt=agent.system_prompt if settings.system_prompt is None else settings.system_prompt,
-            # The parent's key belongs to its own vendor, so a child on another provider resolves its own credential.
-            api_key=cls._api_key(agent, child_provider, parent_provider),
+            # @intent children-carry-the-matched-keys
+            # The child gets the parent's matched record and mode as
+            # they are; each call sends only the key matched to its
+            # own provider, so no key crosses to another vendor.
+            api_keys=agent.runner_config.api_keys,
+            model_mode=agent.runner_config.model_mode,
             provider=agent.runner_config.provider if settings.provider is None else settings.provider,
             model_name=agent.runner_config.model_name if settings.model_name is None else settings.model_name,
             temperature=agent.runner_config.temperature if settings.temperature is None else settings.temperature,
@@ -127,17 +131,6 @@ class AgentForker:
         except ConfigurationError:
             return str(provider.value if isinstance(provider, ModelProvider) else provider or "").strip().lower()
         return resolved or ""
-
-    @staticmethod
-    def _api_key(agent: BaseAgent, child_provider: str, parent_provider: str) -> str | None:
-        # @intent fork-key-never-crosses-providers
-        # Sending the parent vendor's secret to another vendor leaks it and fails auth; None lets the
-        # child's provider read its own env key. Same-provider forks (or a child with no known vendor) keep the key.
-        # A Vidbyte key is no vendor's secret and the gateway serves every managed provider, so it follows such a child.
-        api_key = agent.runner_config.api_key
-        if child_provider and child_provider != parent_provider and not ProviderModelRegistry.vidbyte_key_follows_provider(api_key, child_provider):
-            return None
-        return api_key
 
     @staticmethod
     def _fallback(agent: BaseAgent, settings: AgentForkSettings, child_provider: str, parent_provider: str) -> Sequence[str | FallbackModel] | AgentFallbackSettings | None:

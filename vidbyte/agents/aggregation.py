@@ -11,7 +11,9 @@ Architecture:
     - MultiProviderAggregator: Pure async orchestration over agent-like objects.
     - AggregateResult: Frozen carrier for the synthesized content and metadata.
     - AggregateAgent: BaseAgent subclass that builds proposer/aggregator child
-      agents from ProposerSpecs and runs the engine inside generate_reply.
+      agents from ProposerSpecs and runs the engine inside generate_reply. It
+      matches its api_keys once, with every spec-built model as a primary, and
+      hands the matched ProviderKeys record and mode to every child.
 Relations:
     Sibling of vidbyte/agents/algorithms/multi_provider_agentic_grader.py, which
     selects a winning candidate instead of synthesizing a new answer. This module
@@ -22,17 +24,22 @@ from __future__ import annotations
 
 import asyncio
 import string
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, fields
 from typing import Any
 
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.types import AgentInput, AgentMessage
-from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentMetadata
+from vidbyte.lib.dataclasses.agents import (
+    AgentForkSettings,
+    AgentMetadata,
+    ProviderKeys,
+)
 from vidbyte.lib.dataclasses.multi_agent import AggregateConfig, ProposerSpec
-from vidbyte.lib.enums import ModelProvider
+from vidbyte.lib.enums import TextModelMode
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import AggregateExecutionError, ConfigurationError
+from vidbyte.lib.registries.provider_keys import ProviderKeyMatcher
 from vidbyte.lib.tracing import NullTracer, SpanContext, TracerBase
 from vidbyte.lib.usage_ledger import active_usage_ledger, usage_ledger_scope
 from vidbyte.middleware import AgentMiddleware
@@ -198,21 +205,31 @@ class MultiProviderAggregator:
 class AggregateAgent(BaseAgent):
     """A BaseAgent whose generate_reply fans out to multiple proposer models and synthesizes one answer."""
 
-    def __init__(self, *, name: str, system_prompt: str, proposers: Sequence[ProposerSpec | tuple[str, ...] | Any], aggregator: ProposerSpec | tuple[str, ...] | Any | None = None, config: AggregateConfig | None = None, provider: str | None = None, model_name: str | None = None, api_key: str | None = None, agent_metadata: AgentMetadata | None = None, tools: Sequence[object] | Tools = (), middleware: Sequence[AgentMiddleware] = (), temperature: float | None = None, metadata: dict[str, Any] | None = None, tracer: type[TracerBase] | TracerBase | None = None, trace: type[TracerBase] | TracerBase | None = None) -> None:
+    def __init__(self, *, name: str, system_prompt: str, proposers: Sequence[ProposerSpec | tuple[str, ...] | Any], aggregator: ProposerSpec | tuple[str, ...] | Any | None = None, config: AggregateConfig | None = None, provider: str | None = None, model_name: str | None = None, api_keys: ProviderKeys | Iterable[str | None] | None = None, vidbyte_api_key: str | None = None, model_mode: TextModelMode = TextModelMode.AUTO, agent_metadata: AgentMetadata | None = None, tools: Sequence[object] | Tools = (), middleware: Sequence[AgentMiddleware] = (), temperature: float | None = None, metadata: dict[str, Any] | None = None, tracer: type[TracerBase] | TracerBase | None = None, trace: type[TracerBase] | TracerBase | None = None) -> None:
         # Builds proposer and aggregator child agents from specs and wires them into a MultiProviderAggregator.
-        super().__init__(name=name, system_prompt=system_prompt, agent_metadata=agent_metadata, metadata=metadata, tracer=tracer, trace=trace)
+        # @intent aggregate-models-all-need-their-keys
+        # Every spec-built proposer and the spec-built aggregator (the
+        # default one is this agent's own provider and model) run on
+        # every call, so each provider is a primary that needs its key
+        # when the list holds any. Prebuilt agents add no primary.
+        primaries = [spec.provider for spec in map(self._coerce_spec, proposers) if spec is not None]
+        aggregator_spec = self._coerce_spec(aggregator) if aggregator is not None else None
+        if aggregator_spec is not None:
+            primaries.append(aggregator_spec.provider)
+        elif aggregator is None and provider and model_name:
+            primaries.append(provider)
+        self._api_keys = ProviderKeyMatcher.match(api_keys, primary=tuple(primaries), vidbyte_api_key=vidbyte_api_key, field_name="api_keys")
+        self._model_mode = model_mode
+        super().__init__(name=name, system_prompt=system_prompt, agent_metadata=agent_metadata, metadata=metadata, tracer=tracer, trace=trace, api_keys=self._api_keys, model_mode=model_mode)
         if not proposers:
             raise ConfigurationError("AggregateAgent requires at least one proposer.")
         self._proposer_inputs = tuple(proposers)
         self._aggregator_input = aggregator
         self._config = config or AggregateConfig()
         self._proposer_provider_defaults = (provider, model_name)
-        self._proposer_api_key = api_key
         self._proposer_tools = tools
         self._proposer_middleware = tuple(middleware)
         self._proposer_temperature = temperature
-        # Decide once which provider the explicit key belongs to, before any child is built with it.
-        self._key_owner = self._resolve_key_owner()
         labeled_proposers = self._build_proposers()
         aggregator_agent = self._build_aggregator()
         template = self._config.synthesis_prompt_template or Prompts().get(Prompt.MULTI_PROVIDER_AGGREGATOR_SYNTHESIS_PROMPT)
@@ -279,7 +296,8 @@ class AggregateAgent(BaseAgent):
             config=self._config,
             provider=self._proposer_provider_defaults[0],
             model_name=self._proposer_provider_defaults[1],
-            api_key=self._proposer_api_key,
+            api_keys=self._api_keys,
+            model_mode=self._model_mode,
             agent_metadata=self.agent_metadata,
             tools=self._proposer_tools,
             middleware=self._proposer_middleware,
@@ -309,7 +327,11 @@ class AggregateAgent(BaseAgent):
             system_prompt=spec.system_prompt or self.system_prompt,
             provider=spec.provider,
             model_name=spec.model,
-            api_key=self._child_api_key(spec.provider),
+            # @intent children-carry-the-matched-keys
+            # Each child gets the aggregate's record and mode as they
+            # are and sends only the key matched to its own provider.
+            api_keys=self._api_keys,
+            model_mode=self._model_mode,
             tools=self._proposer_tools,
             middleware=self._proposer_middleware,
             temperature=self._proposer_temperature,
@@ -318,6 +340,10 @@ class AggregateAgent(BaseAgent):
 
     def _build_aggregator(self) -> Any:
         # Resolves the aggregator into a tool-free synthesis agent, defaulting to this agent's own model.
+        # @intent aggregator-carries-the-matched-keys
+        # A spec-built aggregator gets the aggregate's record and mode
+        # as they are, so it sends only the key matched to its own
+        # provider. A prebuilt aggregator is used as given.
         if self._aggregator_input is not None and self._coerce_spec(self._aggregator_input) is None:
             return self._aggregator_input
         spec = self._resolve_aggregator_spec()
@@ -327,29 +353,10 @@ class AggregateAgent(BaseAgent):
             system_prompt=system_prompt,
             provider=spec.provider,
             model_name=spec.model,
-            api_key=self._child_api_key(spec.provider),
+            api_keys=self._api_keys,
+            model_mode=self._model_mode,
             tracer=self._tracer,
         )
-
-    def _resolve_key_owner(self) -> str | None:
-        # @intent aggregate-key-never-crosses-providers
-        # The explicit key belongs to this agent's own provider. Without one, it belongs to the single
-        # provider that every spec-built proposer and aggregator names; if they name several, it stays
-        # unattributed (None) and no named child sends it. Prebuilt child agents do not count.
-        host = self._proposer_provider_defaults[0]
-        specs = (self._coerce_spec(item) for item in (*self._proposer_inputs, self._aggregator_input) if item is not None)
-        names = [host] if host is not None else [spec.provider for spec in specs if spec is not None]
-        owners = {(name.value if isinstance(name, ModelProvider) else str(name)).strip().lower() for name in names}
-        return owners.pop() if len(owners) == 1 else None
-
-    def _child_api_key(self, child_provider: ModelProvider | str | None) -> str | None:
-        # @intent aggregate-key-never-crosses-providers
-        # Sending the key to a child on a provider other than its owner leaks the secret and fails auth;
-        # None lets that provider read its own env key. A child naming no provider keeps the key.
-        if child_provider is None:
-            return self._proposer_api_key
-        child = (child_provider.value if isinstance(child_provider, ModelProvider) else str(child_provider)).strip().lower()
-        return self._proposer_api_key if child == self._key_owner else None
 
     def _resolve_aggregator_spec(self) -> ProposerSpec:
         # Returns the explicit aggregator spec, or falls back to the host provider/model, erroring if neither resolves.
