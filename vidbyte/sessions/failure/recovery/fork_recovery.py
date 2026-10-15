@@ -61,5 +61,6 @@ class ForkRecovery(BaseRecoveryHandler):
                 trace=settings.trace if settings.trace is not None else session_any._recorder_policy(),
                 tags=settings.tags or getattr(session, "_tags", ()),
                 api_key=api_key,
+                algorithm=getattr(getattr(session, "agent", None), "algorithm", None),
             )
         return self.result(True, FailureDisposition.CONTINUE, value=child, details={"label": settings.label, "checkpoint": settings.at, "policy": settings.policy, "trace": settings.trace, "tags": settings.tags})
