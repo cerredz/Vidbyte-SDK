@@ -81,6 +81,12 @@ from vidbyte.agents.contracts import (
 )
 from vidbyte.agents.fallback import AgentFallback, FallbackTransform
 from vidbyte.agents.handoff import HandoffAgent
+from vidbyte.agents.infinite import (
+    InfiniteMemoryAgent,
+    InfiniteMemoryAgentSettings,
+    InfiniteMemoryRuntime,
+    InfiniteWorkspaceSettings,
+)
 from vidbyte.agents.jev import (
     AnthropicSkill,
     GitHubSkill,
@@ -383,6 +389,10 @@ __all__ = [
     "CodingAgent",
     "ContinualTraceAgent",
     "HandoffAgent",
+    "InfiniteMemoryAgent",
+    "InfiniteMemoryAgentSettings",
+    "InfiniteMemoryRuntime",
+    "InfiniteWorkspaceSettings",
     "JevAgent",
     "JevAgentResponse",
     "JevAgentSettings",
