@@ -1,13 +1,13 @@
 """FILE: tests/features/harness_threads/test_harness_threads_errors.py
 
-PURPOSE: Failure classification and detail: each INV-6 condition provoked through a stand-in yields its closed code with every INV-5 element in order (AC-10, NFR-7, FR-10): not installed, launch failed (EC-13), key rejected (EC-9), run failed (EC-23), protocol mismatch (EC-18), Muse serve failures, and an unexpected defect as runtime.error naming only its class (EC-32). Also the error class itself (D-10, §12.3 row 24) and the per-code likely-cause and next-step texts (comment 1).
+PURPOSE: Failure classification and detail: each INV-6 condition provoked through a stand-in yields its closed code with every INV-5 element in order (AC-10, NFR-7, FR-10): not installed, launch failed (EC-13), key rejected (EC-9), run failed (EC-23), protocol mismatch (EC-18), Muse serve failures, and an unexpected defect as runtime.error naming only its class (EC-32), the workspace, and on continue and fork the caller's thread id (INV-5 element 4, review R-7). Also the error class itself (D-10, §12.3 row 24) and the per-code likely-cause and next-step texts (comment 1).
 ROLE IN CODEBASE: Start here when an error has the wrong code, loses a detail, or shows exception text it should not.
 ARCHITECTURE NOTE: check_error (conftest.py) asserts the INV-5 attributes, that likely_cause and next_step are exactly the texts NATIVE_THREAD_LIKELY_CAUSES and NATIVE_THREAD_NEXT_STEPS hold for the code, and that the message names, in order, the function, the code, the harness label, the workspace, the thread id when known, the observation, the vendor text, the likely cause and the next step. Timeouts and output caps are in test_harness_threads_process_bounds.py, batch launchers in test_harness_threads_launcher.py, WSL in test_harness_threads_wsl.py.
 FUNCTION INVENTORY: printed_session reads the thread id the stand-in printed; the test_* functions are one behaviour each.
 COMMON MODIFICATION PATTERNS: A new failure condition is a spec change first (INV-6), then one stand-in mode and one case here.
 WHAT NOT TO DO IN THIS FILE: Do not compare the free text of likely causes or next steps; compare them to the constants maps.
 KNOWN EDGE CASES: The failure exit code is 93 so it cannot be confused with other digits in the message. On win32 a non-program file fails as os_error (WinError 193); on POSIX a non-executable file fails as permission_denied.
-RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §6.1 INV-5, INV-6, §6.2 AC-10, §6.3 EC-9, EC-13, EC-18, EC-23, EC-32, §12.3 rows 23, 24, 32
+RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §6.1 INV-5, INV-6, §6.2 AC-10, §6.3 EC-9, EC-13, EC-18, EC-23, EC-32, §12.3 rows 23, 24, 32; docs/spec/harness-thread-functions/review.md R-7
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads/test_harness_threads_errors.py
 """
 
@@ -21,6 +21,7 @@ import pytest
 HARNESSES = ("grok", "opencode", "muse")
 EXIT = 93
 UNKNOWN_ID = "0192f0c4-beef-7bee-8f00-000000000000"
+DEFECT_THREAD = "0192f0c4-feed-7bee-8f00-000000000001"
 PROBLEMS = ["not_installed", "launcher_refused", "launch_failed", "key_rejected", "thread_not_found", "timed_out", "output_too_large", "protocol_mismatch", "run_failed"]
 DIAGNOSTIC_FIELDS = ("error_kind", "expected", "actual", "safe_runtime_details", "likely_causes", "repair_approaches", "related_docs", "relevant_tests")
 
@@ -135,6 +136,28 @@ async def test_unexpected_defect_is_runtime_error_naming_only_the_class(api, san
         await call(harness)
     error = caught.value
     check_error(error, harness=harness, verb="run", code="runtime.error", observations=[("exception class", ("KeyError",))])
+    for text in (str(error), repr(error), error.vendor_message or "", repr(error.details)):
+        assert secret_detail not in text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("harness", HARNESSES)
+@pytest.mark.parametrize("verb", ["run", "continue", "fork"])
+async def test_unexpected_defect_names_the_workspace_and_the_callers_thread(api, sandbox, call, check_error, monkeypatch, harness, verb) -> None:
+    # INV-5 element 4 / EC-32 / R-7: runtime.error still names the
+    # workspace, and on continue and fork carries the caller's thread.
+    secret_detail = "internal-detail-that-must-not-leak"
+
+    async def broken_run(self, invocation):
+        raise KeyError(secret_detail)
+
+    monkeypatch.setattr(api.CliRunner, "run", broken_run)
+    thread_id = None if verb == "run" else DEFECT_THREAD
+    with pytest.raises(api.NativeThreadError) as caught:
+        await call(harness, verb, thread_id=thread_id)
+    error = caught.value
+    assert error.thread_id == thread_id, f"INV-5 / R-7: runtime.error dropped the caller's thread id {thread_id!r}"
+    check_error(error, harness=harness, verb=verb, code="runtime.error", workspace=sandbox.workspace, thread_id=thread_id, observations=[("exception class", ("KeyError",))])
     for text in (str(error), repr(error), error.vendor_message or "", repr(error.details)):
         assert secret_detail not in text
 

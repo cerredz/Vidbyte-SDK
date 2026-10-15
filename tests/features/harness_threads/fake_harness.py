@@ -3,7 +3,7 @@
 PURPOSE: A standard-library stand-in for the three vendor CLIs the harness thread functions drive (`grok --single`, `opencode run --format json`, `muse exec --json` and batch `muse serve`) and for `wsl.exe`, scripted by a JSON scenario file and logging what each process received.
 ROLE IN CODEBASE: Run as a real child process by the harness_threads tests and never imported. The tests hand it to the SDK through GrokThreadConfig.grok_command, OpencodeThreadConfig.opencode_command and MuseThreadConfig.muse_command (spec §13 "Real seams"), or put an `.exe`/script stand-in that runs it first on PATH.
 ARCHITECTURE NOTE: argv[1] is the scenario path; everything after it is what the SDK appended. A stand-in built for `wsl.exe` inserts `--as-wsl` first, and the muse role then sees only the variables that WSLENV names, as the real wsl.exe forwards. Each process logs to its own JSONL file named after its launch number, so logs read back in launch order and never interleave. Credentials are logged as a SHA-256 digest and a length, never as values. Threads persist as files (Grok under GROK_HOME keyed by --cwd, as Grok does; opencode and Muse under the scenario's state folder), so continue and fork behave like the vendors.
-FUNCTION INVENTORY: main dispatches on the scenario's program; run_grok, run_opencode, run_muse_exec, run_muse_serve and run_wsl play one program each; FakeLog writes the per-process log; start_record captures argv, cwd, stdin kind, credential digests, plain variables and skill folders; hold waits for the release file or the hold limit; flood writes past an output cap; echo_text builds the AC-4 secret echo.
+FUNCTION INVENTORY: main dispatches on the scenario's program; run_grok, run_opencode, run_muse_exec, run_muse_serve and run_wsl play one program each; FakeLog writes the per-process log; start_record captures argv, cwd, stdin kind, credential digests, plain variables and skill folders; hold waits for the release file or the hold limit; flood writes past an output cap; echo_text builds the AC-4 secret echo; early_stderr prints the scenario's stderr_text before any mode runs (R-6).
 COMMON MODIFICATION PATTERNS: Add a scenario field, read it here with .get and a default, and log anything a test must assert on.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import vidbyte or anything outside the standard library. 2. Do not contact the network or run a real vendor CLI or the real wsl.exe. 3. Do not log a credential value; only echo_secrets mode prints one, on purpose, into the vendor's own error output. 4. Never use shell=True.
 KNOWN EDGE CASES: A held process exits by itself after HOLD_LIMIT_SECONDS, so a broken stop cannot leak it for long; its grandchild sleeps GRANDCHILD_SECONDS. opencode reads stdin as bytes and decodes UTF-8 (the Windows console code page is not UTF-8). `muse exec --session-id <unknown>` silently starts a new thread, as Muse 1.0.1 does (spec §15, probe 9).
@@ -210,6 +210,13 @@ def write_err(text: str) -> None:
         os._exit(0)
 
 
+def early_stderr(scenario: dict[str, Any]) -> None:
+    # R-6: what a vendor prints on stderr before it hangs or floods,
+    # such as a device-login prompt.
+    if scenario.get("stderr_text"):
+        write_err(scenario["stderr_text"] + "\n")
+
+
 def flood(total_bytes: int) -> None:
     chunk = b"z" * CHUNK_BYTES
     written = 0
@@ -262,6 +269,7 @@ def run_grok(scenario: dict[str, Any], args: list[str]) -> None:
     mode = scenario.get("mode", "ok")
     if scenario.get("grandchild"):
         start_grandchild(log)
+    early_stderr(scenario)
     if stray or "--single" not in options:
         write_err(f"fake grok: unexpected arguments {stray!r}; a --single=<prompt> option is required\n")
         sys.exit(2)
@@ -343,6 +351,7 @@ def run_opencode(scenario: dict[str, Any], args: list[str]) -> None:
     mode = scenario.get("mode", "ok")
     if scenario.get("grandchild"):
         start_grandchild(log)
+    early_stderr(scenario)
     if args[:1] != ["run"] or stray:
         write_err(f"fake opencode: expected `run` and --flag=value options, got {args!r}\n")
         sys.exit(2)
@@ -455,6 +464,7 @@ def run_muse_exec(scenario: dict[str, Any], args: list[str], env: dict[str, str]
         register_mark(scenario, env)
     if scenario.get("grandchild"):
         start_grandchild(log)
+    early_stderr(scenario)
     if problem is not None:
         write_err(problem + "\n")
         sys.exit(2)

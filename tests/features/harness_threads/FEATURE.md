@@ -34,11 +34,13 @@ None at test time. Windows `.exe` stand-ins use pip's distlib `t64.exe` launcher
 
 ## Known Failure Modes
 
-A vendor that silently creates a new session for an unknown id (Muse `exec --session-id`, opencode `--session`), a key leaking into argv or an error message through vendor output, a batch launcher on Windows turning prompt text into `cmd.exe` commands, a grandchild holding the output pipes after a timeout, a Grok home or a skills folder written inside the workspace, and WSL forwarding the caller's own key into a credential-less serve exchange.
+A vendor that silently creates a new session for an unknown id (Muse `exec --session-id`, opencode `--session`), a key leaking into argv or an error message through vendor output, a batch launcher on Windows turning prompt text into `cmd.exe` commands, a grandchild holding the output pipes after a timeout, or after the vendor already exited with its answer, a Grok home or a skills folder written inside the workspace, WSL forwarding the caller's own key into a credential-less serve exchange, a program named like the vendor CLI in the current folder winning over PATH on Windows, a prompt within the character cap whose quoted command line passes the Windows limit, read-only skill files that block the next rebuild or removal, and a Muse temp folder left behind by a cancel during its preparation.
 
 ## Historical Regressions
 
 2026-10-15: the rejected design (hosts, 43 tools, 4 toolsets, backends, stdio peers, a managed process and 53 failure codes) was replaced by these nine functions; its four test packs (`grok_host`, `opencode_host`, `muse_host`, `native_backends`) were removed with it.
+
+2026-10-15: the S4 review (`docs/spec/harness-thread-functions/review.md`) found R-4, R-6 to R-11 and the weak cancellation proof R-24; each has a regression test here, mapped in the test plan's coverage table.
 
 ## Test Suite Map
 
@@ -50,10 +52,10 @@ A vendor that silently creates a new session for an unknown id (Muse `exec --ses
 - `test_harness_threads_arguments.py`: every argument refusal before any I/O, and the boundary values that must pass.
 - `test_harness_threads_argv.py`: `CliArgv.build`, the exact §9.2 argv per harness and verb, enum-valued flags, plain `str` elements and the invocation fields.
 - `test_harness_threads_errors.py`: each INV-6 condition and its message, the error class's diagnostic packet, per-code texts.
-- `test_harness_threads_process_bounds.py`: timeouts with whole-tree stop, output caps, text cap, cancellation, the newest thread id on failures.
-- `test_harness_threads_launcher.py`: PATH and Grok fallback resolution, not installed, batch launcher refusal, an unpreparable private home.
-- `test_harness_threads_skills.py`: the skill locations for each harness and links inside skills.
-- `test_harness_threads_runner.py`: `CliRunner` and `CliInvocation` with the environment overlay.
+- `test_harness_threads_process_bounds.py`: timeouts with whole-tree stop, output caps, text cap, cancellation (also during Muse's folder preparation), the vendor's stderr on timeouts and caps, a vendor exiting while a grandchild holds its pipes, the newest thread id on failures.
+- `test_harness_threads_launcher.py`: PATH and Grok fallback resolution, not installed, batch launcher refusal, no program from the current folder, an unpreparable private home.
+- `test_harness_threads_skills.py`: the skill locations for each harness, links inside skills, and read-only skill files.
+- `test_harness_threads_runner.py`: `CliRunner` and `CliInvocation` with the environment overlay, and a run that ends at its leader's exit.
 - `test_harness_threads_wsl.py`: Muse WSL mode on win32.
 - `test_harness_threads_static_policy.py`: INV-15's two `ast` rules and INV-20's import rule.
 

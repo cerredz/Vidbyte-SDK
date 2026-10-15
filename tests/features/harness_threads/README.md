@@ -28,3 +28,4 @@ This folder tests the nine harness thread functions of `vidbyte.harnesses.native
 ## Logs
 
 - 2026-10-15 - Created for the harness thread functions (spec `docs/spec/harness-thread-functions/spec.md` r3); replaces the `grok_host`, `opencode_host`, `muse_host` and `native_backends` packs of the rejected design.
+- 2026-10-15 - Added regression tests for the S4 review findings R-4, R-6 to R-11 and R-24 (`docs/spec/harness-thread-functions/review.md`).

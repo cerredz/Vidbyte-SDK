@@ -1,13 +1,13 @@
 """FILE: tests/features/harness_threads/test_harness_threads_runner.py
 
-PURPOSE: The canonical process helper every thread function runs through (§8.5 CliRunner, CliInvocation; D-13, FR-12): the child inherits the caller's environment, minus the env_remove names, plus an env_overlay that wins, the overlay and stdin text stay out of repr, stdin is a pipe that closes or DEVNULL, output is capped while draining continues, the timeout stops the whole tree within its bound, launch failures are fields, and cancellation stops the tree and re-raises.
+PURPOSE: The canonical process helper every thread function runs through (§8.5 CliRunner, CliInvocation; D-13, FR-12): the child inherits the caller's environment, minus the env_remove names, plus an env_overlay that wins, the overlay and stdin text stay out of repr, stdin is a pipe that closes or DEVNULL, output is capped while draining continues, the timeout stops the whole tree within its bound, a run ends when its leader exits even while a grandchild holds the pipes (AC-2, review R-11), launch failures are fields, and cancellation stops the tree and re-raises.
 ROLE IN CODEBASE: Start here when a CLI run hangs, leaks a process, reads the caller's stdin, loses the caller's environment, or raises instead of reporting. Carried over from the deleted grok_host pack's process-helper tests, rewritten for env_overlay (the ManagedProcess tests went with ManagedProcess).
 ARCHITECTURE NOTE: Children are small inline Python programs run with sys.executable. The stdin test points this process's fd 0 at a pipe that never reaches EOF, so a child that inherited stdin would block and the test would see a timeout. Liveness is checked on win32 and POSIX.
 FUNCTION INVENTORY: child builds an argv for an inline program; invocation builds a CliInvocation; never_ending_stdin swaps fd 0 for an open pipe; the test_* functions are one behaviour each.
 COMMON MODIFICATION PATTERNS: Keep children self-contained and bounded (each exits by itself within CHILD_LIMIT_SECONDS).
 WHAT NOT TO DO IN THIS FILE: 1. Do not mock asyncio subprocesses; the helper's job is real process handling. 2. Do not assert exact exit codes after a kill; they differ by platform.
-KNOWN EDGE CASES: On win32 os.dup2 onto fd 0 also replaces the Win32 standard input handle, so an inheriting child does block there too (checked on Windows 11 with Python 3.11).
-RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §8.5 (CliInvocation, CliRunner), D-13 and its r4 exception, §12.3 rows 27, 30
+KNOWN EDGE CASES: On win32 os.dup2 onto fd 0 also replaces the Win32 standard input handle, so an inheriting child does block there too (checked on Windows 11 with Python 3.11). On win32 a tree stop cannot reach a grandchild once its leader has exited, so the leader-exit test ends the grandchild itself.
+RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §8.5 (CliInvocation, CliRunner), D-13 and its r4 exception, §12.3 rows 27, 30; docs/spec/harness-thread-functions/review.md R-11
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads/test_harness_threads_runner.py
 """
 
@@ -17,6 +17,7 @@ import asyncio
 import contextlib
 import math
 import os
+import signal
 import sys
 import textwrap
 import time
@@ -32,6 +33,12 @@ import subprocess, sys, time
 grandchild = subprocess.Popen([sys.executable, "-c", "import time; time.sleep({CHILD_LIMIT_SECONDS})"])
 print(grandchild.pid, flush=True)
 time.sleep({CHILD_LIMIT_SECONDS})
+"""
+LEADER_EXITS_SOURCE = f"""
+import subprocess, sys
+grandchild = subprocess.Popen([sys.executable, "-c", "import time; time.sleep({CHILD_LIMIT_SECONDS})"])
+print(grandchild.pid, flush=True)
+print("answer: done", flush=True)
 """
 
 
@@ -146,6 +153,23 @@ async def test_runner_timeout_stops_the_whole_tree_within_the_bound(lib_api, fas
     assert outcome.timed_out is True and outcome.exit_code is not None
     grandchild = int(outcome.stdout.split()[0])
     assert await wait_until(lambda: not alive(grandchild), fast_stop.kill_wait + 1.0)
+
+
+@pytest.mark.asyncio
+async def test_runner_returns_when_the_leader_exits_while_a_grandchild_holds_the_pipes(lib_api, fast_stop, alive) -> None:
+    # AC-2 / INV-8 / R-11: the run ends at the leader's exit, and what
+    # it printed is kept, although a grandchild still holds its pipes.
+    started = time.monotonic()
+    outcome = await lib_api.CliRunner().run(invocation(lib_api, child(LEADER_EXITS_SOURCE), timeout_seconds=20.0))
+    elapsed = time.monotonic() - started
+    lines = outcome.stdout.splitlines()
+    grandchild = int(lines[0])
+    if alive(grandchild):
+        os.kill(grandchild, signal.SIGTERM)
+    assert outcome.timed_out is False, f"R-11: the run waited {elapsed:.1f} s for the grandchild's pipes"
+    assert outcome.exit_code == 0
+    assert lines[1:] == ["answer: done"]
+    assert elapsed < 4 * fast_stop.kill_wait + fast_stop.slack
 
 
 @pytest.mark.asyncio

@@ -6,17 +6,20 @@ ARCHITECTURE NOTE: Each refusal case builds the stand-in command first, snapshot
 FUNCTION INVENTORY: refuse runs one call that must be refused and checks the INV-4 and INV-5 shape; the test_* functions are one behaviour each.
 COMMON MODIFICATION PATTERNS: A new argument rule is one more row in the case table for its argument.
 WHAT NOT TO DO IN THIS FILE: Do not compare refusal wording beyond the argument name, the cap and the INV-5 elements.
-KNOWN EDGE CASES: The relative-path cases chdir into the sandbox so the relative path exists; it must still be refused (R-14). Non-text values are passed on purpose.
-RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §6.1 INV-4, INV-7, §6.2 AC-5, §6.3 EC-1 to EC-6, EC-33, EC-38, §9.1
+KNOWN EDGE CASES: The relative-path cases chdir into the sandbox so the relative path exists; it must still be refused (R-14). Non-text values are passed on purpose. The quote-dense and astral prompt cases run only on win32, where the quoted command line is what the 32,767-unit CreateProcess limit counts (review R-8).
+RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §6.1 INV-4, INV-7, §6.2 AC-5, §6.3 EC-1 to EC-6, EC-33, EC-38, §9.1; docs/spec/harness-thread-functions/review.md R-8
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads/test_harness_threads_arguments.py
 """
 
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 HARNESSES = ("grok", "opencode", "muse")
 PROMPT_CAPS = {"grok": 24000, "opencode": 200000, "muse": 24000}
+DENSE_PROMPTS = [("quotes", '"' * 20000), ("astral", chr(0x1F600) * 20000)]
 VALID_THREAD = "valid-thread-0001"
 KEY_CASES = [
     ("empty", ""), ("blank", "   "), ("inner-space", "vbk key with space"), ("nul", "vbk-key\x00tail"), ("bell", "vbk-key\x07tail"),
@@ -91,6 +94,17 @@ async def test_prompt_over_the_harness_cap_is_refused_naming_the_cap(refuse, har
     # EC-3 / D-20: 24,000 characters on argv for Grok and Muse, 200,000 on stdin for opencode.
     cap = PROMPT_CAPS[harness]
     await refuse(harness, "prompt", prompt="p" * (cap + 1), observations=[("prompt cap", (str(cap), f"{cap:,}"))])
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform != "win32", reason="the 32,767-unit command-line limit exists only on win32 (EC-3, review R-8)")
+@pytest.mark.parametrize("harness", ["grok", "muse"])
+@pytest.mark.parametrize(("case", "prompt"), DENSE_PROMPTS, ids=[case for case, _ in DENSE_PROMPTS])
+async def test_prompt_whose_quoted_form_passes_the_argv_cap_is_refused(refuse, harness, case, prompt) -> None:
+    # EC-3 / R-8: 20,000 characters, within the 24,000 cap, but quoting
+    # each " or counting UTF-16 units doubles it on the command line;
+    # it is refused naming the cap, never launched as not_installed.
+    await refuse(harness, "prompt", prompt=prompt, observations=[("prompt cap", ("24000", "24,000"))])
 
 
 @pytest.mark.asyncio
