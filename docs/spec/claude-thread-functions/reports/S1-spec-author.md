@@ -32,8 +32,8 @@ Stage: S1 spec author. Date: 2026-10-15. Output: `docs/spec/claude-thread-functi
 ## Disagreements with the request and the scouts (with evidence)
 
 1. **request.md says #1036 is "still open", and KD-8 retargets #1044 to #1036's branch.** Superseded: `git log origin/main` shows #1036 as `f216fdcf`, and pipeline.md (2026-10-15 18:45) records the fact change. The spec keeps base `main` (D-21, NG-12, A-12). request.md is not edited.
-2. **`origin/main` has moved since S0.** It is now `0754e01f` (#1095), not `72a4ade1`. #1095 changed `vidbyte/lib/enums/__init__.py` (3 lines) and `llms.txt` (`git diff --stat 72a4ade1 origin/main`). Two consequences:
-   - `git checkout origin/main -- <files>`, which `review-scope.md` and my own earlier notes suggest, would now pull #1095's enum change into a branch that lacks #1095's modules. The spec says to restore from `72a4ade1` and never from `origin/main` (D-17, rows 1–7, §14).
+2. **`origin/main` has moved since S0.** It is now `0754e01f` (#1095), not `72a4ade1`. ~~#1095 changed `vidbyte/lib/enums/__init__.py` (3 lines) and `llms.txt` (`git diff --stat 72a4ade1 origin/main`).~~ *Corrected in r2 (reviewer R-3):* that list came from a path-filtered diff. #1095 changed 41 files (`git diff --shortstat 72a4ade1 0754e01f`), among them root `vidbyte/__init__.py` (adds `SystemPromptPreset` to `__all__`), `contracts/sdk-public-api.json`, `vidbyte/lib/enums/__init__.py`, `vidbyte/lib/README.md`, `README.md`, `llms.txt` and many `vidbyte/agents/**` files. It touches no file under `vidbyte/harnesses/` and none of the native-thread lib modules. Two consequences:
+   - `git checkout origin/main -- <files>`, which `review-scope.md` and my own earlier notes suggest, would now pull #1095's enum change into a branch that lacks #1095's modules. ~~The spec says to restore from `72a4ade1` and never from `origin/main` (D-17, rows 1–7, §14).~~ *r2:* the spec restores from the merge base, `git merge-base origin/main HEAD` (`72a4ade1` until the catch-up merge), never from an unmerged `origin/main` tip (D-17, rows 1–7, §14).
    - The pipeline's niche fact "`git diff --stat origin/main HEAD` = 42 files, pure insertions" is true only against `72a4ade1`. Against today's `origin/main` the diff also shows #1095's files reversed.
 3. **code-map.md header says HEAD `d8ef24f5` and merge base `77fef0e5`.** Both are stale after the second S0 merge: HEAD was `f6f8d546` (now `6d2eaa48`), and the merge base with main is `72a4ade1`. The code map's line numbers for files #1044 did not touch are still right.
 4. **request.md §C constraint: "#1044's probe accepted only a native `claude.exe`".** The code map (note 8) already corrected this: #1044 also accepted `.com`. It does not matter here, because `NativeLauncher` refuses only `.cmd`/`.bat`, as for the other harnesses.
@@ -55,3 +55,38 @@ Stage: S1 spec author. Date: 2026-10-15. Output: `docs/spec/claude-thread-functi
 - Blocking questions: none. Non-blocking: Q-1 (one-record signature for all four harnesses, default no), Q-2 (workspace `CLAUDE.md`), Q-3 (`--session-id` minting), Q-4 (no retries), Q-5 (more config fields), Q-6 (transcript retention), Q-7 (key out of tool subprocesses). All default "no".
 - `failure.py`'s header asks for docs for new codes. Following #1036, which added 28 codes without them, the docs are not updated (NG-11, §12.4).
 - S2 must also repair the surface pin `len(main_members) == 120` (line 193), which already fails on `base_commit`.
+
+## Revision r2 (review round 1, 2026-10-15)
+
+The spec moved to revision 2 in commit `198eefdf`; `status` stays `draft`. Input: `reports/S1-spec-review.md` (verdict SOUND WITH FIXES: 1 Blocker, 5 Major, 5 Minor). I accepted all eleven findings. §16 of the spec holds the full log.
+
+| ID | Severity | Disposition | Change |
+|---|---|---|---|
+| R-1 | Blocker | accepted | AC-3 no longer accepts an upper-case continue id. INV-12: a different valid id is `thread_not_found`, and an id outside the pattern (upper case included) is `protocol_mismatch`. AC-13 covers upper case. §13 says the stand-in's `continue_upper_id` mode is Grok-only (`test_harness_threads_threads.py:137-142`) |
+| R-2 | Major | accepted | §12.4 has an S008 zero-headroom line with the check `python -m ruff check vidbyte/harnesses/native --isolated --select C901,PLR0912,PLR0915`, and lists the other zero-headroom ratchets. In row 20, both problem choices are conditional expressions, and the exit-0 checks move into the leaf `ClaudeWire._missing_member` |
+| R-3 | Major | accepted | Every byte-identity rule (INV-19, INV-20, INV-22, AC-20, NFR-2, rows 1–7, §12.4, §12.6 P1, §14) compares with `git merge-base origin/main HEAD`. D-17 restores from the merge base. §9.4 puts the catch-up merge before the S3 push, as pipeline.md does. The #1095 claim above is corrected |
+| R-4 | Major | accepted | New `vidbyte/harnesses/native/hostkit/folders.py` with `NativePrivateFolders.prepare` (row 32), exported from hostkit (row 22, now P3 code). `_prepare_config` is removed. The templates use Grok's fields, so the failure template uses `{home}`. Grok is not switched (NG-13) |
+| R-5 | Major | accepted | EC-20, D-12, README row 29 and AC-23 state what each mode allows headless: only `ACCEPT_EDITS` widens anything, and only to file edits and common filesystem commands. A-2 is confirmed by the headless docs. The timeout branch and D-12's flip are dropped |
+| R-6 | Major | accepted as a new documented risk | EC-37, D-22, A-14 and optional Q-8 [scope-adding], default no. INV-14 now says it covers skills and workspace files only. §9.1, EC-8, EC-28, NG-10, the T-2/T-3 residuals and the rollback text are updated |
+| R-7 | Minor | accepted | INV-21 now uses §8.5 order, INV-13 cites EC-31, and EC-36 drops `true` |
+| R-8 | Minor | accepted | Row 33: a header-only change to `vidbyte/lib/dataclasses/validation.py` line 4 |
+| R-9 | Minor | accepted | §12.5: the IMPROVED results are pre-existing, and `--update-baseline` is not run. §14 Never lists it |
+| R-10 | Minor | accepted | T-6 gets an unverified residual, plus A-15 and optional Q-9 [scope-adding] (`NoDefaultCurrentDirectoryInExePath=1` on win32), default no |
+| R-11 | Minor | accepted | Q-1 states readings (a) and (b) with the #690→#747 precedent; the default is unchanged |
+
+**R-6 reasoning (scope rule):** I judged the finding against the settled design, not as a broken invariant.
+- Auto memory is not a credential, so INV-3 and INV-4 still hold.
+- It is not a skill or a workspace file, so INV-14 still holds once its scope is stated.
+- Every thread can already read the workspace's own files, so memory adds persistence, not a new channel.
+- Nobody asked for a switch. The memory switch therefore stays an optional Q-8 with default "no", and the behaviour is documented as an accepted limitation (EC-37).
+
+**Probes not run.** The reviewer suggested two stand-in probes: R-6 (seed `MEMORY.md` and inspect the request body) and R-10 (a workspace `git.exe` marker with `claude -p`). Both start `claude`, which this stage forbids. They are recorded as A-14 (docs only) and A-15 (not probed).
+
+**Changed design sections:**
+- §8: D-2, D-12, D-15, D-17, D-22, and the §8.4 budget (3 → 4 files, 7 → 8 classes).
+- §8.5: `NativePrivateFolders.prepare` and `ClaudeWire._missing_member` added; `ClaudeThreadRun._prepare_config` removed; the `{home}` template.
+- §9: §9.1 memory and §9.4 merge timing.
+- §10: T-2, T-3, T-4 and T-6.
+- §12: new rows 32 and 33, row 22 is now a P3 code change, restores are from the merge base, and the P3/P4 row sets and dependency order changed.
+
+**Not edited (orchestrator files):** pipeline.md, request.md, code-map.md and vendor-facts.md. My r1 note about stale facts in code-map.md and pipeline.md still applies.
