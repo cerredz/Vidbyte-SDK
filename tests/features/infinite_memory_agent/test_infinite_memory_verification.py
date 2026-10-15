@@ -1,9 +1,9 @@
 """FILE: tests/features/infinite_memory_agent/test_infinite_memory_verification.py
 
-PURPOSE: Proves how a pair's verdict decides what reaches memory: the last VERDICT line wins in any Markdown wrapping or case, a missing verdict or a failing verifier commits nothing, drop_entry removes exactly the named staged entry, and a corrupted entries.jsonl at commit time drops each pair's entries with a message instead of crashing the batch. Since the S4 review it also pins two rules no earlier test caught when deleted: the entry rules a pair agent's remember meets when it stages, and the by stamp on an entry the verifier staged.
-ROLE IN CODEBASE: Verification and commit layer of tests/features/infinite_memory_agent/ (spec AC-10, AC-11, AC-37, AC-38; INV-14..INV-17, INV-19, INV-29, INV-32; EC-12, EC-13, EC-17, EC-24; S4 review finding R-11). Exercises vidbyte/agents/infinite/launch.py (InfinitePair), vidbyte/agents/infinite/memory.py and vidbyte/agents/infinite/workspace.py through a real InfiniteMemoryAgent run.
+PURPOSE: Proves how a pair's verdict decides what reaches memory: the last VERDICT line wins in any Markdown wrapping or case, a missing verdict or a failing verifier commits nothing, drop_entry removes exactly the named staged entry, and a corrupted entries.jsonl at commit time drops each pair's entries with a message instead of crashing the batch. Since the S4 review it also pins two rules no earlier test caught when deleted: the entry rules a pair agent's remember meets when it stages, and the by stamp on an entry the verifier staged. Since the re-review it also proves that one staged entry UTF-8 cannot encode never costs the pair its verdict or its other entries.
+ROLE IN CODEBASE: Verification and commit layer of tests/features/infinite_memory_agent/ (spec AC-10, AC-11, AC-37, AC-38; INV-14..INV-17, INV-19, INV-29, INV-32; EC-12, EC-13, EC-17, EC-24; S4 review finding R-11; re-review finding R-27). Exercises vidbyte/agents/infinite/launch.py (InfinitePair), vidbyte/agents/infinite/memory.py and vidbyte/agents/infinite/workspace.py through a real InfiniteMemoryAgent run.
 ARCHITECTURE NOTE: Each test scripts one or two pairs whose generators stage entries with remember, then reads the verdict and dropped list from the pair_finished card in the journal and the committed lines from entries.jsonl.
-FUNCTION INVENTORY: test_no_verdict_or_a_failing_verifier_drops_every_staged_entry (AC-10, EC-12); test_drop_entry_removes_only_the_named_staged_entry (AC-11); test_a_malformed_entries_line_drops_each_pairs_entries_but_the_run_finishes (AC-37, EC-24, INV-16); test_an_entry_that_no_longer_fits_at_commit_is_dropped_with_the_cap_reason (EC-17, INV-19); test_verdict_is_read_from_the_last_matching_line_in_any_markdown_or_case (AC-38, EC-13, INV-14, INV-15); test_a_pair_agents_remember_is_checked_against_the_entry_rules_when_it_stages (R-11, INV-17, INV-15, INV-32); test_an_entry_the_verifier_stages_is_committed_under_the_verifiers_own_key (R-11, INV-16). _names_any checks that a refusal names one of its expected tokens.
+FUNCTION INVENTORY: test_no_verdict_or_a_failing_verifier_drops_every_staged_entry (AC-10, EC-12); test_drop_entry_removes_only_the_named_staged_entry (AC-11); test_a_malformed_entries_line_drops_each_pairs_entries_but_the_run_finishes (AC-37, EC-24, INV-16); test_an_entry_that_no_longer_fits_at_commit_is_dropped_with_the_cap_reason (EC-17, INV-19); test_verdict_is_read_from_the_last_matching_line_in_any_markdown_or_case (AC-38, EC-13, INV-14, INV-15); test_a_pair_agents_remember_is_checked_against_the_entry_rules_when_it_stages (R-11, INV-17, INV-15, INV-32); test_an_entry_the_verifier_stages_is_committed_under_the_verifiers_own_key (R-11, INV-16); test_an_entry_text_that_cannot_be_written_never_costs_the_pair_its_verdict_or_other_entries (re-review R-27, INV-16, INV-29, INV-17). _names_any checks that a refusal names one of its expected tokens.
 COMMON MODIFICATION PATTERNS: Add a verdict spelling as one VERDICT_REPLIES row with the verdict it must give. Add a stage-time entry rule as one STAGE_REFUSALS row naming the tokens its refusal may carry.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level. 2. Do not write the malformed line before the generators have staged; AC-37 is about the commit-time re-check.
 KNOWN EDGE CASES: In AC-37 whichever verifier is called first writes the malformed line, once; both commits come after it, because a pair commits only after its verifier returns.
@@ -274,3 +274,31 @@ def test_an_entry_the_verifier_stages_is_committed_under_the_verifiers_own_key(t
     assert [(entry["text"], entry["by"], entry["verified_by"]) for entry in committed] == [(STAGED_TEXT, "root/p/gen", "root/p/ver"), (fee, "root/p/ver", "root/p/ver")]
     card = finished_cards(workspace_root(tmp_path))[pair_key("p")]
     assert (card["verdict"], card["entries"]) == ("fixed", [entry["id"] for entry in committed])
+
+
+# ---------------------------------------------------------------- re-review: an entry that cannot be written (R-27)
+
+
+def test_an_entry_text_that_cannot_be_written_never_costs_the_pair_its_verdict_or_other_entries(tmp_path: Path) -> None:
+    """Re-review R-27, INV-16, INV-29, INV-17: a generator stages a valid entry, one whose text UTF-8 cannot encode, and another valid one, and the verifier passes; the verdict stays passed and both valid entries commit, while the bad one is refused when staged or dropped at commit with its reason."""
+    first, unwritable, third = "Acme Pro costs 49 USD per seat", "Globex Team costs 59 USD per seat \ud83d", "Umbrella sells only to governments"
+    agent = build_agent(tmp_path)
+    tree = ScriptedTree(
+        {
+            ROOT: [launch(task("p")), reply("done")],
+            generator("p"): [_remember(first), _remember(unwritable), _remember(third), reply("P-SUMMARY")],
+            verifier("p"): [reply("Checked every source.\nVERDICT: passed")],
+        }
+    )
+    with tree.install():
+        agent.run(TASK)
+    tree.assert_complete()
+    card = finished_cards(workspace_root(tmp_path))[pair_key("p")]
+    assert card["verdict"] == "passed", f"an unwritable staged entry turned the verdict into {card['verdict']!r}: {ascii(card['review'][:200])}"
+    committed = read_jsonl(workspace_root(tmp_path) / "entries.jsonl")
+    assert [entry["text"] for entry in committed] == [first, third]
+    assert card["entries"] == [entry["id"] for entry in committed]
+    staged = [content for name, content in tool_results(tree.calls_by(generator("p"))[-1]) if name == "remember"]
+    refused_when_staged = is_error(staged[1]) and bool(template_regex(prompt_text("quota_line")).search(staged[1]))
+    dropped_at_commit = any(re.search(r"(?<![\w-])s2(?![\w-])", item) for item in card["dropped"])
+    assert refused_when_staged or dropped_at_commit, f"the bad entry was neither refused when staged nor listed in dropped: {ascii(staged[1][:200])} {ascii(card['dropped'])}"

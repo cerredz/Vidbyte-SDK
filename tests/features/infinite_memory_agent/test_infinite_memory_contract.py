@@ -1,9 +1,9 @@
 """FILE: tests/features/infinite_memory_agent/test_infinite_memory_contract.py
 
-PURPOSE: Pins the InfiniteMemory agent's static contract: public import paths and exports, enum values, the 40-leaf prompt family, the runtime registry entry and its refusal outside InfiniteMemoryAgent, the session opt-out, settings validation and defaults, the exact tools and schemas the root's model is offered, the TokenEstimate helper, prompt text free of coding-only rules, and the complexity budget.
-ROLE IN CODEBASE: Contract layer of tests/features/infinite_memory_agent/ (spec AC-2, AC-3, AC-4, AC-25, AC-27, AC-39; INV-1..INV-3, INV-6, INV-21, INV-33, INV-36; EC-2, EC-3, EC-33, EC-34; FR-15; NFR-1). Exercises vidbyte/agents/infinite/, vidbyte/lib/enums/infinite.py, vidbyte/lib/constants/infinite.py, vidbyte/lib/util/text.py, vidbyte/lib/registries/runtimes.py and the infinite_memory prompt family.
+PURPOSE: Pins the InfiniteMemory agent's static contract: public import paths and exports, enum values, the 40-leaf prompt family, the runtime registry entry and its refusal outside InfiniteMemoryAgent, the session opt-out, settings validation and defaults, the exact tools and schemas the root's model is offered, the TokenEstimate helper, prompt text free of coding-only rules, and the complexity budget. Since the re-review it also proves that a read-only seed is copied again, unchanged, each time an agent attaches.
+ROLE IN CODEBASE: Contract layer of tests/features/infinite_memory_agent/ (spec AC-2, AC-3, AC-4, AC-25, AC-27, AC-30, AC-39; INV-1..INV-3, INV-6, INV-21, INV-33, INV-36; EC-2, EC-3, EC-33, EC-34; FR-15; NFR-1; re-review finding R-26). Exercises vidbyte/agents/infinite/, vidbyte/lib/enums/infinite.py, vidbyte/lib/constants/infinite.py, vidbyte/lib/util/text.py, vidbyte/lib/registries/runtimes.py and the infinite_memory prompt family.
 ARCHITECTURE NOTE: Every feature symbol is imported inside the test that needs it, so before the feature exists each test fails on its own ImportError and the rest of the suite still collects. Tool offers are read from what the scripted runner receives on the root's first call, not from the agent's internals.
-FUNCTION INVENTORY: test_public_names_import_from_every_documented_path (AC-27, INV-1); test_prompt_family_has_exactly_the_forty_documented_leaves (AC-27, INV-36); test_enum_values_are_the_documented_lowercase_strings (section 8.5); test_runtime_type_resolves_and_refuses_outside_its_agent (AC-3, INV-3, EC-33); test_session_refuses_the_agent (AC-25, EC-34); test_loop_and_limit_defaults_match_the_spec (AC-39, section 9.3); test_construction_rejects_each_invalid_setting (AC-2, EC-2); test_attaching_a_workspace_already_over_a_cap_is_refused (INV-21, EC-3); test_root_is_offered_exactly_the_preset_tools_plus_its_extra (AC-4, INV-6); test_launch_and_remember_schemas_follow_the_documented_shape (section 9.2, INV-9); test_token_estimate_counts_characters_and_cuts_to_a_prefix (FR-15, D-17); test_prompt_family_text_carries_no_coding_only_rules (INV-33, NFR-5); test_new_modules_stay_inside_the_complexity_budget (NFR-1); test_construction_rejects_a_non_settings_object (AC-2, INV-2); test_entries_written_by_hand_in_the_documented_shape_are_accepted (section 9.1).
+FUNCTION INVENTORY: test_public_names_import_from_every_documented_path (AC-27, INV-1); test_prompt_family_has_exactly_the_forty_documented_leaves (AC-27, INV-36); test_enum_values_are_the_documented_lowercase_strings (section 8.5); test_runtime_type_resolves_and_refuses_outside_its_agent (AC-3, INV-3, EC-33); test_session_refuses_the_agent (AC-25, EC-34); test_loop_and_limit_defaults_match_the_spec (AC-39, section 9.3); test_construction_rejects_each_invalid_setting (AC-2, EC-2); test_attaching_a_workspace_already_over_a_cap_is_refused (INV-21, EC-3); test_a_read_only_seed_is_copied_again_each_time_an_agent_attaches (re-review R-26, INV-21, section 9.2, AC-30);test_root_is_offered_exactly_the_preset_tools_plus_its_extra (AC-4, INV-6); test_launch_and_remember_schemas_follow_the_documented_shape (section 9.2, INV-9); test_token_estimate_counts_characters_and_cuts_to_a_prefix (FR-15, D-17); test_prompt_family_text_carries_no_coding_only_rules (INV-33, NFR-5); test_new_modules_stay_inside_the_complexity_budget (NFR-1); test_construction_rejects_a_non_settings_object (AC-2, INV-2); test_entries_written_by_hand_in_the_documented_shape_are_accepted (section 9.1).
 COMMON MODIFICATION PATTERNS: When the spec adds a prompt leaf, add it to EXPECTED_LEAVES. When a setting gains a bound, add one row to INVALID_SETTINGS with the field name and the bad value the error must name.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level (see infinite_memory_fixtures.py). 2. Do not compare tool descriptions to hand-written text; descriptions come from the prompt catalog. 3. Do not loosen the exact tool-name sets to subset checks; INV-6 is an exact list.
 KNOWN EDGE CASES: A ConfigurationError may carry the field in `details` instead of the message, so error_text joins both. The settings-level cases must leave no workspace folder behind, so they never build the agent past its settings.
@@ -17,8 +17,10 @@ import ast
 import importlib
 import json
 import math
+import os
 import random
 import re
+import stat
 import string
 from pathlib import Path
 from typing import Any
@@ -326,6 +328,31 @@ def test_attaching_a_workspace_already_over_a_cap_is_refused(tmp_path: Path, cap
     with pytest.raises(ConfigurationError) as refused:
         build_agent(tmp_path, workspace=fields)
     assert cap in error_text(refused.value)
+
+
+def test_a_read_only_seed_is_copied_again_each_time_an_agent_attaches(tmp_path: Path) -> None:
+    """R-26, INV-21, section 9.2, AC-30: with a read-only seed file, a second and a third agent build over the same workspace, and seed/<name> matches the source each time, including after the source changes."""
+    seed = tmp_path / "inputs" / "brief.md"
+    seed.parent.mkdir(parents=True)
+    seed.write_text("Competitors: Acme, Globex.\n", encoding="utf-8", newline="\n")
+    copy = workspace_root(tmp_path) / "seed" / "brief.md"
+    os.chmod(seed, stat.S_IREAD)
+    try:
+        build_agent(tmp_path, workspace={"seed_files": (seed,)})
+        assert copy.read_bytes() == seed.read_bytes()
+        # Construction may raise only ConfigurationError (section 9.2), and attaching again copies the seed again (INV-21).
+        build_agent(tmp_path, workspace={"seed_files": (seed,)})
+        assert copy.read_bytes() == seed.read_bytes()
+        os.chmod(seed, stat.S_IREAD | stat.S_IWRITE)
+        seed.write_text("Competitors: Acme, Globex, Initech.\n", encoding="utf-8", newline="\n")
+        os.chmod(seed, stat.S_IREAD)
+        build_agent(tmp_path, workspace={"seed_files": (seed,)})
+        assert copy.read_bytes() == seed.read_bytes(), "the edited seed was not copied over the old one"
+    finally:
+        # Windows cannot delete a read-only file, so make every file writable again for tmp_path's cleanup.
+        for path in tmp_path.rglob("*"):
+            if path.is_file():
+                os.chmod(path, path.stat().st_mode | stat.S_IWRITE)
 
 
 # ---------------------------------------------------------------- what the root's model is offered

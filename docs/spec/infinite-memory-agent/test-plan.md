@@ -74,6 +74,10 @@ Every agent-level test drives a real `InfiniteMemoryAgent`. A `ScriptedTree` is 
 | INV-32, INV-19, §12.4 (S4 R-8) | workspace → `test_a_memory_write_that_fails_on_disk_is_a_refusal_and_leaves_no_temp_file[remember, write_note, edit_file × replace-fails, lone-surrogate]` | integration | The atomic replace fails, or the text cannot be encoded as UTF-8 → a `.tmp` copy is left (it counts toward the caps), and the error escapes `execute` raw, with no quota line | `replace-fails` checks that the injected fault actually fired. Each case needs the rejection template and the quota line, no `*.tmp` anywhere, an unchanged byte snapshot, and a working next call. This is the only filesystem fault injection in the pack, granted for R-8 alone: a one-shot `os.replace` failure on the tool's target file. RED at HEAD. |
 | INV-32, INV-19, INV-20 (S4 R-8) | workspace → `test_a_note_path_with_a_colon_is_saved_or_refused_without_leaving_stray_files` | integration | `notes/standup 10:30.md` on NTFS → the colon names a data stream, the write fails raw, and a stray `notes/.standup 10` remains | The test asserts either an exact save or a clean refusal with an unchanged snapshot. It is RED at HEAD on NTFS, and green on POSIX, where a colon is a legal file-name character. |
 | EC-18, INV-17, INV-32 (S4 R-6) | workspace → `test_remember_tells_the_model_to_keep_a_long_paste_in_a_note_or_a_pointer[multi-line-log, one-line-over-the-cap]` | integration | A pasted log, or one line over the cap, is refused without saying where the content belongs (and the multi-line refusal repeats the paste) | A precondition checks that the paste contains neither advice word. The literal text of the rejection template and of the quota line is removed before the search, so only the problem text can supply "pointer" or "note". RED at HEAD. |
+| INV-21, §9.2, AC-30 (re-review R-26) | contract → `test_a_read_only_seed_is_copied_again_each_time_an_agent_attaches` | integration | The seed file is read-only, so its copy under `seed/` keeps the mode bits → the second agent over the same root cannot overwrite the copy and raises a raw `PermissionError` | Three agents are built over one root. Before the third build the source is edited and made read-only again, so skipping an identical copy cannot pass: the copy must match the new bytes. A `finally` block restores write permission so `tmp_path` cleanup works on Windows. RED at `52eaafe8`; green under `apply_fixes.py both`. |
+| INV-19, INV-32, INV-18 (re-review R-27) | workspace → `test_a_supersede_whose_new_text_cannot_be_written_changes_neither_entry_file` | integration | A root `remember` with `supersedes: 1` whose text holds a lone surrogate → `superseded.jsonl` is written first and then the entries write fails, so the model is told nothing was saved while #1 is already copied; a retry copies it again | The refused call is sent twice, and the snapshot before the first and after the second must be byte-identical. A clean supersede must then move #1 exactly once, with id 2. RED at `52eaafe8`; green under `apply_fixes.py both`. |
+| INV-20, INV-19, INV-32 (re-review R-27) | workspace → `test_a_new_note_whose_description_cannot_be_written_leaves_no_note_and_keeps_the_allowance` | integration | `write_note` creates `notes/a.md` and then fails to write a lone-surrogate description to `files.jsonl` → the note stays on disk with no description, and the new-file allowance is spent | Only the description is unwritable, so the note's own text cannot be the cause. After the refusal the snapshot must be unchanged, the clean retry must create the note (allowance 1 still unspent), and a second new note must then be refused. RED at `52eaafe8`; green under `apply_fixes.py both`. |
+| INV-16, INV-29, INV-17 (re-review R-27) | verification → `test_an_entry_text_that_cannot_be_written_never_costs_the_pair_its_verdict_or_other_entries` | integration | A generator stages a valid entry, one with a lone surrogate, and another valid one, and the verifier passes → the commit raises, the verdict turns `unchecked`, and both valid entries are lost | The verdict, the committed texts and the card's ids are compared exactly. The bad entry may be refused at stage time (an error with the quota line) or named `s2` in `dropped`; either fix passes, and silent loss does not. RED at `52eaafe8`; green under `apply_fixes.py both`. |
 
 ## Tests deliberately NOT written
 
@@ -93,6 +97,7 @@ Every agent-level test drives a real `InfiniteMemoryAgent`. A `ScriptedTree` is 
 | Any test of the non-goals NG-1 – NG-15 or Q-1 – Q-9 additions | Out of scope by rule (every Q defaults to no). |
 | S4 R-2: protected names compared case-folded (INV-20, INV-21) | On this Windows host `Path.resolve()` returns the on-disk case of every existing protected name, so `Entries.jsonl`, `SEED/brief.md` and `.RUNS/x.jsonl` are already refused at HEAD, and the test would pass without proving anything. Making it fail here means replacing `FileSystemPermissions.resolve_scoped_path`, which is not a seam this pack fakes. The verifier's probe `v6_case_fold.py` remains the evidence. |
 | S4 R-13 alternative: drop the `sleep(0)` yield and gate AC-37 with `Gate(2)` | This was not granted for S4; it would change an existing test's script. The yield stays, and the R-13 fix is a production comment. |
+| Re-review R-29: the second file of a two-file write is locked by another Windows process | The re-review downgraded it to a Minor follow-up, and its fix is still open (restore the first file, or name the limit in INV-19). Holding a lock needs a second handle opened from the test, which is a filesystem fake this pack was not granted, and the test would pin one of two fixes before either is chosen. |
 
 ## Red run (before implementation)
 
@@ -181,6 +186,42 @@ Gates after the additions:
 - `python lint/run.py` → `SDK-LINT: PASS`, with `S062 888 889 IMPROVED`, `S041 0 0 CLEAN`, `S047 0 0 CLEAN`, and `A001 642 642 RATCHETED`. No rule has a finding in the pack.
 - `ruff check --select F,E9,B,ASYNC,DTZ` on the pack is clean.
 - The full suite gives `14 failed, 5266 passed, 14 skipped`. All 14 failures are the new red tests in the pack; none is outside it.
+
+## S5 re-review additions
+
+After S5 fixed R-1 to R-13, all 107 cases passed at HEAD `52eaafe8`. The S5 re-review (`reports/S5-rereview-verifier.md`) confirmed two Majors that those cases let through, and 4 new tests now pin them. No existing assertion changed. The only lines removed are the three module headers' inventory, purpose and role lines, which were rewritten to name the new tests.
+
+| Finding | Test | At `52eaafe8` | Under `apply_fixes.py both` |
+|---|---|---|---|
+| R-26 | contract → `test_a_read_only_seed_is_copied_again_each_time_an_agent_attaches` | RED | GREEN |
+| R-27 | workspace → `test_a_supersede_whose_new_text_cannot_be_written_changes_neither_entry_file` | RED | GREEN |
+| R-27 | workspace → `test_a_new_note_whose_description_cannot_be_written_leaves_no_note_and_keeps_the_allowance` | RED | GREEN |
+| R-27 | verification → `test_an_entry_text_that_cannot_be_written_never_costs_the_pair_its_verdict_or_other_entries` (the pair case from `rr/r1_guard.py`) | RED | GREEN |
+
+Red at HEAD, each failing for the right reason (`--tb=line`):
+
+```
+PYTHONPATH=$(pwd) python -m pytest tests/features/infinite_memory_agent -q -p no:cacheprovider
+→ 4 failed, 107 passed
+  R-26:             shutil.py:258: PermissionError: [Errno 13] Permission denied: '...\project\memory\seed\brief.md'
+  R-27 supersede:   a refused supersede changed ['superseded.jsonl'] although the model was told nothing was saved
+  R-27 new note:    a refused new note changed ['notes/a.md'] although the model was told nothing was saved
+  R-27 pair:        an unwritable staged entry turned the verdict into 'unchecked':
+                    "'utf-8' codec can't encode character '\\ud83d' in position 301: surrogates not allowed"
+```
+
+Green under the trial fix. HEAD was exported with `git archive` (LF, as `apply_fixes.py` expects), the four edited test modules were copied in, and the re-review verifier's `apply_fixes.py <dir> both` was applied (c1: the seed copy is made writable after copying; c2: an encode check in `_entry_rules`, and every changed value encoded in `write_note` before the first write). Run with `PYTHONPATH=<dir>`:
+
+```
+-k "read_only_seed or cannot_be_written"   7 passed   (the 4 new tests and the 3 R-1 cases the filter also matches)
+whole pack                                  111 passed
+```
+
+Gates after the additions:
+
+- `python lint/run.py` → `SDK-LINT: PASS`, with `S062 889 889 RATCHETED`, `S041 0 0 CLEAN`, `S047 0 0 CLEAN`, and `A001 642 642 RATCHETED`. No rule has a finding in the pack.
+- `ruff check --select F,E9,B,ASYNC,DTZ` on the pack is clean.
+- The full suite gives `4 failed, 5280 passed, 14 skipped`. All 4 failures are the new red tests; none is outside the pack.
 
 ## Notes for the implementer
 

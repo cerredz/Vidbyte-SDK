@@ -27,3 +27,4 @@ From the repository root: `PYTHONPATH=$(pwd) python -m pytest tests/features/inf
 
 - 2026-10-15 - Pack added red, ahead of the implementation, from spec r3 (S2 test author).
 - 2026-10-15 - S4 review additions (S2 test author, spec r5): guardrail tests for stage-time entry rules, the verifier's `by` stamp, and `edit_file`'s caps; regression tests for findings R-1, R-3, R-4, R-6 and R-8.
+- 2026-10-15 - S5 re-review additions (S2 test author, spec r5): regression tests for findings R-26 (a read-only seed on a second attach) and R-27 (refused two-file memory writes, and an unwritable staged entry in a pair).

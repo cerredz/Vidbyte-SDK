@@ -87,6 +87,9 @@ Each line is *input + state → wrong output if unguarded*, with the test that c
 - `edit_file` without the size caps → one edit grows a note or the workspace past its cap (`test_edit_file_refuses_an_edit_that_would_pass_a_cap_and_changes_nothing`).
 - A failed atomic replace, or text UTF-8 cannot encode, leaks a `.tmp` copy that counts toward the caps and escapes the tool as a raw error with no quota line (`test_a_memory_write_that_fails_on_disk_is_a_refusal_and_leaves_no_temp_file`); a colon in a note path leaves a stray NTFS stream base file (`test_a_note_path_with_a_colon_is_saved_or_refused_without_leaving_stray_files`).
 - A pasted log refused without saying where the content belongs → the model retries the paste instead of writing a note (`test_remember_tells_the_model_to_keep_a_long_paste_in_a_note_or_a_pointer`).
+- A read-only seed copied with its mode bits → the next agent that attaches to the workspace cannot overwrite the copy and fails with a raw `PermissionError` (`test_a_read_only_seed_is_copied_again_each_time_an_agent_attaches`).
+- A two-file memory write that fails on its second file after the first was written → the model is told nothing was saved while `superseded.jsonl` already holds the old entry, so a retry duplicates it (`test_a_supersede_whose_new_text_cannot_be_written_changes_neither_entry_file`), or a new note stays on disk with no description and spends the new-file allowance (`test_a_new_note_whose_description_cannot_be_written_leaves_no_note_and_keeps_the_allowance`).
+- One staged entry UTF-8 cannot encode reaches the commit → the pair's verdict turns `unchecked` and its valid entries are lost with it (`test_an_entry_text_that_cannot_be_written_never_costs_the_pair_its_verdict_or_other_entries`).
 
 What an easy generated test would miss: concurrency proven by timing instead of a gate; "no leak" checked only on the final reply instead of every root call; quota checked without interleaved rejections; resume tested only from a journal the implementation wrote itself (never hand-written in the documented shape); a torn line without its missing trailing newline.
 
@@ -95,6 +98,8 @@ What an easy generated test would miss: concurrency proven by timing instead of 
 The pack was written red before the implementation (spec r3, S2). Spec review rounds R-1…R-23 shaped several tests: R-16 (AC-40 second run), R-17 (AC-37 malformed line), R-18 (AC-42 grep over 1 MB), R-19 (AC-38 upper-case verdict), R-20 (AC-31 replay-only batch), R-21 (AC-33 equal-size groups), R-23 (AC-41 reserved name at run time).
 
 The S4 code review (`docs/spec/infinite-memory-agent/review.md`, a separate R- numbering) found bugs that the 89 original tests let through, and the tests named above now pin them: R-1 (card build and `pair_finished` outside the pair guard), R-3 (uncapped `dropped` and `files`), R-4 (replay refused by the context check), R-6 (EC-18 refusal without advice), R-8 (leaked temp files and raw write errors), and R-11 (stage-time entry rules, `edit_file` caps, and the verifier's `by` stamp could each be deleted with the pack still green).
+
+The S5 re-review found two more that the 107 tests at that point let through: R-26 (the R-7 fix copied a read-only seed's mode bits, so a second attach raised `PermissionError`) and R-27 (a refused two-file memory write could leave its first file changed, and one unwritable staged entry turned a pair's verdict `unchecked`). The four tests named above for those lines pin them.
 
 ## Test Suite Map
 
