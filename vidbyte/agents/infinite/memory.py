@@ -3,7 +3,7 @@
 PURPOSE: Defines InfiniteAgentMemory, one agent's handle on the shared workspace with its role, its remember quota, its new-file allowance, and its pair's staged entries; and the four memory tools built on it: remember, write_note, edit_file (FULL preset only), and drop_entry (verifiers only).
 ROLE IN CODEBASE: Built by InfiniteMemoryRuntime (runtime.py) for the root and by InfinitePair (launch.py) for each generator and verifier, whose two memories share one staged list and one dropped list. Calls InfiniteWorkspace (workspace.py) for every rule and write; InfinitePair reads files_written and the staged and dropped lists after each agent returns.
 ARCHITECTURE NOTE: The root's remember commits at once, while a pair agent's remember only stages the entry in memory, after the same rule check, so nothing a pair wrote reaches entries.jsonl before its verifier has judged it. Every tool returns ToolResult.error with what to fix and the remaining quota instead of raising, so a refused call changes nothing and the tool stays usable. Every model-facing description and reply comes from the infinite_memory prompt family.
-FUNCTION INVENTORY: InfiniteAgentMemory.tools picks the tools for the role and preset; remember, write_note, edit_file, and drop carry out one tool call each and return its message; answer and refusal add the quota line to a message or a problem; quota renders the quota line, which InfinitePair also puts in a pair agent's first message. InfiniteRememberTool, InfiniteWriteNoteTool, InfiniteEditFileTool, and InfiniteDropEntryTool each have spec and execute; InfiniteRememberTool._draft turns the model's arguments into an InfiniteEntryDraft.
+FUNCTION INVENTORY: InfiniteAgentMemory.tools picks the tools for the role and preset; remember, write_note, edit_file, and drop carry out one tool call each and return its message; answer and refusal add the quota line to a message or a problem; quota renders the quota line, which InfinitePair also puts in a pair agent's first message. InfiniteRememberTool, InfiniteWriteNoteTool, InfiniteEditFileTool, and InfiniteDropEntryTool each have spec and execute; InfiniteRememberTool._draft turns the model's arguments into an InfiniteEntryDraft and refuses a multi-line paste with the advice to keep it in a note.
 COMMON MODIFICATION PATTERNS: A new memory tool is one BaseTool subclass here, one method on InfiniteAgentMemory, one case in tools, its name in vidbyte/lib/constants/infinite.py (and INFINITE_RESERVED_TOOL_NAMES), and its description leaves in the prompt family.
 WHAT NOT TO DO IN THIS FILE: 1. Do not write to entries.jsonl from a pair agent; stage instead. 2. Do not count a refused call against the quota. 3. Do not raise out of execute for a rule violation; return ToolResult.error. 4. Do not put module-level constants here; they live in vidbyte/lib/constants/infinite.py.
 KNOWN EDGE CASES: A staged key is s<staged + dropped + 1>, so keys never repeat within a pair even after drops. A generator and its verifier have separate quotas but share the staged list, so a verifier sees and can drop the generator's entries. write_note records a path once per agent in files_written even when the agent writes it several times.
@@ -165,12 +165,17 @@ class InfiniteRememberTool(BaseTool):
     def _draft(arguments: Mapping[str, Any]) -> InfiniteEntryDraft:
         # The model sends JSON lists; the record takes tuples and refuses
         # anything else, so a bare string is never split into tags.
-        kind, tags, refs = arguments.get("kind"), arguments.get("tags"), arguments.get("refs")
+        kind, text, tags, refs = arguments.get("kind"), arguments.get("text", ""), arguments.get("tags"), arguments.get("refs")
         if kind not in [item.value for item in InfiniteEntryKind]:
             raise ToolExecutionError(f"kind must be one of {', '.join(item.value for item in InfiniteEntryKind)}; got {kind!r}.")
+        # @intent a-pasted-log-goes-to-a-note
+        # An entry is one short line, so a pasted log is refused without
+        # being echoed back, with the way to keep it instead.
+        if isinstance(text, str) and text.strip() and text.splitlines() != [text]:
+            raise ToolExecutionError("The entry text spans several lines, and an entry is one short line. Save the full text with write_note, then remember a one-line pointer entry that names the note.")
         return InfiniteEntryDraft(
             kind=InfiniteEntryKind(kind),
-            text=arguments.get("text", ""),
+            text=text,
             tags=tuple(tags) if isinstance(tags, list) else () if tags is None else tags,
             refs=tuple(refs) if isinstance(refs, list) else () if refs is None else refs,
             supersedes=arguments.get("supersedes"),

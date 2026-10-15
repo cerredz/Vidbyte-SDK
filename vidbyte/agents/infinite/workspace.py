@@ -258,7 +258,7 @@ class InfiniteWorkspace:
         # text is compared with case and spacing ignored, so a reworded
         # copy is not saved twice.
         if TokenEstimate.count(draft.text) > self.settings.max_entry_tokens:
-            raise ToolExecutionError(f"The entry text is {TokenEstimate.count(draft.text)} tokens, over max_entry_tokens ({self.settings.max_entry_tokens}); shorten it to one short line.")
+            raise ToolExecutionError(f"The entry text is {TokenEstimate.count(draft.text)} tokens, over max_entry_tokens ({self.settings.max_entry_tokens}); shorten it to one short line, or save the full text with write_note and remember a one-line pointer to that note.")
         normal = " ".join(draft.text.split()).casefold()
         twin = next((entry for entry, _ in live if " ".join(entry.draft.text.split()).casefold() == normal), None)
         if twin is not None:
