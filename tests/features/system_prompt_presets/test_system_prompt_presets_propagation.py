@@ -111,6 +111,11 @@ class BaseAgentPresetTests(OfflineAsyncAgentTest):
         self.assertEqual(model.systems[0].count(WORKING_PRINCIPLES), 1)
         self.assertEqual(reply.metadata["system_prompt_presets"], ["working_principles"])
 
+    async def test_an_explicit_per_call_system_option_still_replaces_the_whole_prompt(self) -> None:
+        agent, model = _agent("writer", "Write.", system_prompt_presets=[WP])
+        await agent.arun("Go.", system="Caller override.")
+        self.assertEqual(model.systems[0], "Caller override.")
+
     def test_invalid_values_fail_at_construction(self) -> None:
         for value in ("working_principles", ["unknown"], [WP, WP], 7):
             with self.assertRaises(ConfigurationError):

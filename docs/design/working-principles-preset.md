@@ -445,6 +445,7 @@ All tests are offline. Generative runners are faked (a recording runner bound th
 - `BaseAgent` → `string values work and reply metadata lists the applied presets` — [Edge Case]
 - `BaseAgent` → `the scope is gone after a run, so a later plain agent gets nothing` — [Hidden Failure]
 - `BaseAgent` → `a run that raises still restores the scope` — [Hidden Failure]
+- `BaseAgent` → `an explicit per-call system= option still replaces the whole prompt, preset included` — [Hidden Assumption] (requirement 15)
 - `Propagation` → `an as_tool() specialist run by the parent gets the preset` — [Hidden Assumption]
 - `Propagation` → `a fork_conversation child with its own system prompt gets the preset once` — [Hidden Failure]
 - `Runtimes` → `MCTS and both actor runtimes receive the composed prompt` — [Hidden Assumption]
