@@ -1,6 +1,6 @@
 # S1 spec author report: public-skill-loader
 
-Status: **DONE**. The spec is committed at `db1786a2` (`docs(spec): add public-skill-loader spec r1`) on `feat/public-skill-loader`. This report is not committed. The orchestrator's modified `pipeline.md` was left unstaged.
+Status: **DONE (r2)**. Spec r1 was committed at `db1786a2`, which is `eba57e6c` after the orchestrator rebased onto `c9d31a7f`. Spec r2 (review round 1) and this updated report are committed together on `feat/public-skill-loader`; see §6. The "Answers to consumer requirements" section at the end matches r2.
 
 ## 1. What I read
 
@@ -77,20 +77,44 @@ I also decided against these, each recorded as an optional `Q-n` with default no
 - **Q-1 / D-5, exporting `ConfigurationError`.** It is in scope only because I read consumer item 6 as covering the error raised by the public door and by the entry constructors. A strict reading of the scope rule could call it an addition. It is easy to remove: FR-3, row 3(d), and its mentions in §4 and §9.2.
 - **D-4, rejecting different entries that share a name.** If the CLI wants two same-named skills from different sources, relax the check to reject only equal entries.
 - **D-3, a one-field record versus an inline check.** A reviewer could call the record overbuilt. I chose it because AGENTS.md §4 and the field guide put boundary validation in a dataclass's `__post_init__`.
-- **A-5, the baseline.** The S0 briefing reports the gate at 5,173 passed and 14 skipped. S1 did not re-run it.
-- **Strict tuple only (EC-6).** A list is rejected. Every in-repo caller passes a tuple, but the CLI must write `tuple(...)`.
+- **A-5, the baseline.** *(Superseded in r2: the count at `c9d31a7f` is unknown, and S2 records it.)* The S0 briefing reports the gate at 5,173 passed and 14 skipped, measured at `179d8adc`. S1 did not re-run it.
+- **Strict tuple only (EC-6).** *(Superseded in r2 by D-14: a list is accepted.)* A list is rejected. Every in-repo caller passes a tuple, but the CLI must write `tuple(...)`.
 
 ## 5. Notes
 
 - Partway through Stage B the C: drive reported 0 bytes free ("No space left on device"). It recovered to about 1.3 GB before I wrote the spec, and no data was lost. If later stages fail on writes, check free disk space first.
 
+## 6. Revision r2 (S1 review round 1)
+
+The orchestrator rebased the branch onto `c9d31a7f` (`main` after the 0.3.0 release, #1085, and #1086 to #1088) and settled the version as 0.3.1 (orchestrator decision 2026-10-15 16:20, pipeline.md). I applied all six findings.
+
+- **R-1 (version).** Recorded as D-13, with 0.2.2 on a new `release/0.2.x` branch as runner-up, and Q-8 (non-blocking, default 0.3.1). Also added NG-17 and EC-29. Rows 3(a) and 4–11 now read `0.3.0` → `0.3.1`, at line numbers re-checked at `c9d31a7f`. INV-16 and AC-11 now name the nine places positively, with no old-literal grep. §9.2 row 7 states the CLI pin fact. §14 Ask first adds merging or rebasing `main`. D-10 and Q-5 now give three-of-three release-doc evidence, keeping the default of no. A grep of `lint/`, `scripts/`, `.github/`, `AGENTS.md`, `REPO_MAP.md`, and `contracts/README.md` finds no gate that requires a release doc.
+- **R-2 (two copies of the name rule).** NG-10 stays. Delegation would change JevAgent's duplicate-name message ("JevAlignmentSettings.skills must have unique document names.") to one that names `SkillLoader`. That is not byte-for-byte, even though the pinned `details` would match. Added INV-18, AC-18, and FR-12 (both doors raise equal `details` for repeated names), a §11 Conflicts entry naming the field-guide lesson, and Q-9 (non-blocking, default no).
+- **R-3 (stale text).** Row 12 now also rewrites the skills README at :20 and :48. INV-15 is relaxed, and the new row 15 updates the ROLE line in `vidbyte/agents/skills/__init__.py`. Row 3(f) adds `ConfigurationError` to the root header's "Error exports" line, and NG-11 is narrowed by that one line.
+- **R-4 (test pins).** NG-9, D-11, and Q-7 now say that a rewording which keeps the pinned words needs no test edit.
+- **R-5 (tuple or list).** I chose to accept lists (D-14). The runner-up is strict tuple, which flips if the owner wants the runtime check to match a tuple-only annotation. `SkillLoader.__init__` is annotated `Sequence[...]` and turns any non-text iterable into a tuple before it builds `SkillEntries`. The record stays tuple-strict, following `strict-config-dataclasses.md:7,13` and the precedent at `coding.py:78`. The Jev door also accepts lists, and the CLI type-checks with `mypy --strict`.
+- **R-6 (consumer table).** §9.2 row 1 now gives the preconditions and `details` shapes. Row 3 gives the per-command GitHub request cost and pinning (new EC-27). Row 4 and EC-14 now say "size and cap, or the cap alone for a network download".
+
+New facts I verified in r2:
+- **The conversion guard must stay inline.** Written inline (`tuple(entries) if isinstance(entries, Iterable) and not isinstance(entries, (str, bytes)) else entries`), it passes mypy 2.3.1 under both `lint/mypy.ini` and `--strict`. Moving the test into a separate boolean variable loses the narrowing and adds an `arg-type` error. I ran both forms in the scratchpad.
+- **Installed metadata is stale under `PYTHONPATH`.** With `PYTHONPATH` set to the worktree, `importlib.metadata.version("vidbyte-sdk")` prints `0.2.1` (the shared editable install), while `vidbyte.__version__` prints `0.3.0`. Version tests must read the worktree's files instead (§13).
+- **Nothing the spec relies on changed between bases.** `vidbyte/agents/skills/`, `vidbyte/lib/dataclasses/skills.py`, `vidbyte/agents/jev/`, `lint/baseline.json`, and `lint/mypy.ini` are byte-identical between `179d8adc` and `c9d31a7f`, and every cited line number holds.
+- **`v0.3.0` has no loader names.** None of `SkillLoader`, `SkillResolution`, or `ConfigurationError` is a root export there, so a CLI floor of `>=0.3.0` would fail at import.
+- **Correction on the count.** The version lives in nine places: eight hand-edited literals plus the contract. r1's "nine version literals" in G-4 was loose, and r2 states it exactly.
+
 ## Answers to consumer requirements
 
-These are the answers the vidbyte-cli pipeline (`agent-skill-sources`) should resume from. The full table is spec §9.2, "Consumer contract".
+These are the answers the vidbyte-cli pipeline (`agent-skill-sources`) should resume from. They match spec r2, §9.2, "Consumer contract": version 0.3.1, tuples and lists accepted, the constructor's preconditions, the GitHub request cost, and the corrected oversize detail.
 
-1. **The callable and the result shape.**
-   - Build `SkillLoader(entries)`, where `entries` is a **tuple** of entry objects (and/or `SkillDocument`s) with unique names. Construction validates the tuple, does no I/O, and raises `ConfigurationError` on a bad argument.
-   - Then call `await loader.load()`. It returns `tuple[SkillResolution, ...]`, one result per entry, in input order, so pair them with `zip(entries, results, strict=True)`. No agent is constructed.
+1. **The callable, its preconditions, and the result shape.**
+   - Build `SkillLoader(entries)`. `entries` may be a **tuple or a list** of entry objects and/or `SkillDocument`s. The annotation is `Sequence[SkillEntry | SkillDocument]`, and at runtime any iterable except `str` or `bytes` is accepted and turned into a tuple once, in iteration order. So the list a repeatable option collects can be passed as is.
+   - **Preconditions, checked at construction with no I/O:** every element is one of the six entry classes or a `SkillDocument`, and no two share a `name`. Names compare exactly and case-sensitively, the same rule as `JevAlignmentSettings.skills`. A violation raises `ConfigurationError`, whose `details` has exactly one of three shapes:
+     - `{"entries_type": <type name>}`: the argument is text (`str` or `bytes`) or not a collection;
+     - `{"position": <0-based index>, "entry_type": <type name>}`: the first element that is not an entry or a document;
+     - `{"names": <sorted list of repeated names>}`: repeated names.
+
+     Neither the message nor `details` ever holds the rejected value or a credential. If the CLI derives names from source strings, it must keep them unique or catch this error.
+   - Then call `await loader.load()`. It returns `tuple[SkillResolution, ...]`, one result per entry, in input order, so pair them with `zip(entries, results, strict=True)`. If you passed a generator, keep your own list to pair with. No agent is constructed.
    - **Success:** `result.document` is a `SkillDocument`, and the text to append is `result.document.text`. Also available: `.name`, `.description`, and `.source`, a label such as `github:owner/repo@sha12/skills/pdf/SKILL.md`.
    - **Failure:** `result.document is None`. `result.reason` is a `SkillUnavailableReason`: `not_installed`, `not_found`, `auth_failed`, `rate_limited`, `fetch_failed`, `invalid_skill`, or `too_large` (never `decision_failed`). `result.detail` is a non-blank, SDK-written explanation that names the fix and never contains a secret or file text.
    - `result.transient` is `True` for `rate_limited` and `fetch_failed`, which a later `load()` on the same loader retries.
@@ -111,16 +135,27 @@ These are the answers the vidbyte-cli pipeline (`agent-skill-sources`) should re
    There is no loader-level credential parameter. To use the CLI's keyring token, pass it as `token=` on each `GitHubSkill`; to keep the environment out of vendor reads, pass `api_key=`. `token=""` is rejected when the entry is built, so to force anonymous GitHub reads while `GITHUB_TOKEN` is set, unset the variable.
 
    Credentials are sent only to `api.github.com` or the vendor's fixed endpoint, never follow redirects, and never appear in details, labels, URLs, or reprs. A Vidbyte API key is refused with `auth_failed` before any request.
+
+   **Request cost per command.** A fresh loader per command re-reads everything, because memory is per loader. Per repository group, `GitHubSkill`s cost:
+   - one commit lookup, unless `ref` is a full 40-hex SHA;
+   - one tree listing, if any entry has no `path`;
+   - one file request per entry.
+
+   An unpinned entry with no path therefore costs 3 requests. Anonymous GitHub allows 60 REST requests an hour, so that is about 20 such commands an hour before `rate_limited` (transient). `ref=<40-hex SHA>` plus `path=` cuts an entry to one request, and a token raises the limit.
 4. **Size.**
    - **The SDK's limits.** `SKILL_MARKDOWN_MAX_BYTES = 1_048_576` is inclusive and counts the **whole SKILL.md file in bytes, frontmatter included**, for local, skills.sh, GitHub, and vendor files. `SKILL_DOWNLOAD_MAX_BYTES = 33_554_432` bounds other downloads (GitHub commit and tree answers, vendor zips and records). Inline text and caller documents have no SDK cap.
    - **What the text is.** `document.text` is the body after the frontmatter, so it is smaller than the file.
-   - **Oversize.** It comes back as `reason=too_large` with a detail giving the size and the cap. It is never truncated and never raised, and it is remembered by that loader.
+   - **Oversize.** It comes back as `reason=too_large`. The detail gives the size and the cap, or the cap alone for a network download (a GitHub SKILL.md over the cap, or any download over 32 MiB), so match on `reason` and never parse the detail. It is never truncated and never raised, and it is remembered by that loader.
    - **No caller byte limit.** The CLI enforces its 20,000-byte budget itself: measure `len(result.document.text.encode("utf-8"))`, sum it across everything you append, and turn an over-budget skill into your own structured failure. Because `SkillResolution` is now public and validates itself, you can build `SkillResolution(reason=SkillUnavailableReason.TOO_LARGE, detail="...")` and get the same vocabulary. Never truncate.
    - **Why the budget stays on the CLI side.** The budget is a total across all instructions, which no per-entry SDK limit can enforce. A per-call limit would also clash with the loader's memory. JevAgent applies its own budget the same way.
    - **Trade-off.** A skill of up to 1 MiB is downloaded before you can measure it.
 5. **Parser: none.** The CLI parses `github:owner/repo/path`, `skills.sh:<id>`, and local paths itself, and builds entry objects. The constructors validate every field and raise `ConfigurationError`, which the CLI can catch by its root name. The SDK parser is optional Q-4, default not built.
 6. **Root names** (exactly as they appear in `vidbyte.__all__` and `contracts/sdk-public-api.json`):
-   - **New in 0.2.2:** `ConfigurationError`, `SkillLoader`, `SkillResolution`.
+   - **New in 0.3.1:** `ConfigurationError`, `SkillLoader`, `SkillResolution`.
    - **Already root:** `AnthropicSkill`, `GitHubSkill`, `InlineSkill`, `LocalSkill`, `OpenAISkill`, `SkillDocument`, `SkillEntry`, `SkillSourceType`, `SkillUnavailableReason`, `SkillsShSkill`.
    - **Not root, and not needed by the CLI:** `SkillEntries` (internal validation record) and `SkillFetchStep`.
-7. **Version.** `0.2.2` appears in `pyproject.toml`, `vidbyte/__init__.py` (`__version__`), `vidbyte/cli/__init__.py`, `vidbyte/mcp_server/server/core.py`, `vidbyte/tools/mcp/client.py`, `README.md`, `llms.txt`, `.github/ISSUE_TEMPLATE/bug_report.yml`, and the regenerated contract (`"version": "0.2.2"`). The contract is regenerated in its own commit after the source commit, so its `source.commit` names this PR's source commit. Publishing to PyPI is the user's call after review.
+7. **Version: 0.3.1, not 0.2.2.** `main` released 0.3.0 at 15:34 (tag `v0.3.0` = `a7ed9cde`, the latest on PyPI), so the first release that can carry the loader is 0.3.1. This is orchestrator decision 2026-10-15 16:20 (spec D-13), and the user may override it through Q-8.
+   - **Where it appears:** `0.3.1` is in `pyproject.toml`, `vidbyte/__init__.py` (`__version__`), `vidbyte/cli/__init__.py`, `vidbyte/mcp_server/server/core.py`, `vidbyte/tools/mcp/client.py`, `README.md`, `llms.txt`, `.github/ISSUE_TEMPLATE/bug_report.yml`, and the regenerated contract (`"version": "0.3.1"`).
+   - **Contract provenance:** the contract is regenerated in its own commit after the source commit, so its `source.commit` names this PR's source commit.
+   - **Pin fact for the CLI** (the SDK spec specifies no CLI change): the CLI pins `vidbyte-sdk[codex]>=0.2.1,<0.3` (vidbyte-cli `pyproject.toml:45,52`). That excludes every 0.3.x release, so its floor must become `>=0.3.1,<0.4`. 0.3.0 has no `SkillLoader`, `SkillResolution`, or `ConfigurationError` root export, so `>=0.3.0` would fail at import.
+   - **Publishing:** releasing to PyPI is the user's call after review.
