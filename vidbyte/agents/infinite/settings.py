@@ -3,7 +3,7 @@
 PURPOSE: Defines the two public configuration objects of InfiniteMemoryAgent: InfiniteWorkspaceSettings, the one memory workspace folder with its memory preset, seed files, and caps; and InfiniteMemoryAgentSettings, the model, the prompt, the project folder, the developer's extra tools, the loop limits, and the delegation caps shared by every agent in the tree.
 ROLE IN CODEBASE: Built by the developer and passed to InfiniteMemoryAgent (vidbyte/agents/infinite/agent.py), which builds InfiniteWorkspace (workspace.py) from the workspace settings; read by the runtime, the launch tool, and the memory tools. Exported by vidbyte/agents/infinite/__init__.py, vidbyte/agents/__init__.py, and the root vidbyte package.
 ARCHITECTURE NOTE: Settings objects live in the owning agent's settings.py (AGENTS.md Placement Rules, exception 1). Every check runs in __post_init__, so a constructed object is always valid and nothing downstream checks it again. Paths are stored resolved and absolute, so a later change of the working directory never moves the project or the memory. Checking settings never touches the disk beyond reading: the workspace folder is created by InfiniteWorkspace, never here.
-FUNCTION INVENTORY: InfiniteWorkspaceSettings.__post_init__ is a narrated main function; _resolved_root checks and resolves root; _preset accepts the preset or its value; _seed_paths checks and resolves the seed files. InfiniteMemoryAgentSettings.__post_init__ is a narrated main function; _provider accepts the provider or its value; _resolved_root_dir checks and resolves root_dir; _extra_tools checks the developer's tools against Tools(...) and the reserved names.
+FUNCTION INVENTORY: InfiniteWorkspaceSettings.__post_init__ is a narrated main function; _resolved_root checks and resolves root; _preset accepts the preset or its value; _seed_paths checks and resolves the seed files. InfiniteMemoryAgentSettings.__post_init__ is a narrated main function; _provider accepts the provider or its value; _validate_model checks the model against ProviderModelRegistry for that provider; _resolved_root_dir checks and resolves root_dir; _extra_tools checks the developer's tools against Tools(...) and the reserved names.
 COMMON MODIFICATION PATTERNS: A new setting adds one field, one check in its __post_init__, a named default in vidbyte/lib/constants/infinite.py, and one row in the folder README's limits table.
 WHAT NOT TO DO IN THIS FILE: 1. Do not create the workspace folder or any file here; a refused setting must leave the disk unchanged. 2. Do not put api_key in an error message or in repr. 3. Do not accept a bare string where a sequence is expected; it would split into characters.
 KNOWN EDGE CASES: root="" and root_dir="" are refused even though Path("") is the current folder. A seed file is checked to exist now and copied later, at agent construction. Two seed files with the same file name are refused, because both would land at seed/<name>. True is refused for every cap, although Python counts it as an int.
@@ -168,13 +168,8 @@ class InfiniteMemoryAgentSettings:
         # Accept the provider's value as text too, and keep the enum.
         object.__setattr__(self, "provider", self._provider())
 
-        # @intent the-model-runs-under-its-provider
-        # Every agent in the tree uses this model, so one the SDK cannot
-        # run under the provider is refused here, not at a child's call.
-        try:
-            ProviderModelRegistry.validate_provider_model_pair(self.provider, self.model_name)
-        except ConfigurationError as exc:
-            raise ConfigurationError(f"InfiniteMemoryAgentSettings.model_name must be a model the SDK can run under the given provider; {exc.message}", details={"field": "model_name"}) from exc
+        # Check that the SDK can run the model under that provider.
+        self._validate_model()
 
         # Bash runs in the project folder, so it must exist; keep its
         # absolute path.
@@ -207,6 +202,15 @@ class InfiniteMemoryAgentSettings:
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
                 raise ConfigurationError(f"InfiniteMemoryAgentSettings.{name} must be a whole number of at least {minimum}; got {value!r}.", details={"field": name})
+
+    def _validate_model(self) -> None:
+        # @intent the-model-runs-under-its-provider
+        # Every agent in the tree uses this model, so one the SDK cannot
+        # run under the provider is refused here, not at a child's call.
+        try:
+            ProviderModelRegistry.validate_provider_model_pair(self.provider, self.model_name)
+        except ConfigurationError as exc:
+            raise ConfigurationError(f"InfiniteMemoryAgentSettings.model_name must be a model the SDK can run under the given provider; {exc.message}", details={"field": "model_name"}) from exc
 
     def _provider(self) -> ModelProvider:
         # @intent provider-accepts-its-value
