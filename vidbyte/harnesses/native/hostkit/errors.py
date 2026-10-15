@@ -51,14 +51,13 @@ class NativeErrorFactory:
         # @intent native-errors-redact-before-cap
         # Registered values go first, on the full text, so the cap
         # cannot cut one in half; then the shared redactor scrubs
-        # credential assignments and the result is capped at
-        # NATIVE_VENDOR_MESSAGE_MAX_CHARS.
+        # credential assignments, and the last
+        # NATIVE_VENDOR_MESSAGE_MAX_CHARS are kept, because a vendor
+        # prints its final error last.
         limit = native_threads.NATIVE_VENDOR_MESSAGE_MAX_CHARS
         for secret in sorted(self._secrets, key=len, reverse=True):
             text = text.replace(secret, native_threads.NATIVE_REDACTED)
-        if not text.strip():
-            return text[:limit]
-        return self._redactor.safe_error_message(text, max_chars=limit)
+        return str(self._redactor.redact(text))[-limit:]
 
     @staticmethod
     def listing(items: Iterable[str]) -> str:

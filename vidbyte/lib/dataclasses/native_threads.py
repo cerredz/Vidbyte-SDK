@@ -13,6 +13,7 @@ TESTS: tests/features/harness_threads/test_harness_threads_records.py, tests/fea
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -57,15 +58,23 @@ from vidbyte.lib.errors import ConfigurationError
 
 @dataclass(frozen=True, slots=True)
 class NativeThreadRequest:
-    """The checked arguments of one thread function call; the key never shows in repr."""
+    """The checked arguments of one thread function call; the key never shows in repr.
+
+    workspace is typed Path | str and skills Sequence[str | Path]
+    because the record must see the raw values: a relative path
+    must be refused before it is resolved, and a bare string is a
+    sequence of characters, not a list of skills. After
+    __post_init__ workspace is always the resolved Path and skills
+    a tuple of resolved Paths.
+    """
 
     harness: NativeHarness
     verb: NativeThreadVerb
     prompt: str
     api_key: str = field(repr=False)
-    workspace: Path
+    workspace: Path | str
     model: str | None = None
-    skills: tuple[Path, ...] = ()
+    skills: Sequence[str | Path] = ()
     thread_id: str | None = None
 
     def __post_init__(self) -> None:
