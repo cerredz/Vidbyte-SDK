@@ -149,3 +149,43 @@ Alternatives I considered for sub-parts and dropped:
 - Repo file paths appear only in §11 – §14, plus §8.2 (whose template requires `path:symbol`) and the verbatim quotes in §0.1 and INV-1.
 - No test cases appear; §13 holds facts only.
 - No gate or baseline was run, because S1 forbids install and gate runs. The implementer records the baseline before P1.
+
+## Addendum — r2 (review round 1)
+
+The S1 review of r1 returned SOUND WITH FIXES with 15 findings: 1 Blocker, 7 Major, and 7 Minor. I checked every finding's evidence against the repo, found each one true, and accepted all 15. None was rejected or turned into a blocking question. The per-finding dispositions are in spec §16.
+
+**Changes in r2:**
+- **R-1, history trimming.** Every agent gets the existing `MessageHistoryCompactionMiddleware.trim_with_provider_boundaries(max_tokens=INFINITE_HISTORY_MAX_TOKENS)` (60,000) through `BaseAgent`'s `middleware` argument. The task now sits beside the map in the system-string item (new `context_item` leaf). D-19 and EC-35 are withdrawn; D-28, FR-17, AC-33, EC-48, and A-9 are added. Resume lists finished pairs as short lines.
+- **R-2.** `max_file_tokens` applies to notes only (AC-34).
+- **R-3.** `loop` defaults to `max_iterations=INFINITE_DEFAULT_MAX_ITERATIONS` (100), and D-9 is restated. EC-47 and AC-39 are added, Q-5 is withdrawn, and Q-9 [scope-adding] is added.
+- **R-4.** `launch_subagent` carries internal metadata (INV-38, D-29, AC-35).
+- **R-5.** One `VidbyteSdkError` guard spans the whole pair, and card `summary`/`review` may be empty (AC-37).
+- **R-6.** Extras pass through `_clone_tool`, so ordinary tools are shared by identity. AC-28 now checks names only.
+- **R-7.** Extras come from the root's catalog at run start, so MCP tools and `add_tool` tools count (AC-36, EC-49). The way skills reach every agent is stated.
+- **R-8.** S009 is the type check. The S004, S009, S041, and S047 ceilings are listed, and §12.4 gains lines for them.
+- **R-9 – R-15.**
+  - A001 applies to new files only, and the base.py header line is updated. P4 runs in the order 24 → 20 → 21 → 22 → 23 → 25 → 26.
+  - Row 33 covers the tools README.
+  - The full "compaction for file policy" quote is restored and becomes Q-8.
+  - EC-30 is restated, and EC-46 is added.
+  - The Markdown-tolerant verdict pattern was tested against 10 cases (AC-38).
+  - §8.3 now weighs commit-at-once, and the unreachable running-key set is removed.
+  - Seven task-card field description leaves are added.
+
+**Self-check (r2):**
+- The spec has 18 `## §` sections and 33 rows in §12.3: 18 CREATE and 15 MODIFY.
+- The ID counts below are live IDs. The only gaps are the struck-through withdrawals EC-35, D-19, and Q-5.
+
+  | Prefix | Count |
+  |---|---|
+  | INV | 38 |
+  | AC | 39 |
+  | EC | 48 live of 49 |
+  | FR | 17 |
+  | D | 28 live of 29 |
+  | A | 9 |
+  | Q | 8 live of 9, 0 blocking |
+
+- Every FR and AC appears in §12. The §4, §8.5, and §12.3 names match.
+- Paths appear only where allowed, and all 17 weighted words appear.
+- The prompt family has 41 leaves, which brings the enum header to 139 assets across 34 families.
