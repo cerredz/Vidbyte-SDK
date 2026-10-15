@@ -122,7 +122,7 @@ class InfiniteLaunchTool(BaseTool):
             # recorded card, so a resumed or repeated launch never redoes
             # finished work.
             pairs = {key: InfinitePair(self, card, key) for card, key in zip(cards, keys, strict=True) if self.journal.finished(key) is None}
-            self._check(cards, len(pairs))
+            self._check(cards, tuple(pair.card for pair in pairs.values()))
         except (ConfigurationError, ToolExecutionError) as exc:
             return ToolResult.error(INFINITE_LAUNCH_TOOL_NAME, prompts.get(Prompt.INFINITE_MEMORY_LAUNCH_REJECTED_PROMPT).format(problem=exc.message))
 
@@ -168,24 +168,26 @@ class InfiniteLaunchTool(BaseTool):
             cards.append(InfiniteTaskCard(**given))
         return tuple(cards)
 
-    def _check(self, cards: tuple[InfiniteTaskCard, ...], new: int) -> None:
+    def _check(self, cards: tuple[InfiniteTaskCard, ...], fresh: tuple[InfiniteTaskCard, ...]) -> None:
         # @intent a-batch-stays-inside-its-limits
         # Names stay unique keys, a child never gains a tool its parent
         # lacks, context names only live entries, and the run never
-        # starts more than max_agents agents.
+        # starts more than max_agents agents. Only the names are checked
+        # over the whole batch: a finished task starts nothing, so it
+        # replays even after an entry it named was superseded.
         names = [card.name for card in cards]
         twice = next((name for name in names if names.count(name) > 1), None)
         if twice is not None:
             raise ConfigurationError(f"Two tasks are named {twice}; give every task in one call its own name.")
         granted = tuple(tool.spec().name for tool in self.extras)
-        foreign = next((name for card in cards for name in card.tools if name not in granted), None)
+        foreign = next((name for card in fresh for name in card.tools if name not in granted), None)
         if foreign is not None:
             raise ConfigurationError(f"{foreign} is not a tool you can give to a task; name only these tools: {', '.join(granted) or 'none'}.")
-        ids = tuple(int(item.removeprefix("#")) for card in cards for item in card.context if item.startswith("#"))
+        ids = tuple(int(item.removeprefix("#")) for card in fresh for item in card.context if item.startswith("#"))
         if ids:
             self.workspace.entries(ids)
         started = self.journal.agents_started
-        wanted = INFINITE_MIN_AGENTS * new
+        wanted = INFINITE_MIN_AGENTS * len(fresh)
         if started + wanted > self.settings.max_agents:
             raise ConfigurationError(f"This batch would start {wanted} agents after the {started} already started in this run, over max_agents ({self.settings.max_agents}); launch fewer tasks.")
 
