@@ -290,6 +290,18 @@ class TraceReplacementMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         TraceReplacementCompactionMiddleware.replace_keep_errors()
         TraceReplacementCompactionMiddleware.replace_keep_active_branch("b1")
 
+    async def test_synthetic_user_trace_reaches_provider_as_user_role(self) -> None:
+        # [Hidden Failure] the synthetic_user trace must leave the engine as a user turn, not be rewritten to assistant.
+        user_mw = TraceReplacementCompactionMiddleware.trace_as_synthetic_user(keep_last_user=False, artifact=_ARTIFACT)
+        user_decision = await user_mw.before_model_call(_ctx(_provider_history()))
+        user_trace = user_decision.transform.provider_messages[-1]
+        self.assertTrue(user_trace["content"].startswith("Continual trace (state so far):"))
+        self.assertEqual(user_trace["role"], "user")
+        # The default summary placement still reaches the model as an assistant turn.
+        summary_mw = TraceReplacementCompactionMiddleware.trace_as_summary(keep_last_user=False, artifact=_ARTIFACT)
+        summary_decision = await summary_mw.before_model_call(_ctx(_provider_history()))
+        self.assertEqual(summary_decision.transform.provider_messages[-1]["role"], "assistant")
+
     async def test_parallel_tool_turn_is_never_split(self) -> None:
         # [Hidden Failure] a parallel call turn is one group, so kept tails never orphan a sibling tool result.
         history = [

@@ -282,7 +282,8 @@ class ContextCompactionEngine:
             if message.content == self._provider_message_content(original):
                 return dict(original)
             return self._replace_provider_content(dict(original), message.content)
-        return {"role": "assistant" if message.role != "system" else "system", "content": message.content}
+        # A strategy-built user message (the synthetic_user trace placement) stays a user turn.
+        return {"role": message.role if message.role in ("system", "user") else "assistant", "content": message.content}
 
     def _provider_message_kind(self, message: Mapping[str, Any]) -> str:
         # Classifies provider message dictionaries for compaction decisions.
