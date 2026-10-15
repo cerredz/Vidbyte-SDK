@@ -1,3 +1,14 @@
+"""FILE: vidbyte/lib/runners/streaming_text.py
+
+PURPOSE: Streams text from a provider over server-sent events, only in TextModelMode.DIRECT, straight from the provider with the caller's own key.
+ROLE IN CODEBASE: The streaming counterpart of TextModelRunner; ModelProviders.streaming_text builds the adapter (OpenAI or Anthropic) that sends the request and yields text chunks.
+ARCHITECTURE NOTE: The gateway cannot bill a stream and refuses one, so every gateway mode (AUTO and VIDBYTE_MANAGED) is refused at construction, before validate() resolves or reads any key; a DIRECT config is validated and streams as before.
+COMMON MODIFICATION PATTERNS: A provider that can stream joins STREAMING_SUPPORTED_PROVIDERS together with its adapter's stream_text; the refusal's way forward names it automatically.
+KNOWN EDGE CASES: For a provider that cannot stream, the refusal does not suggest DIRECT, because DIRECT would not make it stream either.
+RELATED DOCS: docs/spec/byok-api-keys/spec.md (INV-11, D-10, table M row M-15).
+TESTS: tests/features/sdk_provider_keys/test_provider_keys_modes.py and tests/test_streaming_text_runner.py.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
@@ -8,7 +19,6 @@ from vidbyte.lib.config import TextModelConfig
 from vidbyte.lib.errors import ConfigurationError, UnsupportedProviderError
 from vidbyte.lib.enums import ModelProvider, TextModelMode
 from vidbyte.lib.http import SyncHttpTransport
-from vidbyte.lib.registries import ProviderModelRegistry
 from vidbyte.providers import ModelProviders
 
 
@@ -21,12 +31,14 @@ class StreamingTextModelRunner:
     })
 
     def __init__(self, config: TextModelConfig | None = None, *, provider: ModelProvider | str | None = None, model: str | None = None, transport: SyncHttpTransport | None = None, **config_options: Any) -> None:
-        # Coerce config, validate provider supports streaming, then build the adapter.
+        # Build the config from the arguments when none was passed.
         config = self._coerce_config(config, provider=provider, model=model, config_options=config_options)
+        # Refuse every gateway mode first, before any key is read, so
+        # the caller learns why and how to stream with their own key.
+        self._refuse_gateway_streaming(config)
+        # Check the DIRECT config and that its provider can stream, then
+        # build the adapter.
         config.validate()
-        # Refuse managed state before the provider check, so the caller
-        # learns why and how to stream with their own key instead.
-        self._refuse_managed_streaming(config)
         self._validate_streaming_provider(config.normalized_provider())
         self._config = config
         self._transport = transport or SyncHttpTransport()
@@ -53,25 +65,24 @@ class StreamingTextModelRunner:
         # Return the configured model identifier string.
         return self._config.model
 
-    def _refuse_managed_streaming(self, config: TextModelConfig) -> None:
-        """Raise UnsupportedProviderError at init time in managed state."""
-        # @intent managed-streaming-is-refused-before-any-request
+    def _refuse_gateway_streaming(self, config: TextModelConfig) -> None:
+        """Raise UnsupportedProviderError at init time for every mode but DIRECT."""
+        # @intent gateway-streaming-is-refused-before-any-request
         # The gateway cannot bill a stream and refuses one; refusing
-        # here sends nothing and names both ways forward.
-        if not config.is_vidbyte_managed():
+        # here reads no key, sends nothing, and names both ways forward.
+        if config.mode is TextModelMode.DIRECT:
             return
         provider = config.normalized_provider()
-        env_var = ProviderModelRegistry.get_api_key_env_var(provider)
-        # Offer the caller's own key as a way to stream only for a
-        # provider this runner can stream; for any other provider that
-        # advice would just lead to the provider refusal below.
-        way_forward = f"Use TextModelRunner, or set {env_var} to stream with your own key."
+        # Offer DIRECT as a way to stream only for a provider this
+        # runner can stream; for any other provider that advice would
+        # just lead to the provider refusal below.
+        way_forward = f"Set mode=TextModelMode.DIRECT to stream from {provider.value} with your own key, or use TextModelRunner, which sends the call through the Vidbyte gateway."
         if provider not in self.STREAMING_SUPPORTED_PROVIDERS:
             streaming = ", ".join(sorted(supported.value for supported in self.STREAMING_SUPPORTED_PROVIDERS))
-            way_forward = f"Use TextModelRunner: streaming supports only {streaming}, so setting {env_var} would not make {provider.value} stream either."
+            way_forward = f"Use TextModelRunner: streaming supports only {streaming}, so TextModelMode.DIRECT would not make {provider.value} stream either."
         raise UnsupportedProviderError(
-            f"Streaming is not available in Vidbyte-managed mode. {way_forward}",
-            details={"provider": provider.value, "mode": TextModelMode.VIDBYTE_MANAGED.value},
+            f"StreamingTextModelRunner streams only straight from the provider, and this config's mode is TextModelMode.{config.mode.name}. {way_forward}",
+            details={"provider": provider.value, "mode": config.mode.value},
         )
 
     def _validate_streaming_provider(self, provider: ModelProvider) -> None:

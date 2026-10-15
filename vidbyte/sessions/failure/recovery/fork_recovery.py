@@ -50,8 +50,9 @@ class ForkRecovery(BaseRecoveryHandler):
                 raise TypeError("ForkRecovery custom policy/trace/tags requires a Session fork_from() boundary and a checkpoint.")
             session_any = cast(Any, session)
             # @intent fork-recovery-keeps-agent-key
-            # Checkpoints never store the key, so hand the live agent's own key to the branch as Session.fork() does.
-            api_key = getattr(getattr(getattr(session, "agent", None), "runner_config", None), "api_key", None)
+            # Checkpoints never store keys, so hand the live agent's
+            # matched record to the branch as Session.fork() does.
+            api_keys = getattr(getattr(getattr(session, "agent", None), "runner_config", None), "api_keys", None)
             child = fork_from(
                 store,
                 checkpoint,
@@ -60,7 +61,7 @@ class ForkRecovery(BaseRecoveryHandler):
                 policy=settings.policy if settings.policy is not None else session_any._policy,
                 trace=settings.trace if settings.trace is not None else session_any._recorder_policy(),
                 tags=settings.tags or getattr(session, "_tags", ()),
-                api_key=api_key,
+                api_keys=api_keys,
                 algorithm=getattr(getattr(session, "agent", None), "algorithm", None),
             )
         return self.result(True, FailureDisposition.CONTINUE, value=child, details={"label": settings.label, "checkpoint": settings.at, "policy": settings.policy, "trace": settings.trace, "tags": settings.tags})

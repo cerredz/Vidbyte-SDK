@@ -115,8 +115,9 @@ class ForkConversationToolTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_model_chosen_provider_swap_does_not_pass_parent_api_key(self) -> None:
         # A model-requested provider swap must not carry the parent's vendor key to the new provider.
+        # byok-api-keys D-13, EC-47: the child keeps the parent's record, where the key is bound to deepseek, so the openai child has no key from it.
         tool = ForkConversationTool()
-        agent = build_test_agent(name="parent", system_prompt="Work.", runner=DoneRunner(), tools=[tool], provider="deepseek", model_name="deepseek-v4-flash", api_key="sk-deepseek-SECRET")
+        agent = build_test_agent(name="parent", system_prompt="Work.", runner=DoneRunner(), tools=[tool], provider="deepseek", model_name="deepseek-v4-flash", api_keys=["sk-deepseek-SECRET"])
         children: list[BaseAgent] = []
         real_fork = agent.fork
 
@@ -132,7 +133,9 @@ class ForkConversationToolTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.status, ToolStatus.SUCCESS)
         self.assertEqual(children[0].runner_config.provider, "openai")
-        self.assertIsNone(children[0].runner_config.api_key)
+        self.assertEqual(children[0].runner_config.api_keys, agent.runner_config.api_keys)
+        self.assertIsNone(children[0].runner_config.api_keys.key_for("openai"))
+        self.assertEqual(children[0].runner_config.api_keys.key_for("deepseek"), "sk-deepseek-SECRET")
 
     async def test_history_last_n_and_tool_names_translate_to_fork_kwargs(self) -> None:
         # The tool should slice history and resolve tool_names before calling parent.fork().

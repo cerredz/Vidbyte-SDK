@@ -28,14 +28,14 @@ from types import SimpleNamespace
 from vidbyte.agents.algorithms.prosecutor_defender_judge import DebateStageRuntimeFactory
 from vidbyte.context.algorithms.prosecutor_defender_judge import DebateStageSettings
 from vidbyte.lib.agents.prosecutor_defender_judge import runner_model_name
-from vidbyte.lib.config import TextModelConfig
+from vidbyte.lib.config import TextModelConfig, TextModelMode
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.runners.text import TextModelRunner
 
 
 def _text_runner() -> TextModelRunner:
-    # A dummy provider key keeps the runner on BYOK, so nothing reads the environment or the network.
-    return TextModelRunner(TextModelConfig(provider="deepseek", model="deepseek-chat", api_key="test-deepseek-key"))
+    # A dummy provider key in DIRECT mode keeps the runner off the gateway, so nothing reads the environment or the network.
+    return TextModelRunner(TextModelConfig(provider="deepseek", model="deepseek-chat", api_keys=["test-deepseek-key"], mode=TextModelMode.DIRECT))
 
 
 class _RaisingModelNameRunner:

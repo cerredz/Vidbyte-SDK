@@ -2,11 +2,11 @@
 
 PURPOSE: Keeps provider enums, configuration maps, and runner catalogs synchronized.
 ROLE IN CODEBASE: Prevents accepted providers/models from failing only during dispatch.
-ARCHITECTURE NOTE: Registry data is extracted statically; importing the SDK is forbidden.
-FUNCTION INVENTORY: RegistryParityAnalyzer extracts named class/module dictionaries.
+ARCHITECTURE NOTE: Registry data is extracted statically; importing the SDK is forbidden. Only when the ProviderModelRegistry body annotates API_KEY_ENV_VARS with the bare name PROVIDER_API_KEY_ENV_VARS is that literal in vidbyte/lib/constants/jev.py checked instead, with its findings pointing at that file.
+FUNCTION INVENTORY: RegistryParityAnalyzer extracts named class/module dictionaries, detects the env-var alias (_aliases), and reads the aliased table (_provider_dict).
 COMMON MODIFICATION PATTERNS: Change scope, detection, and diagnostics together; rerun the focused rule.
 WHAT NOT TO DO: Do not import runtime packages, mutate source, suppress findings, or hide analyzer failures.
-KNOWN EDGE CASES: Existing debt is count-ratcheted; analyzer and parse failures fail closed.
+KNOWN EDGE CASES: Existing debt is count-ratcheted; analyzer and parse failures fail closed. An API_KEY_ENV_VARS that is {}, missing, or any value but the bare name PROVIDER_API_KEY_ENV_VARS is read from the registry itself and reports every provider missing there.
 RELATED DOCS: field-guide/vidbyte-sdk/declarative-config-resolution.md
 TESTS: Exercised by python lint/run.py --rule S014.
 """
@@ -14,6 +14,7 @@ TESTS: Exercised by python lint/run.py --rule S014.
 from __future__ import annotations
 
 import ast
+from collections.abc import Sequence
 
 from lint.core.diagnostic import Diagnostic, Finding
 from lint.core.discovery import SourceCatalog, SourceFile
@@ -22,6 +23,10 @@ from lint.core.registry import Rule
 ENUM_FILE = "vidbyte/lib/enums/model_provider.py"
 REGISTRY_FILE = "vidbyte/lib/registries/models.py"
 RUNNER_FILE = "vidbyte/lib/constants/runners.py"
+# ProviderModelRegistry.API_KEY_ENV_VARS aliases this module's
+# PROVIDER_API_KEY_ENV_VARS, so the env-var literal is read here.
+KEY_ENV_FILE = "vidbyte/lib/constants/jev.py"
+KEY_ENV_TABLE = "PROVIDER_API_KEY_ENV_VARS"
 PARITY_MAPS = ("DEFAULT_PROVIDER_MODELS", "API_KEY_ENV_VARS", "DEFAULT_ENDPOINTS")
 
 
@@ -35,6 +40,14 @@ class RegistryParityAnalyzer:
         runner_source = files[RUNNER_FILE]
         enum = self._enum_members(enum_source.tree)
         maps = {name: self._class_dict(registry_source.tree, "ProviderModelRegistry", name) for name in PARITY_MAPS}
+        # Only a bare-name alias of PROVIDER_API_KEY_ENV_VARS moves the
+        # check to that literal, in its file. {}, a deleted attribute,
+        # or any other value stays a registry finding, as before.
+        key_env_tree = files[KEY_ENV_FILE].tree
+        constants_map = self._provider_dict(key_env_tree.body if key_env_tree else (), KEY_ENV_TABLE)
+        aliased = self._aliases(registry_source.tree, "ProviderModelRegistry", "API_KEY_ENV_VARS", KEY_ENV_TABLE)
+        maps["API_KEY_ENV_VARS"] = constants_map if aliased else maps["API_KEY_ENV_VARS"]
+        sources = dict.fromkeys(PARITY_MAPS, REGISTRY_FILE) | {"API_KEY_ENV_VARS": KEY_ENV_FILE if aliased else REGISTRY_FILE}
         qualified = self._module_string_dict(runner_source.tree, "MODEL_PROVIDER_RUNNER_TYPE_MAP")
         bare = self._module_string_dict(runner_source.tree, "MODEL_RUNNER_TYPE_MAP")
         hits: list[tuple[str, int, str, str]] = []
@@ -42,9 +55,9 @@ class RegistryParityAnalyzer:
         for name, values in maps.items():
             actual = set(values)
             for missing in sorted(expected_names - actual):
-                hits.append((REGISTRY_FILE, values.get("__line__", 1), missing, f"{name} is missing ModelProvider.{missing}"))
+                hits.append((sources[name], values.get("__line__", 1), missing, f"{name} is missing ModelProvider.{missing}"))
             for extra in sorted(actual - expected_names - {"__line__"}):
-                hits.append((REGISTRY_FILE, int(values.get("__line__", 1)), extra, f"{name} contains unknown provider {extra}"))
+                hits.append((sources[name], int(values.get("__line__", 1)), extra, f"{name} contains unknown provider {extra}"))
         defaults = maps["DEFAULT_PROVIDER_MODELS"]
         qualified_lower = {key.lower() for key in qualified if key != "__line__"}
         for member, model in defaults.items():
@@ -88,6 +101,27 @@ class RegistryParityAnalyzer:
                     return result
         return {"__line__": 1}
 
+    def _aliases(self, tree: ast.Module | None, class_name: str, variable: str, target: str) -> bool:
+        # True only when the class annotates variable with the bare name target.
+        for node in tree.body if tree else ():
+            if isinstance(node, ast.ClassDef) and node.name == class_name:
+                for item in node.body:
+                    if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name) and item.target.id == variable:
+                        return isinstance(item.value, ast.Name) and item.value.id == target
+        return False
+
+    def _provider_dict(self, body: Sequence[ast.stmt], variable: str) -> dict[str, str | int]:
+        # Extracts ModelProvider member keys from one annotated
+        # module-level dict literal, such as PROVIDER_API_KEY_ENV_VARS.
+        for item in body:
+            if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name) and item.target.id == variable and isinstance(item.value, ast.Dict):
+                result: dict[str, str | int] = {"__line__": item.lineno}
+                for key, value in zip(item.value.keys, item.value.values, strict=True):
+                    if isinstance(key, ast.Attribute) and isinstance(key.value, ast.Name) and key.value.id == "ModelProvider":
+                        result[key.attr] = value.value if isinstance(value, ast.Constant) and isinstance(value.value, str) else ast.unparse(value)
+                return result
+        return {"__line__": 1}
+
     def _module_string_dict(self, tree: ast.Module | None, variable: str) -> dict[str, str | int]:
         # Extracts string keys from one annotated module-level runner map.
         for item in tree.body if tree else ():
@@ -111,6 +145,7 @@ class ProviderModelRegistryParityRule(Rule):
     repair = "Read the finding's map name, provider member, model, and reason before editing any registry literal. Update the enum, defaults, credential environment map, endpoint map, and qualified and bare runner maps together when the provider contract changes. Add aliases deliberately, preserve the documented bare auto exception, and avoid fallback branches that conceal missing declarative data. Run the focused rule and the provider configuration and runner smoke checks after confirming every parallel key has the intended value. Test both the default selection and an explicit qualified selection so parity is proven across the normal dispatch paths."
     examples = (
         "vidbyte/lib/registries/models.py - central provider configuration maps",
+        "vidbyte/lib/constants/jev.py - PROVIDER_API_KEY_ENV_VARS, the literal that ProviderModelRegistry.API_KEY_ENV_VARS aliases",
         "vidbyte/lib/constants/runners.py - qualified and bare runner catalogue parity",
     )
     will_not_work = (
@@ -121,7 +156,7 @@ class ProviderModelRegistryParityRule(Rule):
     def check(self, catalog: SourceCatalog) -> list[Finding]:
         # Loads required source records and reports a clear missing-file analyzer error.
         files = {source.rel: source for source in catalog.python_files()}
-        missing = [path for path in (ENUM_FILE, REGISTRY_FILE, RUNNER_FILE) if path not in files]
+        missing = [path for path in (ENUM_FILE, REGISTRY_FILE, RUNNER_FILE, KEY_ENV_FILE) if path not in files]
         if missing:
             raise RuntimeError(f"Registry parity requires tracked files {missing}; restore them before linting.")
         return [Finding(rule_id=self.id, rel_path=path, line=line, source_line=files[path].line_at(line), symbol=symbol, extra={"reason": reason}) for path, line, symbol, reason in RegistryParityAnalyzer().analyze(files)]

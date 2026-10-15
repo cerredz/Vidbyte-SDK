@@ -48,6 +48,16 @@ reply = await agent.arun("Summarize user 42.")
 print(reply.content)
 ```
 
+Agents take `vidbyte_api_key`, `api_keys`, and `model_mode`. `api_keys` is a
+plain list of your provider keys in any order. The agent matches the list
+once, at construction, against its own model and every fallback model, and
+refuses a list it cannot match without guessing. Fallbacks, forks, handoffs,
+aggregate children, and Jev children carry that one matching, and each call
+sends only its own provider's key. In the default `TextModelMode.AUTO`, calls
+go through the Vidbyte gateway with the Vidbyte key and relay the matched
+provider key; `model_mode=TextModelMode.DIRECT` calls the provider directly.
+The root README's "Vidbyte-managed text calls" section has the full rules.
+
 For a cooperative, bounded wait, add the built-in to the agent that should
 pause and choose its developer-owned maximum:
 
@@ -153,13 +163,13 @@ agent = Agent(
     provider="openai",
     model_name="gpt-5.2",
     fallback=[
-        "gpt-5-mini",                 # bare name inherits provider, api_key, temperature
+        "gpt-5-mini",                 # bare name inherits provider and temperature; keys come from the agent's api_keys
         "anthropic/claude-sonnet-5",  # provider-prefixed, overrides the provider
     ],
 )
 ```
 
-Entries may also be `FallbackModel` objects when a backup needs its own credentials,
+Entries may also be `FallbackModel` objects when a backup needs its own temperature,
 and the whole chain can be passed as a settings object alongside `AgentLoopSettings`:
 
 ```python
@@ -171,8 +181,9 @@ agent = Agent(
     system_prompt="Answer directly.",
     provider="openai",
     model_name="gpt-5.2",
+    api_keys=[OPENAI_KEY, ANTHROPIC_KEY],  # any order; the backup's key goes here too
     fallback=AgentFallbackSettings(
-        models=[FallbackModel(provider="anthropic", model="claude-sonnet-5", api_key=ANTHROPIC_KEY)],
+        models=[FallbackModel(provider="anthropic", model="claude-sonnet-5", temperature=0.2)],
         enabled=True,
     ),
 )
