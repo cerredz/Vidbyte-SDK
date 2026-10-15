@@ -59,6 +59,8 @@ NATIVE_PROCESS_VALUE_PATTERN = r"[^\x00]*"
 
 # The canonical process helpers.
 NATIVE_PROCESS_READ_CHUNK_BYTES = 65536
+# asyncio's own buffer limit for a child's stream readers.
+NATIVE_PROCESS_STREAM_LIMIT_BYTES = 65536
 NATIVE_PROCESS_TRUNCATION_PROBE_BYTES = 1
 NATIVE_SUCCESS_EXIT_CODE = 0
 NATIVE_TASKKILL_ARGUMENTS = ("taskkill", "/T", "/F", "/PID")

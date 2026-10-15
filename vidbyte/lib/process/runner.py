@@ -1,12 +1,12 @@
 """FILE: vidbyte/lib/process/runner.py
 
-PURPOSE: Defines CliRunner, the canonical way to run one command-line program to completion with a time bound, capped output and no inherited standard input, and ProcessStopper, which stops a child's whole process tree (process group on POSIX, taskkill /T on Windows) and reaps it within a bound.
+PURPOSE: Defines CliRunner, the canonical way to run one command-line program to completion with a time bound, capped output and no inherited standard input; CliExitProtocol, the child's stream protocol that also signals the child's own exit; and ProcessStopper, which stops a child's whole process tree (process group on POSIX, taskkill /T on Windows) and reaps it within a bound.
 ROLE IN CODEBASE: CliRunner runs every vendor process of the harness thread functions under vidbyte/harnesses/native/: the grok, opencode and muse exec runs, the muse serve exchange, the WSL distro listing and the Muse in-distro reap. ProcessStopper is the tree stop CliRunner uses on timeout and cancellation.
 ARCHITECTURE NOTE: Canonical lib helper (AGENTS.md principle 5). Every failure is a field of the returned CliOutcome; only asyncio.CancelledError is raised, after the tree is stopped. Children start with start_new_session=True on POSIX so their process group id is their pid, which is what lets ProcessStopper reach grandchildren even after the leader exited. The child starts with the caller's environment minus the invocation's env_remove names, with env_overlay on top. Timing constants are read through the native_threads constants module at call time so tests can shrink them.
-FUNCTION INVENTORY: CliRunner.run is the narrated main function; CliRunner.find_program finds the file a bare program name starts, never in the current folder; CliRunner.launch starts the child with its environment, returning the child or the launch failure; json_objects reads the JSON objects a CLI printed one per line; _feed_stdin writes stdin_text and closes the pipe; _drain reads one stream into a capped buffer while counting the rest; _finish_readers bounds and cancels the drain tasks; _outcome builds the CliOutcome. ProcessStopper.stop_tree is the narrated main function; _signal_group, _start_taskkill, _wait_taskkill, _kill_leader, _bounded_wait and _close_pipes are its single-step helpers.
+FUNCTION INVENTORY: CliExitProtocol.process_exited sets the run's exited event. CliRunner.run is the narrated main function; CliRunner.find_program finds the file a bare program name starts, never in the current folder; CliRunner.launch starts the child with its environment, returning the child or the launch failure; json_objects reads the JSON objects a CLI printed one per line; _feed_stdin writes stdin_text and closes the pipe; _drain reads one stream into a capped buffer while counting the rest; _finish_readers bounds and cancels the drain tasks and says whether one was still open; _outcome builds the CliOutcome. ProcessStopper.stop_tree is the narrated main function; _signal_group, _start_taskkill, _wait_taskkill, _kill_leader, _bounded_wait and _close_pipes are its single-step helpers.
 COMMON MODIFICATION PATTERNS: A new process option adds a CliInvocation field and its use in run or launch; keep the stop path in ProcessStopper so every caller gets it.
-WHAT NOT TO DO IN THIS FILE: 1. Do not pass shell=True or build a command string; argv goes to create_subprocess_exec (lint S055). 2. Do not let a child inherit the caller's stdin; it is a pipe or DEVNULL. 3. Do not wait without a bound after a kill; a grandchild can hold the pipes open forever.
-KNOWN EDGE CASES: On Windows, taskkill /T cannot reach a grandchild of a leader that already exited. On Windows a bare program name is looked up only in the absolute PATH folders with PATHEXT, and one found in none of them is not started, because CreateProcess would search the current folder; the harness launchers refuse batch files before they get here. Output is decoded as UTF-8 and trimmed to whole characters within max_output_bytes.
+WHAT NOT TO DO IN THIS FILE: 1. Do not pass shell=True or build a command string; argv goes to create_subprocess_exec (lint S055). 2. Do not let a child inherit the caller's stdin; it is a pipe or DEVNULL. 3. Do not wait without a bound after a kill; a grandchild can hold the pipes open forever. 4. Do not learn of the exit from Process.wait() in run; on Python 3.12+ it resolves only after every pipe closes, which a grandchild can delay for good.
+KNOWN EDGE CASES: A run ends when the leader exits, not when its pipes close: the readers then get one kill wait, and a descendant still holding the pipes gets the tree stop. On Windows, taskkill /T cannot reach a grandchild of a leader that already exited. On Windows a bare program name is looked up only in the absolute PATH folders with PATHEXT, and one found in none of them is not started, because CreateProcess would search the current folder; the harness launchers refuse batch files before they get here. Output is decoded as UTF-8 and trimmed to whole characters within max_output_bytes.
 RELATED DOCS: vidbyte/lib/README.md
 TESTS: tests/features/harness_threads/test_harness_threads_runner.py, tests/features/harness_threads/test_harness_threads_process_bounds.py
 """
@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import json
 import os
 import signal
@@ -131,6 +132,23 @@ class ProcessStopper:
                 transport.close()
 
 
+class CliExitProtocol(asyncio.subprocess.SubprocessStreamProtocol):
+    """The stream protocol of one CLI child that also signals the moment the child itself exits."""
+
+    def __init__(self, exited: asyncio.Event, *, limit: int, loop: asyncio.AbstractEventLoop) -> None:
+        super().__init__(limit=limit, loop=loop)
+        self._exited = exited
+
+    def process_exited(self) -> None:
+        # @intent cli-run-ends-at-the-leaders-exit
+        # Python 3.12+ wakes Process.wait() only after every pipe has
+        # closed, and a grandchild that inherited the pipes can keep
+        # them open for good, so the run learns of the exit here, where
+        # Python 3.11 and 3.12 both report it.
+        super().process_exited()
+        self._exited.set()
+
+
 class CliRunner:
     """Runs one command-line program to completion within its invocation's bounds."""
 
@@ -141,14 +159,16 @@ class CliRunner:
         # still read to the end, and its whole tree stopped on timeout
         # or cancellation. Failures are fields of the outcome; only
         # cancellation propagates.
-        # Start the program in its own session, with stdin as a pipe
-        # or the null device.
         # Windows finds a bare program name only in the PATH folders,
         # never in the current folder; POSIX starts it as given.
         program, *_arguments = invocation.argv
         found = CliRunner.find_program(program) if sys.platform == "win32" else program
+
+        # Start the program in its own session, with stdin as a pipe
+        # or the null device, and learn the moment it exits.
         stdin = asyncio.subprocess.PIPE if invocation.stdin_text is not None else asyncio.subprocess.DEVNULL
-        process, launch_failure = await CliRunner.launch(invocation, program=found, stdin=stdin)
+        exited = asyncio.Event()
+        process, launch_failure = await CliRunner.launch(invocation, program=found, stdin=stdin, exited=exited)
         if process is None:
             return CliOutcome(exit_code=None, stdout="", stderr="", stdout_truncated=False, stderr_truncated=False, timed_out=False, launch_failure=launch_failure)
         stdout, stderr = bytearray(), bytearray()
@@ -158,13 +178,13 @@ class CliRunner:
         )
         timed_out = False
         try:
-            # Hand over the standard-input text, then read both
-            # streams to the end and wait for the exit, all
-            # within the time bound.
+            # Hand over the standard-input text, then wait for the
+            # program itself to exit, within the time bound; a
+            # grandchild that still holds the pipes does not hold
+            # the run.
             async with asyncio.timeout(invocation.timeout_seconds):
                 await self._feed_stdin(process, invocation.stdin_text)
-                await asyncio.wait(readers)
-                await process.wait()
+                await exited.wait()
         except TimeoutError:
             # The run passed its bound: stop and reap the whole tree,
             # keeping the output read so far.
@@ -176,9 +196,12 @@ class CliRunner:
             await ProcessStopper.stop_tree(process, grace_seconds=native_threads.NATIVE_KILL_WAIT_SECONDS)
             await self._finish_readers(readers)
             raise
-        # Collect whatever the readers still hold, then
-        # report the outcome.
-        await self._finish_readers(readers)
+        # Give the readers one kill wait to reach the end of the
+        # output. A reader still open after it means a descendant holds
+        # the pipes, so the whole tree is stopped; the outcome keeps
+        # what was read.
+        if await self._finish_readers(readers) and not timed_out:
+            await ProcessStopper.stop_tree(process, grace_seconds=native_threads.NATIVE_KILL_WAIT_SECONDS)
         return self._outcome(process, stdout, stderr, invocation.max_output_bytes, timed_out)
 
     @staticmethod
@@ -202,14 +225,15 @@ class CliRunner:
         return next((path for path in candidates if os.path.isfile(path) and os.access(path, os.X_OK)), None)
 
     @staticmethod
-    async def launch(invocation: CliInvocation, *, program: str | None, stdin: int) -> tuple[asyncio.subprocess.Process | None, ProcessLaunchFailure | None]:
+    async def launch(invocation: CliInvocation, *, program: str | None, stdin: int, exited: asyncio.Event) -> tuple[asyncio.subprocess.Process | None, ProcessLaunchFailure | None]:
         # @intent process-launch-is-shared-and-never-inherits-stdin
         # The one way a helper here starts a child, as program, the
         # file find_program chose (None when it found none). stdin is
         # a pipe or the null device, never the caller's stream, which
         # a child could read and so corrupt a stdio MCP session. POSIX
         # puts the child in a new session so ProcessStopper reaches its
-        # whole group. A failed launch is returned, never raised.
+        # whole group, and CliExitProtocol sets exited when the child
+        # exits. A failed launch is returned, never raised.
         if program is None:
             return None, ProcessLaunchFailure.NOT_FOUND
         _program, *arguments = invocation.argv
@@ -220,8 +244,11 @@ class CliRunner:
         # harness sets (its key, its private folders) wins.
         environment = {name: value for name, value in os.environ.items() if name not in invocation.env_remove}
         environment.update(invocation.env_overlay)
+        loop = asyncio.get_running_loop()
+        protocol_factory = functools.partial(CliExitProtocol, exited, limit=native_threads.NATIVE_PROCESS_STREAM_LIMIT_BYTES, loop=loop)
         try:
-            process = await asyncio.create_subprocess_exec(
+            transport, protocol = await loop.subprocess_exec(
+                protocol_factory,
                 program,
                 *arguments,
                 stdin=stdin,
@@ -240,7 +267,7 @@ class CliRunner:
             return None, ProcessLaunchFailure.PERMISSION_DENIED
         except (OSError, ValueError):
             return None, ProcessLaunchFailure.OS_ERROR
-        return process, None
+        return asyncio.subprocess.Process(transport, protocol, loop), None
 
     @staticmethod
     def json_objects(text: str) -> list[Mapping[str, object]]:
@@ -281,14 +308,15 @@ class CliRunner:
             while chunk := await stream.read(native_threads.NATIVE_PROCESS_READ_CHUNK_BYTES):
                 buffer.extend(chunk[: limit_bytes + native_threads.NATIVE_PROCESS_TRUNCATION_PROBE_BYTES - len(buffer)])
 
-    async def _finish_readers(self, readers: tuple[asyncio.Task[None], ...]) -> None:
+    async def _finish_readers(self, readers: tuple[asyncio.Task[None], ...]) -> bool:
         # Gives the readers one kill-wait to reach EOF, then cancels any
-        # that a surviving grandchild keeps open.
+        # that a surviving grandchild keeps open; True when one was.
         _done, pending = await asyncio.wait(readers, timeout=native_threads.NATIVE_KILL_WAIT_SECONDS)
         for task in pending:
             task.cancel()
         if pending:
             await asyncio.wait(pending)
+        return bool(pending)
 
     def _outcome(self, process: asyncio.subprocess.Process, stdout: bytearray, stderr: bytearray, limit_bytes: int, timed_out: bool) -> CliOutcome:
         # @intent cli-outcome-text-stays-within-the-cap
