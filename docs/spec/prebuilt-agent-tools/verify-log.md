@@ -87,3 +87,54 @@ Gate set (from context/code-map.md §1.3, run in CI order from the worktree root
 - No confirmed finding and no gate is open.
 - M-5 stays a follow-up.
 - Reproducers for every fixed finding live in the c9710ed2 regression files, and the hostile-decimal sweep lives in reports/S5-repair-1.md.
+
+## Iteration 2 — 2026-10-14 — agent report: reports/S5-repair-2.md
+**Gate set changes since iteration 1:**
+- The pack now collects 4,397 cases and runs with `-o faulthandler_timeout=120`.
+- Semgrep runs from the scratchpad venv, because the global semgrep is broken.
+
+**Defects in:**
+- Confirmed findings R-15, R-16, R-17 (all Blocker) and Minor M-6. M-6 was spec drift, already fixed by the spec author in r7 at `70df9458`.
+- The orchestrator's A.29 consistency case: `extract_numbers-zero-with-far-exponent-is-zero`.
+- Gate failing at the start: the pack, `33 failed, 4364 passed` at `2dba19ac` (test baseline `0c055c40`).
+
+**Hypotheses and attempts** (in order, including the ones that failed):
+- **R-15 + R-17, kept from the prototype:** the verifier's one-pattern lexer is adopted for the comment and run alternatives and for the optional closing quotes. It gives 0 misses on 55,175 fuzzed valid long-key texts, 0 over-refusals on 55,934 short-key texts, and ≤ 0.13 s on every EC-51 shape at the cap.
+- **R-15 + R-17, tried and rejected — the run's outer repeat made atomic:**
+  - Why it was tried: the prototype's piece-split hash differs on 3.11.0 and 3.13.1 over a wider 200,000-text corpus.
+  - What the difference is: every difference is only a run's end. On 3.11.0, a failed final possessive iteration keeps its `[ \t]*\.[ \t]*`, so `a.` gives `a.` instead of `a`. Those characters start no piece, so every count and verdict is the same.
+  - What the change did: the atomic run made the hashes identical.
+  - Why it was rejected: it cost 77.2 MB of regex backtracking memory at the cap, against 0.0 MB, and doubled the time. The possessive run is kept, and the header documents the benign difference.
+- **R-15 + R-17, changed from the prototype — multi-line content unrolled:**
+  - The problem: the prototype's `(?>(?:[^"\\]|\\[\s\S]|"(?!""))*)` holds one backtracking entry per character, 122.7 MB on a 1,000,000-character multi-line string of ordinary text. `tomllib` itself uses about 1 MB there.
+  - The committed form: `(?>[^"\\]*+(?:(?:\\[\s\S]|"(?!""))[^"\\]*+)*)`, with the literal form alike. It keeps row 27's atomic group, with plain characters read as single-character runs.
+  - The result: 0.0 MB for ordinary content, ≤ 62.8 MB in the worst case (500,000 escapes or lone quotes). The piece split is identical to the prototype's on 3.11.0 and on 3.13.1 over 200,000 texts.
+- **R-15 + R-17, tried and rejected — atomic quoted-segment content:** it changed nothing on either interpreter.
+- **R-16:** the verifier's exponent bound is adopted as proposed, and its comments are reworded for accuracy. A sweep of 11,739 calls against an exact oracle from the A.27 row gives 0 mismatches and 0 leaks under the default, no-trap and hostile host contexts. The rejected "float()==0.0 means zero" rule was not tried.
+- **A.29 case:** in `_number_entry`, a far exponent builds `Decimal(mantissa)` only. Zero gives `"0"`, and any other value is skipped as before.
+  - First probe expectation was wrong: I expected `1e4001` to be skipped, but its 4,002-character text is within the DecText cap. That behavior is unchanged and is not a defect.
+
+**Changes:**
+- R-15 + R-17 `202ef85f`, R-16 `9f7b70ac`, A.29 case `70298784` (`[gate:pack]`).
+- review.md: R-15 and R-17 are `fixed @202ef85f`, R-16 is `fixed @9f7b70ac`, and M-6 is `fixed @70df9458 (spec author r7)`.
+- `tests/`, `spec.md`, and `test-plan.md` are unchanged since `0c055c40`.
+
+**Gate matrix out:**
+| Gate | Command | Result | Final lines |
+|---|---|---|---|
+| new tests | the 45 r7 cases, `-k "toml or data_size or extract_numbers or far_exponent"` over the 4 files | PASS | all 33 formerly red cases pass, and the 12 guards stay green |
+| pack | gate 1 with `-o faulthandler_timeout=120` | PASS | `4397 passed in 43.29s` |
+| lint | gate 2 | PASS | `S064 RATCHETED: 4 known finding(s).` / `SDK-LINT: PASS` (0 REGRESSED, 0 ERRORED) |
+| typecheck | `lint/run.py --rule S009` | PASS | `S009 RATCHETED: 350 known finding(s).` / `SDK-LINT: PASS` |
+| import sort | gate 3 | PASS (inherited only) | whole tree: `Found 223 errors.`; the PR's 40 `vidbyte` .py files with `--select I001,F401`: `All checks passed!` |
+| semgrep | gate 4 (scratchpad venv) | PASS | `Ran 1 rule on 931 files: 0 findings.` |
+| public API | gate 5 | PASS | `contracts/sdk-public-api.json is current at f7a02bae… (vidbyte-sdk 0.2.1, 606 exports).` |
+| full local gate (source) | gate 6 | PASS (on the rerun) | first run: `1 failed, 8411 passed, 13 skipped in 83.80s` / `CI failed: Command failed with exit code 1: …python.exe -m pytest`. The failure was `tests/test_mcp_stdio_transport.py::McpStdioTransportHardeningTests::test_cancelled_waiter_does_not_break_transport`, a 5 s `wait_for` `TimeoutError` in a subprocess test. That file passes 3 of 3 times alone (`22 passed in 2.23s`), and no MCP file is in the PR. Rerun: `8412 passed, 13 skipped in 79.16s (0:01:19)` / `CI passed.` |
+| full local gate (package) | gate 7 | PASS | `No broken requirements found.` / `Installed vidbyte-sdk 0.2.1 passed smoke checks.` / `CI passed.` |
+| remote checks | `gh pr checks` | none configured | `no checks reported on the 'feat/prebuilt-agent-tools' branch` (CI is disabled repo-wide; nothing was dispatched; code pushed at `70298784`) |
+
+**Still open:**
+- No confirmed finding and no gate is open. M-5 stays a follow-up.
+- For the re-review, not a finding: the TOML scan's worst-case transient regex memory is ≈125 bytes per escape or lone quote in one multi-line string, 62.8 MB at the cap.
+  - The zero-memory alternative is a possessive repeat with the lookahead first. It needs a row-27 spec change and a fresh 3.11.0 versus 3.13 proof.
+  - Reproducers are `scratchpad/s5-2/scan_memory.py` and `toml_memory_ml.py`.
