@@ -617,6 +617,31 @@ class FileSystemToolErrorPathTests(unittest.TestCase):
             self.assertFalse(any(name.endswith("backup.zip") for name in names), names)
             self.assertTrue(any(name.endswith("notes/a.md") for name in names), names)
 
+    def test_zip_that_fails_midway_keeps_the_existing_archive(self) -> None:
+        # @intent failed-zip-keeps-existing-archive
+        # A source file that cannot be read (another program holds a lock on it) fails the zip after
+        # other members were written, so the archive already at the destination must survive unchanged.
+        with TemporaryDirectory() as tmp:
+            Path(tmp, "report").mkdir()
+            Path(tmp, "report", "a.txt").write_text("alpha\n", encoding="utf-8")
+            Path(tmp, "report", "b.log").write_text("beta\n", encoding="utf-8")
+            with zipfile.ZipFile(Path(tmp, "backup.zip"), "w") as archive:
+                archive.writestr("report/summary.txt", "last week's report\n")
+            original = Path(tmp, "backup.zip").read_bytes()
+            real_write = zipfile.ZipFile.write
+
+            def write(archive, filename, *args, **kwargs):
+                if Path(filename).name == "b.log":
+                    raise PermissionError(13, "Permission denied", str(filename))
+                return real_write(archive, filename, *args, **kwargs)
+
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+            with patch.object(zipfile.ZipFile, "write", write):
+                result = run(ZipTool(config).execute(ToolCall("zip", {"source": "report", "destination": "backup.zip"})))
+            self.assertEqual(result.status, ToolStatus.ERROR)
+            self.assertEqual(Path(tmp, "backup.zip").read_bytes(), original)
+            self.assertEqual(sorted(path.name for path in Path(tmp).iterdir()), ["backup.zip", "report"])
+
     def test_write_without_allow_write_returns_error(self) -> None:
         with TemporaryDirectory() as tmp:
             config = FileSystemToolConfig(root=tmp, allow_write=False)
