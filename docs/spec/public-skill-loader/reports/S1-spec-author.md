@@ -1,6 +1,6 @@
 # S1 spec author report: public-skill-loader
 
-Status: **DONE (r3, approved)**. Spec r1 was committed at `db1786a2` (`eba57e6c` after the orchestrator rebased onto `c9d31a7f`), and r2 at `3a793017`. Spec r3 (review round 2, final, `status: approved`) and this updated report are committed together on `feat/public-skill-loader`; see §6 and §7. The "Answers to consumer requirements" section at the end matches r3.
+Status: **DONE (r4)**. Spec r1 was committed at `db1786a2` (`eba57e6c` after the orchestrator rebased onto `c9d31a7f`), r2 at `3a793017`, and r3 (approved) at `843e2852`. Spec r4 (S4 findings R-1 and R-2, text only) and this updated report are committed together on `feat/public-skill-loader`; see §6 to §8. The "Answers to consumer requirements" section at the end matches r4.
 
 ## 1. What I read
 
@@ -116,14 +116,31 @@ All five round-2 findings and the orchestrator's notes are applied. Frontmatter 
   - §11 Baseline: the base stays `c9d31a7f`, with no rebase before S3. `origin/main` was at `9aaf662a` at review time. It has since reached `3b879c67` (#1091 to #1093, after the orchestrator's note).
   - None of #1089 to #1093 touches a file this PR edits, the area suites, `lint/`, `scripts/`, or `contracts/`. #1091 changed `vidbyte/agents/base.py`, which D-2 cites only as a precedent; `BaseAgent.run` moved one line there.
 
+## 8. Revision r4 (S4 findings R-1 and R-2; spec text only)
+
+S3 implemented the spec, now at `status: implemented`, with draft PR #1099. S4 confirmed one Major finding (R-1) and downgraded R-2 to Minor. r4 changes only `spec.md` and this report; no source or test file is touched. `status` and `pr:` stay as S3 set them.
+
+- **R-1 (version proof).** INV-16 now gives the rule that holds through later bumps: the eight literals and the contract's `version` equal `pyproject.toml`'s version, which is never below 0.3.1. 0.3.1 stays this PR's value (D-13 unchanged). AC-11's proof has three parts:
+  - the release test, after the orchestrator-approved edit the repair agent makes: each place equals `pyproject_version()`, with a `(0, 3, 1)` floor;
+  - `generate-sdk-public-api.py --check` and C016 for the contract (`:95` compares the versions);
+  - pyproject reading 0.3.1 at this head.
+
+  So the next routine bump keeps the pack green, and a missed literal still fails.
+- **R-2 (iterable wording).** INV-2, INV-3, §9.2 row 1, D-14, and consumer answer 1 below now state the exact rule.
+  - Any `collections.abc.Iterable` except `str` or `bytes` is accepted, and every `Sequence` qualifies, including one registered with `Sequence.register`.
+  - An object that iterates only through `__getitem__` is rejected as `entries_type`.
+  - An exception from iterating the caller's own argument propagates unchanged.
+
+  I reproduced all three with the built loader at `93144015`. §17 records this as a clarification, not an S3 deviation, because `loader.py:45` is exactly the prescribed expression.
+
 ## Answers to consumer requirements
 
-These are the answers the vidbyte-cli pipeline (`agent-skill-sources`) should resume from. They match spec r3, §9.2, "Consumer contract": version 0.3.1, tuples and lists accepted, the constructor's preconditions, the GitHub request cost, the corrected oversize detail, and CLI main's current SDK pin.
+These are the answers the vidbyte-cli pipeline (`agent-skill-sources`) should resume from. They match spec r4, §9.2, "Consumer contract": version 0.3.1, tuples and lists accepted, the constructor's preconditions, the GitHub request cost, the corrected oversize detail, and CLI main's current SDK pin.
 
 1. **The callable, its preconditions, and the result shape.**
-   - Build `SkillLoader(entries)`. `entries` may be a **tuple or a list** of entry objects and/or `SkillDocument`s. The annotation is `Sequence[SkillEntry | SkillDocument]`, and at runtime any iterable except `str` or `bytes` is accepted and turned into a tuple once, in iteration order. So the list a repeatable option collects can be passed as is. A set gives its own iteration order. A dict gives its keys: a key that is not an entry is rejected at its position, and a dict keyed by entries is accepted as the tuple of its keys. Pass a sequence if you pair results with entries.
+   - Build `SkillLoader(entries)`. `entries` may be a **tuple or a list** of entry objects and/or `SkillDocument`s. The annotation is `Sequence[SkillEntry | SkillDocument]`. At runtime, any `collections.abc.Iterable` except `str` or `bytes` is accepted and turned into a tuple once, in iteration order; every `Sequence` qualifies, including one registered with `Sequence.register`. An object that iterates only through `__getitem__` (not an `Iterable`) is rejected as `{"entries_type": …}`. An exception raised while iterating your own argument propagates unchanged; it is a caller bug, not an unavailable skill. So the list a repeatable option collects can be passed as is. A set gives its own iteration order. A dict gives its keys: a key that is not an entry is rejected at its position, and a dict keyed by entries is accepted as the tuple of its keys. Pass a sequence if you pair results with entries.
    - **Preconditions, checked at construction with no I/O:** every element is one of the six entry classes or a `SkillDocument`, and no two share a `name`. Names compare exactly and case-sensitively, the same rule as `JevAlignmentSettings.skills`. A violation raises `ConfigurationError`, whose `details` has exactly one of three shapes:
-     - `{"entries_type": <type name>}`: the argument is text (`str` or `bytes`) or not a collection;
+     - `{"entries_type": <type name>}`: the argument is text (`str` or `bytes`) or not an `Iterable`, including an object that iterates only through `__getitem__`;
      - `{"position": <0-based index>, "entry_type": <type name>}`: the first element that is not an entry or a document;
      - `{"names": <sorted list of repeated names>}`: repeated names.
 
