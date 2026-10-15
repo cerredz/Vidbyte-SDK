@@ -80,7 +80,6 @@ MUSE_SERVE_COMMAND = "serve"
 MUSE_PROVIDER = "meta"
 MUSE_DEFAULT_PATH = "/usr/local/bin/muse"
 MUSE_REAP_SHELL = "sh"
-MUSE_REAP_STDIN_SWITCH = "-s"
 GROK_HOME_FOLDERS = (".grok", "bin")
 NATIVE_WINDOWS_EXECUTABLE_SUFFIX = ".exe"
 NATIVE_BATCH_SUFFIXES = (".cmd", ".bat")

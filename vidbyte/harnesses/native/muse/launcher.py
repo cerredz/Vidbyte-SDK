@@ -2,7 +2,7 @@
 
 PURPOSE: Defines MuseLauncher, which decides how one Muse call starts `muse` (an explicit muse_command, `wsl.exe -d <distro> -e <muse_path>` on Windows, or muse on PATH), shows each path the way muse sees it, builds the WSL environment (the peer mark and the WSLENV entries), explains WSL launch failures and reaps the marked processes inside the distro; and MusePathTranslator, which maps a Windows path to its /mnt form inside WSL.
 ROLE IN CODEBASE: Built once per call by MuseThreadRun (vidbyte/harnesses/native/muse/threads.py) with the call's MuseThreadConfig and NativeErrorFactory. Runs `wsl.exe -l -q` and the reap through CliRunner (vidbyte/lib/process/runner.py); muse itself is started by MuseThreadRun.
-ARCHITECTURE NOTE: In WSL mode every muse child carries a fresh VIDBYTE_PEER_MARK, forwarded through WSLENV with the overlay names, so the reap `sh -s <mark>` (MUSE_REAP_SCRIPT on stdin, run with the caller's environment, which lacks the mark) kills exactly that call's in-distro tree. Only names the SDK put in the overlay are forwarded, never names taken from the caller's environment, so a caller's own META_API_KEY never reaches `muse serve`. Every flag is a WslFlag member and every other value comes from vidbyte/lib/constants/native_threads.py (spec INV-15).
+ARCHITECTURE NOTE: In WSL mode every muse child carries a fresh VIDBYTE_PEER_MARK, forwarded through WSLENV with the overlay names, so the reap `sh -s <mark>` (MUSE_REAP_SCRIPT on stdin, run with the caller's environment, which lacks the mark) kills exactly that call's in-distro tree. Only names the SDK put in the overlay are forwarded, never names taken from the caller's environment, so a caller's own META_API_KEY never reaches `muse serve`. Every flag is a WslFlag or ShellFlag member and every other value comes from vidbyte/lib/constants/native_threads.py (spec INV-15).
 FUNCTION INVENTORY: MusePathTranslator.to_wsl maps a drive path to /mnt/<drive>/... MuseLauncher: wsl_mode says whether WSL launches muse; resolve finds the launcher prefix or raises; visible_path gives a path as muse sees it; new_mark mints a peer mark; environment adds the mark and WSLENV to an overlay; launch_failure turns WSL failure text into its error; list_distros runs `wsl.exe -l -q`; reap runs the in-distro reap.
 COMMON MODIFICATION PATTERNS: A new launch mode is one more branch in resolve and, if it crosses an OS boundary, a forwarding rule in environment; a new WSL failure text is one more marker in launch_failure.
 WHAT NOT TO DO IN THIS FILE: 1. Do not run anything through a shell; argv goes to CliRunner as a tuple built by CliArgv (S055). 2. Do not forward a variable into WSL that the overlay does not hold. 3. Do not read or log the value of META_API_KEY.
@@ -31,6 +31,7 @@ from vidbyte.lib.dataclasses.process import CliInvocation, CliOption, CliOutcome
 from vidbyte.lib.enums.native_threads import (
     NativeEnvironmentVariable,
     NativeThreadProblem,
+    ShellFlag,
     WslFlag,
 )
 from vidbyte.lib.enums.process import CliOptionStyle
@@ -147,7 +148,7 @@ class MuseLauncher:
         if mark is None or distro is None or not self._wsl_program or re.fullmatch(native_threads.MUSE_PEER_MARK_PATTERN, mark) is None:
             return
         options = (CliOption(WslFlag.DISTRIBUTION, distro), CliOption(WslFlag.EXEC, native_threads.MUSE_REAP_SHELL))
-        argv = CliArgv.build((self._wsl_program,), options=options, style=CliOptionStyle.SEPARATE, operands=(native_threads.MUSE_REAP_STDIN_SWITCH, mark))
+        argv = CliArgv.build((self._wsl_program,), options=options, style=CliOptionStyle.SEPARATE, operands=(ShellFlag.READ_STDIN, mark))
         invocation = CliInvocation(
             argv=argv,
             env_overlay={},

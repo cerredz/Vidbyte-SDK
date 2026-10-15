@@ -122,6 +122,7 @@ from vidbyte.lib.enums.native_threads import (
     NativeThreadVerb,
     OpencodeEventType,
     OpencodeFlag,
+    ShellFlag,
     WslFlag,
 )
 from vidbyte.lib.enums.outputs import (
@@ -268,6 +269,7 @@ __all__ = [
     "ReturnableOption",
     "Reversibility",
     "RuleErrorMode",
+    "ShellFlag",
     "ShellKind",
     "Skill",
     "SkillEnums",

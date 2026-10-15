@@ -1,9 +1,9 @@
 """FILE: vidbyte/lib/enums/native_threads.py
 
-PURPOSE: Defines the closed vocabularies of the harness thread functions: which harness a call drives (NativeHarness), the verb and public function it is (NativeThreadVerb, NativeThreadOperation), the problems a call can fail with (NativeThreadProblem), the Grok permission modes and reasoning efforts, the Muse reasoning efforts, every command-line flag the SDK passes to grok, opencode, muse and wsl.exe (GrokFlag, OpencodeFlag, MuseFlag, WslFlag), the child environment variable names (NativeEnvironmentVariable), the Muse serve methods (MuseMethod) and the opencode event types the SDK reads (OpencodeEventType).
+PURPOSE: Defines the closed vocabularies of the harness thread functions: which harness a call drives (NativeHarness), the verb and public function it is (NativeThreadVerb, NativeThreadOperation), the problems a call can fail with (NativeThreadProblem), the Grok permission modes and reasoning efforts, the Muse reasoning efforts, every command-line flag the SDK passes to grok, opencode, muse, wsl.exe and the reap's sh (GrokFlag, OpencodeFlag, MuseFlag, WslFlag, ShellFlag), the child environment variable names (NativeEnvironmentVariable), the Muse serve methods (MuseMethod) and the opencode event types the SDK reads (OpencodeEventType).
 ROLE IN CODEBASE: Imported by the records in vidbyte/lib/dataclasses/native_threads.py, by the texts in vidbyte/lib/constants/native_threads.py, by NativeThreadError in vidbyte/lib/errors/base.py and by the thread functions under vidbyte/harnesses/native/. Exported from vidbyte/lib/enums/__init__.py; GrokPermissionMode, GrokReasoningEffort and MuseReasoningEffort are also re-exported from vidbyte.harnesses.native.
 ARCHITECTURE NOTE: Every enum here is a StrEnum, so str(member) and an f-string give the value; Python 3.11 formats a (str, Enum) member as Class.MEMBER, which would corrupt argv and environment entries. Flag values are the exact spellings of grok 1.0.52, opencode 1.18.31 and Muse Code 1.0.1.
-FUNCTION INVENTORY: No functions. NativeHarness, NativeThreadVerb, NativeThreadOperation, NativeThreadProblem, GrokPermissionMode, GrokReasoningEffort, MuseReasoningEffort, GrokFlag, OpencodeFlag, MuseFlag, WslFlag, NativeEnvironmentVariable, MuseMethod and OpencodeEventType.
+FUNCTION INVENTORY: No functions. NativeHarness, NativeThreadVerb, NativeThreadOperation, NativeThreadProblem, GrokPermissionMode, GrokReasoningEffort, MuseReasoningEffort, GrokFlag, OpencodeFlag, MuseFlag, WslFlag, ShellFlag, NativeEnvironmentVariable, MuseMethod and OpencodeEventType.
 COMMON MODIFICATION PATTERNS: Add a member only when the vendor CLI adds the value, and use it in the harness module that builds the argv or reads the output in the same change. A new problem also needs its FailureCode members and its texts in vidbyte/lib/constants/native_threads.py.
 WHAT NOT TO DO IN THIS FILE: 1. Do not add an approve-everything member (bypassPermissions, --yolo, --auto, --always-approve); the SDK never approves everything. 2. Do not import anything from vidbyte; enums sit at the bottom layer. 3. Do not turn an enum here back into a (str, Enum).
 KNOWN EDGE CASES: NativeEnvironmentVariable values equal their names. MuseFlag.END_OF_OPTIONS is the bare "--" operand that keeps the Muse prompt from being read as a flag. WSL_UNAVAILABLE is a Muse-only problem.
@@ -141,6 +141,12 @@ class WslFlag(StrEnum):
     QUIET = "-q"
 
 
+class ShellFlag(StrEnum):
+    """The sh options the Muse WSL reap passes: read the script from standard input."""
+
+    READ_STDIN = "-s"
+
+
 class NativeEnvironmentVariable(StrEnum):
     """The environment variables the SDK sets in a vendor child; each value equals its name."""
 
@@ -188,5 +194,6 @@ __all__ = [
     "NativeThreadVerb",
     "OpencodeEventType",
     "OpencodeFlag",
+    "ShellFlag",
     "WslFlag",
 ]
