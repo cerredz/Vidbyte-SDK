@@ -149,6 +149,17 @@ class FetchThenDoneRunner:
         return _Resp(_fc("isDone", '{"final_answer": "done-%d"}' % self.calls, "d%d" % self.calls))
 
 
+class RecordingDoneRunner:
+    """Scripted runner that finishes at once and records the prompt and every keyword it was sent."""
+
+    def __init__(self) -> None:
+        self.requests: list[str] = []
+
+    def run(self, prompt: str, **kwargs: object) -> _Resp:
+        self.requests.append(f"{prompt} {kwargs}")
+        return _Resp(_fc("isDone", '{"final_answer": "done"}', "d%d" % len(self.requests)))
+
+
 @tool
 def fetch(source: str) -> str:
     """Fetch a source by name."""
@@ -357,6 +368,32 @@ class AgentStateSeamTests(unittest.TestCase):
             algorithm="default", metadata={}, agent_metadata={}, tool_names=("grep",), history=())
         restored = Agent.restore(state)
         self.assertIn("__resume_tool_mismatch__", restored.metadata)
+
+    def test_restore_tool_mismatch_marker_stays_out_of_the_model_request(self) -> None:  # [Hidden Assumption]
+        @tool
+        def lookup_order(order_id: str) -> str:
+            """Look up an order."""
+            return "found"
+
+        @tool
+        def issue_refund(order_id: str) -> str:
+            """Refund an order."""
+            return "refunded"
+
+        agent = build_test_agent(name="desk", system_prompt="Help.", runner=EchoRunner(), tools=[lookup_order, issue_refund], metadata={"tenant": "acme"})
+        restored = BaseAgent.restore(agent.export_state(), tools=[lookup_order])
+        runner = RecordingDoneRunner()
+        bind_test_runner(restored, runner)
+        restored.run("where is order o-1?")
+
+        # The developer diagnostic stays on the agent, but the model never sees it or the withheld tool's name.
+        self.assertIn("__resume_tool_mismatch__", restored.metadata)
+        self.assertGreaterEqual(len(runner.requests), 1)
+        sent = "\n".join(runner.requests)
+        self.assertNotIn("__resume_tool_mismatch__", sent)
+        self.assertNotIn("issue_refund", sent)
+        # Caller metadata still reaches the model after the same restore.
+        self.assertIn("acme", sent)
 
 
 # ---------------------------------------------------------------------------

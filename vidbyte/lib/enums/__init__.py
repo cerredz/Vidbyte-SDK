@@ -121,6 +121,12 @@ from vidbyte.lib.enums.native_hosts import (
     OpencodeMcpKind,
     OpencodePermissionAction,
 )
+from vidbyte.lib.enums.outputs import (
+    DeliveryStatus,
+    OutputDestination,
+    OutputMethod,
+    TypefullyPlatform,
+)
 from vidbyte.lib.enums.platform import Platform
 from vidbyte.lib.enums.process import ProcessLaunchFailure
 from vidbyte.lib.enums.prompts import Prompt
@@ -145,7 +151,13 @@ from vidbyte.lib.enums.reasoning_strategies import (
     TestimonyTrust,
     TransitivityConsistency,
 )
-from vidbyte.lib.enums.skills import ContextMinimalFanoutSkill, Skill
+from vidbyte.lib.enums.skills import (
+    ContextMinimalFanoutSkill,
+    Skill,
+    SkillFetchStep,
+    SkillSourceType,
+    SkillUnavailableReason,
+)
 from vidbyte.lib.enums.skills import Skills as SkillEnums
 from vidbyte.lib.enums.sources import PinPolicy
 from vidbyte.lib.enums.speed import AgentSpeedRecordingIntegrity
@@ -182,6 +194,7 @@ __all__ = [
     "ContextMinimalFanoutSkill",
     "CotEventEnum",
     "DefeasibleRuleApplies",
+    "DeliveryStatus",
     "DocumentType",
     "DecisionModelMode",
     "EquivocationFallacy",
@@ -233,6 +246,8 @@ __all__ = [
     "OpencodePermissionAction",
     "OperatingSystemFamily",
     "OrchestratorAction",
+    "OutputDestination",
+    "OutputMethod",
     "PartitionVerdict",
     "PermissionPreset",
     "PinPolicy",
@@ -251,12 +266,16 @@ __all__ = [
     "ShellKind",
     "Skill",
     "SkillEnums",
+    "SkillFetchStep",
+    "SkillSourceType",
+    "SkillUnavailableReason",
     "StrawmanCriticism",
     "StructuredOutputSupport",
     "TaskStatus",
     "TestimonyTrust",
     "TextModelMode",
     "TransitivityConsistency",
+    "TypefullyPlatform",
     "UsageAccountingFailure",
     "UsageKind",
 ]

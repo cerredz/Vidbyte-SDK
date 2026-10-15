@@ -114,7 +114,12 @@ class HarnessDescriptor:
         if param_type == "bool":
             return isinstance(value, bool)
         if param_type.startswith("list["):
-            return isinstance(value, list)
+            # @intent harness-list-param-default-checks-elements
+            # The element type is part of the declared type, so every element obeys the scalar rules above.
+            element_type = param_type[5:-1]
+            return isinstance(value, list) and all(
+                HarnessDescriptor._default_matches_type(item, element_type) for item in value
+            )
         return False
 
 

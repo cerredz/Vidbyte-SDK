@@ -202,7 +202,9 @@ class LoopDetectionMiddleware(AgentMiddleware):
 
     def _make_output_key(self, tool_name: str, output: str) -> str:
         """Produce a stable string key from the tool name and its output text."""
-        output_hash = hashlib.sha256(output.encode()).hexdigest()[:16]
+        # @intent output-hash-accepts-any-text
+        # Tool output may hold lone surrogates (non-UTF-8 file names, half-escaped JSON); surrogatepass hashes them distinctly instead of failing the run.
+        output_hash = hashlib.sha256(output.encode("utf-8", "surrogatepass")).hexdigest()[:16]
         return f"{tool_name}:{output_hash}"
 
     @staticmethod

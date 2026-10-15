@@ -20,7 +20,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from vidbyte.agents.base import BaseAgent
-from vidbyte.agents.types import AgentCard
+from vidbyte.agents.types import AgentCard, AgentForkSettings
 from vidbyte.mcp_server.schema import McpSchema
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.catalog import Tools
@@ -148,7 +148,16 @@ class StudioAgentsRunTool(BaseTool):
         agent = self._agents.get(agent_name)
         if agent is None:
             return ToolResult.error("studio.agents.run", f"Agent '{agent_name}' not found.")
-        reply = await agent.generate_reply(prompt)
+        # @intent studio-runs-on-a-fresh-fork
+        # Each studio call is an independent task from any MCP client, so run it on a fork that never grows
+        # or reads the registered agent's history; preloaded history is kept.
+        run_agent = agent.fork(AgentForkSettings(include_history=bool(agent.history)))
+        # @intent internal-forks-close-their-mcp-servers
+        # The fork starts its own MCP servers on its first run, so close them once it has answered or failed.
+        try:
+            reply = await run_agent.arun(prompt)
+        finally:
+            await run_agent.close_mcp_servers()
         return ToolResult.success("studio.agents.run", reply.content)
 
 

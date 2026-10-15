@@ -204,12 +204,16 @@ class Harness:
         except Exception as exc:
             run = await self._finalize(run_id, request, None, HarnessRunStatus.FAILED, started_at)
             raise HarnessExecutionError("Harness implementation execution failed.", run=run) from exc
+        else:
+            # @intent score-sees-its-own-run-id
+            # score() and trajectory collection are part of the execution, so they run before this
+            # execution's run_id is released, exactly as the failure paths already do; otherwise
+            # score() sees None or, with overlapping executions, the lone other in-flight run's id.
+            run = await self._finalize(run_id, request, output, HarnessRunStatus.SUCCEEDED, started_at)
         finally:
-            # The run is over, so session() stops tagging with this run_id.
+            # execute() is over, so session() stops tagging with this run_id.
             self._active_run_ids.remove(run_id)
             self._run_id_var.reset(token)
-        # Finalize the successful run with the run_id captured above, not shared state.
-        run = await self._finalize(run_id, request, output, HarnessRunStatus.SUCCEEDED, started_at)
         return HarnessExecutionResult(output=output, run=run)
 
     def _current_run_id(self) -> str | None:
@@ -231,7 +235,11 @@ class Harness:
             if deadline.expired():
                 raise _HarnessDeadlineExpired from exc
             raise
-        if deadline.expired():
+        # @intent blocking-run-past-deadline-times-out
+        # A body that blocks (sync run(), or async code that never suspends) returns before the timer callback can run,
+        # so expired() stays False; the deadline itself still passed, and the run must not be recorded as succeeded.
+        deadline_at = deadline.when()
+        if deadline.expired() or (deadline_at is not None and asyncio.get_running_loop().time() >= deadline_at):
             raise _HarnessDeadlineExpired
         return result
 

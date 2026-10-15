@@ -82,6 +82,9 @@ from vidbyte.agents.contracts import (
 from vidbyte.agents.fallback import AgentFallback, FallbackTransform
 from vidbyte.agents.handoff import HandoffAgent
 from vidbyte.agents.jev import (
+    AnthropicSkill,
+    GitHubSkill,
+    InlineSkill,
     JevAgent,
     JevAgentResponse,
     JevAgentSettings,
@@ -201,7 +204,13 @@ from vidbyte.agents.jev import (
     JevTargetOutcomeEvidence,
     JevTargetOutcomeEvidenceItem,
     JevTargetOutcomeItem,
+    LocalSkill,
+    OpenAISkill,
     SkillDocument,
+    SkillEntry,
+    SkillSourceType,
+    SkillsShSkill,
+    SkillUnavailableReason,
 )
 from vidbyte.agents.multi import (
     AgentBinding,
@@ -384,6 +393,15 @@ __all__ = [
     "JevSkillsOutcome",
     "JevSkillStatus",
     "SkillDocument",
+    "AnthropicSkill",
+    "GitHubSkill",
+    "InlineSkill",
+    "LocalSkill",
+    "OpenAISkill",
+    "SkillEntry",
+    "SkillsShSkill",
+    "SkillSourceType",
+    "SkillUnavailableReason",
     "JevCanSimplify",
     "JevCanSimplifyEvidence",
     "JevAssumptionEvidence",

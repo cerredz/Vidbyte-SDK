@@ -53,6 +53,15 @@ async def attach_mcp_server(config: McpServerConfig) -> McpServerHandle:
         ) from e
 
     try:
+        # @intent mcp-spawn-failure-is-a-connection-error
+        # start() spawns the subprocess lazily; start it here so a spawn failure is the documented McpConnectionError, not a handshake failure.
+        try:
+            await transport.start()
+        except Exception as e:
+            raise McpConnectionError(
+                f"Failed to start MCP server subprocess for command {config.command}: {e}"
+            ) from e
+
         client = McpClient(transport)
         try:
             async with asyncio.timeout(config.timeout):

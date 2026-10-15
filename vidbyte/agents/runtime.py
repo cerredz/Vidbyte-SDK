@@ -75,6 +75,7 @@ CONCURRENCY MODEL:
 from __future__ import annotations
 
 import asyncio
+import copy
 import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -673,6 +674,13 @@ class AgentRuntime:
                     return await self._finish_result(final, state)
 
             if finish_attempt_continued or contract_rejected:
+                # @intent refused-finish-still-adopts-added-tools
+                # A refused finish still ends this turn's tool calls, so tools they added reach the next model call, as on a
+                # normal iteration. Its after-iteration hooks already ran with the finish attempt, so it skips them below.
+                catalog = self.tools
+                self._adopt_agent_catalog()
+                if self.tools is not catalog:
+                    tool_schemas = self._resolve_tool_schemas(state.provider)
                 continue
 
             decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state, provider_messages=messages))
@@ -1435,8 +1443,12 @@ class AgentRuntime:
 
     async def _execute_tool(self, tool: object, call: ToolCall, *, tool_is_internal: bool = False) -> ToolResult:
         # Executes the tool, optionally under tool_timeout_seconds, raising ToolExecutionError on failure.
+        # @intent tool-code-gets-its-own-arguments
+        # The runtime validates, retries, prices and records the model's call after the tool ran,
+        # so the tool gets its own copy of the arguments and cannot change the SDK's copy of the call.
+        tool_call = self._tool_owned_call(call)
         try:
-            return await self._run_tool_execute(tool, call, tool_is_internal=tool_is_internal)
+            return await self._run_tool_execute(tool, tool_call, tool_is_internal=tool_is_internal)
         except ToolExecutionError:
             raise
         except Exception as exc:
@@ -1444,6 +1456,15 @@ class AgentRuntime:
                 f"Tool execution failed: {exc}",
                 details={"tool_name": call.tool_name, "error_type": type(exc).__name__},
             ) from exc
+
+    @staticmethod
+    def _tool_owned_call(call: ToolCall) -> ToolCall:
+        # A call built in code may hold values deepcopy rejects; a shallow copy still protects pop and assignment.
+        try:
+            arguments = copy.deepcopy(dict(call.arguments))
+        except Exception:
+            arguments = dict(call.arguments)
+        return replace(call, arguments=arguments)
 
     async def _run_tool_execute(self, tool: object, call: ToolCall, *, tool_is_internal: bool) -> ToolResult:
         # Runs tool.execute, wrapping non-internal calls with ToolSettings.tool_timeout_seconds when set.
