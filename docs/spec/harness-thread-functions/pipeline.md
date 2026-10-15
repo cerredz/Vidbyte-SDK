@@ -18,12 +18,12 @@ started: 2026-10-15
 | S2 tests | done | 2026-10-15 | 2026-10-16 | reports/S2-test-author.md | 397 tests red in tests/features/harness_threads/; spec r4 90265f78; S2_HEAD 8e5e65ec |
 | S3 implement | done | 2026-10-16 | 2026-10-16 | reports/S3-implementer.md | 49 rows; HEAD d5581a24 pushed; pack 395/2 skip; run_ci source+package PASS; lint PASS; Semgrep 0; PR retitled [WIP]; ci.yml 38754831930 dispatched |
 | S4 adversarial review | done | 2026-10-16 | 2026-10-16 | reports/S4-review-{conformance,conventions,engineering}.md, reports/S4-findings-verifier.md | review.md: 11 confirmed (5 Blocker R-1..R-5, 6 Major R-6..R-11), 15 Minor, 0 refuted |
-| S5 repair loop | pending | | | | |
+| S5 repair loop | running | 2026-10-16 | | reports/S5-repair-1.md | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 — CAP REACHED (round 1 SOUND WITH FIXES 1B/8M/4m → r2 65f6b95d; round 2 SOUND WITH FIXES 2B/3M/3m → r3 final, approved) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 — CAP REACHED (round 1 SOUND WITH FIXES 1B/8M/4m → r2 65f6b95d; round 2 SOUND WITH FIXES 2B/3M/3m → r3 final, approved) · S5 repair iterations: 1/8 (running) · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-15 — Work on the existing PR branch `feat/native-grok-opencode-meta-hosts` in a new worktree, not a new `feat/<slug>` branch — the owner said "update the pr" (request.md §A Prompt 4).
@@ -49,6 +49,9 @@ started: 2026-10-15
 - 2026-10-16 — S3 returned BLOCKED at Phase 5 (all 49 rows committed through 4c072c1c; lint, package stage and Semgrep green): 4 pack failures were TypeErrors inside S2 helpers (T-D1 `call` fixture spread a wrong-type config with `**`; T-D2 `invocation(api, argv, **fields)` got argv twice). Orchestrator reproduced both and chose option 1 (test ownership stays with S2): the S2 author fixed them blind to the implementation in 14ec6702 (3 test files, no assertion changed; report 4da73cf3). Orchestrator re-ran the pack: `395 passed, 2 skipped`. New S2_HEAD = 4da73cf3; S3 resumed to finish Phases 5–7.
 
 - 2026-10-16 — S4 verifier routed the test parts of R-1 (124 over-72-column comment lines in 16 test files), R-4, R-6, R-7, R-8, R-9, R-10, R-11 and Minor R-24 to S2. Decision: S2 (the test author, resumed) writes those regression tests first, red against HEAD, and rewraps the test comments (comment-only); then S5 iteration 1 fixes the code against them. Sequential, not parallel, because both agents commit in the one worktree. S2 may read review.md, the verifier report and the S4 repro scripts (stand-ins only) to pin behavior at the public boundary; it still does not read vidbyte/ source.
+
+- 2026-10-16 — S2 regression tests landed (73016a87 tests, 1f6fc22e comment rewrap, cbf574d7 test-plan, 91625f11 report). Orchestrator re-ran the pack: `33 failed, 395 passed, 2 skipped` (the 33 = exactly the new R-4/R-6..R-11 tests; R-24 tightened and green); no vidbyte/ or lint/ change in those commits. New S2_HEAD = 91625f11. R-8 outcome pinned per spec EC-3: `configuration.invalid_argument` naming `prompt`, no process started (win32-only test).
+- 2026-10-16 — S5 iteration 1 pre-authorized, to avoid a BLOCKED round trip: at most one new `ShellFlag` StrEnum (R-2; `-s` is sh's flag, and WslFlag members are pinned by a surface test) and at most one asyncio protocol subclass inside `vidbyte/lib/process/runner.py` (R-11, leader-exit signal via `process_exited`). No new files (budget stays 24 added Python files), and each is recorded under spec §17 "Implementation deviations". Signature changes that the verifier marked "needs spec deviation note" (R-7 `from_unexpected(exc, request)`, R-4 lookup replacing `shutil.which`) are likewise allowed with a §17 note. Reason: the verifier confirmed these as the smallest fixes of INV-/AC- violations, and §8.4's class list is a ceiling meant to stop scope growth, not to block repairs of confirmed defects.
 
 ## User replies (verbatim)
 - (none yet)
