@@ -36,6 +36,7 @@ from vidbyte.lib.errors import AgentExecutionError
 from vidbyte.lib.agents.modality_detector import ModalityDetector
 from vidbyte.lib.models import ProviderModelRegistry
 from vidbyte.lib.tracing import SpanContext
+from vidbyte.lib.dataclasses.agents import AgentStopReason
 from vidbyte.lib.dataclasses.context import BaseAgentContext
 from vidbyte.lib.dataclasses.strategies import AgentResult
 
@@ -90,7 +91,9 @@ class MultiProviderAgenticGraderRuntimeAlgorithm:
             options=dict(options or {}),
             trace_context=trace_context,
         )
-        if captured_output:
+        # @intent isdone-answer-is-the-candidate
+        # An isDone finish already returns its final_answer; the last captured text is that tool-call turn's text, not the answer.
+        if captured_output and res.metadata.get("stop_reason") != AgentStopReason.IS_DONE.value:
             res = dataclasses.replace(res, output=captured_output[-1])
         return res
 
