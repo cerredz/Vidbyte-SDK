@@ -181,7 +181,9 @@ class InfiniteLaunchTool(BaseTool):
         foreign = next((name for card in cards for name in card.tools if name not in granted), None)
         if foreign is not None:
             raise ConfigurationError(f"{foreign} is not a tool you can give to a task; name only these tools: {', '.join(granted) or 'none'}.")
-        self.workspace.entries(tuple(int(item.removeprefix("#")) for card in cards for item in card.context if item.startswith("#")))
+        ids = tuple(int(item.removeprefix("#")) for card in cards for item in card.context if item.startswith("#"))
+        if ids:
+            self.workspace.entries(ids)
         started = self.journal.agents_started
         wanted = INFINITE_MIN_AGENTS * new
         if started + wanted > self.settings.max_agents:
@@ -202,12 +204,15 @@ class InfinitePair(BasePipeline):
         self.staged: list[InfiniteStagedEntry] = []
         self.dropped: list[str] = []
         self.entries: list[int] = []
-        self.files: list[str] = []
 
     async def run(self, prompt: str) -> str:
         """Run the generator, then its verifier, commit or drop the staged entries, record the card, and return its text."""
         launch = self.launch
         status, verdict, summary, review = InfiniteResultStatus.FAILED, InfiniteVerdict.UNCHECKED, "", ""
+        # Each child gets its own memory tools over this pair's shared
+        # staged and dropped lists, and the card lists the files both wrote.
+        writer =InfiniteAgentMemory(launch.workspace, key=f"{self.key}/{INFINITE_GENERATOR_KEY}", role=InfiniteAgentRole.GENERATOR, run_id=launch.journal.run_id, staged=self.staged, dropped=self.dropped)
+        checker = InfiniteAgentMemory(launch.workspace, key=f"{self.key}/{INFINITE_VERIFIER_KEY}", role=InfiniteAgentRole.VERIFIER, run_id=launch.journal.run_id, staged=self.staged, dropped=self.dropped)
         # @intent one-failed-pair-never-sinks-its-siblings
         # Every SDK, disk, or decode error becomes this pair's own card,
         # so siblings and the parent keep going; cancellation is not
@@ -215,10 +220,8 @@ class InfinitePair(BasePipeline):
         try:
             # Build the generator with a fresh context and send it the
             # task card, the entries and paths it names, and its quota.
-            writer = InfiniteAgentMemory(launch.workspace, key=f"{self.key}/{INFINITE_GENERATOR_KEY}", role=InfiniteAgentRole.GENERATOR, run_id=launch.journal.run_id, staged=self.staged, dropped=self.dropped)
             reply = await self._agent(writer).arun(self._task_message(writer))
             summary = self._capped(reply.content.strip())
-            self.files.extend(writer.files_written)
             status = self._status(reply)
 
             # @intent sibling-generators-finish-before-verifiers-judge
@@ -230,9 +233,7 @@ class InfinitePair(BasePipeline):
             # Unless the generator failed, a fresh verifier gets the
             # outcome, never the transcript, checks it, and fixes it.
             if status is not InfiniteResultStatus.FAILED:
-                checker = InfiniteAgentMemory(launch.workspace, key=f"{self.key}/{INFINITE_VERIFIER_KEY}", role=InfiniteAgentRole.VERIFIER, run_id=launch.journal.run_id, staged=self.staged, dropped=self.dropped)
-                review = (await self._agent(checker).arun(self._verifier_message(checker, status, summary))).content
-                self.files.extend(path for path in checker.files_written if path not in self.files)
+                review = (await self._agent(checker).arun(self._verifier_message(checker, status, summary, tuple(writer.files_written)))).content
                 verdict = self._verdict(review)
 
             # @intent only-judged-entries-reach-memory
@@ -247,7 +248,8 @@ class InfinitePair(BasePipeline):
         # parent only the capped card.
         self.dropped.extend(f"{item.key} ({item.draft.text}): not committed, because the verdict is {verdict.value}" for item in self.staged)
         self.staged.clear()
-        self.result = InfiniteResultCard(name=self.card.name, key=self.key, status=status, verdict=verdict, summary=summary, review=self._capped(review), entries=tuple(self.entries), dropped=tuple(self.dropped), files=tuple(self.files))
+        files = tuple(dict.fromkeys((*writer.files_written, *checker.files_written)))
+        self.result = InfiniteResultCard(name=self.card.name, key=self.key, status=status, verdict=verdict, summary=summary, review=self._capped(review), entries=tuple(self.entries), dropped=tuple(self.dropped), files=files)
         launch.journal.pair_finished(self.key, self.result)
         return self.render(self.result)
 
@@ -297,11 +299,11 @@ class InfinitePair(BasePipeline):
         finished = self.finished_lines(launch.journal.finished_children(memory.key))
         return Prompts().get(Prompt.INFINITE_MEMORY_TASK_PROMPT).format(goal=card.goal, criteria=self.criteria, instructions=card.generator_prompt, entries=pasted, paths=paths, finished=finished, quota=memory.quota())
 
-    def _verifier_message(self, memory: InfiniteAgentMemory, status: InfiniteResultStatus, summary: str) -> str:
+    def _verifier_message(self, memory: InfiniteAgentMemory, status: InfiniteResultStatus, summary: str, written: tuple[str, ...]) -> str:
         # The verifier's first message: its instructions, the card, and
         # what the generator reported, staged, and wrote.
         staged = "\n".join(f"- {item.key} ({item.draft.kind.value}): {item.draft.text}" for item in self.staged) or "-"
-        files = "\n".join(f"- {path}" for path in self.files) or "-"
+        files = "\n".join(f"- {path}" for path in written) or "-"
         return Prompts().get(Prompt.INFINITE_MEMORY_VERIFIER_TASK_PROMPT).format(instructions=self.card.verifier_prompt, goal=self.card.goal, criteria=self.criteria, status=status.value, summary=summary or "-", staged=staged, files=files, quota=memory.quota())
 
     @staticmethod
