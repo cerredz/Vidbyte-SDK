@@ -232,6 +232,32 @@ class DeterministicStrategyTests(unittest.IsolatedAsyncioTestCase):
         after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.DEDUPLICATE_TOOL_CALLS)
         self.assertEqual(list(after), [history[0], history[1], history[2], history[5], history[6]])
 
+    async def test_deduplicate_tool_calls_keeps_a_rerun_whose_result_changed(self) -> None:
+        # [Silent Failure] Re-running the same call after a fix (tests FAIL, then PASS) is a new pair, so the model sees the PASS.
+        def call(call_id: str) -> dict[str, object]:
+            return {"role": "assistant", "content": None, "tool_calls": [{"id": call_id, "type": "function", "function": {"name": "run_tests", "arguments": "{}"}}]}
+        history = ({"role": "user", "content": "fix the tests"}, call("c1"), {"role": "tool", "tool_call_id": "c1", "content": "FAIL"}, call("c2"), {"role": "tool", "tool_call_id": "c2", "content": "PASS"})
+        after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.DEDUPLICATE_TOOL_CALLS)
+        self.assertEqual(list(after), list(history))
+        _assert_valid_tool_transcript(self, after)
+
+    async def test_deduplicate_tool_calls_keeps_an_anthropic_rerun_whose_result_changed(self) -> None:
+        # [Silent Failure] Anthropic tool_result blocks are compared by their content, so a changed result survives as on OpenAI.
+        def call(call_id: str) -> dict[str, object]:
+            return {"role": "assistant", "content": [{"type": "tool_use", "id": call_id, "name": "run_tests", "input": {}}]}
+
+        def result(call_id: str, output: str) -> dict[str, object]:
+            return {"role": "user", "content": [{"type": "tool_result", "tool_use_id": call_id, "content": output}]}
+        history = ({"role": "user", "content": "fix the tests"}, call("t1"), result("t1", "FAIL"), call("t2"), result("t2", "PASS"))
+        after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.DEDUPLICATE_TOOL_CALLS)
+        self.assertEqual(list(after), list(history))
+
+    async def test_deduplicate_tool_calls_drops_every_result_of_a_repeated_parallel_call(self) -> None:
+        # [Hidden Failure] A repeated parallel-call turn loses all of its results, not just the first, so none is left orphaned.
+        turn = (msg("assistant", "read_file x2", kind="tool_call"), msg("tool", "a", kind="tool_result"), msg("tool", "b", kind="tool_result"))
+        after, _ = await ContextCompactionEngine().compact_messages((*turn, *turn), mode=CompactionMode.DEDUPLICATE_TOOL_CALLS)
+        self.assertEqual(after, turn)
+
     async def test_salience_eviction_keeps_newest_tool_pair_on_every_provider_shape(self) -> None:
         # [Silent Failure] Anthropic tool_use and Gemini functionCall turns score as tool calls, so the newest pair survives as on OpenAI.
         shapes = {
