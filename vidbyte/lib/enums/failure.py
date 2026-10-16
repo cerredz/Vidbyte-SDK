@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Codes are stable data-contract values; raw exception text is 
 COMMON MODIFICATION PATTERNS: Add a category-prefixed code with docs, mapping coverage, and a focused test.
 KNOWN EDGE CASES: Unknown exceptions map to runtime.error rather than inventing a new taxonomy entry.
 RELATED DOCS: docs/design/session-failure-vocabulary.md; skills/failure/vocabulary.md.
-TESTS: python scripts/test-session-failure-vocabulary.py.
+TESTS: python scripts/test-session-failure-vocabulary.py; tests/features/codex_host/test_codex_host_helper_surface.py and tests/features/codex_host/test_codex_host_records.py.
 """
 
 from __future__ import annotations

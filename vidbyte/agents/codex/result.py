@@ -7,7 +7,7 @@ COMMON MODIFICATION PATTERNS: Copy explicit SDK fields and preserve absent value
 WHAT NOT TO DO IN THIS FILE: Reflect arbitrary objects or serialize private reasoning.
 KNOWN EDGE CASES: Interrupted turns may lack text; SDK run raises for failed turns.
 RELATED DOCS: https://github.com/cerredz/Vidbyte-SDK/pull/409; docs/spec/codex-host-thread-helpers/spec.md (CodexResultSerializer.items, section 12.3 row 6)
-TESTS: Offline typed-result checks and python scripts/run_ci.py.
+TESTS: Offline typed-result checks and python scripts/run_ci.py; tests/features/codex_host/test_codex_host_thread_helpers.py, tests/features/codex_host/test_codex_host_goal_skills.py and tests/features/codex_host/test_codex_host_helper_lifecycle.py.
 """
 
 from __future__ import annotations

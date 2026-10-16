@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Constants live below agent modules so every collaborator can 
 COMMON MODIFICATION PATTERNS: Add a CODEX-prefixed value when adapter behavior needs a shared literal.
 KNOWN EDGE CASES: Supported item kinds track the pinned openai-codex compatibility range.
 RELATED DOCS: docs/design/codex-harness-agent.md; docs/spec/codex-host-thread-helpers/spec.md (section 9.3).
-TESTS: python scripts/run_ci.py.
+TESTS: python scripts/run_ci.py; tests/features/codex_host/test_codex_host_helper_surface.py and tests/features/codex_host/test_codex_host_records.py.
 """
 
 from __future__ import annotations
