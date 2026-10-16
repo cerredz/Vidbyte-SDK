@@ -104,13 +104,13 @@ flowchart TD
 
 ## What changed
 
-74 files, +13,023 / −359, measured against the merge base `8da41971`. 21 of those files are under `docs/spec/harness-thread-helpers-skills/`.
+77 files, measured against the merge base `8da41971`: 53 code, test and repo-doc files (+7,725 / −359), plus 24 files under `docs/spec/harness-thread-helpers-skills/`.
 
 | Area | File | Lines | What |
 |---|---|---|---|
 | Grok | `vidbyte/harnesses/native/grok/helpers.py` | +292 | `GrokThreadHelpers` (8 helpers) and `GrokHelperRun` |
 | Grok | `vidbyte/harnesses/native/grok/commands.py` | +321 | `GrokCommands` (14 functions) and `GrokCommandRun`: the slash line, minted `--session-id`, stream read, evidence |
-| Grok | `vidbyte/harnesses/native/grok/store.py` | +252 | `GrokHome` (moved out of `GrokThreadRun`) and `GrokStore` (strict scans, one-file reads, layout guard) |
+| Grok | `vidbyte/harnesses/native/grok/store.py` | +251 | `GrokHome` (moved out of `GrokThreadRun`) and `GrokStore` (strict scans, one-file reads, layout guard); two blank lines between them (R-27, `25f36c6d`) |
 | Grok | `grok/wire.py`, `grok/threads.py`, `grok/__init__.py` | +175/−10, +7/−58, +56/−6 | `GrokHelperWire`, `GrokStreamWire`; `threads.py` now uses `GrokHome` |
 | opencode | `vidbyte/harnesses/native/opencode/helpers.py` | +257 | `OpencodeThreadHelpers` (8 helpers): `session list`, `db` by id, `export`, `session delete` |
 | opencode | `vidbyte/harnesses/native/opencode/commands.py` | +112 | 4 functions through #1036's `OpencodeThreadRun.execute` with `--command` |
@@ -125,7 +125,7 @@ flowchart TD
 | Library | `vidbyte/lib/constants/native_threads.py` | +417/−27 | every flag, pattern, limit, template, evidence row and error text (INV-15) |
 | Library | `vidbyte/lib/dataclasses/native_threads.py`, `validation.py` | +381/−11, +23/−3 | `NativeThreadSummary`, `NativeCommandOutput`, `NativeHelperRequest`, `GrokCommandArguments` |
 | Library | `vidbyte/lib/enums/native_threads.py`, `failure.py`, `__init__.py`; `lib/errors/base.py` | +147/−11, +4, +12, +1/−1 | `GrokThreadScope`, `GrokCommand`, operations, flags; 4 failure codes |
-| Docs | `vidbyte/harnesses/README.md`, `REPO_MAP.md` | +4/−1, +1/−1 | native bullet extended; #1036's EC-44 sentence replaced by the verified EC-63 limitation |
+| Docs | `vidbyte/harnesses/README.md`, `REPO_MAP.md` | +4/−1, +1/−1 | native bullet extended; #1036's EC-44 sentence replaced by the verified EC-63 limitation; the thread-helpers bullet lists exactly the 22 helpers, and `init_muse_workspace` has its own sentence (R-26, `ccfe71ca`) |
 | Tests | `tests/features/harness_threads/test_harness_threads_{acceptance_helpers, grok_commands, grok_helpers, helper_arguments, helper_bounds, helper_credentials, helper_surface, listing_properties, muse_commands, muse_helpers, opencode_commands, opencode_helpers}.py` | +2,825 | 12 new test files |
 | Tests | `fake_harness_helpers.py` (new), `fake_harness.py`, `conftest.py`, `test_harness_threads_{errors, surface, static_policy}.py`, `FEATURE.md`, `README.md` | +618, +55/−16, +190/−6, +123/−29, +49/−8 | stand-ins in real vendor layouts; surface and errors pins (§13) |
 | Spec | `docs/spec/harness-thread-helpers-skills/**` | 21 files | spec r5, test plan, review, verify log, stage reports, this body |
@@ -174,10 +174,12 @@ Each row names one proving test, in `tests/features/harness_threads/test_harness
 
 ## Verification
 
-All gates ran in the worktree with the branch venv (`-p no:cacheprovider`, no installs). The last code change is `ade57291`. The commits after it change only `docs/`.
+All gates ran in the worktree with the branch venv (`-p no:cacheprovider`, no installs). The last source change is `25f36c6d` (R-27, one blank line). `ccfe71ca` (R-26) changed only `vidbyte/harnesses/README.md`. The commits after them change only `docs/`.
 
 | Gate | Command | SHA | Result | Final lines |
 |---|---|---|---|---|
+| lint | `python lint/run.py` | `b89da0a7` (coordinator) | PASS | exit 0, `SDK-LINT: PASS` |
+| full local gate | `python scripts/run_ci.py`, `PYTHONPATH` unset | `b89da0a7` (coordinator) | PASS | `6632 passed, 17 skipped in 141.62s` · `CI passed.` |
 | lint | `python lint/run.py` | `ade57291`, `71c15a2c` | PASS | `SDK-LINT: PASS` (A001 642/642, A002 605/703); `lint/baseline.json` unchanged against main |
 | test pack | `python -m pytest -p no:cacheprovider -q tests/features/harness_threads` | `f85d08af` (S6, `DEEPSEEK_API_KEY` set) | PASS | `1025 passed, 3 skipped in 90.41s (0:01:30)` |
 | full local gate | `python scripts/run_ci.py` | `ade57291` | PASS | `6632 passed, 17 skipped in 138.65s (0:02:18)` · `Installed vidbyte-sdk 0.3.0 passed smoke checks.` · `CI passed.` |
@@ -187,14 +189,16 @@ All gates ran in the worktree with the branch venv (`-p no:cacheprovider`, no in
 | §4 snippet | AC-1 test with stdout captured | `f85d08af` (S6) | PASS | `1 passed in 1.11s`; output above |
 | probe dry run | `probe.py` below against the pack's stand-ins, with fake keys | `f85d08af` (S6) | exit 0 | 24 verdicts: 23 `HOLDS`, and A-28 `NOT EXERCISED` because the stand-in served inline history. A second run through the `wsl.exe` stand-in, serving `anchoredSnapshot`, gave all 5 Muse verdicts `HOLDS`, A-28 included. No fake key value appeared in any output or file |
 
-Remote check-runs for `71c15a2c`, which was the PR head before this body was committed:
+Remote check-runs for `b89da0a7`, which was the PR head before this refresh (CI run 38952277689, Static policy run 38952280752):
 
 | Check | Status | Conclusion | Final lines |
 |---|---|---|---|
-| Source / Python 3.11 | completed | success | `6580 passed, 69 skipped in 123.05s (0:02:03)` · `CI passed.` |
-| Source / Python 3.12 | completed | success | `6580 passed, 69 skipped, 19 warnings in 126.48s (0:02:06)` · `CI passed.` |
+| Source / Python 3.11 | completed | success | `6580 passed, 69 skipped in 151.36s (0:02:31)` · `CI passed.` |
+| Source / Python 3.12 | completed | success | `6580 passed, 69 skipped, 19 warnings in 155.17s (0:02:35)` · `CI passed.` |
 | Package | completed | success | `Installed vidbyte-sdk 0.3.0 passed smoke checks.` · `CI passed.` |
 | Static policy | completed | success | `1/1: ✓ All tests passed` · `Ran 1 rule on 975 files: 0 findings.` |
+
+Source / Python 3.12 on `b89da0a7` passed on its second attempt, after one `gh run rerun --failed`. On the first attempt, the only failing test was `tests/features/coding_agent/test_coding_agent_environment.py::test_real_bash_reports_its_version_and_git`, which timed out on the runner ("bash did not finish within 15 seconds"). That test is outside this PR, and it passes locally.
 
 The check-runs for this body's own commit, which changes only docs, are added to the PR description once the dispatched runs finish.
 
@@ -672,7 +676,7 @@ I checked the probe in two independent ways, neither of which uses a real key or
 
 ## Adversarial review
 
-The S4 review ([`review.md`](docs/spec/harness-thread-helpers-skills/review.md)) used three lenses (conformance, engineering and conventions) plus a verifier. Its verdict was *mergeable after fixes*. It confirmed 6 must-fix findings, refuted or downgraded 7, and listed 19 minors. The S5 re-review returned SOUND at `578c88bb`, with 0 Blocker, 0 Major and 2 Minor findings (R-24 and R-25, both fixed).
+The S4 review ([`review.md`](docs/spec/harness-thread-helpers-skills/review.md)) used three lenses (conformance, engineering and conventions) plus a verifier. Its verdict was *mergeable after fixes*. It confirmed 6 must-fix findings, refuted or downgraded 7, and listed 21 minors. The S5 re-review returned SOUND at `578c88bb`, with 0 Blocker, 0 Major and 2 Minor findings (R-24 and R-25, both fixed). Repair iteration 3 fixed R-26 and R-27, the two open items from the S6 PR author.
 
 | ID | Severity | Finding | Fix |
 |---|---|---|---|
@@ -694,6 +698,8 @@ These minors were also fixed:
 - R-23 `3fbe9568`: an exact `read_skill` `id`, not a substring.
 - R-24 `ade57291`.
 - R-25 `3c114e7b`.
+- R-26 `ccfe71ca`: the README thread-helpers bullet lists exactly the 22 helpers.
+- R-27 `25f36c6d`: two blank lines between `GrokHome` and `GrokStore`.
 
 ## Deviations from the spec
 
@@ -728,9 +734,5 @@ From review.md, none blocking:
 - R-22: choose one style for refusal texts, inline or `*_RULE` constants.
 
 Open spec questions Q-1 and Q-3 to Q-8 are non-blocking. Q-1 is `compact_grok_thread`; Q-8 is a `grok inspect` pre-flight.
-
-Two cosmetic items I noticed while writing this body:
-- `vidbyte/harnesses/native/grok/store.py:104-106` has three blank lines between `GrokHome` and `GrokStore`.
-- The `vidbyte/harnesses/README.md:179` "Thread helpers" bullet says "22 keyless functions" but lists 23 names, because it includes `init_muse_workspace`.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)

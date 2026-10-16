@@ -166,3 +166,16 @@ Each lesson reads: trigger · preferred action · project-specific reason · qui
 - `vidbyte/harnesses/native/grok/store.py:104-106`: three blank lines between `GrokHome` and `GrokStore` (PEP 8 E303). Cosmetic; lint passes.
 - `vidbyte/harnesses/README.md:179`: the "Thread helpers" sub-bullet says "22 keyless functions" but lists 23 names, because it includes `init_muse_workspace`. Spec TL;DR `spec.md:17` counts it among "25 skill functions" instead (22 + 25 = 47). The counting convention is inconsistent; the functions are not.
 - `origin/main` is 3 commits past the merge base `8da41971` (#1160 `f7f32b19`, #1162 `d5c1532d`, #1163 `7ab22063`). None touches a file this PR changes. I did not merge.
+
+## Addendum: body refresh after repair iteration 3 (2026-10-16)
+
+Both open items above were fixed in repair iteration 3: R-26 at `ccfe71ca` (the README now lists exactly the 22 helpers and gives `init_muse_workspace` its own sentence) and R-27 at `25f36c6d` (store.py now has two blank lines between the classes). I refreshed `pr-body.md` with only what those fixes change:
+- **What changed:** the README and `store.py` rows, plus the totals line. It now reads 77 files: 53 non-docs (+7,725 / −359) and 24 under `docs/spec/`.
+- **Adversarial review:** R-26 and R-27 added to the fixed list, and the minor count now 21, matching `review.md`.
+- **Follow-ups:** the two cosmetic items dropped.
+- **Verification:**
+  - the gate table gained the coordinator's `b89da0a7` rows: lint exit 0 `SDK-LINT: PASS`, and `run_ci.py` with `PYTHONPATH` unset at `6632 passed, 17 skipped in 141.62s`, `CI passed.`;
+  - the remote table moved to `b89da0a7`, with run 38952277689's final lines;
+  - one line records the remote-only Source 3.12 rerun. Attempt 1 failed only `tests/features/coding_agent/test_coding_agent_environment.py::test_real_bash_reports_its_version_and_git`, with "bash did not finish within 15 seconds" (1 failed, 6579 passed), and Package was skipped. Attempt 2 was all green.
+
+As a private check, not added to the body, the pack at the refreshed head `04fc067a` gave `1025 passed, 3 skipped in 91.07s (0:01:31)` with `DEEPSEEK_API_KEY` set. The final check-runs for the new head go into the live PR body only, as before.
