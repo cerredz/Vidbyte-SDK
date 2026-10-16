@@ -22,12 +22,12 @@ Existing-PR run: no new branch, no new PR. Adds to draft PR #1055 on `feat/codex
 | S2 tests | done | 10-16 | 10-16 | reports/S2-test-author.md | 76 new tests in 5 files; red confirmed (area 91 failed / 537 passed = 76 new + 14 authorized-pin + 1 inherited); S2_HEAD 33787d9a |
 | S3 implement | done | 10-16 | 10-16 | reports/S3-implementer.md | S3_HEAD c81ba632 pushed (ff) to PR #1055 (draft, title unchanged); 18/18 rows, 4 new files / 20 classes (budget exact); area 673 passed + 1 inherited; SDK-LINT PASS; run_ci source 1 inherited fail / 5952 passed; package CI passed; semgrep 0 findings; remote CI 38893453043 + static 38893455393 success |
 | S4 adversarial review | done | 10-16 | 10-16 | reports/S4-review-*.md, S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; 0 Blocker / 4 Major (R-1..R-4) / 11 Minor; 0 refuted, 1 downgraded (R-E2 → R-8); conformance SOUND, conventions + engineering MERGEABLE AFTER FIXES |
-| S5 repair loop | running | 10-16 | | reports/S5-repair-1.md | iteration 1 launched at HEAD ecba0d48 |
-| S5 re-review | pending | | | | |
+| S5 repair loop | done | 10-16 | 10-16 | reports/S5-repair-1.md, verify-log.md | converged in 1 iteration: R-2 54f599de, R-3 dd3fe2c2, R-6 c3a3ef98, R-7 4fbc88b6, R-9 549c7475, R-5 3d1ff4e2; pushed ff c81ba632..03e1d7fd; remote 4/4 success on 03e1d7fd |
+| S5 re-review | running | 10-16 | | reports/S5-rereview-1.md | round 1 (conformance, post-repair) |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 1/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 · S5 repair iterations: 1/8 · S5 re-review rounds: 1/2
 
 ## Decisions the orchestrator made
 - 2026-10-15 22:30 — Worktree created on the existing branch `feat/codex-host` (not from main); verified local == origin == 66558ee9 before `git worktree add`. — the run adds to PR #1055.
@@ -58,6 +58,8 @@ Existing-PR run: no new branch, no new PR. Adds to draft PR #1055 on `feat/codex
 
 - 2026-10-16 — S2 r3 split: codex_host_fakes.py 1071 → 894 lines, new codex_host_helper_fakes.py (237, `HelperHandlers` mixin); also moved the pre-existing goal/set and goal/clear handlers (needed to get under 900); behaviour proven unchanged (74 recorded answers equal, mutation results identical); 72e34b81 + ecba0d48. Accepted.
 - 2026-10-16 — S5 iteration 1 launched (fresh agent, brief at scratchpad/s5-iter1-prompt.md). Fourth usage-limit outage (HTTP 429) stopped it before any commit or edit (HEAD still ecba0d48, tree clean). Per coordinator: resumed the SAME agent by ID via SendMessage, not a fresh one; iteration count stays 1/8.
+
+- 2026-10-16 — S5 iteration 1 converged. Orchestrator checks at 03e1d7fd: tree clean; `git diff ecba0d48..HEAD -- tests lint/baseline.json` empty; verify-log `## Iteration 1` present; review.md has no confirmed row open (R-10..R-15 are follow-ups); own gate run: `SDK-LINT: PASS`, source `1 failed, 5957 passed, 25 skipped` (inherited only), package `CI passed.`; check-runs Package / Static policy / Source 3.11 / Source 3.12 all success on 03e1d7fd. Final re-review round 1 launched (conformance, DIFF_BASE c181be65).
 
 ## User replies (verbatim)
 - none
@@ -118,3 +120,6 @@ Existing-PR run: no new branch, no new PR. Adds to draft PR #1055 on `feat/codex
 - CodexHostTools class docstring in toolsets/codex.py still says "one agent tool per CodexHost function" (unpinned; the pinned line is toolsets/__init__.py:11, Q-18 default not reworded). — *source:* S3
 - review.md owner key: code → S5, tests → S2 author, spec → wording only, follow-up → PR body. Mutation harness: `VPY probe.py <ids>` in scratchpad/s4-verifier/ (V36 goal slot leak, V05/V05b delete reserve/release, V02-V04 read-back clauses) must go red once S2's new tests land. — *source:* S4 verifier
 - R-2 trap: `CODEX_USER_MESSAGE_ITEM_TYPE` must go right after `"CODEX_COMPACTION_ITEM_TYPE"` in `constants.__all__`; an end-append breaks test_codex_host_helper_surface.py:288. — *source:* S4 verifier
+- S5 gate lines at 03e1d7fd: area `1 failed, 678 passed, 2 skipped`; source `1 failed, 5957 passed, 25 skipped`; package `CI passed.`; semgrep 0 findings; API 639 exports. — *source:* S5 iteration 1
+- CI passes the inherited test because its shallow clone has no merge-base and the test returns early. — *source:* S5 iteration 1
+- Eight lint rules (A001, A002, C012, S001, S010, S025, S061, S063) report IMPROVED; lowering their baselines needs `--update-baseline`, an owner decision (not done). — *source:* S5 iteration 1
