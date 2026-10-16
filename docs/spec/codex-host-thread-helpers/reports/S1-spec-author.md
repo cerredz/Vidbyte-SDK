@@ -184,3 +184,50 @@ No other file under `docs/` was read. The sibling worktree was not read.
 - **Coverage:** every AC is in §12.1 or §12.3. Every FR names an INV or AC. FR-16 is traced through the §9.2 catalog table, noted under §12.1.
 - **Counts updated:** 4 codes, 19 classes, 19 host failure codes in the pinned slice, TL;DR, §2 and G-2/G-3/G-5.
 - **No tests or production code were written.**
+
+## Addendum r3: review round 2, final (spec commit bd20f6f7, status approved)
+
+**Input:** `reports/S1-spec-review-r2.md`, verdict SOUND WITH FIXES. 14 round-1 findings were resolved and R-9 partly. New findings: R-16 Blocker, R-17 and R-18 Major, R-19 to R-22 Minor. All are accepted with the smallest edit, and each has its own round-2 row in §16. No ID was renumbered. No user reply arrived, so §0.2 is unchanged. Frontmatter: `revision: 3`, `status: approved`.
+
+**Correction to the r2 addendum:** the r2 class count "19" was wrong. The budget lists 20 classes (R-20), and §8.4 and the r2 history row now say 20.
+
+### R-16 and how it was checked independently
+
+- **Source read.** I read the S064 rule source (`lint/rules/s064_retry_overall_deadline.py`). Its retry words are `retr(y|ies|ied)|attempt|backoff`. A loop complies when it makes an in-loop ordered comparison with a clock call or a name containing `deadline`, or when it sits under a timeout scope. The baseline is `"S064": 4`.
+- **Fixtures.** I ran the worktree's own analyzers on a scratch fixture (`RetryLoopScan`, `OperationalConstantAnalyzer`, `NestingAnalyzer` and ruff C901/PLR0912/PLR0915).
+  - The r2 loop shape is reported as retry-without-deadline (words: `CODEX_HOST_INPUT_CHECK_ATTEMPTS`). This reproduces the finding.
+  - The r3 shape is clean on S064, A007, S024 and complexity. That shape is: one deadline `loop.time() + CODEX_HOST_INPUT_CHECK_DEADLINE_SECONDS` before the first read; from the second round on, `if loop.time() + INTERVAL >= deadline: return None`, then sleep; one `next(..., None)` search; no helper chain; no `asyncio.timeout`.
+- **No renaming.** Renaming the constant to avoid "attempt" would game the rule, so it was not done.
+
+### R-17 code choice
+
+The ephemeral refusal is a `ConfigurationError`, not a `codex.*` code.
+- **D-5 and precedent.** D-5 keeps argument errors as `ConfigurationError`, and the goal path refuses ephemeral threads the same way (`codex_host.py:232-233`).
+- **What the caller sees.** At the tool boundary it becomes `configuration.invalid_argument`, with its next step: "Fix the argument or setup named in the message, then call again." (`constants/codex.py:438`).
+- **Why not an existing codex code.** The nearest one, `codex.run_option_unsupported`, has no `CODEX_NEXT_STEPS` entry, so `CodexErrorMapper.error` would raise `KeyError`. No code was added.
+
+### R-22 independent re-count
+
+This was a read-only, counts-only pass over local `~/.codex`:
+- 1,886 rollout files. 183 of them hold 244 skill entries in `UserMessage` content.
+- Order: text, skill in 230 messages; text, skill, skill in 7.
+- `goals_1.sqlite` `thread_goals` is keyed by `thread_id` and has 69 rows: complete 52, blocked 6, usage_limited 6, paused 4, active 1.
+- Everything matches the reviewer's figures. The 280-of-280 first-item ordering is the reviewer's count, and I did not re-count it.
+- No id, title, path or content was printed or recorded.
+
+### Final counts (r3)
+
+- **Host and tools:** 12 new `CodexHost` methods (27 public host functions in all); 11 new tools (26 in all; delete has none).
+- **Error vocabulary:** 4 new codes (`command_not_run`, `skill_not_found`, `skill_disabled`, `goal_unfinished`); 12 `CodexHostOperation` members.
+- **Lib surface:** 5 records and 1 enum.
+- **Code shape:** 4 new files, 20 new classes.
+- **Spec IDs:** FR 17, NFR 9, INV 35, AC 43, EC 50, D 25, A 21.
+- **Questions:** Q 19, all non-blocking. Each defaults to not built, or to the spec's behaviour.
+
+### Self-check (Stage E, re-run on r3)
+
+- **IDs:** every new ID (AC-42, AC-43, EC-48..50, A-21, Q-19) is defined and referenced.
+- **Tables:** every table row has its header's column count.
+- **Coverage:** every AC is in §12.1 or §12.3. Every FR names an INV or AC and appears in §12.1 or §12.3.
+- **Stale text:** the scan finds no stale r2 phrasing.
+- **No tests or production code were written.**
