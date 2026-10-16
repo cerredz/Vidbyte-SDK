@@ -166,6 +166,10 @@ class MultiProviderAggregator:
                 "proposer_count": len(self._proposers),
             }
         }
+        # @intent a-stopped-synthesis-keeps-its-stop
+        # The aggregator's reply is this run's answer, so a synthesis stopped by a budget, guard, or middleware reports that stop.
+        if not self._is_answer(reply):
+            metadata["stop_reason"] = reply.metadata["stop_reason"]
         return AggregateResult(content=self._reply_text(reply), candidates=dict(candidates), metadata=metadata)
 
     def _truncate(self, text: str) -> str:

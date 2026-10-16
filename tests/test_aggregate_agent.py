@@ -261,6 +261,24 @@ class MultiProviderAggregatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.candidates, {"final": "final-out", "done": "done-out", "plain": "plain-out", "bare": "bare-out"})
         self.assertEqual(result.metadata["aggregate"]["failed_labels"], [])
 
+    async def test_stopped_synthesis_reports_its_stop(self) -> None:
+        # [Silent Failure] An aggregator stopped by a budget, guard, or middleware ends with an SDK notice, so the result carries that stop.
+        for reason in (AgentStopReason.MAX_ITERATIONS, AgentStopReason.MIDDLEWARE_ABORT, AgentStopReason.TIMEOUT):
+            with self.subTest(stop_reason=reason.value):
+                notice = f"Agent runtime stopped after reaching {reason.value}."
+                engine = _engine([("ok", FakeAgent("ok", "good"))], aggregator=StoppedAgent("aggregator", notice, reason.value))
+                result = await engine.aggregate("q")
+                self.assertEqual(result.content, notice)
+                self.assertEqual(result.metadata["stop_reason"], reason.value)
+                self.assertEqual(result.metadata["aggregate"]["successful_labels"], ["ok"])
+
+    async def test_answered_synthesis_adds_no_stop_reason(self) -> None:
+        # [Edge Case] A final response, an isDone answer, and a reply with no stop reason or no metadata keep the metadata shape unchanged.
+        for aggregator in (StoppedAgent("final", "final-out", AgentStopReason.FINAL_RESPONSE.value), StoppedAgent("done", "done-out", AgentStopReason.IS_DONE.value), EchoAggregator(), PlainTextAgent("bare", "bare-out")):
+            with self.subTest(aggregator=aggregator.name):
+                result = await _engine([("ok", FakeAgent("ok", "good"))], aggregator=aggregator).aggregate("q")
+                self.assertEqual(set(result.metadata), {"aggregate"})
+
     async def test_truncates_candidate_text(self) -> None:
         # [Silent Failure] Candidate text is capped at max_candidate_chars in the synthesis block.
         aggregator = EchoAggregator()
@@ -359,6 +377,25 @@ class AggregateAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply.metadata["aggregate"]["successful_labels"], ["a"])
         self.assertEqual(reply.metadata["aggregate"]["failed_labels"], ["aborted"])
         self.assertNotIn("Agent runtime stopped", aggregator.last_message or "")
+
+    async def test_middleware_aborted_base_agent_aggregator_reports_its_stop(self) -> None:
+        # [Silent Failure] A real BaseAgent aggregator whose middleware aborts makes the AggregateAgent reply report that stop, not pass the notice off as an answer.
+        aborted = bind_test_runner(BaseAgent(name="aborted", system_prompt="s", provider="openai", model_name="gpt-5.4-mini", middleware=[AbortEveryModelCall()]), UsageRunner())
+        reply = await self._agent(aggregator=aborted).generate_reply("q")
+        self.assertTrue(reply.content.startswith("Agent runtime stopped"))
+        self.assertEqual(reply.metadata["stop_reason"], AgentStopReason.MIDDLEWARE_ABORT.value)
+        self.assertEqual(reply.metadata["aggregate"]["successful_labels"], ["a", "b"])
+
+    async def test_outer_aggregate_fails_an_inner_aggregate_whose_synthesis_stopped(self) -> None:
+        # [Silent Failure] An AggregateAgent used as a proposer whose synthesis stopped is a failed proposer, so its notice never reaches the outer aggregator.
+        aborted = bind_test_runner(BaseAgent(name="aborted", system_prompt="s", provider="openai", model_name="gpt-5.4-mini", middleware=[AbortEveryModelCall()]), UsageRunner())
+        inner = self._agent(name="inner", aggregator=aborted)
+        outer_aggregator = EchoAggregator()
+        reply = await self._agent(name="outer", proposers=[FakeAgent("direct", "direct-out"), inner], aggregator=outer_aggregator).generate_reply("q")
+        self.assertEqual(reply.metadata["aggregate"]["successful_labels"], ["direct"])
+        self.assertEqual(reply.metadata["aggregate"]["failed_labels"], ["inner"])
+        self.assertNotIn("Agent runtime stopped", outer_aggregator.last_message or "")
+        self.assertNotIn("stop_reason", reply.metadata)
 
     async def test_fork_preserves_aggregation(self) -> None:
         # [Hidden Assumption] A fork keeps aggregating rather than degrading to single-model.
