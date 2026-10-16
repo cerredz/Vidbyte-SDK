@@ -1,7 +1,7 @@
 ---
 spec: infinite-memory-events
 title: InfiniteMemoryAgent native run events and handoff
-status: approved         # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
+status: implemented      # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
 revision: 3
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-infinite-memory-events
@@ -9,7 +9,7 @@ branch: feat/infinite-memory-events
 base_commit: 7efceb5504b0d2ac64a3b5874ada635a47ac35cf
 created: 2026-10-15
 updated: 2026-10-16
-pr:
+pr: https://github.com/cerredz/Vidbyte-SDK/pull/1159
 ---
 
 # Spec: InfiniteMemoryAgent native run events and handoff
