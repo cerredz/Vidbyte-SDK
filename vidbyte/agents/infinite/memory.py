@@ -3,8 +3,8 @@
 PURPOSE: Defines InfiniteAgentMemory, one agent's handle on the shared workspace with its role, its remember quota, its new-file allowance, and its pair's staged entries; and the four memory tools built on it: remember, write_note, edit_file (FULL preset only), and drop_entry (verifiers only).
 ROLE IN CODEBASE: Built by InfiniteMemoryRuntime (runtime.py) for the root and by InfinitePair (launch.py) for each generator and verifier, whose two memories share one staged list and one dropped list. Calls InfiniteWorkspace (workspace.py) for every rule and write; InfinitePair reads files_written and the staged and dropped lists after each agent returns.
 ARCHITECTURE NOTE: The root's remember commits at once, while a pair agent's remember only stages the entry in memory, after the same rule check, so nothing a pair wrote reaches entries.jsonl before its verifier has judged it. Every tool returns ToolResult.error with what to fix and the remaining quota instead of raising, for a broken rule and for a write the disk refused or text UTF-8 cannot encode alike, so a refused call changes nothing and the tool stays usable. Every model-facing description and reply comes from the infinite_memory prompt family.
-FUNCTION INVENTORY: InfiniteAgentMemory.tools picks the tools for the role and preset; remember, write_note, edit_file, and drop carry out one tool call each and return its message; answer and refusal add the quota line to a message or a problem; quota renders the quota line, which InfinitePair also puts in a pair agent's first message. InfiniteRememberTool, InfiniteWriteNoteTool, InfiniteEditFileTool, and InfiniteDropEntryTool each have spec and execute; InfiniteRememberTool._draft turns the model's arguments into an InfiniteEntryDraft and refuses a multi-line paste with the advice to keep it in a note.
-COMMON MODIFICATION PATTERNS: A new memory tool is one BaseTool subclass here, one method on InfiniteAgentMemory, one case in tools, its name in vidbyte/lib/constants/infinite.py (and INFINITE_RESERVED_TOOL_NAMES), and its description leaves in the prompt family.
+FUNCTION INVENTORY: InfiniteAgentMemory.tools builds the tools InfiniteMemoryToolRegistry (vidbyte/lib/registries/infinite.py) grants the preset and role; remember, write_note, edit_file, and drop carry out one tool call each and return its message; answer and refusal add the quota line to a message or a problem; quota renders the quota line, which InfinitePair also puts in a pair agent's first message. InfiniteRememberTool, InfiniteWriteNoteTool, InfiniteEditFileTool, and InfiniteDropEntryTool each have spec and execute; InfiniteRememberTool._draft turns the model's arguments into an InfiniteEntryDraft and refuses a multi-line paste with the advice to keep it in a note.
+COMMON MODIFICATION PATTERNS: A new memory tool is one BaseTool subclass here, one method on InfiniteAgentMemory, one builder in tools, its name in the InfiniteMemoryToolRegistry rows that grant it, its name in vidbyte/lib/constants/infinite.py (and INFINITE_RESERVED_TOOL_NAMES), and its description leaves in the prompt family.
 WHAT NOT TO DO IN THIS FILE: 1. Do not write to entries.jsonl from a pair agent; stage instead. 2. Do not count a refused call against the quota. 3. Do not raise out of execute for a rule violation; return ToolResult.error. 4. Do not put module-level constants here; they live in vidbyte/lib/constants/infinite.py.
 KNOWN EDGE CASES: A staged key is s<staged + dropped + 1>, so keys never repeat within a pair even after drops. A generator and its verifier have separate quotas but share the staged list, so a verifier sees and can drop the generator's entries. write_note records a path once per agent in files_written even when the agent writes it several times.
 RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 6.1 INV-15 to INV-18 and INV-32, and 9.2); vidbyte/agents/infinite/README.md
@@ -13,7 +13,7 @@ TESTS: tests/features/infinite_memory_agent/test_infinite_memory_workspace.py an
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from vidbyte.agents.infinite.workspace import InfiniteWorkspace
@@ -27,13 +27,10 @@ from vidbyte.lib.constants.infinite import (
     INFINITE_WRITE_NOTE_TOOL_NAME,
 )
 from vidbyte.lib.dataclasses.infinite import InfiniteEntryDraft, InfiniteStagedEntry
-from vidbyte.lib.enums.infinite import (
-    InfiniteAgentRole,
-    InfiniteEntryKind,
-    InfiniteMemoryPreset,
-)
+from vidbyte.lib.enums.infinite import InfiniteAgentRole, InfiniteEntryKind
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import ConfigurationError, ToolExecutionError
+from vidbyte.lib.registries.infinite import InfiniteMemoryToolRegistry
 from vidbyte.prompts.catalog import Prompts
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec
@@ -57,21 +54,10 @@ class InfiniteAgentMemory:
 
     def tools(self) -> tuple[BaseTool, ...]:
         """Return this agent's memory tools: remember and write_note, edit_file under FULL, and drop_entry for a verifier."""
-        # @intent memory-tools-follow-role-and-preset
-        # Only FULL may change written text, and only a verifier judges
-        # staged entries, so each agent gets exactly the tools of INV-6.
-        tools: list[BaseTool] = [InfiniteRememberTool(self), InfiniteWriteNoteTool(self)]
-        match self.workspace.settings.preset:
-            case InfiniteMemoryPreset.FULL:
-                tools.append(InfiniteEditFileTool(self))
-            case _:
-                pass
-        match self.role:
-            case InfiniteAgentRole.VERIFIER:
-                tools.append(InfiniteDropEntryTool(self))
-            case _:
-                pass
-        return tuple(tools)
+        # InfiniteMemoryToolRegistry decides which tools the preset and
+        # the role grant; this builds each one over this agent's memory.
+        builders: dict[str, Callable[[InfiniteAgentMemory], BaseTool]] = {INFINITE_REMEMBER_TOOL_NAME: InfiniteRememberTool, INFINITE_WRITE_NOTE_TOOL_NAME: InfiniteWriteNoteTool, INFINITE_EDIT_FILE_TOOL_NAME: InfiniteEditFileTool, INFINITE_DROP_ENTRY_TOOL_NAME: InfiniteDropEntryTool}
+        return tuple(builders[name](self) for name in InfiniteMemoryToolRegistry.tool_names(self.workspace.settings.preset, self.role))
 
     def remember(self, draft: InfiniteEntryDraft) -> str:
         """Commit the root's entry at once, or stage a pair agent's entry for its verifier, and return the reply."""

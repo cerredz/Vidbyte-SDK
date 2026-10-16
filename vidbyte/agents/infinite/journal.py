@@ -2,8 +2,8 @@
 
 PURPOSE: Defines InfiniteRunJournal, the append-only record of one InfiniteMemory run in .runs/<run_id>.jsonl: the task, every pair that started, every pair that finished with its result card, and how the run ended, so an interrupted run can resume without redoing finished pairs.
 ROLE IN CODEBASE: Started by InfiniteMemoryRuntime.arun (runtime.py) for a new run, or found by InfiniteMemoryAgent.resume (agent.py) for an interrupted one; written and read by the launch tool (launch.py) for every pair; read by the agent to brief a resumed root and by the launch tool to brief a re-run generator and to cap the number of agents.
-ARCHITECTURE NOTE: One JSON object per line, as spec section 9.1 documents. Every record is opened, written, flushed, fsynced, and closed before the step it records counts as done, under one class-level lock, so a crash loses at most the record being written. That record is then a torn final line without its newline, which loading ignores and the next write cuts off. Card serialization and parsing live here, not on the record.
-FUNCTION INVENTORY: start writes run_started for a new run id; find validates a run id and loads the newest or the named unfinished journal; pair_started, pair_finished, and finish write one record each; finished, finished_children, interrupted_children, and agents_started read what was loaded or written; _whole_lines reads a journal file without its torn last line; _parse turns its lines into a journal; _append writes one record.
+ARCHITECTURE NOTE: One JSON object per line, as spec section 9.1 documents. The bytes on disk belong to AppendOnlyJsonl (vidbyte/lib/util/jsonl.py), the SDK's canonical durable log: every record is written, flushed, and fsynced before the step it records counts as done, so a crash loses at most the record being written, which is then a torn final line that loading ignores and the next write cuts off. What each record means, and card serialization and parsing, live here, not on the record.
+FUNCTION INVENTORY: start writes run_started for a new run id; find validates a run id and loads the newest or the named unfinished journal; pair_started, pair_finished, and finish write one record each; finished, finished_children, interrupted_children, and agents_started read what was loaded or written; _parse turns the whole lines AppendOnlyJsonl.read returns into a journal; _append stamps one record and hands it to AppendOnlyJsonl.append.
 COMMON MODIFICATION PATTERNS: A new record type adds one InfiniteJournalEvent member, one writer method here, and one case in _parse; old journals without it must still load.
 WHAT NOT TO DO IN THIS FILE: 1. Do not batch records or skip fsync; resume trusts every record already on disk. 2. Do not rewrite a journal; only the torn final line is ever cut off. 3. Do not follow a run id that fails INFINITE_RUN_ID_PATTERN; it could name a path outside .runs/. 4. Do not write settings or keys into a record.
 KNOWN EDGE CASES: A final line without its newline that does not parse is torn and ignored; one that parses is kept, and the next write first ends it with a newline. Any other malformed line refuses the journal with its line number. A pair started twice (re-run after a resume) counts as two pairs toward max_agents. Run ids start with a UTC timestamp, so sorting file names newest first sorts runs newest first.
@@ -14,15 +14,12 @@ TESTS: tests/features/infinite_memory_agent/test_infinite_memory_resume.py and t
 from __future__ import annotations
 
 import json
-import os
 import re
-import threading
 import uuid
 from collections.abc import Mapping
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import ClassVar
 
 from vidbyte.lib.constants.infinite import (
     INFINITE_MIN_AGENTS,
@@ -37,23 +34,23 @@ from vidbyte.lib.enums.infinite import (
     InfiniteVerdict,
 )
 from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.util.jsonl import AppendOnlyJsonl
 
 
 class InfiniteRunJournal:
     """The append-only journal of one run: its task, the pairs started and finished, and how it ended."""
 
-    _lock: ClassVar[threading.Lock] = threading.Lock()
-
-    def __init__(self, path: Path, task: str, *, started: list[str] | None = None, cards: dict[str, InfiniteResultCard] | None = None, stop_reason: str | None = None, repair: tuple[int, str] | None = None) -> None:
+    def __init__(self, path: Path, task: str, *, started: list[str] | None = None, cards: dict[str, InfiniteResultCard] | None = None, stop_reason: str | None = None, log: AppendOnlyJsonl | None = None) -> None:
         self.path = path
         self.run_id = path.stem
         self.task = task
         self.stop_reason = stop_reason
         self._started = started if started is not None else []
         self._cards = cards if cards is not None else {}
-        # Where a torn last line starts, and what to write before the
-        # next record, so the next write leaves only whole lines.
-        self._repair = repair
+        # The durable file under the journal; a loaded journal passes
+        # the log it was read through, so a torn last line it found is
+        # cut off before the next record.
+        self._log = log if log is not None else AppendOnlyJsonl(path)
 
     @classmethod
     def start(cls, workspace_root: Path, task: str) -> InfiniteRunJournal:
@@ -79,7 +76,7 @@ class InfiniteRunJournal:
             raise ConfigurationError(f"run_id must look like 20261015T024900Z-1a2b3c4d; got {run_id!r}.", details={"field": "run_id"})
         if run_id is None:
             paths = sorted((path for path in runs.glob("*.jsonl") if re.fullmatch(INFINITE_RUN_ID_PATTERN, path.stem)), reverse=True)
-            loaded = (cls._parse(path, *cls._whole_lines(path)) for path in paths)
+            loaded = (cls._parse(log, log.read()) for log in map(AppendOnlyJsonl, paths))
             journal = next((candidate for candidate in loaded if candidate.stop_reason is None), None)
             if journal is None:
                 raise ConfigurationError(f"There is no unfinished run in {runs} to resume; start a new one with run().", details={"field": "run_id"})
@@ -87,7 +84,8 @@ class InfiniteRunJournal:
         path = runs / f"{run_id}.jsonl"
         if not path.is_file():
             raise ConfigurationError(f"There is no run {run_id} in {runs}.", details={"field": "run_id"})
-        journal = cls._parse(path, *cls._whole_lines(path))
+        log = AppendOnlyJsonl(path)
+        journal = cls._parse(log, log.read())
         if journal.stop_reason is not None:
             raise ConfigurationError(f"Run {run_id} already finished, so it cannot be resumed; start a new one with run().", details={"field": "run_id"})
         return journal
@@ -125,27 +123,12 @@ class InfiniteRunJournal:
         """Return how many agents this run has started: two for every pair_started record."""
         return INFINITE_MIN_AGENTS * len(self._started)
 
-    @staticmethod
-    def _whole_lines(path: Path) -> tuple[str, tuple[int, str] | None]:
-        # @intent a-torn-tail-is-not-a-broken-journal
-        # A crash can cut the last record short. A last line without its
-        # newline that does not parse is left out here and cut off
-        # before the next write; one that parses is kept and gets its
-        # newline.
-        data = path.read_bytes()
-        head, newline, tail = data.rpartition(b"\n")
-        if not tail.strip():
-            return data.decode("utf-8", errors="replace"), None
-        try:
-            json.loads(tail)
-        except ValueError:
-            return (head + newline).decode("utf-8", errors="replace"), (len(head) + len(newline), "")
-        return data.decode("utf-8", errors="replace"), (len(data), "\n")
-
     @classmethod
-    def _parse(cls, path: Path, text: str, repair: tuple[int, str] | None) -> InfiniteRunJournal:
+    def _parse(cls, log: AppendOnlyJsonl, text: str) -> InfiniteRunJournal:
         # Every whole line must be a record in the documented shape, so
-        # a bad line refuses the journal with its line number.
+        # a bad line refuses the journal with its line number; the log
+        # has already left out a torn last line.
+        path = log.path
         task: str | None = None
         started: list[str] = []
         cards: dict[str, InfiniteResultCard] = {}
@@ -171,25 +154,16 @@ class InfiniteRunJournal:
                 raise ConfigurationError(f"The journal {path.name} has a bad record at line {number}; fix or remove that line before resuming.", details={"file": path.name, "line": number}) from exc
         if task is None:
             raise ConfigurationError(f"The journal {path.name} has no run_started record with its task, so it cannot be resumed.", details={"file": path.name})
-        return cls(path, task, started=started, cards=cards, stop_reason=stop_reason, repair=repair)
+        return cls(path, task, started=started, cards=cards, stop_reason=stop_reason, log=log)
 
     def _append(self, event: InfiniteJournalEvent, fields: Mapping[str, object]) -> None:
         # @intent every-record-is-durable-before-it-counts
-        # Each record is flushed and fsynced before the caller moves on,
-        # so resume can trust every whole line on disk. Records are
-        # ASCII JSON, so text UTF-8 cannot encode, such as a lone
-        # surrogate in a model's reply, is escaped instead of failing.
-        record = {"event": event.value, "at": datetime.now(timezone.utc).isoformat(timespec="seconds"), **fields}
-        with self._lock:
-            prefix = ""
-            if self._repair is not None:
-                offset, prefix = self._repair
-                os.truncate(self.path, offset)
-                self._repair = None
-            with self.path.open("a", encoding="utf-8", newline="\n") as handle:
-                handle.write(f"{prefix}{json.dumps(record)}\n")
-                handle.flush()
-                os.fsync(handle.fileno())
+        # One record per event, stamped in UTC. AppendOnlyJsonl fsyncs
+        # it before the caller moves on, so resume can trust every whole
+        # line on disk, and writes ASCII JSON, so text UTF-8 cannot
+        # encode, such as a lone surrogate in a model's reply, is
+        # escaped instead of failing.
+        self._log.append({"event": event.value, "at": datetime.now(timezone.utc).isoformat(timespec="seconds"), **fields})
 
 
 __all__ = ["InfiniteRunJournal"]

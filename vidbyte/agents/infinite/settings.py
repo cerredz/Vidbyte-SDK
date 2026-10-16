@@ -2,18 +2,18 @@
 
 PURPOSE: Defines the two public configuration objects of InfiniteMemoryAgent: InfiniteWorkspaceSettings, the one memory workspace folder with its memory preset, seed files, and caps; and InfiniteMemoryAgentSettings, the model, the prompt, the project folder, the developer's extra tools, the loop limits, and the delegation caps shared by every agent in the tree.
 ROLE IN CODEBASE: Built by the developer and passed to InfiniteMemoryAgent (vidbyte/agents/infinite/agent.py), which builds InfiniteWorkspace (workspace.py) from the workspace settings; read by the runtime, the launch tool, and the memory tools. Exported by vidbyte/agents/infinite/__init__.py, vidbyte/agents/__init__.py, and the root vidbyte package.
-ARCHITECTURE NOTE: Settings objects live in the owning agent's settings.py (AGENTS.md Placement Rules, exception 1). Every check runs in __post_init__, so a constructed object is always valid and nothing downstream checks it again. Paths are stored resolved and absolute, so a later change of the working directory never moves the project or the memory. Checking settings never touches the disk beyond reading: the workspace folder is created by InfiniteWorkspace, never here.
-FUNCTION INVENTORY: InfiniteWorkspaceSettings.__post_init__ is a narrated main function; _resolved_root checks and resolves root; _preset accepts the preset or its value; _seed_paths checks and resolves the seed files. InfiniteMemoryAgentSettings.__post_init__ is a narrated main function; _provider accepts the provider or its value; _validate_model checks the model against ProviderModelRegistry for that provider; _resolved_root_dir checks and resolves root_dir; _extra_tools checks the developer's tools against Tools(...) and the reserved names.
-COMMON MODIFICATION PATTERNS: A new setting adds one field, one check in its __post_init__, a named default in vidbyte/lib/constants/infinite.py, and one row in the folder README's limits table.
+ARCHITECTURE NOTE: Settings objects live in the owning agent's settings.py (AGENTS.md Placement Rules, exception 1). Every check runs in __post_init__, so a constructed object is always valid and nothing downstream checks it again. Each field check is one call to the SDK's canonical RecordFieldValidator or RecordFieldConverter (vidbyte/lib/dataclasses/validation.py), the model check is ProviderModelRegistry's, and the key match is ProviderKeyMatcher's; only the rules that tie two fields together or name the reserved tools are written here. Paths are stored resolved and absolute, so a later change of the working directory never moves the project or the memory. Checking settings never touches the disk beyond reading: the workspace folder is created by InfiniteWorkspace, never here.
+FUNCTION INVENTORY: InfiniteWorkspaceSettings.__post_init__ and InfiniteMemoryAgentSettings.__post_init__ are narrated main functions with no private helpers, and InfiniteMemoryAgentSettings.delegation_limits builds the DelegationLimits record for the middleware: RecordFieldConverter.to_folder resolves root and root_dir, to_enum accepts the preset and the provider or their values, to_files checks and resolves the seed files, to_tuple and Tools(...) check the developer's tools, and RecordFieldValidator checks the text fields and the caps.
+COMMON MODIFICATION PATTERNS: A new setting adds one field, one RecordFieldValidator or RecordFieldConverter call in its __post_init__ (a check they lack becomes a new option there, never a helper here), a named default in vidbyte/lib/constants/infinite.py, and one row in the folder README's limits table.
 WHAT NOT TO DO IN THIS FILE: 1. Do not create the workspace folder or any file here; a refused setting must leave the disk unchanged. 2. Do not put api_keys or vidbyte_api_key in an error message or in repr. 3. Do not accept a bare string where a sequence is expected; it would split into characters.
-KNOWN EDGE CASES: root="" and root_dir="" are refused even though Path("") is the current folder. A seed file is checked to exist now and copied later, at agent construction. Two seed files with the same file name are refused, because both would land at seed/<name>. True is refused for every cap, although Python counts it as an int.
+KNOWN EDGE CASES: root="" and root_dir="" are refused even though Path("") is the current folder. A seed file is checked to exist now and copied later, at agent construction. Two seed files with the same file name are refused, because both would land at seed/<name>. True is refused for every cap, although Python counts it as an int. A refusal names the field as InfiniteWorkspaceSettings.<field> or InfiniteMemoryAgentSettings.<field>, in the message and in details["field"].
 RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 8.5 and 9.3); vidbyte/agents/infinite/README.md
 TESTS: tests/features/infinite_memory_agent/test_infinite_memory_contract.py
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
@@ -30,13 +30,20 @@ from vidbyte.lib.constants.infinite import (
     INFINITE_DEFAULT_MAX_ITERATIONS,
     INFINITE_DEFAULT_MAX_PARALLEL,
     INFINITE_DEFAULT_MAX_TOKENS,
+    INFINITE_LAUNCH_TASKS_ARGUMENT,
+    INFINITE_LAUNCH_TOOL_NAME,
     INFINITE_MIN_AGENTS,
     INFINITE_MIN_CAP,
     INFINITE_RESERVED_TOOL_NAMES,
     INFINITE_TOOL_RESULT_MAX_CHARS,
 )
 from vidbyte.lib.dataclasses.agents import ProviderKeys
+from vidbyte.lib.dataclasses.middleware import DelegationLimits
 from vidbyte.lib.dataclasses.security import PermissionPolicy
+from vidbyte.lib.dataclasses.validation import (
+    RecordFieldConverter,
+    RecordFieldValidator,
+)
 from vidbyte.lib.enums.infinite import InfiniteMemoryPreset
 from vidbyte.lib.enums.model_provider import ModelProvider
 from vidbyte.lib.enums.text_model import TextModelMode
@@ -68,61 +75,28 @@ class InfiniteWorkspaceSettings:
 
     def __post_init__(self) -> None:
         # Keep the workspace folder as an absolute path. The folder may
-        # not exist yet; the workspace creates it when the agent is
-        # built.
-        object.__setattr__(self, "root", self._resolved_root())
+        # not exist yet, because the workspace creates it when the agent
+        # is built, but it may never be an existing file.
+        object.__setattr__(self, "root", RecordFieldConverter.to_folder(self.root, "InfiniteWorkspaceSettings.root"))
 
-        # Accept the preset's value as text too, and keep the enum.
-        object.__setattr__(self, "preset", self._preset())
+        # Accept the preset's value as text too, and keep the enum; the
+        # preset decides which memory tools every agent holds.
+        object.__setattr__(self, "preset", RecordFieldConverter.to_enum(self.preset, InfiniteMemoryPreset, "InfiniteWorkspaceSettings.preset"))
 
-        # Check that every seed file exists and that no two share a file
-        # name, and keep their absolute paths.
-        object.__setattr__(self, "seed_files", self._seed_paths())
+        # @intent seeds-exist-and-keep-their-names-apart
+        # Each seed is copied to seed/<file name>, so each must be an
+        # existing file and no two may share a file name; keep their
+        # absolute paths.
+        object.__setattr__(self, "seed_files", RecordFieldConverter.to_files(self.seed_files, "InfiniteWorkspaceSettings.seed_files", distinct_names=True))
 
         # @intent workspace-caps-are-whole-numbers
         # Every cap is a whole number of at least 1, so no cap can be
         # switched off by 0, a fraction, or True, and one note may never
         # be larger than the whole workspace.
         for name in ("max_files", "max_tokens", "max_file_tokens", "max_entry_tokens", "max_entries_per_agent"):
-            value = getattr(self, name)
-            if isinstance(value, bool) or not isinstance(value, int) or value < INFINITE_MIN_CAP:
-                raise ConfigurationError(f"InfiniteWorkspaceSettings.{name} must be a whole number of at least {INFINITE_MIN_CAP}; got {value!r}.", details={"field": name})
+            RecordFieldValidator.require_int(getattr(self, name), f"InfiniteWorkspaceSettings.{name}", minimum=INFINITE_MIN_CAP)
         if self.max_file_tokens > self.max_tokens:
-            raise ConfigurationError(f"InfiniteWorkspaceSettings.max_file_tokens must be at most max_tokens ({self.max_tokens}); got {self.max_file_tokens}.", details={"field": "max_file_tokens"})
-
-    def _resolved_root(self) -> Path:
-        # The folder path must be non-blank, and it may be missing or a
-        # folder, but never an existing file.
-        if not isinstance(self.root, (str, Path)) or not str(self.root).strip():
-            raise ConfigurationError(f"InfiniteWorkspaceSettings.root must be a folder path; got {self.root!r}.", details={"field": "root"})
-        root = Path(self.root).expanduser().resolve()
-        if root.exists() and not root.is_dir():
-            raise ConfigurationError(f"InfiniteWorkspaceSettings.root must be a folder, but {root} is a file.", details={"field": "root"})
-        return root
-
-    def _preset(self) -> InfiniteMemoryPreset:
-        # The preset decides which memory tools every agent holds.
-        try:
-            return InfiniteMemoryPreset(self.preset)
-        except ValueError as exc:
-            choices = ", ".join(preset.value for preset in InfiniteMemoryPreset)
-            raise ConfigurationError(f"InfiniteWorkspaceSettings.preset must be one of {choices}; got {self.preset!r}.", details={"field": "preset"}) from exc
-
-    def _seed_paths(self) -> tuple[Path, ...]:
-        # Each seed is copied to seed/<file name>, so each must be an
-        # existing file and no two may share a file name.
-        if isinstance(self.seed_files, (str, bytes)) or not isinstance(self.seed_files, Sequence):
-            raise ConfigurationError(f"InfiniteWorkspaceSettings.seed_files must be a tuple or list of file paths; got {self.seed_files!r}.", details={"field": "seed_files"})
-        seeds: list[Path] = []
-        for raw in self.seed_files:
-            path = Path(raw).expanduser().resolve() if isinstance(raw, (str, Path)) and str(raw).strip() else None
-            if path is None or not path.is_file():
-                raise ConfigurationError(f"InfiniteWorkspaceSettings.seed_files must name existing files; {raw} is not one.", details={"field": "seed_files"})
-            clash = next((seed for seed in seeds if seed.name == path.name), None)
-            if clash is not None:
-                raise ConfigurationError(f"InfiniteWorkspaceSettings.seed_files must have distinct file names, but {clash} and {path} are both named {path.name}.", details={"field": "seed_files"})
-            seeds.append(path)
-        return tuple(seeds)
+            raise ConfigurationError(f"InfiniteWorkspaceSettings.max_file_tokens must be at most max_tokens ({self.max_tokens}); got {self.max_file_tokens}.", details={"field": "InfiniteWorkspaceSettings.max_file_tokens"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,94 +141,68 @@ class InfiniteMemoryAgentSettings:
         # provider, policy, and loop are applied to every agent as
         # given.
         for name in ("name", "system_prompt", "model_name"):
-            value = getattr(self, name)
-            if not isinstance(value, str) or not value.strip():
-                raise ConfigurationError(f"InfiniteMemoryAgentSettings.{name} must be non-blank text; got {value!r}.", details={"field": name})
+            RecordFieldValidator.require_text(getattr(self, name), f"InfiniteMemoryAgentSettings.{name}")
 
-        # Accept the provider's value as text too, and keep the enum.
-        object.__setattr__(self, "provider", self._provider())
+        # @intent provider-accepts-its-value
+        # Developers may name the provider as text ("openai"); the enum
+        # is stored, so every agent in the tree gets the same provider.
+        object.__setattr__(self, "provider", RecordFieldConverter.to_enum(self.provider, ModelProvider, "InfiniteMemoryAgentSettings.provider"))
 
-        # Check that the SDK can run the model under that provider.
-        self._validate_model()
-
-        # Bash runs in the project folder, so it must exist; keep its
-        # absolute path.
-        object.__setattr__(self, "root_dir", self._resolved_root_dir())
-
-        # The workspace, the policy, and the loop must be the SDK's own
-        # objects, which have checked themselves.
-        for name, kind in (("workspace", InfiniteWorkspaceSettings), ("permission_policy", PermissionPolicy), ("loop", AgentLoopSettings)):
-            if not isinstance(getattr(self, name), kind):
-                raise ConfigurationError(f"InfiniteMemoryAgentSettings.{name} must be a {kind.__name__}; got {type(getattr(self, name)).__name__}.", details={"field": name})
-
-        # Match the developer's keys once against the provider; the root
-        # and every subagent carry this one record, which is never shown.
-        matched = ProviderKeyMatcher.match(self.api_keys, primary=self.provider, vidbyte_api_key=self.vidbyte_api_key, field_name="InfiniteMemoryAgentSettings.api_keys")
-        object.__setattr__(self, "api_keys", matched)
-        object.__setattr__(self, "vidbyte_api_key", matched.vidbyte_api_key)
-        if not isinstance(self.model_mode, TextModelMode):
-            raise ConfigurationError(f"InfiniteMemoryAgentSettings.model_mode must be a TextModelMode value; got {self.model_mode!r}.", details={"field": "model_mode"})
-
-        # The temperature and timeout are numbers or None, and BaseAgent
-        # checks their ranges.
-        for name in ("temperature", "timeout_seconds"):
-            value = getattr(self, name)
-            if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float))):
-                raise ConfigurationError(f"InfiniteMemoryAgentSettings.{name} must be a number or None; got {value!r}.", details={"field": name})
-
-        # Check the developer's extra tools and keep them as a tuple.
-        object.__setattr__(self, "tools", self._extra_tools())
-
-        # @intent delegation-caps-are-whole-numbers
-        # The depth and batch caps allow at least one level and one
-        # task, and the agent cap at least one generator and verifier
-        # pair.
-        for name, minimum in (("max_depth", INFINITE_MIN_CAP), ("max_parallel", INFINITE_MIN_CAP), ("max_agents", INFINITE_MIN_AGENTS)):
-            value = getattr(self, name)
-            if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
-                raise ConfigurationError(f"InfiniteMemoryAgentSettings.{name} must be a whole number of at least {minimum}; got {value!r}.", details={"field": name})
-
-    def _validate_model(self) -> None:
         # @intent the-model-runs-under-its-provider
         # Every agent in the tree uses this model, so one the SDK cannot
         # run under the provider is refused here, not at a child's call.
         try:
             ProviderModelRegistry.validate_provider_model_pair(self.provider, self.model_name)
         except ConfigurationError as exc:
-            raise ConfigurationError(f"InfiniteMemoryAgentSettings.model_name must be a model the SDK can run under the given provider; {exc.message}", details={"field": "model_name"}) from exc
+            raise ConfigurationError(f"InfiniteMemoryAgentSettings.model_name must be a model the SDK can run under the given provider; {exc.message}", details={"field": "InfiniteMemoryAgentSettings.model_name"}) from exc
 
-    def _provider(self) -> ModelProvider:
-        # @intent provider-accepts-its-value
-        # Developers may name the provider as text ("openai"); the enum
-        # is stored, so every agent in the tree gets the same provider.
-        try:
-            return self.provider if isinstance(self.provider, ModelProvider) else ModelProvider(self.provider)
-        except ValueError as exc:
-            raise ConfigurationError(f"InfiniteMemoryAgentSettings.provider must be a ModelProvider or its value; got {self.provider!r}.", details={"field": "provider"}) from exc
+        # Bash runs in the project folder, so it must already exist;
+        # keep its absolute path.
+        object.__setattr__(self, "root_dir", RecordFieldConverter.to_folder(self.root_dir, "InfiniteMemoryAgentSettings.root_dir", must_exist=True))
 
-    def _resolved_root_dir(self) -> Path:
-        # The project folder is where bash runs, so it must already
-        # exist.
-        root_dir = Path(self.root_dir).expanduser().resolve() if isinstance(self.root_dir, (str, Path)) and str(self.root_dir).strip() else None
-        if root_dir is None or not root_dir.is_dir():
-            raise ConfigurationError(f"InfiniteMemoryAgentSettings.root_dir must be an existing folder; got {self.root_dir}.", details={"field": "root_dir"})
-        return root_dir
+        # The workspace, the policy, and the loop must be the SDK's own
+        # objects, which have checked themselves.
+        for name, kind in (("workspace", InfiniteWorkspaceSettings), ("permission_policy", PermissionPolicy), ("loop", AgentLoopSettings)):
+            RecordFieldConverter.require_instance(getattr(self, name), f"InfiniteMemoryAgentSettings.{name}", kind)
 
-    def _extra_tools(self) -> tuple[object, ...]:
+        # Match the developer's keys once against the provider; the root
+        # and every subagent carry this one record, which is never shown.
+        matched = ProviderKeyMatcher.match(self.api_keys, primary=self.provider, vidbyte_api_key=self.vidbyte_api_key, field_name="InfiniteMemoryAgentSettings.api_keys")
+        object.__setattr__(self, "api_keys", matched)
+        object.__setattr__(self, "vidbyte_api_key", matched.vidbyte_api_key)
+        RecordFieldValidator.require_enum(self.model_mode, TextModelMode, "InfiniteMemoryAgentSettings.model_mode")
+
+        # The temperature and timeout are numbers or None, and BaseAgent
+        # checks their ranges.
+        for name in ("temperature", "timeout_seconds"):
+            RecordFieldConverter.require_instance(getattr(self, name), f"InfiniteMemoryAgentSettings.{name}", (int, float), optional=True)
+
         # @intent extra-tools-never-shadow-preset-tools
         # The extras must form a valid catalog, and none may take the
         # name of a preset or run-bound tool, or the model could not
-        # tell which one it is calling.
-        if isinstance(self.tools, (str, bytes)) or not isinstance(self.tools, Sequence):
-            raise ConfigurationError(f"InfiniteMemoryAgentSettings.tools must be a tuple or list of tools; got a {type(self.tools).__name__}.", details={"field": "tools"})
+        # tell which one it is calling. They are kept as a tuple.
+        tools = RecordFieldConverter.to_tuple(self.tools, "InfiniteMemoryAgentSettings.tools", item_type=object)
         try:
-            names = Tools(cast("tuple[ToolInput, ...]", self.tools)).names()
+            names = Tools(cast("tuple[ToolInput, ...]", tools)).names()
         except (ToolRegistrationError, TypeError) as exc:
-            raise ConfigurationError("InfiniteMemoryAgentSettings.tools must hold tools with distinct names.", details={"field": "tools"}) from exc
+            raise ConfigurationError("InfiniteMemoryAgentSettings.tools must hold tools with distinct names.", details={"field": "InfiniteMemoryAgentSettings.tools"}) from exc
         taken = [name for name in names if name in INFINITE_RESERVED_TOOL_NAMES]
         if taken:
-            raise ConfigurationError(f"InfiniteMemoryAgentSettings.tools must not reuse a reserved tool name; got {', '.join(taken)}. Reserved: {', '.join(INFINITE_RESERVED_TOOL_NAMES)}.", details={"field": "tools"})
-        return tuple(self.tools)
+            raise ConfigurationError(f"InfiniteMemoryAgentSettings.tools must not reuse a reserved tool name; got {', '.join(taken)}. Reserved: {', '.join(INFINITE_RESERVED_TOOL_NAMES)}.", details={"field": "InfiniteMemoryAgentSettings.tools"})
+        object.__setattr__(self, "tools", tools)
+
+        # @intent delegation-caps-are-whole-numbers
+        # The depth and batch caps allow at least one level and one
+        # task, and the agent cap at least one generator and verifier
+        # pair. DelegationLimitsMiddleware enforces the first two on
+        # every agent in the tree.
+        for name, minimum in (("max_depth", INFINITE_MIN_CAP), ("max_parallel", INFINITE_MIN_CAP), ("max_agents", INFINITE_MIN_AGENTS)):
+            RecordFieldValidator.require_int(getattr(self, name), f"InfiniteMemoryAgentSettings.{name}", minimum=minimum)
+
+    @property
+    def delegation_limits(self) -> DelegationLimits:
+        """Return the depth and batch caps that DelegationLimitsMiddleware holds launch_subagent to on every delegating agent."""
+        return DelegationLimits(tool_name=INFINITE_LAUNCH_TOOL_NAME, batch_argument=INFINITE_LAUNCH_TASKS_ARGUMENT, max_depth=self.max_depth, max_parallel=self.max_parallel)
 
 
 __all__ = ["InfiniteMemoryAgentSettings", "InfiniteWorkspaceSettings"]

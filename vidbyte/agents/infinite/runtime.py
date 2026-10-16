@@ -27,16 +27,12 @@ from vidbyte.context.manager import ContextManager
 from vidbyte.context.primitives import TextContextItem
 from vidbyte.context.runtime import ContextWindowPlacement
 from vidbyte.lib.constants.infinite import (
-    INFINITE_DROP_ENTRY_TOOL_NAME,
-    INFINITE_EDIT_FILE_TOOL_NAME,
-    INFINITE_LAUNCH_TOOL_NAME,
     INFINITE_MAP_PRIMITIVE_ID,
     INFINITE_MAP_TITLE,
-    INFINITE_REMEMBER_TOOL_NAME,
     INFINITE_RESERVED_TOOL_NAMES,
     INFINITE_ROOT_DEPTH,
     INFINITE_ROOT_KEY,
-    INFINITE_WRITE_NOTE_TOOL_NAME,
+    INFINITE_RUN_BOUND_TOOL_NAMES,
 )
 from vidbyte.lib.dataclasses.context import BaseAgentContext
 from vidbyte.lib.dataclasses.runner import RunnerHandle
@@ -71,7 +67,7 @@ class InfiniteMemoryRuntime(AgentRuntime):
         # the catalog refuse it mid-run, so refuse the run before any
         # journal record is written. Every other non-internal tool the
         # root holds now is an extra it may hand on to a pair.
-        clash = [name for name in self.tools.names() if name in (INFINITE_LAUNCH_TOOL_NAME, INFINITE_REMEMBER_TOOL_NAME, INFINITE_WRITE_NOTE_TOOL_NAME, INFINITE_EDIT_FILE_TOOL_NAME, INFINITE_DROP_ENTRY_TOOL_NAME)]
+        clash = [name for name in self.tools.names() if name in INFINITE_RUN_BOUND_TOOL_NAMES]
         if clash:
             raise ConfigurationError(f"The tool {clash[0]!r} uses a name InfiniteMemoryAgent reserves for its own tools; rename it. Reserved: {', '.join(INFINITE_RESERVED_TOOL_NAMES)}.", details={"tool": clash[0], "reserved": list(INFINITE_RESERVED_TOOL_NAMES)})
         extras = tuple(tool for tool in self.tools.all() if tool.spec().name not in INFINITE_RESERVED_TOOL_NAMES and not self._tool_name_is_internal(tool.spec().name))

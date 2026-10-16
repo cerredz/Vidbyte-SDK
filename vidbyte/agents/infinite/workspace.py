@@ -2,10 +2,10 @@
 
 PURPOSE: Defines InfiniteWorkspace, the one memory folder every agent in an InfiniteMemory tree shares, and its deterministic guardrails: setup of the folder, the bookkeeping files, and the seeds; the file and token caps recounted from disk before every tool write; the sparse-entry rules; entry commits and supersedes; note writes and edits inside the allowed paths; and the workspace map every agent sees.
 ROLE IN CODEBASE: Built once by InfiniteMemoryAgent (agent.py) from InfiniteWorkspaceSettings (settings.py); called by the memory tools (memory.py) for every remember, write_note, and edit_file, by the launch tool (launch.py) to resolve "#N" context ids and to commit a pair's staged entries, and by the runtime (runtime.py) and the launch tool to render the map.
-ARCHITECTURE NOTE: All data is plain files under the root (spec section 9.1): entries.jsonl holds the live entries, superseded.jsonl the replaced ones, files.jsonl one description per created note. Nothing is cached; every check reads the disk, so files that bash or the developer wrote count too. Every write runs under one class-level lock and replaces whole files atomically (temp file plus os.replace), so a reader never sees half a line. Rule violations raise ToolExecutionError with what to fix, which the memory tools return to the model.
-FUNCTION INVENTORY: __init__ and commit_entry are narrated main functions. usage, entries, check_entry, write_note, edit_file, and map_text are the public operations. _file_tokens counts every file's tokens from disk; _text reads one bookkeeping file; _entry_lines parses a bookkeeping file into entries; _entry_rules refuses text UTF-8 cannot hold, then applies the sparse-entry rules; _note_path applies the note path rules; _room applies the workspace caps to a set of new file texts; _descriptions reads files.jsonl leniently for the map; _replace writes one file atomically; _entry_json and _stamp format one entry line and one UTC stamp.
+ARCHITECTURE NOTE: All data is plain files under the root (spec section 9.1): entries.jsonl holds the live entries, superseded.jsonl the replaced ones, files.jsonl one description per created note. Nothing is cached; every check reads the disk through FolderUsage (vidbyte/lib/tools/filesystem/usage.py), so files that bash or the developer wrote count too. Every write runs under one class-level lock and replaces whole files through LocalFileSystemBackend.write_text(atomic=True), so a reader never sees half a line. Rule violations raise ToolExecutionError with what to fix, which the memory tools return to the model.
+FUNCTION INVENTORY: __init__ and commit_entry are narrated main functions. usage, entries, check_entry, write_note, edit_file, and map_text are the public operations. _text reads one bookkeeping file; _entry_lines parses a bookkeeping file into entries; _entry_rules refuses text UTF-8 cannot hold, then applies the sparse-entry rules; _note_path applies the note path rules; _room applies the workspace caps to FolderUsage's projection of a write; _descriptions reads files.jsonl leniently for the map; _entry_json and _stamp format one entry line and one UTC stamp. Counting files from disk is FolderUsage's and atomic writes are LocalFileSystemBackend's.
 COMMON MODIFICATION PATTERNS: A new guardrail is one more check in the operation it guards, with an @intent comment and a ToolExecutionError message that says what to fix. A new bookkeeping file adds its name to vidbyte/lib/constants/infinite.py, to the setup loop in __init__, and to the reserved paths in _note_path.
-WHAT NOT TO DO IN THIS FILE: 1. Do not cache file counts, entries, or descriptions; bash can change the folder between any two calls. 2. Do not write outside the lock or write a file in place; use _replace. 3. Do not apply max_file_tokens to the bookkeeping files; only max_tokens bounds them (INV-19). 4. Do not raise from map_text on bad file content.
+WHAT NOT TO DO IN THIS FILE: 1. Do not cache file counts, entries, or descriptions; bash can change the folder between any two calls. 2. Do not write outside the lock or write a file in place; use self.backend.write_text(..., atomic=True). 3. Do not apply max_file_tokens to the bookkeeping files; only max_tokens bounds them (INV-19). 4. Do not raise from map_text on bad file content.
 KNOWN EDGE CASES: A malformed line in entries.jsonl or superseded.jsonl makes every entry operation fail with the file and line number until it is fixed, while map_text keeps working. A supersede writes the old line to superseded.jsonl before it rewrites entries.jsonl, so a crash between the two leaves the line in both files rather than in neither. Token counts are TokenEstimate's character estimate of the utf-8 text, with undecodable bytes counted as replacement characters. Text UTF-8 cannot hold raises UnicodeEncodeError, a ValueError the memory tools turn into a refusal, before any file is written; a pair agent's entry meets that check when it is staged, so InfinitePair._commit, which catches only ToolExecutionError, never sees it.
 RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 6.1 INV-16 to INV-24, and 9.1); vidbyte/agents/infinite/README.md
 TESTS: tests/features/infinite_memory_agent/test_infinite_memory_workspace.py, tests/features/infinite_memory_agent/test_infinite_memory_verification.py, and tests/features/infinite_memory_agent/test_infinite_memory_contract.py
@@ -14,9 +14,7 @@ TESTS: tests/features/infinite_memory_agent/test_infinite_memory_workspace.py, t
 from __future__ import annotations
 
 import json
-import os
 import stat
-import tempfile
 import threading
 from collections.abc import Mapping
 from datetime import datetime, timezone
@@ -35,6 +33,7 @@ from vidbyte.lib.constants.infinite import (
     INFINITE_SEED_DIRNAME,
     INFINITE_SEED_LABEL,
     INFINITE_SUPERSEDED_FILE,
+    INFINITE_UNCOUNTED_DIRNAMES,
 )
 from vidbyte.lib.dataclasses.filesystem import FileSystemToolConfig
 from vidbyte.lib.dataclasses.infinite import (
@@ -48,6 +47,7 @@ from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import ConfigurationError, ToolExecutionError
 from vidbyte.lib.tools.filesystem.backends.local import LocalFileSystemBackend
 from vidbyte.lib.tools.filesystem.permissions import FileSystemPermissions
+from vidbyte.lib.tools.filesystem.usage import FolderUsage
 from vidbyte.lib.util.text import (
     TOKEN_ESTIMATE_CHARS_PER_TOKEN,
     SubstringCounter,
@@ -84,11 +84,12 @@ class InfiniteWorkspace:
 
         # Refuse a workspace that already breaks a cap, so no agent
         # starts in a workspace where every write would be refused.
-        counts = self._file_tokens()
-        if len(counts) > settings.max_files:
-            raise ConfigurationError(f"The workspace at {self.root} holds {len(counts)} files, over max_files ({settings.max_files}); raise the cap or remove files.", details={"field": "max_files"})
-        if sum(counts.values()) > settings.max_tokens:
-            raise ConfigurationError(f"The workspace at {self.root} holds {sum(counts.values())} tokens, over max_tokens ({settings.max_tokens}); raise the cap or remove files.", details={"field": "max_tokens"})
+        counts = FolderUsage.tokens_by_file(self.root, skip=INFINITE_UNCOUNTED_DIRNAMES)
+        totals = FolderUsage.totals(counts, {})
+        if totals.files > settings.max_files:
+            raise ConfigurationError(f"The workspace at {self.root} holds {totals.files} files, over max_files ({settings.max_files}); raise the cap or remove files.", details={"field": "max_files"})
+        if totals.tokens > settings.max_tokens:
+            raise ConfigurationError(f"The workspace at {self.root} holds {totals.tokens} tokens, over max_tokens ({settings.max_tokens}); raise the cap or remove files.", details={"field": "max_tokens"})
         for seed in settings.seed_files:
             seed_tokens = counts[f"{INFINITE_SEED_DIRNAME}/{Path(seed).name}"]
             if seed_tokens > settings.max_file_tokens:
@@ -96,8 +97,8 @@ class InfiniteWorkspace:
 
     def usage(self) -> InfiniteWorkspaceUsage:
         """Return the file count and token total of everything under the root except the run journals."""
-        counts = self._file_tokens()
-        return InfiniteWorkspaceUsage(files=len(counts), tokens=sum(counts.values()))
+        totals = FolderUsage.totals(FolderUsage.tokens_by_file(self.root, skip=INFINITE_UNCOUNTED_DIRNAMES), {})
+        return InfiniteWorkspaceUsage(files=totals.files, tokens=totals.tokens)
 
     def entries(self, ids: tuple[int, ...]) -> tuple[InfiniteEntry, ...]:
         """Return the live entries with these ids, in order, or raise ToolExecutionError naming the first id that is not live."""
@@ -144,11 +145,12 @@ class InfiniteWorkspace:
 
             # Refuse the commit if the new files would pass a workspace
             # cap; the bookkeeping files have no per-file cap.
-            self._room(self._file_tokens(), changed)
+            self._room(FolderUsage.tokens_by_file(self.root, skip=INFINITE_UNCOUNTED_DIRNAMES), changed)
 
-            # Write the replaced line first, then the live entries.
+            # Write the replaced line first, then the live entries, each
+            # swapped in whole.
             for relative, text in changed.items():
-                self._replace(relative, text)
+                self.backend.write_text(self.root / relative, text, encoding="utf-8", create_parents=True, newline="", atomic=True)
         return entry
 
     def write_note(self, path: str, text: str, description: str | None, *, by: str, run: str, may_create: bool) -> bool:
@@ -172,7 +174,7 @@ class InfiniteWorkspace:
             if created:
                 record = {"path": relative, "description": description, "by": by, "run": run, "at": self._stamp()}
                 changed[INFINITE_FILES_FILE] = self._text(INFINITE_FILES_FILE) + json.dumps(record, ensure_ascii=False) + "\n"
-            self._room(self._file_tokens(), changed)
+            self._room(FolderUsage.tokens_by_file(self.root, skip=INFINITE_UNCOUNTED_DIRNAMES), changed)
             # @intent a-refused-note-writes-nothing
             # A new note changes two files, so both texts are encoded
             # before either is written; text UTF-8 cannot hold is then
@@ -180,7 +182,7 @@ class InfiniteWorkspace:
             for content in changed.values():
                 content.encode("utf-8")
             for name, content in changed.items():
-                self._replace(name, content)
+                self.backend.write_text(self.root / name, content, encoding="utf-8", create_parents=True, newline="", atomic=True)
         return created
 
     def edit_file(self, path: str, old_text: str, new_text: str) -> None:
@@ -199,8 +201,8 @@ class InfiniteWorkspace:
             note = content.replace(old_text, new_text, 1)
             if TokenEstimate.count(note) > self.settings.max_file_tokens:
                 raise ToolExecutionError(f"{relative} would be {TokenEstimate.count(note)} tokens, over max_file_tokens ({self.settings.max_file_tokens}); write a shorter replacement.")
-            self._room(self._file_tokens(), {relative: note})
-            self._replace(relative, note)
+            self._room(FolderUsage.tokens_by_file(self.root, skip=INFINITE_UNCOUNTED_DIRNAMES), {relative: note})
+            self.backend.write_text(target, note, encoding="utf-8", create_parents=True, newline="", atomic=True)
 
     def map_text(self) -> str:
         """Render the workspace map: the totals against their caps, then one line per file with its tokens and description."""
@@ -208,7 +210,7 @@ class InfiniteWorkspace:
         # Every agent needs the map, so a malformed bookkeeping line
         # only costs that file its description; it never stops the
         # render.
-        counts = self._file_tokens()
+        counts = FolderUsage.tokens_by_file(self.root, skip=INFINITE_UNCOUNTED_DIRNAMES)
         descriptions = self._descriptions(self._text(INFINITE_FILES_FILE))
         live = sum(1 for line in self._text(INFINITE_ENTRIES_FILE).split("\n") if line.strip())
         header = Prompts().get(Prompt.INFINITE_MEMORY_MAP_HEADER).format(files=len(counts), max_files=self.settings.max_files, tokens=sum(counts.values()), max_tokens=self.settings.max_tokens, entries=live)
@@ -227,17 +229,6 @@ class InfiniteWorkspace:
                 return f"{shown}\n{INFINITE_MORE_FILES.format(count=len(lines) - index)}"
             shown = f"{shown}\n{line}"
         return shown
-
-    def _file_tokens(self) -> dict[str, int]:
-        # @intent caps-are-counted-from-disk
-        # Every file under the root counts, whoever wrote it, except the
-        # run journals, so bash cannot slip files past the caps.
-        counts: dict[str, int] = {}
-        for path in sorted(self.root.rglob("*")):
-            relative = path.relative_to(self.root)
-            if path.is_file() and relative.parts[0] != INFINITE_RUNS_DIRNAME:
-                counts[relative.as_posix()] = TokenEstimate.count(path.read_text(encoding="utf-8", errors="replace"))
-        return counts
 
     def _text(self, name: str) -> str:
         # One bookkeeping file's text, or "" when bash removed it.
@@ -316,28 +307,11 @@ class InfiniteWorkspace:
         # @intent writes-never-pass-the-workspace-caps
         # The caps are checked against the files as they would be after
         # the write, counted from disk just before it.
-        files = len(counts) + sum(1 for relative in changed if relative not in counts)
-        tokens = sum(counts.values()) - sum(counts.get(relative, 0) for relative in changed) + sum(TokenEstimate.count(text) for text in changed.values())
-        if files > self.settings.max_files:
-            raise ToolExecutionError(f"This write would make {files} files, over max_files ({self.settings.max_files}); append to an existing note instead.")
-        if tokens > self.settings.max_tokens:
-            raise ToolExecutionError(f"This write would make the workspace {tokens} tokens, over max_tokens ({self.settings.max_tokens}); write less, or ask the developer to raise the cap.")
-
-    def _replace(self, relative: str, text: str) -> None:
-        # Write to a temporary file beside the target and swap it in, so
-        # no reader ever sees a half-written file. A failed write or
-        # swap removes the temporary file, which would otherwise count
-        # toward the caps, and leaves the target as it was.
-        target = self.root / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        handle, temporary = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
-        try:
-            with os.fdopen(handle, "w", encoding="utf-8", newline="") as file:
-                file.write(text)
-            os.replace(temporary, target)
-        except BaseException:
-            os.unlink(temporary)
-            raise
+        after = FolderUsage.totals(counts, changed)
+        if after.files > self.settings.max_files:
+            raise ToolExecutionError(f"This write would make {after.files} files, over max_files ({self.settings.max_files}); append to an existing note instead.")
+        if after.tokens > self.settings.max_tokens:
+            raise ToolExecutionError(f"This write would make the workspace {after.tokens} tokens, over max_tokens ({self.settings.max_tokens}); write less, or ask the developer to raise the cap.")
 
     @staticmethod
     def _descriptions(text: str) -> dict[str, str]:

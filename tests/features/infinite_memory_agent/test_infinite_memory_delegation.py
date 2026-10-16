@@ -3,7 +3,7 @@
 PURPOSE: Proves what launch_subagent promises the root and every generator: pairs in one call run at the same time, each verifier follows its own generator, the parent sees only capped cards in task order, a bad batch starts nothing, depth and role decide who may delegate, max_agents bounds the run, one failing pair never sinks its siblings, extras reach children only by name, context entries are pasted, finished names replay, and the loop's tool limits never cut a batch. It also holds the S4 review's regression tests for this layer: a card or journal record that cannot be written as given, the card bound of NFR-7 as amended in r5, and replay of a pair whose context entry was superseded.
 ROLE IN CODEBASE: Delegation layer of tests/features/infinite_memory_agent/ (spec AC-5..AC-8, AC-12, AC-13, AC-26, AC-28, AC-29, AC-31, AC-32, AC-35, AC-36; INV-4, INV-6..INV-13, INV-24, INV-26, INV-29, INV-30, INV-38; NFR-7; EC-4..EC-11, EC-12, EC-38, EC-43; S4 review findings R-1, R-3, R-4). Exercises vidbyte/agents/infinite/launch.py through a real InfiniteMemoryAgent run.
 ARCHITECTURE NOTE: Every agent in the tree is driven by one ScriptedTree routed by agent name. What the parent saw is read from the tool messages in its next model call; what happened on disk is read from the journal and entries.jsonl. Concurrency is proven with a Gate that opens only when both generators are inside a model call at once, never with timing.
-FUNCTION INVENTORY: test_two_tasks_run_concurrently_and_each_verifier_follows_its_own_generator (AC-5, INV-4, INV-9, INV-12, INV-24); test_an_invalid_batch_starts_nothing_and_the_tool_stays_usable (AC-6, EC-4..EC-7, EC-38, EC-43); test_depth_cap_and_role_decide_who_holds_launch_subagent_and_drop_entry (AC-7, INV-8, INV-13, AC-17 SPARSE clause); test_a_batch_that_would_pass_max_agents_is_refused_whole (AC-8, INV-10, EC-8); test_a_failed_or_blank_generator_skips_its_verifier_and_its_sibling_still_reports (AC-12, EC-9, EC-10, INV-29); test_a_generator_stopped_by_max_iterations_is_partial_and_still_verified (AC-13, EC-11, INV-30); test_a_long_generator_reply_is_cut_in_its_card_and_the_rest_never_reaches_the_root (AC-26, INV-4, NFR-7); test_a_task_card_grants_exactly_the_extras_it_names (AC-28, AC-36, INV-6, INV-7); test_context_pastes_named_entries_and_lists_named_paths (AC-29, D-14); test_relaunching_a_finished_name_replays_its_card_without_building_agents (AC-31, INV-26); test_the_verifier_gets_the_generators_outcome_but_never_its_transcript (AC-32, INV-12); test_launch_subagent_is_exempt_from_the_tool_timeout_and_result_cap (AC-35, INV-38); test_a_pair_whose_card_or_record_cannot_be_written_as_given_still_finishes_beside_its_sibling (R-1, INV-29, INV-32); test_an_unchecked_card_with_long_dropped_and_files_lists_stays_inside_the_nfr7_bound (R-3, NFR-7, INV-4, EC-12); test_a_finished_pair_replays_after_its_context_entry_was_superseded_and_new_pairs_still_run (R-4, INV-26, INV-9).
+FUNCTION INVENTORY: test_two_tasks_run_concurrently_and_each_verifier_follows_its_own_generator (AC-5, INV-4, INV-9, INV-12, INV-24); test_an_invalid_batch_starts_nothing_and_the_tool_stays_usable (AC-6, EC-4..EC-7, EC-38, EC-43); test_depth_cap_and_role_decide_who_holds_launch_subagent_and_drop_entry (AC-7, INV-8, INV-13, AC-17 SPARSE clause); test_a_batch_over_max_parallel_is_denied_by_the_middleware_and_starts_nothing (AC-6, EC-4); test_a_batch_that_would_pass_max_agents_is_refused_whole (AC-8, INV-10, EC-8); test_a_failed_or_blank_generator_skips_its_verifier_and_its_sibling_still_reports (AC-12, EC-9, EC-10, INV-29); test_a_generator_stopped_by_max_iterations_is_partial_and_still_verified (AC-13, EC-11, INV-30); test_a_long_generator_reply_is_cut_in_its_card_and_the_rest_never_reaches_the_root (AC-26, INV-4, NFR-7); test_a_task_card_grants_exactly_the_extras_it_names (AC-28, AC-36, INV-6, INV-7); test_context_pastes_named_entries_and_lists_named_paths (AC-29, D-14); test_relaunching_a_finished_name_replays_its_card_without_building_agents (AC-31, INV-26); test_the_verifier_gets_the_generators_outcome_but_never_its_transcript (AC-32, INV-12); test_launch_subagent_is_exempt_from_the_tool_timeout_and_result_cap (AC-35, INV-38); test_a_pair_whose_card_or_record_cannot_be_written_as_given_still_finishes_beside_its_sibling (R-1, INV-29, INV-32); test_an_unchecked_card_with_long_dropped_and_files_lists_stays_inside_the_nfr7_bound (R-3, NFR-7, INV-4, EC-12); test_a_finished_pair_replays_after_its_context_entry_was_superseded_and_new_pairs_still_run (R-4, INV-26, INV-9).
 COMMON MODIFICATION PATTERNS: Add a rejected-batch case as one INVALID_BATCHES row naming the token the error must contain. Keep private markers (GEN-*-PRIVATE, VER-*-PRIVATE) unique strings so a leak check cannot match by accident.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level. 2. Do not prove concurrency or ordering with sleeps or wall-clock time; use Gate, Signal, and ScriptedTree.events. 3. Do not assert card wording beyond the catalog templates and the field values the spec fixes.
 KNOWN EDGE CASES: A runner AssertionError inside a child may be turned into a tool error by the parent, so every test ends with ScriptedTree.assert_complete, which also fails on unscripted calls. The result-card template is matched with its literal text only, so a template of bare placeholders would make renderings() weak. The R-1 path cases accept both spec-conformant outcomes: the path refused at write time, or accepted with the card error turned into an unchecked card; either way every key finishes and every card returns.
@@ -57,11 +57,11 @@ from tests.features.infinite_memory_agent.infinite_memory_fixtures import (
     write_jsonl,
 )
 from vidbyte import tool
+from vidbyte.lib.constants.infinite import INFINITE_TASK_NAME_PATTERN
 from vidbyte.lib.errors import VidbyteSdkError
 
 MEMORY_TOOLS = {"bash", "grep", "read_lines", "remember", "write_note"}
 GENERATOR_TOOLS = MEMORY_TOOLS | {"launch_subagent", "isDone"}
-LEAF_GENERATOR_TOOLS = MEMORY_TOOLS | {"isDone"}
 VERIFIER_TOOLS = MEMORY_TOOLS | {"drop_entry", "isDone"}
 
 
@@ -151,14 +151,13 @@ def _no_generator(card: dict[str, Any]) -> dict[str, Any]:
 
 
 INVALID_BATCHES = (
-    pytest.param([task("alpha"), task("beta"), task("gamma")], ("max_parallel",), id="more-than-max-parallel"),
     pytest.param([task("alpha"), task("alpha")], ("alpha",), id="duplicate-name"),
     pytest.param([task("alpha", ver="   ")], ("verifier_prompt",), id="blank-verifier-prompt"),
     pytest.param([_no_generator(task("alpha"))], ("generator_prompt",), id="missing-generator-prompt"),
     pytest.param([task("alpha", tools=["web_fetch"])], ("web_fetch",), id="tool-the-root-lacks"),
     pytest.param([task("alpha", context=["#99"])], (99,), id="unknown-context-id"),
     pytest.param([task("alpha", context=["#40"])], (40,), id="superseded-context-id"),
-    pytest.param([task("Pricing Research!")], ("Pricing Research!", r"^[a-z0-9][a-z0-9-]{0,39}$"), id="name-fails-pattern"),
+    pytest.param([task("Pricing Research!")], ("Pricing Research!", INFINITE_TASK_NAME_PATTERN), id="name-fails-pattern"),
     pytest.param([task("alpha", budget_share=0.5)], ("budget_share",), id="unknown-field"),
 )
 
@@ -192,7 +191,7 @@ def test_an_invalid_batch_starts_nothing_and_the_tool_stays_usable(tmp_path: Pat
 
 
 def test_depth_cap_and_role_decide_who_holds_launch_subagent_and_drop_entry(tmp_path: Path) -> None:
-    """AC-7, INV-6, INV-8, INV-13, AC-17 (SPARSE clause): with max_depth=2 the depth-1 generator may delegate, the depth-2 one may not, and no verifier may."""
+    """AC-7, INV-6, INV-8, INV-13, AC-17 (SPARSE clause): with max_depth=2 every generator holds launch_subagent, the depth-1 one delegates, the depth-2 one is refused by the middleware with a reason naming max_depth, and no verifier may delegate."""
     agent = build_agent(tmp_path, max_depth=2)
     nested = generator("a")
     tree = ScriptedTree(
@@ -200,18 +199,38 @@ def test_depth_cap_and_role_decide_who_holds_launch_subagent_and_drop_entry(tmp_
             ROOT: [launch(task("a")), reply("done")],
             generator("a"): [launch(task("b")), reply("A-SUMMARY")],
             verifier("a"): [reply(PASSED_REVIEW)],
-            **simple_pair("b", "B-SUMMARY", parent=nested),
+            generator("b", nested): [launch(task("c")), reply("B-SUMMARY")],
+            verifier("b", nested): [reply(PASSED_REVIEW)],
         }
     )
     with tree.install():
         agent.run(TASK)
     tree.assert_complete()
     assert set(tree.first_call(generator("a")).tools) == GENERATOR_TOOLS
-    assert set(tree.first_call(generator("b", nested)).tools) == LEAF_GENERATOR_TOOLS
+    assert set(tree.first_call(generator("b", nested)).tools) == GENERATOR_TOOLS
     assert set(tree.first_call(verifier("a")).tools) == VERIFIER_TOOLS
     assert set(tree.first_call(verifier("b", nested)).tools) == VERIFIER_TOOLS
     assert not is_error(tool_result(tree.calls_by(generator("a"))[1], "launch_subagent"))
-    assert "root/a/gen/b" in finished_cards(workspace_root(tmp_path))
+    refused = tool_result(tree.calls_by(generator("b", nested))[1], "launch_subagent")
+    assert "Tool denied by middleware" in refused and "max_depth" in refused and int_token(2).search(refused), refused
+    assert generator("c", generator("b", nested)) not in tree.agents_called()
+    cards = finished_cards(workspace_root(tmp_path))
+    assert "root/a/gen/b" in cards and "root/a/gen/b/gen/c" not in cards
+
+
+def test_a_batch_over_max_parallel_is_denied_by_the_middleware_and_starts_nothing(tmp_path: Path) -> None:
+    """AC-6, INV-9, EC-4: a batch of more than max_parallel tasks is refused by DelegationLimitsMiddleware before the tool runs, naming max_parallel; nothing starts, nothing is journaled, and a valid call then works."""
+    agent = build_agent(tmp_path, max_parallel=2)
+    tree = ScriptedTree({ROOT: [launch(task("alpha"), task("beta"), task("gamma")), launch(task("ok-task")), reply("done")], **simple_pair("ok-task", "OK-TASK-SUMMARY")})
+    with tree.install():
+        agent.run(TASK)
+    tree.assert_complete()
+    refused = _root_launch_result(tree, 1)
+    assert "Tool denied by middleware" in refused and "max_parallel" in refused and int_token(2).search(refused) and int_token(3).search(refused), refused
+    accepted = _root_launch_result(tree, 2)
+    assert not is_error(accepted) and "OK-TASK-SUMMARY" in accepted
+    assert tree.agents_called() == {ROOT, generator("ok-task"), verifier("ok-task")}
+    assert events(journal_records(workspace_root(tmp_path))) == ["run_started", "pair_started", "pair_finished", "run_finished"]
 
 
 def test_a_batch_that_would_pass_max_agents_is_refused_whole(tmp_path: Path) -> None:
@@ -497,7 +516,9 @@ def test_an_unchecked_card_with_long_dropped_and_files_lists_stays_inside_the_nf
     from vidbyte.lib.util import TokenEstimate
 
     root = workspace_root(tmp_path)
-    notes = [f"notes/competitor-{index:02d}-list-price-history.md" for index in range(60)]
+    # Enough written paths that their joined list is over the card cap
+    # whatever the cap is; each path is about 12 tokens.
+    notes = [f"notes/competitor-{index:03d}-list-price-history.md" for index in range(INFINITE_CARD_TEXT_MAX_TOKENS // 8)]
     for relative in notes:
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -507,9 +528,9 @@ def test_an_unchecked_card_with_long_dropped_and_files_lists_stays_inside_the_nf
     agent = build_agent(tmp_path, workspace={"max_entry_tokens": 200, "max_entries_per_agent": 10})
     steps = [tool_call("remember", {"kind": "fact", "text": fact}) for fact in facts]
     steps += [tool_call("write_note", {"path": relative, "text": "One more price point.\n"}) for relative in notes]
-    long_summary = "Summary of the competitor pricing research. " * 60
+    long_summary = "Summary of the competitor pricing research. " * (INFINITE_CARD_TEXT_MAX_TOKENS // 4)
     # EC-12: the review has no VERDICT line, so the verdict is unchecked and every staged entry is dropped.
-    long_review = "Reviewed the pricing notes and their sources line by line. " * 50
+    long_review = "Reviewed the pricing notes and their sources line by line. " * (INFINITE_CARD_TEXT_MAX_TOKENS // 8)
     tree = ScriptedTree({ROOT: [launch(task("a")), reply("done")], generator("a"): [*steps, reply(long_summary)], verifier("a"): [reply(long_review)]})
     with tree.install():
         agent.run(TASK)

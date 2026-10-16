@@ -14,6 +14,8 @@ Architecture:
     - MiddlewareHookInvocation: Diagnostic record for every pipeline hook invocation.
     - CostBudgetRunState / ExponentialBackoffRetryRunState: Mutable per-run
       builtin middleware state stored in MiddlewareContext.run_state.
+    - DelegationLimits: The validated depth and batch caps that
+      DelegationLimitsMiddleware holds one delegating tool to.
 Relations:
     Used by vidbyte.middleware and vidbyte.agents.runtime. Invocation records feed
     semantic diagnostic traces without expanding consumer-facing result metadata.
@@ -26,8 +28,10 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from vidbyte.lib.constants.delegation import DELEGATION_MIN_CAP
 from vidbyte.lib.dataclasses.context import BaseAgentContext
 from vidbyte.lib.dataclasses.tools import ToolCall, ToolResult
+from vidbyte.lib.dataclasses.validation import RecordFieldValidator
 
 
 class MiddlewareHook(str, Enum):
@@ -232,8 +236,30 @@ class ExponentialBackoffRetryRunState:
     attempts: int = 0
 
 
+@dataclass(frozen=True, slots=True)
+class DelegationLimits:
+    """How far one delegating tool may go: how deep agents may nest below the top one, and how many tasks one call may carry."""
+
+    tool_name: str
+    batch_argument: str
+    max_depth: int
+    max_parallel: int
+
+    def __post_init__(self) -> None:
+        # @intent delegation-caps-cannot-be-switched-off
+        # The tool and its task-list argument are named exactly as the
+        # model calls them, and each cap allows at least one level and
+        # one task, so 0, a fraction, or True never disables delegation
+        # or lets it run unbounded.
+        RecordFieldValidator.require_text(self.tool_name, "DelegationLimits.tool_name", one_line=True)
+        RecordFieldValidator.require_text(self.batch_argument, "DelegationLimits.batch_argument", one_line=True)
+        for name in ("max_depth", "max_parallel"):
+            RecordFieldValidator.require_int(getattr(self, name), f"DelegationLimits.{name}", minimum=DELEGATION_MIN_CAP)
+
+
 __all__ = [
     "CostBudgetRunState",
+    "DelegationLimits",
     "ExponentialBackoffRetryRunState",
     "MiddlewareAction",
     "MiddlewareContext",

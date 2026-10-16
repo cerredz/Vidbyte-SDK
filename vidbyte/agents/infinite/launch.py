@@ -1,10 +1,10 @@
 """FILE: vidbyte/agents/infinite/launch.py
 
 PURPOSE: Defines the launch_subagent tool and InfinitePair, its pipeline stage: the root or a generator hands over a batch of tasks, each task runs as a fresh generator followed by a fresh verifier that checks and fixes its work, the pair's staged memory entries are committed or dropped by the verdict, and the parent gets back one short result card per task.
-ROLE IN CODEBASE: InfiniteMemoryRuntime (runtime.py) adds one InfiniteLaunchTool to the root for each run; InfinitePair adds one to each generator that is still below the depth cap. Pairs use InfiniteWorkspace (workspace.py) for context entries, commits, and the map, InfiniteRunJournal (journal.py) to record and replay pairs, and InfiniteAgentMemory (memory.py) for each child's memory tools.
+ROLE IN CODEBASE: InfiniteMemoryRuntime (runtime.py) adds one InfiniteLaunchTool to the root for each run; InfinitePair adds one to every generator, with a DelegationLimitsMiddleware (vidbyte/middleware/builtins/delegation_limits.py) at the generator's depth that refuses a call past max_depth or max_parallel. Pairs use InfiniteWorkspace (workspace.py) for context entries, commits, and the map, InfiniteRunJournal (journal.py) to record and replay pairs, and InfiniteAgentMemory (memory.py) for each child's memory tools.
 ARCHITECTURE NOTE: The tool checks the whole batch before anything starts, records every new pair as started, and runs the pairs at once through ParallelPipeline, as JevBulkWorkTool does. Each pair builds plain BaseAgents with a fresh context holding the workspace map, its own history-trimming middleware, and only the extras its task card names; a pair turns every SDK, disk, or decode error into its own card, so siblings and the parent keep going. The tool is internal, so the loop's tool timeout and result cap never cut a batch; the cards are capped here instead.
-FUNCTION INVENTORY: InfiniteLaunchTool.spec builds the closed task-card schema; execute is the narrated main function; _cards reads the model's tasks into task cards; _check applies the batch rules. InfinitePair.run is the narrated main function; _agent builds one child agent; _task_message and _verifier_message write the two first messages; _status, _verdict, _commit, _finish, _capped, and _error_text each do one step; render and finished_lines format a card and a list of finished pairs for a parent.
-COMMON MODIFICATION PATTERNS: A new batch rule is one more check in _check with a message that says what to fix. A new task-card field adds the field to InfiniteTaskCard, one schema property and description leaf here, and its use in _task_message or _agent.
+FUNCTION INVENTORY: InfiniteLaunchTool.spec builds the closed task-card schema; execute is the narrated main function, which reads the model's tasks with ToolArguments.records (vidbyte/lib/tools/arguments.py); _check applies the batch rules that need the journal or the workspace. InfinitePair.run is the narrated main function; _agent builds one child agent; _task_message and _verifier_message write the two first messages; _status, _verdict, _commit, _finish, and _error_text each do one step, and TokenEstimate.cap caps each card text; render and finished_lines format a card and a list of finished pairs for a parent.
+COMMON MODIFICATION PATTERNS: A new per-call delegation cap is one more field on DelegationLimits and one check in DelegationLimitsMiddleware; a batch rule that needs the journal or the workspace is one more check in _check with a message that says what to fix. A new task-card field adds the field to InfiniteTaskCard, one schema property and description leaf here, and its use in _task_message or _agent.
 WHAT NOT TO DO IN THIS FILE: 1. Do not start any agent before the whole batch passes _check and every new pair has its pair_started record. 2. Do not catch CancelledError or BaseException in InfinitePair.run; cancelling the run must stop every pair. 3. Do not give a child a developer tool its card does not name, or a verifier the launch tool. 4. Do not pass a child's transcript to its verifier or its parent; only the capped card goes up. 5. Do not add module-level constants here.
 KNOWN EDGE CASES: A batch of replays only skips ParallelPipeline, which refuses zero stages. An entry superseded between the batch check and the pair's start fails that pair. An error outside VidbyteSdkError, OSError, and ValueError escapes the pair and the call while its siblings keep running (spec EC-41). A pair whose generator raised or answered blank has status failed, no verifier, and every staged entry dropped.
 RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 6.1 INV-4 to INV-16 and INV-26 to INV-31, and 9.2); vidbyte/agents/infinite/README.md; vidbyte/agents/jev/bulk_work.py (the pattern this follows)
@@ -14,10 +14,8 @@ TESTS: tests/features/infinite_memory_agent/test_infinite_memory_delegation.py, 
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 import re
 from pathlib import Path
-from typing import Any
 
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.fork import AgentForker
@@ -34,6 +32,7 @@ from vidbyte.lib.constants.infinite import (
     INFINITE_FINISHED_PAIR_LINE,
     INFINITE_GENERATOR_KEY,
     INFINITE_HISTORY_MAX_TOKENS,
+    INFINITE_LAUNCH_TASKS_ARGUMENT,
     INFINITE_LAUNCH_TOOL_NAME,
     INFINITE_MAP_PRIMITIVE_ID,
     INFINITE_MAP_TITLE,
@@ -56,8 +55,13 @@ from vidbyte.lib.enums.infinite import (
 )
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import ConfigurationError, ToolExecutionError, VidbyteSdkError
+from vidbyte.lib.tools.arguments import ToolArguments
 from vidbyte.lib.util import TokenEstimate
-from vidbyte.middleware import MessageHistoryCompactionMiddleware
+from vidbyte.middleware import (
+    AgentMiddleware,
+    DelegationLimitsMiddleware,
+    MessageHistoryCompactionMiddleware,
+)
 from vidbyte.pipelines.base import BasePipeline
 from vidbyte.pipelines.parallel import ParallelPipeline
 from vidbyte.prompts.catalog import Prompts
@@ -80,7 +84,7 @@ class InfiniteLaunchTool(BaseTool):
         self.extras = extras
 
     def spec(self) -> ToolSpec:
-        """Return the launch_subagent declaration: 1 to max_parallel closed task cards, marked internal like JevBulkWorkTool."""
+        """Return the launch_subagent declaration: 1 to max_parallel closed task cards, marked internal like JevBulkWorkTool; DelegationLimitsMiddleware enforces the cap the schema declares."""
         prompts = Prompts()
         maximum = self.settings.max_parallel
         card = {
@@ -97,11 +101,11 @@ class InfiniteLaunchTool(BaseTool):
             "required": ["name", "goal", "done_criteria", "generator_prompt", "verifier_prompt"],
             "additionalProperties": False,
         }
-        tasks = {"type": "array", "minItems": 1, "maxItems": maximum, "items": card, "description": prompts.get(Prompt.INFINITE_MEMORY_LAUNCH_TASKS_DESCRIPTION).format(max_parallel=maximum)}
+        tasks = {"type": "array", "minItems": 1, "maxItems": maximum, "items": card, "description": prompts.get(Prompt.INFINITE_MEMORY_LAUNCH_TASKS_DESCRIPTION)}
         return ToolSpec(
             name=INFINITE_LAUNCH_TOOL_NAME,
-            description=prompts.get(Prompt.INFINITE_MEMORY_LAUNCH_TOOL_DESCRIPTION).format(max_parallel=maximum),
-            input_schema={"type": "object", "properties": {"tasks": tasks}, "required": ["tasks"], "additionalProperties": False},
+            description=prompts.get(Prompt.INFINITE_MEMORY_LAUNCH_TOOL_DESCRIPTION),
+            input_schema={"type": "object", "properties": {INFINITE_LAUNCH_TASKS_ARGUMENT: tasks}, "required": [INFINITE_LAUNCH_TASKS_ARGUMENT], "additionalProperties": False},
             permission=ToolPermission.SAFE,
             # @intent a-batch-is-never-cut-by-tool-limits
             # A batch lasts as long as its pairs and returns capped
@@ -114,9 +118,10 @@ class InfiniteLaunchTool(BaseTool):
         """Check the whole batch, replay finished tasks, run the new pairs at once, and return every card in task order."""
         prompts = Prompts()
         # Read the tasks and check the whole batch first, so a bad batch
-        # starts nothing and the model is told exactly what to fix.
+        # starts nothing and the model is told exactly what to fix. The
+        # batch cap was already checked by DelegationLimitsMiddleware.
         try:
-            cards = self._cards(call.arguments.get("tasks"))
+            cards = ToolArguments.records(call.arguments.get(INFINITE_LAUNCH_TASKS_ARGUMENT), InfiniteTaskCard, argument=INFINITE_LAUNCH_TASKS_ARGUMENT)
             keys = tuple(f"{self.key}/{card.name}" for card in cards)
             # @intent finished-pairs-are-replayed-not-rerun
             # A name that already finished in this run returns its
@@ -148,35 +153,16 @@ class InfiniteLaunchTool(BaseTool):
                 texts.append(InfinitePair.render(card) if key in pairs else f"{replayed}\n{InfinitePair.render(card)}")
         return ToolResult.success(INFINITE_LAUNCH_TOOL_NAME, "\n\n".join(texts))
 
-    def _cards(self, tasks: object) -> tuple[InfiniteTaskCard, ...]:
-        # Reads the model's tasks into validated task cards, turning
-        # JSON lists into tuples; any problem raises with what to fix.
-        if not isinstance(tasks, list) or not tasks:
-            raise ConfigurationError("tasks must be a list of task objects.")
-        if len(tasks) > self.settings.max_parallel:
-            raise ConfigurationError(f"tasks holds {len(tasks)} tasks, over max_parallel ({self.settings.max_parallel}); split the work over several calls.")
-        fields = dataclasses.fields(InfiniteTaskCard)
-        names = [field.name for field in fields]
-        required = [field.name for field in fields if field.default is dataclasses.MISSING]
-        cards = []
-        for task in tasks:
-            if not isinstance(task, dict):
-                raise ConfigurationError(f"Each task must be an object with the fields {', '.join(names)}; got {task!r}.")
-            unknown = [name for name in task if name not in names]
-            missing = [name for name in required if name not in task]
-            if unknown or missing:
-                raise ConfigurationError(f"Task {task.get('name')!r} has unknown fields {unknown} and lacks the fields {missing}; use exactly {', '.join(names)}.")
-            given: dict[str, Any] = {name: tuple(value) if isinstance(value, list) else value for name, value in task.items()}
-            cards.append(InfiniteTaskCard(**given))
-        return tuple(cards)
-
     def _check(self, cards: tuple[InfiniteTaskCard, ...], fresh: tuple[InfiniteTaskCard, ...]) -> None:
         # @intent a-batch-stays-inside-its-limits
         # Names stay unique keys, a child never gains a tool its parent
         # lacks, context names only live entries, and the run never
         # starts more than max_agents agents. Only the names are checked
         # over the whole batch: a finished task starts nothing, so it
-        # replays even after an entry it named was superseded.
+        # replays even after an entry it named was superseded. The agent
+        # cap stays here, not in DelegationLimitsMiddleware, because only
+        # the journal knows how many agents the run has started and which
+        # tasks are replays that start none.
         names = [card.name for card in cards]
         twice = next((name for name in names if names.count(name) > 1), None)
         if twice is not None:
@@ -230,7 +216,7 @@ class InfinitePair(BasePipeline):
             # and its quota.
             finished = self.finished_lines(launch.journal.finished_children(writer.key))
             reply = await self._agent(writer).arun(self._task_message(writer, finished))
-            summary = self._capped(reply.content.strip())
+            summary = TokenEstimate.cap(reply.content.strip(), INFINITE_CARD_TEXT_MAX_TOKENS, INFINITE_TRUNCATION_MARKER)
             status = self._status(reply)
 
             # @intent a-fair-turn-between-generator-and-verifier
@@ -254,11 +240,11 @@ class InfinitePair(BasePipeline):
 
             # Drop what was not committed and record the card, with the
             # files both agents wrote.
-            card = self._finish(status, verdict, summary, self._capped(review), (*writer.files_written, *checker.files_written))
+            card = self._finish(status, verdict, summary, TokenEstimate.cap(review, INFINITE_CARD_TEXT_MAX_TOKENS, INFINITE_TRUNCATION_MARKER), (*writer.files_written, *checker.files_written))
         except (VidbyteSdkError, OSError, ValueError) as exc:
             # After an error the work counts as unjudged, and the error
             # becomes the review.
-            card = self._finish(status, InfiniteVerdict.UNCHECKED, summary, self._capped(self._error_text(exc)), (*writer.files_written, *checker.files_written))
+            card = self._finish(status, InfiniteVerdict.UNCHECKED, summary, TokenEstimate.cap(self._error_text(exc), INFINITE_CARD_TEXT_MAX_TOKENS, INFINITE_TRUNCATION_MARKER), (*writer.files_written, *checker.files_written))
 
         # Hand the parent only the capped card.
         return self.render(card)
@@ -273,11 +259,17 @@ class InfinitePair(BasePipeline):
         granted = tuple(tool for tool in launch.extras if tool.spec().name in self.card.tools)
         level = launch.depth + INFINITE_DEPTH_STEP
         delegation: tuple[BaseTool, ...] = ()
+        limits: tuple[AgentMiddleware, ...] = ()
+        # @intent every-generator-may-delegate-within-the-caps
+        # Every generator holds launch_subagent one level deeper than
+        # its parent, and DelegationLimitsMiddleware refuses a call past
+        # max_depth or max_parallel with a reason that names the cap. A
+        # verifier only checks work, so it never delegates.
         match memory.role:
             case InfiniteAgentRole.GENERATOR:
                 rules = Prompts().get(Prompt.INFINITE_MEMORY_GENERATOR_SYSTEM_PROMPT)
-                if level < settings.max_depth:
-                    delegation = (InfiniteLaunchTool(settings, launch.workspace, launch.journal, key=memory.key, depth=level, extras=granted),)
+                delegation = (InfiniteLaunchTool(settings, launch.workspace, launch.journal, key=memory.key, depth=level, extras=granted),)
+                limits = (DelegationLimitsMiddleware(settings.delegation_limits, depth=level),)
             case _:
                 rules = Prompts().get(Prompt.INFINITE_MEMORY_VERIFIER_SYSTEM_PROMPT)
         context = ContextManager()
@@ -295,7 +287,7 @@ class InfinitePair(BasePipeline):
             permission_policy=settings.permission_policy,
             agent_loop_settings=settings.loop,
             context_manager=context,
-            middleware=(MessageHistoryCompactionMiddleware.trim_with_provider_boundaries(max_tokens=INFINITE_HISTORY_MAX_TOKENS),),
+            middleware=(MessageHistoryCompactionMiddleware.trim_with_provider_boundaries(max_tokens=INFINITE_HISTORY_MAX_TOKENS), *limits),
         )
 
     def _task_message(self, memory: InfiniteAgentMemory, finished: str) -> str:
@@ -361,14 +353,6 @@ class InfinitePair(BasePipeline):
         return self.result
 
     @staticmethod
-    def _capped(text: str) -> str:
-        # A card's texts are capped, so one long reply never fills the
-        # parent's context; cut text ends with the marker.
-        if TokenEstimate.count(text) <= INFINITE_CARD_TEXT_MAX_TOKENS:
-            return text
-        return f"{TokenEstimate.cut(text, INFINITE_CARD_TEXT_MAX_TOKENS)}{INFINITE_TRUNCATION_MARKER}"
-
-    @staticmethod
     def _error_text(error: BaseException) -> str:
         # A runner's failure arrives wrapped, with the provider's
         # message as its cause, so the cause is the most useful text to
@@ -384,7 +368,7 @@ class InfinitePair(BasePipeline):
         # joined list cut like the summary and the review, so a card
         # never grows with the number of entries or files.
         lists = {"dropped": "; ".join(card.dropped) or "-", "files": ", ".join(card.files) or "-"}
-        cut = {field: text if TokenEstimate.count(text) <= INFINITE_CARD_TEXT_MAX_TOKENS else f"{TokenEstimate.cut(text, INFINITE_CARD_TEXT_MAX_TOKENS)}{INFINITE_TRUNCATION_MARKER}" for field, text in lists.items()}
+        cut = {field: TokenEstimate.cap(text, INFINITE_CARD_TEXT_MAX_TOKENS, INFINITE_TRUNCATION_MARKER) for field, text in lists.items()}
         return Prompts().get(Prompt.INFINITE_MEMORY_RESULT_CARD).format(name=card.name, key=card.key, status=card.status.value, verdict=card.verdict.value, summary=card.summary or "-", review=card.review or "-", entries=", ".join(f"#{number}" for number in card.entries) or "-", **cut)
 
     @staticmethod

@@ -1,0 +1,1 @@
+No task was started, because the whole batch is checked first and it needs a change: {problem} Fix what this names and call launch_subagent again; if it names a limit, split the batch over several calls, launch fewer tasks, or do the work yourself.

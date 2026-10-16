@@ -8,14 +8,18 @@ Purpose:
 Architecture:
     - ToolsFormatter: Converts ToolSpec objects to provider tool declarations
       and parses provider tool calls into ToolCall objects.
+    - ToolArguments: Reads a model's list-of-objects argument into validated
+      dataclass records.
 Relations:
     Related to vidbyte.tools.types and model provider integrations.
 """
 
 from __future__ import annotations
 
+from vidbyte.lib.tools.arguments import ToolArguments
 from vidbyte.lib.tools.formatter import ToolsFormatter
 
 __all__ = [
+    "ToolArguments",
     "ToolsFormatter",
 ]

@@ -230,16 +230,22 @@ Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/
 
 Instructions for InfiniteMemoryAgent, a root agent that delegates its work to
 generator and verifier pairs and keeps memory in one shared workspace folder.
+Every leaf is its own Markdown file, `<leaf>.md`, in the folder, and
+`infinite_memory.json` maps each leaf key to its file.
 `root_system_prompt`, `generator_system_prompt`, and `verifier_system_prompt` are
-the rules each role's system prompt carries; the verifier's ends with the
-`VERDICT:` line it must write. `task_prompt`, `verifier_task_prompt`, and
-`resume_prompt` brief a generator, a verifier, and a resumed root, and
-`result_card` and `replayed_label` are what a parent receives for each pair. The
-`*_saved_prompt`, `*_rejected_prompt`, `remember_staged_prompt`,
-`entry_dropped_prompt`, and `quota_line` leaves are the memory and launch tools'
-replies, `map_header` opens the workspace map, and the `*_description` leaves are
-the model-facing descriptions of `launch_subagent`, `remember`, `write_note`,
-`edit_file`, and `drop_entry` and of their parameters.
+the sectioned operating manuals each role's system prompt carries: how the work
+flows, delegating and writing task cards, reading result cards, memory, history
+trimming, refused calls, and the final reply; the verifier's ends with the
+`VERDICT:` line it must write. They carry behavior only: the numeric delegation
+and workspace limits are enforced in code, and a refusal names the limit it hit.
+`task_prompt`, `verifier_task_prompt`, and `resume_prompt` brief a generator, a
+verifier, and a resumed root, and `result_card` and `replayed_label` are what a
+parent receives for each pair. The `*_saved_prompt`, `*_rejected_prompt`,
+`remember_staged_prompt`, `entry_dropped_prompt`, and `quota_line` leaves are the
+memory and launch tools' replies, kept to a few sentences because they repeat on
+every call, `map_header` opens the workspace map, and the `*_description` leaves
+are the model-facing descriptions of `launch_subagent`, `remember`, `write_note`,
+`edit_file`, and `drop_entry` and of their parameters, each in headed sections.
 
 Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory>
 

@@ -24,13 +24,17 @@ from vidbyte.agents.infinite.settings import InfiniteMemoryAgentSettings
 from vidbyte.agents.infinite.workspace import InfiniteWorkspace
 from vidbyte.lib.constants.infinite import (
     INFINITE_HISTORY_MAX_TOKENS,
+    INFINITE_ROOT_DEPTH,
     INFINITE_ROOT_KEY,
 )
 from vidbyte.lib.dataclasses.agents import AgentMessage
 from vidbyte.lib.enums import AgentRuntimeType
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import ConfigurationError
-from vidbyte.middleware import MessageHistoryCompactionMiddleware
+from vidbyte.middleware import (
+    DelegationLimitsMiddleware,
+    MessageHistoryCompactionMiddleware,
+)
 from vidbyte.prompts.catalog import Prompts
 from vidbyte.tools.toolsets import InfiniteMemoryAgentTools
 
@@ -58,10 +62,14 @@ class InfiniteMemoryAgent(BaseAgent):
         self._resuming_var: contextvars.ContextVar[InfiniteRunJournal | None] = contextvars.ContextVar(f"vidbyte_infinite_resuming_{id(self)}", default=None)
 
         # Build the root: the developer's prompt plus the delegation
-        # rules, the preset tools plus the developer's extras, and its
-        # own history trim, so old tool results drop out past the cap
-        # while the task, the rules, and the map stay.
-        rules = Prompts().get(Prompt.INFINITE_MEMORY_ROOT_SYSTEM_PROMPT).format(max_parallel=settings.max_parallel, max_depth=settings.max_depth)
+        # rules, the preset tools plus the developer's extras, its own
+        # history trim, so old tool results drop out past the cap while
+        # the task, the rules, and the map stay, and the delegation caps.
+        # @intent limits-in-code-behavior-in-the-prompt
+        # The rules describe how to delegate; the depth and batch caps
+        # are enforced by DelegationLimitsMiddleware, so the prompt holds
+        # no numbers the code could contradict.
+        rules = Prompts().get(Prompt.INFINITE_MEMORY_ROOT_SYSTEM_PROMPT)
         super().__init__(
             name=settings.name,
             system_prompt=f"{settings.system_prompt}\n\n{rules}",
@@ -69,7 +77,7 @@ class InfiniteMemoryAgent(BaseAgent):
             tools=(*InfiniteMemoryAgentTools(Path(settings.root_dir), self.workspace.root, settings.workspace.max_tokens).all(), *settings.tools),
             permission_policy=settings.permission_policy,
             agent_loop_settings=settings.loop,
-            middleware=(MessageHistoryCompactionMiddleware.trim_with_provider_boundaries(max_tokens=INFINITE_HISTORY_MAX_TOKENS),),
+            middleware=(MessageHistoryCompactionMiddleware.trim_with_provider_boundaries(max_tokens=INFINITE_HISTORY_MAX_TOKENS), DelegationLimitsMiddleware(settings.delegation_limits, depth=INFINITE_ROOT_DEPTH)),
             api_keys=settings.api_keys,
             model_mode=settings.model_mode,
             provider=settings.provider,

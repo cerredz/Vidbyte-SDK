@@ -9,11 +9,12 @@ ROLE IN CODEBASE:
     Re-exports MathHelper from vidbyte/lib/util/math.py,
     CredentialKeyPolicy from vidbyte/lib/util/credential_keys.py,
     SubstringCounter and TokenEstimate from vidbyte/lib/util/text.py,
+    AppendOnlyJsonl from vidbyte/lib/util/jsonl.py,
     PromptPlacement from
     vidbyte/lib/util/prompt_placement.py, and SupportedKwargs from
     vidbyte/lib/util/call_options.py. Imported by
     vidbyte/agents/speed/tracker.py, by vidbyte/agents/infinite/ for
-    TokenEstimate, and by any future SDK code that needs the same
+    TokenEstimate and AppendOnlyJsonl, and by any future SDK code that needs the same
     general-purpose helpers.
 
 ARCHITECTURE NOTE:
@@ -22,7 +23,8 @@ ARCHITECTURE NOTE:
 
 FUNCTION INVENTORY:
     No functions of its own; re-exports MathHelper, CredentialKeyPolicy,
-    SubstringCounter, TokenEstimate, PromptPlacement, and SupportedKwargs. See
+    SubstringCounter, TokenEstimate, AppendOnlyJsonl, PromptPlacement, and
+    SupportedKwargs. See
     vidbyte/lib/util/math.py for MathHelper's own inventory.
 
 COMMON MODIFICATION PATTERNS:
@@ -51,8 +53,9 @@ from __future__ import annotations
 
 from vidbyte.lib.util.call_options import SupportedKwargs
 from vidbyte.lib.util.credential_keys import CredentialKeyPolicy
+from vidbyte.lib.util.jsonl import AppendOnlyJsonl
 from vidbyte.lib.util.math import MathHelper
 from vidbyte.lib.util.prompt_placement import PromptPlacement
 from vidbyte.lib.util.text import SubstringCounter, TokenEstimate
 
-__all__ = ["CredentialKeyPolicy", "MathHelper", "PromptPlacement", "SubstringCounter", "SupportedKwargs", "TokenEstimate"]
+__all__ = ["AppendOnlyJsonl", "CredentialKeyPolicy", "MathHelper", "PromptPlacement", "SubstringCounter", "SupportedKwargs", "TokenEstimate"]
