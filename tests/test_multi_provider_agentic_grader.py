@@ -15,6 +15,8 @@ Key Functions / Test Cases:
     - test_grader_filler_parsing: Assures meta-grader verbatim output matching works correctly.
     - test_grader_keeps_the_winners_structured_output: Assures the selected trial's output_schema instance is returned.
     - test_select_winner_prefers_faithful_match: Assures the grader's exact choice is not overridden by substring candidates.
+    - test_select_winner_blank_grader_reply_selects_no_candidate: Assures an empty or whitespace grader reply matches no candidate.
+    - test_blank_grader_reply_is_reported_as_grader_raw: Assures a blank grader reply is recorded as grader_raw, never as a trial's win.
     - test_grader_prompt_with_an_unknown_placeholder_is_refused_at_construction: Assures an unrenderable grader_prompt fails before any trial.
     - test_grader_prompt_with_escaped_braces_renders_them_literally: Assures {{ }} in grader_prompt renders as literal braces.
     - test_isdone_trials_are_graded_on_their_final_answers: Assures an isDone finish is graded on its final_answer, not its tool-call text.
@@ -484,6 +486,42 @@ class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(selector._select_winner({"openai": "", "deepseek": "42 is it", "anthropic": long_answer}, FakeResponse("42"), handle), ("42 is it", "deepseek"))
         # With no match at all, the grader's own text is returned.
         self.assertEqual(selector._select_winner({"openai": "  ", "deepseek": "7"}, FakeResponse("unrelated"), handle), ("unrelated", "grader_raw"))
+
+    def test_select_winner_blank_grader_reply_selects_no_candidate(self) -> None:
+        # [Silent Failure] A blank reply is contained in every candidate, so the shortest one was reported as the grader's choice.
+        selector = MultiProviderAgenticGraderRuntimeAlgorithm(MagicMock(), MultiProviderAgenticGraderAlgorithm())
+        handle = RunnerHandle(runner=FakeRunner("ignored"), provider="openai", invoke=_invoke_runner_helper, extract_text=lambda r: getattr(r, "text", str(r)), extract_metadata=lambda r: {})
+        candidates = {"deepseek": "DeepSeek says Paris.", "gemini": "Paris is the capital of France."}
+        for reply in ("", "  \n"):
+            with self.subTest(reply=reply):
+                self.assertEqual(selector._select_winner(candidates, FakeResponse(reply), handle), ("", "grader_raw"))
+        # Control: a non-blank reply quoted from a candidate still selects the shortest candidate containing it.
+        self.assertEqual(selector._select_winner(candidates, FakeResponse("Paris"), handle), ("DeepSeek says Paris.", "deepseek"))
+
+    @patch("vidbyte.agents.algorithms.multi_provider_agentic_grader.ModalityDetector.create_runner")
+    async def test_blank_grader_reply_is_reported_as_grader_raw(self, mock_create_runner: MagicMock) -> None:
+        # [Silent Failure] An empty grader reply, such as a reasoning model that spent its budget thinking, chose no trial.
+        os.environ["DEEPSEEK_API_KEY"] = "fake-deepseek-key"
+        os.environ["GEMINI_API_KEY"] = "fake-gemini-key"
+        runners = {"deepseek": FakeRunner("DeepSeek says Paris."), "gemini": FakeRunner("Paris is the capital of France.")}
+        grader_runner = FakeRunner("")
+        mock_create_runner.side_effect = lambda modality, provider, model, **kwargs: runners.get(provider, grader_runner)
+
+        algorithm = MultiProviderAgenticGraderAlgorithm(provider_models={"deepseek": "deepseek-chat", "gemini": "gemini-3.5-flash"}, grader_provider="openai", grader_model="gpt-4o")
+        runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=Tools(), permission_policy=PermissionPolicy(), config=AgentRuntimeConfig(max_iterations=1), algorithm=ContextWindowAlgorithm(name="multi_provider_agentic_grader", multi_provider_agentic_grader=algorithm))
+        context = runtime.build_context("task", base_context=None, history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+
+        result = await runtime.arun(
+            "task",
+            handle=RunnerHandle(runner=FakeRunner("ignored"), provider="openai", invoke=_invoke_runner_helper, extract_text=lambda r: getattr(r, "text", str(r)), extract_metadata=lambda r: {}),
+            context=context,
+        )
+
+        grader_metadata = result.metadata["multi_provider_agentic_grader"]
+        self.assertEqual(len(grader_runner.calls), 1)
+        self.assertEqual(grader_metadata["grader_decision"], {"selected_provider": "grader_raw", "model": "gpt-4o"})
+        self.assertEqual(result.output, "")
+        self.assertIsNone(result.structured)
 
     def test_grader_prompt_with_an_unknown_placeholder_is_refused_at_construction(self) -> None:
         # [Hidden Failure] An example JSON object is an unknown {name} to str.format, so it is refused before any trial is paid for.
