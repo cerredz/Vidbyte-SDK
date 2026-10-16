@@ -64,3 +64,50 @@ Coordination design drawn from actor systems and distributed termination detecti
 
 - No blocking questions. Q-1–Q-10 are optional, default no.
 - Live-model QA after S3 (not a test): run the §4 snippet against a real provider to check A-5 and A-8.
+
+---
+
+## r2 addendum — S1 review round 1 (2026-10-16)
+
+The reviewer returned SOUND WITH FIXES (0 Blocker, 3 Major, 4 Minor, optional Q-11). I verified each finding against the code before editing and accepted all seven. §16 has one row per finding; §17 has the r2 row. `status` stays `draft`.
+
+**Dispositions**
+
+- **R-1 (Major), accepted.** `BaseAgent.generate_reply` catches every `Exception` and either re-raises an SDK error or wraps it in `AgentExecutionError("Agent '<name>' failed to generate a reply.") from exc` (`vidbyte/agents/base.py:965-979`; `BaseException` takes the branch at :980). So r1's set `(VidbyteSdkError, OSError, ValueError)` was really just `VidbyteSdkError`, and it also catches bugs. r2 states this honestly: contained = `VidbyteSdkError` or an early return (INV-17, D-7, FR-11, A-4). `AGENT_FAILED` names the root cause from `__cause__`, the way `vidbyte/agents/infinite/launch.py:356-361` `_error_text` does, plus the cause's type name (AC-7, EC-12, §9.1). New EC-38 covers what still propagates: a `BaseException`, or the runtime's own code. The README notes that a bug shows up as `AGENT_FAILED` (EC-16, row 30). Q-11 is recorded, default no.
+- **R-2 (Major), accepted.** Confirmed in code:
+  - `include_internal_tools=True` by default (`runtime.py:189`), so isDone is always added (`:194`).
+  - `BaseAgent` passes `agentic_loop=True` (`base.py:947`), so the agentic-loop prompt is appended (`runtime.py:254`).
+  
+  G-1, FR-3, INV-21, AC-13 and AC-14 now include `isDone` and the prompt order: own prompt, then the swarm prompt, then the agentic-loop prompt. AC-14 also states that `isDone` ends only the turn, and row 8 tells the model so. §13 states both facts. `runtime.py` is untouched.
+- **R-3 (Major), accepted with the orchestrator's mapping.**
+  - `AgentSwarmRuntime` is one swarm run: mailboxes, turns, ending, and the member task group. It is built fresh per `arun` and runs once.
+  - `AgentSwarm` is a thin entry point.
+  - The member loop is `AgentSwarmMemberRuntime(AgentRuntime)`, registered as `AgentRuntimeType.AGENT_SWARM_MEMBER = "agent_swarm_member"`. It is exported from the package because the registry imports it through the package (blocking-lint-invariants.md:24-29, A006).
+  - Precedent for a coordinator named `*Runtime`: `BaseActorRuntime` (`vidbyte/agents/runtimes/actor/broker.py:44`).
+  - The run-state reset clauses are gone. FR-16's in-progress refusal stays, because it keeps two runs' event sequences out of one `on_event`.
+  - New files stay at 23. Behavior classes go from 9 to 10, and W-11 is added.
+- **R-4 (Minor), accepted.** `elapsed_ms: int` is checked by `require_int(minimum=0)` and converted with the existing `AGENT_SPEED_MILLISECONDS_PER_SECOND` (`vidbyte/lib/constants/speed.py:18`). Row 4, D-14 and INV-27 are withdrawn (struck through); D-16 replaces them. Modified files go from 14 to 13. §14 now asks first before any change to `validation.py`.
+- **R-5 (Minor), accepted.** `AgentSwarmTools.get_tools(root)` returns the five file and shell tools only (prebuilt-agents.md:5). `AgentSwarmRuntime` builds each member's tools as `(*AgentSwarmTools(root).all(), message tool[, settings.search_tool])`, following `vidbyte/agents/infinite/agent.py:77`. Web search stays opt-in.
+- **R-6 (Minor), accepted.** Added the §13 bullet: set a `Signal` from `on_event`, gate the sender with `after(signal, tool_call("message", …))`, and use the named gate for AC-2.
+- **R-7 (Minor), accepted.**
+  - P3 order: row 22 comes first.
+  - S025: catalog text is exempt, so the 4–5 sentence rule is cited from model-facing-tool-contracts.md / prompt-families.md and left to the S2 contract tests.
+  - The `validate_provider_model_pair` citation is now `vidbyte/lib/dataclasses/config.py:514` (its only lib caller).
+  - Row 8's section is now "how the swarm works".
+
+**Self-check after r2** (scripted over the spec text):
+- All 18 FRs and 21 ACs land on a W row and a §12.3 row.
+- W-1 through W-11 each have rows.
+- §12.3 has CREATE 23 and MODIFY 13, matching §8.4.
+- Every `AgentSwarm*` name used in §4 appears in §8.5 and §12.3.
+- No stale `AGENT_SWARM` (bare), `allow_zero`, `elapsed_seconds` or `swarm=` references remain outside the withdrawn rows and the review log.
+
+**What the round-2 reviewer should look at first**
+- §8.5 (new `AgentSwarmRuntime` / `AgentSwarmMemberRuntime` split and the thin `AgentSwarm.arun`).
+- §9.2: `AgentSwarmRuntime` is public but `AgentSwarm` is the supported entry, and `arun` runs once.
+- Rows 26–29 and 31–33, and the §12.6 order. All of P3 effectively lands in one commit, because the package `__init__` imports `swarm.py` and `runtime.py`.
+
+**Least-sure assumptions (r2)**
+1. A-2: the R-3 mapping now follows the user's words. If the user meant the member loop, the fix is a rename only.
+2. A-5 and A-8 are unchanged. Only live-model QA can settle them.
+3. The member runtime's enum value `agent_swarm_member` is my choice. It names what it resolves to and cannot collide with the five role names.
