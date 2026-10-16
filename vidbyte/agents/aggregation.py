@@ -30,6 +30,7 @@ from typing import Any
 
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.types import AgentInput, AgentMessage
+from vidbyte.lib.constants.outputs import OUTPUT_DELIVERABLE_STOP_REASONS
 from vidbyte.lib.dataclasses.agents import (
     AgentForkSettings,
     AgentMetadata,
@@ -121,11 +122,11 @@ class MultiProviderAggregator:
         return await asyncio.wait_for(agent.generate_reply(prompt), self._config.per_proposer_timeout)
 
     def _collect_candidates(self, labeled_results: Sequence[tuple[str, Any]]) -> tuple[dict[str, str], list[str]]:
-        # Keeps non-blank successful replies as candidates and records the labels that failed.
+        # Keeps non-blank accepted answers as candidates and records the labels that failed.
         candidates: dict[str, str] = {}
         failed_labels: list[str] = []
         for label, result in labeled_results:
-            text = "" if isinstance(result, BaseException) else self._reply_text(result).strip()
+            text = "" if isinstance(result, BaseException) or not self._is_answer(result) else self._reply_text(result).strip()
             if not text:
                 failed_labels.append(label)
                 continue
@@ -173,6 +174,13 @@ class MultiProviderAggregator:
         if len(text) <= limit:
             return text
         return text[:limit] + _TRUNCATION_MARKER
+
+    @staticmethod
+    def _is_answer(reply: Any) -> bool:
+        # @intent stopped-proposers-are-failures
+        # A proposer stopped by a budget, guard, middleware, or unmet contract never reached an accepted answer, so it is never a candidate.
+        stop_reason = (getattr(reply, "metadata", None) or {}).get("stop_reason")
+        return stop_reason is None or stop_reason in OUTPUT_DELIVERABLE_STOP_REASONS
 
     @staticmethod
     def _reply_text(reply: Any) -> str:
