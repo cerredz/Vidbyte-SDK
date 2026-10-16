@@ -21,6 +21,26 @@ none (no `/talk` HANDOFF block or Re-entry ledger exists). The parent session's 
 
 ## C. Structured conversation notes
 
+### USER DECISION RECEIVED DURING THE RUN (2026-10-15 21:32) — SUPERSEDES every "routine" item below
+The user was asked how to schedule the 24/7 cloud routine and answered, verbatim:
+
+````
+dont add as routine, just explain in system prompt, should be good enough for now
+````
+````
+no cloud routine
+````
+
+What changes (relayed by the parent session; binding):
+- **No cloud routine or cron infrastructure** will be created by anyone. Drop "the parent creates a 24/7 routine" from the design. Every mention below of "the routine", "routine invocation", "hourly", or "Anthropic cloud" is superseded by this block.
+- The skill's own instructions (its SKILL.md, the system prompt the agent runs from) must explain **continuous operation**:
+  - When invoked, the agent onboards one provider and opens that provider's PR.
+  - It then returns to an up-to-date main and picks the next qualifying vendor.
+  - It repeats, one branch and one PR per provider, until a stop condition holds: no qualifying candidate is left, 3 or more provider-onboarding PRs are open (back-pressure), or a run fails its proof bar. On any stop it exits with a clear report.
+  - The skill must say how a long continuous run keeps its context small. Recommended: hand each provider to a fresh subagent with a self-contained brief, while the looping agent keeps only a ledger. The spec decides.
+- **Unchanged:** the location `.claude/skills/onboard-model-provider/`, idempotent selection (skip existing members, open PRs, and closed-unmerged vendors), first-party-only facts, the proof bar, and no merging.
+- Consequence for the environment: the skill is started by a person in a Claude Code session on a clone of the repo (this machine is Windows + Git Bash; the skill should still not depend on Windows-only tools). "Fresh Linux clone" is no longer the only target.
+
 ### What this PR delivers (one paragraph)
 An **in-repo skill that onboards one new model provider per run into the Vidbyte SDK, unattended**. Per run it researches the vendor's key format, endpoint, API dialect, model IDs and prices from first-party sources, wires the provider in the repo's own way, proves it, and opens one PR for that provider. THIS PR builds the skill (plus any small deterministic helper the spec proves necessary). **It does not onboard any provider itself.** After this PR, the parent session creates a 24/7 cloud routine (Anthropic cloud, hourly at most) that runs this skill on a fresh clone of the repo; **the skill is therefore the routine's whole contract**.
 
