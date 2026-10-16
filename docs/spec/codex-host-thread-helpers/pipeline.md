@@ -22,12 +22,12 @@ Existing-PR run: no new branch, no new PR. Adds to draft PR #1055 on `feat/codex
 | S2 tests | done | 10-16 | 10-16 | reports/S2-test-author.md | 76 new tests in 5 files; red confirmed (area 91 failed / 537 passed = 76 new + 14 authorized-pin + 1 inherited); S2_HEAD 33787d9a |
 | S3 implement | done | 10-16 | 10-16 | reports/S3-implementer.md | S3_HEAD c81ba632 pushed (ff) to PR #1055 (draft, title unchanged); 18/18 rows, 4 new files / 20 classes (budget exact); area 673 passed + 1 inherited; SDK-LINT PASS; run_ci source 1 inherited fail / 5952 passed; package CI passed; semgrep 0 findings; remote CI 38893453043 + static 38893455393 success |
 | S4 adversarial review | done | 10-16 | 10-16 | reports/S4-review-*.md, S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; 0 Blocker / 4 Major (R-1..R-4) / 11 Minor; 0 refuted, 1 downgraded (R-E2 → R-8); conformance SOUND, conventions + engineering MERGEABLE AFTER FIXES |
-| S5 repair loop | done | 10-16 | 10-16 | reports/S5-repair-1.md, verify-log.md | converged in 1 iteration: R-2 54f599de, R-3 dd3fe2c2, R-6 c3a3ef98, R-7 4fbc88b6, R-9 549c7475, R-5 3d1ff4e2; pushed ff c81ba632..03e1d7fd; remote 4/4 success on 03e1d7fd |
+| S5 repair loop | running (iter 3: merge main) | 10-16 | | reports/S5-repair-1.md, S5-repair-2.md, verify-log.md | iter 2: R-16 ddc432fe; 4/4 green on 867d6f0c; iter 1: converged in 1 iteration: R-2 54f599de, R-3 dd3fe2c2, R-6 c3a3ef98, R-7 4fbc88b6, R-9 549c7475, R-5 3d1ff4e2; pushed ff c81ba632..03e1d7fd; remote 4/4 success on 03e1d7fd |
 | S5 re-review | done | 10-16 | 10-16 | reports/S5-rereview-1.md | round 1: SOUND; R-1..R-9 hold, six mutants each killed by their test, no regression; 0 Blocker / 0 Major / 1 Minor (R-C101) |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 1/8 · S5 re-review rounds: 1/2
+- S1 review rounds: 2/2 · S5 repair iterations: 3/8 · S5 re-review rounds: 1/2
 
 ## Decisions the orchestrator made
 - 2026-10-15 22:30 — Worktree created on the existing branch `feat/codex-host` (not from main); verified local == origin == 66558ee9 before `git worktree add`. — the run adds to PR #1055.
@@ -62,6 +62,9 @@ Existing-PR run: no new branch, no new PR. Adds to draft PR #1055 on `feat/codex
 - 2026-10-16 — S5 iteration 1 converged. Orchestrator checks at 03e1d7fd: tree clean; `git diff ecba0d48..HEAD -- tests lint/baseline.json` empty; verify-log `## Iteration 1` present; review.md has no confirmed row open (R-10..R-15 are follow-ups); own gate run: `SDK-LINT: PASS`, source `1 failed, 5957 passed, 25 skipped` (inherited only), package `CI passed.`; check-runs Package / Static policy / Source 3.11 / Source 3.12 all success on 03e1d7fd. Final re-review round 1 launched (conformance, DIFF_BASE c181be65).
 
 - 2026-10-16 — Re-review round 1 SOUND. R-C101 (Minor, trivial): vidbyte/lib/enums/__init__.py:33-35 TESTS block names no S2 test file although its new CodexSkillScope export is pinned (helper_surface:238-244, packaging:70); §12.5/NFR-8 unmet on that one file, R-7's list missed it. Decision: FIX it now as review.md R-16 via a fresh S5 iteration 2 (one header line, in scope, reversible) rather than leave a known §12.5 gap for the owner; no further re-review round (comment-only header change), orchestrator verifies with lint + diff + check-runs.
+
+- 2026-10-16 — S5 iteration 2 DONE: R-16 (re-review R-C101) fixed ddc432fe (+3 header lines, CRLF kept); verify-log 867d6f0c; full gate set identical to iteration 1; check-runs 4/4 success on 867d6f0c (CI 38931668308, static 38931671805). Orchestrator verified: tree clean, origin == 867d6f0c, test tree unchanged since ecba0d48, `## Iteration 2` present.
+- 2026-10-16 — PR #1055 is now `mergeable: CONFLICTING / DIRTY`: origin/main moved 72a4ade1 → cb554ed3 (54 commits, #1137..#1157). `git merge-tree` shows ONE conflict, vidbyte/lib/errors/base.py (main #1116 vs this PR), plus auto-merges in REPO_MAP.md (native/ section is byte-pinned by the packaging test), vidbyte/agents/codex/tools.py, vidbyte/lib/enums/__init__.py. Decision: merge origin/main again (merge commit, no rebase, as at S0) via a fresh S5 iteration 3 `[gate:mergeable]`, so the owner receives a mergeable PR with green checks on the merged tree. Pre-granted, narrowly (S0 option-A precedent): the agent may update an EXISTING test pin only if the test fails on the merged tree but passes on both 867d6f0c and origin/main, and the change only re-pins the value main changed (text/hash/count), never assertion logic; before/after logged in verify-log. Anything else → BLOCKED. — in scope (S0 did the same), keeps the PR mergeable.
 
 ## User replies (verbatim)
 - none
