@@ -186,3 +186,69 @@ Remote run detail:
 **Still open:** no confirmed finding and no gate.
 - R-24 is fixed @`ade57291`, and R-25 @`3c114e7b`.
 - The follow-ups are unchanged by decision: R-8, R-9, R-12, R-13, R-14, R-18..R-20, R-22, and R-21's 44 markers.
+
+## Iteration 3 — 2026-10-16 14:46 EDT — agent report: reports/S5-repair-3.md
+
+**Defects in:** two trivial Minors from the S6 PR author (`reports/S6-pr-author.md`, "Things that looked wrong"), routed back to repair at HEAD `a35ccf11` (`5c93e6c9` plus one unpushed docs commit). No gate was red: all green at `71c15a2c`, and 4/4 remote at `5c93e6c9`.
+- **R-26** (S6 R-open-1): `vidbyte/harnesses/README.md:179` said "22 keyless functions" but listed 23 names, because `init_muse_workspace` sat in the list.
+- **R-27** (S6 R-open-2): `vidbyte/harnesses/native/grok/store.py:104-106` had three blank lines between `GrokHome` and `GrokStore`.
+
+**Hypotheses and attempts (in order):**
+1. **R-26, three options.**
+   - (a) Change "22" to "23". Rejected: spec r5 (`spec.md:17`) and the PR body count 22 helpers.
+   - (b) Move `init_muse_workspace` into the "Command and skill functions: 24" bullet. Rejected: that makes the bullet 25, against the PR body's 24.
+   - (c) Keep "22", drop `init_muse_workspace` from the list, and give it its own sentence after the return sentence: "`init_muse_workspace` is keyless too: it runs `muse init` in the workspace, with `dry_run=True` to only show what it would create, and returns a `NativeCommandOutput`." I also dropped its clause from the return sentence, so it is described once. **Chosen.**
+   - Check: a scratch script (`r26count.py`) parses the names between "keeps:" and "They take", expands `<h>`, and compares them with `vidbyte.harnesses.native.__all__`. HEAD gave 23 names; the fix gives `names listed: 22` and `listed==exports: True`. Its first version counted the bare `<h>` placeholder token as a name (25); I fixed the parser, not the README.
+   - No test pins this README text (`grep` of `tests/features/harness_threads`). The README is 15,230 characters (A009 0).
+2. **R-27, three options.**
+   - (a) Delete one blank line. **Chosen.**
+   - (b) Run a formatter on the file. Rejected: it would touch other lines.
+   - (c) Dispute it. Rejected: there is no basis.
+   - Reproduced first with `ruff check --no-cache --isolated --preview --select E303 vidbyte/harnesses/native/grok/store.py`: `too-many-blank-lines … (3) --> store.py:107:1`. After `sed -i '106{/^$/d}'`, the diff is `0 1` (one deletion), and E301/E302/E303/E305 over `grok/` print `All checks passed!`. The repo's lint does not select E303, so this was never a gate.
+3. **The full gate, first run: FAILED, and the cause was my shell, not the branch.** I ran `export PYTHONPATH="$(pwd)"` (from code-map §1.2's worktree note), then `run_ci.py`.
+   - The source stage passed: `6632 passed, 17 skipped`.
+   - The package stage failed: `ModuleNotFoundError: No module named 'vidbyte'` in the smoke check. Before it, pip printed `vidbyte-sdk is already installed with the same version as the provided wheel`.
+   - Root cause: `_verify_clean_install` runs `pip install` with cwd at the repo root and the inherited `PYTHONPATH`. So pip finds the git-ignored `vidbyte_sdk.egg-info` in the worktree, treats the SDK as installed, and skips the wheel. The smoke step then pops `PYTHONPATH` (`clean_python_path=True`), so nothing is importable.
+   - Independent check: an empty scratch venv's `pip list` shows `vidbyte-sdk 0.3.0` with `PYTHONPATH=<worktree>`, and nothing without it.
+   - `scripts/run_ci.py` is untouched by the branch. I re-ran with `PYTHONPATH` unset, as iterations 1 and 2 did, and it passed.
+   - **Lesson: never export `PYTHONPATH` before `run_ci.py`.** The pip-install step inheriting it is a latent `run_ci.py` defect, outside §12.3. I did not change it.
+4. **Merge state.** `origin/main` is `6983afd2` (#1160–#1164), 5 commits past the merge base `8da41971`. `comm -12` of both sides' changed files is empty. I did not merge.
+
+**Changes:**
+
+| SHA | Finding | Subject |
+|---|---|---|
+| `ccfe71ca` | R-26 | `docs(harnesses): count only the 22 helpers in the thread-helpers bullet [R-26]` |
+| `25f36c6d` | R-27 | `style(harnesses): use two blank lines between GrokHome and GrokStore [R-27]` |
+| (records commit) | — | `docs(spec): verify-log iteration 3 for harness-thread-helpers-skills` (verify-log, review rows R-26/R-27, report) |
+
+**Invariants checked:**
+- `git diff cd2b329b..HEAD -- tests/features/harness_threads | wc -l` → `0`, so there were no test edits.
+- `git diff 239c408a HEAD -- lint/baseline.json | wc -l` → `0`.
+- `git diff --name-only a35ccf11..25f36c6d` → only `vidbyte/harnesses/README.md` and `vidbyte/harnesses/native/grok/store.py`.
+- Neither commit touches a `#` comment, so the R-1 width check does not apply. Each commit ran lint after `git add` and exited 0.
+
+**Gate matrix out (code SHA `25f36c6d`, `DEEPSEEK_API_KEY` set, `PYTHONPATH` unset):**
+
+| Gate | Command | Result | Final lines |
+|---|---|---|---|
+| lint | `$PY lint/run.py` (own exit code, after `git add`) | PASS (exit 0) | `S063 IMPROVED 4 -> 3` · `S064 RATCHETED: 4 known finding(s).` · `SDK-LINT: PASS`; A009 0 CLEAN |
+| new tests | `$PY -m pytest -p no:cacheprovider -q tests/features/harness_threads` | PASS (exit 0) | `1025 passed, 3 skipped in 91.72s (0:01:31)` |
+| full local gate | `$PY scripts/run_ci.py` | PASS (exit 0) | `6632 passed, 17 skipped in 149.54s (0:02:29)` · `Installed vidbyte-sdk 0.3.0 passed smoke checks.` · `CI passed.` |
+| semgrep fixtures | `semgrep --test --config .semgrep/typed-mapping-boundary-policy.yml .semgrep/typed-mapping-boundary-policy.py` | PASS (exit 0) | `1/1: ✓ All tests passed` · `No tests for fixes found.` |
+| semgrep scan | `semgrep scan --error --config .semgrep/typed-mapping-boundary-policy.yml vidbyte` | PASS (exit 0) | `Ran 1 rule on 975 files: 0 findings.` |
+| remote checks | `gh api repos/cerredz/Vidbyte-SDK/commits/25f36c6d…/check-runs` | 4/4 green | `Package completed success` · `Static policy completed success` · `Source / Python 3.12 completed success` · `Source / Python 3.11 completed success` |
+
+Remote run detail:
+- CI run [38951244041](https://github.com/cerredz/Vidbyte-SDK/actions/runs/38951244041):
+  - Source 3.11: `SDK-LINT: PASS` · `6580 passed, 69 skipped in 149.08s` · `CI passed.`
+  - Source 3.12: `SDK-LINT: PASS` · `6580 passed, 69 skipped, 19 warnings in 154.22s` · `CI passed.`
+  - Package: `Installed vidbyte-sdk 0.3.0 passed smoke checks.` · `CI passed.`
+- Static policy run [38951246923](https://github.com/cerredz/Vidbyte-SDK/actions/runs/38951246923): `1/1: ✓ All tests passed` · `Ran 1 rule on 975 files: 0 findings.`
+- The only annotation is the Ubuntu 26 runner-label notice, not billing.
+- The records commit that carries this entry is dispatched again. Its results are in the S5 STATUS message.
+
+**Still open:** no confirmed finding and no gate.
+- R-26 is fixed @`ccfe71ca`, and R-27 @`25f36c6d`.
+- The follow-ups are unchanged by decision: R-8, R-9, R-12, R-13, R-14, R-18..R-20, R-22, and R-21's 44 markers.
+- One process note for the orchestrator, not a finding: `run_ci.py`'s install step inherits `PYTHONPATH` (see attempt 3). It is a candidate field-guide lesson or a separate PR.
