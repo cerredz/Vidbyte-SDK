@@ -80,6 +80,8 @@ started: 2026-10-15 18:12
   - **Not taken (follow-ups):** R-14 and R-20 (hardening that needs new spec rules); R-12, R-22 (file-size and style moves); R-18, R-19 (scope-adding or new test kinds); R-9, R-13.
 - 2026-10-16 11:30 — origin/main moved to 61acd016 (#1148–#1151, compaction middleware only). S5 merges it; no rebase, because the branch is pushed.
 
+- 2026-10-16 11:10 — A fourth usage-limit outage (HTTP 429, reset at 11:10am) stopped three agents: the r4 spec author mid-way through its Stage E self-check, the #1055 orchestrator, and its S5 repair-1 agent. I resumed the spec author and the #1055 orchestrator by SendMessage, and told the orchestrator to resume its own repair agent by ID.
+
 ## User replies (verbatim)
 - 2026-10-15 ~18:25 — "note, ccan you also in a subagent launch this "spec-pipeline" process for pr #1055 and explain the changes that we want to make with the implementation of the existing pr"
 
