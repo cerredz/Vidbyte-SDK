@@ -23,8 +23,8 @@ Existing-PR run: no new branch, no new PR. Adds to draft PR #1055 on `feat/codex
 | S3 implement | done | 10-16 | 10-16 | reports/S3-implementer.md | S3_HEAD c81ba632 pushed (ff) to PR #1055 (draft, title unchanged); 18/18 rows, 4 new files / 20 classes (budget exact); area 673 passed + 1 inherited; SDK-LINT PASS; run_ci source 1 inherited fail / 5952 passed; package CI passed; semgrep 0 findings; remote CI 38893453043 + static 38893455393 success |
 | S4 adversarial review | done | 10-16 | 10-16 | reports/S4-review-*.md, S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; 0 Blocker / 4 Major (R-1..R-4) / 11 Minor; 0 refuted, 1 downgraded (R-E2 → R-8); conformance SOUND, conventions + engineering MERGEABLE AFTER FIXES |
 | S5 repair loop | done | 10-16 | 10-16 | reports/S5-repair-1.md, S5-repair-2.md, verify-log.md | iter 2: R-16 ddc432fe; 4/4 green on 867d6f0c; iter 1: converged in 1 iteration: R-2 54f599de, R-3 dd3fe2c2, R-6 c3a3ef98, R-7 4fbc88b6, R-9 549c7475, R-5 3d1ff4e2; pushed ff c81ba632..03e1d7fd; remote 4/4 success on 03e1d7fd |
-| S5 re-review | running (round 2) | 10-16 | | reports/S5-rereview-1.md, S5-rereview-2.md | round 2 over iterations 2-4 + merges; round 1: SOUND; R-1..R-9 hold, six mutants each killed by their test, no regression; 0 Blocker / 0 Major / 1 Minor (R-C101) |
-| S6 PR | pending | | | | |
+| S5 re-review | done | 10-16 | 10-16 | reports/S5-rereview-1.md, S5-rereview-2.md | round 2: SOUND, 0/0/0 — R-16..R-18 hold (own mutants killed), 3 merges exact both ways, net diff intact; round 1: SOUND; R-1..R-9 hold, six mutants each killed by their test, no regression; 0 Blocker / 0 Major / 1 Minor (R-C101) |
+| S6 PR | running | 10-16 | | reports/S6-pr-author.md | |
 
 ## Counters and caps
 - S1 review rounds: 2/2 · S5 repair iterations: 4/8 · S5 re-review rounds: 2/2
@@ -71,6 +71,8 @@ Existing-PR run: no new branch, no new PR. Adds to draft PR #1055 on `feat/codex
 
 - 2026-10-16 — S5 iteration 4: first launch died on an API safeguard false positive (`[reasoning_extraction]`, invalid_request) before any edit; resumed the SAME agent by ID, which completed. Fixed R-17 5e30a226, R-18 804bbc91, spec INV-22/INV-35 + §17 deviation 9 04aa8cbe; merged main f7f32b19 (#1160) clean as fca03aea; verify-log 40eeebc4. Orchestrator re-ran at 40eeebc4: `SDK-LINT: PASS`; source `1 failed, 6236 passed, 26 skipped` (inherited only); package `CI passed.`; check-runs 4/4 success; `MERGEABLE`; tree clean; origin == 40eeebc4. Converged.
 - 2026-10-16 — Re-review round 2 of 2 (cap) launched: conformance lens over R-16..R-18 fixes, the three merge resolutions, and every PR-authored commit since 13a61e67.
+
+- 2026-10-16 — Re-review round 2 (cap 2/2) SOUND with 0 findings. Spec set `status: verified`. origin/main moved again to d5c1532d (#1162, middleware/compaction only, 0 conflicts, no shared file): PR is BEHIND but MERGEABLE. Decision: do NOT merge main again (stop chasing a main that moves several times an hour; no overlap; the owner merges with --admin); report it in OPEN ITEMS.
 
 ## User replies (verbatim)
 - none
