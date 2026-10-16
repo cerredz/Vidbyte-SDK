@@ -1987,7 +1987,10 @@ class AgentRuntime:
         # @intent admission-is-a-cap-not-a-middleware
         # The context-window admission (compact or hide) caps an executed tool's output here, like result_max_chars,
         # so a note a middleware appended survives it and a denial's reason is never hidden or cut.
-        if admit:
+        # @intent admission-spares-calls-that-never-ran
+        # An unknown tool or invalid arguments means the tool never ran: the text is the SDK's own guidance, not tool
+        # output, so hiding it would tell the model the tool "completed" and leave it no way to fix the call.
+        if admit and dict(result.metadata).get("error") not in ("unknown_tool", "validation_error"):
             result = self.algorithm.model_visible_tool_result(call, result)
         return result if settings is None else settings.truncate(result)
 
