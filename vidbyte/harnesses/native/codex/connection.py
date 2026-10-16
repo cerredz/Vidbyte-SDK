@@ -5,8 +5,8 @@ ROLE IN CODEBASE: The process and transport layer of vidbyte/harnesses/native/co
 ARCHITECTURE NOTE: "from openai_codex.client import CodexClient, CodexConfig" at module level is the test seam (section 13), so only CodexHost.__aenter__ imports this module (D-21). Every call runs on the host's own ThreadPoolExecutor, bounded by asyncio.wait_for, never on the loop or its default executor (D-1); the bounds are read from this module's namespace at call time.
 COMMON MODIFICATION PATTERNS: A new app-server call goes through call() with a typed CodexClient method, or through raw() with its generated response model when openai-codex has no typed method; a raw call that spends usage is added to SPENDING_RAW_METHODS, so it is sent once (D-2).
 KNOWN EDGE CASES: A spending start that outlives its caller or its bound is owned, never orphaned: a queued start is withdrawn, and a running one posts its outcome to the loop when it returns (INV-11). The router and the done-callback run on openai-codex's threads, so they never raise. Once close began or the process died, only cleanup calls are sent.
-RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.1 D-1 to D-3, D-18 and D-27, and 12.4 call list)
-TESTS: tests/features/codex_host/test_codex_host_lifecycle.py, tests/features/codex_host/test_codex_host_failures.py, tests/features/codex_host/test_codex_host_router.py
+RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.1 D-1 to D-3, D-18 and D-27, and 12.4 call list); docs/spec/codex-host-thread-helpers/spec.md (section 9.2 wire calls)
+TESTS: tests/features/codex_host/test_codex_host_lifecycle.py, tests/features/codex_host/test_codex_host_failures.py, tests/features/codex_host/test_codex_host_router.py, tests/features/codex_host/test_codex_host_helper_lifecycle.py
 """
 
 from __future__ import annotations
@@ -25,7 +25,11 @@ from openai_codex.generated.v2_all import (
     GetAccountRateLimitsResponse,
     ModelListResponse,
     ReviewStartResponse,
+    SkillsListResponse,
+    ThreadDeleteResponse,
+    ThreadGoalGetResponse,
     ThreadGoalSetResponse,
+    ThreadTurnsListResponse,
     WindowsSandboxReadinessResponse,
 )
 from openai_codex.models import InitializeResponse
@@ -36,6 +40,7 @@ from vidbyte.lib.constants.codex import (
     CODEX_ACCEPTED_APPROVAL_METHODS,
     CODEX_APPROVAL_ACCEPT_DECISION,
     CODEX_GOAL_CANCEL_CALL,
+    CODEX_GOAL_GET_METHOD,
     CODEX_GOAL_SET_METHOD,
     CODEX_HOST_CLOSE_INTERRUPT_SECONDS,
     CODEX_HOST_CLOSE_WAIT_SECONDS,
@@ -47,6 +52,9 @@ from vidbyte.lib.constants.codex import (
     CODEX_RATE_LIMITS_READ_METHOD,
     CODEX_REVIEW_START_METHOD,
     CODEX_SANDBOX_READINESS_METHOD,
+    CODEX_SKILLS_LIST_METHOD,
+    CODEX_THREAD_DELETE_METHOD,
+    CODEX_THREAD_TURNS_LIST_METHOD,
     CODEX_TOOL_CALL_METHOD,
     CODEX_TURN_INTERRUPT_METHOD,
     CODEX_UNREGISTERED_TOOL_TEXT,
@@ -63,13 +71,18 @@ if TYPE_CHECKING:
 ResultT = TypeVar("ResultT")
 
 # The generated response model of each call made through the raw path,
-# which openai-codex offers no typed method for (section 12.4).
+# which openai-codex offers no typed method for (codex-host section
+# 12.4; the last four rows are thread-helpers section 9.2).
 RAW_RESPONSES: Mapping[str, type[BaseModel]] = {
     CODEX_RATE_LIMITS_READ_METHOD: GetAccountRateLimitsResponse,
     CODEX_SANDBOX_READINESS_METHOD: WindowsSandboxReadinessResponse,
     CODEX_MODEL_LIST_METHOD: ModelListResponse,
     CODEX_REVIEW_START_METHOD: ReviewStartResponse,
     CODEX_GOAL_SET_METHOD: ThreadGoalSetResponse,
+    CODEX_THREAD_DELETE_METHOD: ThreadDeleteResponse,
+    CODEX_GOAL_GET_METHOD: ThreadGoalGetResponse,
+    CODEX_SKILLS_LIST_METHOD: SkillsListResponse,
+    CODEX_THREAD_TURNS_LIST_METHOD: ThreadTurnsListResponse,
 }
 # Raw calls that spend usage, so each is sent once and never retried
 # (D-2).
