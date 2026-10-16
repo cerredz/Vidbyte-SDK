@@ -17,7 +17,9 @@ started: 2026-10-15 18:12
 | S1 spec + review | done | 2026-10-15 19:00 | 2026-10-15 22:30 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | spec r3 approved (e6b2cdbd); 2 rounds, 25 findings all accepted |
 | S2 tests | done | 2026-10-15 22:35 | 2026-10-16 01:50 | reports/S2-test-author.md | 563 new tests (12 files + fake_harness_helpers.py); red 568 failed/430 passed/3 skipped (re-run by orchestrator); b502b6f2, a2053e68 |
 | S3 implement | done | 2026-10-16 02:05 | 2026-10-16 09:00 | reports/S3-implementer.md | HEAD 462e6d45 pushed; draft PR #1147; 998 passed/3 skipped; lint, run_ci (source+package) and semgrep green; 10/10 new files |
-| S4 adversarial review | running | 2026-10-16 09:10 | | reports/S4-review-{conformance,conventions,engineering}.md | |
+| S4 adversarial review | done | 2026-10-16 09:10 | 2026-10-16 11:30 | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; confirmed 2 Blocker (R-1, R-2) / 4 Major (R-3..R-6) / 17 Minor; refuted 3; downgraded 3; 6641579c |
+| S4→S5 spec amendment r4 | pending | | | | D-33 + §9.2 evidence (R-2, R-23), AC-22/NFR-5 (R-7), INV-18 (R-8), §12.4 scan-cap text (R-16), R-5/R-6 symbols in §12.3 |
+| S4→S5 test amendment | pending | | | | R-4 fixture; red tests for R-2, R-3, R-5, R-16, R-23 |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
@@ -59,6 +61,24 @@ started: 2026-10-15 18:12
 
 - 2026-10-16 09:05 — S3 spot-check passed. HEAD is 462e6d45, the branch is pushed, and PR #1147 is a draft (`gh pr view`). No `tests/features/harness_threads` file changed after S2's commit; the branch's only test diffs vs the merge base 239c408a are in harness_threads (the other test files came from S3's `git merge` of main, commit 4206cee2). I re-ran the area: with `DEEPSEEK_API_KEY` unset it gives `998 passed, 3 skipped`; with it set (as on this machine) it gives `16 failed, 982 passed`. So this disagreement between tests and implementation goes to S4 for adjudication, because S3 may not edit tests.
 - 2026-10-16 09:05 — Flagged for S4 (from S3's report, not from reading code): `NativeEnvironmentVariable.PWD = auto()` in a str enum yields lowercase `"pwd"`. Windows ignores env-var case but POSIX does not, so local gates on win32 cannot catch it.
+
+- 2026-10-16 11:30 — S4 spot-check passed: review.md has 6 confirmed rows, each with its own evidence (commands and re-run repros) and a path:line, and 7 refuted or downgraded rows, each with evidence. The verifier refuted the PWD blind spot I flagged: `E.PWD.value == 'PWD'`, because the enum overrides `_generate_next_value_`. Spec status set to `reviewed` (85e68709).
+- 2026-10-16 11:30 — Before S5, the confirmed fixes are routed to the stage that owns each artifact. A repair agent may not edit the spec or the tests, so a fix that needs either goes there first.
+  - **Spec r4 (fresh S1 author, revision mode):**
+    - R-2: D-33 and the §9.2 Muse evidence cells now read structured toolCall items, never message text.
+    - R-23: the skill id is compared by equality, not as a substring. It is a Minor, taken now because it amends the same §9.2 cell R-2 rewrites, and "prove they ran" is KD-6.
+    - R-7: the AC-22/NFR-5 banner text.
+    - R-8: the INV-18 exemption for boundary records.
+    - R-16: the §12.4 scan-cap next step drops the since advice, which cannot work (the owner asked for detailed, correct errors).
+    - R-5/R-6: `remember_thread` and `child_problem` added to §8.5 and §12.3, so the final conformance re-review finds them in the contract.
+  - **Test amendment (fresh S2 author):**
+    - R-4: the `sandbox` fixture clears all six `CREDENTIAL_NAMES`. This edits an existing fixture. Granted, because INV-2/AC-10 name only the SDK key variables, so the six-name `all(None)` checks depend on the runner's shell by accident (verifier evidence: 998 passed with both keys set once the names are cleared).
+    - R-3: the property generator varies the duplicate copy's texts. Granted, because it is the blind spot that let a confirmed Major through.
+    - R-16: the pin at `helper_surface.py:258` follows the amended §12.4 text.
+    - New red tests for R-2 (3 anchored negatives), R-23 (prefix id), R-5 (2 evidence-step id cases).
+    - No other existing assertion may change.
+  - **Not taken (follow-ups):** R-14 and R-20 (hardening that needs new spec rules); R-12, R-22 (file-size and style moves); R-18, R-19 (scope-adding or new test kinds); R-9, R-13.
+- 2026-10-16 11:30 — origin/main moved to 61acd016 (#1148–#1151, compaction middleware only). S5 merges it; no rebase, because the branch is pushed.
 
 ## User replies (verbatim)
 - 2026-10-15 ~18:25 — "note, ccan you also in a subagent launch this "spec-pipeline" process for pr #1055 and explain the changes that we want to make with the implementation of the existing pr"
