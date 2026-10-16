@@ -1,7 +1,7 @@
 ---
 spec: codex-host-thread-helpers
 title: CodexHost thread helpers and built-in skill functions
-status: verified             # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
+status: pr-open              # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
 revision: 3
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-codex-host-thread-helpers
@@ -131,32 +131,42 @@ The developer gets four things without hand-written JSON-RPC: the threads they a
 
 ```mermaid
 flowchart TD
-  P["Python caller"] --> H["CodexHost.<new method>"]
-  T["CodexHostTools tool (READ / WRITE)"] -->|"run tools: CodexToolScope.reserve"| H
+  P["Python caller"] --> H["CodexHost: one of the 12 new methods"]
+  T["CodexHostTools: 7 new READ and 4 new WRITE tools, none for delete"] -->|"run tools: CodexToolScope.reserve, one slot"| H
   H --> G["CodexHost._guard: open, same loop, process alive"]
-  G -->|"listing, lineage, turns, compact, delete, goal read"| TH["CodexThreadHelpers"]
-  G -->|"list_codex_skills (inline)"| SL["CodexConnection.raw skills/list"]
-  G -->|"run goal / skill / docs"| SF["CodexSkillFunctions"]
-  TH -->|"arguments checked"| W["thread/list pages: until limit, empty or repeated cursor, since cut-off, page bound"]
-  TH --> RT["CodexPreflight.require_thread: thread/read"]
-  RT -->|"unknown"| NF["codex.session_not_found"]
-  RT -->|"active, or this host busy"| BZ["codex.session_busy"]
-  RT -->|"notLoaded, compact only"| GC{"thread/goal/get: no goal, or goal complete?"}
-  GC -->|"no"| GU["codex.goal_unfinished"]
-  GC -->|"yes"| RS["thread/resume"]
-  RT --> M["thread/compact/start | thread/delete | thread/goal/get | thread/turns/list"]
-  RS --> M
-  W --> TR["CodexResponseTranslator: summary, goal, turn_page"]
-  M --> TR
+  G -->|"recent, since, search"| LW["CodexThreadHelpers.list_threads: limit, since and query checked first"]
+  LW --> WK["thread/list pages, newest first, every top-level source, until the limit, an empty or repeated cursor, a thread older than since, or 1000 pages"]
+  G -->|"lineage, turns, goal read"| RT["CodexPreflight.require_thread: thread/read"]
+  RT -->|"unknown id"| NF["codex.session_not_found"]
+  RT -->|lineage| AN["each parent read once, an unreadable parent ends the walk"]
+  RT -->|turns| TL["raw thread/turns/list: itemsView full, oldest first"]
+  RT -->|goal| GG["raw thread/goal/get, never thread/resume"]
+  G -->|"compact, delete"| ID["CodexPreflight.require_idle, then CodexTurnRegistry.reserve"]
+  ID -->|"busy on this host"| BZ["codex.session_busy, nothing sent"]
+  ID --> SS["thread/read: unknown is not found, active is codex.session_busy"]
+  SS -->|delete| DL["raw thread/delete, never a resume"]
+  SS -->|"compact, notLoaded"| CG{"thread/goal/get: no goal, or a complete one?"}
+  CG -->|no| GU["codex.goal_unfinished"]
+  CG -->|yes| RS["thread/resume, as continue_codex_thread does"]
+  SS -->|"compact, loaded"| CP["thread/compact/start, sent once"]
+  RS --> CP
+  CP --> RL["CodexTurnRegistry.release, in finally"]
+  DL --> RL
+  G -->|list_codex_skills| SL["raw skills/list"]
+  WK --> TR["CodexResponseTranslator: summary, goal, skills and turn_page records"]
+  AN --> TR
+  TL --> TR
+  GG --> TR
   SL --> TR
-  SF -->|"skill"| LS["host.list_codex_skills, then exact-name match"]
-  LS -->|"none / disabled"| SK["codex.skill_not_found / codex.skill_disabled"]
-  LS -->|"text + skill item"| SP["host.spawn_codex_thread"]
-  SF -->|"goal"| SP
-  SP -->|"CodexTurnHandle"| CK{"read back: goal stored as sent (host.get_codex_goal), or skill entry in the turn's userMessage (host.list_codex_turns, bounded poll)?"}
-  CK -->|"no"| CN["host.interrupt_codex_turn, then codex.command_not_run"]
-  CK -->|"yes"| OUT["handle / record to caller or tool JSON"]
-  TR --> OUT
+  G -->|"run goal, skill or docs"| SF["CodexSkillFunctions: own input, ephemeral thread and skill name checked first"]
+  SF -->|skill| LS["host.list_codex_skills, then the first enabled exact-name match"]
+  LS -->|"no match, or only disabled ones"| SK["codex.skill_not_found or codex.skill_disabled"]
+  LS -->|"text item, then skill item"| SP["host.spawn_codex_thread: its preflight, start and handle"]
+  SF -->|goal| SP
+  SP --> CK{"read back: host.get_codex_goal, or host.list_codex_turns up to 10 times"}
+  CK -->|"goal missing or different, or skill not recorded"| CN["host.interrupt_codex_turn once, then codex.command_not_run"]
+  CK -->|"the read failed or was cancelled"| CE["one interrupt, then the read's own error with every field kept and a sentence added"]
+  CK -->|confirmed| OUT["CodexTurnHandle to the caller, or tool JSON whose handle the scope owns"]
 ```
 
 ```mermaid
@@ -1331,6 +1341,7 @@ Blocking questions: 0.
 | r2 | 2026-10-15 | S1 spec (review round 1) | All 15 findings accepted (2 Blocker, 7 Major, 6 Minor). A read-only probe of one real `notLoaded` thread settled A-4 and A-5. `get_codex_goal` no longer resumes (INV-33). Compact checks the goal before it resumes (new `codex.goal_unfinished`). `run_codex_skill` reads its input back (INV-34, INV-35). New `CodexSkillHost` Protocol, tool default limit (D-25), lint ratchet checklist and §C deviation table. Now 4 failure codes and 20 classes (r3 corrected r2's "19"). |
 | r3 | 2026-10-16 | S1 spec (review round 2; approved) | All round-2 findings accepted (R-16 Blocker; R-17 and R-18 Major; R-19 to R-22 Minor), and R-9 completed. The skill read-back gets a cumulative deadline that lint S064 accepts. Ephemeral skill runs are refused before any request. `codex.goal_unfinished` gets a next step that works and a terminal row. Turns-not-size wording, a class count of 20, three stale texts and local evidence for A-7, A-15, A-16, A-19 and A-20. Status set to approved: the two review rounds are the approval. |
 | r3 | 2026-10-16 | S3 implement | All 18 §12.3 rows landed in 20 commits, `34a73836` to `7980ebbb`, plus the comment wrap `e46509e3`: 12 `CodexHost` functions over `CodexThreadHelpers` and `CodexSkillFunctions`, 11 tools (26 in `CodexHostTools`), 5 records, 1 enum and 4 failure codes. The area suite and the source stage have only the inherited `harness_threads` failure; lint, the package stage, semgrep and the API check pass. Deviations are listed below. |
+| r3 | 2026-10-16 | S6 PR | Finalized for review; status set to pr-open. The §5 flowchart was redrawn to match the code and the PR #1055 body: compact and delete check `require_idle` and reserve the thread before the existence read, and release it in `finally`; a read-back that fails or is cancelled interrupts once and keeps its own error; every record comes from `CodexResponseTranslator`. The §5 sequence diagram and every rule in Part B are unchanged. |
 
 **Implementation deviations (S3).**
 
