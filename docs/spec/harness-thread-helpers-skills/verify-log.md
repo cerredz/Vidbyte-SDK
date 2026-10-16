@@ -125,3 +125,64 @@ Remote run detail:
 **Still open:** no confirmed finding and no gate.
 - These stay `follow-up` by decision: R-8, R-9, R-12, R-13, R-14, R-18 (route S2), R-19, R-20, R-22, and R-21's 44 "external boundaries" markers.
 - R-14 still reproduces as designed: `[raw code-review; …] RETURNED SUCCESS`.
+
+## Iteration 2 — 2026-10-16 13:50 EDT — agent report: reports/S5-repair-2.md
+
+**Defects in:** the final conformance re-review (`reports/S5-rereview.md`) returned SOUND at `578c88bb` with 0 Blocker, 0 Major and 2 Minor. Worktree HEAD was `68c2cf49`, clean.
+- R-C1 is recorded as **R-24** (Minor, trivial, source). Item 1 of WHAT NOT TO DO at `vidbyte/harnesses/native/muse/commands.py:8` read "Do not give the evidence read or the export a key". Under spec r5 (D-33) this module runs no `muse export`, and `:5` of the same header says so.
+- R-C2 is recorded as **R-25** (Minor, spec text). The spec author had already fixed it at `3c114e7b`.
+- No gate was red. Lint, `run_ci.py`, both semgrep commands and the 4 remote checks were all green at `578c88bb`.
+
+**Hypotheses and attempts (in order):**
+1. **Reproduce R-24.** `grep -n 'transcript\|export' vidbyte/harnesses/native/muse/commands.py` hit `:4` ("re-exported"), `:5` ("no `muse export` runs for evidence") and `:8` ("or the export a key"). The contradiction is real.
+2. **Options for R-24:**
+   - (a) delete item 1. This loses a true warning: the evidence read must stay keyless (INV-23).
+   - (b) reword item 1 to say that no export runs. This repeats the ARCHITECTURE NOTE.
+   - (c) the re-review's wording: "1. Do not give the evidence read a key; only the exec child carries META_API_KEY."
+
+   I chose (c). It is the smallest edit and keeps the INV-23 warning.
+   - Before committing, I checked that (c) is true of the code. `MuseHelperRun.tool_calls` reaches `_serve`, and `muse/helpers.py:297` passes `removed=NATIVE_HELPER_REMOVED_VARIABLES`, which holds `META_API_KEY` (`lib/constants/native_threads.py:458-463`).
+   - I also checked every other symbol the header names: `MuseThreadHelpers`, `init_muse_workspace`, `tool_calls`, `MUSE_READ_SKILL_ID_MEMBER`, both templates and `noneReason`. All exist.
+   - It worked first time. Now `export` appears only in "re-exported" (`:4`) and "no `muse export` runs" (`:5`).
+3. **Comment width.** The edited line is a module docstring line, not a `#` comment. The R-1 rule (`comment-format.md`) covers `#` comments only, and every sibling header (for example `grok/commands.py`) keeps one long line per key. So I kept the line's shape.
+   - The width loop printed `files=31 new_wide_comment_lines=0`, the same as the re-review. The loop runs `awk 'length($0) > 72 && $0 ~ /^[ \t]*#/'` on each file of `git diff --name-only origin/main...HEAD -- 'vidbyte/*.py'`, then `comm -23` against the same awk over `git show origin/main:<f>`.
+4. **Not touched:** `RecordFieldValidator.require_text` at `muse/commands.py:99`. That is the D-25 argument check, and the re-review's R-C2 scoping confirms it.
+5. **Remote CI on a docs-only head.** The records live in committed docs, so I pushed and dispatched twice:
+   - first on the code SHA `ade57291`, whose results are below;
+   - then again on the docs-only records commit that carries this entry, whose results are in the S5 STATUS message.
+
+**Changes:**
+
+| SHA | Finding | Subject |
+|---|---|---|
+| `ade57291` | R-24 | `fix(harnesses): drop the stale export clause from the Muse commands header [R-24]` |
+| (records commit) | — | `docs(spec): verify-log iteration 2 for harness-thread-helpers-skills` (verify-log, review statuses R-24/R-25, report) |
+
+**Invariants checked:**
+- `git diff cd2b329b..HEAD -- tests/features/harness_threads | wc -l` → `0`, so there were no test edits.
+- `git diff 239c408a HEAD -- lint/baseline.json` and `git diff origin/main HEAD -- lint/baseline.json` → `0` lines each.
+- `git diff --name-only 68c2cf49..ade57291` → only `vidbyte/harnesses/native/muse/commands.py`, with 1 line changed.
+- `origin/main` is still `f7f32b19` (fetched 2026-10-16), and the merge base is `8da41971`. I did not merge.
+
+**Gate matrix out (code SHA `ade57291`, `DEEPSEEK_API_KEY` set):**
+
+| Gate | Command | Result | Final lines |
+|---|---|---|---|
+| lint | `$PY lint/run.py` (own exit code, after `git add`) | PASS (exit 0) | `S063 IMPROVED 4 -> 3` · `S064 RATCHETED: 4 known finding(s).` · `SDK-LINT: PASS`; A001 642/642, A002 605/703, S009 350/350, C002 9/9, S052 0, A009 0 |
+| new tests | `$PY -m pytest -p no:cacheprovider -q tests/features/harness_threads` | PASS (exit 0) | `1025 passed, 3 skipped in 90.58s (0:01:30)` |
+| full local gate | `$PY scripts/run_ci.py` | PASS (exit 0) | `6632 passed, 17 skipped in 138.65s (0:02:18)` · `Installed vidbyte-sdk 0.3.0 passed smoke checks.` · `CI passed.` |
+| semgrep fixtures | `semgrep --test --config .semgrep/typed-mapping-boundary-policy.yml .semgrep/typed-mapping-boundary-policy.py` | PASS (exit 0) | `1/1: ✓ All tests passed` · `No tests for fixes found.` |
+| semgrep scan | `semgrep scan --error --config .semgrep/typed-mapping-boundary-policy.yml vidbyte` | PASS (exit 0) | `Ran 1 rule on 975 files: 0 findings.` |
+| remote checks | `gh api repos/cerredz/Vidbyte-SDK/commits/ade57291…/check-runs` | 4/4 green | `Package completed success` · `Static policy completed success` · `Source / Python 3.11 completed success` · `Source / Python 3.12 completed success` |
+
+Remote run detail:
+- CI run [38942154825](https://github.com/cerredz/Vidbyte-SDK/actions/runs/38942154825):
+  - Source 3.12: `SDK-LINT: PASS` · `6580 passed, 69 skipped, 19 warnings in 146.09s` · `CI passed.`
+  - Source 3.11: `6580 passed, 69 skipped in 134.16s` · `CI passed.`
+  - Package: `Installed vidbyte-sdk 0.3.0 passed smoke checks.` · `CI passed.`
+- Static policy run [38942158122](https://github.com/cerredz/Vidbyte-SDK/actions/runs/38942158122): `1/1: ✓ All tests passed` · `Ran 1 rule on 975 files: 0 findings.`
+- The only annotation is a runner notice, not billing: "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026."
+
+**Still open:** no confirmed finding and no gate.
+- R-24 is fixed @`ade57291`, and R-25 @`3c114e7b`.
+- The follow-ups are unchanged by decision: R-8, R-9, R-12, R-13, R-14, R-18..R-20, R-22, and R-21's 44 markers.
