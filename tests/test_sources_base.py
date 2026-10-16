@@ -458,10 +458,13 @@ class SourcesBaseTests(unittest.TestCase):
             ("<p>ünïcode ✓</p>".encode("utf-8"), "text/html; charset=x-bogus", "<p>ünïcode ✓</p>"),
             ("<p>ünïcode ✓</p>".encode("utf-8"), None, "<p>ünïcode ✓</p>"),
             # Codecs that codecs.lookup knows but that cannot decode text under errors="replace" must fall back too:
-            # bytes-to-bytes codecs raise LookupError, and idna and punycode raise UnicodeError.
+            # bytes-to-bytes codecs raise LookupError, and the domain-name codecs idna and punycode are never page
+            # encodings (from Python 3.13 punycode decodes most pages to "" instead of raising).
             ("<p>ünïcode ✓</p>".encode("utf-8"), "text/html; charset=base64", "<p>ünïcode ✓</p>"),
             ('<meta charset="hex"><p>ünïcode ✓</p>'.encode("utf-8"), "text/html", '<meta charset="hex"><p>ünïcode ✓</p>'),
             ("<p>ünïcode ✓</p>".encode("utf-8"), "text/html; charset=idna", "<p>ünïcode ✓</p>"),
+            ("<p>ünïcode ✓</p>".encode("utf-8"), "text/html; charset=punycode", "<p>ünïcode ✓</p>"),
+            ('<meta charset="idna"><p>ünïcode ✓</p>'.encode("utf-8"), "text/html", '<meta charset="idna"><p>ünïcode ✓</p>'),
             ('<meta charset="punycode"><p>ünïcode ✓</p>'.encode("utf-8"), "text/html", '<meta charset="punycode"><p>ünïcode ✓</p>'),
         )
         for body, content_type, expected in cases:

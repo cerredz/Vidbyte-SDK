@@ -45,9 +45,13 @@ def _url_list(call: ToolCall) -> list[str]:
 # Matches <meta charset=...> and <meta http-equiv="Content-Type" content="...; charset=...">.
 _META_CHARSET = re.compile(rb"""<meta[^>]+?charset\s*=\s*["']?\s*([A-Za-z0-9_.:\-]+)""", re.IGNORECASE)
 # Every byte value once. A codec that cannot decode this with errors="replace" is not a usable text
-# encoding: bytes-to-bytes codecs (base64, hex, rot13, zlib) raise LookupError, and idna, punycode and
-# undefined raise UnicodeError. An empty probe would not do, because Python skips the codec for empty input.
+# encoding: bytes-to-bytes codecs (base64, hex, rot13, zlib) raise LookupError, and undefined raises
+# UnicodeError. An empty probe would not do, because Python skips the codec for empty input.
 _CODEC_PROBE = bytes(range(256))
+# @intent domain-name-codecs-never-decode-pages
+# idna and punycode encode domain labels (RFC 3490, RFC 3492), never documents. The probe cannot be relied on to
+# reject them: from Python 3.13 the punycode decoder honours errors="replace" and turns most pages into "".
+_DOMAIN_NAME_CODECS = frozenset({"idna", "punycode"})
 
 
 def _header_charset(content_type: str | None) -> str | None:
@@ -63,7 +67,7 @@ def _header_charset(content_type: str | None) -> str | None:
                 _CODEC_PROBE.decode(name, errors="replace")
             except (LookupError, UnicodeError):
                 return None
-            return name
+            return None if name in _DOMAIN_NAME_CODECS else name
     return None
 
 
@@ -76,6 +80,8 @@ def _meta_charset(body: bytes) -> str | None:
         name = codecs.lookup(match.group(1).decode("ascii")).name
         _CODEC_PROBE.decode(name, errors="replace")
     except (LookupError, UnicodeError):
+        return None
+    if name in _DOMAIN_NAME_CODECS:
         return None
     # A UTF-16 label read from ASCII bytes cannot be true, so the HTML Standard treats it as UTF-8.
     return "utf-8" if name.startswith("utf-16") else name
