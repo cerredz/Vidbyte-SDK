@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+import json
 import unittest
 
 from vidbyte.agents import AgentRuntime
@@ -68,6 +70,21 @@ def _parallel_tool_history() -> tuple[dict, ...]:
         return {"role": "tool", "tool_call_id": call_id, "content": call_id}
 
     return ({"role": "system", "content": "sys"}, {"role": "user", "content": "go"}, call("c1", "c2"), result("c1"), result("c2"), call("c3", "c4", "c5"), result("c3"), result("c4"), result("c5"), call("c6"), result("c6"))
+
+
+_BASE64_ASSET = "ICON = '" + "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo" * 6 + "'\n"
+
+
+def _bloated_call_histories() -> dict[str, tuple[dict, ...]]:
+    # Returns a write_file call whose arguments hold a long base64 run, then a result echoing it, in chat and Anthropic shapes.
+    arguments = json.dumps({"path": "gen.py", "content": _BASE64_ASSET})
+    chat_call = {"role": "assistant", "content": None, "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "write_file", "arguments": arguments}}]}
+    chat = ({"role": "user", "content": "Generate the module."}, chat_call, {"role": "tool", "tool_call_id": "call_1", "content": "wrote " + _BASE64_ASSET})
+    tool_use = {"type": "tool_use", "id": "toolu_1", "name": "write_file", "input": {"path": "gen.py", "content": _BASE64_ASSET}}
+    anthropic_result = {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": "wrote " + _BASE64_ASSET}]}
+    anthropic = ({"role": "user", "content": "Generate the module."}, {"role": "assistant", "content": [tool_use]}, anthropic_result)
+    narrated = ({"role": "user", "content": "Generate the module."}, {"role": "assistant", "content": [{"type": "text", "text": "Writing it now."}, tool_use]}, anthropic_result)
+    return {"chat": chat, "anthropic": anthropic, "anthropic narrated": narrated}
 
 
 def _assert_valid_tool_transcript(test: unittest.TestCase, messages: tuple[dict, ...]) -> None:
@@ -279,6 +296,44 @@ class CompactionMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         decision = await middleware.before_model_call(ctx)
         self.assertEqual(len(tuple(decision.transform.provider_messages)), 1)
         self.assertEqual(tuple(decision.transform.provider_messages)[0]["content"], "new")
+
+    async def test_scrub_bloat_leaves_a_chat_call_turn_byte_for_byte_unchanged(self) -> None:
+        # [Hidden Failure] A content=None call turn's content is a repr of the message; scrubbing it wrote that repr into the assistant text in front of the unchanged call.
+        history = _bloated_call_histories()["chat"]
+        original = copy.deepcopy(history)
+        decision = await MessageHistoryCompactionMiddleware.scrub_bloat().before_model_call(MiddlewareContext(hook=MiddlewareHook.BEFORE_MODEL_CALL, agent_name="worker", provider_messages=history))
+        after = tuple(decision.transform.provider_messages)
+        self.assertEqual(after[1], original[1])
+        self.assertIsNone(after[1]["content"])
+        self.assertEqual(after[1]["tool_calls"], original[1]["tool_calls"])
+        _assert_valid_tool_transcript(self, after)
+        # With the bloat only in the call's arguments there is nothing to scrub, so the pass must report no change.
+        call_only = (*history[:2], {"role": "tool", "tool_call_id": "call_1", "content": "wrote 219 chars"})
+        decision = await MessageHistoryCompactionMiddleware.scrub_bloat().before_model_call(MiddlewareContext(hook=MiddlewareHook.BEFORE_MODEL_CALL, agent_name="worker", provider_messages=call_only))
+        self.assertEqual(tuple(decision.transform.provider_messages), call_only)
+        self.assertFalse(decision.transform.metadata["changed"])
+
+    async def test_scrub_bloat_leaves_an_anthropic_tool_use_turn_unchanged(self) -> None:
+        # [Hidden Failure] An Anthropic call turn's content renders the tool_use block's repr; scrubbing it added a text block holding that repr.
+        for shape in ("anthropic", "anthropic narrated"):
+            with self.subTest(shape=shape):
+                history = _bloated_call_histories()[shape]
+                original = copy.deepcopy(history)
+                after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.MECHANICAL_BLOAT_SCRUBBER)
+                self.assertEqual(after[1]["content"], original[1]["content"])
+                self.assertFalse(any("tool_use" in str(block.get("text", "")) for block in after[1]["content"] if block.get("type") == "text"))
+
+    async def test_scrub_bloat_still_scrubs_the_tool_result_after_a_call_turn(self) -> None:
+        # Verifies the call-turn skip leaves the strategy working: the tool result carrying the same base64 run is still scrubbed.
+        blob = "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo" * 6
+        for shape, history in _bloated_call_histories().items():
+            with self.subTest(shape=shape):
+                decision = await MessageHistoryCompactionMiddleware.scrub_bloat().before_model_call(MiddlewareContext(hook=MiddlewareHook.BEFORE_MODEL_CALL, agent_name="worker", provider_messages=history))
+                after = tuple(decision.transform.provider_messages)
+                result_text = after[2]["content"] if shape == "chat" else after[2]["content"][0]["content"]
+                self.assertIn("[scrubbed base64:", result_text)
+                self.assertNotIn(blob, result_text)
+                self.assertTrue(decision.transform.metadata["changed"])
 
     async def test_summary_middleware_requires_summarizer(self) -> None:
         # Verifies summary middleware requires explicit summarizer dependency injection.
