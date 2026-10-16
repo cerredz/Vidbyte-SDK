@@ -473,6 +473,28 @@ class DeterministicStrategyTests(unittest.IsolatedAsyncioTestCase):
         after, _ = await ContextCompactionEngine().compact_messages(messages, mode=CompactionMode.SELECTIVE_CONTEXT_PRUNING, options={"min_unique_terms": 2})
         self.assertEqual(tuple(m.content for m in after), ("alpha beta",))
 
+    async def test_selective_pruning_keeps_different_calls_whose_results_read_the_same(self) -> None:
+        # [Silent Failure] Two calls whose results both read "saved" are two exchanges, so the second is not pruned as a duplicate and erased with its call.
+        for provider in ("openai", "gemini"):
+            with self.subTest(provider=provider):
+                history = _two_lookup_history(provider)[:1] + _lookup_pair(provider, "a", "saved") + _lookup_pair(provider, "b", "saved")
+                after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.SELECTIVE_CONTEXT_PRUNING)
+                self.assertEqual(list(after), list(history))
+        # A parallel turn keeps both calls, and a repeated plain reply is still pruned.
+        turn = {"role": "assistant", "content": None, "tool_calls": [{"id": f"c{i}", "type": "function", "function": {"name": "save", "arguments": f'{{"note": "{i}"}}'}} for i in (1, 2)]}
+        history = ({"role": "user", "content": "save both"}, turn, {"role": "tool", "tool_call_id": "c1", "content": "saved"}, {"role": "tool", "tool_call_id": "c2", "content": "saved"}, {"role": "assistant", "content": "done"}, {"role": "assistant", "content": "done"})
+        after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.SELECTIVE_CONTEXT_PRUNING)
+        self.assertEqual(list(after), list(history[:-1]))
+        _assert_valid_tool_transcript(self, after)
+
+    async def test_selective_pruning_keeps_a_call_whose_result_is_empty(self) -> None:
+        # [Silent Failure] An empty tool result is still the record that the call ran, so pruning it would erase the call and the model would repeat it.
+        for provider in ("openai", "gemini"):
+            with self.subTest(provider=provider):
+                history = _two_lookup_history(provider)[:1] + _lookup_pair(provider, "a", "")
+                after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.SELECTIVE_CONTEXT_PRUNING)
+                self.assertEqual(list(after), list(history))
+
     async def test_salience_eviction_pinned_error_and_chronology(self) -> None:
         # [Hidden Failure] Pinned metadata and tool errors outrank ordinary messages, returned chronologically.
         messages = (msg("assistant", "ordinary"), msg("tool", "success", "tool_result", status="success"), msg("tool", "error", "tool_result", status="error"), msg("assistant", "pinned", pinned=True))

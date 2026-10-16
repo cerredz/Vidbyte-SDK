@@ -806,11 +806,13 @@ class SelectiveContextPruningCompaction(BaseCompaction):
         self.min_unique_terms = min_unique_terms
 
     async def compact(self, messages: Sequence[ContextMessage]) -> tuple[ContextMessage, ...]:
-        # Removes messages that match low-signal pruning criteria while preserving system messages.
+        # Removes messages that match low-signal pruning criteria while preserving system messages and tool exchanges.
         seen: set[tuple[str, str, str]] = set()
         result = []
         for message in messages:
-            if message.role == "system":
+            # @intent pruning-never-splits-a-tool-exchange
+            # Pruning one half of a call/result pair makes the engine drop the whole exchange, so the model repeats the call; repeated calls are deduplicate_tool_calls' job.
+            if message.role == "system" or _is_tool_message(message):
                 result.append(message)
                 continue
             key = (message.role, message.kind, message.content)
