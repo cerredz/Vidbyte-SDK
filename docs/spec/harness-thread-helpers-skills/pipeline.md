@@ -22,7 +22,7 @@ started: 2026-10-15 18:12
 | S4→S5 test amendment | done | 2026-10-16 12:15 | 2026-10-16 12:55 | reports/S2-test-author-amendment.md | S2_HEAD (amended) = cd2b329b; 10 new test functions (30 cases) + grants a–d; red 34 failed / 991 passed / 3 skipped, identical with and without DEEPSEEK_API_KEY (re-run by orchestrator) |
 | S5 repair loop | done | 2026-10-16 13:00 | 2026-10-16 14:05 | reports/S5-repair-1.md | converged in 1 iteration: HEAD 578c88bb pushed; 12 findings fixed; merged origin/main 8da41971 (6b55dde5); remote 4/4 green; orchestrator's own run_ci: 6632 passed, 17 skipped, "CI passed." |
 | S5 re-review | done | 2026-10-16 14:10 | 2026-10-16 14:30 | reports/S5-rereview.md | SOUND: 0 Blocker, 0 Major, 2 Minor. R-C2 fixed by the spec author @3c114e7b. R-C1 fixed by repair iteration 2 @ade57291 (reports/S5-repair-2.md); docs head 71c15a2c pushed, remote 4/4 green; the orchestrator's own lint and run_ci are green (6632 passed, 17 skipped). Spec status: verified |
-| S6 PR | running | 2026-10-16 15:00 | | reports/S6-pr-author.md | |
+| S6 PR | done | 2026-10-16 15:00 | 2026-10-16 17:00 | reports/S6-pr-author.md | PR #1147 finalized: draft against main, no `[WIP]`, 1 mermaid block, 58.6k-char body; refreshed after iteration 3; check-runs on a0c20add 4/4 success; no conflict with origin/main (merge-tree) |
 
 ## Counters and caps
 - S1 review rounds: 2/2 (cap reached; final author revision r3 sets status approved) · S5 repair iterations: 3/8 · S5 re-review rounds: 1/2
@@ -147,6 +147,14 @@ started: 2026-10-15 18:12
     - text conflicts in REPO_MAP.md, `vidbyte/harnesses/README.md` and `vidbyte/harnesses/native/__init__.py`;
     - `failure.py`, `enums/__init__.py` and the surface test auto-merge, but both PRs append FailureCodes and pin counts. So whichever PR merges second needs a merge with main and pin updates.
 - 2026-10-16 16:30 — Resuming the S6 PR author to refresh the live body for b89da0a7: R-26/R-27 rows, the What-changed rows, and the verification table. The PR author is the only role that edits pr-body.md.
+
+- 2026-10-16 17:00 — **The final S6 spot-check passed.**
+  - The PR is a draft against `main`, titled `feat(harnesses): thread helpers and verified built-in skill functions for Grok, opencode and Muse`.
+  - The body has 1 mermaid block, is 58,610 characters, and ends with the 🤖 footer.
+  - `git status` is clean, nothing is unpushed, and check-runs on a0c20add are 4/4 success.
+  - GitHub reports `MERGEABLE`/`BEHIND`, and `git merge-tree` against origin/main shows no conflict. I did no merge, because merging is the user's call (`--admin` per PR).
+  - This final pipeline.md commit is docs only. CI is re-dispatched on it, so the head the user sees has its own green runs. Then the worktree is removed and the branch kept.
+  - Subagents I launched for this run: 17 (S0 1, S1 3, S2 1, S3 1, S4 4, the r4/r5 author 1, the S2 amendment 1, S5 3, the re-review 1, S6 1), plus the PR #1055 orchestrator.
 
 ## User replies (verbatim)
 - 2026-10-15 ~18:25 — "note, ccan you also in a subagent launch this "spec-pipeline" process for pr #1055 and explain the changes that we want to make with the implementation of the existing pr"
