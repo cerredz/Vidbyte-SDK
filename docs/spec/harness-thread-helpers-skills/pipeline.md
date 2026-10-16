@@ -25,7 +25,7 @@ started: 2026-10-15 18:12
 | S6 PR | running | 2026-10-16 15:00 | | reports/S6-pr-author.md | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 (cap reached; final author revision r3 sets status approved) · S5 repair iterations: 2/8 · S5 re-review rounds: 1/2
+- S1 review rounds: 2/2 (cap reached; final author revision r3 sets status approved) · S5 repair iterations: 3/8 · S5 re-review rounds: 1/2
 
 ## Decisions the orchestrator made
 - 2026-10-15 18:12 — Fast-forwarded local `main` to origin/main f216fdcf (PR #1036 merged) before creating the worktree — Prompt 5: "Make sure the local main is up to date".
@@ -131,6 +131,22 @@ started: 2026-10-15 18:12
   - (b) `vidbyte/harnesses/native/grok/store.py:104-106` has three blank lines between classes.
 
   After that, the PR author is resumed to refresh the live body's verification table for the new head SHA.
+
+- 2026-10-16 16:30 — S5 iteration 3 converged, and my own checks pass.
+  - `git status` is clean and HEAD b89da0a7 is pushed.
+  - Only 2 files under `vidbyte/` changed: the README (1 line) and `grok/store.py` (1 blank line). The tests diff against cd2b329b is empty.
+  - Check-runs on b89da0a7 are 4/4 success. Source 3.12 needed one rerun because the remote-only real-bash test timed out; it is outside this PR.
+  - My own lint run exited 0, and `run_ci.py` with PYTHONPATH unset printed `6632 passed, 17 skipped` and `CI passed.`
+  - New trap, saved to memory: an exported PYTHONPATH breaks run_ci's clean-install step.
+  - Counters: S5 iterations 3/8.
+- 2026-10-16 16:30 — **PR #1055 pipeline (the subagent orchestrator) finished, and I verified it myself.**
+  - The PR is a draft against `main`, titled "feat(harnesses): add CodexHost with agent tools, thread helpers and skill functions", with 3 mermaid blocks.
+  - Check-runs on ea473f63 are 4/4 success, and its worktree is removed.
+  - It ran S5 4/8 and re-review 2/2. Its review confirmed 0 Blockers, 4 Majors and 11 Minors, all dispositioned.
+  - **Cross-PR overlap**, from `git merge-tree --write-tree origin/feat/codex-host origin/feat/harness-thread-helpers-skills`:
+    - text conflicts in REPO_MAP.md, `vidbyte/harnesses/README.md` and `vidbyte/harnesses/native/__init__.py`;
+    - `failure.py`, `enums/__init__.py` and the surface test auto-merge, but both PRs append FailureCodes and pin counts. So whichever PR merges second needs a merge with main and pin updates.
+- 2026-10-16 16:30 — Resuming the S6 PR author to refresh the live body for b89da0a7: R-26/R-27 rows, the What-changed rows, and the verification table. The PR author is the only role that edits pr-body.md.
 
 ## User replies (verbatim)
 - 2026-10-15 ~18:25 — "note, ccan you also in a subagent launch this "spec-pipeline" process for pr #1055 and explain the changes that we want to make with the implementation of the existing pr"
