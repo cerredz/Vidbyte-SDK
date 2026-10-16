@@ -96,10 +96,14 @@ from vidbyte.lib.enums.failure import (
 )
 from vidbyte.lib.enums.infinite import (
     InfiniteAgentRole,
+    InfiniteDropReason,
     InfiniteEntryKind,
+    InfiniteEventKind,
+    InfiniteFileChange,
     InfiniteJournalEvent,
     InfiniteMemoryPreset,
     InfiniteResultStatus,
+    InfiniteStopCause,
     InfiniteVerdict,
 )
 from vidbyte.lib.enums.jev import (
@@ -252,10 +256,14 @@ __all__ = [
     "IdentityVerdict",
     "ImpactLevel",
     "InfiniteAgentRole",
+    "InfiniteDropReason",
     "InfiniteEntryKind",
+    "InfiniteEventKind",
+    "InfiniteFileChange",
     "InfiniteJournalEvent",
     "InfiniteMemoryPreset",
     "InfiniteResultStatus",
+    "InfiniteStopCause",
     "InfiniteVerdict",
     "JevBoundaryKind",
     "JevClaimKind",
