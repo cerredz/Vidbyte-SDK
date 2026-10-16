@@ -420,6 +420,64 @@ class AgentRuntimeSpanTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(inputs["input_messages"], inputs["messages"])
         self.assertEqual(inputs["history_messages"], ({"role": "assistant", "content": "draft"},))
 
+    async def _second_llm_span_messages(self, options: dict[str, Any] | None = None) -> tuple[dict[str, Any], ...]:
+        # Runs one tool round and a final answer, then returns what the second model call's span says the model saw.
+        tracer = RecordingTracer()
+        runtime = AgentRuntime(agent_name="rt-agent", system_prompt="sys", tools=Tools().add(WriteTool()), permission_policy=PermissionPolicy(), tracer=tracer)
+        runner = FakeRunner([
+            FakeResponse("", {"output": [{"type": "function_call", "name": "write", "arguments": "{}"}]}),
+            FakeResponse("", {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "ok"}'}]}),
+        ])
+        from vidbyte.lib.dataclasses.context import BaseAgentContext
+        context = BaseAgentContext(system_prompt="sys", history=(), file_paths=(), tools=(), budget=None)
+        await runtime.arun(
+            "prompt",
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=_invoke_runner, extract_text=_output_text, extract_metadata=_output_metadata),
+            context=context,
+            options=options,
+        )
+        llm_spans = [s for s in tracer.spans_started if s["name"] == "llm.call"]
+        self.assertEqual(len(llm_spans), 2)
+        return llm_spans[1]["attributes"]["input_messages"]
+
+    async def test_llm_span_shows_task_in_front_of_the_tool_exchange_it_provoked(self) -> None:
+        # The provider sends the task before the run's own call and result, so the span must not show it after them.
+        messages = await self._second_llm_span_messages()
+        self.assertEqual([m["role"] for m in messages], ["system", "user", "assistant", "tool"])
+        self.assertEqual(messages[1], {"role": "user", "content": "prompt"})
+        self.assertTrue(messages[2]["tool_calls"])
+
+    async def test_llm_span_shows_task_right_after_caller_history(self) -> None:
+        # With caller history the task sits at the run boundary: after the caller's turns, in front of the run's call.
+        history = [{"role": "user", "content": "earlier question"}, {"role": "assistant", "content": "earlier answer"}]
+        messages = await self._second_llm_span_messages({"messages": history})
+        self.assertEqual([m["role"] for m in messages], ["system", "user", "assistant", "user", "assistant", "tool"])
+        self.assertEqual(messages[1:4], ({"role": "user", "content": "earlier question"}, {"role": "assistant", "content": "earlier answer"}, {"role": "user", "content": "prompt"}))
+        self.assertTrue(messages[4]["tool_calls"])
+
+    def _trace_messages(self, provider: str, call_options: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+        # Builds the model-call span inputs directly for a provider-shaped request.
+        runtime = self._make_runtime(RecordingTracer())
+        handle = RunnerHandle(runner=FakeRunner([]), provider=provider, invoke=_invoke_runner, extract_text=_output_text, extract_metadata=_output_metadata)
+        return runtime._llm_trace_inputs(handle, "prompt", call_options, provider, 1, 2, {})["input_messages"]
+
+    def test_gemini_span_shows_task_ahead_of_a_leading_model_turn(self) -> None:
+        # Gemini sends the task first when its contents would open with a model turn, such as a pinned note, even past the run boundary.
+        note = {"role": "assistant", "content": "note"}
+        call = {"role": "model", "parts": [{"functionCall": {"name": "write", "args": {}}}]}
+        result = {"role": "user", "parts": [{"functionResponse": {"name": "write", "response": {"output": "written"}}}]}
+        messages = self._trace_messages("gemini", {"system": "sys", "messages": (note, call, result), "prompt_index": 1})
+        self.assertEqual([m["role"] for m in messages], ["system", "user", "assistant", "model", "user"])
+        self.assertEqual(messages[1], {"role": "user", "content": "prompt"})
+
+    def test_anthropic_span_without_run_boundary_uses_the_provider_call_rule(self) -> None:
+        # With no run boundary, Anthropic places the task by its own tool_use rule, in front of the call turn.
+        call = {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "write", "input": {}}]}
+        result = {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "written"}]}
+        messages = self._trace_messages("anthropic", {"system": "sys", "messages": (call, result)})
+        self.assertEqual(messages[1], {"role": "user", "content": "prompt"})
+        self.assertEqual([m["role"] for m in messages], ["system", "user", "assistant", "user"])
+
     async def test_tool_span_emitted_per_tool_execution(self) -> None:
         tracer = RecordingTracer()
         tool = WriteTool()
