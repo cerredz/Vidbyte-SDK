@@ -1,12 +1,12 @@
 """FILE: vidbyte/lib/enums/native_threads.py
 
-PURPOSE: Defines the closed vocabularies of the harness thread functions: which harness a call drives (NativeHarness), the verb and public function it is (NativeThreadVerb, NativeThreadOperation), the problems a call can fail with (NativeThreadProblem), the Grok permission modes and reasoning efforts, the Muse reasoning efforts, every command-line flag the SDK passes to grok, opencode, muse, wsl.exe and the reap's sh (GrokFlag, OpencodeFlag, MuseFlag, WslFlag, ShellFlag), the child environment variable names (NativeEnvironmentVariable), the Muse serve methods (MuseMethod) and the opencode event types the SDK reads (OpencodeEventType).
-ROLE IN CODEBASE: Imported by the records in vidbyte/lib/dataclasses/native_threads.py, by the texts in vidbyte/lib/constants/native_threads.py, by NativeThreadError in vidbyte/lib/errors/base.py and by the thread functions under vidbyte/harnesses/native/. Exported from vidbyte/lib/enums/__init__.py; GrokPermissionMode, GrokReasoningEffort and MuseReasoningEffort are also re-exported from vidbyte.harnesses.native.
-ARCHITECTURE NOTE: Every enum here is a StrEnum, so str(member) and an f-string give the value; Python 3.11 formats a (str, Enum) member as Class.MEMBER, which would corrupt argv and environment entries. Flag values are the exact spellings of grok 1.0.52, opencode 1.18.31 and Muse Code 1.0.1.
-FUNCTION INVENTORY: No functions. NativeHarness, NativeThreadVerb, NativeThreadOperation, NativeThreadProblem, GrokPermissionMode, GrokReasoningEffort, MuseReasoningEffort, GrokFlag, OpencodeFlag, MuseFlag, WslFlag, ShellFlag, NativeEnvironmentVariable, MuseMethod and OpencodeEventType.
+PURPOSE: Defines the closed vocabularies of the harness thread functions: which harness a call drives (NativeHarness), the verb and public function it is (NativeThreadVerb, NativeThreadOperation), the problems a call can fail with (NativeThreadProblem), the Grok permission modes and reasoning efforts, the Muse reasoning efforts, the Claude Code permission modes and reasoning efforts, every command-line flag the SDK passes to grok, opencode, muse, claude, wsl.exe and the reap's sh (GrokFlag, OpencodeFlag, MuseFlag, ClaudeFlag, WslFlag, ShellFlag), the child environment variable names (NativeEnvironmentVariable), the Muse serve methods (MuseMethod) and the opencode event types the SDK reads (OpencodeEventType).
+ROLE IN CODEBASE: Imported by the records in vidbyte/lib/dataclasses/native_threads.py, by the texts in vidbyte/lib/constants/native_threads.py, by NativeThreadError in vidbyte/lib/errors/base.py and by the thread functions under vidbyte/harnesses/native/. Exported from vidbyte/lib/enums/__init__.py; GrokPermissionMode, GrokReasoningEffort, MuseReasoningEffort, ClaudePermissionMode and ClaudeReasoningEffort are also re-exported from vidbyte.harnesses.native.
+ARCHITECTURE NOTE: Every enum here is a StrEnum, so str(member) and an f-string give the value; Python 3.11 formats a (str, Enum) member as Class.MEMBER, which would corrupt argv and environment entries. Flag values are the exact spellings of grok 1.0.52, opencode 1.18.31, Muse Code 1.0.1 and Claude Code 2.1.301.
+FUNCTION INVENTORY: No functions. NativeHarness, NativeThreadVerb, NativeThreadOperation, NativeThreadProblem, GrokPermissionMode, GrokReasoningEffort, MuseReasoningEffort, ClaudePermissionMode, ClaudeReasoningEffort, GrokFlag, OpencodeFlag, MuseFlag, ClaudeFlag, WslFlag, ShellFlag, NativeEnvironmentVariable, MuseMethod and OpencodeEventType.
 COMMON MODIFICATION PATTERNS: Add a member only when the vendor CLI adds the value, and use it in the harness module that builds the argv or reads the output in the same change. A new problem also needs its FailureCode members and its texts in vidbyte/lib/constants/native_threads.py.
 WHAT NOT TO DO IN THIS FILE: 1. Do not add an approve-everything member (bypassPermissions, --yolo, --auto, --always-approve); the SDK never approves everything. 2. Do not import anything from vidbyte; enums sit at the bottom layer. 3. Do not turn an enum here back into a (str, Enum).
-KNOWN EDGE CASES: NativeEnvironmentVariable values equal their names. MuseFlag.END_OF_OPTIONS is the bare "--" operand that keeps the Muse prompt from being read as a flag. WSL_UNAVAILABLE is a Muse-only problem.
+KNOWN EDGE CASES: NativeEnvironmentVariable values equal their names. ClaudePermissionMode.DEFAULT is "default", which Claude Code 2.1.301 still accepts as a hidden alias of "manual". MuseFlag.END_OF_OPTIONS is the bare "--" operand that keeps the Muse prompt from being read as a flag. WSL_UNAVAILABLE is a Muse-only problem.
 RELATED DOCS: vidbyte/harnesses/README.md
 TESTS: tests/features/harness_threads/test_harness_threads_surface.py, tests/features/harness_threads/test_harness_threads_argv.py
 """
@@ -22,6 +22,7 @@ class NativeHarness(StrEnum):
     GROK = "grok"
     OPENCODE = "opencode"
     MUSE = "muse"
+    CLAUDE = "claude"
 
 
 class NativeThreadVerb(StrEnum):
@@ -44,6 +45,9 @@ class NativeThreadOperation(StrEnum):
     RUN_MUSE_THREAD = "run_muse_thread"
     CONTINUE_MUSE_THREAD = "continue_muse_thread"
     FORK_MUSE_THREAD = "fork_muse_thread"
+    RUN_CLAUDE_THREAD = "run_claude_thread"
+    CONTINUE_CLAUDE_THREAD = "continue_claude_thread"
+    FORK_CLAUDE_THREAD = "fork_claude_thread"
 
 
 class NativeThreadProblem(StrEnum):
@@ -94,6 +98,25 @@ class MuseReasoningEffort(StrEnum):
     ULTRA = "ultra"
 
 
+class ClaudePermissionMode(StrEnum):
+    """The Claude Code headless permission modes the SDK allows; there is no approve-everything mode."""
+
+    DEFAULT = "default"
+    ACCEPT_EDITS = "acceptEdits"
+    DONT_ASK = "dontAsk"
+    PLAN = "plan"
+
+
+class ClaudeReasoningEffort(StrEnum):
+    """The reasoning efforts claude --effort accepts."""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    XHIGH = "xhigh"
+    MAX = "max"
+
+
 class GrokFlag(StrEnum):
     """The grok options the Grok thread functions pass, each joined to its value."""
 
@@ -132,6 +155,19 @@ class MuseFlag(StrEnum):
     END_OF_OPTIONS = "--"
 
 
+class ClaudeFlag(StrEnum):
+    """The claude options the Claude Code thread functions pass, each value as a separate element."""
+
+    PRINT = "--print"
+    OUTPUT_FORMAT = "--output-format"
+    SETTING_SOURCES = "--setting-sources"
+    PERMISSION_MODE = "--permission-mode"
+    MODEL = "--model"
+    EFFORT = "--effort"
+    RESUME = "--resume"
+    FORK_SESSION = "--fork-session"
+
+
 class WslFlag(StrEnum):
     """The wsl.exe options the Muse WSL mode passes: the distro, the program to run, and the quiet distro listing."""
 
@@ -162,6 +198,10 @@ class NativeEnvironmentVariable(StrEnum):
     XDG_CONFIG_HOME = "XDG_CONFIG_HOME"
     WSLENV = "WSLENV"
     VIDBYTE_PEER_MARK = "VIDBYTE_PEER_MARK"
+    ANTHROPIC_API_KEY = "ANTHROPIC_API_KEY"
+    CLAUDE_CONFIG_DIR = "CLAUDE_CONFIG_DIR"
+    DISABLE_AUTOUPDATER = "DISABLE_AUTOUPDATER"
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"
 
 
 class MuseMethod(StrEnum):
@@ -181,6 +221,9 @@ class OpencodeEventType(StrEnum):
 
 
 __all__ = [
+    "ClaudeFlag",
+    "ClaudePermissionMode",
+    "ClaudeReasoningEffort",
     "GrokFlag",
     "GrokPermissionMode",
     "GrokReasoningEffort",
