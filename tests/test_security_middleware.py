@@ -26,6 +26,7 @@ import unittest
 
 from vidbyte.agents import AgentRuntime
 from vidbyte.agents.settings.tool import ToolSettings
+from vidbyte.context import ContextWindow, ContextWindowAlgorithm, ToolResultAdmission
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.dataclasses.context import BaseContext
 from vidbyte.lib.dataclasses.middleware import (
@@ -441,6 +442,30 @@ class CanaryTripwireRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("VIDBYTE-CANARY-", runner.seen_tool_output)
         self.assertEqual(result.metadata["middleware_abort_reason"], "canary_leaked")
 
+    async def test_canary_survives_context_window_admission(self) -> None:
+        # @intent admission-is-a-cap-not-a-middleware
+        # [Silent Failure] A compact or hide context-window algorithm caps only the raw output, so the canary still reaches the model.
+        @tool
+        def lookup() -> str:
+            # Returns an internal document longer than the compact cap.
+            return "internal document " * 50
+
+        cases = {
+            "compact_tool_outputs": "[tool output compacted]",
+            "hide_tool_outputs": "Raw tool output was withheld",
+        }
+        for preset, marker in cases.items():
+            with self.subTest(preset=preset):
+                middleware = (CanaryTripwireMiddleware(inject_probability=1.0, random_seed=7),)
+                runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=Tools([lookup]), permission_policy=PermissionPolicy(), algorithm=getattr(ContextWindow.preset, preset), middleware=middleware)
+                context = runtime.build_context("task", base_context=BaseContext(), history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+                runner = EchoRunner(echo=True)
+                handle = RunnerHandle(runner=runner, provider="openai", invoke=invoke_echo_runner, extract_text=echo_runner_text, extract_metadata=echo_runner_metadata)
+                result = await runtime.arun("task", handle=handle, context=context)
+                self.assertIn(marker, runner.seen_tool_output)
+                self.assertIn("VIDBYTE-CANARY-", runner.seen_tool_output)
+                self.assertEqual(result.metadata["middleware_abort_reason"], "canary_leaked")
+
     async def test_model_not_echoing_tool_output_finishes_normally(self) -> None:
         # [Edge Case] A model that does not repeat the canary finishes without an abort.
         runner = EchoRunner(echo=False)
@@ -474,6 +499,37 @@ class DenialTruncationTests(unittest.IsolatedAsyncioTestCase):
                 self.assertGreater(len(denial.output), 20)
                 self.assertIn(denial.output, runner.seen_tool_output)
                 self.assertNotIn("truncated by ToolSettings", runner.seen_tool_output)
+
+    async def test_denial_reason_survives_context_window_admission(self) -> None:
+        # @intent denials-are-never-truncated
+        # [Silent Failure] A refused call has no raw output, so a compact or hide algorithm must neither cut nor withhold its denial reason.
+        @tool(permission=ToolPermission.WRITE)
+        def lookup() -> str:
+            # Never runs: both guardrails below refuse it.
+            return "internal document"
+
+        guardrails = {
+            "permission_denied": ((), PermissionPolicy()),
+            "middleware_denied": ((ToolPolicyMiddleware(deny_tools={"lookup"}),), PermissionPolicy.allow_all()),
+        }
+        algorithms = {
+            "tiny_compact": ContextWindowAlgorithm(name="tiny_compact", tool_result_admission=ToolResultAdmission.COMPACT, max_tool_result_chars=20),
+            "hide_tool_outputs": ContextWindow.preset.hide_tool_outputs,
+        }
+        for error, (middleware, policy) in guardrails.items():
+            for name, algorithm in algorithms.items():
+                with self.subTest(error=error, algorithm=name):
+                    runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=Tools([lookup]), permission_policy=policy, algorithm=algorithm, middleware=middleware)
+                    context = runtime.build_context("task", base_context=BaseContext(), history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+                    runner = EchoRunner(echo=False)
+                    handle = RunnerHandle(runner=runner, provider="openai", invoke=invoke_echo_runner, extract_text=echo_runner_text, extract_metadata=echo_runner_metadata)
+                    result = await runtime.arun("task", handle=handle, context=context)
+                    denial = result.metadata["tool_calls"][0].result
+                    self.assertEqual(denial.metadata["error"], error)
+                    self.assertGreater(len(denial.output), 20)
+                    self.assertIn(denial.output, runner.seen_tool_output)
+                    self.assertNotIn("completed with status", runner.seen_tool_output)
+                    self.assertNotIn("[tool output compacted]", runner.seen_tool_output)
 
 
 # ---------------------------------------------------------------------------
