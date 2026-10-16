@@ -598,7 +598,7 @@ class NativeThreadError(AgentExecutionError):
         self.vendor_message = vendor_message
         self.error_type = error_type
         self.error_kind = failure_code.value
-        self.expected = f"{operation.value} returning a NativeThreadResult"
+        self.expected = f"{operation.value} finishing with its documented result"
         self.actual = message
         self.safe_runtime_details = {
             "harness": harness.value,
