@@ -32,7 +32,7 @@ from vidbyte.lib.dataclasses.strategies import StrategyResult
 from vidbyte.agents.types import AgentMessage
 from vidbyte.lib.enums import ModelModality
 from vidbyte.tools.types import ToolCallContext
-from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
+from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig, AgentStopReason
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.security import PermissionPolicy
 from vidbyte.lib.tracing import TracerBase
@@ -86,6 +86,8 @@ class BaseActorRuntime(ABC):
         self._message_count = 0
         self._completion_future: asyncio.Future[str] | None = None
         self._boot_pending = False
+        # Set when the max_loop ceiling, not an actor's reply, ended the run.
+        self._max_loop_reached = False
         # Actors currently handling a message; quiescence waits for this to reach zero.
         self.busy_actors = 0
 
@@ -189,6 +191,7 @@ class BaseActorRuntime(ABC):
         self._handle = handle
         self._options = options or {}
         self._message_count = 0
+        self._max_loop_reached = False
         self._completion_future = asyncio.get_running_loop().create_future()
 
         try:
@@ -257,12 +260,22 @@ class BaseActorRuntime(ABC):
             self._tasks.clear()
             self._actors.clear()
 
+        # Report the run's counts, and whether the max_loop ceiling stopped it before an answer.
         return StrategyResult(
             output=output_text,
             strategy_name=f"actor_model_{self.__class__.__name__}",
             calls=(),
-            metadata={"message_count": self._message_count, "active_actors": active_actors},
+            metadata=self._result_metadata(active_actors),
         )
+
+    def _result_metadata(self, active_actors: int) -> dict[str, Any]:
+        # Builds the run's result metadata.
+        metadata: dict[str, Any] = {"message_count": self._message_count, "active_actors": active_actors}
+        # @intent max-loop-stop-is-not-an-answer
+        # The ceiling's notice is an SDK message, not an answer, so mark the stop the way the linear loop marks its own.
+        if self._max_loop_reached:
+            metadata["stop_reason"] = AgentStopReason.MAX_ITERATIONS.value
+        return metadata
 
     def _start_semantic_span(self, name: str, parent: Any = None, **attributes: Any) -> Any:
         # Opens actor runtime spans only for semantic controllers.
@@ -321,6 +334,7 @@ class PointToPointActorRuntime(BaseActorRuntime):
         if self._message_count > self.max_loop:
             if self._completion_future and not self._completion_future.done():
                 self._completion_future.set_result(f"Execution terminated. Max loops ({self.max_loop}) reached.")
+                self._max_loop_reached = True
             self._end_semantic_span(span, output="max_loop")
             return
 
@@ -361,6 +375,7 @@ class BroadcastActorRuntime(BaseActorRuntime):
         if self._message_count > self.max_loop:
             if self._completion_future and not self._completion_future.done():
                 self._completion_future.set_result(f"Execution terminated. Max loops ({self.max_loop}) reached.")
+                self._max_loop_reached = True
             self._end_semantic_span(span, output="max_loop")
             return
 
