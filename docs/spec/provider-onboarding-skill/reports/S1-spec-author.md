@@ -154,3 +154,21 @@ The order is cerebras, ai21, cohere, sambanova, upstage, groq, deepinfra, togeth
 - G 4, NG 13, INV 26 (4 of them must-not-regress), AC 15, EC 56, FR 17, NFR 7, D 26, T 6, W 6, A 10, Q 5. No Q is blocking.
 - §12.3 has 3 rows. The wiring checklist has 33 rows.
 - Budget: 2 new files, 1 modified file, 0 `.py`, 0 dependencies, 0 config keys, 1 command.
+
+## 7. Revision r2 (2026-10-16)
+
+Applied review round 1 (`reports/S1-spec-review.md`). §16 records every finding. Twelve were accepted. R-12 became Q-6, R-2's optional `allowed-tools` idea became Q-7 (default no), and R-5's optional "all unreachable means `NETWORK_BLOCKED`" rule was rejected.
+
+**What I checked myself while revising:**
+- **`provider_for_model`.** It matches a full ID, or a full qualified key, so a catalog name shared with another provider is not a conflict. I narrowed D-14 (d) to the full ID. Groq's `openai/gpt-oss-120b` therefore stays eligible after Cerebras merges `gpt-oss-120b`.
+- **`Runner._normalize_provider_and_model`.** It routes an undeclared `<existing provider>/<model>` string to that provider. I recorded this as a limitation (EC-60), not a new check.
+- **Groq models page.** Raw HTML on 2026-10-16 shows `openai/gpt-oss-120b` at $0.15 input / $0.60 output per 1M, and `openai/gpt-oss-20b` at $0.075 / $0.30. The Llama IDs say "Contact Sales".
+- **`run_ci.py`.** It prints `CI passed.` for any stage that passes. An excepted known-red failure makes the source stage print `CI failed`, so FR-11 checks for `SDK-LINT: PASS` and `passed smoke checks.` instead.
+- **Two repo facts.** `.claude/ci-settings.json` denies `Bash(git push *)`. `claude.yml` has `contents: write` and trusts `cerredz`.
+- **The wiring checklist, re-checked under the strict §8.5 cell grammar.** All 33 rows pass: every path exists at HEAD, every backticked symbol and every dotted part appears in its file, and every heading appears verbatim.
+
+**Counts after r2:**
+- G 4, NG 13, INV 26.
+- AC 15 (AC-14 withdrawn), EC 60 (EC-1 withdrawn), FR 17 (FR-14 withdrawn), NFR 7.
+- D 28, T 6, W 6.
+- A 10 (A-10 withdrawn), Q 7. None is blocking.
