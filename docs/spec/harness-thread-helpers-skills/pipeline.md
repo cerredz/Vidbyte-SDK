@@ -14,7 +14,7 @@ started: 2026-10-15 18:12
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-15 18:12 | 2026-10-15 18:55 | reports/S0-scout.md | base_commit 72a4ade1 (ff from f216fdcf); code-map.md 4 sections, ~45 files |
-| S1 spec + review | pending | | | | |
+| S1 spec + review | running | 2026-10-15 19:00 | | reports/S1-spec-author.md | |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -23,7 +23,7 @@ started: 2026-10-15 18:12
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 0/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 1/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-15 18:12 — Fast-forwarded local `main` to origin/main f216fdcf (PR #1036 merged) before creating the worktree — Prompt 5: "Make sure the local main is up to date".
@@ -34,6 +34,10 @@ started: 2026-10-15 18:12
 
 - 2026-10-15 18:55 — Fast-forwarded the worktree branch and local `main` from f216fdcf to origin/main 72a4ade1 (#1027) before any code commit — Prompt 5 wants work on current main; #1027 touches only `vidbyte/harnesses/serialization.py` and `lint/rules/s014_provider_model_registry_parity.py` among mapped areas, neither of which code-map.md maps, so the map stays valid.
 - 2026-10-15 18:55 — S0 spot-check passed: code-map.md has §1–§4; `grok/threads.py:141-143` (private-home key) and `errors/base.py:599` (hardcoded "returning a NativeThreadResult") match the scout's citations.
+
+- 2026-10-15 20:00 — Both the S1 spec author and the PR #1055 orchestrator stopped on an API usage limit (HTTP 429, session limit). The limit reset at 8pm, and I resumed both with SendMessage instead of relaunching, because their partial work (an uncommitted spec.md here; S0 done at 53d62851 in the #1055 worktree) was saved and a fresh agent would redo it.
+
+- 2026-10-15 20:15 — S1 author r1 spot-check passed: commit 7910f151, revision 1, 17 template sections, report present. Spec r1: 45 functions (22 helpers, 23 skill functions), 10 new files, FailureCode 148→152, 0 blocking Q. Launched S1 reviewer round 1.
 
 ## User replies (verbatim)
 - 2026-10-15 ~18:25 — "note, ccan you also in a subagent launch this "spec-pipeline" process for pr #1055 and explain the changes that we want to make with the implementation of the existing pr"
@@ -53,3 +57,7 @@ started: 2026-10-15 18:12
 - opencode CLI: `session list --format json -n` (no `--dir`, so INV-18's PWD guarantee has no equivalent); no search, no compact; `run --command`; `opencode db [query] --format json` — *source:* S0 scout
 - Muse CLI: no list/delete command; `muse export` writes into cwd unless `--out` (forbidden in the workspace by AC-19/INV-12; on Windows `--out` needs `/mnt/...`); `MuseMethod` lacks `session/list`/`session/compact`; fake `muse serve` returns -32602 for frames without `sessionId`+`excludeItems`; `wsl.exe -e muse` fails on the default distro — use `-d MuseUbuntu1 -e /usr/local/bin/muse` — *source:* S0 scout
 - Reading Grok `summary.json` reverses #1036 D-17 ("Grok's storage layout is a vendor detail the SDK should not read"); the private-home non-isolation finding contradicts EC-44, still stated at `vidbyte/harnesses/README.md:178`; `vidbyte/lib` has no timestamp-parsing helper — *source:* S0 scout
+- Spec r1 contract: shared `NativeThreadSummary`, plus new types `NativeCommandOutput`, `GrokThreadScope`, `GrokCommand`; the root `__all__` grows from 17 to 66; new FailureCodes `grok.command_not_run`, `opencode.command_not_run`, `muse.command_not_run`, `grok.store_unreadable` — *source:* S1 author
+- Pattern to copy: #1036's `GrokThreads._call` (catch order CancelledError → NativeThreadError → ConfigurationError → Exception), a narrated `<X>Run.execute`, `NativeErrorFactory` with a closed code table; helper child processes list every key variable in `env_remove`; no helper takes `api_key`; read helpers never create the private Grok home (EC-1) — *source:* S1 author
+- S052 lint: no blocking file I/O inside `async def`; route file work through `asyncio.to_thread` — *source:* S1 author
+- Grok one-shot uses `--single` (not `-p`); A-7 (does `--single "/goal …"` expand the slash command) is unverified, and the manual QA probe goes in the PR body (§12.5) — *source:* S1 author

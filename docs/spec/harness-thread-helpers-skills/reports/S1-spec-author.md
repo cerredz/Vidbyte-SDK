@@ -1,0 +1,87 @@
+# S1 spec author report: harness-thread-helpers-skills
+
+- **Stage:** S1 spec author
+- **Spec:** `docs/spec/harness-thread-helpers-skills/spec.md`, r1 (1,271 lines), committed as `7910f151` on `feat/harness-thread-helpers-skills`
+- **Base:** `72a4ade1`
+- **Result:** DONE. 0 blocking questions.
+
+## 1. What I read
+
+Rawest material first: code and vendor CLIs, then the docs.
+
+- **Source code, PR #1036, as merged at `72a4ade1`:**
+  - `vidbyte/harnesses/native/__init__.py`, plus `grok/`, `opencode/` and `muse/`, each with `__init__.py`, `threads.py` and `wire.py`. Muse also has `launcher.py`.
+  - `hostkit/__init__.py`, `hostkit/errors.py` and `hostkit/launcher.py`.
+  - The lib layer: `lib/enums/native_threads.py`, `lib/enums/failure.py`, `lib/constants/native_threads.py`, `lib/dataclasses/native_threads.py`, `lib/dataclasses/process.py` (`CliInvocation`), `lib/dataclasses/validation.py` and `lib/errors/base.py`.
+  - The exemplar I copied is `GrokThreads._call`: the guarded except-order, the narrated `GrokThreadRun.execute`, and the `NativeErrorFactory` table.
+- **Repo rules:**
+  - AGENTS.md: principles, Placement Rules and Repository Map.
+  - `lint/rules/*` for A001, A002, A007, S052, S061, S015, C016, C006, S060/S039, S012, S008/S024, S020 and A009, plus `lint/baseline.json`.
+  - `.semgrep/typed-mapping-boundary-policy.yml`. Its rule `no-untyped-mapping-fallback` runs only in `static-policy.yml`.
+  - `REPO_MAP.md` and `vidbyte/harnesses/README.md`, which holds the false EC-44 sentence.
+  - The field-guide entries the briefing allowed, `house-style.md` and `spec-template.md`.
+- **Tests:**
+  - `tests/features/harness_threads/*`: surface, errors, static policy, `fake_harness.py`, `conftest.py` and `FEATURE.md`.
+  - My baseline run in the worktree venv gave `1 failed, 435 passed, 2 skipped`. The failure is `test_harness_threads_surface.py` line 193, `assert 148 == 120`. It is a stale #1036 pin that is already red on main. The gate forces its rewrite, and that is S2's job (§12.3 row 35).
+- **Vendors, keyless only:**
+  - `grok --help`, `grok sessions --help`, `grok export --help` and `grok inspect`. `grok inspect` is what proved #1036 EC-44 false.
+  - `opencode session list|delete --help` and `opencode export --help`.
+  - `muse --help`, `muse exec --help`, `muse init --help` and `muse export --help`.
+  - The allowed captures `msp.schema.json` (MSP 1.0.1) and `muse-skills.json`. I did NOT open `oc-export.json`, `oc-config.json` or `inspect*.json`.
+- **Docs:**
+  - The request: `request.md` (Prompts 1–6, KD-1 to KD-10, §C, §E.1, §E.2), `context/code-map.md` and `reports/S0-scout.md`.
+  - From the #1036 spec folder: `request.md`, `spec.md` (read in chunks), `review.md` and `pr-body.md`.
+
+## 2. Approaches weighed
+
+- **Chosen design:** 45 functions under the owner's naming.
+  - **22 helpers.** They are keyless, use a new `NativeHelperRequest`, and return one shared `NativeThreadSummary`.
+  - **23 skill functions.** They use the per-harness building blocks `run_grok_command` / `run_opencode_command` / `run_muse_skill`, plus 3–5 line named wrappers. They return #1036's `NativeThreadResult` only when that run's own record proves the command ran. Otherwise they raise `<harness>.command_not_run` with the new thread id.
+  - **10 new source files, 0 dependencies.**
+  - **Refactor scope:** shared plumbing is extracted only where three callers need it: `GrokHome`, `MuseChildren`, `NativeThreadListing` and `NativeCommandEvidence`.
+- **Rejected: prefix-only wrappers (§8.3).** These are 23 one-liners that prepend `/goal` and so on. They are the smallest option, but they fail INV-8. On Muse, `muse exec "/goal …"` was verified to run an ordinary thread and report success (KD-6). request.md itself lists "bare slash-command prefixing without verification" as rejected.
+- **Rejected: helpers on `NativeThreadRequest` with a dummy prompt and key.** That would put a key on keyless calls (INV-2). It would also make refusals name `prompt` (INV-3).
+- **Rejected: parsing `grok sessions list` text.** The text has no created time, parent or model, and no member names to check strictly (FR-4, INV-6). I read `summary.json` instead. This reverses #1036 D-17 and is recorded as a D- item; the file's shape is A-1 to A-4.
+- **Evidence source per harness:**
+  - **Grok:** `--output-format=streaming-json` tool calls (`update_goal`, `read_file` of the persona or resume CORE path, `image_gen` / `image_edit`). For `--agent`, evidence is `summary.json` `agent_name`. Rejected: post-hoc export parsing, which is Markdown and lossy.
+  - **opencode:** its own `Command "<name>" not found` dispatch error. opencode resolves `--command` itself, so no transcript check is needed.
+  - **Muse:** MSP `session/read {excludeItems:false}` `toolCall` items (`read_skill` + skill id, or `create_goal`). History mode `none` fails closed.
+
+## 3. Where I disagreed with the scout or the request (with evidence)
+
+- **Muse compaction.** The scout suggested "Muse list/compact reuse", but compaction is excluded (NG-3). `/compact` is a TUI/turn command, and no headless path was verified for any of the three harnesses. That leaves Q-1, default no.
+- **Grok search.** It runs locally over `summary.json` (title, summary, last-turn summary), not through `grok sessions search`. That command's output is human text, with the same problem as `sessions list` (INV-6).
+- **opencode lineage.** It uses `opencode export` `info.parentID`, not `opencode db`. `opencode db` is an internal SQLite surface with no stability promise.
+- **Excluded functions.** `run_grok_skill`, `run_opencode_skill`, `run_muse_command` (NG-7, Q-6), `run_grok_code_review` and `run_grok_imagine_video` (NG-5, Q-2) are excluded. None of them has a verifiable evidence rule offline, and an unverifiable wrapper is exactly the rejected design.
+- **`get_*_thread` returns only the summary record.** KD-7 fixes the record, so the plan, to-do list and goal state are left out (Q-3).
+- **The briefing's venv note was followed.** No global `pip install`.
+- **The scout was right that main moved to `72a4ade1`.** This was confirmed, and `base_commit` uses it.
+- **#1036 EC-44 is false.** SDK Grok runs still load `~/.claude` hooks, skills and MCP servers (`grok inspect`). Per the orchestrator, this is a limitation (EC-63, T-6, NG-9), and the README sentence is replaced (AC-26). It is not fixed in this PR.
+
+## 4. Assumptions I am least sure of
+
+All of these are unverifiable offline. The manual QA probe in the PR body (§12.5) covers each one.
+
+- **A-7:** `grok --single "/goal …"` expands a leading slash command.
+  - If wrong, every Grok command except plan and explore raises `grok.command_not_run`. That is fail-closed, so it is safe but not useful.
+  - This is the biggest risk to G-2.
+- **A-2:** the `summary.json` member types (times, `parent_session_id`, `agent_name`, model).
+- **A-8, A-9 and A-11:** the streaming-json event fields, the evidence markers (persona and CORE paths), and the "final text = text after last tool event" rule.
+- **A-15:** opencode's exact unknown-command text and its exit code.
+- **A-16 and A-17:** a batch `muse serve` answers `session/read` with inline `toolCall` items, and `read_skill` args carry the skill id.
+
+## 5. Stage E self-check
+
+- **Template:** all sections from §0 to §17 are present, in template order.
+- **IDs:**
+  - Defined: G 4, NG 15, INV 28, AC 26, EC 65, FR 20, NFR 12, D 25, W 12, T 7, A 23, Q 6.
+  - Every referenced ID is defined. KD-n refers to request.md.
+- **Names:**
+  - §4, §8.5, FR, §9.2 and §12.3 name the same 45 functions.
+  - Every stray name is an NG exclusion or an existing #1036 function.
+  - Export math: 17 existing + 45 + 4 = 66 in the root, and the subpackages hold 23, 15 and 16. I checked this against the live `__all__` in the venv.
+- **File budget:** 10 CREATE rows = the §8.4 budget of 10.
+- **EC guards:** every EC row has a guard cell. EC-24 is marked as a vendor limitation. I added INV-5 to EC-58.
+- **Threats:** every T- row names a control and where it sits.
+- **No tests:** §13 has facts only, with no `def test_` and no `assert`.
+- **One fix made during the self-check:** FR-20 (docs) had no acceptance criterion. I added **AC-26** (P1, proven by review) and linked it from W-11.
