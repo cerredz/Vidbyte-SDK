@@ -1102,11 +1102,20 @@ class AgentRuntime:
         if transform.provider_messages is not None:
             transformed["messages"] = tuple(dict(message) for message in transform.provider_messages)
             # @intent prompt-sits-at-the-run-boundary
-            # A rewritten list keeps the run boundary only while everything in front of it is unchanged; otherwise the
-            # provider places the prompt by the shape of the turns.
+            # A rewritten list keeps the run boundary while everything in front of it is unchanged. A rewritten head moves it to
+            # the first message of this run the rewrite kept: the shape rule cannot tell a rewrite's user-role note from a
+            # caller's question and would send the task after the run's work. Compaction builds new dicts, so this matches by
+            # equality, and a message equal to one in front of the boundary cannot anchor. With none kept, the provider places
+            # the task by shape.
             boundary = transformed.get("prompt_index")
-            if boundary is not None and transformed["messages"][:boundary] != tuple(call_options.get("messages", ()))[:boundary]:
-                transformed.pop("prompt_index")
+            original = tuple(call_options.get("messages", ()))
+            if boundary is not None and transformed["messages"][:boundary] != original[:boundary]:
+                head, own = original[:boundary], original[boundary:]
+                kept = next((index for index, message in enumerate(transformed["messages"]) if message in own and message not in head), None)
+                if kept is None:
+                    transformed.pop("prompt_index")
+                else:
+                    transformed["prompt_index"] = kept
         return transformed
 
     def _provider_messages_from_options(self, call_options: Mapping[str, Any]) -> tuple[Mapping[str, Any], ...]:
