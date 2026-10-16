@@ -3,11 +3,11 @@
 PURPOSE: Defines InfiniteWorkspace, the one memory folder every agent in an InfiniteMemory tree shares, and its deterministic guardrails: setup of the folder, the bookkeeping files, and the seeds; the file and token caps recounted from disk before every tool write; the sparse-entry rules; entry commits and supersedes; note writes and edits inside the allowed paths; and the workspace map every agent sees.
 ROLE IN CODEBASE: Built once by InfiniteMemoryAgent (agent.py) from InfiniteWorkspaceSettings (settings.py); called by the memory tools (memory.py) for every remember, write_note, and edit_file, by the launch tool (launch.py) to resolve "#N" context ids and to commit a pair's staged entries, and by the runtime (runtime.py) and the launch tool to render the map.
 ARCHITECTURE NOTE: All data is plain files under the root (spec section 9.1): entries.jsonl holds the live entries, superseded.jsonl the replaced ones, files.jsonl one description per created note. Nothing is cached; every check reads the disk through FolderUsage (vidbyte/lib/tools/filesystem/usage.py), so files that bash or the developer wrote count too. Every write runs under one class-level lock and replaces whole files through LocalFileSystemBackend.write_text(atomic=True), so a reader never sees half a line. Rule violations raise ToolExecutionError with what to fix, which the memory tools return to the model.
-FUNCTION INVENTORY: __init__ and commit_entry are narrated main functions. usage, entries, check_entry, write_note, edit_file, and map_text are the public operations; relative names a note by its workspace-relative path for events and the handoff, and never raises. _text reads one bookkeeping file; _entry_lines parses a bookkeeping file into entries; _entry_rules refuses text UTF-8 cannot hold, then applies the sparse-entry rules; _note_path applies the note path rules; _room applies the workspace caps to FolderUsage's projection of a write; _descriptions reads files.jsonl leniently for the map; _entry_json and _stamp format one entry line and one UTC stamp. Counting files from disk is FolderUsage's and atomic writes are LocalFileSystemBackend's.
+FUNCTION INVENTORY: __init__ and commit_entry are narrated main functions. usage, entries, check_entry, write_note, edit_file, and map_text are the public operations; relative names a note by its workspace-relative path for events and the handoff, and never raises; run_entries and descriptions read one run's live entries and the note descriptions for the handoff, outside the lock, as entries does, and write nothing. _text reads one bookkeeping file; _entry_lines parses a bookkeeping file into entries; _entry_rules refuses text UTF-8 cannot hold, then applies the sparse-entry rules; _note_path applies the note path rules; _room applies the workspace caps to FolderUsage's projection of a write; _descriptions reads files.jsonl leniently for the map and the handoff, all of it or one run's records; _entry_json and _stamp format one entry line and one UTC stamp. Counting files from disk is FolderUsage's and atomic writes are LocalFileSystemBackend's.
 COMMON MODIFICATION PATTERNS: A new guardrail is one more check in the operation it guards, with an @intent comment and a ToolExecutionError message that says what to fix. A new bookkeeping file adds its name to vidbyte/lib/constants/infinite.py, to the setup loop in __init__, and to the reserved paths in _note_path.
 WHAT NOT TO DO IN THIS FILE: 1. Do not cache file counts, entries, or descriptions; bash can change the folder between any two calls. 2. Do not write outside the lock or write a file in place; use self.backend.write_text(..., atomic=True). 3. Do not apply max_file_tokens to the bookkeeping files; only max_tokens bounds them (INV-19). 4. Do not raise from map_text on bad file content.
 KNOWN EDGE CASES: A malformed line in entries.jsonl or superseded.jsonl makes every entry operation fail with the file and line number until it is fixed, while map_text keeps working. A supersede writes the old line to superseded.jsonl before it rewrites entries.jsonl, so a crash between the two leaves the line in both files rather than in neither. Token counts are TokenEstimate's character estimate of the utf-8 text, with undecodable bytes counted as replacement characters. Text UTF-8 cannot hold raises UnicodeEncodeError, a ValueError the memory tools turn into a refusal, before any file is written; a pair agent's entry meets that check when it is staged, so InfinitePair._commit, which catches only ToolExecutionError, never sees it.
-RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 6.1 INV-16 to INV-24, and 9.1); vidbyte/agents/infinite/README.md
+RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 6.1 INV-16 to INV-24, and 9.1); docs/spec/infinite-memory-events/spec.md (section 9.2); vidbyte/agents/infinite/README.md
 TESTS: tests/features/infinite_memory_agent/test_infinite_memory_workspace.py, tests/features/infinite_memory_agent/test_infinite_memory_verification.py, and tests/features/infinite_memory_agent/test_infinite_memory_contract.py
 """
 
@@ -107,6 +107,15 @@ class InfiniteWorkspace:
         if missing:
             raise ToolExecutionError(f"Memory entry #{missing[0]} is not a live entry in {INFINITE_ENTRIES_FILE}; name only ids the map's memory holds.")
         return tuple(live[number] for number in ids)
+
+    def run_entries(self, run_id: str) -> tuple[InfiniteEntry, ...]:
+        """Return the live entries one run committed, in id order; a malformed entries.jsonl line raises ToolExecutionError as entries does."""
+        live = (entry for entry, _ in self._entry_lines(INFINITE_ENTRIES_FILE, self._text(INFINITE_ENTRIES_FILE)) if entry.run == run_id)
+        return tuple(sorted(live, key=lambda entry: entry.id))
+
+    def descriptions(self, run_id: str | None = None) -> dict[str, str]:
+        """Return each described note's description by its path, in the order files.jsonl first names them, only for notes created in run_id when one is given; malformed lines are skipped."""
+        return self._descriptions(self._text(INFINITE_FILES_FILE), run_id)
 
     def check_entry(self, draft: InfiniteEntryDraft, staged: tuple[InfiniteStagedEntry, ...] = ()) -> None:
         """Raise ToolExecutionError when the draft breaks a sparse-entry rule against the live entries and the pair's staged entries."""
@@ -326,17 +335,17 @@ class InfiniteWorkspace:
             raise ToolExecutionError(f"This write would make the workspace {after.tokens} tokens, over max_tokens ({self.settings.max_tokens}); write less, or ask the developer to raise the cap.")
 
     @staticmethod
-    def _descriptions(text: str) -> dict[str, str]:
-        # The last description files.jsonl records for each path; a line
-        # that is not a JSON object with a text path and description is
-        # skipped.
+    def _descriptions(text: str, run: str | None = None) -> dict[str, str]:
+        # The last description files.jsonl records for each path, from
+        # one run's records when run is given; a line that is not a JSON
+        # object with a text path and description is skipped.
         found: dict[str, str] = {}
         for line in text.split("\n"):
             try:
                 record = json.loads(line)
             except ValueError:
                 continue
-            if isinstance(record, dict) and isinstance(record.get("path"), str) and isinstance(record.get("description"), str):
+            if isinstance(record, dict) and isinstance(record.get("path"), str) and isinstance(record.get("description"), str) and (run is None or record.get("run") == run):
                 found[record["path"]] = record["description"]
         return found
 
