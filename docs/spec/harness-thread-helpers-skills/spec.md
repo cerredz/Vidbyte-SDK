@@ -1,7 +1,7 @@
 ---
 spec: harness-thread-helpers-skills
 title: Thread helpers and built-in skill functions for the Grok, opencode and Muse harnesses
-status: reviewed         # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
+status: verified         # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
 revision: 5
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-harness-thread-helpers-skills

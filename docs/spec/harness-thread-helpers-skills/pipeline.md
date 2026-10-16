@@ -21,11 +21,11 @@ started: 2026-10-15 18:12
 | S4→S5 spec amendment r4, r5 | done | 2026-10-16 11:35 | 2026-10-16 12:10 | reports/S1-spec-author.md (addenda r4, r5) | r4 d6792f3d; r5 b701550e: D-33 reads `history.snapshot.state.items` in snapshot/anchoredSnapshot (no export); `remember_thread` D-34, `child_problem` D-35; `member=` on `require` |
 | S4→S5 test amendment | done | 2026-10-16 12:15 | 2026-10-16 12:55 | reports/S2-test-author-amendment.md | S2_HEAD (amended) = cd2b329b; 10 new test functions (30 cases) + grants a–d; red 34 failed / 991 passed / 3 skipped, identical with and without DEEPSEEK_API_KEY (re-run by orchestrator) |
 | S5 repair loop | done | 2026-10-16 13:00 | 2026-10-16 14:05 | reports/S5-repair-1.md | converged in 1 iteration: HEAD 578c88bb pushed; 12 findings fixed; merged origin/main 8da41971 (6b55dde5); remote 4/4 green; orchestrator's own run_ci: 6632 passed, 17 skipped, "CI passed." |
-| S5 re-review | running | 2026-10-16 14:10 | | reports/S5-rereview.md | |
-| S6 PR | pending | | | | |
+| S5 re-review | done | 2026-10-16 14:10 | 2026-10-16 14:30 | reports/S5-rereview.md | SOUND: 0 Blocker, 0 Major, 2 Minor. R-C2 fixed by the spec author @3c114e7b. R-C1 fixed by repair iteration 2 @ade57291 (reports/S5-repair-2.md); docs head 71c15a2c pushed, remote 4/4 green; the orchestrator's own lint and run_ci are green (6632 passed, 17 skipped). Spec status: verified |
+| S6 PR | running | 2026-10-16 15:00 | | reports/S6-pr-author.md | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 (cap reached; final author revision r3 sets status approved) · S5 repair iterations: 1/8 · S5 re-review rounds: 1/2
+- S1 review rounds: 2/2 (cap reached; final author revision r3 sets status approved) · S5 repair iterations: 2/8 · S5 re-review rounds: 1/2
 
 ## Decisions the orchestrator made
 - 2026-10-15 18:12 — Fast-forwarded local `main` to origin/main f216fdcf (PR #1036 merged) before creating the worktree — Prompt 5: "Make sure the local main is up to date".
