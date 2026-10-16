@@ -200,3 +200,79 @@ All five fail closed and have probe items.
 - **Tables:** 0 malformed rows.
 - **Budget:** still 10 new source files and 20 classes. Exports: 68, with subpackages at 25, 15 and 16.
 - **No tests:** the spec contains no test code.
+
+## Addendum r4
+
+r4 amends the contract for the S4 code review (`review.md`, `reports/S4-findings-verifier.md`), before S5 fixes the code. The spec commit is `d6792f3d`. The S4 IDs R-1 to R-23 collide with the spec-review IDs R-1 to R-25 already in §16, so the spec cites them as "S4 R-n", and their §16 rows have Round "S4".
+
+### What I read
+
+- `review.md`, `reports/S4-findings-verifier.md` and the `reports/S4-review-*.md` files.
+- The code behind each accepted finding:
+  - `muse/commands.py:134-153`: the old anchored rule is two `require_text` calls over the export.
+  - `hostkit/evidence.py:36`: the substring match.
+  - `hostkit/errors.py`: the `thread_id` fallbacks in `failure`, `from_configuration_error`, `from_unexpected` and `from_launch_failure`.
+  - `grok/commands.py:230-243`.
+  - `muse/wire.py`: `tool_calls` at 300-338 and `exited` at 272-281.
+  - `GrokHelperWire._checked` and `OpencodeHelperWire._checked`.
+  - The `MUSE_*` constants, with the old scan-cap next step at line 817.
+  - The test pin at `test_harness_threads_helper_surface.py:258`.
+- **Why R-2 is a real Blocker.** `MUSE_GOAL_PROMPT_TEMPLATE` names `create_goal`, and `MUSE_SKILL_PROMPT_TEMPLATE` names the skill. Both are in the export, so the r3 text search always passed.
+
+### What changed and why
+
+- **R-2 (D-33, INV-8, AC-34, EC-83, EC-84, A-28; rows 4, 25, 26, 27).**
+  - Muse evidence is always a `toolCall` item, and message text never counts.
+  - In `anchoredSnapshot` mode the items are the top-level `items` list of the run's own `muse export` JSON.
+  - The new pure `MuseSessionWire.item_calls(holder)` reads both sources. `tool_calls` hands it the history or the snapshot state.
+  - One `NativeCommandEvidence.require` call checks both sources.
+  - An export that is not JSON, not an object, or has no `items` list fails closed with `MUSE_EXPORT_ITEMS_DETAIL`.
+  - **Where the export is parsed.** I put the parse in `MuseCommandRun.execute` (a `ValueError` from `json.loads` counts as no document), not in `MuseHelperRun.transcript`. Two reasons: `transcript` keeps its `-> str` signature, and the briefing allows only one new wire static.
+- **R-23 (AC-17, EC-82, A-17, §9.2, §9.3, row 30).** `require` gains one keyword, `member`.
+  - With `member` set, a call counts only when its `args` parse as a JSON object whose `member` value equals `fragment` exactly, with no folding.
+  - Muse passes `member=MUSE_READ_SKILL_ID_MEMBER` (`"id"`). Grok keeps the substring rule after folding.
+  - I chose a keyword on `require` so that inline and anchored items stay "the same `require`", as the briefing asks for R-2.
+- **R-5 (D-34, AC-35, EC-85; rows 8, 15, 27).** `NativeErrorFactory.remember_thread(thread_id: str) -> None` follows the `register_secret` precedent (per-call state).
+  - The fallback order is: the explicit `thread_id`, then the remembered id, then `request.thread_id`.
+  - There are exactly two call sites: right after `GrokStreamWire.read` and right after `MuseThreadRun.execute`.
+  - A launch failure before the child started stays without an id (INV-26).
+  - INV-29 and EC-61 keep their wording.
+- **R-6 (D-35; rows 8, 13, 19, 25).** `NativeErrorFactory.child_problem(outcome: CliOutcome, *, marker: str | None = None, texts: tuple[str, ...] = ()) -> NativeThreadProblem | None` is a pure static, following the `wrong_thread` precedent (`efae78a5`).
+  - The order is: timed out, then stdout cut, then non-zero exit with the marker, then other non-zero exit, else `None`.
+  - Each site passes its own marker: Grok checks stderr and stdout, opencode checks stderr, and Muse passes no marker.
+  - The marker and texts are data arguments, not a boolean flag (`function_design.md`).
+  - Main's four copies stay ("do not rewrite untouched code"). The §8.4 budget is unchanged, and §8.4 says so.
+- **R-7.** AC-22, NFR-5 and §11 say `SDK-LINT: PASS`.
+- **R-8.** INV-18, NFR-4 and §12.4 use #1036's wording and exempt boundary-record validation (#1036 D-26).
+- **R-16.** §12.4 holds the verbatim next step. Row 4 stores it, and §13 notes that the pin at `:258` moves with it.
+- **Propagation.**
+  - TL;DR, §5 and the §12.4 `muse.command_not_run` cause now name items, not "transcript lacks the call".
+  - W-12 now covers AC-35.
+  - The proof cells of amended ACs say "r4 amendment: proof pending (S2, S5)".
+  - §12.4 checks that no `require_text` call remains in `muse/commands.py` and that `remember_thread` has exactly two call sites.
+- **Recorded, not changed.**
+  - Code fixes: R-1, R-3, R-10, R-11, R-15, R-17 and R-21.
+  - R-4 is a test-fixture fix only. No `NativeEnvironmentVariable` members are added, and README line 179 stays.
+  - Deferred to follow-up (S4): R-9, R-12, R-13, R-14, R-18, R-19, R-20 and R-22.
+  - The verifier's refutations: no spec change.
+- **Not changed.** The frontmatter `base_commit` still says `0f69f7b7`. §17 records that the merge base is now `239c408a`, through S3's merge `4206cee2`.
+
+### Least-sure assumptions now
+
+- **A-17, the `id` member name.** The member name is unverified on a real Muse. If it is wrong, every Muse skill call fails closed. The failure is loud but total, and probe g prints the real `args`.
+- **A-28, the export's top-level `items` shape.** This shape is unverified. The default export file is named `trajectory-<timestamp>.json`, which hints at a different format. If the shape is wrong, the run fails closed with `MUSE_EXPORT_ITEMS_DETAIL`, and probe g prints the real top-level keys.
+- **`member` on `require`.** This adds a keyword to an existing §8.5 signature. It is not a new name. If the orchestrator reads "no change to any name in §8.5" strictly, the fallback is an equality check inside `MuseCommandRun`. That would split the evidence rule into two places, and the briefing asks for one.
+
+### Self-check results (r4)
+
+- **Defined IDs:** G 4, NG 15, INV 29, AC 35, EC 85, FR 20, NFR 12, D 35, W 12, T 9, A 29, Q 8. No number is skipped and none is reused.
+- **References:** every referenced ID is defined. The KD-n IDs are the request's key decisions.
+- **Coverage:** every AC is reached by a W- item, by a range or directly, and AC-35 by W-2, W-7, W-9 and W-12. Every EC row has a guard. The FR-to-AC mapping goes through the W- items, as in r3.
+- **Tables:** 0 malformed rows, checked by column count per table, with code spans and escaped pipes handled.
+- **Names:** `remember_thread`, `child_problem`, `item_calls`, `member`, `MUSE_READ_SKILL_ID_MEMBER` and `MUSE_EXPORT_ITEMS_DETAIL` have the same signatures in §8.5, §12.3 and §16.
+- **Remnants:**
+  - `AGENT-LINT` is left only in the S4 R-7 row and the historical r3 §17 row.
+  - `require_text` is left only for Grok code-review (D-28) and in "no `require_text` call remains".
+  - `list_opencode_threads_since` is not left in any next-step text.
+- **Budget:** still 47 functions, 68 exports, 10 new source files and 20 harness classes.
+- **No tests:** the spec contains no test code.
