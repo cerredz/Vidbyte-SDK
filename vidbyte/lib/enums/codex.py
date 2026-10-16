@@ -221,6 +221,15 @@ class CodexGoalStatus(str, Enum):
     COMPLETE = "complete"
 
 
+class CodexSkillScope(str, Enum):
+    """Where a Codex skill comes from, as skills/list reports it."""
+
+    USER = "user"
+    REPO = "repo"
+    SYSTEM = "system"
+    ADMIN = "admin"
+
+
 class CodexHostOperation(str, Enum):
     """The CodexHost step an error came from: open, request checks, or one function."""
 
@@ -241,6 +250,18 @@ class CodexHostOperation(str, Enum):
     TRACK_CODEX_THREAD_USAGE = "track_codex_thread_usage"
     LAUNCH_CODEX_SUBAGENTS = "launch_codex_subagents"
     START_CODEX_REVIEW = "start_codex_review"
+    LIST_RECENT_CODEX_THREADS = "list_recent_codex_threads"
+    LIST_CODEX_THREADS_SINCE = "list_codex_threads_since"
+    SEARCH_CODEX_THREADS = "search_codex_threads"
+    GET_CODEX_THREAD_LINEAGE = "get_codex_thread_lineage"
+    LIST_CODEX_TURNS = "list_codex_turns"
+    COMPACT_CODEX_THREAD = "compact_codex_thread"
+    DELETE_CODEX_THREAD = "delete_codex_thread"
+    GET_CODEX_GOAL = "get_codex_goal"
+    RUN_CODEX_GOAL = "run_codex_goal"
+    LIST_CODEX_SKILLS = "list_codex_skills"
+    RUN_CODEX_SKILL = "run_codex_skill"
+    RUN_CODEX_OPENAI_DOCS = "run_codex_openai_docs"
 
 
 __all__ = [
@@ -260,6 +281,7 @@ __all__ = [
     "CodexReviewTargetKind",
     "CodexSandbox",
     "CodexSandboxReadiness",
+    "CodexSkillScope",
     "CodexSortDirection",
     "CodexThreadSortKey",
     "CodexThreadSource",
