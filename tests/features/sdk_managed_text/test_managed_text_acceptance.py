@@ -5,8 +5,8 @@ ROLE IN CODEBASE: Acceptance layer of tests/features/sdk_managed_text/ (spec AC-
 ARCHITECTURE NOTE: Only the inner HTTP transport is scripted. Expected requests are spelled as literals from spec section 4 or recorded from the real adapter in BYOK state, never recomputed from production constants.
 COMMON MODIFICATION PATTERNS: When the gateway serves a new provider, add it to MANAGED_MODELS in managed_text_fixtures.py; the per-provider test picks it up. When the README section is reworded, keep the facts this module checks.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level (see managed_text_fixtures.py). 2. Do not read the developer's real environment; every test clears it.
-KNOWN EDGE CASES: Gemini carries the model only in its URL, so its managed body has no "model" key. Anthropic's BYOK default cap is 1,024 while managed calls default to 32,768.
-RELATED DOCS: tests/features/sdk_managed_text/FEATURE.md; docs/spec/managed-generative-models/spec.md sections 4, 6.2 and 9.2.
+KNOWN EDGE CASES: Gemini carries the model only in its URL, so its managed body has no "model" key. Anthropic's BYOK default cap is 1,024 while managed calls default to 32,768. Since byok-api-keys, a provider key in AUTO is relayed through the gateway; byte-identical vendor-direct requests need TextModelMode.DIRECT, so the oracle and the goldens use it.
+RELATED DOCS: tests/features/sdk_managed_text/FEATURE.md; docs/spec/managed-generative-models/spec.md sections 4, 6.2 and 9.2; docs/spec/byok-api-keys/spec.md section 13 (superseded rows).
 TESTS: python -m pytest tests/features/sdk_managed_text/test_managed_text_acceptance.py
 """
 
@@ -40,6 +40,16 @@ from vidbyte.lib.runners import TextModelRunner
 
 PROMPT = "Say hi in one word."
 KEY_PATTERN = re.compile(r"[0-9a-f]{32}")
+RELAY_HEADER = "X-Vidbyte-Provider-Key"
+# byok-api-keys FR-15: oracle keys that each match their own provider (table A), so the DIRECT oracle binds the key to the provider under test.
+ORACLE_KEYS = {
+    ModelProvider.OPENAI: "sk-proj-" + "oracle",
+    ModelProvider.ANTHROPIC: "sk-ant-" + "oracle",
+    ModelProvider.GEMINI: "AQ" + "." + "o" * 40,
+    ModelProvider.XAI: "xai-" + "oracle",
+    ModelProvider.DEEPSEEK: "d-oracle",
+    ModelProvider.KIMI: "k-oracle",
+}
 README = Path(__file__).resolve().parents[3] / "README.md"
 # The spec names no heading, so find the section by the spec's own term ("Vidbyte-managed mode") in any level-2 to level-4 heading.
 README_SECTION_HEADING = re.compile(r"^(#{2,4}) [^\n]*\bvidbyte[- ]managed\b[^\n]*$", re.IGNORECASE | re.MULTILINE)
@@ -84,10 +94,14 @@ class ManagedTextAcceptanceTests(unittest.TestCase):
                 gateway = ScriptedGateway(provider_answer(provider, text="Hi"))
                 with patch.dict(os.environ, {"VIDBYTE_API_KEY": VIDBYTE_KEY}, clear=True):
                     response = TextModelRunner(TextModelConfig(provider=provider.value, model=model), transport=gateway).run(PROMPT, system="Be brief.")
-                # The oracle: the same adapter in BYOK state with the config managed mode pins (cap 32,768, timeout 630 s).
+                # The oracle: the same adapter vendor-direct (byok-api-keys FR-15: TextModelMode.DIRECT) with the config managed mode pins (cap 32,768, timeout 630 s).
+                from vidbyte.lib.config import TextModelMode
+
                 vendor = ScriptedGateway(provider_answer(provider, text="Hi"))
                 with patch.dict(os.environ, {}, clear=True):
-                    TextModelRunner(TextModelConfig(provider=provider, model=model, api_key="sk-byok-oracle", max_output_tokens=32768, timeout_seconds=630.0), transport=vendor).run(PROMPT, system="Be brief.")
+                    TextModelRunner(TextModelConfig(provider=provider, model=model, api_keys=[ORACLE_KEYS[provider]], mode=TextModelMode.DIRECT, max_output_tokens=32768, timeout_seconds=630.0), transport=vendor).run(PROMPT, system="Be brief.")
+                self.assertEqual(len(vendor.requests), 1)
+                self.assertNotEqual(vendor.requests[0]["url"], GATEWAY_URL)
 
                 self.assertEqual(len(gateway.requests), 1)
                 [sent] = gateway.requests
@@ -107,40 +121,57 @@ class ManagedTextAcceptanceTests(unittest.TestCase):
                 self.assertEqual(response.text, "Hi")
                 self.assertEqual(response.usage, provider_usage(provider))
 
-    def test_provider_key_keeps_its_byok_request_byte_identical_while_keyless_providers_go_managed(self) -> None:
-        # AC-3, EC-1, EC-30, INV-17: BYOK is decided per provider; a provider key (env or explicit) keeps base_commit's exact request.
+    def test_provider_key_relays_in_auto_and_keeps_its_byok_request_byte_identical_in_direct(self) -> None:
+        # AC-3, EC-1, EC-30, INV-17; byok-api-keys INV-2 (AUTO relays the provider key), INV-6 (DIRECT keeps base_commit's exact vendor request).
+        from vidbyte.lib.config import TextModelMode
+
+        direct = TextModelMode.DIRECT
+        gemini_key = "AQ" + "." + "g" * 40
         environment = {"OPENAI_API_KEY": "sk-openai-byok", "MOONSHOT_API_KEY": "sk-moonshot-byok", "VIDBYTE_API_KEY": VIDBYTE_KEY}
         byok_goldens = (
             (
-                TextModelConfig(provider="openai", model="gpt-5.5"),
+                {"provider": "openai", "model": "gpt-5.5", "mode": direct},
                 ModelProvider.OPENAI,
                 {"method": "POST", "url": "https://api.openai.com/v1/responses", "headers": {"authorization": "Bearer sk-openai-byok", "content-type": "application/json"}, "json_body": {"model": "gpt-5.5", "input": PROMPT}, "timeout_seconds": 60.0},
             ),
             (
-                TextModelConfig(provider="gemini", model="gemini-3.5-flash", api_key="sk-gemini-explicit"),
+                {"provider": "gemini", "model": "gemini-3.5-flash", "api_keys": [gemini_key], "mode": direct},
                 ModelProvider.GEMINI,
-                {"method": "POST", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent", "headers": {"x-goog-api-key": "sk-gemini-explicit", "content-type": "application/json"}, "json_body": {"contents": [{"role": "user", "parts": [{"text": PROMPT}]}]}, "timeout_seconds": 60.0},
+                {"method": "POST", "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent", "headers": {"x-goog-api-key": gemini_key, "content-type": "application/json"}, "json_body": {"contents": [{"role": "user", "parts": [{"text": PROMPT}]}]}, "timeout_seconds": 60.0},
             ),
             (
                 # MOONSHOT_API_KEY, not KIMI_API_KEY, is kimi's variable; a guessed name would bill this user.
-                TextModelConfig(provider="kimi", model="kimi-k2.7-code"),
+                {"provider": "kimi", "model": "kimi-k2.7-code", "mode": direct},
                 ModelProvider.KIMI,
                 {"method": "POST", "url": "https://api.moonshot.ai/v1/chat/completions", "headers": {"authorization": "Bearer sk-moonshot-byok", "content-type": "application/json"}, "json_body": {"model": "kimi-k2.7-code", "messages": [{"role": "user", "content": PROMPT}]}, "timeout_seconds": 60.0},
             ),
         )
-        for config, provider, golden in byok_goldens:
-            with self.subTest(byok=provider.value), patch.dict(os.environ, environment, clear=True):
+        for options, provider, golden in byok_goldens:
+            with self.subTest(direct=provider.value), patch.dict(os.environ, environment, clear=True):
                 vendor = ScriptedGateway(provider_answer(provider))
-                self.assertFalse(config.is_vidbyte_managed())
+                config = TextModelConfig(**options)
+                self.assertFalse(config.credentials().uses_gateway)
                 TextModelRunner(config, transport=vendor).run(PROMPT)
                 self.assertEqual(vendor.requests, [golden])
-        with self.subTest(managed="anthropic"), patch.dict(os.environ, environment, clear=True):
+        for provider, model, relayed in ((ModelProvider.OPENAI, "gpt-5.5", "sk-openai-byok"), (ModelProvider.KIMI, "kimi-k2.7-code", "sk-moonshot-byok")):
+            with self.subTest(relay=provider.value), patch.dict(os.environ, environment, clear=True):
+                gateway = ScriptedGateway(provider_answer(provider))
+                config = TextModelConfig(provider=provider.value, model=model)
+                self.assertTrue(config.credentials().uses_gateway)
+                self.assertTrue(config.credentials().relays)
+                TextModelRunner(config, transport=gateway).run(PROMPT)
+                self.assertEqual([request["url"] for request in gateway.requests], [GATEWAY_URL])
+                self.assertEqual(header(gateway.requests[0], "authorization"), f"Bearer {VIDBYTE_KEY}")
+                self.assertEqual(header(gateway.requests[0], RELAY_HEADER), relayed)
+        with self.subTest(paid="anthropic"), patch.dict(os.environ, environment, clear=True):
             gateway = ScriptedGateway(provider_answer(ModelProvider.ANTHROPIC))
             config = TextModelConfig(provider="anthropic", model="claude-sonnet-5")
-            self.assertTrue(config.is_vidbyte_managed())
+            self.assertTrue(config.credentials().uses_gateway)
+            self.assertFalse(config.credentials().relays)
             TextModelRunner(config, transport=gateway).run(PROMPT)
             self.assertEqual([request["url"] for request in gateway.requests], [GATEWAY_URL])
             self.assertEqual(header(gateway.requests[0], "authorization"), f"Bearer {VIDBYTE_KEY}")
+            self.assertIsNone(header(gateway.requests[0], RELAY_HEADER))
 
     def test_readme_managed_section_states_the_fee_and_the_limits_that_match_the_constants(self) -> None:
         # AC-18: the fee disclosure ships, and its numbers cannot drift from the constants the SDK enforces.

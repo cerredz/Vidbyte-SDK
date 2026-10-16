@@ -211,53 +211,133 @@ reply = image_agent.run("A clean product mockup on a white desk")
 print(reply.content)
 ```
 
-### Vidbyte-managed text calls
+### Working Principles preset
 
-A Vidbyte API key lets text calls run without a provider account. In
-Vidbyte-managed mode the SDK sends each call to Vidbyte's model gateway, which
-calls the provider with Vidbyte's own provider key. Vidbyte bills you the
-provider cost plus a **2% fee**. Calls made with your own provider key (BYOK)
-go straight to the provider, and Vidbyte does not bill them.
-
-With `VIDBYTE_API_KEY=vb_live_<your key>` set and no `OPENAI_API_KEY`, the
-code is the same as with your own key:
+`SystemPromptPreset.WORKING_PRINCIPLES` is an opt-in paragraph that makes an
+agent work more ambitiously: aim at the outcome beyond the literal request, work
+like the best professional in the field, verify independently, borrow methods
+from other fields, and carry those principles into every subagent prompt. It
+distills Felix Rieseberg's essay
+[How to be more ambitious: a tutorial for humans with models](https://felixrieseberg.com/how-to-be-more-ambitious-a-tutorial-for-humans-with-models/).
 
 ```python
+from vidbyte import BaseAgent, SystemPromptPreset
+
+agent = BaseAgent(name="analyst", system_prompt="Answer directly.", provider="openai", model_name="gpt-5.2",
+                  system_prompt_presets=[SystemPromptPreset.WORKING_PRINCIPLES])
+```
+
+The text is `vidbyte/prompts/prompts/working_principles/system_prompt.md`; the
+runtime appends it after your system prompt, and every agent the run starts
+(specialists, agents built in tools, Jev clones, swarm helpers, bulk workers)
+inherits it unless it sets `system_prompt_presets=()`. It adds about 275 input
+tokens per model call. See "System Prompt Presets" in `vidbyte/agents/README.md`.
+
+### Vidbyte-managed text calls
+
+A text call can use two kinds of key. A **Vidbyte API key**
+(`vidbyte_api_key`, or the `VIDBYTE_API_KEY` environment variable) sends the
+call through Vidbyte's model gateway. Your own **provider keys** go in
+`api_keys`, a plain list in any order. In the default mode,
+`TextModelMode.AUTO`, every call goes to the gateway with the Vidbyte key:
+
+- **Relay:** when the call's provider has one of your keys, the gateway relays
+  that key to the provider. Your provider bills you; Vidbyte bills only its
+  **2% fee**.
+- **Vidbyte-paid:** when the provider has no key of yours, the gateway calls
+  the provider with Vidbyte's own provider key. Vidbyte bills you the
+  provider cost plus the 2% fee.
+
+`TextModelMode.DIRECT` is the only way to call a provider without Vidbyte. It
+sends the call straight to the provider with your own key, reads no Vidbyte
+key, and Vidbyte bills nothing.
+
+```python
+import os
+
+from vidbyte import Agent
 from vidbyte.lib.config import TextModelConfig, TextModelMode
 from vidbyte.lib.runners import TextModelRunner
 
-runner = TextModelRunner(TextModelConfig(provider="openai", model="gpt-5.5"))
-response = runner.run("Say hi in one word.")
-print(response.text, response.usage)  # the provider's own answer and usage
+agent = Agent(
+    name="researcher",
+    system_prompt="Answer in one word.",
+    provider="xai",
+    model_name="grok-4.5",
+    vidbyte_api_key=os.environ["VIDBYTE_API_KEY"],
+    api_keys=[os.environ["ANTHROPIC_API_KEY"], os.environ["XAI_API_KEY"]],
+    fallback=["anthropic/claude-sonnet-5"],
+)
+print(agent.run("Say hi.").content)  # grok relays the xAI key; the Claude backup relays the Anthropic key
 
-claude = TextModelRunner(  # managed even when ANTHROPIC_API_KEY is also set
-    TextModelConfig(provider="anthropic", model="claude-sonnet-5", mode=TextModelMode.VIDBYTE_MANAGED)
+paid = TextModelRunner(TextModelConfig(provider="openai", model="gpt-5.5"))  # VIDBYTE_API_KEY set, no OpenAI key: Vidbyte-paid
+
+offline = Agent(
+    name="offline",
+    system_prompt="Answer in one word.",
+    provider="xai",
+    model_name="grok-4.5",
+    api_keys=[os.environ["XAI_API_KEY"]],
+    model_mode=TextModelMode.DIRECT,  # never contacts Vidbyte
 )
 ```
 
-**Turning it on and off**
+**How the SDK matches your keys**
 
-- **On:** set `VIDBYTE_API_KEY`, pass a Vidbyte key as `api_key`, or set
-  `mode=TextModelMode.VIDBYTE_MANAGED`. Agents use managed mode too, because
-  they send their model calls through `TextModelRunner`.
-- **Off for one provider:** set that provider's own key, such as
-  `OPENAI_API_KEY`. In the default mode, a provider key always wins over
-  `VIDBYTE_API_KEY`.
-- **Off everywhere:** unset `VIDBYTE_API_KEY` and do not set
-  `mode=TextModelMode.VIDBYTE_MANAGED`. Managed Jev calls need the same
-  variable, so they stop working too.
-- **Per provider:** the choice is made for each provider separately. While
-  `VIDBYTE_API_KEY` is set, every managed provider that has no key of its own
-  is billed through Vidbyte. This includes calls made by fallback, fork, and
-  aggregation children of an agent.
+- **Any order:** you never say which key belongs to which provider. `None`
+  and blank entries are skipped, so a list of `os.environ.get(...)` calls
+  works.
+- **Prefixes:** a key whose prefix proves its provider goes to that provider:
+  `sk-ant-` (Anthropic), `sk-or-` (OpenRouter), `sk-proj-` and `sk-admin-`
+  (OpenAI), `xai-` (xAI), and `AIza` or `AQ.` (Gemini). A Vidbyte key in the
+  list is the Vidbyte key.
+- **Other keys:** a key without such a prefix, such as a DeepSeek, Kimi, or
+  Mistral key, goes to the one configured model (the agent's own model or a
+  fallback) that can take it. When it is the list's only such key and the
+  agent's own model can take it, it goes to that model.
+- **No guessing:** when such a key could belong to more than one configured
+  model, or to none, the agent refuses the list when it is built. Put that key
+  in its provider's environment variable instead, such as `DEEPSEEK_API_KEY`.
+  Environment variables are never matched, because their names already say
+  which provider they belong to.
+- **Your model needs its key:** a list that holds provider keys but none for
+  the agent's own model is refused when the agent is built. An empty list, or
+  a list that holds only a Vidbyte key, is fine: every `AUTO` call is then
+  Vidbyte-paid.
+- **One matching for every child:** the agent matches its list once, against
+  its own model and every fallback model. Fallbacks, forks, handoffs,
+  aggregate proposers, Jev agents, and resumed sessions all carry that one
+  matching, and each call sends only its own provider's key. An
+  `AggregateAgent` that is given provider keys needs one for every proposer
+  and aggregator model it builds.
+- **Never stored or shown:** keys never appear in a repr, a log line, an error
+  message, or a session checkpoint. Pass `api_keys` and `vidbyte_api_key`
+  again when you resume a session.
 
-**What managed mode serves and refuses**
+**Modes**
 
-- **Providers:** OpenAI, Anthropic, Gemini, xAI, DeepSeek, and Kimi. Other
-  providers stay on your own key: `VIDBYTE_API_KEY` is ignored for them, and
-  a Vidbyte key passed as `api_key`, or managed mode, with another provider
-  is refused before a request is sent.
-- **Output cap:** every managed request carries an output-token cap. When
+Text configs take `mode=`, and agents take the same choice as `model_mode=`.
+
+- **`TextModelMode.AUTO` (default):** needs a Vidbyte key. Without one, the
+  call fails before any request, and the error names `VIDBYTE_API_KEY` and
+  `TextModelMode.DIRECT`. The call relays the provider's key from `api_keys`
+  or from that provider's environment variable, and is Vidbyte-paid when
+  there is neither.
+- **`TextModelMode.VIDBYTE_MANAGED`:** always Vidbyte-paid. Provider keys are
+  never read.
+- **`TextModelMode.DIRECT`:** straight to the provider with your own key, from
+  `api_keys` or the provider's environment variable. None of the gateway rules
+  below apply. Use it to stream, to call a provider the gateway does not
+  serve, or to use a custom `endpoint`.
+
+**What the gateway serves and refuses**
+
+These rules apply to `AUTO` and `VIDBYTE_MANAGED` calls.
+
+- **Providers:** OpenAI, Anthropic, Gemini, xAI, DeepSeek, and Kimi. A gateway
+  mode with another provider, or with a custom `endpoint`, is refused before a
+  request is sent; use `TextModelMode.DIRECT` for those.
+- **Output cap:** every gateway request carries an output-token cap. When
   `max_output_tokens` is not set, the SDK sends 32,768. If you pass a
   `generationConfig` in `extra_body` for Gemini, it replaces the one the SDK
   builds, so it must include `maxOutputTokens`. For xAI, DeepSeek, and Kimi,
@@ -265,20 +345,23 @@ claude = TextModelRunner(  # managed even when ANTHROPIC_API_KEY is also set
   `extra_body`.
 - **Request size:** the gateway refuses a request over 2,000,000 bytes,
   measured as JSON with non-ASCII characters escaped. Shorten the context, or
-  use your own provider key.
-- **Streaming:** `StreamingTextModelRunner` refuses managed mode. Use
-  `TextModelRunner`, or set the provider's own key to stream.
+  use `TextModelMode.DIRECT`.
+- **Relayed keys:** a relayed provider key must be printable ASCII without
+  spaces, at most 512 characters.
+- **Streaming:** `StreamingTextModelRunner` streams only in
+  `TextModelMode.DIRECT` and refuses both gateway modes.
 - **Refused request fields:** hosted (non-function) tools, any service tier
   (`service_tier`), body fields outside the gateway's allowed lists, Gemini
   snake_case keys, a `model` key in a Gemini body, and OpenAI
   `previous_response_id` and `conversation`.
-- **Provider accounts:** managed calls run under Vidbyte's provider accounts.
-  Provider-side stored state, such as OpenAI stored responses and Gemini
-  cached content, lives in those accounts, not in yours.
+- **Provider accounts:** a Vidbyte-paid call runs under Vidbyte's provider
+  account, so provider-side stored state, such as OpenAI stored responses and
+  Gemini cached content, lives in that account, not in yours. A relayed call
+  runs under your own provider account.
 
 **Waits, retries, and billing**
 
-- **Wait per attempt:** one managed attempt can wait up to 630 s
+- **Wait per attempt:** one gateway attempt can wait up to 630 s
   (10.5 minutes), because the gateway gives a long generation up to 600 s.
 - **Retries:** when the gateway answers 409 or 502, or Vidbyte's hosting edge
   answers with a page that is not a JSON object, the SDK sends the call again,
@@ -294,7 +377,7 @@ claude = TextModelRunner(  # managed even when ANTHROPIC_API_KEY is also set
 - **Outer timeouts:** an agent timeout shorter than 630 s can cancel a call
   that Vidbyte still completes and bills. An example is the 120 s default
   stage limit of the prosecutor/defender/judge algorithm.
-- **Error messages:** managed errors never repeat the gateway's or the
+- **Error messages:** gateway errors never repeat the gateway's or the
   provider's response text, because that text could hold a key. They name the
   provider, the HTTP status, and what to do next.
 
@@ -1428,7 +1511,7 @@ await session.arun("first step")
 
 # later / cold process - re-supply non-serializable parts
 session = Session.resume(store, session_id, tools=[grep])
-session = Session.resume(store, session_id, api_key=tenant_key)  # keys are never checkpointed; re-pass an explicit one
+session = Session.resume(store, session_id, api_keys=[tenant_key])  # keys are never checkpointed; re-pass explicit ones
 session = Session.continue_(store, session_id)           # == resume(head)
 branch = Session.fork_from(store, checkpoint_id)         # new id + parent lineage
 branches = session.batch_fork(3)                                   # child records only

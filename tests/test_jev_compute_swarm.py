@@ -126,7 +126,7 @@ def _swarm_jev() -> ScriptedJev:
 
 
 def _settings(*tools: object) -> JevAgentSettings:
-    return JevAgentSettings(name="researcher", system_prompt="Research.", provider="openai", model_name="gpt-4.1", api_key="main-key", tools=tools or (lookup,))
+    return JevAgentSettings(name="researcher", system_prompt="Research.", provider="openai", model_name="gpt-4.1", api_keys=["sk-main-key"], tools=tools or (lookup,))
 
 
 def _agent(runner: RecordingRunner, *, swarm_agents: int = 4) -> JevAgent:

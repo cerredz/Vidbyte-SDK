@@ -108,6 +108,23 @@ from vidbyte.lib.enums.multi_agent import (
     OrchestratorAction,
     TaskStatus,
 )
+from vidbyte.lib.enums.native_threads import (
+    GrokFlag,
+    GrokPermissionMode,
+    GrokReasoningEffort,
+    MuseFlag,
+    MuseMethod,
+    MuseReasoningEffort,
+    NativeEnvironmentVariable,
+    NativeHarness,
+    NativeThreadOperation,
+    NativeThreadProblem,
+    NativeThreadVerb,
+    OpencodeEventType,
+    OpencodeFlag,
+    ShellFlag,
+    WslFlag,
+)
 from vidbyte.lib.enums.outputs import (
     DeliveryStatus,
     OutputDestination,
@@ -115,7 +132,8 @@ from vidbyte.lib.enums.outputs import (
     TypefullyPlatform,
 )
 from vidbyte.lib.enums.platform import Platform
-from vidbyte.lib.enums.prompts import Prompt
+from vidbyte.lib.enums.process import CliOptionStyle, ProcessLaunchFailure
+from vidbyte.lib.enums.prompts import Prompt, SystemPromptPreset
 from vidbyte.lib.enums.reasoning_strategies import (
     AbsenceEvidenceSignificance,
     BurdenOfProofVerdict,
@@ -162,6 +180,7 @@ __all__ = [
     "BudgetPreset",
     "BurdenOfProofVerdict",
     "CircularityVerdict",
+    "CliOptionStyle",
     "CodexApprovalMode",
     "CodexContextAnchor",
     "CodexInputType",
@@ -187,6 +206,9 @@ __all__ = [
     "FailureSeverity",
     "FailureStatus",
     "GitHeadState",
+    "GrokFlag",
+    "GrokPermissionMode",
+    "GrokReasoningEffort",
     "HypothesisStatus",
     "IdentityVerdict",
     "ImpactLevel",
@@ -217,7 +239,17 @@ __all__ = [
     "ModelNameModality",
     "ModelProvider",
     "MultiAgentStopReason",
+    "MuseFlag",
+    "MuseMethod",
+    "MuseReasoningEffort",
+    "NativeEnvironmentVariable",
+    "NativeHarness",
+    "NativeThreadOperation",
+    "NativeThreadProblem",
+    "NativeThreadVerb",
     "NecessarySufficientVerdict",
+    "OpencodeEventType",
+    "OpencodeFlag",
     "OperatingSystemFamily",
     "OrchestratorAction",
     "OutputDestination",
@@ -227,6 +259,7 @@ __all__ = [
     "PinPolicy",
     "Platform",
     "PredictMatch",
+    "ProcessLaunchFailure",
     "ProgressState",
     "Prompt",
     "QuantifierKind",
@@ -236,6 +269,7 @@ __all__ = [
     "ReturnableOption",
     "Reversibility",
     "RuleErrorMode",
+    "ShellFlag",
     "ShellKind",
     "Skill",
     "SkillEnums",
@@ -244,6 +278,7 @@ __all__ = [
     "SkillUnavailableReason",
     "StrawmanCriticism",
     "StructuredOutputSupport",
+    "SystemPromptPreset",
     "TaskStatus",
     "TestimonyTrust",
     "TextModelMode",
@@ -251,4 +286,5 @@ __all__ = [
     "TypefullyPlatform",
     "UsageAccountingFailure",
     "UsageKind",
+    "WslFlag",
 ]

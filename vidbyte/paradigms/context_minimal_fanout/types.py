@@ -12,6 +12,8 @@ Architecture:
     - SplitPrompt / PromptSplitPlan: structured splitter/adversarial output.
     - ImplementationOutput / ContextMinimalFanoutResult: fanout results.
     - ContextMinimalFanoutSettings: per-role configuration for the four stages.
+    - AgentRoleSettings: one role's model, api_keys list (normalized here,
+      matched by the role's agent), and Vidbyte key.
 Relations:
     Consumed by vidbyte.paradigms.context_minimal_fanout.paradigm and built from
     OutputSchemaBuilder snapshots.
@@ -24,7 +26,9 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from vidbyte.lib.dataclasses.agents import ProviderKeys
 from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.registries.provider_keys import ProviderKeyMatcher
 
 if TYPE_CHECKING:
     # Avoids a runtime circular import; ContextManager is only used as a type hint
@@ -423,15 +427,24 @@ class AgentRoleSettings:
     runner: object | None = None
     provider: str | None = None
     model_name: str | Sequence[str] | None = None
-    api_key: str | None = None
+    api_keys: Sequence[str | None] = field(default=(), repr=False)
     temperature: float | None = None
     tools: tuple[object, ...] = ()
     middleware: tuple[object, ...] = ()
     agent_options: Mapping[str, Any] = field(default_factory=dict)
     max_tokens: int | None = None
+    vidbyte_api_key: str | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
-        # Normalizes tuple and mapping fields.
+        # Normalizes tuple and mapping fields. The key list's shape and
+        # the Vidbyte key's format are checked here; the role's agent
+        # matches the list against its provider when the paradigm
+        # builds it. The Vidbyte key is stripped and stored before its
+        # check, as Agent does, so a padded key is the same key.
+        object.__setattr__(self, "api_keys", ProviderKeyMatcher.normalize(self.api_keys, field_name="AgentRoleSettings.api_keys"))
+        vidbyte_key = (self.vidbyte_api_key.strip() or None) if isinstance(self.vidbyte_api_key, str) else self.vidbyte_api_key
+        object.__setattr__(self, "vidbyte_api_key", vidbyte_key)
+        ProviderKeys(vidbyte_api_key=self.vidbyte_api_key)
         object.__setattr__(self, "tools", _object_tuple(self.tools))
         object.__setattr__(self, "middleware", _object_tuple(self.middleware))
         object.__setattr__(self, "agent_options", dict(self.agent_options))

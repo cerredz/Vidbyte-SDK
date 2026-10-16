@@ -4,9 +4,11 @@ import json
 import unittest
 from typing import Mapping
 
-from vidbyte.lib.config import ModelProvider, TextModelConfig
+from vidbyte.lib.config import ModelProvider, TextModelConfig, TextModelMode
 from vidbyte.lib.http import HttpResponse
 from vidbyte.lib.runners import TextModelRunner
+
+GEMINI_TEST_KEY = "AQ" + "." + "x" * 40
 
 
 class FakeTransport:
@@ -40,7 +42,7 @@ class TextModelRunnerTests(unittest.TestCase):
     def test_openai_responses_request_and_text_normalization(self) -> None:
         transport = FakeTransport({"output_text": "ok", "usage": {"output_tokens": 1}})
         runner = TextModelRunner(
-            TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-test", api_key="key"),
+            TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-test", api_keys=["sk-key"], mode=TextModelMode.DIRECT),
             transport=transport,
         )
 
@@ -62,7 +64,7 @@ class TextModelRunnerTests(unittest.TestCase):
         }
         for output in ([reasoning, message], [message]):
             transport = FakeTransport({"output": output, "usage": {"output_tokens": 9}})
-            runner = TextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-test", api_key="key"), transport=transport)
+            runner = TextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-test", api_keys=["sk-key"], mode=TextModelMode.DIRECT), transport=transport)
 
             response = runner.run("Hello")
 
@@ -71,7 +73,7 @@ class TextModelRunnerTests(unittest.TestCase):
 
     def test_openai_responses_translates_chat_tool_history_into_items(self) -> None:
         transport = FakeTransport({"output_text": "ok"})
-        runner = TextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-test", api_key="key"), transport=transport)
+        runner = TextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-test", api_keys=["sk-key"], mode=TextModelMode.DIRECT), transport=transport)
         history = [
             {"role": "user", "content": "task"},
             {
@@ -102,7 +104,7 @@ class TextModelRunnerTests(unittest.TestCase):
         # Responses rejects the Chat Completions nested function shape with 400 "Missing required parameter: 'tools[0].name'".
         transport = FakeTransport({"output_text": "ok"})
         parameters = {"type": "object", "properties": {"q": {"type": "string"}}, "required": ["q"]}
-        runner = TextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-test", api_key="key"), transport=transport)
+        runner = TextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-test", api_keys=["sk-key"], mode=TextModelMode.DIRECT), transport=transport)
         tools = [
             {"type": "function", "function": {"name": "lookup", "description": "Find it.", "parameters": parameters}},
             {"type": "web_search"},
@@ -120,7 +122,7 @@ class TextModelRunnerTests(unittest.TestCase):
     def test_anthropic_messages_request_and_text_normalization(self) -> None:
         transport = FakeTransport({"content": [{"type": "text", "text": "ok"}]})
         runner = TextModelRunner(
-            TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-test", api_key="key"),
+            TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-test", api_keys=["sk-ant-key"], mode=TextModelMode.DIRECT),
             transport=transport,
         )
 
@@ -163,7 +165,7 @@ class TextModelRunnerTests(unittest.TestCase):
         for content, expected in cases:
             with self.subTest(expected=expected):
                 transport = FakeTransport({"content": content})
-                runner = TextModelRunner(TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-test", api_key="key"), transport=transport)
+                runner = TextModelRunner(TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-test", api_keys=["sk-ant-key"], mode=TextModelMode.DIRECT), transport=transport)
 
                 self.assertEqual(runner.run("Hello").text, expected)
 
@@ -172,7 +174,7 @@ class TextModelRunnerTests(unittest.TestCase):
             {"candidates": [{"content": {"parts": [{"text": "ok"}]}}], "usageMetadata": {"x": 1}}
         )
         runner = TextModelRunner(
-            TextModelConfig(provider=ModelProvider.GEMINI, model="gemini-test", api_key="key"),
+            TextModelConfig(provider=ModelProvider.GEMINI, model="gemini-test", api_keys=[GEMINI_TEST_KEY], mode=TextModelMode.DIRECT),
             transport=transport,
         )
 
@@ -180,12 +182,12 @@ class TextModelRunnerTests(unittest.TestCase):
 
         self.assertEqual(response.text, "ok")
         self.assertIn("models/gemini-test:generateContent", transport.requests[0]["url"])
-        self.assertEqual(transport.requests[0]["headers"].get("x-goog-api-key"), "key")
+        self.assertEqual(transport.requests[0]["headers"].get("x-goog-api-key"), GEMINI_TEST_KEY)
 
     def test_xai_chat_completions_request_and_text_normalization(self) -> None:
         transport = FakeTransport({"choices": [{"message": {"content": "ok"}}]})
         runner = TextModelRunner(
-            TextModelConfig(provider=ModelProvider.XAI, model="grok-test", api_key="key"),
+            TextModelConfig(provider=ModelProvider.XAI, model="grok-test", api_keys=["xai-key"], mode=TextModelMode.DIRECT),
             transport=transport,
         )
 

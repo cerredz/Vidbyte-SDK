@@ -5,7 +5,7 @@ ROLE IN CODEBASE: Deadline layer of tests/features/sdk_managed_text/ (spec INV-1
 ARCHITECTURE NOTE: For one call, the gateway module's asyncio name is replaced by a namespace whose get_running_loop returns FakeLoopClock. Its time() is the loop time the deadline reads, its sleep() records each retry wait and advances the clock by it, and SlowGateway advances the clock by a fixed step per attempt. Against the 630 s timeout, steps of 0, 600 and 629.5 s give 3, 2 and 1 POSTs. 629.5 + 0.5 lands exactly on the deadline in binary floating point, so the last case pins the >= comparison.
 COMMON MODIFICATION PATTERNS: When the retry waits or the 630 s floor change, move the step values so each case still lands on its boundary, and keep one case exactly on the deadline. Keep message checks to the facts section 9.2 binds: the re-send count, or that no re-send was made.
 WHAT NOT TO DO IN THIS FILE: 1. Do not patch asyncio globally or asyncio.get_running_loop itself; asyncio.run in this file needs the real loop, so patch only the gateway module's asyncio attribute. 2. Do not swap the fake clock for a real one with short timeouts; no real step lands exactly on the deadline, so a > comparison, a deadline taken after the first POST and a shortened attempt would all pass. 3. Do not import feature symbols at module level (see managed_text_fixtures.py).
-KNOWN EDGE CASES: A deadline taken after the first POST gives the 600 s case a third POST. A > comparison gives the 629.5 s case a second POST. A deadline that ignores the loop clock is caught because the clock starts at 1000 s, not 0. A shortened attempt shows as a timeout_seconds below 630.0. In AUTO, construction reads no environment, so only validate() can refuse a managed shape before a direct caller sends the key.
+KNOWN EDGE CASES: A deadline taken after the first POST gives the 600 s case a third POST. A > comparison gives the 629.5 s case a second POST. A deadline that ignores the loop clock is caught because the clock starts at 1000 s, not 0. A shortened attempt shows as a timeout_seconds below 630.0. Since byok-api-keys (D-23), AUTO always means the gateway, so TextModelConfig refuses an endpoint or an unserved provider when it is built, before any environment is read.
 RELATED DOCS: tests/features/sdk_managed_text/FEATURE.md; docs/spec/managed-generative-models/spec.md INV-10, INV-16, EC-3, EC-7, EC-38 and section 9.2 ("Retries").
 TESTS: python -m pytest tests/features/sdk_managed_text/test_managed_text_deadline.py
 """
@@ -179,24 +179,25 @@ class LastAttemptTests(DeadlineAssertions):
 
 
 class DirectValidateTests(unittest.TestCase):
-    """Checks EC-3 and EC-7 on a direct TextModelConfig.validate() call, where no runner rebuilds the config in explicit managed mode."""
+    """Checks EC-3 and EC-7 on a TextModelConfig a direct caller builds; since byok-api-keys D-23 the gateway-shape checks run when the config is built."""
 
     def test_validate_refuses_an_endpoint_when_auto_selects_the_vidbyte_key(self) -> None:
-        # EC-7, INV-7: building the config reads no environment, so validate() is the only check before a direct caller sends the key to a caller URL.
+        # EC-7, INV-7; byok-api-keys D-23, M-13: AUTO always uses the gateway, so building the config refuses the endpoint before a caller can send the key to a caller URL.
         with patch.dict(os.environ, {"VIDBYTE_API_KEY": VIDBYTE_KEY}, clear=True):
-            config = TextModelConfig(provider="openai", model="gpt-5.5", endpoint="https://proxy.example/v1")
             with self.assertRaises(ConfigurationError) as caught:
-                config.validate()
+                TextModelConfig(provider="openai", model="gpt-5.5", endpoint="https://proxy.example/v1")
         self.assertRegex(str(caught.exception), re.compile("endpoint", re.IGNORECASE))
+        self.assertIn("TextModelMode.DIRECT", str(caught.exception))
 
     def test_validate_refuses_an_explicit_vidbyte_key_for_a_provider_the_gateway_does_not_serve(self) -> None:
-        # EC-3, INV-8: an explicit vb_live_ key makes the config managed in AUTO, so validate() must refuse openrouter before the key can reach it.
+        # EC-3, INV-8; byok-api-keys D-25, D-23, M-12: the Vidbyte key is now vidbyte_api_key, and building the config refuses openrouter before the key can reach it.
         with patch.dict(os.environ, {}, clear=True):
-            config = TextModelConfig(provider="openrouter", model="openrouter/auto", api_key=VIDBYTE_KEY)
             with self.assertRaises(UnsupportedProviderError) as caught:
-                config.validate()
+                TextModelConfig(provider="openrouter", model="openrouter/auto", vidbyte_api_key=VIDBYTE_KEY)
         for provider in MANAGED_PROVIDERS:
             self.assertIn(provider, str(caught.exception))
+        self.assertIn("TextModelMode.DIRECT", str(caught.exception))
+        self.assertNotIn(VIDBYTE_KEY, str(caught.exception))
 
 
 if __name__ == "__main__":

@@ -65,7 +65,8 @@ class JevAgent(BaseAgent):
                 system_prompt=settings.system_prompt,
                 provider=settings.provider,
                 model_name=settings.model_name,
-                api_key=settings.api_key,
+                api_keys=settings.api_keys,
+                model_mode=settings.model_mode,
                 temperature=settings.temperature,
                 timeout_seconds=settings.timeout_seconds,
                 # @intent jev-children-never-steal-main-agent-tools
@@ -94,12 +95,14 @@ class JevAgent(BaseAgent):
             tools=settings.tools,
             permission_policy=settings.permission_policy,
             agent_loop_settings=settings.loop,
-            api_key=settings.api_key,
+            api_keys=settings.api_keys,
+            model_mode=settings.model_mode,
             provider=settings.provider,
             model_name=settings.model_name,
             temperature=settings.temperature,
             timeout_seconds=settings.timeout_seconds,
             outputs=settings.outputs,
+            system_prompt_presets=settings.system_prompt_presets,
         )
 
     @property

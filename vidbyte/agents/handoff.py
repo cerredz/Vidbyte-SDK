@@ -47,7 +47,11 @@ class HandoffAgent(BaseAgent):
         kwargs.pop("handoff", None)
         kwargs.pop("system_prompt", None)
         kwargs.pop("output_schema", None)
-        super().__init__(name=name, system_prompt=self.build_system_prompt(), handoff=None, output_schema=self.build_output_schema(), **kwargs)
+        # @intent handoff-agent-keeps-its-fixed-prompt
+        # The handoff prompt is fixed, so the agent never takes the
+        # presets of the run it summarizes.
+        kwargs.pop("system_prompt_presets", None)
+        super().__init__(name=name, system_prompt=self.build_system_prompt(), handoff=None, output_schema=self.build_output_schema(), system_prompt_presets=(), **kwargs)
 
     @classmethod
     def from_source_agent(cls, source_agent: BaseAgent, spec: Handoff) -> "HandoffAgent":
@@ -61,7 +65,8 @@ class HandoffAgent(BaseAgent):
             spec,
             provider=source_agent.runner_config.provider,
             model_name=source_agent.runner_config.model_name,
-            api_key=source_agent.runner_config.api_key,
+            api_keys=source_agent.runner_config.api_keys,
+            model_mode=source_agent.runner_config.model_mode,
             temperature=source_agent.runner_config.temperature,
             timeout_seconds=source_agent.runner_config.timeout_seconds,
             fallback=source_agent._fallback_spec,

@@ -5,15 +5,15 @@ Description:
 Purpose:
     Stores model configurations and delegates API key and endpoint validation and resolution to ProviderModelRegistry.
 Architecture:
-    - TextModelConfig: dataclass for text/chat completions.
+    - TextModelConfig: dataclass for text/chat completions; matches its api_keys list to its provider at construction.
+    - TextCredentials: the keys one text call sends, resolved for its mode.
     - ImageModelConfig: dataclass for image generation.
     - VideoModelConfig: dataclass for video generation tasks.
     - DecisionModelConfig: dataclass for calibrated decision models (TypeSafe Jev).
 Key Functions:
-    - resolved_api_key: Resolves provider key by delegating to ProviderModelRegistry; in managed state it returns the non-secret placeholder instead.
+    - credentials: Resolves a TextModelConfig's provider key and Vidbyte key for its mode (DIRECT, VIDBYTE_MANAGED, or AUTO).
+    - resolved_api_key: Resolves the provider key; a text config in a gateway mode returns the non-secret placeholder instead.
     - resolved_endpoint: Resolves provider endpoint by delegating to ProviderModelRegistry.
-    - is_vidbyte_managed: Reports whether a TextModelConfig routes through the Vidbyte gateway.
-    - resolved_vidbyte_api_key: Resolves the live Vidbyte key a managed TextModelConfig sends.
 Relations:
     Used by runners, agents, and strategies to initialize model executions.
 Similar Files:
@@ -22,9 +22,9 @@ Similar Files:
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from vidbyte.lib.constants.jev import (
     JEV_DEFAULT_MODEL,
@@ -34,21 +34,28 @@ from vidbyte.lib.constants.jev import (
     JEV_MANAGED_RUN_CLOSE_PATH,
     JEV_NO_RETRIES,
     JEV_TIMEOUT_FLOOR_SECONDS,
+    VIDBYTE_API_KEY_ENV_VAR,
     VIDBYTE_JEV_GATEWAY_ENDPOINT,
     VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND,
     VIDBYTE_MANAGED_KEY_PLACEHOLDER,
     VIDBYTE_MANAGED_TEXT_PROVIDERS,
+    VIDBYTE_PROVIDER_KEY_MAX_LENGTH,
 )
+from vidbyte.lib.dataclasses.agents import ProviderKeys
 from vidbyte.lib.enums import DecisionModelMode, ModelProvider, TextModelMode
 from vidbyte.lib.errors import ConfigurationError, UnsupportedProviderError
 from vidbyte.lib.registries.models import ProviderModelRegistry
+from vidbyte.lib.registries.provider_keys import ProviderKeyMatcher
+
+# The way out a text call names when no Vidbyte key is found.
+TEXT_REMEDY: str = f"Pass vidbyte_api_key or set {VIDBYTE_API_KEY_ENV_VAR}, or use mode=TextModelMode.DIRECT to call the provider with your own key and no Vidbyte fee."
 
 
 @dataclass(frozen=True, slots=True)
 class TextModelConfig:
     provider: ModelProvider | str
     model: str
-    api_key: str | None = field(default=None, repr=False)
+    api_keys: ProviderKeys | Iterable[str | None] | None = field(default_factory=ProviderKeys, repr=False)
     system: str | None = None
     messages: tuple[Mapping[str, Any], ...] = ()
     temperature: float | None = None
@@ -69,19 +76,30 @@ class TextModelConfig:
     mode: TextModelMode = TextModelMode.AUTO
     # Where the runtime's own exchange begins in messages; the provider puts the prompt there.
     prompt_index: int | None = None
+    vidbyte_api_key: str | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
-        """Reject a bad prompt_index, a mode that is not the enum, and what explicit managed mode can never serve, as soon as the config is built."""
+        """Reject a bad prompt_index or mode, refuse what the gateway can never serve, and match the key list, as soon as the config is built."""
         # @intent prompt-sits-at-the-run-boundary
         if self.prompt_index is not None and (isinstance(self.prompt_index, bool) or not isinstance(self.prompt_index, int) or self.prompt_index < 0):
             raise ConfigurationError(f"prompt_index must be a non-negative int or None, got {self.prompt_index!r}.")
         # @intent text-mode-shape-fails-at-construction
-        # AUTO reads no environment here: TextModelRunner rebuilds
-        # the config on every call, so validate() settles AUTO once.
+        # Nothing here reads the environment: TextModelRunner rebuilds
+        # the config on every call, so validate() settles the keys once.
         if not isinstance(self.mode, TextModelMode):
             raise ConfigurationError("mode must be a TextModelMode value.")
-        if self.mode is TextModelMode.VIDBYTE_MANAGED:
-            self._require_managed_shape(self.normalized_provider())
+        # Every mode but DIRECT goes through the gateway, so a provider
+        # it does not serve, or a custom endpoint, is refused before any
+        # key is read (INV-8); matching first would advise adding a key
+        # that the gateway still could not use.
+        if self.mode is not TextModelMode.DIRECT:
+            self._require_gateway_shape(self.normalized_provider())
+        # Match the developer's key list to this config's provider. A
+        # record passed back in is only checked, so a rebuilt config
+        # keeps the same keys.
+        matched = ProviderKeyMatcher.match(self.api_keys, primary=self.provider, vidbyte_api_key=self.vidbyte_api_key, field_name="TextModelConfig.api_keys")
+        object.__setattr__(self, "api_keys", matched)
+        object.__setattr__(self, "vidbyte_api_key", matched.vidbyte_api_key)
 
     def normalized_provider(self) -> ModelProvider:
         # Convert strings to the canonical provider enum at the SDK boundary.
@@ -97,53 +115,71 @@ class TextModelConfig:
         self._validate_top_p()
         self._validate_positive_int(self.max_output_tokens, field_name="max_output_tokens")
         self._validate_positive_float(self.timeout_seconds, field_name="timeout_seconds")
+        # @intent keys-are-checked-before-any-request
+        # Resolving the credentials refuses a missing or unsendable key
+        # here, before any provider code builds a request.
+        self.credentials()
+
+    def credentials(self) -> TextCredentials:
+        """Resolve the provider key and the Vidbyte key this config's calls send, by mode (spec table R)."""
+        # @intent each-mode-reads-only-the-key-it-sends
+        # DIRECT never reads the Vidbyte key and VIDBYTE_MANAGED never
+        # reads the provider key, so no key is read, or sent, by a mode
+        # that has no use for it.
         provider = self.normalized_provider()
-        # @intent managed-state-is-checked-before-any-request
-        # A managed config must suit the gateway and hold a live Vidbyte
-        # key, because that key must never follow a caller URL or reach
-        # a provider the gateway does not serve.
-        if self.is_vidbyte_managed():
-            self._require_managed_shape(provider)
-            self.resolved_vidbyte_api_key()
-            return
-        # A BYOK config resolves its provider key as before.
-        ProviderModelRegistry.resolve_api_key(provider, self.api_key)
-
-    def is_vidbyte_managed(self) -> bool:
-        """Return True in explicit managed mode, or when AUTO selects a Vidbyte key."""
-        # @intent vidbyte-key-selection-decides-managed-state
-        # The fall-through keeps a provider key the caller holds on
-        # BYOK, so only a selected Vidbyte key bills through Vidbyte.
-        if self.mode is TextModelMode.VIDBYTE_MANAGED:
-            return True
-        return ProviderModelRegistry.find_vidbyte_api_key(self.provider, self.api_key) is not None
-
-    def resolved_vidbyte_api_key(self) -> str:
-        """Return the checked live Vidbyte key this config's managed calls send to the gateway."""
-        # @intent explicit-managed-mode-never-reads-the-provider-key
-        # Explicit managed mode takes only api_key or VIDBYTE_API_KEY,
-        # so a provider key in the environment is never sent; AUTO takes
-        # the Vidbyte key its fall-through selected.
-        details = {"error_kind": VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND}
-        if self.mode is TextModelMode.VIDBYTE_MANAGED:
-            if self.api_key is not None and not isinstance(self.api_key, str):
-                raise ConfigurationError("api_key must be a string in VIDBYTE_MANAGED text mode.", details=details)
-            return ProviderModelRegistry.resolve_vidbyte_api_key(self.api_key)
-        selected = ProviderModelRegistry.find_vidbyte_api_key(self.provider, self.api_key)
-        if selected is None:
-            raise ConfigurationError("This TextModelConfig is not in Vidbyte-managed mode: no Vidbyte API key was selected.", details=details)
-        return ProviderModelRegistry.resolve_vidbyte_api_key(selected)
+        # __post_init__ always stores the matched record in api_keys.
+        keys = cast(ProviderKeys, self.api_keys)
+        match self.mode:
+            case TextModelMode.DIRECT:
+                # Straight to the provider with the developer's own
+                # key: no Vidbyte key and no Vidbyte fee, so a missing
+                # provider key stops here and names the keys the list
+                # does hold (M-8).
+                provider_key = ProviderModelRegistry.find_provider_api_key(provider, keys)
+                if provider_key is None:
+                    held = ", ".join(member.value for member in keys.providers)
+                    hint = f" (api_keys holds keys for: {held})" if held else ""
+                    raise ConfigurationError(
+                        f"Missing API key for provider {provider.value}. Pass api_keys or set {ProviderModelRegistry.get_api_key_env_var(provider)}.{hint}",
+                        details={"provider": provider.value, "mode": self.mode.value},
+                    )
+                return TextCredentials(TextModelMode.DIRECT, provider_api_key=provider_key)
+            case TextModelMode.VIDBYTE_MANAGED:
+                # Through the gateway on Vidbyte's own provider account,
+                # so only the Vidbyte key is read.
+                vidbyte_key = ProviderModelRegistry.resolve_vidbyte_api_key(self.vidbyte_api_key, remedy=TEXT_REMEDY)
+                return TextCredentials(TextModelMode.VIDBYTE_MANAGED, vidbyte_api_key=vidbyte_key)
+            case TextModelMode.AUTO:
+                # Through the gateway, which always needs the Vidbyte
+                # key. The call relays the developer's provider key
+                # when there is one, and is Vidbyte-paid otherwise.
+                vidbyte_key = ProviderModelRegistry.resolve_vidbyte_api_key(self.vidbyte_api_key, remedy=TEXT_REMEDY)
+                provider_key = ProviderModelRegistry.find_provider_api_key(provider, keys)
+                # @intent relayed-key-fits-the-gateway-header
+                # The gateway refuses a provider-key header over
+                # its limit, so the call fails here, before any
+                # request; DIRECT sends the key straight to the
+                # vendor, which has no such limit.
+                if provider_key is not None and len(provider_key) > VIDBYTE_PROVIDER_KEY_MAX_LENGTH:
+                    source = "api_keys" if keys.key_for(provider) is not None else ProviderModelRegistry.get_api_key_env_var(provider)
+                    raise ConfigurationError(
+                        f"The {provider.value} key from {source} has {len(provider_key)} characters, and the Vidbyte gateway relays keys of at most {VIDBYTE_PROVIDER_KEY_MAX_LENGTH} characters. Use mode=TextModelMode.DIRECT to send it straight to {provider.value}.",
+                        details={"provider": provider.value, "source": source, "length": len(provider_key)},
+                    )
+                return TextCredentials(TextModelMode.AUTO, provider_api_key=provider_key, vidbyte_api_key=vidbyte_key)
+            case _:
+                raise ConfigurationError("mode must be a TextModelMode value.")
 
     def resolved_api_key(self) -> str:
-        # @intent managed-adapters-see-only-the-placeholder-key
-        # Adapters build vendor auth from this value, so in managed
-        # state they get a non-secret stand-in and the Vidbyte key never
-        # reaches a vendor, even when an adapter is called directly.
-        if self.is_vidbyte_managed():
-            return VIDBYTE_MANAGED_KEY_PLACEHOLDER
-        # Resolve explicit keys before provider-specific
-        # environment variables.
-        return ProviderModelRegistry.resolve_api_key(self.normalized_provider(), self.api_key)
+        """Return the key an adapter puts in its vendor auth header: the provider key in DIRECT, else the placeholder."""
+        # @intent gateway-adapters-see-only-the-placeholder-key
+        # Adapters build vendor auth from this value, so in a gateway
+        # mode they get a non-secret stand-in, and neither the Vidbyte
+        # key nor a relayed provider key ever enters a vendor header.
+        # TextCredentials always holds a provider key in DIRECT, so the
+        # placeholder serves the gateway modes only.
+        provider_api_key = self.credentials().provider_api_key if self.mode is TextModelMode.DIRECT else None
+        return provider_api_key if provider_api_key is not None else VIDBYTE_MANAGED_KEY_PLACEHOLDER
 
     def resolved_endpoint(self) -> str:
         # Prefer caller-provided endpoints for tests, proxies, and compatible APIs.
@@ -154,16 +190,23 @@ class TextModelConfig:
         if not self.model.strip():
             raise ConfigurationError("model must be non-empty.")
 
-    def _require_managed_shape(self, provider: ModelProvider) -> None:
-        """Refuse a custom endpoint and any provider the gateway does not serve, before a managed call can send the Vidbyte key."""
-        # @intent managed-key-stays-on-the-gateway
-        # The bearer key must never follow a caller URL or go to a
-        # vendor the gateway cannot bill.
+    def _require_gateway_shape(self, provider: ModelProvider) -> None:
+        """Refuse a custom endpoint and any provider the gateway does not serve, before a gateway call can send the Vidbyte key."""
+        # @intent gateway-keys-stay-on-the-gateway
+        # The Vidbyte key and a relayed provider key must never follow a
+        # caller URL or go to a vendor the gateway cannot serve; DIRECT
+        # is the way to reach either.
         if self.endpoint is not None and (not isinstance(self.endpoint, str) or self.endpoint.strip()):
-            raise ConfigurationError("A custom endpoint is not allowed in Vidbyte-managed text mode.")
+            raise ConfigurationError(
+                "A custom endpoint is not allowed when text calls go through the Vidbyte gateway. Use mode=TextModelMode.DIRECT to send calls to your own endpoint.",
+                details={"mode": self.mode.value},
+            )
         if provider not in VIDBYTE_MANAGED_TEXT_PROVIDERS:
             supported = ", ".join(sorted(managed.value for managed in VIDBYTE_MANAGED_TEXT_PROVIDERS))
-            raise UnsupportedProviderError(f"Vidbyte-managed text mode supports: {supported}.", details={"provider": provider.value})
+            raise UnsupportedProviderError(
+                f"The Vidbyte gateway serves only: {supported}. Use mode=TextModelMode.DIRECT to call {provider.value} with your own key.",
+                details={"provider": provider.value, "mode": self.mode.value},
+            )
 
     def _validate_temperature(self) -> None:
         # Most provider APIs accept temperature values in the inclusive 0-2 range.
@@ -184,6 +227,54 @@ class TextModelConfig:
         # Optional floating-point limits must be positive when supplied.
         if value is not None and value <= 0:
             raise ConfigurationError(f"{field_name} must be greater than zero.")
+
+
+@dataclass(frozen=True, slots=True)
+class TextCredentials:
+    """The keys one text call sends, resolved for its mode by TextModelConfig.credentials()."""
+
+    mode: TextModelMode
+    provider_api_key: str | None = field(default=None, repr=False)
+    vidbyte_api_key: str | None = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        """Refuse a combination of keys that the mode can never send."""
+        # @intent credentials-fit-their-mode
+        # DIRECT sends only a provider key and VIDBYTE_MANAGED only the
+        # Vidbyte key; AUTO always sends the Vidbyte key and may relay a
+        # provider key. Any other combination would send a key where its
+        # mode never sends one. The message names no key.
+        if not isinstance(self.mode, TextModelMode):
+            raise ConfigurationError("TextCredentials.mode must be a TextModelMode value.")
+        has_provider_key = isinstance(self.provider_api_key, str) and bool(self.provider_api_key.strip())
+        has_vidbyte_key = isinstance(self.vidbyte_api_key, str) and bool(self.vidbyte_api_key.strip())
+        match self.mode:
+            case TextModelMode.DIRECT:
+                fits = has_provider_key and self.vidbyte_api_key is None
+            case TextModelMode.VIDBYTE_MANAGED:
+                fits = has_vidbyte_key and self.provider_api_key is None
+            case TextModelMode.AUTO:
+                fits = has_vidbyte_key and (self.provider_api_key is None or has_provider_key)
+            case _:
+                raise ConfigurationError("TextCredentials.mode must be a TextModelMode value.")
+        if not fits:
+            raise ConfigurationError(
+                f"TextCredentials in {self.mode.value} mode cannot hold these keys: DIRECT holds only a provider key, VIDBYTE_MANAGED only a Vidbyte key, and AUTO a Vidbyte key with an optional provider key."
+            )
+
+    @property
+    def uses_gateway(self) -> bool:
+        """Return True when the call goes through the Vidbyte gateway, which is every mode but DIRECT."""
+        return self.mode is not TextModelMode.DIRECT
+
+    @property
+    def relays(self) -> bool:
+        """Return True when a gateway call carries the developer's own provider key."""
+        # @intent relay-header-only-on-gateway-calls
+        # The transport adds the provider-key header only when this
+        # is True. DIRECT puts its key in the vendor's own auth header,
+        # so a DIRECT call, or a gateway call with no key, never relays.
+        return self.uses_gateway and self.provider_api_key is not None
 
 
 @dataclass(frozen=True, slots=True)
@@ -504,6 +595,7 @@ __all__ = [
     "AudioModelConfig",
     "EmbeddingModelConfig",
     "ImageModelConfig",
+    "TextCredentials",
     "TextModelConfig",
     "VideoModelConfig",
 ]

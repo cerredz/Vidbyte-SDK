@@ -61,7 +61,8 @@ def _is_done_response(final_answer: str = "done") -> FakeResponse:
 
 
 def _max_iterations_response() -> FakeResponse:
-    return FakeResponse("I could not complete the task.", {})
+    # A tool call that is not isDone keeps the loop going, so max_iterations=1 ends the trial (a plain reply would finish it).
+    return FakeResponse("I could not complete the task.", {"output": [{"type": "function_call", "name": "keep_working", "arguments": "{}"}]})
 
 
 def _reflection_response() -> FakeResponse:

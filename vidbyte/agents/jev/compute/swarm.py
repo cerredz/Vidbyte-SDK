@@ -46,7 +46,8 @@ class JevSwarmAgent(BaseAgent):
             system_prompt=settings.system_prompt,
             provider=settings.provider,
             model_name=settings.model_name,
-            api_key=settings.api_key,
+            api_keys=settings.api_keys,
+            model_mode=settings.model_mode,
             temperature=settings.temperature,
             timeout_seconds=settings.timeout_seconds,
             # @intent jev-children-never-steal-main-agent-tools

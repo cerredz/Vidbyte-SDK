@@ -279,12 +279,17 @@ class JevRunState(BaseAgent):
             name=f"{settings.name}-run-state",
             system_prompt=Prompts().get(Prompt.JEV_RUN_STATE_SYSTEM_PROMPT),
             agent_loop_settings=AgentLoopSettings(max_iterations=continual.run_state_max_iterations, max_tokens=continual.run_state_max_tokens),
-            api_key=settings.api_key,
+            api_keys=settings.api_keys,
+            model_mode=settings.model_mode,
             provider=settings.provider,
             model_name=settings.model_name,
             temperature=settings.temperature,
             timeout_seconds=settings.timeout_seconds,
             output_schema=payload,
+            # @intent run-state-keeps-its-fixed-prompt
+            # This agent's prompt is fixed, so it opts out of the
+            # presets of the run it serves.
+            system_prompt_presets=(),
         )
         self.checks = continual.checks
         self.decision = runtime_settings.decision

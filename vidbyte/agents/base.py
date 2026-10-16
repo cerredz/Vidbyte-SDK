@@ -46,21 +46,25 @@ from vidbyte.context.manager import ContextManager
 from vidbyte.context.window import ContextWindow, ContextWindowAlgorithm
 from vidbyte.context.primitives import ContextItem
 from vidbyte.context.handoff import Handoff, MinimalHandoff
-from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig, FallbackModel, PauseDuration
+from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig, FallbackModel, PauseDuration, ProviderKeys
+from vidbyte.lib.dataclasses.prompts import SystemPromptPresetSelection
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.sessions import SESSION_SCHEMA_VERSION, RunState
 from vidbyte.lib.dataclasses.speed import RecordStreamInput
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.dataclasses.trace import TraceField, TraceOption, TraceSchema
 from vidbyte.lib.constants import RUNNER_TYPE_TEXT
-from vidbyte.lib.enums import AgentRuntimeType, ModelProvider
+from vidbyte.lib.enums import AgentRuntimeType, ModelProvider, SystemPromptPreset, TextModelMode
 from vidbyte.lib.errors import AgentExecutionError, AllModelsFailedError, ConfigurationError, FailureRaisedError, OutputSchemaViolationError, UsageAccountingError
+from vidbyte.lib.registries.provider_keys import ProviderKeyMatcher
 from vidbyte.lib.runners import Runner
+from vidbyte.lib.system_prompt_presets import SystemPromptPresetScope
 from vidbyte.lib.tracing import NullTracer, TracerBase
 from vidbyte.lib.usage_ledger import UsageLedger, active_usage_ledger, usage_ledger_scope
 from vidbyte.lib.util.credential_keys import CredentialKeyPolicy
 from vidbyte.agents.runtimes.configs import ActorRuntime, LinearRuntime, MctsSearchRuntime
 from vidbyte.middleware import AgentMiddleware
+from vidbyte.prompts.system_prompt_presets import SystemPromptPresetComposer
 from vidbyte.tools.adapters import ensure_tool
 from vidbyte.tools.base import BaseTool, _ToolWrapper, _unwrap_tool
 from vidbyte.tools.catalog import Tools
@@ -98,7 +102,9 @@ class BaseAgent(McpAttachableMixin):
         compaction_trigger_tokens: int | None = None,
         compaction_target_tokens: int | None = None,
         middleware: Sequence[AgentMiddleware] = (),
-        api_key: str | None = None,
+        api_keys: ProviderKeys | Iterable[str | None] | None = None,
+        vidbyte_api_key: str | None = None,
+        model_mode: TextModelMode = TextModelMode.AUTO,
         provider: ModelProvider | str | None = None,
         model_name: str | None = None,
         temperature: float | None = None,
@@ -118,6 +124,7 @@ class BaseAgent(McpAttachableMixin):
         trace_option: TraceOption | None = None,
         fallback: Sequence[str | FallbackModel] | AgentFallbackSettings | None = None,
         outputs: Sequence[OutputConnector] = (),
+        system_prompt_presets: Iterable[SystemPromptPreset | str] | None = None,
     ) -> None:
         if not name:
             raise AgentExecutionError("Agent name cannot be empty.")
@@ -175,17 +182,23 @@ class BaseAgent(McpAttachableMixin):
             )
 
         provider_str = str(provider.value if isinstance(provider, ModelProvider) else provider) if provider is not None else None
+        # Match the developer's keys once, against this agent's model
+        # and every model its fallback chain names, so every child
+        # carries the same matching.
+        from vidbyte.agents.fallback import AgentFallback
+        primary_provider = Runner._normalize_provider_and_model(provider, model_name)[0]
+        matched_keys = ProviderKeyMatcher.match(api_keys, primary=primary_provider, others=AgentFallback.providers_in(fallback), vidbyte_api_key=vidbyte_api_key, field_name="api_keys")
         self.runner_config = AgentRunnerConfig(
-            api_key=api_key,
+            api_keys=matched_keys,
             provider=provider_str,
             model_name=model_name,
             temperature=temperature,
             timeout_seconds=timeout_seconds,
             run_id=run_id,
+            model_mode=model_mode,
         )
         self.name = name
         self._fallback_spec = fallback
-        from vidbyte.agents.fallback import AgentFallback
         self.fallback = AgentFallback.from_spec(fallback, runner_config=self.runner_config, agent_name=name)
         self._runner_cache: dict[str, object] = {}
         # @intent nested-tool-catalogs-are-flattened
@@ -234,6 +247,10 @@ class BaseAgent(McpAttachableMixin):
         self.runtime_config = self.agent_loop_settings.to_runtime_config()
         self.max_tool_rounds = self.agent_loop_settings.max_iterations
         self.system_prompt = system_prompt
+        # @intent unset-presets-inherit-from-the-run
+        # None means this agent takes the presets of the run it is started
+        # in; an explicit tuple, even an empty one, is final.
+        self.system_prompt_presets = SystemPromptPresetSelection.parse(system_prompt_presets, "BaseAgent.system_prompt_presets")
         self.middleware = tuple(middleware)
         self.outputs = OutputDispatcher.connectors(outputs)
         self.description = description or "General purpose agent."
@@ -549,13 +566,23 @@ class BaseAgent(McpAttachableMixin):
             trace_option=self._export_trace_option(),
             output_schema=self._export_output_schema(),
             permission_policy=tuple(sorted(permission.value for permission in self.permission_policy.allowed)),
+            system_prompt_presets=None if self.system_prompt_presets is None else tuple(preset.value for preset in self.system_prompt_presets),
         )
 
     @classmethod
-    def restore(cls, state: RunState, *, tools: Sequence[object] = (), middleware: Sequence[AgentMiddleware] = (), tracer: object | None = None, trace: object | None = None, output_schema: object | None = None, api_key: str | None = None, outputs: Sequence[OutputConnector] = ()) -> BaseAgent:
-        """Rebuild a live agent from a RunState, re-supplying non-serializable parts (the rehydration contract)."""
+    def restore(cls, state: RunState, *, tools: Sequence[object] = (), middleware: Sequence[AgentMiddleware] = (), tracer: object | None = None, trace: object | None = None, output_schema: object | None = None, api_keys: ProviderKeys | Iterable[str | None] | None = None, vidbyte_api_key: str | None = None, outputs: Sequence[OutputConnector] = (), algorithm: ContextWindowAlgorithm | str | None = None) -> BaseAgent:
+        """Rebuild a live agent from a RunState, re-supplying non-serializable parts such as tools, API keys and algorithm (the rehydration contract)."""
         from vidbyte.sessions.serialization import SessionSerializer
         serializer = SessionSerializer()
+        # Match the list against the providers the root matched, so a
+        # fork child binds each key as its root did; only a child on
+        # another provider skips the configured-model check. Older
+        # states match as a root.
+        stored = state.runtime_config.get("key_providers")
+        if isinstance(stored, Mapping):
+            primaries = tuple(stored.get("primary") or ())
+            own_provider = Runner._normalize_provider_and_model(state.provider, state.model_name)[0]
+            api_keys = ProviderKeyMatcher.match(api_keys, primary=primaries, others=tuple(stored.get("others") or ()), vidbyte_api_key=vidbyte_api_key, field_name="api_keys", require_primary_key=bool(primaries) and own_provider == primaries[0])
         agent_metadata = AgentMetadata(**{key: str(state.agent_metadata.get(key, "")) for key in ("name", "description", "use_cases")})
         child = cls(
             name=state.agent_name,
@@ -566,7 +593,9 @@ class BaseAgent(McpAttachableMixin):
             provider=state.provider,
             model_name=state.model_name,
             temperature=state.temperature,
-            api_key=api_key,
+            api_keys=api_keys,
+            vidbyte_api_key=vidbyte_api_key,
+            model_mode=TextModelMode(state.runtime_config.get("model_mode", TextModelMode.AUTO.value)),
             run_id=state.run_id,
             agent_loop_settings=cls._restore_loop_settings(state),
             timeout_seconds=state.runtime_config.get("runner_timeout_seconds"),
@@ -575,7 +604,8 @@ class BaseAgent(McpAttachableMixin):
             description=state.description,
             capabilities=tuple(state.capabilities),
             agent_metadata=agent_metadata,
-            algorithm=None if state.algorithm in ("", "default") else state.algorithm,
+            # @intent restore-takes-the-agent-algorithm: a user-named algorithm is not a preset, so a re-supplied one wins over the stored name.
+            algorithm=algorithm if algorithm is not None else (None if state.algorithm in ("", "default") else state.algorithm),
             # @intent run-state-snapshot-owns-its-data: the restored agent gets its own copy, so editing it cannot rewrite the checkpoint.
             metadata=copy.deepcopy(dict(state.metadata)),
             tracer=tracer,
@@ -583,6 +613,8 @@ class BaseAgent(McpAttachableMixin):
             output_schema=cls._restore_output_schema(state, output_schema),
             permission_policy=cls._restore_permission_policy(state),
             outputs=outputs,
+            # Older checkpoints carry None, which inherits, as those agents did.
+            system_prompt_presets=state.system_prompt_presets,
         )
         child.history = [serializer.message_from_dict(item) for item in state.history]
         cls._record_resume_tool_mismatch(child, state.tool_names)
@@ -597,6 +629,11 @@ class BaseAgent(McpAttachableMixin):
             "compaction_trigger_tokens": self.runtime_config.compaction_trigger_tokens,
             "compaction_target_tokens": self.runtime_config.compaction_target_tokens,
             "runner_timeout_seconds": self.runner_config.timeout_seconds,
+            "model_mode": self.runner_config.model_mode.value,
+            # @intent resume-matches-like-the-root
+            # Names only, never a key: a restore matches the list it
+            # is given against these names again.
+            "key_providers": {"primary": [p.value for p in self.runner_config.api_keys.matched_primary], "others": [p.value for p in self.runner_config.api_keys.matched_others]},
         }
         if self.fallback is not None:
             # @intent resume-keeps-fallback-chain
@@ -825,6 +862,12 @@ class BaseAgent(McpAttachableMixin):
             # @intent queued-replies-are-per-request
             # Like last_reply, the drained follow-up replies describe only this request, so a request that drains nothing leaves none.
             self.last_queued_replies = []
+        # @intent run-presets-reach-every-agent-the-run-starts
+        # Keep this run's system-prompt presets (its own, or the ones
+        # it inherited) active for the whole run, so every specialist,
+        # clone, helper, worker, or fork the run starts gets them
+        # without each spawn path copying them by hand.
+        preset_token = SystemPromptPresetScope.enter(SystemPromptPresetScope.resolve(self.system_prompt_presets))
         try:
             parent = active_usage_ledger()
             if parent is self._usage_tracker:
@@ -841,8 +884,14 @@ class BaseAgent(McpAttachableMixin):
                 finally:
                     self._merge_usage_into(parent)
         finally:
+            SystemPromptPresetScope.exit(preset_token)
             if token is not None:
                 self._run_queue_var.reset(token)
+
+    def _applied_preset_metadata(self) -> dict[str, list[str]]:
+        # Returns the reply-metadata entry naming this run's presets, or nothing when none applied.
+        applied = SystemPromptPresetScope.resolve(self.system_prompt_presets)
+        return {"system_prompt_presets": [preset.value for preset in applied]} if applied else {}
 
     def _merge_usage_into(self, parent: UsageLedger) -> None:
         # Merges this run's usage into the parent ledger, flagging the parent corrupted if the merge cannot happen.
@@ -940,6 +989,10 @@ class BaseAgent(McpAttachableMixin):
             "model_name": self.runner_config.model_name,
             **dict(input_metadata),
             **dict(result.metadata),
+            # Name the presets this run's prompt carried, so a caller can
+            # see that a child inherited them; a run without presets adds
+            # no key.
+            **self._applied_preset_metadata(),
         }
         if result.structured is not None:
             metadata["structured"] = result.structured
@@ -1385,7 +1438,11 @@ class BaseAgent(McpAttachableMixin):
 
         return runtime_cls(
             agent_name=self.name,
-            system_prompt=self.system_prompt,
+            # @intent presets-compose-in-one-place
+            # Every runtime type is built here, so composing the presets
+            # here gives all of them the same prompt; self.system_prompt
+            # stays the developer's own text for forks and checkpoints.
+            system_prompt=SystemPromptPresetComposer.compose(self.system_prompt, SystemPromptPresetScope.resolve(self.system_prompt_presets)),
             tools=self.tools,
             permission_policy=self.permission_policy,
             config=self.runtime_config,
@@ -1601,7 +1658,8 @@ class BaseAgent(McpAttachableMixin):
         utility = Runner.from_model(
             provider=self.runner_config.provider,
             model_name=self.runner_config.model_name,
-            api_key=self.runner_config.api_key,
+            api_keys=self.runner_config.api_keys,
+            model_mode=self.runner_config.model_mode,
             temperature=self.runner_config.temperature,
             options=options,
         )

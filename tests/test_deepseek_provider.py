@@ -21,7 +21,7 @@ import unittest
 from collections.abc import Mapping
 
 from tests.agent_test_support import build_test_agent
-from vidbyte.lib.config import ModelProvider, TextModelConfig
+from vidbyte.lib.config import ModelProvider, TextModelConfig, TextModelMode
 from vidbyte.lib.errors import ProviderResponseError
 from vidbyte.lib.http import HttpResponse
 from vidbyte.lib.runners import TextModelRunner
@@ -46,7 +46,7 @@ class DeepSeekToolCallTextTests(unittest.TestCase):
         """A tool call whose arguments are "" yields "" text instead of a ProviderResponseError."""
         message = {"role": "assistant", "content": None, "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "ping", "arguments": ""}}]}
         transport = _ScriptedTransport({"choices": [{"message": message}]})
-        provider = DeepSeekProvider(model="deepseek-v4-pro", api_key="test-key")
+        provider = DeepSeekProvider(model="deepseek-v4-pro", api_keys=["test-key"], mode=TextModelMode.DIRECT)
 
         response = asyncio.run(provider.run_text(prompt="ping", system=None, metadata=None, transport=transport))
 
@@ -58,7 +58,7 @@ class DeepSeekToolCallTextTests(unittest.TestCase):
         message = {"role": "assistant", "content": "The refund window is "}
         interrupted = _ScriptedTransport({"choices": [{"message": message, "finish_reason": "insufficient_system_resource"}], "usage": usage})
         truncated = _ScriptedTransport({"choices": [{"message": message, "finish_reason": "length"}], "usage": usage})
-        provider = DeepSeekProvider(model="deepseek-v4-pro", api_key="test-key")
+        provider = DeepSeekProvider(model="deepseek-v4-pro", api_keys=["test-key"], mode=TextModelMode.DIRECT)
 
         with self.assertRaises(ProviderResponseError) as caught:
             asyncio.run(provider.run_text(prompt="q", system=None, metadata=None, transport=interrupted))
@@ -73,12 +73,12 @@ class DeepSeekFenceTests(unittest.TestCase):
 
     def _text(self, content: str, provider_type: type = DeepSeekProvider) -> str:
         transport = _ScriptedTransport({"choices": [{"message": {"role": "assistant", "content": content}}]})
-        provider = provider_type(model="test-model", api_key="test-key")
+        provider = provider_type(model="test-model", api_keys=["test-key"], mode=TextModelMode.DIRECT)
         return asyncio.run(provider.run_text(prompt="q", system=None, metadata=None, transport=transport)).text
 
     def _agent(self, content: str, **options: object) -> object:
         transport = _ScriptedTransport({"choices": [{"message": {"role": "assistant", "content": content}}]})
-        runner = TextModelRunner(TextModelConfig(provider=ModelProvider.DEEPSEEK, model="deepseek-chat", api_key="test-key"), transport=transport)
+        runner = TextModelRunner(TextModelConfig(provider=ModelProvider.DEEPSEEK, model="deepseek-chat", api_keys=["test-key"], mode=TextModelMode.DIRECT), transport=transport)
         return build_test_agent(name="worker", system_prompt="Answer.", runner=runner, provider="deepseek", model_name="deepseek-chat", **options)
 
     def test_code_replies_come_back_byte_identical(self) -> None:

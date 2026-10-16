@@ -1,9 +1,13 @@
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Any
 
 from vidbyte.lib.agents import ModalityDetector
 from vidbyte.lib.enums import ModelModality, ModelProvider
+
+if TYPE_CHECKING:
+    from vidbyte.lib.dataclasses.agents import ProviderKeys
 
 
 def coerce_modality(value: ModelModality | str | None) -> ModelModality:
@@ -27,7 +31,7 @@ def create_runner_for_modality(
     provider: ModelProvider | str,
     model: str,
     transport: object | None = None,
-    api_key: str | None = None,
+    api_keys: ProviderKeys | Iterable[str | None] | None = None,
     temperature: float | None = None,
     **options: Any,
 ) -> object:
@@ -37,7 +41,7 @@ def create_runner_for_modality(
         provider=provider,
         model=model,
         transport=transport,
-        api_key=api_key,
+        api_keys=api_keys,
         temperature=temperature,
         **options,
     )

@@ -33,7 +33,8 @@ COMMON MODIFICATION PATTERNS:
 
 WHAT NOT TO DO IN THIS FILE:
     Do not assert that an unclassified code is retryable, and do not assert a
-    specific FallbackModel api_key reaches any record — it must not.
+    specific provider key reaches any record — it must not. Fallback models
+    take their keys from the agent's api_keys, not from a key of their own.
 
 KNOWN EDGE CASES:
     A recovered turn still records its failed attempt; a cancelled turn is

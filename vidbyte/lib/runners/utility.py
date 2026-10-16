@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import fields
 from typing import Any, Mapping
 
@@ -16,17 +17,32 @@ from vidbyte.lib.constants import (
     RUNNER_TYPE_TEXT,
     RUNNER_TYPE_VIDEO,
 )
-from vidbyte.lib.enums import ModelProvider
+from vidbyte.lib.dataclasses.agents import ProviderKeys
+from vidbyte.lib.enums import ModelProvider, TextModelMode
 from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.registries.provider_keys import ProviderKeyMatcher
 
 
 class Runner:
     """Resolves model/provider identifiers into executable SDK model runners."""
 
-    def __init__(self, *, provider: ModelProvider | str | None, model_name: str | None, api_key: str | None = None, temperature: float | None = None, options: Mapping[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        provider: ModelProvider | str | None,
+        model_name: str | None,
+        api_keys: ProviderKeys | Iterable[str | None] | None = None,
+        vidbyte_api_key: str | None = None,
+        model_mode: TextModelMode = TextModelMode.AUTO,
+        temperature: float | None = None,
+        options: Mapping[str, Any] | None = None,
+    ) -> None:
         # Store primitive model/provider configuration for runner inference and construction.
         self.provider, self.model_name, self._model_lookup = self._normalize_provider_and_model(provider, model_name)
-        self.api_key = api_key
+        # An agent passes its matched record, which goes through as it
+        # is; a raw list is matched against this runner's provider.
+        self.api_keys = ProviderKeyMatcher.match(api_keys, primary=self.provider, vidbyte_api_key=vidbyte_api_key, field_name="api_keys")
+        self.model_mode = model_mode
         self.temperature = temperature
         self.options = dict(options or {})
 
@@ -103,8 +119,16 @@ class Runner:
         config_type = self._config_type_for(runner_type)
         allowed = {field.name for field in fields(config_type)}
         options = dict(self.options)
-        if self.api_key is not None:
-            options["api_key"] = self.api_key
+        # @intent non-text-configs-take-their-providers-key
+        # A text config takes the whole matched record and the mode, so
+        # it resolves its own credentials. Image, video, audio, and
+        # embedding configs keep api_key and get only their provider's
+        # matched key, or none, so their variable resolves as before.
+        if runner_type == RUNNER_TYPE_TEXT:
+            options["api_keys"] = self.api_keys
+            options["mode"] = self.model_mode
+        elif (provider_key := self.api_keys.key_for(self.provider or "")) is not None:
+            options["api_key"] = provider_key
         if self.temperature is not None and runner_type == RUNNER_TYPE_TEXT:
             options["temperature"] = self.temperature
         return {key: value for key, value in options.items() if key in allowed}

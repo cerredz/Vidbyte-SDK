@@ -181,6 +181,7 @@ class ReflexionRuntimeAlgorithm:
             strategy_name=result.strategy_name,
             calls=result.calls,
             metadata=metadata,
+            structured=result.structured,
         )
 
 
