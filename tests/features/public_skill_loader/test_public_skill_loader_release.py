@@ -1,13 +1,13 @@
 """FILE: tests/features/public_skill_loader/test_public_skill_loader_release.py
 
-PURPOSE: Pin the release identity the public door ships under: each of the eight version literals (pyproject, vidbyte.__version__, the CLI fallback, the MCP server default, the MCP client's clientInfo, the README install line, llms.txt, and the bug template placeholder) equals pyproject.toml's version, observed through the code that uses it where one exists, and that version is never below 0.3.1, the first release that carries the loader.
-ROLE IN CODEBASE: Covers spec AC-11, INV-16, FR-8, D-13 and EC-29 for pyproject.toml, vidbyte/__init__.py, vidbyte/cli/__init__.py, vidbyte/mcp_server/server/core.py, vidbyte/tools/mcp/client.py, README.md, llms.txt and .github/ISSUE_TEMPLATE/bug_report.yml. The ninth place, the contract's "version", is C016's: it must equal pyproject's version, which this file pins.
+PURPOSE: Pin the release identity the public door ships under: each of the eight version literals (pyproject, vidbyte.__version__, the CLI fallback, the MCP server default, the MCP client's clientInfo, the README install line, llms.txt, and the bug template placeholder) equals pyproject.toml's version, observed through the code that uses it where one exists, and that version is never below 0.4.0, the first release that carries the loader.
+ROLE IN CODEBASE: Covers spec AC-11, INV-16, FR-8, D-15 and EC-29 for pyproject.toml, vidbyte/__init__.py, vidbyte/cli/__init__.py, vidbyte/mcp_server/server/core.py, vidbyte/tools/mcp/client.py, README.md, llms.txt and .github/ISSUE_TEMPLATE/bug_report.yml. The ninth place, the contract's "version", is C016's: it must equal pyproject's version, which this file pins.
 ARCHITECTURE NOTE: Values are read from this checkout's own files and modules, never from importlib.metadata, VersionResolver unpatched, or vidbyte --version, which read the shared editable install's stale metadata locally (spec section 13). The CLI fallback is reached by making the metadata lookup fail; the MCP client's version is captured from the initialize request it sends to a recording transport.
 FUNCTION INVENTORY: test_every_version_bearing_place_reads_the_release_version.
 COMMON MODIFICATION PATTERNS: A routine version bump changes nothing here, because every place is compared with pyproject.toml's version and FIRST_LOADER_RELEASE is only a floor; a new version-bearing place adds a reader and a PLACES row.
 WHAT NOT TO DO IN THIS FILE: 1. Do not grep for the old literal instead; a merge from main can change what it finds (spec section 12.4). 2. Do not read the installed distribution's metadata.
-KNOWN EDGE CASES: YAML reads the placeholder 0.3.1 as text, since it has two dots. The README has other install lines without a pinned version; only the pinned one is a version place.
-RELATED DOCS: docs/spec/public-skill-loader/spec.md (sections 6.1 INV-16, 8.1 D-13, 9.2 row 7, 12.3 rows 3 to 10, 13 Version)
+KNOWN EDGE CASES: YAML reads the placeholder 0.4.0 as text, since it has two dots. The README has other install lines without a pinned version; only the pinned one is a version place.
+RELATED DOCS: docs/spec/public-skill-loader/spec.md (sections 6.1 INV-16, 8.1 D-15, 9.2 row 7, 12.3 rows 3 to 10, 13 Version)
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/public_skill_loader/test_public_skill_loader_release.py
 """
 
@@ -31,9 +31,9 @@ from vidbyte.cli import VersionResolver
 from vidbyte.mcp_server.server.core import McpStudioServer
 from vidbyte.tools.mcp.client import McpClient
 
-# EC-29, D-13: 0.3.1 is the first release that carries the public
+# EC-29, D-15: 0.4.0 is the first release that carries the public
 # loader, so a later bump may raise the version but never go below it.
-FIRST_LOADER_RELEASE = (0, 3, 1)
+FIRST_LOADER_RELEASE = (0, 4, 0)
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
