@@ -44,6 +44,9 @@ started: 2026-10-15 18:04
 - 2026-10-15 19:50 — Interruption 1: the S1 author was stopped by an API rate limit (HTTP 429, session limit) mid-grounding, nothing on disk (verified 20:02: HEAD 1362785a, clean). The coordinator asked to continue; I resumed the SAME author via SendMessage at 20:02 (its notice said its work was saved; coordinator rule: resume rather than relaunch). Gave it the baseline facts above.
 - 2026-10-15 ~21:55 — Interruption 2: the S1 author was stopped by the same limit while assembling. Verified 2026-10-16 01:39: HEAD 1362785a, clean; parts `p0-verbatim.md`, `p1a.md`, `p1b.md` (§1–§5), `p2a.md`/`p2b.md`/`p2c.md` (§6–§7), `p3a.md`/`p3b.md` (§8–§10) in `C:/Users/422mi/AppData/Local/Temp/claude/C--Users-422mi-vidbyte-repos/d2d5110d-c484-4b56-acef-651ebe9a78a5/scratchpad/spec-parts/`. Coordinator (2026-10-16): resume the same author, do not relaunch. Resumed via SendMessage to finish §11–§17, assemble, commit, report.
 
+- 2026-10-16 02:10 — S1 review round 1 launched (fresh reviewer; briefed to verify INV-15 compliance, pinned surface, D-2 lib behavior, D-6 vs ledger 5, size, prompt arithmetic, worktree side effects, "neither verifier able to change the workspace", acceptance coverage, §11 commands).
+- 2026-10-16 ~02:16 — Interruption 3: the S1 reviewer was stopped by an API rate limit (HTTP 429, session limit, reset 6:10am) before writing its report. Verified 2026-10-16 16:48: HEAD 364cac38, clean, no reports/S1-spec-review.md; it left only a scratch probe folder `scratchpad/s1probe` (outside the worktree). Resumed the SAME reviewer via SendMessage (coordinator rule: resume, never relaunch while its context exists).
+
 ## User replies (verbatim)
 - none (coordinator relay messages on 2026-10-15 20:0x and 2026-10-16 01:3x concerned rate-limit resumption only; no product decisions)
 
