@@ -250,9 +250,13 @@ class GrokCommandRun:
         elif command is GrokCommand.CODE_REVIEW:
             document = await GrokHelperRun.export(home, request, config, errors, thread_id=thread_id)
             NativeCommandEvidence.require_text(document.text, fragment=native_threads.GROK_CODE_REVIEW_FRAGMENT, errors=errors, request=request, thread_id=thread_id)
-        elif command is not None:
+        else:
+            # A record without an agent names a command; without one no
+            # tool can count, so the check fails closed.
             calls = GrokStreamWire.tool_calls(outcome.stdout)
-            NativeCommandEvidence.require(calls, tools=native_threads.GROK_EVIDENCE_TOOLS[command], fragment=native_threads.GROK_EVIDENCE_FRAGMENTS.get(command), errors=errors, request=request, thread_id=thread_id)
+            tools = () if command is None else native_threads.GROK_EVIDENCE_TOOLS[command]
+            fragment = None if command is None else native_threads.GROK_EVIDENCE_FRAGMENTS.get(command)
+            NativeCommandEvidence.require(calls, tools=tools, fragment=fragment, errors=errors, request=request, thread_id=thread_id)
         return result
 
     @staticmethod
