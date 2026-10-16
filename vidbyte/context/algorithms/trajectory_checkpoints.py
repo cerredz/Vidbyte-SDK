@@ -19,6 +19,7 @@ Similar Files:
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -33,6 +34,7 @@ from vidbyte.prompts.catalog import Prompts
 _MAX_CHECKPOINT_CHARS_LIMIT = 100_000
 _MAX_FIELD_CHARS_LIMIT = 25_000
 _STATE_KEY = "_trajectory_checkpoints_state"
+_SUMMARIZER_INPUT_SLOT = re.compile(r"\{(main_system_prompt|conversation_history)\}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,10 +114,12 @@ class TrajectoryCheckpointAlgorithm(InnerContextWindowAlgorithm):
         try:
             system_prompt = Prompts().get(Prompt.TRAJECTORY_CHECKPOINTS_AGENTIC_SUMMARIZER)
             history_str = self._format_history(ctx.messages)
-            user_message = f"Main Agent System Prompt:\n{ctx.system_prompt or ''}\n\nMain Agent Conversation History:\n{history_str}"
             if not ctx.runner or not ctx.invoke_runner or not ctx.runner_output_text:
                 raise ValueError("Context lacks runner or invoke_runner callable.")
-            combined_prompt = f"{system_prompt}\n\n{user_message}"
+            # @intent summarizer-input-fills-its-template
+            # The summarizer prompt holds its input slots before the output description; fill them in one pass, since its JSON example has braces.
+            values = {"main_system_prompt": ctx.system_prompt or "", "conversation_history": history_str}
+            combined_prompt = _SUMMARIZER_INPUT_SLOT.sub(lambda match: values[match.group(1)], system_prompt)
             response = await ctx.invoke_runner(ctx.runner, combined_prompt, **dict(ctx.options or {}))
             response_text = ctx.runner_output_text(response)
             parsed = self._parse_json_response(response_text)

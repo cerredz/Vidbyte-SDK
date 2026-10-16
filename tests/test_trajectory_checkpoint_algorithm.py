@@ -262,6 +262,23 @@ class TrajectoryCheckpointAlgorithmTests(unittest.IsolatedAsyncioTestCase):
         await runtime.arun("task", handle=runner_handle(runner), context=base_context())
         self.assertIn("visible output", runner.calls[1]["prompt"])
 
+    async def test_runtime_checkpoint_fills_summarizer_input_slots_before_output_description(self) -> None:
+        # Verify the agent system prompt and history fill the summarizer template's slots once, ahead of its output contract.
+        @tool
+        def lookup() -> str:
+            return "visible output"
+        runner = FakeRunner([tool_response(), FakeResponse(_JSON_OUTPUT), is_done_response()])
+        algorithm = TrajectoryCheckpointAlgorithm(interval=1, include_tool_outputs=True)
+        runtime = AgentRuntime(agent_name="worker", system_prompt="Catalog every river gauge.", tools=Tools([lookup]), permission_policy=PermissionPolicy(), algorithm=ContextWindowAlgorithm(name="trajectory_checkpoints", trajectory_checkpoints=algorithm))
+        await runtime.arun("task", handle=runner_handle(runner), context=base_context())
+        prompt = runner.calls[1]["prompt"]
+        self.assertNotIn("{main_system_prompt}", prompt)
+        self.assertNotIn("{conversation_history}", prompt)
+        output_start = prompt.index("# Output Description")
+        for marker in ("Catalog every river gauge.", "visible output"):
+            self.assertEqual(prompt.count(marker), 1, marker)
+            self.assertLess(prompt.index(marker), output_start, marker)
+
     async def test_runtime_slots_match_template(self) -> None:
         # Verify recorded slot templates validate successfully.
         recorder = ContextWindowRecorder()
