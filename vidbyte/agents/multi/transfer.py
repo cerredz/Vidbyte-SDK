@@ -23,7 +23,7 @@ from typing import Any
 
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.types import AgentInput, AgentMessage
-from vidbyte.lib.dataclasses.agents import AgentForkSettings
+from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentStopReason
 from vidbyte.lib.dataclasses.multi_agent import (
     AgentDispatch,
     AgentReport,
@@ -182,6 +182,12 @@ class AgentTransfer:
 
     @classmethod
     def default_report_parser(cls, reply: AgentMessage, dispatch: AgentDispatch, ledger: TaskLedgerSnapshot) -> AgentReport:
+        # @intent middleware-abort-ends-the-run
+        # A worker stopped by its middleware left the SDK's stop text, not output, so the task is blocked, never completed or retried.
+        if reply.metadata.get("stop_reason") == AgentStopReason.MIDDLEWARE_ABORT.value:
+            reason = str(reply.metadata.get("middleware_abort_reason") or "middleware_abort")
+            blocker = TaskBlocker(code="middleware_abort", message=f"Worker run stopped by middleware: {reason}", retryable=False)
+            return AgentReport(task_id=dispatch.task_id, status=TaskStatus.BLOCKED, blockers=(blocker,))
         # Non-blank text is usable output, but it is never promoted to verified evidence.
         content = reply.content.strip()
         if content:
