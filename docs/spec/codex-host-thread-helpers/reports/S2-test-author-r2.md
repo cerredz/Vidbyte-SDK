@@ -83,3 +83,39 @@ It runs the whole codex set, deselects the one inherited failure, and loads each
 
 1. **`codex_host_fakes.py` is 1071 lines.** It passed 1000 lines in S2 r1 (899 → 1059), and r2 adds 12. AGENTS.md principle 3 asks for files well below 1,000 lines, and no lint rule gates test files. A follow-up could move the thread-helper handlers (thread/list paging, goal/get, compact, delete, turns/list, skills/list) into a mixin module beside the fake, plus its README File Index bullet. That is a refactor of its own, so this round leaves it.
 2. **R-8's protected case does not happen today.** The verifier showed that the current code cannot produce it, because a skill run always reads the first turn of a brand-new thread. The tests guard against a future Codex that renames, re-cases or reorders the recorded input, and against a regression in the two clauses.
+
+## r3 split
+
+The orchestrator accepted open item 1 and asked for the fake to be split to 900 lines or fewer, with no change in behaviour. This is done in commit `72e34b81`, and open item 1 is now closed.
+
+**What moved.** The code moved to `tests/features/codex_host/codex_host_helper_fakes.py` as `HelperHandlers`, a mixin that `FakeAppServer` inherits. It holds:
+
+- the thread-helper switches;
+- paged `thread/list` with `_listed_threads` and `_offset`;
+- `thread/goal/get`, `thread/compact/start`, `thread/delete`, `thread/turns/list` with `_listed_turn`, and `skills/list`;
+- the turn/start input recording, `source_kind`, `goal_record` and `skill_entry`.
+
+`thread/goal/set` and `thread/goal/clear` were in the fake before this run, but they moved too. Moving only this run's additions left the file at 921 lines. The rest stays with its classes: the six `FakeThread` fields, `_status_wire`, `FakeTurn.hidden_reads`, and the resume step that clears `notLoaded`. Moving the three goal methods together brought the file to 894.
+
+**What stayed the same.**
+
+- No test file changed.
+- `codex_host_fakes` re-exports `goal_record` and `skill_entry`.
+- `__init__` sets the switches at the same point as before.
+- The method table keeps its key order.
+- The new module reaches `codex_host_fakes` only when it is used, through `_fakes()`. Because of that, importing either module first works without a circular import.
+
+**No pin, so not BLOCKED.** No packaging, surface or contract test lists the test tree's files. Outside `docs/`, `git grep codex_host_fakes` finds only these:
+
+- `FEATURE.md` and `README.md`;
+- the lazy import in `codex_host_support.py`;
+- the tests that import `FakeRpcError`.
+
+| Check | Result |
+|---|---|
+| `wc -l` | `894 codex_host_fakes.py` (was 1071), `237 codex_host_helper_fakes.py` |
+| Equivalence check, separate from the suite (`s2r3_equivalence.py`) | **Syntax trees:** each moved function, the switches block, the table and the recording block was compared between HEAD and the split; all 20 comparisons were the same. **Side-by-side run:** the HEAD fake and the split fake were both driven through 74 observations, and every one was equal (it covers thread/list in its plain, paged and endless modes, filters and bad cursors; the turn listing; the recording variants; goal set, get and clear; compact; delete; skills; attribute order; defaults; the table; counters; and the final thread wires). **Planted change:** `hidden_reads -= 2` was reported in both parts, so the check catches a real change. |
+| Pytest gate | `1 failed, 678 passed, 2 skipped in 51.64s`; the one failure is the inherited one |
+| Mutation harness, 10 probes | Identical to r2. V00 gave `869 passed`. Each other probe gave `1 failed, 868 passed`, and the same test as in r2 caught it (log: `s2r3_probes.log`) |
+| CI view with openai-codex hidden | `57 passed, 140 skipped` |
+| Lint, after `git add` | `SDK-LINT: PASS` |
