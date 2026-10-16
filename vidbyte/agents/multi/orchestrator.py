@@ -25,7 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from vidbyte.agents.base import BaseAgent
 from vidbyte.context.multi_agent import MultiAgentContext
-from vidbyte.lib.dataclasses.agents import AgentForkSettings
+from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentStopReason
 from vidbyte.lib.dataclasses.multi_agent import FinalizationContext, FinalizationRenderer, ManagerAgentCloser, ManagerAgentFactory, OrchestrationContext, OrchestrationRenderer, OrchestratorDecision, OrchestratorPlan, TaskSpec
 from vidbyte.lib.enums.multi_agent import OrchestratorAction
 from vidbyte.lib.enums.prompts import Prompt
@@ -163,6 +163,11 @@ class MagenticOneOrchestrator:
         manager = self._require_run_manager()
         prompt = f"{self._final_prompt}\n\n{self._finalization_renderer(context)}"
         reply = await manager.generate_reply(prompt, trace_metadata={"multi_agent_phase": "finalize"})
+        # @intent middleware-abort-ends-the-run
+        # A synthesis the manager's middleware stopped left the SDK's
+        # stop text, not an answer, so it is never returned as one.
+        if reply.metadata.get("stop_reason") == AgentStopReason.MIDDLEWARE_ABORT.value:
+            raise MultiAgentExecutionError("Multi-agent manager's final answer was stopped by middleware.", details={"phase": "finalize"})
         content = reply.content.strip()
         if not content:
             raise MultiAgentExecutionError("Multi-agent manager returned a blank final answer.", details={"phase": "finalize"})
@@ -178,7 +183,7 @@ class MagenticOneOrchestrator:
             await self._close_manager(manager, "run")
 
     async def _structured_phase(self, phase: str, prompt: str, schema: type[BaseModel], retries: int, round_number: int) -> BaseModel:
-        # Retries only manager invocation/parse failures and closes every structured phase fork.
+        # Retries only manager invocation/parse failures, never a middleware stop, and closes every structured phase fork.
         last_error: Exception | None = None
         for attempt in range(retries + 1):
             phase_agent = self._create_manager(phase, AgentForkSettings(include_history=False, output_schema=schema))
@@ -191,6 +196,11 @@ class MagenticOneOrchestrator:
             except ConfigurationError:
                 raise
             except Exception as exc:
+                # @intent middleware-abort-ends-the-run
+                # A phase the manager's middleware stopped made no parse
+                # mistake, so it ends here instead of paying for a retry.
+                if getattr(exc, "stop_reason", None) == AgentStopReason.MIDDLEWARE_ABORT.value:
+                    raise MultiAgentExecutionError("Multi-agent manager phase was stopped by middleware.", details={"phase": phase, "round": round_number, "attempts": attempt + 1}) from exc
                 last_error = exc
             finally:
                 await self._close_manager(phase_agent, phase)
