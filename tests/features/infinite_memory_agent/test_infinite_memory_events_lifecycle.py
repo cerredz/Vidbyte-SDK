@@ -1,9 +1,9 @@
 """FILE: tests/features/infinite_memory_agent/test_infinite_memory_events_lifecycle.py
 
-PURPOSE: Proves how an InfiniteMemory run's event stream opens and ends when the run does not finish normally: a cancelled run ends with run_stopped(cancelled) and its resume opens with run_resumed, a runner error ends with run_stopped(failed), a KeyboardInterrupt ends with run_stopped(cancelled), each run stays resumable, and the handoff of a cancelled run says it is unfinished and how to resume it.
-ROLE IN CODEBASE: Lifecycle layer of tests/features/infinite_memory_agent/ for docs/spec/infinite-memory-events/spec.md (AC-5, AC-6, AC-17, AC-27; INV-1..INV-3, INV-6, INV-27; D-9, D-14). Exercises the try/except BaseException that vidbyte/agents/infinite/runtime.py wraps around the run, InfiniteEvents.run_stopped/run_resumed in vidbyte/agents/infinite/events.py, and InfiniteMemoryAgent.run_handoff for an unfinished journal.
+PURPOSE: Proves how an InfiniteMemory run's event stream opens and ends when the run does not finish normally: a cancelled run ends with run_stopped(cancelled) and its resume opens with run_resumed, a runner error ends with run_stopped(failed), a KeyboardInterrupt ends with run_stopped(cancelled), each run stays resumable, the handoff of a cancelled run says it is unfinished and how to resume it, and a resumed run counts its pairs at every depth.
+ROLE IN CODEBASE: Lifecycle layer of tests/features/infinite_memory_agent/ for docs/spec/infinite-memory-events/spec.md (AC-5, AC-6, AC-17, AC-27; INV-1..INV-3, INV-6, INV-27; D-9, D-14; the section 9.1 run_resumed and run_finished counts). Exercises the try/except BaseException that vidbyte/agents/infinite/runtime.py wraps around the run, InfiniteEvents.run_stopped/run_resumed in vidbyte/agents/infinite/events.py, and InfiniteMemoryAgent.run_handoff for an unfinished journal.
 ARCHITECTURE NOTE: Cancellation copies the pack's existing pattern (test_infinite_memory_resume.py): the generator's runner sets a Signal and then waits on one nobody sets, the test cancels the asyncio task running arun, and nothing sleeps. The KeyboardInterrupt case runs arun inside asyncio.run in a plain test, so even an interrupt that crossed a task boundary would surface as the exception pytest.raises expects instead of aborting the pytest session.
-FUNCTION INVENTORY: test_a_cancelled_run_ends_with_run_stopped_and_its_resume_opens_with_run_resumed (AC-5, INV-2, INV-6, INV-27); test_the_handoff_of_a_cancelled_run_says_it_is_unfinished_and_how_to_resume (AC-17, INV-22, INV-24, D-14); test_a_root_runner_error_ends_the_stream_with_run_stopped_failed_and_the_run_stays_resumable (AC-6, INV-3, INV-6); test_a_keyboard_interrupt_in_arun_ends_the_stream_with_run_stopped_cancelled (AC-27, INV-3). _cancel_while_alpha_waits runs the shared cancellation.
+FUNCTION INVENTORY: test_a_cancelled_run_ends_with_run_stopped_and_its_resume_opens_with_run_resumed (AC-5, INV-2, INV-6, INV-27); test_the_handoff_of_a_cancelled_run_says_it_is_unfinished_and_how_to_resume (AC-17, INV-22, INV-24, D-14); test_a_resumed_run_counts_finished_and_interrupted_pairs_at_every_depth (section 9.1, INV-2); test_a_root_runner_error_ends_the_stream_with_run_stopped_failed_and_the_run_stays_resumable (AC-6, INV-3, INV-6); test_a_keyboard_interrupt_in_arun_ends_the_stream_with_run_stopped_cancelled (AC-27, INV-3). _cancel_while_alpha_waits runs the shared cancellation.
 COMMON MODIFICATION PATTERNS: A new way for a run to stop gets one test that collects events with seen.append, triggers the stop, and checks that the last event is run_stopped with its reason and error_type and that the journal has no run_finished.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level. 2. Do not wait for the generator with a sleep; await the Signal it sets. 3. Do not raise KeyboardInterrupt inside a pytest-asyncio test body; run it through asyncio.run so a regression cannot end the pytest session.
 KNOWN EDGE CASES: BaseAgent.generate_reply wraps an Exception from the runtime in AgentExecutionError, so AC-6 compares the caller's exception with a run without events instead of naming its type, while run_stopped names the RuntimeError the runtime itself saw. str(CancelledError()) is empty, so the cancelled run_stopped has an empty message.
@@ -25,22 +25,28 @@ from tests.features.infinite_memory_agent.infinite_events_fixtures import (
 )
 from tests.features.infinite_memory_agent.infinite_memory_fixtures import (
     ROOT,
+    RUN_A,
     TASK,
     ModelCall,
     ScriptedTree,
     Signal,
     build_agent,
+    card_record,
     events,
     fail,
     generator,
     journal_paths,
     journal_records,
     launch,
+    pair_finished_record,
     pair_key,
+    pair_started_record,
     reply,
+    run_started_record,
     simple_pair,
     task,
     workspace_root,
+    write_journal,
 )
 from vidbyte.lib.errors import VidbyteSdkError
 
@@ -124,6 +130,33 @@ async def test_the_handoff_of_a_cancelled_run_says_it_is_unfinished_and_how_to_r
     assert sections["How to continue"] == InfiniteHandoff.RESUME.format(run_id=journal.stem)
     assert f'agent.resume("{journal.stem}")' in sections["How to continue"]
     assert newest.metadata["run_id"] == journal.stem and newest.sections == sections
+
+
+def test_a_resumed_run_counts_finished_and_interrupted_pairs_at_every_depth(tmp_path: Path) -> None:
+    """Section 9.1, INV-2: resuming a hand-written journal in which root/a started, its nested pair root/a/gen/b finished, and root/a/gen/c started gives run_resumed finished=1 and interrupted naming both unfinished keys at their depths, and run_finished pairs=1 and agents=6, because these counts cover every depth, not only the root's own pairs."""
+    seen: list[Any] = []
+    agent = build_agent(tmp_path, on_event=seen.append)
+    nested_done, nested_cut = "root/a/gen/b", "root/a/gen/c"
+    write_journal(
+        workspace_root(tmp_path),
+        RUN_A,
+        [
+            run_started_record(RUN_A, TASK),
+            pair_started_record("root/a"),
+            pair_started_record(nested_done),
+            pair_finished_record(card_record("b", key=nested_done, summary="B-SUMMARY")),
+            pair_started_record(nested_cut),
+        ],
+    )
+    tree = ScriptedTree({ROOT: [reply("Finished after the resume.")]})
+    with tree.install():
+        agent.resume()
+    tree.assert_complete()
+    assert kinds(seen) == ["run_resumed", "run_finished"]
+    resumed, finished = seen
+    assert (resumed.run_id, resumed.details.finished, resumed.details.interrupted, resumed.details.interrupted_omitted) == (RUN_A, 1, ("root/a", nested_cut), 0)
+    assert (finished.run_id, finished.details.pairs, finished.details.agents) == (RUN_A, 1, 6)
+    assert_portable(seen)
 
 
 # ---------------------------------------------------------------- AC-6, AC-27
