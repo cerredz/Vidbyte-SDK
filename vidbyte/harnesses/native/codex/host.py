@@ -3,7 +3,7 @@
 PURPOSE: CodexHost, one Codex app-server process that many threads and turns share for one async with block: it starts threads and turns, goal runs, forks, reviews and subagent launches, returns a handle as soon as Codex accepts a turn, and answers waits, results, steering, interrupts and per-thread usage from the turns it registered. It also lists, searches, reads, compacts and deletes stored threads, and gets and runs goals and skills.
 ROLE IN CODEBASE: The main class of vidbyte/harnesses/native/codex/; the module functions in oneshot.py and the CodexHostTools toolset in vidbyte/tools/ both drive it.
 ARCHITECTURE NOTE: Importing this module never loads openai-codex: __aenter__ imports connection, wire and turns, the modules that do (D-21). Each public method is one narrated main function over a flat list of leaf helpers; CodexConnection sends every call and keeps background tasks, CodexPreflight runs every check, the translators in wire.py build params and records, CodexTurnRegistry owns every turn, and each CodexLiveTurn sends its own one stop. CodexThreadHelpers runs the thread helpers on those same parts, and CodexSkillFunctions runs goals and skills through the host's own public functions, typed by its CodexSkillHost Protocol so it never imports this module.
-COMMON MODIFICATION PATTERNS: A new operation is one public method: guard, field rules, preflight, the calls through CodexConnection, then a record from CodexResponseTranslator. A new way a turn can end goes through CodexTurnRegistry.finish, so the first outcome still wins.
+COMMON MODIFICATION PATTERNS: A new operation is one public method: guard, field rules, preflight, the calls through CodexConnection, then a record from CodexResponseTranslator. A new thread helper goes in CodexThreadHelpers and a new run wrapper in CodexSkillFunctions; its host method is the guard, then one delegation. A new way a turn can end goes through CodexTurnRegistry.finish, so the first outcome still wins.
 KNOWN EDGE CASES: Close wins over a turn still starting (EC-79); a start whose caller left is still owned and gets one interrupt (INV-11); a goal run registers only after its budget echo matches (INV-25); a user reviewer that Codex reports stops the operation before the thread spends (D-32); a review is read back after registration, because its first events can be dropped (D-23).
 RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.1, 8.5 and 9.2); docs/spec/codex-host-thread-helpers/spec.md (sections 8.5 and 12.3)
 TESTS: tests/features/codex_host/test_codex_host_lifecycle.py, tests/features/codex_host/test_codex_host_threads.py, tests/features/codex_host/test_codex_host_turns.py, tests/features/codex_host/test_codex_host_review_goals.py, tests/features/codex_host/test_codex_host_failures.py, tests/features/codex_host/test_codex_host_thread_helpers.py, tests/features/codex_host/test_codex_host_goal_skills.py, tests/features/codex_host/test_codex_host_helper_lifecycle.py, tests/features/codex_host/test_codex_host_helper_surface.py
@@ -119,7 +119,8 @@ class CodexHost:
 
     def __init__(self, settings: CodexClientSettings | None = None) -> None:
         # Nothing starts here; the host opens once, in __aenter__
-        # (INV-2). The connection, translators, registry and preflight
+        # (INV-2). The connection, translators, registry, preflight,
+        # _threads (thread helpers) and _skills (goal and skill runs)
         # exist only once the host opened.
         self._settings = settings or CodexClientSettings()
         self._loop: asyncio.AbstractEventLoop | None = None
