@@ -71,3 +71,18 @@ Other checks: `python lint/run.py --format json` exits 0 with no finding in `tes
 - Validate every argument before `NativeLauncher.resolve` and `NativePrivateFolders.prepare`: refusal tests assert no `~/.vidbyte` folder appears.
 - Do not change the sandbox's PATH/home redirection or its removal of `ANTHROPIC_*`/`CLAUDE*`; do not edit tests to make them pass.
 - `test_branch_changes_only_the_files_the_spec_lists` diffs the working tree against the merge base: any changed path outside §12.3's list, `docs/spec/claude-thread-functions/` and `tests/` fails it, and `pyproject.toml`, `vidbyte/tools`, `vidbyte/lib/errors/__init__.py`, `lint/baseline.json` must equal the merge base.
+
+## Addendum: S3 fix (2026-10-15)
+
+After S3 landed (HEAD `27d5cd1b`, which includes a merge of origin/main), the orchestrator found that `test_harness_threads_claude_surface.py::test_request_applies_the_claude_rules_only_to_claude` contradicted the spec. Its Grok/opencode/Muse loop built an opencode `NativeThreadRequest` without a model, but opencode has always required one (spec §9.1, INV-20; `test_harness_threads_arguments.py` `MODEL_CASES`), so the test raised `ConfigurationError: model must be non-empty text …; got None.` The red run hid this, because the test failed earlier on the missing `NativeHarness.CLAUDE`. Commit `140cc2fa` passes `model=pack.OPENCODE_MODEL` (`"deepseek/deepseek-v4-pro"`) for opencode only and changes no assertion; only that test file was touched, and nothing under `vidbyte/` was read. The test passes alone (`1 passed in 0.96s`). The first full-pack run after the fix ended `2 failed, 628 passed, 2 skipped in 188.50s`: existing timing-bound tests `test_harness_threads_process_bounds.py::test_cancellation_propagates_after_the_tree_is_stopped[opencode]` and `test_harness_threads_wsl.py::test_wsl_run_past_its_timeout_is_reaped_with_the_calls_mark` missed their tree-death waits on a loaded machine (the run took more than twice the usual time). Run alone three times, the pair failed once and passed twice. The second full run was clean:
+
+```
+$ PYTHONPATH=$(pwd) timeout 1200 python -m pytest -q -p no:cacheprovider tests/features/harness_threads < /dev/null | tail -n 5
+........................................................................ [ 68%]
+.............................................s.......................... [ 79%]
+........................................................................ [ 91%]
+.......s................................................                 [100%]
+630 passed, 2 skipped in 136.12s (0:02:16)
+```
+
+Lesson for this stage: a test that is red only because an earlier line fails cannot show its later lines are right. Lines that build records for the other harnesses should be run against the merge base, where those harnesses exist, before the red run is recorded.
