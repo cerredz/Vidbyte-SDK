@@ -69,7 +69,7 @@ from vidbyte.lib.dataclasses.codex import (
 from vidbyte.lib.errors import ConfigurationError
 
 FINAL_RESPONSE = "codex reply"
-PRICED_MODEL = "gpt-4o"
+PRICED_MODEL = "gpt-5.5"
 UNPRICED_MODEL = "codex-house-model"
 
 
@@ -208,6 +208,21 @@ class RecordUsageGateTests(unittest.TestCase):
 
         self.assertIsNone(CodexMetricsTranslator.record_usage(request))
         self.assertEqual(tracker.rollup().model_call_count, 0)
+
+    def test_records_the_built_in_openai_provider_like_the_default(self) -> None:
+        default_request, default_tracker = _request()
+        explicit_request, explicit_tracker = _request(
+            settings=_codex_settings(PRICED_MODEL, model_provider="openai")
+        )
+
+        CodexMetricsTranslator.record_usage(default_request)
+        CodexMetricsTranslator.record_usage(explicit_request)
+
+        explicit = explicit_tracker.rollup()
+        self.assertEqual(explicit.model_call_count, 1)
+        self.assertEqual(explicit.total_tokens, default_tracker.rollup().total_tokens)
+        self.assertIsNotNone(explicit.cost_usd)
+        self.assertEqual(explicit.cost_usd, default_tracker.rollup().cost_usd)
 
     def test_prefers_the_turn_model_over_the_thread_model(self) -> None:
         request, tracker = _request(
@@ -355,6 +370,21 @@ class CodexHarnessAgentUsageIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(reply.metadata[CODEX_USAGE_ROLLUP_KEY].model_call_count, 0)
         self.assertIsNone(agent.get_cost_usd())
+
+    async def test_an_explicit_openai_provider_prices_the_turn_like_the_default(
+        self,
+    ) -> None:
+        default_agent, _ = _build_agent()
+        explicit_agent, _ = _build_agent(
+            codex=_codex_settings(PRICED_MODEL, model_provider="openai")
+        )
+
+        await default_agent.arun(CodexRunInput.text("prompt"))
+        reply = await explicit_agent.arun(CodexRunInput.text("prompt"))
+
+        self.assertEqual(reply.metadata[CODEX_USAGE_ROLLUP_KEY].model_call_count, 1)
+        self.assertIsNotNone(explicit_agent.get_cost_usd())
+        self.assertEqual(explicit_agent.get_cost_usd(), default_agent.get_cost_usd())
 
 
 if __name__ == "__main__":
