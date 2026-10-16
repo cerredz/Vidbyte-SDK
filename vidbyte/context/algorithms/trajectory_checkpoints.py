@@ -134,11 +134,13 @@ class TrajectoryCheckpointAlgorithm(InnerContextWindowAlgorithm):
                 primitive_id=f"trajectory_checkpoint:{counter}",
                 iteration=snapshot.iteration_count,
                 checkpoint_index=checkpoint_index,
-                reasoning_summary=parsed.get("reasoning_summary", ""),
-                trajectory=parsed.get("trajectory", ""),
-                output=parsed.get("output", ""),
+                # @intent null-optional-arg-means-default
+                # A model may write null or a list for a text field; the checkpoint renders text, so coerce as error_correction does.
+                reasoning_summary=str(parsed.get("reasoning_summary") or ""),
+                trajectory=str(parsed.get("trajectory") or ""),
+                output=str(parsed.get("output") or ""),
                 score=score,
-                feedback=parsed.get("feedback", ""),
+                feedback=str(parsed.get("feedback") or ""),
                 title=self.checkpoint_title,
                 max_chars=self.max_checkpoint_chars,
                 metadata={

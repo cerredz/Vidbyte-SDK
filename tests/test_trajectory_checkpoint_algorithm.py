@@ -193,6 +193,22 @@ class TrajectoryCheckpointAlgorithmTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Runtime Checkpoint", final_system)
         self.assertEqual(result.metadata["trajectory_checkpoints"]["checkpoint_count"], 1)
 
+    async def test_runtime_checkpoint_survives_null_and_list_summary_fields(self) -> None:
+        # [Hidden Failure] A summarizer that writes null or a list for a text field still yields a checkpoint instead of failing the run.
+        @tool
+        def lookup() -> str:
+            return "plan=pro"
+        summary = json.dumps({"reasoning_summary": "res", "trajectory": ["read file", "ran tests"], "output": None, "score": 0.5, "feedback": "feed"})
+        runner = FakeRunner([tool_response(), FakeResponse(summary), is_done_response("final output")])
+        runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=Tools([lookup]), permission_policy=PermissionPolicy(), algorithm=ContextWindowAlgorithm(name="trajectory_checkpoints", trajectory_checkpoints=TrajectoryCheckpointAlgorithm(interval=1)))
+        result = await runtime.arun("task", handle=runner_handle(runner), context=base_context())
+        final_system = runner.calls[2]["kwargs"]["system"]
+        self.assertEqual(result.metadata["stop_reason"], "is_done")
+        self.assertEqual(result.metadata["trajectory_checkpoints"]["checkpoint_count"], 1)
+        self.assertIn("Runtime Checkpoint", final_system)
+        self.assertIn("ran tests", final_system)
+        self.assertNotIn("### Output\nNone", final_system)
+
     async def test_runtime_does_not_write_checkpoint_before_interval(self) -> None:
         # Verify checkpoint is omitted before interval boundary.
         runner = FakeRunner([FakeResponse("draft"), is_done_response()])
