@@ -19,7 +19,7 @@ Existing-PR run: no new branch, no new PR. Adds to draft PR #1055 on `feat/codex
 | S0 merge main | done | 22:31 | 23:05 | reports/S0-merge-main.md | merge commit c181be65; packs 551 passed / 1 inherited failure; SDK-LINT: PASS |
 | S0 worktree + capture + recon | done | 22:30 | 23:25 | reports/S0-scout.md | base_commit c181be65; code-map.md (4 sections, ~30 files) |
 | S1 spec + review | done | 23:28 | 10-16 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | spec r3 bd20f6f7 approved; 2 rounds (SOUND WITH FIXES ×2), 22 findings applied; 12 methods, 11 tools → 26, 4 codes, 5 records, 1 enum, 4 new files; 0 blocking Q |
-| S2 tests | running | 10-16 | | reports/S2-test-author.md | |
+| S2 tests | done | 10-16 | 10-16 | reports/S2-test-author.md | 76 new tests in 5 files; red confirmed (area 91 failed / 537 passed = 76 new + 14 authorized-pin + 1 inherited); S2_HEAD 33787d9a |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
@@ -44,6 +44,9 @@ Existing-PR run: no new branch, no new PR. Adds to draft PR #1055 on `feat/codex
 - 2026-10-16 — S1 review round 2 (final, cap 2/2): reviewer agent died in a second usage-limit outage AFTER writing a complete report (verdict line, round-1 resolution, R-16..R-22, verified claims). Used the on-disk report as the round-2 result; did not relaunch. Verdict SOUND WITH FIXES: 1 Blocker (R-16 skill read-back loop is a new S064 lint finding), 2 Major (R-17 ephemeral-thread skill run spends then reports command_not_run; R-18 goal_unfinished next step offers two failing remedies), 4 Minor. Sent to the author for the last revision with `status: approved`; anything still disputed becomes a Q-n with a stated default.
 - 2026-10-16 — Spec approved at r3 after 2 review rounds (cap). Every Q-n takes its stated default (none blocking): Q-1..Q-10, Q-12, Q-13, Q-15..Q-19 = not built; Q-11 = keep `()` for an empty since window (deviation from §C example list, visible in §6.3 table); Q-14 = idle loaded thread may be deleted, busy refused (deviation, visible); Q-16/Q-19 [scope-adding] not built.
 - 2026-10-16 — R-17 resolved without a new code: skill/docs runs on an ephemeral thread raise `ConfigurationError` → `configuration.invalid_argument` up front, before any turn. Accepted (D-5 keeps argument errors as ConfigurationError).
+- 2026-10-16 — S2 author died mid-run in the outage with work uncommitted; resumed the same agent via SendMessage from its red run (coordinator instruction). It committed aeeee55b (tests+plan), 50463bb6 (proof), 33787d9a (report). S2_HEAD = 33787d9a.
+- 2026-10-16 — S2 author suggested S3 reword `vidbyte/tools/toolsets/__init__.py:11` ("One tool per CodexHost function"); DENIED for S3: that line is pinned at test_codex_host_packaging.py:242 and spec Q-18 defaults to not rewording. Spec wins.
+- 2026-10-16 — S2 author validated its tests against a scratch implementation kept in the scratchpad only (45/45 one-rule mutations caught). S3 is told not to read the scratchpad (except the schema dir) so the implementation stays independent of it.
 
 ## User replies (verbatim)
 - none
@@ -88,3 +91,11 @@ Existing-PR run: no new branch, no new PR. Adds to draft PR #1055 on `feat/codex
 - S064 baseline 4 with 4 findings (no slack); its retry words include "attempt"; the read-back complies only through an in-loop `loop.time()`/deadline comparison (`CODEX_HOST_INPUT_CHECK_DEADLINE_SECONDS = 10.0`). Never rename to *_ATTEMPTS or raise the baseline. — *source:* S1 author r3
 - Tests patch `CODEX_HOST_INPUT_CHECK_INTERVAL_SECONDS` and `..._DEADLINE_SECONDS` inside `native/codex/skill_functions.py`; AC-43 patches the deadline below the interval and expects exactly one `thread/turns/list` request. — *source:* S1 author r3
 - Codex records skills as `{type:"skill", name, path}` in UserMessage content, text first (local ~/.codex evidence). — *source:* S1 author r3
+- S2_HEAD = 33787d9a. Test tree paths for the no-edit check: `tests/`. — *source:* orchestrator
+- 76 new tests: test_codex_host_helper_surface.py, test_codex_host_helper_tools.py, test_codex_host_thread_helpers.py, test_codex_host_goal_skills.py, test_codex_host_helper_lifecycle.py (20 run on CI, 56 need the codex extra). — *source:* S2
+- `GOAL_UNFINISHED_MESSAGE` `{status}` uses the wire value (`goal.status.value`); on 3.11 a (str, Enum) formats as `CodexGoalStatus.X`. — *source:* S2
+- `INPUT_NOT_RECORDED_MESSAGE` `{seconds}` is plain `str.format` of the deadline global in skill_functions (tests expect `600.0` and `0.25`; no `:g`). — *source:* S2
+- skill_functions.py imports both read-back bounds by name and reads them at call time (tests patch them there). — *source:* S2
+- A skills/list failure inside a skill run keeps operation `list_codex_skills`; not-found/disabled skill carries the run's own operation. — *source:* S2
+- Compact reserves the thread and releases it in `finally` (after failure, cancel, goal_unfinished); its resume params equal those continue_codex_thread sends. — *source:* S2
+- Existing test name `test_toolset_holds_the_fifteen_tools_with_their_spec_schemas` keeps its name but checks 26. — *source:* S2
