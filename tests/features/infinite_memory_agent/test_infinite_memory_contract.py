@@ -3,7 +3,7 @@
 PURPOSE: Pins the InfiniteMemory agent's static contract: public import paths and exports, enum values, the 40-leaf prompt family, the runtime registry entry and its refusal outside InfiniteMemoryAgent, the session opt-out, settings validation and defaults, the exact tools and schemas the root's model is offered, the TokenEstimate helper, prompt text free of coding-only rules, and the complexity budget. Since the re-review it also proves that a read-only seed is copied again, unchanged, each time an agent attaches.
 ROLE IN CODEBASE: Contract layer of tests/features/infinite_memory_agent/ (spec AC-2, AC-3, AC-4, AC-25, AC-27, AC-30, AC-39; INV-1..INV-3, INV-6, INV-21, INV-33, INV-36; EC-2, EC-3, EC-33, EC-34; FR-15; NFR-1; re-review finding R-26). Exercises vidbyte/agents/infinite/, vidbyte/lib/enums/infinite.py, vidbyte/lib/constants/infinite.py, vidbyte/lib/util/text.py, vidbyte/lib/registries/runtimes.py and the infinite_memory prompt family.
 ARCHITECTURE NOTE: Every feature symbol is imported inside the test that needs it, so before the feature exists each test fails on its own ImportError and the rest of the suite still collects. Tool offers are read from what the scripted runner receives on the root's first call, not from the agent's internals.
-FUNCTION INVENTORY: test_public_names_import_from_every_documented_path (AC-27, INV-1); test_prompt_family_has_exactly_the_forty_documented_leaves (AC-27, INV-36); test_enum_values_are_the_documented_lowercase_strings (section 8.5); test_runtime_type_resolves_and_refuses_outside_its_agent (AC-3, INV-3, EC-33); test_session_refuses_the_agent (AC-25, EC-34); test_loop_and_limit_defaults_match_the_spec (AC-39, section 9.3); test_construction_rejects_each_invalid_setting (AC-2, EC-2); test_attaching_a_workspace_already_over_a_cap_is_refused (INV-21, EC-3); test_a_read_only_seed_is_copied_again_each_time_an_agent_attaches (re-review R-26, INV-21, section 9.2, AC-30);test_root_is_offered_exactly_the_preset_tools_plus_its_extra (AC-4, INV-6); test_launch_and_remember_schemas_follow_the_documented_shape (section 9.2, INV-9); test_token_estimate_counts_characters_and_cuts_to_a_prefix (FR-15, D-17); test_prompt_family_text_carries_no_coding_only_rules (INV-33, NFR-5); test_new_modules_stay_inside_the_complexity_budget (NFR-1); test_construction_rejects_a_non_settings_object (AC-2, INV-2); test_entries_written_by_hand_in_the_documented_shape_are_accepted (section 9.1).
+FUNCTION INVENTORY: test_public_names_import_from_every_documented_path (AC-27, INV-1); test_prompt_family_has_exactly_the_forty_documented_leaves (AC-27, INV-36); test_enum_values_are_the_documented_lowercase_strings (section 8.5); test_runtime_type_resolves_and_refuses_outside_its_agent (AC-3, INV-3, EC-33); test_session_refuses_the_agent (AC-25, EC-34); test_loop_and_limit_defaults_match_the_spec (AC-39, section 9.3); test_construction_rejects_each_invalid_setting (AC-2, EC-2); test_attaching_a_workspace_already_over_a_cap_is_refused (INV-21, EC-3); test_a_read_only_seed_is_copied_again_each_time_an_agent_attaches (re-review R-26, INV-21, section 9.2, AC-30);test_root_is_offered_exactly_the_preset_tools_plus_its_extra (AC-4, INV-6); test_memory_tool_registry_covers_every_preset_and_role (INV-6, AC-17); test_launch_and_remember_schemas_follow_the_documented_shape (section 9.2, INV-9); test_token_estimate_counts_characters_and_cuts_to_a_prefix (FR-15, D-17); test_prompt_family_text_carries_no_coding_only_rules (INV-33, NFR-5); test_new_modules_stay_inside_the_complexity_budget (NFR-1); test_construction_rejects_a_non_settings_object (AC-2, INV-2); test_entries_written_by_hand_in_the_documented_shape_are_accepted (section 9.1).
 COMMON MODIFICATION PATTERNS: When the spec adds a prompt leaf, add it to EXPECTED_LEAVES. When a setting gains a bound, add one row to INVALID_SETTINGS with the field name and the bad value the error must name.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level (see infinite_memory_fixtures.py). 2. Do not compare tool descriptions to hand-written text; descriptions come from the prompt catalog. 3. Do not loosen the exact tool-name sets to subset checks; INV-6 is an exact list.
 KNOWN EDGE CASES: A ConfigurationError may carry the field in `details` instead of the message, so error_text joins both. The settings-level cases must leave no workspace folder behind, so they never build the agent past its settings.
@@ -232,17 +232,17 @@ def test_session_refuses_the_agent(tmp_path: Path) -> None:
 
 
 def test_loop_and_limit_defaults_match_the_spec(tmp_path: Path) -> None:
-    """AC-39, section 9.3: without `loop` every agent stops at 100 iterations and cuts tool results at 100,000 characters; caps default to D-7."""
+    """AC-39, section 9.3, raised by PR #1084 review: without `loop` every agent stops at 500 iterations and cuts tool results at 200,000 characters; every cap defaults to its generous value."""
     from vidbyte.lib.constants.infinite import INFINITE_DEFAULT_MAX_ITERATIONS, INFINITE_TOOL_RESULT_MAX_CHARS
 
     settings = build_settings(tmp_path)
-    assert settings.loop.max_iterations == INFINITE_DEFAULT_MAX_ITERATIONS == 100
+    assert settings.loop.max_iterations == INFINITE_DEFAULT_MAX_ITERATIONS == 500
     assert settings.loop.tool_settings is not None
-    assert settings.loop.tool_settings.result_max_chars == INFINITE_TOOL_RESULT_MAX_CHARS == 100_000
-    assert (settings.max_depth, settings.max_parallel, settings.max_agents) == (10, 10, 200)
+    assert settings.loop.tool_settings.result_max_chars == INFINITE_TOOL_RESULT_MAX_CHARS == 200_000
+    assert (settings.max_depth, settings.max_parallel, settings.max_agents) == (20, 20, 1_000)
     workspace = settings.workspace
-    assert (workspace.max_files, workspace.max_tokens, workspace.max_file_tokens) == (200, 250_000, 20_000)
-    assert (workspace.max_entry_tokens, workspace.max_entries_per_agent) == (60, 5)
+    assert (workspace.max_files, workspace.max_tokens, workspace.max_file_tokens) == (2_000, 2_000_000, 100_000)
+    assert (workspace.max_entry_tokens, workspace.max_entries_per_agent) == (150, 25)
     assert workspace.root == workspace_root(tmp_path).resolve()
 
 
@@ -374,6 +374,22 @@ def test_root_is_offered_exactly_the_preset_tools_plus_its_extra(tmp_path: Path,
     tree.assert_complete()
 
 
+
+def test_memory_tool_registry_covers_every_preset_and_role() -> None:
+    """INV-6, AC-17: InfiniteMemoryToolRegistry names tools for every preset and role; only FULL adds edit_file, only a verifier adds drop_entry, and no row grants launch_subagent."""
+    from vidbyte.lib.enums import InfiniteAgentRole, InfiniteMemoryPreset
+    from vidbyte.lib.registries import InfiniteMemoryToolRegistry
+
+    for preset in InfiniteMemoryPreset:
+        for role in InfiniteAgentRole:
+            names = InfiniteMemoryToolRegistry.tool_names(preset, role)
+            assert len(names) == len(set(names)), f"{preset}/{role} names a tool twice: {names}"
+            assert {"remember", "write_note"} <= set(names)
+            assert ("edit_file" in names) == (preset is InfiniteMemoryPreset.FULL), (preset, role, names)
+            assert ("drop_entry" in names) == (role is InfiniteAgentRole.VERIFIER), (preset, role, names)
+            assert "launch_subagent" not in names
+
+
 def test_launch_and_remember_schemas_follow_the_documented_shape(tmp_path: Path) -> None:
     """Section 9.2, INV-9, INV-11: launch_subagent takes 1..max_parallel closed task cards with both prompts; remember's kind is the enum."""
     from vidbyte.lib.enums import InfiniteEntryKind
@@ -424,6 +440,8 @@ def test_token_estimate_counts_characters_and_cuts_to_a_prefix() -> None:
         assert TokenEstimate.count(text) == (0 if not text else max(1, math.ceil(len(text) / 4)))
         assert text.startswith(cut)
         assert TokenEstimate.count(cut) <= budget
+        capped = TokenEstimate.cap(text, budget, "[cut]")
+        assert capped == text if TokenEstimate.count(text) <= budget else capped == f"{cut}[cut]"
         assert TokenEstimate.cut(cut, budget) == cut
         assert cut == text if TokenEstimate.count(text) <= budget else len(cut) == budget * 4
 

@@ -52,6 +52,11 @@ from tests.features.infinite_memory_agent.infinite_memory_fixtures import (
     workspace_root,
     write_jsonl,
 )
+from vidbyte.lib.constants.infinite import (
+    INFINITE_DEFAULT_MAX_ENTRY_TOKENS,
+    INFINITE_MAX_TAGS,
+    INFINITE_NEW_FILES_PER_AGENT,
+)
 
 
 def _recorder(root: Path, states: list[dict[str, bytes]]) -> Callable[[ModelCall], None]:
@@ -80,8 +85,8 @@ def _seed_file(tmp_path: Path, text: str = "Competitors: Acme, Globex.") -> Path
 
 REJECTED_REMEMBERS: tuple[tuple[str, dict[str, Any], tuple[Any, ...]], ...] = (
     ("two-line text", {"kind": "fact", "text": "Acme is 49 USD\nGlobex is 59 USD"}, ()),
-    ("text over max_entry_tokens", {"kind": "fact", "text": "Acme pricing detail " * 15}, ()),
-    ("four tags", {"kind": "fact", "text": "Acme raised prices", "tags": ["acme", "pricing", "q3", "saas"]}, ("tags",)),
+    ("text over max_entry_tokens", {"kind": "fact", "text": "Acme pricing detail " * (INFINITE_DEFAULT_MAX_ENTRY_TOKENS // 4)}, ()),
+    ("one tag over the cap", {"kind": "fact", "text": "Acme raised prices", "tags": [f"tag-{index}" for index in range(INFINITE_MAX_TAGS + 1)]}, ("tags",)),
     ("kind outside the enum", {"kind": "opinion", "text": "Acme looks expensive"}, ("opinion",)),
     ("supersedes a missing id", {"kind": "fact", "text": "Acme now charges 52 USD", "supersedes": 77}, (77,)),
     ("text of a live entry", {"kind": "fact", "text": "  prices are   listed in usd "}, ("already recorded as #41",)),
@@ -89,10 +94,10 @@ REJECTED_REMEMBERS: tuple[tuple[str, dict[str, Any], tuple[Any, ...]], ...] = (
 
 
 def test_root_remember_rejects_each_rule_breaking_entry_and_enforces_the_quota(tmp_path: Path) -> None:
-    """AC-14, EC-18, EC-19, INV-17, INV-32: each bad remember is an error with the quota line and changes nothing; rejections cost no quota; the sixth accepted call is refused."""
+    """AC-14, EC-18, EC-19, INV-17, INV-32: each bad remember is an error with the quota line and changes nothing; rejections cost no quota; with max_entries_per_agent=5, the sixth accepted call is refused."""
     root = workspace_root(tmp_path)
     write_jsonl(root / "entries.jsonl", [entry_record(41, "Prices Are Listed In USD")])
-    agent = build_agent(tmp_path)
+    agent = build_agent(tmp_path, workspace={"max_entries_per_agent": 5})
     states: list[dict[str, bytes]] = []
     watch = _recorder(root, states)
     valid = [f"Valid fact number {n} about competitor pricing" for n in range(1, 7)]
@@ -176,12 +181,15 @@ def test_write_note_refuses_every_path_and_size_breach_and_changes_nothing(tmp_p
         ("code suffix", {"path": "notes/a.py", "text": "print(1)", "description": "A code file"}),
     )
     created = {"path": "notes/a.md", "text": "Acme lists Pro at 49 USD.", "description": "Competitor prices"}
+    # Spend the rest of the new-file allowance, so the next new file is
+    # one past it.
+    fillers = [{"path": f"notes/filler-{index}.md", "text": "Filler.", "description": f"Filler note {index}"} for index in range(INFINITE_NEW_FILES_PER_AGENT - 1)]
     later = (
-        ("second new file", {"path": "notes/b.md", "text": "Globex", "description": "A second file"}),
+        ("one new file past the allowance", {"path": "notes/b.md", "text": "Globex", "description": "A second file"}),
         ("append over max_file_tokens", {"path": "notes/a.md", "text": "y" * 200}),
     )
     appended = {"path": "notes/a.md", "text": " Globex lists Team at 59 USD."}
-    calls = [args for _, args in rejected] + [created] + [args for _, args in later] + [appended]
+    calls = [args for _, args in rejected] + [created] + fillers + [args for _, args in later] + [appended]
     states: list[dict[str, bytes]] = []
     watch = _recorder(root, states)
     tree = ScriptedTree({ROOT: [observe(watch, tool_call("write_note", args)) for args in calls] + [observe(watch, reply("done"))]})
@@ -190,8 +198,8 @@ def test_write_note_refuses_every_path_and_size_breach_and_changes_nothing(tmp_p
     tree.assert_complete()
     results = _results(tree)
     rejected_template = template_regex(prompt_text("memory_rejected_prompt"))
-    refused_indexes = list(range(len(rejected))) + [len(rejected) + 1, len(rejected) + 2]
-    labels = [label for label, _ in rejected] + ["valid create"] + [label for label, _ in later] + ["valid append"]
+    refused_indexes = list(range(len(rejected))) + [len(rejected) + 1 + len(fillers), len(rejected) + 2 + len(fillers)]
+    labels = [label for label, _ in rejected] + ["valid create"] + ["filler create"] * len(fillers) + [label for label, _ in later] + ["valid append"]
     for index in refused_indexes:
         assert is_error(results[index]) and rejected_template.search(results[index]), f"{labels[index]}: {results[index]}"
         assert states[index] == states[index + 1], f"{labels[index]} changed the workspace"
@@ -203,7 +211,8 @@ def test_write_note_refuses_every_path_and_size_breach_and_changes_nothing(tmp_p
     assert (root / "seed" / "brief.md").read_bytes() == seed_before
     note = (root / "notes" / "a.md").read_text(encoding="utf-8")
     assert note.startswith("Acme lists Pro at 49 USD.") and "Globex lists Team at 59 USD." in note and "yyyy" not in note
-    (described,) = read_jsonl(root / "files.jsonl")
+    described, *filled = read_jsonl(root / "files.jsonl")
+    assert [record["path"] for record in filled] == [filler["path"] for filler in fillers]
     assert (described["path"], described["description"], described["by"]) == ("notes/a.md", "Competitor prices", "root")
     assert described["run"] == journal_records(root)[0]["run"]
     assert datetime.fromisoformat(described["at"]).utcoffset().total_seconds() == 0
@@ -363,20 +372,22 @@ def test_every_agent_sees_the_map_and_the_roots_map_refreshes_after_each_tool_it
 
 
 def test_a_map_over_its_cap_ends_with_the_remaining_file_count(tmp_path: Path) -> None:
-    """AC-18, EC-42, D-16: with 300 notes the map stays within INFINITE_MAP_MAX_TOKENS and says how many files it left out."""
+    """AC-18, EC-42, D-16: with more notes than the map can list, the map stays within INFINITE_MAP_MAX_TOKENS and says how many files it left out."""
     from vidbyte.agents.infinite import InfiniteWorkspaceSettings
     from vidbyte.agents.infinite.workspace import InfiniteWorkspace
     from vidbyte.lib.constants.infinite import INFINITE_MAP_MAX_TOKENS, INFINITE_MORE_FILES
     from vidbyte.lib.util import TokenEstimate
 
     root = tmp_path / "memory"
-    notes = [f"notes/f-{index:04d}.md" for index in range(1, 301)]
+    # Each map line is about 13 tokens, so this many notes fill the
+    # map well past its cap.
+    notes = [f"notes/f-{index:04d}.md" for index in range(1, INFINITE_MAP_MAX_TOKENS // 8 + 1)]
     for relative in notes:
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"Pricing note {relative}\n", encoding="utf-8")
     write_jsonl(root / "files.jsonl", [{"path": relative, "description": f"Pricing note number {relative[8:12]}", "by": "root", "run": "20261015T024900Z-1a2b3c4d", "at": "2026-10-15T02:51:07Z"} for relative in notes])
-    workspace = InfiniteWorkspace(InfiniteWorkspaceSettings(root=root, max_files=400))
+    workspace = InfiniteWorkspace(InfiniteWorkspaceSettings(root=root, max_files=len(notes) + 10))
     rendered = workspace.map_text()
     assert TokenEstimate.count(rendered) <= INFINITE_MAP_MAX_TOKENS
     before, _, after_count = INFINITE_MORE_FILES.partition("{count}")
@@ -384,7 +395,9 @@ def test_a_map_over_its_cap_ends_with_the_remaining_file_count(tmp_path: Path) -
     assert more, f"the map does not end with {INFINITE_MORE_FILES!r}"
     listed_notes = sum(1 for relative in notes if relative in rendered)
     left_out = int(more.group(1))
-    assert 0 < left_out and 303 - listed_notes - 3 <= left_out <= 303 - listed_notes, (left_out, listed_notes)
+    # The notes plus the three bookkeeping files are every file on disk.
+    total = len(notes) + 3
+    assert 0 < left_out and total - listed_notes - 3 <= left_out <= total - listed_notes, (left_out, listed_notes)
 
 
 def test_map_labels_and_usage_read_the_disk_and_never_fail_on_bad_lines(tmp_path: Path) -> None:
@@ -596,7 +609,7 @@ def test_a_supersede_whose_new_text_cannot_be_written_changes_neither_entry_file
 
 
 def test_a_new_note_whose_description_cannot_be_written_leaves_no_note_and_keeps_the_allowance(tmp_path: Path) -> None:
-    """Re-review R-27, INV-20, INV-19, INV-32: a write_note that would create notes/a.md with a description UTF-8 cannot encode is refused with the quota line and leaves no note and no files.jsonl line; the allowance stays unspent, so the clean retry creates the note with its description, and a second new note is then refused."""
+    """Re-review R-27, INV-20, INV-19, INV-32: a write_note that would create notes/a.md with a description UTF-8 cannot encode is refused with the quota line and leaves no note and no files.jsonl line; the allowance stays unspent, so the clean retry creates the note with its description, and once the rest of the allowance is spent the next new note is refused."""
     root = workspace_root(tmp_path)
     agent = build_agent(tmp_path)
     states: list[dict[str, bytes]] = []
@@ -604,20 +617,23 @@ def test_a_new_note_whose_description_cannot_be_written_leaves_no_note_and_keeps
     # The note's text is fine; only its files.jsonl description holds the lone surrogate.
     unwritable = {"path": "notes/a.md", "text": "Acme lists Pro at 49 USD.", "description": "Acme prices \ud83d"}
     clean = {"path": "notes/a.md", "text": "Acme lists Pro at 49 USD.", "description": "Acme prices"}
+    fillers = [{"path": f"notes/filler-{index}.md", "text": "Filler.", "description": f"Filler note {index}"} for index in range(INFINITE_NEW_FILES_PER_AGENT - 1)]
     second = {"path": "notes/b.md", "text": "Globex lists Team at 59 USD.", "description": "Globex prices"}
-    tree = ScriptedTree({ROOT: [observe(watch, tool_call("write_note", unwritable)), observe(watch, tool_call("write_note", clean)), observe(watch, tool_call("write_note", second)), observe(watch, reply("done"))]})
+    calls = [unwritable, clean, *fillers, second]
+    tree = ScriptedTree({ROOT: [*(observe(watch, tool_call("write_note", args)) for args in calls), observe(watch, reply("done"))]})
     with tree.install():
         agent.run(TASK)
     tree.assert_complete()
-    refused, created, over_allowance = _results(tree)
+    results = _results(tree)
+    refused, created, over_allowance = results[0], results[1], results[-1]
     assert is_error(refused), ascii(refused[:300])
     assert template_regex(prompt_text("memory_rejected_prompt")).search(refused) and template_regex(prompt_text("quota_line")).search(refused), ascii(refused[:300])
     assert states[0] == states[1], f"a refused new note changed {_changed(states[0], states[1])} although the model was told nothing was saved"
     assert not is_error(created) and template_regex(prompt_text("note_saved_prompt")).search(created), created
-    assert is_error(over_allowance), f"a second new note passed the allowance of one: {over_allowance}"
+    assert is_error(over_allowance), f"a new note past the allowance of {INFINITE_NEW_FILES_PER_AGENT} was created: {over_allowance}"
     assert not (root / "notes" / "b.md").exists()
     assert (root / "notes" / "a.md").read_text(encoding="utf-8") == "Acme lists Pro at 49 USD."
-    assert [(record["path"], record["description"]) for record in read_jsonl(root / "files.jsonl")] == [("notes/a.md", "Acme prices")]
+    assert [(record["path"], record["description"]) for record in read_jsonl(root / "files.jsonl")] == [("notes/a.md", "Acme prices"), *((filler["path"], filler["description"]) for filler in fillers)]
 
 
 # ---------------------------------------------------------------- S4 review: EC-18 guidance (R-6)
@@ -625,7 +641,7 @@ def test_a_new_note_whose_description_cannot_be_written_leaves_no_note_and_keeps
 
 EC18_PASTES = (
     pytest.param("\n".join(f"2026-10-15 ERROR worker {index} failed: connection reset by peer at stage {index % 7}" for index in range(200)), id="multi-line-log"),
-    pytest.param(("Worker failure detail from the overnight batch " * 8).strip(), id="one-line-over-the-cap"),
+    pytest.param(("Worker failure detail from the overnight batch " * (INFINITE_DEFAULT_MAX_ENTRY_TOKENS // 8)).strip(), id="one-line-over-the-cap"),
 )
 ADVICE = re.compile(r"pointer|note", re.IGNORECASE)
 

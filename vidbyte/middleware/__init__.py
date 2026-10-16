@@ -15,7 +15,7 @@ Architecture:
       CostBudgetMiddleware, ExponentialBackoffRetryMiddleware,
       LoopDetectionMiddleware, CircuitBreakerMiddleware, CircuitState,
       CanaryTripwireMiddleware, ConfusedDeputyGuardMiddleware, HoneypotToolMiddleware,
-      and FailureMiddleware.
+      FailureMiddleware, and DelegationLimitsMiddleware with its DelegationLimits record.
 Relations:
     Related to vidbyte.agents.runtime and vidbyte.middleware.builtins.
 """
@@ -23,6 +23,7 @@ Relations:
 from __future__ import annotations
 
 from vidbyte.lib.dataclasses.middleware import (
+    DelegationLimits,
     MiddlewareAction,
     MiddlewareContext,
     MiddlewareDecision,
@@ -39,6 +40,7 @@ from vidbyte.middleware.builtins import (
     CircuitState,
     ConfusedDeputyGuardMiddleware,
     CostBudgetMiddleware,
+    DelegationLimitsMiddleware,
     ExponentialBackoffRetryMiddleware,
     FailureMiddleware,
     HoneypotToolMiddleware,
@@ -64,6 +66,8 @@ __all__ = [
     "CircuitState",
     "ConfusedDeputyGuardMiddleware",
     "CostBudgetMiddleware",
+    "DelegationLimits",
+    "DelegationLimitsMiddleware",
     "ExponentialBackoffRetryMiddleware",
     "FailureMiddleware",
     "HoneypotToolMiddleware",

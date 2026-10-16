@@ -30,6 +30,9 @@ FUNCTION INVENTORY:
     0 for "", otherwise the characters divided by four, rounded up.
     TokenEstimate.cut(text, max_tokens) -> str: the text when it fits,
     otherwise its prefix of max_tokens times four characters.
+    TokenEstimate.cap(text, max_tokens, marker) -> str: the text when it
+    fits, otherwise its cut followed by the marker, so a reader sees that
+    text was left out.
 
 COMMON MODIFICATION PATTERNS:
     Add another general text helper as a @staticmethod here.
@@ -43,7 +46,8 @@ WHAT NOT TO DO IN THIS FILE:
 KNOWN EDGE CASES:
     An empty search raises ValueError; every caller rejects it earlier.
     TokenEstimate counts characters, not bytes, so five euro signs are 2
-    tokens.
+    tokens. cap adds the marker after the cut, so a capped text can be
+    the marker's length over max_tokens.
 
 RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/unique-edit-overlapping-matches.md;
@@ -53,7 +57,7 @@ TESTS:
     tests/test_patch_tool.py, tests/test_filesystem_tools.py, and
     tests/test_context_primitives_builtins.py cover SubstringCounter through
     its callers. tests/features/infinite_memory_agent/test_infinite_memory_contract.py
-    covers TokenEstimate.
+    covers TokenEstimate, count, cut, and cap.
 """
 
 from __future__ import annotations
@@ -95,6 +99,13 @@ class TokenEstimate:
         if TokenEstimate.count(text) <= max_tokens:
             return text
         return text[: max_tokens * TOKEN_ESTIMATE_CHARS_PER_TOKEN]
+
+    @staticmethod
+    def cap(text: str, max_tokens: int, marker: str) -> str:
+        """Return text when it fits max_tokens, otherwise its cut followed by marker, so the reader knows text was left out."""
+        if TokenEstimate.count(text) <= max_tokens:
+            return text
+        return f"{TokenEstimate.cut(text, max_tokens)}{marker}"
 
 
 __all__ = ["TOKEN_ESTIMATE_CHARS_PER_TOKEN", "SubstringCounter", "TokenEstimate"]

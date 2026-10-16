@@ -25,7 +25,7 @@ reply = agent.run("Compare the list prices of our five competitors.")
 - Memory that survives history trimming and restarts. Agents save short typed entries with `remember` and longer material with `write_note`. A pair's entries are staged and reach `entries.jsonl` only after its verifier gives a verdict.
 - Runs that must be resumable. `resume()` or `aresume()` continues the newest unfinished run, or a named one.
 
-Every agent holds `bash` (in `root_dir`), `grep` and `read_lines` (in the workspace), `remember`, and `write_note`. The FULL preset adds `edit_file`, the root and generators below `max_depth` hold `launch_subagent`, and verifiers hold `drop_entry`. The root also holds every developer tool it was given, including tools added with `add_tool` and MCP tools; a pair gets only the extras its task card names.
+Every agent holds `bash` (in `root_dir`), `grep` and `read_lines` (in the workspace), `remember`, and `write_note`. The FULL preset adds `edit_file`, the root and every generator hold `launch_subagent`, and verifiers hold `drop_entry`. Which memory tools each agent holds is one table, `InfiniteMemoryToolRegistry` in `vidbyte/lib/registries/infinite.py`. The root also holds every developer tool it was given, including tools added with `add_tool` and MCP tools; a pair gets only the extras its task card names.
 
 ## What it is not for
 
@@ -49,7 +49,7 @@ Every agent holds `bash` (in `root_dir`), `grep` and `read_lines` (in the worksp
 
 Everything lives as plain files under the workspace root, so a person or `bash` can read and repair it.
 
-- `entries.jsonl` holds one live memory entry per line: `id`, `kind` (decision, fact, lesson, open_question, or pointer), one-line `text`, up to three `tags` and `refs`, `supersedes`, the author `by`, the verifier `verified_by` (null for the root), the `run` id, and a UTC `at` stamp. Ids never repeat.
+- `entries.jsonl` holds one live memory entry per line: `id`, `kind` (decision, fact, lesson, open_question, or pointer), one-line `text`, up to eight `tags` and eight `refs`, `supersedes`, the author `by`, the verifier `verified_by` (null for the root), the `run` id, and a UTC `at` stamp. Ids never repeat.
 - `superseded.jsonl` holds entries that a newer entry replaced, moved there unchanged; `grep` skips it.
 - `files.jsonl` holds one line per note created through `write_note`, with its one-line description for the map.
 - Notes are any other text files (`.md`, `.txt`, `.json`, `.jsonl`) under the root. Seed files are copied to `seed/` when the agent is built and are read-only to the tools.
@@ -59,13 +59,23 @@ Every agent sees a map of the workspace at the top of its context: the file and 
 
 ## Limits and defaults
 
-- `max_depth` 10, `max_parallel` 10 tasks per call, `max_agents` 200 agents per run (each pair counts as two, including pairs started before a resume).
-- Workspace: `max_files` 200, `max_tokens` 250,000 in total, `max_file_tokens` 20,000 per note or seed. The bookkeeping files count only toward the total.
-- Memory: entries of at most `max_entry_tokens` (60) tokens, `max_entries_per_agent` (5) accepted `remember` calls per agent, and one new file per agent.
-- Every agent stops after 100 model turns and cuts each ordinary tool result at 100,000 characters, unless you pass another `loop`; one `loop` applies to every agent in the tree.
-- Each agent's history is trimmed to 60,000 tokens by dropping the oldest tool exchanges first; the task, the rules, and the map are never trimmed.
-- A card's summary and review are each cut to 400 tokens, and so are its dropped entries and its files in the text the parent reads; the journal keeps both lists whole.
+The defaults are generous on purpose: the point of this agent is work that outgrows one context, so a cap should stop a runaway tree, not a large honest task. All of them live in `vidbyte/lib/constants/infinite.py`.
+
+- `max_depth` 20, `max_parallel` 20 tasks per call, `max_agents` 1,000 agents per run (each pair counts as two, including pairs started before a resume).
+- Workspace: `max_files` 2,000, `max_tokens` 2,000,000 in total, `max_file_tokens` 100,000 per note or seed. The bookkeeping files count only toward the total.
+- Memory: entries of at most `max_entry_tokens` (150) tokens with up to eight tags and eight refs, `max_entries_per_agent` (25) accepted `remember` calls per agent, ten new files per agent, and up to 100 context items per task card.
+- Every agent stops after 500 model turns and cuts each ordinary tool result at 200,000 characters, unless you pass another `loop`; one `loop` applies to every agent in the tree.
+- Each agent's history is trimmed to 90,000 tokens by dropping the oldest tool exchanges first; the task, the rules, and the map are never trimmed. With the largest role prompt (about 2,100 tokens), the tool descriptions (about 5,000), and an 8,000-token map, an agent's whole context stays near 105,000 tokens, inside a 128,000-token model.
+- A card's summary and review are each cut to 800 tokens, and so are its dropped entries and its files in the text the parent reads; the journal keeps both lists whole. The map is cut at 8,000 tokens.
 - Tokens are estimated as characters divided by four everywhere (`TokenEstimate`).
+
+### Where each limit is enforced
+
+Limits are enforced in code, and the prompts only describe behavior: no prompt states a number the code could contradict, and a refusal names the limit it hit.
+
+- `max_depth` and `max_parallel` are enforced by `DelegationLimitsMiddleware` (`vidbyte/middleware/builtins/delegation_limits.py`), which the root and every generator carry at their own depth. It denies a `launch_subagent` call at the depth cap, or one carrying more tasks than `max_parallel`, before the tool runs, so nothing starts. The tool schema still declares `maxItems` for the model.
+- `max_agents` is checked by `launch_subagent` itself, because only the run's journal knows how many agents have started and which task names are replays that start none.
+- The workspace and memory caps are checked by `InfiniteWorkspace` against the files on disk, counted with `FolderUsage`.
 - `model_name` must be in `ProviderModelRegistry`'s catalog under `provider`, as the SDK's declarative `BaseAgentSettings` require. A plain `BaseAgent` accepts more names, such as `gpt-4.1-2025-04-14`, which these settings refuse. Set `ProviderModelRegistry.STRICT_MODEL_VALIDATION = False` to accept the names a plain `BaseAgent` accepts, such as a model released after this SDK version.
 
 The caps are checked against the files on disk before every tool write, so files that `bash` wrote count too; a refused write changes nothing.
@@ -73,6 +83,10 @@ The caps are checked against the files on disk before every tool write, so files
 ## Resume
 
 `resume(run_id=None)` and `aresume(run_id=None)` continue a run whose journal has no `run_finished`: the newest one, or the one named. A malformed run id, an unknown or finished run, or no unfinished run raises `ConfigurationError` before any model call. The resumed root starts a fresh conversation whose first message holds the original task, one short line per finished pair, and the names of pairs that started but never finished. Launching a finished name again returns its recorded card and runs nothing; an interrupted pair runs again from scratch, and its staged entries are lost by design. A cut-off last journal line is ignored; any other malformed line refuses the resume with its line number.
+
+## Shared helpers
+
+This package builds on canonical helpers in `vidbyte/lib/` rather than private copies: `RecordFieldValidator` and `RecordFieldConverter` (`vidbyte/lib/dataclasses/validation.py`) check every settings and record field; `ToolArguments.records` (`vidbyte/lib/tools/arguments.py`) reads the task cards; `FolderUsage` (`vidbyte/lib/tools/filesystem/usage.py`) counts the workspace; `LocalFileSystemBackend.write_text(atomic=True)` swaps in whole files; `AppendOnlyJsonl` (`vidbyte/lib/util/jsonl.py`) writes and repairs the journal; `TokenEstimate.cap` cuts card text; and `InfiniteMemoryToolRegistry` (`vidbyte/lib/registries/infinite.py`) names each agent's memory tools.
 
 ## File Index
 
@@ -94,6 +108,8 @@ The caps are checked against the files on disk before every tool write, so files
 - Use one process per workspace. The workspace lock is per process, so two processes can lose an entry, mint the same id twice, and interleave journal lines.
 - A crash after a pair committed its entries but before its `pair_finished` record re-runs that pair on resume, which can repeat near-duplicate entries and note text.
 - A parent's `timeout_seconds` includes the time it waits on its children, so a short timeout can end the root while it waits on a batch.
-- History past 60,000 tokens is trimmed by whole tool exchanges, and one tool output larger than that is dropped whole; read a smaller range or save the content to a note.
+- History past 90,000 tokens is trimmed by whole tool exchanges, and one tool output larger than that is dropped whole; read a smaller range or save the content to a note.
 - A skill reaches every agent through `system_prompt`, which every child inherits, or as a developer tool that task cards name.
 - Do not put secrets in the workspace: entries, notes, and journals are plain files that every agent and `bash` can read.
+- Keep deterministic limits out of the prompt families. A new cap is a constant, a settings field, and a check in code (middleware for a per-call cap, `InfiniteWorkspace` for a disk cap) whose refusal names it; the prompts say only that limits exist and are enforced.
+- Before adding a private helper here, look in `vidbyte/lib/` for a canonical one and add an option to it, as `RecordFieldValidator`'s `one_line` and `require_text_items` were added for this package.

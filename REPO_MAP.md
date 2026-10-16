@@ -82,7 +82,7 @@ The invariants an agent's configuration must satisfy before it is allowed to run
 
 ##### `vidbyte/agents/infinite/`
 
-A delegating agent for long tasks of any kind, built to treat its own context window as scarce. Its root hands work to fresh subagents that run in pairs, a generator that does one task and a verifier that checks and fixes it, and gets back only a short, capped result card per pair. Every agent in the tree shares one memory folder guarded by fixed limits on files, tokens, entry size, and per-agent writes, and a pair's memory entries are saved only after its verifier gives a verdict. Each run is journaled, so an interrupted run resumes without redoing finished pairs. Its records, enums, constants, and prompt text live lower in the shared substrate, and its preset tools in the toolsets folder.
+A delegating agent for long tasks of any kind, built to treat its own context window as scarce. Its root hands work to fresh subagents that run in pairs, a generator that does one task and a verifier that checks and fixes it, and gets back only a short, capped result card per pair. Every agent in the tree shares one memory folder guarded by fixed limits on files, tokens, entry size, and per-agent writes, and a pair's memory entries are saved only after its verifier gives a verdict. Its delegation caps are enforced by a built-in middleware, not by its prompts. Each run is journaled, so an interrupted run resumes without redoing finished pairs. Its records, enums, constants, and prompt text live lower in the shared substrate, and its preset tools in the toolsets folder.
 
 ##### `vidbyte/agents/jev/`
 
@@ -258,7 +258,7 @@ Deterministic hooks that run around a full run, around individual iterations, ar
 
 ##### `vidbyte/middleware/builtins/`
 
-The shipped set of policy middleware available out of the box, covering a wide range of concerns: audit logging, retry handling around transient failures, enforcing token and runtime budget limits, detecting unproductive repetition, enforcing tool-use policy, and a set of security-focused safeguards against certain classes of prompt manipulation. These represent the guardrails available for free without writing any custom middleware. Reading through this folder before writing new custom middleware is worthwhile, since the needed behavior may already exist here in some form. Each one plugs into the same general middleware interface described in the parent folder.
+The shipped set of policy middleware available out of the box, covering a wide range of concerns: audit logging, retry handling around transient failures, enforcing token and runtime budget limits, capping how deep and how wide an agent may delegate, detecting unproductive repetition, enforcing tool-use policy, and a set of security-focused safeguards against certain classes of prompt manipulation. These represent the guardrails available for free without writing any custom middleware. Reading through this folder before writing new custom middleware is worthwhile, since the needed behavior may already exist here in some form. Each one plugs into the same general middleware interface described in the parent folder.
 
 ##### `vidbyte/middleware/compaction/`
 

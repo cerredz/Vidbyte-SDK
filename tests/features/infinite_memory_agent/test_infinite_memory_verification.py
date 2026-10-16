@@ -47,6 +47,10 @@ from tests.features.infinite_memory_agent.infinite_memory_fixtures import (
     workspace_root,
     write_jsonl,
 )
+from vidbyte.lib.constants.infinite import (
+    INFINITE_DEFAULT_MAX_ENTRIES_PER_AGENT,
+    INFINITE_DEFAULT_MAX_ENTRY_TOKENS,
+)
 from vidbyte.lib.errors import VidbyteSdkError
 
 STAGED_TEXT = "Initech charges 30 USD per seat"
@@ -201,7 +205,7 @@ def test_verdict_is_read_from_the_last_matching_line_in_any_markdown_or_case(tmp
 
 
 STAGE_REFUSALS: tuple[tuple[str, dict[str, Any], tuple[Any, ...]], ...] = (
-    ("text over max_entry_tokens", {"kind": "fact", "text": "Globex pricing detail " * 15}, ("max_entry_tokens", 60)),
+    ("text over max_entry_tokens", {"kind": "fact", "text": "Globex pricing detail " * (INFINITE_DEFAULT_MAX_ENTRY_TOKENS // 4)}, ("max_entry_tokens", INFINITE_DEFAULT_MAX_ENTRY_TOKENS)),
     ("text of a live entry", {"kind": "fact", "text": "  acme pro COSTS 49 usd   per seat "}, ("already recorded as #7",)),
     ("supersedes a missing id", {"kind": "fact", "text": "Initech costs 30 USD per seat", "supersedes": 99}, (99,)),
 )
@@ -244,7 +248,7 @@ def test_a_pair_agents_remember_is_checked_against_the_entry_rules_when_it_stage
     assert not is_error(staged) and template_regex(prompt_text("remember_staged_prompt"), key="s1").search(staged), staged
     assert is_error(repeated) and "already staged as s1" in repeated, repeated
     # Refused calls cost nothing: after one accepted call the generator still has 4 of its 5 entries.
-    assert template_regex(prompt_text("quota_line"), entries_left=4, entries_max=5).search(repeated), repeated
+    assert template_regex(prompt_text("quota_line"), entries_left=INFINITE_DEFAULT_MAX_ENTRIES_PER_AGENT - 1, entries_max=INFINITE_DEFAULT_MAX_ENTRIES_PER_AGENT).search(repeated), repeated
     checked = tool_result(tree.calls_by(verifier("p"))[-1], "remember")
     assert is_error(checked) and "already staged as s1" in checked, checked
     assert not re.search(r"(?<![\w-])s2(?![\w-])", tree.first_call(verifier("p")).prompt), "only s1 may reach the verifier as staged"

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from vidbyte.lib.registries.agents import AgentRegistry
 from vidbyte.lib.registries.components import ComponentRegistry
+from vidbyte.lib.registries.infinite import InfiniteMemoryToolRegistry
 from vidbyte.lib.registries.models import ProviderModelRegistry
 from vidbyte.lib.registries.pricing import DEEPSEEK_TIME_OF_DAY_RATES, OPENAI_GPT56_TIER_RATES, OPENAI_GPT6_TIER_RATES, ModelPricing, ModelPricingRegistry, PRICING_AS_OF, PRICING_SOURCE_URL, PROVIDER_PRICING
 from vidbyte.lib.registries.prompts import PromptRecord, Prompts
@@ -28,6 +29,7 @@ from vidbyte.lib.registries.actors import ActorRegistry, actor_registry
 __all__ = [
     "AgentRegistry",
     "ComponentRegistry",
+    "InfiniteMemoryToolRegistry",
     "ProviderModelRegistry",
     "ProviderKeyMatcher",
     "ModelPricing",

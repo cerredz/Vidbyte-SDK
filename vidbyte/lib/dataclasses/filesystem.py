@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from vidbyte.lib.dataclasses.validation import RecordFieldValidator
 from vidbyte.lib.enums import Platform
 from vidbyte.lib.errors import ConfigurationError, ToolExecutionError
 
@@ -12,6 +13,9 @@ if TYPE_CHECKING:
 
 # The smallest overwrite line limit; 0 would refuse every existing file.
 _MIN_OVERWRITE_LINES = 1
+
+# The smallest file count or token total a folder can hold.
+_MIN_FOLDER_COUNT = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,6 +28,19 @@ class FileStat:
     is_dir: bool
     size: int | None
     modified_time: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class FolderTotals:
+    """How many files a folder holds and their estimated token total, as FolderUsage counts them from disk."""
+
+    files: int
+    tokens: int
+
+    def __post_init__(self) -> None:
+        # Both are counts, so neither can be negative or a bool.
+        for name in ("files", "tokens"):
+            RecordFieldValidator.require_int(getattr(self, name), f"FolderTotals.{name}", minimum=_MIN_FOLDER_COUNT)
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,5 +105,6 @@ class FileSystemToolConfig:
 __all__ = [
     "FileStat",
     "FileSystemToolConfig",
+    "FolderTotals",
     "OverwriteLineLimit",
 ]
