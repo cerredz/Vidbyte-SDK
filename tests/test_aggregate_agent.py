@@ -228,6 +228,20 @@ class MultiProviderAggregatorTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ConfigurationError):
             MultiProviderAggregator([("a", FakeAgent("a", "x"))], EchoAggregator(), AggregateConfig(), "no placeholders")
 
+    def test_template_with_an_unknown_placeholder_raises(self) -> None:
+        # [Hidden Failure] An example JSON object is an unknown {name} to str.format, so it is refused before any proposer runs.
+        with self.assertRaises(ConfigurationError) as ctx:
+            _engine([("a", FakeAgent("a", "x"))], template=_TEMPLATE + '\nReply as JSON like {"answer": "..."}')
+        self.assertIn('"answer"', str(ctx.exception))
+
+    async def test_template_with_escaped_braces_renders_them_literally(self) -> None:
+        # [Edge Case] Escaped braces construct and reach the aggregator as a literal JSON example.
+        aggregator = EchoAggregator()
+        engine = _engine([("a", FakeAgent("a", "alpha-out"))], aggregator=aggregator, template=_TEMPLATE + '\nReply as JSON like {{"answer": "..."}}')
+        await engine.aggregate("the-question")
+        self.assertIn("alpha-out", aggregator.last_message or "")
+        self.assertTrue((aggregator.last_message or "").endswith('Reply as JSON like {"answer": "..."}'))
+
     def test_empty_proposers_raises(self) -> None:
         # [Edge Case] The engine requires at least one proposer.
         with self.assertRaises(ConfigurationError):
