@@ -401,6 +401,9 @@ GROK_RESUME_CORE = "shared/resume-session/CORE.md"
 # skill puts it in the run's own export (D-28).
 GROK_CODE_REVIEW_FRAGMENT = "deep code quality audit of the current branch's changes"
 MUSE_READ_SKILL_TOOL = "read_skill"
+# The read_skill argument whose value must equal the skill id exactly
+# (D-33, A-17); its args are parsed as JSON, never folded.
+MUSE_READ_SKILL_ID_MEMBER = "id"
 MUSE_CREATE_GOAL_TOOL = "create_goal"
 GROK_EVIDENCE_TOOLS: MappingProxyType[GrokCommand, tuple[str, ...]] = MappingProxyType(
     {

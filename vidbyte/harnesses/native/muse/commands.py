@@ -144,7 +144,7 @@ class MuseCommandRun:
         # (spec INV-8); every error from here on names the new thread.
         calls = await MuseHelperRun.tool_calls(prompted, config, errors, thread_id=thread_id)
         if calls is not None:
-            NativeCommandEvidence.require(calls, tools=(tool,), fragment=fragment, errors=errors, request=prompted, thread_id=thread_id)
+            NativeCommandEvidence.require(calls, tools=(tool,), fragment=fragment, member=native_threads.MUSE_READ_SKILL_ID_MEMBER, errors=errors, request=prompted, thread_id=thread_id)
             return result
 
         # After a compaction the items start past the early call, so
