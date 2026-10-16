@@ -68,6 +68,7 @@ from vidbyte.agents.contracts import (
     MinTokens,
     MinToolCalls,
     MinToolCallsById,
+    SchemaConformance,
 )
 from vidbyte.agents.settings.loop import AgentLoopSettings
 from vidbyte.agents.settings.tool import ToolSettings
@@ -90,6 +91,13 @@ from vidbyte.lib.errors import CodexAgentError, ConfigurationError
 
 FINAL_RESPONSE = "codex reply"
 DURATION_MS = 2500
+ANSWER_SCHEMA = {
+    "type": "object",
+    "properties": {"answer": {"type": "string"}},
+    "required": ["answer"],
+    "additionalProperties": False,
+}
+SCHEMA_VALID_RESPONSE = '{"answer": "42"}'
 
 
 def _command(
@@ -194,6 +202,7 @@ class CounterShapeParityTests(unittest.TestCase):
             "tool_calls_by_name",
             "tokens_used",
             "elapsed_seconds",
+            "final_output",
             "final_output_chars",
             "final_output_tokens",
             "cost_spent_usd",
@@ -356,6 +365,15 @@ class UsageAndOutputCounterTests(unittest.TestCase):
 
     def test_counts_final_output_characters(self) -> None:
         self.assertEqual(_counters()["final_output_chars"], len(FINAL_RESPONSE))
+
+    def test_carries_the_final_response_text(self) -> None:
+        self.assertEqual(_counters()["final_output"], FINAL_RESPONSE)
+
+    def test_carries_empty_text_when_the_turn_has_no_final_response(self) -> None:
+        counters = _counters(_run_result(final_response=""))
+
+        self.assertEqual(counters["final_output"], "")
+        self.assertEqual(counters["final_output_chars"], 0)
 
     def test_reports_the_supplied_cost(self) -> None:
         self.assertEqual(_counters(cost_usd=0.42)["cost_spent_usd"], 0.42)
@@ -587,6 +605,44 @@ class AgentContractIntegrationTests(unittest.IsolatedAsyncioTestCase):
         reply = await agent.arun(CodexRunInput.text("go"))
 
         self.assertEqual(reply.content, FINAL_RESPONSE)
+
+    async def test_schema_conformance_accepts_a_schema_valid_reply(self) -> None:
+        agent, _ = _build_agent(
+            loop=AgentLoopSettings(output_contracts=(SchemaConformance(ANSWER_SCHEMA),)),
+            result=_run_result(final_response=SCHEMA_VALID_RESPONSE),
+        )
+
+        reply = await agent.arun(CodexRunInput.text("go"))
+
+        self.assertEqual(reply.content, SCHEMA_VALID_RESPONSE)
+        self.assertEqual(reply.metadata[CODEX_CONTRACTS_KEY].unmet, ())
+
+    async def test_schema_conformance_rejects_a_non_json_reply(self) -> None:
+        agent, _ = _build_agent(
+            loop=AgentLoopSettings(output_contracts=(SchemaConformance(ANSWER_SCHEMA),)),
+            result=_run_result(final_response=FINAL_RESPONSE),
+        )
+
+        with self.assertRaises(CodexAgentError) as caught:
+            await agent.arun(CodexRunInput.text("go"))
+
+        self.assertEqual(
+            caught.exception.failure_code, FailureCode.CODEX_CONTRACT_UNMET.value
+        )
+        self.assertIn("SchemaConformance", str(caught.exception))
+
+    async def test_published_counters_leave_out_the_final_text(self) -> None:
+        # The reply already carries the text; the evidence keeps only its measurements.
+        agent, _ = _build_agent(
+            loop=AgentLoopSettings(output_contracts=(SchemaConformance(ANSWER_SCHEMA),)),
+            result=_run_result(final_response=SCHEMA_VALID_RESPONSE),
+        )
+
+        reply = await agent.arun(CodexRunInput.text("go"))
+
+        counters = reply.metadata[CODEX_CONTRACTS_KEY].counters
+        self.assertNotIn("final_output", counters)
+        self.assertEqual(counters["final_output_chars"], len(SCHEMA_VALID_RESPONSE))
 
     async def test_an_agent_without_a_loop_publishes_no_contract_key(self) -> None:
         agent, _ = _build_agent()
