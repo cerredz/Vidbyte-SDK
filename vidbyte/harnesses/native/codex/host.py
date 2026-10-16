@@ -1,12 +1,12 @@
 """FILE: vidbyte/harnesses/native/codex/host.py
 
-PURPOSE: CodexHost, one Codex app-server process that many threads and turns share for one async with block: it starts threads and turns, goal runs, forks, reviews and subagent launches, returns a handle as soon as Codex accepts a turn, and answers waits, results, steering, interrupts and per-thread usage from the turns it registered.
+PURPOSE: CodexHost, one Codex app-server process that many threads and turns share for one async with block: it starts threads and turns, goal runs, forks, reviews and subagent launches, returns a handle as soon as Codex accepts a turn, and answers waits, results, steering, interrupts and per-thread usage from the turns it registered. It also lists, searches, reads, compacts and deletes stored threads, and gets and runs goals and skills.
 ROLE IN CODEBASE: The main class of vidbyte/harnesses/native/codex/; the module functions in oneshot.py and the CodexHostTools toolset in vidbyte/tools/ both drive it.
-ARCHITECTURE NOTE: Importing this module never loads openai-codex: __aenter__ imports connection, wire and turns, the modules that do (D-21). Each public method is one narrated main function over a flat list of leaf helpers; CodexConnection sends every call and keeps background tasks, CodexPreflight runs every check, the translators in wire.py build params and records, CodexTurnRegistry owns every turn, and each CodexLiveTurn sends its own one stop.
+ARCHITECTURE NOTE: Importing this module never loads openai-codex: __aenter__ imports connection, wire and turns, the modules that do (D-21). Each public method is one narrated main function over a flat list of leaf helpers; CodexConnection sends every call and keeps background tasks, CodexPreflight runs every check, the translators in wire.py build params and records, CodexTurnRegistry owns every turn, and each CodexLiveTurn sends its own one stop. CodexThreadHelpers runs the thread helpers on those same parts, and CodexSkillFunctions runs goals and skills through the host's own public functions, typed by its CodexSkillHost Protocol so it never imports this module.
 COMMON MODIFICATION PATTERNS: A new operation is one public method: guard, field rules, preflight, the calls through CodexConnection, then a record from CodexResponseTranslator. A new way a turn can end goes through CodexTurnRegistry.finish, so the first outcome still wins.
 KNOWN EDGE CASES: Close wins over a turn still starting (EC-79); a start whose caller left is still owned and gets one interrupt (INV-11); a goal run registers only after its budget echo matches (INV-25); a user reviewer that Codex reports stops the operation before the thread spends (D-32); a review is read back after registration, because its first events can be dropped (D-23).
-RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.1, 8.5 and 9.2)
-TESTS: tests/features/codex_host/test_codex_host_lifecycle.py, tests/features/codex_host/test_codex_host_threads.py, tests/features/codex_host/test_codex_host_turns.py, tests/features/codex_host/test_codex_host_review_goals.py, tests/features/codex_host/test_codex_host_failures.py
+RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.1, 8.5 and 9.2); docs/spec/codex-host-thread-helpers/spec.md (sections 8.5 and 12.3)
+TESTS: tests/features/codex_host/test_codex_host_lifecycle.py, tests/features/codex_host/test_codex_host_threads.py, tests/features/codex_host/test_codex_host_turns.py, tests/features/codex_host/test_codex_host_review_goals.py, tests/features/codex_host/test_codex_host_failures.py, tests/features/codex_host/test_codex_host_thread_helpers.py, tests/features/codex_host/test_codex_host_goal_skills.py, tests/features/codex_host/test_codex_host_helper_lifecycle.py, tests/features/codex_host/test_codex_host_helper_surface.py
 """
 
 from __future__ import annotations
@@ -21,6 +21,8 @@ from typing import TYPE_CHECKING, Any, cast
 from vidbyte.agents.codex.tools import CodexToolBridge, CodexToolTranslator
 from vidbyte.harnesses.native.codex.errors import GOAL_START_CALL, CodexErrorMapper
 from vidbyte.harnesses.native.codex.preflight import CodexPreflight
+from vidbyte.harnesses.native.codex.skill_functions import CodexSkillFunctions
+from vidbyte.harnesses.native.codex.thread_helpers import CodexThreadHelpers
 from vidbyte.lib.constants.codex import (
     CODEX_ACCOUNT_READ_METHOD,
     CODEX_GOAL_CANCEL_CALL,
@@ -28,8 +30,11 @@ from vidbyte.lib.constants.codex import (
     CODEX_HOST_BINARY_NAME,
     CODEX_HOST_EXPERIMENTAL_API_TEXT,
     CODEX_HOST_MIN_LIVE_TURNS,
+    CODEX_HOST_THREAD_LIST_DEFAULT_LIMIT,
+    CODEX_OPENAI_DOCS_SKILL_NAME,
     CODEX_RATE_LIMITS_READ_METHOD,
     CODEX_REVIEW_START_METHOD,
+    CODEX_SKILLS_LIST_METHOD,
     CODEX_THREAD_FORK_METHOD,
     CODEX_THREAD_LIST_METHOD,
     CODEX_THREAD_NAME_SET_METHOD,
@@ -49,11 +54,15 @@ from vidbyte.lib.dataclasses.codex_host import (
     CodexRateLimits,
     CodexReadiness,
     CodexReviewTarget,
+    CodexSkillInfo,
     CodexSpawnRequest,
+    CodexThreadGoal,
     CodexThreadInfo,
     CodexThreadPage,
+    CodexThreadSummary,
     CodexThreadUsage,
     CodexTurnHandle,
+    CodexTurnPage,
     CodexTurnSnapshot,
     _reject_bad_seconds,
     _reject_small_int,
@@ -123,6 +132,8 @@ class CodexHost:
         self._responses: CodexResponseTranslator
         self._registry: CodexTurnRegistry
         self._preflight: CodexPreflight
+        self._threads: CodexThreadHelpers
+        self._skills: CodexSkillFunctions
 
     async def __aenter__(self) -> CodexHost:
         # @intent open-once-and-close-what-a-failed-open-started
@@ -175,6 +186,10 @@ class CodexHost:
         self._connection = CodexConnection(self._params.client_config(binary), loop)
         self._connected = True
         self._preflight = CodexPreflight(self._connection, self._params, self._responses, self._registry)
+        # The thread helpers share the host's parts; the run wrappers
+        # go through the host's own public functions.
+        self._threads = CodexThreadHelpers(self._connection, self._params, self._responses, self._preflight, self._registry)
+        self._skills = CodexSkillFunctions(self)
         found, supported = self._responses.version(await self._connection.launch(target))
         if not supported:
             raise CodexErrorMapper.version_unsupported(found)
@@ -489,6 +504,111 @@ class CodexHost:
         # Register the review turn, then read it back before returning.
         turn = self._track_review(response, pricing)
         return await self._accept_review(operation, turn, late=False)
+
+    async def list_recent_codex_threads(self, cwd: str, limit: int = CODEX_HOST_THREAD_LIST_DEFAULT_LIMIT) -> tuple[CodexThreadSummary, ...]:
+        # Up to limit threads of every top-level source, the SDK's own
+        # included, newest first, with no usage check (INV-10, INV-11).
+        operation = CodexHostOperation.LIST_RECENT_CODEX_THREADS
+        self._guard(operation, talks=True)
+        return await self._threads.list_threads(operation, cwd, "", None, limit)
+
+    async def list_codex_threads_since(self, cwd: str, since: int, limit: int = CODEX_HOST_THREAD_LIST_DEFAULT_LIMIT) -> tuple[CodexThreadSummary, ...]:
+        # The threads updated at or after since, in Unix seconds,
+        # newest first; an empty window is () (INV-14, D-9).
+        operation = CodexHostOperation.LIST_CODEX_THREADS_SINCE
+        self._guard(operation, talks=True)
+        return await self._threads.list_threads(operation, cwd, "", since, limit)
+
+    async def search_codex_threads(self, cwd: str, query: str, limit: int = CODEX_HOST_THREAD_LIST_DEFAULT_LIMIT) -> tuple[CodexThreadSummary, ...]:
+        # The threads whose title Codex matches with query, newest
+        # first (D-6).
+        operation = CodexHostOperation.SEARCH_CODEX_THREADS
+        self._guard(operation, talks=True)
+        return await self._threads.list_threads(operation, cwd, query, None, limit)
+
+    async def get_codex_thread_lineage(self, thread_id: str) -> tuple[CodexThreadSummary, ...]:
+        # The thread and its fork or spawn parents, child first; the
+        # chain is complete when the last has no parent (INV-16).
+        operation = CodexHostOperation.GET_CODEX_THREAD_LINEAGE
+        self._guard(operation, talks=True)
+        return await self._threads.lineage(operation, thread_id)
+
+    async def list_codex_turns(self, thread_id: str, cursor: str = "", limit: int | None = None) -> CodexTurnPage:
+        # One page of the stored transcript, oldest first, with every
+        # item; a None limit means Codex's own page size (INV-17).
+        operation = CodexHostOperation.LIST_CODEX_TURNS
+        self._guard(operation, talks=True)
+        return await self._threads.turns(operation, thread_id, cursor, limit)
+
+    async def compact_codex_thread(self, thread_id: str) -> None:
+        """Start Codex's compaction of a stored thread's history.
+
+        The compaction runs inside this host's codex app-server process,
+        so it finishes only while the host stays open. A thread that is
+        not loaded here is loaded first, the way continue_codex_thread
+        loads it, and is refused with codex.goal_unfinished while it has
+        an unfinished goal.
+        """
+        # Busy and unknown threads are refused before anything is sent
+        # (INV-8, INV-18).
+        operation = CodexHostOperation.COMPACT_CODEX_THREAD
+        self._guard(operation, talks=True)
+        await self._threads.compact(operation, thread_id)
+
+    async def delete_codex_thread(self, thread_id: str) -> None:
+        """Delete a stored thread for good; it cannot be undone.
+
+        This is a plain function and never a tool, so no model can
+        reach it. Busy and unknown threads are refused.
+        """
+        # Busy and unknown threads are refused before anything is sent
+        # (INV-8, INV-19).
+        operation = CodexHostOperation.DELETE_CODEX_THREAD
+        self._guard(operation, talks=True)
+        await self._threads.delete(operation, thread_id)
+
+    async def get_codex_goal(self, thread_id: str) -> CodexThreadGoal | None:
+        # The thread's stored goal, or None, without loading the thread
+        # (INV-20, INV-33).
+        operation = CodexHostOperation.GET_CODEX_GOAL
+        self._guard(operation, talks=True)
+        return await self._threads.goal(operation, thread_id)
+
+    async def run_codex_goal(self, objective: str, token_budget: int | None = None, request: CodexSpawnRequest | None = None) -> CodexTurnHandle:
+        # @intent a-goal-run-is-confirmed-before-its-handle-returns
+        # Start a goal run on a new thread with the caller's request,
+        # and return its handle only once Codex stored that goal
+        # (INV-21, INV-22).
+        operation = CodexHostOperation.RUN_CODEX_GOAL
+        self._guard(operation, talks=True)
+        return await self._skills.run_goal(operation, objective, token_budget, request)
+
+    async def list_codex_skills(self, cwd: str = "") -> tuple[CodexSkillInfo, ...]:
+        # The skills Codex lists for one folder, or for the
+        # app-server's own when cwd is empty, with no usage check
+        # (INV-23).
+        operation = CodexHostOperation.LIST_CODEX_SKILLS
+        self._guard(operation, talks=True)
+        connection = self._connection
+        listing = connection.raw(CODEX_SKILLS_LIST_METHOD, self._params.skills_list(cwd))
+        return self._responses.skills(await connection.call(operation, CODEX_SKILLS_LIST_METHOD, listing))
+
+    async def run_codex_skill(self, skill: str, prompt: str, request: CodexSpawnRequest | None = None) -> CodexTurnHandle:
+        # @intent a-skill-run-is-confirmed-before-its-handle-returns
+        # Start a new thread whose first turn carries the skill as a
+        # first-class input item, and return its handle only once Codex
+        # recorded that item (INV-24, INV-25, INV-34).
+        operation = CodexHostOperation.RUN_CODEX_SKILL
+        self._guard(operation, talks=True)
+        return await self._skills.run_skill(operation, skill, prompt, request)
+
+    async def run_codex_openai_docs(self, question: str, request: CodexSpawnRequest | None = None) -> CodexTurnHandle:
+        # @intent the-docs-run-is-the-openai-docs-skill-run
+        # run_codex_skill for the bundled openai-docs skill, which
+        # answers from the official OpenAI documentation (INV-26).
+        operation = CodexHostOperation.RUN_CODEX_OPENAI_DOCS
+        self._guard(operation, talks=True)
+        return await self._skills.run_skill(operation, CODEX_OPENAI_DOCS_SKILL_NAME, question, request)
 
     def _guard(self, operation: CodexHostOperation, *, talks: bool) -> None:
         # Every method needs an open host and the loop that opened it; a
