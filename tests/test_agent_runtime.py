@@ -44,7 +44,7 @@ from vidbyte.context import ContextArtifact, ContextManager, ContextPermissions,
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.enums import AgentRuntimeType, ModelModality
-from vidbyte.lib.errors import AgentExecutionError
+from vidbyte.lib.errors import AgentExecutionError, ConfigurationError
 from vidbyte.lib.dataclasses.context import BaseContext as StrategyContext
 from vidbyte.tools import BaseTool, ToolCall, ToolCallContext, ToolPermission, ToolResult, ToolSpec, Tools, tool
 from vidbyte.tools.security import PermissionPolicy
@@ -1202,6 +1202,24 @@ class NonLinearRuntimeRegressionTests(unittest.TestCase):
             with self.subTest(topology=topology):
                 result, _ = self._run(ActorRuntime(topology=topology))
                 self.assertEqual(result.content, "ANSWER")
+
+    def test_actor_runtime_rejects_a_non_actor_topology(self) -> None:
+        # @intent actor-runtime-needs-an-actor-topology
+        # [Regression] A linear, search, or JEV topology was accepted and silently ran that runtime without the actor settings.
+        for topology in (AgentRuntimeType.LINEAR, AgentRuntimeType.MCTS_SEARCH, AgentRuntimeType.JEV):
+            for value in (topology, topology.value):
+                with self.subTest(topology=value):
+                    with self.assertRaises(ConfigurationError) as caught:
+                        ActorRuntime(topology=value, max_loop=2)
+                    self.assertIn(topology.value, str(caught.exception))
+
+    def test_actor_runtime_accepts_every_actor_topology(self) -> None:
+        # @intent actor-runtime-needs-an-actor-topology
+        # ACTOR_MODEL stays a supported alias of the point-to-point topology next to the two explicit ones.
+        for topology in (AgentRuntimeType.ACTOR_MODEL, AgentRuntimeType.ACTOR_MODEL_P2P, AgentRuntimeType.ACTOR_MODEL_BROADCAST):
+            for value in (topology, topology.value):
+                with self.subTest(topology=value):
+                    self.assertIs(ActorRuntime(topology=value).runtime_type, topology)
 
     def test_actor_quiescence_does_not_complete_the_run_twice(self) -> None:
         # [Regression] A reply that completed the run during the quiescence poll was set again.

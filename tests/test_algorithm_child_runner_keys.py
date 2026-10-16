@@ -2,11 +2,12 @@
 
 PURPOSE:
     Proves a RunnerHandle keeps the agent's matched api_keys record and
-    model_mode through with_runner and wrap_text, and that the independent
-    critic's explicit reviewer runner is built with them.
+    model_mode through with_runner and wrap_text, that the independent
+    critic's explicit reviewer runner is built with them, and that a critic
+    whose producer failed over reviews on the fallback model.
 ROLE IN CODEBASE:
     Regression tests for vidbyte/lib/dataclasses/runner.py and for
-    IndependentCriticRuntimeAlgorithm._reviewer_handle in
+    IndependentCriticRuntimeAlgorithm._reviewer_handle and arun in
     vidbyte/agents/algorithms/independent_critic.py.
 ARCHITECTURE NOTE:
     A real TextModelRunner is built offline from dummy, format-valid keys with
@@ -31,6 +32,8 @@ import os
 import unittest
 from unittest.mock import patch
 
+from vidbyte import ContextWindow
+from vidbyte.agents import AgentFallback, AgentRuntime, FallbackModel
 from vidbyte.agents.algorithms.independent_critic import IndependentCriticRuntimeAlgorithm
 from vidbyte.context.algorithms import IndependentCriticAlgorithm
 from vidbyte.lib.agents.prosecutor_defender_judge import runner_model_name
@@ -38,7 +41,9 @@ from vidbyte.lib.constants.jev import PROVIDER_API_KEY_ENV_VARS, VIDBYTE_API_KEY
 from vidbyte.lib.dataclasses.agents import ProviderKeys
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.enums import TextModelMode
-from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.errors import ConfigurationError, ProviderRequestError
+from vidbyte.tools import Tools
+from vidbyte.tools.security import PermissionPolicy
 
 # Dummy, format-valid provider keys; nothing here is a real credential.
 _KEYS = ProviderKeys(providers=("deepseek", "gemini"), keys=("sk-test-deepseek", "AIza" + "t" * 35))
@@ -88,6 +93,55 @@ class CriticReviewerKeysTests(unittest.TestCase):
         with self.assertRaises(ConfigurationError) as ctx:
             self.critic._reviewer_handle(_handle(api_keys=deepseek_only))
         self.assertIn("Missing API key for provider gemini", str(ctx.exception))
+
+
+class _ScriptedRunner:
+    """A model that answers from a script, or raises a provider outage on every call when it is down."""
+
+    def __init__(self, model: str, replies: tuple[str, ...] = (), *, down: bool = False) -> None:
+        self.model, self.replies, self.down = model, list(replies), down
+        self.prompts: list[str] = []
+
+    def model_name(self) -> str:
+        return self.model
+
+
+async def _invoke(runner: _ScriptedRunner, prompt: str, **kwargs: object) -> str:
+    runner.prompts.append(prompt)
+    if runner.down:
+        raise ProviderRequestError("primary is down", provider="deepseek", status_code=503)
+    return runner.replies.pop(0)
+
+
+class _BackupChain(AgentFallback):
+    """A deepseek -> openai chain whose backup is a scripted runner, so no real runner is built."""
+
+    def __init__(self, backup: _ScriptedRunner) -> None:
+        super().__init__([FallbackModel(provider="deepseek", model="deepseek-chat"), FallbackModel(provider="openai", model=backup.model)])
+        self.backup = backup
+
+    def build_runner(self, index: int) -> object:
+        return self.backup
+
+
+class CriticAfterFailoverTests(unittest.IsolatedAsyncioTestCase):
+    async def test_review_runs_on_the_fallback_model_the_producer_switched_to(self) -> None:
+        primary = _ScriptedRunner("deepseek-chat", down=True)
+        backup = _ScriptedRunner("gpt-backup", ("FINAL Paris.", '{"verdict": "pass", "summary": "Checked.", "findings": []}'))
+        runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=Tools(), permission_policy=PermissionPolicy(), algorithm=ContextWindow.preset.independent_critic, fallback=_BackupChain(backup))
+        context = runtime.build_context("Look up Paris.", base_context=None, history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+        handle = RunnerHandle(runner=primary, provider="deepseek", invoke=_invoke, extract_text=str, extract_metadata=lambda result: {})
+
+        # The default failure policy raises when the review fails, so completing proves the review ran.
+        result = await runtime.arun("Look up Paris.", handle=handle, context=context)
+
+        self.assertEqual(result.output, "FINAL Paris.")
+        self.assertEqual(len(primary.prompts), 1)
+        self.assertEqual(len(backup.prompts), 2)
+        self.assertIn("FINAL Paris.", backup.prompts[1])
+        review = result.metadata["independent_critic"]
+        self.assertEqual(review["status"], "reviewed")
+        self.assertEqual((review["reviewer"]["provider"], review["reviewer"]["model"]), ("openai", "gpt-backup"))
 
 
 if __name__ == "__main__":
