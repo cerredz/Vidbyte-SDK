@@ -205,6 +205,8 @@ GROK_SUMMARY_FILE = "summary.json"
 GROK_CWD_FILE = ".cwd"
 GROK_USER_HOME_PARTS = (".grok",)
 MUSE_EXPORT_PARTS = ("export", "thread.json")
+# The helpers open a vendor file in binary and read it up to its cap.
+NATIVE_BINARY_READ_MODE = "rb"
 
 # Fixed option values and separators.
 GROK_JSON_OUTPUT_FORMAT = "json"
