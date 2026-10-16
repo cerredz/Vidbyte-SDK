@@ -24,6 +24,7 @@ from vidbyte.lib.constants.codex import (
     CODEX_HOST_INPUT_CHECK_INTERVAL_SECONDS,
     CODEX_HOST_INPUT_CHECK_TURN_LIMIT,
     CODEX_HOST_SKILL_NAMES_IN_ERROR,
+    CODEX_USER_MESSAGE_ITEM_TYPE,
 )
 from vidbyte.lib.dataclasses.codex import (
     CodexRunInput,
@@ -62,8 +63,6 @@ APP_SERVER_PLACE = "the app-server's working folder"
 NAME_SEPARATOR = ", "
 MORE_NAMES_TEXT = " and {count} more"
 NO_NAMES_TEXT = "none"
-# The stored item that holds a turn's recorded input.
-USER_MESSAGE_ITEM_TYPE = "userMessage"
 
 
 class CodexSkillHost(Protocol):
@@ -217,7 +216,7 @@ class CodexSkillFunctions:
                     return None
                 await asyncio.sleep(CODEX_HOST_INPUT_CHECK_INTERVAL_SECONDS)
             page = await self._host.list_codex_turns(handle.thread_id, limit=CODEX_HOST_INPUT_CHECK_TURN_LIMIT)
-            content = next((item.fields["content"] for turn in page.turns if turn.turn_id == handle.turn_id for item in turn.items if item.type == USER_MESSAGE_ITEM_TYPE), None)
+            content = next((item.fields["content"] for turn in page.turns if turn.turn_id == handle.turn_id for item in turn.items if item.type == CODEX_USER_MESSAGE_ITEM_TYPE), None)
             if content is not None:
                 return list(content)
         return None

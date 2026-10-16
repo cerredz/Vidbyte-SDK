@@ -322,6 +322,8 @@ CODEX_TOOL_CALL_TIMEOUT_SECONDS = 300.0
 # inflate every effort floor by an amount that varies with the prompt.
 CODEX_TOOL_ITEM_TYPES = frozenset({"commandExecution", "mcpToolCall", "dynamicToolCall"})
 CODEX_COMPACTION_ITEM_TYPE = "contextCompaction"
+# The stored item that holds a turn's recorded input.
+CODEX_USER_MESSAGE_ITEM_TYPE = "userMessage"
 CODEX_ITEM_COMPLETED_STATUS = "completed"
 CODEX_COMMAND_SUCCESS_EXIT_CODE = 0
 CODEX_MILLISECONDS_PER_SECOND = 1000
@@ -554,6 +556,7 @@ __all__ = [
     "CODEX_ITEM_COMPLETED_STATUS",
     "CODEX_CONTRACTS_KEY",
     "CODEX_COMPACTION_ITEM_TYPE",
+    "CODEX_USER_MESSAGE_ITEM_TYPE",
     "CODEX_COMMAND_SUCCESS_EXIT_CODE",
     "CODEX_NEXT_FORK_DEPTH",
     "CODEX_MIDDLEWARE_METADATA_KEY",
