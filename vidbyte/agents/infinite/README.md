@@ -119,7 +119,7 @@ Each event is an `InfiniteEvent` whose `kind` is an `InfiniteEventKind`:
 
 Every event has `run_id`, `agent_key`, `role`, `depth`, `at`, a one-line `summary`, and typed `details`, a record from `vidbyte.lib.dataclasses.infinite` that serializes with `dataclasses.asdict`. Launch and pair-outcome events carry the launching agent (`root`, or a generator); memory events carry the agent that acted. The root is at depth 0 and a pair's agents at their launcher's depth plus 1; `at` is UTC, to the millisecond.
 
-- Caps: a summary is at most 280 characters, texts 500, paths 500, lines 120, and labels 64; a list shows its first five items and counts the rest in its `*_omitted` field; every count is at most 2^63 - 1. Cut text ends with ` … [cut]`, and a lone surrogate becomes `?`. Every details record is at most 32,768 bytes as JSON (27,015 at worst), and a whole event at most 31,091.
+- Caps: a summary is at most 280 characters, texts 500, paths 500, lines 120, and labels 64; a list shows its first five items and counts the rest in its `*_omitted` field; every count is at most 2^63 - 1. Cut text ends with ` … [cut]`, and a lone surrogate becomes `?`. Every details record is at most 32,768 bytes as JSON (27,015 at worst), and a whole event at most 31,093.
 - Keys: a pair key over 508 characters becomes `~`, 16 hexadecimal digits of its SHA-256, a slash, and its last 490 characters; an agent key keeps its `/gen` or `/ver`. Keys are never cut with the marker.
 - Usage: `tokens` sums the replies' `UsageRollup`s, and `cost_usd` is `None` whenever any part of the cost is unknown, never 0.
 - Note paths are workspace-relative POSIX paths, so `./notes/a.md` and `notes/a.md` are one note.
