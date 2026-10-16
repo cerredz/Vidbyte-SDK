@@ -762,6 +762,12 @@ class MechanicalBloatScrubberCompaction(BaseCompaction):
         # Scrubs ANSI escapes, long base64-like spans, and excess repeated lines.
         result = []
         for message in messages:
+            # @intent scrubber-leaves-call-turns-alone
+            # A call turn's content renders its calls (a repr of the message, tool_use block or part), not text the model
+            # wrote, and its arguments cannot be rewritten; scrubbing it would write that repr back in front of the call.
+            if message.kind == "tool_call":
+                result.append(message)
+                continue
             scrubbed, stats = _scrub_bloat_text(message.content, base64_min_chars=self.base64_min_chars, max_repeated_lines=self.max_repeated_lines, placeholder=self.placeholder)
             if scrubbed != message.content:
                 result.append(_replace_message_content(message, scrubbed, {"compaction": CompactionMode.MECHANICAL_BLOAT_SCRUBBER.value, **stats}))
