@@ -200,6 +200,11 @@ class MultiProviderAggregator:
         missing = _REQUIRED_TEMPLATE_PLACEHOLDERS - found
         if missing:
             raise ConfigurationError(f"Aggregate synthesis template is missing required placeholders: {sorted(missing)}.")
+        # @intent templates-render-or-are-refused
+        # str.format raises on any other {name}, such as an example JSON object, so synthesis would fail only after every proposer ran.
+        unknown = found - _REQUIRED_TEMPLATE_PLACEHOLDERS
+        if unknown:
+            raise ConfigurationError(f"Aggregate synthesis template has unknown placeholders {sorted(unknown)}; write literal braces as {{{{ and }}}}.")
 
 
 class AggregateAgent(BaseAgent):

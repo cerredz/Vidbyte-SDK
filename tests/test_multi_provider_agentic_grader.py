@@ -15,6 +15,8 @@ Key Functions / Test Cases:
     - test_grader_filler_parsing: Assures meta-grader verbatim output matching works correctly.
     - test_grader_keeps_the_winners_structured_output: Assures the selected trial's output_schema instance is returned.
     - test_select_winner_prefers_faithful_match: Assures the grader's exact choice is not overridden by substring candidates.
+    - test_grader_prompt_with_an_unknown_placeholder_is_refused_at_construction: Assures an unrenderable grader_prompt fails before any trial.
+    - test_grader_prompt_with_escaped_braces_renders_them_literally: Assures {{ }} in grader_prompt renders as literal braces.
     - test_isdone_trials_are_graded_on_their_final_answers: Assures an isDone finish is graded on its final_answer, not its tool-call text.
     - test_direct_agent_grader_runners_carry_its_keys_and_mode: Assures a DIRECT BaseAgent's trial and grader runners get its matched keys and mode.
     - GraderTrialsStayOnTheirProviderTests: Assures a down provider's trial drops out instead of running on the agent's fallback model under its name.
@@ -473,6 +475,17 @@ class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(selector._select_winner({"openai": "", "deepseek": "42 is it", "anthropic": long_answer}, FakeResponse("42"), handle), ("42 is it", "deepseek"))
         # With no match at all, the grader's own text is returned.
         self.assertEqual(selector._select_winner({"openai": "  ", "deepseek": "7"}, FakeResponse("unrelated"), handle), ("unrelated", "grader_raw"))
+
+    def test_grader_prompt_with_an_unknown_placeholder_is_refused_at_construction(self) -> None:
+        # [Hidden Failure] An example JSON object is an unknown {name} to str.format, so it is refused before any trial is paid for.
+        with self.assertRaises(ConfigurationError) as ctx:
+            MultiProviderAgenticGraderAlgorithm(grader_prompt='{request}\n{candidates}\nReply as JSON like {"winner": "openai"}.')
+        self.assertIn('"winner"', str(ctx.exception))
+
+    def test_grader_prompt_with_escaped_braces_renders_them_literally(self) -> None:
+        # [Edge Case] Escaped braces construct and reach the grader as a literal JSON example.
+        algorithm = MultiProviderAgenticGraderAlgorithm(grader_prompt='{request}\n{candidates}\nReply as JSON like {{"winner": "openai"}}.')
+        self.assertEqual(algorithm.render_grader_prompt("task", "cands"), 'task\ncands\nReply as JSON like {"winner": "openai"}.')
 
     @patch("vidbyte.agents.algorithms.multi_provider_agentic_grader.ModalityDetector.create_runner")
     async def test_isdone_trials_are_graded_on_their_final_answers(self, mock_create_runner: MagicMock) -> None:

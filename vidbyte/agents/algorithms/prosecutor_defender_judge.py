@@ -37,7 +37,7 @@ from vidbyte.context.algorithms.prosecutor_defender_judge import DebateStageSett
 from vidbyte.context.templates import NullRecorder
 from vidbyte.lib.agents.modality_detector import ModalityDetector
 from vidbyte.lib.agents.prosecutor_defender_judge import dump_payload, json_safe_mapping, optional_int, runner_model_name, safe_error_category, safe_tool_call_summary, safe_trace_error
-from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
+from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig, AgentStopReason
 from vidbyte.lib.dataclasses.context import BaseAgentContext, ContextArtifact
 from vidbyte.lib.dataclasses.prosecutor_defender_judge import AllegationRecord, DebateStageRecord, DefenderReportPayload, DefenseRecord, EvidenceCitationPayload, EvidenceCitationRecord, EvidenceSource, JudgeDecision, JudgeDecisionRecord, JudgeReasonCode, JudgeReportPayload, ProsecutorDefenderJudgeReport, ProsecutorReportPayload
 from vidbyte.lib.dataclasses.runner import RunnerHandle
@@ -390,6 +390,10 @@ class ProsecutorDefenderJudgeRuntimeAlgorithm:
         # state (tools, middleware, options, output contract) fully intact.
         self.runtime.recorder.append("system_prompt")
         producer = await self._run_producer(message, handle, context, metadata, options, trace_context)
+        # @intent middleware-abort-ends-the-run
+        # An aborted producer left the SDK's stop text, not a candidate, and the abort ends the run, so no debate runs.
+        if producer.metadata.get("stop_reason") == AgentStopReason.MIDDLEWARE_ABORT.value:
+            return producer
 
         # Freeze the exact producer candidate and fingerprint it. This sha256 is
         # the referential anchor the review stages and returned metadata are bound

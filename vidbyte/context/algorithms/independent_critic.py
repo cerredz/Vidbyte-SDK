@@ -249,6 +249,11 @@ def _validate_review_prompt(value: str | None) -> None:
     missing = _REQUIRED_REVIEW_PLACEHOLDERS - found
     if missing:
         raise ConfigurationError(f"review_prompt is missing required formatting placeholders: {sorted(missing)}.")
+    # @intent templates-render-or-are-refused
+    # str.format raises on any other {name}, such as an example JSON object, so the review would fail only after the producer ran.
+    unknown = found - _REQUIRED_REVIEW_PLACEHOLDERS
+    if unknown:
+        raise ConfigurationError(f"review_prompt has unknown formatting placeholders {sorted(unknown)}; write literal braces as {{{{ and }}}}.")
 
 
 def _validate_metadata(value: Mapping[str, Any]) -> None:
