@@ -1,7 +1,7 @@
 ---
 spec: provider-onboarding-skill
 title: "Onboard-model-provider skill: one source-backed, mutation-tested provider PR per unattended run"
-status: approved         # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
+status: tests-written    # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
 revision: 4
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-provider-onboarding-skill
