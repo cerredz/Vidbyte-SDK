@@ -4,7 +4,8 @@ PURPOSE:
     Counts every start position where a substring occurs, including matches
     that overlap, so "exactly once" edit checks cannot mistake two overlapping
     matches for one. Also estimates how many tokens a text holds, and cuts a
-    text to a token budget, with one fixed characters-per-token rule.
+    text to a token budget, with one fixed characters-per-token rule, and
+    truncates a text to a character limit with a marker inside the limit.
 
 ROLE IN CODEBASE:
     SubstringCounter is called by the unique-match edit tools: PatchTool
@@ -15,7 +16,13 @@ ROLE IN CODEBASE:
     TokenEstimate is called by the InfiniteMemory agent
     (vidbyte/agents/infinite/) for every workspace cap, the map, and the
     result cards, and by its toolset (vidbyte/tools/toolsets/infinite.py)
-    for grep's file-size cap. Calls only str methods and math.ceil.
+    for grep's file-size cap. TokenEstimate.truncate_chars is the SDK's one
+    character cut with a marker: OutputText.truncate
+    (vidbyte/lib/outputs/text.py) delegates to it, so the output connectors,
+    InfiniteEvents, and InfiniteMemoryAgent.run_handoff use it through that
+    method, and InfiniteHandoff (vidbyte/context/handoff/infinite.py) calls
+    it directly, because importing vidbyte.lib.outputs there breaks import
+    vidbyte. Calls only str methods and math.ceil.
 
 ARCHITECTURE NOTE:
     Static-method-only classes with no SDK dependencies. Python's str.count
@@ -32,7 +39,10 @@ FUNCTION INVENTORY:
     otherwise its prefix of max_tokens times four characters.
     TokenEstimate.cap(text, max_tokens, marker) -> str: the text when it
     fits, otherwise its cut followed by the marker, so a reader sees that
-    text was left out.
+    text was left out. TokenEstimate.truncate_chars(text, max_chars,
+    marker) -> str: the text when it has at most max_chars characters,
+    otherwise its first max_chars minus the marker's length characters
+    followed by the marker.
 
 COMMON MODIFICATION PATTERNS:
     Add another general text helper as a @staticmethod here.
@@ -47,7 +57,9 @@ KNOWN EDGE CASES:
     An empty search raises ValueError; every caller rejects it earlier.
     TokenEstimate counts characters, not bytes, so five euro signs are 2
     tokens. cap adds the marker after the cut, so a capped text can be
-    the marker's length over max_tokens.
+    the marker's length over max_tokens. truncate_chars instead keeps the
+    marker inside max_chars, and expects max_chars to be at least the
+    marker's length, as every caller's limit is.
 
 RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/unique-edit-overlapping-matches.md;
@@ -58,6 +70,10 @@ TESTS:
     tests/test_context_primitives_builtins.py cover SubstringCounter through
     its callers. tests/features/infinite_memory_agent/test_infinite_memory_contract.py
     covers TokenEstimate, count, cut, and cap.
+    tests/test_output_text_truncate_marker.py covers truncate_chars through
+    OutputText.truncate, and
+    tests/features/infinite_memory_agent/test_infinite_memory_handoff.py
+    through the handoff's list lines.
 """
 
 from __future__ import annotations
@@ -86,7 +102,7 @@ class SubstringCounter:
 
 
 class TokenEstimate:
-    """Static-method home for the SDK's characters-per-token estimate."""
+    """Static-method home for the SDK's text budgets: the characters-per-token estimate and the cuts to a token or character limit."""
 
     @staticmethod
     def count(text: str) -> int:
@@ -106,6 +122,13 @@ class TokenEstimate:
         if TokenEstimate.count(text) <= max_tokens:
             return text
         return f"{TokenEstimate.cut(text, max_tokens)}{marker}"
+
+    @staticmethod
+    def truncate_chars(text: str, max_chars: int, marker: str) -> str:
+        """Return text when it has at most max_chars characters, otherwise its first max_chars - len(marker) characters followed by marker, so the marker stays inside the limit."""
+        if len(text) <= max_chars:
+            return text
+        return text[: max_chars - len(marker)] + marker
 
 
 __all__ = ["TOKEN_ESTIMATE_CHARS_PER_TOKEN", "SubstringCounter", "TokenEstimate"]
