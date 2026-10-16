@@ -18,12 +18,12 @@ started: 2026-10-15 15:04
 | S2 tests | done | 17:40 | 18:15 | reports/S2-test-author.md | 20 tests (67 cases) in tests/features/public_skill_loader/; red confirmed (17 failed, 50 errors); S2_HEAD 467555d9 |
 | S3 implement | done | 18:20 | 21:40 | reports/S3-implementer.md | S3_HEAD c691c176; draft PR #1099; 67/67 new green; source stage 5243 passed 14 skipped; package stage passed; budget 0/0 files, 1/1 class, 3/3 root names |
 | S4 adversarial review | done | 21:45 | 22:40 | reports/S4-review-{conformance,conventions,engineering}.md | review.md: MERGEABLE AFTER FIXES; confirmed 0 Blocker / 1 Major (R-1); 6 Minor (R-2..R-7); 1 downgraded (R-C1→R-2); 0 refuted |
-| S5 repair loop | pending | | | | |
+| S5 repair loop | running (iteration 1, resumed after a 429 interruption) | 22:45 | | reports/S5-repair-1.md | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 · S5 repair iterations: 1/8 · S5 re-review rounds: 0/2
 
 ## Environment facts (carried into every briefing)
 - PR repo `cerredz/Vidbyte-SDK` (origin `https://github.com/cerredz/Vidbyte-SDK.git`), base `main`. Worktree `C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-public-skill-loader`, branch `feat/public-skill-loader`, created from `origin/main` `179d8adc`, rebased at 16:20 onto `origin/main` `c9d31a7f` (0.3.0). The branch has NO upstream (orchestrator unset the auto-tracked `origin/main`); first push must be `git push -u origin feat/public-skill-loader`.
@@ -71,6 +71,9 @@ started: 2026-10-15 15:04
 - 2026-10-15 22:40 — DECIDED: fix R-1 rather than waive it (a release-pinned test contradicts repo precedent — none of the last three bumps touched a test — and a human reviewer would flag it). Route: spec author r4 rewords INV-16/AC-11 so the durable form is the spec (done, `bdf23937`), then GRANT the S5 repair agent this exact test edit: in `tests/features/public_skill_loader/test_public_skill_loader_release.py`, replace the `RELEASE_VERSION = "0.3.1"` comparison with "each of the eight places == `pyproject_version()` and the version tuple ≥ (0, 3, 1)", updating the header PURPOSE/COMMON MODIFICATION PATTERNS lines. After r4 the old test contradicts AC-11(a), which is the playbook's grant condition.
 - 2026-10-15 22:40 — DECIDED: GRANT R-5 as a strengthening-only test edit (`test_public_skill_loader_docs.py:46`: when the REPO_MAP heading is absent, return "" so the existing guard fails loudly instead of reading the preamble). Reason: it makes the test deliver the guarantee test-plan.md states for AC-16 ("a renamed heading cannot hide a stale phrase"); no assertion is weakened. Logged as a deliberate exception to the default "no".
 - 2026-10-15 22:40 — DECIDED: R-6 (rewrap 69 test comment lines) and R-7 (pack README) are follow-ups, not built: test-tree churn without behavior change; repo precedent mixed (jev_skills_preload pack has 198 such lines; 9 of 17 packs have a README). R-2 spec text done by the author in r4; the repair agent may align `loader.py:9` KNOWN EDGE CASES and skills README `:25` with the r4 wording. R-3, R-4: repair agent (trivial).
+
+- 2026-10-15 (evening) — S5 iteration 1's repair agent stopped on an API session limit (HTTP 429) after committing and pushing its five fixes (`e4041b3e` R-1, `852ea989` R-5, `a5638085` R-2, `320bcb8a` R-3, `922823f6` R-4; remote head = local `922823f6`) and reporting "All six local gates are green", but before dispatching remote CI or writing `verify-log.md` / `reports/S5-repair-1.md`. Orchestrator verified: tree clean; `git diff 467555d9..HEAD --stat -- tests/` touches only the two granted files (`test_public_skill_loader_docs.py` +4/-2, `test_public_skill_loader_release.py` +7/-5). DECIDED: resume the SAME agent (its context holds its gate runs and hypotheses) to finish iteration 1 rather than start iteration 2; an external rate-limit interruption is not a failed iteration, so the counter stays at 1/8. Its gate result is treated as unverified until it re-runs the full gate after the merge below.
+- (evening) — DECIDED (parent-session instruction, treated as the user's steering and as the spec §14 Ask-first approval): bring `origin/main` (`0754e01f`, 15 commits past the merge-base `c9d31a7f`, incl. #1095 "opt-in Working Principles system-prompt preset", which adds root export `SystemPromptPreset`) into the branch by MERGE, not rebase (branch is pushed; no force-push). Orchestrator checked main: version literals still `0.3.0` (so D-13's 0.3.1 holds; A-9 holds), contract gains `SystemPromptPreset`; main also edits README.md, llms.txt, REPO_MAP.md, vidbyte/agents/README.md, vidbyte/__init__.py — conflicts likely. After the merge commit: run the generator, commit the contract alone if it wrote, `--check`, full gate, push, dispatch remote CI.
 
 ## User replies (verbatim)
 - none yet
