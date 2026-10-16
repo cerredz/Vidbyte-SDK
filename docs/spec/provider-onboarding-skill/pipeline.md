@@ -15,7 +15,7 @@ started: 2026-10-15 18:41
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 18:41 | 19:05 | reports/S0-scout.md | base 72a4ade1; code-map.md (4 sections, 37 per-provider touch points) |
 | S1 spec + review | done | 2026-10-15 19:10 | 2026-10-16 17:00 | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | spec r3 approved @014de415 (r1 SOUND WITH FIXES 1B/8M/4m; r2 SOUND WITH FIXES 1B/4M/2m; all Blockers fixed) |
-| S2 tests | pending | | | | |
+| S2 tests | done | 2026-10-16 17:05 | 2026-10-16 18:00 | reports/S2-test-author.md | 46 tests in tests/features/onboard_model_provider_skill/ (5 files), red confirmed; S2_HEAD=8e9b8b7f |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
