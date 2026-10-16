@@ -18,8 +18,8 @@ started: 2026-10-15 18:12
 | S2 tests | done | 2026-10-15 22:35 | 2026-10-16 01:50 | reports/S2-test-author.md | 563 new tests (12 files + fake_harness_helpers.py); red 568 failed/430 passed/3 skipped (re-run by orchestrator); b502b6f2, a2053e68 |
 | S3 implement | done | 2026-10-16 02:05 | 2026-10-16 09:00 | reports/S3-implementer.md | HEAD 462e6d45 pushed; draft PR #1147; 998 passed/3 skipped; lint, run_ci (source+package) and semgrep green; 10/10 new files |
 | S4 adversarial review | done | 2026-10-16 09:10 | 2026-10-16 11:30 | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; confirmed 2 Blocker (R-1, R-2) / 4 Major (R-3..R-6) / 17 Minor; refuted 3; downgraded 3; 6641579c |
-| S4→S5 spec amendment r4 | pending | | | | D-33 + §9.2 evidence (R-2, R-23), AC-22/NFR-5 (R-7), INV-18 (R-8), §12.4 scan-cap text (R-16), R-5/R-6 symbols in §12.3 |
-| S4→S5 test amendment | pending | | | | R-4 fixture; red tests for R-2, R-3, R-5, R-16, R-23 |
+| S4→S5 spec amendment r4, r5 | done | 2026-10-16 11:35 | 2026-10-16 12:10 | reports/S1-spec-author.md (addenda r4, r5) | r4 d6792f3d; r5 b701550e: D-33 reads `history.snapshot.state.items` in snapshot/anchoredSnapshot (no export); `remember_thread` D-34, `child_problem` D-35; `member=` on `require` |
+| S4→S5 test amendment | running | 2026-10-16 12:15 | | reports/S2-test-author-amendment.md | R-4 fixture; red tests for R-2, R-3, R-5, R-16, R-23; MSP-shaped anchored snapshot in the stand-in |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
@@ -81,6 +81,26 @@ started: 2026-10-15 18:12
 - 2026-10-16 11:30 — origin/main moved to 61acd016 (#1148–#1151, compaction middleware only). S5 merges it; no rebase, because the branch is pushed.
 
 - 2026-10-16 11:10 — A fourth usage-limit outage (HTTP 429, reset at 11:10am) stopped three agents: the r4 spec author mid-way through its Stage E self-check, the #1055 orchestrator, and its S5 repair-1 agent. I resumed the spec author and the #1055 orchestrator by SendMessage, and told the orchestrator to resume its own repair agent by ID.
+
+- 2026-10-16 11:20 — Spec r4 spot-check passed: d6792f3d and 91e01517 touch only `spec.md` and the S1 author report; revision is 4, status is `reviewed`, and §16 has 14 S4 rows. I accepted the author's new `member` keyword on `NativeCommandEvidence.require` (R-23): one evidence rule in one place, and it adds a keyword, not a name.
+- 2026-10-16 11:20 — **I disproved r4's assumption A-28 with my own probe**, so r4 goes back to the author for r5.
+  - **The probe:** a `--provider echo` Muse session in a throwaway XDG store inside WSL, then `muse export --redacted`. It ran with no key, no cost, and never touched the user's store.
+  - **The finding:** the real export (schema version 1) has no top-level `items`. Its keys are `diagnostics`, `events`, `export_schema_version`, `exporter_version`, `redaction`, `session_build`, `session_terminated_abnormally` and `sessions`. `events[]` is an event-sourced log.
+  - **Why it matters:** under r4, every compacted Muse skill or goal run would fail closed against the real CLI. That is safe, but the feature is broken.
+  - **The way out:** the MSP schema offers `SessionHistory.snapshot.state.items` ("every item … at the snapshot cursor") and `view/page`, which pages forward from the beginning of the durable view.
+  - **What I sent the author:** this evidence, plus a narrowly scoped probe permission (echo provider and throwaway store only). Its job is to pick the smallest rule that is correct against the real protocol. The test author waits for r5.
+
+- 2026-10-16 12:10 — Spec r5 spot-check passed: b701550e and e0c62181 touch only spec.md and the author report; revision 5; base_commit 239c408a; §16 has orch-1..orch-3. **D-33 (r5):**
+  - `inline` mode reads `history.items`; `snapshot` and `anchoredSnapshot` read `history.snapshot.state.items`. Text never counts and no export is read.
+  - The runner-up is `view/page` from the start of the view; its event shape is verified on Muse 1.0.1.
+  - A-28 (the anchored fold keeps pre-boundary items) is still unverifiable offline. The echo provider cannot compact (`session/compact` → `-32030 compaction_unavailable`). If A-28 is false, the run fails closed (EC-84), and only paid probe g in the PR body settles it.
+- 2026-10-16 12:15 — **Test amendment granted** (fresh S2 agent). It changes existing test files at exactly these places, and no other existing assertion may change:
+  - (a) R-4: the `sandbox` fixture clears every `fake_harness.CREDENTIAL_NAMES` entry.
+  - (b) R-3: the generator at `listing_properties.py:49-51` varies the duplicate copy's texts.
+  - (c) R-16: the pin at `helper_surface.py:258` takes the r5 §12.4 text.
+  - (d) The Muse stand-in and the existing AC-34/AC-17 tests, where they encode the withdrawn export-text evidence rule (r3 D-33), move to the r5 MSP-shaped rule.
+
+  Each change is listed before and after in test-plan.md. Reason: those tests encode a rule the spec now forbids (it was disproved against the real CLI). The R-4 fixture is test-only by spec INV-2/AC-10.
 
 ## User replies (verbatim)
 - 2026-10-15 ~18:25 — "note, ccan you also in a subagent launch this "spec-pipeline" process for pr #1055 and explain the changes that we want to make with the implementation of the existing pr"
