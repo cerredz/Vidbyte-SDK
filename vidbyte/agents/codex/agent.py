@@ -124,6 +124,7 @@ class CodexHarnessAgent:
                 ) from exc
             self._usage.reset()
             self._failures.reset()
+            self._middleware.reset()
             boundary = CodexMiddlewareRequest(
                 agent_name=self.settings.name, prompt=translated.user_prompt
             )

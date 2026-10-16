@@ -183,6 +183,23 @@ class _MetadataMiddleware(AgentMiddleware):
         return MiddlewareDecision.continue_(metadata={"policy": self.value})
 
 
+class _FailOpenOnceAfterRun(AgentMiddleware):
+    """A fail-open audit middleware whose after_run raises on the first turn only."""
+
+    fail_closed = False
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def after_run(self, ctx: MiddlewareContext) -> MiddlewareDecision:
+        # Raises once, so any later event in a reply can only be a stale one.
+        del ctx
+        self.calls += 1
+        if self.calls == 1:
+            raise RuntimeError("audit sink unavailable")
+        return MiddlewareDecision.continue_()
+
+
 def _make_unsupported(hook: str) -> AgentMiddleware:
     # Builds a middleware overriding exactly one unsupported hook by name.
     async def override(self: AgentMiddleware, ctx: MiddlewareContext) -> MiddlewareDecision:
@@ -486,6 +503,37 @@ class CodexHarnessAgentMiddlewareTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertNotIn(CODEX_MIDDLEWARE_METADATA_KEY, reply.metadata)
         self.assertNotIn("policy", reply.metadata)
+
+    async def test_a_later_reply_does_not_repeat_an_earlier_turns_events(
+        self,
+    ) -> None:
+        agent, _ = _build_agent((_FailOpenOnceAfterRun(),))
+
+        first = await agent.arun(CodexRunInput.text(PROMPT))
+        second = await agent.arun(CodexRunInput.text(PROMPT))
+
+        first_log = first.metadata[CODEX_MIDDLEWARE_METADATA_KEY]
+        self.assertEqual(first_log["event_count"], 1)
+        self.assertEqual(
+            [event["reason"] for event in first_log["events"]],
+            ["middleware_error_fail_open"],
+        )
+        second_log = second.metadata[CODEX_MIDDLEWARE_METADATA_KEY]
+        self.assertEqual(second_log["event_count"], 0)
+        self.assertEqual(tuple(second_log["events"]), ())
+
+    async def test_each_reply_reports_only_its_own_turns_events(self) -> None:
+        agent, _ = _build_agent((_RaisingBeforeRun(fail_closed=False),))
+
+        replies = [await agent.arun(CodexRunInput.text(PROMPT)) for _ in range(3)]
+
+        for reply in replies:
+            log = reply.metadata[CODEX_MIDDLEWARE_METADATA_KEY]
+            self.assertEqual(log["event_count"], 1)
+            self.assertEqual(
+                [event["reason"] for event in log["events"]],
+                ["middleware_error_fail_open"],
+            )
 
 
 if __name__ == "__main__":
