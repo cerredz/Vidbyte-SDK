@@ -12,6 +12,17 @@ from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDeci
 from vidbyte.middleware.base import AgentMiddleware
 
 
+# The modes engine.compact_tool_result applies to one tool result; it returns the result unchanged for any other mode.
+_TOOL_RESULT_MODES = frozenset({
+    CompactionMode.TRUNCATE_TOOL_RESULTS,
+    CompactionMode.STRIP_TOOL_RESULT_BODIES,
+    CompactionMode.HIDE_TOOL_RESULTS,
+    CompactionMode.TOOL_RESULT_CLEARING_WITH_EXCLUSIONS,
+    CompactionMode.HEAD_TAIL_TOOL_PREVIEW,
+    CompactionMode.MECHANICAL_BLOAT_SCRUBBER,
+})
+
+
 class ToolResultCompactionMiddleware(AgentMiddleware):
     """Compact model-visible tool results after tool execution."""
 
@@ -74,6 +85,10 @@ class ToolResultCompactionMiddleware(AgentMiddleware):
 
     def _validate_options(self) -> None:
         # Raises ValueError for invalid constructor options before runtime starts.
+        # @intent compaction-middlewares-refuse-modes-they-cannot-apply
+        # A history mode here would leave every tool result unchanged, so refuse it instead of compacting nothing.
+        if self.mode not in _TOOL_RESULT_MODES:
+            raise ValueError(f"ToolResultCompactionMiddleware mode must be one of {sorted(item.value for item in _TOOL_RESULT_MODES)}, got '{self.mode.value}'; use MessageHistoryCompactionMiddleware for history modes.")
         if "max_chars" in self.options and int(self.options["max_chars"]) < 0:
             raise ValueError("max_chars must be non-negative.")
         if "head_chars" in self.options and int(self.options["head_chars"]) < 0:
@@ -204,6 +219,10 @@ class MessageHistoryCompactionMiddleware(AgentMiddleware):
 
     def _validate_options(self) -> None:
         # Raises ValueError for invalid message compaction constructor options.
+        # @intent compaction-middlewares-refuse-modes-they-cannot-apply
+        # The history engine has no hide strategy and would run a no-op, so point to the per-result middleware instead.
+        if self.mode is CompactionMode.HIDE_TOOL_RESULTS:
+            raise ValueError("hide_tool_results hides single tool results; use ToolResultCompactionMiddleware.hide(), or strip_tool_result_bodies for history.")
         if "percentage" in self.options and not 0 <= float(self.options["percentage"]) <= 1:
             raise ValueError("percentage must be between 0 and 1.")
         if "order" in self.options and self.options["order"] not in {"oldest", "newest"}:

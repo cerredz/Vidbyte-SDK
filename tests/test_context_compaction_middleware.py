@@ -285,6 +285,54 @@ class CompactionMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             SummaryCompactionMiddleware(mode=CompactionMode.SUMMARIZE_OLDEST_N, summarizer=None)  # type: ignore[arg-type]
 
+    async def test_tool_result_middleware_refuses_history_modes(self) -> None:
+        # [Hidden Failure] A history mode on the per-result middleware compacted nothing, so it must fail at construction and name the valid modes.
+        for mode, options in (("keep_last_n_messages", {"n": 1}), ("tool_output_sliding_window", {}), ("trim_to_token_budget", {"max_tokens": 10})):
+            with self.subTest(mode=mode):
+                with self.assertRaises(ValueError) as caught:
+                    ToolResultCompactionMiddleware(mode=mode, **options)
+                for expected in ("truncate_tool_results", "strip_tool_result_bodies", "hide_tool_results", "tool_result_clearing_with_exclusions", "head_tail_tool_preview", "mechanical_bloat_scrubber", "MessageHistoryCompactionMiddleware", mode):
+                    self.assertIn(expected, str(caught.exception))
+
+    async def test_tool_result_middleware_still_accepts_per_result_modes(self) -> None:
+        # Verifies the six per-result modes and the disabled raw() middleware still construct.
+        for mode in ("truncate_tool_results", "strip_tool_result_bodies", "hide_tool_results", "tool_result_clearing_with_exclusions", "head_tail_tool_preview", "mechanical_bloat_scrubber"):
+            with self.subTest(mode=mode):
+                self.assertEqual(ToolResultCompactionMiddleware(mode=mode).mode.value, mode)
+        self.assertFalse(ToolResultCompactionMiddleware.raw().options["enabled"])
+
+    async def test_tool_result_middleware_accepts_exactly_the_modes_the_engine_applies(self) -> None:
+        # [Hidden Failure] Every mode the middleware accepts must change a bloated result, and every mode it refuses must be one the engine leaves unchanged.
+        raw = ToolResult.success("lookup", "\x1b[31mred\x1b[0m " + "word " * 300)
+        ctx = MiddlewareContext(hook=MiddlewareHook.AFTER_TOOL_CALL, agent_name="worker", tool_call=ToolCall("lookup"), tool_result=raw)
+        for mode in CompactionMode:
+            with self.subTest(mode=mode):
+                applied = ContextCompactionEngine().compact_tool_result(ToolCall("lookup"), raw, mode=mode)[0].output != raw.output
+                try:
+                    middleware = ToolResultCompactionMiddleware(mode=mode)
+                except ValueError:
+                    self.assertFalse(applied, f"{mode.value} is applied by the engine but refused by the middleware")
+                    continue
+                self.assertTrue(applied, f"{mode.value} is accepted by the middleware but leaves tool results unchanged")
+                decision = await middleware.after_tool_call(ctx)
+                self.assertNotEqual(decision.transform.model_visible_tool_result.output, raw.output)
+
+    async def test_message_history_middleware_refuses_hide_tool_results(self) -> None:
+        # [Hidden Failure] The history engine has no hide strategy, so hide_tool_results must fail at construction and point to the per-result middleware.
+        with self.assertRaises(ValueError) as caught:
+            MessageHistoryCompactionMiddleware(mode="hide_tool_results")
+        self.assertIn("ToolResultCompactionMiddleware.hide()", str(caught.exception))
+        self.assertIn("strip_tool_result_bodies", str(caught.exception))
+
+    async def test_message_history_middleware_still_accepts_every_other_mode(self) -> None:
+        # Verifies every history mode except hide_tool_results still constructs with its minimum required options.
+        for mode in CompactionMode:
+            if mode is CompactionMode.HIDE_TOOL_RESULTS:
+                continue
+            with self.subTest(mode=mode):
+                options = {"active_branch": "main"} if mode is CompactionMode.CONTEXT_SNAPSHOT_BRANCH_TRIM else {}
+                self.assertIs(MessageHistoryCompactionMiddleware(mode=mode, **options).mode, mode)
+
 
 class RuntimeCompactionIntegrationTests(unittest.IsolatedAsyncioTestCase):
     def _runtime(self, *, middleware: tuple[AgentMiddleware, ...] = (), algorithm=None) -> AgentRuntime:
