@@ -18,7 +18,7 @@ Existing-PR run: no new branch, no new PR. Adds to draft PR #1055 on `feat/codex
 |---|---|---|---|---|---|
 | S0 merge main | done | 22:31 | 23:05 | reports/S0-merge-main.md | merge commit c181be65; packs 551 passed / 1 inherited failure; SDK-LINT: PASS |
 | S0 worktree + capture + recon | done | 22:30 | 23:25 | reports/S0-scout.md | base_commit c181be65; code-map.md (4 sections, ~30 files) |
-| S1 spec + review | running | 23:28 | | reports/S1-spec-author.md | |
+| S1 spec + review | running | 23:28 | | reports/S1-spec-author.md, S1-spec-review.md | spec r1 5a1c754c (12 methods, 11 tools → 26, 4 new files); review round 1 running |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -27,7 +27,7 @@ Existing-PR run: no new branch, no new PR. Adds to draft PR #1055 on `feat/codex
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 0/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 1/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-15 22:30 — Worktree created on the existing branch `feat/codex-host` (not from main); verified local == origin == 66558ee9 before `git worktree add`. — the run adds to PR #1055.
@@ -40,6 +40,7 @@ Existing-PR run: no new branch, no new PR. Adds to draft PR #1055 on `feat/codex
 - 2026-10-15 23:28 — S1 author authorized to probe a local `codex app-server` with NON-spending calls only (skills/list; thread/list limit ≤ 3; thread/read, goal/get, compact/start, delete, turns/list on random non-existent UUIDs) to resolve the scout's unverified items from the rawest source; never turn/start, review/start, goal/set or any write on a real thread id; record only shapes/codes, never real thread content. — the brief forbids paid turns, not read-only protocol probes.
 - 2026-10-15 23:28 — S2 test author will be authorized to update EXISTING test pins that the spec's new surface necessarily changes (tool count 15, tool-name lists, CodexHostOperation/TOOL_NAMES, CALL_LIST, NEXT_STEPS entries, packaging pins), each tied to a spec ID, and nothing else. — adding tools is impossible without changing those pins, and only the test author may touch tests.
 - 2026-10-16 (after limit reset) — S1 author died mid-read in a usage-limit outage (HTTP 429), leaving no spec.md or report on disk. Resumed the SAME author via SendMessage (its saved transcript holds the briefing and its reading so far) instead of relaunching fresh; fallback = fresh relaunch with the identical briefing. — the coordinator asked to resume rather than redo finished work.
+- 2026-10-16 — S1 review round 1: SOUND WITH FIXES, 2 Blocker / 7 Major / 6 Minor. Orchestrator guidance to the author: R-3 → settle A-4/A-5 with a read-only probe (thread/read, thread/goal/get, thread/turns/list limit 1) on ONE real notLoaded thread id from thread/list, no resume, no writes; principle: no READ tool ever resumes/loads a thread; a WRITE that must resume first proves it cannot start turns, or refuses with guidance. R-5 → BUILD the skill read-back (request §C "Check that the command actually ran" is a settled decision, so it is in scope, not scope-adding). R-6 → keep D-9 (empty since-window returns ()) and D-14 (idle loaded thread may be deleted) as documented deviations from the §C example list, with a §C-case → outcome table and Q-11/Q-14 pointing at them. — all reversible and inside scope; §C's case list came from the coordinator's examples ("etc."), and an empty result is not a failure.
 
 ## User replies (verbatim)
 - none
@@ -65,3 +66,10 @@ Existing-PR run: no new branch, no new PR. Adds to draft PR #1055 on `feat/codex
 - Error mapper: -32600 on any method except `thread/read` → `codex.api_error`; -32601 → `protocol_mismatch`; non-spending raw calls retried up to 3x on overload. — *source:* S0 scout
 - Compaction runs as its own non-steerable turn (`thread/compacted {threadId, turnId}`); the host does not register it and `require_idle` checks only this host's own turns. — *source:* S0 scout
 - Code style that bites: one call level deep; `#` comments wrapped at 72 columns; an `@intent` block within 20 lines of its def; tool descriptions 4–5 sentences, no examples; new host modules must live under `native/codex/`. — *source:* S0 scout
+- Spec r1 contract: 12 new CodexHost methods — thread helpers `list_recent_codex_threads`, `list_codex_threads_since`, `search_codex_threads`, `get_codex_thread_lineage`, `list_codex_turns` (full transcript), `compact_codex_thread`, `delete_codex_thread` (plain fn, no tool); skill fns `get_codex_goal`, `run_codex_goal` (reads goal back, raises `codex.command_not_run`), `list_codex_skills`, `run_codex_skill`, `run_codex_openai_docs`. Helper classes `CodexThreadHelpers`, `CodexSkillFunctions` under native/codex/; host methods check usability and hand off. — *source:* S1 author
+- Semgrep is NOT installed in the venv or on PATH; route = `uvx --from semgrep==1.170.1 semgrep scan ...` or the `static-policy.yml` dispatch. — *source:* S1 author
+- Idle check is per thread (`CodexPreflight.require_idle(operation, thread_id)`, preflight.py:162): compact/delete refuse only a busy target thread. — *source:* S1 author
+- Do not rename `CodexResultSerializer._item` (tests/test_codex_output_contracts.py:322 calls it); the spec adds a public `items()` classmethod. — *source:* S1 author
+- Three new FailureCodes (`command_not_run`, `skill_not_found`, `skill_disabled`) go right after `CODEX_TURN_TIMED_OUT`; each needs a `CODEX_NEXT_STEPS` entry or `CodexErrorMapper.error` raises KeyError. — *source:* S1 author
+- Live probe: compact and goal/get answer "thread not found" for unknown ids; turns/list answers "thread not loaded". — *source:* S1 author
+- Pins S2 may update per spec §13: tools 15 → 26, records 15 → 20, enums 22 → 23, CALL_LIST gains thread_compact (reviewer verifying completeness). — *source:* S1 author
