@@ -1,14 +1,14 @@
 ---
 spec: public-skill-loader
 title: "Public skill loader: resolve every #904 skill source without JevAgent (SDK 0.4.0)"
-status: verified
+status: pr-open
 revision: 5
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-public-skill-loader
 branch: feat/public-skill-loader
 base_commit: c9d31a7fb4128d1a609ce9702b0a55c71fcb1a3f
 created: 2026-10-15
-updated: 2026-10-15
+updated: 2026-10-16
 pr: https://github.com/cerredz/Vidbyte-SDK/pull/1099
 ---
 
@@ -129,17 +129,29 @@ The developer builds entries, builds one loader, and gets one result per entry i
 
 ```mermaid
 flowchart TD
-  A["caller: SkillLoader(entries)"] -->|"tuple or list"| T["SkillLoader.__init__: tuple(entries); text and non-collections pass through"]
-  T -->|"tuple, or the rejected value"| V["SkillEntries.__post_init__"]
-  V -->|invalid| X["ConfigurationError, no I/O"]
-  V -->|validated tuple| B["SkillLoader stores entries and resolver map"]
-  B -->|"await load()"| G["SkillLoader._pending_groups"]
-  G -->|"one group per source type and key"| R["resolver.resolve, all groups concurrently"]
-  R -->|"GET via SkillFetch"| N[("api.github.com, Anthropic, OpenAI")]
-  R -->|"read_capped in a worker thread"| D[("local disk")]
-  R -->|"SKILL.md bytes"| P["SkillMarkdown.parse"]
-  P -->|SkillResolution| M["memory keeps non-transient results"]
-  M -->|"tuple of SkillResolution, input order"| C["caller: document.text, or reason and detail"]
+  A["caller: SkillLoader(entries)"] --> B{"loader.SkillLoader.__init__: an Iterable, and not str or bytes?"}
+  B -->|yes| C["tuple(entries), once, in iteration order"]
+  B -->|no| D["the value, unconverted"]
+  C --> E["skills.SkillEntries.__post_init__"]
+  D --> E
+  E -->|"not a tuple"| ERR1["ConfigurationError, details: entries_type"]
+  E -->|"an element is not an entry or a SkillDocument"| ERR2["ConfigurationError, details: position, entry_type"]
+  E -->|"a name repeats"| ERR3["ConfigurationError, details: names"]
+  E -->|valid| F["SkillLoader keeps the tuple, remembers each SkillDocument, builds the resolver map, with no I/O"]
+  F -->|"await loader.load()"| G["SkillLoader._pending_groups: entries not yet remembered, grouped by source type and group_key"]
+  G --> H["asyncio.gather: resolver.resolve(group) for every group at once"]
+  H --> R1["InlineSkillResolver: the entry's text becomes a SkillDocument"]
+  H --> R2["LocalSkillResolver, SkillsShSkillResolver: read_capped in asyncio.to_thread"]
+  H --> R3["GitHubSkillResolver, AnthropicSkillResolver, OpenAISkillResolver: SkillFetch.get through HttpTransport.request, no redirects"]
+  R2 -->|"SKILL.md bytes"| P["SkillMarkdown.parse"]
+  R3 -->|"SKILL.md bytes"| P
+  R2 -->|"missing, unreadable, or too large"| S
+  R3 -->|"refused, failed, missing key, or too large"| S
+  R1 --> S["one SkillResolution per entry: a document, or a reason and a detail"]
+  P -->|"document, or invalid_skill"| S
+  H -->|"a resolver raised, or the load was cancelled"| Z["re-raised from load(), and nothing from this load is remembered"]
+  S --> M["memory.setdefault for documents and permanent failures, never for rate_limited or fetch_failed"]
+  M --> DONE["tuple of SkillResolution, in input order"]
 ```
 
 ```mermaid
@@ -159,7 +171,7 @@ sequenceDiagram
   CLI->>CLI: measure text bytes, append to agent prompt
 ```
 
-The caller passes its entries as a tuple or a list. `SkillLoader.__init__` turns any collection into a tuple once. It leaves text, and values that are not collections, as they are, so that `SkillEntries` can reject them whole. `SkillEntries` then validates the tuple at the boundary. These two steps are the only new ones, and a bad value stops there before any file, environment variable, or network is touched. `load()` then runs the unchanged pipeline. Entries not yet remembered are grouped by source type and resolver key, every group resolves concurrently, and each resolver reads through `SkillFetch` (network) or `LocalSkillResolver.read_capped` (disk) and parses through `SkillMarkdown`. Every expected failure becomes a `SkillResolution` with a reason inside the resolvers. Documents and permanent failures are kept in the loader's memory, which is the only state that changes. The tuple comes back in input order.
+The caller passes its entries as a tuple or a list. `SkillLoader.__init__` turns any `Iterable` other than `str` or `bytes` into a tuple once. It leaves text, and values that are not an `Iterable`, as they are, so that `SkillEntries` can reject them whole. `SkillEntries` then validates the tuple at the boundary. These two steps are the only new ones, and a bad value stops there before any file, environment variable, or network is touched. `load()` then runs the unchanged pipeline. Entries not yet remembered are grouped by source type and resolver key, every group resolves concurrently, and each resolver reads through `SkillFetch` (network) or `LocalSkillResolver.read_capped` (disk) and parses through `SkillMarkdown`. Every expected failure becomes a `SkillResolution` with a reason inside the resolvers. Documents and permanent failures are kept in the loader's memory, which is the only state that changes. The tuple comes back in input order.
 
 ---
 
@@ -802,6 +814,7 @@ Never amend or squash after step 3. Once the contract is committed, update from 
 | r3 | 2026-10-15 | S3 implement | Rows 1–15 built in §12.6 order: `SkillEntries` (`0b28cf99`), the loader's conversion and check (`6ad3cbd5`, `edd21008`), the three root exports (`c3c5264f`), 0.3.1 (`67090f24`), the docs (`56541481`), and the contract regenerated alone (`46c074c3`). 67 of 67 new cases, the area suite, both gate stages, and semgrep are green. Draft PR #1099 |
 | r4 | 2026-10-15 | S4 revision (spec text) | S4 R-1: INV-16 states the version rule that holds through later bumps, and AC-11's three-part proof survives the next bump; the repair agent makes the approved release-test edit. S4 R-2: INV-2, INV-3, §9.2 row 1, and D-14 state the exact `Iterable` rule. `status` and `pr:` are unchanged (S3 owns them) |
 | r5 | 2026-10-15 | S5 revision (spec text) and user decision | S5 R-C11: the consumer contract now states what the release carries after the merge (18 `main` PRs, among them #1027's breaking change), and "additive" is limited to names. S5 R-C12: stale line citations are corrected. S5 R-C13: test-plan.md:29 and FEATURE.md:10, :15, and :25 are reworded, FEATURE.md in its own commit. User decision (§0.2 r5): the version is 0.4.0 (D-15 supersedes D-13), and `docs/design/release-0-4-0.md` is specified as row 16 (D-16 supersedes D-10, and NG-12 is withdrawn). Q-8 and Q-5 are resolved, and FR-13, AC-19, and EC-30 are added. The repair iteration makes the version move, the contract, the release notes, and the release-test floor. `status` stays `reviewed` |
+| r5 | 2026-10-16 | S6 PR | Finalized for review: `status: pr-open`, and the PR description is `pr-body.md`. §5 had drifted from the code, so its flowchart is replaced by the PR's, which traces the shipped code: the conversion test, the three `ConfigurationError` shapes, each resolver's read, and the memory rule. §5's prose now says "not an `Iterable`" instead of "not a collection", per INV-2 (r4). §2 and AC-3 still say "not a collection" and are listed as a follow-up. No other section changes |
 
 **Implementation deviations (S3)**
 - Row 2(a): `SkillEntries` could not join the single import line at `loader.py:27`. The longer line broke isort's line length (lint S051), so the import is a parenthesized block (`edd21008`).
