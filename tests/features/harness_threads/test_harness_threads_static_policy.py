@@ -7,7 +7,7 @@ FUNCTION INVENTORY: native_modules lists and parses the package's source files; 
 COMMON MODIFICATION PATTERNS: A harness module that needs a value adds it to vidbyte/lib/constants/native_threads.py or an enum, never an exception here.
 WHAT NOT TO DO IN THIS FILE: Do not add allow-lists of files or literals; INV-15 has none.
 KNOWN EDGE CASES: An f-string's literal parts are ast.Constant nodes, so `f"--model={m}"` breaks rule 2 (as INV-15 says). `-1` parses as a unary minus on the constant 1 and is therefore not caught; INV-15 is stated over ast.Constant nodes.
-RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §6.1 INV-15, INV-20, §6.2 AC-14, §12.3 rows 32-44
+RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §6.1 INV-15, INV-20, §6.2 AC-14, §12.3 rows 32-44; docs/spec/harness-thread-helpers-skills/spec.md §6.1 INV-15, INV-20, §12.3 rows 11-30
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads/test_harness_threads_static_policy.py
 """
 
@@ -20,6 +20,9 @@ PACKAGE = Path(__file__).resolve().parents[3] / "vidbyte" / "harnesses" / "nativ
 NAMED_MODULES = (
     "__init__.py", "grok/__init__.py", "grok/threads.py", "grok/wire.py", "opencode/__init__.py", "opencode/threads.py", "opencode/wire.py",
     "muse/__init__.py", "muse/threads.py", "muse/wire.py", "muse/launcher.py", "hostkit/errors.py", "hostkit/launcher.py", "hostkit/skills.py",
+    # harness-thread-helpers-skills §12.3: the 10 new modules.
+    "grok/store.py", "grok/helpers.py", "grok/commands.py", "opencode/helpers.py", "opencode/commands.py",
+    "muse/children.py", "muse/helpers.py", "muse/commands.py", "hostkit/listing.py", "hostkit/evidence.py",
 )
 ALLOWED_VALUES = ("", 0, 1)
 FORBIDDEN_IMPORT = "vidbyte.tools"

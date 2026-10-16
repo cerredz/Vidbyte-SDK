@@ -7,7 +7,7 @@ FUNCTION INVENTORY: printed_session reads the thread id the stand-in printed; th
 COMMON MODIFICATION PATTERNS: A new failure condition is a spec change first (INV-6), then one stand-in mode and one case here.
 WHAT NOT TO DO IN THIS FILE: Do not compare the free text of likely causes or next steps; compare them to the constants maps.
 KNOWN EDGE CASES: The failure exit code is 93 so it cannot be confused with other digits in the message. On win32 a non-program file fails as os_error (WinError 193); on POSIX a non-executable file fails as permission_denied.
-RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §6.1 INV-5, INV-6, §6.2 AC-10, §6.3 EC-9, EC-13, EC-18, EC-23, EC-32, §12.3 rows 23, 24, 32; docs/spec/harness-thread-functions/review.md R-7
+RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §6.1 INV-5, INV-6, §6.2 AC-10, §6.3 EC-9, EC-13, EC-18, EC-23, EC-32, §12.3 rows 23, 24, 32; docs/spec/harness-thread-functions/review.md R-7; docs/spec/harness-thread-helpers-skills/spec.md §6.1 INV-22, §12.3 row 36
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads/test_harness_threads_errors.py
 """
 
@@ -191,10 +191,12 @@ async def test_error_class_carries_the_diagnostic_packet_for_this_feature(api, s
 
 
 def test_every_code_has_its_own_likely_cause_and_next_step(lib_api) -> None:
-    # D-10 / comment 1: texts written per code, for the 28 harness codes
-    # plus invalid_argument and runtime.error.
+    # D-10 / comment 1: texts written per code, for the 32 harness codes
+    # (helpers spec INV-22 adds the three command_not_run codes and
+    # grok.store_unreadable) plus invalid_argument and runtime.error.
     codes = lib_api.FailureCode
     harness_codes = [codes(f"{harness}.{problem}") for harness in HARNESSES for problem in PROBLEMS] + [codes("muse.wsl_unavailable")]
+    harness_codes += [codes(code) for code in ("grok.command_not_run", "opencode.command_not_run", "muse.command_not_run", "grok.store_unreadable")]
     expected = {*harness_codes, codes.CONFIGURATION_INVALID_ARGUMENT, codes.RUNTIME_ERROR}
     for table in (lib_api.constants.NATIVE_THREAD_LIKELY_CAUSES, lib_api.constants.NATIVE_THREAD_NEXT_STEPS):
         assert set(table) == expected

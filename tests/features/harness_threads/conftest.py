@@ -1,13 +1,13 @@
 """FILE: tests/features/harness_threads/conftest.py
 
-PURPOSE: Shared offline fixtures for the harness_threads pack: lazy imports of the spec §8.5 contract names, a sandbox with a redirected user home, a workspace, skill folders and an empty PATH folder, the scripted stand-in (fake_harness.py) with its log reader, `.exe`/script stand-ins for PATH lookups, the INV-5 error check, and process liveness checks for both platforms.
+PURPOSE: Shared offline fixtures for the harness_threads pack: lazy imports of the spec §8.5 contract names, a sandbox with a redirected user home, a workspace, skill folders and an empty PATH folder, the scripted stand-in (fake_harness.py) with its log reader, `.exe`/script stand-ins for PATH lookups, the INV-5 error check, and process liveness checks for both platforms. For the thread helpers and skill functions it adds callers by function name (helper, skill) and builders that seed each vendor store in the layout the stand-in keeps (stores).
 ROLE IN CODEBASE: Loaded by pytest for every module in tests/features/harness_threads/. The stand-in runs as a real child process through the config records' <harness>_command fields (spec §13 "Real seams"); nothing in the thread functions, CliRunner or the filesystem is mocked.
 ARCHITECTURE NOTE: Every vidbyte import happens inside a fixture (lib_api, api), so a missing module fails each test at setup instead of aborting collection of the whole suite; lib_api needs only the vidbyte.lib names, so the process, argv and record tests can pass before the harness modules land. The sandbox is made by tmp_path_factory.mktemp("case") so no path holds a harness name, and the user home and the workspace are sibling folders (spec §13, R-17). PATH holds only the sandbox's own bin folder, so no test can reach a real grok, opencode, muse or wsl.exe.
-FUNCTION INVENTORY: lib_api and api return namespaces of contract names; Sandbox builds the folders, scenarios, stand-ins and snapshots and reads the stand-in logs; sandbox builds one per test with the home, PATH and temp folder redirected; call runs one thread function against the stand-in; check_error asserts the INV-5 attributes and message order; fast_stop shrinks NATIVE_KILL_WAIT_SECONDS; wait_until polls with a deadline; process_alive reports liveness on win32 and POSIX; launcher_bytes finds pip's console-script launcher for `.exe` stand-ins.
+FUNCTION INVENTORY: lib_api and api return namespaces of contract names; Sandbox builds the folders, scenarios, stand-ins and snapshots and reads the stand-in logs; sandbox builds one per test with the home, PATH and temp folder redirected; call runs one thread function against the stand-in; helper and skill run one new function by its §8.5 name (the missing name fails the test, never the collection), with the stand-in config unless raw_config hands a value over as is; Stores seeds a Grok store (summary.json, non-session files), opencode's SQLite `session` table and Muse session metadata; summary_fields flattens a NativeThreadSummary; check_error asserts the INV-5 attributes and message order, for a helper or skill function through `operation=`; fast_stop shrinks NATIVE_KILL_WAIT_SECONDS; wait_until polls with a deadline; process_alive reports liveness on win32 and POSIX; launcher_bytes finds pip's console-script launcher for `.exe` stand-ins.
 COMMON MODIFICATION PATTERNS: Add a stand-in behaviour as a scenario field read by fake_harness.py; add a fixture here only when two or more modules in this pack need it.
 WHAT NOT TO DO IN THIS FILE: 1. Do not stub the thread functions, CliRunner or the filesystem; a missing feature must stay red. 2. Do not leave PATH, USERPROFILE or HOME pointing at the developer's machine: the Grok fallback is `~/.grok/bin/grok.exe`, which exists on the author's machine. 3. Never name the WSL distro MuseUbuntu1; the stand-in distro is FAKE_DISTRO.
 KNOWN EDGE CASES: pip's distlib `t64.exe` is the launcher behind every `.exe` stand-in; tests that need one skip when pip lacks it. Liveness on win32 uses OpenProcess/GetExitCodeProcess (STILL_ACTIVE 259). Path text in messages is compared in both native and POSIX spelling, and case-insensitively on win32 (shutil.which returns PATHEXT suffixes in upper case).
-RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §6, §8.5, §9, §13
+RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §6, §8.5, §9, §13; docs/spec/harness-thread-helpers-skills/spec.md §8.5, §9.1, §13
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads
 """
 
@@ -16,14 +16,20 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import importlib
+import importlib.util
+import inspect
 import io
 import json
 import os
 import re
+import sqlite3
 import sys
 import tempfile
+import urllib.parse
 import zipfile
 from collections.abc import Awaitable, Callable, Iterable
+from contextlib import closing
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -49,6 +55,11 @@ FAST_KILL_WAIT_SECONDS = 0.5
 SLACK_SECONDS = 5.0
 POLL_SECONDS = 0.05
 EXCLUDED_FROM_SNAPSHOT = ("fake",)
+FIXED_TIME = datetime(2026, 3, 1, 12, 0, 0, tzinfo=timezone.utc)
+FIXED_MS = int(FIXED_TIME.timestamp() * 1000)
+GROK_MODEL = "grok-build-fast-1"
+MUSE_MODEL = "muse-coder-1"
+UUID4_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 
 
 def sha256(text: str) -> str:
@@ -294,15 +305,16 @@ def find_in_order(message: str, parts: Iterable[tuple[str, tuple[str, ...]]], *,
 
 @pytest.fixture
 def check_error(api: SimpleNamespace, sandbox: Sandbox) -> Callable[..., None]:
-    def check(error: BaseException, *, harness: str, verb: str, code: str, workspace: Path | None = None, thread_id: str | None | bool = False, observations: Iterable[tuple[str, tuple[str, ...]]] = (), vendor: str | None = None, exit_code: int | None | bool = False) -> None:
+    def check(error: BaseException, *, harness: str, verb: str = "run", code: str, operation: str | None = None, workspace: Path | None = None, thread_id: str | None | bool = False, observations: Iterable[tuple[str, tuple[str, ...]]] = (), vendor: str | None = None, exit_code: int | None | bool = False) -> None:
         # INV-5 attributes and message order; thread_id/exit_code False
-        # means "do not check".
+        # means "do not check". `operation` names a helper or skill
+        # function (its NativeThreadOperation value is its own name).
         assert isinstance(error, api.NativeThreadError), f"expected NativeThreadError, got {type(error).__name__}: {error}"
         assert isinstance(error, api.AgentExecutionError)
         assert error.failure_code.value == code, f"expected {code}, got {error.failure_code.value}: {error}"
         assert isinstance(error.failure_code, api.FailureCode)
         assert error.harness == api.enums.NativeHarness(harness)
-        operation = f"{verb}_{harness}_thread"
+        operation = operation or f"{verb}_{harness}_thread"
         assert error.operation == api.enums.NativeThreadOperation(operation)
         assert error.likely_cause == api.constants.NATIVE_THREAD_LIKELY_CAUSES[error.failure_code], "likely_cause must be the text written for this code"
         assert error.next_step == api.constants.NATIVE_THREAD_NEXT_STEPS[error.failure_code], "next_step must be the text written for this code"
@@ -412,3 +424,161 @@ def pack() -> SimpleNamespace:
         COMMAND_FIELDS=COMMAND_FIELDS, SLACK_SECONDS=SLACK_SECONDS, key_digest=key_digest, private_home=private_home, wsl_form=wsl_form,
         path_spellings=path_spellings, find_in_order=find_in_order, launcher_bytes=launcher_bytes,
     )
+
+
+# ---- Thread helpers and skill functions (spec harness-thread-helpers-skills)
+
+
+def harness_of(name: str) -> str:
+    return next(harness for harness in HARNESSES if f"_{harness}_" in f"_{name}_")
+
+
+def built_config(api: SimpleNamespace, sandbox: Sandbox, harness: str, fake: dict[str, Any] | None, config: dict[str, Any] | None) -> Any:
+    fields = {COMMAND_FIELDS[harness]: sandbox.command(harness, **(fake or {})), "timeout_seconds": CALL_TIMEOUT_SECONDS, **(config or {})}
+    return api.configs[harness](**fields)
+
+
+@pytest.fixture
+def helper(api: SimpleNamespace, sandbox: Sandbox) -> Callable[..., Awaitable[Any]]:
+    async def run(name: str, *positional: Any, fake: dict[str, Any] | None = None, config: dict[str, Any] | None = None, raw_config: Any = BUILT_CONFIG, **keywords: Any) -> Any:
+        # One keyless function by its §8.5 name. A name the package does
+        # not export fails here with AttributeError naming it. A function
+        # that takes `config` gets the stand-in (`config` adds fields),
+        # unless `raw_config` is handed over as is (e.g. None, the SDK
+        # default, or a record of another harness).
+        function = getattr(api.native, name)
+        if "config" in inspect.signature(function).parameters:
+            keywords["config"] = built_config(api, sandbox, harness_of(name), fake, config) if raw_config is BUILT_CONFIG else raw_config
+        return await function(*positional, **keywords)
+
+    return run
+
+
+@pytest.fixture
+def skill(api: SimpleNamespace, sandbox: Sandbox) -> Callable[..., Awaitable[Any]]:
+    async def run(name: str, *positional: Any, fake: dict[str, Any] | None = None, config: dict[str, Any] | None = None, raw_config: Any = BUILT_CONFIG, **keywords: Any) -> Any:
+        # One command or skill function with the caller's key, the
+        # sandbox workspace and the stand-in (opencode also gets its
+        # required model); `config` adds fields, `raw_config` replaces
+        # the built record.
+        function = getattr(api.native, name)
+        harness = harness_of(name)
+        keywords.setdefault("api_key", API_KEY)
+        keywords.setdefault("workspace", sandbox.workspace)
+        if harness == "opencode":
+            keywords.setdefault("model", OPENCODE_MODEL)
+        keywords["config"] = built_config(api, sandbox, harness, fake, config) if raw_config is BUILT_CONFIG else raw_config
+        return await function(*positional, **keywords)
+
+    return run
+
+
+def summary_fields(summary: Any) -> tuple[Any, ...]:
+    # A NativeThreadSummary as a plain tuple, so expectations need no
+    # import of the record.
+    return (summary.harness.value, summary.thread_id, summary.title, summary.created_at, summary.updated_at, summary.parent_thread_id, summary.model)
+
+
+def stamp(value: datetime | str) -> str:
+    return value if isinstance(value, str) else value.isoformat()
+
+
+class Stores:
+    """Builders for vendor stores in the layouts the stand-ins keep."""
+
+    def __init__(self, sandbox: Sandbox) -> None:
+        self.sandbox = sandbox
+        self.user_grok = sandbox.home / ".grok"
+        self.fake_helpers = load_fake_helpers()
+
+    def grok_group(self, workspace: Path | str | None = None) -> str:
+        return urllib.parse.quote(str(workspace or self.sandbox.workspace), safe="")
+
+    def grok_thread(self, thread_id: str, *, home: Path | None = None, group: str | None = None, created: datetime | str = FIXED_TIME, updated: datetime | str = FIXED_TIME, title: str | None = "Thread title", session_summary: str | None = None, last_turn_summary: str | None = None, parent: str | None = None, model: str | None = GROK_MODEL, agent: str | None = None, raw: bytes | None = None, transcript: bytes | None = None, drop: Iterable[str] = (), extra: dict[str, Any] | None = None) -> Path:
+        # Grok's real layout: <home>/sessions/<group>/<id>/summary.json,
+        # group = the url-encoded workspace unless named.
+        folder = (home or self.sandbox.grok_home()) / "sessions" / (group or self.grok_group()) / thread_id
+        folder.mkdir(parents=True, exist_ok=True)
+        data: dict[str, Any] = {
+            "created_at": stamp(created), "updated_at": stamp(updated), "generated_title": title, "session_summary": session_summary,
+            "last_turn_summary": last_turn_summary, "parent_session_id": parent, "current_model_id": model, **(extra or {}),
+        }
+        if agent is not None:
+            data["agent_name"] = agent
+        for member in drop:
+            data.pop(member, None)
+        (folder / "summary.json").write_bytes(raw if raw is not None else json.dumps(data).encode("utf-8"))
+        if transcript is not None:
+            (folder / "transcript.md").write_bytes(transcript)
+        return folder
+
+    def grok_noise(self, home: Path, group: str, cwd: str) -> list[Path]:
+        # The non-session files a real store holds (EC-66).
+        sessions = home / "sessions"
+        (sessions / group).mkdir(parents=True, exist_ok=True)
+        files = {sessions / "session_search.sqlite": b"SQLite format 3\x00", sessions / group / "permission.toml": b"[allow]\n", sessions / group / "permission_cli.toml": b"[allow]\n", sessions / group / ".cwd": cwd.encode("utf-8")}
+        for path, data in files.items():
+            path.write_bytes(data)
+        return list(files)
+
+    def opencode_session(self, thread_id: str, *, directory: Path | str | None = None, title: str = "Session title", created_ms: int = FIXED_MS, updated_ms: int = FIXED_MS, parent: str | None = None, project: str = "global", export: bytes | None = None) -> None:
+        # One row of opencode's `session` table, plus the stand-in's own
+        # transcript file.
+        state = self.sandbox.state_dir / "opencode"
+        state.mkdir(parents=True, exist_ok=True)
+        with closing(sqlite3.connect(state / "opencode.db")) as connection:
+            connection.execute(self.fake_helpers.OPENCODE_SCHEMA)
+            connection.execute(
+                "INSERT INTO session (id, project_id, parent_id, directory, title, time_created, time_updated) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (thread_id, project, parent, str(directory or self.sandbox.workspace), title, created_ms, updated_ms),
+            )
+            connection.commit()
+        (state / thread_id).write_text(title, encoding="utf-8")
+        if export is not None:
+            (state / f"{thread_id}.export").write_bytes(export)
+
+    def opencode_many(self, rows: Iterable[tuple[Any, ...]]) -> None:
+        # Bulk rows (id, project, parent, directory, title, created, updated).
+        state = self.sandbox.state_dir / "opencode"
+        state.mkdir(parents=True, exist_ok=True)
+        with closing(sqlite3.connect(state / "opencode.db")) as connection:
+            connection.execute(self.fake_helpers.OPENCODE_SCHEMA)
+            connection.executemany("INSERT INTO session (id, project_id, parent_id, directory, title, time_created, time_updated) VALUES (?, ?, ?, ?, ?, ?, ?)", list(rows))
+            connection.commit()
+
+    def muse_session(self, thread_id: str, *, workspace_root: str | None = None, created: datetime | str = FIXED_TIME, updated: datetime | str = FIXED_TIME, forked_from: str | None = None, model: str | None = MUSE_MODEL, items: list[dict[str, Any]] | None = None, session_extra: dict[str, Any] | None = None, export: bytes | None = None) -> None:
+        # One MSP Session with its items; forkedFrom is an object.
+        # `export` is the exact document `muse export` writes for it.
+        (self.sandbox.state_dir / "muse").mkdir(parents=True, exist_ok=True)
+        (self.sandbox.state_dir / "muse" / thread_id).write_text("seeded", encoding="utf-8")
+        if export is not None:
+            (self.sandbox.state_dir / "muse" / f"{thread_id}.export").write_bytes(export)
+        provenance = None if forked_from is None else {"commandId": "0192f0c4-0000-7000-8000-000000000000", "cutCursor": "cut-0001", "cutExplicit": False, "sessionId": forked_from}
+        session = {
+            "activeTurnId": None, "createdAt": stamp(created), "forkedFrom": provenance, "modelId": model, "path": f"/home/dev/.muse/sessions/{thread_id}.jsonl",
+            "providerId": "meta", "sessionId": thread_id, "status": "notLoaded", "turnCount": 1, "updatedAt": stamp(updated),
+            "workspaceRoot": workspace_root if workspace_root is not None else str(self.sandbox.workspace), **(session_extra or {}),
+        }
+        path = self.sandbox.state_dir / "muse-meta" / f"{thread_id}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"session": session, "items": items or []}), encoding="utf-8")
+
+
+def load_fake_helpers() -> Any:
+    # The stand-in's sibling module (standard library only), for the one
+    # SQLite schema both sides use.
+    spec = importlib.util.spec_from_file_location("fake_harness_helpers_for_tests", PACK / "fake_harness_helpers.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture
+def stores(sandbox: Sandbox) -> Stores:
+    return Stores(sandbox)
+
+
+@pytest.fixture
+def shapes() -> SimpleNamespace:
+    # Pure helpers for the helper and skill tests.
+    return SimpleNamespace(summary_fields=summary_fields, harness_of=harness_of, FIXED_TIME=FIXED_TIME, FIXED_MS=FIXED_MS, GROK_MODEL=GROK_MODEL, MUSE_MODEL=MUSE_MODEL, UUID4=UUID4_PATTERN)
