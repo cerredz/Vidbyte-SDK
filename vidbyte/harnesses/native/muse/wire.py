@@ -249,9 +249,9 @@ class MuseSessionWire:
         answer = answers[0]
 
         # @intent muse-helper-json-rpc-errors-are-classified
-        # -32020 is a thread Muse does not have; -32601 is a Muse too old
-        # for the method, which the SDK cannot read around; any other
-        # error is a failed request with Muse's own message.
+        # -32020 is a thread Muse does not have; -32601 is a Muse too
+        # old for the method, which the SDK cannot read around; any
+        # other error is a failed request with Muse's own message.
         error = answer.get(native_threads.JSONRPC_ERROR_FIELD)
         if isinstance(error, dict):
             code, message = error.get(native_threads.JSONRPC_CODE_FIELD), error.get(native_threads.JSONRPC_MESSAGE_FIELD)

@@ -77,7 +77,8 @@ NATIVE_WINDOWS_COMMAND_TEXT_MAX_UNITS = NATIVE_WINDOWS_ARGV_PROMPT_MAX_UNITS - N
 NATIVE_OPENCODE_SCAN_MAX = 10000
 # OPENCODE_SESSION_QUERY selects one exact id: at most this many rows.
 OPENCODE_SESSION_QUERY_MAX_ROWS = 1
-# The latest epoch millisecond a datetime holds (9999-12-31T23:59:59.999Z).
+# The latest epoch millisecond a datetime holds
+# (9999-12-31T23:59:59.999Z).
 NATIVE_EPOCH_MS_MIN = 0
 NATIVE_EPOCH_MS_MAX = 253402300799999
 OPENCODE_MILLISECONDS_PER_SECOND = 1000
@@ -385,8 +386,9 @@ MUSE_METHOD_NOT_FOUND_CODE = -32601
 # passed NATIVE_THREAD_ID_PATTERN (D-26, T-9).
 OPENCODE_SESSION_QUERY = "SELECT id, title, time_created, time_updated, parent_id, directory FROM session WHERE id = '{thread_id}'"
 
-# Command and skill evidence (§9.2, INV-8): the tool a run must call and
-# the text its arguments must hold, matched after backslash folding.
+# Command and skill evidence (§9.2, INV-8): the tool a run must call
+# and the text its arguments must hold, matched after backslash
+# folding.
 GROK_UPDATE_GOAL_TOOL = "update_goal"
 GROK_READ_FILE_TOOL = "read_file"
 GROK_IMAGE_TOOLS = ("image_gen", "image_edit")

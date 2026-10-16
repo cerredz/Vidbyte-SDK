@@ -207,10 +207,11 @@ class GrokStore:
 
     @staticmethod
     def _read(path: Path, request: NativeHelperRequest | NativeThreadRequest, errors: NativeErrorFactory) -> GrokThreadFile | None:
-        # One summary.json, or None when it is not there. Only a regular
-        # file is opened, and its size comes from the open handle, so
-        # an oversize file is named and never loaded (spec EC-10); any
-        # other OSError is store_unreadable naming the file (spec EC-13).
+        # One summary.json, or None when it is not there. Only a
+        # regular file is opened, and its size comes from the open
+        # handle, so an oversize file is named and never loaded (spec
+        # EC-10); any other OSError is store_unreadable naming the file
+        # (spec EC-13).
         try:
             if not path.is_file():
                 return None

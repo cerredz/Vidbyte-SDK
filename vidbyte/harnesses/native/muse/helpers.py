@@ -175,7 +175,8 @@ class MuseHelperRun:
         try:
             mark, overlay = launcher.new_mark(), MuseChildren.overlay(launcher, folder)
 
-            # Read the requested thread; an unknown id is thread_not_found.
+            # Read the requested thread; an unknown id is
+            # thread_not_found.
             result = await MuseHelperRun._serve(MuseMethod.SESSION_READ, MuseWire.session_read_params(request.thread_id or ""), prefix, launcher, overlay, mark, request, errors)
             head = MuseSessionWire.session(result, request, errors)
             chain = [head]

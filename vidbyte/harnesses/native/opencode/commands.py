@@ -92,8 +92,8 @@ class OpencodeCommands:
             settings = OpencodeThreadConfig() if config is None else RecordFieldConverter.require_instance(config, native_threads.NATIVE_CONFIG_ARGUMENT, OpencodeThreadConfig)
 
             # @intent opencode-plan-runs-only-the-plan-agent
-            # The plan function always runs the plan agent; a config that
-            # names another agent is refused, not overridden.
+            # The plan function always runs the plan agent; a config
+            # that names another agent is refused, not overridden.
             if operation is NativeThreadOperation.RUN_OPENCODE_PLAN:
                 if settings.agent not in (None, native_threads.OPENCODE_PLAN_AGENT):
                     raise ConfigurationError(native_threads.OPENCODE_PLAN_AGENT_RULE.format(agent=native_threads.OPENCODE_PLAN_AGENT, got=settings.agent), details={native_threads.NATIVE_FIELD_DETAIL_KEY: native_threads.NATIVE_CONFIG_ARGUMENT})

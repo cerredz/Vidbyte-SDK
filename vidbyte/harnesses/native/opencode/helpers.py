@@ -166,8 +166,8 @@ class OpencodeHelperRun:
 
     @staticmethod
     async def get(request: NativeHelperRequest, config: OpencodeThreadConfig, errors: NativeErrorFactory) -> NativeThreadSummary:
-        # Read the id's row from opencode's session table, database-wide,
-        # with one db child (spec D-26).
+        # Read the id's row from opencode's session table,
+        # database-wide, with one db child (spec D-26).
         options = (CliOption(OpencodeFlag.FORMAT, native_threads.OPENCODE_JSON_FORMAT),)
         outcome = await OpencodeHelperRun._child(request, config, errors, command=(native_threads.OPENCODE_DB_COMMAND,), options=options, operands=(OpencodeHelperRun._query(request.thread_id or ""),))
         rows = OpencodeHelperWire.rows(outcome, request, errors)
