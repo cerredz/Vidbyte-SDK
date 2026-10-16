@@ -226,8 +226,8 @@ class InfiniteEvents:
         with self._shielded(InfiniteEventKind.GENERATOR_FINISHED):
             # A pair launched before this object existed has no start
             # time, so its duration is reported as 0.
-            launched = self._launched.pop(memory.key.rpartition("/")[0], None)
-            duration = 0 if launched is None else int((time.monotonic() - launched) * INFINITE_EVENT_MILLISECONDS_PER_SECOND)
+            launched = self._launched.pop(memory.key.removesuffix(f"/{INFINITE_GENERATOR_KEY}"), None)
+            duration = INFINITE_MIN_COUNT if launched is None else int((time.monotonic() - launched) * INFINITE_EVENT_MILLISECONDS_PER_SECOND)
             tokens, cost = self._usage((reply.metadata.get(INFINITE_USAGE_METADATA_KEY),))
             details = InfiniteGeneratorFinishedDetails(
                 status=status, stop_reason=self._cut(str(reply.metadata.get(INFINITE_STOP_REASON_METADATA_KEY, "")), INFINITE_EVENT_LABEL_MAX_CHARS, collapse=True), summary=self._cut(summary, INFINITE_EVENT_TEXT_MAX_CHARS),
