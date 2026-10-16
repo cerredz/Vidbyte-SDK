@@ -14,7 +14,7 @@ started: 2026-10-15 18:41
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 18:41 | 19:05 | reports/S0-scout.md | base 72a4ade1; code-map.md (4 sections, 37 per-provider touch points) |
-| S1 spec + review | running | 2026-10-15 19:10 | | reports/S1-spec-author.md | spec r1 @9da36eb1 (author done; review round 1 next) |
+| S1 spec + review | running | 2026-10-15 19:10 | | reports/S1-spec-author.md, reports/S1-spec-review.md | r1 reviewed SOUND WITH FIXES (1B/8M/4m); r2 @6e6edb94; round 2 (focused) next |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -23,7 +23,7 @@ started: 2026-10-15 18:41
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 0/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 1/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Fixed values
 - REPO_ROOT `C:/Users/422mi/vidbyte-repos/vidbyte-sdk` (main checkout: never touched; has untracked files)
