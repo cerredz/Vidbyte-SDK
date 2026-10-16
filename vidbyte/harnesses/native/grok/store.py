@@ -103,7 +103,6 @@ class GrokHome:
         }
 
 
-
 class GrokStore:
     """Reads the session folders of one Grok home: every thread of a scope for a list or search, or one id's summary.json."""
 
