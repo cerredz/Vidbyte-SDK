@@ -14,7 +14,7 @@ started: 2026-10-16 16:10
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-16 16:10 | 2026-10-16 16:30 | reports/S0-scout.md | base_commit 0f2aeb48; code-map.md (4 §, 14 contradictions) |
-| S1 spec + review | pending | | | | |
+| S1 spec + review | running | 2026-10-16 16:35 | | reports/S1-spec-author.md, reports/S1-spec-review.md | spec r1 @a43f5423 (37 rows, 23 new files); review round 1 running |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -23,7 +23,7 @@ started: 2026-10-16 16:10
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 0/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 1/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-16 16:08 — Base on origin/main (0f2aeb48), not on the unmerged InfiniteMemoryAgent branch (#1084) — the user said "inside of the vidbyte-sdk/", and #1084 is still open.
@@ -32,6 +32,8 @@ started: 2026-10-16 16:10
 
 - 2026-10-16 16:30 — Corrected request.md §C: InfiniteMemoryAgent #1084 IS merged (2c84049c, 15:45 today); main's vidbyte/agents/infinite/ is a legitimate code precedent; the user's "no InfiniteMemoryAgent biases" rule still governs prompts/roles — scout evidence code-map §4 item 1, verified with git merge-base --is-ancestor.
 - 2026-10-16 16:30 — Spot-check S0: code-map has 4 sections; runtime.py:588-602 and :668-702 match the scout's description of where _after_tool_iteration fires (only after a tool iteration that continues); patch.py path confirmed; only docs/spec/agent-swarm untracked.
+
+- 2026-10-16 17:20 — Spot-check S1 r1: 18/18 template sections; 37 §12.3 rows; frontmatter base_commit/worktree correct; commit "docs(spec): add agent-swarm spec r1" @a43f5423. Briefed the reviewer to treat L2 (over-engineering vs "very minimal") and the idle/wake/quiet race as priorities, and to judge the author's A-2 role mapping (AgentSwarmRuntime = per-member runtime; AgentSwarm = coordinator).
 
 ## User replies (verbatim)
 - 2026-10-16 16:05 — answers to four clarifying questions: "One shared folder (Recommended)"; "Stay alive until quiet (Recommended)"; "Shared goal + per-agent prompts (Recommended)"; "Callback + list on result (Recommended)".
@@ -57,4 +59,10 @@ started: 2026-10-16 16:10
 - Default `PermissionPolicy()` allows only SAFE+READ: bash (EXECUTE) and write/patch (WRITE) are denied unless the swarm sets a policy; bash is NOT confined to the root folder (agents README:144) — *source:* S0 scout
 - Patch tool is `vidbyte/tools/builtins/editing/patch.py`, model-facing name `patch_file`; `CodingAgentTools.get_tools` is closer to bash+grep+read+write+patch than ParadigmMinimalToolset — *source:* S0 scout
 - No central test fake: N-concurrent-agent scripting uses `ScriptedTree` (patches `BaseAgent._runner_for_model`, routes by agent name, orders with Gate/Signal); other fakes in tests/agent_test_support.py, tests/features/coding_agent/conftest.py, tests/features/infinite... — *source:* S0 scout code-map §3/§4
+- Idle/wake goes through a middleware `review_finish` hook returning `continue_with`/`accept` (spec D-3), because CONTINUE ordering is right at runtime.py:563-568/:669-670 while `_continue_finish_attempt` (:598-601) appends the reply after the hook's message (possible latent JevAgent ordering bug — reported, not fixed) — *source:* S1 author
+- Turn reply text: plain finish = `ctx.run_state[AgentRuntimeStateKey.ITERATION_OUTPUTS.value][-1]`; isDone path = `ctx.tool_result.output` — *source:* S1 author
+- `BaseTool.validate_call` only checks required args are present, so `message.execute` must re-check recipient and blank text — *source:* S1 author
+- `RecordFieldValidator.require_number` refuses 0 — *source:* S1 author
+- `ScriptedTree`: each agent's script is one continuous list of steps across all its turns — *source:* S1 author
+- Two `harness_threads` surface tests already fail on any branch touching `vidbyte/tools` or root exports (field guide local-ci-verification.md); do not fix them — *source:* S1 author
 - vidbyte-gates.md is wrong for the SDK: lint marker is `SDK-LINT: PASS`; run_ci.py runs no semgrep; `--stage source` needs `PYTHONPATH=$(pwd)` while the package stage must run without it — *source:* S0 scout
