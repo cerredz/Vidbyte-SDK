@@ -15,8 +15,8 @@ started: 2026-10-15 22:10
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-15 22:10 | 2026-10-15 22:40 | reports/S0-scout.md | base ff1bc933; code-map.md (2 new + 16 changed files) |
-| S1 spec + review | in progress (review r2 SOUND WITH FIXES 0B/1M/4m; author applying final r3, no further review) | 2026-10-15 22:55 | | reports/S1-spec-author.md | spec r1: 2 new files, 22 §12.3 rows, 0 blocking Q |
-| S2 tests | pending | | | | |
+| S1 spec + review | done (r3 approved c6774e94) | 2026-10-15 22:55 | 2026-10-16 07:05 | reports/S1-spec-author.md, S1-spec-reviewer-r1.md, S1-spec-reviewer-r2.md | spec r1: 2 new files, 22 §12.3 rows, 0 blocking Q |
+| S2 tests | in progress | 2026-10-16 07:05 | | reports/S2-test-author.md | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
@@ -47,6 +47,9 @@ started: 2026-10-15 22:10
 - 2026-10-16 02:50 — Forwarded SDK r2 facts + the cross-repo rulings to the Vidbyte and CLI authors (revision round 1 for both).
 - 2026-10-16 03:20 — Review r2 (reports/S1-spec-reviewer-r2.md): SOUND WITH FIXES — all 13 r1 dispositions hold; size arithmetic matches an independent rebuild (subagent_finished details 27,011 / event 31,089 / compact 14,544; scratchpad r2check/sizes.py). R-14 Major: since #1113 DelegationLimitsMiddleware refuses launches past max_depth/max_parallel in before_tool_call, before InfiniteLaunchTool.execute, so those refusals never emit batch_rejected — INV-15 false; narrow it, add an EC row, tell the siblings (optional Q-6 default no). Minors R-15..R-18 (Task-returning sink logged as TypeError; budget headroom; acceptance checks for cost_usd=0.0 / non-UTC at / at resolution; 4 drifted anchors).
 - 2026-10-16 03:20 — Review cap reached (2/2): the author applies R-14..R-18 as r3 with no third review; the orchestrator spot-checks r3 and approves. Budget-test ruling widened within the single pre-approved edit (row 22): launch.py ≤ 410 and lib/dataclasses/infinite.py ≤ 620 (reviewer's line-by-line count: launch ~394/400 after required @intent blocks, lib ~577/600) — margin for counting variance, so S3 cannot need a second existing-test edit.
+- 2026-10-16 06:55 — Second account usage-limit stop (window reset 06:50) hit the in-flight author revisions mid-edit (r3); partial spec edits were left uncommitted and the same agents were resumed to finish them. Pacing from here: ≤ 3 agents of this run at a time (another session's prompts pipeline shares the window); focused round-2 reviews resume the same reviewers.
+- 2026-10-16 07:05 — Spec r3 approved (c6774e94, 1,020 lines; FR 23, AC 37, EC 37, INV 38, 25 §12.3 rows, 0 blocking Q). r2→r3 facts forwarded to siblings: launches refused by DelegationLimitsMiddleware (past max_depth / over max_parallel) emit NO event; batch_rejected = refusals inside the launch tool only; runtime-refused memory tool calls emit no tool_refused; cost_usd is null whenever any part is unpriced (cost_complete false) — treat null as unknown, never 0. Row 22 test edit: module count ≤ 9, launch.py ≤ 410, lib/dataclasses/infinite.py ≤ 620, BUDGET_MODULES comment "twelve" → "fourteen".
+- 2026-10-16 07:05 — S2 environment ruling: do NOT `pip install -e .` in this worktree (the global Python has no installed vidbyte SDK; an editable install would repoint every other session's `import vidbyte` here). Run everything from the worktree root with `PYTHONPATH=$(pwd)` per the field guide's local-ci-verification.md.
 
 ## User replies (verbatim)
 - (none during the run yet)

@@ -184,3 +184,44 @@ All 18 sections are present in template order, and no section is skipped. IDs ha
   - The field changes from §B are listed in D-21.
 - Row 22 touches the module-level `BUDGET_MODULES` tuple, which only the budget test reads (R-13). It is still the single pre-approved edit.
 - `launch` has about 8 lines of headroom at 400. If S3 runs out, it must stop with BLOCKED rather than raise the cap.
+
+---
+
+## Addendum: revision r3 (2026-10-16, revision round 2, final)
+
+**Status:** DONE. The r3 spec is committed as `c6774e94` on top of `ea0ea4b8`, with front matter `status: approved` and `revision: 3`. Only `spec.md` was staged; the orchestrator's `pipeline.md` edit and this report are left uncommitted.
+
+### Dispositions (all accepted; logged in §16)
+
+**R-14 (Major), middleware refusals.** Since #1113, `DelegationLimitsMiddleware.before_tool_call` denies a `launch_subagent` call past `max_depth` or over `max_parallel` before `InfiniteLaunchTool.execute` runs. I confirmed this in the code: `delegation_limits.py:53-68`, attached to the root at `agent.py:80` and to each generator at `launch.py:272`. The runtime returns the denial as `Tool denied by middleware: ...` (`runtime.py:1397`). The spec now says so everywhere it matters:
+- INV-15 now covers only refusals made inside `execute`, and lists them: unreadable tasks, a duplicate name, a foreign tool, an unknown context entry, and `max_agents`.
+- New EC-37 describes the denial: no event, and the model sees the tool error.
+- New AC-36 (P1) pins that no event is delivered for a denied launch.
+- AC-7 now names a refusal made inside `execute`.
+- §4, the §5 flowchart and prose, the §9.1 `batch_rejected` row, row 8, the §9.2 sibling list, D-21, and A-4 all state the gap.
+- INV-20 also says that a runtime denial of a memory tool emits nothing.
+- New Q-6 asks whether middleware denials should emit events. It is non-blocking, and the default is no.
+
+**R-15, returned values.** Only a coroutine object (`inspect.iscoroutine`) is closed and counted as a `TypeError` sink failure. Any other return value is ignored, including a `Task` or `Future` the sink scheduled itself. I updated INV-36, D-27, EC-32, §9.2, T-1, row 6, §14, the §12.4 checklist, and the §5 sequence note to match. AC-29 gains case (b), a sink that returns the task it scheduled: no warning.
+
+**R-16, budget (your ruling).** Row 22 sets `launch` ≤ 410 and lib records ≤ 620, still inside the single pre-approved test edit; the module count stays ≤ 9. Estimates are the review's line-by-line counts, ~394 and ~577. I updated §8.4, D-2, NFR-1, and row 8. The R-1 row in §16 now carries a note that R-16 supersedes it.
+
+**R-17, validator coverage.** New AC-37 (P0) checks:
+- `cost_usd=0.0` is accepted in all three usage records and is delivered through `InfiniteEvents`.
+- An `at` with a +01:00 offset, a naive `at`, and an `at` with microsecond 1 are refused.
+- `require_callable(None)` is refused when `optional` is not set.
+- INV-38 still holds for `require_number` and `truncate`.
+
+**R-18, anchors.** Corrected: memory `__init__` is at :42; in the journal, `__init__` is at :43, `find` at :67-68, and the `RUN_FINISHED` case at :151-152. D-19 now notes that the workspace uses `newline=""`. §13 now credits the zero refusal to `tests/features/harness_threads/test_harness_threads_records.py:21,26`.
+
+**Found while self-checking (no reviewer ID).** D-18 now treats a part's cost as known only when its rollup has `cost_complete` true. The reason: `UsageRollup.cost_usd` sums only the priced calls when any call is unpriced (`vidbyte/agents/pricing/tracker.py:185-186`, `_sum_or_none` :251), so reporting it would understate the cost. The §9.2 sibling list and A-4 say that `cost_usd: null` means the cost is unknown. This is recorded in the §17 r3 row.
+
+### Stage E self-check (r3)
+- All 18 sections are present in template order.
+- No ID gaps, and no ID is referenced without being defined.
+- ID counts: G 4, NG 13, INV 38, AC 37, EC 37, FR 23, NFR 9, D 29, T 4, W 11, A 10, Q 6 (0 blocking), R 18.
+- All 25 rows in §12.3 name a governing standard.
+- Every markdown table row has the same cell count as its header.
+- The spec contains no test code.
+- I re-verified the cited anchors against the code: `delegation_limits.py`, `launch.py:272`, `runtime.py:1397`, and `tracker.py:185-186`.
+- No code changed since r2, so the r2 baselines still stand: pack 113 passed, API current, lint PASS, and run_ci source failing only the 3 known harness_threads tests.
