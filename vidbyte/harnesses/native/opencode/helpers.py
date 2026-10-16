@@ -20,7 +20,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from vidbyte.harnesses.native.hostkit import NativeErrorFactory, NativeLauncher, NativeThreadListing
+from vidbyte.harnesses.native.hostkit import (
+    NativeErrorFactory,
+    NativeLauncher,
+    NativeThreadListing,
+)
 from vidbyte.harnesses.native.opencode.wire import OpencodeHelperWire
 from vidbyte.lib.constants import native_threads
 from vidbyte.lib.dataclasses.native_threads import (
@@ -140,9 +144,8 @@ class OpencodeHelperRun:
         mine = (summary for summary, directory in OpencodeHelperWire.sessions(outcome, request, errors) if os.path.normcase(directory) == wanted)
 
         # Keep one entry per id, inside the window, newest first, at
-        # most limit. The request checked the limit; `or` only tells
-        # the type checker it is set.
-        return NativeThreadListing.newest(mine, cutoff=cutoff, limit=request.limit or 0)
+        # most limit.
+        return NativeThreadListing.newest(mine, cutoff=cutoff, limit=request.limit)
 
     @staticmethod
     async def search(request: NativeHelperRequest, config: OpencodeThreadConfig, errors: NativeErrorFactory) -> tuple[NativeThreadSummary, ...]:
@@ -159,7 +162,7 @@ class OpencodeHelperRun:
         matching = (summary for summary, directory in OpencodeHelperWire.sessions(outcome, request, errors) if os.path.normcase(directory) == wanted and NativeThreadListing.matches((summary.title,), query))
 
         # Newest first, one entry per id, at most limit.
-        return NativeThreadListing.newest(matching, cutoff=None, limit=request.limit or 0)
+        return NativeThreadListing.newest(matching, cutoff=None, limit=request.limit)
 
     @staticmethod
     async def get(request: NativeHelperRequest, config: OpencodeThreadConfig, errors: NativeErrorFactory) -> NativeThreadSummary:
@@ -190,14 +193,14 @@ class OpencodeHelperRun:
         while parent is not None:
             NativeThreadListing.check_step(tuple(chain), parent, errors, request)
             step = await OpencodeHelperRun._child(request, config, errors, command=(native_threads.OPENCODE_DB_COMMAND,), options=options, operands=(OpencodeHelperRun._query(parent),))
-            rows = OpencodeHelperWire.rows(step, request, errors)
 
             # A parent with no row ends the chain; the head then names
             # the missing id (spec EC-25).
-            if not rows:
+            head = next(iter(OpencodeHelperWire.rows(step, request, errors)), None)
+            if head is None:
                 break
-            chain.append(rows[0])
-            parent = rows[0].parent_thread_id
+            chain.append(head)
+            parent = head.parent_thread_id
 
         # Root first, ending with the requested session.
         return tuple(reversed(chain))

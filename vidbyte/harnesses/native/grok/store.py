@@ -23,7 +23,11 @@ from pathlib import Path
 from vidbyte.harnesses.native.grok.wire import GrokHelperWire
 from vidbyte.harnesses.native.hostkit import NativeErrorFactory, NativeSkillFolders
 from vidbyte.lib.constants import native_threads
-from vidbyte.lib.dataclasses.native_threads import GrokThreadFile, NativeHelperRequest, NativeThreadRequest
+from vidbyte.lib.dataclasses.native_threads import (
+    GrokThreadFile,
+    NativeHelperRequest,
+    NativeThreadRequest,
+)
 from vidbyte.lib.enums.native_threads import (
     GrokThreadScope,
     NativeEnvironmentVariable,

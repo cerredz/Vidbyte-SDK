@@ -26,7 +26,10 @@ from vidbyte.lib.dataclasses.native_threads import (
     NativeThreadSummary,
 )
 from vidbyte.lib.dataclasses.process import CliOutcome
-from vidbyte.lib.dataclasses.validation import RecordFieldConverter, RecordFieldValidator
+from vidbyte.lib.dataclasses.validation import (
+    RecordFieldConverter,
+    RecordFieldValidator,
+)
 from vidbyte.lib.enums.native_threads import (
     NativeHarness,
     NativeThreadProblem,

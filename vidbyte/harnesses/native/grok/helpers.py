@@ -21,7 +21,11 @@ from typing import Any
 
 from vidbyte.harnesses.native.grok.store import GrokHome, GrokStore
 from vidbyte.harnesses.native.grok.wire import GrokHelperWire
-from vidbyte.harnesses.native.hostkit import NativeErrorFactory, NativeLauncher, NativeThreadListing
+from vidbyte.harnesses.native.hostkit import (
+    NativeErrorFactory,
+    NativeLauncher,
+    NativeThreadListing,
+)
 from vidbyte.lib.constants import native_threads
 from vidbyte.lib.dataclasses.native_threads import (
     GrokThreadConfig,
@@ -136,9 +140,8 @@ class GrokHelperRun:
         files = await asyncio.to_thread(GrokStore.threads, home, request, errors)
 
         # Keep one entry per id, inside the window, newest first, at
-        # most limit. The request checked the limit; `or` only tells
-        # the type checker it is set.
-        return NativeThreadListing.newest((found.summary for found in files), cutoff=cutoff, limit=request.limit or 0)
+        # most limit.
+        return NativeThreadListing.newest((found.summary for found in files), cutoff=cutoff, limit=request.limit)
 
     @staticmethod
     async def search(request: NativeHelperRequest, config: GrokThreadConfig, errors: NativeErrorFactory) -> tuple[NativeThreadSummary, ...]:
@@ -154,7 +157,7 @@ class GrokHelperRun:
         matching = (found.summary for found in files if NativeThreadListing.matches(found.search_text, query))
 
         # Newest first, one entry per id, at most limit.
-        return NativeThreadListing.newest(matching, cutoff=None, limit=request.limit or 0)
+        return NativeThreadListing.newest(matching, cutoff=None, limit=request.limit)
 
     @staticmethod
     async def get(request: NativeHelperRequest, config: GrokThreadConfig, errors: NativeErrorFactory) -> NativeThreadSummary:

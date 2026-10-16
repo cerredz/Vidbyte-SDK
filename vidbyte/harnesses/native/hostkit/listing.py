@@ -35,11 +35,13 @@ class NativeThreadListing:
         return None if since is None else now - since
 
     @staticmethod
-    def newest(summaries: Iterable[NativeThreadSummary], *, cutoff: datetime | None, limit: int) -> tuple[NativeThreadSummary, ...]:
+    def newest(summaries: Iterable[NativeThreadSummary], *, cutoff: datetime | None, limit: int | None) -> tuple[NativeThreadSummary, ...]:
         # @intent native-listing-is-newest-first-unique-and-limited
         # One entry per thread id, the newer one when a store lists an
         # id twice; then only the threads inside the window, newest
-        # first with ties by thread id descending, at most limit.
+        # first with ties by thread id descending, at most limit. A
+        # listing request always carries its checked limit; None would
+        # keep them all.
         kept: dict[str, NativeThreadSummary] = {}
         for summary in summaries:
             seen = kept.get(summary.thread_id)
