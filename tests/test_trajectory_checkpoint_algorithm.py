@@ -74,9 +74,9 @@ def runner_output_metadata(response: object) -> dict:
     return {}
 
 
-def base_context() -> BaseAgentContext:
+def base_context(system_prompt: str = "sys") -> BaseAgentContext:
     # Returns a minimal agent context for testing.
-    return BaseAgentContext(system_prompt="sys", history=(), file_paths=(), tools=(), budget=None)
+    return BaseAgentContext(system_prompt=system_prompt, history=(), file_paths=(), tools=(), budget=None)
 
 
 def runner_handle(runner: FakeRunner) -> RunnerHandle:
@@ -193,6 +193,22 @@ class TrajectoryCheckpointAlgorithmTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Runtime Checkpoint", final_system)
         self.assertEqual(result.metadata["trajectory_checkpoints"]["checkpoint_count"], 1)
 
+    async def test_runtime_checkpoint_survives_null_and_list_summary_fields(self) -> None:
+        # [Hidden Failure] A summarizer that writes null or a list for a text field still yields a checkpoint instead of failing the run.
+        @tool
+        def lookup() -> str:
+            return "plan=pro"
+        summary = json.dumps({"reasoning_summary": "res", "trajectory": ["read file", "ran tests"], "output": None, "score": 0.5, "feedback": "feed"})
+        runner = FakeRunner([tool_response(), FakeResponse(summary), is_done_response("final output")])
+        runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=Tools([lookup]), permission_policy=PermissionPolicy(), algorithm=ContextWindowAlgorithm(name="trajectory_checkpoints", trajectory_checkpoints=TrajectoryCheckpointAlgorithm(interval=1)))
+        result = await runtime.arun("task", handle=runner_handle(runner), context=base_context())
+        final_system = runner.calls[2]["kwargs"]["system"]
+        self.assertEqual(result.metadata["stop_reason"], "is_done")
+        self.assertEqual(result.metadata["trajectory_checkpoints"]["checkpoint_count"], 1)
+        self.assertIn("Runtime Checkpoint", final_system)
+        self.assertIn("ran tests", final_system)
+        self.assertNotIn("### Output\nNone", final_system)
+
     async def test_runtime_does_not_write_checkpoint_before_interval(self) -> None:
         # Verify checkpoint is omitted before interval boundary.
         runner = FakeRunner([FakeResponse("draft"), is_done_response()])
@@ -245,6 +261,56 @@ class TrajectoryCheckpointAlgorithmTests(unittest.IsolatedAsyncioTestCase):
         runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=Tools([lookup]), permission_policy=PermissionPolicy(), algorithm=ContextWindowAlgorithm(name="trajectory_checkpoints", trajectory_checkpoints=algorithm))
         await runtime.arun("task", handle=runner_handle(runner), context=base_context())
         self.assertIn("visible output", runner.calls[1]["prompt"])
+
+    async def test_runtime_checkpoint_fills_summarizer_input_slots_before_output_description(self) -> None:
+        # Verify the run's system prompt and history fill the summarizer template's slots once, ahead of its output contract.
+        @tool
+        def lookup() -> str:
+            return "visible output"
+        runner = FakeRunner([tool_response(), FakeResponse(_JSON_OUTPUT), is_done_response()])
+        algorithm = TrajectoryCheckpointAlgorithm(interval=1, include_tool_outputs=True)
+        runtime = AgentRuntime(agent_name="worker", system_prompt="Catalog every river gauge.", tools=Tools([lookup]), permission_policy=PermissionPolicy(), algorithm=ContextWindowAlgorithm(name="trajectory_checkpoints", trajectory_checkpoints=algorithm))
+        await runtime.arun("task", handle=runner_handle(runner), context=base_context("Catalog every river gauge."))
+        prompt = runner.calls[1]["prompt"]
+        self.assertNotIn("{main_system_prompt}", prompt)
+        self.assertNotIn("{conversation_history}", prompt)
+        output_start = prompt.index("# Output Description")
+        for marker in ("Catalog every river gauge.", "visible output"):
+            self.assertEqual(prompt.count(marker), 1, marker)
+            self.assertLess(prompt.index(marker), output_start, marker)
+
+    async def test_runtime_checkpoint_sees_run_system_prompt_not_agent_prompt(self) -> None:
+        # [Hidden Failure] A run's context may replace the agent's own prompt, so the summarizer must judge the run by the prompt its main model followed.
+        @tool
+        def lookup() -> str:
+            return "visible output"
+        runner = FakeRunner([tool_response(), FakeResponse(_JSON_OUTPUT), is_done_response()])
+        algorithm = TrajectoryCheckpointAlgorithm(interval=1)
+        runtime = AgentRuntime(agent_name="worker", system_prompt="AGENTSYS-4K write poems.", tools=Tools([lookup]), permission_policy=PermissionPolicy(), algorithm=ContextWindowAlgorithm(name="trajectory_checkpoints", trajectory_checkpoints=algorithm))
+        await runtime.arun("task", handle=runner_handle(runner), context=base_context("RUNSYS-9P quote prices in EUR."))
+        # The main model follows the run's prompt, and the summarizer is given that same prompt.
+        self.assertIn("RUNSYS-9P quote prices in EUR.", runner.calls[0]["kwargs"]["system"])
+        self.assertIn("RUNSYS-9P quote prices in EUR.", runner.calls[1]["prompt"])
+        self.assertNotIn("AGENTSYS-4K", runner.calls[1]["prompt"])
+
+    async def test_runtime_checkpoint_history_shows_task_at_run_boundary(self) -> None:
+        # [Hidden Failure] The summarizer sees the run's task once, after the caller's history and before the run's own tool work, as the main model does.
+        @tool
+        def lookup() -> str:
+            return "TOOL-OUTPUT-3"
+        task = "TASKMARK-7Q catalog every river gauge"
+        caller = [{"role": "user", "content": "CALLER-QUESTION-1"}, {"role": "assistant", "content": "CALLER-REPLY-2"}]
+        runner = FakeRunner([tool_response(), FakeResponse(_JSON_OUTPUT), is_done_response()])
+        algorithm = TrajectoryCheckpointAlgorithm(interval=1, include_tool_outputs=True)
+        runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=Tools([lookup]), permission_policy=PermissionPolicy(), algorithm=ContextWindowAlgorithm(name="trajectory_checkpoints", trajectory_checkpoints=algorithm))
+        await runtime.arun(task, handle=runner_handle(runner), context=base_context(), options={"messages": caller})
+        prompt = runner.calls[1]["prompt"]
+        self.assertEqual(prompt.count(task), 1)
+        positions = [prompt.index(marker) for marker in ("CALLER-QUESTION-1", "CALLER-REPLY-2", task, "TOOL-OUTPUT-3")]
+        self.assertEqual(positions, sorted(positions))
+        # The main model still gets the task once, as the prompt and never inside its history.
+        self.assertEqual(runner.calls[2]["prompt"], task)
+        self.assertNotIn(task, str(runner.calls[2]["kwargs"]["messages"]))
 
     async def test_runtime_slots_match_template(self) -> None:
         # Verify recorded slot templates validate successfully.

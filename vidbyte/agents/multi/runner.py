@@ -77,7 +77,11 @@ class MultiAgentRunner:
         self._ledger.remember_candidate(state, decision)
         await self._ledger.update_next_action(state, decision)
         if decision.action is OrchestratorAction.FINISH:
-            return await self._handle_finish(state, decision)
+            outcome = await self._handle_finish(state, decision)
+            # A rejected finish counts as a stall, so it reaches the same replan threshold as a stalled delegate.
+            if outcome is not None or state.stalls < self._agent.settings.replan_after_stalls:
+                return outcome
+            return await self._handle_replan(state)
         if decision.action is OrchestratorAction.REPLAN:
             return await self._handle_replan(state)
         progressed = await self._dispatcher.delegate(state, decision)

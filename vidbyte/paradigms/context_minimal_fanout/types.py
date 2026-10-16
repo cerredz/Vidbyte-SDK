@@ -21,6 +21,7 @@ Relations:
 
 from __future__ import annotations
 
+import posixpath
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -315,7 +316,7 @@ class PromptSplitPlan:
         return replace(self, prompts=tuple(prompts))
 
     def validate(self, *, max_prompt_count: int) -> None:
-        # Enforces prompt count, unique ids, and unique owned path assignments.
+        # Enforces prompt count, unique ids, and non-overlapping owned paths.
         if not self.prompts:
             raise ConfigurationError("Prompt split plan must contain at least one implementation prompt.")
         if len(self.prompts) > max_prompt_count:
@@ -325,15 +326,18 @@ class PromptSplitPlan:
 
     def overlap_conflicts(self) -> tuple[str, ...]:
         # Returns human-readable owned-path conflicts without raising.
-        owners: dict[str, str] = {}
+        # @intent owned-paths-overlap-by-location-not-spelling
+        # A branch may change anything within its owned paths, so two prompts overlap when their
+        # paths name the same location or one lies inside the other, however each was spelled.
+        owners: list[tuple[str, str]] = []
         conflicts: list[str] = []
         for prompt in self.prompts:
             for path in prompt.owned_paths:
                 normalized = _normalize_path(path)
-                previous = owners.get(normalized)
-                if previous is not None and previous != prompt.id:
+                previous = next((owner for owned, owner in owners if owner != prompt.id and _paths_nest(normalized, owned)), None)
+                if previous is not None:
                     conflicts.append(f"{path} owned by both {previous} and {prompt.id}")
-                owners[normalized] = prompt.id
+                owners.append((normalized, prompt.id))
         return tuple(conflicts)
 
     def to_markdown(self) -> str:
@@ -367,7 +371,7 @@ class PromptSplitPlan:
             raise ConfigurationError(f"Duplicate split prompt ids: {', '.join(sorted(set(duplicates)))}")
 
     def _validate_owned_paths_do_not_overlap(self) -> None:
-        # Rejects duplicate ownership of the same normalized path.
+        # Rejects two prompts owning the same location or one inside the other.
         conflicts = self.overlap_conflicts()
         if conflicts:
             raise ConfigurationError(f"Split prompt owned_paths overlap: {', '.join(conflicts)}")
@@ -567,8 +571,13 @@ def _bullet_lines(items: Sequence[str]) -> list[str]:
 
 
 def _normalize_path(path: str) -> str:
-    # Normalizes path ownership keys for duplicate detection.
-    return path.strip().replace("\\", "/").lower()
+    # Normalizes path ownership keys for duplicate detection: case, separators, "." and ".." segments, a trailing slash.
+    return posixpath.normpath(path.strip().replace("\\", "/").lower())
+
+
+def _paths_nest(left: str, right: str) -> bool:
+    # True when two normalized paths are the same or one lies inside the other; "." is the whole tool root.
+    return left == right or "." in (left, right) or left.startswith(f"{right}/") or right.startswith(f"{left}/")
 
 
 def _escape_attr(value: str) -> str:

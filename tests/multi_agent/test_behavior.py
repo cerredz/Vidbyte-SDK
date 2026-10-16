@@ -133,6 +133,24 @@ class MeteredOrchestrator(ScriptedOrchestrator):
         return await super().finalize(context)
 
 
+class ReopeningOrchestrator(ScriptedOrchestrator):
+    """Scripted orchestrator whose replan reopens the work under a fresh task id."""
+
+    def fork(self) -> "ReopeningOrchestrator":
+        return ReopeningOrchestrator(tuple(self._decisions), final_content=self._final_content)
+
+    async def replan(self, context: OrchestrationContext) -> OrchestratorPlan:
+        # A fresh task id supersedes the blocked task so the replan can recover the run.
+        return OrchestratorPlan(plan_summary="retry", tasks=(TaskSpec(task_id="task-2", goal="do work again", owner="worker"),))
+
+
+def _block_first_task(dispatch: AgentDispatch, _: TaskLedgerSnapshot) -> TaskBlocker | None:
+    # The approval gate denies the original task for good, so only a replan can reopen the work.
+    if dispatch.task_id == "task-1":
+        return TaskBlocker(code="policy", message="task-1 needs approval", retryable=False)
+    return None
+
+
 class MultiAgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
     """End-to-end behavior checks around the decomposed runtime."""
 
@@ -246,6 +264,47 @@ class MultiAgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.stop_reason, MultiAgentStopReason.MAX_ROUNDS)
         self.assertFalse(result.completed)
         self.assertFalse(result.ledger.tasks[0].evidence[0].verified)
+
+    async def test_rejected_premature_finishes_reach_the_stall_replan_threshold(self) -> None:
+        # [Hidden Failure] A rejected finish is one stall, so finishing early with open work must still trigger the promised replan.
+        events: list[str] = []
+        decisions = (
+            OrchestratorDecision(action=OrchestratorAction.DELEGATE, task_id="task-1", owner="worker", instruction="run"),
+            OrchestratorDecision(action=OrchestratorAction.FINISH, final_answer="guess"),
+            OrchestratorDecision(action=OrchestratorAction.DELEGATE, task_id="task-2", owner="worker", instruction="run"),
+            OrchestratorDecision(action=OrchestratorAction.FINISH, final_answer="candidate"),
+        )
+        binding = AgentBinding(ScriptedWorker(events), transfer=AgentTransfer(before_dispatch=_block_first_task))
+        settings = MultiAgentSettings(max_rounds=4, max_replans=1, replan_after_stalls=2)
+        team = MultiAgent(name="team", system_prompt="coordinate", orchestrator=ReopeningOrchestrator(decisions), agents=(binding,), settings=settings)
+
+        await team.generate_reply("complete the task")
+
+        result = team.last_result
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(result.replans, 1)
+        self.assertEqual(result.stop_reason, MultiAgentStopReason.COMPLETED)
+        self.assertEqual({task.task_id: task.status for task in result.ledger.tasks}, {"task-1": TaskStatus.SUPERSEDED, "task-2": TaskStatus.COMPLETED})
+
+    async def test_rejected_finishes_stop_at_max_replans_once_the_replan_budget_is_spent(self) -> None:
+        # [Edge Case] Rejected finishes at the stall threshold end exactly like stalled delegates when no replan is left.
+        events: list[str] = []
+        decisions = (
+            OrchestratorDecision(action=OrchestratorAction.FINISH, final_answer="guess"),
+            OrchestratorDecision(action=OrchestratorAction.FINISH, final_answer="guess"),
+        )
+        team = self._team(events, transfer=AgentTransfer(), decisions=decisions, settings=MultiAgentSettings(max_rounds=2, max_replans=0, replan_after_stalls=2))
+
+        await team.generate_reply("complete the task")
+
+        result = team.last_result
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(result.stop_reason, MultiAgentStopReason.MAX_REPLANS)
+        self.assertEqual(result.replans, 0)
+        self.assertFalse(result.completed)
+        self.assertEqual(events.count("worker.generate_reply"), 0)
 
     async def test_worker_stopped_by_its_middleware_blocks_its_task_instead_of_completing_it(self) -> None:
         # [Silent Failure] A worker's middleware abort (a tripwire, a kill switch) is a security stop, never finished work.

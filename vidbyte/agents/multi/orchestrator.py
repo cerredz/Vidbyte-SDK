@@ -15,16 +15,18 @@ Relations:
 
 from __future__ import annotations
 
+import functools
 import inspect
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from vidbyte.agents.base import BaseAgent
 from vidbyte.context.multi_agent import MultiAgentContext
+from vidbyte.lib.constants.outputs import OUTPUT_DELIVERABLE_STOP_REASONS
 from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentStopReason
 from vidbyte.lib.dataclasses.multi_agent import FinalizationContext, FinalizationRenderer, ManagerAgentCloser, ManagerAgentFactory, OrchestrationContext, OrchestrationRenderer, OrchestratorDecision, OrchestratorPlan, TaskSpec
 from vidbyte.lib.enums.multi_agent import OrchestratorAction
@@ -143,20 +145,18 @@ class MagenticOneOrchestrator:
     async def plan(self, context: OrchestrationContext) -> OrchestratorPlan:
         # Runs the structured planning phase and maps its validated output to public contracts.
         prompt = self._phase_message(self._planning_prompt, context)
-        output = await self._structured_phase("plan", prompt, _PlanOutput, self._retry_budget(context), context.round)
-        return self._to_plan(output)
+        return await self._structured_phase("plan", prompt, _PlanOutput, self._retry_budget(context), context.round, self._to_plan)
 
     async def decide(self, context: OrchestrationContext) -> OrchestratorDecision:
         # Runs one structured progress assessment against the latest ledger revision.
         prompt = self._phase_message(self._progress_prompt, context)
-        output = await self._structured_phase("progress", prompt, _DecisionOutput, self._retry_budget(context), context.round)
-        return self._to_decision(output, tuple(card.name for card in context.team))
+        to_decision = functools.partial(self._to_decision, owners=tuple(card.name for card in context.team))
+        return await self._structured_phase("progress", prompt, _DecisionOutput, self._retry_budget(context), context.round, to_decision)
 
     async def replan(self, context: OrchestrationContext) -> OrchestratorPlan:
         # Runs the structured recovery phase without granting it direct ledger mutation.
         prompt = self._phase_message(self._replanning_prompt, context)
-        output = await self._structured_phase("replan", prompt, _PlanOutput, self._retry_budget(context), context.round)
-        return self._to_plan(output)
+        return await self._structured_phase("replan", prompt, _PlanOutput, self._retry_budget(context), context.round, self._to_plan)
 
     async def finalize(self, context: FinalizationContext) -> str:
         # Uses the schema-free run manager to synthesize the terminal user-facing answer.
@@ -168,6 +168,11 @@ class MagenticOneOrchestrator:
         # stop text, not an answer, so it is never returned as one.
         if reply.metadata.get("stop_reason") == AgentStopReason.MIDDLEWARE_ABORT.value:
             raise MultiAgentExecutionError("Multi-agent manager's final answer was stopped by middleware.", details={"phase": "finalize"})
+        # @intent a-stopped-synthesis-is-not-an-answer
+        # A synthesis stopped by a budget or guard also left the SDK's stop text, so it is never returned as the team's answer.
+        stop_reason = reply.metadata.get("stop_reason")
+        if stop_reason is not None and stop_reason not in OUTPUT_DELIVERABLE_STOP_REASONS:
+            raise MultiAgentExecutionError("Multi-agent manager's final answer was stopped before it answered.", details={"phase": "finalize", "stop_reason": stop_reason})
         content = reply.content.strip()
         if not content:
             raise MultiAgentExecutionError("Multi-agent manager returned a blank final answer.", details={"phase": "finalize"})
@@ -182,8 +187,9 @@ class MagenticOneOrchestrator:
         if manager is not None:
             await self._close_manager(manager, "run")
 
-    async def _structured_phase(self, phase: str, prompt: str, schema: type[BaseModel], retries: int, round_number: int) -> BaseModel:
+    async def _structured_phase(self, phase: str, prompt: str, schema: type[BaseModel], retries: int, round_number: int, convert: Callable[[BaseModel], Any]) -> Any:
         # Retries only manager invocation/parse failures, never a middleware stop, and closes every structured phase fork.
+        # The public-contract conversion runs inside the retry, so a reply whose fields contradict its action is retried too.
         last_error: Exception | None = None
         for attempt in range(retries + 1):
             parse_attempt = attempt + 1
@@ -193,7 +199,7 @@ class MagenticOneOrchestrator:
                     raise ConfigurationError("manager_agent_factory must honor the requested output schema for each phase.", details={"phase": phase, "expected_schema": schema.__name__, "actual_schema": getattr(phase_agent.output_schema, "__name__", None)})
                 suffix = "" if attempt == 0 else "\n\nYour prior response was invalid. Return only data matching the required schema."
                 reply = await phase_agent.generate_reply(prompt + suffix, trace_metadata={"multi_agent_phase": phase, "parse_attempt": parse_attempt})
-                return self._parse_phase_reply(reply.content, reply.metadata, schema)
+                return convert(self._parse_phase_reply(reply.content, reply.metadata, schema))
             except ConfigurationError:
                 raise
             except Exception as exc:

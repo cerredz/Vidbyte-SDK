@@ -1478,6 +1478,24 @@ class SessionToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status.value, "success")
         self.assertEqual(store.get_meta(result.output).parent_session_id, source.id)
 
+    async def test_fork_tool_branches_other_session_with_custom_context_window_algorithm(self) -> None:  # [Silent Failure]
+        # @intent cross-session-fork-keeps-stored-algorithm-name
+        # The tool has no live agent for another session, so its branch must keep the source's user-named algorithm instead of failing as an unknown preset.
+        custom = ContextWindowAlgorithm(name="custom_compact", tool_result_admission=ToolResultAdmission.COMPACT, max_tool_result_chars=200)
+        store = InMemorySessionStore()
+        agent = BaseAgent(name="triage", system_prompt="Work.", provider="deepseek", model_name="deepseek-chat", api_keys=["sk-test-fake"], algorithm=custom)
+        session = Session(agent, store=store)
+        session.checkpoint()
+
+        tool = ForkTool(store, scope=SessionScope.sessions([session.id]))
+        result = await tool.execute(ToolCall(tool_name="fork", arguments={"session_id": session.id}))
+
+        self.assertEqual(result.status.value, "success", result.output)
+        self.assertEqual(store.head(result.output).run_state.algorithm, "custom_compact")
+        self.assertEqual(store.get_meta(result.output).parent_session_id, session.id)
+        resumed = Session.resume(store, result.output, api_keys=["sk-test-fake"], algorithm=custom).agent.algorithm
+        self.assertEqual((resumed.name, resumed.tool_result_admission, resumed.max_tool_result_chars), ("custom_compact", ToolResultAdmission.COMPACT, 200))
+
     async def test_fork_tool_rejects_checkpoint_from_other_session(self) -> None:  # [Hidden Assumption]
         store = InMemorySessionStore()
         store.put(_checkpoint("secret-session", "foreign"))
