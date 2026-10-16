@@ -19,8 +19,8 @@ started: 2026-10-15 18:12
 | S3 implement | done | 2026-10-16 02:05 | 2026-10-16 09:00 | reports/S3-implementer.md | HEAD 462e6d45 pushed; draft PR #1147; 998 passed/3 skipped; lint, run_ci (source+package) and semgrep green; 10/10 new files |
 | S4 adversarial review | done | 2026-10-16 09:10 | 2026-10-16 11:30 | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; confirmed 2 Blocker (R-1, R-2) / 4 Major (R-3..R-6) / 17 Minor; refuted 3; downgraded 3; 6641579c |
 | S4→S5 spec amendment r4, r5 | done | 2026-10-16 11:35 | 2026-10-16 12:10 | reports/S1-spec-author.md (addenda r4, r5) | r4 d6792f3d; r5 b701550e: D-33 reads `history.snapshot.state.items` in snapshot/anchoredSnapshot (no export); `remember_thread` D-34, `child_problem` D-35; `member=` on `require` |
-| S4→S5 test amendment | running | 2026-10-16 12:15 | | reports/S2-test-author-amendment.md | R-4 fixture; red tests for R-2, R-3, R-5, R-16, R-23; MSP-shaped anchored snapshot in the stand-in |
-| S5 repair loop | pending | | | | |
+| S4→S5 test amendment | done | 2026-10-16 12:15 | 2026-10-16 12:55 | reports/S2-test-author-amendment.md | S2_HEAD (amended) = cd2b329b; 10 new test functions (30 cases) + grants a–d; red 34 failed / 991 passed / 3 skipped, identical with and without DEEPSEEK_API_KEY (re-run by orchestrator) |
+| S5 repair loop | running | 2026-10-16 13:00 | | reports/S5-repair-1.md | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
 
@@ -101,6 +101,8 @@ started: 2026-10-15 18:12
   - (d) The Muse stand-in and the existing AC-34/AC-17 tests, where they encode the withdrawn export-text evidence rule (r3 D-33), move to the r5 MSP-shaped rule.
 
   Each change is listed before and after in test-plan.md. Reason: those tests encode a rule the spec now forbids (it was disproved against the real CLI). The R-4 fixture is test-only by spec INV-2/AC-10.
+
+- 2026-10-16 12:55 — S2 amendment spot-check passed. `git diff --name-only b35d9276..cd2b329b` touches only `tests/features/harness_threads/` and `docs/spec/harness-thread-helpers-skills/`, and spec.md changed in 6 lines, all of them Proof cells. My own re-run with DEEPSEEK_API_KEY set gave `34 failed, 991 passed, 3 skipped`: muse_commands 16, errors 8, listing_properties 6, grok_commands 2, helper_surface 2. From here on, the test tree may differ from cd2b329b only by a grant I record. PR #1147 has no remote checks yet, because CI is dispatch-only. origin/main is at cb554ed3.
 
 ## User replies (verbatim)
 - 2026-10-15 ~18:25 — "note, ccan you also in a subagent launch this "spec-pipeline" process for pr #1055 and explain the changes that we want to make with the implementation of the existing pr"
