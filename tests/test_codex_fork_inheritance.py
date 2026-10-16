@@ -6,7 +6,8 @@ PURPOSE:
     settings that carry output contracts. Locks the guarantee that branching a
     guarded thread never silently strips the guardrails the parent enforces,
     and that an inherited chain the child cannot reach fails before Codex
-    creates a native branch.
+    creates a native branch. Also locks that the inherited context-window
+    tools write to the fork's own copy of the context, never the parent's.
 
 ROLE IN CODEBASE:
     Exercises CodexFork._prepare_child and CodexFork.afork in
@@ -24,7 +25,9 @@ ARCHITECTURE NOTE:
 FUNCTION INVENTORY:
     No production functions. _codex() builds provider settings; _parent()
     builds a parent agent bound to an existing thread and to a scripted
-    transport; _fork() forks it and binds the child to the same transport.
+    transport; _fork() forks it and binds the child to the same transport;
+    _write_note() runs context_create_text through an agent's own tool bridge,
+    the executor Codex calls back into; _note_ids() lists a manager's notes.
 
 COMMON MODIFICATION PATTERNS:
     When CodexHarnessAgentSettings gains another guardrail, add it to
@@ -65,10 +68,14 @@ from vidbyte.lib.dataclasses.codex import (
     CodexTurnSettings,
     CodexUsage,
 )
+from vidbyte.context.manager import ContextManager
 from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision
+from vidbyte.lib.dataclasses.tools import ToolCall, ToolStatus
 from vidbyte.lib.enums.failure import FailureCode
 from vidbyte.lib.errors import CodexAgentError
 from vidbyte.middleware.base import AgentMiddleware
+from vidbyte.tools.builtins.context_primitives import context_window_tools
+from vidbyte.tools.decorators import tool
 
 FINAL_RESPONSE = "codex reply"
 PARENT_THREAD = "th_parent"
@@ -159,6 +166,32 @@ async def _fork(
 def _fallback() -> AgentFallbackSettings:
     # Builds a one-step chain that retries a failed Codex turn on the backup model.
     return AgentFallbackSettings(models=[BACKUP_MODEL], fallback_on=(CodexAgentError,))
+
+
+@tool
+def _lookup(key: str) -> str:
+    """Looks a key up in a fixed table."""
+    return f"value for {key}"
+
+
+async def _write_note(agent: CodexHarnessAgent, note_id: str) -> None:
+    # Runs context_create_text through the agent's own tool bridge, as a Codex tool call does.
+    bridge = agent._translation.tools
+    assert bridge is not None
+    result = await bridge._executor.execute_call(
+        ToolCall(
+            tool_name="context_create_text",
+            arguments={"primitive_id": note_id, "content": f"{note_id} finding"},
+            call_id=f"call_{note_id}",
+        )
+    )
+    assert result.status == ToolStatus.SUCCESS, result.output
+
+
+def _note_ids(manager: ContextManager | None) -> list[str]:
+    # Lists the ids a context manager holds, in insertion order.
+    assert manager is not None
+    return [primitive_id for primitive_id, _ in manager.registry_items()]
 
 
 class CodexForkGuardrailInheritanceTests(unittest.IsolatedAsyncioTestCase):
@@ -256,6 +289,88 @@ class CodexForkControlTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(child.settings.fallback, fallback)
         self.assertEqual(child.settings.codex.turn.cwd, CHILD_CWD)
         self.assertEqual(len(transport.forks), 1)
+
+
+class CodexForkContextToolTests(unittest.IsolatedAsyncioTestCase):
+    """A fork's inherited context tools write to the fork's own context window."""
+
+    async def asyncSetUp(self) -> None:
+        # A parent that keeps its own window, with one note written before it branches.
+        self.manager = ContextManager()
+        self.parent, self.transport = _parent(
+            context_manager=self.manager,
+            tools=tuple(context_window_tools(self.manager)) + (_lookup,),
+        )
+        await _write_note(self.parent, "parent:plan")
+
+    async def test_fork_note_lands_in_the_forks_own_window(self) -> None:
+        child = await _fork(self.parent, self.transport)
+
+        await _write_note(child, "lru:finding")
+
+        self.assertIsNot(child.settings.context_manager, self.manager)
+        self.assertEqual(_note_ids(child.settings.context_manager), ["parent:plan", "lru:finding"])
+        self.assertEqual(_note_ids(self.manager), ["parent:plan"])
+
+    async def test_sibling_forks_never_see_each_others_notes(self) -> None:
+        lru = await _fork(self.parent, self.transport, CodexForkSettings(name="lru"))
+        ttl = await _fork(self.parent, self.transport, CodexForkSettings(name="ttl"))
+
+        await _write_note(lru, "lru:finding")
+        await _write_note(ttl, "ttl:finding")
+
+        self.assertEqual(_note_ids(lru.settings.context_manager), ["parent:plan", "lru:finding"])
+        self.assertEqual(_note_ids(ttl.settings.context_manager), ["parent:plan", "ttl:finding"])
+        self.assertEqual(_note_ids(self.manager), ["parent:plan"])
+
+    async def test_fork_keeps_the_parents_tool_declarations(self) -> None:
+        # The native branch keeps the parent's dynamic tools, so the child's must match them exactly.
+        child = await _fork(self.parent, self.transport)
+
+        parent_bridge, child_bridge = self.parent._translation.tools, child._translation.tools
+        assert parent_bridge is not None and child_bridge is not None
+        self.assertEqual(child_bridge.tools.names(), parent_bridge.tools.names())
+        self.assertEqual(child_bridge.dynamic_tools, parent_bridge.dynamic_tools)
+
+    async def test_fork_keeps_plain_tools_by_identity(self) -> None:
+        child = await _fork(self.parent, self.transport)
+
+        self.assertIs(child.settings.tools[-1], _lookup)
+        self.assertIs(self.parent.settings.tools[-1], _lookup)
+
+    async def test_fork_with_a_context_override_writes_to_its_copy(self) -> None:
+        # The override is copied like an inherited manager, and parent-bound tools follow that copy.
+        override = ContextManager()
+        child = await _fork(self.parent, self.transport, CodexForkSettings(context_manager=override))
+
+        await _write_note(child, "override:finding")
+
+        self.assertEqual(_note_ids(child.settings.context_manager), ["override:finding"])
+        self.assertEqual(_note_ids(override), [])
+        self.assertEqual(_note_ids(self.manager), ["parent:plan"])
+
+
+class CodexForkCustomizedContextToolTests(unittest.IsolatedAsyncioTestCase):
+    """A customize() view over a context tool is rebound through the view."""
+
+    async def test_customized_context_tool_writes_to_the_forks_window(self) -> None:
+        manager = ContextManager()
+        tools = tuple(
+            item.customize(description="Save a short text note to the shared context window.")
+            if item.name == "context_create_text"
+            else item
+            for item in context_window_tools(manager)
+        )
+        parent, transport = _parent(context_manager=manager, tools=tools)
+        child = await _fork(parent, transport)
+
+        await _write_note(child, "lru:finding")
+
+        self.assertEqual(_note_ids(child.settings.context_manager), ["lru:finding"])
+        self.assertEqual(_note_ids(manager), [])
+        child_bridge, parent_bridge = child._translation.tools, parent._translation.tools
+        assert child_bridge is not None and parent_bridge is not None
+        self.assertEqual(child_bridge.dynamic_tools, parent_bridge.dynamic_tools)
 
 
 if __name__ == "__main__":
