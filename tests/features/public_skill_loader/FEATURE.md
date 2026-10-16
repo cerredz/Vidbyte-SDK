@@ -7,12 +7,12 @@ A program that never builds a `JevAgent`, vidbyte-cli first, turns skill entries
 ## Contract
 
 - `vidbyte.SkillLoader`, `vidbyte.SkillResolution`, and `vidbyte.ConfigurationError` are root exports, the same objects as their defining-module classes, and exported nowhere else new.
-- `SkillLoader(entries)` takes any iterable except `str` and `bytes`, turns it into a tuple once in iteration order, and validates it through `SkillEntries` (a tuple-only record in `vidbyte.lib.dataclasses.skills`). It raises `ConfigurationError` with exactly one `details` shape: `{"entries_type": <type>}` for text or a non-collection, `{"position": <0-based>, "entry_type": <type>}` for the first non-entry element, `{"names": <sorted repeated names>}` for repeated names (exact, case-sensitive). The element check runs before the name check. An empty collection is valid.
+- `SkillLoader(entries)` takes any `collections.abc.Iterable` except `str` and `bytes` (every `Sequence` qualifies, including one registered with `Sequence.register`), turns it into a tuple once in iteration order, and validates it through `SkillEntries` (a tuple-only record in `vidbyte.lib.dataclasses.skills`). An exception raised while iterating the argument propagates unchanged. It raises `ConfigurationError` with exactly one `details` shape: `{"entries_type": <type>}` for text or a non-`Iterable` (including an object that iterates only through `__getitem__`), `{"position": <0-based>, "entry_type": <type>}` for the first non-entry element, `{"names": <sorted repeated names>}` for repeated names (exact, case-sensitive). The element check runs before the name check. An empty collection is valid.
 - No message or detail of that error holds the rejected value or any token or key. Construction reads no file, no environment variable, and sends no request.
 - `await loader.load()` returns one result per element in input order; expected failures are data, never exceptions. Credentials are per entry, with `GITHUB_TOKEN`, `ANTHROPIC_API_KEY`, and `OPENAI_API_KEY` read only inside `load()`, and each credential goes only to its own fixed host.
 - A loader remembers documents and permanent failures for its lifetime and can be loaded again on a new event loop (`asyncio.run` twice).
 - `JevAlignmentSettings(skills=t)` and `SkillLoader(t)` agree on every tuple or list of entries and documents: both accept, or both raise with equal `details`.
-- Every version-bearing place reads `0.3.1`, and the folder docs describe the public door.
+- Every version-bearing place equals `pyproject.toml`'s version, which is at least `0.4.0`, and the folder docs describe the public door.
 
 ## Actors / Callers
 
@@ -22,7 +22,7 @@ A program that never builds a `JevAgent`, vidbyte-cli first, turns skill entries
 ## Inputs and Preconditions
 
 - Entries are constructed (and field-validated) by their own classes before the loader exists.
-- The argument is a tuple, list, generator, or other non-text iterable of entries and `SkillDocument`s with unique names.
+- The argument is a tuple, list, generator, or other `collections.abc.Iterable` that is not `str` or `bytes`, holding entries and `SkillDocument`s with unique names.
 
 ## Observable Outcomes
 
