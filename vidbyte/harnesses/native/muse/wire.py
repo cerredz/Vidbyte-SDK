@@ -3,7 +3,7 @@
 PURPOSE: Defines the Muse codecs: MuseWire speaks the batch `muse serve` exchange (MSP frames on stdin, the answer to request id 2 on stdout) that checks or forks a thread before exec runs; MuseExecOutput reads the JSON records of one `muse exec --json` run into a NativeThreadResult, or into the NativeThreadError that names what went wrong; MuseSessionWire builds the session/list and session/read parameters of the thread helpers and the evidence read, and reads their answers into NativeThreadSummary records and tool calls.
 ROLE IN CODEBASE: Called by MuseThreadRun.execute in vidbyte/harnesses/native/muse/threads.py: MuseWire builds the serve stdin and reads its answer, MuseExecOutput reads the exec outcome. MuseHelperRun (muse/helpers.py) builds its serve batches with MuseWire.batch_frames and the MuseSessionWire params, and reads them with MuseSessionWire. All raise through the call's NativeErrorFactory (hostkit/errors.py).
 ARCHITECTURE NOTE: Separate classes because writing the run's MSP batch, reading exec records and reading the helpers' session answers are three jobs (spec D-17). A Session is read strictly as msp.schema.json shapes it: forkedFrom is null or an object carrying sessionId, and a member the record refuses is protocol_mismatch naming the MSP member (spec INV-6). The history of a session/read with items comes in mode inline (history.items), snapshot (history.snapshot.state.items), anchoredSnapshot (items only after a compaction boundary) or none (with noneReason). Pure: no process, no file and no await. Every member name, request id and marker comes from vidbyte/lib/constants/native_threads.py (spec INV-15). The checks run in the INV-6 order: timeout, output cap, then the vendor's own answer.
-FUNCTION INVENTORY: MuseWire.new_command_id mints a UUIDv7; batch_frames joins the initialize request, the initialized notification and the session request; session_read_params and session_fork_params build the request parameters; read_answer is the narrated reader of the serve answer; _answer finds the line answering request id 2. MuseExecOutput.read is the narrated reader of exec records, read through CliRunner.json_objects; _session finds the first session stream id; _terminal finds the terminal record's payload. MuseSessionWire.list_params and read_items_params build the request parameters; result reads the answer to request id 2 for one method; sessions and session read Session records into summaries; tool_calls reads the toolCall items of a history, or None after compaction; _summary builds one summary, naming a refused member as MSP spells it.
+FUNCTION INVENTORY: MuseWire.new_command_id mints a UUIDv7; batch_frames joins the initialize request, the initialized notification and the session request; session_read_params and session_fork_params build the request parameters; read_answer is the narrated reader of the serve answer; _answer finds the line answering request id 2. MuseExecOutput.read is the narrated reader of exec records, read through CliRunner.json_objects; _session finds the first session stream id; _terminal finds the terminal record's payload. MuseSessionWire.list_params and read_items_params build the request parameters; result reads the answer to request id 2 for one method; exited checks that an export or init child finished within its bounds and exited 0; sessions and session read Session records into summaries; tool_calls reads the toolCall items of a history, or None after compaction; _summary builds one summary, naming a refused member as MSP spells it.
 COMMON MODIFICATION PATTERNS: A new MSP request is one MuseMethod member and one params builder here; a new exec failure text is one more marker in MUSE_KEY_REJECTED_MARKERS or one more check in MuseExecOutput.read.
 WHAT NOT TO DO IN THIS FILE: 1. Do not copy vidbyte.__version__ at import time; batch_frames reads it on every call. 2. Do not send a commandId that is not from new_command_id. 3. Do not copy vendor text into an error unscrubbed; pass it as vendor_text and the factory scrubs and caps it.
 KNOWN EDGE CASES: -32020 is thread_not_found, -32601 (an older Muse without the method) is protocol_mismatch naming the method, and any other JSON-RPC error is run_failed with Muse's message. History mode none means there are no items to check, so the evidence read fails closed naming noneReason (spec EC-56). `muse exec --session-id <unknown>` silently starts a new thread, so a continue checks the id with session/read first, and an exec whose session stream is not the id it was given is thread_not_found carrying the stream's id. A fork whose serve answer is its source id is protocol_mismatch before exec starts. The session stream id is looked for before the runner checks, so a timed-out or cut run still reports it (spec INV-5). Lines that are not JSON objects are skipped.
@@ -31,7 +31,10 @@ from vidbyte.lib.dataclasses.native_threads import (
     NativeToolCall,
 )
 from vidbyte.lib.dataclasses.process import CliOutcome
-from vidbyte.lib.dataclasses.validation import RecordFieldConverter, RecordFieldValidator
+from vidbyte.lib.dataclasses.validation import (
+    RecordFieldConverter,
+    RecordFieldValidator,
+)
 from vidbyte.lib.enums.native_threads import (
     MuseMethod,
     NativeHarness,
@@ -264,6 +267,18 @@ class MuseSessionWire:
         if not isinstance(result, dict):
             raise errors.failure(NativeThreadProblem.PROTOCOL_MISMATCH, request=request, thread_id=thread_id, outcome=outcome, missing_member=native_threads.JSONRPC_RESULT_FIELD)
         return result
+
+    @staticmethod
+    def exited(outcome: CliOutcome, request: NativeHelperRequest | NativeThreadRequest, errors: NativeErrorFactory, *, thread_id: str | None = None) -> None:
+        # An export or init child must have finished within the control
+        # timeout and the output cap, and exited 0; a failed exit keeps
+        # Muse's own words.
+        if outcome.timed_out:
+            raise errors.failure(NativeThreadProblem.TIMED_OUT, request=request, thread_id=thread_id, outcome=outcome, vendor_text=outcome.stderr, seconds=native_threads.NATIVE_CONTROL_TIMEOUT_SECONDS)
+        if outcome.stdout_truncated:
+            raise errors.failure(NativeThreadProblem.OUTPUT_TOO_LARGE, request=request, thread_id=thread_id, outcome=outcome, vendor_text=outcome.stderr, cap_bytes=native_threads.NATIVE_PROCESS_MAX_OUTPUT_BYTES)
+        if outcome.exit_code != native_threads.NATIVE_SUCCESS_EXIT_CODE:
+            raise errors.failure(NativeThreadProblem.RUN_FAILED, request=request, thread_id=thread_id, outcome=outcome, vendor_text=outcome.stderr)
 
     @staticmethod
     def sessions(result: Mapping[str, object], request: NativeHelperRequest, errors: NativeErrorFactory) -> tuple[NativeThreadSummary, ...]:
