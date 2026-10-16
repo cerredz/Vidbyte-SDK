@@ -713,6 +713,7 @@ MUSE_EXPORT_FILE_MISSING_DETAIL = "muse export exited 0 but wrote no file at {pa
 GROK_TEXT_FLAG_RULE = "{field} may not hold the token {flag}, which the slash command would read as its own option."
 GROK_GOAL_RESERVED_RULE = "{field} may not be the /goal subcommand {word}."
 GROK_DESIGN_DOC_SPACE_RULE = "design_doc may not contain whitespace, because the slash command splits its arguments at whitespace."
+OPENCODE_PLAN_AGENT_RULE = "config.agent must be None or {agent} for run_opencode_plan, which runs opencode's {agent} agent; got {got}."
 
 # The failure code of each harness and problem, a closed table, so the
 # error factory never builds a code from text.
