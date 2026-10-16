@@ -74,9 +74,9 @@ def runner_output_metadata(response: object) -> dict:
     return {}
 
 
-def base_context() -> BaseAgentContext:
+def base_context(system_prompt: str = "sys") -> BaseAgentContext:
     # Returns a minimal agent context for testing.
-    return BaseAgentContext(system_prompt="sys", history=(), file_paths=(), tools=(), budget=None)
+    return BaseAgentContext(system_prompt=system_prompt, history=(), file_paths=(), tools=(), budget=None)
 
 
 def runner_handle(runner: FakeRunner) -> RunnerHandle:
@@ -263,14 +263,14 @@ class TrajectoryCheckpointAlgorithmTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("visible output", runner.calls[1]["prompt"])
 
     async def test_runtime_checkpoint_fills_summarizer_input_slots_before_output_description(self) -> None:
-        # Verify the agent system prompt and history fill the summarizer template's slots once, ahead of its output contract.
+        # Verify the run's system prompt and history fill the summarizer template's slots once, ahead of its output contract.
         @tool
         def lookup() -> str:
             return "visible output"
         runner = FakeRunner([tool_response(), FakeResponse(_JSON_OUTPUT), is_done_response()])
         algorithm = TrajectoryCheckpointAlgorithm(interval=1, include_tool_outputs=True)
         runtime = AgentRuntime(agent_name="worker", system_prompt="Catalog every river gauge.", tools=Tools([lookup]), permission_policy=PermissionPolicy(), algorithm=ContextWindowAlgorithm(name="trajectory_checkpoints", trajectory_checkpoints=algorithm))
-        await runtime.arun("task", handle=runner_handle(runner), context=base_context())
+        await runtime.arun("task", handle=runner_handle(runner), context=base_context("Catalog every river gauge."))
         prompt = runner.calls[1]["prompt"]
         self.assertNotIn("{main_system_prompt}", prompt)
         self.assertNotIn("{conversation_history}", prompt)
@@ -278,6 +278,20 @@ class TrajectoryCheckpointAlgorithmTests(unittest.IsolatedAsyncioTestCase):
         for marker in ("Catalog every river gauge.", "visible output"):
             self.assertEqual(prompt.count(marker), 1, marker)
             self.assertLess(prompt.index(marker), output_start, marker)
+
+    async def test_runtime_checkpoint_sees_run_system_prompt_not_agent_prompt(self) -> None:
+        # [Hidden Failure] A run's context may replace the agent's own prompt, so the summarizer must judge the run by the prompt its main model followed.
+        @tool
+        def lookup() -> str:
+            return "visible output"
+        runner = FakeRunner([tool_response(), FakeResponse(_JSON_OUTPUT), is_done_response()])
+        algorithm = TrajectoryCheckpointAlgorithm(interval=1)
+        runtime = AgentRuntime(agent_name="worker", system_prompt="AGENTSYS-4K write poems.", tools=Tools([lookup]), permission_policy=PermissionPolicy(), algorithm=ContextWindowAlgorithm(name="trajectory_checkpoints", trajectory_checkpoints=algorithm))
+        await runtime.arun("task", handle=runner_handle(runner), context=base_context("RUNSYS-9P quote prices in EUR."))
+        # The main model follows the run's prompt, and the summarizer is given that same prompt.
+        self.assertIn("RUNSYS-9P quote prices in EUR.", runner.calls[0]["kwargs"]["system"])
+        self.assertIn("RUNSYS-9P quote prices in EUR.", runner.calls[1]["prompt"])
+        self.assertNotIn("AGENTSYS-4K", runner.calls[1]["prompt"])
 
     async def test_runtime_checkpoint_history_shows_task_at_run_boundary(self) -> None:
         # [Hidden Failure] The summarizer sees the run's task once, after the caller's history and before the run's own tool work, as the main model does.

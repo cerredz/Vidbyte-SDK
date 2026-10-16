@@ -369,7 +369,9 @@ class AgentRuntime:
                     # @intent inner-algorithms-see-the-task
                     # The task reaches the runner apart from messages, so hand side models the conversation the main model sees, task at the run boundary.
                     messages=self._messages_with_task(messages, caller_messages, message),
-                    system_prompt=self.system_prompt,
+                    # @intent inner-algorithms-see-the-run-system-prompt
+                    # A run's base context may replace the agent's prompt, so side models get the prompt this run's main model follows.
+                    system_prompt=context.system_prompt,
                 )
             stop_result = self._budget_stop(
                 iteration_count=state.iteration_count,
