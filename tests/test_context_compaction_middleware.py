@@ -285,6 +285,96 @@ class CompactionMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             SummaryCompactionMiddleware(mode=CompactionMode.SUMMARIZE_OLDEST_N, summarizer=None)  # type: ignore[arg-type]
 
+    async def test_tool_result_middleware_refuses_history_modes(self) -> None:
+        # [Hidden Failure] A history mode on the per-result middleware compacted nothing, so it must fail at construction and name the valid modes.
+        for mode, options in (("keep_last_n_messages", {"n": 1}), ("tool_output_sliding_window", {}), ("trim_to_token_budget", {"max_tokens": 10})):
+            with self.subTest(mode=mode):
+                with self.assertRaises(ValueError) as caught:
+                    ToolResultCompactionMiddleware(mode=mode, **options)
+                for expected in ("truncate_tool_results", "strip_tool_result_bodies", "hide_tool_results", "tool_result_clearing_with_exclusions", "head_tail_tool_preview", "mechanical_bloat_scrubber", "MessageHistoryCompactionMiddleware", mode):
+                    self.assertIn(expected, str(caught.exception))
+
+    async def test_tool_result_middleware_still_accepts_per_result_modes(self) -> None:
+        # Verifies the six per-result modes and the disabled raw() middleware still construct.
+        for mode in ("truncate_tool_results", "strip_tool_result_bodies", "hide_tool_results", "tool_result_clearing_with_exclusions", "head_tail_tool_preview", "mechanical_bloat_scrubber"):
+            with self.subTest(mode=mode):
+                self.assertEqual(ToolResultCompactionMiddleware(mode=mode).mode.value, mode)
+        self.assertFalse(ToolResultCompactionMiddleware.raw().options["enabled"])
+
+    async def test_tool_result_middleware_accepts_exactly_the_modes_the_engine_applies(self) -> None:
+        # [Hidden Failure] Every mode the middleware accepts must change a bloated result, and every mode it refuses must be one the engine leaves unchanged.
+        raw = ToolResult.success("lookup", "\x1b[31mred\x1b[0m " + "word " * 300)
+        ctx = MiddlewareContext(hook=MiddlewareHook.AFTER_TOOL_CALL, agent_name="worker", tool_call=ToolCall("lookup"), tool_result=raw)
+        for mode in CompactionMode:
+            with self.subTest(mode=mode):
+                applied = ContextCompactionEngine().compact_tool_result(ToolCall("lookup"), raw, mode=mode)[0].output != raw.output
+                try:
+                    middleware = ToolResultCompactionMiddleware(mode=mode)
+                except ValueError:
+                    self.assertFalse(applied, f"{mode.value} is applied by the engine but refused by the middleware")
+                    continue
+                self.assertTrue(applied, f"{mode.value} is accepted by the middleware but leaves tool results unchanged")
+                decision = await middleware.after_tool_call(ctx)
+                self.assertNotEqual(decision.transform.model_visible_tool_result.output, raw.output)
+
+    async def test_message_history_middleware_refuses_hide_tool_results(self) -> None:
+        # [Hidden Failure] The history engine has no hide strategy, so hide_tool_results must fail at construction and point to the per-result middleware.
+        with self.assertRaises(ValueError) as caught:
+            MessageHistoryCompactionMiddleware(mode="hide_tool_results")
+        self.assertIn("ToolResultCompactionMiddleware.hide()", str(caught.exception))
+        self.assertIn("strip_tool_result_bodies", str(caught.exception))
+
+    async def test_message_history_middleware_still_accepts_every_other_mode(self) -> None:
+        # Verifies every history mode except hide_tool_results and the summarize modes still constructs, and the summarize modes construct with a summarizer.
+        summarize_modes = {CompactionMode.SUMMARIZE_OLDEST_N, CompactionMode.SUMMARIZE_RANGE, CompactionMode.SUMMARIZE_BY_TOPIC_BLOCKS}
+        for mode in CompactionMode:
+            if mode is CompactionMode.HIDE_TOOL_RESULTS:
+                continue
+            with self.subTest(mode=mode):
+                options = {"active_branch": "main"} if mode is CompactionMode.CONTEXT_SNAPSHOT_BRANCH_TRIM else {}
+                middleware = SummaryCompactionMiddleware(mode=mode, summarizer=FakeSummarizer()) if mode in summarize_modes else MessageHistoryCompactionMiddleware(mode=mode, **options)
+                self.assertIs(middleware.mode, mode)
+
+    async def test_message_history_middleware_refuses_summarize_modes_without_a_summarizer(self) -> None:
+        # [Hidden Failure] This middleware's engine has no summarizer, so a summarize mode stopped every run at its first compaction; it must fail at construction and point to SummaryCompactionMiddleware.
+        for mode in ("summarize_oldest_n", "summarize_range", "summarize_by_topic_blocks"):
+            with self.subTest(mode=mode):
+                with self.assertRaises(ValueError) as caught:
+                    MessageHistoryCompactionMiddleware(mode=mode)
+                self.assertIn(f"{mode} needs a summarizer", str(caught.exception))
+                self.assertIn("SummaryCompactionMiddleware", str(caught.exception))
+
+    async def test_message_history_middleware_refuses_a_summarizer_passed_as_an_option(self) -> None:
+        # [Hidden Failure] A summarizer= keyword lands in the options, which the engine never reads, so the run failed claiming none was injected.
+        with self.assertRaisesRegex(ValueError, "summarize_oldest_n needs a summarizer; use SummaryCompactionMiddleware"):
+            MessageHistoryCompactionMiddleware(mode="summarize_oldest_n", summarizer=FakeSummarizer(), n=4)
+
+    async def test_message_history_middleware_accepts_exactly_the_modes_its_engine_can_run(self) -> None:
+        # [Hidden Failure] Every mode the middleware accepts must run on its engine, and every summarize mode it refuses must be one that engine raises on.
+        ctx = MiddlewareContext(hook=MiddlewareHook.BEFORE_MODEL_CALL, agent_name="worker", provider_messages=_sequential_tool_history())
+        for mode in CompactionMode:
+            if mode is CompactionMode.HIDE_TOOL_RESULTS:
+                continue
+            with self.subTest(mode=mode):
+                options = {"active_branch": "main"} if mode is CompactionMode.CONTEXT_SNAPSHOT_BRANCH_TRIM else {}
+                try:
+                    middleware = MessageHistoryCompactionMiddleware(mode=mode, **options)
+                except ValueError:
+                    with self.assertRaisesRegex(ValueError, "requires an injected summarizer"):
+                        await ContextCompactionEngine().compact_provider_messages(ctx.provider_messages, mode=mode, options=options)
+                    continue
+                decision = await middleware.before_model_call(ctx)
+                self.assertEqual(decision.transform.metadata["compaction"], mode.value)
+
+    async def test_summary_middleware_still_constructs_and_summarizes_every_summarize_mode(self) -> None:
+        # Verifies the refusal leaves SummaryCompactionMiddleware, which wires the summarizer into its engine, able to run all three modes.
+        ctx = MiddlewareContext(hook=MiddlewareHook.BEFORE_MODEL_CALL, agent_name="worker", provider_messages=_sequential_tool_history())
+        for build in (SummaryCompactionMiddleware.summarize_oldest_n, SummaryCompactionMiddleware.summarize_range, SummaryCompactionMiddleware.summarize_by_topic_blocks):
+            with self.subTest(build=build.__name__):
+                decision = await build(FakeSummarizer()).before_model_call(ctx)
+                self.assertTrue(decision.transform.metadata["changed"])
+                self.assertTrue(any(str(message.get("content") or "").startswith("summarized") for message in decision.transform.provider_messages))
+
 
 class RuntimeCompactionIntegrationTests(unittest.IsolatedAsyncioTestCase):
     def _runtime(self, *, middleware: tuple[AgentMiddleware, ...] = (), algorithm=None) -> AgentRuntime:

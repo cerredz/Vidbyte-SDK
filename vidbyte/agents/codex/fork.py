@@ -14,10 +14,12 @@ from __future__ import annotations
 import asyncio
 import copy
 from dataclasses import replace
+from typing import TYPE_CHECKING, cast
 
 from vidbyte.agents.codex.config import CodexVidbyteTranslator
 from vidbyte.agents.codex.fallback import CodexFallbackCoordinator
 from vidbyte.agents.codex.transport import CodexTransport
+from vidbyte.agents.fork import AgentForker
 from vidbyte.lib.constants.codex import CODEX_NEXT_FORK_DEPTH, CODEX_ROOT_FORK_DEPTH
 from vidbyte.lib.dataclasses.codex import (
     CodexForkRequest,
@@ -27,6 +29,9 @@ from vidbyte.lib.dataclasses.codex import (
 )
 from vidbyte.lib.enums.failure import FailureCode
 from vidbyte.lib.errors import CodexAgentError
+
+if TYPE_CHECKING:
+    from vidbyte.tools.adapters import ToolInput
 
 
 class CodexFork:
@@ -128,6 +133,10 @@ class CodexFork:
         )
         if settings.clear_context_manager:
             child_settings = replace(child_settings, context_manager=None, context_placements=())
+        # @intent fork-rebinds-context-tools
+        # The child renders its own copy of the context, so tools writing to the parent's manager write to that copy, as BaseAgent.fork does.
+        tools = tuple(cast("ToolInput", AgentForker._clone_tool(tool, parent.context_manager, child_settings.context_manager)) for tool in parent.tools)
+        child_settings = replace(child_settings, tools=tools)
         if settings.clear_output_schema:
             child_settings = replace(child_settings, output_schema=None)
         child_settings = CodexVidbyteTranslator().translate_agent(child_settings).settings

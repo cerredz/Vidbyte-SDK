@@ -102,11 +102,43 @@ class TraceArtifactRendererTests(unittest.TestCase):
         self.assertIn("omitted", text)
 
     def test_max_tokens_drops_oldest_array_entries_first(self) -> None:
-        # [Silent Failure] token trimming must drop the oldest (front) entries first.
+        # [Silent Failure] token trimming must drop the oldest (front) entries first, and say how many it dropped.
         artifact = {"actions_taken": ["oldest", "mid", "newest"]}
-        text = TraceArtifactRenderer(max_tokens=8, token_counter=lambda s: len(s.split())).render(artifact)
-        self.assertIn("newest", text)
+        text = TraceArtifactRenderer(max_tokens=10, token_counter=lambda s: len(s.split())).render(artifact)
+        self.assertIn("## actions_taken\n- ...[2 omitted]...\n- newest", text)
         self.assertNotIn("oldest", text)
+
+    def test_max_tokens_marks_an_emptied_list_instead_of_rendering_none(self) -> None:
+        # [Silent Failure] a list the budget emptied must not read "- N/A", which tells the model nothing was done.
+        artifact = {"actions_taken": [f"a{i}" for i in range(1, 7)], "facts": [f"f{i}" for i in range(1, 5)]}
+        text = TraceArtifactRenderer(max_tokens=16, token_counter=lambda s: len(s.split())).render(artifact)
+        self.assertIn("## actions_taken\n- ...[6 omitted]...\n\n## facts", text)
+        self.assertNotIn("N/A", text)
+        self.assertLessEqual(len(text.split()), 16)
+
+    def test_max_tokens_marks_a_trimmed_list_before_its_kept_entries(self) -> None:
+        # [Silent Failure] a partly trimmed list must not look complete; the marker sits where the dropped entries were.
+        artifact = {"actions_taken": [f"a{i}" for i in range(1, 7)]}
+        text = TraceArtifactRenderer(max_tokens=12, token_counter=lambda s: len(s.split())).render(artifact)
+        self.assertIn("## actions_taken\n- ...[4 omitted]...\n- a5\n- a6", text)
+        self.assertNotIn("a4", text)
+
+    def test_max_tokens_accounts_for_every_entry_and_still_fits(self) -> None:
+        # [Silent Failure] every list entry is either shown or counted in a marker, and the marked text stays within max_tokens.
+        # Each budget sits above the floor of title, headings, scalars and one marker per list, and trims both lists.
+        artifact = {"goal": "Restore checkout", "actions_taken": [f"ACT{i} restarted pod {i}" for i in range(1, 7)], "facts": [f"FACT{i} db latency {i}00ms" for i in range(1, 5)], "current_status": "pods healthy"}
+        for counter, budget in ((None, 45), (None, 50), (lambda s: len(s.split()), 30), (lambda s: len(s.split()), 35)):
+            renderer = TraceArtifactRenderer(max_tokens=budget, token_counter=counter)
+            text = renderer.render(artifact)
+            self.assertLessEqual(renderer._token_count(text), budget)
+            self.assertNotIn("N/A", text)
+            for name in ("actions_taken", "facts"):
+                lines = text.split(f"## {name}\n", 1)[1].split("\n\n", 1)[0].splitlines()
+                markers = [line for line in lines if line.startswith("- ...[") and line.endswith(" omitted]...")]
+                omitted = sum(int(line[len("- ...[") : -len(" omitted]...")]) for line in markers)
+                shown = len([line for line in lines if line.startswith("- ")]) - len(markers)
+                self.assertGreater(omitted, 0, (counter, budget, name))
+                self.assertEqual(shown + omitted, len(artifact[name]), (counter, budget, name))
 
     def test_is_empty_true_for_blank_artifacts(self) -> None:
         # [Hidden Assumption] None / {} / all-None / empty collections count as empty.
@@ -116,6 +148,17 @@ class TraceArtifactRendererTests(unittest.TestCase):
     def test_is_empty_false_when_any_content(self) -> None:
         # [Edge Case] any populated field makes the artifact non-empty.
         self.assertFalse(TraceArtifactRenderer.is_empty({"a": None, "b": ["x"]}))
+
+    def test_is_empty_judges_only_the_listed_fields(self) -> None:
+        # [Silent Failure] content only in fields the trace will not render made the guard pass an empty trace.
+        artifact = {"goal": "GOAL-MARK", "mistakes": [], "current_status": ""}
+        self.assertTrue(TraceArtifactRenderer.is_empty(artifact, fields=["mistakes", "current_status"]))
+        self.assertFalse(TraceArtifactRenderer.is_empty({**artifact, "mistakes": ["m1"]}, fields=["mistakes", "current_status"]))
+        # Listed fields the artifact lacks render nothing, so they count as empty too.
+        self.assertTrue(TraceArtifactRenderer.is_empty(artifact, fields=["nope"]))
+        # Without a field subset every field still counts, as before.
+        self.assertFalse(TraceArtifactRenderer.is_empty(artifact))
+        self.assertFalse(TraceArtifactRenderer.is_empty(artifact, fields=None))
 
 
 class ReplaceWithTraceCompactionTests(unittest.IsolatedAsyncioTestCase):
@@ -307,6 +350,38 @@ class TraceReplacementMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(decision.transform.metadata["scope"], "all_non_system")
         self.assertEqual(decision.transform.metadata["before_count"], 5)
 
+    async def test_composed_pass_reports_the_replacement_as_a_change(self) -> None:
+        # [Silent Failure] a composed pass reports its own equal counts, taken after the replacement, so without the changed flag MinCompactions saw 0.
+        presets = (
+            TraceReplacementCompactionMiddleware.trace_plus_strip_tool_results(keep_last_groups=1, artifact=_ARTIFACT),
+            TraceReplacementCompactionMiddleware.keep_recent_tail(keep_last_groups=1, compose_after="truncate_tool_results", artifact=_ARTIFACT),
+        )
+        for mw in presets:
+            with self.subTest(compose_after=mw.compose_after):
+                decision = await mw.before_model_call(_ctx(_provider_history()))
+                meta = decision.transform.metadata
+                self.assertLess(len(decision.transform.provider_messages), len(_provider_history()))
+                self.assertEqual(meta["before_count"], meta["after_count"])
+                self.assertIs(meta.get("changed"), True)
+
+    async def test_in_place_fallback_reports_the_rewrite_as_a_change(self) -> None:
+        # [Silent Failure] stripping tool bodies before any trace exists keeps the message count, yet the model sees a different history.
+        mw = TraceReplacementCompactionMiddleware.trace_fallback_to_mechanical(fallback_mode="strip_tool_result_bodies", fallback_options={})
+        decision = await mw.before_model_call(_ctx(_provider_history()))
+        meta = decision.transform.metadata
+        self.assertTrue(meta["fallback_used"])
+        self.assertEqual(meta["before_count"], meta["after_count"])
+        self.assertIn("[tool result stripped by compaction]", [m.get("content") for m in decision.transform.provider_messages])
+        self.assertIs(meta.get("changed"), True)
+
+    async def test_no_op_fallback_reports_no_change(self) -> None:
+        # [Hidden Assumption] a fallback that leaves the history untouched must still count as no compaction.
+        history = [{"role": "user", "content": "do X"}, {"role": "assistant", "content": "thinking"}]
+        mw = TraceReplacementCompactionMiddleware.trace_fallback_to_mechanical(fallback_mode="strip_tool_result_bodies", fallback_options={})
+        decision = await mw.before_model_call(_ctx(history))
+        self.assertEqual(list(decision.transform.provider_messages), history)
+        self.assertIs(decision.transform.metadata.get("changed"), False)
+
     async def test_family_presets_construct(self) -> None:
         # [Edge Case] every family preset constructs without error.
         TraceReplacementCompactionMiddleware.keep_recent_tail()
@@ -406,6 +481,47 @@ class TraceReplacementMiddlewareTests(unittest.IsolatedAsyncioTestCase):
                     self.assertIn("ship it", str(after[0].get("content")))
                     self.assertEqual(after[1], history[2])
 
+    def _field_subset_presets(self, artifact):
+        # Returns a recent-tail replacement and a tail-summary replacement that both render only mistakes and status.
+        render = {"fields": ["mistakes", "current_status"]}
+        return (
+            TraceReplacementCompactionMiddleware.keep_recent_tail(1, render=render, artifact=artifact),
+            TraceSummaryTailCompactionMiddleware.trace_then_summarize_tail(FakeSummarizer(), keep_last_groups=1, render=render, artifact=artifact),
+        )
+
+    @staticmethod
+    def _two_result_history():
+        # Returns a user ask followed by two tool call/result pairs, RESULT-1 then RESULT-2.
+        history = [{"role": "user", "content": "fix the tests"}]
+        for index in (1, 2):
+            history.append({"role": "assistant", "tool_calls": [{"id": f"c{index}", "function": {"name": "run_tests"}}]})
+            history.append({"role": "tool", "tool_call_id": f"c{index}", "content": f"RESULT-{index}"})
+        return history
+
+    async def test_content_outside_rendered_fields_keeps_the_history(self) -> None:
+        # [Silent Failure] a goal outside the field subset passed the guard, so a "- N/A" trace replaced RESULT-1 with nothing.
+        artifact = {"goal": "GOAL-MARK", "mistakes": [], "current_status": ""}
+        for mw in self._field_subset_presets(artifact):
+            with self.subTest(middleware=mw.name):
+                decision = await mw.before_model_call(_ctx(self._two_result_history()))
+                self.assertIsNone(decision.transform)
+        # A configured fallback runs instead of the empty trace.
+        mw = TraceReplacementCompactionMiddleware.trace_fallback_to_mechanical(fallback_options={"n": 2}, render={"fields": ["mistakes"]}, artifact=artifact)
+        decision = await mw.before_model_call(_ctx(self._two_result_history()))
+        self.assertIs(decision.transform.metadata.get("fallback_used"), True)
+
+    async def test_rendered_field_with_content_still_replaces(self) -> None:
+        # [Edge Case] once a listed field has content, the field-subset trace replaces the older history as before.
+        artifact = {"goal": "GOAL-MARK", "mistakes": ["MISTAKE-MARK"], "current_status": ""}
+        for mw in self._field_subset_presets(artifact):
+            with self.subTest(middleware=mw.name):
+                decision = await mw.before_model_call(_ctx(self._two_result_history()))
+                contents = [str(m.get("content")) for m in decision.transform.provider_messages]
+                self.assertIn("MISTAKE-MARK", contents[0])
+                self.assertNotIn("GOAL-MARK", contents[0])
+                self.assertNotIn("RESULT-1", contents)
+                self.assertIs(decision.transform.metadata.get("changed"), True)
+
 
 class ProviderErrorStatusTests(unittest.TestCase):
     def test_engine_marks_only_failed_tool_results_as_errors(self) -> None:
@@ -432,10 +548,41 @@ class TraceSummaryTailMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         contents = [m.get("content") for m in decision.transform.provider_messages]
         self.assertTrue(any("summary of" in str(c) for c in contents))
 
+    async def test_same_size_rebuild_reports_a_change(self) -> None:
+        # [Silent Failure] one tool call and its result become the trace and the tail summary, 2 -> 2, which the counts alone read as no compaction.
+        history = [{"role": "assistant", "tool_calls": [{"id": "c1", "function": {"name": "lookup"}}]}, {"role": "tool", "tool_call_id": "c1", "content": "RESULT"}]
+        mw = TraceSummaryTailCompactionMiddleware.trace_then_summarize_tail(FakeSummarizer(), keep_last_groups=1, artifact=_ARTIFACT)
+        decision = await mw.before_model_call(_ctx(history))
+        meta = decision.transform.metadata
+        self.assertEqual((meta["before_count"], meta["after_count"]), (2, 2))
+        self.assertEqual([m.get("content") for m in decision.transform.provider_messages][1], "summary of 2 messages")
+        self.assertIs(meta.get("changed"), True)
+
     async def test_requires_summarizer(self) -> None:
         # [Hidden Assumption] a missing summarizer fails loudly.
         with self.assertRaises(ValueError):
             TraceSummaryTailCompactionMiddleware(summarizer=None)
+
+    async def test_refuses_options_it_would_silently_ignore(self) -> None:
+        # [Silent Failure] the rebuild always yields one assistant trace and one tail summary, so these options were accepted and then dropped.
+        for option in ({"placement": "system_suffix"}, {"keep_errors": True}, {"keep_last_user": True}, {"compose_after": "strip_tool_result_bodies"}):
+            (name,) = option
+            with self.subTest(option=name):
+                with self.assertRaisesRegex(ValueError, f"does not support {name}; use TraceReplacementCompactionMiddleware"):
+                    TraceSummaryTailCompactionMiddleware.trace_then_summarize_tail(FakeSummarizer(), keep_last_groups=1, artifact=_ARTIFACT, **option)
+                with self.assertRaisesRegex(ValueError, f"does not support {name}"):
+                    TraceSummaryTailCompactionMiddleware(summarizer=FakeSummarizer(), artifact=_ARTIFACT, **option)
+
+    async def test_supported_options_still_construct_and_apply(self) -> None:
+        # [Edge Case] the options the rebuild does read stay accepted: artifact, render, trace marker and the cold-start fallback.
+        mw = TraceSummaryTailCompactionMiddleware.trace_then_summarize_tail(FakeSummarizer(), keep_last_groups=1, artifact=_ARTIFACT, render={"max_chars": 40}, trace_marker="custom_marker")
+        decision = await mw.before_model_call(_ctx(_provider_history()))
+        self.assertLessEqual(len(decision.transform.provider_messages[0]["content"]), 40)
+        self.assertEqual(mw.strategy_options["trace_marker"], "custom_marker")
+        fallback_mw = TraceSummaryTailCompactionMiddleware.trace_then_summarize_tail(FakeSummarizer(), fallback_mode="keep_last_n_messages", fallback_options={"n": 2})
+        fallback = await fallback_mw.before_model_call(_ctx(_provider_history()))
+        self.assertTrue(fallback.transform.metadata["fallback_used"])
+        self.assertEqual(len(fallback.transform.provider_messages), 2)
 
 
 class RunStateSharingIntegrationTests(unittest.IsolatedAsyncioTestCase):
@@ -452,6 +599,70 @@ class RunStateSharingIntegrationTests(unittest.IsolatedAsyncioTestCase):
         mw = TraceReplacementCompactionMiddleware.replace_all_with_trace()
         decision = await mw.before_model_call(_ctx(_provider_history(), run_state={}))
         self.assertIsNone(decision.transform)
+
+
+class TraceReplacementOptionValidationTests(unittest.IsolatedAsyncioTestCase):
+    # Each bad history-mode option, the pass that runs it, and the message MessageHistoryCompactionMiddleware raises for it.
+    _BAD_OPTIONS = (
+        ("fallback", "remove_tool_call_percentage", {"percentage": 1.5}, "percentage must be between 0 and 1"),
+        ("fallback", "keep_last_n_messages", {"n": -2}, "n must be non-negative"),
+        ("compose_after", "head_tail_tool_preview", {"head_chars": -5}, "head_chars must be non-negative"),
+    )
+
+    async def test_bad_fallback_or_compose_options_fail_at_construction(self) -> None:
+        # [Silent Failure] accepted, these failed open on every call and left compaction off, and n=-2 silently wiped the history.
+        for pass_name, mode, options, message in self._BAD_OPTIONS:
+            kw = {"fallback_mode": mode, "fallback_options": options} if pass_name == "fallback" else {"compose_after": mode, "compose_after_options": options}
+            with self.subTest(pass_name=pass_name, mode=mode):
+                with self.assertRaisesRegex(ValueError, message):
+                    TraceReplacementCompactionMiddleware.keep_recent_tail(1, artifact_provider=lambda ctx: {}, **kw)
+
+    async def test_summary_tail_bad_fallback_options_fail_at_construction(self) -> None:
+        # [Silent Failure] the summary-tail middleware runs the same fallback, so it inherits the same construction check.
+        for pass_name, mode, options, message in self._BAD_OPTIONS:
+            if pass_name != "fallback":
+                continue
+            with self.subTest(mode=mode):
+                with self.assertRaisesRegex(ValueError, message):
+                    TraceSummaryTailCompactionMiddleware.trace_then_summarize_tail(FakeSummarizer(), fallback_mode=mode, fallback_options=options)
+
+    async def test_valid_fallback_and_compose_options_still_construct_and_apply(self) -> None:
+        # [Edge Case] in-range options and the built-in presets, including summarize fallbacks given a summarizer, still construct and still run.
+        TraceReplacementCompactionMiddleware.trace_fallback_to_mechanical()
+        TraceReplacementCompactionMiddleware.trace_plus_strip_tool_results()
+        TraceReplacementCompactionMiddleware.trace_fallback_to_mechanical(fallback_mode="summarize_oldest_n", fallback_options={"n": 2}, summarizer=FakeSummarizer())
+        fallback_mw = TraceReplacementCompactionMiddleware.keep_recent_tail(1, fallback_mode="remove_tool_call_percentage", fallback_options={"percentage": 1.0})
+        fallback = await fallback_mw.before_model_call(_ctx(_provider_history()))
+        self.assertTrue(fallback.transform.metadata["fallback_used"])
+        self.assertNotIn("tool", [m["role"] for m in fallback.transform.provider_messages])
+        compose_mw = TraceReplacementCompactionMiddleware.keep_recent_tail(3, artifact=_ARTIFACT, compose_after="head_tail_tool_preview", compose_after_options={"head_chars": 2, "tail_chars": 0})
+        composed = await compose_mw.before_model_call(_ctx(_provider_history()))
+        self.assertEqual(composed.transform.metadata["compaction"], "head_tail_tool_preview")
+        summary_tail_mw = TraceSummaryTailCompactionMiddleware.trace_then_summarize_tail(FakeSummarizer(), fallback_mode="summarize_oldest_n", fallback_options={"n": 2})
+        summarized = await summary_tail_mw.before_model_call(_ctx(_provider_history()))
+        self.assertTrue(summarized.transform.metadata["fallback_used"])
+
+    # A summarize fallback runs on a cold start; a summarize composed pass runs after a trace replacement.
+    _SUMMARIZE_PASSES = (
+        ("fallback", {"artifact_provider": lambda ctx: {}, "fallback_mode": "summarize_oldest_n", "fallback_options": {"n": 4}}),
+        ("compose_after", {"artifact": _ARTIFACT, "compose_after": "summarize_range", "compose_after_options": {"keep_last": 1}}),
+    )
+
+    async def test_summarize_fallback_or_compose_without_a_summarizer_fails_at_construction(self) -> None:
+        # [Silent Failure] accepted, these raised on every call, the fail-open pipeline turned compaction off, and the history grew with every turn.
+        for pass_name, kw in self._SUMMARIZE_PASSES:
+            with self.subTest(pass_name=pass_name):
+                with self.assertRaisesRegex(ValueError, "needs a summarizer"):
+                    TraceReplacementCompactionMiddleware.keep_recent_tail(1, **kw)
+
+    async def test_summarize_fallback_or_compose_with_a_summarizer_constructs_and_summarizes(self) -> None:
+        # [Edge Case] given this middleware's summarizer, the same passes still construct and summarize.
+        for pass_name, kw in self._SUMMARIZE_PASSES:
+            with self.subTest(pass_name=pass_name):
+                mw = TraceReplacementCompactionMiddleware.keep_recent_tail(1, summarizer=FakeSummarizer(), **kw)
+                decision = await mw.before_model_call(_ctx(_provider_history()))
+                self.assertEqual(decision.transform.metadata["fallback_used"], pass_name == "fallback")
+                self.assertTrue(any(str(m.get("content") or "").startswith("summary of") for m in decision.transform.provider_messages))
 
 
 if __name__ == "__main__":
