@@ -38,6 +38,7 @@ _EC_JSON = '{"corrections": [{"claim": "x is true", "why_wrong": "system prompt 
 _EC_EMPTY = '{"corrections": [], "stale_primitive_ids": [], "summary": "context is consistent"}'
 _EC_GHOST = '{"corrections": [], "stale_primitive_ids": ["problem_space_search:ghost"], "summary": "one stale note"}'
 _EC_PINNED = '{"corrections": [], "stale_primitive_ids": ["problem_space_search:pinned"], "summary": "one stale note"}'
+_EC_LONE = '{"corrections": [], "stale_primitive_ids": "problem_space_search:ghost", "summary": "one stale note"}'
 _EC_BLANK = '{"corrections": [{"claim": "", "why_wrong": ""}, {"claim": null, "why_wrong": null}, {"claim": "  ", "why_wrong": " "}, "", "  ", null], "stale_primitive_ids": [], "summary": "nothing new"}'
 
 
@@ -357,6 +358,18 @@ class ErrorCorrectionAlgorithmTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(metadata["passes"][0]["removed"], ("problem_space_search:ghost",))
         self.assertIsNone(manager.get_by_id("problem_space_search:ghost"))
         self.assertIn("Correction Notice", runner.calls[-1]["kwargs"].get("system", ""))
+
+    async def test_a_lone_stale_id_string_removes_that_primitive(self) -> None:
+        # [Silent Failure] An auditor that writes its one stale id as a bare string, not a one-item array, still removes that primitive.
+        manager = ContextManager()
+        manager.upsert(ProblemSpaceSearchContextItem(primitive_id="problem_space_search:ghost", iteration=1, note_index=1, unconsidered="u", blind_spots="b", next_directions="n"))
+        runner = FakeRunner([tool_response(), FakeResponse(_EC_LONE), is_done_response()])
+        runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=lookup_tools(), permission_policy=PermissionPolicy(), algorithm=ContextWindowAlgorithm(name="error_correction", error_correction=ErrorCorrectionAlgorithm(interval=1)), context_manager=manager)
+        result = await runtime.arun("task", handle=runner_handle(runner), context=base_context())
+        metadata = result.metadata["error_correction"]
+        self.assertEqual(metadata["passes"][0]["removed"], ("problem_space_search:ghost",))
+        self.assertEqual(metadata["passes"][0]["skipped"], ())
+        self.assertIsNone(manager.get_by_id("problem_space_search:ghost"))
 
     async def test_runtime_keeps_frozen_primitive_auditor_names(self) -> None:
         # [Hidden Failure] An auditor that names only a frozen primitive removes nothing, so the pinned note survives and no notice is posted.
