@@ -1,0 +1,1 @@
+Quota left: {entries_left} of {entries_max} memory entries and {files_left} of {files_max} new files; appending to an existing file uses no file quota.

@@ -1,0 +1,1 @@
+Saved as live entry #{id}. Every agent can find it now, and a task card can name it in its context.
