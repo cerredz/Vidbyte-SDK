@@ -73,3 +73,28 @@ The precedent is the review-feedback user message at `runtime.py:670`. The root'
 - **A-3, the retriever's `AgentMessage.metadata["tool_calls"]`.** It is seen in the runtime's result metadata; I did not trace it through `BaseAgent.arun`. Only the card's searches list depends on it.
 - **A-9, the recall quota of 10 and 8 terms.** The conversation fixed that a quota exists, not its value.
 - **Budget risk.** `InfiniteRecallTool` must fit in about 149 lines of `memory.py` headroom. D-16 moves parsing and file reading out. If it still overflows, the implementer must report BLOCKED (§14), not grow the package.
+
+## Addendum: r2 (S1 review round 1, commit 631fefbc)
+
+The verdict was SOUND WITH FIXES with 12 findings (2 Blocker, 5 Major, 5 Minor). All 12 are accepted. None reversed a settled decision, and none was scope-adding. R-6's optional part, a monotone cut, is a review-suggested control, so it became Q-11 (default: not built). §16 records each disposition.
+
+**What I re-verified before editing**
+- **C006.** `python lint/run.py --rule C006 --all` passes at the baseline. The moved classes carry their existing findings at `strategies.py:599`, `:601`, and `:670`; moving them keeps the count. `MessageHistoryCompactionMiddleware._validate_options` is not a C006 site, so adding `low_watermark_tokens` to its key loop adds nothing. The safe shape is `RecordFieldValidator.require_int`/`require_bool`, or the inline `isinstance(x, bool) or not isinstance(x, int) or x < bound`.
+- **Backend.** `_require_short_cache` spans `backend/provider/generative_models/client.py:260-278`. The review said `:276`; the last line is `pending.extend(node.values())` at `:278`. `plan()` builds `wire` at `:176`, and `send()` posts `plan.wire` at `:195`.
+- **The R-5 precedent and seams.** `semantic.py:78-81` (`asyncio.to_thread`, `@intent semantic-search-runs-off-the-event-loop`) is the precedent. `InfiniteWorkspace` is built once, at `agent.py:58`. `launch.workspace` and `memory.workspace` reach it, so an attribute on the workspace needs no new plumbing. The only test reference to the toolset is `callable(InfiniteMemoryAgentTools.get_tools)` (`test_infinite_memory_contract.py:162`), so the new required `index` breaks no test.
+- **Bash.** `_collect` is cancelled by `wait_for` on a timeout, which loses its local `omitted`. The count therefore moves into a one-item list that `execute` owns (§8.5). With that change the timeout marker can show the real count instead of a vague "middle not shown".
+
+**Options I weighed for R-6**
+- *Original-size measure:* count masked outputs at their `original_chars`. It is stateless and monotone, so it never dips. But the root's old history is mostly masked read outputs, so the trim would keep far less than B. That gives up history the context could hold and undercuts D-2. Rejected.
+- *`run_state` cut that only moves forward, under a private key class:* this removes the dips. But the engine's strategy API is stateless (options in, view and stats out), so it needs plumbing through the middleware, the engine, and the strategy, plus a reset rule between runs. It is now Q-11, default no. The §12.5 real-key run counts cut moves to decide it.
+- *Chosen:* state the cost, which is two full-history writes per dip at about net drop / S per masking event. Scope NFR-4.1 to the bare strategy. Pin the behavior with AC-4.4 (equal-size outputs: at most `ceil(G / S)` moves) and AC-4.5 (one dip: two moves).
+
+**Choices inside the accepted fixes**
+- **R-3.** The cap reuses the map's own rule and constants (`INFINITE_MAP_MAX_TOKENS`, `INFINITE_MORE_FILES`). The rule is lifted from `map_text` into `InfiniteWorkspace.fit_map_lines`, so one cut serves both (principle 5). This adds no constant and no mechanism. A new marker sentence in constants would break that file's WHAT NOT TO DO 2. The no-change status message is bounded at 150 tokens (NFR-7.2): about 60 for the header, 35 for the loop block, and the rest for the leaf text.
+- **R-4.** `INFINITE_BOOKKEEPING_NAMES` matches any part of the resolved path, case-folded, so `Superseded.jsonl` on Windows and a link into `.runs/` are refused too. `search_memory` keeps the base class's exact-part ignore rule.
+- **R-5.** `FullTextIndex()` now opens nothing, and FTS5 is probed on first use. Building it inside the workspace therefore never breaks agent construction (INV-8.7). Its lock is a public `RLock`, so one call can hold it across the refresh and the search. Two agents refreshing the same file at once can then never leave a stale row for the other's search.
+- **R-7.** I chose the reorder, not a `{found}`-only cap: the same single cut at the end, with transcribed text last.
+
+**Remaining risks**
+- The root now appends a status message on every tool iteration. A no-change message carries the header and the loop block, about 110–150 tokens each. Over 50 retained iterations that is about 5–7K tokens of history. Sending only the loop block when nothing changed would save about 80 tokens an iteration, but EC-7.5 relies on the newest message carrying the totals. I kept the shape; it is a possible later trim, not built.
+- §8, §8.5, §9, and §12.3 changed (new `index` parameters, `full_text`, `fit_map_lines`, `_collect`'s signature, `INFINITE_BOOKKEEPING_NAMES`, the card order). A focused round-2 review is warranted.
