@@ -36,6 +36,7 @@ from vidbyte.tools.security import PermissionPolicy
 
 _EC_JSON = '{"corrections": [{"claim": "x is true", "why_wrong": "system prompt says x is false"}], "stale_primitive_ids": [], "summary": "one correction"}'
 _EC_EMPTY = '{"corrections": [], "stale_primitive_ids": [], "summary": "context is consistent"}'
+_EC_GHOST = '{"corrections": [], "stale_primitive_ids": ["problem_space_search:ghost"], "summary": "one stale note"}'
 
 
 class FakeResponse:
@@ -210,7 +211,19 @@ class ErrorCorrectionAlgorithmTests(unittest.IsolatedAsyncioTestCase):
         algorithm = ErrorCorrectionAlgorithm()
         ctx = run_context(ContextManager())
         removed, skipped = algorithm.apply_removals(ctx, ["error_correction:gone"])
-        self.assertEqual(removed, ["error_correction:gone"])
+        self.assertEqual(removed, [])
+        self.assertEqual(skipped, ["error_correction:gone"])
+
+    def test_apply_removals_counts_only_present_primitives(self) -> None:
+        # [Silent Failure] An auditor-named id that is missing, or repeated after removal, is skipped rather than counted as removed.
+        manager = ContextManager()
+        manager.upsert(ProblemSpaceSearchContextItem(primitive_id="problem_space_search:1", iteration=1, note_index=1, unconsidered="u", blind_spots="b", next_directions="n"))
+        algorithm = ErrorCorrectionAlgorithm()
+        ctx = run_context(manager)
+        removed, skipped = algorithm.apply_removals(ctx, ["problem_space_search:1", "problem_space_search:ghost", "problem_space_search:1"])
+        self.assertEqual(removed, ["problem_space_search:1"])
+        self.assertEqual(skipped, ["problem_space_search:ghost", "problem_space_search:1"])
+        self.assertIsNone(manager.get_by_id("problem_space_search:1"))
 
     def test_parse_malformed_json_raises(self) -> None:
         # [Silent Failure] Malformed JSON is not silently ignored.
@@ -271,6 +284,30 @@ class ErrorCorrectionAlgorithmTests(unittest.IsolatedAsyncioTestCase):
         result = await runtime.arun("task", handle=runner_handle(runner), context=base_context())
         self.assertEqual(result.metadata["error_correction"]["pass_count"], 1)
         self.assertFalse(any("Correction Notice" in c["kwargs"].get("system", "") for c in runner.calls))
+
+    async def test_runtime_skips_notice_when_auditor_names_only_missing_id(self) -> None:
+        # [Silent Failure] A stale id the auditor invents removes nothing, so the pass posts no notice and counts no removal.
+        runner = FakeRunner([tool_response(), FakeResponse(_EC_GHOST), is_done_response()])
+        runtime = algo_runtime(ErrorCorrectionAlgorithm(interval=1))
+        result = await runtime.arun("task", handle=runner_handle(runner), context=base_context())
+        metadata = result.metadata["error_correction"]
+        self.assertEqual(metadata["removed_count"], 0)
+        self.assertEqual(metadata["passes"][0]["removed"], ())
+        self.assertEqual(metadata["passes"][0]["skipped"], ("problem_space_search:ghost",))
+        self.assertFalse(any("Correction Notice" in c["kwargs"].get("system", "") for c in runner.calls))
+
+    async def test_runtime_posts_notice_when_present_primitive_removed(self) -> None:
+        # [Edge Case] Removing a primitive that is really in the context still posts the notice, with no corrections.
+        manager = ContextManager()
+        manager.upsert(ProblemSpaceSearchContextItem(primitive_id="problem_space_search:ghost", iteration=1, note_index=1, unconsidered="u", blind_spots="b", next_directions="n"))
+        runner = FakeRunner([tool_response(), FakeResponse(_EC_GHOST), is_done_response()])
+        runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=lookup_tools(), permission_policy=PermissionPolicy(), algorithm=ContextWindowAlgorithm(name="error_correction", error_correction=ErrorCorrectionAlgorithm(interval=1)), context_manager=manager)
+        result = await runtime.arun("task", handle=runner_handle(runner), context=base_context())
+        metadata = result.metadata["error_correction"]
+        self.assertEqual(metadata["removed_count"], 1)
+        self.assertEqual(metadata["passes"][0]["removed"], ("problem_space_search:ghost",))
+        self.assertIsNone(manager.get_by_id("problem_space_search:ghost"))
+        self.assertIn("Correction Notice", runner.calls[-1]["kwargs"].get("system", ""))
 
     async def test_runtime_respects_max_passes(self) -> None:
         # [Edge Case] The pass cap halts audits while iterations continue.

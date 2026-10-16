@@ -80,7 +80,9 @@ class ReflexionAlgorithm:
             return False
         # @intent isdone-is-a-normal-stop
         # A plain-text final answer is a normal completion just like isDone, so only other stops are failed trials.
-        return self.stop_reason(result) not in (AgentStopReason.IS_DONE, AgentStopReason.FINAL_RESPONSE)
+        # @intent middleware-abort-ends-the-run
+        # A middleware abort (a tripwire, a spend ceiling) stops the whole run, so it is never retried as a failed trial.
+        return self.stop_reason(result) not in (AgentStopReason.IS_DONE, AgentStopReason.FINAL_RESPONSE, AgentStopReason.MIDDLEWARE_ABORT)
 
     def render_reflection_prompt(
         self,
