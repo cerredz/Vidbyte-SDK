@@ -119,6 +119,19 @@ started: 2026-10-15 18:12
 
   These run in sequence, because both commit in the same worktree. origin/main is at f7f32b19 (#1160, `agents/runtime.py` only): there is no overlap, so no merge is needed.
 
+- 2026-10-16 15:45 — **S6 spot-check passed.**
+  - `gh pr view` shows the PR is a draft against `main`, with the title `feat(harnesses): thread helpers and verified built-in skill functions for Grok, opencode and Muse` (no `[WIP]`).
+  - The body has 1 mermaid block, is 57,687 characters (under GitHub's 65,536), and ends with the 🤖 footer.
+  - Check-runs on 5c93e6c9: 4/4 success. Nothing is unpushed. On origin, the spec has `status: pr-open` and the `pr:` URL.
+  - Two acceptance proofs hold:
+    - AC-1: the test exists at `acceptance_helpers.py:67`.
+    - AC-35: commit cdbbd72b touches `grok/commands.py`, `hostkit/errors.py` and `muse/commands.py`.
+- 2026-10-16 15:45 — The S6 OPEN ITEMS name two code-tree defects. Per the playbook, they go back to S5 as iteration 3:
+  - (a) `vidbyte/harnesses/README.md:179` says "22 keyless functions" but lists 23 names, because it includes `init_muse_workspace`.
+  - (b) `vidbyte/harnesses/native/grok/store.py:104-106` has three blank lines between classes.
+
+  After that, the PR author is resumed to refresh the live body's verification table for the new head SHA.
+
 ## User replies (verbatim)
 - 2026-10-15 ~18:25 — "note, ccan you also in a subagent launch this "spec-pipeline" process for pr #1055 and explain the changes that we want to make with the implementation of the existing pr"
 
