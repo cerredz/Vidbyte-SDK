@@ -1,8 +1,8 @@
 """FILE: tests/features/codex_host/test_codex_host_review_gaps.py
 
-PURPOSE: Pins the windows the S4 review of CodexHost found open: a review cancelled during its registration read-back, a cancelled launch, a cancelled close, an unusable output_schema, a start still in flight when its caller left, the problem a late-accepted turn or goal run ends with, a mapping output_schema that only parses JSON, and the launch tool's cap slots on failure and cancellation.
-ROLE IN CODEBASE: Regression layer of tests/features/codex_host/ (review.md R-1, R-2, R-6, R-7, R-10, R-12, R-13 and R-14; spec INV-7, INV-8, INV-11, INV-21, INV-24, INV-32, INV-37, D-35, D-36, EC-36, EC-52, EC-82 and EC-83). The host classes need the optional openai-codex extra, so CI skips them; the launch tool class runs over StubCodexHost and is CI-visible.
-ARCHITECTURE NOTE: Holds on the fake app-server keep one request unanswered while the test cancels its caller. Exact interrupt counts use the pack's one-worker barrier: with CODEX_HOST_WORKER_THREADS patched to 1, a later host call cannot return before an interrupt queued earlier has reached the fake.
+PURPOSE: Pins the windows the S4 review of CodexHost found open: a review cancelled during its registration read-back, a cancelled launch, a cancelled close, an unusable output_schema, a start still in flight when its caller left, the problem a late-accepted turn or goal run ends with, a mapping output_schema that only parses JSON, and the launch tool's cap slots on failure and cancellation; and, for review R-18 of the thread-helpers spec, a launch that fails midway keeping every field of the mapped error it rebuilds.
+ROLE IN CODEBASE: Regression layer of tests/features/codex_host/ (review.md R-1, R-2, R-6, R-7, R-10, R-12, R-13 and R-14, and docs/spec/codex-host-thread-helpers/review.md R-18; spec INV-7, INV-8, INV-11, INV-21, INV-24, INV-32, INV-37, D-35, D-36, EC-36, EC-52, EC-82 and EC-83). The host classes need the optional openai-codex extra, so CI skips them; the launch tool class runs over StubCodexHost and is CI-visible.
+ARCHITECTURE NOTE: Holds on the fake app-server keep one request unanswered while the test cancels its caller. Exact interrupt counts use the pack's one-worker barrier: with CODEX_HOST_WORKER_THREADS patched to 1, a later host call cannot return before an interrupt queued earlier has reached the fake. The R-18 test swaps the connection's CodexErrorMapper for codex_host_support.FieldCarryingMapper, which also sets error_type and thread_id, so the rebuild's dropped fields are visible.
 COMMON MODIFICATION PATTERNS: Add a cancellation window by holding the request the window awaits, cancelling the caller, releasing the hold, and asserting who owns what Codex accepted.
 KNOWN EDGE CASES: openai-codex queues a second turn/start on a thread behind a held first one, so a second continue is run as a task and never awaited while the first start is held. A late start lands through a callback a host worker posts to the loop, so a test that needs the landing polls for it, bounded by WAIT_SECONDS.
 RELATED DOCS: tests/features/codex_host/FEATURE.md; docs/spec/codex-host/review.md; docs/spec/codex-host/spec.md sections 6.1, 6.3 and 8.1.
@@ -19,8 +19,11 @@ from typing import Any
 
 from tests.features.codex_host.codex_host_support import (
     WAIT_SECONDS,
+    FieldCarryingMapper,
     HostTestCase,
     StubCodexHost,
+    changed_error_fields,
+    input_texts,
     requires_sdk,
 )
 
@@ -120,6 +123,32 @@ class CodexHostLaunchCancellationTests(HostTestCase):
         self.assertEqual(self.count("turn/start"), 1)
         snapshot = await self.wait_done(host, CodexTurnHandle(thread_id=thread_id, turn_id=first_turn))
         self.assert_problem(snapshot, "interrupted", None)
+
+
+@requires_sdk
+class CodexHostLaunchRebuildFieldTests(HostTestCase):
+    """Thread-helpers review R-18; codex-host INV-37, AC-18, EC-52 and D-22: a launch that fails midway raises the mapped error, every field kept."""
+
+    async def test_a_launch_that_fails_midway_keeps_every_field_of_the_mapped_error(self) -> None:
+        from tests.features.codex_host.codex_host_fakes import FakeRpcError
+
+        host = await self.open_host()
+        mapper = FieldCarryingMapper()
+        self.patch_connection("CodexErrorMapper", mapper)
+        self.server.fail("turn/start", FakeRpcError(-32603, "turn/start failed"), predicate=lambda params: input_texts(params) == [("text", "Part three.")])
+        error = await self.assert_codex_error(host.launch_codex_subagents(["Part one.", "Part two.", "Part three."]), "codex.api_error")
+        original = mapper.only(error.operation)
+        # The third start's error carried both fields, so a rebuild that drops either one is visible here.
+        self.assertTrue(original.thread_id)
+        self.assertTrue(original.safe_runtime_details["error_type"])
+        # EC-52: the mapped error, saying 2 turns were started and interrupted. The spec gives no literal for that
+        # sentence, so its words are checked, not its wording.
+        self.assertTrue(error.message.startswith(original.message + " "), error.message)
+        added = error.message[len(original.message) :]
+        self.assertRegex(added, r"\b2\b")
+        self.assertIn("started", added)
+        self.assertIn("interrupted", added)
+        self.assertEqual(changed_error_fields(error, original), {})
 
 
 @requires_sdk

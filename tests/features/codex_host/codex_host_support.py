@@ -3,7 +3,7 @@
 PURPOSE: Shared helpers for the CodexHost feature pack: the spec's literal texts and tables, the privacy canaries, the openai-codex skip gate, a duck-typed stub host for the tool tests, and HostTestCase, which runs a real CodexHost against the in-memory app-server.
 ROLE IN CODEBASE: Imported by every test module in tests/features/codex_host/. It imports nothing the feature adds and nothing from openai-codex at module level, so every module still collects before the feature exists and on CI, which installs only the dev extra.
 ARCHITECTURE NOTE: HostTestCase.asyncSetUp patches the one seam spec section 13 names, vidbyte.harnesses.native.codex.connection.CodexClient, with the fake client from codex_host_fakes.py, and shutil.which with a recorder. Everything above the seam (CodexHost, its translators, preflight, pricing, records) runs unmocked. StubCodexHost stands in for CodexHost only in the tool tests, which spec section 13 allows because the tools import CodexHost under TYPE_CHECKING only.
-FUNCTION INVENTORY: requires_sdk skips a class when openai-codex is missing; error_texts(exc) returns every text an error shows, its visible chain included; input_texts(params) reads a turn request's input items; HostTestCase.open_host / close_host / spawn / wait_done / assert_problem / assert_codex_error / run_in_other_loop drive a host, and patch_connection / patch_skill_functions / patch_platform / wait_for_request / wait_until / ask / count script and observe the fake app-server; StubCodexHost answers the twenty-seven host methods from scripted records; make_echo_tool builds a small dynamic tool; thread_suffix is the " Thread: <id>." the error mapper appends. The thread-helpers spec adds HELPER_METHODS, its message texts, four codes, four rows and eleven tool rows.
+FUNCTION INVENTORY: requires_sdk skips a class when openai-codex is missing; error_texts(exc) returns every text an error shows, its visible chain included; input_texts(params) reads a turn request's input items; HostTestCase.open_host / close_host / spawn / wait_done / assert_problem / assert_codex_error / run_in_other_loop drive a host, and patch_connection / patch_skill_functions / patch_platform / wait_for_request / wait_until / ask / count script and observe the fake app-server; StubCodexHost answers the twenty-seven host methods from scripted records; make_echo_tool builds a small dynamic tool; thread_suffix is the " Thread: <id>." the error mapper appends; FieldCarryingMapper maps as the host's CodexErrorMapper does and also sets error_type and thread_id, and changed_error_fields lists the KEPT_ERROR_FIELDS a rebuilt error lost (thread-helpers review R-17, R-18). The thread-helpers spec adds HELPER_METHODS, its message texts, four codes, four rows and eleven tool rows.
 COMMON MODIFICATION PATTERNS: When the spec changes a next-step text, a tool name or a classification row, change the literal here, never by reading the production constant. Add a host helper here only when two or more modules need it.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import vidbyte.harnesses.native, vidbyte.lib.dataclasses.codex_host, the new enums or openai_codex at module level: a missing feature must fail each test, not abort collection. 2. Do not start a process or touch the network. 3. Do not copy production logic; tests assert the spec's literal values.
 KNOWN EDGE CASES: The privacy canaries are unique strings, so finding one in any output proves a leak. StubCodexHost reports a handle RUNNING until a test marks it finished, which is how the live-turn cap sees running turns.
@@ -265,6 +265,49 @@ def assert_no_canary(case: unittest.TestCase, texts: list[str], canaries: tuple[
 def input_texts(params: dict[str, Any]) -> list[tuple[str, str]]:
     """The (type, text) pairs of a turn/start or turn/steer request's input items."""
     return [(item["type"], item.get("text", "")) for item in params["input"]]
+
+
+# Review R-17 and R-18 of the thread-helpers spec: a CodexAgentError the host rebuilds must carry each of these as the original did.
+KEPT_ERROR_FIELDS = ("failure_code", "operation", "thread_id", "error_kind", "expected", "safe_runtime_details", "likely_causes", "next_step", "repair_approaches", "related_docs", "relevant_tests")
+
+
+def changed_error_fields(error: Any, original: Any) -> dict[str, tuple[Any, Any]]:
+    """Each kept field the rebuilt error does not carry as the original did, as (rebuilt, original)."""
+    return {name: (getattr(error, name), getattr(original, name)) for name in KEPT_ERROR_FIELDS if getattr(error, name) != getattr(original, name)}
+
+
+class FieldCarryingMapper:
+    """The connection's CodexErrorMapper, plus the error_type and thread_id fields that CodexAgentError gained on main (#1116).
+
+    No codex-host path sets either field today, because CodexErrorMapper.error passes neither. This mapper stands in for
+    one that does, so a rebuild that drops them is visible. Install it with HostTestCase.patch_connection("CodexErrorMapper",
+    mapper) after the host opens. It records every error it maps.
+    """
+
+    def __init__(self) -> None:
+        from vidbyte.harnesses.native.codex.errors import CodexErrorMapper
+
+        self._real = CodexErrorMapper
+        self.mapped: list[Any] = []
+
+    def __getattr__(self, name: str) -> Any:
+        # process_exited and the other builders answer as the real mapper does.
+        return getattr(self._real, name)
+
+    def from_exception(self, exc: Exception, operation: Any, method: str, *, dead: bool, bound_seconds: float, thread_id: str = "") -> Any:
+        from vidbyte.lib.errors import CodexAgentError
+
+        error = self._real.from_exception(exc, operation, method, dead=dead, bound_seconds=bound_seconds, thread_id=thread_id)
+        carried = CodexAgentError(error.message, failure_code=error.failure_code, operation=error.operation, error_type=type(exc).__name__, next_step=error.next_step, thread_id=thread_id)
+        self.mapped.append(carried)
+        return carried
+
+    def only(self, operation: str) -> Any:
+        """The one error mapped for the operation; the tests rely on there being exactly one."""
+        matches = [error for error in self.mapped if error.operation == operation]
+        if len(matches) != 1:
+            raise AssertionError(f"expected one mapped error for {operation}, got {[error.message for error in self.mapped]}")
+        return matches[0]
 
 
 class HostTestCase(unittest.IsolatedAsyncioTestCase):
