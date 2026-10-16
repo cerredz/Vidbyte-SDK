@@ -135,14 +135,9 @@ class JevRuntime(AgentRuntime):
             if self.run_state is not None:
                 await self.run_state.begin(message, prior_user_turns=self._prior_user_turns(context.history))
                 self.usage.require_accounted()
-                sequence_instructions = self.run_state.agent_instructions()
-                if sequence_instructions:
-                    context = replace(context, system_prompt=f"{context.system_prompt or ''}\n\n{sequence_instructions}")
-                    # @intent explicit-system-option-carries-the-stage-order
-                    # An explicit system option replaces the context prompt on the wire, so the stage order joins it too.
-                    explicit_system = (options or {}).get("system")
-                    if isinstance(explicit_system, str):
-                        options = {**dict(options or {}), "system": f"{explicit_system}\n\n{sequence_instructions}"}
+                # Give the main agent the request's required stage
+                # order, in whichever system prompt reaches the model.
+                context, options = self._add_stage_order(self.run_state.agent_instructions(), context, options)
             # Hide every tool above READ before the selector runs, so the model is never offered a tool it may not call.
             context, options = self._keep_read_only_tools(context, options)
             context, options, selector_metadata = await self._select_tools(message, context, options)
@@ -158,6 +153,20 @@ class JevRuntime(AgentRuntime):
             if selector_metadata is not None:
                 result = replace(result, metadata={**dict(result.metadata), "jev_tool_selector": selector_metadata})
             return self.response.finished(result, self.usage.settle())
+
+    @staticmethod
+    def _add_stage_order(sequence_instructions: str, context: BaseAgentContext, options: Mapping[str, Any] | None) -> tuple[BaseAgentContext, Mapping[str, Any] | None]:
+        # Appends the run state's required stage order, when there is
+        # one, to the run context's system prompt.
+        if not sequence_instructions:
+            return context, options
+        context = replace(context, system_prompt=f"{context.system_prompt or ''}\n\n{sequence_instructions}")
+        # @intent explicit-system-option-carries-the-stage-order
+        # An explicit system option replaces the context prompt on the wire, so the stage order joins it too.
+        explicit_system = (options or {}).get("system")
+        if isinstance(explicit_system, str):
+            options = {**dict(options or {}), "system": f"{explicit_system}\n\n{sequence_instructions}"}
+        return context, options
 
     def _keep_read_only_tools(self, context: BaseAgentContext, options: Mapping[str, Any] | None) -> tuple[BaseAgentContext, Mapping[str, Any] | None]:
         # Narrows this run's user tools to SAFE and READ when the gate judged the request read-only, and
