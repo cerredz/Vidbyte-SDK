@@ -66,7 +66,42 @@ Gate set (from context/code-map.md §1 and the S5 briefing §4; run from the wor
 | `778b094a` | contract regenerated |
 | (this commit) | verify-log and review.md statuses |
 
-**Gate matrix out** (final pushed code head `778b094a`, post-merge):
+**Granted test edits (exact before/after):**
+- R-1, `tests/features/public_skill_loader/test_public_skill_loader_release.py`.
+  - Before, `:34-35` and `:113`:
+    ```python
+    # D-13: 0.3.0 is released, so the first release that can carry the public loader is 0.3.1 (Q-8 may override it).
+    RELEASE_VERSION = "0.3.1"
+        assert read(monkeypatch) == RELEASE_VERSION, place
+    ```
+  - After:
+    ```python
+    # EC-29, D-13: 0.3.1 is the first release that carries the public
+    # loader, so a later bump may raise the version but never go below it.
+    FIRST_LOADER_RELEASE = (0, 3, 1)
+        assert read(monkeypatch) == pyproject_version(monkeypatch), place
+        assert tuple(int(part) for part in pyproject_version(monkeypatch).split(".")[:3]) >= FIRST_LOADER_RELEASE, place
+    ```
+  - The header changed in two places:
+    - PURPOSE: "reads the release version" became "equals pyproject.toml's version, …, and that version is never below 0.3.1, the first release that carries the loader".
+    - COMMON MODIFICATION PATTERNS: "The next bump changes RELEASE_VERSION;" became "A routine version bump changes nothing here, because every place is compared with pyproject.toml's version and FIRST_LOADER_RELEASE is only a floor;".
+  - The eight PLACES rows and the CLI-fallback patching are unchanged.
+  - A pre-release version such as `0.4.0rc1` would make `int()` raise, so the test errors loudly. That is outside the grant and was left as is.
+- R-5, `tests/features/public_skill_loader/test_public_skill_loader_docs.py` `:44-46`.
+  - Before:
+    ```python
+    # The File Index entry for vidbyte/agents/skills/, up to the next heading.
+    return text.split("##### `vidbyte/agents/skills/`", 1)[-1].split("\n#", 1)[0]
+    ```
+  - After:
+    ```python
+    # The File Index entry for vidbyte/agents/skills/, up to the next
+    # heading; empty when the heading is gone, so the guard fails.
+    _, found, entry = text.partition("##### `vidbyte/agents/skills/`")
+    return entry.split("\n#", 1)[0] if found else ""
+    ```
+
+**Gate matrix out** (final pushed code head `778b094a`, post-merge; the docs-only head `612f75e1` was also dispatched: CI 38828979286, with Source / Python 3.11, Source / Python 3.12, and Package all success at `5851 passed, 56 skipped`, and Static policy 38828981180 success):
 
 | Gate | Command | Result | Final lines |
 |---|---|---|---|
