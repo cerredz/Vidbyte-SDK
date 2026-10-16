@@ -21,6 +21,7 @@ Key Functions / Test Cases:
     - test_direct_agent_grader_runners_carry_its_keys_and_mode: Assures a DIRECT BaseAgent's trial and grader runners get its matched keys and mode.
     - GraderTrialsStayOnTheirProviderTests: Assures a down provider's trial drops out instead of running on the agent's fallback model under its name.
     - ExplicitProviderKeyCheckTests: Assures resolve_active demands a provider's own key only in DIRECT mode, counting a matched key.
+    - GraderStoppedTrialTests: Assures a trial stopped by its own limit is a failed trial, never a graded candidate or the run's answer.
 Relations:
     Validates MultiProviderAgenticGraderAlgorithm and MultiProviderAgenticGraderRuntimeAlgorithm within the test framework.
 Similar Files:
@@ -45,10 +46,12 @@ from vidbyte.agents.runtime import AgentRuntime
 from vidbyte.lib.enums import TextModelMode
 from vidbyte.lib.errors import AgentExecutionError, ConfigurationError, ProviderRequestError
 from vidbyte.middleware import ModelRetryMiddleware
-from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig, ProviderKeys
+from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig, AgentStopReason, ProviderKeys
 from vidbyte.lib.registries.models import ProviderModelRegistry
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.config.constants import API_KEY_ENV_VARS
+from vidbyte.lib.constants.outputs import OUTPUT_DELIVERABLE_STOP_REASONS
+from vidbyte.tools import tool
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.security import PermissionPolicy
 from vidbyte.lib.dataclasses.context import BaseAgentContext
@@ -118,6 +121,12 @@ class Ticket(BaseModel):
 
     title: str
     urgency: int
+
+
+@tool
+def lookup(query: str) -> str:
+    """Look up a fact."""
+    return f"no result for {query}"
 
 
 class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
@@ -671,6 +680,97 @@ class ExplicitProviderKeyCheckTests(unittest.TestCase):
         for mode in (TextModelMode.AUTO, TextModelMode.VIDBYTE_MANAGED):
             with self.subTest(mode=mode):
                 self.assertEqual(ProviderModelRegistry.resolve_active(self.PROVIDER_MODELS, None, model_mode=mode), self.PROVIDER_MODELS)
+
+
+class GraderStoppedTrialTests(unittest.IsolatedAsyncioTestCase):
+    """A trial stopped by its own limit never reached an answer, so it is a failed trial, never a graded candidate."""
+
+    INTERIM = "Let me look that up."
+    DEEPSEEK_ANSWER = "Canberra (from deepseek)."
+    GEMINI_ANSWER = "Canberra (from gemini)."
+    PROVIDER_MODELS = {"deepseek": "deepseek-chat", "gemini": "gemini-3.5-flash"}
+
+    def setUp(self) -> None:
+        # Hide every provider variable; the gateway mode needs no provider key and no request leaves the process.
+        environment = patch.dict(os.environ)
+        environment.start()
+        self.addCleanup(environment.stop)
+        for env_var in API_KEY_ENV_VARS.values():
+            os.environ.pop(env_var, None)
+
+    def _deepseek_looping(self) -> FakeRunner:
+        # Every turn narrates and calls lookup, so the trial stops on max_iterations instead of answering.
+        arguments = json.dumps({"query": "capital"})
+        return FakeRunner(self.INTERIM, raw={"choices": [{"message": {"role": "assistant", "content": self.INTERIM, "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "lookup", "arguments": arguments}}]}}]})
+
+    def _gemini_looping(self) -> FakeRunner:
+        # The same narrate-and-call-lookup turn on Gemini's wire.
+        return FakeRunner(self.INTERIM, raw={"candidates": [{"content": {"role": "model", "parts": [{"text": self.INTERIM}, {"functionCall": {"name": "lookup", "args": {"query": "capital"}}}]}}]})
+
+    def _algorithm(self) -> MultiProviderAgenticGraderRuntimeAlgorithm:
+        # The runtime adapter for a deepseek-vs-gemini comparison graded by openai.
+        algorithm = MultiProviderAgenticGraderAlgorithm(provider_models=self.PROVIDER_MODELS, grader_provider="openai", grader_model="gpt-4.1-mini")
+        runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=Tools([lookup]), permission_policy=PermissionPolicy(), config=AgentRuntimeConfig(max_iterations=1), algorithm=ContextWindowAlgorithm(name="multi_provider_agentic_grader", multi_provider_agentic_grader=algorithm))
+        return MultiProviderAgenticGraderRuntimeAlgorithm(runtime, algorithm)
+
+    async def _grade(self, runners: dict[str, FakeRunner]) -> StrategyResult:
+        # A one-iteration run with a lookup tool; each provider's trial and the openai grader read their scripted runner.
+        adapter = self._algorithm()
+        runtime = adapter.runtime
+        context = runtime.build_context("task", base_context=None, history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+        handle = RunnerHandle(runner=FakeRunner("ignored"), provider="deepseek", invoke=_invoke_runner_helper, extract_text=lambda r: getattr(r, "text", str(r)), extract_metadata=lambda r: {})
+        with patch("vidbyte.agents.algorithms.multi_provider_agentic_grader.ModalityDetector.create_runner", side_effect=lambda modality, provider, model, **kwargs: runners[provider]):
+            return await runtime.arun("task", handle=handle, context=context)
+
+    async def test_stopped_trial_is_not_graded_and_the_answering_trial_wins(self) -> None:
+        # [Silent Failure] The stopped trial's last tool-call narration was graded as its answer and could be selected.
+        grader = FakeRunner(self.GEMINI_ANSWER)
+        result = await self._grade({"deepseek": self._deepseek_looping(), "gemini": FakeRunner(self.GEMINI_ANSWER), "openai": grader})
+
+        grader_metadata = result.metadata["multi_provider_agentic_grader"]
+        self.assertEqual(grader_metadata["candidates"], {"gemini": self.GEMINI_ANSWER})
+        self.assertEqual(grader_metadata["total_runs"], 1)
+        self.assertNotIn(self.INTERIM, grader.calls[0]["prompt"])
+        self.assertEqual(grader_metadata["grader_decision"]["selected_provider"], "gemini")
+        self.assertEqual(result.output, self.GEMINI_ANSWER)
+        # The stopped trial's tool call was still made, so it stays on the run's record.
+        self.assertIn("lookup", [call.tool_name for call in result.calls])
+
+    async def test_every_trial_stopped_fails_like_every_trial_raised(self) -> None:
+        # [Silent Failure] With every trial stopped, one trial's narration came back as the answer with no stop_reason.
+        grader = FakeRunner(self.INTERIM)
+
+        with self.assertRaises(AgentExecutionError) as ctx:
+            await self._grade({"deepseek": self._deepseek_looping(), "gemini": self._gemini_looping(), "openai": grader})
+
+        self.assertIn("All provider loops failed", str(ctx.exception))
+        self.assertIn("deepseek stopped: max_iterations", str(ctx.exception))
+        self.assertIn("gemini stopped: max_iterations", str(ctx.exception))
+        self.assertEqual(grader.calls, [])
+
+    def test_only_deliverable_stop_reasons_become_candidates(self) -> None:
+        # [Hidden Failure] A budget, guard, or unmet contract stop is a failed trial, the same as max_iterations.
+        adapter = self._algorithm()
+        # arun returns an aborted trial before candidates are collected, so a middleware abort never reaches this step.
+        for reason in (r for r in AgentStopReason if r is not AgentStopReason.MIDDLEWARE_ABORT):
+            with self.subTest(stop_reason=reason.value):
+                results = [StrategyResult(output="text", strategy_name="direct_runner", metadata={"stop_reason": reason.value}), StrategyResult(output=self.GEMINI_ANSWER, strategy_name="direct_runner", metadata={})]
+                candidates, _, _ = adapter._collect_candidates(self.PROVIDER_MODELS, results)
+                self.assertEqual("deepseek" in candidates, reason.value in OUTPUT_DELIVERABLE_STOP_REASONS)
+                self.assertEqual(candidates["gemini"], self.GEMINI_ANSWER)
+
+    async def test_isdone_and_final_response_trials_are_both_candidates(self) -> None:
+        # Control: an isDone finish and a plain final reply both answered, so both are graded.
+        arguments = json.dumps({"final_answer": self.DEEPSEEK_ANSWER})
+        deepseek = FakeRunner(arguments, raw={"choices": [{"message": {"role": "assistant", "content": None, "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "isDone", "arguments": arguments}}]}}]})
+        grader = FakeRunner(self.DEEPSEEK_ANSWER)
+        result = await self._grade({"deepseek": deepseek, "gemini": FakeRunner(self.GEMINI_ANSWER), "openai": grader})
+
+        grader_metadata = result.metadata["multi_provider_agentic_grader"]
+        self.assertEqual(grader_metadata["candidates"], {"deepseek": self.DEEPSEEK_ANSWER, "gemini": self.GEMINI_ANSWER})
+        self.assertIn(self.DEEPSEEK_ANSWER, grader.calls[0]["prompt"])
+        self.assertIn(self.GEMINI_ANSWER, grader.calls[0]["prompt"])
+        self.assertEqual(result.output, self.DEEPSEEK_ANSWER)
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ Architecture:
 Key Functions:
     - arun: Orchestrates concurrent agent trials across providers, captures outputs, and runs the meta-grader.
     - _run_provider_trial: Runs the agentic loop for a single provider and captures output text.
-    - _collect_candidates: Filters trial results into a candidates dict and aggregates tokens/calls.
+    - _collect_candidates: Keeps answered trials as candidates, failing raised or stopped ones, and aggregates tokens/calls.
     - _build_candidates_text: Formats the candidates dict into a labeled text block for the grader.
     - _run_grader: Invokes the meta-grader model call via middleware.
     - _select_winner: Picks the best candidate from the grader's output.
@@ -34,6 +34,7 @@ from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.enums import ModelModality
 from vidbyte.lib.errors import AgentExecutionError
 from vidbyte.lib.agents.modality_detector import ModalityDetector
+from vidbyte.lib.constants.outputs import OUTPUT_DELIVERABLE_STOP_REASONS
 from vidbyte.lib.models import ProviderModelRegistry
 from vidbyte.lib.tracing import SpanContext
 from vidbyte.lib.dataclasses.agents import AgentStopReason
@@ -111,20 +112,28 @@ class MultiProviderAgenticGraderRuntimeAlgorithm:
         return res
 
     def _collect_candidates(self, active_models: dict[str, str], results: list[Any]) -> tuple[dict[str, str], int, list[Any]]:
-        # Extracts successful trial outputs and accumulates token counts and tool call records.
+        # Extracts answered trial outputs and accumulates token counts and tool call records.
         candidates: dict[str, str] = {}
         total_tokens = 0
         call_contexts: list[Any] = []
+        stopped: list[str] = []
         for (p_name, _m_name), res in zip(active_models.items(), results):
             if isinstance(res, Exception):
                 continue
-            candidates[p_name] = res.output
+            # @intent stopped-trials-are-failures
+            # A trial stopped by its own limit, a guard, or an unmet contract never reached an accepted answer, so its last text is never graded.
+            stop_reason = (res.metadata or {}).get("stop_reason")
+            if stop_reason is None or stop_reason in OUTPUT_DELIVERABLE_STOP_REASONS:
+                candidates[p_name] = res.output
+            else:
+                stopped.append(f"{p_name} stopped: {stop_reason}")
+            # A stopped trial still spent tokens and made tool calls, so they stay on the run's record.
             if res.metadata:
                 total_tokens += res.metadata.get("tokens_used", 0) or 0
                 if "tool_calls" in res.metadata:
                     call_contexts.extend(res.metadata["tool_calls"])
         if not candidates:
-            failures = [str(r) for r in results if isinstance(r, Exception)]
+            failures = [str(r) for r in results if isinstance(r, Exception)] + stopped
             raise AgentExecutionError(f"All provider loops failed: {', '.join(failures)}")
         return candidates, total_tokens, call_contexts
 
