@@ -94,6 +94,9 @@ class MultiProviderAgenticGraderRuntimeAlgorithm:
             metadata={**dict(metadata or {}), "context_window_algorithm": "multi_provider_agentic_grader", "grader_stage": "agent_loop", "loop_provider": provider_name, "loop_model": model_name},
             options=dict(options or {}),
             trace_context=trace_context,
+            # @intent trials-stay-on-their-provider
+            # A trial stands for one provider, so a failed one drops out instead of running on the agent's fallback model under that provider's name.
+            pin_model=True,
         )
         # @intent isdone-answer-is-the-candidate
         # An isDone finish already returns its final_answer; the last captured text is that tool-call turn's text, not the answer.
