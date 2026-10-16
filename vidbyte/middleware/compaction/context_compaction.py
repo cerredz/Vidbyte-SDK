@@ -22,6 +22,13 @@ _TOOL_RESULT_MODES = frozenset({
     CompactionMode.MECHANICAL_BLOAT_SCRUBBER,
 })
 
+# The history modes the engine runs only with an injected summarizer; without one they raise on every call.
+_SUMMARY_MODES = frozenset({
+    CompactionMode.SUMMARIZE_OLDEST_N,
+    CompactionMode.SUMMARIZE_RANGE,
+    CompactionMode.SUMMARIZE_BY_TOPIC_BLOCKS,
+})
+
 
 class ToolResultCompactionMiddleware(AgentMiddleware):
     """Compact model-visible tool results after tool execution."""
@@ -111,6 +118,10 @@ class MessageHistoryCompactionMiddleware(AgentMiddleware):
         self.mode = mode if isinstance(mode, CompactionMode) else CompactionMode(str(mode))
         self.options = dict(options)
         self.engine = ContextCompactionEngine()
+        # @intent summarize-modes-need-a-summarizer-at-construction
+        # This engine has no summarizer, so a summarize mode would stop every run at its first compaction; refuse it here.
+        if self.mode in _SUMMARY_MODES and self.engine.summarizer is None:
+            raise ValueError(f"{self.mode.value} needs a summarizer; use SummaryCompactionMiddleware(mode=..., summarizer=...), or pass summarizer= to the trace middleware that runs it.")
         self._validate_options()
 
     @classmethod
@@ -468,9 +479,16 @@ class TraceReplacementCompactionMiddleware(AgentMiddleware):
         ReplaceWithTraceCompaction("validation", **self.strategy_options)
         # @intent trace-fallback-and-compose-options-validate-eagerly
         # The fallback and composed passes run history modes, so their bad options must fail here, not fail open on every call.
+        summarizer = self.engine.summarizer
         for mode, options in ((self.fallback_mode, self.fallback_options), (self.compose_after, self.compose_after_options)):
-            if mode is not None:
+            if mode is None:
+                continue
+            if summarizer is None:
                 MessageHistoryCompactionMiddleware(mode=mode, **options)
+            else:
+                # @intent summarize-modes-need-a-summarizer-at-construction
+                # These passes run on this middleware's summarizer, so validate them with it.
+                SummaryCompactionMiddleware(mode=mode, summarizer=summarizer, **options)
 
     @staticmethod
     def _coerce_mode(mode: CompactionMode | str | None) -> CompactionMode | None:
