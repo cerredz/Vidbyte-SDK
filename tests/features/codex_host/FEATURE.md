@@ -100,7 +100,7 @@ The thread helpers add these (thread-helpers spec):
 - Delete holds no registry reservation, or keeps it after a failure or a cancel → a continue or a review starts a paid turn on a thread being deleted, or the thread stays busy forever.
 - A goal run reads nothing back, or compares only the objective → a goal without its budget keeps spending. A mismatch with no cancel → the goal keeps running.
 - A skill match that ignores case, takes a disabled duplicate, or lists every installed skill in the error → the wrong skill, a refused skill, or an unbounded message.
-- A skill run with no read-back → Codex drops the skill entry, and the caller gets a handle for a plain prompt. A read-back with no deadline or attempt cap → it waits forever.
+- A skill run with no read-back → Codex drops the skill entry, and the caller gets a handle for a plain prompt. A read-back with no deadline or attempt cap → it waits forever. A read-back that accepts a skill entry of another name or case, or the input of another turn → a run Codex never confirmed returns a handle.
 - A skill run on an ephemeral thread → the read-back can never confirm it, so it always spends and then fails.
 - The turns tool sends no default `limit` → a whole transcript lands in one tool result.
 - A run tool takes no cap slot, or keeps it after a failure or a cancel (the goal tool included) → the cap never fires, or it fills up forever.

@@ -3,7 +3,7 @@
 PURPOSE: An in-memory codex app-server for the CodexHost feature pack. It answers the JSON-RPC lines the real openai-codex CodexClient writes the way codex app-server 0.162 does, so the client's reader thread, message router, retry helper and goal routing all run unmocked.
 ROLE IN CODEBASE: Imported lazily, inside HostTestCase.asyncSetUp only, by the openai-codex-gated modules of tests/features/codex_host/. client_class(server) is what replaces vidbyte.harnesses.native.codex.connection.CodexClient, the seam spec section 13 names.
 ARCHITECTURE NOTE: FakeCodexClient subclasses the real openai_codex.client.CodexClient. It overrides start() to attach an in-memory process instead of a subprocess, and wraps close(), the goal-operation methods, _read_message() and _write_message() only to record what happened (a write attempted after close is logged as write_after_close). Every line the client writes reaches FakeAppServer.receive(), which logs the request with the writing thread and answers it on its own daemon thread; the answer, with any notifications written before or after it, goes to stdout in one atomic block. Answers are built from the field names of openai_codex.generated.v2_all, so the real response models validate them.
-FUNCTION INVENTORY: FakeAppServer holds the scripted state (account, rate limits, sandbox, model pages, threads, reviewers, skills), the request log, holds, failures and drive helpers (complete_turn, emit_usage, emit, goal_update, server_request, die, send_raw, wait_for, wait_until); Request, Reply, Hold, FakeRpcError, FakeThread, FakeTurn; token_usage builds a usage payload; goal_record and skill_entry build a stored goal and a skills/list entry; client_class binds the fake client to one server; RecordingGoalState logs finish() and wake_notification_reader(). The thread-helper switches (paged_thread_list, thread_page_size, endless_thread_list, record_turn_input, drop_skill_input, input_hidden_reads, goal_get_answer, turn_cursors) and the per-thread fields (created_at, updated_at, source, parent_thread_id, status, explicit_name) are off or neutral by default, so every answer the older modules rely on is unchanged.
+FUNCTION INVENTORY: FakeAppServer holds the scripted state (account, rate limits, sandbox, model pages, threads, reviewers, skills), the request log, holds, failures and drive helpers (complete_turn, emit_usage, emit, goal_update, server_request, die, send_raw, wait_for, wait_until); Request, Reply, Hold, FakeRpcError, FakeThread, FakeTurn; token_usage builds a usage payload; goal_record and skill_entry build a stored goal and a skills/list entry; client_class binds the fake client to one server; RecordingGoalState logs finish() and wake_notification_reader(). The thread-helper switches (paged_thread_list, thread_page_size, endless_thread_list, record_turn_input, drop_skill_input, recorded_skill_name, input_on_earlier_turn, input_hidden_reads, goal_get_answer, turn_cursors) and the per-thread fields (created_at, updated_at, source, parent_thread_id, status, explicit_name) are off or neutral by default, so every answer the older modules rely on is unchanged.
 COMMON MODIFICATION PATTERNS: Teach the fake a new method by adding a handler to FakeAppServer._handlers, building the answer from the generated model's aliases; add a drive helper when a test needs a new notification sequence.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import this module at module level from a test file: it imports openai-codex, which CI does not install. 2. Do not start a real process, run codex or touch the network (NG-13). 3. Do not encode the host's own rules (mapping, preflight order, caps); answer as Codex would and let the tests assert the spec.
 KNOWN EDGE CASES: stdout is one FIFO, so a notification written before a response line is routed before that response; the real router drops events for a turn that has no subscriber while its thread has no pending turn/start, which the review read-back tests rely on. The thread reviewer the fake reports is what the request sent, else default_reviewer, unless force_reviewer is set (A-15, A-16).
@@ -511,6 +511,11 @@ class FakeAppServer:
         self.record_turn_input = False
         self.drop_skill_input = False
         self.input_hidden_reads = 0
+        # recorded_skill_name: when set, each recorded skill entry carries this name instead of the one sent.
+        # input_on_earlier_turn: the input is recorded on a completed turn placed before the started one, so the
+        # first turn a page shows holds the skill but is not the turn turn/start returned.
+        self.recorded_skill_name: str | None = None
+        self.input_on_earlier_turn = False
         # goal_get_answer: when set, thread/goal/get answers goal_get_answer(thread) instead of the stored goal.
         self.goal_get_answer: Callable[[FakeThread], dict[str, Any] | None] | None = None
         # Extra thread/turns/list cursors a test names, mapped to the turn offset they resume at.
@@ -956,8 +961,15 @@ class FakeAppServer:
         if self.record_turn_input:
             # Codex records the turn's input as its first item, a userMessage whose content is the input sent.
             content = [entry for entry in copy.deepcopy(params.get("input", [])) if not (self.drop_skill_input and entry.get("type") == "skill")]
-            turn.items.append({"type": "userMessage", "id": f"item-{next(self._item_ids)}", "content": content})
-            turn.hidden_reads = self.input_hidden_reads
+            if self.recorded_skill_name is not None:
+                content = [{**entry, "name": self.recorded_skill_name} if entry.get("type") == "skill" else entry for entry in content]
+            message = {"type": "userMessage", "id": f"item-{next(self._item_ids)}", "content": content}
+            if self.input_on_earlier_turn:
+                earlier = FakeTurn(turn_id=self.next_turn_id(), status="completed", items=[message])
+                thread.turns.insert(len(thread.turns) - 1, earlier)
+            else:
+                turn.items.append(message)
+                turn.hidden_reads = self.input_hidden_reads
         started = ("turn/started", {"threadId": thread.thread_id, "turn": turn.wire(with_items=False)})
         after: list[Note] = [started]
         if self.autocomplete is not None:

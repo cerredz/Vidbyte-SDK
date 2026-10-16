@@ -2,7 +2,7 @@
 
 PURPOSE: Proves the goal and skill functions over the in-memory app-server: get_codex_goal's record, run_codex_goal's request order, its stored-goal read-back and the single goal cancel on a failed or cancelled check; list_codex_skills's params and records; run_codex_skill and run_codex_openai_docs resolving the skill before any thread starts, sending the skill as first-class input, confirming it with the bounded read-back, and the single interrupt on a failed or cancelled check; and the argument refusals of all three run functions.
 ROLE IN CODEBASE: Goal and skill layer of tests/features/codex_host/ (docs/spec/codex-host-thread-helpers/spec.md AC-24 to AC-32, AC-39, AC-40, AC-42, AC-43, INV-20 to INV-27, INV-34, INV-35, EC-25 to EC-34, EC-37, EC-45, EC-46, EC-48). Every class needs the optional openai-codex extra, so CI skips them.
-ARCHITECTURE NOTE: The fake stores a goal as goal/set sent it, and goal_get_answer can make thread/goal/get answer something else, which stages a goal that did not take. skills maps a working folder to its skills/list entries. record_turn_input makes turn/start store its input as the turn's userMessage, drop_skill_input leaves the skill entry out, and input_hidden_reads hides that item from the first reads. The read-back bounds are patched in skill_functions, where spec section 13 says the module imports them by name: the interval to 0 with a long deadline for exact read counts, or a deadline below the interval for the deadline stop. Exact cancel and interrupt counts use the one-worker barrier.
+ARCHITECTURE NOTE: The fake stores a goal as goal/set sent it, and goal_get_answer can make thread/goal/get answer something else, which stages a goal that did not take. skills maps a working folder to its skills/list entries. record_turn_input makes turn/start store its input as the turn's userMessage, drop_skill_input leaves the skill entry out, recorded_skill_name records it under another name, input_on_earlier_turn records the input on an earlier turn instead of the started one, and input_hidden_reads hides that item from the first reads. The read-back bounds are patched in skill_functions, where spec section 13 says the module imports them by name: the interval to 0 with a long deadline for exact read counts, or a deadline below the interval for the deadline stop. Exact cancel and interrupt counts use the one-worker barrier.
 COMMON MODIFICATION PATTERNS: Add a goal mismatch as a goal_get_answer row; add a skill case by seeding server.skills for the folder the request names (DEFAULT_CWD for an empty cwd) and asserting the turn/start input and the thread/turns/list count.
 KNOWN EDGE CASES: openai-codex's goal cancel pauses the goal and interrupts its turn and swallows its own failures, so a goal cancel is counted from the fake client's cancel_goal_operation log, not from turn/interrupt requests. A skill run with no thread yet (not found, disabled) names no thread, so its message has no thread suffix.
 RELATED DOCS: tests/features/codex_host/FEATURE.md; docs/spec/codex-host-thread-helpers/spec.md sections 6.1 (INV-20 to INV-27, INV-34, INV-35), 9.2 and 13.
@@ -505,6 +505,55 @@ class CodexSkillReadBackTests(_GoalSkillCase):
         self.assertEqual(self.interrupts(dropped), 1)
         await self.barrier(host, dropped)
         self.assertEqual(self.interrupts(dropped), 1)
+
+    async def test_a_skill_recorded_under_another_name_stops_the_run_once(self) -> None:
+        """INV-34, AC-39 and review R-8: the recorded skill entry must carry exactly the name sent.
+
+        Another name, or the same name in another case, is a miss: one read, one interrupt, codex.command_not_run.
+        """
+        self.fast_read_back()
+        self.patch_connection("CODEX_HOST_WORKER_THREADS", 1)
+        self.server.record_turn_input = True
+        host = await self.opened()
+        for recorded in ("other-skill", "S"):
+            with self.subTest(recorded=recorded):
+                self.server.recorded_skill_name = recorded
+                error = await self.assert_codex_error(host.run_codex_skill("s", "do it"), "codex.command_not_run")
+                thread_id = self.started_thread()
+                self.assertEqual(error.operation, "run_codex_skill")
+                self.assertEqual(error.message, SKILL_DROPPED_MESSAGE.format(skill="s") + thread_suffix(thread_id))
+                # Codex did record a skill entry, so only its name can explain the miss.
+                (turn,) = self.server.threads[thread_id].turns
+                self.assertEqual(turn.items[0]["content"], [{"text": "do it", "type": "text"}, {"name": recorded, "path": SKILL_PATH, "type": "skill"}])
+                self.assertEqual(self.count("thread/turns/list", lambda params: params["threadId"] == thread_id), 1)
+                self.assertEqual(self.interrupts(thread_id), 1)
+                await self.barrier(host, thread_id)
+                self.assertEqual(self.interrupts(thread_id), 1)
+
+    async def test_input_recorded_on_another_turn_does_not_confirm_the_run(self) -> None:
+        """INV-34, AC-39 and review R-8: only the turn whose id is the handle's turn can confirm the run.
+
+        Here every page shows an earlier turn that holds the exact skill entry sent, never the started turn,
+        so the read-back misses on every attempt and the run is stopped once.
+        """
+        self.fast_read_back()
+        self.patch_connection("CODEX_HOST_WORKER_THREADS", 1)
+        self.server.record_turn_input = True
+        self.server.input_on_earlier_turn = True
+        host = await self.opened()
+        error = await self.assert_codex_error(host.run_codex_skill("s", "do it"), "codex.command_not_run")
+        thread_id = self.started_thread()
+        self.assertEqual(error.operation, "run_codex_skill")
+        self.assertEqual(error.message, INPUT_NOT_RECORDED_MESSAGE.format(skill="s", seconds=FAR_DEADLINE_SECONDS) + thread_suffix(thread_id))
+        earlier, started = self.server.threads[thread_id].turns
+        self.assertEqual(earlier.items[0]["content"], _skill_input("do it", "s", SKILL_PATH))
+        self.assertEqual(started.items, [])
+        self.assertEqual(self.count("thread/turns/list", lambda params: params["threadId"] == thread_id), INPUT_CHECK_ATTEMPTS)
+        # The one interrupt stops the started turn, not the earlier one.
+        stops = self.server.matching("turn/interrupt", lambda params: params["threadId"] == thread_id)
+        self.assertEqual([request.params["turnId"] for request in stops], [started.turn_id])
+        await self.barrier(host, thread_id)
+        self.assertEqual(self.interrupts(thread_id), 1)
 
     async def test_a_failed_interrupt_does_not_hide_the_miss(self) -> None:
         # EC-29 for skills, INV-35: the interrupt's failure is ignored.
