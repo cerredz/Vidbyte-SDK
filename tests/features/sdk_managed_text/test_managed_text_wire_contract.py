@@ -5,7 +5,7 @@ ROLE IN CODEBASE: Wire-contract layer of tests/features/sdk_managed_text/ (spec 
 ARCHITECTURE NOTE: Each test runs a managed call with only VIDBYTE_API_KEY set and reads the envelope the scripted inner transport received; the adapters are real, so a key the adapter emits shows up exactly as the gateway would see it.
 COMMON MODIFICATION PATTERNS: When backend's allowed lists or an adapter's emitted keys change, update EMITTED_KEYS from the spec's section 9.2 table, never from the adapter's current output.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level (see managed_text_fixtures.py). 2. Do not compare caps with >= or <=: an explicit caller value must arrive exactly.
-KNOWN EDGE CASES: A Gemini generationConfig in extra_body replaces the adapter's one, so its cap disappears by design (EC-8). TextModelConfig accepts a NaN timeout, and max(nan, 630.0) is nan.
+KNOWN EDGE CASES: A Gemini generationConfig in extra_body replaces the adapter's one, so its cap disappears by design (EC-8). TextModelConfig accepts a NaN timeout, and max(nan, 630.0) is nan. Since byok-api-keys, the vendor-direct oracle and the caller-timeout case need TextModelMode.DIRECT; a provider key in AUTO relays through the gateway and gets the floor too (INV-20).
 RELATED DOCS: tests/features/sdk_managed_text/FEATURE.md; docs/spec/managed-generative-models/spec.md sections 6.1 (INV-9, INV-10) and 9.2 ("Keys the SDK emits per dialect").
 TESTS: python -m pytest tests/features/sdk_managed_text/test_managed_text_wire_contract.py
 """
@@ -24,6 +24,16 @@ from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.runners import TextModelRunner
 
 MANAGED_ONLY = {"VIDBYTE_API_KEY": VIDBYTE_KEY}
+RELAY_HEADER = "X-Vidbyte-Provider-Key"
+# byok-api-keys FR-15: oracle keys that each match their own provider (table A), so the DIRECT oracle binds the key to the provider under test.
+ORACLE_KEYS = {
+    ModelProvider.OPENAI: "sk-proj-" + "oracle",
+    ModelProvider.ANTHROPIC: "sk-ant-" + "oracle",
+    ModelProvider.GEMINI: "AQ" + "." + "o" * 40,
+    ModelProvider.XAI: "xai-" + "oracle",
+    ModelProvider.DEEPSEEK: "d-oracle",
+    ModelProvider.KIMI: "k-oracle",
+}
 # The cap field each dialect uses (spec section 9.2 "Cap field per dialect").
 CAP_FIELD = {
     ModelProvider.OPENAI: "max_output_tokens",
@@ -86,11 +96,15 @@ def native_body(transport: ScriptedGateway) -> dict[str, Any]:
 
 
 def byok_body(provider: ModelProvider, run_options: dict[str, Any], **config_options: Any) -> dict[str, Any]:
-    # The body the same config produces with a provider key, as the oracle for the managed body (INV-2).
+    # The body the same config produces vendor-direct with a provider key, as the oracle for the managed body (INV-2; byok-api-keys FR-15: DIRECT).
+    from vidbyte.lib.config import TextModelMode
+
     transport = ScriptedGateway(provider_answer(provider, '{"answer": "Hi"}'))
     with patch.dict(os.environ, {}, clear=True):
-        runner = TextModelRunner(TextModelConfig(provider=provider.value, model=MANAGED_MODELS[provider], api_key="sk-byok-oracle", **config_options), transport=transport)
+        runner = TextModelRunner(TextModelConfig(provider=provider.value, model=MANAGED_MODELS[provider], api_keys=[ORACLE_KEYS[provider]], mode=TextModelMode.DIRECT, **config_options), transport=transport)
         runner.run("Hi", **run_options)
+    if transport.requests[0]["url"] == GATEWAY_URL:
+        raise AssertionError("the DIRECT oracle must go to the vendor, not the gateway")
     return transport.requests[0]["json_body"]
 
 
@@ -135,10 +149,19 @@ class TimeoutFloorTests(unittest.TestCase):
                 transport = managed_call(ModelProvider.OPENAI, timeout_seconds=requested)
                 self.assertEqual([request["url"] for request in transport.requests], [GATEWAY_URL])
                 self.assertEqual(transport.requests[0]["timeout_seconds"], expected)
-        # The floor must be keyed on managed state: a BYOK call beside a Vidbyte key keeps its own 30 s.
+        # byok-api-keys INV-20: a provider key beside a Vidbyte key in AUTO is relayed through the gateway, so it gets the floor too.
+        from vidbyte.lib.config import TextModelMode
+
+        relay = ScriptedGateway(provider_answer(ModelProvider.OPENAI))
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-byok", **MANAGED_ONLY}, clear=True):
+            TextModelRunner(TextModelConfig(provider="openai", model="gpt-5.5", timeout_seconds=30.0), transport=relay).run("Hi")
+        self.assertEqual([request["url"] for request in relay.requests], [GATEWAY_URL])
+        self.assertEqual(relay.requests[0]["timeout_seconds"], 630.0)
+        self.assertEqual({key.lower(): value for key, value in relay.requests[0]["headers"].items()}.get(RELAY_HEADER.lower()), "sk-byok")
+        # The floor must be keyed on gateway use: a DIRECT call beside a Vidbyte key keeps its own 30 s (INV-6).
         byok = ScriptedGateway(provider_answer(ModelProvider.OPENAI))
         with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-byok", **MANAGED_ONLY}, clear=True):
-            TextModelRunner(TextModelConfig(provider="openai", model="gpt-5.5", timeout_seconds=30.0), transport=byok).run("Hi")
+            TextModelRunner(TextModelConfig(provider="openai", model="gpt-5.5", timeout_seconds=30.0, mode=TextModelMode.DIRECT), transport=byok).run("Hi")
         self.assertEqual(byok.requests[0]["timeout_seconds"], 30.0)
         self.assertNotIn(GATEWAY_URL, [request["url"] for request in byok.requests])
 

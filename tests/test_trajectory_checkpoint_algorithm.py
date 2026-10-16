@@ -27,6 +27,7 @@ from typing import Any
 from vidbyte import ContextWindow, ContextWindowAlgorithm, ContextWindowPlacement, ReflexionAlgorithm, TrajectoryCheckpointAlgorithm
 from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
 from vidbyte.agents.runtime import AgentRuntime
+from vidbyte.context.manager import ContextManager
 from vidbyte.context.runtime import ContextWindowRunContext
 from vidbyte.context.primitives import TrajectoryCheckpointContextItem
 from vidbyte.context.templates import ContextWindowRecorder
@@ -254,6 +255,20 @@ class TrajectoryCheckpointAlgorithmTests(unittest.IsolatedAsyncioTestCase):
         template = TrajectoryCheckpointContextWindowTemplate(iterations=2, interval=2)
         self.assertEqual(template.validate(recorder), [])
 
+    async def test_runtime_checkpoint_never_overwrites_note_already_in_manager(self) -> None:
+        # Verify a checkpoint skips an id already registered in a shared manager instead of replacing that note.
+        manager = ContextManager()
+        existing = TrajectoryCheckpointContextItem(primitive_id="trajectory_checkpoint:1", iteration=1, checkpoint_index=1, reasoning_summary="model note", trajectory="t", output="o", score=None, feedback="f")
+        manager.upsert(existing)
+        runner = FakeRunner([FakeResponse("one"), FakeResponse(_JSON_OUTPUT), is_done_response()])
+        runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=Tools(), permission_policy=PermissionPolicy(), algorithm=ContextWindowAlgorithm(name="trajectory_checkpoints", trajectory_checkpoints=TrajectoryCheckpointAlgorithm(interval=1)), context_manager=manager)
+        result = await runtime.arun("task", handle=runner_handle(runner), context=base_context())
+        self.assertIs(manager.get_by_id("trajectory_checkpoint:1"), existing)
+        added = manager.get_by_id("trajectory_checkpoint:2")
+        self.assertIsInstance(added, TrajectoryCheckpointContextItem)
+        self.assertEqual(added.reasoning_summary, "res")
+        self.assertEqual(result.metadata["trajectory_checkpoints"]["checkpoints"][0]["primitive_id"], "trajectory_checkpoint:2")
+
     async def test_inner_context_window_private_manager_created_when_missing(self) -> None:
         # Verify private context manager initialization works when none is specified.
         runner = FakeRunner([FakeResponse("one"), FakeResponse(_JSON_OUTPUT), is_done_response()])
@@ -298,6 +313,22 @@ class TrajectoryCheckpointAlgorithmTests(unittest.IsolatedAsyncioTestCase):
         parsed_md = algo._parse_json_response(raw_markdown)
         self.assertEqual(parsed_md["reasoning_summary"], "res2")
         self.assertEqual(parsed_md["score"], 0.9)
+
+    def test_format_history_reads_gemini_and_anthropic_tool_turns(self) -> None:
+        # [Hidden Failure] Gemini parts and Anthropic tool_use turns reach the side-call history instead of empty lines.
+        gemini = [{"role": "model", "parts": [{"functionCall": {"name": "lookup_population", "args": {"city": "Paris"}}}]}, {"role": "user", "parts": [{"functionResponse": {"name": "lookup_population", "response": {"population": 2100000}}}]}]
+        anthropic = [{"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_1", "name": "lookup_population", "input": {"city": "Paris"}}]}, {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": "2100000"}]}]
+        for include_tool_outputs in (True, False):
+            algorithm = TrajectoryCheckpointAlgorithm(include_tool_outputs=include_tool_outputs)
+            for provider, messages in (("gemini", gemini), ("anthropic", anthropic)):
+                with self.subTest(provider=provider, include_tool_outputs=include_tool_outputs):
+                    history = algorithm._format_history(messages)
+                    self.assertIn("lookup_population", history)
+                    if include_tool_outputs:
+                        self.assertIn("2100000", history)
+                    else:
+                        self.assertIn("[Tool output omitted]", history)
+                        self.assertNotIn("2100000", history)
 
     def test_agentic_parsing_invalid_json_raises_error(self) -> None:
         # Verify malformed LLM responses raise an error.

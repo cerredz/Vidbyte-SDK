@@ -35,12 +35,17 @@ class JevReviewer(BaseAgent):
             name=f"{settings.name}-review",
             system_prompt=Prompts().get(Prompt.JEV_REVIEW_SYSTEM_PROMPT),
             agent_loop_settings=AgentLoopSettings(max_iterations=continual.review_max_iterations, max_tokens=continual.review_max_tokens),
-            api_key=settings.api_key,
+            api_keys=settings.api_keys,
+            model_mode=settings.model_mode,
             provider=settings.provider,
             model_name=settings.model_name,
             temperature=settings.temperature,
             timeout_seconds=settings.timeout_seconds,
             output_schema=JevReviewPayload,
+            # @intent reviewer-keeps-its-fixed-prompt
+            # This agent's prompt is fixed, so it opts out of the
+            # presets of the run it serves.
+            system_prompt_presets=(),
         )
         self.rendered = ""
 

@@ -56,7 +56,7 @@ _REF_PATTERN = re.compile(r"^[a-z][a-z0-9_.-]*$")
 _NAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
 _INTERPOLATION_PATTERN = re.compile(r"\$\{[^}]*\}")
 _SECRET_KEY_SUFFIXES = (
-    "api_key", "token", "password", "secret", "credential",
+    "api_key", "api_keys", "token", "password", "secret", "credential",
 )
 _SECRET_KEY_PREFIXES = (
     "api_key_", "token_", "password_", "secret_", "credential_",

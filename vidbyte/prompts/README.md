@@ -81,6 +81,7 @@ prompt text.
 | Prompt Engineering | `prompt_engineering` | master_prompt | [prompt_engineering.json](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/prompt_engineering.json) |
 | Reflexion | `reflexion` | agent_system_prompt, reflect_system_prompt, reflect_prompt | [reflexion/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/reflexion) |
 | Prompt Templates | `templates` | intent_based, persona, specification | [templates/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/templates) |
+| Working Principles | `working_principles` | system_prompt | [working_principles/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/working_principles/system_prompt.md) |
 | Trajectory Checkpoints | `trajectory_checkpoints` | agentic_summarizer | [trajectory_checkpoints_agentic_summarizer.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/trajectory_checkpoints_agentic_summarizer.md) |
 | Agentic Engineering Skill | `agentic_engineering_skill` | skill | [skills/agentic-engineering.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/skills/agentic-engineering.md) |
 | Prompt Bucket | `prompt_bucket` | skill | [skills/prompt-bucket.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/skills/prompt-bucket.md) |
@@ -422,6 +423,23 @@ Prompts used to generate agentic trajectory checkpoints.
 
 Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/trajectory_checkpoints_agentic_summarizer.md>
 
+#### Working Principles — `working_principles`
+
+An opt-in system-prompt preset, not a standalone prompt: eight example-free
+sentences that make any agent work more ambitiously. They tell it to aim at the
+outcome beyond the literal request, work the way the best professional in the
+field would from the rawest material, hold demanding targets, question
+assumptions and verify with an independent check, borrow the methods of other
+fields that solve the same problem, finish the given task before taking the
+larger move it opens, and carry these principles into every subagent prompt.
+The ideas come from Felix Rieseberg's essay
+[How to be more ambitious: a tutorial for humans with models](https://felixrieseberg.com/how-to-be-more-ambitious-a-tutorial-for-humans-with-models/).
+Attach it with `BaseAgent(..., system_prompt_presets=[SystemPromptPreset.WORKING_PRINCIPLES])`;
+agents started inside that agent's run inherit it. See the agents README,
+"System Prompt Presets", for composition, inheritance, opt-out, and cost.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/working_principles/system_prompt.md>
+
 #### Agentic Engineering Skill — `agentic_engineering_skill`
 
 An on-disk skill file that teaches a model how to extend the agentic engineering
@@ -449,6 +467,7 @@ Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/skills/p
 ## Key Modules
 
 - `catalog.py`: prompt record loading, validation, family lookup, and direct import names.
+- `system_prompt_presets.py`: `SystemPromptPresetComposer`, which reads a preset's text and composes enabled presets into an agent's system prompt.
 - `prompts/`: JSON and Markdown prompt assets packaged with the SDK.
 - `__init__.py`: dynamic direct prompt exports.
 

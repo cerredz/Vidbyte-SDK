@@ -48,6 +48,16 @@ reply = await agent.arun("Summarize user 42.")
 print(reply.content)
 ```
 
+Agents take `vidbyte_api_key`, `api_keys`, and `model_mode`. `api_keys` is a
+plain list of your provider keys in any order. The agent matches the list
+once, at construction, against its own model and every fallback model, and
+refuses a list it cannot match without guessing. Fallbacks, forks, handoffs,
+aggregate children, and Jev children carry that one matching, and each call
+sends only its own provider's key. In the default `TextModelMode.AUTO`, calls
+go through the Vidbyte gateway with the Vidbyte key and relay the matched
+provider key; `model_mode=TextModelMode.DIRECT` calls the provider directly.
+The root README's "Vidbyte-managed text calls" section has the full rules.
+
 For a cooperative, bounded wait, add the built-in to the agent that should
 pause and choose its developer-owned maximum:
 
@@ -185,13 +195,13 @@ agent = Agent(
     provider="openai",
     model_name="gpt-5.2",
     fallback=[
-        "gpt-5-mini",                 # bare name inherits provider, api_key, temperature
+        "gpt-5-mini",                 # bare name inherits provider and temperature; keys come from the agent's api_keys
         "anthropic/claude-sonnet-5",  # provider-prefixed, overrides the provider
     ],
 )
 ```
 
-Entries may also be `FallbackModel` objects when a backup needs its own credentials,
+Entries may also be `FallbackModel` objects when a backup needs its own temperature,
 and the whole chain can be passed as a settings object alongside `AgentLoopSettings`:
 
 ```python
@@ -203,8 +213,9 @@ agent = Agent(
     system_prompt="Answer directly.",
     provider="openai",
     model_name="gpt-5.2",
+    api_keys=[OPENAI_KEY, ANTHROPIC_KEY],  # any order; the backup's key goes here too
     fallback=AgentFallbackSettings(
-        models=[FallbackModel(provider="anthropic", model="claude-sonnet-5", api_key=ANTHROPIC_KEY)],
+        models=[FallbackModel(provider="anthropic", model="claude-sonnet-5", temperature=0.2)],
         enabled=True,
     ),
 )
@@ -233,6 +244,60 @@ Rules worth knowing:
 - Fallback requires the linear runtime and an agent with its own `provider`/`model_name`;
   both are rejected at construction otherwise. `fork()` inherits the chain, and
   `AgentForkSettings(fallback=...)` overrides it.
+
+## System Prompt Presets
+
+A system-prompt preset is a fixed, reviewed paragraph you can attach to any agent
+with one keyword. The first one, `SystemPromptPreset.WORKING_PRINCIPLES`, distills
+Felix Rieseberg's essay
+[How to be more ambitious: a tutorial for humans with models](https://felixrieseberg.com/how-to-be-more-ambitious-a-tutorial-for-humans-with-models/)
+into eight example-free sentences: aim at the outcome beyond the literal request,
+work like the best professional in the field from the rawest material, hold
+demanding targets, test assumptions and verify independently, borrow the methods
+of other fields that solve the same problem, finish the given task before taking
+the larger move, and carry the principles into every subagent prompt. It is off
+unless you turn it on.
+
+```python
+from vidbyte import BaseAgent, SystemPromptPreset
+
+agent = BaseAgent(name="analyst", system_prompt="Answer directly.", provider="openai", model_name="gpt-5.2",
+                  system_prompt_presets=[SystemPromptPreset.WORKING_PRINCIPLES])
+```
+
+To read exactly what it adds, open
+`vidbyte/prompts/prompts/working_principles/system_prompt.md`, or print
+`SystemPromptPresetComposer.compose(agent.system_prompt, agent.system_prompt_presets)`
+(`from vidbyte.prompts import SystemPromptPresetComposer`) to see the exact
+prompt the agent sends.
+
+- **Where it goes.** The runtime sends your prompt, one blank line, the preset,
+  then the agentic-loop note. `agent.system_prompt` itself is unchanged. A
+  prompt that already holds the text does not get a second copy. A per-call
+  `system=` option replaces the whole system prompt, preset included.
+- **Inheritance.** `None` (the default) means "use the presets of the run this
+  agent is started in". While an agent with presets runs, every agent its run
+  starts inherits them: `as_tool()` specialists, agents built inside your tools,
+  and JevAgent's specialists, clones, swarm helpers, bulk workers, and fresh
+  continuations. `fork()`, `export_state()`, and `restore()` keep the field.
+  `JevAgentSettings(system_prompt_presets=[...])` sets it on a JevAgent.
+- **Opting out.** `system_prompt_presets=()` is final: that agent and the
+  agents its run starts get nothing. Fixed-prompt SDK machinery (Jev run state,
+  handoff, reviewer, run-brief writer, and clarifier; `ContinualTraceAgent`;
+  `HandoffAgent`) always opts out. `ContextMinimalFanoutParadigm` roles opt in
+  through `agent_options={"system_prompt_presets": [...]}`, so parallel workers
+  do not stretch past their slices by default.
+- **Not inherited.** An agent built during a run but run after it, an agent run
+  in a raw thread or another event loop, and the `MultiAgent` and
+  `AggregateAgent` facades (set the field on their members instead).
+  `CodexHarnessAgent` is not a `BaseAgent`: pass
+  `SystemPromptPresetComposer.compose(prompt, [SystemPromptPreset.WORKING_PRINCIPLES])`
+  as its `system_prompt`.
+- **Cost.** About 275 input tokens (241 words) on every model call of every
+  agent that has it, children included. The text sits in the stable system
+  prefix, so prompt caching covers it after the first call.
+- **Visibility.** A reply's `metadata["system_prompt_presets"]` lists the
+  presets that applied, and is absent when none did.
 
 ## Durable Sessions
 
@@ -321,6 +386,7 @@ credential and limits.
 - `base.py`: `BaseAgent`, inferred runner construction, tool binding, context assembly, trace setup, and runtime dispatch.
 - `client.py`: namespace client used by `VidbyteSDK().agents`.
 - `fallback.py`: `AgentFallback`, the ordered model chain and the transforms that route a run to the next model.
+- `base.py` also opens the run's `SystemPromptPresetScope` (`vidbyte/lib/system_prompt_presets.py`) and composes presets in `_runtime()` through `SystemPromptPresetComposer` (`vidbyte/prompts/system_prompt_presets.py`).
 - `settings/fallback.py`: `AgentFallbackSettings`, the validated developer-facing chain configuration.
 - `runtimes/`: linear, search, and actor-model runtime components.
 - `handoff.py`: structured handoff generation from a completed agent run.

@@ -347,57 +347,75 @@ class AggregateAgentTests(unittest.IsolatedAsyncioTestCase):
 
     def test_explicit_key_never_reaches_a_proposer_on_another_provider(self) -> None:
         # [Hidden Failure] The host vendor's secret must not be sent to a different vendor's proposer.
+        # byok-api-keys D-13, D-27, INV-24, EC-33: the list is matched once with every proposer's provider as a primary (so the openai proposer
+        # needs its own key); every child carries that one record and each call takes only its own provider's key.
+        deepseek_key, openai_key = "ds-SECRET", "sk-proj-" + "panel"
         agent = AggregateAgent(
             name="panel",
             system_prompt="Answer.",
             provider=ModelProvider.DEEPSEEK,
             model_name="deepseek-v4-flash",
-            api_key="sk-deepseek-SECRET",
+            api_keys=[deepseek_key, openai_key],
             proposers=[("deepseek", "deepseek-v4-flash"), ("openai", "gpt-5.4-mini"), ProposerSpec(" DeepSeek ", "deepseek-v4-pro")],
         )
-        keys = {label: child.runner_config.api_key for label, child in agent._engine._proposers}
-        self.assertEqual(keys["openai:gpt-5.4-mini"], None)
-        self.assertEqual(keys["deepseek:deepseek-v4-flash"], "sk-deepseek-SECRET")
-        self.assertEqual(keys[" DeepSeek :deepseek-v4-pro"], "sk-deepseek-SECRET")
-        self.assertEqual(agent._engine._aggregator.runner_config.api_key, "sk-deepseek-SECRET")
+        record = agent.runner_config.api_keys
+        self.assertEqual((record.key_for("deepseek"), record.key_for("openai")), (deepseek_key, openai_key))
+        children = dict(agent._engine._proposers)
+        self.assertEqual({label: child.runner_config.api_keys for label, child in children.items()}, {label: record for label in children})
+        openai_child, deepseek_child = children["openai:gpt-5.4-mini"], children["deepseek:deepseek-v4-flash"]
+        self.assertEqual(openai_child.runner_config.api_keys.key_for(openai_child.runner_config.provider), openai_key)
+        self.assertEqual(deepseek_child.runner_config.api_keys.key_for(deepseek_child.runner_config.provider), deepseek_key)
+        self.assertEqual(agent._engine._aggregator.runner_config.api_keys, record)
 
     def test_explicit_key_never_reaches_an_aggregator_on_another_provider(self) -> None:
         # [Hidden Failure] An explicit aggregator on another vendor resolves its own credential.
-        agent = AggregateAgent(
-            name="panel",
-            system_prompt="Answer.",
-            provider="deepseek",
-            model_name="deepseek-v4-flash",
-            api_key="sk-deepseek-SECRET",
-            proposers=[("deepseek", "deepseek-v4-flash")],
-            aggregator=("openai", "gpt-5.4-mini"),
-        )
-        self.assertIsNone(agent._engine._aggregator.runner_config.api_key)
-        self.assertEqual(agent._engine._proposers[0][1].runner_config.api_key, "sk-deepseek-SECRET")
+        # byok-api-keys D-27, INV-24 (M-18): the spec-built aggregator's provider is a primary, so it gets its own key from the list, and a
+        # list without an openai key is refused before any request instead of the DeepSeek key reaching the openai aggregator.
+        deepseek_key, openai_key = "ds-SECRET", "sk-proj-" + "panel"
+        panel = {"name": "panel", "system_prompt": "Answer.", "provider": "deepseek", "model_name": "deepseek-v4-flash", "proposers": [("deepseek", "deepseek-v4-flash")], "aggregator": ("openai", "gpt-5.4-mini")}
+        agent = AggregateAgent(**panel, api_keys=[deepseek_key, openai_key])
+        aggregator, proposer = agent._engine._aggregator, agent._engine._proposers[0][1]
+        self.assertEqual(aggregator.runner_config.api_keys, agent.runner_config.api_keys)
+        self.assertEqual(aggregator.runner_config.api_keys.key_for(aggregator.runner_config.provider), openai_key)
+        self.assertEqual(proposer.runner_config.api_keys.key_for(proposer.runner_config.provider), deepseek_key)
+        with self.assertRaises(ConfigurationError) as caught:
+            AggregateAgent(**panel, api_keys=[deepseek_key])
+        message = str(caught.exception)
+        for fact in ("openai", "deepseek", "OPENAI_API_KEY", "api_keys"):
+            self.assertIn(fact, message)
+        self.assertNotIn(deepseek_key, message)
 
     def test_key_without_provider_reaches_every_child_when_all_name_one_provider(self) -> None:
         # [Hidden Assumption] With no host provider, a single-vendor panel's key belongs to that vendor.
+        # byok-api-keys D-13, D-27: the only configured provider is deepseek, so the unproven key is bound to it and every child carries that record.
         agent = AggregateAgent(
             name="panel",
             system_prompt="Answer.",
-            api_key="sk-deepseek-TEAM",
+            api_keys=["sk-deepseek-TEAM"],
             proposers=[("deepseek", "deepseek-v4-flash"), ProposerSpec(" DeepSeek ", "deepseek-v4-pro")],
             aggregator=(ModelProvider.DEEPSEEK.value, "deepseek-v4-flash"),
         )
-        self.assertEqual([child.runner_config.api_key for _, child in agent._engine._proposers], ["sk-deepseek-TEAM", "sk-deepseek-TEAM"])
-        self.assertEqual(agent._engine._aggregator.runner_config.api_key, "sk-deepseek-TEAM")
+        record = agent.runner_config.api_keys
+        self.assertEqual(record.key_for("deepseek"), "sk-deepseek-TEAM")
+        self.assertEqual([child.runner_config.api_keys for _, child in agent._engine._proposers], [record, record])
+        self.assertEqual(agent._engine._aggregator.runner_config.api_keys, record)
 
-    def test_key_without_provider_reaches_no_child_when_providers_are_mixed(self) -> None:
-        # [Hidden Assumption] A key given without a provider over a mixed panel cannot be attributed, so no child sends it.
-        agent = AggregateAgent(
-            name="panel",
-            system_prompt="Answer.",
-            api_key="sk-unknown-SECRET",
-            proposers=[("deepseek", "deepseek-v4-flash"), ("deepseek", "deepseek-v4-pro")],
-            aggregator=("openai", "gpt-5.4-mini"),
-        )
-        self.assertEqual([child.runner_config.api_key for _, child in agent._engine._proposers], [None, None])
-        self.assertIsNone(agent._engine._aggregator.runner_config.api_key)
+    def test_key_without_provider_is_refused_when_providers_are_mixed(self) -> None:
+        # [Hidden Assumption] A key given without a provider over a mixed panel cannot be attributed, so no child may send it.
+        # byok-api-keys INV-25, D-27, EC-33 (M-19): deepseek and openai are both primaries that could take an unproven sk- key, so the panel is
+        # refused when it is built, naming the candidates, instead of guessing or silently dropping the key.
+        with self.assertRaises(ConfigurationError) as caught:
+            AggregateAgent(
+                name="panel",
+                system_prompt="Answer.",
+                api_keys=["sk-unknown-SECRET"],
+                proposers=[("deepseek", "deepseek-v4-flash"), ("deepseek", "deepseek-v4-pro")],
+                aggregator=("openai", "gpt-5.4-mini"),
+            )
+        message = str(caught.exception)
+        for fact in ("api_keys[0]", "deepseek", "openai"):
+            self.assertIn(fact, message)
+        self.assertNotIn("sk-unknown-SECRET", message)
 
 
 # ---------------------------------------------------------------------------

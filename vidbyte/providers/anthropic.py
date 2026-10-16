@@ -75,7 +75,10 @@ class AnthropicProvider:
 
     def _create_messages(self, config: TextModelConfig, prompt: str) -> list[Mapping[str, Any]]:
         # Preserve multi-turn history and put the prompt in front of the tool exchange it provoked.
-        history = [dict(message) for message in config.messages]
+        # @intent history-system-turn-is-a-user-turn
+        # Anthropic accepts only user and assistant roles in messages, so a system turn in the history (the
+        # system_suffix trace placement) is sent as a user turn, as GeminiProvider._gemini_turn already does.
+        history = [{**message, "role": "user"} if message.get("role") == "system" else dict(message) for message in config.messages]
         history.insert(PromptPlacement.index(history, is_call_turn=self._is_tool_use_turn, boundary=config.prompt_index), {"role": "user", "content": prompt})
         return history
 

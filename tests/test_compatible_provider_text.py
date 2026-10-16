@@ -18,6 +18,7 @@ import json
 import unittest
 from collections.abc import Mapping
 
+from vidbyte.lib.config import TextModelMode
 from vidbyte.lib.errors import ProviderRequestError, ProviderResponseError
 from vidbyte.lib.http import HttpResponse, HttpResponseParser
 from vidbyte.providers.compatible import GLMProvider, MiniMaxProvider, MistralProvider
@@ -25,6 +26,8 @@ from vidbyte.providers.openrouter import OpenRouterProvider
 from vidbyte.providers.xai import XAIProvider
 
 _PROVIDERS = (XAIProvider, OpenRouterProvider, MistralProvider)
+# Each fake key carries the prefix its provider's keys use, so the key matcher binds it to that provider.
+_PROVIDER_TEST_KEYS = {XAIProvider: "xai-test-key", OpenRouterProvider: "sk-or-v1-test-key", MistralProvider: "test-key", MiniMaxProvider: "test-key"}
 
 
 class _ScriptedTransport:
@@ -40,7 +43,7 @@ class CompatibleToolCallTextTests(unittest.TestCase):
 
     def _text(self, provider_type: type, message: Mapping[str, object]) -> str:
         transport = _ScriptedTransport({"choices": [{"message": message, "finish_reason": "stop"}]})
-        provider = provider_type(model="test-model", api_key="test-key")
+        provider = provider_type(model="test-model", api_keys=[_PROVIDER_TEST_KEYS[provider_type]], mode=TextModelMode.DIRECT)
         return asyncio.run(provider.run_text(prompt="q", system=None, metadata=None, transport=transport)).text
 
     def test_empty_tool_calls_list_keeps_the_text(self) -> None:
@@ -77,7 +80,7 @@ class CompatibleToolCallTextTests(unittest.TestCase):
         """A GLM reply cut off by network_error raises with its billed usage; "stop" and "model_context_window_exceeded" return the text."""
         usage = {"prompt_tokens": 1200, "completion_tokens": 6}
         message = {"role": "assistant", "content": "The refund window is "}
-        provider = GLMProvider(model="glm-5", api_key="test-key")
+        provider = GLMProvider(model="glm-5", api_keys=["test-key"], mode=TextModelMode.DIRECT)
         with self.assertRaises(ProviderResponseError) as caught:
             asyncio.run(provider.run_text(prompt="q", system=None, metadata=None, transport=_ScriptedTransport({"choices": [{"message": message, "finish_reason": "network_error"}], "usage": usage})))
         self.assertIn("network_error", caught.exception.message)

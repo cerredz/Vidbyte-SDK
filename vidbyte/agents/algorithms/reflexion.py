@@ -57,6 +57,8 @@ class ReflexionRuntimeAlgorithm:
                 trace_context=trace_context,
             )
             last_result = result
+            # Reflect and retry on the model this trial finished on, so a failover sticks.
+            handle = self.runtime._active_handle(handle)
             failed_attempt = self.algorithm.format_failed_attempt(result)
             attempt_summaries.append(self._attempt_summary(result, trial_index=trial_index))
             if not self.algorithm.should_reflect(result, trial_index=trial_index):
@@ -181,6 +183,7 @@ class ReflexionRuntimeAlgorithm:
             strategy_name=result.strategy_name,
             calls=result.calls,
             metadata=metadata,
+            structured=result.structured,
         )
 
 

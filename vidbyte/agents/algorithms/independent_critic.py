@@ -68,6 +68,8 @@ class IndependentCriticRuntimeAlgorithm:
         artifacts = self._resolve_artifacts(context)
         tools = self._resolve_tools()
         candidate = await self._run_candidate(message, handle=handle, context=context, metadata=metadata, options=options, trace_context=trace_context)
+        # Review on the model that produced the candidate, so a producer that failed over is not reviewed by the failed model.
+        handle = self.runtime._active_handle(handle)
         try:
             report, reviewer_result, reviewer_handle = await self._run_review(message, candidate.output, artifacts=artifacts, tools=tools, handle=handle, trace_context=trace_context)
             return self._with_review_metadata(candidate, report, reviewer_result, artifacts=artifacts, tools=tools, handle=reviewer_handle)
@@ -198,6 +200,8 @@ class IndependentCriticRuntimeAlgorithm:
             modality=ModelModality.TEXT,
             provider=self.algorithm.reviewer_provider,
             model=self.algorithm.reviewer_model or "",
+            api_keys=producer_handle.api_keys,
+            mode=producer_handle.model_mode,
         )
         return producer_handle.with_runner(runner, self.algorithm.reviewer_provider)
 

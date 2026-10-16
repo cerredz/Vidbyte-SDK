@@ -43,6 +43,16 @@ skills.materialize(
 - `references/harness-commands.md`: shared command examples for Claude Code,
   Codex CLI, OpenCode, Cursor CLI, Gemini CLI, and unknown platforms.
 
+## System-Prompt Presets
+
+`ContextMinimalFanoutParadigm` (`paradigm.py`) builds its context, splitter,
+adversarial, and implementation agents with `system_prompt_presets=()`, so they
+do not inherit a preset such as `SystemPromptPreset.WORKING_PRINCIPLES` from a
+run that starts the paradigm. Each implementation worker owns one slice that the
+adversarial stage made non-overlapping, and a preset that says "take the larger
+move" would push it into a sibling's slice. Opt a role in through its
+`AgentRoleSettings(agent_options={"system_prompt_presets": [...]})`.
+
 ## Key Modules
 
 - `skills/skills.json`: package-local manifest consumed by `vidbyte.skills`.
