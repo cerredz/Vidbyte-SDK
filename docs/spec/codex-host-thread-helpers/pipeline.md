@@ -24,7 +24,7 @@ Existing-PR run: no new branch, no new PR. Adds to draft PR #1055 on `feat/codex
 | S4 adversarial review | done | 10-16 | 10-16 | reports/S4-review-*.md, S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; 0 Blocker / 4 Major (R-1..R-4) / 11 Minor; 0 refuted, 1 downgraded (R-E2 → R-8); conformance SOUND, conventions + engineering MERGEABLE AFTER FIXES |
 | S5 repair loop | done | 10-16 | 10-16 | reports/S5-repair-1.md, S5-repair-2.md, verify-log.md | iter 2: R-16 ddc432fe; 4/4 green on 867d6f0c; iter 1: converged in 1 iteration: R-2 54f599de, R-3 dd3fe2c2, R-6 c3a3ef98, R-7 4fbc88b6, R-9 549c7475, R-5 3d1ff4e2; pushed ff c81ba632..03e1d7fd; remote 4/4 success on 03e1d7fd |
 | S5 re-review | done | 10-16 | 10-16 | reports/S5-rereview-1.md, S5-rereview-2.md | round 2: SOUND, 0/0/0 — R-16..R-18 hold (own mutants killed), 3 merges exact both ways, net diff intact; round 1: SOUND; R-1..R-9 hold, six mutants each killed by their test, no regression; 0 Blocker / 0 Major / 1 Minor (R-C101) |
-| S6 PR | running | 10-16 | | reports/S6-pr-author.md | |
+| S6 PR | done | 10-16 | 10-16 | reports/S6-pr-author.md | title "feat(harnesses): add CodexHost with agent tools, thread helpers and skill functions"; whole-PR body 59,690 chars, 3 mermaid, ends with the Claude Code line; spec pr-open f13e377b; report 857ebac7; check-runs 4/4 success on 857ebac7; draft, base main, MERGEABLE/BEHIND |
 
 ## Counters and caps
 - S1 review rounds: 2/2 · S5 repair iterations: 4/8 · S5 re-review rounds: 2/2
@@ -73,6 +73,8 @@ Existing-PR run: no new branch, no new PR. Adds to draft PR #1055 on `feat/codex
 - 2026-10-16 — Re-review round 2 of 2 (cap) launched: conformance lens over R-16..R-18 fixes, the three merge resolutions, and every PR-authored commit since 13a61e67.
 
 - 2026-10-16 — Re-review round 2 (cap 2/2) SOUND with 0 findings. Spec set `status: verified`. origin/main moved again to d5c1532d (#1162, middleware/compaction only, 0 conflicts, no shared file): PR is BEHIND but MERGEABLE. Decision: do NOT merge main again (stop chasing a main that moves several times an hour; no overlap; the owner merges with --admin); report it in OPEN ITEMS.
+
+- 2026-10-16 — S6 verified independently: `gh pr view` → OPEN, draft, base main, head feat/codex-host, title without [WIP]; live body 59,758 bytes, 3 ```mermaid blocks, last line the Claude Code line; cited tests exist (5 spot-checked via `git grep "def <name>"`); spec on origin `status: pr-open`, `pr:` set; check-runs 4/4 success on 857ebac7; tree clean; nothing unpushed. S6 OPEN ITEMS are all follow-ups already in the body (mapper never sets thread_id/error_type; `_fifteen_tools_` test name asserts 26; FEATURE.md:128 interrupt-in-flight claim vs timeout-only test (codex-host R-32); six dead CODEX_*_NOTIFICATION constants; R-10..R-12; the inherited test). This final pipeline.md commit is pushed and CI re-dispatched so the head carries its own green checks.
 
 ## User replies (verbatim)
 - none
