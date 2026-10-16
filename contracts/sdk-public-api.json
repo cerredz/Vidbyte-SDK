@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "source": {"repository": "cerredz/Vidbyte-SDK", "commit": "56541481fbb32624aa70ff26b9f4feeb496ea273", "generator": "scripts/generate-sdk-public-api.py"},
+  "source": {"repository": "cerredz/Vidbyte-SDK", "commit": "fc0175dac652f9da580a302b8d4195da0a72286a", "generator": "scripts/generate-sdk-public-api.py"},
   "distribution": "vidbyte-sdk",
   "version": "0.3.1",
   "exports": [
@@ -559,6 +559,7 @@
     "SymmetricFlatTrace",
     "SymmetricSubScoreTrace",
     "SymmetricTimelineTrace",
+    "SystemPromptPreset",
     "TaskBlocker",
     "TaskContextItem",
     "TaskEvidence",
