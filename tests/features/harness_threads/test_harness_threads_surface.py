@@ -1,6 +1,6 @@
 """FILE: tests/features/harness_threads/test_harness_threads_surface.py
 
-PURPOSE: The public surface and the removal of the rejected design: the nine thread functions and their exports (INV-1, D-22), their signatures (§8.5), the StrEnum vocabularies and vendor values (D-11, R-3), the FailureCode tail (INV-22, D-10), the contract constants (§8.5), the old names and files gone (AC-13, INV-19, INV-21) and a side-effect-free `import vidbyte` (INV-23).
+PURPOSE: The public surface and the removal of the rejected design: the twelve thread functions (nine from #1036, three Claude Code ones from claude-thread-functions) and their exports (INV-1, D-22), their signatures (§8.5), the StrEnum vocabularies and vendor values (D-11, R-3), the FailureCode tail, main's 28 harness codes then the nine claude.* codes (INV-22, D-10; claude-thread-functions INV-21), the contract constants (§8.5), the old names and files gone (AC-13, INV-19, INV-21) and a side-effect-free `import vidbyte` (INV-23).
 ROLE IN CODEBASE: Start here when an import, an export list, a failure code or a constant changes. Nothing here starts a vendor stand-in.
 ARCHITECTURE NOTE: The git checks compare against `git merge-base origin/main HEAD` (so a newer main cannot fail them) and skip when origin/main is missing, as in a shallow CI clone. The `import vidbyte` check runs in a fresh interpreter so this suite's own imports cannot hide a side effect.
 FUNCTION INVENTORY: git runs one bounded git command; literal_all reads a module's literal __all__; the test_* functions are one behaviour each.
@@ -27,13 +27,15 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-FUNCTIONS = tuple(f"{verb}_{harness}_thread" for harness in ("grok", "opencode", "muse") for verb in ("run", "continue", "fork"))
+HARNESSES = ("grok", "opencode", "muse", "claude")
+FUNCTIONS = tuple(f"{verb}_{harness}_thread" for harness in HARNESSES for verb in ("run", "continue", "fork"))
 EXPECTED_EXPORTS = {
     *FUNCTIONS, "NativeThreadResult", "GrokThreadConfig", "OpencodeThreadConfig", "MuseThreadConfig",
     "NativeThreadError", "GrokPermissionMode", "GrokReasoningEffort", "MuseReasoningEffort",
+    "ClaudeThreadConfig", "ClaudePermissionMode", "ClaudeReasoningEffort",
 }
 EXPECTED_ENUMS = {
-    "NativeHarness": ["grok", "opencode", "muse"],
+    "NativeHarness": ["grok", "opencode", "muse", "claude"],
     "NativeThreadVerb": ["run", "continue", "fork"],
     "NativeThreadOperation": list(FUNCTIONS),
     "NativeThreadProblem": ["not_installed", "launcher_refused", "launch_failed", "key_rejected", "thread_not_found", "timed_out", "output_too_large", "protocol_mismatch", "run_failed", "wsl_unavailable"],
@@ -44,12 +46,14 @@ EXPECTED_ENUMS = {
     "OpencodeFlag": ["--format", "--dir", "--model", "--agent", "--variant", "--session", "--fork"],
     "MuseFlag": ["--json", "--provider", "--workspace", "--session-id", "--model", "--reasoning-effort", "--user-input-auto-resolve", "--"],
     "WslFlag": ["-d", "-e", "-l", "-q"],
-    "NativeEnvironmentVariable": ["XAI_API_KEY", "GROK_CODE_XAI_API_KEY", "GROK_HOME", "GROK_DISABLE_AUTOUPDATER", "OPENCODE_CONFIG_CONTENT", "OPENCODE_DISABLE_AUTOUPDATE", "META_API_KEY", "MUSE_NO_AUTO_UPDATE", "MUSE_AUTH_PATH", "XDG_CONFIG_HOME", "WSLENV", "VIDBYTE_PEER_MARK"],
+    "NativeEnvironmentVariable": ["XAI_API_KEY", "GROK_CODE_XAI_API_KEY", "GROK_HOME", "GROK_DISABLE_AUTOUPDATER", "OPENCODE_CONFIG_CONTENT", "OPENCODE_DISABLE_AUTOUPDATE", "META_API_KEY", "MUSE_NO_AUTO_UPDATE", "MUSE_AUTH_PATH", "XDG_CONFIG_HOME", "WSLENV", "VIDBYTE_PEER_MARK", "ANTHROPIC_API_KEY", "CLAUDE_CONFIG_DIR", "DISABLE_AUTOUPDATER", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"],
     "MuseMethod": ["initialize", "initialized", "session/read", "session/fork"],
     "OpencodeEventType": ["text", "error"],
 }
 PROBLEMS = ["not_installed", "launcher_refused", "launch_failed", "key_rejected", "thread_not_found", "timed_out", "output_too_large", "protocol_mismatch", "run_failed"]
-NEW_FAILURE_CODES = [f"{harness}.{problem}" for harness in ("grok", "opencode", "muse") for problem in PROBLEMS] + ["muse.wsl_unavailable"]
+HARNESS_FAILURE_CODES = [f"{harness}.{problem}" for harness in ("grok", "opencode", "muse") for problem in PROBLEMS] + ["muse.wsl_unavailable"]
+CLAUDE_FAILURE_CODES = [f"claude.{problem}" for problem in PROBLEMS]
+MAIN_MEMBER_COUNT = 148
 CONTRACT_CONSTANTS = {
     "NATIVE_THREAD_DEFAULT_SECONDS": 1800.0, "NATIVE_THREAD_MAX_SECONDS": 14400.0, "NATIVE_CONTROL_TIMEOUT_SECONDS": 30.0,
     "NATIVE_KILL_WAIT_SECONDS": 1.0, "MUSE_REAP_TIMEOUT_SECONDS": 10.0, "NATIVE_ARGV_PROMPT_MAX_CHARS": 24000,
@@ -119,8 +123,8 @@ def importable(module: str, name: str) -> bool:
     return True
 
 
-def test_native_package_exports_exactly_the_nine_functions_and_their_records(api) -> None:
-    # INV-1 / D-22: one literal __all__ with the nine functions plus the
+def test_native_package_exports_exactly_the_twelve_functions_and_their_records(api) -> None:
+    # INV-1 / D-22: one literal __all__ with the twelve functions plus the
     # records, error and config enums; the subpackages export their
     # three.
     native = api.native
@@ -129,7 +133,7 @@ def test_native_package_exports_exactly_the_nine_functions_and_their_records(api
     assert (native.GrokThreadConfig, native.OpencodeThreadConfig, native.MuseThreadConfig) == (api.GrokThreadConfig, api.OpencodeThreadConfig, api.MuseThreadConfig)
     assert native.NativeThreadError is api.NativeThreadError
     assert (native.GrokPermissionMode, native.GrokReasoningEffort, native.MuseReasoningEffort) == (api.enums.GrokPermissionMode, api.enums.GrokReasoningEffort, api.enums.MuseReasoningEffort)
-    for harness in ("grok", "opencode", "muse"):
+    for harness in HARNESSES:
         subpackage = importlib.import_module(f"vidbyte.harnesses.native.{harness}")
         names = [f"{verb}_{harness}_thread" for verb in ("run", "continue", "fork")]
         assert sorted(subpackage.__all__) == sorted(names), harness
@@ -173,15 +177,20 @@ def test_vocabularies_are_str_enums_carrying_the_vendor_values(lib_api) -> None:
         assert getattr(lib_api.enums_package, cls.__name__) is cls
 
 
-def test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes(lib_api) -> None:
-    # INV-22 / D-10: main's members unchanged in name, value and order;
-    # then GROK_, OPENCODE_, MUSE_ x 9 problems and
+def test_failure_codes_keep_main_and_append_exactly_the_nine_claude_codes(lib_api) -> None:
+    # INV-22 / D-10 (#1036) and claude-thread-functions INV-21 / D-18:
+    # main at the merge base already ends with the 28 harness codes (148
+    # members); this branch keeps every one of them in name, value and
+    # order and appends exactly the nine claude.* codes after
     # MUSE_WSL_UNAVAILABLE.
     members = list(lib_api.FailureCode)
     names = [member.name for member in members]
-    tail = members[names.index("RULE_EVALUATION_FAILED") + 1 :]
-    assert [member.value for member in tail] == NEW_FAILURE_CODES
-    assert [member.name for member in tail] == [code.upper().replace(".", "_") for code in NEW_FAILURE_CODES]
+    harness_tail = members[names.index("RULE_EVALUATION_FAILED") + 1 : names.index("MUSE_WSL_UNAVAILABLE") + 1]
+    assert [member.value for member in harness_tail] == HARNESS_FAILURE_CODES
+    assert [member.name for member in harness_tail] == [code.upper().replace(".", "_") for code in HARNESS_FAILURE_CODES]
+    claude_tail = members[names.index("MUSE_WSL_UNAVAILABLE") + 1 :]
+    assert [member.value for member in claude_tail] == CLAUDE_FAILURE_CODES
+    assert [member.name for member in claude_tail] == [code.upper().replace(".", "_") for code in CLAUDE_FAILURE_CODES]
     base = optional_merge_base()
     if base is None:
         return
@@ -190,9 +199,10 @@ def test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes(lib_api
     tree = ast.parse(shown.stdout)
     enum_class = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "FailureCode")
     main_members = [(node.targets[0].id, node.value.value) for node in enum_class.body if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)]
-    assert len(main_members) == 120
+    assert len(main_members) == MAIN_MEMBER_COUNT
+    assert [value for _, value in main_members[-len(HARNESS_FAILURE_CODES) :]] == HARNESS_FAILURE_CODES
     assert [(member.name, member.value) for member in members[: len(main_members)]] == main_members
-    assert len(members) == len(main_members) + len(NEW_FAILURE_CODES)
+    assert len(members) == len(main_members) + len(CLAUDE_FAILURE_CODES)
 
 
 def test_contract_constants_hold_the_spec_values(lib_api) -> None:

@@ -1,13 +1,13 @@
 """FILE: tests/features/harness_threads/fake_harness.py
 
-PURPOSE: A standard-library stand-in for the three vendor CLIs the harness thread functions drive (`grok --single`, `opencode run --format json`, `muse exec --json` and batch `muse serve`) and for `wsl.exe`, scripted by a JSON scenario file and logging what each process received.
-ROLE IN CODEBASE: Run as a real child process by the harness_threads tests and never imported. The tests hand it to the SDK through GrokThreadConfig.grok_command, OpencodeThreadConfig.opencode_command and MuseThreadConfig.muse_command (spec §13 "Real seams"), or put an `.exe`/script stand-in that runs it first on PATH.
-ARCHITECTURE NOTE: argv[1] is the scenario path; everything after it is what the SDK appended. A stand-in built for `wsl.exe` inserts `--as-wsl` first, and the muse role then sees only the variables that WSLENV names, as the real wsl.exe forwards. Each process logs to its own JSONL file named after its launch number, so logs read back in launch order and never interleave. Credentials are logged as a SHA-256 digest and a length, never as values. Threads persist as files (Grok under GROK_HOME keyed by --cwd, as Grok does; opencode and Muse under the scenario's state folder), so continue and fork behave like the vendors.
-FUNCTION INVENTORY: main dispatches on the scenario's program; run_grok, run_opencode, run_muse_exec, run_muse_serve and run_wsl play one program each; FakeLog writes the per-process log; start_record captures argv, cwd, stdin kind, credential digests, plain variables and skill folders; hold waits for the release file or the hold limit; flood writes past an output cap; echo_text builds the AC-4 secret echo; early_stderr prints the scenario's stderr_text before any mode runs (R-6).
+PURPOSE: A standard-library stand-in for the four vendor CLIs the harness thread functions drive (`grok --single`, `opencode run --format json`, `muse exec --json` and batch `muse serve`, `claude --print --output-format json`) and for `wsl.exe`, scripted by a JSON scenario file and logging what each process received.
+ROLE IN CODEBASE: Run as a real child process by the harness_threads tests and never imported. The tests hand it to the SDK through GrokThreadConfig.grok_command, OpencodeThreadConfig.opencode_command, MuseThreadConfig.muse_command and ClaudeThreadConfig.claude_command (spec §13 "Real seams"), or put an `.exe`/script stand-in that runs it first on PATH.
+ARCHITECTURE NOTE: argv[1] is the scenario path; everything after it is what the SDK appended. A stand-in built for `wsl.exe` inserts `--as-wsl` first, and the muse role then sees only the variables that WSLENV names, as the real wsl.exe forwards. Each process logs to its own JSONL file named after its launch number, so logs read back in launch order and never interleave. Credentials are logged as a SHA-256 digest and a length, never as values. Threads persist as files (Grok under GROK_HOME keyed by --cwd, as Grok does; Claude Code under CLAUDE_CONFIG_DIR/projects/<cwd key>, as Claude Code 2.1.301 does; opencode and Muse under the scenario's state folder), so continue and fork behave like the vendors.
+FUNCTION INVENTORY: main dispatches on the scenario's program; run_grok, run_opencode, run_muse_exec, run_muse_serve, run_claude and run_wsl play one program each; parse_claude reads Claude Code's separate-style options; claude_answer builds Claude Code's one JSON result object for each mode; FakeLog writes the per-process log; start_record captures argv, cwd, stdin kind, credential digests, plain variables and skill folders; hold waits for the release file or the hold limit; flood writes past an output cap; echo_text builds the AC-4 secret echo; early_stderr prints the scenario's stderr_text before any mode runs (R-6).
 COMMON MODIFICATION PATTERNS: Add a scenario field, read it here with .get and a default, and log anything a test must assert on.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import vidbyte or anything outside the standard library. 2. Do not contact the network or run a real vendor CLI or the real wsl.exe. 3. Do not log a credential value; only echo_secrets mode prints one, on purpose, into the vendor's own error output. 4. Never use shell=True.
-KNOWN EDGE CASES: A held process exits by itself after HOLD_LIMIT_SECONDS, so a broken stop cannot leak it for long; its grandchild sleeps GRANDCHILD_SECONDS. opencode reads stdin as bytes and decodes UTF-8 (the Windows console code page is not UTF-8). `muse exec --session-id <unknown>` silently starts a new thread, as Muse 1.0.1 does (spec §15, probe 9).
-RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §9.2, §13, §15
+KNOWN EDGE CASES: A held process exits by itself after HOLD_LIMIT_SECONDS, so a broken stop cannot leak it for long; its grandchild sleeps GRANDCHILD_SECONDS. opencode and claude read stdin as bytes and decode UTF-8 (the Windows console code page is not UTF-8). `muse exec --session-id <unknown>` silently starts a new thread, as Muse 1.0.1 does (spec §15, probe 9). `claude --resume <id>` searches every project folder of its config folder (vendor-facts p07) and, when none holds the id, exits 1 with an empty stdout and Claude Code's marker on stderr (p05); a failed run still prints its JSON object with a session_id (p16), and `subtype` says "success" on a 401. The claude role logs only the names of the ANTHROPIC_*/CLAUDE* variables it saw, never their values.
+RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §9.2, §13, §15; docs/spec/claude-thread-functions/spec.md §9.2, §13; docs/spec/claude-thread-functions/context/vendor-facts.md §4, §6, §7
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads
 """
 
@@ -31,11 +31,27 @@ GRANDCHILD_SECONDS = 30
 POLL_SECONDS = 0.02
 CHUNK_BYTES = 1 << 20
 DEFAULT_FAIL_EXIT = 93
-CREDENTIAL_NAMES = ("XAI_API_KEY", "GROK_CODE_XAI_API_KEY", "META_API_KEY", "DEEPSEEK_API_KEY", "ZAI_API_KEY", "OPENCODE_CONFIG_CONTENT")
+VENDOR_CREDENTIAL_NAMES = ("XAI_API_KEY", "GROK_CODE_XAI_API_KEY", "META_API_KEY", "DEEPSEEK_API_KEY", "ZAI_API_KEY", "OPENCODE_CONFIG_CONTENT")
+CREDENTIAL_NAMES = (*VENDOR_CREDENTIAL_NAMES, "ANTHROPIC_API_KEY")
 PLAIN_NAMES = (
     "GROK_HOME", "GROK_DISABLE_AUTOUPDATER", "OPENCODE_DISABLE_AUTOUPDATE", "MUSE_NO_AUTO_UPDATE",
     "XDG_CONFIG_HOME", "MUSE_AUTH_PATH", "WSLENV", "VIDBYTE_PEER_MARK",
+    "CLAUDE_CONFIG_DIR", "DISABLE_AUTOUPDATER", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "CLAUDE_CODE_GIT_BASH_PATH", "VIDBYTE_UNRELATED_SETTING",
 )
+CLAUDE_VALUED = ("--output-format", "--setting-sources", "--permission-mode", "--model", "--effort", "--resume")
+CLAUDE_SWITCHES = ("--print", "--fork-session")
+# What Claude Code 2.1.301 accepts for --permission-mode and --effort
+# (vendor-facts f2, f2b); the SDK may pass only some of them.
+CLAUDE_PERMISSION_MODES = ("default", "manual", "acceptEdits", "dontAsk", "plan", "auto", "bypassPermissions")
+CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+CLAUDE_NAME_PREFIXES = ("ANTHROPIC_", "CLAUDE")
+CLAUDE_UUID_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+CLAUDE_NOT_FOUND = "No conversation found with session ID: {session}"
+CLAUDE_NO_INPUT = "Error: Input must be provided either through stdin or as a prompt argument when using --print"
+CLAUDE_KEY_REJECTED = "Invalid API key · Fix external API key"
+CLAUDE_NOT_LOGGED_IN = "Not logged in · Please run /login"
+CLAUDE_BUDGET_TEXT = "Reached maximum budget ($0.00001)"
+CLAUDE_ERROR_EXIT = 1
 GROK_SWITCHES = ("--fork-session",)
 OPENCODE_SWITCHES = ("--fork",)
 MUSE_VALUED = ("--provider", "--workspace", "--session-id", "--model", "--reasoning-effort")
@@ -233,14 +249,15 @@ def flood(total_bytes: int) -> None:
         os._exit(0)
 
 
-def echo_text(scenario: dict[str, Any], args: list[str], stdin_text: str, env: dict[str, str]) -> str:
+def echo_text(scenario: dict[str, Any], args: list[str], stdin_text: str, env: dict[str, str], names: tuple[str, ...] = VENDOR_CREDENTIAL_NAMES) -> str:
     # AC-4: everything the child was given, credentials included, as one
     # vendor error text. The first copy of the key sits near the start;
     # a run of back-to-back copies straddles the vendor-text cap, so
     # capping before scrubbing would leave a fragment of the key behind.
+    # Each role echoes only its own credential names.
     key = scenario["echo_key"]
     cap = scenario.get("echo_cap", 1000)
-    head = f"echo key {key} argv {' '.join(args)} stdin {stdin_text} env {' '.join(env.get(name, '') for name in CREDENTIAL_NAMES)} "
+    head = f"echo key {key} argv {' '.join(args)} stdin {stdin_text} env {' '.join(env.get(name, '') for name in names)} "
     filler = "x" * max(0, cap - 100 - len(head))
     return head + filler + key * 6
 
@@ -613,6 +630,126 @@ def run_muse(scenario: dict[str, Any], args: list[str], *, via_wsl: bool, launch
     sys.exit(2)
 
 
+def parse_claude(args: list[str]) -> tuple[dict[str, str], list[str], list[str]]:
+    # Separate style only: `--flag value` or a bare switch. Anything
+    # else (a joined `--flag=value`, a prompt operand, an unknown flag)
+    # is stray, which Claude Code would refuse or read as the prompt.
+    options: dict[str, str] = {}
+    switches: list[str] = []
+    stray: list[str] = []
+    index = 0
+    while index < len(args):
+        element = args[index]
+        if element in CLAUDE_VALUED and index + 1 < len(args):
+            options[element] = args[index + 1]
+            index += 2
+            continue
+        if element in CLAUDE_SWITCHES:
+            switches.append(element)
+        else:
+            stray.append(element)
+        index += 1
+    return options, switches, stray
+
+
+def claude_answer(scenario: dict[str, Any], mode: str, session: str, text: str, env: dict[str, str], args: list[str], stdin_text: str) -> tuple[dict[str, Any] | list[Any], int]:
+    # The one JSON value Claude Code prints with --output-format json,
+    # and its exit status (vendor-facts §6): success, the 401 shape
+    # (subtype "success" on a failure), the budget shape (errors, no
+    # result), a generic in-run error, or the not-logged-in shape a
+    # child without ANTHROPIC_API_KEY gets.
+    answer: dict[str, Any] = {
+        "type": "result", "subtype": "success", "is_error": False, "api_error_status": None, "duration_ms": 1200, "duration_api_ms": 15,
+        "num_turns": 1, "result": text, "stop_reason": "end_turn", "session_id": session, "total_cost_usd": 0.00014,
+        "permission_denials": [], "terminal_reason": "completed", "uuid": new_id(),
+    }
+    status = CLAUDE_ERROR_EXIT
+    if "ANTHROPIC_API_KEY" not in env:
+        answer.update(is_error=True, terminal_reason="api_error", result=CLAUDE_NOT_LOGGED_IN, total_cost_usd=0)
+    elif mode == "key_rejected":
+        answer.update(is_error=True, api_error_status=scenario.get("status", 401), terminal_reason="api_error", result=CLAUDE_KEY_REJECTED, stop_reason="stop_sequence", total_cost_usd=0)
+    elif mode == "api_error":
+        answer.update(is_error=True, api_error_status=scenario.get("status"), terminal_reason="api_error", result=scenario["vendor_text"], total_cost_usd=0)
+    elif mode == "budget":
+        answer.update(is_error=True, subtype="error_max_budget_usd", terminal_reason="budget_exhausted", errors=scenario.get("errors", [CLAUDE_BUDGET_TEXT]))
+        answer.pop("result")
+    elif mode == "echo_secrets":
+        answer.update(is_error=True, api_error_status=500, terminal_reason="api_error", result=echo_text(scenario, args, stdin_text, env, ("ANTHROPIC_API_KEY",)))
+    else:
+        status = 0
+    answer.update(scenario.get("override", {}))
+    for member in scenario.get("drop", []):
+        answer.pop(member, None)
+    return ([answer] if mode == "array" else answer), scenario.get("exit_code", status)
+
+
+def run_claude(scenario: dict[str, Any], args: list[str]) -> None:
+    env = dict(os.environ)
+    log = FakeLog(scenario["log_dir"], "claude")
+    kind = stdin_kind()
+    stdin_text = read_stdin_text() if kind in ("pipe", "file") else ""
+    options, switches, stray = parse_claude(args)
+    config_dir = env.get("CLAUDE_CONFIG_DIR")
+    names = sorted(name for name in env if name.upper().startswith(CLAUDE_NAME_PREFIXES))
+    start_record(log, "claude", args, env, via_wsl=False, skills_folder=None if config_dir is None else Path(config_dir) / "skills", extra={"options": options, "switches": switches, "stray": stray, "stdin_text": stdin_text, "claude_names": names})
+    mode = scenario.get("mode", "ok")
+    if scenario.get("grandchild"):
+        start_grandchild(log)
+    early_stderr(scenario)
+    if stray or "--print" not in switches or options.get("--output-format") != "json":
+        write_err(f"error: fake claude: unexpected arguments {stray!r}; --print and --output-format json are required\n")
+        sys.exit(2)
+    if options.get("--permission-mode", "default") not in CLAUDE_PERMISSION_MODES or options.get("--effort", "low") not in CLAUDE_EFFORTS:
+        write_err(f"error: fake claude: invalid option value in {args!r}\n")
+        sys.exit(1)
+    if not stdin_text.strip():
+        write_err(CLAUDE_NO_INPUT + "\n")
+        sys.exit(1)
+    if config_dir is None:
+        write_err("fake claude: CLAUDE_CONFIG_DIR is not set, so this run would use the user's own ~/.claude\n")
+        sys.exit(4)
+    if mode == "hold":
+        log.write("held", outcome=hold(scenario))
+    if mode == "flood":
+        flood(scenario["flood_bytes"])
+        sys.exit(0)
+    if mode == "garbage":
+        write_out("Claude Code finished, but this line is not JSON\n")
+        sys.exit(0)
+    if mode == "stderr_exit":
+        write_err(scenario["vendor_text"] + "\n")
+        sys.exit(scenario.get("exit_code", DEFAULT_FAIL_EXIT))
+    projects = Path(config_dir) / "projects"
+    resume = options.get("--resume")
+    forking = "--fork-session" in switches
+    found = [path for path in sorted(projects.glob("*/*.jsonl")) if path.stem == resume] if resume is not None else []
+    if resume is not None and not found:
+        write_err(CLAUDE_NOT_FOUND.format(session=resume) + "\n")
+        sys.exit(1)
+    if resume is not None and not forking:
+        session = {"continue_other_id": new_id(), "continue_upper_id": resume.upper()}.get(mode, resume)
+    elif resume is not None:
+        session = resume if mode == "fork_returns_source" else new_id()
+    else:
+        session = new_id()
+    log.write("session", session=session)
+    # The transcript, keyed by the working folder as Claude Code keys
+    # it; a fork starts from a copy of its source's history.
+    folder = projects / re.sub(r"[^A-Za-z0-9]", "-", os.getcwd())
+    folder.mkdir(parents=True, exist_ok=True)
+    history = found[0].read_text(encoding="utf-8") if found and forking else ""
+    transcript = folder / f"{session}.jsonl"
+    with transcript.open("a", encoding="utf-8") as handle:
+        handle.write(history + json.dumps({"prompt_chars": len(stdin_text)}) + "\n")
+    text = "c" * scenario["text_chars"] if mode == "long_text" else scenario.get("text", f"claude answer to: {stdin_text}")
+    if mode == "echo_secrets":
+        write_err(echo_text(scenario, args, stdin_text, env, ("ANTHROPIC_API_KEY",)) + "\n")
+    answer, status = claude_answer(scenario, mode, session, text, env, args, stdin_text)
+    log.write("answer", session=session, text_chars=len(text), resumed=resume, forked=forking, exit_code=status)
+    write_out(json.dumps(answer, ensure_ascii=False) + "\n")
+    sys.exit(status)
+
+
 def reap(scenario: dict[str, Any], args: list[str]) -> None:
     # `wsl.exe -d <distro> -e sh -s <mark>` with the reap script on
     # stdin: log it and end the processes carrying the mark.
@@ -675,6 +812,8 @@ def main() -> None:
         run_opencode(scenario, args)
     if program == "muse":
         run_muse(scenario, args, via_wsl=False, launcher_args=[])
+    if program == "claude":
+        run_claude(scenario, args)
     write_err(f"fake harness: unknown program {program!r}\n")
     sys.exit(2)
 

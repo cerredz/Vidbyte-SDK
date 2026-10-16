@@ -2,12 +2,12 @@
 
 PURPOSE: Shared offline fixtures for the harness_threads pack: lazy imports of the spec §8.5 contract names, a sandbox with a redirected user home, a workspace, skill folders and an empty PATH folder, the scripted stand-in (fake_harness.py) with its log reader, `.exe`/script stand-ins for PATH lookups, the INV-5 error check, and process liveness checks for both platforms.
 ROLE IN CODEBASE: Loaded by pytest for every module in tests/features/harness_threads/. The stand-in runs as a real child process through the config records' <harness>_command fields (spec §13 "Real seams"); nothing in the thread functions, CliRunner or the filesystem is mocked.
-ARCHITECTURE NOTE: Every vidbyte import happens inside a fixture (lib_api, api), so a missing module fails each test at setup instead of aborting collection of the whole suite; lib_api needs only the vidbyte.lib names, so the process, argv and record tests can pass before the harness modules land. The sandbox is made by tmp_path_factory.mktemp("case") so no path holds a harness name, and the user home and the workspace are sibling folders (spec §13, R-17). PATH holds only the sandbox's own bin folder, so no test can reach a real grok, opencode, muse or wsl.exe.
-FUNCTION INVENTORY: lib_api and api return namespaces of contract names; Sandbox builds the folders, scenarios, stand-ins and snapshots and reads the stand-in logs; sandbox builds one per test with the home, PATH and temp folder redirected; call runs one thread function against the stand-in; check_error asserts the INV-5 attributes and message order; fast_stop shrinks NATIVE_KILL_WAIT_SECONDS; wait_until polls with a deadline; process_alive reports liveness on win32 and POSIX; launcher_bytes finds pip's console-script launcher for `.exe` stand-ins.
-COMMON MODIFICATION PATTERNS: Add a stand-in behaviour as a scenario field read by fake_harness.py; add a fixture here only when two or more modules in this pack need it.
-WHAT NOT TO DO IN THIS FILE: 1. Do not stub the thread functions, CliRunner or the filesystem; a missing feature must stay red. 2. Do not leave PATH, USERPROFILE or HOME pointing at the developer's machine: the Grok fallback is `~/.grok/bin/grok.exe`, which exists on the author's machine. 3. Never name the WSL distro MuseUbuntu1; the stand-in distro is FAKE_DISTRO.
-KNOWN EDGE CASES: pip's distlib `t64.exe` is the launcher behind every `.exe` stand-in; tests that need one skip when pip lacks it. Liveness on win32 uses OpenProcess/GetExitCodeProcess (STILL_ACTIVE 259). Path text in messages is compared in both native and POSIX spelling, and case-insensitively on win32 (shutil.which returns PATHEXT suffixes in upper case).
-RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §6, §8.5, §9, §13
+ARCHITECTURE NOTE: Every vidbyte import happens inside a fixture (lib_api, api), so a missing module fails each test at setup instead of aborting collection of the whole suite; lib_api needs only the vidbyte.lib names, so the process, argv and record tests can pass before the harness modules land. The api namespace resolves each thread function and config record only when a test asks for it (ThreadFunctions, ConfigRecords, ContractNames), so a harness that has not landed yet (Claude Code, spec claude-thread-functions) fails its own tests with an AttributeError naming the missing name and leaves the other harnesses' tests green. The sandbox is made by tmp_path_factory.mktemp("case") so no path holds a harness name, and the user home and the workspace are sibling folders (spec §13, R-17). PATH holds only the sandbox's own bin folder, so no test can reach a real grok, opencode, muse, claude or wsl.exe, and the sandbox drops every ANTHROPIC_*/CLAUDE* variable of the shell running the tests (claude-thread-functions §13: that shell carries a real key and its own Claude Code session).
+FUNCTION INVENTORY: lib_api and api return namespaces of contract names (ContractNames looks a name it lacks up in the records module; ThreadFunctions and ConfigRecords look functions and config records up on first use); private_home and private_config give the private Grok home and Claude Code config folder of a workspace; Sandbox builds the folders, scenarios, stand-ins and snapshots and reads the stand-in logs; sandbox builds one per test with the home, PATH, temp folder and Anthropic variables redirected; call runs one thread function against the stand-in; check_error asserts the INV-5 attributes and message order; fast_stop shrinks NATIVE_KILL_WAIT_SECONDS; wait_until polls with a deadline; process_alive reports liveness on win32 and POSIX; launcher_bytes finds pip's console-script launcher for `.exe` stand-ins.
+COMMON MODIFICATION PATTERNS: Add a stand-in behaviour as a scenario field read by fake_harness.py; add a fixture here only when two or more modules in this pack need it. A new harness is one entry in HARNESSES, LABELS, COMMAND_FIELDS and CONFIG_NAMES.
+WHAT NOT TO DO IN THIS FILE: 1. Do not stub the thread functions, CliRunner or the filesystem; a missing feature must stay red. 2. Do not leave PATH, USERPROFILE or HOME pointing at the developer's machine: the Grok fallback is `~/.grok/bin/grok.exe` and the Claude Code fallback `~/.local/bin/claude.exe`, which exist on the author's machine. 3. Never name the WSL distro MuseUbuntu1; the stand-in distro is FAKE_DISTRO. 4. Never let a real ANTHROPIC_API_KEY, CLAUDE_CONFIG_DIR or CLAUDECODE reach a stand-in; a test that needs one sets a fake value itself.
+KNOWN EDGE CASES: pip's distlib `t64.exe` is the launcher behind every `.exe` stand-in; tests that need one skip when pip lacks it. Liveness on win32 uses OpenProcess/GetExitCodeProcess (STILL_ACTIVE 259). Path text in messages is compared in both native and POSIX spelling, and case-insensitively on win32 (shutil.which returns PATHEXT suffixes in upper case). Environment names are upper case on win32, so the Anthropic variables are matched on the upper-cased name.
+RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §6, §8.5, §9, §13; docs/spec/claude-thread-functions/spec.md §6, §8.5, §9.2, §13
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads
 """
 
@@ -33,11 +33,12 @@ import pytest
 PACK = Path(__file__).resolve().parent
 REPO_ROOT = PACK.parents[2]
 FAKE = PACK / "fake_harness.py"
-HARNESSES = ("grok", "opencode", "muse")
+HARNESSES = ("grok", "opencode", "muse", "claude")
 VERBS = ("run", "continue", "fork")
-LABELS = {"grok": "Grok Build", "opencode": "opencode", "muse": "Muse Code"}
-COMMAND_FIELDS = {"grok": "grok_command", "opencode": "opencode_command", "muse": "muse_command"}
-CONFIG_NAMES = {"grok": "GrokThreadConfig", "opencode": "OpencodeThreadConfig", "muse": "MuseThreadConfig"}
+LABELS = {"grok": "Grok Build", "opencode": "opencode", "muse": "Muse Code", "claude": "Claude Code"}
+COMMAND_FIELDS = {"grok": "grok_command", "opencode": "opencode_command", "muse": "muse_command", "claude": "claude_command"}
+CONFIG_NAMES = {"grok": "GrokThreadConfig", "opencode": "OpencodeThreadConfig", "muse": "MuseThreadConfig", "claude": "ClaudeThreadConfig"}
+CLAUDE_NAME_PREFIXES = ("ANTHROPIC_", "CLAUDE")
 OPENCODE_MODEL = "deepseek/deepseek-v4-pro"
 API_KEY = "vbk-test-0123456789abcdef0123456789abcdef"
 PROMPT = "List the top-level folders."
@@ -64,6 +65,48 @@ def private_home(home: Path, workspace: Path) -> Path:
     # sha256(normcase(resolved workspace))>.
     key = hashlib.sha256(os.path.normcase(str(workspace.resolve())).encode("utf-8")).hexdigest()[:16]
     return home / ".vidbyte" / "grok-homes" / key
+
+
+def private_config(home: Path, workspace: Path) -> Path:
+    # claude-thread-functions INV-13: <home>/.vidbyte/claude-configs/
+    # <first 16 hex of sha256(normcase(resolved workspace))>.
+    key = hashlib.sha256(os.path.normcase(str(workspace.resolve())).encode("utf-8")).hexdigest()[:16]
+    return home / ".vidbyte" / "claude-configs" / key
+
+
+class ContractNames(SimpleNamespace):
+    """A namespace of contract names that looks a name it lacks up in the records module."""
+
+    def __getattr__(self, name: str) -> Any:
+        # Only called for a missing attribute; a record that has not
+        # landed fails with the records module's own AttributeError.
+        records = vars(self).get("records")
+        if records is None or name.startswith("__"):
+            raise AttributeError(name)
+        return getattr(records, name)
+
+
+class ThreadFunctions(dict):
+    """Thread functions by (harness, verb), looked up on first use."""
+
+    def __init__(self, native: Any) -> None:
+        super().__init__()
+        self.native = native
+
+    def __missing__(self, key: tuple[str, str]) -> Any:
+        harness, verb = key
+        return getattr(self.native, f"{verb}_{harness}_thread")
+
+
+class ConfigRecords(dict):
+    """Config record classes by harness, looked up on first use."""
+
+    def __init__(self, records: Any) -> None:
+        super().__init__()
+        self.records = records
+
+    def __missing__(self, harness: str) -> Any:
+        return getattr(self.records, CONFIG_NAMES[harness])
 
 
 def wsl_form(path: Path) -> str:
@@ -203,16 +246,20 @@ class Sandbox:
     def grok_home(self, workspace: Path | None = None) -> Path:
         return private_home(self.home, workspace or self.workspace)
 
+    def claude_config(self, workspace: Path | None = None) -> Path:
+        return private_config(self.home, workspace or self.workspace)
+
 
 @pytest.fixture
 def lib_api() -> SimpleNamespace:
     # vidbyte.lib names only (spec §8.5), imported lazily so a missing
-    # module fails setup, not collection.
+    # module fails setup, not collection. A record that has not landed
+    # yet (ClaudeThreadConfig) is looked up when a test asks for it.
     records = importlib.import_module("vidbyte.lib.dataclasses.native_threads")
     process_records = importlib.import_module("vidbyte.lib.dataclasses.process")
     process = importlib.import_module("vidbyte.lib.process")
     errors = importlib.import_module("vidbyte.lib.errors")
-    return SimpleNamespace(
+    return ContractNames(
         records=records,
         NativeThreadRequest=records.NativeThreadRequest,
         NativeThreadResult=records.NativeThreadResult,
@@ -240,11 +287,11 @@ def lib_api() -> SimpleNamespace:
 
 @pytest.fixture
 def api(lib_api: SimpleNamespace) -> SimpleNamespace:
-    # The nine public functions (spec §8.5), imported lazily from
-    # vidbyte.harnesses.native.
+    # The public functions (spec §8.5), imported lazily from
+    # vidbyte.harnesses.native and looked up per (harness, verb) when a
+    # test calls one, so a missing harness fails only its own tests.
     native = importlib.import_module("vidbyte.harnesses.native")
-    functions = {(harness, verb): getattr(native, f"{verb}_{harness}_thread") for harness in HARNESSES for verb in VERBS}
-    return SimpleNamespace(**vars(lib_api), native=native, functions=functions, configs={harness: getattr(lib_api, CONFIG_NAMES[harness]) for harness in HARNESSES})
+    return ContractNames(**vars(lib_api), native=native, functions=ThreadFunctions(native), configs=ConfigRecords(lib_api.records))
 
 
 @pytest.fixture
@@ -256,6 +303,12 @@ def sandbox(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.Monkey
     monkeypatch.setenv("HOME", str(box.home))
     monkeypatch.setenv("PATH", str(box.bin))
     monkeypatch.setattr(tempfile, "tempdir", str(box.tmp))
+    # claude-thread-functions §13: the shell running these tests may
+    # hold a real Anthropic key and its own Claude Code session
+    # (CLAUDECODE, CLAUDE_CONFIG_DIR). No stand-in may see them; a
+    # test that needs such a variable sets a fake value itself.
+    for name in [name for name in os.environ if name.upper().startswith(CLAUDE_NAME_PREFIXES)]:
+        monkeypatch.delenv(name)
     return box
 
 
@@ -411,4 +464,5 @@ def pack() -> SimpleNamespace:
         FAKE_DISTRO=FAKE_DISTRO, OTHER_DISTRO=OTHER_DISTRO, REPO_ROOT=REPO_ROOT, FAKE=FAKE, CALL_TIMEOUT_SECONDS=CALL_TIMEOUT_SECONDS,
         COMMAND_FIELDS=COMMAND_FIELDS, SLACK_SECONDS=SLACK_SECONDS, key_digest=key_digest, private_home=private_home, wsl_form=wsl_form,
         path_spellings=path_spellings, find_in_order=find_in_order, launcher_bytes=launcher_bytes,
+        private_config=private_config, CLAUDE_NAME_PREFIXES=CLAUDE_NAME_PREFIXES,
     )
