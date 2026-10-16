@@ -14,8 +14,8 @@ started: 2026-10-16 16:10
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-16 16:10 | 2026-10-16 16:30 | reports/S0-scout.md | base_commit 0f2aeb48; code-map.md (4 §, 14 contradictions) |
-| S1 spec + review | running | 2026-10-16 16:35 | | reports/S1-spec-author.md, reports/S1-spec-review.md | spec r1 @a43f5423 (37 rows, 23 new files); review round 1 running |
-| S2 tests | pending | | | | |
+| S1 spec + review | done | 2026-10-16 16:35 | 2026-10-16 18:40 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-2.md | spec r3 approved @d2746a4d; R1 SOUND WITH FIXES (7 applied), R2 SOUND WITH FIXES (6 applied) |
+| S2 tests | running | 2026-10-16 18:45 | | reports/S2-test-author.md | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
@@ -40,6 +40,9 @@ started: 2026-10-16 16:10
 - 2026-10-16 18:05 — Spec r2 @66c1b2d8: all R-1..R-7 accepted (§16 rows present). R-3 changed §8.5/§12 → launched scoped round-2 reviewer (last allowed round), report reports/S1-spec-review-2.md, findings numbered from R-8.
 
 - 2026-10-16 18:25 — S1 review round 2: SOUND WITH FIXES (0 Blocker, 3 Major R-8..R-10, 3 Minor R-11..R-13); R-1..R-7 confirmed resolved. Resumed author for r3 with instruction to set status: approved (two rounds = approval; cap reached, disputes become Q-n with defaults).
+
+- 2026-10-16 18:40 — Spec r3 approved (status: approved, @d2746a4d). Q-1..Q-11 all take their stated defaults (all "No / not built"): Q-1 no sync run twin; Q-2 one recipient only; Q-3 no message length cap; Q-4 fixed allow-all permissions + SDK defaults; Q-5 no usage on result; Q-6 TOOL_CALLED carries name+status only; Q-7 contain failures per agent; Q-8 keep full events tuple; Q-9 no shared-workplace guard; Q-10 five root exports; Q-11 private root-cause helper. Summary printed to the user; continuing to S2 without waiting.
+- 2026-10-16 18:45 — Environment: the global Python 3.11.0 has an EDITABLE vidbyte-sdk install pointing at the MAIN checkout, plus pytest 8.3.5 and pytest-asyncio 1.3.0. Do NOT run `pip install -e` in the worktree (it would repoint the shared global install away from main for every other session). Run everything with `PYTHONPATH=$(pwd)` from the worktree root (verified: vidbyte imports from the worktree that way).
 
 ## User replies (verbatim)
 - 2026-10-16 16:05 — answers to four clarifying questions: "One shared folder (Recommended)"; "Stay alive until quiet (Recommended)"; "Shared goal + per-agent prompts (Recommended)"; "Callback + list on result (Recommended)".
