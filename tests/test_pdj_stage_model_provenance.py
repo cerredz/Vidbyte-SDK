@@ -4,11 +4,13 @@ PURPOSE:
     Proves a prosecutor/defender/judge stage that inherits the producer's
     transport records the producer's model, not None, in its stage record,
     and that a stage on its own provider and model builds its runner with the
-    agent's matched keys and mode.
+    agent's matched keys and mode. After the producer fails over, inherited
+    stages run on and record the fallback model, not the failed primary.
 ROLE IN CODEBASE:
     Regression tests for runner_model_name in
-    vidbyte/lib/agents/prosecutor_defender_judge.py and for
-    DebateStageRuntimeFactory._stage_handle, which passes its result on.
+    vidbyte/lib/agents/prosecutor_defender_judge.py, for
+    DebateStageRuntimeFactory._stage_handle, which passes its result on, and
+    for the handle ProsecutorDefenderJudgeRuntimeAlgorithm.arun gives the stages.
 ARCHITECTURE NOTE:
     A real TextModelRunner with a dummy BYOK key is built offline; no request
     is sent, so no provider network call or real key is needed.
@@ -27,11 +29,14 @@ TESTS:
 
 from __future__ import annotations
 
+import json
 import os
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from vidbyte import ContextWindow
+from vidbyte.agents import AgentFallback, AgentRuntime, FallbackModel
 from vidbyte.agents.algorithms.prosecutor_defender_judge import DebateStageRuntimeFactory, _StageInvocationCounter
 from vidbyte.context.algorithms.prosecutor_defender_judge import DebateStageSettings
 from vidbyte.lib.agents.prosecutor_defender_judge import runner_model_name
@@ -39,7 +44,10 @@ from vidbyte.lib.config import TextModelConfig, TextModelMode
 from vidbyte.lib.constants.jev import PROVIDER_API_KEY_ENV_VARS, VIDBYTE_API_KEY_ENV_VAR
 from vidbyte.lib.dataclasses.agents import ProviderKeys
 from vidbyte.lib.dataclasses.runner import RunnerHandle
+from vidbyte.lib.errors import ProviderRequestError
 from vidbyte.lib.runners.text import TextModelRunner
+from vidbyte.tools import Tools
+from vidbyte.tools.security import PermissionPolicy
 
 
 def _text_runner() -> TextModelRunner:
@@ -99,6 +107,60 @@ class ExplicitStageKeysTests(unittest.TestCase):
         counted = _StageInvocationCounter(self.handle).handle()
         self.assertIs(counted.api_keys, self.keys)
         self.assertIs(counted.model_mode, TextModelMode.DIRECT)
+
+
+# One allegation, its conceded defense, and the judge's decision, each citing text the stage can see.
+_ALLEGATIONS = {"summary": "Unsupported.", "allegations": [{"severity": "minor", "category": "accuracy", "claim": "No source.", "candidate_excerpt": "FINAL", "evidence": [{"source": "original_task", "source_name": "original_task", "excerpt": "Paris", "support": "The task."}], "recommended_fix": "Cite."}]}
+_DEFENSES = {"responses": [{"allegation_id": "ALG-001", "position": "concede", "response": "No evidence.", "evidence": [{"source": "allegation", "source_name": "ALG-001", "excerpt": "No source", "support": "Restating."}]}]}
+_DECISIONS = {"decisions": [{"allegation_id": "ALG-001", "decision": "survives", "reason_code": "conceded", "rationale": "Conceded."}]}
+
+
+class _ScriptedRunner:
+    """A model that answers from a script, or raises a provider outage on every call when it is down."""
+
+    def __init__(self, model: str, replies: tuple[str, ...] = (), *, down: bool = False) -> None:
+        self.model, self.replies, self.down = model, list(replies), down
+        self.prompts: list[str] = []
+
+    def model_name(self) -> str:
+        return self.model
+
+
+async def _invoke(runner: _ScriptedRunner, prompt: str, **kwargs: object) -> str:
+    runner.prompts.append(prompt)
+    if runner.down:
+        raise ProviderRequestError("primary is down", provider="deepseek", status_code=503)
+    return runner.replies.pop(0)
+
+
+class _BackupChain(AgentFallback):
+    """A deepseek -> openai chain whose backup is a scripted runner, so no real runner is built."""
+
+    def __init__(self, backup: _ScriptedRunner) -> None:
+        super().__init__([FallbackModel(provider="deepseek", model="deepseek-chat"), FallbackModel(provider="openai", model=backup.model)])
+        self.backup = backup
+
+    def build_runner(self, index: int) -> object:
+        return self.backup
+
+
+class InheritedStagesAfterFailoverTests(unittest.IsolatedAsyncioTestCase):
+    async def test_inherited_stages_run_on_and_record_the_fallback_model(self) -> None:
+        primary = _ScriptedRunner("deepseek-chat", down=True)
+        backup = _ScriptedRunner("gpt-backup", ("FINAL Paris.", json.dumps(_ALLEGATIONS), json.dumps(_DEFENSES), json.dumps(_DECISIONS)))
+        runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=Tools(), permission_policy=PermissionPolicy(), algorithm=ContextWindow.preset.prosecutor_defender_judge, fallback=_BackupChain(backup))
+        context = runtime.build_context("Look up Paris.", base_context=None, history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+        handle = RunnerHandle(runner=primary, provider="deepseek", invoke=_invoke, extract_text=str, extract_metadata=lambda result: {})
+
+        # The default failure policy raises when a stage fails, so completing proves all three stages ran.
+        result = await runtime.arun("Look up Paris.", handle=handle, context=context)
+
+        self.assertEqual(result.output, "FINAL Paris.")
+        self.assertEqual(len(primary.prompts), 1)
+        self.assertEqual(len(backup.prompts), 4)
+        report = result.metadata["prosecutor_defender_judge"]
+        self.assertEqual(report["verdict"], "needs_changes")
+        self.assertEqual({role: (stage["provider"], stage["model"]) for role, stage in report["stages"].items()}, {role: ("openai", "gpt-backup") for role in ("prosecutor", "defender", "judge")})
 
 
 if __name__ == "__main__":

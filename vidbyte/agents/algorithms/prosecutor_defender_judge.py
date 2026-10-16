@@ -401,7 +401,8 @@ class ProsecutorDefenderJudgeRuntimeAlgorithm:
 
         # Delegate the three strictly sequential review stages to run(). arun stays
         # thin so the producer contract and the review contract remain separable.
-        return await self.run(message=message, candidate=candidate, candidate_sha256=candidate_sha256, producer=producer, context=context, handle=handle, trace_context=trace_context)
+        # The stages inherit the model the producer finished on, so a failover sticks.
+        return await self.run(message=message, candidate=candidate, candidate_sha256=candidate_sha256, producer=producer, context=context, handle=self.runtime._active_handle(handle), trace_context=trace_context)
 
     async def run(self, *, message: str, candidate: str, candidate_sha256: str, producer: AgentResult, context: BaseAgentContext, handle: RunnerHandle, trace_context: SpanContext | None) -> AgentResult:
         # Executes the isolated prosecutor -> defender -> judge protocol against a
