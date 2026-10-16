@@ -8,7 +8,8 @@ ARCHITECTURE NOTE: before_run, after_run, and on_model_error sit at boundaries V
     owns. The other six describe positions inside a loop Codex owns, where no point
     exists at which Vidbyte could refuse an action; declaring one fails to load.
 FUNCTION INVENTORY: CodexMiddlewareValidator.validate rejects unsupported overrides;
-    CodexMiddlewareRunner.before_run/after_run/on_model_error dispatch one hook each.
+    CodexMiddlewareRunner.before_run/after_run/on_model_error dispatch one hook each;
+    CodexMiddlewareRunner.reset starts each turn's event log.
 COMMON MODIFICATION PATTERNS: To support a new hook, prove its enforcement point first,
     then remove it from CODEX_UNSUPPORTED_MIDDLEWARE_HOOKS and add its runner method.
 WHAT NOT TO DO IN THIS FILE: Do not reimplement fail_closed, sleep, or event recording
@@ -99,6 +100,12 @@ class CodexMiddlewareRunner:
         """Return whether any middleware is attached to this agent."""
         return bool(self._middleware)
 
+    def reset(self) -> None:
+        """Start a fresh event log at the start of a turn."""
+        # The reply reports this turn's events only, like the usage tracker and
+        # failure ledger beside it; BaseAgent builds a fresh pipeline per run.
+        self._pipeline = MiddlewarePipeline(self._middleware)
+
     async def before_run(self, request: CodexMiddlewareRequest) -> Mapping[str, Any]:
         """Run before_run and return its merged transform metadata."""
         # @intent decide-before-the-provider-is-touched
@@ -132,7 +139,7 @@ class CodexMiddlewareRunner:
         )
 
     def metadata(self) -> dict[str, Any]:
-        """Return the pipeline's accumulated middleware metadata and events."""
+        """Return this turn's middleware metadata and events."""
         return self._pipeline.metadata()
 
     def _context(
