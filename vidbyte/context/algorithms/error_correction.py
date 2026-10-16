@@ -187,8 +187,12 @@ class ErrorCorrectionAlgorithm(InnerContextWindowAlgorithm):
                 why = str(entry.get("why_wrong") or "").strip()
                 text = f"{claim} — {why}" if claim and why else (claim or why)
             else:
-                text = str(entry)
-            corrections.append(_truncate(text, self.max_field_chars))
+                text = "" if entry is None else str(entry).strip()
+            # @intent blank-corrections-correct-nothing
+            # An entry with no claim and no reason (null, "", an echoed empty example) says nothing; counting it would
+            # make a pass that found nothing post a blank notice over the last real one.
+            if text:
+                corrections.append(_truncate(text, self.max_field_chars))
         return tuple(corrections)
 
     def _format_managed_primitives(self, ctx: ContextWindowRunContext) -> str:
