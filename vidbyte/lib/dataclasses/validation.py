@@ -6,13 +6,14 @@ ARCHITECTURE NOTE: Two classes of static methods, each taking the checked value 
 FUNCTION INVENTORY: require_text (an optional character cap, pattern and one-line rule), accepts_text (require_text's rule as a bool), require_optional_text, require_text_items (a tuple of texts, each under require_text's rule), require_command_line_units (a value's quoted Windows command-line length), require_number (allow_zero admits 0), require_int (maximum optional), require_bool, require_enum, require_argv, require_directory, require_utc_datetime (a zero UTC offset and a microsecond resolution), require_callable (optional admits None; synchronous refuses async callables); _text_problem words what a text value fails, and _received renders the received value safely for a message. RecordFieldConverter: to_tuple, to_mapping, to_enum (a member or its exact value string), to_path (a str or os.PathLike, unchecked), to_folder (resolved, never a file, optionally existing), to_files (existing files, resolved, optionally with distinct names), require_instance.
 COMMON MODIFICATION PATTERNS: Add a new check as one more static method with value first and field_name second, and call it from a record's __post_init__; never copy a check into a record.
 WHAT NOT TO DO IN THIS FILE: 1. Do not convert values silently; to_path only wraps a path in Path and never checks or resolves it. 2. Do not quote mapping values or long text in a message; they can hold secrets. 3. Do not import from a layer above vidbyte.lib.
-KNOWN EDGE CASES: bool is an int subclass, so every numeric check refuses bool first. A field whose last name segment reads as a credential (password, token, secret, api_key) is never quoted, whatever its length. require_argv refuses a list on purpose, because argv fields must be immutable tuples. require_directory must run on the path as given, before Path.resolve(), or a relative path would pass; to_folder and to_files are the opposite choice, for settings that accept a relative path and store it resolved against the working directory at construction. require_text_items refuses a list, as require_argv does, so a frozen record cannot be changed through its field. require_utc_datetime accepts any zone whose offset is zero, not only timezone.utc. require_callable with synchronous relies on inspect.iscoroutinefunction, which sees through functools.partial and bound methods; an object's async __call__ is checked on its type.
+KNOWN EDGE CASES: bool is an int subclass, so every numeric check refuses bool first. A field whose last name segment reads as a credential (password, token, secret, api_key) is never quoted, whatever its length. require_argv refuses a list on purpose, because argv fields must be immutable tuples. require_directory must run on the path as given, before Path.resolve(), or a relative path would pass; to_folder and to_files are the opposite choice, for settings that accept a relative path and store it resolved against the working directory at construction. require_text_items refuses a list, as require_argv does, so a frozen record cannot be changed through its field. require_utc_datetime accepts any zone whose offset is zero, not only timezone.utc. require_callable with synchronous relies on inspect.iscoroutinefunction, which sees through functools.partial and bound methods; an object's async __call__ is checked on its type, after any partials around the object are unwrapped.
 RELATED DOCS: vidbyte/lib/README.md; lint/rules/c008_shared_validator_owner.py
 TESTS: tests/features/harness_threads/test_harness_threads_records.py; tests/test_record_field_validation.py (the options added for InfiniteMemory); tests/test_record_field_validation_event_options.py (allow_zero, require_utc_datetime, require_callable); tests/features/infinite_memory_agent/test_infinite_memory_contract.py
 """
 
 from __future__ import annotations
 
+import functools
 import inspect
 import math
 import os
@@ -157,11 +158,16 @@ class RecordFieldValidator:
         # function, a partial or bound method of one, or an object whose
         # __call__ is async is refused: calling it only makes a
         # coroutine, which a synchronous caller would never await.
+        # Partials are unwrapped first, so one around such an object is
+        # refused too.
         if value is None and optional:
             return None
         if not callable(value):
             raise ConfigurationError(f"{field_name} must be a callable{' or None' if optional else ''}; got {RecordFieldValidator._received(value, field_name)}.", details={"field": field_name})
-        if synchronous and (inspect.iscoroutinefunction(value) or inspect.iscoroutinefunction(type(value).__call__)):
+        target = value
+        while isinstance(target, functools.partial):
+            target = target.func
+        if synchronous and (inspect.iscoroutinefunction(target) or inspect.iscoroutinefunction(type(target).__call__)):
             raise ConfigurationError(f"{field_name} must be a plain synchronous function, for example one that only puts its argument on a queue; got an async callable of type {type(value).__name__}.", details={"field": field_name})
         return value
 
