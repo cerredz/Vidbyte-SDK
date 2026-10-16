@@ -242,9 +242,10 @@ class CodexSkillFunctions:
 
     @staticmethod
     def _unchecked(exc: CodexAgentError, sentence: str) -> CodexAgentError:
-        # The check's own error, with its code, operation and next step,
-        # plus the sentence that says the run was interrupted.
-        return CodexAgentError(exc.message + sentence, failure_code=exc.failure_code, operation=exc.operation, next_step=exc.next_step)
+        # The check's own error with every field it carried (code,
+        # operation, error type, next step, thread id), plus the
+        # sentence that says the run was interrupted.
+        return CodexAgentError(exc.message + sentence, failure_code=exc.failure_code, operation=exc.operation, error_type=exc.safe_runtime_details.get("error_type", ""), next_step=exc.next_step, thread_id=exc.thread_id)
 
 
 __all__ = ["CodexSkillFunctions", "CodexSkillHost"]
