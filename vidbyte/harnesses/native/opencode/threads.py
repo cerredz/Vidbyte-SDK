@@ -1,8 +1,8 @@
 """FILE: vidbyte/harnesses/native/opencode/threads.py
 
-PURPOSE: Defines the three public opencode thread functions (OpencodeThreads: run_opencode_thread, continue_opencode_thread, fork_opencode_thread) and the flow of one call (OpencodeThreadRun): find opencode, bind the caller's key to the model's provider in an inline config, run `opencode run --format=json` headless once with the prompt on stdin, and read its JSON events.
+PURPOSE: Defines the three public opencode thread functions (OpencodeThreads: run_opencode_thread, continue_opencode_thread, fork_opencode_thread) and the flow of one call (OpencodeThreadRun): find opencode, bind the caller's key to the model's provider in an inline config, run `opencode run --format=json` headless once with the prompt on stdin, or with --command and the command's arguments on stdin, and read its JSON events.
 ROLE IN CODEBASE: The functions are bound as module names in vidbyte/harnesses/native/opencode/__init__.py and re-exported from vidbyte.harnesses.native. OpencodeThreadRun uses NativeLauncher and NativeErrorFactory from hostkit, CliArgv and CliRunner from vidbyte.lib.process, and OpencodeWire (opencode/wire.py) to build the config and read the events. GLM and DeepSeek are reached through the model argument ("zai-coding-plan/glm-5.3", "deepseek/deepseek-v4-pro").
-ARCHITECTURE NOTE: The key reaches opencode only inside OPENCODE_CONFIG_CONTENT, whose provider apiKey beats a stored auth.json login (spec D-8); the caller's skill folders are listed in the same config and read in place, never copied. The prompt travels on stdin, so no prompt can become a flag and no prompt length meets the argv limit. The module holds no literals of its own (spec INV-15): flags are OpencodeFlag members and every other value comes from vidbyte/lib/constants/native_threads.py.
+ARCHITECTURE NOTE: The key reaches opencode only inside OPENCODE_CONFIG_CONTENT, whose provider apiKey beats a stored auth.json login (spec D-8); the caller's skill folders are listed in the same config and read in place, never copied. The prompt travels on stdin, so no prompt can become a flag and no prompt length meets the argv limit. A command run (request.command set, from opencode/commands.py) adds --command=<name> after the #1036 options and sends its arguments on stdin, or no stdin when it has none (spec D-8); with command None the argv and stdin are #1036's (spec INV-26). The module holds no literals of its own (spec INV-15): flags are OpencodeFlag members and every other value comes from vidbyte/lib/constants/native_threads.py.
 FUNCTION INVENTORY: OpencodeThreads.run_opencode_thread, continue_opencode_thread and fork_opencode_thread are the public functions; OpencodeThreads._call is the one guarded try they share. OpencodeThreadRun.execute is the narrated main function of one call; _environment builds the child's environment overlay and _argv builds the command line.
 COMMON MODIFICATION PATTERNS: A new opencode option is an OpencodeThreadConfig field (vidbyte/lib/dataclasses/native_threads.py), an OpencodeFlag member and one CliOption in _argv. A new failure condition goes in OpencodeWire.read.
 WHAT NOT TO DO IN THIS FILE: 1. Do not put the key on argv, on stdin or in a file; it travels only inside OPENCODE_CONFIG_CONTENT of the child. 2. Do not drop --dir or the cwd; an inherited PWD must never choose the project. 3. Do not copy skills; opencode reads the folders the caller passed.
@@ -95,14 +95,15 @@ class OpencodeThreadRun:
         # @intent opencode-prompt-travels-on-stdin
         # Run opencode once, headless, in the workspace, with the inline
         # config in its environment and the prompt on stdin followed by
-        # end of input, so the prompt is never read as an option.
+        # end of input, so the prompt is never read as an option. A
+        # command run without arguments sends no standard input.
         invocation = CliInvocation(
             argv=OpencodeThreadRun._argv(launcher, request, config),
             env_overlay=OpencodeThreadRun._environment(content),
             timeout_seconds=config.timeout_seconds,
             max_output_bytes=native_threads.NATIVE_PROCESS_MAX_OUTPUT_BYTES,
             cwd=Path(request.workspace),
-            stdin_text=request.prompt,
+            stdin_text=request.prompt or None,
         )
         outcome = await CliRunner().run(invocation)
 
@@ -143,6 +144,8 @@ class OpencodeThreadRun:
             options.append(CliOption(OpencodeFlag.SESSION, request.thread_id))
         if request.verb is NativeThreadVerb.FORK:
             options.append(CliOption(OpencodeFlag.FORK))
+        if request.command is not None:
+            options.append(CliOption(OpencodeFlag.COMMAND, request.command))
         return CliArgv.build(launcher, command=(native_threads.OPENCODE_RUN_COMMAND,), options=tuple(options), style=CliOptionStyle.JOINED)
 
 
