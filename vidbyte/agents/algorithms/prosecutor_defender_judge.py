@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, ValidationError
 
 from vidbyte.context.algorithms.prosecutor_defender_judge import DebateStageSettings, ProsecutorDefenderJudgeAlgorithm, ProsecutorDefenderJudgeFailurePolicy
+from vidbyte.context.manager import ContextManager
 from vidbyte.context.templates import NullRecorder
 from vidbyte.lib.agents.modality_detector import ModalityDetector
 from vidbyte.lib.agents.prosecutor_defender_judge import dump_payload, json_safe_mapping, optional_int, runner_model_name, safe_error_category, safe_tool_call_summary, safe_trace_error
@@ -45,6 +46,7 @@ from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.enums import ModelModality
 from vidbyte.lib.errors import AgentExecutionError, ConfigurationError
 from vidbyte.lib.tracing import SpanContext
+from vidbyte.tools.base import BaseTool, _unwrap_tool
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.types import ToolCallContext, ToolPermission
 
@@ -213,10 +215,15 @@ class DebateResourceProjector:
         metadata = dict(spec.metadata)
         if metadata.get("source") == "mcp" or metadata.get("internal_agent_tool"):
             raise ConfigurationError(f"Review tool {spec.name!r} is a remote or agent-delegation capability and cannot be projected.")
-        if tool.__class__.__name__ in _REJECTED_TOOL_CLASSES:
-            raise ConfigurationError(f"Review tool {spec.name!r} uses unsupported live-bound type {tool.__class__.__name__}.")
-        if callable(getattr(tool, "bind_agent", None)) or callable(getattr(tool, "bind_context_getter", None)):
+        # @intent review-refuses-live-context-tools
+        # Judge the tool behind customize()/with_activity() views; context tools keep the parent's live manager in _manager.
+        inner = _unwrap_tool(tool) if isinstance(tool, BaseTool) else tool
+        if inner.__class__.__name__ in _REJECTED_TOOL_CLASSES:
+            raise ConfigurationError(f"Review tool {spec.name!r} uses unsupported live-bound type {inner.__class__.__name__}.")
+        if callable(getattr(inner, "bind_agent", None)) or callable(getattr(inner, "bind_context_getter", None)):
             raise ConfigurationError(f"Review tool {spec.name!r} can bind live parent-agent state and cannot be projected.")
+        if isinstance(getattr(inner, "_manager", None), ContextManager):
+            raise ConfigurationError(f"Review tool {spec.name!r} reads or writes the parent's live context manager and cannot be projected.")
 
 
 class DebateStageRuntimeFactory:
