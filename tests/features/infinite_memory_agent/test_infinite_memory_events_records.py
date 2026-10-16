@@ -1,9 +1,9 @@
 """FILE: tests/features/infinite_memory_agent/test_infinite_memory_events_records.py
 
-PURPOSE: Proves the event vocabulary and records on their own, outside a scripted run: the public names and where they import from, the on_event settings check, the size bound of every details record at its worst case, the caps and line rules every record enforces, the envelope's own checks (at, details type, summary, keys), zero and unknown costs, how InfiniteEvents shortens keys over 508 characters, how it reads usage from a reply, and how it clamps a huge settings limit.
-ROLE IN CODEBASE: Record-and-writer layer of tests/features/infinite_memory_agent/ for docs/spec/infinite-memory-events/spec.md (AC-21, AC-24, AC-30, AC-32, AC-37 a, b, f; INV-11..INV-14, INV-32..INV-36; EC-3, EC-36; D-18, D-24, D-25, D-27). Exercises vidbyte/lib/enums/infinite.py, vidbyte/lib/dataclasses/infinite.py, vidbyte/agents/infinite/settings.py, and vidbyte/agents/infinite/events.py with a real workspace, journal, and launch tool.
+PURPOSE: Proves the event vocabulary and records on their own, outside a scripted run: the public names and where they import from, the on_event settings check, the size bound of every details record at its worst case, the caps and line rules every record enforces, the envelope's own checks (at, details type, summary, keys), zero and unknown costs, how InfiniteEvents shortens keys over 508 characters, how it reads usage from a reply, how it sums a pair's usage over several replies or none, and how it clamps a huge settings limit.
+ROLE IN CODEBASE: Record-and-writer layer of tests/features/infinite_memory_agent/ for docs/spec/infinite-memory-events/spec.md (AC-21, AC-24, AC-30, AC-32, AC-37 a, b, f; INV-11..INV-14, INV-32..INV-36; EC-3, EC-13, EC-14, EC-36; D-18, D-24, D-25, D-27). Exercises vidbyte/lib/enums/infinite.py, vidbyte/lib/dataclasses/infinite.py, vidbyte/agents/infinite/settings.py, and vidbyte/agents/infinite/events.py with a real workspace, journal, and launch tool.
 ARCHITECTURE NOTE: The worst-case shapes and the byte figures are copied from spec section 9.1 (Worst case), and the field caps from its table, so this file states the bound independently of the implementation: a record that grows a field, loses a cap, or forgets a one-line rule fails here even when every scripted run still passes. The key rule is restated from INV-35 with hashlib, never read from the module under test.
-FUNCTION INVENTORY: test_the_public_names_are_one_object_wherever_they_are_exported (AC-24, NG-9); test_on_event_refuses_a_non_callable_or_asynchronous_sink (AC-21, INV-36, D-27); test_on_event_accepts_none_and_synchronous_callables_as_the_last_field (AC-21, INV-32); test_every_details_record_at_its_caps_fits_its_worst_case_figure (AC-30, INV-33, NFR-4); test_every_capped_field_refuses_one_character_more_and_every_list_a_sixth_item (AC-30, INV-12, INV-34, INV-35); test_one_line_fields_refuse_a_line_break (INV-12); test_the_envelope_refuses_a_wrong_time_details_type_summary_key_or_depth (AC-37 b, INV-11, INV-13, INV-14); test_cost_may_be_zero_or_unknown_but_never_negative_or_infinite (AC-37 a, INV-13, D-18); test_keys_over_508_characters_are_shortened_by_digest_and_stay_distinct (AC-32, INV-35, D-25); test_generator_usage_is_read_from_the_reply_rollup_and_unknown_cost_is_none (AC-37 f, D-18, EC-3); test_a_limit_above_the_count_cap_is_reported_at_the_cap (EC-36, D-24). _worst, _baseline, _build, _refusal_field, _short_key, and _long_launcher_key are builders.
+FUNCTION INVENTORY: test_the_public_names_are_one_object_wherever_they_are_exported (AC-24, NG-9); test_on_event_refuses_a_non_callable_or_asynchronous_sink (AC-21, INV-36, D-27); test_on_event_accepts_none_and_synchronous_callables_as_the_last_field (AC-21, INV-32); test_every_details_record_at_its_caps_fits_its_worst_case_figure (AC-30, INV-33, NFR-4); test_every_capped_field_refuses_one_character_more_and_every_list_a_sixth_item (AC-30, INV-12, INV-34, INV-35); test_one_line_fields_refuse_a_line_break (INV-12); test_the_envelope_refuses_a_wrong_time_details_type_summary_key_or_depth (AC-37 b, INV-11, INV-13, INV-14); test_cost_may_be_zero_or_unknown_but_never_negative_or_infinite (AC-37 a, INV-13, D-18); test_keys_over_508_characters_are_shortened_by_digest_and_stay_distinct (AC-32, INV-35, D-25); test_generator_usage_is_read_from_the_reply_rollup_and_unknown_cost_is_none (AC-37 f, D-18, EC-3); test_a_pairs_cost_is_known_only_when_every_reply_is_fully_priced_and_unknown_without_replies (D-18, EC-13, EC-14); test_a_limit_above_the_count_cap_is_reported_at_the_cap (EC-36, D-24). _worst, _baseline, _build, _refusal_field, _short_key, and _long_launcher_key are builders.
 COMMON MODIFICATION PATTERNS: A new details field adds one row to _FIELDS (with its cap and line type from spec section 9.1) and its worst-case value to _worst, and the spec's worst-case table figure is updated before _FIGURES here.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level. 2. Do not compute expected caps, sizes, or keys by calling the implementation's helpers; restate them from the spec. 3. Do not loosen _FIGURES to whatever the implementation measures; a larger number is a spec change.
 KNOWN EDGE CASES: A staged key at 64 characters is "s" plus 63 digits, the longest value INFINITE_STAGED_KEY_PATTERN allows inside the label cap. The item records InfiniteCommittedEntry and InfiniteDroppedEntry carry no caps of their own (spec D-6); a too-long item text is refused by the containing InfiniteSubagentFinishedDetails, and the spec does not say how the error names the item, so the refusal check accepts any field name that starts with the list's qualified name.
@@ -540,6 +540,45 @@ def test_generator_usage_is_read_from_the_reply_rollup_and_unknown_cost_is_none(
     assert (event.details.tokens, event.details.cost_usd) == expected
     assert (event.details.status, event.details.stop_reason, event.details.summary, event.details.tool_calls) == (InfiniteResultStatus.DONE, "final_response", "P-SUMMARY: done.", 2)
     assert event.summary == "p/gen: done: P-SUMMARY: done."
+    assert_portable(seen)
+
+
+def test_a_pairs_cost_is_known_only_when_every_reply_is_fully_priced_and_unknown_without_replies(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """D-18, EC-13, EC-14: subagent_finished adds tokens over every reply of a real pair but reports a cost only when every reply's rollup is complete: two complete replies (0.02 and 0.01) give 8 tokens and 0.03, a complete reply plus an incomplete one give 8 tokens and None, and a pair with no reply at all (its generator raised) gives 0 tokens and None, never 0 dollars."""
+    from vidbyte.agents.infinite.events import InfiniteEvents
+    from vidbyte.agents.infinite.journal import InfiniteRunJournal
+    from vidbyte.agents.infinite.launch import InfiniteLaunchTool, InfinitePair
+    from vidbyte.agents.infinite.workspace import InfiniteWorkspace
+    from vidbyte.agents.pricing.records import UsageRollup
+    from vidbyte.lib.dataclasses.agents import AgentMessage
+    from vidbyte.lib.dataclasses.infinite import InfiniteResultCard, InfiniteTaskCard
+    from vidbyte.lib.enums.infinite import InfiniteResultStatus, InfiniteVerdict
+
+    settings = build_settings(tmp_path)
+    workspace = InfiniteWorkspace(settings.workspace)
+    journal = InfiniteRunJournal.start(workspace.root, TASK)
+    seen: list[Any] = []
+    caplog.set_level(logging.DEBUG, logger=EVENTS_LOGGER)
+    events = InfiniteEvents(seen.append, journal.run_id)
+    launch = InfiniteLaunchTool(settings, workspace, journal, key="root", depth=0, extras=(), events=events)
+    card = InfiniteTaskCard(name="p", goal="Find the list prices.", done_criteria=("Every price has a source URL",), generator_prompt="Research the vendor.", verifier_prompt="Check every price.")
+    finished = InfiniteResultCard(name="p", key="root/p", status=InfiniteResultStatus.FAILED, verdict=InfiniteVerdict.UNCHECKED, summary="", review="", entries=(), dropped=(), files=())
+    generator_part = UsageRollup(total_tokens=5, cost_usd=0.02, cost_complete=True)
+    cases = {
+        "both priced": (generator_part, UsageRollup(total_tokens=3, cost_usd=0.01, cost_complete=True)),
+        "verifier partly priced": (generator_part, UsageRollup(total_tokens=3, cost_usd=0.01, cost_complete=False)),
+        "no replies": (),
+    }
+    for parts in cases.values():
+        pair = InfinitePair(launch, card, "root/p")
+        pair.replies.extend(AgentMessage(sender="analyst/root/p/gen", recipient="analyst/root", content="done", metadata={"usage_rollup": part}) for part in parts)
+        events.subagent_finished(pair, finished)
+    assert event_warnings(caplog) == []
+    assert kinds(seen) == ["subagent_finished"] * len(cases)
+    priced, partly, empty = ((event.details.tokens, event.details.cost_usd) for event in seen)
+    assert priced == (8, pytest.approx(0.03))
+    assert partly == (8, None)
+    assert empty == (0, None)
     assert_portable(seen)
 
 
