@@ -5,7 +5,7 @@ ROLE IN CODEBASE: Replaces free-form provider strings with discoverable public e
 ARCHITECTURE NOTE: Empty PROVIDER_DEFAULT sentinels are omitted before SDK calls.
 COMMON MODIFICATION PATTERNS: Add an SDK-supported member when upgrading the pinned compatibility range.
 KNOWN EDGE CASES: Enum values must match openai-codex 0.162 wire values exactly.
-RELATED DOCS: https://developers.openai.com/codex/sdk; docs/design/codex-harness-agent.md.
+RELATED DOCS: https://developers.openai.com/codex/sdk; docs/design/codex-harness-agent.md; docs/spec/codex-host-thread-helpers/spec.md (CodexSkillScope and the helper operations, section 9.1).
 TESTS: python scripts/run_ci.py.
 """
 
