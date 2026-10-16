@@ -134,6 +134,10 @@ class MuseCommandRun:
         result = await MuseThreadRun.execute(prompted, config, errors)
         thread_id = result.thread_id
 
+        # muse exec returned its thread, so every error from here on
+        # names it, whichever step raises (spec D-34).
+        errors.remember_thread(thread_id)
+
         # @intent muse-skill-evidence-fails-closed
         # Read the new thread's own items back, with no key, and return
         # only when they hold the tool call that proves the skill ran

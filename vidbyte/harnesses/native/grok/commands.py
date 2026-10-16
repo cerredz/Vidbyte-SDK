@@ -233,6 +233,10 @@ class GrokCommandRun:
         # the answer text (spec §9.2 reading order).
         result = GrokStreamWire.read(outcome, request, errors, timeout_seconds=config.timeout_seconds, thread_id=thread_id)
 
+        # The stream was read, so the thread exists: every error from
+        # here on names it, whichever step raises (spec D-34).
+        errors.remember_thread(thread_id)
+
         # @intent grok-command-evidence-fails-closed
         # Return only when the run's own record shows the command ran
         # (spec INV-8): an agent is named in the new thread's own
