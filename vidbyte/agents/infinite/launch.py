@@ -145,10 +145,10 @@ class InfiniteLaunchTool(BaseTool):
         # Announce each task in the order the model listed it: a new
         # pair right after its started record, a finished one as a
         # replay of the card it recorded.
-        for card, key in zip(cards, keys, strict=True):
+        for task, key in zip(cards, keys, strict=True):
             if key in pairs:
                 self.journal.pair_started(key)
-                self.events.subagent_launched(self, card)
+                self.events.subagent_launched(self, task)
             elif (recorded := self.journal.finished(key)) is not None:
                 self.events.subagent_replayed(self, recorded)
 
