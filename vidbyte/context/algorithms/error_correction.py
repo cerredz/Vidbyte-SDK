@@ -195,7 +195,9 @@ class ErrorCorrectionAlgorithm(InnerContextWindowAlgorithm):
         # Lists currently-managed primitive ids and titles so the auditor can name stale ids.
         lines = []
         for primitive_id, item in ctx.context_manager.registry_items():
-            if not primitive_id or not self._is_removable(str(primitive_id)) or not _is_unfrozen(item):
+            # @intent auditor-is-offered-only-ids-it-can-remove
+            # apply_removals always keeps the correction notice, so listing it would invite a removal that is silently skipped.
+            if not primitive_id or primitive_id == _NOTICE_ID or not self._is_removable(str(primitive_id)) or not _is_unfrozen(item):
                 continue
             title = getattr(item, "title", "")
             lines.append(f"- {primitive_id} ({title})")
