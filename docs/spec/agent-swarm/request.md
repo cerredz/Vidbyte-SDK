@@ -46,7 +46,7 @@ none
 
 ### Key decisions
 
-- **Build it in `vidbyte-sdk`, on `origin/main`.** Prompt 3 says "inside of the vidbyte-sdk/". InfiniteMemoryAgent (the agent this "branches off") is still an open, unmerged PR (#1084, branch `feat/infinite-memory-agent`), so nothing may import from it or depend on it.
+- **Build it in `vidbyte-sdk`, on `origin/main`.** Prompt 3 says "inside of the vidbyte-sdk/". *Orchestrator correction at S0 (scout evidence, code-map.md §4 item 1):* InfiniteMemoryAgent, the agent this "branches off", is **merged on main** as `2c84049c` (#1084, 2026-10-16 15:45). An earlier note here said it was unmerged; that was stale. Main's `vidbyte/agents/infinite/` is therefore a legitimate code precedent for the package shape: runtime subclass, toolset, settings, lib records, enums, constants, prompt family and feature pack. The user's rule still applies to its **prompt and roles**: "dont want to influence the same biases as the InfiniteMemoryAgent". The follow-up branches (`feat/infinite-memory-events` #1159, `feat/infinite-memory-prompts`) are still unmerged and off-limits.
 - **Five classes with exactly these names and roles** (Prompt 3): `AgentSwarmTools`, `AgentSwarmSettings`, `AgentSwarmRuntime`, `AgentSwarmEvents` ("events that happen during the agent swarm"), `AgentSwarmWorkplace`. The user asked for a decomposition by role. Whether a thin public entry class (for example `AgentSwarm`) sits on top is for the spec author to decide (see Open questions).
 - **Workplace = one shared folder.** Every agent's file and shell tools are rooted in the same directory. The clarifying option's wording, which the user picked: "Every agent's tools are rooted in the same directory. Simplest; agents must coordinate edits through messages (research shows concurrent edits can collide, which is itself useful data). Git per agent can come later."
 - **Lifecycle = stay alive until quiet.** The option's wording: "An agent that ends its turn goes idle; a new message wakes it. The swarm ends when every agent is idle with an empty inbox, or a max-turns / time limit is hit."
@@ -149,7 +149,7 @@ These were noted while reading the SDK earlier. The scout re-verifies each one; 
   - **L09** (Thoughtworks): agents coordinated through an accidental blackboard. Give coordination its own channel, separate from the files. That is the `message` tool.
   - **F13**: bugs live in the seams between agents. This is context only.
 - **Things not to touch:**
-  - InfiniteMemoryAgent code on the unmerged branch;
+  - InfiniteMemoryAgent's behaviour on main (reading and copying its patterns is fine), and its unmerged follow-up branches;
   - `vidbyte/agents/runtimes/actor/` behaviour for its existing users (reuse is fine, but changing its semantics is not);
   - anything under `docs/` other than `docs/spec/agent-swarm/`.
 
