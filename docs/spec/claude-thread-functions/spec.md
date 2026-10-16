@@ -1,7 +1,7 @@
 ---
 spec: claude-thread-functions
 title: Run, continue and fork Claude Code threads with the caller's API key
-status: approved
+status: tests-written
 revision: 3
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-claude-thread-functions

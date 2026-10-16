@@ -16,8 +16,8 @@ started: 2026-10-15 18:13
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-15 | 2026-10-15 | reports/S0-merge.md, reports/S0-vendor-scout.md, reports/S0-scout.md | merges d8ef24f5 (#1036 head) + 81833363 (origin/main 72a4ade1), not pushed; code-map.md; vendor-facts.md |
 | S1 spec + review | done | 2026-10-15 | 2026-10-15 | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | spec r3 approved 66203747 (2 review rounds, 15 findings applied) |
-| S2 tests | pending | | | | |
-| S3 implement | pending | | | | |
+| S2 tests | done | 2026-10-15 | 2026-10-15 | reports/S2-test-author.md | 194 tests red; S2_HEAD 25211e79; claude_host pack deleted |
+| S3 implement | running | 2026-10-15 | | reports/S3-implementer.md | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
@@ -40,6 +40,9 @@ started: 2026-10-15 18:13
 - 2026-10-15 — S1 round 2 (reports/S1-spec-review-r2.md): SOUND WITH FIXES 0B/3M/1m (R-12…R-15); review cap 2/2 reached. R-12 accepted by the orchestrator: switch Grok's `_prepare_home` call site to the new hostkit `NativePrivateFolders.prepare` in this PR, behavior-preserving (no constant/text/code/test change). Reason: AGENTS.md principle 5 ("have every caller use that helper"); a one-caller helper beside an identical Grok copy would draw a convention comment; reviewer verified no test references `_prepare_home`. This touches #1036's Grok module, which the request scoped as "no behavior change", not "no edit". Final author revision r3 sets `status: approved`.
 
 - 2026-10-15 — Spec r3 approved (66203747). Q-1…Q-9 take their stated defaults (all "no"; none blocking): Q-1 keep #1036's keyword signature (field guide `strict-config-dataclasses.md`: PR #747 read the same owner wording on #690 as "build one validated record first", which `_call` already does); Q-2 no workspace CLAUDE.md via another flag; Q-3 no `--session-id` up front; Q-4 no `CLAUDE_CODE_MAX_RETRIES=0`; Q-5 no extra ClaudeThreadConfig fields; Q-6 no transcript-sweep change or cleanup; Q-7 no key-out-of-tool-env switch; Q-8 auto memory stays on (scope-adding, default no); Q-9 no `NoDefaultCurrentDirectoryInExePath=1` child setting (scope-adding, default no). Summary printed to the user; continuing to S2 without waiting.
+
+- 2026-10-15 — S2 done. S2_HEAD = 25211e79 (48186352 claude_host pack removed; 688c2747 tests + test-plan; 0a709aee Proof column; 25211e79 report). Orchestrator re-ran `test_harness_threads_claude_threads.py`: `9 failed` with `AttributeError: module 'vidbyte.harnesses.native' has no attribute 'run_claude_thread'`; every §6.2 AC appears in test-plan.md; tree clean. Pack: 203 failed / 427 passed / 2 skipped (all failures = feature missing or #1044 code present). Existing-test changes used under the bounded authorization (test-plan.md "Changes to existing tests"). From S3 on, no agent may change a test: the check is `git log --no-merges 25211e79..HEAD -- tests` empty AND `git show --cc --format= <each merge> -- tests` empty (merges of origin/main legitimately bring main's own test changes).
+- 2026-10-15 — S3 plan: the implementer merges origin/main (0754e01f or newer) into the branch FIRST (Phase 2 drift check), then implements; merge, never rebase. PR #1044 is non-draft (owner's state) — no draft toggle; S3 runs `gh pr edit 1044 --title "[WIP] feat(harnesses): run, continue and fork Claude Code threads with the caller's API key" --body-file <placeholder>` instead of `gh pr create` (#1036-run precedent). Semgrep venv reused: `C:/Users/422mi/AppData/Local/Temp/claude/C--Users-422mi-vidbyte-repos/4d43667e-6c86-4da6-8d31-a29ffd6bcc34/scratchpad/semgrep-venv` (semgrep 1.170.1, verified). CI workflows still TEMPORARILY DISABLED → dispatch by hand.
 
 ## User replies (verbatim)
 - (none yet)
