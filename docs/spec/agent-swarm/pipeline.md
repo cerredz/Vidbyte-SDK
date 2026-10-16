@@ -23,7 +23,7 @@ started: 2026-10-16 16:10
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 1/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-16 16:08 — Base on origin/main (0f2aeb48), not on the unmerged InfiniteMemoryAgent branch (#1084) — the user said "inside of the vidbyte-sdk/", and #1084 is still open.
@@ -36,6 +36,10 @@ started: 2026-10-16 16:10
 - 2026-10-16 17:20 — Spot-check S1 r1: 18/18 template sections; 37 §12.3 rows; frontmatter base_commit/worktree correct; commit "docs(spec): add agent-swarm spec r1" @a43f5423. Briefed the reviewer to treat L2 (over-engineering vs "very minimal") and the idle/wake/quiet race as priorities, and to judge the author's A-2 role mapping (AgentSwarmRuntime = per-member runtime; AgentSwarm = coordinator).
 
 - 2026-10-16 17:45 — S1 review round 1: SOUND WITH FIXES (0 Blocker, 3 Major, 4 Minor, Q-11 optional default no). Resumed author in Revision mode by path to reports/S1-spec-review.md. Steered R-3 toward AgentSwarmRuntime = swarm-level coordinator (request.md §C open question + author's own A-2 "if wrong" branch; no approval gate means A-2 can't be corrected later). R-3 changes §8.5/§12 → scoped round-2 review required (playbook rule).
+
+- 2026-10-16 18:05 — Spec r2 @66c1b2d8: all R-1..R-7 accepted (§16 rows present). R-3 changed §8.5/§12 → launched scoped round-2 reviewer (last allowed round), report reports/S1-spec-review-2.md, findings numbered from R-8.
+
+- 2026-10-16 18:25 — S1 review round 2: SOUND WITH FIXES (0 Blocker, 3 Major R-8..R-10, 3 Minor R-11..R-13); R-1..R-7 confirmed resolved. Resumed author for r3 with instruction to set status: approved (two rounds = approval; cap reached, disputes become Q-n with defaults).
 
 ## User replies (verbatim)
 - 2026-10-16 16:05 — answers to four clarifying questions: "One shared folder (Recommended)"; "Stay alive until quiet (Recommended)"; "Shared goal + per-agent prompts (Recommended)"; "Callback + list on result (Recommended)".
@@ -72,4 +76,12 @@ started: 2026-10-16 16:10
 - S025 skips catalog-loaded descriptions, so the 4–5 sentence rule needs the swarm's own contract test; `ToolParameter` has no enum field → use `ToolSpec.input_schema` (precedent infinite/memory.py:139) — *source:* S1 reviewer
 - C011 counts inherited run/arun; its suffixes exclude Runtime and Swarm — *source:* S1 reviewer
 - `BaseActorRuntime(ABC)` (runtimes/actor/broker.py:44) is a registered multi-agent coordinator that is NOT an AgentRuntime subclass — precedent for a coordinator named *Runtime — *source:* S1 reviewer
+- r2 names: `AgentSwarm` (thin entry) → `AgentSwarmRuntime` (per-run coordinator, fresh per arun) → members run `AgentSwarmMemberRuntime` (`AgentRuntimeType.AGENT_SWARM_MEMBER = "agent_swarm_member"`); `member.py` holds member runtime + member agent + `AgentSwarmMessageTool` + `AgentSwarmTurnMiddleware`, imports the coordinator only under TYPE_CHECKING; package exports six names, root exports five — *source:* S1 author r2
+- `AgentSwarmTools.get_tools(root)` returns only bash/grep/read/write/patch; the coordinator appends `message` and the optional search tool — *source:* S1 author r2
+- Members use `PermissionPolicy.allow_all()`; `agent_swarm_member` shows up in the fork-tool runtime enum and YAML `agent.runtime` choices and must refuse to run there — *source:* S1 author r2
+- `BaseAgent(runtime=X)._runtime()` raises ConfigurationError directly; `.arun()` wraps it as AgentExecutionError with the cause — test `_runtime()` (tests …/test_infinite_memory_contract.py:214-219) — *source:* S1 reviewer r2 (probed)
+- Any Exception in a tool → `ToolResult.error("Tool execution failed: …")` and the loop continues (runtime.py:1341-1348, 1480-1483); middleware decision hooks are fail_closed by default (middleware/base.py:28) → abort("middleware_error") and early return; `review_finish` exceptions propagate — *source:* S1 reviewer r2
+- A006 counts function-local imports (skips only TYPE_CHECKING blocks and `__init__.py` targets); never hide a cycle with a local import — *source:* S1 reviewer r2
+- Local interpreter is Python 3.11.0: `asyncio.timeout` around a TaskGroup unwinds children parked on futures (probe 0.22 s for 0.2 s); KeyboardInterrupt/SystemExit re-raised bare — *source:* S1 reviewer r2
+- No default run-wide timeout (AgentRuntimeConfig.timeout_seconds None; BaseAgent timeout_seconds is per model call); fork tool enum (fork.py:471) and YAML choices (config.py:668) derive from AgentRuntimeType; no test pins the runtime list — *source:* S1 reviewer r2
 - vidbyte-gates.md is wrong for the SDK: lint marker is `SDK-LINT: PASS`; run_ci.py runs no semgrep; `--stage source` needs `PYTHONPATH=$(pwd)` while the package stage must run without it — *source:* S0 scout
