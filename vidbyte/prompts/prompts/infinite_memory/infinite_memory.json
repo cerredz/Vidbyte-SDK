@@ -1,6 +1,6 @@
 {
   "name": "InfiniteMemory Agent",
-  "description": "Instructions for InfiniteMemoryAgent: the root, generator, and verifier rules that each agent's system prompt carries, the messages that brief a generator, a verifier, and a resumed root, the result card a parent receives for each pair, the replies of the memory tools and their quota line, the workspace map's header, and the model-facing descriptions of launch_subagent, remember, write_note, edit_file, and drop_entry and of their parameters.",
+  "description": "Instructions for InfiniteMemoryAgent, one Markdown file per leaf: the root, generator, and verifier operating manuals that each agent's system prompt carries, the messages that brief a generator, a verifier, and a resumed root, the result card a parent receives for each pair, the replies of the memory tools and their quota line, the workspace map's header, and the model-facing descriptions of launch_subagent, remember, write_note, edit_file, and drop_entry and of their parameters.",
   "key": "infinite_memory",
   "prompts": {
     "root_system_prompt": {
@@ -15,45 +15,153 @@
       "path": "verifier_system_prompt.md",
       "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/verifier_system_prompt.md"
     },
-    "task_prompt": "# Goal\n\n{goal}\n\n# Done criteria\n\n{criteria}\n\n# Your instructions\n\n{instructions}\n\n# Memory entries to start from\n\n{entries}\n\n# Workspace files to start from\n\n{paths}\n\n# Your subagent pairs that already finished in this run\n\n{finished}\n\n# Your memory quota\n\n{quota}",
-    "verifier_task_prompt": "# Your instructions\n\n{instructions}\n\n# Goal\n\n{goal}\n\n# Done criteria\n\n{criteria}\n\n# What the generator reported\n\nStatus: {status}\n\n{summary}\n\n# Memory entries the generator staged\n\n{staged}\n\n# Files the generator wrote\n\n{files}\n\n# Your memory quota\n\n{quota}",
-    "resume_prompt": "This run was interrupted and is now resuming. The workspace and its memory are as the earlier part of the run left them.\n\n# The original task\n\n{task}\n\n# Subagent pairs that already finished\n\n{finished}\n\nLaunching one of these names again returns its recorded result card without running it.\n\n# Subagent pairs that started but never finished\n\n{interrupted}\n\nLaunch these again if their work is still needed.",
-    "result_card": "### Pair {name} ({key})\nStatus: {status}. Verdict: {verdict}.\nSummary: {summary}\nReview: {review}\nEntries saved: {entries}\nEntries dropped: {dropped}\nFiles written: {files}",
-    "replayed_label": "(Replayed: this pair already finished earlier in this run, so it was not run again.)",
-    "launch_rejected_prompt": "No task was started, because the batch needs a change: {problem} Fix the tasks and call launch_subagent again.",
-    "memory_rejected_prompt": "Nothing was saved, because the call needs a change: {problem} Fix it and call the tool again, or move on.",
-    "remember_saved_prompt": "Saved as entry #{id}.",
-    "remember_staged_prompt": "Staged as {key}. It is saved to memory only after the verifier has checked this pair's work.",
-    "note_saved_prompt": "Saved the file {path}.",
-    "entry_dropped_prompt": "Dropped {key}, so it will not be saved. Staged entries still waiting for the verdict: {remaining}.",
-    "quota_line": "Quota left: {entries_left} of {entries_max} memory entries and {files_left} of {files_max} new files.",
-    "map_header": "Files: {files} of {max_files}. Tokens: {tokens} of {max_tokens}. Live memory entries: {entries}. Each line below is one workspace file with its token count and description.",
+    "task_prompt": {
+      "path": "task_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/task_prompt.md"
+    },
+    "verifier_task_prompt": {
+      "path": "verifier_task_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/verifier_task_prompt.md"
+    },
+    "resume_prompt": {
+      "path": "resume_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/resume_prompt.md"
+    },
+    "result_card": {
+      "path": "result_card.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/result_card.md"
+    },
+    "replayed_label": {
+      "path": "replayed_label.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/replayed_label.md"
+    },
+    "launch_rejected_prompt": {
+      "path": "launch_rejected_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/launch_rejected_prompt.md"
+    },
+    "memory_rejected_prompt": {
+      "path": "memory_rejected_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/memory_rejected_prompt.md"
+    },
+    "remember_saved_prompt": {
+      "path": "remember_saved_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/remember_saved_prompt.md"
+    },
+    "remember_staged_prompt": {
+      "path": "remember_staged_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/remember_staged_prompt.md"
+    },
+    "note_saved_prompt": {
+      "path": "note_saved_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/note_saved_prompt.md"
+    },
+    "entry_dropped_prompt": {
+      "path": "entry_dropped_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/entry_dropped_prompt.md"
+    },
+    "quota_line": {
+      "path": "quota_line.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/quota_line.md"
+    },
+    "map_header": {
+      "path": "map_header.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/map_header.md"
+    },
     "launch_tool_description": {
       "path": "launch_tool_description.md",
       "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/launch_tool_description.md"
     },
-    "launch_tasks_description": "The tasks to run in this call, from 1 to {max_parallel}, each carried out by its own pair of a generator and a verifier. Every task needs a name that no other task in this call uses, because the name identifies its pair and its result card. All the pairs of one call run at the same time, so put only independent pieces of work in the same call. Write each task for agents that cannot see this conversation, and expect one short result card back for each task, in the order given.",
-    "launch_name_description": "A short lowercase name for the task, made of letters, digits, and hyphens, that starts with a letter or digit and has at most 40 characters. The name identifies the pair in its result card and in the run's journal. It must be unique within this call, and launching a name that already finished in this run returns that pair's recorded card instead of running it again. Choose a name that says what the task covers, so its result card is easy to match to its task.",
-    "launch_goal_description": "What the task must achieve, stated as the outcome rather than the steps. Keep it to one or two sentences that make sense without this conversation. Both the generator and the verifier read the goal, so it is the shared target for doing the work and for checking it. Put the detailed method in the generator prompt and the acceptance checks in the done criteria.",
-    "launch_done_criteria_description": "The conditions that are true when the task is done, given as a list with at least one item. Write each condition so that another agent can check it by reading the workspace or the generator's report. The verifier judges the work against every condition and fixes what falls short before it gives its verdict. A condition that cannot be checked leaves the verifier nothing to judge, so prefer concrete, observable outcomes.",
-    "launch_generator_prompt_description": "Complete instructions for the generator, the fresh agent that does the work of this task. The generator cannot see this conversation, so say everything it needs: the method, the sources to use, the constraints, and what its final reply must report. It starts with the goal, the done criteria, the entries and paths named in context, and the workspace map. Its final reply becomes the summary on the task's result card, so ask it to report what you will need to know.",
-    "launch_verifier_prompt_description": "Instructions for the verifier, the fresh agent that checks the generator's work after the generator finishes. Say what to check and how, including any sources or tests that prove the work right or wrong. The verifier sees the goal, the done criteria, the generator's report, the memory entries it staged, and the files it wrote, but never the generator's conversation. It can fix what it finds and drop staged entries, and its reply must carry a verdict, or nothing the pair staged is saved.",
-    "launch_context_description": "The memory entries and workspace files the pair should start from, as a short list. An item made of a hash sign followed by an entry's number names a live memory entry, and that entry's text is pasted into the generator's first message. Any other item is a file path relative to the workspace folder, which the generator is told to read rather than given in full. Name only live entries, because an unknown or superseded entry id rejects the whole call.",
-    "launch_tools_description": "The names of extra tools the pair needs beyond the preset tools every agent holds. Choose only from the extra tools you hold yourself, because a pair never gains a tool its parent lacks, and any other name rejects the whole call. Both agents of the pair receive the tools named here. Leave the list out when the preset tools are enough for the task.",
-    "remember_tool_description": "Save one short memory entry that later agents in this run, and later runs, can find. Use it only for what will matter again: a decision, a fact, a lesson, an open question, or a pointer to a file. The text must be one short line, and the same text cannot be saved twice. Each agent has a small quota of entries, shown after every call. In a pair, entries are staged and saved only after the verifier has checked the work; to replace an outdated entry, give its id in supersedes.",
-    "remember_kind_description": "What kind of knowledge the entry records, chosen from decision, fact, lesson, open_question, and pointer. A decision records a choice that was made, a fact records something established, and a lesson records what to do or avoid next time. An open question records something still unknown, and a pointer names a workspace file that holds longer material. Pick the kind that best tells a later agent how to use the entry.",
-    "remember_text_description": "The entry itself, written as one short line that makes sense on its own. A later agent reads it without this conversation, so name the subject plainly instead of referring to earlier messages. The text must stay under the entry token cap, and text that is already saved or staged is refused. Keep longer material in a note written with write_note, and remember a pointer to that note instead.",
-    "remember_tags_description": "Up to three short lowercase tags that help later searches find the entry. Each tag uses only letters, digits, and hyphens, and starts with a letter or digit. Choose tags that name the topic or area the entry belongs to. Leave the list out when no tag would help a later search.",
-    "remember_refs_description": "Up to three references that back the entry or tell a later agent where to look next. Each reference is one line that names a workspace file by its path or an outside source by its address. References are saved with the entry as written and are not checked, so give exact paths and addresses. Leave the list out when the entry stands on its own.",
-    "remember_supersedes_description": "The id of a saved entry that this new entry replaces, given when the old entry is outdated or wrong. The old entry must still be live in memory. Once the new entry is saved, the old one moves out of the live memory into the record of replaced entries, so searches no longer find it. Leave it out when the entry adds new knowledge instead of correcting old knowledge.",
-    "write_note_tool_description": "Write longer material to a file in the shared workspace, where every agent and later runs can read it. Give a path inside the workspace that ends in .md, .txt, .json, or .jsonl; seed files, run journals, and the three memory files cannot be written. A new file needs a one-line description for the workspace map, and each agent may create only one new file. Writing to an existing file appends the text to its end. Every file and the workspace as a whole have size limits, and a write over a limit is refused.",
-    "note_path_description": "The path of the file, relative to the workspace folder. It must stay inside the workspace, fit on one line without a colon, and end in .md, .txt, .json, or .jsonl. Seed files, run journals, and the three memory files cannot be written or edited. Choose a path whose folder and name say what the file holds, because the workspace map lists every file by its path.",
-    "write_note_text_description": "The text to write to the file. When the file does not exist yet, this text becomes its whole content. When the file exists, the text is appended to its end, so begin it with a line break when it should start on a new line. The file must stay under its size limit after the write, or the whole write is refused.",
-    "write_note_file_description": "A one-line description of a new file for the workspace map. It is required when the file does not exist yet and ignored when it does. Every agent sees the map, so say in a few words what the file holds and when to read it. The description must stay under the entry token cap.",
-    "edit_file_tool_description": "Replace one passage of an existing workspace file with new text. The old text must appear exactly once in the file, so include enough of it to be unique. Seed files, run journals, and the three memory files cannot be edited. The file and workspace size limits still apply after the change. Use it to correct a file in place instead of appending a correction.",
-    "edit_file_old_text_description": "The exact passage to replace in the file. It must appear exactly once, so include enough of the surrounding text to make it unique. The match is exact, including spacing, line breaks, and letter case. When the passage appears more than once or not at all, the edit is refused with the number of matches found.",
-    "edit_file_new_text_description": "The text that takes the place of the old passage. It replaces only that one match and leaves the rest of the file unchanged. It may be empty, which deletes the passage. The file must stay under its size limit after the change, or the edit is refused.",
-    "drop_entry_tool_description": "Drop one memory entry that the generator or you staged, so that it is never saved. Name it by its staged key, as listed in your first message or in the result of remember. Drop entries that are wrong, duplicated, or not worth keeping, and add a corrected one with remember when it still matters. The entries you do not drop are saved after your final reply when it carries a verdict. The result lists the staged keys that remain.",
-    "drop_entry_id_description": "The staged key of the entry to drop. Staged keys are the short labels that remember returns when it stages an entry, and your first message lists every key the generator staged. A key that is not currently staged is refused with the list of keys that are. Dropping an entry cannot be undone, but you can stage a corrected entry with remember."
+    "launch_tasks_description": {
+      "path": "launch_tasks_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/launch_tasks_description.md"
+    },
+    "launch_name_description": {
+      "path": "launch_name_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/launch_name_description.md"
+    },
+    "launch_goal_description": {
+      "path": "launch_goal_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/launch_goal_description.md"
+    },
+    "launch_done_criteria_description": {
+      "path": "launch_done_criteria_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/launch_done_criteria_description.md"
+    },
+    "launch_generator_prompt_description": {
+      "path": "launch_generator_prompt_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/launch_generator_prompt_description.md"
+    },
+    "launch_verifier_prompt_description": {
+      "path": "launch_verifier_prompt_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/launch_verifier_prompt_description.md"
+    },
+    "launch_context_description": {
+      "path": "launch_context_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/launch_context_description.md"
+    },
+    "launch_tools_description": {
+      "path": "launch_tools_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/launch_tools_description.md"
+    },
+    "remember_tool_description": {
+      "path": "remember_tool_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/remember_tool_description.md"
+    },
+    "remember_kind_description": {
+      "path": "remember_kind_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/remember_kind_description.md"
+    },
+    "remember_text_description": {
+      "path": "remember_text_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/remember_text_description.md"
+    },
+    "remember_tags_description": {
+      "path": "remember_tags_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/remember_tags_description.md"
+    },
+    "remember_refs_description": {
+      "path": "remember_refs_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/remember_refs_description.md"
+    },
+    "remember_supersedes_description": {
+      "path": "remember_supersedes_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/remember_supersedes_description.md"
+    },
+    "write_note_tool_description": {
+      "path": "write_note_tool_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/write_note_tool_description.md"
+    },
+    "note_path_description": {
+      "path": "note_path_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/note_path_description.md"
+    },
+    "write_note_text_description": {
+      "path": "write_note_text_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/write_note_text_description.md"
+    },
+    "write_note_file_description": {
+      "path": "write_note_file_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/write_note_file_description.md"
+    },
+    "edit_file_tool_description": {
+      "path": "edit_file_tool_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/edit_file_tool_description.md"
+    },
+    "edit_file_old_text_description": {
+      "path": "edit_file_old_text_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/edit_file_old_text_description.md"
+    },
+    "edit_file_new_text_description": {
+      "path": "edit_file_new_text_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/edit_file_new_text_description.md"
+    },
+    "drop_entry_tool_description": {
+      "path": "drop_entry_tool_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/drop_entry_tool_description.md"
+    },
+    "drop_entry_id_description": {
+      "path": "drop_entry_id_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/drop_entry_id_description.md"
+    }
   }
 }
