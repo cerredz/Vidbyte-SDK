@@ -60,6 +60,7 @@ NATIVE_LIST_DEFAULT_LIMIT = 20
 NATIVE_RECENT_DEFAULT_LIMIT = 10
 NATIVE_LIST_MIN_LIMIT = 1
 NATIVE_LIST_MAX_LIMIT = 200
+NATIVE_SINCE_MIN = timedelta(0)
 NATIVE_SINCE_MAX = timedelta(days=3650)
 NATIVE_QUERY_MAX_CHARS = 1000
 NATIVE_TITLE_MAX_CHARS = 4096
@@ -91,6 +92,8 @@ GROK_EXECUTE_PLAN_MAX_CONCURRENCY = 8
 GROK_BRANCH_MAX_CHARS = 255
 GROK_PR_MAX_CHARS = 2048
 GROK_PR_MAX_NUMBER = 999999999
+# At most one of local, branch and pr names what /review reviews.
+GROK_REVIEW_MAX_TARGETS = 1
 
 # Record patterns (spec §9.1), each applied with re.fullmatch.
 # The key pattern is printable ASCII without space, "{" or "}", so
@@ -110,6 +113,10 @@ NATIVE_PROCESS_VALUE_PATTERN = r"[^\x00]*"
 # text of a command (which may be empty for some commands).
 NATIVE_COMMAND_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._/:-]*$"
 NATIVE_COMMAND_TEXT_PATTERN = r"[^\x00]*"
+# A thread title and a search query: text without NUL (blank is
+# refused separately).
+NATIVE_TITLE_PATTERN = r"[^\x00]*"
+NATIVE_QUERY_PATTERN = r"[^\x00]*"
 GROK_BRANCH_PATTERN = r"^[^\s\x00-][^\s\x00]*$"
 GROK_PR_PATTERN = r"^([1-9][0-9]*|https://\S+)$"
 # Evidence text is matched after each run of backslashes becomes "/",
@@ -422,6 +429,15 @@ GROK_TEXT_OPTION_FLAGS: MappingProxyType[GrokCommand, tuple[GrokCommandFlag, ...
         GrokCommand.IMPLEMENT: (GrokCommandFlag.EFFORT,),
     }
 )
+# The highest --effort each Grok command takes; the others take none.
+GROK_MAX_EFFORTS: MappingProxyType[GrokCommand, int] = MappingProxyType(
+    {
+        GrokCommand.IMPLEMENT: GROK_IMPLEMENT_MAX_EFFORT,
+        GrokCommand.EXECUTE_PLAN: GROK_EXECUTE_PLAN_MAX_EFFORT,
+    }
+)
+# The Grok commands whose text may be empty: they take no text.
+GROK_BLANK_TEXT_COMMANDS = frozenset({GrokCommand.REVIEW, GrokCommand.CODE_REVIEW})
 # The /goal subcommands, refused as a whole objective (D-30).
 GROK_GOAL_RESERVED_WORDS = frozenset({"status", "pause", "resume", "clear"})
 GROK_SLASH_TEMPLATE = "/{command}"
