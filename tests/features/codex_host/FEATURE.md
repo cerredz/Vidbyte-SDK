@@ -132,7 +132,7 @@ None yet. Add one line per fixed bug, with the test that protects it.
 - `test_codex_host_goal_skills.py` covers `get_codex_goal`, the goal run and its read-back, the skill listing, the skill run and the docs run with the bounded read-back, and the stop sent on every miss, failure and cancel (AC-24 to AC-32, AC-39, AC-40, AC-42, AC-43).
 - `test_codex_host_helper_lifecycle.py` covers the thread-helpers section 4 snippet, the call guards, no preflight and no resume on the READ helpers, `-32601` per method, and the privacy canaries (AC-1, AC-34, AC-37).
 - The seven modules from `test_codex_host_lifecycle.py` to `test_codex_host_sdk_contract.py` need the `codex` extra, so CI skips them. So do `test_codex_host_thread_helpers.py`, `test_codex_host_goal_skills.py` and `test_codex_host_helper_lifecycle.py`.
-- `codex_host_support.py` holds the spec literals, canaries, `HostTestCase` and `StubCodexHost`. `codex_host_fakes.py` holds the in-memory app-server.
+- `codex_host_support.py` holds the spec literals, canaries, `HostTestCase` and `StubCodexHost`. `codex_host_fakes.py` holds the in-memory app-server, and `codex_host_helper_fakes.py` holds its thread-helper, goal and skill handlers, a mixin `FakeAppServer` inherits.
 
 Run it with `PYTHONPATH=$(pwd) python -m pytest -q tests/features/codex_host`, from the worktree root, with the venv that has the `codex` extra.
 
