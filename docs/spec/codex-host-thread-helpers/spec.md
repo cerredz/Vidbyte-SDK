@@ -311,7 +311,7 @@ State changes only at three points: `thread/resume` (it loads the thread here; o
   - It returns the handle only when the stored goal exists, has exactly the sent objective, and, when a budget was given, has exactly that `token_budget`.
 - **INV-22** — **A failed goal check stops the run.**
   - If the stored goal is missing or differs, the goal run gets exactly one interrupt through `interrupt_codex_turn`, which cancels a goal run. A failure of that interrupt is ignored. Then `codex.command_not_run` is raised with operation `run_codex_goal`, and the message names the thread.
-  - If the check itself raises or is cancelled, the run gets the same single interrupt and the original exception propagates. A `CodexAgentError` keeps its code, operation and next step, and its message gains `GOAL_UNCHECKED_MESSAGE` (§9.2).
+  - If the check itself raises or is cancelled, the run gets the same single interrupt and the original exception propagates. A `CodexAgentError` keeps every field it carried (code, operation, next step, error type and thread id), and only its message changes: it gains `GOAL_UNCHECKED_MESSAGE` (§9.2).
 
 **Skill functions**
 - **INV-23** — **`list_codex_skills`.**
@@ -361,7 +361,7 @@ State changes only at three points: `thread/resume` (it loads the thread here; o
 - **INV-35** — **A failed skill check stops the run.**
   - If no `userMessage` appears within the bound, or it appears without the skill entry, the run gets exactly one interrupt through `interrupt_codex_turn`. A failure of that interrupt is ignored.
   - Then `codex.command_not_run` is raised with the function's own operation (`run_codex_skill` or `run_codex_openai_docs`). The message names the thread and the skill (`INPUT_NOT_RECORDED_MESSAGE` or `SKILL_DROPPED_MESSAGE`).
-  - If the read-back itself raises or is cancelled, the run gets the same single interrupt and the original exception propagates. A `CodexAgentError` keeps its code, operation and next step, and its message gains `SKILL_UNCHECKED_MESSAGE` (§9.2).
+  - If the read-back itself raises or is cancelled, the run gets the same single interrupt and the original exception propagates. A `CodexAgentError` keeps every field it carried (code, operation, next step, error type and thread id), and only its message changes: it gains `SKILL_UNCHECKED_MESSAGE` (§9.2).
 
 ### 6.2 Acceptance criteria
 
@@ -1342,3 +1342,4 @@ Blocking questions: 0.
 6. **Two header links landed in a follow-up commit.** §12.5 asks every modified codex file to link this spec. `vidbyte/agents/codex/result.py` and `vidbyte/lib/enums/codex.py` got the link in `7980ebbb`, separate from their row commits.
 7. **No file outside §12.3 changed.** Exactly the 18 row files changed, with no test, README, `REPO_MAP.md`, contract or lint-baseline edit.
 8. **The read-back's item type is a lib constant outside §9.3.** S3 defined `USER_MESSAGE_ITEM_TYPE = "userMessage"` in `vidbyte/harnesses/native/codex/skill_functions.py`, against §12.4. S5 (review R-2) moved it to `vidbyte/lib/constants/codex.py` as `CODEX_USER_MESSAGE_ITEM_TYPE`, next to its one precedent, `CODEX_COMPACTION_ITEM_TYPE`, in the module and in `__all__`. It is not appended at the end of `__all__`, because §9.3 does not list it and the end of `__all__` holds exactly the §9.3 names (`test_codex_host_helper_surface.py:288`).
+9. **Both `CodexAgentError` rebuilds keep every field (review R-17 and R-18).** The S5 iteration 3 merge of main's #1116 gave `CodexAgentError.__init__` the union signature `error_type="", next_step="", thread_id=""`. Two rebuilds that only append a sentence still passed just code, operation and next step: `CodexSkillFunctions._unchecked` (the INV-22 and INV-35 re-raise, R-17) and the partial-failure rebuild in `CodexHost.launch_codex_subagents` (codex-host EC-52, R-18), which is also the precedent §12.3 row 10 cites. Both dropped `error_type` and `thread_id`. S5 iteration 4 passes both through. `error_type` is read from `safe_runtime_details["error_type"]`, because `CodexAgentError` has no `error_type` attribute. INV-22 and INV-35 now name every field. A canonical "same error, new message" helper would need `vidbyte/lib/errors/base.py` or `native/codex/errors.py`, both outside §12.3, so it is a follow-up.
