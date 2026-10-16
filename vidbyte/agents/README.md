@@ -180,6 +180,8 @@ The workspace holds `entries.jsonl` (short typed memory entries, committed for a
 
 `resume()` and `aresume()` continue the newest unfinished run, or the one named, from its journal: finished pairs are replayed from their recorded cards and interrupted ones run again. `Session` persistence and `fork()` are not supported. See `vidbyte/agents/infinite/README.md` for the layout, the limits, and the known edge cases.
 
+Pass a plain (not async) function as `on_event` in the settings to receive one typed `InfiniteEvent` per step of the run, in order, on the agent's loop thread: the run starting, resuming, finishing, or stopping, each pair launched, replayed, and finished, each generator's reply, each memory entry saved, staged, or dropped, each note written, and each refused call. Events are capped in size, and a sink that raises never stops the run. Every successful reply carries the journal's run id in `reply.metadata["infinite_run_id"]`, and `agent.run_handoff(run_id)` builds that run's nine-section `InfiniteHandoff` from the journal and the workspace without a model call and saves it as `.runs/<run_id>.handoff.md`.
+
 ## Model Fallback
 
 An agent can declare an ordered chain of backup models. Array index sets precedence:
@@ -391,7 +393,7 @@ credential and limits.
 - `runtimes/`: linear, search, and actor-model runtime components.
 - `handoff.py`: structured handoff generation from a completed agent run.
 - `coding.py`: `CodingAgent`, a `BaseAgent` preloaded with bash, read, write, edit, glob, grep, and one web-fetch tool over one root folder; its checks live in `CodingAgentSettings` and its tools in `CodingAgentTools`.
-- `infinite/`: `InfiniteMemoryAgent`, a root agent that delegates work to generator and verifier subagent pairs through `launch_subagent` and keeps memory in one guarded workspace folder; resumable from its run journal.
+- `infinite/`: `InfiniteMemoryAgent`, a root agent that delegates work to generator and verifier subagent pairs through `launch_subagent` and keeps memory in one guarded workspace folder; resumable from its run journal; streams typed run events and builds a deterministic run handoff.
 - `coding_context/`: `CodingContextWindow` and one loader per section (`AgentsMdLoader`), which build the context a `CodingAgent` shows after its system prompt.
 - `skills/`: `SkillLoader` and one resolver per source, the agent-agnostic loader that turns declarative skill entries into `SkillDocument`s for `JevAgent`'s skill preload.
 - `multi/`: ledger-driven manager/worker orchestration and transfer controls.
