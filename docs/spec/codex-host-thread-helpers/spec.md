@@ -297,7 +297,7 @@ State changes only at three points: `thread/resume` (it loads the thread here; o
   - `thread/compact/start` is sent exactly once (typed `thread_compact`, no retry). The method returns `None` once Codex accepts.
   - The compaction runs inside this host's `codex app-server` process, so it finishes only while the host stays open. The method docstring and the tool description say so (EC-41).
 - **INV-19** — **Delete.**
-  - `thread/delete` is sent exactly once per call, through the raw path.
+  - One `thread/delete` is sent per call, through the raw path, which the SDK may resend after an overload refusal (EC-24, A-14).
   - The thread is never resumed first.
   - The method returns `None`.
 
