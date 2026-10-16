@@ -2,10 +2,10 @@
 
 PURPOSE: The contract of the 47 thread helpers and skill functions that needs no stand-in: their signatures and named defaults (§8.5, D-15), keyless helpers (INV-2, AC-10), one NativeThreadOperation per function named after it (INV-5, §9.1), the §9.3 tables, the exported records NativeThreadSummary and NativeCommandOutput (§9.1), RecordFieldConverter.to_utc_datetime (D-13, EC-14, EC-15), the new and widened error texts (AC-20, §12.4), and the root export lists left alone (INV-1).
 ROLE IN CODEBASE: Start here when a helper or skill function's parameters, a default, a record rule or an error text changes. Nothing here starts a process.
-ARCHITECTURE NOTE: Expected signatures are written out from spec §8.5 as (name, kind, default) rows, with the named defaults resolved from vidbyte.lib.constants.native_threads, so a literal default or a reordered keyword fails here. Error texts are checked only for the tokens the spec names verbatim (`timeout_seconds`, the control timeout, `transcript`, both Grok caps, `grok inspect --json`, `collidesWith`, `features.video_gen`, compaction, the scan cap), each accepted as the constant's name or its value.
+ARCHITECTURE NOTE: Expected signatures are written out from spec §8.5 as (name, kind, default) rows, with the named defaults resolved from vidbyte.lib.constants.native_threads, so a literal default or a reordered keyword fails here. Error texts are checked only for the tokens the spec names verbatim (`timeout_seconds`, the control timeout, `transcript`, both Grok caps, `grok inspect --json`, `collidesWith`, `features.video_gen`, compaction, the scan cap), each accepted as the constant's name or its value. The two exceptions are texts §12.4 fixes character for character: the opencode protocol_mismatch next step (S4 R-16, SCAN_CAP_STEP) and the r5 muse command_not_run likely cause (D-33, MUSE_COMPACTION_CAUSE).
 FUNCTION INVENTORY: tail builds a keyword-only tail; expected_signatures holds the §8.5 table; kind maps an inspect kind to P or K; spellings lists the acceptable renderings of a numeric constant; git and literal_all read the merge base; the test_* functions are one behaviour each.
 COMMON MODIFICATION PATTERNS: A new parameter is a spec change first (§8.5), then one row here.
-WHAT NOT TO DO IN THIS FILE: Do not import vidbyte at module level; do not compare whole free texts (see test_harness_threads_errors.py for the per-code text tables).
+WHAT NOT TO DO IN THIS FILE: Do not import vidbyte at module level; do not compare whole free texts (see test_harness_threads_errors.py for the per-code text tables), except a text the spec gives verbatim (SCAN_CAP_STEP, MUSE_COMPACTION_CAUSE).
 KNOWN EDGE CASES: `skills=()` defaults are compared by value, so a list default would fail as intended (a mutable default). GROK_GOAL_RESERVED_WORDS is compared as a set because the spec fixes its members, not a container type.
 RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-helpers-skills/spec.md §6.1 INV-1, INV-2, INV-5, §6.2 AC-10, AC-20, §6.3 EC-14, EC-15, §8.5, §9.1, §9.3, §12.4
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads/test_harness_threads_helper_surface.py
@@ -27,6 +27,8 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 REQUIRED = inspect.Parameter.empty
 GROK_HELPERS = ["list_grok_threads", "list_recent_grok_threads", "list_grok_threads_since", "get_grok_thread", "read_grok_thread", "get_grok_thread_lineage", "search_grok_threads", "delete_grok_thread"]
 OPENCODE_HELPERS = [name.replace("grok", "opencode") for name in GROK_HELPERS]
+SCAN_CAP_STEP = "Run opencode --version and install the opencode release named in this message, then retry; when the message names the scan cap, list and search cannot cover this project, so get a known thread with get_opencode_thread, which needs no list, or delete old root sessions with delete_opencode_thread until fewer than the cap remain."
+MUSE_COMPACTION_CAUSE = "muse exec sends slash commands as plain text and the model did not call read_skill or create_goal, the thread's history could not be read back, or the run compacted and the history Muse served after the compaction lacks the call."
 MUSE_HELPERS = ["list_muse_threads", "list_recent_muse_threads", "list_muse_threads_since", "get_muse_thread", "read_muse_thread", "get_muse_thread_lineage"]
 KEYLESS = [*GROK_HELPERS, *OPENCODE_HELPERS, *MUSE_HELPERS, "init_muse_workspace"]
 SUMMARY = {"harness": "grok", "thread_id": "thread-0001", "title": "A title", "parent_thread_id": "thread-0000", "model": "grok-build-fast-1"}
@@ -254,8 +256,17 @@ def test_new_and_widened_texts_name_what_the_spec_requires(lib_api) -> None:
     grok_output = causes[codes("grok.output_too_large")]
     assert any(text in grok_output for text in spellings("GROK_CLI_MAX_OUTPUT_BYTES", constants.GROK_CLI_MAX_OUTPUT_BYTES)), grok_output
     assert any(text in grok_output for text in spellings("NATIVE_PROCESS_MAX_OUTPUT_BYTES", constants.NATIVE_PROCESS_MAX_OUTPUT_BYTES)), grok_output
-    mismatch = causes[codes("opencode.protocol_mismatch")] + steps[codes("opencode.protocol_mismatch")]
-    assert any(text in mismatch for text in spellings("NATIVE_OPENCODE_SCAN_MAX", constants.NATIVE_OPENCODE_SCAN_MAX)) and "list_opencode_threads_since" in mismatch, mismatch
+    mismatch_step = steps[codes("opencode.protocol_mismatch")]
+    mismatch = causes[codes("opencode.protocol_mismatch")] + mismatch_step
+    assert any(text in mismatch for text in spellings("NATIVE_OPENCODE_SCAN_MAX", constants.NATIVE_OPENCODE_SCAN_MAX)), mismatch
+    assert mismatch_step == SCAN_CAP_STEP, f"R-16 / §12.4: the scan-cap next step is fixed verbatim: {mismatch_step!r}"
+
+
+def test_the_muse_command_not_run_cause_is_the_r5_text(lib_api) -> None:
+    # §12.4 / D-33 (r5): no export is read for evidence, so the cause
+    # speaks of the history Muse served, not of a transcript.
+    cause = lib_api.constants.NATIVE_THREAD_LIKELY_CAUSES[lib_api.FailureCode("muse.command_not_run")]
+    assert cause == MUSE_COMPACTION_CAUSE, f"§12.4 r5: {cause!r}"
 
 
 def test_root_export_lists_are_untouched() -> None:

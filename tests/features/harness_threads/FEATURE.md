@@ -54,6 +54,8 @@ For the helpers and skill functions: a listing that trusts the vendor's order (M
 
 2026-10-15: the thread helpers and skill functions (`docs/spec/harness-thread-helpers-skills/spec.md` r3) were added with failing tests first (S2). The Grok stand-in now keeps Grok's real store layout instead of a hashed `<id>.json` file, the Muse fork reply carries `forkedFrom` as an object (MSP `ForkProvenance`), and the stale `120` pin in the surface test became a post-merge invariant.
 
+2026-10-16: the S4 review of the helpers (spec r4/r5) found R-2 to R-6, R-16 and R-23; each has a failing test here (test plan, "Amendment (S4 findings, spec r5)"). The sandbox now clears the stand-in's credential variables (R-4), the Muse stand-in serves MSP's anchored snapshot with every item and writes the real export's event-log members with no `items` (D-33 r5), and the AC-34 export-fallback tests were replaced.
+
 ## Test Suite Map
 
 - `test_harness_threads_surface.py`: exports, signatures, enums, failure codes, contract constants, removed names and files, restored files, `import vidbyte`.
@@ -63,25 +65,25 @@ For the helpers and skill functions: a listing that trusts the vendor's order (M
 - `test_harness_threads_records.py`: config, request and result records, `CliOption`.
 - `test_harness_threads_arguments.py`: every argument refusal before any I/O, and the boundary values that must pass.
 - `test_harness_threads_argv.py`: `CliArgv.build`, the exact §9.2 argv per harness and verb, enum-valued flags, plain `str` elements and the invocation fields.
-- `test_harness_threads_errors.py`: each INV-6 condition and its message, the error class's diagnostic packet, per-code texts.
+- `test_harness_threads_errors.py`: each INV-6 condition and its message, the error class's diagnostic packet, per-code texts, and the one child-outcome mapping `NativeErrorFactory.child_problem` (D-35).
 - `test_harness_threads_process_bounds.py`: timeouts with whole-tree stop, output caps, text cap, cancellation (also during Muse's folder preparation), the vendor's stderr on timeouts and caps, a vendor exiting while a grandchild holds its pipes, the newest thread id on failures.
 - `test_harness_threads_launcher.py`: PATH and Grok fallback resolution, not installed, batch launcher refusal, no program (vendor CLI, `wsl.exe` or `taskkill.exe`) from the current folder, an unpreparable private home.
 - `test_harness_threads_skills.py`: the skill locations for each harness, links inside skills, and read-only skill files.
 - `test_harness_threads_runner.py`: `CliRunner` and `CliInvocation` with the environment overlay, a run that ends at its leader's exit, and a cancel in the wait that follows.
 - `test_harness_threads_wsl.py`: Muse WSL mode on win32.
 - `test_harness_threads_static_policy.py`: INV-15's two `ast` rules and INV-20's import rule, over the 14 + 10 named modules.
-- `test_harness_threads_helper_surface.py`: the 47 signatures and defaults, keyless helpers, the operation members, the §9.3 tables, the `NativeThreadSummary` and `NativeCommandOutput` records, `to_utc_datetime`, the new error texts (AC-20) and the untouched root `__all__` lists.
+- `test_harness_threads_helper_surface.py`: the 47 signatures and defaults, keyless helpers, the operation members, the §9.3 tables, the `NativeThreadSummary` and `NativeCommandOutput` records, `to_utc_datetime`, the new error texts (AC-20) with the two §12.4 texts pinned verbatim (the opencode scan-cap next step and the r5 Muse compaction cause), and the untouched root `__all__` lists.
 - `test_harness_threads_grok_helpers.py`: the Grok store scan, both scopes, get, read, lineage, search, delete, strict reads, the non-session files and the layout bound (AC-2 to AC-9, AC-19, AC-27, AC-28).
 - `test_harness_threads_opencode_helpers.py`: `session list` with `--max-count` and the directory filter, `db` lookups by id with subagent chains, export, delete, empty and malformed output (AC-2 to AC-8, AC-31, AC-32).
 - `test_harness_threads_muse_helpers.py`: `session/list` and `session/read` over batch serve, the export child in an empty temp folder, `init_muse_workspace`, the private config (AC-2 to AC-6, AC-18, AC-19, INV-23).
-- `test_harness_threads_grok_commands.py`: the §9.2 slash lines, `--session-id`, `GROK_WORKFLOWS`, evidence, agents, the code-review export, the minted id on every failure, `skills=` shadowing (AC-13 to AC-15, AC-29, AC-30, AC-33).
+- `test_harness_threads_grok_commands.py`: the §9.2 slash lines, `--session-id`, `GROK_WORKFLOWS`, evidence, agents, the code-review export, the minted id on every failure, including a malformed own `summary.json` after the run, `skills=` shadowing (AC-13 to AC-15, AC-29, AC-30, AC-33, AC-35).
 - `test_harness_threads_opencode_commands.py`: `--command`, stdin, the plan agent and `command_not_run` (AC-16).
-- `test_harness_threads_muse_commands.py`: the skill prompt, items evidence, history modes and the export fallback after compaction (AC-17, AC-34).
+- `test_harness_threads_muse_commands.py`: the skill prompt, items evidence in every history mode including MSP's anchored snapshot after compaction (no export), a `read_skill` id that must equal the skill, text that never counts, and the new thread id on evidence-step failures (AC-17, AC-34, AC-35).
 - `test_harness_threads_helper_arguments.py`: every refusal before any I/O, naming the public parameter, and the texts that must pass (AC-12).
 - `test_harness_threads_helper_credentials.py`: keyless helper children, nothing written by read helpers, the echoed key in skill runs (AC-10, AC-11, AC-24).
 - `test_harness_threads_helper_bounds.py`: not installed, batch launchers, timeouts, output caps, run failures and cancellation for helpers and skill runs (AC-23, AC-25).
 - `test_harness_threads_acceptance_helpers.py`: the helpers spec's §4 example (AC-1), and the nine run functions' threads seen by the helpers (INV-13).
-- `test_harness_threads_listing_properties.py`: seeded, deterministic property checks of INV-7 and INV-10 over generated Grok stores, and the wrapper equivalence.
+- `test_harness_threads_listing_properties.py`: seeded, deterministic property checks of INV-7 and INV-10 over generated Grok stores (a duplicate at another time has its own texts), the wrapper equivalence, and a search that never matches the older copy of an id.
 
 Run `PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads`.
 

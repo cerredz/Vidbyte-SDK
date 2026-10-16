@@ -1,13 +1,13 @@
 """FILE: tests/features/harness_threads/test_harness_threads_grok_commands.py
 
-PURPOSE: The Grok command functions against a grok stand-in that streams `--output-format=streaming-json` events and keeps a real-layout store: the exact §9.2 slash line, argv and environment of every function (AC-13, INV-9, INV-24, D-29), the evidence rule with and without evidence, Windows paths and a mismatched or missing `end` (AC-14, INV-8, EC-48), the plan and explore agents read from the new thread's `summary.json` (AC-15, EC-51), a corrupt sibling thread (AC-28), imagine-video and the code-review export (AC-30, D-28, EC-73), the minted id on every failure and the "may not exist" detail (AC-29, INV-29, EC-50, EC-81), the stream cap (INV-16) and `skills=` shadowing (AC-33, D-32).
+PURPOSE: The Grok command functions against a grok stand-in that streams `--output-format=streaming-json` events and keeps a real-layout store: the exact §9.2 slash line, argv and environment of every function (AC-13, INV-9, INV-24, D-29), the evidence rule with and without evidence, Windows paths and a mismatched or missing `end` (AC-14, INV-8, EC-48), the plan and explore agents read from the new thread's `summary.json` (AC-15, EC-51), a malformed own `summary.json` after the run that keeps the minted id (AC-35, EC-85, D-34), a corrupt sibling thread (AC-28), imagine-video and the code-review export (AC-30, D-28, EC-73), the minted id on every failure and the "may not exist" detail (AC-29, INV-29, EC-50, EC-81), the stream cap (INV-16) and `skills=` shadowing (AC-33, D-32).
 ROLE IN CODEBASE: Start here when a Grok command function sends the wrong line, accepts an unexpanded command, or loses the thread id of a failed run.
 ARCHITECTURE NOTE: The stand-in takes `--session-id` as the new thread's id, emits a `list_dir` call and then the evidence call the bundled skill would make (Windows backslash paths, as Grok prints them), and writes `summary.json` with `agent_name` for `--agent` runs. `update_goal` appears only when the child has `GROK_WORKFLOWS=0`, as in Grok, so a goal run without it fails closed. `expand: false` plays a Grok that did not expand the command; `tools` replaces the calls.
 FUNCTION INVENTORY: grok_argv builds the expected argv in the §12.3 row 21 order; minted reads the `--session-id` the child got; the test_* functions are one behaviour each.
 COMMON MODIFICATION PATTERNS: A new command is one row in LINE_CASES plus its evidence in fake_harness_helpers.py.
 WHAT NOT TO DO IN THIS FILE: Do not take the thread id from the stream: the test reads it from argv, because INV-29 says the SDK mints it.
 KNOWN EDGE CASES: The design doc lives in the sandbox workspace, so its path holds no whitespace as long as the temp folder has none. The flood and padding cases write just past the real caps, because only the timing knobs are documented as monkeypatchable.
-RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-helpers-skills/spec.md §6.1 INV-8, INV-16, INV-24, INV-29, §6.2 AC-13 to AC-15, AC-28 to AC-30, AC-33, §6.3 EC-41, EC-48 to EC-51, EC-73, EC-74, EC-78, EC-81, §9.2, D-28, D-29, D-32
+RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-helpers-skills/spec.md §6.1 INV-6, INV-8, INV-16, INV-24, INV-29, §6.2 AC-13 to AC-15, AC-28 to AC-30, AC-33, AC-35, §6.3 EC-41, EC-48 to EC-51, EC-73, EC-74, EC-78, EC-81, EC-85, §9.2, D-28, D-29, D-32, D-34
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads/test_harness_threads_grok_commands.py
 """
 
@@ -153,6 +153,20 @@ async def test_agent_runs_need_the_agent_name_in_the_new_threads_summary(api, sa
     with pytest.raises(api.NativeThreadError) as caught:
         await skill(name, "Look around", fake=fake)
     check_error(caught.value, harness="grok", operation=name, code="grok.command_not_run", workspace=sandbox.workspace, thread_id=minted(sandbox))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("name", "fake", "member"), [
+    ("run_grok_plan", {"summary_fields": {"agent_name": 7}}, "agent_name"),
+    ("run_grok_explore", {"summary_fields": {"created_at": "yesterday"}}, "created_at"),
+], ids=["plan-agent-name-not-text", "explore-created-at-not-rfc3339"])
+async def test_a_malformed_own_summary_after_the_run_keeps_the_minted_id(api, sandbox, skill, check_error, name, fake, member) -> None:
+    # AC-35 / EC-85 / D-34 / INV-6 (r4, S4 R-5): the stream was read,
+    # so the strict read of the run's own summary.json fails with the
+    # minted --session-id attached, naming the member.
+    with pytest.raises(api.NativeThreadError) as caught:
+        await skill(name, "Look around", fake=fake)
+    check_error(caught.value, harness="grok", operation=name, code="grok.protocol_mismatch", workspace=sandbox.workspace, thread_id=minted(sandbox), observations=[("member", (member,))])
 
 
 @pytest.mark.asyncio

@@ -98,3 +98,78 @@ The two non-failing new tests are intended: `helper_surface.py::test_root_export
 - **Stand-in roles and scenario fields** (fake_harness.py + fake_harness_helpers.py): roles `grok`, `grok-export`, `grok-delete`, `opencode`, `opencode-list`, `opencode-db`, `opencode-export`, `opencode-delete`, `muse-exec`, `muse-serve`, `muse-export`, `muse-init`; fields `mode`, `export_mode`, `delete_mode`, `serve_mode`, `expand`, `tools`, `end_session`, `summary_fields`, `summary_mode`, `padding_bytes`, `history_mode`, `none_reason`, `exec_items`, `export_drop_tools`, `list_result`, `session_fields`, `list_text`, `db_text`, `empty_list`, `commands`, `not_found_channel`, `projects`, `oversize_bytes`.
 - **Do not change** any file in `tests/features/harness_threads/` (tests, conftest.py, the two stand-in files, FEATURE.md, README.md). If a test looks wrong, report it to the orchestrator instead of editing it.
 - Pre-existing, outside this area: the pristine-main baseline has a flaky MCP stdio test outside `tests/features/harness_threads`; do not chase it.
+
+## Amendment (S4 findings, spec r5)
+Spec: `docs/spec/harness-thread-helpers-skills/spec.md` r5 (D-33 rewritten, D-34, D-35, AC-17 r4, AC-34 r5, AC-35, EC-82 to EC-85, §12.4, §13) · Findings: `reports/S4-findings-verifier.md` R-2 to R-6, R-16, R-23 · Same framework and venv as above · Report: `reports/S2-test-author-amendment.md`.
+
+### Coverage map (amendment)
+| Spec ID | Test (file → name) | Level | Failure it catches (input + state → wrong output) | How it could pass vacuously, and why it does not |
+|---|---|---|---|---|
+| R-4 (hermetic sandbox) | conftest.py → `sandbox` (granted edit a) | fixture | `DEEPSEEK_API_KEY` / `ZAI_API_KEY` in the developer's shell → 16 area tests saw a key the sandbox did not set | the names come from `fake_harness.CREDENTIAL_NAMES` (loaded by path), so a name added to the stand-in is cleared too; the area gives the same result with and without the key (red run below) |
+| AC-17, EC-82, D-33 (S4 R-23) | muse_commands.py → `test_a_read_skill_call_counts_only_when_its_parsed_id_is_the_skill` (6 shapes: `longer-id` = `bundled:grill-and-record`, `id-in-a-list`, `json-string`, `not-json`, `nested-id`, `id-not-a-string`) | integration | `run_muse_skill("bundled:grill", …)` whose only `read_skill` args are not an object whose `MUSE_READ_SKILL_ID_MEMBER` equals the id → success reported (substring test) | each shape asserts first that the args hold `bundled:grill` as text, so only a parse-and-compare rule rejects it; the args are built under the constant, not the literal `"id"` |
+| AC-17, D-33 | muse_commands.py → `test_a_read_skill_call_with_more_arguments_still_counts` | integration (guard) | an over-strict rule that compares the whole args → a real call with an extra member refused | red today only because the constant is missing; with it injected it passes on today's code, and it fails a whole-args equality |
+| AC-34, EC-79, D-33 r5 (S4 R-2) | muse_commands.py → `test_after_compaction_the_evidence_is_the_anchored_snapshots_tool_call[plan, goal]` (replaces the r3 export test, granted edit d) | integration | anchoredSnapshot whose `state.items` holds every item plus a `compaction` item → a `muse export` child starts for evidence | asserts no `muse-export` start, one exec and one serve, the one `{sessionId, excludeItems: false}` read, an empty temp folder and the returned thread id |
+| AC-34, EC-83, EC-84, D-33 r5 (S4 R-2) | muse_commands.py → `test_after_compaction_text_or_a_call_outside_the_fold_is_command_not_run` (5 rows: `goal-named-only-in-its-prompt`, `plan-reads-another-skill`, `answer-names-read-skill`, `call-missing-from-the-fold`, `goal-call-missing-from-the-fold`; replaces the r3 transcript test, granted edit d) | integration | compacted run whose served items lack the evidence `toolCall` while text (the SDK's own prompt, the answer) or the export names it → success reported | each text row asserts its trap word really is in the prompt or answer; the drop rows use the stand-in's `anchored_drop_tools` (the call is in the thread and in the export, but not in the fold); every row also requires `muse.command_not_run` with the new id, a cause naming compaction and no export child |
+| D-33, INV-6 | muse_commands.py → `test_an_unknown_history_mode_is_protocol_mismatch_naming_items` | integration (guard) | `history_mode: pagedView` → read as an empty history or as no evidence | passes today; it pins "an unknown mode is protocol_mismatch naming items, as before" across the `tool_calls` rewrite |
+| §12.4, D-33 r5 | helper_surface.py → `test_the_muse_command_not_run_cause_is_the_r5_text` | unit | the r3/r4 cause ("its transcript lacks the call") left in place | compares to the §12.4 r5 text copied character for character (checked by `grep -c` of the same string in spec.md and the test: 1 and 1) |
+| AC-35, EC-85, D-34 (S4 R-5) | grok_commands.py → `test_a_malformed_own_summary_after_the_run_keeps_the_minted_id[plan-agent-name-not-text, explore-created-at-not-rfc3339]` | integration | the run's own `summary.json` with `agent_name: 7` (plan) or `created_at: "yesterday"` (explore) → `grok.protocol_mismatch` with `thread_id=None` | the code is checked before the id, so the test proves the strict read fired; the id is the minted `--session-id` read from argv, and the message must name the member after it |
+| AC-35, EC-85, D-34 (S4 R-5) | muse_commands.py → `test_an_evidence_folder_failure_after_the_run_carries_the_new_thread[no-space, unexpected]` | integration | the evidence read's private folder fails with `OSError(ENOSPC)` → `muse.launch_failed`, or with `KeyError` → `runtime.error`, both with `thread_id=None` | `tempfile.mkdtemp` (the call §13 / INV-12 name) fails only once the exec child has logged its answer, so the run's own folder is made; the test asserts one exec and no serve start, so the failure really is the evidence folder |
+| D-35 (S4 R-6) | errors.py → `test_child_problem_maps_one_finished_child_in_the_d35_order` (8 rows) | unit (real `CliOutcome`) | a mapping in another order (marker before timeout or cap), one that searches the outcome instead of `texts`, or one that maps the marker on a clean exit | each row first asserts its `CliOutcome` premise (timed out, stdout cut, clean exit); checked against a reference implementation (8 pass) and three mutants (each caught) via a scratch plugin; `child_problem` must be a `@staticmethod` called on the class |
+| INV-7, D-3 (S4 R-3) | listing_properties.py → `draw_store` (granted edit b) and `test_search_matches_the_literal_case_insensitive_oracle` (seeds 1, 2, 3, 6 now red) | property | a duplicated id whose older copy alone matches the query → listed | a copy at another time draws its own texts; an equal-time copy keeps them (INV-7 names no winner for a tie); the SDK's output equals a filter-then-dedupe model on all 10 seeds (scratch plugin), so the reds are exactly R-3 |
+| INV-7, D-3 (S4 R-3) | listing_properties.py → `test_search_never_matches_the_older_copy_of_a_duplicated_id[workspace-group, second-group]` | integration | `t-dup` "fix the login bug" (2026-10-02) and "write the docs" (2026-10-09) in two groups → `LOGIN` finds it | both group orders; the `DOCS` query must return exactly `("t-dup", "write the docs")`, so an empty search cannot pass |
+| §12.4 (S4 R-16) | helper_surface.py → `test_new_and_widened_texts_name_what_the_spec_requires` (granted edit c) | unit | the r3 "narrow the list with list_opencode_threads_since or archive old sessions" next step | compares to the §12.4 text verbatim (`SCAN_CAP_STEP`, `grep -c` 1 and 1); the scan-cap spelling check on cause + step is kept |
+
+### Granted edits (before → after)
+- **(a) `conftest.py` `sandbox`.** Before: the fixture set `USERPROFILE`, `HOME`, `PATH` and `tempfile.tempdir` only. After: it also calls `monkeypatch.delenv(name, raising=False)` for every `CREDENTIAL_NAMES` entry of `fake_harness.py`, which the new `load_fake_harness()` (cached) loads by path, and the comment gains one line. `fake_harness.py`'s ROLE IN CODEBASE now says conftest loads it for that tuple. Committed alone (`228b2a9e`).
+- **(b) `listing_properties.py:49–51`.** Before: the second-group copy reused `title=title, session_summary=summary` and the row's texts. After: `texts = (title, summary) if other == updated else (<3 new words>, <2 new words>)`, used for the copy and its row.
+- **(c) `helper_surface.py:258`.** Before: `assert any(... spellings("NATIVE_OPENCODE_SCAN_MAX", ...)) and "list_opencode_threads_since" in mismatch, mismatch`. After: the spellings check on cause + step stays, and `assert mismatch_step == SCAN_CAP_STEP` with the §12.4 text.
+- **(d) `muse_commands.py`, the withdrawn export-evidence rule.** Before: `test_after_compaction_the_evidence_comes_from_the_export_transcript[plan, goal]` (one keyless `muse-export` start with `--session` = the thread, temp folder empty) and `test_after_compaction_a_transcript_without_the_call_is_command_not_run_naming_compaction` (`export_drop_tools: ["read_skill"]`, one export start). After: `test_after_compaction_the_evidence_is_the_anchored_snapshots_tool_call[plan, goal]` and `test_after_compaction_text_or_a_call_outside_the_fold_is_command_not_run` (5 rows), above. The stand-in's anchoredSnapshot now serves every item plus a `compaction` item (`summarizedThrough`, `trigger`, `outcome`) with `history.items` null and the `anchored_drop_tools` switch; its unseeded `muse export` writes the real event-log members (`diagnostics`, `events`, `export_schema_version`, `exporter_version`, `redaction`, `session_build`, `session_terminated_abnormally`, `sessions`) and no `items`; `export_drop_tools` is gone (only these tests used it). The `read_muse_thread` tests in `muse_helpers.py` are unchanged and pass (23 passed).
+
+### Tests deliberately NOT written (amendment)
+| Candidate | Why it would not earn its keep |
+|---|---|
+| R-1, R-10, R-11, R-15, R-17, R-21 | code-only fixes by the briefing; existing tests cover their behaviour |
+| R-9, R-12, R-13, R-14, R-18, R-19, R-20, R-22 | not tested now (briefing) |
+| Refuted: `NativeEnvironmentVariable` members for DEEPSEEK/ZAI, deleting README:179, the PWD enum "bug" | refuted by the verifier |
+| AC-35 `runtime.error` after a Grok run | no seam reaches it without mocking `CliRunner` or `GrokStore`, which the repo does not mock; the Muse `unexpected` row proves the same `_call` fallback |
+| S4 repro case B (the export `mkdir` fails after a compaction) | r5 runs no export for evidence, so the seam no longer exists |
+| `remember_thread` called exactly twice; the three `child_problem` call sites | structural (§12.4 checklist, S4 review); their behaviour is the existing helper-bound and not-found tests plus the D-35 contract test |
+| A committed self-test of the stand-in's MSP shapes | it would be a green test of the test double; checked once by a scratch script instead (report) |
+
+### Red run (amendment)
+`"$PY" -m pytest -q -p no:cacheprovider tests/features/harness_threads -rf`, with `DEEPSEEK_API_KEY` set →
+```
+FAILED tests/features/harness_threads/test_harness_threads_muse_commands.py::test_after_compaction_text_or_a_call_outside_the_fold_is_command_not_run[goal-call-missing-from-the-fold]
+FAILED tests/features/harness_threads/test_harness_threads_muse_commands.py::test_an_evidence_folder_failure_after_the_run_carries_the_new_thread[no-space]
+FAILED tests/features/harness_threads/test_harness_threads_muse_commands.py::test_an_evidence_folder_failure_after_the_run_carries_the_new_thread[unexpected]
+34 failed, 991 passed, 3 skipped in 86.42s (0:01:26)
+```
+and with `env -u DEEPSEEK_API_KEY` →
+```
+FAILED tests/features/harness_threads/test_harness_threads_muse_commands.py::test_after_compaction_text_or_a_call_outside_the_fold_is_command_not_run[goal-call-missing-from-the-fold]
+FAILED tests/features/harness_threads/test_harness_threads_muse_commands.py::test_an_evidence_folder_failure_after_the_run_carries_the_new_thread[no-space]
+FAILED tests/features/harness_threads/test_harness_threads_muse_commands.py::test_an_evidence_folder_failure_after_the_run_carries_the_new_thread[unexpected]
+34 failed, 991 passed, 3 skipped in 86.47s (0:01:26)
+```
+The two FAILED sets are identical (`diff` of the sorted ids is empty). Baseline before the amendment: `998 passed, 3 skipped` without the key and `16 failed, 982 passed` with it; after the R-4 commit alone, `998 passed, 3 skipped` both ways.
+
+| Group | Tests | Failed | Passed | Why each failure is the right one |
+|---|---|---|---|---|
+| R-23 (`read_skill` id) | 7 | 7 | 0 | `AttributeError: ... has no attribute 'MUSE_READ_SKILL_ID_MEMBER'`; with the constant injected (scratch plugin) the 6 shapes fail `DID NOT RAISE` (substring rule) and the guard passes |
+| R-2 anchored positives | 2 | 2 | 0 | `D-33: no export runs for evidence` (today reads the export) |
+| R-2 anchored negatives | 5 | 5 | 0 | 4 `DID NOT RAISE` (text found in the export); `plan-reads-another-skill` is the missing constant, and `DID NOT RAISE` with it injected |
+| R-2 unknown mode | 1 | 0 | 1 | guard, passes today |
+| R-2 r5 cause | 1 | 1 | 0 | today's cause still says "its transcript lacks the call" |
+| R-5 Grok / Muse | 2 + 2 | 4 | 0 | `thread_id None != '<new id>'`, after the code matched (`grok.protocol_mismatch`, `muse.launch_failed`, `runtime.error`) |
+| R-6 `child_problem` | 8 | 8 | 0 | `AttributeError: child_problem` |
+| R-3 search | 2 new + 10 seeds | 2 + 4 | 6 seeds | the older copy matches; seeds 1, 2, 3, 6 hit a duplicate with different texts |
+| R-16 pin | 1 | 1 | 0 | the r3 next step with `list_opencode_threads_since` |
+| everything else in the area | 984 (+ 3 skipped) | 0 | 984 | unchanged; `muse_helpers.py` 23 passed with the new export document |
+
+### Notes for the repair agent (S5)
+- **Names the new tests bind to.** `vidbyte.lib.constants.native_threads.MUSE_READ_SKILL_ID_MEMBER` (`"id"`); `vidbyte.harnesses.native.hostkit.NativeErrorFactory.child_problem` as a `@staticmethod`, returning a `NativeThreadProblem` member compared with `is`; the r5 `muse.command_not_run` likely cause and the R-16 opencode next step, each character for character.
+- **Muse evidence (D-33 r5).** `anchoredSnapshot` is read from `history.snapshot.state.items` like `snapshot`; no `muse export` child may start in any skill run; only `toolCall` items count; a `read_skill` counts only when `json.loads(args)` is a dict whose `id` equals the skill id (extra members allowed). The cause must still name compaction.
+- **Evidence-folder failures.** The tests fail `tempfile.mkdtemp` once the exec child has logged its answer. Keep making the evidence read's private folder with `tempfile.mkdtemp` (INV-12), or the two `test_an_evidence_folder_failure_*` rows stop reaching it and fail with `DID NOT RAISE`.
+- **D-34.** The Grok rows need the minted id on `grok.protocol_mismatch` from the run's own `summary.json`; the Muse rows need the new id on `launch_failed` and on `runtime.error` from `_call`.
+- **Stand-in fields changed.** New: `anchored_drop_tools`, and `text` for the Muse answer (already read). Gone: `export_drop_tools`. A seeded `<state>/muse/<id>.export` is still exported byte for byte.
+- **Do not change** any file in `tests/features/harness_threads/`. If a test looks wrong, report it to the orchestrator.

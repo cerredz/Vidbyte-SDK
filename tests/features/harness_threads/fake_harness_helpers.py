@@ -3,10 +3,10 @@
 PURPOSE: The vendor paths that the thread helpers and the skill functions reach, kept beside fake_harness.py so each file stays under 1,000 lines: grok `--output-format=streaming-json` runs with `--session-id`, `grok export` and `grok sessions delete` over the real Grok store layout; opencode `session list`, `db`, `export`, `session delete` and `run --command` over a SQLite file with opencode's `session` columns; muse serve `session/list` and `session/read` with items, `muse export --out` and `muse init`.
 ROLE IN CODEBASE: Imported only by fake_harness.py, which hands itself in as `base` (its log, output, hold and flood helpers), so nothing is imported twice and no test imports this file. The tests seed vendor state with the same layouts (conftest.py store builders), so a helper reads exactly what a run wrote.
 ARCHITECTURE NOTE: Each layout copies the vendor fact the spec records (spec §13): Grok keeps `<GROK_HOME>/sessions/<url-encoded cwd>/<id>/summary.json` beside `sessions/session_search.sqlite` and `<group>/.cwd`; opencode 1.18.31 lists roots only, with rows exactly {id, title, updated, created, projectId, directory}, stops at `--max-count` (default 100), answers `db --format=json <sql>` from its `session` table, records no parent on a fork and refuses an unknown `--command` with an error event; Muse lists at most 200 sessions newest first and carries `forkedFrom` as an object. Where a vendor's own order is unspecified the stand-in picks the order that differs from INV-7 (Muse ties ascending), so a helper that trusts the vendor's order fails.
-FUNCTION INVENTORY: grok_find, grok_record, run_grok_stream, run_grok_store_command; opencode_store, opencode_project, opencode_record, opencode_command_refusal, run_opencode_helper; muse_meta_path, muse_load, muse_after_exec, muse_after_fork, muse_read, muse_list, run_muse_export, run_muse_init; helper_modes plays hold, flood and fail for any helper child; utc_now and epoch_ms give the vendor clocks.
+FUNCTION INVENTORY: grok_find, grok_record, run_grok_stream, run_grok_store_command; opencode_store, opencode_project, opencode_record, opencode_command_refusal, run_opencode_helper; muse_meta_path, muse_load, muse_after_exec, muse_after_fork, muse_read (MSP history modes; an anchored snapshot holds every item plus a compaction item), muse_list, muse_export_document (the real export's event-log members), run_muse_export, run_muse_init; helper_modes plays hold, flood and fail for any helper child; utc_now and epoch_ms give the vendor clocks.
 COMMON MODIFICATION PATTERNS: Add a scenario field, read it here with .get and a default, and log anything a test must assert on. A vendor fact that changes is changed here and in the conftest.py builder that seeds the same layout.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import vidbyte or anything outside the standard library. 2. Do not contact the network or run a real vendor CLI. 3. Do not log a credential value. 4. Do not make a stand-in lenient where the spec says the reader must be strict: Muse `forkedFrom` is an object, opencode list rows carry no parent.
-KNOWN EDGE CASES: Grok's evidence paths use Windows backslashes on purpose, so a reader that does not fold backslash runs to `/` (spec §9.2) finds no evidence. `update_goal` appears only when GROK_WORKFLOWS is "0", as the in-turn goal driver does. `muse export --session` prefers an existing path in its working folder over a session id (EC-40); a seeded `<state>/muse/<id>.export` (or `<state>/opencode/<id>.export`) is exported byte for byte.
+KNOWN EDGE CASES: Grok's evidence paths use Windows backslashes on purpose, so a reader that does not fold backslash runs to `/` (spec §9.2) finds no evidence. `update_goal` appears only when GROK_WORKFLOWS is "0", as the in-turn goal driver does. `muse export --session` prefers an existing path in its working folder over a session id (EC-40); a seeded `<state>/muse/<id>.export` (or `<state>/opencode/<id>.export`) is exported byte for byte, and an unseeded Muse export has the real event-log members and no top-level `items`, so no test can pass by reading a list Muse does not write. A `history_mode` the stand-in does not know is served as is, with `items` and `snapshot` both null.
 RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-helpers-skills/spec.md §9.1, §9.2, §13
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads
 """
@@ -56,6 +56,7 @@ MUSE_SKILL_PATTERN = re.compile(r"Use the `([^`]+)` skill")
 MUSE_LIST_MAX = 200
 MUSE_LIST_DEFAULT = 50
 MUSE_CONFIG = (".muse", "config.toml")
+MUSE_BUILD = {"display": "Muse Code 1.0.1 (e27e408b66)", "semver": "1.0.1", "sha": "e27e408b66"}
 
 
 def utc_now() -> str:
@@ -466,8 +467,15 @@ def muse_read(scenario: dict[str, Any], session: str, exclude: bool) -> dict[str
     if mode == "snapshot":
         history["snapshot"] = {"schemaVersion": 1, "state": {"items": items}, "viewCursor": "view-0001"}
     if mode == "anchoredSnapshot":
-        kept = [muse_item(1, "compaction", summary="Earlier turns were compacted.")] + [item for item in items if item.get("kind") != "toolCall" or item.get("tool") == "list_dir"]
-        history["snapshot"] = {"anchor": {"boundaryCursor": "view-0000", "summarizedThrough": "anchor-0001"}, "schemaVersion": 1, "state": {"items": kept}, "viewCursor": "view-0001"}
+        # MSP's anchored rung is the full folded state: every item in
+        # first-opened order, plus a compaction item where the boundary
+        # fell (before the last answer). `anchored_drop_tools` removes
+        # calls by tool name: the A-28-false world of EC-84.
+        dropped = set(scenario.get("anchored_drop_tools", []))
+        kept = [item for item in items if item.get("kind") != "toolCall" or item.get("tool") not in dropped]
+        through = kept[-2]["itemId"] if len(kept) > 1 else None
+        kept.insert(max(len(kept) - 1, 0), muse_item(len(items) + 1, "compaction", summarizedThrough=through, trigger="auto", outcome="compacted"))
+        history["snapshot"] = {"anchor": {"boundaryCursor": "view-0001", "summarizedThrough": through}, "schemaVersion": 1, "state": {"items": kept}, "viewCursor": "view-0002"}
     if mode == "none":
         history["noneReason"] = "excluded" if exclude else scenario.get("none_reason", "historyBudget")
     return {"history": history, "pendingRequests": [], "session": found, "viewCursor": "view-0001"}
@@ -522,6 +530,27 @@ def muse_options(args: list[str], valued: tuple[str, ...], switches: tuple[str, 
     return options, present, None
 
 
+def muse_export_document(meta: dict[str, Any]) -> dict[str, Any]:
+    # A real `muse export` (1.0.1) is an event log with exactly these
+    # top-level members and no `items` (spec §13, r5). Each item rides
+    # in one event's payload, so its text is in the file, as a real
+    # log's prompt is; the payload kind is the stand-in's own, because
+    # the real tool-call event shape is unobserved.
+    session = meta["session"]["sessionId"]
+    events = [
+        {"derived": {"decoded": True, "session_id": session}, "envelope": {
+            "causation_id": None, "durability": "durable", "id": f"event-{index:04d}", "payload": {"kind": "item_recorded", "record": item}, "payload_schema_version": 2,
+            "payload_type": "runtime.session", "record_type": "event", "recorded_at": index, "schema_version": 1, "sequence": index, "stream": {"id": session, "kind": "session"},
+        }, "kind": "record", "recorded_at": index}
+        for index, item in enumerate(meta["items"], start=1)
+    ]
+    return {
+        "diagnostics": {"duplicate_records": 0, "gaps": 0, "omitted_live_only": 0, "unknown_payload_kinds": 0, "unparseable_lines": 0}, "events": events,
+        "export_schema_version": 1, "exporter_version": MUSE_BUILD, "redaction": "raw", "session_build": MUSE_BUILD, "session_terminated_abnormally": False,
+        "sessions": [{"root_session_id": session, "saw_history_gap": False, "session_end": {"exit_reason": "clean", "uptime_ms": 145}, "session_id": session, "turn_count": meta["session"].get("turnCount", 0)}],
+    }
+
+
 def run_muse_export(base: Any, scenario: dict[str, Any], args: list[str], env: dict[str, str], via_wsl: bool, launcher_args: list[str]) -> None:
     # `muse export --session <id|path> --out <file>`: an existing path
     # in the working folder wins over an id (EC-40); without --out it
@@ -544,9 +573,7 @@ def run_muse_export(base: Any, scenario: dict[str, Any], args: list[str], env: d
     elif meta is not None and seeded.is_file():
         data = seeded.read_bytes()
     elif meta is not None:
-        dropped = set(scenario.get("export_drop_tools", []))
-        items = [item for item in meta["items"] if item.get("tool") not in dropped]
-        data = json.dumps({"session": meta["session"], "items": items}, indent=2).encode("utf-8")
+        data = json.dumps(muse_export_document(meta), indent=2).encode("utf-8")
     else:
         base.write_err(f"Error: session {value} not found\n")
         sys.exit(1)

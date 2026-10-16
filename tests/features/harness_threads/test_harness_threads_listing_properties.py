@@ -1,12 +1,12 @@
 """FILE: tests/features/harness_threads/test_harness_threads_listing_properties.py
 
-PURPOSE: Seeded, deterministic property checks of the listing and lineage contracts over generated Grok stores: for every generated store, window and limit, `list_grok_threads` equals an independent INV-7 oracle (window, newest first, ties by id descending, one entry per id keeping the newer, limit), with timestamps written in mixed offsets (EC-15); the wrappers equal the base list (INV-7 wrapper equivalence); `search_grok_threads` equals the oracle's literal case-insensitive filter (D-3); and every lineage is root first, linked, and ends at the requested thread (INV-10).
+PURPOSE: Seeded, deterministic property checks of the listing and lineage contracts over generated Grok stores: for every generated store, window and limit, `list_grok_threads` equals an independent INV-7 oracle (window, newest first, ties by id descending, one entry per id keeping the newer, limit), with timestamps written in mixed offsets (EC-15); the wrappers equal the base list (INV-7 wrapper equivalence); `search_grok_threads` equals the oracle's literal case-insensitive filter over the kept copy only (D-3, INV-7), with one hand-written regression for an id whose older copy alone matches (S4 R-3); and every lineage is root first, linked, and ends at the requested thread (INV-10).
 ROLE IN CODEBASE: Start here when a list or lineage is right for hand-written stores but wrong for some mix of ties, duplicates, offsets and limits.
 ARCHITECTURE NOTE: Hypothesis is not installed in this repository, so each case is drawn from random.Random(seed) over a fixed seed list; a failure names its seed, and rerunning that seed rebuilds the same store. Grok listing reads files only, so many stores cost no child process. Every generated time sits a whole number of hours before the test's own clock reading, at least one hour away from any window edge, because the helper reads the clock itself.
-FUNCTION INVENTORY: draw_store builds one random store and returns its oracle rows; oracle applies INV-7 to the rows; render writes a time in a random offset; the test_* functions are one property each.
+FUNCTION INVENTORY: draw_store builds one random store and returns its oracle rows, giving a duplicate at another time its own texts; oracle applies INV-7 to the rows; render writes a time in a random offset; the test_* functions are one property each.
 COMMON MODIFICATION PATTERNS: To widen the search, add seeds; keep offsets and windows on the whole-hour grid with one-hour margins.
 WHAT NOT TO DO IN THIS FILE: Do not compute the oracle with SDK code; it must stay independent.
-KNOWN EDGE CASES: Duplicated ids sit in a second group folder of the same private home, as two encodings of one path would.
+KNOWN EDGE CASES: Duplicated ids sit in a second group folder of the same private home, as two encodings of one path would. A duplicate at the same time keeps the same texts, because INV-7 names no winner for a tie, so the oracle never has to pick one.
 RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-helpers-skills/spec.md §6.1 INV-7, INV-10, §6.3 EC-15 to EC-17, EC-25, D-3
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads/test_harness_threads_listing_properties.py
 """
@@ -36,7 +36,8 @@ def render(rng: random.Random, value: datetime) -> str:
 def draw_store(rng: random.Random, stores, now: datetime) -> list[dict]:
     # 6 to 14 threads, some sharing an offset (ties), some ids repeated
     # in a second group (duplicates); the rows keep every copy and the
-    # oracle keeps only the newer one.
+    # oracle keeps only the newer one. A copy at another time has its
+    # own texts, so a search that reads the older copy fails (R-3).
     rows = []
     count = rng.randint(6, 14)
     for index in range(count):
@@ -48,8 +49,9 @@ def draw_store(rng: random.Random, stores, now: datetime) -> list[dict]:
         rows.append({"id": thread_id, "updated": updated, "texts": (title, summary)})
         if rng.random() < 0.2:
             other = now - timedelta(hours=rng.choice(OFFSET_HOURS))
-            stores.grok_thread(thread_id, group=SECOND_GROUP, created=render(rng, other - timedelta(hours=1)), updated=render(rng, other), title=title, session_summary=summary)
-            rows.append({"id": thread_id, "updated": other, "texts": (title, summary)})
+            texts = (title, summary) if other == updated else (" ".join(rng.sample(WORDS, 3)), " ".join(rng.sample(WORDS, 2)))
+            stores.grok_thread(thread_id, group=SECOND_GROUP, created=render(rng, other - timedelta(hours=1)), updated=render(rng, other), title=texts[0], session_summary=texts[1])
+            rows.append({"id": thread_id, "updated": other, "texts": texts})
     return rows
 
 
@@ -114,6 +116,20 @@ async def test_search_matches_the_literal_case_insensitive_oracle(sandbox, helpe
         limit = rng.choice((1, 5, 200))
         found = await helper("search_grok_threads", sandbox.workspace, query, limit=limit)
         assert [summary.thread_id for summary in found] == oracle(rows, now, since=None, limit=limit, query=query), f"seed {seed}, query {query!r}"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("older_group", ["workspace-group", "second-group"])
+async def test_search_never_matches_the_older_copy_of_a_duplicated_id(sandbox, helper, stores, older_group) -> None:
+    # INV-7 / D-3 (S4 R-3): an id in two groups is one thread, its
+    # newer copy; text only the older copy holds finds nothing.
+    older, newer = (None, SECOND_GROUP) if older_group == "workspace-group" else (SECOND_GROUP, None)
+    stores.grok_thread("t-dup", group=older, created="2026-10-01T09:00:00Z", updated="2026-10-02T09:00:00Z", title="fix the login bug", session_summary="the login form")
+    stores.grok_thread("t-dup", group=newer, created="2026-10-08T09:00:00Z", updated="2026-10-09T09:00:00Z", title="write the docs", session_summary="a docs pass")
+    stale = await helper("search_grok_threads", sandbox.workspace, "LOGIN")
+    assert [summary.thread_id for summary in stale] == [], "INV-7: the older copy is not the thread"
+    found = await helper("search_grok_threads", sandbox.workspace, "DOCS")
+    assert [(summary.thread_id, summary.title) for summary in found] == [("t-dup", "write the docs")]
 
 
 @pytest.mark.asyncio
