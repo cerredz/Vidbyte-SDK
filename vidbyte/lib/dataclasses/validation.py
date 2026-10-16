@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Two classes of static methods, each taking the checked value 
 FUNCTION INVENTORY: require_text, accepts_text (require_text's rule as a bool), require_optional_text, require_command_line_units (a value's quoted Windows command-line length), require_number, require_int, require_bool, require_enum, require_argv, require_directory; _text_problem words what a text value fails, and _received renders the received value safely for a message. RecordFieldConverter: to_tuple, to_mapping, to_enum (a member or its exact value string), to_path (a str or os.PathLike, unchecked), to_utc_datetime (an aware datetime or an ISO 8601 text with an offset, as UTC), require_instance.
 COMMON MODIFICATION PATTERNS: Add a new check as one more static method with value first and field_name second, and call it from a record's __post_init__; never copy a check into a record.
 WHAT NOT TO DO IN THIS FILE: 1. Do not convert values silently; to_path only wraps a path in Path and never checks or resolves it. 2. Do not quote mapping values or long text in a message; they can hold secrets. 3. Do not import from a layer above vidbyte.lib.
-KNOWN EDGE CASES: bool is an int subclass, so every numeric check refuses bool first. A field whose last name segment reads as a credential (password, token, secret, api_key) is never quoted, whatever its length. require_argv refuses a list on purpose, because argv fields must be immutable tuples. require_directory must run on the path as given, before Path.resolve(), or a relative path would pass. to_utc_datetime refuses a naive time, because comparing it with an aware one raises TypeError later.
+KNOWN EDGE CASES: bool is an int subclass, so every numeric check refuses bool first. A field whose last name segment reads as a credential (password, token, secret, api_key) is never quoted, whatever its length. require_argv refuses a list on purpose, because argv fields must be immutable tuples. require_directory must run on the path as given, before Path.resolve(), or a relative path would pass. to_utc_datetime refuses a naive time, because comparing it with an aware one raises TypeError later, and a time that overflows once moved to UTC (9999-12-31T23:00:00-05:00), so a garbled vendor time is a field error, never a raw OverflowError.
 RELATED DOCS: vidbyte/lib/README.md; lint/rules/c008_shared_validator_owner.py
 TESTS: tests/features/harness_threads/test_harness_threads_records.py
 """
@@ -184,7 +184,8 @@ class RecordFieldConverter:
     def to_utc_datetime(value: Any, field_name: str) -> datetime:
         # An aware datetime, or an ISO 8601 text that carries an
         # offset, returned in UTC; a naive time, a date alone or any
-        # other type is refused.
+        # other type is refused, and so is a time that leaves the
+        # datetime range once moved to UTC.
         parsed = value
         if isinstance(value, str):
             try:
@@ -193,7 +194,10 @@ class RecordFieldConverter:
                 parsed = None
         if not isinstance(parsed, datetime) or parsed.utcoffset() is None:
             raise ConfigurationError(f"{field_name} must be a timezone-aware datetime or an ISO 8601 time with an offset; got {RecordFieldValidator._received(value, field_name)}.", details={"field": field_name})
-        return parsed.astimezone(UTC)
+        try:
+            return parsed.astimezone(UTC)
+        except OverflowError as exc:
+            raise ConfigurationError(f"{field_name} must be a time that stays between year 1 and year 9999 in UTC; got {RecordFieldValidator._received(value, field_name)}.", details={"field": field_name}) from exc
 
     @staticmethod
     def require_instance(value: Any, field_name: str, expected: type[Any] | tuple[type[Any], ...], *, optional: bool = False) -> Any:
