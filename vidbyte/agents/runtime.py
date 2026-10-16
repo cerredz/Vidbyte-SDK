@@ -753,7 +753,7 @@ class AgentRuntime:
                     state.model_call_count,
                     compaction_count,
                 )
-            compaction_count += self._compaction_event_delta(decision)
+            compaction_count += self._compaction_event_delta(decision, self._provider_messages_from_options(current_call_options))
             current_call_options = self._apply_before_model_call_transform(current_call_options, decision)
             state.model_call_count += 1
             # @intent model-call-count-survives-fallback-switch
@@ -2151,23 +2151,18 @@ class AgentRuntime:
                 return middleware.estimated_spend_usd_for(run_state or {})
         return 0.0
 
-    def _compaction_event_delta(self, decision: MiddlewareDecision) -> int:
+    def _compaction_event_delta(self, decision: MiddlewareDecision, messages: Sequence[Mapping[str, Any]]) -> int:
         # Returns 1 when a history compaction transform actually mutated provider messages.
         transform = decision.transform
         if transform is None or transform.provider_messages is None:
             return 0
-        meta = dict(transform.metadata or {})
-        if "compaction" not in meta:
+        if "compaction" not in dict(transform.metadata or {}):
             return 0
         # @intent content-rewrites-count-as-compactions
-        # Prefer the middleware's own changed flag, because an in-place rewrite keeps the message count.
-        if isinstance(meta.get("changed"), bool):
-            return 1 if meta["changed"] else 0
-        before = meta.get("before_count")
-        after = meta.get("after_count")
-        if before is not None and after is not None:
-            return 1 if int(before) != int(after) else 0
-        return 1
+        # @intent stacked-compactions-all-count
+        # Compare the history itself: an in-place rewrite keeps the message count, and stacked middleware merge their
+        # metadata later-wins, so a later no-op's flag or counts would hide an earlier middleware's compaction.
+        return 1 if tuple(dict(message) for message in transform.provider_messages) != tuple(messages) else 0
 
     def _publish_contract_evaluations(self, run_state: dict[Any, Any], counters: Mapping[str, Any]) -> None:
         # Records each contract's evaluation into run_state so _with_run_state_metadata lifts it into the result.

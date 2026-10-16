@@ -931,7 +931,7 @@ class IsDoneFalsyFinalAnswerTests(unittest.IsolatedAsyncioTestCase):
 class CompactionFloorTests(unittest.IsolatedAsyncioTestCase):
     # @intent content-rewrites-count-as-compactions
     # Clearing a tool result in place keeps the message count, yet it is still a compaction that MinCompactions must see.
-    async def _run(self, exclude_tools: tuple[str, ...]) -> tuple[object, ToolCallingRunner]:
+    async def _run(self, exclude_tools: tuple[str, ...], stacked: tuple[object, ...] = ()) -> tuple[object, ToolCallingRunner]:
         @tool
         def lookup(q: str) -> str:
             """Look something up."""
@@ -939,7 +939,7 @@ class CompactionFloorTests(unittest.IsolatedAsyncioTestCase):
 
         runner = ToolCallingRunner([_chat_tool_turn(("call_1", "lookup", '{"q": "a"}')), *(_text_turn("answer") for _ in range(3))])
         settings = AgentLoopSettings(output_contracts=(MinCompactions(1),), max_contract_rejections=1)
-        middleware = [MessageHistoryCompactionMiddleware.clear_tool_results_except(exclude_tools=exclude_tools)]
+        middleware = [MessageHistoryCompactionMiddleware.clear_tool_results_except(exclude_tools=exclude_tools), *stacked]
         agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[lookup], middleware=middleware, agent_loop_settings=settings)
         with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
             reply = await agent.arun("task")
@@ -955,6 +955,21 @@ class CompactionFloorTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_no_op_compaction_still_does_not_count(self) -> None:
         reply, _ = await self._run(exclude_tools=("lookup",))
+
+        self.assertEqual(reply.metadata["stop_reason"], "contract_unsatisfied")
+
+    # @intent stacked-compactions-all-count
+    # A later middleware that changes nothing must not erase an earlier middleware's compaction through the metadata merge.
+    async def test_stacked_no_op_keeps_an_earlier_compaction_counted(self) -> None:
+        reply, runner = await self._run(exclude_tools=(), stacked=(MessageHistoryCompactionMiddleware.deduplicate_tool_calls(),))
+
+        tool_messages = [m for m in runner.calls[1]["kwargs"]["messages"] if m.get("role") == "tool"]
+        self.assertEqual([m["content"] for m in tool_messages], ["[tool result cleared by compaction]"])
+        self.assertEqual(reply.metadata["stop_reason"], "final_response")
+        self.assertEqual(reply.content, "answer")
+
+    async def test_stacked_no_ops_still_do_not_count(self) -> None:
+        reply, _ = await self._run(exclude_tools=("lookup",), stacked=(MessageHistoryCompactionMiddleware.deduplicate_tool_calls(),))
 
         self.assertEqual(reply.metadata["stop_reason"], "contract_unsatisfied")
 

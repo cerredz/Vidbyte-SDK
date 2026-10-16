@@ -239,8 +239,9 @@ After each `before_model_call` that continues, the runtime inspects the
 middleware transform:
 
 - Must include `provider_messages` and metadata key `"compaction"`.
-- If `before_count` / `after_count` present → count only when they differ.
-- Else → count 1 conservatively.
+- Counts once when that transform hands the model a history different from the one
+  the hook was given, so in-place rewrites and stacked middleware count too.
+- `changed` / `before_count` / `after_count` metadata is informational only.
 
 **Does not count:** `ToolResultCompactionMiddleware` (per-tool output truncate/strip/hide).
 
