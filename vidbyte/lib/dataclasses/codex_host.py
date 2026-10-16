@@ -1,12 +1,12 @@
 """FILE: vidbyte/lib/dataclasses/codex_host.py
 
-PURPOSE: Defines the fifteen validated records CodexHost takes and returns: the spawn request and goal, turn handles and snapshots, readiness and rate limits, model and thread listings, usage, review targets and the problem record every failure carries.
-ROLE IN CODEBASE: The data layer under vidbyte/harnesses/native/codex/ (the host and its translators) and vidbyte/tools/builtins/codex/ (the fifteen tools), which build and read these records; the Codex settings, input, result and usage records they hold come from vidbyte/lib/dataclasses/codex.py.
+PURPOSE: Defines the twenty validated records CodexHost takes and returns: the spawn request and goal, turn handles and snapshots, readiness and rate limits, model and thread listings, usage, review targets, the problem record every failure carries, and the thread-helper records (thread summaries, the stored goal, skill listings, and stored turns with their page).
+ROLE IN CODEBASE: The data layer under vidbyte/harnesses/native/codex/ (the host and its translators) and vidbyte/tools/builtins/codex/ (the twenty-six tools), which build and read these records; the Codex settings, input, result and usage records they hold come from vidbyte/lib/dataclasses/codex.py.
 ARCHITECTURE NOTE: Every record is frozen with slots and checks itself in __post_init__, raising ConfigurationError that names the field; the one exception is a USER approvals reviewer, refused with the CodexAgentError the host's tools report (D-16). Behaviour that acts on these records lives in the host, never here, and every runtime import stays inside vidbyte.lib.
 COMMON MODIFICATION PATTERNS: Add a field with its check in the same record's __post_init__, reusing the codex.py helpers; a new record is added here and to the alphabetical __all__.
 KNOWN EDGE CASES: bool is an int, so every integer check refuses bool first; NaN and infinity fail the finite checks; vendor text such as plan types and reasoning efforts stays str because Codex owns those open sets.
-RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.5 and 9.1)
-TESTS: tests/features/codex_host/test_codex_host_records.py
+RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.5 and 9.1); docs/spec/codex-host-thread-helpers/spec.md (sections 8.5 and 9.1)
+TESTS: tests/features/codex_host/test_codex_host_records.py and tests/features/codex_host/test_codex_host_helper_surface.py
 """
 
 from __future__ import annotations
@@ -20,8 +20,10 @@ from vidbyte.lib.constants.codex import (
     CODEX_HOST_MIN_EXCLUSIVE_SECONDS,
     CODEX_HOST_MIN_TOKEN_LIMIT,
     CODEX_HOST_USER_REVIEWER_TEXT,
+    CODEX_THREAD_SUMMARY_HARNESS,
 )
 from vidbyte.lib.dataclasses.codex import (
+    CodexItem,
     CodexRunInput,
     CodexRunResult,
     CodexSubagentSettings,
@@ -44,6 +46,7 @@ from vidbyte.lib.enums.codex import (
     CodexHostOperation,
     CodexReviewTargetKind,
     CodexSandboxReadiness,
+    CodexSkillScope,
     CodexThreadStatus,
     CodexTurnStatus,
 )
@@ -492,6 +495,103 @@ class CodexReviewTarget:
             raise ConfigurationError(f"Codex review target {self.kind.value} needs {', '.join(needed) or 'no fields'}; got empty {missing} and unused {unused}.")
 
 
+@dataclass(frozen=True, slots=True)
+class CodexThreadSummary:
+    """One Codex thread in the cross-harness summary shape: ids, title, times, parent and model."""
+
+    harness: str = field(default=CODEX_THREAD_SUMMARY_HARNESS, init=False)
+    thread_id: str
+    title: str | None
+    created_at: int
+    updated_at: int
+    parent_thread_id: str | None
+    model: str
+
+    def __post_init__(self) -> None:
+        _require_text("Codex thread summary", "thread_id", self.thread_id)
+        _reject_wrong_type("Codex thread summary", "title", self.title, str, optional=True)
+        _require_non_negative_int("Codex thread summary", "created_at", self.created_at)
+        _require_non_negative_int("Codex thread summary", "updated_at", self.updated_at)
+        _reject_wrong_type("Codex thread summary", "parent_thread_id", self.parent_thread_id, str, optional=True)
+        _reject_non_str("Codex thread summary", {"model": self.model})
+
+
+@dataclass(frozen=True, slots=True)
+class CodexThreadGoal:
+    """A thread's stored goal as Codex reports it: objective, status, budget and use so far."""
+
+    thread_id: str
+    objective: str
+    status: CodexGoalStatus
+    token_budget: int | None
+    tokens_used: int
+    time_used_seconds: int
+    created_at: int
+    updated_at: int
+
+    def __post_init__(self) -> None:
+        _require_text("Codex thread goal", "thread_id", self.thread_id)
+        _require_text("Codex thread goal", "objective", self.objective)
+        _reject_wrong_type("Codex thread goal", "status", self.status, CodexGoalStatus)
+        # NONE means "no goal", which a stored goal can never be.
+        if self.status is CodexGoalStatus.NONE:
+            raise ConfigurationError("Codex thread goal status must be a goal status other than NONE.")
+        _reject_optional_count("Codex thread goal", {"token_budget": self.token_budget})
+        counts = {"tokens_used": self.tokens_used, "time_used_seconds": self.time_used_seconds, "created_at": self.created_at, "updated_at": self.updated_at}
+        for field_name, value in counts.items():
+            _require_non_negative_int("Codex thread goal", field_name, value)
+
+
+@dataclass(frozen=True, slots=True)
+class CodexSkillInfo:
+    """One skill Codex lists for a folder: its name, description, SKILL.md path, scope and switch."""
+
+    name: str
+    description: str
+    path: str
+    scope: CodexSkillScope
+    enabled: bool
+
+    def __post_init__(self) -> None:
+        _require_text("Codex skill info", "name", self.name)
+        _reject_non_str("Codex skill info", {"description": self.description})
+        _require_text("Codex skill info", "path", self.path)
+        _reject_wrong_type("Codex skill info", "scope", self.scope, CodexSkillScope)
+        _require_bool("Codex skill info", "enabled", self.enabled)
+
+
+@dataclass(frozen=True, slots=True)
+class CodexStoredTurn:
+    """One stored turn of a thread with every item Codex kept for it, in order."""
+
+    turn_id: str
+    status: CodexTurnStatus
+    final_response: str
+    error_message: str
+    started_at: int | None
+    completed_at: int | None
+    items: tuple[CodexItem, ...]
+
+    def __post_init__(self) -> None:
+        _require_text("Codex stored turn", "turn_id", self.turn_id)
+        _reject_wrong_type("Codex stored turn", "status", self.status, CodexTurnStatus)
+        _reject_non_str("Codex stored turn", {"final_response": self.final_response, "error_message": self.error_message})
+        _reject_optional_count("Codex stored turn", {"started_at": self.started_at, "completed_at": self.completed_at})
+        _reject_bad_tuple("Codex stored turn", "items", self.items, CodexItem)
+
+
+@dataclass(frozen=True, slots=True)
+class CodexTurnPage:
+    """One page of a thread's stored turns, oldest first, and the cursor for the next page."""
+
+    turns: tuple[CodexStoredTurn, ...]
+    next_cursor: str
+
+    def __post_init__(self) -> None:
+        _reject_bad_tuple("Codex turn page", "turns", self.turns, CodexStoredTurn)
+        _reject_non_str("Codex turn page", {"next_cursor": self.next_cursor})
+
+
 __all__ = [
     "CodexGoal",
     "CodexModelInfo",
@@ -500,11 +600,16 @@ __all__ = [
     "CodexRateLimits",
     "CodexReadiness",
     "CodexReviewTarget",
+    "CodexSkillInfo",
     "CodexSpawnRequest",
+    "CodexStoredTurn",
+    "CodexThreadGoal",
     "CodexThreadInfo",
     "CodexThreadPage",
+    "CodexThreadSummary",
     "CodexThreadUsage",
     "CodexTurnHandle",
+    "CodexTurnPage",
     "CodexTurnSnapshot",
     "CodexTurnSummary",
     "CodexTurnUsage",
