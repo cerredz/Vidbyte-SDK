@@ -150,11 +150,16 @@ class GrokHelperRun:
         home = GrokStore.home(request, errors)
         files = await asyncio.to_thread(GrokStore.threads, home, request, errors)
 
+        # Keep only the newer copy of an id two groups hold, before any
+        # match, so an older copy's texts can never match (spec INV-7).
+        winners = set(NativeThreadListing.newest((found.summary for found in files), cutoff=None, limit=None))
+        current = [found for found in files if found.summary in winners]
+
         # Keep the threads whose title, session summary or last-turn
         # summary holds the query literally, in any letter case; the
         # query never reaches a child (spec INV-9).
         query = request.query or ""
-        matching = (found.summary for found in files if NativeThreadListing.matches(found.search_text, query))
+        matching = (found.summary for found in current if NativeThreadListing.matches(found.search_text, query))
 
         # Newest first, one entry per id, at most limit.
         return NativeThreadListing.newest(matching, cutoff=None, limit=request.limit)
