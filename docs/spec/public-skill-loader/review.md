@@ -102,3 +102,21 @@ MERGEABLE AFTER FIXES — One confirmed Major remains, R-C11, and it needs spec 
 - The loader's credential path: `ProviderModelRegistry.resolve_api_key`, `get_default_endpoint`, and `get_api_key_env_var` are AST-identical between `c9d31a7f` and HEAD, and `VIDBYTE_API_KEY_PREFIX` is unchanged since v0.3.0. INV-9 holds.
 - The skill entries keep `api_key=` (`AnthropicSkill`, `OpenAISkill`) and `token=` (`GitHubSkill`). #1027 renamed only the agent and config parameters.
 - `--check` reports the contract current at `fc0175da` (0.3.1, 643 exports). The pack plus the Jev area gives `493 passed, 1 skipped`, and the tree is clean.
+
+## S5 re-review round 2 (final; SOUND)
+
+Diff reviewed: delta `b02b45e6..acfd36be`, read against the full PR `0754e01f...acfd36be` · Lens: conformance (scoped to the 0.4.0 move; round 2 of 2, the cap) · Review: reports/S5-rereview-2.md
+
+R-1 to R-5 and R-C11 to R-C13 above are confirmed fixed by this round, and their rows are unchanged. This round's findings are R-C20 to R-C22, all Minor.
+
+### Verdict
+SOUND — The move to 0.4.0 is complete in all nine INV-16 places, and every factual claim in `docs/design/release-0-4-0.md` reproduces against git or a probe. No Blocker and no Major. Three Minors remain: the live PR title, which S6 owns, and two wording fixes in the release notes, which S5 iteration 3 closed.
+
+### Minor findings (fix if trivial, otherwise follow-ups)
+| ID | Where | Finding | Status |
+|---|---|---|---|
+| R-C20 | PR #1099 title (GitHub state; the spec title at `spec.md:3` and `:15` already reads "(SDK 0.4.0)") | The live title still reads `[WIP] feat: … (SDK 0.3.1)`. Main squash-merges with the PR title as the commit subject (`a7ed9cde`, `0754e01f`), so a merge from the UI would record 0.3.1 as the subject of the commit that ships 0.4.0 and carries the tag `v0.4.0`. Fix: when S6 writes the description, it also sets the title, for example `feat: Public skill loader: resolve every #904 skill source without JevAgent (SDK 0.4.0)`, with no `[WIP]`. | for S6 (GitHub state, no commit) |
+| R-C21 | `docs/design/release-0-4-0.md:13` | "#1103 to #1107 at the time of writing" was already stale: at review time the local `origin/main` ref listed #1103 to #1111, and nothing in the doc triggers a refresh before the tag. A maintainer tagging from it would omit shipped fixes. Fix: name the later fixes by a range that cannot expire, and keep #1104. | fixed @510ef3f3 |
+| R-C22 | `docs/design/release-0-4-0.md:7` | "raises `ConfigurationError` … when the argument is text or not a collection" is the pre-r4 wording. A generator is not a `collections.abc.Collection`, yet `SkillLoader` accepts it. INV-2 (r4) rejects text and any argument that is not an `Iterable`. "Takes a tuple or a list" matches the annotation and README:25, and stays. | fixed @0ae0c1c4, as "not an `Iterable`" (INV-2's and README:25's term) rather than "not iterable": a `__getitem__`-only object passes `iter()` yet is rejected (verify-log Iteration 3) |
+
+Follow-up, not a spec r6: spec §2 (`spec.md:71`) and AC-3 (`spec.md:229`) keep the pre-r4 phrase "text or not a collection", because INV-2 r4 governs.

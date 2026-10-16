@@ -235,3 +235,69 @@ Gate set (from context/code-map.md §1 and the S5 briefing §4; run from the wor
   - The doc's "#1103 to #1107 at the time of writing" reflects the local `origin/main` ref `aac190e9`, which was not fetched.
   - Refresh that line if `main` moves before the merge (row 16).
   - If `main` releases 0.4.0 first, D-15 flips.
+
+## Iteration 3 — 2026-10-15 22:44 (host clock) — agent report: reports/S5-repair-3.md
+
+**Defects in:**
+- R-C22 and R-C21, both Minor, both in `docs/design/release-0-4-0.md`, from re-review round 2 (SOUND, the cap). The orchestrator closed them now because a maintainer tags 0.4.0 from that doc (pipeline.md, 2026-10-15 23:00).
+- R-C20 (the PR title) is S6's, so this iteration did not touch it.
+- No red gate at the start (`3125d307`). Remote on `21bb77dd`, the last pushed head, was green: CI 38839690617 and Static policy 38839692956.
+
+**Hypotheses and attempts (in order):**
+- **R-C22, the wording.** The briefing's fix was "not a collection" → "not iterable". Before committing, I tested that wording against Python's own meaning of "iterable", the same standard the re-reviewer applied to "collection". Probe `scratchpad/r3/inv2_wording.py`, run at HEAD from an empty folder with `PYTHONPATH=<worktree>` (it printed `imported from …\worktrees\vidbyte-sdk-public-skill-loader\vidbyte\__init__.py`):
+
+  | Argument | `iter()` works | `isinstance(Iterable)` | `isinstance(Collection)` | `SkillLoader(...)` |
+  |---|---|---|---|---|
+  | generator | True | True | False | ACCEPTED |
+  | `__getitem__`/`__len__` class | True | False | False | REJECTED `{'entries_type': 'GetItemOnly'}` |
+  | `"abc"` | True | True | True | REJECTED `{'entries_type': 'str'}` |
+  | `None` | False | False | False | REJECTED `{'entries_type': 'NoneType'}` |
+
+  - Python's glossary counts a `__getitem__`-only object as iterable, and `iter()` accepts it, yet the loader rejects it. So "not iterable" would leave the same kind of gap R-C22 names, only in the opposite direction.
+  - The rule the code enforces is the `collections.abc.Iterable` check, which is INV-2's term ("one that is not an `Iterable`") and `vidbyte/agents/skills/README.md:25`'s.
+  - So the doc now says "not an `Iterable`". The change is the same size, and the phrase is exact.
+  - **Flip:** if the orchestrator wants plain English over the exact term, change those two tokens to "not iterable". The cost is imprecision on the `__getitem__` corner only.
+  - "Takes a tuple or a list" stays, as the re-reviewer confirmed.
+- **R-C21, the later-fixes line.**
+  - The local `origin/main` ref moved again after the re-review, with no fetch by this agent (the ref is shared with other worktrees). It is now `c04e5ef5`, and `git log --first-parent --oneline 0754e01f..origin/main` lists #1103 to #1112, 10 PRs, all `fix(...)`. A dated list cannot hold.
+  - The new range is exact on the tag, for two reasons. `git rev-list --first-parent origin/main | grep -c ^0754e01f` gives `1`, so `0754e01f` is on main's first-parent chain. And all 10 commits after it have one parent (squash merges).
+  - So on a tag cut on `main`, `git log --first-parent 0754e01f..v0.4.0` lists the later PRs plus #1099's own squash. Hence the doc says "lists them beside #1099".
+  - #1104's subject, "child runners carry the agent's api_keys and model_mode, and the grader's key check counts them", matches the kept mention.
+  - The bullet keeps the word "fixes" because all 10 are fixes. If a feature merges before the tag, the range still lists it.
+- **Scope check for the stages not run locally** (the briefing asked for this before relying on it). Nothing that a gate runs reads `docs/design/release-0-4-0.md`:
+  - `git grep -n "release-0-4-0" -- ':!docs/spec'` is empty.
+  - `git grep "docs/design" -- lint tests scripts pyproject.toml MANIFEST.in .github` finds only header `RELATED DOCS` lines and prose. The one path check, `test_harness_threads_errors.py:185`, tests other files' existence.
+  - Lint parses only Python files and `README.md` files (`lint/core/discovery.py:53-70`). Other rules use tracked file names only, and an edit leaves those unchanged.
+  - The build is plain `setuptools` (no setuptools-scm, no `MANIFEST.in`), and `[tool.setuptools.packages.find] include = ["vidbyte*"]` keeps `docs/` out of the wheel and sdist.
+  - So the source and package stages were left to remote CI, and lint was run locally anyway.
+- **Line endings.** Git warns "LF will be replaced by CRLF" on the edited files. This is harmless: each fix commit is 1 file, +1/-1, with no line-ending churn.
+
+**Changes:**
+
+| Commit | Change |
+|---|---|
+| `0ae0c1c4` | R-C22: `release-0-4-0.md:7`, "not a collection" → "not an `Iterable`". 1 line |
+| `510ef3f3` | R-C21: `release-0-4-0.md:13`, "#1103 to #1107 at the time of writing, among them #1104" → "`git log --first-parent 0754e01f..v0.4.0` lists them beside #1099. Among them is #1104". 1 line |
+| (this commit) | this entry; review.md section `## S5 re-review round 2 (final; SOUND)` (append only); `reports/S5-repair-3.md` |
+
+**Gate matrix out** (fix head `510ef3f3`, pushed; this docs-only commit is dispatched again, and its runs are in the S5-repair-3 STATUS):
+
+| Gate | Command | Result | Final lines |
+|---|---|---|---|
+| new tests (the pack) | `PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider tests/features/public_skill_loader` | PASS | `67 passed in 0.31s` |
+| lint | `python lint/run.py` | PASS | `S063 IMPROVED 4 -> 3. …` / `S064 RATCHETED: 4 known finding(s). …` / `SDK-LINT: PASS` (exit 0; 0 REGRESSED or ERRORED) |
+| contract | `PYTHONPATH=$(pwd) python scripts/generate-sdk-public-api.py --check` | PASS | `contracts/sdk-public-api.json is current at 013cf884fb9a532101bbbe128d9fde908b2fd131 (vidbyte-sdk 0.4.0, 643 exports).` |
+| version places | `git grep -n -e "0\.3\.1" -e "0, 3, 1" -- ':!docs'` | PASS | empty (`rc=1`) |
+| source stage | not run locally (scope check above) | n/a | remote CI below is the full-gate evidence |
+| package stage | not run locally (scope check above) | n/a | remote CI below is the full-gate evidence |
+| remote CI | `gh workflow run ci.yml`, run 38841931593 on `510ef3f3` | PASS | Source / Python 3.11, Source / Python 3.12, and Package all success. 3.11 `5851 passed, 56 skipped in 105.86s (0:01:45)` / `CI passed.`; 3.12 `5851 passed, 56 skipped, 19 warnings in 103.93s (0:01:43)` / `CI passed.`; Package `Installed vidbyte-sdk 0.4.0 passed smoke checks.` / `CI passed.` |
+| remote Static policy | `gh workflow run static-policy.yml`, run 38841933458 on `510ef3f3` | PASS | Static policy = success |
+
+**Still open:**
+- No finding in this iteration's scope is open.
+- For S6: R-C20, the PR title (set it to the spec's "(SDK 0.4.0)" title without `[WIP]`).
+- Follow-ups:
+  - spec §2 (`spec.md:71`) and AC-3 (`:229`) keep "not a collection", and INV-2 r4 governs;
+  - R-6 and R-7.
+- For the orchestrator: R-C22's wording is "not an `Iterable`", not the briefed "not iterable" (evidence and flip above).
+- Inherited local source-stage failures (a), (c), and (d) were not re-run, because no source stage ran locally.
