@@ -15,7 +15,7 @@ started: 2026-10-15 18:04
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-15 18:04 | 2026-10-15 18:52 | reports/S0-scout.md | base_commit 5c08c35e; code-map.md (4 sections, ~90 files read) |
-| S1 spec + review | running (author r1 at 7df09460; review round 1 done: SOUND WITH FIXES, 0 Blocker / 8 Major / 3 Minor; author revision running) | 2026-10-15 19:05 | | reports/S1-spec-author.md; reports/S1-spec-review.md (pending) | spec r1 (~197 KB, 18 sections, 27 §12.3 rows, 40 new files, 42 public names; FR 18, NFR 11, AC 23, EC 72, INV 36, D 28, W 13, A 11, Q 10 non-blocking) |
+| S1 spec + review | running (r1 7df09460 → round 1 SOUND WITH FIXES, 0B/8M/3m → r2 25358062, all 11 accepted; scoped round 2 review running) | 2026-10-15 19:05 | | reports/S1-spec-author.md; reports/S1-spec-review.md (pending) | spec r1 (~197 KB, 18 sections, 27 §12.3 rows, 40 new files, 42 public names; FR 18, NFR 11, AC 23, EC 72, INV 36, D 28, W 13, A 11, Q 10 non-blocking) |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -50,6 +50,9 @@ started: 2026-10-15 18:04
 - 2026-10-16 17:06 — S1 review round 1 (resumed reviewer) DONE: SOUND WITH FIXES; 0 Blocker, 8 Major (R-1 prompt port contracts, R-2 fitter worst case, R-3 ledger signature order, R-4 nested repo with no commit fails `add -A`, R-5 D-2 lib `__call__`, R-6 worktree reader folder/index state, R-7 RUN step as `from_thread`, R-8 cmd.exe strips `^`), 3 Minor (R-9..R-11). The reviewer HELD D-6 (tree snapshots) as a recorded refinement of ledger 5 (Q-10 asks the owner).
 - 2026-10-16 17:08 — Orchestrator adjudication for the author revision: R-3 is mandatory, because ledger 2 and Prompt 2 fix `chain_threads(steps, template)` / `chain_threads([step_a, step_b], template=...)` and `verify_with(writer, verifiers, ...)`; adopt D-25's runner-up. R-2's optional [scope-adding] Q-11 (mark shortened inputs in StepOutcome) is recorded with default not built. A scoped round 2 review will follow, because accepted findings change §8, §8.5 and §9.
 
+- 2026-10-16 17:40 — Author revision r2 committed at 25358062 (`docs(spec): revise native-thread-compose spec r2 (review round 1, R-1 to R-11)`): all 11 findings accepted; R-3 restored the ledger signatures `chain_threads(steps, template=None, *, prompt)` and `verify_with(writer, verifiers, *, prompt)`; EC-73..EC-76 added; Q-11 added (default not built); budget 40 new files, 9 modified (row 28 docstring-only edit of `native/__init__.py`). Spot-check: revision 2, 18 sections, §16 rows r1-1..r1-11 all dispositioned.
+- 2026-10-16 17:42 — Round 2 required by the playbook (accepted findings changed §8, §8.5, §9): launching a fresh scoped reviewer (report `reports/S1-spec-review-r2.md`). This is the last review round (cap 2).
+
 ## User replies (verbatim)
 - none (coordinator relay messages on 2026-10-15 20:0x and 2026-10-16 01:3x concerned rate-limit resumption only; no product decisions)
 
@@ -76,3 +79,6 @@ started: 2026-10-15 18:04
 - Test seams: bind each step with `<harness>_command` set to the stand-in argv; put real git on PATH (sandbox PATH holds only `bin`, `conftest.py:257`); commits in test repos need `-c user.name=… -c user.email=…`; `tempfile.tempdir` is the sandbox `tmp`, a sibling of `ws`; compose constants are read at call time (monkeypatchable via `vidbyte.lib.constants.native_compose`), but `NATIVE_ARGV_PROMPT_MAX_CHARS` is imported by name into the base record — *source:* S1 author.
 - `fake_harness.py` cannot yet vary its answer per launch, write into its workspace, or echo the key; extend only with scenario fields read via `.get` with a default; base tests stay unmodified — *source:* S1 author.
 - The package stage does not check the compose prompt files, so AC-21 needs an explicit look inside the built wheel — *source:* S1 author.
+- Spec r2 contract deltas: `ComposeGit.set_index` added; constants `COMPOSE_FIT_ROUNDS` and `COMPOSE_GIT_HEAD_TREE` removed; `THREAD_COMPOSE_ADD_LIKELY_CAUSE` and `THREAD_COMPOSE_ADD_NEXT_STEP` added; general composites `chain_threads(steps, template=None, *, prompt)` and `verify_with(writer, verifiers, *, prompt)`, aliases `(prompt, *, …)`; git arguments use `HEAD`, never `HEAD^{tree}` — *source:* S1 author r2.
+- On Python 3.11.0 build `JsonAnswer(...)` without a subscript (`JsonAnswer[X](...)` raises TypeError); `inspect.iscoroutinefunction(alias)` is False for the callable-instance aliases — *source:* S1 reviewer, author r2.
+- The 10 ported prompts must follow the §9.2 per-file port rules exactly (changing a port rule is Ask-first in §14); `json_answer` + schema is the only JSON contract; AC-21 forbids six named CLI texts in the ported files; C015 (source-stage lint) proves the prompt files ship; no README may live in `compose/prompts/` — *source:* S1 author r2.
