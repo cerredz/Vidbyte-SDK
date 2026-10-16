@@ -307,6 +307,38 @@ class TraceReplacementMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(decision.transform.metadata["scope"], "all_non_system")
         self.assertEqual(decision.transform.metadata["before_count"], 5)
 
+    async def test_composed_pass_reports_the_replacement_as_a_change(self) -> None:
+        # [Silent Failure] a composed pass reports its own equal counts, taken after the replacement, so without the changed flag MinCompactions saw 0.
+        presets = (
+            TraceReplacementCompactionMiddleware.trace_plus_strip_tool_results(keep_last_groups=1, artifact=_ARTIFACT),
+            TraceReplacementCompactionMiddleware.keep_recent_tail(keep_last_groups=1, compose_after="truncate_tool_results", artifact=_ARTIFACT),
+        )
+        for mw in presets:
+            with self.subTest(compose_after=mw.compose_after):
+                decision = await mw.before_model_call(_ctx(_provider_history()))
+                meta = decision.transform.metadata
+                self.assertLess(len(decision.transform.provider_messages), len(_provider_history()))
+                self.assertEqual(meta["before_count"], meta["after_count"])
+                self.assertIs(meta.get("changed"), True)
+
+    async def test_in_place_fallback_reports_the_rewrite_as_a_change(self) -> None:
+        # [Silent Failure] stripping tool bodies before any trace exists keeps the message count, yet the model sees a different history.
+        mw = TraceReplacementCompactionMiddleware.trace_fallback_to_mechanical(fallback_mode="strip_tool_result_bodies", fallback_options={})
+        decision = await mw.before_model_call(_ctx(_provider_history()))
+        meta = decision.transform.metadata
+        self.assertTrue(meta["fallback_used"])
+        self.assertEqual(meta["before_count"], meta["after_count"])
+        self.assertIn("[tool result stripped by compaction]", [m.get("content") for m in decision.transform.provider_messages])
+        self.assertIs(meta.get("changed"), True)
+
+    async def test_no_op_fallback_reports_no_change(self) -> None:
+        # [Hidden Assumption] a fallback that leaves the history untouched must still count as no compaction.
+        history = [{"role": "user", "content": "do X"}, {"role": "assistant", "content": "thinking"}]
+        mw = TraceReplacementCompactionMiddleware.trace_fallback_to_mechanical(fallback_mode="strip_tool_result_bodies", fallback_options={})
+        decision = await mw.before_model_call(_ctx(history))
+        self.assertEqual(list(decision.transform.provider_messages), history)
+        self.assertIs(decision.transform.metadata.get("changed"), False)
+
     async def test_family_presets_construct(self) -> None:
         # [Edge Case] every family preset constructs without error.
         TraceReplacementCompactionMiddleware.keep_recent_tail()
@@ -431,6 +463,16 @@ class TraceSummaryTailMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         decision = await mw.before_model_call(_ctx(_provider_history()))
         contents = [m.get("content") for m in decision.transform.provider_messages]
         self.assertTrue(any("summary of" in str(c) for c in contents))
+
+    async def test_same_size_rebuild_reports_a_change(self) -> None:
+        # [Silent Failure] one tool call and its result become the trace and the tail summary, 2 -> 2, which the counts alone read as no compaction.
+        history = [{"role": "assistant", "tool_calls": [{"id": "c1", "function": {"name": "lookup"}}]}, {"role": "tool", "tool_call_id": "c1", "content": "RESULT"}]
+        mw = TraceSummaryTailCompactionMiddleware.trace_then_summarize_tail(FakeSummarizer(), keep_last_groups=1, artifact=_ARTIFACT)
+        decision = await mw.before_model_call(_ctx(history))
+        meta = decision.transform.metadata
+        self.assertEqual((meta["before_count"], meta["after_count"]), (2, 2))
+        self.assertEqual([m.get("content") for m in decision.transform.provider_messages][1], "summary of 2 messages")
+        self.assertIs(meta.get("changed"), True)
 
     async def test_requires_summarizer(self) -> None:
         # [Hidden Assumption] a missing summarizer fails loudly.
