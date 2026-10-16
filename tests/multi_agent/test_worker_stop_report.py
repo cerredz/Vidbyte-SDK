@@ -193,7 +193,8 @@ class WorkerLimitStopTeamTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(task.result)
         self.assertEqual([(item.code, item.retryable, dict(item.metadata)) for item in task.blockers], [("worker_stopped", True, {"stop_reason": "max_iterations"})])
         self.assertFalse(result.completed)
-        self.assertEqual(result.stop_reason, MultiAgentStopReason.MAX_ROUNDS)
+        # The failed dispatch and the two rejected finishes are three stalls; since #1122 that triggers a replan, and none are allowed.
+        self.assertEqual(result.stop_reason, MultiAgentStopReason.MAX_REPLANS)
 
     async def test_repeated_limit_stops_end_in_blocked_after_max_attempts(self) -> None:
         # [Edge Case] The failure is retryable, but the ledger still bounds re-dispatches by max_task_attempts.
