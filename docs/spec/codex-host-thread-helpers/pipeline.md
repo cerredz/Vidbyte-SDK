@@ -20,8 +20,8 @@ Existing-PR run: no new branch, no new PR. Adds to draft PR #1055 on `feat/codex
 | S0 worktree + capture + recon | done | 22:30 | 23:25 | reports/S0-scout.md | base_commit c181be65; code-map.md (4 sections, ~30 files) |
 | S1 spec + review | done | 23:28 | 10-16 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | spec r3 bd20f6f7 approved; 2 rounds (SOUND WITH FIXES ×2), 22 findings applied; 12 methods, 11 tools → 26, 4 codes, 5 records, 1 enum, 4 new files; 0 blocking Q |
 | S2 tests | done | 10-16 | 10-16 | reports/S2-test-author.md | 76 new tests in 5 files; red confirmed (area 91 failed / 537 passed = 76 new + 14 authorized-pin + 1 inherited); S2_HEAD 33787d9a |
-| S3 implement | pending | | | | |
-| S4 adversarial review | pending | | | | |
+| S3 implement | done | 10-16 | 10-16 | reports/S3-implementer.md | S3_HEAD c81ba632 pushed (ff) to PR #1055 (draft, title unchanged); 18/18 rows, 4 new files / 20 classes (budget exact); area 673 passed + 1 inherited; SDK-LINT PASS; run_ci source 1 inherited fail / 5952 passed; package CI passed; semgrep 0 findings; remote CI 38893453043 + static 38893455393 success |
+| S4 adversarial review | running | 10-16 | | reports/S4-review-*.md | |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
@@ -47,6 +47,8 @@ Existing-PR run: no new branch, no new PR. Adds to draft PR #1055 on `feat/codex
 - 2026-10-16 — S2 author died mid-run in the outage with work uncommitted; resumed the same agent via SendMessage from its red run (coordinator instruction). It committed aeeee55b (tests+plan), 50463bb6 (proof), 33787d9a (report). S2_HEAD = 33787d9a.
 - 2026-10-16 — S2 author suggested S3 reword `vidbyte/tools/toolsets/__init__.py:11` ("One tool per CodexHost function"); DENIED for S3: that line is pinned at test_codex_host_packaging.py:242 and spec Q-18 defaults to not rewording. Spec wins.
 - 2026-10-16 — S2 author validated its tests against a scratch implementation kept in the scratchpad only (45/45 one-rule mutations caught). S3 is told not to read the scratchpad (except the schema dir) so the implementation stays independent of it.
+- 2026-10-16 — S3 installed semgrep into the worktree venv, which pulled ~40 packages (incl. mcp 1.23.3, not a project dependency). Orchestrator rebuilt the worktree venv fresh at the same path (`pip install -e .[dev,codex]`, 56 packages = exactly pyproject + extras, as CI installs) and created a separate semgrep venv C:/Users/422mi/vidbyte-repos/worktrees/.venvs/codex-host-semgrep (semgrep==1.170.1, mcp<2). Re-ran area suite in the clean venv: 1 failed (inherited), 673 passed. Semgrep: `Ran 1 rule on 980 files: 0 findings`. — environment problem, no source touched.
+- 2026-10-16 — S4 diff base = c181be65 (the merge commit = BASE_COMMIT), not origin/main: `origin/main...HEAD` would re-review all of PR #1055's original CodexHost, which already had its own pipeline review. DIFF_HEAD = S3_HEAD c81ba632.
 
 ## User replies (verbatim)
 - none
@@ -99,3 +101,9 @@ Existing-PR run: no new branch, no new PR. Adds to draft PR #1055 on `feat/codex
 - A skills/list failure inside a skill run keeps operation `list_codex_skills`; not-found/disabled skill carries the run's own operation. — *source:* S2
 - Compact reserves the thread and releases it in `finally` (after failure, cancel, goal_unfinished); its resume params equal those continue_codex_thread sends. — *source:* S2
 - Existing test name `test_toolset_holds_the_fifteen_tools_with_their_spec_schemas` keeps its name but checks 26. — *source:* S2
+- S3_HEAD = c81ba632; new files vidbyte/harnesses/native/codex/{thread_helpers.py (279), skill_functions.py (251)}, vidbyte/tools/builtins/codex/{thread_helpers.py, skill_functions.py}; host.py 891 lines. — *source:* S3
+- Lint and semgrep scan only git-tracked files; `git add -N` a new module before trusting either (a C002 finding slipped past P3 that way). — *source:* S3
+- Semgrep command: `PATH="C:/Users/422mi/vidbyte-repos/worktrees/.venvs/codex-host-semgrep/Scripts:$PATH" C:/Users/422mi/vidbyte-repos/worktrees/.venvs/codex-host-semgrep/Scripts/pysemgrep scan --error --config .semgrep/typed-mapping-boundary-policy.yml vidbyte` (plain `semgrep` launcher picks the global pysemgrep and crashes on mcp 2.x). Never install semgrep into the worktree venv. — *source:* orchestrator
+- Remote CI on HEAD is green even though the inherited test fails locally (CI's merge-base context differs). — *source:* orchestrator
+- Helper `_reject_skill_arguments` avoids "request" in its name (lint A002). `CODEX_HOST_INPUT_CHECK_ATTEMPTS` kept its spec name and lint passes. — *source:* S3
+- CodexHostTools class docstring in toolsets/codex.py still says "one agent tool per CodexHost function" (unpinned; the pinned line is toolsets/__init__.py:11, Q-18 default not reworded). — *source:* S3
