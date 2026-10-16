@@ -52,6 +52,23 @@ def _two_lookup_history(provider: str) -> tuple[dict[str, object], ...]:
     return (ask, *_lookup_pair(provider, "A", "out A"), *_lookup_pair(provider, "B", "out B"))
 
 
+def _write_file_history(contents: Sequence[object]) -> tuple[dict[str, object], ...]:
+    # Returns a coding-agent history: one write_file call per content, each sending a whole module (~1,000 tokens) as arguments.
+    history: list[dict[str, object]] = [{"role": "user", "content": "write the modules"}]
+    for index, content in enumerate(contents, start=1):
+        arguments = '{"path": "m%d.py", "content": "%s"}' % (index, "x" * 4000)
+        history.append({"role": "assistant", "content": content, "tool_calls": [{"id": f"c{index}", "type": "function", "function": {"name": "write_file", "arguments": arguments}}]})
+        history.append({"role": "tool", "tool_call_id": f"c{index}", "content": "ok"})
+    return tuple(history)
+
+
+_CALL_TURN_CONTENTS = {
+    "none": (None, None, None),
+    "narrated": ("Writing m1.py now.", "", "Writing m3.py now."),
+    "text parts": ([{"type": "text", "text": "Writing m1.py now."}], [], [{"type": "text", "text": "Writing m3.py now."}]),
+}
+
+
 def _gemini_tool_history(result: RuntimeToolResult) -> tuple[dict[str, object], ...]:
     # Returns a Gemini history whose one tool result is written by ToolsFormatter, so a failure has the real error-response shape.
     call = RuntimeToolCall(result.tool_name, {"q": result.tool_name})
@@ -574,9 +591,44 @@ class DeterministicStrategyTests(unittest.IsolatedAsyncioTestCase):
         def call(call_id: str, text: str) -> dict[str, object]:
             return {"role": "assistant", "content": text, "tool_calls": [{"id": call_id, "type": "function", "function": {"name": "lookup", "arguments": "{}"}}]}
         history = ({"role": "user", "content": "go"}, call("c1", "a"), {"role": "tool", "tool_call_id": "c1", "content": "ok"}, call("c2", "x" * 50), {"role": "tool", "tool_call_id": "c2", "content": "fact"})
-        after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.SALIENCE_SCORE_EVICTION, options={"max_messages": 10, "max_tokens": 8, "token_counter": len})
+        # Each call also costs its 18-character signature now: the c1 pair is 21, the user turn 2, and the c2 pair 72.
+        after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.SALIENCE_SCORE_EVICTION, options={"max_messages": 10, "max_tokens": 30, "token_counter": len})
         self.assertEqual(list(after), list(history[:3]))
         _assert_valid_tool_transcript(self, after)
+
+    async def test_trim_to_token_budget_counts_a_narrated_call_turns_arguments(self) -> None:
+        # [Silent Failure] A chat call turn with text content ("", a narration, or text parts) is charged for its arguments, as a None-content turn is.
+        for name, contents in _CALL_TURN_CONTENTS.items():
+            with self.subTest(call_turn_content=name):
+                history = _write_file_history(contents)
+                after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.TRIM_TO_TOKEN_BUDGET, options={"max_tokens": 1500})
+                _assert_valid_tool_transcript(self, after)
+                self.assertEqual([call["id"] for m in after for call in m.get("tool_calls") or ()], ["c3"])
+                self.assertEqual(list(after), [history[0], history[-2], history[-1]])
+
+    async def test_group_token_budgets_count_a_narrated_call_turns_arguments(self) -> None:
+        # [Silent Failure] Whole-group budgets evict the same big narrated pairs that they evict for None-content call turns.
+        modes = ((CompactionMode.TRIM_WITH_PROVIDER_BOUNDARIES, {"max_tokens": 1500}), (CompactionMode.SALIENCE_SCORE_EVICTION, {"max_messages": 10, "max_tokens": 1500}))
+        for mode, options in modes:
+            baseline, _ = await ContextCompactionEngine().compact_provider_messages(_write_file_history(_CALL_TURN_CONTENTS["none"]), mode=mode, options=options)
+            for name, contents in _CALL_TURN_CONTENTS.items():
+                with self.subTest(mode=mode.value, call_turn_content=name):
+                    after, _ = await ContextCompactionEngine().compact_provider_messages(_write_file_history(contents), mode=mode, options=options)
+                    _assert_valid_tool_transcript(self, after)
+                    self.assertEqual(len([m for m in after if m.get("tool_calls")]), 1, "the 1,500-token budget fits one ~1,000-token write_file call")
+                    self.assertEqual([m.get("tool_call_id") for m in after], [m.get("tool_call_id") for m in baseline])
+
+    async def test_query_relevance_matches_a_narrated_call_turns_arguments(self) -> None:
+        # [Silent Failure] A chat call turn with "" or narrated content matches the query on its arguments, as its None-content twin does, so its pair survives.
+        def lookup(content: object, city: str) -> tuple[dict[str, object], dict[str, object]]:
+            call = {"role": "assistant", "content": content, "tool_calls": [{"id": f"call_{city}", "type": "function", "function": {"name": "lookup", "arguments": f'{{"q": "{city}"}}'}}]}
+            return call, {"role": "tool", "tool_call_id": f"call_{city}", "content": f"{city} weather: sunny"}
+        for content in (None, "", "Checking the forecast."):
+            with self.subTest(call_turn_content=content):
+                history = ({"role": "user", "content": "plan a trip"}, *lookup(content, "rome"), *lookup(content, "paris"))
+                after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.QUERY_RELEVANCE_FILTER, options={"query": "paris weather", "min_score": 1})
+                self.assertEqual(list(after), list(history[-2:]))
+                _assert_valid_tool_transcript(self, after)
 
     async def test_query_relevance_empty_query_and_lexical_matching(self) -> None:
         # [Hidden Assumption] Empty queries keep system/recent only, and punctuation/case tokenization is stable.

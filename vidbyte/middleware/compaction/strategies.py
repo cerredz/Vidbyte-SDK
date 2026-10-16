@@ -52,10 +52,20 @@ def _approximate_token_count(text: str) -> int:
     return max(1, math.ceil(len(text) / 4)) if text else 0
 
 
+def _message_text(message: ContextMessage) -> str:
+    # Returns the text a message sends, which token budgets count and relevance scoring reads.
+    # @intent call-turns-measure-their-call-arguments
+    # A chat call turn with text or list content (a narration, "" or []) also sends its tool calls, which that content leaves out,
+    # so their names and arguments join it; a None content and the Anthropic and Gemini shapes already render them.
+    raw = message.metadata.get("provider_message") if isinstance(message.metadata, Mapping) else None
+    narrated_call = isinstance(raw, Mapping) and isinstance(raw.get("content"), (str, list)) and bool(raw.get("tool_calls"))
+    return message.content + (tool_call_signature(message) or "") if narrated_call else message.content
+
+
 def _message_tokens(message: ContextMessage, token_counter: TokenCounter | None) -> int:
     # Counts one message body using an injected counter when available, otherwise the local heuristic.
     counter = token_counter or _approximate_token_count
-    return max(0, int(counter(message.content)))
+    return max(0, int(counter(_message_text(message))))
 
 
 def _message_identifier(message: ContextMessage, fallback_index: int) -> str:
@@ -99,8 +109,8 @@ def _message_tool_name(message: ContextMessage) -> str | None:
 
 
 def _message_terms(message: ContextMessage) -> set[str]:
-    # Tokenizes message content into lowercase terms for deterministic relevance scoring.
-    return {match.group(0).lower() for match in _TERM_PATTERN.finditer(message.content)}
+    # Tokenizes the text a message sends into lowercase terms for deterministic relevance scoring.
+    return {match.group(0).lower() for match in _TERM_PATTERN.finditer(_message_text(message))}
 
 
 def _replace_message_content(message: ContextMessage, content: str, metadata: Mapping[str, object]) -> ContextMessage:
