@@ -12,7 +12,8 @@ Purpose:
     reflection or retry trial, no critic review, no prosecutor/defender/judge
     stage, and no grader call.
 Architecture:
-    - ReflexionAbortTests: an aborted trial is returned, a failed trial still reflects.
+    - ReflexionAbortTests: an aborted trial is returned, a failed trial still reflects,
+      and an abort at the reflection call keeps the failed trial's accounting.
     - IndependentCriticAbortTests: an aborted producer is not reviewed, a normal candidate is.
     - ProsecutorDefenderJudgeAbortTests: an aborted producer is not debated, a normal candidate is.
     - MultiProviderGraderAbortTests: an aborted trial ends the run with its own text, a raised trial still drops out.
@@ -42,6 +43,7 @@ from vidbyte.context.algorithms.independent_critic import CriticFailurePolicy
 from vidbyte.context.algorithms.prosecutor_defender_judge import ProsecutorDefenderJudgeFailurePolicy
 from vidbyte.lib.config.constants import API_KEY_ENV_VARS
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig, AgentStopReason
+from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.middleware.base import AgentMiddleware
@@ -79,8 +81,26 @@ def _is_done(answer: str) -> FakeResponse:
     return FakeResponse("", {"output": [{"type": "function_call", "name": "isDone", "arguments": json.dumps({"final_answer": answer})}]})
 
 
+def _billed_call(name: str, tokens: int) -> FakeResponse:
+    # A tool-calling turn whose provider reports the tokens it billed.
+    return FakeResponse("", {"output": [{"type": "function_call", "name": name, "arguments": "{}"}], "usage": {"total_tokens": tokens}})
+
+
 def _honeypot() -> HoneypotToolMiddleware:
     return HoneypotToolMiddleware(trap_tool_names=["export_all_users"])
+
+
+class _KillSwitch(AgentMiddleware):
+    """Aborts the run before the Reflexion reflection call, or before the given 1-based model call."""
+
+    def __init__(self, *, at_call: int | None = None) -> None:
+        self.at_call = at_call
+        self.seen = 0
+
+    async def before_model_call(self, ctx: MiddlewareContext) -> MiddlewareDecision:
+        self.seen += 1
+        hit = self.seen == self.at_call if self.at_call is not None else ctx.metadata.get("reflexion_stage") == "reflect"
+        return MiddlewareDecision.abort("kill_switch") if hit else MiddlewareDecision.continue_()
 
 
 async def _run(runner: FakeRunner, algorithm: ContextWindowAlgorithm, *, middleware: tuple[AgentMiddleware, ...] = (), config: AgentRuntimeConfig | None = None) -> AgentResult:
@@ -123,6 +143,40 @@ class ReflexionAbortTests(_AbortAssertions):
         self.assertEqual(result.output, "fixed")
         self.assertEqual(len(runner.calls), 3)
         self.assertEqual(result.metadata["reflexion"]["trial_count"], 2)
+        self.assertEqual(result.metadata["reflexion"]["reflection_count"], 1)
+
+    async def test_abort_at_the_reflection_call_keeps_the_failed_trials_accounting(self) -> None:
+        # The trial runs lookup twice and stops at max_iterations; the kill switch then aborts the reflection call.
+        runner = FakeRunner([_billed_call("lookup", 7), _billed_call("lookup", 11), FakeResponse("Finish sooner."), _is_done("fixed")])
+
+        result = await _run(runner, ContextWindowAlgorithm(name="reflexion", reflexion=ReflexionAlgorithm(max_trials=3)), middleware=(_KillSwitch(),), config=AgentRuntimeConfig(max_iterations=2))
+
+        # The abort still ends the run, but the result reports the work the trial did, as a plain agent's abort would.
+        self.assertEqual(result.output, "Agent runtime stopped by middleware: kill_switch")
+        self.assertEqual(result.metadata["stop_reason"], AgentStopReason.MIDDLEWARE_ABORT.value)
+        self.assertEqual(result.metadata["middleware_abort_reason"], "kill_switch")
+        self.assertEqual(len(runner.calls), 2)
+        self.assertEqual(result.metadata["tool_call_count"], 2)
+        self.assertEqual([context.tool_name for context in result.metadata["tool_calls"]], ["lookup", "lookup"])
+        self.assertEqual(len(result.metadata["tool_call_states"]), 2)
+        self.assertEqual(result.metadata["iteration_count"], 2)
+        self.assertEqual(result.metadata["tokens_used"], 18)
+        self.assertEqual(result.metadata["reflexion"]["attempts"], ({"trial_index": 0, "stop_reason": "max_iterations", "tool_call_count": 2},))
+        self.assertEqual(result.metadata["reflexion"]["reflection_count"], 0)
+
+    async def test_abort_inside_a_retry_trial_reports_only_that_trials_accounting(self) -> None:
+        # Calls 1-2 are the first trial, 3 is the reflection, 4 is the retry's first call; the kill switch aborts call 5.
+        runner = FakeRunner([_billed_call("lookup", 7), _billed_call("lookup", 11), FakeResponse("Finish sooner."), _billed_call("lookup", 13), _is_done("fixed")])
+
+        result = await _run(runner, ContextWindowAlgorithm(name="reflexion", reflexion=ReflexionAlgorithm(max_trials=3)), middleware=(_KillSwitch(at_call=5),), config=AgentRuntimeConfig(max_iterations=2))
+
+        self.assertEqual(result.output, "Agent runtime stopped by middleware: kill_switch")
+        self.assertEqual(result.metadata["stop_reason"], AgentStopReason.MIDDLEWARE_ABORT.value)
+        self.assertEqual(len(runner.calls), 4)
+        self.assertEqual(result.metadata["tool_call_count"], 1)
+        self.assertEqual(result.metadata["iteration_count"], 1)
+        self.assertEqual(result.metadata["tokens_used"], 13)
+        self.assertEqual([attempt["tool_call_count"] for attempt in result.metadata["reflexion"]["attempts"]], [2, 1])
         self.assertEqual(result.metadata["reflexion"]["reflection_count"], 1)
 
 
