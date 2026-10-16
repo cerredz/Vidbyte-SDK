@@ -193,3 +193,63 @@ The control is a copy with only a no-op comment, and it stays red, so the green 
 1. **A second rebuild has the same defect.** `host.py:476` (spawn batch, after some turns started) rebuilds the error the same way and drops `error_type` and `thread_id` too. It is outside R-17's scope, and it has no test.
 2. **The mapper does not fill `thread_id` either.** `CodexErrorMapper.error` receives `thread_id` but writes it only into the message. Whether it should also set the #1116 field is a design choice for S5 or the owner. If it does, R-17 stops being latent and the stand-in mapper becomes the real one.
 3. **INV-22 and INV-35 could name every field.** Their spec text could say "every field" instead of listing code, operation and next step.
+
+## r5: R-18, the spawn-batch rebuild keeps every CodexAgentError field
+
+The orchestrator accepted r4's open item 1 as R-18, a sibling of R-17. The test is in commit `b769621c`, `test(codex): prove the spawn-batch rebuild keeps every CodexAgentError field [R-18]`. It stays red until S5 iteration 4 fixes both sites. The orchestrator ruled on r4's other open items: the mapper filling `thread_id` is a follow-up for the owner, with no test, and S5 rewords the spec text of INV-22 and INV-35.
+
+**The defect.** When `launch_codex_subagents` fails after some turns started, it interrupts them and then rebuilds the error at `vidbyte/harnesses/native/codex/host.py:476`. The rebuild passes only the message plus a count sentence, the code, the operation and the next step, so `error_type` and `thread_id` arrive empty. The governing rules are INV-37, AC-18, EC-52 and D-22 of `docs/spec/codex-host/spec.md`. EC-52 promises "the mapped error, saying k turns were started and interrupted", which means the mapped error itself, with the count added.
+
+**The test**, `test_codex_host_review_gaps.py::CodexHostLaunchRebuildFieldTests::test_a_launch_that_fails_midway_keeps_every_field_of_the_mapped_error`, uses the real path:
+
+1. The host opens.
+2. The connection's mapper is swapped for `FieldCarryingMapper`.
+3. The test launches three prompts, and the third `turn/start` fails with −32603 over the fake app-server.
+
+It then checks four things:
+
+- the original carried both fields;
+- the message is the original plus a sentence that names 2 turns as started and interrupted;
+- the sentence's words are right (the spec gives no literal for it, so only its words are checked, not its wording);
+- none of the 11 kept fields changed.
+
+**Where it lives.** The test goes in `test_codex_host_review_gaps.py`, because that module already holds the review-found launch windows. It does not go in `test_codex_host_threads.py`: this run's AC-35 says that file stays unedited.
+
+**Shared helper.** `FieldCarryingMapper`, `KEPT_ERROR_FIELDS` and `changed_error_fields` moved from `test_codex_host_goal_skills.py` to `codex_host_support.py`, because two modules now use them. The R-17 tests keep their names and fail exactly as they did in r4.
+
+**Red on the current code, failing only on the two dropped fields:**
+
+```
+E       - {'safe_runtime_details': ({'error_type': '',
+E       -                            'operation': 'launch_codex_subagents'},
+E       -                           {'error_type': 'InternalRpcError',
+E       -                            'operation': 'launch_codex_subagents'}),
+E       -  'thread_id': ('', 'thr-3')}
+FAILED tests/features/codex_host/test_codex_host_review_gaps.py::CodexHostLaunchRebuildFieldTests::test_a_launch_that_fails_midway_keeps_every_field_of_the_mapped_error
+```
+
+The message checks, which run first, pass. Five back-to-back runs of the module each gave `1 failed, 15 passed`.
+
+**Green in a scratch copy** (`s4-verifier/s2r5_green.py`; the copy is written to `mut/`, and the worktree is not touched). The analogous fix is:
+
+```python
+raise CodexAgentError(message, failure_code=exc.failure_code, operation=exc.operation, error_type=exc.safe_runtime_details.get("error_type", ""), next_step=exc.next_step, thread_id=exc.thread_id) from None
+```
+
+```
+X18_none: exit=1 :: ============================== 1 failed in 1.27s ==============================
+    VERIFIER-MUTANT vidbyte.harnesses.native.codex.host loaded_from_mutant=True
+X18_fix: exit=0 :: ============================== 1 passed in 1.11s ==============================
+    VERIFIER-MUTANT vidbyte.harnesses.native.codex.host loaded_from_mutant=True
+X17_X18_fix_area: exit=0 :: ================ 891 passed, 2 skipped, 1 deselected in 54.03s ================
+    VERIFIER-MUTANT vidbyte.harnesses.native.codex.host loaded_from_mutant=True
+    VERIFIER-MUTANT vidbyte.harnesses.native.codex.skill_functions loaded_from_mutant=True
+```
+
+`X18_none` is the control: a copy with only a no-op comment, and it stays red. With both fixes (R-17 and R-18), the whole area has no failures; the inherited test is deselected.
+
+**Gates on the worktree:**
+
+- **Area pytest:** `4 failed, 683 passed, 2 skipped in 52.22s`. The failures are the 2 R-17 tests, the R-18 test, and the inherited `test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes`.
+- **Lint:** `SDK-LINT: PASS`.
+- **CI view with openai-codex hidden:** `57 passed, 143 skipped`.
