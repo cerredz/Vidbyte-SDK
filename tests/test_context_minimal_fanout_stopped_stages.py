@@ -1,7 +1,7 @@
 """FILE: tests/test_context_minimal_fanout_stopped_stages.py
 
 PURPOSE: Regression tests proving a fanout stage agent stopped by its own limit is reported as not having answered.
-ROLE IN CODEBASE: Guards ContextMinimalFanoutParadigm's branch outcomes and environment overview against SDK stop notices.
+ROLE IN CODEBASE: Guards ContextMinimalFanoutParadigm's branch outcomes, environment overview, and split plan against stopped stage agents.
 ARCHITECTURE NOTE: Runs the real four-stage arun offline on scripted runners supplied through AgentRoleSettings.runner.
 COMMON MODIFICATION PATTERNS: Add a case here when a stage starts reading its agent's reply content.
 KNOWN EDGE CASES: A reply with no stop_reason counts as an answer, matching OutputShaping.is_deliverable.
@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import unittest
 
+from vidbyte.lib.errors import AgentExecutionError
 from vidbyte.paradigms import AgentRoleSettings, ContextMinimalFanoutParadigm, ContextMinimalFanoutResult, ContextMinimalFanoutSettings
 from vidbyte.tools import tool
 
@@ -62,8 +63,10 @@ class BranchRunner:
 
     def __init__(self, looping_id: str | None = None) -> None:
         self.looping_id = looping_id
+        self.prompts: list[str] = []
 
     def run(self, prompt: str, **kwargs: object) -> _Resp:
+        self.prompts.append(prompt)
         for prompt_id in ("p1", "p2"):
             if f'<implementation_prompt id="{prompt_id}"' in prompt:
                 return _Resp(PEEK if prompt_id == self.looping_id else _done(f"implemented {prompt_id}"))
@@ -78,17 +81,22 @@ def _planner() -> TurnRunner:
     return TurnRunner([("declare_output_schema", {"fields": PLAN_FIELDS})], PLAN_VALUES, _done("planned"))
 
 
+def _stopped_planner() -> TurnRunner:
+    # Writes the plan head and p1 (a plan that validates on its own), then only peeks until max_iterations stops it.
+    return TurnRunner([("declare_output_schema", {"fields": PLAN_FIELDS})], PLAN_VALUES[:3], PEEK)
+
+
 def _role(name: str, runner: object) -> AgentRoleSettings:
     # Small iteration caps so a looping agent stops on its own limit within a few scripted turns.
     return AgentRoleSettings(name=name, provider="deepseek", model_name="deepseek-v4-flash", api_keys=["sk-test"], runner=runner, tools=(peek,), agent_options={"max_iterations": 3})
 
 
 class FanoutStoppedStageTests(unittest.IsolatedAsyncioTestCase):
-    async def _run(self, context: TurnRunner, branches: BranchRunner, splitter: TurnRunner | None = None) -> ContextMinimalFanoutResult:
+    async def _run(self, context: TurnRunner, branches: BranchRunner, splitter: TurnRunner | None = None, adversarial: TurnRunner | None = None) -> ContextMinimalFanoutResult:
         settings = ContextMinimalFanoutSettings(
             context=_role("ctx", context),
             splitter=_role("split", splitter or _planner()),
-            adversarial=_role("adv", _planner()),
+            adversarial=_role("adv", adversarial or _planner()),
             implementation=_role("impl", branches),
             include_minimal_toolset=False,
         )
@@ -123,6 +131,33 @@ class FanoutStoppedStageTests(unittest.IsolatedAsyncioTestCase):
     async def test_context_prose_answer_without_summary_is_still_the_overview(self) -> None:
         result = await self._run(TurnRunner(_done(OVERVIEW)), BranchRunner())
         self.assertEqual(result.environment.summary.overview, OVERVIEW)
+
+    async def test_splitter_stopped_after_a_partial_plan_fails_the_run(self) -> None:
+        adversarial = _planner()
+        branches = BranchRunner()
+        with self.assertRaises(AgentExecutionError) as caught:
+            await self._run(_answering_context(), branches, splitter=_stopped_planner(), adversarial=adversarial)
+        self.assertEqual(caught.exception.details, {"role": "splitter", "stop_reason": "max_iterations"})
+        self.assertIn("splitter", str(caught.exception))
+        self.assertEqual(adversarial.prompts, [])
+        self.assertEqual(branches.prompts, [])
+
+    async def test_adversarial_round_stopped_after_a_partial_rewrite_fails_the_run(self) -> None:
+        adversarial = _stopped_planner()
+        branches = BranchRunner()
+        with self.assertRaises(AgentExecutionError) as caught:
+            await self._run(_answering_context(), branches, adversarial=adversarial)
+        self.assertEqual(caught.exception.details, {"role": "adversarial", "stop_reason": "max_iterations"})
+        self.assertIn("adversarial", str(caught.exception))
+        # The round was shown the complete plan, so only its own stop could have dropped p2.
+        self.assertIn("Bump api.", adversarial.prompts[0])
+        self.assertEqual(branches.prompts, [])
+
+    async def test_planners_that_finish_keep_the_full_plan(self) -> None:
+        result = await self._run(_answering_context(), BranchRunner())
+        self.assertEqual([split_prompt.id for split_prompt in result.plan.prompts], ["p1", "p2"])
+        self.assertEqual([output.prompt_id for output in result.outputs], ["p1", "p2"])
+        self.assertEqual(result.metadata["failed_count"], 0)
 
 
 if __name__ == "__main__":

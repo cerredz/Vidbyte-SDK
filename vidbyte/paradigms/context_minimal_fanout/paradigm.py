@@ -22,6 +22,7 @@ from typing import Any
 from vidbyte.agents import BaseAgent
 from vidbyte.lib.constants import RUNNER_TYPE_TEXT
 from vidbyte.lib.constants.outputs import OUTPUT_DELIVERABLE_STOP_REASONS
+from vidbyte.lib.errors import AgentExecutionError
 from vidbyte.middleware.builtins import CostBudgetMiddleware, TokenBudgetMiddleware
 from vidbyte.paradigms.base import ParadigmHarness
 from vidbyte.paradigms.context_minimal_fanout.prompts import ContextMinimalFanoutPrompts
@@ -98,7 +99,11 @@ class ContextMinimalFanoutParadigm(ParadigmHarness):
         builder = OutputSchemaBuilder()
         agent = self._build_planning_agent(settings.splitter, "splitter", builder, settings)
         message = self._build_splitter_message(prompt, environment)
-        await agent.arun(message)
+        reply = await agent.arun(message)
+        # @intent a-stopped-planner-never-shrinks-the-plan
+        # A planner stopped by its own limit or middleware may have written only part of the plan, so its snapshot is no plan.
+        if not self._answered(reply):
+            raise AgentExecutionError(f"The splitter agent stopped before finishing the split plan: {reply.metadata.get('stop_reason')}.", details={"role": "splitter", "stop_reason": reply.metadata.get("stop_reason")})
         return PromptSplitPlan.from_snapshot(builder.snapshot())
 
     async def _run_adversarial_loop(self, prompt: str, plan: PromptSplitPlan, environment: EnvironmentContext, settings: ContextMinimalFanoutSettings) -> PromptSplitPlan:
@@ -108,7 +113,11 @@ class ContextMinimalFanoutParadigm(ParadigmHarness):
             builder = OutputSchemaBuilder()
             agent = self._build_planning_agent(settings.adversarial, "adversarial", builder, settings)
             message = self._build_adversarial_message(prompt, current, environment)
-            await agent.arun(message)
+            reply = await agent.arun(message)
+            # @intent a-stopped-planner-never-shrinks-the-plan
+            # Each round rewrites the whole plan into a fresh builder, so a stopped round would replace the plan with a part of it.
+            if not self._answered(reply):
+                raise AgentExecutionError(f"The adversarial agent stopped before finishing the split plan: {reply.metadata.get('stop_reason')}.", details={"role": "adversarial", "stop_reason": reply.metadata.get("stop_reason")})
             current = PromptSplitPlan.from_snapshot(builder.snapshot())
             if not current.overlap_conflicts():
                 break
