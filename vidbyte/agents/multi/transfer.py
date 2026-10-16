@@ -23,6 +23,7 @@ from typing import Any
 
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.types import AgentInput, AgentMessage
+from vidbyte.lib.constants.outputs import OUTPUT_DELIVERABLE_STOP_REASONS
 from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentStopReason
 from vidbyte.lib.dataclasses.multi_agent import (
     AgentDispatch,
@@ -188,6 +189,12 @@ class AgentTransfer:
             reason = str(reply.metadata.get("middleware_abort_reason") or "middleware_abort")
             blocker = TaskBlocker(code="middleware_abort", message=f"Worker run stopped by middleware: {reason}", retryable=False)
             return AgentReport(task_id=dispatch.task_id, status=TaskStatus.BLOCKED, blockers=(blocker,))
+        # @intent limit-stops-are-failed-attempts
+        # A worker stopped by a budget, guard, or unmet output contract never reached an accepted answer, so the attempt failed.
+        stop_reason = reply.metadata.get("stop_reason")
+        if stop_reason is not None and stop_reason not in OUTPUT_DELIVERABLE_STOP_REASONS:
+            blocker = TaskBlocker(code="worker_stopped", message=f"Worker run stopped before answering: {stop_reason}", retryable=True, metadata={"stop_reason": str(stop_reason)})
+            return AgentReport(task_id=dispatch.task_id, status=TaskStatus.FAILED, blockers=(blocker,))
         # Non-blank text is usable output, but it is never promoted to verified evidence.
         content = reply.content.strip()
         if content:
