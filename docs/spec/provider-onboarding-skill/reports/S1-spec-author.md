@@ -205,3 +205,12 @@ I then set `status: approved` and moved the spec to revision 3.
 - AC 15 (AC-14 withdrawn), EC 61 (EC-1 withdrawn), FR 17 (FR-14 withdrawn), NFR 7.
 - D 29, T 6, W 6.
 - A 10 (A-10 withdrawn), Q 10. None is blocking.
+
+## 9. Revision r4 (2026-10-16): alignment with the S2 tests
+
+This was not a review round. I made the smallest edits that bring the spec into line with the 46 committed tests, covering the seven spec defects in the S2 report. They are recorded in §16 as rows s2-1 to s2-7. The status stays approved.
+
+**How I checked that the edits fit the tests:**
+- **The brief.** The brief test, `test_onboard_skill_contract.py::test_subagent_brief_carries_every_field_and_rule`, does not pin the PYTHONPATH wording. Rewording the brief therefore creates no new mismatch.
+- **The PYTHONPATH rule.** The X7 test bans `export PYTHONPATH` in shell commands, and `export PYTHONPATH=` anywhere. AC-8 now says exactly that.
+- **The spec's own checkers.** Both checklist checkers report `rows=33 problems=0`. The table check reports `table problems=0`, and `check_ids.py` is clean.
