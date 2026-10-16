@@ -82,6 +82,9 @@ from vidbyte.agents.contracts import (
 from vidbyte.agents.fallback import AgentFallback, FallbackTransform
 from vidbyte.agents.handoff import HandoffAgent
 from vidbyte.agents.infinite import (
+    InfiniteEvent,
+    InfiniteEventKind,
+    InfiniteHandoff,
     InfiniteMemoryAgent,
     InfiniteMemoryAgentSettings,
     InfiniteMemoryRuntime,
@@ -389,6 +392,9 @@ __all__ = [
     "CodingAgent",
     "ContinualTraceAgent",
     "HandoffAgent",
+    "InfiniteEvent",
+    "InfiniteEventKind",
+    "InfiniteHandoff",
     "InfiniteMemoryAgent",
     "InfiniteMemoryAgentSettings",
     "InfiniteMemoryRuntime",

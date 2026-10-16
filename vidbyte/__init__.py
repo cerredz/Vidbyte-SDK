@@ -9,7 +9,7 @@ Purpose:
     their category packages.
 Architecture:
     - VidbyteSDK: Root namespace client.
-    - Agent exports: BaseAgent, CodingAgent, CodingAgentSettings, CodingAgentTools, InfiniteMemoryAgent, InfiniteMemoryAgentSettings, InfiniteWorkspaceSettings, InfiniteMemoryPreset, AgentCard, AgentMessage, AgentRegistry, AgentRunnerConfig, AgentSpec.
+    - Agent exports: BaseAgent, CodingAgent, CodingAgentSettings, CodingAgentTools, InfiniteMemoryAgent, InfiniteMemoryAgentSettings, InfiniteWorkspaceSettings, InfiniteMemoryPreset, InfiniteEvent, InfiniteEventKind, InfiniteHandoff, AgentCard, AgentMessage, AgentRegistry, AgentRunnerConfig, AgentSpec.
     - Configuration exports: YamlLoader, AgentSettings, ToolDefinition, MiddlewareDefinition.
     - Tool exports: BaseTool, ToolActivity, ToolCall, ToolCallActivity, ToolExecutor, ToolParameter, ToolPermission, ToolRegistry, ToolResult, ToolSpec, ToolStatus, ToolsFormatter.
     - Middleware exports: AgentMiddleware, MiddlewarePipeline, policy events, and diagnostic hook invocations.
@@ -103,6 +103,9 @@ from vidbyte.agents import (
     FinalizationContext,
     GitHubSkill,
     HandoffAgent,
+    InfiniteEvent,
+    InfiniteEventKind,
+    InfiniteHandoff,
     InfiniteMemoryAgent,
     InfiniteMemoryAgentSettings,
     InfiniteWorkspaceSettings,
@@ -755,6 +758,9 @@ __all__ = [
     "CodingAgent",
     "CodingAgentSettings",
     "CodingAgentTools",
+    "InfiniteEvent",
+    "InfiniteEventKind",
+    "InfiniteHandoff",
     "InfiniteMemoryAgent",
     "InfiniteMemoryAgentSettings",
     "InfiniteMemoryPreset",
