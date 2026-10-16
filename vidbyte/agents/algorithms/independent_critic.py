@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Any
 
 from vidbyte.context.algorithms.independent_critic import CriticFailurePolicy, IndependentCriticAlgorithm
 from vidbyte.lib.agents.modality_detector import ModalityDetector
-from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
+from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig, AgentStopReason
 from vidbyte.lib.dataclasses.context import BaseAgentContext, BaseContext, ContextArtifact
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.strategies import AgentResult
@@ -68,6 +68,10 @@ class IndependentCriticRuntimeAlgorithm:
         artifacts = self._resolve_artifacts(context)
         tools = self._resolve_tools()
         candidate = await self._run_candidate(message, handle=handle, context=context, metadata=metadata, options=options, trace_context=trace_context)
+        # @intent middleware-abort-ends-the-run
+        # An aborted producer left the SDK's stop text, not a candidate, and the abort ends the run, so nothing is reviewed.
+        if candidate.metadata.get("stop_reason") == AgentStopReason.MIDDLEWARE_ABORT.value:
+            return candidate
         # Review on the model that produced the candidate, so a producer that failed over is not reviewed by the failed model.
         handle = self.runtime._active_handle(handle)
         try:
