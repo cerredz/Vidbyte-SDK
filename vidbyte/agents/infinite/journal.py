@@ -1,14 +1,14 @@
 """FILE: vidbyte/agents/infinite/journal.py
 
-PURPOSE: Defines InfiniteRunJournal, the append-only record of one InfiniteMemory run in .runs/<run_id>.jsonl: the task, every pair that started, every pair that finished with its result card, and how the run ended, so an interrupted run can resume without redoing finished pairs.
-ROLE IN CODEBASE: Started by InfiniteMemoryRuntime.arun (runtime.py) for a new run, or found by InfiniteMemoryAgent.resume (agent.py) for an interrupted one; written and read by the launch tool (launch.py) for every pair; read by the agent to brief a resumed root and by the launch tool to brief a re-run generator and to cap the number of agents.
+PURPOSE: Defines InfiniteRunJournal, the append-only record of one InfiniteMemory run in .runs/<run_id>.jsonl: the task, every pair that started, every pair that finished with its result card, and how the run ended (its stop reason, the root's final answer, and the notes the root wrote), so an interrupted run can resume without redoing finished pairs and a finished one can be handed off.
+ROLE IN CODEBASE: Started by InfiniteMemoryRuntime.arun (runtime.py) for a new run, or found by InfiniteMemoryAgent.resume (agent.py) for an interrupted one; written and read by the launch tool (launch.py) for every pair; read by the agent to brief a resumed root and to build a run's handoff, by the launch tool to brief a re-run generator and to cap the number of agents, and by InfiniteEvents (events.py) for a resumed or finished run's event.
 ARCHITECTURE NOTE: One JSON object per line, as spec section 9.1 documents. The bytes on disk belong to AppendOnlyJsonl (vidbyte/lib/util/jsonl.py), the SDK's canonical durable log: every record is written, flushed, and fsynced before the step it records counts as done, so a crash loses at most the record being written, which is then a torn final line that loading ignores and the next write cuts off. What each record means, and card serialization and parsing, live here, not on the record.
-FUNCTION INVENTORY: start writes run_started for a new run id; find validates a run id and loads the newest or the named unfinished journal; pair_started, pair_finished, and finish write one record each; finished, finished_children, interrupted_children, and agents_started read what was loaded or written; _parse turns the whole lines AppendOnlyJsonl.read returns into a journal; _append stamps one record and hands it to AppendOnlyJsonl.append.
+FUNCTION INVENTORY: start writes run_started for a new run id; find validates a run id and loads the newest or the named unfinished journal, or with unfinished=False the newest or the named run in any state; pair_started, pair_finished, and finish write one record each; finished, finished_children, interrupted_children, cards, interrupted, and agents_started read what was loaded or written; _parse turns the whole lines AppendOnlyJsonl.read returns into a journal; _append stamps one record and hands it to AppendOnlyJsonl.append.
 COMMON MODIFICATION PATTERNS: A new record type adds one InfiniteJournalEvent member, one writer method here, and one case in _parse; old journals without it must still load.
 WHAT NOT TO DO IN THIS FILE: 1. Do not batch records or skip fsync; resume trusts every record already on disk. 2. Do not rewrite a journal; only the torn final line is ever cut off. 3. Do not follow a run id that fails INFINITE_RUN_ID_PATTERN; it could name a path outside .runs/. 4. Do not write settings or keys into a record.
-KNOWN EDGE CASES: A final line without its newline that does not parse is torn and ignored; one that parses is kept, and the next write first ends it with a newline. Any other malformed line refuses the journal with its line number. A pair started twice (re-run after a resume) counts as two pairs toward max_agents. Run ids start with a UTC timestamp, so sorting file names newest first sorts runs newest first.
-RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 6.1 INV-25 to INV-28, and 9.1); vidbyte/agents/infinite/README.md
-TESTS: tests/features/infinite_memory_agent/test_infinite_memory_resume.py and tests/features/infinite_memory_agent/test_infinite_memory_delegation.py
+KNOWN EDGE CASES: A final line without its newline that does not parse is torn and ignored; one that parses is kept, and the next write first ends it with a newline. Any other malformed line refuses the journal with its line number. A pair started twice (re-run after a resume) counts as two pairs toward max_agents. Run ids start with a UTC timestamp, so sorting file names newest first sorts runs newest first. A run_finished record written before it carried answer and files still loads, with no answer and no root files; an answer that is not text, or files that are not a list of text, refuse the journal like any bad record.
+RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 6.1 INV-25 to INV-28, and 9.1); docs/spec/infinite-memory-events/spec.md (sections 9.1 and 9.2, D-29); vidbyte/agents/infinite/README.md
+TESTS: tests/features/infinite_memory_agent/test_infinite_memory_resume.py, tests/features/infinite_memory_agent/test_infinite_memory_delegation.py, tests/features/infinite_memory_agent/test_infinite_memory_events_stream.py, and tests/features/infinite_memory_agent/test_infinite_memory_handoff.py
 """
 
 from __future__ import annotations
@@ -40,11 +40,15 @@ from vidbyte.lib.util.jsonl import AppendOnlyJsonl
 class InfiniteRunJournal:
     """The append-only journal of one run: its task, the pairs started and finished, and how it ended."""
 
-    def __init__(self, path: Path, task: str, *, started: list[str] | None = None, cards: dict[str, InfiniteResultCard] | None = None, stop_reason: str | None = None, log: AppendOnlyJsonl | None = None) -> None:
+    def __init__(self, path: Path, task: str, *, started: list[str] | None = None, cards: dict[str, InfiniteResultCard] | None = None, stop_reason: str | None = None, answer: str | None = None, root_files: tuple[str, ...] = (), log: AppendOnlyJsonl | None = None) -> None:
         self.path = path
         self.run_id = path.stem
         self.task = task
         self.stop_reason = stop_reason
+        # The root's final answer and the notes it wrote, once the run
+        # has finished.
+        self.answer = answer
+        self.root_files = root_files
         self._started = started if started is not None else []
         self._cards = cards if cards is not None else {}
         # The durable file under the journal; a loaded journal passes
@@ -65,28 +69,34 @@ class InfiniteRunJournal:
         return journal
 
     @classmethod
-    def find(cls, workspace_root: Path, run_id: str | None) -> InfiniteRunJournal:
-        """Return the named unfinished run, or the newest unfinished run when run_id is None; raise ConfigurationError otherwise."""
+    def find(cls, workspace_root: Path, run_id: str | None, *, unfinished: bool = True) -> InfiniteRunJournal:
+        """Return the named unfinished run, or the newest unfinished run when run_id is None; with unfinished=False, the named or newest run in any state; raise ConfigurationError otherwise."""
         # @intent resume-only-a-safe-unfinished-run
         # A run id is checked against its pattern before it becomes a
         # path, so it can never lead outside .runs/. Only an unfinished
-        # run resumes, and nothing is written while looking.
+        # run resumes, while a handoff may read a run in any state, and
+        # nothing is written while looking.
         runs = Path(workspace_root) / INFINITE_RUNS_DIRNAME
         if run_id is not None and (not isinstance(run_id, str) or re.fullmatch(INFINITE_RUN_ID_PATTERN, run_id) is None):
             raise ConfigurationError(f"run_id must look like 20261015T024900Z-1a2b3c4d; got {run_id!r}.", details={"field": "run_id"})
+        # Without a run id, take the newest run that qualifies; journals
+        # are read newest first and only as far as needed.
         if run_id is None:
             paths = sorted((path for path in runs.glob("*.jsonl") if re.fullmatch(INFINITE_RUN_ID_PATTERN, path.stem)), reverse=True)
             loaded = (cls._parse(log, log.read()) for log in map(AppendOnlyJsonl, paths))
-            journal = next((candidate for candidate in loaded if candidate.stop_reason is None), None)
+            journal = next((candidate for candidate in loaded if candidate.stop_reason is None or not unfinished), None)
             if journal is None:
-                raise ConfigurationError(f"There is no unfinished run in {runs} to resume; start a new one with run().", details={"field": "run_id"})
+                problem = f"There is no unfinished run in {runs} to resume; start a new one with run()." if unfinished else f"There is no run in {runs}; run the agent first."
+                raise ConfigurationError(problem, details={"field": "run_id"})
             return journal
+        # With a run id, load that run, and refuse a finished one only
+        # when an unfinished run was asked for.
         path = runs / f"{run_id}.jsonl"
         if not path.is_file():
             raise ConfigurationError(f"There is no run {run_id} in {runs}.", details={"field": "run_id"})
         log = AppendOnlyJsonl(path)
         journal = cls._parse(log, log.read())
-        if journal.stop_reason is not None:
+        if unfinished and journal.stop_reason is not None:
             raise ConfigurationError(f"Run {run_id} already finished, so it cannot be resumed; start a new one with run().", details={"field": "run_id"})
         return journal
 
@@ -100,10 +110,12 @@ class InfiniteRunJournal:
         self._append(InfiniteJournalEvent.PAIR_FINISHED, {"key": key, "card": asdict(card)})
         self._cards[key] = card
 
-    def finish(self, stop_reason: str) -> None:
-        """Record that the root's loop returned, which closes the run to resume."""
-        self._append(InfiniteJournalEvent.RUN_FINISHED, {"stop_reason": stop_reason})
+    def finish(self, stop_reason: str, answer: str, files: tuple[str, ...]) -> None:
+        """Record that the root's loop returned, with its stop reason, its final answer, and the notes it wrote, which closes the run to resume."""
+        self._append(InfiniteJournalEvent.RUN_FINISHED, {"stop_reason": stop_reason, "answer": answer, "files": list(files)})
         self.stop_reason = stop_reason
+        self.answer = answer
+        self.root_files = tuple(files)
 
     def finished(self, key: str) -> InfiniteResultCard | None:
         """Return the recorded card of a finished pair, or None."""
@@ -117,6 +129,16 @@ class InfiniteRunJournal:
         """Return the names of pairs this agent launched that started but never finished, each once."""
         keys = dict.fromkeys(key for key in self._started if key.rpartition("/")[0] == parent_key and key not in self._cards)
         return tuple(key.rpartition("/")[2] for key in keys)
+
+    @property
+    def cards(self) -> tuple[InfiniteResultCard, ...]:
+        """Return the card of every finished pair at any depth, in finishing order."""
+        return tuple(self._cards.values())
+
+    @property
+    def interrupted(self) -> tuple[str, ...]:
+        """Return the keys of pairs at any depth that started but never finished, each once, in starting order."""
+        return tuple(dict.fromkeys(key for key in self._started if key not in self._cards))
 
     @property
     def agents_started(self) -> int:
@@ -133,6 +155,8 @@ class InfiniteRunJournal:
         started: list[str] = []
         cards: dict[str, InfiniteResultCard] = {}
         stop_reason: str | None = None
+        answer: str | None = None
+        root_files: tuple[str, ...] = ()
         for number, line in enumerate(text.split("\n"), start=1):
             if not line.strip():
                 continue
@@ -149,12 +173,18 @@ class InfiniteRunJournal:
                         lists = {field: tuple(card[field]) for field in ("entries", "dropped", "files")}
                         cards[str(record["key"])] = InfiniteResultCard(**{**card, **enums, **lists})
                     case InfiniteJournalEvent.RUN_FINISHED:
+                        # An older record has no answer or files; a
+                        # newer one must hold text and a list of text.
                         stop_reason = str(record["stop_reason"])
+                        answer, files = record.get("answer"), record.get("files", [])
+                        if not isinstance(answer, str | None) or not isinstance(files, list) or not all(isinstance(item, str) for item in files):
+                            raise TypeError("run_finished needs a text answer and a list of text files")
+                        root_files = tuple(files)
             except (ValueError, KeyError, TypeError, ConfigurationError) as exc:
                 raise ConfigurationError(f"The journal {path.name} has a bad record at line {number}; fix or remove that line before resuming.", details={"file": path.name, "line": number}) from exc
         if task is None:
             raise ConfigurationError(f"The journal {path.name} has no run_started record with its task, so it cannot be resumed.", details={"file": path.name})
-        return cls(path, task, started=started, cards=cards, stop_reason=stop_reason, log=log)
+        return cls(path, task, started=started, cards=cards, stop_reason=stop_reason, answer=answer, root_files=root_files, log=log)
 
     def _append(self, event: InfiniteJournalEvent, fields: Mapping[str, object]) -> None:
         # @intent every-record-is-durable-before-it-counts
