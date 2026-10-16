@@ -10,6 +10,7 @@ from vidbyte import FileContextItem as RootFileContextItem
 from vidbyte.context import (
     ContextManager,
     ContextWindow,
+    ContextWindowAlgorithm,
     DocumentContextItem,
     FileContextItem,
     MemoryContextItem,
@@ -17,6 +18,7 @@ from vidbyte.context import (
     TaskContextItem,
     TextContextItem,
     ToolCallContextItem,
+    ToolResultAdmission,
 )
 from vidbyte.context.primitives import TextContextItem as PrimitiveTextContextItem
 from vidbyte.lib.dataclasses import ContextItem, ContextResponse
@@ -126,6 +128,12 @@ class ContextManagementTests(unittest.TestCase):
         self.assertEqual(ContextWindow.preset.reflexion.name, "reflexion")
         self.assertEqual(ContextWindow.resolve_algorithm("compact_tool_outputs").name, "compact_tool_outputs")
         self.assertEqual(ContextWindow.resolve_algorithm("reflexion").name, "reflexion")
+
+    def test_negative_admission_cap_fails_at_construction(self) -> None:
+        # @intent admission-cap-fails-at-construction
+        # [Hidden Failure] The runtime caps tool output only when a tool returns, so a bad cap must not wait until mid-run to fail.
+        with self.assertRaisesRegex(ValueError, "max_tool_result_chars"):
+            ContextWindowAlgorithm(name="bad_compact", tool_result_admission=ToolResultAdmission.COMPACT, max_tool_result_chars=-1)
 
 
 if __name__ == "__main__":

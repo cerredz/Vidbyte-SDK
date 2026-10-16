@@ -57,10 +57,14 @@ class ContextWindowAlgorithm:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        # Verifies that at most one runtime context algorithm is configured.
+        # Verifies that at most one runtime context algorithm is configured and the admission cap is valid.
         active = [x for x in (self.reflexion, self.multi_provider_agentic_grader, self.prosecutor_defender_judge, self.independent_critic, self.trajectory_checkpoints, self.problem_space_search, self.error_correction) if x is not None]
         if len(active) > 1:
             raise ValueError("At most one runtime context-window algorithm can be configured.")
+        # @intent admission-cap-fails-at-construction
+        # The runtime applies this cap only when a tool returns, so a bad value must fail here, not mid-run.
+        if self.max_tool_result_chars < 0:
+            raise ValueError(f"max_tool_result_chars must be non-negative, got {self.max_tool_result_chars}.")
 
     def model_visible_tool_result(self, call: ToolCall, result: ToolResult) -> ToolResult:
 
