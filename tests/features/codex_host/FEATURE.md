@@ -97,6 +97,7 @@ The thread helpers add these (thread-helpers spec):
 - The turn listing or the goal read resumes a `notLoaded` thread → Codex can continue an unfinished goal as untracked turns.
 - Compact resumes a `notLoaded` thread with an unfinished goal → untracked, uncapped goal turns.
 - Compact holds no registry reservation, or keeps it after a failure or a cancel → a continue slips in during the compaction, or the thread stays busy forever.
+- Delete holds no registry reservation, or keeps it after a failure or a cancel → a continue or a review starts a paid turn on a thread being deleted, or the thread stays busy forever.
 - A goal run reads nothing back, or compares only the objective → a goal without its budget keeps spending. A mismatch with no cancel → the goal keeps running.
 - A skill match that ignores case, takes a disabled duplicate, or lists every installed skill in the error → the wrong skill, a refused skill, or an unbounded message.
 - A skill run with no read-back → Codex drops the skill entry, and the caller gets a handle for a plain prompt. A read-back with no deadline or attempt cap → it waits forever.

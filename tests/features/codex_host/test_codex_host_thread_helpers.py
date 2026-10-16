@@ -646,6 +646,79 @@ class CodexThreadReservationTests(_HelperCase):
         self.assertIsNone(await self.call(host.compact_codex_thread(thread.thread_id)))
         self.assertIsNone(await self.call(host.delete_codex_thread(thread.thread_id)))
 
+    async def test_a_delete_in_flight_holds_the_thread_until_it_ends(self) -> None:
+        """INV-9, AC-23's delete half and review R-4: while thread/delete waits on Codex, the thread is held.
+
+        Without the hold, a continue or a review passes the idle check and starts a paid turn on a thread being deleted.
+        """
+        from vidbyte.lib.dataclasses.codex_host import CodexReviewTarget
+        from vidbyte.lib.enums.codex import CodexReviewTargetKind
+
+        thread = self.server.seed_thread(completed_turns=1)
+        host = await self.opened()
+        hold = self.server.hold("thread/delete")
+        task = asyncio.ensure_future(host.delete_codex_thread(thread.thread_id))
+        await asyncio.to_thread(hold.wait_arrived)
+        self.remark()
+        refused = (
+            ("continue_codex_thread", lambda: host.continue_codex_thread(thread.thread_id, "x")),
+            ("start_codex_review", lambda: host.start_codex_review(thread.thread_id, CodexReviewTarget(kind=CodexReviewTargetKind.UNCOMMITTED_CHANGES))),
+            ("compact_codex_thread", lambda: host.compact_codex_thread(thread.thread_id)),
+            ("delete_codex_thread", lambda: host.delete_codex_thread(thread.thread_id)),
+        )
+        for name, start in refused:
+            with self.subTest(method=name):
+                error = await self.assert_codex_error(start(), "codex.session_busy")
+                self.assertEqual(error.operation, name)
+                self.assertEqual(error.message, BUSY_TEXT + thread_suffix(thread.thread_id))
+        self.assertEqual(self.sent(), [])
+        hold.release()
+        self.assertIsNone(await self.call(task))
+        self.assertNotIn(thread.thread_id, self.server.threads)
+        # Once the delete ends, the host holds the thread no more: the next calls pass the idle check and ask
+        # Codex, which no longer has the thread.
+        self.remark()
+        error = await self.assert_codex_error(host.continue_codex_thread(thread.thread_id, "Carry on."), "codex.session_not_found")
+        self.assertEqual(error.operation, "continue_codex_thread")
+        self.assertEqual([request.params["threadId"] for request in self.sent() if request.method == "thread/read"], [thread.thread_id])
+        self.assertFalse({"thread/resume", "turn/start"} & set(self.sent_methods()), self.sent_methods())
+        self.remark()
+        await self.assert_codex_error(host.delete_codex_thread(thread.thread_id), "codex.session_not_found")
+        self.assertEqual(self.sent_methods(), ["thread/read"])
+
+    async def test_a_failed_or_cancelled_delete_releases_the_thread(self) -> None:
+        """INV-9 and review R-4: a delete gives the thread back on every outcome, not only on success.
+
+        A failed delete leaves the thread stored. A cancelled delete is refused by Codex here, so the thread stays
+        stored too, and a compact and a delete on it must still go through.
+        """
+        thread = self.server.seed_thread(completed_turns=1)
+        host = await self.opened()
+        self.server.fail("thread/delete", self.fakes.FakeRpcError(-32603, "delete failed"), times=1)
+        error = await self.assert_codex_error(host.delete_codex_thread(thread.thread_id), "codex.api_error")
+        self.assertEqual(error.operation, "delete_codex_thread")
+        self.assertIn(thread.thread_id, self.server.threads)
+        # The failed delete gave the thread back: a compact goes through.
+        self.remark()
+        self.assertIsNone(await self.call(host.compact_codex_thread(thread.thread_id)))
+        self.assertEqual(self.sent_methods(), ["thread/read", "thread/compact/start"])
+
+        hold = self.server.hold("thread/delete")
+        task = asyncio.ensure_future(host.delete_codex_thread(thread.thread_id))
+        await asyncio.to_thread(hold.wait_arrived)
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await asyncio.wait_for(task, WAIT_SECONDS)
+        # Codex refuses the delete that was already sent, so the thread is still stored once its answer is written.
+        self.server.fail("thread/delete", self.fakes.FakeRpcError(-32603, "delete failed"), times=1)
+        hold.release()
+        await asyncio.to_thread(hold.wait_responded)
+        self.assertIn(thread.thread_id, self.server.threads)
+        # The cancelled delete gave the thread back too: a compact and then a delete go through.
+        self.assertIsNone(await self.call(host.compact_codex_thread(thread.thread_id)))
+        self.assertIsNone(await self.call(host.delete_codex_thread(thread.thread_id)))
+        self.assertNotIn(thread.thread_id, self.server.threads)
+
 
 if __name__ == "__main__":
     unittest.main()
