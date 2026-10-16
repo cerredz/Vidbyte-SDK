@@ -79,7 +79,11 @@ class InfiniteAgentMemory:
 
     def write_note(self, path: str, text: str, description: str | None) -> str:
         """Create or append to a note, counting a created file against this agent's allowance, and return the reply."""
-        created = self.workspace.write_note(path, text, description, by=self.key, run=self.run_id, may_create=self.created < INFINITE_NEW_FILES_PER_AGENT)
+        # @intent one-note-is-listed-once
+        # A model may spell one note several ways (./notes/a.md,
+        # notes\a.md), so files_written keeps the workspace's relative
+        # path, and the card and the verifier list each note once.
+        created, path = self.workspace.write_note(path, text, description, by=self.key, run=self.run_id, may_create=self.created < INFINITE_NEW_FILES_PER_AGENT)
         self.created += int(created)
         if path not in self.files_written:
             self.files_written.append(path)
@@ -87,7 +91,7 @@ class InfiniteAgentMemory:
 
     def edit_file(self, path: str, old_text: str, new_text: str) -> str:
         """Replace the one match of old_text in a note and return the reply."""
-        self.workspace.edit_file(path, old_text, new_text)
+        path = self.workspace.edit_file(path, old_text, new_text)
         if path not in self.files_written:
             self.files_written.append(path)
         return Prompts().get(Prompt.INFINITE_MEMORY_NOTE_SAVED_PROMPT).format(path=path)
