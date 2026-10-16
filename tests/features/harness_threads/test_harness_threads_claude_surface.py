@@ -203,10 +203,11 @@ def test_claude_thread_config_refuses_a_bad_field_naming_it(lib_api, field, bad)
     assert f"ClaudeThreadConfig.{field}" in str(caught.value), str(caught.value)
 
 
-def test_request_applies_the_claude_rules_only_to_claude(lib_api, sandbox) -> None:
+def test_request_applies_the_claude_rules_only_to_claude(lib_api, sandbox, pack) -> None:
     # INV-5 rules 1-2 / §9.1 / INV-20: Claude ids must be lowercase
     # UUIDs and Claude prompts may reach 200,000 characters; the other
-    # harnesses keep their own rules.
+    # harnesses keep their own rules (opencode still requires its
+    # provider/model).
     enums = lib_api.enums
     fields = {"prompt": "Explain.", "api_key": "sk-ant-key", "workspace": sandbox.workspace}
     uuid_id = "c3f73f50-b50c-4f3a-8369-f97267313173"
@@ -217,7 +218,8 @@ def test_request_applies_the_claude_rules_only_to_claude(lib_api, sandbox) -> No
             lib_api.NativeThreadRequest(harness=enums.NativeHarness.CLAUDE, verb=enums.NativeThreadVerb.FORK, thread_id=bad, **fields)
         assert "thread_id" in str(caught.value), bad
     for harness in (enums.NativeHarness.GROK, enums.NativeHarness.OPENCODE, enums.NativeHarness.MUSE):
-        assert lib_api.NativeThreadRequest(harness=harness, verb=enums.NativeThreadVerb.CONTINUE, thread_id="fix-login", **fields).thread_id == "fix-login"
+        model = {"model": pack.OPENCODE_MODEL} if harness is enums.NativeHarness.OPENCODE else {}
+        assert lib_api.NativeThreadRequest(harness=harness, verb=enums.NativeThreadVerb.CONTINUE, thread_id="fix-login", **fields, **model).thread_id == "fix-login"
     long_prompt = {**fields, "prompt": "p" * lib_api.constants.NATIVE_PROMPT_MAX_CHARS}
     assert len(lib_api.NativeThreadRequest(harness=enums.NativeHarness.CLAUDE, verb=enums.NativeThreadVerb.RUN, **long_prompt).prompt) == 200000
     with pytest.raises(lib_api.ConfigurationError):
