@@ -5,7 +5,7 @@ ROLE IN CODEBASE: Built by the developer and passed to InfiniteMemoryAgent (vidb
 ARCHITECTURE NOTE: Settings objects live in the owning agent's settings.py (AGENTS.md Placement Rules, exception 1). Every check runs in __post_init__, so a constructed object is always valid and nothing downstream checks it again. Paths are stored resolved and absolute, so a later change of the working directory never moves the project or the memory. Checking settings never touches the disk beyond reading: the workspace folder is created by InfiniteWorkspace, never here.
 FUNCTION INVENTORY: InfiniteWorkspaceSettings.__post_init__ is a narrated main function; _resolved_root checks and resolves root; _preset accepts the preset or its value; _seed_paths checks and resolves the seed files. InfiniteMemoryAgentSettings.__post_init__ is a narrated main function; _provider accepts the provider or its value; _validate_model checks the model against ProviderModelRegistry for that provider; _resolved_root_dir checks and resolves root_dir; _extra_tools checks the developer's tools against Tools(...) and the reserved names.
 COMMON MODIFICATION PATTERNS: A new setting adds one field, one check in its __post_init__, a named default in vidbyte/lib/constants/infinite.py, and one row in the folder README's limits table.
-WHAT NOT TO DO IN THIS FILE: 1. Do not create the workspace folder or any file here; a refused setting must leave the disk unchanged. 2. Do not put api_key in an error message or in repr. 3. Do not accept a bare string where a sequence is expected; it would split into characters.
+WHAT NOT TO DO IN THIS FILE: 1. Do not create the workspace folder or any file here; a refused setting must leave the disk unchanged. 2. Do not put api_keys or vidbyte_api_key in an error message or in repr. 3. Do not accept a bare string where a sequence is expected; it would split into characters.
 KNOWN EDGE CASES: root="" and root_dir="" are refused even though Path("") is the current folder. A seed file is checked to exist now and copied later, at agent construction. Two seed files with the same file name are refused, because both would land at seed/<name>. True is refused for every cap, although Python counts it as an int.
 RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 8.5 and 9.3); vidbyte/agents/infinite/README.md
 TESTS: tests/features/infinite_memory_agent/test_infinite_memory_contract.py
@@ -13,7 +13,7 @@ TESTS: tests/features/infinite_memory_agent/test_infinite_memory_contract.py
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
@@ -35,11 +35,14 @@ from vidbyte.lib.constants.infinite import (
     INFINITE_RESERVED_TOOL_NAMES,
     INFINITE_TOOL_RESULT_MAX_CHARS,
 )
+from vidbyte.lib.dataclasses.agents import ProviderKeys
 from vidbyte.lib.dataclasses.security import PermissionPolicy
 from vidbyte.lib.enums.infinite import InfiniteMemoryPreset
 from vidbyte.lib.enums.model_provider import ModelProvider
+from vidbyte.lib.enums.text_model import TextModelMode
 from vidbyte.lib.errors import ConfigurationError, ToolRegistrationError
 from vidbyte.lib.registries.models import ProviderModelRegistry
+from vidbyte.lib.registries.provider_keys import ProviderKeyMatcher
 from vidbyte.tools.adapters import ToolInput
 from vidbyte.tools.catalog import Tools
 
@@ -128,7 +131,8 @@ class InfiniteMemoryAgentSettings:
 
     root_dir keeps its raw type until __post_init__ checks it, because
     Path("") is the current folder. After __post_init__ it is a resolved
-    Path, provider is a ModelProvider, and tools is a tuple.
+    Path, provider is a ModelProvider, api_keys is the matched
+    ProviderKeys record, and tools is a tuple.
     """
 
     name: str
@@ -137,7 +141,7 @@ class InfiniteMemoryAgentSettings:
     model_name: str
     root_dir: str | Path
     workspace: InfiniteWorkspaceSettings
-    api_key: str | None = field(default=None, repr=False)
+    api_keys: ProviderKeys | Iterable[str | None] | None = field(default_factory=ProviderKeys, repr=False)
     temperature: float | None = None
     timeout_seconds: float | None = None
     tools: tuple[object, ...] = ()
@@ -152,6 +156,8 @@ class InfiniteMemoryAgentSettings:
     max_depth: int = INFINITE_DEFAULT_MAX_DEPTH
     max_parallel: int = INFINITE_DEFAULT_MAX_PARALLEL
     max_agents: int = INFINITE_DEFAULT_MAX_AGENTS
+    vidbyte_api_key: str | None = field(default=None, repr=False)
+    model_mode: TextModelMode = TextModelMode.AUTO
 
     def __post_init__(self) -> None:
         # @intent one-closed-surface-for-every-agent
@@ -181,11 +187,16 @@ class InfiniteMemoryAgentSettings:
             if not isinstance(getattr(self, name), kind):
                 raise ConfigurationError(f"InfiniteMemoryAgentSettings.{name} must be a {kind.__name__}; got {type(getattr(self, name)).__name__}.", details={"field": name})
 
-        # The key is text or None and never shown; the temperature and
-        # timeout are numbers or None, and BaseAgent checks their
-        # ranges.
-        if self.api_key is not None and not isinstance(self.api_key, str):
-            raise ConfigurationError(f"InfiniteMemoryAgentSettings.api_key must be text or None; got a {type(self.api_key).__name__}.", details={"field": "api_key"})
+        # Match the developer's keys once against the provider; the root
+        # and every subagent carry this one record, which is never shown.
+        matched = ProviderKeyMatcher.match(self.api_keys, primary=self.provider, vidbyte_api_key=self.vidbyte_api_key, field_name="InfiniteMemoryAgentSettings.api_keys")
+        object.__setattr__(self, "api_keys", matched)
+        object.__setattr__(self, "vidbyte_api_key", matched.vidbyte_api_key)
+        if not isinstance(self.model_mode, TextModelMode):
+            raise ConfigurationError(f"InfiniteMemoryAgentSettings.model_mode must be a TextModelMode value; got {self.model_mode!r}.", details={"field": "model_mode"})
+
+        # The temperature and timeout are numbers or None, and BaseAgent
+        # checks their ranges.
         for name in ("temperature", "timeout_seconds"):
             value = getattr(self, name)
             if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float))):

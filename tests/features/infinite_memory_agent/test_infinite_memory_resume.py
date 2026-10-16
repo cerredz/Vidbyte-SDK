@@ -379,7 +379,7 @@ def test_api_key_stays_out_of_the_settings_repr_the_journal_and_the_workspace(tm
     from vidbyte.agents.infinite import InfiniteMemoryAgent
 
     secret = "sk-live-SECRET-0123456789"
-    settings = build_settings(tmp_path, api_key=secret)
+    settings = build_settings(tmp_path, api_keys=[secret])
     assert secret not in repr(settings)
     agent = InfiniteMemoryAgent(settings)
     tree = ScriptedTree({ROOT: [launch(task("alpha")), reply("done")], **simple_pair("alpha", "ALPHA-SUMMARY")})

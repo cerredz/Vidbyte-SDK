@@ -269,6 +269,7 @@ INVALID_SETTINGS = (
     pytest.param("max_depth", lambda tmp: {"max_depth": 0}, ("max_depth", 0), id="max-depth-0"),
     pytest.param("max_parallel", lambda tmp: {"max_parallel": 0}, ("max_parallel", 0), id="max-parallel-0"),
     pytest.param("max_agents", lambda tmp: {"max_agents": 1}, ("max_agents", 1), id="max-agents-1"),
+    pytest.param("model_mode", lambda tmp: {"model_mode": "direct"}, ("model_mode", "direct"), id="model-mode-not-enum"),
     pytest.param(
         "max_file_tokens",
         lambda tmp: {"workspace": {"max_tokens": 1_000, "max_file_tokens": 1_001}},
