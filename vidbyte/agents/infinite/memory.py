@@ -27,8 +27,17 @@ from vidbyte.lib.constants.infinite import (
     INFINITE_REMEMBER_TOOL_NAME,
     INFINITE_WRITE_NOTE_TOOL_NAME,
 )
-from vidbyte.lib.dataclasses.infinite import InfiniteDroppedEntry, InfiniteEntryDraft, InfiniteStagedEntry
-from vidbyte.lib.enums.infinite import InfiniteAgentRole, InfiniteDropReason, InfiniteEntryKind, InfiniteFileChange
+from vidbyte.lib.dataclasses.infinite import (
+    InfiniteDroppedEntry,
+    InfiniteEntryDraft,
+    InfiniteStagedEntry,
+)
+from vidbyte.lib.enums.infinite import (
+    InfiniteAgentRole,
+    InfiniteDropReason,
+    InfiniteEntryKind,
+    InfiniteFileChange,
+)
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import ConfigurationError, ToolExecutionError
 from vidbyte.lib.registries.infinite import InfiniteMemoryToolRegistry
