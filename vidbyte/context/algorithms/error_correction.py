@@ -123,7 +123,7 @@ class ErrorCorrectionAlgorithm(InnerContextWindowAlgorithm):
             raise exc
 
     def apply_removals(self, ctx: ContextWindowRunContext, stale_ids: Sequence[Any]) -> tuple[list[str], list[str]]:
-        # Removes allow-listed managed primitives; returns (removed, skipped) id lists.
+        # Removes allow-listed, unfrozen managed primitives; returns (removed, skipped) id lists.
         removed: list[str] = []
         skipped: list[str] = []
         for raw_id in stale_ids:
@@ -133,7 +133,7 @@ class ErrorCorrectionAlgorithm(InnerContextWindowAlgorithm):
             # primitive counts as removed, so a pass that changed nothing posts no notice.
             if primitive_id == _NOTICE_ID:
                 skipped.append(primitive_id)
-            elif self._is_removable(primitive_id) and ctx.context_manager.get_by_id(primitive_id) is not None:
+            elif self._is_removable(primitive_id) and _is_unfrozen(ctx.context_manager.get_by_id(primitive_id)):
                 ctx.remove(primitive_id)
                 removed.append(primitive_id)
             else:
@@ -195,7 +195,7 @@ class ErrorCorrectionAlgorithm(InnerContextWindowAlgorithm):
         # Lists currently-managed primitive ids and titles so the auditor can name stale ids.
         lines = []
         for primitive_id, item in ctx.context_manager.registry_items():
-            if not primitive_id or not self._is_removable(str(primitive_id)):
+            if not primitive_id or not self._is_removable(str(primitive_id)) or not _is_unfrozen(item):
                 continue
             title = getattr(item, "title", "")
             lines.append(f"- {primitive_id} ({title})")
@@ -311,6 +311,12 @@ def _truncate(value: str, max_chars: int) -> str:
     if max_chars <= len(suffix):
         return value[:max_chars]
     return value[: max_chars - len(suffix)].rstrip() + suffix
+
+
+def _is_unfrozen(item: Any) -> bool:
+    # @intent auditor-never-removes-frozen-primitives
+    # A frozen primitive is pinned against model-driven changes (context_remove refuses it), so the auditor is neither offered nor allowed to remove one.
+    return item is not None and not getattr(item, "primitive_frozen", False)
 
 
 __all__ = [
