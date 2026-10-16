@@ -28,6 +28,7 @@ from vidbyte.lib.constants.infinite import (
     INFINITE_RUNS_DIRNAME,
 )
 from vidbyte.lib.dataclasses.infinite import InfiniteResultCard
+from vidbyte.lib.dataclasses.validation import RecordFieldConverter
 from vidbyte.lib.enums.infinite import (
     InfiniteJournalEvent,
     InfiniteResultStatus,
@@ -176,10 +177,8 @@ class InfiniteRunJournal:
                         # An older record has no answer or files; a
                         # newer one must hold text and a list of text.
                         stop_reason = str(record["stop_reason"])
-                        answer, files = record.get("answer"), record.get("files", [])
-                        if not isinstance(answer, str | None) or not isinstance(files, list) or not all(isinstance(item, str) for item in files):
-                            raise TypeError("run_finished needs a text answer and a list of text files")
-                        root_files = tuple(files)
+                        answer = RecordFieldConverter.require_instance(record.get("answer"), "run_finished.answer", str, optional=True)
+                        root_files = RecordFieldConverter.to_tuple(record.get("files", []), "run_finished.files", item_type=str)
             except (ValueError, KeyError, TypeError, ConfigurationError) as exc:
                 raise ConfigurationError(f"The journal {path.name} has a bad record at line {number}; fix or remove that line before resuming.", details={"file": path.name, "line": number}) from exc
         if task is None:
