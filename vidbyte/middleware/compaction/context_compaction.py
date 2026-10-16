@@ -443,6 +443,11 @@ class TraceReplacementCompactionMiddleware(AgentMiddleware):
         # Validates render bounds and replacement options by constructing them once at init time.
         TraceArtifactRenderer(**self.render)
         ReplaceWithTraceCompaction("validation", **self.strategy_options)
+        # @intent trace-fallback-and-compose-options-validate-eagerly
+        # The fallback and composed passes run history modes, so their bad options must fail here, not fail open on every call.
+        for mode, options in ((self.fallback_mode, self.fallback_options), (self.compose_after, self.compose_after_options)):
+            if mode is not None:
+                MessageHistoryCompactionMiddleware(mode=mode, **options)
 
     @staticmethod
     def _coerce_mode(mode: CompactionMode | str | None) -> CompactionMode | None:

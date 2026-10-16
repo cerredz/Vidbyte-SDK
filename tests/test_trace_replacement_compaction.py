@@ -601,5 +601,47 @@ class RunStateSharingIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(decision.transform)
 
 
+class TraceReplacementOptionValidationTests(unittest.IsolatedAsyncioTestCase):
+    # Each bad history-mode option, the pass that runs it, and the message MessageHistoryCompactionMiddleware raises for it.
+    _BAD_OPTIONS = (
+        ("fallback", "remove_tool_call_percentage", {"percentage": 1.5}, "percentage must be between 0 and 1"),
+        ("fallback", "keep_last_n_messages", {"n": -2}, "n must be non-negative"),
+        ("compose_after", "head_tail_tool_preview", {"head_chars": -5}, "head_chars must be non-negative"),
+    )
+
+    async def test_bad_fallback_or_compose_options_fail_at_construction(self) -> None:
+        # [Silent Failure] accepted, these failed open on every call and left compaction off, and n=-2 silently wiped the history.
+        for pass_name, mode, options, message in self._BAD_OPTIONS:
+            kw = {"fallback_mode": mode, "fallback_options": options} if pass_name == "fallback" else {"compose_after": mode, "compose_after_options": options}
+            with self.subTest(pass_name=pass_name, mode=mode):
+                with self.assertRaisesRegex(ValueError, message):
+                    TraceReplacementCompactionMiddleware.keep_recent_tail(1, artifact_provider=lambda ctx: {}, **kw)
+
+    async def test_summary_tail_bad_fallback_options_fail_at_construction(self) -> None:
+        # [Silent Failure] the summary-tail middleware runs the same fallback, so it inherits the same construction check.
+        for pass_name, mode, options, message in self._BAD_OPTIONS:
+            if pass_name != "fallback":
+                continue
+            with self.subTest(mode=mode):
+                with self.assertRaisesRegex(ValueError, message):
+                    TraceSummaryTailCompactionMiddleware.trace_then_summarize_tail(FakeSummarizer(), fallback_mode=mode, fallback_options=options)
+
+    async def test_valid_fallback_and_compose_options_still_construct_and_apply(self) -> None:
+        # [Edge Case] in-range options and the built-in presets, including summarize fallbacks, still construct without a summarizer check and still run.
+        TraceReplacementCompactionMiddleware.trace_fallback_to_mechanical()
+        TraceReplacementCompactionMiddleware.trace_plus_strip_tool_results()
+        TraceReplacementCompactionMiddleware.trace_fallback_to_mechanical(fallback_mode="summarize_oldest_n", fallback_options={"n": 2}, summarizer=FakeSummarizer())
+        fallback_mw = TraceReplacementCompactionMiddleware.keep_recent_tail(1, fallback_mode="remove_tool_call_percentage", fallback_options={"percentage": 1.0})
+        fallback = await fallback_mw.before_model_call(_ctx(_provider_history()))
+        self.assertTrue(fallback.transform.metadata["fallback_used"])
+        self.assertNotIn("tool", [m["role"] for m in fallback.transform.provider_messages])
+        compose_mw = TraceReplacementCompactionMiddleware.keep_recent_tail(3, artifact=_ARTIFACT, compose_after="head_tail_tool_preview", compose_after_options={"head_chars": 2, "tail_chars": 0})
+        composed = await compose_mw.before_model_call(_ctx(_provider_history()))
+        self.assertEqual(composed.transform.metadata["compaction"], "head_tail_tool_preview")
+        summary_tail_mw = TraceSummaryTailCompactionMiddleware.trace_then_summarize_tail(FakeSummarizer(), fallback_mode="summarize_oldest_n", fallback_options={"n": 2})
+        summarized = await summary_tail_mw.before_model_call(_ctx(_provider_history()))
+        self.assertTrue(summarized.transform.metadata["fallback_used"])
+
+
 if __name__ == "__main__":
     unittest.main()
