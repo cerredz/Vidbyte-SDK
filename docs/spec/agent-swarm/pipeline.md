@@ -35,6 +35,8 @@ started: 2026-10-16 16:10
 
 - 2026-10-16 17:20 — Spot-check S1 r1: 18/18 template sections; 37 §12.3 rows; frontmatter base_commit/worktree correct; commit "docs(spec): add agent-swarm spec r1" @a43f5423. Briefed the reviewer to treat L2 (over-engineering vs "very minimal") and the idle/wake/quiet race as priorities, and to judge the author's A-2 role mapping (AgentSwarmRuntime = per-member runtime; AgentSwarm = coordinator).
 
+- 2026-10-16 17:45 — S1 review round 1: SOUND WITH FIXES (0 Blocker, 3 Major, 4 Minor, Q-11 optional default no). Resumed author in Revision mode by path to reports/S1-spec-review.md. Steered R-3 toward AgentSwarmRuntime = swarm-level coordinator (request.md §C open question + author's own A-2 "if wrong" branch; no approval gate means A-2 can't be corrected later). R-3 changes §8.5/§12 → scoped round-2 review required (playbook rule).
+
 ## User replies (verbatim)
 - 2026-10-16 16:05 — answers to four clarifying questions: "One shared folder (Recommended)"; "Stay alive until quiet (Recommended)"; "Shared goal + per-agent prompts (Recommended)"; "Callback + list on result (Recommended)".
 
@@ -65,4 +67,9 @@ started: 2026-10-16 16:10
 - `RecordFieldValidator.require_number` refuses 0 — *source:* S1 author
 - `ScriptedTree`: each agent's script is one continuous list of steps across all its turns — *source:* S1 author
 - Two `harness_threads` surface tests already fail on any branch touching `vidbyte/tools` or root exports (field guide local-ci-verification.md); do not fix them — *source:* S1 author
+- `BaseAgent.generate_reply` wraps every Exception in `AgentExecutionError` (a `VidbyteSdkError`, base.py:965-979); root-cause text comes from `__cause__` like infinite/launch.py `_error_text` — *source:* S1 reviewer
+- The loop always adds `isDone` to tools (runtime.py:193-194) and appends the agentic-loop prompt after the system prompt (:254); exact-tool-set tests must include `isDone` (infinite tests do) — *source:* S1 reviewer
+- S025 skips catalog-loaded descriptions, so the 4–5 sentence rule needs the swarm's own contract test; `ToolParameter` has no enum field → use `ToolSpec.input_schema` (precedent infinite/memory.py:139) — *source:* S1 reviewer
+- C011 counts inherited run/arun; its suffixes exclude Runtime and Swarm — *source:* S1 reviewer
+- `BaseActorRuntime(ABC)` (runtimes/actor/broker.py:44) is a registered multi-agent coordinator that is NOT an AgentRuntime subclass — precedent for a coordinator named *Runtime — *source:* S1 reviewer
 - vidbyte-gates.md is wrong for the SDK: lint marker is `SDK-LINT: PASS`; run_ci.py runs no semgrep; `--stage source` needs `PYTHONPATH=$(pwd)` while the package stage must run without it — *source:* S0 scout
