@@ -16,6 +16,7 @@ import copy
 from dataclasses import replace
 
 from vidbyte.agents.codex.config import CodexVidbyteTranslator
+from vidbyte.agents.codex.fallback import CodexFallbackCoordinator
 from vidbyte.agents.codex.transport import CodexTransport
 from vidbyte.lib.constants.codex import CODEX_NEXT_FORK_DEPTH, CODEX_ROOT_FORK_DEPTH
 from vidbyte.lib.dataclasses.codex import (
@@ -119,12 +120,21 @@ class CodexFork:
             # child must be able to execute every tool its model can call.
             tools=parent.tools,
             tool_permission_policy=parent.tool_permission_policy,
+            # A branch of a guarded thread stays guarded: the child keeps the parent's
+            # turn middleware, fallback chain, and output contracts, as BaseAgent.fork does.
+            loop=parent.loop,
+            middleware=parent.middleware,
+            fallback=parent.fallback,
         )
         if settings.clear_context_manager:
             child_settings = replace(child_settings, context_manager=None, context_placements=())
         if settings.clear_output_schema:
             child_settings = replace(child_settings, output_schema=None)
-        return CodexVidbyteTranslator().translate_agent(child_settings).settings
+        child_settings = CodexVidbyteTranslator().translate_agent(child_settings).settings
+        # The inherited chain must stay reachable from the child's own model; check it
+        # here so a codex override that drops the model fails before the native fork.
+        CodexFallbackCoordinator.build(child_settings)
+        return child_settings
 
     def fork(self, request: CodexForkRequest) -> CodexForkResult:
         # @intent no-nested-fork-loop
