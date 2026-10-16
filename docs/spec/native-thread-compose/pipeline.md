@@ -15,7 +15,7 @@ started: 2026-10-15 18:04
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-15 18:04 | 2026-10-15 18:52 | reports/S0-scout.md | base_commit 5c08c35e; code-map.md (4 sections, ~90 files read) |
-| S1 spec + review | running (author r1 done at 7df09460 after two rate-limit resumes; review round 1 running) | 2026-10-15 19:05 | | reports/S1-spec-author.md; reports/S1-spec-review.md (pending) | spec r1 (~197 KB, 18 sections, 27 §12.3 rows, 40 new files, 42 public names; FR 18, NFR 11, AC 23, EC 72, INV 36, D 28, W 13, A 11, Q 10 non-blocking) |
+| S1 spec + review | running (author r1 at 7df09460; review round 1 done: SOUND WITH FIXES, 0 Blocker / 8 Major / 3 Minor; author revision running) | 2026-10-15 19:05 | | reports/S1-spec-author.md; reports/S1-spec-review.md (pending) | spec r1 (~197 KB, 18 sections, 27 §12.3 rows, 40 new files, 42 public names; FR 18, NFR 11, AC 23, EC 72, INV 36, D 28, W 13, A 11, Q 10 non-blocking) |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -24,7 +24,7 @@ started: 2026-10-15 18:04
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 0/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 1/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Key SHAs
 - BASE_COMMIT: 5c08c35edcb1827e190ca4e2b2b1370808ef24be (head of PR #1036 at S0; the base moved from 4a7987c7 during S0 via a merge of main that touched 2 unrelated files)
@@ -46,6 +46,9 @@ started: 2026-10-15 18:04
 
 - 2026-10-16 02:10 — S1 review round 1 launched (fresh reviewer; briefed to verify INV-15 compliance, pinned surface, D-2 lib behavior, D-6 vs ledger 5, size, prompt arithmetic, worktree side effects, "neither verifier able to change the workspace", acceptance coverage, §11 commands).
 - 2026-10-16 ~02:16 — Interruption 3: the S1 reviewer was stopped by an API rate limit (HTTP 429, session limit, reset 6:10am) before writing its report. Verified 2026-10-16 16:48: HEAD 364cac38, clean, no reports/S1-spec-review.md; it left only a scratch probe folder `scratchpad/s1probe` (outside the worktree). Resumed the SAME reviewer via SendMessage (coordinator rule: resume, never relaunch while its context exists).
+
+- 2026-10-16 17:06 — S1 review round 1 (resumed reviewer) DONE: SOUND WITH FIXES; 0 Blocker, 8 Major (R-1 prompt port contracts, R-2 fitter worst case, R-3 ledger signature order, R-4 nested repo with no commit fails `add -A`, R-5 D-2 lib `__call__`, R-6 worktree reader folder/index state, R-7 RUN step as `from_thread`, R-8 cmd.exe strips `^`), 3 Minor (R-9..R-11). The reviewer HELD D-6 (tree snapshots) as a recorded refinement of ledger 5 (Q-10 asks the owner).
+- 2026-10-16 17:08 — Orchestrator adjudication for the author revision: R-3 is mandatory, because ledger 2 and Prompt 2 fix `chain_threads(steps, template)` / `chain_threads([step_a, step_b], template=...)` and `verify_with(writer, verifiers, ...)`; adopt D-25's runner-up. R-2's optional [scope-adding] Q-11 (mark shortened inputs in StepOutcome) is recorded with default not built. A scoped round 2 review will follow, because accepted findings change §8, §8.5 and §9.
 
 ## User replies (verbatim)
 - none (coordinator relay messages on 2026-10-15 20:0x and 2026-10-16 01:3x concerned rate-limit resumption only; no product decisions)
