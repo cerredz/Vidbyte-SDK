@@ -1,7 +1,7 @@
 """FILE: vidbyte/lib/outputs/text.py
 
 PURPOSE: Defines OutputText, the pure string helpers connectors use to fit a title and body into a destination's fields.
-ROLE IN CODEBASE: Called by the connectors in this package, by OutputShaping in vidbyte/agents/output/connector.py for the first-line title rule, and, through truncate with INFINITE_TRUNCATION_MARKER, by InfiniteEvents (vidbyte/agents/infinite/events.py), InfiniteHandoff (vidbyte/context/handoff/infinite.py) and InfiniteMemoryAgent.run_handoff to cut event and handoff text to its cap.
+ROLE IN CODEBASE: Called by the connectors in this package, by OutputShaping in vidbyte/agents/output/connector.py for the first-line title rule, and, through truncate with INFINITE_TRUNCATION_MARKER, by InfiniteEvents (vidbyte/agents/infinite/events.py) and InfiniteMemoryAgent.run_handoff to cut event and handoff text to its cap. InfiniteHandoff (vidbyte/context/handoff/infinite.py) applies the same cut to its list lines without importing this package, because vidbyte.lib.dataclasses imports vidbyte.context while it loads and this package's connectors need vidbyte.lib.dataclasses back.
 ARCHITECTURE NOTE: Leaf string functions with no knowledge of agents, replies, stop reasons, or structured output.
 COMMON MODIFICATION PATTERNS: Add a helper here only when two or more connectors need the same text transform.
 KNOWN EDGE CASES: single_line never calls truncate, because the default truncation marker contains line breaks. With a one-line marker, such as the InfiniteMemory one, a cut one-line text stays one line.

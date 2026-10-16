@@ -2,10 +2,10 @@
 
 PURPOSE: Defines InfiniteHandoff, the handoff of one InfiniteMemory run: a Handoff with nine fixed sections (Outcome, Work done, Decisions, Facts, Lessons, Open questions, Files, Unverified or failed work, How to continue), the wording of every line in them, and six renderers that turn the run's journal, entries, and notes into those section bodies without a model.
 ROLE IN CODEBASE: Built only by InfiniteMemoryAgent.run_handoff (vidbyte/agents/infinite/agent.py), which reads the journal and the workspace, calls the renderers here, cuts each body to its cap, and saves to_context_text() as .runs/<run_id>.handoff.md. Exported from vidbyte.context.handoff, vidbyte.context, vidbyte.agents.infinite, vidbyte.agents, and vidbyte, beside the other prebuilt handoffs (engineering.py, research.py, minimal.py).
-ARCHITECTURE NOTE: A Handoff subclass that keeps the base keyword constructor, so fill() returns another InfiniteHandoff and the object works anywhere a Handoff does. The wording lives here as class attributes, not in the constants module, because it is developer-facing document text, not a cap or a model-facing prompt. Each renderer is a static method that formats its lines with that wording and hands them to _lines, which collapses each line, cuts it to INFINITE_HANDOFF_LINE_MAX_CHARS with the infinite marker, and joins them, or returns EMPTY when there are none. This module imports only the base Handoff and vidbyte.lib, never vidbyte.agents.
+ARCHITECTURE NOTE: A Handoff subclass that keeps the base keyword constructor, so fill() returns another InfiniteHandoff and the object works anywhere a Handoff does. The wording lives here as class attributes, not in the constants module, because it is developer-facing document text, not a cap or a model-facing prompt. Each renderer is a static method that formats its lines with that wording and hands them to _lines, which collapses each line, cuts it to INFINITE_HANDOFF_LINE_MAX_CHARS with the infinite marker exactly as OutputText.truncate cuts, and joins them, or returns EMPTY when there are none. This module imports only the base Handoff and the dependency-light vidbyte.lib constants, records, and enums, never vidbyte.agents and never vidbyte.lib.outputs: vidbyte.lib.dataclasses imports vidbyte.context while it loads, and the outputs package (through its connectors and vidbyte.lib.tools.filesystem) needs the finished vidbyte.lib.dataclasses package back, so importing it here breaks import vidbyte.
 FUNCTION INVENTORY: default_sections returns the nine titles with a one-line description each; outcome, work_done, entries, files, unverified, and how_to_continue render one section body each; _lines collapses, cuts, and joins list lines.
 COMMON MODIFICATION PATTERNS: A new section adds its title and description to default_sections in contract order, one renderer here, and one line in InfiniteMemoryAgent.run_handoff that calls it; its cap stays INFINITE_HANDOFF_SECTION_MAX_CHARS unless the spec's chunk arithmetic changes. Changing a sentence changes its class attribute only.
-WHAT NOT TO DO IN THIS FILE: 1. Do not import from vidbyte.agents; the agent passes plain records in. 2. Do not call a model or read a file here; the handoff must be deterministic. 3. Do not leave a list line multi-line or longer than INFINITE_HANDOFF_LINE_MAX_CHARS. 4. Do not change the base constructor's keywords; fill() rebuilds this class through them.
+WHAT NOT TO DO IN THIS FILE: 1. Do not import from vidbyte.agents, or from vidbyte.lib.outputs (an import cycle at package load, see the architecture note); the agent passes plain records in. 2. Do not call a model or read a file here; the handoff must be deterministic. 3. Do not leave a list line multi-line or longer than INFINITE_HANDOFF_LINE_MAX_CHARS. 4. Do not change the base constructor's keywords; fill() rebuilds this class through them.
 KNOWN EDGE CASES: A card with an empty summary or review renders without a trailing space, because every list line is collapsed. A finished run without a recorded answer (a journal written before answers were stored) renders NO_ANSWER in place of the answer. An unfinished run's Outcome is UNFINISHED, with no stop reason. A note without a description in files.jsonl renders INFINITE_NO_DESCRIPTION.
 RELATED DOCS: docs/spec/infinite-memory-events/spec.md (sections 6.1 INV-22 to INV-24 and INV-37, 8.5, and 9.1); vidbyte/agents/infinite/README.md
 TESTS: tests/features/infinite_memory_agent/test_infinite_memory_handoff.py, tests/features/infinite_memory_agent/test_infinite_memory_events_lifecycle.py, and tests/features/infinite_memory_agent/test_infinite_memory_events_pairs.py
@@ -27,7 +27,6 @@ from vidbyte.lib.enums.infinite import (
     InfiniteResultStatus,
     InfiniteVerdict,
 )
-from vidbyte.lib.outputs.text import OutputText
 
 
 class InfiniteHandoff(Handoff):
@@ -101,9 +100,12 @@ class InfiniteHandoff(Handoff):
     def _lines(lines: Iterable[str]) -> str:
         # @intent every-handoff-line-is-one-bounded-line
         # A model's summary or review can hold line breaks and any
-        # length, so each line is collapsed to one line and cut to its
-        # cap with the marker the events use; no lines means EMPTY.
-        shown = [OutputText.truncate(" ".join(line.split()), INFINITE_HANDOFF_LINE_MAX_CHARS, marker=INFINITE_TRUNCATION_MARKER) for line in lines]
+        # length, so each line is collapsed to one line and, past its
+        # cap, keeps what fits before the marker the events use, as
+        # OutputText.truncate cuts; no lines means EMPTY.
+        room = INFINITE_HANDOFF_LINE_MAX_CHARS - len(INFINITE_TRUNCATION_MARKER)
+        collapsed = (" ".join(line.split()) for line in lines)
+        shown = [text if len(text) <= INFINITE_HANDOFF_LINE_MAX_CHARS else f"{text[:room]}{INFINITE_TRUNCATION_MARKER}" for text in collapsed]
         return "\n".join(shown) or InfiniteHandoff.EMPTY
 
 
