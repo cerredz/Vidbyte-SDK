@@ -260,17 +260,22 @@ class BaseActorRuntime(ABC):
             self._tasks.clear()
             self._actors.clear()
 
+        # Report the run's counts, and whether the max_loop ceiling stopped it before an answer.
+        return StrategyResult(
+            output=output_text,
+            strategy_name=f"actor_model_{self.__class__.__name__}",
+            calls=(),
+            metadata=self._result_metadata(active_actors),
+        )
+
+    def _result_metadata(self, active_actors: int) -> dict[str, Any]:
+        # Builds the run's result metadata.
         metadata: dict[str, Any] = {"message_count": self._message_count, "active_actors": active_actors}
         # @intent max-loop-stop-is-not-an-answer
         # The ceiling's notice is an SDK message, not an answer, so mark the stop the way the linear loop marks its own.
         if self._max_loop_reached:
             metadata["stop_reason"] = AgentStopReason.MAX_ITERATIONS.value
-        return StrategyResult(
-            output=output_text,
-            strategy_name=f"actor_model_{self.__class__.__name__}",
-            calls=(),
-            metadata=metadata,
-        )
+        return metadata
 
     def _start_semantic_span(self, name: str, parent: Any = None, **attributes: Any) -> Any:
         # Opens actor runtime spans only for semantic controllers.
