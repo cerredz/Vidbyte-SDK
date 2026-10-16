@@ -119,3 +119,77 @@ The orchestrator accepted open item 1 and asked for the fake to be split to 900 
 | Mutation harness, 10 probes | Identical to r2. V00 gave `869 passed`. Each other probe gave `1 failed, 868 passed`, and the same test as in r2 caught it (log: `s2r3_probes.log`) |
 | CI view with openai-codex hidden | `57 passed, 140 skipped` |
 | Lint, after `git add` | `SDK-LINT: PASS` |
+
+## r4: R-17, the run re-raise keeps every CodexAgentError field
+
+The orchestrator sent this finding after S5's two merges of main, at HEAD `00932996`. The tests are in commit `f9c987dc`, `test(codex): prove the run re-raise keeps every CodexAgentError field [R-17]`. They stay red until S5 applies the source fix.
+
+**The defect.** When a check fails with a `CodexAgentError`, `CodexSkillFunctions._unchecked` (`vidbyte/harnesses/native/codex/skill_functions.py:247`) builds a new error. It passes only the message plus suffix, the code, the operation and the next step. Main's #1116 gave `CodexAgentError.__init__` a `thread_id` argument, and `error_type` was already there, so the new error has both empty. That breaks the "original exception propagates" promise of INV-22 and INV-35, cited with AC-27, AC-40, D-16 and D-17. Note that the spec's literal list ("keeps its code, operation and next step") predates #1116 and does not name these two fields.
+
+**No real path sets either field today.** Every codex-host error comes from these sources, and none of them passes `error_type` or `thread_id`:
+
+- `CodexErrorMapper.error` (`errors.py:61-65`), which puts the thread only in the message text (`Thread: <id>.`);
+- `missing_sdk`;
+- the validation error in `codex_host.py`;
+- the busy refusal in `_base.py`;
+- the batch rebuild at `host.py:476`.
+
+So, over the real mapper alone, a test would compare `""` with `""` and pass. The defect is real but latent: it starts losing data as soon as any function the run reuses sets either field. The tests therefore swap the connection module's `CodexErrorMapper`, through the existing `patch_connection` helper, for `_FieldCarryingMapper`. It maps exactly as the real mapper does, then also sets `error_type=type(exc).__name__` and `thread_id`. Everything else is the real path: fake JSON-RPC −32603, the real SDK, `connection.call`, the host, and the run's `except`.
+
+**Tests**, in `test_codex_host_goal_skills.py::CodexRunReRaiseTests`:
+
+- `test_a_goal_check_error_keeps_every_field_it_carried` (`thread/goal/get` fails)
+- `test_a_skill_read_back_error_keeps_every_field_it_carried` (`thread/turns/list` fails)
+
+Each one does the following:
+
+1. Checks that the original error carried both fields.
+2. Checks that the re-raised message is exactly the original message plus the formatted `*_UNCHECKED_MESSAGE`.
+3. Checks that none of the 11 kept fields changed: `failure_code`, `operation`, `thread_id`, `error_kind`, `expected`, `safe_runtime_details`, `likely_causes`, `next_step`, `repair_approaches`, `related_docs` and `relevant_tests`.
+
+**Red on the current code, failing only on the two dropped fields:**
+
+```
+E   - {'safe_runtime_details': ({'error_type': '', 'operation': 'get_codex_goal'},
+E   -                           {'error_type': 'InternalRpcError',
+E   -                            'operation': 'get_codex_goal'}),
+E   -  'thread_id': ('', 'thr-1')}
+E   - {'safe_runtime_details': ({'error_type': '', 'operation': 'list_codex_turns'},
+E   -                           {'error_type': 'InternalRpcError',
+E   -                            'operation': 'list_codex_turns'}),
+E   -  'thread_id': ('', 'thr-1')}
+FAILED tests/features/codex_host/test_codex_host_goal_skills.py::CodexRunReRaiseTests::test_a_goal_check_error_keeps_every_field_it_carried
+FAILED tests/features/codex_host/test_codex_host_goal_skills.py::CodexRunReRaiseTests::test_a_skill_read_back_error_keeps_every_field_it_carried
+2 failed, 24 deselected in 1.23s
+```
+
+The message, code, operation and next step all match, so the failures come from those two fields alone. Five back-to-back runs of the module each gave `2 failed, 24 passed`.
+
+**Green in a scratch copy.** The script `s4-verifier/s2r4_green.py` writes a copy of `skill_functions.py` to `mut/`, and `verifier_plugin` serves that copy, so the worktree is not touched. `CodexAgentError` has no `error_type` attribute: it stores the value only in `safe_runtime_details["error_type"]`. A literal `exc.error_type` would raise `AttributeError`, so the fix reads that key:
+
+```python
+return CodexAgentError(exc.message + sentence, failure_code=exc.failure_code, operation=exc.operation, error_type=exc.safe_runtime_details.get("error_type", ""), next_step=exc.next_step, thread_id=exc.thread_id)
+```
+
+```
+X17_none_new_tests: exit=1 :: ============================== 2 failed in 1.25s ==============================
+    VERIFIER-MUTANT vidbyte.harnesses.native.codex.skill_functions loaded_from_mutant=True
+X17_fix_new_tests: exit=0 :: ============================== 2 passed in 1.11s ==============================
+    VERIFIER-MUTANT vidbyte.harnesses.native.codex.skill_functions loaded_from_mutant=True
+X17_fix_area: exit=0 :: ================ 890 passed, 2 skipped, 1 deselected in 53.18s ================
+    VERIFIER-MUTANT vidbyte.harnesses.native.codex.skill_functions loaded_from_mutant=True
+```
+
+The control is a copy with only a no-op comment, and it stays red, so the green comes from the fix and not from the copy mechanism. With the fix, the whole area has no failures (the inherited test is deselected).
+
+**Gates on the worktree:**
+
+- **Area pytest:** `3 failed, 683 passed, 2 skipped in 52.58s`. The failures are the 2 new tests and the inherited `test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes`.
+- **Lint:** `SDK-LINT: PASS`.
+- **CI view with openai-codex hidden:** `57 passed, 142 skipped`. The 2 new tests skip there, which is the expected behaviour.
+
+**Open items:**
+
+1. **A second rebuild has the same defect.** `host.py:476` (spawn batch, after some turns started) rebuilds the error the same way and drops `error_type` and `thread_id` too. It is outside R-17's scope, and it has no test.
+2. **The mapper does not fill `thread_id` either.** `CodexErrorMapper.error` receives `thread_id` but writes it only into the message. Whether it should also set the #1116 field is a design choice for S5 or the owner. If it does, R-17 stops being latent and the stand-in mapper becomes the real one.
+3. **INV-22 and INV-35 could name every field.** Their spec text could say "every field" instead of listing code, operation and next step.
