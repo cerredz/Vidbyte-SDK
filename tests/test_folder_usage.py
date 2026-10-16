@@ -2,6 +2,10 @@
 
 PURPOSE: Proves FolderUsage counts every file under a folder from disk, skips only the named top-level folders, keys files by POSIX relative path, and projects a write's effect on the file count and token total; and that FolderTotals refuses impossible counts. It also proves LocalFileSystemBackend.write_text(atomic=True), the write FolderUsage's callers pair it with: a whole file is swapped in, and a failed swap leaves the target and no temporary file behind.
 ROLE IN CODEBASE: Unit tests for vidbyte/lib/tools/filesystem/usage.py, FolderTotals in vidbyte/lib/dataclasses/filesystem.py, and the atomic option of vidbyte/lib/tools/filesystem/backends/local.py. InfiniteWorkspace's caps are proven through them in tests/features/infinite_memory_agent/test_infinite_memory_workspace.py.
+ARCHITECTURE NOTE: Each test builds a small folder in tmp_path and compares exact counts, using TokenEstimate's four-characters-per-token rule. The failed-swap test patches os.replace to raise, so the cleanup path runs without a real disk fault.
+COMMON MODIFICATION PATTERNS: A new FolderUsage option adds one folder layout and its expected mapping; a new write_text option adds one test that checks the folder listing after the write, so a leftover temporary file is caught.
+KNOWN EDGE CASES: skip names only top-level folders, so a nested folder with a skipped name still counts. Undecodable bytes are counted, not refused. Text the encoding cannot hold fails before any file, temporary or target, is created.
+RELATED DOCS: vidbyte/lib/README.md (tools/filesystem/); vidbyte/agents/infinite/README.md (limits).
 TESTS: PYTHONPATH=$(pwd) python -m pytest tests/test_folder_usage.py -q
 """
 

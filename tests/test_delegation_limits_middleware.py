@@ -2,6 +2,10 @@
 
 PURPOSE: Proves DelegationLimits refuses caps that would switch delegation off or run it unbounded, and that DelegationLimitsMiddleware denies only the delegating tool's call, at the depth cap first and then over the batch cap, with a reason and metadata that name the cap.
 ROLE IN CODEBASE: Unit tests for vidbyte/middleware/builtins/delegation_limits.py and the DelegationLimits record in vidbyte/lib/dataclasses/middleware.py. The InfiniteMemoryAgent feature tests prove the same middleware through a real run (tests/features/infinite_memory_agent/test_infinite_memory_delegation.py).
+ARCHITECTURE NOTE: Each test calls before_tool_call directly with a MiddlewareContext built by _decide, outside any agent, so the decision, its reason, and its metadata are read without a runner. LIMITS uses max_depth 3 and max_parallel 2 so the edges sit at small, readable numbers.
+COMMON MODIFICATION PATTERNS: A new cap on DelegationLimits adds one invalid-value row to test_limits_refuse_caps_that_switch_delegation_off and one deny test that asserts the reason names the cap and the metadata's limit key.
+KNOWN EDGE CASES: The depth refusal must win when both caps are broken, because splitting the batch would not help. A task argument that is not a list is left to the tool. A bool or a float is never a cap.
+RELATED DOCS: vidbyte/middleware/README.md (DelegationLimitsMiddleware); vidbyte/agents/infinite/README.md (where each limit is enforced).
 TESTS: PYTHONPATH=$(pwd) python -m pytest tests/test_delegation_limits_middleware.py -q
 """
 

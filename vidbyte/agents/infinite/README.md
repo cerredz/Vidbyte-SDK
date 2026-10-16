@@ -68,6 +68,7 @@ The defaults are generous on purpose: the point of this agent is work that outgr
 - Each agent's history is trimmed to 90,000 tokens by dropping the oldest tool exchanges first; the task, the rules, and the map are never trimmed. With the largest role prompt (about 2,100 tokens), the tool descriptions (about 5,000), and an 8,000-token map, an agent's whole context stays near 105,000 tokens, inside a 128,000-token model.
 - A card's summary and review are each cut to 800 tokens, and so are its dropped entries and its files in the text the parent reads; the journal keeps both lists whole. The map is cut at 8,000 tokens.
 - Tokens are estimated as characters divided by four everywhere (`TokenEstimate`).
+- `model_name` must be in `ProviderModelRegistry`'s catalog under `provider`, as the SDK's declarative `BaseAgentSettings` require. A plain `BaseAgent` accepts more names, such as `gpt-4.1-2025-04-14`, which these settings refuse. Set `ProviderModelRegistry.STRICT_MODEL_VALIDATION = False` to accept the names a plain `BaseAgent` accepts, such as a model released after this SDK version.
 
 ### Where each limit is enforced
 
@@ -76,7 +77,6 @@ Limits are enforced in code, and the prompts only describe behavior: no prompt s
 - `max_depth` and `max_parallel` are enforced by `DelegationLimitsMiddleware` (`vidbyte/middleware/builtins/delegation_limits.py`), which the root and every generator carry at their own depth. It denies a `launch_subagent` call at the depth cap, or one carrying more tasks than `max_parallel`, before the tool runs, so nothing starts. The tool schema still declares `maxItems` for the model.
 - `max_agents` is checked by `launch_subagent` itself, because only the run's journal knows how many agents have started and which task names are replays that start none.
 - The workspace and memory caps are checked by `InfiniteWorkspace` against the files on disk, counted with `FolderUsage`.
-- `model_name` must be in `ProviderModelRegistry`'s catalog under `provider`, as the SDK's declarative `BaseAgentSettings` require. A plain `BaseAgent` accepts more names, such as `gpt-4.1-2025-04-14`, which these settings refuse. Set `ProviderModelRegistry.STRICT_MODEL_VALIDATION = False` to accept the names a plain `BaseAgent` accepts, such as a model released after this SDK version.
 
 The caps are checked against the files on disk before every tool write, so files that `bash` wrote count too; a refused write changes nothing.
 

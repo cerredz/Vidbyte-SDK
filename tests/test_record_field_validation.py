@@ -2,6 +2,10 @@
 
 PURPOSE: Proves the RecordFieldValidator and RecordFieldConverter options added for InfiniteMemory: text without a length cap, one-line text, tuples of text items checked item by item, integers without a maximum, folders resolved once and never files, and lists of existing files with distinct names. Every refusal names the field, or the item as field[index].
 ROLE IN CODEBASE: Unit tests for vidbyte/lib/dataclasses/validation.py. The options that predate InfiniteMemory are proven through the harness-thread records in tests/features/harness_threads/test_harness_threads_records.py.
+ARCHITECTURE NOTE: The tests call the static validators directly with qualified field names such as Card.tags, as records do, and assert both the message and details['field'], because both are what a caller reads. Folder tests pin the working directory and the home directory with monkeypatch.
+COMMON MODIFICATION PATTERNS: A new validator option adds one accept case and one refuse case naming the field; a new item-level rule adds a row to test_a_bad_item_is_named_by_its_index.
+KNOWN EDGE CASES: One line means no break str.splitlines sees, including U+2028 and U+0085. require_text_items refuses a list so a frozen record cannot be changed through its field. to_files refuses a bare str, which is one path rather than a list.
+RELATED DOCS: vidbyte/lib/README.md (dataclasses/validation.py); vidbyte/agents/infinite/README.md (shared helpers).
 TESTS: PYTHONPATH=$(pwd) python -m pytest tests/test_record_field_validation.py -q
 """
 

@@ -2,6 +2,10 @@
 
 PURPOSE: Proves ToolArguments.records reads a model's list-of-objects argument into validated records: each object uses exactly the record's init fields, JSON lists become tuples, the record's own checks still run, and every refusal names the argument and the item's index.
 ROLE IN CODEBASE: Unit tests for vidbyte/lib/tools/arguments.py. launch_subagent's use of it is proven by tests/features/infinite_memory_agent/test_infinite_memory_delegation.py.
+ARCHITECTURE NOTE: Ticket is a test-only frozen record shaped like InfiniteTaskCard: required fields, tuple fields with a default and a default factory, a field with init=False, and its own __post_init__ check, so every branch of ToolArguments.records is reached without the agent.
+COMMON MODIFICATION PATTERNS: A new argument shape in ToolArguments gets its own test beside these, reusing Ticket; a new refusal adds one parametrized row naming the text the message must contain.
+KNOWN EDGE CASES: A field with init=False is reported as unknown, never set. An empty list is refused like a non-list. Values other than lists reach the record unchanged, so the record's own checks decide.
+RELATED DOCS: vidbyte/lib/README.md (tools/); vidbyte/agents/infinite/README.md (launch_subagent).
 TESTS: PYTHONPATH=$(pwd) python -m pytest tests/test_tool_arguments.py -q
 """
 

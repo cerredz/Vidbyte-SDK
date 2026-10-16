@@ -2,6 +2,10 @@
 
 PURPOSE: Proves AppendOnlyJsonl writes one ASCII JSON line per record, reads back only whole lines, leaves out a torn last line that does not parse and cuts it off before the next append, keeps an unterminated last line that does parse and ends it first, and keeps concurrent appends whole.
 ROLE IN CODEBASE: Unit tests for vidbyte/lib/util/jsonl.py. InfiniteRunJournal's crash recovery is proven through it in tests/features/infinite_memory_agent/test_infinite_memory_resume.py.
+ARCHITECTURE NOTE: Torn tails are written by hand as the bytes a crash would leave, then read and appended through AppendOnlyJsonl, so the tests pin the on-disk contract. The concurrency test gives each thread its own instance on one path, as separate pairs of one run do.
+COMMON MODIFICATION PATTERNS: A new repair case is one more starting byte string and the lines expected after one read and one append.
+KNOWN EDGE CASES: A last line without its newline is kept when it parses and dropped when it does not. append without a prior read does no repair. The lock is per class, so the concurrency test proves one process only.
+RELATED DOCS: vidbyte/lib/README.md (util/); vidbyte/agents/infinite/README.md (resume).
 TESTS: PYTHONPATH=$(pwd) python -m pytest tests/test_append_only_jsonl.py -q
 """
 
