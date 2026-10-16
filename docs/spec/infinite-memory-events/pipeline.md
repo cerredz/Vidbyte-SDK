@@ -15,7 +15,7 @@ started: 2026-10-15 22:10
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-15 22:10 | 2026-10-15 22:40 | reports/S0-scout.md | base ff1bc933; code-map.md (2 new + 16 changed files) |
-| S1 spec + review | in progress (r2 a27ff27c; focused review round 2) | 2026-10-15 22:55 | | reports/S1-spec-author.md | spec r1: 2 new files, 22 §12.3 rows, 0 blocking Q |
+| S1 spec + review | in progress (review r2 SOUND WITH FIXES 0B/1M/4m; author applying final r3, no further review) | 2026-10-15 22:55 | | reports/S1-spec-author.md | spec r1: 2 new files, 22 §12.3 rows, 0 blocking Q |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -24,7 +24,7 @@ started: 2026-10-15 22:10
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 (round 2 in progress) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 (cap reached) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Sibling runs (same feature, other repos)
 - Vidbyte: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-agent-run-dashboard (feat/agent-run-dashboard)
@@ -45,6 +45,8 @@ started: 2026-10-15 22:10
 - 2026-10-16 02:50 — Spec r2 (a27ff27c, 1,007 lines) spot-check passed: revision 2, base_commit 7efceb55, 18 § sections, 25 §12.3 rows, §16 logs R-1..R-13 accepted. Caps are fixed constants (no settings validator has a maximum): details worst case 27,015 bytes (compact UTF-8 ≤ 14,548), whole event ≤ 31,091 (limit 32,768); agent_key ≤ 512 ASCII via D-25 digest rule ("~" + 16 hex sha256 + "/" + last 490 chars); summary 280, text 500, path 500, line 120, label 64, 5 items per list + *_omitted; handoff SDK-owned: Outcome ≤ 239,000, other sections ≤ 15,900, ≤ 1,000 lines, total ≤ 366,500 (≤ 23 chunks of 16,000). Async sinks refused at settings. New lib rows 23/24 extend RecordFieldValidator (require_number(allow_zero=), require_utc_datetime, require_callable(optional=, synchronous=)) and OutputText.truncate(marker=). Budget-test raise now: module count ≤ 9, lib/dataclasses/infinite.py 400→600, launch stays 400.
 - 2026-10-16 02:50 — Round 2 review: resumed the SAME reviewer (af94e0ed) with a focused brief (verify R-1..R-13 dispositions, the new shared-lib rows 23/24, the cap arithmetic, and defects introduced by the re-baseline) instead of a fresh one — cheaper under the shared usage window and it already knows the code; S1 review rounds 2/2 after this.
 - 2026-10-16 02:50 — Forwarded SDK r2 facts + the cross-repo rulings to the Vidbyte and CLI authors (revision round 1 for both).
+- 2026-10-16 03:20 — Review r2 (reports/S1-spec-reviewer-r2.md): SOUND WITH FIXES — all 13 r1 dispositions hold; size arithmetic matches an independent rebuild (subagent_finished details 27,011 / event 31,089 / compact 14,544; scratchpad r2check/sizes.py). R-14 Major: since #1113 DelegationLimitsMiddleware refuses launches past max_depth/max_parallel in before_tool_call, before InfiniteLaunchTool.execute, so those refusals never emit batch_rejected — INV-15 false; narrow it, add an EC row, tell the siblings (optional Q-6 default no). Minors R-15..R-18 (Task-returning sink logged as TypeError; budget headroom; acceptance checks for cost_usd=0.0 / non-UTC at / at resolution; 4 drifted anchors).
+- 2026-10-16 03:20 — Review cap reached (2/2): the author applies R-14..R-18 as r3 with no third review; the orchestrator spot-checks r3 and approves. Budget-test ruling widened within the single pre-approved edit (row 22): launch.py ≤ 410 and lib/dataclasses/infinite.py ≤ 620 (reviewer's line-by-line count: launch ~394/400 after required @intent blocks, lib ~577/600) — margin for counting variance, so S3 cannot need a second existing-test edit.
 
 ## User replies (verbatim)
 - (none during the run yet)
