@@ -37,6 +37,7 @@ from vidbyte.tools.security import PermissionPolicy
 _EC_JSON = '{"corrections": [{"claim": "x is true", "why_wrong": "system prompt says x is false"}], "stale_primitive_ids": [], "summary": "one correction"}'
 _EC_EMPTY = '{"corrections": [], "stale_primitive_ids": [], "summary": "context is consistent"}'
 _EC_GHOST = '{"corrections": [], "stale_primitive_ids": ["problem_space_search:ghost"], "summary": "one stale note"}'
+_EC_PINNED = '{"corrections": [], "stale_primitive_ids": ["problem_space_search:pinned"], "summary": "one stale note"}'
 
 
 class FakeResponse:
@@ -225,6 +226,28 @@ class ErrorCorrectionAlgorithmTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(skipped, ["problem_space_search:ghost", "problem_space_search:1"])
         self.assertIsNone(manager.get_by_id("problem_space_search:1"))
 
+    def test_apply_removals_skips_frozen_primitive(self) -> None:
+        # [Hidden Failure] A frozen primitive under an allow-listed prefix is pinned: it stays and is skipped, while its unfrozen sibling is removed.
+        manager = ContextManager()
+        manager.upsert(ProblemSpaceSearchContextItem(primitive_id="problem_space_search:pinned", iteration=1, note_index=1, unconsidered="u", blind_spots="b", next_directions="n", primitive_frozen=True))
+        manager.upsert(ProblemSpaceSearchContextItem(primitive_id="problem_space_search:1", iteration=1, note_index=2, unconsidered="u", blind_spots="b", next_directions="n"))
+        algorithm = ErrorCorrectionAlgorithm()
+        ctx = run_context(manager)
+        removed, skipped = algorithm.apply_removals(ctx, ["problem_space_search:pinned", "problem_space_search:1"])
+        self.assertEqual(removed, ["problem_space_search:1"])
+        self.assertEqual(skipped, ["problem_space_search:pinned"])
+        self.assertIsNotNone(manager.get_by_id("problem_space_search:pinned"))
+        self.assertIsNone(manager.get_by_id("problem_space_search:1"))
+
+    def test_format_managed_primitives_omits_frozen_primitive(self) -> None:
+        # [Hidden Assumption] The auditor is offered only ids it may remove, so a frozen primitive is not listed.
+        manager = ContextManager()
+        manager.upsert(ProblemSpaceSearchContextItem(primitive_id="problem_space_search:pinned", iteration=1, note_index=1, unconsidered="u", blind_spots="b", next_directions="n", primitive_frozen=True))
+        manager.upsert(ProblemSpaceSearchContextItem(primitive_id="problem_space_search:1", iteration=1, note_index=2, unconsidered="u", blind_spots="b", next_directions="n"))
+        listing = ErrorCorrectionAlgorithm()._format_managed_primitives(run_context(manager))
+        self.assertNotIn("problem_space_search:pinned", listing)
+        self.assertIn("- problem_space_search:1 (Problem-Space Search)", listing)
+
     def test_parse_malformed_json_raises(self) -> None:
         # [Silent Failure] Malformed JSON is not silently ignored.
         with self.assertRaises(Exception):
@@ -308,6 +331,20 @@ class ErrorCorrectionAlgorithmTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(metadata["passes"][0]["removed"], ("problem_space_search:ghost",))
         self.assertIsNone(manager.get_by_id("problem_space_search:ghost"))
         self.assertIn("Correction Notice", runner.calls[-1]["kwargs"].get("system", ""))
+
+    async def test_runtime_keeps_frozen_primitive_auditor_names(self) -> None:
+        # [Hidden Failure] An auditor that names only a frozen primitive removes nothing, so the pinned note survives and no notice is posted.
+        manager = ContextManager()
+        manager.upsert(ProblemSpaceSearchContextItem(primitive_id="problem_space_search:pinned", iteration=1, note_index=1, unconsidered="u", blind_spots="b", next_directions="n", primitive_frozen=True))
+        runner = FakeRunner([tool_response(), FakeResponse(_EC_PINNED), is_done_response()])
+        runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=lookup_tools(), permission_policy=PermissionPolicy(), algorithm=ContextWindowAlgorithm(name="error_correction", error_correction=ErrorCorrectionAlgorithm(interval=1)), context_manager=manager)
+        result = await runtime.arun("task", handle=runner_handle(runner), context=base_context())
+        metadata = result.metadata["error_correction"]
+        self.assertEqual(metadata["removed_count"], 0)
+        self.assertEqual(metadata["passes"][0]["removed"], ())
+        self.assertEqual(metadata["passes"][0]["skipped"], ("problem_space_search:pinned",))
+        self.assertIsNotNone(manager.get_by_id("problem_space_search:pinned"))
+        self.assertFalse(any("Correction Notice" in c["kwargs"].get("system", "") for c in runner.calls))
 
     async def test_runtime_respects_max_passes(self) -> None:
         # [Edge Case] The pass cap halts audits while iterations continue.
