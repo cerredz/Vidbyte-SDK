@@ -26,6 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from vidbyte.agents.base import BaseAgent
 from vidbyte.context.multi_agent import MultiAgentContext
+from vidbyte.lib.constants.outputs import OUTPUT_DELIVERABLE_STOP_REASONS
 from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentStopReason
 from vidbyte.lib.dataclasses.multi_agent import FinalizationContext, FinalizationRenderer, ManagerAgentCloser, ManagerAgentFactory, OrchestrationContext, OrchestrationRenderer, OrchestratorDecision, OrchestratorPlan, TaskSpec
 from vidbyte.lib.enums.multi_agent import OrchestratorAction
@@ -167,6 +168,11 @@ class MagenticOneOrchestrator:
         # stop text, not an answer, so it is never returned as one.
         if reply.metadata.get("stop_reason") == AgentStopReason.MIDDLEWARE_ABORT.value:
             raise MultiAgentExecutionError("Multi-agent manager's final answer was stopped by middleware.", details={"phase": "finalize"})
+        # @intent a-stopped-synthesis-is-not-an-answer
+        # A synthesis stopped by a budget or guard also left the SDK's stop text, so it is never returned as the team's answer.
+        stop_reason = reply.metadata.get("stop_reason")
+        if stop_reason is not None and stop_reason not in OUTPUT_DELIVERABLE_STOP_REASONS:
+            raise MultiAgentExecutionError("Multi-agent manager's final answer was stopped before it answered.", details={"phase": "finalize", "stop_reason": stop_reason})
         content = reply.content.strip()
         if not content:
             raise MultiAgentExecutionError("Multi-agent manager returned a blank final answer.", details={"phase": "finalize"})
