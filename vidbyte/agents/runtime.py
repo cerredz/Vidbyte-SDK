@@ -1973,7 +1973,9 @@ class AgentRuntime:
         # @intent appended-middleware-notes-survive-truncation: truncation keeps the head, so a note a
         # middleware appended (canary watermark, loop-detection notice) would be cut off a long output.
         # Cap only the raw part and re-attach the appended tail; replaced outputs are capped whole.
-        if visible is not result and result.output and visible.output.startswith(result.output):
+        # An empty raw output counts too: the visible text is then all middleware note, which a hide admission
+        # would otherwise withhold whole, and there is no tool output in it to cap or hide.
+        if visible is not result and visible.output.startswith(result.output):
             capped = self._truncate_for_tool_settings(call, result, admit=admit)
             tail = visible.output[len(result.output):]
             return ToolResult(tool_name=visible.tool_name, status=visible.status, output=capped.output + tail, metadata={**dict(capped.metadata), **dict(visible.metadata)})
