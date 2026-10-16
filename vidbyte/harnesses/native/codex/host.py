@@ -472,8 +472,9 @@ class CodexHost:
                 turn.stop(self._connection, None)
             if not started or not isinstance(exc, CodexAgentError):
                 raise
+            # Keep every field of the error; only its message grows.
             message = f"{exc.message} {len(started)} turns were started before this failure and were interrupted."
-            raise CodexAgentError(message, failure_code=exc.failure_code, operation=exc.operation, next_step=exc.next_step) from None
+            raise CodexAgentError(message, failure_code=exc.failure_code, operation=exc.operation, error_type=exc.safe_runtime_details.get("error_type", ""), next_step=exc.next_step, thread_id=exc.thread_id) from None
         return tuple(turn.handle for turn in started)
 
     async def start_codex_review(
