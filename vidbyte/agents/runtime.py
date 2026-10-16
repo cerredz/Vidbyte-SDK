@@ -130,7 +130,7 @@ from vidbyte.lib.dataclasses.speed import (
     RecordToolCallInput,
 )
 from vidbyte.lib.dataclasses.strategies import AgentResult
-from vidbyte.lib.enums import AgentRuntimeStateKey, ModelModality, UsageKind
+from vidbyte.lib.enums import AgentRuntimeStateKey, ModelModality, ModelProvider, UsageKind
 from vidbyte.lib.errors import (
     AllModelsFailedError,
     PermissionDeniedError,
@@ -141,11 +141,14 @@ from vidbyte.lib.token_usage import token_usage_from_response
 from vidbyte.lib.tools import ToolsFormatter
 from vidbyte.lib.tracing import NullTracer, SpanContext, TracerBase
 from vidbyte.lib.util.credential_keys import CredentialKeyPolicy
+from vidbyte.lib.util.prompt_placement import PromptPlacement
 from vidbyte.middleware import AgentMiddleware, MiddlewarePipeline
 from vidbyte.middleware.builtins.context_compaction import (
     ToolResultCompactionMiddleware,
 )
 from vidbyte.prompts.agentic_loop import append_agentic_loop_prompt
+from vidbyte.providers.anthropic import AnthropicProvider
+from vidbyte.providers.gemini import GeminiProvider
 from vidbyte.providers.output_schema import OutputSchemaFormatter
 from vidbyte.tools._internal import IS_DONE_TOOL_NAME, with_internal_agent_tools
 from vidbyte.tools.activity import ActivityToolFormatter
@@ -1537,8 +1540,11 @@ class AgentRuntime:
         trace_messages: list[dict[str, Any]] = []
         if system is not None:
             trace_messages.append({"role": "system", "content": _trace_text(system)})
-        trace_messages.extend(history_messages)
+        # Put the task where the provider puts it in the request, never after the run's own work.
+        position = self._traced_prompt_position(provider, call_options.get("messages") or (), call_options.get("prompt_index"))
+        trace_messages.extend(history_messages[:position])
         trace_messages.append({"role": "user", "content": safe_prompt})
+        trace_messages.extend(history_messages[position:])
         input_messages = tuple(trace_messages)
         inputs: dict[str, Any] = {
             "agent_name": self.agent_name,
@@ -1569,6 +1575,19 @@ class AgentRuntime:
             f"tools={len(list(tools)) if tools else 0}"
         )
         return inputs
+
+    @staticmethod
+    def _traced_prompt_position(provider: str, messages: Sequence[Mapping[str, Any]], boundary: int | None) -> int:
+        """Return where the provider puts the task among the request's messages, by that provider's own placement rule."""
+        # @intent traced-prompt-sits-where-the-request-put-it
+        # The span shows the task where the request put it: at the run boundary or in front of the tool exchange it
+        # provoked, never after the run's own work. Each wire family's own rule decides, on the unscrubbed messages, so
+        # the view cannot drift from the request; Gemini also puts the task ahead of a leading model turn.
+        wire = ToolsFormatter.wire_format(str(getattr(provider, "value", provider)))
+        if wire == ModelProvider.GEMINI.value:
+            return GeminiProvider._prompt_index([GeminiProvider._gemini_turn(message) for message in messages], boundary)
+        is_call_turn = AnthropicProvider._is_tool_use_turn if wire == ModelProvider.ANTHROPIC.value else PromptPlacement.is_chat_call_turn
+        return PromptPlacement.index(messages, is_call_turn=is_call_turn, boundary=boundary)
 
     @staticmethod
     def _runner_model_name(runner: object) -> str | None:
