@@ -170,6 +170,10 @@ class FailureCode(str, Enum):
     MUSE_PROTOCOL_MISMATCH = "muse.protocol_mismatch"
     MUSE_RUN_FAILED = "muse.run_failed"
     MUSE_WSL_UNAVAILABLE = "muse.wsl_unavailable"
+    GROK_COMMAND_NOT_RUN = "grok.command_not_run"
+    OPENCODE_COMMAND_NOT_RUN = "opencode.command_not_run"
+    MUSE_COMMAND_NOT_RUN = "muse.command_not_run"
+    GROK_STORE_UNREADABLE = "grok.store_unreadable"
 
     @property
     def category(self) -> str:
