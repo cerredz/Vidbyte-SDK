@@ -45,7 +45,7 @@ class MuseChildren:
         # the call ends, however it ends. Cancelling the await does not
         # stop the worker thread that fills it, so a cancel that lands
         # mid-way waits for that work and removes the folder before it
-        # goes on (spec INV-9).
+        # goes on (#1036 INV-9).
         preparing = asyncio.ensure_future(asyncio.to_thread(MuseChildren._prepare_config, skills, request, errors))
         try:
             return await asyncio.shield(preparing)
@@ -59,7 +59,7 @@ class MuseChildren:
     @staticmethod
     async def close_config(folder: Path) -> None:
         # The private folder goes however the call ends; a removal that
-        # fails leaves it behind (spec EC-34).
+        # fails leaves it behind (#1036 EC-34).
         with contextlib.suppress(OSError):
             await asyncio.to_thread(NativeSkillFolders.remove, folder)
 
@@ -136,7 +136,7 @@ class MuseChildren:
         # Waits for a preparation whose caller was cancelled, then
         # removes the folder it made. A preparation that failed has
         # already removed its own folder, and a removal that fails
-        # leaves it behind (spec EC-34).
+        # leaves it behind (#1036 EC-34).
         await asyncio.wait({preparing})
         if preparing.exception() is None:
             with contextlib.suppress(OSError):
