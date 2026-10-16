@@ -1,12 +1,12 @@
 """FILE: vidbyte/lib/outputs/text.py
 
 PURPOSE: Defines OutputText, the pure string helpers connectors use to fit a title and body into a destination's fields.
-ROLE IN CODEBASE: Called by the connectors in this package and by OutputShaping in vidbyte/agents/output/connector.py for the first-line title rule.
+ROLE IN CODEBASE: Called by the connectors in this package, by OutputShaping in vidbyte/agents/output/connector.py for the first-line title rule, and, through truncate with INFINITE_TRUNCATION_MARKER, by InfiniteEvents (vidbyte/agents/infinite/events.py), InfiniteHandoff (vidbyte/context/handoff/infinite.py) and InfiniteMemoryAgent.run_handoff to cut event and handoff text to its cap.
 ARCHITECTURE NOTE: Leaf string functions with no knowledge of agents, replies, stop reasons, or structured output.
 COMMON MODIFICATION PATTERNS: Add a helper here only when two or more connectors need the same text transform.
-KNOWN EDGE CASES: single_line never calls truncate, because the truncation marker contains line breaks.
+KNOWN EDGE CASES: single_line never calls truncate, because the default truncation marker contains line breaks. With a one-line marker, such as the InfiniteMemory one, a cut one-line text stays one line.
 RELATED DOCS: vidbyte/lib/outputs/README.md
-TESTS: tests/features/agent_output_connectors/test_output_connectors_wire_contract.py
+TESTS: tests/features/agent_output_connectors/test_output_connectors_wire_contract.py; tests/test_output_text_truncate_marker.py (the marker option)
 """
 
 from __future__ import annotations
@@ -32,11 +32,11 @@ class OutputText:
         return f"{content.title}\n\n{content.body}"
 
     @staticmethod
-    def truncate(text: str, limit: int) -> str:
-        """Cut text so the result, including the truncation marker, is at most limit characters."""
+    def truncate(text: str, limit: int, *, marker: str = OUTPUT_TRUNCATION_MARKER) -> str:
+        """Cut text so the result, including marker (OUTPUT_TRUNCATION_MARKER unless the caller names its own), is at most limit characters."""
         if len(text) <= limit:
             return text
-        return text[: limit - len(OUTPUT_TRUNCATION_MARKER)] + OUTPUT_TRUNCATION_MARKER
+        return text[: limit - len(marker)] + marker
 
     @staticmethod
     def single_line(text: str, limit: int) -> str:
