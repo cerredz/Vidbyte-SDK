@@ -113,6 +113,12 @@ started: 2026-10-15 18:12
   - check-runs for 578c88bb: Package, Static policy, Source 3.11 and Source 3.12 all completed with success.
 - 2026-10-16 14:05 — The repair agent amended one local, unpushed commit after catching its own S009 regression. That is not a force-push, because nothing pushed was rewritten. Its lesson goes into later briefings: never read a gate's verdict through `| tail`, whose exit code is tail's.
 
+- 2026-10-16 14:30 — The S5 final re-review (conformance) is **SOUND**: 0 Blocker, 0 Major, 2 Minor. All 13 handed fixes are confirmed with the reviewer's own evidence, and the re-review round count is 1/2. No findings verifier is needed, because that step only checks a new Blocker or Major. I am closing both Minors anyway, since each is a comment a human reviewer would leave:
+  - **R-C2, spec text:** a stale `transcript` remnant, three AC Proof cells still reading "pending (S5)", and row 27's wording. These go to the spec author, which owns the spec.
+  - **R-C1, source:** the header of `muse/commands.py` contradicts itself about the export. This goes to a short repair iteration 2, scoped to R-C1, because no other role may edit source.
+
+  These run in sequence, because both commit in the same worktree. origin/main is at f7f32b19 (#1160, `agents/runtime.py` only): there is no overlap, so no merge is needed.
+
 ## User replies (verbatim)
 - 2026-10-15 ~18:25 — "note, ccan you also in a subagent launch this "spec-pipeline" process for pr #1055 and explain the changes that we want to make with the implementation of the existing pr"
 
