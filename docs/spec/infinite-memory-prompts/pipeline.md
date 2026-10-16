@@ -53,6 +53,7 @@ The folder holds 40 `.md` assets; `infinite_memory.json` top level is a dict wit
 - 2026-10-16 02:20 — **Request terminology corrected by the scout:** the root system prompt is consumed raw at `agent.py:72-75` (no `.format`, no `{max_parallel}`/`{max_depth}`; #1113 removed them). request.md §C's mention of those placeholders is stale; the spec records the code's truth. D-D still holds (no placeholder added or removed).
 - 2026-10-16 02:20 — **Coordinator correction applied:** layout is 40 `.md` assets resolved via `"path"` (36 added in #1113), keep it; sizes are measured from the branch (the baseline table above); constants in `vidbyte/lib/constants/infinite.py` are 5–10× looser than the original brief said and no number, old or new, may be quoted in a prompt; the scratchpad folder `pr1084/` is stale and was not read.
 - 2026-10-16 02:20 — Style reference is `vidbyte/prompts/prompts/jev_bulk_work/` only; no coding-agent prompt family exists (scout §4).
+- 2026-10-16 06:51 — The S1 author (launched 02:25) was killed by the session usage limit during Stage B (reading); it left no spec.md and no report. Limit reset 06:50. Resumed the same agent by message (its grounding reads are kept) with the briefing unchanged; if resumption fails, a fresh author is launched with the identical briefing. Base branch re-fetched: still 7efceb55.
 
 ## User replies (verbatim)
 - (none yet)
