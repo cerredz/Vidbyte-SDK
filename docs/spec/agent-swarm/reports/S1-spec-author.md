@@ -111,3 +111,45 @@ The reviewer returned SOUND WITH FIXES (0 Blocker, 3 Major, 4 Minor, optional Q-
 1. A-2: the R-3 mapping now follows the user's words. If the user meant the member loop, the fix is a rename only.
 2. A-5 and A-8 are unchanged. Only live-model QA can settle them.
 3. The member runtime's enum value `agent_swarm_member` is my choice. It names what it resolves to and cannot collide with the five role names.
+
+---
+
+## r3 addendum — S1 review round 2, approved (2026-10-16)
+
+The scoped round-2 reviewer returned SOUND WITH FIXES: 0 Blocker, 3 Major (R-8..R-10) and 3 Minor (R-11..R-13). It also confirmed that R-1..R-7 are resolved and that the termination protocol is intact. I checked each finding against the code and accepted all six. §16 has rows r2-1..r2-6, and §17 has the r3 row. Frontmatter is `status: approved`, `revision: 3`, because the coordinator said the two review rounds are the approval. I dispute nothing, so no new Q-n is needed.
+
+**Dispositions and the evidence I re-read**
+
+- **R-8, accepted.**
+  - `_runtime()` is first called from `_build_context` (`base.py:1280`), inside the `try` that starts at `:918`. The `except Exception` at `:965-978` wraps the refusal.
+  - So `arun` raises `AgentExecutionError`, with the `ConfigurationError` as its `__cause__`.
+  - AC-12, INV-24 and EC-35 now assert at `_runtime()`, following `test_infinite_memory_contract.py:214-219`, and on `__cause__` when going through `arun`.
+  - `base.py` is untouched.
+- **R-9, accepted.**
+  - Tool exceptions become `ToolResult.error` (`runtime.py:1331-1348`).
+  - A decision-hook exception becomes `abort("middleware_error")`, because `fail_closed` defaults to `True` (`middleware/base.py:28`, `pipeline.py:208-215`). The abort comes back as an `AgentResult` with `MIDDLEWARE_ABORT` (`runtime.py:1204-1231`, `:1815-1821`).
+  - `review_finish` exceptions propagate (`pipeline.py:94-106`).
+  - INV-17, D-7, EC-15, EC-16, A-4, the §5 prose, §11, §13 and row 30 now state the contained set by where the exception is raised.
+  - Row 26 keeps `fail_closed = True`. The design is unchanged.
+- **R-10, accepted.**
+  - The member runtime now refuses when `swarm_runtime is None`, with no `isinstance` check and no function-local import.
+  - That is the only way it can be built outside a swarm: `base.py:1463-1465` returns `{}`, and `fork.py:56-58` builds a plain `BaseAgent`.
+  - §12.4 forbids a function-local import.
+- **R-11, accepted.** In Python 3.11, `taskgroups.py` re-raises `KeyboardInterrupt` and `SystemExit` bare. EC-38 and A-12 are restated, and A-12's unwrap branch is dropped.
+- **R-12, accepted.** `AgentSwarmRuntime.arun` now checks the goal first (§8.5, §9.2, row 27).
+- **R-13, accepted.** `_run_member` is named as the narrated main function of each member task (§8.5, §12.4, row 27).
+
+**Self-check after r3:**
+- FR and AC traceability is unchanged and complete: 18 FRs and 21 ACs.
+- W-1..W-11 each have rows.
+- CREATE is 23 and MODIFY is 13.
+- `AgentSwarm*` names agree across §4, §8.5 and §12.3.
+- No stale "refuses anything but an `AgentSwarmRuntime`", tool-to-`AGENT_FAILED` or `BaseExceptionGroup` claim remains. The only `BaseExceptionGroup` mention left is in A-12's *If wrong* clause, on purpose.
+
+**Least-sure assumptions (final)**
+1. A-5: the trim keeps the goal.
+2. A-8: the provisional `isDone` text before a wake does not confuse the model.
+
+Both need live-model QA after S3.
+
+3. A-2: the R-3 name mapping. If it is wrong, the fix is a rename only.
