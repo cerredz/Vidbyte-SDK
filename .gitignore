@@ -9,3 +9,6 @@ build/
 
 # Local eval database
 .vidbyte_evals.db
+
+# Throwaway probe code from offline bug-finding runs (never committed)
+scratchpad/
