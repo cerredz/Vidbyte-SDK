@@ -1,12 +1,12 @@
 """FILE: vidbyte/lib/dataclasses/validation.py
 
-PURPOSE: Defines RecordFieldValidator, the one canonical field validator for validated records (text, optional text, positive finite numbers, bounded ints, strict bools, enum members, argv tuples and absolute directories), and RecordFieldConverter, the canonical conversions and checks records apply beside it (tuples, read-only mappings, enum members, paths and plain instance checks).
+PURPOSE: Defines RecordFieldValidator, the one canonical field validator for validated records (text, optional text, positive finite numbers, bounded ints, strict bools, enum members, argv tuples and absolute directories), and RecordFieldConverter, the canonical conversions and checks records apply beside it (tuples, read-only mappings, enum members, paths, UTC-aware times and plain instance checks).
 ROLE IN CODEBASE: Called from the __post_init__ of the records in vidbyte/lib/dataclasses/native_threads.py and process.py, and, through accepts_text, by the output readers GrokWire, OpencodeWire, MuseWire and MuseExecOutput under vidbyte/harnesses/native/ to check a vendor's thread id.
 ARCHITECTURE NOTE: Two classes of static methods, each taking the checked value first and the field name second, returning the checked or converted value or raising ConfigurationError. The checked variable is always named value, so the bool guards here are the single owner lint rules C002, C006, C007 and C008 point at. Messages name the field and the expected type or range, and quote a value only when it is a short, non-secret scalar or text. Every ConfigurationError also carries details["field"], so a caller can name the bad argument without reading the message text.
-FUNCTION INVENTORY: require_text, accepts_text (require_text's rule as a bool), require_optional_text, require_command_line_units (a value's quoted Windows command-line length), require_number, require_int, require_bool, require_enum, require_argv, require_directory; _text_problem words what a text value fails, and _received renders the received value safely for a message. RecordFieldConverter: to_tuple, to_mapping, to_enum (a member or its exact value string), to_path (a str or os.PathLike, unchecked), require_instance.
+FUNCTION INVENTORY: require_text, accepts_text (require_text's rule as a bool), require_optional_text, require_command_line_units (a value's quoted Windows command-line length), require_number, require_int, require_bool, require_enum, require_argv, require_directory; _text_problem words what a text value fails, and _received renders the received value safely for a message. RecordFieldConverter: to_tuple, to_mapping, to_enum (a member or its exact value string), to_path (a str or os.PathLike, unchecked), to_utc_datetime (an aware datetime or an ISO 8601 text with an offset, as UTC), require_instance.
 COMMON MODIFICATION PATTERNS: Add a new check as one more static method with value first and field_name second, and call it from a record's __post_init__; never copy a check into a record.
 WHAT NOT TO DO IN THIS FILE: 1. Do not convert values silently; to_path only wraps a path in Path and never checks or resolves it. 2. Do not quote mapping values or long text in a message; they can hold secrets. 3. Do not import from a layer above vidbyte.lib.
-KNOWN EDGE CASES: bool is an int subclass, so every numeric check refuses bool first. A field whose last name segment reads as a credential (password, token, secret, api_key) is never quoted, whatever its length. require_argv refuses a list on purpose, because argv fields must be immutable tuples. require_directory must run on the path as given, before Path.resolve(), or a relative path would pass.
+KNOWN EDGE CASES: bool is an int subclass, so every numeric check refuses bool first. A field whose last name segment reads as a credential (password, token, secret, api_key) is never quoted, whatever its length. require_argv refuses a list on purpose, because argv fields must be immutable tuples. require_directory must run on the path as given, before Path.resolve(), or a relative path would pass. to_utc_datetime refuses a naive time, because comparing it with an aware one raises TypeError later.
 RELATED DOCS: vidbyte/lib/README.md; lint/rules/c008_shared_validator_owner.py
 TESTS: tests/features/harness_threads/test_harness_threads_records.py
 """
@@ -18,6 +18,7 @@ import os
 import re
 import subprocess
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from types import MappingProxyType
@@ -178,6 +179,21 @@ class RecordFieldConverter:
         if not isinstance(text, str):
             raise ConfigurationError(f"{field_name} must be a str or os.PathLike path; got a value of type {type(value).__name__}.", details={"field": field_name})
         return Path(text)
+
+    @staticmethod
+    def to_utc_datetime(value: Any, field_name: str) -> datetime:
+        # An aware datetime, or an ISO 8601 text that carries an
+        # offset, returned in UTC; a naive time, a date alone or any
+        # other type is refused.
+        parsed = value
+        if isinstance(value, str):
+            try:
+                parsed = datetime.fromisoformat(value)
+            except ValueError:
+                parsed = None
+        if not isinstance(parsed, datetime) or parsed.utcoffset() is None:
+            raise ConfigurationError(f"{field_name} must be a timezone-aware datetime or an ISO 8601 time with an offset; got {RecordFieldValidator._received(value, field_name)}.", details={"field": field_name})
+        return parsed.astimezone(UTC)
 
     @staticmethod
     def require_instance(value: Any, field_name: str, expected: type[Any] | tuple[type[Any], ...], *, optional: bool = False) -> Any:
