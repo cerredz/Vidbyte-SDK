@@ -55,7 +55,13 @@ def _approximate_token_count(text: str) -> int:
 def _message_tokens(message: ContextMessage, token_counter: TokenCounter | None) -> int:
     # Counts one message body using an injected counter when available, otherwise the local heuristic.
     counter = token_counter or _approximate_token_count
-    return max(0, int(counter(message.content)))
+    # @intent token-budgets-count-call-arguments
+    # A chat call turn with text or list content (a narration, "" or []) also sends its tool calls, which that content leaves out,
+    # so their names and arguments count with it; a None content and the Anthropic and Gemini shapes already render them.
+    raw = message.metadata.get("provider_message") if isinstance(message.metadata, Mapping) else None
+    narrated_call = isinstance(raw, Mapping) and isinstance(raw.get("content"), (str, list)) and bool(raw.get("tool_calls"))
+    text = message.content + (tool_call_signature(message) or "") if narrated_call else message.content
+    return max(0, int(counter(text)))
 
 
 def _message_identifier(message: ContextMessage, fallback_index: int) -> str:
