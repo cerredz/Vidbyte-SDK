@@ -276,7 +276,7 @@ class TraceReplacementCompactionMiddleware(AgentMiddleware):
         if not ctx.provider_messages:
             return MiddlewareDecision.continue_()
         artifact = await self._resolve_artifact(ctx)
-        if TraceArtifactRenderer.is_empty(artifact):
+        if TraceArtifactRenderer.is_empty(artifact, self.render.get("fields")):
             return await self._apply_fallback(ctx)
         trace_text = self._render_trace(artifact)
         messages, stats = await self._replace_history(ctx, trace_text)
@@ -480,7 +480,7 @@ class TraceSummaryTailCompactionMiddleware(TraceReplacementCompactionMiddleware)
         if not ctx.provider_messages:
             return MiddlewareDecision.continue_()
         artifact = await self._resolve_artifact(ctx)
-        if TraceArtifactRenderer.is_empty(artifact):
+        if TraceArtifactRenderer.is_empty(artifact, self.render.get("fields")):
             return await self._apply_fallback(ctx)
         trace_text = self._render_trace(artifact)
         context_messages = self.engine.to_context_messages(ctx.provider_messages)

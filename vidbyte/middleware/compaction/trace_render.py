@@ -50,11 +50,14 @@ class TraceArtifactRenderer:
         return self._apply_char_limit(body)
 
     @staticmethod
-    def is_empty(artifact: Mapping[str, Any] | None) -> bool:
-        # Returns True when the artifact is missing or every field is empty (cold-start guard).
+    def is_empty(artifact: Mapping[str, Any] | None, fields: Sequence[str] | None = None) -> bool:
+        # Returns True when the artifact is missing or every field the trace renders is empty (cold-start guard).
         if not isinstance(artifact, Mapping) or not artifact:
             return True
-        return not any(TraceArtifactRenderer._has_content(value) for value in artifact.values())
+        # @intent cold-start-guard-checks-rendered-fields
+        # A field subset renders only those fields, so content elsewhere must not let an empty trace replace the history.
+        names = artifact.keys() if fields is None else [name for name in fields if name in artifact]
+        return not any(TraceArtifactRenderer._has_content(artifact[name]) for name in names)
 
     @staticmethod
     def _has_content(value: Any) -> bool:

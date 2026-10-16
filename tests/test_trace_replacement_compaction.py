@@ -149,6 +149,17 @@ class TraceArtifactRendererTests(unittest.TestCase):
         # [Edge Case] any populated field makes the artifact non-empty.
         self.assertFalse(TraceArtifactRenderer.is_empty({"a": None, "b": ["x"]}))
 
+    def test_is_empty_judges_only_the_listed_fields(self) -> None:
+        # [Silent Failure] content only in fields the trace will not render made the guard pass an empty trace.
+        artifact = {"goal": "GOAL-MARK", "mistakes": [], "current_status": ""}
+        self.assertTrue(TraceArtifactRenderer.is_empty(artifact, fields=["mistakes", "current_status"]))
+        self.assertFalse(TraceArtifactRenderer.is_empty({**artifact, "mistakes": ["m1"]}, fields=["mistakes", "current_status"]))
+        # Listed fields the artifact lacks render nothing, so they count as empty too.
+        self.assertTrue(TraceArtifactRenderer.is_empty(artifact, fields=["nope"]))
+        # Without a field subset every field still counts, as before.
+        self.assertFalse(TraceArtifactRenderer.is_empty(artifact))
+        self.assertFalse(TraceArtifactRenderer.is_empty(artifact, fields=None))
+
 
 class ReplaceWithTraceCompactionTests(unittest.IsolatedAsyncioTestCase):
     def _messages(self):
@@ -469,6 +480,47 @@ class TraceReplacementMiddlewareTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(len(after), 2)
                     self.assertIn("ship it", str(after[0].get("content")))
                     self.assertEqual(after[1], history[2])
+
+    def _field_subset_presets(self, artifact):
+        # Returns a recent-tail replacement and a tail-summary replacement that both render only mistakes and status.
+        render = {"fields": ["mistakes", "current_status"]}
+        return (
+            TraceReplacementCompactionMiddleware.keep_recent_tail(1, render=render, artifact=artifact),
+            TraceSummaryTailCompactionMiddleware.trace_then_summarize_tail(FakeSummarizer(), keep_last_groups=1, render=render, artifact=artifact),
+        )
+
+    @staticmethod
+    def _two_result_history():
+        # Returns a user ask followed by two tool call/result pairs, RESULT-1 then RESULT-2.
+        history = [{"role": "user", "content": "fix the tests"}]
+        for index in (1, 2):
+            history.append({"role": "assistant", "tool_calls": [{"id": f"c{index}", "function": {"name": "run_tests"}}]})
+            history.append({"role": "tool", "tool_call_id": f"c{index}", "content": f"RESULT-{index}"})
+        return history
+
+    async def test_content_outside_rendered_fields_keeps_the_history(self) -> None:
+        # [Silent Failure] a goal outside the field subset passed the guard, so a "- N/A" trace replaced RESULT-1 with nothing.
+        artifact = {"goal": "GOAL-MARK", "mistakes": [], "current_status": ""}
+        for mw in self._field_subset_presets(artifact):
+            with self.subTest(middleware=mw.name):
+                decision = await mw.before_model_call(_ctx(self._two_result_history()))
+                self.assertIsNone(decision.transform)
+        # A configured fallback runs instead of the empty trace.
+        mw = TraceReplacementCompactionMiddleware.trace_fallback_to_mechanical(fallback_options={"n": 2}, render={"fields": ["mistakes"]}, artifact=artifact)
+        decision = await mw.before_model_call(_ctx(self._two_result_history()))
+        self.assertIs(decision.transform.metadata.get("fallback_used"), True)
+
+    async def test_rendered_field_with_content_still_replaces(self) -> None:
+        # [Edge Case] once a listed field has content, the field-subset trace replaces the older history as before.
+        artifact = {"goal": "GOAL-MARK", "mistakes": ["MISTAKE-MARK"], "current_status": ""}
+        for mw in self._field_subset_presets(artifact):
+            with self.subTest(middleware=mw.name):
+                decision = await mw.before_model_call(_ctx(self._two_result_history()))
+                contents = [str(m.get("content")) for m in decision.transform.provider_messages]
+                self.assertIn("MISTAKE-MARK", contents[0])
+                self.assertNotIn("GOAL-MARK", contents[0])
+                self.assertNotIn("RESULT-1", contents)
+                self.assertIs(decision.transform.metadata.get("changed"), True)
 
 
 class ProviderErrorStatusTests(unittest.TestCase):
