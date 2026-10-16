@@ -1,4 +1,4 @@
-# Verification log: Public skill loader: resolve every #904 skill source without JevAgent (SDK 0.3.1)
+# Verification log: Public skill loader: resolve every #904 skill source without JevAgent (SDK 0.4.0)
 
 Gate set (from context/code-map.md §1 and the S5 briefing §4; run from the worktree root):
 (1) local: `PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider tests/features/public_skill_loader tests/features/jev_skills_preload tests/test_jev_skill_preload.py`;
@@ -120,3 +120,118 @@ Gate set (from context/code-map.md §1 and the S5 briefing §4; run from the wor
 - Local source-stage failures (c) and (d) need an orchestrator decision on main's test `tests/features/harness_threads/test_harness_threads_surface.py`.
 - (a) and (b) are inherited from main.
 - No confirmed finding is open. R-6 and R-7 are follow-ups.
+
+## Iteration 2 — 2026-10-15 — agent report: reports/S5-repair-2.md
+
+**Defects in:**
+- No open confirmed finding in code: R-C11, R-C12, and R-C13 were fixed in spec text by `ed354f3a` (r5) and `b1a970c4` (FEATURE.md), and only their statuses were left to update. R-C10 stays refuted.
+- The user's decisions D-15 and D-16 (spec r5) made three items:
+  - V: move the release to 0.4.0 (rows 3(a), 4-11);
+  - T: raise the release test's floor to 0.4.0, as an orchestrator-granted test edit (AC-11);
+  - N: add the release notes, `docs/design/release-0-4-0.md` (row 16, FR-13, AC-19).
+- No red gate at the start (`835c0da5`) apart from the four inherited local source-stage failures (a) to (d) from Iteration 1.
+
+**Hypotheses and attempts (in order):**
+- **V, the literals.** `git grep -n -e "0\.3\.1" -e "0, 3, 1" -e "0_3_1" -e "0-3-1" -- ':!docs'` found the nine places named in INV-16, at the line numbers row 7 gives, plus four lines of the release test's text. Each of the eight hand-edited literals was changed by `sed` at its own line number, and `git diff` showed exactly 8 changed lines.
+  - Re-grepping before the commit left only the contract and the test.
+  - Later, `git grep -e "0\.3\.0" -e "<0\.4" -e ">=0\.3" -- ':!docs'` found nothing, so no other place pins the old minor.
+  - D-15's flip condition does not hold: `origin/main` (local ref `aac190e9`) still reads `version = "0.3.0"`, with no `v0.4.0` tag. Its #1103 to #1107 touch no version place and not the contract.
+- **V, the contract.** `PYTHONPATH=$(pwd) python scripts/generate-sdk-public-api.py` ran on the clean tree and printed `wrote … at 013cf884… (vidbyte-sdk 0.4.0, 643 exports)`. The data diff is exactly `"version"` and `source.commit`, and the file was committed alone. Nothing was amended.
+- **T.** The pack was green at the contract commit (67 passed, because 0.4.0 is above the old floor (0, 3, 1)), so the test edit came after the bump.
+  - The grant names lines `:3`, `:9`, and `:34-36`, and the category "docstring/comment lines that name 0.3.1 or D-13". Two more header lines name D-13: `:4` (ROLE IN CODEBASE, "Covers spec AC-11, INV-16, FR-8, D-13 and EC-29") and `:10` (RELATED DOCS, "8.1 D-13").
+  - Reading the category as the grant, only the token `D-13` was changed to `D-15` on those two lines. **Flag for the orchestrator:** if the line list was meant to be exhaustive, revert `:4` and `:10` (2 tokens).
+  - No assertion changed.
+- **T, the proof that the test still fails at 0.3.x.** Scratch copies made with `git archive HEAD`, plus the edited test, imported through `PYTHONPATH` from an empty folder, never in the worktree:
+
+  | Copy | Result |
+  |---|---|
+  | all eight places at 0.4.0 | 8 passed |
+  | all at 0.3.1 | 8 failed, `assert (0, 3, 1) >= (0, 4, 0)` |
+  | all at 0.3.9 | 8 failed, `assert (0, 3, 9) >= (0, 4, 0)` |
+  | all at 0.3.0 | 8 failed, `assert (0, 3, 0) >= (0, 4, 0)` |
+  | all at 0.4.1 | 8 passed |
+  | all at 0.5.0 | 8 passed |
+  | `llms.txt` alone at 0.3.1 | 1 failed, 7 passed, `assert '0.3.1' == '0.4.0'` |
+
+- **N, the release notes. Every claim was checked against git or a probe, not memory:**
+  - **PR list.** `git log --first-parent --oneline v0.3.0..0754e01f` lists 18 PRs: 3 features (#1036, #1027, #1095) and 15 fixes, grouped by commit scope: compaction 6, context 4, and one each in providers, agents, sessions, jev, and algorithms.
+  - **Root signatures.** A probe compared `inspect.signature` of every root export, from `git archive` copies of `v0.3.0` and HEAD (639 and 643 names).
+    - `api_key` is removed from exactly 11 signatures on 8 roots: `Agent`, `Agent.restore`, `AgentRoleSettings`, `AgentRunnerConfig` (first parameter `api_key` → `api_keys`), `AggregateAgent`, `BaseAgent`, `BaseAgent.restore`, `JevAgentSettings`, `JevRunBriefSettings`, `Session.fork_from`, and `Session.resume`.
+    - All 11 take `api_keys`, and all but `AgentRunnerConfig` and `JevRunBriefSettings` take `vidbyte_api_key`.
+    - `model_mode=TextModelMode.AUTO` is on `Agent`, `AgentRunnerConfig`, `AggregateAgent`, `BaseAgent`, and `JevAgentSettings`.
+    - `api_key` remains on `AnthropicSkill`, `OpenAISkill`, `LinearIssueOutput`, `NotionPageOutput`, and `TypefullyDraftOutput`.
+    - `algorithm=` is new on the two `restore` methods, `Session.resume`, and `Session.fork_from` (#1093).
+    - `system_prompt_presets` is on `Agent`, `BaseAgent`, and `JevAgentSettings` (#1095).
+    - Root names: 4 added (`ConfigurationError`, `SkillLoader`, `SkillResolution`, `SystemPromptPreset`), 0 removed.
+  - **Gateway probe** at HEAD, with `httpx` send faked, a fake `OPENAI_API_KEY`, and no `VIDBYTE_API_KEY`:
+    - `Agent(..., api_key=…)` raises `TypeError: BaseAgent.__init__() got an unexpected keyword argument 'api_key'`.
+    - `Agent(...).run("hello")` raises `AgentExecutionError`, caused by `ConfigurationError: Missing Vidbyte API key. Pass vidbyte_api_key or set VIDBYTE_API_KEY, or use mode=TextModelMode.DIRECT …`, with 0 requests sent.
+    - `TextModelMode` is in `vidbyte.lib.enums.__all__`, not in `vidbyte.__all__`.
+  - **#1036.**
+    - `FailureCode` goes from 120 members at `v0.3.0` to 148 at HEAD.
+    - 9 `*_thread` functions are in `vidbyte.harnesses.native.__all__`.
+    - Its squash diff deletes no file under `vidbyte/`, so the "removed" items in its body never shipped.
+  - **No dependency change.** `git diff v0.3.0 HEAD -- pyproject.toml` changes only the version line.
+  - **publish.yml** runs `validate-tag`, then `ci` (`ci.yml`), then `publish` through the `pypi` environment.
+- **N, a deviation from row 16's wording.** Row 16 heads the list "from `git log --first-parent v0.3.0..HEAD`", but on this branch that range shows only #1086 to #1088: the merge's second parent carries the rest. So the doc cites `v0.3.0..0754e01f` plus #1099.
+  - #1103 to #1107, on the local `origin/main` ref and not on this branch, appear as "fixes merged there after `0754e01f` ship too … at the time of writing", naming #1104 by its own subject.
+  - The doc has 15 lines, as the precedent does, and no other `docs/` file was read.
+- **Source stage, first run: a fourth failure.** `tests/features/coding_agent/test_coding_agent_environment.py::test_real_bash_reports_its_version_and_git` failed with `Tool probe failed: bash did not finish within 15 seconds` (`CODING_ENVIRONMENT_PROBE_TIMEOUT_SECONDS`).
+  - Hypothesis: host load, not this PR.
+  - Evidence:
+    - (1) None of this iteration's commits, and nothing in the PR, touches the coding agent or `vidbyte/tools/builtins/`.
+    - (2) It failed 3 of 3 in isolation (about 16 s each), and identically on a `git archive 0754e01f` copy, the merge-base.
+    - (3) A bare `bash -c` took 0.95 s, but the probe script took 33 s under xtrace, spread over the tools' `--version` calls (1 to 4 s each).
+    - (4) Host CPU was at 100%, with two long-lived `bash` processes of about 4,500 CPU-seconds each, not this session's, left alone.
+    - (5) After the load eased it passed (`1 passed in 9.10s`), and the source-stage re-run passed it.
+  - Verdict: environmental and inherited. It is not a test or timeout change for this PR.
+- **Semgrep fixtures, first attempt.** `python -I run_semgrep_without_mcp.py --test …` hung for more than 600 s, with 8 idle spawn workers, and printed Python's `freeze_support()` spawn error. The cause: the scratch wrapper calls `main()` at module level with no `__main__` guard, so Windows spawn workers re-import it.
+  - Fix, in scratch only: `it2/run_semgrep_guarded.py`. It keeps the `mcp` stub at module level and moves `main()` under `if __name__ == "__main__"`, so `--test` passes.
+  - Use the guarded wrapper for `--test`. Either wrapper works for `scan`.
+  - `.semgrep/` and the workflows have no diff against `origin/main`.
+
+**Changes:**
+
+| Commit | Change |
+|---|---|
+| `013cf884` | V: the eight literals to 0.4.0, as `release: bump vidbyte-sdk to 0.4.0 (D-15, rows 4-10)`. 8 files, +8/-8 |
+| `46416739` | V: contract regenerated alone, as `chore(contracts): regenerate the public-API contract for 0.4.0 (W-5, row 11)`. Version and `source.commit` only |
+| `dc522090` | T: the granted test edit, alone. 6 lines |
+| `93a2b1a8` | N: `docs/design/release-0-4-0.md`, alone. 15 lines |
+| (this commit) | the verify log, the review.md statuses (R-C11 `fixed @ed354f3a (spec r5)`, R-C12 `fixed @ed354f3a`, R-C13 `fixed @ed354f3a, b1a970c4`), and `reports/S5-repair-2.md`. The log title now says SDK 0.4.0, as the spec's does |
+
+**Granted test edit (exact before/after),** in `tests/features/public_skill_loader/test_public_skill_loader_release.py`. Only the named token changed on each line, and no assertion changed. `:35` ("loader, so a later bump may raise the version but never go below it.") is unchanged.
+
+| Line | Before | After |
+|---|---|---|
+| `:3` | `… and that version is never below 0.3.1, the first release that carries the loader.` | `… never below 0.4.0, …` |
+| `:4` | `ROLE IN CODEBASE: Covers spec AC-11, INV-16, FR-8, D-13 and EC-29 for …` | `… FR-8, D-15 and EC-29 …` (outside the grant's line list; see above) |
+| `:9` | `KNOWN EDGE CASES: YAML reads the placeholder 0.3.1 as text, since it has two dots. …` | `… the placeholder 0.4.0 as text …` |
+| `:10` | `RELATED DOCS: … (sections 6.1 INV-16, 8.1 D-13, 9.2 row 7, …)` | `… 8.1 D-15, …` (outside the grant's line list; see above) |
+| `:34` | `# EC-29, D-13: 0.3.1 is the first release that carries the public` | `# EC-29, D-15: 0.4.0 is the first release that carries the public` |
+| `:36` | `FIRST_LOADER_RELEASE = (0, 3, 1)` | `FIRST_LOADER_RELEASE = (0, 4, 0)` |
+
+**Gate matrix out** (code head `93a2b1a8`, pushed; the docs-only head of this commit is dispatched again, and its runs are in the S5-repair-2 STATUS):
+
+| Gate | Command | Result | Final lines |
+|---|---|---|---|
+| new tests (the pack) | `PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider tests/features/public_skill_loader` | PASS | `67 passed in 0.46s` |
+| pack + Jev area | (1) | PASS | `493 passed, 1 skipped in 11.01s` |
+| lint | (2) | PASS | `S064 RATCHETED: 4 known finding(s). Inspect with: python lint/run.py --rule S064 --all` / `SDK-LINT: PASS`. 0 REGRESSED or ERRORED. IMPROVED: A001, A002, C011, C012, S001, S010, S025, S061, S063. `git diff origin/main -- lint/` is empty |
+| contract | (3) | PASS | `contracts/sdk-public-api.json is current at 013cf884fb9a532101bbbe128d9fde908b2fd131 (vidbyte-sdk 0.4.0, 643 exports).` / `C016 public-api-contract-current 0 0 CLEAN` / `SDK-LINT: PASS` |
+| source stage | (4) | **FAIL (3, all inherited)** | Re-run: `====== 3 failed, 5888 passed, 16 skipped, 1 warning in 136.28s (0:02:16) ======` / `CI failed: …-m pytest…`. The 3 are (a), (c), and (d) from Iteration 1; (b) passed. First run: `4 failed, 5887 passed, 16 skipped in 260.74s`, which is (a), (c), (d), and the host-load bash-probe timeout above |
+| package stage | (5), `env -u PYTHONPATH` | PASS | `Installed vidbyte-sdk 0.4.0 passed smoke checks.` / `CI passed.` (`vidbyte_sdk.egg-info` removed afterwards) |
+| semgrep scan | (6), `scan --error --config .semgrep/typed-mapping-boundary-policy.yml vidbyte` | PASS | `Ran 1 rule on 962 files: 0 findings.` |
+| semgrep fixtures | `--test --config .semgrep/typed-mapping-boundary-policy.yml .semgrep/typed-mapping-boundary-policy.py` (guarded wrapper) | PASS | `1/1: ✓ All tests passed` |
+| remote CI | (7), run 38839158032 on `93a2b1a8` | PASS | Source / Python 3.11, Source / Python 3.12, and Package all success. `5851 passed, 56 skipped` / `Installed vidbyte-sdk 0.4.0 passed smoke checks.` / `CI passed.` |
+| remote Static policy | (7), run 38839160549 on `93a2b1a8` | PASS | Static policy = success |
+| version places | `git grep -n -e "0\.3\.1" -e "0, 3, 1" -- ':!docs'` | PASS | empty. All nine INV-16 places read 0.4.0, the contract by `--check` |
+
+**Still open:**
+- No confirmed finding is open. R-6 and R-7 remain follow-ups, and R-C10 stays refuted.
+- Local source-stage failures (a), (c), and (d) are inherited, per the orchestrator decision of 2026-10-16 00:40 in pipeline.md.
+- For the orchestrator: the `:4` and `:10` reading of the test grant (2 tokens, `D-13` → `D-15`). Revert them if the grant's line list was exhaustive.
+- For S6 and the release:
+  - The doc's "#1103 to #1107 at the time of writing" reflects the local `origin/main` ref `aac190e9`, which was not fetched.
+  - Refresh that line if `main` moves before the merge (row 16).
+  - If `main` releases 0.4.0 first, D-15 flips.
