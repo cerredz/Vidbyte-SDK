@@ -21,7 +21,7 @@ Existing-PR run: no new branch, no new PR. Adds to draft PR #1055 on `feat/codex
 | S1 spec + review | done | 23:28 | 10-16 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | spec r3 bd20f6f7 approved; 2 rounds (SOUND WITH FIXES ×2), 22 findings applied; 12 methods, 11 tools → 26, 4 codes, 5 records, 1 enum, 4 new files; 0 blocking Q |
 | S2 tests | done | 10-16 | 10-16 | reports/S2-test-author.md | 76 new tests in 5 files; red confirmed (area 91 failed / 537 passed = 76 new + 14 authorized-pin + 1 inherited); S2_HEAD 33787d9a |
 | S3 implement | done | 10-16 | 10-16 | reports/S3-implementer.md | S3_HEAD c81ba632 pushed (ff) to PR #1055 (draft, title unchanged); 18/18 rows, 4 new files / 20 classes (budget exact); area 673 passed + 1 inherited; SDK-LINT PASS; run_ci source 1 inherited fail / 5952 passed; package CI passed; semgrep 0 findings; remote CI 38893453043 + static 38893455393 success |
-| S4 adversarial review | running | 10-16 | | reports/S4-review-*.md | |
+| S4 adversarial review | done | 10-16 | 10-16 | reports/S4-review-*.md, S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; 0 Blocker / 4 Major (R-1..R-4) / 11 Minor; 0 refuted, 1 downgraded (R-E2 → R-8); conformance SOUND, conventions + engineering MERGEABLE AFTER FIXES |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
@@ -49,6 +49,9 @@ Existing-PR run: no new branch, no new PR. Adds to draft PR #1055 on `feat/codex
 - 2026-10-16 — S2 author validated its tests against a scratch implementation kept in the scratchpad only (45/45 one-rule mutations caught). S3 is told not to read the scratchpad (except the schema dir) so the implementation stays independent of it.
 - 2026-10-16 — S3 installed semgrep into the worktree venv, which pulled ~40 packages (incl. mcp 1.23.3, not a project dependency). Orchestrator rebuilt the worktree venv fresh at the same path (`pip install -e .[dev,codex]`, 56 packages = exactly pyproject + extras, as CI installs) and created a separate semgrep venv C:/Users/422mi/vidbyte-repos/worktrees/.venvs/codex-host-semgrep (semgrep==1.170.1, mcp<2). Re-ran area suite in the clean venv: 1 failed (inherited), 673 passed. Semgrep: `Ran 1 rule on 980 files: 0 findings`. — environment problem, no source touched.
 - 2026-10-16 — S4 diff base = c181be65 (the merge commit = BASE_COMMIT), not origin/main: `origin/main...HEAD` would re-review all of PR #1055's original CodexHost, which already had its own pipeline review. DIFF_HEAD = S3_HEAD c81ba632.
+
+- 2026-10-16 — S4 verified: 4 confirmed Majors. Routing by owner tag: R-1 (goal-tool slot release, INV-27), R-4 (delete reservation/release, INV-9) and R-8 (read-back name and turn-id clauses, INV-34; downgraded Minor, `tests` follow-up) → the S2 test author a593a92fd8d724b3b (resumed by ID; tests are its contract). R-8 INCLUDED, not deferred: it protects the user's settled "check that the command actually ran" decision (request §C), touches only tests, and is reversible. R-2, R-3, R-6, R-7, R-9 (code) and R-5 (spec wording) → S5 repair iteration 1 after the tests land. R-10..R-15 stay follow-ups (outside §12.3, spec-pinned texts, or [scope-adding]) and go to the PR body.
+- 2026-10-16 — R-3 bound for `since` NOT added (verifier: `"minimum": 0` is a new A007 finding with the ratchet at 255/255); only constant-valued bounds on limit/turns limit/token_budget.
 
 ## User replies (verbatim)
 - none
@@ -107,3 +110,5 @@ Existing-PR run: no new branch, no new PR. Adds to draft PR #1055 on `feat/codex
 - Remote CI on HEAD is green even though the inherited test fails locally (CI's merge-base context differs). — *source:* orchestrator
 - Helper `_reject_skill_arguments` avoids "request" in its name (lint A002). `CODEX_HOST_INPUT_CHECK_ATTEMPTS` kept its spec name and lint passes. — *source:* S3
 - CodexHostTools class docstring in toolsets/codex.py still says "one agent tool per CodexHost function" (unpinned; the pinned line is toolsets/__init__.py:11, Q-18 default not reworded). — *source:* S3
+- review.md owner key: code → S5, tests → S2 author, spec → wording only, follow-up → PR body. Mutation harness: `VPY probe.py <ids>` in scratchpad/s4-verifier/ (V36 goal slot leak, V05/V05b delete reserve/release, V02-V04 read-back clauses) must go red once S2's new tests land. — *source:* S4 verifier
+- R-2 trap: `CODEX_USER_MESSAGE_ITEM_TYPE` must go right after `"CODEX_COMPACTION_ITEM_TYPE"` in `constants.__all__`; an end-append breaks test_codex_host_helper_surface.py:288. — *source:* S4 verifier
