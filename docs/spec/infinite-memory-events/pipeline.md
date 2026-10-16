@@ -16,8 +16,8 @@ started: 2026-10-15 22:10
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-15 22:10 | 2026-10-15 22:40 | reports/S0-scout.md | base ff1bc933; code-map.md (2 new + 16 changed files) |
 | S1 spec + review | done (r3 approved c6774e94) | 2026-10-15 22:55 | 2026-10-16 07:05 | reports/S1-spec-author.md, S1-spec-reviewer-r1.md, S1-spec-reviewer-r2.md | spec r1: 2 new files, 22 §12.3 rows, 0 blocking Q |
-| S2 tests | in progress | 2026-10-16 07:05 | | reports/S2-test-author.md | |
-| S3 implement | pending | | | | |
+| S2 tests | done | 2026-10-16 07:10 | 2026-10-16 12:20 | reports/S2-test-author.md | 53 tests (73 cases) in 8 new files; red 74 failed / 112 passed; commits 28f45271, 1944edab |
+| S3 implement | in progress | 2026-10-16 12:25 | | | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
@@ -50,6 +50,10 @@ started: 2026-10-15 22:10
 - 2026-10-16 06:55 — Second account usage-limit stop (window reset 06:50) hit the in-flight author revisions mid-edit (r3); partial spec edits were left uncommitted and the same agents were resumed to finish them. Pacing from here: ≤ 3 agents of this run at a time (another session's prompts pipeline shares the window); focused round-2 reviews resume the same reviewers.
 - 2026-10-16 07:05 — Spec r3 approved (c6774e94, 1,020 lines; FR 23, AC 37, EC 37, INV 38, 25 §12.3 rows, 0 blocking Q). r2→r3 facts forwarded to siblings: launches refused by DelegationLimitsMiddleware (past max_depth / over max_parallel) emit NO event; batch_rejected = refusals inside the launch tool only; runtime-refused memory tool calls emit no tool_refused; cost_usd is null whenever any part is unpriced (cost_complete false) — treat null as unknown, never 0. Row 22 test edit: module count ≤ 9, launch.py ≤ 410, lib/dataclasses/infinite.py ≤ 620, BUDGET_MODULES comment "twelve" → "fourteen".
 - 2026-10-16 07:05 — S2 environment ruling: do NOT `pip install -e .` in this worktree (the global Python has no installed vidbyte SDK; an editable install would repoint every other session's `import vidbyte` here). Run everything from the worktree root with `PYTHONPATH=$(pwd)` per the field guide's local-ci-verification.md.
+- 2026-10-16 09:00–11:50 — Third account usage-limit stop hit S2 mid-work (files staged, nothing committed); resumed the same agent after the reset.
+- 2026-10-16 12:20 — S2 spot-check passed (independent re-run): `PYTHONPATH=$(pwd) PYTHONDONTWRITEBYTECODE=1 python -m pytest tests/features/infinite_memory_agent tests/test_record_field_validation_event_options.py tests/test_output_text_truncate_marker.py -q -p no:cacheprovider` → 74 failed, 112 passed (112 + the edited budget test = the 113 baseline). Failure reasons all missing symbols/modules/keywords (22 `on_event` kwarg, 14+ missing lib records, 13 missing modules, 4 `run_handoff`, 3 missing RecordFieldValidator options). Spec diff 9a180d40..HEAD touches only §6.2 AC rows. Existing-file test edits: only row 22 (budget test) plus pack README/FEATURE.md.
+- 2026-10-16 12:20 — Spec ambiguities S2 resolved inside the tests (tests are now the contract; not re-opened in the spec): AC-36 denial text checked with `in` (the model sees it wrapped in `[tool_error kind=middleware_denied]`); AC-32 "differ only in first character" read as the first task name's first character; AC-37 f vs D-17: `generator_finished` must work without an earlier `subagent_launched`, so `duration_ms` needs a default; AC-18 NO_ANSWER position and AC-30 refused-field name matched loosely; §9.1 whole-event figures ~2 bytes off (tests check only the 32,768 details bound). S4 conformance reviewers are told.
+- 2026-10-16 12:25 — Base `origin/feat/infinite-memory-agent` still 7efceb55 (PR #1084 OPEN at that head) — no rebase before S3. Spec rows avoid `vidbyte/prompts/prompts/infinite_memory/` (§12.5 "no new leaves"), so no overlap with the parallel prompts pipeline.
 
 ## User replies (verbatim)
 - (none during the run yet)
