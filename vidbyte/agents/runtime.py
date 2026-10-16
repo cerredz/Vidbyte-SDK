@@ -76,6 +76,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import functools
 import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -1029,7 +1030,9 @@ class AgentRuntime:
                     iteration=iteration,
                     runner=runner,
                     provider=provider,
-                    invoke_runner=invoke_runner,
+                    # @intent side-calls-count-toward-the-token-budget
+                    # max_tokens covers every model call in the run, so each side call's tokens join the loop's count before the next budget check.
+                    invoke_runner=functools.partial(self._invoke_and_count_side_call, state, invoke_runner, runner_output_metadata) if invoke_runner is not None else None,
                     runner_output_text=runner_output_text,
                     runner_output_metadata=runner_output_metadata,
                     options=options,
@@ -1049,6 +1052,14 @@ class AgentRuntime:
         response = await runner.invoke(prompt, **options)
         # Algorithm side calls are billed like loop calls, so they land in the same usage ledger.
         self.usage_tracker.record_call(response)
+        return response
+
+    async def _invoke_and_count_side_call(self, state: BaseAgentRuntimeLoopState, invoke_runner: Callable[..., Any], runner_output_metadata: Callable[[object], Mapping[str, Any]] | None, runner: RunnerHandle, prompt: str, **options: Any) -> object:
+        """Invoke an inner-loop algorithm's side call and add its tokens to this run's token count."""
+        # Uses the same token extraction as loop calls, so the budget and the usage ledger agree.
+        response = await invoke_runner(runner, prompt, **options)
+        runner_metadata = dict(runner_output_metadata(response)) if runner_output_metadata is not None else {}
+        state.tokens_used = self._add_token_usage(state.tokens_used, token_usage_from_response(response, runner_metadata))
         return response
 
     @staticmethod
