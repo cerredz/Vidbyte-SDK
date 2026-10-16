@@ -15,8 +15,16 @@ from __future__ import annotations
 
 from vidbyte.harnesses.native.grok import (
     continue_grok_thread,
+    delete_grok_thread,
     fork_grok_thread,
+    get_grok_thread,
+    get_grok_thread_lineage,
+    list_grok_threads,
+    list_grok_threads_since,
+    list_recent_grok_threads,
+    read_grok_thread,
     run_grok_thread,
+    search_grok_threads,
 )
 from vidbyte.harnesses.native.muse import (
     continue_muse_thread,
@@ -31,32 +39,48 @@ from vidbyte.harnesses.native.opencode import (
 from vidbyte.lib.dataclasses.native_threads import (
     GrokThreadConfig,
     MuseThreadConfig,
+    NativeCommandOutput,
     NativeThreadResult,
+    NativeThreadSummary,
     OpencodeThreadConfig,
 )
 from vidbyte.lib.enums.native_threads import (
+    GrokCommand,
     GrokPermissionMode,
     GrokReasoningEffort,
+    GrokThreadScope,
     MuseReasoningEffort,
 )
 from vidbyte.lib.errors import NativeThreadError
 
 __all__ = [
+    "GrokCommand",
     "GrokPermissionMode",
     "GrokReasoningEffort",
     "GrokThreadConfig",
+    "GrokThreadScope",
     "MuseReasoningEffort",
     "MuseThreadConfig",
+    "NativeCommandOutput",
     "NativeThreadError",
     "NativeThreadResult",
+    "NativeThreadSummary",
     "OpencodeThreadConfig",
     "continue_grok_thread",
     "continue_muse_thread",
     "continue_opencode_thread",
+    "delete_grok_thread",
     "fork_grok_thread",
     "fork_muse_thread",
     "fork_opencode_thread",
+    "get_grok_thread",
+    "get_grok_thread_lineage",
+    "list_grok_threads",
+    "list_grok_threads_since",
+    "list_recent_grok_threads",
+    "read_grok_thread",
     "run_grok_thread",
     "run_muse_thread",
     "run_opencode_thread",
+    "search_grok_threads",
 ]
