@@ -12,7 +12,7 @@ TESTS: Offline typed-result checks and python scripts/run_ci.py.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
@@ -76,6 +76,11 @@ class CodexResultSerializer:
             else None,
             usage_available=result.usage is not None,
         )
+
+    @classmethod
+    def items(cls, values: Sequence[ThreadItem]) -> tuple[CodexItem, ...]:
+        # Serialize stored items by the same rule as a turn result's items.
+        return tuple(cls._item(value) for value in values)
 
     @classmethod
     def _item(cls, value: ThreadItem) -> CodexItem:
