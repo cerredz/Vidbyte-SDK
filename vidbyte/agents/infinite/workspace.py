@@ -244,11 +244,11 @@ class InfiniteWorkspace:
         # @intent one-note-has-one-path-in-events
         # Events and the handoff name a note once however the model
         # spelled it, and never by an absolute path. A path that no
-        # longer resolves inside comes back as given, so an event that
-        # lists it is never lost.
+        # longer resolves inside, or loops (RuntimeError on 3.11),
+        # comes back as given, so an event that lists it is never lost.
         try:
             return FileSystemPermissions.resolve_scoped_path(self._scope, path).relative_to(self.root).as_posix()
-        except (ToolExecutionError, ValueError, OSError):
+        except (ToolExecutionError, ValueError, OSError, RuntimeError):
             return path
 
     def _text(self, name: str) -> str:
