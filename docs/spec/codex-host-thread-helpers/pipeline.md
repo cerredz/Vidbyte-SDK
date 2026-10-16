@@ -18,8 +18,8 @@ Existing-PR run: no new branch, no new PR. Adds to draft PR #1055 on `feat/codex
 |---|---|---|---|---|---|
 | S0 merge main | done | 22:31 | 23:05 | reports/S0-merge-main.md | merge commit c181be65; packs 551 passed / 1 inherited failure; SDK-LINT: PASS |
 | S0 worktree + capture + recon | done | 22:30 | 23:25 | reports/S0-scout.md | base_commit c181be65; code-map.md (4 sections, ~30 files) |
-| S1 spec + review | running | 23:28 | | reports/S1-spec-author.md, S1-spec-review.md | spec r1 5a1c754c (12 methods, 11 tools → 26, 4 new files); review round 1 running |
-| S2 tests | pending | | | | |
+| S1 spec + review | done | 23:28 | 10-16 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | spec r3 bd20f6f7 approved; 2 rounds (SOUND WITH FIXES ×2), 22 findings applied; 12 methods, 11 tools → 26, 4 codes, 5 records, 1 enum, 4 new files; 0 blocking Q |
+| S2 tests | running | 10-16 | | reports/S2-test-author.md | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
@@ -42,6 +42,8 @@ Existing-PR run: no new branch, no new PR. Adds to draft PR #1055 on `feat/codex
 - 2026-10-16 (after limit reset) — S1 author died mid-read in a usage-limit outage (HTTP 429), leaving no spec.md or report on disk. Resumed the SAME author via SendMessage (its saved transcript holds the briefing and its reading so far) instead of relaunching fresh; fallback = fresh relaunch with the identical briefing. — the coordinator asked to resume rather than redo finished work.
 - 2026-10-16 — S1 review round 1: SOUND WITH FIXES, 2 Blocker / 7 Major / 6 Minor. Orchestrator guidance to the author: R-3 → settle A-4/A-5 with a read-only probe (thread/read, thread/goal/get, thread/turns/list limit 1) on ONE real notLoaded thread id from thread/list, no resume, no writes; principle: no READ tool ever resumes/loads a thread; a WRITE that must resume first proves it cannot start turns, or refuses with guidance. R-5 → BUILD the skill read-back (request §C "Check that the command actually ran" is a settled decision, so it is in scope, not scope-adding). R-6 → keep D-9 (empty since-window returns ()) and D-14 (idle loaded thread may be deleted) as documented deviations from the §C example list, with a §C-case → outcome table and Q-11/Q-14 pointing at them. — all reversible and inside scope; §C's case list came from the coordinator's examples ("etc."), and an empty result is not a failure.
 - 2026-10-16 — S1 review round 2 (final, cap 2/2): reviewer agent died in a second usage-limit outage AFTER writing a complete report (verdict line, round-1 resolution, R-16..R-22, verified claims). Used the on-disk report as the round-2 result; did not relaunch. Verdict SOUND WITH FIXES: 1 Blocker (R-16 skill read-back loop is a new S064 lint finding), 2 Major (R-17 ephemeral-thread skill run spends then reports command_not_run; R-18 goal_unfinished next step offers two failing remedies), 4 Minor. Sent to the author for the last revision with `status: approved`; anything still disputed becomes a Q-n with a stated default.
+- 2026-10-16 — Spec approved at r3 after 2 review rounds (cap). Every Q-n takes its stated default (none blocking): Q-1..Q-10, Q-12, Q-13, Q-15..Q-19 = not built; Q-11 = keep `()` for an empty since window (deviation from §C example list, visible in §6.3 table); Q-14 = idle loaded thread may be deleted, busy refused (deviation, visible); Q-16/Q-19 [scope-adding] not built.
+- 2026-10-16 — R-17 resolved without a new code: skill/docs runs on an ephemeral thread raise `ConfigurationError` → `configuration.invalid_argument` up front, before any turn. Accepted (D-5 keeps argument errors as ConfigurationError).
 
 ## User replies (verbatim)
 - none
@@ -82,3 +84,7 @@ Existing-PR run: no new branch, no new PR. Adds to draft PR #1055 on `feat/codex
 - `vidbyte/agents/codex/README.md` has a legacy A009 ceiling of 65,000 chars (it is 51,754). — *source:* S1 author r2
 - `wire.thread_list` drops falsy values, so `limit=None`/0 is never sent. — *source:* S1 author r2
 - Lint ratchets near baseline: A007 255 (numeric default on limit/timeout/budget/depth params, incl. 0), C008 45 (`require/validate/check/resolve` + `limit/positive/int/bool` helper outside lib/dataclasses/validation.py), S024 25 (nesting > 3), S008 19. — *source:* S1 reviewer r1
+- Spec r3 final counts: 12 new methods (27 host functions), 11 new tools (26; delete has none), 4 new codes, 5 records, 1 enum (`CodexSkillScope`), 12 operations, 4 new files, 20 classes; FR 17, NFR 9, INV 35, AC 43, EC 50. — *source:* S1 author r3
+- S064 baseline 4 with 4 findings (no slack); its retry words include "attempt"; the read-back complies only through an in-loop `loop.time()`/deadline comparison (`CODEX_HOST_INPUT_CHECK_DEADLINE_SECONDS = 10.0`). Never rename to *_ATTEMPTS or raise the baseline. — *source:* S1 author r3
+- Tests patch `CODEX_HOST_INPUT_CHECK_INTERVAL_SECONDS` and `..._DEADLINE_SECONDS` inside `native/codex/skill_functions.py`; AC-43 patches the deadline below the interval and expects exactly one `thread/turns/list` request. — *source:* S1 author r3
+- Codex records skills as `{type:"skill", name, path}` in UserMessage content, text first (local ~/.codex evidence). — *source:* S1 author r3
