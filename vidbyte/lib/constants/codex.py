@@ -5,7 +5,7 @@ ROLE IN CODEBASE: Supplies stable bounds, counters, provider labels, and item vo
 ARCHITECTURE NOTE: Constants live below agent modules so every collaborator can import them safely.
 COMMON MODIFICATION PATTERNS: Add a CODEX-prefixed value when adapter behavior needs a shared literal.
 KNOWN EDGE CASES: Supported item kinds track the pinned openai-codex compatibility range.
-RELATED DOCS: docs/design/codex-harness-agent.md.
+RELATED DOCS: docs/design/codex-harness-agent.md; docs/spec/codex-host-thread-helpers/spec.md (section 9.3).
 TESTS: python scripts/run_ci.py.
 """
 
@@ -17,6 +17,7 @@ from vidbyte.lib.enums.codex import (
     CodexApprovalMode,
     CodexFailureClass,
     CodexGoalStatus,
+    CodexThreadSourceKind,
 )
 from vidbyte.lib.enums.failure import (
     FailureCode,
@@ -269,6 +270,33 @@ CODEX_FAILURE_CLASSIFICATION: Mapping[str, tuple[str, str, str, str]] = {
         FailureSeverity.WARNING.value,
         FailureDisposition.STOP.value,
     ),
+    # Thread-helper codes. A run whose goal or skill did not take, an
+    # unknown or disabled skill and an unfinished goal fail the same
+    # way on every retry until someone changes the request or thread.
+    FailureCode.CODEX_COMMAND_NOT_RUN.value: (
+        CodexFailureClass.TERMINAL.value,
+        FailurePhase.SESSION.value,
+        FailureSeverity.ERROR.value,
+        FailureDisposition.RAISE.value,
+    ),
+    FailureCode.CODEX_SKILL_NOT_FOUND.value: (
+        CodexFailureClass.TERMINAL.value,
+        FailurePhase.CONFIGURATION.value,
+        FailureSeverity.ERROR.value,
+        FailureDisposition.RAISE.value,
+    ),
+    FailureCode.CODEX_SKILL_DISABLED.value: (
+        CodexFailureClass.TERMINAL.value,
+        FailurePhase.CONFIGURATION.value,
+        FailureSeverity.ERROR.value,
+        FailureDisposition.RAISE.value,
+    ),
+    FailureCode.CODEX_GOAL_UNFINISHED.value: (
+        CodexFailureClass.TERMINAL.value,
+        FailurePhase.SESSION.value,
+        FailureSeverity.WARNING.value,
+        FailureDisposition.RAISE.value,
+    ),
 }
 # Published apart from one another so a caller can tell "no failures" from
 # "one recovered failure", and a first-attempt answer from a fallback answer.
@@ -356,12 +384,58 @@ CODEX_HOST_MIN_TOKEN_LIMIT = 1
 CODEX_HOST_MIN_EXCLUSIVE_SECONDS = 0.0
 # The approval_mode thread/start sends when nothing is set (D-16).
 CODEX_HOST_DEFAULT_APPROVAL_MODE = CodexApprovalMode.AUTO_REVIEW
+# The limit the thread-helper listings use when none is given.
+CODEX_HOST_THREAD_LIST_DEFAULT_LIMIT = 20
+# The largest limit one thread-helper listing accepts.
+CODEX_HOST_THREAD_LIST_MAX_LIMIT = 1000
+# The most thread/list pages one walk reads (at least the max limit).
+CODEX_HOST_THREAD_LIST_MAX_PAGES = 1000
+# The smallest limit for thread listings and turn pages.
+CODEX_HOST_MIN_LIST_LIMIT = 1
+# The most summaries one lineage walk returns.
+CODEX_HOST_LINEAGE_MAX_DEPTH = 100
+# The most enabled skill names one skill_not_found message lists.
+CODEX_HOST_SKILL_NAMES_IN_ERROR = 50
+# The sourceKinds the helper listings send: every top-level source.
+CODEX_HOST_HELPER_SOURCE_KINDS = (
+    CodexThreadSourceKind.CLI,
+    CodexThreadSourceKind.VSCODE,
+    CodexThreadSourceKind.EXEC,
+    CodexThreadSourceKind.APP_SERVER,
+    CodexThreadSourceKind.UNKNOWN,
+)
+# The fixed harness label every CodexThreadSummary carries.
+CODEX_THREAD_SUMMARY_HARNESS = "codex"
+# The bundled skill run_codex_openai_docs runs.
+CODEX_OPENAI_DOCS_SKILL_NAME = "openai-docs"
+# The itemsView that makes thread/turns/list return every item.
+CODEX_TURN_ITEMS_VIEW_FULL = "full"
+# Turns per page the list_codex_turns tool asks for by default.
+CODEX_HOST_TURNS_TOOL_DEFAULT_LIMIT = 3
+# The most read-backs of one skill turn's recorded input.
+CODEX_HOST_INPUT_CHECK_ATTEMPTS = 10
+# The wait between two read-backs, never before the first.
+CODEX_HOST_INPUT_CHECK_INTERVAL_SECONDS = 0.5
+# Time from the first read-back after which no new read starts.
+CODEX_HOST_INPUT_CHECK_DEADLINE_SECONDS = 10.0
+# Turns one read-back asks for: the new thread's first turn.
+CODEX_HOST_INPUT_CHECK_TURN_LIMIT = 1
+# Goal statuses with which compact may load a notLoaded thread.
+CODEX_HOST_RESUMABLE_GOAL_STATUSES = frozenset({CodexGoalStatus.COMPLETE})
 # App-server methods the host calls through the SDK's raw request path.
 CODEX_RATE_LIMITS_READ_METHOD = "account/rateLimits/read"
 CODEX_SANDBOX_READINESS_METHOD = "windowsSandbox/readiness"
 CODEX_REVIEW_START_METHOD = "review/start"
 CODEX_GOAL_SET_METHOD = "thread/goal/set"
 CODEX_MODEL_LIST_METHOD = "model/list"
+# Deletes a stored thread; sent once per call (thread helpers).
+CODEX_THREAD_DELETE_METHOD = "thread/delete"
+# Reads a thread's goal without loading the thread.
+CODEX_GOAL_GET_METHOD = "thread/goal/get"
+# Lists the skills Codex offers for working folders.
+CODEX_SKILLS_LIST_METHOD = "skills/list"
+# Reads one page of a thread's stored turns with their items.
+CODEX_THREAD_TURNS_LIST_METHOD = "thread/turns/list"
 # Notification names the turn watchers read.
 CODEX_TURN_STARTED_NOTIFICATION = "turn/started"
 CODEX_TURN_COMPLETED_NOTIFICATION = "turn/completed"
@@ -433,6 +507,10 @@ CODEX_NEXT_STEPS: Mapping[str, str] = {
     FailureCode.CODEX_PROCESS_EXITED.value: "Open a new CodexHost and continue the thread by id.",
     FailureCode.CODEX_PROTOCOL_MISMATCH.value: "Match the Codex CLI and openai-codex versions (codex update), then open a new CodexHost.",
     FailureCode.CODEX_TURN_TIMED_OUT.value: "Raise timeout_seconds, or continue the thread to finish the work.",
+    FailureCode.CODEX_COMMAND_NOT_RUN.value: "Read what Codex recorded with get_codex_goal or list_codex_turns, then start the run again.",
+    FailureCode.CODEX_SKILL_NOT_FOUND.value: "Pick a skill that list_codex_skills reports for the same working folder, and pass its exact name.",
+    FailureCode.CODEX_SKILL_DISABLED.value: "Enable the skill in your Codex configuration, or pick an enabled skill that list_codex_skills reports.",
+    FailureCode.CODEX_GOAL_UNFINISHED.value: "Continue the thread with continue_codex_thread until its goal is complete, or clear the goal from a Codex client, then compact the thread again.",
     FailureCode.CODEX_FORK_FAILED.value: "Fork from a completed turn.",
     FailureCode.CODEX_RESPONSE_INVALID.value: "Continue the thread and ask for a final answer.",
     FailureCode.CONFIGURATION_INVALID_ARGUMENT.value: "Fix the argument or setup named in the message, then call again.",
@@ -453,6 +531,8 @@ CODEX_THREAD_READ_METHOD = "thread/read"
 CODEX_TURN_START_METHOD = "turn/start"
 CODEX_TURN_STEER_METHOD = "turn/steer"
 CODEX_TURN_INTERRUPT_METHOD = "turn/interrupt"
+# Starts Codex's compaction of a thread's history (typed call).
+CODEX_THREAD_COMPACT_METHOD = "thread/compact/start"
 # openai-codex's own goal cancel call, named in its mapped errors.
 CODEX_GOAL_CANCEL_CALL = "cancel_goal_operation"
 
@@ -540,4 +620,25 @@ __all__ = [
     "CODEX_TURN_STEER_METHOD",
     "CODEX_TURN_INTERRUPT_METHOD",
     "CODEX_GOAL_CANCEL_CALL",
+    "CODEX_HOST_THREAD_LIST_DEFAULT_LIMIT",
+    "CODEX_HOST_THREAD_LIST_MAX_LIMIT",
+    "CODEX_HOST_THREAD_LIST_MAX_PAGES",
+    "CODEX_HOST_MIN_LIST_LIMIT",
+    "CODEX_HOST_LINEAGE_MAX_DEPTH",
+    "CODEX_HOST_SKILL_NAMES_IN_ERROR",
+    "CODEX_HOST_HELPER_SOURCE_KINDS",
+    "CODEX_THREAD_SUMMARY_HARNESS",
+    "CODEX_OPENAI_DOCS_SKILL_NAME",
+    "CODEX_TURN_ITEMS_VIEW_FULL",
+    "CODEX_HOST_TURNS_TOOL_DEFAULT_LIMIT",
+    "CODEX_HOST_INPUT_CHECK_ATTEMPTS",
+    "CODEX_HOST_INPUT_CHECK_INTERVAL_SECONDS",
+    "CODEX_HOST_INPUT_CHECK_DEADLINE_SECONDS",
+    "CODEX_HOST_INPUT_CHECK_TURN_LIMIT",
+    "CODEX_HOST_RESUMABLE_GOAL_STATUSES",
+    "CODEX_THREAD_DELETE_METHOD",
+    "CODEX_GOAL_GET_METHOD",
+    "CODEX_SKILLS_LIST_METHOD",
+    "CODEX_THREAD_TURNS_LIST_METHOD",
+    "CODEX_THREAD_COMPACT_METHOD",
 ]
