@@ -10,6 +10,7 @@ Purpose:
 
 from __future__ import annotations
 
+import dataclasses
 import unittest
 
 from pydantic import BaseModel
@@ -19,7 +20,9 @@ from vidbyte.agents.algorithms import ReflexionRuntimeAlgorithm
 from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
 from vidbyte.agents import AgentFallback, AgentRuntime, FallbackModel
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
+from vidbyte.lib.dataclasses.middleware import MiddlewareDecision, MiddlewareTransform
 from vidbyte.lib.dataclasses.runner import RunnerHandle
+from vidbyte.middleware import AgentMiddleware
 from vidbyte.lib.dataclasses.strategies import AgentResult as StrategyResult
 from vidbyte.lib.errors import ProviderRequestError
 from vidbyte.tools import ToolCallContext, ToolCallState, ToolResult, Tools, tool
@@ -73,6 +76,23 @@ def runner_output_metadata(response: object) -> dict:
 class Ticket(BaseModel):
     title: str
     urgency: int
+
+
+SECRET = "SECRETMARK api-token-123"
+
+
+class RedactSecretMiddleware(AgentMiddleware):
+    """A caller's redaction middleware: the model is shown [REDACTED] instead of a result holding the secret."""
+
+    def __init__(self) -> None:
+        self.redactions = 0
+
+    async def after_tool_call(self, ctx):
+        result = ctx.tool_result
+        if result is not None and "SECRETMARK" in str(result.output):
+            self.redactions += 1
+            return MiddlewareDecision.continue_(transform=MiddlewareTransform(model_visible_tool_result=dataclasses.replace(result, output="[REDACTED]")))
+        return MiddlewareDecision.continue_()
 
 
 class ReflexionAlgorithmTests(unittest.IsolatedAsyncioTestCase):
@@ -302,6 +322,81 @@ class ReflexionAlgorithmTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("Stop reason: max_iterations", summary)
         self.assertIn("lookup", summary)
+
+    def test_format_failed_attempt_renders_model_visible_result_not_raw_output(self) -> None:
+        algorithm = ReflexionAlgorithm()
+        raw = ToolResult.success("read_secret", SECRET)
+        redacted = ToolCallContext(
+            tool_name="read_secret",
+            state=ToolCallState.SUCCEEDED,
+            result=raw,
+            model_visible_result=dataclasses.replace(raw, output="[REDACTED]"),
+        )
+        unprotected = ToolCallContext(tool_name="lookup", state=ToolCallState.SUCCEEDED, result=ToolResult.success("lookup", "plain value"))
+
+        summary = algorithm.format_failed_attempt(
+            StrategyResult(
+                output="failed",
+                strategy_name="direct_runner",
+                metadata={"stop_reason": "max_iterations", "tool_calls": (redacted, unprotected)},
+            )
+        )
+
+        # The redacted call shows the model's view; a call the model saw raw still shows its raw output.
+        self.assertIn("- read_secret (succeeded): [REDACTED]", summary)
+        self.assertNotIn("SECRETMARK", summary)
+        self.assertIn("- lookup (succeeded): plain value", summary)
+
+    async def test_runtime_never_sends_a_redacted_tool_result_to_reflection_or_next_trial(self) -> None:
+        @tool
+        def read_secret() -> str:
+            """Read a credentials file."""
+            return SECRET
+
+        runner = FakeRunner(
+            [
+                FakeResponse("", {"output": [{"type": "function_call", "name": "read_secret", "arguments": "{}"}]}),
+                FakeResponse("Do not read credentials again."),
+                FakeResponse("", {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "fixed"}'}]}),
+            ]
+        )
+        middleware = RedactSecretMiddleware()
+        runtime = AgentRuntime(
+            agent_name="worker",
+            system_prompt="Work.",
+            tools=Tools([read_secret]),
+            permission_policy=PermissionPolicy(),
+            config=AgentRuntimeConfig(max_iterations=1),
+            middleware=(middleware,),
+            algorithm=ContextWindow.preset.reflexion,
+        )
+        context = runtime.build_context(
+            "task",
+            base_context=None,
+            history=(),
+            agent_history=(),
+            agent_metadata={},
+            existing_tool_calls=(),
+        )
+
+        result = await runtime.arun(
+            "task",
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
+            context=context,
+        )
+
+        # The run took the failed-trial, reflection, retry path and the middleware really hid a secret-bearing result.
+        self.assertEqual(result.output, "fixed")
+        self.assertEqual(len(runner.calls), 3)
+        self.assertEqual(middleware.redactions, 1)
+        reflection_call, retry_call = runner.calls[1], runner.calls[2]
+        self.assertIn("Failed attempt:", reflection_call["prompt"])
+        self.assertIn("[REDACTED]", reflection_call["prompt"])
+        self.assertIn("[REDACTED]", retry_call["kwargs"]["system"])
+        # No string bound for the model, prompt or any request keyword such as system or messages, carries the secret.
+        for index, call in enumerate(runner.calls):
+            with self.subTest(model_call=index):
+                self.assertNotIn("SECRETMARK", repr(call))
 
 
 if __name__ == "__main__":

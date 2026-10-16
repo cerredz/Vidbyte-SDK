@@ -120,7 +120,10 @@ class ReflexionAlgorithm:
             for call in tool_calls:
                 name = str(getattr(call, "tool_name", "unknown"))
                 state = getattr(getattr(call, "state", None), "value", getattr(call, "state", "unknown"))
-                output = str(getattr(getattr(call, "result", None), "output", ""))
+                # @intent failed-attempt-replays-what-the-model-saw
+                # The reflection and the next trial are model calls, so they get the truncated or redacted view, never the raw output.
+                shown = getattr(call, "model_visible_result", None) or getattr(call, "result", None)
+                output = str(getattr(shown, "output", ""))
                 lines.append(f"- {name} ({state}): {output}")
         return self._truncate("\n".join(lines), self.max_attempt_chars, "attempt")
 
