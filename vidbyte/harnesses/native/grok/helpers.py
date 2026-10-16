@@ -219,6 +219,13 @@ class GrokHelperRun:
         found = GrokHelperRun._found(await asyncio.to_thread(GrokStore.thread, home, request, errors, thread_id=request.thread_id or ""), home, request, errors)
         thread_id = found.summary.thread_id
 
+        # @intent grok-delete-is-checked-on-disk
+        # grok can exit 0 and keep the thread (it asked to confirm, or
+        # answered for another home), so the delete counts only once
+        # this session folder is gone, checked after grok exits (spec
+        # INV-11, EC-23).
+        folder = found.path.parent
+
         # Find grok: the caller's command, then PATH, then the copy the
         # Grok installer puts under the user's home folder.
         launcher = NativeLauncher.resolve(config.grok_command, program=native_threads.GROK_PROGRAM, fallback=GrokHome.fallback(), errors=errors, request=request)
@@ -244,11 +251,7 @@ class GrokHelperRun:
         # exit each raise.
         GrokHelperWire.deleted(outcome, request, errors)
 
-        # @intent grok-delete-is-checked-on-disk
-        # grok can exit 0 and keep the thread (it asked to confirm, or
-        # answered for another home), so the session folder must be
-        # gone before the delete counts (spec INV-11, EC-23).
-        folder = found.path.parent
+        # The session folder must be gone before the delete counts.
         if await asyncio.to_thread(folder.exists):
             raise errors.failure(NativeThreadProblem.RUN_FAILED, request=request, thread_id=thread_id, searched=native_threads.GROK_DELETE_LEFT_DETAIL.format(folder=folder))
 
