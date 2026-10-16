@@ -18,7 +18,7 @@ started: 2026-10-15 22:10
 | S1 spec + review | done (r3 approved c6774e94) | 2026-10-15 22:55 | 2026-10-16 07:05 | reports/S1-spec-author.md, S1-spec-reviewer-r1.md, S1-spec-reviewer-r2.md | spec r1: 2 new files, 22 §12.3 rows, 0 blocking Q |
 | S2 tests | done | 2026-10-16 07:10 | 2026-10-16 12:20 | reports/S2-test-author.md | 53 tests (73 cases) in 8 new files; red 74 failed / 112 passed; commits 28f45271, 1944edab |
 | S3 implement | done | 2026-10-16 12:30 | 2026-10-16 12:55 | reports/S3-implementer.md | 23 code + 3 docs commits; HEAD 24297ccf pushed; draft PR #1159 (base feat/infinite-memory-agent) |
-| S4 adversarial review | in progress (lenses sequential: conformance running) | 2026-10-16 14:35 | | | |
+| S4 adversarial review | in progress (conformance SOUND 0B/0M/1m; engineering running) | 2026-10-16 14:35 | | reports/S4-review-conformance.md | |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
@@ -58,6 +58,7 @@ started: 2026-10-15 22:10
 - 2026-10-16 12:55 — Deviations to put in front of S4 (reviewers judge, not the orchestrator): (3) InfiniteHandoff._lines re-implements OutputText.truncate's cut inline because importing vidbyte.lib.outputs from vidbyte.context creates an import cycle through the lib.dataclasses façade (AGENTS.md principle 5 tension; row 24 added `marker=` for this caller); (2)/(4) records module and events.py were compacted (several fields per line) to fit line caps — check readability vs budget; (6) generator duration keyed by key minus /gen. Two commit messages cite wrong IDs (8cd15dab AC-15, 72f1f56d FR-14).
 - 2026-10-16 12:55 — Pacing: SDK S4 waits until the CLI S2 test author (critical path: Vidbyte S2 → Vidbyte S3 → CLI S3, which needs CLI S2 done) has a slot; ≤ 2 heavy agents.
 - 2026-10-16 14:35 — S4 reviewers run ONE AT A TIME instead of in parallel (playbook says parallel): the account usage window (5-hour cycle, next reset 16:50) has already stopped the run three times, and the Vidbyte S3 implementer is in flight. Lenses are independent and blind to each other, so sequential order changes wall-clock only, not findings. Order: conformance (cross-repo name/field conformance is the highest-value check), then engineering, then conventions, then the findings verifier.
+- 2026-10-16 14:55 — S4 conformance: SOUND, 0B/0M/1m. Every FR/NFR/INV/AC/EC and §12.3 row conforms; §8.5/§9.1/§9.2 names, fields, enum values, caps and the D-25 digest match exactly; §4 snippet passes byte for byte (ScriptedTree). R-C1 Minor: deviation 3 accepted (import cycle reproduced; the inline cut matched OutputText.truncate on 3,007 differential inputs) — fix only infinite README.md:135 wording; follow-up [scope-adding]: remove the upward import in vidbyte/lib/dataclasses/__init__.py:19 so the handoff can call truncate. Facts: the 3 harness_threads failures compare against merge-base with origin/main (c04e5ef5) — stacked-base artifacts, not this PR; test_mcp_stdio_transport cancelled-waiter test flakes under full-suite load; I001 one finding in vidbyte/context/__init__.py pre-exists at base; S063 IMPROVED 4→3 (leave baseline). Engineering lens launched 14:55.
 
 ## User replies (verbatim)
 - (none during the run yet)
