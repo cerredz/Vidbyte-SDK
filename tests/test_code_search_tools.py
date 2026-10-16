@@ -66,6 +66,14 @@ class CodeSearchToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("pkg/auth.py", result.output)
         self.assertNotIn(".git", result.output)
 
+    async def test_glob_trailing_globstar_lists_files(self) -> None:
+        """A pattern whose last segment is ** lists the files below it on every supported Python."""
+        # Before Python 3.13 pathlib yields only directories for "pkg/**", so glob answered "No files matched.".
+        for pattern in ("pkg/**", "**"):
+            with self.subTest(pattern=pattern):
+                result = await GlobTool(self.root).execute(ToolCall("glob", {"pattern": pattern}))
+                self.assertEqual(sorted(result.output.splitlines()), ["pkg/auth.py", "pkg/other.txt"])
+
     async def test_grep_returns_line_context(self) -> None:
         """Grep returns line-numbered snippets."""
         result = await GrepTool(self.root).execute(
