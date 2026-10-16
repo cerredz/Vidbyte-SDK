@@ -1,12 +1,12 @@
 """FILE: vidbyte/tools/builtins/codex/_base.py
 
-PURPOSE: The shared parts of the fifteen CodexHost tools: CodexToolScope, which holds one toolset's live-turn cap, the developer's spawn defaults and the turn handles the toolset created, and _CodexHostTool, the base that turns every failure into an error result, reads model-written arguments and writes records as JSON.
+PURPOSE: The shared parts of the twenty-six CodexHost tools: CodexToolScope, which holds one toolset's live-turn cap, the developer's spawn defaults and the turn handles the toolset created, and _CodexHostTool, the base that turns every failure into an error result, reads model-written arguments and writes records as JSON.
 ROLE IN CODEBASE: The base layer of vidbyte/tools/builtins/codex/; every tool module subclasses _CodexHostTool, and CodexHostTools in vidbyte/tools/toolsets/codex.py builds one CodexToolScope for its tools.
 ARCHITECTURE NOTE: CodexHost is imported under TYPE_CHECKING only, so importing the tools never needs openai-codex. The scope's cap check and its reservation run with no await between them, so two concurrent calls can never pass the cap together (INV-32). The argument readers are BaseTool resolve_ helpers: JSON null means the argument was omitted, and a wrong type is a ToolExecutionError.
 COMMON MODIFICATION PATTERNS: A new argument type gets one _resolve_ helper here; a new tool calls the helpers in its own execute and returns through _run.
 KNOWN EDGE CASES: A cap check reads each live handle's status through get_codex_turn_result, a local read that sends nothing to Codex. A structured answer parsed into a pydantic model is written as that model's JSON.
-RELATED DOCS: docs/spec/codex-host/spec.md (section 9.2 Tools and Scope rules; INV-10 and INV-32 to INV-35)
-TESTS: tests/features/codex_host/test_codex_host_tools.py
+RELATED DOCS: docs/spec/codex-host/spec.md (section 9.2 Tools and Scope rules; INV-10 and INV-32 to INV-35); docs/spec/codex-host-thread-helpers/spec.md (section 9.2 argument readers)
+TESTS: tests/features/codex_host/test_codex_host_tools.py, tests/features/codex_host/test_codex_host_helper_tools.py
 """
 
 from __future__ import annotations
@@ -147,6 +147,14 @@ class _CodexHostTool(BaseTool):
             return None
         if isinstance(value, bool) or not isinstance(value, int) or value < CODEX_HOST_MIN_TOKEN_LIMIT:
             raise ToolExecutionError(f"'{name}' must be a whole number of at least {CODEX_HOST_MIN_TOKEN_LIMIT}.", details={"parameter": name})
+        return value
+
+    @staticmethod
+    def _resolve_timestamp(call: ToolCall, name: str) -> int:
+        # A required whole number of Unix seconds, zero or more.
+        value = call.arguments.get(name)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ToolExecutionError(f"'{name}' must be a whole number of Unix seconds of at least 0.", details={"parameter": name})
         return value
 
     @staticmethod
