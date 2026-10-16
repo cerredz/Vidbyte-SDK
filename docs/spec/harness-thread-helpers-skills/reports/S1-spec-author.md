@@ -276,3 +276,91 @@ r4 amends the contract for the S4 code review (`review.md`, `reports/S4-findings
   - `list_opencode_threads_since` is not left in any next-step text.
 - **Budget:** still 47 functions, 68 exports, 10 new source files and 20 harness classes.
 - **No tests:** the spec contains no test code.
+
+## Addendum r5
+
+r5 revises D-33, A-28 and everything that depends on them, after the orchestrator's probe of a real Muse. The spec commit is `b701550e`.
+
+### The evidence
+
+- **The orchestrator's probe.** It ran `muse exec --provider echo` and then `muse export --redacted` in a throwaway store. The export has the top-level members `diagnostics`, `events`, `export_schema_version`, `exporter_version`, `redaction`, `session_build`, `session_terminated_abnormally` and `sessions`, and no `items`. I re-read the file: 58 `events`, each `{kind, derived, envelope{stream, payload{kind, event}}}`. So under r4, every compacted Muse skill or goal run would fail closed with `MUSE_EXPORT_ITEMS_DETAIL`.
+- **The MSP schema** (`scratchpad/msp.schema.json`, `msp-view-defs.json`):
+  - `SnapshotState` says "the anchored rung serves the full folded state".
+  - `SnapshotState.items` is "Every item, in first-opened order, each at its latest revision at the snapshot cursor".
+  - `ItemKind` includes `compaction`.
+  - `session/read` takes no `history` preference; the server picks the mode.
+  - `view/page` has error arms `-32040 viewTruncated` and `-32042 boundaryPruned`.
+  - Nothing in the schema says an anchored snapshot drops items from before the boundary. That premise (review R-25 in r2, and the comment in `wire.py` "An anchored snapshot starts at a compaction boundary") came from the word "anchored".
+- **The stand-in** (`fake_harness_helpers.py:454-473`) models that premise: its anchored mode keeps a `compaction` item and only the `list_dir` calls.
+
+### My probes (echo only, no key, throwaway store, removed afterwards)
+
+The scripts are under `C:/Users/422mi/AppData/Local/Temp/claude/C--Users-422mi-vidbyte-repos/8ba228e7-1bc7-41fd-a637-c0f10b927957/scratchpad/muse-probe/`: `probe_history.py`, `probe_autocompact.py` and `probe_prefixcompact.py`. Their logs and raw answers are in `out/` (`probe.log`, `probe2.log`, `probe3.log`, `read*.json`, `page*.json`, `p2_*.json`, `p3_*.json`). Each script:
+- runs under `env -i PATH=/usr/bin:/bin`;
+- makes its own `tempfile.mkdtemp` root with `HOME`, `XDG_DATA_HOME`, `XDG_CONFIG_HOME`, `XDG_STATE_HOME` and `XDG_CACHE_HOME` inside it, and asserts that no `*KEY*` or `*TOKEN*` variable is set;
+- removes the root in `finally`. Every log ends `exists_after False`, and `initialize` reported `museHome` inside the root.
+
+1. **History before and after a manual compact.** Command: `MSYS_NO_PATHCONV=1 wsl.exe -d MuseUbuntu1 -e env -i PATH=/usr/bin:/bin /usr/bin/python3 -I <scratchpad>/muse-probe/probe_history.py <scratchpad>/muse-probe/out`. The script ran three `muse exec --provider echo --session-id <uuid7> --json -- "<prompt>"` turns. One `muse serve` then sent `initialize`, `initialized`, `session/read {excludeItems:false}`, `view/page {limit:1000, direction:forward}`, `session/resume {history:auto}`, `session/compact`, then `session/read` and `view/page` again. After that it ran a fourth exec turn, and a second serve sent `session/read` and `view/page`. Output:
+   - `read1_before mode inline ... inline items 15` (3 `userMessage`, 3 `agentMessage`, 9 `reminderChild`);
+   - `page1_before events 24 nextCursor None`, with 15 `item/completed`, 3 `turn/started`, 3 `turn/completed` and 3 `session/tokenUsage`;
+   - `item/completed` params are `['item', 'sessionId', 'sourceRange', 'viewCursor']`, and `item` is the full `Item` (`itemId`, `kind`, `revision`, `status`, `text`, `turnId`, ...);
+   - `compact {"error": {"code": -32030, "data": {"kind": "commandRejected", "reason": "compaction_unavailable", "retryable": false}}}`;
+   - after the compact, the mode is still `inline` with 15 items; after turn four, `inline` with 20 items and 32 page events.
+2. **Auto-compaction.** `probe_autocompact.py` ran four exec turns per strategy, with `--context-compaction-soft-threshold 0.001 --context-compaction-hard-threshold 0.002` and long prompts, then a batch serve `session/read` plus `view/page`.
+   - `summary-preserved-suffix/v1`: mode `inline`, no `compaction` item.
+   - Both prefix strategies: exit 2, "context compaction strategy `prefix-extension-summary/v1` is experimental; set MUSE_EXPERIMENTAL_PREFIX_COMPACTION=on".
+3. **The same with the experimental flag.** `probe_prefixcompact.py` repeated the prefix strategies with `MUSE_EXPERIMENTAL_PREFIX_COMPACTION=on`. Result: exit 0, mode `inline`, no `compaction` item, for both strategies.
+
+**Conclusion:** the echo provider cannot compact, so the anchored fold cannot be observed without a paid run. Per the briefing, the unverified part stays as a sharper A-28 tied to manual probe g. The `view/page` event shape (needed by the runner-up) is verified on 1.0.1.
+
+### The decision (D-33)
+
+- **Chosen: (a).** In `anchoredSnapshot` mode, read `history.snapshot.state.items` with the same loop as `snapshot` mode, through the same single `require(..., member=MUSE_READ_SKILL_ID_MEMBER)` call. The reasons:
+  - It is the smallest rule: it deletes the export path, adds nothing, and leaves r4's own `item_calls` with no reason to exist.
+  - It is sound in every case: an item in the server's fold is a call the model made, and text never counts.
+  - It is complete under the schema's own words ("full folded state", "every item"), because the evidence call opens the run, before any boundary (`no_compactable_history` means a compaction needs earlier history).
+- **Runner-up: (b),** paging `view/page` forward from the start through the same loop. It is correct by the view's contract, and its shape is verified. But it needs a new `MuseMethod` member, a page reader, a page cap and one serve child per page, because the batch serve exchange cannot carry a cursor into the next request. It also has its own truncation arms.
+- **Rejected: (c),** parsing the export's `events`. Its tool-call event shape is unobserved, and the export is a debugging artifact, not an MSP contract.
+- **Flip condition:** probe g shows an anchored `state.items` that lacks the run's early call. Then switch to (b).
+
+### What changed in the spec
+
+- **D-33** is rewritten.
+- **A-28** is rewritten: the schema basis, what stays unverified (a pruned fold; a snapshot folded at the boundary), and that it fails closed.
+- **INV-8, the TL;DR, §5 and §9.2** read the anchored state like a snapshot, with no export.
+- **AC-34** now uses an MSP-shaped anchored stand-in, and asserts that no export child starts.
+- **EC rows.** EC-79 and EC-83 are amended. EC-84 is rewritten for the A-28-false world. EC-85 and AC-35 lose the export-folder example.
+- **§8.4** gets an r5 note: nothing is added, and the budget is unchanged.
+- **§8.5:**
+  - `MuseSessionWire.tool_calls -> tuple[NativeToolCall, ...]`, never `None`.
+  - `MuseHelperRun.tool_calls` is listed with the same return type.
+  - `item_calls` and `transcript` are removed.
+- **§12.3 rows:**
+  - Row 4: `MUSE_EXPORT_ITEMS_DETAIL` is withdrawn, and the exact new `MUSE_COMMAND_NOT_RUN` likely cause comes from §12.4.
+  - Row 25: the anchored branch reads `state.items`; the new `@intent muse-anchored-snapshot-holds-every-item`; header updates.
+  - Row 26: remove the `transcript` flow.
+  - Row 27: four narrated steps, with no transcript and no JSON parse.
+- **§12.4:**
+  - The exact cause: "muse exec sends slash commands as plain text and the model did not call read_skill or create_goal, the thread's history could not be read back, or the run compacted and the history Muse served after the compaction lacks the call."
+  - The no-export check.
+  - The intent list.
+- **§12.5 probe g** checks the anchored fold and prints the mode, the cursors and the item kinds.
+- **§13** says what the stand-in must model, both for the anchored snapshot and for the real export's top-level members, and records the probe facts.
+- **§16:** rows orch-1 (the rule), orch-2 (R-23's `member` kept, as the orchestrator accepted) and orch-3 (`base_commit`).
+- **§17:** the r5 row.
+- **Frontmatter:** `revision: 5`, `base_commit: 239c408a...` (verified with `git merge-base HEAD origin/main`; `git diff --stat 239c408a origin/main -- vidbyte/harnesses/native` is empty).
+- **Unchanged:** R-5, R-6, R-7, R-8, R-16 and R-23.
+
+### Least-sure assumptions now
+
+- **A-28.** The real anchored fold keeps the items from before the boundary, and the evidence call sits at or before the snapshot cursor. This is unverifiable offline. If it is wrong, the run fails closed (EC-84) and D-33 flips to `view/page`.
+- **A-17.** The `read_skill` argument is named `id`. This is unchanged; if it is wrong, every skill call fails closed.
+- **The `view/page` shape for `toolCall`.** If the flip happens, (b) relies on a `toolCall` arriving as `item/*` with `params.item` in the shared `Item` schema. That is observed only for message items so far.
+
+### Self-check results (r5)
+
+- **Defined IDs:** G 4, NG 15, INV 29, AC 35, EC 85, FR 20, NFR 12, D 35, W 12, T 9, A 29, Q 8. No ID is new, renumbered or reused.
+- **Tables:** 0 malformed rows. No ID is dangling; the KD-n IDs are the request's.
+- **No tests:** the spec contains no test code.
+- **Withdrawn names:** every mention of `item_calls`, `MUSE_EXPORT_ITEMS_DETAIL` and `transcript` outside §16/§17 is a withdrawal note. §8.5 lists none of them.
+- **Budget:** still 47 functions, 68 exports, 10 new source files and 20 harness classes.
