@@ -1,9 +1,9 @@
 """FILE: vidbyte/lib/constants/infinite.py
 
-PURPOSE: Defines every named default, limit, pattern, tool name, workspace file name, and short label of the InfiniteMemory agent: the delegation caps, the workspace caps, the entry and card sizes, the history cap, the run-id and verdict formats, the map's fixed labels, the run events' caps, key rule, and summary templates, the reply metadata keys, and the run handoff's file suffix and caps.
+PURPOSE: Defines every named default, limit, pattern, tool name, workspace file name, and short label of the InfiniteMemory agent: the delegation caps, the workspace caps, the entry and card sizes, the history cap, the run-id and verdict formats, the map's fixed labels, the run events' caps, key rule, and summary templates, the reply metadata keys, and the run handoff's file suffix, caps, and run-id metadata key.
 ROLE IN CODEBASE: Read by the settings and every module in vidbyte/agents/infinite/ (InfiniteEvents in events.py reads the event caps and templates), by the records in vidbyte/lib/dataclasses/infinite.py, by InfiniteHandoff (vidbyte/context/handoff/infinite.py), and by InfiniteMemoryAgentTools (vidbyte/tools/toolsets/infinite.py). The feature tests import the labels and caps to check output against them.
 ARCHITECTURE NOTE: Immutable constants only; behavior lives in the workspace, journal, memory, launch, and runtime modules. The limits are generous on purpose, because this agent exists to take on work that outgrows one context: each one only stops a runaway run, and the context caps are sized for a 128,000-token model: the role prompt, the tool descriptions, the map, and the trimmed history take about 105,000 tokens, which leaves room for the developer's own prompt and the reply. Patterns are raw strings compiled where they are used, and the label templates are filled with str.format.
-FUNCTION INVENTORY: No functions; defaults (INFINITE_DEFAULT_*), limits, patterns (INFINITE_*_PATTERN), tool names (INFINITE_*_TOOL_NAME and INFINITE_RESERVED_TOOL_NAMES), workspace layout names, labels, event caps (INFINITE_EVENT_*_MAX_*, the key digest, the byte bound, and the time factors), event summary templates (INFINITE_EVENT_*_SUMMARY), reply metadata keys (INFINITE_*_METADATA_KEY), and handoff caps (INFINITE_HANDOFF_*).
+FUNCTION INVENTORY: No functions; defaults (INFINITE_DEFAULT_*), limits, patterns (INFINITE_*_PATTERN), tool names (INFINITE_*_TOOL_NAME and INFINITE_RESERVED_TOOL_NAMES), workspace layout names, labels, event caps (INFINITE_EVENT_*_MAX_*, the key digest, the byte bound, and the time factors), event summary templates (INFINITE_EVENT_*_SUMMARY), reply metadata keys (INFINITE_*_METADATA_KEY), and handoff caps and the handoff's run-id metadata key (INFINITE_HANDOFF_*).
 COMMON MODIFICATION PATTERNS: Change a cap or label here, never at its use site, so the settings, the tools, the tests, and the folder README stay in step. Add a named constant here before writing another InfiniteMemory policy literal. A new event kind adds one summary template here; a new details field adds its cap here, and its row to _FIELDS and its worst-case details size to _FIGURES in tests/features/infinite_memory_agent/test_infinite_memory_events_records.py, which check every cap and keep each record under INFINITE_EVENT_MAX_DETAILS_BYTES.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import from any layer above vidbyte/lib. 2. Do not put model-facing sentences here; they belong in vidbyte/prompts/prompts/infinite_memory/. The event summaries are developer-facing display lines, and the handoff wording lives in vidbyte/context/handoff/infinite.py. 3. Do not rename a workspace file name; workspaces already on disk use it. 4. Do not tie an event cap to a setting; only fixed caps bound an event at any settings value.
 KNOWN EDGE CASES: Every token figure is TokenEstimate's characters-divided-by-four estimate, not a real tokenizer count. The verdict pattern accepts Markdown emphasis and a trailing period, and the last matching line wins. Grep's file-size cap is derived from max_tokens with INFINITE_UTF8_MAX_BYTES_PER_CHAR, so no workspace file is too large to search.
@@ -217,6 +217,8 @@ INFINITE_HANDOFF_SUFFIX = ".handoff.md"
 INFINITE_HANDOFF_OUTCOME_MAX_CHARS = 239_000
 INFINITE_HANDOFF_SECTION_MAX_CHARS = 15_900
 INFINITE_HANDOFF_LINE_MAX_CHARS = 1_000
+# The handoff's metadata key for the id of the run it describes.
+INFINITE_HANDOFF_RUN_ID_METADATA_KEY = "run_id"
 
 __all__ = [
     "INFINITE_CARD_TEXT_MAX_TOKENS",
@@ -267,6 +269,7 @@ __all__ = [
     "INFINITE_GENERATOR_KEY",
     "INFINITE_HANDOFF_LINE_MAX_CHARS",
     "INFINITE_HANDOFF_OUTCOME_MAX_CHARS",
+    "INFINITE_HANDOFF_RUN_ID_METADATA_KEY",
     "INFINITE_HANDOFF_SECTION_MAX_CHARS",
     "INFINITE_HANDOFF_SUFFIX",
     "INFINITE_HISTORY_MAX_TOKENS",
