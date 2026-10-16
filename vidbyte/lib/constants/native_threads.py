@@ -715,6 +715,7 @@ MUSE_METHOD_NOT_FOUND_DETAIL = "muse serve does not know the method {method}."
 MUSE_MEMBER_DETAIL = "The member {member} of a Muse session is missing or unusable."
 MUSE_HISTORY_NONE_DETAIL = "Muse returned the thread's history without items (mode none, noneReason {reason})."
 MUSE_EXPORT_FILE_MISSING_DETAIL = "muse export exited 0 but wrote no file at {path}."
+MUSE_EXPORT_FILE_UNREADABLE_DETAIL = "muse export wrote {path}, but the SDK could not read it ({error_type})."
 # Refusal rules of the command records, named in invalid_argument.
 GROK_TEXT_FLAG_RULE = "{field} may not hold the token {flag}, which the slash command would read as its own option."
 GROK_GOAL_RESERVED_RULE = "{field} may not be the /goal subcommand {word}."

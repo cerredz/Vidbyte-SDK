@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: No helper takes a key or a model (spec INV-2). Every flow ope
 FUNCTION INVENTORY: MuseThreadHelpers holds the seven public functions and _call, the one guarded try they share. MuseHelperRun.list, get, lineage, read, init and tool_calls are the narrated flows; _serve runs one serve batch for one method and returns its result; _export runs the `muse export` child into the private folder; _export_file reads the exported file with its byte cap.
 COMMON MODIFICATION PATTERNS: A new helper is one NativeThreadOperation member, its rows in the operation tables of vidbyte/lib/constants/native_threads.py, one public method here that calls _call with its flow, and one flow that opens and closes its private config folder around its children.
 WHAT NOT TO DO IN THIS FILE: 1. Do not give a helper or evidence child a key, and do not let one inherit META_API_KEY or any other key variable. 2. Do not run muse export in the workspace or the caller's folder; it writes there and reads a same-named file as the session. 3. Do not read the export file before checking its size. 4. Do not leave the private config folder behind on any path, a cancel included. 5. Do not let one flow call another flow.
-KNOWN EDGE CASES: -32020 is thread_not_found for the requested id and ends a lineage at a parent Muse cannot find (spec EC-65); -32601 is protocol_mismatch naming the method (spec EC-36). An export that exits 0 but writes no file is protocol_mismatch naming the file, and a file over NATIVE_PROCESS_MAX_OUTPUT_BYTES is output_too_large (spec EC-38, EC-39). init_muse_workspace where Muse is already set up is run_failed with Muse's text (spec EC-58); with dry_run it writes nothing (spec EC-59). On Windows, Muse runs only through config.wsl_distro or config.muse_command (spec EC-34).
+KNOWN EDGE CASES: -32020 is thread_not_found for the requested id and ends a lineage at a parent Muse cannot find (spec EC-65); -32601 is protocol_mismatch naming the method (spec EC-36). An export that exits 0 but writes no file, or writes one the SDK cannot open or read (a permission error, a locked file), is protocol_mismatch naming the file, and a file over NATIVE_PROCESS_MAX_OUTPUT_BYTES is output_too_large (spec EC-38, EC-39). init_muse_workspace where Muse is already set up is run_failed with Muse's text (spec EC-58); with dry_run it writes nothing (spec EC-59). On Windows, Muse runs only through config.wsl_distro or config.muse_command (spec EC-34).
 RELATED DOCS: vidbyte/harnesses/README.md
 TESTS: tests/features/harness_threads/test_harness_threads_muse_helpers.py, tests/features/harness_threads/test_harness_threads_listing_properties.py, tests/features/harness_threads/test_harness_threads_helper_arguments.py, tests/features/harness_threads/test_harness_threads_helper_bounds.py, tests/features/harness_threads/test_harness_threads_helper_credentials.py, tests/features/harness_threads/test_harness_threads_muse_commands.py
 """
@@ -337,8 +337,8 @@ class MuseHelperRun:
     def _export_file(path: Path, request: NativeHelperRequest | NativeThreadRequest, errors: NativeErrorFactory, thread_id: str) -> str:
         # The exported file whole, as UTF-8 text. Its size comes from
         # the open handle, so a file over the cap is never loaded (spec
-        # EC-39); no file at all is protocol_mismatch naming it (spec
-        # EC-38).
+        # EC-39); no file at all, or one the SDK cannot open or read,
+        # is protocol_mismatch naming it (spec EC-38).
         try:
             with path.open(native_threads.NATIVE_BINARY_READ_MODE) as handle:
                 if os.fstat(handle.fileno()).st_size > native_threads.NATIVE_PROCESS_MAX_OUTPUT_BYTES:
@@ -346,6 +346,9 @@ class MuseHelperRun:
                 data = handle.read(native_threads.NATIVE_PROCESS_MAX_OUTPUT_BYTES)
         except FileNotFoundError as exc:
             raise errors.failure(NativeThreadProblem.PROTOCOL_MISMATCH, request=request, thread_id=thread_id, searched=native_threads.MUSE_EXPORT_FILE_MISSING_DETAIL.format(path=path)) from exc
+        except OSError as exc:
+            detail = native_threads.MUSE_EXPORT_FILE_UNREADABLE_DETAIL.format(path=path, error_type=type(exc).__name__)
+            raise errors.failure(NativeThreadProblem.PROTOCOL_MISMATCH, request=request, thread_id=thread_id, searched=detail) from exc
         return data.decode(native_threads.NATIVE_TEXT_ENCODING, native_threads.NATIVE_DECODE_REPLACE)
 
 
