@@ -1,7 +1,7 @@
 """FILE: vidbyte/lib/outputs/text.py
 
 PURPOSE: Defines OutputText, the pure string helpers connectors use to fit a title and body into a destination's fields.
-ROLE IN CODEBASE: Called by the connectors in this package, by OutputShaping in vidbyte/agents/output/connector.py for the first-line title rule, and, through truncate with INFINITE_TRUNCATION_MARKER, by InfiniteEvents (vidbyte/agents/infinite/events.py) and InfiniteMemoryAgent.run_handoff to cut event and handoff text to its cap. InfiniteHandoff (vidbyte/context/handoff/infinite.py) applies the same cut to its list lines without importing this package, because vidbyte.lib.dataclasses imports vidbyte.context while it loads and this package's connectors need vidbyte.lib.dataclasses back.
+ROLE IN CODEBASE: Called by the connectors in this package, by OutputShaping in vidbyte/agents/output/connector.py for the first-line title rule, and, through truncate with INFINITE_TRUNCATION_MARKER, by InfiniteEvents (vidbyte/agents/infinite/events.py) and InfiniteMemoryAgent.run_handoff to cut event and handoff text to its cap. truncate delegates the cut to TokenEstimate.truncate_chars (vidbyte/lib/util/text.py), which InfiniteHandoff (vidbyte/context/handoff/infinite.py) calls directly for its list lines, because vidbyte.lib.dataclasses imports vidbyte.context while it loads and this package's connectors need vidbyte.lib.dataclasses back.
 ARCHITECTURE NOTE: Leaf string functions with no knowledge of agents, replies, stop reasons, or structured output.
 COMMON MODIFICATION PATTERNS: Add a helper here only when two or more connectors need the same text transform.
 KNOWN EDGE CASES: single_line never calls truncate, because the default truncation marker contains line breaks. With a one-line marker, such as the InfiniteMemory one, a cut one-line text stays one line.
@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from vidbyte.lib.constants.outputs import OUTPUT_TRUNCATION_MARKER
 from vidbyte.lib.dataclasses.outputs import OutputContent
+from vidbyte.lib.util.text import TokenEstimate
 
 
 class OutputText:
@@ -34,9 +35,7 @@ class OutputText:
     @staticmethod
     def truncate(text: str, limit: int, *, marker: str = OUTPUT_TRUNCATION_MARKER) -> str:
         """Cut text so the result, including marker (OUTPUT_TRUNCATION_MARKER unless the caller names its own), is at most limit characters."""
-        if len(text) <= limit:
-            return text
-        return text[: limit - len(marker)] + marker
+        return TokenEstimate.truncate_chars(text, limit, marker)
 
     @staticmethod
     def single_line(text: str, limit: int) -> str:
