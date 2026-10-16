@@ -1,21 +1,33 @@
-"""Context Protocol Header
+"""FILE: tests/multi_agent/test_manager_middleware_abort.py
 
-Description:
-    Tests that a middleware abort on the MultiAgent manager ends the team run.
-Purpose:
+PURPOSE:
+    Proves that a middleware abort on the MultiAgent manager ends the team run.
     A security or budget stop on the manager (an output guard, a kill switch,
     a spend ceiling) must end the run visibly: a stopped structured phase is
     never retried as a parse failure, which would pay for the same model call
     again, and a stopped final synthesis is never returned as the team's
     answer with completed=True.
-Architecture:
-    A real BaseAgent manager on an offline scripted runner, forked through
-    manager_agent_factory so every phase fork keeps the runner, drives a
-    MagenticOneOrchestrator inside a public MultiAgent run.
-Relations:
+ROLE IN CODEBASE:
     Regression tests for the @intent middleware-abort-ends-the-run sites in
-    vidbyte/agents/multi/orchestrator.py, matching
-    tests/test_algorithms_honor_middleware_abort.py for the single-agent algorithms.
+    vidbyte/agents/multi/orchestrator.py (MagenticOneOrchestrator._structured_phase
+    and MagenticOneOrchestrator.finalize).
+ARCHITECTURE NOTE:
+    A real BaseAgent manager on an offline scripted text runner, forked through
+    manager_agent_factory so every run and phase fork keeps the runner and the
+    guard middleware, drives a MagenticOneOrchestrator inside a public
+    MultiAgent run. Custom phase prompts let the runner and the guard tell the
+    phases apart; max_iterations=1 makes each phase attempt one model call.
+COMMON MODIFICATION PATTERNS:
+    Add a phase scenario by adding its marker to PHASE_PROMPTS and its reply to
+    ManagerRunner._reply, then pass that phase as abort_phase to _team.
+KNOWN EDGE CASES:
+    The guard aborts in after_model_response, so the aborted call was already
+    made and is counted; an ordinary unparseable reply must still be retried.
+RELATED DOCS:
+    vidbyte/agents/multi/README.md
+TESTS:
+    python -m pytest tests/multi_agent/test_manager_middleware_abort.py; the
+    single-agent counterpart is tests/test_algorithms_honor_middleware_abort.py.
 """
 
 from __future__ import annotations

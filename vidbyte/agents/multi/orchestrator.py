@@ -186,12 +186,13 @@ class MagenticOneOrchestrator:
         # Retries only manager invocation/parse failures, never a middleware stop, and closes every structured phase fork.
         last_error: Exception | None = None
         for attempt in range(retries + 1):
+            parse_attempt = attempt + 1
             phase_agent = self._create_manager(phase, AgentForkSettings(include_history=False, output_schema=schema))
             try:
                 if phase_agent.output_schema is not schema:
                     raise ConfigurationError("manager_agent_factory must honor the requested output schema for each phase.", details={"phase": phase, "expected_schema": schema.__name__, "actual_schema": getattr(phase_agent.output_schema, "__name__", None)})
                 suffix = "" if attempt == 0 else "\n\nYour prior response was invalid. Return only data matching the required schema."
-                reply = await phase_agent.generate_reply(prompt + suffix, trace_metadata={"multi_agent_phase": phase, "parse_attempt": attempt + 1})
+                reply = await phase_agent.generate_reply(prompt + suffix, trace_metadata={"multi_agent_phase": phase, "parse_attempt": parse_attempt})
                 return self._parse_phase_reply(reply.content, reply.metadata, schema)
             except ConfigurationError:
                 raise
@@ -200,7 +201,7 @@ class MagenticOneOrchestrator:
                 # A phase the manager's middleware stopped made no parse
                 # mistake, so it ends here instead of paying for a retry.
                 if getattr(exc, "stop_reason", None) == AgentStopReason.MIDDLEWARE_ABORT.value:
-                    raise MultiAgentExecutionError("Multi-agent manager phase was stopped by middleware.", details={"phase": phase, "round": round_number, "attempts": attempt + 1}) from exc
+                    raise MultiAgentExecutionError("Multi-agent manager phase was stopped by middleware.", details={"phase": phase, "round": round_number, "attempts": parse_attempt}) from exc
                 last_error = exc
             finally:
                 await self._close_manager(phase_agent, phase)
