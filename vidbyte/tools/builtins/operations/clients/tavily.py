@@ -4,8 +4,9 @@ Description:
     Executing client for the Tavily Search and Extract web operations.
 Purpose:
     Turns one query into a normalized SearchPayload and a URL batch into a
-    normalized FetchPayload, counting only successfully extracted pages so the
-    credit-batched extract tariff bills what Tavily actually served.
+    normalized FetchPayload, sent at most 20 URLs per request (Tavily's cap),
+    counting only successfully extracted pages so the credit-batched extract
+    tariff bills what Tavily actually served.
 Architecture:
     - TavilyClient: WebOperationClient subclass owning the Tavily endpoints, its
       bearer header, the depth tiers, and vendor result normalization.
@@ -28,7 +29,10 @@ from vidbyte.lib.http.transport import HttpTransport
 from vidbyte.tools.builtins.operations.clients._base import RetryPolicy, WebOperationClient
 
 _MAX_RESULTS = 20
+# Tavily Extract accepts at most this many URLs in one request.
+_MAX_URLS = 20
 _MAX_SNIPPET_CHARS = 500
+_MAX_QUERY_CHARS = 400
 
 
 class TavilyClient(WebOperationClient):
@@ -40,16 +44,35 @@ class TavilyClient(WebOperationClient):
 
     async def search(self, query: str, *, max_results: int = 5, search_depth: str = "basic") -> SearchPayload:
         """Run one Tavily search and return normalized hits with billing counts."""
-        body = {"query": query, "search_depth": search_depth, "max_results": min(max(1, max_results), _MAX_RESULTS)}
+        # @intent tavily-query-stays-under-the-cap
+        # Tavily's help center says to "keep your query under 400 characters", and a longer one is rejected with
+        # "Query is too long. Max query length is 400 characters.", so only the first 400 characters are sent, as Brave's client does.
+        body = {"query": query[:_MAX_QUERY_CHARS], "search_depth": search_depth, "max_results": min(max(1, max_results), _MAX_RESULTS)}
         payload, attempts = await self.request_json("search", "POST", path="search", headers=self._headers(), json_body=body)
         return SearchPayload(provider=self.provider, query=query, hits=self._hits_from_payload(payload), attempts=attempts, billable_units=1)
 
     async def extract(self, urls: Sequence[str], *, extract_depth: str = "basic") -> FetchPayload:
         """Extract every URL and return the pages Tavily successfully retrieved."""
-        body = {"urls": list(urls), "extract_depth": extract_depth}
-        payload, attempts = await self.request_json("fetch", "POST", path="extract", headers=self._headers(), json_body=body)
-        pages = self._pages_from_payload(payload)
-        return FetchPayload(provider=self.provider, pages=pages, attempts=attempts, billable_units=len(pages))
+        pages: list[FetchedPage] = []
+        attempts = 1
+        # @intent tavily-extract-batches-stay-under-the-cap
+        # Tavily's help center: "You can extract content from a single URL or multiple URLs (up to 20) in one
+        # request", and a larger request is rejected, so the URLs go out in consecutive slices of at most that many.
+        for batch in self._url_batches(urls):
+            # Each slice is one ordinary Extract request, built exactly as a single request always was.
+            body = {"urls": batch, "extract_depth": extract_depth}
+            payload, used = await self.request_json("fetch", "POST", path="extract", headers=self._headers(), json_body=body)
+            # Keep the slice's pages in input order, and report the most attempts any one request needed.
+            pages.extend(self._pages_from_payload(payload))
+            attempts = max(attempts, used)
+        # Bill only the pages Tavily actually returned, as before.
+        return FetchPayload(provider=self.provider, pages=tuple(pages), attempts=attempts, billable_units=len(pages))
+
+    @staticmethod
+    def _url_batches(urls: Sequence[str]) -> list[list[str]]:
+        # Consecutive slices of at most the vendor cap; an empty input stays one empty request, as before.
+        url_list = list(urls)
+        return [url_list[start : start + _MAX_URLS] for start in range(len(url_list))[::_MAX_URLS]] or [url_list]
 
     def _headers(self) -> dict[str, str]:
         # Builds the Tavily bearer header; the key never leaves this mapping.

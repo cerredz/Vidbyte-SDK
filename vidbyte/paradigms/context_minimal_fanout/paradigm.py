@@ -71,17 +71,21 @@ class ContextMinimalFanoutParadigm(ParadigmHarness):
         builder = OutputSchemaBuilder()
         tools = (*self._read_only_toolset(settings), *settings.context.tools, *self._output_schema_tools(builder))
         middleware = self._with_budget_middleware(settings.context.middleware, settings.context.max_tokens, settings)
+        # Paradigm agents take no system-prompt presets unless the role
+        # opts in through agent_options (see the implementation agent).
+        options = {"system_prompt_presets": (), **settings.context.agent_options}
         agent = BaseAgent(
             name=settings.context.name,
             system_prompt=settings.context.system_prompt or self._prompts.for_role("context"),
             tools=tools,
             middleware=middleware,
-            api_key=settings.context.api_key,
+            api_keys=settings.context.api_keys,
+            vidbyte_api_key=settings.context.vidbyte_api_key,
             provider=settings.context.provider,
             model_name=settings.context.model_name,
             temperature=settings.context.temperature,
             metadata={"role": "context"},
-            **dict(settings.context.agent_options),
+            **options,
         )
         self._bind_role_runner(agent, settings.context)
         reply = await agent.arun(self._build_context_message(prompt))
@@ -135,17 +139,21 @@ class ContextMinimalFanoutParadigm(ParadigmHarness):
         # Constructs a splitter/adversarial planning agent with output-schema tools.
         tools = (*self._read_only_toolset(settings), *role_settings.tools, *self._output_schema_tools(builder))
         middleware = self._with_budget_middleware(role_settings.middleware, role_settings.max_tokens, settings)
+        # Paradigm agents take no system-prompt presets unless the role
+        # opts in through agent_options (see the implementation agent).
+        options = {"system_prompt_presets": (), **role_settings.agent_options}
         agent = BaseAgent(
             name=role_settings.name,
             system_prompt=role_settings.system_prompt or self._prompts.for_role(role),
             tools=tools,
             middleware=middleware,
-            api_key=role_settings.api_key,
+            api_keys=role_settings.api_keys,
+            vidbyte_api_key=role_settings.vidbyte_api_key,
             provider=role_settings.provider,
             model_name=role_settings.model_name,
             temperature=role_settings.temperature,
             metadata={"role": role},
-            **dict(role_settings.agent_options),
+            **options,
         )
         return self._bind_role_runner(agent, role_settings)
 
@@ -160,12 +168,19 @@ class ContextMinimalFanoutParadigm(ParadigmHarness):
         options = dict(settings.implementation.agent_options)
         if settings.include_minimal_toolset and settings.implementation_include_write:
             options.setdefault("permission_policy", PermissionPolicy(allowed=frozenset({ToolPermission.SAFE, ToolPermission.READ, ToolPermission.WRITE})))
+        # @intent fanout-workers-skip-presets-unless-opted-in
+        # Each worker owns one slice the adversarial stage made
+        # non-overlapping. A preset that says "take the larger move"
+        # would push it into a sibling's slice, so a role gets presets
+        # only when its agent_options names them.
+        options.setdefault("system_prompt_presets", ())
         agent = BaseAgent(
             name=f"{settings.implementation.name}-{split_prompt.id}",
             system_prompt=settings.implementation.system_prompt or self._prompts.for_role("implementation"),
             tools=tools,
             middleware=middleware,
-            api_key=settings.implementation.api_key,
+            api_keys=settings.implementation.api_keys,
+            vidbyte_api_key=settings.implementation.vidbyte_api_key,
             provider=settings.implementation.provider,
             model_name=settings.implementation.model_name,
             temperature=settings.implementation.temperature,

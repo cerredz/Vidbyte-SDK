@@ -1,19 +1,22 @@
 """FILE: vidbyte/agents/jev/settings.py
 
 PURPOSE: Defines JevAgent's two opinionated public configuration objects: JevAgentSettings for the agents that generate, and JevRuntimeSettings for Jev's own decision policy, whose `continual` field holds JevContinualSettings for the done checks and continuations. JevRunBriefSettings configures the mid-run brief: the separate writer's model and limits and the brief's refresh cadence.
-ROLE IN CODEBASE: JevAgent maps JevAgentSettings into BaseAgent and builds its preflight gate from both objects at construction, so JevRuntime never reads settings to decide what to ask.
+ROLE IN CODEBASE: JevAgent maps JevAgentSettings into BaseAgent and builds its preflight gate from both objects at construction, so JevRuntime never reads settings to decide what to ask. JevAgentSettings matches its api_keys list once (ProviderKeyMatcher) and every Jev child carries that ProviderKeys record and the text-model mode; JevRunBriefSettings only normalizes its own list, which the brief writer matches against its provider.
 ARCHITECTURE NOTE: The surface is intentionally closed; named Jev capabilities belong here as explicit settings instead of a generic decisions collection. JevAgentSettings holds the main agent and the JevSpecialist candidates Jev may hand a run to; JevRuntimeSettings holds the decision model, the preflight flags, the continuation settings (the done checks and their limits), and the tool-selector threshold.
 COMMON MODIFICATION PATTERNS: Add a generative-agent field to JevAgentSettings or a Jev policy setting to JevRuntimeSettings, then implement its fixed policy in vidbyte/agents/jev/gate/ without exposing runtime replacement hooks.
-KNOWN EDGE CASES: The generative provider cannot be TypeSafe because Jev is a decision model; neither generative nor decision API keys appear in repr output. Specialist titles must be unique because each one is a Choice option name. Preflight presets are validated by JevPreflightRegistry and done checks by JevDoneRegistry at construction, every continuation limit rejects booleans and non-integers, so no TypeSafe key is needed until a run asks Jev; the tool-selector threshold rejects booleans, non-finite values, and out-of-range probabilities.
+KNOWN EDGE CASES: The generative provider cannot be TypeSafe because Jev is a decision model; neither generative nor decision API keys appear in repr output. Specialist titles must be unique because each one is a Choice option name. Preflight presets are validated by JevPreflightRegistry and done checks by JevDoneRegistry at construction, every continuation limit rejects booleans and non-integers, so no TypeSafe key is needed until a run asks Jev; the tool-selector threshold rejects booleans, non-finite values, and out-of-range probabilities. JevAlignmentSettings.skills accepts SkillEntry, SkillDocument, and str values in one list: strings become inline_skill_<position> documents counted over the whole list, entries pass through unchanged and are resolved later by the preload's SkillLoader (no I/O here), and names must be unique across every kind.
 RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-multipart-done-criteria.md, docs/design/jev-run-brief.md, and skills/jev-agent/SKILL.md.
-TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, tests/test_jev_done.py, tests/test_jev_run_brief.py, and scripts/test-jev-agent-scaffold.py.
+TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, tests/test_jev_done.py, tests/test_jev_run_brief.py, tests/features/agent_output_connectors/test_output_connectors_agent_wiring.py, and scripts/test-jev-agent-scaffold.py.
 """
 
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 
+from vidbyte.agents.output.connector import OutputConnector
+from vidbyte.agents.output.dispatcher import OutputDispatcher
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.lib.constants.jev import (
     JEV_BULK_WORK_AGENTS,
@@ -43,9 +46,11 @@ from vidbyte.lib.constants.jev import (
     JEV_TOOL_SELECTOR_MAX_THRESHOLD,
     JEV_TOOL_SELECTOR_MIN_THRESHOLD,
 )
+from vidbyte.lib.dataclasses.agents import ProviderKeys
 from vidbyte.lib.dataclasses.jev import JevProbability, JevSpecialist
 from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
-from vidbyte.lib.dataclasses.skills import SkillDocument
+from vidbyte.lib.dataclasses.prompts import SystemPromptPresetSelection
+from vidbyte.lib.dataclasses.skills import SkillDocument, SkillEntry
 from vidbyte.lib.enums import (
     DecisionModelMode,
     JevContinuationGate,
@@ -53,10 +58,13 @@ from vidbyte.lib.enums import (
     JevDynamicComputeOption,
     JevPreflightPreset,
     ModelProvider,
+    SystemPromptPreset,
+    TextModelMode,
 )
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.jev import JevDoneRegistry, JevPreflightRegistry
 from vidbyte.lib.jev.compute import JevComputeRegistry
+from vidbyte.lib.registries.provider_keys import ProviderKeyMatcher
 from vidbyte.tools.security import PermissionPolicy
 
 
@@ -78,24 +86,26 @@ class JevBulkSettings:
 class JevAlignmentSettings:
     """Select request-time skill guidance for JevAgent."""
 
-    skills: tuple[SkillDocument | str, ...] = ()
+    skills: tuple[SkillEntry | SkillDocument | str, ...] = ()
 
     def __post_init__(self) -> None:
         # Normalizes caller skills once so every run reads the same named documents.
         object.__setattr__(self, "skills", self._normalized_skills())
 
-    def _normalized_skills(self) -> tuple[SkillDocument, ...]:
+    def _normalized_skills(self) -> tuple[SkillEntry | SkillDocument, ...]:
         # @intent names-uniquely-identify-response-results
-        # JevAgent.response exposes each decision by the configured name. Duplicate names would make two
-        # different candidate bodies indistinguishable to callers and future source adapters.
-        """Normalize caller strings and require unique stable names for every skill."""
+        # JevAgent.response exposes each decision by the
+        # configured name. Duplicate names would make two
+        # different candidate bodies indistinguishable to
+        # callers, whichever source each came from.
+        """Normalize caller strings, keep skill entries unchanged, and require unique stable names for every skill."""
         if isinstance(self.skills, (str, bytes)):
-            raise ConfigurationError("JevAlignmentSettings.skills must be an iterable of SkillDocument or strings, not a string.")
+            raise ConfigurationError("JevAlignmentSettings.skills must be an iterable of SkillEntry, SkillDocument, or string values, not a string.")
         try:
             candidates = tuple(self.skills)
         except TypeError as exc:
-            raise ConfigurationError("JevAlignmentSettings.skills must be an iterable of SkillDocument or strings.") from exc
-        skills: list[SkillDocument] = []
+            raise ConfigurationError("JevAlignmentSettings.skills must be an iterable of SkillEntry, SkillDocument, or string values.") from exc
+        skills: list[SkillEntry | SkillDocument] = []
         for index, candidate in enumerate(candidates, start=1):
             if isinstance(candidate, str):
                 candidate = SkillDocument(
@@ -104,8 +114,8 @@ class JevAlignmentSettings:
                     text=candidate,
                     source="inline",
                 )
-            if not isinstance(candidate, SkillDocument):
-                raise ConfigurationError("JevAlignmentSettings.skills must contain only SkillDocument or string values.")
+            if not isinstance(candidate, (SkillEntry, SkillDocument)):
+                raise ConfigurationError("JevAlignmentSettings.skills must contain only SkillEntry, SkillDocument, or string values.")
             skills.append(candidate)
         seen: set[str] = set()
         duplicates: set[str] = set()
@@ -126,7 +136,7 @@ class JevAgentSettings:
     system_prompt: str
     provider: ModelProvider | str
     model_name: str
-    api_key: str | None = field(default=None, repr=False)
+    api_keys: ProviderKeys | Iterable[str | None] | None = field(default_factory=ProviderKeys, repr=False)
     temperature: float | None = None
     timeout_seconds: float | None = None
     tools: tuple[object, ...] = ()
@@ -135,6 +145,10 @@ class JevAgentSettings:
     agents: tuple[JevSpecialist, ...] = ()
     bulk_work: JevBulkSettings = field(default_factory=JevBulkSettings)
     alignment: JevAlignmentSettings = field(default_factory=JevAlignmentSettings)
+    outputs: tuple[OutputConnector, ...] = ()
+    vidbyte_api_key: str | None = field(default=None, repr=False)
+    model_mode: TextModelMode = TextModelMode.AUTO
+    system_prompt_presets: tuple[SystemPromptPreset, ...] | None = None
 
     def __post_init__(self) -> None:
         # Normalizes immutable inputs and rejects invalid agent configuration before runtime construction.
@@ -147,6 +161,13 @@ class JevAgentSettings:
         if provider is ModelProvider.TYPESAFE:
             raise ConfigurationError("JevAgentSettings.provider must be a generative model provider, not TypeSafe.")
         object.__setattr__(self, "provider", provider)
+        # Match the developer's keys once against the agent's provider;
+        # the main agent and every Jev child carry this one record.
+        matched = ProviderKeyMatcher.match(self.api_keys, primary=provider, vidbyte_api_key=self.vidbyte_api_key, field_name="JevAgentSettings.api_keys")
+        object.__setattr__(self, "api_keys", matched)
+        object.__setattr__(self, "vidbyte_api_key", matched.vidbyte_api_key)
+        if not isinstance(self.model_mode, TextModelMode):
+            raise ConfigurationError("JevAgentSettings.model_mode must be a TextModelMode value.")
         if isinstance(self.tools, (str, bytes)):
             raise ConfigurationError("JevAgentSettings.tools must be an iterable of tool objects, not a string.")
         try:
@@ -164,6 +185,10 @@ class JevAgentSettings:
         if not isinstance(self.alignment, JevAlignmentSettings):
             raise ConfigurationError("JevAgentSettings.alignment must be a JevAlignmentSettings instance.")
         self._validate_agents()
+        object.__setattr__(self, "outputs", OutputDispatcher.connectors(self.outputs))
+        # None keeps "inherit from the run this agent runs in"; a list
+        # becomes a validated tuple of preset members.
+        object.__setattr__(self, "system_prompt_presets", SystemPromptPresetSelection.parse(self.system_prompt_presets, "JevAgentSettings.system_prompt_presets"))
 
     def _validate_agents(self) -> None:
         # Freezes the specialists in the order given, which is also the order Jev reads their options.
@@ -262,13 +287,15 @@ class JevRunBriefSettings:
     """Validated settings for the run brief: the writer's model, its loop limits, and how often the brief is refreshed.
 
     The writer is a separate, tool-free agent. Leave `provider` and `model_name` unset to reuse the main agent's
-    model and key, set only `model_name` for a cheaper model from the same provider, or set both for another
-    provider, which then uses `api_key` or that provider's environment variable instead of the main agent's key.
+    model and matched keys, set only `model_name` for a cheaper model from the same provider, or set both for
+    another provider. With its own `api_keys`, the writer matches that list against its provider as a root of its
+    own; without one, it carries the main agent's matched record, and a provider with no key there uses its
+    environment variable or goes Vidbyte-paid.
     """
 
     provider: ModelProvider | str | None = None
     model_name: str | None = None
-    api_key: str | None = field(default=None, repr=False)
+    api_keys: Sequence[str | None] = field(default=(), repr=False)
     temperature: float | None = None
     every_iterations: int = JEV_RUN_BRIEF_EVERY_ITERATIONS
     max_iterations: int = JEV_RUN_BRIEF_MAX_ITERATIONS
@@ -277,6 +304,9 @@ class JevRunBriefSettings:
     def __post_init__(self) -> None:
         self._validate_model()
         self._validate_temperature()
+        # Only the list's shape and characters are checked here; the
+        # writer matches it against its own provider when it is built.
+        object.__setattr__(self, "api_keys", ProviderKeyMatcher.normalize(self.api_keys, field_name="JevRunBriefSettings.api_keys"))
         for field_name in ("every_iterations", "max_iterations", "max_tokens"):
             value = getattr(self, field_name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:

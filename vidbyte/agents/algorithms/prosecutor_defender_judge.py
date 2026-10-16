@@ -111,7 +111,7 @@ class _StageInvocationCounter:
 
     def handle(self) -> RunnerHandle:
         # Exposes a normal RunnerHandle backed by the counting invocation boundary.
-        return RunnerHandle(runner=self.inner.runner, provider=self.inner.provider, invoke=self.invoke, extract_text=self.inner.extract_text, extract_metadata=self.inner.extract_metadata)
+        return RunnerHandle(runner=self.inner.runner, provider=self.inner.provider, invoke=self.invoke, extract_text=self.inner.extract_text, extract_metadata=self.inner.extract_metadata, api_keys=self.inner.api_keys, model_mode=self.inner.model_mode)
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,7 +240,7 @@ class DebateStageRuntimeFactory:
         # Resolves inherited transport or creates a dedicated validated text runner.
         if settings.provider is None or settings.model is None:
             return handle, handle.provider, runner_model_name(handle.runner)
-        runner = ModalityDetector.create_runner(ModelModality.TEXT, provider=settings.provider, model=settings.model)
+        runner = ModalityDetector.create_runner(ModelModality.TEXT, provider=settings.provider, model=settings.model, api_keys=handle.api_keys, mode=handle.model_mode)
         return handle.with_runner(runner, settings.provider), settings.provider, settings.model
 
 
@@ -401,7 +401,8 @@ class ProsecutorDefenderJudgeRuntimeAlgorithm:
 
         # Delegate the three strictly sequential review stages to run(). arun stays
         # thin so the producer contract and the review contract remain separable.
-        return await self.run(message=message, candidate=candidate, candidate_sha256=candidate_sha256, producer=producer, context=context, handle=handle, trace_context=trace_context)
+        # The stages inherit the model the producer finished on, so a failover sticks.
+        return await self.run(message=message, candidate=candidate, candidate_sha256=candidate_sha256, producer=producer, context=context, handle=self.runtime._active_handle(handle), trace_context=trace_context)
 
     async def run(self, *, message: str, candidate: str, candidate_sha256: str, producer: AgentResult, context: BaseAgentContext, handle: RunnerHandle, trace_context: SpanContext | None) -> AgentResult:
         # Executes the isolated prosecutor -> defender -> judge protocol against a

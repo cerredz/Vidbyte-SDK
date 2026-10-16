@@ -46,6 +46,7 @@ from vidbyte.lib.dataclasses.agents import (
     AgentStopReason,
     FinishReview,
     FinishReviewAction,
+    ProviderKeys,
 )
 from vidbyte.lib.dataclasses.aggregate_agent_descriptor import AggregateAgentDescriptor
 from vidbyte.lib.dataclasses.codex import (
@@ -209,7 +210,16 @@ from vidbyte.lib.dataclasses.sessions import (
     TraceCapture,
     UsageRollup,
 )
-from vidbyte.lib.dataclasses.skills import SkillDocument
+from vidbyte.lib.dataclasses.skills import (
+    AnthropicSkill,
+    GitHubSkill,
+    InlineSkill,
+    LocalSkill,
+    OpenAISkill,
+    SkillDocument,
+    SkillEntry,
+    SkillsShSkill,
+)
 from vidbyte.lib.dataclasses.sources import (
     ArtifactRef,
     FetchResponse,
@@ -406,6 +416,7 @@ __all__ = [
     "ProsecutorAllegationPayload",
     "ProsecutorDefenderJudgeReport",
     "ProsecutorReportPayload",
+    "ProviderKeys",
     "RecordModelCallFailureInput",
     "RecordModelCallInput",
     "RecordRetryWaitInput",
@@ -433,6 +444,13 @@ __all__ = [
     "SearchPayload",
     "Selection",
     "SkillDocument",
+    "AnthropicSkill",
+    "GitHubSkill",
+    "InlineSkill",
+    "LocalSkill",
+    "OpenAISkill",
+    "SkillEntry",
+    "SkillsShSkill",
     "SessionMeta",
     "SessionStatus",
     "SourceResult",

@@ -23,7 +23,7 @@ from tests.test_streaming_text_runner import FakeStreamingTransport
 from tests.test_text_model_runner import FakeTransport
 from vidbyte import tool
 from vidbyte.agents import AgentRuntime
-from vidbyte.lib.config import ModelProvider, TextModelConfig
+from vidbyte.lib.config import ModelProvider, TextModelConfig, TextModelMode
 from vidbyte.lib.runners import StreamingTextModelRunner, TextModelRunner
 
 PROMPT = "fix calc.py"
@@ -37,19 +37,19 @@ GREETING = {"role": "assistant", "content": "Hi! I'm the front desk bot."}
 
 def _chat_wire(messages: list) -> list:
     transport = FakeTransport({"choices": [{"message": {"content": "ok"}}]})
-    TextModelRunner(TextModelConfig(provider=ModelProvider.XAI, model="grok-test", api_key="key"), transport=transport).run(PROMPT, system="Work.", messages=messages)
+    TextModelRunner(TextModelConfig(provider=ModelProvider.XAI, model="grok-test", api_keys=["xai-key"], mode=TextModelMode.DIRECT), transport=transport).run(PROMPT, system="Work.", messages=messages)
     return transport.requests[0]["json_body"]["messages"]
 
 
 def _anthropic_wire(messages: list) -> list:
     transport = FakeTransport({"content": [{"type": "text", "text": "ok"}]})
-    TextModelRunner(TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-test", api_key="key"), transport=transport).run(PROMPT, messages=messages)
+    TextModelRunner(TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-test", api_keys=["sk-ant-key"], mode=TextModelMode.DIRECT), transport=transport).run(PROMPT, messages=messages)
     return transport.requests[0]["json_body"]["messages"]
 
 
 def _responses_wire(messages: list) -> list:
     transport = FakeTransport({"output_text": "ok"})
-    TextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-test", api_key="key"), transport=transport).run(PROMPT, messages=messages)
+    TextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-test", api_keys=["sk-key"], mode=TextModelMode.DIRECT), transport=transport).run(PROMPT, messages=messages)
     return transport.requests[0]["json_body"]["input"]
 
 
@@ -129,9 +129,18 @@ class AnthropicPromptOrderTests(unittest.TestCase):
         wire = _anthropic_wire([{"role": "user", "content": "earlier"}, {"role": "assistant", "content": "prior reply"}])
         self.assertTrue(_is_prompt(wire[-1]))
 
+    def test_history_system_turn_is_sent_as_a_user_turn(self) -> None:
+        # The system_suffix trace placement puts a system turn in the history; Anthropic rejects that role in messages.
+        earlier, reply = {"role": "user", "content": "earlier"}, {"role": "assistant", "content": "prior reply"}
+        wire = _anthropic_wire([earlier, reply, ANTHROPIC_CALL, ANTHROPIC_RESULT, {"role": "system", "content": "TRACE"}])
+        self.assertNotIn("system", [turn["role"] for turn in wire])
+        self.assertIn({"role": "user", "content": "TRACE"}, wire)
+        self.assertEqual(wire[:2], [earlier, reply])
+        self.assertEqual(wire[3:5], [ANTHROPIC_CALL, ANTHROPIC_RESULT])
+
     def test_streaming_uses_the_same_order(self) -> None:
         transport = FakeStreamingTransport([])
-        runner = StreamingTextModelRunner(TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-test", api_key="key"), transport=transport)
+        runner = StreamingTextModelRunner(TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-test", api_keys=["sk-ant-key"], mode=TextModelMode.DIRECT), transport=transport)
         list(runner.stream(PROMPT, messages=[ANTHROPIC_CALL, ANTHROPIC_RESULT]))
         self.assertTrue(_is_prompt(transport.requests[0]["json_body"]["messages"][0]))
 
@@ -155,7 +164,7 @@ class ResponsesPromptOrderTests(unittest.TestCase):
 
     def test_streaming_uses_the_same_order(self) -> None:
         transport = FakeStreamingTransport([])
-        runner = StreamingTextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-test", api_key="key"), transport=transport)
+        runner = StreamingTextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-test", api_keys=["sk-key"], mode=TextModelMode.DIRECT), transport=transport)
         list(runner.stream(PROMPT, messages=[CHAT_CALL, CHAT_RESULT]))
         self.assertTrue(_is_prompt(transport.requests[0]["json_body"]["input"][0]))
 
@@ -179,7 +188,7 @@ class AgentRequestOrderTests(unittest.IsolatedAsyncioTestCase):
             await agent.arun(PROMPT)
         second = runner.calls[1]
         transport = FakeTransport({"choices": [{"message": {"content": "ok"}}]})
-        await TextModelRunner(TextModelConfig(provider=ModelProvider.XAI, model="grok-test", api_key="key"), transport=transport).arun(second["prompt"], system="Work.", messages=second["kwargs"]["messages"])
+        await TextModelRunner(TextModelConfig(provider=ModelProvider.XAI, model="grok-test", api_keys=["xai-key"], mode=TextModelMode.DIRECT), transport=transport).arun(second["prompt"], system="Work.", messages=second["kwargs"]["messages"])
         wire = transport.requests[0]["json_body"]["messages"]
         self.assertEqual([turn["role"] for turn in wire], ["system", "user", "assistant", "tool"])
         self.assertEqual(wire[1]["content"], second["prompt"])

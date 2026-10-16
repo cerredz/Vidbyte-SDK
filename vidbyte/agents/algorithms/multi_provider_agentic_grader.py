@@ -36,6 +36,7 @@ from vidbyte.lib.errors import AgentExecutionError
 from vidbyte.lib.agents.modality_detector import ModalityDetector
 from vidbyte.lib.models import ProviderModelRegistry
 from vidbyte.lib.tracing import SpanContext
+from vidbyte.lib.dataclasses.agents import AgentStopReason
 from vidbyte.lib.dataclasses.context import BaseAgentContext
 from vidbyte.lib.dataclasses.strategies import AgentResult
 
@@ -56,7 +57,7 @@ class MultiProviderAgenticGraderRuntimeAlgorithm:
     async def arun(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: SpanContext | None = None) -> AgentResult:
         # Orchestrates concurrent provider trials followed by a meta-grader selection pass.
         started_at = self.runtime.middleware.clock()
-        active_models = ProviderModelRegistry.resolve_active(self.algorithm.provider_models, options)
+        active_models = ProviderModelRegistry.resolve_active(self.algorithm.provider_models, options, api_keys=handle.api_keys, model_mode=handle.model_mode)
         results = await self._run_provider_trials(message, context, handle, metadata, options, trace_context, active_models)
         candidates, total_tokens, call_contexts = self._collect_candidates(active_models, results)
         candidates_text = self._build_candidates_text(candidates)
@@ -65,7 +66,11 @@ class MultiProviderAgenticGraderRuntimeAlgorithm:
             return raw_result
         selected_output, selected_provider = self._select_winner(candidates, raw_result, handle)
         res_metadata = self._build_result_metadata(metadata, active_models, selected_provider, candidates, total_tokens, call_contexts)
-        return AgentResult(output=selected_output, strategy_name="multi_provider_agentic_grader", calls=tuple(call_contexts), metadata=res_metadata)
+        # @intent grader-keeps-the-winners-structured-output
+        # Carry the winning trial's validated schema instance; the grader's own text has none.
+        winner = dict(zip(active_models, results, strict=True)).get(selected_provider)
+        structured = None if winner is None or isinstance(winner, BaseException) else winner.structured
+        return AgentResult(output=selected_output, strategy_name="multi_provider_agentic_grader", calls=tuple(call_contexts), metadata=res_metadata, structured=structured)
 
     async def _run_provider_trials(self, message: str, context: BaseAgentContext, handle: RunnerHandle, metadata: Mapping[str, Any] | None, options: Mapping[str, Any] | None, trace_context: SpanContext | None, active_models: dict[str, str]) -> list[Any]:
         # Launches all provider loops concurrently and returns their results, including exceptions.
@@ -79,7 +84,7 @@ class MultiProviderAgenticGraderRuntimeAlgorithm:
         # Runs a single provider's agentic loop, capturing output text via wrap_text for grading.
         trial_prompt = self.algorithm.agent_system_prompt_text(context.system_prompt or "")
         trial_context = dataclasses.replace(context, system_prompt=trial_prompt)
-        p_runner = ModalityDetector.create_runner(modality=ModelModality.TEXT, provider=provider_name, model=model_name)
+        p_runner = ModalityDetector.create_runner(modality=ModelModality.TEXT, provider=provider_name, model=model_name, api_keys=handle.api_keys, mode=handle.model_mode)
         captured_output: list[str] = []
         trial_handle = handle.with_runner(p_runner, provider_name).wrap_text(captured_output.append)
         res = await self.runtime._arun_once(
@@ -89,8 +94,13 @@ class MultiProviderAgenticGraderRuntimeAlgorithm:
             metadata={**dict(metadata or {}), "context_window_algorithm": "multi_provider_agentic_grader", "grader_stage": "agent_loop", "loop_provider": provider_name, "loop_model": model_name},
             options=dict(options or {}),
             trace_context=trace_context,
+            # @intent trials-stay-on-their-provider
+            # A trial stands for one provider, so a failed one drops out instead of running on the agent's fallback model under that provider's name.
+            pin_model=True,
         )
-        if captured_output:
+        # @intent isdone-answer-is-the-candidate
+        # An isDone finish already returns its final_answer; the last captured text is that tool-call turn's text, not the answer.
+        if captured_output and res.metadata.get("stop_reason") != AgentStopReason.IS_DONE.value:
             res = dataclasses.replace(res, output=captured_output[-1])
         return res
 
@@ -119,7 +129,7 @@ class MultiProviderAgenticGraderRuntimeAlgorithm:
     async def _run_grader(self, message: str, candidates_text: str, context: BaseAgentContext, handle: RunnerHandle, metadata: Mapping[str, Any] | None, started_at: Any, trace_context: SpanContext | None) -> Any:
         # Invokes the meta-grader model call via middleware and returns its raw result.
         grader_prompt = self.algorithm.render_grader_prompt(message, candidates_text)
-        grader_runner = ModalityDetector.create_runner(modality=ModelModality.TEXT, provider=self.algorithm.grader_provider, model=self.algorithm.grader_model)
+        grader_runner = ModalityDetector.create_runner(modality=ModelModality.TEXT, provider=self.algorithm.grader_provider, model=self.algorithm.grader_model, api_keys=handle.api_keys, mode=handle.model_mode)
         grader_handle = handle.with_runner(grader_runner, self.algorithm.grader_provider)
         raw_result, _, _ = await self.runtime._invoke_with_middleware(
             grader_handle,

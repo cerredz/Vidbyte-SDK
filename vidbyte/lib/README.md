@@ -39,9 +39,12 @@ print(default_model, api_key_env, openai_models, gpt56_luna_price)
 - `constants/`: shared SDK constants, including model/provider-to-runner mappings.
 - `registries/`: agent, provider/model, pricing, runtime, prompt, tool, actor, and declarable-component registries.
 - `errors/`: SDK-specific exception types.
+- `outputs/`: provider classes that send a finished agent reply's title and body to chat channels, email, issue trackers and code hosts (including comments and update-in-place), docs workspaces, CI job summaries, social-post drafts, CRM tasks, and signed webhooks.
+- `process/`: the canonical local-process helpers: `CliRunner` runs one command with a deadline and capped output, its child inheriting the caller's environment plus an overlay; `CliArgv` builds every argv from flag records in one joined or separate style; and `ProcessStopper` stops a whole process tree. Failures come back as fields of the returned record, never as exceptions, except cancellation.
 - `runners/`: runner handles, concrete model runners, and runner inference helpers.
 - `tools/`: provider-specific tool schema formatting.
 - `tracing/`: tracer base classes and null tracer.
+- `system_prompt_presets.py`: `SystemPromptPresetScope`, the run-scoped ContextVar that hands an agent's system-prompt presets to every agent its run starts.
 
 ## Related Layers
 

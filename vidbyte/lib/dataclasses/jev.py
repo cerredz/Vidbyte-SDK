@@ -92,6 +92,7 @@ from vidbyte.lib.enums.jev import (
     JevSkillStatus,
     JevSwarmPlanQuestionKey,
 )
+from vidbyte.lib.enums.skills import SkillUnavailableReason
 from vidbyte.lib.errors import ConfigurationError
 
 if TYPE_CHECKING:
@@ -3726,27 +3727,44 @@ class JevBulkWorkResult:
 
 @dataclass(frozen=True, slots=True)
 class JevSkillResult:
-    """Metadata and relevance decision for one configured skill, without its text."""
+    """Metadata and relevance decision for one configured skill, without its text.
+
+    An UNAVAILABLE result says why in `reason` and `detail`; a skill that never loaded has no
+    description or source.
+    """
 
     name: str
-    description: str
+    description: str | None
     source: str | None
     status: JevSkillStatus
     probability: float | None = None
+    reason: SkillUnavailableReason | None = None
+    detail: str | None = None
 
     def __post_init__(self) -> None:
         # @intent-response-never-retains-skill-bodies
         # Skill bodies may contain private caller instructions and are only needed by the live run context.
         # The response keeps identifying metadata and the decision evidence, not the injected content.
-        """Validate public skill outcome metadata and any available probability."""
-        for field_name in ("name", "description"):
-            value = getattr(self, field_name)
-            if not isinstance(value, str) or not value.strip():
-                raise ConfigurationError(f"JevSkillResult.{field_name} must be non-blank text.")
-        if self.source is not None and (not isinstance(self.source, str) or not self.source.strip()):
-            raise ConfigurationError("JevSkillResult.source must be None or non-blank text.")
+        """Validate public skill outcome metadata, the unavailable reason, and any available probability."""
+        if not isinstance(self.name, str) or not self.name.strip():
+            raise ConfigurationError("JevSkillResult.name must be non-blank text.")
         if not isinstance(self.status, JevSkillStatus):
             raise ConfigurationError("JevSkillResult.status must be a JevSkillStatus.")
+        unavailable = self.status is JevSkillStatus.UNAVAILABLE
+        if (self.description is not None or not unavailable) and (not isinstance(self.description, str) or not self.description.strip()):
+            raise ConfigurationError("JevSkillResult.description must be non-blank text; only an unavailable skill may have None.")
+        if self.source is not None and (not isinstance(self.source, str) or not self.source.strip()):
+            raise ConfigurationError("JevSkillResult.source must be None or non-blank text.")
+        # @intent skill-result-explains-unavailable
+        # A caller must always learn why a skill was not
+        # offered, and only unavailable skills carry a
+        # reason, so the two can never disagree.
+        if self.reason is not None and not isinstance(self.reason, SkillUnavailableReason):
+            raise ConfigurationError("JevSkillResult.reason must be a SkillUnavailableReason or None.")
+        if (self.reason is not None) != unavailable:
+            raise ConfigurationError("JevSkillResult.reason must be set exactly when status is UNAVAILABLE.")
+        if (self.detail is not None) != (self.reason is not None) or (self.detail is not None and (not isinstance(self.detail, str) or not self.detail.strip())):
+            raise ConfigurationError("JevSkillResult.detail must be non-blank text exactly when reason is set.")
         if self.probability is not None:
             object.__setattr__(self, "probability", JevProbability.require(self.probability, field_name="skill relevance probability"))
 

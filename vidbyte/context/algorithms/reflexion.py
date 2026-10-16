@@ -78,7 +78,9 @@ class ReflexionAlgorithm:
         """Return whether the failed attempt should produce reflection and retry."""
         if trial_index >= self.max_trials - 1:
             return False
-        return self.stop_reason(result) is not AgentStopReason.IS_DONE
+        # @intent isdone-is-a-normal-stop
+        # A plain-text final answer is a normal completion just like isDone, so only other stops are failed trials.
+        return self.stop_reason(result) not in (AgentStopReason.IS_DONE, AgentStopReason.FINAL_RESPONSE)
 
     def render_reflection_prompt(
         self,
@@ -118,7 +120,10 @@ class ReflexionAlgorithm:
             for call in tool_calls:
                 name = str(getattr(call, "tool_name", "unknown"))
                 state = getattr(getattr(call, "state", None), "value", getattr(call, "state", "unknown"))
-                output = str(getattr(getattr(call, "result", None), "output", ""))
+                # @intent failed-attempt-replays-what-the-model-saw
+                # The reflection and the next trial are model calls, so they get the truncated or redacted view, never the raw output.
+                shown = getattr(call, "model_visible_result", None) or getattr(call, "result", None)
+                output = str(getattr(shown, "output", ""))
                 lines.append(f"- {name} ({state}): {output}")
         return self._truncate("\n".join(lines), self.max_attempt_chars, "attempt")
 

@@ -27,7 +27,7 @@ from tests.agent_test_support import build_test_agent
 from vidbyte import CodingAgent, tool
 from vidbyte.agents import AgentLoopSettings, AgentRuntime
 from vidbyte.agents.contracts import MinDistinctTools
-from vidbyte.lib.config import ModelProvider, TextModelConfig
+from vidbyte.lib.config import ModelProvider, TextModelConfig, TextModelMode
 from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision, MiddlewareTransform
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.http import HttpResponse
@@ -103,7 +103,8 @@ def fetch(url: str) -> str:
 
 
 def _runner(provider: ModelProvider, model: str, transport: SequenceTransport) -> TextModelRunner:
-    return TextModelRunner(TextModelConfig(provider=provider, model=model, api_key="key"), transport=transport)
+    provider_key = {ModelProvider.DEEPSEEK: "key", ModelProvider.ANTHROPIC: "sk-ant-key", ModelProvider.GEMINI: "AQ" + "." + "x" * 40}[provider]
+    return TextModelRunner(TextModelConfig(provider=provider, model=model, api_keys=[provider_key], mode=TextModelMode.DIRECT), transport=transport)
 
 
 async def _research(runner: object, provider: str, model: str, *, messages: list | None = None, middleware: tuple = ()) -> None:

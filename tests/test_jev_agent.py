@@ -383,7 +383,7 @@ class JevSettingsTests(unittest.TestCase):
 
     def test_normalizes_provider_and_redacts_both_keys(self) -> None:
         # [Silent Failure] canonical provider identity is stored and neither credential appears in repr.
-        settings = _settings(api_key="generative-secret")
+        settings = _settings(api_keys=["sk-generative-secret"])
         managed_key = "vb_live_" + "a" * 32
         rendered = repr(settings) + repr(JevRuntimeSettings(decision=DecisionModelConfig(mode=DecisionModelMode.VIDBYTE_MANAGED, api_key=managed_key)))
         self.assertIs(settings.provider, ModelProvider.OPENAI)

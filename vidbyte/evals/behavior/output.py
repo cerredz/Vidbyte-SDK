@@ -30,7 +30,10 @@ class OutputBehavior:
     # @intent code-fences-may-be-indented-or-empty
     # Fences sit on their own lines (LF or CRLF), may be indented (list items) and may wrap no body, so a block never swallows the next one.
     _CODE_BLOCK_PATTERN = re.compile(r"(?ms)^[ \t]*(`{3,}|~{3,})([^\n`]*)\n(?:.*?\n)??[ \t]*\1[ \t]*\r?$")
-    _URL_PATTERN = re.compile(r"(?i)\b(?:https?://|www\.)[^\s<>)\]]+")
+    # @intent url-after-cjk-text-is-a-url
+    # Japanese, Chinese and Korean writing glues a URL to the preceding word, and those characters are \w,
+    # so only an ASCII word character may block a URL start (keeping "seehttps://" and "awww." unmatched).
+    _URL_PATTERN = re.compile(r"(?i)(?<![A-Za-z0-9_])(?:https?://|www\.)[^\s<>)\]]+")
     _MARKDOWN_CITATION_PATTERN = re.compile(r"\[[^\]]+\]\((?:https?://|www\.)[^)\s]+\)")
     _FOOTNOTE_CITATION_PATTERN = re.compile(r"\[\^[^\]]+\]")
     _BRACKET_CITATION_PATTERN = re.compile(r"(?<!\^)\[(?:\d+|[A-Za-z][A-Za-z0-9_-]*,\s*\d{4})\]")

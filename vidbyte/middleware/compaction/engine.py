@@ -97,7 +97,13 @@ class ContextCompactionEngine:
         steps: list[tuple[ContextMessage | None, tuple[str | None, frozenset[str] | None, int]]] = [*zip(messages, tags, strict=True), (None, (None, None, 0))]
         for message, (role, ids, parts) in steps:
             if role == "result":
-                if message is not None and call_at is not None and (wanted is None or ids is None or ids <= wanted - answered):
+                # @intent id-less-results-stay-with-their-own-call
+                # Without ids, a result belongs to the open call turn only if it directly followed that turn (or the turn's earlier
+                # result) in the original history; an orphan whose call was evicted would otherwise count against an earlier call.
+                before = kept[-1].metadata.get("provider_index") if kept and isinstance(kept[-1].metadata, Mapping) else None
+                position = message.metadata.get("provider_index") if message is not None and isinstance(message.metadata, Mapping) else None
+                adjacent = (wanted is not None and ids is not None) or not isinstance(before, int) or not isinstance(position, int) or position == before + 1
+                if message is not None and call_at is not None and adjacent and (wanted is None or ids is None or ids <= wanted - answered):
                     kept.append(message)
                     answered |= ids or set()
                     responses += parts
@@ -272,7 +278,24 @@ class ContextCompactionEngine:
         # Anthropic and Gemini keep tool names in content blocks and parts (a tool_result only by call id); unnamed, every per-tool strategy treats all tools as one.
         tool_name = self._provider_tool_name(raw)
         tool_name = self._provider_block_tool_name(raw, tool_names or {}) if tool_name is None else tool_name
-        return ContextMessage(role=role, content=content, kind=kind, metadata={"provider_message": raw, "provider_index": index, "provider_id": self._provider_message_id(raw, index), "tool_name": tool_name})
+        metadata: dict[str, Any] = {"provider_message": raw, "provider_index": index, "provider_id": self._provider_message_id(raw, index), "tool_name": tool_name}
+        # @intent provider-error-results-carry-error-status
+        # Error-aware strategies (keep_errors, salience) read status, and each provider marks a failed tool result in its own shape.
+        if kind == "tool_result" and self._provider_tool_error(raw):
+            metadata["status"] = "error"
+        return ContextMessage(role=role, content=content, kind=kind, metadata=metadata)
+
+    @staticmethod
+    def _provider_tool_error(message: Mapping[str, Any]) -> bool:
+        # Reads ToolsFormatter's error markers: Anthropic is_error blocks, Gemini error responses, and the text envelope's first line.
+        content, parts = message.get("content"), message.get("parts")
+        if isinstance(content, list) and any(isinstance(block, Mapping) and block.get("type") == "tool_result" and block.get("is_error") is True for block in content):
+            return True
+        for part in parts if isinstance(parts, list) else ():
+            response = part.get("functionResponse", part.get("function_response")) if isinstance(part, Mapping) else None
+            if isinstance(response, Mapping) and isinstance(response.get("response"), Mapping) and response["response"].get("status") == "error":
+                return True
+        return isinstance(content, str) and content.startswith("[tool_error ")
 
     def _context_message_to_provider(self, message: ContextMessage) -> dict[str, Any]:
         # Converts a compacted ContextMessage back to a provider message dictionary.
@@ -282,7 +305,8 @@ class ContextCompactionEngine:
             if message.content == self._provider_message_content(original):
                 return dict(original)
             return self._replace_provider_content(dict(original), message.content)
-        return {"role": "assistant" if message.role != "system" else "system", "content": message.content}
+        # A strategy-built user message (the synthetic_user trace placement) stays a user turn.
+        return {"role": message.role if message.role in ("system", "user") else "assistant", "content": message.content}
 
     def _provider_message_kind(self, message: Mapping[str, Any]) -> str:
         # Classifies provider message dictionaries for compaction decisions.
@@ -325,7 +349,9 @@ class ContextCompactionEngine:
             for part in parts:
                 function_response = (part.get("functionResponse") or part.get("function_response")) if isinstance(part, Mapping) else None
                 response = function_response.get("response") if isinstance(function_response, Mapping) else None
-                output = response.get("output") if isinstance(response, Mapping) else None
+                # @intent gemini-error-responses-compact-their-message
+                # A failed call's response carries its text in "message" (ToolsFormatter._gemini_error_response), not "output".
+                output = response.get("output", response.get("message")) if isinstance(response, Mapping) else None
                 text = part.get("text") if isinstance(part, Mapping) else None
                 part_values.append(output if isinstance(output, str) else text if isinstance(text, str) else str(part))
             return "\n".join(part_values)
@@ -395,7 +421,7 @@ class ContextCompactionEngine:
                 if isinstance(part, Mapping) and isinstance(part.get("functionResponse"), Mapping):
                     raw_response = dict(part["functionResponse"])
                     response = dict(raw_response.get("response", {}))
-                    response["output"] = content
+                    response["output" if "output" in response or "message" not in response else "message"] = content
                     raw_response["response"] = response
                     replaced.append({"functionResponse": raw_response})
                 else:

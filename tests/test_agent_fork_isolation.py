@@ -16,6 +16,7 @@ from vidbyte.lib.dataclasses.agents import AgentMetadata
 from vidbyte.lib.dataclasses.trace import TraceOption
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.registries.models import ProviderModelRegistry
+from vidbyte.lib.runners import Runner
 from vidbyte.lib.tracing import SpanContext, TracerBase
 from vidbyte.tools.agent_tool import AgentTool
 from vidbyte.tools.builtins.context_primitives import context_window_tools
@@ -443,34 +444,56 @@ class AgentForkIsolationTests(unittest.IsolatedAsyncioTestCase):
 
     def test_cross_provider_fork_does_not_inherit_parent_api_key(self) -> None:
         # @intent fork-key-never-crosses-providers: a DeepSeek key must never be sent to OpenAI.
-        parent = BaseAgent(name="router", system_prompt="Route.", provider="deepseek", model_name="deepseek-v4-flash", api_key="sk-deepseek-SECRET")
+        # byok-api-keys D-13, INV-15, INV-3, EC-47: the fork carries the parent's matched record unchanged; the record binds the key to deepseek, so the child's openai call takes OPENAI_API_KEY and never the DeepSeek key.
+        parent = BaseAgent(name="router", system_prompt="Route.", provider="deepseek", model_name="deepseek-v4-flash", api_keys=["sk-deepseek-SECRET"])
 
-        with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-openai-ENV"}):
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-openai-ENV"}, clear=True):
             for provider in ("openai", ModelProvider.OPENAI):
                 child = parent.fork(AgentForkSettings(provider=provider, model_name="gpt-5.4-mini"))
-                self.assertIsNone(child.runner_config.api_key)
+                self.assertEqual(child.runner_config.api_keys, parent.runner_config.api_keys)
+                self.assertIsNone(child.runner_config.api_keys.key_for("openai"))
                 self.assertEqual(child.runner_config.provider, "openai")
-                self.assertEqual(ProviderModelRegistry.resolve_api_key(child.runner_config.provider, child.runner_config.api_key), "sk-openai-ENV")
-        self.assertEqual(parent.runner_config.api_key, "sk-deepseek-SECRET")
+                self.assertEqual(ProviderModelRegistry.find_provider_api_key(child.runner_config.provider, child.runner_config.api_keys), "sk-openai-ENV")
+        self.assertEqual(parent.runner_config.api_keys.key_for("deepseek"), "sk-deepseek-SECRET")
 
-    def test_cross_provider_fork_keeps_a_vidbyte_key_only_for_a_managed_provider(self) -> None:
+    def test_cross_provider_fork_keeps_the_vidbyte_key_as_the_gateway_bearer_and_no_provider_key_crosses(self) -> None:
         # @intent vidbyte-key-may-cross-to-a-managed-provider: the gateway serves Kimi with the same Vidbyte key, but not GLM.
+        # byok-api-keys D-13, INV-13, INV-3, EC-47, D-23: every fork carries the record and its Vidbyte key; a kimi call uses that key only as the
+        # gateway bearer, a glm call in AUTO is refused before any request (and in DIRECT takes GLM_API_KEY), and a key bound to deepseek never goes to kimi.
+        from vidbyte.lib.config import TextModelConfig, TextModelMode
+        from vidbyte.lib.errors import UnsupportedProviderError
+
         vidbyte_key = VIDBYTE_API_KEY_PREFIX + "A1b2C3d4" * 5
-        parent = BaseAgent(name="router", system_prompt="Route.", provider="deepseek", model_name="deepseek-chat", api_key=vidbyte_key)
-        vendor_parent = BaseAgent(name="router", system_prompt="Route.", provider="deepseek", model_name="deepseek-chat", api_key="sk-deepseek-SECRET")
+        parent = BaseAgent(name="router", system_prompt="Route.", provider="deepseek", model_name="deepseek-chat", api_keys=[vidbyte_key])
+        vendor_parent = BaseAgent(name="router", system_prompt="Route.", provider="deepseek", model_name="deepseek-chat", api_keys=["sk-deepseek-SECRET"])
+
+        def child_config(child: BaseAgent, mode: object = None) -> TextModelConfig:
+            # The text config the child's runner would build from its own runner config.
+            return TextModelConfig(provider=child.runner_config.provider, model=child.runner_config.model_name, api_keys=child.runner_config.api_keys, mode=mode or child.runner_config.model_mode)
 
         with patch.dict(os.environ, {"GLM_API_KEY": "glm-ENV"}, clear=True):
             managed = parent.fork(AgentForkSettings(provider="kimi", model_name="kimi-k2.7-code"))
             unmanaged = parent.fork(AgentForkSettings(provider="glm", model_name="glm-5.2"))
             vendor = vendor_parent.fork(AgentForkSettings(provider="kimi", model_name="kimi-k2.7-code"))
+            kimi = child_config(managed).credentials()
+            with self.assertRaises(UnsupportedProviderError) as refused:
+                child_config(unmanaged)
+            glm_direct_key = child_config(unmanaged, TextModelMode.DIRECT).resolved_api_key()
+            vendor_kimi_key = ProviderModelRegistry.find_provider_api_key(vendor.runner_config.provider, vendor.runner_config.api_keys)
 
-        self.assertEqual((managed.runner_config.provider, managed.runner_config.api_key), ("kimi", vidbyte_key))
-        self.assertIsNone(unmanaged.runner_config.api_key)
-        self.assertIsNone(vendor.runner_config.api_key)
+        self.assertEqual(managed.runner_config.provider, "kimi")
+        self.assertEqual((kimi.vidbyte_api_key, kimi.provider_api_key, kimi.uses_gateway), (vidbyte_key, None, True))
+        self.assertEqual(unmanaged.runner_config.api_keys, parent.runner_config.api_keys)
+        self.assertNotIn(vidbyte_key, str(refused.exception))
+        self.assertEqual(glm_direct_key, "glm-ENV")
+        self.assertEqual(vendor.runner_config.api_keys, vendor_parent.runner_config.api_keys)
+        self.assertIsNone(vendor.runner_config.api_keys.key_for("kimi"))
+        self.assertIsNone(vendor_kimi_key)
 
     def test_same_provider_fork_keeps_parent_api_key(self) -> None:
         # Staying on the parent's provider, including model-only overrides, keeps the parent's explicit key.
-        parent = BaseAgent(name="router", system_prompt="Route.", provider="deepseek", model_name="deepseek-v4-flash", api_key="sk-deepseek-SECRET")
+        # byok-api-keys D-13, INV-15: the child carries the parent's matched record unchanged.
+        parent = BaseAgent(name="router", system_prompt="Route.", provider="deepseek", model_name="deepseek-v4-flash", api_keys=["sk-deepseek-SECRET"])
 
         for settings in (
             AgentForkSettings(),
@@ -478,44 +501,69 @@ class AgentForkIsolationTests(unittest.IsolatedAsyncioTestCase):
             AgentForkSettings(provider="deepseek", model_name="deepseek-v4-pro"),
             AgentForkSettings(provider=ModelProvider.DEEPSEEK),
         ):
-            self.assertEqual(parent.fork(settings).runner_config.api_key, "sk-deepseek-SECRET")
+            child = parent.fork(settings)
+            self.assertEqual(child.runner_config.api_keys, parent.runner_config.api_keys)
+            self.assertEqual(child.runner_config.api_keys.key_for("deepseek"), "sk-deepseek-SECRET")
 
     def test_same_vendor_fork_keeps_key_of_provider_prefixed_parent(self) -> None:
         # @intent fork-reads-prefixed-parent-provider: "deepseek/deepseek-chat" runs on DeepSeek, so a DeepSeek child keeps the key.
-        parent = BaseAgent(name="router", system_prompt="Route.", model_name="deepseek/deepseek-chat", api_key="PARENTKEY")
+        # byok-api-keys D-27: the root matches its list against the prefixed model's provider, so the unproven key is bound to deepseek.
+        parent = BaseAgent(name="router", system_prompt="Route.", model_name="deepseek/deepseek-chat", api_keys=["PARENTKEY"])
 
         # No DeepSeek key in the environment, so only the inherited key can authenticate the same-vendor child.
-        with patch.dict(os.environ):
-            os.environ.pop("DEEPSEEK_API_KEY", None)
+        with patch.dict(os.environ, {}, clear=True):
             same_vendor = parent.fork(AgentForkSettings(provider="deepseek", model_name="deepseek-reasoner"))
             cross_vendor = parent.fork(AgentForkSettings(provider="gemini", model_name="gemini-2.5-flash"))
+            same_key = ProviderModelRegistry.find_provider_api_key(same_vendor.runner_config.provider, same_vendor.runner_config.api_keys)
+            cross_key = ProviderModelRegistry.find_provider_api_key(cross_vendor.runner_config.provider, cross_vendor.runner_config.api_keys)
 
-        self.assertEqual(same_vendor.runner_config.api_key, "PARENTKEY")
-        self.assertIsNone(cross_vendor.runner_config.api_key)
+        self.assertEqual(same_key, "PARENTKEY")
+        self.assertIsNone(cross_key)
+        self.assertEqual(cross_vendor.runner_config.api_keys, parent.runner_config.api_keys)
 
-    def test_fork_whose_prefixed_model_switches_vendor_drops_key_and_keeps_backup_vendor(self) -> None:
+    def test_fork_whose_prefixed_model_switches_vendor_sends_it_no_parent_key_and_keeps_backup_vendor(self) -> None:
         # @intent fork-reads-prefixed-child-provider: with no provider set, "gemini/gemini-3.5-flash" moves the child to Gemini.
-        combined = BaseAgent(name="router", system_prompt="Route.", model_name="deepseek/deepseek-chat", api_key="PARENTKEY", fallback=["deepseek-reasoner"])
-        split = BaseAgent(name="router", system_prompt="Route.", provider="deepseek", model_name="deepseek-chat", api_key="PARENTKEY")
+        # byok-api-keys D-13, INV-3, EC-47: the child keeps the record, so its Gemini runner gets no provider key while its DeepSeek backup still relays the parent's key.
+        vidbyte_key = VIDBYTE_API_KEY_PREFIX + "A1b2C3d4" * 5
+        combined = BaseAgent(name="router", system_prompt="Route.", model_name="deepseek/deepseek-chat", api_keys=["PARENTKEY"], vidbyte_api_key=vidbyte_key, fallback=["deepseek-reasoner"])
+        split = BaseAgent(name="router", system_prompt="Route.", provider="deepseek", model_name="deepseek-chat", api_keys=["PARENTKEY"])
 
-        with patch.dict(os.environ):
-            os.environ.pop("DEEPSEEK_API_KEY", None)
+        with patch.dict(os.environ, {}, clear=True):
             switched = combined.fork(AgentForkSettings(model_name="gemini/gemini-3.5-flash"))
             # A split parent's inherited provider pins the child to DeepSeek, so it keeps the key.
             stays = split.fork(AgentForkSettings(model_name="gemini/gemini-3.5-flash"))
+            switched_keys = [switched.fallback.build_runner(index)._config.credentials().provider_api_key for index in range(2)]
 
-        self.assertIsNone(switched.runner_config.api_key)
+        self.assertEqual(switched.runner_config.api_keys, combined.runner_config.api_keys)
         self.assertEqual(switched.fallback.models[1].identity(), "deepseek/deepseek-reasoner")
-        self.assertEqual(stays.runner_config.api_key, "PARENTKEY")
+        self.assertEqual(switched_keys, [None, "PARENTKEY"])
+        self.assertEqual(stays.runner_config.provider, "deepseek")
+        self.assertEqual(stays.runner_config.api_keys.key_for(stays.runner_config.provider), "PARENTKEY")
+
+    def test_bare_model_fork_of_provider_prefixed_parent_stays_on_parent_vendor(self) -> None:
+        # @intent fork-inherits-the-parent-vendor: a bare "deepseek-reasoner" on a "deepseek/deepseek-chat" parent stays on DeepSeek.
+        parent = BaseAgent(name="router", system_prompt="Route.", model_name="deepseek/deepseek-chat", api_keys=["PARENTKEY"], fallback=["deepseek-v4-flash"])
+
+        with patch.dict(os.environ):
+            os.environ.pop("DEEPSEEK_API_KEY", None)
+            child = parent.fork(AgentForkSettings(model_name="deepseek-reasoner"))
+
+        self.assertEqual(Runner._normalize_provider_and_model(child.runner_config.provider, child.runner_config.model_name)[:2], ("deepseek", "deepseek-reasoner"))
+        self.assertEqual(child.runner_config.api_keys.key_for(child.runner_config.provider), "PARENTKEY")
+        self.assertEqual([model.identity() for model in child.fallback.models], ["deepseek/deepseek-reasoner", "deepseek/deepseek-v4-flash"])
 
     def test_cross_provider_fork_keeps_parent_fallback_providers(self) -> None:
         # @intent fork-keeps-resolved-fallback-providers: a bare DeepSeek backup must not become an Anthropic model.
-        parent = BaseAgent(name="router", system_prompt="Route.", provider="deepseek", model_name="deepseek-v4-pro", api_key="sk-deepseek-SECRET", timeout_seconds=30.0, fallback=["deepseek-v4-flash"])
+        # byok-api-keys D-13, D-26: FallbackModel has no key; each runner in the child's chain takes its key from the parent's record.
+        vidbyte_key = VIDBYTE_API_KEY_PREFIX + "A1b2C3d4" * 5
+        parent = BaseAgent(name="router", system_prompt="Route.", provider="deepseek", model_name="deepseek-v4-pro", api_keys=["sk-deepseek-SECRET"], vidbyte_api_key=vidbyte_key, timeout_seconds=30.0, fallback=["deepseek-v4-flash"])
 
         child = parent.fork(AgentForkSettings(provider="anthropic", model_name="claude-sonnet-4-6"))
+        with patch.dict(os.environ, {}, clear=True):
+            keys = [child.fallback.build_runner(index)._config.credentials().provider_api_key for index in range(len(child.fallback.models))]
 
         self.assertEqual([model.identity() for model in child.fallback.models], ["anthropic/claude-sonnet-4-6", "deepseek/deepseek-v4-flash"])
-        self.assertEqual([model.api_key for model in child.fallback.models], [None, "sk-deepseek-SECRET"])
+        self.assertEqual(keys, [None, "sk-deepseek-SECRET"])
         self.assertEqual(child.fallback.fallback_on, parent.fallback.fallback_on)
         self.assertEqual(child.fallback.timeout_seconds, 30.0)
 

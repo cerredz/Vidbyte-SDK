@@ -5,7 +5,8 @@ PURPOSE:
     `loop.output_contracts` list in an agent YAML is built into concrete floor objects,
     and an unknown floor type fails as a ConfigurationError carrying the file path; a
     `loop.tool_error_policy` mapping is built into a ToolErrorPolicy; YAML merge keys
-    resolve as SafeLoader resolves them while own duplicate keys stay rejected.
+    resolve as SafeLoader resolves them while own duplicate keys stay rejected; a file
+    that is not UTF-8 text fails as a ConfigurationError carrying the file path.
 
 ROLE IN CODEBASE:
     Exercises YamlLoader._construct_base_agent and YamlLoader._build_output_contracts in
@@ -89,6 +90,34 @@ class LibConfigLoaderMergeKeyTests(unittest.TestCase):
     def test_own_duplicate_beside_a_merge_is_still_rejected(self) -> None:
         with self.assertRaisesRegex(yaml.constructor.ConstructorError, "Duplicate key 'y' is not allowed"):
             yaml.load("a: &a {x: 1, y: 2}\nb: {<<: *a, y: 1, y: 2}\n", Loader=_DuplicateKeySafeLoader)
+
+    def test_two_merge_keys_in_one_mapping_are_rejected(self) -> None:
+        # Verify a second `<<` in one mapping is rejected instead of letting the later merge hide the earlier one.
+        # @intent one-merge-key-per-mapping
+        documents = (
+            "a: &a {x: 1}\nb: &b {x: 2}\nc: {<<: *a, <<: *b}\n",
+            "a: &a {x: 1}\nb: &b {x: 2}\nc:\n  <<: *a\n  <<: *b\n",
+        )
+        for text in documents:
+            with self.subTest(text=text):
+                with self.assertRaisesRegex(yaml.constructor.ConstructorError, "Duplicate key '<<' is not allowed"):
+                    yaml.load(text, Loader=_DuplicateKeySafeLoader)
+
+
+class LibConfigLoaderReadErrorTests(unittest.TestCase):
+    def test_non_utf8_file_is_a_configuration_error_with_path(self) -> None:
+        # @intent unreadable-yaml-is-a-configuration-error
+        text = "name: researcher\nsystem_prompt: Grüße aus der Forschung.\n"
+        encodings = (("utf16.yaml", "utf-16"), ("cp1252.yaml", "cp1252"))
+        with tempfile.TemporaryDirectory() as folder:
+            for name, encoding in encodings:
+                with self.subTest(encoding=encoding):
+                    path = Path(folder) / name
+                    path.write_bytes(text.encode(encoding))
+                    with self.assertRaises(ConfigurationError) as caught:
+                        YamlLoader().load_agent(path)
+                    self.assertEqual(caught.exception.details.get("path"), str(path))
+                    self.assertIsInstance(caught.exception.__cause__, UnicodeError)
 
 
 if __name__ == "__main__":

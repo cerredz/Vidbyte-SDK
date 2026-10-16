@@ -16,6 +16,7 @@ from pydantic.alias_generators import to_camel
 from vidbyte import tool, vidbyte_tool
 from vidbyte.agents import AgentRuntime
 from vidbyte.lib.dataclasses.tools import ToolParameter
+from vidbyte.lib.errors import ToolExecutionError
 from vidbyte.lib.tools.formatter import ToolsFormatter
 from vidbyte.tools import FunctionTool, ToolCall, ToolRegistry, Tools, ToolStatus
 from vidbyte.tools.security import PermissionPolicy
@@ -35,6 +36,11 @@ class Quote(BaseModel):
 class QuoteRecord:
     sku: str
     price: float
+
+
+class Hotel(BaseModel):
+    name: str
+    city: str
 
 
 class Priority(Enum):
@@ -290,6 +296,35 @@ class CustomFunctionToolTests(unittest.IsolatedAsyncioTestCase):
         formatted = ToolsFormatter.format_tool_result(call, result, "openai")
         self.assertIn("kind=execution_error", formatted["content"])
 
+    async def test_raised_tool_execution_error_keeps_its_declared_kind(self) -> None:
+        # @intent function-tool-errors-share-the-runtime-error-kind
+        # [Silent Failure] A raised ToolExecutionError keeps its declared kind, as it does in a raising BaseTool,
+        # so ToolErrorPolicy can retry a rate-limited @tool function.
+        @tool
+        def fetch_quote(symbol: str) -> str:
+            """Fetch a quote for a symbol."""
+            raise ToolExecutionError("quota hit", details={"error": "rate_limited", "error_type": "RateLimited"})
+
+        call = ToolCall("fetch_quote", {"symbol": "ACME"})
+        result = await fetch_quote.execute(call)
+
+        self.assertEqual(result.status, ToolStatus.ERROR)
+        self.assertEqual(result.output, "quota hit")
+        self.assertEqual(result.metadata["error"], "rate_limited")
+        self.assertEqual(result.metadata["error_type"], "RateLimited")
+        formatted = ToolsFormatter.format_tool_result(call, result, "openai")
+        self.assertIn("kind=rate_limited", formatted["content"])
+
+        @tool
+        def fetch_plain(symbol: str) -> str:
+            """Fetch a quote with no declared error kind."""
+            raise ToolExecutionError(f"feed down for {symbol}")
+
+        plain = await fetch_plain.execute(ToolCall("fetch_plain", {"symbol": "ACME"}))
+
+        self.assertEqual(plain.metadata["error"], "execution_error")
+        self.assertEqual(plain.metadata["error_type"], "ToolExecutionError")
+
     async def test_annotated_field_metadata_reaches_schema_and_validation(self) -> None:
         # This module uses `from __future__ import annotations`, so these hints are strings too.
         calls: list[tuple[str, int]] = []
@@ -502,6 +537,25 @@ class StructuredToolOutputTests(unittest.IsolatedAsyncioTestCase):
         result = await self._run(report, output_schema=None)
 
         self.assertEqual(result.output, '{"a": {"z": true}, "b": [1, 2.5, null]}')
+
+    # @intent tool-output-keeps-non-ascii-readable
+    # A dict or model return must hand the model the same characters a str return would, not \uXXXX escapes.
+    async def test_non_ascii_output_stays_readable(self) -> None:
+        def weather() -> dict[str, Any]:
+            return {"city": "Zürich", "stations": ["品川", "新横浜"]}
+
+        def hotel() -> Hotel:
+            return Hotel(name="Hôtel Élysée", city="Zürich")
+
+        weather_result = await self._run(weather, output_schema=None)
+        hotel_result = await self._run(hotel, output_schema=Hotel)
+
+        self.assertEqual(hotel_result.status, ToolStatus.SUCCESS, hotel_result.output)
+        self.assertEqual(weather_result.output, '{"city": "Zürich", "stations": ["品川", "新横浜"]}')
+        self.assertEqual(hotel_result.output, '{"city": "Zürich", "name": "Hôtel Élysée"}')
+        for result, expected in ((weather_result, weather()), (hotel_result, hotel().model_dump())):
+            self.assertNotIn("\\u", result.output)
+            self.assertEqual(json.loads(result.output), expected)
 
     # @intent tool-model-output-round-trips
     # A camelCase API model returned as its own output_schema must pass the check, so models dump by alias.

@@ -16,7 +16,7 @@ Relations:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -42,6 +42,8 @@ from vidbyte.sessions.usage import SessionUsageBuilder, UsageRollup
 
 if TYPE_CHECKING:
     from vidbyte.agents.base import BaseAgent
+    from vidbyte.context.window import ContextWindowAlgorithm
+    from vidbyte.lib.dataclasses.agents import ProviderKeys
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,10 +201,14 @@ class Session:
         if at is not None and self._store.get(at).session_id != self._session_id:
             raise SessionError("Cannot fork from a checkpoint from another session.", details={"checkpoint_id": at})
         # @intent live-fork-keeps-agent-key
-        # Checkpoints never store the key, so hand the live agent's own key to the branch; without it the branch bills
-        # the provider's env key. The branch restores this session's checkpoint, so the provider is the same.
-        api_key = getattr(getattr(self._agent, "runner_config", None), "api_key", None)
-        return self.fork_from(self._store, checkpoint_id, tools=tools or (), middleware=middleware or (), policy=self._policy, trace=self._recorder_policy(), tags=self._tags, api_key=api_key)
+        # Checkpoints never store keys, so hand the live agent's matched
+        # keys (its ProviderKeys record, Vidbyte key included) to the
+        # branch; without them the branch falls back to environment
+        # keys. The branch restores this session's checkpoint, so its
+        # provider is the same.
+        api_keys = getattr(getattr(self._agent, "runner_config", None), "api_keys", None)
+        # @intent live-fork-keeps-agent-algorithm: checkpoints store only the algorithm's name, so hand the branch the live agent's own algorithm.
+        return self.fork_from(self._store, checkpoint_id, tools=tools or (), middleware=middleware or (), policy=self._policy, trace=self._recorder_policy(), tags=self._tags, api_keys=api_keys, algorithm=getattr(self._agent, "algorithm", None))
 
     def batch_fork(self, count: int, *, at: str | None = None, tools: Sequence[object] | None = None, middleware: Sequence[object] | None = None) -> list[ForkOutcome]:
         # Attempt count independent forks from the same checkpoint, isolating branch creation failures.
@@ -289,8 +295,8 @@ class Session:
         return self._persist(None, label=label).id
 
     @classmethod
-    def resume(cls, store: SessionStore, session_id: str, *, checkpoint_id: str | None = None, tools: Sequence[object] = (), middleware: Sequence[object] = (), tracer: object | None = None, output_schema: object | None = None, policy: CheckpointPolicy | str = CheckpointPolicy.PER_TURN, trace: TraceCapture | str = TraceCapture.AUTO, api_key: str | None = None) -> "Session":
-        """Reconstruct a live session from a checkpoint, re-supplying non-serializable parts (tools, middleware, tracer, output schema, API key)."""
+    def resume(cls, store: SessionStore, session_id: str, *, checkpoint_id: str | None = None, tools: Sequence[object] = (), middleware: Sequence[object] = (), tracer: object | None = None, output_schema: object | None = None, policy: CheckpointPolicy | str = CheckpointPolicy.PER_TURN, trace: TraceCapture | str = TraceCapture.AUTO, api_keys: ProviderKeys | Iterable[str | None] | None = None, vidbyte_api_key: str | None = None, algorithm: ContextWindowAlgorithm | str | None = None) -> "Session":
+        """Reconstruct a live session from a checkpoint, re-supplying non-serializable parts (tools, middleware, tracer, output schema, API keys, context-window algorithm)."""
         session_id = store.resolve(session_id)
         source = store.get(checkpoint_id) if checkpoint_id else store.head(session_id)
         if source is None:
@@ -300,8 +306,11 @@ class Session:
         if checkpoint_id and source.session_id != session_id:
             raise SessionError("Cannot resume from a checkpoint from another session.", details={"checkpoint_id": checkpoint_id})
         # @intent resume-takes-the-agent-key
-        # Checkpoints never store the key, so an agent built with an explicit key needs it back here, as fork_from() and BaseAgent.restore() accept it.
-        agent = cls._restore_agent(source, tools=tools, middleware=middleware, tracer=tracer, output_schema=output_schema, api_key=api_key)
+        # Checkpoints never store keys, so an agent built with explicit
+        # keys needs them back here, as fork_from() and
+        # BaseAgent.restore() accept them; restore matches the list
+        # against the providers the root matched.
+        agent = cls._restore_agent(source, tools=tools, middleware=middleware, tracer=tracer, output_schema=output_schema, api_keys=api_keys, vidbyte_api_key=vidbyte_api_key, algorithm=algorithm)
         session = cls(agent, store=store, session_id=session_id, policy=policy, trace=trace, _existing=True)
         # @intent resume-checkpoint-becomes-head
         # The agent holds this checkpoint's history, so move the live and stored head there exactly as rewind() does; the next turn then records it as its parent.
@@ -315,10 +324,10 @@ class Session:
         return cls.resume(store, session_id, **kwargs)
 
     @classmethod
-    def fork_from(cls, store: SessionStore, checkpoint_id: str, *, tools: Sequence[object] = (), middleware: Sequence[object] = (), tracer: object | None = None, output_schema: object | None = None, policy: CheckpointPolicy | str = CheckpointPolicy.PER_TURN, trace: TraceCapture | str = TraceCapture.AUTO, tags: Sequence[str] = (), api_key: str | None = None) -> "Session":
+    def fork_from(cls, store: SessionStore, checkpoint_id: str, *, tools: Sequence[object] = (), middleware: Sequence[object] = (), tracer: object | None = None, output_schema: object | None = None, policy: CheckpointPolicy | str = CheckpointPolicy.PER_TURN, trace: TraceCapture | str = TraceCapture.AUTO, tags: Sequence[str] = (), api_keys: ProviderKeys | Iterable[str | None] | None = None, vidbyte_api_key: str | None = None, algorithm: ContextWindowAlgorithm | str | None = None) -> "Session":
         """Create a new session branched from any checkpoint, copying its state as the root."""
         source = store.get(checkpoint_id)
-        agent = cls._restore_agent(source, tools=tools, middleware=middleware, tracer=tracer, output_schema=output_schema, api_key=api_key)
+        agent = cls._restore_agent(source, tools=tools, middleware=middleware, tracer=tracer, output_schema=output_schema, api_keys=api_keys, vidbyte_api_key=vidbyte_api_key, algorithm=algorithm)
         session = cls(agent, store=store, session_id=f"se_{uuid4().hex}", policy=policy, trace=trace, tags=tags, parent_session_id=source.session_id)
         session._persist(None, label="fork")
         return session
@@ -476,10 +485,10 @@ class Session:
         return self._recorder._policy
 
     @staticmethod
-    def _restore_agent(source: Checkpoint, *, tools: Sequence[object], middleware: Sequence[object], tracer: object | None, output_schema: object | None, api_key: str | None = None) -> "BaseAgent":
+    def _restore_agent(source: Checkpoint, *, tools: Sequence[object], middleware: Sequence[object], tracer: object | None, output_schema: object | None, api_keys: ProviderKeys | Iterable[str | None] | None = None, vidbyte_api_key: str | None = None, algorithm: ContextWindowAlgorithm | str | None = None) -> "BaseAgent":
         # Rebuild a BaseAgent from a checkpoint's RunState via the rehydration contract.
         from vidbyte.agents.base import BaseAgent
-        return BaseAgent.restore(source.run_state, tools=tools, middleware=middleware, tracer=tracer, output_schema=output_schema, api_key=api_key)
+        return BaseAgent.restore(source.run_state, tools=tools, middleware=middleware, tracer=tracer, output_schema=output_schema, api_keys=api_keys, vidbyte_api_key=vidbyte_api_key, algorithm=algorithm)
 
 
 def _now() -> str:

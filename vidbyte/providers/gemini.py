@@ -7,8 +7,12 @@ from vidbyte.lib.config import EmbeddingModelConfig, TextModelConfig
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ProviderConfigurationError, ProviderResponseError
 from vidbyte.lib.http import HttpResponseParser, HttpTransport
+from vidbyte.lib.registries.structured_output import StructuredOutputRegistry
 from vidbyte.lib.runners.types import EmbeddingResponse, TextModelResponse
 from vidbyte.lib.tools.formatter import ToolsFormatter
+
+# Gemini refuses a larger batchEmbedContents call with 400 "at most 100 requests can be in one batch".
+_GEMINI_EMBEDDING_BATCH_LIMIT = 100
 
 
 class GeminiProvider:
@@ -54,8 +58,10 @@ class GeminiProvider:
     def _create_payload(self, config: TextModelConfig, prompt: str, system: str | None, metadata: Mapping[str, object] | None) -> dict[str, Any]:
         # Build the Gemini request body around its contents array contract.
         payload: dict[str, Any] = {"contents": self._create_contents(config, prompt)}
-        self._attach_instructions(payload, config, system)
-        self._attach_generation_config(payload, config)
+        # Decide once whether the output schema travels as instructions, so both steps below agree.
+        schema_as_text = self._schema_as_text(config)
+        self._attach_instructions(payload, config, system, schema_as_text)
+        self._attach_generation_config(payload, config, schema_as_text)
         self._attach_tools(payload, config)
         self._attach_safety(payload, config)
         self._attach_cache(payload, config)
@@ -152,13 +158,24 @@ class GeminiProvider:
             turn["parts"] = [{"text": content if isinstance(content, str) else str(content)}]
         return turn
 
-    def _attach_instructions(self, payload: dict[str, Any], config: TextModelConfig, system: str | None) -> None:
+    def _schema_as_text(self, config: TextModelConfig) -> bool:
+        # @intent gemini-2-schema-cannot-ride-with-function-calls
+        # The registry declares which models reject a JSON response type beside function declarations.
+        if config.response_format is None or not config.tools:
+            return False
+        return not StructuredOutputRegistry.native_schema_with_tools(self.provider, config.model)
+
+    def _attach_instructions(self, payload: dict[str, Any], config: TextModelConfig, system: str | None, schema_as_text: bool) -> None:
         # Gemini uses systemInstruction for developer-provided instructions.
-        instructions = system or config.system
+        instructions = system or config.system or ""
+        # @intent below-native-the-fields-only-reach-the-model-as-text
+        # When native schema cannot be sent, its fields reach the model through the instructions instead.
+        if schema_as_text and config.response_format is not None:
+            instructions = (instructions + StructuredOutputRegistry.describe(self.provider, config.model).schema_instruction(dict(config.response_format))).strip()
         if instructions:
             payload["systemInstruction"] = {"parts": [{"text": instructions}]}
 
-    def _attach_generation_config(self, payload: dict[str, Any], config: TextModelConfig) -> None:
+    def _attach_generation_config(self, payload: dict[str, Any], config: TextModelConfig, schema_as_text: bool) -> None:
         # Collect Gemini generation options under generationConfig.
         generation_config: dict[str, Any] = {}
         if config.temperature is not None:
@@ -167,7 +184,7 @@ class GeminiProvider:
             generation_config["topP"] = config.top_p
         if config.max_output_tokens is not None:
             generation_config["maxOutputTokens"] = config.max_output_tokens
-        if config.response_format is not None:
+        if config.response_format is not None and not schema_as_text:
             generation_config["responseMimeType"] = "application/json"
             # @intent response-schema-speaks-gemini-openapi-subset
             # responseSchema is Gemini's OpenAPI subset, so $defs/$ref from any nested model or Enum
@@ -206,6 +223,32 @@ class GeminiProvider:
         # POST to batchEmbedContents and return one float vector per input text.
         config = self._embedding_config_for(config)
         model = quote(config.model, safe="")
+        url = f"{config.resolved_endpoint()}/models/{model}:batchEmbedContents"
+        # @intent gemini-embedding-batches-stay-under-the-cap
+        # Gemini answers more than 100 requests in one batch with 400 "BatchEmbedContentsRequest.requests: at most
+        # 100 requests can be in one batch", so the texts go out in consecutive slices of at most that many.
+        embeddings: list[tuple[float, ...]] = []
+        bodies: list[Mapping[str, Any]] = []
+        for batch in self._embedding_batches(texts):
+            # Each slice is one ordinary batch call, built exactly as a single call always was.
+            payload = self._create_embedding_payload(config, model, batch)
+            response = transport.request(method="POST", url=url, headers=self._create_embedding_headers(config), json_body=payload, timeout_seconds=config.timeout_seconds)
+            parsed = self._parser.parse_json_response(response, provider=self.provider.value)
+            # Check each slice against its own size, then keep its vectors in input order.
+            embeddings.extend(self._extract_batch_embeddings(parsed, expected_count=len(batch)))
+            bodies.append(parsed)
+        # One slice keeps its body as raw, as before; several are listed in order, since no single body covers them all.
+        raw = bodies[0] if len(bodies) == 1 else {"batches": bodies}
+        return EmbeddingResponse(provider=self.provider, model=config.model, embeddings=tuple(embeddings), raw=raw)
+
+    @staticmethod
+    def _embedding_batches(texts: list[str]) -> list[list[str]]:
+        # Consecutive slices of at most the vendor cap; an empty input stays one empty call, as before.
+        return [texts[start : start + _GEMINI_EMBEDDING_BATCH_LIMIT] for start in range(len(texts))[::_GEMINI_EMBEDDING_BATCH_LIMIT]] or [texts]
+
+    @staticmethod
+    def _create_embedding_payload(config: EmbeddingModelConfig, model: str, texts: list[str]) -> dict[str, Any]:
+        # One batchEmbedContents body whose requests carry the model path and task type for each text.
         task_type = config.input_type or "RETRIEVAL_DOCUMENT"
         payload: dict[str, Any] = {"requests": [{"model": f"models/{model}", "content": {"parts": [{"text": t}]}, "taskType": task_type} for t in texts]}
         # @intent embedding-dimensions-reach-every-provider
@@ -213,11 +256,7 @@ class GeminiProvider:
         if config.dimensions is not None:
             for request in payload["requests"]:
                 request["outputDimensionality"] = config.dimensions
-        url = f"{config.resolved_endpoint()}/models/{model}:batchEmbedContents"
-        response = transport.request(method="POST", url=url, headers=self._create_embedding_headers(config), json_body=payload, timeout_seconds=config.timeout_seconds)
-        parsed = self._parser.parse_json_response(response, provider=self.provider.value)
-        embeddings = self._extract_batch_embeddings(parsed, expected_count=len(texts))
-        return EmbeddingResponse(provider=self.provider, model=config.model, embeddings=embeddings, raw=parsed)
+        return payload
 
     def _embedding_config_for(self, config: EmbeddingModelConfig | None) -> EmbeddingModelConfig:
         # Resolve embedding config from call argument or stored instance config.

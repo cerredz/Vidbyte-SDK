@@ -14,7 +14,7 @@ Primary README reference:
 
 Vidbyte SDK is the Python SDK surface for building agent workflows with tools, managed context, structured output, tracing, middleware, pipelines, validated state machines, prompt assets, evals, MCP integration, provider registries, and swappable runtimes. It is designed for developers who want to build the agent itself: the loop, tool execution, context window, trace artifact, runtime policy, and multi-agent composition.
 
-The SDK package imports as `vidbyte`. The repository currently identifies the package as version `0.2.1` and pre-release; its README says it is intentionally minimal as a public SDK namespace and does not include private Vidbyte service logic. Public docs should preserve that boundary: document the reusable developer-facing abstractions, and do not imply that proprietary Vidbyte learning models, backend data access, private scoring logic, or production platform internals ship inside this package.
+The SDK package imports as `vidbyte`. The repository currently identifies the package as version `0.3.0` and pre-release; its README says it is intentionally minimal as a public SDK namespace and does not include private Vidbyte service logic. Public docs should preserve that boundary: document the reusable developer-facing abstractions, and do not imply that proprietary Vidbyte learning models, backend data access, private scoring logic, or production platform internals ship inside this package.
 
 The core mental model is:
 
@@ -958,6 +958,19 @@ prompt_text = prompts.get(Prompt.REFLEXION_AGENT_SYSTEM_PROMPT)
 
 Prompt lookup accepts `Prompt` enum members, not raw strings. Runtime prompt overrides should be passed through the agent or runner API that consumes the text.
 
+#### System-prompt presets
+
+A system-prompt preset is a fixed paragraph an agent opts into with one keyword. `SystemPromptPreset.WORKING_PRINCIPLES` (prompt key `Prompt.WORKING_PRINCIPLES_SYSTEM_PROMPT`, file `vidbyte/prompts/prompts/working_principles/system_prompt.md`) distills Felix Rieseberg's essay "How to be more ambitious: a tutorial for humans with models" (https://felixrieseberg.com/how-to-be-more-ambitious-a-tutorial-for-humans-with-models/) into eight sentences about aiming at the real outcome, working like the best professional in the field, verifying independently, borrowing other fields' methods, and carrying the principles into subagent prompts.
+
+```python
+from vidbyte import BaseAgent, SystemPromptPreset
+
+agent = BaseAgent(name="analyst", system_prompt="Answer directly.", provider="openai", model_name="gpt-5.2",
+                  system_prompt_presets=[SystemPromptPreset.WORKING_PRINCIPLES])
+```
+
+The runtime sends the agent's prompt, a blank line, the preset, then the agentic-loop note; `agent.system_prompt` is unchanged and the text is never added twice. `system_prompt_presets=None` (the default) inherits the presets of the run the agent is started in, so specialists, agents built inside tools, forks, and JevAgent's clones, swarm helpers, bulk workers, and fresh continuations all receive it; `()` opts an agent and its children out. `JevAgentSettings.system_prompt_presets` sets it on a JevAgent, `fork()` and session checkpoints keep it, and `SystemPromptPresetComposer.compose(prompt, presets)` (in `vidbyte.prompts`) shows the exact composed prompt. It costs about 275 input tokens per model call.
+
 ### Evals
 
 `vidbyte.evals` provides building blocks for local eval scripts:
@@ -1110,7 +1123,7 @@ Verbs: `Session.resume(store, session_id, tools=, runner=)` reconstructs a live 
 
 Names and movement: `session.tag(...)` adds lookup labels; `store.resolve(identifier)` checks exact session id first and then newest matching tag; `store.list_sessions(agent_name=..., tag=..., status=...)` filters metadata. `session.usage(prices=...)` returns token/tool/turn/latency/cost rollups from stored message usage metadata. `session.export()` and `sdk.harnesses.sessions.export/import_` move store-neutral zip bundles; `new_id=` rewrites session ids only.
 
-Stores implement one `SessionStore` protocol and are interchangeable: `InMemorySessionStore`, `FileSessionStore` (atomic JSON), `SqliteSessionStore` (stdlib sqlite3, no driver), and `PostgresSessionStore`/`MongoDbSessionStore`/`SupabaseSessionStore` (lazy driver imports). `CheckpointPolicy.PER_TURN` (default) writes a checkpoint after each run; `MANUAL` writes only on `checkpoint()`. Persistence is fail-open: a store write failure is recorded in `reply.metadata["__session_error__"]` and never ends the run. The serializer scrubs `api_key` and credential-like keys and stamps a `schema_version` on every payload.
+Stores implement one `SessionStore` protocol and are interchangeable: `InMemorySessionStore`, `FileSessionStore` (atomic JSON), `SqliteSessionStore` (stdlib sqlite3, no driver), and `PostgresSessionStore`/`MongoDbSessionStore`/`SupabaseSessionStore` (lazy driver imports). `CheckpointPolicy.PER_TURN` (default) writes a checkpoint after each run; `MANUAL` writes only on `checkpoint()`. Persistence is fail-open: a store write failure is recorded in `reply.metadata["__session_error__"]` and never ends the run. The serializer scrubs `api_key`, `api_keys`, and credential-like keys and stamps a `schema_version` on every payload.
 
 Prebuilt agent-facing tools in `vidbyte/tools/builtins/sessions/` let an agent operate on its own or another agent's thread, gated by `SessionScope` (default own runs): `CheckpointTool`, `ForkTool`, `BatchForkTool`, `RewindTool`, and three resume modes — `ResumeReplaceTool` (override the current context window with another thread's state), `ResumeAppendTool` (append the other thread's context window into the current one), `ResumeOutputTool` (append only the other thread's final output; errors if that thread is not COMPLETED). A central `SessionTool` exposes `create_checkpoint`/`fork_current`/`list_my_runs`/`read_run`. `Session` auto-binds any of these tools found on the wrapped agent.
 

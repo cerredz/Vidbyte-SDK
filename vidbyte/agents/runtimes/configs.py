@@ -56,6 +56,11 @@ class ActorRuntime:
         # Initializes an actor runtime configuration with specific topologies and prebuilt actors.
         from vidbyte.lib.registries.models import ProviderModelRegistry
         self.runtime_type = AgentRuntimeType(topology)
+        # @intent actor-runtime-needs-an-actor-topology
+        # A linear, search, or JEV value would silently run that runtime and drop every actor setting below.
+        _actor_topologies = (AgentRuntimeType.ACTOR_MODEL, AgentRuntimeType.ACTOR_MODEL_P2P, AgentRuntimeType.ACTOR_MODEL_BROADCAST)
+        if self.runtime_type not in _actor_topologies:
+            raise ConfigurationError(f"ActorRuntime topology must be one of {tuple(item.value for item in _actor_topologies)}, got '{self.runtime_type.value}'.")
         if max_loop < 1:
             raise ConfigurationError("ActorRuntime max_loop must be at least 1.")
         _valid_termination_modes = ("coordinator", "quiescence")

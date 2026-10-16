@@ -20,6 +20,8 @@ Similar Files:
 from __future__ import annotations
 
 import asyncio
+import codecs
+import re
 
 from vidbyte.lib.dataclasses.operations import FetchPayload
 from vidbyte.lib.errors import ProviderRequestError, ProviderResponseError, SourceFetchError
@@ -38,6 +40,45 @@ def _url_list(call: ToolCall) -> list[str]:
             return cleaned
     single = call.arguments.get("url")
     return [single] if isinstance(single, str) and single.strip() else []
+
+
+# Matches <meta charset=...> and <meta http-equiv="Content-Type" content="...; charset=...">.
+_META_CHARSET = re.compile(rb"""<meta[^>]+?charset\s*=\s*["']?\s*([A-Za-z0-9_.:\-]+)""", re.IGNORECASE)
+# Every byte value once. A codec that cannot decode this with errors="replace" is not a usable text
+# encoding: bytes-to-bytes codecs (base64, hex, rot13, zlib) raise LookupError, and idna, punycode and
+# undefined raise UnicodeError. An empty probe would not do, because Python skips the codec for empty input.
+_CODEC_PROBE = bytes(range(256))
+
+
+def _header_charset(content_type: str | None) -> str | None:
+    # Returns the Content-Type charset parameter (RFC 9110 section 8.3) when it is a usable text codec.
+    for parameter in (content_type or "").split(";")[1:]:
+        name, _, value = parameter.partition("=")
+        if name.strip().lower() == "charset":
+            label = value.strip().strip("\"'").strip()
+            if not label:
+                return None
+            try:
+                name = codecs.lookup(label).name
+                _CODEC_PROBE.decode(name, errors="replace")
+            except (LookupError, UnicodeError):
+                return None
+            return name
+    return None
+
+
+def _meta_charset(body: bytes) -> str | None:
+    # Returns a usable text charset a <meta> tag declares in the first 1024 bytes (the HTML Standard's prescan).
+    match = _META_CHARSET.search(body[:1024])
+    if match is None:
+        return None
+    try:
+        name = codecs.lookup(match.group(1).decode("ascii")).name
+        _CODEC_PROBE.decode(name, errors="replace")
+    except (LookupError, UnicodeError):
+        return None
+    # A UTF-16 label read from ASCII bytes cannot be true, so the HTML Standard treats it as UTF-8.
+    return "utf-8" if name.startswith("utf-16") else name
 
 
 def _render_fetched_pages(label: str, payload: FetchPayload) -> str:
@@ -230,7 +271,13 @@ class DirectHttpFetchTool(PricedOperationTool):
         from vidbyte.sources.fetches.http import HttpFetcher
 
         response = HttpFetcher().fetch(url)
-        return response.body_bytes.decode("utf-8", errors="replace")
+        # @intent fetch-honours-declared-charset
+        # Pages declare their encoding in the Content-Type charset or a <meta charset>; decoding every
+        # page as UTF-8 turns windows-1252, Shift_JIS and GBK pages into U+FFFD for the model.
+        # Prefer the charset the server sent, then one the page declares near its top, then UTF-8.
+        codec = _header_charset(response.content_type) or _meta_charset(response.body_bytes) or "utf-8"
+        # Replace undecodable bytes so a wrong or lying declaration still never fails the fetch.
+        return response.body_bytes.decode(codec, errors="replace")
 
 
 __all__ = [

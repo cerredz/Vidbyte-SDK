@@ -1,12 +1,12 @@
 """FILE: vidbyte/lib/http/vidbyte_gateway.py
 
-PURPOSE: Sends every Vidbyte-managed text call to Vidbyte's one generative gateway route, wrapping the provider adapter's native body in the gateway envelope, re-sending only the answers the gateway marks safe to retry with the same Idempotency-Key, and turning every failure into a credential-safe error.
-ROLE IN CODEBASE: TextModelRunner.arun wraps its transport in VidbyteGatewayTransport when its config is in managed state, so the unchanged provider adapters (OpenAI, Anthropic, Gemini, OpenAI-compatible) reach the gateway instead of a vendor; a 2xx JSON object goes back to the adapter unchanged, so BYOK and managed calls share one parser.
-ARCHITECTURE NOTE: A decorator over HttpTransport: it discards the adapter's URL and headers, builds the managed headers itself (bearer key plus Idempotency-Key, the shape lint C017 traces), and makes each attempt one inner request with no inner retries. Each except block only records which kind of exception the send raised; the error is raised after the block, so it carries no __cause__ or __context__ that could hold a response body.
+PURPOSE: Sends every gateway text call (AUTO and VIDBYTE_MANAGED) to Vidbyte's one generative gateway route, wrapping the provider adapter's native body in the gateway envelope, relaying the caller's own provider key in its own header when the call has one, re-sending only the answers the gateway marks safe to retry with the same Idempotency-Key, and turning every failure into a credential-safe error worded for a relayed or a Vidbyte-paid call.
+ROLE IN CODEBASE: TextModelRunner.arun wraps its transport in VidbyteGatewayTransport when its resolved TextCredentials use the gateway, passing the Vidbyte key and, for a relay call, the provider key; the unchanged provider adapters (OpenAI, Anthropic, Gemini, OpenAI-compatible) then reach the gateway instead of a vendor, and a 2xx JSON object goes back to the adapter unchanged, so DIRECT and gateway calls share one parser.
+ARCHITECTURE NOTE: A decorator over HttpTransport: it discards the adapter's URL and headers, builds the gateway headers itself (bearer key, Idempotency-Key, and the optional X-Vidbyte-Provider-Key, each a subscript store with an imported constant, the shape lint C017 traces), and makes each attempt one inner request with no inner retries. Each except block only records which kind of exception the send raised; the error is raised after the block, so it carries no __cause__ or __context__ that could hold a response body.
 COMMON MODIFICATION PATTERNS: A new gateway status gets its reason in _GatewayAnswer.gateway_reason; a change to which answers are re-sent changes _GatewayAnswer.retryable and the README together; the route, key format, and timeout floor live in vidbyte/lib/constants/jev.py.
 KNOWN EDGE CASES: An answer that is not a JSON object (an HTML edge page, an empty body, a JSON array, truncated JSON) is an edge failure at any status, including 200, and is re-sent; a missing answer (network failure or timeout) is never re-sent, because a retry after a 630 s timeout would only meet the gateway's pending claim. Re-sends stop at one deadline per call (the call's own timeout from the first POST), but each attempt keeps its full timeout, so the worst case is about twice the timeout and a slow 502 gets at most one re-send; messages state how many re-sends the call made. A relayed vendor body nests an object under "error", which is not the gateway's top-level "error": true. Cancellation is never caught.
-RELATED DOCS: docs/spec/managed-generative-models/spec.md (sections 8.5 and 9.2); field-guide/vidbyte-sdk/provider-api-contracts.md.
-TESTS: tests/features/sdk_managed_text/test_managed_text_failures.py, tests/features/sdk_managed_text/test_managed_text_wire_contract.py, tests/features/sdk_managed_text/test_managed_text_acceptance.py.
+RELATED DOCS: docs/spec/managed-generative-models/spec.md (sections 8.5 and 9.2); docs/spec/byok-api-keys/spec.md (section 9.2 table G, D-15, D-16); field-guide/vidbyte-sdk/provider-api-contracts.md.
+TESTS: tests/features/sdk_managed_text/test_managed_text_failures.py, tests/features/sdk_managed_text/test_managed_text_wire_contract.py, tests/features/sdk_managed_text/test_managed_text_acceptance.py, tests/features/sdk_provider_keys/test_provider_keys_failures.py, tests/features/sdk_provider_keys/test_provider_keys_wire_contract.py.
 """
 
 from __future__ import annotations
@@ -24,9 +24,11 @@ from vidbyte.lib.constants.jev import (
     JEV_RETRY_BACKOFF_SECONDS,
     JEV_STATUS_SERVER_ERROR_FLOOR,
     JEV_STATUS_UNPROCESSABLE,
+    PROVIDER_API_KEY_ENV_VARS,
     VIDBYTE_API_KEY_ENV_VAR,
     VIDBYTE_GATEWAY_TIMEOUT_FLOOR_SECONDS,
     VIDBYTE_GENERATIVE_GATEWAY_ENDPOINT,
+    VIDBYTE_PROVIDER_KEY_HEADER,
     VIDBYTE_STATUS_FORBIDDEN,
     VIDBYTE_STATUS_PAYMENT_REQUIRED,
     VIDBYTE_STATUS_RATE_LIMITED,
@@ -70,11 +72,12 @@ class _GatewayAnswer:
             return False
         return self.body is None or status in (HTTPStatus.CONFLICT, HTTPStatus.BAD_GATEWAY)
 
-    def failure_reason(self, provider: ModelProvider, timeout_seconds: float, resends: int) -> str:
-        """Explain why this attempt failed, from its status and shape only."""
+    def failure_reason(self, provider: ModelProvider, timeout_seconds: float, resends: int, relays: bool) -> str:
+        """Explain why this attempt failed, from its status, its shape, and whether the call relayed a provider key."""
         # @intent managed-failures-never-echo-a-response-body
-        # Gateway and vendor bodies can reflect the bearer key, so every
-        # reason is written by the SDK and no body text is ever copied.
+        # Gateway and vendor bodies can reflect the bearer key or the
+        # relayed provider key, so every reason is written by the SDK
+        # and no body text is ever copied.
         status = self.status()
         retried = f"the SDK re-sent it with the same Idempotency-Key (re-sends in this call: {resends})"
         if resends == JEV_NO_RETRIES:
@@ -86,29 +89,50 @@ class _GatewayAnswer:
         if self.body is None:
             return f"Vidbyte's hosting edge answered HTTP {status} instead of the gateway (usually during a deploy or restart); {retried}, the failure is usually transient, and Vidbyte may already have billed the call"
         if self.body.get("error") is True:
-            return self.gateway_reason(status, retried)
+            return self.gateway_reason(status, retried, provider, relays)
+        # @intent relayed-refusal-blames-the-callers-own-key
+        # On a relay call a provider 401, 402, or 403 answers the
+        # caller's own key or account, so the remedy is theirs to fix,
+        # never a Vidbyte wallet, quota, or cap. Some providers (xAI,
+        # seen live) answer a wrong key with a 400, so a relayed 400
+        # names the caller's own key as one cause; a Vidbyte-paid 400
+        # answered Vidbyte's own account, so it does not.
+        if relays and status in (HTTPStatus.UNAUTHORIZED, HTTPStatus.PAYMENT_REQUIRED, HTTPStatus.FORBIDDEN):
+            return f"{provider.value} refused the call made with your own {provider.value} key (HTTP {status}): the key is wrong or revoked, lacks access to this model, or its {provider.value} account cannot pay; the provider's message is withheld, and Vidbyte did not bill the call"
         relayed = f"{provider.value} returned HTTP {status} through the Vidbyte gateway; the provider's message is withheld, and the call was not billed"
+        if relays and status == HTTPStatus.BAD_REQUEST:
+            relayed += f"; some providers answer a wrong API key with HTTP 400, so check your own {provider.value} key in api_keys or {PROVIDER_API_KEY_ENV_VARS[provider]}"
         return f"{relayed}; {retried}" if status in (HTTPStatus.CONFLICT, HTTPStatus.BAD_GATEWAY) else relayed
 
-    def gateway_reason(self, status: int, retried: str) -> str:
-        """Look up the remedy for one gateway error status."""
+    def gateway_reason(self, status: int, retried: str, provider: ModelProvider, relays: bool) -> str:
+        """Look up the remedy for one gateway error status, worded for a relay call or a Vidbyte-paid call."""
         # @intent gateway-status-names-its-remedy
         # The gateway's own error code is body text, so the remedy comes
         # from the status alone, which is all the caller needs to act.
+        # Under relay the wallet pays only Vidbyte's fee, no daily cap
+        # applies, and no Vidbyte account is behind the call, so those
+        # remedies are worded differently there. The transport never
+        # learns the mode, and VIDBYTE_MANAGED ignores api_keys, so a
+        # paid 402 offers a provider key only as a TextModelMode.AUTO
+        # option.
         reasons = {
-            VIDBYTE_STATUS_UNAUTHORIZED: f"Vidbyte rejected the API key (HTTP {status}); check {VIDBYTE_API_KEY_ENV_VAR} or TextModelConfig.api_key",
-            VIDBYTE_STATUS_PAYMENT_REQUIRED: f"your own Vidbyte wallet balance is too low for this call (HTTP {status}, which never means a provider's billing); top up the wallet, or set your own provider key",
+            VIDBYTE_STATUS_UNAUTHORIZED: f"Vidbyte rejected the Vidbyte API key (HTTP {status}); check {VIDBYTE_API_KEY_ENV_VAR} or vidbyte_api_key",
+            VIDBYTE_STATUS_PAYMENT_REQUIRED: f"your own Vidbyte wallet balance is too low for this call (HTTP {status}, which never means a provider's billing); top up the wallet, or, with mode=TextModelMode.AUTO (the default), add your own provider key for {provider.value} to api_keys so the wallet pays only Vidbyte's fee",
             VIDBYTE_STATUS_FORBIDDEN: f"the Vidbyte API key lacks the models:invoke scope (HTTP {status}); grant that scope to the key",
             HTTPStatus.CONFLICT: f"an earlier attempt of this call is still running at Vidbyte (HTTP {status}) and may still complete and be billed; {retried}, so wait before sending the request again, because a new request may pay twice",
-            HTTPStatus.REQUEST_ENTITY_TOO_LARGE: f"the request exceeds the gateway's 2,000,000-byte limit, measured as JSON with non-ASCII characters escaped (HTTP {status}); shorten the context or use your own provider key",
-            JEV_STATUS_UNPROCESSABLE: f"the gateway cannot manage this request (HTTP {status}); the causes are an unmanaged or unpriced provider or model, a malformed model name, streaming, a missing or invalid output-token limit, a body model that differs from the model (or any body model for Gemini), a hosted (non-function) tool, a service tier, a previous-response or conversation reference, or a body field outside the gateway's allowed list, including Gemini snake_case keys",
+            HTTPStatus.REQUEST_ENTITY_TOO_LARGE: f"the request exceeds the gateway's 2,000,000-byte limit, measured as JSON with non-ASCII characters escaped (HTTP {status}); shorten the context, or use TextModelMode.DIRECT to send it straight to the provider",
+            JEV_STATUS_UNPROCESSABLE: f"the gateway cannot manage this request (HTTP {status}); the causes are an unmanaged or unpriced provider or model, a malformed model name, streaming, a missing or invalid output-token limit, a body model that differs from the model (or any body model for Gemini), a hosted (non-function) tool, a service tier, a previous-response or conversation reference, or a body field outside the gateway's allowed list, including Gemini snake_case keys; to send a request the gateway cannot bill, use TextModelMode.DIRECT, which sends it straight to the provider with your own key",
             VIDBYTE_STATUS_RATE_LIMITED: f"the Vidbyte API key reached its request quota or its daily managed spend cap (HTTP {status}); wait for the limit to reset, or raise the cap",
         }
+        if relays:
+            reasons[VIDBYTE_STATUS_PAYMENT_REQUIRED] = f"your Vidbyte wallet balance is too low for Vidbyte's fee on this call (HTTP {status}, which never means a provider's billing); top up the wallet"
+            reasons[VIDBYTE_STATUS_RATE_LIMITED] = f"the Vidbyte API key reached its request quota (HTTP {status}); wait for the quota to reset"
         if status in reasons:
             return reasons[status]
         if status < JEV_STATUS_SERVER_ERROR_FLOOR:
             return f"Vidbyte returned HTTP {status}"
-        unavailable = f"the Vidbyte gateway, or the provider behind it, is unavailable or refused Vidbyte's own account (HTTP {status}), and the cause is not known"
+        cause = "is unavailable" if relays else "is unavailable or refused Vidbyte's own account"
+        unavailable = f"the Vidbyte gateway, or the provider behind it, {cause} (HTTP {status}), and the cause is not known"
         return f"{unavailable}; {retried}" if status == HTTPStatus.BAD_GATEWAY else unavailable
 
     @staticmethod
@@ -126,16 +150,18 @@ class _GatewayAnswer:
 class VidbyteGatewayTransport(HttpTransport):
     """Sends a provider adapter's native request to Vidbyte's generative gateway, with same-key retries and credential-safe errors."""
 
-    def __init__(self, inner: HttpTransport, *, provider: ModelProvider, model: str, api_key: str) -> None:
-        """Keep the transport that sends each attempt and what this call's envelope and bearer header carry."""
+    def __init__(self, inner: HttpTransport, *, provider: ModelProvider, model: str, api_key: str, provider_api_key: str | None = None) -> None:
+        """Keep the transport that sends each attempt and what this call's envelope and headers carry."""
         # @intent one-gateway-transport-per-call-holds-the-bearer
-        # The runner builds one transport for each managed call, so the
-        # Vidbyte key and this call's envelope fields live only as long
-        # as the call and are never shared with a concurrent one.
+        # The runner builds one transport for each gateway call, so the
+        # Vidbyte key, the relayed provider key, and this call's
+        # envelope fields live only as long as the call and are never
+        # shared with a concurrent one. Neither key is ever logged.
         self._inner = inner
         self._provider = provider
         self._model = model
         self._api_key = api_key
+        self._provider_api_key = provider_api_key
         self._parser = HttpResponseParser()
 
     async def request(
@@ -154,12 +180,16 @@ class VidbyteGatewayTransport(HttpTransport):
         # paying the provider again.
         idempotency_key = uuid.uuid4().hex
         # @intent managed-request-reaches-only-the-gateway
-        # Build the managed headers from the Vidbyte bearer key, JSON,
-        # and that key alone. The adapter's vendor URL and headers are
-        # dropped, so the Vidbyte key goes only to the gateway and never
-        # sits in a vendor header.
+        # Build the gateway headers from the Vidbyte bearer key, JSON,
+        # the idempotency key, and, on a relay call, the provider key.
+        # The adapter's vendor URL and headers are dropped, so the
+        # Vidbyte key goes only to the gateway and never sits in a
+        # vendor header, and the provider key travels only in its own
+        # header.
         gateway_headers = self._parser.bearer_headers(self._api_key)
         gateway_headers[JEV_IDEMPOTENCY_KEY_HEADER] = idempotency_key
+        if self._provider_api_key is not None:
+            gateway_headers[VIDBYTE_PROVIDER_KEY_HEADER] = self._provider_api_key
         # Wrap the adapter's body, unchanged, in the envelope the
         # gateway bills from.
         envelope: dict[str, object] = {"provider": self._provider.value, "model": self._model, "body": dict(json_body or {})}
@@ -187,9 +217,10 @@ class VidbyteGatewayTransport(HttpTransport):
         # Hand a 2xx JSON object to the adapter exactly as it came back.
         if answer.succeeded() and answer.response is not None:
             return answer.response
-        # Otherwise raise the last attempt's failure, worded by the SDK.
-        reason = answer.failure_reason(self._provider, timeout_seconds, resends)
-        raise ProviderRequestError(f"Vidbyte managed {self._provider.value} request failed: {reason}.", provider="vidbyte", status_code=answer.status())
+        # Otherwise raise the last attempt's failure, worded by the SDK
+        # for a relay call or a Vidbyte-paid call.
+        reason = answer.failure_reason(self._provider, timeout_seconds, resends, self._provider_api_key is not None)
+        raise ProviderRequestError(f"Vidbyte gateway {self._provider.value} request failed: {reason}.", provider="vidbyte", status_code=answer.status())
 
     async def _send(self, *, envelope: Mapping[str, object], headers: Mapping[str, str], idempotency_key: str, timeout_seconds: float) -> _GatewayAnswer:
         """Make one POST to the gateway and record what came back."""

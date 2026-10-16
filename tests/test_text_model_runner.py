@@ -4,9 +4,11 @@ import json
 import unittest
 from typing import Mapping
 
-from vidbyte.lib.config import ModelProvider, TextModelConfig
+from vidbyte.lib.config import ModelProvider, TextModelConfig, TextModelMode
 from vidbyte.lib.http import HttpResponse
 from vidbyte.lib.runners import TextModelRunner
+
+GEMINI_TEST_KEY = "AQ" + "." + "x" * 40
 
 
 class FakeTransport:
@@ -40,7 +42,7 @@ class TextModelRunnerTests(unittest.TestCase):
     def test_openai_responses_request_and_text_normalization(self) -> None:
         transport = FakeTransport({"output_text": "ok", "usage": {"output_tokens": 1}})
         runner = TextModelRunner(
-            TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-test", api_key="key"),
+            TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-test", api_keys=["sk-key"], mode=TextModelMode.DIRECT),
             transport=transport,
         )
 
@@ -51,9 +53,27 @@ class TextModelRunnerTests(unittest.TestCase):
         self.assertEqual(transport.requests[0]["json_body"]["input"], "Hello")
         self.assertEqual(transport.requests[0]["json_body"]["instructions"], "System")
 
+    def test_openai_responses_reasoning_item_text_is_not_the_answer(self) -> None:
+        # @intent reasoning-items-are-not-the-answer
+        message = {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "The refund window is 30 days."}]}
+        reasoning = {
+            "type": "reasoning",
+            "id": "rs_1",
+            "summary": [{"type": "summary_text", "text": "secret summary"}],
+            "content": [{"type": "reasoning_text", "text": "secret chain of thought"}],
+        }
+        for output in ([reasoning, message], [message]):
+            transport = FakeTransport({"output": output, "usage": {"output_tokens": 9}})
+            runner = TextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-test", api_keys=["sk-key"], mode=TextModelMode.DIRECT), transport=transport)
+
+            response = runner.run("Hello")
+
+            self.assertEqual(response.text, "The refund window is 30 days.")
+            self.assertNotIn("secret chain of thought", response.text)
+
     def test_openai_responses_translates_chat_tool_history_into_items(self) -> None:
         transport = FakeTransport({"output_text": "ok"})
-        runner = TextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-test", api_key="key"), transport=transport)
+        runner = TextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-test", api_keys=["sk-key"], mode=TextModelMode.DIRECT), transport=transport)
         history = [
             {"role": "user", "content": "task"},
             {
@@ -84,7 +104,7 @@ class TextModelRunnerTests(unittest.TestCase):
         # Responses rejects the Chat Completions nested function shape with 400 "Missing required parameter: 'tools[0].name'".
         transport = FakeTransport({"output_text": "ok"})
         parameters = {"type": "object", "properties": {"q": {"type": "string"}}, "required": ["q"]}
-        runner = TextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-test", api_key="key"), transport=transport)
+        runner = TextModelRunner(TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-test", api_keys=["sk-key"], mode=TextModelMode.DIRECT), transport=transport)
         tools = [
             {"type": "function", "function": {"name": "lookup", "description": "Find it.", "parameters": parameters}},
             {"type": "web_search"},
@@ -102,7 +122,7 @@ class TextModelRunnerTests(unittest.TestCase):
     def test_anthropic_messages_request_and_text_normalization(self) -> None:
         transport = FakeTransport({"content": [{"type": "text", "text": "ok"}]})
         runner = TextModelRunner(
-            TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-test", api_key="key"),
+            TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-test", api_keys=["sk-ant-key"], mode=TextModelMode.DIRECT),
             transport=transport,
         )
 
@@ -112,12 +132,49 @@ class TextModelRunnerTests(unittest.TestCase):
         self.assertEqual(transport.requests[0]["url"], "https://api.anthropic.com/v1/messages")
         self.assertEqual(transport.requests[0]["json_body"]["max_tokens"], 1024)
 
+    def test_anthropic_joins_adjacent_text_blocks_as_written(self) -> None:
+        # @intent adjacent-text-blocks-are-one-text
+        # With citations Claude splits one sentence into adjacent text blocks at each cited span; only another block between text starts a new line.
+        citation = [{"type": "char_location", "cited_text": "x", "document_index": 0, "start_char_index": 0, "end_char_index": 1}]
+        cases = [
+            (
+                [
+                    {"type": "text", "text": "According to the document, "},
+                    {"type": "text", "text": "the grass is green", "citations": citation},
+                    {"type": "text", "text": " and "},
+                    {"type": "text", "text": "the sky is blue", "citations": citation},
+                    {"type": "text", "text": "."},
+                ],
+                "According to the document, the grass is green and the sky is blue.",
+            ),
+            (
+                [
+                    {"type": "text", "text": "I'll search."},
+                    {"type": "server_tool_use", "id": "srvtoolu_1", "name": "web_search", "input": {"query": "answer"}},
+                    {"type": "web_search_tool_result", "tool_use_id": "srvtoolu_1", "content": []},
+                    {"type": "text", "text": "Based on the results, "},
+                    {"type": "text", "text": "it is 42", "citations": citation},
+                ],
+                "I'll search.\nBased on the results, it is 42",
+            ),
+            (
+                [{"type": "text", "text": "Checking."}, {"type": "tool_use", "id": "toolu_1", "name": "lookup", "input": {}}],
+                "Checking.",
+            ),
+        ]
+        for content, expected in cases:
+            with self.subTest(expected=expected):
+                transport = FakeTransport({"content": content})
+                runner = TextModelRunner(TextModelConfig(provider=ModelProvider.ANTHROPIC, model="claude-test", api_keys=["sk-ant-key"], mode=TextModelMode.DIRECT), transport=transport)
+
+                self.assertEqual(runner.run("Hello").text, expected)
+
     def test_gemini_generate_content_request_and_text_normalization(self) -> None:
         transport = FakeTransport(
             {"candidates": [{"content": {"parts": [{"text": "ok"}]}}], "usageMetadata": {"x": 1}}
         )
         runner = TextModelRunner(
-            TextModelConfig(provider=ModelProvider.GEMINI, model="gemini-test", api_key="key"),
+            TextModelConfig(provider=ModelProvider.GEMINI, model="gemini-test", api_keys=[GEMINI_TEST_KEY], mode=TextModelMode.DIRECT),
             transport=transport,
         )
 
@@ -125,12 +182,12 @@ class TextModelRunnerTests(unittest.TestCase):
 
         self.assertEqual(response.text, "ok")
         self.assertIn("models/gemini-test:generateContent", transport.requests[0]["url"])
-        self.assertEqual(transport.requests[0]["headers"].get("x-goog-api-key"), "key")
+        self.assertEqual(transport.requests[0]["headers"].get("x-goog-api-key"), GEMINI_TEST_KEY)
 
     def test_xai_chat_completions_request_and_text_normalization(self) -> None:
         transport = FakeTransport({"choices": [{"message": {"content": "ok"}}]})
         runner = TextModelRunner(
-            TextModelConfig(provider=ModelProvider.XAI, model="grok-test", api_key="key"),
+            TextModelConfig(provider=ModelProvider.XAI, model="grok-test", api_keys=["xai-key"], mode=TextModelMode.DIRECT),
             transport=transport,
         )
 

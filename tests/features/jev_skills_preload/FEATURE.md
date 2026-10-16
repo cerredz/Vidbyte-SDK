@@ -2,11 +2,20 @@
 
 ## High-Level Feature Description
 
-An SDK caller can supply immutable skill documents through `JevAlignmentSettings.skills`. For each main-agent request, Jev classifies every configured skill against the request in one or more bounded yes/no calls. The runtime appends only independently passing full skill bodies to that run's effective system prompt and reports selected, skipped, unavailable, and usage outcomes through `JevAgent.response.skills`. The empty default makes the feature opt-in.
+An SDK caller lists where each skill lives in `JevAlignmentSettings.skills`: one of six declarative entries (`InlineSkill`, `LocalSkill`, `SkillsShSkill`, `GitHubSkill`, `AnthropicSkill`, `OpenAISkill`), an already-resolved `SkillDocument`, or an inline string. The first run that reaches the preload resolves the entries through the agent's own `SkillLoader`; then, for each main-agent request, Jev classifies every loaded skill against the request in one or more bounded yes/no calls. The runtime appends only independently passing full skill bodies to that run's effective system prompt and reports selected, skipped, unavailable (with a reason and a detail that names the fix), and usage outcomes through `JevAgent.response.skills`. The empty default makes the feature opt-in.
 
 ## Contract
 
-- A caller may configure a `SkillDocument` or inline string; inline bodies keep exact text and receive deterministic names.
+- A caller may configure any of the six entries, a `SkillDocument`, or an inline string, mixed in one tuple; inline strings keep exact text and receive deterministic names, and names are unique across all of them.
+
+## Skill Source Contract
+
+- **Entries.** Each entry is a frozen, validated record whose read-only `type` is fixed by its class. Every field is checked at construction (`ConfigurationError` naming `<Class>.<field>`; `TypeError` for `type=` or a field the class lacks). Construction never reads a file, sends a request, or reads `GITHUB_TOKEN`, `ANTHROPIC_API_KEY`, or `OPENAI_API_KEY`; relative paths are pinned to the working folder at construction.
+- **Sources.** `InlineSkill` is its own text (label `inline`). `LocalSkill` reads `<path>/SKILL.md` (label `local:<folder name>`). `SkillsShSkill` reads the copy `npx skills add` installed and checks `skills-lock.json` when the folder is `<root>/.agents/skills` (label `skills_sh:<source>/<name>[@<hash12>]`). `GitHubSkill` makes one commit lookup and at most one tree listing per `(repo, ref, token)` group, then one raw fetch per entry (label `github:<owner>/<repo>@<sha12>/<folder>/SKILL.md`). `AnthropicSkill` and `OpenAISkill` download the version content as a zip or a bare `SKILL.md`, read only `SKILL.md` in memory, and fall back from `latest` to the version the skill record names (label `<vendor>:<skill_id>@<version>`).
+- **Content.** Only one `SKILL.md` is read per skill: strict UTF-8 with one byte-order mark removed, YAML frontmatter through `safe_load` with required `name` and `description`, and the exact bytes after the closing line as text. `SKILL.md` is capped at `SKILL_MARKDOWN_MAX_BYTES`, every other download at `SKILL_DOWNLOAD_MAX_BYTES`; nothing is extracted or written to disk, no subprocess runs, and nothing a skill mentions is fetched.
+- **Requests.** Every request goes through `HttpTransport` with a 10 s timeout, one retry after 0.5 s for the transport's retryable statuses, a size cap, no redirects, and a 25 s deadline per step. A token or key is sent only in its own host's header, never appears in a repr, label, detail, or response, and a Vidbyte key (`vb_live_…`, padded or not) is never sent: the entry is `auth_failed` with no request.
+- **Reasons.** An unusable skill is `unavailable` with exactly one reason and a non-blank detail: `not_installed`, `not_found`, `auth_failed`, `invalid_skill`, `too_large` (loading), `rate_limited`, `fetch_failed` (transient), and, set by the preload only, `decision_failed` (a failed Jev batch, a reply without token counts, or a missing answer) and `too_large` from batching (recomputed every run). A result that never loaded has `description` and `source` set to `None`.
+- **Memory.** The loader lives exactly as long as its `JevAgent`. A document or a permanent reason is remembered for the agent's lifetime and never replaced; `rate_limited` and `fetch_failed` are never remembered and are retried on the next run that reaches the preload. Overlapping loads return the first remembered resolution, so `documents()` always matches the last load. A programming error while loading leaves `JevSkillsPreload.run` unchanged and reaches the `arun` caller as the cause of `AgentExecutionError` (the wrapping every failed run gets); cancellation propagates unchanged; neither remembers anything from that load. Two agents never share memory. To pick up a fixed source or a new key, create a new agent.
 - Every candidate has a unique name and receives one fixed-index relevance question, grouped into stable-order batches when needed.
 - Requests stay under conservative local UTF-8 JSON byte bounds; full skill text is never truncated. A candidate too large to fit alone is unavailable while other candidates continue.
 - Caller fields remain structured, untrusted decision state. Question wording contains only generated identifiers, never caller-provided metadata or body text.
@@ -22,8 +31,8 @@ An SDK caller can supply immutable skill documents through `JevAlignmentSettings
 
 ## Actors / Callers
 
-- SDK callers configure inline or resolved documents on `JevAgentSettings.alignment.skills` and tune the yes threshold on `JevRuntimeSettings.skills_threshold`.
-- `JevAgent` constructs `JevSkillsPreload` only for nonempty settings.
+- SDK callers configure skill entries, resolved documents, or inline strings on `JevAgentSettings.alignment.skills` and tune the yes threshold on `JevRuntimeSettings.skills_threshold`.
+- `JevAgent` constructs `JevSkillsPreload` only for nonempty settings; the preload builds the agent's one `SkillLoader` and loads pending entries at the start of each run it reaches.
 - `JevRuntime` invokes the narrow `JevPreload` context transform after prompt/tool alignment and before run-state setup, tool selection, and the main loop.
 - `DecisionModelHelper` sends each TypeSafe batch and scores per-question noul answers.
 - `JevResponse` writes the per-run result record exposed by `JevAgent.response`.
@@ -71,9 +80,9 @@ An SDK caller can supply immutable skill documents through `JevAlignmentSettings
 
 ## External Dependencies
 
-- Existing TypeSafe System One endpoint and `DecisionModelHelper` are the only external boundary.
-- The generic `SkillDocument` is already resolved plain text; network/source loaders and native provider skill references are deferred.
-- Tests replace the decision helper boundary and text runner with scripted fakes; no live credentials or network calls are required.
+- The TypeSafe System One endpoint through `DecisionModelHelper` decides relevance.
+- Skill sources are resolved by the agent-agnostic `vidbyte.agents.skills` package (`SkillLoader`, one resolver per source, the shared `SkillFetch` step and `SkillMarkdown` parser): the local filesystem, `api.github.com`, `api.anthropic.com/v1`, and `api.openai.com/v1`, all through `HttpTransport`. `SkillDocument` remains the already-resolved form and is accepted unchanged.
+- Tests replace the decision helper, the text runner, and `HttpTransport._send_once` with scripted fakes; local and skills.sh files live under `tmp_path`; no live credentials or network calls are required.
 
 ## Known Failure Modes
 
@@ -84,6 +93,9 @@ An SDK caller can supply immutable skill documents through `JevAlignmentSettings
 - A selected skill can contain unhelpful or unsafe instructions; this feature classifies topical usefulness and does not validate trust or safety.
 - Cancellation and unexpected programming failures propagate, while runtime cleanup still restores mutations.
 - A TypeSafe outage means no skills are injected; the user's ordinary request continues without them.
+- A missing, private, moved, malformed, oversized, or unauthorized skill source makes only that skill unavailable with its reason; a hostile `SKILL.md`, lock file, tree listing, skill record, or archive ends as `invalid_skill` (or `too_large`) instead of crashing the run.
+- A source whose egress is blocked or that never finishes costs each run up to one deadline per step, because transient failures are retried on every run.
+- A permanent failure (for example a skill installed after `not_installed` was remembered, or a key set after `auth_failed`) persists until a new agent is created.
 
 ## Historical Regressions
 
@@ -93,11 +105,18 @@ None yet. Add a dated entry and a focused regression test for each fixed defect.
 
 - `tests/test_jev_skill_preload.py` covers settings, exact content, fixed question structure/token floor, independent scoring, failure behavior, response reset, runtime order, caller options, and cleanup.
 - `scripts/test-jev-skills-preload.py` runs the complete focused module with PASS/FAIL reporting.
+- `tests/features/jev_skills_preload/conftest.py` holds the pack's offline fixtures: a URL-routed fake of `HttpTransport._send_once`, a Jev stand-in that answers by skill name, a main-model stand-in, `SKILL.md` writers, and a file/environment recorder.
+- `test_skill_sources_entries.py` covers entry construction, validation, path pinning, and settings normalization; `test_skill_sources_contract.py` covers exports, enum values, and the `JevSkillResult` and `SkillResolution` records.
+- `test_skill_sources_markdown.py` covers the shared `SKILL.md` parser; `test_skill_sources_local.py`, `test_skill_sources_skills_sh.py`, `test_skill_sources_github.py`, and `test_skill_sources_vendor.py` cover each source's loading, labels, status map, caps, and malformed inputs (including a seeded archive-corruption sweep).
+- `test_skill_sources_fetch.py` covers the shared request step, retries, and the per-step deadline; `test_skill_sources_memory.py` covers the loader's memory, grouping, concurrency, and crash and cancellation handling.
+- `test_skill_sources_security.py` covers secrets, the Vidbyte-key guard, redirects, processes, and disk writes; `test_skill_sources_jev_wiring.py` covers exact appending and the preload's reasons; `test_skill_sources_acceptance.py` runs the developer snippet and checks lazy construction and gate bypass.
+- Run the pack with `PYTHONPATH=$(pwd) python -m pytest -q tests/features/jev_skills_preload tests/test_jev_skill_preload.py`.
 - `python scripts/test-jev-agent-scaffold.py`, `python scripts/test-jev-multipart-done-criteria.py`, `python lint/run.py`, `python scripts/run_ci.py --stage source`, and `python scripts/run_ci.py` cover existing Jev contracts, source rules, packaging, and the full suite.
 
 ## Omitted Testing Strategies
 
 - Live TypeSafe/provider tests are omitted because they require credentials and make classification nondeterministic; scripted decision and text runners cover the boundary.
 - Browser, UI, accessibility, persistence, and migration tests are omitted because this is an in-process request-time context transform with no UI or durable state.
-- Concurrency and load tests are omitted because one JevAgent instance has no concurrent-run safety contract and the implementation adds one decision request per run.
-- Provider-native skill source tests are deferred with the separate adapter work; this feature accepts resolved plain text only.
+- Load tests are omitted because one JevAgent instance has no concurrent-run safety contract; the loader's own concurrency (groups resolved at once, overlapping first runs) is covered with event-ordered fakes instead of timing.
+- Live GitHub, Anthropic, OpenAI, and skills.sh tests are omitted: they need credentials and network access, and the vendor content routes are pending real-key QA (spec A-1, A-4). Every request is answered at the transport seam.
+- WellKnownSkill, VidbyteSkill, PackageSkill, GitLab sources, refresh APIs, and TTLs are not built (spec section 3), so they have no tests.
