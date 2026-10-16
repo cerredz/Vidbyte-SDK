@@ -105,6 +105,7 @@ class InfiniteAgentMemory:
         self.created += int(created)
         if path not in self.files_written:
             self.files_written.append(path)
+        # @intent an-event-follows-its-durable-change
         self.events.file_written(self, path, InfiniteFileChange.CREATED if created else InfiniteFileChange.APPENDED, text, description if created else None)
         return Prompts().get(Prompt.INFINITE_MEMORY_NOTE_SAVED_PROMPT).format(path=path)
 
@@ -113,6 +114,7 @@ class InfiniteAgentMemory:
         path = self.workspace.edit_file(path, old_text, new_text)
         if path not in self.files_written:
             self.files_written.append(path)
+        # @intent an-event-follows-its-durable-change
         self.events.file_written(self, path, InfiniteFileChange.EDITED, new_text, None)
         return Prompts().get(Prompt.INFINITE_MEMORY_NOTE_SAVED_PROMPT).format(path=path)
 
@@ -124,6 +126,7 @@ class InfiniteAgentMemory:
         self.staged.remove(staged)
         dropped = InfiniteDroppedEntry(key=staged.key, text=staged.draft.text, reason=InfiniteDropReason.VERIFIER, note="dropped by the verifier")
         self.dropped.append(dropped)
+        # @intent an-event-follows-its-durable-change
         self.events.memory_dropped(self, dropped)
         remaining = ", ".join(item.key for item in self.staged) or "-"
         return Prompts().get(Prompt.INFINITE_MEMORY_ENTRY_DROPPED_PROMPT).format(key=key, remaining=remaining)
