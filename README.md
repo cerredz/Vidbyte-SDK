@@ -211,6 +211,28 @@ reply = image_agent.run("A clean product mockup on a white desk")
 print(reply.content)
 ```
 
+### Working Principles preset
+
+`SystemPromptPreset.WORKING_PRINCIPLES` is an opt-in paragraph that makes an
+agent work more ambitiously: aim at the outcome beyond the literal request, work
+like the best professional in the field, verify independently, borrow methods
+from other fields, and carry those principles into every subagent prompt. It
+distills Felix Rieseberg's essay
+[How to be more ambitious: a tutorial for humans with models](https://felixrieseberg.com/how-to-be-more-ambitious-a-tutorial-for-humans-with-models/).
+
+```python
+from vidbyte import BaseAgent, SystemPromptPreset
+
+agent = BaseAgent(name="analyst", system_prompt="Answer directly.", provider="openai", model_name="gpt-5.2",
+                  system_prompt_presets=[SystemPromptPreset.WORKING_PRINCIPLES])
+```
+
+The text is `vidbyte/prompts/prompts/working_principles/system_prompt.md`; the
+runtime appends it after your system prompt, and every agent the run starts
+(specialists, agents built in tools, Jev clones, swarm helpers, bulk workers)
+inherits it unless it sets `system_prompt_presets=()`. It adds about 275 input
+tokens per model call. See "System Prompt Presets" in `vidbyte/agents/README.md`.
+
 ### Vidbyte-managed text calls
 
 A text call can use two kinds of key. A **Vidbyte API key**

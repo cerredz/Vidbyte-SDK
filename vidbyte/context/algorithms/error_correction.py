@@ -123,14 +123,17 @@ class ErrorCorrectionAlgorithm(InnerContextWindowAlgorithm):
             raise exc
 
     def apply_removals(self, ctx: ContextWindowRunContext, stale_ids: Sequence[Any]) -> tuple[list[str], list[str]]:
-        # Removes allow-listed managed primitives; returns (removed, skipped) id lists.
+        # Removes allow-listed, unfrozen managed primitives; returns (removed, skipped) id lists.
         removed: list[str] = []
         skipped: list[str] = []
         for raw_id in stale_ids:
             primitive_id = str(raw_id)
+            # @intent removed-means-it-was-there
+            # The auditor can name an id that is not in the context (a guess, or the same id twice); only a present
+            # primitive counts as removed, so a pass that changed nothing posts no notice.
             if primitive_id == _NOTICE_ID:
                 skipped.append(primitive_id)
-            elif self._is_removable(primitive_id):
+            elif self._is_removable(primitive_id) and _is_unfrozen(ctx.context_manager.get_by_id(primitive_id)):
                 ctx.remove(primitive_id)
                 removed.append(primitive_id)
             else:
@@ -192,7 +195,9 @@ class ErrorCorrectionAlgorithm(InnerContextWindowAlgorithm):
         # Lists currently-managed primitive ids and titles so the auditor can name stale ids.
         lines = []
         for primitive_id, item in ctx.context_manager.registry_items():
-            if not primitive_id or not self._is_removable(str(primitive_id)):
+            # @intent auditor-is-offered-only-ids-it-can-remove
+            # apply_removals always keeps the correction notice, so listing it would invite a removal that is silently skipped.
+            if not primitive_id or primitive_id == _NOTICE_ID or not self._is_removable(str(primitive_id)) or not _is_unfrozen(item):
                 continue
             title = getattr(item, "title", "")
             lines.append(f"- {primitive_id} ({title})")
@@ -308,6 +313,12 @@ def _truncate(value: str, max_chars: int) -> str:
     if max_chars <= len(suffix):
         return value[:max_chars]
     return value[: max_chars - len(suffix)].rstrip() + suffix
+
+
+def _is_unfrozen(item: Any) -> bool:
+    # @intent auditor-never-removes-frozen-primitives
+    # A frozen primitive is pinned against model-driven changes (context_remove refuses it), so the auditor is neither offered nor allowed to remove one.
+    return item is not None and not getattr(item, "primitive_frozen", False)
 
 
 __all__ = [

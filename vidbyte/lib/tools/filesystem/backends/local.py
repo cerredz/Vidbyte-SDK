@@ -79,7 +79,12 @@ class LocalFileSystemBackend(BaseFileSystemBackend):
         return FileStat(path=str(path), exists=True, is_file=path.is_file(), is_dir=path.is_dir(), size=metadata.st_size, modified_time=metadata.st_mtime)
 
     def find(self, root: Path, pattern: str) -> tuple[str, ...]:
-        return tuple(str(path.relative_to(root)) for path in sorted(root.rglob(pattern), key=lambda item: str(item).lower()))
+        matches = set(root.rglob(pattern))
+        # See @intent trailing-globstar-matches-files: before Python 3.13 a last "**" segment matched directories only,
+        # so add everything below the matched directories, as Python 3.13 does.
+        if pattern.endswith("**") and Path(pattern).name == "**":
+            matches.update(root.rglob(pattern + "/*"))
+        return tuple(str(path.relative_to(root)) for path in sorted(matches, key=lambda item: str(item).lower()))
 
     def diff_text(self, left: Path, right_content: str, *, encoding: str, label: str) -> str:
         current = left.read_text(encoding=encoding) if left.exists() else ""

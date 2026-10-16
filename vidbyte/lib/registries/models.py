@@ -56,7 +56,7 @@ from vidbyte.lib.constants.jev import (
     VIDBYTE_PROVIDER_KEY_PATTERN,
 )
 from vidbyte.lib.constants.runners import MODEL_PROVIDER_RUNNER_TYPE_MAP, MODEL_RUNNER_TYPE_MAP
-from vidbyte.lib.enums import ModelModality, ModelProvider
+from vidbyte.lib.enums import ModelModality, ModelProvider, TextModelMode
 from vidbyte.lib.errors import ConfigurationError
 
 if TYPE_CHECKING:
@@ -271,11 +271,11 @@ class ProviderModelRegistry:
         return normalized.lower() in {name.lower() for name in cls.models_for_provider(p_enum)}
 
     @classmethod
-    def resolve_active(cls, provider_models: Mapping[str, str] | None, options: Mapping[str, Any] | None) -> dict[str, str]:
+    def resolve_active(cls, provider_models: Mapping[str, str] | None, options: Mapping[str, Any] | None, *, api_keys: ProviderKeys | None = None, model_mode: TextModelMode = TextModelMode.AUTO) -> dict[str, str]:
         # Returns {provider_name: model_name} for all providers with valid credentials.
         opts = options or {}
         if provider_models is not None:
-            return cls._resolve_explicit(provider_models, opts)
+            return cls._resolve_explicit(provider_models, opts, api_keys, model_mode)
         return cls._resolve_from_environment()
 
     @classmethod
@@ -398,13 +398,16 @@ class ProviderModelRegistry:
             cls.require_openrouter_for_routed_model(provider, model)
 
     @classmethod
-    def _resolve_explicit(cls, provider_models: Mapping[str, str], opts: Mapping[str, Any]) -> dict[str, str]:
+    def _resolve_explicit(cls, provider_models: Mapping[str, str], opts: Mapping[str, Any], api_keys: ProviderKeys | None, model_mode: TextModelMode) -> dict[str, str]:
         # Builds the active-models dict for an explicit user-supplied provider_models mapping.
         active: dict[str, str] = {}
         for provider_name, model_name in provider_models.items():
             p_enum = ModelProvider(provider_name)
             env_var = cls.API_KEY_ENV_VARS.get(p_enum)
-            if env_var and not os.environ.get(env_var) and not opts.get("api_key"):
+            # @intent explicit-providers-need-a-key-only-when-direct
+            # Only DIRECT must hold the provider's own key; AUTO and VIDBYTE_MANAGED can run on the Vidbyte key, and a key matched into the agent's api_keys counts like its variable.
+            held = api_keys is not None and api_keys.key_for(p_enum) is not None
+            if model_mode is TextModelMode.DIRECT and env_var and not os.environ.get(env_var) and not opts.get("api_key") and not held:
                 raise ConfigurationError(
                     f"Missing API key for explicitly requested provider '{provider_name}'. Set {env_var}."
                 )

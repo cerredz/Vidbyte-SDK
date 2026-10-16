@@ -749,6 +749,7 @@ asyncio.run(main())
 - Forking **before** the first successful run raises `CodexAgentError(failure_code="codex.fork_failed")`.
 - Any `CodexForkSettings` field you leave unset is inherited from the parent. `clear_context_manager=True` and `clear_output_schema=True` drop the inherited values. `context_placements=()` clears inherited anchors.
 - A fork always inherits the parent's `tools` and `tool_permission_policy`, because the native branch keeps the parent's tool definitions.
+- A fork also inherits the parent's `middleware`, `fallback` chain, and `loop` settings (output contracts), so a branch of a guarded thread stays guarded. When the parent has a fallback chain, a `codex=` override must still name a model; otherwise the fork fails with `codex.fork_failed` before any native branch is created.
 - Lineage is recorded in `reply.metadata["forked_from_thread_id"]` and `["fork_depth"]`, and mirrored on `reply.codex`.
 - If forks write files concurrently in one `cwd`, they can overwrite each other. Give each fork its own worktree through `CodexForkSettings(codex=...)` with a different `cwd`.
 

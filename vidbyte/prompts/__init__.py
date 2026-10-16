@@ -4,6 +4,7 @@
 # Purpose: Dynamically registers and exports all registered prompt assets.
 # Architecture & Functions:
 #   - Exposes Prompt and Prompts catalog models.
+#   - Exposes SystemPromptPresetComposer, which renders and composes system-prompt presets.
 #   - Automatically inspects the Prompt catalog to populate globals with direct imports.
 # Codebase Relation:
 #   - Canonical entrance for fetching prompt templates or raw prompt strings.
@@ -16,6 +17,7 @@ from __future__ import annotations
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.prompts.catalog import PromptRecord, Prompts
 from vidbyte.prompts.prompts import VMAOPrompts
+from vidbyte.prompts.system_prompt_presets import SystemPromptPresetComposer
 
 _prompts = Prompts()
 
@@ -28,5 +30,6 @@ __all__ = [
     "Prompt",
     "PromptRecord",
     "Prompts",
+    "SystemPromptPresetComposer",
     "VMAOPrompts",
 ] + list(_direct_prompt_exports)

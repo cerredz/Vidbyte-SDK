@@ -150,7 +150,7 @@ from vidbyte.lib.enums.outputs import (
 )
 from vidbyte.lib.enums.platform import Platform
 from vidbyte.lib.enums.process import CliOptionStyle, ProcessLaunchFailure
-from vidbyte.lib.enums.prompts import Prompt
+from vidbyte.lib.enums.prompts import Prompt, SystemPromptPreset
 from vidbyte.lib.enums.reasoning_strategies import (
     AbsenceEvidenceSignificance,
     BurdenOfProofVerdict,
@@ -309,6 +309,7 @@ __all__ = [
     "SkillUnavailableReason",
     "StrawmanCriticism",
     "StructuredOutputSupport",
+    "SystemPromptPreset",
     "TaskStatus",
     "TestimonyTrust",
     "TextModelMode",

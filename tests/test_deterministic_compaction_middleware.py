@@ -10,6 +10,7 @@ from vidbyte.lib.dataclasses.tools import ToolCall as RuntimeToolCall
 from vidbyte.lib.dataclasses.tools import ToolResult as RuntimeToolResult
 from vidbyte.lib.tools import ToolsFormatter
 from vidbyte.middleware.builtins import MessageHistoryCompactionMiddleware, ToolResultCompactionMiddleware
+from vidbyte.middleware.compaction import ToolOutputSlidingWindowCompaction
 from vidbyte.tools.builtins.context import ContextCompactionTool
 from vidbyte.tools.types import ToolCall
 
@@ -232,6 +233,32 @@ class DeterministicStrategyTests(unittest.IsolatedAsyncioTestCase):
         after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.DEDUPLICATE_TOOL_CALLS)
         self.assertEqual(list(after), [history[0], history[1], history[2], history[5], history[6]])
 
+    async def test_deduplicate_tool_calls_keeps_a_rerun_whose_result_changed(self) -> None:
+        # [Silent Failure] Re-running the same call after a fix (tests FAIL, then PASS) is a new pair, so the model sees the PASS.
+        def call(call_id: str) -> dict[str, object]:
+            return {"role": "assistant", "content": None, "tool_calls": [{"id": call_id, "type": "function", "function": {"name": "run_tests", "arguments": "{}"}}]}
+        history = ({"role": "user", "content": "fix the tests"}, call("c1"), {"role": "tool", "tool_call_id": "c1", "content": "FAIL"}, call("c2"), {"role": "tool", "tool_call_id": "c2", "content": "PASS"})
+        after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.DEDUPLICATE_TOOL_CALLS)
+        self.assertEqual(list(after), list(history))
+        _assert_valid_tool_transcript(self, after)
+
+    async def test_deduplicate_tool_calls_keeps_an_anthropic_rerun_whose_result_changed(self) -> None:
+        # [Silent Failure] Anthropic tool_result blocks are compared by their content, so a changed result survives as on OpenAI.
+        def call(call_id: str) -> dict[str, object]:
+            return {"role": "assistant", "content": [{"type": "tool_use", "id": call_id, "name": "run_tests", "input": {}}]}
+
+        def result(call_id: str, output: str) -> dict[str, object]:
+            return {"role": "user", "content": [{"type": "tool_result", "tool_use_id": call_id, "content": output}]}
+        history = ({"role": "user", "content": "fix the tests"}, call("t1"), result("t1", "FAIL"), call("t2"), result("t2", "PASS"))
+        after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.DEDUPLICATE_TOOL_CALLS)
+        self.assertEqual(list(after), list(history))
+
+    async def test_deduplicate_tool_calls_drops_every_result_of_a_repeated_parallel_call(self) -> None:
+        # [Hidden Failure] A repeated parallel-call turn loses all of its results, not just the first, so none is left orphaned.
+        turn = (msg("assistant", "read_file x2", kind="tool_call"), msg("tool", "a", kind="tool_result"), msg("tool", "b", kind="tool_result"))
+        after, _ = await ContextCompactionEngine().compact_messages((*turn, *turn), mode=CompactionMode.DEDUPLICATE_TOOL_CALLS)
+        self.assertEqual(after, turn)
+
     async def test_salience_eviction_keeps_newest_tool_pair_on_every_provider_shape(self) -> None:
         # [Silent Failure] Anthropic tool_use and Gemini functionCall turns score as tool calls, so the newest pair survives as on OpenAI.
         shapes = {
@@ -375,6 +402,27 @@ class DeterministicStrategyTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             await ContextCompactionEngine().compact_messages((msg("tool", "x", "tool_result"),), mode=CompactionMode.TOOL_OUTPUT_SLIDING_WINDOW, options={"window_mode": "not_a_mode"})
 
+    async def test_tool_output_sliding_window_refuses_modes_it_cannot_apply(self) -> None:
+        # [Silent Failure] A mode the window cannot apply is refused by name instead of silently becoming truncation.
+        for window_mode in (CompactionMode.HIDE_TOOL_RESULTS, CompactionMode.MECHANICAL_BLOAT_SCRUBBER, CompactionMode.KEEP_LAST_N_MESSAGES, "hide_tool_results", "not_a_mode"):
+            with self.subTest(window_mode=window_mode):
+                with self.assertRaises(ValueError) as caught:
+                    ToolOutputSlidingWindowCompaction(mode=window_mode)
+                for valid in ("truncate_tool_results", "strip_tool_result_bodies", "head_tail_tool_preview"):
+                    self.assertIn(valid, str(caught.exception))
+
+    async def test_tool_output_sliding_window_applies_each_supported_mode_given_as_enum_or_string(self) -> None:
+        # [Hidden Assumption] Supported window modes keep their treatment whether passed as an enum member or its string value.
+        messages = (msg("tool", "x" * 50, "tool_result", tool_name="lookup"), msg("tool", "new-output", "tool_result", tool_name="lookup"))
+        expected = {CompactionMode.TRUNCATE_TOOL_RESULTS: "[... truncated 40 characters ...]", CompactionMode.STRIP_TOOL_RESULT_BODIES: "[older tool result cleared by compaction]", CompactionMode.HEAD_TAIL_TOOL_PREVIEW: "...[omitted 40 characters]..."}
+        for mode, marker in expected.items():
+            for given in (mode, mode.value):
+                with self.subTest(window_mode=given):
+                    after = await ToolOutputSlidingWindowCompaction(keep_recent=1, mode=given, max_chars=10, head_chars=5, tail_chars=5).compact(messages)
+                    self.assertIn(marker, after[0].content)
+                    self.assertEqual(after[0].metadata["compaction"], mode.value)
+                    self.assertEqual(after[1].content, "new-output")
+
     async def test_clear_tool_results_exclusions_and_metadata(self) -> None:
         # [Edge Case] Empty exclusions clear all results and record original size.
         messages = (msg("tool", "secret", "tool_result"),)
@@ -472,6 +520,28 @@ class DeterministicStrategyTests(unittest.IsolatedAsyncioTestCase):
         messages = (msg("assistant", "alpha beta"), msg("assistant", "alpha"))
         after, _ = await ContextCompactionEngine().compact_messages(messages, mode=CompactionMode.SELECTIVE_CONTEXT_PRUNING, options={"min_unique_terms": 2})
         self.assertEqual(tuple(m.content for m in after), ("alpha beta",))
+
+    async def test_selective_pruning_keeps_different_calls_whose_results_read_the_same(self) -> None:
+        # [Silent Failure] Two calls whose results both read "saved" are two exchanges, so the second is not pruned as a duplicate and erased with its call.
+        for provider in ("openai", "gemini"):
+            with self.subTest(provider=provider):
+                history = _two_lookup_history(provider)[:1] + _lookup_pair(provider, "a", "saved") + _lookup_pair(provider, "b", "saved")
+                after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.SELECTIVE_CONTEXT_PRUNING)
+                self.assertEqual(list(after), list(history))
+        # A parallel turn keeps both calls, and a repeated plain reply is still pruned.
+        turn = {"role": "assistant", "content": None, "tool_calls": [{"id": f"c{i}", "type": "function", "function": {"name": "save", "arguments": f'{{"note": "{i}"}}'}} for i in (1, 2)]}
+        history = ({"role": "user", "content": "save both"}, turn, {"role": "tool", "tool_call_id": "c1", "content": "saved"}, {"role": "tool", "tool_call_id": "c2", "content": "saved"}, {"role": "assistant", "content": "done"}, {"role": "assistant", "content": "done"})
+        after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.SELECTIVE_CONTEXT_PRUNING)
+        self.assertEqual(list(after), list(history[:-1]))
+        _assert_valid_tool_transcript(self, after)
+
+    async def test_selective_pruning_keeps_a_call_whose_result_is_empty(self) -> None:
+        # [Silent Failure] An empty tool result is still the record that the call ran, so pruning it would erase the call and the model would repeat it.
+        for provider in ("openai", "gemini"):
+            with self.subTest(provider=provider):
+                history = _two_lookup_history(provider)[:1] + _lookup_pair(provider, "a", "")
+                after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.SELECTIVE_CONTEXT_PRUNING)
+                self.assertEqual(list(after), list(history))
 
     async def test_salience_eviction_pinned_error_and_chronology(self) -> None:
         # [Hidden Failure] Pinned metadata and tool errors outrank ordinary messages, returned chronologically.
@@ -573,6 +643,34 @@ class DeterministicMiddlewareTests(unittest.IsolatedAsyncioTestCase):
             MessageHistoryCompactionMiddleware.trim_to_token_budget(max_tokens=-1)
         with self.assertRaises(ValueError):
             MessageHistoryCompactionMiddleware.context_snapshot_branch_trim(active_branch="")
+
+    async def test_tool_output_sliding_window_factory_refuses_window_modes_it_cannot_apply(self) -> None:
+        # [Silent Failure] An unsupported window_mode fails at construction rather than truncating older results on every call.
+        for window_mode in ("hide_tool_results", "mechanical_bloat_scrubber", CompactionMode.KEEP_LAST_N_MESSAGES, "not_a_mode"):
+            with self.subTest(window_mode=window_mode):
+                with self.assertRaisesRegex(ValueError, "window_mode must be one of"):
+                    MessageHistoryCompactionMiddleware.tool_output_sliding_window(keep_recent=1, window_mode=window_mode)
+
+    async def test_tool_output_sliding_window_factory_applies_supported_window_modes(self) -> None:
+        # [Edge Case] The three supported window modes still construct and compact older provider tool results.
+        provider_messages = ({"role": "user", "content": "go"}, *_lookup_pair("openai", "a", "x" * 900), *_lookup_pair("openai", "b", "new-output"))
+        expected = {"truncate_tool_results": "[... truncated 890 characters ...]", "strip_tool_result_bodies": "[older tool result cleared by compaction]", "head_tail_tool_preview": "...[omitted 300 characters]..."}
+        for window_mode, marker in expected.items():
+            for given in (window_mode, CompactionMode(window_mode)):
+                with self.subTest(window_mode=given):
+                    middleware = MessageHistoryCompactionMiddleware.tool_output_sliding_window(keep_recent=1, window_mode=given, max_chars=10)
+                    decision = await middleware.before_model_call(MiddlewareContext(hook=MiddlewareHook.BEFORE_MODEL_CALL, agent_name="agent", message="go", provider_messages=provider_messages))
+                    contents = [m["content"] for m in decision.transform.provider_messages if m["role"] == "tool"]
+                    self.assertIn(marker, contents[0])
+                    self.assertEqual(contents[1], "new-output")
+
+    async def test_legacy_tool_sliding_window_refuses_unsupported_window_mode(self) -> None:
+        # [Hidden Failure] compact_context reports an unsupported window_mode as an error and leaves the history untouched.
+        state = MemoryState((msg("tool", "x" * 900, "tool_result", tool_name="fetch"), msg("tool", "new", "tool_result", tool_name="fetch")))
+        result = await ContextCompactionTool(state).execute(ToolCall("compact_context", {"mode": CompactionMode.TOOL_OUTPUT_SLIDING_WINDOW.value, "keep_recent": 1, "window_mode": "hide_tool_results"}))
+        self.assertEqual(result.status.value, "error")
+        self.assertIn("window_mode must be one of", result.output)
+        self.assertEqual(state.messages()[0].content, "x" * 900)
 
     async def test_legacy_tool_supports_head_tail_preview(self) -> None:
         # [Edge Case] ContextCompactionTool delegates new head/tail preview mode.

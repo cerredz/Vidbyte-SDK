@@ -42,8 +42,12 @@ class ContinualTraceAgent(BaseAgent):
         kwargs.pop("handoff", None)
         kwargs.pop("trace_option", None)
         kwargs.pop("max_iterations", None)
+        # @intent trace-agent-keeps-its-fixed-prompt
+        # The trace prompt is fixed, so the agent never takes the
+        # presets of the run it traces.
+        kwargs.pop("system_prompt_presets", None)
         self._tool = UpdateTraceTool(self.schema, trace_so_far)
-        super().__init__(name=name, system_prompt=Prompts().get(Prompt.CONTINUAL_TRACE_SYSTEM_PROMPT), tools=[self._tool], max_iterations=max_trace_iterations, **kwargs)
+        super().__init__(name=name, system_prompt=Prompts().get(Prompt.CONTINUAL_TRACE_SYSTEM_PROMPT), tools=[self._tool], max_iterations=max_trace_iterations, system_prompt_presets=(), **kwargs)
         self.last_error: str | None = None
 
     @classmethod

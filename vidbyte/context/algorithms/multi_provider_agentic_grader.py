@@ -99,6 +99,11 @@ def _validate_grader_prompt_placeholders(grader_prompt: str | None) -> None:
     missing = _REQUIRED_GRADER_PLACEHOLDERS - found
     if missing:
         raise ConfigurationError(f"grader_prompt is missing required formatting placeholders: {sorted(missing)}.")
+    # @intent templates-render-or-are-refused
+    # str.format raises on any other {name}, such as an example JSON object, so grading would fail only after every trial ran.
+    unknown = found - _REQUIRED_GRADER_PLACEHOLDERS
+    if unknown:
+        raise ConfigurationError(f"grader_prompt has unknown formatting placeholders {sorted(unknown)}; write literal braces as {{{{ and }}}}.")
 
 
 def _validate_metadata_keys(metadata: Mapping[str, Any]) -> None:

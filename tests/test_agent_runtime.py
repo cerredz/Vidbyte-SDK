@@ -41,10 +41,10 @@ from vidbyte.tools import ToolActivity, ToolParameter
 from vidbyte.tools.builtins.operations.base import PricedOperationTool
 from vidbyte.agents.types import AgentMessage
 from vidbyte.context import ContextArtifact, ContextManager, ContextPermissions, ContextResponse, ContextToolCall, ContextWindow, ContextWindowAlgorithm, DocumentContextItem, TaskContextItem, TextContextItem, TrajectoryCheckpointAlgorithm
-from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
+from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig, AgentStopReason
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.enums import AgentRuntimeType, ModelModality
-from vidbyte.lib.errors import AgentExecutionError
+from vidbyte.lib.errors import AgentExecutionError, ConfigurationError
 from vidbyte.lib.dataclasses.context import BaseContext as StrategyContext
 from vidbyte.tools import BaseTool, ToolCall, ToolCallContext, ToolPermission, ToolResult, ToolSpec, Tools, tool
 from vidbyte.tools.security import PermissionPolicy
@@ -1203,6 +1203,24 @@ class NonLinearRuntimeRegressionTests(unittest.TestCase):
                 result, _ = self._run(ActorRuntime(topology=topology))
                 self.assertEqual(result.content, "ANSWER")
 
+    def test_actor_runtime_rejects_a_non_actor_topology(self) -> None:
+        # @intent actor-runtime-needs-an-actor-topology
+        # [Regression] A linear, search, or JEV topology was accepted and silently ran that runtime without the actor settings.
+        for topology in (AgentRuntimeType.LINEAR, AgentRuntimeType.MCTS_SEARCH, AgentRuntimeType.JEV):
+            for value in (topology, topology.value):
+                with self.subTest(topology=value):
+                    with self.assertRaises(ConfigurationError) as caught:
+                        ActorRuntime(topology=value, max_loop=2)
+                    self.assertIn(topology.value, str(caught.exception))
+
+    def test_actor_runtime_accepts_every_actor_topology(self) -> None:
+        # @intent actor-runtime-needs-an-actor-topology
+        # ACTOR_MODEL stays a supported alias of the point-to-point topology next to the two explicit ones.
+        for topology in (AgentRuntimeType.ACTOR_MODEL, AgentRuntimeType.ACTOR_MODEL_P2P, AgentRuntimeType.ACTOR_MODEL_BROADCAST):
+            for value in (topology, topology.value):
+                with self.subTest(topology=value):
+                    self.assertIs(ActorRuntime(topology=value).runtime_type, topology)
+
     def test_actor_quiescence_does_not_complete_the_run_twice(self) -> None:
         # [Regression] A reply that completed the run during the quiescence poll was set again.
         result, _ = self._run(ActorRuntime(termination_mode="quiescence", include_actors=[]))
@@ -1249,6 +1267,25 @@ class NonLinearRuntimeRegressionTests(unittest.TestCase):
         result, runner = self._run(ActorRuntime(include_actors=[], max_loop=2))
         self.assertEqual(result.content, "ANSWER")
         self.assertEqual(runner.calls, 1)
+
+    def test_actor_max_loop_stop_reports_max_iterations(self) -> None:
+        # @intent max-loop-stop-is-not-an-answer
+        # [Regression] A run cut off by max_loop returned the SDK's notice with no stop_reason, so output connectors posted it as the answer.
+        for topology in (AgentRuntimeType.ACTOR_MODEL_P2P, AgentRuntimeType.ACTOR_MODEL_BROADCAST):
+            with self.subTest(topology=topology):
+                result, runner = self._run(ActorRuntime(topology=topology, include_actors=[], max_loop=1))
+                self.assertEqual(result.content, "Execution terminated. Max loops (1) reached.")
+                self.assertEqual(result.metadata.get("stop_reason"), AgentStopReason.MAX_ITERATIONS.value)
+                self.assertEqual(runner.calls, 1)
+
+    def test_actor_answer_within_max_loop_has_no_stop_reason(self) -> None:
+        # @intent max-loop-stop-is-not-an-answer
+        # A root answer that fits under the ceiling is an accepted answer, so the run carries no stop_reason.
+        for topology in (AgentRuntimeType.ACTOR_MODEL_P2P, AgentRuntimeType.ACTOR_MODEL_BROADCAST):
+            with self.subTest(topology=topology):
+                result, _ = self._run(ActorRuntime(topology=topology, include_actors=[], max_loop=2))
+                self.assertEqual(result.content, "ANSWER")
+                self.assertIsNone(result.metadata.get("stop_reason"))
 
     def test_actor_broadcast_coordinator_returns_the_root_answer(self) -> None:
         # @intent coordinator-completes-only-from-the-root

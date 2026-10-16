@@ -1,0 +1,11 @@
+{
+  "name": "Working Principles",
+  "description": "An opt-in, domain-neutral system-prompt preset that makes an agent work more ambitiously: aim at the outcome beyond the literal request, work the way the best professional in the field would from the rawest material, hold demanding targets, test assumptions and verify with an independent check, borrow the methods of other fields that solve the same problem, finish the given task before taking the larger move it opens, and carry these principles into every subagent prompt. Distilled from Felix Rieseberg's essay \"How to be more ambitious: a tutorial for humans with models\". Attach it with system_prompt_presets=[SystemPromptPreset.WORKING_PRINCIPLES]; agents started inside that agent's run inherit it.",
+  "key": "working_principles",
+  "prompts": {
+    "system_prompt": {
+      "path": "system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/working_principles/system_prompt.md"
+    }
+  }
+}

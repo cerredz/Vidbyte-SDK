@@ -290,19 +290,23 @@ class DeduplicateToolCallsCompaction(BaseCompaction):
     """Removes duplicate tool-call/result pairs while keeping the first occurrence."""
 
     async def compact(self, messages: Sequence[ContextMessage]) -> tuple[ContextMessage, ...]:
-        seen_signatures: set[str] = set()
+        seen_pairs: set[tuple[str, tuple[str, ...]]] = set()
         remove_indexes: set[int] = set()
         for index, message in enumerate(messages):
             # Key each call on its tool names and arguments, not its per-call id, so repeated calls match.
             signature = tool_call_signature(message)
             if signature is None:
                 continue
-            if signature in seen_signatures:
-                remove_indexes.add(index)
-                if index + 1 < len(messages) and messages[index + 1].kind == "tool_result":
-                    remove_indexes.add(index + 1)
+            # @intent dedupe-keeps-a-changed-result
+            # A pair is the call plus all its results (parallel calls); a re-run whose result changed (tests now pass) is news, not a repeat.
+            end = index + 1
+            while end < len(messages) and messages[end].kind == "tool_result":
+                end += 1
+            pair = (signature, tuple(m.content for m in messages[index + 1:end]))
+            if pair in seen_pairs:
+                remove_indexes.update(range(index, end))
             else:
-                seen_signatures.add(signature)
+                seen_pairs.add(pair)
         return tuple(m for i, m in enumerate(messages) if i not in remove_indexes)
 
 
@@ -516,8 +520,10 @@ class ReplaceWithTraceCompaction(BaseCompaction):
     @staticmethod
     def _last_user_group(groups: Sequence[tuple[ContextMessage, ...]]) -> int | None:
         # Returns the index of the newest group containing a user message, or None.
+        # @intent last-user-skips-tool-results
+        # Anthropic and Gemini send tool results as role="user" messages; those are tool output, not the user's turn.
         for index in range(len(groups) - 1, -1, -1):
-            if any(message.role == "user" for message in groups[index]):
+            if any(message.role == "user" and message.kind != "tool_result" for message in groups[index]):
                 return index
         return None
 
@@ -647,12 +653,18 @@ class DeleteMessagesByIdOrRangeCompaction(BaseCompaction):
 class ToolOutputSlidingWindowCompaction(BaseCompaction):
     """Compacts older tool outputs while preserving the most recent outputs per tool."""
 
-    def __init__(self, keep_recent: int = 2, mode: CompactionMode = CompactionMode.TRUNCATE_TOOL_RESULTS, max_chars: int = 600, placeholder: str = "[older tool result cleared by compaction]", head_chars: int = 400, tail_chars: int = 200) -> None:
+    WINDOW_MODES = (CompactionMode.TRUNCATE_TOOL_RESULTS, CompactionMode.STRIP_TOOL_RESULT_BODIES, CompactionMode.HEAD_TAIL_TOOL_PREVIEW)
+
+    def __init__(self, keep_recent: int = 2, mode: CompactionMode | str = CompactionMode.TRUNCATE_TOOL_RESULTS, max_chars: int = 600, placeholder: str = "[older tool result cleared by compaction]", head_chars: int = 400, tail_chars: int = 200) -> None:
         # Stores the per-tool sliding-window size and the compaction style for older results.
         if keep_recent < 0:
             raise ValueError("keep_recent must be non-negative.")
+        # @intent sliding-window-refuses-modes-it-cannot-apply
+        # Older results are only stripped, previewed, or truncated, so any other mode would silently become truncation.
+        if mode not in self.WINDOW_MODES:
+            raise ValueError(f"window_mode must be one of {[item.value for item in self.WINDOW_MODES]}, got {getattr(mode, 'value', mode)!r}.")
         self.keep_recent = keep_recent
-        self.mode = mode
+        self.mode = CompactionMode(mode)
         self.max_chars = max_chars
         self.placeholder = placeholder
         self.head_chars = head_chars
@@ -804,11 +816,13 @@ class SelectiveContextPruningCompaction(BaseCompaction):
         self.min_unique_terms = min_unique_terms
 
     async def compact(self, messages: Sequence[ContextMessage]) -> tuple[ContextMessage, ...]:
-        # Removes messages that match low-signal pruning criteria while preserving system messages.
+        # Removes messages that match low-signal pruning criteria while preserving system messages and tool exchanges.
         seen: set[tuple[str, str, str]] = set()
         result = []
         for message in messages:
-            if message.role == "system":
+            # @intent pruning-never-splits-a-tool-exchange
+            # Pruning one half of a call/result pair makes the engine drop the whole exchange, so the model repeats the call; repeated calls are deduplicate_tool_calls' job.
+            if message.role == "system" or _is_tool_message(message):
                 result.append(message)
                 continue
             key = (message.role, message.kind, message.content)

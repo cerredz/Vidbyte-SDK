@@ -76,6 +76,9 @@ class RunState:
     trace_option: Mapping[str, Any] = field(default_factory=dict)
     output_schema: Mapping[str, Any] | None = None
     permission_policy: tuple[str, ...] | None = None
+    # The agent's own SystemPromptPreset values; None means it inherits
+    # from the run it runs in, which is also what older checkpoints mean.
+    system_prompt_presets: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)

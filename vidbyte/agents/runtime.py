@@ -76,6 +76,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import functools
 import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -151,7 +152,7 @@ from vidbyte.tools.activity import ActivityToolFormatter
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.operations.base import PricedOperationTool
 from vidbyte.tools.catalog import Tools
-from vidbyte.tools.security import PermissionDecision, PermissionPolicy
+from vidbyte.tools.security import PermissionCeiling, PermissionDecision, PermissionPolicy
 from vidbyte.tools.types import ToolCall, ToolCallContext, ToolCallState, ToolResult
 
 
@@ -211,6 +212,10 @@ class AgentRuntime:
         self.usage_tracker = usage_tracker or UsageTracker()
         self.speed_tracker = speed_tracker or AgentSpeedTracker()
         self.fallback = fallback
+        # @intent run-stays-on-the-fallback-model
+        # The model this run switched to and where its chain stands, so later stages and trials stay on the model that worked.
+        self._fallback_handle: RunnerHandle | None = None
+        self._fallback_progress: tuple[int, list[dict[str, str]], list[BaseException], bool] = (0, [], [], False)
 
     def _context_window_admission_middleware(self) -> tuple[AgentMiddleware, ...]:
         # Returns compatibility middleware for legacy tool-result admission presets.
@@ -298,8 +303,8 @@ class AgentRuntime:
         finally:
             self.speed_tracker.end_step()
 
-    async def _arun_once(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: SpanContext | None = None) -> AgentResult:
-        """Run one direct model/tool attempt until isDone or a budget stop."""
+    async def _arun_once(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: SpanContext | None = None, pin_model: bool = False) -> AgentResult:
+        """Run one direct model/tool attempt until isDone or a budget stop; `pin_model` keeps it off the fallback chain."""
         run_options = dict(options or {})
         state = BaseAgentRuntimeLoopState(
             message=message,
@@ -327,10 +332,12 @@ class AgentRuntime:
         compaction_count = 0
         last_assistant_output: str | None = None
         active_trace_context = trace_context
-        fallback_index = 0
-        fallback_attempts: list[dict[str, str]] = []
-        fallback_errors: list[BaseException] = []
-        fallback_context_reset = False
+        # @intent a-later-trial-resumes-the-fallback-chain
+        # A trial handed the model this run already switched to counts on from that switch and still reports it.
+        resumed = handle is self._fallback_handle
+        fallback_index, fallback_attempts, fallback_errors, fallback_context_reset = self._fallback_progress if resumed else (0, [], [], False)
+        if resumed and self.fallback is not None:
+            self._publish_fallback_metadata(state.run_state, self.fallback.result_metadata(fallback_attempts, context_reset=fallback_context_reset))
 
         decision = await self.middleware.before_run(self._middleware_context(MiddlewareHook.BEFORE_RUN, state))
         if decision.action is not MiddlewareAction.CONTINUE:
@@ -359,8 +366,12 @@ class AgentRuntime:
                     runner_output_text=handle.extract_text,
                     runner_output_metadata=handle.extract_metadata,
                     options=run_options,
-                    messages=messages,
-                    system_prompt=self.system_prompt,
+                    # @intent inner-algorithms-see-the-task
+                    # The task reaches the runner apart from messages, so hand side models the conversation the main model sees, task at the run boundary.
+                    messages=self._messages_with_task(messages, caller_messages, message),
+                    # @intent inner-algorithms-see-the-run-system-prompt
+                    # A run's base context may replace the agent's prompt, so side models get the prompt this run's main model follows.
+                    system_prompt=context.system_prompt,
                 )
             stop_result = self._budget_stop(
                 iteration_count=state.iteration_count,
@@ -406,7 +417,8 @@ class AgentRuntime:
             )
             call_dispatched_at = self.speed_tracker.now()
             model_call_count_before = state.model_call_count
-            state.run_state["_speed_fallback_index"] = fallback_index
+            if not pin_model:
+                state.run_state["_speed_fallback_index"] = fallback_index
             state.run_state["_speed_call_dispatched_at"] = call_dispatched_at
             try:
                 raw_result, state.model_call_count, compaction_count = await self._invoke_with_middleware(
@@ -426,7 +438,7 @@ class AgentRuntime:
                 )
             except BaseException as exc:
                 self._end_semantic_span(iteration_span, error=exc)
-                transition = self._fallback_transition(
+                transition = None if pin_model else self._fallback_transition(
                     exc,
                     index=fallback_index,
                     handle=handle,
@@ -447,6 +459,7 @@ class AgentRuntime:
                 # @intent fallback-context-reset-is-sticky
                 # Once any switch reset the transcript this run, a later same-wire switch cannot undo it.
                 fallback_context_reset = fallback_context_reset or transition.context_reset
+                self._fallback_handle, self._fallback_progress = handle, (fallback_index, fallback_attempts, fallback_errors, fallback_context_reset)
                 # A non-None transition proves self.fallback is set, so this needs no further guard.
                 self._publish_fallback_metadata(
                     state.run_state,
@@ -740,7 +753,7 @@ class AgentRuntime:
                     state.model_call_count,
                     compaction_count,
                 )
-            compaction_count += self._compaction_event_delta(decision)
+            compaction_count += self._compaction_event_delta(decision, self._provider_messages_from_options(current_call_options))
             current_call_options = self._apply_before_model_call_transform(current_call_options, decision)
             state.model_call_count += 1
             # @intent model-call-count-survives-fallback-switch
@@ -856,6 +869,11 @@ class AgentRuntime:
         if callable(model_name):
             return str(model_name())
         return str(model_name or "unknown")
+
+    def _active_handle(self, handle: RunnerHandle) -> RunnerHandle:
+        # @intent run-stays-on-the-fallback-model
+        # Once this run has failed over, an outer algorithm's later stages call the model that worked, not the one that failed.
+        return handle if self._fallback_handle is None else self._fallback_handle
 
     def _fallback_transition(self, error: BaseException, *, index: int, handle: RunnerHandle, provider: str, messages: list[dict[str, Any]], attempts: list[dict[str, str]], errors: list[BaseException], parent_span: SpanContext | None) -> "FallbackTransform | None":
         """Return rebuilt state for the next model in the chain, or None when the caller must re-raise."""
@@ -1016,7 +1034,9 @@ class AgentRuntime:
                     iteration=iteration,
                     runner=runner,
                     provider=provider,
-                    invoke_runner=invoke_runner,
+                    # @intent side-calls-count-toward-the-token-budget
+                    # max_tokens covers every model call in the run, so each side call's tokens join the loop's count before the next budget check.
+                    invoke_runner=functools.partial(self._invoke_and_count_side_call, state, invoke_runner, runner_output_metadata) if invoke_runner is not None else None,
                     runner_output_text=runner_output_text,
                     runner_output_metadata=runner_output_metadata,
                     options=options,
@@ -1036,6 +1056,14 @@ class AgentRuntime:
         response = await runner.invoke(prompt, **options)
         # Algorithm side calls are billed like loop calls, so they land in the same usage ledger.
         self.usage_tracker.record_call(response)
+        return response
+
+    async def _invoke_and_count_side_call(self, state: BaseAgentRuntimeLoopState, invoke_runner: Callable[..., Any], runner_output_metadata: Callable[[object], Mapping[str, Any]] | None, runner: RunnerHandle, prompt: str, **options: Any) -> object:
+        """Invoke an inner-loop algorithm's side call and add its tokens to this run's token count."""
+        # Uses the same token extraction as loop calls, so the budget and the usage ledger agree.
+        response = await invoke_runner(runner, prompt, **options)
+        runner_metadata = dict(runner_output_metadata(response)) if runner_output_metadata is not None else {}
+        state.tokens_used = self._add_token_usage(state.tokens_used, token_usage_from_response(response, runner_metadata))
         return response
 
     @staticmethod
@@ -1428,7 +1456,7 @@ class AgentRuntime:
         decision = self.permission_policy.check(spec, call)
         if decision is PermissionDecision.DENY:
             raise PermissionDeniedError(
-                f"Permission denied for tool '{spec.name}' requiring {spec.permission.value}",
+                f"Permission denied for tool '{spec.name}' requiring {spec.permission.value}{PermissionCeiling.denial_note(spec.permission)}",
                 details={"tool_name": spec.name, "permission": spec.permission.value},
             )
 
@@ -1586,6 +1614,15 @@ class AgentRuntime:
             if isinstance(contract, SchemaConformance) and contract.schema is self.output_schema:
                 return contract.evaluate({contract.key: output})
         return self._schema_formatter.validate(output, self.output_schema)
+
+    @staticmethod
+    def _messages_with_task(messages: Sequence[dict[str, Any]], caller_messages: Sequence[dict[str, Any]], message: str) -> list[dict[str, Any]]:
+        """Return a copy of the run's messages with its task as a user turn after the caller's own messages, where the provider sends it."""
+        # Like _run_boundary, trust the caller's messages only while they still open the list as the same objects; a
+        # fallback reset that rewrote them leaves the task opening the list. The live list is never changed.
+        caller_count = len(caller_messages)
+        boundary = caller_count if len(messages) >= caller_count and all(messages[index] is caller for index, caller in enumerate(caller_messages)) else 0
+        return [*messages[:boundary], {"role": "user", "content": message}, *messages[boundary:]]
 
     @staticmethod
     def _run_boundary(conversation: Sequence[Mapping[str, Any]], messages: Sequence[Mapping[str, Any]], caller_messages: Sequence[Mapping[str, Any]]) -> int | None:
@@ -2114,23 +2151,18 @@ class AgentRuntime:
                 return middleware.estimated_spend_usd_for(run_state or {})
         return 0.0
 
-    def _compaction_event_delta(self, decision: MiddlewareDecision) -> int:
+    def _compaction_event_delta(self, decision: MiddlewareDecision, messages: Sequence[Mapping[str, Any]]) -> int:
         # Returns 1 when a history compaction transform actually mutated provider messages.
         transform = decision.transform
         if transform is None or transform.provider_messages is None:
             return 0
-        meta = dict(transform.metadata or {})
-        if "compaction" not in meta:
+        if "compaction" not in dict(transform.metadata or {}):
             return 0
         # @intent content-rewrites-count-as-compactions
-        # Prefer the middleware's own changed flag, because an in-place rewrite keeps the message count.
-        if isinstance(meta.get("changed"), bool):
-            return 1 if meta["changed"] else 0
-        before = meta.get("before_count")
-        after = meta.get("after_count")
-        if before is not None and after is not None:
-            return 1 if int(before) != int(after) else 0
-        return 1
+        # @intent stacked-compactions-all-count
+        # Compare the history itself: an in-place rewrite keeps the message count, and stacked middleware merge their
+        # metadata later-wins, so a later no-op's flag or counts would hide an earlier middleware's compaction.
+        return 1 if tuple(dict(message) for message in transform.provider_messages) != tuple(messages) else 0
 
     def _publish_contract_evaluations(self, run_state: dict[Any, Any], counters: Mapping[str, Any]) -> None:
         # Records each contract's evaluation into run_state so _with_run_state_metadata lifts it into the result.

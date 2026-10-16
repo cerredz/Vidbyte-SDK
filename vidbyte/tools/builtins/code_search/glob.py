@@ -52,7 +52,8 @@ class GlobTool(BaseCodeSearchTool):
         matches: list[str] = []
         seen: set[str] = set()
         truncated = False
-        for path in start.glob(pattern):
+        # Spell a last "**" segment so it covers the files below it on every supported Python version.
+        for path in start.glob(self._files_pattern(pattern)):
             resolved = Path(path).resolve()
             if not resolved.is_file() or self.should_ignore(resolved):
                 continue
@@ -83,3 +84,13 @@ class GlobTool(BaseCodeSearchTool):
             output,
             metadata={"count": len(matches), "truncated": truncated},
         )
+
+    @staticmethod
+    def _files_pattern(pattern: str) -> str:
+        """Return a pattern that matches the files a last "**" segment covers."""
+        # @intent trailing-globstar-matches-files
+        # Before Python 3.13, pathlib yields only directories for a pattern whose last segment is "**", so "src/**"
+        # answered "No files matched."; "**/*" matches the same files on every supported version.
+        if pattern.endswith("**") and Path(pattern).name == "**":
+            return pattern + "/*"
+        return pattern
