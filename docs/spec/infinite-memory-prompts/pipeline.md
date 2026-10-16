@@ -17,8 +17,8 @@ STACKED RUN. Base branch is `feat/infinite-memory-agent` (PR #1084), not `main`.
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-16 01:45 | 2026-10-16 02:20 | reports/S0-scout.md | base_commit 7efceb55; code-map.md (171 lines, 40-row leaf exposure table) |
-| S1 spec + review | running (spec r1 at f70e65a2; reviewer launched 07:15) | 2026-10-16 02:25 | | reports/S1-spec-author.md, reports/S1-spec-review.md | spec r1: 729 lines, 47 §12.3 rows, INV-1…24, A-1…7, Q-1/Q-3 default no, Q-2 resolved |
-| S2 tests | pending | | | | |
+| S1 spec + review | done | 2026-10-16 02:25 | 2026-10-16 17:45 | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | spec r3 approved at 8ab4e35a (two rounds: SOUND WITH FIXES both; 26 findings applied); INV-1…24 (INV-23 struck), AC-1…14, 47 §12.3 rows, A-1…7, Q-1/Q-3 default no |
+| S2 tests | running (test author launched 17:50) | 2026-10-16 17:50 | | reports/S2-test-author.md | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
@@ -67,6 +67,8 @@ The folder holds 40 `.md` assets; `infinite_memory.json` top level is a dict wit
 
 - 2026-10-16 17:20 — **S1 review round 2 result:** SOUND WITH FIXES, 0 Blocker / 2 Major (R-16 struck prohibition surviving in outline 34; R-17 outline 1.6 contradicting the `decision` entry kind and root:64) / 9 Minor (R-18…R-26). Author revising to r3 and setting status: approved; cap of 2 rounds reached, no round 3.
 - 2026-10-16 17:20 — **R-26 ruling:** the duplicate-sentence check over the seven assets is accepted as a tested invariant (INV-15), not a Q-n: it tests the user's own D-F standard ("never from repetition or filler"), so rule 11 does not apply. R-17: rewording option for root:64 (INV-19 holds). R-19: add the rules to outlines 2.7 and 1.8 rather than blank the cells (the user's main point is every stage carrying its principles).
+
+- 2026-10-16 17:45 — **S1 closed.** Q-1 (floor on all 40 leaves) applied as default no; Q-3 (content-is-data sentence per system prompt) applied as default no and shown to the user in the spec summary; Q-2 resolved earlier. Spec r3 is the contract for S2–S6.
 
 ## User replies (verbatim)
 - (none yet)
