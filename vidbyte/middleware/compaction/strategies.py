@@ -516,8 +516,10 @@ class ReplaceWithTraceCompaction(BaseCompaction):
     @staticmethod
     def _last_user_group(groups: Sequence[tuple[ContextMessage, ...]]) -> int | None:
         # Returns the index of the newest group containing a user message, or None.
+        # @intent last-user-skips-tool-results
+        # Anthropic and Gemini send tool results as role="user" messages; those are tool output, not the user's turn.
         for index in range(len(groups) - 1, -1, -1):
-            if any(message.role == "user" for message in groups[index]):
+            if any(message.role == "user" and message.kind != "tool_result" for message in groups[index]):
                 return index
         return None
 
