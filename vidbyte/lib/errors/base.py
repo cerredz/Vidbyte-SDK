@@ -247,38 +247,6 @@ class AggregateExecutionError(AgentExecutionError):
     """Raised when an aggregate (mixture-of-agents) run cannot produce a synthesis."""
 
 
-class ClaudeOperationError(VidbyteSdkError):
-    """Carries one ClaudeHost failure as a failure code, a safe reason and a next step."""
-
-    DIAGNOSTIC_FIELDS = (
-        "error_kind",
-        "expected",
-        "actual",
-        "safe_runtime_details",
-        "likely_causes",
-        "repair_approaches",
-        "related_docs",
-        "relevant_tests",
-    )
-
-    def __init__(self, reason: str, *, failure_code: str, operation: str, next_step: str) -> None:
-        # The reason names the operation and the failing field or
-        # exception class, never raw exception text.
-        self.failure_code = failure_code
-        self.operation = operation
-        self.reason = reason
-        self.next_step = next_step
-        self.error_kind = failure_code
-        self.expected = f"ClaudeHost operation {operation!r} completing successfully"
-        self.actual = reason
-        self.safe_runtime_details = {"operation": operation}
-        self.likely_causes = ("Claude Code, its SDK, or the arguments passed to ClaudeHost refused the operation the reason names.",)
-        self.repair_approaches = (next_step,)
-        self.related_docs = ("https://platform.claude.com/docs/en/agent-sdk/python", "https://docs.claude.com/en/docs/claude-code/rate-limits")
-        self.relevant_tests = ("python scripts/run_ci.py",)
-        super().__init__(reason, details={"error_kind": self.error_kind, "expected": self.expected, "actual": self.actual, "safe_runtime_details": self.safe_runtime_details, "likely_causes": self.likely_causes, "repair_approaches": self.repair_approaches, "related_docs": self.related_docs, "relevant_tests": self.relevant_tests})
-
-
 class AgentForkError(VidbyteSdkError):
     """Base class for agent fork failures raised by the fork pipeline."""
 
