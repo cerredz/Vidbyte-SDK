@@ -3,7 +3,7 @@
 PURPOSE: Defines the readers of what grok prints and stores: GrokWire reads one `grok --single --output-format=json` run of #1036; GrokStreamWire reads one `--output-format=streaming-json` command run and its tool calls; GrokHelperWire reads one summary.json, a `grok export` transcript and a `grok sessions delete` answer. Each turns vendor output into a record, or into the NativeThreadError that names what went wrong.
 ROLE IN CODEBASE: GrokWire is called by GrokThreadRun.execute (grok/threads.py), GrokStreamWire by GrokCommandRun.execute (grok/commands.py), and GrokHelperWire by GrokStore (grok/store.py) for each summary.json and by GrokHelperRun (grok/helpers.py) for the export and delete children; all raise through the call's NativeErrorFactory (hostkit/errors.py).
 ARCHITECTURE NOTE: Pure: no process, no file and no await; the store and the helper flows read the files and run the children. Grok writes one JSON object at exit for a --single json run, and one JSON event per line for a streaming run (text, tool_call, tool_call_update, then end {sessionId}, or error {message}). Every member name and marker comes from vidbyte/lib/constants/native_threads.py (spec INV-15). The checks run in the INV-6 order: timeout, output cap, the vendor's error object (key rejected or run failed), a bare non-zero exit, then the shape of the answer and the thread id. A summary.json member the record refuses is protocol_mismatch naming the member as Grok spells it and the file (spec INV-6).
-FUNCTION INVENTORY: GrokWire.read is the narrated main function of a #1036 run; _answer parses stdout as one JSON object, or None. GrokStreamWire.read reads a command run in the spec §9.2 order, on the id the SDK minted (spec D-29); tool_calls lists the run's tool calls for the evidence check; _events parses the stream. GrokHelperWire.thread_file reads one summary.json into a GrokThreadFile; document reads a `grok export` transcript whole; deleted reads a `grok sessions delete` answer; _checked holds the timeout, cap, not-found and exit checks the two children share; _optional_text reads one optional text member of a summary.json.
+FUNCTION INVENTORY: GrokWire.read is the narrated main function of a #1036 run; _answer parses stdout as one JSON object, or None. GrokStreamWire.read reads a command run in the spec §9.2 order, on the id the SDK minted (spec D-29); tool_calls lists the run's tool calls for the evidence check; _events parses the stream. GrokHelperWire.thread_file reads one summary.json into a GrokThreadFile; document reads a `grok export` transcript whole; deleted reads a `grok sessions delete` answer; _checked raises the problem NativeErrorFactory.child_problem finds in either child's outcome (spec D-35); _optional_text reads one optional text member of a summary.json.
 COMMON MODIFICATION PATTERNS: A new sign-in failure text from grok is one more marker in GROK_NOT_SIGNED_IN_MARKERS; a new answer member the SDK must read gets its name constant and one check in read; a new summary.json member is one name constant, one GROK_SUMMARY_MEMBERS entry and one read in thread_file.
 WHAT NOT TO DO IN THIS FILE: 1. Do not copy vendor text into an error unscrubbed; pass it as vendor_text and the factory scrubs and caps it. 2. Do not accept a cut stdout; a truncated answer is output_too_large, never parsed, and a transcript is returned whole or not at all (spec INV-21). 3. Do not start processes, read files or await anything here. 4. Do not take a command run's thread id from the stream; the SDK minted it, and an end event naming another id is protocol_mismatch.
 KNOWN EDGE CASES: A continue is matched case-insensitively and returns the id the caller gave. A fork whose answer is its source thread is protocol_mismatch, because grok then continued the source instead of copying it. A thread id that the result record would refuse is protocol_mismatch, not an argument error. A timed-out #1036 run carries no new thread id, because grok prints it only at exit; a command run always carries its minted id, and says the thread may not exist when it failed before any tool call or end event (spec INV-29, EC-81). A blank generated_title reads as no title. A tool event without a usable name is skipped, because it cannot be evidence.
@@ -238,18 +238,14 @@ class GrokHelperWire:
 
     @staticmethod
     def _checked(outcome: CliOutcome, request: NativeHelperRequest | NativeThreadRequest, errors: NativeErrorFactory, *, thread_id: str) -> None:
-        # The checks the export and delete children share: their fixed
-        # time bound, the output cap, grok's not-found text for the id,
-        # then any other non-zero exit.
-        if outcome.timed_out:
-            raise errors.failure(NativeThreadProblem.TIMED_OUT, request=request, thread_id=thread_id, outcome=outcome, vendor_text=outcome.stderr, seconds=native_threads.NATIVE_CONTROL_TIMEOUT_SECONDS)
-        if outcome.stdout_truncated:
-            raise errors.failure(NativeThreadProblem.OUTPUT_TOO_LARGE, request=request, thread_id=thread_id, outcome=outcome, vendor_text=outcome.stderr, cap_bytes=native_threads.NATIVE_PROCESS_MAX_OUTPUT_BYTES)
+        # The checks the export and delete children share, mapped in
+        # one place (spec D-35): their fixed time bound, the output
+        # cap, grok's not-found text for the id on either stream, then
+        # any other non-zero exit.
         missing = native_threads.GROK_SESSION_NOT_FOUND_TEXT.format(thread_id=thread_id)
-        if outcome.exit_code != native_threads.NATIVE_SUCCESS_EXIT_CODE and (missing in outcome.stderr or missing in outcome.stdout):
-            raise errors.failure(NativeThreadProblem.THREAD_NOT_FOUND, request=request, thread_id=thread_id, outcome=outcome, vendor_text=outcome.stderr)
-        if outcome.exit_code != native_threads.NATIVE_SUCCESS_EXIT_CODE:
-            raise errors.failure(NativeThreadProblem.RUN_FAILED, request=request, thread_id=thread_id, outcome=outcome, vendor_text=outcome.stderr)
+        problem = NativeErrorFactory.child_problem(outcome, marker=missing, texts=(outcome.stderr, outcome.stdout))
+        if problem is not None:
+            raise errors.failure(problem, request=request, thread_id=thread_id, outcome=outcome, vendor_text=outcome.stderr, seconds=native_threads.NATIVE_CONTROL_TIMEOUT_SECONDS, cap_bytes=native_threads.NATIVE_PROCESS_MAX_OUTPUT_BYTES)
 
     @staticmethod
     def _optional_text(document: Mapping[str, object], member: str, path: Path, errors: NativeErrorFactory, request: NativeHelperRequest | NativeThreadRequest) -> str | None:

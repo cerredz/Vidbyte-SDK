@@ -3,7 +3,7 @@
 PURPOSE: Defines OpencodeWire, the codec of one `opencode run --format=json` call: it builds the inline config that binds the caller's key to the provider its model names, and turns the run's CliOutcome into a NativeThreadResult, or into the NativeThreadError that names what went wrong. Also defines OpencodeHelperWire, the reader of the thread helpers' children: `session list` rows, `opencode db` session rows, an `export` document and a `session delete` answer.
 ROLE IN CODEBASE: OpencodeWire is called by OpencodeThreadRun.execute in vidbyte/harnesses/native/opencode/threads.py (also for the command functions of opencode/commands.py): config_content before the run, read after CliRunner returns. OpencodeHelperWire is called by OpencodeHelperRun (opencode/helpers.py) after each helper child. Both raise through the call's NativeErrorFactory (hostkit/errors.py).
 ARCHITECTURE NOTE: Pure: no process, no file and no await. opencode prints one JSON event per line, each with "type" and "sessionID"; "text" events carry part.text and part.messageID, "error" events carry error.name and error.data.message/statusCode; an unknown session is "Session not found" on stderr with exit 1. Every member name and marker comes from vidbyte/lib/constants/native_threads.py (spec INV-15). The checks run in the INV-6 order: timeout, output cap, a refused key, an unknown command (only when the run named one, spec D-8), an unknown session, a failed run, then the shape of the answer and the thread id. `session list` and `opencode db` print one JSON array of row objects; times are epoch milliseconds, read by one converter that refuses a bool (lint C002).
-FUNCTION INVENTORY: OpencodeWire.config_content builds the OPENCODE_CONFIG_CONTENT value; read is the narrated main function, reading the JSON lines through CliRunner.json_objects; _session finds the first usable sessionID; _error classifies the first error event and builds its vendor text; _unknown_command finds opencode's Command-not-found text for the run's command; _text joins the text parts of the last message. OpencodeHelperWire.sessions reads `session list` rows with their directories; rows reads the `opencode db` rows of one id; document returns an export whole; deleted accepts a delete; _checked holds the timeout, cap, not-found and exit checks every helper child shares; _array parses one JSON array of objects; _epoch converts epoch milliseconds to UTC; _summary builds one record, naming a refused member as opencode spells it.
+FUNCTION INVENTORY: OpencodeWire.config_content builds the OPENCODE_CONFIG_CONTENT value; read is the narrated main function, reading the JSON lines through CliRunner.json_objects; _session finds the first usable sessionID; _error classifies the first error event and builds its vendor text; _unknown_command finds opencode's Command-not-found text for the run's command; _text joins the text parts of the last message. OpencodeHelperWire.sessions reads `session list` rows with their directories; rows reads the `opencode db` rows of one id; document returns an export whole; deleted accepts a delete; _checked raises the problem NativeErrorFactory.child_problem finds in a helper child's outcome (spec D-35); _array parses one JSON array of objects; _epoch converts epoch milliseconds to UTC; _summary builds one record, naming a refused member as opencode spells it.
 COMMON MODIFICATION PATTERNS: A new key-refusal signal from opencode is one more name in OPENCODE_KEY_REJECTED_ERROR_NAMES or status in OPENCODE_KEY_REJECTED_STATUSES; a new config member is one more key in config_content; a new session row member is one name constant and one read in sessions or rows.
 WHAT NOT TO DO IN THIS FILE: 1. Do not return the config value anywhere but the child's environment; it holds the key, and the caller registers it as a secret. 2. Do not copy vendor text into an error unscrubbed; pass it as vendor_text and the factory scrubs and caps it. 3. Do not start processes or await anything here.
 KNOWN EDGE CASES: The thread id is looked for before the runner checks, so a timed-out or cut stream still reports the session opencode printed (spec INV-5). Lines that are not JSON objects, such as plugin log lines, are skipped. The answer text is only the last message's text parts, so earlier narration ("Let me look at the files first.") is left out; a run whose last message has no text returns "". A continue is matched case-insensitively and returns the id the caller gave; a fork whose answer is its source is protocol_mismatch. An empty `session list` prints nothing or [], both no threads. A list exactly NATIVE_OPENCODE_SCAN_MAX rows long may be cut and is protocol_mismatch (spec EC-75). A blank title reads as no title.
@@ -224,18 +224,13 @@ class OpencodeHelperWire:
 
     @staticmethod
     def _checked(outcome: CliOutcome, request: NativeHelperRequest, errors: NativeErrorFactory) -> None:
-        # What every helper child shares: its fixed time bound, the
-        # output cap, opencode's not-found text, then any other
-        # non-zero exit.
-        if outcome.timed_out:
-            raise errors.failure(NativeThreadProblem.TIMED_OUT, request=request, outcome=outcome, vendor_text=outcome.stderr, seconds=native_threads.NATIVE_CONTROL_TIMEOUT_SECONDS)
-        if outcome.stdout_truncated:
-            raise errors.failure(NativeThreadProblem.OUTPUT_TOO_LARGE, request=request, outcome=outcome, vendor_text=outcome.stderr, cap_bytes=native_threads.NATIVE_PROCESS_MAX_OUTPUT_BYTES)
-        failed = outcome.exit_code != native_threads.NATIVE_SUCCESS_EXIT_CODE
-        if failed and native_threads.OPENCODE_SESSION_NOT_FOUND_MARKER in outcome.stderr:
-            raise errors.failure(NativeThreadProblem.THREAD_NOT_FOUND, request=request, outcome=outcome, vendor_text=outcome.stderr)
-        if failed:
-            raise errors.failure(NativeThreadProblem.RUN_FAILED, request=request, outcome=outcome, vendor_text=outcome.stderr)
+        # What every helper child shares, mapped in one place (spec
+        # D-35): its fixed time bound, the output cap, opencode's
+        # not-found text on stderr, then any other non-zero exit.
+        marker = native_threads.OPENCODE_SESSION_NOT_FOUND_MARKER
+        problem = NativeErrorFactory.child_problem(outcome, marker=marker, texts=(outcome.stderr,))
+        if problem is not None:
+            raise errors.failure(problem, request=request, outcome=outcome, vendor_text=outcome.stderr, seconds=native_threads.NATIVE_CONTROL_TIMEOUT_SECONDS, cap_bytes=native_threads.NATIVE_PROCESS_MAX_OUTPUT_BYTES)
 
     @staticmethod
     def _array(stdout: str, outcome: CliOutcome, request: NativeHelperRequest, errors: NativeErrorFactory) -> list[Mapping[str, object]]:

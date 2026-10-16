@@ -3,7 +3,7 @@
 PURPOSE: Defines NativeErrorFactory, which builds every NativeThreadError a thread function, thread helper or command function raises: it looks the failure code up in a closed table, composes the message from the INV-5 sentences in order, scrubs every dynamic part (the values the call injected, then the shared HarnessRedactor) and caps the vendor text.
 ROLE IN CODEBASE: One factory per call, built by the public functions in the threads, helpers and commands modules of vidbyte/harnesses/native/grok, opencode and muse with the harness and the function, and handed to their flow classes, wire readers, launchers and the hostkit listing and evidence checks. A request is a NativeThreadRequest (runs and commands) or a NativeHelperRequest (helpers); the factory reads only its workspace and thread_id.
 ARCHITECTURE NOTE: Lives in hostkit, not vidbyte.lib, because scrubbing reuses HarnessRedactor from vidbyte.harnesses.serialization and lib may not import upward. Every fixed word comes from vidbyte/lib/constants/native_threads.py (spec INV-15): the sentence templates, the harness labels, the failure code of each harness and problem, and the likely cause and next step of each code. The code is looked up in NATIVE_THREAD_FAILURE_CODES, never built from text, so a code that is not a FailureCode member cannot occur.
-FUNCTION INVENTORY: register_secret remembers an injected value; scrub redacts and caps text; wrong_thread says which problem a Grok or opencode answer on the wrong thread is; listing joins names for a sentence; failure is the narrated main function that builds the error for a problem; from_configuration_error, from_unexpected and from_launch_failure build the invalid-argument, runtime and launch errors; _context_sentences formats the scrubbed workspace and thread id sentences; _observed_sentences formats what the SDK saw; _error assembles the message and the error. Only the entry methods scrub, so every helper is one call deep (AGENTS.md principle 1).
+FUNCTION INVENTORY: register_secret remembers an injected value; scrub redacts and caps text; wrong_thread says which problem a Grok or opencode answer on the wrong thread is; child_problem says which problem a finished helper or evidence child is (spec D-35), reading only its outcome and the marker and texts it is given; listing joins names for a sentence; failure is the narrated main function that builds the error for a problem; from_configuration_error, from_unexpected and from_launch_failure build the invalid-argument, runtime and launch errors; _context_sentences formats the scrubbed workspace and thread id sentences; _observed_sentences formats what the SDK saw; _error assembles the message and the error. Only the entry methods scrub, so every helper is one call deep (AGENTS.md principle 1).
 COMMON MODIFICATION PATTERNS: A new problem adds its NativeThreadProblem member, its summary and observation templates, its codes in NATIVE_THREAD_FAILURE_CODES and their texts; this file needs no change unless the problem brings a new kind of observation, which becomes one more keyword argument of failure.
 WHAT NOT TO DO IN THIS FILE: 1. Do not put raw exception text into a message; only class names, the SDK's own validator text and scrubbed vendor text. 2. Do not scrub or cut the likely cause and the next step; they must appear exactly as the constants hold them. 3. Do not raise from a builder; a builder that fails would hide the original error.
 KNOWN EDGE CASES: A registered value is replaced before the redactor runs and before the cap, so a cap cannot cut a secret in half and leave its prefix. Empty text stays empty instead of becoming the redactor's "raised without a message" fallback. A timed-out outcome reports no exit code, because the status then comes from the tree stop, not from the vendor.
@@ -76,6 +76,23 @@ class NativeErrorFactory:
             return NativeThreadProblem.THREAD_NOT_FOUND
         if request.verb is NativeThreadVerb.FORK and same:
             return NativeThreadProblem.PROTOCOL_MISMATCH
+        return None
+
+    @staticmethod
+    def child_problem(outcome: CliOutcome, *, marker: str | None = None, texts: tuple[str, ...] = ()) -> NativeThreadProblem | None:
+        # One finished helper or evidence child, in one order (spec
+        # D-35): its time bound, its output cap, the vendor's
+        # not-found marker in one of texts on a failed exit, then any
+        # other failed exit. Each caller picks its own marker source.
+        failed = outcome.exit_code != native_threads.NATIVE_SUCCESS_EXIT_CODE
+        if outcome.timed_out:
+            return NativeThreadProblem.TIMED_OUT
+        if outcome.stdout_truncated:
+            return NativeThreadProblem.OUTPUT_TOO_LARGE
+        if failed and marker is not None and any(marker in text for text in texts):
+            return NativeThreadProblem.THREAD_NOT_FOUND
+        if failed:
+            return NativeThreadProblem.RUN_FAILED
         return None
 
     @staticmethod
