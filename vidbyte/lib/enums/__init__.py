@@ -33,6 +33,9 @@ RELATED DOCS:
 TESTS:
     tests/test_jev_agent.py and tests/test_jev_run_brief.py.
     Configuration and runtime tests cover the exported enum namespace.
+    tests/features/codex_host/test_codex_host_helper_surface.py and
+    tests/features/codex_host/test_codex_host_packaging.py (the Codex*
+    export order).
 """
 
 from __future__ import annotations
