@@ -136,6 +136,16 @@ class ContextManagementTests(unittest.TestCase):
             with self.subTest(max_tool_result_chars=bad), self.assertRaisesRegex(ValueError, "max_tool_result_chars"):
                 ContextWindowAlgorithm(name="bad_compact", tool_result_admission=ToolResultAdmission.COMPACT, max_tool_result_chars=bad)
 
+    def test_invalid_admission_mode_fails_at_construction(self) -> None:
+        # @intent admission-cap-fails-at-construction
+        # [Hidden Failure] The runtime admits tool output only when a tool returns, so a mistyped mode would fail after the tool's side effects (or never, in a tool-free run).
+        for bad in ("hidden", "HIDE_RAW", "truncate", None, 3, ["compact"]):
+            with self.subTest(tool_result_admission=bad), self.assertRaisesRegex(ValueError, "tool_result_admission"):
+                ContextWindowAlgorithm(name="bad_mode", tool_result_admission=bad)
+        for good in ("raw", "compact", "hide_raw", *ToolResultAdmission):
+            with self.subTest(tool_result_admission=good):
+                self.assertEqual(ContextWindowAlgorithm(name="good_mode", tool_result_admission=good).tool_result_admission, good)
+
 
 if __name__ == "__main__":
     unittest.main()
