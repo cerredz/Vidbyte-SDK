@@ -90,3 +90,35 @@ The spec moved to revision 2 in commit `198eefdf`; `status` stays `draft`. Input
 - §12: new rows 32 and 33, row 22 is now a P3 code change, restores are from the merge base, and the P3/P4 row sets and dependency order changed.
 
 **Not edited (orchestrator files):** pipeline.md, request.md, code-map.md and vendor-facts.md. My r1 note about stale facts in code-map.md and pipeline.md still applies.
+
+## Revision r3 (review round 2, final, 2026-10-15)
+
+The spec moved to revision 3 in commit `66203747`, and `status` is now `approved` (review cap 2/2 reached). Input: `reports/S1-spec-review-r2.md`, committed with the spec (verdict SOUND WITH FIXES: 0 Blocker, 3 Major, 1 Minor). I accepted all four findings. §16 of the spec holds the full log.
+
+| ID | Severity | Disposition | Change |
+|---|---|---|---|
+| R-12 | Major | accepted (the orchestrator chose to switch Grok) | New row 34 changes Grok's `execute` step 2 to call `NativePrivateFolders.prepare` with Grok's existing constants. The same row deletes `_prepare_home` and the imports only it used (`hashlib`, `os`, `NativeSkillFolders`, `NativeThreadProblem`). NG-13 is withdrawn and struck through. D-15's runner-up (b) is now the decision. INV-20 says Grok's behaviour is unchanged. Rows 22, 25 and 32, §2, §8.2, §9.4, §11, §12.2, §12.6 and the §14 exception were updated. The §8.4 counts stay the same |
+| R-13 | Major | accepted | The new leaf `ClaudeWire._text` is added. `read` narrows the answer with `if answer is None`, then one combined `if` that covers `is_error`, `session` and `text`, and the error names the missing member via `_missing_member(answer, session, text) -> str`. `_error_text` lists `errors` only when it is a `list`. Row 20 now states the typing rule, and §12.4 checks S009 (no more than 350). C901 stays at 8 |
+| R-14 | Major | accepted (text only) | FR-3 now promises only that the source's transcript is unchanged. EC-37, A-14 and §9.1 now give the memory path as named after the workspace's git repository, and say a fork's notes reach its source. D-6 and EC-37 say the SDK drops an inherited `CLAUDE_CODE_DISABLE_AUTO_MEMORY`. D-22 is qualified. T-4 now names the store shared by every caller of a workspace path. Q-8 is restated with its stakes. README row 29 and AC-23 were updated |
+| R-15 | Minor | accepted | Row 23's comment no longer says Claude folds the case of ids. Row 32 now uses absolute imports, and §12.4 has an S040 line |
+
+**R-14 invariant check:** No stated invariant breaks, so Q-8 stays optional with default "no".
+- INV-3, INV-4 and INV-14 still hold.
+- INV-12 governs only thread ids.
+- KD-5, the user's "copy, run, new id", still holds.
+- Only FR-3's "the source is unchanged" was too broad. That was my reading of p06, not the user's words, and it is now narrowed.
+
+**Facts carried into the spec:**
+- S040 bans relative imports.
+- Ruff's C901 counts only `if` statements.
+- `NativeErrorFactory.failure(thread_id=None)` falls back to `request.thread_id`.
+- `--resume` also accepts a path to a transcript `.jsonl` file. The UUID pattern blocks this (D-8).
+- Piped stdin is capped at 10 MB. The 200,000-character cap is at most 800,000 bytes, so it fits (D-5).
+- I re-read the Claude Code cli-reference, headless and memory docs on 2026-10-15 to confirm these quotes. I ran no `claude`.
+
+**Changed design sections:**
+- §8: D-5, D-6, D-8, D-15 and D-22; NG-13 withdrawn.
+- §8.5: `_text` added, and the signature of `_missing_member` changed.
+- §9: §9.1 (memory path) and §9.4 (`_prepare_home` removed).
+- §10: T-4.
+- §12: new row 34, rows 20, 22, 23, 25, 29 and 32, new §12.2 Grok row, §12.4 S009 and S040 lines, and the P3 order.
