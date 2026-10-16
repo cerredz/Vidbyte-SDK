@@ -4,9 +4,10 @@ FILE:
     vidbyte/lib/enums/prompts.py
 
 PURPOSE:
-    Defines the stable typed identifiers for all 98 static prompt assets across 33
-    JSON/Markdown-backed families. This file owns identifiers only; prompt text and
-    family metadata belong under ``vidbyte/prompts/prompts/``.
+    Defines the stable typed identifiers for all 99 static prompt assets across 34
+    JSON/Markdown-backed families, and the opt-in system-prompt presets an agent can
+    attach. This file owns identifiers only; prompt text and family metadata belong
+    under ``vidbyte/prompts/prompts/``.
 
 ROLE IN CODEBASE:
     ``vidbyte/prompts/catalog.py`` converts descriptor keys into these enum values and
@@ -22,6 +23,10 @@ ARCHITECTURE NOTE:
 CLASS INVENTORY:
     Prompt(str, Enum): Typed keys accepted by ``Prompts.get()`` and returned by
     ``Prompts.keys()``. Contract coverage lives in ``tests/test_prompts_interface.py``.
+    SystemPromptPreset(str, Enum): Presets accepted by ``BaseAgent(system_prompt_presets=)``.
+    Each value is a family key whose ``system_prompt`` leaf holds the preset text, so a
+    new preset is one member plus one family. Coverage lives in
+    ``tests/features/system_prompt_presets/``.
 
 COMMON MODIFICATION PATTERNS:
     Add one member for each new descriptor leaf, preserve every published value, update
@@ -158,7 +163,16 @@ class Prompt(str, Enum):
     PROSECUTOR_DEFENDER_JUDGE_DEFENDER_PROMPT = "prosecutor_defender_judge.defender_prompt"
     PROSECUTOR_DEFENDER_JUDGE_JUDGE_SYSTEM_PROMPT = "prosecutor_defender_judge.judge_system_prompt"
     PROSECUTOR_DEFENDER_JUDGE_JUDGE_PROMPT = "prosecutor_defender_judge.judge_prompt"
+    WORKING_PRINCIPLES_SYSTEM_PROMPT = "working_principles.system_prompt"
+
+
+class SystemPromptPreset(str, Enum):
+    """Opt-in system-prompt fragments an agent can attach; each value names the prompt family that holds its text."""
+
+    WORKING_PRINCIPLES = "working_principles"
+
 
 __all__ = [
     "Prompt",
+    "SystemPromptPreset",
 ]

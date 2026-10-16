@@ -53,6 +53,7 @@ Agent(
     algorithm: ContextWindowAlgorithm | str | None = None,  # context-window algorithm, e.g. ContextWindow.preset.reflexion
     output_schema: type | Mapping[str, Any] | None = None,  # structured-output schema for providers that support it
     handoff: Handoff | None = None,      # produce a handoff document automatically after each run
+    system_prompt_presets: Iterable[SystemPromptPreset | str] | None = None,  # opt-in preset paragraphs, e.g. [SystemPromptPreset.WORKING_PRINCIPLES]; None inherits from the run, () opts out
 )
 ```
 
@@ -64,6 +65,7 @@ Each parameter has a specific role:
 - **Capability** (`tools`, `middleware`, `permission_policy`): What the agent can do and how it behaves.
 - **Context** (`context_items`, `context_manager`, `algorithm`): Default context and context-window behavior. Per-call context belongs on `AgentInput`.
 - **Output / handoff** (`output_schema`, `handoff`): Structured output and automatic handoff-document generation.
+- **Presets** (`system_prompt_presets`): Opt-in system-prompt paragraphs appended after `system_prompt`. `SystemPromptPreset.WORKING_PRINCIPLES` distills Felix Rieseberg's essay on working ambitiously with models; agents started inside the run inherit it. See `vidbyte/agents/README.md`, "System Prompt Presets".
 
 ## Run the Agent
 

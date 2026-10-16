@@ -16,6 +16,8 @@ Key Functions / Test Cases:
     - test_grader_keeps_the_winners_structured_output: Assures the selected trial's output_schema instance is returned.
     - test_select_winner_prefers_faithful_match: Assures the grader's exact choice is not overridden by substring candidates.
     - test_isdone_trials_are_graded_on_their_final_answers: Assures an isDone finish is graded on its final_answer, not its tool-call text.
+    - test_direct_agent_grader_runners_carry_its_keys_and_mode: Assures a DIRECT BaseAgent's trial and grader runners get its matched keys and mode.
+    - ExplicitProviderKeyCheckTests: Assures resolve_active demands a provider's own key only in DIRECT mode, counting a matched key.
 Relations:
     Validates MultiProviderAgenticGraderAlgorithm and MultiProviderAgenticGraderRuntimeAlgorithm within the test framework.
 Similar Files:
@@ -32,18 +34,24 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from vidbyte import ContextWindow, ContextWindowAlgorithm, MultiProviderAgenticGraderAlgorithm
+from vidbyte import BaseAgent, ContextWindow, ContextWindowAlgorithm, MultiProviderAgenticGraderAlgorithm
 from vidbyte.agents.algorithms.multi_provider_agentic_grader import MultiProviderAgenticGraderRuntimeAlgorithm
 from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
 from vidbyte.agents.runtime import AgentRuntime
+from vidbyte.lib.enums import TextModelMode
 from vidbyte.lib.errors import AgentExecutionError, ConfigurationError
-from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
+from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig, ProviderKeys
+from vidbyte.lib.registries.models import ProviderModelRegistry
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.config.constants import API_KEY_ENV_VARS
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.security import PermissionPolicy
 from vidbyte.lib.dataclasses.context import BaseAgentContext
 from vidbyte.lib.dataclasses.strategies import AgentResult as StrategyResult
+
+# Dummy, format-valid provider keys; nothing here is a real credential and no request leaves the process.
+_DEEPSEEK_TEST_KEY = "sk-test-deepseek"
+_GEMINI_TEST_KEY = "AIza" + "t" * 35
 
 
 class FakeResponse:
@@ -205,10 +213,11 @@ class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
             existing_tool_calls=(),
         )
 
+        # Only a DIRECT agent must hold the provider's own key; the gateway modes can run on the Vidbyte key.
         with self.assertRaises(ConfigurationError) as ctx:
             await runtime.arun(
                 "task",
-                handle=RunnerHandle(runner=FakeRunner("ignored"), provider="openai", invoke=_invoke_runner_helper, extract_text=lambda r: getattr(r, "text", str(r)), extract_metadata=lambda r: {}),
+                handle=RunnerHandle(runner=FakeRunner("ignored"), provider="openai", invoke=_invoke_runner_helper, extract_text=lambda r: getattr(r, "text", str(r)), extract_metadata=lambda r: {}, model_mode=TextModelMode.DIRECT),
                 context=context,
             )
         self.assertIn("Missing API key for explicitly requested provider 'openai'", str(ctx.exception))
@@ -474,6 +483,58 @@ class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(gemini_answer, runner_grader.calls[0]["prompt"])
         self.assertEqual(grader_metadata["grader_decision"]["selected_provider"], "gemini")
         self.assertEqual(result.output, gemini_answer)
+
+    @patch("vidbyte.agents.algorithms.multi_provider_agentic_grader.ModalityDetector.create_runner")
+    async def test_direct_agent_grader_runners_carry_its_keys_and_mode(self, mock_create_runner: MagicMock) -> None:
+        # [Silent Failure] A child runner built without the agent's keys and mode falls back to AUTO and bills the Vidbyte gateway.
+        runners = {"deepseek": FakeRunner("Canberra (from deepseek)."), "gemini": FakeRunner("Canberra (from gemini).")}
+        grader_runner = FakeRunner("Canberra (from gemini).")
+        mock_create_runner.side_effect = lambda modality, provider, model, **kwargs: grader_runner if model == "deepseek-v4-pro" else runners[provider]
+        keys = ProviderKeys(providers=("deepseek", "gemini"), keys=(_DEEPSEEK_TEST_KEY, _GEMINI_TEST_KEY))
+        algorithm = MultiProviderAgenticGraderAlgorithm(provider_models={"deepseek": "deepseek-chat", "gemini": "gemini-3.5-flash"}, grader_provider="deepseek", grader_model="deepseek-v4-pro")
+        # No provider variable is set, so the agent's api_keys are the only keys there are.
+        agent = BaseAgent(name="worker", system_prompt="Work.", provider="deepseek", model_name="deepseek-chat", api_keys=keys, model_mode=TextModelMode.DIRECT, max_iterations=1, algorithm=ContextWindowAlgorithm(name="multi_provider_agentic_grader", multi_provider_agentic_grader=algorithm))
+
+        result = await agent.arun("Capital of Australia?")
+
+        self.assertEqual(result.content, "Canberra (from gemini).")
+        self.assertEqual(sorted((call.kwargs["provider"], call.kwargs["model"]) for call in mock_create_runner.call_args_list), [("deepseek", "deepseek-chat"), ("deepseek", "deepseek-v4-pro"), ("gemini", "gemini-3.5-flash")])
+        for call in mock_create_runner.call_args_list:
+            self.assertIs(call.kwargs["api_keys"], agent.runner_config.api_keys)
+            self.assertIs(call.kwargs["mode"], TextModelMode.DIRECT)
+
+
+
+class ExplicitProviderKeyCheckTests(unittest.TestCase):
+    """resolve_active demands a provider's own key only when the agent calls providers directly."""
+
+    PROVIDER_MODELS = {"deepseek": "deepseek-chat", "gemini": "gemini-3.5-flash"}
+
+    def setUp(self) -> None:
+        # Hide every provider variable, so only the agent's matched keys can count.
+        environment = patch.dict(os.environ)
+        environment.start()
+        self.addCleanup(environment.stop)
+        for env_var in API_KEY_ENV_VARS.values():
+            os.environ.pop(env_var, None)
+
+    def test_direct_counts_a_key_matched_into_api_keys(self) -> None:
+        keys = ProviderKeys(providers=("deepseek", "gemini"), keys=(_DEEPSEEK_TEST_KEY, _GEMINI_TEST_KEY))
+        active = ProviderModelRegistry.resolve_active(self.PROVIDER_MODELS, None, api_keys=keys, model_mode=TextModelMode.DIRECT)
+        self.assertEqual(active, self.PROVIDER_MODELS)
+
+    def test_direct_without_a_key_for_a_provider_still_raises(self) -> None:
+        # The deepseek key must not stand in for gemini: a key reaches only the provider it was matched to.
+        keys = ProviderKeys(providers=("deepseek",), keys=(_DEEPSEEK_TEST_KEY,))
+        with self.assertRaises(ConfigurationError) as ctx:
+            ProviderModelRegistry.resolve_active(self.PROVIDER_MODELS, None, api_keys=keys, model_mode=TextModelMode.DIRECT)
+        self.assertIn("Missing API key for explicitly requested provider 'gemini'", str(ctx.exception))
+
+    def test_gateway_modes_need_no_provider_key(self) -> None:
+        for mode in (TextModelMode.AUTO, TextModelMode.VIDBYTE_MANAGED):
+            with self.subTest(mode=mode):
+                self.assertEqual(ProviderModelRegistry.resolve_active(self.PROVIDER_MODELS, None, model_mode=mode), self.PROVIDER_MODELS)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -57,7 +57,7 @@ class MultiProviderAgenticGraderRuntimeAlgorithm:
     async def arun(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: SpanContext | None = None) -> AgentResult:
         # Orchestrates concurrent provider trials followed by a meta-grader selection pass.
         started_at = self.runtime.middleware.clock()
-        active_models = ProviderModelRegistry.resolve_active(self.algorithm.provider_models, options)
+        active_models = ProviderModelRegistry.resolve_active(self.algorithm.provider_models, options, api_keys=handle.api_keys, model_mode=handle.model_mode)
         results = await self._run_provider_trials(message, context, handle, metadata, options, trace_context, active_models)
         candidates, total_tokens, call_contexts = self._collect_candidates(active_models, results)
         candidates_text = self._build_candidates_text(candidates)
@@ -84,7 +84,7 @@ class MultiProviderAgenticGraderRuntimeAlgorithm:
         # Runs a single provider's agentic loop, capturing output text via wrap_text for grading.
         trial_prompt = self.algorithm.agent_system_prompt_text(context.system_prompt or "")
         trial_context = dataclasses.replace(context, system_prompt=trial_prompt)
-        p_runner = ModalityDetector.create_runner(modality=ModelModality.TEXT, provider=provider_name, model=model_name)
+        p_runner = ModalityDetector.create_runner(modality=ModelModality.TEXT, provider=provider_name, model=model_name, api_keys=handle.api_keys, mode=handle.model_mode)
         captured_output: list[str] = []
         trial_handle = handle.with_runner(p_runner, provider_name).wrap_text(captured_output.append)
         res = await self.runtime._arun_once(
@@ -126,7 +126,7 @@ class MultiProviderAgenticGraderRuntimeAlgorithm:
     async def _run_grader(self, message: str, candidates_text: str, context: BaseAgentContext, handle: RunnerHandle, metadata: Mapping[str, Any] | None, started_at: Any, trace_context: SpanContext | None) -> Any:
         # Invokes the meta-grader model call via middleware and returns its raw result.
         grader_prompt = self.algorithm.render_grader_prompt(message, candidates_text)
-        grader_runner = ModalityDetector.create_runner(modality=ModelModality.TEXT, provider=self.algorithm.grader_provider, model=self.algorithm.grader_model)
+        grader_runner = ModalityDetector.create_runner(modality=ModelModality.TEXT, provider=self.algorithm.grader_provider, model=self.algorithm.grader_model, api_keys=handle.api_keys, mode=handle.model_mode)
         grader_handle = handle.with_runner(grader_runner, self.algorithm.grader_provider)
         raw_result, _, _ = await self.runtime._invoke_with_middleware(
             grader_handle,

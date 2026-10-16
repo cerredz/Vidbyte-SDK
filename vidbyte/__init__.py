@@ -15,7 +15,7 @@ Architecture:
     - Middleware exports: AgentMiddleware, MiddlewarePipeline, policy events, and diagnostic hook invocations.
     - MCP exports: McpServerConfig, McpServerHandle, McpToolPermission.
     - Context exports: context contracts plus general problem-solving challenge records.
-    - Preset exports: BudgetPreset, PermissionPreset.
+    - Preset exports: BudgetPreset, PermissionPreset, SystemPromptPreset.
     - Pipeline exports: BasePipeline, ConditionalPipeline, ParallelPipeline, PipelineNode, SequentialPipeline.
     - Output exports: OutputConnector, OutputDispatcher (sends any AgentMessage to a list of connectors), the sixteen destination connectors (SlackOutput through HubSpotTaskOutput) and TypefullyPlatform, and the OutputContent, DeliveryReceipt, OutputDestination, DeliveryStatus, and OutputDeliveryError records they use.
     - Harness exports: the Harness base class, specifications, run manifests, trajectory collection/sinks, and typed failures.
@@ -469,6 +469,7 @@ from vidbyte.lib.enums import (
     PermissionPreset,
     Prompt,
     StructuredOutputSupport,
+    SystemPromptPreset,
 )
 from vidbyte.lib.enums.config import AgentType
 from vidbyte.lib.errors import (
@@ -1208,6 +1209,7 @@ __all__ = [
     "ProgressContextItem",
     "Prompt",
     "Prompts",
+    "SystemPromptPreset",
     "ReflexionAlgorithm",
     "ResponseContextItem",
     "RuntimeLimitMiddleware",
