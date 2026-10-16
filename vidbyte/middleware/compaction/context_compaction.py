@@ -461,6 +461,11 @@ class TraceSummaryTailCompactionMiddleware(TraceReplacementCompactionMiddleware)
         # Stores the tail summarizer and the number of recent groups to summarize.
         if summarizer is None:
             raise ValueError("trace_then_summarize_tail requires an injected summarizer.")
+        # @intent summary-tail-refuses-options-it-ignores
+        # The rebuild always puts one assistant trace before one summary of the whole tail, so these would be accepted and silently dropped.
+        ignored = sorted(set(kw) & {"placement", "compose_after", "compose_after_options", "keep_last_user", "keep_pinned", "keep_errors", "keep_active_branch", "n", "percentage"})
+        if ignored:
+            raise ValueError(f"trace_then_summarize_tail does not support {', '.join(ignored)}; use TraceReplacementCompactionMiddleware for retention, placement or composition.")
         self._summarizer = summarizer
         self.keep_last_groups = keep_last_groups
         super().__init__(scope="all_non_system", keep_last_groups=keep_last_groups, summarizer=summarizer, **kw)

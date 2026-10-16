@@ -511,6 +511,27 @@ class TraceSummaryTailMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             TraceSummaryTailCompactionMiddleware(summarizer=None)
 
+    async def test_refuses_options_it_would_silently_ignore(self) -> None:
+        # [Silent Failure] the rebuild always yields one assistant trace and one tail summary, so these options were accepted and then dropped.
+        for option in ({"placement": "system_suffix"}, {"keep_errors": True}, {"keep_last_user": True}, {"compose_after": "strip_tool_result_bodies"}):
+            (name,) = option
+            with self.subTest(option=name):
+                with self.assertRaisesRegex(ValueError, f"does not support {name}; use TraceReplacementCompactionMiddleware"):
+                    TraceSummaryTailCompactionMiddleware.trace_then_summarize_tail(FakeSummarizer(), keep_last_groups=1, artifact=_ARTIFACT, **option)
+                with self.assertRaisesRegex(ValueError, f"does not support {name}"):
+                    TraceSummaryTailCompactionMiddleware(summarizer=FakeSummarizer(), artifact=_ARTIFACT, **option)
+
+    async def test_supported_options_still_construct_and_apply(self) -> None:
+        # [Edge Case] the options the rebuild does read stay accepted: artifact, render, trace marker and the cold-start fallback.
+        mw = TraceSummaryTailCompactionMiddleware.trace_then_summarize_tail(FakeSummarizer(), keep_last_groups=1, artifact=_ARTIFACT, render={"max_chars": 40}, trace_marker="custom_marker")
+        decision = await mw.before_model_call(_ctx(_provider_history()))
+        self.assertLessEqual(len(decision.transform.provider_messages[0]["content"]), 40)
+        self.assertEqual(mw.strategy_options["trace_marker"], "custom_marker")
+        fallback_mw = TraceSummaryTailCompactionMiddleware.trace_then_summarize_tail(FakeSummarizer(), fallback_mode="keep_last_n_messages", fallback_options={"n": 2})
+        fallback = await fallback_mw.before_model_call(_ctx(_provider_history()))
+        self.assertTrue(fallback.transform.metadata["fallback_used"])
+        self.assertEqual(len(fallback.transform.provider_messages), 2)
+
 
 class RunStateSharingIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_consumer_reads_producer_run_state(self) -> None:
