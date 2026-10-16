@@ -17,7 +17,7 @@ STACKED RUN. Base branch is `feat/infinite-memory-agent` (PR #1084), not `main`.
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-16 01:45 | 2026-10-16 02:20 | reports/S0-scout.md | base_commit 7efceb55; code-map.md (171 lines, 40-row leaf exposure table) |
-| S1 spec + review | running (author launched) | 2026-10-16 02:25 | | | |
+| S1 spec + review | running (spec r1 at f70e65a2; reviewer launched 07:15) | 2026-10-16 02:25 | | reports/S1-spec-author.md, reports/S1-spec-review.md | spec r1: 729 lines, 47 §12.3 rows, INV-1…24, A-1…7, Q-1/Q-3 default no, Q-2 resolved |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -31,15 +31,17 @@ STACKED RUN. Base branch is `feat/infinite-memory-agent` (PR #1084), not `main`.
 ## Baseline measurements (orchestrator, before any change, at 7efceb55)
 Script: `C:/Users/422mi/AppData/Local/Temp/claude/C--Users-422mi-vidbyte-repos/7d03425b-8396-4738-89eb-c11a8a3fac1a/scratchpad/measure_tokens.py <worktree>` (chars/4 = `TokenEstimate.count` rule; tiktoken 0.12.0 cl100k_base importable in Python 3.11).
 
-| asset | chars | chars/4 | tiktoken |
+| asset | chars | TokenEstimate.count (ceil len/4) | tiktoken |
 |---|---|---|---|
 | root_system_prompt.md | 8516 | 2129 | 1829 |
-| generator_system_prompt.md | 6011 | 1502 | 1277 |
-| verifier_system_prompt.md | 4981 | 1245 | 1059 |
-| task_prompt.md | 1141 | 285 | 241 |
+| generator_system_prompt.md | 6011 | 1503 | 1277 |
+| verifier_system_prompt.md | 4981 | 1246 | 1059 |
+| task_prompt.md | 1141 | 286 | 241 |
 | verifier_task_prompt.md | 1176 | 294 | 251 |
-| resume_prompt.md | 1090 | 272 | 232 |
-| launch_tool_description.md | 1977 | 494 | 416 |
+| resume_prompt.md | 1090 | 273 | 232 |
+| launch_tool_description.md | 1977 | 495 | 416 |
+
+(Corrected 07:15: `TokenEstimate.count` is ceil(len/4); the first table used floor division and was one low on five rows. The spec's §4 snippet output is the record.)
 
 The folder holds 40 `.md` assets; `infinite_memory.json` top level is a dict with 4 keys (the scout establishes the leaf mapping).
 
