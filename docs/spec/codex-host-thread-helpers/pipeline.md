@@ -22,12 +22,12 @@ Existing-PR run: no new branch, no new PR. Adds to draft PR #1055 on `feat/codex
 | S2 tests | done | 10-16 | 10-16 | reports/S2-test-author.md | 76 new tests in 5 files; red confirmed (area 91 failed / 537 passed = 76 new + 14 authorized-pin + 1 inherited); S2_HEAD 33787d9a |
 | S3 implement | done | 10-16 | 10-16 | reports/S3-implementer.md | S3_HEAD c81ba632 pushed (ff) to PR #1055 (draft, title unchanged); 18/18 rows, 4 new files / 20 classes (budget exact); area 673 passed + 1 inherited; SDK-LINT PASS; run_ci source 1 inherited fail / 5952 passed; package CI passed; semgrep 0 findings; remote CI 38893453043 + static 38893455393 success |
 | S4 adversarial review | done | 10-16 | 10-16 | reports/S4-review-*.md, S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; 0 Blocker / 4 Major (R-1..R-4) / 11 Minor; 0 refuted, 1 downgraded (R-E2 → R-8); conformance SOUND, conventions + engineering MERGEABLE AFTER FIXES |
-| S5 repair loop | running (iter 3: merge main) | 10-16 | | reports/S5-repair-1.md, S5-repair-2.md, verify-log.md | iter 2: R-16 ddc432fe; 4/4 green on 867d6f0c; iter 1: converged in 1 iteration: R-2 54f599de, R-3 dd3fe2c2, R-6 c3a3ef98, R-7 4fbc88b6, R-9 549c7475, R-5 3d1ff4e2; pushed ff c81ba632..03e1d7fd; remote 4/4 success on 03e1d7fd |
-| S5 re-review | done | 10-16 | 10-16 | reports/S5-rereview-1.md | round 1: SOUND; R-1..R-9 hold, six mutants each killed by their test, no regression; 0 Blocker / 0 Major / 1 Minor (R-C101) |
+| S5 repair loop | done | 10-16 | 10-16 | reports/S5-repair-1.md, S5-repair-2.md, verify-log.md | iter 2: R-16 ddc432fe; 4/4 green on 867d6f0c; iter 1: converged in 1 iteration: R-2 54f599de, R-3 dd3fe2c2, R-6 c3a3ef98, R-7 4fbc88b6, R-9 549c7475, R-5 3d1ff4e2; pushed ff c81ba632..03e1d7fd; remote 4/4 success on 03e1d7fd |
+| S5 re-review | running (round 2) | 10-16 | | reports/S5-rereview-1.md, S5-rereview-2.md | round 2 over iterations 2-4 + merges; round 1: SOUND; R-1..R-9 hold, six mutants each killed by their test, no regression; 0 Blocker / 0 Major / 1 Minor (R-C101) |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 4/8 · S5 re-review rounds: 1/2
+- S1 review rounds: 2/2 · S5 repair iterations: 4/8 · S5 re-review rounds: 2/2
 
 ## Decisions the orchestrator made
 - 2026-10-15 22:30 — Worktree created on the existing branch `feat/codex-host` (not from main); verified local == origin == 66558ee9 before `git worktree add`. — the run adds to PR #1055.
@@ -68,6 +68,9 @@ Existing-PR run: no new branch, no new PR. Adds to draft PR #1055 on `feat/codex
 
 - 2026-10-16 — S5 iteration 3 DONE: merged origin/main twice (b96b64cc ← cb554ed3, one conflict vidbyte/lib/errors/base.py resolved as union `error_type="", next_step="", thread_id=""`; 0ded7dc7 ← 8da41971 #1158, clean); pre-granted re-pin NOT used; PR test hunks vs main byte-identical before/after (orchestrator cmp); gates on merged tree: area 1 inherited / 683 passed, SDK-LINT PASS, API 640 exports, source 1 inherited / 6229 passed / 26 skipped, package CI passed, semgrep 0/986; check-runs 4/4 success on 00932996; GitHub `MERGEABLE` (`mergeStateStatus: BLOCKED` = branch protection; dispatch runs don't count — owner's known --admin gate).
 - 2026-10-16 — New finding from iteration 3's niche facts, confirmed by execution: the union added `thread_id` to CodexAgentError, and the run re-raise at native/codex/skill_functions.py:247 rebuilds the error dropping `error_type` (held in safe_runtime_details) and `thread_id` → R-17; the spawn-batch rebuild at host.py:476 has the same drop → R-18. Latent today (no codex-host path sets either field) but a silent field loss against the owner's "extensively handle errors" and against #1116's purpose. S2 author (same agent) wrote red tests via a field-carrying mapper over the real path: f9c987dc (R-17, 2 tests), b769621c (R-18, 1 test in test_codex_host_review_gaps.py; helpers moved to codex_host_support.py); scratch copies with the 1-line fixes go green (891 passed). Routed to S5 iteration 4 with the spec wording fix (INV-22/INV-35 "every field"). NOT built: CodexErrorMapper.error setting the #1116 thread_id field (changes the original host's mapping beyond spec → PR follow-up). Also for the PR body: main's #1121 PermissionCeiling now applies to host dynamic tools for the thread's life (tightening only; making it per-turn touches agents/codex/tools.py, outside §12.3 → follow-up).
+
+- 2026-10-16 — S5 iteration 4: first launch died on an API safeguard false positive (`[reasoning_extraction]`, invalid_request) before any edit; resumed the SAME agent by ID, which completed. Fixed R-17 5e30a226, R-18 804bbc91, spec INV-22/INV-35 + §17 deviation 9 04aa8cbe; merged main f7f32b19 (#1160) clean as fca03aea; verify-log 40eeebc4. Orchestrator re-ran at 40eeebc4: `SDK-LINT: PASS`; source `1 failed, 6236 passed, 26 skipped` (inherited only); package `CI passed.`; check-runs 4/4 success; `MERGEABLE`; tree clean; origin == 40eeebc4. Converged.
+- 2026-10-16 — Re-review round 2 of 2 (cap) launched: conformance lens over R-16..R-18 fixes, the three merge resolutions, and every PR-authored commit since 13a61e67.
 
 ## User replies (verbatim)
 - none
@@ -131,3 +134,6 @@ Existing-PR run: no new branch, no new PR. Adds to draft PR #1055 on `feat/codex
 - S5 gate lines at 03e1d7fd: area `1 failed, 678 passed, 2 skipped`; source `1 failed, 5957 passed, 25 skipped`; package `CI passed.`; semgrep 0 findings; API 639 exports. — *source:* S5 iteration 1
 - CI passes the inherited test because its shallow clone has no merge-base and the test returns early. — *source:* S5 iteration 1
 - Eight lint rules (A001, A002, C012, S001, S010, S025, S061, S063) report IMPROVED; lowering their baselines needs `--update-baseline`, an owner decision (not done). — *source:* S5 iteration 1
+- Merges of main in this run: c181be65 (S0, ← 72a4ade1), b96b64cc (← cb554ed3; base.py union), 0ded7dc7 (← 8da41971), fca03aea (← f7f32b19). Main moves several times an hour: fetch + `git merge-tree --write-tree --name-only HEAD origin/main` right before handing off. — *source:* S5 iterations 3-4
+- GitHub `mergeStateStatus: BLOCKED` with `mergeable: MERGEABLE` is branch protection (dispatch runs don't count); owner merges with --admin. — *source:* S5 iteration 3
+- CodexAgentError has no `error_type` attribute; it lives in `safe_runtime_details["error_type"]`. — *source:* S2 r4
