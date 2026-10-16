@@ -73,8 +73,8 @@ A rate that neither form binds is unpriced.
 
 Network rule. `NETWORK_BLOCKED` needs positive evidence that your session's own policy refused the fetch:
 
-- After each fetch, run `grep -i '^x-deny-reason' "<evidence>/pages/<name>.headers"`. A match, or a sandbox or tool permission-denial message for the fetch, ends the run `NETWORK_BLOCKED <host> <evidence file>`.
-- Any other failure on a vendor host (curl exit not 0 for DNS, connection, TLS or timeout, or an HTTP status of 400 or more without `x-deny-reason`) is first checked against GitHub with `curl -sS --max-time 30 -o /dev/null -w '%{http_code}\n' https://api.github.com`. When that does not print a 2xx status, end the run `NETWORK_BLOCKED api.github.com <evidence>/fetch-log.txt`. Otherwise the vendor page is unreachable, and section 3 decides whether that is `docs-unreachable`.
+- After each fetch, run `grep -i '^x-deny-reason' "<evidence>/pages/<name>.headers"`. A match, or a sandbox or tool permission-denial message for the fetch, ends the run `NETWORK_BLOCKED`; its detail is the host and that header line or message, on one line, because the orchestrator deletes the evidence directory after this outcome.
+- Any other failure on a vendor host (curl exit not 0 for DNS, connection, TLS or timeout, or an HTTP status of 400 or more without `x-deny-reason`) is first checked against GitHub with `curl -sS --max-time 30 -o /dev/null -w '%{http_code}\n' https://api.github.com`. When that does not print a 2xx status, end the run `NETWORK_BLOCKED` with the detail `api.github.com` and what the check printed. Otherwise the vendor page is unreachable, and section 3 decides whether that is `docs-unreachable`.
 
 ## 3. Qualify
 
