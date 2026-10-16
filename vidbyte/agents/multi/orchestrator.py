@@ -15,10 +15,11 @@ Relations:
 
 from __future__ import annotations
 
+import functools
 import inspect
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -143,20 +144,18 @@ class MagenticOneOrchestrator:
     async def plan(self, context: OrchestrationContext) -> OrchestratorPlan:
         # Runs the structured planning phase and maps its validated output to public contracts.
         prompt = self._phase_message(self._planning_prompt, context)
-        output = await self._structured_phase("plan", prompt, _PlanOutput, self._retry_budget(context), context.round)
-        return self._to_plan(output)
+        return await self._structured_phase("plan", prompt, _PlanOutput, self._retry_budget(context), context.round, self._to_plan)
 
     async def decide(self, context: OrchestrationContext) -> OrchestratorDecision:
         # Runs one structured progress assessment against the latest ledger revision.
         prompt = self._phase_message(self._progress_prompt, context)
-        output = await self._structured_phase("progress", prompt, _DecisionOutput, self._retry_budget(context), context.round)
-        return self._to_decision(output, tuple(card.name for card in context.team))
+        to_decision = functools.partial(self._to_decision, owners=tuple(card.name for card in context.team))
+        return await self._structured_phase("progress", prompt, _DecisionOutput, self._retry_budget(context), context.round, to_decision)
 
     async def replan(self, context: OrchestrationContext) -> OrchestratorPlan:
         # Runs the structured recovery phase without granting it direct ledger mutation.
         prompt = self._phase_message(self._replanning_prompt, context)
-        output = await self._structured_phase("replan", prompt, _PlanOutput, self._retry_budget(context), context.round)
-        return self._to_plan(output)
+        return await self._structured_phase("replan", prompt, _PlanOutput, self._retry_budget(context), context.round, self._to_plan)
 
     async def finalize(self, context: FinalizationContext) -> str:
         # Uses the schema-free run manager to synthesize the terminal user-facing answer.
@@ -182,8 +181,9 @@ class MagenticOneOrchestrator:
         if manager is not None:
             await self._close_manager(manager, "run")
 
-    async def _structured_phase(self, phase: str, prompt: str, schema: type[BaseModel], retries: int, round_number: int) -> BaseModel:
+    async def _structured_phase(self, phase: str, prompt: str, schema: type[BaseModel], retries: int, round_number: int, convert: Callable[[BaseModel], Any]) -> Any:
         # Retries only manager invocation/parse failures, never a middleware stop, and closes every structured phase fork.
+        # The public-contract conversion runs inside the retry, so a reply whose fields contradict its action is retried too.
         last_error: Exception | None = None
         for attempt in range(retries + 1):
             parse_attempt = attempt + 1
@@ -193,7 +193,7 @@ class MagenticOneOrchestrator:
                     raise ConfigurationError("manager_agent_factory must honor the requested output schema for each phase.", details={"phase": phase, "expected_schema": schema.__name__, "actual_schema": getattr(phase_agent.output_schema, "__name__", None)})
                 suffix = "" if attempt == 0 else "\n\nYour prior response was invalid. Return only data matching the required schema."
                 reply = await phase_agent.generate_reply(prompt + suffix, trace_metadata={"multi_agent_phase": phase, "parse_attempt": parse_attempt})
-                return self._parse_phase_reply(reply.content, reply.metadata, schema)
+                return convert(self._parse_phase_reply(reply.content, reply.metadata, schema))
             except ConfigurationError:
                 raise
             except Exception as exc:
