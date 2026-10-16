@@ -165,5 +165,52 @@ class SnapshotNullTextTests(unittest.TestCase):
         self.assertEqual((environment.files[0].notes, environment.files[0].content), ("LRU impl", "class Cache: ..."))
 
 
+def _two_prompt_plan(first: tuple[str, ...], second: tuple[str, ...]) -> PromptSplitPlan:
+    prompts = (
+        SplitPrompt(id="p1", title="Part one", prompt="Do part one.", owned_paths=first),
+        SplitPrompt(id="p2", title="Part two", prompt="Do part two.", owned_paths=second),
+    )
+    return PromptSplitPlan(goal="Split", global_instructions="Keep the API stable.", non_overlap_requirements=(), prompts=prompts)
+
+
+class OwnedPathOverlapTests(unittest.TestCase):
+    """Parallel branches overlap when their owned paths name the same location, however each is spelled."""
+
+    def test_same_or_nested_locations_conflict_and_fail_validation(self) -> None:
+        pairs = (
+            ("src/cache.py", "./src/cache.py"),
+            ("src/cache.py", "src//cache.py"),
+            ("src/cache.py", "src/../src/cache.py"),
+            ("src/auth/", "src/auth"),
+            ("src/cache.py", "src\\cache.py"),
+            ("src/auth", "src/auth/login.py"),
+            ("src/auth/login.py", "src/auth"),
+            (".", "src/cache.py"),
+            ("src/cache.py", "./"),
+        )
+        for first, second in pairs:
+            with self.subTest(first=first, second=second):
+                plan = _two_prompt_plan((first,), (second,))
+                self.assertEqual(plan.overlap_conflicts(), (f"{second} owned by both p1 and p2",))
+                with self.assertRaisesRegex(ConfigurationError, "owned_paths overlap"):
+                    plan.validate(max_prompt_count=len(plan.prompts))
+
+    def test_distinct_locations_do_not_conflict(self) -> None:
+        cases = (
+            (("src/cache.py",), ("src/cache_utils.py",)),
+            (("src/auth",), ("src/authz/login.py",)),
+            (("src/cache.py", "./src/cache.py", "src"), ("tests/test_cache.py",)),
+        )
+        for first, second in cases:
+            with self.subTest(first=first, second=second):
+                plan = _two_prompt_plan(first, second)
+                self.assertEqual(plan.overlap_conflicts(), ())
+                plan.validate(max_prompt_count=len(plan.prompts))
+
+    def test_identical_spelling_message_is_unchanged(self) -> None:
+        plan = _two_prompt_plan(("src/cache.py",), ("src/cache.py",))
+        self.assertEqual(plan.overlap_conflicts(), ("src/cache.py owned by both p1 and p2",))
+
+
 if __name__ == "__main__":
     unittest.main()
