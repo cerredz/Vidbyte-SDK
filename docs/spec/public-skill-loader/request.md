@@ -45,6 +45,13 @@ can you launch a subagent with the "spec-pipeline" skill for the following for t
   A (selected): **"Own spec-pipeline run (Recommended)"**
   Option text shown to the user: "Run a full spec-pipeline in vidbyte-sdk (spec, blind tests, adversarial review, draft PR) to make the loader public and bump to 0.2.2. The CLI pipeline waits, then resumes against it. Slower, with the most scrutiny on a public API change."
 
+**Prompt 5** (2026-10-15 evening, during S5; the user's answer to a multiple-choice question relayed by the parent session; question, selected answer, and option text verbatim):
+
+- Q: "SDK main now carries #1027, which is unreleased and breaking: it removes `api_key=` from Agent, BaseAgent and 6 other root exports, and default text calls go through the Vidbyte gateway, so an OPENAI_API_KEY-only setup fails with 'Missing Vidbyte API key'. What version should PR #1099 (the public skill loader) stamp for the next release?"
+  A (selected): **"0.4.0 (Recommended)"**
+  Option text shown to the user: "Ship the breaking change as a new minor, per AGENTS.md's 'APIs may change between minor versions'. CLI installs pinned `<0.4` won't silently pick up the gateway routing. The CLI skill PR pins `>=0.4.0,<0.5` and has to verify #1027's behavior, as the CLI's pin comment asks. Cost: 9 version-literal edits, a regenerated contract, and one repair iteration."
+- Relayed with it (the parent session's instruction, carrying the user's decision): "The version bump's release notes or docs, following the repo's 0.3.0 precedent, should name #1027's breaking changes alongside the loader, if the precedent includes such notes."
+
 ## B. Handoff block and decision ledger (verbatim, if present)
 
 none
@@ -64,7 +71,8 @@ none
 - **SDK PR first.** The SDK exposes a **public, root-exported way to resolve skill entries from every source #904 supports**: inline text, local folders, skills.sh, GitHub, Anthropic and OpenAI. Each resolves into skill documents (name plus text) that a non-Jev caller can put into any agent's prompt, with per-entry unavailability reported in a structured way (`SkillUnavailableReason`), not as a crash. The spec designs the exact shape. — Reason: the CLI may import only root exports (C028/C011), and the repo rule is "the SDK PR comes first".
 - **Prefer exposing or wrapping the loader that already exists over writing a second one.** — Reason: one loader, one set of fetch/parse/limit rules.
 - **`JevAgent` must keep its current behavior.** — Reason: it is the existing consumer; this PR only adds a public door.
-- **The SDK version goes to 0.2.2 in this PR.** — Reason: the CLI will raise its floor to the first release that contains the loader, and CLI lint rule C029 requires the CLI's floor to match the vendored contract's version, so an SDK commit with `version = "0.2.2"` must exist.
+- ~~**The SDK version goes to 0.2.2 in this PR.**~~ *Superseded by the user's decision of 2026-10-15 evening (Prompt 5) below; kept for history.* — Reason: the CLI will raise its floor to the first release that contains the loader, and CLI lint rule C029 requires the CLI's floor to match the vendored contract's version, so an SDK commit with `version = "0.2.2"` must exist.
+- **The SDK version goes to 0.4.0 in this PR** (user decision, Prompt 5, verbatim answer: "0.4.0 (Recommended)"; option text: "Ship the breaking change as a new minor, per AGENTS.md's 'APIs may change between minor versions'. CLI installs pinned `<0.4` won't silently pick up the gateway routing. The CLI skill PR pins `>=0.4.0,<0.5` and has to verify #1027's behavior, as the CLI's pin comment asks. Cost: 9 version-literal edits, a regenerated contract, and one repair iteration."). — Reason: main (merged into this branch) carries #1027, an unreleased breaking change (removes `api_key=` from Agent, BaseAgent and other root exports; default text calls go through the Vidbyte gateway), so the next release is a new minor. The release notes follow the 0.3.0 precedent (`docs/design/release-0-3-0.md`) and name #1027's breaking changes alongside the loader. Consequence for the CLI: its pin becomes `vidbyte-sdk[codex]>=0.4.0,<0.5`, and the CLI run must verify #1027's gateway routing against its six agents before relying on 0.4.0.
 - **Built as its own full spec-pipeline run** (spec, blind tests, adversarial review, draft PR) — "the most scrutiny on a public API change".
 
 ### Rejected alternatives
@@ -98,6 +106,7 @@ Scope note on these: items 1, 2, 3, 4, 6, 7 are answers the spec must give (they
 ### Clarifications and answers
 - Q: "How should vidbyte-cli let you attach skills to every agent, given that the SDK's skill loader is private and only JevAgent uses it?" — A: "SDK PR first (Recommended)".
 - Q: "If the SDK change comes first, how should it be built?" — A: "Own spec-pipeline run (Recommended)".
+- Q: "… What version should PR #1099 (the public skill loader) stamp for the next release?" (full text in §A, Prompt 5) — A: "0.4.0 (Recommended)".
 
 ### Terminology
 - **Skill entry** — one of the #904 record types (`InlineSkill`, `LocalSkill`, `SkillsShSkill`, `GitHubSkill`, `AnthropicSkill`, `OpenAISkill`), unioned as `SkillEntry`. Data only.
