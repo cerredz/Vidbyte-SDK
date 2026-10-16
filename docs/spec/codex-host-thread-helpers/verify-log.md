@@ -46,3 +46,35 @@ Expected red: exactly one inherited test, `tests/features/harness_threads/test_h
 | 7 remote checks | dispatched `ci.yml` 38924353312 and `static-policy.yml` 38924356214 on `3d1ff4e2` | PASS 4/4 | `gh api repos/cerredz/Vidbyte-SDK/commits/3d1ff4e2…/check-runs`: `Package completed success` · `Source / Python 3.12 completed success` · `Static policy completed success` · `Source / Python 3.11 completed success`. The docs commit after this one is dispatched again; its result is in the S5 STATUS block. |
 
 **Still open:** none of R-1 to R-9. R-10 to R-15 are follow-ups for the PR body (not this stage's).
+
+## Iteration 2 — 2026-10-16 16:19 UTC — agent report: reports/S5-repair-2.md
+**Defects in:** R-16 (Minor, trivial, code), which the re-review raised as R-C101 (reports/S5-rereview-1.md). The TESTS block of `vidbyte/lib/enums/__init__.py:33-35` named no S2 test file, although §12.3 row 3 modifies the file to export `CodexSkillScope` (§12.5, NFR-8). No gate was red at the start: the orchestrator's re-run at `03e1d7fd` matched the iteration 1 matrix.
+
+**Hypotheses and attempts** (in order):
+1. **Reproduce first.** `git diff c181be65...HEAD -- vidbyte/lib/enums/__init__.py` shows that this run adds the two `CodexSkillScope` lines. The header's first 36 lines hold 0 mentions of `tests/features/codex_host` (RED). After the fix they hold 2 (GREEN).
+2. **Check for a byte pin before editing.** `git grep -n "enums/__init__" -- tests` finds only the header text of `tests/features/jev_skills_preload/test_skill_sources_contract.py:4`. That file reads `enums.__all__` and no file bytes, and no test hashes the file. So the fix needs no test change.
+3. **The re-reviewer's file pair was checked, not taken as given.** A mutation probe (`scratchpad/s5i2_enums_mutants.py`) runs on a `git archive HEAD` copy and confirms that it loaded from that copy. The copy's baseline has one failure of its own: the archive has no `REPO_MAP.md`, so `test_repo_map_section_sits_between_the_harnesses_paragraph_and_stores` fails. Each mutant's count includes that failure:
+   - Remove `"CodexSkillScope"` from `__all__`: 2 failed, the packaging file only.
+   - Move it to the end of `__all__`: 2 failed, the packaging file only.
+   - Also remove its import: 3 failed, packaging plus `test_codex_host_helper_surface.py`.
+   No other file in the area suite catches any of the three. So the TESTS block names exactly those two files.
+4. **Line ending and width.** The index stores the file with LF, and the working copy has CRLF (autocrlf). The edit script refuses mixed line endings and keeps CRLF: 320 of 320 lines are CRLF. `git diff` shows 3 pure insertions. The new sentence is filled by `textwrap` at 72 columns, with the block's 4-space indent: line widths 67, 70 and 18. The older lines are wider (up to 96, wrapped at 79) and are outside the TESTS block, so they were left alone. The phrasing "X and Y." matches the block's first line and R-7's `4fbc88b6` wording.
+5. **Gates on a clean tree.** The R-16 review.md row was written before the fix and saved to scratch during the gate run, so gates 1 to 6 ran on a tree exactly at `ddc432fe` (`git status --porcelain` was empty). The row was put back afterwards.
+
+**Changes:** `ddc432fe` [R-16] · then the docs commit `docs(spec): verify-log iteration 2 for codex-host-thread-helpers` (the R-16 row in review.md, this entry, the report).
+
+**Gate matrix out** (local gates at `ddc432fe`; the docs commit after it changes only `docs/spec/`):
+| Gate | Command | Result | Final lines |
+|---|---|---|---|
+| new tests (the R-16 pins and S2 r2) | gate 1 with `-rA` | PASS | `PASSED …test_codex_host_helper_surface.py::CodexHelperEnumTests::test_skill_scope_has_the_four_wire_values_and_is_exported` · `PASSED …test_codex_host_packaging.py::CodexHostExportTests::test_existing_export_lists_gain_only_the_new_names_in_place` · the five S2 round-2 tests `PASSED` |
+| narrow | the two pinning files plus `tests/test_jev_agent.py`, `tests/test_jev_run_brief.py`, `test_skill_sources_contract.py`; `lint/run.py --rule A001` | PASS | `78 passed in 1.81s` · `A001 IMPROVED 642 -> 640` (as at `7e092c46`) · `SDK-LINT: PASS` |
+| 1 area tests | see header | PASS (inherited only) | `FAILED tests/features/harness_threads/test_harness_threads_surface.py::test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes` · `1 failed, 678 passed, 2 skipped in 52.00s` |
+| 2 lint | `$VPY lint/run.py` | PASS | 133 rule rows. The IMPROVED rows are the same eight as in iteration 1 (A001, A002, C012, S001, S010, S025, S061, S063). `A007 255/255, C008 45/45, S008 19/19, S024 25/25, S064 4/4 RATCHETED` · `S064 RATCHETED: 4 known finding(s).` · `SDK-LINT: PASS` |
+| 3 public API | `PYTHONPATH=$(pwd) $VPY scripts/generate-sdk-public-api.py --check` | PASS | `contracts/sdk-public-api.json is current at 998dc0da01d5f4519e76a3d92f08c4cd9d59d0df (vidbyte-sdk 0.3.0, 639 exports).` |
+| 4 source stage | `PYTHONPATH=$(pwd) $VPY scripts/run_ci.py --stage source` | PASS (inherited only) | `SDK-LINT: PASS` · `FAILED …::test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes` · `1 failed, 5957 passed, 25 skipped in 96.80s (0:01:36)` · `CI failed: Command failed with exit code 1: …python.exe -m pytest` |
+| 5 package stage | `env -u PYTHONPATH $VPY scripts/run_ci.py --stage package` | PASS | `No broken requirements found.` · `Installed vidbyte-sdk 0.3.0 passed smoke checks.` · `CI passed.` |
+| 6 static policy | `git add -A` (nothing to stage); `pysemgrep --test …`; `pysemgrep scan --error --config .semgrep/typed-mapping-boundary-policy.yml vidbyte` (semgrep 1.170.1) | PASS | `1/1: ✓ All tests passed` · `Scan was limited to files tracked by git` · `Ran 1 rule on 980 files: 0 findings.` |
+| inherited proof | that test in a `--shared` scratch clone at merge-base `72a4ade1`, with `origin/main` pinned there (origin/main itself has moved on to `cb554ed3`) | FAIL, as on main | `test_harness_threads_surface.py:193: AssertionError: assert 148 == 120` · `1 failed in 1.15s` |
+| 7 remote checks | `gh workflow run ci.yml` and `static-policy.yml --ref feat/codex-host`; runs 38930980948 (CI) and 38930984111 (Static policy) on `ddc432fe` | PASS 4/4 | `gh api repos/cerredz/Vidbyte-SDK/commits/ddc432fe…/check-runs`: `Package completed success` · `Static policy completed success` · `Source / Python 3.12 completed success` · `Source / Python 3.11 completed success`. The docs commit after this one is dispatched again; its result is in the S5 STATUS block. |
+
+**Still open:** none. R-1 to R-9 and R-16 are fixed. R-10 to R-15 are follow-ups for the PR body.
