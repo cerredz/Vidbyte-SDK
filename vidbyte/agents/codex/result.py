@@ -79,7 +79,8 @@ class CodexResultSerializer:
 
     @classmethod
     def items(cls, values: Sequence[ThreadItem]) -> tuple[CodexItem, ...]:
-        # Serialize stored items by the same rule as a turn result's items.
+        # Serialize stored items by the same rule as a turn result's
+        # items.
         return tuple(cls._item(value) for value in values)
 
     @classmethod
