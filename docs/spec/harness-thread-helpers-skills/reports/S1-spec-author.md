@@ -140,3 +140,63 @@ All of these are new or still unverified, and each is a probe item:
 - **Tables:** every table row has a uniform column count. I checked this by script, and it caught a misplaced T-8 row, which I fixed before the commit.
 - **Budget:** 10 new source files, as before. The new methods (`GrokStore.thread`, `GrokHelperRun.export`, `NativeCommandEvidence.require_text`) live in files already counted. `OpencodeHelperWire.info` was removed.
 - **No tests:** the spec still contains no test code.
+
+## Addendum: r3 (S1 review round 2, final; status approved)
+
+- **Spec r3:** committed as `e6b2cdbd`, on top of `a428f686`.
+- **Review read:** `reports/S1-spec-review-r2.md`. Verdict SOUND WITH FIXES, with 1 Blocker, 5 Major and 5 Minor findings, and R-10 marked unresolved.
+- **Disposition:**
+  - R-15 to R-25 accepted, all 11.
+  - R-10 re-disposed: R-15 resolves it.
+  - Nothing rejected. Nothing is still disputed, so no dispute-Q was needed.
+
+### Evidence I re-checked myself
+
+All of this comes from the strings of the opencode 1.18.31 binary. I started no opencode process and read no session data.
+
+- **`session list`:**
+  - It lists root sessions only: `E.list({roots:!0,limit:D.maxCount})`.
+  - With no limit given, it stops at 100 rows: `let Y=$.limit??100`.
+- **The unknown-command text** is `Command not found: "${t.command}".${I}`.
+- **`opencode db`:**
+  - It is `command:"db"` with `instance:!1`.
+  - Its default subcommand is `$0 [query]`, with `--format json|tsv`.
+  - The handler runs `C.all(k1.raw(u))` and prints `JSON.stringify(rows)`.
+- **The `session` table** has the columns `id`, `parent_id`, `directory`, `title`, `time_created` and `time_updated`.
+- **Not-found text:** `Session not found: ${id}`.
+- **Repo:** `NATIVE_THREAD_ID_PATTERN` is `^[A-Za-z0-9][A-Za-z0-9_-]*$`, so no quote, space or semicolon can reach the SQL. `require_command_line_units` is at `validation.py:64`, and `NativeThreadRequest` calls it under the name `prompt` at `native_threads.py:102`.
+
+### Decisions in r3 and why
+
+- **R-15 (and R-10):** get and lineage use `opencode db --format=json "<constant SELECT … WHERE id = '<id>'>"`.
+  - This is the request's own mechanism (request.md:236) and the orchestrator's preference.
+  - It reads `parent_id` for non-root sessions without moving a transcript.
+  - It is injection-safe through the id pattern (T-9).
+  - Lineage runs one query per step. A recursive CTE would need one child in all, but it is harder to verify, and lineage depth is small.
+  - The flip condition in D-26 falls back to `export` `info`.
+  - Forks record no parent (`Session.fork`), so this is now a documented limitation (EC-76, plus a README sentence).
+- **R-16:** lists pass `--max-count=10000`. Exactly the cap raises `opencode.protocol_mismatch` with a detail naming the cap, never a short list.
+  - I chose `protocol_mismatch` over `output_too_large` because the shared `OUTPUT_TOO_LARGE` observation speaks of a byte cap.
+  - The fix stays internal: an error, not a parameter.
+- **R-20:** the in-scope fix is a refusal plus error texts. A `skills=` folder named like the command is refused (D-32). The text changes cover the workspace and user shadows. The `grok inspect` pre-flight is Q-8 [scope-adding], default no.
+- **R-25:** in `anchoredSnapshot` mode the evidence comes from the run's own `muse export` (D-33). It fails closed, with a compaction cause, if A-28 is false.
+- **Unasked correction:** I reworded D-24's reason. The 1.18.31 session record may carry a model, but the decision `model=None` stands.
+
+### Least-sure assumptions now
+
+- **A-7:** `-p` slash expansion.
+- **A-26:** bundled skills resolve under a private `GROK_HOME`.
+- **A-27:** the code-review expansion appears in the export transcript.
+- **A-28:** `muse export` keeps tool calls from before compaction.
+- **A-24:** `features.video_gen` defaults on.
+
+All five fail closed and have probe items.
+
+### Self-check results (r3)
+
+- **Defined IDs:** G 4, NG 15, INV 29, AC 34, EC 81, FR 20, NFR 12, D 33, W 12, T 9, A 29, Q 8.
+- **References:** every referenced ID is defined.
+- **Names:** §8.5 = FR = 47 functions.
+- **Tables:** 0 malformed rows.
+- **Budget:** still 10 new source files and 20 classes. Exports: 68, with subpackages at 25, 15 and 16.
+- **No tests:** the spec contains no test code.

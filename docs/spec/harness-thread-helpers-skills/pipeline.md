@@ -14,8 +14,8 @@ started: 2026-10-15 18:12
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-15 18:12 | 2026-10-15 18:55 | reports/S0-scout.md | base_commit 72a4ade1 (ff from f216fdcf); code-map.md 4 sections, ~45 files |
-| S1 spec + review | running | 2026-10-15 19:00 | | reports/S1-spec-author.md | |
-| S2 tests | pending | | | | |
+| S1 spec + review | done | 2026-10-15 19:00 | 2026-10-15 22:30 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | spec r3 approved (e6b2cdbd); 2 rounds, 25 findings all accepted |
+| S2 tests | running | 2026-10-15 22:35 | | reports/S2-test-author.md | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
@@ -45,6 +45,9 @@ started: 2026-10-15 18:12
 - 2026-10-15 21:00 — S1 r2 spot-check passed: commit 7a0d170f, revision 2, §16 has a disposition row for each of R-1..R-14 (all accepted). The scope is now 47 functions (22 helpers, 25 skill functions) and 68 exports. Because accepted findings changed §8, §8.5, §9 and §10, I launched review round 2 (the last allowed), focused on those sections and what depends on them, as the playbook's S1 rule requires.
 
 - 2026-10-15 21:30 — S1 review round 2: SOUND WITH FIXES, 1 Blocker (R-15: opencode `session list` holds only root sessions and no `parentID`, so D-26's get/lineage cannot work), 5 Major, 5 Minor; 13 of 14 round-1 findings resolved. Sent to the author for the final revision (r3) with `status: approved`; anything still disputed becomes a Q-n with a default. For R-15 I pointed the author to the request's own mechanism (`opencode db`, request.md §E.2) because it reads metadata without moving transcripts (the concern behind R-10); the author decides with evidence.
+
+- 2026-10-15 22:30 — S1 r3 spot-check passed: commit e6b2cdbd, `status: approved`, revision 3, §16 has 12 round-2 rows (R-15..R-25 + R-10 re-disposition). S1 summary printed to the user; continuing to S2 without a stop (playbook rule 8).
+- 2026-10-15 22:35 — Authorized S2 to modify existing test files exactly as spec §12.3 rows 35–38 specify (surface test expected exports 68 / 25/15/16, `EXPECTED_ENUMS`, `NEW_FAILURE_CODES` 32, the stale lines 193 and 195; the errors-test key set; `fake_harness.py` stand-ins; conftest/FEATURE.md/README/static-policy test). This is an exception to the S2 template's "never modify an existing test's assertions": these pins encode the public surface this PR is specified to change, line 193 is already red on main, and the gate cannot pass without them. No other existing assertion may change.
 
 ## User replies (verbatim)
 - 2026-10-15 ~18:25 — "note, ccan you also in a subagent launch this "spec-pipeline" process for pr #1055 and explain the changes that we want to make with the implementation of the existing pr"
@@ -78,3 +81,5 @@ started: 2026-10-15 18:12
 - opencode 1.18.31: `session list` returns root sessions only, defaults to 100 rows per project, and its rows are exactly `{id,title,updated,created,projectId,directory}`; `Session.fork` sets no `parentID` (only subagent children have one); `export` gives `{info: <full session incl. parentID>, messages}`; `opencode db "<sql>" --format json` runs in-CLI (no sqlite3 needed); an unknown `--command` produces the error event `Command not found: "<name>". Available commands: …` and exit 1 — *source:* S1 review r2
 - Grok docs: summary.json members at 17-sessions.md:420-431; a same-named workspace/user skill overrides the bundled one (08-skills.md:213); `--session-id` with `--single` is documented (14-headless-mode.md:364) — *source:* S1 review r2
 - The existing TIMED_OUT/OUTPUT_TOO_LARGE advice texts (`vidbyte/lib/constants/native_threads.py:390-445`) describe runs only; Muse `anchoredSnapshot` history starts at the compaction boundary — *source:* S1 review r2
+- Spec r3 contract for S2/S3: 47 functions (§8.5); exported types `NativeThreadSummary`, `NativeCommandOutput`, `GrokThreadScope`, `GrokCommand` (11 members); FailureCode appends `GROK_COMMAND_NOT_RUN`, `OPENCODE_COMMAND_NOT_RUN`, `MUSE_COMMAND_NOT_RUN`, `GROK_STORE_UNREADABLE` (148→152); `NativeThreadProblem` gains `COMMAND_NOT_RUN`, `STORE_UNREADABLE`; `NativeThreadOperation` gains 47 members equal to the function names; constants `NATIVE_LIST_DEFAULT_LIMIT` 20, `NATIVE_RECENT_DEFAULT_LIMIT` 10, `NATIVE_LIST_MAX_LIMIT` 200, `NATIVE_OPENCODE_SCAN_MAX` 10000, `GROK_SUMMARY_GRACE_SECONDS` 60, `GROK_CODE_REVIEW_FRAGMENT`, `OPENCODE_SESSION_QUERY`, `OPENCODE_COMMAND_NOT_FOUND_TEXT`, `GROK_TEXT_OPTION_FLAGS`; exports 68 (grok 25, opencode 15, muse 16) — *source:* S1 author r3
+- opencode get/lineage use `opencode db --format=json "<OPENCODE_SESSION_QUERY>"` (a constant SELECT with a pattern-checked id; falls back to `export` `info` per D-26); opencode lists pass `--max-count=NATIVE_OPENCODE_SCAN_MAX`, and exactly the cap raises `opencode.protocol_mismatch`; opencode forks record no parent (EC-76) — *source:* S1 author r3
