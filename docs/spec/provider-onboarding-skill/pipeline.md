@@ -14,7 +14,7 @@ started: 2026-10-15 18:41
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 18:41 | 19:05 | reports/S0-scout.md | base 72a4ade1; code-map.md (4 sections, 37 per-provider touch points) |
-| S1 spec + review | running | 2026-10-15 19:10 | | reports/S1-spec-author.md, reports/S1-spec-review.md | r1 reviewed SOUND WITH FIXES (1B/8M/4m); r2 @6e6edb94 reviewed SOUND WITH FIXES (1B/4M/2m); author revising to r3 (final) |
+| S1 spec + review | done | 2026-10-15 19:10 | 2026-10-16 17:00 | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | spec r3 approved @014de415 (r1 SOUND WITH FIXES 1B/8M/4m; r2 SOUND WITH FIXES 1B/4M/2m; all Blockers fixed) |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -41,6 +41,9 @@ started: 2026-10-15 18:41
 
 - 2026-10-15 21:33 — S1 spec author (first launch) terminated on an API session limit before writing anything (no spec, no commit). Resumed the same agent via SendMessage with the user's decision verbatim, rather than relaunching, so its grounding reads are kept.
 - 2026-10-15 21:33 — Added a superseding "USER DECISION RECEIVED DURING THE RUN" block at the top of request.md §C (original notes kept below it) so every later agent that reads request.md sees the no-routine / continuous-mode decision first.
+- 2026-10-16 01:39 / 16:50 — The S1 author hit API session limits twice more (mid-r1 draft; before r3 edits). Resumed the same agent via SendMessage each time; not counted against any cap (parent's instruction).
+- 2026-10-16 17:00 — S1 closed after 2/2 review rounds; told the author to set `status: approved` in r3. Every Q-n takes its stated default (all non-blocking): Q-1 no persistent skip ledger; Q-2 no refresh step for conflicting provider PRs (stated limitation in each PR body); Q-3 no support for model IDs with ≥ 2 `/` or a provider-named first segment (D-29); Q-4 provider PRs open ready-for-review, not draft (D-16); Q-5 no `/loop` suggestion; Q-6 any first-party page stating the exact model's per-token USD rate counts as "the pricing page"; Q-7 no `allowed-tools` frontmatter; Q-8 the orchestrator does not re-run focused tests itself; Q-9 preview models are allowed and named as preview; Q-10 a rate may be bound by two quotes ≤ 1,000 bytes apart with no other model ID between. Q-3, Q-6, Q-9, Q-10 to be surfaced to the user in the final report.
+- 2026-10-16 17:00 — The harness flagged "bypass-permissions" in the S1 author's output: it is spec content (SKILL.md will document starting `claude --add-dir <parent> --permission-mode auto`, or bypassPermissions only inside an isolated container/VM, as the walk-away prerequisite). Not an instruction to the orchestrator; to be surfaced to the user as a fact about the skill.
 
 ## User replies (verbatim)
 - 2026-10-15 21:32 — (relayed by the parent session; changes a settled decision) The user was asked how to schedule the 24/7 cloud routine and answered: "dont add as routine, just explain in system prompt, should be good enough for now", and "no cloud routine".
@@ -49,6 +52,15 @@ started: 2026-10-15 18:41
 
 
 ## Niche facts accumulated (carried into every later briefing)
+- Never export `PYTHONPATH` before `scripts/run_ci.py` (it makes the clean install skip the wheel); only use it as a one-command prefix. — *source:* parent session / S1 r3
+- Spec r3 deliverable: 2 new files (`.claude/skills/onboard-model-provider/SKILL.md`, `.claude/skills/onboard-model-provider/references/provider-run.md` with a 33-row wiring table in a strict cell grammar) + 1 modified (`REPO_MAP.md` `.claude/` entry); 0 `.py`, 0 deps (D-1). — *source:* S1
+- No committed test may compare against `base_commit` or a merge-base (AC-10/11/12, INV-23…26 are PR-time evidence) — such a test breaks on later main or on every provider branch (r1 Blocker). — *source:* S1 review r1
+- D-29: a one-`/` model ID whose first segment is a `ModelProvider` value is ineligible (`Runner._normalize_provider_and_model(None, id)[0]` must be None), else an undeclared-provider call sends the new vendor's key to that other provider (r2 Blocker). — *source:* S1 review r2
+- Claude Code (docs 2026-10-16): `disable-model-invocation: true` still allows typing `/name`; `${CLAUDE_SKILL_DIR}` is substituted; subagents can start subagents (≤ 3 levels). — *source:* S1 reviews
+- `lint/run.py` runs before pytest in `run_ci.py`'s source stage; it prints `SDK-LINT: PASS`; the package smoke line is exactly `Installed vidbyte-sdk {version} passed smoke checks.`; any passing stage prints `CI passed.` — *source:* S1 r2/r3
+- No lint rule or test reads `.claude/`; `llms.txt:1198` and `artifacts/file_index.md` exclude `.claude/`, so `REPO_MAP.md` is the only index. Three historic remote `feat/provider-*` branches exist (#234, #96 closed unmerged; #319 merged); none collides with a seed slug. — *source:* S1 review r1
+- origin/main has moved past base (77efd25a at 02:39, 18 commits); none touches a checklist symbol or the REPO_MAP `.claude/` entry. — *source:* S1 review r2
+- Author's checkers (scratchpad): `C:/Users/422mi/AppData/Local/Temp/claude/C--Users-422mi-vidbyte-repos/974874d5-52be-49ef-bbf6-f27795eaf01b/scratchpad/check_checklist_r2.py` (wiring grammar, rows=33 problems=0) and `.../scratchpad/check_ids.py`. — *source:* S1
 - On this machine the bare `python` on PATH may be a browser-use env without pytest. If `python -m pytest` fails to import, use `py -3.11` (Python 3.11 at `C:\Users\422mi\AppData\Local\Programs\Python\Python311\python.exe` ran the SDK gate successfully before). — *source:* parent session 21:32
 - code-map.md §2b lists 37 per-provider touch points (traced via kimi, mistral, meta); it is the source for the skill's checklist. — *source:* S0
 - C009 (baseline 0): every token-priced default text model must resolve to a price; only OpenRouter is exempt (`_PRICED_PER_RESPONSE`). So a vendor whose default text model has no first-party price cannot pass the gate; "the repo's rule for unpriced models" (pricing.py:61-64 "omitted") only covers non-default models. — *source:* S0 §4.1.1
