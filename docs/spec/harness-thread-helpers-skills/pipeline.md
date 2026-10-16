@@ -4,7 +4,7 @@ repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-harness-thread-helpers-skills
 branch: feat/harness-thread-helpers-skills
 base_commit: 77efd25a (rebased from 0f69f7b7 before S3)
-pr:
+pr: https://github.com/cerredz/Vidbyte-SDK/pull/1147
 until: none
 started: 2026-10-15 18:12
 ---
@@ -16,8 +16,8 @@ started: 2026-10-15 18:12
 | S0 worktree + capture + recon | done | 2026-10-15 18:12 | 2026-10-15 18:55 | reports/S0-scout.md | base_commit 72a4ade1 (ff from f216fdcf); code-map.md 4 sections, ~45 files |
 | S1 spec + review | done | 2026-10-15 19:00 | 2026-10-15 22:30 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | spec r3 approved (e6b2cdbd); 2 rounds, 25 findings all accepted |
 | S2 tests | done | 2026-10-15 22:35 | 2026-10-16 01:50 | reports/S2-test-author.md | 563 new tests (12 files + fake_harness_helpers.py); red 568 failed/430 passed/3 skipped (re-run by orchestrator); b502b6f2, a2053e68 |
-| S3 implement | running | 2026-10-16 01:55 | | reports/S3-implementer.md | |
-| S4 adversarial review | pending | | | | |
+| S3 implement | done | 2026-10-16 02:05 | 2026-10-16 09:00 | reports/S3-implementer.md | HEAD 462e6d45 pushed; draft PR #1147; 998 passed/3 skipped; lint, run_ci (source+package) and semgrep green; 10/10 new files |
+| S4 adversarial review | running | 2026-10-16 09:10 | | reports/S4-review-{conformance,conventions,engineering}.md | |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
@@ -54,6 +54,11 @@ started: 2026-10-15 18:12
 - 2026-10-16 01:50 — S2 spot-check passed: re-ran `tests/features/harness_threads` in the venv → `568 failed, 430 passed, 3 skipped` (matches the report); `git diff --name-only 9cdf80d0..HEAD` touches only tests/features/harness_threads/ and docs/spec/harness-thread-helpers-skills/. S2's 5 open spec gaps (MUSE_GOAL_PROMPT_TEMPLATE value, EC-74 vs §12.4 placement of features.video_gen, EC-67 detail order, Muse session/list limit, mismatch-detail field naming) are tolerated by the tests; S3 resolves each within the spec's words and records it in its report. No spec revision needed.
 
 - 2026-10-16 02:00 — Rebased the unpushed docs+test commits from 0f69f7b7 onto origin/main 77efd25a (16 commits; mapped files touched: only `vidbyte/lib/errors/base.py` +2 lines in `CodexAgentError` and `REPO_MAP.md` 5 lines) and fast-forwarded local main. Red re-run after rebase: 568 failed, 430 passed, 3 skipped — unchanged. Done before S3 so the implementer starts on current main.
+
+- 2026-10-16 06:15 — Third usage-limit outage (reset 6:10am) stopped S3 after 4 committed W-1 commits (HEAD 6161a680), and also stopped the #1055 orchestrator and its S2 author. Resumed S3 by SendMessage. Resumed the #1055 orchestrator and told it to resume its own S2 author by ID, so it keeps its own pipeline.
+
+- 2026-10-16 09:05 — S3 spot-check passed. HEAD is 462e6d45, the branch is pushed, and PR #1147 is a draft (`gh pr view`). No `tests/features/harness_threads` file changed after S2's commit; the branch's only test diffs vs the merge base 239c408a are in harness_threads (the other test files came from S3's `git merge` of main, commit 4206cee2). I re-ran the area: with `DEEPSEEK_API_KEY` unset it gives `998 passed, 3 skipped`; with it set (as on this machine) it gives `16 failed, 982 passed`. So this disagreement between tests and implementation goes to S4 for adjudication, because S3 may not edit tests.
+- 2026-10-16 09:05 — Flagged for S4 (from S3's report, not from reading code): `NativeEnvironmentVariable.PWD = auto()` in a str enum yields lowercase `"pwd"`. Windows ignores env-var case but POSIX does not, so local gates on win32 cannot catch it.
 
 ## User replies (verbatim)
 - 2026-10-15 ~18:25 — "note, ccan you also in a subagent launch this "spec-pipeline" process for pr #1055 and explain the changes that we want to make with the implementation of the existing pr"
@@ -99,3 +104,6 @@ started: 2026-10-15 18:12
   — *source:* S2
 - Test fixtures `helper`/`skill` take `config=` or `raw_config=`. The stand-in roles and scenario fields are in test-plan.md "Notes for the implementer". The guard test `test_root_export_lists_are_untouched` passes on purpose: the root `__all__` must not grow — *source:* S2
 - Lint (`python lint/run.py`) ends `SDK-LINT: PASS` (not AGENT-LINT); it reports IMPROVED for A001, A002, S025, S061 and S063, and S2 did not lower those baselines. S062 flags adjacent-literal string concatenation — *source:* S2
+- S3 deviations (13, in spec §17): extra private helper signatures; helper children drop all four SDK key variables; `_call` returns `Any` (INV-15 allows no TypeVar); `NativeEnvironmentVariable.PWD = auto()` to dodge bandit S105; Muse goal template wording and `features.video_gen` placement chosen by S3 — *source:* S3
+- The global semgrep is broken by mcp 2.x; S3 ran the static-policy scan from an isolated venv with CI's `semgrep==1.170.1` — *source:* S3
+- AC-22 expects the lint banner `AGENT-LINT: PASS`, but `lint/run.py` prints `SDK-LINT: PASS` (a spec text defect) — *source:* S3
