@@ -15,8 +15,8 @@ started: 2026-10-15 18:12
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-15 18:12 | 2026-10-15 18:55 | reports/S0-scout.md | base_commit 72a4ade1 (ff from f216fdcf); code-map.md 4 sections, ~45 files |
 | S1 spec + review | done | 2026-10-15 19:00 | 2026-10-15 22:30 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | spec r3 approved (e6b2cdbd); 2 rounds, 25 findings all accepted |
-| S2 tests | running | 2026-10-15 22:35 | | reports/S2-test-author.md | |
-| S3 implement | pending | | | | |
+| S2 tests | done | 2026-10-15 22:35 | 2026-10-16 01:50 | reports/S2-test-author.md | 563 new tests (12 files + fake_harness_helpers.py); red 568 failed/430 passed/3 skipped (re-run by orchestrator); b502b6f2, a2053e68 |
+| S3 implement | running | 2026-10-16 01:55 | | reports/S3-implementer.md | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
@@ -48,6 +48,10 @@ started: 2026-10-15 18:12
 
 - 2026-10-15 22:30 — S1 r3 spot-check passed: commit e6b2cdbd, `status: approved`, revision 3, §16 has 12 round-2 rows (R-15..R-25 + R-10 re-disposition). S1 summary printed to the user; continuing to S2 without a stop (playbook rule 8).
 - 2026-10-15 22:35 — Authorized S2 to modify existing test files exactly as spec §12.3 rows 35–38 specify (surface test expected exports 68 / 25/15/16, `EXPECTED_ENUMS`, `NEW_FAILURE_CODES` 32, the stale lines 193 and 195; the errors-test key set; `fake_harness.py` stand-ins; conftest/FEATURE.md/README/static-policy test). This is an exception to the S2 template's "never modify an existing test's assertions": these pins encode the public surface this PR is specified to change, line 193 is already red on main, and the gate cannot pass without them. No other existing assertion may change.
+
+- 2026-10-16 01:05 — Second usage-limit outage (HTTP 429; reset at 1am) stopped S2 mid-write: 6 test files modified and 4 new, nothing committed. Resumed the same S2 agent with SendMessage rather than a fresh one, since its inventory and partial files are saved. Also resumed the PR #1055 orchestrator, which was at its S1 round-2 review.
+
+- 2026-10-16 01:50 — S2 spot-check passed: re-ran `tests/features/harness_threads` in the venv → `568 failed, 430 passed, 3 skipped` (matches the report); `git diff --name-only 9cdf80d0..HEAD` touches only tests/features/harness_threads/ and docs/spec/harness-thread-helpers-skills/. S2's 5 open spec gaps (MUSE_GOAL_PROMPT_TEMPLATE value, EC-74 vs §12.4 placement of features.video_gen, EC-67 detail order, Muse session/list limit, mismatch-detail field naming) are tolerated by the tests; S3 resolves each within the spec's words and records it in its report. No spec revision needed.
 
 ## User replies (verbatim)
 - 2026-10-15 ~18:25 — "note, ccan you also in a subagent launch this "spec-pipeline" process for pr #1055 and explain the changes that we want to make with the implementation of the existing pr"
@@ -83,3 +87,13 @@ started: 2026-10-15 18:12
 - The existing TIMED_OUT/OUTPUT_TOO_LARGE advice texts (`vidbyte/lib/constants/native_threads.py:390-445`) describe runs only; Muse `anchoredSnapshot` history starts at the compaction boundary — *source:* S1 review r2
 - Spec r3 contract for S2/S3: 47 functions (§8.5); exported types `NativeThreadSummary`, `NativeCommandOutput`, `GrokThreadScope`, `GrokCommand` (11 members); FailureCode appends `GROK_COMMAND_NOT_RUN`, `OPENCODE_COMMAND_NOT_RUN`, `MUSE_COMMAND_NOT_RUN`, `GROK_STORE_UNREADABLE` (148→152); `NativeThreadProblem` gains `COMMAND_NOT_RUN`, `STORE_UNREADABLE`; `NativeThreadOperation` gains 47 members equal to the function names; constants `NATIVE_LIST_DEFAULT_LIMIT` 20, `NATIVE_RECENT_DEFAULT_LIMIT` 10, `NATIVE_LIST_MAX_LIMIT` 200, `NATIVE_OPENCODE_SCAN_MAX` 10000, `GROK_SUMMARY_GRACE_SECONDS` 60, `GROK_CODE_REVIEW_FRAGMENT`, `OPENCODE_SESSION_QUERY`, `OPENCODE_COMMAND_NOT_FOUND_TEXT`, `GROK_TEXT_OPTION_FLAGS`; exports 68 (grok 25, opencode 15, muse 16) — *source:* S1 author r3
 - opencode get/lineage use `opencode db --format=json "<OPENCODE_SESSION_QUERY>"` (a constant SELECT with a pattern-checked id; falls back to `export` `info` per D-26); opencode lists pass `--max-count=NATIVE_OPENCODE_SCAN_MAX`, and exactly the cap raises `opencode.protocol_mismatch`; opencode forks record no parent (EC-76) — *source:* S1 author r3
+- Test contract from S2:
+  - Grok argv order: `--output-format=streaming-json`, `--session-id=<uuid4>`, `--cwd`, `--permission-mode`, optional `--model`/`--reasoning-effort`/`--agent`, then `--single=<line>`.
+  - Grok env: `GROK_WORKFLOWS=0` for the goal run only.
+  - opencode: `--command=<c>` with the arguments on stdin (empty stdin when there are none); get is a single `db --format=json <OPENCODE_SESSION_QUERY>`.
+  - `NATIVE_CONTROL_TIMEOUT_SECONDS` is read from the constants module at call time (monkeypatched in tests).
+  - Helper children drop `XAI_API_KEY`, `GROK_CODE_XAI_API_KEY`, `META_API_KEY` and `OPENCODE_CONFIG_CONTENT`.
+  - Muse `session/list` params are exactly `{workspaceRoot, limit, updatedAfter?}`; get and lineage send `excludeItems: true`; the skill evidence read sends `excludeItems: false` once; export runs `export --session <id> --out <tmp>/export/thread.json` with cwd `<tmp>/export`; ties are returned ascending by id and the SDK reverses them; each helper call gets a fresh private `XDG_CONFIG_HOME`.
+  — *source:* S2
+- Test fixtures `helper`/`skill` take `config=` or `raw_config=`. The stand-in roles and scenario fields are in test-plan.md "Notes for the implementer". The guard test `test_root_export_lists_are_untouched` passes on purpose: the root `__all__` must not grow — *source:* S2
+- Lint (`python lint/run.py`) ends `SDK-LINT: PASS` (not AGENT-LINT); it reports IMPROVED for A001, A002, S025, S061 and S063, and S2 did not lower those baselines. S062 flags adjacent-literal string concatenation — *source:* S2
