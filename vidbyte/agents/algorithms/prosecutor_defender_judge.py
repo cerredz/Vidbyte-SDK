@@ -111,7 +111,7 @@ class _StageInvocationCounter:
 
     def handle(self) -> RunnerHandle:
         # Exposes a normal RunnerHandle backed by the counting invocation boundary.
-        return RunnerHandle(runner=self.inner.runner, provider=self.inner.provider, invoke=self.invoke, extract_text=self.inner.extract_text, extract_metadata=self.inner.extract_metadata)
+        return RunnerHandle(runner=self.inner.runner, provider=self.inner.provider, invoke=self.invoke, extract_text=self.inner.extract_text, extract_metadata=self.inner.extract_metadata, api_keys=self.inner.api_keys, model_mode=self.inner.model_mode)
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,7 +240,7 @@ class DebateStageRuntimeFactory:
         # Resolves inherited transport or creates a dedicated validated text runner.
         if settings.provider is None or settings.model is None:
             return handle, handle.provider, runner_model_name(handle.runner)
-        runner = ModalityDetector.create_runner(ModelModality.TEXT, provider=settings.provider, model=settings.model)
+        runner = ModalityDetector.create_runner(ModelModality.TEXT, provider=settings.provider, model=settings.model, api_keys=handle.api_keys, mode=handle.model_mode)
         return handle.with_runner(runner, settings.provider), settings.provider, settings.model
 
 
