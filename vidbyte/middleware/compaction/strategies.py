@@ -653,12 +653,18 @@ class DeleteMessagesByIdOrRangeCompaction(BaseCompaction):
 class ToolOutputSlidingWindowCompaction(BaseCompaction):
     """Compacts older tool outputs while preserving the most recent outputs per tool."""
 
-    def __init__(self, keep_recent: int = 2, mode: CompactionMode = CompactionMode.TRUNCATE_TOOL_RESULTS, max_chars: int = 600, placeholder: str = "[older tool result cleared by compaction]", head_chars: int = 400, tail_chars: int = 200) -> None:
+    WINDOW_MODES = (CompactionMode.TRUNCATE_TOOL_RESULTS, CompactionMode.STRIP_TOOL_RESULT_BODIES, CompactionMode.HEAD_TAIL_TOOL_PREVIEW)
+
+    def __init__(self, keep_recent: int = 2, mode: CompactionMode | str = CompactionMode.TRUNCATE_TOOL_RESULTS, max_chars: int = 600, placeholder: str = "[older tool result cleared by compaction]", head_chars: int = 400, tail_chars: int = 200) -> None:
         # Stores the per-tool sliding-window size and the compaction style for older results.
         if keep_recent < 0:
             raise ValueError("keep_recent must be non-negative.")
+        # @intent sliding-window-refuses-modes-it-cannot-apply
+        # Older results are only stripped, previewed, or truncated, so any other mode would silently become truncation.
+        if mode not in self.WINDOW_MODES:
+            raise ValueError(f"window_mode must be one of {[item.value for item in self.WINDOW_MODES]}, got {getattr(mode, 'value', mode)!r}.")
         self.keep_recent = keep_recent
-        self.mode = mode
+        self.mode = CompactionMode(mode)
         self.max_chars = max_chars
         self.placeholder = placeholder
         self.head_chars = head_chars

@@ -6,7 +6,7 @@ from typing import Any
 from vidbyte.lib.dataclasses.context import ContextMessage
 from vidbyte.middleware.compaction.base import CompactionMode, Summarizer, TokenCounter
 from vidbyte.middleware.compaction.engine import ContextCompactionEngine
-from vidbyte.middleware.compaction.strategies import ReplaceWithTraceCompaction, _provider_groups
+from vidbyte.middleware.compaction.strategies import ReplaceWithTraceCompaction, ToolOutputSlidingWindowCompaction, _provider_groups
 from vidbyte.middleware.compaction.trace_render import TraceArtifactRenderer
 from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision, MiddlewareTransform
 from vidbyte.middleware.base import AgentMiddleware
@@ -236,6 +236,10 @@ class MessageHistoryCompactionMiddleware(AgentMiddleware):
             raise ValueError("max_repeated_lines must be non-negative.")
         if self.mode is CompactionMode.CONTEXT_SNAPSHOT_BRANCH_TRIM and not str(self.options.get("active_branch", "")).strip():
             raise ValueError("active_branch must be provided.")
+        # @intent sliding-window-refuses-modes-it-cannot-apply
+        # Build the window once so a window_mode it cannot apply fails here instead of failing every model call at run time.
+        if self.mode is CompactionMode.TOOL_OUTPUT_SLIDING_WINDOW:
+            ToolOutputSlidingWindowCompaction(mode=self.options.get("window_mode", CompactionMode.TRUNCATE_TOOL_RESULTS))
 
 
 class SummaryCompactionMiddleware(MessageHistoryCompactionMiddleware):

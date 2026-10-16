@@ -10,6 +10,7 @@ from vidbyte.lib.dataclasses.tools import ToolCall as RuntimeToolCall
 from vidbyte.lib.dataclasses.tools import ToolResult as RuntimeToolResult
 from vidbyte.lib.tools import ToolsFormatter
 from vidbyte.middleware.builtins import MessageHistoryCompactionMiddleware, ToolResultCompactionMiddleware
+from vidbyte.middleware.compaction import ToolOutputSlidingWindowCompaction
 from vidbyte.tools.builtins.context import ContextCompactionTool
 from vidbyte.tools.types import ToolCall
 
@@ -401,6 +402,27 @@ class DeterministicStrategyTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             await ContextCompactionEngine().compact_messages((msg("tool", "x", "tool_result"),), mode=CompactionMode.TOOL_OUTPUT_SLIDING_WINDOW, options={"window_mode": "not_a_mode"})
 
+    async def test_tool_output_sliding_window_refuses_modes_it_cannot_apply(self) -> None:
+        # [Silent Failure] A mode the window cannot apply is refused by name instead of silently becoming truncation.
+        for window_mode in (CompactionMode.HIDE_TOOL_RESULTS, CompactionMode.MECHANICAL_BLOAT_SCRUBBER, CompactionMode.KEEP_LAST_N_MESSAGES, "hide_tool_results", "not_a_mode"):
+            with self.subTest(window_mode=window_mode):
+                with self.assertRaises(ValueError) as caught:
+                    ToolOutputSlidingWindowCompaction(mode=window_mode)
+                for valid in ("truncate_tool_results", "strip_tool_result_bodies", "head_tail_tool_preview"):
+                    self.assertIn(valid, str(caught.exception))
+
+    async def test_tool_output_sliding_window_applies_each_supported_mode_given_as_enum_or_string(self) -> None:
+        # [Hidden Assumption] Supported window modes keep their treatment whether passed as an enum member or its string value.
+        messages = (msg("tool", "x" * 50, "tool_result", tool_name="lookup"), msg("tool", "new-output", "tool_result", tool_name="lookup"))
+        expected = {CompactionMode.TRUNCATE_TOOL_RESULTS: "[... truncated 40 characters ...]", CompactionMode.STRIP_TOOL_RESULT_BODIES: "[older tool result cleared by compaction]", CompactionMode.HEAD_TAIL_TOOL_PREVIEW: "...[omitted 40 characters]..."}
+        for mode, marker in expected.items():
+            for given in (mode, mode.value):
+                with self.subTest(window_mode=given):
+                    after = await ToolOutputSlidingWindowCompaction(keep_recent=1, mode=given, max_chars=10, head_chars=5, tail_chars=5).compact(messages)
+                    self.assertIn(marker, after[0].content)
+                    self.assertEqual(after[0].metadata["compaction"], mode.value)
+                    self.assertEqual(after[1].content, "new-output")
+
     async def test_clear_tool_results_exclusions_and_metadata(self) -> None:
         # [Edge Case] Empty exclusions clear all results and record original size.
         messages = (msg("tool", "secret", "tool_result"),)
@@ -621,6 +643,34 @@ class DeterministicMiddlewareTests(unittest.IsolatedAsyncioTestCase):
             MessageHistoryCompactionMiddleware.trim_to_token_budget(max_tokens=-1)
         with self.assertRaises(ValueError):
             MessageHistoryCompactionMiddleware.context_snapshot_branch_trim(active_branch="")
+
+    async def test_tool_output_sliding_window_factory_refuses_window_modes_it_cannot_apply(self) -> None:
+        # [Silent Failure] An unsupported window_mode fails at construction rather than truncating older results on every call.
+        for window_mode in ("hide_tool_results", "mechanical_bloat_scrubber", CompactionMode.KEEP_LAST_N_MESSAGES, "not_a_mode"):
+            with self.subTest(window_mode=window_mode):
+                with self.assertRaisesRegex(ValueError, "window_mode must be one of"):
+                    MessageHistoryCompactionMiddleware.tool_output_sliding_window(keep_recent=1, window_mode=window_mode)
+
+    async def test_tool_output_sliding_window_factory_applies_supported_window_modes(self) -> None:
+        # [Edge Case] The three supported window modes still construct and compact older provider tool results.
+        provider_messages = ({"role": "user", "content": "go"}, *_lookup_pair("openai", "a", "x" * 900), *_lookup_pair("openai", "b", "new-output"))
+        expected = {"truncate_tool_results": "[... truncated 890 characters ...]", "strip_tool_result_bodies": "[older tool result cleared by compaction]", "head_tail_tool_preview": "...[omitted 300 characters]..."}
+        for window_mode, marker in expected.items():
+            for given in (window_mode, CompactionMode(window_mode)):
+                with self.subTest(window_mode=given):
+                    middleware = MessageHistoryCompactionMiddleware.tool_output_sliding_window(keep_recent=1, window_mode=given, max_chars=10)
+                    decision = await middleware.before_model_call(MiddlewareContext(hook=MiddlewareHook.BEFORE_MODEL_CALL, agent_name="agent", message="go", provider_messages=provider_messages))
+                    contents = [m["content"] for m in decision.transform.provider_messages if m["role"] == "tool"]
+                    self.assertIn(marker, contents[0])
+                    self.assertEqual(contents[1], "new-output")
+
+    async def test_legacy_tool_sliding_window_refuses_unsupported_window_mode(self) -> None:
+        # [Hidden Failure] compact_context reports an unsupported window_mode as an error and leaves the history untouched.
+        state = MemoryState((msg("tool", "x" * 900, "tool_result", tool_name="fetch"), msg("tool", "new", "tool_result", tool_name="fetch")))
+        result = await ContextCompactionTool(state).execute(ToolCall("compact_context", {"mode": CompactionMode.TOOL_OUTPUT_SLIDING_WINDOW.value, "keep_recent": 1, "window_mode": "hide_tool_results"}))
+        self.assertEqual(result.status.value, "error")
+        self.assertIn("window_mode must be one of", result.output)
+        self.assertEqual(state.messages()[0].content, "x" * 900)
 
     async def test_legacy_tool_supports_head_tail_preview(self) -> None:
         # [Edge Case] ContextCompactionTool delegates new head/tail preview mode.
