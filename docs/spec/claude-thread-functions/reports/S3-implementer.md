@@ -1,6 +1,8 @@
 # S3 implementer report — claude-thread-functions
 
-Status: BLOCKED at the push step (Phase 6). Every §12.3 row is implemented and committed locally; nothing is pushed, PR #1044 is not retitled, CI is not dispatched, and the spec status stays `tests-written`. One S2 test contradicts the spec (see "Blocking finding").
+Status: DONE. Every §12.3 row is implemented; the branch is pushed (`feat/claude-host`), PR #1044 is retitled, CI and Static policy are dispatched, the spec is `status: implemented` and §17 records the S3 row and deviations.
+
+History: the first pass stopped BLOCKED at the push because one S2 test contradicted the spec (see "Blocking finding"). The test author fixed it in `140cc2fa` (`model=pack.OPENCODE_MODEL` on the opencode request, no assertion changed), with docs `3839c7bc` and the orchestrator's `adbffcfe`; S3 then re-ran the gates, caught up with main twice and finished Phases 6 and 7 (see "Round 2").
 
 ## Phase 2 — catch-up merge and drift check
 
@@ -9,7 +11,7 @@ Status: BLOCKED at the push step (Phase 6). Every §12.3 row is implemented and 
 - Pack after the merge: `203 failed, 427 passed, 2 skipped in 79.56s` (same as S2's red figure).
 - Drift check `git diff --stat 72a4ade1..origin/main -- <spec §11/§12.3 paths>`: only `vidbyte/lib/enums/__init__.py` (+`SystemPromptPreset`, additive) and `vidbyte/lib/enums/prompts.py` (not touched by this spec). No structural drift.
 
-## Blocking finding
+## Blocking finding (round 1; resolved by S2 in 140cc2fa)
 
 `tests/features/harness_threads/test_harness_threads_claude_surface.py::test_request_applies_the_claude_rules_only_to_claude` (line 219–220) builds
 
@@ -64,6 +66,8 @@ c75b3f01 docs(process): name Claude Code among the separate-style CliArgv caller
 ```
 
 Every commit ends with the `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` trailer.
+
+After those: `27d5cd1b` (this report, round 1); S2's `140cc2fa` and `3839c7bc` and the orchestrator's `adbffcfe`; merges `5454d057` (origin/main `8cfe3e93`) and `cf9c541d` (origin/main `b28c3027`); `1443f2e4 docs(spec): record implementation for claude-thread-functions`; then `docs(spec): record implementation proof for claude-thread-functions` (§17 row, deviations, this report).
 
 ## What was built, in data-flow order
 
@@ -158,7 +162,51 @@ CI passed.
 
 Scope checks against the merge base `0105b5b7`: `pyproject.toml`, `vidbyte/tools`, `vidbyte/lib/errors/__init__.py` and `lint/baseline.json` are byte-identical; the files changed outside `docs/spec/claude-thread-functions/` and `tests/` are exactly the §12.3 files. No commit of this stage touches `tests/` (`git log --no-merges 25211e79..HEAD --not origin/main -- tests` is empty); every test file that differs from `25211e79` is identical to `origin/main` (brought in by the catch-up merge).
 
-Not run (blocked before them): `git push`, the PR #1044 retitle, the `ci.yml` and `static-policy.yml` dispatches, the spec `status: implemented` commit and the §6.2/§17 proof commit.
+The gate lines above are round 1 (before the S2 fix). Round 2 follows.
+
+## Round 2 — after the S2 test fix
+
+1. Pack on `adbffcfe`: `1 failed, 629 passed, 2 skipped in 160.49s` — the one failure was the known load-sensitive `test_harness_threads_launcher.py::test_tree_stop_never_runs_a_taskkill_from_the_current_folder[cancel]`; rerun alone: `2 passed in 3.95s`.
+2. `git fetch`: origin/main had moved to `8cfe3e93` (#1105–#1108, algorithm and runtime files only, no overlap with this spec). Merged → `5454d057`, no conflicts, no `tests/` conflict. Pack after the merge:
+
+```
+.......s................................................                 [100%]
+630 passed, 2 skipped in 212.80s (0:03:32)
+```
+
+3. Source stage on `5454d057` (machine at 60–100% CPU from other sessions' pytest, lint and multiprocessing jobs): lint `SDK-LINT: PASS`, compileall and the three context/trace checks `ok`, then
+
+```
+FAILED tests/features/harness_threads/test_harness_threads_process_bounds.py::test_run_past_its_timeout_is_timed_out_with_its_tree_stopped[grok-hold-False]
+FAILED tests/features/harness_threads/test_harness_threads_wsl.py::test_wsl_run_past_its_timeout_is_reaped_with_the_calls_mark
+FAILED tests/test_mcp_stdio_transport.py::McpStdioTransportHardeningTests::test_cancelled_waiter_does_not_break_transport
+====== 3 failed, 6041 passed, 16 skipped, 1 warning in 365.32s (0:06:05) ======
+```
+
+   All three are timing tests over code this branch does not change in behaviour. Evidence, A/B against a `git archive origin/main` export run under the same load:
+   - process-bounds tree stop: at 100% load, branch `2 failed, 3 passed` and main `2 failed, 3 passed` (both `muse-hold-False` among them); once load fell below 40%, branch `5 passed` (together with the MCP test: `1 failed, 5 passed in 16.55s`, the failure being the MCP test).
+   - WSL reap: branch reruns `1 passed in 3.22s`, `1 passed in 4.37s`; main `1 passed in 3.89s`.
+   - MCP cancelled waiter (`vidbyte/tools` and its test are byte-identical to origin/main): five interleaved runs, branch 2 failed / 3 passed, main 2 failed / 3 passed (`try 1 branch: 1 failed in 6.02s | main: 1 failed in 6.19s` … `try 5 branch: 1 passed in 0.81s | main: 1 failed in 6.39s`).
+4. Package stage on `5454d057` (PYTHONPATH unset):
+
+```
+Installed vidbyte-sdk 0.3.0 passed smoke checks.
+CI passed.
+```
+
+5. Pushed `5454d057`; `gh pr edit 1044` retitled it. `gh pr view 1044` then said `"mergeStateStatus":"BEHIND"`: main had moved again to `b28c3027` (#1109, #1110; algorithm files and two new tests, no overlap). Merged → `cf9c541d`, no conflicts. Pack plus main's two new test files:
+
+```
+......................                                                   [100%]
+668 passed, 2 skipped in 81.24s (0:01:21)
+```
+
+6. Pushed `cf9c541d`. PR: `{"baseRefName":"main","isDraft":false,"mergeable":"MERGEABLE","title":"[WIP] feat(harnesses): run, continue and fork Claude Code threads with the caller's API key","url":"https://github.com/cerredz/Vidbyte-SDK/pull/1044"}` (state read before the second merge said BEHIND). Dispatched on `cf9c541d`:
+   - CI: run `38839502990` (https://github.com/cerredz/Vidbyte-SDK/actions/runs/38839502990)
+   - Static policy: run `38839504682` (https://github.com/cerredz/Vidbyte-SDK/actions/runs/38839504682)
+7. `1443f2e4 docs(spec): record implementation for claude-thread-functions` (status `implemented`), pushed. Then the §17 r3 S3 row and the "Implementation deviations (S3)" list (no §6.2 Proof cell was blank; AC-21 already names its gate commands), committed and pushed with this report.
+
+Test-tree check: `git log --no-merges --oneline 3839c7bc..HEAD --not origin/main -- tests` prints nothing, and `git show --cc` of both merge commits prints nothing for `tests/`.
 
 ## Tricky parts
 
