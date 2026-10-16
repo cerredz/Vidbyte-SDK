@@ -25,6 +25,7 @@ from vidbyte.agents.infinite.workspace import InfiniteWorkspace
 from vidbyte.context.handoff.infinite import InfiniteHandoff
 from vidbyte.lib.constants.infinite import (
     INFINITE_HANDOFF_OUTCOME_MAX_CHARS,
+    INFINITE_HANDOFF_RUN_ID_METADATA_KEY,
     INFINITE_HANDOFF_SECTION_MAX_CHARS,
     INFINITE_HANDOFF_SUFFIX,
     INFINITE_HISTORY_MAX_TOKENS,
@@ -155,7 +156,7 @@ class InfiniteMemoryAgent(BaseAgent):
         # the saved text always fits the backend's handoff sections.
         sections = {outcome: self._section(InfiniteHandoff.outcome(journal.task, journal.stop_reason, journal.answer), INFINITE_HANDOFF_OUTCOME_MAX_CHARS)}
         sections.update((title, self._section(body, INFINITE_HANDOFF_SECTION_MAX_CHARS)) for title, body in zip(titles, bodies, strict=True))
-        handoff = InfiniteHandoff(sections=sections, title=InfiniteHandoff.TITLE.format(run_id=journal.run_id), metadata={"filled": True, "run_id": journal.run_id})
+        handoff = InfiniteHandoff(sections=sections, title=InfiniteHandoff.TITLE.format(run_id=journal.run_id), metadata={"filled": True, INFINITE_HANDOFF_RUN_ID_METADATA_KEY: journal.run_id})
 
         # @intent the-handoff-file-is-whole-and-identical-everywhere
         # Save the text beside the journal through an atomic swap, with
