@@ -3,7 +3,7 @@
 PURPOSE: Shared offline fixtures for the harness_threads pack: lazy imports of the spec §8.5 contract names, a sandbox with a redirected user home, a workspace, skill folders and an empty PATH folder, the scripted stand-in (fake_harness.py) with its log reader, `.exe`/script stand-ins for PATH lookups, the INV-5 error check, and process liveness checks for both platforms. For the thread helpers and skill functions it adds callers by function name (helper, skill) and builders that seed each vendor store in the layout the stand-in keeps (stores).
 ROLE IN CODEBASE: Loaded by pytest for every module in tests/features/harness_threads/. The stand-in runs as a real child process through the config records' <harness>_command fields (spec §13 "Real seams"); nothing in the thread functions, CliRunner or the filesystem is mocked.
 ARCHITECTURE NOTE: Every vidbyte import happens inside a fixture (lib_api, api), so a missing module fails each test at setup instead of aborting collection of the whole suite; lib_api needs only the vidbyte.lib names, so the process, argv and record tests can pass before the harness modules land. The sandbox is made by tmp_path_factory.mktemp("case") so no path holds a harness name, and the user home and the workspace are sibling folders (spec §13, R-17). PATH holds only the sandbox's own bin folder, so no test can reach a real grok, opencode, muse or wsl.exe.
-FUNCTION INVENTORY: lib_api and api return namespaces of contract names; Sandbox builds the folders, scenarios, stand-ins and snapshots and reads the stand-in logs; sandbox builds one per test with the home, PATH and temp folder redirected; call runs one thread function against the stand-in; helper and skill run one new function by its §8.5 name (the missing name fails the test, never the collection), with the stand-in config unless raw_config hands a value over as is; Stores seeds a Grok store (summary.json, non-session files), opencode's SQLite `session` table and Muse session metadata; summary_fields flattens a NativeThreadSummary; check_error asserts the INV-5 attributes and message order, for a helper or skill function through `operation=`; fast_stop shrinks NATIVE_KILL_WAIT_SECONDS; wait_until polls with a deadline; process_alive reports liveness on win32 and POSIX; launcher_bytes finds pip's console-script launcher for `.exe` stand-ins.
+FUNCTION INVENTORY: lib_api and api return namespaces of contract names; Sandbox builds the folders, scenarios, stand-ins and snapshots and reads the stand-in logs; sandbox builds one per test with the home, PATH and temp folder redirected and the vendor key variables cleared; load_fake_harness and load_fake_helpers load the stand-in's two modules by path; call runs one thread function against the stand-in; helper and skill run one new function by its §8.5 name (the missing name fails the test, never the collection), with the stand-in config unless raw_config hands a value over as is; Stores seeds a Grok store (summary.json, non-session files), opencode's SQLite `session` table and Muse session metadata; summary_fields flattens a NativeThreadSummary; check_error asserts the INV-5 attributes and message order, for a helper or skill function through `operation=`; fast_stop shrinks NATIVE_KILL_WAIT_SECONDS; wait_until polls with a deadline; process_alive reports liveness on win32 and POSIX; launcher_bytes finds pip's console-script launcher for `.exe` stand-ins.
 COMMON MODIFICATION PATTERNS: Add a stand-in behaviour as a scenario field read by fake_harness.py; add a fixture here only when two or more modules in this pack need it.
 WHAT NOT TO DO IN THIS FILE: 1. Do not stub the thread functions, CliRunner or the filesystem; a missing feature must stay red. 2. Do not leave PATH, USERPROFILE or HOME pointing at the developer's machine: the Grok fallback is `~/.grok/bin/grok.exe`, which exists on the author's machine. 3. Never name the WSL distro MuseUbuntu1; the stand-in distro is FAKE_DISTRO.
 KNOWN EDGE CASES: pip's distlib `t64.exe` is the launcher behind every `.exe` stand-in; tests that need one skip when pip lacks it. Liveness on win32 uses OpenProcess/GetExitCodeProcess (STILL_ACTIVE 259). Path text in messages is compared in both native and POSIX spelling, and case-insensitively on win32 (shutil.which returns PATHEXT suffixes in upper case).
@@ -14,6 +14,7 @@ TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads
 from __future__ import annotations
 
 import asyncio
+import functools
 import hashlib
 import importlib
 import importlib.util
@@ -262,11 +263,14 @@ def api(lib_api: SimpleNamespace) -> SimpleNamespace:
 def sandbox(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> Sandbox:
     # Spec §13 user-home seam: USERPROFILE (win32) and HOME (POSIX)
     # point at the sandbox home, a sibling of the workspace.
+    # The stand-in's CREDENTIAL_NAMES are cleared (S4 R-4).
     box = Sandbox(tmp_path_factory.mktemp("case").resolve())
     monkeypatch.setenv("USERPROFILE", str(box.home))
     monkeypatch.setenv("HOME", str(box.home))
     monkeypatch.setenv("PATH", str(box.bin))
     monkeypatch.setattr(tempfile, "tempdir", str(box.tmp))
+    for name in load_fake_harness().CREDENTIAL_NAMES:
+        monkeypatch.delenv(name, raising=False)
     return box
 
 
@@ -562,6 +566,16 @@ class Stores:
         path = self.sandbox.state_dir / "muse-meta" / f"{thread_id}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({"session": session, "items": items or []}), encoding="utf-8")
+
+
+@functools.cache
+def load_fake_harness() -> Any:
+    # The stand-in itself (standard library only; main() runs only as a
+    # script), for the credential names it logs.
+    spec = importlib.util.spec_from_file_location("fake_harness_for_tests", FAKE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def load_fake_helpers() -> Any:
