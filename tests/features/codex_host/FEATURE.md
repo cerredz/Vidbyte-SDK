@@ -102,7 +102,7 @@ The thread helpers add these (thread-helpers spec):
 - A skill run with no read-back → Codex drops the skill entry, and the caller gets a handle for a plain prompt. A read-back with no deadline or attempt cap → it waits forever.
 - A skill run on an ephemeral thread → the read-back can never confirm it, so it always spends and then fails.
 - The turns tool sends no default `limit` → a whole transcript lands in one tool result.
-- A run tool takes no cap slot, or keeps it after a failure → the cap never fires, or it fills up forever.
+- A run tool takes no cap slot, or keeps it after a failure or a cancel (the goal tool included) → the cap never fires, or it fills up forever.
 - A delete tool exists → a prompt-injected model deletes the user's history.
 - A skill path, a skill description or a goal objective is copied into an error → private paths and text reach the model.
 

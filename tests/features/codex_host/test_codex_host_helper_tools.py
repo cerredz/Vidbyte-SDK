@@ -300,6 +300,37 @@ class CodexHelperToolScopeTests(_ToolCase):
         # Both calls held the only slot; it must be free again.
         self.assert_success(await _call(tools, "run_codex_goal", {"objective": "Ship the fix."}))
 
+    async def test_a_failed_or_cancelled_goal_run_releases_its_slot(self) -> None:
+        """INV-27, AC-33 and review R-1: a goal run holds the only slot just while the host call runs.
+
+        A host error or a cancel must give the slot back, or a scope would lock after max_live_turns failed goal runs.
+        Each case is followed by another run tool that needs the same slot.
+        """
+        host = StubCodexHost()
+        tools = _toolset(host, max_live_turns=1)
+        host.raises["run_codex_goal"] = CodexAgentError(
+            "Codex shows no goal on the new thread. Thread: thr-stub-1.",
+            failure_code="codex.command_not_run",
+            operation="run_codex_goal",
+            next_step=NEXT_STEPS["codex.command_not_run"],
+        )
+        self.assert_error_result(await _call(tools, "run_codex_goal", VALID_ARGUMENTS["run_codex_goal"]), "codex.command_not_run")
+        del host.raises["run_codex_goal"]
+        # The failed goal run gave the slot back, so a skill run can take it.
+        probe = _handle_of(self.assert_success(await _call(tools, "run_codex_skill", VALID_ARGUMENTS["run_codex_skill"])))
+        _finish(host, probe)
+
+        host.gates["run_codex_goal"] = asyncio.Event()
+        task = asyncio.ensure_future(_call(tools, "run_codex_goal", VALID_ARGUMENTS["run_codex_goal"]))
+        await _until(lambda: host.names().count("run_codex_goal") == 2, "the second goal run to reach the host")
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+        del host.gates["run_codex_goal"]
+        # The cancelled goal run gave the slot back too, so a docs run can take it.
+        self.assert_success(await _call(tools, "run_codex_openai_docs", VALID_ARGUMENTS["run_codex_openai_docs"]))
+        self.assertEqual([name for name in host.names() if name in RUN_TOOLS], ["run_codex_goal", "run_codex_skill", "run_codex_goal", "run_codex_openai_docs"])
+
     async def test_new_codes_become_error_results_with_their_next_steps(self) -> None:
         # FR-15: the four new codes reach the model as "<code>: <message> Next step: <next_step>".
         rows = (
