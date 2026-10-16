@@ -85,3 +85,58 @@ All of these are unverifiable offline. The manual QA probe in the PR body (§12.
 - **Threats:** every T- row names a control and where it sits.
 - **No tests:** §13 has facts only, with no `def test_` and no `assert`.
 - **One fix made during the self-check:** FR-20 (docs) had no acceptance criterion. I added **AC-26** (P1, proven by review) and linked it from W-11.
+
+## Addendum: r2 (S1 review round 1)
+
+- **Spec r2:** committed as `7a0d170f`. HEAD before it was `39eaa7f4`, after the rebase onto origin/main `0f69f7b7`.
+- **Review read:** `reports/S1-spec-review.md`. Verdict SOUND WITH FIXES, with 1 Blocker, 9 Major and 4 Minor findings.
+- **Disposition:** all 14 accepted. None rejected, none deferred. §16 records each one.
+
+### Evidence I re-checked before accepting
+
+I did not take the review on trust. I checked each claim against the raw source:
+
+- **R-2:** `~/.grok/sessions/` on this machine holds only `session_search.sqlite`.
+- **R-3:** `lint/baseline.json:11` has `"C002": 9`, and the rule is `severity = "blocking"`. `RecordFieldValidator.require_int` / `require_bool` are at `validation.py:85` / `:92`.
+- **R-4, the user guide:**
+  - `04-slash-commands.md:275-277` documents `/imagine-video` with `image_to_video`.
+  - `26-config-reference.md:290` documents `features.video_gen`.
+- **R-4, the code-review skill:**
+  - `code-review/SKILL.md` is a 192-line rubric.
+  - It has no persona file and no distinctive tool, and it does not say "call no tool".
+- **R-5:** the `/goal` reserved words are at `04-slash-commands.md:328`, and the execute-plan argument hint splits on whitespace.
+- **R-6:** `14-headless-mode.md:25` and `:354` document `-s, --session-id`: "Create a **new** session with this **UUID**". `GrokFlag` has no `SESSION_ID` today.
+- **R-13:**
+  - Surface test line 195 is stale as well as line 193.
+  - `fake_harness.py:562` returns `forkedFrom` as a string.
+  - FailureCode has 148 members at both `72a4ade1` and `0f69f7b7`, by the test's own `ast` logic.
+- **Rebase effects:**
+  - The `vidbyte/lib/enums/__init__.py` native import block is still at lines 111–126, and `__all__` is at lines 172–290.
+  - `contracts/sdk-public-api.json` has 0 `harnesses.native` entries.
+- **Baseline re-run:** on `39eaa7f4`, `1 failed, 435 passed, 2 skipped in 61.86 s`. The single failure is the same stale line-193 pin.
+
+### Where I went beyond the reviewer's smallest fix
+
+- **R-4: both functions are restored, not only imagine-video.** The orchestrator ruled both in scope (request.md:267/:269). code-review leaves no tool trace, so its evidence is the run's own `grok export` transcript containing a sentence of the skill's Core Prompt (D-28). This matches the owner's own proof rule ("goal state in `summary.json` or `export`"). The caller cannot spoof it, because the function takes no text. If the expansion is not in the transcript, the function fails closed (A-27).
+- **R-9: the layout bound has a grace period.** The reviewer's rule raises when no session folder has a `summary.json`. That would make a fresh home's first run raise `protocol_mismatch` on any list during startup. I added `GROK_SUMMARY_GRACE_SECONDS` (60), measured on the newest folder's mtime (D-31, EC-67).
+- **R-5: the token check also refuses `<flag>=`,** for example `--effort=5`, not only exact tokens.
+- **R-8: renumbered.** The reviewer's proposed "A-22" was already taken, so the item is A-26. IDs stay stable.
+
+### Assumptions I am now least sure of
+
+All of these are new or still unverified, and each is a probe item:
+
+- **A-25:** `--session-id` combines with `--single`. If it does not, every Grok command run fails, which is loud, and D-29 flips back to r1.
+- **A-26:** bundled skills resolve under a fresh private `GROK_HOME`. If they do not, 11 of the 13 named Grok wrappers always raise `command_not_run` (all but plan and explore).
+- **A-27:** the code-review expansion appears in the export transcript.
+- **A-24:** `features.video_gen` is on by default.
+- **A-7:** `-p` slash expansion is still the largest single risk.
+
+### Self-check results (r2)
+
+- **Defined IDs:** G 4, NG 15 (NG-5 withdrawn), INV 29, AC 31, EC 74, FR 20, NFR 12, D 31, W 12, T 8, A 27, Q 7 (Q-2 closed).
+- **References:** every referenced ID is defined.
+- **Names:** §8.5 = FR = 47 functions, and every §4 name is in §8.5. Exports: 17 + 47 + 4 = 68, with subpackages at 25, 15 and 16.
+- **Tables:** every table row has a uniform column count. I checked this by script, and it caught a misplaced T-8 row, which I fixed before the commit.
+- **Budget:** 10 new source files, as before. The new methods (`GrokStore.thread`, `GrokHelperRun.export`, `NativeCommandEvidence.require_text`) live in files already counted. `OpencodeHelperWire.info` was removed.
+- **No tests:** the spec still contains no test code.

@@ -23,7 +23,7 @@ started: 2026-10-15 18:12
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 1/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 (round 2 running) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-15 18:12 — Fast-forwarded local `main` to origin/main f216fdcf (PR #1036 merged) before creating the worktree — Prompt 5: "Make sure the local main is up to date".
@@ -41,6 +41,8 @@ started: 2026-10-15 18:12
 
 - 2026-10-15 20:40 — S1 review round 1: SOUND WITH FIXES, 1 Blocker (R-1 call depth), 9 Major, 4 Minor, none tagged scope-adding. All 14 go to the author for triage. R-4 restores `run_grok_imagine_video`/`run_grok_code_review`, which were already in the accepted catalog (request.md §E.2), so it is in scope.
 - 2026-10-15 20:40 — Rebased the 3 docs-only, unpushed commits from 72a4ade1 onto origin/main 0f69f7b7 (#1095, #1103) and fast-forwarded local main. #1095 touches `vidbyte/__init__.py`, `contracts/sdk-public-api.json` and `vidbyte/lib/enums/__init__.py`; the public API contract has 0 harness entries (C016 does not cover `vidbyte.harnesses.native`), so nothing in the spec changes.
+
+- 2026-10-15 21:00 — S1 r2 spot-check passed: commit 7a0d170f, revision 2, §16 has a disposition row for each of R-1..R-14 (all accepted). The scope is now 47 functions (22 helpers, 25 skill functions) and 68 exports. Because accepted findings changed §8, §8.5, §9 and §10, I launched review round 2 (the last allowed), focused on those sections and what depends on them, as the playbook's S1 rule requires.
 
 ## User replies (verbatim)
 - 2026-10-15 ~18:25 — "note, ccan you also in a subagent launch this "spec-pipeline" process for pr #1055 and explain the changes that we want to make with the implementation of the existing pr"
@@ -69,3 +71,5 @@ started: 2026-10-15 18:12
 - Grok headless takes `-s/--session-id <UUID>` for a new session; the runner's output cap keeps the first N bytes, so the final `end` event carrying the id is lost on overflow — *source:* S1 review R-6
 - Stale surface test: line 195 is stale as well as line 193; `fake_harness.py:562` returns Muse `forkedFrom` as a string, but real MSP gives an object with `sessionId`. MSP `session/list` max 200, sorted by `updatedAt` desc, with `nextCursor` — *source:* S1 review
 - `contracts/sdk-public-api.json` and lint C016 do not cover `vidbyte.harnesses.native` (0 harness entries at 0f69f7b7) — *source:* orchestrator
+- Spec r2: `GrokStore.threads` serves list and search only; `GrokStore.thread(..., thread_id=)` serves get, read, delete, lineage and evidence; `GrokHelperRun.export` serves both `read_grok_thread` and the code-review evidence; Grok command runs pass an internal minted UUID4 as `--session-id` (D-29); named Grok wrappers refuse flag tokens and reserved `/goal` words, while `run_grok_command` stays raw (D-30) — *source:* S1 author r2
+- Highest-risk assumptions, all for manual probe in the PR body: A-7 (slash expansion under `--single`), A-25 (`--session-id` together with `--single`), A-26 (bundled skills resolve under a private GROK_HOME; if not, 11 of the 13 named Grok wrappers always raise `command_not_run`), A-27, A-24 — *source:* S1 author r2
