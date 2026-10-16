@@ -76,7 +76,7 @@ class McpStudioServer:
         self,
         *,
         name: str = "vidbyte-sdk-studio",
-        version: str = "0.3.0",
+        version: str = "0.4.0",
         agents: Mapping[str, BaseAgent] | None = None,
         tools: Sequence[BaseTool] = (),
         strategy_names: Sequence[str] = (),
