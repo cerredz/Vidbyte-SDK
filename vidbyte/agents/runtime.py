@@ -366,7 +366,9 @@ class AgentRuntime:
                     runner_output_text=handle.extract_text,
                     runner_output_metadata=handle.extract_metadata,
                     options=run_options,
-                    messages=messages,
+                    # @intent inner-algorithms-see-the-task
+                    # The task reaches the runner apart from messages, so hand side models the conversation the main model sees, task at the run boundary.
+                    messages=self._messages_with_task(messages, caller_messages, message),
                     system_prompt=self.system_prompt,
                 )
             stop_result = self._budget_stop(
@@ -1610,6 +1612,15 @@ class AgentRuntime:
             if isinstance(contract, SchemaConformance) and contract.schema is self.output_schema:
                 return contract.evaluate({contract.key: output})
         return self._schema_formatter.validate(output, self.output_schema)
+
+    @staticmethod
+    def _messages_with_task(messages: Sequence[dict[str, Any]], caller_messages: Sequence[dict[str, Any]], message: str) -> list[dict[str, Any]]:
+        """Return a copy of the run's messages with its task as a user turn after the caller's own messages, where the provider sends it."""
+        # Like _run_boundary, trust the caller's messages only while they still open the list as the same objects; a
+        # fallback reset that rewrote them leaves the task opening the list. The live list is never changed.
+        caller_count = len(caller_messages)
+        boundary = caller_count if len(messages) >= caller_count and all(messages[index] is caller for index, caller in enumerate(caller_messages)) else 0
+        return [*messages[:boundary], {"role": "user", "content": message}, *messages[boundary:]]
 
     @staticmethod
     def _run_boundary(conversation: Sequence[Mapping[str, Any]], messages: Sequence[Mapping[str, Any]], caller_messages: Sequence[Mapping[str, Any]]) -> int | None:
