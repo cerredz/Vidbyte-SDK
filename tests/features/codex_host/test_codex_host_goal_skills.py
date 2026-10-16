@@ -2,7 +2,7 @@
 
 PURPOSE: Proves the goal and skill functions over the in-memory app-server: get_codex_goal's record, run_codex_goal's request order, its stored-goal read-back and the single goal cancel on a failed or cancelled check; list_codex_skills's params and records; run_codex_skill and run_codex_openai_docs resolving the skill before any thread starts, sending the skill as first-class input, confirming it with the bounded read-back, and the single interrupt on a failed or cancelled check; and the argument refusals of all three run functions.
 ROLE IN CODEBASE: Goal and skill layer of tests/features/codex_host/ (docs/spec/codex-host-thread-helpers/spec.md AC-24 to AC-32, AC-39, AC-40, AC-42, AC-43, INV-20 to INV-27, INV-34, INV-35, EC-25 to EC-34, EC-37, EC-45, EC-46, EC-48). Every class needs the optional openai-codex extra, so CI skips them.
-ARCHITECTURE NOTE: The fake stores a goal as goal/set sent it, and goal_get_answer can make thread/goal/get answer something else, which stages a goal that did not take. skills maps a working folder to its skills/list entries. record_turn_input makes turn/start store its input as the turn's userMessage, drop_skill_input leaves the skill entry out, recorded_skill_name records it under another name, input_on_earlier_turn records the input on an earlier turn instead of the started one, and input_hidden_reads hides that item from the first reads. The read-back bounds are patched in skill_functions, where spec section 13 says the module imports them by name: the interval to 0 with a long deadline for exact read counts, or a deadline below the interval for the deadline stop. Exact cancel and interrupt counts use the one-worker barrier.
+ARCHITECTURE NOTE: The fake stores a goal as goal/set sent it, and goal_get_answer can make thread/goal/get answer something else, which stages a goal that did not take. skills maps a working folder to its skills/list entries. record_turn_input makes turn/start store its input as the turn's userMessage, drop_skill_input leaves the skill entry out, recorded_skill_name records it under another name, input_on_earlier_turn records the input on an earlier turn instead of the started one, and input_hidden_reads hides that item from the first reads. The read-back bounds are patched in skill_functions, where spec section 13 says the module imports them by name: the interval to 0 with a long deadline for exact read counts, or a deadline below the interval for the deadline stop. Exact cancel and interrupt counts use the one-worker barrier. For the re-raise of a failed check (review R-17), the connection module's CodexErrorMapper is swapped for _FieldCarryingMapper, which maps as the real one does and also sets error_type and thread_id, so a rebuilt error that drops a field is visible.
 COMMON MODIFICATION PATTERNS: Add a goal mismatch as a goal_get_answer row; add a skill case by seeding server.skills for the folder the request names (DEFAULT_CWD for an empty cwd) and asserting the turn/start input and the thread/turns/list count.
 KNOWN EDGE CASES: openai-codex's goal cancel pauses the goal and interrupts its turn and swallows its own failures, so a goal cancel is counted from the fake client's cancel_goal_operation log, not from turn/interrupt requests. A skill run with no thread yet (not found, disabled) names no thread, so its message has no thread suffix.
 RELATED DOCS: tests/features/codex_host/FEATURE.md; docs/spec/codex-host-thread-helpers/spec.md sections 6.1 (INV-20 to INV-27, INV-34, INV-35), 9.2 and 13.
@@ -606,6 +606,86 @@ class CodexSkillReadBackTests(_GoalSkillCase):
         self.assertEqual(error.message, INPUT_NOT_RECORDED_MESSAGE.format(skill="s", seconds=0.25) + thread_suffix(thread_id))
         on_thread = [method for method in _thread_methods(self.sent(), thread_id) if method in ("thread/turns/list", "turn/interrupt")]
         self.assertEqual(on_thread, ["thread/turns/list", "turn/interrupt"])
+
+
+class _FieldCarryingMapper:
+    """The connection's CodexErrorMapper, plus the error_type and thread_id fields that CodexAgentError gained on main (#1116).
+
+    No codex-host path sets either field today, because CodexErrorMapper.error passes neither. This mapper stands in for
+    one that does, so a re-raise that rebuilds the error shows what it drops. It records every error it maps.
+    """
+
+    def __init__(self) -> None:
+        from vidbyte.harnesses.native.codex.errors import CodexErrorMapper
+
+        self._real = CodexErrorMapper
+        self.mapped: list[Any] = []
+
+    def __getattr__(self, name: str) -> Any:
+        # process_exited and the other builders answer as the real mapper does.
+        return getattr(self._real, name)
+
+    def from_exception(self, exc: Exception, operation: Any, method: str, *, dead: bool, bound_seconds: float, thread_id: str = "") -> Any:
+        from vidbyte.lib.errors import CodexAgentError
+
+        error = self._real.from_exception(exc, operation, method, dead=dead, bound_seconds=bound_seconds, thread_id=thread_id)
+        carried = CodexAgentError(error.message, failure_code=error.failure_code, operation=error.operation, error_type=type(exc).__name__, next_step=error.next_step, thread_id=thread_id)
+        self.mapped.append(carried)
+        return carried
+
+
+# INV-22 and INV-35: the original exception propagates, so every field but the message must arrive as the check raised it.
+KEPT_ERROR_FIELDS = ("failure_code", "operation", "thread_id", "error_kind", "expected", "safe_runtime_details", "likely_causes", "next_step", "repair_approaches", "related_docs", "relevant_tests")
+
+
+def _changed_fields(error: Any, original: Any) -> dict[str, tuple[Any, Any]]:
+    """Each kept field the re-raised error does not carry as the original did, as (re-raised, original)."""
+    return {name: (getattr(error, name), getattr(original, name)) for name in KEPT_ERROR_FIELDS if getattr(error, name) != getattr(original, name)}
+
+
+@requires_sdk
+class CodexRunReRaiseTests(_GoalSkillCase):
+    """Review R-17, AC-27, AC-40, INV-22, INV-35, D-16 and D-17: a failed check's error keeps every field it carried."""
+
+    async def asyncSetUp(self) -> None:
+        await super().asyncSetUp()
+        self.list_skill(self.fakes.DEFAULT_CWD, self.fakes.skill_entry("s", SKILL_PATH))
+
+    async def opened_with_full_errors(self) -> tuple[Any, _FieldCarryingMapper]:
+        # The host opens with the real mapper; only the run's own failures go through the stand-in.
+        host = await self.opened()
+        mapper = _FieldCarryingMapper()
+        self.patch_connection("CodexErrorMapper", mapper)
+        return host, mapper
+
+    def assert_every_field_kept(self, error: Any, mapper: _FieldCarryingMapper, suffix: str) -> None:
+        originals = [mapped for mapped in mapper.mapped if mapped.operation == error.operation]
+        self.assertEqual(len(originals), 1, [mapped.message for mapped in mapper.mapped])
+        original = originals[0]
+        # The check's own error carried both fields, so a re-raise that drops either one is visible here.
+        self.assertTrue(original.thread_id)
+        self.assertTrue(original.safe_runtime_details["error_type"])
+        self.assertEqual(error.message, original.message + suffix)
+        self.assertEqual(_changed_fields(error, original), {})
+
+    async def test_a_goal_check_error_keeps_every_field_it_carried(self) -> None:
+        # R-17, AC-27, INV-22, D-16: only the message changes, by GOAL_UNCHECKED_MESSAGE.
+        host, mapper = await self.opened_with_full_errors()
+        self.server.fail("thread/goal/get", self.fakes.FakeRpcError(-32603, "goal read failed"))
+        error = await self.assert_codex_error(host.run_codex_goal("ship it", token_budget=500), "codex.api_error")
+        thread_id = self.started_thread()
+        self.assertEqual(error.operation, "get_codex_goal")
+        self.assert_every_field_kept(error, mapper, GOAL_UNCHECKED_MESSAGE.format(thread_id=thread_id))
+
+    async def test_a_skill_read_back_error_keeps_every_field_it_carried(self) -> None:
+        # R-17, AC-40, INV-35, D-17: only the message changes, by SKILL_UNCHECKED_MESSAGE.
+        self.server.record_turn_input = True
+        host, mapper = await self.opened_with_full_errors()
+        self.server.fail("thread/turns/list", self.fakes.FakeRpcError(-32603, "history read failed"))
+        error = await self.assert_codex_error(host.run_codex_skill("s", "do it"), "codex.api_error")
+        thread_id = self.started_thread()
+        self.assertEqual(error.operation, "list_codex_turns")
+        self.assert_every_field_kept(error, mapper, SKILL_UNCHECKED_MESSAGE.format(thread_id=thread_id))
 
 
 if __name__ == "__main__":
