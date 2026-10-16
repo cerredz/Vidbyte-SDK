@@ -22,12 +22,12 @@ Existing-PR run: no new branch, no new PR. Adds to draft PR #1055 on `feat/codex
 | S2 tests | done | 10-16 | 10-16 | reports/S2-test-author.md | 76 new tests in 5 files; red confirmed (area 91 failed / 537 passed = 76 new + 14 authorized-pin + 1 inherited); S2_HEAD 33787d9a |
 | S3 implement | done | 10-16 | 10-16 | reports/S3-implementer.md | S3_HEAD c81ba632 pushed (ff) to PR #1055 (draft, title unchanged); 18/18 rows, 4 new files / 20 classes (budget exact); area 673 passed + 1 inherited; SDK-LINT PASS; run_ci source 1 inherited fail / 5952 passed; package CI passed; semgrep 0 findings; remote CI 38893453043 + static 38893455393 success |
 | S4 adversarial review | done | 10-16 | 10-16 | reports/S4-review-*.md, S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; 0 Blocker / 4 Major (R-1..R-4) / 11 Minor; 0 refuted, 1 downgraded (R-E2 → R-8); conformance SOUND, conventions + engineering MERGEABLE AFTER FIXES |
-| S5 repair loop | pending | | | | |
+| S5 repair loop | running | 10-16 | | reports/S5-repair-1.md | iteration 1 launched at HEAD ecba0d48 |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 · S5 repair iterations: 1/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-15 22:30 — Worktree created on the existing branch `feat/codex-host` (not from main); verified local == origin == 66558ee9 before `git worktree add`. — the run adds to PR #1055.
@@ -55,6 +55,9 @@ Existing-PR run: no new branch, no new PR. Adds to draft PR #1055 on `feat/codex
 
 - 2026-10-16 — S2 round 2 (same author, resumed by ID) closed R-1, R-4, R-8 with 5 tests (6c5eca2a, 6a434afd, 30a0a0ac; report d0f0c768); every named mutant (V36, V05, V05b, V02, V03, V04) now caught, controls intact; area 1 inherited fail / 678 passed; SDK-LINT PASS; no vidbyte/ change. Spot-check: diff aaaac67a..d0f0c768 touches only tests/ and docs/.
 - 2026-10-16 — Accepted S2's open item: tests/features/codex_host/codex_host_fakes.py is 1071 lines (899 before this run) against AGENTS.md principle 3 ("Keep files well below 1,000 lines"). Sent the same author a split to ≤900 lines (helper handlers to one new module beside it), behaviour unchanged, mutation results unchanged. — test-only, reversible, and a human reviewer would flag it.
+
+- 2026-10-16 — S2 r3 split: codex_host_fakes.py 1071 → 894 lines, new codex_host_helper_fakes.py (237, `HelperHandlers` mixin); also moved the pre-existing goal/set and goal/clear handlers (needed to get under 900); behaviour proven unchanged (74 recorded answers equal, mutation results identical); 72e34b81 + ecba0d48. Accepted.
+- 2026-10-16 — S5 iteration 1 launched (fresh agent, brief at scratchpad/s5-iter1-prompt.md). Fourth usage-limit outage (HTTP 429) stopped it before any commit or edit (HEAD still ecba0d48, tree clean). Per coordinator: resumed the SAME agent by ID via SendMessage, not a fresh one; iteration count stays 1/8.
 
 ## User replies (verbatim)
 - none
