@@ -10,10 +10,14 @@ GitHub now answers `"mergeable":"MERGEABLE"`, with `mergeStateStatus` `BLOCKED`.
 
 The merge needed no test change, no source change beyond the conflict line, and no baseline change. Every gate matches iteration 2. The only differences are the counts that main's new tests add, plus one lint row that moved because of main's own files.
 
+Main moved once more while the gates ran: #1158, `8da41971`, which has no conflict with this PR. I merged that too, so that the tree the owner squashes is the tree that was tested. See "Second merge" below.
+
 | Commit | Defect | Subject |
 |---|---|---|
 | `b96b64cc` | `[gate:mergeable]` | `merge: bring origin/main cb554ed3 into feat/codex-host [gate:mergeable]` |
-| next | — | `docs(spec): verify-log iteration 3 for codex-host-thread-helpers` (verify-log entry and header line, this report) |
+| `2e60369c` | — | `docs(spec): verify-log iteration 3 for codex-host-thread-helpers` (verify-log entry and header line, this report) |
+| `0ded7dc7` | `[gate:mergeable]` | `merge: bring origin/main 8da41971 into feat/codex-host [gate:mergeable]` |
+| next | — | `docs(spec): record the second main merge of S5 iteration 3 for codex-host-thread-helpers` |
 
 ## The conflict: `vidbyte/lib/errors/base.py`
 
@@ -81,6 +85,25 @@ Pinned files that the merge leaves exactly as at HEAD: `vidbyte/harnesses/native
   - The +2 are two header-less test files that main added: `tests/test_algorithms_honor_middleware_abort.py` and `tests/test_independent_critic_algorithm.py`.
   - The other 7 IMPROVED rows are the same as before. The A007, C008, S008, S024 and S064 ratchets are unchanged. Main did not touch `lint/`, and `lint/baseline.json` is untouched.
 
+## Second merge: `8da41971` (#1158)
+
+- **When it happened:** right after `2e60369c` was pushed, `git fetch` showed origin/main at `8da41971`, one commit past `cb554ed3`. GitHub answered `"mergeStateStatus":"BEHIND","mergeable":"MERGEABLE"`.
+- **What #1158 changes:** only `vidbyte/agents/codex/fork.py` (a fork rebinds inherited context tools with `AgentForker._clone_tool`), one line of `vidbyte/agents/codex/README.md`, and `tests/test_codex_fork_inheritance.py`. This PR touches none of them. `git merge-tree --write-tree` was clean, and the real merge `0ded7dc7` had no conflict.
+- **Where it meets this PR:** the fork then calls `CodexVidbyteTranslator().translate_agent`, which runs this PR's `CodexToolTranslator.validate_names`. `tests/test_codex_fork_inheritance.py tests/test_codex_tools.py` gives `61 passed in 1.52s`.
+- **The PR's net diff is unchanged:** `git diff -U0 8da41971 0ded7dc7` is identical to `git diff -U0 cb554ed3 b96b64cc` outside `docs/` (57 files, +14590/-23).
+- **The inherited proof still holds:** #1158 changes neither `failure.py` nor `tests/features/harness_threads` (`git diff --quiet` succeeds), so the proof at `cb554ed3` carries over.
+- **Superseded runs:** I cancelled the runs already dispatched on `2e60369c` (38935602952 and 38935606171).
+
+| Gate at `0ded7dc7` | Result | Final lines |
+|---|---|---|
+| 1 area tests | PASS (inherited only) | `FAILED tests/features/harness_threads/test_harness_threads_surface.py::test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes` · `1 failed, 683 passed, 2 skipped in 52.44s` |
+| 2 lint | PASS | All 133 rule rows identical to `b96b64cc` · `S064 RATCHETED: 4 known finding(s). Inspect with: python lint/run.py --rule S064 --all` · `SDK-LINT: PASS` |
+| 3 public API | PASS | `contracts/sdk-public-api.json is current at d08e89ef75ff4a6ee07465ee5097363e7d0d26c4 (vidbyte-sdk 0.3.0, 640 exports).` |
+| 4 source stage | PASS (inherited only) | `reasoning trace contracts: ok (182 tools, 55 shapes)` · `FAILED …::test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes` · `=========== 1 failed, 6229 passed, 26 skipped in 100.90s (0:01:40) ============` · `CI failed: Command failed with exit code 1: …python.exe -m pytest` (+6 tests = #1158's; `def test_` count 7 → 13) |
+| 5 package stage | PASS | `No broken requirements found.` · `Installed vidbyte-sdk 0.3.0 passed smoke checks.` · `CI passed.` |
+| 6 static policy | PASS | `1/1: ✓ All tests passed` · `Scan was limited to files tracked by git` · `Ran 1 rule on 986 files: 0 findings.` |
+| 7 remote checks and mergeable | on the final docs commit | reported in the S5 STATUS block |
+
 ## The inherited failure at the new merge base
 
 After the merge, `git merge-base origin/main HEAD` is `cb554ed3`. In a detached scratch worktree at `cb554ed3`, HEAD, origin/main and their merge base are all `cb554ed3`. There, `test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes` still fails with `assert 148 == 120`. Main has not changed `vidbyte/lib/enums/failure.py` since `72a4ade1`, so main's FailureCode still has 148 members while the test expects the pre-#1036 120. The failure is still inherited: a fix belongs on main in its own PR. Remote CI still passes it, because its shallow checkout has no `origin/main`. The scratch worktree was removed with `git worktree remove`; it was clean, so no `--force` was needed.
@@ -95,7 +118,7 @@ No finding was handed in, and none moved. review.md is unchanged. R-1 to R-9 and
 
 ## For the S6 PR author
 
-- The PR body can say that the branch merges `cb554ed3` and is green on the merged tree, with the counts above.
+- The PR body can say that the branch merges origin/main up to `8da41971` (#1158) and is green on the merged tree: source `1 failed (inherited), 6229 passed, 26 skipped`, package `CI passed.`, lint `SDK-LINT: PASS`, API 640 exports.
 - The owner merges with `gh pr merge 1055 --squash --admin --match-head-commit <final sha>`, because dispatched checks never clear BLOCKED. If main moves first, main must be merged again and the checks re-dispatched (field guide).
 - The `PermissionCeiling` interaction (Interactions, item 2) is worth one line under follow-ups.
 
