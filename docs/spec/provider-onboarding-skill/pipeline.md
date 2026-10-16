@@ -14,7 +14,7 @@ started: 2026-10-15 18:41
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 18:41 | 19:05 | reports/S0-scout.md | base 72a4ade1; code-map.md (4 sections, 37 per-provider touch points) |
-| S1 spec + review | pending | | | | |
+| S1 spec + review | running | 2026-10-15 19:10 | | reports/S1-spec-author.md | spec r1 @9da36eb1 (author done; review round 1 next) |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
