@@ -128,3 +128,59 @@ No other file under `docs/` was read. The sibling worktree was not read.
   - recorded `turn/start` input.
 - **S2 updates only the pins** that §13 names.
 - **Inherited failure:** `test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes` still fails, `assert 148 == 120`. It is not this PR's to fix.
+
+## Addendum r2: review round 1 (spec commit deeba11e)
+
+**Input:** `reports/S1-spec-review.md`, verdict SOUND WITH FIXES, 15 findings (2 Blocker, 7 Major, 6 Minor). The orchestrator decided R-3, R-5 and R-6. All 15 are accepted, and each has a row in spec §16. No ID was renumbered. No user reply arrived, so §0.2 is unchanged.
+
+### R-3 probe (read-only, codex app-server 0.162.1)
+
+`probe_r3.py` ran only these calls: `initialize`, then `thread/list` (limit 3), which returned 3 threads, all `notLoaded`. On ONE of them, with its id masked in all output, it ran `thread/read` (includeTurns false), `thread/goal/get`, `thread/read`, `thread/turns/list` (limit 1, itemsView full, sortDirection desc), `thread/read` and `thread/list`. It sent no resume, compact, delete, goal-set or turn-start.
+
+| Call | Result |
+|---|---|
+| `thread/read` | ok, status `notLoaded` |
+| `thread/goal/get` | ok, `{goal: null}`; the thread stays `notLoaded` |
+| `thread/turns/list` | ok. Keys: backwardsCursor, data, nextCursor. One turn, nextCursor non-null. Turn keys: completedAt, durationMs, error, id, items, itemsView, rootTurnId, startedAt, status. `completed`, 89 items, the first a `userMessage` (keys clientId, content, id, type; content entries text, text_elements, type `text`) |
+| `thread/read`, `thread/list` afterwards | the thread is still `notLoaded` |
+
+**Consequences**
+- **A-5 is verified.**
+- **A-4 is disproved for `thread/goal/get`**, so D-15 flipped and `get_codex_goal` never resumes (INV-20, new INV-33: no READ function loads a thread).
+- **A-4 is unverified for `thread/compact/start`**, because a write is not probeable. Compact therefore keeps its resume, behind a goal check: on a `notLoaded` thread it first runs `thread/goal/get`, and any goal not `complete` raises the new `codex.goal_unfinished` before any resume (INV-18, D-13, AC-38, EC-42).
+
+### Residual risks recorded
+
+- **A-16 / EC-44:** `thread/goal/get` on a `notLoaded` thread reads stored goals. Only `null` was observed.
+- **A-17 / EC-43:** resuming a thread with no goal, or a `complete` one, starts no turn. This is unverifiable without a write.
+- **A-19:** the `userMessage` is recorded within 5 s of `turn/start`. If wrong, there are loud false `command_not_run` failures, never a silent pass.
+- **A-20:** the skill entry persists in `userMessage.content`. The schema allows it (`v2_all.py:9968-9975, 6509-6519`). It has not been observed live.
+- **A-18:** `NativeThreadSummary` field types are assumed. The request gives names only.
+
+### Triage summary
+
+| ID | Disposition | Change |
+|---|---|---|
+| R-1 | Accepted | `thread_list(limit: int \| None = None)`, plus the A007 checklist line |
+| R-2 | Accepted | `_valid_arguments` and `_valid_kwargs` added to the §13 authorized pins |
+| R-3 | Accepted (orchestrator) | Probe, INV-33, D-15 flipped, compact goal gate, `codex.goal_unfinished` |
+| R-4 | Accepted | EC-41, a sentence in INV-18, docstring, tool description and `COMPACT_STARTED_TEXT`; Q-16 `[scope-adding]` |
+| R-5 | Accepted (orchestrator) | Skill read-back: INV-34, INV-35, D-17, AC-30, AC-39, AC-40, EC-45, EC-46, 3 messages, 4 constants |
+| R-6 | Accepted (orchestrator) | §6.3 §C table; D-9, D-14 and FR-15 marked "Deviates from request §C"; Q-11 and Q-14 repointed |
+| R-7 | Accepted | `CodexSkillHost` Protocol; no host import |
+| R-8 | Accepted | §12.4 A007, C008, S024 and S008 lines |
+| R-9 | Accepted | `CODEX_HOST_TURNS_TOOL_DEFAULT_LIMIT` (D-25, AC-41, EC-47) |
+| R-10 | Accepted | `from_sdk` unchanged byte for byte |
+| R-11 | Accepted | `vidbyte/agents/codex/README.md` read and recorded; no edit, legacy A009 ceiling 65,000 |
+| R-12 | Accepted | §4 and AC-1 say 0.162.1 |
+| R-13 | Accepted | A-18; D-10 flip |
+| R-14 | Accepted (acknowledged) | NG-14 drift note; Q-18 |
+| R-15 | Accepted | INV-16 reworded |
+
+### Self-check (Stage E, re-run on r2)
+
+- **IDs:** every new ID is defined and referenced at least once: INV-33..35, AC-38..41, EC-41..47, D-25, A-16..20, Q-16..18. No dangling local reference. D-26 is codex-host's own and carries that prefix. The two codex-host `INV-32 to INV-34` ranges now prefix each ID, because local INV-33..35 exist.
+- **Tables:** every table row has its header's column count.
+- **Coverage:** every AC is in §12.1 or §12.3. Every FR names an INV or AC. FR-16 is traced through the §9.2 catalog table, noted under §12.1.
+- **Counts updated:** 4 codes, 19 classes, 19 host failure codes in the pinned slice, TL;DR, §2 and G-2/G-3/G-5.
+- **No tests or production code were written.**
