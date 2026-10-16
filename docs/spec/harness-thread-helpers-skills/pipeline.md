@@ -23,7 +23,7 @@ started: 2026-10-15 18:12
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 (round 2 running) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 (cap reached; final author revision r3 sets status approved) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-15 18:12 — Fast-forwarded local `main` to origin/main f216fdcf (PR #1036 merged) before creating the worktree — Prompt 5: "Make sure the local main is up to date".
@@ -43,6 +43,8 @@ started: 2026-10-15 18:12
 - 2026-10-15 20:40 — Rebased the 3 docs-only, unpushed commits from 72a4ade1 onto origin/main 0f69f7b7 (#1095, #1103) and fast-forwarded local main. #1095 touches `vidbyte/__init__.py`, `contracts/sdk-public-api.json` and `vidbyte/lib/enums/__init__.py`; the public API contract has 0 harness entries (C016 does not cover `vidbyte.harnesses.native`), so nothing in the spec changes.
 
 - 2026-10-15 21:00 — S1 r2 spot-check passed: commit 7a0d170f, revision 2, §16 has a disposition row for each of R-1..R-14 (all accepted). The scope is now 47 functions (22 helpers, 25 skill functions) and 68 exports. Because accepted findings changed §8, §8.5, §9 and §10, I launched review round 2 (the last allowed), focused on those sections and what depends on them, as the playbook's S1 rule requires.
+
+- 2026-10-15 21:30 — S1 review round 2: SOUND WITH FIXES, 1 Blocker (R-15: opencode `session list` holds only root sessions and no `parentID`, so D-26's get/lineage cannot work), 5 Major, 5 Minor; 13 of 14 round-1 findings resolved. Sent to the author for the final revision (r3) with `status: approved`; anything still disputed becomes a Q-n with a default. For R-15 I pointed the author to the request's own mechanism (`opencode db`, request.md §E.2) because it reads metadata without moving transcripts (the concern behind R-10); the author decides with evidence.
 
 ## User replies (verbatim)
 - 2026-10-15 ~18:25 — "note, ccan you also in a subagent launch this "spec-pipeline" process for pr #1055 and explain the changes that we want to make with the implementation of the existing pr"
@@ -73,3 +75,6 @@ started: 2026-10-15 18:12
 - `contracts/sdk-public-api.json` and lint C016 do not cover `vidbyte.harnesses.native` (0 harness entries at 0f69f7b7) — *source:* orchestrator
 - Spec r2: `GrokStore.threads` serves list and search only; `GrokStore.thread(..., thread_id=)` serves get, read, delete, lineage and evidence; `GrokHelperRun.export` serves both `read_grok_thread` and the code-review evidence; Grok command runs pass an internal minted UUID4 as `--session-id` (D-29); named Grok wrappers refuse flag tokens and reserved `/goal` words, while `run_grok_command` stays raw (D-30) — *source:* S1 author r2
 - Highest-risk assumptions, all for manual probe in the PR body: A-7 (slash expansion under `--single`), A-25 (`--session-id` together with `--single`), A-26 (bundled skills resolve under a private GROK_HOME; if not, 11 of the 13 named Grok wrappers always raise `command_not_run`), A-27, A-24 — *source:* S1 author r2
+- opencode 1.18.31: `session list` returns root sessions only, defaults to 100 rows per project, and its rows are exactly `{id,title,updated,created,projectId,directory}`; `Session.fork` sets no `parentID` (only subagent children have one); `export` gives `{info: <full session incl. parentID>, messages}`; `opencode db "<sql>" --format json` runs in-CLI (no sqlite3 needed); an unknown `--command` produces the error event `Command not found: "<name>". Available commands: …` and exit 1 — *source:* S1 review r2
+- Grok docs: summary.json members at 17-sessions.md:420-431; a same-named workspace/user skill overrides the bundled one (08-skills.md:213); `--session-id` with `--single` is documented (14-headless-mode.md:364) — *source:* S1 review r2
+- The existing TIMED_OUT/OUTPUT_TOO_LARGE advice texts (`vidbyte/lib/constants/native_threads.py:390-445`) describe runs only; Muse `anchoredSnapshot` history starts at the compaction boundary — *source:* S1 review r2
