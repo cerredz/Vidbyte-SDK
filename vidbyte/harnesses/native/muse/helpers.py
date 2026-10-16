@@ -1,9 +1,9 @@
 """FILE: vidbyte/harnesses/native/muse/helpers.py
 
-PURPOSE: Defines the six public Muse thread helpers and init_muse_workspace (MuseThreadHelpers: list_muse_threads, list_recent_muse_threads, list_muse_threads_since, get_muse_thread, read_muse_thread, get_muse_thread_lineage, init_muse_workspace) and the flows behind them (MuseHelperRun): one keyless `muse serve` batch per session/list or session/read, a `muse export` into an SDK temp folder for read, and `muse init` in the workspace; plus the two evidence reads of the Muse skill functions, tool_calls (session/read with items) and transcript (the run's own export).
-ROLE IN CODEBASE: The helpers are bound as module names in vidbyte/harnesses/native/muse/__init__.py and re-exported from vidbyte.harnesses.native. MuseHelperRun uses MuseLauncher (muse/launcher.py) to find muse and translate paths, MuseChildren (muse/children.py) for the private config folder, the serve invocation and the reaping run, MuseWire and MuseSessionWire (muse/wire.py) to build the batches and read the answers, and NativeThreadListing from hostkit. MuseCommandRun (muse/commands.py) calls MuseHelperRun.tool_calls and transcript for its evidence.
+PURPOSE: Defines the six public Muse thread helpers and init_muse_workspace (MuseThreadHelpers: list_muse_threads, list_recent_muse_threads, list_muse_threads_since, get_muse_thread, read_muse_thread, get_muse_thread_lineage, init_muse_workspace) and the flows behind them (MuseHelperRun): one keyless `muse serve` batch per session/list or session/read, a `muse export` into an SDK temp folder for read, and `muse init` in the workspace; plus the evidence read of the Muse skill functions, tool_calls (session/read with items).
+ROLE IN CODEBASE: The helpers are bound as module names in vidbyte/harnesses/native/muse/__init__.py and re-exported from vidbyte.harnesses.native. MuseHelperRun uses MuseLauncher (muse/launcher.py) to find muse and translate paths, MuseChildren (muse/children.py) for the private config folder, the serve invocation and the reaping run, MuseWire and MuseSessionWire (muse/wire.py) to build the batches and read the answers, and NativeThreadListing from hostkit. MuseCommandRun (muse/commands.py) calls only MuseHelperRun.tool_calls, for its evidence.
 ARCHITECTURE NOTE: No helper takes a key or a model (spec INV-2). Every flow opens one fresh private config folder (XDG_CONFIG_HOME, with a MUSE_AUTH_PATH that never exists) and removes it in finally, however the call ends, so no saved login is read (spec INV-23). Every child runs with every key variable removed, self-update off, and the fixed control timeout and output cap whatever config.timeout_seconds says (spec INV-16, D-14); in WSL mode every child carries the call's mark and a timed-out or cancelled one is reaped in the distro (spec INV-14). session/list always asks for NATIVE_LIST_MAX_LIMIT sessions, because Muse orders ties by ascending id and the SDK's cut must order them by INV-7 instead. read exports into an empty folder inside the private one, with that folder as the working folder, so muse export writes nowhere else and cannot take a file named like the id for the session (spec D-17, EC-40); the file is read in asyncio.to_thread with its size taken from the open handle. No flow calls another flow (spec R-1). The module holds no literals of its own (spec INV-15).
-FUNCTION INVENTORY: MuseThreadHelpers holds the seven public functions and _call, the one guarded try they share. MuseHelperRun.list, get, lineage, read, init, tool_calls and transcript are the narrated flows; _serve runs one serve batch for one method and returns its result; _export runs the `muse export` child into the private folder; _export_file reads the exported file with its byte cap.
+FUNCTION INVENTORY: MuseThreadHelpers holds the seven public functions and _call, the one guarded try they share. MuseHelperRun.list, get, lineage, read, init and tool_calls are the narrated flows; _serve runs one serve batch for one method and returns its result; _export runs the `muse export` child into the private folder; _export_file reads the exported file with its byte cap.
 COMMON MODIFICATION PATTERNS: A new helper is one NativeThreadOperation member, its rows in the operation tables of vidbyte/lib/constants/native_threads.py, one public method here that calls _call with its flow, and one flow that opens and closes its private config folder around its children.
 WHAT NOT TO DO IN THIS FILE: 1. Do not give a helper or evidence child a key, and do not let one inherit META_API_KEY or any other key variable. 2. Do not run muse export in the workspace or the caller's folder; it writes there and reads a same-named file as the session. 3. Do not read the export file before checking its size. 4. Do not leave the private config folder behind on any path, a cancel included. 5. Do not let one flow call another flow.
 KNOWN EDGE CASES: -32020 is thread_not_found for the requested id and ends a lineage at a parent Muse cannot find (spec EC-65); -32601 is protocol_mismatch naming the method (spec EC-36). An export that exits 0 but writes no file is protocol_mismatch naming the file, and a file over NATIVE_PROCESS_MAX_OUTPUT_BYTES is output_too_large (spec EC-38, EC-39). init_muse_workspace where Muse is already set up is run_failed with Muse's text (spec EC-58); with dry_run it writes nothing (spec EC-59). On Windows, Muse runs only through config.wsl_distro or config.muse_command (spec EC-34).
@@ -260,7 +260,7 @@ class MuseHelperRun:
         return NativeCommandOutput(harness=NativeHarness.MUSE, text=outcome.stdout)
 
     @staticmethod
-    async def tool_calls(request: NativeThreadRequest, config: MuseThreadConfig, errors: NativeErrorFactory, *, thread_id: str) -> tuple[NativeToolCall, ...] | None:
+    async def tool_calls(request: NativeThreadRequest, config: MuseThreadConfig, errors: NativeErrorFactory, *, thread_id: str) -> tuple[NativeToolCall, ...]:
         # The evidence read of a skill run: session/read with items, in
         # a fresh private config folder and with no key, every error
         # carrying the new thread's id (spec INV-8, EC-61).
@@ -273,24 +273,9 @@ class MuseHelperRun:
         finally:
             await MuseChildren.close_config(folder)
 
-        # The toolCall items of the history, or None after compaction,
-        # when the evidence must come from the transcript (spec D-33).
+        # The toolCall items of the history, in every mode but none,
+        # an anchored snapshot after a compaction included (spec D-33).
         return MuseSessionWire.tool_calls(result, request, errors, thread_id=thread_id)
-
-    @staticmethod
-    async def transcript(request: NativeThreadRequest, config: MuseThreadConfig, errors: NativeErrorFactory, *, thread_id: str) -> str:
-        # The run's own export, for evidence after compaction (spec
-        # D-33): the same keyless export child as read, in a fresh
-        # private config folder removed however the call ends.
-        launcher = MuseLauncher(config, errors)
-        prefix = launcher.resolve(request)
-        folder = await MuseChildren.open_config((), request, errors)
-        try:
-            mark, overlay = launcher.new_mark(), MuseChildren.overlay(launcher, folder)
-            path = await MuseHelperRun._export(prefix, launcher, overlay, mark, folder, request, errors, thread_id=thread_id)
-            return await asyncio.to_thread(MuseHelperRun._export_file, path, request, errors, thread_id)
-        finally:
-            await MuseChildren.close_config(folder)
 
     @staticmethod
     async def _serve(

@@ -1,8 +1,8 @@
 """FILE: vidbyte/harnesses/native/muse/commands.py
 
 PURPOSE: Defines the six public Muse skill functions (MuseCommands: run_muse_skill, run_muse_goal, run_muse_plan, run_muse_import, run_muse_scaffold and run_muse_browser_app) and the flow of one run (MuseCommandRun): run #1036's `muse exec` once with a prompt that asks for the skill or the goal, then read the new thread's own record back and return only when it shows the skill was loaded or the goal set.
-ROLE IN CODEBASE: The functions are bound as module names in vidbyte/harnesses/native/muse/__init__.py and re-exported from vidbyte.harnesses.native. MuseCommandRun runs the thread with MuseThreadRun.execute (muse/threads.py), reads the evidence with MuseHelperRun.tool_calls or, after compaction, MuseHelperRun.transcript (muse/helpers.py), and checks it with NativeCommandEvidence from hostkit. init_muse_workspace is keyless and lives in MuseThreadHelpers (muse/helpers.py).
-ARCHITECTURE NOTE: muse exec does not expand slash commands, so a skill is asked for in the prompt (MUSE_SKILL_PROMPT_TEMPLATE, MUSE_GOAL_PROMPT_TEMPLATE) and the evidence is the model's own tool call (spec D-9): a read_skill call whose args name the skill, or a create_goal call. Evidence fails closed (spec INV-8). The evidence read is a keyless `muse serve` session/read with items in a fresh private config folder (spec INV-23); when the history is an anchored snapshot, whose items start after a compaction, the run's own keyless `muse export` transcript must hold the tool name and the skill id instead (spec D-33). Every error after the run carries the new thread's id (spec EC-61). The text is checked under its public name before anything starts (spec D-25). The module holds no literals of its own (spec INV-15).
+ROLE IN CODEBASE: The functions are bound as module names in vidbyte/harnesses/native/muse/__init__.py and re-exported from vidbyte.harnesses.native. MuseCommandRun runs the thread with MuseThreadRun.execute (muse/threads.py), reads the evidence with MuseHelperRun.tool_calls (muse/helpers.py), and checks it with one NativeCommandEvidence.require call from hostkit. init_muse_workspace is keyless and lives in MuseThreadHelpers (muse/helpers.py).
+ARCHITECTURE NOTE: muse exec does not expand slash commands, so a skill is asked for in the prompt (MUSE_SKILL_PROMPT_TEMPLATE, MUSE_GOAL_PROMPT_TEMPLATE) and the evidence is the model's own tool call (spec D-9): a read_skill call whose args, parsed as JSON, have the skill id as their id member, or a create_goal call. Evidence fails closed (spec INV-8). The evidence read is a keyless `muse serve` session/read with items in a fresh private config folder (spec INV-23). Every history mode but none is read the same way, an anchored snapshot after a compaction included, because MSP serves the full folded state there; only toolCall items count, never message text, and no `muse export` runs for evidence (spec D-33). Every error after the run carries the new thread's id (spec EC-61, D-34). The text is checked under its public name before anything starts (spec D-25). The module holds no literals of its own (spec INV-15).
 FUNCTION INVENTORY: MuseCommands holds the six public functions and _call, the one guarded try they share. MuseCommandRun.execute is the narrated main function of one run.
 COMMON MODIFICATION PATTERNS: A new bundled Muse skill is one MuseSkill member, one NativeThreadOperation member, its text name in NATIVE_TEXT_ARGUMENTS and one wrapper here that passes the skill id.
 WHAT NOT TO DO IN THIS FILE: 1. Do not give the evidence read or the export a key; only the exec child carries META_API_KEY. 2. Do not accept a run without its evidence, and do not drop the new thread's id from an error raised after the run. 3. Do not send a slash command to muse exec; it reaches the model as plain text.
@@ -141,19 +141,12 @@ class MuseCommandRun:
         # @intent muse-skill-evidence-fails-closed
         # Read the new thread's own items back, with no key, and return
         # only when they hold the tool call that proves the skill ran
-        # (spec INV-8); every error from here on names the new thread.
+        # (spec INV-8): a read_skill call whose parsed id is the skill,
+        # or any create_goal call. Every history mode but none is read
+        # this way, an anchored snapshot after a compaction included,
+        # and message text never counts (spec D-33).
         calls = await MuseHelperRun.tool_calls(prompted, config, errors, thread_id=thread_id)
-        if calls is not None:
-            NativeCommandEvidence.require(calls, tools=(tool,), fragment=fragment, member=native_threads.MUSE_READ_SKILL_ID_MEMBER, errors=errors, request=prompted, thread_id=thread_id)
-            return result
-
-        # After a compaction the items start past the early call, so
-        # the run's own export transcript must hold the tool name and,
-        # for a skill, its id (spec D-33).
-        transcript = await MuseHelperRun.transcript(prompted, config, errors, thread_id=thread_id)
-        NativeCommandEvidence.require_text(transcript, fragment=tool, errors=errors, request=prompted, thread_id=thread_id)
-        if fragment is not None:
-            NativeCommandEvidence.require_text(transcript, fragment=fragment, errors=errors, request=prompted, thread_id=thread_id)
+        NativeCommandEvidence.require(calls, tools=(tool,), fragment=fragment, member=native_threads.MUSE_READ_SKILL_ID_MEMBER, errors=errors, request=prompted, thread_id=thread_id)
         return result
 
 
