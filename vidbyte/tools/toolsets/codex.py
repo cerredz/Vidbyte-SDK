@@ -51,7 +51,7 @@ if TYPE_CHECKING:
 
 
 class CodexHostTools(Tools):
-    """Catalog of one agent tool per CodexHost function over one host.
+    """Catalog of one agent tool per CodexHost function except delete_codex_thread, over one host.
 
     The developer owns the host and closes it; build one catalog per agent,
     and never pass a host's catalog as dynamic tools to that same host
