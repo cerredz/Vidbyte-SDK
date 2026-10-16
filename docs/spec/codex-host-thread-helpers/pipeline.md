@@ -23,7 +23,7 @@ Existing-PR run: no new branch, no new PR. Adds to draft PR #1055 on `feat/codex
 | S3 implement | done | 10-16 | 10-16 | reports/S3-implementer.md | S3_HEAD c81ba632 pushed (ff) to PR #1055 (draft, title unchanged); 18/18 rows, 4 new files / 20 classes (budget exact); area 673 passed + 1 inherited; SDK-LINT PASS; run_ci source 1 inherited fail / 5952 passed; package CI passed; semgrep 0 findings; remote CI 38893453043 + static 38893455393 success |
 | S4 adversarial review | done | 10-16 | 10-16 | reports/S4-review-*.md, S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; 0 Blocker / 4 Major (R-1..R-4) / 11 Minor; 0 refuted, 1 downgraded (R-E2 → R-8); conformance SOUND, conventions + engineering MERGEABLE AFTER FIXES |
 | S5 repair loop | done | 10-16 | 10-16 | reports/S5-repair-1.md, verify-log.md | converged in 1 iteration: R-2 54f599de, R-3 dd3fe2c2, R-6 c3a3ef98, R-7 4fbc88b6, R-9 549c7475, R-5 3d1ff4e2; pushed ff c81ba632..03e1d7fd; remote 4/4 success on 03e1d7fd |
-| S5 re-review | running | 10-16 | | reports/S5-rereview-1.md | round 1 (conformance, post-repair) |
+| S5 re-review | done | 10-16 | 10-16 | reports/S5-rereview-1.md | round 1: SOUND; R-1..R-9 hold, six mutants each killed by their test, no regression; 0 Blocker / 0 Major / 1 Minor (R-C101) |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
@@ -60,6 +60,8 @@ Existing-PR run: no new branch, no new PR. Adds to draft PR #1055 on `feat/codex
 - 2026-10-16 — S5 iteration 1 launched (fresh agent, brief at scratchpad/s5-iter1-prompt.md). Fourth usage-limit outage (HTTP 429) stopped it before any commit or edit (HEAD still ecba0d48, tree clean). Per coordinator: resumed the SAME agent by ID via SendMessage, not a fresh one; iteration count stays 1/8.
 
 - 2026-10-16 — S5 iteration 1 converged. Orchestrator checks at 03e1d7fd: tree clean; `git diff ecba0d48..HEAD -- tests lint/baseline.json` empty; verify-log `## Iteration 1` present; review.md has no confirmed row open (R-10..R-15 are follow-ups); own gate run: `SDK-LINT: PASS`, source `1 failed, 5957 passed, 25 skipped` (inherited only), package `CI passed.`; check-runs Package / Static policy / Source 3.11 / Source 3.12 all success on 03e1d7fd. Final re-review round 1 launched (conformance, DIFF_BASE c181be65).
+
+- 2026-10-16 — Re-review round 1 SOUND. R-C101 (Minor, trivial): vidbyte/lib/enums/__init__.py:33-35 TESTS block names no S2 test file although its new CodexSkillScope export is pinned (helper_surface:238-244, packaging:70); §12.5/NFR-8 unmet on that one file, R-7's list missed it. Decision: FIX it now as review.md R-16 via a fresh S5 iteration 2 (one header line, in scope, reversible) rather than leave a known §12.5 gap for the owner; no further re-review round (comment-only header change), orchestrator verifies with lint + diff + check-runs.
 
 ## User replies (verbatim)
 - none
