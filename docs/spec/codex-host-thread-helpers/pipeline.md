@@ -18,7 +18,7 @@ Existing-PR run: no new branch, no new PR. Adds to draft PR #1055 on `feat/codex
 |---|---|---|---|---|---|
 | S0 merge main | done | 22:31 | 23:05 | reports/S0-merge-main.md | merge commit c181be65; packs 551 passed / 1 inherited failure; SDK-LINT: PASS |
 | S0 worktree + capture + recon | done | 22:30 | 23:25 | reports/S0-scout.md | base_commit c181be65; code-map.md (4 sections, ~30 files) |
-| S1 spec + review | pending | | | | |
+| S1 spec + review | running | 23:28 | | reports/S1-spec-author.md | |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -37,6 +37,9 @@ Existing-PR run: no new branch, no new PR. Adds to draft PR #1055 on `feat/codex
 - 2026-10-15 22:58 — Merge agent BLOCKED: 7 tests failed only from the union (codex_host packaging test pins the old native/__init__.py SHA, REPO_MAP section and README bullet; harness_threads static-policy test scanned all of native/ incl. codex/; harness_threads INV-21 test rejects any vidbyte/tools change vs main). GRANTED option A (patch 3 test files, +9/-7, inside the merge commit): update the 3 pins to the merged texts; static-policy scan skips `native/codex/`; INV-21 excludes builtins/codex, builtins/__init__.py, toolsets/codex.py, toolsets/__init__.py. — reversible, inside "resolve as union"; the two harness_threads checks are branch-scope diffs against main that reject any later branch. Option B (refactor codex/ to #1036's INV-15/INV-20 rules) NOT done: optional Q for the spec author, default no.
 - 2026-10-15 23:05 — Inherited failure accepted as inherited: tests/features/harness_threads/test_harness_threads_surface.py::test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes ("assert 148 == 120" at line 193) fails on plain origin/main 72a4ade1 (1 failed, 435 passed in a detached main worktree). Not fixed in this PR. `scripts/run_ci.py` therefore exits 1 on exactly this one test; "green" for this run = every other step and test passes, and this test fails for the same reason as on main.
 - 2026-10-15 23:06 — AGENTS_MD_PATH / REPO_MAP_PATH taken from the worktree (merged tree), not the main checkout, so stages never read the main checkout.
+- 2026-10-15 23:28 — S1 author authorized to probe a local `codex app-server` with NON-spending calls only (skills/list; thread/list limit ≤ 3; thread/read, goal/get, compact/start, delete, turns/list on random non-existent UUIDs) to resolve the scout's unverified items from the rawest source; never turn/start, review/start, goal/set or any write on a real thread id; record only shapes/codes, never real thread content. — the brief forbids paid turns, not read-only protocol probes.
+- 2026-10-15 23:28 — S2 test author will be authorized to update EXISTING test pins that the spec's new surface necessarily changes (tool count 15, tool-name lists, CodexHostOperation/TOOL_NAMES, CALL_LIST, NEXT_STEPS entries, packaging pins), each tied to a spec ID, and nothing else. — adding tools is impossible without changing those pins, and only the test author may touch tests.
+- 2026-10-16 (after limit reset) — S1 author died mid-read in a usage-limit outage (HTTP 429), leaving no spec.md or report on disk. Resumed the SAME author via SendMessage (its saved transcript holds the briefing and its reading so far) instead of relaunching fresh; fallback = fresh relaunch with the identical briefing. — the coordinator asked to resume rather than redo finished work.
 
 ## User replies (verbatim)
 - none
