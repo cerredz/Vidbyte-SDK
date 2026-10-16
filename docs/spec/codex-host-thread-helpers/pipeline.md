@@ -53,6 +53,9 @@ Existing-PR run: no new branch, no new PR. Adds to draft PR #1055 on `feat/codex
 - 2026-10-16 — S4 verified: 4 confirmed Majors. Routing by owner tag: R-1 (goal-tool slot release, INV-27), R-4 (delete reservation/release, INV-9) and R-8 (read-back name and turn-id clauses, INV-34; downgraded Minor, `tests` follow-up) → the S2 test author a593a92fd8d724b3b (resumed by ID; tests are its contract). R-8 INCLUDED, not deferred: it protects the user's settled "check that the command actually ran" decision (request §C), touches only tests, and is reversible. R-2, R-3, R-6, R-7, R-9 (code) and R-5 (spec wording) → S5 repair iteration 1 after the tests land. R-10..R-15 stay follow-ups (outside §12.3, spec-pinned texts, or [scope-adding]) and go to the PR body.
 - 2026-10-16 — R-3 bound for `since` NOT added (verifier: `"minimum": 0` is a new A007 finding with the ratchet at 255/255); only constant-valued bounds on limit/turns limit/token_budget.
 
+- 2026-10-16 — S2 round 2 (same author, resumed by ID) closed R-1, R-4, R-8 with 5 tests (6c5eca2a, 6a434afd, 30a0a0ac; report d0f0c768); every named mutant (V36, V05, V05b, V02, V03, V04) now caught, controls intact; area 1 inherited fail / 678 passed; SDK-LINT PASS; no vidbyte/ change. Spot-check: diff aaaac67a..d0f0c768 touches only tests/ and docs/.
+- 2026-10-16 — Accepted S2's open item: tests/features/codex_host/codex_host_fakes.py is 1071 lines (899 before this run) against AGENTS.md principle 3 ("Keep files well below 1,000 lines"). Sent the same author a split to ≤900 lines (helper handlers to one new module beside it), behaviour unchanged, mutation results unchanged. — test-only, reversible, and a human reviewer would flag it.
+
 ## User replies (verbatim)
 - none
 
