@@ -413,6 +413,15 @@ State changes only at three points: `thread/resume` (it loads the thread here; o
 | AC-42 | An open host, and the fake lists an enabled skill `s` | `run_codex_skill("s", "x", request=<ephemeral thread>)`; separately, `run_codex_openai_docs("q", request=<ephemeral thread>)` | Each raises `ConfigurationError` whose message is `EPHEMERAL_SKILL_MESSAGE` for that function. No request is sent: no `skills/list` and no `thread/start`. | P0 | `test_codex_host_goal_skills.py::test_bad_skill_arguments_are_refused_before_any_request` |
 | AC-43 | The fake lists an enabled skill `s` and never records a `userMessage`, and `CODEX_HOST_INPUT_CHECK_DEADLINE_SECONDS` is patched in `skill_functions` to less than `CODEX_HOST_INPUT_CHECK_INTERVAL_SECONDS` | `run_codex_skill("s", "do it")` | Exactly one `thread/turns/list` request is sent, then one interrupt, then `codex.command_not_run` with operation `run_codex_skill` and `INPUT_NOT_RECORDED_MESSAGE`. | P1 | `test_codex_host_goal_skills.py::test_a_deadline_shorter_than_the_interval_allows_one_read` |
 
+**Implementation proof (S3, 2026-10-16).** S2 filled every Proof cell above, so none was blank. The code that turns each proof green landed in these commits on `feat/codex-host`:
+
+- AC-36: `34a73836` (the four codes) and `3aebb0a6` (their classifications and next steps).
+- AC-10 and the record halves of AC-15, AC-24 and AC-29: `575467b2`, `12b076d5` (`CodexSkillScope` and the operations), `96d6d484` (the five records), `e221ab1e` (`CodexResultSerializer.items`), `b65d0e0f` and `48a160a1` (raw responses and translators).
+- AC-2 to AC-23 and AC-38 (thread helpers): `8520600c` (`CodexThreadHelpers`), `96b572d9` (the limit check owner), `b55ece4e` (the host methods).
+- AC-24 to AC-32, AC-39, AC-40, AC-42 and AC-43 (goal and skill functions): `32edb6f2` (`CodexSkillFunctions`) and `b55ece4e`.
+- AC-1, AC-34, AC-35 and AC-37: `b55ece4e`, over the rows above.
+- AC-33, AC-41 and the tool halves of AC-9 and AC-21: `80e0f308` (descriptions), `1ce73fcf` (`_resolve_timestamp`), `f8496128` and `94a2cc34` (the eleven tools), `bafd0264`, `4de1ee99` and `864648d2` (exports and `CodexHostTools`).
+
 ### 6.3 Edge cases and failure modes
 
 | ID | Trigger (input + state) | System behavior | User sees | Guarded by (INV-/D-) |
@@ -1321,3 +1330,14 @@ Blocking questions: 0.
 | r1 | 2026-10-15 | S1 spec | Initial spec. 12 CodexHost functions (7 thread helpers, 5 built-in skill functions), 11 tools, 5 records, 1 enum and 3 failure codes, in two collaborator modules and two tool modules. |
 | r2 | 2026-10-15 | S1 spec (review round 1) | All 15 findings accepted (2 Blocker, 7 Major, 6 Minor). A read-only probe of one real `notLoaded` thread settled A-4 and A-5. `get_codex_goal` no longer resumes (INV-33). Compact checks the goal before it resumes (new `codex.goal_unfinished`). `run_codex_skill` reads its input back (INV-34, INV-35). New `CodexSkillHost` Protocol, tool default limit (D-25), lint ratchet checklist and §C deviation table. Now 4 failure codes and 20 classes (r3 corrected r2's "19"). |
 | r3 | 2026-10-16 | S1 spec (review round 2; approved) | All round-2 findings accepted (R-16 Blocker; R-17 and R-18 Major; R-19 to R-22 Minor), and R-9 completed. The skill read-back gets a cumulative deadline that lint S064 accepts. Ephemeral skill runs are refused before any request. `codex.goal_unfinished` gets a next step that works and a terminal row. Turns-not-size wording, a class count of 20, three stale texts and local evidence for A-7, A-15, A-16, A-19 and A-20. Status set to approved: the two review rounds are the approval. |
+| r3 | 2026-10-16 | S3 implement | All 18 §12.3 rows landed in 20 commits, `34a73836` to `7980ebbb`: 12 `CodexHost` functions over `CodexThreadHelpers` and `CodexSkillFunctions`, 11 tools (26 in `CodexHostTools`), 5 records, 1 enum and 4 failure codes. The area suite and the source stage have only the inherited `harness_threads` failure; lint, the package stage, semgrep and the API check pass. Deviations are listed below. |
+
+**Implementation deviations (S3).**
+
+1. **The listing `limit` check has a canonical owner.** Lint C002 flagged the inline `isinstance(limit, bool)` guard in `CodexThreadHelpers._reject_listing` as a duplicate of `vidbyte/lib/dataclasses/coding.py:143`. The type and range check now goes through `RecordFieldValidator.require_int` (`vidbyte/lib/dataclasses/validation.py`), and the exact `LIMIT_MESSAGE` is re-raised `from None`. The behavior and the text are unchanged (`96b572d9`).
+2. **The `since` and `query` checks are keyed by operation.** `_reject_listing` checks `since` only for `list_codex_threads_since` and `query` only for `search_codex_threads`, because the other wrappers pass `since=None` or `search=""` into the one shared `list_threads`.
+3. **The skill-argument helper is `_reject_skill_arguments`.** A name containing `request` would need an A002 `@intent` block. It runs after the own-input check: first the ephemeral check, then `SKILL_NAME_MESSAGE`, in row 10's order.
+4. **`CODEX_HOST_INPUT_CHECK_ATTEMPTS` keeps its spec name**, although the S3 briefing advised against `*_ATTEMPTS` names. §12.4 forbids renaming it, and the in-loop `loop.time()` deadline comparison satisfies S064.
+5. **The `CodexHostTools` class docstring is unchanged.** "Catalog of one agent tool per CodexHost function over one host." mirrors the pinned `toolsets/__init__.py:11` bullet, which the orchestrator kept. The file header and the narrated comment in `__init__` say that `delete_codex_thread` has no tool.
+6. **Two header links landed in a follow-up commit.** §12.5 asks every modified codex file to link this spec. `vidbyte/agents/codex/result.py` and `vidbyte/lib/enums/codex.py` got the link in `7980ebbb`, separate from their row commits.
+7. **No file outside §12.3 changed.** Exactly the 18 row files changed, with no test, README, `REPO_MAP.md`, contract or lint-baseline edit.
