@@ -3,7 +3,7 @@ slug: harness-thread-helpers-skills
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-harness-thread-helpers-skills
 branch: feat/harness-thread-helpers-skills
-base_commit: 72a4ade129d74bab45b4fc12764d951df6d1ec3b
+base_commit: 0f69f7b7 (rebased from 72a4ade1 at S1)
 pr:
 until: none
 started: 2026-10-15 18:12
@@ -39,6 +39,9 @@ started: 2026-10-15 18:12
 
 - 2026-10-15 20:15 — S1 author r1 spot-check passed: commit 7910f151, revision 1, 17 template sections, report present. Spec r1: 45 functions (22 helpers, 23 skill functions), 10 new files, FailureCode 148→152, 0 blocking Q. Launched S1 reviewer round 1.
 
+- 2026-10-15 20:40 — S1 review round 1: SOUND WITH FIXES, 1 Blocker (R-1 call depth), 9 Major, 4 Minor, none tagged scope-adding. All 14 go to the author for triage. R-4 restores `run_grok_imagine_video`/`run_grok_code_review`, which were already in the accepted catalog (request.md §E.2), so it is in scope.
+- 2026-10-15 20:40 — Rebased the 3 docs-only, unpushed commits from 72a4ade1 onto origin/main 0f69f7b7 (#1095, #1103) and fast-forwarded local main. #1095 touches `vidbyte/__init__.py`, `contracts/sdk-public-api.json` and `vidbyte/lib/enums/__init__.py`; the public API contract has 0 harness entries (C016 does not cover `vidbyte.harnesses.native`), so nothing in the spec changes.
+
 ## User replies (verbatim)
 - 2026-10-15 ~18:25 — "note, ccan you also in a subagent launch this "spec-pipeline" process for pr #1055 and explain the changes that we want to make with the implementation of the existing pr"
 
@@ -61,3 +64,8 @@ started: 2026-10-15 18:12
 - Pattern to copy: #1036's `GrokThreads._call` (catch order CancelledError → NativeThreadError → ConfigurationError → Exception), a narrated `<X>Run.execute`, `NativeErrorFactory` with a closed code table; helper child processes list every key variable in `env_remove`; no helper takes `api_key`; read helpers never create the private Grok home (EC-1) — *source:* S1 author
 - S052 lint: no blocking file I/O inside `async def`; route file work through `asyncio.to_thread` — *source:* S1 author
 - Grok one-shot uses `--single` (not `-p`); A-7 (does `--single "/goal …"` expand the slash command) is unverified, and the manual QA probe goes in the PR body (§12.5) — *source:* S1 author
+- Grok store holds non-session files (`~/.grok/sessions/session_search.sqlite`, `permission*.toml` in group folders); scans must take directories only — *source:* S1 review R-2
+- C002 (blocking, baseline 9) flags inline `isinstance(x, bool)` guards; use `RecordFieldValidator.require_int`/`require_bool` (`vidbyte/lib/dataclasses/validation.py:85,:92`) — *source:* S1 review R-3
+- Grok headless takes `-s/--session-id <UUID>` for a new session; the runner's output cap keeps the first N bytes, so the final `end` event carrying the id is lost on overflow — *source:* S1 review R-6
+- Stale surface test: line 195 is stale as well as line 193; `fake_harness.py:562` returns Muse `forkedFrom` as a string, but real MSP gives an object with `sessionId`. MSP `session/list` max 200, sorted by `updatedAt` desc, with `nextCursor` — *source:* S1 review
+- `contracts/sdk-public-api.json` and lint C016 do not cover `vidbyte.harnesses.native` (0 harness entries at 0f69f7b7) — *source:* orchestrator
