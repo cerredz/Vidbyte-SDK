@@ -25,7 +25,7 @@ The live event stream (`on_event`, `InfiniteEvent`) and the run handoff (`run_ha
 - `test_infinite_memory_events_lifecycle.py` covers how the stream ends when a run does not finish: cancellation and its resume, a runner error, a `KeyboardInterrupt`, and the handoff of a cancelled run.
 - `test_infinite_memory_events_pairs.py` covers launch, pair, memory, and note events: `batch_rejected`, replay order, structured drops, `file_written`, `tool_refused`, caps and omitted counts, nesting, a failing generator, path spellings, a lone surrogate, and middleware denials.
 - `test_infinite_memory_events_records.py` covers the event vocabulary and records directly: exports, the `on_event` check, the worst-case size of every details record, every cap and one-line rule, the envelope checks, costs, key shortening, usage reading, and clamped limits.
-- `test_infinite_memory_handoff.py` covers `run_handoff`: the nine sections and the byte-exact file, old journals, refused run ids, the section and line caps, hand-edited journals, which entries and cards each section lists, and a note replaced by a symlink loop.
+- `test_infinite_memory_handoff.py` covers `run_handoff`: the nine sections and the byte-exact file, old journals, refused run ids, the section and line caps, hand-edited journals, which entries and cards each section lists, a lone surrogate in the answer, and a note replaced by a symlink loop.
 
 ## Run
 

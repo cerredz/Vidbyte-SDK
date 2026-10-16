@@ -1,9 +1,9 @@
 """FILE: tests/features/infinite_memory_agent/test_infinite_memory_handoff.py
 
-PURPOSE: Proves InfiniteMemoryAgent.run_handoff: the nine sections of a finished run and the exact file it saves, the placeholder for a journal written before the answer was stored, the run_id errors that write nothing, the section and line caps on a huge answer and a long Files list, the refusal of a hand-edited journal in both run_handoff and resume, which entries and cards each section lists, and a note replaced by a symlink loop.
-ROLE IN CODEBASE: Handoff layer of tests/features/infinite_memory_agent/ for docs/spec/infinite-memory-events/spec.md (AC-16, AC-18, AC-19, AC-33; INV-22..INV-24, INV-26, INV-37; EC-15, EC-19, EC-20, EC-21, EC-24, EC-33, EC-35; FR-14; D-11, D-14, D-19, D-26). Exercises InfiniteMemoryAgent.run_handoff in vidbyte/agents/infinite/agent.py, InfiniteHandoff in vidbyte/context/handoff/infinite.py, the journal's run_finished answer and files, and the workspace readers run_entries and descriptions.
+PURPOSE: Proves InfiniteMemoryAgent.run_handoff: the nine sections of a finished run and the exact file it saves, the placeholder for a journal written before the answer was stored, the run_id errors that write nothing, the section and line caps on a huge answer and a long Files list, the refusal of a hand-edited journal in both run_handoff and resume, which entries and cards each section lists, a lone surrogate in the answer, and a note replaced by a symlink loop.
+ROLE IN CODEBASE: Handoff layer of tests/features/infinite_memory_agent/ for docs/spec/infinite-memory-events/spec.md (AC-16, AC-18, AC-19, AC-33; INV-22..INV-24, INV-26, INV-37; EC-15, EC-17, EC-19, EC-20, EC-21, EC-24, EC-33, EC-35; FR-14; D-11, D-14, D-19, D-26). Exercises InfiniteMemoryAgent.run_handoff in vidbyte/agents/infinite/agent.py, InfiniteHandoff in vidbyte/context/handoff/infinite.py, the journal's run_finished answer and files, and the workspace readers run_entries and descriptions.
 ARCHITECTURE NOTE: Runs are scripted with ScriptedTree, or their journals are written by hand with the pack's record builders (the old run_finished shape for AC-18). run_handoff is always called inside an empty ScriptedTree, so any model call would fail the test. Expected section bodies are built from InfiniteHandoff's own wording attributes, which the spec fixes (section 9.1), and from cut/line in infinite_events_fixtures.py for the caps.
-FUNCTION INVENTORY: test_a_finished_run_gives_nine_sections_and_a_byte_exact_file_without_a_model_call (AC-16, INV-22, INV-23, D-19); test_an_old_journal_without_an_answer_uses_the_placeholder_and_resume_is_unchanged (AC-18, EC-21, INV-26); test_a_bad_unknown_or_missing_run_id_is_refused_and_writes_nothing (AC-19, INV-22); test_a_huge_answer_and_a_long_files_list_are_cut_to_the_section_caps (AC-33, INV-37, EC-24, EC-33, D-26); test_a_hand_edited_run_finished_record_is_refused_with_its_line (EC-20, INV-26); test_a_malformed_entries_line_refuses_the_handoff_and_writes_nothing (EC-19, INV-22); test_the_handoff_lists_this_runs_live_entries_by_kind_and_every_card_in_finishing_order (INV-24, D-11); test_a_note_replaced_by_a_symlink_loop_is_named_as_given_and_breaks_no_handoff_or_event (EC-35, FR-14, D-23). _handoff calls run_handoff with no model allowed; _files_record copies the files.jsonl shape.
+FUNCTION INVENTORY: test_a_finished_run_gives_nine_sections_and_a_byte_exact_file_without_a_model_call (AC-16, INV-22, INV-23, D-19); test_an_old_journal_without_an_answer_uses_the_placeholder_and_resume_is_unchanged (AC-18, EC-21, INV-26); test_a_bad_unknown_or_missing_run_id_is_refused_and_writes_nothing (AC-19, INV-22); test_a_huge_answer_and_a_long_files_list_are_cut_to_the_section_caps (AC-33, INV-37, EC-24, EC-33, D-26); test_a_hand_edited_run_finished_record_is_refused_with_its_line (EC-20, INV-26); test_a_malformed_entries_line_refuses_the_handoff_and_writes_nothing (EC-19, INV-22); test_the_handoff_lists_this_runs_live_entries_by_kind_and_every_card_in_finishing_order (INV-24, D-11); test_a_lone_surrogate_in_the_roots_answer_becomes_a_question_mark_in_the_handoff_and_its_file (EC-17, INV-23); test_a_note_replaced_by_a_symlink_loop_is_named_as_given_and_breaks_no_handoff_or_event (EC-35, FR-14, D-23). _handoff calls run_handoff with no model allowed; _files_record copies the files.jsonl shape.
 COMMON MODIFICATION PATTERNS: A new handoff rule gets one test that builds the run (scripted or hand-written), calls _handoff, and compares one section with text built from InfiniteHandoff's wording attributes.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level. 2. Do not compare the handoff file with text read in text mode; compare bytes, because Windows would turn "\\n" into "\\r\\n". 3. Do not hard-code the handoff sentences; read them from InfiniteHandoff's class attributes, which spec section 9.1 names.
 KNOWN EDGE CASES: The spec allows NO_ANSWER to be either the whole Outcome or the answer inside OUTCOME, so AC-18 checks that the Outcome holds the task and the placeholder rather than one exact body. journal_paths globs .runs/*.jsonl, so the handoff file never counts as a journal. AC-33 adds files.jsonl records after the run in the shape the workspace writes, because creating 30 notes through the model would only repeat AC-31.
@@ -311,7 +311,26 @@ def test_the_handoff_lists_this_runs_live_entries_by_kind_and_every_card_in_fini
     )
 
 
-# ---------------------------------------------------------------- EC-35
+# ---------------------------------------------------------------- EC-17, EC-35
+
+
+def test_a_lone_surrogate_in_the_roots_answer_becomes_a_question_mark_in_the_handoff_and_its_file(tmp_path: Path) -> None:
+    """EC-17, INV-23: a root whose final answer holds "\\ud800" still gets its handoff: the Outcome shows "?" in its place, the saved file's bytes decode as UTF-8 and equal to_context_text() encoded as UTF-8, and the journal keeps the original answer."""
+    from vidbyte.context.handoff.infinite import InfiniteHandoff
+
+    answer = "Prices checked \ud800 done."
+    agent = build_agent(tmp_path)
+    tree = ScriptedTree({ROOT: [reply(answer)]})
+    with tree.install():
+        run_id = agent.run(TASK).metadata["infinite_run_id"]
+    tree.assert_complete()
+    root = workspace_root(tmp_path)
+    handoff = _handoff(agent, run_id)
+    assert handoff.sections["Outcome"] == InfiniteHandoff.OUTCOME.format(task=TASK, stop_reason="final_response", answer="Prices checked ? done.")
+    saved = (root / ".runs" / f"{run_id}{HANDOFF_SUFFIX}").read_bytes()
+    assert saved == handoff.to_context_text().encode("utf-8")
+    assert "Prices checked ? done." in saved.decode("utf-8")
+    assert journal_records(root)[-1]["answer"] == answer
 
 
 def test_a_note_replaced_by_a_symlink_loop_is_named_as_given_and_breaks_no_handoff_or_event(tmp_path: Path) -> None:
