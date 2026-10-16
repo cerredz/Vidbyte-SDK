@@ -290,19 +290,23 @@ class DeduplicateToolCallsCompaction(BaseCompaction):
     """Removes duplicate tool-call/result pairs while keeping the first occurrence."""
 
     async def compact(self, messages: Sequence[ContextMessage]) -> tuple[ContextMessage, ...]:
-        seen_signatures: set[str] = set()
+        seen_pairs: set[tuple[str, tuple[str, ...]]] = set()
         remove_indexes: set[int] = set()
         for index, message in enumerate(messages):
             # Key each call on its tool names and arguments, not its per-call id, so repeated calls match.
             signature = tool_call_signature(message)
             if signature is None:
                 continue
-            if signature in seen_signatures:
-                remove_indexes.add(index)
-                if index + 1 < len(messages) and messages[index + 1].kind == "tool_result":
-                    remove_indexes.add(index + 1)
+            # @intent dedupe-keeps-a-changed-result
+            # A pair is the call plus all its results (parallel calls); a re-run whose result changed (tests now pass) is news, not a repeat.
+            end = index + 1
+            while end < len(messages) and messages[end].kind == "tool_result":
+                end += 1
+            pair = (signature, tuple(m.content for m in messages[index + 1:end]))
+            if pair in seen_pairs:
+                remove_indexes.update(range(index, end))
             else:
-                seen_signatures.add(signature)
+                seen_pairs.add(pair)
         return tuple(m for i, m in enumerate(messages) if i not in remove_indexes)
 
 
