@@ -18,7 +18,7 @@ STACKED RUN. Base branch is `feat/infinite-memory-agent` (PR #1084), not `main`.
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-16 01:45 | 2026-10-16 02:20 | reports/S0-scout.md | base_commit 7efceb55; code-map.md (171 lines, 40-row leaf exposure table) |
 | S1 spec + review | done | 2026-10-16 02:25 | 2026-10-16 17:45 | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | spec r3 approved at 8ab4e35a (two rounds: SOUND WITH FIXES both; 26 findings applied); INV-1…24 (INV-23 struck), AC-1…14, 47 §12.3 rows, A-1…7, Q-1/Q-3 default no |
-| S2 tests | running (test author launched 17:50) | 2026-10-16 17:50 | | reports/S2-test-author.md | |
+| S2 tests | done (spec r4 revision for two S2-found defects in progress) | 2026-10-16 17:50 | 2026-10-16 18:20 | reports/S2-test-author.md | test_infinite_memory_prompts.py: 17 tests / 131 cases; red 37 / green 94 at f4cad411; 113 pre-existing green; S2_HEAD = f4cad411 (test tree at b719c400); lint PASS |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
@@ -70,10 +70,20 @@ The folder holds 40 `.md` assets; `infinite_memory.json` top level is a dict wit
 
 - 2026-10-16 17:45 — **S1 closed.** Q-1 (floor on all 40 leaves) applied as default no; Q-3 (content-is-data sentence per system prompt) applied as default no and shown to the user in the spec summary; Q-2 resolved earlier. Spec r3 is the contract for S2–S6.
 
+- 2026-10-16 18:20 — **S2 spot-check held** (own run: 37 failed / 94 passed; diff vs base confined to tests/; two commits b719c400 + f4cad411). S2_HEAD = f4cad411. S3/S5/S6 diff the test tree against it.
+- 2026-10-16 18:20 — **S2-found spec defects resolved via the author (r4):** INV-15 (e) aligned to the test's reading (sentences of five or more words; label sentences such as "A dash means none." repeat by design); §8.5 (4) "uses no file quota" / "found with grep" marked keep (review) per INV-17 and R-5; pre-existing test count corrected to 113. The author sets status: tests-written in the same commit (one writer on spec.md). *Why:* a per-field label explanation is not padding; the user's D-F standard targets repeated rules.
+
 ## User replies (verbatim)
 - (none yet)
 
 ## Niche facts accumulated (carried into every later briefing)
+- Run the new module: `PYTHONPATH=$(pwd) python -m pytest tests/features/infinite_memory_agent/test_infinite_memory_prompts.py -q -p no:cacheprovider`; `python lint/run.py` reads `git ls-files`, so new files must be `git add`ed before lint sees them. — *source:* S2
+- Five floor reds, not four: verifier_system_prompt needs ≥ 41 more tiktoken (1,059 → ≥ 1,100); its estimate already passes. — *source:* S2
+- Phrase match as coded in the test's `normalize()`: lowercase; ’ ‘ “ ” folded; `*` `_` backtick `,` stripped; whitespace collapsed; contiguous substring inside the named leaf only. "the default is not to remember" must appear in root, generator AND remember_tool_description. — *source:* S2
+- Sentences = S025 rule copied into the test (terminal . ! ? + whitespace/end, not after e.g./i.e./etc./vs./approx.); ≥ 4 per compact description; the duplicate check exempts sentences under five words. — *source:* S2
+- Bounds bound exactly: 23-description per-leaf sums ≤ 4,900 est / ≤ 4,183 tik; replies ≤ 80 by both measures; quota_line ≤ 38/38, map_header ≤ 54/51, result_card ≤ 54/56 (est/tik); tiktoken baselines are lower bounds for the seven. — *source:* S2
+- Digits only as `^\d+\. ` list markers; braces only as the documented placeholders (`{{` fails too); 13 fragments no trailing newline, 27 whole texts exactly one; every base heading must survive in order (extra headings allowed between); the 24 descriptions follow the tool/parameter heading patterns with the five overrides listed in the test's `HEADINGS`. — *source:* S2
+- Do not `pip install -e` in the worktree (it would re-point the global editable install); `PYTHONPATH=$(pwd)` makes the worktree win; pytest 8.3.5, pytest-asyncio 1.3.0, tiktoken 0.12.0 are already installed. — *source:* S2 / code-map §1
 - Base branch may gain commits during the run (the user is fixing PR #1084 in another checkout): `git fetch origin` and compare against `origin/feat/infinite-memory-agent` before S3 and before S6; rebase the worktree onto it if it moved. — *source:* coordinator
 - Keep every change inside the `infinite_memory` prompt family and its tests so the stacked PR does not conflict with `feat/infinite-memory-events`; the PR body lists "possible conflict with feat/infinite-memory-events on the 40-leaf test" under follow-ups. — *source:* coordinator
 - Windows: long quoted heredocs in the Bash tool fail with "unexpected EOF"; write helper scripts with the Write tool and run by path. `git worktree remove` fails if a shell's cwd is inside the worktree. — *source:* brief
