@@ -1,14 +1,14 @@
 """FILE: vidbyte/harnesses/native/hostkit/errors.py
 
-PURPOSE: Defines NativeErrorFactory, which builds every NativeThreadError a thread function raises: it looks the failure code up in a closed table, composes the message from the INV-5 sentences in order, scrubs every dynamic part (the values the call injected, then the shared HarnessRedactor) and caps the vendor text.
-ROLE IN CODEBASE: One factory per call, built by the public functions in vidbyte/harnesses/native/grok/threads.py, opencode/threads.py and muse/threads.py with the harness and the function, and handed to their flow classes, wire readers and launchers.
+PURPOSE: Defines NativeErrorFactory, which builds every NativeThreadError a thread function, thread helper or command function raises: it looks the failure code up in a closed table, composes the message from the INV-5 sentences in order, scrubs every dynamic part (the values the call injected, then the shared HarnessRedactor) and caps the vendor text.
+ROLE IN CODEBASE: One factory per call, built by the public functions in the threads, helpers and commands modules of vidbyte/harnesses/native/grok, opencode and muse with the harness and the function, and handed to their flow classes, wire readers, launchers and the hostkit listing and evidence checks. A request is a NativeThreadRequest (runs and commands) or a NativeHelperRequest (helpers); the factory reads only its workspace and thread_id.
 ARCHITECTURE NOTE: Lives in hostkit, not vidbyte.lib, because scrubbing reuses HarnessRedactor from vidbyte.harnesses.serialization and lib may not import upward. Every fixed word comes from vidbyte/lib/constants/native_threads.py (spec INV-15): the sentence templates, the harness labels, the failure code of each harness and problem, and the likely cause and next step of each code. The code is looked up in NATIVE_THREAD_FAILURE_CODES, never built from text, so a code that is not a FailureCode member cannot occur.
 FUNCTION INVENTORY: register_secret remembers an injected value; scrub redacts and caps text; wrong_thread says which problem a Grok or opencode answer on the wrong thread is; listing joins names for a sentence; failure is the narrated main function that builds the error for a problem; from_configuration_error, from_unexpected and from_launch_failure build the invalid-argument, runtime and launch errors; _context_sentences formats the scrubbed workspace and thread id sentences; _observed_sentences formats what the SDK saw; _error assembles the message and the error. Only the entry methods scrub, so every helper is one call deep (AGENTS.md principle 1).
 COMMON MODIFICATION PATTERNS: A new problem adds its NativeThreadProblem member, its summary and observation templates, its codes in NATIVE_THREAD_FAILURE_CODES and their texts; this file needs no change unless the problem brings a new kind of observation, which becomes one more keyword argument of failure.
 WHAT NOT TO DO IN THIS FILE: 1. Do not put raw exception text into a message; only class names, the SDK's own validator text and scrubbed vendor text. 2. Do not scrub or cut the likely cause and the next step; they must appear exactly as the constants hold them. 3. Do not raise from a builder; a builder that fails would hide the original error.
 KNOWN EDGE CASES: A registered value is replaced before the redactor runs and before the cap, so a cap cannot cut a secret in half and leave its prefix. Empty text stays empty instead of becoming the redactor's "raised without a message" fallback. A timed-out outcome reports no exit code, because the status then comes from the tree stop, not from the vendor.
 RELATED DOCS: vidbyte/harnesses/README.md
-TESTS: tests/features/harness_threads/test_harness_threads_errors.py, tests/features/harness_threads/test_harness_threads_credentials.py
+TESTS: tests/features/harness_threads/test_harness_threads_errors.py, tests/features/harness_threads/test_harness_threads_credentials.py, tests/features/harness_threads/test_harness_threads_helper_surface.py, tests/features/harness_threads/test_harness_threads_helper_credentials.py
 """
 
 from __future__ import annotations
@@ -17,7 +17,10 @@ from collections.abc import Iterable
 
 from vidbyte.harnesses.serialization import HarnessRedactor
 from vidbyte.lib.constants import native_threads
-from vidbyte.lib.dataclasses.native_threads import NativeThreadRequest
+from vidbyte.lib.dataclasses.native_threads import (
+    NativeHelperRequest,
+    NativeThreadRequest,
+)
 from vidbyte.lib.dataclasses.process import CliOutcome
 from vidbyte.lib.enums.failure import FailureCode
 from vidbyte.lib.enums.native_threads import (
@@ -86,7 +89,7 @@ class NativeErrorFactory:
         self,
         problem: NativeThreadProblem,
         *,
-        request: NativeThreadRequest | None,
+        request: NativeThreadRequest | NativeHelperRequest | None,
         thread_id: str | None = None,
         outcome: CliOutcome | None = None,
         vendor_text: str | None = None,
@@ -126,7 +129,7 @@ class NativeErrorFactory:
             sentences.append(native_threads.NATIVE_VENDOR_TEXT_SENTENCE.format(vendor_text=vendor))
         return self._error(code, sentences, thread_id=newest_id, exit_code=exit_code, vendor_message=vendor)
 
-    def from_configuration_error(self, exc: ConfigurationError, request: NativeThreadRequest | None) -> NativeThreadError:
+    def from_configuration_error(self, exc: ConfigurationError, request: NativeThreadRequest | NativeHelperRequest | None) -> NativeThreadError:
         # A record or validator refusal names its argument in
         # details["field"]; its message is the SDK's own text, which
         # never quotes the key.
@@ -141,7 +144,7 @@ class NativeErrorFactory:
         ]
         return self._error(FailureCode.CONFIGURATION_INVALID_ARGUMENT, sentences, thread_id=thread_id)
 
-    def from_unexpected(self, exc: Exception, request: NativeThreadRequest | None) -> NativeThreadError:
+    def from_unexpected(self, exc: Exception, request: NativeThreadRequest | NativeHelperRequest | None) -> NativeThreadError:
         # @intent native-errors-defects-name-only-the-class
         # A defect reports only the exception's class name; its text may
         # hold paths, payloads or secrets and is never copied into the
@@ -158,7 +161,7 @@ class NativeErrorFactory:
         ]
         return self._error(FailureCode.RUNTIME_ERROR, sentences, thread_id=thread_id, error_type=error_type)
 
-    def from_launch_failure(self, failure: ProcessLaunchFailure, program: str, *, request: NativeThreadRequest, thread_id: str | None = None) -> NativeThreadError:
+    def from_launch_failure(self, failure: ProcessLaunchFailure, program: str, *, request: NativeThreadRequest | NativeHelperRequest, thread_id: str | None = None) -> NativeThreadError:
         # A missing executable means not installed; any other launch
         # failure means the operating system refused to start it.
         if failure is ProcessLaunchFailure.NOT_FOUND:
