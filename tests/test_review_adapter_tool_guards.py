@@ -1,27 +1,34 @@
-"""Context Protocol Header
+"""FILE: tests/test_review_adapter_tool_guards.py
 
-Description:
-    Tests that the two return-level review adapters refuse allow-listed tools
-    that would carry the producer's live authority into the reviewer.
-Purpose:
-    The independent critic and the prosecutor/defender/judge stages run in a
-    fresh runtime with context_manager=None, but a context-window tool, a
-    reasoning-trace tool, or any tool keeping the producer's ContextManager in
-    _manager still writes to and reads that live manager. A customize() view
-    over a delegation tool hid it from the critic's owner guard. Both cases
-    must be refused before any review call, and the producer's registry must
-    stay exactly as it was; ordinary tools must still reach the reviewer.
-Architecture:
-    - IndependentCriticToolGuardTests: context, trace, and wrapped tools are refused; ordinary tools are reviewed.
-    - ProsecutorDefenderJudgeToolGuardTests: context and wrapped context tools fail preflight; ordinary tools are debated.
-Relations:
+PURPOSE:
+    Proves the two return-level review adapters refuse allow-listed tools that
+    would carry the producer's live authority into the reviewer. The critic and
+    the prosecutor/defender/judge stages run with context_manager=None, but a
+    context-window tool, a reasoning-trace tool, or any tool keeping the
+    producer's ContextManager in _manager still writes to and reads that live
+    manager, and a customize() view over a delegation tool hid it from the
+    critic's owner guard. Both are refused before any review call, the
+    producer's registry stays exactly as it was, and ordinary tools still reach
+    the reviewer.
+ROLE IN CODEBASE:
     Regression tests for the @intent review-refuses-live-context-tools sites in
     vidbyte/agents/algorithms/independent_critic.py and
     vidbyte/agents/algorithms/prosecutor_defender_judge.py, which follow the
     _manager convention of BaseTool.rebind_context_manager in vidbyte/tools/base.py.
-Similar Files:
-    - tests/test_algorithms_honor_middleware_abort.py: the scripted runtime harness used here.
-    - tests/test_reflexion_algorithm.py: the fake runner and response shapes reused here.
+ARCHITECTURE NOTE:
+    Every case runs the real AgentRuntime.arun with the algorithm on the
+    scripted runner from tests/test_reflexion_algorithm.py; nothing calls a
+    private guard directly and no provider network call is made.
+COMMON MODIFICATION PATTERNS:
+    Add a refusal case when the SDK ships a new tool that holds producer state,
+    and a control case when a new kind of ordinary tool must keep working.
+KNOWN EDGE CASES:
+    A user tool may keep a non-context object in _manager; it stays allowed.
+    PDJ wraps the ConfigurationError in a preflight AgentExecutionError.
+RELATED DOCS:
+    tests/test_algorithms_honor_middleware_abort.py uses the same harness.
+TESTS:
+    Run with python -m pytest tests/test_review_adapter_tool_guards.py.
 """
 
 from __future__ import annotations
