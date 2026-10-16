@@ -5,7 +5,7 @@ ROLE IN CODEBASE: JevRuntimeSettings calls JevPreflightRegistry.validate at cons
 ARCHITECTURE NOTE: Questions are dataclasses in this folder, flags and their policy live in vidbyte/lib/jev/presets.py, and records live in vidbyte/lib/dataclasses/jev.py; this lib module never imports the agents layer and never calls Jev.
 COMMON MODIFICATION PATTERNS: Register a new preset's questions by adding its question tuple to _questions; keep scoring in DecisionModelHelper and the actions taken on answers in JevPreflightGate, not here. The specialist question is not keyed by a preset: specialists() builds it from the configured JevSpecialist records.
 KNOWN EDGE CASES: A preset without fixed questions (TOOL_SELECTOR) contributes nothing here; its questions are built per run from the tool catalog.
-RELATED DOCS: docs/design/jev-preflight-clarity.md, skills/jev-agent/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+RELATED DOCS: docs/design/jev-preflight-clarity.md, docs/design/jev-read-only-intent.md, skills/jev-agent/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_preflight.py and scripts/test-jev-preflight.py.
 """
 
@@ -19,6 +19,7 @@ from vidbyte.lib.enums.jev import JevPreflightPreset, JevPreflightQuestionKey
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.jev.preflight.bulk_work import BULK_WORK_QUESTIONS
 from vidbyte.lib.jev.preflight.clarity import CLARITY_QUESTIONS
+from vidbyte.lib.jev.preflight.read_only import READ_ONLY_QUESTIONS
 from vidbyte.lib.jev.preflight.run_state_relation import RunStateRelationQuestion
 from vidbyte.lib.jev.preflight.specialist import SpecialistQuestion
 from vidbyte.lib.jev.presets import JevPresets
@@ -28,7 +29,7 @@ class JevPreflightRegistry:
     """Registry over every fixed preflight question, keyed by JevPreflightQuestionKey."""
 
     _questions: Mapping[JevPreflightQuestionKey, JevPreflightQuestion] = MappingProxyType(
-        {question.key: question for question in (*CLARITY_QUESTIONS, RunStateRelationQuestion(), *BULK_WORK_QUESTIONS)}
+        {question.key: question for question in (*CLARITY_QUESTIONS, RunStateRelationQuestion(), *BULK_WORK_QUESTIONS, *READ_ONLY_QUESTIONS)}
     )
     _specialist: SpecialistQuestion = SpecialistQuestion()
 

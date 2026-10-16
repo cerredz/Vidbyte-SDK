@@ -3870,6 +3870,8 @@ class JevAgentResponse:
     `run_brief` the latest verified run brief, and `run_brief_updates` every attempt to refresh it, in order.
     `clone` holds the run's one CLONE launch, or None when Jev never selected CLONE.
     `swarm` holds the run's one SWARM launch, or None when no plan launched.
+    `read_only` is True when the READ_ONLY preset judged the request to ask only for an assessment, so the run,
+    and every agent it started, could use only SAFE and READ tools.
     """
 
     input: str = ""
@@ -3892,6 +3894,7 @@ class JevAgentResponse:
     clone: JevCloneResult | None = None
     swarm: JevSwarmResult | None = None
     bulk_work: JevBulkWorkResult | None = None
+    read_only: bool = False
     skills: JevSkillsOutcome = field(default_factory=JevSkillsOutcome)
 
     @property

@@ -385,7 +385,8 @@ JEV covers TypeSafe's Jev calibrated decision model and `JevAgent`, the opiniona
 | `JevAgent` facade | `vidbyte/agents/jev/agent.py` |
 | `JevAgentSettings`, the whole public configuration surface | `vidbyte/agents/jev/settings.py` |
 | `JevRuntime` (runs the gate, then the inherited loop) | `vidbyte/agents/jev/runtime.py`; resolved from `AgentRuntimeType.JEV` in `vidbyte/lib/registries/runtimes.py` |
-| `JevPreflightGate` and `JevClarificationAgent` | `vidbyte/agents/jev/gate/` |
+| `JevPreflightGate`, `JevClarificationAgent`, and `JevReadOnly` (the READ_ONLY case's tool limit) | `vidbyte/agents/jev/gate/` |
+| `PermissionCeiling`, the run-scoped permission cap every `PermissionPolicy.check` honors | `vidbyte/lib/permission_ceiling.py`; re-exported from `vidbyte/tools/security/` |
 | `JevPreflight` contract and the `JevPreflightTools` tool selector | `vidbyte/agents/jev/preflight.py` |
 | `JevResponse`, the only writer of `JevAgentResponse` | `vidbyte/agents/jev/response.py` |
 | Structured note-taking compaction: `JevRunBriefKeeper` and its tool-free writer | `vidbyte/agents/jev/brief/` |
@@ -398,7 +399,7 @@ JEV covers TypeSafe's Jev calibrated decision model and `JevAgent`, the opiniona
 | The four per-assignment SWARM plan questions and `JevSwarmPlanRegistry` | `vidbyte/lib/jev/compute/plan.py` |
 | Run-brief writer prompt family | `vidbyte/prompts/prompts/jev_run_brief/`; keys in `vidbyte/lib/enums/prompts.py` |
 | `JevPresets`: the preflight flags and the question keys each flag asks | `vidbyte/lib/jev/presets.py` |
-| Fixed preflight questions, one dataclass per question, one module per preset | `vidbyte/lib/jev/preflight/<preset>.py` (`clarity.py`) |
+| Fixed preflight questions, one dataclass per question, one module per preset | `vidbyte/lib/jev/preflight/<preset>.py` (`clarity.py`, `bulk_work.py`, `read_only.py`) |
 | `JevPreflightRegistry` | `vidbyte/lib/jev/preflight/preflight.py` |
 | Fixed done questions, one module per check (`multi_part.py`, `claims.py`, `motivating_case.py`) | `vidbyte/lib/jev/done/` |
 | `JevDoneRegistry` (question, threshold, and enabled-check validation) | `vidbyte/lib/jev/done/done.py` |
