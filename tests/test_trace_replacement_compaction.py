@@ -102,11 +102,43 @@ class TraceArtifactRendererTests(unittest.TestCase):
         self.assertIn("omitted", text)
 
     def test_max_tokens_drops_oldest_array_entries_first(self) -> None:
-        # [Silent Failure] token trimming must drop the oldest (front) entries first.
+        # [Silent Failure] token trimming must drop the oldest (front) entries first, and say how many it dropped.
         artifact = {"actions_taken": ["oldest", "mid", "newest"]}
-        text = TraceArtifactRenderer(max_tokens=8, token_counter=lambda s: len(s.split())).render(artifact)
-        self.assertIn("newest", text)
+        text = TraceArtifactRenderer(max_tokens=10, token_counter=lambda s: len(s.split())).render(artifact)
+        self.assertIn("## actions_taken\n- ...[2 omitted]...\n- newest", text)
         self.assertNotIn("oldest", text)
+
+    def test_max_tokens_marks_an_emptied_list_instead_of_rendering_none(self) -> None:
+        # [Silent Failure] a list the budget emptied must not read "- N/A", which tells the model nothing was done.
+        artifact = {"actions_taken": [f"a{i}" for i in range(1, 7)], "facts": [f"f{i}" for i in range(1, 5)]}
+        text = TraceArtifactRenderer(max_tokens=16, token_counter=lambda s: len(s.split())).render(artifact)
+        self.assertIn("## actions_taken\n- ...[6 omitted]...\n\n## facts", text)
+        self.assertNotIn("N/A", text)
+        self.assertLessEqual(len(text.split()), 16)
+
+    def test_max_tokens_marks_a_trimmed_list_before_its_kept_entries(self) -> None:
+        # [Silent Failure] a partly trimmed list must not look complete; the marker sits where the dropped entries were.
+        artifact = {"actions_taken": [f"a{i}" for i in range(1, 7)]}
+        text = TraceArtifactRenderer(max_tokens=12, token_counter=lambda s: len(s.split())).render(artifact)
+        self.assertIn("## actions_taken\n- ...[4 omitted]...\n- a5\n- a6", text)
+        self.assertNotIn("a4", text)
+
+    def test_max_tokens_accounts_for_every_entry_and_still_fits(self) -> None:
+        # [Silent Failure] every list entry is either shown or counted in a marker, and the marked text stays within max_tokens.
+        # Each budget sits above the floor of title, headings, scalars and one marker per list, and trims both lists.
+        artifact = {"goal": "Restore checkout", "actions_taken": [f"ACT{i} restarted pod {i}" for i in range(1, 7)], "facts": [f"FACT{i} db latency {i}00ms" for i in range(1, 5)], "current_status": "pods healthy"}
+        for counter, budget in ((None, 45), (None, 50), (lambda s: len(s.split()), 30), (lambda s: len(s.split()), 35)):
+            renderer = TraceArtifactRenderer(max_tokens=budget, token_counter=counter)
+            text = renderer.render(artifact)
+            self.assertLessEqual(renderer._token_count(text), budget)
+            self.assertNotIn("N/A", text)
+            for name in ("actions_taken", "facts"):
+                lines = text.split(f"## {name}\n", 1)[1].split("\n\n", 1)[0].splitlines()
+                markers = [line for line in lines if line.startswith("- ...[") and line.endswith(" omitted]...")]
+                omitted = sum(int(line[len("- ...[") : -len(" omitted]...")]) for line in markers)
+                shown = len([line for line in lines if line.startswith("- ")]) - len(markers)
+                self.assertGreater(omitted, 0, (counter, budget, name))
+                self.assertEqual(shown + omitted, len(artifact[name]), (counter, budget, name))
 
     def test_is_empty_true_for_blank_artifacts(self) -> None:
         # [Hidden Assumption] None / {} / all-None / empty collections count as empty.

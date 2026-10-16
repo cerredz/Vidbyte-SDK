@@ -43,8 +43,10 @@ class TraceArtifactRenderer:
     def render(self, artifact: Mapping[str, Any]) -> str:
         # Renders the artifact into a titled Markdown document under the configured bounds.
         items = self._ordered_items(artifact)
-        items = self._apply_token_budget(items)
-        body = self._render_items(items)
+        # Count the entries the token budget drops per field, so the text can say what it left out.
+        dropped: dict[str, int] = {}
+        items = self._apply_token_budget(items, dropped)
+        body = self._render_items(items, dropped)
         return self._apply_char_limit(body)
 
     @staticmethod
@@ -84,28 +86,35 @@ class TraceArtifactRenderer:
             items.append((name, list(value) if isinstance(value, (list, tuple, set)) else value))
         return items
 
-    def _apply_token_budget(self, items: list[tuple[str, Any]]) -> list[tuple[str, Any]]:
-        # Drops oldest array entries first until the rendered text fits the token budget.
+    def _apply_token_budget(self, items: list[tuple[str, Any]], dropped: dict[str, int]) -> list[tuple[str, Any]]:
+        # Drops oldest array entries first until the rendered text, omission markers included, fits the token budget.
         if self.max_tokens is None:
             return items
-        while self._token_count(self._render_items(items)) > self.max_tokens:
-            if not self._drop_oldest_array_entry(items):
+        while self._token_count(self._render_items(items, dropped)) > self.max_tokens:
+            if not self._drop_oldest_array_entry(items, dropped):
                 break
         return items
 
-    def _drop_oldest_array_entry(self, items: list[tuple[str, Any]]) -> bool:
-        # Removes the first entry of the first non-empty array field; False when no arrays remain.
-        for _, value in items:
+    def _drop_oldest_array_entry(self, items: list[tuple[str, Any]], dropped: dict[str, int]) -> bool:
+        # Removes the first entry of the first non-empty array field and counts it; False when no arrays remain.
+        for name, value in items:
             if isinstance(value, list) and value:
                 value.pop(0)
+                dropped[name] = dropped.get(name, 0) + 1
                 return True
         return False
 
-    def _render_items(self, items: Sequence[tuple[str, Any]]) -> str:
+    def _render_items(self, items: Sequence[tuple[str, Any]], dropped: Mapping[str, int] | None = None) -> str:
         # Renders ordered (name, value) items into a titled Markdown document.
         lines = [f"# {self.title}"]
         for name, value in items:
             lines.append(f"\n## {name}")
+            # @intent token-budget-marks-dropped-entries
+            # A list trimmed to fit the budget says how many entries it lost, so an emptied one never reads "- N/A" (none happened).
+            if dropped and dropped.get(name):
+                lines.append(f"- ...[{dropped[name]} omitted]...")
+                if not value:
+                    continue
             lines.extend(self._render_value(value))
         return "\n".join(lines)
 
