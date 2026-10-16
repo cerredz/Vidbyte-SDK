@@ -26,7 +26,7 @@ STACKED RUN. Base branch is `feat/infinite-memory-agent` (PR #1084), not `main`.
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 (round 1: SOUND WITH FIXES, 0 Blocker / 8 Major / 7 Minor, all 15 applied in r2 at b32566fe; round 2: scoped reviewer launched 08:05 on §6.1, §6.3, §7, §8.1, §8.5, §12.3.1, §12.4, §13, §14, §15, §16; report goes to reports/S1-spec-review-r2.md; whatever remains disputed after it becomes a Q-n with a default) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 (round 1: SOUND WITH FIXES, 0 Blocker / 8 Major / 7 Minor, all 15 applied in r2 at b32566fe; round 2: SOUND WITH FIXES, 0 Blocker / 2 Major / 9 Minor, reports/S1-spec-review-r2.md, applied in r3) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Baseline measurements (orchestrator, before any change, at 7efceb55)
 Script: `C:/Users/422mi/AppData/Local/Temp/claude/C--Users-422mi-vidbyte-repos/7d03425b-8396-4738-89eb-c11a8a3fac1a/scratchpad/measure_tokens.py <worktree>` (chars/4 = `TokenEstimate.count` rule; tiktoken 0.12.0 cl100k_base importable in Python 3.11).
@@ -64,6 +64,9 @@ The folder holds 40 `.md` assets; `infinite_memory.json` top level is a dict wit
 - 2026-10-16 07:40 — Second review round: scoped to §6.1, §8.5, §12.3.1, §13, §14 and dependents, because accepted findings change the test contract (§8.5). Within the cap of 2.
 
 - 2026-10-16 16:51 — The round-2 reviewer (launched 08:05) was killed by the session usage limit mid-verification; no report on disk. Limit reset; the same agent was resumed by message with the briefing unchanged. Base re-fetched: still 7efceb55.
+
+- 2026-10-16 17:20 — **S1 review round 2 result:** SOUND WITH FIXES, 0 Blocker / 2 Major (R-16 struck prohibition surviving in outline 34; R-17 outline 1.6 contradicting the `decision` entry kind and root:64) / 9 Minor (R-18…R-26). Author revising to r3 and setting status: approved; cap of 2 rounds reached, no round 3.
+- 2026-10-16 17:20 — **R-26 ruling:** the duplicate-sentence check over the seven assets is accepted as a tested invariant (INV-15), not a Q-n: it tests the user's own D-F standard ("never from repetition or filler"), so rule 11 does not apply. R-17: rewording option for root:64 (INV-19 holds). R-19: add the rules to outlines 2.7 and 1.8 rather than blank the cells (the user's main point is every stage carrying its principles).
 
 ## User replies (verbatim)
 - (none yet)
