@@ -63,8 +63,8 @@ class ContextWindowAlgorithm:
             raise ValueError("At most one runtime context-window algorithm can be configured.")
         # @intent admission-cap-fails-at-construction
         # The runtime applies this cap only when a tool returns, so a bad value must fail here, not mid-run.
-        if self.max_tool_result_chars < 0:
-            raise ValueError(f"max_tool_result_chars must be non-negative, got {self.max_tool_result_chars}.")
+        if isinstance(self.max_tool_result_chars, bool) or not isinstance(self.max_tool_result_chars, int) or self.max_tool_result_chars < 0:
+            raise ValueError(f"max_tool_result_chars must be a non-negative integer (not a bool), got {self.max_tool_result_chars!r}.")
 
     def model_visible_tool_result(self, call: ToolCall, result: ToolResult) -> ToolResult:
 

@@ -129,11 +129,12 @@ class ContextManagementTests(unittest.TestCase):
         self.assertEqual(ContextWindow.resolve_algorithm("compact_tool_outputs").name, "compact_tool_outputs")
         self.assertEqual(ContextWindow.resolve_algorithm("reflexion").name, "reflexion")
 
-    def test_negative_admission_cap_fails_at_construction(self) -> None:
+    def test_invalid_admission_cap_fails_at_construction(self) -> None:
         # @intent admission-cap-fails-at-construction
         # [Hidden Failure] The runtime caps tool output only when a tool returns, so a bad cap must not wait until mid-run to fail.
-        with self.assertRaisesRegex(ValueError, "max_tool_result_chars"):
-            ContextWindowAlgorithm(name="bad_compact", tool_result_admission=ToolResultAdmission.COMPACT, max_tool_result_chars=-1)
+        for bad in (-1, True, 2.5, float("nan"), float("inf")):
+            with self.subTest(max_tool_result_chars=bad), self.assertRaisesRegex(ValueError, "max_tool_result_chars"):
+                ContextWindowAlgorithm(name="bad_compact", tool_result_admission=ToolResultAdmission.COMPACT, max_tool_result_chars=bad)
 
 
 if __name__ == "__main__":
