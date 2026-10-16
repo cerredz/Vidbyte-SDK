@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "source": {"repository": "cerredz/Vidbyte-SDK", "commit": "fc0175dac652f9da580a302b8d4195da0a72286a", "generator": "scripts/generate-sdk-public-api.py"},
+  "source": {"repository": "cerredz/Vidbyte-SDK", "commit": "013cf884fb9a532101bbbe128d9fde908b2fd131", "generator": "scripts/generate-sdk-public-api.py"},
   "distribution": "vidbyte-sdk",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "exports": [
     "ActionTrace",
     "AdversarialAgentDescriptor",
