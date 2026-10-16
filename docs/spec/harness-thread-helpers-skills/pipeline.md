@@ -20,12 +20,12 @@ started: 2026-10-15 18:12
 | S4 adversarial review | done | 2026-10-16 09:10 | 2026-10-16 11:30 | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; confirmed 2 Blocker (R-1, R-2) / 4 Major (R-3..R-6) / 17 Minor; refuted 3; downgraded 3; 6641579c |
 | S4→S5 spec amendment r4, r5 | done | 2026-10-16 11:35 | 2026-10-16 12:10 | reports/S1-spec-author.md (addenda r4, r5) | r4 d6792f3d; r5 b701550e: D-33 reads `history.snapshot.state.items` in snapshot/anchoredSnapshot (no export); `remember_thread` D-34, `child_problem` D-35; `member=` on `require` |
 | S4→S5 test amendment | done | 2026-10-16 12:15 | 2026-10-16 12:55 | reports/S2-test-author-amendment.md | S2_HEAD (amended) = cd2b329b; 10 new test functions (30 cases) + grants a–d; red 34 failed / 991 passed / 3 skipped, identical with and without DEEPSEEK_API_KEY (re-run by orchestrator) |
-| S5 repair loop | running | 2026-10-16 13:00 | | reports/S5-repair-1.md | |
-| S5 re-review | pending | | | | |
+| S5 repair loop | done | 2026-10-16 13:00 | 2026-10-16 14:05 | reports/S5-repair-1.md | converged in 1 iteration: HEAD 578c88bb pushed; 12 findings fixed; merged origin/main 8da41971 (6b55dde5); remote 4/4 green; orchestrator's own run_ci: 6632 passed, 17 skipped, "CI passed." |
+| S5 re-review | running | 2026-10-16 14:10 | | reports/S5-rereview.md | |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 (cap reached; final author revision r3 sets status approved) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 (cap reached; final author revision r3 sets status approved) · S5 repair iterations: 1/8 · S5 re-review rounds: 1/2
 
 ## Decisions the orchestrator made
 - 2026-10-15 18:12 — Fast-forwarded local `main` to origin/main f216fdcf (PR #1036 merged) before creating the worktree — Prompt 5: "Make sure the local main is up to date".
@@ -103,6 +103,15 @@ started: 2026-10-15 18:12
   Each change is listed before and after in test-plan.md. Reason: those tests encode a rule the spec now forbids (it was disproved against the real CLI). The R-4 fixture is test-only by spec INV-2/AC-10.
 
 - 2026-10-16 12:55 — S2 amendment spot-check passed. `git diff --name-only b35d9276..cd2b329b` touches only `tests/features/harness_threads/` and `docs/spec/harness-thread-helpers-skills/`, and spec.md changed in 6 lines, all of them Proof cells. My own re-run with DEEPSEEK_API_KEY set gave `34 failed, 991 passed, 3 skipped`: muse_commands 16, errors 8, listing_properties 6, grok_commands 2, helper_surface 2. From here on, the test tree may differ from cd2b329b only by a grant I record. PR #1147 has no remote checks yet, because CI is dispatch-only. origin/main is at cb554ed3.
+
+- 2026-10-16 14:05 — S5 iteration 1 converged, and my own checks pass:
+  - `git status` is clean, and HEAD 578c88bb matches origin.
+  - `git diff cd2b329b..HEAD -- tests/features/harness_threads` is empty. The other test files that differ come only from the merged main: 0 files differ from 8da41971 outside harness_threads.
+  - The baseline diff vs 239c408a is empty, and verify-log has "## Iteration 1".
+  - review.md has 0 `open` rows.
+  - My lint run exited 0 with `SDK-LINT: PASS`, and my `scripts/run_ci.py` printed `6632 passed, 17 skipped` and `CI passed.`
+  - check-runs for 578c88bb: Package, Static policy, Source 3.11 and Source 3.12 all completed with success.
+- 2026-10-16 14:05 — The repair agent amended one local, unpushed commit after catching its own S009 regression. That is not a force-push, because nothing pushed was rewritten. Its lesson goes into later briefings: never read a gate's verdict through `| tail`, whose exit code is tail's.
 
 ## User replies (verbatim)
 - 2026-10-15 ~18:25 — "note, ccan you also in a subagent launch this "spec-pipeline" process for pr #1055 and explain the changes that we want to make with the implementation of the existing pr"
