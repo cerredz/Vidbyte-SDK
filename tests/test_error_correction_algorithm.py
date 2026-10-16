@@ -248,6 +248,15 @@ class ErrorCorrectionAlgorithmTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("problem_space_search:pinned", listing)
         self.assertIn("- problem_space_search:1 (Problem-Space Search)", listing)
 
+    def test_format_managed_primitives_omits_own_notice(self) -> None:
+        # [Hidden Assumption] The auditor is offered only ids it may remove, so its own correction notice, which apply_removals always keeps, is not listed.
+        manager = ContextManager()
+        manager.upsert(ErrorCorrectionContextItem(primitive_id="error_correction:notice", iteration=4, pass_index=1, corrections=("a is wrong",), summary="s"))
+        manager.upsert(ProblemSpaceSearchContextItem(primitive_id="problem_space_search:1", iteration=1, note_index=1, unconsidered="u", blind_spots="b", next_directions="n"))
+        listing = ErrorCorrectionAlgorithm()._format_managed_primitives(run_context(manager))
+        self.assertNotIn("error_correction:notice", listing)
+        self.assertIn("- problem_space_search:1 (Problem-Space Search)", listing)
+
     def test_parse_malformed_json_raises(self) -> None:
         # [Silent Failure] Malformed JSON is not silently ignored.
         with self.assertRaises(Exception):
