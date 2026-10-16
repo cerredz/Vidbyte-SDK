@@ -36,6 +36,7 @@ from vidbyte.lib.dataclasses.codex_host import (
     CodexTurnPage,
     _reject_small_int,
 )
+from vidbyte.lib.dataclasses.validation import RecordFieldValidator
 from vidbyte.lib.enums.codex import (
     CodexHostOperation,
     CodexSortDirection,
@@ -201,8 +202,12 @@ class CodexThreadHelpers:
         # A falsy limit or query would be left out of the request, so
         # Codex would apply its own page size or list every thread; a
         # float since would compare silently with integer times (INV-6).
-        if isinstance(limit, bool) or not isinstance(limit, int) or not CODEX_HOST_MIN_LIST_LIMIT <= limit <= CODEX_HOST_THREAD_LIST_MAX_LIMIT:
-            raise ConfigurationError(LIMIT_MESSAGE.format(operation=operation.value, minimum=CODEX_HOST_MIN_LIST_LIMIT, maximum=CODEX_HOST_THREAD_LIST_MAX_LIMIT))
+        # The canonical integer check owns the limit's rule, and this
+        # module owns only its message.
+        try:
+            RecordFieldValidator.require_int(limit, "limit", minimum=CODEX_HOST_MIN_LIST_LIMIT, maximum=CODEX_HOST_THREAD_LIST_MAX_LIMIT)
+        except ConfigurationError:
+            raise ConfigurationError(LIMIT_MESSAGE.format(operation=operation.value, minimum=CODEX_HOST_MIN_LIST_LIMIT, maximum=CODEX_HOST_THREAD_LIST_MAX_LIMIT)) from None
         if operation is CodexHostOperation.LIST_CODEX_THREADS_SINCE and (isinstance(since, bool) or not isinstance(since, int) or since < 0):
             raise ConfigurationError(SINCE_MESSAGE.format(operation=operation.value))
         if operation is CodexHostOperation.SEARCH_CODEX_THREADS and (not isinstance(search, str) or not search.strip()):
