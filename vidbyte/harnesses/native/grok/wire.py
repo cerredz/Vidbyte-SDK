@@ -28,7 +28,7 @@ from vidbyte.lib.dataclasses.native_threads import (
     NativeToolCall,
 )
 from vidbyte.lib.dataclasses.process import CliOutcome
-from vidbyte.lib.dataclasses.validation import RecordFieldValidator
+from vidbyte.lib.dataclasses.validation import RecordFieldConverter, RecordFieldValidator
 from vidbyte.lib.enums.native_threads import (
     GrokEventType,
     NativeHarness,
@@ -210,8 +210,8 @@ class GrokHelperWire:
                 harness=NativeHarness.GROK,
                 thread_id=path.parent.name,
                 title=title if title is not None and title.strip() else None,
-                created_at=document.get(native_threads.GROK_CREATED_AT_FIELD),
-                updated_at=document.get(native_threads.GROK_UPDATED_AT_FIELD),
+                created_at=RecordFieldConverter.to_utc_datetime(document.get(native_threads.GROK_CREATED_AT_FIELD), native_threads.GROK_CREATED_AT_FIELD),
+                updated_at=RecordFieldConverter.to_utc_datetime(document.get(native_threads.GROK_UPDATED_AT_FIELD), native_threads.GROK_UPDATED_AT_FIELD),
                 parent_thread_id=document.get(native_threads.GROK_PARENT_FIELD),
                 model=document.get(native_threads.GROK_MODEL_FIELD),
             )

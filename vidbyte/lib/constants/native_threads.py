@@ -75,6 +75,8 @@ NATIVE_WINDOWS_COMMAND_TEXT_MAX_UNITS = NATIVE_WINDOWS_ARGV_PROMPT_MAX_UNITS - N
 # opencode session list stops at 100 rows unless asked for more; a
 # list of exactly this many may be cut (D-19, EC-75).
 NATIVE_OPENCODE_SCAN_MAX = 10000
+# OPENCODE_SESSION_QUERY selects one exact id: at most this many rows.
+OPENCODE_SESSION_QUERY_MAX_ROWS = 1
 # The latest epoch millisecond a datetime holds (9999-12-31T23:59:59.999Z).
 NATIVE_EPOCH_MS_MIN = 0
 NATIVE_EPOCH_MS_MAX = 253402300799999

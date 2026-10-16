@@ -386,9 +386,10 @@ class GrokCommandArguments:
                 raise ConfigurationError("budget_tokens is taken only by /goal.", details={"field": "budget_tokens"})
             RecordFieldValidator.require_int(self.budget_tokens, "budget_tokens", minimum=GROK_COMMAND_MIN_VALUE, maximum=GROK_GOAL_MAX_BUDGET_TOKENS)
         if self.effort is not None:
-            if self.command not in GROK_MAX_EFFORTS:
+            most = None if self.command is None else GROK_MAX_EFFORTS.get(self.command)
+            if most is None:
                 raise ConfigurationError("effort is taken only by /implement and /execute-plan.", details={"field": "effort"})
-            RecordFieldValidator.require_int(self.effort, "effort", minimum=GROK_COMMAND_MIN_VALUE, maximum=GROK_MAX_EFFORTS[self.command])
+            RecordFieldValidator.require_int(self.effort, "effort", minimum=GROK_COMMAND_MIN_VALUE, maximum=most)
         if self.concurrency is not None:
             if self.command is not GrokCommand.EXECUTE_PLAN:
                 raise ConfigurationError("concurrency is taken only by /execute-plan.", details={"field": "concurrency"})

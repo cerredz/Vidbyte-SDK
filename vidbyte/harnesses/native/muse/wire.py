@@ -31,7 +31,7 @@ from vidbyte.lib.dataclasses.native_threads import (
     NativeToolCall,
 )
 from vidbyte.lib.dataclasses.process import CliOutcome
-from vidbyte.lib.dataclasses.validation import RecordFieldValidator
+from vidbyte.lib.dataclasses.validation import RecordFieldConverter, RecordFieldValidator
 from vidbyte.lib.enums.native_threads import (
     MuseMethod,
     NativeHarness,
@@ -331,14 +331,15 @@ class MuseSessionWire:
         if forked is not None and not isinstance(forked, dict):
             raise errors.failure(NativeThreadProblem.PROTOCOL_MISMATCH, request=request, searched=native_threads.MUSE_MEMBER_DETAIL.format(member=native_threads.MUSE_FORKED_FROM_FIELD))
         try:
+            parent = None if forked is None else RecordFieldConverter.require_instance(forked.get(native_threads.MUSE_SESSION_ID_FIELD), native_threads.MUSE_FORKED_FROM_FIELD, str, optional=True)
             return NativeThreadSummary(
                 harness=NativeHarness.MUSE,
-                thread_id=session.get(native_threads.MUSE_SESSION_ID_FIELD),
+                thread_id=RecordFieldConverter.require_instance(session.get(native_threads.MUSE_SESSION_ID_FIELD), native_threads.MUSE_SESSION_ID_FIELD, str),
                 title=None,
-                created_at=session.get(native_threads.MUSE_CREATED_AT_FIELD),
-                updated_at=session.get(native_threads.MUSE_UPDATED_AT_FIELD),
-                parent_thread_id=None if forked is None else forked.get(native_threads.MUSE_SESSION_ID_FIELD),
-                model=session.get(native_threads.MUSE_MODEL_ID_FIELD),
+                created_at=RecordFieldConverter.to_utc_datetime(session.get(native_threads.MUSE_CREATED_AT_FIELD), native_threads.MUSE_CREATED_AT_FIELD),
+                updated_at=RecordFieldConverter.to_utc_datetime(session.get(native_threads.MUSE_UPDATED_AT_FIELD), native_threads.MUSE_UPDATED_AT_FIELD),
+                parent_thread_id=parent,
+                model=RecordFieldConverter.require_instance(session.get(native_threads.MUSE_MODEL_ID_FIELD), native_threads.MUSE_MODEL_ID_FIELD, str, optional=True),
             )
         except ConfigurationError as exc:
             field = str(exc.details.get(native_threads.NATIVE_FIELD_DETAIL_KEY, ""))

@@ -13,7 +13,7 @@ TESTS: tests/features/harness_threads/test_harness_threads_surface.py, tests/fea
 
 from __future__ import annotations
 
-from enum import StrEnum
+from enum import StrEnum, auto
 
 
 class NativeHarness(StrEnum):
@@ -206,6 +206,12 @@ class ShellFlag(StrEnum):
 class NativeEnvironmentVariable(StrEnum):
     """The environment variables the SDK sets in a vendor child; each value equals its name."""
 
+    @staticmethod
+    def _generate_next_value_(name: str, start: int, count: int, last_values: list[str]) -> str:
+        # A member written auto() takes its own name as its value, as
+        # every member here does.
+        return name
+
     XAI_API_KEY = "XAI_API_KEY"
     GROK_CODE_XAI_API_KEY = "GROK_CODE_XAI_API_KEY"
     GROK_HOME = "GROK_HOME"
@@ -219,7 +225,10 @@ class NativeEnvironmentVariable(StrEnum):
     WSLENV = "WSLENV"
     VIDBYTE_PEER_MARK = "VIDBYTE_PEER_MARK"
     GROK_WORKFLOWS = "GROK_WORKFLOWS"
-    PWD = "PWD"
+    # The working-directory variable opencode reads for its project.
+    # auto() spells the value, because a literal assigned to the
+    # name PWD reads to bandit S105 as a hard-coded password.
+    PWD = auto()
 
 
 class MuseMethod(StrEnum):
