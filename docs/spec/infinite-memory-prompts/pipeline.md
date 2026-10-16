@@ -26,7 +26,7 @@ STACKED RUN. Base branch is `feat/infinite-memory-agent` (PR #1084), not `main`.
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 1/2 (round 1 verdict SOUND WITH FIXES: 0 Blocker, 8 Major, 7 Minor; author revising to r2; a scoped round 2 follows because R-4/R-5 change §8.5) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 (round 1: SOUND WITH FIXES, 0 Blocker / 8 Major / 7 Minor, all 15 applied in r2 at b32566fe; round 2: scoped reviewer launched 08:05 on §6.1, §6.3, §7, §8.1, §8.5, §12.3.1, §12.4, §13, §14, §15, §16; report goes to reports/S1-spec-review-r2.md; whatever remains disputed after it becomes a Q-n with a default) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Baseline measurements (orchestrator, before any change, at 7efceb55)
 Script: `C:/Users/422mi/AppData/Local/Temp/claude/C--Users-422mi-vidbyte-repos/7d03425b-8396-4738-89eb-c11a8a3fac1a/scratchpad/measure_tokens.py <worktree>` (chars/4 = `TokenEstimate.count` rule; tiktoken 0.12.0 cl100k_base importable in Python 3.11).
