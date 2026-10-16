@@ -3,7 +3,7 @@ slug: harness-thread-helpers-skills
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-harness-thread-helpers-skills
 branch: feat/harness-thread-helpers-skills
-base_commit: 0f69f7b7 (rebased from 72a4ade1 at S1)
+base_commit: 77efd25a (rebased from 0f69f7b7 before S3)
 pr:
 until: none
 started: 2026-10-15 18:12
@@ -52,6 +52,8 @@ started: 2026-10-15 18:12
 - 2026-10-16 01:05 — Second usage-limit outage (HTTP 429; reset at 1am) stopped S2 mid-write: 6 test files modified and 4 new, nothing committed. Resumed the same S2 agent with SendMessage rather than a fresh one, since its inventory and partial files are saved. Also resumed the PR #1055 orchestrator, which was at its S1 round-2 review.
 
 - 2026-10-16 01:50 — S2 spot-check passed: re-ran `tests/features/harness_threads` in the venv → `568 failed, 430 passed, 3 skipped` (matches the report); `git diff --name-only 9cdf80d0..HEAD` touches only tests/features/harness_threads/ and docs/spec/harness-thread-helpers-skills/. S2's 5 open spec gaps (MUSE_GOAL_PROMPT_TEMPLATE value, EC-74 vs §12.4 placement of features.video_gen, EC-67 detail order, Muse session/list limit, mismatch-detail field naming) are tolerated by the tests; S3 resolves each within the spec's words and records it in its report. No spec revision needed.
+
+- 2026-10-16 02:00 — Rebased the unpushed docs+test commits from 0f69f7b7 onto origin/main 77efd25a (16 commits; mapped files touched: only `vidbyte/lib/errors/base.py` +2 lines in `CodexAgentError` and `REPO_MAP.md` 5 lines) and fast-forwarded local main. Red re-run after rebase: 568 failed, 430 passed, 3 skipped — unchanged. Done before S3 so the implementer starts on current main.
 
 ## User replies (verbatim)
 - 2026-10-15 ~18:25 — "note, ccan you also in a subagent launch this "spec-pipeline" process for pr #1055 and explain the changes that we want to make with the implementation of the existing pr"
