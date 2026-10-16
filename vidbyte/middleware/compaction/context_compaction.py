@@ -22,6 +22,13 @@ _TOOL_RESULT_MODES = frozenset({
     CompactionMode.MECHANICAL_BLOAT_SCRUBBER,
 })
 
+# The history modes the engine runs only with an injected summarizer; without one they raise on every call.
+_SUMMARY_MODES = frozenset({
+    CompactionMode.SUMMARIZE_OLDEST_N,
+    CompactionMode.SUMMARIZE_RANGE,
+    CompactionMode.SUMMARIZE_BY_TOPIC_BLOCKS,
+})
+
 
 class ToolResultCompactionMiddleware(AgentMiddleware):
     """Compact model-visible tool results after tool execution."""
@@ -223,6 +230,10 @@ class MessageHistoryCompactionMiddleware(AgentMiddleware):
         # The history engine has no hide strategy and would run a no-op, so point to the per-result middleware instead.
         if self.mode is CompactionMode.HIDE_TOOL_RESULTS:
             raise ValueError("hide_tool_results hides single tool results; use ToolResultCompactionMiddleware.hide(), or strip_tool_result_bodies for history.")
+        # @intent summarize-modes-need-a-summarizer-at-construction
+        # This engine has no summarizer, so a summarize mode would stop every run at its first compaction; refuse it here.
+        if self.mode in _SUMMARY_MODES and self.engine.summarizer is None:
+            raise ValueError(f"{self.mode.value} needs a summarizer; use SummaryCompactionMiddleware(mode=..., summarizer=...), or pass summarizer= to the trace middleware that runs it.")
         if "percentage" in self.options and not 0 <= float(self.options["percentage"]) <= 1:
             raise ValueError("percentage must be between 0 and 1.")
         if "order" in self.options and self.options["order"] not in {"oldest", "newest"}:
@@ -469,8 +480,12 @@ class TraceReplacementCompactionMiddleware(AgentMiddleware):
         # @intent trace-fallback-and-compose-options-validate-eagerly
         # The fallback and composed passes run history modes, so their bad options must fail here, not fail open on every call.
         for mode, options in ((self.fallback_mode, self.fallback_options), (self.compose_after, self.compose_after_options)):
-            if mode is not None:
+            if mode is not None and self.engine.summarizer is None:
                 MessageHistoryCompactionMiddleware(mode=mode, **options)
+            elif mode is not None:
+                # @intent summarize-modes-need-a-summarizer-at-construction
+                # These passes run on this middleware's summarizer, so validate them with it.
+                SummaryCompactionMiddleware(mode=mode, summarizer=self.engine.summarizer, **options)
 
     @staticmethod
     def _coerce_mode(mode: CompactionMode | str | None) -> CompactionMode | None:

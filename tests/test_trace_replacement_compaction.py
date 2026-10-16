@@ -627,7 +627,7 @@ class TraceReplacementOptionValidationTests(unittest.IsolatedAsyncioTestCase):
                     TraceSummaryTailCompactionMiddleware.trace_then_summarize_tail(FakeSummarizer(), fallback_mode=mode, fallback_options=options)
 
     async def test_valid_fallback_and_compose_options_still_construct_and_apply(self) -> None:
-        # [Edge Case] in-range options and the built-in presets, including summarize fallbacks, still construct without a summarizer check and still run.
+        # [Edge Case] in-range options and the built-in presets, including summarize fallbacks given a summarizer, still construct and still run.
         TraceReplacementCompactionMiddleware.trace_fallback_to_mechanical()
         TraceReplacementCompactionMiddleware.trace_plus_strip_tool_results()
         TraceReplacementCompactionMiddleware.trace_fallback_to_mechanical(fallback_mode="summarize_oldest_n", fallback_options={"n": 2}, summarizer=FakeSummarizer())
@@ -641,6 +641,28 @@ class TraceReplacementOptionValidationTests(unittest.IsolatedAsyncioTestCase):
         summary_tail_mw = TraceSummaryTailCompactionMiddleware.trace_then_summarize_tail(FakeSummarizer(), fallback_mode="summarize_oldest_n", fallback_options={"n": 2})
         summarized = await summary_tail_mw.before_model_call(_ctx(_provider_history()))
         self.assertTrue(summarized.transform.metadata["fallback_used"])
+
+    # A summarize fallback runs on a cold start; a summarize composed pass runs after a trace replacement.
+    _SUMMARIZE_PASSES = (
+        ("fallback", {"artifact_provider": lambda ctx: {}, "fallback_mode": "summarize_oldest_n", "fallback_options": {"n": 4}}),
+        ("compose_after", {"artifact": _ARTIFACT, "compose_after": "summarize_range", "compose_after_options": {"keep_last": 1}}),
+    )
+
+    async def test_summarize_fallback_or_compose_without_a_summarizer_fails_at_construction(self) -> None:
+        # [Silent Failure] accepted, these raised on every call, the fail-open pipeline turned compaction off, and the history grew with every turn.
+        for pass_name, kw in self._SUMMARIZE_PASSES:
+            with self.subTest(pass_name=pass_name):
+                with self.assertRaisesRegex(ValueError, "needs a summarizer"):
+                    TraceReplacementCompactionMiddleware.keep_recent_tail(1, **kw)
+
+    async def test_summarize_fallback_or_compose_with_a_summarizer_constructs_and_summarizes(self) -> None:
+        # [Edge Case] given this middleware's summarizer, the same passes still construct and summarize.
+        for pass_name, kw in self._SUMMARIZE_PASSES:
+            with self.subTest(pass_name=pass_name):
+                mw = TraceReplacementCompactionMiddleware.keep_recent_tail(1, summarizer=FakeSummarizer(), **kw)
+                decision = await mw.before_model_call(_ctx(_provider_history()))
+                self.assertEqual(decision.transform.metadata["fallback_used"], pass_name == "fallback")
+                self.assertTrue(any(str(m.get("content") or "").startswith("summary of") for m in decision.transform.provider_messages))
 
 
 if __name__ == "__main__":
