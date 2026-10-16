@@ -1,9 +1,9 @@
 """FILE: vidbyte/harnesses/native/opencode/__init__.py
 
-PURPOSE: The opencode subpackage of the harness thread functions; exports run_opencode_thread, continue_opencode_thread and fork_opencode_thread, and the eight keyless opencode thread helpers (list, list recent, list since, get, read, lineage, search and delete).
+PURPOSE: The opencode subpackage of the harness thread functions; exports run_opencode_thread, continue_opencode_thread and fork_opencode_thread, the eight keyless opencode thread helpers (list, list recent, list since, get, read, lineage, search and delete), and the four opencode command functions (run_opencode_command, run_opencode_review, run_opencode_init and run_opencode_plan).
 ROLE IN CODEBASE: Imported by vidbyte/harnesses/native/__init__.py, which re-exports every function bound here. Nothing here is re-exported from vidbyte or vidbyte.harnesses.
-ARCHITECTURE NOTE: A package initializer that only binds each public function to its class attribute, OpencodeThreads (opencode/threads.py) or OpencodeThreadHelpers (opencode/helpers.py), so callers get plain module functions while the code stays in its class.
-FUNCTION INVENTORY: No functions of its own. run_opencode_thread, continue_opencode_thread and fork_opencode_thread are bound from OpencodeThreads; list_opencode_threads, list_recent_opencode_threads, list_opencode_threads_since, get_opencode_thread, read_opencode_thread, get_opencode_thread_lineage, search_opencode_threads and delete_opencode_thread from OpencodeThreadHelpers.
+ARCHITECTURE NOTE: A package initializer that only binds each public function to its class attribute, OpencodeThreads (opencode/threads.py), OpencodeThreadHelpers (opencode/helpers.py) or OpencodeCommands (opencode/commands.py), so callers get plain module functions while the code stays in its class.
+FUNCTION INVENTORY: No functions of its own. run_opencode_thread, continue_opencode_thread and fork_opencode_thread are bound from OpencodeThreads; list_opencode_threads, list_recent_opencode_threads, list_opencode_threads_since, get_opencode_thread, read_opencode_thread, get_opencode_thread_lineage, search_opencode_threads and delete_opencode_thread from OpencodeThreadHelpers; run_opencode_command, run_opencode_review, run_opencode_init and run_opencode_plan from OpencodeCommands.
 COMMON MODIFICATION PATTERNS: Bind each public function to its class attribute and list it in the literal __all__.
 WHAT NOT TO DO IN THIS FILE: 1. Do not add import-time side effects such as finding the opencode executable. 2. Do not export OpencodeThreadRun, OpencodeHelperRun or the wire readers; they are internal.
 KNOWN EDGE CASES: None; the module only binds names.
@@ -13,6 +13,7 @@ TESTS: tests/features/harness_threads/
 
 from __future__ import annotations
 
+from vidbyte.harnesses.native.opencode.commands import OpencodeCommands
 from vidbyte.harnesses.native.opencode.helpers import OpencodeThreadHelpers
 from vidbyte.harnesses.native.opencode.threads import OpencodeThreads
 
@@ -27,6 +28,10 @@ read_opencode_thread = OpencodeThreadHelpers.read_opencode_thread
 get_opencode_thread_lineage = OpencodeThreadHelpers.get_opencode_thread_lineage
 search_opencode_threads = OpencodeThreadHelpers.search_opencode_threads
 delete_opencode_thread = OpencodeThreadHelpers.delete_opencode_thread
+run_opencode_command = OpencodeCommands.run_opencode_command
+run_opencode_review = OpencodeCommands.run_opencode_review
+run_opencode_init = OpencodeCommands.run_opencode_init
+run_opencode_plan = OpencodeCommands.run_opencode_plan
 
 __all__ = [
     "continue_opencode_thread",
@@ -38,6 +43,10 @@ __all__ = [
     "list_opencode_threads_since",
     "list_recent_opencode_threads",
     "read_opencode_thread",
+    "run_opencode_command",
+    "run_opencode_init",
+    "run_opencode_plan",
+    "run_opencode_review",
     "run_opencode_thread",
     "search_opencode_threads",
 ]
