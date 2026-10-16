@@ -332,6 +332,18 @@ class DeterministicStrategyTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(function_response["response"]["output"].startswith("# a.py\ndef"))
         self.assertLess(len(function_response["response"]["output"]), len(output))
 
+    async def test_truncation_leaves_an_empty_anthropic_tool_result_empty(self) -> None:
+        # [Silent Failure] An empty Anthropic tool result stays "", not a truncated repr of its tool_result block shown to the model as tool output.
+        # @intent empty-block-text-is-text
+        call = {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_01A09q90qw90lq917835lq9", "name": "tail_log", "input": {"path": "app.log"}}]}
+        history = ({"role": "user", "content": "watch the log"}, call, {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01A09q90qw90lq917835lq9", "content": ""}]})
+        cases = ((CompactionMode.TRUNCATE_TOOL_RESULTS, {"max_chars": 20}), (CompactionMode.HEAD_TAIL_TOOL_PREVIEW, {"head_chars": 10, "tail_chars": 5}))
+        for mode, options in cases:
+            with self.subTest(mode=mode.value):
+                after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=mode, options=options)
+                self.assertEqual(after[2]["content"][0]["content"], "")
+                self.assertEqual(list(after), list(history))
+
     async def test_scrub_bloat_reduces_gemini_function_response_output(self) -> None:
         # [Silent Failure] Line-based bloat detection sees the Gemini tool output's real lines, as it does for OpenAI and Anthropic.
         output = "header\n" + "A" * 90 + "\nline\nline\nline"

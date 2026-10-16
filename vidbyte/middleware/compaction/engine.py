@@ -337,7 +337,11 @@ class ContextCompactionEngine:
             values = []
             for item in content:
                 if isinstance(item, Mapping):
-                    values.append(str(item.get("content") or item.get("text") or item))
+                    # @intent empty-block-text-is-text
+                    # An empty tool result ("" = no output) is text, not a missing field: reading it as the block's repr
+                    # would write that repr back to the model as the tool's output when a strategy truncates it.
+                    text = item.get("content") if item.get("content") is not None else item.get("text")
+                    values.append(str(text if text is not None else item))
                 else:
                     values.append(str(item))
             return "\n".join(values)
