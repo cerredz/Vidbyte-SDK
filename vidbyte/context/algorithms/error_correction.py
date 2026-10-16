@@ -128,9 +128,12 @@ class ErrorCorrectionAlgorithm(InnerContextWindowAlgorithm):
         skipped: list[str] = []
         for raw_id in stale_ids:
             primitive_id = str(raw_id)
+            # @intent removed-means-it-was-there
+            # The auditor can name an id that is not in the context (a guess, or the same id twice); only a present
+            # primitive counts as removed, so a pass that changed nothing posts no notice.
             if primitive_id == _NOTICE_ID:
                 skipped.append(primitive_id)
-            elif self._is_removable(primitive_id):
+            elif self._is_removable(primitive_id) and ctx.context_manager.get_by_id(primitive_id) is not None:
                 ctx.remove(primitive_id)
                 removed.append(primitive_id)
             else:
