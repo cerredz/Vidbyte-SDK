@@ -618,6 +618,18 @@ class DeterministicStrategyTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(len([m for m in after if m.get("tool_calls")]), 1, "the 1,500-token budget fits one ~1,000-token write_file call")
                     self.assertEqual([m.get("tool_call_id") for m in after], [m.get("tool_call_id") for m in baseline])
 
+    async def test_query_relevance_matches_a_narrated_call_turns_arguments(self) -> None:
+        # [Silent Failure] A chat call turn with "" or narrated content matches the query on its arguments, as its None-content twin does, so its pair survives.
+        def lookup(content: object, city: str) -> tuple[dict[str, object], dict[str, object]]:
+            call = {"role": "assistant", "content": content, "tool_calls": [{"id": f"call_{city}", "type": "function", "function": {"name": "lookup", "arguments": f'{{"q": "{city}"}}'}}]}
+            return call, {"role": "tool", "tool_call_id": f"call_{city}", "content": f"{city} weather: sunny"}
+        for content in (None, "", "Checking the forecast."):
+            with self.subTest(call_turn_content=content):
+                history = ({"role": "user", "content": "plan a trip"}, *lookup(content, "rome"), *lookup(content, "paris"))
+                after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.QUERY_RELEVANCE_FILTER, options={"query": "paris weather", "min_score": 1})
+                self.assertEqual(list(after), list(history[-2:]))
+                _assert_valid_tool_transcript(self, after)
+
     async def test_query_relevance_empty_query_and_lexical_matching(self) -> None:
         # [Hidden Assumption] Empty queries keep system/recent only, and punctuation/case tokenization is stable.
         messages = (msg("system", "rules"), msg("user", "Billing, invoice!"), msg("assistant", "shipping"), msg("assistant", "recent"))
