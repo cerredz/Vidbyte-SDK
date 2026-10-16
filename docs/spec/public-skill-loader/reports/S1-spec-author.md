@@ -1,6 +1,6 @@
 # S1 spec author report: public-skill-loader
 
-Status: **DONE (r4)**. Spec r1 was committed at `db1786a2` (`eba57e6c` after the orchestrator rebased onto `c9d31a7f`), r2 at `3a793017`, and r3 (approved) at `843e2852`. Spec r4 (S4 findings R-1 and R-2, text only) and this updated report are committed together on `feat/public-skill-loader`; see §6 to §8. The "Answers to consumer requirements" section at the end matches r4.
+Status: **DONE (r5)**. Spec r1 was committed at `db1786a2` (`eba57e6c` after the orchestrator rebased onto `c9d31a7f`), r2 at `3a793017`, r3 (approved) at `843e2852`, and r4 at `bdf23937`. Spec r5 (S5 findings R-C11 to R-C13, plus the user's Q-8 answer: version 0.4.0) and this updated report are committed together on `feat/public-skill-loader`. The FEATURE.md wording is a separate commit. See §6 to §9. The "Answers to consumer requirements" section at the end matches r5. Answer 7 is corrected in place.
 
 ## 1. What I read
 
@@ -133,9 +133,48 @@ S3 implemented the spec, now at `status: implemented`, with draft PR #1099. S4 c
 
   I reproduced all three with the built loader at `93144015`. §17 records this as a clarification, not an S3 deviation, because `loader.py:45` is exactly the prescribed expression.
 
+## 9. Revision r5 (S5 re-review R-C11 to R-C13; user decision on Q-8: 0.4.0)
+
+Since r4, S5 fixed S4's R-1 to R-5, merged `origin/main` `0754e01f` into the branch as `fc0175da` (parent-approved), and regenerated the contract alone at `778b094a`. Its re-review confirmed one Major finding (R-C11) and two Minors (R-C12, R-C13), and refuted R-C10 as a PR defect. While r5 was in progress, the orchestrator relayed the user's answer to Q-8, "0.4.0 (Recommended)", together with a request for release notes in the 0.3.0 precedent's shape. r5 applies all of it as text. It edits no source, test code, contract, or version literal; the repair iteration makes those changes. `status` stays `reviewed`.
+
+- **User decision (§0.2 r5).** The version is 0.4.0 (new D-15). D-13 (0.3.1) is struck with its reason. `docs/design/release-0-4-0.md` is specified as row 16 (new D-16, FR-13, AC-19), D-10 is struck, and NG-12 is withdrawn. Q-8 and Q-5 are resolved. Every place that named 0.3.1 as this release now says 0.4.0: the title, TL;DR, §1, §2, G-4, INV-16, AC-10, AC-11, FR-8, EC-29, NFR-2, §8.4, §9.2 row 7, §9.4, §12, §13, §14, A-6, and A-9. AC-11's floor is now `(0, 4, 0)`, and the spec says the release test's `FIRST_LOADER_RELEASE` (`:36`) moves there in the repair iteration under an orchestrator grant. AC-17 names no version, so it is unchanged.
+- **Reading the precedent.** I read `docs/design/release-0-3-0.md` (via `git show a7ed9cde:…`) because the user's relayed instruction names the 0.3.0 precedent. It has 15 lines: a title, a why-this-release paragraph that justifies a minor, a "What 0.3.0 adds, from git log" bullet list, and a closing paragraph on the version places, the contract count, and the release steps. Row 16 copies that shape. No other file under `docs/` outside this spec's folder was read.
+- **R-C11 (consumer contract).** I verified these facts with my own commands:
+  - `git log --first-parent --oneline v0.3.0..0754e01f` lists 18 PRs.
+  - An `inspect.signature` probe at the `v0.3.0` tree and at `25fe2e5b` shows `api_key` gone from all 11 signatures. All 11 now take `api_keys`, and all but `AgentRunnerConfig` and `JevRunBriefSettings` also take `vidbyte_api_key`.
+  - `TextModelMode` is not a root export at either ref.
+  - The route probe at HEAD gives `AgentExecutionError` caused by "Missing Vidbyte API key" with 0 requests, and `Agent(api_key=…)` raises the `TypeError`.
+  - The CLI-binding dump differs only in its version line (30 bindings).
+  - CLI `origin/main` pins `>=0.3.0,<0.4` (`pyproject.toml:46,53`).
+  - The contract counts are 639 at `v0.3.0`, 640 at `0754e01f`, and 643 at HEAD.
+  - The skill entries keep `api_key=` and `token=`.
+
+  §9.2 row 7, Q-8, D-13 (its proposed flip condition is recorded as already met and handed to Q-8), §9.4, and answer 7 below now carry these facts. EC-30 records what a 0.3.x caller of the changed agents sees on 0.4.0.
+- **R-C12 (citations).** Every citation was re-checked with `grep -n` at `25fe2e5b`, and each cited body is unchanged:
+  - `text.py:108-115`;
+  - `base.py:1106-1113` (the reviewer's `:1106-1112` misses the `raise`);
+  - `settings.py:95-128`, `:102-107`, and `:119-127`.
+
+  Beyond the verifier's list:
+  - `vidbyte/__init__.py:442`, `:627`, and `:871-880`;
+  - `loader.py:49`, `:71`, and `:71-76`;
+  - the skills README notes `:45` and `:47`;
+  - `skills.py:41`, `:61`, `:73`, `:192-193`, and `:269-290`. The `SkillResolution` exemplar moved 36 lines, because `SkillEntries` now sits above it, not the 2 lines the verifier's optional note gave.
+
+  `errors/base.py:287` appears only in review.md's S4 section, which stays as written. §12.2 to §12.4 keep the build-time numbers at `c9d31a7f`, and a note in §12.3 says so. Answer 2 below now cites `text.py:108-115`.
+- **R-C13 (pack wording).** In test-plan.md:29, each place is now "checked to equal `pyproject.toml`'s version, which is at least 0.4.0". Line 77 of the same file records S2's red run (`'0.3.0' == '0.3.1'`); it is history, and I left it. FEATURE.md, edited under the orchestrator's grant for these three lines only, in its own commit:
+  - `:10` before: "`SkillLoader(entries)` takes any iterable except `str` and `bytes`, turns it into a tuple once … `{"entries_type": <type>}` for text or a non-collection, …".
+  - `:10` after: "`SkillLoader(entries)` takes any `collections.abc.Iterable` except `str` and `bytes` (every `Sequence` qualifies, including one registered with `Sequence.register`), turns it into a tuple once in iteration order, … An exception raised while iterating the argument propagates unchanged. … `{"entries_type": <type>}` for text or a non-`Iterable` (including an object that iterates only through `__getitem__`), …". The rest of the line is unchanged.
+  - `:15` before: "Every version-bearing place reads `0.3.1`, and the folder docs describe the public door."
+  - `:15` after: "Every version-bearing place equals `pyproject.toml`'s version, which is at least `0.4.0`, and the folder docs describe the public door."
+  - `:25` before: "The argument is a tuple, list, generator, or other non-text iterable of entries and `SkillDocument`s with unique names."
+  - `:25` after: "The argument is a tuple, list, generator, or other `collections.abc.Iterable` that is not `str` or `bytes`, holding entries and `SkillDocument`s with unique names."
+- **R-C10.** The §16 row records that no spec change is needed: draft state is the user's call.
+- **Date.** I dated the §0.2 entry and `updated:` 2026-10-15, the local date on this machine (21:16 EDT). That is 2026-10-16 in UTC, the date the orchestrator's heading suggested.
+
 ## Answers to consumer requirements
 
-These are the answers the vidbyte-cli pipeline (`agent-skill-sources`) should resume from. They match spec r4, §9.2, "Consumer contract": version 0.3.1, tuples and lists accepted, the constructor's preconditions, the GitHub request cost, the corrected oversize detail, and CLI main's current SDK pin.
+These are the answers the vidbyte-cli pipeline (`agent-skill-sources`) should resume from. They match spec r5, §9.2, "Consumer contract": version 0.4.0 (the user's choice, a deliberate minor crossing for the CLI), tuples and lists accepted, the constructor's preconditions, the GitHub request cost, the corrected oversize detail, and what 0.4.0 carries beyond the loader.
 
 1. **The callable, its preconditions, and the result shape.**
    - Build `SkillLoader(entries)`. `entries` may be a **tuple or a list** of entry objects and/or `SkillDocument`s. The annotation is `Sequence[SkillEntry | SkillDocument]`. At runtime, any `collections.abc.Iterable` except `str` or `bytes` is accepted and turned into a tuple once, in iteration order; every `Sequence` qualifies, including one registered with `Sequence.register`. An object that iterates only through `__getitem__` (not an `Iterable`) is rejected as `{"entries_type": …}`. An exception raised while iterating your own argument propagates unchanged; it is a caller bug, not an unavailable skill. So the list a repeatable option collects can be passed as is. A set gives its own iteration order. A dict gives its keys: a key that is not an entry is rejected at its position, and a dict keyed by entries is accepted as the tuple of its keys. Pass a sequence if you pair results with entries.
@@ -151,7 +190,7 @@ These are the answers the vidbyte-cli pipeline (`agent-skill-sources`) should re
    - `result.transient` is `True` for `rate_limited` and `fetch_failed`, which a later `load()` on the same loader retries.
    - Expected failures never raise. Only a programming error or cancellation propagates.
 2. **Async.** `load()` is `async`. Inside a running event loop, use `await loader.load()`. From synchronous command setup, use `asyncio.run(loader.load())`; calling that inside a running loop raises asyncio's own `RuntimeError`.
-   - **Why no sync twin:** the loader runs concurrent I/O on asyncio. The SDK's sync-twin pattern (`TextModelRunner.run`, `vidbyte/lib/runners/text.py:93-100`) raises inside a running loop, so a twin would add nothing.
+   - **Why no sync twin:** the loader runs concurrent I/O on asyncio. The SDK's sync-twin pattern (`TextModelRunner.run`, `vidbyte/lib/runners/text.py:108-115`; citation corrected r5) raises inside a running loop, so a twin would add nothing.
    - **Lint:** in the SDK, C011 is the sync-twin rule, and it covers only `*Agent`, `*Runner`, `*Harness`, `*Session`, and `*Machine` classes with `arun()`, not `SkillLoader.load()`. (The CLI's own C011 is a different rule.)
    - **Reuse:** a loader can be loaded again on a new event loop.
 3. **Credentials.** Pass them per entry:
@@ -166,6 +205,8 @@ These are the answers the vidbyte-cli pipeline (`agent-skill-sources`) should re
    There is no loader-level credential parameter. To use the CLI's keyring token, pass it as `token=` on each `GitHubSkill`; to keep the environment out of vendor reads, pass `api_key=`. `token=""` is rejected when the entry is built, so to force anonymous GitHub reads while `GITHUB_TOKEN` is set, unset the variable.
 
    Credentials are sent only to `api.github.com` or the vendor's fixed endpoint, never follow redirects, and never appear in details, labels, URLs, or reprs. A Vidbyte API key is refused with `auth_failed` before any request.
+
+   **#1027 does not touch these fields (added r5).** It renamed only agent and config parameters (answer 7). `GitHubSkill` keeps `token=`, and `AnthropicSkill` and `OpenAISkill` keep `api_key=`.
 
    **Request cost per command.** A fresh loader per command re-reads everything, because memory is per loader. Per repository group, `GitHubSkill`s cost:
    - one commit lookup, unless `ref` is a full 40-hex SHA;
@@ -182,15 +223,20 @@ These are the answers the vidbyte-cli pipeline (`agent-skill-sources`) should re
    - **Trade-off.** A skill of up to 1 MiB is downloaded before you can measure it.
 5. **Parser: none.** The CLI parses `github:owner/repo/path`, `skills.sh:<id>`, and local paths itself, and builds entry objects. The constructors validate every field and raise `ConfigurationError`, which the CLI can catch by its root name. The SDK parser is optional Q-4, default not built.
 6. **Root names** (exactly as they appear in `vidbyte.__all__` and `contracts/sdk-public-api.json`):
-   - **New in 0.3.1:** `ConfigurationError`, `SkillLoader`, `SkillResolution`.
+   - **New in 0.4.0 from this PR** (version corrected r5): `ConfigurationError`, `SkillLoader`, `SkillResolution`. 0.4.0 also adds `SystemPromptPreset` from #1095, which the CLI does not need.
    - **Already root:** `AnthropicSkill`, `GitHubSkill`, `InlineSkill`, `LocalSkill`, `OpenAISkill`, `SkillDocument`, `SkillEntry`, `SkillSourceType`, `SkillUnavailableReason`, `SkillsShSkill`.
    - **Not root, and not needed by the CLI:** `SkillEntries` (internal validation record) and `SkillFetchStep`.
-7. **Version: 0.3.1, not 0.2.2.** `main` released 0.3.0 at 15:34 (tag `v0.3.0` = `a7ed9cde`, the latest on PyPI), so the first release that can carry the loader is 0.3.1. This is orchestrator decision 2026-10-15 16:20 (spec D-13), and the user may override it through Q-8.
-   - **Where it appears:** `0.3.1` is in `pyproject.toml`, `vidbyte/__init__.py` (`__version__`), `vidbyte/cli/__init__.py`, `vidbyte/mcp_server/server/core.py`, `vidbyte/tools/mcp/client.py`, `README.md`, `llms.txt`, `.github/ISSUE_TEMPLATE/bug_report.yml`, and the regenerated contract (`"version": "0.3.1"`).
-   - **Contract provenance:** the contract is regenerated in its own commit after the source commit, so its `source.commit` names this PR's source commit.
-   - **Pin facts for the CLI** (the SDK spec specifies no CLI change):
-     - CLI `origin/main` (`64b04b3`, #166) already pins `vidbyte-sdk[codex]>=0.3.0,<0.4` (`pyproject.toml:46,53`), with the comment "stay within 0.3.x until a newer minor is verified". So 0.3.1 needs only a floor raise to `>=0.3.1,<0.4`, with no minor crossing.
-     - The CLI pipeline's branch (`b8af987`) still has the older `>=0.2.1,<0.3` (`:45,52`), which excludes every 0.3.x release. It must take CLI main's pin or set the same `>=0.3.1,<0.4`.
-     - 0.3.0 has no `SkillLoader`, `SkillResolution`, or `ConfigurationError` root export, so a floor of `>=0.3.0` would fail at import.
-   - **Trade-off behind Q-8:** the older pin comment asked for a new minor to be verified before crossing, and CLI main has since made that crossing itself. 0.3.0 (#1085) changed only version literals, and its root export list equals `179d8adc`'s (the same 639 names). As built from this branch, 0.3.1 differs from a 0.2.2 cut from `179d8adc` only by #1086 to #1088 plus this PR. Released from `main` after merge, it also carries whatever `main` has gained by then (#1089 to #1093 so far). A 0.2.2 would fall outside CLI main's `>=0.3.0` floor.
+7. **Version: 0.4.0 (corrected r5).** The user chose 0.4.0 (spec §0.2 r5, D-15). That replaces the earlier default, 0.3.1 (D-13, now struck), which will never be released. Version 0.3.0 (tag `v0.3.0` = `a7ed9cde`, the latest on PyPI) has no `SkillLoader`, `SkillResolution`, or `ConfigurationError` root export, so a floor of `>=0.3.0` fails at import.
+   - **Where it appears:** after the SDK's r5 repair iteration, `0.4.0` is in `pyproject.toml`, `vidbyte/__init__.py` (`__version__`), `vidbyte/cli/__init__.py`, `vidbyte/mcp_server/server/core.py`, `vidbyte/tools/mcp/client.py`, `README.md`, `llms.txt`, `.github/ISSUE_TEMPLATE/bug_report.yml`, and the regenerated contract (`"version": "0.4.0"`). At `25fe2e5b` these places still read `0.3.1`.
+   - **Contract provenance:** the contract is regenerated in its own commit after the version commit, so its `source.commit` names the commit it was generated from.
+   - **What 0.4.0 carries:** tag `v0.3.0`, plus 18 `main` PRs, plus this PR. The 18 are the fixes #1086 to #1094, #1096 to #1098, and #1100 to #1102, and the features #1036, #1027, and #1095 (`git log --first-parent --oneline v0.3.0..0754e01f`). #1103 and #1104 reached `origin/main` after `0754e01f`, so a 0.4.0 tagged from `main` after this PR merges carries them too.
+     - #1027 is breaking. It removes `api_key=` from 11 signatures on 8 root exports: the constructors of `Agent`, `BaseAgent`, `AggregateAgent`, `AgentRoleSettings`, `AgentRunnerConfig` (where it was the first positional field), `JevAgentSettings`, and `JevRunBriefSettings`, plus `Agent.restore`, `BaseAgent.restore`, `Session.resume`, and `Session.fork_from`. All 11 take `api_keys=` instead, and all but `AgentRunnerConfig` and `JevRunBriefSettings` also take `vidbyte_api_key=`.
+     - #1027 also changes the default. `model_mode=TextModelMode.AUTO` sends every text call through the Vidbyte gateway and needs a Vidbyte key (`VIDBYTE_API_KEY` or `vidbyte_api_key=`). With only a provider key such as `OPENAI_API_KEY` set, a text call fails with `ConfigurationError: Missing Vidbyte API key …` before any request. `TextModelMode` is not a root export (only `vidbyte.lib.enums` exports it), and the string `model_mode="direct"` is rejected.
+     - Root names compared with 0.3.0: 4 added (`ConfigurationError`, `SkillLoader`, `SkillResolution`, `SystemPromptPreset`) and none removed. "Additive" holds for names only, because the contract does not record parameters.
+     - The skill entries are unaffected: `GitHubSkill` keeps `token=`, and `AnthropicSkill` and `OpenAISkill` keep `api_key=`.
+   - **Pin for the CLI** (the SDK spec specifies no CLI change): the CLI pins `vidbyte-sdk[codex]>=0.4.0,<0.5`, a deliberate minor crossing, and before relying on 0.4.0 the CLI run must verify #1027's gateway routing against its six agents.
+     - CLI `origin/main` (`64b04b3`, #166) pins `>=0.3.0,<0.4` (`pyproject.toml:46,53`), with the comment "stay within 0.3.x until a newer minor is verified". 0.4.0 is that newer minor, so `<0.4` installs never pick it up silently.
+     - The CLI pipeline's branch (`b8af987`) still has the older `>=0.2.1,<0.3` (`:45,52`) and needs the same new pin.
+     - Facts for the verification, from the S5 verifier and re-run in r5: every SDK symbol CLI `origin/main` binds in its five `services/*/sdk.py` adapters (30 bindings) has the same signature at 0.3.0 and at `25fe2e5b`. Its only SDK `api_key=` calls (`DecisionModelConfig` in `services/mcp/sdk.py:110`, `LinearIssueOutput` in `services/outputs/sdk.py:75`) are unchanged. `CodexHarnessAgent` is not a `BaseAgent` and uses no text-model routing. So no current CLI binding is known to break, but the CLI still verifies the minor, as its pin comment asks.
+   - **Release notes:** `docs/design/release-0-4-0.md` (spec row 16) names the loader and #1027's breaking changes.
    - **Publishing:** releasing to PyPI is the user's call after review.
