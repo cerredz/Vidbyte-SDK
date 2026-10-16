@@ -58,7 +58,8 @@ EXPECTED_ENUMS: dict[str, dict[str, str]] = {
     "CodexReviewTargetKind": {"UNCOMMITTED_CHANGES": "uncommittedChanges", "BASE_BRANCH": "baseBranch", "COMMIT": "commit", "CUSTOM": "custom"},
     "CodexReviewDelivery": {"INLINE": "inline", "DETACHED": "detached"},
     "CodexGoalStatus": {"NONE": "", "ACTIVE": "active", "PAUSED": "paused", "BLOCKED": "blocked", "USAGE_LIMITED": "usageLimited", "BUDGET_LIMITED": "budgetLimited", "COMPLETE": "complete"},
-    "CodexHostOperation": {"OPEN_HOST": "open_host", "VALIDATE_SPAWN_REQUEST": "validate_spawn_request", **{name.upper(): name for name in TOOL_NAMES}},
+    # docs/spec/codex-host-thread-helpers/spec.md section 13: DELETE_CODEX_THREAD is the one operation without a tool.
+    "CodexHostOperation": {"OPEN_HOST": "open_host", "VALIDATE_SPAWN_REQUEST": "validate_spawn_request", **{name.upper(): name for name in TOOL_NAMES}, "DELETE_CODEX_THREAD": "delete_codex_thread"},
 }
 
 # The openai-codex 0.162.1 generated type each spec enum mirrors, and how its wire values are read.
@@ -75,6 +76,7 @@ SDK_WIRE_SOURCES = {
     "CodexReviewTargetKind": ("ReviewTarget", "tags"),
     "CodexReviewDelivery": ("ReviewDelivery", "enum"),
     "CodexGoalStatus": ("ThreadGoalStatus", "enum"),
+    "CodexSkillScope": ("SkillScope", "enum"),
 }
 
 RECORD_NAMES = (
@@ -93,6 +95,12 @@ RECORD_NAMES = (
     "CodexTurnSnapshot",
     "CodexTurnSummary",
     "CodexTurnUsage",
+    # docs/spec/codex-host-thread-helpers/spec.md section 9.1.
+    "CodexThreadSummary",
+    "CodexThreadGoal",
+    "CodexSkillInfo",
+    "CodexStoredTurn",
+    "CodexTurnPage",
 )
 
 LEGACY_REPAIR = ("Inspect the operation and chained exception, then correct the matching Codex settings or runtime state.",)
@@ -111,6 +119,11 @@ def _valid_kwargs() -> dict[str, dict[str, Any]]:
     from vidbyte.lib.dataclasses.codex_host import CodexRateLimitWindow, CodexThreadInfo, CodexTurnHandle, CodexTurnSummary, CodexTurnUsage
     from vidbyte.lib.enums.codex import CodexAccountKind, CodexReviewTargetKind, CodexSandboxReadiness, CodexThreadStatus, CodexTurnStatus
     from vidbyte.lib.enums.failure import FailureCode
+
+    # The five records of docs/spec/codex-host-thread-helpers/spec.md section 9.1.
+    from vidbyte.lib.dataclasses.codex import CodexItem
+    from vidbyte.lib.dataclasses.codex_host import CodexStoredTurn
+    from vidbyte.lib.enums.codex import CodexGoalStatus, CodexSkillScope
 
     handle = CodexTurnHandle(thread_id="thr-1", turn_id="turn-1")
     window = CodexRateLimitWindow(used_percent=42, resets_at=1_760_003_600, window_minutes=300)
@@ -131,6 +144,8 @@ def _valid_kwargs() -> dict[str, dict[str, Any]]:
     )
     usage = CodexUsage(input_tokens=300, output_tokens=60, total_tokens=360)
     turn_usage = CodexTurnUsage(turn_id="turn-1", status=CodexTurnStatus.COMPLETED, usage=usage, usage_available=True)
+    final_item = CodexItem(id="item-1", type="agentMessage", fields={"text": "Done.", "phase": "final_answer"})
+    stored_turn = {"turn_id": "turn-1", "status": CodexTurnStatus.COMPLETED, "final_response": "Done.", "error_message": "", "started_at": 1_760_000_000, "completed_at": 1_760_000_005, "items": (final_item,)}
     return {
         "CodexGoal": {"objective": "Ship the fix.", "token_budget": 5000},
         "CodexSpawnRequest": {"prompt": "Summarize the readme."},
@@ -165,6 +180,20 @@ def _valid_kwargs() -> dict[str, dict[str, Any]]:
         "CodexTurnUsage": {"turn_id": "turn-1", "status": CodexTurnStatus.COMPLETED, "usage": usage, "usage_available": True},
         "CodexThreadUsage": {"thread_id": "thr-1", "total": usage, "turns": (turn_usage,), "cost_usd": 0.0033, "cost_complete": True},
         "CodexReviewTarget": {"kind": CodexReviewTargetKind.COMMIT, "sha": "abc1234"},
+        "CodexThreadSummary": {"thread_id": "thr-1", "title": "Release notes", "created_at": 1_760_000_000, "updated_at": 1_760_000_060, "parent_thread_id": None, "model": "gpt-5.5"},
+        "CodexThreadGoal": {
+            "thread_id": "thr-1",
+            "objective": "Ship the fix.",
+            "status": CodexGoalStatus.ACTIVE,
+            "token_budget": 5000,
+            "tokens_used": 120,
+            "time_used_seconds": 30,
+            "created_at": 1_760_000_000,
+            "updated_at": 1_760_000_060,
+        },
+        "CodexSkillInfo": {"name": "openai-docs", "description": "Answers from the OpenAI docs.", "path": "skills/openai-docs/SKILL.md", "scope": CodexSkillScope.SYSTEM, "enabled": True},
+        "CodexStoredTurn": stored_turn,
+        "CodexTurnPage": {"turns": (CodexStoredTurn(**stored_turn),), "next_cursor": ""},
     }
 
 

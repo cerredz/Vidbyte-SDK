@@ -35,11 +35,16 @@ RECORD_EXPORTS = [
     "CodexRateLimits",
     "CodexReadiness",
     "CodexReviewTarget",
+    "CodexSkillInfo",
     "CodexSpawnRequest",
+    "CodexStoredTurn",
+    "CodexThreadGoal",
     "CodexThreadInfo",
     "CodexThreadPage",
+    "CodexThreadSummary",
     "CodexThreadUsage",
     "CodexTurnHandle",
+    "CodexTurnPage",
     "CodexTurnSnapshot",
     "CodexTurnSummary",
     "CodexTurnUsage",
@@ -54,6 +59,7 @@ NEW_ENUMS = (
     "CodexReviewDelivery",
     "CodexReviewTargetKind",
     "CodexSandboxReadiness",
+    "CodexSkillScope",
     "CodexSortDirection",
     "CodexThreadSortKey",
     "CodexThreadSourceKind",
@@ -78,6 +84,7 @@ ENUMS_CODEX_ORDER = [
     "CodexReviewTargetKind",
     "CodexSandbox",
     "CodexSandboxReadiness",
+    "CodexSkillScope",
     "CodexSortDirection",
     "CodexThreadSortKey",
     "CodexThreadSource",
@@ -162,7 +169,7 @@ class CodexHostImportSafetyTests(unittest.TestCase):
     def test_imports_never_load_the_sdk_and_entering_reports_the_pip_extra(self) -> None:
         outcome = _run_import_probe("blocked")
         self.assertEqual(outcome["loaded"], [])
-        self.assertEqual((outcome["tools"], outcome["first"]), (15, "check_codex_ready"))
+        self.assertEqual((outcome["tools"], outcome["first"]), (26, "check_codex_ready"))
         self.assertEqual(outcome["error"], "CodexAgentError")
         self.assertEqual(outcome["code"], "codex.not_installed")
         self.assertIn(PIP_INSTALL_FRAGMENT, outcome["next_step"])

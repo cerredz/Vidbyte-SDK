@@ -3,11 +3,11 @@
 PURPOSE: An in-memory codex app-server for the CodexHost feature pack. It answers the JSON-RPC lines the real openai-codex CodexClient writes the way codex app-server 0.162 does, so the client's reader thread, message router, retry helper and goal routing all run unmocked.
 ROLE IN CODEBASE: Imported lazily, inside HostTestCase.asyncSetUp only, by the openai-codex-gated modules of tests/features/codex_host/. client_class(server) is what replaces vidbyte.harnesses.native.codex.connection.CodexClient, the seam spec section 13 names.
 ARCHITECTURE NOTE: FakeCodexClient subclasses the real openai_codex.client.CodexClient. It overrides start() to attach an in-memory process instead of a subprocess, and wraps close(), the goal-operation methods, _read_message() and _write_message() only to record what happened (a write attempted after close is logged as write_after_close). Every line the client writes reaches FakeAppServer.receive(), which logs the request with the writing thread and answers it on its own daemon thread; the answer, with any notifications written before or after it, goes to stdout in one atomic block. Answers are built from the field names of openai_codex.generated.v2_all, so the real response models validate them.
-FUNCTION INVENTORY: FakeAppServer holds the scripted state (account, rate limits, sandbox, model pages, threads, reviewers), the request log, holds, failures and drive helpers (complete_turn, emit_usage, emit, goal_update, server_request, die, send_raw, wait_for, wait_until); Request, Reply, Hold, FakeRpcError, FakeThread, FakeTurn; token_usage builds a usage payload; client_class binds the fake client to one server; RecordingGoalState logs finish() and wake_notification_reader().
+FUNCTION INVENTORY: FakeAppServer holds the scripted state (account, rate limits, sandbox, model pages, threads, reviewers, skills), the request log, holds, failures and drive helpers (complete_turn, emit_usage, emit, goal_update, server_request, die, send_raw, wait_for, wait_until); Request, Reply, Hold, FakeRpcError, FakeThread, FakeTurn; token_usage builds a usage payload; goal_record and skill_entry build a stored goal and a skills/list entry; client_class binds the fake client to one server; RecordingGoalState logs finish() and wake_notification_reader(). The thread-helper switches (paged_thread_list, thread_page_size, endless_thread_list, record_turn_input, drop_skill_input, input_hidden_reads, goal_get_answer, turn_cursors) and the per-thread fields (created_at, updated_at, source, parent_thread_id, status, explicit_name) are off or neutral by default, so every answer the older modules rely on is unchanged.
 COMMON MODIFICATION PATTERNS: Teach the fake a new method by adding a handler to FakeAppServer._handlers, building the answer from the generated model's aliases; add a drive helper when a test needs a new notification sequence.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import this module at module level from a test file: it imports openai-codex, which CI does not install. 2. Do not start a real process, run codex or touch the network (NG-13). 3. Do not encode the host's own rules (mapping, preflight order, caps); answer as Codex would and let the tests assert the spec.
 KNOWN EDGE CASES: stdout is one FIFO, so a notification written before a response line is routed before that response; the real router drops events for a turn that has no subscriber while its thread has no pending turn/start, which the review read-back tests rely on. The thread reviewer the fake reports is what the request sent, else default_reviewer, unless force_reviewer is set (A-15, A-16).
-RELATED DOCS: tests/features/codex_host/FEATURE.md; docs/spec/codex-host/spec.md section 13.
+RELATED DOCS: tests/features/codex_host/FEATURE.md; docs/spec/codex-host/spec.md section 13; docs/spec/codex-host-thread-helpers/spec.md section 13.
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/codex_host
 """
 
@@ -119,6 +119,8 @@ class FakeTurn:
     status: str = "inProgress"
     items: list[dict[str, Any]] = field(default_factory=list)
     error: dict[str, Any] | None = None
+    # How many more thread/turns/list answers leave this turn's userMessage out (FakeAppServer.input_hidden_reads).
+    hidden_reads: int = 0
 
     def wire(self, *, with_items: bool) -> dict[str, Any]:
         body: dict[str, Any] = {
@@ -151,6 +153,16 @@ class FakeThread:
     forked_from: str | None = None
     turns: list[FakeTurn] = field(default_factory=list)
     goal: dict[str, Any] | None = None
+    # The fields below default to what every thread reported before the thread-helpers pack; a test sets them per thread.
+    created_at: int = BASE_TIME
+    updated_at: int = BASE_TIME + 60
+    # A SessionSource wire value: "cli", "vscode", "exec", "appServer", "unknown", or {"subAgent": "review"} and the like.
+    source: Any = "appServer"
+    parent_thread_id: str | None = None
+    # A forced status type ("notLoaded", "systemError", "idle" or "active"); None reports idle or active from the turns.
+    status: str | None = None
+    # When True, name goes on the wire even when it is None or "" (JSON null or an empty string).
+    explicit_name: bool = False
 
     def find_turn(self, turn_id: str) -> FakeTurn | None:
         return next((turn for turn in self.turns if turn.turn_id == turn_id), None)
@@ -159,8 +171,8 @@ class FakeThread:
         running = any(turn.status == "inProgress" for turn in self.turns)
         body: dict[str, Any] = {
             "cliVersion": FAKE_VERSION,
-            "createdAt": BASE_TIME,
-            "updatedAt": BASE_TIME + 60,
+            "createdAt": self.created_at,
+            "updatedAt": self.updated_at,
             "cwd": self.cwd,
             "ephemeral": self.ephemeral,
             "id": self.thread_id,
@@ -168,17 +180,34 @@ class FakeThread:
             "modelProvider": self.provider,
             "preview": f"preview of {self.thread_id}",
             "sessionId": f"session-{self.thread_id}",
-            "source": "appServer",
-            "status": {"type": "active", "activeFlags": []} if running else {"type": "idle"},
+            "source": copy.deepcopy(self.source),
+            "status": self._status_wire(running),
             "turns": [turn.wire(with_items=True) for turn in self.turns] if include_turns else [],
         }
-        if self.name:
+        if self.name or self.explicit_name:
             body["name"] = self.name
         if not self.ephemeral:
             body["path"] = os.path.join(DEFAULT_CWD, "sessions", f"{self.thread_id}.jsonl")
         if self.forked_from:
             body["forkedFromId"] = self.forked_from
+        if self.parent_thread_id:
+            body["parentThreadId"] = self.parent_thread_id
         return body
+
+    def _status_wire(self, running: bool) -> dict[str, Any]:
+        kind = self.status or ("active" if running else "idle")
+        return {"type": "active", "activeFlags": []} if kind == "active" else {"type": kind}
+
+    def source_kind(self) -> str:
+        """The ThreadSourceKind a sourceKinds filter matches this thread's source against."""
+        if isinstance(self.source, str):
+            return self.source
+        agent = self.source.get("subAgent") if isinstance(self.source, dict) else None
+        if agent is None:
+            return "unknown"
+        if isinstance(agent, dict):
+            return "subAgentThreadSpawn" if "thread_spawn" in agent else "subAgentOther"
+        return {"review": "subAgentReview", "compact": "subAgentCompact"}.get(agent, "subAgentOther")
 
 
 def token_usage(total: tuple[int, int], last: tuple[int, int]) -> dict[str, Any]:
@@ -195,6 +224,27 @@ def agent_message(item_id: str, text: str, phase: str | None = "final_answer") -
     if phase is not None:
         item["phase"] = phase
     return item
+
+
+def goal_record(thread_id: str, objective: str, status: str = "active", *, token_budget: int | None = None, tokens_used: int = 0, time_used_seconds: int = 0) -> dict[str, Any]:
+    """A stored ThreadGoal, keyed by its wire aliases; tokenBudget is left out when there is none."""
+    goal: dict[str, Any] = {
+        "createdAt": BASE_TIME,
+        "objective": objective,
+        "status": status,
+        "threadId": thread_id,
+        "timeUsedSeconds": time_used_seconds,
+        "tokensUsed": tokens_used,
+        "updatedAt": BASE_TIME + 30,
+    }
+    if token_budget is not None:
+        goal["tokenBudget"] = token_budget
+    return goal
+
+
+def skill_entry(name: str, path: str, *, enabled: bool = True, scope: str = "user", description: str = "") -> dict[str, Any]:
+    """One SkillMetadata entry of a skills/list answer."""
+    return {"name": name, "description": description or f"The {name} skill.", "enabled": enabled, "path": path, "scope": scope}
 
 
 def _model(model_id: str, model: str, *, hidden: bool = False, default: bool = False) -> dict[str, Any]:
@@ -446,6 +496,25 @@ class FakeAppServer:
         self.budget_echo: Any = _UNSET
         self.repeat_last_cursor = False
         self.threads: dict[str, FakeThread] = {}
+        # Thread-helper switches; each is off by default, so the answers above stay exactly as they were.
+        # paged_thread_list: thread/list sorts, filters (sourceKinds, cwd, searchTerm), honors limit and pages
+        # with distinct cursors ending in null; thread_page_size caps each page further.
+        self.paged_thread_list = False
+        self.thread_page_size: int | None = None
+        # endless_thread_list: every thread/list answer is an empty page with a fresh cursor.
+        self.endless_thread_list = False
+        # Skills per working folder for skills/list; a request without cwds is answered for DEFAULT_CWD.
+        self.skills: dict[str, list[dict[str, Any]]] = {}
+        # record_turn_input: turn/start stores its input as the turn's userMessage item, the way Codex records it;
+        # drop_skill_input leaves the skill entries out of it; input_hidden_reads hides it from that many
+        # thread/turns/list answers first.
+        self.record_turn_input = False
+        self.drop_skill_input = False
+        self.input_hidden_reads = 0
+        # goal_get_answer: when set, thread/goal/get answers goal_get_answer(thread) instead of the stored goal.
+        self.goal_get_answer: Callable[[FakeThread], dict[str, Any] | None] | None = None
+        # Extra thread/turns/list cursors a test names, mapped to the turn offset they resume at.
+        self.turn_cursors: dict[str, int] = {}
         self._handlers: dict[str, Callable[[dict[str, Any]], Any]] = {
             "initialize": self._initialize,
             "account/read": self._account_read,
@@ -464,6 +533,11 @@ class FakeAppServer:
             "review/start": self._review_start,
             "thread/goal/clear": self._goal_clear,
             "thread/goal/set": self._goal_set,
+            "thread/goal/get": self._goal_get,
+            "thread/compact/start": self._thread_compact,
+            "thread/delete": self._thread_delete,
+            "thread/turns/list": self._turns_list,
+            "skills/list": self._skills_list,
         }
 
     # ----- lifecycle hooks called by FakeCodexClient -----
@@ -813,6 +887,9 @@ class FakeAppServer:
     def _thread_resume(self, params: dict[str, Any]) -> dict[str, Any]:
         thread = self.thread_or_error(params["threadId"])
         self._apply_approvals(thread, params)
+        # Resuming loads a stored thread into this app-server, so it no longer reports notLoaded.
+        if thread.status == "notLoaded":
+            thread.status = None
         return self.thread_response(thread, include_turns=not params.get("excludeTurns", False))
 
     def _thread_fork(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -833,7 +910,40 @@ class FakeAppServer:
         return {"thread": thread.wire(include_turns=bool(params.get("includeTurns")))}
 
     def _thread_list(self, params: dict[str, Any]) -> dict[str, Any]:
-        return {"data": [thread.wire(include_turns=False) for thread in list(self.threads.values())], "nextCursor": "cursor-after-page"}
+        if self.endless_thread_list:
+            return {"data": [], "nextCursor": f"endless-{next(self._ids)}"}
+        if not self.paged_thread_list:
+            return {"data": [thread.wire(include_turns=False) for thread in list(self.threads.values())], "nextCursor": "cursor-after-page"}
+        matches = self._listed_threads(params)
+        start = self._offset(params.get("cursor"), "threads-after-", {})
+        size = params.get("limit") or len(matches)
+        if self.thread_page_size is not None:
+            size = min(size, self.thread_page_size)
+        page = matches[start : start + size]
+        end = start + len(page)
+        return {"data": [thread.wire(include_turns=False) for thread in page], "nextCursor": f"threads-after-{end}" if end < len(matches) else None}
+
+    def _listed_threads(self, params: dict[str, Any]) -> list[FakeThread]:
+        # Codex filters by source kind, exact cwd and title substring, then sorts by the requested key.
+        threads = list(self.threads.values())
+        if "sourceKinds" in params:
+            threads = [thread for thread in threads if thread.source_kind() in params["sourceKinds"]]
+        if params.get("cwd"):
+            threads = [thread for thread in threads if thread.cwd == params["cwd"]]
+        if params.get("searchTerm"):
+            threads = [thread for thread in threads if params["searchTerm"] in (thread.name or "")]
+        key = "updated_at" if params.get("sortKey") == "updated_at" else "created_at"
+        return sorted(threads, key=lambda thread: getattr(thread, key), reverse=params.get("sortDirection") != "asc")
+
+    def _offset(self, cursor: Any, prefix: str, aliases: dict[str, int]) -> int:
+        # A cursor is one this fake issued (prefix + offset) or one a test named; anything else is refused.
+        if not cursor:
+            return 0
+        if cursor in aliases:
+            return aliases[cursor]
+        if isinstance(cursor, str) and cursor.startswith(prefix) and cursor[len(prefix) :].isdigit():
+            return int(cursor[len(prefix) :])
+        raise FakeRpcError(-32600, f"invalid cursor: {cursor}")
 
     def _thread_name_set(self, params: dict[str, Any]) -> dict[str, Any]:
         self.thread_or_error(params["threadId"]).name = params["name"]
@@ -843,6 +953,11 @@ class FakeAppServer:
         thread = self.thread_or_error(params["threadId"])
         turn = FakeTurn(turn_id=self.next_turn_id())
         thread.turns.append(turn)
+        if self.record_turn_input:
+            # Codex records the turn's input as its first item, a userMessage whose content is the input sent.
+            content = [entry for entry in copy.deepcopy(params.get("input", [])) if not (self.drop_skill_input and entry.get("type") == "skill")]
+            turn.items.append({"type": "userMessage", "id": f"item-{next(self._item_ids)}", "content": content})
+            turn.hidden_reads = self.input_hidden_reads
         started = ("turn/started", {"threadId": thread.thread_id, "turn": turn.wire(with_items=False)})
         after: list[Note] = [started]
         if self.autocomplete is not None:
@@ -897,3 +1012,48 @@ class FakeAppServer:
             thread.turns.append(turn)
             notes.append(("turn/started", {"threadId": thread.thread_id, "turn": turn.wire(with_items=False)}))
         return Reply(result={"goal": answer}, after=notes)
+
+    def _goal_get(self, params: dict[str, Any]) -> dict[str, Any]:
+        # Reads the stored goal without loading the thread, so a notLoaded thread stays notLoaded (spec A-5, A-16).
+        thread = self.thread_or_error(params["threadId"])
+        goal = self.goal_get_answer(thread) if self.goal_get_answer is not None else thread.goal
+        return {"goal": copy.deepcopy(goal)}
+
+    def _thread_compact(self, params: dict[str, Any]) -> dict[str, Any]:
+        # Compaction acts only on a thread loaded in this app-server (spec A-4).
+        thread = self.thread_or_error(params["threadId"])
+        if thread.status == "notLoaded":
+            raise FakeRpcError(-32600, f"thread not loaded: {thread.thread_id}")
+        return {}
+
+    def _thread_delete(self, params: dict[str, Any]) -> dict[str, Any]:
+        thread = self.thread_or_error(params["threadId"])
+        with self._cond:
+            del self.threads[thread.thread_id]
+            self._cond.notify_all()
+        return {}
+
+    def _turns_list(self, params: dict[str, Any]) -> dict[str, Any]:
+        # Persisted history, oldest first unless desc is asked; an ephemeral thread has none (spec A-21).
+        thread = self.thread_or_error(params["threadId"])
+        turns = [] if thread.ephemeral else list(thread.turns)
+        if params.get("sortDirection") == "desc":
+            turns.reverse()
+        start = self._offset(params.get("cursor"), "turns-after-", self.turn_cursors)
+        limit = params.get("limit")
+        page = turns[start:] if limit is None else turns[start : start + limit]
+        end = start + len(page)
+        full = params.get("itemsView") == "full"
+        return {"data": [self._listed_turn(turn, full) for turn in page], "nextCursor": f"turns-after-{end}" if end < len(turns) else None}
+
+    def _listed_turn(self, turn: FakeTurn, full: bool) -> dict[str, Any]:
+        body = turn.wire(with_items=full)
+        if full and turn.hidden_reads > 0:
+            turn.hidden_reads -= 1
+            body["items"] = [item for item in body["items"] if item["type"] != "userMessage"]
+        return body
+
+    def _skills_list(self, params: dict[str, Any]) -> dict[str, Any]:
+        # Without cwds Codex answers for its own working folder.
+        cwds = params["cwds"] if "cwds" in params else [DEFAULT_CWD]
+        return {"data": [{"cwd": cwd, "errors": [], "skills": copy.deepcopy(self.skills.get(cwd, []))} for cwd in cwds]}

@@ -3,11 +3,11 @@
 PURPOSE: Shared helpers for the CodexHost feature pack: the spec's literal texts and tables, the privacy canaries, the openai-codex skip gate, a duck-typed stub host for the tool tests, and HostTestCase, which runs a real CodexHost against the in-memory app-server.
 ROLE IN CODEBASE: Imported by every test module in tests/features/codex_host/. It imports nothing the feature adds and nothing from openai-codex at module level, so every module still collects before the feature exists and on CI, which installs only the dev extra.
 ARCHITECTURE NOTE: HostTestCase.asyncSetUp patches the one seam spec section 13 names, vidbyte.harnesses.native.codex.connection.CodexClient, with the fake client from codex_host_fakes.py, and shutil.which with a recorder. Everything above the seam (CodexHost, its translators, preflight, pricing, records) runs unmocked. StubCodexHost stands in for CodexHost only in the tool tests, which spec section 13 allows because the tools import CodexHost under TYPE_CHECKING only.
-FUNCTION INVENTORY: requires_sdk skips a class when openai-codex is missing; error_texts(exc) returns every text an error shows, its visible chain included; input_texts(params) reads a turn request's input items; HostTestCase.open_host / close_host / spawn / wait_done / assert_problem / assert_codex_error / run_in_other_loop drive a host, and patch_connection / patch_platform / wait_for_request / wait_until / ask / count script and observe the fake app-server; StubCodexHost answers the fifteen host methods from scripted records; make_echo_tool builds a small dynamic tool.
+FUNCTION INVENTORY: requires_sdk skips a class when openai-codex is missing; error_texts(exc) returns every text an error shows, its visible chain included; input_texts(params) reads a turn request's input items; HostTestCase.open_host / close_host / spawn / wait_done / assert_problem / assert_codex_error / run_in_other_loop drive a host, and patch_connection / patch_skill_functions / patch_platform / wait_for_request / wait_until / ask / count script and observe the fake app-server; StubCodexHost answers the twenty-seven host methods from scripted records; make_echo_tool builds a small dynamic tool; thread_suffix is the " Thread: <id>." the error mapper appends. The thread-helpers spec adds HELPER_METHODS, its message texts, four codes, four rows and eleven tool rows.
 COMMON MODIFICATION PATTERNS: When the spec changes a next-step text, a tool name or a classification row, change the literal here, never by reading the production constant. Add a host helper here only when two or more modules need it.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import vidbyte.harnesses.native, vidbyte.lib.dataclasses.codex_host, the new enums or openai_codex at module level: a missing feature must fail each test, not abort collection. 2. Do not start a process or touch the network. 3. Do not copy production logic; tests assert the spec's literal values.
 KNOWN EDGE CASES: The privacy canaries are unique strings, so finding one in any output proves a leak. StubCodexHost reports a handle RUNNING until a test marks it finished, which is how the live-turn cap sees running turns.
-RELATED DOCS: tests/features/codex_host/FEATURE.md; docs/spec/codex-host/spec.md sections 9.2, 9.3 and 13.
+RELATED DOCS: tests/features/codex_host/FEATURE.md; docs/spec/codex-host/spec.md sections 9.2, 9.3 and 13; docs/spec/codex-host-thread-helpers/spec.md sections 8.5, 9.2 and 13.
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/codex_host
 """
 
@@ -78,9 +78,15 @@ NEXT_STEPS = {
     "codex.response_invalid": "Continue the thread and ask for a final answer.",
     "configuration.invalid_argument": "Fix the argument or setup named in the message, then call again.",
     "configuration.unsupported_combination": USER_REVIEWER_TEXT,
+    # docs/spec/codex-host-thread-helpers/spec.md section 9.2 "New failure codes", verbatim.
+    "codex.command_not_run": "Read what Codex recorded with get_codex_goal or list_codex_turns, then start the run again.",
+    "codex.skill_not_found": "Pick a skill that list_codex_skills reports for the same working folder, and pass its exact name.",
+    "codex.skill_disabled": "Enable the skill in your Codex configuration, or pick an enabled skill that list_codex_skills reports.",
+    "codex.goal_unfinished": "Continue the thread with continue_codex_thread until its goal is complete, or clear the goal from a Codex client, then compact the thread again.",
 }
 
-# Spec section 12.3 row 1: the fifteen new FailureCode members, in their required order.
+# Spec section 12.3 row 1: the fifteen new FailureCode members, in their required order, then the four the
+# thread-helpers spec (section 12.3 row 1) inserts right after CODEX_TURN_TIMED_OUT.
 NEW_FAILURE_CODES = (
     ("CODEX_NOT_INSTALLED", "codex.not_installed"),
     ("CODEX_VERSION_UNSUPPORTED", "codex.version_unsupported"),
@@ -97,6 +103,10 @@ NEW_FAILURE_CODES = (
     ("CODEX_PROCESS_EXITED", "codex.process_exited"),
     ("CODEX_PROTOCOL_MISMATCH", "codex.protocol_mismatch"),
     ("CODEX_TURN_TIMED_OUT", "codex.turn_timed_out"),
+    ("CODEX_COMMAND_NOT_RUN", "codex.command_not_run"),
+    ("CODEX_SKILL_NOT_FOUND", "codex.skill_not_found"),
+    ("CODEX_SKILL_DISABLED", "codex.skill_disabled"),
+    ("CODEX_GOAL_UNFINISHED", "codex.goal_unfinished"),
 )
 
 # Spec section 9.2: class / phase / severity / disposition values for each new code.
@@ -116,6 +126,10 @@ CLASSIFICATION_ROWS = {
     "codex.process_exited": ("transient", "resource", "critical", "route"),
     "codex.protocol_mismatch": ("terminal", "configuration", "critical", "raise"),
     "codex.turn_timed_out": ("transient", "resource", "warning", "stop"),
+    "codex.command_not_run": ("terminal", "session", "error", "raise"),
+    "codex.skill_not_found": ("terminal", "configuration", "error", "raise"),
+    "codex.skill_disabled": ("terminal", "configuration", "error", "raise"),
+    "codex.goal_unfinished": ("terminal", "session", "warning", "raise"),
 }
 
 # Spec section 9.2 tool table: (name, class name, permission, parameters, required), in R3 order.
@@ -159,8 +173,68 @@ TOOL_TABLE = (
         ("thread_id", "target_kind", "branch", "sha", "title", "instructions", "delivery"),
         ("thread_id", "target_kind"),
     ),
+    # docs/spec/codex-host-thread-helpers/spec.md section 9.2 tool table, rows 16 to 26; delete_codex_thread has no tool.
+    ("list_recent_codex_threads", "ListRecentCodexThreadsTool", "read", ("cwd", "limit"), ()),
+    ("list_codex_threads_since", "ListCodexThreadsSinceTool", "read", ("since", "cwd", "limit"), ("since",)),
+    ("search_codex_threads", "SearchCodexThreadsTool", "read", ("query", "cwd", "limit"), ("query",)),
+    ("get_codex_thread_lineage", "GetCodexThreadLineageTool", "read", ("thread_id",), ("thread_id",)),
+    ("list_codex_turns", "ListCodexTurnsTool", "read", ("thread_id", "cursor", "limit"), ("thread_id",)),
+    ("compact_codex_thread", "CompactCodexThreadTool", "write", ("thread_id",), ("thread_id",)),
+    ("get_codex_goal", "GetCodexGoalTool", "read", ("thread_id",), ("thread_id",)),
+    ("run_codex_goal", "RunCodexGoalTool", "write", ("objective", "token_budget"), ("objective",)),
+    ("list_codex_skills", "ListCodexSkillsTool", "read", ("cwd",), ()),
+    ("run_codex_skill", "RunCodexSkillTool", "write", ("skill", "prompt"), ("skill", "prompt")),
+    ("run_codex_openai_docs", "RunCodexOpenaiDocsTool", "write", ("question",), ("question",)),
 )
 TOOL_NAMES = tuple(row[0] for row in TOOL_TABLE)
+
+# docs/spec/codex-host-thread-helpers/spec.md section 8.5: the twelve new CodexHost methods, in their order.
+HELPER_METHODS = (
+    "list_recent_codex_threads",
+    "list_codex_threads_since",
+    "search_codex_threads",
+    "get_codex_thread_lineage",
+    "list_codex_turns",
+    "compact_codex_thread",
+    "delete_codex_thread",
+    "get_codex_goal",
+    "run_codex_goal",
+    "list_codex_skills",
+    "run_codex_skill",
+    "run_codex_openai_docs",
+)
+
+# docs/spec/codex-host-thread-helpers/spec.md section 9.2 "Message constants" and tool texts, verbatim.
+RUNNING_THREAD_MESSAGE = "Codex reports a running turn on the thread, so it cannot be compacted or deleted until that turn ends."
+LIMIT_MESSAGE = "{operation} limit must be an integer from {minimum} to {maximum}."
+SINCE_MESSAGE = "{operation} since must be a non-negative integer number of Unix seconds."
+QUERY_MESSAGE = "{operation} query must be a non-empty string."
+GOAL_UNFINISHED_MESSAGE = "Codex reports an unfinished goal (status {status}) on the thread, and loading the thread to compact it could let Codex continue that goal."
+OWN_INPUT_MESSAGE = "{operation} takes its input as arguments; leave request.prompt and request.goal at their defaults."
+EPHEMERAL_SKILL_MESSAGE = "{operation} needs a stored thread to confirm the skill run, so request.thread.ephemeral must be False."
+SKILL_NAME_MESSAGE = "{operation} skill must be a non-empty string."
+SKILL_NOT_FOUND_MESSAGE = "Codex lists no skill named '{skill}' for {place}. Enabled skills: {names}."
+SKILL_DISABLED_MESSAGE = "The Codex skill '{skill}' is disabled for {place}."
+NO_GOAL_MESSAGE = "Codex reports no goal on the thread after the goal run started."
+OBJECTIVE_DIFFERS_MESSAGE = "Codex reports a goal objective different from the one sent."
+BUDGET_DIFFERS_MESSAGE = "Codex reports a goal token budget of {stored}, not the {sent} that was sent."
+GOAL_UNCHECKED_MESSAGE = " The goal run on thread {thread_id} was interrupted because its goal could not be checked."
+INPUT_NOT_RECORDED_MESSAGE = "Codex recorded no input for the turn of skill '{skill}' within {seconds} seconds, so the skill run could not be confirmed."
+SKILL_DROPPED_MESSAGE = "Codex recorded the turn's input without the skill '{skill}', so the run did not use the skill."
+SKILL_UNCHECKED_MESSAGE = " The skill run on thread {thread_id} was interrupted because its input could not be checked."
+COMPACT_STARTED_TEXT = "Compaction started on thread {thread_id}; Codex compacts its history in the background and finishes only while this host stays open."
+NO_GOAL_TEXT = "Thread {thread_id} has no goal."
+# {place} of the skill messages when the caller's cwd is "".
+APP_SERVER_PLACE = "the app-server's working folder"
+# The module that imports the read-back bounds by name, where spec section 13 says a test may patch them.
+SKILL_FUNCTIONS_MODULE = "vidbyte.harnesses.native.codex.skill_functions"
+# The existing preflight text for a thread with a running turn on this host (codex-host BUSY_MESSAGE, spec EC-17).
+BUSY_TEXT = "The thread already has a running turn on this host."
+
+
+def thread_suffix(thread_id: str) -> str:
+    """The text CodexErrorMapper.error appends to a message when it names a thread (spec section 9.2)."""
+    return f" Thread: {thread_id}."
 
 
 def error_texts(exc: BaseException) -> list[str]:
@@ -226,6 +300,12 @@ class HostTestCase(unittest.IsolatedAsyncioTestCase):
     def patch_connection(self, name: str, value: Any) -> None:
         """Patch one bound in the connection module's namespace for this test."""
         patcher = mock.patch(f"{CONNECTION_MODULE}.{name}", value)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def patch_skill_functions(self, name: str, value: Any) -> None:
+        """Patch one read-back bound where skill_functions imported it by name (thread-helpers spec section 13)."""
+        patcher = mock.patch(f"{SKILL_FUNCTIONS_MODULE}.{name}", value)
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -350,6 +430,8 @@ class StubCodexHost:
         self.raises: dict[str, BaseException] = {}
         self.gates: dict[str, asyncio.Event] = {}
         self.finished: set[tuple[str, str]] = set()
+        # When True, get_codex_goal answers None, as for a thread without a goal.
+        self.goal_missing = False
         self._ids = itertools.count(1)
 
     def names(self) -> list[str]:
@@ -511,3 +593,75 @@ class StubCodexHost:
     async def start_codex_review(self, thread_id: str, target: Any, delivery: Any = None) -> Any:
         await self._enter("start_codex_review", thread_id, target, delivery=delivery)
         return self._handle(thread_id)
+
+    # ----- the twelve thread-helper methods (docs/spec/codex-host-thread-helpers/spec.md section 8.5) -----
+    # Each records its arguments by name, however the tool passed them, so a test reads one normalized mapping.
+
+    def _summary(self, thread_id: str, parent: str | None = None) -> Any:
+        from vidbyte.lib.dataclasses.codex_host import CodexThreadSummary
+
+        return CodexThreadSummary(thread_id=thread_id, title="Stub thread", created_at=1, updated_at=2, parent_thread_id=parent, model="gpt-5.5")
+
+    async def list_recent_codex_threads(self, cwd: str, limit: int = 20) -> Any:
+        await self._enter("list_recent_codex_threads", cwd=cwd, limit=limit)
+        return (self._summary("thr-stub-recent"),)
+
+    async def list_codex_threads_since(self, cwd: str, since: int, limit: int = 20) -> Any:
+        await self._enter("list_codex_threads_since", cwd=cwd, since=since, limit=limit)
+        return (self._summary("thr-stub-since"),)
+
+    async def search_codex_threads(self, cwd: str, query: str, limit: int = 20) -> Any:
+        await self._enter("search_codex_threads", cwd=cwd, query=query, limit=limit)
+        return (self._summary("thr-stub-found"),)
+
+    async def get_codex_thread_lineage(self, thread_id: str) -> Any:
+        await self._enter("get_codex_thread_lineage", thread_id=thread_id)
+        return (self._summary(thread_id, parent="thr-stub-parent"), self._summary("thr-stub-parent"))
+
+    async def list_codex_turns(self, thread_id: str, cursor: str = "", limit: int | None = None) -> Any:
+        from vidbyte.lib.dataclasses.codex import CodexItem
+        from vidbyte.lib.dataclasses.codex_host import CodexStoredTurn, CodexTurnPage
+        from vidbyte.lib.enums.codex import CodexTurnStatus
+
+        await self._enter("list_codex_turns", thread_id=thread_id, cursor=cursor, limit=limit)
+        items = (
+            CodexItem(id="item-stub-user", type="userMessage", fields={"clientId": None, "content": [{"type": "text", "text": "Fix it.", "text_elements": []}]}),
+            CodexItem(id="item-stub-final", type="agentMessage", fields={"text": "Stub final answer.", "phase": "final_answer"}),
+        )
+        turn = CodexStoredTurn(turn_id="turn-stub-1", status=CodexTurnStatus.COMPLETED, final_response="Stub final answer.", error_message="", started_at=1, completed_at=2, items=items)
+        return CodexTurnPage(turns=(turn,), next_cursor="stub-turn-cursor")
+
+    async def compact_codex_thread(self, thread_id: str) -> None:
+        await self._enter("compact_codex_thread", thread_id=thread_id)
+
+    async def delete_codex_thread(self, thread_id: str) -> None:
+        await self._enter("delete_codex_thread", thread_id=thread_id)
+
+    async def get_codex_goal(self, thread_id: str) -> Any:
+        from vidbyte.lib.dataclasses.codex_host import CodexThreadGoal
+        from vidbyte.lib.enums.codex import CodexGoalStatus
+
+        await self._enter("get_codex_goal", thread_id=thread_id)
+        if self.goal_missing:
+            return None
+        return CodexThreadGoal(thread_id=thread_id, objective="Ship the fix.", status=CodexGoalStatus.ACTIVE, token_budget=500, tokens_used=120, time_used_seconds=30, created_at=1, updated_at=2)
+
+    async def run_codex_goal(self, objective: str, token_budget: int | None = None, request: Any = None) -> Any:
+        await self._enter("run_codex_goal", objective=objective, token_budget=token_budget, request=request)
+        return self._handle()
+
+    async def list_codex_skills(self, cwd: str = "") -> Any:
+        from vidbyte.lib.dataclasses.codex_host import CodexSkillInfo
+        from vidbyte.lib.enums.codex import CodexSkillScope
+
+        await self._enter("list_codex_skills", cwd=cwd)
+        path = os.path.abspath(os.path.join(os.sep, "stub-skills", "openai-docs", "SKILL.md"))
+        return (CodexSkillInfo(name="openai-docs", description="Stub skill.", path=path, scope=CodexSkillScope.SYSTEM, enabled=True),)
+
+    async def run_codex_skill(self, skill: str, prompt: str, request: Any = None) -> Any:
+        await self._enter("run_codex_skill", skill=skill, prompt=prompt, request=request)
+        return self._handle()
+
+    async def run_codex_openai_docs(self, question: str, request: Any = None) -> Any:
+        await self._enter("run_codex_openai_docs", question=question, request=request)
+        return self._handle()

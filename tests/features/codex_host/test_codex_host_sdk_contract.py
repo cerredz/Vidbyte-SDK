@@ -43,6 +43,8 @@ CALL_LIST: dict[str, tuple[str, ...]] = {
     "unregister_turn_notifications": ("turn_id",),
     "next_turn_notification": ("turn_id",),
     "request_with_retry_on_overload": ("method", "params"),
+    # docs/spec/codex-host-thread-helpers/spec.md section 9.2: compact is the one new typed call.
+    "thread_compact": ("thread_id",),
 }
 
 # The raw path's keyword-only arguments: the generated response model, and the single attempt for spending calls.

@@ -55,6 +55,18 @@ def _valid_arguments(handle: dict[str, str]) -> dict[str, dict[str, Any]]:
         "track_codex_thread_usage": {"thread_id": "thr-elsewhere"},
         "launch_codex_subagents": {"prompts": ["Review module A."]},
         "start_codex_review": {"thread_id": "thr-elsewhere", "target_kind": "uncommittedChanges"},
+        # docs/spec/codex-host-thread-helpers/spec.md section 9.2 tools 16 to 26.
+        "list_recent_codex_threads": {},
+        "list_codex_threads_since": {"since": 1_760_000_000},
+        "search_codex_threads": {"query": "readme"},
+        "get_codex_thread_lineage": {"thread_id": "thr-elsewhere"},
+        "list_codex_turns": {"thread_id": "thr-elsewhere"},
+        "compact_codex_thread": {"thread_id": "thr-elsewhere"},
+        "get_codex_goal": {"thread_id": "thr-elsewhere"},
+        "run_codex_goal": {"objective": "Ship the fix."},
+        "list_codex_skills": {},
+        "run_codex_skill": {"skill": "openai-docs", "prompt": "Find the event that streams text."},
+        "run_codex_openai_docs": {"question": "Which event streams text deltas?"},
     }
 
 
@@ -138,7 +150,7 @@ class CodexHostToolsShapeTests(_ToolCase):
         import vidbyte.tools.builtins.codex as builtin_codex
 
         tools = _toolset(StubCodexHost(), max_live_turns=2)
-        self.assertEqual(len(tools), 15)
+        self.assertEqual(len(tools), 26)
         self.assertEqual(tuple(tools.names()), TOOL_NAMES)
         for tool, (name, class_name, permission, parameters, required) in zip(tools, TOOL_TABLE):
             with self.subTest(tool=name):
