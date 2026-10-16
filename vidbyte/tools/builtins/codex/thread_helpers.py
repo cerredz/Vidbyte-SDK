@@ -12,7 +12,9 @@ TESTS: tests/features/codex_host/test_codex_host_helper_tools.py
 from __future__ import annotations
 
 from vidbyte.lib.constants.codex import (
+    CODEX_HOST_MIN_LIST_LIMIT,
     CODEX_HOST_THREAD_LIST_DEFAULT_LIMIT,
+    CODEX_HOST_THREAD_LIST_MAX_LIMIT,
     CODEX_HOST_TURNS_TOOL_DEFAULT_LIMIT,
 )
 from vidbyte.lib.enums.codex import CodexHostOperation
@@ -57,7 +59,7 @@ class ListRecentCodexThreadsTool(_CodexHostTool):
                 "additionalProperties": False,
                 "properties": {
                     "cwd": {"type": "string", "description": CWD_DESCRIPTION},
-                    "limit": {"type": "integer", "description": LIMIT_DESCRIPTION},
+                    "limit": {"type": "integer", "minimum": CODEX_HOST_MIN_LIST_LIMIT, "maximum": CODEX_HOST_THREAD_LIST_MAX_LIMIT, "description": LIMIT_DESCRIPTION},
                 },
             },
         )
@@ -89,7 +91,7 @@ class ListCodexThreadsSinceTool(_CodexHostTool):
                 "properties": {
                     "since": {"type": "integer", "description": SINCE_DESCRIPTION},
                     "cwd": {"type": "string", "description": CWD_DESCRIPTION},
-                    "limit": {"type": "integer", "description": LIMIT_DESCRIPTION},
+                    "limit": {"type": "integer", "minimum": CODEX_HOST_MIN_LIST_LIMIT, "maximum": CODEX_HOST_THREAD_LIST_MAX_LIMIT, "description": LIMIT_DESCRIPTION},
                 },
             },
         )
@@ -122,7 +124,7 @@ class SearchCodexThreadsTool(_CodexHostTool):
                 "properties": {
                     "query": {"type": "string", "description": QUERY_DESCRIPTION},
                     "cwd": {"type": "string", "description": CWD_DESCRIPTION},
-                    "limit": {"type": "integer", "description": LIMIT_DESCRIPTION},
+                    "limit": {"type": "integer", "minimum": CODEX_HOST_MIN_LIST_LIMIT, "maximum": CODEX_HOST_THREAD_LIST_MAX_LIMIT, "description": LIMIT_DESCRIPTION},
                 },
             },
         )
@@ -182,7 +184,7 @@ class ListCodexTurnsTool(_CodexHostTool):
                 "properties": {
                     "thread_id": {"type": "string", "description": THREAD_ID_DESCRIPTION},
                     "cursor": {"type": "string", "description": TURN_CURSOR_DESCRIPTION},
-                    "limit": {"type": "integer", "description": TURN_LIMIT_DESCRIPTION},
+                    "limit": {"type": "integer", "minimum": CODEX_HOST_MIN_LIST_LIMIT, "description": TURN_LIMIT_DESCRIPTION},
                 },
             },
         )

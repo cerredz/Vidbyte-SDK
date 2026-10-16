@@ -11,6 +11,7 @@ TESTS: tests/features/codex_host/test_codex_host_helper_tools.py
 
 from __future__ import annotations
 
+from vidbyte.lib.constants.codex import CODEX_HOST_MIN_TOKEN_LIMIT
 from vidbyte.lib.enums.codex import CodexHostOperation
 from vidbyte.tools.builtins.codex._base import _CodexHostTool
 from vidbyte.tools.builtins.codex.descriptions import (
@@ -81,7 +82,7 @@ class RunCodexGoalTool(_CodexHostTool):
                 "required": ["objective"],
                 "properties": {
                     "objective": {"type": "string", "description": RUN_GOAL_OBJECTIVE_DESCRIPTION},
-                    "token_budget": {"type": "integer", "description": RUN_GOAL_BUDGET_DESCRIPTION},
+                    "token_budget": {"type": "integer", "minimum": CODEX_HOST_MIN_TOKEN_LIMIT, "description": RUN_GOAL_BUDGET_DESCRIPTION},
                 },
             },
         )
