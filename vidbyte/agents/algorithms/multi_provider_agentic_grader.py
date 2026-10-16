@@ -174,7 +174,9 @@ class MultiProviderAgenticGraderRuntimeAlgorithm:
         # Otherwise the longest candidate quoted in the grader's output is the most specific match.
         contained = sorted((p_name for p_name, text in stripped.items() if text in grader_output), key=lambda p_name: -len(stripped[p_name]))
         # Otherwise the shortest candidate that contains the grader's output is the closest match.
-        containing = sorted((p_name for p_name, text in stripped.items() if grader_output in text), key=lambda p_name: len(stripped[p_name]))
+        # @intent a-blank-verdict-selects-no-candidate
+        # A blank grader reply is contained in every candidate, so it matches none rather than crowning the shortest.
+        containing = sorted((p_name for p_name, text in stripped.items() if grader_output and grader_output in text), key=lambda p_name: len(stripped[p_name]))
         ranked = exact + contained + containing
         if ranked:
             return candidates[ranked[0]], ranked[0]
