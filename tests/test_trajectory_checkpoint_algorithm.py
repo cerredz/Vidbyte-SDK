@@ -279,6 +279,25 @@ class TrajectoryCheckpointAlgorithmTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(prompt.count(marker), 1, marker)
             self.assertLess(prompt.index(marker), output_start, marker)
 
+    async def test_runtime_checkpoint_history_shows_task_at_run_boundary(self) -> None:
+        # [Hidden Failure] The summarizer sees the run's task once, after the caller's history and before the run's own tool work, as the main model does.
+        @tool
+        def lookup() -> str:
+            return "TOOL-OUTPUT-3"
+        task = "TASKMARK-7Q catalog every river gauge"
+        caller = [{"role": "user", "content": "CALLER-QUESTION-1"}, {"role": "assistant", "content": "CALLER-REPLY-2"}]
+        runner = FakeRunner([tool_response(), FakeResponse(_JSON_OUTPUT), is_done_response()])
+        algorithm = TrajectoryCheckpointAlgorithm(interval=1, include_tool_outputs=True)
+        runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=Tools([lookup]), permission_policy=PermissionPolicy(), algorithm=ContextWindowAlgorithm(name="trajectory_checkpoints", trajectory_checkpoints=algorithm))
+        await runtime.arun(task, handle=runner_handle(runner), context=base_context(), options={"messages": caller})
+        prompt = runner.calls[1]["prompt"]
+        self.assertEqual(prompt.count(task), 1)
+        positions = [prompt.index(marker) for marker in ("CALLER-QUESTION-1", "CALLER-REPLY-2", task, "TOOL-OUTPUT-3")]
+        self.assertEqual(positions, sorted(positions))
+        # The main model still gets the task once, as the prompt and never inside its history.
+        self.assertEqual(runner.calls[2]["prompt"], task)
+        self.assertNotIn(task, str(runner.calls[2]["kwargs"]["messages"]))
+
     async def test_runtime_slots_match_template(self) -> None:
         # Verify recorded slot templates validate successfully.
         recorder = ContextWindowRecorder()
