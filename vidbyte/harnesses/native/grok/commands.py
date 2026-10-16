@@ -158,8 +158,9 @@ class GrokCommands:
         try:
             # Check the command, its options and its text under the
             # text's public name before anything starts (spec D-25,
-            # D-30). /review and /code-review take no text, so their
-            # empty one is the raw command's arguments.
+            # D-30); /execute-plan's text slot is its design_doc.
+            # /review and /code-review take no text, so their empty one
+            # is the raw command's arguments.
             field = native_threads.NATIVE_TEXT_ARGUMENTS.get(operation, native_threads.NATIVE_TEXT_ARGUMENTS[NativeThreadOperation.RUN_GROK_COMMAND])
             arguments = GrokCommandArguments(command=command, agent=agent, text=text, design_doc=design_doc, budget_tokens=budget_tokens, effort=effort, concurrency=concurrency, dry_run=dry_run, auto_pr=auto_pr, local=local, branch=branch, pr=pr, named=operation is not NativeThreadOperation.RUN_GROK_COMMAND, text_field=field)
             if sys.platform == native_threads.NATIVE_WINDOWS_PLATFORM:

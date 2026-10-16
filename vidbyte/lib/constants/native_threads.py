@@ -505,6 +505,7 @@ NATIVE_TEXT_ARGUMENTS: MappingProxyType[NativeThreadOperation, str] = MappingPro
         _Op.RUN_GROK_GOAL: "objective",
         _Op.RUN_GROK_IMPLEMENT: "task",
         _Op.RUN_GROK_DESIGN: "description",
+        _Op.RUN_GROK_EXECUTE_PLAN: "design_doc",
         _Op.RUN_GROK_RESUME_CLAUDE: "session",
         _Op.RUN_GROK_RESUME_CODEX: "session",
         _Op.RUN_GROK_RESUME_CURSOR: "session",
