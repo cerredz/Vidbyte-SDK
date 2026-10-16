@@ -172,3 +172,36 @@ Applied review round 1 (`reports/S1-spec-review.md`). §16 records every finding
 - AC 15 (AC-14 withdrawn), EC 60 (EC-1 withdrawn), FR 17 (FR-14 withdrawn), NFR 7.
 - D 28, T 6, W 6.
 - A 10 (A-10 withdrawn), Q 7. None is blocking.
+
+## 8. Revision r3 (2026-10-16)
+
+Applied review round 2 (`reports/S1-spec-review-r2.md`), the last round. §16 records every finding as rows r2-1 to r2-7.
+- **Accepted:** six findings.
+- **r2-3, accepted in part:** the single-quote rate binding became Q-10, with default yes.
+- **r2-7's optional re-run:** became Q-8, with default no.
+
+I then set `status: approved` and moved the spec to revision 3.
+
+**What I checked myself while revising:**
+- **R-1 fix chosen.** I chose to exclude these IDs (D-29) rather than the reviewer's prefix-rule fix. It is smaller: no new rule kind, no extra test case, and no dependence on a source for the vendor's key prefix.
+- **The key-leak mechanism, by read-only probe at HEAD.** `Runner._normalize_provider_and_model(None, id)[0]` returns `deepseek` for `deepseek/x` and `openai` for `openai/gpt-oss-120b`. It also returns `openai` for `OpenAI/x`: the match ignores case and takes no aliases. An unprefixed key binds to deepseek. `provider_for_model("deepseek/deepseek-chat")` is None, so r2's EC-28 example was wrong.
+- **Groq models page (raw and text form).** `qwen/qwen3.8-27b` ($0.80 input / $4.00 output) is in the "Preview Models" table. That is Groq's only priced text model that D-29 leaves eligible, so Groq moves to rank 6 and Q-9 was added.
+- **Cerebras model page (raw).** The only price record, ``pricing:{inputPrice:`$0.35 / M tokens`,outputPrice:`$0.75 / M tokens`}``, sits 457 bytes after `` modelId:`gpt-oss-120b` ``, with no other model ID between them. A one-quote binding is therefore impossible, which is why Q-10 exists.
+- **Claude Code permission docs** (`permission-modes`, `permissions`, raw on 2026-10-16). Verified quotes:
+  - auto mode is the starting mode from v2.1.283;
+  - `acceptEdits` covers only the working directory and `additionalDirectories`;
+  - "An allow rule won't match past an assignment of any other variable";
+  - `bypassPermissions` is for isolated containers or VMs only;
+  - the auto-mode classifier treats internal file paths in public-repo PR bodies as outbound content.
+- **Checklist-path extraction command.** Run against the spec's own wiring table, it prints the 22 unique checklist paths.
+- **Self-checks, all clean:**
+  - 18 sections; only the three §12.3 rows start with a number;
+  - no undefined or duplicate IDs;
+  - every Markdown table keeps a constant GFM cell count;
+  - both checklist checkers report `rows=33 problems=0`.
+
+**Counts after r3:**
+- G 4, NG 13, INV 26.
+- AC 15 (AC-14 withdrawn), EC 61 (EC-1 withdrawn), FR 17 (FR-14 withdrawn), NFR 7.
+- D 29, T 6, W 6.
+- A 10 (A-10 withdrawn), Q 10. None is blocking.
