@@ -1,7 +1,7 @@
 ---
 spec: harness-thread-helpers-skills
 title: Thread helpers and built-in skill functions for the Grok, opencode and Muse harnesses
-status: verified         # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
+status: pr-open          # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
 revision: 5
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-harness-thread-helpers-skills
@@ -1497,3 +1497,4 @@ No question blocks this spec.
 | r4 | 2026-10-16 | S1 revision (S4 findings) | Amends the contract for the S4 code review, before S5. **R-2:** Muse evidence is always `toolCall` items, also after a compaction (the export's top-level `items`, read by the new shared `MuseSessionWire.item_calls`); message text never counts, and an unreadable export fails closed (D-33, EC-83, EC-84, AC-34, A-28). **R-23:** a `read_skill` call counts only when its parsed `id` equals the skill id (`require(..., member=)`, EC-82, AC-17, A-17). **R-5:** `NativeErrorFactory.remember_thread` keeps the new thread id on every error after the paid run (D-34, AC-35, EC-85). **R-6:** the pure `NativeErrorFactory.child_problem` is the one helper-child outcome mapping (D-35). **R-7:** `SDK-LINT: PASS`. **R-8:** INV-18 exempts boundary-record validation, as #1036 does. **R-16:** the new verbatim scan-cap next step (§12.4). Every other S4 finding is recorded in §16. Still 47 functions, 68 exports, 10 new source files, 20 harness classes; the merge base is now `239c408a` (S3's merge `4206cee2`). Status stays `reviewed` |
 | r5 | 2026-10-16 | S1 revision (D-33 against the real Muse) | The orchestrator's probe showed that a real `muse export` has no top-level `items`, so r4's evidence rule could never pass after a compaction. **D-33:** a Muse anchored snapshot is read like a snapshot (`history.snapshot.state.items`), MSP's "full folded state" of "every item". No export runs for evidence, and message text still never counts. Runner-up: page `view/page` from the start, whose event shape I verified on 1.0.1. Withdrawn: `item_calls`, `MUSE_EXPORT_ITEMS_DETAIL` and r3's `transcript` flow. A-28 is sharpened (echo cannot compact, so the anchored fold is checked only by probe g), EC-84 is rewritten for its false case, and §13 says what the stand-in must model. Kept: R-23's `member` keyword (accepted by the orchestrator) and every other r4 change. `base_commit` is `239c408a`. Still 47 functions, 68 exports, 10 new source files and 20 harness classes. Status stays `reviewed` |
 | r5 | 2026-10-16 | S5 re-review R-C2 | stale text corrected; no behavior change |
+| r5 | 2026-10-16 | S6 PR | finalized for review |
