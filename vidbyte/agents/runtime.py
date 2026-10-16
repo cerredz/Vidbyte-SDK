@@ -302,8 +302,8 @@ class AgentRuntime:
         finally:
             self.speed_tracker.end_step()
 
-    async def _arun_once(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: SpanContext | None = None) -> AgentResult:
-        """Run one direct model/tool attempt until isDone or a budget stop."""
+    async def _arun_once(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: SpanContext | None = None, pin_model: bool = False) -> AgentResult:
+        """Run one direct model/tool attempt until isDone or a budget stop; `pin_model` keeps it off the fallback chain."""
         run_options = dict(options or {})
         state = BaseAgentRuntimeLoopState(
             message=message,
@@ -412,7 +412,8 @@ class AgentRuntime:
             )
             call_dispatched_at = self.speed_tracker.now()
             model_call_count_before = state.model_call_count
-            state.run_state["_speed_fallback_index"] = fallback_index
+            if not pin_model:
+                state.run_state["_speed_fallback_index"] = fallback_index
             state.run_state["_speed_call_dispatched_at"] = call_dispatched_at
             try:
                 raw_result, state.model_call_count, compaction_count = await self._invoke_with_middleware(
@@ -432,7 +433,7 @@ class AgentRuntime:
                 )
             except BaseException as exc:
                 self._end_semantic_span(iteration_span, error=exc)
-                transition = self._fallback_transition(
+                transition = None if pin_model else self._fallback_transition(
                     exc,
                     index=fallback_index,
                     handle=handle,
