@@ -5,8 +5,8 @@ ROLE IN CODEBASE: The wire layer of vidbyte/harnesses/native/codex/; CodexHost a
 ARCHITECTURE NOTE: openai-codex's generated models are imported at module level, so only CodexHost.__aenter__ imports this module (D-21). Thread and turn params reuse CodexContentTranslator's settings translation, are validated with the generated params model and dumped by alias, so their wire shape comes from openai-codex itself.
 COMMON MODIFICATION PATTERNS: A new params field goes through its settings record and CodexContentTranslator first; a new record gets one CodexResponseTranslator method that reads the generated model's typed fields, never the account email.
 KNOWN EDGE CASES: CodexContentTranslator always writes config["agents"], so unless subagents are set the caller's own agents entry is put back or the key dropped (INV-30); a granular approval policy has no plain value, so it never counts as never (D-32); a goal run's result spans every physical turn it ran.
-RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.1 D-17, D-20, D-29, D-32 and D-34, and 9.2 wire translation and goal table)
-TESTS: tests/features/codex_host/test_codex_host_turns.py, tests/features/codex_host/test_codex_host_threads.py, tests/features/codex_host/test_codex_host_review_goals.py
+RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.1 D-17, D-20, D-29, D-32 and D-34, and 9.2 wire translation and goal table); docs/spec/codex-host-thread-helpers/spec.md (sections 6.1 INV-11, INV-15, INV-17, INV-20, INV-23 and 9.2 wire calls)
+TESTS: tests/features/codex_host/test_codex_host_turns.py, tests/features/codex_host/test_codex_host_threads.py, tests/features/codex_host/test_codex_host_review_goals.py, tests/features/codex_host/test_codex_host_thread_helpers.py, tests/features/codex_host/test_codex_host_goal_skills.py
 """
 
 from __future__ import annotations
@@ -39,8 +39,10 @@ from openai_codex.generated.v2_all import (
     RateLimitWindow,
     ReasoningEffort,
     ReasoningSummary,
+    SkillsListResponse,
     Thread,
     ThreadForkParams,
+    ThreadGoalGetResponse,
     ThreadItem,
     ThreadListResponse,
     ThreadResumeParams,
@@ -49,6 +51,7 @@ from openai_codex.generated.v2_all import (
     ThreadStartParams,
     ThreadStartResponse,
     ThreadStartSource,
+    ThreadTurnsListResponse,
     Turn,
     TurnStartParams,
     TurnStatus,
@@ -68,6 +71,7 @@ from vidbyte.lib.constants.codex import (
     CODEX_HOST_MINIMUM_VERSION,
     CODEX_SANDBOX_THREAD_MODE,
     CODEX_SANDBOX_TURN_POLICY,
+    CODEX_TURN_ITEMS_VIEW_FULL,
     CODEX_USAGE_PROVIDER,
 )
 from vidbyte.lib.dataclasses.codex import (
@@ -86,10 +90,15 @@ from vidbyte.lib.dataclasses.codex_host import (
     CodexRateLimitWindow,
     CodexReadiness,
     CodexReviewTarget,
+    CodexSkillInfo,
     CodexSpawnRequest,
+    CodexStoredTurn,
+    CodexThreadGoal,
     CodexThreadInfo,
     CodexThreadPage,
+    CodexThreadSummary,
     CodexTurnHandle,
+    CodexTurnPage,
     CodexTurnSnapshot,
     CodexTurnSummary,
 )
@@ -101,6 +110,7 @@ from vidbyte.lib.enums.codex import (
     CodexGoalStatus,
     CodexReviewDelivery,
     CodexSandboxReadiness,
+    CodexSkillScope,
     CodexSortDirection,
     CodexThreadSortKey,
     CodexThreadSourceKind,
@@ -272,9 +282,11 @@ class CodexParamsTranslator:
         sort: CodexThreadSortKey,
         sort_direction: CodexSortDirection,
         cursor: str,
+        limit: int | None = None,
     ) -> dict[str, Any]:
-        # Every set argument goes under its wire name; empty ones, and
-        # archived when False, are left out (section 9.2).
+        # Every set argument goes under its wire name; empty ones, a
+        # None limit, and archived when False, are left out (section
+        # 9.2), so list_codex_threads never sends a limit.
         values = {
             "cwd": cwd,
             "searchTerm": search,
@@ -283,8 +295,32 @@ class CodexParamsTranslator:
             "sortKey": sort.value,
             "sortDirection": sort_direction.value,
             "cursor": cursor,
+            "limit": limit,
         }
         return {key: value for key, value in values.items() if value}
+
+    @staticmethod
+    def thread_params(thread_id: str) -> dict[str, Any]:
+        # The params of a call that names only a thread: goal read and
+        # delete.
+        return {"threadId": thread_id}
+
+    @staticmethod
+    def turns_page(thread_id: str, cursor: str, limit: int | None) -> dict[str, Any]:
+        # One page of stored turns with every item, oldest first; the
+        # cursor and limit are sent only when set (INV-17).
+        params: dict[str, Any] = {"threadId": thread_id, "itemsView": CODEX_TURN_ITEMS_VIEW_FULL, "sortDirection": CodexSortDirection.ASC.value}
+        if cursor:
+            params["cursor"] = cursor
+        if limit is not None:
+            params["limit"] = limit
+        return params
+
+    @staticmethod
+    def skills_list(cwd: str) -> dict[str, Any]:
+        # The skills of one folder, or of the app-server's own working
+        # folder when cwd is empty (INV-23).
+        return {"cwds": [cwd]} if cwd else {}
 
     @staticmethod
     def review(thread_id: str, target: CodexReviewTarget, delivery: CodexReviewDelivery) -> dict[str, Any]:
@@ -488,6 +524,71 @@ class CodexResponseTranslator:
         # One page of threads and the cursor of the next one ("" at the
         # end).
         return CodexThreadPage(threads=tuple(self.thread_info(thread) for thread in response.data), next_cursor=response.next_cursor or "")
+
+    @staticmethod
+    def summary(thread: Thread) -> CodexThreadSummary:
+        # The cross-harness summary of a thread: an empty name is no
+        # title, and the fork parent comes before the spawn parent
+        # (INV-15).
+        return CodexThreadSummary(
+            thread_id=thread.id,
+            title=thread.name or None,
+            created_at=thread.created_at,
+            updated_at=thread.updated_at,
+            parent_thread_id=thread.forked_from_id or thread.parent_thread_id or None,
+            model=thread.model or "",
+        )
+
+    @staticmethod
+    def goal(response: ThreadGoalGetResponse) -> CodexThreadGoal | None:
+        # The thread's stored goal field by field, or None when Codex
+        # reports no goal (INV-20).
+        goal = response.goal
+        if goal is None:
+            return None
+        return CodexThreadGoal(
+            thread_id=goal.thread_id,
+            objective=goal.objective,
+            status=CodexGoalStatus(goal.status.value),
+            token_budget=goal.token_budget,
+            tokens_used=goal.tokens_used,
+            time_used_seconds=goal.time_used_seconds,
+            created_at=goal.created_at,
+            updated_at=goal.updated_at,
+        )
+
+    @staticmethod
+    def skills(response: SkillsListResponse) -> tuple[CodexSkillInfo, ...]:
+        # Every skill of every listed folder, in Codex's order (INV-23).
+        return tuple(
+            CodexSkillInfo(
+                name=skill.name,
+                description=skill.description,
+                path=skill.path.root,
+                scope=CodexSkillScope(skill.scope.value),
+                enabled=skill.enabled,
+            )
+            for entry in response.data
+            for skill in entry.skills
+        )
+
+    @staticmethod
+    def turn_page(response: ThreadTurnsListResponse) -> CodexTurnPage:
+        # Stored turns with every item, serialized by the result
+        # serializer's rule, so reasoning content never leaves (INV-17).
+        turns = tuple(
+            CodexStoredTurn(
+                turn_id=turn.id,
+                status=CodexTurnStatus(turn.status.value),
+                final_response=final_answer(turn.items) or "",
+                error_message=turn.error.message if turn.error is not None else "",
+                started_at=turn.started_at,
+                completed_at=turn.completed_at,
+                items=CodexResultSerializer.items(turn.items),
+            )
+            for turn in response.data
+        )
+        return CodexTurnPage(turns=turns, next_cursor=response.next_cursor or "")
 
     @staticmethod
     def fork_point(thread: Thread, from_turn_id: str) -> str:
