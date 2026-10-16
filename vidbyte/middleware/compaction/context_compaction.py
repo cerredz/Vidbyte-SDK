@@ -281,7 +281,10 @@ class TraceReplacementCompactionMiddleware(AgentMiddleware):
         trace_text = self._render_trace(artifact)
         messages, stats = await self._replace_history(ctx, trace_text)
         messages, stats = await self._compose(messages, stats)
-        transform = MiddlewareTransform(provider_messages=messages, metadata={"compaction": stats.mode, "scope": self.strategy_options["scope"], "before_count": stats.before_count, "after_count": stats.after_count, "trace_chars": len(trace_text), "fallback_used": False})
+        # @intent content-rewrites-count-as-compactions
+        # A composed pass reports its own counts, taken after the replacement, so report whether the history really changed.
+        changed = messages != tuple(dict(message) for message in ctx.provider_messages)
+        transform = MiddlewareTransform(provider_messages=messages, metadata={"compaction": stats.mode, "scope": self.strategy_options["scope"], "before_count": stats.before_count, "after_count": stats.after_count, "trace_chars": len(trace_text), "fallback_used": False, "changed": changed})
         return MiddlewareDecision.continue_(transform=transform)
 
     # Family A — scope/retention presets
@@ -430,7 +433,10 @@ class TraceReplacementCompactionMiddleware(AgentMiddleware):
         if self.fallback_mode is None:
             return MiddlewareDecision.continue_()
         messages, stats = await self.engine.compact_provider_messages(ctx.provider_messages, mode=self.fallback_mode, options=self.fallback_options)
-        transform = MiddlewareTransform(provider_messages=messages, metadata={"compaction": stats.mode, "fallback_used": True, "before_count": stats.before_count, "after_count": stats.after_count})
+        # @intent content-rewrites-count-as-compactions
+        # Fallback modes may rewrite tool results in place, keeping the message count.
+        changed = messages != tuple(dict(message) for message in ctx.provider_messages)
+        transform = MiddlewareTransform(provider_messages=messages, metadata={"compaction": stats.mode, "fallback_used": True, "before_count": stats.before_count, "after_count": stats.after_count, "changed": changed})
         return MiddlewareDecision.continue_(transform=transform)
 
     def _validate_options(self) -> None:
@@ -475,7 +481,10 @@ class TraceSummaryTailCompactionMiddleware(TraceReplacementCompactionMiddleware)
         context_messages = self.engine.to_context_messages(ctx.provider_messages)
         rebuilt = await self._replace_and_summarize_tail(context_messages, trace_text)
         provider = self.engine.from_context_messages(rebuilt)
-        transform = MiddlewareTransform(provider_messages=provider, metadata={"compaction": CompactionMode.REPLACE_WITH_TRACE.value, "tail_summarized": True, "before_count": len(context_messages), "after_count": len(provider)})
+        # @intent content-rewrites-count-as-compactions
+        # The trace and tail summary can replace as many messages as they add, keeping the message count.
+        changed = provider != tuple(dict(message) for message in ctx.provider_messages)
+        transform = MiddlewareTransform(provider_messages=provider, metadata={"compaction": CompactionMode.REPLACE_WITH_TRACE.value, "tail_summarized": True, "before_count": len(context_messages), "after_count": len(provider), "changed": changed})
         return MiddlewareDecision.continue_(transform=transform)
 
     async def _replace_and_summarize_tail(self, messages: Sequence[ContextMessage], trace_text: str) -> list[ContextMessage]:
