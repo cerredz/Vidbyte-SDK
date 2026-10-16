@@ -1312,6 +1312,8 @@ class BaseAgent(McpAttachableMixin):
             invoke=self._invoke_runner,
             extract_text=self._runner_output_text,
             extract_metadata=self._runner_output_metadata,
+            api_keys=self.runner_config.api_keys,
+            model_mode=self.runner_config.model_mode,
         )
         runtime = self._runtime()
         # Per-call managed primitives render for this run only; the agent's own manager stays unchanged.
@@ -1379,6 +1381,8 @@ class BaseAgent(McpAttachableMixin):
             invoke=self._invoke_runner,
             extract_text=self._runner_output_text,
             extract_metadata=self._runner_output_metadata,
+            api_keys=self.runner_config.api_keys,
+            model_mode=self.runner_config.model_mode,
         )
         result = await self._runtime().arun(
             message,

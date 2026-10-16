@@ -198,6 +198,8 @@ class IndependentCriticRuntimeAlgorithm:
             modality=ModelModality.TEXT,
             provider=self.algorithm.reviewer_provider,
             model=self.algorithm.reviewer_model or "",
+            api_keys=producer_handle.api_keys,
+            mode=producer_handle.model_mode,
         )
         return producer_handle.with_runner(runner, self.algorithm.reviewer_provider)
 
