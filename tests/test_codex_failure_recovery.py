@@ -12,20 +12,23 @@ PURPOSE:
 ROLE IN CODEBASE:
     Exercises vidbyte/agents/codex/failures.py,
     vidbyte/agents/codex/fallback.py, the attempt loop in
-    vidbyte/agents/codex/agent.py, and the metadata keys in
+    vidbyte/agents/codex/agent.py, the failed-turn error in
+    vidbyte/agents/codex/transport.py, and the metadata keys in
     vidbyte/agents/codex/result.py, against the real
     vidbyte/agents/fallback.py and vidbyte/lib/dataclasses/failure.py.
 
 ARCHITECTURE NOTE:
-    Every test runs offline. Only CodexTransport is faked; the real
+    Every test runs offline. Only CodexTransport is faked, or, for the
+    same-thread tests, the optional openai_codex SDK beneath it; the real
     AgentFallbackSettings, AgentFallback, Failure, and FailureSafety all run,
     because the defect this guards against — the two judgments disagreeing,
     or a retry on a terminal code — only appears wired together.
 
 FUNCTION INVENTORY:
     No production functions. _error() builds one classified adapter error,
-    _codex_settings() builds provider settings naming a primary model, and
-    _build_agent() wires an agent to a scripted transport.
+    _codex_settings() builds provider settings naming a primary model,
+    _build_agent() wires an agent to a scripted transport, and _fake_sdk()
+    builds an SDK whose turns fail on one model.
 
 COMMON MODIFICATION PATTERNS:
     Add a codex.* failure code, then add its row to the classification table;
@@ -49,10 +52,13 @@ from __future__ import annotations
 import asyncio
 import unittest
 from dataclasses import replace
+from types import SimpleNamespace
+from unittest import mock
 
 from vidbyte.agents.codex.agent import CodexHarnessAgent
 from vidbyte.agents.codex.failures import CodexFailureLedger, CodexFailureTranslator
 from vidbyte.agents.codex.fallback import CodexFallbackCoordinator
+from vidbyte.agents.codex.transport import CodexTransport
 from vidbyte.agents.settings.fallback import AgentFallbackSettings
 from vidbyte.lib.constants.codex import (
     CODEX_ANSWERING_MODEL_KEY,
@@ -71,8 +77,11 @@ from vidbyte.lib.dataclasses.codex import (
     CodexFallbackAttempt,
     CodexFallbackDecision,
     CodexHarnessAgentSettings,
+    CodexPrompt,
     CodexRunInput,
     CodexRunResult,
+    CodexSdkTypes,
+    CodexTextInput,
     CodexThreadSettings,
     CodexTransportRunRequest,
     CodexTurnSettings,
@@ -110,13 +119,17 @@ def _run_result() -> CodexRunResult:
 
 
 def _error(
-    code: FailureCode = FailureCode.CODEX_TURN_FAILED, cause: Exception | None = None
+    code: FailureCode = FailureCode.CODEX_TURN_FAILED,
+    cause: Exception | None = None,
+    thread_id: str = "",
 ) -> CodexAgentError:
-    # Builds one classified adapter error, optionally with a chained cause.
+    # Builds one classified adapter error, optionally with a chained cause and
+    # the native thread the failed operation ran on.
     error = CodexAgentError(
         "Codex failed the requested turn.",
         failure_code=code.value,
         operation="turn_run",
+        thread_id=thread_id,
     )
     if cause is not None:
         try:
@@ -130,10 +143,13 @@ def _codex_settings(
     turn_model: str = PRIMARY_MODEL,
     thread_model: str = "",
     model_provider: str = "",
+    ephemeral: bool = False,
 ) -> CodexAgentSettings:
     # Builds provider settings that may name a model at either lifecycle layer.
     return CodexAgentSettings(
-        thread=CodexThreadSettings(model=thread_model, model_provider=model_provider),
+        thread=CodexThreadSettings(
+            model=thread_model, model_provider=model_provider, ephemeral=ephemeral
+        ),
         turn=CodexTurnSettings(model=turn_model),
     )
 
@@ -185,6 +201,78 @@ def _build_agent(
     transport = _ScriptedTransport(failures)
     agent._transport = transport  # type: ignore[assignment]
     return agent, transport
+
+
+class _FakeThread:
+    """Native thread whose turns fail on _FakeAsyncCodex.failing_model."""
+
+    def __init__(self, thread_id: str) -> None:
+        self.id = thread_id
+
+    async def run(self, input: object, **kwargs: object) -> object:
+        # Logs which thread and model ran the turn, then fails on the scripted model.
+        model = kwargs.get("model")
+        _FakeAsyncCodex.events.append(("turn", self.id, model))
+        if model == _FakeAsyncCodex.failing_model:
+            raise RuntimeError("model overloaded")
+        return object()
+
+
+class _FakeAsyncCodex:
+    """Stands in for openai_codex.AsyncCodex, numbering each new native thread."""
+
+    events: list[tuple[str, ...]] = []
+    started = 0
+    failing_model = PRIMARY_MODEL
+
+    def __init__(self, config: object = None) -> None:
+        self._client = SimpleNamespace(_sync=None)
+
+    async def __aenter__(self) -> _FakeAsyncCodex:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    async def thread_start(self, **kwargs: object) -> _FakeThread:
+        # Opens a new thread under the next number, as the app-server does.
+        _FakeAsyncCodex.started += 1
+        thread_id = f"th_{_FakeAsyncCodex.started}"
+        _FakeAsyncCodex.events.append(("start", thread_id))
+        return _FakeThread(thread_id)
+
+    async def thread_resume(self, thread_id: str, **kwargs: object) -> _FakeThread:
+        # Reopens a saved thread by its id.
+        _FakeAsyncCodex.events.append(("resume", thread_id))
+        return _FakeThread(thread_id)
+
+
+def _fake_sdk() -> CodexSdkTypes:
+    # Builds SDK types whose constructors accept the adapter's default arguments.
+    _FakeAsyncCodex.events = []
+    _FakeAsyncCodex.started = 0
+    passthrough = SimpleNamespace
+    return CodexSdkTypes(
+        async_codex=_FakeAsyncCodex,
+        codex_config=passthrough,
+        approval_mode=str,
+        sandbox=str,
+        personality=str,
+        reasoning_effort=str,
+        reasoning_summary=mock.Mock(),
+        thread_source=str,
+        thread_start_source=str,
+        text_input=lambda text: text,
+        image_input=lambda url: url,
+        local_image_input=lambda path: path,
+        skill_input=lambda name, path: name,
+        mention_input=lambda name, path: name,
+    )
+
+
+def _serialize(thread_id: str, result: object) -> CodexRunResult:
+    # Stands in for CodexResultSerializer.from_sdk, keeping the thread the turn ran on.
+    return replace(_run_result(), thread_id=thread_id)
 
 
 class ClassificationCoverageTests(unittest.TestCase):
@@ -720,6 +808,139 @@ class AgentAttemptLoopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(agent.get_usage().calls[0].model, PRICED_BACKUP_MODEL)
         self.assertIsNotNone(direct.get_cost_usd())
         self.assertEqual(agent.get_cost_usd(), direct.get_cost_usd())
+
+
+class AgentFallbackThreadTests(unittest.IsolatedAsyncioTestCase):
+    """Covers which native thread each fallback attempt is sent to."""
+
+    async def test_a_fallback_after_a_failed_first_turn_continues_on_its_thread(
+        self,
+    ) -> None:
+        agent, transport = _build_agent(
+            failures=[_error(thread_id="th_open")],
+            fallback=AgentFallbackSettings(
+                models=[BACKUP_MODEL], fallback_on=(CodexAgentError,)
+            ),
+        )
+
+        await agent.arun(CodexRunInput.text("go"))
+
+        self.assertEqual(transport.requests[0].thread_id, "")
+        self.assertEqual(transport.requests[1].thread_id, "th_open")
+
+    async def test_a_failed_thread_start_lets_the_next_attempt_start_one(
+        self,
+    ) -> None:
+        agent, transport = _build_agent(
+            failures=[_error(FailureCode.CODEX_THREAD_START_FAILED)],
+            fallback=AgentFallbackSettings(
+                models=[BACKUP_MODEL], fallback_on=(CodexAgentError,)
+            ),
+        )
+
+        await agent.arun(CodexRunInput.text("go"))
+
+        self.assertEqual(transport.requests[1].thread_id, "")
+
+    async def test_a_held_thread_is_sent_on_every_attempt(self) -> None:
+        agent, transport = _build_agent(
+            failures=[_error(thread_id="th_held")],
+            fallback=AgentFallbackSettings(
+                models=[BACKUP_MODEL], fallback_on=(CodexAgentError,)
+            ),
+        )
+        agent.thread_id = "th_held"
+
+        await agent.arun(CodexRunInput.text("go"))
+
+        self.assertEqual(
+            [request.thread_id for request in transport.requests],
+            ["th_held", "th_held"],
+        )
+
+    async def test_an_ephemeral_thread_is_not_reopened_by_the_next_attempt(
+        self,
+    ) -> None:
+        # An ephemeral thread is not saved, so a new app-server cannot resume it.
+        agent, transport = _build_agent(
+            failures=[_error(thread_id="th_open")],
+            fallback=AgentFallbackSettings(
+                models=[BACKUP_MODEL], fallback_on=(CodexAgentError,)
+            ),
+            codex=_codex_settings(ephemeral=True),
+        )
+
+        await agent.arun(CodexRunInput.text("go"))
+
+        self.assertEqual(transport.requests[1].thread_id, "")
+
+
+class TransportFailedTurnThreadTests(unittest.IsolatedAsyncioTestCase):
+    """Covers that a failed turn names its thread, through the real transport."""
+
+    async def asyncSetUp(self) -> None:
+        patches = (
+            mock.patch.object(CodexTransport, "_load_sdk", return_value=_fake_sdk()),
+            mock.patch(
+                "vidbyte.agents.codex.transport.CodexResultSerializer.from_sdk",
+                side_effect=_serialize,
+            ),
+        )
+        for patch in patches:
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    async def test_a_turn_failing_after_thread_start_names_the_started_thread(
+        self,
+    ) -> None:
+        request = CodexTransportRunRequest(
+            thread_id="",
+            system_prompt="You are a Codex harness agent.",
+            prompt=CodexPrompt(
+                items=(CodexTextInput("go"),),
+                user_prompt="go",
+                recipient="codex-agent",
+                metadata={},
+            ),
+            settings=_codex_settings(),
+            output_schema={},
+        )
+
+        with self.assertRaises(CodexAgentError) as caught:
+            await CodexTransport().run(request)
+
+        self.assertEqual(
+            caught.exception.failure_code, FailureCode.CODEX_TURN_FAILED.value
+        )
+        self.assertEqual(caught.exception.thread_id, "th_1")
+
+    async def test_a_fresh_agent_runs_every_attempt_on_one_started_thread(
+        self,
+    ) -> None:
+        agent = CodexHarnessAgent(
+            CodexHarnessAgentSettings(
+                name="codex-agent",
+                system_prompt="You are a Codex harness agent.",
+                codex=_codex_settings(),
+                fallback=AgentFallbackSettings(
+                    models=[BACKUP_MODEL], fallback_on=(CodexAgentError,)
+                ),
+            )
+        )
+
+        reply = await agent.arun(CodexRunInput.text("go"))
+
+        self.assertEqual(reply.metadata[CODEX_ANSWERING_MODEL_KEY], BACKUP_MODEL)
+        self.assertEqual(
+            _FakeAsyncCodex.events,
+            [
+                ("start", "th_1"),
+                ("turn", "th_1", PRIMARY_MODEL),
+                ("resume", "th_1"),
+                ("turn", "th_1", BACKUP_MODEL),
+            ],
+        )
+        self.assertEqual(agent.thread_id, "th_1")
 
 
 if __name__ == "__main__":

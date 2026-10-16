@@ -293,6 +293,15 @@ class CodexHarnessAgent:
                 if next_index is None:
                     raise
                 index = next_index
+                # A failed first turn already opened a thread, so the next model
+                # continues on it rather than starting blind on a second one. An
+                # ephemeral thread is not saved, so it cannot be reopened.
+                if (
+                    not request.thread_id
+                    and exc.thread_id
+                    and not request.settings.thread.ephemeral
+                ):
+                    request = replace(request, thread_id=exc.thread_id)
                 continue
             if self._fallback.enabled:
                 attempts.append(self._fallback.attempt(index))
