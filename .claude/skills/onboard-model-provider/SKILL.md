@@ -92,14 +92,14 @@ gh api "repos/cerredz/Vidbyte-SDK/pulls?state=all&head=cerredz:feat/provider-$SL
   --jq '.[] | "#\(.number) \(.state) \(.merged_at // "unmerged")"'; echo "prs exit $?"
 git ls-remote --exit-code --heads origin "refs/heads/feat/provider-$SLUG"; echo "remote-branch exit $?"
 git show-ref --verify --quiet "refs/heads/feat/provider-$SLUG"; echo "local-branch exit $?"
-test -e "$WORKTREE" || test -e "$WORKTREE-evidence"; echo "paths exit $?"
+test -e "$WORKTREE" || test -e "$WORKTREE-evidence" || test -e "$WORKTREE-main"; echo "paths exit $?"
 ```
 
    The skip dispositions, recorded in the ledger as written:
    - `member`: the slug is among the `ModelProvider` values on main.
    - `closed-unmerged #n`, `open-pr #n` or `merged #n`: some PR, in any state, has the head `cerredz:feat/provider-<slug>`. With several, a closed unmerged PR wins over an open one, and an open one over a merged one. A closed unmerged PR is the person's rejection, so that vendor is skipped forever.
    - `remote-branch`: `ls-remote` exits 0. Exit 2 means the branch is absent; any other exit stops the session with `NETWORK_BLOCKED - github.com <exit>`.
-   - `local-branch`: the local branch exists (`show-ref` exits 0), or the worktree path or its `-evidence` path exists (`paths exit 0`), left by an earlier STOP or an interrupted session. They are never overwritten.
+   - `local-branch`: the local branch exists (`show-ref` exits 0), or the worktree path, its `-evidence` path or its `-main` twin exists (`paths exit 0`), left by an earlier STOP or an interrupted session. They are never overwritten.
 
    With no vendor left, stop with `NO_CANDIDATE`.
 3. Create the worktree for the selected vendor. This is the pass's first write: a new branch from the fetched `origin/main`, never one that resets or forces an existing branch. The SHA it prints is the pass's `<base>`:
@@ -177,7 +177,7 @@ git worktree remove --force "$WORKTREE" && git branch -D "feat/provider-$SLUG" &
 ```
 
   Each step runs only after the one before it succeeded, so a failed remove keeps the branch and the evidence. When `cleanup exit` is not 0, leave what is left for the person, keep the vendor's recorded outcome and continue; the next session skips that vendor as `local-branch` until it is gone.
-- `PROOF_FAILED`, `PUBLISH_FAILED` and `RESULT_UNVERIFIED` keep the worktree, its `-evidence` directory and the branch, so no unpushed work is lost; the STOP line names the kept worktree. The next session skips that vendor as `local-branch` until the person runs the cleanup block above, after which it is reconsidered. After `PUBLISH_FAILED pr` the pushed branch also stays on GitHub (`remote-branch`) until the person deletes it or opens its PR by hand.
+- `PROOF_FAILED`, `PUBLISH_FAILED` and `RESULT_UNVERIFIED` keep the worktree, its `-evidence` directory and the branch, so no unpushed work is lost; the STOP line names the kept worktree. The next session skips that vendor as `local-branch` until the person runs the cleanup block above, and `git worktree remove --force "$WORKTREE-main"` when that twin exists, after which it is reconsidered. After `PUBLISH_FAILED pr` the pushed branch also stays on GitHub (`remote-branch`) until the person deletes it or opens its PR by hand.
 - A session the person interrupts leaves the worktree and branch of its last pass, and prints no STOP line; the next session skips that vendor as `local-branch`.
 
 ## Output
