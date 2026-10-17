@@ -60,6 +60,8 @@ TESTS:
 
 from __future__ import annotations
 
+import importlib
+
 from vidbyte.lib.util.call_options import SupportedKwargs
 from vidbyte.lib.util.credential_keys import CredentialKeyPolicy
 from vidbyte.lib.util.jsonl import AppendOnlyJsonl
@@ -82,6 +84,4 @@ def __getattr__(name: str) -> object:
     # first access keeps every import order working.
     if name not in _LAZY_EXPORTS:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    from vidbyte.lib.util.fulltext import FullTextIndex
-
-    return FullTextIndex
+    return getattr(importlib.import_module(_LAZY_EXPORTS[name]), name)
