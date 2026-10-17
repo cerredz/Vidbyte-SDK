@@ -3,7 +3,7 @@
 STATUS: BLOCKED
 STAGE: S3 implementer
 BRANCH: feat/codex-host-first-class (worktree `C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-codex-host-first-class`)
-START: c8c5e128 (S2 tests written) · HEAD: see the end of this report
+START: c8c5e128 (S2 tests written) · last code commit: 2f31b1fc · this report: ef4cddbe and the commit after it
 PUSHED: no · PR: none (held until the gate is green; see "Why nothing was pushed")
 
 ## 1. What was built
