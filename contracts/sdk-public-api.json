@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "source": {"repository": "cerredz/Vidbyte-SDK", "commit": "9eca4a33ddb5ea1a21c07f840e556487a8770e19", "generator": "scripts/generate-sdk-public-api.py"},
+  "source": {"repository": "cerredz/Vidbyte-SDK", "commit": "698f913b594f9cbeac6513d4883c0e4f0f1f4175", "generator": "scripts/generate-sdk-public-api.py"},
   "distribution": "vidbyte-sdk",
   "version": "0.3.0",
   "exports": [
@@ -29,6 +29,11 @@
     "AgentSpeedTracker",
     "AgentStage",
     "AgentStopReason",
+    "AgentSwarm",
+    "AgentSwarmEventKind",
+    "AgentSwarmMember",
+    "AgentSwarmSettings",
+    "AgentSwarmStopReason",
     "AgentTransfer",
     "AgentTransferError",
     "AgentType",
