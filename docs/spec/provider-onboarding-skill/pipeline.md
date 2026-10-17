@@ -17,7 +17,7 @@ started: 2026-10-15 18:41
 | S1 spec + review | done | 2026-10-15 19:10 | 2026-10-16 17:00 | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | spec r3 approved @014de415 (r1 SOUND WITH FIXES 1B/8M/4m; r2 SOUND WITH FIXES 1B/4M/2m; all Blockers fixed) |
 | S2 tests | done | 2026-10-16 17:05 | 2026-10-16 18:00 | reports/S2-test-author.md | 46 tests in tests/features/onboard_model_provider_skill/ (5 files), red confirmed; S2_HEAD=8e9b8b7f |
 | S3 implement | done | 2026-10-16 18:10 | 2026-10-16 22:00 | reports/S3-implementer.md | S3_HEAD=32ca7991; draft PR https://github.com/cerredz/Vidbyte-SDK/pull/1175; 46/46 green; SDK-LINT PASS; source stage 1 failed (known-red harness test, proved on base + origin/main probes); package stage CI passed; budget 2 new + 1 mod / 2+1 |
-| S4 adversarial review | pending | | | | |
+| S4 adversarial review | done | 2026-10-16 22:00 | 2026-10-16 23:10 | reports/S4-review-{conformance,conventions,engineering}.md, reports/S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; confirmed 3 Blockers / 5 Majors / 10 Minors; refuted 1, downgraded 1 |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
@@ -46,6 +46,11 @@ started: 2026-10-15 18:41
 - 2026-10-16 17:00 — The harness flagged "bypass-permissions" in the S1 author's output: it is spec content (SKILL.md will document starting `claude --add-dir <parent> --permission-mode auto`, or bypassPermissions only inside an isolated container/VM, as the walk-away prerequisite). Not an instruction to the orchestrator; to be surfaced to the user as a fact about the skill.
 
 - 2026-10-16 18:05 — S2 reported spec contradictions (git stash literal, export PYTHONPATH literal, row padding, interpreter definition, AC-15 scope, bare push spans). Resolved before S3 through the same S1 author in Revision mode → spec r4 @83626fce (status kept approved, not a review round; §16 rows s2-1…s2-7). Tests unchanged (`git diff 8e9b8b7f..HEAD -- tests` empty). Then set `status: tests-written` @ffeac1b5.
+
+- 2026-10-16 22:30 — The previous process exited mid-S4: the conformance and engineering reviewers were resumed via SendMessage (same agents), not relaunched; not counted against any cap.
+- 2026-10-16 23:10 — S4 verifier: MERGEABLE AFTER FIXES — 3 Blockers (R-1, R-2, R-3), 5 Majors (R-4…R-8), 10 Minors; 1 refuted, 1 downgraded. Routing:
+  - R-1, R-2, R-4, R-5, R-6, R-7 (skill text) + `trivial` Minors → S5 repair agent. The repair agent may amend ONLY the spec text those fixes cite (D-15/§11 for R-2, D-11/INV-9 for R-7, D-24 if R-V4 is taken), recorded as a §16/§17 r6 row, because the verifier tied each fix to its spec decision; it may not touch tests.
+  - R-3 (Blocker: four S2 tests — S5, X8, X9, A5 — pass with the defect their test-plan row claims to catch) and R-8 (Major: unpinned C9 Bearer assertion, back-pressure union, "example key alone is not enough") are TEST changes. Granted to the S2 test author only (the one agent allowed to write tests; no other agent's test diff is accepted), AFTER the repair agent's text edits, so the new assertions pin the final wording. Grant is strengthen-only: add assertions/tests, never weaken or delete; each new assertion must be shown red on the matching mutation (s4ver/mut2.py, s4eng/mut.py) and green on the real files. Why grant: a test that cannot fail for the defect its test-plan row claims is a test contradicting its spec ID (AC/INV coverage claim) — the playbook's grant condition. The new S2 anchor SHA replaces S2_HEAD for later test-diff checks.
 
 ## User replies (verbatim)
 - 2026-10-15 21:32 — (relayed by the parent session; changes a settled decision) The user was asked how to schedule the 24/7 cloud routine and answered: "dont add as routine, just explain in system prompt, should be good enough for now", and "no cloud routine".
