@@ -1,17 +1,18 @@
 """FILE: vidbyte/lib/dataclasses/codex_host.py
 
-PURPOSE: Defines the twenty validated records CodexHost takes and returns: the spawn request and goal, turn handles and snapshots, readiness and rate limits, model and thread listings, usage, review targets, the problem record every failure carries, and the thread-helper records (thread summaries, the stored goal, skill listings, and stored turns with their page).
+PURPOSE: Defines the twenty-six validated records CodexHost takes and returns: the spawn request and goal, turn handles and snapshots, readiness and rate limits, model and thread listings with their service tiers, usage, review targets, the problem record every failure carries, the thread-helper records (thread summaries, the stored goal, skill listings, and stored turns with their page), and the approval and user-input requests an approval_handler receives with the answers it returns.
 ROLE IN CODEBASE: The data layer under vidbyte/harnesses/native/codex/ (the host and its translators) and vidbyte/tools/builtins/codex/ (the twenty-six tools), which build and read these records; the Codex settings, input, result and usage records they hold come from vidbyte/lib/dataclasses/codex.py.
 ARCHITECTURE NOTE: Every record is frozen with slots and checks itself in __post_init__, raising ConfigurationError that names the field; the one exception is a USER approvals reviewer, refused with the CodexAgentError the host's tools report (D-16). Behaviour that acts on these records lives in the host, never here, and every runtime import stays inside vidbyte.lib.
-COMMON MODIFICATION PATTERNS: Add a field with its check in the same record's __post_init__, reusing the codex.py helpers; a new record is added here and to the alphabetical __all__.
-KNOWN EDGE CASES: bool is an int, so every integer check refuses bool first; NaN and infinity fail the finite checks; vendor text such as plan types and reasoning efforts stays str because Codex owns those open sets.
-RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.5 and 9.1); docs/spec/codex-host-thread-helpers/spec.md (sections 8.5 and 9.1)
-TESTS: tests/features/codex_host/test_codex_host_records.py and tests/features/codex_host/test_codex_host_helper_surface.py
+COMMON MODIFICATION PATTERNS: Add a field with its check in the same record's __post_init__, reusing the codex.py helpers; a new record is added here and to the alphabetical __all__. A new routed server request adds one parse branch to CodexServerRequest.from_params; its wire encoding lives in CodexParamsTranslator, because a lib record exposes no dict encoder.
+KNOWN EDGE CASES: bool is an int, so every integer check refuses bool first; NaN and infinity fail the finite checks; vendor text such as plan types, reasoning efforts and service tier ids stays str because Codex owns those open sets. CodexServerRequest.from_params reads an absent and a null optional field alike, and keeps only the string decisions Codex offers, so available_decisions is None when Codex sent no list and a tuple, maybe empty, when it sent one.
+RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.5 and 9.1); docs/spec/codex-host-thread-helpers/spec.md (sections 8.5 and 9.1); docs/spec/codex-host-hardening/spec.md (sections 8.5 and 9.1)
+TESTS: tests/features/codex_host/test_codex_host_records.py, tests/features/codex_host/test_codex_host_helper_surface.py and tests/features/codex_host/test_codex_host_hardening_records.py
 """
 
 from __future__ import annotations
 
 import math
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -21,6 +22,10 @@ from vidbyte.lib.constants.codex import (
     CODEX_HOST_MIN_TOKEN_LIMIT,
     CODEX_HOST_USER_REVIEWER_TEXT,
     CODEX_THREAD_SUMMARY_HARNESS,
+)
+from vidbyte.lib.constants.codex_host import (
+    CODEX_HOST_NETWORK_ACCESS_MESSAGE,
+    CODEX_HOST_WRITABLE_ROOTS_MESSAGE,
 )
 from vidbyte.lib.dataclasses.codex import (
     CodexItem,
@@ -39,13 +44,17 @@ from vidbyte.lib.dataclasses.codex import (
 from vidbyte.lib.dataclasses.security import PermissionPolicy
 from vidbyte.lib.enums.codex import (
     CodexAccountKind,
+    CodexApprovalDecision,
     CodexApprovalMode,
     CodexApprovalPolicy,
     CodexApprovalsReviewer,
+    CodexCommandApprovalKind,
     CodexGoalStatus,
     CodexHostOperation,
     CodexReviewTargetKind,
+    CodexSandbox,
     CodexSandboxReadiness,
+    CodexServerRequestKind,
     CodexSkillScope,
     CodexThreadStatus,
     CodexTurnStatus,
@@ -138,6 +147,13 @@ class CodexSpawnRequest:
     or that the model type rejects, gets a schema problem and keeps its raw
     text. A type that is not a Pydantic model, or a mapping that cannot be
     serialized to JSON, is refused before any request.
+
+    ``turn_service_tier`` picks a service tier for this turn only, and the
+    host checks it against the tiers ``list_codex_models`` reports for the
+    model. ``network_access`` and ``writable_roots`` change the turn's
+    sandbox: network access needs a READ_ONLY or WORKSPACE_WRITE
+    ``turn.sandbox``, and the extra writable folders, each an absolute
+    path, need WORKSPACE_WRITE.
     """
 
     prompt: str | CodexRunInput = ""
@@ -155,6 +171,9 @@ class CodexSpawnRequest:
     max_output_tokens: int | None = None
     timeout_seconds: float | None = None
     name: str = ""
+    turn_service_tier: str = ""
+    network_access: bool | None = None
+    writable_roots: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         # Check each group of fields in turn, so a bad request fails
@@ -163,6 +182,7 @@ class CodexSpawnRequest:
         self._reject_bad_settings()
         self._reject_bad_approvals()
         self._reject_bad_tools()
+        self._reject_bad_sandbox_fields()
         self._reject_bad_goal()
 
         # The caps are Vidbyte's own interrupts, so they must be real
@@ -188,6 +208,7 @@ class CodexSpawnRequest:
         _reject_wrong_type("Codex spawn request", "subagents", self.subagents, CodexSubagentSettings, optional=True)
         _optional_text("Codex spawn request", "developer_instructions", self.developer_instructions)
         _optional_text("Codex spawn request", "name", self.name)
+        _optional_text("Codex spawn request", "turn_service_tier", self.turn_service_tier)
 
     def _reject_bad_approvals(self) -> None:
         # @intent refuse-unanswerable-approvals
@@ -223,6 +244,22 @@ class CodexSpawnRequest:
             raise ConfigurationError("Codex spawn request disabled_plugin_ids must be None or a tuple of non-empty strings.")
         if self.output_schema is not None and not isinstance(self.output_schema, (type, Mapping)):
             raise ConfigurationError("Codex spawn request output_schema must be None, a type or a mapping.")
+
+    def _reject_bad_sandbox_fields(self) -> None:
+        # @intent sandbox-overrides-need-the-sandbox-they-change
+        # Both fields are sent inside the turn's sandbox policy, and only
+        # some policies have them, so a sandbox without the setting is
+        # refused here rather than by Codex mid-run (INV-37).
+        if self.network_access is not None:
+            _require_bool("Codex spawn request", "network_access", self.network_access)
+            if self.turn.sandbox not in (CodexSandbox.READ_ONLY, CodexSandbox.WORKSPACE_WRITE):
+                raise ConfigurationError(CODEX_HOST_NETWORK_ACCESS_MESSAGE.format(sandbox=self.turn.sandbox.name), details={"field": "network_access"})
+        roots = self.writable_roots
+        if roots == ():
+            return
+        bad_roots = not isinstance(roots, tuple) or any(not isinstance(root, str) or not root or not os.path.isabs(root) for root in roots)
+        if bad_roots or self.turn.sandbox is not CodexSandbox.WORKSPACE_WRITE:
+            raise ConfigurationError(CODEX_HOST_WRITABLE_ROOTS_MESSAGE, details={"field": "writable_roots"})
 
     def _reject_bad_goal(self) -> None:
         # A goal is its own run: it replaces the prompt, and Codex keeps
@@ -345,8 +382,21 @@ class CodexRateLimits:
 
 
 @dataclass(frozen=True, slots=True)
+class CodexServiceTier:
+    """One service tier a Codex model offers, such as fast or flex, with its label and description."""
+
+    tier_id: str
+    name: str = ""
+    description: str = ""
+
+    def __post_init__(self) -> None:
+        _require_text("Codex service tier", "tier_id", self.tier_id)
+        _reject_non_str("Codex service tier", {"name": self.name, "description": self.description})
+
+
+@dataclass(frozen=True, slots=True)
 class CodexModelInfo:
-    """One model Codex offers: its ids, labels, default and supported reasoning efforts."""
+    """One model Codex offers: its ids, labels, default and supported reasoning efforts, and its service tiers."""
 
     model_id: str
     model: str
@@ -356,14 +406,18 @@ class CodexModelInfo:
     is_default: bool
     default_effort: str
     efforts: tuple[str, ...]
+    service_tiers: tuple[CodexServiceTier, ...] = ()
+    default_service_tier: str = ""
 
     def __post_init__(self) -> None:
         _require_text("Codex model info", "model_id", self.model_id)
         _require_text("Codex model info", "model", self.model)
-        _reject_non_str("Codex model info", {"display_name": self.display_name, "description": self.description, "default_effort": self.default_effort})
+        text = {"display_name": self.display_name, "description": self.description, "default_effort": self.default_effort, "default_service_tier": self.default_service_tier}
+        _reject_non_str("Codex model info", text)
         _require_bool("Codex model info", "hidden", self.hidden)
         _require_bool("Codex model info", "is_default", self.is_default)
         _reject_bad_tuple("Codex model info", "efforts", self.efforts, str)
+        _reject_bad_tuple("Codex model info", "service_tiers", self.service_tiers, CodexServiceTier)
 
 
 @dataclass(frozen=True, slots=True)
@@ -592,6 +646,189 @@ class CodexTurnPage:
         _reject_non_str("Codex turn page", {"next_cursor": self.next_cursor})
 
 
+@dataclass(frozen=True, slots=True)
+class CodexUserInputOption:
+    """One answer Codex offers for a user-input question: its label and what it means."""
+
+    label: str
+    description: str = ""
+
+    def __post_init__(self) -> None:
+        _require_text("Codex user input option", "label", self.label)
+        _reject_non_str("Codex user input option", {"description": self.description})
+
+
+@dataclass(frozen=True, slots=True)
+class CodexUserInputQuestion:
+    """One question Codex asks the user mid-turn, with the answers it offers, if any."""
+
+    question_id: str
+    header: str
+    question: str
+    options: tuple[CodexUserInputOption, ...] = ()
+    is_other: bool = False
+    is_secret: bool = False
+
+    def __post_init__(self) -> None:
+        # @intent a-secret-question-is-only-marked-here
+        # is_secret tells the handler to hide what the user types; the
+        # record only carries the flag and never logs the question.
+        _require_text("Codex user input question", "question_id", self.question_id)
+        _reject_non_str("Codex user input question", {"header": self.header, "question": self.question})
+        _reject_bad_tuple("Codex user input question", "options", self.options, CodexUserInputOption)
+        _require_bool("Codex user input question", "is_other", self.is_other)
+        _require_bool("Codex user input question", "is_secret", self.is_secret)
+
+
+@dataclass(frozen=True, slots=True)
+class CodexServerRequest:
+    """One approval or user-input request Codex sends mid-turn, as an approval_handler receives it.
+
+    ``available_decisions`` is None when Codex sent no list, and otherwise
+    holds the decisions Codex offers that this release knows, in Codex's
+    order, so an empty tuple means only decline or cancel can answer it.
+    ``questions`` is filled only for a USER_INPUT request.
+    """
+
+    kind: CodexServerRequestKind
+    thread_id: str
+    turn_id: str
+    item_id: str
+    approval_kind: CodexCommandApprovalKind = CodexCommandApprovalKind.COMMAND
+    approval_id: str = ""
+    environment_id: str = ""
+    started_at_ms: int = 0
+    reason: str = ""
+    command: str = ""
+    cwd: str = ""
+    grant_root: str = ""
+    available_decisions: tuple[CodexApprovalDecision, ...] | None = None
+    questions: tuple[CodexUserInputQuestion, ...] = ()
+    is_blocking: bool = False
+
+    def __post_init__(self) -> None:
+        _reject_wrong_type("Codex server request", "kind", self.kind, CodexServerRequestKind)
+        for field_name, value in {"thread_id": self.thread_id, "turn_id": self.turn_id, "item_id": self.item_id}.items():
+            _require_text("Codex server request", field_name, value)
+        _reject_wrong_type("Codex server request", "approval_kind", self.approval_kind, CodexCommandApprovalKind)
+        text = {"approval_id": self.approval_id, "environment_id": self.environment_id, "reason": self.reason, "command": self.command, "cwd": self.cwd, "grant_root": self.grant_root}
+        _reject_non_str("Codex server request", text)
+        _require_non_negative_int("Codex server request", "started_at_ms", self.started_at_ms)
+        if self.available_decisions is not None:
+            _reject_bad_tuple("Codex server request", "available_decisions", self.available_decisions, CodexApprovalDecision)
+        _reject_bad_tuple("Codex server request", "questions", self.questions, CodexUserInputQuestion)
+        if self.questions and self.kind is not CodexServerRequestKind.USER_INPUT:
+            raise ConfigurationError("Codex server request questions belong only to a USER_INPUT request.")
+        _require_bool("Codex server request", "is_blocking", self.is_blocking)
+
+    @classmethod
+    def from_params(cls, kind: CodexServerRequestKind, params: Mapping[str, Any] | None) -> CodexServerRequest:
+        """Read one routed server request from Codex's camelCase wire params; a malformed one raises ConfigurationError."""
+        # @intent read-a-server-request-as-codex-sends-it
+        # Codex leaves a key out and sends null to mean the same thing,
+        # so both read as the record's default, and unknown keys are
+        # ignored. The record's own checks then refuse a missing id or a
+        # value of the wrong type, which the router answers by default.
+        if not isinstance(params, Mapping):
+            raise ConfigurationError("Codex server request params must be a mapping.")
+        sent = {key: value for key, value in params.items() if value is not None}
+
+        # Keep only the decisions this release can answer with, and read
+        # each question with its options.
+        decisions = cls._wire_decisions(sent.get("availableDecisions"))
+        questions = sent.get("questions", [])
+        if not isinstance(questions, list):
+            raise ConfigurationError("Codex server request questions must be a list.")
+        return cls(
+            kind=kind,
+            thread_id=sent.get("threadId", ""),
+            turn_id=sent.get("turnId", ""),
+            item_id=sent.get("itemId", ""),
+            approval_kind=cls._wire_approval_kind(sent.get("kind", CodexCommandApprovalKind.COMMAND)),
+            approval_id=sent.get("approvalId", ""),
+            environment_id=sent.get("environmentId", ""),
+            started_at_ms=sent.get("startedAtMs", 0),
+            reason=sent.get("reason", ""),
+            command=sent.get("command", ""),
+            cwd=sent.get("cwd", ""),
+            grant_root=sent.get("grantRoot", ""),
+            available_decisions=decisions,
+            questions=tuple(cls._wire_question(raw) for raw in questions),
+            is_blocking=sent.get("isBlocking", False),
+        )
+
+    @staticmethod
+    def _wire_approval_kind(value: object) -> CodexCommandApprovalKind:
+        # An unknown kind is a parse failure, so the request is declined
+        # rather than read as a plain command (EC-4).
+        try:
+            return CodexCommandApprovalKind(value)
+        except ValueError:
+            raise ConfigurationError("Codex server request approval_kind must be command or writeStdin.") from None
+
+    @staticmethod
+    def _wire_decisions(value: object) -> tuple[CodexApprovalDecision, ...] | None:
+        # No list stays None; a list keeps its known string decisions in
+        # Codex's order and drops object and unknown ones (EC-5).
+        if value is None:
+            return None
+        if not isinstance(value, list):
+            raise ConfigurationError("Codex server request available_decisions must be a list.")
+        known = {member.value: member for member in CodexApprovalDecision}
+        return tuple(known[item] for item in value if isinstance(item, str) and item in known)
+
+    @staticmethod
+    def _wire_question(raw: object) -> CodexUserInputQuestion:
+        # A question and its options read absent and null values as the
+        # record defaults; a missing id or label fails the record checks.
+        if not isinstance(raw, Mapping):
+            raise ConfigurationError("Codex server request questions must hold objects.")
+        sent = {key: value for key, value in raw.items() if value is not None}
+        options = sent.get("options", [])
+        if not isinstance(options, list) or any(not isinstance(option, Mapping) for option in options):
+            raise ConfigurationError("Codex user input question options must be a list of objects.")
+        choices = [{key: value for key, value in option.items() if value is not None} for option in options]
+        return CodexUserInputQuestion(
+            question_id=sent.get("id", ""),
+            header=sent.get("header", ""),
+            question=sent.get("question", ""),
+            options=tuple(CodexUserInputOption(label=choice.get("label", ""), description=choice.get("description", "")) for choice in choices),
+            is_other=sent.get("isOther", False),
+            is_secret=sent.get("isSecret", False),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class CodexUserInputAnswer:
+    """The user's answers to one question, named by the question's id."""
+
+    question_id: str
+    answers: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        _require_text("Codex user input answer", "question_id", self.question_id)
+        _reject_bad_tuple("Codex user input answer", "answers", self.answers, str)
+
+
+@dataclass(frozen=True, slots=True)
+class CodexServerAnswer:
+    """An approval_handler's answer to one server request: a decision, and for user input its answers."""
+
+    decision: CodexApprovalDecision
+    answers: tuple[CodexUserInputAnswer, ...] = ()
+
+    def __post_init__(self) -> None:
+        _reject_wrong_type("Codex server answer", "decision", self.decision, CodexApprovalDecision)
+        _reject_bad_tuple("Codex server answer", "answers", self.answers, CodexUserInputAnswer)
+        # Each question is answered at most once, and answers only go
+        # with ACCEPT, because declining or cancelling sends none.
+        question_ids = [answer.question_id for answer in self.answers]
+        if len(set(question_ids)) != len(question_ids):
+            raise ConfigurationError("Codex server answer answers must answer each question at most once.")
+        if self.answers and self.decision is not CodexApprovalDecision.ACCEPT:
+            raise ConfigurationError("Codex server answer answers go only with the ACCEPT decision.")
+
+
 __all__ = [
     "CodexGoal",
     "CodexModelInfo",
@@ -600,6 +837,9 @@ __all__ = [
     "CodexRateLimits",
     "CodexReadiness",
     "CodexReviewTarget",
+    "CodexServerAnswer",
+    "CodexServerRequest",
+    "CodexServiceTier",
     "CodexSkillInfo",
     "CodexSpawnRequest",
     "CodexStoredTurn",
@@ -613,4 +853,7 @@ __all__ = [
     "CodexTurnSnapshot",
     "CodexTurnSummary",
     "CodexTurnUsage",
+    "CodexUserInputAnswer",
+    "CodexUserInputOption",
+    "CodexUserInputQuestion",
 ]
