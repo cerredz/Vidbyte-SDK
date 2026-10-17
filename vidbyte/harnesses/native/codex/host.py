@@ -204,7 +204,7 @@ class CodexHost:
         self._registry = CodexTurnRegistry(loop)
         self._connection = CodexConnection(self._params.client_config(binary), loop)
         self._connected = True
-        self._preflight = CodexPreflight(self._connection, self._params, self._responses, self._registry)
+        self._preflight = CodexPreflight(self._connection, self._params, self._responses, self._registry, approvals_answered=False)
         # The thread helpers share the host's parts; the run wrappers
         # go through the host's own public functions.
         self._threads = CodexThreadHelpers(self._connection, self._params, self._responses, self._preflight, self._registry)
@@ -251,14 +251,16 @@ class CodexHost:
             await connection.close()
 
     async def check_codex_ready(self) -> CodexReadiness:
-        # Read the account and, on Windows, the sandbox readiness; every
-        # problem found is reported in the result, never raised (AC-22).
+        # Read the account, the usage allowance through the preflight's
+        # own read and, on Windows, the sandbox readiness; every problem
+        # found is reported, never raised (AC-22, hardening INV-24).
         operation = CodexHostOperation.CHECK_CODEX_READY
         self._guard(operation, talks=True)
         connection = self._connection
         account = await connection.call(operation, CODEX_ACCOUNT_READ_METHOD, connection.client.account_read)
+        usage = await self._preflight.usage_problem(operation)
         sandbox = await self._preflight.sandbox_status(operation)
-        return self._responses.readiness(self._version, account, sandbox)
+        return self._responses.readiness(self._version, account, usage, sandbox)
 
     async def get_codex_rate_limits(self) -> CodexRateLimits:
         # One read of the account's usage windows, with the SDK's
@@ -354,6 +356,7 @@ class CodexHost:
         # can apply before anything is sent.
         forking = CodexForkRequest(thread_id=thread_id, from_turn_id=from_turn_id, exclude_turns=exclude_turns, overrides=overrides or CodexSpawnRequest())
         request = forking.overrides
+        self._preflight.reject_user_reviewer(operation, request)
         # Read the thread with its turns and pick the fork point
         # locally, so a wrong point stops before thread/fork.
         source = await self._preflight.require_thread(operation, thread_id, include_turns=True)
@@ -616,6 +619,7 @@ class CodexHost:
         operation = CodexHostOperation.RUN_CODEX_GOAL
         self._guard(operation, talks=True)
         goal_run = CodexGoalRunRequest(goal=CodexGoal(objective=objective, token_budget=token_budget), request=request or CodexSpawnRequest())
+        self._preflight.reject_user_reviewer(operation, goal_run.request)
         return await self._skills.run_goal(operation, goal_run)
 
     async def list_codex_skills(self, cwd: str = "") -> tuple[CodexSkillInfo, ...]:
@@ -636,7 +640,9 @@ class CodexHost:
         # recorded that item (INV-24, INV-25, INV-34).
         operation = CodexHostOperation.RUN_CODEX_SKILL
         self._guard(operation, talks=True)
-        return await self._skills.run_skill(CodexSkillRunRequest(operation=operation, skill=skill, prompt=prompt, request=request or CodexSpawnRequest()))
+        skill_run = CodexSkillRunRequest(operation=operation, skill=skill, prompt=prompt, request=request or CodexSpawnRequest())
+        self._preflight.reject_user_reviewer(operation, skill_run.request)
+        return await self._skills.run_skill(skill_run)
 
     async def run_codex_openai_docs(self, question: str, request: CodexSpawnRequest | None = None) -> CodexTurnHandle:
         # @intent the-docs-run-is-the-openai-docs-skill-run
@@ -644,7 +650,9 @@ class CodexHost:
         # answers from the official OpenAI documentation (INV-26).
         operation = CodexHostOperation.RUN_CODEX_OPENAI_DOCS
         self._guard(operation, talks=True)
-        return await self._skills.run_skill(CodexSkillRunRequest(operation=operation, skill=CODEX_OPENAI_DOCS_SKILL_NAME, prompt=question, request=request or CodexSpawnRequest()))
+        skill_run = CodexSkillRunRequest(operation=operation, skill=CODEX_OPENAI_DOCS_SKILL_NAME, prompt=question, request=request or CodexSpawnRequest())
+        self._preflight.reject_user_reviewer(operation, skill_run.request)
+        return await self._skills.run_skill(skill_run)
 
     def _guard(self, operation: CodexHostOperation, *, talks: bool) -> None:
         # Every method needs an open host and the loop that opened it; a

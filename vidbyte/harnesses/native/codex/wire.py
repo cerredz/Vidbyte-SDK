@@ -512,12 +512,13 @@ class CodexResponseTranslator:
             return CodexErrorMapper.problem(FailureCode.CODEX_SANDBOX_NOT_READY, f"The Codex Windows sandbox reports {readiness.value}.")
         return None
 
-    def readiness(self, version: str, response: GetAccountResponse, sandbox: CodexSandboxReadiness) -> CodexReadiness:
+    def readiness(self, version: str, response: GetAccountResponse, usage: CodexProblem | None, sandbox: CodexSandboxReadiness) -> CodexReadiness:
         # The account maps to its kind and ChatGPT plan only; the email
         # is never read (INV-9). Each problem found is reported, not
-        # raised.
+        # raised, in the order sign-in, usage, sandbox; the usage
+        # problem is the preflight's own (hardening INV-24, D-25).
         account = response.account.root if response.account is not None else None
-        problems = tuple(problem for problem in (self.sign_in_problem(response), self.sandbox_problem(sandbox)) if problem is not None)
+        problems = tuple(problem for problem in (self.sign_in_problem(response), usage, self.sandbox_problem(sandbox)) if problem is not None)
         return CodexReadiness(
             ready=not problems,
             version=version,

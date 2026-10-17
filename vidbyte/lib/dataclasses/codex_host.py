@@ -2,7 +2,7 @@
 
 PURPOSE: Defines the twenty-six validated records CodexHost takes and returns: the spawn request and goal, turn handles and snapshots, readiness and rate limits, model and thread listings with their service tiers, usage, review targets, the problem record every failure carries, the thread-helper records (thread summaries, the stored goal, skill listings, and stored turns with their page), and the approval and user-input requests an approval_handler receives with the answers it returns.
 ROLE IN CODEBASE: The data layer under vidbyte/harnesses/native/codex/ (the host and its translators) and vidbyte/tools/builtins/codex/ (the twenty-six tools), which build and read these records; the Codex settings, input, result and usage records they hold come from vidbyte/lib/dataclasses/codex.py.
-ARCHITECTURE NOTE: Every record is frozen with slots and checks itself in __post_init__, raising ConfigurationError that names the field; the one exception is a USER approvals reviewer, refused with the CodexAgentError the host's tools report (D-16). Behaviour that acts on these records lives in the host, never here, and every runtime import stays inside vidbyte.lib.
+ARCHITECTURE NOTE: Every record is frozen with slots and checks itself in __post_init__, raising ConfigurationError that names the field. A USER approvals reviewer builds, because only the host knows whether an approval_handler can answer it; CodexPreflight refuses it on a host without one (hardening INV-20, D-5). Behaviour that acts on these records lives in the host, never here, and every runtime import stays inside vidbyte.lib.
 COMMON MODIFICATION PATTERNS: Add a field with its check in the same record's __post_init__, reusing the codex.py helpers; a new record is added here and to the alphabetical __all__. A new routed server request adds one parse branch to CodexServerRequest.from_params; its wire encoding lives in CodexParamsTranslator, because a lib record exposes no dict encoder.
 KNOWN EDGE CASES: bool is an int, so every integer check refuses bool first; NaN and infinity fail the finite checks; vendor text such as plan types, reasoning efforts and service tier ids stays str because Codex owns those open sets. CodexServerRequest.from_params reads an absent and a null optional field alike, and keeps only the string decisions Codex offers, so available_decisions is None when Codex sent no list and a tuple, maybe empty, when it sent one. A goal request refuses the first non-default field of CODEX_HOST_GOAL_REJECTED_FIELDS through _reject_goal_fields, which CodexGoalRunRequest shares; the sandbox-field checks run before it, so a goal request that sets network_access with a default turn is refused for the sandbox (hardening INV-34).
 RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.5 and 9.1); docs/spec/codex-host-thread-helpers/spec.md (sections 8.5 and 9.1); docs/spec/codex-host-hardening/spec.md (sections 8.5 and 9.1)
@@ -20,7 +20,6 @@ from typing import TYPE_CHECKING, Any
 from vidbyte.lib.constants.codex import (
     CODEX_HOST_MIN_EXCLUSIVE_SECONDS,
     CODEX_HOST_MIN_TOKEN_LIMIT,
-    CODEX_HOST_USER_REVIEWER_TEXT,
     CODEX_THREAD_SUMMARY_HARNESS,
 )
 from vidbyte.lib.constants.codex_host import (
@@ -52,7 +51,6 @@ from vidbyte.lib.enums.codex import (
     CodexApprovalsReviewer,
     CodexCommandApprovalKind,
     CodexGoalStatus,
-    CodexHostOperation,
     CodexReviewTargetKind,
     CodexSandbox,
     CodexSandboxReadiness,
@@ -62,7 +60,7 @@ from vidbyte.lib.enums.codex import (
     CodexTurnStatus,
 )
 from vidbyte.lib.enums.failure import FailureCode
-from vidbyte.lib.errors import CodexAgentError, ConfigurationError
+from vidbyte.lib.errors import ConfigurationError
 
 if TYPE_CHECKING:
     from vidbyte.tools.adapters import ToolInput
@@ -220,21 +218,13 @@ class CodexSpawnRequest:
         _optional_text("Codex spawn request", "turn_service_tier", self.turn_service_tier)
 
     def _reject_bad_approvals(self) -> None:
-        # @intent refuse-unanswerable-approvals
-        # A USER reviewer sends approval requests to a human that
-        # nothing on the host can answer, so the request is refused with
-        # the code and next step the host's tools report. The explicit
-        # approval fields replace approval_mode, so the two ways are
-        # never mixed.
+        # @intent approval-fields-are-never-mixed-with-approval-mode
+        # The explicit approval fields replace approval_mode, so the two
+        # ways are never mixed. A USER reviewer builds here; the host
+        # refuses it only when it has no approval_handler to answer it
+        # (hardening INV-20, D-5).
         _reject_wrong_type("Codex spawn request", "approval_policy", self.approval_policy, CodexApprovalPolicy)
         _reject_wrong_type("Codex spawn request", "approvals_reviewer", self.approvals_reviewer, CodexApprovalsReviewer)
-        if self.approvals_reviewer is CodexApprovalsReviewer.USER:
-            raise CodexAgentError(
-                "Codex spawn request approvals_reviewer=USER sends approval requests to a human, and nothing on a CodexHost can answer them.",
-                failure_code=FailureCode.CONFIGURATION_UNSUPPORTED_COMBINATION.value,
-                operation=CodexHostOperation.VALIDATE_SPAWN_REQUEST.value,
-                next_step=CODEX_HOST_USER_REVIEWER_TEXT,
-            )
         explicit = self.approval_policy is not CodexApprovalPolicy.PROVIDER_DEFAULT or self.approvals_reviewer is not CodexApprovalsReviewer.PROVIDER_DEFAULT
         modes = (self.thread.approval_mode, self.turn.approval_mode)
         if explicit and any(mode is not CodexApprovalMode.PROVIDER_DEFAULT for mode in modes):
