@@ -48,6 +48,12 @@ Each line is input + state → wrong output. The test that catches it is in the 
 - `META_API_KEY` set beside a Meta key in `api_keys` → the environment value is relayed instead of the list's key, or another provider's listed key rides on the `meta` request (meta-muse-managed-text INV-2, INV-4, T-1).
 - A `VIDBYTE_MANAGED` `meta` call with `META_API_KEY` set → the variable is read or relayed, so the user is billed by Meta for a call Vidbyte meant to pay (meta-muse-managed-text INV-3, AC-4).
 - A Muse id the backend does not serve (`muse-spark-1.3`) → an SDK-side model list refuses it or rewrites it, or the 422 is re-sent (meta-muse-managed-text FR-5, D-4, AC-7).
+- A Meta key in the `LLM_<numeric id>_<secret>` shape Meta documents → no prefix proves it and none reserves it, so a Muse agent's list is refused (M-6), or, beside a Kimi, DeepSeek, Mistral, GLM or MiniMax model, it binds to that provider by elimination and is relayed to that vendor (meta-muse-managed-text FR-9, INV-16, EC-17, AC-16, AC-17).
+- A malformed `LLM_` key (a word ID, a `.` in the secret, no secret, or `LLM_<id>|<secret>`) → bound to a provider that takes unproven keys instead of M-6 (meta-muse-managed-text EC-8, INV-16, AC-17).
+- An `LLM_` key and an `LLM|` key in one list → two Meta keys bound to two providers instead of M-7 (meta-muse-managed-text INV-16).
+- A list whose only key is a Meta key, for a `deepseek` or `kimi` model → the key is relayed to that vendor instead of M-18 naming `meta` and the provider (meta-muse-managed-text AC-17, EC-17).
+- The Meta row widened with `\d`, `\w`, a word ID, a looser secret, an ignore-case flag, or a reserved `LLM` → keys Meta never issues prove `meta`, or other keys are reserved; or another row, the row order, or a message changes (meta-muse-managed-text D-8, D-9, INV-17).
+- The Meta row's comment or its registries README row without Meta's 2026-10-17 page → the routing rule loses its first-party source, or an example key is copied into the tree (meta-muse-managed-text AC-18).
 
 ## Contract
 
@@ -91,17 +97,17 @@ None yet. Add one line per fixed bug with the test that protects it.
 
 ## Test Suite Map
 
-- `provider_keys_fixtures.py`: runtime-built fake keys per table F/A, per-dialect `isDone` answers, `ProviderRouter`, `RecordingEnviron`, `key_view`, `flat`.
-- `test_provider_keys_acceptance.py`: the §4 snippet run as written (AC-1); `AUTO` relay vs paid (AC-2, AC-3); missing Vidbyte key (AC-4); `DIRECT` byte identity (AC-5); Vidbyte entries and variables (AC-11); unserved providers and endpoints (AC-12, AC-36); `VIDBYTE_MANAGED` (AC-13); README facts (AC-27); the Muse snippet, `VIDBYTE_MANAGED` Muse, and the `meta` `DIRECT` golden with its gateway envelopes (meta-muse-managed-text AC-1, AC-4, AC-6, AC-12).
-- `test_provider_keys_matching.py`: list shapes (AC-8), table F and A (AC-29), unique assignment (AC-10, AC-42), primaries (INV-24; M-18 for a `meta` primary, meta-muse-managed-text EC-6), Vidbyte entries (AC-35), record pass-through (AC-39), settings roots.
-- `test_provider_keys_property.py`: seeded random and exhaustive permutation checks of INV-9 and INV-10 (no `hypothesis`).
-- `test_provider_keys_agents.py`: agent relay and fallback (AC-7, AC-16, AC-17, AC-31, AC-38), root refusals (AC-9, AC-32, AC-33, AC-37), children (AC-18, AC-34), model mode (AC-25, AC-26), non-text runners (AC-23), and Muse agents: fallback, fork, and the grader member (meta-muse-managed-text AC-11, EC-11, EC-16).
+- `provider_keys_fixtures.py`: runtime-built fake keys per table F/A, per-dialect `isDone` answers, `ProviderRouter`, `RecordingEnviron`, `key_view`, `flat`. `K_META_DOC` is a Meta fake in the documented `LLM_` shape (meta-muse-managed-text FR-9).
+- `test_provider_keys_acceptance.py`: the §4 snippet run as written (AC-1); `AUTO` relay vs paid (AC-2, AC-3); missing Vidbyte key (AC-4); `DIRECT` byte identity (AC-5); Vidbyte entries and variables (AC-11); unserved providers and endpoints (AC-12, AC-36); `VIDBYTE_MANAGED` (AC-13); README facts (AC-27); the Muse snippet, `VIDBYTE_MANAGED` Muse, and the `meta` `DIRECT` golden with its gateway envelopes (meta-muse-managed-text AC-1, AC-4, AC-6, AC-12). Since meta-muse-managed-text r4, the Muse snippet and the `VIDBYTE_MANAGED` Muse call run with the key in both Meta shapes (AC-1, AC-4, AC-16).
+- `test_provider_keys_matching.py`: list shapes (AC-8), table F and A (AC-29), unique assignment (AC-10, AC-42), primaries (INV-24; M-18 for a `meta` primary, meta-muse-managed-text EC-6), Vidbyte entries (AC-35), record pass-through (AC-39), settings roots. Since meta-muse-managed-text r4: both Meta shapes in table F and the reserved prefixes, never bound by elimination, M-7 across the shapes, M-6 for a malformed `LLM_` key on every root, and M-18 for a lone Meta key (FR-9, INV-16, INV-17, EC-8, EC-17, AC-17).
+- `test_provider_keys_property.py`: seeded random and exhaustive permutation checks of INV-9 and INV-10 (no `hypothesis`). The pool holds a Meta fake in each shape (meta-muse-managed-text FR-9).
+- `test_provider_keys_agents.py`: agent relay and fallback (AC-7, AC-16, AC-17, AC-31, AC-38), root refusals (AC-9, AC-32, AC-33, AC-37), children (AC-18, AC-34), model mode (AC-25, AC-26), non-text runners (AC-23), and Muse agents: fallback, fork, and the grader member (meta-muse-managed-text AC-11, EC-11, EC-16). A Meta key in either shape never rides on a keyless kimi fallback (meta-muse-managed-text AC-17).
 - `test_provider_keys_sessions.py`: restore paths (AC-19, AC-41), exported state (INV-14), old checkpoints (EC-53).
-- `test_provider_keys_modes.py`: `TextCredentials`, table R, M-8/M-9/M-14, gateway shape (INV-8; `meta` served since meta-muse-managed-text, AC-10, INV-1, INV-12, INV-14), streaming (AC-6), pinning (INV-12), unsendable keys (AC-40).
-- `test_provider_keys_wire_contract.py`: relay header, body, cap and floor, re-sends, and concurrency (INV-2, INV-16, INV-20, INV-21); `meta` in every per-provider table and its relay sources (meta-muse-managed-text AC-2, AC-3, AC-5, AC-6).
+- `test_provider_keys_modes.py`: `TextCredentials`, table R, M-8/M-9/M-14, gateway shape (INV-8; `meta` served since meta-muse-managed-text, AC-10, INV-1, INV-12, INV-14), streaming (AC-6), pinning (INV-12), unsendable keys (AC-40). The `DIRECT` Muse call in both Meta key shapes (meta-muse-managed-text AC-16).
+- `test_provider_keys_wire_contract.py`: relay header, body, cap and floor, re-sends, and concurrency (INV-2, INV-16, INV-20, INV-21); `meta` in every per-provider table and its relay sources (meta-muse-managed-text AC-2, AC-3, AC-5, AC-6). The `LLM_` shape from a mixed list and from `META_API_KEY` (meta-muse-managed-text AC-16).
 - `test_provider_keys_failures.py`: table G per status in both modes (AC-15), relayed provider refusals (AC-14), and `meta` gateway failures: unserved Muse ids (422), the missing-key 502, relayed 401 and 429 (meta-muse-managed-text AC-7 to AC-9).
 - `test_provider_keys_security.py`: reprs (AC-20), leak scenarios (AC-21) including every `meta` gateway failure (meta-muse-managed-text AC-14), credential guards and the harness redactor (AC-22).
-- `test_provider_keys_contract.py`: names, constants, exports, field orders, signatures, the old keyword (AC-24), and the manual scripts (AC-30).
+- `test_provider_keys_contract.py`: names, constants, exports, field orders, signatures, the old keyword (AC-24), and the manual scripts (AC-30). The Meta row of `KEY_FORMATS` against spec section 8.5 with every other row unchanged, and the row's source comment and registries README row (meta-muse-managed-text D-8, INV-17, AC-18).
 
 Run `python -m pytest tests/features/sdk_provider_keys` from a worktree, with `PYTHONPATH` set to the worktree and `DEEPSEEK_API_KEY` unset.
 

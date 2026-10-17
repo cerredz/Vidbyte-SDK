@@ -1,7 +1,7 @@
 """FILE: tests/features/sdk_provider_keys/test_provider_keys_matching.py
 
 PURPOSE: Proves the matching rules of ProviderKeyMatcher one rule at a time: the list's shape, each entry's characters, which prefixes prove a provider (table F), which providers take an unproven key (table A and the reserved prefixes), unique assignment with the lone-key rule, the configured-primary rule (INV-24), the Vidbyte entry, a record passed back in, and that every refusal names indexes and providers but never key characters.
-ROLE IN CODEBASE: Unit layer of tests/features/sdk_provider_keys/ (spec AC-8 to AC-10, AC-29, AC-35, AC-39, AC-42; INV-10, INV-13, INV-24 to INV-26; D-2 to D-4, D-25, D-28, D-29, D-31; EC-1 to EC-10, EC-45, EC-46, EC-51, EC-55, EC-58; table M rows M-1 to M-7, M-10, M-11, M-18 to M-20). Exercises vidbyte/lib/registries/provider_keys.py and vidbyte/lib/dataclasses/agents.py directly, and through the roots that call them (TextModelConfig, Agent, JevAgentSettings, JevRunBriefSettings, AgentRoleSettings).
+ROLE IN CODEBASE: Unit layer of tests/features/sdk_provider_keys/ (spec AC-8 to AC-10, AC-29, AC-35, AC-39, AC-42; INV-10, INV-13, INV-24 to INV-26; D-2 to D-4, D-25, D-28, D-29, D-31; EC-1 to EC-10, EC-45, EC-46, EC-51, EC-55, EC-58; table M rows M-1 to M-7, M-10, M-11, M-18 to M-20; meta-muse-managed-text FR-9, INV-16, INV-17, EC-8, EC-17, AC-17). Exercises vidbyte/lib/registries/provider_keys.py and vidbyte/lib/dataclasses/agents.py directly, and through the roots that call them (TextModelConfig, Agent, JevAgentSettings, JevRunBriefSettings, AgentRoleSettings).
 ARCHITECTURE NOTE: The matcher is pure (no environment, no network), so these tests call it directly with primary/others and check the returned ProviderKeys through key_for and key_view. The expected provider of every table F sample is spelled from the spec's table, never read from KEY_FORMATS.
 COMMON MODIFICATION PATTERNS: When a vendor documents a new key prefix (a table F row), add a sample to the provider_of table and a reserved-prefix case. Keep message checks to the facts table M binds; the wording is the implementer's.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import ProviderKeyMatcher, ProviderKeys or the new constants at module level. 2. Do not write AIza + 35, sk-ant-api03- + 93 + AA, or a T3BlbkFJ-signed key as one literal; build them by concatenation inside the AC-29 test. 3. Do not mock any part of the matcher.
@@ -22,6 +22,7 @@ from tests.features.sdk_provider_keys.provider_keys_fixtures import (
     K_ANTHROPIC,
     K_GEMINI_AQ,
     K_META,
+    K_META_DOC,
     K_OPENAI,
     K_OPENAI_2,
     K_OPENAI_ADMIN,
@@ -143,6 +144,11 @@ class TableFAndATests(unittest.TestCase):
             ("AQ.", K_GEMINI_AQ, ModelProvider.GEMINI),
             ("LLM|", K_META, ModelProvider.META),
             ("LLM| short app ID", "LLM" + "|" + "7" + "|" + "m" * 8, ModelProvider.META),
+            # meta-muse-managed-text FR-9, INV-16: the LLM_ shape Meta
+            # documents, whose secret takes the same set as LLM|.
+            ("LLM_", K_META_DOC, ModelProvider.META),
+            ("LLM_ short ID", "LLM" + "_" + "7" + "_" + "m" * 8, ModelProvider.META),
+            ("LLM_ secret with _ and -", "LLM" + "_" + "1" * 16 + "_" + "a_b-c" + "m" * 8, ModelProvider.META),
         )
         for name, key, provider in proven:
             with self.subTest(sample=name):
@@ -160,6 +166,19 @@ class TableFAndATests(unittest.TestCase):
             ("LLM| dotted secret", "LLM" + "|" + "1" * 15 + "|" + "a.b"),
             ("LLM| no secret", "LLM" + "|" + "1" * 15),
             ("lowercase llm|", "llm" + "|" + "1" * 15 + "|" + "m" * 20),
+            # meta-muse-managed-text EC-8, D-9: malformed LLM_ keys, the
+            # two mixed separators, non-ASCII digits or letters (which
+            # \d and \w would take), and a lowercase llm_ key.
+            ("LLM_ word ID", "LLM" + "_" + "app" + "_" + "m" * 20),
+            ("LLM_ dotted secret", "LLM" + "_" + "1" * 16 + "_" + "a.b"),
+            ("LLM_ no secret", "LLM" + "_" + "1" * 16),
+            ("LLM_ trailing separator", "LLM" + "_" + "1" * 16 + "_"),
+            ("LLM_ no ID", "LLM" + "_" + "_" + "m" * 20),
+            ("LLM_ then |", "LLM" + "_" + "1" * 16 + "|" + "m" * 20),
+            ("LLM| then _", "LLM" + "|" + "1" * 15 + "_" + "m" * 20),
+            ("LLM_ non-ASCII digit ID", "LLM" + "_" + "١" * 3 + "_" + "m" * 8),
+            ("LLM_ non-ASCII secret", "LLM" + "_" + "1" * 16 + "_" + "m" * 8 + "é"),
+            ("lowercase llm_", "llm" + "_" + "1" * 16 + "_" + "m" * 20),
         )
         for name, key in unproven:
             with self.subTest(sample=name):
@@ -184,12 +203,48 @@ class TableFAndATests(unittest.TestCase):
                 self.assertFalse(matcher().accepts_unproven(provider, dotted_xai))
                 self.assertFalse(matcher().accepts_unproven(provider, bad_anthropic))
                 self.assertEqual(matcher().accepts_unproven(provider, bad_openai), provider is ModelProvider.OPENAI)
-                # LLM| is reserved to meta, and meta takes no unproven key, so nothing takes a malformed Meta key.
+                # LLM| is reserved to meta, which takes no unproven key,
+                # so nothing takes a malformed LLM| key. The test below
+                # covers LLM_ (meta-muse-managed-text INV-16).
                 self.assertFalse(matcher().accepts_unproven(provider, bad_meta))
                 # OpenAI's workload identity token is a JWT, so openai takes eyJ as well as sk- (table A).
                 self.assertEqual(matcher().accepts_unproven(provider, jwt), open_provider or provider is ModelProvider.OPENAI)
                 # A provider name works as well as the enum member.
                 self.assertEqual(matcher().accepts_unproven(provider.value, plain), open_provider)
+
+    def test_every_meta_shaped_key_is_reserved_to_meta_and_no_provider_takes_it_unproven(self) -> None:
+        # meta-muse-managed-text INV-16, EC-8, AC-17 (iii): a key that
+        # starts with LLM_ or LLM| is meta's or nobody's, whether or
+        # not it fully matches, so no vendor ever gets it by
+        # elimination.
+        meta_shaped = {
+            "LLM_": K_META_DOC,
+            "LLM|": K_META,
+            "LLM_ word ID": "LLM" + "_" + "app" + "_" + "m" * 20,
+            "LLM_ dotted secret": "LLM" + "_" + "1" * 16 + "_" + "a.b",
+            "LLM_ no secret": "LLM" + "_" + "1" * 16,
+            "LLM_ trailing separator": "LLM" + "_" + "1" * 16 + "_",
+            "LLM_ no ID": "LLM" + "_" + "_" + "m" * 20,
+            "LLM_ then |": "LLM" + "_" + "1" * 16 + "|" + "m" * 20,
+            "bare LLM_": "LLM" + "_",
+        }
+        for name, key in meta_shaped.items():
+            for provider in ALL_PROVIDERS:
+                with self.subTest(key=name, provider=provider.value):
+                    self.assertFalse(matcher().accepts_unproven(provider, key))
+        # INV-17, EC-8: only the two literal prefixes are reserved, and
+        # case-sensitively, so these stay plain unproven keys that every
+        # open provider takes and no format-bound provider does.
+        near_misses = {
+            "lowercase llm_": "llm" + "_" + "1" * 16 + "_" + "m" * 20,
+            "LLM-": "LLM" + "-" + "1" * 16 + "-" + "m" * 20,
+            "LLMx": "LLM" + "x" + "1" * 16 + "m" * 20,
+        }
+        for name, key in near_misses.items():
+            for provider in ALL_PROVIDERS:
+                with self.subTest(key=name, provider=provider.value):
+                    open_provider = provider not in FORMAT_BOUND and provider is not ModelProvider.OPENAI
+                    self.assertEqual(matcher().accepts_unproven(provider, key), open_provider)
 
 
 class UniqueAssignmentTests(KeySafeAssertions):
@@ -260,12 +315,17 @@ class UniqueAssignmentTests(KeySafeAssertions):
         self.assertEqual(key_view(matcher().match([K_OPENAI_JWT], primary="openai", others=("deepseek",)))[0], {"openai": K_OPENAI_JWT})
 
     def test_a_meta_key_proves_meta_in_any_order_and_meta_never_takes_an_unproven_key(self) -> None:
-        # Table F/A: an LLM| key is meta's wherever it sits, so a Muse agent with a DeepSeek backup splits the list without guessing.
+        # Table F/A: a Meta key is meta's wherever it sits, so a Muse
+        # agent with a DeepSeek backup splits the list without guessing.
+        # This test uses the LLM| form; the next one adds the LLM_ form
+        # Meta documents (meta-muse-managed-text FR-9).
         for entries in ([K_UNPROVEN, K_META, K_ANTHROPIC], [K_ANTHROPIC, K_META, K_UNPROVEN], [K_META, K_UNPROVEN, K_ANTHROPIC]):
             with self.subTest(order=[entries.index(K_META), entries.index(K_UNPROVEN)]):
                 record = matcher().match(entries, primary="meta", others=("deepseek", "anthropic"))
                 self.assertEqual(key_view(record)[0], {"meta": K_META, "deepseek": K_UNPROVEN, "anthropic": K_ANTHROPIC})
-        # Meta issues only LLM| keys, so a lone unproven key is never sent to it: before this rule it bound to meta by D-29.
+        # Every Meta key starts with LLM_ or LLM|, so a lone unproven
+        # key is never sent to meta: before this rule it bound to meta
+        # by D-29.
         message, details = self.refused(lambda: matcher().match([K_UNPROVEN], primary="meta"), K_UNPROVEN)
         self.assertIn("meta", message)
         self.assertEqual(details.get("index"), 0)
@@ -273,6 +333,73 @@ class UniqueAssignmentTests(KeySafeAssertions):
         message, _details = self.refused(lambda: matcher().match([K_UNPROVEN], primary="meta", others=("deepseek",)), K_UNPROVEN)
         for fact in ("deepseek", "meta", "META_API_KEY"):
             self.assertIn(fact, message)
+
+    def test_a_meta_key_in_either_shape_goes_to_meta_beside_every_provider_that_takes_unproven_keys(self) -> None:
+        # meta-muse-managed-text INV-16, EC-17, FR-9: a Meta key never
+        # binds to kimi, deepseek, mistral, glm or minimax by
+        # elimination, whether or not a meta model is configured.
+        for shape, meta_key in (("LLM_", K_META_DOC), ("LLM|", K_META)):
+            for provider in ("kimi", "deepseek", "mistral", "glm", "minimax"):
+                for others in ((provider,), (provider, "meta")):
+                    with self.subTest(shape=shape, provider=provider, meta_configured=len(others) == 2):
+                        record = matcher().match([K_ANTHROPIC, meta_key], primary="anthropic", others=others)
+                        self.assertEqual(key_view(record)[0], {"anthropic": K_ANTHROPIC, "meta": meta_key})
+            # A Muse agent with a DeepSeek backup and a DeepSeek key
+            # splits the list in either order.
+            for entries in ([K_UNPROVEN, meta_key], [meta_key, K_UNPROVEN]):
+                with self.subTest(shape=shape, meta_index=entries.index(meta_key)):
+                    record = matcher().match(entries, primary="meta", others=("deepseek",))
+                    self.assertEqual(key_view(record)[0], {"meta": meta_key, "deepseek": K_UNPROVEN})
+
+    def test_two_meta_keys_in_different_shapes_are_refused_and_the_same_documented_key_twice_is_one_key(self) -> None:
+        # meta-muse-managed-text INV-16, M-7: both shapes prove meta, so
+        # two different Meta keys have no right answer, even when a
+        # kimi backup could take the LLM_ one by elimination.
+        for others in ((), ("kimi",)):
+            with self.subTest(others=others):
+                message, details = self.refused(lambda others=others: matcher().match([K_META, K_META_DOC], primary="meta", others=others), K_META, K_META_DOC)
+                for fact in ("api_keys[0]", "api_keys[1]", "meta"):
+                    self.assertIn(fact, message)
+                self.assertEqual((tuple(details.get("indexes", ())), details.get("provider")), ((0, 1), "meta"))
+        record = matcher().match([K_META_DOC, f"  {K_META_DOC}\n"], primary="meta")
+        self.assertEqual(key_view(record)[0], {"meta": K_META_DOC})
+
+    def test_a_malformed_llm_key_is_refused_at_construction_on_every_root_whatever_its_providers(self) -> None:
+        # meta-muse-managed-text AC-17 (iii), EC-8, INV-16: LLM_ is
+        # reserved to meta, which takes no unproven key, so M-6 refuses
+        # the list before any request, naming the index, the length
+        # and the configured providers but never the key.
+        from vidbyte.lib.config import TextModelMode
+
+        malformed = {
+            "word ID": "LLM" + "_" + "app" + "_" + "m" * 20,
+            "dotted secret": "LLM" + "_" + "1" * 16 + "_" + "a.b",
+            "no secret": "LLM" + "_" + "1" * 16,
+            "trailing separator": "LLM" + "_" + "1" * 16 + "_",
+            "LLM_ then |": "LLM" + "_" + "1" * 16 + "|" + "m" * 20,
+            "bare LLM_": "LLM" + "_",
+        }
+        # Each root: a build from the bad key, its index in the list,
+        # and the providers it configures. Unserved providers use
+        # DIRECT, because a gateway mode refuses them first (M-12).
+        roots = {
+            "kimi": (lambda key: TextModelConfig(provider="kimi", model="kimi-k2.7-code", api_keys=[key]), 0, ("kimi",)),
+            "deepseek": (lambda key: TextModelConfig(provider="deepseek", model="deepseek-v4-pro", api_keys=[key]), 0, ("deepseek",)),
+            "meta": (lambda key: TextModelConfig(provider="meta", model="muse-spark-1.1", api_keys=[key]), 0, ("meta",)),
+            "mistral DIRECT": (lambda key: TextModelConfig(provider="mistral", model="mistral-medium-latest", api_keys=[key], mode=TextModelMode.DIRECT), 0, ("mistral",)),
+            "glm DIRECT": (lambda key: TextModelConfig(provider="glm", model="glm-5.2", api_keys=[key], mode=TextModelMode.DIRECT), 0, ("glm",)),
+            "minimax DIRECT": (lambda key: TextModelConfig(provider="minimax", model="MiniMax-M3", api_keys=[key], mode=TextModelMode.DIRECT), 0, ("minimax",)),
+            "Agent with a kimi fallback": (lambda key: Agent(name="a", system_prompt="s", provider="anthropic", model_name="claude-sonnet-5", api_keys=[K_ANTHROPIC, key], vidbyte_api_key=VIDBYTE_KEY, fallback=["kimi/kimi-k2.7-code"]), 1, ("anthropic", "kimi")),
+        }
+        for shape, key in malformed.items():
+            for root, (build, index, providers) in roots.items():
+                with self.subTest(key=shape, root=root), patch.dict(os.environ, {}, clear=True):
+                    message, details = self.refused(lambda build=build, key=key: build(key), key, K_ANTHROPIC, VIDBYTE_KEY)
+                    self.assertEqual((details.get("index"), details.get("length")), (index, len(key)))
+                    self.assertIn(str(len(key)), message)
+                    for provider in providers:
+                        self.assertIn(provider, details.get("providers", ()))
+                        self.assertIn(provider, message)
 
     def test_two_unproven_keys_two_providers_could_take_are_refused_naming_every_candidate_and_variable(self) -> None:
         # EC-35, M-19: the lowest failing index, its length, the candidates and their environment variables.
@@ -350,6 +477,27 @@ class ConfiguredPrimaryTests(KeySafeAssertions):
                 self.assertEqual(details.get("provider"), "meta")
                 for fact in ("meta", "anthropic", "META_API_KEY", "Vidbyte's own meta account"):
                     self.assertIn(fact, message)
+
+    def test_a_lone_meta_key_for_a_provider_that_takes_unproven_keys_is_refused_with_m18(self) -> None:
+        # meta-muse-managed-text AC-17 (ii), EC-17: the key proves meta
+        # in either shape, so the primary holds no key and the list is
+        # refused when built, instead of the key going to that vendor.
+        from vidbyte.lib.config import TextModelMode
+
+        primaries = {
+            "deepseek": ("deepseek-v4-pro", TextModelMode.AUTO, "DEEPSEEK_API_KEY"),
+            "kimi": ("kimi-k2.7-code", TextModelMode.AUTO, "MOONSHOT_API_KEY"),
+            "mistral": ("mistral-medium-latest", TextModelMode.DIRECT, "MISTRAL_API_KEY"),
+            "glm": ("glm-5.2", TextModelMode.DIRECT, "GLM_API_KEY"),
+            "minimax": ("MiniMax-M3", TextModelMode.DIRECT, "MINIMAX_API_KEY"),
+        }
+        for shape, meta_key in (("LLM_", K_META_DOC), ("LLM|", K_META)):
+            for provider, (model, mode, variable) in primaries.items():
+                with self.subTest(shape=shape, provider=provider), patch.dict(os.environ, {}, clear=True):
+                    message, details = self.refused(lambda provider=provider, model=model, mode=mode, meta_key=meta_key: TextModelConfig(provider=provider, model=model, api_keys=[meta_key], mode=mode), meta_key)
+                    self.assertEqual((details.get("provider"), list(details.get("providers", ()))), (provider, ["meta"]))
+                    for fact in ("meta", provider, variable):
+                        self.assertIn(fact, message)
 
     def test_require_primary_key_off_accepts_a_list_without_the_primarys_key(self) -> None:
         # D-30: only BaseAgent.restore turns the check off, for a fork child resumed with its own key.

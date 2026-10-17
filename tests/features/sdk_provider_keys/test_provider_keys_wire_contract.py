@@ -1,7 +1,7 @@
 """FILE: tests/features/sdk_provider_keys/test_provider_keys_wire_contract.py
 
 PURPOSE: Proves what a relay call puts on the wire: the X-Vidbyte-Provider-Key header carries exactly the call provider's stripped key and nothing else does; a call with no provider key sends exactly the base_commit managed request; relay calls keep the 32,768 cap and the 630 s floor; and every re-send of one call, and every concurrent call, carries its own Idempotency-Key with identical headers.
-ROLE IN CODEBASE: Wire-contract layer of tests/features/sdk_provider_keys/ (spec AC-2, AC-3; INV-2, INV-3, INV-16, INV-20, INV-21; EC-9, EC-14, EC-28, EC-37, EC-38; FR-7; meta-muse-managed-text AC-2, AC-3, AC-5, AC-6, INV-2 to INV-6, T-1). Exercises vidbyte/lib/http/vidbyte_gateway.py (VidbyteGatewayTransport) and vidbyte/lib/runners/text.py through the real adapters in vidbyte/providers/.
+ROLE IN CODEBASE: Wire-contract layer of tests/features/sdk_provider_keys/ (spec AC-2, AC-3; INV-2, INV-3, INV-16, INV-20, INV-21; EC-9, EC-14, EC-28, EC-37, EC-38; FR-7; meta-muse-managed-text AC-2, AC-3, AC-5, AC-6, INV-2 to INV-6, T-1; r4 AC-16, FR-9). Exercises vidbyte/lib/http/vidbyte_gateway.py (VidbyteGatewayTransport) and vidbyte/lib/runners/text.py through the real adapters in vidbyte/providers/.
 ARCHITECTURE NOTE: Each test runs TextModelRunner against a scripted inner transport (managed_text_fixtures.ScriptedGateway), the only fake, and reads what the gateway transport handed it. Retry waits are replaced at SLEEP_TARGET by BackoffRecorder, so re-sends take no wall-clock time.
 COMMON MODIFICATION PATTERNS: When the gateway serves a new provider, add its fake key to RELAY_KEYS and its cap field to CAP_FIELD. Keep header comparisons case-insensitive.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import the new constants or TextModelMode.DIRECT at module level. 2. Do not compare the relay header with the unstripped input; INV-2 says the value is the stripped key.
@@ -39,6 +39,7 @@ from tests.features.sdk_provider_keys.provider_keys_fixtures import (
     K_GEMINI_AQ,
     K_META,
     K_META_2,
+    K_META_DOC,
     K_OPENAI,
     K_UNPROVEN,
     K_UNPROVEN_2,
@@ -64,7 +65,9 @@ RELAY_KEYS: dict[ModelProvider, str] = {
     ModelProvider.XAI: K_XAI,
     ModelProvider.DEEPSEEK: K_UNPROVEN,
     ModelProvider.KIMI: K_UNPROVEN_2,
-    # meta-muse-managed-text FR-2: a Meta key is format-bound (LLM|<app id>|<secret>), so it binds to meta in any list.
+    # meta-muse-managed-text FR-2, FR-9: a Meta key is format-bound
+    # (LLM_<id>_<secret> or LLM|<id>|<secret>), so it binds to meta in
+    # any list. MetaRelayTests covers the LLM_ shape.
     ModelProvider.META: K_META,
 }
 # The cap field each dialect uses (managed-generative-models spec section 9.2), Gemini's sits in generationConfig.
@@ -203,6 +206,11 @@ class MetaRelayTests(unittest.TestCase):
             ("mixed list beats META_API_KEY", {"VIDBYTE_API_KEY": VIDBYTE_KEY, "META_API_KEY": K_META_2}, {"api_keys": [K_ANTHROPIC, K_OPENAI, K_META, K_XAI]}, K_META, (K_ANTHROPIC, K_OPENAI, K_XAI, K_META_2)),
             ("padded list entry", {"VIDBYTE_API_KEY": VIDBYTE_KEY}, {"api_keys": [f"  {K_META}\n"]}, K_META, ()),
             ("META_API_KEY with no list", {"VIDBYTE_API_KEY": VIDBYTE_KEY, "META_API_KEY": f"\t{K_META_2}  \n"}, {}, K_META_2, (K_META,)),
+            # meta-muse-managed-text AC-16 (i) and (ii), FR-9: the LLM_
+            # shape Meta documents relays the same way, from a mixed
+            # list (beating an LLM| META_API_KEY) or from the variable.
+            ("LLM_ key in a mixed list beats META_API_KEY", {"VIDBYTE_API_KEY": VIDBYTE_KEY, "META_API_KEY": K_META}, {"api_keys": [K_ANTHROPIC, K_OPENAI, K_META_DOC, K_XAI]}, K_META_DOC, (K_ANTHROPIC, K_OPENAI, K_XAI, K_META)),
+            ("LLM_ META_API_KEY with no list", {"VIDBYTE_API_KEY": VIDBYTE_KEY, "META_API_KEY": f"\t{K_META_DOC}  \n"}, {}, K_META_DOC, (K_META,)),
         )
         for label, environment, options, relayed, absent in cases:
             with self.subTest(case=label):

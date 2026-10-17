@@ -33,7 +33,9 @@ ORACLE_KEYS = {
     ModelProvider.XAI: "xai-" + "oracle",
     ModelProvider.DEEPSEEK: "d-oracle",
     ModelProvider.KIMI: "k-oracle",
-    # META is format-bound (LLM|<digits>|<secret>), so its oracle must fully match that rule or matching refuses it (M-6).
+    # META is format-bound: its oracle must fully match one of the two
+    # Meta shapes (LLM_<digits>_<secret> or LLM|<digits>|<secret>),
+    # or matching refuses it (M-6). This one uses the LLM| form.
     ModelProvider.META: "LLM" + "|" + "0" * 15 + "|" + "o" * 32,
 }
 # The cap field each dialect uses (spec section 9.2 "Cap field per dialect").
