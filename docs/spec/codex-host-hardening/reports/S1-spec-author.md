@@ -237,3 +237,36 @@ Nothing was disputed, so no new Q was added. Q-20 stays unused.
   - It does not handle server-request methods; those are sent to the client.
   - It answers an unknown method with -32601.
 - **The 20 superseded tests.** A1–A8, B1, C1–C3, G1–G5, I1, I2 and T1, plus the support literals listed in §13.
+
+---
+
+## Addendum — r4 (S2 clarifications; status stays approved)
+
+Spec commit: `d3389171`. This revision changes spec text only. No file under `tests/` was touched, nor `test-plan.md`, nor the §6.2 Proof column; a script confirmed the Proof column is byte-identical to `f5dbb7cc`.
+
+**What changed.** Each S2 defect (S2 report §6) is resolved, and every test choice was kept:
+- **Misstatements corrected (1, 2).**
+  - AC-22 and B1 now say `includeTurns` is never true. openai-codex `thread_read` always sends `{"threadId", "includeTurns": include_turns}`.
+  - AC-32 and INV-37 now name the three keys and say every other key is `false`. The stable 0.163.0 `workspaceWrite` policy defaults `excludeSlashTmp` and `excludeTmpdirEnvVar` to false.
+- **Choices recorded.**
+  - 3: the INV-37 checks run before the goal rule. Either message conforms if it names the field.
+  - 4: `{sandbox}` is the member name. The value would render `PROVIDER_DEFAULT` as an empty string.
+  - 7: sandbox fields on fork, review and goal runs are refused at `turn` first.
+  - 8: a pending call cancelled by `cancel_pending` logs `closing`.
+  - 9: `handled_by` is `default` whenever the default answer was sent.
+  - 10: `status` is the `CodexTurnStatus` wire value.
+  - 11: only a router built with a handler writes the fallback WARNING.
+  - 13: how `{tier}`, `{models}` and `{tiers}` render. The values are sorted and joined with `CODEX_HOST_LIST_SEPARATOR`.
+- **§13 notes (5, 6, 12, 14).**
+  - AC-39 is proved by keyword checks.
+  - AC-40's lint half is a command; an `ast` scan stands in for it.
+  - The tests use 0.2 s for AC-25 and an absolute path for AC-27.
+  - AC-20's fresh-host row guards only against a double walk.
+- **Test-imposed names**, now in INV-10, §8.5 and §13:
+  - the watcher thread name `"codex-host-watcher"`;
+  - the log record shape: the first word is the event, then `key=value` tokens, one token per value, `key=` when empty, and no `exc_info`;
+  - three patch names: `turn_events.CODEX_HOST_LOST_TURN_GRACE_SECONDS`, `connection.CODEX_TOOL_CALL_TIMEOUT_SECONDS`, and `connection.retry_on_overload`, which must be openai-codex's own object.
+
+**Schema and protocol check.** No test choice contradicts the 0.163.0 schema or protocol. Choices 4, 8, 9, 11 and 13 are logging and rendering details the schema does not govern. Choices 3 and 7 are the order of local refusals.
+
+**Self-check.** Traceability is unchanged (48 INV, 41 AC, 56 EC, 37 FR). All 47 test ids in §6.2 and §13 resolve. Every table row has its header's cell count. §0.1 is identical to r1, and nothing was added to §1–§10 except my own text.
