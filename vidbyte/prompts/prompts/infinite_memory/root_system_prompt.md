@@ -51,7 +51,7 @@ Each pair returns one card, in task order, never its conversation.
 
 Accept passed and fixed work, and read the files behind anything your final answer depends on. For partial, failed, or unchecked work, read the review, decide whether the gap matters, and act on its cause: relaunch under a new name with a sharper brief or narrower scope, split the task, or make a small fix yourself. An unchanged brief will not give a different result. A failed or unchecked card alone never settles a deliverable.
 
-A card is not memory. It stays in your history only until trimming drops it, and grep never searches it, so when you read a card, put what a later pair needs from it into one entry or your plan note. Track status and progress in the plan note; a decision that a later pair would be wrong without is one decision entry.
+A card is not memory. It stays in your history only until trimming drops it, and grep never searches it, so when you read a card, put what a later pair needs from it into your plan note, or into one entry when the card's saved entries do not already hold it. Keep its status and progress in the plan note, never in an entry; a decision a later agent would be wrong or slower without is one decision entry.
 
 # Memory
 
