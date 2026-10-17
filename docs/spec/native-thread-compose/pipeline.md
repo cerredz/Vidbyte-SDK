@@ -65,6 +65,8 @@ started: 2026-10-15 18:04
 
 - 2026-10-16 22:12 — Spec summary printed (playbook format); S2 test author launched against spec r3 at HEAD a316c738. Briefing targets: every AC proven by a fake-harness test, Windows + Linux CI (ubuntu, Python 3.11/3.12) deterministic, compose pack well under 3 minutes, base pack 438 green after any fake_harness extension, `SDK-LINT: PASS` with the new test files, no `pip install -e`.
 
+- 2026-10-16 ~22:14 — Interruption 5: the Claude Code process exited (no rate-limit notice) about a minute after the S2 test author launched at 22:12. Verified 2026-10-16 22:30: HEAD 7d3fa198, clean (no untracked files), no `tests/features/harness_compose/`, no S2 report; the agent's saved context exists (its transcript was last written 22:13, during orientation reading). Coordinator (22:3x): resume the interrupted agent with SendMessage when its context exists. Resumed the SAME S2 test author via SendMessage.
+
 ## User replies (verbatim)
 - none (coordinator relay messages on 2026-10-15 20:0x and 2026-10-16 01:3x concerned rate-limit resumption only; no product decisions)
 
