@@ -67,6 +67,8 @@ started: 2026-10-15 18:04
 
 - 2026-10-16 ~22:14 — Interruption 5: the Claude Code process exited (no rate-limit notice) about a minute after the S2 test author launched at 22:12. Verified 2026-10-16 22:30: HEAD 7d3fa198, clean (no untracked files), no `tests/features/harness_compose/`, no S2 report; the agent's saved context exists (its transcript was last written 22:13, during orientation reading). Coordinator (22:3x): resume the interrupted agent with SendMessage when its context exists. Resumed the SAME S2 test author via SendMessage.
 
+- 2026-10-16 ~23:10 — Interruption 6: the resumed S2 test author was stopped by an API rate limit (HTTP 429, session limit, reset 2:40am) just after it re-oriented and announced it would start writing (FEATURE.md first). Verified 2026-10-17 02:41: HEAD 7ec4d3fc, clean, `tests/features/harness_compose/` exists but is empty (untracked by git), no S2 report; it left git probes in `C:/Users/422mi/AppData/Local/Temp/claude/C--Users-422mi-vidbyte-repos/d2d5110d-c484-4b56-acef-651ebe9a78a5/scratchpad/s2probe/` (idx, repo). Its saved context exists (transcript last written 23:10). Coordinator (02:4x): resume the same agent. Resumed the SAME S2 test author via SendMessage.
+
 ## User replies (verbatim)
 - none (coordinator relay messages on 2026-10-15 20:0x and 2026-10-16 01:3x concerned rate-limit resumption only; no product decisions)
 
