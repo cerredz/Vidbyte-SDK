@@ -1,6 +1,6 @@
 """FILE: tests/features/harness_threads/test_harness_threads_claude_errors.py
 
-PURPOSE: How a Claude Code answer is classified (spec claude-thread-functions INV-7, D-10): a JSON object with is_error true and an integer api_error_status of 401 or 403 is claude.key_rejected carrying the reason, status and result text and the answer's session_id (AC-11, EC-4, EC-34); any other status, no status, a non-integer status or an `errors` list instead of `result` is claude.run_failed with that text (AC-11, EC-17, EC-18, EC-36); `subtype` never decides; any other non-zero exit is claude.run_failed carrying stderr (AC-12); exit 0 with output that is not one JSON object, an is_error that is not false, a session_id that is not a lowercase UUID or a result that is not a string is claude.protocol_mismatch naming the member and the tested version 2.1.302 (AC-10, AC-13, EC-16); stderr on a successful answer is ignored (EC-35); and a failed fork reports the fork's new id while a failed continue reports the caller's (INV-6, D-14).
+PURPOSE: How a Claude Code answer is classified (spec claude-thread-functions INV-7, D-10): a JSON object with is_error true and an integer api_error_status of 401 or 403 is claude.key_rejected carrying the reason, status and result text and the answer's session_id (AC-11, EC-4, EC-34); any other status, no status, a non-integer status or an `errors` list instead of `result` is claude.run_failed with that text (AC-11, EC-17, EC-18, EC-36); `subtype` never decides; a non-zero exit whose stderr holds the option parser's error line (unknown option, invalid choice, missing argument) is claude.protocol_mismatch naming the tested version (PR #1044 review); any other non-zero exit is claude.run_failed carrying stderr (AC-12); exit 0 with output that is not one JSON object, an is_error that is not false, a session_id that is not a lowercase UUID or a result that is not a string is claude.protocol_mismatch naming the member and the tested version 2.1.302 (AC-10, AC-13, EC-16); stderr on a successful answer is ignored (EC-35); and a failed fork reports the fork's new id while a failed continue reports the caller's (INV-6, D-14).
 ROLE IN CODEBASE: Start here when a Claude Code failure gets the wrong code, loses Claude's own text, or reports the wrong thread.
 ARCHITECTURE NOTE: The stand-in prints Claude Code 2.1.302's one JSON result object (vendor-facts §6): success, the 401 shape with subtype "success", the budget shape with `errors` and no `result`, a generic in-run error, and any member overridden or dropped by the scenario's `override` and `drop` fields. check_error (conftest.py) asserts the INV-6 attributes, that likely_cause and next_step are the table texts for the code, and the message order. Vendor text is compared with the spec's own templates, CLAUDE_ERROR_TEXT and CLAUDE_ERROR_STATUS_TEXT, read from the constants module.
 FUNCTION INVENTORY: printed_session reads the session id the stand-in printed; vendor_text formats the expected vendor text from the spec templates; the test_* functions are one behaviour each.
@@ -22,6 +22,13 @@ VENDOR = "Overloaded: the API is busy, retry later"
 BUDGET = "Reached maximum budget ($0.00001)"
 OTHER_SESSION = "22222222-3333-4444-8555-666666666666"
 REJECTED_STATUSES = [401, 403]
+# 2.1.302's option parser errors, as printed for a refused argv.
+REFUSED_OPTION_LINES = [
+    "error: unknown option '--example'",
+    "error: option '--permission-mode <mode>' argument 'default' is invalid. Allowed choices are acceptEdits, auto, bypassPermissions, manual, dontAsk, plan.",
+    "error: missing required argument 'prompt'",
+    "Notice: a newer Claude Code is available\nerror: unknown option '--example'",
+]
 OTHER_STATUSES = [
     ("rate-limited", 429, True), ("server", 500, True), ("overloaded", 529, True), ("billing", 400, True), ("null", None, False),
     ("true", True, True), ("string-401", "401", False), ("list", [401], False), ("object", {"code": 401}, False),
@@ -116,6 +123,18 @@ async def test_bare_non_zero_exit_is_run_failed_carrying_stderr(api, sandbox, ca
     with pytest.raises(api.NativeThreadError) as caught:
         await call("claude", verb, "Again.", thread_id=thread, fake={"mode": "stderr_exit", "vendor_text": vendor, "exit_code": RUN_EXIT})
     check_error(caught.value, harness="claude", verb=verb, code="claude.run_failed", workspace=sandbox.workspace, thread_id=thread, observations=[("exit status", (str(RUN_EXIT),))], vendor=vendor, exit_code=RUN_EXIT)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("vendor", REFUSED_OPTION_LINES, ids=["unknown-option", "invalid-choice", "missing-argument", "after-a-notice"])
+async def test_option_parser_refusal_is_protocol_mismatch_naming_the_tested_version(api, sandbox, call, check_error, vendor) -> None:
+    # PR #1044 review 4301626282: 2.1.302 refuses an unknown option or a
+    # value outside its choices with exit 1, no stdout and its option
+    # parser's error line, so the installed release differs from the
+    # tested one; a notice printed before the line does not hide it.
+    with pytest.raises(api.NativeThreadError) as caught:
+        await call("claude", fake={"mode": "stderr_exit", "vendor_text": vendor, "exit_code": 1})
+    check_error(caught.value, harness="claude", verb="run", code="claude.protocol_mismatch", workspace=sandbox.workspace, thread_id=None, observations=[("tested version", (TESTED_VERSION,))], vendor=vendor, exit_code=1)
 
 
 @pytest.mark.asyncio

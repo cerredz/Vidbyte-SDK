@@ -231,6 +231,10 @@ MUSE_FORK_SESSION_MEMBER = "result.session.sessionId"
 MUSE_COMPLETED_TERMINAL = "completed"
 MUSE_SESSION_STREAM_KIND = "session"
 CLAUDE_SESSION_NOT_FOUND_MARKER = "No conversation found with session ID"
+# The starts of the option parser's own error lines: claude refused an
+# option or value the SDK passes, so the installed release differs from
+# the tested one (protocol_mismatch, not run_failed).
+CLAUDE_REJECTED_OPTION_MARKERS = ("error: unknown option", "error: option '", "error: missing required argument")
 CLAUDE_KEY_REJECTED_STATUSES = frozenset({401, 403})
 
 # Tested vendor versions: the releases these contracts were checked
@@ -468,7 +472,7 @@ NATIVE_THREAD_LIKELY_CAUSES: MappingProxyType[FailureCode, str] = MappingProxyTy
         FailureCode.CLAUDE_THREAD_NOT_FOUND: "The thread is not in this workspace's private config folder: another workspace created it, Claude Code swept it after 30 days, it never existed, or Claude Code answered on another thread.",
         FailureCode.CLAUDE_TIMED_OUT: "The Claude Code run needed more than timeout_seconds, for example because the task is large, or because a rejected key is retried for about three minutes before Claude Code reports it.",
         FailureCode.CLAUDE_OUTPUT_TOO_LARGE: "Claude Code printed more than NATIVE_PROCESS_MAX_OUTPUT_BYTES, so its one JSON answer could not be read whole.",
-        FailureCode.CLAUDE_PROTOCOL_MISMATCH: "The installed Claude Code printed output this SDK cannot read, or a fork returned its source thread; it may differ from the release this SDK was checked against.",
+        FailureCode.CLAUDE_PROTOCOL_MISMATCH: "The installed Claude Code printed output this SDK cannot read, refused an option or value the SDK passes, or a fork returned its source thread; it may differ from the release this SDK was checked against.",
         FailureCode.CLAUDE_RUN_FAILED: "Claude Code reported a failure of its own, such as an API error, a rate limit, an overload, a billing or budget limit, or an unknown model.",
         FailureCode.CONFIGURATION_INVALID_ARGUMENT: "An argument failed its check before anything started; the message names the argument and the rule it broke.",
         FailureCode.RUNTIME_ERROR: "An unexpected exception inside the SDK, which is a defect in the SDK rather than a vendor failure.",

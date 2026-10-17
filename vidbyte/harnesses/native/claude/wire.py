@@ -2,7 +2,7 @@
 
 PURPOSE: Defines ClaudeWire, the reader of one `claude --print --output-format json` run: it turns the run's CliOutcome into a NativeThreadResult, or into the NativeThreadError that names what went wrong.
 ROLE IN CODEBASE: Called by ClaudeThreadRun.execute in vidbyte/harnesses/native/claude/threads.py after CliRunner returns; it raises through the call's NativeErrorFactory (hostkit/errors.py) and checks the answered thread id with RecordFieldValidator.accepts_text.
-ARCHITECTURE NOTE: Pure: no process, no file and no await. Claude Code 2.1.302 writes one JSON object at exit, {"is_error", "session_id", "result", "api_error_status", "terminal_reason", "subtype", "errors", ...}, on success and on an in-run failure alike, and a failure before the run (an unknown --resume id) as text on stderr with exit 1. Every member name and marker comes from vidbyte/lib/constants/native_threads.py (spec INV-16). The answer is read first, as opencode/wire.py does, and the checks then run in the INV-7 order: timeout, output cap, the answer's own is_error (key rejected or run failed), a bare non-zero exit (thread not found or run failed), then the shape of the success answer and the thread id.
+ARCHITECTURE NOTE: Pure: no process, no file and no await. Claude Code 2.1.302 writes one JSON object at exit, {"is_error", "session_id", "result", "api_error_status", "terminal_reason", "subtype", "errors", ...}, on success and on an in-run failure alike, and a failure before the run (an unknown --resume id) as text on stderr with exit 1. Every member name and marker comes from vidbyte/lib/constants/native_threads.py (spec INV-16). The answer is read first, as opencode/wire.py does, and the checks then run in the INV-7 order: timeout, output cap, the answer's own is_error (key rejected or run failed), a bare non-zero exit (thread not found, an option the installed claude refused, which is protocol_mismatch, or run failed), then the shape of the success answer and the thread id.
 FUNCTION INVENTORY: read is the narrated main function; _answer parses stdout as one JSON object, or None; _session returns the answer's session_id when it is a lowercase UUID; _text returns its result when it is text; _missing_member names the member that makes a success answer unusable; _error_text builds the vendor text of an is_error answer.
 COMMON MODIFICATION PATTERNS: A new answer member the SDK must read gets its name constant and one check in read; a new failure shape is a spec change first (INV-7).
 WHAT NOT TO DO IN THIS FILE: 1. Do not decide success by subtype; Claude Code reports "success" on a rejected key. 2. Do not copy vendor text into an error unscrubbed; pass it as vendor_text and the factory scrubs and caps it. 3. Do not accept a cut stdout; a truncated answer is output_too_large and only its thread id is ever used. 4. Do not start processes or await anything here.
@@ -62,11 +62,14 @@ class ClaudeWire:
             raise errors.failure(problem, request=request, thread_id=newest, outcome=outcome, vendor_text=ClaudeWire._error_text(answer))
 
         # A non-zero exit without an error answer: Claude Code's own
-        # not-found text means the thread is unknown here; anything
-        # else is a failed run, reported with what it wrote to stderr.
+        # not-found text means the thread is unknown here; its option
+        # parser refusing an option or value the SDK passes means the
+        # installed release differs from the tested one; anything else
+        # is a failed run. Each is reported with what it wrote to stderr.
         if outcome.exit_code != native_threads.NATIVE_SUCCESS_EXIT_CODE:
             not_found = native_threads.CLAUDE_SESSION_NOT_FOUND_MARKER in outcome.stderr
-            problem = NativeThreadProblem.THREAD_NOT_FOUND if not_found else NativeThreadProblem.RUN_FAILED
+            refused = any(line.startswith(native_threads.CLAUDE_REJECTED_OPTION_MARKERS) for line in outcome.stderr.splitlines())
+            problem = NativeThreadProblem.THREAD_NOT_FOUND if not_found else NativeThreadProblem.PROTOCOL_MISMATCH if refused else NativeThreadProblem.RUN_FAILED
             raise errors.failure(problem, request=request, thread_id=newest, outcome=outcome, vendor_text=outcome.stderr)
 
         # Exit 0: the answer must be one object that says it did not
