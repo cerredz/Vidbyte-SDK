@@ -24,6 +24,8 @@ print(agent.response.stop_reason, len(agent.response.episodes))
 print("\n".join(agent.response.goal.progress))
 ```
 
+A preset runs its registered command (`PlaywrightMCP` runs `python -m mcp_server_playwright`). When that command is not installed, pass the server's own command instead, for example `BrowserServerSettings(command=("npx", "@playwright/mcp@latest"))`.
+
 ## What it is for
 
 - Browser tasks too long for one conversation: the orchestrator's context stays bounded however many pages the workers visit, because it sees only result cards and its goal card.
