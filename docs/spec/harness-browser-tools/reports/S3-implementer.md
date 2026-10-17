@@ -1,8 +1,10 @@
 # S3 Implementer report: harness browser tools
 
-- Stage: S3 implementer. Status: **BLOCKED**. The implementation is complete, and lint and the package gate pass. Six tests are red for test-side reasons that S3 may not fix. GitHub push protection also refuses the branch because of an S2 test fixture. See "Blockers".
-- Branch `feat/harness-browser-tools`; code-complete HEAD `0dfde894`; test baseline `871ee369`; `git diff 871ee369..HEAD --stat -- tests/` is EMPTY.
-- Draft PR: none. The push was refused (Blocker 3), so `gh pr create` could not run. The branch exists only locally.
+- Stage: S3 implementer. Status: **DONE**. The implementation is complete, and lint and the package gate pass. The three blockers S3 reported at `0dfde894` were resolved by orchestrator-adjudicated, test-only repairs (see "Post-S3 test repairs"). Only the inherited failure stays red.
+- Branch `feat/harness-browser-tools`. Code-complete HEAD `0dfde894`.
+- S3's own commits change no test: `git diff 871ee369..0dfde894 --stat -- tests/` is empty.
+- After the post-S3 repairs, the test baseline is `9e81a7d0`, and `git diff 9e81a7d0..HEAD --stat -- tests/` is EMPTY.
+- Draft PR: opened after the fixture fold, when the branch was first pushed. Its URL is in the spec frontmatter `pr:`.
 - All 37 rows of §12.3 are implemented in the §12.6 phase order, one commit per work item (19 commits, `2b2e350a` … `0dfde894`).
 
 ## Commits by phase
@@ -31,37 +33,49 @@
 
 Budget (§8.4): 12 of 12 new files, 34 of 34 new classes, 0 dependencies, 0 new config keys, no schema change. Files outside §12.3: none. (`pipeline.md` differs from `871ee369` only by the orchestrator's `b8e02a7d`; S3 never staged it.)
 
-## Gates (final lines, at HEAD `0dfde894`)
+## Gates (final lines)
 
-Run in order by one script at HEAD `0dfde894` (working tree clean apart from this untracked report).
+**Final evidence after the post-S3 test repairs and the fixture fold.** The orchestrator decided not to re-run the full local source gate. Its reasons:
+- The full source gate already ran on this exact source code (`0dfde894`). Every step passed except pytest, which had 7 failures: the 6 test defects since repaired, plus the 1 inherited failure.
+- Since then, only test files under `tests/features/harness_threads` and `tests/features/codex_host`, and docs, have changed. `git diff 0dfde894..HEAD -- vidbyte/` is empty.
+- The full suite runs again on GitHub CI, which the orchestrator dispatches after the push.
 
-1. `PYTHONPATH=$(pwd) py -3.11 -m pytest -q tests/features/harness_threads`
-   `4 failed, 608 passed, 3 skipped in 179.33s (0:02:59)`. The four reds are listed under "Test status".
-2. `PYTHONPATH=$(pwd) py -3.11 lint/run.py`
-   `S009 IMPROVED 350 -> 346. Lower it with: python lint/run.py --rule S009 --update-baseline` / `SDK-LINT: PASS`
-   No rule regressed: A007 255/255, S008 19/19, S064 4/4, A006 34/34, S009 (mypy) 346 against an allowance of 350.
-   The S3 files have no mypy errors (`harnesses/native`, `lib/process` and the `browser_tools` modules).
-   No baseline was raised and no suppression was added.
-3. `PYTHONPATH=$(pwd) py -3.11 scripts/run_ci.py --stage source`
+1. Focused re-run at `9676198f` of the two folders the repairs touched: `PYTHONPATH=$(pwd) py -3.11 -m pytest -q tests/features/harness_threads tests/features/codex_host`
+   `FAILED tests/features/harness_threads/test_harness_threads_surface.py::test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes` / `1 failed, 811 passed, 3 skipped in 206.00s (0:03:26)`
+   The one failure is the inherited `assert 167 == 120`.
+2. Source gate re-run at `9676198f`: `PYTHONPATH=$(pwd) py -3.11 scripts/run_ci.py --stage source`. **Killed, not passed.** Claude Code stopped the run because the machine was critically low on memory. Other sessions' jobs were using that memory.
+   - Before the kill, every step up to pytest passed, including lint (`SDK-LINT: PASS`).
+   - Pytest had reached about 21% (into the harness_threads lifecycle tests) with no FAILED line.
+   - It was not re-run, by the orchestrator's decision.
+3. The full source gate at code-complete `0dfde894`, before the repairs: `PYTHONPATH=$(pwd) py -3.11 scripts/run_ci.py --stage source`
    - Every step before pytest passed: the tracked-bytecode check, lint (`SDK-LINT: PASS`), compileall, `check_context_write_paths.py`, `check_context_primitive_introductions.py` and `check_reasoning_trace_contracts.py`.
-   - Pytest, the last step: `=========== 7 failed, 6615 passed, 17 skipped in 254.37s (0:04:14) ============` / `CI failed: Command failed with exit code 1: ...python.exe -m pytest`.
-   - The seven failures: the four harness_threads reds and the three Codex packaging pins (Blocker 2).
-   - An earlier full run at the same HEAD gave the same seven failures (6615 passed).
-4. `py -3.11 scripts/run_ci.py --stage package` (no PYTHONPATH)
+   - Pytest: `=========== 7 failed, 6615 passed, 17 skipped in 254.37s (0:04:14) ============` / `CI failed: Command failed with exit code 1: ...python.exe -m pytest`.
+   - The 7 failures were the 3 routing tests and the 3 Codex packaging pins (both repaired since) and the 1 inherited test.
+4. Lint at `0dfde894`: `PYTHONPATH=$(pwd) py -3.11 lint/run.py`
+   `S009 IMPROVED 350 -> 346. Lower it with: python lint/run.py --rule S009 --update-baseline` / `SDK-LINT: PASS`
+   - No rule regressed: A007 255/255, S008 19/19, S064 4/4, A006 34/34, S009 (mypy) 346 against an allowance of 350.
+   - The S3 files have no mypy errors.
+   - No baseline was raised and no suppression was added.
+5. Package gate at `0dfde894`: `py -3.11 scripts/run_ci.py --stage package` (no PYTHONPATH)
    `No broken requirements found.` / `Installed vidbyte-sdk 0.3.0 passed smoke checks.` / `CI passed.` (exit 0)
+   This still holds, because no source has changed since `0dfde894`.
 
 ## Test status
 
-`tests/features/harness_threads`: `4 failed, 608 passed, 3 skipped`. The four reds:
+After the repairs, one test is red. `test_harness_threads_surface.py::test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes` is inherited: only its merge-base length assertion fails (`assert 167 == 120`). The same test fails identically on `origin/main` `6f5a7310`. This was proved in a detached scratch worktree, which was then removed and pruned.
 
-1. `test_harness_threads_browser_lifecycle.py::test_muse_required_server_failure_carries_muses_reason`: S2 fixture-routing defect (Blocker 1).
-2. `test_harness_threads_browser_lifecycle.py::test_tool_calls_and_artifacts_cap_at_a_thousand`: its artifact half is the same defect. The tool-call half passes.
-3. `test_harness_threads_browser_mounts.py::test_grok_unlisted_server_tool_cancels_the_turn_loudly`: the same defect.
-4. `test_harness_threads_surface.py::test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes`: inherited. Only the merge-base length assertion fails (`assert 167 == 120`). The same test fails identically on `origin/main` `6f5a7310`; this was proved in a detached scratch worktree, which was then removed and pruned.
+At code-complete `0dfde894`, before the repairs, `tests/features/harness_threads` gave `4 failed, 608 passed, 3 skipped` (the 3 routing tests and the inherited one), and the full suite added the 3 Codex packaging pins. The MCP stdio flake did not occur in any run.
 
-The full suite in the source gate adds three more reds, all in `tests/features/codex_host/test_codex_host_packaging.py` (Blocker 2). The MCP stdio flake did not occur.
+## Post-S3 test repairs
 
-## Blockers (decision needed)
+The orchestrator adjudicated all three blockers below as test defects or test drift. The test author fixed them in test-only commits, with every assertion unchanged:
+- `305a9b67` routes the node-side fake fields through `sandbox.node`;
+- `fd70e93d` and `9e81a7d0` refresh the Codex packaging pins and their comments;
+- the key-shaped fixtures are now built at run time, folded into the S2 test commit `fb8ab004`.
+
+Folding rewrote every commit from the S2 test commit onward, and step A remapped every SHA in this report. No file under `vidbyte/` changed. Details are in `reports/S2-test-author.md`, section "## Post-S3 repair (orchestrator-adjudicated)". The test baseline is now `9e81a7d0`.
+
+## Blockers (reported at `0dfde894`; all three resolved, see "Post-S3 test repairs")
 
 ### Blocker 1: three S2 tests put node-side scenario fields where the node stand-in never reads them
 
@@ -150,7 +164,7 @@ They are also recorded in the spec, under §17 "Implementation deviations (S3)".
 
 ## Spec edits made by S3
 
-- Frontmatter: `status: implemented`, because all 37 rows are implemented and the six reds are test-side. `pr:` stays empty, because no PR could be opened (Blocker 3).
+- Frontmatter: `status: implemented`, because all 37 rows are implemented. `pr:` is recorded in its own commit once the draft PR is open.
 - §6.2: every Proof cell gets its S3 commits. AC-3, AC-12, AC-20 and AC-24 also carry a note.
 - §17: a row `r4 | 2026-10-17 | S3 implement | …`. **Flag:** an `r4` row from S1 already existed; the S3 row follows the brief literally, so the table now has two `r4` rows.
 - §17 "Implementation deviations (S3)" list.
