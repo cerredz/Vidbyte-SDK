@@ -75,6 +75,9 @@ The folder holds 40 `.md` assets; `infinite_memory.json` top level is a dict wit
 
 - 2026-10-16 21:51 — The r4 author was killed by the session limit mid-edit (spec.md modified, uncommitted: frontmatter, 113 count, INV-15 (e), §13, A-7 done; §8.5 (4) marks, §16 rows, §17 row missing). Edits kept on disk; the same agent resumed by message to finish and commit. Base re-fetched: still 7efceb55.
 
+- 2026-10-16 22:10 — **Orchestrator replaced.** The previous orchestrator (Fable) and its resumed r4 author died at the Fable usage limit; the coordinator confirmed no live orchestrator or child (ListAgents). A new orchestrator (Opus) resumes with `--from S3`. Every child from here on is launched with `model: "opus"`; Fable is not used. On-disk state verified: worktree on `feat/infinite-memory-prompts` at 7f988dc8, only `spec.md` modified (the r4 diff matches the 21:51 entry: frontmatter, 113, INV-15 (e), §13, A-7 done; §8.5 (4) marks, §16 rows, §17 row still missing). Base re-fetched: still 7efceb55.
+- 2026-10-16 22:10 — **r4 finished by a fresh spec author** (Revision mode), per the playbook rule for an author that is gone, with the 18:20 rulings verbatim and the uncommitted edits kept on disk. One writer on spec.md. Commit expected: `docs(spec): revise infinite-memory-prompts spec r4 (S2-found defects)`.
+
 ## User replies (verbatim)
 - (none yet)
 
