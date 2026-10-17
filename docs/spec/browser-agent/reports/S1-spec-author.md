@@ -113,3 +113,33 @@ Under `docs/` I read nothing else.
   - A reviewer who reads the rule literally may flag the remaining citations.
 - **AC-1** depends on the test author routing scripts by agent name. The names are fixed by constants (§13).
 - **AC-13**: on the final-text path, the loop appends the assistant reply after the hook's user message (§13).
+
+## Addendum: revision r2 (review round 1), commit f09bf057
+
+I accepted all eight findings and verified each against the code before changing the spec.
+
+- **R-1 (rebuild).** I restored the user's rebuild.
+  - `_after_tool_iteration` deletes, in place, every stored message before the last assistant turn once the stored history passes `BROWSER_HISTORY_MAX_TOKENS`.
+  - It is safe because the task never sits in `messages`. The provider inserts it at `prompt_index` (runtime.py:1611-1615, prompt_placement.py:29-48, gemini.py:81-103).
+  - I also checked the alternatives. No compaction mode on main changes stored history (context_compaction.py:217-229). `compaction_trigger_tokens` is only passed through config. The one in-loop summarizer (trajectory_checkpoints) calls a model.
+  - My r1 disagreement no. 3 is withdrawn: the user's decision outranks the field guide.
+- **R-2 (stuck card).** The stuck card now carries evidence.
+  - It is built from `worker.last_reply.metadata["tool_calls"]`; `last_reply` is set at base.py:1009, before the raise at :1022.
+  - The worker sees `max_tool_calls: n/N` in its prompt (runtime.py:1679-1701), and its rules say to return its card before the budget runs out.
+  - `BROWSER_EPISODE_FINAL_TURNS` is renamed `BROWSER_EPISODE_REPLY_TURNS = 4`. The slack is real: a schema miss is repaired in the loop up to 3 times (base.py:1494, runtime.py:523-543).
+- **R-3 (refused finish).** The finish hook now upserts the card, with the verdict and gap, before the loop continues. This is needed because a refused finish skips `_after_tool_iteration` (runtime.py:680-688). The orchestrator leaf now says to finish through `isDone`, and EC-36 records the order of messages on main.
+- **R-4 (progress cap).**
+  - EC-37 records the outcome: about 480–800 progress lines, then the run ends `goal_stalled`.
+  - A new `progress_full` leaf makes 19 leaves and 34 new files.
+  - Q-10 is a [scope-adding] question, default no.
+- **R-5 (screenshots).** The worker leaf now says screenshots cannot be seen and are taken only to save evidence. A-9 covers whether a server names the saved file.
+- **R-6 (kept observations).**
+  - `keep_observations` is back to the user's 2, applied per tool. An all-tools count is blocked by the 1,020-line strategies.py, and Q-6 asks the user to confirm.
+  - A new worker `trim_with_provider_boundaries(max_tokens=BROWSER_WORKER_HISTORY_MAX_TOKENS=32_000)`, the Infinite children pattern, now bounds the worker budget.
+  - My r1 disagreement no. 4 is replaced by this.
+- **R-7 (configs).** Servers are now queued with `with_preset_mcp_server` or `with_mcp_server`. `BrowserAgentTools` holds role names only.
+- **R-8 (stop codes).** Row 5 now states why no `_STOP_CODES` row is added.
+
+Least sure in r2:
+- A-6 is now verified in code, but not exercised against a live provider.
+- The rebuild trigger (60,000) and the worker trim (32,000) are untested starting values, like the other caps (A-7).

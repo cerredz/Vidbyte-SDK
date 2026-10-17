@@ -23,7 +23,7 @@ started: 2026-10-16 17:17
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 1/2 (round 1 reviewer launched 2026-10-16 on r1 @85fe040a) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 (round 1 on r1 @85fe040a: SOUND WITH FIXES, 8 findings, all accepted → r2 @f09bf057; round 2 scoped to §8/§8.5/§9/§10/§12 budget and dependents, launched 2026-10-17 on r2, the last round allowed) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Fixed values
 - REPO_ROOT: C:/Users/422mi/vidbyte-repos/vidbyte-sdk (origin https://github.com/cerredz/Vidbyte-SDK.git; gh logged in as cerredz)
@@ -47,6 +47,9 @@ started: 2026-10-16 17:17
 - none yet
 
 ## Niche facts accumulated (carried into every later briefing)
+- S1 author r2: the task is never in the stored `messages`; the provider inserts it at `prompt_index` (`runtime.py:1611-1615`; `prompt_placement.py:29-48`; `gemini.py:81-103`), which is what makes the in-place rebuild safe. Assistant turns use role "assistant" (chat, Anthropic) and "model" (Gemini) (`formatter.py:381,396`). — *source:* S1 author r2
+- S1 author r2: `output_schema` adds SchemaConformance (`base.py:1494`); a malformed reply is repaired in the loop up to `max_contract_rejections=3`, spending iterations but no actions. `OutputSchemaViolationError` subclasses `AgentExecutionError` → `VidbyteSdkError`, so catch it first. — *source:* S1 author r2
+- Spec r2 contract changes: `BrowserEventKind.CONTEXT_REBUILT` (10 kinds); `BrowserAgentResponse.rebuilds: int = 0`; `BrowserAgentTools.named_servers()` (static; `configs()` removed; holds no key); `BrowserResponse.rebuilt()`; constants `BROWSER_EPISODE_KEEP_OBSERVATIONS=2` (per tool), `BROWSER_EPISODE_REPLY_TURNS=4`, `BROWSER_WORKER_HISTORY_MAX_TOKENS=32000`, `BROWSER_HISTORY_MAX_TOKENS` (rebuild trigger); 19 prompt leaves (new `progress_full`); budget 34 new + 12 modified files; §12.3 still 29 rows. — *source:* S1 author r2
 - S1 reviewer r1: VERDICT SOUND WITH FIXES, 2 Blocker (R-1 rebuild replaced by outgoing-only trim; R-2 stuck card without evidence), 4 Major (R-3 refused-finish order + stale pin; R-4 progress cap ends productive runs; R-5 worker prompt asks to verify with screenshots it cannot see; R-6 "2 observations kept" became "1 per tool"), 2 Minor (R-7 `configs()` duplicates `with_preset_mcp_server`; R-8 `GOAL_STALLED` touches an @intent). No over-engineering found; base.py edit is required (usage_tracker/agent_catalog). — *source:* S1 reviewer
 - On a cap stop the worker's evidence survives: `last_reply` is set at `base.py:1007-1009` before `_assert_schema_satisfied` raises at :1022; executed calls are in `metadata["tool_calls"]` (`runtime.py:2125`). — *source:* S1 reviewer
 - `max_tool_calls` stops the run at the top of each iteration (`runtime.py:2073`) and mid-turn (:1862-1870); the model already sees "max_tool_calls: n/N" on every call (:1679-1701). — *source:* S1 reviewer
