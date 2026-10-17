@@ -361,7 +361,7 @@ class CodexGoalRunRequest:
         RecordFieldConverter.require_instance(self.request, "run_codex_goal request", CodexSpawnRequest)
         if isinstance(self.request.prompt, CodexRunInput) or self.request.prompt or self.request.goal is not None:
             raise ConfigurationError(CODEX_HOST_OWN_INPUT_MESSAGE.format(operation=CodexHostOperation.RUN_CODEX_GOAL.value), details={"field": "request"})
-        _reject_goal_fields(self.request)
+        _reject_goal_fields("run_codex_goal request", self.request)
 
 
 @dataclass(frozen=True, slots=True)

@@ -346,7 +346,7 @@ CODEX_HOST_APPROVAL_HANDLER_MESSAGE = "CodexHost approval_handler must be None o
 CODEX_HOST_FORK_POINTS_MESSAGE = "fork_codex_thread before_turn_id cannot be combined with from_turn_id; pass from_turn_id to fork through a completed turn, or before_turn_id to fork just before a turn."
 # The spawn request: refusals of the goal rule and of the turn sandbox
 # fields (hardening INV-34, INV-37).
-CODEX_HOST_GOAL_FIELD_MESSAGE = "Codex spawn request goal does not use the field {name}, because Codex starts goal turns itself with the thread's settings; leave {name} at its default, or set the matching thread setting."
+CODEX_HOST_GOAL_FIELD_MESSAGE = "{owner} does not use the field {name}, because Codex starts goal turns itself with the thread's settings; leave {name} at its default, or set the matching thread setting."
 CODEX_HOST_NETWORK_ACCESS_MESSAGE = "Codex spawn request network_access needs turn.sandbox READ_ONLY or WORKSPACE_WRITE, because only those sandbox policies take it, and it got turn.sandbox {sandbox}."
 CODEX_HOST_WRITABLE_ROOTS_MESSAGE = "Codex spawn request writable_roots must be a tuple of non-empty absolute paths, and it needs turn.sandbox WORKSPACE_WRITE."
 
