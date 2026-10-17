@@ -3,7 +3,7 @@
 PURPOSE: Proves what a developer can watch and trust: events arrive in order with consecutive sequence numbers, a sink's Exception is recorded and never breaks the run while a BaseException propagates, every run ends with exactly one run_finished or run_stopped, event details are one short line, usage is one rollup that counts every agent and fails closed on an unpriced call, keys never reach tools, events, the response, or a model, and the run-start checks (reserved MCP tool names, an ACTION role with no tools, duplicate tool names across servers) refuse before any model call, while each server starts under its role name with only its own env and timeout.
 ROLE IN CODEBASE: Observability and boundary layer of tests/features/browser_agent/ (spec AC-3, AC-18, AC-19, AC-21 run-start half, AC-30; INV-3, INV-20, INV-21, INV-25, INV-28; EC-6, EC-7, EC-8, EC-20, EC-33; D-7, D-18, D-19; T-1, T-3, T-5; FR-17, FR-18, FR-19). Exercises vidbyte/agents/browser/events.py, usage.py, response.py, tools.py and the runtime's run-start checks through BrowserAgent.run / arun.
 ARCHITECTURE NOTE: EventLog is the developer's on_event sink; it records every event and the orchestrator call count at the moment it arrived. Usage is read from the reply metadata, agent.response and agent.get_usage() and compared as UsageRollup values; the tracker and ledger are real.
-FUNCTION INVENTORY: test_a_raising_sink_is_recorded_and_never_breaks_the_run (AC-18, INV-20, EC-20); test_a_base_exception_from_the_sink_propagates (INV-20, D-18); test_a_max_iterations_stop_ends_with_run_stopped (EC-33, INV-20); test_event_details_are_one_line_within_their_cap (section 8.5 BrowserEvent, section 12.3 row 11); test_usage_is_one_rollup_that_counts_every_agent (AC-19, INV-21, FR-18); test_an_unpriced_call_raises_usage_accounting_error (AC-19, INV-21, D-19); test_keys_never_reach_tools_events_the_response_or_any_model_call (AC-3, INV-3, T-1, T-3, T-5); test_servers_start_under_their_role_names_with_their_own_env_and_timeout (D-7, FR-4, T-5, EC-28); test_a_reserved_name_on_an_mcp_tool_is_refused_before_any_model_call (AC-21, EC-7, INV-25); test_an_action_server_without_tools_is_refused_before_any_model_call (AC-30, EC-8); test_duplicate_tool_names_across_servers_fail_the_attach_all_or_nothing (EC-6, INV-28).
+FUNCTION INVENTORY: test_a_raising_sink_is_recorded_and_never_breaks_the_run (AC-18, INV-20, EC-20); test_a_base_exception_from_the_sink_propagates (INV-20, D-18); test_a_max_iterations_stop_ends_with_run_stopped (EC-33, INV-20); test_event_details_are_one_line_within_their_cap (section 8.5 BrowserEvent, section 12.3 row 11); test_usage_is_one_rollup_that_counts_every_agent (AC-19, INV-21, FR-18); test_an_unpriced_call_raises_usage_accounting_error (AC-19, INV-21, D-19, INV-20 / S4 R-4); test_keys_never_reach_tools_events_the_response_or_any_model_call (AC-3, INV-3, T-1, T-3, T-5); test_servers_start_under_their_role_names_with_their_own_env_and_timeout (D-7, FR-4, T-5, EC-28); test_a_reserved_name_on_an_mcp_tool_is_refused_before_any_model_call (AC-21, EC-7, INV-25); test_an_action_server_without_tools_is_refused_before_any_model_call (AC-30, EC-8); test_duplicate_tool_names_across_servers_fail_the_attach_all_or_nothing (EC-6, INV-28).
 COMMON MODIFICATION PATTERNS: Add a usage scenario as one more parametrize row with its per-agent usage and expected totals. Take caps from vidbyte.lib.constants.browser.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level. 2. Do not put a real key anywhere; FIRECRAWL_KEY and MODEL_KEY are fakes. 3. Do not catch the run's exception broadly and pass; find the documented error type in the raised chain.
 KNOWN EDGE CASES: A run-start refusal may reach the caller wrapped by BaseAgent's own error handling, so the checks walk the cause chain with find_error. Server indexes in role names are not fixed to 0- or 1-based by the spec, so names are matched by shape.
@@ -168,12 +168,16 @@ def test_usage_is_one_rollup_that_counts_every_agent(done_when: bool, expected: 
 
 
 def test_an_unpriced_call_raises_usage_accounting_error() -> None:
-    """AC-19, INV-21, D-19: a run in which one model call reports a model with no price raises UsageAccountingError naming it, instead of returning."""
-    agent = build_agent()
+    """AC-19, INV-21, D-19, INV-20 (S4 R-4): a run in which one model call reports a model with no price raises UsageAccountingError naming it, instead of returning, and its last event is run_stopped, never run_finished."""
+    log = EventLog()
+    agent = build_agent(on_event=log)
     model = ScriptedModel({NAME: [reply(FINAL, model="not-in-the-pricebook")], RECHECK: [DONE]})
     with installed(model, FakeBrowserServers()), pytest.raises(UsageAccountingError) as raised:
         agent.run(TASK)
     assert "not-in-the-pricebook" in error_text(raised.value)
+    # A run that raises instead of returning has not finished.
+    assert log.kinds()[-1] == "run_stopped", log.kinds()
+    assert "run_finished" not in log.kinds()
 
 
 # ---------------------------------------------------------------- keys (INV-3) and servers (D-7)
