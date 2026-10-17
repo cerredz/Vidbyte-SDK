@@ -471,3 +471,115 @@ Files: `VP\scripts\env_filter_wrapper.py` (stdlib), with flags `--allow NAME`, `
   - chrome-devtools real browser run and its process tree (only Playwright was run).
 - Wrapper: `os.execve` on Linux/Muse.
 - I saw the real `~/.local/share/opencode/opencode.db-shm` mtime change at 22:44:25 during the probe window. A before/after re-test shows the isolated runs do not touch it, so it was probably another process [U].
+
+## 9. Follow-up probes (spec r2 assumptions)
+
+Run on 2026-10-17 with the same rules as before: no model, no paid API, no real key, nothing installed globally, no user config changed. Every process was killed; afterwards no probe process and no LISTENING probe port remained. `VP` is the same scratch folder.
+
+Method:
+- opencode: `opencode serve` plus its session API, with a fake `@ai-sdk/openai-compatible` provider pointed at the scripted stand-in endpoint. The XDG root was private and empty (`VP\oc\a17`), and the cwd had no `opencode.json` (`VP\oc\ws17`).
+- Grok: `grok -p` with `GROK_HOME=VP\grokllm\home_a18`, whose `config.toml` holds only the stand-in endpoint and model and no MCP servers. `USERPROFILE` pointed at an empty folder. Every MCP server came from the per-run `--agent` file.
+
+Scripts:
+- `VP\scripts\oc_session_probe.sh` now accepts `OC_ROOT` and `OC_WS` overrides.
+- New: `VP\scripts\a17_summary.py`, `VP\scripts\a18_summary.py`, `VP\scripts\q18_case.sh`.
+- Reused: `fake_llm_server.py`, `grok_llm_case.sh`, `canary_mcp.py`, `canary_http_mcp.py`.
+
+### A-17 (opencode): wildcard deny, then exact allow — CONFIRMED [V: probe]
+
+Setup: the canary was mounted as server id `vidbyte-canary` in `OPENCODE_CONFIG_CONTENT`. The configs are in `VP\oc\occ_a17_{A,B,C}.json`. The script called `vidbyte-canary_canary_ping`, then `vidbyte-canary_env_inherit_yes`.
+
+**Variant A:** `{"vidbyte-canary_*":"deny","vidbyte-canary_canary_ping":"allow"}`
+- The model's `tools[]` held exactly one MCP tool, `vidbyte-canary_canary_ping`. The other two canary tools were absent.
+- The allowed call ran: the canary recorded `canary_ping {"a":1}`, and the model got `pong {"a": 1}`.
+- The other call came back `Model tried to call unavailable tool 'vidbyte-canary_env_inherit_yes'`.
+- Evidence: `VP\oc\fake_a17_A.jsonl`, `VP\obs\a17\`.
+
+**Variant B (reverse key order):** `{"vidbyte-canary_canary_ping":"allow","vidbyte-canary_*":"deny"}`
+- No MCP tools at all, and the canary received no call. Last match wins, so key order is load-bearing.
+- Evidence: `VP\oc\fake_a17_B.jsonl`.
+
+**Variant C:** `{"vidbyte-canary_*":"deny"}` alone
+- No MCP tools. Evidence: `VP\oc\fake_a17_C.jsonl`.
+
+**Tool names**
+- A hyphen in the server id is kept, not rewritten: `vidbyte-canary_canary_ping`, `vidbyte-canary_env_inherit_yes`. Only `_` separates server and tool.
+
+**New network observation** (blocked by the refusing proxy, harmless here)
+- opencode sent `CONNECT registry.npmjs.org:443` and `CONNECT github.com:443` at session start when the fake provider used `npm:"@ai-sdk/openai-compatible"`. Evidence: `VP\oc\fake_a17_*.jsonl`, `PROXY` lines.
+- The call still worked, so the package is bundled. The purpose of these requests is [U].
+
+### A-18 (Grok): exact `MCPTool(...)` allow and deny — CONFIRMED [V: probe]
+
+Setup:
+- Agent file `VP\grokllm\a18\agent_block.md`, block YAML, with server `canary` and a literal `PROBE_SECRET`.
+- Script: `use_tool` called `canary__canary_ping`, then `canary__env_inherit_yes`, then `canary__echo_secret_ok`.
+
+**Separate flags:** `--agent F --allow "MCPTool(canary__canary_ping)" --deny "MCPTool(canary__env_inherit_yes)"`
+- `canary__canary_ping` → `completed`, with rawOutput `{"type":"MCP","tool_name":"canary_ping","server_name":"canary","output":{"OkayOutput":"pong {\"n\": 1}"}}`.
+- `canary__env_inherit_yes` → `failed`: `Tool `use_tool` was not executed: Denied by permission policy: deny rule on mcp matching "canary__env_inherit_yes"`. The turn continued.
+- `canary__echo_secret_ok` (neither allowed nor denied) → `failed`: `User cancelled the execution for tool `use_tool``. Then `end.stopReason:"cancelled"`, and the process exited 0.
+- The canary recorded only `canary_ping`.
+- Evidence: `VP\logs\grokllm_a18_sep.stdout`, `VP\grokllm\fake_a18_sep.jsonl`, `VP\obs\a18\`.
+
+What this means:
+- An exact allow does not open other tools.
+- A tool that is neither allowed nor denied still cancels the whole turn. With an exact allow/deny design, any unlisted tool the model tries (it can still find every tool via `search_tool`) ends the run as cancelled with exit code 0.
+
+**Joined and repeated forms (A-4):** `--agent=F --output-format=streaming-json --allow=MCPTool(canary__canary_ping) --allow=MCPTool(canary__echo_secret_ok) --deny=MCPTool(canary__env_inherit_yes)`
+- Both allowed calls → `completed`. The denied call → `failed` (deny message). `end.stopReason:"end_turn"`, rc 0.
+- The canary recorded `canary_ping` and `echo_secret_ok`.
+- Evidence: `VP\logs\grokllm_a18_joined.stdout`.
+
+### A-4 (Grok agent-file and flag forms) — CONFIRMED [V: probe]
+
+**JSON flow values per key**
+- `VP\grokllm\a18\agent_json_values.md`: `name: "…"`, `description: "…"`, `mcpServers: [{"name": "canary", "command": "C:\\Users\\…\\python.exe", "args": […], "env": [{"name": "PROBE_SECRET", "value": "…"}]}]`.
+- It was written with `json.dumps`, so the Windows paths have escaped backslashes.
+- The server mounted, and `canary__canary_ping` → `completed`. Evidence: `VP\logs\grokllm_a4_json_values.stdout`.
+
+**Whole frontmatter as one JSON object**
+- `VP\grokllm\a18\agent_json_object.md`: `---\n{"name": …, "description": …, "mcpServers": [ … ]}\n---`. Same result.
+- Evidence: `VP\logs\grokllm_a4_json_object.stdout`.
+
+**Joined `--agent=`, `--allow=`, `--deny=`, `--output-format=`**
+- Accepted; see A-18 above.
+
+**`--agent=F --resume <id>`**
+- Same `sessionId`. The request carried the prior turns (9 messages, including the first prompt). The agent's server was mounted, and `canary__canary_ping` → `completed`.
+- Evidence: `VP\logs\grokllm_a4_resume.stdout`, `VP\grokllm\fake_a4_resume.jsonl`.
+
+**`--agent=F --resume <id> --fork-session`**
+- A new `sessionId` (`01a149b6-4308-…`), with history carried over (14 messages). The tool worked.
+- Evidence: `VP\logs\grokllm_a4_fork.stdout`.
+
+**Related to A-14: `--resume <id>` with no `--agent`**
+- `canary__canary_ping` → `Tool not found`, so the MCP servers are gone.
+- But the resumed request's system prompt still contained the agent file's body ("You are a probe agent"). The stored system prompt is reused; the default agent's prompt is not restored.
+- Evidence: `VP\logs\grokllm_a14_resume_noagent.stdout`, `VP\grokllm\fake_a14_resume_noagent.jsonl`.
+
+### Q-18 (Grok agent-file HTTP entry under `-p`) — CONFIRMED for keyless; keyed needs a literal value [V: probe]
+
+Setup: the server was `VP\scripts\canary_http_mcp.py` on `127.0.0.1:18960`, with one tool `canary_ping`. Run with `--allow MCPTool(web__canary_ping)`.
+
+**Results**
+- `- name: web` / `url: http://127.0.0.1:18960/mcp` (url only) → mounted as `web__canary_ping`, and the call → `completed` (`OkayOutput: "pong"`).
+  - Evidence: `VP\logs\grokllm_q18_min.stdout`, `VP\obs\a18\http_min.json`.
+- `type: http` plus `headers:` as a `[{name, value}]` sequence → works. Both `Authorization: Bearer probe-not-a-key` and `X-Probe` were sent on every request.
+  - Evidence: `VP\obs\a18\http_hdrseq.json`.
+- `headers:` as a map (`Authorization: "Bearer …"`) → works, and the headers were sent.
+  - Evidence: `VP\obs\a18\http_hdrmap.json`.
+- `headers: {Authorization: "Bearer ${PROBE_SECRET_SRC}"}` → the literal `Bearer ${PROBE_SECRET_SRC}` was sent. There is no `${VAR}` expansion in agent-file headers, just as with agent-file `env`. A keyed remote would need the literal key written into the agent file.
+  - Evidence: `VP\obs\a18\http_varref.json`.
+
+**Wire sequence** (same in all four runs)
+- `POST server/discover` (header `mcp-protocol-version: 2026-07-28`; the canary answered `{}`).
+- `POST initialize`.
+- `POST notifications/initialized` (`mcp-protocol-version: 2025-11-25`, `mcp-session-id` echoed).
+- `GET /mcp` (got 405).
+- `POST tools/list`, then `POST tools/call`.
+- `user-agent: grok-cli/1.0.52`.
+
+**Still unverified**
+- How Grok behaves when a real server rejects `server/discover` with an error. [U]
+- Real Jina and Parallel endpoints (not contacted). [U]
