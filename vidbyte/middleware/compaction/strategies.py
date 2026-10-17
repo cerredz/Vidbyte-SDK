@@ -602,51 +602,6 @@ class TrimToTokenBudgetCompaction(BaseCompaction):
         return tuple(message for index, message in enumerate(messages) if index in keep_indexes)
 
 
-class TrimWithProviderBoundariesCompaction(BaseCompaction):
-    """Trims message history while avoiding orphaned tool-call/result boundaries."""
-
-    def __init__(self, max_messages: int | None = None, max_tokens: int | None = None, token_counter: TokenCounter | None = None) -> None:
-        # Stores count and token bounds used after provider-boundary repair.
-        if max_messages is not None and max_messages < 0:
-            raise ValueError("max_messages must be non-negative.")
-        if max_tokens is not None and max_tokens < 0:
-            raise ValueError("max_tokens must be non-negative.")
-        self.max_messages = max_messages
-        self.max_tokens = max_tokens
-        self.token_counter = token_counter
-
-    async def compact(self, messages: Sequence[ContextMessage]) -> tuple[ContextMessage, ...]:
-        # Trims whole call/result groups by count, then by token budget, so no tool boundary is ever split.
-        # @intent parallel-tool-turns-are-kept-or-dropped-whole
-        groups = _provider_groups(messages)
-        if self.max_messages is not None:
-            first_kept = max(0, len(messages) - self.max_messages)
-            kept: list[tuple[ContextMessage, ...]] = []
-            offset = 0
-            for group in groups:
-                if offset + len(group) > first_kept:
-                    kept.append(group)
-                offset += len(group)
-            groups = tuple(kept)
-        if self.max_tokens is not None:
-            groups = self._trim_groups_to_tokens(groups, self.max_tokens)
-        return tuple(message for group in groups for message in group)
-
-    def _trim_groups_to_tokens(self, groups: Sequence[tuple[ContextMessage, ...]], max_tokens: int) -> tuple[tuple[ContextMessage, ...], ...]:
-        # Keeps system groups first, then the newest whole groups that still fit the token budget.
-        def cost(group: tuple[ContextMessage, ...]) -> int:
-            # Sums the token cost of every record in one call/result group.
-            return sum(_message_tokens(message, self.token_counter) for message in group)
-
-        keep = {index for index, group in enumerate(groups) if group[0].role == "system"}
-        remaining = max_tokens - sum(cost(groups[index]) for index in keep)
-        for index in range(len(groups) - 1, -1, -1):
-            if remaining >= 0 and index not in keep and cost(groups[index]) <= remaining:
-                keep.add(index)
-                remaining -= cost(groups[index])
-        return tuple(group for index, group in enumerate(groups) if index in keep)
-
-
 class DeleteMessagesByIdOrRangeCompaction(BaseCompaction):
     """Deletes explicitly identified messages or a zero-based index range."""
 
@@ -669,57 +624,6 @@ class DeleteMessagesByIdOrRangeCompaction(BaseCompaction):
         start = 0 if self.start is None else self.start
         end = math.inf if self.end is None else self.end
         return start <= index <= end
-
-
-class ToolOutputSlidingWindowCompaction(BaseCompaction):
-    """Compacts older tool outputs while preserving the most recent outputs per tool."""
-
-    WINDOW_MODES = (CompactionMode.TRUNCATE_TOOL_RESULTS, CompactionMode.STRIP_TOOL_RESULT_BODIES, CompactionMode.HEAD_TAIL_TOOL_PREVIEW)
-
-    def __init__(self, keep_recent: int = 2, mode: CompactionMode | str = CompactionMode.TRUNCATE_TOOL_RESULTS, max_chars: int = 600, placeholder: str = "[older tool result cleared by compaction]", head_chars: int = 400, tail_chars: int = 200) -> None:
-        # Stores the per-tool sliding-window size and the compaction style for older results.
-        if keep_recent < 0:
-            raise ValueError("keep_recent must be non-negative.")
-        # @intent sliding-window-refuses-modes-it-cannot-apply
-        # Older results are only stripped, previewed, or truncated, so any other mode would silently become truncation.
-        if mode not in self.WINDOW_MODES:
-            raise ValueError(f"window_mode must be one of {[item.value for item in self.WINDOW_MODES]}, got {getattr(mode, 'value', mode)!r}.")
-        self.keep_recent = keep_recent
-        self.mode = CompactionMode(mode)
-        self.max_chars = max_chars
-        self.placeholder = placeholder
-        self.head_chars = head_chars
-        self.tail_chars = tail_chars
-
-    async def compact(self, messages: Sequence[ContextMessage]) -> tuple[ContextMessage, ...]:
-        # Counts tool outputs from newest to oldest and compacts those outside each tool window.
-        remaining: dict[str, int] = {}
-        result: list[ContextMessage] = list(messages)
-        for index in range(len(messages) - 1, -1, -1):
-            message = messages[index]
-            if message.kind != "tool_result":
-                continue
-            tool_name = _message_tool_name(message) or "_unknown"
-            seen = remaining.get(tool_name, 0)
-            remaining[tool_name] = seen + 1
-            if seen >= self.keep_recent:
-                result[index] = self._compact_older_result(message)
-        return tuple(result)
-
-    def _compact_older_result(self, message: ContextMessage) -> ContextMessage:
-        # Applies the configured deterministic compaction to one older tool result.
-        if self.mode is CompactionMode.STRIP_TOOL_RESULT_BODIES:
-            return _replace_message_content(message, self.placeholder, {"compaction": self.mode.value, "original_chars": len(message.content)})
-        if self.mode is CompactionMode.HEAD_TAIL_TOOL_PREVIEW:
-            preview, omitted = _head_tail_text(message.content, self.head_chars, self.tail_chars, "\n...[omitted {count} characters]...\n")
-            if omitted:
-                return _replace_message_content(message, preview, {"compaction": self.mode.value, "original_chars": len(message.content), "omitted_chars": omitted})
-            return message
-        if len(message.content) <= self.max_chars:
-            return message
-        omitted = len(message.content) - self.max_chars
-        content = message.content[:self.max_chars] + f" [... truncated {omitted} characters ...]"
-        return _replace_message_content(message, content, {"compaction": CompactionMode.TRUNCATE_TOOL_RESULTS.value, "original_chars": len(message.content), "truncated_chars": omitted})
 
 
 class ToolResultClearingWithExclusionsCompaction(BaseCompaction):
@@ -1023,9 +927,7 @@ __all__ = [
     "SummarizeByTopicBlocksCompaction",
     "SummarizeOldestNCompaction",
     "SummarizeRangeCompaction",
-    "ToolOutputSlidingWindowCompaction",
     "ToolResultClearingWithExclusionsCompaction",
     "TrimToTokenBudgetCompaction",
-    "TrimWithProviderBoundariesCompaction",
     "TruncateToolResultMessagesCompaction",
 ]
