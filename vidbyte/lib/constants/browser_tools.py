@@ -48,6 +48,9 @@ BROWSER_CALL_FOLDER_PREFIX = "vidbyte-browser-"
 # tempfile.mkdtemp names a folder with this many random characters
 # after the prefix; the Grok budget counts the agent path with it.
 BROWSER_CALL_FOLDER_RANDOM_CHARS = 8
+# A per-call folder name of the real length, for the Grok budget,
+# which is checked before the folder exists.
+BROWSER_CALL_FOLDER_ESTIMATE = BROWSER_CALL_FOLDER_PREFIX + "x" * BROWSER_CALL_FOLDER_RANDOM_CHARS
 BROWSER_ARTIFACTS_FOLDER = "artifacts"
 BROWSER_PROFILES_FOLDER = "profiles"
 BROWSER_FILE_ENCODING = "utf-8"
@@ -339,6 +342,7 @@ MUSE_SERVER_TRANSPORT_FIELD = "transport"
 MUSE_SERVER_URL_FIELD = "url"
 MUSE_STREAMABLE_HTTP_TRANSPORT = "streamable_http"
 MUSE_MCP_TOOL_PREFIX = "mcp"
+MUSE_TOOL_NAME_SEPARATOR = "__"
 
 # Field names of the refusals; a refusal names an index, a registry name
 # or a position, never the caller's text (spec D-28).
@@ -387,6 +391,7 @@ BROWSER_INSTALL_TIMEOUT_DETAIL = "npm did not finish installing {package} within
 BROWSER_INSTALL_NO_ENTRY_DETAIL = "npm installed {package} but its entry file is missing, so nothing was published."
 BROWSER_CALL_FOLDER_DETAIL = "The per-call browser folder could not be created in the temp folder {folder} ({error_type})."
 BROWSER_TOOLS_UNAVAILABLE_DETAIL = "The vendor's output shows neither a connection to nor a call on these mounted servers, so no mounted tool was used on them: {servers}."
+BROWSER_GROK_AGENT_FILE_DETAIL = "The Grok agent file could not be written into the per-call folder {folder} ({error_type})."
 BROWSER_REQUIRED_SERVER_DETAIL = "Muse Code stopped the run because a mounted server failed to start."
 BROWSER_GROK_KEYED_REMOTE_DETAIL = "Grok Build would need the key of the remote tool {tool} written into its agent file, so the SDK does not mount it; Grok mounts stdio tools with or without a key and remote tools without one."
 BROWSER_GROK_BUDGET_DETAIL = "The Grok allow and deny rules for these tools take {units} command-line units, more than the {limit} the SDK leaves for them; narrow the capabilities or mount fewer tools."
