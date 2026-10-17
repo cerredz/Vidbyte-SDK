@@ -185,8 +185,11 @@ class AnthropicProvider:
 
     def _is_repeat(self, payload: Mapping[str, Any]) -> bool:
         # Whether this adapter sent these tools and this system before;
-        # a new pair is remembered, clearing a full memory first.
-        encoded = json.dumps([payload.get("tools"), payload.get("system")], sort_keys=True, ensure_ascii=False).encode("utf-8")
+        # a new pair is remembered, clearing a full memory first. The
+        # digest encodes a lone surrogate as it is, which strict UTF-8
+        # refuses; the body sent is untouched, and the transport's own
+        # json.dumps escapes it as on main.
+        encoded = json.dumps([payload.get("tools"), payload.get("system")], sort_keys=True, ensure_ascii=False).encode("utf-8", "surrogatepass")
         digest = hashlib.sha256(encoded).hexdigest()
         if digest in self._seen_prefixes:
             return True
