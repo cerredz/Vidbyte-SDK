@@ -2,7 +2,7 @@
 
 PURPOSE: Defines the launch_subagent tool and InfinitePair, its pipeline stage: the root or a generator hands over a batch of tasks, each task runs as a fresh generator followed by a fresh verifier that checks and fixes its work, the pair's staged memory entries are committed or dropped by the verdict, and the parent gets back one short result card per task, only the finished line and the summary when the pair is done and passed or fixed.
 ROLE IN CODEBASE: InfiniteMemoryRuntime (runtime.py) adds one InfiniteLaunchTool to the root for each run; InfinitePair adds one to every generator, with a DelegationLimitsMiddleware (vidbyte/middleware/builtins/delegation_limits.py) at the generator's depth that refuses a call past max_depth or max_parallel. Pairs use InfiniteWorkspace (workspace.py) for context entries, commits, and the map, InfiniteRunJournal (journal.py) to record and replay pairs, and InfiniteAgentMemory (memory.py) for each child's memory tools.
-ARCHITECTURE NOTE: The tool checks the whole batch before anything starts, records every new pair as started, and runs the pairs at once through ParallelPipeline, as JevBulkWorkTool does. Each pair builds plain BaseAgents with a fresh context holding the workspace map, its own masking and history-trimming middleware (and, for a generator, the delegation limits), the windowed read_lines and smart-case grep, and only the extras its task card names; a pair turns every SDK, disk, or decode error into its own card, so siblings and the parent keep going. The tool is internal, so the loop's tool timeout and result cap never cut a batch; the cards are capped here instead.
+ARCHITECTURE NOTE: The tool checks the whole batch before anything starts, records every new pair as started, and runs the pairs at once through ParallelPipeline, as JevBulkWorkTool does. Each pair builds plain BaseAgents with a fresh context holding the workspace map, its own masking and history-trimming middleware (and, for a generator, the delegation limits), the windowed read_lines, search_memory, and smart-case grep (a generator under the DELEGATED recall mode gets recall instead of grep, as InfiniteMemoryToolRegistry says), and only the extras its task card names; a pair turns every SDK, disk, or decode error into its own card, so siblings and the parent keep going. The tool is internal, so the loop's tool timeout and result cap never cut a batch; the cards are capped here instead.
 FUNCTION INVENTORY: InfiniteLaunchTool.spec builds the closed task-card schema; execute is the narrated main function, which reads the model's tasks with ToolArguments.records (vidbyte/lib/tools/arguments.py); _check applies the batch rules that need the journal or the workspace. InfinitePair.run is the narrated main function; _agent builds one child agent; _task_message and _verifier_message write the two first messages; _status, _verdict, _commit, _finish, and _error_text each do one step, and TokenEstimate.cap caps each card text; render formats a card for a parent, compact (its finished line and summary) for a done pair that passed or was fixed and whole otherwise, and finished_lines formats a list of finished pairs.
 COMMON MODIFICATION PATTERNS: A new per-call delegation cap is one more field on DelegationLimits and one check in DelegationLimitsMiddleware; a batch rule that needs the journal or the workspace is one more check in _check with a message that says what to fix. A new task-card field adds the field to InfiniteTaskCard, one schema property and description leaf here, and its use in _task_message or _agent.
 WHAT NOT TO DO IN THIS FILE: 1. Do not start any agent before the whole batch passes _check and every new pair has its pair_started record. 2. Do not catch CancelledError or BaseException in InfinitePair.run; cancelling the run must stop every pair. 3. Do not give a child a developer tool its card does not name, or a verifier the launch tool. 4. Do not pass a child's transcript to its verifier or its parent; only the capped card goes up. 5. Do not add module-level constants here.
@@ -58,6 +58,7 @@ from vidbyte.lib.enums.infinite import (
 )
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import ConfigurationError, ToolExecutionError, VidbyteSdkError
+from vidbyte.lib.registries.infinite import InfiniteMemoryToolRegistry
 from vidbyte.lib.tools.arguments import ToolArguments
 from vidbyte.lib.util import TokenEstimate
 from vidbyte.middleware import (
@@ -257,12 +258,13 @@ class InfinitePair(BasePipeline):
         # @intent children-start-fresh-with-only-what-they-need
         # A child gets the parent's model, provider settings, and
         # permission policy, the role's rules, a map of the workspace,
-        # its own masking and history trim, and only the extras its card
-        # names;
+        # the workspace tools its recall mode does not withhold, its own
+        # masking and history trim, and only the extras its card names;
         # agent-bound extras are cloned as in a fork.
         launch, settings = self.launch, self.launch.settings
         granted = tuple(tool for tool in launch.extras if tool.spec().name in self.card.tools)
         level = launch.depth + INFINITE_DEPTH_STEP
+        withheld = InfiniteMemoryToolRegistry.withheld_tool_names(launch.workspace.settings.recall_mode, memory.role)
         delegation: tuple[BaseTool, ...] = ()
         limits: tuple[AgentMiddleware, ...] = ()
         # @intent every-generator-may-delegate-within-the-caps
@@ -288,7 +290,7 @@ class InfinitePair(BasePipeline):
             model_mode=settings.model_mode,
             temperature=settings.temperature,
             timeout_seconds=settings.timeout_seconds,
-            tools=(*InfiniteMemoryAgentTools.get_tools(Path(settings.root_dir), launch.workspace.root, launch.workspace.settings.max_tokens, launch.workspace.settings.max_read_lines, launch.workspace.full_text), *memory.tools(), *delegation, *(AgentForker._clone_tool(tool, None, None) for tool in granted)),
+            tools=(*(tool for tool in InfiniteMemoryAgentTools.get_tools(Path(settings.root_dir), launch.workspace.root, launch.workspace.settings.max_tokens, launch.workspace.settings.max_read_lines, launch.workspace.full_text) if tool.name not in withheld), *memory.tools(), *delegation, *(AgentForker._clone_tool(tool, None, None) for tool in granted)),
             permission_policy=settings.permission_policy,
             agent_loop_settings=settings.loop,
             context_manager=context,

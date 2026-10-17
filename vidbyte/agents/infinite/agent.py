@@ -2,7 +2,7 @@
 
 PURPOSE: Exposes InfiniteMemoryAgent, a root agent that ruthlessly delegates work to generator and verifier subagent pairs and keeps its memory in one guarded workspace folder, built from one validated InfiniteMemoryAgentSettings; and its resume/aresume, which continue an interrupted run from its journal.
 ROLE IN CODEBASE: Maps the settings into BaseAgent with AgentRuntimeType.INFINITE_MEMORY, which RuntimeRegistry resolves to InfiniteMemoryRuntime (runtime.py). Builds the InfiniteWorkspace (workspace.py) once, and passes it, the settings, and a resumed run's journal (journal.py) to each run-local runtime through _runtime_extension_kwargs.
-ARCHITECTURE NOTE: A closed construction surface like JevAgent: callers pass only the settings object, and the runtime, the preset tools, and the middleware are fixed here. The root's search_memory searches the workspace's one full-text index, which every child shares. The middleware order is masking (older grep, read_lines, and search_memory outputs become the masked_output leaf, the calls stay), then the history trim with its low watermark, then the delegation limits, so the trim measures the masked view. The root holds bash, grep, read_lines, and search_memory from InfiniteMemoryAgentTools plus the developer's extras; the runtime adds the run-bound tools for each run. Durable sessions are not supported, because a restored agent would be a plain BaseAgent that the runtime refuses; the run journal is the resume path instead.
+ARCHITECTURE NOTE: A closed construction surface like JevAgent: callers pass only the settings object, and the runtime, the preset tools, and the middleware are fixed here. The root's search_memory searches the workspace's one full-text index, which every child shares. The middleware order is masking (older grep, read_lines, and search_memory outputs become the masked_output leaf, the calls stay), then the history trim with its low watermark, then the delegation limits, so the trim measures the masked view. The root holds bash, grep, read_lines, and search_memory from InfiniteMemoryAgentTools, less the tools InfiniteMemoryToolRegistry.withheld_tool_names names for its recall mode (grep under DELEGATED), plus the developer's extras; the runtime adds the run-bound tools for each run. Durable sessions are not supported, because a restored agent would be a plain BaseAgent that the runtime refuses; the run journal is the resume path instead.
 FUNCTION INVENTORY: __init__ is the narrated main function; _runtime_extension_kwargs hands the run-time objects to the runtime; resume and aresume find an unfinished run and continue it; _resume_prompt writes the resumed root's first message.
 COMMON MODIFICATION PATTERNS: A new agent-level capability is a validated field on InfiniteMemoryAgentSettings (settings.py) used here or passed to the runtime through _runtime_extension_kwargs.
 WHAT NOT TO DO IN THIS FILE: 1. Do not accept BaseAgent keyword arguments; everything comes from the settings. 2. Do not start a run in resume before the journal checks pass. 3. Do not share one middleware instance between agents; each agent builds its own.
@@ -32,8 +32,10 @@ from vidbyte.lib.constants.infinite import (
 )
 from vidbyte.lib.dataclasses.agents import AgentMessage
 from vidbyte.lib.enums import AgentRuntimeType
+from vidbyte.lib.enums.infinite import InfiniteAgentRole
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.registries.infinite import InfiniteMemoryToolRegistry
 from vidbyte.middleware import (
     DelegationLimitsMiddleware,
     MessageHistoryCompactionMiddleware,
@@ -66,7 +68,9 @@ class InfiniteMemoryAgent(BaseAgent):
         self._resuming_var: contextvars.ContextVar[InfiniteRunJournal | None] = contextvars.ContextVar(f"vidbyte_infinite_resuming_{id(self)}", default=None)
 
         # Build the root: the developer's prompt plus the delegation
-        # rules, the preset tools plus the developer's extras, its own
+        # rules, the preset tools plus the developer's extras, without
+        # the workspace tools its recall mode withholds (grep when it
+        # asks a retriever through recall instead), its own
         # masking of older search and read outputs, its own history trim,
         # so old tool results drop out past the cap while the task, the
         # rules, and the map stay, and the delegation caps.
@@ -75,11 +79,12 @@ class InfiniteMemoryAgent(BaseAgent):
         # are enforced by DelegationLimitsMiddleware, so the prompt holds
         # no numbers the code could contradict.
         rules = Prompts().get(Prompt.INFINITE_MEMORY_ROOT_SYSTEM_PROMPT)
+        withheld = InfiniteMemoryToolRegistry.withheld_tool_names(settings.workspace.recall_mode, InfiniteAgentRole.ROOT)
         super().__init__(
             name=settings.name,
             system_prompt=f"{settings.system_prompt}\n\n{rules}",
             runtime=AgentRuntimeType.INFINITE_MEMORY,
-            tools=(*InfiniteMemoryAgentTools(Path(settings.root_dir), self.workspace.root, settings.workspace.max_tokens, settings.workspace.max_read_lines, self.workspace.full_text).all(), *settings.tools),
+            tools=(*(tool for tool in InfiniteMemoryAgentTools(Path(settings.root_dir), self.workspace.root, settings.workspace.max_tokens, settings.workspace.max_read_lines, self.workspace.full_text).all() if tool.name not in withheld), *settings.tools),
             permission_policy=settings.permission_policy,
             agent_loop_settings=settings.loop,
             middleware=(
