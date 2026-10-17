@@ -57,7 +57,7 @@ A preset runs its registered command (`PlaywrightMCP` runs `python -m mcp_server
 
 All of them live in `vidbyte/lib/constants/browser.py`, and every cap is enforced in code; the prompts carry no numbers.
 
-- Orchestrator: 1,000 iterations and tool results cut at 20,000 characters, unless you pass another `loop`; history rebuilt past 60,000 tokens.
+- Orchestrator: 1,000 iterations and tool results cut at 20,000 characters, unless you pass another `loop`; history rebuilt past 60,000 tokens. `run_episode` is an internal tool, so `loop.max_tool_calls` never counts it: episodes are bounded by `loop.max_iterations` and by how many the model starts in one turn. `patch_goal` is an ordinary tool and does count.
 - Each episode: `max_actions` 30 browser calls (the worker's `max_tool_calls`), `max_screenshots` 5 per screenshot tool (`ToolSettings.max_calls_per_tool`), the newest `keep_observations` 2 results of each tool kept whole and older ones cut to 400 characters, and the worker's history trimmed to 32,000 tokens.
 - Rechecks: `recheck_every` 5 episodes and `max_stalls` 3.
 - Servers: `timeout` 30 seconds per request, at most 600.
