@@ -56,6 +56,7 @@ prompt text.
 | Actor Runtime | `actor_runtime` | planner, coder, reviewer, generator, critic, reasoner, summarization, decomposer, explorer, tradeoff, hypothesis_generator, refiner, formatter, safety, final_answer | [actor_runtime/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/actor_runtime) |
 | Agentic Engineering | `agentic_engineering` | system_prompt, error_messages, file_headers, folder_readme, function_design, intent_based_commenting, feature_test_packs | [agentic_engineering/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_engineering) |
 | Agentic Loop | `agentic_loop` | context_prompt | [agentic_loop.json](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_loop.json) |
+| Browser Agent | `browser_agent` | orchestrator_system_prompt, worker_system_prompt, episode_prompt, done_when_system_prompt, recheck_system_prompt, recheck_prompt, goal_card, result_card, run_episode_description, run_episode_task_description, run_episode_done_when_description, patch_goal_description, patch_goal_section_description, patch_goal_text_description, patch_refused, progress_full, continue_prompt, stuck_summary, stalled_output | [browser_agent/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/browser_agent) |
 | Context Engineering | `context_engineering` | guideline_prompt | [context_engineering.json](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/context_engineering.json) |
 | Create Skills | `create_skills` | create_skill | [create_skills/create_skill.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/create_skills/create_skill.md) |
 | Continual Trace | `continual_trace` | system_prompt | [continual_trace/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/continual_trace/system_prompt.md) |
@@ -123,6 +124,28 @@ where the source and its tests form a high-signal interface for any downstream
 coding agent.
 
 Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_engineering>
+
+#### Browser Agent — `browser_agent`
+
+Instructions for BrowserAgent, an orchestrator that plans long browser tasks and
+hands page work to fresh episode workers that act through the developer's
+browser MCP servers. Every leaf is its own Markdown file, `<leaf>.md`, in the
+folder, and `browser_agent.json` maps each leaf key to its file.
+`orchestrator_system_prompt` and `worker_system_prompt` are the sectioned
+operating manuals of the two roles: planning, delegating episodes, keeping the
+goal card, and finishing through `isDone` for the orchestrator; acting on pages,
+saving evidence, and returning the card before the budget runs out for the
+worker. `episode_prompt` briefs one worker, `done_when_system_prompt` turns a
+task into done criteria, and `recheck_system_prompt` and `recheck_prompt` ask a
+fresh agent whether the goal is done from the goal, the criteria, and the
+progress only. `goal_card` is the card pinned at the top of the orchestrator's
+context and `result_card` is the episode card it reads. `patch_refused`,
+`progress_full`, `continue_prompt`, `stuck_summary`, and `stalled_output` are
+the runtime's short replies and outputs, and the `*_description` leaves describe
+`run_episode` and `patch_goal` and their parameters. They carry behavior only:
+every cap is enforced in code, and no leaf states a number.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/browser_agent>
 
 #### Context Engineering — `context_engineering`
 
