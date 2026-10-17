@@ -15,7 +15,7 @@ started: 2026-10-15 18:04
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-15 18:04 | 2026-10-15 18:52 | reports/S0-scout.md | base_commit 5c08c35e; code-map.md (4 sections, ~90 files read) |
-| S1 spec + review | running (r1 7df09460 → round 1 SOUND WITH FIXES, 0B/8M/3m → r2 25358062, all 11 accepted; scoped round 2 review running) | 2026-10-15 19:05 | | reports/S1-spec-author.md; reports/S1-spec-review.md (pending) | spec r1 (~197 KB, 18 sections, 27 §12.3 rows, 40 new files, 42 public names; FR 18, NFR 11, AC 23, EC 72, INV 36, D 28, W 13, A 11, Q 10 non-blocking) |
+| S1 spec + review | running (r1 7df09460 → round 1 SOUND WITH FIXES 0B/8M/3m → r2 25358062 → round 2 SOUND WITH FIXES 1B/2M/3m (R-12..R-17) → final author revision r3 running, sets approved) | 2026-10-15 19:05 | | reports/S1-spec-author.md; reports/S1-spec-review.md; reports/S1-spec-review-r2.md | spec r2: 18 sections, 28 §12.3 rows, 40 new + 9 modified files, 42 public names; FR 18, NFR 11, AC 23, EC 76, INV 36, D 28, W 13, A 11, Q 11 (none blocking) |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -24,7 +24,7 @@ started: 2026-10-15 18:04
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 1/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 (cap reached; no round 3) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Key SHAs
 - BASE_COMMIT: 5c08c35edcb1827e190ca4e2b2b1370808ef24be (head of PR #1036 at S0; the base moved from 4a7987c7 during S0 via a merge of main that touched 2 unrelated files)
@@ -55,6 +55,9 @@ started: 2026-10-15 18:04
 
 - 2026-10-16 ~18:25 — Interruption 4: the S1 round-2 reviewer was stopped by an API rate limit (HTTP 429, session limit, reset 9:40pm) before writing its report. Verified 2026-10-16 21:41: HEAD edac7d93, clean, no reports/S1-spec-review-r2.md; it left probe scripts and run folders in `C:/Users/422mi/AppData/Local/Temp/claude/C--Users-422mi-vidbyte-repos/d2d5110d-c484-4b56-acef-651ebe9a78a5/scratchpad/s1probe-r2/` (git_table_probe.py, concurrency_probe.py, measure_prompts.py, python_facts.py, runs/, runs2/; last write 18:22). Coordinator (21:4x): resume the same reviewer, do not relaunch; round 2 is the cap. Resumed via SendMessage.
 
+- 2026-10-16 21:50 — S1 review round 2 (resumed reviewer) DONE: SOUND WITH FIXES; r2 closes R-1..R-4 and R-6..R-11; R-5 reopened as R-13. New: R-12 Blocker (INV-4 bullets and AC-15 forbid an echoed key in result-record reprs and `ThreadComposeError` attributes, while INV-4's last paragraph and EC-71 keep step text raw; fix: scope INV-4/AC-15 to text compose produces), R-13 Major (D-2 primary puts the harness calling convention in a lib record on a precedent, `RunnerHandle`, that matches only the fallback), R-14 Major (aliases advertise `(prompt, *, a, b)` but accept `**steps`; bind with `__signature__.bind` → `TypeError`), R-15/R-16/R-17 Minor (INV-26 cwd vs §9.2 repository root under `diff.relative=true`; EC-73 texts given to every `add` failure; `role_system` port keeps "any attempt to do so will fail"). None scope-adding. The git table held through the real `CliRunner` on every probed repo state.
+- 2026-10-16 21:52 — Orchestrator adjudication for the final revision: R-13 takes the reviewer's first option, build the injected-invoker form now (`ThreadStep.invoker`, default None, `repr=False, compare=False`; `__call__` raises `ConfigurationError` naming `ThreadStep.invoker` when None; composites call `ThreadBinder.invoke(step, prompt)`), because AGENTS.md:51 ("Behavior that acts on the record lives in the layer that owns that behavior") and the `RunnerHandle` precedent both point there, and it avoids a shape switch in S5. All other round-2 findings are text edits to accept. Round 2 is the cap: no round 3; the author sets `status: approved`; anything it disputes becomes a `Q-n` with a stated default.
+
 ## User replies (verbatim)
 - none (coordinator relay messages on 2026-10-15 20:0x and 2026-10-16 01:3x concerned rate-limit resumption only; no product decisions)
 
@@ -84,3 +87,11 @@ started: 2026-10-15 18:04
 - Spec r2 contract deltas: `ComposeGit.set_index` added; constants `COMPOSE_FIT_ROUNDS` and `COMPOSE_GIT_HEAD_TREE` removed; `THREAD_COMPOSE_ADD_LIKELY_CAUSE` and `THREAD_COMPOSE_ADD_NEXT_STEP` added; general composites `chain_threads(steps, template=None, *, prompt)` and `verify_with(writer, verifiers, *, prompt)`, aliases `(prompt, *, …)`; git arguments use `HEAD`, never `HEAD^{tree}` — *source:* S1 author r2.
 - On Python 3.11.0 build `JsonAnswer(...)` without a subscript (`JsonAnswer[X](...)` raises TypeError); `inspect.iscoroutinefunction(alias)` is False for the callable-instance aliases — *source:* S1 reviewer, author r2.
 - The 10 ported prompts must follow the §9.2 per-file port rules exactly (changing a port rule is Ask-first in §14); `json_answer` + schema is the only JSON contract; AC-21 forbids six named CLI texts in the ported files; C015 (source-stage lint) proves the prompt files ship; no README may live in `compose/prompts/` — *source:* S1 author r2.
+- INV-15 static policy rule 1 checks only module-level statements (`tree.body`), so class bodies are unchecked; rule 2 rejects every str, bytes, int and float literal (f-string text included) except docstrings, `__all__` strings, `""`, `0` and `1` — *source:* S1 reviewer r2.
+- `NativeThreadResult.text` (`vidbyte/lib/dataclasses/native_threads.py:218`) and `WorkspaceDiff.text` are plain fields, so their repr prints model and file text raw; the base wire builders never scrub answer text — *source:* S1 reviewer r2.
+- `RunnerHandle` (`vidbyte/lib/dataclasses/runner.py:14–20`) is a plain class forwarding to an injected `_invoke` — the precedent for `ThreadStep.invoker` — *source:* S1 reviewer r2.
+- Python 3.11.0 does not enforce a declared `__signature__` (`alias("p", opencode=1)` runs); bind explicitly with `self.__signature__.bind(...)` — *source:* S1 reviewer r2.
+- The §9.2 git table works through the real `CliRunner` on: unborn repo (`worktree add` exits 128 "invalid reference: HEAD"), nested repo with no commit (`add` exits 128), spaces and `ü` in the repo path, `& % ^` in the temp path, no git identity, a linked worktree, a sparse checkout; ten concurrent readers plus three snapshots leave 0 registrations; one snapshot of a small repo adds ~5 loose objects. Probe scripts: `C:/Users/422mi/AppData/Local/Temp/claude/C--Users-422mi-vidbyte-repos/d2d5110d-c484-4b56-acef-651ebe9a78a5/scratchpad/s1probe-r2/` — *source:* S1 reviewer r2.
+- Run git from the repository root: with `diff.relative=true`, a tree diff run from a subfolder drops paths outside it — *source:* S1 reviewer r2.
+- `CliRunner`: child stdin is `DEVNULL` when `stdin_text` is None (runner.py:200); child env = `os.environ` minus `env_remove`, then `env_overlay` (runner.py:278–279); on win32 `find_program` follows PATHEXT, so a `git.cmd` earlier on PATH wins and the runner does not refuse batch files (only hostkit does) — *source:* S1 reviewer r2.
+- The 438 base harness_threads tests collect in this worktree — *source:* S1 reviewer r2.
