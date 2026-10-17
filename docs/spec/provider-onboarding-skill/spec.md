@@ -1,15 +1,15 @@
 ---
 spec: provider-onboarding-skill
 title: "Onboard-model-provider skill: one source-backed, mutation-tested provider PR per unattended run"
-status: verified         # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
-revision: 9
+status: pr-open          # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
+revision: 10
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-provider-onboarding-skill
 branch: feat/onboard-model-provider-skill
 base_commit: 72a4ade129d74bab45b4fc12764d951df6d1ec3b
 created: 2026-10-15
 updated: 2026-10-17
-pr: https://github.com/cerredz/Vidbyte-SDK/pull/1175  # filled at S3 (draft) and finalized at S6
+pr: https://github.com/cerredz/Vidbyte-SDK/pull/1175
 ---
 
 # Spec: Onboard-model-provider skill: one source-backed, mutation-tested provider PR per unattended run
@@ -131,29 +131,61 @@ The person no longer researches vendors, hunts for the 33 touch points, or write
 
 ## §5 Flow diagram
 
+The flowchart is drawn from the shipped SKILL.md and `references/provider-run.md` (r10, S6). It is the same diagram as the PR body's Flow section.
+
 ```mermaid
 flowchart TD
-  U[person sends /onboard-model-provider] --> P[SKILL.md preflight: repo, origin, gh push, git identity, interpreter, Agent tool]
-  P -->|fails| S1[STOP PREREQ_MISSING]
-  P --> F[pass top: git fetch origin main]
-  F -->|PRICING_AS_OF not before today| S2[STOP VINTAGE_DEFERRED]
-  F --> B[back-pressure: gh api open PRs on feat/provider-* plus this session's PRs]
-  B -->|count >= 3| S3[STOP BACKPRESSURE]
-  B --> W[selection walk over the seed list: member, PRs any state, remote branch, local branch]
-  W -->|none left| S4[STOP NO_CANDIDATE]
-  W -->|slug| T[git worktree add -b feat/provider-slug from origin/main]
-  T -->|add exit not 0: record local-branch, next vendor| W
-  T -->|brief| A[fresh subagent runs references/provider-run.md]
-  A -->|research fails a check| D[DISQUALIFIED reason]
-  A -->|proof fails| S5[STOP PROOF_FAILED, worktree kept]
-  A -->|push or PR fails| S6[STOP PUBLISH_FAILED, worktree kept]
-  A -->|refused by network policy| S7[STOP NETWORK_BLOCKED]
-  A -->|PR opened| V[orchestrator verifies: PR by number, diff paths, managed set untouched, gate lines in body]
-  V -->|mismatch| S8[STOP RESULT_UNVERIFIED, worktree kept]
-  V -->|ok| C[remove worktree, ledger line]
-  D --> C2[remove worktree and branch, ledger line] --> F
-  C --> F
+  start(["person sends /onboard-model-provider"]) --> pre["Preflight, once: git-repo, origin-remote, github-push, git-identity, python-dev-extras, agent-tool"]
+  pre -->|a check fails| sPre["STOP PREREQ_MISSING name, then the remedy line after python-dev-extras"]
+  pre --> fetch["Pass top: git fetch origin main"]
+  fetch --> reads["Read main's PRICING_AS_OF, today in UTC, the open feat/provider-* PRs and the ModelProvider members"]
+  reads -->|PRICING_AS_OF is not before today| sVin["STOP VINTAGE_DEFERRED"]
+  reads -->|3 or more open, counting this session's PRs| sBp["STOP BACKPRESSURE"]
+  reads --> walk["Walk the 10 seed vendors in rank order. A ledger vendor or a member is skipped without a query. Otherwise read: PRs in any state, remote branch, local branch, worktree, -evidence and -main paths"]
+  walk -->|no vendor left| sNo["STOP NO_CANDIDATE"]
+  walk -->|pick: the first vendor no skip rule excludes| add["git worktree add -b feat/provider-SLUG from origin/main: the pass's first write"]
+  add -->|add exit not 0: record local-branch, next vendor| walk
+  add --> agent["Launch one fresh general-purpose subagent with the brief and wait for its PROVIDER RESULT"]
+  fetch -->|fetch fails| sNet["STOP NETWORK_BLOCKED"]
+  reads -->|a gh api read fails| sNet
+  walk -->|a gh api read or ls-remote fails| sNet
+
+  subgraph SUB["Provider subagent: references/provider-run.md, inside the new worktree"]
+    r1["1 Orient: AGENTS.md, file headers, folder READMEs"] --> r2["2 Research: curl each first-party page raw, make its text form, check every quote with grep -F"]
+    r2 --> r3["3 Qualify: pages, dialect, endpoint, slug, models, env var, key format, structured output"]
+    r3 --> r4["4 Red-first: add the enum member, write the tests, watch them fail"]
+    r4 --> r5["5 Wire every checklist row that applies, of 33"]
+    r5 --> r6["6 Self-check script"]
+    r6 --> r7["7 Commit, green run, one mutation check per new key rule"]
+    r7 --> r8["8 Gate: import path, source stage with the known-red rule, package stage"]
+    r8 --> r9["9 Publish: local-path guard, one push, one PR create"]
+  end
+
+  agent --> r1
+  r2 -->|policy denial, or GitHub unreachable| oNet["result NETWORK_BLOCKED"]
+  r3 -->|a check fails, before any edit| oDis["result DISQUALIFIED reason"]
+  r4 -->|fails| oProof["result PROOF_FAILED check"]
+  r6 -->|fails| oProof
+  r7 -->|fails| oProof
+  r8 -->|fails| oProof
+  r9 -->|guard, push or PR create fails| oPub["result PUBLISH_FAILED push or pr"]
+  r9 --> oPr["result PR_OPENED url"]
+
+  agent -->|no PROVIDER RESULT block| sUnv["STOP RESULT_UNVERIFIED, worktree kept, PR left open"]
+  oPr --> v4["Verify: PR read by number, changed paths all in the checklist, no added file, jev.py one added line, gate lines in the body"]
+  oDis --> vc["Verify: worktree HEAD is the base SHA and its status is clean"]
+  oNet --> vc
+  v4 -->|a check fails| sUnv
+  vc -->|not clean| sUnv
+  oProof --> sProof["STOP PROOF_FAILED, worktree, evidence and branch kept"]
+  oPub --> sPub["STOP PUBLISH_FAILED, worktree, evidence and branch kept"]
+  v4 -->|ok| done["Ledger line, pass line for PR_OPENED or DISQUALIFIED, then cleanup: worktree remove, branch -D, rm evidence"]
+  vc -->|ok| done
+  done -->|PR_OPENED or DISQUALIFIED, even when cleanup exit is not 0| fetch
+  done -->|NETWORK_BLOCKED| sNet
 ```
+
+Every STOP line is followed by one ledger line per seed vendor in seed order (INV-1).
 
 ```mermaid
 sequenceDiagram
@@ -1039,6 +1071,19 @@ Auth: the command runs as the person, using their `gh` and git credentials. Ther
 | r7 | 2026-10-17 | S1 revise (post-S5 alignment) | Aligned three edge-case rows with the skill text that S5 repair 1 changed; text only, no review round (s5a-1 to s5a-3). EC-30 adds the missing response-example cause, EC-40 names D-15's A13 scoped-diff exception, the new EC-62 states that exception's two checks as provider-run.md `## 8. Gate` gives them, and EC-52 states the one-clone and two-clone outcomes. In the same revision (s5a-4 to s5a-7), INV-5 (d) and the §8.5 pass-top skip reads name the `-main` twin (S5 R-E4, 416483ad), the §6.3 rollback removes that twin, FR-6 and D-3 add the failed-add branch, and T-1 states the one-clone control (S5 R-6, 02102cdb). A final sweep of all twelve S5 repair commits (s5a-8 to s5a-14) aligned §4, the §5 flowchart, INV-13, INV-15, EC-17, D-8, D-16, D-24, the §8.5 frontmatter and pass-top block, §9.1, the §9.2 GitHub calls, §12.3 row 1 and A-4. Added: EC-62. Status stays reviewed. |
 | r8 | 2026-10-17 | S5 repair 2 | Re-review round 1 fixes under the orchestrator's amendment grant (s5r2-1 onward). The new EC-63 names `PUBLISH_FAILED push local-path-guard`, the outcome of the repaired PR-body guard, which now passes a clean body in a root container (review R-11). INV-13 names the pull-request attribution line as the one URL a run writes without fetching it (review R-12). The §9.1 Cerebras reason says which checks r3 verified and where the r6 response-example check passes (s5r2-3). Status stays reviewed. |
 | r9 | 2026-10-17 | S5 repair 3 | A coordinator-relayed lesson (s5r3-1): D-13 says a provider run never edits or removes an existing vendor's key entries, and that a newer documented key shape goes to the PR's Follow-ups for a separate PR that adds it beside the old one. The verbatim-quote requirement was already met. Status stays reviewed. |
+| r10 | 2026-10-17 | S6 PR | finalized for review; §5 redrawn to the shipped flow |
+
+**§5 redraw (S6, r10).** The r7 flowchart differed from SKILL.md in seven places that change no behaviour (re-review round 1, `reports/S5-rereview-1.md`). The redrawn flowchart, the same one the PR body's Flow section carries, adds each of them:
+
+1. The selection walk skips a vendor that already has an outcome in this session's ledger (INV-5 e), and it reads the worktree, `-evidence` and `-main` paths.
+2. `DISQUALIFIED` passes the clean check before cleanup, and a dirty worktree stops `RESULT_UNVERIFIED` (EC-49).
+3. `NETWORK_BLOCKED` from the subagent passes the same clean check and the D-8 cleanup before the STOP.
+4. A failed `git fetch`, a failed `gh api` read (`prs exit` not 0) and an `ls-remote` exit other than 0 or 2 each stop `NETWORK_BLOCKED` (EC-56).
+5. A missing result block stops `RESULT_UNVERIFIED` (`no-result`).
+6. A `cleanup exit` other than 0 leaves what is left for the person, and the session continues with no STOP.
+7. Cleanup deletes the evidence directory too.
+
+The flowchart also places `PROOF_FAILED` on sections 4 and 6 to 8 and `PUBLISH_FAILED` on section 9, as the sections' steps name them. Follow-up R-15 is about the one sentence in provider-run.md's run rules that names `PROOF_FAILED` for section 9 as well. The sequence diagram already matched and is unchanged. PR #1175's body re-records the §6.2 PR-time proof on the final tip, 451478b0.
 
 **Implementation deviations (S3).** These are choices the spec left open or that the implementation had to make. None changes a requirement, an acceptance criterion or a test.
 
