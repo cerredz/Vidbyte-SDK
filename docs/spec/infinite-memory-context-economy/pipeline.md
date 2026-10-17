@@ -19,12 +19,12 @@ started: 2026-10-16 16:05
 | S3 implement | done | 2026-10-17 00:00 | 2026-10-17 | reports/S3-implementer.md | **S3_HEAD = 84e566bb** (code e21463fe); draft PR #1177; 57/57 rows; budget 14/14 files, 4/4 modules, infinite pkg 9/9 (launch.py 381/400); orchestrator re-ran 249 new+changed tests: 249 passed; lint PASS; source gate 3 failed (harness_threads, pre-existing/branch-scoped), package gate PASS; contract --check current; semgrep 0 findings; CI 39009423722 success + Static policy 39009425314 success on 5f91b456 |
 | S4 adversarial review | done | 2026-10-17 | 2026-10-17 | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; raw C 0B/1M/1m, V 2B/2M/5m, E 2B/1M/2m; verified 5 Blockers (R-1..R-5), 6 Majors (R-6, R-7 code; R-8..R-11 test-pack), 13 Minors (R-12..R-24); 2 refuted, 4 downgraded; spec status reviewed |
 | S5 test-pack (pre-repair) | done | 2026-10-17 | 2026-10-17 | reports/S5-test-pack.md | 15 new tests (R-8 4, R-9 4+guards, R-10 1, R-11 1, R-24 1) in 6 test files + FEATURE.md lines; orchestrator re-ran 7 related paths: 10 failed (all new, right reasons), 336 passed; 0 removed test lines; 0 vidbyte/lint changes; **TESTS_HEAD = 3bda907e** (repair agents: `git diff 3bda907e..HEAD -- tests` must stay empty) |
-| S5 repair loop | running | 2026-10-17 | | | |
-| S5 re-review | pending | | | | |
+| S5 repair loop | done (converged at iteration 1) | 2026-10-17 | 2026-10-17 | reports/S5-repair-1.md, verify-log.md | **S5_HEAD = 72d1ca7f**; merged origin/main 6f5a7310 (#1055) at 16e39b73; fixed R-1 848469a2, R-2 0e41b3a2, R-7 7eb2942c, R-3 5634b579, R-6 5698fdab, R-4 7d6d7449, R-19 d7bb1f4a, R-14 468303dc, R-13 1fbe3ede+8da92fb9 (C003), R-12 3ec30b9e, R-15 a805c951, R-16 7ab9a924, R-5 1a6365e6; test-pack R-8..R-11, R-24 green; orchestrator re-ran source gate: SDK-LINT PASS, 3 failed (harness_threads surface, inherited) / 6580 passed / 16 skipped; CI 39018081408 (3/3) + Static policy 39018082882 success at 72d1ca7f; PR MERGEABLE; `git log --first-parent 3bda907e..HEAD -- tests` = merge only; lint baseline untouched |
+| S5 re-review | running | 2026-10-17 | | | |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 · S5 repair iterations: 1/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-16 16:05 — Item 10 (`recall`) is built opt-in, `DIRECT` default — the checklist said "only if measurement says so" but the user said "implement all of these in 1 pr"; opt-in builds it without changing any run's behavior (request.md §C Q-ORCH-1).
@@ -53,6 +53,8 @@ started: 2026-10-16 16:05
 - 2026-10-17 — Spec r5 (987d156e) applied S4 R-3 (INV-2.3 unread outputs stay whole; AC-2.1/AC-2.2 one call per turn; new AC-2.5, EC-2.5), R-2 (INV-8.2 extended: NUL → whitespace, lone surrogate dropped; new EC-8.8; INV-8.5 excludes names UTF-8 cannot encode), R-16 (new MODIFY rows 58 `llms.txt:519`, 59 `artifacts/file_index.md:422`). The R-16 grant is extended to `llms.txt:815` (the "Direct utilities and search" tool table, same file, same omission, same repo-forced reason) — the repair agent adds `InfiniteSearchMemoryTool` there in the table's existing format.
 
 - 2026-10-17 — R-2 fix order follows spec r5 FR-8.6 + INV-8.2: blank check on the raw query first, then NUL → space and lone surrogates dropped (`" "` alone → SUCCESS 0 of 0). The verifier's `s4-verify/fix_r1.py` does it the other way and contradicts r5; the repair copies `s5-tests/fix_r2_r5.py`'s order.
+
+- 2026-10-17 — R-19 accepted as fixed with the repair agent's interpretation: a failing pre-search returns the recall-shaped error but still spends its quota slot — refunding would need an `await` between the quota check and its increment (a race the "gets right" list forbids), and INV-10.6/EC-10.3 count the slot. Re-review asked to confirm.
 
 ## User replies (verbatim)
 - (none during the run)
@@ -96,3 +98,4 @@ started: 2026-10-16 16:05
 - Probe hygiene: `python -I` ignores PYTHONIOENCODING (use `sys.stdout.reconfigure(encoding='utf-8', errors='backslashreplace')`); `-X pycache_prefix=<scratch>` defeats false passes from bytecode cache; Windows stdout is CRLF (`tr -d '
 '`); plugins load with `PYTHONPATH="<win wt>;<win dir>" ... -p <name>`. — *source:* S4 reviewers
 - S5 test-pack run commands (each red at 3bda907e, green under the scratchpad fix plugins `s5-tests/fix_r2_r5.py`, `fix_r7.py`, `s4-verify/fix_mask_batch.py`, `s5-tests/fix_anth_digest.py`): R-8 `-k "lone_surrogate or utf8_cannot_encode"` (search + recall files); R-9 `-k "parallel_batch or one_per_model_turn or newest_model_turn_whole or unanswered_batch"` (economy + compaction_windows); R-10 `-k warm_search` (audit-hook "open" counting; stat/resolve/scandir allowed, content opens of unchanged files not); R-11 `-k LoneSurrogate` (first body byte-equal to main: make only the digest surrogate-safe); R-24 `-k rowid` (trace via wrapped `sqlite3.connect`; helper must keep connecting through it). Whole tree at 3bda907e: 13 failed (10 new + 3 harness_threads pre-existing), 6370 passed, 16 skipped. — *source:* S5 test-pack author
+- C003 (allowance 0) rejects `importlib.import_module` on a non-literal; S015 needs `_LAZY_EXPORTS` to stay a dict (R-13's literal suggestion broke the gate; 8da92fb9 is the fix). Pinned semgrep 1.170.1 now lives in scratchpad `s5-repair1/semgrep170` (the shared `semgrep-venv` drifted to 1.181.0). `search_memory._listing` replaces `iter_files` there (scandir, binary files listed with no rows, survives junction loops). — *source:* S5 repair 1
