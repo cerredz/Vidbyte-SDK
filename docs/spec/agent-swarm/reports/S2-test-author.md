@@ -169,3 +169,28 @@ Feature symbols are imported inside each test, and collection has no errors. `py
 2. **§9.2 says `AgentSwarmRuntime` "runs once, and raises ConfigurationError on a second call".** It does not say whether a call refused for a bad goal counts as the run. The §8.5 pseudocode checks the goal before "mark it as run", and the AC-18 test pins that: the same runtime runs a valid goal after a refusal.
 3. **INV-1 says the goal is "the first user message".** On this loop it reaches the runner as the call's `prompt`, with `messages == []` on the first call (probed). The tests assert `prompt == goal` on every call and that the goal is never repeated as a message. This is a wording gap, not a contradiction.
 4. **INV-22 and NG-10 ("no role") give no word list.** The test bans the infinite_memory family's own role and workflow words only (see Pruned).
+
+## Addendum: `renderings` keyword clash (fixed in 87c8ed14)
+
+**Defect.** The fixture helper was declared `renderings(template, text, **known)`. Two callers pass the `{text}` field of the `inbox_message` template as `text=`:
+
+- `test_agent_swarm_messaging.py:241` (EC-2);
+- `test_agent_swarm_property.py:187` (all 36 property runs).
+
+Python raised `TypeError: renderings() got multiple values for argument 'text'` before any assertion ran. This caused all 26 failures the S3 implementer reported against the implementation (135 passed, 26 failed).
+
+The red run could not show it. Both callers sit after the feature imports, and those imports failed first. The lesson: call every fixture helper once with its real argument shapes before the feature exists.
+
+**Fix.** The haystack is now positional-only, so `text` stays free for `**known`. No assertion, no other helper and no caller changed:
+
+`def renderings(template: str, haystack: str, /, **known: object) -> int:`
+
+**Run after the fix.** The implementation was not read.
+
+```
+$ PYTHONPATH=$(pwd) python -m pytest tests/features/agent_swarm -q
+161 passed in 3.16s
+```
+
+- Three repeat runs of the pack: `161 passed in 3.16s`, `161 passed in 3.29s`, `161 passed in 3.25s`.
+- Neighbour suites: `197 passed in 5.79s`.
