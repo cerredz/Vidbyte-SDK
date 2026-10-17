@@ -148,6 +148,24 @@ The hardening slice adds these (codex-host-hardening spec):
 - Readiness ignores used-up usage → a host reports ready and its first spawn is refused. A cached model list is never refreshed → a newly enabled model is refused for the life of the host.
 - `forget_codex_turns` drops a running turn, sends a request, or unregisters the thread's tools → a turn nobody owns, or a continued thread whose tools stop answering.
 
+The first-class-features slice adds these (codex-host-first-class spec):
+
+- A collaboration mode sent without the experimental API, or kept on a goal, review, launch or fork → Codex refuses after a thread exists, or drops the mode silently.
+- A plan or mode turn priced as the spawn model instead of the model Codex resolved → a wrong cost. A settings change re-prices a running turn → its usage is split across two prices.
+- `update_codex_thread_settings` sends unset fields → Codex resets settings the caller never named.
+- The slice-2 load guard reuses compact's complete-only set → a paused goal blocks settings, memory, revert and inject, and the next step loops. It lets an active goal load → untracked paid goal turns.
+- A stream keeps every event, or waits on a slow subscriber → unbounded memory, or a turn delayed by its reader. An abandoned or never-iterated subscription keeps the window → memory held until close.
+- A stream event or log carries raw reasoning text → private reasoning reaches the caller.
+- A side chat names, unsubscribes or injects into the parent, or skips the boundary item → the parent's history changes, or the fork answers as the main thread.
+- A side chat on a fork whose approvals Codex routes to a person, on a host without a handler → approvals accepted unasked. A failed side chat keeps the fork's tools or its turn → an orphan turn spending the plan.
+- The side-chat tool runs with a writable sandbox or asks the user → a prompt-injected model escalates through a read-only feature.
+- The worktree folder is the raw branch name, git runs without a bound or with terminal prompts on, or git's stderr is copied whole into the error or a log → a path outside the root, a hang, or private paths in the logs.
+- `resume_codex_goal` resumes a spent budget, or starts the run untracked → turns refused at once, or goal turns nobody caps. `pause_codex_goal` leaves a tracked goal run open → its wait never ends.
+- Content search omits `sourceKinds` → the host's own app-server threads are never found.
+- A tool exists for clear goal, revert, inject, reset memories or the terminal clean → a prompt-injected model destroys history or stops processes.
+- An unmodeled answer is read without a check → an `AttributeError` deep in the host instead of `codex.protocol_mismatch`.
+- `wait_codex_turns` interrupts or forgets its turns at the timeout → turns stop or lose their owner silently.
+
 ## Historical Regressions
 
 - PR #1178 (codex-host-hardening AC-2 and AC-3): a spawn or launch whose `turn/start` failed raised without the new thread's id, and its tool registration stayed behind. Protected by `test_codex_host_resilience.py::CodexSpawnCleanupTests`, red until the hardening slice lands.
@@ -192,6 +210,25 @@ The hardening slice (`docs/spec/codex-host-hardening/spec.md`, test plan `docs/s
 - Every hardening module except the records, the contract (minus one class), the tool class and the live gate needs the `codex` extra, so CI skips it.
 - `codex_host_support.py` holds the spec literals, canaries, `HostTestCase` and `StubCodexHost`. `codex_host_fakes.py` holds the in-memory app-server, and `codex_host_helper_fakes.py` holds its thread-helper, goal and skill handlers, a mixin `FakeAppServer` inherits.
 
+The first-class-features slice (`docs/spec/codex-host-first-class/spec.md`, test plan `docs/spec/codex-host-first-class/test-plan.md`) adds these, all red until the slice lands:
+
+- `test_codex_host_feature_records.py` checks the new records, the collaboration-mode rules, `GitWorktreeSpec` with a seeded property test of its ref rule, and the seventeen input records (section 9.1). It is CI-visible.
+- `test_codex_host_feature_constants.py` pins the section 9.2 texts, the section 9.3 values, the ten new enums and the twenty-five new operations. It is CI-visible.
+- `test_codex_host_feature_structure.py` checks the four SDK-free mixins over `CodexHostCore`, the section 8.5 signatures, the import probe, the `TYPE_CHECKING`-only imports, the INV-47 line ceilings and the two frozen files. It is CI-visible, except the collaborator-interface class.
+- `test_codex_host_feature_docs.py` checks the limits each new docstring must state (FR-33, T-1). It is CI-visible.
+- `test_codex_host_feature_tools.py` checks the sixteen new tools: no tool for the INV-42 functions, no posture parameter, the paid-work sentence, the arguments passed, the side-chat posture, cap slots, ownership and error results (AC-35 to AC-37). Its stub-host classes are CI-visible.
+- `test_codex_host_feature_contract.py` covers the call guards, the experimental gate, the error packets with one failed call record each, malformed answers and a dead app-server for all twenty-five methods (AC-8, AC-34, AC-41).
+- `test_codex_host_settings_modes.py` covers thread settings, the preset list, modes on the wire and their pricing, the plan run and its fallback answer, and turn settings (AC-2 to AC-11, AC-20).
+- `test_codex_host_stream_wait.py` covers the stream's order, bounds, gaps, release rules and handle checks, a slow approval handler, and `wait_codex_turns` (AC-12 to AC-18, AC-43, AC-44).
+- `test_codex_host_mcp_memory.py` covers the MCP listing and the three memory functions (AC-19, AC-21).
+- `test_codex_host_side_chat.py` covers the side-chat flow, its refusals and its cleanup (AC-22, AC-23, AC-42).
+- `test_codex_host_worktree.py` covers `create_codex_worktree` and `GitWorktrees` with the real git on temporary repositories (AC-24). Its `GitWorktrees` class is CI-visible wherever git is installed.
+- `test_codex_host_goal_control.py` covers pause, resume, edit and clear of a goal (AC-25 to AC-29).
+- `test_codex_host_thread_admin.py` covers archive, unarchive, rename, revert, inject, the terminals, content search, the child listing and the load guard (AC-30 to AC-33).
+- `test_codex_host_first_class_snippet.py` runs the section 4 snippet (AC-1).
+- `codex_host_feature_support.py` holds the slice's literals and `FeatureStubMethods`, and `codex_host_feature_fakes.py` holds the fake's slice-2 handlers, a mixin `FakeAppServer` inherits. `FeatureHostCase` in `codex_host_support.py` keeps a request window per test.
+- The section 13 pins in nine older modules now expect the slice: 42 tools, the new exports, enums and operations, the fork row's `collaboration_mode` tail, and the seventh `GOAL_REJECTED_FIELDS` entry.
+
 Run it with `PYTHONPATH=$(pwd) python -m pytest -q tests/features/codex_host`, from the worktree root, with the venv that has the `codex` extra.
 
 ## Omitted Testing Strategies
@@ -211,3 +248,6 @@ Run it with `PYTHONPATH=$(pwd) python -m pytest -q tests/features/codex_host`, f
 - **`forget_codex_turns` racing a handed-over start (hardening EC-19):** the window is a few instructions wide; the busy row proves the same `require_idle` refusal deterministically.
 - **The focused C021 agent lint (hardening AC-40):** it is a command the implementer and reviewer run (`AGENT-LINT: PASS`); the pack scans `vidbyte/harnesses/native` with `ast` for the same rule.
 - **Stdlib logging when a handler raises (hardening EC-44):** that is the standard library's behaviour, not the host's.
+- **The first-class controls not built (the queue, P2 items, one-shot mirrors, a stream tool, turn-less notification watching, Q-10, Q-11):** there is nothing to test, and no test asks for them.
+- **First-class T-4 and T-7:** T-4 is N/A (one account's private app-server) and T-7 is out of scope (Codex owns sign-in), so neither has a control to test.
+- **How long a slow approval handler pauses a stream (first-class EC-55):** the test checks that every event arrives after the handler answers; a timed pause would need a wall clock.

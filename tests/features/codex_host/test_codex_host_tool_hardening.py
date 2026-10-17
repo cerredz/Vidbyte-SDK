@@ -45,6 +45,21 @@ NO_HANDLE_ARGUMENTS: dict[str, dict[str, Any]] = {
     "spawn_codex_thread": {"prompt": "Fix the failing test."},
     "list_codex_skills": {},
     "get_codex_goal": {"thread_id": "thr-elsewhere"},
+    # docs/spec/codex-host-first-class/spec.md section 13: one row per new tool that needs no turn handle.
+    "update_codex_thread_settings": {"thread_id": "thr-elsewhere", "effort": "high"},
+    "list_codex_collaboration_modes": {},
+    "run_codex_plan": {"prompt": "Plan a fix for the failing test."},
+    "list_codex_mcp_servers": {},
+    "get_codex_memory_status": {},
+    "start_codex_side_chat": {"thread_id": "thr-elsewhere", "prompt": "Which step of the plan is riskiest?"},
+    "pause_codex_goal": {"thread_id": "thr-elsewhere"},
+    "resume_codex_goal": {"thread_id": "thr-elsewhere"},
+    "archive_codex_thread": {"thread_id": "thr-elsewhere"},
+    "unarchive_codex_thread": {"thread_id": "thr-elsewhere"},
+    "rename_codex_thread": {"thread_id": "thr-elsewhere", "name": "Login fix"},
+    "list_codex_background_terminals": {"thread_id": "thr-elsewhere"},
+    "search_codex_thread_content": {"query": "login"},
+    "list_codex_child_threads": {"thread_id": "thr-elsewhere"},
 }
 # INV-44 and AC-36: parameter names no tool may offer the model.
 FORBIDDEN_PARAMETERS = frozenset(
@@ -124,7 +139,8 @@ class CodexToolSurfaceGuardTests(unittest.TestCase):
 
     def test_the_toolset_holds_26_tools_and_offers_no_forbidden_parameter(self) -> None:
         tools = _toolset(StubCodexHost())
-        self.assertEqual(len(tools), 26)
+        # docs/spec/codex-host-first-class/spec.md section 13: 42 tools (INV-41).
+        self.assertEqual(len(tools), 42)
         self.assertEqual(tuple(tools.names()), TOOL_NAMES)
         for tool in tools:
             spec = tool.spec()

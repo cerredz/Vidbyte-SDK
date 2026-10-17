@@ -30,7 +30,8 @@ from vidbyte.lib.dataclasses.tools import ToolCall, ToolResult, ToolStatus
 from vidbyte.lib.errors import CodexAgentError
 
 WORKSPACE = os.path.abspath(os.path.join(os.sep, "agent-workspace"))
-NEW_ROWS = TOOL_TABLE[15:]
+# docs/spec/codex-host-first-class/spec.md section 13: the thread-helper rows end at 26, before the sixteen first-class rows.
+NEW_ROWS = TOOL_TABLE[15:26]
 NEW_TOOLS = tuple(row[0] for row in NEW_ROWS)
 RUN_TOOLS = ("run_codex_goal", "run_codex_skill", "run_codex_openai_docs")
 # Spec section 9.2 tool table: the JSON type of each new parameter.
@@ -130,7 +131,8 @@ class CodexHelperToolShapeTests(_ToolCase):
 
         tools = _toolset(StubCodexHost(), max_live_turns=1)
         self.assertEqual(tuple(tools.names()), TOOL_NAMES)
-        self.assertEqual(len(tools), 26)
+        # docs/spec/codex-host-first-class/spec.md section 13: 42 tools once the sixteen first-class tools follow.
+        self.assertEqual(len(tools), 42)
         self.assertNotIn("delete_codex_thread", tools.names())
         for tool, (name, class_name, permission, parameters, required) in zip(list(tools)[15:], NEW_ROWS):
             with self.subTest(tool=name):

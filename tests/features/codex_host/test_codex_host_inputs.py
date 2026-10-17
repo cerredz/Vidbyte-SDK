@@ -13,11 +13,14 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import importlib
 import inspect
+import os
 import unittest
 from collections.abc import Callable
 from typing import Any
 
+from tests.features.codex_host.codex_host_feature_support import GOAL_EDIT_EMPTY_MESSAGE, INJECT_ITEMS_MESSAGE, WORKTREE_REPOSITORY_MESSAGE
 from tests.features.codex_host.codex_host_support import WAIT_SECONDS, HostTestCase, requires_sdk
 from vidbyte.lib.dataclasses import codex_host_inputs
 from vidbyte.lib.dataclasses.codex import CodexRunInput, CodexTextInput, CodexThreadSettings
@@ -48,6 +51,19 @@ HANDLE = CodexTurnHandle(thread_id="thr-1", turn_id="turn-1")
 TARGET = CodexReviewTarget(kind=CodexReviewTargetKind.UNCOMMITTED_CHANGES)
 GOAL = CodexGoal(objective="Ship the fix.")
 EPHEMERAL = CodexSpawnRequest(thread=CodexThreadSettings(ephemeral=True))
+# An absolute folder that exists, as CodexWorktreeRequest.repository must be.
+EXISTING_FOLDER = os.path.dirname(os.path.abspath(__file__))
+
+
+def _features() -> Any:
+    # docs/spec/codex-host-first-class/spec.md section 9.1: read at call time, so this file imports before the module exists.
+    return importlib.import_module("vidbyte.lib.dataclasses.codex_host_features")
+
+
+def _enums() -> Any:
+    # The new enums of section 8.5, read at call time for the same reason.
+    return importlib.import_module("vidbyte.lib.enums.codex")
+
 
 # One valid instance of every record the module exports.
 VALID_RECORDS: dict[str, Callable[[], Any]] = {
@@ -70,6 +86,24 @@ VALID_RECORDS: dict[str, Callable[[], Any]] = {
     # docs/spec/codex-host-hardening/spec.md INV-19 and D-33: the constructor's record. Read from the module at call time,
     # so this file still imports before the record exists.
     "CodexHostSetup": lambda: codex_host_inputs.CodexHostSetup(),
+    # docs/spec/codex-host-first-class/spec.md section 9.1: the seventeen input records of the new functions.
+    "CodexThreadSettingsRequest": lambda: codex_host_inputs.CodexThreadSettingsRequest(thread_id="thr-1", settings=_features().CodexThreadSettingsUpdate(model="gpt-5.5")),
+    "CodexPlanRunRequest": lambda: codex_host_inputs.CodexPlanRunRequest(prompt="Plan the fix.", request=CodexSpawnRequest()),
+    "CodexTurnsWaitRequest": lambda: codex_host_inputs.CodexTurnsWaitRequest(handles=(HANDLE,), return_when=_enums().CodexTurnWaitMode.ALL_COMPLETED, timeout_seconds=1.5),
+    "CodexMcpServerListRequest": lambda: codex_host_inputs.CodexMcpServerListRequest(thread_id="thr-1", server_name="docs", detail=_enums().CodexMcpServerDetail.FULL, cursor="c-1", limit=5),
+    "CodexTurnSettingsRequest": lambda: codex_host_inputs.CodexTurnSettingsRequest(handle=HANDLE, effort=_enums().CodexReasoningEffort.LOW),
+    "CodexMemoryModeRequest": lambda: codex_host_inputs.CodexMemoryModeRequest(thread_id="thr-1", mode=_enums().CodexMemoryMode.DISABLED),
+    "CodexMemoryStatusRequest": lambda: codex_host_inputs.CodexMemoryStatusRequest(min_consolidated_threads=5),
+    "CodexSideChatRequest": lambda: codex_host_inputs.CodexSideChatRequest(thread_id="thr-1", prompt="Which step is riskiest?", request=CodexSpawnRequest()),
+    "CodexWorktreeRequest": lambda: codex_host_inputs.CodexWorktreeRequest(repository=EXISTING_FOLDER, branch="feat/x"),
+    "CodexGoalResumeRequest": lambda: codex_host_inputs.CodexGoalResumeRequest(thread_id="thr-1", request=CodexSpawnRequest()),
+    "CodexGoalEditRequest": lambda: codex_host_inputs.CodexGoalEditRequest(thread_id="thr-1", objective="New aim."),
+    "CodexThreadRevertRequest": lambda: codex_host_inputs.CodexThreadRevertRequest(thread_id="thr-1", before_turn_id="turn-2"),
+    "CodexThreadRenameRequest": lambda: codex_host_inputs.CodexThreadRenameRequest(thread_id="thr-1", name="New name"),
+    "CodexItemsInjectRequest": lambda: codex_host_inputs.CodexItemsInjectRequest(thread_id="thr-1", items=[{"type": "message", "role": "user", "content": []}]),
+    "CodexTerminalListRequest": lambda: codex_host_inputs.CodexTerminalListRequest(thread_id="thr-1", cursor="c-1", limit=5),
+    "CodexThreadSearchRequest": lambda: codex_host_inputs.CodexThreadSearchRequest(query="login", archived=True, limit=5),
+    "CodexChildThreadsRequest": lambda: codex_host_inputs.CodexChildThreadsRequest(thread_id="thr-1", descendants=True, limit=5),
 }
 
 # (label, factory, text the refusal must contain): each row breaks one rule of a valid baseline.
@@ -182,6 +216,8 @@ class CodexHostInputBoundaryTests(HostTestCase):
         from vidbyte.harnesses.native.codex import CodexHost
 
         host = await self.open_host()
+        settings = _features().CodexThreadSettingsUpdate(effort=_enums().CodexReasoningEffort.HIGH)
+        disabled = _enums().CodexMemoryMode.DISABLED
         rows: tuple[tuple[str, Callable[[], Any], str], ...] = (
             ("list_codex_models", lambda: host.list_codex_models(include_hidden="yes"), "list_codex_models include_hidden"),
             ("spawn_codex_thread", lambda: host.spawn_codex_thread({}), "spawn_codex_thread request"),
@@ -210,6 +246,29 @@ class CodexHostInputBoundaryTests(HostTestCase):
             ("list_codex_skills", lambda: host.list_codex_skills(cwd=None), "list_codex_skills cwd"),
             ("run_codex_skill", lambda: host.run_codex_skill("s", ""), "run_codex_skill prompt"),
             ("run_codex_openai_docs", lambda: host.run_codex_openai_docs(""), "run_codex_openai_docs question"),
+            # docs/spec/codex-host-first-class/spec.md section 13 and INV-1: the 22 new coroutine methods that take an argument.
+            ("update_codex_thread_settings", lambda: host.update_codex_thread_settings("", settings), "update_codex_thread_settings thread_id"),
+            ("run_codex_plan", lambda: host.run_codex_plan("Plan it.", request={}), "run_codex_plan request"),
+            ("wait_codex_turns", lambda: host.wait_codex_turns(()), "wait_codex_turns handles"),
+            ("list_codex_mcp_servers", lambda: host.list_codex_mcp_servers(limit=0), "list_codex_mcp_servers limit"),
+            ("update_codex_turn_settings", lambda: host.update_codex_turn_settings(HANDLE), "update_codex_turn_settings was given no setting to change"),
+            ("set_codex_thread_memory_mode", lambda: host.set_codex_thread_memory_mode("", disabled), "set_codex_thread_memory_mode thread_id"),
+            ("get_codex_memory_status", lambda: host.get_codex_memory_status(0), "get_codex_memory_status min_consolidated_threads"),
+            ("start_codex_side_chat", lambda: host.start_codex_side_chat("", "Ask."), "start_codex_side_chat thread_id"),
+            ("create_codex_worktree", lambda: host.create_codex_worktree("relative/path", "feat-x"), WORKTREE_REPOSITORY_MESSAGE),
+            ("pause_codex_goal", lambda: host.pause_codex_goal(""), "pause_codex_goal thread_id"),
+            ("resume_codex_goal", lambda: host.resume_codex_goal(""), "resume_codex_goal thread_id"),
+            ("edit_codex_goal", lambda: host.edit_codex_goal("thr-1"), GOAL_EDIT_EMPTY_MESSAGE),
+            ("clear_codex_goal", lambda: host.clear_codex_goal(""), "clear_codex_goal thread_id"),
+            ("archive_codex_thread", lambda: host.archive_codex_thread(""), "archive_codex_thread thread_id"),
+            ("unarchive_codex_thread", lambda: host.unarchive_codex_thread(""), "unarchive_codex_thread thread_id"),
+            ("revert_codex_thread", lambda: host.revert_codex_thread("thr-1", ""), "revert_codex_thread before_turn_id"),
+            ("rename_codex_thread", lambda: host.rename_codex_thread("thr-1", ""), "rename_codex_thread name"),
+            ("inject_codex_items", lambda: host.inject_codex_items("thr-1", []), INJECT_ITEMS_MESSAGE.format(maximum=1024)),
+            ("list_codex_background_terminals", lambda: host.list_codex_background_terminals("thr-1", limit=0), "list_codex_background_terminals limit"),
+            ("clean_codex_background_terminals", lambda: host.clean_codex_background_terminals(""), "clean_codex_background_terminals thread_id"),
+            ("search_codex_thread_content", lambda: host.search_codex_thread_content(" "), "search_codex_thread_content query"),
+            ("list_codex_child_threads", lambda: host.list_codex_child_threads("thr-1", limit=0), "list_codex_child_threads limit"),
         )
         # Every public method that takes an argument has a row, so a
         # new one cannot skip its input record unnoticed.

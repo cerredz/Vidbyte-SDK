@@ -75,19 +75,26 @@ NEW_ENUMS = (
 )
 
 # Spec section 12.3 row 3, verbatim: the Codex* order in vidbyte.lib.enums.__all__. docs/spec/codex-host-hardening/spec.md
-# section 12.3 row 2 places its three new enums in the same alphabetical block.
+# section 12.3 row 2 places its three new enums in the same alphabetical block. docs/spec/codex-host-first-class/spec.md
+# section 13: the nine new enums join it, 35 names, ASCII-sorted (its section 12.3 row 3).
 ENUMS_CODEX_ORDER = [
     "CodexAccountKind",
     "CodexApprovalDecision",
     "CodexApprovalMode",
     "CodexApprovalPolicy",
     "CodexApprovalsReviewer",
+    "CodexCollaborationModeKind",
     "CodexCommandApprovalKind",
     "CodexContextAnchor",
     "CodexGoalStatus",
     "CodexHostOperation",
     "CodexInputType",
+    "CodexMcpAuthStatus",
+    "CodexMcpConnectionStatus",
+    "CodexMcpServerDetail",
+    "CodexMemoryMode",
     "CodexPersonality",
+    "CodexPlanStepStatus",
     "CodexReasoningEffort",
     "CodexReasoningSummary",
     "CodexReviewDelivery",
@@ -102,7 +109,10 @@ ENUMS_CODEX_ORDER = [
     "CodexThreadSourceKind",
     "CodexThreadStartSource",
     "CodexThreadStatus",
+    "CodexTurnEventKind",
+    "CodexTurnSettingsStatus",
     "CodexTurnStatus",
+    "CodexTurnWaitMode",
 ]
 
 # request.md section C, through spec section 12.5: the repo-map section and the README bullet.
@@ -180,7 +190,8 @@ class CodexHostImportSafetyTests(unittest.TestCase):
     def test_imports_never_load_the_sdk_and_entering_reports_the_pip_extra(self) -> None:
         outcome = _run_import_probe("blocked")
         self.assertEqual(outcome["loaded"], [])
-        self.assertEqual((outcome["tools"], outcome["first"]), (26, "check_codex_ready"))
+        # docs/spec/codex-host-first-class/spec.md section 13: the catalog holds 42 tools (INV-41).
+        self.assertEqual((outcome["tools"], outcome["first"]), (42, "check_codex_ready"))
         self.assertEqual(outcome["error"], "CodexAgentError")
         self.assertEqual(outcome["code"], "codex.not_installed")
         self.assertIn(PIP_INSTALL_FRAGMENT, outcome["next_step"])

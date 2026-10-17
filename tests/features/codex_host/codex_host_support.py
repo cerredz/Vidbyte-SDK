@@ -3,11 +3,11 @@
 PURPOSE: Shared helpers for the CodexHost feature pack: the spec's literal texts and tables, the privacy canaries, the openai-codex skip gate, a duck-typed stub host for the tool tests, and HostTestCase, which runs a real CodexHost against the in-memory app-server.
 ROLE IN CODEBASE: Imported by every test module in tests/features/codex_host/. It imports nothing the feature adds and nothing from openai-codex at module level, so every module still collects before the feature exists and on CI, which installs only the dev extra.
 ARCHITECTURE NOTE: HostTestCase.asyncSetUp patches the one seam spec section 13 names, vidbyte.harnesses.native.codex.connection.CodexClient, with the fake client from codex_host_fakes.py, and shutil.which with a recorder. Everything above the seam (CodexHost, its translators, preflight, pricing, records) runs unmocked. StubCodexHost stands in for CodexHost only in the tool tests, which spec section 13 allows because the tools import CodexHost under TYPE_CHECKING only.
-FUNCTION INVENTORY: requires_sdk skips a class when openai-codex is missing; error_texts(exc) returns every text an error shows, its visible chain included; input_texts(params) reads a turn request's input items; HostTestCase.open_host / close_host / spawn / wait_done / assert_problem / assert_codex_error / run_in_other_loop drive a host, and patch_connection / patch_skill_functions / patch_platform / wait_for_request / wait_until / ask / count script and observe the fake app-server; StubCodexHost answers the twenty-seven host methods from scripted records; make_echo_tool builds a small dynamic tool; mapped_summary checks a CodexErrorMapper message's head and its likely-cause and next-step tail and returns what lies between, and thread_suffix is the thread sentence the mapper adds there; FieldCarryingMapper maps as the host's CodexErrorMapper does and records every error, and changed_error_fields lists the KEPT_ERROR_FIELDS a rebuilt error lost (thread-helpers review R-17, R-18). The thread-helpers spec adds HELPER_METHODS, its message texts, four codes, four rows and eleven tool rows. The codex-host-hardening spec adds its section 9.2 messages, the changed causes and next steps, the INV-15 DEFAULT_ANSWERS table, RETRYABLE_CODES, RETRIED_METHODS and GOAL_REJECTED_FIELDS; open_host takes an optional approval_handler; capture_logs, LogRecorder, log_events and log_fields read the INV-7 to INV-10 log records, and log_fields refuses a word with no "=" (S5 R-12).
+FUNCTION INVENTORY: requires_sdk skips a class when openai-codex is missing; error_texts(exc) returns every text an error shows, its visible chain included; input_texts(params) reads a turn request's input items; HostTestCase.open_host / close_host / spawn / wait_done / assert_problem / assert_codex_error / run_in_other_loop drive a host, and patch_connection / patch_skill_functions / patch_platform / wait_for_request / wait_until / ask / count script and observe the fake app-server; StubCodexHost answers the twenty-seven host methods from scripted records, and the sixteen first-class-feature tool methods through FeatureStubMethods (codex_host_feature_support.py); make_echo_tool builds a small dynamic tool; mapped_summary checks a CodexErrorMapper message's head and its likely-cause and next-step tail and returns what lies between, and thread_suffix is the thread sentence the mapper adds there; FieldCarryingMapper maps as the host's CodexErrorMapper does and records every error, and changed_error_fields lists the KEPT_ERROR_FIELDS a rebuilt error lost (thread-helpers review R-17, R-18). The thread-helpers spec adds HELPER_METHODS, its message texts, four codes, four rows and eleven tool rows. The codex-host-hardening spec adds its section 9.2 messages, the changed causes and next steps, the INV-15 DEFAULT_ANSWERS table, RETRYABLE_CODES, RETRIED_METHODS and GOAL_REJECTED_FIELDS; open_host takes an optional approval_handler; capture_logs, LogRecorder, log_events and log_fields read the INV-7 to INV-10 log records, and log_fields refuses a word with no "=" (S5 R-12). The codex-host-first-class spec adds sixteen tool rows, the seventh GOAL_REJECTED_FIELDS entry and FeatureHostCase, whose opened / remark / sent / sent_methods / call / refused_locally / call_records keep a request window per test; its own literals live in codex_host_feature_support.py.
 COMMON MODIFICATION PATTERNS: When the spec changes a next-step text, a tool name or a classification row, change the literal here, never by reading the production constant. Add a host helper here only when two or more modules need it.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import vidbyte.harnesses.native, vidbyte.lib.dataclasses.codex_host, the new enums or openai_codex at module level: a missing feature must fail each test, not abort collection. 2. Do not start a process or touch the network. 3. Do not copy production logic; tests assert the spec's literal values.
 KNOWN EDGE CASES: The privacy canaries are unique strings, so finding one in any output proves a leak. StubCodexHost reports a handle RUNNING until a test marks it finished, which is how the live-turn cap sees running turns.
-RELATED DOCS: tests/features/codex_host/FEATURE.md; docs/spec/codex-host/spec.md sections 9.2, 9.3 and 13; docs/spec/codex-host-thread-helpers/spec.md sections 8.5, 9.2 and 13; docs/spec/codex-host-hardening/spec.md sections 9.2, 9.3 and 13.
+RELATED DOCS: tests/features/codex_host/FEATURE.md; docs/spec/codex-host/spec.md sections 9.2, 9.3 and 13; docs/spec/codex-host-thread-helpers/spec.md sections 8.5, 9.2 and 13; docs/spec/codex-host-hardening/spec.md sections 9.2, 9.3 and 13; docs/spec/codex-host-first-class/spec.md sections 9.2 and 13.
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/codex_host
 """
 
@@ -25,6 +25,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 from unittest import mock
 
+from tests.features.codex_host.codex_host_feature_support import FeatureStubMethods
 from vidbyte.lib.constants.codex_host import CODEX_HOST_LIKELY_CAUSES
 from vidbyte.lib.dataclasses.tools import ToolCall, ToolPermission, ToolResult, ToolSpec
 from vidbyte.tools.base import BaseTool
@@ -190,6 +191,23 @@ TOOL_TABLE = (
     ("list_codex_skills", "ListCodexSkillsTool", "read", ("cwd",), ()),
     ("run_codex_skill", "RunCodexSkillTool", "write", ("skill", "prompt"), ("skill", "prompt")),
     ("run_codex_openai_docs", "RunCodexOpenaiDocsTool", "write", ("question",), ("question",)),
+    # docs/spec/codex-host-first-class/spec.md section 9.2 tool table, rows 27 to 42; the INV-42 functions have no tool.
+    ("update_codex_thread_settings", "UpdateCodexThreadSettingsTool", "write", ("thread_id", "model", "effort"), ("thread_id",)),
+    ("list_codex_collaboration_modes", "ListCodexCollaborationModesTool", "read", (), ()),
+    ("run_codex_plan", "RunCodexPlanTool", "write", ("prompt",), ("prompt",)),
+    ("wait_codex_turns", "WaitCodexTurnsTool", "read", ("turns", "return_when", "timeout_seconds"), ("turns",)),
+    ("list_codex_mcp_servers", "ListCodexMcpServersTool", "read", ("thread_id", "server_name", "cursor"), ()),
+    ("update_codex_turn_settings", "UpdateCodexTurnSettingsTool", "write", ("thread_id", "turn_id", "model", "effort"), ("thread_id", "turn_id")),
+    ("get_codex_memory_status", "GetCodexMemoryStatusTool", "read", (), ()),
+    ("start_codex_side_chat", "StartCodexSideChatTool", "write", ("thread_id", "prompt"), ("thread_id", "prompt")),
+    ("pause_codex_goal", "PauseCodexGoalTool", "write", ("thread_id",), ("thread_id",)),
+    ("resume_codex_goal", "ResumeCodexGoalTool", "write", ("thread_id",), ("thread_id",)),
+    ("archive_codex_thread", "ArchiveCodexThreadTool", "write", ("thread_id",), ("thread_id",)),
+    ("unarchive_codex_thread", "UnarchiveCodexThreadTool", "write", ("thread_id",), ("thread_id",)),
+    ("rename_codex_thread", "RenameCodexThreadTool", "write", ("thread_id", "name"), ("thread_id", "name")),
+    ("list_codex_background_terminals", "ListCodexBackgroundTerminalsTool", "read", ("thread_id", "cursor", "limit"), ("thread_id",)),
+    ("search_codex_thread_content", "SearchCodexThreadContentTool", "read", ("query", "archived", "cursor", "limit"), ("query",)),
+    ("list_codex_child_threads", "ListCodexChildThreadsTool", "read", ("thread_id", "descendants", "cursor", "limit"), ("thread_id",)),
 )
 TOOL_NAMES = tuple(row[0] for row in TOOL_TABLE)
 
@@ -262,7 +280,8 @@ CHANGED_LIKELY_CAUSES = {
 # Section 9.3: the codes whose same call can succeed unchanged (INV-2), and the four typed reads retried on overload (INV-3).
 RETRYABLE_CODES = frozenset({"codex.api_error", "codex.session_busy", "codex.usage_limited", "codex.thread_resume_failed", "codex.response_invalid"})
 RETRIED_METHODS = frozenset({"account/read", "thread/read", "thread/list", "thread/name/set"})
-GOAL_REJECTED_FIELDS = ("turn", "output_schema", "disabled_plugin_ids", "turn_service_tier", "network_access", "writable_roots")
+# docs/spec/codex-host-first-class/spec.md section 9.3: CODEX_HOST_GOAL_REJECTED_FIELDS gains collaboration_mode at the end.
+GOAL_REJECTED_FIELDS = ("turn", "output_schema", "disabled_plugin_ids", "turn_service_tier", "network_access", "writable_roots", "collaboration_mode")
 # INV-15 and section 9.3: the fixed fail-closed answer of each server request a host without a handler gets.
 DEFAULT_ANSWERS = {
     "item/commandExecution/requestApproval": {"decision": "decline"},
@@ -581,8 +600,11 @@ def make_echo_tool(name: str = "echo_text", permission: ToolPermission = ToolPer
     return _EchoTool(name, permission)
 
 
-class StubCodexHost:
-    """A duck-typed CodexHost for the tool tests: it records every call and answers from records."""
+class StubCodexHost(FeatureStubMethods):
+    """A duck-typed CodexHost for the tool tests: it records every call and answers from records.
+
+    FeatureStubMethods, in codex_host_feature_support.py, adds the sixteen methods the first-class-feature tools call.
+    """
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
@@ -826,3 +848,51 @@ class StubCodexHost:
     async def run_codex_openai_docs(self, question: str, request: Any = None) -> Any:
         await self._enter("run_codex_openai_docs", question=question, request=request)
         return self._handle()
+
+
+class FeatureHostCase(HostTestCase):
+    """HostTestCase plus the request-window helpers the first-class-feature tests share (docs/spec/codex-host-first-class)."""
+
+    async def opened(self, settings: Any = None, approval_handler: Any = None, *, linux: bool = True) -> Any:
+        """Open a host and start the request window; on Linux the preflight sends no windowsSandbox/readiness."""
+        if linux:
+            self.patch_platform("linux")
+        host = await self.open_host(settings, approval_handler)
+        self.remark()
+        return host
+
+    def remark(self) -> None:
+        self.mark = len(self.server.requests)
+
+    def sent(self) -> list[Any]:
+        return list(self.server.requests)[self.mark :]
+
+    def sent_methods(self) -> list[str]:
+        return [request.method for request in self.sent()]
+
+    async def call(self, awaitable: Awaitable[Any]) -> Any:
+        return await asyncio.wait_for(awaitable, WAIT_SECONDS)
+
+    async def refused_locally(self, awaitable: Awaitable[Any], field_name: str) -> Any:
+        """Await a call that must raise ConfigurationError naming the field, with no request sent (INV-1, NFR-5)."""
+        from vidbyte.lib.errors import ConfigurationError
+
+        sent = len(self.server.requests)
+        with self.assertRaises(ConfigurationError) as caught:
+            await asyncio.wait_for(awaitable, WAIT_SECONDS)
+        self.assertTrue(str(caught.exception.details.get("field", "")).endswith(field_name), (field_name, caught.exception.details, str(caught.exception)))
+        self.assertEqual(self.server.methods()[sent:], [])
+        return caught.exception
+
+    async def codex_error(self, awaitable: Awaitable[Any], code: str) -> Any:
+        """Await a call that must raise CodexAgentError with the code; the caller checks a packet whose next step the spec overrides."""
+        from vidbyte.lib.errors import CodexAgentError
+
+        with self.assertRaises(CodexAgentError) as caught:
+            await asyncio.wait_for(awaitable, WAIT_SECONDS)
+        self.assertEqual(caught.exception.failure_code, code, caught.exception.message)
+        return caught.exception
+
+    def call_records(self, records: list[logging.LogRecord], event: str, method: str) -> list[dict[str, str]]:
+        """The fields of each INV-7 call record of the event that names the method."""
+        return [fields for fields in (log_fields(record) for record in log_events(records, event)) if fields.get("method") == method]

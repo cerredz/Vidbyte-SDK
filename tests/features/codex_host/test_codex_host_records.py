@@ -66,7 +66,49 @@ EXPECTED_ENUMS: dict[str, dict[str, str]] = {
         **{name.upper(): name for name in TOOL_NAMES},
         "DELETE_CODEX_THREAD": "delete_codex_thread",
         "FORGET_CODEX_TURNS": "forget_codex_turns",
+        # docs/spec/codex-host-first-class/spec.md section 13: the nine new operations without a tool (INV-42).
+        "STREAM_CODEX_TURN": "stream_codex_turn",
+        "SET_CODEX_THREAD_MEMORY_MODE": "set_codex_thread_memory_mode",
+        "RESET_CODEX_MEMORIES": "reset_codex_memories",
+        "CREATE_CODEX_WORKTREE": "create_codex_worktree",
+        "EDIT_CODEX_GOAL": "edit_codex_goal",
+        "CLEAR_CODEX_GOAL": "clear_codex_goal",
+        "REVERT_CODEX_THREAD": "revert_codex_thread",
+        "INJECT_CODEX_ITEMS": "inject_codex_items",
+        "CLEAN_CODEX_BACKGROUND_TERMINALS": "clean_codex_background_terminals",
     },
+    # docs/spec/codex-host-first-class/spec.md section 8.5, verbatim: the nine new enums.
+    "CodexCollaborationModeKind": {"NONE": "", "PLAN": "plan", "DEFAULT": "default"},
+    "CodexMemoryMode": {"ENABLED": "enabled", "DISABLED": "disabled"},
+    "CodexMcpAuthStatus": {"UNKNOWN": "unknown", "UNSUPPORTED": "unsupported", "NOT_LOGGED_IN": "notLoggedIn", "BEARER_TOKEN": "bearerToken", "OAUTH": "oAuth"},
+    "CodexMcpConnectionStatus": {
+        "NOT_REPORTED": "",
+        "NOT_STARTED": "notStarted",
+        "STARTING": "starting",
+        "CONNECTED": "connected",
+        "AUTHENTICATION_REQUIRED": "authenticationRequired",
+        "FAILED": "failed",
+        "CANCELLED": "cancelled",
+        "DISABLED": "disabled",
+    },
+    "CodexMcpServerDetail": {"FULL": "full", "TOOLS_AND_AUTH_ONLY": "toolsAndAuthOnly"},
+    "CodexTurnSettingsStatus": {"APPLIED": "applied", "TARGET_UNAVAILABLE": "targetUnavailable"},
+    "CodexTurnEventKind": {
+        "ITEM_STARTED": "item_started",
+        "ITEM_COMPLETED": "item_completed",
+        "MESSAGE_DELTA": "message_delta",
+        "REASONING_SUMMARY_DELTA": "reasoning_summary_delta",
+        "PLAN_DELTA": "plan_delta",
+        "COMMAND_OUTPUT_DELTA": "command_output_delta",
+        "FILE_CHANGE_DELTA": "file_change_delta",
+        "PLAN_UPDATED": "plan_updated",
+        "DIFF_UPDATED": "diff_updated",
+        "USAGE_UPDATED": "usage_updated",
+        "GAP": "gap",
+        "ENDED": "ended",
+    },
+    "CodexPlanStepStatus": {"PENDING": "pending", "IN_PROGRESS": "inProgress", "COMPLETED": "completed"},
+    "CodexTurnWaitMode": {"FIRST_COMPLETED": "FIRST_COMPLETED", "ALL_COMPLETED": "ALL_COMPLETED"},
 }
 
 # The openai-codex 0.162.1 generated type each spec enum mirrors, and how its wire values are read.
@@ -84,6 +126,13 @@ SDK_WIRE_SOURCES = {
     "CodexReviewDelivery": ("ReviewDelivery", "enum"),
     "CodexGoalStatus": ("ThreadGoalStatus", "enum"),
     "CodexSkillScope": ("SkillScope", "enum"),
+    # docs/spec/codex-host-first-class/spec.md section 13: the wire enums the new enums mirror; "" stands for null or absent.
+    "CodexCollaborationModeKind": ("ModeKind", "enum"),
+    "CodexMcpAuthStatus": ("McpAuthStatus", "enum"),
+    "CodexMcpConnectionStatus": ("McpServerConnectionStatus", "enum"),
+    "CodexMcpServerDetail": ("McpServerStatusDetail", "enum"),
+    "CodexMemoryMode": ("ThreadMemoryMode", "enum"),
+    "CodexPlanStepStatus": ("TurnPlanStepStatus", "enum"),
 }
 
 RECORD_NAMES = (

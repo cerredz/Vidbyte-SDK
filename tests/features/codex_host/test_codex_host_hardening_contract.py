@@ -544,7 +544,8 @@ class CodexHardeningConstantTests(unittest.TestCase):
         self.assertEqual(set(rejected[CodexHostOperation.START_CODEX_REVIEW]), every_field - {"timeout_seconds", "max_output_tokens"})
         fork_row = tuple(rejected[CodexHostOperation.FORK_CODEX_THREAD])
         self.assertEqual(fork_row[: len(FORK_ROW_BEFORE)], FORK_ROW_BEFORE)
-        self.assertEqual(set(fork_row[len(FORK_ROW_BEFORE) :]), {"turn_service_tier", "network_access", "writable_roots"})
+        # docs/spec/codex-host-first-class/spec.md section 9.3: the fork row's tail gains collaboration_mode (INV-10).
+        self.assertEqual(set(fork_row[len(FORK_ROW_BEFORE) :]), {"turn_service_tier", "network_access", "writable_roots", "collaboration_mode"})
 
     def test_no_native_host_module_binds_a_top_level_constant(self) -> None:
         # C021 at baseline 0, over every module under vidbyte/harnesses/native/, the two new codex modules included.

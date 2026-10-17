@@ -69,6 +69,23 @@ def _valid_arguments(handle: dict[str, str]) -> dict[str, dict[str, Any]]:
         "list_codex_skills": {},
         "run_codex_skill": {"skill": "openai-docs", "prompt": "Find the event that streams text."},
         "run_codex_openai_docs": {"question": "Which event streams text deltas?"},
+        # docs/spec/codex-host-first-class/spec.md section 9.2 tools 27 to 42; the handle tools use the scope's own handle.
+        "update_codex_thread_settings": {"thread_id": "thr-elsewhere", "effort": "high"},
+        "list_codex_collaboration_modes": {},
+        "run_codex_plan": {"prompt": "Plan a fix for the failing test."},
+        "wait_codex_turns": {"turns": [dict(handle)]},
+        "list_codex_mcp_servers": {},
+        "update_codex_turn_settings": {**handle, "effort": "low"},
+        "get_codex_memory_status": {},
+        "start_codex_side_chat": {"thread_id": "thr-elsewhere", "prompt": "Which step of the plan is riskiest?"},
+        "pause_codex_goal": {"thread_id": "thr-elsewhere"},
+        "resume_codex_goal": {"thread_id": "thr-elsewhere"},
+        "archive_codex_thread": {"thread_id": "thr-elsewhere"},
+        "unarchive_codex_thread": {"thread_id": "thr-elsewhere"},
+        "rename_codex_thread": {"thread_id": "thr-elsewhere", "name": "Login fix"},
+        "list_codex_background_terminals": {"thread_id": "thr-elsewhere"},
+        "search_codex_thread_content": {"query": "login"},
+        "list_codex_child_threads": {"thread_id": "thr-elsewhere"},
     }
 
 
@@ -152,7 +169,8 @@ class CodexHostToolsShapeTests(_ToolCase):
         import vidbyte.tools.builtins.codex as builtin_codex
 
         tools = _toolset(StubCodexHost(), max_live_turns=2)
-        self.assertEqual(len(tools), 26)
+        # docs/spec/codex-host-first-class/spec.md section 13: the catalog grows from 26 to 42 tools (INV-41).
+        self.assertEqual(len(tools), 42)
         self.assertEqual(tuple(tools.names()), TOOL_NAMES)
         for tool, (name, class_name, permission, parameters, required) in zip(tools, TOOL_TABLE):
             with self.subTest(tool=name):

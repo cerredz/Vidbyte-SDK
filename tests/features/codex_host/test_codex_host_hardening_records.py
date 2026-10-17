@@ -427,7 +427,15 @@ class CodexSpawnRequestHardeningTests(unittest.TestCase):
                 with self.assertRaises(ConfigurationError) as caught:
                     self._spawn(goal=goal, **fields)
                 self.assertIn(name, str(caught.exception))
-        self.assertEqual(GOAL_REJECTED_FIELDS, ("turn", "output_schema", "disabled_plugin_ids", "turn_service_tier", "network_access", "writable_roots"))
+        # docs/spec/codex-host-first-class/spec.md section 9.3: a goal request refuses collaboration_mode too, as the seventh field.
+        from vidbyte.lib.dataclasses.codex_host_modes import CodexCollaborationMode
+        from vidbyte.lib.enums.codex import CodexCollaborationModeKind
+
+        with self.assertRaises(ConfigurationError) as caught:
+            self._spawn(goal=goal, collaboration_mode=CodexCollaborationMode(mode=CodexCollaborationModeKind.PLAN))
+        self.assertEqual(str(caught.exception), GOAL_FIELD_MESSAGE.format(owner=GOAL_SPAWN_OWNER, name="collaboration_mode"))
+        self.assertTrue(str(caught.exception.details.get("field", "")).endswith("collaboration_mode"), caught.exception.details)
+        self.assertEqual(GOAL_REJECTED_FIELDS, ("turn", "output_schema", "disabled_plugin_ids", "turn_service_tier", "network_access", "writable_roots", "collaboration_mode"))
 
     def test_a_goal_request_with_thread_settings_and_vidbyte_caps_still_builds(self) -> None:
         # AC-29: only turn-only fields are refused; the thread posture and Vidbyte's own caps stay allowed.
