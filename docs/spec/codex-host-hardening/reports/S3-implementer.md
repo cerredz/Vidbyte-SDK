@@ -1,10 +1,12 @@
 # S3 implementer report: codex-host-hardening (spec r4)
 
-STATUS: BLOCKED
+STATUS: DONE (first run BLOCKED; unblocked by the orchestrator at 13:30, see §7)
 STAGE: S3 implementer
 BRANCH: feat/codex-host-first-class (worktree `C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-codex-host-first-class`)
-START: c8c5e128 (S2 tests written) · last code commit: 2f31b1fc · this report: ef4cddbe and the commit after it
-PUSHED: no · PR: none (held until the gate is green; see "Why nothing was pushed")
+START: c8c5e128 (S2 tests written) · S2_HEAD: fadec47f · last code commit: 2f31b1fc · spec record: b09e10bd
+PUSHED: yes, `git push -u origin feat/codex-host-first-class` · PR: https://github.com/cerredz/Vidbyte-SDK/pull/1181 (draft, base `ai/resolve-pr-1055-comments`)
+
+Sections 2 to 4 describe the first, blocked run. Section 7 has the final results.
 
 ## 1. What was built
 
@@ -132,3 +134,73 @@ The brief says to run the full gate before pushing, and the gate's pytest step f
 - `harness_threads` surface tests read `origin/main` through git, so their results depend on the checkout.
 - The global `semgrep` is broken (mcp 2.x); use `.../site-packages/semgrep/bin/semgrep-core.exe` with one target per call.
 - Files are LF and git warns about CRLF on add; this is harmless.
+
+## 7. Unblocked run (after the S2 correction at fadec47f)
+
+The orchestrator granted both test corrections and accepted the `harness_threads` surface failure as inherited (pipeline.md, 13:30). In fadec47f, S2 changed `function_rows.py:85` to `endswith("thread_id")` and `approvals.py:463` to `closed == 1` plus "every reader error is the SDK's close-time `TransportClosedError`". No code changed for this. `git diff fadec47f..HEAD -- tests` is empty.
+
+Area suite (`PYTHONPATH=$(pwd) "$V" -m pytest -q -p no:cacheprovider tests/features/codex_host tests/features/harness_threads tests/test_codex_*.py`):
+
+```
+FAILED tests/features/harness_threads/test_harness_threads_surface.py::test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes
+1 failed, 1024 passed, 3 skipped in 63.48s (0:01:03)
+```
+
+Full lint (`PYTHONPATH=$(pwd) "$V" lint/run.py`, exit 0). `lint/run.py` does not invoke semgrep; its only mention is a comment in `lint/core/discovery.py`. Its pass line is `SDK-LINT: PASS`, and no `AGENT-LINT` string exists anywhere under `lint/`:
+
+```
+S064 RATCHETED: 4 known finding(s). Inspect with: python lint/run.py --rule S064 --all
+
+SDK-LINT: PASS
+EXIT=0
+```
+
+Gate source stage (`PYTHONPATH=$(pwd) "$V" scripts/run_ci.py --stage source`). Only the one inherited failure remains:
+
+```
+SDK-LINT: PASS
+context write-path integrity: ok
+context primitive introductions: ok
+reasoning trace contracts: ok (182 tools, 55 shapes)
+FAILED tests/features/harness_threads/test_harness_threads_surface.py::test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes
+=========== 1 failed, 6555 passed, 27 skipped in 114.21s (0:01:54) ============
+CI failed: Command failed with exit code 1: ...python.exe -m pytest (cwd=...vidbyte-sdk-codex-host-first-class)
+```
+
+Gate package stage (`"$V" scripts/run_ci.py --stage package`, no PYTHONPATH; it installs only into its own temp venv):
+
+```
+No broken requirements found.
+> ...vidbyte-sdk-install-udxg9cde\venv\Scripts\python.exe -c from importlib.metadata import entry_points, version; import vidbyte; ...
+Installed vidbyte-sdk 0.3.0 passed smoke checks.
+CI passed.
+EXIT=0
+```
+
+Semgrep evidence. The global CLI fails at import (`ModuleNotFoundError: No module named 'mcp.server.fastmcp'`, because mcp 2.x is installed globally). Nothing was installed or repaired. The exact command, once per changed file:
+
+```
+SC=C:/Users/422mi/AppData/Local/Programs/Python/Python311/Lib/site-packages/semgrep/bin/semgrep-core.exe
+"$SC" -rules .semgrep/typed-mapping-boundary-policy.yml -lang python -json <file>
+```
+
+Result: `0 results 0 errors` on each of the 23 changed `vidbyte/**/*.py` files. A positive control (`scratchpad/semprobe/bad.py`, an `Any` parameter with a non-Mapping fallback) gave `1 results 0 errors`, so the run does detect violations.
+
+Publish:
+
+```
+$ git push -u origin feat/codex-host-first-class
+ * [new branch]        feat/codex-host-first-class -> feat/codex-host-first-class
+branch 'feat/codex-host-first-class' set up to track 'origin/feat/codex-host-first-class'.
+$ gh pr create --repo cerredz/Vidbyte-SDK --base ai/resolve-pr-1055-comments --head feat/codex-host-first-class --draft --title "[WIP] feat: CodexHost production hardening and first-class Codex features" --body-file <scratchpad>/s3-placeholder-pr-body.md
+https://github.com/cerredz/Vidbyte-SDK/pull/1181
+$ gh pr view 1181 --json isDraft,baseRefName,headRefName,state
+{"baseRefName":"ai/resolve-pr-1055-comments","headRefName":"feat/codex-host-first-class","isDraft":true,"number":1181,"state":"OPEN",...}
+```
+
+Spec record in b09e10bd:
+- the frontmatter has `pr: https://github.com/cerredz/Vidbyte-SDK/pull/1181` and `status: implemented`;
+- the AC-40 command proof says it "ends `SDK-LINT: PASS` at `2f31b1fc`";
+- §17 gains the row `r4 | 2026-10-17 | S3 implement | …` and a "### Implementation deviations (S3)" list (§5 above, plus the semgrep note).
+
+All of it was pushed again with `git push -u origin feat/codex-host-first-class`. Repository workflows are `workflow_dispatch`-only, so the pushes triggered nothing.
