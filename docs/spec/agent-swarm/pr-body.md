@@ -208,10 +208,12 @@ Remote checks run only by manual dispatch on this repo, so `gh pr checks` stays 
 
 | Workflow | Run | Commit | Result |
 |---|---|---|---|
-| CI (`ci.yml`) | 39008866234 | `4a993f98` | success: Source / Python 3.11 (`SDK-LINT: PASS`, `6376 passed, 57 skipped`), Source / Python 3.12 (`6376 passed, 57 skipped, 19 warnings`), Package (`CI passed.`) |
-| Static policy (`static-policy.yml`) | 39008871160 | `4a993f98` | success: `Ran 1 rule on 995 files: 0 findings.` |
+| CI (`ci.yml`) | 39010164516 | `40a9f8d5` | success: Source / Python 3.11 (`SDK-LINT: PASS`, `6376 passed, 57 skipped`), Source / Python 3.12 (`SDK-LINT: PASS`, `6376 passed, 57 skipped, 19 warnings`), Package (`Installed vidbyte-sdk 0.3.0 passed smoke checks.` / `CI passed.`) |
+| Static policy (`static-policy.yml`) | 39010166215 | `40a9f8d5` | success: `Findings: 0 (0 blocking)` / `Ran 1 rule on 995 files: 0 findings.` |
+| CI (`ci.yml`) | 39008866234 | `4a993f98` | success, same three jobs (the last code commit) |
+| Static policy (`static-policy.yml`) | 39008871160 | `4a993f98` | success |
 
-Every commit after `4a993f98` changes only `docs/spec/agent-swarm/`.
+Every commit after `4a993f98` changes only `docs/spec/agent-swarm/`; `40a9f8d5` added this body, and the one commit after it adds the S6 report.
 
 ## Adversarial review
 
