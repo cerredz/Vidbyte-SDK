@@ -89,9 +89,12 @@ class BrowserAgent(BaseAgent):
         return self._response.state
 
     def _runtime_extension_kwargs(self) -> dict[str, Any]:
+        # @intent live-servers-reach-only-the-runtime
         # Hands the settings, the role map, the live servers, the
         # response writer, and the event emitter to each run-local
-        # BrowserAgentRuntime.
+        # BrowserAgentRuntime. The servers are read per run, after they
+        # connect, and their configs hold each server's env, so they go
+        # to the runtime only.
         return {"settings": self.settings, "browser_tools": self.browser_tools, "servers": self.mcp_servers(), "response": self._response, "events": self.events}
 
 

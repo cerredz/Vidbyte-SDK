@@ -186,9 +186,11 @@ class BrowserAgentRuntime(AgentRuntime):
             self.events.emit(BrowserEventKind.CONTEXT_REBUILT, str(stats.removed_count))
 
     def _budget_stop(self, *, iteration_count: int, tokens_used: int | None, contexts: Sequence[ToolCallContext], started_at: float) -> AgentResult | None:
-        # A run whose rechecks keep finding no progress stops before
-        # its next model call, with the card as its output; otherwise
-        # the loop's own budgets apply.
+        # @intent a-stalled-run-stops-before-its-next-model-call
+        # A run whose rechecks keep finding no progress would only
+        # spend more calls, so it stops before its next model call,
+        # with the card as its output; otherwise the loop's own
+        # budgets apply.
         if self.goal.stalled():
             output = Prompts().get(Prompt.BROWSER_AGENT_STALLED_OUTPUT).format(card=self.goal.item().content)
             return self._stopped_result(output, stop_reason=AgentStopReason.GOAL_STALLED, iteration_count=iteration_count, tokens_used=tokens_used, contexts=contexts)
