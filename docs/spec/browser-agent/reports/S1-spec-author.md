@@ -143,3 +143,34 @@ I accepted all eight findings and verified each against the code before changing
 Least sure in r2:
 - A-6 is now verified in code, but not exercised against a live provider.
 - The rebuild trigger (60,000) and the worker trim (32,000) are untested starting values, like the other caps (A-7).
+
+## Addendum: revision r3 (review round 2), commit 0adeae0b
+
+I accepted all four Majors after checking each against the code. The spec is now `status: approved`, revision 3.
+
+- **r2 R-1 (seam-observable ACs).** The test seam records the task apart from the messages. `ModelCall.prompt` holds the task, and `messages` holds `options["messages"]`; `prompt_index` is dropped (fixtures :253-262, :320-335).
+  - AC-22 and AC-31 now assert `messages` and `prompt` separately.
+  - AC-31 sums each message's string content, which is the trim's own measure (strategies.py:50-68). The trim's count is never lower, so a correct trim passes.
+  - INV-11 now allows the trim to drop a whole turn.
+  - The evidence on a stuck card is now exact: the first 400 characters, with no marker (INV-12, AC-7, EC-11, row 15).
+  - §13 now gives recipes for reaching both caps. For the orchestrator, results are cut to 20,000 characters, about 5,070 tokens per turn, so 11 turns stay under the cap and the 12th passes it. For the worker, 17 distinct tools at the MCP client's 8,000-character cap pass 32,000 tokens.
+- **r2 R-2 (EC-12).** EC-12 now matches INV-12: stop reason `contract_unsatisfied`, exact `actions`, and evidence.
+  - `stuck_summary` takes `{reason}` only, so a card with `actions` None never shows "None". The leaf count is still 19.
+  - An error card fills the reason with the error type name.
+- **r2 R-3 (refused finish).** Verified: the `isDone` refusal is stored at runtime.py:656-657 before the hook runs at :673. The refused branch continues at :680-688, before `_after_tool_iteration` at :700.
+  - One private step, `_rebuild_history`, now runs from both hooks. On a refusal it runs before the gap message.
+  - A rebuild is counted only when something was removed (EC-35).
+  - New AC-33 covers this path.
+  - NFR-4 and the budget now include what a refused finish appends after its check.
+- **r2 R-4 (engine).** The step calls `ContextCompactionEngine().compact_provider_messages(messages, mode=TRIM_WITH_PROVIDER_BOUNDARIES, options={"max_messages": 1})`, then `messages[:] = list(kept)`.
+  - Verified: with `max_messages=1` the trim keeps exactly the group that holds the last message (strategies.py:613-622).
+  - The engine classifies all three provider shapes, and every result shape in formatter.py is classified as a result (engine.py:311-330).
+  - Precedent for the call: context/algorithms/tool_results.py:78.
+  - `BROWSER_ASSISTANT_ROLES` is deleted.
+  - D-11's "no seam" reason is corrected: `TOP_OF_CONVERSATION` exists, but it renders assistant-role messages.
+  - No file under `vidbyte/middleware/` changes.
+
+Final counts: FR 23, NFR 8, INV 30, AC 33, EC 37, D 28, W 10, T 6, A 9, Q 10, and 29 rows in §12.3. The budget is 34 new files (19 leaves) and 12 modified files.
+
+Least sure in r3:
+- The orchestrator recipe's arithmetic: about 5,070 tokens per turn, leaving 11 turns about 4,000 tokens under the cap. It rests on the JSON overhead and the ToolSettings suffix. The test author should assert the first call whose `messages` shrink, not a fixed call index.
