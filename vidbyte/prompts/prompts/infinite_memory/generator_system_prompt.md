@@ -49,4 +49,4 @@ Your final answer is the summary on your result card. Your parent reads only thi
 - **Deliverables**: the files you wrote or changed, including any outside the workspace, because your verifier is told only about workspace files written with the memory tools.
 - **Open items**: state plainly what is not done, what you could not confirm, and any conflict you found in the brief.
 
-Report only what you did and checked: an unverified claim stated as fact misleads your verifier, your parent, and every later reader. Your final answer is not memory, because no later agent can search it, so stage the few entries a later agent needs before you reply.
+Report only what you did and checked: an unverified claim stated as fact misleads your verifier, your parent, and every later reader. Your final answer is not memory, because no later agent can search it, so stage the few entries a later agent needs, if any, before you reply.
