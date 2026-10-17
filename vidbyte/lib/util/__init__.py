@@ -29,8 +29,8 @@ ARCHITECTURE NOTE:
 FUNCTION INVENTORY:
     Re-exports MathHelper, CredentialKeyPolicy, SubstringCounter,
     TokenEstimate, AppendOnlyJsonl, PromptPlacement, and SupportedKwargs;
-    __getattr__ loads each name in _LAZY_EXPORTS from its module on first
-    access. See vidbyte/lib/util/math.py for MathHelper's own inventory.
+    __getattr__ loads FullTextIndex, the one name in _LAZY_EXPORTS, from
+    its module on first access. See vidbyte/lib/util/math.py for MathHelper's own inventory.
 
 COMMON MODIFICATION PATTERNS:
     Add a new general-purpose helper class as its own module in this folder,
@@ -60,8 +60,6 @@ TESTS:
 
 from __future__ import annotations
 
-import importlib
-
 from vidbyte.lib.util.call_options import SupportedKwargs
 from vidbyte.lib.util.credential_keys import CredentialKeyPolicy
 from vidbyte.lib.util.jsonl import AppendOnlyJsonl
@@ -82,7 +80,8 @@ def __getattr__(name: str) -> object:
     # validation is still loading; fulltext needs validation's checks for
     # its records, so importing it here then would fail. Loading it on
     # first access keeps every import order working.
-    module = _LAZY_EXPORTS.get(name)
-    if module is None:
+    if name not in _LAZY_EXPORTS:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    return getattr(importlib.import_module(module), name)
+    from vidbyte.lib.util.fulltext import FullTextIndex
+
+    return FullTextIndex
