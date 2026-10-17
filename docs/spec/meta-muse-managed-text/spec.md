@@ -1,7 +1,7 @@
 ---
 spec: meta-muse-managed-text
 title: Let the SDK's gateway text modes (AUTO and VIDBYTE_MANAGED) use provider meta
-status: verified              # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
+status: pr-open               # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
 revision: 4
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-meta-muse-managed-text
@@ -114,17 +114,32 @@ Both calls reach Vidbyte's one gateway route instead of raising `UnsupportedProv
 
 ```mermaid
 flowchart TD
-  A["Agent.run / TextModelRunner(config)"] -->|"provider=meta, mode"| B["TextModelConfig.__post_init__"]
-  B -->|"mode is AUTO or VIDBYTE_MANAGED"| C{"_require_gateway_shape: META in VIDBYTE_MANAGED_TEXT_PROVIDERS?"}
-  C -->|"no (base_commit)"| X["UnsupportedProviderError M-12"]
-  C -->|"yes (this PR)"| D["ProviderKeyMatcher.match: LLM_ or LLM| key proven meta"]
-  D -->|"ProviderKeys"| E["TextModelRunner.__init__: credentials(), cap 32768, floor 630 s"]
-  E -->|"TextCredentials"| F["TextModelRunner.arun: VidbyteGatewayTransport(provider=meta)"]
-  F --> G["MetaProvider._create_payload: model, messages, max_tokens"]
-  G -->|"native chat body"| H["VidbyteGatewayTransport.request: envelope, headers"]
-  H -->|"POST /api/v1/models/generate"| I["Vidbyte gateway (cerredz/Vidbyte#710)"]
-  I -->|"Bearer: relayed or Vidbyte Meta key"| J["api.meta.ai/v1/chat/completions"]
-  I -->|"answer"| K["_GatewayAnswer: 2xx to adapter, else status-worded ProviderRequestError"]
+  AG["Agent with provider meta, api_keys and fallback"] --> AM["BaseAgent init: ProviderKeyMatcher.match once, against meta and every fallback provider"]
+  AM -->|"malformed LLM_ key, two Meta keys, or no key for a primary"| RF["ConfigurationError M-6, M-7 or M-18 at construction; nothing is sent"]
+  AM -->|"matched ProviderKeys record"| CR["Agent run: ModalityDetector.create_runner builds a TextModelConfig"]
+  TC["TextModelConfig with provider meta, built directly"] --> PI["TextModelConfig post-init"]
+  CR --> PI
+  PI --> DM{"mode is DIRECT?"}
+  DM -->|"no: AUTO, the default, or VIDBYTE_MANAGED"| GS{"_require_gateway_shape: no custom endpoint, and META in VIDBYTE_MANAGED_TEXT_PROVIDERS?"}
+  GS -->|"no: before this PR, always for meta"| UP["ConfigurationError M-13 for a custom endpoint, else UnsupportedProviderError M-12; nothing is sent"]
+  GS -->|"yes: this PR adds META to the set"| KM["ProviderKeyMatcher.match: a key in either Meta shape proves meta; a passed-in record is only checked"]
+  DM -->|"yes"| KM
+  KM --> CRD["TextModelRunner init: credentials() by mode"]
+  CRD -->|"DIRECT, unchanged"| DIR["MetaProvider POSTs to api.meta.ai/v1/chat/completions with Bearer Meta key"]
+  CRD -->|"AUTO with a Meta key: api_keys first, then META_API_KEY, at most 512 chars"| REL["relay: Vidbyte key plus Meta key"]
+  CRD -->|"AUTO without a Meta key, or VIDBYTE_MANAGED, which never reads META_API_KEY"| PAID["Vidbyte-paid: Vidbyte key only"]
+  REL --> PIN["pin the cap: caller max_output_tokens or 32,768; pin the timeout: at least 630 s"]
+  PAID --> PIN
+  PIN --> TR["arun: build one VidbyteGatewayTransport for this call"]
+  TR --> BODY["MetaProvider builds the same chat body as DIRECT, with max_tokens from the pinned cap"]
+  BODY --> POST["gateway transport drops the vendor URL and headers and POSTs the envelope: provider meta, model, body"]
+  POST -->|"Authorization Bearer Vidbyte key, Idempotency-Key, X-Vidbyte-Provider-Key on relay calls only"| GW["Vidbyte gateway, cerredz/Vidbyte PR 710"]
+  GW --> ANS{"answer"}
+  ANS -->|"2xx JSON object"| OK["MetaProvider parses the chat completion into a TextModelResponse"]
+  ANS -->|"409, 502, or not a JSON object"| RS["re-send at most twice with the same Idempotency-Key, after 0.5 s then 1.0 s"]
+  RS --> GW
+  ANS -->|"any other status, no answer, or re-sends spent"| ERR["ProviderRequestError worded from the status and from relay or paid; no body text and no key"]
+  ERR -->|"inside an Agent: a fallback error"| FB["AgentFallback runs the next model, which relays only its own provider key or none"]
 ```
 
 ```mermaid
@@ -141,7 +156,7 @@ sequenceDiagram
   SDK-->>Dev: TextModelResponse / agent result
 ```
 
-Validation happens at construction. `_require_gateway_shape` admits `meta` only because the set now holds it, and it still refuses a custom endpoint. `ProviderKeyMatcher.match` proves a key of either Meta shape, `LLM_<numeric id>_<secret>` or `LLM|<id>|<secret>`, as `meta`. Both prefixes are reserved to `meta`, so a key that starts with either but does not fully match is refused with M-6 and never bound to another provider (r4, D-8). `credentials()` then checks that the key can be sent and is at most 512 characters. State is pinned once, in `TextModelRunner.__init__`: the keys, the 32,768 cap, and the 630 s floor. `MetaProvider` builds the same body it builds for `DIRECT`, and `VidbyteGatewayTransport` replaces the vendor URL and headers with the gateway's. Failures are caught in `_GatewayAnswer`: a 409, a 502, or an answer that is not JSON is re-sent with the same `Idempotency-Key`, and every failure is worded from its status alone.
+Validation happens at construction. An agent matches its key list once, in `BaseAgent.__init__`, against its primary and every fallback provider; each runner it later builds gets that matched record, which `TextModelConfig` only checks. In a gateway mode, `TextModelConfig.__post_init__` runs `_require_gateway_shape` before matching (`model_configs.py:95-100`). That check refuses a custom endpoint first (M-13), then any provider outside the set (M-12), and it admits `meta` only because the set now holds it. `ProviderKeyMatcher.match` proves a key of either Meta shape, `LLM_<numeric id>_<secret>` or `LLM|<id>|<secret>`, as `meta`. Both prefixes are reserved to `meta`, so a key that starts with either but does not fully match is refused with M-6 and never bound to another provider (r4, D-8). *(S6)* One ordering consequence: a `TextModelConfig` built directly for a provider the gateway does not serve, in a gateway mode, raises M-12 before its keys are matched, so a malformed `LLM_` key there gets M-12, not M-6. Both refusals happen at construction and send nothing (S5 re-review R-C1, recorded in the PR body as a deviation). `credentials()` then checks that the key can be sent and is at most 512 characters. State is pinned once, in `TextModelRunner.__init__`: the keys, the 32,768 cap, and the 630 s floor. `MetaProvider` builds the same body it builds for `DIRECT`, and `VidbyteGatewayTransport` replaces the vendor URL and headers with the gateway's. Failures are caught in `_GatewayAnswer`: a 409, a 502, or an answer that is not JSON is re-sent with the same `Idempotency-Key`, and every failure is worded from its status alone.
 
 ---
 
@@ -800,3 +815,4 @@ There is no new endpoint and no new query. Secrets follow the existing conventio
 | r3 | 2026-10-17 | S1 spec (review round 2, final) | All five round-2 findings accepted (2 Major, 3 Minor; 0 Blocker), all text only. One canonical merge-prerequisites sentence (#710 deployed, then ops has provisioned the backend's `META_API_KEY`, then the live check has passed), repeated word for word in the TL;DR, §2, §9.4, FR-8, AC-15, A-3, and §12.5. EC-16 broadened to compositions that tolerate a failed member or stage (adding the critic, judge, and brief writer), counted as agent-loop member runs, and disclosed with the paid case and a general opt-out. A two-call live check with a control call, run from this branch. Checklist ticks only for what holds. INV-4 names M-14 and M-21. Status set to approved. Design and budget unchanged (one constant, 0 new files). |
 | r3 | 2026-10-17 | S3 implement | Rows 1-2 built as specified, with no deviation: `ModelProvider.META` in `VIDBYTE_MANAGED_TEXT_PROVIDERS` with the 4-line cited comment (`b2306206`, `jev.py` 5+/2-), and the Providers, Output cap and Prefixes README bullets (`98b91e11`). Area `183 passed`; lint `SDK-LINT: PASS`; full gate red only on the pre-existing harness_threads test (`148 == 120` at `845a4d9b`, `167 == 120` at origin/main `6f5a7310`), and `--stage package` passes. Draft PR #1180. |
 | r4 | 2026-10-17 | S1 spec (revision after S4 review) | S4 R-1 (Blocker) accepted. Meta documents keys as `LLM_<numeric id>_<secret>`, so the `KEY_FORMATS` Meta row proves both `LLM_` and `LLM|` and reserves both prefixes (D-8). The secret class stays `[A-Za-z0-9_-]+` (D-9, A-6), checked by a new live-check call (c) that passes the real key through `api_keys`. New: FR-9; INV-16, INV-17; AC-16, AC-17, AC-18; EC-17..EC-19; A-6, A-7; Q-7 (default no); NG-11, NG-12; W-5; §12.3 rows 4 (`provider_keys.py`) and 5 (registries README). Row 2(c) now reads "`LLM_` or `LLM|` (Meta)". Minors: R-4 (the merge sentence names no spec section), R-5 (constants cited by name), R-9 (team workers in EC-16), R-10 (live call (d) in `VIDBYTE_MANAGED`), R-11 (Run A's `LLM|` text recorded). R-2, R-3, R-6, R-7, and R-8 are recorded as §13 facts. Budget: 0 new files; production files changed: 2 (`jev.py`, `provider_keys.py`). Frontmatter `status` left to the orchestrator. |
+| r4 | 2026-10-17 | S6 PR | finalized for review. `status: pr-open`, and the PR body is in `pr-body.md`. §5's flowchart is replaced with the PR's chart, because the old one had drifted from the code. It did not show that agents match keys once at construction, against the primary and every fallback, or that `_require_gateway_shape` refuses an endpoint (M-13) before an unserved provider (M-12) and runs before matching. The §5 prose now states that order and its one consequence (S5 R-C1). The sequence diagram is kept. No behavior text in Parts B and C changed; R-C1 is listed under the PR body's "Deviations from the spec". |
