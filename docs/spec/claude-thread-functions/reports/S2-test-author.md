@@ -86,3 +86,34 @@ $ PYTHONPATH=$(pwd) timeout 1200 python -m pytest -q -p no:cacheprovider tests/f
 ```
 
 Lesson for this stage: a test that is red only because an earlier line fails cannot show its later lines are right. Lines that build records for the other harnesses should be run against the merge base, where those harnesses exist, before the red run is recorded.
+
+## S5 test changes (after S4)
+
+Brief: the coordinator's S5 message, bounded to the regression tests spec r4 (`cabf0f80`) requires for S4 findings R-1 to R-4 (`review.md`). I read `git show cabf0f80`, `review.md` and the test pack, and nothing under `vidbyte/`, `REPO_MAP.md` or `vidbyte/harnesses/README.md`. No real `claude` and no real key were used; every stand-in ran with the sandbox's HOME and USERPROFILE.
+
+What changed (test commit `test(harnesses): regression tests for S4 findings [R-1 R-2 R-3 R-4]`):
+- **R-2** (INV-5 rule 5, AC-8, EC-38): `PROMPT_CASES` in `test_harness_threads_claude_arguments.py` gained `("lone-surrogate", "list \ud800 files")`. It runs through the same `refuse` fixture, so the refusal must be `configuration.invalid_argument` naming `prompt`, with nothing started and no `~/.vidbyte` folder. There is no such case for Grok, opencode or Muse (EC-38, INV-20).
+- **R-3** (INV-6, INV-7 item 4, EC-14): `fake_harness.py` gained the `answer_then_hold` mode, which prints a valid success answer, logs `printed`, then holds. The new `test_answer_printed_before_the_timeout_gives_the_newest_thread_id[run|continue|fork]` expects `claude.timed_out` with the printed `session_id` (run, fork) or the caller's id (continue), the seconds waited, and stderr as the vendor text. It uses `PRINTED_TIMEOUT = 3.0` so a slow stand-in still prints first; a stand-in stopped before printing fails on its own assertion. The existing nothing-printed tests already assert `thread_id=None` (run) and the caller's id (continue, fork), as r4 says, and are unchanged.
+- **R-1** (INV-6, INV-7 item 5, EC-15): the new `test_stdout_past_the_cap_carries_claudes_stderr_as_the_vendor_text` sits beside the unchanged cap test. It combines `flood` with `stderr_text` and checks `vendor=`.
+- **R-4** (AC-23 as rewritten in r4): `test_harnesses_readme_and_repo_map_describe_the_claude_functions` now requires the six tokens in the README, and requires `Claude Code` with none of the three function names, `claude-configs`, `--setting-sources` or `CLAUDE.md` in the REPO_MAP `native/` section. This is the only changed assertion; its before and after are in test-plan.md "Changes to existing tests" item 7.
+- The headers of the three test files and the stand-in name the new cases.
+
+Red, at the unchanged code (HEAD `cabf0f80`):
+
+```
+$ PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider tests/features/harness_threads/ -k claude < /dev/null
+FAILED tests/features/harness_threads/test_harness_threads_claude_process_bounds.py::test_answer_printed_before_the_timeout_gives_the_newest_thread_id[run]
+FAILED tests/features/harness_threads/test_harness_threads_claude_process_bounds.py::test_answer_printed_before_the_timeout_gives_the_newest_thread_id[fork]
+5 failed, 195 passed, 437 deselected, 1 warning in 37.90s
+$ PYTHONPATH=$(pwd) timeout 1200 python -m pytest -q -p no:cacheprovider tests/features/harness_threads/ < /dev/null
+5 failed, 630 passed, 2 skipped, 1 warning in 67.25s (0:01:07)
+```
+
+Each failure names its finding: the REPO_MAP section holds all six forbidden tokens (R-4); the surrogate prompt gives `runtime.error` from `UnicodeEncodeError` instead of `configuration.invalid_argument` (R-2); `vendor_message` is None on `output_too_large` (R-1); and `thread_id` is None on the run and the source id on the fork (R-3). `[continue]` passes now and must keep passing (a guard), because the caller's id is already the fallback. Every earlier Claude test still passes, apart from the changed AC-23 check. The one warning comes from the garbage collector closing the child that the surrogate call leaked (R-2's own symptom).
+
+For the repair agent:
+- Apply R-1 and R-3 as one patch (`review.md` Fix notes). The three new process-bounds tests need the answer read before the timeout and output-cap checks, with `thread_id=newest` and `vendor_text=outcome.stderr` on both.
+- The R-4 test now *forbids* the tokens in REPO_MAP. Reword the REPO_MAP Claude sentences in plain words, keep `Claude Code`, and keep the exact names in the README.
+- Do not route R-2 through `NATIVE_STDIN_PROMPT_HARNESSES`: opencode must keep its behaviour (INV-20).
+
+Open: there is no guard that emoji and accented prompts still run after the new pattern (r4 INV-5 rule 5 says they must). It was outside this brief and is a recommended small follow-up.
