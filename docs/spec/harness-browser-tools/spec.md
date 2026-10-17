@@ -9,7 +9,7 @@ branch: feat/harness-browser-tools
 base_commit: 845a4d9bd5f144b1e083b5dc3c76bff17c75b235
 created: 2026-10-16
 updated: 2026-10-17
-pr:
+pr: https://github.com/cerredz/Vidbyte-SDK/pull/1183
 ---
 
 # Spec: Browser tools for every harness thread: run_<harness>_with_browser
