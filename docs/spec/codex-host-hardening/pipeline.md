@@ -20,12 +20,12 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
 | S2 tests | done | 10:10 | 11:40 | reports/S2-test-author.md | **S2_HEAD fadec47f** (was 09524ff4; moved by the orchestrator-granted correction of 2 assertions); 106 new tests (97 red, 8 guards, 1 live-skipped), 20 superseded + 7 support literals; red 125F/631P/3S vs baseline 1F/650P/2S; spec r4 (d3389171) aligned to test choices |
 | S3 implement | done | 11:45 | 14:20 | reports/S3-implementer.md | **S3_HEAD c9150d63**; draft PR #1181 (base `ai/resolve-pr-1055-comments`, 64 files +9688/−551); 24/24 rows; budget 3 files / 13 classes / 0 deps / 9 config keys (exact); host.py 923; area 1F(inherited)/1024P/3S; source 1F(inherited)/6555P/27S; package CI passed; SDK-LINT: PASS |
 | S4 adversarial review | done | 14:25 | 16:10 | reports/S4-review-{conformance,conventions,engineering}.md, reports/S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES — confirmed 4 Blocker / 6 Major / 7 Minor; refuted 0; downgraded 1 (R-V3). Owners: code R-1,R-2,R-3,R-9,R-10; test R-4,R-5,R-6,R-8; spec R-7 |
-| S5 repair loop | running (iteration 3: m-9 only) | 16:15 | 21:00 | verify-log.md, reports/S5-repair-{1,2}.md | iteration 1 (efb19043) fixed R-1..R-10; iteration 2 (**HEAD 127173b5**: R-11 @8e5c649b, R-12 @b40b6562); S2_HEAD 68562b22 untouched; area 1F(inherited)/1057P/3S; source 1F(inherited)/6588P/27S; package CI passed; SDK-LINT: PASS; review.md 0 open |
+| S5 repair loop | done | 16:15 | 22:30 | verify-log.md, reports/S5-repair-{1,2,3}.md | 3 iterations: 1 (efb19043) R-1..R-10; 2 (127173b5) R-11, R-12; 3 (**HEAD 91544b51**, fix 14509eda) m-9. S2_HEAD 68562b22 untouched; source 1F(inherited)/6588P/27S; package CI passed; SDK-LINT: PASS; review.md 0 open; **spec status: verified** |
 | S5 re-review | done (2/2) | 18:15 | 21:40 | reports/S5-rereview.md, reports/S5-findings-verifier.md, reports/S5-rereview-2.md | round 1: R-11 Blocker, R-12 Major, m-8, all fixed; round 2: MERGEABLE AFTER FIXES, 0 Blocker / 0 Major / 1 Minor (m-9, FR-36 docstrings), fixes held, kill-tested (5 R-11 and 6 R-12 tests fail under revert) |
 | S6 PR | deferred to the end of slice 2 | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 2/8 · S5 re-review rounds: 2/2
+- S1 review rounds: 2/2 · S5 repair iterations: 3/8 · S5 re-review rounds: 2/2
 
 ## Decisions the orchestrator made
 - 2026-10-17 06:44: Waited for PR #1055 to merge (merged at 2026-10-17T06:44:08Z as `6f5a7310`) before creating the worktree, per Prompt 3.
@@ -182,6 +182,20 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
   - **No new test:** FR-36 is P2, and AC-39's NG-10 row lives on `list_codex_threads`. An AC-39 row for `search_codex_threads` would need another S2 round for a docs-only P2 item, so I verify `__doc__` directly with a one-liner instead.
   - **No round 3 re-review:** the cap is 2, and a docstring cannot regress behavior. I check the diff myself: docstrings only, the gates, and `__doc__` non-empty.
   - I transcribed m-9 into `review.md` under "Post-repair re-review round 2 — minor findings".
+
+- 2026-10-17 22:30: **Slice 1 verified.** Checks I ran myself:
+  - Iteration 3's fix 14509eda is docstring-only: the AST of host.py with docstrings stripped is identical before and after.
+  - All three rows 16–18 functions now have a `__doc__` stating the title-only limit.
+  - `git diff 68562b22..HEAD -- tests` is empty.
+  - Source stage: `1 failed (inherited), 6588 passed, 27 skipped`. Package stage: `CI passed.` Lint: `SDK-LINT: PASS`.
+  - I set the spec's `status: verified` as a docs status flip.
+  - **Accepted:** the repair agent left "(NG-10)" out of the docstrings to match the package, where no docstring in `vidbyte/harnesses/native/codex/` cites a spec ID.
+  - **Follow-ups for the PR body:**
+    - add the three methods to AC-39's keyword table, a test change for S2 that guards the docstrings;
+    - m-2's method-key half, m-3, m-4, m-5, m-6 and m-7;
+    - the inherited `harness_threads` count test.
+  - **Next:** slice 2 `codex-host-first-class` starts on this branch at HEAD, through S0 to S5. Its pipeline.md is `docs/spec/codex-host-first-class/pipeline.md`. S6 runs once for both slices.
+- **Load-sensitive test:** `tests/test_mcp_stdio_transport.py::...test_cancelled_waiter_does_not_break_transport` can hit its 5.0 s MCP timeout when the source stage runs alongside semgrep or other heavy jobs. It passed 5/5 alone, so run the source stage alone. *Source:* S5 repair 3
 
 ## User replies (verbatim)
 - (none yet)

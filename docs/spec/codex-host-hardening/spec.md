@@ -1,7 +1,7 @@
 ---
 spec: codex-host-hardening
 title: CodexHost production hardening and missed settings (slice 1 of 2)
-status: reviewed
+status: verified
 revision: 6
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-codex-host-first-class
