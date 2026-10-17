@@ -1,14 +1,14 @@
 """FILE: vidbyte/agents/infinite/workspace.py
 
 PURPOSE: Defines InfiniteWorkspace, the one memory folder every agent in an InfiniteMemory tree shares, and its deterministic guardrails: setup of the folder, the bookkeeping files, and the seeds; the file and token caps recounted from disk before every tool write; the sparse-entry rules; entry commits and supersedes; note writes and edits inside the allowed paths; and the workspace map every agent sees.
-ROLE IN CODEBASE: Built once by InfiniteMemoryAgent (agent.py) from InfiniteWorkspaceSettings (settings.py); called by the memory tools (memory.py) for every remember, write_note, and edit_file, by the launch tool (launch.py) to resolve "#N" context ids and to commit a pair's staged entries, and by the runtime (runtime.py) and the launch tool to render the map.
+ROLE IN CODEBASE: Built once by InfiniteMemoryAgent (agent.py) from InfiniteWorkspaceSettings (settings.py); called by the memory tools (memory.py) for every remember, write_note, and edit_file, by the launch tool (launch.py) to resolve "#N" context ids and to commit a pair's staged entries, and by the runtime (runtime.py) and the launch tool to render the map; the runtime also diffs two map snapshots for the root's status message and cuts its change lines with fit_map_lines.
 ARCHITECTURE NOTE: All data is plain files under the root (spec section 9.1): entries.jsonl holds the live entries, superseded.jsonl the replaced ones, files.jsonl one description per created note. Nothing is cached; every check reads the disk through FolderUsage (vidbyte/lib/tools/filesystem/usage.py), so files that bash or the developer wrote count too. Every write runs under one class-level lock and replaces whole files through LocalFileSystemBackend.write_text(atomic=True), so a reader never sees half a line. Rule violations raise ToolExecutionError with what to fix, which the memory tools return to the model.
-FUNCTION INVENTORY: __init__ and commit_entry are narrated main functions. usage, entries, check_entry, write_note, edit_file, and map_text are the public operations. _text reads one bookkeeping file; _entry_lines parses a bookkeeping file into entries; _entry_rules refuses text UTF-8 cannot hold, then applies the sparse-entry rules; _note_path applies the note path rules; _room applies the workspace caps to FolderUsage's projection of a write; _descriptions reads files.jsonl leniently for the map; _entry_json and _stamp format one entry line and one UTC stamp. Counting files from disk is FolderUsage's and atomic writes are LocalFileSystemBackend's.
+FUNCTION INVENTORY: __init__ and commit_entry are narrated main functions. usage, entries, check_entry, write_note, edit_file, map_snapshot, and map_text are the public operations; map_snapshot reads the map's header and every file line uncut, and map_text renders it through the static fit_map_lines, which applies the map cap and also cuts the root's status message. _text reads one bookkeeping file; _entry_lines parses a bookkeeping file into entries; _entry_rules refuses text UTF-8 cannot hold, then applies the sparse-entry rules; _note_path applies the note path rules; _room applies the workspace caps to FolderUsage's projection of a write; _descriptions reads files.jsonl leniently for the map; _entry_json and _stamp format one entry line and one UTC stamp. Counting files from disk is FolderUsage's and atomic writes are LocalFileSystemBackend's.
 COMMON MODIFICATION PATTERNS: A new guardrail is one more check in the operation it guards, with an @intent comment and a ToolExecutionError message that says what to fix. A new bookkeeping file adds its name to vidbyte/lib/constants/infinite.py, to the setup loop in __init__, and to the reserved paths in _note_path.
-WHAT NOT TO DO IN THIS FILE: 1. Do not cache file counts, entries, or descriptions; bash can change the folder between any two calls. 2. Do not write outside the lock or write a file in place; use self.backend.write_text(..., atomic=True). 3. Do not apply max_file_tokens to the bookkeeping files; only max_tokens bounds them (INV-19). 4. Do not raise from map_text on bad file content.
+WHAT NOT TO DO IN THIS FILE: 1. Do not cache file counts, entries, or descriptions; bash can change the folder between any two calls. 2. Do not write outside the lock or write a file in place; use self.backend.write_text(..., atomic=True). 3. Do not apply max_file_tokens to the bookkeeping files; only max_tokens bounds them (INV-19). 4. Do not raise from map_snapshot or map_text on bad file content. 5. Do not cut map lines anywhere but fit_map_lines; the map and the root's status message share its rule.
 KNOWN EDGE CASES: A malformed line in entries.jsonl or superseded.jsonl makes every entry operation fail with the file and line number until it is fixed, while map_text keeps working. A supersede writes the old line to superseded.jsonl before it rewrites entries.jsonl, so a crash between the two leaves the line in both files rather than in neither. Token counts are TokenEstimate's character estimate of the utf-8 text, with undecodable bytes counted as replacement characters. Text UTF-8 cannot hold raises UnicodeEncodeError, a ValueError the memory tools turn into a refusal, before any file is written; a pair agent's entry meets that check when it is staged, so InfinitePair._commit, which catches only ToolExecutionError, never sees it.
-RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 6.1 INV-16 to INV-24, and 9.1); vidbyte/agents/infinite/README.md
-TESTS: tests/features/infinite_memory_agent/test_infinite_memory_workspace.py, tests/features/infinite_memory_agent/test_infinite_memory_verification.py, and tests/features/infinite_memory_agent/test_infinite_memory_contract.py
+RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 6.1 INV-16 to INV-24, and 9.1); docs/spec/infinite-memory-context-economy/spec.md (FR-7.2, INV-7.3); vidbyte/agents/infinite/README.md
+TESTS: tests/features/infinite_memory_agent/test_infinite_memory_workspace.py, tests/features/infinite_memory_agent/test_infinite_memory_verification.py, tests/features/infinite_memory_agent/test_infinite_memory_contract.py, and tests/features/infinite_memory_agent/test_infinite_memory_stable_prefix.py
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import stat
 import threading
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import ClassVar
@@ -39,6 +39,7 @@ from vidbyte.lib.dataclasses.filesystem import FileSystemToolConfig
 from vidbyte.lib.dataclasses.infinite import (
     InfiniteEntry,
     InfiniteEntryDraft,
+    InfiniteMapSnapshot,
     InfiniteStagedEntry,
     InfiniteWorkspaceUsage,
 )
@@ -205,31 +206,41 @@ class InfiniteWorkspace:
             self.backend.write_text(target, note, encoding="utf-8", create_parents=True, newline="", atomic=True)
         return relative
 
-    def map_text(self) -> str:
-        """Render the workspace map: the totals against their caps, then one line per file with its tokens and description."""
+    def map_snapshot(self) -> InfiniteMapSnapshot:
+        """Return the workspace map uncut: its header with the totals against their caps, and one (path, line) pair per file with its tokens and description."""
         # @intent the-map-never-fails-on-content
         # Every agent needs the map, so a malformed bookkeeping line
         # only costs that file its description; it never stops the
-        # render.
+        # render. Nothing is cached: each snapshot is counted from disk.
         counts = FolderUsage.tokens_by_file(self.root, skip=INFINITE_UNCOUNTED_DIRNAMES)
         descriptions = self._descriptions(self._text(INFINITE_FILES_FILE))
         live = sum(1 for line in self._text(INFINITE_ENTRIES_FILE).split("\n") if line.strip())
         header = Prompts().get(Prompt.INFINITE_MEMORY_MAP_HEADER).format(files=len(counts), max_files=self.settings.max_files, tokens=sum(counts.values()), max_tokens=self.settings.max_tokens, entries=live)
-        lines = [f"- {path} ({tokens} tokens): {INFINITE_SEED_LABEL if path.startswith(f'{INFINITE_SEED_DIRNAME}/') else descriptions.get(path, INFINITE_NO_DESCRIPTION)}" for path, tokens in counts.items()]
-        rendered = "\n".join((header, *lines))
-        if TokenEstimate.count(rendered) <= INFINITE_MAP_MAX_TOKENS:
-            return rendered
+        lines = tuple((path, f"- {path} ({tokens} tokens): {INFINITE_SEED_LABEL if path.startswith(f'{INFINITE_SEED_DIRNAME}/') else descriptions.get(path, INFINITE_NO_DESCRIPTION)}") for path, tokens in counts.items())
+        return InfiniteMapSnapshot(header=header, lines=lines)
+
+    def map_text(self) -> str:
+        """Render the workspace map: the snapshot's header, then the file lines that fit the map cap."""
+        snapshot = self.map_snapshot()
+        return "\n".join((snapshot.header, *self.fit_map_lines(snapshot.header, [line for _, line in snapshot.lines])))
+
+    @staticmethod
+    def fit_map_lines(header: str, lines: Sequence[str]) -> tuple[str, ...]:
+        """Return the lines to show after header within the map cap, the last one INFINITE_MORE_FILES naming how many were left out when some were."""
+        if TokenEstimate.count("\n".join((header, *lines))) <= INFINITE_MAP_MAX_TOKENS:
+            return tuple(lines)
 
         # @intent the-map-fits-its-cap
         # Past the cap, keep the first lines that fit and say how many
-        # files were left out, leaving room for that closing line.
+        # lines were left out, leaving room for that closing line. The
+        # map and the root's status message both cut here.
         room = INFINITE_MAP_MAX_TOKENS * TOKEN_ESTIMATE_CHARS_PER_TOKEN - len(INFINITE_MORE_FILES.format(count=len(lines))) - len("\n")
-        shown = header
+        shown = len(header)
         for index, line in enumerate(lines):
-            if len(shown) + len("\n") + len(line) > room:
-                return f"{shown}\n{INFINITE_MORE_FILES.format(count=len(lines) - index)}"
-            shown = f"{shown}\n{line}"
-        return shown
+            if shown + len("\n") + len(line) > room:
+                return (*lines[:index], INFINITE_MORE_FILES.format(count=len(lines) - index))
+            shown += len("\n") + len(line)
+        return tuple(lines)
 
     def _text(self, name: str) -> str:
         # One bookkeeping file's text, or "" when bash removed it.
