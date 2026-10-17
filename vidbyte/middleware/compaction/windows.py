@@ -17,8 +17,18 @@ import math
 from collections.abc import Sequence
 
 from vidbyte.lib.dataclasses.context import ContextMessage
-from vidbyte.middleware.compaction.base import BaseCompaction, CompactionMode, TokenCounter
-from vidbyte.middleware.compaction.strategies import _head_tail_text, _message_tokens, _message_tool_name, _provider_groups, _replace_message_content
+from vidbyte.middleware.compaction.base import (
+    BaseCompaction,
+    CompactionMode,
+    TokenCounter,
+)
+from vidbyte.middleware.compaction.strategies import (
+    _head_tail_text,
+    _message_tokens,
+    _message_tool_name,
+    _provider_groups,
+    _replace_message_content,
+)
 
 
 class TrimWithProviderBoundariesCompaction(BaseCompaction):
