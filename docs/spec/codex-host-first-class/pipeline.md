@@ -16,8 +16,8 @@ Slice 1 (`docs/spec/codex-host-hardening/`, status `verified`) is done on this b
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 recon | done | 22:40 | 23:05 | reports/S0-scout.md | code-map.md: 4 sections, 564 lines; per-function protocol table (§4.1); pins table (§3.4) |
-| S1 spec + review | running | 23:10 | | reports/S1-spec-author.md | r1 fde5a8b0: 1,832 lines; FR 36, AC 41, EC 55; budget 13 files / 70 classes / 0 deps / 43 config keys; Q-1 (queue) blocking, default not built |
-| S2 tests | pending | | | | |
+| S1 spec + review | done | 23:10 | 03:10 | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | r1 fde5a8b0; round 1 SOUND WITH FIXES (1B/6M/6m, 040e56c1); r2 603519bb; round 2 SOUND WITH FIXES (0B/3M/2m, 4db45a23); **r3 d9072cdb status approved**. Budget 13 files / 69 classes / 0 deps / 46 config keys / 42 endpoints; INV 55, AC 44, EC 62, FR 36 |
+| S2 tests | running | 03:15 | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
@@ -25,7 +25,7 @@ Slice 1 (`docs/spec/codex-host-hardening/`, status `verified`) is done on this b
 | S6 PR (both slices) | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 0/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-17 22:40: **The same branch, worktree and PR as slice 1.** The precedent is #1055's two specs in one PR. Slice 2's base is slice 1's verified HEAD a7730107. request.md is slice 1's verbatim conversation capture with a slice-2 header (scope, what slice 1 already built, and the machinery to reuse).
@@ -41,6 +41,13 @@ Slice 1 (`docs/spec/codex-host-hardening/`, status `verified`) is done on this b
     - the TUI never calls `thread/queue/start` or `list`, so Codex drains the queue itself and the resulting turns are untracked by the host (slice-1 INV-11);
     - inside one private server, the queue is redundant with `continue_codex_thread` and with `wait_codex_turn` followed by continue.
   - **Not stopping for the user:** the default is evidence-backed and conservative, so I don't stop. It is named in the S1 summary so the user can interrupt.
+
+- 2026-10-18 03:10: **S1 done.** r3 (d9072cdb) has `status: approved` and 18 sections, and §16 records every finding from both rounds (R-1…R-18). The defaults I applied, all printed in the S1 summary:
+  - Q-1, the queue: not built.
+  - Q-2…Q-9: no.
+  - Q-10 and Q-11: optional and scope-adding, not built.
+  - **R-14 took a different form from the reviewer's fix.** The side-chat tool uses `DENY_ALL` approval modes, which send `approvalPolicy "never"` and no reviewer on both `thread/fork` and `turn/start`. The reviewer's explicit `NEVER` would have reached only `thread/fork`, because `turn_start` never sends explicit fields. I accepted it, since it narrows on both requests.
+  - **The host stream bound is enforced (D-39):** `CodexTurnRegistry.charge_stream` with limits of 65,536 events and 32,000,000 chars.
 
 ## User replies (verbatim)
 - (none yet)
@@ -94,3 +101,20 @@ Slice 1 (`docs/spec/codex-host-hardening/`, status `verified`) is done on this b
 - **Two test-harness traps:** `test_codex_host_inputs.py:216` uses `iscoroutinefunction`, so it cannot see an async-generator host method. A change under `vidbyte/tools/` outside the four excluded paths fails the harness_threads branch-scope test locally. *Source:* S0 scout
 - **Stashes:** never a bare `git stash`, because the stash stack is shared with other worktrees. *Source:* environment
 - **Long heredocs:** a long quoted heredoc fails to parse in this Git Bash, so write docs with the Write or Edit tool. *Source:* S5 repair 2, orchestrator
+- **Slice-2 contract names (r3):**
+  - the mixins `CodexSettingsMethods`, `CodexStreamMethods`, `CodexThreadMethods` and `CodexGoalMethods` over `CodexHostCore`;
+  - `CodexTurnStarts`, `CodexTurnEventLog` and `CodexJsonObjectResponse`;
+  - `raw(method, params, parse=None)`;
+  - `GitWorktrees` in its own lib module;
+  - the record modules `codex_host_modes` and `codex_host_features`;
+  - `CodexThreadHelpers.fork(..., *, starts_turn=False)`.
+  
+  *Source:* S1 author r3
+- **Slice-2 seams:**
+  - patchable limits `turn_stream.CODEX_HOST_STREAM_EVENT_LIMIT`, `_TEXT_LIMIT_CHARS`, `_HOST_EVENT_LIMIT` and `_HOST_TEXT_LIMIT_CHARS`, plus `turn_starts.CODEX_HOST_GOAL_RESUME_START_SECONDS`;
+  - read the host totals with `host._registry.charge_stream(0, 0)`;
+  - the fake answers -32601 for every slice-2 method, so new handlers go in a stateless mixin module, because `codex_host_fakes.py` is 902 lines;
+  - the fake's `thread/search` must apply Codex's default source filter: an empty `sourceKinds` means cli and vscode only, and `FakeThread.source="appServer"`;
+  - the fake's fork copies the parent's reviewer and policy unless params override them (`codex_host_fakes.py:857`).
+  
+  *Source:* S1 author r3
