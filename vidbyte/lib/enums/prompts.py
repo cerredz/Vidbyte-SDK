@@ -4,7 +4,7 @@ FILE:
     vidbyte/lib/enums/prompts.py
 
 PURPOSE:
-    Defines the stable typed identifiers for all 139 static prompt assets across 35
+    Defines the stable typed identifiers for all 149 static prompt assets across 36
     JSON/Markdown-backed families, and the opt-in system-prompt presets an agent can
     attach. This file owns identifiers only; prompt text and family metadata belong
     under ``vidbyte/prompts/prompts/``.
@@ -150,6 +150,16 @@ class Prompt(str, Enum):
     INFINITE_MEMORY_EDIT_FILE_NEW_TEXT_DESCRIPTION = "infinite_memory.edit_file_new_text_description"
     INFINITE_MEMORY_DROP_ENTRY_TOOL_DESCRIPTION = "infinite_memory.drop_entry_tool_description"
     INFINITE_MEMORY_DROP_ENTRY_ID_DESCRIPTION = "infinite_memory.drop_entry_id_description"
+    AGENT_SWARM_SYSTEM_PROMPT = "agent_swarm.system_prompt"
+    AGENT_SWARM_MESSAGE_TOOL_DESCRIPTION = "agent_swarm.message_tool_description"
+    AGENT_SWARM_MESSAGE_TO_DESCRIPTION = "agent_swarm.message_to_description"
+    AGENT_SWARM_MESSAGE_TEXT_DESCRIPTION = "agent_swarm.message_text_description"
+    AGENT_SWARM_MESSAGE_SENT = "agent_swarm.message_sent"
+    AGENT_SWARM_MESSAGE_UNKNOWN_RECIPIENT = "agent_swarm.message_unknown_recipient"
+    AGENT_SWARM_MESSAGE_STOPPED_RECIPIENT = "agent_swarm.message_stopped_recipient"
+    AGENT_SWARM_MESSAGE_BLANK_TEXT = "agent_swarm.message_blank_text"
+    AGENT_SWARM_INBOX = "agent_swarm.inbox"
+    AGENT_SWARM_INBOX_MESSAGE = "agent_swarm.inbox_message"
     CONTINUAL_TRACE_SYSTEM_PROMPT = "continual_trace.system_prompt"
     CONTEXT_ENGINEERING_GUIDELINE_PROMPT = "context_engineering.guideline_prompt"
     EXPERT_PROMPTING_EXPERT_PROMPT = "expert_prompting.expert_prompt"

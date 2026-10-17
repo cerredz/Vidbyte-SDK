@@ -1,0 +1,1 @@
+The text the other agent receives, delivered whole and exactly as written. The recipient sees only this text and your name. It reaches the recipient under a line that names you, together with any other messages waiting for that agent. The text must not be empty or blank.

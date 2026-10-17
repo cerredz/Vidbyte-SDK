@@ -1,0 +1,1 @@
+The name of the one agent that receives this message. It must be one of the other agents in this swarm, written exactly as the allowed values list it. You cannot send a message to yourself or to every agent at once. Make a separate call for each agent that needs the message.
