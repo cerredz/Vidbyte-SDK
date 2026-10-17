@@ -106,9 +106,10 @@ test -e "$WORKTREE" || test -e "$WORKTREE-evidence"; echo "paths exit $?"
 
 ```sh
 SLUG=<slug> WORKTREE=<checkout>-onboard-<slug>
-git worktree add -b "feat/provider-$SLUG" "$WORKTREE" origin/main
-git -C "$WORKTREE" rev-parse HEAD
+git worktree add -b "feat/provider-$SLUG" "$WORKTREE" origin/main && git -C "$WORKTREE" rev-parse HEAD; echo "add exit $?"
 ```
+
+   When `add exit` is not 0, the add failed, usually because another session created that branch or path after this pass's checks. The SHA, if one printed, is not yours: launch no subagent, record `local-branch` for the vendor, and continue the walk of step 2 with the next vendor.
 
 ## The provider subagent
 
@@ -172,12 +173,11 @@ The HEAD must equal `<base>` and `status --porcelain` must print nothing (else `
 
 ```sh
 SLUG=<slug> WORKTREE=<checkout>-onboard-<slug>
-git worktree remove --force "$WORKTREE"
-git branch -D "feat/provider-$SLUG"
-test -n "$SLUG" && rm -rf -- "$WORKTREE-evidence"
+git worktree remove --force "$WORKTREE" && git branch -D "feat/provider-$SLUG" && test -n "$SLUG" && rm -rf -- "$WORKTREE-evidence"; echo "cleanup exit $?"
 ```
 
-- `PROOF_FAILED`, `PUBLISH_FAILED` and `RESULT_UNVERIFIED` keep the worktree, its `-evidence` directory and the branch, so no unpushed work is lost; the STOP line names the kept worktree. The next session skips that vendor as `local-branch` until the person runs the three commands above, after which it is reconsidered. After `PUBLISH_FAILED pr` the pushed branch also stays on GitHub (`remote-branch`) until the person deletes it or opens its PR by hand.
+  Each step runs only after the one before it succeeded, so a failed remove keeps the branch and the evidence. When `cleanup exit` is not 0, leave what is left for the person, keep the vendor's recorded outcome and continue; the next session skips that vendor as `local-branch` until it is gone.
+- `PROOF_FAILED`, `PUBLISH_FAILED` and `RESULT_UNVERIFIED` keep the worktree, its `-evidence` directory and the branch, so no unpushed work is lost; the STOP line names the kept worktree. The next session skips that vendor as `local-branch` until the person runs the cleanup block above, after which it is reconsidered. After `PUBLISH_FAILED pr` the pushed branch also stays on GitHub (`remote-branch`) until the person deletes it or opens its PR by hand.
 - A session the person interrupts leaves the worktree and branch of its last pass, and prints no STOP line; the next session skips that vendor as `local-branch`.
 
 ## Output
@@ -204,7 +204,7 @@ onboard-model-provider: STOP RESULT_UNVERIFIED <slug> <what>; kept <worktree>; o
 
 ## Rules
 
-- Run one session at a time. Two sessions can pick the same vendor or overshoot the back-pressure limit; GitHub then refuses the second push, and that session stops with `PUBLISH_FAILED`.
+- Run one session at a time. Two sessions can pick the same vendor or overshoot the back-pressure limit. In one clone, the second session's worktree add fails and it skips that vendor as `local-branch`; from two clones, GitHub refuses the second push, and that session stops with `PUBLISH_FAILED`.
 - The skill never merges, closes, edits, labels or comments on a PR: the person merges or closes each one.
 - Closing a provider PR unmerged skips that vendor forever, so close one only to reject the vendor; a PR that conflicts after another provider merged stays open until it is resolved.
 - Never stash, and never touch the launcher checkout: no checkout, switch, reset, clean or commit there; every provider works in its own sibling worktree.
