@@ -6,13 +6,13 @@ ARCHITECTURE NOTE: Only SDK types imported for checking; installing Codex is opt
 COMMON MODIFICATION PATTERNS: Copy explicit SDK fields and preserve absent values.
 WHAT NOT TO DO IN THIS FILE: Reflect arbitrary objects or serialize private reasoning.
 KNOWN EDGE CASES: Interrupted turns may lack text; SDK run raises for failed turns.
-RELATED DOCS: https://github.com/cerredz/Vidbyte-SDK/pull/409
-TESTS: Offline typed-result checks and python scripts/run_ci.py.
+RELATED DOCS: https://github.com/cerredz/Vidbyte-SDK/pull/409; docs/spec/codex-host-thread-helpers/spec.md (CodexResultSerializer.items, section 12.3 row 6)
+TESTS: Offline typed-result checks and python scripts/run_ci.py; tests/features/codex_host/test_codex_host_thread_helpers.py, tests/features/codex_host/test_codex_host_goal_skills.py and tests/features/codex_host/test_codex_host_helper_lifecycle.py.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
@@ -76,6 +76,12 @@ class CodexResultSerializer:
             else None,
             usage_available=result.usage is not None,
         )
+
+    @classmethod
+    def items(cls, values: Sequence[ThreadItem]) -> tuple[CodexItem, ...]:
+        # Serialize stored items by the same rule as a turn result's
+        # items.
+        return tuple(cls._item(value) for value in values)
 
     @classmethod
     def _item(cls, value: ThreadItem) -> CodexItem:
