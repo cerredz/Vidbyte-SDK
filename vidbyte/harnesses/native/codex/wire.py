@@ -317,7 +317,7 @@ class CodexParamsTranslator:
     ) -> dict[str, Any]:
         # Every set argument goes under its wire name; empty ones, a
         # None limit, and archived when False, are left out (section
-        # 9.2), so list_codex_threads never sends a limit.
+        # 9.2), so a limit is sent only when given (hardening INV-29).
         values = {
             "cwd": cwd,
             "searchTerm": search,
