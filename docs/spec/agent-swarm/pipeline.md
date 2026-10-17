@@ -17,7 +17,7 @@ started: 2026-10-16 16:10
 | S1 spec + review | done | 2026-10-16 16:35 | 2026-10-16 18:40 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-2.md | spec r3 approved @d2746a4d; R1 SOUND WITH FIXES (7 applied), R2 SOUND WITH FIXES (6 applied) |
 | S2 tests | done | 2026-10-16 18:45 | 2026-10-16 20:40 | reports/S2-test-author.md | 51 tests / 161 cases, all red (missing symbols); S2_HEAD=9895d663 → 87c8ed14 after adjudicated fixture fix |
 | S3 implement | done | 2026-10-16 20:45 | 2026-10-16 22:30 | reports/S3-implementer.md | S3_HEAD=c0b167d3; draft PR #1174; 23 new + 13 modified = budget; 161/161 |
-| S4 adversarial review | running | 2026-10-16 22:35 | | reports/S4-review-{conformance,conventions,engineering}.md | |
+| S4 adversarial review | done | 2026-10-16 22:35 | 2026-10-17 00:40 | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES — 1 Blocker (R-1), 4 Major (R-2..R-5), 10 Minor (R-6..R-15); 4 refuted |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
@@ -55,6 +55,10 @@ started: 2026-10-16 16:10
 
 - 2026-10-16 22:30 — Spot-check S3: tree clean; HEAD c0b167d3 == origin/feat/agent-swarm; `git diff 87c8ed14..HEAD -- tests/` empty; pack re-run "161 passed in 3.25s"; PR #1174 draft, title starts "[WIP]"; spec status implemented + pr url. Gates per implementer: source stage SDK-LINT: PASS + 3 known harness_threads failures (6398 passed); package stage "CI passed."; contract --check current; Semgrep 0 findings. Noted for conventions lens: several commit messages lack W-/FR-/AC- IDs (e.g. 0d64078a, 28444b65, f97170ec).
 - 2026-10-16 22:33 — Dispatched remote CI on c0b167d3: ci.yml run 38990716271, static-policy.yml run 38990717815. NOT dispatched: agents-md-placement.yml (it moves code by pushing commits), actionlint.yml (no workflow changes), publish.yml. origin/main is 4 commits ahead (#1169–#1172, none in §12.3) → catch-up merge is an S5 item.
+
+- 2026-10-17 00:10 — Remote CI on c0b167d3: ci.yml 38990716271 success, static-policy.yml 38990717815 success.
+- 2026-10-17 00:40 — Spot-check S4: review.md has Verdict / Confirmed (R-1..R-5, each with path:line + reproduced evidence) / Refuted (4) / Minor (R-6..R-15). My commit-ID suspicion was REFUTED (IDs live in commit bodies). Reviewer templates were passed by file path (scratchpad/swarm/s4-*.md), not inline — deviation logged, no effect on output.
+- 2026-10-17 00:45 — S4 routing: R-1 (prompt workflow advice), R-2 (isDone search tool), R-3 (unrequested CancelledError → AGENT_FAILED + re-raise, guard `task.cancelling()==0 and _stop_reason is None`), R-4 (move AgentSwarmTurnMiddleware to vidbyte/middleware/builtins/agent_swarm_turn.py, after R-3) → S5 repair. R-5 test gaps (M2, M7/EC-18, M21+M22/EC-26) + regression tests for R-2 and R-3 → S2 test author (only it edits tests). Spec r4 via S1 author before both: §8.4 23→24 new files + §12.3 row (R-4); containment rule for R-3 (INV-17/EC-38); R-14 decided as "replies may be partial under EC-18" (cheapest rule, documents existing behaviour, adds nothing). Minors R-6..R-13 go to S5 as trivial fixes; R-15 is a scope-adding follow-up → stays out (rule 11).
 
 ## User replies (verbatim)
 - 2026-10-16 16:05 — answers to four clarifying questions: "One shared folder (Recommended)"; "Stay alive until quiet (Recommended)"; "Shared goal + per-agent prompts (Recommended)"; "Callback + list on result (Recommended)".
