@@ -22,8 +22,8 @@ STACKED RUN. Base branch is `feat/infinite-memory-agent` (PR #1084), not `main`.
 | S3 implement | done | 2026-10-16 22:30 | 2026-10-16 23:15 | reports/S3-implementer.md | S3_HEAD = c86005c2 (pushed); draft PR https://github.com/cerredz/Vidbyte-SDK/pull/1176 (base feat/infinite-memory-agent); 12 assets + README changed, rows 8–43 others verified unchanged; module 131/131, pack 244/244 |
 | S4 adversarial review | done | 2026-10-16 23:20 | 2026-10-17 03:40 | reports/S4-review-*.md, reports/S4-findings-verifier.md | review.md: 1 Blocker + 5 Major confirmed, 20 Minor |
 | S5 repair loop | done (2 iterations) | 2026-10-17 03:45 | 2026-10-17 05:25 | reports/S5-repair-1.md, reports/S5-repair-2.md | converged at 5f41a5f4; verify-log.md iterations 1-2 |
-| S5 re-review | running (round 2/2) | 2026-10-17 04:05 | | reports/S5-rereview.md | round 1: 15/15 fixes confirmed, R-C101 → R-27 |
-| S6 PR | pending | | | | |
+| S5 re-review | done (2 rounds) | 2026-10-17 04:05 | 2026-10-17 14:20 | reports/S5-rereview.md, reports/S5-rereview-2.md | round 1: 15/15 fixes confirmed, R-C101 → R-27; round 2: SOUND, R-27/R-28 confirmed, 0 new findings |
+| S6 PR | running | 2026-10-17 14:25 | | | |
 
 ## Counters and caps
 - S1 review rounds: 2/2 (round 1: SOUND WITH FIXES, 0 Blocker / 8 Major / 7 Minor, all 15 applied in r2 at b32566fe; round 2: SOUND WITH FIXES, 0 Blocker / 2 Major / 9 Minor, reports/S1-spec-review-r2.md, applied in r3) · S5 repair iterations: 2/8 · S5 re-review rounds: 2/2
@@ -109,6 +109,9 @@ The folder holds 40 `.md` assets; `infinite_memory.json` top level is a dict wit
 - 2026-10-17 05:25 — **S5 iteration 2 converged** (fixed R-27 @fe04ab8c, R-28 @3825237d; verify-log at 5f41a5f4, pushed). Orchestrator's own gate run at 5f41a5f4 (`scratchpad/gates-s5-2/`): module 131; pack 244; `SDK-LINT: PASS`; semgrep 0; public-API current; source = only the 3 inherited harness_threads failures (`3 failed, 6174 passed, 16 skipped`); package `CI passed.`. Test diff vs f4cad411 empty. Tiktoken: root 2470, generator 1490, verifier 1216, task 1142, verifier_task 1160, resume 1151, launch 1123; 23-sum 3,905. Re-review round 2/2 (final) launched, scoped to fe04ab8c and 3825237d plus regressions since 689599d3.
 
 - 2026-10-17 14:00 — **Session limit interruption (after 05:25, reset ~14:00).** The round-2 re-reviewer died mid-review at the limit (HTTP 429) with no report on disk (`reports/S5-rereview-2.md` absent). Tree clean at c77bc7c6 = origin; base still 7efceb55, no rebase. The same re-reviewer is resumed by message (its saved progress kept; it is the only writer of its one report file, so no second writer exists), with the briefing unchanged; if resumption fails, a fresh re-reviewer is launched with the identical briefing. Still re-review round 2/2.
+
+- 2026-10-17 14:20 — **Re-review round 2/2: SOUND.** R-27 and R-28 confirmed (the root holds grep under both presets, `agent.py:77`, reserved name `infinite/runtime.py:72`; grep found a map-hidden plan note in three cut workspaces, even under grep's own result cap, via `files.jsonl:1`); 0 new findings; module 131, pack 244, `SDK-LINT: PASS`, §4 snippet 2470/1490/1216/1142/1160/1151/1123 tik. Spec status set to `verified` (orchestrator one-line docs commit). S5 closed: 2/8 iterations, 2/2 re-review rounds.
+- 2026-10-17 14:25 — **S6 launched** (PR author, opus). Base re-fetched: still 7efceb55, no rebase. Code unchanged since 3825237d, so the orchestrator's gate run at 5f41a5f4 is the gate of record (module 131; pack 244; `SDK-LINT: PASS`; semgrep 0; public-API current; source = only the 3 inherited harness_threads failures; package `CI passed.`; no remote checks).
 
 ## User replies (verbatim)
 - (none yet)
