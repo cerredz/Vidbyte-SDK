@@ -50,6 +50,13 @@ The three source-stage pytest failures are all in `tests/features/harness_thread
 - `test_import_vidbyte_starts_no_process_and_leaves_the_native_package_unloaded`: root `__all__` differs at index 30, `'AgentSwarm'`, the PR's specified exports.
 The last two diff `git merge-base origin/main HEAD` and fail on any branch that changes `vidbyte/tools` or root exports (field guide `local-ci-verification.md`); CI skips them in its shallow clone.
 
-**Remote checks:** pending at this commit; the dispatched CI and Static policy results are recorded in the next docs commit.
+**Remote checks** (dispatched with `gh workflow run` on `8f9a0811`, the pushed head with every fix and this log's first version; read with `gh run watch` and `gh run view`):
+
+| Gate | Run | Result | Final lines |
+|---|---|---|---|
+| CI `ci.yml` | 39006274191 | PASS: Source / Python 3.11, Source / Python 3.12, Package all success | `SDK-LINT: PASS` / `6375 passed, 57 skipped in 114.74s` / `CI passed.` (3.12: `6375 passed, 57 skipped, 19 warnings in 119.47s`) / Package: `Installed vidbyte-sdk 0.3.0 passed smoke checks.` / `CI passed.` |
+| Static policy `static-policy.yml` | 39006275608 | PASS | `Findings: 0 (0 blocking)` / `Ran 1 rule on 995 files: 0 findings.` |
+
+CI skips the three inherited `harness_threads` surface tests (no `origin/main` in its shallow clone), so the remote source stage is fully green. The commit that records this table is docs-only.
 
 **Still open:** none of R-1..R-15 (statuses in review.md). Test gap for the S2 owner, not a code defect: no test kills the mutant that drops the `_stop_reason is None` guard (recipe above).

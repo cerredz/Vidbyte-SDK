@@ -122,4 +122,11 @@ No confirmed finding is open. Everything the briefing listed is either fixed or 
 
 ## Remote checks
 
-**Remote checks:** pending at this commit; the dispatched CI and Static policy results are recorded in the next docs commit.
+**Remote checks** (dispatched with `gh workflow run` on `8f9a0811`, the pushed head with every fix and this log's first version; read with `gh run watch` and `gh run view`):
+
+| Gate | Run | Result | Final lines |
+|---|---|---|---|
+| CI `ci.yml` | 39006274191 | PASS: Source / Python 3.11, Source / Python 3.12, Package all success | `SDK-LINT: PASS` / `6375 passed, 57 skipped in 114.74s` / `CI passed.` (3.12: `6375 passed, 57 skipped, 19 warnings in 119.47s`) / Package: `Installed vidbyte-sdk 0.3.0 passed smoke checks.` / `CI passed.` |
+| Static policy `static-policy.yml` | 39006275608 | PASS | `Findings: 0 (0 blocking)` / `Ran 1 rule on 995 files: 0 findings.` |
+
+CI skips the three inherited `harness_threads` surface tests (no `origin/main` in its shallow clone), so the remote source stage is fully green. The commit that records this table is docs-only.
