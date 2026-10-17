@@ -9,7 +9,7 @@ Purpose:
     their category packages.
 Architecture:
     - VidbyteSDK: Root namespace client.
-    - Agent exports: BaseAgent, CodingAgent, CodingAgentSettings, CodingAgentTools, InfiniteMemoryAgent, InfiniteMemoryAgentSettings, InfiniteWorkspaceSettings, InfiniteMemoryPreset, AgentCard, AgentMessage, AgentRegistry, AgentRunnerConfig, AgentSpec.
+    - Agent exports: BaseAgent, CodingAgent, CodingAgentSettings, CodingAgentTools, InfiniteMemoryAgent, InfiniteMemoryAgentSettings, InfiniteWorkspaceSettings, InfiniteMemoryPreset, AgentSwarm, AgentSwarmSettings, AgentSwarmMember, AgentSwarmEventKind, AgentSwarmStopReason, AgentCard, AgentMessage, AgentRegistry, AgentRunnerConfig, AgentSpec.
     - Configuration exports: YamlLoader, AgentSettings, ToolDefinition, MiddlewareDefinition.
     - Tool exports: BaseTool, ToolActivity, ToolCall, ToolCallActivity, ToolExecutor, ToolParameter, ToolPermission, ToolRegistry, ToolResult, ToolSpec, ToolStatus, ToolsFormatter.
     - Middleware exports: AgentMiddleware, MiddlewarePipeline, policy events, and diagnostic hook invocations.
@@ -58,6 +58,8 @@ from vidbyte.agents import (
     AgentSpeedRollup,
     AgentSpeedTracker,
     AgentStopReason,
+    AgentSwarm,
+    AgentSwarmSettings,
     AgentTransfer,
     AggregateAgent,
     AggregateConfig,
@@ -440,6 +442,7 @@ from vidbyte.lib.dataclasses.adversarial_agent_descriptor import (
     AdversarialAgentDescriptor,
 )
 from vidbyte.lib.dataclasses.agent_descriptor import AgentDescriptor
+from vidbyte.lib.dataclasses.agent_swarm import AgentSwarmMember
 from vidbyte.lib.dataclasses.aggregate_agent_descriptor import AggregateAgentDescriptor
 from vidbyte.lib.dataclasses.coding import CodingAgentSettings
 from vidbyte.lib.dataclasses.continual_trace_descriptor import (
@@ -468,6 +471,8 @@ from vidbyte.lib.dataclasses.prosecutor_defender_judge import (
     ProsecutorReportPayload,
 )
 from vidbyte.lib.enums import (
+    AgentSwarmEventKind,
+    AgentSwarmStopReason,
     BudgetPreset,
     InfiniteMemoryPreset,
     PermissionPreset,
@@ -759,6 +764,11 @@ __all__ = [
     "InfiniteMemoryAgentSettings",
     "InfiniteMemoryPreset",
     "InfiniteWorkspaceSettings",
+    "AgentSwarm",
+    "AgentSwarmEventKind",
+    "AgentSwarmMember",
+    "AgentSwarmSettings",
+    "AgentSwarmStopReason",
     "JevAgent",
     "JevAgentResponse",
     "JevAgentSettings",

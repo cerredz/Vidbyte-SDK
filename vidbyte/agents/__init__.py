@@ -19,6 +19,14 @@ Similar Files:
 
 from __future__ import annotations
 
+from vidbyte.agents.agent_swarm import (
+    AgentSwarm,
+    AgentSwarmEvents,
+    AgentSwarmMemberRuntime,
+    AgentSwarmRuntime,
+    AgentSwarmSettings,
+    AgentSwarmWorkplace,
+)
 from vidbyte.agents.aggregation import (
     AggregateAgent,
     AggregateResult,
@@ -393,6 +401,12 @@ __all__ = [
     "InfiniteMemoryAgentSettings",
     "InfiniteMemoryRuntime",
     "InfiniteWorkspaceSettings",
+    "AgentSwarm",
+    "AgentSwarmEvents",
+    "AgentSwarmMemberRuntime",
+    "AgentSwarmRuntime",
+    "AgentSwarmSettings",
+    "AgentSwarmWorkplace",
     "JevAgent",
     "JevAgentResponse",
     "JevAgentSettings",
