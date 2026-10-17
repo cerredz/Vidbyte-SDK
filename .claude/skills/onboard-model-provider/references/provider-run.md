@@ -308,6 +308,20 @@ cd <worktree>-main && PYTHONPATH=<worktree>-main <py> -m pytest '<node>' -q -p n
 git -C <worktree> worktree remove --force <worktree>-main
 ```
 
+   - One node fails on every branch that applied row A13 and passes on the twin, because it asserts that the branch changes no file under `vidbyte/tools` or `vidbyte/lib/configs`: `tests/features/harness_threads/test_harness_threads_surface.py::test_branch_leaves_the_tools_and_configs_packages_as_main_has_them`. When it failed all 3 reruns, exclude this node, never its whole file, only when both checks below hold, and record both outputs. First, this prints exactly one line, `vidbyte/lib/configs/structured_output.py`:
+
+```sh
+git -C <worktree> diff --name-only <base> HEAD -- vidbyte/tools vidbyte/lib/configs
+```
+
+     Second, a one-line control edit to that file on a new twin makes the node fail there with the same `AssertionError` line as on the branch. Run this last, after the twin block of every other failing node, because the edit stays in the twin until it is removed:
+
+```sh
+git -C <worktree> worktree add --detach <worktree>-main <base> && echo '# control edit' >> <worktree>-main/vidbyte/lib/configs/structured_output.py
+cd <worktree>-main && PYTHONPATH=<worktree>-main <py> -m pytest '<node>' -q -p no:cacheprovider
+git -C <worktree> worktree remove --force <worktree>-main
+```
+
    - Anything else ends the run `PROOF_FAILED gate-source`.
 
    Remove the twin when the rule is done, whatever its result. Record each excluded or flaky node with all of its outputs for the PR's Verification section. Never exclude a node by name alone. As examples only, two tests were known red on main when this procedure was written: `tests/features/harness_threads/test_harness_threads_surface.py::test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes` (deterministic) and `tests/test_mcp_stdio_transport.py::McpStdioTransportHardeningTests::test_cancelled_waiter_does_not_break_transport` (timing-flaky).
