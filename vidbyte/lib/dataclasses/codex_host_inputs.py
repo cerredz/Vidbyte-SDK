@@ -1,18 +1,19 @@
 """FILE: vidbyte/lib/dataclasses/codex_host_inputs.py
 
-PURPOSE: Defines the sixteen validated input records of CodexHost's public functions: one record per function, or per family of functions that share one shape, which checks every argument the caller passed before the host sends anything to Codex.
-ROLE IN CODEBASE: The input layer under vidbyte/harnesses/native/codex/; each CodexHost method keeps its keyword signature, builds its record right after its guard, and hands the record's checked fields to its helpers and to CodexThreadHelpers and CodexSkillFunctions.
+PURPOSE: Defines the seventeen validated input records of CodexHost: the constructor's CodexHostSetup, which checks the settings and the approval_handler, and one record per public function, or per family of functions that share one shape, which checks every argument the caller passed before the host sends anything to Codex.
+ROLE IN CODEBASE: The input layer under vidbyte/harnesses/native/codex/; CodexHost.__init__ builds CodexHostSetup first, and each CodexHost method keeps its keyword signature, builds its record right after its guard, and hands the record's checked fields to its helpers and to CodexThreadHelpers and CodexSkillFunctions.
 ARCHITECTURE NOTE: Every record is frozen with slots and checks itself in __post_init__ through RecordFieldValidator and RecordFieldConverter, and through the codex_host.py rules a turn already owns for seconds and counts, so each check keeps one owner. A field name in a message starts with the function the caller called, because callers never build these records themselves; a record that serves several functions carries that operation as its first field.
 COMMON MODIFICATION PATTERNS: A new CodexHost method gets one record here, or reuses CodexThreadRef or CodexTurnRef, and builds it after its guard; a new per-operation field rule is one entry in CODEX_HOST_REJECTED_FIELDS (vidbyte/lib/constants/codex_host.py).
-KNOWN EDGE CASES: A str prompt is stored as CodexRunInput.text(prompt), so the host reads one input type. Launch prompts may arrive as a list and are stored as a tuple; one str is refused, because it is a sequence of characters, not of prompts. The listing limit, since and query keep the exact thread-helpers section 9.2 messages.
-RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.5 and 9.2 per-operation field rules); docs/spec/codex-host-thread-helpers/spec.md (section 9.2); vidbyte/lib/dataclasses/validation.py
-TESTS: tests/features/codex_host/test_codex_host_inputs.py
+KNOWN EDGE CASES: A str prompt is stored as CodexRunInput.text(prompt), so the host reads one input type. Launch prompts may arrive as a list and are stored as a tuple; one str is refused, because it is a sequence of characters, not of prompts. The listing limits, since and query keep the exact thread-helpers section 9.2 messages. An approval_handler counts as async when inspect.iscoroutinefunction is true of it or of its __call__, so a sync function that returns a coroutine is refused. A review's request is checked as given, so the host substitutes the default only for None.
+RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.5 and 9.2 per-operation field rules); docs/spec/codex-host-thread-helpers/spec.md (section 9.2); docs/spec/codex-host-hardening/spec.md (section 9.1); vidbyte/lib/dataclasses/validation.py
+TESTS: tests/features/codex_host/test_codex_host_inputs.py and tests/features/codex_host/test_codex_host_hardening_contract.py
 """
 
 from __future__ import annotations
 
+import inspect
 import operator
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 
 from vidbyte.lib.constants.codex import (
@@ -21,7 +22,9 @@ from vidbyte.lib.constants.codex import (
     CODEX_HOST_THREAD_LIST_MAX_LIMIT,
 )
 from vidbyte.lib.constants.codex_host import (
+    CODEX_HOST_APPROVAL_HANDLER_MESSAGE,
     CODEX_HOST_EPHEMERAL_SKILL_MESSAGE,
+    CODEX_HOST_FORK_POINTS_MESSAGE,
     CODEX_HOST_LAUNCH_OVER_LIMIT_MESSAGE,
     CODEX_HOST_LAUNCH_PROMPTS_MESSAGE,
     CODEX_HOST_LIMIT_MESSAGE,
@@ -36,10 +39,12 @@ from vidbyte.lib.constants.codex_host import (
     CODEX_HOST_UNUSED_ARGUMENT_MESSAGE,
     CODEX_HOST_UNUSED_FIELD_MESSAGE,
 )
-from vidbyte.lib.dataclasses.codex import CodexRunInput
+from vidbyte.lib.dataclasses.codex import CodexClientSettings, CodexRunInput
 from vidbyte.lib.dataclasses.codex_host import (
     CodexGoal,
     CodexReviewTarget,
+    CodexServerAnswer,
+    CodexServerRequest,
     CodexSpawnRequest,
     CodexTurnHandle,
     _reject_bad_seconds,
@@ -79,6 +84,34 @@ def _reject_unused_fields(operation: CodexHostOperation, request: object) -> Non
         read = operator.attrgetter(name)
         if read(request) != read(default):
             raise ConfigurationError(CODEX_HOST_UNUSED_FIELD_MESSAGE.format(operation=operation.value, name=name), details={"field": name})
+
+
+def _reject_bad_list_limit(operation: CodexHostOperation, limit: object) -> None:
+    # A thread listing's page size, refused with the thread-helpers
+    # spec's own message rather than the canonical check's.
+    try:
+        RecordFieldValidator.require_int(limit, "limit", minimum=CODEX_HOST_MIN_LIST_LIMIT, maximum=CODEX_HOST_THREAD_LIST_MAX_LIMIT)
+    except ConfigurationError:
+        raise ConfigurationError(CODEX_HOST_LIMIT_MESSAGE.format(operation=operation.value, minimum=CODEX_HOST_MIN_LIST_LIMIT, maximum=CODEX_HOST_THREAD_LIST_MAX_LIMIT), details={"field": "limit"}) from None
+
+
+@dataclass(frozen=True, slots=True)
+class CodexHostSetup:
+    """The input of the CodexHost constructor: the client settings, and the async approval_handler, if any."""
+
+    settings: CodexClientSettings | None = None
+    approval_handler: Callable[[CodexServerRequest], Awaitable[CodexServerAnswer]] | None = None
+
+    def __post_init__(self) -> None:
+        # @intent the-approval-handler-is-checked-when-the-host-is-built
+        # The router awaits the handler on the host's loop, so only an
+        # async function, or an object whose __call__ is one, can
+        # answer; anything else is refused now rather than mid-turn
+        # (INV-19).
+        RecordFieldConverter.require_instance(self.settings, "CodexHost settings", CodexClientSettings, optional=True)
+        handler = self.approval_handler
+        if handler is not None and not (callable(handler) and (inspect.iscoroutinefunction(handler) or inspect.iscoroutinefunction(handler.__call__))):
+            raise ConfigurationError(CODEX_HOST_APPROVAL_HANDLER_MESSAGE.format(kind=type(handler).__name__), details={"field": "approval_handler"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,24 +176,31 @@ class CodexContinueRequest:
 
 @dataclass(frozen=True, slots=True)
 class CodexForkRequest:
-    """The input of fork_codex_thread: the thread, the turn to fork through, and the overrides a fork can apply."""
+    """The input of fork_codex_thread: the thread, the turn to fork through or before, and the overrides a fork can apply."""
 
     thread_id: str
     from_turn_id: str = ""
     exclude_turns: bool = False
     overrides: CodexSpawnRequest = field(default_factory=CodexSpawnRequest)
+    before_turn_id: str = ""
+    defer_goal_continuation: bool = False
 
     def __post_init__(self) -> None:
-        # An empty from_turn_id means the latest completed turn.
+        # An empty from_turn_id means the latest completed turn, and a
+        # fork names at most one fork point (INV-28 step 1).
         RecordFieldValidator.require_text(self.thread_id, "fork_codex_thread thread_id", one_line=True)
         RecordFieldValidator.require_text(self.from_turn_id, "fork_codex_thread from_turn_id", allow_blank=True, one_line=True)
         RecordFieldValidator.require_bool(self.exclude_turns, "fork_codex_thread exclude_turns")
+        RecordFieldValidator.require_text(self.before_turn_id, "fork_codex_thread before_turn_id", allow_blank=True, one_line=True)
+        RecordFieldValidator.require_bool(self.defer_goal_continuation, "fork_codex_thread defer_goal_continuation")
+        if self.from_turn_id and self.before_turn_id:
+            raise ConfigurationError(CODEX_HOST_FORK_POINTS_MESSAGE, details={"field": "before_turn_id"})
         _reject_unused_fields(CodexHostOperation.FORK_CODEX_THREAD, self.overrides)
 
 
 @dataclass(frozen=True, slots=True)
 class CodexThreadListRequest:
-    """The input of list_codex_threads: the filters, sort and cursor of one page; empty values keep Codex's defaults."""
+    """The input of list_codex_threads: the filters, sort, cursor and size of one page; empty values keep Codex's defaults."""
 
     cwd: str = ""
     search: str = ""
@@ -169,6 +209,7 @@ class CodexThreadListRequest:
     sort: CodexThreadSortKey = CodexThreadSortKey.PROVIDER_DEFAULT
     sort_direction: CodexSortDirection = CodexSortDirection.PROVIDER_DEFAULT
     cursor: str = ""
+    limit: int | None = None
 
     def __post_init__(self) -> None:
         RecordFieldValidator.require_text(self.cwd, "list_codex_threads cwd", allow_blank=True)
@@ -178,6 +219,8 @@ class CodexThreadListRequest:
         RecordFieldValidator.require_enum(self.sort, CodexThreadSortKey, "list_codex_threads sort")
         RecordFieldValidator.require_enum(self.sort_direction, CodexSortDirection, "list_codex_threads sort_direction")
         RecordFieldValidator.require_text(self.cursor, "list_codex_threads cursor", allow_blank=True, one_line=True)
+        if self.limit is not None:
+            _reject_bad_list_limit(CodexHostOperation.LIST_CODEX_THREADS, self.limit)
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,16 +274,20 @@ class CodexSubagentLaunchRequest:
 
 @dataclass(frozen=True, slots=True)
 class CodexReviewRequest:
-    """The input of start_codex_review: the thread, what the review looks at, and where its findings go."""
+    """The input of start_codex_review: the thread, what the review looks at, where its findings go, and its caps."""
 
     thread_id: str
     target: CodexReviewTarget
     delivery: CodexReviewDelivery = CodexReviewDelivery.INLINE
+    request: CodexSpawnRequest = field(default_factory=CodexSpawnRequest)
 
     def __post_init__(self) -> None:
+        # A review runs in its thread's own posture, so its request may
+        # carry only Vidbyte's time and token caps (INV-30).
         RecordFieldValidator.require_text(self.thread_id, "start_codex_review thread_id", one_line=True)
         RecordFieldConverter.require_instance(self.target, "start_codex_review target", CodexReviewTarget)
         RecordFieldValidator.require_enum(self.delivery, CodexReviewDelivery, "start_codex_review delivery")
+        _reject_unused_fields(CodexHostOperation.START_CODEX_REVIEW, self.request)
 
 
 @dataclass(frozen=True, slots=True)
@@ -264,10 +311,7 @@ class CodexThreadListing:
         if operation not in (CodexHostOperation.LIST_RECENT_CODEX_THREADS, CodexHostOperation.LIST_CODEX_THREADS_SINCE, CodexHostOperation.SEARCH_CODEX_THREADS):
             raise ConfigurationError(CODEX_HOST_LISTING_OPERATION_MESSAGE.format(operation=operation.value), details={"field": "operation"})
         RecordFieldValidator.require_text(self.cwd, f"{operation.value} cwd", allow_blank=True)
-        try:
-            RecordFieldValidator.require_int(self.limit, "limit", minimum=CODEX_HOST_MIN_LIST_LIMIT, maximum=CODEX_HOST_THREAD_LIST_MAX_LIMIT)
-        except ConfigurationError:
-            raise ConfigurationError(CODEX_HOST_LIMIT_MESSAGE.format(operation=operation.value, minimum=CODEX_HOST_MIN_LIST_LIMIT, maximum=CODEX_HOST_THREAD_LIST_MAX_LIMIT), details={"field": "limit"}) from None
+        _reject_bad_list_limit(operation, self.limit)
         # The window and the query belong to one listing each.
         if operation is CodexHostOperation.LIST_CODEX_THREADS_SINCE:
             try:
@@ -317,12 +361,14 @@ class CodexGoalRunRequest:
 
 @dataclass(frozen=True, slots=True)
 class CodexSkillListRequest:
-    """The input of list_codex_skills: the folder whose skills are listed; empty means the app-server's own."""
+    """The input of list_codex_skills: the folder whose skills are listed, empty for the app-server's own, and whether Codex rescans."""
 
     cwd: str = ""
+    force_reload: bool = False
 
     def __post_init__(self) -> None:
         RecordFieldValidator.require_text(self.cwd, "list_codex_skills cwd", allow_blank=True)
+        RecordFieldValidator.require_bool(self.force_reload, "list_codex_skills force_reload")
 
 
 @dataclass(frozen=True, slots=True)
@@ -356,6 +402,7 @@ __all__ = [
     "CodexContinueRequest",
     "CodexForkRequest",
     "CodexGoalRunRequest",
+    "CodexHostSetup",
     "CodexModelListRequest",
     "CodexReviewRequest",
     "CodexSkillListRequest",
