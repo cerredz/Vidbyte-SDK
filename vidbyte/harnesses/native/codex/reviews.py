@@ -3,10 +3,10 @@
 PURPOSE: CodexReviews, the CodexHost collaborator behind start_codex_review: it checks the thread and the account, sends review/start once, registers the review turn with the caller's time and output caps, reads it back from one page, and owns a review whose caller left.
 ROLE IN CODEBASE: A host collaborator of vidbyte/harnesses/native/codex/; CodexHost builds it in _open() after CodexTurnEvents, and start_codex_review guards, builds its CodexReviewRequest, then delegates here. Review turns are watched through CodexTurnEvents like any other turn.
 ARCHITECTURE NOTE: Reaches Codex only through CodexConnection, builds params with CodexParamsTranslator and records with CodexResponseTranslator, and reads review turns back through CodexThreadHelpers.review_turn. It imports no openai-codex module at module level, and its collaborators only under TYPE_CHECKING, so importing CodexHost still loads no SDK module (codex-host D-21, hardening INV-41).
-FUNCTION INVENTORY: start(operation, review) checks, sends one review/start, registers the turn and returns its handle once read back; _adopt_late(operation, request, pricing, response) registers a review whose caller left and reads it back in the background; _track(response, request, pricing) registers the review turn under the request's caps; _accept(operation, turn, late=...) reads a registered review back and either ends it from what Codex stored or watches it.
+FUNCTION INVENTORY: start(operation, review) checks, sends one review/start, registers the turn and returns its handle once read back; _adopt_late(operation, request, pricing, response) registers a review whose caller left and reads it back in the background; _track(response, request, pricing) registers the review turn under the request's caps; _accept(operation, turn, late=...) reads a registered review back and either ends it from what Codex stored, failing it through CodexTurnEvents.fail when that end cannot be built, or watches it.
 COMMON MODIFICATION PATTERNS: A new review argument is a field on CodexReviewRequest in vidbyte/lib/dataclasses/codex_host_inputs.py and, if Codex takes it, one key in CodexParamsTranslator.review; a cap Vidbyte enforces itself stays on the review's CodexSpawnRequest.
 WHAT NOT TO DO: Do not read a review back with thread/read includeTurns; one review_read_back page holds the review turn (hardening INV-38). Do not retry review/start: it spends, so it is sent once, and a start that outlives its caller is adopted and stopped once (codex-host INV-11). Do not register a review turn under a fresh CodexSpawnRequest, or its caps are lost (hardening INV-30).
-KNOWN EDGE CASES: openai-codex drops a review turn's events that arrive before registration, so every review is read back after registering (D-23); a review that already ended is built from what was read back. A caller cancelled during the read-back leaves the review watched and stopped with one interrupt. Close wins over a review still being accepted (EC-79).
+KNOWN EDGE CASES: openai-codex drops a review turn's events that arrive before registration, so every review is read back after registering (D-23); a review that already ended is built from what was read back, and one whose snapshot cannot be built ends FAILED codex.protocol_mismatch, as a turn whose events fail does (hardening INV-12). A caller cancelled during the read-back leaves the review watched and stopped with one interrupt. Close wins over a review still being accepted (EC-79).
 RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.1 D-23 and 9.2); docs/spec/codex-host-hardening/spec.md (sections 6.1 INV-30 and INV-38, 8.1 D-14 and D-18, and 8.5)
 TESTS: tests/features/codex_host/test_codex_host_review_goals.py, tests/features/codex_host/test_codex_host_review_gaps.py, tests/features/codex_host/test_codex_host_fork_review.py, tests/features/codex_host/test_codex_host_failures.py
 """
@@ -136,9 +136,15 @@ class CodexReviews:
                 return handle
             raise CodexErrorMapper.process_exited(operation, handle.thread_id)
         # A review that already ended is built from what was read back.
+        # If that build raises, the review ends FAILED through the same
+        # failure path as a turn whose events fail, so no wait hangs
+        # and the thread takes the next review (hardening INV-12).
         if stored is not None and stored.status.value != CodexTurnStatus.RUNNING.value:
             client.unregister_turn_notifications(handle.turn_id)
-            self._registry.finish(turn, self._responses.turn_snapshot(turn, stored.items, stored))
+            try:
+                self._registry.finish(turn, self._responses.turn_snapshot(turn, stored.items, stored))
+            except Exception as exc:
+                events.fail(turn, exc)
             return handle
         # Otherwise watch it; a late review also gets its one interrupt.
         turn.watch(connection, events.on_event, events.on_lost)

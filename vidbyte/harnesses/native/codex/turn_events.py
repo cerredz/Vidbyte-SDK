@@ -3,7 +3,7 @@
 PURPOSE: CodexTurnEvents, the CodexHost collaborator that ends each live turn from its events: it folds every notification a watcher posts into its turn and finishes the turn from Codex's completion, the goal finish rule or a review's one-page read-back. A turn whose events cannot be processed, or whose watcher can no longer read them, is stopped and ended FAILED, so no turn is left running and no wait hangs.
 ROLE IN CODEBASE: A host collaborator of vidbyte/harnesses/native/codex/; CodexHost builds it in _open() after CodexThreadHelpers and hands on_event and on_lost to every CodexLiveTurn.watch, and CodexReviews watches review turns the same way.
 ARCHITECTURE NOTE: Everything here runs on the host's event loop. It imports no openai-codex module at module level, and the connection, translators, turns and thread helpers only under TYPE_CHECKING, so importing CodexHost still loads no SDK module (codex-host D-21, hardening INV-41). CODEX_HOST_LOST_TURN_GRACE_SECONDS is bound by name and read at call time, so the tests can patch it here (section 13).
-FUNCTION INVENTORY: on_event(turn, note) folds one notification into its turn and ends the turn when the notification ends it, failing the turn if that raises (INV-11); on_lost(turn) starts _end_lost_turn when a watcher read failed (INV-13); complete_review(turn) ends a completed review from its read-back, failing it if that raises anything but a CodexAgentError (INV-12); _end_lost_turn(turn) ends a turn whose watcher stopped while the host stays open; _fail(turn, exc) logs, stops and fails a turn whose events failed.
+FUNCTION INVENTORY: on_event(turn, note) folds one notification into its turn and ends the turn when the notification ends it, failing the turn if that raises (INV-11); on_lost(turn) starts _end_lost_turn when a watcher read failed (INV-13); complete_review(turn) ends a completed review from its read-back, failing it if that raises anything but a CodexAgentError (INV-12); _end_lost_turn(turn) ends a turn whose watcher stopped while the host stays open; fail(turn, exc) logs, stops and fails a turn whose events failed, and CodexReviews calls it for a review read back as ended whose snapshot cannot be built (INV-12).
 COMMON MODIFICATION PATTERNS: A new way a turn ends from its events is one branch in on_event, finished through CodexTurnRegistry.finish so the first outcome still wins; its failure needs nothing extra, because on_event already guards it.
 WHAT NOT TO DO: Do not log an exception's text or pass exc_info; log its type name and ExceptionOrigin only (hardening INV-10). Do not close a goal run's stream before its turn is finished: _end_lost_turn relies on the snapshot to tell a normal goal end from a lost one (INV-13). Do not catch BaseException, so cancellation propagates.
 KNOWN EDGE CASES: A goal run's watcher always ends with a failed read once its stream closes, so on_lost runs for every goal run and returns at once, because the run already ended. A process death can reach a watcher before the liveness monitor, so _end_lost_turn waits the grace and checks again, and a close or death that lands before its last step wins as process_exited. The cleanup interrupt of a lost turn is quiet and sent once; its failure does not keep the turn running (EC-18).
@@ -86,7 +86,7 @@ class CodexTurnEvents:
             else:
                 self._registry.finish(turn, self._responses.turn_snapshot(turn, turn.items, turn.completed))
         except Exception as exc:
-            self._fail(turn, exc)
+            self.fail(turn, exc)
 
     def on_lost(self, turn: CodexLiveTurn) -> None:
         # Runs on the loop when the turn's watcher could not read; the
@@ -108,7 +108,7 @@ class CodexTurnEvents:
             items = stored.items if stored is not None else turn.items
             self._registry.finish(turn, self._responses.turn_snapshot(turn, items, turn.completed))
         except Exception as exc:
-            self._fail(turn, exc)
+            self.fail(turn, exc)
 
     async def _end_lost_turn(self, turn: CodexLiveTurn) -> None:
         # @intent a-lost-watcher-never-leaves-a-turn-running
@@ -136,7 +136,7 @@ class CodexTurnEvents:
             self._registry.finish(turn, self._responses.failed(turn.handle, FailureCode.CODEX_API_ERROR, CODEX_HOST_LOST_EVENTS_MESSAGE))
             turn.close_goal_stream(connection.client)
 
-    def _fail(self, turn: CodexLiveTurn, exc: Exception) -> None:
+    def fail(self, turn: CodexLiveTurn, exc: Exception) -> None:
         # @intent a-turn-whose-events-fail-is-stopped-then-failed
         # In this order: log the failure by type and origin only, send
         # the turn at most one quiet stop, end it FAILED, then close a
