@@ -26,7 +26,7 @@ Relaunch one under its same name: its new generator is then told which of its ow
 
 # What to do next
 
-1. Read the workspace map and your plan note, and search memory, before you launch anything. Do not read every note to catch up: the map's descriptions, your plan note, and a few searches are enough to decide what to launch. If you kept no plan note, write one now from the task and the finished cards.
+1. Read the workspace map and your plan note, and search memory, before you launch anything. Do not read every note to catch up: the map's descriptions, your plan note, and a few searches are enough to decide what to launch. If the map does not show your plan note, search the workspace for it; if you kept none, write one now from the task and the finished cards.
 2. Compare the deliverables with the finished cards, and mark each deliverable in your plan note as met, missing, or interrupted. Where the plan note and a recorded card disagree, trust the card and correct the note, since the interruption may have come before you recorded it.
 3. Relaunch the interrupted work that still matters, and launch what is missing. Write each card from your notes and entries, since the new pairs cannot see the earlier part of the run any more than you can. Keep each batch small enough that you can read every card it returns.
 4. A card is not memory: never save a card's status or progress as an entry. Entries you saved yourself before the interruption are still live, and a reworded copy of one is not refused, so search before you save. Record progress in your plan note as cards arrive, so another interruption loses nothing, and put into one entry only what a later pair would be wrong or slower without.
