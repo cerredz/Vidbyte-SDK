@@ -10,9 +10,9 @@ Until now, a caller of `InfiniteMemoryAgent` could not see anything until `run()
 
 The journal's `run_finished` record gains two fields, `answer` and `files`. The journal is still the only thing resume reads.
 
-**Base and landing.** This PR is stacked on #1084 (`feat/infinite-memory-agent` at `7efceb55`). #1084 has since been squash-merged into `main` as `2c84049c` (2026-10-16 19:45 UTC). Because its branch still exists, GitHub did **not** retarget this PR, and `7efceb55` is not an ancestor of `main`. To land this PR, it must be rebased onto `main` with `git rebase --onto origin/main 7efceb55` and retargeted to `main`. A dry replay onto `main` at `6f5a7310` has no textual conflicts. On the replayed tree, the focused pack gives `1 failed, 193 passed`. The failure is one assertion that `main`'s #1169 supersedes; see Follow-ups.
+**Base.** This PR is based on `main` (#1084 merged as `2c84049c`). It was first stacked on #1084's branch at `7efceb55`; after #1084's squash merge, its 71 commits were replayed with `git rebase --onto origin/main 7efceb55` onto `main` at `6f5a7310`, with no conflicts. `main`'s #1169 (`08f67e7f`) now records each note once by its workspace-relative path on the result card, so one AC-34 assertion and four spec clauses follow it (Deviation 12). Commit SHAs in this body are the replayed ones; `docs/spec/infinite-memory-events/reports/S5-repair-3.md` maps each to its pre-replay SHA.
 
-**Related PRs:** cerredz/Vidbyte#708 adds the backend checkpoint route, `agent_run_events`, and `/agents/dashboard`. cerredz/vidbyte-cli-internal#171 adds the vidbyte CLI command that runs the agent and checkpoints these events. Both are open drafts and consume this PR's public names.
+**Related PRs:** cerredz/Vidbyte#708 adds the backend checkpoint route, `agent_run_events`, and `/agents/dashboard`. cerredz/vidbyte-cli-internal#171 adds the vidbyte CLI command that runs the agent and checkpoints these events. Both are open drafts and consume this PR's public names. The CLI pins this PR's branch, so it re-pins to the replayed head; the vendored `contracts/sdk-public-api.json` blob (`91e9f11893e8`) is unchanged by the replay.
 
 ## How to use what this PR introduces
 
@@ -106,9 +106,9 @@ flowchart TD
 | `vidbyte/lib/constants/infinite.py` | Event caps (summary 280, text 500, path 500, line 120, label 64, items 5, key 512, count 2^63−1, details 32,768 bytes), the key-digest settings, summary templates, handoff caps (239,000, 15,900, 1,000), the suffix, and the metadata keys. |
 | `vidbyte/lib/util/text.py` | `TokenEstimate.truncate_chars(text, limit, marker)`: the character cut that `OutputText.truncate` and the handoff share. |
 | `vidbyte/lib/outputs/text.py` | `OutputText.truncate(..., marker=)` delegates to `truncate_chars`. The default marker is unchanged. |
-| `contracts/sdk-public-api.json` | Regenerated: 647 exports. |
+| `contracts/sdk-public-api.json` | Regenerated: 647 exports, `main`'s plus the three new names. Its `source.commit` still names the pre-replay `52249854`, whose `vidbyte/__init__.py` and `pyproject.toml` are byte-identical to the head's, so the generator keeps the pin and the blob. |
 | `vidbyte/agents/infinite/README.md`, `vidbyte/agents/README.md`, `vidbyte/lib/README.md` | Document events, the sink rules, the size bound (31,093 bytes per whole event), and the handoff, and update the File Index. |
-| Tests (11 files, +2,706/−6) | Five new feature modules: `test_infinite_memory_events_{stream,pairs,records,lifecycle}.py` and `test_infinite_memory_handoff.py`, plus the shared `infinite_events_fixtures.py`. Two new helper tests: `tests/test_record_field_validation_event_options.py` and `tests/test_output_text_truncate_marker.py`. The one pre-approved budget edit is in `test_infinite_memory_contract.py` (`launch.py` ≤ 410, lib records ≤ 620). `FEATURE.md` and the pack README are updated. In all: 60 new test functions and 80 new collected cases (193 focused cases, up from 113). |
+| Tests (11 files, +2,706/−6) | Five new feature modules: `test_infinite_memory_events_{stream,pairs,records,lifecycle}.py` and `test_infinite_memory_handoff.py`, plus the shared `infinite_events_fixtures.py`. Two new helper tests: `tests/test_record_field_validation_event_options.py` and `tests/test_output_text_truncate_marker.py`. The one pre-approved budget edit is in `test_infinite_memory_contract.py` (`launch.py` ≤ 410, lib records ≤ 620). `FEATURE.md` and the pack README are updated. In all: 60 new test functions and 80 new collected cases (194 focused cases on `main`, up from 114). |
 | Docs: `docs/spec/infinite-memory-events/` | The spec, test plan, review, verify log, pipeline record, the S0–S6 stage reports, and this body. |
 
 ## Acceptance criteria → proof
@@ -150,82 +150,77 @@ Test files: **stream**, **pairs**, **records**, and **lifecycle** are `tests/fea
 | AC-31 | Large settings and long lists stay bounded, with honest omitted counts | pairs `test_large_settings_and_long_lists_stay_bounded_with_honest_omitted_counts` |
 | AC-32 | Keys over 508 characters are shortened by digest and stay distinct | records `test_keys_over_508_characters_are_shortened_by_digest_and_stay_distinct` |
 | AC-33 | A huge answer and a long Files list are cut to the section caps | handoff `test_a_huge_answer_and_a_long_files_list_are_cut_to_the_section_caps` |
-| AC-34 | Two spellings of one note give one relative path in events and the handoff | pairs `test_two_spellings_of_one_note_are_one_relative_path_in_events_and_the_handoff`. This passes here. Its card-spelling clause (`:517`) fails once rebased onto `main` (#1169); see Follow-ups |
+| AC-34 | Two spellings of one note give one relative path in events, on the card, and in the handoff | pairs `test_two_spellings_of_one_note_are_one_relative_path_in_events_and_the_handoff`. Its card assertion (`:517`) expects `["notes/a.md"]`, as `main`'s #1169 records it (Deviation 12) |
 | AC-35 | A lone surrogate becomes `?` in events, and the journal keeps the original | pairs `test_a_lone_surrogate_in_a_generator_reply_becomes_a_question_mark_in_events_only`; handoff `test_a_lone_surrogate_in_the_roots_answer_becomes_a_question_mark_in_the_handoff_and_its_file` |
 | AC-36 | Middleware denials give no event, and the run still finishes | pairs `test_middleware_denials_deliver_no_event_and_the_run_still_finishes` |
 | AC-37 | The new validator options, the envelope checks, cost rules, the truncate marker, and usage reading | records `test_cost_may_be_zero_or_unknown_but_never_negative_or_infinite`, `test_the_envelope_refuses_a_wrong_time_details_type_summary_key_or_depth`, `test_generator_usage_is_read_from_the_reply_rollup_and_unknown_cost_is_none`; options `test_require_utc_datetime_accepts_only_a_zero_offset_at_the_resolution`, `test_require_callable_refuses_none_unless_optional_and_async_sinks_when_synchronous`, `test_require_number_accepts_zero_only_with_allow_zero`; truncate `test_truncate_keeps_the_callers_marker_inside_the_limit_and_the_default_is_unchanged` |
 
 ## Verification
 
-`e7c1c950` and every later commit change only `docs/spec/`. The source under test is identical from `2073421b`, the last source commit, through the head.
+All gates below ran on the branch replayed onto `main`. `4aba9eac` is the last commit that changes code or tests; every later commit changes only `docs/spec/`.
 
 | Gate | Command | SHA | Final line(s) |
 |---|---|---|---|
-| Focused pack | `PYTHONPATH=$(pwd) python -m pytest tests/features/infinite_memory_agent tests/test_record_field_validation_event_options.py tests/test_output_text_truncate_marker.py -q -p no:cacheprovider` | `e7c1c950` | `193 passed in 7.42s` |
-| Lint | `python lint/run.py` (inside the source stage) | `e7c1c950` | `SDK-LINT: PASS` |
-| Full gate, source stage | `PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source` | `e7c1c950` | `3 failed, 6123 passed, 16 skipped in 104.34s (0:01:44)`, then `CI failed: … -m pytest`. The 3 failures are the inherited `tests/features/harness_threads/test_harness_threads_surface.py` tests, which also fail at base `7efceb55` (see Follow-ups). Lint, compileall, and the three `check_*` scripts pass. |
-| Full gate, package stage | `python scripts/run_ci.py --stage package` (no `PYTHONPATH`) | `e7c1c950` | `Installed vidbyte-sdk 0.3.0 passed smoke checks.` / `CI passed.` |
-| Semgrep static policy | `semgrep scan --error --config .semgrep/typed-mapping-boundary-policy.yml vidbyte` (semgrep 1.170.1) | `e7c1c950` | `Ran 1 rule on 982 files: 0 findings.` |
-| Public API contract | `PYTHONPATH=$(pwd) python scripts/generate-sdk-public-api.py --check` | `e7c1c950` | `contracts/sdk-public-api.json is current at 52249854c2da0ca5961a743e961d5b8972fa35ce (vidbyte-sdk 0.3.0, 647 exports).` |
-| §4 snippet | §4 run as written under the scripted model (no network) | `e7c1c950` | The output is identical to the spec's text block. `.runs` holds `<id>.jsonl` and `<id>.handoff.md`, and the file's bytes equal `to_context_text()` with no `\r`. |
-| Worst-case size | AC-30 builders in a full `InfiniteEvent` (512-character key, 280-character summary, millisecond `at`), under 4 `json.dumps` settings | `e7c1c950` | `max details 27015 max event 31093` |
-| Replay onto `main` | `git merge-tree --write-tree --merge-base=7efceb55 origin/main HEAD`, then the focused pack on that tree | `main` `6f5a7310` + `e7c1c950` | No conflicts (tree `908eab5a`). `1 failed, 193 passed`: `test_two_spellings_of_one_note_are_one_relative_path_in_events_and_the_handoff` at `:517` |
-| Remote checks | `gh workflow run CI` and `gh workflow run "Static policy"` on the branch, then `gh api repos/cerredz/Vidbyte-SDK/commits/<sha>/check-runs` | `cfd64939` (finalize commit; same source) | 4/4 green: `Package`, `Static policy`, `Source / Python 3.11`, and `Source / Python 3.12` all `completed success` (runs 39013426908 and 39013428202). Earlier, `900be217` was also 4/4 green (runs 39011862131 and 39011863558). These are dispatched runs, so `gh pr checks` lists none. |
+| Focused pack | `PYTHONPATH=$(pwd) python -m pytest tests/features/infinite_memory_agent tests/test_record_field_validation_event_options.py tests/test_output_text_truncate_marker.py -q -p no:cacheprovider` | `4aba9eac` | `194 passed in 5.52s` (this PR's 193 plus `main`'s #1169 test) |
+| Lint | `PYTHONPATH=$(pwd) python lint/run.py` (also inside the source stage) | `4aba9eac` | `S064 RATCHETED: 4 known finding(s).` / `SDK-LINT: PASS` |
+| Full gate, source stage | `PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source` | `4aba9eac` | `2 failed, 6524 passed, 16 skipped in 107.21s (0:01:47)`, then `CI failed: … -m pytest`. Lint, compileall, and the three `check_*` scripts pass. The 2 failures are branch-scoped `tests/features/harness_threads/test_harness_threads_surface.py` checks that CI skips: one fails on `main` itself, and the other fails on `main` when any root export is added (see Follow-ups). |
+| Full gate, package stage | `python scripts/run_ci.py --stage package` (no `PYTHONPATH`) | `4aba9eac` | `Installed vidbyte-sdk 0.3.0 passed smoke checks.` / `CI passed.` |
+| Semgrep static policy | `semgrep scan --error --config .semgrep/typed-mapping-boundary-policy.yml vidbyte` (semgrep 1.170.1) | `4aba9eac` | `Ran 1 rule on 1006 files: 0 findings.` |
+| Public API contract | `PYTHONPATH=$(pwd) python scripts/generate-sdk-public-api.py --check` | `4aba9eac` | `contracts/sdk-public-api.json is current at 52249854c2da0ca5961a743e961d5b8972fa35ce (vidbyte-sdk 0.3.0, 647 exports).` |
+| §4 snippet | §4 run as written under the scripted model (no network) | `4aba9eac` | The output is identical to the spec's text block. `.runs` holds `<id>.jsonl` and `<id>.handoff.md`, and the file's bytes equal `to_context_text()` with no `\r`. |
+| Worst-case size | AC-30 builders in a full `InfiniteEvent` (512-character key, 280-character summary, millisecond `at`), under 4 `json.dumps` settings | `4aba9eac` | `max details 27015 max event 31093` |
+| Replay onto `main` | `git rebase --onto origin/main 7efceb55` | `main` `6f5a7310` | 71 commits replayed with no conflicts. Every file's added and removed lines in `git diff origin/main HEAD` match the pre-replay `git diff 7efceb55 7692b9bc`. Before the AC-34 change the focused pack gave `1 failed, 193 passed`, the failure being `:517`. |
+| Remote checks | `gh workflow run CI` and `gh workflow run "Static policy"` on the branch, then `gh api repos/cerredz/Vidbyte-SDK/commits/<sha>/check-runs` | `4aba9eac` | 4/4 green: `Package`, `Static policy`, `Source / Python 3.11`, and `Source / Python 3.12` all `completed success` (runs 39039578860 and 39039580375). These are dispatched runs, so `gh pr checks` lists none. |
 
 ## Adversarial review
 
-The S4 review on `24297ccf` used three lenses (conformance, conventions, and engineering), and a findings verifier checked the results. It found **0 Blockers, 7 Majors (all fixed), and 10 Minors**. Of the Minors, 4 were fixed (m-5 to m-8), 1 is wontfix (m-10), and 5 are follow-ups (m-1 to m-4, m-9). The verifier refuted or downgraded 2 claims: R-V1 went from Major to m-1, and R-E4's proposed fix was refuted, though the finding stands as R-4. After two repair iterations, a re-review found **3 Minors (rr-1 to rr-3), all fixed**, and no new Blocker or Major.
+The S4 review on `643dad39` used three lenses (conformance, conventions, and engineering), and a findings verifier checked the results. It found **0 Blockers, 7 Majors (all fixed), and 10 Minors**. Of the Minors, 4 were fixed (m-5 to m-8), 1 is wontfix (m-10), and 5 are follow-ups (m-1 to m-4, m-9). The verifier refuted or downgraded 2 claims: R-V1 went from Major to m-1, and R-E4's proposed fix was refuted, though the finding stands as R-4. After two repair iterations, a re-review found **3 Minors (rr-1 to rr-3), all fixed**, and no new Blocker or Major.
 
 | ID | Severity | Finding | Fixed in |
 |---|---|---|---|
-| R-1 | Major | Two lib headers sent maintainers to `docs/spec` for the worst-case sizes, against AGENTS.md | `e7625553` (headers point at the AC-30 `_FIELDS`/`_FIGURES` tables) |
-| R-2 | Major | `InfiniteWorkspace.relative` let the `RuntimeError` from `Path.resolve()` on a symlink loop escape (on Python 3.11), which broke `run_handoff` for every run and broke events | `ca5157a4`; test kept true on 3.13 in `1dbfdd84` (`test_a_note_replaced_by_a_symlink_loop_keeps_one_name_and_breaks_no_handoff_or_event`) |
-| R-3 | Major | The handoff's lone-surrogate scrub had no test; removing it made `run_handoff` raise `UnicodeEncodeError` | `99c5908d` |
-| R-4 | Major | Nothing measured NFR-2 ("0 `InfiniteEvent` instances with `on_event=None`") | `d8186147` (`test_without_a_sink_no_event_method_builds_an_event_or_logs`) |
-| R-5 | Major | D-18's cost rule (known only when every part is complete; no parts means unknown) had no test | `755e55cd` (`test_a_pairs_cost_is_known_only_when_every_reply_is_fully_priced_and_unknown_without_replies`) |
-| R-6 | Major | The all-depth counts of `run_resumed` and `run_finished` were tested only at the root | `ae71adb1` (`test_a_resumed_run_counts_finished_and_interrupted_pairs_at_every_depth`) |
-| R-7 | Major | The handoff's list-line cut copied `OutputText.truncate` inline (AGENTS.md style 5) | `a16ba2f8` (shared `TokenEstimate.truncate_chars`) |
+| R-1 | Major | Two lib headers sent maintainers to `docs/spec` for the worst-case sizes, against AGENTS.md | `2c33508c` (headers point at the AC-30 `_FIELDS`/`_FIGURES` tables) |
+| R-2 | Major | `InfiniteWorkspace.relative` let the `RuntimeError` from `Path.resolve()` on a symlink loop escape (on Python 3.11), which broke `run_handoff` for every run and broke events | `f5633a1e`; test kept true on 3.13 in `cc670f55` (`test_a_note_replaced_by_a_symlink_loop_keeps_one_name_and_breaks_no_handoff_or_event`) |
+| R-3 | Major | The handoff's lone-surrogate scrub had no test; removing it made `run_handoff` raise `UnicodeEncodeError` | `a5aef63b` |
+| R-4 | Major | Nothing measured NFR-2 ("0 `InfiniteEvent` instances with `on_event=None`") | `e25f8db6` (`test_without_a_sink_no_event_method_builds_an_event_or_logs`) |
+| R-5 | Major | D-18's cost rule (known only when every part is complete; no parts means unknown) had no test | `45528bc0` (`test_a_pairs_cost_is_known_only_when_every_reply_is_fully_priced_and_unknown_without_replies`) |
+| R-6 | Major | The all-depth counts of `run_resumed` and `run_finished` were tested only at the root | `80502c10` (`test_a_resumed_run_counts_finished_and_interrupted_pairs_at_every_depth`) |
+| R-7 | Major | The handoff's list-line cut copied `OutputText.truncate` inline (AGENTS.md style 5) | `b883453f` (shared `TokenEstimate.truncate_chars`) |
 
 The other fixes were:
 
-- **S4 Minors:** m-5 `e7e6dd59` (a partial around an object with an async `__call__`), m-6 `cd07e8f0` (metadata key constant), m-7 `3f68608d` (`@intent` per event site), and m-8 `146effaa` (README figure 31,093).
-- **Re-review Minors:** rr-1 `d913802b` (a partial subclass with an async `__call__`), rr-2 `3bd374c3` (envelope comment), and rr-3 `2073421b` (truncate comment).
+- **S4 Minors:** m-5 `19936ae5` (a partial around an object with an async `__call__`), m-6 `dec4ba67` (metadata key constant), m-7 `4ad3955d` (`@intent` per event site), and m-8 `277a1323` (README figure 31,093).
+- **Re-review Minors:** rr-1 `3141ae5a` (a partial subclass with an async `__call__`), rr-2 `e9a8a411` (envelope comment), and rr-3 `87bf3ec5` (truncate comment).
 
-**Commit-subject traceability (m-10, wontfix: history is not rewritten).** Two commit subjects cite IDs their commits do not implement: `8cd15dab` cites AC-15, and `72f1f56d` cites FR-14. The correct mapping is **AC-15 → `5e5b845c`** and **FR-14 → `8cd15dab`, `e8c5ef27`**.
+**Commit-subject traceability (m-10, wontfix: history is not rewritten).** Two commit subjects cite IDs their commits do not implement: `a076598d` cites AC-15, and `1faccf58` cites FR-14. The correct mapping is **AC-15 → `df01ea0e`** and **FR-14 → `a076598d`, `b1152dad`**.
 
 ## Deviations from the spec
 
-1. **Text-list items are refused under the list's own name.** Each list is checked in two calls: `require_text_items(max_items=)`, then `require_text` per item. This is because `require_text_items` with `max_chars` names `field[index]`, and AC-30 wants `Record.field` (`0b987caa`).
-2. **`vidbyte/lib/dataclasses/infinite.py` is compacted to 604 of its 620 lines.** `__all__` and the `InfiniteEventDetails` alias sit on one line each (`0b987caa`).
-3. **`events.py` packs each details constructor several fields to a line**, to reach exactly 400 of its 400 lines. The 414-character alias line and this packing are follow-up m-1 (`75eb0018`).
-4. **The journal checks `answer` and `files` with `RecordFieldConverter.require_instance` and `to_tuple`**, not a hand-written `TypeError` branch, which lint S024 counts as a fourth nesting level. The error is still the bad-record `ConfigurationError` with its line (`581ab74b`).
-5. **`generator_finished` finds the pair's launch time by the key without `/gen`**, and reports a missing time as `INFINITE_MIN_COUNT` (0), as lint A007 requires (`581ab74b`).
+1. **Text-list items are refused under the list's own name.** Each list is checked in two calls: `require_text_items(max_items=)`, then `require_text` per item. This is because `require_text_items` with `max_chars` names `field[index]`, and AC-30 wants `Record.field` (`daa35abd`).
+2. **`vidbyte/lib/dataclasses/infinite.py` is compacted to 604 of its 620 lines.** `__all__` and the `InfiniteEventDetails` alias sit on one line each (`daa35abd`).
+3. **`events.py` packs each details constructor several fields to a line**, to reach exactly 400 of its 400 lines. The 414-character alias line and this packing are follow-up m-1 (`d35c7502`).
+4. **The journal checks `answer` and `files` with `RecordFieldConverter.require_instance` and `to_tuple`**, not a hand-written `TypeError` branch, which lint S024 counts as a fourth nesting level. The error is still the bad-record `ConfigurationError` with its line (`c96f822c`).
+5. **`generator_finished` finds the pair's launch time by the key without `/gen`**, and reports a missing time as `INFINITE_MIN_COUNT` (0), as lint A007 requires (`c96f822c`).
 6. **Five ambiguities were settled in the tests' favour.** In particular, `duration_ms` defaults to 0 when the launch time is unknown (AC-37 (f)), which departs from D-17. `NO_ANSWER` sits in the Outcome's answer slot, beside the stop reason.
-7. **The lib headers name the AC-30 test tables, not this spec** (review R-1, `e7625553`).
-8. **The character cut is the new `TokenEstimate.truncate_chars` in `vidbyte/lib/util/text.py`**, a file outside §12.3 that the orchestrator approved (review R-7, option A). `OutputText.truncate(marker=)` delegates to it. `InfiniteHandoff._lines` calls it directly, because importing `vidbyte.lib.outputs` from the handoff module is an import cycle. A 1,404-case differential found 0 mismatches (`a16ba2f8`). This replaces the inline cut of the earlier deviation.
-9. **An extra constant, `INFINITE_HANDOFF_RUN_ID_METADATA_KEY = "run_id"`**, is not in §9.1. It replaced a literal (review m-6, `cd07e8f0`).
-10. **`require_callable(synchronous=True)` is stricter than D-27's wording.** It checks `iscoroutinefunction` on every `functools.partial` layer and on each layer's type `__call__` (m-5 `e7e6dd59`, rr-1 `d913802b`).
+7. **The lib headers name the AC-30 test tables, not this spec** (review R-1, `2c33508c`).
+8. **The character cut is the new `TokenEstimate.truncate_chars` in `vidbyte/lib/util/text.py`**, a file outside §12.3 that the orchestrator approved (review R-7, option A). `OutputText.truncate(marker=)` delegates to it. `InfiniteHandoff._lines` calls it directly, because importing `vidbyte.lib.outputs` from the handoff module is an import cycle. A 1,404-case differential found 0 mismatches (`b883453f`). This replaces the inline cut of the earlier deviation.
+9. **An extra constant, `INFINITE_HANDOFF_RUN_ID_METADATA_KEY = "run_id"`**, is not in §9.1. It replaced a literal (review m-6, `dec4ba67`).
+10. **`require_callable(synchronous=True)` is stricter than D-27's wording.** It checks `iscoroutinefunction` on every `functools.partial` layer and on each layer's type `__call__` (m-5 `19936ae5`, rr-1 `3141ae5a`).
 11. **The whole-event worst case is 31,093 bytes, not 31,091.** The spec is corrected in INV-33, §9.1, and §9.2 by this PR's finalize commit. The other whole-event cells in §9.1 used a flat 4,076-byte envelope estimate. The measured envelopes are 4,072 to 4,079 bytes, so those cells are off by −4 to +3 bytes. They are left as estimates; all stay under 32,768.
+12. **The card's `files` holds the one relative path that `main` records.** The spec said the card keeps each note path as the model spelled it. On `main`, #1169 (`08f67e7f`) makes `write_note` and `edit_file` return the workspace-relative path, so the card lists each note once by that path. INV-28's card-files clause, AC-34's card clause, EC-16, and D-23 are reworded to match (`5f6d0595`). AC-34's card assertion changes from `["./notes/a.md", "notes/a.md"]` to `["notes/a.md"]` (`4aba9eac`). The event and handoff assertions are unchanged, and the new assertion fails on a copy with #1169's two assignments reverted.
 
 ## Follow-ups
 
-- **Rebase onto `main` and retarget (needed before merge).** #1084 landed as `2c84049c`. Run `git rebase --onto origin/main 7efceb55 feat/infinite-memory-events`, force-push, and run `gh pr edit 1159 --base main`.
-  - #1169 (`08f67e7f`) on `main` makes the card's `files` hold each note's relative path once.
-  - That supersedes INV-28's card-spelling clause, EC-16, D-23's "card keeps the model's spelling", and AC-34's card clause. The single test change is `test_infinite_memory_events_pairs.py:517`, from `["./notes/a.md", "notes/a.md"]` to `["notes/a.md"]`.
-  - After that, rerun `generate-sdk-public-api.py --check`, because its `source.commit` pin moves.
-  - The CLI sibling (cerredz/vidbyte-cli-internal#171) pins this branch, so re-pin it after the force-push.
+- **Re-pin the CLI sibling** (cerredz/vidbyte-cli-internal#171) to this branch's replayed head. The vendored contract blob is unchanged.
 - **m-1:** `events.py` sits at 400/400 lines by packing constructor arguments, and the `InfiniteEventDetails` alias is a 414-character line. Raise the cap, or lay out one keyword per line.
 - **m-2:** No tests for `batch_rejected` and `subagent_replayed` at a nested launcher, or for digest-shortening of verifier keys and interrupted keys over 508 characters.
 - **m-3:** No tests for the root's appended or edited files in the handoff's Files section, for `description == ""` on an append, or for `duration_ms` in milliseconds.
 - **m-4:** `run_handoff` resolves every `files.jsonl` description across all runs. That is about 193 µs per `relative()` call, or about 1.9 s at 10,000 records.
 - **m-9:** `llms.txt` omits `InfiniteHandoff`, and InfiniteMemory as a whole (including #1084's agent).
 - **Spec figure 31,091 → 31,093:** done in this PR (`docs(spec): finalize infinite-memory-events for PR`). Forward 31,093 to the CLI and Vidbyte siblings.
-- **Inherited `harness_threads` failures (base-branch issue):** three `tests/features/harness_threads/test_harness_threads_surface.py` tests diff against `merge-base origin/main HEAD` and fail at base `7efceb55` as well:
-  - `test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes`
-  - `test_branch_leaves_the_tools_and_configs_packages_as_main_has_them`
-  - `test_import_vidbyte_starts_no_process_and_leaves_the_native_package_unloaded`
-
-  Remote CI is green. Recheck them after the rebase.
+- **Two branch-scoped `harness_threads` checks fail locally (inherited from `main`).** Both compare with `merge-base origin/main HEAD`, which CI's shallow clone does not have, so CI skips that part and is green.
+  - `test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes` (`:193`) expects 120 `FailureCode` members on `main`, which now has 167. It fails at `main` `6f5a7310` itself with `assert 167 == 120`.
+  - `test_import_vidbyte_starts_no_process_and_leaves_the_native_package_unloaded` (`:258`) requires the root `__all__` to equal `main`'s. It passes at `main` and fails there as soon as one unrelated root export is added. This PR adds three, as FR-17 and AC-24 require.
+  - The third check that failed on the old base, `test_branch_leaves_the_tools_and_configs_packages_as_main_has_them`, passes on `main`.
 - **Limitations, kept by design:**
   - A slow sink slows the run, because delivery is inline (EC-9).
   - A `KeyboardInterrupt` raised by the sink on the opening event gives no `run_stopped` (D-9).
