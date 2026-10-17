@@ -1,12 +1,49 @@
 # S3 Implementer report: agent-swarm
 
-Spec: `docs/spec/agent-swarm/spec.md` r3 · Test plan: `docs/spec/agent-swarm/test-plan.md` · Branch `feat/agent-swarm` (worktree `C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-agent-swarm`) · Base `0f2aeb48` · Test tree frozen at `9895d663`
+Spec: `docs/spec/agent-swarm/spec.md` r3 · Test plan: `docs/spec/agent-swarm/test-plan.md` · Branch `feat/agent-swarm` (worktree `C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-agent-swarm`) · Base `0f2aeb48` · Test baseline `87c8ed14` (was `9895d663`)
 
-## Status: BLOCKED at Phase 5 (full gate) by a bug in an S2 test helper
+## Status: DONE. Draft PR https://github.com/cerredz/Vidbyte-SDK/pull/1174
 
-Every row of spec §12.3 is implemented and committed (P1 to P4). The pack cannot reach 161 passed without a one-word change to an S2 fixture, which the briefing puts under "Ask first". Nothing was pushed and no PR was opened.
+Every row of spec §12.3 is implemented and committed (P1 to P4).
 
-### The blocker
+S3 first stopped BLOCKED at Phase 5 because of the S2 helper bug described below. The orchestrator chose option 1. S2 fixed its own helper in `87c8ed14` (`renderings(template, haystack, /, **known)`, no assertion changed). That commit is the new test baseline, and `git diff 87c8ed14..HEAD -- tests/` is empty. The scratch shim plugins were deleted and were never used again.
+
+### Final gates (after the S2 fix, on `670b9eb9`; only `docs/` changed after that)
+
+**Pack:** `PYTHONPATH=$(pwd) python -m pytest tests/features/agent_swarm -q`
+
+```
+.................                                                        [100%]
+161 passed in 3.31s
+```
+
+**Local gate, source stage:** `PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source`
+
+```
+SDK-LINT: PASS
+context write-path integrity: ok
+context primitive introductions: ok
+reasoning trace contracts: ok (182 tools, 55 shapes)
+=========== 3 failed, 6398 passed, 16 skipped in 101.58s (0:01:41) ============
+CI failed: Command failed with exit code 1: ...python.exe -m pytest (cwd=C:\Users\422mi\vidbyte-repos\worktrees\vidbyte-sdk-agent-swarm).
+```
+
+The only failures are the three `tests/features/harness_threads/test_harness_threads_surface.py` tests that the orchestrator accepted as not caused by this branch (proof under Gates below):
+
+- `test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes`
+- `test_branch_leaves_the_tools_and_configs_packages_as_main_has_them`
+- `test_import_vidbyte_starts_no_process_and_leaves_the_native_package_unloaded`
+
+**Earlier gates, still valid:** the package stage (`CI passed.`), lint, the contract check, Semgrep and the neighbours, all quoted under Gates below. Every one of them ran on `0d64078a`. Between that commit and the gate above, only test and docs files changed.
+
+**Phase 6 and Phase 7:**
+
+- Pushed `feat/agent-swarm` and opened draft PR #1174 with the placeholder body.
+- Spec frontmatter: `status: implemented` and `pr:` (`8a40a6f6`).
+- §6.2 Proof cells now name their implementing commits, and §17 has an r3 "S3 implement" row and an "Implementation deviations" list (`6e243292`).
+- main was not merged into the branch, and CI was not dispatched.
+
+### The blocker (resolved by S2 in `87c8ed14`)
 
 `tests/features/agent_swarm/agent_swarm_fixtures.py:598`:
 
