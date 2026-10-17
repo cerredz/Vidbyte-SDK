@@ -96,13 +96,14 @@ class BrowserGoal:
 
         # Progress only grows, by one fact per non-blank line; the plan
         # and the blockers are replaced by the text as sent.
-        if chosen is BrowserGoalSection.PROGRESS:
-            lines = tuple(line.strip() for line in text.splitlines() if line.strip())
-            card = replace(self._card, progress=(*self._card.progress, *lines))
-        elif chosen is BrowserGoalSection.PLAN:
-            card = replace(self._card, plan=text)
-        else:
-            card = replace(self._card, blockers=text)
+        match chosen:
+            case BrowserGoalSection.PROGRESS:
+                lines = tuple(line.strip() for line in text.splitlines() if line.strip())
+                card = replace(self._card, progress=(*self._card.progress, *lines))
+            case BrowserGoalSection.PLAN:
+                card = replace(self._card, plan=text)
+            case BrowserGoalSection.BLOCKERS:
+                card = replace(self._card, blockers=text)
 
         # The new card passed its own caps, so it replaces the old one
         # everywhere: here, on the response, and in the next call.
