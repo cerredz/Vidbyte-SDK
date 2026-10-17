@@ -144,7 +144,9 @@ INFINITE_FINISHED_PAIR_LINE = "- {name}: {status}, verdict {verdict}, entries {e
 # record, subagent_finished, holds 2,060 capped characters (24,720
 # bytes) plus 2,295 bytes of keys, numbers, enums, and JSON syntax:
 # 27,015 bytes, under the 32,768-byte bound, which is half of the
-# backend's 65,536-byte details cap. Its envelope adds at most 4,076.
+# backend's 65,536-byte details cap. Its envelope adds at most 4,078,
+# so a whole event is at most 31,093; generator_finished's envelope,
+# 4,079, is the largest, but it wraps a smaller record.
 INFINITE_EVENT_SUMMARY_MAX_CHARS = 280
 INFINITE_EVENT_TEXT_MAX_CHARS = 500
 INFINITE_EVENT_PATH_MAX_CHARS = 500
