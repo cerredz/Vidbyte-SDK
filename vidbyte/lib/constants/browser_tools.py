@@ -53,7 +53,8 @@ BROWSER_PROFILES_FOLDER = "profiles"
 BROWSER_FILE_ENCODING = "utf-8"
 # Removing a profile right after its browser was killed can race the
 # operating system releasing the browser's lock file, so the removal is
-# tried a few times, a short pause apart.
+# tried a few times, a short pause apart, all within the cleanup budget
+# BROWSER_REAP_TIMEOUT_SECONDS that also bounds the reap.
 BROWSER_REMOVE_ATTEMPTS = 5
 BROWSER_REMOVE_PAUSE_SECONDS = 0.2
 

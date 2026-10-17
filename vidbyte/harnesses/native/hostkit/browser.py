@@ -3,10 +3,10 @@
 PURPOSE: Defines the shared flow of every browser function: NativeBrowserRun.execute, the one main function that registers the keys, resolves the tool strings, lets the harness refuse what it cannot mount, prepares Node, Chrome, the tool cache and the per-call folder, runs the harness, reads its tool calls, checks that the mounted tools were used, and reaps the browser and collects the artifacts, or discards everything on a failure; NativeBrowserHarness, the seam each harness implements; BrowserRuntimes (Node and Chrome checks), BrowserToolCache (one pinned install per tool) and NativeBrowserTools (prepare, write_file, require, complete and discard).
 ROLE IN CODEBASE: The browser functions in vidbyte/harnesses/native/grok/browser.py, opencode/browser.py and muse/browser.py build the request records and call NativeBrowserRun.execute with their own NativeBrowserHarness; Grok's seam writes its agent file through NativeBrowserTools.write_file, and Muse's synchronous _prepare_config writes settings.json through NativeBrowserTools.backend. Exported from the hostkit package for those modules only.
 ARCHITECTURE NOTE: Every layer of spec section 5 runs inside execute, so no harness can skip one. Validation (the two records, BrowserToolRegistry.select, the seam's check) happens before any process starts or file is written; after prepare, any failure or cancellation first runs discard, shielded from a further cancel, then propagates. The keys are registered with the error factory before the first step that can make error text. Every child starts through CliRunner with an argv tuple; every file and folder step runs through asyncio.to_thread (lint S052); files are written only through backend, the reviewed LocalFileSystemBackend (spec D-25). BROWSER_CHROME_PATHS, BROWSER_TOOL_INSTALL_TIMEOUT_SECONDS and BROWSER_REAP_TIMEOUT_SECONDS are read through the constants module at call time. It imports hostkit siblings from their concrete modules, never from the hostkit package that imports this one (spec D-27). The module holds no literals of its own (spec INV-15).
-FUNCTION INVENTORY: NativeBrowserRun.execute is the narrated main function. NativeBrowserHarness lists check, run, tool_calls and missing. BrowserRuntimes.node finds and checks Node; BrowserRuntimes.chrome searches the Chrome locations. BrowserToolCache.ensure returns a tool's cached entry, installing it first when needed; _staging makes a staging folder; _publish renames it into place. NativeBrowserTools.prepare builds the mount; write_file writes one per-call file; require raises tools_unavailable for missing servers; complete reaps, removes the profiles and returns the result; discard reaps and removes the whole per-call folder; _make_folder creates the per-call folder; _command builds one stdio server's command; _remove removes a folder with retries; _artifacts lists the saved files.
+FUNCTION INVENTORY: NativeBrowserRun.execute is the narrated main function. NativeBrowserHarness lists check, run, tool_calls and missing. BrowserRuntimes.node finds and checks Node; BrowserRuntimes.chrome searches the Chrome locations. BrowserToolCache.ensure returns a tool's cached entry, installing it first when needed; _install runs the bundled npm into a staging folder and checks its outcome; _staging makes a staging folder; _publish renames it into place. NativeBrowserTools.prepare builds the mount; write_file writes one per-call file; require raises tools_unavailable for missing servers; complete reaps, removes the profiles and returns the result; discard reaps and removes the whole per-call folder; _make_folder creates the per-call folder; _command builds one stdio server's command; _remove removes a folder with retries within the cleanup budget; _remove_attempts makes those tries; _artifacts lists the saved files.
 COMMON MODIFICATION PATTERNS: A new preflight step goes into prepare, before the per-call folder is made, and raises through the error factory. A new harness implements NativeBrowserHarness in its own browser.py; this file does not change.
 WHAT NOT TO DO IN THIS FILE: 1. Do not put a key on argv, in a file or in os.environ; keys reach a server only through the harness's own channel. 2. Do not run a Windows batch file as node. 3. Do not repair a published cache folder that lacks its entry; name it. 4. Do not import the hostkit package or a harness subpackage here. 5. Do not let a failure after prepare skip discard.
-KNOWN EDGE CASES: A selection with no stdio tool needs neither Node nor the cache, and one with no tool that drives Chrome needs no Chrome (spec INV-1). Two calls installing one tool at once each use their own staging folder; the first rename publishes and the loser keeps the published copy. A cancelled install removes its staging folder before CancelledError propagates. On Windows a killed browser can hold its profile lock for a moment, so a removal is tried BROWSER_REMOVE_ATTEMPTS times; a folder that still cannot be removed is left behind. The per-call folder survives only a successful call that saved artifacts, and then without its profiles.
+KNOWN EDGE CASES: A selection with no stdio tool needs neither Node nor the cache, and one with no tool that drives Chrome needs no Chrome (spec INV-1). Two calls installing one tool at once each use their own staging folder; the first rename publishes and the loser keeps the published copy. A cancelled install removes its staging folder before CancelledError propagates. On Windows a killed browser can hold its profile lock for a moment, so a removal is tried BROWSER_REMOVE_ATTEMPTS times within BROWSER_REAP_TIMEOUT_SECONDS; a folder that still cannot be removed is left behind. The per-call folder survives only a successful call that saved artifacts, and then without its profiles.
 RELATED DOCS: vidbyte/harnesses/README.md
 TESTS: tests/features/harness_threads/test_harness_threads_browser_runtime.py, tests/features/harness_threads/test_harness_threads_browser_lifecycle.py
 """
@@ -186,21 +186,7 @@ class BrowserToolCache:
         except OSError as exc:
             raise errors.failure(NativeThreadProblem.TOOL_INSTALL_FAILED, request=request, searched=browser_tools.BROWSER_CACHE_FOLDER_DETAIL.format(folder=staging_root, error_type=type(exc).__name__)) from exc
         try:
-            invocation = CliInvocation(
-                argv=(node, str(npm_cli), *browser_tools.BROWSER_NPM_INSTALL_ARGUMENTS, str(staging), package),
-                env_overlay={},
-                timeout_seconds=browser_tools.BROWSER_TOOL_INSTALL_TIMEOUT_SECONDS,
-                max_output_bytes=native_threads.NATIVE_PROCESS_MAX_OUTPUT_BYTES,
-            )
-            outcome = await CliRunner().run(invocation)
-            if outcome.launch_failure is not None:
-                raise errors.failure(NativeThreadProblem.TOOL_INSTALL_FAILED, request=request, searched=browser_tools.BROWSER_INSTALL_LAUNCH_DETAIL.format(package=package, kind=outcome.launch_failure.value))
-            if outcome.timed_out:
-                raise errors.failure(NativeThreadProblem.TOOL_INSTALL_FAILED, request=request, searched=browser_tools.BROWSER_INSTALL_TIMEOUT_DETAIL.format(package=package, seconds=invocation.timeout_seconds))
-            if outcome.exit_code != 0:
-                raise errors.failure(NativeThreadProblem.TOOL_INSTALL_FAILED, request=request, outcome=outcome, vendor_text=outcome.stderr, searched=browser_tools.BROWSER_INSTALL_FAILED_DETAIL.format(package=package))
-            if not await asyncio.to_thread(staging.joinpath(*definition.entry).is_file):
-                raise errors.failure(NativeThreadProblem.TOOL_INSTALL_FAILED, request=request, searched=browser_tools.BROWSER_INSTALL_NO_ENTRY_DETAIL.format(package=package))
+            await BrowserToolCache._install(definition, (node, str(npm_cli), *browser_tools.BROWSER_NPM_INSTALL_ARGUMENTS, str(staging), package), package, staging, request, errors)
 
             # Publish by rename; a concurrent install that published
             # first wins, and its copy is used.
@@ -212,6 +198,27 @@ class BrowserToolCache:
         finally:
             with contextlib.suppress(OSError):
                 await asyncio.to_thread(NativeSkillFolders.remove, staging)
+
+    @staticmethod
+    async def _install(definition: BrowserToolDefinition, argv: tuple[str, ...], package: str, staging: Path, request: NativeThreadRequest, errors: NativeErrorFactory) -> None:
+        # The bundled npm installs the pinned package into the staging
+        # folder; a start failure, a timeout, a non-zero exit or a
+        # missing entry each name the package and fail the install.
+        invocation = CliInvocation(
+            argv=argv,
+            env_overlay={},
+            timeout_seconds=browser_tools.BROWSER_TOOL_INSTALL_TIMEOUT_SECONDS,
+            max_output_bytes=native_threads.NATIVE_PROCESS_MAX_OUTPUT_BYTES,
+        )
+        outcome = await CliRunner().run(invocation)
+        if outcome.launch_failure is not None:
+            raise errors.failure(NativeThreadProblem.TOOL_INSTALL_FAILED, request=request, searched=browser_tools.BROWSER_INSTALL_LAUNCH_DETAIL.format(package=package, kind=outcome.launch_failure.value))
+        if outcome.timed_out:
+            raise errors.failure(NativeThreadProblem.TOOL_INSTALL_FAILED, request=request, searched=browser_tools.BROWSER_INSTALL_TIMEOUT_DETAIL.format(package=package, seconds=invocation.timeout_seconds))
+        if outcome.exit_code != native_threads.NATIVE_SUCCESS_EXIT_CODE:
+            raise errors.failure(NativeThreadProblem.TOOL_INSTALL_FAILED, request=request, outcome=outcome, vendor_text=outcome.stderr, searched=browser_tools.BROWSER_INSTALL_FAILED_DETAIL.format(package=package))
+        if not await asyncio.to_thread(staging.joinpath(*definition.entry).is_file):
+            raise errors.failure(NativeThreadProblem.TOOL_INSTALL_FAILED, request=request, searched=browser_tools.BROWSER_INSTALL_NO_ENTRY_DETAIL.format(package=package))
 
     @staticmethod
     def _staging(staging_root: Path) -> Path:
@@ -345,8 +352,18 @@ class NativeBrowserTools:
     @staticmethod
     async def _remove(folder: Path) -> None:
         # A removal right after a kill can race the operating system
-        # releasing the browser's files, so it is tried a few times; a
-        # folder that still stays is left behind.
+        # releasing the browser's files, so it is tried a few times,
+        # all within the cleanup budget that also bounds the reap; a
+        # folder that still stays when the budget runs out is left
+        # behind.
+        with contextlib.suppress(TimeoutError):
+            async with asyncio.timeout(browser_tools.BROWSER_REAP_TIMEOUT_SECONDS):
+                await NativeBrowserTools._remove_attempts(folder)
+
+    @staticmethod
+    async def _remove_attempts(folder: Path) -> None:
+        # Remove, check, pause, a fixed number of times; the caller's
+        # budget stops the tries early.
         for _attempt in range(browser_tools.BROWSER_REMOVE_ATTEMPTS):
             with contextlib.suppress(OSError):
                 await asyncio.to_thread(NativeSkillFolders.remove, folder)
