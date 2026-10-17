@@ -130,3 +130,40 @@ The full list is in the spec under §17 "Implementation deviations (S3)". In sho
 1. The S2 test defect above. It blocks the required checks, and the fix is S2's.
 2. The two harness_threads surface tests fail only locally, for the reasons shown above. The S5 gate should expect them, or the harness owner should scope them.
 3. Semgrep runs here only through the scratchpad wrapper, until mcp<2 is available for semgrep's CLI. That is an environment problem, not a repository one.
+
+## After the AC-13 grant
+
+The orchestrator granted option 1. S2 changed only the assertion at `test_browser_agent_recheck.py:112`, the AC-13 Proof cell, and a test-plan note (e35b2db3). The orchestrator then committed `pipeline.md` (085d1887). I changed no test.
+
+Browser pack, run with every provider key unset:
+```
+$ PYTHONPATH=$(pwd) python -m pytest tests/features/browser_agent -q -p no:cacheprovider
+..................................                                       [100%]
+106 passed in 1.48s
+```
+
+Full local gate, with every provider key unset. Only the two local-only harness_threads tests fail; the section above shows why.
+```
+$ PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source
+SDK-LINT: PASS
+FAILED tests/features/harness_threads/test_harness_threads_surface.py::test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes
+FAILED tests/features/harness_threads/test_harness_threads_surface.py::test_import_vidbyte_starts_no_process_and_leaves_the_native_package_unloaded
+============ 2 failed, 6346 passed, 16 skipped in 98.40s (0:01:38) ============
+```
+
+I pushed 085d1887 and dispatched both workflows on it. `gh run watch --exit-status` exited 0 for both runs.
+- CI run 39064133364:
+  - `Source / Python 3.11`: `6307 passed, 57 skipped in 112.39s`, then `CI passed.`
+  - `Source / Python 3.12`: `6307 passed, 57 skipped, 19 warnings in 113.38s`, then `CI passed.`
+  - `Package`: success.
+- Static policy run 39064135009: success.
+
+Check-runs on the pushed head (`gh api repos/cerredz/Vidbyte-SDK/commits/085d1887f95be828831f28e93d80e1362eeaa1e0/check-runs`):
+```
+Package	completed	success
+Static policy	completed	success
+Source / Python 3.11	completed	success
+Source / Python 3.12	completed	success
+```
+
+After 085d1887 the branch has only this docs commit, which changes the spec's §17 r4 S3 row and this report. I did not re-dispatch CI on the final SHA, because the change touches no code or test.
