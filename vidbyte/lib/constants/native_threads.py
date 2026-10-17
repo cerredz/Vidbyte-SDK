@@ -515,7 +515,7 @@ NATIVE_THREAD_NEXT_STEPS: MappingProxyType[FailureCode, str] = MappingProxyType(
         FailureCode.CLAUDE_LAUNCH_FAILED: "Check that claude --version runs from a terminal and that ~/.vidbyte/claude-configs is a writable folder, then retry; run concurrent Claude Code calls in one workspace only with a skill set an earlier call already prepared.",
         FailureCode.CLAUDE_KEY_REJECTED: "Pass a valid Anthropic API key as api_key and retry.",
         FailureCode.CLAUDE_THREAD_NOT_FOUND: "Continue or fork a Claude Code thread only from the workspace that created it, with the thread_id that run_claude_thread or fork_claude_thread returned.",
-        FailureCode.CLAUDE_TIMED_OUT: "Raise ClaudeThreadConfig.timeout_seconds, narrow the prompt, or check the key; continue the thread to finish a partial turn.",
+        FailureCode.CLAUDE_TIMED_OUT: "Raise ClaudeThreadConfig.timeout_seconds, narrow the prompt, or check the key; continue the thread named by this error's thread_id to finish the partial turn, which may already have changed files in the workspace.",
         FailureCode.CLAUDE_OUTPUT_TOO_LARGE: "Ask Claude Code for a shorter answer, for example by having it write long results to a file in the workspace.",
         FailureCode.CLAUDE_PROTOCOL_MISMATCH: "Run claude --version and install the Claude Code release named in this message, then retry.",
         FailureCode.CLAUDE_RUN_FAILED: "Read the vendor text in this message, fix the cause it names, and retry or continue the thread.",

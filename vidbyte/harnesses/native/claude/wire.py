@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Pure: no process, no file and no await. Claude Code 2.1.302 w
 FUNCTION INVENTORY: read is the narrated main function; _answer parses stdout as one JSON object, or None; _session returns the answer's session_id when it is a lowercase UUID; _text returns its result when it is text; _missing_member names the member that makes a success answer unusable; _error_text builds the vendor text of an is_error answer.
 COMMON MODIFICATION PATTERNS: A new answer member the SDK must read gets its name constant and one check in read; a new failure shape is a spec change first (INV-7).
 WHAT NOT TO DO IN THIS FILE: 1. Do not decide success by subtype; Claude Code reports "success" on a rejected key. 2. Do not copy vendor text into an error unscrubbed; pass it as vendor_text and the factory scrubs and caps it. 3. Do not accept a cut stdout; a truncated answer is output_too_large and only its thread id is ever used. 4. Do not start processes or await anything here.
-KNOWN EDGE CASES: True counts as an int status, so "api_error_status": true is run_failed with the status shown, never key_rejected. A failed run or fork still reports the session_id of its answer, because Claude Code writes a resumable transcript even then; a failed continue reports the caller's id. That holds for timed_out and output_too_large too. A failed run or fork carries a new id only when its stdout is one JSON object whose session_id is a lowercase UUID; otherwise a run carries None and a fork its source id, for example after a timeout before Claude Code printed its answer, an answer cut at the cap, a non-zero exit that printed only stderr, or an exit-0 stdout that is not JSON (spec INV-6, EC-14, EC-15, D-9). A continue answered on another lowercase UUID is thread_not_found; one answered in upper case is a bad session_id, protocol_mismatch. A fork answered with its source id is protocol_mismatch. Stderr on a successful answer is ignored, because Claude Code prints notices there.
+KNOWN EDGE CASES: True counts as an int status, so "api_error_status": true is run_failed with the status shown, never key_rejected. A failed run or fork still reports the session_id of its answer, because Claude Code writes a resumable transcript even then; a failed continue reports the caller's id. That holds for timed_out and output_too_large too. A run or fork that printed no usable session_id reports the id it passed as --session-id (minted_id), because Claude Code writes that transcript as soon as the turn starts: after a timeout before it printed its answer, an answer cut at the cap or an exit-0 stdout that is not JSON. Only a non-zero exit that printed nothing but stderr (an unknown source thread, a refused option) reports no new id, because it never started the thread: a run then carries None and a fork its source id (spec INV-6, EC-14, EC-15; PR #1044 review reverses D-9). A run or fork answered on an id other than minted_id is protocol_mismatch. A continue answered on another lowercase UUID is thread_not_found; one answered in upper case is a bad session_id, protocol_mismatch. A fork answered with its source id is protocol_mismatch. Stderr on a successful answer is ignored, because Claude Code prints notices there.
 RELATED DOCS: vidbyte/harnesses/README.md
 TESTS: tests/features/harness_threads/test_harness_threads_claude_errors.py, tests/features/harness_threads/test_harness_threads_claude_threads.py, tests/features/harness_threads/test_harness_threads_claude_process_bounds.py
 """
@@ -35,15 +35,17 @@ class ClaudeWire:
     """Reads the one JSON answer of a headless claude run."""
 
     @staticmethod
-    def read(outcome: CliOutcome, request: NativeThreadRequest, errors: NativeErrorFactory, *, timeout_seconds: float) -> NativeThreadResult:
-        # Read the answer once, before any check. An answer already
-        # printed names the thread Claude Code created, so every
-        # failure below reports that id, a timeout included; a
-        # continue always reports the id the caller gave.
+    def read(outcome: CliOutcome, request: NativeThreadRequest, errors: NativeErrorFactory, *, timeout_seconds: float, minted_id: str | None) -> NativeThreadResult:
+        # Read the answer once, before any check. A continue always
+        # reports the id the caller gave. A run or fork reports the id
+        # its answer printed, else the one it passed as --session-id,
+        # so a timeout before Claude Code printed anything still names
+        # the thread it started.
         answer = ClaudeWire._answer(outcome.stdout)
         session = ClaudeWire._session(answer)
         text = ClaudeWire._text(answer)
-        newest = request.thread_id if request.verb is NativeThreadVerb.CONTINUE else session
+        printed = request.thread_id if request.verb is NativeThreadVerb.CONTINUE else session
+        newest = printed if printed is not None else minted_id
 
         # The run passed its time bound, or printed more than the cap:
         # the answer cannot be trusted, so the process outcome decides
@@ -65,12 +67,14 @@ class ClaudeWire:
         # not-found text means the thread is unknown here; its option
         # parser refusing an option or value the SDK passes means the
         # installed release differs from the tested one; anything else
-        # is a failed run. Each is reported with what it wrote to stderr.
+        # is a failed run. Each is reported with what it wrote to stderr,
+        # and with an id only when Claude Code printed one, because an
+        # exit this early never started the minted thread.
         if outcome.exit_code != native_threads.NATIVE_SUCCESS_EXIT_CODE:
             not_found = native_threads.CLAUDE_SESSION_NOT_FOUND_MARKER in outcome.stderr
             refused = any(line.startswith(native_threads.CLAUDE_REJECTED_OPTION_MARKERS) for line in outcome.stderr.splitlines())
             problem = NativeThreadProblem.THREAD_NOT_FOUND if not_found else NativeThreadProblem.PROTOCOL_MISMATCH if refused else NativeThreadProblem.RUN_FAILED
-            raise errors.failure(problem, request=request, thread_id=newest, outcome=outcome, vendor_text=outcome.stderr)
+            raise errors.failure(problem, request=request, thread_id=printed, outcome=outcome, vendor_text=outcome.stderr)
 
         # Exit 0: the answer must be one object that says it did not
         # fail, with a lowercase UUID session_id and a text result.
@@ -86,6 +90,12 @@ class ClaudeWire:
         if wrong is not None:
             detail = native_threads.NATIVE_WRONG_THREAD_DETAILS[wrong].format(answered=session, requested=request.thread_id)
             raise errors.failure(wrong, request=request, thread_id=newest, outcome=outcome, searched=detail)
+
+        # A run or fork must answer on the id it passed as --session-id;
+        # another id means the installed claude ignored the option.
+        if minted_id is not None and session != minted_id:
+            detail = native_threads.NATIVE_OTHER_THREAD_DETAIL.format(answered=session, requested=minted_id)
+            raise errors.failure(NativeThreadProblem.PROTOCOL_MISMATCH, request=request, thread_id=newest, outcome=outcome, searched=detail)
 
         # Return the caller's own id on a continue, the new one
         # otherwise, with the text cut at the result cap. The None

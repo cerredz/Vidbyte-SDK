@@ -1,6 +1,6 @@
 """FILE: tests/features/harness_threads/test_harness_threads_claude_threads.py
 
-PURPOSE: Claude Code thread ids across the verbs (spec claude-thread-functions INV-12): continue sends `--resume <id>` without `--fork-session` and returns exactly the given id (AC-3, FR-2), fork sends `--resume <id> --fork-session` and returns the new id (AC-4, FR-3), an id Claude Code does not know is claude.thread_not_found carrying the caller's id (AC-12, EC-5), a thread is found only from the workspace that created it and from any spelling of that workspace (EC-7, INV-13), a continue answered on another id is claude.thread_not_found and one answered in upper case is claude.protocol_mismatch (AC-14, AC-13, INV-12, R-1), and a fork answered with its source id is claude.protocol_mismatch (AC-14, EC-19).
+PURPOSE: Claude Code thread ids across the verbs (spec claude-thread-functions INV-12): continue sends `--resume <id>` without `--fork-session` and returns exactly the given id (AC-3, FR-2), fork sends `--resume <id> --fork-session --session-id <minted id>` and returns that new id (AC-4, FR-3), a run or fork answered on an id other than the one it minted is claude.protocol_mismatch (PR #1044 review), an id Claude Code does not know is claude.thread_not_found carrying the caller's id (AC-12, EC-5), a thread is found only from the workspace that created it and from any spelling of that workspace (EC-7, INV-13), a continue answered on another id is claude.thread_not_found and one answered in upper case is claude.protocol_mismatch (AC-14, AC-13, INV-12, R-1), and a fork answered with its source id is claude.protocol_mismatch (AC-14, EC-19).
 ROLE IN CODEBASE: Start here when continue or fork reaches the wrong Claude Code thread, or when a missing thread surfaces as something other than thread_not_found.
 ARCHITECTURE NOTE: The stand-in keeps each thread as a transcript file under CLAUDE_CONFIG_DIR/projects/<cwd key>/<id>.jsonl and resolves `--resume` by searching every project folder of that config folder, as Claude Code 2.1.302 does (vendor-facts p07, p08), so continue and fork are checked against real vendor-side state. An unknown id gets Claude Code's own pre-run failure: exit 1, empty stdout, `No conversation found with session ID: <id>` on stderr (p05).
 FUNCTION INVENTORY: the test_* functions are one behaviour each.
@@ -127,3 +127,19 @@ async def test_fork_answered_with_its_source_is_protocol_mismatch(api, sandbox, 
         await call("claude", "fork", "Branch.", thread_id=first.thread_id, fake={"mode": "fork_returns_source"})
     assert sandbox.answers("claude")[-1]["session"] == first.thread_id
     check_error(caught.value, harness="claude", verb="fork", code="claude.protocol_mismatch", workspace=sandbox.workspace, thread_id=first.thread_id, observations=[("tested version", (TESTED_VERSION,))])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("verb", ["run", "fork"])
+async def test_run_or_fork_answered_off_its_minted_id_is_protocol_mismatch(api, sandbox, call, check_error, verb) -> None:
+    # PR #1044 review: a run or fork passes the id it minted as
+    # --session-id and must be answered on it; another id means the
+    # installed claude ignored the option. The error names both ids and
+    # carries the one Claude Code answered on.
+    source = (await call("claude")).thread_id if verb == "fork" else None
+    with pytest.raises(api.NativeThreadError) as caught:
+        await call("claude", verb, "Again.", thread_id=source, fake={"mode": "ignore_session_id"})
+    answered, minted = sandbox.answers("claude")[-1]["session"], sandbox.minted_id()
+    assert minted is not None and answered not in (minted, source)
+    detail = api.constants.NATIVE_OTHER_THREAD_DETAIL.format(answered=answered, requested=minted)
+    check_error(caught.value, harness="claude", verb=verb, code="claude.protocol_mismatch", workspace=sandbox.workspace, thread_id=answered, observations=[("tested version", (TESTED_VERSION,)), ("other thread", (detail,))])

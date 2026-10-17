@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Every call runs claude with CLAUDE_CONFIG_DIR set to a privat
 FUNCTION INVENTORY: ClaudeThreads.run_claude_thread, continue_claude_thread and fork_claude_thread are the public functions; ClaudeThreads._call is the one guarded try they share. ClaudeThreadRun.execute is the narrated main function of one call and prepares the private config folder and its skills folder through NativePrivateFolders.prepare; _fallback names the native installer's claude, _environment builds the child's environment overlay, _inherited_names lists the caller's variables the child must not inherit and _argv builds the command line.
 COMMON MODIFICATION PATTERNS: A new Claude Code option is a ClaudeThreadConfig field (vidbyte/lib/dataclasses/native_threads.py), a ClaudeFlag member and one CliOption in _argv. A new failure condition goes in ClaudeWire.read.
 WHAT NOT TO DO IN THIS FILE: 1. Do not put the key on argv, on stdin or in a file; it travels only in ANTHROPIC_API_KEY of the child. 2. Do not create the private config folder inside the workspace, and do not write anything into the workspace or the user's ~/.claude. 3. Do not pass an approve-everything permission mode or --dangerously-skip-permissions; ClaudePermissionMode has none. 4. Do not drop --setting-sources user; it is what keeps a workspace's settings, hooks and MCP servers from loading.
-KNOWN EDGE CASES: A wrong or revoked key is retried by Claude Code for about three minutes before it reports key_rejected, so a shorter timeout_seconds reports timed_out instead (spec EC-4). The workspace's own CLAUDE.md, skills, agents, commands and .mcp.json are not loaded, and neither are the user's ~/.claude settings (EC-10). A headless run denies every request its permission mode would prompt for and goes on, so the answer says what it could not do (EC-20, A-2). Concurrent calls in one workspace share one config folder, so calls whose skill sets differ can collide while its skills folder is rebuilt (EC-21, an accepted limit; the CLAUDE_LAUNCH_FAILED likely cause says so). The SDK never removes a config folder; its transcripts are plain text that Claude Code sweeps after 30 days (EC-28), and Claude Code's auto memory notes there reach every later thread of the workspace and are never swept (EC-37). The thread id is read only from Claude Code's JSON answer, so a claude.* error of a run or fork carries a new id only when Claude Code printed one JSON object whose session_id is a lowercase UUID, even one it printed before it hung; otherwise a run carries None and a fork its source id, for example after a timeout before printing, an answer cut at the cap, a non-zero exit with only stderr, stdout that is not JSON or a failed launch. A continue's claude.* error always carries the caller's id (INV-6, D-9, EC-14, EC-15).
+KNOWN EDGE CASES: A wrong or revoked key is retried by Claude Code for about three minutes before it reports key_rejected, so a shorter timeout_seconds reports timed_out instead (spec EC-4). The workspace's own CLAUDE.md, skills, agents, commands and .mcp.json are not loaded, and neither are the user's ~/.claude settings (EC-10). A headless run denies every request its permission mode would prompt for and goes on, so the answer says what it could not do (EC-20, A-2). Concurrent calls in one workspace share one config folder, so calls whose skill sets differ can collide while its skills folder is rebuilt (EC-21, an accepted limit; the CLAUDE_LAUNCH_FAILED likely cause says so). The SDK never removes a config folder; its transcripts are plain text that Claude Code sweeps after 30 days (EC-28), and Claude Code's auto memory notes there reach every later thread of the workspace and are never swept (EC-37). A run or fork mints its thread id with uuid4 and passes it as --session-id (PR #1044 review, reversing D-9), so its claude.* error carries a thread id even after a timeout before printing, an answer cut at the cap or stdout that is not JSON; only a non-zero exit that printed nothing but stderr (an unknown source thread, a refused option) or a failed launch started no thread, and then a run carries None and a fork its source id. A continue never sends --session-id, which Claude Code refuses without --fork-session, and its claude.* error always carries the caller's id (INV-6, EC-14, EC-15).
 RELATED DOCS: vidbyte/harnesses/README.md
 TESTS: tests/features/harness_threads/test_harness_threads_claude_argv.py, tests/features/harness_threads/test_harness_threads_claude_credentials.py, tests/features/harness_threads/test_harness_threads_claude_launcher.py, tests/features/harness_threads/test_harness_threads_claude_acceptance.py
 """
@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+import uuid
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -109,11 +110,17 @@ class ClaudeThreadRun:
         # From here on the key is scrubbed from anything claude prints.
         errors.register_secret(request.api_key)
 
+        # Name a new thread before it starts, so a run or fork that
+        # times out before Claude Code prints its answer still reports
+        # an id the caller can continue. A continue keeps the caller's
+        # id; Claude Code refuses --session-id on a plain --resume.
+        minted = None if request.verb is NativeThreadVerb.CONTINUE else str(uuid.uuid4())
+
         # Run claude once, headless, in the workspace: the key and the
         # private folder in its environment, the caller's own Anthropic
         # and Claude variables left out, and the prompt on stdin.
         invocation = CliInvocation(
-            argv=ClaudeThreadRun._argv(launcher, request, config),
+            argv=ClaudeThreadRun._argv(launcher, request, config, minted),
             env_overlay=ClaudeThreadRun._environment(request, config_dir),
             env_remove=ClaudeThreadRun._inherited_names(),
             timeout_seconds=config.timeout_seconds,
@@ -129,7 +136,7 @@ class ClaudeThreadRun:
             raise errors.from_launch_failure(outcome.launch_failure, program, request=request)
 
         # Read the one JSON answer: the thread id and the final text.
-        return ClaudeWire.read(outcome, request, errors, timeout_seconds=config.timeout_seconds)
+        return ClaudeWire.read(outcome, request, errors, timeout_seconds=config.timeout_seconds, minted_id=minted)
 
     @staticmethod
     def _fallback() -> Path | None:
@@ -164,7 +171,7 @@ class ClaudeThreadRun:
         return tuple(name for name in os.environ if name.startswith(native_threads.CLAUDE_INHERITED_ENVIRONMENT_PREFIXES) and name not in native_threads.CLAUDE_INHERITED_ENVIRONMENT_KEPT)
 
     @staticmethod
-    def _argv(launcher: tuple[str, ...], request: NativeThreadRequest, config: ClaudeThreadConfig) -> tuple[str, ...]:
+    def _argv(launcher: tuple[str, ...], request: NativeThreadRequest, config: ClaudeThreadConfig, minted: str | None) -> tuple[str, ...]:
         # @intent claude-workspace-settings-never-load
         # Only the user settings source is read, and that is the private
         # config folder, so no settings file of the workspace can add an
@@ -184,6 +191,8 @@ class ClaudeThreadRun:
             options.append(CliOption(ClaudeFlag.RESUME, request.thread_id))
         if request.verb is NativeThreadVerb.FORK:
             options.append(CliOption(ClaudeFlag.FORK_SESSION))
+        if minted is not None:
+            options.append(CliOption(ClaudeFlag.SESSION_ID, minted))
         return CliArgv.build(launcher, options=tuple(options), style=CliOptionStyle.SEPARATE)
 
 

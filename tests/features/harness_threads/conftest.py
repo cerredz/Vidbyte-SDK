@@ -232,6 +232,10 @@ class Sandbox:
     def answers(self, role: str | None = None) -> list[dict[str, Any]]:
         return self.records("answer", role)
 
+    def minted_id(self) -> str | None:
+        # The --session-id the SDK passed on the last claude start.
+        return self.starts("claude")[-1]["options"].get("--session-id")
+
     def snapshot(self, *, include_fake: bool = False) -> dict[str, tuple[str, int, str]]:
         # Every file and folder under the sandbox root, except the
         # stand-in's own logs, scenarios and vendor state.

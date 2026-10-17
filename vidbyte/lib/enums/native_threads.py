@@ -166,6 +166,7 @@ class ClaudeFlag(StrEnum):
     EFFORT = "--effort"
     RESUME = "--resume"
     FORK_SESSION = "--fork-session"
+    SESSION_ID = "--session-id"
 
 
 class WslFlag(StrEnum):

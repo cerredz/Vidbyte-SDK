@@ -37,7 +37,7 @@ CLAUDE_ENUMS = {
     "ClaudeReasoningEffort": [("LOW", "low"), ("MEDIUM", "medium"), ("HIGH", "high"), ("XHIGH", "xhigh"), ("MAX", "max")],
     "ClaudeFlag": [
         ("PRINT", "--print"), ("OUTPUT_FORMAT", "--output-format"), ("SETTING_SOURCES", "--setting-sources"), ("PERMISSION_MODE", "--permission-mode"),
-        ("MODEL", "--model"), ("EFFORT", "--effort"), ("RESUME", "--resume"), ("FORK_SESSION", "--fork-session"),
+        ("MODEL", "--model"), ("EFFORT", "--effort"), ("RESUME", "--resume"), ("FORK_SESSION", "--fork-session"), ("SESSION_ID", "--session-id"),
     ],
 }
 CLAUDE_CONSTANTS = {

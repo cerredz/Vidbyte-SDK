@@ -141,10 +141,11 @@ async def test_option_parser_refusal_is_protocol_mismatch_naming_the_tested_vers
 @pytest.mark.parametrize("mode", ["garbage", "array"])
 async def test_exit_zero_without_one_json_object_is_protocol_mismatch(api, sandbox, call, check_error, mode) -> None:
     # AC-10 / AC-13 / EC-16: text or a JSON array on stdout; the
-    # message names the tested version.
+    # message names the tested version, and the run reports the id it
+    # minted, since it printed none (PR #1044 review).
     with pytest.raises(api.NativeThreadError) as caught:
         await call("claude", fake={"mode": mode})
-    check_error(caught.value, harness="claude", verb="run", code="claude.protocol_mismatch", workspace=sandbox.workspace, thread_id=None, observations=[("tested version", (TESTED_VERSION,))])
+    check_error(caught.value, harness="claude", verb="run", code="claude.protocol_mismatch", workspace=sandbox.workspace, thread_id=sandbox.minted_id(), observations=[("tested version", (TESTED_VERSION,))])
 
 
 @pytest.mark.asyncio
@@ -153,11 +154,11 @@ async def test_exit_zero_with_a_bad_member_is_protocol_mismatch_naming_it(api, s
     # AC-13 / EC-16 / INV-7 step 10 / R-13: is_error not false, a
     # session_id that is not a lowercase UUID, or a result that is not a
     # str; the member and 2.1.302 are named; a valid session_id still
-    # becomes thread_id.
+    # becomes thread_id, and a bad one leaves the id the run minted.
     with pytest.raises(api.NativeThreadError) as caught:
         await call("claude", fake={"mode": "ok", "override": override, "drop": drop})
     session_ok = member != "session_id"
-    thread_id = printed_session(sandbox) if session_ok else None
+    thread_id = printed_session(sandbox) if session_ok else sandbox.minted_id()
     missing = api.constants.NATIVE_MISSING_MEMBER_SENTENCE.format(member=member)
     check_error(caught.value, harness="claude", verb="run", code="claude.protocol_mismatch", workspace=sandbox.workspace, thread_id=thread_id, observations=[("tested version", (TESTED_VERSION,)), ("bad member", (missing,))])
 

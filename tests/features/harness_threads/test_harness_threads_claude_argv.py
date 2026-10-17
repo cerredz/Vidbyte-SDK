@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: The argv is read from what the stand-in received after its sc
 FUNCTION INVENTORY: spy_runner records invocations; expected_argv builds the §9.2 argv for one call; the test_* functions are one behaviour each.
 COMMON MODIFICATION PATTERNS: A new option is a spec change first (§8.5 ClaudeFlag, §9.2), then one more element in expected_argv.
 WHAT NOT TO DO IN THIS FILE: Do not loosen the exact argv comparisons into membership checks; the order is the §9.2 contract.
-KNOWN EDGE CASES: The stand-in reads stdin to EOF before it logs, so a logged stdin_text equal to the prompt also proves the pipe was closed (INV-11, vendor-facts q8). The fork's --resume is the source id; its new id comes back in the answer.
+KNOWN EDGE CASES: The stand-in reads stdin to EOF before it logs, so a logged stdin_text equal to the prompt also proves the pipe was closed (INV-11, vendor-facts q8). The fork's --resume is the source id and its --session-id the new id the SDK minted, which the answer echoes; the minted id is random, so expected_argv takes it from the call's result.
 RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/claude-thread-functions/spec.md §6.1 INV-8, INV-9, INV-11, INV-17, INV-18, §6.2 AC-5, §6.3 EC-26, §8.1 D-5, D-7, D-12, §9.2
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads/test_harness_threads_claude_argv.py
 """
@@ -40,14 +40,17 @@ def spy_runner(api, monkeypatch) -> list:
     return seen
 
 
-def expected_argv(verb: str, *, thread: str | None, mode: str = "manual", model: str | None = None, effort: str | None = None) -> list[str]:
+def expected_argv(verb: str, *, thread: str | None, minted: str | None = None, mode: str = "manual", model: str | None = None, effort: str | None = None) -> list[str]:
     # §9.2, in its order: the four fixed options, then --model, --effort,
-    # --resume and --fork-session when they apply; no operand.
+    # --resume and --fork-session when they apply, then --session-id with
+    # the id a run or fork mints (PR #1044 review); no operand. A
+    # continue never sends --session-id.
     argv = ["--print", "--output-format", "json", "--setting-sources", "user", "--permission-mode", mode]
     argv += ["--model", model] if model is not None else []
     argv += ["--effort", effort] if effort is not None else []
     argv += ["--resume", thread] if verb != "run" else []
-    return argv + (["--fork-session"] if verb == "fork" else [])
+    argv += ["--fork-session"] if verb == "fork" else []
+    return argv + (["--session-id", minted] if verb != "continue" else [])
 
 
 @pytest.mark.asyncio
@@ -56,9 +59,9 @@ async def test_argv_matches_the_documented_form_without_options(sandbox, call, p
     # AC-5 / §9.2: only the always-present options, in order; the prompt
     # is no argv element and arrives on stdin.
     thread = (await call("claude")).thread_id if verb != "run" else None
-    await call("claude", verb, pack.PROMPT, thread_id=thread)
+    result = await call("claude", verb, pack.PROMPT, thread_id=thread)
     start = sandbox.starts("claude")[-1]
-    assert start["argv"] == expected_argv(verb, thread=thread)
+    assert start["argv"] == expected_argv(verb, thread=thread, minted=result.thread_id)
     assert start["stdin_kind"] == "pipe" and start["stdin_text"] == pack.PROMPT
     assert pack.PROMPT not in start["argv"] and start["stray"] == []
 
@@ -75,7 +78,7 @@ async def test_every_option_keeps_the_separate_style_and_a_flag_like_prompt_stay
     assert result.text == f"claude answer to: {FLAG_PROMPT}"
     start = sandbox.starts("claude")[-1]
     argv = start["argv"]
-    assert argv == expected_argv(verb, thread=thread, mode="acceptEdits", model="claude-opus-5-5", effort="xhigh")
+    assert argv == expected_argv(verb, thread=thread, minted=result.thread_id, mode="acceptEdits", model="claude-opus-5-5", effort="xhigh")
     assert FLAG_PROMPT not in argv and start["stdin_text"] == FLAG_PROMPT
     flags = {member.value for member in enums.ClaudeFlag}
     assert all(element in flags for element in argv if element.startswith("-")), "INV-16: every flag is a ClaudeFlag member"
@@ -86,9 +89,9 @@ async def test_every_option_keeps_the_separate_style_and_a_flag_like_prompt_stay
 async def test_each_permission_mode_reaches_argv_as_its_vendor_value(api, sandbox, call, mode) -> None:
     # INV-18 / D-12: the four modes, passed as members, become their
     # 2.1.302 values; nothing approves everything.
-    await call("claude", config={"permission_mode": api.enums.ClaudePermissionMode(mode)})
+    result = await call("claude", config={"permission_mode": api.enums.ClaudePermissionMode(mode)})
     argv = sandbox.only_start("claude")["argv"]
-    assert argv == expected_argv("run", thread=None, mode=mode)
+    assert argv == expected_argv("run", thread=None, minted=result.thread_id, mode=mode)
     assert not any(element in APPROVE_EVERYTHING for element in argv)
 
 
@@ -97,8 +100,8 @@ async def test_each_permission_mode_reaches_argv_as_its_vendor_value(api, sandbo
 async def test_each_reasoning_effort_reaches_argv_as_its_vendor_value(api, sandbox, call, effort) -> None:
     # §8.5 ClaudeReasoningEffort / §9.2: --effort <value> after the
     # fixed options; no effort set means no --effort at all.
-    await call("claude", config={"reasoning_effort": api.enums.ClaudeReasoningEffort(effort)})
-    assert sandbox.only_start("claude")["argv"] == expected_argv("run", thread=None, effort=effort)
+    result = await call("claude", config={"reasoning_effort": api.enums.ClaudeReasoningEffort(effort)})
+    assert sandbox.only_start("claude")["argv"] == expected_argv("run", thread=None, minted=result.thread_id, effort=effort)
 
 
 @pytest.mark.asyncio
@@ -123,7 +126,7 @@ async def test_runner_gets_plain_strings_the_call_timeout_the_cap_stdin_and_the_
     # overlay variables.
     thread = (await call("claude", config={"timeout_seconds": 45.5})).thread_id if verb != "run" else None
     invocations = spy_runner(api, monkeypatch)
-    await call("claude", verb, pack.PROMPT, thread_id=thread, config={"timeout_seconds": 45.5})
+    result = await call("claude", verb, pack.PROMPT, thread_id=thread, config={"timeout_seconds": 45.5})
     (invocation,) = invocations
     assert all(type(element) is str for element in invocation.argv)
     assert all(type(name) is str and type(value) is str for name, value in invocation.env_overlay.items())
@@ -134,4 +137,5 @@ async def test_runner_gets_plain_strings_the_call_timeout_the_cap_stdin_and_the_
     assert invocation.env_overlay["DISABLE_AUTOUPDATER"] == invocation.env_overlay["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] == api.constants.NATIVE_ENABLED_SWITCH == "1"
     assert os.path.normcase(invocation.env_overlay["CLAUDE_CONFIG_DIR"]) == os.path.normcase(str(sandbox.claude_config()))
     assert pack.API_KEY not in invocation.argv and not any(pack.API_KEY in element for element in invocation.argv)
-    assert list(invocation.argv[-len(expected_argv(verb, thread=thread)) :]) == expected_argv(verb, thread=thread)
+    expected = expected_argv(verb, thread=thread, minted=result.thread_id)
+    assert list(invocation.argv[-len(expected) :]) == expected

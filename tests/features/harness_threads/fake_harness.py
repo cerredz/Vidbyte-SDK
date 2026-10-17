@@ -38,7 +38,7 @@ PLAIN_NAMES = (
     "XDG_CONFIG_HOME", "MUSE_AUTH_PATH", "WSLENV", "VIDBYTE_PEER_MARK",
     "CLAUDE_CONFIG_DIR", "DISABLE_AUTOUPDATER", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "CLAUDE_CODE_GIT_BASH_PATH", "VIDBYTE_UNRELATED_SETTING",
 )
-CLAUDE_VALUED = ("--output-format", "--setting-sources", "--permission-mode", "--model", "--effort", "--resume")
+CLAUDE_VALUED = ("--output-format", "--setting-sources", "--permission-mode", "--model", "--effort", "--resume", "--session-id")
 CLAUDE_SWITCHES = ("--print", "--fork-session")
 # What Claude Code 2.1.302 accepts for --permission-mode and --effort
 # (vendor-facts f2, f2b); the SDK may pass only some of them.
@@ -48,6 +48,7 @@ CLAUDE_NAME_PREFIXES = ("ANTHROPIC_", "CLAUDE")
 CLAUDE_UUID_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 CLAUDE_NOT_FOUND = "No conversation found with session ID: {session}"
 CLAUDE_NO_INPUT = "Error: Input must be provided either through stdin or as a prompt argument when using --print"
+CLAUDE_SESSION_ID_NEEDS_FORK = "Error: --session-id can only be used with --continue or --resume if --fork-session is also specified."
 CLAUDE_KEY_REJECTED = "Invalid API key · Fix external API key"
 CLAUDE_NOT_LOGGED_IN = "Not logged in · Please run /login"
 CLAUDE_BUDGET_TEXT = "Reached maximum budget ($0.00001)"
@@ -702,6 +703,9 @@ def run_claude(scenario: dict[str, Any], args: list[str]) -> None:
     if options.get("--permission-mode", "default") not in CLAUDE_PERMISSION_MODES or options.get("--effort", "low") not in CLAUDE_EFFORTS:
         write_err(f"error: fake claude: invalid option value in {args!r}\n")
         sys.exit(1)
+    if "--session-id" in options and "--resume" in options and "--fork-session" not in switches:
+        write_err(CLAUDE_SESSION_ID_NEEDS_FORK + "\n")
+        sys.exit(1)
     if not stdin_text.strip():
         write_err(CLAUDE_NO_INPUT + "\n")
         sys.exit(1)
@@ -726,12 +730,15 @@ def run_claude(scenario: dict[str, Any], args: list[str]) -> None:
     if resume is not None and not found:
         write_err(CLAUDE_NOT_FOUND.format(session=resume) + "\n")
         sys.exit(1)
+    # A run or fork answers on the id given with --session-id, as
+    # Claude Code 2.1.302 does, unless the scenario ignores it.
+    minted = None if mode == "ignore_session_id" else options.get("--session-id")
     if resume is not None and not forking:
         session = {"continue_other_id": new_id(), "continue_upper_id": resume.upper()}.get(mode, resume)
     elif resume is not None:
-        session = resume if mode == "fork_returns_source" else new_id()
+        session = resume if mode == "fork_returns_source" else minted or new_id()
     else:
-        session = new_id()
+        session = minted or new_id()
     log.write("session", session=session)
     # The transcript, keyed by the working folder as Claude Code keys
     # it; a fork starts from a copy of its source's history.
