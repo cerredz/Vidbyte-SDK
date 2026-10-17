@@ -2,7 +2,7 @@
 
 PURPOSE: Defines every named default, limit, pattern, tool name, workspace file name, and short label of the InfiniteMemory agent: the delegation caps, the workspace caps, the entry and card sizes, the history cap, the run-id and verdict formats, and the map's fixed labels.
 ROLE IN CODEBASE: Read by the settings and every module in vidbyte/agents/infinite/, by the records in vidbyte/lib/dataclasses/infinite.py, and by InfiniteMemoryAgentTools (vidbyte/tools/toolsets/infinite.py). The feature tests import the labels and caps to check output against them.
-ARCHITECTURE NOTE: Immutable constants only; behavior lives in the workspace, journal, memory, launch, and runtime modules. The limits are generous on purpose, because this agent exists to take on work that outgrows one context: each one only stops a runaway run, and the context caps are sized for a 128,000-token model: the role prompt, the tool descriptions, the map, and the trimmed history take about 105,000 tokens, which leaves room for the developer's own prompt and the reply. Patterns are raw strings compiled where they are used, and the label templates are filled with str.format.
+ARCHITECTURE NOTE: Immutable constants only; behavior lives in the workspace, journal, memory, launch, and runtime modules. The limits are generous on purpose, because this agent exists to take on work that outgrows one context: each one only stops a runaway run, and the context caps are sized for a 128,000-token model: the role prompt, the tool descriptions, the map, and the trimmed history take about 105,000 tokens, which leaves room for the developer's own prompt and the reply. The history also holds the root's status messages and, past its cap, is cut back toward the low watermark. Patterns are raw strings compiled where they are used, and the label templates are filled with str.format.
 FUNCTION INVENTORY: No functions; defaults (INFINITE_DEFAULT_*), limits, patterns (INFINITE_*_PATTERN), tool names (INFINITE_*_TOOL_NAME and INFINITE_RESERVED_TOOL_NAMES), workspace layout names, and labels.
 COMMON MODIFICATION PATTERNS: Change a cap or label here, never at its use site, so the settings, the tools, the tests, and the folder README stay in step. Add a named constant here before writing another InfiniteMemory policy literal.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import from any layer above vidbyte/lib. 2. Do not put model-facing sentences here; they belong in vidbyte/prompts/prompts/infinite_memory/. 3. Do not rename a workspace file name; workspaces already on disk use it.
@@ -43,13 +43,15 @@ INFINITE_DEPTH_STEP = 1
 INFINITE_PAIR_TURN_SECONDS = 0
 
 # Workspace defaults: total files, total tokens, tokens per note or
-# seed, tokens per entry or file description, and accepted remember
-# calls per agent.
+# seed, tokens per entry or file description, accepted remember calls
+# per agent, and the most lines one read_lines call returns before its
+# footer names the next start line.
 INFINITE_DEFAULT_MAX_FILES = 2_000
 INFINITE_DEFAULT_MAX_TOKENS = 2_000_000
 INFINITE_DEFAULT_MAX_FILE_TOKENS = 100_000
 INFINITE_DEFAULT_MAX_ENTRY_TOKENS = 150
 INFINITE_DEFAULT_MAX_ENTRIES_PER_AGENT = 25
+INFINITE_DEFAULT_MAX_READ_LINES = 200
 
 # The default loop for every agent in the tree: at most 500 iterations,
 # and every ordinary tool result cut at 200,000 characters, about
@@ -62,7 +64,12 @@ INFINITE_TOOL_RESULT_MAX_CHARS = 200_000
 # a task card's context, and the token caps of a card's summary and
 # review, the workspace map, and every agent's message history. A full
 # batch of cards, each with four texts at the card cap, takes about
-# 64,000 tokens, so it fits inside the history cap.
+# 64,000 tokens, so it fits inside the history cap; a pair that is done
+# and passed or fixed shows only its finished line and its summary, so a
+# batch of those takes about a quarter of that. Past the history cap,
+# the trim drops whole multiples of the cap less the low watermark, so
+# the first kept message, and the prompt cache behind it, stays put
+# while the history grows by less than that.
 INFINITE_NEW_FILES_PER_AGENT = 10
 INFINITE_MAX_TAGS = 8
 INFINITE_MAX_REFS = 8
@@ -70,6 +77,7 @@ INFINITE_CONTEXT_MAX_ITEMS = 100
 INFINITE_CARD_TEXT_MAX_TOKENS = 800
 INFINITE_MAP_MAX_TOKENS = 8_000
 INFINITE_HISTORY_MAX_TOKENS = 90_000
+INFINITE_HISTORY_LOW_WATERMARK_TOKENS = 65_000
 
 # The most bytes one character takes in UTF-8, so a byte cap derived
 # from a token cap never skips a file the token cap allows.
@@ -85,15 +93,16 @@ INFINITE_RUN_ID_PATTERN = r"^\d{8}T\d{6}Z-[0-9a-f]{8}$"
 INFINITE_RUN_ID_TIME_FORMAT = "%Y%m%dT%H%M%SZ"
 
 # The model-facing names of the run-bound tools, which each run adds to
-# its agents, and the name of the launch tool's task list. The reserved
-# names add the three preset tools, so no developer tool may take any
-# of them.
+# its agents, the name of the launch tool's task list, and the name of
+# the ranked memory search. The reserved names add the three preset
+# tools, so no developer tool may take any of them.
 INFINITE_LAUNCH_TOOL_NAME = "launch_subagent"
 INFINITE_LAUNCH_TASKS_ARGUMENT = "tasks"
 INFINITE_REMEMBER_TOOL_NAME = "remember"
 INFINITE_WRITE_NOTE_TOOL_NAME = "write_note"
 INFINITE_EDIT_FILE_TOOL_NAME = "edit_file"
 INFINITE_DROP_ENTRY_TOOL_NAME = "drop_entry"
+INFINITE_SEARCH_MEMORY_TOOL_NAME = "search_memory"
 INFINITE_RUN_BOUND_TOOL_NAMES = (
     INFINITE_LAUNCH_TOOL_NAME,
     INFINITE_REMEMBER_TOOL_NAME,
@@ -107,6 +116,15 @@ INFINITE_RESERVED_TOOL_NAMES = (
     "grep",
     "read_lines",
 )
+
+# Masking and the workspace grep: every agent keeps the newest outputs
+# of each workspace search or read tool whole and replaces older ones
+# with the masked_output leaf, while the call itself stays, so the
+# model can repeat it; no other tool's output is masked. The workspace
+# grep shows matching lines only, because read_lines shows more.
+INFINITE_MASK_KEEP_RECENT = 3
+INFINITE_MASKED_TOOL_NAMES = ("grep", "read_lines", INFINITE_SEARCH_MEMORY_TOOL_NAME)
+INFINITE_GREP_CONTEXT_LINES = 0
 
 # Agent keys and workspace layout: the root's key, the last part of a
 # pair's generator and verifier keys, the journal and seed folders, the
@@ -127,13 +145,15 @@ INFINITE_MAP_PRIMITIVE_ID = "infinite_memory_map"
 
 # Short fixed labels: the map's title, the end of cut card text, the
 # map's word for a file with no description or a seed, the line that
-# replaces map lines past its cap, and one finished pair in a briefing.
+# replaces map lines past its cap, one finished pair in a briefing or a
+# compact card, and a file gone since the root's last status message.
 INFINITE_MAP_TITLE = "Workspace map"
 INFINITE_TRUNCATION_MARKER = " … [cut]"
 INFINITE_NO_DESCRIPTION = "(no description)"
 INFINITE_SEED_LABEL = "(seed file, read-only)"
 INFINITE_MORE_FILES = "… and {count} more files"
 INFINITE_FINISHED_PAIR_LINE = "- {name}: {status}, verdict {verdict}, entries {entries}"
+INFINITE_MAP_REMOVED_LINE = "- {path}: removed"
 
 __all__ = [
     "INFINITE_CARD_TEXT_MAX_TOKENS",
@@ -146,6 +166,7 @@ __all__ = [
     "INFINITE_DEFAULT_MAX_FILE_TOKENS",
     "INFINITE_DEFAULT_MAX_ITERATIONS",
     "INFINITE_DEFAULT_MAX_PARALLEL",
+    "INFINITE_DEFAULT_MAX_READ_LINES",
     "INFINITE_DEFAULT_MAX_TOKENS",
     "INFINITE_DEPTH_STEP",
     "INFINITE_DROP_ENTRY_TOOL_NAME",
@@ -155,12 +176,17 @@ __all__ = [
     "INFINITE_FINISHED_PAIR_LINE",
     "INFINITE_FIRST_ENTRY_ID",
     "INFINITE_GENERATOR_KEY",
+    "INFINITE_GREP_CONTEXT_LINES",
+    "INFINITE_HISTORY_LOW_WATERMARK_TOKENS",
     "INFINITE_HISTORY_MAX_TOKENS",
     "INFINITE_LAUNCH_TASKS_ARGUMENT",
     "INFINITE_LAUNCH_TOOL_NAME",
     "INFINITE_MAP_MAX_TOKENS",
     "INFINITE_MAP_PRIMITIVE_ID",
+    "INFINITE_MAP_REMOVED_LINE",
     "INFINITE_MAP_TITLE",
+    "INFINITE_MASKED_TOOL_NAMES",
+    "INFINITE_MASK_KEEP_RECENT",
     "INFINITE_MAX_REFS",
     "INFINITE_MAX_TAGS",
     "INFINITE_MIN_AGENTS",
@@ -179,6 +205,7 @@ __all__ = [
     "INFINITE_RUN_BOUND_TOOL_NAMES",
     "INFINITE_RUN_ID_PATTERN",
     "INFINITE_RUN_ID_TIME_FORMAT",
+    "INFINITE_SEARCH_MEMORY_TOOL_NAME",
     "INFINITE_SEED_DIRNAME",
     "INFINITE_SEED_LABEL",
     "INFINITE_STAGED_KEY_PATTERN",
