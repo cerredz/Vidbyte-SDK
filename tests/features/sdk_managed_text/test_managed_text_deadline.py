@@ -3,7 +3,7 @@
 PURPOSE: Proves the r5 retry deadline and the last-attempt rule of a managed call: re-sends share one cumulative deadline taken from the event-loop clock before the first POST, each attempt keeps the full 630 s timeout, the error states how many re-sends the call made, and the last attempt's outcome decides the error. Also proves that a direct TextModelConfig.validate() refuses the managed shapes the gateway cannot serve.
 ROLE IN CODEBASE: Deadline layer of tests/features/sdk_managed_text/ (spec INV-10, INV-16, EC-38, section 9.2 "Retries"; EC-3 and EC-7 for the direct validate() calls). Drives VidbyteGatewayTransport in vidbyte/lib/http/vidbyte_gateway.py directly, without the runner, and TextModelConfig.validate in vidbyte/lib/dataclasses/model_configs.py.
 ARCHITECTURE NOTE: For one call, the gateway module's asyncio name is replaced by a namespace whose get_running_loop returns FakeLoopClock. Its time() is the loop time the deadline reads, its sleep() records each retry wait and advances the clock by it, and SlowGateway advances the clock by a fixed step per attempt. Against the 630 s timeout, steps of 0, 600 and 629.5 s give 3, 2 and 1 POSTs. 629.5 + 0.5 lands exactly on the deadline in binary floating point, so the last case pins the >= comparison.
-COMMON MODIFICATION PATTERNS: When the retry waits or the 630 s floor change, move the step values so each case still lands on its boundary, and keep one case exactly on the deadline. Keep message checks to the facts section 9.2 binds: the re-send count, or that no re-send was made.
+COMMON MODIFICATION PATTERNS: When the gateway serves a new provider, add it to MANAGED_PROVIDERS. When the retry waits or the 630 s floor change, move the step values so each case still lands on its boundary, and keep one case exactly on the deadline. Keep message checks to the facts section 9.2 binds: the re-send count, or that no re-send was made.
 WHAT NOT TO DO IN THIS FILE: 1. Do not patch asyncio globally or asyncio.get_running_loop itself; asyncio.run in this file needs the real loop, so patch only the gateway module's asyncio attribute. 2. Do not swap the fake clock for a real one with short timeouts; no real step lands exactly on the deadline, so a > comparison, a deadline taken after the first POST and a shortened attempt would all pass. 3. Do not import feature symbols at module level (see managed_text_fixtures.py).
 KNOWN EDGE CASES: A deadline taken after the first POST gives the 600 s case a third POST. A > comparison gives the 629.5 s case a second POST. A deadline that ignores the loop clock is caught because the clock starts at 1000 s, not 0. A shortened attempt shows as a timeout_seconds below 630.0. Since byok-api-keys (D-23), AUTO always means the gateway, so TextModelConfig refuses an endpoint or an unserved provider when it is built, before any environment is read.
 RELATED DOCS: tests/features/sdk_managed_text/FEATURE.md; docs/spec/managed-generative-models/spec.md INV-10, INV-16, EC-3, EC-7, EC-38 and section 9.2 ("Retries").
@@ -44,7 +44,9 @@ CLOCK_START = 1000.0
 VENDOR_URL = "https://api.openai.com/v1/responses"
 VENDOR_HEADERS = {"authorization": "Bearer vidbyte-managed"}
 ADAPTER_BODY = {"model": "gpt-5.5", "input": "Hi", "max_output_tokens": 8192}
-MANAGED_PROVIDERS = ("openai", "anthropic", "gemini", "xai", "deepseek", "kimi")
+# The providers the gateway serves; meta joined in
+# meta-muse-managed-text FR-1 (AC-10: M-12 lists all seven).
+MANAGED_PROVIDERS = ("openai", "anthropic", "gemini", "xai", "deepseek", "kimi", "meta")
 
 
 class FakeLoopClock:

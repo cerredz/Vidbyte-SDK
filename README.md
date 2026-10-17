@@ -289,8 +289,8 @@ offline = Agent(
   works.
 - **Prefixes:** a key whose prefix proves its provider goes to that provider:
   `sk-ant-` (Anthropic), `sk-or-` (OpenRouter), `sk-proj-` and `sk-admin-`
-  (OpenAI), `xai-` (xAI), and `AIza` or `AQ.` (Gemini). A Vidbyte key in the
-  list is the Vidbyte key.
+  (OpenAI), `xai-` (xAI), `LLM_` or `LLM|` (Meta), and `AIza` or `AQ.`
+  (Gemini). A Vidbyte key in the list is the Vidbyte key.
 - **Other keys:** a key without such a prefix, such as a DeepSeek, Kimi, or
   Mistral key, goes to the one configured model (the agent's own model or a
   fallback) that can take it. When it is the list's only such key and the
@@ -334,14 +334,14 @@ Text configs take `mode=`, and agents take the same choice as `model_mode=`.
 
 These rules apply to `AUTO` and `VIDBYTE_MANAGED` calls.
 
-- **Providers:** OpenAI, Anthropic, Gemini, xAI, DeepSeek, and Kimi. A gateway
-  mode with another provider, or with a custom `endpoint`, is refused before a
-  request is sent; use `TextModelMode.DIRECT` for those.
+- **Providers:** OpenAI, Anthropic, Gemini, xAI, DeepSeek, Kimi, and Meta. A
+  gateway mode with another provider, or with a custom `endpoint`, is refused
+  before a request is sent; use `TextModelMode.DIRECT` for those.
 - **Output cap:** every gateway request carries an output-token cap. When
   `max_output_tokens` is not set, the SDK sends 32,768. If you pass a
   `generationConfig` in `extra_body` for Gemini, it replaces the one the SDK
-  builds, so it must include `maxOutputTokens`. For xAI, DeepSeek, and Kimi,
-  set the cap with `max_output_tokens`, not `max_completion_tokens` in
+  builds, so it must include `maxOutputTokens`. For xAI, DeepSeek, Kimi, and
+  Meta, set the cap with `max_output_tokens`, not `max_completion_tokens` in
   `extra_body`.
 - **Request size:** the gateway refuses a request over 2,000,000 bytes,
   measured as JSON with non-ASCII characters escaped. Shorten the context, or

@@ -1,17 +1,18 @@
 """FILE: tests/features/sdk_provider_keys/test_provider_keys_security.py
 
 PURPOSE: Proves that keys never leak: no record listed in INV-4 shows a key in its repr; no log line, error message, details mapping or traceback produced by relay, refusal, retry or agent failure paths holds a key; and every credential guard catches the new plural name api_keys (with list and tuple values, in the = and : forms) while still catching every name it caught before.
-ROLE IN CODEBASE: Security layer of tests/features/sdk_provider_keys/ (spec AC-20, AC-21, AC-22; INV-4, INV-22; FR-13; EC-49; T-1). Exercises vidbyte/lib/dataclasses (model_configs, agents), vidbyte/agents (fallback, jev settings), vidbyte/paradigms/context_minimal_fanout/types.py, vidbyte/lib/util/credential_keys.py, vidbyte/lib/dataclasses/config.py, vidbyte/lib/dataclasses/agent_descriptor.py and vidbyte/harnesses/serialization.py.
+ROLE IN CODEBASE: Security layer of tests/features/sdk_provider_keys/ (spec AC-20, AC-21, AC-22; INV-4, INV-22; FR-13; EC-49; T-1; meta-muse-managed-text AC-14, INV-8, INV-9, NFR-1). Exercises vidbyte/lib/dataclasses (model_configs, agents), vidbyte/agents (fallback, jev settings), vidbyte/paradigms/context_minimal_fanout/types.py, vidbyte/lib/util/credential_keys.py, vidbyte/lib/dataclasses/config.py, vidbyte/lib/dataclasses/agent_descriptor.py and vidbyte/harnesses/serialization.py.
 ARCHITECTURE NOTE: The harness free-text cases live here rather than in tests/test_harness_redaction.py, which the spec's section 13 lists as not superseded. Log capture attaches one recording handler to the root logger at DEBUG for the duration of each scenario, so any SDK logger that propagates is seen.
 COMMON MODIFICATION PATTERNS: When INV-4 gains a record, add it to the repr test. When a guard gains a name, add the name to the guard test and keep the old names in the INV-22 half.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import ProviderKeys, TextCredentials or TextModelMode.DIRECT at module level. 2. Do not build AIza or OpenAI-legacy key shapes here; the fixtures' fakes are enough. 3. Do not loosen a "no key" check to "no full key"; a prefix of a key is still key text.
 KNOWN EDGE CASES: AgentFallback is a plain class whose default repr shows no fields; the check still guards against a future __repr__ that prints its record. AgentFallbackSettings cannot hold a key at all after D-26, so it has no repr case.
-RELATED DOCS: tests/features/sdk_provider_keys/FEATURE.md; docs/spec/byok-api-keys/spec.md sections 6.1 (INV-4, INV-22), 6.2 (AC-20 to AC-22) and 12.3 rows 14 to 16.
+RELATED DOCS: tests/features/sdk_provider_keys/FEATURE.md; docs/spec/byok-api-keys/spec.md sections 6.1 (INV-4, INV-22), 6.2 (AC-20 to AC-22) and 12.3 rows 14 to 16; docs/spec/meta-muse-managed-text/spec.md AC-14 and INV-9 (log seam in section 13).
 TESTS: python -m pytest tests/features/sdk_provider_keys/test_provider_keys_security.py
 """
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import tempfile
@@ -22,20 +23,26 @@ from typing import Any, Callable
 from unittest.mock import patch
 
 from tests.features.sdk_managed_text.managed_text_fixtures import (
+    BODY_CANARY,
+    LEAKED_KEY,
     RUNNER_TRANSPORT_TARGET,
     SLEEP_TARGET,
     VIDBYTE_KEY,
     BackoffRecorder,
     ScriptedGateway,
+    answer,
     gateway_error,
     provider_answer,
+    relayed_provider_error,
 )
 from tests.features.sdk_provider_keys.provider_keys_fixtures import (
     K_ANTHROPIC,
+    K_META,
     K_OPENAI,
     K_UNPROVEN,
     K_UNPROVEN_2,
     K_XAI,
+    provider_key_header,
     responses_done,
 )
 from vidbyte.lib.config import TextModelConfig, YamlLoader
@@ -64,6 +71,12 @@ def rendered_error(error: BaseException) -> str:
     # Everything an exception can show: message, details, repr, and the formatted traceback with its chain.
     details = getattr(error, "details", {})
     return str(error) + repr(details) + repr(error) + "".join(traceback.format_exception(type(error), error, error.__traceback__))
+
+
+def run_meta_relay(transport: ScriptedGateway) -> None:
+    # One default-mode meta call that relays K_META through the scripted
+    # transport (meta-muse-managed-text AC-14).
+    TextModelRunner(TextModelConfig(provider="meta", model="muse-spark-1.1", api_keys=[K_META]), transport=transport).run("Hi")
 
 
 class ReprTests(unittest.TestCase):
@@ -170,6 +183,40 @@ class LeakScenarioTests(unittest.TestCase):
                 searched = "\n".join(lines) + (rendered_error(error) if error is not None else "")
                 for key in ALL_KEYS:
                     self.assertNotIn(key, searched)
+
+    def test_every_meta_gateway_failure_logs_and_raises_no_key_canary_or_key_shaped_body_text(self) -> None:
+        # meta-muse-managed-text AC-14, INV-8, INV-9, NFR-1: each
+        # failure's bodies carry LEAKED_KEY and BODY_CANARY, and the
+        # relayed 400 echoes the Meta key itself.
+        from vidbyte.lib.errors import ProviderRequestError
+
+        echoed_400 = answer(400, {"error": {"message": f"{BODY_CANARY} Invalid key {K_META} ({LEAKED_KEY})", "type": "invalid_request_error", "code": "invalid_api_key"}})
+        unsupported_422 = answer(422, {"error": True, "code": "model_gateway_unsupported_model", "message": f"{BODY_CANARY} Bearer {LEAKED_KEY}", "request_id": "req_1"})
+        dropped = ProviderRequestError("connection reset", provider="http", response_excerpt=f"{BODY_CANARY} {K_META} {LEAKED_KEY}")
+        scenarios = (
+            ("gateway 422", unsupported_422, 422, 1),
+            ("gateway 502 three times", gateway_error(502), 502, 3),
+            ("relayed 400 echoing the Meta key", echoed_400, 400, 1),
+            ("relayed 401", relayed_provider_error(ModelProvider.META, 401), 401, 1),
+            ("network failure", dropped, None, 1),
+        )
+        for label, step, status, attempts in scenarios:
+            with self.subTest(scenario=label):
+                transport = ScriptedGateway(step)
+                lines, error = self.run_scenario(functools.partial(run_meta_relay, transport))
+                # The call must have reached the gateway as a meta relay
+                # call; at base_commit it is refused before any request.
+                self.assertIsInstance(error, ProviderRequestError, f"{label}: {type(error).__name__ if error else 'no error'}")
+                self.assertEqual(error.status_code, status)
+                self.assertEqual(len(transport.requests), attempts)
+                for request in transport.requests:
+                    self.assertEqual(request["json_body"]["provider"], "meta")
+                    self.assertEqual(provider_key_header(request), K_META)
+                self.assertIsNone(error.__cause__)
+                self.assertIsNone(error.__context__)
+                searched = "\n".join(lines) + rendered_error(error)
+                for secret in (K_META, VIDBYTE_KEY, LEAKED_KEY, BODY_CANARY):
+                    self.assertNotIn(secret, searched)
 
 
 class CredentialGuardTests(unittest.TestCase):

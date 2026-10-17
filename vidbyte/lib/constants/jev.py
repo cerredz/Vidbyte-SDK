@@ -69,8 +69,10 @@ VIDBYTE_API_KEY_ENV_VAR: str = "VIDBYTE_API_KEY"
 # The one generative route, on the contract's live host (C018), which
 # every managed text call posts to whatever its provider.
 VIDBYTE_GENERATIVE_GATEWAY_ENDPOINT: str = "https://vidbyte-backend.onrender.com/api/v1/models/generate"
-# The six providers the generative gateway dispatches: cerredz/Vidbyte
-# backend spec r3 section 9.2.8 at commit a14b37e7e (spec.md A-1).
+# The seven providers the generative gateway dispatches: the six of
+# cerredz/Vidbyte backend spec r3 section 9.2.8 at commit a14b37e7e
+# (spec.md A-1), plus meta from cerredz/Vidbyte#710 meta-muse-gateway
+# spec r4 section 9.2 at commit c395349bd.
 VIDBYTE_MANAGED_TEXT_PROVIDERS: frozenset[ModelProvider] = frozenset({
     ModelProvider.OPENAI,
     ModelProvider.ANTHROPIC,
@@ -78,6 +80,7 @@ VIDBYTE_MANAGED_TEXT_PROVIDERS: frozenset[ModelProvider] = frozenset({
     ModelProvider.XAI,
     ModelProvider.DEEPSEEK,
     ModelProvider.KIMI,
+    ModelProvider.META,
 })
 # The gateway refuses a body without an output-token cap and injects
 # none, so a managed call without max_output_tokens sends this one.

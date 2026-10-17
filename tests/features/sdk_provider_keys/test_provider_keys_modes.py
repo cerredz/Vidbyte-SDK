@@ -1,12 +1,12 @@
 """FILE: tests/features/sdk_provider_keys/test_provider_keys_modes.py
 
 PURPOSE: Proves how TextModelConfig.credentials() resolves the three modes (table R) and what each runner does with the result: DIRECT reads only the provider key, VIDBYTE_MANAGED reads only the Vidbyte key, AUTO needs a Vidbyte key and relays when the provider has a key; a gateway runner pins its credentials; streaming refuses every gateway mode; and an unsendable provider key is refused before any request.
-ROLE IN CODEBASE: Mode layer of tests/features/sdk_provider_keys/ (spec AC-6, AC-40; INV-5 to INV-8, INV-11, INV-12, INV-26; D-7, D-8, D-10, D-14, D-32; EC-12, EC-21 to EC-23, EC-56; table M rows M-8, M-9, M-12, M-13, M-15, M-21). Exercises vidbyte/lib/dataclasses/model_configs.py (TextModelConfig, TextCredentials), vidbyte/lib/registries/models.py (find_provider_api_key, resolve_vidbyte_api_key), vidbyte/lib/runners/text.py and vidbyte/lib/runners/streaming_text.py.
+ROLE IN CODEBASE: Mode layer of tests/features/sdk_provider_keys/ (spec AC-6, AC-40; INV-5 to INV-8, INV-11, INV-12, INV-26; D-7, D-8, D-10, D-14, D-32; EC-12, EC-21 to EC-23, EC-56; table M rows M-8, M-9, M-12, M-13, M-15, M-21; meta-muse-managed-text AC-10, INV-1, INV-10, INV-12, INV-14; r4 AC-16). Exercises vidbyte/lib/dataclasses/model_configs.py (TextModelConfig, TextCredentials), vidbyte/lib/registries/models.py (find_provider_api_key, resolve_vidbyte_api_key), vidbyte/lib/runners/text.py and vidbyte/lib/runners/streaming_text.py.
 ARCHITECTURE NOTE: credentials() is the only code that reads the environment for a text call, so RecordingEnviron (a recording stand-in for os.environ) proves which variables each mode reads. Runner behavior is observed at the inner transport, which is the only fake.
-COMMON MODIFICATION PATTERNS: When a mode is added, add its row to the table R test and its refusals to the streaming test. Keep message checks to the facts table M binds.
+COMMON MODIFICATION PATTERNS: When a mode is added, add its row to the table R test and its refusals to the streaming test. Keep message checks to the facts table M binds. When the gateway serves a new provider, add it to SERVED, the list M-12 names.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import TextModelMode.DIRECT, TextCredentials or the new constants at module level. 2. Do not mock credentials() or ProviderModelRegistry; patch only the environment and the inner transport.
 KNOWN EDGE CASES: TextCredentials raises ConfigurationError for an impossible combination, the repo's convention for a record's own validation (spec section 9.1 names the rules, not the error type). A NaN timeout must still become the 630 s floor on a relay call.
-RELATED DOCS: tests/features/sdk_provider_keys/FEATURE.md; docs/spec/byok-api-keys/spec.md sections 6.1, 9.1 (TextCredentials) and 9.2 (table R, table M).
+RELATED DOCS: tests/features/sdk_provider_keys/FEATURE.md; docs/spec/byok-api-keys/spec.md sections 6.1, 9.1 (TextCredentials) and 9.2 (table R, table M); docs/spec/meta-muse-managed-text/spec.md section 6.1.
 TESTS: python -m pytest tests/features/sdk_provider_keys/test_provider_keys_modes.py
 """
 
@@ -30,6 +30,7 @@ from tests.features.sdk_managed_text.managed_text_fixtures import (
 from tests.features.sdk_provider_keys.provider_keys_fixtures import (
     K_ANTHROPIC,
     K_META,
+    K_META_DOC,
     K_OPENAI,
     K_UNPROVEN,
     K_XAI,
@@ -44,7 +45,9 @@ from vidbyte.lib.runners import StreamingTextModelRunner, TextModelRunner
 
 CREDENTIAL_ERROR_KIND = "vidbyte_managed_credentials"
 PLACEHOLDER = "vidbyte-managed"
-SERVED = ("openai", "anthropic", "gemini", "xai", "deepseek", "kimi")
+# The providers the gateway serves, which M-12 lists; meta joined in
+# meta-muse-managed-text FR-1 (AC-10, INV-10).
+SERVED = ("openai", "anthropic", "gemini", "xai", "deepseek", "kimi", "meta")
 
 
 class FakeStreamingTransport:
@@ -220,7 +223,7 @@ class GatewayShapeTests(unittest.TestCase):
         from vidbyte.lib.config import TextModelMode
 
         for mode in (TextModelMode.AUTO, TextModelMode.VIDBYTE_MANAGED):
-            for provider, model in (("openrouter", "openai/gpt-5.5"), ("glm", "glm-4.6"), ("minimax", "MiniMax-M2"), ("meta", "llama-4"), ("mistral", "mistral-large-latest")):
+            for provider, model in (("openrouter", "openai/gpt-5.5"), ("glm", "glm-4.6"), ("minimax", "MiniMax-M2"), ("mistral", "mistral-large-latest")):
                 environment = RecordingEnviron({"VIDBYTE_API_KEY": VIDBYTE_KEY})
                 with self.subTest(mode=mode.value, provider=provider), patch.object(os, "environ", environment), self.assertRaises(UnsupportedProviderError) as caught:
                     TextModelConfig(provider=provider, model=model, mode=mode)
@@ -254,6 +257,36 @@ class GatewayShapeTests(unittest.TestCase):
                 self.assertIn("custom endpoint", str(refused.exception))
                 self.assertIn("TextModelMode.DIRECT", str(refused.exception))
                 self.assertNotIn(K_ANTHROPIC, str(refused.exception) + repr(refused.exception.details))
+
+    def test_meta_builds_in_both_gateway_modes_and_still_refuses_a_custom_endpoint_and_streaming(self) -> None:
+        # meta-muse-managed-text INV-1 (enum and string spellings),
+        # INV-12 (an endpoint is still refused for meta), INV-14
+        # (streaming still refuses meta).
+        from vidbyte.lib.config import TextModelMode
+
+        for mode in (TextModelMode.AUTO, TextModelMode.VIDBYTE_MANAGED):
+            for provider in (ModelProvider.META, "meta"):
+                with self.subTest(mode=mode.value, provider=str(provider), case="builds"), patch.dict(os.environ, {"VIDBYTE_API_KEY": VIDBYTE_KEY, "META_API_KEY": K_META}, clear=True):
+                    config = TextModelConfig(provider=provider, model="muse-spark-1.1", mode=mode)
+                    self.assertIs(config.mode, mode)
+            with self.subTest(mode=mode.value, case="endpoint"), patch.dict(os.environ, {"VIDBYTE_API_KEY": VIDBYTE_KEY}, clear=True):
+                with self.assertRaises(ConfigurationError) as refused:
+                    TextModelConfig(provider="meta", model="muse-spark-1.1", endpoint="https://proxy.example/v1", mode=mode)
+                self.assertIn("endpoint", str(refused.exception))
+                self.assertIn("TextModelMode.DIRECT", str(refused.exception))
+            with self.subTest(mode=mode.value, case="streaming"), patch.dict(os.environ, {"VIDBYTE_API_KEY": VIDBYTE_KEY, "META_API_KEY": K_META}, clear=True):
+                # Built outside assertRaises: at base_commit the config
+                # itself raises M-12, which must not pass for the
+                # streaming refusal.
+                streaming_config = TextModelConfig(provider="meta", model="muse-spark-1.1", mode=mode)
+                transport = FakeStreamingTransport([])
+                with self.assertRaises(UnsupportedProviderError) as caught:
+                    StreamingTextModelRunner(streaming_config, transport=transport)
+                self.assertIn("TextModelRunner", str(caught.exception))
+                self.assertIn("TextModelMode.DIRECT", str(caught.exception))
+                self.assertEqual(caught.exception.details.get("mode"), mode.value)
+                self.assertNotIn(K_META, str(caught.exception) + repr(caught.exception.details))
+                self.assertEqual(transport.requests, [])
 
 
 class StreamingModeTests(unittest.TestCase):
@@ -376,17 +409,25 @@ class UnsendableKeyTests(unittest.TestCase):
         self.assertEqual(provider_key_header(gateway.requests[0]), key)
 
     def test_a_meta_key_from_a_mixed_list_reaches_meta_unchanged_in_direct(self) -> None:
-        # Table F: the gateway does not serve meta, so a Muse call is DIRECT; the LLM| key's pipes are printable ASCII and reach Meta as the bearer token.
+        # Table F, meta-muse-managed-text INV-11: in DIRECT a Muse call
+        # goes straight to Meta, as at base_commit; the LLM| key's
+        # pipes are printable ASCII and reach Meta as the bearer token.
+        # Since r4 (AC-16 (iii), FR-9) the LLM_ shape does the same,
+        # to chat/completions, with no gateway call.
         from vidbyte.lib.config import TextModelMode
 
-        vendor = ScriptedGateway(provider_answer(ModelProvider.META))
-        with patch.dict(os.environ, {}, clear=True):
-            TextModelRunner(TextModelConfig(provider="meta", model="muse-spark-1.1", api_keys=[K_ANTHROPIC, K_META], mode=TextModelMode.DIRECT), transport=vendor).run("Hi")
-        [sent] = vendor.requests
-        self.assertTrue(str(sent["url"]).startswith("https://api.meta.ai/v1/"), sent["url"])
-        self.assertEqual(header(sent, "authorization"), f"Bearer {K_META}")
-        # The Anthropic key in the same list never leaves for Meta.
-        self.assertNotIn(K_ANTHROPIC, flat(sent))
+        for shape, meta_key in (("LLM|", K_META), ("LLM_", K_META_DOC)):
+            with self.subTest(shape=shape):
+                vendor = ScriptedGateway(provider_answer(ModelProvider.META))
+                with patch.dict(os.environ, {}, clear=True):
+                    TextModelRunner(TextModelConfig(provider="meta", model="muse-spark-1.1", api_keys=[K_ANTHROPIC, meta_key], mode=TextModelMode.DIRECT), transport=vendor).run("Hi")
+                [sent] = vendor.requests
+                self.assertTrue(str(sent["url"]).startswith("https://api.meta.ai/v1/"), sent["url"])
+                self.assertEqual(sent["url"], "https://api.meta.ai/v1/chat/completions")
+                self.assertEqual(header(sent, "authorization"), f"Bearer {meta_key}")
+                # The Anthropic key in the same list never leaves for
+                # Meta.
+                self.assertNotIn(K_ANTHROPIC, flat(sent))
 
 
 if __name__ == "__main__":

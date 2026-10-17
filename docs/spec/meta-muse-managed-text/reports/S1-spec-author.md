@@ -1,0 +1,207 @@
+# S1 spec author report: meta-muse-managed-text
+
+- **Stage:** S1 spec author, revision r1
+- **Worktree:** `C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-meta-muse-managed-text`
+- **Branch:** `feat/meta-muse-managed-text`
+- **Commit:** `8ec7dda6 docs(spec): add meta-muse-managed-text spec r1`. It contains only `docs/spec/meta-muse-managed-text/spec.md`. Its parent is `75761b81`, and the code is identical to `845a4d9b`.
+- **Files created:** 2, `spec.md` (committed) and this report (left uncommitted for the orchestrator). No production code, test, stub, or prototype was written in the worktree.
+
+## What I read
+
+- **Rules:**
+  - `AGENTS.md`, in full.
+  - `vidbyte/lib/README.md` and `vidbyte/lib/registries/README.md`.
+  - The `jev.py`, `text.py`, and test-pack headers (COMMON MODIFICATION PATTERNS, WHAT NOT TO DO, ROLE IN CODEBASE).
+  - Field guide: comment-format, local-ci-verification, provider-api-contracts, review-scope, operation-pricebook-rates, blocking-lint-invariants, strict-config-dataclasses, declarative-config-resolution.
+  - `vidbyte-gates.md`.
+- **Allowed docs:**
+  - `request.md`, `context/code-map.md`, `context/wire-contract.md`, and `reports/S0-scout.md`.
+  - The byok spec: the gateway-served providers, mode resolution (table R), relay, table G, EC-15, M-12, and D-11.
+  - The Run A spec (§9.2-9.4; §15 A-3, A-7, Q-1, Q-4; EC-24, EC-27, EC-29, EC-30) and its PR-body sections, read-only from the Run A worktree.
+- **Production code, read and traced end to end:**
+  - `vidbyte/lib/constants/jev.py`
+  - `vidbyte/lib/dataclasses/model_configs.py`
+  - `vidbyte/lib/registries/{provider_keys,models,pricing}.py`
+  - `vidbyte/lib/runners/{text,streaming_text,types}.py`
+  - `vidbyte/lib/http/vidbyte_gateway.py`
+  - `vidbyte/providers/compatible.py`
+  - `vidbyte/agents/{base,fallback,runtime}.py`
+  - `vidbyte/lib/dataclasses/agents.py`
+  - Plus the META rows of `constants/runners.py`, `configs/structured_output.py`, and `enums/model_provider.py`.
+- **Tests (facts only, for §13):** every module that names served providers or META in `tests/features/sdk_managed_text/` and `tests/features/sdk_provider_keys/`.
+- **First-party Meta docs:** fetched 2026-10-16 as Markdown from `https://dev.meta.ai/docs/<page>.md`. Pages: `protocols/chat-completions`, `reasoning`, `api-reference/chat-completions/schemas`, `models`, `quickstart`, `pricing-rate-limits`, `error-handling`. No secondary site was used.
+
+## How the design was verified (independent of my reading)
+
+All of the following were scratchpad-only and never committed. They live under `C:/Users/422mi/AppData/Local/Temp/claude/C--Users-422mi-vidbyte-repos/974874d5-52be-49ef-bbf6-f27795eaf01b/scratchpad/`.
+
+1. **Baseline at `845a4d9b`:**
+   - Area run: `168 passed in 2.00s`.
+   - `py -3.11 scripts/run_ci.py` (PYTHONPATH unset): `SDK-LINT: PASS`; pytest `1 failed, 6245 passed, 16 skipped`. The failure is the known harness_threads `148 == 120` test.
+   - `--stage package`: `CI passed.`
+   - The MCP stdio flake passed 3 of 3 times.
+2. **`probe_meta_gateway.py`:** widens `VIDBYTE_MANAGED_TEXT_PROVIDERS` with META in memory only, then drives the unchanged runner, adapter, and transport with the packs' own fakes. Results:
+   - **AUTO relay from a mixed list:** one gateway POST, 4 headers, the relay header equal to the Meta key, the Anthropic key absent. Envelope `{"provider":"meta","model":"muse-spark-1.1","body":{"max_tokens":32768,...}}`, timeout 630.
+   - **AUTO paid:** 3 headers.
+   - **Environment relay with cap 100:** `max_tokens` 100.
+   - **VIDBYTE_MANAGED:** no relay header.
+   - **DIRECT:** unchanged, to `api.meta.ai`, with no `max_tokens` and timeout 60.
+   - **422:** 1 attempt.
+   - **Paid 502:** 3 attempts, with waits of 0.5 s and 1.0 s.
+   - **Messages:** M-12 now lists meta, and M-18 offers "Vidbyte's own meta account".
+
+   This is the evidence for D-1, "the constant is the only gate".
+3. **`probe_plugin/widen_meta_probe.py`:** a pytest plugin that widens the set in memory, run over the whole suite: `3 failed, 6243 passed, 16 skipped`. The failures are exactly the two by-design gateway-refusal tests (named in §13) plus the pre-existing harness test. No other test depends on meta being refused.
+
+## Approaches weighed
+
+- **Chosen (D-1, D-2):** add `ModelProvider.META` to the set. Keep `max_tokens`. Update two README bullets and the comment above the set. S2 extends the pack tables.
+- **Smaller, rejected:**
+  - *No SDK change; developers use DIRECT.* This fails FR-1 and G-3, because Muse traffic keeps skipping the fee.
+  - *The constant alone, with no docs.* This fails FR-7, because `jev.py:6` requires the README managed-mode section to change together with the set.
+- **Larger, rejected:**
+  - *A per-provider gateway capability table* (cap field, served models, default cap). No second provider-specific rule exists to justify it. It is D-1's runner-up, with an explicit flip condition.
+  - *An SDK allowlist of served Muse ids* (D-4, Q-2). It would drift from the backend pin, and no served provider has one.
+  - *`MetaProvider` emits `max_completion_tokens`* (D-2's runner-up). This is Run A's recommendation; see the disagreement below.
+- **Budget:** 0 new files, classes, dependencies, config keys, tables, or endpoints. The production diff is about 5 lines in one file, plus 2 README bullets.
+
+## Where I disagree with the request, the scout, or Run A (with evidence)
+
+1. **Run A and wire contract §9.2 say Run B should send the cap as `max_completion_tokens`, because whether `max_tokens` counts reasoning is unverified (A-3).** Meta's own pages settle A-3:
+   - `reasoning`: "`max_tokens` (Chat Completions) and `max_output_tokens` (Responses API) cap reasoning tokens plus visible output tokens combined".
+   - `protocols/chat-completions`: "The deprecated alias `max_tokens` is still accepted."
+
+   So `max_tokens` bounds exactly what `max_completion_tokens` bounds. Switching fields would change DIRECT bodies, or make the adapter mode-aware, for no admission or hold benefit. It would also contradict `test_managed_text_wire_contract.py:130` (no managed body carries `max_completion_tokens`) and the README's chat-dialect guidance. The spec keeps `max_tokens` (D-2) and states the flip if Meta drops the alias (A-4).
+2. **The request and wire contract premise that every meta gateway call "answers `output_cap_missing`" unless Run B adds a cap is wrong for SDK traffic.** `TextModelRunner.__init__` (`text.py:57-62`) already pins 32,768 for every gateway mode, so `MetaProvider` already writes `max_tokens`. The probe confirmed it. The scout said the same, and I agree with the scout.
+3. **The request hint to model the change on Kimi and DeepSeek.** Only Kimi has the same shape: `MetaProvider` and `KimiProvider` are bare subclasses, while DeepSeek overrides `_extract_chat_text`. The spec names Kimi as the sibling. This agrees with the scout.
+4. **The scout's open question about whether a model or endpoint map, a request builder, a cap rule, or an export must change.** None must. The probe and the full-suite plugin run prove it beyond the scout's reading.
+5. **The scout listed `docs/spec/managed-generative-models/spec.md` among the code headers' citations.** It was not named for reading, so I did not read it.
+6. **`vidbyte-gates.md:28` says the lint final line is `AGENT-LINT: PASS`.** In this repo it is `SDK-LINT: PASS` (observed). §11 records the observed line.
+7. **The scout listed pytest versions, `testpaths`, Meta's `metadata` acceptance, and Muse's output maximum as unverified.** The first three are now verified (`pyproject.toml:48-49, :78-79`; Meta's schemas page lists `metadata`). The output maximum for `muse-spark-1.1` stays unverified (A-2).
+
+## Deviations and environment notes
+
+- **Semgrep fails locally at import:** `ModuleNotFoundError: No module named 'mcp.server.fastmcp'`, mcp 2.x. It is not part of `run_ci.py`. I installed nothing. §11 records it as remote-only.
+- **The scratchpad held Meta doc files from an earlier S1 attempt** (21:58). Every quote in the spec comes from my fresh downloads at 22:34.
+- **The Stage E fact check corrected the draft before commit:**
+  - Two signatures in §8.5: `TextModelRunner` has `provider`/`model` keywords, and `Agent` is the `BaseAgent` alias with no `**options`.
+  - A `create_runner` mention, which does not exist.
+  - An M-15 label.
+  - Three wire-contract overstatements: a hold sized from "the larger value", the claim that "the backend never logs the header", and "idempotency scoped per API key".
+  - A PR #1147 reference taken from memory, not from the repo.
+
+## Stage E self-check
+
+- **FR → INV/AC:** every FR maps. FR-1 → INV-1, AC-1, AC-10; FR-2 → INV-2, AC-2; FR-3 → INV-3, AC-3, AC-4; FR-4 → INV-5, AC-5; FR-5 → AC-7; FR-6 → INV-10, AC-10; FR-7 → AC-13; FR-8 → AC-15.
+- **AC → W:** every AC maps. W-1 covers AC-1..12 and AC-14, W-2 covers AC-13, and W-4 covers AC-15.
+- **Edge cases:** EC-1..EC-15 are each guarded by an INV or D, or accepted as a named limitation.
+- **Threats:** T-1..T-4 each name a control and where it sits.
+- **Contract names:** the §4, §8.5, and §12.3 names match: `VIDBYTE_MANAGED_TEXT_PROVIDERS`, `ModelProvider.META`, `TextModelConfig`, `TextModelMode`, `TextModelRunner`, `Agent`/`BaseAgent` keywords, `.text`, and `.content`.
+- **Budget:** 0 new files, matching §8.4.
+- **Weighted words:** each one in request.md §D maps to an INV, NFR, or AC (INV-1, INV-4, INV-9, INV-15, NFR-1..3, AC-1..4, AC-15).
+- **Commands:** the §11 commands were run on this machine, and their final lines are quoted.
+- **Template:** the headings diff against `spec-template.md` is empty. The only extra frontmatter key is the requested `wire_contract`.
+- **Tests:** none in the spec.
+- **Key literals:** no key-shaped literal (grep for `LLM|<digits>|…`, `vb_live_…`, `sk-ant-…`: none).
+
+## Assumptions I am least sure of
+
+1. **A-2:** that `muse-spark-1.1`'s configured maximum output is at least 32,768. Meta publishes `output 131072` only for 1.3 and a 1,048,576-token shared context for all three versions. If this is wrong, every capless meta gateway call gets Meta's 400, and the relay wording then wrongly hints at a bad key (EC-3).
+2. **EC-5:** how the gateway sizes its hold when both `max_tokens` and `max_completion_tokens` are present, and how Meta treats both. Neither is documented. It is reachable only through `extra_body`.
+3. **A-5:** that the gateway relays Meta's 2xx JSON unchanged, so the existing parser reads it. This is stated by the wire contract but untested against a live #710 deployment.
+
+## Notes for Run A (backend), not blocking here
+
+- The missing-key 502 `subtitle` never reaches SDK users (Q-1, default no). The PR body's deploy order is the mitigation.
+- The `-contributor` ids under Vidbyte's key are Run A's Q-4 (Q-3 here, default no).
+- Run A's A-3 is answered by Meta's `reasoning` page (quoted above). Run A may close it.
+
+## Revision r2 (review round 1, 2026-10-17)
+
+- **Commit:** `4046e75c docs(spec): revise meta-muse-managed-text spec r2 (review round 1: R-1..R-6)`, spec only.
+- **Triage:** all six findings were accepted, after I re-verified each one's evidence against the code. None was rejected. The design, the budget (0 new files), and the IDs are unchanged, and the only new IDs are EC-16 and Q-6.
+- **Independent checks I ran before accepting:**
+  - **R-1:** I re-ran the reviewer's `s1_grader_probe.py` myself. At base it sent 2 `anthropic` requests. Widened, it also sent 1 `meta` request that relayed `META_API_KEY` with `max_tokens` 32,768. I also read `resolve_active` and `_resolve_from_environment` (`models.py:274-279`, `:418-428`); the grader at `:61`, `:87`, `:93`, `:121`; `aggregation.py:97`, `:129`; `ContextMinimalFanoutSettings.return_exceptions` (`types.py:486`); and the fork and handoff pass-through (`fork.py:68`, `handoff.py:68`, `provider_keys.py:124-135`).
+  - **R-2:** `base.py:317-321` (`max_tokens` is the loop budget) and `:1662` (only `timeout_seconds` reaches the runner).
+  - **R-3:** `CONTRIBUTING.md:75-83` and `.github/pull_request_template.md`.
+  - **R-4:** `README.md:290-297`. A grep of the tests that read `README.md` found none that binds the Prefixes bullet.
+  - **R-5:** found the log seam (`test_provider_keys_security.py:106-121`). No trace seam exists, so the INV-9 trace clause is handed to byok INV-22 instead of being claimed.
+  - **R-6:** checked read-only in the Run A worktree that `c395349bd` is on `origin/feat/meta-muse-gateway` and that spec §9.2-9.4 are identical through `da96273c0`.
+- **Coordinator's cap confirmation:** INV-5 and D-3 now cite `VIDBYTE_MANAGED_DEFAULT_MAX_OUTPUT_TOKENS` at `jev.py:84`, applied by `text.py:57-62`. D-2 quotes https://dev.meta.ai/docs/reasoning ("cap reasoning tokens plus visible output tokens combined"), which I re-checked against the saved page (reasoning.md:390).
+- **One propagation beyond the review:** INV-3 said `VIDBYTE_MANAGED` "never reads `META_API_KEY`". EC-16 shows the grader reads it to choose members, so INV-3 is now scoped to the call's credential resolution. Otherwise a test author could write a test that fails on correct code.
+- **Assumption still least sure of:** A-2, the output limit for `muse-spark-1.1`. It now has a named pre-merge check, but only the user or ops can run it: it needs real keys and a deployed #710.
+
+## Revision r3 (review round 2, final, 2026-10-17)
+
+- **Commit:** `d4c8a7d7 docs(spec): revise meta-muse-managed-text spec r3 (review round 2: R-1..R-5)`, spec only. Frontmatter is `status: approved`, `revision: 3`.
+- **Triage:** all five findings were accepted, and all five changes are text only. I disputed none, so no new Q-n was needed. The design (one constant), the budget (0 new files), and every ID are unchanged, and no new ID was added.
+- **Independent checks before accepting:**
+  - **R-1:** `.github/workflows/publish.yml` is a manual `workflow_dispatch` that validates the tag, so merging and releasing are separate events. I found no evidence against the stricter list, so the backend key is a merge gate. One canonical sentence appears verbatim 7 times: TL;DR, §2, §9.4, FR-8, AC-15, §12.5, and A-3. It keeps "merges only after cerredz/Vidbyte#710 is deployed" first.
+  - **R-2:** I read the critic try and except (`independent_critic.py:79-85`, `:211`), the judge preflight and failure policy (`prosecutor_defender_judge.py:250`, `:457-466`, `:494-496`, `:539-541`), and the brief writer's `except VidbyteSdkError` (`writer.py:146`, `:160`; `JevRunBriefWriter(BaseAgent)`). I confirmed the grader runs a full agent loop per trial (`:96`). I re-ran `s1r2_critic_probe.py`: base sent 1 `anthropic` request with `review_failed`; widened added 4 `meta` relays, and the result was still `review_failed`. So a user can be billed for a member whose result is not used, and EC-16 now says so.
+  - **R-3:** confirmed that the relayed 400 withholds Meta's message (`vidbyte_gateway.py:100-104`). The two-call design isolates the cap with the control call (`max_output_tokens=1024`), so the verdict does not depend on message text.
+  - **R-4:** `CONTRIBUTING.md:72`.
+  - **R-5:** `models.py:172-194` handles the Vidbyte prefix and the sendable pattern. The 512-character limit lives in `TextModelConfig.credentials`, not in `find_provider_api_key`, and INV-4 cites both.
+- **Self-check:** the headings match the template, no key-shaped literals appear, and no stale wording remains. The leftover hits for "before any SDK release" and "merges only after" are A-3's description of Run A's A-7, a source quote, and a §16 quote.
+- **Still least sure of:** A-2. Its check is now executable and has an unambiguous verdict, but only the user or ops can run it.
+
+## r4 addendum
+
+A fresh S1 author wrote this revision on 2026-10-17, working in Revision mode from `review.md` (S4, NEEDS REWORK). The r1-r3 author is gone. Only `spec.md` and this report changed.
+
+### What I read
+- In full: house-style.md, spec-template.md, `review.md`, `request.md`, `spec.md` r3, `vidbyte/lib/registries/provider_keys.py` (313 lines), and `vidbyte/lib/registries/README.md` (78 lines).
+- In part: `AGENTS.md`; the S4 verifier report (§2, R-1 evidence and collision check); `pipeline.md` (decisions and niche facts); `context/wire-contract.md:1-20`; field-guide `init.md`, `comment-format.md`, and `provider-api-contracts.md`.
+- Code and test locations, each opened before I cited it:
+  - `jev.py:72-87`, `:101`, `:107-120`;
+  - `model_configs.py:88-100`, where matching runs in every mode, so INV-16 holds for `DIRECT` too;
+  - `dispatcher.py:55-83`, `:118-124`;
+  - `README.md:284-300`;
+  - `test_provider_keys_contract.py:1-12`, `:55-77`;
+  - `test_provider_keys_matching.py:134-188`, `:258-275`;
+  - `provider_keys_fixtures.py:9`, `:38-41`, `:168-174`;
+  - `test_provider_keys_property.py:1-10`, `:45-59`;
+  - `test_managed_text_acceptance.py:52-53`, `:64-72`, `:195-248`;
+  - `test_provider_keys_agents.py:425-495`;
+  - `test_provider_keys_failures.py:204-212`;
+  - `FEATURE.md:66-72`;
+  - `lint/ruff.toml`.
+
+### Independent checks
+- **Meta's pages, fetched with curl on 2026-10-17 at 12:20 UTC** into the scratchpad `s1r4_meta/`, both HTTP 200:
+  - `authentication.md:13`: "API keys start with `LLM_`, followed by a numeric ID and the secret, separated by underscores". The example has a 16-digit ID and an elided secret: three characters, five dots, three characters.
+  - `error-handling.md:70`, `:509`, and `:511` give the `LLM_{numeric_id}_{secret}` format.
+  - `grep -c 'LLM|'` returns 0 on both pages.
+- **Matcher behavior, my own in-memory script** `s1r4_meta/s1r4_shape_check.py`. It monkeypatches `KEY_FORMATS` only, builds keys by concatenation, and prints no key.
+  - At HEAD: `provider_of(LLM_)` is `None`, and eight providers accept the key unproven. `[ANT, LLM_]` with a meta primary gives M-6. With an anthropic primary plus kimi, the result is `{'anthropic', 'kimi': LLM_}`, so kimi gets the Meta key.
+  - Widened: `provider_of` gives META for both shapes, and no provider accepts any malformed `LLM_` key (word ID, dotted secret, no secret, empty secret). Kimi gets `None`. A lone `LLM_` key for a deepseek or kimi primary gives M-18.
+  - Collisions: no other prefix starts with `LLM`, and no other row fully matches either shape.
+- **Counts:** the tests make 65 references to `LLM|` fakes across 11 files (`git grep -c`, matching review.md). Outside `docs/` and `tests/`, only `README.md:292` and `provider_keys.py:7`, `:53`, and `:55` name a Meta key shape (`git grep`). No map, `llms.txt`, or skill needs an edit.
+- **Spec integrity:** my scratchpad `s1r4_meta/table_check.py` counts the cells in every table row, ignoring pipes inside code spans, and found every row consistent after one fix. The canonical merge sentence appears exactly 7 times. The regex text is byte-identical in §8.5, §12.3 row 4, and review.md. No key-shaped literal appears (`grep -E 'LLM[_|][0-9]{4,}'` finds nothing).
+
+### Triage (all recorded in §16)
+- **R-1 Blocker: accepted.** New IDs: D-8, D-9, FR-9, INV-16, INV-17, AC-16, AC-17, AC-18, EC-17, EC-18, EC-19, A-6, A-7, Q-7, NG-11, NG-12, W-5, and §12.3 rows 4 and 5. The change propagated through §1, §2, §4, §5, AC-1, AC-13, FR-7, D-1, D-7, EC-8, EC-10, §8.2, §8.3, §8.4, §8.5, §9.2, §9.4, T-1, §11, §12.1, §12.2, §12.4, §12.5, §12.6, §13, and §14.
+- **R-4: accepted.** The sentence now ends "after the pre-merge live check described in this PR has passed", in all 7 places.
+- **R-5: accepted.** INV-5, D-3, §8.4, and §9.3 cite the constants by name. `META_API_KEY` is the `ModelProvider.META` entry of `PROVIDER_API_KEY_ENV_VARS`, not a constant of its own.
+- **R-9: accepted.** Multi-agent team workers were added to EC-16, §9.4, and the PR disclosure.
+- **R-10: accepted.** The live check gains call (d), in `VIDBYTE_MANAGED`, beside R-1's call (c) through `api_keys`.
+- **R-11: recorded** in §9.2 and NG-1. `wire-contract.md` is untouched.
+- **R-2, R-3, R-6, R-7, R-8:** recorded as §13 facts. R-3 is closed by AC-17 (i). R-8 stays a follow-up.
+
+### Decisions I made, with reasons
+- **D-8: one Meta row with both prefixes and a two-branch pattern** (review.md's regex). It follows the Gemini and OpenAI rows. Runner-up: drop `LLM|`, which waits on Q-7 (default no). A second Meta row was rejected in §8.3.
+- **D-9: keep the secret class `[A-Za-z0-9_-]+`, not `[!-~]+`.** Three reasons decided it:
+  - the registries README already makes this choice when a vendor does not show its secret characters (the meta row `:55` and the gemini row `:54`);
+  - an existing test pins a dotted `LLM|` secret as unproven (`test_provider_keys_matching.py:160`), so one class for both branches keeps the rule coherent;
+  - the residual risk is fail-closed (M-6, nothing sent, and `META_API_KEY` still works), and it is caught before merge by live-check call (c). That is why A-6 exists.
+
+  The loose class would have been safer for the must-have, but it would have broken with the repo's established convention. The merge gate makes the strict choice cost nothing to users. D-9's flip: call (c) is refused while call (b) returns.
+- **The §4 snippet** keeps reading keys from the environment, so AC-1 stays literally runnable. Its comment shows both shapes as concatenations of placeholders. AC-1's Given now runs `META_API_KEY` in both shapes.
+- **INV-11 gained an r4 clause.** A documented-shape key in `api_keys` was refused in `DIRECT` at `base_commit`. It now reaches Meta, so "byte-identical to base_commit" applies only to keys that base accepted.
+
+### Budget
+New files: 0, equal to §12.3's count. Production files changed: 2 (`jev.py` and `provider_keys.py`), plus 2 docs (the root README and the registries README). No new class, constant, method, or row.
+
+### Least sure of
+- **A-6, the secret character set.** Only the live check can settle it.
+- **A-7, that no vendor issues `LLM_` keys.** This rests on the absence of evidence: the table A vendors have no sourced key format.
+- **The S2 grant.** Whether the r4 test delta fixes R-6 and R-7 is the orchestrator's call; §12.5 Follow-ups covers R-6 if it does not.

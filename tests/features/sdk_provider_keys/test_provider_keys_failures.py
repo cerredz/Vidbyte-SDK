@@ -1,12 +1,12 @@
 """FILE: tests/features/sdk_provider_keys/test_provider_keys_failures.py
 
 PURPOSE: Proves that every gateway failure is worded for the mode it ran in (section 9.2 table G): a Vidbyte-paid call keeps its remedies, a relay call never suggests adding a provider key it already sent and never blames a daily cap or Vidbyte's own account, a relayed provider 401/402/403 says the caller's own key was refused, and 413 and 422 name TextModelMode.DIRECT; and that no failure carries a key, a body, or a chained exception.
-ROLE IN CODEBASE: Failure layer of tests/features/sdk_provider_keys/ (spec AC-14, AC-15; INV-17; D-15; EC-24 to EC-27; FR-7). Exercises vidbyte/lib/http/vidbyte_gateway.py (_GatewayAnswer.failure_reason and gateway_reason) through TextModelRunner.
+ROLE IN CODEBASE: Failure layer of tests/features/sdk_provider_keys/ (spec AC-14, AC-15; INV-17; D-15; EC-24 to EC-27; FR-7; meta-muse-managed-text AC-7 to AC-9, INV-7, INV-8, EC-1, EC-2, EC-13, EC-15, FR-5). Exercises vidbyte/lib/http/vidbyte_gateway.py (_GatewayAnswer.failure_reason and gateway_reason) through TextModelRunner.
 ARCHITECTURE NOTE: The inner transport is scripted with gateway and provider bodies that carry BODY_CANARY and a key-shaped LEAKED_KEY (managed_text_fixtures); finding either, the Vidbyte key, or the relayed provider key in an error's message, details or formatted traceback means a leak. The retry wait is replaced at SLEEP_TARGET by BackoffRecorder.
-COMMON MODIFICATION PATTERNS: When table G gains a row, add its facts to PAID_FACTS and RELAY_FACTS from the spec's "Facts the tests bind" column, never from the current wording.
+COMMON MODIFICATION PATTERNS: When table G gains a row, add its facts to PAID_FACTS and RELAY_FACTS from the spec's "Facts the tests bind" column, never from the current wording. When the gateway serves a new provider, add its relay key to PROVIDER_KEYS.
 WHAT NOT TO DO IN THIS FILE: 1. Do not pin whole sentences; the wording is the implementer's and only the facts are bound. 2. Do not import TextModelMode.DIRECT at module level.
 KNOWN EDGE CASES: 409 and 502 are re-sent before they are raised, so they take three attempts. A relayed provider 401/402/403 cannot reach a Vidbyte-paid call (the backend remaps it), so it is tested in relay mode only.
-RELATED DOCS: tests/features/sdk_provider_keys/FEATURE.md; docs/spec/byok-api-keys/spec.md sections 6.1 (INV-17) and 9.2 (table G).
+RELATED DOCS: tests/features/sdk_provider_keys/FEATURE.md; docs/spec/byok-api-keys/spec.md sections 6.1 (INV-17) and 9.2 (table G); docs/spec/meta-muse-managed-text/spec.md sections 6.2, 6.3 and context/wire-contract.md (the 422 code and the missing-key 502 copy).
 TESTS: python -m pytest tests/features/sdk_provider_keys/test_provider_keys_failures.py
 """
 
@@ -29,15 +29,18 @@ from tests.features.sdk_managed_text.managed_text_fixtures import (
     ScriptedGateway,
     answer,
     gateway_error,
+    idempotency_key,
     relayed_provider_error,
 )
-from tests.features.sdk_provider_keys.provider_keys_fixtures import K_ANTHROPIC, K_GEMINI_AQ, K_OPENAI, K_XAI, provider_key_header
+from tests.features.sdk_provider_keys.provider_keys_fixtures import K_ANTHROPIC, K_GEMINI_AQ, K_META, K_OPENAI, K_XAI, provider_key_header
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ProviderRequestError
 from vidbyte.lib.http import HttpResponse
 from vidbyte.lib.runners import TextModelRunner
 
-PROVIDER_KEYS = {ModelProvider.OPENAI: K_OPENAI, ModelProvider.ANTHROPIC: K_ANTHROPIC, ModelProvider.XAI: K_XAI, ModelProvider.GEMINI: K_GEMINI_AQ}
+# The key each relay call sends; every value is also a secret that no
+# error may carry (meta joined in meta-muse-managed-text).
+PROVIDER_KEYS = {ModelProvider.OPENAI: K_OPENAI, ModelProvider.ANTHROPIC: K_ANTHROPIC, ModelProvider.XAI: K_XAI, ModelProvider.GEMINI: K_GEMINI_AQ, ModelProvider.META: K_META}
 STATUSES = (401, 402, 403, 409, 413, 422, 429, 500, 502, 503)
 RESENT = (409, 502)
 # Section 9.2 table G, "Facts the tests bind"; rows the table leaves unchanged keep the managed pack's facts (403, 409).
@@ -55,25 +58,48 @@ PAID_FACTS: dict[int, tuple[str, ...]] = {402: ("wallet", "provider key"), 429: 
 RELAY_FACTS: dict[int, tuple[str, ...]] = {402: ("wallet",), 429: ("quota",)}
 # What a relay message must not say, because the facts differ under relay (D-15).
 RELAY_FORBIDDEN: dict[int, tuple[str, ...]] = {402: ("provider key",), 429: ("daily",), 500: ("Vidbyte's own account",), 502: ("Vidbyte's own account",), 503: ("Vidbyte's own account",)}
+# Run A's answer for a Muse id outside the backend pin (wire contract
+# section 9.2), carrying the canary and a key-shaped string.
+META_UNSUPPORTED_MODEL = answer(422, {"error": True, "code": "model_gateway_unsupported_model", "message": f"{BODY_CANARY} model not served; Bearer {LEAKED_KEY}", "request_id": "req_1"})
+# Run A's Vidbyte-paid 502 while the backend holds no Meta key: the
+# missing-key copy, with the canary in the remedy the SDK must not echo
+# (Q-1 = No).
+META_MISSING_KEY = answer(
+    502,
+    {
+        "error": True,
+        "code": "model_gateway_upstream_failed",
+        "title": "Vidbyte-paid access not configured",
+        "subtitle": f"{BODY_CANARY} Send your own key for this provider in the X-Vidbyte-Provider-Key header, or use another provider; nothing was billed for this call.",
+        "description": f"Vidbyte has no key of its own configured for this model provider ({LEAKED_KEY}).",
+        "request_id": "req_1",
+    },
+)
 
 
 class GatewayCall:
     """One default-mode call to the gateway, Vidbyte-paid or relaying, with its scripted transport and recorded waits."""
 
-    def __init__(self, *steps: HttpResponse | BaseException, relay: bool, provider: ModelProvider = ModelProvider.OPENAI) -> None:
-        # Holds the script; relay decides whether the call carries the provider's key.
+    def __init__(self, *steps: HttpResponse | BaseException, relay: bool, provider: ModelProvider = ModelProvider.OPENAI, model: str | None = None, mode: Any = None) -> None:
+        # Holds the script; relay decides whether the call carries the
+        # provider's key; model and mode default to MANAGED_MODELS and
+        # AUTO.
         self.transport = ScriptedGateway(*steps)
         self.backoff = BackoffRecorder()
         self.relay = relay
         self.provider = provider
+        self.model = model or MANAGED_MODELS[provider]
+        self.mode = mode
 
     def run(self) -> Any:
         # Runs the call with a cleared environment and returns the response or the ProviderRequestError it raised.
         from vidbyte.lib.config import TextModelConfig
 
         options: dict[str, Any] = {"api_keys": [PROVIDER_KEYS[self.provider]]} if self.relay else {}
+        if self.mode is not None:
+            options["mode"] = self.mode
         with patch.dict(os.environ, {"VIDBYTE_API_KEY": VIDBYTE_KEY}, clear=True), patch(SLEEP_TARGET, new=self.backoff):
-            runner = TextModelRunner(TextModelConfig(provider=self.provider.value, model=MANAGED_MODELS[self.provider], **options), transport=self.transport)
+            runner = TextModelRunner(TextModelConfig(provider=self.provider.value, model=self.model, **options), transport=self.transport)
             try:
                 return runner.run("Hi")
             except ProviderRequestError as error:
@@ -196,6 +222,75 @@ class RelayedProviderRefusalTests(FailureAssertions):
         call = GatewayCall(dropped, relay=True)
         self.assert_credential_safe(call.run(), status=None, provider=ModelProvider.OPENAI)
         self.assertEqual(len(call.transport.requests), 1)
+
+
+class MetaGatewayFailureTests(FailureAssertions):
+    """meta-muse-managed-text AC-7 to AC-9, EC-1, EC-2, EC-13, EC-15: a meta gateway failure is worded from its status alone, as for every served provider."""
+
+    def test_a_muse_id_the_gateway_does_not_serve_is_sent_unchanged_once_and_gets_the_422_wording(self) -> None:
+        # AC-7, EC-1, EC-15, FR-5, D-4: no SDK-side model list; one
+        # POST, no re-send, and the 422 names the unmanaged model and
+        # TextModelMode.DIRECT.
+        from vidbyte.lib.config import TextModelMode
+
+        cases = (("muse-spark-1.3", True, None), ("muse-spark-1.2", False, None), ("muse-spark-1.3-contributor", False, TextModelMode.VIDBYTE_MANAGED))
+        for model, relay, mode in cases:
+            with self.subTest(model=model, relay=relay):
+                call = GatewayCall(META_UNSUPPORTED_MODEL, relay=relay, provider=ModelProvider.META, model=model, mode=mode)
+                message = self.assert_credential_safe(call.run(), status=422, provider=ModelProvider.META)
+                [sent] = call.transport.requests
+                self.assertEqual((sent["json_body"]["provider"], sent["json_body"]["model"], sent["json_body"]["body"]["model"]), ("meta", model, model))
+                self.assertEqual(provider_key_header(sent), K_META if relay else None)
+                self.assertRegex(message, re.compile("unmanaged or unpriced provider or model", re.IGNORECASE))
+                self.assertIn("TextModelMode.DIRECT", message)
+                self.assertNotIn("model_gateway_unsupported_model", message)
+                self.assertEqual(call.backoff.delays, [])
+
+    def test_a_meta_502_is_sent_three_times_with_one_key_and_worded_for_who_pays(self) -> None:
+        # AC-8, EC-2, INV-7, INV-8: the paid message blames Vidbyte's
+        # own account; the relay message does not; neither copies the
+        # missing-key remedy.
+        cases = (("paid", False, META_MISSING_KEY), ("relay", True, gateway_error(502)))
+        for label, relay, step in cases:
+            with self.subTest(call=label):
+                call = GatewayCall(step, relay=relay, provider=ModelProvider.META)
+                message = self.assert_credential_safe(call.run(), status=502, provider=ModelProvider.META)
+                self.assertEqual(len(call.transport.requests), 3)
+                self.assertEqual(call.backoff.delays, [0.5, 1.0])
+                first = call.transport.requests[0]
+                self.assertRegex(idempotency_key(first) or "", re.compile(r"[0-9a-f]{32}"))
+                for attempt in call.transport.requests:
+                    self.assertEqual(attempt["headers"], first["headers"])
+                    self.assertEqual(attempt["json_body"], first["json_body"])
+                    self.assertEqual(attempt["json_body"]["provider"], "meta")
+                    self.assertEqual(provider_key_header(attempt), K_META if relay else None)
+                self.assertRegex(message, re.compile("unavailable", re.IGNORECASE))
+                if relay:
+                    self.assertNotIn("vidbyte's own account", message.lower())
+                else:
+                    self.assertIn("unavailable or refused vidbyte's own account", message.lower())
+                self.assertNotIn("X-Vidbyte-Provider-Key header", message)
+                self.assertNotIn("not configured", message)
+
+    def test_a_relayed_meta_401_names_the_callers_own_meta_key_and_a_relayed_429_is_withheld(self) -> None:
+        # AC-9, EC-13: Meta's own {"error": {...}} body is read as a
+        # relayed provider status, never as the gateway's "error": true,
+        # and neither is re-sent.
+        cases = ((401, ("your own meta key",)), (429, ()))
+        for status, facts in cases:
+            with self.subTest(status=status):
+                call = GatewayCall(relayed_provider_error(ModelProvider.META, status), relay=True, provider=ModelProvider.META)
+                message = self.assert_credential_safe(call.run(), status=status, provider=ModelProvider.META)
+                self.assertEqual(provider_key_header(call.transport.requests[0]), K_META)
+                self.assertIn(str(status), message)
+                self.assertGreaterEqual(message.count("meta"), 2, "names meta as the answering provider, not only in the prefix")
+                for fact in facts:
+                    self.assertIn(fact, message.lower())
+                self.assertRegex(message, re.compile("withheld", re.IGNORECASE))
+                self.assertRegex(message, re.compile(r"(not|n't)\b[^.;]{0,20}bill", re.IGNORECASE))
+                self.assertNotRegex(message, re.compile("quota|daily|wallet", re.IGNORECASE))
+                self.assertEqual(len(call.transport.requests), 1)
+                self.assertEqual(call.backoff.delays, [])
 
 
 if __name__ == "__main__":

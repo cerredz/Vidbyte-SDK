@@ -1,12 +1,12 @@
 """FILE: tests/features/sdk_provider_keys/test_provider_keys_agents.py
 
 PURPOSE: Proves that agents match api_keys once, at the root, and that every call an agent makes carries only its own provider's matched key: list order changes nothing, a failed relay falls back with the backup's own key, a fallback or fork without a key goes Vidbyte-paid, every child carries the root's ProviderKeys and model_mode, an aggregate's spec-built models all need their keys, and image and audio models get their provider's matched key.
-ROLE IN CODEBASE: Agent layer of tests/features/sdk_provider_keys/ (spec AC-7, AC-16 to AC-18, AC-23, AC-25, AC-26, AC-31, AC-33, AC-34, AC-37, AC-38; INV-3, INV-15, INV-23, INV-24, INV-25; EC-11, EC-29, EC-47, EC-48, EC-57). Exercises vidbyte/agents/base.py, fallback.py, fork.py, aggregation.py, handoff.py, vidbyte/trace/continual, vidbyte/agents/jev and vidbyte/lib/runners/utility.py with real TextModelRunner instances.
+ROLE IN CODEBASE: Agent layer of tests/features/sdk_provider_keys/ (spec AC-7, AC-16 to AC-18, AC-23, AC-25, AC-26, AC-31, AC-33, AC-34, AC-37, AC-38; INV-3, INV-15, INV-23, INV-24, INV-25; EC-11, EC-29, EC-47, EC-48, EC-57; meta-muse-managed-text AC-11, EC-11, EC-16, INV-1, INV-4; r4 AC-17, EC-17, INV-16). Exercises vidbyte/agents/base.py, fallback.py, fork.py, aggregation.py, handoff.py, vidbyte/trace/continual, vidbyte/agents/jev and vidbyte/lib/runners/utility.py with real TextModelRunner instances.
 ARCHITECTURE NOTE: Agents build their own TextModelRunner, which looks HttpTransport up in vidbyte.lib.runners.text, so RUNNER_TRANSPORT_TARGET is replaced by a ScriptedGateway (ordered answers) or a ProviderRouter (answers by provider, for concurrent aggregate children). Nothing above the inner transport is faked.
 COMMON MODIFICATION PATTERNS: When a new agent-building surface appears, add it to the children test with the same "carries the root's record and mode" assertion. Keep each run's answers in the dialect of the provider that receives them (provider_keys_fixtures.done_answer).
 WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols (TextModelMode.DIRECT, ProviderKeys) at module level. 2. Do not bind a fake runner where the test is about which key a real request carries; use the transport seam. 3. Do not compare ProviderKeys records from differently ordered lists with ==; compare key_view, because the spec keeps first-appearance order.
 KNOWN EDGE CASES: A relayed provider 401 is a fallback error (DEFAULT_FALLBACK_ERRORS holds ProviderRequestError), so a ScriptedGateway whose first answer is a relayed 401 drives the chain to its backup. Aggregate proposers run concurrently, so their requests are checked per provider, never by position.
-RELATED DOCS: tests/features/sdk_provider_keys/FEATURE.md; docs/spec/byok-api-keys/spec.md sections 5, 6.1, 6.2, 8.1 (D-13, D-27, D-29) and 9.2.
+RELATED DOCS: tests/features/sdk_provider_keys/FEATURE.md; docs/spec/byok-api-keys/spec.md sections 5, 6.1, 6.2, 8.1 (D-13, D-27, D-29) and 9.2; docs/spec/meta-muse-managed-text/spec.md AC-11, EC-11, EC-16 and section 13 (composition seam).
 TESTS: python -m pytest tests/features/sdk_provider_keys/test_provider_keys_agents.py
 """
 
@@ -27,6 +27,9 @@ from tests.features.sdk_managed_text.managed_text_fixtures import (
 )
 from tests.features.sdk_provider_keys.provider_keys_fixtures import (
     K_ANTHROPIC,
+    K_META,
+    K_META_2,
+    K_META_DOC,
     K_OPENAI,
     K_SK_UNPROVEN,
     K_SK_UNPROVEN_2,
@@ -419,6 +422,107 @@ class AgentChildrenTests(unittest.TestCase):
         self.assertIsNone(provider_key_header(sent))
         self.assertNotIn(K_UNPROVEN, flat(sent))
         self.assertNotIn(K_OPENAI, flat(sent))
+
+
+class MetaAgentTests(unittest.TestCase):
+    """meta-muse-managed-text AC-11, EC-11, EC-16: agents whose primary, fork or member is a Muse model reach the gateway with only Meta's key."""
+
+    def test_a_relayed_meta_401_falls_back_to_anthropic_and_each_call_carries_only_its_own_providers_key(self) -> None:
+        # AC-11, INV-1, INV-4: at base_commit the Muse runner is refused
+        # before any request, so no meta call is made and no fallback
+        # runs.
+        gateway = ScriptedGateway(relayed_provider_error(ModelProvider.META, 401), anthropic_done("Claude says hi"))
+        with patch.dict(os.environ, {}, clear=True), patch(RUNNER_TRANSPORT_TARGET, new=gateway):
+            agent = Agent(name="muse", system_prompt="Answer in one word.", provider="meta", model_name="muse-spark-1.1", vidbyte_api_key=VIDBYTE_KEY, api_keys=[K_ANTHROPIC, K_META], fallback=["anthropic/claude-sonnet-5"])
+            reply = agent.run("Say hi.")
+        self.assertEqual(reply.content, "Claude says hi")
+        self.assertEqual([request["url"] for request in gateway.requests], [GATEWAY_URL, GATEWAY_URL])
+        self.assertEqual([request["json_body"]["provider"] for request in gateway.requests], ["meta", "anthropic"])
+        meta_call, anthropic_call = gateway.requests
+        self.assertEqual(meta_call["json_body"]["model"], "muse-spark-1.1")
+        self.assertEqual(meta_call["json_body"]["body"]["max_tokens"], 32768)
+        for request, own, other in ((meta_call, K_META, K_ANTHROPIC), (anthropic_call, K_ANTHROPIC, K_META)):
+            self.assertEqual(header(request, "authorization"), f"Bearer {VIDBYTE_KEY}")
+            self.assertEqual(provider_key_header(request), own)
+            self.assertNotIn(other, flat(request))
+
+    def test_a_fork_to_muse_relays_meta_api_key_or_goes_vidbyte_paid_and_never_carries_the_parents_anthropic_key(self) -> None:
+        # EC-11, INV-3, INV-4: the fork keeps the parent's matched
+        # record (no Meta key, no M-18 re-check), so META_API_KEY
+        # decides who pays.
+        from vidbyte.agents.fork import AgentForker
+
+        cases = (("META_API_KEY set", {"META_API_KEY": K_META_2}, K_META_2), ("no Meta key", {}, None))
+        for label, environment, relayed in cases:
+            with self.subTest(case=label):
+                gateway = ScriptedGateway(chat_done("Muse says hi"))
+                with patch.dict(os.environ, environment, clear=True), patch(RUNNER_TRANSPORT_TARGET, new=gateway):
+                    parent = Agent(name="writer", system_prompt="Write.", provider="anthropic", model_name="claude-sonnet-5", vidbyte_api_key=VIDBYTE_KEY, api_keys=[K_ANTHROPIC])
+                    fork = AgentForker.fork(parent, AgentForkSettings(provider="meta", model_name="muse-spark-1.1"))
+                    reply = fork.run("Say hi.")
+                self.assertEqual(reply.content, "Muse says hi")
+                self.assertEqual(fork.runner_config.api_keys, parent.runner_config.api_keys)
+                [sent] = gateway.requests
+                self.assertEqual((sent["url"], sent["json_body"]["provider"], sent["json_body"]["model"]), (GATEWAY_URL, "meta", "muse-spark-1.1"))
+                self.assertEqual(sent["json_body"]["body"]["max_tokens"], 32768)
+                self.assertEqual(header(sent, "authorization"), f"Bearer {VIDBYTE_KEY}")
+                self.assertEqual(provider_key_header(sent), relayed)
+                self.assertEqual(len(sent["headers"]), 4 if relayed else 3)
+                self.assertNotIn(K_ANTHROPIC, flat(sent))
+
+    def test_the_multi_provider_grader_adds_a_muse_member_that_relays_only_meta_api_key(self) -> None:
+        # EC-16 (accepted and disclosed; Q-6 = No): with provider_models
+        # unset, a set META_API_KEY makes meta a member, and each member
+        # relays only its own key.
+        from vidbyte.context.algorithms.multi_provider_agentic_grader import MultiProviderAgenticGraderAlgorithm
+        from vidbyte.context.algorithms.tool_results import ContextWindowAlgorithm
+
+        router = ProviderRouter({ModelProvider.ANTHROPIC: anthropic_done("Claude answer"), ModelProvider.META: chat_done("Muse answer")})
+        environment = {"VIDBYTE_API_KEY": VIDBYTE_KEY, "ANTHROPIC_API_KEY": K_ANTHROPIC, "META_API_KEY": K_META}
+        with patch.dict(os.environ, environment, clear=True), patch(RUNNER_TRANSPORT_TARGET, new=router):
+            algorithm = ContextWindowAlgorithm(name="multi_provider_agentic_grader", multi_provider_agentic_grader=MultiProviderAgenticGraderAlgorithm(grader_provider="anthropic", grader_model="claude-sonnet-5"))
+            agent = Agent(name="grader", system_prompt="Solve the task.", provider="anthropic", model_name="claude-sonnet-5", algorithm=algorithm)
+            message = agent.run("task")
+        # Count member runs, not requests: each member is an agent loop
+        # of one or more calls.
+        result = message.metadata["multi_provider_agentic_grader"]
+        self.assertEqual(set(result["candidates"]), {"anthropic", "meta"})
+        self.assertEqual(result["total_runs"], 2)
+        meta_calls = router.for_provider(ModelProvider.META)
+        self.assertTrue(meta_calls)
+        for request in meta_calls:
+            self.assertEqual(request["url"], GATEWAY_URL)
+            self.assertEqual(request["json_body"]["model"], "muse-spark-1.1")
+            self.assertEqual(request["json_body"]["body"]["max_tokens"], 32768)
+            self.assertEqual(provider_key_header(request), K_META)
+            self.assertNotIn(K_ANTHROPIC, flat(request))
+        for request in router.for_provider(ModelProvider.ANTHROPIC):
+            self.assertNotIn(K_META, flat(request))
+
+    def test_a_meta_key_in_either_shape_never_rides_on_a_kimi_fallback_that_holds_no_key_of_its_own(self) -> None:
+        # meta-muse-managed-text AC-17 (i), EC-17, INV-4, INV-16 (S4
+        # R-1, R-3): the kimi fallback has no key in the list and
+        # MOONSHOT_API_KEY is unset, so its call goes Vidbyte-paid.
+        # Before r4 an LLM_ key bound to kimi by elimination and rode
+        # on this call to Moonshot.
+        for shape, meta_key in (("LLM_", K_META_DOC), ("LLM|", K_META)):
+            for fallback in (["kimi/kimi-k2.7-code"], ["kimi/kimi-k2.7-code", "meta/muse-spark-1.1"]):
+                with self.subTest(shape=shape, meta_configured=len(fallback) == 2):
+                    gateway = ScriptedGateway(relayed_provider_error(ModelProvider.ANTHROPIC, 401), chat_done("Kimi says hi"))
+                    with patch.dict(os.environ, {}, clear=True), patch(RUNNER_TRANSPORT_TARGET, new=gateway):
+                        agent = Agent(name="writer", system_prompt="Answer in one word.", provider="anthropic", model_name="claude-sonnet-5", vidbyte_api_key=VIDBYTE_KEY, api_keys=[K_ANTHROPIC, meta_key], fallback=fallback)
+                        reply = agent.run("Say hi.")
+                    self.assertEqual(reply.content, "Kimi says hi")
+                    self.assertEqual([request["json_body"]["provider"] for request in gateway.requests], ["anthropic", "kimi"])
+                    anthropic_call, kimi_call = gateway.requests
+                    self.assertEqual(provider_key_header(anthropic_call), K_ANTHROPIC)
+                    # Vidbyte-paid: the base commit's three headers and
+                    # no relay header.
+                    self.assertIsNone(provider_key_header(kimi_call))
+                    self.assertEqual({name.lower() for name in kimi_call["headers"]}, {"authorization", "content-type", "idempotency-key"})
+                    self.assertEqual(header(kimi_call, "authorization"), f"Bearer {VIDBYTE_KEY}")
+                    for request in (anthropic_call, kimi_call):
+                        self.assertNotIn(meta_key, flat(request))
 
 
 class NonTextModelKeyTests(unittest.TestCase):
