@@ -1,15 +1,15 @@
 ---
 spec: infinite-memory-prompts
 title: Rewrite and expand the InfiniteMemoryAgent prompt family so every prompt reinforces the agent's intended behavior
-status: verified       # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
+status: pr-open       # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
 revision: 4
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-infinite-memory-prompts
 branch: feat/infinite-memory-prompts
 base_commit: 7efceb5504b0d2ac64a3b5874ada635a47ac35cf
 created: 2026-10-16
-updated: 2026-10-16
-pr: https://github.com/cerredz/Vidbyte-SDK/pull/1176    # filled at S3 (draft) and finalized at S6
+updated: 2026-10-17
+pr: https://github.com/cerredz/Vidbyte-SDK/pull/1176
 ---
 
 # Spec: Rewrite and expand the InfiniteMemoryAgent prompt family so every prompt reinforces the agent's intended behavior
@@ -123,6 +123,8 @@ flowchart TD
   A -->|memory tool + parameter descriptions in schema| G
   A -->|memory tool + drop_entry descriptions in schema| V
   B -->|launch_subagent tasks| L[launch.InfinitePair.run]
+  B -->|launch_subagent past max_depth or max_parallel| D[DelegationLimitsMiddleware]
+  D -->|refusal that names the cap, before the tool runs| B
   L -->|task_prompt formatted: goal, criteria, instructions, entries, paths, finished, quota| G[Generator agent]
   A -->|generator_system_prompt raw| G
   G -->|remember staged / write_note / edit_file| W[Workspace + journal]
@@ -134,13 +136,14 @@ flowchart TD
   W -->|entry_dropped_prompt + quota_line| V
   V -->|final reply, last VERDICT line parsed| L
   L -->|commit remaining staged entries, or drop all if unchecked| W
-  L -->|result_card formatted, each field capped| B
+  L -->|generator failed: no verifier runs, verdict unchecked| B
+  L -->|result_card formatted: summary, review, dropped and files capped, entry ids whole| B
   L -->|replayed_label + recorded card for a finished name| B
-  L -->|launch_rejected_prompt on batch refusal| B
+  L -->|launch_rejected_prompt on a batch-check refusal: names, tools, context ids, max_agents| B
   B -->|resume_prompt formatted: task, finished, interrupted| B2[Root on resume: agent.resume]
 ```
 
-The catalog is the only source: every asset reaches a model either as a raw system string (the three system prompts, `agent.py:72-75`, `launch.py` child construction), as a `str.format` rendering (the three briefings, the card, the replies, the quota line, the map header), or inside a tool schema (the 24 descriptions, `launch.py:86-115`, `memory.py`; every generator holds `launch_subagent` too, `launch.py:271`, so the launch schema rides in root and generator calls alike). A child's first message (the briefing) survives trimming and is re-sent on every call of that child (base INV-23). Validation of the batch happens before any pair runs (`launch_rejected_prompt`); the verdict is parsed only from the verifier's final reply, and staged entries commit only after it. The root re-reads the map item at the top of its context after every tool iteration (`runtime.py:104-110`); children get the map once at construction. On resume, the journal's finished and interrupted pair lists are rendered into `resume_prompt` and the root starts a fresh conversation (`agent.py:120`).
+The catalog is the only source: every asset reaches a model either as a raw system string (the three system prompts, `agent.py:72-75`, `launch.py` child construction), as a `str.format` rendering (the three briefings, the card, the replies, the quota line, the map header), or inside a tool schema (the 24 descriptions, `launch.py:86-115`, `memory.py`; every generator holds `launch_subagent` too, `launch.py:271`, so the launch schema rides in root and generator calls alike). A child's first message (the briefing) survives trimming and is re-sent on every call of that child (base INV-23). Validation of the batch happens before any pair runs (`launch_rejected_prompt`); the verdict is parsed only from the verifier's final reply, and staged entries commit only after it. The root re-reads the map item at the top of its context after every tool iteration (`runtime.py:104-110`); children get the map once at construction. On resume, the journal's finished and interrupted pair lists are rendered into `resume_prompt` and the root starts a fresh conversation (`agent.py:120`). Three paths the r1–r4 diagrams left out, corrected at S6 (S4 conformance notes; the code did not change): a generator whose status is failed gets no verifier, so its card comes back `unchecked` and every staged entry is dropped (`launch.py:231`, `:238`); the card's entry-id list is not capped, only the summary, the review and the joined dropped and files lists are (`launch.py:219`, `:243`, `:364-372`); and a call past `max_depth` or `max_parallel` is refused by `DelegationLimitsMiddleware` before the tool runs (`delegation_limits.py:54,66`), so `launch_rejected_prompt` carries only the tool's own batch checks: duplicate names, tools the parent does not hold, non-live context ids, and `max_agents` (`launch.py:156-180`).
 
 ```mermaid
 sequenceDiagram
@@ -154,12 +157,13 @@ sequenceDiagram
   G->>W: remember (staged) / write_note / edit_file
   W-->>G: remember_staged_prompt | note_saved_prompt | memory_rejected_prompt + quota_line
   G-->>L: final reply (summary)
+  Note over L,V: a generator whose status is failed gets no verifier, and its card comes back unchecked
   L->>V: verifier_task_prompt(instructions, goal, criteria, status, summary, staged, files, quota)
   V->>W: drop_entry / edit_file / write_note
   W-->>V: entry_dropped_prompt + quota_line
   V-->>L: review ending in VERDICT: passed | fixed | failed
   L->>W: commit staged entries (or drop all when unchecked)
-  L-->>R: result_card (capped fields), or replayed_label + recorded card
+  L-->>R: result_card (summary, review, dropped and files capped, entry ids whole), or replayed_label + recorded card
 ```
 
 ---
@@ -781,6 +785,7 @@ Each outline lists the rules the asset must state (as rules, not as the prose to
 | r3 | 2026-10-16 | S1 review round 2 — approved | Applied R-16…R-26 (2 Major, 9 Minor): outline 34 and INV-21 freed of the struck EC-14 prohibition; root outlines 1.6/1.8 reconciled with the `decision` kind and `:64` (reworded, not dropped); each root rule given one home; three matrix cells given rules (2.7, 1.8) and P6 × planning moved to §How the work flows; EC-1 names `map_header`; §7 table states SPARSE/FULL and the toolset tools; per-leaf sums everywhere; INV-15 is the single tested list, now with (e) no duplicate sentences in the seven; D-9 strips commas; D-7/§11 record the `prompt-families.md` override for the briefings; status set to approved (two review rounds complete) |
 | r4 | 2026-10-16 | S2 tests — spec defects found | Applied the S2-found defects per the orchestrator's 18:20 rulings (§16 S2-1…S2-4; no requirement added, no test changed): INV-15 (e) reads "sentences of five words or more", with AC-7, EC-11, A-7 and the §13 duplicate-sentence fact aligned (the four-word "A dash means none." label repeats by design); §8.5 (4) marks "uses no file quota" and "found with grep" keep (review), states what INV-17 tests, and outlines 39–40 match; card label count "six" → "seven" (§8.5 (4), outline 31); pre-existing pack count 111 → 113 in G-4, INV-21 and §11; §13 names `verifier_system_prompt` as sub-floor by tiktoken; status set to tests-written |
 | r4 | 2026-10-16 | S3 implement | Rows 1–43 implemented or verified in `32aae37e`…`ce4072cb` (draft PR #1176); the seven assets at 2,424 / 1,478 / 1,209 / 1,136 / 1,135 / 1,123 / 1,139 tiktoken; 23-description sums 4,586 est / 3,913 tik; no revision bump |
+| r4 | 2026-10-17 | S6 PR | finalized for review: status pr-open; PR body in `pr-body.md` (the seven at 2,470 / 1,490 / 1,216 / 1,142 / 1,160 / 1,151 / 1,123 tiktoken after S5 repairs R-1…R-28; 23-description sums 4,577 est / 3,905 tik); §5 diagrams and paragraph corrected to the code in three places the S4 conformance lens found (failed-generator branch, uncapped entry ids, depth and batch-size refusals from `DelegationLimitsMiddleware`), no behavior change; §6.2 AC-11/AC-12 proof cells keep their S3-time figures as history, the current figures are in `pr-body.md`; no revision bump |
 
 **Implementation deviations (S3, r4):**
 
