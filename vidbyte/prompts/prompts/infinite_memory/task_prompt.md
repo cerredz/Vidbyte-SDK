@@ -14,7 +14,7 @@ A verifier checks your work against each of these after you finish, so meet ever
 
 {criteria}
 
-The verifier is a fresh agent that reads your final answer as claims and checks each criterion with its own tools. For each one, your final answer must say whether it is met and where the evidence is: a file path and section, a source, or a check the verifier can repeat. Evidence that exists only in your conversation does not count, because the verifier never sees it. Criteria about where the output must be and what form it takes count as much as criteria about its content. When a criterion can be read more than one way, take the reading the goal supports and state it in your final answer, so the verifier judges against it. The task is done only when every criterion holds through your own work, not the verifier's fixes, and a criterion you could not meet is better reported plainly than left for the verifier to find.
+The verifier is a fresh agent that reads your final answer as claims and checks each criterion with its own tools. For each one, your final answer must say whether it is met and where the evidence is: a file path and section, a source, or a check the verifier can repeat. Evidence that exists only in your conversation does not count, because the verifier never sees it. Criteria about where the output must be and what form it takes count as much as criteria about its content. When a criterion can be read more than one way, take the reading the goal supports and state it in your final answer, so the verifier can test it. The task is done only when every criterion holds through your own work, not the verifier's fixes, and a criterion you could not meet is better reported plainly than left for the verifier to find.
 
 # Your instructions
 
