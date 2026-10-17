@@ -150,3 +150,41 @@ The S2 test author found two defects. Per the orchestrator this is a defect fix,
 **S2 notes**
 - I agree with them and pinned none. The open formats and accepted variants stay open.
 - One fact went into §13 Per-area config. The POSIX-only endless-printer test is skipped on Windows, so INV-6.4 is proven only by the Linux CI run.
+
+## Addendum: r5 (S4 amendment, status stays reviewed)
+
+The orchestrator routed three verified S4 findings that need spec text: R-3 (masking of unread batches), the advisory EC-8.8 from R-2, and R-16 (the two index files). R-23 is waived and only logged. §16 holds one S4 row each, and §17 holds the r5 row.
+
+**R-3, masking.**
+- INV-2.3 follows the verifier's "after" text. Three additions make it testable:
+  - the model turn is the last message whose role is `assistant` (OpenAI, Anthropic) or `model` (Gemini), and checking `assistant` alone is named as the Gemini hazard;
+  - a history with no model turn has every scoped output unread, which matches the verifier's plugin (`default=-1`);
+  - "every other older output" replaces "each older output" in the STRIP sentence.
+- AC-2.1's Given gains "one call per model turn". I gave AC-2.2 the same clause, because under the new INV its Then is true only for that turn shape. The existing test already uses one call per turn, so the test needs no change.
+- AC-2.5 is new (P0). Its second view follows a turn that calls **no scoped tool**. Without that qualifier "exactly the oldest 2" is false: a turn that makes another `read_lines` call masks 3 of the 5. The Proof cell is left for the test author.
+- EC-2.5 is new and names the failure: the input (a batch of more than 3), the state (counting by message order alone), and the wrong output (2 of 5 lost, and the same 2 lost again on a re-issue).
+- Propagated to the §5 diagram label and step 2, D-2, W-2.2, row 4 (rule, `@intent`, AC-2.5), and §13.
+- Left unchanged:
+  - EC-4.3, which names no count of masked outputs;
+  - §9, which has no masking algorithm;
+  - INV-2.1, INV-2.5, and INV-2.6, kept verbatim.
+- Verified in code:
+  - `engine.py` `_provider_to_context_message` takes `role` from the provider message as given;
+  - `runtime.py:1951-1952` appends one message per tool result;
+  - `windows.py:143-161` counts by order only;
+  - the existing `_mixed_history` ends with an assistant message, so `test_a_scope_compacts_only…` keeps its expectation.
+
+**R-2 / EC-8.8: INV-8.2 was extended, not just cited.**
+- INV-8.2's old guarantee was "no FTS5 syntax error". It covered the NUL case, whose "unterminated string" is an FTS5 syntax error, but not the `UnicodeEncodeError` of a lone surrogate.
+- New wording: a NUL reads as whitespace and a lone surrogate is removed before the split, so such a query returns a normal result. FR-8.6's blank check reads the query as given (as `search_memory.py:72-73` does today), so a query of NULs alone gets zero hits, not `invalid_argument`. I chose the normal-result outcome over the error the briefing allowed. It is the verifier's proven fix, and it keeps one deterministic outcome for the test author.
+- EC-8.8 is the verifier's line plus the query trigger. INV-8.5's exclusions gain such file names, so INV-8.5 and EC-8.8 no longer contradict each other. INV-8.8 stays verbatim.
+- Propagated to D-11 (quoting alone no longer "makes any query text safe"), T-1, row 20 (the checks sit in the tool, not `FullTextIndex`, per verifier §3), and §13.
+- On this machine, `sys.getfilesystemencoding()` / `getfilesystemencodeerrors()` give `utf-8` / `surrogatepass`. A file `caf\ud800.md` was created and listed, and the scratch file was removed. `'\ud800'.encode('utf-8', 'surrogateescape')` raises. `b'bad\xff'` decodes to `'bad\udcff'`. The Linux half is reasoned from these facts and was not run.
+
+**R-16, index files.**
+- New MODIFY rows 58 (`llms.txt:519`) and 59 (`artifacts/file_index.md:422`, a 90-column wrapped paragraph), both in P4, with the tool list in the order of `code_search/__init__.py`.
+- §12.5 is corrected; I grepped both files for every touched file name and found none. The "Nothing applies" line drops `llms.txt`.
+- §12.6 is updated. §8.4 is unchanged, because it counts new files only.
+- Not edited: `llms.txt:815`, a "Direct utilities and search" table that also omits the tool. The grant names only the two export lines.
+
+**Counts after r5:** 32 FR, 54 AC rows (53 plus AC-1), 55 EC, 74 INV. New IDs: AC-2.5, EC-2.5, EC-8.8, rows 58 and 59. Nothing was renumbered.
