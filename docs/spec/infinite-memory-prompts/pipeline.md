@@ -21,12 +21,12 @@ STACKED RUN. Base branch is `feat/infinite-memory-agent` (PR #1084), not `main`.
 | S2 tests | done (spec r4 committed a255373a) | 2026-10-16 17:50 | 2026-10-16 22:20 | reports/S2-test-author.md | test_infinite_memory_prompts.py: 17 tests / 131 cases; red 37 / green 94 at f4cad411; 113 pre-existing green; S2_HEAD = f4cad411 (test tree at b719c400); lint PASS |
 | S3 implement | done | 2026-10-16 22:30 | 2026-10-16 23:15 | reports/S3-implementer.md | S3_HEAD = c86005c2 (pushed); draft PR https://github.com/cerredz/Vidbyte-SDK/pull/1176 (base feat/infinite-memory-agent); 12 assets + README changed, rows 8–43 others verified unchanged; module 131/131, pack 244/244 |
 | S4 adversarial review | done | 2026-10-16 23:20 | 2026-10-17 03:40 | reports/S4-review-*.md, reports/S4-findings-verifier.md | review.md: 1 Blocker + 5 Major confirmed, 20 Minor |
-| S5 repair loop | done (1 iteration) | 2026-10-17 03:45 | 2026-10-17 04:00 | reports/S5-repair-1.md | converged at 3c07bb5c; verify-log.md iteration 1 |
-| S5 re-review | running (round 1/2) | 2026-10-17 04:05 | | | |
+| S5 repair loop | done (2 iterations) | 2026-10-17 03:45 | 2026-10-17 05:25 | reports/S5-repair-1.md, reports/S5-repair-2.md | converged at 5f41a5f4; verify-log.md iterations 1-2 |
+| S5 re-review | running (round 2/2) | 2026-10-17 04:05 | | reports/S5-rereview.md | round 1: 15/15 fixes confirmed, R-C101 → R-27 |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 (round 1: SOUND WITH FIXES, 0 Blocker / 8 Major / 7 Minor, all 15 applied in r2 at b32566fe; round 2: SOUND WITH FIXES, 0 Blocker / 2 Major / 9 Minor, reports/S1-spec-review-r2.md, applied in r3) · S5 repair iterations: 1/8 · S5 re-review rounds: 1/2
+- S1 review rounds: 2/2 (round 1: SOUND WITH FIXES, 0 Blocker / 8 Major / 7 Minor, all 15 applied in r2 at b32566fe; round 2: SOUND WITH FIXES, 0 Blocker / 2 Major / 9 Minor, reports/S1-spec-review-r2.md, applied in r3) · S5 repair iterations: 2/8 · S5 re-review rounds: 2/2
 
 ## Baseline measurements (orchestrator, before any change, at 7efceb55)
 Script: `C:/Users/422mi/AppData/Local/Temp/claude/C--Users-422mi-vidbyte-repos/7d03425b-8396-4738-89eb-c11a8a3fac1a/scratchpad/measure_tokens.py <worktree>` (chars/4 = `TokenEstimate.count` rule; tiktoken 0.12.0 cl100k_base importable in Python 3.11).
@@ -105,6 +105,8 @@ The folder holds 40 `.md` assets; `infinite_memory.json` top level is a dict wit
 
 - 2026-10-17 04:55 — **Scoped verifier: R-C101 CONFIRMED Major as R-27** (ran the real InfiniteWorkspace: the map cuts at 166–426 files depending on description length; in one 244-file run the root's own `plan.md` was not on the map). Fix: root:58 append ", as many as fit"; note_path:7 "lists every file by its path" → "lists files by their paths" (root 2,470 tik / 2,858 est; README:68 figures still hold; 23-sum 3,905 tik).
 - 2026-10-17 04:55 — **Orchestrator ruling — R-28 added to iteration 2 as a trivial Minor:** the scoped verifier showed (`scratchpad/s5-verifier-r27/plan_note_cut.py`) that a cut map can hide the plan note, and resume step 1 says "If you kept no plan note, write one now", so a resumed root on a large workspace can start a second plan note — against "supersede rather than duplicate" and "the workspace is the source of truth". Fix: tell the resumed root to search for its plan note before deciding it kept none, using a tool the root actually holds (verify in `vidbyte/lib/registries/infinite.py`). *Why:* a few words, true of the code, at the resume stage the user named; the final re-review checks it. Counts toward S5 iteration 2/8.
+
+- 2026-10-17 05:25 — **S5 iteration 2 converged** (fixed R-27 @fe04ab8c, R-28 @3825237d; verify-log at 5f41a5f4, pushed). Orchestrator's own gate run at 5f41a5f4 (`scratchpad/gates-s5-2/`): module 131; pack 244; `SDK-LINT: PASS`; semgrep 0; public-API current; source = only the 3 inherited harness_threads failures (`3 failed, 6174 passed, 16 skipped`); package `CI passed.`. Test diff vs f4cad411 empty. Tiktoken: root 2470, generator 1490, verifier 1216, task 1142, verifier_task 1160, resume 1151, launch 1123; 23-sum 3,905. Re-review round 2/2 (final) launched, scoped to fe04ab8c and 3825237d plus regressions since 689599d3.
 
 ## User replies (verbatim)
 - (none yet)
