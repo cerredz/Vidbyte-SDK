@@ -18,12 +18,12 @@ started: 2026-10-15 18:41
 | S2 tests | done | 2026-10-16 17:05 | 2026-10-16 18:00 | reports/S2-test-author.md | 46 tests in tests/features/onboard_model_provider_skill/ (5 files), red confirmed; S2_HEAD=8e9b8b7f |
 | S3 implement | done | 2026-10-16 18:10 | 2026-10-16 22:00 | reports/S3-implementer.md | S3_HEAD=32ca7991; draft PR https://github.com/cerredz/Vidbyte-SDK/pull/1175; 46/46 green; SDK-LINT PASS; source stage 1 failed (known-red harness test, proved on base + origin/main probes); package stage CI passed; budget 2 new + 1 mod / 2+1 |
 | S4 adversarial review | done | 2026-10-16 22:00 | 2026-10-16 23:10 | reports/S4-review-{conformance,conventions,engineering}.md, reports/S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; confirmed 3 Blockers / 5 Majors / 10 Minors; refuted 1, downgraded 1 |
-| S5 repair loop | pending | | | | |
+| S5 repair loop | in progress | 2026-10-17 02:50 | | reports/S5-repair-1.md | iter 1 DONE @39e37702 (+ verify-log 0ade6460): R-1, R-2, R-4…R-7 + 6 trivial Minors fixed, one commit each; spec r6; 46/46; SDK-LINT PASS; source 1 failed (known-red, red on detached origin/main 6f5a7310); package CI passed. R-3/R-8 → S2 author (grant) |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 · S5 repair iterations: 1/8 · S5 re-review rounds: 0/2
 
 ## Fixed values
 - REPO_ROOT `C:/Users/422mi/vidbyte-repos/vidbyte-sdk` (main checkout: never touched; has untracked files)
@@ -51,6 +51,7 @@ started: 2026-10-15 18:41
 - 2026-10-16 23:10 — S4 verifier: MERGEABLE AFTER FIXES — 3 Blockers (R-1, R-2, R-3), 5 Majors (R-4…R-8), 10 Minors; 1 refuted, 1 downgraded. Routing:
   - R-1, R-2, R-4, R-5, R-6, R-7 (skill text) + `trivial` Minors → S5 repair agent. The repair agent may amend ONLY the spec text those fixes cite (D-15/§11 for R-2, D-11/INV-9 for R-7, D-24 if R-V4 is taken), recorded as a §16/§17 r6 row, because the verifier tied each fix to its spec decision; it may not touch tests.
   - R-3 (Blocker: four S2 tests — S5, X8, X9, A5 — pass with the defect their test-plan row claims to catch) and R-8 (Major: unpinned C9 Bearer assertion, back-pressure union, "example key alone is not enough") are TEST changes. Granted to the S2 test author only (the one agent allowed to write tests; no other agent's test diff is accepted), AFTER the repair agent's text edits, so the new assertions pin the final wording. Grant is strengthen-only: add assertions/tests, never weaken or delete; each new assertion must be shown red on the matching mutation (s4ver/mut2.py, s4eng/mut.py) and green on the real files. Why grant: a test that cannot fail for the defect its test-plan row claims is a test contradicting its spec ID (AC/INV coverage claim) — the playbook's grant condition. The new S2 anchor SHA replaces S2_HEAD for later test-diff checks.
+- 2026-10-17 03:30 — S5 iteration 1 spot-checked: porcelain empty, `git diff 8e9b8b7f..HEAD -- tests` empty, verify-log `## Iteration 1` present, 0 unpushed commits, R-3/R-8 still open. Next: the S2 author (same agent, SendMessage) applies the R-3/R-8 strengthen-only grant against the final wording listed in reports/S5-repair-1.md "Not mine: R-3, R-8". Spec lines outside the repair grant (EC-40 vs D-15 exception, EC-52 same-clone case, EC-30 "no response example") go to the S1 spec author in Revision mode as a §16 row — text alignment only, not a review round. R-7 option (c) (`_CHAT_PROVIDERS`) not taken: the verifier rated it cosmetic and it would widen §12.3 C11. Follow-ups R-E5, R-E6, R-E7, R-E2f stay out of scope (listed in the PR body).
 
 ## User replies (verbatim)
 - 2026-10-15 21:32 — (relayed by the parent session; changes a settled decision) The user was asked how to schedule the 24/7 cloud routine and answered: "dont add as routine, just explain in system prompt, should be good enough for now", and "no cloud routine".
@@ -92,3 +93,6 @@ started: 2026-10-15 18:41
 - Title search for "provider" hits unrelated closed-unmerged PRs (#504, #697, #406); no `feat/provider-*` branch exists yet. Key provider-PR detection on the exact branch prefix, not titles. — *source:* S0 §4.1.12
 - `provider_keys.py` is 312 lines vs byok NFR-4 "under 300" (unenforced); each table F rule adds ~3-5 lines. — *source:* S0
 - Environment: Windows + Git Bash for this pipeline (heredocs collapse `\\`; CRLF); the routine runs on Linux. Known-red on pristine main: harness_threads `test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes` (148 != 120) and mcp stdio `test_cancelled_waiter_does_not_break_transport` (flaky). GitHub CI never attaches to PRs (0 checks); merges need `--admin` by the user. — *source:* orchestrator brief
+- Git for Windows ships GNU grep 3.0, which ABORTS (exit 134) on `grep -i -F` when LANG/LC_ALL are unset (the agent's Bash tool). `grep -i` without `-F`, and `git grep -i -F`, are fine. `id -un` prints `PC` here while paths hold `422mi`; the PR-body path guard now matches `/$(basename "$HOME")/` and the octal-backslash form `$(printf '\134%s\134' ...)`, with no `-i`. — *source:* S5 iter 1 (R-E8)
+- The known-red AssertionError line truncates path lists (`['vidbyte/lib...ed_output.py']`), so the A13 control-edit exclusion is bounded by the scoped-diff check (exactly `vidbyte/lib/configs/structured_output.py`), not by the error line. — *source:* S5 iter 1 (R-2)
+- Repair reproducers live in `<scratch>/s5r1/` (r2_exec.py, r5_exec.py, r6_exec.py, re8_exec.py); each reads its command from the skill file. `<scratch>/s4eng/real` and `s4ver/mut2.py` mutate a 32ca7991 copy: refresh it from the current skill files before reuse. — *source:* S5 iter 1
