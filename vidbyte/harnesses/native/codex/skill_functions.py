@@ -2,11 +2,11 @@
 
 PURPOSE: CodexSkillFunctions, the CodexHost collaborator behind the run wrappers: run_codex_goal starts a goal run and reads its stored goal back, and run_codex_skill and run_codex_openai_docs resolve a skill, start a turn whose input carries it as a first-class item, and read that input back; a run that cannot be confirmed is interrupted once and reported.
 ROLE IN CODEBASE: A host collaborator of vidbyte/harnesses/native/codex/; CodexHost builds it in _open() with itself as the host, and its three run methods guard, then delegate here.
-ARCHITECTURE NOTE: The wrappers compose CodexHost's own public functions through the CodexSkillHost Protocol defined here, so this module never imports host.py, at runtime or under TYPE_CHECKING, and no import cycle exists (D-2). Errors from a reused function keep that function's operation; only the errors a wrapper raises itself carry the wrapper's (D-3). The read-back bounds are imported by name and read as module globals at call time (section 13).
+ARCHITECTURE NOTE: The wrappers compose CodexHost's own public functions through the CodexSkillHost Protocol defined here, so this module never imports host.py, at runtime or under TYPE_CHECKING, and no import cycle exists (D-2). Every CodexAgentError that escapes a wrapper carries the wrapper's operation: one from a reused function is relabelled through CodexErrorMapper.relabel, which keeps every other field (hardening INV-31, D-22, superseding D-3). The read-back bounds are imported by name and read as module globals at call time (section 13).
 COMMON MODIFICATION PATTERNS: A new named skill wrapper is one host method that passes its skill name to run_skill; a new check on a started run reads the run back through CodexSkillHost and ends with the same single interrupt.
-KNOWN EDGE CASES: turn/start may return before Codex records the turn's input, so the read-back polls a bounded number of times, a fixed interval apart, under one deadline that never cuts a read in flight short (INV-34, EC-50). A cancelled or failed check still sends its one interrupt before the original exception propagates (INV-22, INV-35). An ephemeral thread keeps no history, so a skill run on one is refused before any request (INV-6).
-RELATED DOCS: docs/spec/codex-host-thread-helpers/spec.md (sections 6.1 INV-21 to INV-27, INV-34 and INV-35, 8.1 D-2, D-3, D-16 and D-17, and 9.2)
-TESTS: tests/features/codex_host/test_codex_host_goal_skills.py, tests/features/codex_host/test_codex_host_helper_lifecycle.py, tests/features/codex_host/test_codex_host_helper_surface.py
+KNOWN EDGE CASES: turn/start may return before Codex records the turn's input, so the read-back polls a bounded number of times, a fixed interval apart, under one deadline that never cuts a read in flight short (INV-34, EC-50). A cancelled or failed check still sends its one interrupt before the original exception propagates (INV-22, INV-35). An ephemeral thread keeps no history, so a skill run on one is refused before any request (INV-6). The skill is resolved in the folder the turn runs in: the turn's cwd, else the thread's (hardening INV-33).
+RELATED DOCS: docs/spec/codex-host-thread-helpers/spec.md (sections 6.1 INV-21 to INV-27, INV-34 and INV-35, 8.1 D-2, D-3, D-16 and D-17, and 9.2); docs/spec/codex-host-hardening/spec.md (sections 6.1 INV-31 and INV-33, and 8.1 D-22)
+TESTS: tests/features/codex_host/test_codex_host_goal_skills.py, tests/features/codex_host/test_codex_host_helper_lifecycle.py, tests/features/codex_host/test_codex_host_helper_surface.py, tests/features/codex_host/test_codex_host_resilience.py, tests/features/codex_host/test_codex_host_function_rows.py
 """
 
 from __future__ import annotations
@@ -70,7 +70,7 @@ class CodexSkillHost(Protocol):
 
     async def spawn_codex_thread(self, request: CodexSpawnRequest) -> CodexTurnHandle: ...
 
-    async def list_codex_skills(self, cwd: str = "") -> tuple[CodexSkillInfo, ...]: ...
+    async def list_codex_skills(self, cwd: str = "", force_reload: bool = False) -> tuple[CodexSkillInfo, ...]: ...
 
     async def get_codex_goal(self, thread_id: str) -> CodexThreadGoal | None: ...
 
@@ -91,18 +91,23 @@ class CodexSkillFunctions:
         # A goal run is started through spawn's goal path, then its
         # stored goal is read back; a goal that is missing or differs,
         # or a check that fails, gets one interrupt so the run never
-        # keeps spending unseen (INV-21, INV-22).
+        # keeps spending unseen (INV-21, INV-22). Every host error that
+        # escapes names run_codex_goal (hardening INV-31).
         # Take the caller's posture unchanged, apart from the goal; the
         # record already refused a request with its own prompt or goal.
         goal = goal_run.goal
-        handle = await self._host.spawn_codex_thread(replace(goal_run.request, goal=goal))
+        try:
+            handle = await self._host.spawn_codex_thread(replace(goal_run.request, goal=goal))
+        except CodexAgentError as exc:
+            raise CodexErrorMapper.relabel(exc, operation) from None
         # Read the stored goal back. A failed or cancelled read stops
         # the run, and a host error says the run was interrupted.
         try:
             stored = await self._host.get_codex_goal(handle.thread_id)
         except CodexAgentError as exc:
             await self._interrupt(handle)
-            raise exc.with_sentence(CODEX_HOST_GOAL_UNCHECKED_SENTENCE.format(thread_id=handle.thread_id)) from None
+            unchecked = exc.with_sentence(CODEX_HOST_GOAL_UNCHECKED_SENTENCE.format(thread_id=handle.thread_id))
+            raise CodexErrorMapper.relabel(unchecked, operation) from None
         except BaseException:
             await self._interrupt(handle)
             raise
@@ -119,24 +124,31 @@ class CodexSkillFunctions:
         # first-class input item after the caller's text, and then read
         # back from the stored turn; a run whose input cannot be
         # confirmed gets one interrupt and is reported (INV-24, INV-25,
-        # INV-34, INV-35).
+        # INV-34, INV-35). Every host error that escapes names the
+        # wrapper the caller called (hardening INV-31).
         # The record already checked the request, the skill name and
         # the text, so a bad argument sent nothing.
         operation, skill, spawn = skill_run.operation, skill_run.skill, skill_run.request
         text = CodexTextInput(text=skill_run.prompt)
         # Find the first enabled skill of that exact name for the
-        # folder the thread will run in.
-        cwd = spawn.thread.cwd
-        path = self._skill_path(operation, skill, cwd, await self._host.list_codex_skills(cwd))
-        run_input = CodexRunInput(items=(text, CodexSkillInput(name=skill, path=path)))
-        handle = await self._host.spawn_codex_thread(replace(spawn, prompt=run_input))
+        # folder the turn will run in: the turn's own, else the
+        # thread's (hardening INV-33). Then start the thread with the
+        # skill as an input item.
+        cwd = spawn.turn.cwd or spawn.thread.cwd
+        try:
+            path = self._skill_path(operation, skill, cwd, await self._host.list_codex_skills(cwd))
+            run_input = CodexRunInput(items=(text, CodexSkillInput(name=skill, path=path)))
+            handle = await self._host.spawn_codex_thread(replace(spawn, prompt=run_input))
+        except CodexAgentError as exc:
+            raise CodexErrorMapper.relabel(exc, operation) from None
         # Read the turn's recorded input back. A failed or cancelled
         # read stops the run, and a host error says so.
         try:
             content = await self._recorded_input(handle)
         except CodexAgentError as exc:
             await self._interrupt(handle)
-            raise exc.with_sentence(CODEX_HOST_SKILL_UNCHECKED_SENTENCE.format(thread_id=handle.thread_id)) from None
+            unchecked = exc.with_sentence(CODEX_HOST_SKILL_UNCHECKED_SENTENCE.format(thread_id=handle.thread_id))
+            raise CodexErrorMapper.relabel(unchecked, operation) from None
         except BaseException:
             await self._interrupt(handle)
             raise
