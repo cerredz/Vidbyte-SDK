@@ -115,3 +115,59 @@
   - Phases P1–P4 are in §12.6. Removing the two approval constants must land in the same commit as the router (P2). Removing the record's USER raise must land in the same commit as preflight step 0 (P3).
   - The rule most likely to be broken: a module-level import of `vidbyte.lib.constants` in `lib/errors/base.py`. It causes a runtime cycle (D-6).
   - The second most likely: forgetting to insert the new constants before `"CODEX_HOST_THREAD_LIST_DEFAULT_LIMIT"` in `__all__`.
+
+---
+
+## Addendum — r2 (review round 1, stacked on #1178)
+
+Spec commit: `2b6affc1` (r2, `status: draft`). New base: `8baff3514640a5c5f110c1e2c7cea996d1640ecb` (#1178 head). Where this addendum and the r1 text above disagree, the addendum wins.
+
+### What changed, one line each
+
+1. Re-grounded on #1178: every `path:line`, symbol and file length in §11–§13 re-verified by script (152 citations). Three r2 drafts were off and were corrected: `_open` `:176-218`, the preflight methods `:69/:116/:132/:139`, `_reject_bad_goal` `:227`.
+2. request.md §B.1 recorded as D-31…D-33 ("user decision, #1055 review", comment ids verified against request.md); the stacking is D-34 (orchestrator decision); INV-47, INV-48, NFR-11, AC-40, AC-41 and W-14 enforce them.
+3. Every new value moved to `vidbyte.lib.constants.codex_host` (9 constants and 11 messages, sorted `__all__`); `vidbyte.lib.constants.codex` only changes three values and loses two names. Nothing new under `vidbyte/harnesses/native/` (C021 baseline 0).
+4. Errors use the packet; r1's `" Thread: <id>."` suffix is gone. X1's mapper half is already fixed by #1178, so INV-1 is now a regression guard and X1's remaining half is the orphan-registration cleanup (INV-26, INV-28, D-11).
+5. Inputs follow #1178's records: `CodexHostSetup` is new; `CodexForkRequest`, `CodexThreadListRequest`, `CodexReviewRequest`, `CodexSkillListRequest` and `CodexGoalRunRequest` are extended in place; `forget_codex_turns` uses `CodexThreadRef`. r1's `reject_list_arguments` and the preflight goal-field check are dropped.
+6. R-2: a local `CodexPreflight.reject_user_reviewer` makes "refused before any request" literal for spawn, continue, launch, fork and the three run wrappers.
+7. R-3: new `CodexCommandApprovalKind`; `CodexServerRequest` gains `approval_kind`, `approval_id`, `environment_id`, `started_at_ms`; `available_decisions` is tri-state; the §4 snippet checks `approval_kind`.
+8. R-4: `retryable` reads a code-by-code set `CODEX_HOST_RETRYABLE_CODES` (no `fork_failed`, `process_exited`, `turn_timed_out`).
+9. R-5: the router keeps `_closed`, `_pending` and the handler under one lock; `cancel_pending` closes it first at close and death; EC-3 rewritten.
+10. R-6: the lost-turn path waits `CODEX_HOST_LOST_TURN_GRACE_SECONDS` (0.5 s), re-checks, interrupts, and only then logs and finishes (A-14).
+11. R-7 → NG-20 and FR-36; R-8 → `fork_point` newest-first, tri-state; R-9 → §13 names the AC-7/8/9 seams and row 12 imports the tool-call timeout by name; R-10 → both new collaborators are imported inside `_open`'s existing import `try`.
+12. R-11 → Q-18, not built. New Q-19 (the spawn tool's goal path refuses a non-default `spawn_defaults.turn`; T1 is superseded for that).
+13. Wrapper errors now rewrite the message head as well as the operation field (`CodexErrorMapper.relabel` + `CodexAgentError.with_operation`), because a changed field with the old head would contradict the packet.
+14. Size: the host module is 919 lines at base (#1178 added 26). Moving reviews alone left it near 920, so turn events move to a new `CodexTurnEvents` and the fork body to `CodexThreadHelpers.fork`; estimate about 890, ask-first at 940. Budget: 3 new files, 13 classes, 9 config keys.
+15. §13 re-derived: 20 superseded tests (A1–A8, B1, C1–C3, G1–G5, I1, I2, T1). I1 and I2 are #1178's own boundary and baseline tests; T1 is new because the tool's goal call runs with a turn posture.
+
+### R-n dispositions
+
+R-1 accepted (stack + conventions); R-2 accepted (the reviewer's alternative); R-3, R-4, R-5 accepted; R-6 accepted and strengthened (grace + re-check; the reviewer's minimal fix is D-9's runner-up); R-7, R-8, R-9, R-10 accepted; R-11 deferred to Q-18 (default no). Review notes V-1 (D-6's import path) and V-2 (G-3 wording) accepted. All are in spec §16.
+
+### New evidence
+
+- **D-6 import experiment.** In a copy of the tree at the new base, a module-level `from vidbyte.lib.constants.codex_host import ...` in `lib/errors/base.py` imports cleanly, and `import vidbyte` still works. r1's cycle claim (and the reviewer's alternative reason) are both wrong; the import stays function-level as a coupling choice only. The r1 "Notes for S3" bullet about a runtime cycle is withdrawn.
+- **`_open`'s SDK imports sit in one `try` that maps `ImportError` to the missing-SDK error** (`host.py:180-188`), so the new collaborators belong in that block.
+- **`codex_host_inputs` already imports private helpers from `codex_host`** (`_reject_bad_seconds`, `_reject_small_int`), which is the precedent for sharing `_reject_goal_fields`.
+- **`test_codex_host_tools.py:310`** runs a goal call with `_defaults()`, whose `turn` is non-default, so INV-34 changes its result (T1).
+- **The pinned `__all__` tail of `vidbyte.lib.constants.codex` starts at `:626`, and the removed names sit at `:609-610`.** With nothing added to that module, the r1 note about inserting before the tail no longer applies.
+
+### Stage E self-check (r2)
+
+- Traceability: 48 INV, 41 AC, 37 FR, 11 NFR, 55 EC, 14 W, 6 T, 34 D, 18 Q, 15 A. Every FR except FR-36 (docstrings only, proved by AC-39) cites an INV; every INV below 41 is in an FR; INV-47/48 are covered by NFR-11; every AC is in a W row; every §12.3 row serves an FR/NFR.
+- 3 CREATE rows = §8.4. Names agree across §4, §8.5 and §12.3. All tables have consistent cell counts.
+- All 28 test ids in §13 resolve by AST at the new base. 126 cited existing identifiers grep-confirmed.
+- No file paths in §1–§10 other than wire methods, request.md/AGENTS.md references and literal values. §0.1 is byte-identical to r1. 0 blocking Qs.
+
+### Least-sure assumptions (r2 order)
+
+1. **A-5** (runtime reaction to the empty and decline answers), unchanged.
+2. **A-14.** A death reaches the liveness monitor within the 0.5 s grace. Not measured; if wrong, one refused interrupt is attempted (no behaviour change).
+3. **A-15.** Codex accepts `decline`/`cancel` when a present `availableDecisions` omits them.
+4. **A-13.** #1178 does not change before it merges; if it does, the implementer re-reads §11 and reports BLOCKED on conflicts.
+5. **A-1/A-2**, as in r1.
+
+### Notes for the next agents (supersede the r1 notes above)
+
+- **S2:** 20 superseded tests plus the support literals listed in §13; build handler hosts as `CodexHost(settings, approval_handler=...)` like `open_host`; patch the grace in the `turn_events` module and the tool-call timeout via `patch_connection` once row 12 lands.
+- **S3:** the rule most likely to be broken is C021 — run `git add` then `python lint/run.py --rule C021` after every phase. The second is the order pins: `FORGET_CODEX_TURNS` before `START_CODEX_REVIEW`, and `forget_codex_turns` defined before `start_codex_review`. Do not restyle #1178 code (NG-21); merge `origin/main`, never rebase (D-34).
