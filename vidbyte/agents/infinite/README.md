@@ -55,7 +55,7 @@ Everything lives as plain files under the workspace root, so a person or `bash` 
 - Notes are any other text files (`.md`, `.txt`, `.json`, `.jsonl`) under the root. Seed files are copied to `seed/` when the agent is built and are read-only to the tools.
 - `.runs/<run_id>.jsonl` is one journal per run: `run_started` with the task, `pair_started` and `pair_finished` with each pair's card, and `run_finished` with the stop reason. Journals do not count toward the caps and are never deleted for you.
 
-Every agent sees a map of the workspace at the top of its context: the file and token totals against their caps, the live-entry count, and one line per file with its token count and description. The root's map is rendered again after every tool iteration; a child's map is rendered once, when the child is built.
+Every agent sees a map of the workspace at the top of its context: the file and token totals against their caps, the live-entry count, and one line per file with its token count and description. Every map is drawn once: the root's when its run starts, and a child's when the child is built. The root's system string therefore never changes within a run, so a provider's prompt cache can serve it. Instead of a redrawn map, the root gets one status message appended to its history after each tool iteration: the map lines of the files added, changed, or removed since the last report, cut by the map's own rule, then its loop budgets. With no change it is the loop budgets alone (about 33 tokens with the default loop).
 
 ## Limits and defaults
 
@@ -65,8 +65,10 @@ The defaults are generous on purpose: the point of this agent is work that outgr
 - Workspace: `max_files` 2,000, `max_tokens` 2,000,000 in total, `max_file_tokens` 100,000 per note or seed. The bookkeeping files count only toward the total.
 - Memory: entries of at most `max_entry_tokens` (150) tokens with up to eight tags and eight refs, `max_entries_per_agent` (25) accepted `remember` calls per agent, ten new files per agent, and up to 100 context items per task card.
 - Every agent stops after 500 model turns and cuts each ordinary tool result at 200,000 characters, unless you pass another `loop`; one `loop` applies to every agent in the tree.
-- Each agent's history is trimmed to 90,000 tokens by dropping the oldest tool exchanges first; the task, the rules, and the map are never trimmed. With the largest role prompt (about 2,100 tokens), the tool descriptions (about 5,000), and an 8,000-token map, an agent's whole context stays near 105,000 tokens, inside a 128,000-token model.
-- A card's summary and review are each cut to 800 tokens, and so are its dropped entries and its files in the text the parent reads; the journal keeps both lists whole. The map is cut at 8,000 tokens.
+- Every agent's `read_lines` returns at most `max_read_lines` (200) lines per call and ends a longer range with a footer naming the next start line; set it on `InfiniteWorkspaceSettings`. The workspace `grep` is smart-case (a pattern without capitals ignores case) and shows matching lines only.
+- Every agent keeps the newest three outputs of each of `grep`, `read_lines`, and `search_memory` whole in what the model sees and replaces older ones with the short `masked_output` placeholder; the calls stay, so the agent can repeat one. Other tools' outputs, such as result cards, are never masked. The stored history is never changed.
+- Each agent's history is trimmed, after masking, once it passes 90,000 tokens: the oldest tool exchanges are dropped in whole steps of 25,000 tokens back toward a 65,000-token low watermark, so the first kept message, and the prompt cache behind it, stays put while the history grows by less than a step. The task, the rules, and the map are never trimmed. With the largest role prompt (about 2,100 tokens), the tool descriptions (about 5,000), and an 8,000-token map, an agent's whole context stays near 105,000 tokens, inside a 128,000-token model.
+- A pair that is done and passed or fixed comes back to its parent as one finished line (name, status, verdict, and saved entries) and its summary; the journal keeps the whole card. Any other card comes back whole: its summary and review are each cut to 800 tokens, and so are its dropped entries and its files in the text the parent reads; the journal keeps both lists whole. The map is cut at 8,000 tokens.
 - Tokens are estimated as characters divided by four everywhere (`TokenEstimate`).
 - `model_name` must be in `ProviderModelRegistry`'s catalog under `provider`, as the SDK's declarative `BaseAgentSettings` require. A plain `BaseAgent` accepts more names, such as `gpt-4.1-2025-04-14`, which these settings refuse. Set `ProviderModelRegistry.STRICT_MODEL_VALIDATION = False` to accept the names a plain `BaseAgent` accepts, such as a model released after this SDK version.
 
@@ -93,8 +95,8 @@ This package builds on canonical helpers in `vidbyte/lib/` rather than private c
 - `__init__.py`: the package facade, exporting the agent, its two settings objects, and the runtime.
 - `agent.py`: `InfiniteMemoryAgent`, which builds the workspace and the root, and its `resume` and `aresume`.
 - `settings.py`: `InfiniteMemoryAgentSettings` and `InfiniteWorkspaceSettings`, validated when they are created.
-- `runtime.py`: `InfiniteMemoryRuntime`, which opens the journal, adds the run-bound tools and the map, runs the loop, and records the run's end.
-- `workspace.py`: `InfiniteWorkspace`, the shared folder and every guardrail on writing to it, plus the map.
+- `runtime.py`: `InfiniteMemoryRuntime`, which opens the journal, adds the run-bound tools, draws the map once, keeps the root's system string stable, appends a status message after each tool iteration, runs the loop, and records the run's end.
+- `workspace.py`: `InfiniteWorkspace`, the shared folder and every guardrail on writing to it, plus the map: `map_snapshot`, uncut, and `fit_map_lines`, the one cut rule for the map and the root's status message.
 - `journal.py`: `InfiniteRunJournal`, the append-only, fsynced record of one run, and finding a run to resume.
 - `memory.py`: `InfiniteAgentMemory` and the `remember`, `write_note`, `edit_file`, and `drop_entry` tools.
 - `launch.py`: the `launch_subagent` tool and `InfinitePair`, which runs one generator and its verifier and commits or drops their entries.
@@ -108,7 +110,8 @@ This package builds on canonical helpers in `vidbyte/lib/` rather than private c
 - Use one process per workspace. The workspace lock is per process, so two processes can lose an entry, mint the same id twice, and interleave journal lines.
 - A crash after a pair committed its entries but before its `pair_finished` record re-runs that pair on resume, which can repeat near-duplicate entries and note text.
 - A parent's `timeout_seconds` includes the time it waits on its children, so a short timeout can end the root while it waits on a batch.
-- History past 90,000 tokens is trimmed by whole tool exchanges, and one tool output larger than that is dropped whole; read a smaller range or save the content to a note.
+- History past 90,000 tokens is trimmed by whole tool exchanges back toward the 65,000-token low watermark. When the newest exchange alone is larger than the budget left beside the system part, every exchange is dropped, that one included; read a smaller window or save the content to a note.
+- The root learns about workspace changes only from its status messages; its system string keeps the map drawn at run start. Do not upsert the map again or put anything that changes per call into the root's system string: one changed byte there costs the whole prompt cache.
 - A skill reaches every agent through `system_prompt`, which every child inherits, or as a developer tool that task cards name.
 - Do not put secrets in the workspace: entries, notes, and journals are plain files that every agent and `bash` can read.
 - Keep deterministic limits out of the prompt families. A new cap is a constant, a settings field, and a check in code (middleware for a per-call cap, `InfiniteWorkspace` for a disk cap) whose refusal names it; the prompts say only that limits exist and are enforced.
