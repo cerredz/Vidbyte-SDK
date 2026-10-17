@@ -73,6 +73,8 @@ The folder holds 40 `.md` assets; `infinite_memory.json` top level is a dict wit
 - 2026-10-16 18:20 — **S2 spot-check held** (own run: 37 failed / 94 passed; diff vs base confined to tests/; two commits b719c400 + f4cad411). S2_HEAD = f4cad411. S3/S5/S6 diff the test tree against it.
 - 2026-10-16 18:20 — **S2-found spec defects resolved via the author (r4):** INV-15 (e) aligned to the test's reading (sentences of five or more words; label sentences such as "A dash means none." repeat by design); §8.5 (4) "uses no file quota" / "found with grep" marked keep (review) per INV-17 and R-5; pre-existing test count corrected to 113. The author sets status: tests-written in the same commit (one writer on spec.md). *Why:* a per-field label explanation is not padding; the user's D-F standard targets repeated rules.
 
+- 2026-10-16 21:51 — The r4 author was killed by the session limit mid-edit (spec.md modified, uncommitted: frontmatter, 113 count, INV-15 (e), §13, A-7 done; §8.5 (4) marks, §16 rows, §17 row missing). Edits kept on disk; the same agent resumed by message to finish and commit. Base re-fetched: still 7efceb55.
+
 ## User replies (verbatim)
 - (none yet)
 
