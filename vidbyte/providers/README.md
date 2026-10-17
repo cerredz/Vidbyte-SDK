@@ -529,6 +529,20 @@ Two auth details are vendor-specific and neither is guessable from the code alon
   `x-goog-api-key` header specifically so the key never lands in a URL, where proxy logs, browser
   history, and error reporters would capture it. The intent comment in the file says so; preserve it.
 
+## Anthropic Prompt-Cache Marks
+
+`AnthropicProvider` marks a request for Anthropic's prompt cache only when the same adapter object
+has already sent the same tools and system (a sha256 digest of both, at most
+`ANTHROPIC_CACHE_SEEN_PREFIX_LIMIT` = 256 remembered, cleared when full). A first send goes out
+byte for byte as before. A repeat gets at most three block-level marks, each exactly
+`{"type": "ephemeral"}`: the system, sent as one text block, the last block of the last message,
+and the last block of the message before the newest assistant turn. A marked string message is
+sent as one marked text block. The adapter never adds a top-level `cache_control` and never sends
+a `ttl`, which the Vidbyte gateway refuses. A request that already holds `cache_control` anywhere
+(through `extra_body`, tools, or messages) gets no marks, because the caller owns its caching and
+Anthropic refuses more than four breakpoints. Marks go on copies; the caller's messages are never
+changed.
+
 ## Google's Colon-Method REST Convention
 
 Gemini endpoints are `/models/{model}:generateContent`, not `/models/{model}/generateContent`. The
@@ -597,6 +611,8 @@ something was free.
 
 1. **Adapters are stateless per call.** Config resolves through `_config(config)`, which prefers the
    per-call config over the instance default. Do not cache mutable per-request state on the adapter.
+   The one cross-call memory is `AnthropicProvider._seen_prefixes`, the bounded set of
+   tools-and-system digests that gates prompt-cache marks (see below).
 2. **Response parsing stays injectable.** Each adapter accepts a `response_parser` so tests and
    alternate transports can substitute one. Do not construct `HttpResponseParser` inline.
 3. **Transport is injected, never created.** Adapters receive a `transport` argument and must not
