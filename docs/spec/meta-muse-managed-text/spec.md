@@ -1,7 +1,7 @@
 ---
 spec: meta-muse-managed-text
 title: Let the SDK's gateway text modes (AUTO and VIDBYTE_MANAGED) use provider meta
-status: tests-written         # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
+status: implemented           # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
 revision: 3
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-meta-muse-managed-text
@@ -10,7 +10,7 @@ base_commit: 845a4d9bd5f144b1e083b5dc3c76bff17c75b235
 wire_contract: https://github.com/cerredz/Vidbyte/pull/710
 created: 2026-10-16
 updated: 2026-10-17
-pr:                      # filled at S3 (draft) and finalized at S6
+pr: https://github.com/cerredz/Vidbyte-SDK/pull/1180  # filled at S3 (draft) and finalized at S6
 ---
 
 # Spec: Let the SDK's gateway text modes (AUTO and VIDBYTE_MANAGED) use provider meta
