@@ -76,11 +76,11 @@ git fetch --quiet origin main
 git show origin/main:vidbyte/lib/registries/pricing.py | sed -n 's/^PRICING_AS_OF: str = "\([0-9-]*\)"$/\1/p'
 date -u +%F
 gh api --paginate "repos/cerredz/Vidbyte-SDK/pulls?state=open&per_page=100" \
-  --jq '.[] | select(.head.repo.full_name == "cerredz/Vidbyte-SDK") | select(.head.ref | startswith("feat/provider-")) | "#\(.number)"'
+  --jq '.[] | select(.head.repo.full_name == "cerredz/Vidbyte-SDK") | select(.head.ref | startswith("feat/provider-")) | "#\(.number)"'; echo "prs exit $?"
 git show origin/main:vidbyte/lib/enums/model_provider.py | sed -n 's/^    [A-Z0-9_]* = "\([a-z0-9_]*\)"$/\1/p'
 ```
 
-   - A failed fetch stops the session: `STOP NETWORK_BLOCKED - github.com <error>`. A failed `gh api` call anywhere in a pass stops it with `NETWORK_BLOCKED - api.github.com <status>`.
+   - A failed fetch stops the session: `STOP NETWORK_BLOCKED - github.com <error>`. A failed `gh api` call anywhere in a pass stops it with `NETWORK_BLOCKED - api.github.com <status>`; each `gh api` read in a pass prints `prs exit <n>`, and any value but 0 is such a failure, never an empty list.
    - Vintage: when main's `PRICING_AS_OF` is not before today (UTC), any new rates would need a later date than today, so stop with `VINTAGE_DEFERRED`.
    - Back-pressure: the open provider PRs are the union of the numbers printed and the PRs this session opened, because GitHub's list can lag. When that count reaches `MAX_OPEN_PROVIDER_PRS`, stop with `BACKPRESSURE`, listing them. Only PRs whose head repository is `cerredz/Vidbyte-SDK` count, so a fork cannot block the loop.
    - The last command prints the `ModelProvider` values on main.
@@ -89,7 +89,7 @@ git show origin/main:vidbyte/lib/enums/model_provider.py | sed -n 's/^    [A-Z0-
 ```sh
 SLUG=<slug> WORKTREE=<checkout>-onboard-<slug>
 gh api "repos/cerredz/Vidbyte-SDK/pulls?state=all&head=cerredz:feat/provider-$SLUG&per_page=100" \
-  --jq '.[] | "#\(.number) \(.state) \(.merged_at // "unmerged")"'
+  --jq '.[] | "#\(.number) \(.state) \(.merged_at // "unmerged")"'; echo "prs exit $?"
 git ls-remote --exit-code --heads origin "refs/heads/feat/provider-$SLUG"; echo "remote-branch exit $?"
 git show-ref --verify --quiet "refs/heads/feat/provider-$SLUG"; echo "local-branch exit $?"
 test -e "$WORKTREE" || test -e "$WORKTREE-evidence"; echo "paths exit $?"
