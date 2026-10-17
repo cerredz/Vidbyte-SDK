@@ -5,15 +5,20 @@ ROLE IN CODEBASE: Supplies stable bounds, counters, provider labels, and item vo
 ARCHITECTURE NOTE: Constants live below agent modules so every collaborator can import them safely.
 COMMON MODIFICATION PATTERNS: Add a CODEX-prefixed value when adapter behavior needs a shared literal.
 KNOWN EDGE CASES: Supported item kinds track the pinned openai-codex compatibility range.
-RELATED DOCS: docs/design/codex-harness-agent.md.
-TESTS: python scripts/run_ci.py.
+RELATED DOCS: docs/design/codex-harness-agent.md; docs/spec/codex-host-thread-helpers/spec.md (section 9.3).
+TESTS: python scripts/run_ci.py; tests/features/codex_host/test_codex_host_helper_surface.py and tests/features/codex_host/test_codex_host_records.py.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 
-from vidbyte.lib.enums.codex import CodexFailureClass
+from vidbyte.lib.enums.codex import (
+    CodexApprovalMode,
+    CodexFailureClass,
+    CodexGoalStatus,
+    CodexThreadSourceKind,
+)
 from vidbyte.lib.enums.failure import (
     FailureCode,
     FailureDisposition,
@@ -171,6 +176,127 @@ CODEX_FAILURE_CLASSIFICATION: Mapping[str, tuple[str, str, str, str]] = {
         FailureSeverity.ERROR.value,
         FailureDisposition.RAISE.value,
     ),
+    # CodexHost codes. Setup problems are terminal until the developer
+    # fixes them; usage windows, overload and a dead process pass with
+    # time or a new host; Vidbyte's own stops are warnings that end the
+    # turn.
+    FailureCode.CODEX_NOT_INSTALLED.value: (
+        CodexFailureClass.TERMINAL.value,
+        FailurePhase.CONFIGURATION.value,
+        FailureSeverity.CRITICAL.value,
+        FailureDisposition.RAISE.value,
+    ),
+    FailureCode.CODEX_VERSION_UNSUPPORTED.value: (
+        CodexFailureClass.TERMINAL.value,
+        FailurePhase.CONFIGURATION.value,
+        FailureSeverity.CRITICAL.value,
+        FailureDisposition.RAISE.value,
+    ),
+    FailureCode.CODEX_NOT_SIGNED_IN.value: (
+        CodexFailureClass.TERMINAL.value,
+        FailurePhase.CONFIGURATION.value,
+        FailureSeverity.ERROR.value,
+        FailureDisposition.RAISE.value,
+    ),
+    FailureCode.CODEX_USAGE_LIMITED.value: (
+        CodexFailureClass.TRANSIENT.value,
+        FailurePhase.RESOURCE.value,
+        FailureSeverity.ERROR.value,
+        FailureDisposition.STOP.value,
+    ),
+    FailureCode.CODEX_MODEL_UNKNOWN.value: (
+        CodexFailureClass.TERMINAL.value,
+        FailurePhase.CONFIGURATION.value,
+        FailureSeverity.ERROR.value,
+        FailureDisposition.RAISE.value,
+    ),
+    FailureCode.CODEX_SESSION_NOT_FOUND.value: (
+        CodexFailureClass.TERMINAL.value,
+        FailurePhase.SESSION.value,
+        FailureSeverity.ERROR.value,
+        FailureDisposition.RAISE.value,
+    ),
+    FailureCode.CODEX_SESSION_BUSY.value: (
+        CodexFailureClass.TRANSIENT.value,
+        FailurePhase.SESSION.value,
+        FailureSeverity.WARNING.value,
+        FailureDisposition.ROUTE.value,
+    ),
+    FailureCode.CODEX_BUDGET_EXHAUSTED.value: (
+        CodexFailureClass.TERMINAL.value,
+        FailurePhase.RESOURCE.value,
+        FailureSeverity.WARNING.value,
+        FailureDisposition.STOP.value,
+    ),
+    FailureCode.CODEX_API_ERROR.value: (
+        CodexFailureClass.TRANSIENT.value,
+        FailurePhase.MODEL.value,
+        FailureSeverity.ERROR.value,
+        FailureDisposition.ROUTE.value,
+    ),
+    FailureCode.CODEX_PERMISSION_DENIED.value: (
+        CodexFailureClass.TERMINAL.value,
+        FailurePhase.ACTION.value,
+        FailureSeverity.ERROR.value,
+        FailureDisposition.STOP.value,
+    ),
+    FailureCode.CODEX_SANDBOX_NOT_READY.value: (
+        CodexFailureClass.TERMINAL.value,
+        FailurePhase.CONFIGURATION.value,
+        FailureSeverity.ERROR.value,
+        FailureDisposition.RAISE.value,
+    ),
+    FailureCode.CODEX_SCHEMA_VIOLATION.value: (
+        CodexFailureClass.MODEL_RETRYABLE.value,
+        FailurePhase.OUTPUT.value,
+        FailureSeverity.ERROR.value,
+        FailureDisposition.ROUTE.value,
+    ),
+    FailureCode.CODEX_PROCESS_EXITED.value: (
+        CodexFailureClass.TRANSIENT.value,
+        FailurePhase.RESOURCE.value,
+        FailureSeverity.CRITICAL.value,
+        FailureDisposition.ROUTE.value,
+    ),
+    FailureCode.CODEX_PROTOCOL_MISMATCH.value: (
+        CodexFailureClass.TERMINAL.value,
+        FailurePhase.CONFIGURATION.value,
+        FailureSeverity.CRITICAL.value,
+        FailureDisposition.RAISE.value,
+    ),
+    FailureCode.CODEX_TURN_TIMED_OUT.value: (
+        CodexFailureClass.TRANSIENT.value,
+        FailurePhase.RESOURCE.value,
+        FailureSeverity.WARNING.value,
+        FailureDisposition.STOP.value,
+    ),
+    # Thread-helper codes. A run whose goal or skill did not take, an
+    # unknown or disabled skill and an unfinished goal fail the same
+    # way on every retry until someone changes the request or thread.
+    FailureCode.CODEX_COMMAND_NOT_RUN.value: (
+        CodexFailureClass.TERMINAL.value,
+        FailurePhase.SESSION.value,
+        FailureSeverity.ERROR.value,
+        FailureDisposition.RAISE.value,
+    ),
+    FailureCode.CODEX_SKILL_NOT_FOUND.value: (
+        CodexFailureClass.TERMINAL.value,
+        FailurePhase.CONFIGURATION.value,
+        FailureSeverity.ERROR.value,
+        FailureDisposition.RAISE.value,
+    ),
+    FailureCode.CODEX_SKILL_DISABLED.value: (
+        CodexFailureClass.TERMINAL.value,
+        FailurePhase.CONFIGURATION.value,
+        FailureSeverity.ERROR.value,
+        FailureDisposition.RAISE.value,
+    ),
+    FailureCode.CODEX_GOAL_UNFINISHED.value: (
+        CodexFailureClass.TERMINAL.value,
+        FailurePhase.SESSION.value,
+        FailureSeverity.WARNING.value,
+        FailureDisposition.RAISE.value,
+    ),
 }
 # Published apart from one another so a caller can tell "no failures" from
 # "one recovered failure", and a first-attempt answer from a fallback answer.
@@ -196,6 +322,8 @@ CODEX_TOOL_CALL_TIMEOUT_SECONDS = 300.0
 # inflate every effort floor by an amount that varies with the prompt.
 CODEX_TOOL_ITEM_TYPES = frozenset({"commandExecution", "mcpToolCall", "dynamicToolCall"})
 CODEX_COMPACTION_ITEM_TYPE = "contextCompaction"
+# The stored item that holds a turn's recorded input.
+CODEX_USER_MESSAGE_ITEM_TYPE = "userMessage"
 CODEX_ITEM_COMPLETED_STATUS = "completed"
 CODEX_COMMAND_SUCCESS_EXIT_CODE = 0
 CODEX_MILLISECONDS_PER_SECOND = 1000
@@ -224,6 +352,191 @@ CODEX_CONTRACTS_KEY = "output_contracts"
 # so simultaneous turns against it are not a performance opportunity the provider
 # offers — and the facade's thread_id, history, and usage ledger would race.
 CODEX_MAX_CONCURRENT_TURNS = 1
+# CodexHost bounds each app-server call by the tool bridge's bound, so a
+# host call never outlives the dynamic-tool call that made it (D-3).
+CODEX_HOST_REQUEST_TIMEOUT_SECONDS = CODEX_TOOL_CALL_TIMEOUT_SECONDS
+# The wait tool's default and clamp, kept below the bridge bound so a
+# wait made from inside a Codex dynamic tool still answers (D-31).
+CODEX_HOST_TOOL_MAX_WAIT_SECONDS = 240.0
+# Each host's own call executor size: the ceiling of the standard
+# library's default pool size. Workers start only when needed (D-1).
+CODEX_HOST_WORKER_THREADS = 32
+# The bound on each interrupt sent at close and on the goal cancel after
+# a failed goal start; a live app-server answers at once (INV-7).
+CODEX_HOST_CLOSE_INTERRUPT_SECONDS = 5.0
+# How long close waits for the close thread; CodexClient.close() bounds
+# itself to about 3 seconds (INV-7).
+CODEX_HOST_CLOSE_WAIT_SECONDS = 10.0
+# The host's dynamic-tools opt-in message (INV-29).
+CODEX_HOST_EXPERIMENTAL_API_TEXT = "Dynamic tools on CodexHost require CodexClientSettings(experimental_api=True)."
+# The next step of every configuration.unsupported_combination refusal:
+# a USER reviewer at construction (D-16) or reported by Codex (D-32).
+CODEX_HOST_USER_REVIEWER_TEXT = "Set approvals_reviewer=AUTO_REVIEW or GUARDIAN_SUBAGENT, and set it whenever approval_policy is set. To continue a thread whose reviewer is user, pass overrides=CodexSpawnRequest(approvals_reviewer=AUTO_REVIEW), or set it in the CodexHostTools spawn_defaults. Answering approval requests in code needs set_codex_approval_handler, which this release does not include."
+# The oldest codex runtime the host talks to, the SDK's own floor (D-5).
+CODEX_HOST_MINIMUM_VERSION = "0.151.0"
+# The executable name the host resolves on PATH (D-4).
+CODEX_HOST_BINARY_NAME = "codex"
+# max_attempts for raw calls that spend usage, so none is sent twice
+# (D-2).
+CODEX_HOST_SINGLE_ATTEMPT = 1
+# Lower bounds for max_live_turns, token_budget and max_output_tokens.
+CODEX_HOST_MIN_LIVE_TURNS = 1
+CODEX_HOST_MIN_TOKEN_LIMIT = 1
+# Timeouts must be strictly greater than this.
+CODEX_HOST_MIN_EXCLUSIVE_SECONDS = 0.0
+# The approval_mode thread/start sends when nothing is set (D-16).
+CODEX_HOST_DEFAULT_APPROVAL_MODE = CodexApprovalMode.AUTO_REVIEW
+# The limit the thread-helper listings use when none is given.
+CODEX_HOST_THREAD_LIST_DEFAULT_LIMIT = 20
+# The largest limit one thread-helper listing accepts.
+CODEX_HOST_THREAD_LIST_MAX_LIMIT = 1000
+# The most thread/list pages one walk reads (at least the max limit).
+CODEX_HOST_THREAD_LIST_MAX_PAGES = 1000
+# The smallest limit for thread listings and turn pages.
+CODEX_HOST_MIN_LIST_LIMIT = 1
+# The most summaries one lineage walk returns.
+CODEX_HOST_LINEAGE_MAX_DEPTH = 100
+# The most enabled skill names one skill_not_found message lists.
+CODEX_HOST_SKILL_NAMES_IN_ERROR = 50
+# The sourceKinds the helper listings send: every top-level source.
+CODEX_HOST_HELPER_SOURCE_KINDS = (
+    CodexThreadSourceKind.CLI,
+    CodexThreadSourceKind.VSCODE,
+    CodexThreadSourceKind.EXEC,
+    CodexThreadSourceKind.APP_SERVER,
+    CodexThreadSourceKind.UNKNOWN,
+)
+# The fixed harness label every CodexThreadSummary carries.
+CODEX_THREAD_SUMMARY_HARNESS = "codex"
+# The bundled skill run_codex_openai_docs runs.
+CODEX_OPENAI_DOCS_SKILL_NAME = "openai-docs"
+# The itemsView that makes thread/turns/list return every item.
+CODEX_TURN_ITEMS_VIEW_FULL = "full"
+# Turns per page the list_codex_turns tool asks for by default.
+CODEX_HOST_TURNS_TOOL_DEFAULT_LIMIT = 3
+# The most read-backs of one skill turn's recorded input.
+CODEX_HOST_INPUT_CHECK_ATTEMPTS = 10
+# The wait between two read-backs, never before the first.
+CODEX_HOST_INPUT_CHECK_INTERVAL_SECONDS = 0.5
+# Time from the first read-back after which no new read starts.
+CODEX_HOST_INPUT_CHECK_DEADLINE_SECONDS = 10.0
+# Turns one read-back asks for: the new thread's first turn.
+CODEX_HOST_INPUT_CHECK_TURN_LIMIT = 1
+# Goal statuses with which compact may load a notLoaded thread.
+CODEX_HOST_RESUMABLE_GOAL_STATUSES = frozenset({CodexGoalStatus.COMPLETE})
+# App-server methods the host calls through the SDK's raw request path.
+CODEX_RATE_LIMITS_READ_METHOD = "account/rateLimits/read"
+CODEX_SANDBOX_READINESS_METHOD = "windowsSandbox/readiness"
+CODEX_REVIEW_START_METHOD = "review/start"
+CODEX_GOAL_SET_METHOD = "thread/goal/set"
+CODEX_MODEL_LIST_METHOD = "model/list"
+# Deletes a stored thread; sent once per call (thread helpers).
+CODEX_THREAD_DELETE_METHOD = "thread/delete"
+# Reads a thread's goal without loading the thread.
+CODEX_GOAL_GET_METHOD = "thread/goal/get"
+# Lists the skills Codex offers for working folders.
+CODEX_SKILLS_LIST_METHOD = "skills/list"
+# Reads one page of a thread's stored turns with their items.
+CODEX_THREAD_TURNS_LIST_METHOD = "thread/turns/list"
+# Notification names the turn watchers read.
+CODEX_TURN_STARTED_NOTIFICATION = "turn/started"
+CODEX_TURN_COMPLETED_NOTIFICATION = "turn/completed"
+CODEX_ITEM_COMPLETED_NOTIFICATION = "item/completed"
+CODEX_USAGE_UPDATED_NOTIFICATION = "thread/tokenUsage/updated"
+CODEX_GOAL_UPDATED_NOTIFICATION = "thread/goal/updated"
+CODEX_GOAL_CLEARED_NOTIFICATION = "thread/goal/cleared"
+# Maps an approval_mode value to the wire approvalPolicy and
+# approvalsReviewer; an empty reviewer is left unsent.
+CODEX_APPROVAL_MODE_WIRE: Mapping[str, tuple[str, str]] = {
+    "auto_review": ("on-request", "auto_review"),
+    "deny_all": ("never", ""),
+}
+# Maps a CodexSandbox value to the thread sandbox mode and to the turn
+# sandboxPolicy type.
+CODEX_SANDBOX_THREAD_MODE: Mapping[str, str] = {
+    "read-only": "read-only",
+    "workspace-write": "workspace-write",
+    "full-access": "danger-full-access",
+}
+CODEX_SANDBOX_TURN_POLICY: Mapping[str, str] = {
+    "read-only": "readOnly",
+    "workspace-write": "workspaceWrite",
+    "full-access": "dangerFullAccess",
+}
+# Approval requests the host's router accepts, mirroring the SDK's own
+# default handler (D-16).
+CODEX_ACCEPTED_APPROVAL_METHODS = frozenset(
+    {"item/commandExecution/requestApproval", "item/fileChange/requestApproval"}
+)
+CODEX_APPROVAL_ACCEPT_DECISION = "accept"
+# Maps a turn error's codexErrorInfo key to a failure code; every other
+# key means codex.api_error.
+CODEX_ERROR_INFO_CODES: Mapping[str, str] = {
+    "usageLimitExceeded": FailureCode.CODEX_USAGE_LIMITED.value,
+    "rateLimitExceeded": FailureCode.CODEX_USAGE_LIMITED.value,
+    "sessionBudgetExceeded": FailureCode.CODEX_BUDGET_EXHAUSTED.value,
+    "contextWindowExceeded": FailureCode.CODEX_BUDGET_EXHAUSTED.value,
+    "unauthorized": FailureCode.CODEX_NOT_SIGNED_IN.value,
+    "sandboxError": FailureCode.CODEX_SANDBOX_NOT_READY.value,
+    "tooManyDenials": FailureCode.CODEX_PERMISSION_DENIED.value,
+    "cyberPolicy": FailureCode.CODEX_PERMISSION_DENIED.value,
+    "misalignmentPolicyViolation": FailureCode.CODEX_PERMISSION_DENIED.value,
+}
+# Goal statuses that end a goal run, as openai-codex's goal stream ends.
+CODEX_GOAL_TERMINAL_STATUSES = frozenset(
+    {
+        CodexGoalStatus.PAUSED,
+        CodexGoalStatus.BLOCKED,
+        CodexGoalStatus.USAGE_LIMITED,
+        CodexGoalStatus.BUDGET_LIMITED,
+        CodexGoalStatus.COMPLETE,
+    }
+)
+# The next step each CodexHost failure tells its caller to take.
+CODEX_NEXT_STEPS: Mapping[str, str] = {
+    FailureCode.CODEX_NOT_INSTALLED.value: "Install the Codex CLI (npm install -g @openai/codex) or pass CodexClientSettings(codex_bin=...).",
+    FailureCode.CODEX_VERSION_UNSUPPORTED.value: "Run codex update, then open a new CodexHost.",
+    FailureCode.CODEX_NOT_SIGNED_IN.value: "Run codex login, then retry.",
+    FailureCode.CODEX_USAGE_LIMITED.value: "Wait until the usage window resets, or sign Codex in with an API key.",
+    FailureCode.CODEX_MODEL_UNKNOWN.value: "Pick a model from list_codex_models.",
+    FailureCode.CODEX_SESSION_NOT_FOUND.value: "Find the thread with list_codex_threads, or use a handle this host returned; continue a finished turn instead of steering it.",
+    FailureCode.CODEX_SESSION_BUSY.value: "Steer or wait on the running turn, or fork the thread.",
+    FailureCode.CODEX_BUDGET_EXHAUSTED.value: "Raise max_output_tokens or the goal token_budget, or split the work.",
+    FailureCode.CODEX_API_ERROR.value: "Retry with backoff, and check the service status if it persists.",
+    FailureCode.CODEX_PERMISSION_DENIED.value: "Allow the action (approval_policy, approvals_reviewer or sandbox), or ask for work that does not need it.",
+    FailureCode.CODEX_SANDBOX_NOT_READY.value: "Set up the Codex Windows sandbox, or run with sandbox=FULL_ACCESS.",
+    FailureCode.CODEX_SCHEMA_VIOLATION.value: "Continue the thread and ask for output that matches the schema; the raw text is in result.final_response.",
+    FailureCode.CODEX_PROCESS_EXITED.value: "Open a new CodexHost and continue the thread by id.",
+    FailureCode.CODEX_PROTOCOL_MISMATCH.value: "Match the Codex CLI and openai-codex versions (codex update), then open a new CodexHost.",
+    FailureCode.CODEX_TURN_TIMED_OUT.value: "Raise timeout_seconds, or continue the thread to finish the work.",
+    FailureCode.CODEX_COMMAND_NOT_RUN.value: "Read what Codex recorded with get_codex_goal or list_codex_turns, then start the run again.",
+    FailureCode.CODEX_SKILL_NOT_FOUND.value: "Pick a skill that list_codex_skills reports for the same working folder, and pass its exact name.",
+    FailureCode.CODEX_SKILL_DISABLED.value: "Enable the skill in your Codex configuration, or pick an enabled skill that list_codex_skills reports.",
+    FailureCode.CODEX_GOAL_UNFINISHED.value: "Continue the thread with continue_codex_thread until its goal is complete, or clear the goal from a Codex client, then compact the thread again.",
+    FailureCode.CODEX_FORK_FAILED.value: "Fork from a completed turn.",
+    FailureCode.CODEX_RESPONSE_INVALID.value: "Continue the thread and ask for a final answer.",
+    FailureCode.CONFIGURATION_INVALID_ARGUMENT.value: "Fix the argument or setup named in the message, then call again.",
+    FailureCode.CONFIGURATION_UNSUPPORTED_COMBINATION.value: CODEX_HOST_USER_REVIEWER_TEXT,
+}
+# The router's answer to a tool call on a thread with no Vidbyte tools.
+CODEX_UNREGISTERED_TOOL_TEXT = "No Vidbyte tool is registered for this thread on this host."
+# App-server methods the host calls through openai-codex's typed
+# client methods, named in its mapped errors (D-13); thread/start is
+# CODEX_THREAD_START_METHOD above.
+CODEX_INITIALIZE_METHOD = "initialize"
+CODEX_ACCOUNT_READ_METHOD = "account/read"
+CODEX_THREAD_RESUME_METHOD = "thread/resume"
+CODEX_THREAD_FORK_METHOD = "thread/fork"
+CODEX_THREAD_NAME_SET_METHOD = "thread/name/set"
+CODEX_THREAD_LIST_METHOD = "thread/list"
+CODEX_THREAD_READ_METHOD = "thread/read"
+CODEX_TURN_START_METHOD = "turn/start"
+CODEX_TURN_STEER_METHOD = "turn/steer"
+CODEX_TURN_INTERRUPT_METHOD = "turn/interrupt"
+# Starts Codex's compaction of a thread's history (typed call).
+CODEX_THREAD_COMPACT_METHOD = "thread/compact/start"
+# openai-codex's own goal cancel call, named in its mapped errors.
+CODEX_GOAL_CANCEL_CALL = "cancel_goal_operation"
 
 
 __all__ = [
@@ -243,6 +556,7 @@ __all__ = [
     "CODEX_ITEM_COMPLETED_STATUS",
     "CODEX_CONTRACTS_KEY",
     "CODEX_COMPACTION_ITEM_TYPE",
+    "CODEX_USER_MESSAGE_ITEM_TYPE",
     "CODEX_COMMAND_SUCCESS_EXIT_CODE",
     "CODEX_NEXT_FORK_DEPTH",
     "CODEX_MIDDLEWARE_METADATA_KEY",
@@ -264,4 +578,70 @@ __all__ = [
     "CODEX_THREAD_START_METHOD",
     "CODEX_TOOL_CALL_METHOD",
     "CODEX_TOOL_CALL_TIMEOUT_SECONDS",
+    "CODEX_HOST_REQUEST_TIMEOUT_SECONDS",
+    "CODEX_HOST_TOOL_MAX_WAIT_SECONDS",
+    "CODEX_HOST_WORKER_THREADS",
+    "CODEX_HOST_CLOSE_INTERRUPT_SECONDS",
+    "CODEX_HOST_CLOSE_WAIT_SECONDS",
+    "CODEX_HOST_EXPERIMENTAL_API_TEXT",
+    "CODEX_HOST_USER_REVIEWER_TEXT",
+    "CODEX_HOST_MINIMUM_VERSION",
+    "CODEX_HOST_BINARY_NAME",
+    "CODEX_HOST_SINGLE_ATTEMPT",
+    "CODEX_HOST_MIN_LIVE_TURNS",
+    "CODEX_HOST_MIN_TOKEN_LIMIT",
+    "CODEX_HOST_MIN_EXCLUSIVE_SECONDS",
+    "CODEX_HOST_DEFAULT_APPROVAL_MODE",
+    "CODEX_RATE_LIMITS_READ_METHOD",
+    "CODEX_SANDBOX_READINESS_METHOD",
+    "CODEX_REVIEW_START_METHOD",
+    "CODEX_GOAL_SET_METHOD",
+    "CODEX_MODEL_LIST_METHOD",
+    "CODEX_TURN_STARTED_NOTIFICATION",
+    "CODEX_TURN_COMPLETED_NOTIFICATION",
+    "CODEX_ITEM_COMPLETED_NOTIFICATION",
+    "CODEX_USAGE_UPDATED_NOTIFICATION",
+    "CODEX_GOAL_UPDATED_NOTIFICATION",
+    "CODEX_GOAL_CLEARED_NOTIFICATION",
+    "CODEX_APPROVAL_MODE_WIRE",
+    "CODEX_SANDBOX_THREAD_MODE",
+    "CODEX_SANDBOX_TURN_POLICY",
+    "CODEX_ACCEPTED_APPROVAL_METHODS",
+    "CODEX_APPROVAL_ACCEPT_DECISION",
+    "CODEX_ERROR_INFO_CODES",
+    "CODEX_GOAL_TERMINAL_STATUSES",
+    "CODEX_NEXT_STEPS",
+    "CODEX_UNREGISTERED_TOOL_TEXT",
+    "CODEX_INITIALIZE_METHOD",
+    "CODEX_ACCOUNT_READ_METHOD",
+    "CODEX_THREAD_RESUME_METHOD",
+    "CODEX_THREAD_FORK_METHOD",
+    "CODEX_THREAD_NAME_SET_METHOD",
+    "CODEX_THREAD_LIST_METHOD",
+    "CODEX_THREAD_READ_METHOD",
+    "CODEX_TURN_START_METHOD",
+    "CODEX_TURN_STEER_METHOD",
+    "CODEX_TURN_INTERRUPT_METHOD",
+    "CODEX_GOAL_CANCEL_CALL",
+    "CODEX_HOST_THREAD_LIST_DEFAULT_LIMIT",
+    "CODEX_HOST_THREAD_LIST_MAX_LIMIT",
+    "CODEX_HOST_THREAD_LIST_MAX_PAGES",
+    "CODEX_HOST_MIN_LIST_LIMIT",
+    "CODEX_HOST_LINEAGE_MAX_DEPTH",
+    "CODEX_HOST_SKILL_NAMES_IN_ERROR",
+    "CODEX_HOST_HELPER_SOURCE_KINDS",
+    "CODEX_THREAD_SUMMARY_HARNESS",
+    "CODEX_OPENAI_DOCS_SKILL_NAME",
+    "CODEX_TURN_ITEMS_VIEW_FULL",
+    "CODEX_HOST_TURNS_TOOL_DEFAULT_LIMIT",
+    "CODEX_HOST_INPUT_CHECK_ATTEMPTS",
+    "CODEX_HOST_INPUT_CHECK_INTERVAL_SECONDS",
+    "CODEX_HOST_INPUT_CHECK_DEADLINE_SECONDS",
+    "CODEX_HOST_INPUT_CHECK_TURN_LIMIT",
+    "CODEX_HOST_RESUMABLE_GOAL_STATUSES",
+    "CODEX_THREAD_DELETE_METHOD",
+    "CODEX_GOAL_GET_METHOD",
+    "CODEX_SKILLS_LIST_METHOD",
+    "CODEX_THREAD_TURNS_LIST_METHOD",
+    "CODEX_THREAD_COMPACT_METHOD",
 ]
