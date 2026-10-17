@@ -1,6 +1,6 @@
 {
   "name": "InfiniteMemory Agent",
-  "description": "Instructions for InfiniteMemoryAgent, one Markdown file per leaf: the root, generator, and verifier operating manuals that each agent's system prompt carries, the messages that brief a generator, a verifier, and a resumed root, the result card a parent receives for each pair, the replies of the memory tools and their quota line, the workspace map's header, the placeholder that masks an older search or read output, the root's update on what changed in the workspace, and the model-facing descriptions of launch_subagent, remember, write_note, edit_file, and drop_entry and of their parameters.",
+  "description": "Instructions for InfiniteMemoryAgent, one Markdown file per leaf: the root, generator, and verifier operating manuals that each agent's system prompt carries, the messages that brief a generator, a verifier, and a resumed root, the result card a parent receives for each pair, the replies of the memory tools and their quota line, the workspace map's header, the placeholder that masks an older search or read output, the root's update on what changed in the workspace, the retriever's operating manual and first message, the recall card that returns what a retriever cited, and the model-facing descriptions of launch_subagent, remember, write_note, edit_file, drop_entry, and recall and of their parameters.",
   "key": "infinite_memory",
   "prompts": {
     "root_system_prompt": {
@@ -170,6 +170,38 @@
     "map_update": {
       "path": "map_update.md",
       "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/map_update.md"
+    },
+    "recall_tool_description": {
+      "path": "recall_tool_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/recall_tool_description.md"
+    },
+    "recall_question_description": {
+      "path": "recall_question_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/recall_question_description.md"
+    },
+    "recall_purpose_description": {
+      "path": "recall_purpose_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/recall_purpose_description.md"
+    },
+    "recall_known_description": {
+      "path": "recall_known_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/recall_known_description.md"
+    },
+    "recall_terms_description": {
+      "path": "recall_terms_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/recall_terms_description.md"
+    },
+    "retriever_system_prompt": {
+      "path": "retriever_system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/retriever_system_prompt.md"
+    },
+    "retriever_task_prompt": {
+      "path": "retriever_task_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/retriever_task_prompt.md"
+    },
+    "recall_card": {
+      "path": "recall_card.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/recall_card.md"
     }
   }
 }
