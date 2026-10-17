@@ -3,10 +3,10 @@
 PURPOSE: Defines the validated records of the harness thread functions: NativeThreadRequest, the checked arguments of one call; GrokThreadConfig, OpencodeThreadConfig, MuseThreadConfig and ClaudeThreadConfig, the per-harness settings a caller may pass; and NativeThreadResult, what a successful call returns.
 ROLE IN CODEBASE: NativeThreadRequest is built by the twelve public functions under vidbyte/harnesses/native/ (grok/threads.py, opencode/threads.py, muse/threads.py, claude/threads.py) and read by every step of their flows. The four config records and NativeThreadResult are re-exported from vidbyte.harnesses.native; callers build the configs, the functions return the result.
 ARCHITECTURE NOTE: Every check lives in __post_init__, so a constructed record is always valid. Field checks go through RecordFieldValidator and RecordFieldConverter (vidbyte/lib/dataclasses/validation.py); the three rules that relate a field to another value (thread_id against the verb, a skill folder's SKILL.md, unique skill folder names) raise ConfigurationError inline. A refused field raises ConfigurationError whose details["field"] is the public argument name (api_key, skills[2]); the thread functions turn it into a NativeThreadError naming that argument. The workspace and each skill path are checked as given, absolute and existing, and then stored resolved, so a relative path never passes because of the current folder.
-FUNCTION INVENTORY: NativeThreadRequest.__post_init__ is the narrated main function; _checked_workspace checks and resolves the workspace; _checked_model checks the model for the harness; _checked_thread_id ties the thread id to the verb; _checked_skills checks, resolves and names each skill folder. GrokThreadConfig, OpencodeThreadConfig, MuseThreadConfig, ClaudeThreadConfig and NativeThreadResult have only __post_init__.
+FUNCTION INVENTORY: NativeThreadRequest.__post_init__ is the narrated main function and picks the prompt cap and pattern for the harness; _checked_workspace checks and resolves the workspace; _checked_model checks the model for the harness; _checked_thread_id ties the thread id to the verb; _checked_skills checks, resolves and names each skill folder. GrokThreadConfig, OpencodeThreadConfig, MuseThreadConfig, ClaudeThreadConfig and NativeThreadResult have only __post_init__.
 COMMON MODIFICATION PATTERNS: A new config field adds one field and one validator call to its record, and its bound or pattern to vidbyte/lib/constants/native_threads.py. A config record never gets a model field: the model is an argument of every call.
 WHAT NOT TO DO IN THIS FILE: 1. Do not read keys from environment variables. 2. Do not put a key value in an error message or its details; name the parameter instead. 3. Do not drop repr=False from a key field. 4. Do not import from vidbyte.harnesses; vidbyte/lib is the bottom layer.
-KNOWN EDGE CASES: The prompt cap is NATIVE_PROMPT_MAX_CHARS for opencode and Claude Code, which read the prompt from stdin (NATIVE_STDIN_PROMPT_HARNESSES), and NATIVE_ARGV_PROMPT_MAX_CHARS for Grok and Muse, which take it on argv; on Windows the Grok and Muse prompt must also fit NATIVE_WINDOWS_ARGV_PROMPT_MAX_UNITS once quoted and counted in UTF-16 units, the way CreateProcess counts it; that ceiling leaves room for the rest of the command line, and a launch that still passes the limit is reported as launch_failed. A skill item that is not a path is refused naming skills[<i>], while a skill list that is a str or holds too many items is refused naming skills. Two skill folders with the same folder name are refused, because each harness finds a skill by its folder name. A Claude Code thread id must be a lowercase UUID (CLAUDE_THREAD_ID_PATTERN), because claude --resume also matches a session title or a transcript path.
+KNOWN EDGE CASES: The prompt cap is NATIVE_PROMPT_MAX_CHARS for opencode and Claude Code, which read the prompt from stdin (NATIVE_STDIN_PROMPT_HARNESSES), and NATIVE_ARGV_PROMPT_MAX_CHARS for Grok and Muse, which take it on argv; on Windows the Grok and Muse prompt must also fit NATIVE_WINDOWS_ARGV_PROMPT_MAX_UNITS once quoted and counted in UTF-16 units, the way CreateProcess counts it; that ceiling leaves room for the rest of the command line, and a launch that still passes the limit is reported as launch_failed. A skill item that is not a path is refused naming skills[<i>], while a skill list that is a str or holds too many items is refused naming skills. Two skill folders with the same folder name are refused, because each harness finds a skill by its folder name. A Claude Code thread id must be a lowercase UUID (CLAUDE_THREAD_ID_PATTERN), because claude --resume also matches a session title or a transcript path. A Claude Code prompt that holds a lone surrogate is refused (CLAUDE_PROMPT_PATTERN), because UTF-8 cannot encode it for stdin; opencode's prompt is not checked for one (spec EC-38).
 RELATED DOCS: vidbyte/harnesses/README.md
 TESTS: tests/features/harness_threads/test_harness_threads_records.py, tests/features/harness_threads/test_harness_threads_arguments.py
 """
@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from vidbyte.lib.constants.native_threads import (
+    CLAUDE_PROMPT_PATTERN,
     CLAUDE_THREAD_ID_PATTERN,
     MUSE_DEFAULT_PATH,
     MUSE_DISTRO_MAX_CHARS,
@@ -92,8 +93,11 @@ class NativeThreadRequest:
 
         # Grok and Muse take the prompt on argv, so they get the
         # smaller cap; opencode and Claude Code read it from stdin.
+        # A Claude Code prompt with a lone surrogate is refused here,
+        # because writing it to stdin would fail after claude started.
         prompt_cap = NATIVE_PROMPT_MAX_CHARS if self.harness in NATIVE_STDIN_PROMPT_HARNESSES else NATIVE_ARGV_PROMPT_MAX_CHARS
-        RecordFieldValidator.require_text(self.prompt, "prompt", max_chars=prompt_cap, pattern=NATIVE_PROMPT_PATTERN)
+        prompt_pattern = CLAUDE_PROMPT_PATTERN if self.harness is NativeHarness.CLAUDE else NATIVE_PROMPT_PATTERN
+        RecordFieldValidator.require_text(self.prompt, "prompt", max_chars=prompt_cap, pattern=prompt_pattern)
 
         # @intent argv-prompt-fits-the-windows-command-line
         # On Windows a prompt of quotes or emoji within the cap can
