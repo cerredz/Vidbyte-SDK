@@ -82,7 +82,8 @@ class CodexForgetTurnsTests(RowTestCase):
         with self.assertRaises(ConfigurationError) as caught:
             await asyncio.wait_for(host.forget_codex_turns(""), WAIT_SECONDS)
         self.assertIn("forget_codex_turns thread_id", str(caught.exception))
-        self.assertEqual(caught.exception.details.get("field"), "thread_id")
+        # D-33: forget reuses CodexThreadRef, which labels the field "forget_codex_turns thread_id" (as _field_named accepts).
+        self.assertTrue(str(caught.exception.details.get("field", "")).endswith("thread_id"), caught.exception.details)
         self.assertEqual(len(self.server.requests), sent)
 
         # The thread's dynamic tools stay registered, so a later tool call still reaches the developer's tool.

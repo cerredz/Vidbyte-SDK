@@ -460,7 +460,12 @@ class CodexCloseHandlerTests(ApprovalTestCase):
         self.assertEqual([entry["reason"] for entry in self.fallbacks(records)[before:]], ["closing"])
         held.release()
         await asyncio.wait_for(closing, CLOSE_SECONDS)
-        self.assertEqual((self.server.closed, self.server.reader_errors), (1, []))
+        from openai_codex.errors import TransportClosedError
+
+        # Close ends the process, so the SDK reader records its normal end-of-file TransportClosedError; any other entry
+        # means the router raised on the reader thread (INV-15, INV-16).
+        self.assertEqual(self.server.closed, 1)
+        self.assertEqual([type(error).__name__ for error in self.server.reader_errors if type(error) is not TransportClosedError], [])
         self.assertEqual(self.count("turn/interrupt"), 1)
 
 

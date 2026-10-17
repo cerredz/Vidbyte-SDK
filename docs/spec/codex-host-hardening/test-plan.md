@@ -190,3 +190,18 @@ The count checks out: 650 − 27 = 623 previously passing tests stay green, and 
 - **`experimental_api=False` refusals are local and send nothing at all.** Not even the `thread/read` of fork step 3 may follow.
 - **The forget tests read handles and usage through the public API only.** `forget_codex_turns` on a closed host must still work and return the count, and it must keep the thread's dynamic-tool registration.
 - **Run order:** `tests/features/codex_host/test_codex_host_sdk_contract.py` first, after the S10 bump; then the pack; then `tests/test_codex_*.py`; then the full gate.
+
+## Orchestrator-granted corrections (S3)
+
+The orchestrator granted these two edits on 2026-10-17, after S3 was blocked on them. Each was checked against the spec and a test run. No other test line changed.
+
+1. **`test_codex_host_function_rows.py::CodexForgetTurnsTests::test_forget_drops_ended_turns_refuses_a_busy_thread_and_sends_nothing`** (AC-41, D-33)
+   - **Before:** `self.assertEqual(caught.exception.details.get("field"), "thread_id")`
+   - **After:** `self.assertTrue(str(caught.exception.details.get("field", "")).endswith("thread_id"), caught.exception.details)`
+   - **Why:** D-33 makes forget reuse `CodexThreadRef`, which labels the field `"forget_codex_turns thread_id"`. This now matches I1 and `_field_named`.
+2. **`test_codex_host_approvals.py::CodexCloseHandlerTests::test_close_cancels_a_pending_handler_and_declines_a_late_request_for_a_turn_awaiting_cleanup`** (AC-38, INV-15, INV-16)
+   - **Before:** `self.assertEqual((self.server.closed, self.server.reader_errors), (1, []))`
+   - **After:** `self.assertEqual(self.server.closed, 1)`, plus a check that every entry in `reader_errors` is the SDK's `TransportClosedError`. The check compares the type itself, not its name.
+   - **Why:** close ends the process, so the SDK reader always records that end-of-file error (`codex_host_fakes.py` `reader_failed`). Any other entry still means the router raised. The `turn/interrupt` count of 1 is kept.
+
+Run: `PYTHONPATH=$(pwd) "$V" -m pytest tests/features/codex_host/test_codex_host_function_rows.py tests/features/codex_host/test_codex_host_approvals.py -q -p no:cacheprovider` gives `24 passed in 2.20s`.
