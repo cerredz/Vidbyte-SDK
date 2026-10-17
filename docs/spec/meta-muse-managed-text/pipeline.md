@@ -25,7 +25,7 @@ Run B of two sequential runs. Run A (cerredz/Vidbyte, slug `meta-muse-gateway`) 
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 1/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 · S5 repair iterations: 1/8 · S5 re-review rounds: 1/2
 
 ## Decisions the orchestrator made
 - 2026-10-16 18:25 — Worktree from origin/main `845a4d9b`; upstream unset (`git worktree add` set it to origin/main). Push with `git push -u origin feat/meta-muse-managed-text`.
