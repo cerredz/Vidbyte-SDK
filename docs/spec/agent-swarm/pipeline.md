@@ -15,7 +15,7 @@ started: 2026-10-16 16:10
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-16 16:10 | 2026-10-16 16:30 | reports/S0-scout.md | base_commit 0f2aeb48; code-map.md (4 §, 14 contradictions) |
 | S1 spec + review | done | 2026-10-16 16:35 | 2026-10-16 18:40 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-2.md | spec r3 approved @d2746a4d; R1 SOUND WITH FIXES (7 applied), R2 SOUND WITH FIXES (6 applied) |
-| S2 tests | done | 2026-10-16 18:45 | 2026-10-16 20:40 | reports/S2-test-author.md | 51 tests / 161 cases, all red (missing symbols); S2_HEAD=9895d663 |
+| S2 tests | done | 2026-10-16 18:45 | 2026-10-16 20:40 | reports/S2-test-author.md | 51 tests / 161 cases, all red (missing symbols); S2_HEAD=9895d663 → 87c8ed14 after adjudicated fixture fix |
 | S3 implement | running | 2026-10-16 20:45 | | reports/S3-implementer.md | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
@@ -48,6 +48,10 @@ started: 2026-10-16 16:10
 
 - 2026-10-16 20:40 — Spot-check S2: 3 commits (ecfbac79 tests, cf403857 proof, 9895d663 report); every AC-1..AC-21 cited in test-plan.md; re-ran the pack myself: "161 failed in 2.26s", all ImportError/ModuleNotFoundError/KeyError('agent_swarm') — red for the right reason. S2_HEAD = 9895d663 (test tree frozen from here). Spec status → tests-written.
 - 2026-10-16 20:40 — Accepted the test author's handling of three non-blocking spec ambiguities (cross-field refusal field names; a refused goal does not consume the run per §8.5 pseudocode; INV-1 goal arrives as the call's `prompt`). Logged here; no spec revision needed.
+
+- 2026-10-16 21:10 — Semgrep: built isolated venv scratchpad/semgrep-venv (semgrep 1.170.1); the background `--version` check "failed" only because it ran the global pysemgrep — with `/c/...` Scripts first on PATH it reports 1.170.1. Command given to S3/S5: `PATH="/c/Users/422mi/AppData/Local/Temp/claude/C--Users-422mi-vidbyte-repos/b5ead954-ba63-4734-96d3-7e412171de95/scratchpad/semgrep-venv/Scripts:$PATH" semgrep scan --error --config .semgrep/typed-mapping-boundary-policy.yml vidbyte`.
+- 2026-10-16 22:00 — S3 BLOCKED at Phase 5: 26/161 failed with `TypeError: renderings() got multiple values for argument 'text'` (S2 fixture helper keyword clash; callers pass `text=` as a template field). Verified myself. Adjudication: genuine test-harness defect, no assertion involved → routed to the S2 test author (only it edits tests). Fix 87c8ed14 = `renderings(template, haystack, /, **known)` (3-line diff, verified). Pack now 161 passed (re-run by orchestrator: "161 passed in 3.22s"). New S2_HEAD = 87c8ed14; later stages diff the test tree against it.
+- 2026-10-16 22:00 — S3 deviations accepted as repo-forced: asyncio.Semaphore instead of asyncio.Lock (lint TID251/S039 bans Lock; CodexAgent precedent); provider coerced with ModelProvider(...) (C012); on_event checked with callable() (S009 mypy); start events flushed inside the time limit; sorted-position imports/README/REPO_MAP entries.
 
 ## User replies (verbatim)
 - 2026-10-16 16:05 — answers to four clarifying questions: "One shared folder (Recommended)"; "Stay alive until quiet (Recommended)"; "Shared goal + per-agent prompts (Recommended)"; "Callback + list on result (Recommended)".
@@ -100,4 +104,7 @@ started: 2026-10-16 16:10
 - Refusals put `AgentSwarmSettings.<f>` / `AgentSwarmMember.<f>` in `details["field"]` and repeat it in the message; event errors name exactly `AgentSwarmEvent.<f>` — *source:* S2
 - Budget test: exactly 7 .py files in vidbyte/agents/agent_swarm; each of the 11 new modules ≤ 400 lines after its header; AST scan forbids any `sleep` call in the package and toolset — *source:* S2
 - AC-6 uses timeout_seconds=0.5 with elapsed < 10.5 s; AC-16/AC-19 need Git bash on Windows — *source:* S2
+- C012 accepts only `ModelProvider(x)` or a ProviderModelRegistry provider call; S024 counts `with`/`try` as nesting (combine `asyncio.timeout(...)` and `TaskGroup()` in one `async with`); asyncio.Lock is lint-banned (TID251/S039) → Semaphore — *source:* S3
+- Three `harness_threads` failures on this branch are not ours: `failure_codes…` fails at base 0f2aeb48; `tools_and_configs…` and `import_vidbyte…` compare against merge-base and fail on any vidbyte/tools or root __all__ change (NFR-6 allows them) — *source:* S3
+- origin/main had 8 files of drift (none in §12.3) at S3; catch up by MERGE after push, never rebase — *source:* S3
 - vidbyte-gates.md is wrong for the SDK: lint marker is `SDK-LINT: PASS`; run_ci.py runs no semgrep; `--stage source` needs `PYTHONPATH=$(pwd)` while the package stage must run without it — *source:* S0 scout
