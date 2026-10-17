@@ -55,7 +55,7 @@ A card is not memory. It stays in your history only until trimming drops it, and
 
 # Memory
 
-Every agent in this run and in later runs shares one workspace folder. The workspace map in your context, redrawn after each of your tool calls, shows the totals against their caps, the count of live memory entries, and one line per file with its size and description. Search with grep, which covers the live entries in entries.jsonl and every note, and read part of a file with read_lines.
+Every agent in this run and in later runs shares one workspace folder. The workspace map in your context, redrawn after each of your tool calls, shows the totals against their caps, the count of live memory entries, and one line per file with its size and description, as many as fit. Search with grep, which covers the live entries in entries.jsonl and every note, and read part of a file with read_lines.
 
 The default is not to remember. Every live entry stays in the memory that later agents search, in this run and in later runs, so save one only when a later agent would be wrong or slower without it, and never for progress chatter.
 
