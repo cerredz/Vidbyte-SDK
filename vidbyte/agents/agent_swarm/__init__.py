@@ -2,7 +2,7 @@
 
 PURPOSE: Exposes AgentSwarm, its settings (AgentSwarmSettings), the three roles of one run (AgentSwarmRuntime, AgentSwarmEvents, and AgentSwarmWorkplace), and AgentSwarmMemberRuntime, the runtime that AgentRuntimeType.AGENT_SWARM_MEMBER resolves to.
 ROLE IN CODEBASE: This is the public package boundary imported by vidbyte.agents, by the runtime registry's lazy import, and by application code.
-ARCHITECTURE NOTE: The member agent, the message tool, and the turn middleware stay internal to the package; the swarm's records and enums are public from vidbyte.lib.dataclasses.agent_swarm and vidbyte.lib.enums, and its toolset from vidbyte.tools.toolsets.
+ARCHITECTURE NOTE: The member agent and the message tool stay internal to the package, and the turn middleware, which lives in vidbyte/middleware/builtins/agent_swarm_turn.py, is exported from neither package; the swarm's records and enums are public from vidbyte.lib.dataclasses.agent_swarm and vidbyte.lib.enums, and its toolset from vidbyte.tools.toolsets.
 FUNCTION INVENTORY: None; this module only re-exports the six public names.
 COMMON MODIFICATION PATTERNS: Export a new name here only when it becomes part of the supported AgentSwarm API, and mirror it in vidbyte/agents/__init__.py.
 WHAT NOT TO DO IN THIS FILE: 1. Do not export AgentSwarmMemberAgent, AgentSwarmMessageTool, or AgentSwarmTurnMiddleware; they are internal. 2. Do not add logic here.

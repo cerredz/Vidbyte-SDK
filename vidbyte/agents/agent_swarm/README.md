@@ -83,7 +83,7 @@ Every event has a `sequence` (1, 2, … in the order the changes happened) and `
 - `swarm.py`: `AgentSwarm`, the entry point; prepares the folder and runs one fresh `AgentSwarmRuntime` per `arun`, refusing a concurrent run.
 - `settings.py`: `AgentSwarmSettings`, validated when it is created, with the keys matched once.
 - `runtime.py`: `AgentSwarmRuntime`, one swarm run: the inboxes, turns, wakes, failures, the end check, and the replies.
-- `member.py`: the member's loop (`AgentSwarmMemberRuntime`), its agent, the `message` tool, and the turn middleware that turns a finish into the end of a turn.
+- `member.py`: the member's loop (`AgentSwarmMemberRuntime`), its agent, and the `message` tool; each agent gets the turn middleware that turns a finish into the end of a turn, which lives in the middleware layer as `vidbyte.middleware.builtins.agent_swarm_turn`.
 - `events.py`: `AgentSwarmEvents`, the numbered event record and its in-order, once-only delivery to `on_event`.
 - `workplace.py`: `AgentSwarmWorkplace`, which creates the shared folder and never cleans it.
 - `README.md`: this file.

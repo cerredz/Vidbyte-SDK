@@ -1,19 +1,18 @@
 """FILE: vidbyte/agents/agent_swarm/member.py
 
-PURPOSE: Defines the four parts that make one ordinary agent loop into a swarm member: AgentSwarmMemberRuntime, the member's loop, which hands it the messages that arrived during its turn after each tool iteration; AgentSwarmMemberAgent, the BaseAgent each member runs as; AgentSwarmMessageTool, the run-bound message tool; and AgentSwarmTurnMiddleware, which records tool calls and turns every finish attempt into the end of a turn.
-ROLE IN CODEBASE: AgentSwarmRuntime (runtime.py) builds one AgentSwarmMemberAgent per member, holding one AgentSwarmMessageTool and one AgentSwarmTurnMiddleware; BaseAgent._runtime builds AgentSwarmMemberRuntime for it through RuntimeRegistry (vidbyte/lib/registries/runtimes.py), which resolves AgentRuntimeType.AGENT_SWARM_MEMBER. All four call back into the run's AgentSwarmRuntime, which owns every piece of swarm state. Only AgentSwarmMemberRuntime is exported, so the registry can import it through the package.
-ARCHITECTURE NOTE: Each member runs one long BaseAgent run for the whole swarm, so a turn end is a finish attempt that the turn middleware turns into a wait: AgentSwarmRuntime.end_turn returns the next messages, which come back to the model as the feedback of a continued finish, or nothing once the swarm ends, which accepts the finish and lets the run return. Mid-turn delivery is the loop's one documented seam for appending to the conversation, _after_tool_iteration. AgentSwarmRuntime is imported only for type checking and never inside a function, so the package has no import cycle; the member runtime therefore refuses a missing swarm runtime by checking for None, which is all a plain BaseAgent or a fork can pass.
-FUNCTION INVENTORY: AgentSwarmMemberRuntime.__init__ refuses construction outside a swarm and _after_tool_iteration appends the delivered messages; AgentSwarmMemberAgent.__init__ configures the member and _runtime_extension_kwargs hands the swarm runtime to its loop; AgentSwarmMessageTool.spec declares message with the peers as its recipient choices and execute posts it; AgentSwarmTurnMiddleware.after_tool_call records TOOL_CALLED and review_finish ends the turn.
-COMMON MODIFICATION PATTERNS: A change to what a member holds (policy, history trim, tool-result cap) is made in AgentSwarmMemberAgent.__init__ with its value in vidbyte/lib/constants/agent_swarm.py. Model-facing text for the message tool comes from the agent_swarm prompt family, never from a literal here.
-WHAT NOT TO DO IN THIS FILE: 1. Do not import AgentSwarmRuntime at run time; keep it under TYPE_CHECKING. 2. Do not keep swarm state in these classes; AgentSwarmRuntime owns it. 3. Do not set fail_closed to False on the turn middleware; a recording bug must stop that member rather than silently drop an event. 4. Do not override any other loop hook.
-KNOWN EDGE CASES: isDone ends only the turn: on a wake the model reads the loop's provisional refusal of isDone and then the delivered messages. A turn that ends with an empty reply is still a turn end, with empty text. An exception in collect_messages or end_turn leaves the loop and fails that member with its cause; an exception in record_tool_call aborts the member through the fail-closed middleware; an exception inside the message tool is a tool error the model reads.
-RELATED DOCS: docs/spec/agent-swarm/spec.md (sections 8.1 D-1 to D-3, D-9, D-10, 8.5, and 9.2); vidbyte/agents/agent_swarm/README.md
+PURPOSE: Defines three of the four parts that make one ordinary agent loop into a swarm member: AgentSwarmMemberRuntime, the member's loop, which hands it the messages that arrived during its turn after each tool iteration; AgentSwarmMemberAgent, the BaseAgent each member runs as; and AgentSwarmMessageTool, the run-bound message tool. The fourth part, AgentSwarmTurnMiddleware, which records tool calls and turns every finish attempt into the end of a turn, lives in the middleware layer (vidbyte/middleware/builtins/agent_swarm_turn.py); this module imports it to build each member, so it also resolves from here.
+ROLE IN CODEBASE: AgentSwarmRuntime (runtime.py) builds one AgentSwarmMemberAgent per member, holding one AgentSwarmMessageTool and one AgentSwarmTurnMiddleware; BaseAgent._runtime builds AgentSwarmMemberRuntime for it through RuntimeRegistry (vidbyte/lib/registries/runtimes.py), which resolves AgentRuntimeType.AGENT_SWARM_MEMBER. All four parts call back into the run's AgentSwarmRuntime, which owns every piece of swarm state. Only AgentSwarmMemberRuntime is exported from the package, so the registry can import it through the package.
+ARCHITECTURE NOTE: Each member runs one long BaseAgent run for the whole swarm, so a turn end is a finish attempt that the turn middleware turns into a wait. Mid-turn delivery is the loop's one documented seam for appending to the conversation, _after_tool_iteration. AgentSwarmRuntime is imported only for type checking and never inside a function, so the package has no import cycle; the member runtime therefore refuses a missing swarm runtime by checking for None, which is all a plain BaseAgent or a fork can pass.
+FUNCTION INVENTORY: AgentSwarmMemberRuntime.__init__ refuses construction outside a swarm and _after_tool_iteration appends the delivered messages; AgentSwarmMemberAgent.__init__ configures the member and _runtime_extension_kwargs hands the swarm runtime to its loop; AgentSwarmMessageTool.spec declares message with the peers as its recipient choices and execute posts it.
+COMMON MODIFICATION PATTERNS: A change to what a member holds (policy, history trim, tool-result cap, middleware) is made in AgentSwarmMemberAgent.__init__ with its value in vidbyte/lib/constants/agent_swarm.py. Model-facing text for the message tool comes from the agent_swarm prompt family, never from a literal here.
+WHAT NOT TO DO IN THIS FILE: 1. Do not import AgentSwarmRuntime at run time; keep it under TYPE_CHECKING. 2. Do not keep swarm state in these classes; AgentSwarmRuntime owns it. 3. Do not define middleware here; AgentSwarmTurnMiddleware belongs to the middleware layer. 4. Do not override any other loop hook.
+KNOWN EDGE CASES: An exception in collect_messages leaves the loop and fails that member with its cause; an exception inside the message tool is a tool error the model reads. The turn middleware's own edge cases (isDone ends only the turn, an empty reply is still a turn end) are listed in its module.
+RELATED DOCS: docs/spec/agent-swarm/spec.md (sections 8.1 D-1 to D-3, D-9, D-10, 8.5, and 9.2); vidbyte/agents/agent_swarm/README.md; vidbyte/middleware/builtins/agent_swarm_turn.py
 TESTS: tests/features/agent_swarm/test_agent_swarm_contract.py and tests/features/agent_swarm/test_agent_swarm_messaging.py
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from vidbyte.agents.base import BaseAgent
@@ -27,14 +26,13 @@ from vidbyte.lib.constants.agent_swarm import (
     AGENT_SWARM_TOOL_RESULT_MAX_CHARS,
 )
 from vidbyte.lib.dataclasses.agent_swarm import AgentSwarmMember
-from vidbyte.lib.dataclasses.agents import FinishReview, ProviderKeys
-from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision
+from vidbyte.lib.dataclasses.agents import ProviderKeys
 from vidbyte.lib.dataclasses.security import PermissionPolicy
-from vidbyte.lib.enums import AgentRuntimeStateKey, AgentRuntimeType
+from vidbyte.lib.enums import AgentRuntimeType
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import ConfigurationError, ToolExecutionError
 from vidbyte.middleware import MessageHistoryCompactionMiddleware
-from vidbyte.middleware.base import AgentMiddleware
+from vidbyte.middleware.builtins.agent_swarm_turn import AgentSwarmTurnMiddleware
 from vidbyte.prompts.catalog import Prompts
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec
@@ -68,32 +66,6 @@ class AgentSwarmMemberRuntime(AgentRuntime):
         text = await self.swarm_runtime.collect_messages(self.agent_name)
         if text:
             messages.append({"role": "user", "content": text})
-
-
-class AgentSwarmTurnMiddleware(AgentMiddleware):
-    """Records each tool call as a swarm event and turns each finish attempt into the end of a turn."""
-
-    def __init__(self, swarm_runtime: AgentSwarmRuntime) -> None:
-        self.swarm_runtime = swarm_runtime
-
-    async def after_tool_call(self, ctx: MiddlewareContext) -> MiddlewareDecision:
-        """Record a TOOL_CALLED event for every tool call except the loop's own internal ones, such as isDone."""
-        if ctx.tool_call is not None and ctx.tool_result is not None and not ctx.tool_is_internal:
-            await self.swarm_runtime.record_tool_call(ctx.agent_name, ctx.tool_call.tool_name, ctx.tool_result.status)
-        return MiddlewareDecision.continue_()
-
-    async def review_finish(self, ctx: MiddlewareContext) -> FinishReview:
-        """End the agent's turn: continue with the next messages when it is woken, or accept the finish once the swarm ends."""
-        # @intent a-finish-is-the-end-of-a-turn
-        # The reply that ends the turn is isDone's answer when the model
-        # called it, else the model's last text. The swarm decides what
-        # happens next: new messages continue this same run as the next
-        # turn, and an empty answer means the swarm has ended.
-        run_state: Mapping[Any, Any] = ctx.run_state
-        outputs = run_state.get(AgentRuntimeStateKey.ITERATION_OUTPUTS.value, ())
-        reply = ctx.tool_result.output if ctx.tool_result is not None else (outputs[-1] if outputs else "")
-        text = await self.swarm_runtime.end_turn(ctx.agent_name, reply)
-        return FinishReview.continue_with(text) if text else FinishReview.accept()
 
 
 class AgentSwarmMessageTool(BaseTool):
