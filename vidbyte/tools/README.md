@@ -87,6 +87,7 @@ print(catalog.provider_schemas("openai"))
 - `security/`: permission policies and sandbox contracts.
 - `mcp/`: MCP clients, transports, presets, and bridged tools.
 - `builtins/`: a minimal subprocess bash tool, code search, context, context primitives, editing, memory, MCP, handoff, pause, reasoning traces, and utility tools.
+- Search and read options: `GrepTool` takes `smart_case` (a pattern with no uppercase letter ignores letter case) and `context_lines` (the lines shown around each match when a call sets none), and `ReadLinesTool` returns at most `FileSystemToolConfig.max_read_lines` lines per call when that is set, ending with a line that names the next start line. Every default keeps the old output.
 - `builtins/operations/`: priced search and fetch tools plus the executing provider clients.
 - `toolsets/`: pre-assembled tool catalogs, including `CodingAgentTools`, the seven tools a `CodingAgent` starts with, and `InfiniteMemoryAgentTools`, bash over the project folder plus grep and read_lines over the memory workspace.
 
