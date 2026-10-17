@@ -64,6 +64,37 @@ transport returned: `action.policy_violation`, `action.unsafe`,
 Action rules are the main extension point for agent behavior. Safety and
 permission rules should be fail closed and run before the action.
 
+## Browser tools
+
+The harness browser functions (`run_<harness>_with_browser` and its continue
+and fork siblings in `vidbyte.harnesses.native`) add four codes. Every other
+failure of a browser call keeps its harness's own `grok.*`, `opencode.*` or
+`muse.*` code.
+
+- `browser.mount_unsupported`: the selected tools ask for something the
+  harness cannot carry safely: a keyed remote tool on Grok, a keyed or
+  narrowed tool on Muse, a local tool on Muse in WSL mode, or more Grok allow
+  and deny rules than fit on its command line. Refused before anything
+  starts. Next step: choose tools the harness can mount, as the observation
+  describes, or run the same tools on a harness that can mount them.
+- `browser.runtime_missing`: Node 22.12.0 or later is not on PATH, the node
+  found first is a Windows batch file, or a tool that drives Chrome found no
+  Chrome stable install. Next step: install Node 22.12.0 or later as a real
+  `node` executable on PATH, and Google Chrome stable for playwright or
+  chromedevtools, then call again.
+- `browser.tool_install_failed`: npm could not install a pinned tool package:
+  the registry was unreachable, the install timed out, the npm that ships
+  with Node is missing, the user home is unknown, or an earlier install left
+  a broken folder. Next step: check access to registry.npmjs.org and that
+  the user home is writable, delete any broken folder the message names under
+  `~/.vidbyte/tools`, then call again.
+- `browser.tools_unavailable`: a mounted tool server did not start or connect
+  in time, or the agent used none of the mounted tools; opencode prints no
+  per-server status, so there the two cannot be told apart. The error carries
+  the thread id and the answer. Next step: read the servers and the vendor
+  text the message names, check each tool's key, and continue the thread
+  with the same tools to try again.
+
 ## Runtime and resources
 
 `runtime.max_iterations`, `runtime.max_tokens`, `runtime.max_tool_calls`,
