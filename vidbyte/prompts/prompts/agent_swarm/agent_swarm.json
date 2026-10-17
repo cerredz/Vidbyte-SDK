@@ -1,0 +1,47 @@
+{
+  "name": "Agent Swarm",
+  "description": "Instructions for AgentSwarm, one Markdown file per leaf: the swarm prompt each agent's system prompt carries after its own, the model-facing descriptions of the message tool and its two parameters, the message tool's reply and its three refusals, and the user message that delivers other agents' messages with one labeled block per message.",
+  "key": "agent_swarm",
+  "prompts": {
+    "system_prompt": {
+      "path": "system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agent_swarm/system_prompt.md"
+    },
+    "message_tool_description": {
+      "path": "message_tool_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agent_swarm/message_tool_description.md"
+    },
+    "message_to_description": {
+      "path": "message_to_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agent_swarm/message_to_description.md"
+    },
+    "message_text_description": {
+      "path": "message_text_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agent_swarm/message_text_description.md"
+    },
+    "message_sent": {
+      "path": "message_sent.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agent_swarm/message_sent.md"
+    },
+    "message_unknown_recipient": {
+      "path": "message_unknown_recipient.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agent_swarm/message_unknown_recipient.md"
+    },
+    "message_stopped_recipient": {
+      "path": "message_stopped_recipient.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agent_swarm/message_stopped_recipient.md"
+    },
+    "message_blank_text": {
+      "path": "message_blank_text.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agent_swarm/message_blank_text.md"
+    },
+    "inbox": {
+      "path": "inbox.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agent_swarm/inbox.md"
+    },
+    "inbox_message": {
+      "path": "inbox_message.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agent_swarm/inbox_message.md"
+    }
+  }
+}
