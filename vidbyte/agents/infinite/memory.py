@@ -30,7 +30,11 @@ from vidbyte.lib.constants.infinite import (
     INFINITE_WRITE_NOTE_TOOL_NAME,
 )
 from vidbyte.lib.dataclasses.infinite import InfiniteEntryDraft, InfiniteStagedEntry
-from vidbyte.lib.enums.infinite import InfiniteAgentRole, InfiniteEntryKind
+from vidbyte.lib.enums.infinite import (
+    InfiniteAgentRole,
+    InfiniteEntryKind,
+    InfiniteRecallMode,
+)
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import ConfigurationError, ToolExecutionError
 from vidbyte.lib.registries.infinite import InfiniteMemoryToolRegistry
@@ -63,7 +67,7 @@ class InfiniteAgentMemory:
         # role, and the recall mode grant; this builds each one over this
         # agent's memory.
         builders: dict[str, Callable[[InfiniteAgentMemory], BaseTool]] = {INFINITE_REMEMBER_TOOL_NAME: InfiniteRememberTool, INFINITE_WRITE_NOTE_TOOL_NAME: InfiniteWriteNoteTool, INFINITE_EDIT_FILE_TOOL_NAME: InfiniteEditFileTool, INFINITE_DROP_ENTRY_TOOL_NAME: InfiniteDropEntryTool, INFINITE_RECALL_TOOL_NAME: InfiniteRecallTool}
-        return tuple(builders[name](self) for name in InfiniteMemoryToolRegistry.tool_names(self.workspace.settings.preset, self.role, self.workspace.settings.recall_mode))
+        return tuple(builders[name](self) for name in InfiniteMemoryToolRegistry.tool_names(self.workspace.settings.preset, self.role, InfiniteRecallMode(self.workspace.settings.recall_mode)))
 
     def remember(self, draft: InfiniteEntryDraft) -> str:
         """Commit the root's entry at once, or stage a pair agent's entry for its verifier, and return the reply."""

@@ -32,7 +32,7 @@ from vidbyte.lib.constants.infinite import (
 )
 from vidbyte.lib.dataclasses.agents import AgentMessage
 from vidbyte.lib.enums import AgentRuntimeType
-from vidbyte.lib.enums.infinite import InfiniteAgentRole
+from vidbyte.lib.enums.infinite import InfiniteAgentRole, InfiniteRecallMode
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.registries.infinite import InfiniteMemoryToolRegistry
@@ -79,7 +79,7 @@ class InfiniteMemoryAgent(BaseAgent):
         # are enforced by DelegationLimitsMiddleware, so the prompt holds
         # no numbers the code could contradict.
         rules = Prompts().get(Prompt.INFINITE_MEMORY_ROOT_SYSTEM_PROMPT)
-        withheld = InfiniteMemoryToolRegistry.withheld_tool_names(settings.workspace.recall_mode, InfiniteAgentRole.ROOT)
+        withheld = InfiniteMemoryToolRegistry.withheld_tool_names(InfiniteRecallMode(settings.workspace.recall_mode), InfiniteAgentRole.ROOT)
         super().__init__(
             name=settings.name,
             system_prompt=f"{settings.system_prompt}\n\n{rules}",

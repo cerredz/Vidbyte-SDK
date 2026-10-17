@@ -53,6 +53,7 @@ from vidbyte.lib.dataclasses.infinite import (
 )
 from vidbyte.lib.enums.infinite import (
     InfiniteAgentRole,
+    InfiniteRecallMode,
     InfiniteResultStatus,
     InfiniteVerdict,
 )
@@ -264,7 +265,7 @@ class InfinitePair(BasePipeline):
         launch, settings = self.launch, self.launch.settings
         granted = tuple(tool for tool in launch.extras if tool.spec().name in self.card.tools)
         level = launch.depth + INFINITE_DEPTH_STEP
-        withheld = InfiniteMemoryToolRegistry.withheld_tool_names(launch.workspace.settings.recall_mode, memory.role)
+        withheld = InfiniteMemoryToolRegistry.withheld_tool_names(InfiniteRecallMode(launch.workspace.settings.recall_mode), memory.role)
         delegation: tuple[BaseTool, ...] = ()
         limits: tuple[AgentMiddleware, ...] = ()
         # @intent every-generator-may-delegate-within-the-caps

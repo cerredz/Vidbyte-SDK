@@ -100,7 +100,7 @@ class InfiniteRecallTool(BaseTool):
         # takes a tuple.
         terms = self._optional_argument(call, "terms", default=())
         try:
-            request = InfiniteRecallRequest(question=call.arguments.get("question"), purpose=call.arguments.get("purpose"), known=self._optional_argument(call, "known", default=""), terms=tuple(terms) if isinstance(terms, list) else terms)
+            request = InfiniteRecallRequest(question=call.arguments.get("question", ""), purpose=call.arguments.get("purpose", ""), known=self._optional_argument(call, "known", default=""), terms=tuple(terms) if isinstance(terms, list) else terms)
         except ConfigurationError as exc:
             return ToolResult.error(INFINITE_RECALL_TOOL_NAME, memory.refusal(str(exc)))
         if memory.recalled >= INFINITE_RECALLS_PER_AGENT:
