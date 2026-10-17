@@ -67,7 +67,6 @@ Each line is input + state → wrong output.
 - Streaming refusal keyed on "`VIDBYTE_API_KEY` is set" instead of on the mode → `DIRECT` streaming breaks, or an `AUTO` stream bypasses the gateway (byok-api-keys INV-11).
 - `mode` inserted before `timeout_seconds` → positional construction breaks.
 - `meta` left out of `VIDBYTE_MANAGED_TEXT_PROVIDERS` → a Muse config in `AUTO` or `VIDBYTE_MANAGED` raises `UnsupportedProviderError` at construction, and agents with a Muse fallback fail instead of falling back (meta-muse-managed-text FR-1, INV-1).
-- `META` given an `ORACLE_KEYS` entry that fully matches neither Meta shape (`LLM_<digits>_<secret>` or `LLM|<digits>|<secret>`, meta-muse-managed-text FR-9) → the `DIRECT` oracle is refused at matching (M-6), so the per-provider test fails on the oracle instead of on the gateway call.
 
 ## Historical Regressions
 

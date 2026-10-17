@@ -3,8 +3,8 @@
 PURPOSE: Proves what a managed request carries on the wire beyond the envelope: the output-token cap in each dialect's own field, extra_body passed through untouched, the 630 s per-attempt timeout floor, and only the body keys the gateway's allowed lists accept.
 ROLE IN CODEBASE: Wire-contract layer of tests/features/sdk_managed_text/ (spec INV-2, INV-9, INV-10; AC-8, AC-9, AC-26; EC-8, EC-20; NG-14; meta-muse-managed-text AC-5, INV-5, INV-6 through the per-provider tables). Exercises the TextModelRunner construction-time pinning in vidbyte/lib/runners/text.py and the real adapters in vidbyte/providers/.
 ARCHITECTURE NOTE: Each test runs a managed call with only VIDBYTE_API_KEY set and reads the envelope the scripted inner transport received; the adapters are real, so a key the adapter emits shows up exactly as the gateway would see it.
-COMMON MODIFICATION PATTERNS: When backend's allowed lists or an adapter's emitted keys change, update EMITTED_KEYS from the spec's section 9.2 table, never from the adapter's current output.
-WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level (see managed_text_fixtures.py). 2. Do not compare caps with >= or <=: an explicit caller value must arrive exactly.
+COMMON MODIFICATION PATTERNS: When backend's allowed lists or an adapter's emitted keys change, update EMITTED_KEYS from the spec's section 9.2 table, never from the adapter's current output. When the gateway serves a new provider, give it a row in ORACLE_KEYS (a key its own table F rule proves, when it has one), CAP_FIELD, EMITTED_KEYS and FULL_CONFIG.
+WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level (see managed_text_fixtures.py). 2. Do not compare caps with >= or <=: an explicit caller value must arrive exactly. 3. Do not give META an ORACLE_KEYS entry that fully matches neither Meta shape (LLM_<digits>_<secret> or LLM|<digits>|<secret>): matching refuses the DIRECT oracle (M-6), so the per-provider test fails on the oracle instead of on the gateway call.
 KNOWN EDGE CASES: A Gemini generationConfig in extra_body replaces the adapter's one, so its cap disappears by design (EC-8). TextModelConfig accepts a NaN timeout, and max(nan, 630.0) is nan. Since byok-api-keys, the vendor-direct oracle and the caller-timeout case need TextModelMode.DIRECT; a provider key in AUTO relays through the gateway and gets the floor too (INV-20).
 RELATED DOCS: tests/features/sdk_managed_text/FEATURE.md; docs/spec/managed-generative-models/spec.md sections 6.1 (INV-9, INV-10) and 9.2 ("Keys the SDK emits per dialect"); docs/spec/meta-muse-managed-text/spec.md sections 6.1 (INV-5) and 9.2 (the meta body keys).
 TESTS: python -m pytest tests/features/sdk_managed_text/test_managed_text_wire_contract.py
@@ -45,7 +45,8 @@ CAP_FIELD = {
     ModelProvider.XAI: "max_tokens",
     ModelProvider.DEEPSEEK: "max_tokens",
     ModelProvider.KIMI: "max_tokens",
-    # meta-muse-managed-text D-2, INV-5: MetaProvider writes the cap as max_tokens, which #710 accepts.
+    # meta-muse-managed-text D-2, INV-5: MetaProvider writes the cap as
+    # max_tokens, which #710 accepts.
     ModelProvider.META: "max_tokens",
 }
 # Spec section 9.2 "Keys the SDK emits per dialect", copied from the table, not from the adapters.
@@ -57,7 +58,9 @@ EMITTED_KEYS = {
     ModelProvider.XAI: _CHAT_KEYS,
     ModelProvider.DEEPSEEK: _CHAT_KEYS,
     ModelProvider.KIMI: _CHAT_KEYS,
-    # meta-muse-managed-text section 9.2: the meta body uses only these keys, all on #710's Meta allowlist (response_format never: META is PROMPT_ONLY).
+    # meta-muse-managed-text section 9.2: the meta body uses only these
+    # keys, all on #710's Meta allowlist (response_format never: META is
+    # PROMPT_ONLY).
     ModelProvider.META: _CHAT_KEYS,
 }
 GEMINI_GENERATION_CONFIG_KEYS = frozenset({"temperature", "topP", "maxOutputTokens", "responseMimeType", "responseSchema", "thinkingConfig"})

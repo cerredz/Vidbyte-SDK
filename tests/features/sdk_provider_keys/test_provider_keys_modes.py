@@ -3,7 +3,7 @@
 PURPOSE: Proves how TextModelConfig.credentials() resolves the three modes (table R) and what each runner does with the result: DIRECT reads only the provider key, VIDBYTE_MANAGED reads only the Vidbyte key, AUTO needs a Vidbyte key and relays when the provider has a key; a gateway runner pins its credentials; streaming refuses every gateway mode; and an unsendable provider key is refused before any request.
 ROLE IN CODEBASE: Mode layer of tests/features/sdk_provider_keys/ (spec AC-6, AC-40; INV-5 to INV-8, INV-11, INV-12, INV-26; D-7, D-8, D-10, D-14, D-32; EC-12, EC-21 to EC-23, EC-56; table M rows M-8, M-9, M-12, M-13, M-15, M-21; meta-muse-managed-text AC-10, INV-1, INV-10, INV-12, INV-14; r4 AC-16). Exercises vidbyte/lib/dataclasses/model_configs.py (TextModelConfig, TextCredentials), vidbyte/lib/registries/models.py (find_provider_api_key, resolve_vidbyte_api_key), vidbyte/lib/runners/text.py and vidbyte/lib/runners/streaming_text.py.
 ARCHITECTURE NOTE: credentials() is the only code that reads the environment for a text call, so RecordingEnviron (a recording stand-in for os.environ) proves which variables each mode reads. Runner behavior is observed at the inner transport, which is the only fake.
-COMMON MODIFICATION PATTERNS: When a mode is added, add its row to the table R test and its refusals to the streaming test. Keep message checks to the facts table M binds.
+COMMON MODIFICATION PATTERNS: When a mode is added, add its row to the table R test and its refusals to the streaming test. Keep message checks to the facts table M binds. When the gateway serves a new provider, add it to SERVED, the list M-12 names.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import TextModelMode.DIRECT, TextCredentials or the new constants at module level. 2. Do not mock credentials() or ProviderModelRegistry; patch only the environment and the inner transport.
 KNOWN EDGE CASES: TextCredentials raises ConfigurationError for an impossible combination, the repo's convention for a record's own validation (spec section 9.1 names the rules, not the error type). A NaN timeout must still become the 630 s floor on a relay call.
 RELATED DOCS: tests/features/sdk_provider_keys/FEATURE.md; docs/spec/byok-api-keys/spec.md sections 6.1, 9.1 (TextCredentials) and 9.2 (table R, table M); docs/spec/meta-muse-managed-text/spec.md section 6.1.
@@ -45,7 +45,8 @@ from vidbyte.lib.runners import StreamingTextModelRunner, TextModelRunner
 
 CREDENTIAL_ERROR_KIND = "vidbyte_managed_credentials"
 PLACEHOLDER = "vidbyte-managed"
-# The providers the gateway serves, which M-12 lists; meta joined in meta-muse-managed-text FR-1 (AC-10, INV-10).
+# The providers the gateway serves, which M-12 lists; meta joined in
+# meta-muse-managed-text FR-1 (AC-10, INV-10).
 SERVED = ("openai", "anthropic", "gemini", "xai", "deepseek", "kimi", "meta")
 
 
@@ -258,7 +259,9 @@ class GatewayShapeTests(unittest.TestCase):
                 self.assertNotIn(K_ANTHROPIC, str(refused.exception) + repr(refused.exception.details))
 
     def test_meta_builds_in_both_gateway_modes_and_still_refuses_a_custom_endpoint_and_streaming(self) -> None:
-        # meta-muse-managed-text INV-1 (enum and string spellings), INV-12 (an endpoint is still refused for meta), INV-14 (streaming still refuses meta).
+        # meta-muse-managed-text INV-1 (enum and string spellings),
+        # INV-12 (an endpoint is still refused for meta), INV-14
+        # (streaming still refuses meta).
         from vidbyte.lib.config import TextModelMode
 
         for mode in (TextModelMode.AUTO, TextModelMode.VIDBYTE_MANAGED):
@@ -272,7 +275,9 @@ class GatewayShapeTests(unittest.TestCase):
                 self.assertIn("endpoint", str(refused.exception))
                 self.assertIn("TextModelMode.DIRECT", str(refused.exception))
             with self.subTest(mode=mode.value, case="streaming"), patch.dict(os.environ, {"VIDBYTE_API_KEY": VIDBYTE_KEY, "META_API_KEY": K_META}, clear=True):
-                # Built outside assertRaises: at base_commit the config itself raises M-12, which must not pass for the streaming refusal.
+                # Built outside assertRaises: at base_commit the config
+                # itself raises M-12, which must not pass for the
+                # streaming refusal.
                 streaming_config = TextModelConfig(provider="meta", model="muse-spark-1.1", mode=mode)
                 transport = FakeStreamingTransport([])
                 with self.assertRaises(UnsupportedProviderError) as caught:

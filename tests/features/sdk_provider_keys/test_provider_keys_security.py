@@ -74,7 +74,8 @@ def rendered_error(error: BaseException) -> str:
 
 
 def run_meta_relay(transport: ScriptedGateway) -> None:
-    # One default-mode meta call that relays K_META through the scripted transport (meta-muse-managed-text AC-14).
+    # One default-mode meta call that relays K_META through the scripted
+    # transport (meta-muse-managed-text AC-14).
     TextModelRunner(TextModelConfig(provider="meta", model="muse-spark-1.1", api_keys=[K_META]), transport=transport).run("Hi")
 
 
@@ -184,7 +185,9 @@ class LeakScenarioTests(unittest.TestCase):
                     self.assertNotIn(key, searched)
 
     def test_every_meta_gateway_failure_logs_and_raises_no_key_canary_or_key_shaped_body_text(self) -> None:
-        # meta-muse-managed-text AC-14, INV-8, INV-9, NFR-1: each failure's bodies carry LEAKED_KEY and BODY_CANARY, and the relayed 400 echoes the Meta key itself.
+        # meta-muse-managed-text AC-14, INV-8, INV-9, NFR-1: each
+        # failure's bodies carry LEAKED_KEY and BODY_CANARY, and the
+        # relayed 400 echoes the Meta key itself.
         from vidbyte.lib.errors import ProviderRequestError
 
         echoed_400 = answer(400, {"error": {"message": f"{BODY_CANARY} Invalid key {K_META} ({LEAKED_KEY})", "type": "invalid_request_error", "code": "invalid_api_key"}})
@@ -201,7 +204,8 @@ class LeakScenarioTests(unittest.TestCase):
             with self.subTest(scenario=label):
                 transport = ScriptedGateway(step)
                 lines, error = self.run_scenario(functools.partial(run_meta_relay, transport))
-                # The call must have reached the gateway as a meta relay call; at base_commit it is refused before any request.
+                # The call must have reached the gateway as a meta relay
+                # call; at base_commit it is refused before any request.
                 self.assertIsInstance(error, ProviderRequestError, f"{label}: {type(error).__name__ if error else 'no error'}")
                 self.assertEqual(error.status_code, status)
                 self.assertEqual(len(transport.requests), attempts)

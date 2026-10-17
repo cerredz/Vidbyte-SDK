@@ -39,7 +39,8 @@ K_GEMINI_AQ = "AQ" + "." + "x" * 40
 # read on 2026-10-15 and meta-muse-managed-text Q-7 keeps. Built
 # from parts so no literal looks like a real Meta key.
 K_META = "LLM" + "|" + "1" * 15 + "|" + "m" * 32
-# A second Meta fake, for META_API_KEY when K_META sits in api_keys, so a test can tell which source was relayed.
+# A second Meta fake, for META_API_KEY when K_META sits in api_keys, so
+# a test can tell which source was relayed.
 K_META_2 = "LLM" + "|" + "2" * 15 + "|" + "e" * 32
 # A Meta fake in the documented form (LLM_<numeric id>_<secret>,
 # meta-muse-managed-text FR-9), the shape a Muse user pastes today.
@@ -82,7 +83,8 @@ def anthropic_done(text: str) -> HttpResponse:
 
 
 def chat_done(text: str) -> HttpResponse:
-    # Chat-completions dialect (xai, deepseek, kimi, mistral, meta): the model ends the run with one isDone tool call.
+    # Chat-completions dialect (xai, deepseek, kimi, mistral, meta): the
+    # model ends the run with one isDone tool call.
     tool_call = {"id": "call_1", "type": "function", "function": {"name": "isDone", "arguments": json.dumps({"final_answer": text})}}
     return answer(200, {"id": "chatcmpl-1", "choices": [{"index": 0, "message": {"role": "assistant", "content": None, "tool_calls": [tool_call]}, "finish_reason": "tool_calls"}], "usage": _USAGE_CHAT})
 

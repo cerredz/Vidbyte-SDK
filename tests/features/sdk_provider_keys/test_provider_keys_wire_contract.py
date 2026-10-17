@@ -71,7 +71,8 @@ RELAY_KEYS: dict[ModelProvider, str] = {
     ModelProvider.META: K_META,
 }
 # The cap field each dialect uses (managed-generative-models spec section 9.2), Gemini's sits in generationConfig.
-# meta-muse-managed-text D-2, INV-5: MetaProvider writes the cap as max_tokens.
+# meta-muse-managed-text D-2, INV-5: MetaProvider writes the cap as
+# max_tokens.
 CAP_FIELD = {ModelProvider.OPENAI: "max_output_tokens", ModelProvider.ANTHROPIC: "max_tokens", ModelProvider.XAI: "max_tokens", ModelProvider.DEEPSEEK: "max_tokens", ModelProvider.KIMI: "max_tokens", ModelProvider.META: "max_tokens"}
 
 
@@ -201,7 +202,9 @@ class MetaRelayTests(unittest.TestCase):
     """meta-muse-managed-text AC-2, AC-3, INV-2 to INV-4, T-1: which Meta key a meta call relays, and that no other key rides with it."""
 
     def test_a_meta_call_relays_the_lists_meta_key_before_meta_api_key_stripped_and_no_other_key(self) -> None:
-        # INV-2, INV-4, T-1: the list's Meta key wins over META_API_KEY; padding is removed; another provider's key never rides on a meta request.
+        # INV-2, INV-4, T-1: the list's Meta key wins over META_API_KEY;
+        # padding is removed; another provider's key never rides on a
+        # meta request.
         cases = (
             ("mixed list beats META_API_KEY", {"VIDBYTE_API_KEY": VIDBYTE_KEY, "META_API_KEY": K_META_2}, {"api_keys": [K_ANTHROPIC, K_OPENAI, K_META, K_XAI]}, K_META, (K_ANTHROPIC, K_OPENAI, K_XAI, K_META_2)),
             ("padded list entry", {"VIDBYTE_API_KEY": VIDBYTE_KEY}, {"api_keys": [f"  {K_META}\n"]}, K_META, ()),
@@ -228,7 +231,8 @@ class MetaRelayTests(unittest.TestCase):
                     self.assertNotIn(other, flat(sent))
 
     def test_a_meta_call_without_a_meta_key_sends_exactly_the_three_vidbyte_paid_headers(self) -> None:
-        # AC-3, INV-3: no key, a blank META_API_KEY, or a list holding only the Vidbyte key all give the Vidbyte-paid meta request.
+        # AC-3, INV-3: no key, a blank META_API_KEY, or a list holding
+        # only the Vidbyte key all give the Vidbyte-paid meta request.
         cases = (
             ("no key", {"VIDBYTE_API_KEY": VIDBYTE_KEY}, {}),
             ("blank META_API_KEY", {"VIDBYTE_API_KEY": VIDBYTE_KEY, "META_API_KEY": "   "}, {}),

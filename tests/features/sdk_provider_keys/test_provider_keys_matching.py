@@ -465,8 +465,11 @@ class ConfiguredPrimaryTests(KeySafeAssertions):
                 self.assertIn("Vidbyte's own openai account", message)
 
     def test_m18_offers_vidbytes_own_meta_account_for_a_meta_primary_whose_list_holds_only_another_providers_key(self) -> None:
-        # meta-muse-managed-text EC-6, INV-10, FR-6: the list is refused when built, and the remedy now offers Vidbyte's own meta account.
-        # At base_commit the TextModelConfig root raises M-12 instead, and the Agent root's M-18 lacks the clause.
+        # meta-muse-managed-text EC-6, INV-10, FR-6: the list is refused
+        # when built, and the remedy now offers Vidbyte's own meta
+        # account.
+        # At base_commit the TextModelConfig root raises M-12 instead,
+        # and the Agent root's M-18 lacks the clause.
         roots = {
             "TextModelConfig": lambda: TextModelConfig(provider="meta", model="muse-spark-1.1", api_keys=[K_ANTHROPIC]),
             "Agent": lambda: Agent(name="a", system_prompt="s", provider="meta", model_name="muse-spark-1.1", api_keys=[K_ANTHROPIC], vidbyte_api_key=VIDBYTE_KEY),

@@ -4,7 +4,7 @@ PURPOSE: Proves the stakeholder-visible promises of Vidbyte-managed text calls: 
 ROLE IN CODEBASE: Acceptance layer of tests/features/sdk_managed_text/ (spec AC-1, AC-2, AC-3, AC-18, AC-23, AC-24; meta-muse-managed-text AC-13 and, through MANAGED_MODELS, INV-1, INV-6). Exercises vidbyte/lib/runners/text.py, vidbyte/lib/http/vidbyte_gateway.py, vidbyte/lib/dataclasses/model_configs.py and the unchanged adapters in vidbyte/providers/.
 ARCHITECTURE NOTE: Only the inner HTTP transport is scripted. Expected requests are spelled as literals from spec section 4 or recorded from the real adapter in BYOK state, never recomputed from production constants.
 COMMON MODIFICATION PATTERNS: When the gateway serves a new provider, add it to MANAGED_MODELS in managed_text_fixtures.py and give it an ORACLE_KEYS entry that its own key rule proves; the per-provider test picks it up, and a missing oracle key is a KeyError. When the README section is reworded, keep the facts this module checks.
-WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level (see managed_text_fixtures.py). 2. Do not read the developer's real environment; every test clears it.
+WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level (see managed_text_fixtures.py). 2. Do not read the developer's real environment; every test clears it. 3. Do not give META an ORACLE_KEYS entry that fully matches neither Meta shape (LLM_<digits>_<secret> or LLM|<digits>|<secret>): matching refuses the DIRECT oracle (M-6), so the per-provider test fails on the oracle instead of on the gateway call.
 KNOWN EDGE CASES: Gemini carries the model only in its URL, so its managed body has no "model" key. Anthropic's BYOK default cap is 1,024 while managed calls default to 32,768. Since byok-api-keys, a provider key in AUTO is relayed through the gateway; byte-identical vendor-direct requests need TextModelMode.DIRECT, so the oracle and the goldens use it.
 RELATED DOCS: tests/features/sdk_managed_text/FEATURE.md; docs/spec/managed-generative-models/spec.md sections 4, 6.2 and 9.2; docs/spec/byok-api-keys/spec.md section 13 (superseded rows); docs/spec/meta-muse-managed-text/spec.md sections 6.2 (AC-13) and 12.3 row 2.
 TESTS: python -m pytest tests/features/sdk_managed_text/test_managed_text_acceptance.py
@@ -57,20 +57,24 @@ ORACLE_KEYS = {
 README = Path(__file__).resolve().parents[3] / "README.md"
 # The spec names no heading, so find the section by the spec's own term ("Vidbyte-managed mode") in any level-2 to level-4 heading.
 README_SECTION_HEADING = re.compile(r"^(#{2,4}) [^\n]*\bvidbyte[- ]managed\b[^\n]*$", re.IGNORECASE | re.MULTILINE)
-# The seven providers meta-muse-managed-text section 12.3 row 2(a) lists as served, in the README's spelling.
+# The seven providers meta-muse-managed-text section 12.3 row 2(a) lists
+# as served, in the README's spelling.
 SERVED_PROVIDER_NAMES = ("OpenAI", "Anthropic", "Gemini", "xAI", "DeepSeek", "Kimi", "Meta")
-# The chat-dialect providers whose cap the README says to set with max_output_tokens (row 2(b)).
+# The chat-dialect providers whose cap the README says to set with
+# max_output_tokens (row 2(b)).
 CHAT_CAP_PROVIDER_NAMES = ("xAI", "DeepSeek", "Kimi", "Meta")
 
 
 def readme_bullet(section: str, label: str) -> str:
-    # One "- **Label:**" bullet of the section, its wrapped lines joined, so a re-wrap cannot change the outcome.
+    # One "- **Label:**" bullet of the section, its wrapped lines
+    # joined, so a re-wrap cannot change the outcome.
     match = re.search(rf"^- \*\*{re.escape(label)}:\*\*(.*?)(?=^- |^\*\*|^#|\Z)", section, re.MULTILINE | re.DOTALL)
     return " ".join(match.group(1).split()) if match else ""
 
 
 def names_word(text: str, name: str) -> bool:
-    # True when the provider name appears as a whole word, in any case (the existing README test is case-insensitive too).
+    # True when the provider name appears as a whole word, in any case
+    # (the existing README test is case-insensitive too).
     return re.search(rf"\b{re.escape(name)}\b", text, re.IGNORECASE) is not None
 
 
@@ -216,7 +220,8 @@ class ManagedTextAcceptanceTests(unittest.TestCase):
                 self.assertRegex(section, re.compile(pattern, re.IGNORECASE))
 
     def test_readme_managed_section_names_meta_as_served_in_the_chat_cap_guidance_and_by_its_llm_prefix(self) -> None:
-        # meta-muse-managed-text AC-13, FR-7, section 12.3 row 2(a)-(c): the three bullets that change when the gateway serves meta.
+        # meta-muse-managed-text AC-13, FR-7, section 12.3 row 2(a)-(c):
+        # the three bullets that change when the gateway serves meta.
         text = README.read_text(encoding="utf-8")
         heading = README_SECTION_HEADING.search(text)
         if heading is None:
@@ -225,24 +230,29 @@ class ManagedTextAcceptanceTests(unittest.TestCase):
         next_heading = re.search(rf"^#{{1,{len(heading.group(1))}}} ", rest, re.MULTILINE)
         section = rest[: next_heading.start()] if next_heading else rest
         providers, cap, prefixes = (readme_bullet(section, label) for label in ("Providers", "Output cap", "Prefixes"))
-        # Each bullet must exist, so a renamed label fails here instead of passing on an empty string.
+        # Each bullet must exist, so a renamed label fails here instead
+        # of passing on an empty string.
         for label, bullet in (("Providers", providers), ("Output cap", cap), ("Prefixes", prefixes)):
             with self.subTest(bullet=label):
                 self.assertTrue(bullet, f"the managed section has no '- **{label}:**' bullet")
 
-        # (a) The bullet's first sentence is the served list: all seven names, Meta among them.
+        # (a) The bullet's first sentence is the served list: all seven
+        # names, Meta among them.
         served_list = providers.split(". ")[0]
         for name in SERVED_PROVIDER_NAMES:
             with self.subTest(served=name):
                 self.assertTrue(names_word(served_list, name), f"{name!r} is not in the served list: {served_list!r}")
-        # (b) The sentence that steers chat-dialect users away from max_completion_tokens names Meta with xAI, DeepSeek and Kimi.
+        # (b) The sentence that steers chat-dialect users away from
+        # max_completion_tokens names Meta with xAI, DeepSeek and Kimi.
         chat_cap_sentences = [sentence for sentence in re.split(r"(?<=\.)\s+", cap) if "max_completion_tokens" in sentence]
         self.assertTrue(chat_cap_sentences, f"the Output cap bullet no longer mentions max_completion_tokens: {cap!r}")
         self.assertTrue(
             any(all(names_word(sentence, name) for name in CHAT_CAP_PROVIDER_NAMES) for sentence in chat_cap_sentences),
             f"no max_completion_tokens sentence names all of {CHAT_CAP_PROVIDER_NAMES}: {chat_cap_sentences!r}",
         )
-        # (c) The Prefixes bullet lists LLM| as the prefix that proves a Meta key, beside the prefixes it already listed.
+        # (c) The Prefixes bullet lists LLM| as a prefix that proves a
+        # Meta key, beside the prefixes it already listed. Since r4 it
+        # reads "`LLM_` or `LLM|` (Meta)", which still holds this text.
         self.assertIn("`LLM|` (Meta)", prefixes)
         for existing in ("`sk-ant-` (Anthropic)", "`xai-` (xAI)", "(Gemini)"):
             with self.subTest(prefix=existing):

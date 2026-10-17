@@ -358,11 +358,16 @@ class TextCallAcceptanceTests(unittest.TestCase):
                 self.assertNotIn("META_API_KEY", environment.reads)
 
     def test_meta_in_direct_sends_base_commits_request_and_both_gateway_envelopes_wrap_that_body_with_the_cap(self) -> None:
-        # meta-muse-managed-text AC-12, INV-11: DIRECT stays byte-identical to base_commit and never contacts the gateway or reads VIDBYTE_API_KEY.
-        # AC-6, INV-6: the relay and Vidbyte-paid envelopes are identical, and their body is the DIRECT body plus max_tokens 32,768.
+        # meta-muse-managed-text AC-12, INV-11: DIRECT stays
+        # byte-identical to base_commit and never contacts the gateway
+        # or reads VIDBYTE_API_KEY.
+        # AC-6, INV-6: the relay and Vidbyte-paid envelopes are
+        # identical, and their body is the DIRECT body plus max_tokens
+        # 32,768.
         from vidbyte.lib.config import TextModelMode
 
-        # Recorded from base_commit's MetaProvider (the worktree's vidbyte/ is byte-identical to it at S2).
+        # Recorded from base_commit's MetaProvider (the worktree's
+        # vidbyte/ is byte-identical to it at S2).
         golden = {"method": "POST", "url": "https://api.meta.ai/v1/chat/completions", "headers": {"authorization": f"Bearer {K_META}", "content-type": "application/json"}, "json_body": {"model": "muse-spark-1.1", "messages": [{"role": "user", "content": PROMPT}]}, "timeout_seconds": 60.0}
         vendor = ScriptedGateway(provider_answer(ModelProvider.META))
         environment = RecordingEnviron({"VIDBYTE_API_KEY": VIDBYTE_KEY})

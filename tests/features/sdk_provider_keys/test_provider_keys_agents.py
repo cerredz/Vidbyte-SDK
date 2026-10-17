@@ -428,7 +428,9 @@ class MetaAgentTests(unittest.TestCase):
     """meta-muse-managed-text AC-11, EC-11, EC-16: agents whose primary, fork or member is a Muse model reach the gateway with only Meta's key."""
 
     def test_a_relayed_meta_401_falls_back_to_anthropic_and_each_call_carries_only_its_own_providers_key(self) -> None:
-        # AC-11, INV-1, INV-4: at base_commit the Muse runner is refused before any request, so no meta call is made and no fallback runs.
+        # AC-11, INV-1, INV-4: at base_commit the Muse runner is refused
+        # before any request, so no meta call is made and no fallback
+        # runs.
         gateway = ScriptedGateway(relayed_provider_error(ModelProvider.META, 401), anthropic_done("Claude says hi"))
         with patch.dict(os.environ, {}, clear=True), patch(RUNNER_TRANSPORT_TARGET, new=gateway):
             agent = Agent(name="muse", system_prompt="Answer in one word.", provider="meta", model_name="muse-spark-1.1", vidbyte_api_key=VIDBYTE_KEY, api_keys=[K_ANTHROPIC, K_META], fallback=["anthropic/claude-sonnet-5"])
@@ -445,7 +447,9 @@ class MetaAgentTests(unittest.TestCase):
             self.assertNotIn(other, flat(request))
 
     def test_a_fork_to_muse_relays_meta_api_key_or_goes_vidbyte_paid_and_never_carries_the_parents_anthropic_key(self) -> None:
-        # EC-11, INV-3, INV-4: the fork keeps the parent's matched record (no Meta key, no M-18 re-check), so META_API_KEY decides who pays.
+        # EC-11, INV-3, INV-4: the fork keeps the parent's matched
+        # record (no Meta key, no M-18 re-check), so META_API_KEY
+        # decides who pays.
         from vidbyte.agents.fork import AgentForker
 
         cases = (("META_API_KEY set", {"META_API_KEY": K_META_2}, K_META_2), ("no Meta key", {}, None))
@@ -467,7 +471,9 @@ class MetaAgentTests(unittest.TestCase):
                 self.assertNotIn(K_ANTHROPIC, flat(sent))
 
     def test_the_multi_provider_grader_adds_a_muse_member_that_relays_only_meta_api_key(self) -> None:
-        # EC-16 (accepted and disclosed; Q-6 = No): with provider_models unset, a set META_API_KEY makes meta a member, and each member relays only its own key.
+        # EC-16 (accepted and disclosed; Q-6 = No): with provider_models
+        # unset, a set META_API_KEY makes meta a member, and each member
+        # relays only its own key.
         from vidbyte.context.algorithms.multi_provider_agentic_grader import MultiProviderAgenticGraderAlgorithm
         from vidbyte.context.algorithms.tool_results import ContextWindowAlgorithm
 
@@ -477,7 +483,8 @@ class MetaAgentTests(unittest.TestCase):
             algorithm = ContextWindowAlgorithm(name="multi_provider_agentic_grader", multi_provider_agentic_grader=MultiProviderAgenticGraderAlgorithm(grader_provider="anthropic", grader_model="claude-sonnet-5"))
             agent = Agent(name="grader", system_prompt="Solve the task.", provider="anthropic", model_name="claude-sonnet-5", algorithm=algorithm)
             message = agent.run("task")
-        # Count member runs, not requests: each member is an agent loop of one or more calls.
+        # Count member runs, not requests: each member is an agent loop
+        # of one or more calls.
         result = message.metadata["multi_provider_agentic_grader"]
         self.assertEqual(set(result["candidates"]), {"anthropic", "meta"})
         self.assertEqual(result["total_runs"], 2)
