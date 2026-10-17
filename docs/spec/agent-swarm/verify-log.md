@@ -60,3 +60,44 @@ The last two diff `git merge-base origin/main HEAD` and fail on any branch that 
 CI skips the three inherited `harness_threads` surface tests (no `origin/main` in its shallow clone), so the remote source stage is fully green. The commit that records this table is docs-only.
 
 **Still open:** none of R-1..R-15 (statuses in review.md). Test gap for the S2 owner, not a code defect: no test kills the mutant that drops the `_stop_reason is None` guard (recipe above).
+
+## Iteration 2 — 2026-10-17 — agent report: reports/S5-repair-2.md
+
+**Defects in:**
+- From the S5 conformance re-review (reports/S5-rereview.md, SOUND, 0 Blocker, 0 Major): R-16 (Minor, spec text), already resolved by spec r5 at `c66a1ffe`, so no code change; R-17 (Minor), three doc sentences that still describe behaviour from before the R-6, R-2 and R-11 fixes.
+- Failing gates: none. At `87df4fc9` the pack gave 171 passed, the source stage printed `SDK-LINT: PASS` plus the 3 inherited `harness_threads` failures, and remote runs 39007165774 and 39007167332 succeeded. The S2 test at `87df4fc9` closed iteration 1's test gap: it kills the mutant that drops the `_stop_reason is None` guard.
+- Main catch-up: none needed. `git fetch origin && git log --oneline HEAD..origin/main` printed nothing, so origin/main is still `845a4d9b`, already merged at `dc4710f9`.
+
+**Hypotheses and attempts** (each was the first one tried, and each held):
+- R-17 (1), `swarm.py:38`. The `AgentSwarm.arun` docstring listed "the turn budget is spent" and "every agent failed" as separate ends. Under INV-9, INV-10 and EC-9, a spent budget only stops wakes, and "every agent failed" is one case of "no agent is working". New text: "Run the swarm on the goal until no agent is working, or the time limit is reached." It matches the package README line 3, `REPO_MAP.md:77` and the `runtime.py` PURPOSE line. Checked with `python -c "from vidbyte import AgentSwarm; print(AgentSwarm.arun.__doc__)"`.
+- R-17 (2), `README.md:58`. The `search_tool` row now ends "may not take a swarm tool's name or `isDone`". It matches `settings.py:105-107`. `probe_verify.py p3` still raises `ConfigurationError: ... got 'isDone'. Reserved: bash, grep, read_lines, write_text, patch_file, message, isDone.` The new backticked token has no file suffix, so S020 is not affected.
+- R-17 (3), `events.py:9`. There were two options, and I chose the reword. **Option A**, deleting the placeholder at `runtime.py:53`, was rejected. Grep shows that every read of `self._events` is inside a method, and no test touches it before `arun`, so mypy would accept the deletion. But `post_message`, `collect_messages`, `end_turn` and `record_tool_call` are public methods of an exported class. Called before `arun`, they now record into the placeholder and flush to `on_event`. Without the placeholder they would raise `AttributeError`. That is a behaviour change, which the briefing forbids. **Option B**, rewording the header, changes no code and leaves lint unchanged. It also agrees with spec r5 §17, which says the record is "rebuilt right after the run is marked as run". The new sentence says that a record is built with the runtime and replaced by a fresh one when `arun` starts, before the first event (`runtime.py:79` runs before the first `record` at `:89`). `test_event_time_counts_from_arun_not_from_building_the_runtime` still passes.
+- Same-class sweep. I grepped every product file the branch changes for "budget is spent", "turn budget", "work left", "swarm tool's name" and "when the runtime". I found no other false sentence. Two summaries say the swarm stops when "none has work left": the class docstring at `swarm.py:27` and `vidbyte/agents/README.md:419`. Both are loose but not false, and neither lists an end condition, so I left them alone. The enum comment `MAX_TURNS`, "the turn budget refused a wake", is accurate.
+
+**Changes:**
+- `4a993f98` R-17 (three files, three lines; doc text only)
+- R-16: none (spec r5 `c66a1ffe`)
+- `git diff 87df4fc9..HEAD -- tests/` is empty. Product files changed since `87df4fc9`: `vidbyte/agents/agent_swarm/{swarm.py,events.py,README.md}`, all §12.3 rows.
+
+**Gate matrix out** (local runs on `4a993f98`):
+
+| Gate | Command | Result | Final lines |
+|---|---|---|---|
+| new tests | `PYTHONPATH=$(pwd) python -m pytest tests/features/agent_swarm -q` | PASS | `171 passed in 5.69s` |
+| contract (C016) | `python scripts/generate-sdk-public-api.py --check` | PASS | `contracts/sdk-public-api.json is current at 698f913b594f9cbeac6513d4883c0e4f0f1f4175 (vidbyte-sdk 0.3.0, 649 exports).` |
+| source stage: lint | `PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source` | PASS | `S063 IMPROVED 4 -> 3 ...` / `S064 RATCHETED: 4 known finding(s).` / `SDK-LINT: PASS`; 0 REGRESSED. The 133 rule-table and verdict lines are byte-identical to iteration 1's run on `dc4710f9` (`diff` exit 0), including A001 642/642, S009 346/350 and S020 1/1 |
+| source stage: compileall + 3 check scripts | same run | PASS | no output, next step ran |
+| source stage: pytest | same run | FAIL, 3 inherited | `3 failed, 6414 passed, 16 skipped in 145.31s (0:02:25)` / `CI failed: Command failed with exit code 1: ... -m pytest`. The same three `harness_threads` surface tests as in iteration 1 (see there). The +1 passed is S2's test at `87df4fc9` |
+| package stage | `env -u PYTHONPATH python scripts/run_ci.py --stage package` | PASS | `No broken requirements found.` / `Installed vidbyte-sdk 0.3.0 passed smoke checks.` / `CI passed.` |
+| static policy | `semgrep scan --error --config .semgrep/typed-mapping-boundary-policy.yml vidbyte` (1.170.1) | PASS | `Ran 1 rule on 995 files: 0 findings.` |
+
+**Remote checks.** Both were dispatched with `gh workflow run` on `4a993f98`, the pushed head with the R-17 fix, and read with `gh run watch --exit-status` and `gh run view --log`. `headSha` is `4a993f987238d8693a88379533aecf3379028fb4` for both:
+
+| Gate | Run | Result | Final lines |
+|---|---|---|---|
+| CI `ci.yml` | 39008866234 | PASS: Source / Python 3.11, Source / Python 3.12 and Package all success | 3.11: `SDK-LINT: PASS` / `6376 passed, 57 skipped in 116.32s` / `CI passed.` · 3.12: `SDK-LINT: PASS` / `6376 passed, 57 skipped, 19 warnings in 123.72s` / `CI passed.` · Package: `Installed vidbyte-sdk 0.3.0 passed smoke checks.` / `CI passed.` |
+| Static policy `static-policy.yml` | 39008871160 | PASS | `Findings: 0 (0 blocking)` / `Ran 1 rule on 995 files: 0 findings.` |
+
+The commit that records these tables touches only `docs/spec/agent-swarm/`.
+
+**Still open:** none. R-1..R-17 are all fixed, resolved in the spec, recorded, or deferred as follow-ups (statuses in review.md). The only red local cells are the three inherited `harness_threads` tests, which CI skips.
