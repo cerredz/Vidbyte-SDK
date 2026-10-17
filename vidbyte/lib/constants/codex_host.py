@@ -31,6 +31,7 @@ from vidbyte.lib.constants.codex import (
     CODEX_THREAD_TURNS_LIST_METHOD,
 )
 from vidbyte.lib.enums.codex import (
+    CodexApprovalDecision,
     CodexGoalStatus,
     CodexHostOperation,
     CodexSandboxReadiness,
@@ -79,8 +80,8 @@ CODEX_HOST_RETRYABLE_CODES = frozenset(
 # elicitations are declined; a method not listed gets an empty answer
 # (hardening D-3, INV-15).
 CODEX_HOST_SERVER_REQUEST_DEFAULT_ANSWERS: Mapping[str, Mapping[str, Any]] = {
-    CodexServerRequestKind.COMMAND_EXECUTION.value: {"decision": "decline"},
-    CodexServerRequestKind.FILE_CHANGE.value: {"decision": "decline"},
+    CodexServerRequestKind.COMMAND_EXECUTION.value: {"decision": CodexApprovalDecision.DECLINE.value},
+    CodexServerRequestKind.FILE_CHANGE.value: {"decision": CodexApprovalDecision.DECLINE.value},
     CodexServerRequestKind.USER_INPUT.value: {"answers": {}},
     "item/permissions/requestApproval": {"permissions": {}},
     "mcpServer/elicitation/request": {"action": "decline"},
