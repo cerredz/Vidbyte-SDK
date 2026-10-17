@@ -171,3 +171,69 @@ R-1 accepted (stack + conventions); R-2 accepted (the reviewer's alternative); R
 
 - **S2:** 20 superseded tests plus the support literals listed in §13; build handler hosts as `CodexHost(settings, approval_handler=...)` like `open_host`; patch the grace in the `turn_events` module and the tool-call timeout via `patch_connection` once row 12 lands.
 - **S3:** the rule most likely to be broken is C021 — run `git add` then `python lint/run.py --rule C021` after every phase. The second is the order pins: `FORGET_CODEX_TURNS` before `START_CODEX_REVIEW`, and `forget_codex_turns` defined before `start_codex_review`. Do not restyle #1178 code (NG-21); merge `origin/main`, never rebase (D-34).
+
+---
+
+## Addendum — r3 (review round 2, final; spec approved)
+
+Spec commit: `804c6f0b` (r3, `status: approved`). The base is unchanged: `8baff351` (#1178, still open). Where this addendum and the earlier text disagree, this addendum wins. One correction to the r2 addendum: it said 126 cited identifiers were confirmed by grep. The correct count is 125, because one of the names checked was a probe the spec does not cite.
+
+### What changed, one line each
+
+1. **R-12 (Major), accepted.**
+   - Fork now gates `before_turn_id` and `defer_goal_continuation` locally on `CodexClientSettings.experimental_api`, mirroring `_tool_bridge`. The gate is INV-28 step 1, via a private host helper `_reject_experimental_fork_fields`.
+   - New lib message `CODEX_HOST_FORK_EXPERIMENTAL_MESSAGE`, which brings the new messages to 12.
+   - New EC-56 and an AC-22 clause. D-19 and §8.5 seam 2 now name both halves of the experimental pattern (inject after validation, and gate locally). The `collaborationMode` note for slice 2 says the same.
+2. **R-13, accepted.** INV-17 states the lock's span: check, parse, schedule and add only. The lock is released before `future.result()` and taken again in the `finally`. INV-21 and row 12 cancel a snapshot, `tuple(self._pending)`.
+3. **R-14, accepted.** `start_codex_review` substitutes `CodexSpawnRequest()` only when `request is None` (INV-30, row 19). The sibling `x or CodexSpawnRequest()` call sites are left as #1178 wrote them (NG-21).
+4. **R-15, accepted.** §9.1 lists every mapping from absent or null to a default. EC-4 is narrowed to missing ids, wrong types and an unknown `kind`. AC-11 gains the `options: null` clause.
+5. **R-16, accepted.** Only a cached model list is refreshed (INV-25, D-26). AC-20 gains the fresh-host case: exactly one `model/list` walk.
+6. **R-17, accepted.**
+   - A-10 is restated: every goal run ends with one `_GoalStreamClosed` watcher failure, after its snapshot is set.
+   - INV-13 step (a) runs first, with no wait. Finishing a goal run before closing its stream is stated as an order every path must keep.
+   - AC-8 gains a clause for a goal run that ends normally.
+7. **Author-found.** `currentTime/read` is in the experimental schema only, and §9.3 says so. The answer is unchanged.
+8. **Status and estimates.** `status: approved`, revision 3, a §17 r3 row, and §16 rows for R-12…R-17 plus the author note. The host-module estimate moves from about 890 to about 900 lines (ask-first stays at 940).
+
+Nothing was disputed, so no new Q was added. Q-20 stays unused.
+
+### New evidence (r3)
+
+- **Stable versus experimental schema, 0.163.0.** I generated both with `codex app-server generate-json-schema --out <dir>`, once with and once without `--experimental`.
+  - `ThreadForkParams` has `beforeTurnId` and `deferGoalContinuation` only in the experimental output. The `s0-schema-0163` bundle that r1 and r2 cited was the experimental one.
+  - `currentTime/read` and `currentTimeAt` are experimental-only.
+  - The other fields this slice sends are in the stable schema: `serviceTierForTurn`, `networkAccess`, `writableRoots`, `forceReload`, the `thread/turns/list` fields, `serviceTiers`/`defaultServiceTier`, and the approval fields `approvalId`, `environmentId` and `startedAtMs`.
+  - `ReasoningEffort` is an open string ("a non-empty reasoning effort value advertised by the model"), so `max` and `ultra` need no gate.
+- **The stable `ToolRequestUserInputQuestion`.** It requires only `header`, `id` and `question`. `options` is `["array","null"]`, and `isOther` and `isSecret` default to false. The params require `isBlocking`, `itemId`, `questions`, `threadId` and `turnId`.
+- **Goal-stream closing.** openai-codex's `_GoalOperationState.next_notification` raises any queued exception, and `wake_notification_reader` queues `_GoalStreamClosed()`. Every goal-ending path in the host module finishes the turn before it calls `close_goal_stream`. Those paths are at `host.py:250, 762, 798, 887, 915`.
+- **The fake has no model of the experimental capability.** Nothing in `codex_host_fakes.py` mentions "experimental". The only test that builds a host with `experimental_api=False` is `test_codex_host_threads.py:444`.
+
+### Stage E self-check (r3)
+
+- **Counts.** 48 INV, 41 AC, 37 FR, 11 NFR, 56 EC, 14 W, 6 T, 34 D, 18 Q, 15 A.
+- **Tracing.** Same result as r2: only FR-36 has no INV, by design.
+- **Structure.** 3 CREATE rows, which equals §8.4. Names agree across §4, §8.5 and §12.3. Every table row has its header's cell count.
+- **Test ids.** All 28 resolve.
+- **Paths and §0.1.** No new file paths in §1–§10. §0.1 is identical to r1.
+- **Questions.** 0 blocking.
+
+### Notes for S2, the test author (supersede the earlier notes)
+
+- **Contract names.**
+  - The handler: `CodexHost(settings, *, approval_handler=...)`.
+  - The records: `CodexServerRequest`, `CodexServerAnswer`, `CodexUserInputQuestion`, `CodexUserInputOption`, `CodexUserInputAnswer` and `CodexServiceTier`.
+  - The enums: `CodexServerRequestKind`, `CodexApprovalDecision` and `CodexCommandApprovalKind`.
+  - Other new names: `forget_codex_turns`, `CodexAgentError.retryable` and `.with_operation`, and the log events `codex_host_call`, `codex_host_call_failed`, `codex_host_server_request`, `codex_host_server_request_fallback`, `codex_host_turn_item`, `codex_host_turn_ended`, `codex_host_turn_event_failed`, `codex_host_turn_lost` and `codex_host_tool_failed`.
+- **Seams.**
+  - Send server requests with `HostTestCase.ask`.
+  - Handler-timeout tests use `patch_connection("CODEX_TOOL_CALL_TIMEOUT_SECONDS", ...)`.
+  - Patch the grace in `vidbyte.harnesses.native.codex.turn_events`.
+  - AC-8: patch `server.client.next_turn_notification` or `next_goal_notification` before the spawn.
+  - AC-7: patch `CodexResponseTranslator.turn_snapshot` or `goal_snapshot`.
+  - AC-9: make `stored_turn` return None first and raise second.
+  - For the experimental gate, use `open_host(CodexClientSettings(experimental_api=False))` and assert that zero requests are sent.
+- **What the fake cannot show.**
+  - It ignores `beforeTurnId` and `deferGoalContinuation`, and it never refuses an experimental field.
+  - It does not handle server-request methods; those are sent to the client.
+  - It answers an unknown method with -32601.
+- **The 20 superseded tests.** A1–A8, B1, C1–C3, G1–G5, I1, I2 and T1, plus the support literals listed in §13.
