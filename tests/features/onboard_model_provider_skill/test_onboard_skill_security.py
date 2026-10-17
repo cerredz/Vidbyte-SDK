@@ -1,12 +1,12 @@
 """FILE: tests/features/onboard_model_provider_skill/test_onboard_skill_security.py
 
 PURPOSE: Prove the /onboard-model-provider skill cannot instruct the writes and leaks its threat model rules out: no Windows-only construct, `gh pr`, `gh issue`, `git stash`, force push or `path:line`; GitHub only through `gh api`, with one PR-create POST as the only write; one push of the single provider refspec; no change to VIDBYTE_MANAGED_TEXT_PROVIDERS; the D-29 rule that keeps a provider-prefixed model ID from being catalogued under the wrong vendor; and no literal key shape.
-ROLE IN CODEBASE: Security layer of tests/features/onboard_model_provider_skill/ (spec AC-3, AC-15, AC-8 "never git stash"; INV-8, INV-12, INV-14, INV-16, INV-18, INV-19, INV-21; NFR-1, NFR-4; D-12, D-13, D-16, D-29; EC-63; INV-13; threats T-1 to T-4; reviews R-3, R-8, R-10, R-11, R-12).
+ROLE IN CODEBASE: Security layer of tests/features/onboard_model_provider_skill/ (spec AC-3, AC-15, AC-8 "never git stash"; INV-8, INV-12, INV-14, INV-16, INV-18, INV-19, INV-21; NFR-1, NFR-4; D-12, D-13, D-16, D-29; EC-63; INV-13; threats T-1 to T-4; EC-33; spec r9 row s5r3-1; reviews R-3, R-8, R-10, R-11, R-12).
 ARCHITECTURE NOTE: The skill runs with push rights under a person's identity, often in auto or bypassPermissions mode (D-27), so its text is the control. Each scan reads both files whole, prose and fences alike, because an agent follows a prose instruction as readily as a command; each scan also asserts the file is long enough to have been scanned. The D-29 test also checks the runtime behaviour the rule relies on, so a change to Runner's provider derivation fails here. Rules are pinned by their content, not by a token (review R-3): the D-29 condition must read "is None" in prose, every self-check relation must keep its polarity as a statement, and both python fences must compile, so an inverted condition or an assert turned into a bare call fails.
-FUNCTION INVENTORY: test_skill_files_hold_no_forbidden_construct (S1); test_github_is_reached_only_through_gh_api_and_the_only_write_is_the_pr_create (S2); test_every_push_is_the_single_unforced_provider_refspec (S3); test_the_managed_text_provider_set_is_only_ever_named_as_untouched (S4); test_qualify_rejects_provider_prefixed_ids_and_the_self_check_proves_it (S5); test_no_literal_key_shape_appears_and_fakes_are_built_by_concatenation (S6); test_format_binding_needs_a_first_party_statement_not_an_example_key (S7); test_every_url_a_run_writes_was_fetched_and_only_the_attribution_line_is_exempt (S8); test_the_pr_body_guard_is_the_exact_command_and_ends_in_a_named_outcome (S9); _rules_for_the_whole_run reads the bullets before the first H2 of provider-run.md.
+FUNCTION INVENTORY: test_skill_files_hold_no_forbidden_construct (S1); test_github_is_reached_only_through_gh_api_and_the_only_write_is_the_pr_create (S2); test_every_push_is_the_single_unforced_provider_refspec (S3); test_the_managed_text_provider_set_is_only_ever_named_as_untouched (S4); test_qualify_rejects_provider_prefixed_ids_and_the_self_check_proves_it (S5); test_no_literal_key_shape_appears_and_fakes_are_built_by_concatenation (S6); test_format_binding_needs_a_first_party_statement_not_an_example_key (S7); test_every_url_a_run_writes_was_fetched_and_only_the_attribution_line_is_exempt (S8); test_the_pr_body_guard_is_the_exact_command_and_ends_in_a_named_outcome (S9); test_a_run_never_edits_an_existing_vendors_key_rule_and_sends_a_newer_shape_to_follow_ups (S10); _rules_for_the_whole_run reads the bullets before the first H2 of provider-run.md.
 COMMON MODIFICATION PATTERNS: When the spec allows a new GitHub write or a new git ref, change the spec first, then the matching pattern here. Keep the forbidden patterns literal enough that a reviewer can read them.
 WHAT NOT TO DO IN THIS FILE: 1. Do not call GitHub, git or a vendor. 2. Do not write a real key, or a literal that looks like one, into this file: S6 patterns are built from short pieces. 3. Do not assert that a seed slug is or is not a ModelProvider member.
-KNOWN EDGE CASES: `git worktree remove --force` is allowed (not a push). Regex and sed escapes (an escaped pipe, an escaped group parenthesis, a backreference, an escaped dot, a class such as the whitespace class) are not Windows paths. A pytest node ID `file.py::Test` is not a `path:line` reference. A `gh api -X POST` fragment in prose with no endpoint is a mention, not a command. S8 and S9 compare whole lines (the URL rule, the guard paragraph, the proof rule), so an added sentence fails as surely as a deleted one. GUARD_COMMAND is a raw string, so each octal backslash escape stays the four characters the file holds; S9 checks that before comparing. test_onboard_skill_publish_guard.py runs the same line through sh.
+KNOWN EDGE CASES: `git worktree remove --force` is allowed (not a push). Regex and sed escapes (an escaped pipe, an escaped group parenthesis, a backreference, an escaped dot, a class such as the whitespace class) are not Windows paths. A pytest node ID `file.py::Test` is not a `path:line` reference. A `gh api -X POST` fragment in prose with no endpoint is a mention, not a command. S8 and S9 compare whole lines (the URL rule, the guard paragraph, the proof rule), so an added sentence fails as surely as a deleted one. GUARD_COMMAND is a raw string, so each octal backslash escape stays the four characters the file holds; S9 checks that before comparing. test_onboard_skill_publish_guard.py runs the same line through sh. S10's negative check blanks each negated verb phrase (a never, not or no before the verb, or before two verbs joined by or) before it searches, so the rule's own "Never edit or remove" and "never replaces it" pass while "You may edit" or "replace the rule" fail.
 RELATED DOCS: tests/features/onboard_model_provider_skill/FEATURE.md; docs/spec/provider-onboarding-skill/spec.md r3 sections 5 (INV-8 to INV-21), 6.2 (AC-3, AC-15), 8.1 (D-12, D-29), 8.5 (self-check), 10 (threat model).
 TESTS: python -m pytest tests/features/onboard_model_provider_skill/test_onboard_skill_security.py -q
 """
@@ -108,6 +108,26 @@ PROOF_RULE_SENTENCES = (
     "The reruns that section 8 allows, and the body check's rerun in section 9 step 1, are the only repeats, and code never changes after a proof step failed.",
 )
 PROOF_RULE = " ".join(PROOF_RULE_SENTENCES)
+# D-13 / EC-33 / spec r9 row s5r3-1 (a coordinator-relayed lesson: the SDK's Meta key rule drifted from Meta's docs, and
+# nothing stopped a run from rewriting it): Qualify step 7 and the Follow-ups bullet, final wording at 164ac9fd.
+KEY_RULE_KEPT_SENTENCES = (
+    "Never edit or remove an existing vendor's `KEY_FORMATS` rule, `FORMAT_BOUND_PROVIDERS` entry or `RESERVED_PREFIXES` entry, or the README lines that document them: a new P that overlaps one is `key-prefix-collision`, never a reason to edit it.",
+    "When a page this run opened from that vendor's own docs shows its keys in a shape its rule does not match, keep the rule, because keys issued in the old shape still exist, and record the difference under the PR's Follow-ups with the URL, its fetch-log date and a quote written as the Sources table writes one, so that a separate PR adds the new shape beside the old one and never replaces it.",
+)
+FOLLOW_UPS_SENTENCES = (
+    "- **Follow-ups**: if another provider PR merges first, this one conflicts on the shared lists and on the pricebook vintage.",
+    "Do not close it, because closing a provider PR unmerged skips that vendor forever; resolve it on a later day after re-verifying the prices.",
+    "List here too each existing vendor's key-shape difference that section 3's Key format step records.",
+)
+# A phrase that tells a run to edit a key rule. A "never", "not" or "no" before the verb (or before "x or y") negates it,
+# so `_NEGATED_VERB` blanks those phrases first; calibrated so every prose line of both skill files passes.
+_KEY_RULE_VERBS = "(?:edit|remove|delete|replace|update|narrow|rewrite|widen|change|drop|overwrite)"
+_NEGATED_VERB = re.compile(r"\b(?:never|not|no) (?:\w+ or )?\w+", flags=re.IGNORECASE)
+_EDITS_A_KEY_RULE = re.compile(
+    r"\b" + _KEY_RULE_VERBS + r"s?(?: or " + _KEY_RULE_VERBS + r"s?)? (?:the |its |an |that |this |another |each |any )?(?:existing |other |old |current )?(?:vendor's |provider's )?(?:key[- ]format |key |`KEY_FORMATS` |`FORMAT_BOUND_PROVIDERS` |`RESERVED_PREFIXES` )?(?:rule|entry|entries|prefix)\b",
+    flags=re.IGNORECASE,
+)
+_REPLACES_THE_OLD = re.compile(r"\bin place of the old\b|\breplac\w* (?:it|them|the old)\b", flags=re.IGNORECASE)
 
 _UNQUOTED_PLACEHOLDER = re.compile(r"(?<![\"'\w])<[a-z][^<>\"']*>(?![\"'\w])")
 
@@ -262,6 +282,26 @@ def test_the_pr_body_guard_is_the_exact_command_and_ends_in_a_named_outcome() ->
     assert procedure.text.count("local-path-guard") == procedure.text.count("`PUBLISH_FAILED push local-path-guard`") >= 1, "EC-63: the guard's only outcome is PUBLISH_FAILED push local-path-guard"
     assert not [line for line in procedure.prose_lines() if re.search(r"\brun it (?:again|until)\b|\brepeat (?:it|the check) until\b", line)], "the guard reruns once, never until it passes"
     assert [rule for rule in _rules_for_the_whole_run(procedure) if rule.startswith("- Sections 1 to 5 are work")] == [PROOF_RULE], "the one-shot proof rule allows only section 8's reruns and the body check's one rerun"
+
+
+def test_a_run_never_edits_an_existing_vendors_key_rule_and_sends_a_newer_shape_to_follow_ups() -> None:
+    # S10 · D-13 / EC-33 / spec r9 row s5r3-1: the SDK's Meta key rule drifted from Meta's docs, and a run that rewrote it
+    # would strand every key issued in the old shape. Qualify step 7 keeps every existing vendor's key entries, calls an
+    # overlap key-prefix-collision, and sends a newer documented shape to Follow-ups for a separate PR that adds it beside
+    # the old one. Both lines are pinned whole, and no prose line of either file may tell a run to edit a key rule.
+    skill, procedure = _documents()
+    qualify = [line.strip() for line in procedure.section("## 3. Qualify").prose_lines()]
+    step_7 = [index for index, line in enumerate(qualify) if line.startswith("7. **Key format.**")]
+    step_8 = [index for index, line in enumerate(qualify) if line.startswith("8. **Structured output.**")]
+    kept = [index for index, line in enumerate(qualify) if "an existing vendor's `KEY_FORMATS` rule" in line]
+
+    assert len(step_7) == 1 and len(step_8) == 1, "section 3 holds one Key format step (7), the step the Follow-ups bullet names, and one step 8"
+    assert len(kept) == 1 and qualify[kept[0]] == " ".join(KEY_RULE_KEPT_SENTENCES), "D-13 / s5r3-1: an existing vendor's key entries are never edited, and a newer shape goes to Follow-ups"
+    assert step_7[0] < kept[0] < step_8[0], "the rule belongs to step 7, Key format"
+    publish = [line.strip() for line in procedure.section("## 9. Publish").prose_lines()]
+    assert [line for line in publish if "**Follow-ups**" in line] == [" ".join(FOLLOW_UPS_SENTENCES)], "s5r3-1: the Follow-ups bullet lists each existing vendor's key-shape difference"
+    offences = [match.group(0) for line in skill.prose_lines() + procedure.prose_lines() for pattern in (_EDITS_A_KEY_RULE, _REPLACES_THE_OLD) for match in pattern.finditer(_NEGATED_VERB.sub("NEGATED", line))]
+    assert offences == [], f"D-13 inverted: no line may tell a run to edit, replace or narrow a key rule: {offences}"
 
 
 def test_no_literal_key_shape_appears_and_fakes_are_built_by_concatenation() -> None:

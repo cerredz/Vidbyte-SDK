@@ -1,12 +1,12 @@
 """FILE: tests/features/onboard_model_provider_skill/test_onboard_skill_wiring_checklist.py
 
 PURPOSE: Prove the wiring checklist in references/provider-run.md is the spec r3 section 12.3 table and still matches the tree: the header and the 33 refs in order, the section 8.5 cell grammar, every path and symbol present in the file it names, the silent rows marked, the swap regression in row C6, and the checklist paths that SKILL.md's own sed command prints for result check (2).
-ROLE IN CODEBASE: Integration layer of tests/features/onboard_model_provider_skill/ (spec AC-4, AC-5 last clause, AC-7 C6 and collision clauses; INV-14, INV-21 path + symbol; NFR-7; D-12, D-13, D-21, D-28; EC-43; reviews R-4, R-8; section 12.3 "Wiring checklist").
+ROLE IN CODEBASE: Integration layer of tests/features/onboard_model_provider_skill/ (spec AC-4, AC-5 last clause, AC-7 C6 and collision clauses; INV-14, INV-21 path + symbol; NFR-7; D-12, D-13, D-21, D-28; EC-43; FR-7, INV-9, G-2; spec r9 row s5r3-1; reviews R-4, R-8; section 12.3 "Wiring checklist").
 ARCHITECTURE NOTE: These tests read the real repository files the checklist names, so a rename of DEFAULT_ENDPOINTS or a README heading on main fails here, in every provider PR, instead of misleading the next provider run (spec section 13, version split). The sed check runs the skill's own command through SedEmulator, so a padded or reformatted row that the command would skip fails here rather than in a live result check.
-FUNCTION INVENTORY: test_wiring_table_has_the_spec_header_and_the_33_refs_in_order (W1); test_each_wiring_row_follows_the_cell_grammar_and_names_the_spec_path_and_symbols (W2); test_every_wiring_path_and_symbol_exists_in_the_tree (W3); test_exactly_the_silent_rows_say_silent (W4); test_row_c6_requires_the_swap_case_and_qualify_runs_the_cross_vendor_collision_check (W5); test_verifying_command_prints_exactly_the_checklist_paths (W6); test_c9_template_proves_the_vendor_key_leaves_as_its_bearer_token_and_the_other_key_stays (W7).
+FUNCTION INVENTORY: test_wiring_table_has_the_spec_header_and_the_33_refs_in_order (W1); test_each_wiring_row_follows_the_cell_grammar_and_names_the_spec_path_and_symbols (W2); test_every_wiring_path_and_symbol_exists_in_the_tree (W3); test_exactly_the_silent_rows_say_silent (W4); test_row_c6_requires_the_swap_case_and_qualify_runs_the_cross_vendor_collision_check (W5); test_verifying_command_prints_exactly_the_checklist_paths (W6); test_c9_template_proves_the_vendor_key_leaves_as_its_bearer_token_and_the_other_key_stays (W7); test_row_c4_quotes_the_statement_that_documents_the_prefix_and_never_a_paraphrase (W8).
 COMMON MODIFICATION PATTERNS: When a provider PR legitimately renames a symbol a row names, the provider PR must update the row in provider-run.md; this test is what tells it to. When the spec adds a row, add it to WIRING_ROWS in onboard_skill_fixtures.py.
 WHAT NOT TO DO IN THIS FILE: 1. Do not check line numbers; D-21 forbids them and they drift on every merge. 2. Do not assert anything about the provider list; every provider PR grows it. 3. Do not run a shell to execute the sed command.
-KNOWN EDGE CASES: Table cells are split on unescaped pipes, so the escaped pipes in the C4 Add cell stay inside it. A dotted symbol A.B passes when both A and B appear with identifier boundaries. Heading texts are matched verbatim anywhere in the file, as the grammar says. Row B3's symbol is the exempt dash. W7 measures the C9 template's comment lines with the longest seed slug in place of <s>, the width a provider PR pastes.
+KNOWN EDGE CASES: Table cells are split on unescaped pipes, so the escaped pipes in the C4 Add cell stay inside it. A dotted symbol A.B passes when both A and B appear with identifier boundaries. Heading texts are matched verbatim anywhere in the file, as the grammar says. Row B3's symbol is the exempt dash. W7 measures the C9 template's comment lines with the longest seed slug in place of <s>, the width a provider PR pastes. W8 allows the word paraphrase only in the C4 note itself, which forbids one.
 RELATED DOCS: tests/features/onboard_model_provider_skill/FEATURE.md; docs/spec/provider-onboarding-skill/spec.md r3 sections 6.2 (AC-4), 8.5 (cell grammar), 12.3.
 TESTS: python -m pytest tests/features/onboard_model_provider_skill/test_onboard_skill_wiring_checklist.py -q
 """
@@ -57,6 +57,9 @@ C9_STATEMENTS = (
     'self.assertEqual(sent["json_body"]["model"], "<default id>")',
 )
 COMMENT_RULE = "- Comments go above the line they explain, as `#` lines wrapped at 72 columns. Every price block and every key rule carries its source URL in that comment."
+# FR-7 / INV-9 / G-2 / spec r9 row s5r3-1: the README row of a table F vendor quotes what documents P, as the Sources
+# table quotes it; the Meta row's README quote, recorded from a summarized read, does not contain its prefix.
+C4_NOTE = "- **C4.** A table F row quotes the statement or example that documents P as the Sources table quotes it, so the quote contains P and is never a paraphrase of the page."
 C9_NAMES = ("ScriptedGateway", "provider_answer", "header", "flat", "K_ANTHROPIC", "TextModelRunner", "TextModelConfig", "ModelProvider", "patch", "os", "UnsendableKeyTests")
 
 
@@ -183,6 +186,16 @@ def test_c9_template_proves_the_vendor_key_leaves_as_its_bearer_token_and_the_ot
     comments = [line for line in blocks[0] if line.lstrip().startswith("#")]
     assert comments and [line for line in comments if len(line.replace("<s>", longest)) > 72] == [], f"comments wrap at 72 columns with <s> = {longest}"
     assert any(COMMENT_RULE in line for line in section.prose_lines()), "the procedure states the 72-column comment rule"
+
+
+def test_row_c4_quotes_the_statement_that_documents_the_prefix_and_never_a_paraphrase() -> None:
+    # W8 · FR-7 / INV-9 / G-2 / spec r9 row s5r3-1: a README quote that paraphrases the page can drop the prefix it is
+    # there to prove, which is how the Meta row drifted from Meta's docs. The C4 note is pinned whole, and no other
+    # wiring-checklist line may allow a paraphrase.
+    prose = [line.strip() for line in read_markdown(PROCEDURE_FILE, PROCEDURE_REF).section("## 5. Wiring checklist").prose_lines()]
+
+    assert [line for line in prose if line.startswith("- **C4.**")] == [C4_NOTE], "s5r3-1: the C4 README row quotes what documents P, so the quote contains P"
+    assert [line for line in prose if re.search(r"paraphras", line, flags=re.IGNORECASE) and line != C4_NOTE] == [], "a wiring-checklist quote is never a paraphrase"
 
 
 def test_verifying_command_prints_exactly_the_checklist_paths() -> None:
