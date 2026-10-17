@@ -155,6 +155,17 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
        The re-reviewer's `_consume` alternative is incomplete, per the verifier: it still leaks when the loop has closed.
   - Iteration 2 counts toward the cap of 8. Re-review round 2 of 2 follows.
 
+- 2026-10-17 19:50: **Spec r6 (a0c9b489) and the S2 re-review round (S2_HEAD 6b59d390 → 68562b22) checked.**
+  - r6 changes only `spec.md` (+12/−8) and adds EC-58. It is revision 6 with `status: reviewed`.
+  - S2 made 3 commits: 48228a1d (tests, plus a strict `log_fields`), b4127a6a (the AC-18 Proof cell only) and 68562b22 (the report).
+  - My area run gives `12 failed, 1046 passed, 3 skipped`: the 11 new R-11/R-12 rows plus the inherited failure.
+  - The `noqa: S102` markers on three `exec` calls suppress nothing gated, because `lint/ruff.toml` selects only TID251.
+  - S2's in-memory variant table:
+    - the planned fix (no shield, plus whitespace→`_` in `describe`) passes 353 with 0 stray ERROR records;
+    - the cancel-wrapper alternative still fails the 6 R-12 rows;
+    - the `_consume` alternative fails the closed-loop row;
+    - the `LogToken.of` route for origins fails the 2 unit rows.
+
 ## User replies (verbatim)
 - (none yet)
 
@@ -302,3 +313,10 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
   - The mutation plugin was not re-run, because `_end_lost_turn` and `handle` changed.
   
   *Source:* S5 repair 1
+- **S2_HEAD = 68562b22**, so the repair contract is `git diff 68562b22..HEAD -- tests` empty.
+  - `log_fields` is now strict: a word with no `=` fails the test.
+  - R-11 rows capture the `asyncio` and `concurrent.futures` loggers and run `settle()` (sleep(0) plus gc.collect, three times each).
+  - A row that holds a CancelledError traceback keeps the leaked future alive and passes falsely.
+  - My R-10 row and #1178's in-flight-start row still leak and stay green, unchanged.
+  
+  *Source:* S2 re-review round
