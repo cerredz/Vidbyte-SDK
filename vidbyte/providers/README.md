@@ -612,7 +612,7 @@ something was free.
 1. **Adapters are stateless per call.** Config resolves through `_config(config)`, which prefers the
    per-call config over the instance default. Do not cache mutable per-request state on the adapter.
    The one cross-call memory is `AnthropicProvider._seen_prefixes`, the bounded set of
-   tools-and-system digests that gates prompt-cache marks (see below).
+   tools-and-system digests that gates prompt-cache marks (see Anthropic Prompt-Cache Marks above).
 2. **Response parsing stays injectable.** Each adapter accepts a `response_parser` so tests and
    alternate transports can substitute one. Do not construct `HttpResponseParser` inline.
 3. **Transport is injected, never created.** Adapters receive a `transport` argument and must not
