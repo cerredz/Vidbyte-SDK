@@ -37,6 +37,8 @@ K_OPENROUTER = "sk-or-v1-" + "R" * 24
 K_GEMINI_AQ = "AQ" + "." + "x" * 40
 # A Meta Model API fake (LLM|<app id>|<secret>), built from parts so no literal looks like a real Meta key.
 K_META = "LLM" + "|" + "1" * 15 + "|" + "m" * 32
+# A second Meta fake, for META_API_KEY when K_META sits in api_keys, so a test can tell which source was relayed.
+K_META_2 = "LLM" + "|" + "2" * 15 + "|" + "e" * 32
 
 # Unproven fakes: no table F prefix and no reserved prefix, so only table A and unique assignment decide their owner.
 K_UNPROVEN = "d-mock-" + "u" * 16
@@ -75,7 +77,7 @@ def anthropic_done(text: str) -> HttpResponse:
 
 
 def chat_done(text: str) -> HttpResponse:
-    # Chat-completions dialect (xai, deepseek, kimi, mistral): the model ends the run with one isDone tool call.
+    # Chat-completions dialect (xai, deepseek, kimi, mistral, meta): the model ends the run with one isDone tool call.
     tool_call = {"id": "call_1", "type": "function", "function": {"name": "isDone", "arguments": json.dumps({"final_answer": text})}}
     return answer(200, {"id": "chatcmpl-1", "choices": [{"index": 0, "message": {"role": "assistant", "content": None, "tool_calls": [tool_call]}, "finish_reason": "tool_calls"}], "usage": _USAGE_CHAT})
 
@@ -167,6 +169,7 @@ __all__ = [
     "K_ANTHROPIC_2",
     "K_GEMINI_AQ",
     "K_META",
+    "K_META_2",
     "K_OPENAI",
     "K_OPENAI_2",
     "K_OPENAI_ADMIN",

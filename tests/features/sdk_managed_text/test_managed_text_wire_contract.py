@@ -1,12 +1,12 @@
 """FILE: tests/features/sdk_managed_text/test_managed_text_wire_contract.py
 
 PURPOSE: Proves what a managed request carries on the wire beyond the envelope: the output-token cap in each dialect's own field, extra_body passed through untouched, the 630 s per-attempt timeout floor, and only the body keys the gateway's allowed lists accept.
-ROLE IN CODEBASE: Wire-contract layer of tests/features/sdk_managed_text/ (spec INV-2, INV-9, INV-10; AC-8, AC-9, AC-26; EC-8, EC-20; NG-14). Exercises the TextModelRunner construction-time pinning in vidbyte/lib/runners/text.py and the real adapters in vidbyte/providers/.
+ROLE IN CODEBASE: Wire-contract layer of tests/features/sdk_managed_text/ (spec INV-2, INV-9, INV-10; AC-8, AC-9, AC-26; EC-8, EC-20; NG-14; meta-muse-managed-text AC-5, INV-5, INV-6 through the per-provider tables). Exercises the TextModelRunner construction-time pinning in vidbyte/lib/runners/text.py and the real adapters in vidbyte/providers/.
 ARCHITECTURE NOTE: Each test runs a managed call with only VIDBYTE_API_KEY set and reads the envelope the scripted inner transport received; the adapters are real, so a key the adapter emits shows up exactly as the gateway would see it.
 COMMON MODIFICATION PATTERNS: When backend's allowed lists or an adapter's emitted keys change, update EMITTED_KEYS from the spec's section 9.2 table, never from the adapter's current output.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level (see managed_text_fixtures.py). 2. Do not compare caps with >= or <=: an explicit caller value must arrive exactly.
 KNOWN EDGE CASES: A Gemini generationConfig in extra_body replaces the adapter's one, so its cap disappears by design (EC-8). TextModelConfig accepts a NaN timeout, and max(nan, 630.0) is nan. Since byok-api-keys, the vendor-direct oracle and the caller-timeout case need TextModelMode.DIRECT; a provider key in AUTO relays through the gateway and gets the floor too (INV-20).
-RELATED DOCS: tests/features/sdk_managed_text/FEATURE.md; docs/spec/managed-generative-models/spec.md sections 6.1 (INV-9, INV-10) and 9.2 ("Keys the SDK emits per dialect").
+RELATED DOCS: tests/features/sdk_managed_text/FEATURE.md; docs/spec/managed-generative-models/spec.md sections 6.1 (INV-9, INV-10) and 9.2 ("Keys the SDK emits per dialect"); docs/spec/meta-muse-managed-text/spec.md sections 6.1 (INV-5) and 9.2 (the meta body keys).
 TESTS: python -m pytest tests/features/sdk_managed_text/test_managed_text_wire_contract.py
 """
 
@@ -33,6 +33,8 @@ ORACLE_KEYS = {
     ModelProvider.XAI: "xai-" + "oracle",
     ModelProvider.DEEPSEEK: "d-oracle",
     ModelProvider.KIMI: "k-oracle",
+    # META is format-bound (LLM|<digits>|<secret>), so its oracle must fully match that rule or matching refuses it (M-6).
+    ModelProvider.META: "LLM" + "|" + "0" * 15 + "|" + "o" * 32,
 }
 # The cap field each dialect uses (spec section 9.2 "Cap field per dialect").
 CAP_FIELD = {
@@ -41,6 +43,8 @@ CAP_FIELD = {
     ModelProvider.XAI: "max_tokens",
     ModelProvider.DEEPSEEK: "max_tokens",
     ModelProvider.KIMI: "max_tokens",
+    # meta-muse-managed-text D-2, INV-5: MetaProvider writes the cap as max_tokens, which #710 accepts.
+    ModelProvider.META: "max_tokens",
 }
 # Spec section 9.2 "Keys the SDK emits per dialect", copied from the table, not from the adapters.
 _CHAT_KEYS = frozenset({"model", "messages", "temperature", "top_p", "max_tokens", "stop", "tools", "tool_choice", "response_format", "metadata"})
@@ -51,6 +55,8 @@ EMITTED_KEYS = {
     ModelProvider.XAI: _CHAT_KEYS,
     ModelProvider.DEEPSEEK: _CHAT_KEYS,
     ModelProvider.KIMI: _CHAT_KEYS,
+    # meta-muse-managed-text section 9.2: the meta body uses only these keys, all on #710's Meta allowlist (response_format never: META is PROMPT_ONLY).
+    ModelProvider.META: _CHAT_KEYS,
 }
 GEMINI_GENERATION_CONFIG_KEYS = frozenset({"temperature", "topP", "maxOutputTokens", "responseMimeType", "responseSchema", "thinkingConfig"})
 FORBIDDEN_KEYS = ("service_tier", "previous_response_id", "conversation")
@@ -75,6 +81,7 @@ FULL_CONFIG: dict[ModelProvider, tuple[dict[str, Any], dict[str, Any]]] = {
     ModelProvider.XAI: ({}, {"tools": (_FUNCTION_TOOL,), "tool_choice": "auto"}),
     ModelProvider.DEEPSEEK: ({}, {"tools": (_FUNCTION_TOOL,), "tool_choice": "auto"}),
     ModelProvider.KIMI: ({}, {"tools": (_FUNCTION_TOOL,), "tool_choice": "auto"}),
+    ModelProvider.META: ({}, {"tools": (_FUNCTION_TOOL,), "tool_choice": "auto"}),
 }
 
 

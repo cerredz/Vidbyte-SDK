@@ -44,7 +44,8 @@ CLOCK_START = 1000.0
 VENDOR_URL = "https://api.openai.com/v1/responses"
 VENDOR_HEADERS = {"authorization": "Bearer vidbyte-managed"}
 ADAPTER_BODY = {"model": "gpt-5.5", "input": "Hi", "max_output_tokens": 8192}
-MANAGED_PROVIDERS = ("openai", "anthropic", "gemini", "xai", "deepseek", "kimi")
+# The providers the gateway serves; meta joined in meta-muse-managed-text FR-1 (AC-10: M-12 lists all seven).
+MANAGED_PROVIDERS = ("openai", "anthropic", "gemini", "xai", "deepseek", "kimi", "meta")
 
 
 class FakeLoopClock:

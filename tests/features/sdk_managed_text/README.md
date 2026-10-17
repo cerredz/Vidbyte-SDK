@@ -9,7 +9,7 @@ This folder holds the feature tests for Vidbyte-managed text calls. With only `V
 - `README.md` describes the scope and test ownership.
 - `FEATURE.md` defines the contract, the invariants, the known failure modes, and the strategies left out on purpose.
 - `managed_text_fixtures.py` provides the scripted inner transport, provider-shaped answers, gateway and relayed error bodies that carry a canary and a key-shaped string, and the retry-wait recorder.
-- `test_managed_text_acceptance.py` runs the README snippet, all six managed providers end to end, the per-provider BYOK rule, the agent path, and the README fee disclosure.
+- `test_managed_text_acceptance.py` runs the README snippet, all seven managed providers end to end, the per-provider BYOK rule, the agent path, the README fee disclosure, and the README's Meta bullets.
 - `test_managed_text_selection.py` covers key selection, explicit managed mode, the refusals managed state owes before any request, runner pinning, other modalities, the config field contract, and key hygiene.
 - `test_managed_text_wire_contract.py` covers output caps per dialect, `extra_body` passthrough, the 630 s timeout floor, and the allowed body keys per dialect.
 - `test_managed_text_failures.py` covers credential-safe errors, remedy facts, edge failures, cancellation, same-key retries, one key per call, and concurrent calls.
@@ -19,3 +19,4 @@ This folder holds the feature tests for Vidbyte-managed text calls. With only `V
 
 - 2026-10-10 - Pack added red, ahead of the implementation, from spec r4 (S2 test author).
 - 2026-10-13 - byok-api-keys S2: superseded rows from docs/spec/byok-api-keys/spec.md section 13 applied (api_keys / vidbyte_api_key, relay in AUTO, DIRECT oracles and goldens, construction-time refusals, M-9 and M-15 wording); contract text updated per G-1, INV-1, INV-2.
+- 2026-10-17 - meta-muse-managed-text S2: `meta` moved from unserved to served (`MANAGED_MODELS`, `UNMANAGED_TEXT_PROVIDERS`, `_CHAT_PROVIDERS`, oracle keys, cap field, emitted keys, full config, `MANAGED_PROVIDERS`) and a README test for the three Meta bullets added (AC-13); red until `ModelProvider.META` joins `VIDBYTE_MANAGED_TEXT_PROVIDERS`.

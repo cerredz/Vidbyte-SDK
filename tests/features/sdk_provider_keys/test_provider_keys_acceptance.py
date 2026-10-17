@@ -1,12 +1,12 @@
 """FILE: tests/features/sdk_provider_keys/test_provider_keys_acceptance.py
 
 PURPOSE: Proves the developer-visible promises of the two-key setup end to end: the spec section 4 snippet run as written relays the grok call with the xAI key, a default-mode call relays exactly when the provider has a key, AUTO refuses to run without a Vidbyte key, DIRECT stays byte-identical to base_commit's BYOK request, a Vidbyte entry in api_keys is only ever the bearer, unserved providers and custom endpoints need DIRECT, VIDBYTE_MANAGED ignores provider keys, and the README documents all of it.
-ROLE IN CODEBASE: Acceptance layer of tests/features/sdk_provider_keys/ (spec AC-1 to AC-5, AC-11 to AC-13, AC-27, AC-36). Exercises vidbyte/agents/base.py, vidbyte/lib/dataclasses/model_configs.py, vidbyte/lib/registries/provider_keys.py, vidbyte/lib/runners/text.py and vidbyte/lib/http/vidbyte_gateway.py with only the inner transport faked.
+ROLE IN CODEBASE: Acceptance layer of tests/features/sdk_provider_keys/ (spec AC-1 to AC-5, AC-11 to AC-13, AC-27, AC-36; meta-muse-managed-text AC-1, AC-4, AC-6, AC-12, INV-3, INV-6, INV-11). Exercises vidbyte/agents/base.py, vidbyte/lib/dataclasses/model_configs.py, vidbyte/lib/registries/provider_keys.py, vidbyte/lib/runners/text.py and vidbyte/lib/http/vidbyte_gateway.py with only the inner transport faked.
 ARCHITECTURE NOTE: Expected requests are literals: base_commit's BYOK goldens were recorded from the unchanged adapters, and the relay header name comes from the wire contract, never from production constants. Every test clears the environment, so a developer's real keys never change an outcome.
 COMMON MODIFICATION PATTERNS: When the README section is reworded, keep every fact the README test checks. When a provider's adapter changes its BYOK request, re-record its golden from base_commit's adapter, not from the new code.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols (TextModelMode.DIRECT, ProviderKeys, the header constant) at module level; import them inside each test. 2. Do not read the developer's environment; every test uses patch.dict(os.environ, ..., clear=True) or RecordingEnviron.
 KNOWN EDGE CASES: The section 4 snippet reads os.environ itself, so it runs inside the patched environment. Building the offline agent must read no VIDBYTE_API_KEY, which RecordingEnviron proves by recording every read.
-RELATED DOCS: tests/features/sdk_provider_keys/FEATURE.md; docs/spec/byok-api-keys/spec.md sections 4, 6.2 and 9.2.
+RELATED DOCS: tests/features/sdk_provider_keys/FEATURE.md; docs/spec/byok-api-keys/spec.md sections 4, 6.2 and 9.2; docs/spec/meta-muse-managed-text/spec.md sections 4 (the Muse snippet) and 6.2.
 TESTS: python -m pytest tests/features/sdk_provider_keys/test_provider_keys_acceptance.py
 """
 
@@ -32,6 +32,8 @@ from tests.features.sdk_managed_text.managed_text_fixtures import (
 )
 from tests.features.sdk_provider_keys.provider_keys_fixtures import (
     K_ANTHROPIC,
+    K_META,
+    K_META_2,
     K_OPENAI,
     K_XAI,
     RecordingEnviron,
@@ -110,6 +112,48 @@ class SnippetAcceptanceTests(unittest.TestCase):
         self.assertNotIn("VIDBYTE_API_KEY", offline_reads)
         self.assertIs(offline.runner_config.model_mode, TextModelMode.DIRECT)
         self.assertIsNone(offline.runner_config.api_keys.vidbyte_api_key)
+
+    def test_meta_muse_snippet_relays_the_meta_key_for_the_agent_and_sends_the_paid_call_without_it(self) -> None:
+        # meta-muse-managed-text AC-1, G-1, G-2, INV-2, INV-3, INV-5: the spec's section 4 snippet as written; both calls reach the gateway instead of raising.
+        gateway = ScriptedGateway(chat_done("Hi"), provider_answer(ModelProvider.META, "Hello"))
+        environment = RecordingEnviron({"VIDBYTE_API_KEY": VIDBYTE_KEY, "ANTHROPIC_API_KEY": K_ANTHROPIC, "META_API_KEY": K_META})
+        printed = io.StringIO()
+        with patch.object(os, "environ", environment), patch(RUNNER_TRANSPORT_TARGET, new=gateway), redirect_stdout(printed):
+            # The snippet's own imports, inside the test so the module collects on any branch.
+            from vidbyte import Agent
+            from vidbyte.lib.config import TextModelConfig, TextModelMode
+            from vidbyte.lib.runners import TextModelRunner
+
+            muse = Agent(
+                name="muse",
+                system_prompt="Answer in one word.",
+                provider="meta",
+                model_name="muse-spark-1.1",
+                vidbyte_api_key=os.environ["VIDBYTE_API_KEY"],
+                api_keys=[os.environ["ANTHROPIC_API_KEY"], os.environ["META_API_KEY"]],
+                fallback=["anthropic/claude-sonnet-5"],
+            )
+            print(muse.run("Say hi.").content)
+
+            paid = TextModelRunner(TextModelConfig(provider="meta", model="muse-spark-1.1", mode=TextModelMode.VIDBYTE_MANAGED))
+            print(paid.run("Say hi.").text)
+
+        self.assertEqual(printed.getvalue().splitlines(), ["Hi", "Hello"])
+        self.assertEqual([(request["method"], request["url"]) for request in gateway.requests], [("POST", GATEWAY_URL), ("POST", GATEWAY_URL)])
+        agent_call, paid_call = gateway.requests
+        # The agent's attempt relays the Meta key, and its body carries the 32,768 cap an agent cannot change.
+        self.assertEqual((agent_call["json_body"]["provider"], agent_call["json_body"]["model"]), ("meta", "muse-spark-1.1"))
+        self.assertEqual(provider_key_header(agent_call), K_META)
+        self.assertEqual(header(agent_call, "authorization"), f"Bearer {VIDBYTE_KEY}")
+        self.assertEqual(agent_call["json_body"]["body"]["max_tokens"], 32768)
+        self.assertNotIn("max_completion_tokens", agent_call["json_body"]["body"])
+        # The VIDBYTE_MANAGED call is Vidbyte-paid although META_API_KEY is set.
+        self.assertEqual((paid_call["json_body"]["provider"], paid_call["json_body"]["model"]), ("meta", "muse-spark-1.1"))
+        self.assertIsNone(provider_key_header(paid_call))
+        self.assertEqual({name.lower() for name in paid_call["headers"]}, {"authorization", "content-type", "idempotency-key"})
+        self.assertEqual(paid_call["json_body"]["body"]["max_tokens"], 32768)
+        self.assertNotIn(K_META, flat(paid_call))
+        self.assertNotIn(K_ANTHROPIC, flat(gateway.requests))
 
 
 class TextCallAcceptanceTests(unittest.TestCase):
@@ -281,6 +325,51 @@ class TextCallAcceptanceTests(unittest.TestCase):
         [sent] = gateway.requests
         self.assertIsNone(provider_key_header(sent))
         self.assertNotIn("OPENAI_API_KEY", environment.reads)
+
+    def test_vidbyte_managed_meta_never_reads_meta_api_key_or_sends_a_meta_key(self) -> None:
+        # meta-muse-managed-text AC-4, INV-3: the Meta key in api_keys is matched, then ignored; META_API_KEY is never read.
+        from vidbyte.lib.config import TextModelMode
+
+        gateway = ScriptedGateway(provider_answer(ModelProvider.META))
+        environment = RecordingEnviron({"META_API_KEY": K_META_2, "VIDBYTE_API_KEY": VIDBYTE_KEY})
+        with patch.object(os, "environ", environment), patch(RUNNER_TRANSPORT_TARGET, new=gateway):
+            response = TextModelRunner(TextModelConfig(provider="meta", model="muse-spark-1.1", api_keys=[K_META], mode=TextModelMode.VIDBYTE_MANAGED)).run(PROMPT)
+        self.assertEqual(response.text, "Hi")
+        [sent] = gateway.requests
+        self.assertEqual((sent["url"], sent["json_body"]["provider"]), (GATEWAY_URL, "meta"))
+        self.assertIsNone(provider_key_header(sent))
+        self.assertEqual({name.lower() for name in sent["headers"]}, {"authorization", "content-type", "idempotency-key"})
+        self.assertNotIn(K_META, flat(sent))
+        self.assertNotIn(K_META_2, flat(sent))
+        self.assertNotIn("META_API_KEY", environment.reads)
+
+    def test_meta_in_direct_sends_base_commits_request_and_both_gateway_envelopes_wrap_that_body_with_the_cap(self) -> None:
+        # meta-muse-managed-text AC-12, INV-11: DIRECT stays byte-identical to base_commit and never contacts the gateway or reads VIDBYTE_API_KEY.
+        # AC-6, INV-6: the relay and Vidbyte-paid envelopes are identical, and their body is the DIRECT body plus max_tokens 32,768.
+        from vidbyte.lib.config import TextModelMode
+
+        # Recorded from base_commit's MetaProvider (the worktree's vidbyte/ is byte-identical to it at S2).
+        golden = {"method": "POST", "url": "https://api.meta.ai/v1/chat/completions", "headers": {"authorization": f"Bearer {K_META}", "content-type": "application/json"}, "json_body": {"model": "muse-spark-1.1", "messages": [{"role": "user", "content": PROMPT}]}, "timeout_seconds": 60.0}
+        vendor = ScriptedGateway(provider_answer(ModelProvider.META))
+        environment = RecordingEnviron({"VIDBYTE_API_KEY": VIDBYTE_KEY})
+        with patch.object(os, "environ", environment):
+            TextModelRunner(TextModelConfig(provider="meta", model="muse-spark-1.1", api_keys=[K_META], mode=TextModelMode.DIRECT), transport=vendor).run(PROMPT)
+        self.assertEqual(vendor.requests, [golden])
+        self.assertNotIn("VIDBYTE_API_KEY", environment.reads)
+
+        expected_envelope = {"provider": "meta", "model": "muse-spark-1.1", "body": {**golden["json_body"], "max_tokens": 32768}}
+        envelopes: dict[str, object] = {}
+        for name, options in (("relay", {"api_keys": [K_META]}), ("vidbyte-paid", {})):
+            with self.subTest(case=name), patch.dict(os.environ, {"VIDBYTE_API_KEY": VIDBYTE_KEY}, clear=True):
+                gateway = ScriptedGateway(provider_answer(ModelProvider.META))
+                TextModelRunner(TextModelConfig(provider="meta", model="muse-spark-1.1", **options), transport=gateway).run(PROMPT)
+                [sent] = gateway.requests
+                self.assertEqual((sent["method"], sent["url"]), ("POST", GATEWAY_URL))
+                self.assertEqual(sent["json_body"], expected_envelope)
+                self.assertEqual(provider_key_header(sent), K_META if name == "relay" else None)
+                envelopes[name] = sent["json_body"]
+        self.assertEqual(set(envelopes), {"relay", "vidbyte-paid"})
+        self.assertEqual(envelopes["relay"], envelopes["vidbyte-paid"])
 
 
 class ReadmeAcceptanceTests(unittest.TestCase):

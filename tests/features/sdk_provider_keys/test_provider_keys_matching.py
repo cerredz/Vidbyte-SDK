@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: The matcher is pure (no environment, no network), so these te
 COMMON MODIFICATION PATTERNS: When a vendor documents a new key prefix (a table F row), add a sample to the provider_of table and a reserved-prefix case. Keep message checks to the facts table M binds; the wording is the implementer's.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import ProviderKeyMatcher, ProviderKeys or the new constants at module level. 2. Do not write AIza + 35, sk-ant-api03- + 93 + AA, or a T3BlbkFJ-signed key as one literal; build them by concatenation inside the AC-29 test. 3. Do not mock any part of the matcher.
 KNOWN EDGE CASES: A key that starts with a table F prefix but does not fully match its rule (an xai- key with a dot) is unproven and reserved to that provider, which takes no unproven key, so nothing can take it. An sk-svcacct- key is reserved to openai, which takes it as an unproven sk- key.
-RELATED DOCS: tests/features/sdk_provider_keys/FEATURE.md; docs/spec/byok-api-keys/spec.md section 9.2 ("Matching", tables F, A, M) and D-28, D-29, D-31.
+RELATED DOCS: tests/features/sdk_provider_keys/FEATURE.md; docs/spec/byok-api-keys/spec.md section 9.2 ("Matching", tables F, A, M) and D-28, D-29, D-31; docs/spec/meta-muse-managed-text/spec.md EC-6 and INV-10 (M-18 for a meta primary).
 TESTS: python -m pytest tests/features/sdk_provider_keys/test_provider_keys_matching.py
 """
 
@@ -336,6 +336,20 @@ class ConfiguredPrimaryTests(KeySafeAssertions):
                 message, details = self.refused(build, K_XAI, VIDBYTE_KEY)
                 self.assertEqual(details.get("provider"), "openai")
                 self.assertIn("Vidbyte's own openai account", message)
+
+    def test_m18_offers_vidbytes_own_meta_account_for_a_meta_primary_whose_list_holds_only_another_providers_key(self) -> None:
+        # meta-muse-managed-text EC-6, INV-10, FR-6: the list is refused when built, and the remedy now offers Vidbyte's own meta account.
+        # At base_commit the TextModelConfig root raises M-12 instead, and the Agent root's M-18 lacks the clause.
+        roots = {
+            "TextModelConfig": lambda: TextModelConfig(provider="meta", model="muse-spark-1.1", api_keys=[K_ANTHROPIC]),
+            "Agent": lambda: Agent(name="a", system_prompt="s", provider="meta", model_name="muse-spark-1.1", api_keys=[K_ANTHROPIC], vidbyte_api_key=VIDBYTE_KEY),
+        }
+        for root, build in roots.items():
+            with self.subTest(root=root), patch.dict(os.environ, {}, clear=True):
+                message, details = self.refused(build, K_ANTHROPIC, VIDBYTE_KEY)
+                self.assertEqual(details.get("provider"), "meta")
+                for fact in ("meta", "anthropic", "META_API_KEY", "Vidbyte's own meta account"):
+                    self.assertIn(fact, message)
 
     def test_require_primary_key_off_accepts_a_list_without_the_primarys_key(self) -> None:
         # D-30: only BaseAgent.restore turns the check off, for a fork child resumed with its own key.

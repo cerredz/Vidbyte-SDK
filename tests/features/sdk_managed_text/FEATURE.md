@@ -66,6 +66,8 @@ Each line is input + state → wrong output.
 - Default cap applied with `max`/`min` → a caller's 100 or 20,000 is overridden.
 - Streaming refusal keyed on "`VIDBYTE_API_KEY` is set" instead of on the mode → `DIRECT` streaming breaks, or an `AUTO` stream bypasses the gateway (byok-api-keys INV-11).
 - `mode` inserted before `timeout_seconds` → positional construction breaks.
+- `meta` left out of `VIDBYTE_MANAGED_TEXT_PROVIDERS` → a Muse config in `AUTO` or `VIDBYTE_MANAGED` raises `UnsupportedProviderError` at construction, and agents with a Muse fallback fail instead of falling back (meta-muse-managed-text FR-1, INV-1).
+- `META` given an `ORACLE_KEYS` entry that does not fully match `LLM|<digits>|<secret>` → the `DIRECT` oracle is refused at matching (M-6), so the per-provider test fails on the oracle instead of on the gateway call.
 
 ## Historical Regressions
 
@@ -73,7 +75,7 @@ None yet. Add one line per fixed bug with the test that protects it.
 
 ## Test Suite Map
 
-- `test_managed_text_acceptance.py`: the README snippet run as written (AC-1), all six providers end to end (AC-2, AC-23), the per-provider relay rule with byte-identical `DIRECT` goldens (AC-3, EC-30), the agent path (AC-24), and the README fee disclosure (AC-18).
+- `test_managed_text_acceptance.py`: the README snippet run as written (AC-1), all seven providers end to end (AC-2, AC-23; `meta` since meta-muse-managed-text FR-1), the per-provider relay rule with byte-identical `DIRECT` goldens (AC-3, EC-30), the agent path (AC-24), the README fee disclosure (AC-18), and the README's three Meta bullets (meta-muse-managed-text AC-13).
 - `test_managed_text_selection.py`: the key-resolution table (relay in `AUTO`, vendor only in `DIRECT`), explicit mode, credential errors, endpoint and provider refusals, streaming refusal, runner pinning, other modalities untouched, the config field contract, repr, the adapter placeholder, and the resolver shared with `DecisionModelConfig`.
 - `test_managed_text_wire_contract.py`: output caps per dialect, `extra_body` passthrough, the 630 s attempt floor, and the emitted-key allowlist per dialect (AC-26).
 - `test_managed_text_failures.py`: credential-safe errors per status, remedy wording, relayed provider errors, missing responses, edge pages, unexpected exceptions, cancellation, same-key retries, one key per call, and concurrent calls.

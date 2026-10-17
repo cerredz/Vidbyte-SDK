@@ -23,3 +23,4 @@ This folder holds the feature tests for `api_keys`, `vidbyte_api_key`, `Provider
 ## Logs
 
 - 2026-10-13 - Pack added red, ahead of the implementation, from spec r4 (S2 test author).
+- 2026-10-17 - meta-muse-managed-text S2: `meta` added to the per-provider relay tables (`RELAY_KEYS`, `CAP_FIELD`, `PROVIDER_KEYS`, `SERVED`) and removed from the unserved rows; Muse tests added for the snippet, relay sources, paid calls, failures, leaks, M-18, forks, fallbacks, and the grader. Red until `ModelProvider.META` joins `VIDBYTE_MANAGED_TEXT_PROVIDERS`.

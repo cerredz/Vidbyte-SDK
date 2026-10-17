@@ -36,7 +36,8 @@ SLEEP_TARGET = "vidbyte.lib.http.vidbyte_gateway.asyncio.sleep"
 # Where TextModelRunner looks up its default transport class (spec section 13).
 RUNNER_TRANSPORT_TARGET = "vidbyte.lib.runners.text.HttpTransport"
 
-# The six providers the gateway serves, each with a realistic model id (registries/models.py defaults, section 4 for openai).
+# The seven providers the gateway serves, each with a realistic model id (registries/models.py defaults, section 4 for openai).
+# Meta joined in docs/spec/meta-muse-managed-text/spec.md FR-1; muse-spark-1.1 is its registry default.
 MANAGED_MODELS: dict[ModelProvider, str] = {
     ModelProvider.OPENAI: "gpt-5.5",
     ModelProvider.ANTHROPIC: "claude-sonnet-5",
@@ -44,18 +45,19 @@ MANAGED_MODELS: dict[ModelProvider, str] = {
     ModelProvider.XAI: "grok-4.5",
     ModelProvider.DEEPSEEK: "deepseek-v4-pro",
     ModelProvider.KIMI: "kimi-k2.7-code",
+    ModelProvider.META: "muse-spark-1.1",
 }
 # Text providers the SDK supports but the gateway does not (INV-8, NG-5).
 UNMANAGED_TEXT_PROVIDERS: tuple[ModelProvider, ...] = (
     ModelProvider.OPENROUTER,
     ModelProvider.GLM,
     ModelProvider.MINIMAX,
-    ModelProvider.META,
     ModelProvider.MISTRAL,
 )
 
 _REAL_SLEEP = asyncio.sleep
-_CHAT_PROVIDERS = frozenset({ModelProvider.XAI, ModelProvider.DEEPSEEK, ModelProvider.KIMI})
+# Providers that answer in the chat-completions shape; Meta's Muse API is OpenAI-compatible chat completions.
+_CHAT_PROVIDERS = frozenset({ModelProvider.XAI, ModelProvider.DEEPSEEK, ModelProvider.KIMI, ModelProvider.META})
 
 
 class ScriptedGateway:
@@ -136,6 +138,7 @@ def gateway_error(status: int) -> HttpResponse:
 
 def relayed_provider_error(provider: ModelProvider, status: int) -> HttpResponse:
     # A vendor error relayed by the gateway; every vendor nests an object under "error", never the boolean true.
+    # Meta, like OpenAI, xAI, DeepSeek and Kimi, uses the OpenAI-style default branch below.
     detail = f"{BODY_CANARY} upstream said key {LEAKED_KEY}"
     if provider is ModelProvider.ANTHROPIC:
         return answer(status, {"type": "error", "error": {"type": "invalid_request_error", "message": detail}})
