@@ -189,6 +189,12 @@ class FailureCode(str, Enum):
     MUSE_PROTOCOL_MISMATCH = "muse.protocol_mismatch"
     MUSE_RUN_FAILED = "muse.run_failed"
     MUSE_WSL_UNAVAILABLE = "muse.wsl_unavailable"
+    # The browser tools of the harness thread functions, shared by every
+    # harness (skills/failure/vocabulary.md, "Browser tools").
+    BROWSER_MOUNT_UNSUPPORTED = "browser.mount_unsupported"
+    BROWSER_RUNTIME_MISSING = "browser.runtime_missing"
+    BROWSER_TOOL_INSTALL_FAILED = "browser.tool_install_failed"
+    BROWSER_TOOLS_UNAVAILABLE = "browser.tools_unavailable"
 
     @property
     def category(self) -> str:

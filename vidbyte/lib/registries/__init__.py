@@ -15,6 +15,7 @@ Similar Files:
 from __future__ import annotations
 
 from vidbyte.lib.registries.agents import AgentRegistry
+from vidbyte.lib.registries.browser_tools import BrowserToolRegistry
 from vidbyte.lib.registries.components import ComponentRegistry
 from vidbyte.lib.registries.infinite import InfiniteMemoryToolRegistry
 from vidbyte.lib.registries.models import ProviderModelRegistry
@@ -28,6 +29,7 @@ from vidbyte.lib.registries.actors import ActorRegistry, actor_registry
 
 __all__ = [
     "AgentRegistry",
+    "BrowserToolRegistry",
     "ComponentRegistry",
     "InfiniteMemoryToolRegistry",
     "ProviderModelRegistry",

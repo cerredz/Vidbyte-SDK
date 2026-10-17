@@ -20,6 +20,7 @@ PACKAGE = Path(__file__).resolve().parents[3] / "vidbyte" / "harnesses" / "nativ
 NAMED_MODULES = (
     "__init__.py", "grok/__init__.py", "grok/threads.py", "grok/wire.py", "opencode/__init__.py", "opencode/threads.py", "opencode/wire.py",
     "muse/__init__.py", "muse/threads.py", "muse/wire.py", "muse/launcher.py", "hostkit/errors.py", "hostkit/launcher.py", "hostkit/skills.py",
+    "hostkit/browser.py", "grok/browser.py", "grok/mounts.py", "opencode/browser.py", "opencode/mounts.py", "muse/browser.py", "muse/mounts.py",
 )
 ALLOWED_VALUES = ("", 0, 1)
 FORBIDDEN_IMPORT = "vidbyte.tools"

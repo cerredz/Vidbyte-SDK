@@ -62,7 +62,11 @@ if TYPE_CHECKING:
     from vidbyte.lib.dataclasses.agents import AgentMessage
     from vidbyte.lib.dataclasses.outputs import DeliveryReceipt
     from vidbyte.lib.enums.failure import FailureCode
-    from vidbyte.lib.enums.native_threads import NativeHarness, NativeThreadOperation
+    from vidbyte.lib.enums.native_threads import (
+        NativeHarness,
+        NativeThreadOperation,
+        NativeThreadResultRecord,
+    )
 
 
 class VidbyteSdkError(Exception):
@@ -585,10 +589,13 @@ class NativeThreadError(AgentExecutionError):
         exit_code: int | None = None,
         vendor_message: str | None = None,
         error_type: str = "",
+        result_record: NativeThreadResultRecord | None = None,
     ) -> None:
         # The factory in vidbyte/harnesses/native/hostkit/errors.py has
         # already composed and scrubbed the message and picked the texts
-        # written for this code, so this class only stores them.
+        # written for this code, so this class only stores them. The
+        # record the function returns on success names `expected`; None
+        # keeps the plain functions' NativeThreadResult text.
         self.failure_code = failure_code
         self.harness = harness
         self.operation = operation
@@ -599,7 +606,7 @@ class NativeThreadError(AgentExecutionError):
         self.vendor_message = vendor_message
         self.error_type = error_type
         self.error_kind = failure_code.value
-        self.expected = f"{operation.value} returning a NativeThreadResult"
+        self.expected = f"{operation.value} returning a {'NativeThreadResult' if result_record is None else result_record.value}"
         self.actual = message
         self.safe_runtime_details = {
             "harness": harness.value,
