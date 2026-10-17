@@ -8,7 +8,7 @@ COMMON MODIFICATION PATTERNS: A new memory tool is one BaseTool subclass here, o
 WHAT NOT TO DO IN THIS FILE: 1. Do not write to entries.jsonl from a pair agent; stage instead. 2. Do not count a refused call against the quota. 3. Do not raise out of execute for a rule violation; return ToolResult.error. 4. Do not put module-level constants here; they live in vidbyte/lib/constants/infinite.py.
 KNOWN EDGE CASES: settings is the tree's one InfiniteMemoryAgentSettings, which a tool that starts an agent of its own reads for the model, the prompt, and the loop. A staged key is s<staged + dropped + 1>, so keys never repeat within a pair even after drops. A generator and its verifier have separate quotas but share the staged list, so a verifier sees and can drop the generator's entries. write_note records a path once per agent in files_written even when the agent writes it several times.
 RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 6.1 INV-15 to INV-18 and INV-32, and 9.2); vidbyte/agents/infinite/README.md
-TESTS: tests/features/infinite_memory_agent/test_infinite_memory_workspace.py and tests/features/infinite_memory_agent/test_infinite_memory_verification.py
+TESTS: tests/features/infinite_memory_agent/test_infinite_memory_workspace.py, tests/features/infinite_memory_agent/test_infinite_memory_verification.py, and tests/features/infinite_memory_agent/test_infinite_memory_recall.py
 """
 
 from __future__ import annotations
