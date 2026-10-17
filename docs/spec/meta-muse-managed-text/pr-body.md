@@ -231,7 +231,7 @@ Call (a) of the live check tests this before merge.
 
 ### Gates
 
-The source tree at HEAD `75187327` is identical to the tree the full gate ran on: `git diff --stat 8033c08c HEAD -- . ':!docs'` prints nothing.
+Only `docs/` has changed since the full gate ran at `8033c08c`, and since the PR author's own runs at `75187327`. At this PR's head, `git diff --stat 8033c08c HEAD -- . ':!docs'` prints nothing.
 
 | Gate | Command | Run by, at | Final lines |
 |---|---|---|---|
