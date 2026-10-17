@@ -1,7 +1,7 @@
 """FILE: tests/features/codex_host/test_codex_host_hardening_contract.py
 
-PURPOSE: Proves the lib and error contracts of the codex-host-hardening slice that need no running host: CodexHostSetup's check of the constructor arguments; the fields appended to the fork, thread-list, review, skill-list and goal-run input records; CodexAgentError.retryable decided code by code and with_operation keeping every other field; CodexErrorMapper.relabel and its thread/read and turn/steer classification; ExceptionOrigin; LogToken's two rules and its exports (spec r5, S4 R-9); the section 9.2 and 9.3 constants, the r5 additions included, verbatim and in sorted __all__; no top-level constant under the native hosts (C021); the 0.163 pin; and the docstrings section 3 asks for.
-ROLE IN CODEBASE: Contract layer of the hardening tests in tests/features/codex_host/ (docs/spec/codex-host-hardening/spec.md AC-5, AC-13, AC-34, AC-39, AC-40, AC-41 record half, INV-2, INV-4, INV-6, INV-19, INV-28 step 1, INV-29 to INV-32, INV-34, INV-47, INV-48, D-6, D-8, D-13, D-22, EC-54, EC-55, and the spec r5 rows for S4 R-2, R-7 and R-9). Every class but the classification one runs on CI; that one needs openai-codex to build the SDK's JSON-RPC errors.
+PURPOSE: Proves the lib and error contracts of the codex-host-hardening slice that need no running host: CodexHostSetup's check of the constructor arguments; the fields appended to the fork, thread-list, review, skill-list and goal-run input records; CodexAgentError.retryable decided code by code and with_operation keeping every other field; CodexErrorMapper.relabel and its thread/read and turn/steer classification; ExceptionOrigin, a whitespace run in a file or function name included (spec r6, S5 R-12); LogToken's two rules and its exports (spec r5, S4 R-9); the section 9.2 and 9.3 constants, the r5 additions included, verbatim and in sorted __all__; no top-level constant under the native hosts (C021); the 0.163 pin; and the docstrings section 3 asks for.
+ROLE IN CODEBASE: Contract layer of the hardening tests in tests/features/codex_host/ (docs/spec/codex-host-hardening/spec.md AC-5, AC-13, AC-34, AC-39, AC-40, AC-41 record half, INV-2, INV-4, INV-6, INV-19, INV-28 step 1, INV-29 to INV-32, INV-34, INV-47, INV-48, D-6, D-8, D-13, D-22, EC-54, EC-55, the spec r5 rows for S4 R-2, R-7 and R-9, and spec r6 row 9 for S5 R-12). Every class but the classification one runs on CI; that one needs openai-codex to build the SDK's JSON-RPC errors.
 ARCHITECTURE NOTE: Feature names are imported inside each test, so a missing name fails that test while the module still collects. Expected texts and tables are the spec's literals from codex_host_support, never read back from the production constant they pin. The C021 check reads the native host sources with ast, the same scan lint/rules/c021_native_host_constants_in_lib.py runs.
 COMMON MODIFICATION PATTERNS: A new section 9.2 or 9.3 constant adds one row to NEW_CONSTANTS; a new input field adds its valid and invalid rows beside the record's other rows.
 KNOWN EDGE CASES: RecordFieldValidator puts the whole "<method> <field>" label in details["field"] while _reject_unused_fields puts the bare name, so the rows accept either by checking that the label ends with the field. The docstring checks are keyword-level, because section 3 fixes what each limitation says, not its wording.
@@ -95,6 +95,13 @@ def _raise_here() -> None:
 
 def _raise_deeper() -> None:
     _raise_here()
+
+
+def _compiled(source: str, filename: str) -> dict[str, Any]:
+    """Run literal source under a made-up file name, so its frames name that file, and return its namespace; no file is written."""
+    namespace: dict[str, Any] = {}
+    exec(compile(source, filename, "exec"), namespace)  # noqa: S102 - the source is a literal of this module
+    return namespace
 
 
 async def _async_handler(request: Any) -> Any:
@@ -392,6 +399,35 @@ class CodexExceptionOriginTests(unittest.TestCase):
                 self.assertEqual(origin, f"test_codex_host_hardening_contract.py:_raise_here:{line}")
                 self.assertNotIn("origin-canary-3b9d", origin)
         self.assertEqual(ExceptionOrigin.describe(RuntimeError("never raised")), "")
+
+    def test_a_frame_in_a_file_whose_name_has_a_space_describes_as_one_token(self) -> None:
+        # INV-7 and row 9 (spec r6, S5 R-12), the spec's own example. compile names the file, so nothing is written to
+        # disk, and the answer is the same whether or not this build freezes the stdlib. <module> stays as it is.
+        from vidbyte.lib.util.exception_origin import ExceptionOrigin
+
+        try:
+            _compiled("raise KeyError('k')", "my script.py")
+        except KeyError as exc:
+            origin = ExceptionOrigin.describe(exc)
+        self.assertEqual(origin, "my_script.py:<module>:1")
+
+    def test_each_run_of_whitespace_in_a_file_or_function_name_becomes_one_underscore(self) -> None:
+        # Row 9: a run of spaces and tabs is one "_", in the file's basename and in the function's name alike.
+        from vidbyte.lib.util.exception_origin import ExceptionOrigin
+
+        renamed = _compiled("def read():\n    raise KeyError('k')\n", "plain.py")["read"]
+        renamed.__code__ = renamed.__code__.replace(co_name="read  the\tsetting")
+        rows = (
+            ("a run in the file name", lambda: _compiled("raise KeyError('k')", "my \t  script.py"), "my_script.py:<module>:1"),
+            ("runs in the function name", renamed, "plain.py:read_the_setting:2"),
+        )
+        for label, raiser, expected in rows:
+            with self.subTest(case=label):
+                try:
+                    raiser()
+                except KeyError as exc:
+                    origin = ExceptionOrigin.describe(exc)
+                self.assertEqual(origin, expected)
 
 
 class CodexLogTokenTests(unittest.TestCase):

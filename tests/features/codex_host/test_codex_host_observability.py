@@ -1,10 +1,10 @@
 """FILE: tests/features/codex_host/test_codex_host_observability.py
 
-PURPOSE: Proves the redacted logs the hardening slice adds: one record per app-server call, success at DEBUG and failure at WARNING with its code, error type and origin, including a call whose caller was cancelled after it was sent and a start handed over on cancel, one only for a call whose bound ran out, and none for a call refused before it was sent; one INFO record per server request naming who answered and a short answer label; DEBUG records for turn items and one INFO record per turn end; one WARNING per tool failure; every message %-style with arguments; and no record carrying a privacy canary, a prompt, command text, a cwd, model output or any exception text.
-ROLE IN CODEBASE: Observability layer of the hardening tests in tests/features/codex_host/ (docs/spec/codex-host-hardening/spec.md AC-18, INV-7 to INV-10, INV-23, INV-42, D-12, D-13, EC-57, and the S4 review rows R-4, R-9 and R-10). The class needs the optional openai-codex extra, so CI skips it.
+PURPOSE: Proves the redacted logs the hardening slice adds: one record per app-server call, success at DEBUG and failure at WARNING with its code, error type and origin, including a call whose caller was cancelled after it was sent and a start handed over on cancel, one only for a call whose bound ran out, and none for a call refused before it was sent; no asyncio or concurrent.futures record carrying the text of a handed-over start that failed; one INFO record per server request naming who answered and a short answer label; DEBUG records for turn items and one INFO record per turn end; one WARNING per tool failure; every message %-style with arguments; and no record carrying a privacy canary, a prompt, command text, a cwd, model output or any exception text.
+ROLE IN CODEBASE: Observability layer of the hardening tests in tests/features/codex_host/ (docs/spec/codex-host-hardening/spec.md AC-18, INV-7 to INV-10, INV-23, INV-42, D-12, D-13, EC-57, EC-58, the S4 review rows R-4, R-9 and R-10, and the S5 re-review rows R-11 and R-12). The class needs the optional openai-codex extra, so CI skips it.
 ARCHITECTURE NOTE: HostTestCase.capture_logs records every logger under vidbyte.harnesses.native.codex and vidbyte.tools.builtins.codex at DEBUG, so a record written to a wrongly named logger is missed and the event check fails. The canaries are seeded where a careless log line would pick them up: the account email, the client env, the prompt, the command and cwd of an approval, Codex's error text, the model's final answer and a tool exception's message.
 COMMON MODIFICATION PATTERNS: A new log event adds one expectation here with its fields; a new private value adds one canary seeded where it flows.
-KNOWN EDGE CASES: The hostile-id rows name each Codex-made thread and turn through FakeAppServer.name_next, so those ids keep the fake's thr- and turn- prefixes; their expected tokens are literals worked out by hand from LogToken's two rules. CodexCallRecordTests runs the host on one worker thread, so a call that returns is the barrier after which every earlier worker has returned and run its done-callbacks. log_fields splits a message on spaces, so every field value is checked as one token; an empty value reads as "". The no-handler host answers routed requests with handled_by=default and no fallback WARNING, because INV-17 lists no fallback reason for a host without a handler.
+KNOWN EDGE CASES: The hostile-id rows name each Codex-made thread and turn through FakeAppServer.name_next, so those ids keep the fake's thr- and turn- prefixes; their expected tokens are literals worked out by hand from LogToken's two rules. CodexCallRecordTests runs the host on one worker thread, so a call that returns is the barrier after which every earlier worker has returned and run its done-callbacks. log_fields splits a message on spaces, so every field value is checked as one token; an empty value reads as "", and a word with no "=" fails the test. The R-11 rows also record the asyncio and concurrent.futures loggers and collect garbage before reading them, because asyncio reports a failure nothing read from Future.__del__; the R-12 rows compile a function under the file name "my handler.py" and read the raw words of each record. The no-handler host answers routed requests with handled_by=default and no fallback WARNING, because INV-17 lists no fallback reason for a host without a handler.
 RELATED DOCS: tests/features/codex_host/FEATURE.md; docs/spec/codex-host-hardening/spec.md sections 6.1 (INV-7 to INV-10, INV-23) and 8.1 (D-12, D-13).
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/codex_host/test_codex_host_observability.py
 """
@@ -12,11 +12,15 @@ TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/codex_host/test_code
 from __future__ import annotations
 
 import asyncio
+import gc
 import json
 import logging
 import os
+import time
+import traceback
 import unittest
 from collections.abc import Callable
+from contextlib import suppress
 from typing import Any
 from unittest import mock
 
@@ -24,6 +28,7 @@ from tests.features.codex_host.codex_host_support import (
     CANARIES,
     ENV_SECRET,
     HOST_LOGGER,
+    STDERR_SECRET,
     TOOLS_LOGGER,
     TURN_EVENTS_MODULE,
     WAIT_SECONDS,
@@ -93,8 +98,33 @@ EVENT_TURN = "turn-2 status=completed\tfailure_code="
 EVENT_TURN_TOKEN = "turn-2_status_completed_failure_code_"
 
 
+# Spec r6 INV-10 and EC-58 (S5 R-11): loggers the host never writes to, where asyncio and concurrent.futures report a
+# future's failure that nothing read.
+STRAY_LOGGERS = ("asyncio", "concurrent.futures")
+# Spec r6 INV-7 and row 9 (S5 R-12): compile names a frame's file, so a frame "in" a file whose name has a space needs no
+# file on disk. Line 2 of the source raises.
+SPACED_FILE = "my handler.py"
+SPACED_SOURCE = "def read_setting(*args, **kwargs):\n    raise KeyError('setting')\n"
+SPACED_ORIGIN = "my_handler.py:read_setting:2"
+
+
 def _on(thread_id: str) -> Callable[[dict[str, Any]], bool]:
     return lambda params: params.get("threadId") == thread_id
+
+
+def _rendered(record: logging.LogRecord) -> str:
+    """All a handler could print for a record: its message, its traceback with every chained exception, and its stack."""
+    text = record.getMessage()
+    if record.exc_info:
+        text += "\n" + "".join(traceback.format_exception(*record.exc_info))
+    return text + ("\n" + record.stack_info if record.stack_info else "")
+
+
+def _raiser_in_a_spaced_file() -> Callable[..., Any]:
+    """A function whose frame is in SPACED_FILE; whatever calls it gets a KeyError from line 2."""
+    namespace: dict[str, Any] = {}
+    exec(compile(SPACED_SOURCE, SPACED_FILE, "exec"), namespace)  # noqa: S102 - the source is a literal of this module
+    return namespace["read_setting"]
 
 
 @requires_sdk
@@ -359,10 +389,68 @@ class CodexLogTokenRecordTests(HostTestCase):
         ended = self.fields(records, "codex_host_turn_ended")
         self.assertEqual(ended, [{"thread_id": EVENT_THREAD_TOKEN, "turn_id": EVENT_TURN_TOKEN, "status": "failed", "failure_code": "codex.api_error"}])
 
+    # Spec r6 INV-7, INV-10 and row 9 (S5 R-12): an origin is one token in each of the four records that carry one, even when
+    # the frame's file name has a space. These rows read the raw words, because a split origin is what a key=value reader hides.
+
+    def words(self, records: list[logging.LogRecord], event: str) -> list[list[str]]:
+        return [record.getMessage().split(" ") for record in log_events(records, event)]
+
+    async def test_an_origin_in_a_file_whose_name_has_a_space_logs_as_one_token_in_a_fallback(self) -> None:
+        read_setting = _raiser_in_a_spaced_file()
+
+        async def handler(request: Any) -> Any:
+            return read_setting(request)
+
+        records = self.capture_logs()
+        await self.open_host(approval_handler=handler)
+        answer = await self.ask("item/commandExecution/requestApproval", {"threadId": "thr-1", "turnId": "turn-1", "itemId": "item-1"})
+        self.assertEqual(answer, {"decision": "decline"})
+        expected = ["codex_host_server_request_fallback", "method=item/commandExecution/requestApproval", "thread_id=thr-1", "reason=handler_failed", "error_type=KeyError", f"origin={SPACED_ORIGIN}"]
+        self.assertEqual(self.words(records, "codex_host_server_request_fallback"), [expected])
+
+    async def test_an_origin_in_a_file_whose_name_has_a_space_logs_as_one_token_in_a_tool_failure(self) -> None:
+        from vidbyte.tools.toolsets import CodexHostTools
+
+        records = self.capture_logs()
+        host = await self.open_host()
+        tool = next(tool for tool in CodexHostTools(host, max_live_turns=2) if tool.spec().name == "check_codex_ready")
+        with mock.patch.object(host, "check_codex_ready", side_effect=_raiser_in_a_spaced_file()):
+            result = await asyncio.wait_for(tool.execute(ToolCall(tool_name="check_codex_ready", arguments={})), WAIT_SECONDS)
+        self.assertEqual(result.status, ToolStatus.ERROR)
+        expected = ["codex_host_tool_failed", "tool=check_codex_ready", "error_type=KeyError", f"origin={SPACED_ORIGIN}"]
+        self.assertEqual(self.words(records, "codex_host_tool_failed"), [expected])
+
+    async def test_an_origin_in_a_file_whose_name_has_a_space_logs_as_one_token_in_a_turn_event_failure(self) -> None:
+        records = self.capture_logs()
+        host = await self.open_host()
+        handle = await self.spawn(host)
+        with mock.patch(f"{TRANSLATOR}.turn_snapshot", side_effect=_raiser_in_a_spaced_file()):
+            self.server.complete_turn(handle.thread_id, handle.turn_id, final="Done.")
+            snapshot = await asyncio.wait_for(host.wait_codex_turn(handle), WAIT_SECONDS)
+        self.assert_problem(snapshot, "failed", "codex.protocol_mismatch")
+        expected = ["codex_host_turn_event_failed", f"thread_id={handle.thread_id}", f"turn_id={handle.turn_id}", "error_type=KeyError", f"origin={SPACED_ORIGIN}"]
+        self.assertEqual(self.words(records, "codex_host_turn_event_failed"), [expected])
+
+    async def test_an_origin_in_a_file_whose_name_has_a_space_logs_as_one_token_in_a_failed_call(self) -> None:
+        # The client is the section 13 seam; its thread read raises from the spaced file on the host's worker.
+        records = self.capture_logs()
+        host = await self.open_host()
+        stored = self.server.seed_thread()
+        with mock.patch.object(self.server.client, "thread_read", side_effect=_raiser_in_a_spaced_file()), self.assertRaises(CodexAgentError):
+            await asyncio.wait_for(host.read_codex_thread(stored.thread_id), WAIT_SECONDS)
+        failed = self.words(records, "codex_host_call_failed")
+        self.assertEqual(len(failed), 1, failed)
+        self.assertEqual([word.split("=", 1)[0] for word in failed[0][1:]], list(EVENT_KEYS["codex_host_call_failed"]), failed[0])
+        self.assertIn(f"origin={SPACED_ORIGIN}", failed[0])
+
 
 @requires_sdk
 class CodexCallRecordTests(HostTestCase):
-    """INV-7 and EC-57 (spec r5, S4 R-10): one record for each call sent, whoever still waits for it; none for one never sent."""
+    """INV-7 and EC-57 (spec r5, S4 R-10): one record for each call sent, whoever still waits for it; none for one never sent.
+
+    INV-10 and EC-58 (spec r6, S5 R-11): a handed-over start that fails puts its text in no asyncio or concurrent.futures
+    record, whether its caller was cancelled or ran out of time, the process died, the host closed, or the loop closed.
+    """
 
     async def asyncSetUp(self) -> None:
         await super().asyncSetUp()
@@ -402,6 +490,42 @@ class CodexCallRecordTests(HostTestCase):
             ("success", None, "codex_host_call", logging.DEBUG, ""),
             ("failure", self.fakes.FakeRpcError(-32603, f"store failed for {RPC_CANARY}"), "codex_host_call_failed", logging.WARNING, "codex.api_error"),
         )
+
+    def capture_strays(self) -> list[logging.LogRecord]:
+        """Also record the two loggers the host never writes to, at DEBUG, for the rest of the test (EC-58)."""
+        return self.capture_logs(*STRAY_LOGGERS)
+
+    async def settle(self) -> None:
+        """Let the loop run and collect what nothing holds: asyncio reports a failure nothing read from Future.__del__."""
+        for _ in range(3):
+            await asyncio.sleep(0)
+            gc.collect()
+        await asyncio.sleep(0)
+
+    async def until_written(self, method: str, thread_id: str) -> None:
+        """Wait for a handed-over start's one record on a host that is dead or closed, so no barrier call can be sent."""
+        deadline = time.monotonic() + WAIT_SECONDS
+        while not self.written(method, thread_id):
+            self.assertLess(time.monotonic(), deadline, f"the late record of {method} on {thread_id} was never written")
+            await asyncio.sleep(0.01)
+
+    def assert_no_failure_text(self, strays: list[logging.LogRecord], canary: str) -> None:
+        """INV-10 and EC-58: no stray record carries the failure's text, in its message or anywhere in its traceback."""
+        carrying = [(record.name, record.levelname, (record.getMessage().splitlines() or [""])[0]) for record in list(strays) if canary in _rendered(record)]
+        self.assertEqual(carrying, [], "a logger the host does not own wrote the failed start's text")
+
+    def spawn_task(self, host: Any) -> Any:
+        from vidbyte.lib.dataclasses.codex_host import CodexSpawnRequest
+
+        return asyncio.ensure_future(host.spawn_codex_thread(CodexSpawnRequest(prompt="Summarize the readme.")))
+
+    async def cancel_mid_start(self, spawn: Any, held: Any) -> str:
+        """Cancel a spawn whose turn/start Codex holds, so the start is handed over; return its thread. The hold stays."""
+        thread_id = str((await asyncio.to_thread(held.wait_arrived)).params["threadId"])
+        spawn.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await spawn
+        return thread_id
 
     async def test_a_call_cancelled_after_it_was_sent_writes_one_record_once_its_worker_returns(self) -> None:
         host = await self.open_host()
@@ -501,6 +625,103 @@ class CodexCallRecordTests(HostTestCase):
             await asyncio.wait_for(host.read_codex_thread(busy_thread.thread_id), WAIT_SECONDS)
         self.assertEqual(self.count("thread/read", _on(busy_thread.thread_id)), 2)
         self.assertEqual(len(self.written("thread/read", busy_thread.thread_id)), 2)
+
+    # Spec r6 INV-10 and EC-58 (S5 R-11). Each row plants a canary in the error that ends a handed-over start, lets the
+    # start fail, collects, and then reads every asyncio and concurrent.futures record, message and traceback alike. The
+    # start's one INV-7 record is still checked, because hiding the failure must not drop that record.
+
+    async def test_a_spending_start_handed_over_on_cancel_that_fails_writes_its_text_to_no_other_logger(self) -> None:
+        # The R-10 hand-over: Codex's JSON-RPC error text is the canary.
+        strays = self.capture_strays()
+        host = await self.open_host()
+        other = self.server.seed_thread()
+        self.server.fail("turn/start", self.fakes.FakeRpcError(-32603, f"store failed for {RPC_CANARY}"), times=1)
+        held = self.server.hold("turn/start")
+        thread_id = await self.cancel_while_held(self.spawn_task(host), held, "turn/start")
+        await self.barrier(host, other.thread_id)
+        await self.settle()
+        self.assertEqual(self.shape(self.written("turn/start", thread_id)), [("codex_host_call_failed", logging.WARNING)])
+        self.assert_no_failure_text(strays, RPC_CANARY)
+
+    async def test_a_start_handed_over_when_its_bound_ran_out_that_fails_writes_its_text_to_no_other_logger(self) -> None:
+        # The timeout hand-over: the WARNING the timeout wrote stays the start's one record.
+        strays = self.capture_strays()
+        host = await self.open_host()
+        other = self.server.seed_thread()
+        self.patch_connection("CODEX_HOST_REQUEST_TIMEOUT_SECONDS", 0.5)
+        self.server.fail("turn/start", self.fakes.FakeRpcError(-32603, f"store failed for {RPC_CANARY}"), times=1)
+        held = self.server.hold("turn/start")
+        try:
+            with self.assertRaises(CodexAgentError):
+                await asyncio.wait_for(self.spawn_task(host), WAIT_SECONDS)
+            thread_id = str((await asyncio.to_thread(held.wait_arrived)).params["threadId"])
+            timed_out = self.written("turn/start", thread_id)
+            self.assertEqual(self.shape(timed_out), [("codex_host_call_failed", logging.WARNING)])
+        finally:
+            held.release()
+        await asyncio.to_thread(held.wait_responded)
+        await self.barrier(host, other.thread_id)
+        await self.settle()
+        self.assertEqual(self.written("turn/start", thread_id), timed_out)
+        self.assert_no_failure_text(strays, RPC_CANARY)
+
+    async def test_a_handed_over_start_that_dies_with_the_process_writes_the_stderr_tail_to_no_other_logger(self) -> None:
+        # The process dies while the start is in flight; openai-codex puts Codex's stderr tail in the start's error.
+        strays = self.capture_strays()
+        host = await self.open_host()
+        held = self.server.hold("turn/start")
+        thread_id = await self.cancel_mid_start(self.spawn_task(host), held)
+        self.server.die(STDERR_SECRET)
+        await self.until_written("turn/start", thread_id)
+        await self.settle()
+        self.assertEqual(self.shape(self.written("turn/start", thread_id)), [("codex_host_call_failed", logging.WARNING)])
+        self.assert_no_failure_text(strays, STDERR_SECRET)
+
+    async def test_a_handed_over_start_that_fails_when_the_host_closes_writes_the_stderr_tail_to_no_other_logger(self) -> None:
+        # No crash is needed: Codex wrote one stderr line, the caller cancelled its spawn mid-start, and the host closed,
+        # which ends the start with an error that carries that line.
+        strays = self.capture_strays()
+        host = await self.open_host()
+        self.server.process.stderr.write_line(STDERR_SECRET)
+        await asyncio.to_thread(self.server.process.stderr.wait_drained)
+        held = self.server.hold("turn/start")
+        thread_id = await self.cancel_mid_start(self.spawn_task(host), held)
+        await self.close_host(host)
+        await self.until_written("turn/start", thread_id)
+        await self.settle()
+        self.assertEqual(self.shape(self.written("turn/start", thread_id)), [("codex_host_call_failed", logging.WARNING)])
+        self.assert_no_failure_text(strays, STDERR_SECRET)
+
+    async def test_a_handed_over_start_that_fails_after_its_loop_closed_writes_its_text_to_no_other_logger(self) -> None:
+        # The caller's loop is gone when the start fails: the caller cancelled its spawn mid-start and returned without
+        # closing the host, so asyncio.run closed that loop. The start's worker still writes its one record.
+        from vidbyte.harnesses.native.codex import CodexHost
+
+        strays = self.capture_strays()
+        self.server.fail("turn/start", self.fakes.FakeRpcError(-32603, f"store failed for {RPC_CANARY}"), times=1)
+        held = self.server.hold("turn/start")
+
+        async def leave_mid_start() -> None:
+            host = CodexHost()
+            await host.__aenter__()
+            spawn = self.spawn_task(host)
+            await asyncio.to_thread(held.wait_arrived)
+            spawn.cancel()
+            with suppress(asyncio.CancelledError):
+                await spawn
+
+        try:
+            self.assertIsNone(await self.run_in_other_loop(leave_mid_start))
+            thread_id = str((await asyncio.to_thread(held.wait_arrived)).params["threadId"])
+        finally:
+            held.release()
+        # That host can never be closed now; ending its process after the test stops its reader threads.
+        self.addCleanup(self.server.die, "")
+        await asyncio.to_thread(held.wait_responded)
+        await self.until_written("turn/start", thread_id)
+        await self.settle()
+        self.assertEqual(self.shape(self.written("turn/start", thread_id)), [("codex_host_call_failed", logging.WARNING)])
+        self.assert_no_failure_text(strays, RPC_CANARY)
 
 
 if __name__ == "__main__":

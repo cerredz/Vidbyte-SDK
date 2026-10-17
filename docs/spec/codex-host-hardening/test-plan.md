@@ -298,3 +298,73 @@ S4_MUTANT=<M> PYTHONPATH="$(pwd);<scratchpad>/s4-eng" "$V" -B -m pytest tests/fe
   - one `codex_host_turn_event_failed` WARNING with `error_type=RuntimeError`;
   - at most one interrupt;
   - and the thread taking the next review.
+
+## Re-review round 1 additions
+
+- **Stage:** S2 test author, re-review round 1. The source is the post-repair re-review (`review.md`, "Post-repair re-review round 1", with the verifier's `reports/S5-findings-verifier.md`) and spec r6 (`a0c9b489`). The rows are written on top of `a0c9b489`. Production code is the repair's `efb19043`.
+- **What this round adds:** 11 red tests and one stricter helper.
+  - **5 R-11 rows** in `observability::CodexCallRecordTests`, one per path that leaks today. Each plants a canary in the error that ends a handed-over start: Codex's JSON-RPC error text, or its stderr tail.
+  - **6 R-12 rows.** Two are unit rows in `hardening_contract::CodexExceptionOriginTests`, and they run on CI. Four are record rows in `observability::CodexLogTokenRecordTests`, one for each record that carries an origin.
+  - **`log_fields` is strict** (section C). A word after the event name with no `=` now fails the test, where it used to be dropped silently.
+- **The leaks the suite already has.** Two existing rows trip R-11 today and stay green: the R-10 row `test_a_spending_start_handed_over_on_cancel_writes_one_record_for_its_late_outcome`, and #1178's `review_gaps::CodexHostInFlightStartTests::test_a_failed_in_flight_start_frees_its_thread_when_it_returns`. Neither is changed. The new cancel row runs the same sequence with the stray loggers recorded.
+
+| Finding | Test id | Red reason (today, `efb19043` code) |
+|---|---|---|
+| R-11 (cancel hand-over, R-10's path) | `observability::CodexCallRecordTests::test_a_spending_start_handed_over_on_cancel_that_fails_writes_its_text_to_no_other_logger` | `AssertionError: Lists differ: [('asyncio', 'ERROR', 'Future exception was never retrieved')] != []`. The record's future repr and traceback carry `rpc-canary-a3c5`. |
+| R-11 (timeout hand-over) | `observability::CodexCallRecordTests::test_a_start_handed_over_when_its_bound_ran_out_that_fails_writes_its_text_to_no_other_logger` | The same `asyncio` record, with the RPC canary. The timeout's WARNING is still the start's one record. |
+| R-11 (death after a hand-over) | `observability::CodexCallRecordTests::test_a_handed_over_start_that_dies_with_the_process_writes_the_stderr_tail_to_no_other_logger` | The same `asyncio` record. Its `TransportClosedError` carries `stderr-canary-a8e2`, which `server.die` wrote. |
+| R-11 (ordinary close after a hand-over) | `observability::CodexCallRecordTests::test_a_handed_over_start_that_fails_when_the_host_closes_writes_the_stderr_tail_to_no_other_logger` | The same `asyncio` record, with the stderr line written before the spawn. No crash is involved. |
+| R-11 (the loop closed first, EC-58) | `observability::CodexCallRecordTests::test_a_handed_over_start_that_fails_after_its_loop_closed_writes_its_text_to_no_other_logger` | `AssertionError: Lists differ: [('concurrent.futures', 'ERROR', 'exception calling callback for <Future at 0x… state=finished raised InternalRpcError>')] != []`. The canary is in the traceback's chained `__context__`. |
+| R-12 (unit, the spec's example) | `hardening_contract::CodexExceptionOriginTests::test_a_frame_in_a_file_whose_name_has_a_space_describes_as_one_token` | `AssertionError: 'my script.py:<module>:1' != 'my_script.py:<module>:1'` |
+| R-12 (unit, whitespace runs) | `hardening_contract::CodexExceptionOriginTests::test_each_run_of_whitespace_in_a_file_or_function_name_becomes_one_underscore` | `AssertionError: 'my <tab>  script.py:<module>:1' != 'my_script.py:<module>:1'`. Its function-name row expects `plain.py:read_the_setting:2`. |
+| R-12 (router fallback) | `observability::CodexLogTokenRecordTests::test_an_origin_in_a_file_whose_name_has_a_space_logs_as_one_token_in_a_fallback` | `AssertionError: Lists differ: [[…, 'origin=my', 'handler.py:read_setting:2']] != [[…, 'origin=my_handler.py:read_setting:2']]` |
+| R-12 (tool failure) | `observability::CodexLogTokenRecordTests::test_an_origin_in_a_file_whose_name_has_a_space_logs_as_one_token_in_a_tool_failure` | The same split, in `codex_host_tool_failed` |
+| R-12 (turn event failure) | `observability::CodexLogTokenRecordTests::test_an_origin_in_a_file_whose_name_has_a_space_logs_as_one_token_in_a_turn_event_failure` | The same split, in `codex_host_turn_event_failed` |
+| R-12 (failed call) | `observability::CodexLogTokenRecordTests::test_an_origin_in_a_file_whose_name_has_a_space_logs_as_one_token_in_a_failed_call` | `AssertionError: Lists differ: [..., 'origin', 'handler.py:read_setting:2', 'duration_ms'] != [..., 'origin', 'duration_ms']`, the key list of `codex_host_call_failed` |
+| R-12 (section C) | `codex_host_support.log_fields` | Not a test. It now raises `AssertionError: a value split into words with no '=': [...]`. |
+
+**How the tests are built**
+
+- **Every logger, every part of the record (R-11).** `capture_strays` records `asyncio` and `concurrent.futures` at DEBUG. A record counts as a leak when the canary appears in its message, in its `exc_info` formatted with every chained exception, or in its stack.
+- **Collect, then read (R-11).** asyncio reports an unread failure from `Future.__del__`. So each row waits for the start's INV-7 record, then calls `settle()` (`asyncio.sleep(0)` and `gc.collect()`, three times each) before it reads the records.
+  - On an open host, the wait is the one-worker barrier.
+  - On a dead or closed host, it is `until_written`, which polls the records for at most `WAIT_SECONDS`.
+- **The INV-7 check stays.** Every R-11 row also asserts that the start has exactly one `codex_host_call_failed` WARNING. For the timeout row, that is the WARNING the timeout itself wrote.
+- **The closed loop (EC-58).** The caller runs on a second loop through `run_in_other_loop`. It opens a host, cancels its spawn mid-start and returns without closing the host, so `asyncio.run` closes that loop. Only then is the held `turn/start` released to fail. The host can no longer be closed, so a cleanup ends the fake process.
+- **No file on disk (R-12).** `compile` gives a frame its file name. So `"my script.py"` and `"my handler.py"` exist only as code-object names, and the result does not depend on whether the build freezes the stdlib. The rows do not pin `<frozen_os>`. The whitespace-run function name is made with `code.replace(co_name=...)`.
+- **Raw words (R-12).** The record rows compare `getMessage().split(" ")` with literal word lists, because a key=value reader is what hides a split.
+- **Not pinned.** A queued start withdrawn by its cancelled caller sends nothing and writes nothing (EC-57). The rows hold `turn/start`, so every start here is running when it is handed over.
+
+**Candidate fixes.** These runs use the verifier's in-memory plugin, which leaves the worktree untouched:
+
+```
+S5V_VARIANT=<variant> PYTHONPATH="$(pwd);<scratchpad>/s5-verify" "$V" -B -m pytest tests/features/codex_host -q -p no:cacheprovider -p s5v_patch_plugin
+```
+
+| Variant | `tests/features/codex_host` | Stray ERROR records in the session | What it shows |
+|---|---|---|---|
+| as is | `11 failed, 342 passed, 1 skipped` | 7: the 5 R-11 rows, the R-10 row and the #1178 row | All 11 new rows are red |
+| `no_shield,origin_split` (the planned fix) | `353 passed, 1 skipped` | 0 | Every new row turns green, and nothing else changes |
+| `cancel_wrapper` (alternative A) | `6 failed, 347 passed, 1 skipped` (the R-12 rows) | 0 | The R-11 rows accept it |
+| `consume` (alternative B, the re-reviewer's) | `7 failed, 346 passed, 1 skipped` (R-12 and the closed-loop row) | 1 | Only the closed-loop row rejects it, which is the verifier's point |
+| `origin_logtoken` (the re-reviewer's R-12 route) | `7 failed, 346 passed, 1 skipped` (R-11 and the 2 unit rows) | 7 | The unit rows reject it: `'my_script.py:_module_:1' != 'my_script.py:<module>:1'` |
+
+- **Strict `log_fields` proof.** With only the strict `log_fields` applied, at `a0c9b489` and before any new row, `tests/features/codex_host` gives `342 passed, 1 skipped`, the same as before.
+- **Stability.** The observability and contract files ran 5 times as is (`11 failed, 37 passed` each time), and 5 times under the planned fix (`48 passed`, with 0 stray records each time).
+
+**Runs**
+
+| Run | Before (`a0c9b489`) | After |
+|---|---|---|
+| `tests/features/codex_host` | `342 passed, 1 skipped` | `11 failed, 342 passed, 1 skipped` |
+| `tests/features/codex_host tests/features/harness_threads tests/test_codex_*.py` | `1 failed, 1046 passed, 3 skipped` | `12 failed, 1046 passed, 3 skipped` |
+
+- The 12 failures are the 11 new rows and the inherited `test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes`.
+- `lint/run.py` ends `SDK-LINT: PASS`.
+
+**For the repair agent.** Never edit these tests.
+- **R-11.** The rows read only outcomes:
+  - no canary in any `asyncio` or `concurrent.futures` record;
+  - exactly one INV-7 record for the start;
+  - that record still written by the worker after the loop closed.
+- **R-12.** `describe` must keep `<module>` as it is, and turn each whitespace run into one `_`, in the basename and in the function name. Routing the four call sites through `LogToken.of` fails the unit rows.

@@ -3,7 +3,7 @@
 PURPOSE: Shared helpers for the CodexHost feature pack: the spec's literal texts and tables, the privacy canaries, the openai-codex skip gate, a duck-typed stub host for the tool tests, and HostTestCase, which runs a real CodexHost against the in-memory app-server.
 ROLE IN CODEBASE: Imported by every test module in tests/features/codex_host/. It imports nothing the feature adds and nothing from openai-codex at module level, so every module still collects before the feature exists and on CI, which installs only the dev extra.
 ARCHITECTURE NOTE: HostTestCase.asyncSetUp patches the one seam spec section 13 names, vidbyte.harnesses.native.codex.connection.CodexClient, with the fake client from codex_host_fakes.py, and shutil.which with a recorder. Everything above the seam (CodexHost, its translators, preflight, pricing, records) runs unmocked. StubCodexHost stands in for CodexHost only in the tool tests, which spec section 13 allows because the tools import CodexHost under TYPE_CHECKING only.
-FUNCTION INVENTORY: requires_sdk skips a class when openai-codex is missing; error_texts(exc) returns every text an error shows, its visible chain included; input_texts(params) reads a turn request's input items; HostTestCase.open_host / close_host / spawn / wait_done / assert_problem / assert_codex_error / run_in_other_loop drive a host, and patch_connection / patch_skill_functions / patch_platform / wait_for_request / wait_until / ask / count script and observe the fake app-server; StubCodexHost answers the twenty-seven host methods from scripted records; make_echo_tool builds a small dynamic tool; mapped_summary checks a CodexErrorMapper message's head and its likely-cause and next-step tail and returns what lies between, and thread_suffix is the thread sentence the mapper adds there; FieldCarryingMapper maps as the host's CodexErrorMapper does and records every error, and changed_error_fields lists the KEPT_ERROR_FIELDS a rebuilt error lost (thread-helpers review R-17, R-18). The thread-helpers spec adds HELPER_METHODS, its message texts, four codes, four rows and eleven tool rows. The codex-host-hardening spec adds its section 9.2 messages, the changed causes and next steps, the INV-15 DEFAULT_ANSWERS table, RETRYABLE_CODES, RETRIED_METHODS and GOAL_REJECTED_FIELDS; open_host takes an optional approval_handler; capture_logs, LogRecorder, log_events and log_fields read the INV-7 to INV-10 log records.
+FUNCTION INVENTORY: requires_sdk skips a class when openai-codex is missing; error_texts(exc) returns every text an error shows, its visible chain included; input_texts(params) reads a turn request's input items; HostTestCase.open_host / close_host / spawn / wait_done / assert_problem / assert_codex_error / run_in_other_loop drive a host, and patch_connection / patch_skill_functions / patch_platform / wait_for_request / wait_until / ask / count script and observe the fake app-server; StubCodexHost answers the twenty-seven host methods from scripted records; make_echo_tool builds a small dynamic tool; mapped_summary checks a CodexErrorMapper message's head and its likely-cause and next-step tail and returns what lies between, and thread_suffix is the thread sentence the mapper adds there; FieldCarryingMapper maps as the host's CodexErrorMapper does and records every error, and changed_error_fields lists the KEPT_ERROR_FIELDS a rebuilt error lost (thread-helpers review R-17, R-18). The thread-helpers spec adds HELPER_METHODS, its message texts, four codes, four rows and eleven tool rows. The codex-host-hardening spec adds its section 9.2 messages, the changed causes and next steps, the INV-15 DEFAULT_ANSWERS table, RETRYABLE_CODES, RETRIED_METHODS and GOAL_REJECTED_FIELDS; open_host takes an optional approval_handler; capture_logs, LogRecorder, log_events and log_fields read the INV-7 to INV-10 log records, and log_fields refuses a word with no "=" (S5 R-12).
 COMMON MODIFICATION PATTERNS: When the spec changes a next-step text, a tool name or a classification row, change the literal here, never by reading the production constant. Add a host helper here only when two or more modules need it.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import vidbyte.harnesses.native, vidbyte.lib.dataclasses.codex_host, the new enums or openai_codex at module level: a missing feature must fail each test, not abort collection. 2. Do not start a process or touch the network. 3. Do not copy production logic; tests assert the spec's literal values.
 KNOWN EDGE CASES: The privacy canaries are unique strings, so finding one in any output proves a leak. StubCodexHost reports a handle RUNNING until a test marks it finished, which is how the live-turn cap sees running turns.
@@ -542,9 +542,17 @@ def log_events(records: list[logging.LogRecord], event: str) -> list[logging.Log
 
 
 def log_fields(record: logging.LogRecord) -> dict[str, str]:
-    """The key=value fields of one event record, read from its format string and arguments."""
+    """The key=value fields of one event record, read from its format string and arguments.
+
+    Every word after the event name must be one key=value field (INV-10). A word with no "=" means a value split in
+    two, so it fails the test rather than being dropped (S5 R-12: an origin such as "<frozen os>" would split).
+    """
     text = record.getMessage()
-    return dict(part.split("=", 1) for part in text.split(" ")[1:] if "=" in part)
+    parts = text.split(" ")[1:]
+    orphans = [part for part in parts if "=" not in part]
+    if orphans:
+        raise AssertionError(f"a value split into words with no '=': {orphans} in {text[:300]!r}")
+    return dict(part.split("=", 1) for part in parts)
 
 
 class _EchoTool(BaseTool):
