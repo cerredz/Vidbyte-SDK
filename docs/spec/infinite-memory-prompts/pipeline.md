@@ -89,6 +89,8 @@ The folder holds 40 `.md` assets; `infinite_memory.json` top level is a dict wit
 
 - 2026-10-16 23:25 — **S4 launched:** three reviewers (conformance, conventions, engineering; model opus) in parallel on `origin/feat/infinite-memory-agent...c86005c2`, reports at `reports/S4-review-{conformance,conventions,engineering}.md`. Orchestrator re-ran semgrep through the scratch venv (`scratchpad/run_semgrep.py` with `scratchpad/semgrep-venv/Scripts/python.exe`): `Ran 1 rule on 980 files: 0 findings.`, exit 0.
 
+- 2026-10-16 23:45 — **S4 reviews in:** conformance MERGEABLE AFTER FIXES (0 B / 2 M / 5 m: R-C1 root:20 "read a file only to decide a card" contradicts kept :48/:52 and leaves P1 × card-reading uncovered; R-C2 verifier assets never give the "context is scarce" reason, INV-1); conventions MERGEABLE AFTER FIXES (0 B / 2 M / 8 m: R-V1 resume/verifier_task restate their own rules and reach the floor only through the repeats; R-V2 test helper chain depth in the S2 module); engineering MERGEABLE AFTER FIXES (0 B / 6 M / 7 m: R-E1 task:17 + verifier_task:35 make the generator's reading the verifier's standard, contradicting :25; launch:13 claims the verifier sees the context field (launch.py:307-309); three briefings reach the floor only via repeats; root:20 vs :52; generator:52 missing "if any"; test-pack gaps). Findings verifier launched next (opus).
+
 ## User replies (verbatim)
 - (none yet)
 
