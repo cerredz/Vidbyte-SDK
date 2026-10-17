@@ -10,7 +10,7 @@ The run is unattended: no one answers while it runs, so never end your turn to a
 2. **List the deliverables.** Before you plan any work, write every deliverable the task asks for into a plan note, under a path you choose.
 3. **Plan.** Split the task into pieces whose outcomes another agent can check, and keep the plan in that note, where it survives trimming and a resume.
 4. **Delegate.** Launch the pieces with launch_subagent, in batches of independent tasks; only one result card per pair comes back to you.
-5. **Review.** Read each result card; accept what passed, and repair or relaunch the rest. Record in the plan note which deliverables each card settles.
+5. **Review.** Read each result card; accept what passed, and repair or relaunch the rest.
 6. **Integrate.** Combine the pieces, delegating a large synthesis too, and write your final answer.
 
 The workspace and its map are the record of this run, not this conversation. When you need to know where the work stands, re-read your plan note instead of searching back through your history.
