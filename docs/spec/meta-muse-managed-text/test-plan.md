@@ -153,3 +153,187 @@ All edits are inside the S2 grant (pipeline.md, 2026-10-17 03:40). No assertion 
 | `pk/test_provider_keys_acceptance.py`, `pk/test_provider_keys_agents.py`, `pk/test_provider_keys_matching.py` | imports, header | — | + `K_META`, `K_META_2` where used; meta IDs in ROLE and RELATED DOCS | documentation |
 | `pk/FEATURE.md` | Known Failure Modes, Test Suite Map | no meta entries | five meta failure modes; meta tests named per module | documentation |
 | `pk/README.md` | Logs | one entry | + 2026-10-17 meta-muse-managed-text S2 line | documentation |
+
+## r4 delta
+
+**Spec:** r4 (`04729669`; pipeline r4 and S2 delta grant `121911df`). **Production under test:** HEAD `121911df`, the r3 implementation with no r4 change, so the Meta row of `ProviderKeyMatcher.KEY_FORMATS` is still `(META, ("LLM|",), LLM\|[0-9]+\|[A-Za-z0-9_-]+)`. **Commits:** `23c4e9c4` (r4 tests), `4af4d8e0` (R-2, R-6, R-7 tidy). **New files:** none (budget 0).
+
+**What this delta protects.** A Muse user pastes the key Meta issues today, `LLM_<numeric id>_<secret>`. That key must reach Meta and only Meta, in every mode and on every path. A malformed `LLM_` key must fail closed with M-6 and never be sent to a vendor. At HEAD the documented key is unproven and unreserved, so it binds by elimination to kimi, deepseek, mistral, glm or minimax and is relayed to that vendor (probe at HEAD: `match([K_ANTHROPIC, K_META_DOC], primary="anthropic", others=("kimi",))` gives `{anthropic, kimi}`; the same call with `K_META` gives `{anthropic, meta}`).
+
+**Fixture:** `K_META_DOC = "LLM" + "_" + "1" * 16 + "_" + "m" * 32` in `pk/provider_keys_fixtures.py`, exported in `__all__`. `LLM_` joins the reserved-prefix list on its KNOWN EDGE CASES line. Malformed keys are built inline by concatenation, so no literal Meta key shape appears in the tree.
+
+**Totals:** 9 new test methods (matching 5, agents 1, contract 3) and 7 extended existing tests: about 290 new subtests. At HEAD, 15 tests and 139 subtests are red, all on `LLM_` subtests or the r4 source text. Every `LLM|` subtest passes at HEAD. Green-ability: 192 passed. Mutants: 13 of 13 killed.
+
+### Failure inventory (r4)
+
+Each line is input + state → wrong output, and the test that catches it.
+
+| # | Input + state → wrong output | Caught by |
+|---|---|---|
+| F1 | documented key in a mixed list for a `meta` agent in `AUTO` → M-6 at construction, so the §4 snippet does not run | AC-1 subtest `shape="LLM_"`; MetaRelayTests case "LLM_ key in a mixed list beats META_API_KEY" |
+| F2 | documented key beside a kimi, deepseek, mistral, glm or minimax model, with or without `meta` configured → bound to that provider by elimination and relayed to that vendor (EC-17) | `test_a_meta_key_in_either_shape_goes_to_meta_beside_every_provider_that_takes_unproven_keys`; AC-17 (i) agent test |
+| F3 | `anthropic` primary, relayed 401, `kimi` fallback, `MOONSHOT_API_KEY` unset → the Meta key rides on the kimi envelope (S4 R-1, R-3) | `MetaAgentTests::test_a_meta_key_in_either_shape_never_rides_on_a_kimi_fallback_that_holds_no_key_of_its_own` |
+| F4 | lone Meta key, either shape, for a `deepseek`, `kimi`, `mistral`, `glm` or `minimax` config → bound to that vendor instead of M-18 | `ConfiguredPrimaryTests::test_a_lone_meta_key_for_a_provider_that_takes_unproven_keys_is_refused_with_m18` |
+| F5 | malformed `LLM_` key (word ID, `.` in the secret, no secret, trailing separator, `LLM_<id>` then `\|`, bare `LLM_`) on any root → bound to an open provider instead of M-6 | `UniqueAssignmentTests::test_a_malformed_llm_key_is_refused_at_construction_on_every_root_whatever_its_providers`; `TableFAndATests::test_every_meta_shaped_key_is_reserved_to_meta_and_no_provider_takes_it_unproven` |
+| F6 | missing ID (`LLM__…`) → same as F5 | reserved test; table F unproven rows |
+| F7 | non-ASCII digit ID or non-ASCII secret letter → proven `meta` by a `\d` or `\w` class (D-9) | table F unproven rows "LLM_ non-ASCII digit ID" and "LLM_ non-ASCII secret". Through a root these keys are refused earlier by the printable-ASCII check (M-6b), so the provider_of table is the seam. |
+| F8 | whitespace: a padded `LLM_` entry or a padded `META_API_KEY` → not stripped, or relayed padded | MetaRelayTests case "LLM_ META_API_KEY with no list"; padded duplicate in the M-7 test. An inner space is M-6b, generic, not re-tested. |
+| F9 | both shapes in one list → bound to two providers instead of M-7 | `test_two_meta_keys_in_different_shapes_are_refused_and_the_same_documented_key_twice_is_one_key` |
+| F10 | the same documented key twice → refused instead of one key | same test |
+| F11 | `META_API_KEY` in the documented shape, no list → not relayed | MetaRelayTests case "LLM_ META_API_KEY with no list" |
+| F12 | list key `LLM_` beside `META_API_KEY` `LLM\|` → the variable wins | MetaRelayTests case "LLM_ key in a mixed list beats META_API_KEY" |
+| F13 | `VIDBYTE_MANAGED` Muse call with an `LLM_` list key and `META_API_KEY` set → refused at construction, or the variable read or a key sent | AC-4 subtest `listed="LLM_"` |
+| F14 | `DIRECT` Muse call with an `LLM_` key → refused, or not sent as `Bearer` to `https://api.meta.ai/v1/chat/completions` | modes DIRECT subtest `shape="LLM_"` |
+| F15 | lowercase `llm_`, `LLM-`, `LLMx` → reserved (over-reach, INV-17 and EC-8) | reserved test, near-miss half; table F unproven row "lowercase llm_" |
+| F16 | the Meta row widened with a word ID, `[!-~]+`, `\d`/`\w`, ignore-case, a reserved `LLM`, or `LLM\|` dropped; another row, the order, or a flag changed (D-8, D-9, INV-17) | `NamesAndConstantsTests::test_the_meta_row_is_the_section_8_5_row_and_every_other_row_keeps_its_rule` plus the behavior rows (see the mutation table) |
+| F17 | the Meta-row comment without `LLM_`, the URL or the 2026-10-17 date, wider than 72 columns, or with an example key (AC-18) | `KeyFormatSourceTests::test_the_comment_above_the_meta_row_names_the_llm_shape_and_cites_metas_page` |
+| F18 | the registries README meta row without both patterns (the `LLM_` one first), Meta's 2026-10-17 sentence, the error page, or #1027's kept 2026-10-15 text, or with an example key | `KeyFormatSourceTests::test_the_registries_readme_meta_row_quotes_metas_llm_sentence_and_keeps_the_older_source` |
+| F19 | fork or handoff to Muse with an `LLM_` key in the parent list | not written (see below) |
+
+### Coverage map (r4)
+
+| Spec ID | Test | Level | Red at HEAD (input + state → wrong output) | Why it cannot pass vacuously |
+|---|---|---|---|---|
+| FR-9, INV-16, AC-16 (provider_of) | `pk/test_provider_keys_matching.py::TableFAndATests::test_each_table_f_sample_proves_its_provider_and_every_unsourced_shape_is_unproven` (extended: 3 proven `LLM_` rows, 10 unproven rows) | unit | `provider_of(K_META_DOC)` → None, not META (3 subtests) | Expected providers are spelled from the spec, never read from `KEY_FORMATS`. The 10 unproven rows pass at HEAD and exist to kill the m3, m7, m8 and m9 mutants. |
+| INV-16, EC-8, AC-17 (iii), INV-17 | `…matching.py::TableFAndATests::test_every_meta_shaped_key_is_reserved_to_meta_and_no_provider_takes_it_unproven` (new) | unit | 8 `LLM_`-shaped keys × 8 open providers → `accepts_unproven` True (64 subtests) | Runs over every `ModelProvider`. The near-miss half asserts True for open providers, so a test that reserved everything would fail it. |
+| INV-16, EC-17, FR-9 | `…matching.py::UniqueAssignmentTests::test_a_meta_key_in_either_shape_goes_to_meta_beside_every_provider_that_takes_unproven_keys` (new) | unit | `{anthropic, kimi: <Meta key>}` instead of `{anthropic, meta}` for all 5 providers × meta configured or not; a meta primary with a DeepSeek key raises (12) | Compares the whole `key_view`. The `LLM\|` subtests pass at HEAD, so the test is not red for an unrelated reason. |
+| INV-16, M-7 | `…matching.py::UniqueAssignmentTests::test_two_meta_keys_in_different_shapes_are_refused_and_the_same_documented_key_twice_is_one_key` (new) | unit | M-6 at index 1 instead of M-7; with a kimi backup no error at all; the same key twice gives M-6 (3) | Checks `details.indexes == (0, 1)` and `provider == "meta"`, so an M-6 or M-19 cannot satisfy it. |
+| AC-17 (iii), EC-8, INV-16 | `…matching.py::UniqueAssignmentTests::test_a_malformed_llm_key_is_refused_at_construction_on_every_root_whatever_its_providers` (new) | unit (through the roots) | 6 malformed keys × 6 roots (kimi and deepseek in `AUTO`; mistral, glm and minimax in `DIRECT`; an Agent with a kimi fallback) → "ConfigurationError not raised" (36) | Checks `details.index`, `details.length` and each configured provider in `details.providers`, plus no key text. The `meta` root passes at HEAD, which shows the assertions accept M-6. |
+| AC-17 (ii), EC-17 | `…matching.py::ConfiguredPrimaryTests::test_a_lone_meta_key_for_a_provider_that_takes_unproven_keys_is_refused_with_m18` (new) | unit (TextModelConfig) | `LLM_` × 5 providers → no error, so the key would go to that vendor (5) | Requires `details.provider == p` and `providers == ["meta"]`. The `LLM\|` subtests pass at HEAD with the same assertions. |
+| AC-17 (i), EC-17, INV-4 (S4 R-1, R-3) | `pk/test_provider_keys_agents.py::MetaAgentTests::test_a_meta_key_in_either_shape_never_rides_on_a_kimi_fallback_that_holds_no_key_of_its_own` (new) | agent, real transport seam | the kimi envelope relays the `LLM_` key (2: meta configured or not) | Asserts the call order `["anthropic", "kimi"]` and the reply from kimi, so the fallback really ran. Kills `meta_key_to_keyless` in both shapes, at HEAD rows and green. |
+| AC-1, AC-16 (i) | `pk/test_provider_keys_acceptance.py::SnippetAcceptanceTests::test_meta_muse_snippet_relays_the_meta_key_for_the_agent_and_sends_the_paid_call_without_it` (extended: subTest per shape) | acceptance | `shape="LLM_"`: M-6 raised by the §4 snippet's `Agent(...)` | Every r3 assertion kept and applied to both shapes. |
+| AC-4, INV-3 | `…acceptance.py::TextCallAcceptanceTests::test_vidbyte_managed_meta_never_reads_meta_api_key_or_sends_a_meta_key` (extended: list `K_META_DOC`, variable `K_META`) | acceptance | M-6 at construction | `META_API_KEY` reads are recorded by `RecordingEnviron`, and both keys are absent from the request. |
+| AC-16 (i), (ii), INV-2, INV-4 | `pk/test_provider_keys_wire_contract.py::MetaRelayTests::test_a_meta_call_relays_the_lists_meta_key_before_meta_api_key_stripped_and_no_other_key` (extended: 2 rows) | wire contract | the mixed-list row raises M-6. The `META_API_KEY` row passes at HEAD (the variable is trusted by its name) and pins AC-16 (ii). | The relay header must equal the list key, and the key must be absent everywhere else in the request. |
+| AC-16 (iii), INV-11 | `pk/test_provider_keys_modes.py::UnsendableKeyTests::test_a_meta_key_from_a_mixed_list_reaches_meta_unchanged_in_direct` (extended: subTest per shape, exact URL) | mode | `shape="LLM_"`: M-6 | Exactly one request, to the exact Meta URL, with `Bearer <key>`; so no gateway call. |
+| §8.5, D-8, D-9, INV-17 | `pk/test_provider_keys_contract.py::NamesAndConstantsTests::test_the_meta_row_is_the_section_8_5_row_and_every_other_row_keeps_its_rule` (new) | contract | META row `(("LLM\|",), …)` ≠ the §8.5 row | The 5 other rows pass at HEAD with literal `base_commit` prefixes, patterns and flags. |
+| §8.5 (grant 1) | `…contract.py::NamesAndConstantsTests::test_the_key_format_tables_follow_table_f_table_a_and_the_reserved_prefixes` (`:71` changed by grant) | contract | last set `{"LLM\|"}` ≠ `{"LLM\|", "LLM_"}` | Unchanged otherwise. |
+| AC-18, row 4(b) | `…contract.py::KeyFormatSourceTests::test_the_comment_above_the_meta_row_names_the_llm_shape_and_cites_metas_page` (new) | doc contract | the HEAD block lacks `LLM_` and `2026-10-17`, and its first line is 74 columns (4) | Fails if no comment sits directly above the row. Reads `MATCHER_SOURCE`, a module constant. |
+| AC-18, row 5 | `…contract.py::KeyFormatSourceTests::test_the_registries_readme_meta_row_quotes_metas_llm_sentence_and_keeps_the_older_source` (new) | doc contract | the pattern pair, the date, the quote and the error page are missing (4). The kept 2026-10-15 text passes. | Requires exactly one `\| meta \|` row. `REGISTRIES_README` is a module constant. |
+| FR-9 (CMP) | `pk/test_provider_keys_property.py` (`POOL` and `PROVEN` gain `K_META_DOC`) | property | passes at HEAD (INV-9 holds for any table) | The vacuity guard (`> CASES // 8` of each outcome) still passes at HEAD and green. |
+
+### Tests deliberately NOT written (r4)
+
+| Spec ID / case | Why no new test |
+|---|---|
+| AC-11 (relayed Meta 401 → anthropic fallback) in the `LLM_` shape | Re-proves AC-1 (`LLM_` relayed on the meta call) plus AC-17 (i) (no key on the other provider's call). |
+| EC-11 fork or handoff to Muse with an `LLM_` parent key | The child carries the root's matched record unchanged (D-13), and that is shape-agnostic. F2 and the AC-1 subtest cover how the record is built. |
+| AC-14 leaks with an `LLM_` key | Header placement, error wording and redaction do not depend on the key's shape. The leak tests use `LEAKED_KEY` and `K_META` canaries. |
+| EC-18 (workaround: an off-class secret through `META_API_KEY`) | byok EC-14 already pins that the variable is trusted by its name, and the MetaRelayTests "META_API_KEY with no list" rows relay it. The `api_keys` half of EC-18 is the F5 dotted-secret case. |
+| EC-19 (another vendor's key proven `meta`) | An accepted limitation (A-7). A test would only re-prove the proven-row samples and the M-18 test. |
+| Padded `LLM_` list entry | Stripping is generic (`_entries`). It is covered for the `LLM\|` shape and by the padded duplicate in the M-7 test. |
+| A no-misroute property test over random lists | Re-proves the reserved test and the either-shape test. Instead, `POOL` gained `K_META_DOC`, so INV-9 and INV-10 run over both shapes. |
+| AC-13's r4 text "`LLM_` or `LLM\|` (Meta)" in the root README | Outside the grant ("AC-13 stays as is"). The existing assertion still holds after the r4 edit. **Open item:** no test binds the `LLM_` half of the root README Prefixes bullet. |
+| AC-18 clause "today's page no longer shows that form" | A paraphrase with no fixed wording, left to the S5 review. Every fact AC-18 fixes in words is bound. |
+
+### Red run (r4)
+
+Per file, at HEAD `4af4d8e0` (tests) over `121911df` (production):
+
+```
+$ PYTHONPATH=$(pwd) env -u DEEPSEEK_API_KEY py -3.11 -m pytest tests/features/sdk_provider_keys/test_provider_keys_<file>.py -q -p no:cacheprovider
+matching: 6 failed, 32 passed in 1.02s
+agents: 1 failed, 25 passed in 0.94s
+acceptance: 2 failed, 12 passed in 0.91s
+wire_contract: 1 failed, 13 passed in 0.97s
+modes: 1 failed, 18 passed in 0.89s
+contract: 4 failed, 12 passed in 0.88s
+property: 2 passed in 1.25s
+```
+
+Area:
+
+```
+$ PYTHONPATH=$(pwd) env -u DEEPSEEK_API_KEY py -3.11 -m pytest tests/features/sdk_provider_keys tests/features/sdk_managed_text -q -p no:cacheprovider
+FAILED test_provider_keys_acceptance.py::SnippetAcceptanceTests::test_meta_muse_snippet_relays_the_meta_key_for_the_agent_and_sends_the_paid_call_without_it
+FAILED test_provider_keys_acceptance.py::TextCallAcceptanceTests::test_vidbyte_managed_meta_never_reads_meta_api_key_or_sends_a_meta_key
+FAILED test_provider_keys_agents.py::MetaAgentTests::test_a_meta_key_in_either_shape_never_rides_on_a_kimi_fallback_that_holds_no_key_of_its_own
+FAILED test_provider_keys_contract.py::NamesAndConstantsTests::test_the_key_format_tables_follow_table_f_table_a_and_the_reserved_prefixes
+FAILED test_provider_keys_contract.py::NamesAndConstantsTests::test_the_meta_row_is_the_section_8_5_row_and_every_other_row_keeps_its_rule
+FAILED test_provider_keys_contract.py::KeyFormatSourceTests::test_the_comment_above_the_meta_row_names_the_llm_shape_and_cites_metas_page
+FAILED test_provider_keys_contract.py::KeyFormatSourceTests::test_the_registries_readme_meta_row_quotes_metas_llm_sentence_and_keeps_the_older_source
+FAILED test_provider_keys_matching.py::TableFAndATests::test_each_table_f_sample_proves_its_provider_and_every_unsourced_shape_is_unproven
+FAILED test_provider_keys_matching.py::TableFAndATests::test_every_meta_shaped_key_is_reserved_to_meta_and_no_provider_takes_it_unproven
+FAILED test_provider_keys_matching.py::UniqueAssignmentTests::test_a_malformed_llm_key_is_refused_at_construction_on_every_root_whatever_its_providers
+FAILED test_provider_keys_matching.py::UniqueAssignmentTests::test_a_meta_key_in_either_shape_goes_to_meta_beside_every_provider_that_takes_unproven_keys
+FAILED test_provider_keys_matching.py::UniqueAssignmentTests::test_two_meta_keys_in_different_shapes_are_refused_and_the_same_documented_key_twice_is_one_key
+FAILED test_provider_keys_matching.py::ConfiguredPrimaryTests::test_a_lone_meta_key_for_a_provider_that_takes_unproven_keys_is_refused_with_m18
+FAILED test_provider_keys_modes.py::UnsendableKeyTests::test_a_meta_key_from_a_mixed_list_reaches_meta_unchanged_in_direct
+FAILED test_provider_keys_wire_contract.py::MetaRelayTests::test_a_meta_call_relays_the_lists_meta_key_before_meta_api_key_stripped_and_no_other_key
+15 failed, 177 passed in 2.35s
+```
+
+(The `FAILED` paths are shortened by dropping `tests/features/sdk_provider_keys/`.) The 177 are the 183 r3 tests minus the 6 extended ones above, so the rest of the area still passes. Subtest audit under `unittest` (scratch `s2b_sub.py`, which counts each failing subtest): 139 failing subtests in the 15 tests. Every one is an `LLM_` subtest, the §8.5 row, or the r4 source text. No `LLM|` subtest fails. Reasons: "ConfigurationError not raised" (41: the misroute or the missing M-18); "True is not false" (64: `LLM_` not reserved); `kimi` in place of `meta` in `key_view` (10); a ConfigurationError where the call must succeed (7: M-6 in AC-1, AC-4, the relay row and DIRECT; the meta-primary split twice; the same documented key twice); M-6 or no error where M-7 is due (2); `provider_of` None (3); the kimi relay header holding the key (2); the section 8.5 row and the `:71` pin (2); and the r4 source text (8).
+
+### Green-ability (r4)
+
+The scratch pytest plugin `<scratchpad>/plugins/s2b_r4.py` (not committed) rebinds the Meta row of `ProviderKeyMatcher.KEY_FORMATS` in memory to the exact §8.5 row. It also writes scratch copies of `provider_keys.py` and the registries README, carrying the row 4(b) example comment and the row 5 text, and points the contract module's `MATCHER_SOURCE` and `REGISTRIES_README` at them.
+
+```
+$ S2B_MODE=green PYTHONPATH="<worktree>;<scratchpad>/plugins" env -u DEEPSEEK_API_KEY py -3.11 -m pytest tests/features/sdk_provider_keys tests/features/sdk_managed_text -q -p no:cacheprovider -p s2b_r4
+192 passed in 1.44s
+```
+
+### Mutation check (r4)
+
+All mutants are applied in memory on top of the green state (`S2B_MODE=<mutant>`, same command). `m4` is `S4E_MUTANT=meta_key_to_keyless -p s4e_mutants` on top of green.
+
+| Mutant | Area result | Killed by (besides the §8.5 pin) |
+|---|---|---|
+| m1 `LLM_` in prefixes, pattern unchanged | 10 failed, 182 passed | table F `LLM_` rows; either-shape; M-7; M-18; AC-1, AC-4, AC-16 (i) and (iii); agent AC-17 (i) |
+| m2 pattern widened, `LLM_` not reserved | 4 failed, 188 passed | reserved test; malformed-key M-6 test; `:71` pin |
+| m3 word ID in the `LLM_` branch | 3 failed, 189 passed | table F "LLM_ word ID"; malformed M-6 ("word ID") |
+| m4 `meta_key_to_keyless` (S4 R-3) | 1 failed, 191 passed | agent AC-17 (i), 4 of 4 subtests (both shapes; at HEAD rows too, where the `LLM\|` subtests fail under the mutant) |
+| m5 `LLM\|` prefix and branch dropped | 25 failed, 167 passed | every r3 Meta test |
+| m5b `LLM\|` prefix dropped, branch kept | 4 failed, 188 passed | `accepts_unproven` `bad_meta`; reserved test; `:71` pin |
+| m6 `LLM` reserved instead of `LLM_` | 3 failed, 189 passed | reserved test, near misses `LLM-` and `LLMx`; `:71` pin |
+| m7 `\d` and `\w` in the `LLM_` branch | 2 failed, 190 passed | table F non-ASCII digit and letter rows |
+| m8 `[!-~]+` secret (D-9 rejected) | 3 failed, 189 passed | table F dotted secret; malformed M-6 ("dotted secret") |
+| m9 ignore-case flag | 2 failed, 190 passed | table F "lowercase llm_" and "lowercase llm pipe" |
+| m11 README row copies an example key | 1 failed, 191 passed | AC-18 README test |
+| m12 a 75-column comment line | 1 failed, 191 passed | AC-18 comment test |
+| m13 neither source dated 2026-10-17 | 2 failed, 190 passed | both AC-18 tests |
+
+13 of 13 killed. Every row mutant is also killed by a behavior test, not only by the §8.5 pin.
+
+### R-2, R-6 and R-7 results
+
+- **R-2:** `git diff -U0 origin/main...HEAD -- '*.py' | grep -E '^\+\s*#' | awk 'length($0) > 73'` prints nothing (0 lines), new comments included. Of S4's 52 lines, 9 were rewritten by the r4 commit (corrected or re-indented) and 43 were wrapped in place by the tidy commit (`<scratchpad>/plugins/s2b_wrap.py`, which checks that the words are unchanged). Pre-existing wide comments that S2 did not touch are untouched.
+- **R-6:** COMMON MODIFICATION PATTERNS now names `SERVED` (`pk/test_provider_keys_modes.py:6`), `PROVIDER_KEYS` (`pk/test_provider_keys_failures.py:6`), `POOL`/`PROVEN` for a new key shape (`pk/test_provider_keys_property.py:6`), `MANAGED_PROVIDERS` (`mt/test_managed_text_deadline.py:6`), `ORACLE_KEYS`/`CAP_FIELD`/`EMITTED_KEYS`/`FULL_CONFIG` (`mt/test_managed_text_wire_contract.py:6`) and `_CHAT_PROVIDERS` (`mt/managed_text_fixtures.py:7`). `RELAY_KEYS`/`CAP_FIELD` (`pk/…wire_contract.py:6`) and `MANAGED_MODELS`/`ORACLE_KEYS` (`mt/…acceptance.py:6`) were already named. The `ORACLE_KEYS` trap left `mt/FEATURE.md` Known Failure Modes, which lists feature failures (feature_test_packs doctrine). It is now WHAT NOT TO DO item 3 in the two headers that hold `ORACLE_KEYS`, and it names both Meta shapes.
+- **R-7:** `py -3.11 -m ruff check --no-cache --isolated --preview --select E301,E302,E303,E305 <the 14 branch-changed .py files>` → `All checks passed!`. The new test inserted before `class NonTextModelKeyTests` brings its blank lines to two. `META_UNSUPPORTED_MODEL` and `META_MISSING_KEY` now sit in the constants block after `RELAY_FORBIDDEN`. `ruff --select F,E9` is clean, and `python lint/run.py` prints `SDK-LINT: PASS`.
+
+### Before/after of every edit to an existing test or fixture (r4)
+
+All edits are inside the r4 grant (pipeline.md, S2 delta grant). No assertion was weakened, skipped or deleted.
+
+| File | Symbol | Before | After | Grant |
+|---|---|---|---|---|
+| `pk/test_provider_keys_contract.py` | `test_the_key_format_tables_…` `:71` | last prefix set `{"LLM\|"}` | `{"LLM\|", "LLM_"}` | (1) |
+| `pk/provider_keys_fixtures.py` | header `:9`; `K_META` comment; new `K_META_DOC`; `__all__` | reserved list ends `LLM\|`; comment "(LLM pipe app id pipe secret)" | reserved list adds `LLM_`; comment names the 2026-10-15 form kept by Q-7; fixture and export added | (2), (3) |
+| `pk/test_provider_keys_matching.py` | table F test | 10 proven rows, 12 unproven | +3 proven `LLM_` rows, +10 unproven rows | (2) |
+| same | `test_accepts_unproven_…` comment | "LLM pipe is reserved to meta …" | wrapped, and points to the `LLM_` test | (3) |
+| same | `test_a_meta_key_proves_meta_in_any_order_…` two comments | "an LLM pipe key is meta's …"; "Meta issues only LLM pipe keys" (false) | "a Meta key …, this test uses the pipe form"; "Every Meta key starts with LLM_ or LLM pipe" | (3) |
+| `pk/test_provider_keys_acceptance.py` | AC-1 snippet test | one run with `K_META` | the same body in `for shape, meta_key in (("LLM\|", K_META), ("LLM_", K_META_DOC))` under `subTest`; `K_META` → `meta_key` in the environment, the relay-header assertion and the paid-call absence check; comments wrapped | (2) |
+| same | AC-4 test | list `K_META`, variable `K_META_2` | loop over that pair and (`K_META_DOC`, `K_META`) under `subTest`; assertions identical | (2) |
+| `pk/test_provider_keys_modes.py` | DIRECT Muse test | one run with `K_META`; URL `startswith` | `subTest` per shape; `startswith` kept, plus exact URL `https://api.meta.ai/v1/chat/completions` (AC-16 (iii)); comments wrapped | (2) |
+| `pk/test_provider_keys_wire_contract.py` | `RELAY_KEYS` comment; MetaRelayTests cases | "format-bound (LLM pipe form)"; 3 cases | names both shapes; +2 `LLM_` cases | (2), (3) |
+| `pk/test_provider_keys_property.py` | `POOL`, `PROVEN`; CMP line | `K_META` only | `+ K_META_DOC`; CMP names a new key shape | (2), (3) |
+| `pk/test_provider_keys_agents.py` | blank lines before `NonTextModelKeyTests` | 1 | 2 (new test inserted above it) | (4) |
+| `pk/test_provider_keys_failures.py` | `META_UNSUPPORTED_MODEL`, `META_MISSING_KEY` | mid-file before `MetaGatewayFailureTests` | constants block, after `RELAY_FORBIDDEN`; bytes of the values unchanged | (4) |
+| `mt/test_managed_text_acceptance.py`, `mt/test_managed_text_wire_contract.py` | `ORACLE_KEYS[META]` comment; WHAT NOT TO DO | "format-bound (LLM pipe digits pipe secret)" | names both shapes and says the oracle uses the pipe form; item 3 holds the moved trap | (3) |
+| `mt/test_managed_text_acceptance.py` | AC-13 (c) comment | "lists LLM pipe as the prefix" | "as a prefix …; since r4 it reads `LLM_` or `LLM\|` (Meta), which still holds this text" | (3) |
+| `mt/FEATURE.md` | Known Failure Modes `:70` | the `ORACLE_KEYS` trap with the pipe shape only | corrected to both shapes (r4 commit), then moved to the headers (tidy commit) | (3) |
+| 12 files | 43 comment lines (R-2) | single lines of 73 to 164 columns | PEP 8 blocks of at most 72 columns, same words | (3) |
+
+### Notes for the repair agent (implementer)
+
+- **Change only** spec §12.3 rows 4 and 5, plus the root README Prefixes bullet (row 2(c), r4 text). Row 4 is `vidbyte/lib/registries/provider_keys.py`: the Meta row becomes exactly the §8.5 row (prefixes `("LLM|", "LLM_")`, pattern `LLM(?:\|[0-9]+\|[A-Za-z0-9_-]+|_[0-9]+_[A-Za-z0-9_-]+)`, no flags, still last), and the comment directly above it becomes a block of at most 72 columns. Row 5 is the registries README meta row.
+- **The comment block** (AC-18 test) must sit directly above the line that starts `(ModelProvider.META,`. Every line must be at most 72 columns with its 8-space indent. The joined text must contain `LLM_`, `LLM|`, `https://dev.meta.ai/docs/authentication` and `2026-10-17`, and no `LLM_` or `LLM|` followed by a digit.
+- **The registries README `| meta |` row** (AC-18 test) must contain, verbatim:
+  - the Pattern cell `` `LLM_[0-9]+_[A-Za-z0-9_-]+` or `LLM\\|[0-9]+\\|[A-Za-z0-9_-]+` ``, with the two backslashes as today;
+  - `https://dev.meta.ai/docs/authentication` and `2026-10-17`;
+  - ``API keys start with `LLM_`, followed by a numeric ID and the secret, separated by underscores``;
+  - `https://dev.meta.ai/docs/error-handling`;
+  - the kept `2026-10-15` and `API keys look like this` text.
+  - It must not contain an example key.
+- **Do not change** any test file or pack doc, any other `KEY_FORMATS` row, the row order, `FORMAT_BOUND_PROVIDERS`, `RESERVED_PREFIXES`, the `OPENAI_*` prefixes, or any message. The §8.5-row test pins the other five rows literally.
+- After rows 4 and 5, `PYTHONPATH=$(pwd) env -u DEEPSEEK_API_KEY py -3.11 -m pytest tests/features/sdk_provider_keys tests/features/sdk_managed_text -q -p no:cacheprovider` must end `192 passed`.

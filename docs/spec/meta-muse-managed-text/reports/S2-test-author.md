@@ -114,3 +114,40 @@ All are within the grant; every before and after is recorded in `test-plan.md`.
 - The session scratchpad is shared with other running agents. Writing `fill_proof.py` at the scratchpad root overwrote an existing file of that name: the Write tool reported "updated", and its origin is unknown. My later scratch files went under `scratchpad/meta-s2/`. If another agent relied on the root `fill_proof.py`, it now holds this run's Proof-filling script.
 - `DEEPSEEK_API_KEY` is set in this shell. Every pytest command here ran under `env -u DEEPSEEK_API_KEY`.
 - The full suite was not run (memory is tight, and no module outside the two packs imports their fixtures; checked by grep). The area command covers every changed file.
+
+## r4 delta
+
+- **Stage:** S2 test author (r4 delta), against spec r4. The production code under test is HEAD `121911df`, which holds the r3 implementation and no r4 change.
+- **Commits (not pushed):**
+  - `23c4e9c4 test(provider-keys): add failing tests for meta-muse-managed-text r4 [AC-1, AC-16..AC-18]`
+  - `4af4d8e0 test(sdk-packs): wrap S2 comments at 72 columns and tidy pack headers [R-2, R-6, R-7]`
+  - `docs(spec): record r4 test proof for meta-muse-managed-text`: `test-plan.md` `## r4 delta`, the four §6.2 Proof cells (AC-1, AC-16, AC-17, AC-18; a script checked that only those 4 lines changed), and this section.
+- **Not touched:** `vidbyte/` (including `provider_keys.py`), `vidbyte/lib/registries/README.md`, the root `README.md`, `lint/`, `scripts/`, `pipeline.md`, and the main checkouts. No install, no `git stash`, no push, and no `scripts/run_ci.py`.
+
+### What was built
+
+- **Fixture:** `K_META_DOC = "LLM" + "_" + "1" * 16 + "_" + "m" * 32` (`provider_keys_fixtures.py`, in `__all__`). `LLM_` was added to the reserved-prefix list in the header.
+- **Tests:** 9 new test methods and 7 extended existing tests, about 290 new subtests. No new file. The coverage map, the failure inventory (F1 to F19) and the before/after of every edit are in `test-plan.md` `## r4 delta`.
+- **AC-17 (i) closes S4 R-3.** The agent test kills `meta_key_to_keyless` in both shapes (4 of 4 subtests). It does so at HEAD's rows too, where only the `LLM_` subtests are red without the mutant.
+
+### Results
+
+- **Red (HEAD):** area `15 failed, 177 passed`. There are 139 failing subtests, all on the `LLM_` shape, the §8.5 row or the r4 source text, and no `LLM|` subtest fails. The 177 are every r3 test that was not extended.
+- **Green-ability:** `192 passed`. The scratch plugin `s2b_r4.py` sets the exact §8.5 row and serves the row 4(b) and row 5 text from scratch copies.
+- **Mutants:** 13 of 13 killed. They are m1 to m9 on the row, `meta_key_to_keyless`, and three source-text mutants. Each row mutant is also killed by a behavior test, not only by the §8.5 pin.
+- **R-2:** the recount prints nothing (0 lines). R-6 and R-7 are done. `ruff` E301/E302/E303/E305 and F/E9 report `All checks passed!`, and `python lint/run.py` reports `SDK-LINT: PASS`.
+
+### Spec defects and observations (r4)
+
+**No blocking defect.** Every name in §4, §8.5 and §12.3 that the r4 delta binds exists and is bound as written: `ProviderKeyMatcher.KEY_FORMATS`, `provider_of`, `accepts_unproven`, `match`, `FORMAT_BOUND_PROVIDERS`, `RESERVED_PREFIXES`, `OPENAI_KEY_PREFIX`, `OPENAI_JWT_PREFIX`, the §8.5 row, the M-6, M-7 and M-18 details keys, and the registries README `| meta |` row.
+
+1. **Open item: AC-13's r4 text is unbound.** AC-13 and FR-7 now require the root README Prefixes bullet to read "`LLM_` or `LLM|` (Meta)". The existing AC-13 test checks only `` `LLM|` (Meta) ``, which that text still contains. The grant says "AC-13 stays as is" and grants new tests only for AC-16 to AC-18, INV-16, INV-17 and EC-17 to EC-19. So no test fails if the implementer leaves `LLM_` out of the root README. The S5 review must check it, or a later grant can add one `assertIn`.
+2. **AC-18's "says that today's page no longer shows that form" is a paraphrase** (row 5(b) gives no fixed wording), so it is left to the S5 review. Every fixed string is bound: both pattern spans in order, the URL, the date, the quoted sentence, the error page, and #1027's kept 2026-10-15 text.
+3. **Observation.** The comment above the Meta row at HEAD already breaks the 72-column rule (its first line is 74 columns), so the AC-18 comment test is red for that reason as well as for the missing `LLM_` and date. Row 4(b)'s example block passes at 72 columns or fewer.
+4. **Observation (fail-closed path).** Keys with non-ASCII digits or letters never reach `provider_of` through a root. The printable-ASCII check (M-6b) refuses them first. The `\d`/`\w` guard therefore lives in the `provider_of` table, which is the only seam where those mutants are visible.
+
+### Environment notes (r4)
+
+- In Git Bash, `PYTHONPATH="$(pwd);<dir>"` turns the first entry into `C:\c\Users\...`, an invalid path. `vidbyte` still resolved to the worktree through `sys.path[0]`, because `-m` adds the cwd (checked with `vidbyte.__file__`). The final green and mutant runs used the explicit Windows path instead.
+- A `sed -i` rewrite turned one CRLF file into LF. It was converted back before commit. All later scripted edits keep line endings.
+- Scratch files are prefixed `s2b_` in `<scratchpad>/plugins/` so they cannot collide with other agents' plugins. Only `s4e_mutants.py`, from another stage, was loaded, and it was not edited.
