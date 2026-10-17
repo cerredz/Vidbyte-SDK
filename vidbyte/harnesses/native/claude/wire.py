@@ -74,7 +74,7 @@ class ClaudeWire:
         if answer is None:
             raise errors.failure(NativeThreadProblem.PROTOCOL_MISMATCH, request=request, thread_id=newest, outcome=outcome)
         if answer.get(native_threads.CLAUDE_IS_ERROR_FIELD) is not False or session is None or text is None:
-            missing = ClaudeWire._missing_member(answer, session, text)
+            missing = ClaudeWire._missing_member(answer, session)
             raise errors.failure(NativeThreadProblem.PROTOCOL_MISMATCH, request=request, thread_id=newest, outcome=outcome, missing_member=missing)
 
         # A continue must answer on the thread it was given; a fork must
@@ -85,8 +85,10 @@ class ClaudeWire:
             raise errors.failure(wrong, request=request, thread_id=newest, outcome=outcome, searched=detail)
 
         # Return the caller's own id on a continue, the new one
-        # otherwise, with the text cut at the result cap.
-        thread_id = request.thread_id if request.verb is NativeThreadVerb.CONTINUE and request.thread_id is not None else session
+        # otherwise, with the text cut at the result cap. The None
+        # test only narrows the type for mypy: the request record
+        # already checked that a continue has an id.
+        thread_id =request.thread_id if request.verb is NativeThreadVerb.CONTINUE and request.thread_id is not None else session
         cap = native_threads.NATIVE_RESULT_TEXT_MAX_CHARS
         return NativeThreadResult(harness=NativeHarness.CLAUDE, thread_id=thread_id, text=text[:cap], text_truncated=len(text) > cap)
 
@@ -116,7 +118,7 @@ class ClaudeWire:
         return text if isinstance(text, str) else None
 
     @staticmethod
-    def _missing_member(answer: Mapping[str, object], session: str | None, text: str | None) -> str:
+    def _missing_member(answer: Mapping[str, object], session: str | None) -> str:
         # The first unusable member of a success answer, in the order
         # is_error, session_id, result; read calls this only when one
         # of them is unusable, so the result is the one left when the

@@ -796,3 +796,4 @@ Blocking questions: 0.
 2. `ClaudeWire._missing_member(answer, session, text)` keeps the §8.5 signature and returns exactly what row 20 lists (is_error, else session_id when `session` is None, else result), so `text` is accepted but not read.
 3. ~~`output_too_large` is raised with `cap_bytes` only, as row 20 lists; unlike Grok, no stderr text is attached.~~ *Reversed in r4 after S4 R-1:* Claude was unlike all three siblings, not only Grok. `claude.output_too_large` carries stderr as its vendor text (INV-6, INV-7 item 5, row 20).
 4. Beyond the row 29 and row 30 content, the README's hostkit sentence now also lists the private per-workspace folders, and the REPO_MAP section says "Plumbing the harnesses share" instead of "the three", because both were made wrong by this change.
+5. *(S5 repair iteration 1, R-8)* Deviation 2 is resolved: `ClaudeWire._missing_member(answer, session)` no longer takes the unused `text` parameter; `read` checks `text` itself.
