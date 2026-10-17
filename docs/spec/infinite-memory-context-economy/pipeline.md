@@ -18,7 +18,8 @@ started: 2026-10-16 16:05
 | S2 tests | done | 2026-10-16 20:45 | 2026-10-17 |  reports/S2-test-author.md | 133 new tests in 10 files + §13 changed tests; red confirmed (orchestrator re-ran test_read_lines_window.py 10 failed, test_infinite_memory_stable_prefix.py 8 failed, right reasons); test commit 0d265474, proof 5e930f3b; 2 spec defects → spec r4 (fb702ba5), tests aligned acfec7a8; **S2_HEAD = acfec7a8** (S3/S5/S6 diff the test tree against it) |
 | S3 implement | done | 2026-10-17 00:00 | 2026-10-17 | reports/S3-implementer.md | **S3_HEAD = 84e566bb** (code e21463fe); draft PR #1177; 57/57 rows; budget 14/14 files, 4/4 modules, infinite pkg 9/9 (launch.py 381/400); orchestrator re-ran 249 new+changed tests: 249 passed; lint PASS; source gate 3 failed (harness_threads, pre-existing/branch-scoped), package gate PASS; contract --check current; semgrep 0 findings; CI 39009423722 success + Static policy 39009425314 success on 5f91b456 |
 | S4 adversarial review | done | 2026-10-17 | 2026-10-17 | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; raw C 0B/1M/1m, V 2B/2M/5m, E 2B/1M/2m; verified 5 Blockers (R-1..R-5), 6 Majors (R-6, R-7 code; R-8..R-11 test-pack), 13 Minors (R-12..R-24); 2 refuted, 4 downgraded; spec status reviewed |
-| S5 repair loop | pending | | | | |
+| S5 test-pack (pre-repair) | done | 2026-10-17 | 2026-10-17 | reports/S5-test-pack.md | 15 new tests (R-8 4, R-9 4+guards, R-10 1, R-11 1, R-24 1) in 6 test files + FEATURE.md lines; orchestrator re-ran 7 related paths: 10 failed (all new, right reasons), 336 passed; 0 removed test lines; 0 vidbyte/lint changes; **TESTS_HEAD = 3bda907e** (repair agents: `git diff 3bda907e..HEAD -- tests` must stay empty) |
+| S5 repair loop | running | 2026-10-17 | | | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
 
@@ -50,6 +51,8 @@ started: 2026-10-16 16:05
 - 2026-10-17 — Minors: S5 fixes the `trivial` rows (R-12, R-13, R-14, R-15, R-16, R-19); `follow-up` rows R-17, R-18, R-20, R-21, R-22 stay open as follow-ups for the PR body.
 
 - 2026-10-17 — Spec r5 (987d156e) applied S4 R-3 (INV-2.3 unread outputs stay whole; AC-2.1/AC-2.2 one call per turn; new AC-2.5, EC-2.5), R-2 (INV-8.2 extended: NUL → whitespace, lone surrogate dropped; new EC-8.8; INV-8.5 excludes names UTF-8 cannot encode), R-16 (new MODIFY rows 58 `llms.txt:519`, 59 `artifacts/file_index.md:422`). The R-16 grant is extended to `llms.txt:815` (the "Direct utilities and search" tool table, same file, same omission, same repo-forced reason) — the repair agent adds `InfiniteSearchMemoryTool` there in the table's existing format.
+
+- 2026-10-17 — R-2 fix order follows spec r5 FR-8.6 + INV-8.2: blank check on the raw query first, then NUL → space and lone surrogates dropped (`" "` alone → SUCCESS 0 of 0). The verifier's `s4-verify/fix_r1.py` does it the other way and contradicts r5; the repair copies `s5-tests/fix_r2_r5.py`'s order.
 
 ## User replies (verbatim)
 - (none during the run)
@@ -92,3 +95,4 @@ started: 2026-10-16 16:05
 - Width check for R-5: `git diff -U0 845a4d9b HEAD -- 'vidbyte/*.py'` piped through awk (track `@@ +N`, print added `^[ 	]*#` lines > 72 cols); then `PYTHONIOENCODING=utf-8 python lint/run.py --rule A002`. Lint rule counts on main and the branch are identical for all 90 rules (scratch export of main 845a4d9b at scratchpad `main-base`, git-init'ed). — *source:* S4 conformance / conventions
 - Probe hygiene: `python -I` ignores PYTHONIOENCODING (use `sys.stdout.reconfigure(encoding='utf-8', errors='backslashreplace')`); `-X pycache_prefix=<scratch>` defeats false passes from bytecode cache; Windows stdout is CRLF (`tr -d '
 '`); plugins load with `PYTHONPATH="<win wt>;<win dir>" ... -p <name>`. — *source:* S4 reviewers
+- S5 test-pack run commands (each red at 3bda907e, green under the scratchpad fix plugins `s5-tests/fix_r2_r5.py`, `fix_r7.py`, `s4-verify/fix_mask_batch.py`, `s5-tests/fix_anth_digest.py`): R-8 `-k "lone_surrogate or utf8_cannot_encode"` (search + recall files); R-9 `-k "parallel_batch or one_per_model_turn or newest_model_turn_whole or unanswered_batch"` (economy + compaction_windows); R-10 `-k warm_search` (audit-hook "open" counting; stat/resolve/scandir allowed, content opens of unchanged files not); R-11 `-k LoneSurrogate` (first body byte-equal to main: make only the digest surrogate-safe); R-24 `-k rowid` (trace via wrapped `sqlite3.connect`; helper must keep connecting through it). Whole tree at 3bda907e: 13 failed (10 new + 3 harness_threads pre-existing), 6370 passed, 16 skipped. — *source:* S5 test-pack author
