@@ -6,7 +6,7 @@
 | Date | 2026-10-17 |
 | Branch | `feat/codex-host-first-class` |
 | Spec | `docs/spec/codex-host-first-class/spec.md`, r1 (1,832 lines), committed as `fde5a8b0` |
-| Writes | spec.md (committed) and this report (not committed). Throwaway check scripts are in the session scratchpad only. No code, no tests, no installs, no `codex` binary, no push. |
+| Writes | spec.md and this report (both committed). Throwaway check scripts are in the session scratchpad only. No code, no tests, no installs, no `codex` binary, no push. |
 
 ## What I read
 - **Rules and the request:**
@@ -84,3 +84,45 @@
 4. **A-11:** a collaboration mode persists to later turns. §4 sidesteps this by passing `DEFAULT` explicitly.
 5. **A-2:** an omitted `developer_instructions` behaves as `null`. It is a one-line flip if wrong.
 6. **Ceilings.** `wire.py` ≤ 840 is my estimate, about 820 after the edits. A tighter real count could force a BLOCKED report.
+
+## Addendum r2 (S1 review round 1, 2026-10-17)
+
+**Input.** `reports/S1-spec-review.md` (verdict SOUND WITH FIXES: 1 Blocker, 6 Major, 6 Minor). All 13 findings were accepted; §16 has one row each.
+
+**Re-checked before applying, independently of the reviewer:**
+- `ThreadSearchParams.json:85-86`, which defaults to interactive sources;
+- `task_mentions.rs:80` and `tui/src/lib.rs:779-784`, which define interactive as CLI and VS Code;
+- `goal_menu.rs:44-58,110-115,133-143`, the resume set and the edit that sets budget-limited back to active;
+- the `ThreadForkResponse` reviewer fields (`V -I`);
+- the fake's `source` default and its fork copying the reviewer (`codex_host_fakes.py:161,857`);
+- `side.rs:426-446` and `methods.txt:14`;
+- that no test calls `over_cap`.
+
+**Where I chose differently from the reviewer's smallest fix:**
+- **R-6.** The reviewer suggested releasing the handler after a later check in the mixin. I put the check inside `CodexThreadHelpers.fork(..., starts_turn=True)`, right after `thread/fork` and before the handler is shared, so nothing needs releasing. `fork_codex_thread` keeps `starts_turn=False` and is unchanged.
+- **R-2.** I took the reviewer's first option: an allow-list `CODEX_HOST_LOAD_SAFE_GOAL_STATUSES` that refuses only `ACTIVE`. That is consistent with A-13, which `resume_codex_goal` already relied on. Compact's complete-only set is unchanged.
+- **R-3.** Beyond adding `BUDGET_LIMITED`, resume refuses a spent budget locally (`tokens_used` ≥ `token_budget`), with its own message, cause and next step. Otherwise that case waits out the 30-second start window and ends in a vague `codex.api_error`.
+- **R-1.** I chose `CODEX_HOST_HELPER_SOURCE_KINDS`, not every kind. Search then matches `list_codex_threads`, and sub-agent internals stay out (D-35).
+- **R-7.** The cursor exists from the generator's first step to its `finally`, held weakly, and the start is fixed at the call. So AC-14 now has the subscriber take one event first, and AC-43 covers a subscription that is never iterated. The usage delta is computed once in `on_event`, so `over_cap` takes it as an argument.
+- **R-4 and R-5.** I took the orchestrator's direction: no clean tool, and narrowed claims. The scope-adding halves are the optional Q-10 and Q-11, default not built.
+
+**Found by me while checking R-5 and R-6.** A side-chat fork of a parent with an active goal may carry the goal. Codex's `/side` forks with continuation "start if idle" (`app_server_session.rs:1001-1019`), and the schema says a fork carries the goal unless `deferGoalContinuation` is set. I recorded it as EC-61 and A-20, the same acceptance slice-1 EC-28 gave `fork_codex_thread`. I did not build a refusal, because that needs a user decision.
+
+**Correction to this report's r1 text.** Under "Approaches weighed", item 1, forwarders do not "break the `vars(CodexHost)` helper-order pin": the pin takes only a slice after `start_codex_review` (R-12). The size argument stands alone.
+
+**Sections changed, for a round-2 reviewer:**
+- §8.1: D-1, D-10, D-14, D-21, D-22, D-23, D-34, and the new D-35…D-38;
+- §8.3 and §8.4: 69 classes, 44 config keys, 42 endpoints;
+- §8.5: `fork(starts_turn)`, `CodexPreflight.reject_routed_reviewer`, `routes_to_user`, `CodexLiveTurn.over_cap(delta)`, the `subscribe` semantics, the `GitWorktreeSpec` comments;
+- §9.1: the `GitWorktreeSpec` checks and both lifecycles;
+- §9.2: the normative sequences, the search params, 16 tools and the messages;
+- §9.3: the resume set and `CODEX_HOST_LOAD_SAFE_GOAL_STATUSES`;
+- §9.4;
+- §10: T-1 and T-2;
+- §12.3 rows 16, 18–20, 23, 24, 28, 29, 32, 34 and 37–39. The shape of §12 is unchanged: still 39 rows and 13 new files.
+
+**Least-sure assumptions now:**
+- A-1 and A-19: a status-only active set starts a goal turn;
+- A-13: loading a non-active goal does not restart it, which the new load guard now depends on as well;
+- A-20: no goal continuation on a side fork;
+- A-14: the inject item shape.
