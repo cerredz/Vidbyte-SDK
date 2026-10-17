@@ -120,7 +120,8 @@ class ToolOutputSlidingWindowCompaction(BaseCompaction):
     WINDOW_MODES = (CompactionMode.TRUNCATE_TOOL_RESULTS, CompactionMode.STRIP_TOOL_RESULT_BODIES, CompactionMode.HEAD_TAIL_TOOL_PREVIEW)
 
     def __init__(self, keep_recent: int = 2, mode: CompactionMode | str = CompactionMode.TRUNCATE_TOOL_RESULTS, max_chars: int = 600, placeholder: str = "[older tool result cleared by compaction]", head_chars: int = 400, tail_chars: int = 200, tools: Sequence[str] = ()) -> None:
-        # Stores the per-tool sliding-window size, the compaction style for older results, and the tools it applies to.
+        # Stores the per-tool sliding-window size, the compaction style
+        # for older results, and the tools it applies to.
         if keep_recent < 0:
             raise ValueError("keep_recent must be non-negative.")
         # @intent sliding-window-refuses-modes-it-cannot-apply
@@ -160,8 +161,8 @@ class ToolOutputSlidingWindowCompaction(BaseCompaction):
             message = messages[index]
             if message.kind != "tool_result":
                 continue
-            # With a scope, only the named tools' outputs are counted and
-            # compacted; every other result is left as it is.
+            # With a scope, only the named tools' outputs are counted
+            # and compacted; every other result is left as it is.
             name = _message_tool_name(message)
             if self.tools and name not in self.tools:
                 continue

@@ -117,8 +117,9 @@ class InfiniteMemoryRuntime(AgentRuntime):
         """Build the root's system string without the loop-settings block, which each status message carries instead."""
         # @intent the-roots-prefix-never-changes
         # The block's counters change on every call, so leaving it out
-        # keeps the root's system string byte-identical for the whole run
-        # and lets a provider serve the prefix from its prompt cache.
+        # keeps the root's system string byte-identical for the whole
+        # run and lets a provider serve the prefix from its prompt
+        # cache.
         return super()._build_system_string(context)
 
     async def _after_tool_iteration(self, state: BaseAgentRuntimeLoopState, messages: list[dict[str, Any]]) -> None:
@@ -144,8 +145,8 @@ class InfiniteMemoryRuntime(AgentRuntime):
         # change lines are cut below, so lines left out never repeat.
         self._reported = current
 
-        # Render the loop-settings block with the live counters, counting
-        # tool calls as the base system-string path does.
+        # Render the loop-settings block with the live counters,
+        # counting tool calls as the base system-string path does.
         block = self._render_loop_settings_block(iteration_count=state.iteration_count, tokens_used=state.tokens_used, tool_call_count=len(self._non_internal_tool_contexts(state.call_contexts)))
 
         # Changes go in the map_update text, cut by the map's own rule,

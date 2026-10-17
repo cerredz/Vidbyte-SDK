@@ -87,7 +87,8 @@ class InfiniteWorkspaceSettings:
         object.__setattr__(self, "preset", RecordFieldConverter.to_enum(self.preset, InfiniteMemoryPreset, "InfiniteWorkspaceSettings.preset"))
 
         # Accept the recall mode's value as text too, and keep the enum;
-        # DELEGATED gives the root and generators recall instead of grep.
+        # DELEGATED gives the root and generators recall instead of
+        # grep.
         object.__setattr__(self, "recall_mode", RecordFieldConverter.to_enum(self.recall_mode, InfiniteRecallMode, "InfiniteWorkspaceSettings.recall_mode"))
 
         # @intent seeds-exist-and-keep-their-names-apart

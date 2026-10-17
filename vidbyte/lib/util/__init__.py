@@ -79,9 +79,9 @@ def __getattr__(name: str) -> object:
     """Return a lazily exported helper, importing its module on first access."""
     # @intent fulltext-export-loads-on-first-access
     # validation.py imports credential_keys, which runs this file while
-    # validation is still loading; fulltext needs validation's checks for
-    # its records, so importing it here then would fail. Loading it on
-    # first access keeps every import order working.
+    # validation is still loading; fulltext needs validation's checks
+    # for its records, so importing it here then would fail. Loading it
+    # on first access keeps every import order working.
     if name not in _LAZY_EXPORTS:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     return getattr(importlib.import_module(_LAZY_EXPORTS[name]), name)

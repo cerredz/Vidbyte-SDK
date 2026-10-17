@@ -31,8 +31,8 @@ class ReadLinesTool(FileSystemTool):
         return dataclasses.replace(spec, description=f"{spec.description} At most {window:,} lines come back from one call; when more lines remain in the requested range, the result ends with a line naming the next start line.")
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Validate range bounds, read and slice the lines, and return them
-        # newline-joined, cut to the read window when one is set.
+        # Validate range bounds, read and slice the lines, and return
+        # them newline-joined, cut to the read window when one is set.
         path = call.arguments.get("path", "")
         start = int(self._optional_argument(call, "start", default=1))
         end_raw = call.arguments.get("end", None)

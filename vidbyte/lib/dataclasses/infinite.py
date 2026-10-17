@@ -268,7 +268,8 @@ class InfiniteRecallCitation:
         """Return the citation one reply line states, or None for any other line; a citation line whose numbers this record refuses raises ConfigurationError."""
         # @intent only-the-three-line-forms-are-citations
         # Prose and every other line are ignored, so nothing the
-        # retriever writes outside the three forms is read as a citation.
+        # retriever writes outside the three forms is read as a
+        # citation.
         if entry := re.match(INFINITE_RECALL_FOUND_ENTRY_PATTERN, line):
             return cls(why=entry.group(2), entry_id=int(entry.group(1)))
         if lines := re.match(INFINITE_RECALL_FOUND_RANGE_PATTERN, line):

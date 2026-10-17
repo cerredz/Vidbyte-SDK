@@ -64,8 +64,8 @@ class InfiniteAgentMemory:
     def tools(self) -> tuple[BaseTool, ...]:
         """Return this agent's memory tools: remember and write_note, edit_file under FULL, drop_entry for a verifier, and recall for the root and generators under DELEGATED."""
         # InfiniteMemoryToolRegistry decides which tools the preset, the
-        # role, and the recall mode grant; this builds each one over this
-        # agent's memory.
+        # role, and the recall mode grant; this builds each one over
+        # this agent's memory.
         builders: dict[str, Callable[[InfiniteAgentMemory], BaseTool]] = {INFINITE_REMEMBER_TOOL_NAME: InfiniteRememberTool, INFINITE_WRITE_NOTE_TOOL_NAME: InfiniteWriteNoteTool, INFINITE_EDIT_FILE_TOOL_NAME: InfiniteEditFileTool, INFINITE_DROP_ENTRY_TOOL_NAME: InfiniteDropEntryTool, INFINITE_RECALL_TOOL_NAME: InfiniteRecallTool}
         return tuple(builders[name](self) for name in InfiniteMemoryToolRegistry.tool_names(self.workspace.settings.preset, self.role, InfiniteRecallMode(self.workspace.settings.recall_mode)))
 

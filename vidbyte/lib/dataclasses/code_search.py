@@ -48,8 +48,9 @@ class FullTextRow:
 
     def __post_init__(self) -> None:
         # @intent full-text-rows-name-their-source-and-label
-        # A row is replaced and dropped by its source, and a hit is shown
-        # by its label, so neither may be blank; the text may be empty.
+        # A row is replaced and dropped by its source, and a hit is
+        # shown by its label, so neither may be blank; the text may be
+        # empty.
         RecordFieldValidator.require_text(self.source, "FullTextRow.source")
         RecordFieldValidator.require_text(self.label, "FullTextRow.label")
         RecordFieldValidator.require_text(self.text, "FullTextRow.text", allow_blank=True)
@@ -77,8 +78,8 @@ class FullTextMatches:
 
     def __post_init__(self) -> None:
         # @intent the-total-counts-every-shown-hit
-        # The total is the count of every matching row, so it can never be
-        # smaller than the hits shown.
+        # The total is the count of every matching row, so it can never
+        # be smaller than the hits shown.
         object.__setattr__(self, "hits", RecordFieldConverter.to_tuple(self.hits, "FullTextMatches.hits", item_type=FullTextHit))
         RecordFieldValidator.require_int(self.total, "FullTextMatches.total", minimum=len(self.hits))
 

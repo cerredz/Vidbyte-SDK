@@ -162,7 +162,8 @@ class MessageHistoryCompactionMiddleware(AgentMiddleware):
 
     @classmethod
     def trim_with_provider_boundaries(cls, max_messages: int | None = None, max_tokens: int | None = None, token_counter: TokenCounter | None = None, *, low_watermark_tokens: int | None = None) -> "MessageHistoryCompactionMiddleware":
-        # Builds middleware that trims history while preserving adjacent tool boundaries, down to low_watermark_tokens when one is set.
+        # Builds middleware that trims history while preserving adjacent
+        # tool boundaries, down to low_watermark_tokens when one is set.
         return cls(mode=CompactionMode.TRIM_WITH_PROVIDER_BOUNDARIES, max_messages=max_messages, max_tokens=max_tokens, token_counter=token_counter, low_watermark_tokens=low_watermark_tokens)
 
     @classmethod
@@ -172,7 +173,8 @@ class MessageHistoryCompactionMiddleware(AgentMiddleware):
 
     @classmethod
     def tool_output_sliding_window(cls, keep_recent: int = 2, window_mode: CompactionMode | str = CompactionMode.TRUNCATE_TOOL_RESULTS, max_chars: int = 600, *, placeholder: str = "[older tool result cleared by compaction]", tools: tuple[str, ...] = ()) -> "MessageHistoryCompactionMiddleware":
-        # Builds middleware that compacts older tool outputs per tool name, only for the named tools when tools is not empty.
+        # Builds middleware that compacts older tool outputs per tool
+        # name, only for the named tools when tools is not empty.
         return cls(mode=CompactionMode.TOOL_OUTPUT_SLIDING_WINDOW, keep_recent=keep_recent, window_mode=window_mode, max_chars=max_chars, placeholder=placeholder, tools=tools)
 
     @classmethod
@@ -249,7 +251,9 @@ class MessageHistoryCompactionMiddleware(AgentMiddleware):
         if self.mode is CompactionMode.CONTEXT_SNAPSHOT_BRANCH_TRIM and not str(self.options.get("active_branch", "")).strip():
             raise ValueError("active_branch must be provided.")
         # @intent sliding-window-refuses-modes-it-cannot-apply
-        # Build the window once so a window_mode or a scope it cannot apply fails here instead of failing every model call at run time.
+        # Build the window once so a window_mode or a scope it cannot
+        # apply fails here instead of failing every model call at run
+        # time.
         if self.mode is CompactionMode.TOOL_OUTPUT_SLIDING_WINDOW:
             ToolOutputSlidingWindowCompaction(mode=self.options.get("window_mode", CompactionMode.TRUNCATE_TOOL_RESULTS), tools=self.options.get("tools", ()))
         # Build a trim with the given low watermark once, so the

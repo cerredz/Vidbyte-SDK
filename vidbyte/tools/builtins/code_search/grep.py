@@ -140,7 +140,8 @@ class GrepTool(BaseCodeSearchTool):
         # @intent smart-case-skips-regex-escapes
         # In a regex, \S, \W, \D, \B, \A and \Z are escapes, not
         # capitals, so a letter right after an unescaped backslash is
-        # dropped before the check; a literal pattern counts every letter.
+        # dropped before the check; a literal pattern counts every
+        # letter.
         text = re.sub(r"\\.", "", pattern, flags=re.DOTALL) if use_regex else pattern
         return any(character.isupper() for character in text)
 

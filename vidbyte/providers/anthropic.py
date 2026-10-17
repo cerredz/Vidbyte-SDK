@@ -146,17 +146,17 @@ class AnthropicProvider:
             payload.update(dict(config.extra_body))
 
     def _attach_cache_breakpoints(self, payload: dict[str, Any], config: TextModelConfig) -> None:
-        # Marks the system and two message blocks of a repeat request with
-        # block-level cache_control, never a top-level key or a ttl.
-        # Send a non-empty system as one marked text block.
+        # Marks the system and two message blocks of a repeat request
+        # with block-level cache_control, never a top-level key or a
+        # ttl. Send a non-empty system as one marked text block.
         system = payload.get("system")
         if isinstance(system, str) and system:
             payload["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
         if not config.messages:
             return
         # Mark the last message, which the next call reads back, and the
-        # message right before the newest assistant turn, which this call
-        # reads back from the previous one.
+        # message right before the newest assistant turn, which this
+        # call reads back from the previous one.
         messages = payload["messages"]
         assistants = [index for index, message in enumerate(messages) if message.get("role") == "assistant"]
         targets = {len(messages) - 1}
@@ -183,7 +183,8 @@ class AnthropicProvider:
     @staticmethod
     def _holds_cache_control(payload: Mapping[str, Any]) -> bool:
         # Whether any dict anywhere in the payload already has a
-        # cache_control key: the top level, the system, a tool, or a block.
+        # cache_control key: the top level, the system, a tool, or a
+        # block.
         pending: list[Any] = [payload]
         while pending:
             node = pending.pop()

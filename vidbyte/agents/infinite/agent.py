@@ -70,10 +70,10 @@ class InfiniteMemoryAgent(BaseAgent):
         # Build the root: the developer's prompt plus the delegation
         # rules, the preset tools plus the developer's extras, without
         # the workspace tools its recall mode withholds (grep when it
-        # asks a retriever through recall instead), its own
-        # masking of older search and read outputs, its own history trim,
-        # so old tool results drop out past the cap while the task, the
-        # rules, and the map stay, and the delegation caps.
+        # asks a retriever through recall instead), its own masking of
+        # older search and read outputs, its own history trim, so old
+        # tool results drop out past the cap while the task, the rules,
+        # and the map stay, and the delegation caps.
         # @intent limits-in-code-behavior-in-the-prompt
         # The rules describe how to delegate; the depth and batch caps
         # are enforced by DelegationLimitsMiddleware, so the prompt holds

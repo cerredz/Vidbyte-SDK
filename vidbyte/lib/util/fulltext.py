@@ -42,8 +42,9 @@ class FullTextIndex:
         # missing FTS5 fails only the first search, never the build.
         # @intent one-lock-guards-every-call-on-the-index
         # One index is shared by every agent of a tree and searched from
-        # worker threads, so every method takes this reentrant lock, and a
-        # caller holds it across a refresh and the search that follows.
+        # worker threads, so every method takes this reentrant lock, and
+        # a caller holds it across a refresh and the search that
+        # follows.
         self.lock = threading.RLock()
         self._connection: sqlite3.Connection | None = None
         self._fingerprints: dict[str, str] = {}
@@ -58,12 +59,13 @@ class FullTextIndex:
     def replace(self, source: str, fingerprint: str, rows: Sequence[FullTextRow]) -> None:
         """Swap every row stored for the source for the given rows, and store its new fingerprint."""
         with self.lock:
-            # Open the table on first use, then drop the source's old rows
-            # by the rowids they were given.
+            # Open the table on first use, then drop the source's old
+            # rows by the rowids they were given.
             connection = self._table()
             self._delete(connection, source)
-            # Insert the new rows under consecutive rowids, so the source's
-            # rows are one recorded range the next replace can delete.
+            # Insert the new rows under consecutive rowids, so the
+            # source's rows are one recorded range the next replace can
+            # delete.
             first = self._next_rowid
             with connection:
                 connection.executemany("insert into rows (rowid, source, label, body) values (?, ?, ?, ?)", [(first + offset, row.source, row.label, row.text) for offset, row in enumerate(rows)])
@@ -85,8 +87,9 @@ class FullTextIndex:
     def search(self, words: Sequence[str], *, limit: int, snippet_tokens: int) -> FullTextMatches:
         """Return the best rows holding every word, best first, with a snippet of each, and the count of every match."""
         # Refuse sizes the query cannot honor before touching the table.
-        # The shared validator checks them (no bool, no float), and a bad
-        # size is the caller's ValueError, not a configuration error.
+        # The shared validator checks them (no bool, no float), and a
+        # bad size is the caller's ValueError, not a configuration
+        # error.
         try:
             RecordFieldValidator.require_int(limit, "limit", minimum=FULLTEXT_MIN_HITS)
             RecordFieldValidator.require_int(snippet_tokens, "snippet_tokens", minimum=FULLTEXT_SNIPPET_MIN_TOKENS, maximum=FULLTEXT_SNIPPET_MAX_TOKENS)
@@ -96,9 +99,9 @@ class FullTextIndex:
         if not words:
             return FullTextMatches((), 0)
         with self.lock:
-            # Open the table on first use, then match the AND of the quoted
-            # words, best bm25 score first, and count every matching row
-            # for the total line.
+            # Open the table on first use, then match the AND of the
+            # quoted words, best bm25 score first, and count every
+            # matching row for the total line.
             connection = self._table()
             expression = FullTextIndex.match_expression(words)
             found = connection.execute("select label, snippet(rows, 2, '', '', '…', ?) from rows where rows match ? order by bm25(rows) limit ?", (snippet_tokens, expression, limit)).fetchall()

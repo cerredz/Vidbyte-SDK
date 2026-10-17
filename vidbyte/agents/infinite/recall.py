@@ -84,9 +84,9 @@ class InfiniteRecallTool(BaseTool):
             permission=ToolPermission.READ,
             input_schema={"type": "object", "properties": properties, "required": ["question", "purpose"], "additionalProperties": False},
             # @intent a-recall-is-never-cut-by-tool-limits
-            # A recall lasts as long as its retriever, which its own loop
-            # cap bounds, and returns a capped card, so the loop's tool
-            # timeout and result cap must not apply.
+            # A recall lasts as long as its retriever, which its own
+            # loop cap bounds, and returns a capped card, so the loop's
+            # tool timeout and result cap must not apply.
             metadata={"internal": True},
         )
 
@@ -94,10 +94,10 @@ class InfiniteRecallTool(BaseTool):
         """Check the request and the quota, pre-search the terms, run a fresh retriever, and return a capped card of what it cited, copied from disk."""
         memory, prompts = self.memory, Prompts()
         # @intent a-refused-recall-costs-nothing
-        # Check the request, then this agent's allowance, before anything
-        # starts, so a refused call starts no retriever and costs no
-        # recall. The model sends terms as a JSON list, and the record
-        # takes a tuple.
+        # Check the request, then this agent's allowance, before
+        # anything starts, so a refused call starts no retriever and
+        # costs no recall. The model sends terms as a JSON list, and the
+        # record takes a tuple.
         terms = self._optional_argument(call, "terms", default=())
         try:
             request = InfiniteRecallRequest(question=call.arguments.get("question", ""), purpose=call.arguments.get("purpose", ""), known=self._optional_argument(call, "known", default=""), terms=tuple(terms) if isinstance(terms, list) else terms)
@@ -130,8 +130,9 @@ class InfiniteRecallTool(BaseTool):
 
         # @intent found-text-comes-from-disk
         # Copy each accepted citation's text from disk under a label the
-        # code builds, and list each refused one by its place and reason,
-        # so the retriever's own words never reach the found section.
+        # code builds, and list each refused one by its place and
+        # reason, so the retriever's own words never reach the found
+        # section.
         found: list[str] = []
         for citation in citations:
             try:
@@ -151,10 +152,10 @@ class InfiniteRecallTool(BaseTool):
     def _retriever(self, tools: tuple[BaseTool, ...]) -> BaseAgent:
         # @intent the-retriever-only-reads
         # A fresh agent with the developer's prompt and the retriever's
-        # rules, a map drawn now, only the read-only workspace tools, the
-        # masking and history trim every agent has, and a short loop. It
-        # has no role and no memory tools, so it is no pair: it never
-        # counts toward max_agents and writes no journal record.
+        # rules, a map drawn now, only the read-only workspace tools,
+        # the masking and history trim every agent has, and a short
+        # loop. It has no role and no memory tools, so it is no pair: it
+        # never counts toward max_agents and writes no journal record.
         memory, settings = self.memory, self.memory.settings
         context = ContextManager()
         context.upsert(TextContextItem(title=INFINITE_MAP_TITLE, content=memory.workspace.map_text(), primitive_id=INFINITE_MAP_PRIMITIVE_ID), placement=ContextWindowPlacement.TOP_OF_CONTEXT)
@@ -211,7 +212,8 @@ class InfiniteRecallTool(BaseTool):
     async def _copy(self, citation: InfiniteRecallCitation, read: BaseTool) -> str:
         # Copy one citation's text from disk under its code-built label,
         # or raise ToolExecutionError with the reason it is refused. An
-        # entry must be live, and only its id, kind, and text are copied.
+        # entry must be live, and only its id, kind, and text are
+        # copied.
         workspace = self.memory.workspace
         if citation.entry_id is not None:
             (entry,) = workspace.entries((citation.entry_id,))
@@ -233,8 +235,8 @@ class InfiniteRecallTool(BaseTool):
             raise ToolExecutionError("The path is a bookkeeping file or a run journal, not a note; cite a memory entry by its id instead.")
 
         # Read the range through the same windowed read_lines the
-        # retriever read with, so it is scoped and numbered the same way,
-        # and refuse a range that ends past the file's last line.
+        # retriever read with, so it is scoped and numbered the same
+        # way, and refuse a range that ends past the file's last line.
         result = await read.execute(ToolCall(read.name, {"path": relative.as_posix(), "start": start, "end": end}))
         if result.status is ToolStatus.ERROR:
             raise ToolExecutionError(result.output)

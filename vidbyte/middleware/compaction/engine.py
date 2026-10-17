@@ -194,7 +194,8 @@ class ContextCompactionEngine:
         if mode is CompactionMode.TRIM_WITH_PROVIDER_BOUNDARIES:
             max_messages = options.get("max_messages")
             max_tokens = options.get("max_tokens")
-            # The low watermark goes through as given, so the strategy's own check refuses a bool, a float, or a negative number.
+            # The low watermark goes through as given, so the strategy's
+            # own check refuses a bool, a float, or a negative number.
             return TrimWithProviderBoundariesCompaction(None if max_messages is None else int(max_messages), None if max_tokens is None else int(max_tokens), options.get("token_counter"), low_watermark_tokens=options.get("low_watermark_tokens"))
         if mode is CompactionMode.DELETE_MESSAGES_BY_ID_OR_RANGE:
             start = options.get("start")

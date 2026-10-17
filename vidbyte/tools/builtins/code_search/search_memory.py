@@ -84,8 +84,8 @@ class InfiniteSearchMemoryTool(BaseCodeSearchTool):
 
         # @intent search-memory-runs-off-the-event-loop
         # Reading the workspace and every SQLite call run in a worker
-        # thread, so the event loop keeps serving the other agents of the
-        # tree while this one searches.
+        # thread, so the event loop keeps serving the other agents of
+        # the tree while this one searches.
         try:
             matches = await asyncio.to_thread(self._lookup, words)
         except ConfigurationError as exc:
@@ -194,8 +194,8 @@ class InfiniteSearchMemoryTool(BaseCodeSearchTool):
         # @intent only-entry-text-is-searched
         # Each live entry is one row of its text alone, labelled by its
         # id and kind; a malformed line is left out and never fails the
-        # search, so the workspace's own checks stay the place to fix it.
-        # An entries file grep would skip as binary gives no rows.
+        # search, so the workspace's own checks stay the place to fix
+        # it. An entries file grep would skip as binary gives no rows.
         rows: list[FullTextRow] = []
         if not self.is_text_file(path):
             return rows
