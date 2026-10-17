@@ -601,22 +601,32 @@ class CodexHost:
         return await self._reviews.start(operation, review)
 
     async def list_recent_codex_threads(self, cwd: str, limit: int = CODEX_HOST_THREAD_LIST_DEFAULT_LIMIT) -> tuple[CodexThreadSummary, ...]:
-        # Up to limit threads of every top-level source, the SDK's own
-        # included, newest first, with no usage check (INV-10, INV-11).
+        """Up to limit threads of every top-level source, newest first.
+
+        The SDK's own threads are included, and no preflight check is
+        sent. Nothing here filters by text; search_codex_threads
+        matches thread titles only, not their content.
+        """
         operation = CodexHostOperation.LIST_RECENT_CODEX_THREADS
         self._guard(operation, talks=True)
         return await self._threads.list_threads(CodexThreadListing(operation=operation, cwd=cwd, limit=limit))
 
     async def list_codex_threads_since(self, cwd: str, since: int, limit: int = CODEX_HOST_THREAD_LIST_DEFAULT_LIMIT) -> tuple[CodexThreadSummary, ...]:
-        # The threads updated at or after since, in Unix seconds,
-        # newest first; an empty window is () (INV-14, D-9).
+        """Up to limit threads updated at or after since, newest first.
+
+        since is in Unix seconds, and an empty window is (). Nothing
+        here filters by text; search_codex_threads matches thread
+        titles only, not their content.
+        """
         operation = CodexHostOperation.LIST_CODEX_THREADS_SINCE
         self._guard(operation, talks=True)
         return await self._threads.list_threads(CodexThreadListing(operation=operation, cwd=cwd, limit=limit, since=since))
 
     async def search_codex_threads(self, cwd: str, query: str, limit: int = CODEX_HOST_THREAD_LIST_DEFAULT_LIMIT) -> tuple[CodexThreadSummary, ...]:
-        # The threads whose title Codex matches with query, newest
-        # first (D-6).
+        """Up to limit threads whose title matches query, newest first.
+
+        Codex matches query against titles only, not thread content.
+        """
         operation = CodexHostOperation.SEARCH_CODEX_THREADS
         self._guard(operation, talks=True)
         return await self._threads.list_threads(CodexThreadListing(operation=operation, cwd=cwd, limit=limit, query=query))
