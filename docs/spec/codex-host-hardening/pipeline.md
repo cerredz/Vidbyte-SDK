@@ -107,6 +107,13 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
      
      The new S2_HEAD then follows.
   3. **S5 repair loop:** code fixes for R-1, R-2, R-3, R-7 (code side), R-9 and R-10. Minors are fixed only where trivial.
+- 2026-10-17 16:40: **Spec r5 (be733a0b) checked.**
+  - Only `spec.md` changed (+67/−29). It is revision 5 with `status: reviewed`.
+  - `git diff fadec47f..HEAD -- tests test-plan.md` is empty, and the commit message is the one I requested.
+  - **The r5 budget:** 3 files, 14 classes, 0 dependencies, 11 config keys, 13 messages. It differs from my plan of 10 config keys, because the author added two: `CODEX_HOST_FORK_EXPERIMENTAL_FIELDS` for R-2 and `CODEX_HOST_LOG_TOKEN_MAX_CHARS = 128` for R-9. Both trace to confirmed findings, so I accepted it.
+  - R-9's helper is the class `LogToken.of(value, limit)`, because the other helpers in text.py are classes. That makes 14 classes.
+  - R-10 becomes EC-57: a call refused before it is sent is not logged.
+  - §16 has an "S4 review" row that routes all 10 findings.
 
 ## User replies (verbatim)
 - (none yet)
@@ -227,3 +234,19 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
 - R-3's fix wraps `reviews.py:141` the way its sibling paths are wrapped, and renames `CodexTurnEvents._fail` to `fail`. It has 2 callers plus the FILE inventory, and no test references it. *Source:* verifier
 - R-9's log-token helper applies to every record that shows a Codex-issued id: `_log_call`, `finish` and the `turn_events` warnings, not just the router. *Source:* verifier
 - R-1: re-read the field guide's `comment-format.md` before re-wrapping. Wrapped comments must still keep A002's `@intent` within 20 lines of its `def`. *Source:* verifier
+- **Spec r5 contract (be733a0b):**
+  - `CODEX_HOST_GOAL_FIELD_MESSAGE` is `{owner} does not use the field {name}, because Codex starts goal turns itself with the thread's settings; leave {name} at its default, or set the matching thread setting.`
+    - `CodexSpawnRequest` passes the owner `"Codex spawn request goal"`, so its text is unchanged from r4.
+    - `CodexGoalRunRequest` passes the owner `"run_codex_goal request"`.
+  - `CODEX_HOST_ANY_MODEL_TEXT = "any model"` (message 13).
+  - `CODEX_HOST_FORK_EXPERIMENTAL_FIELDS = ("before_turn_id", "defer_goal_continuation")`, checked in that order.
+  - `CODEX_HOST_LOG_TOKEN_MAX_CHARS = 128`.
+  - `LogToken.of(value, limit)` is in `vidbyte/lib/util/text.py`.
+    - Every character outside ASCII `A-Za-z0-9_.:/-` becomes `_`.
+    - A result longer than `limit` keeps its first `limit` characters plus `...`.
+    - `""` stays `""`, and running it twice gives the same result.
+    - It applies only at log calls: the router's method and its three ids, `_log_call`'s thread_id, `observe`'s four values, and the handle ids in `finish` and both `turn_events` warnings. Routing, answers and errors keep the raw values.
+  - R-10: `call` goes through `self._executor.submit` and `asyncio.wrap_future` inside the same `wait_for`, and a done-callback logs a late landing. A `start` hand-over logs from `_post_late` on the worker side. A timed-out call already logged, so it adds nothing.
+  - The connection.py header line "neither does a cancelled call" must go; only EC-57's refused-before-send case remains.
+  
+  *Source:* spec author r5
