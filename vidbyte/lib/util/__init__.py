@@ -60,8 +60,6 @@ TESTS:
 
 from __future__ import annotations
 
-import importlib
-
 from vidbyte.lib.util.call_options import SupportedKwargs
 from vidbyte.lib.util.credential_keys import CredentialKeyPolicy
 from vidbyte.lib.util.jsonl import AppendOnlyJsonl
@@ -70,6 +68,9 @@ from vidbyte.lib.util.prompt_placement import PromptPlacement
 from vidbyte.lib.util.text import SubstringCounter, TokenEstimate
 
 # Each name loaded from its module on first access, never at import.
+# C003 bans an import whose module comes from data, so __getattr__
+# imports each module by its literal name, and a name listed here
+# that the module does not define raises instead of resolving.
 _LAZY_EXPORTS = {"FullTextIndex": "vidbyte.lib.util.fulltext"}
 
 __all__ = ["AppendOnlyJsonl", "CredentialKeyPolicy", "FullTextIndex", "MathHelper", "PromptPlacement", "SubstringCounter", "SupportedKwargs", "TokenEstimate"]
@@ -84,4 +85,6 @@ def __getattr__(name: str) -> object:
     # on first access keeps every import order working.
     if name not in _LAZY_EXPORTS:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    return getattr(importlib.import_module(_LAZY_EXPORTS[name]), name)
+    import vidbyte.lib.util.fulltext as fulltext
+
+    return getattr(fulltext, name)
