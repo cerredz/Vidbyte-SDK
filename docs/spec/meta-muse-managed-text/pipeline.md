@@ -16,7 +16,7 @@ Run B of two sequential runs. Run A (cerredz/Vidbyte, slug `meta-muse-gateway`) 
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-16 18:25 | 2026-10-16 21:55 | reports/S0-scout.md | base_commit 845a4d9b; code-map.md (4 sections, 303 lines); one gate in code (`_require_gateway_shape`) |
-| S1 spec + review | pending | | | | |
+| S1 spec + review | in progress | 2026-10-16 22:00 | | reports/S1-spec-author.md | spec r1 8ec7dda6 (one-constant change, 0 new files; 8 FR / 15 AC / 15 EC; 0 blocking Q-n); round-1 review running |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -31,6 +31,7 @@ Run B of two sequential runs. Run A (cerredz/Vidbyte, slug `meta-muse-gateway`) 
 - 2026-10-16 18:25 — Worktree from origin/main `845a4d9b`; upstream unset (`git worktree add` set it to origin/main). Push with `git push -u origin feat/meta-muse-managed-text`.
 - 2026-10-16 18:25 — Copied Run A spec §9.2–§9.4 verbatim into `context/wire-contract.md` (source commit `c395349bd`; §9.2 unchanged through Run A's final head) so every stage reads one stable contract text.
 - 2026-10-16 21:45 — The S0 scout died on an API session limit mid-task; resumed the same agent via SendMessage after the coordinator said the limit had reset. Not counted against any cap.
+- 2026-10-16 22:00 — The host process exited (Windows paging-file MEM_COMMIT error) while the first S1 author had written nothing; per the coordinator, launched a fresh S1 author (spec r1 at 8ec7dda6). Not counted against any cap. Heavy commands run one at a time from now on.
 - 2026-10-16 21:56 — Scout disclosure accepted: one early grep was not excluded from `docs/` and printed lines from other specs; the scout used none of them.
 
 ## User replies (verbatim)
