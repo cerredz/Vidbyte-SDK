@@ -15,7 +15,7 @@ started: 2026-10-16 16:05
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-16 16:05 | 2026-10-16 16:45 | reports/S0-scout.md | base_commit 0f2aeb48; code-map.md (4 sections, ~60 files) |
 | S1 spec + review | done | 2026-10-16 16:50 | 2026-10-16 20:40 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | spec r3 (75789419), approved; round 1 SOUND WITH FIXES (12 accepted), round 2 SOUND WITH FIXES (12 accepted) |
-| S2 tests | running (defect fix) | 2026-10-16 20:45 | | reports/S2-test-author.md | 133 new tests in 10 files + §13 changed tests; red confirmed (orchestrator re-ran test_read_lines_window.py 10 failed, test_infinite_memory_stable_prefix.py 8 failed, right reasons); test commit 0d265474, proof 5e930f3b; 2 spec defects → spec r4 |
+| S2 tests | done | 2026-10-16 20:45 | 2026-10-17 |  reports/S2-test-author.md | 133 new tests in 10 files + §13 changed tests; red confirmed (orchestrator re-ran test_read_lines_window.py 10 failed, test_infinite_memory_stable_prefix.py 8 failed, right reasons); test commit 0d265474, proof 5e930f3b; 2 spec defects → spec r4 (fb702ba5), tests aligned acfec7a8; **S2_HEAD = acfec7a8** (S3/S5/S6 diff the test tree against it) |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
