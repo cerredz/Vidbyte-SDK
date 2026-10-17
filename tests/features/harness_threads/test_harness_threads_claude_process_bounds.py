@@ -1,6 +1,6 @@
 """FILE: tests/features/harness_threads/test_harness_threads_claude_process_bounds.py
 
-PURPOSE: Every Claude Code run is bounded and leaves nothing behind (spec claude-thread-functions INV-9, INV-10): a run past ClaudeThreadConfig.timeout_seconds raises claude.timed_out within the stop bound with its whole process tree gone, naming the seconds waited and Claude's stderr without the key (AC-15, EC-14), a timed-out run reports no thread while a timed-out continue or fork reports the caller's id (EC-14, D-9), stdout past NATIVE_PROCESS_MAX_OUTPUT_BYTES raises claude.output_too_large naming the cap (AC-15, EC-15), answer text past NATIVE_RESULT_TEXT_MAX_CHARS is cut and flagged (INV-9), and caller cancellation propagates unchanged after the tree is stopped (AC-16, EC-33).
+PURPOSE: Every Claude Code run is bounded and leaves nothing behind (spec claude-thread-functions INV-9, INV-10): a run past ClaudeThreadConfig.timeout_seconds raises claude.timed_out within the stop bound with its whole process tree gone, naming the seconds waited and Claude's stderr without the key (AC-15, EC-14), a run timed out before printing reports no thread while a timed-out continue or fork reports the caller's id (EC-14, D-9), a run or fork that printed a valid answer and then hung reports the printed id and a continue the caller's (r4 INV-6, S4 R-3), stdout past NATIVE_PROCESS_MAX_OUTPUT_BYTES raises claude.output_too_large naming the cap and carrying Claude's stderr (AC-15, EC-15, r4 S4 R-1), answer text past NATIVE_RESULT_TEXT_MAX_CHARS is cut and flagged (INV-9), and caller cancellation propagates unchanged after the tree is stopped (AC-16, EC-33).
 ROLE IN CODEBASE: Start here when a Claude call hangs, outlives its timeout, leaks a claude process, or reports the wrong thread for a run it stopped.
 ARCHITECTURE NOTE: The stand-in holds until a release file appears or its 30-second limit passes, and can start a grandchild that inherits its pipes, so only a whole-tree stop ends it. NATIVE_KILL_WAIT_SECONDS is shrunk through the constants module (fast_stop), as spec §13 allows. Liveness is checked on win32 too (OpenProcess/GetExitCodeProcess).
 FUNCTION INVENTORY: tree_pids lists the stand-in leader and grandchild pids; the test_* functions are one behaviour each.
@@ -19,6 +19,12 @@ import time
 import pytest
 
 TIMEOUT = 1.5
+# S4 R-3: long enough for the stand-in to start and print its answer
+# on a loaded machine before the SDK stops it; a stand-in stopped
+# before printing fails on its own assertion, not on the thread id.
+PRINTED_TIMEOUT = 3.0
+BACKGROUND_NOTICE = "Claude Code is still finishing background work"
+FLOOD_NOTICE = "Claude Code: output limit notice"
 FLOOD_EXTRA_BYTES = 65536
 DEVICE_NOTICE = "Waiting for the API to answer the first request"
 
@@ -65,6 +71,36 @@ async def test_stdout_past_the_cap_is_output_too_large_naming_it(api, sandbox, c
     with pytest.raises(api.NativeThreadError) as caught:
         await call("claude", fake={"mode": "flood", "flood_bytes": cap + FLOOD_EXTRA_BYTES})
     check_error(caught.value, harness="claude", verb="run", code="claude.output_too_large", workspace=sandbox.workspace, thread_id=None, observations=[("byte cap", (str(cap), f"{cap:,}"))])
+
+
+@pytest.mark.asyncio
+async def test_stdout_past_the_cap_carries_claudes_stderr_as_the_vendor_text(api, sandbox, call, check_error) -> None:
+    # S4 R-1 / INV-6 / INV-7 item 5 / EC-15 (r4): output_too_large
+    # carries stderr as its vendor text, as Grok, opencode and Muse do
+    # (G-4); nothing valid was printed, so a run has no thread id.
+    cap = api.constants.NATIVE_PROCESS_MAX_OUTPUT_BYTES
+    with pytest.raises(api.NativeThreadError) as caught:
+        await call("claude", fake={"mode": "flood", "flood_bytes": cap + FLOOD_EXTRA_BYTES, "stderr_text": FLOOD_NOTICE})
+    check_error(caught.value, harness="claude", verb="run", code="claude.output_too_large", workspace=sandbox.workspace, thread_id=None, observations=[("byte cap", (str(cap), f"{cap:,}"))], vendor=FLOOD_NOTICE)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("verb", ["run", "continue", "fork"])
+async def test_answer_printed_before_the_timeout_gives_the_newest_thread_id(api, sandbox, call, check_error, fast_stop, verb) -> None:
+    # S4 R-3 / INV-6 / INV-7 item 4 / EC-14 / D-9 (r4): Claude Code
+    # printed a valid answer and then did not exit. timed_out carries
+    # the printed session_id for run and fork, the caller's id for
+    # continue, and Claude's stderr as the vendor text.
+    source = (await call("claude")).thread_id if verb != "run" else None
+    with pytest.raises(api.NativeThreadError) as caught:
+        await call("claude", verb, "Again.", thread_id=source, fake={"mode": "answer_then_hold", "stderr_text": BACKGROUND_NOTICE}, config={"timeout_seconds": PRINTED_TIMEOUT})
+    printed = sandbox.records("printed", "claude")
+    assert len(printed) == 1, "the stand-in was stopped before it printed its answer; the machine is slower than PRINTED_TIMEOUT allows"
+    session = printed[0]["session"]
+    if verb == "fork":
+        assert session != source, "the stand-in's fork printed a new id"
+    expected = source if verb == "continue" else session
+    check_error(caught.value, harness="claude", verb=verb, code="claude.timed_out", workspace=sandbox.workspace, thread_id=expected, observations=[("seconds waited", (str(PRINTED_TIMEOUT),))], vendor=BACKGROUND_NOTICE)
 
 
 @pytest.mark.asyncio

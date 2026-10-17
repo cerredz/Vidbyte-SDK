@@ -1,6 +1,6 @@
 """FILE: tests/features/harness_threads/test_harness_threads_claude_acceptance.py
 
-PURPOSE: The developer-facing outcomes of the Claude Code thread functions (spec claude-thread-functions): the §4 snippet runs as written against a stand-in `claude` found on PATH and prints exactly `claude True True` and the fork's answer (AC-1, G-1), run_claude_thread returns Claude's new session_id and its `result` text from exactly one child process (AC-2, FR-1, INV-11), a workspace that ships Claude Code settings, CLAUDE.md, skills and an MCP server reaches nothing (AC-22, INV-4, INV-14, EC-9, EC-10), and the harnesses README and REPO_MAP describe the functions and their limits (AC-23).
+PURPOSE: The developer-facing outcomes of the Claude Code thread functions (spec claude-thread-functions): the §4 snippet runs as written against a stand-in `claude` found on PATH and prints exactly `claude True True` and the fork's answer (AC-1, G-1), run_claude_thread returns Claude's new session_id and its `result` text from exactly one child process (AC-2, FR-1, INV-11), a workspace that ships Claude Code settings, CLAUDE.md, skills and an MCP server reaches nothing (AC-22, INV-4, INV-14, EC-9, EC-10), and the harnesses README names the functions and their limits while the REPO_MAP native section describes Claude Code in plain words only (AC-23 as rewritten in r4 after S4 R-4).
 ROLE IN CODEBASE: Start here when a Claude thread function stops returning what Claude Code answered, when the documented snippet breaks, or when a repository's own Claude Code settings start to steer an SDK run.
 ARCHITECTURE NOTE: AC-1 runs the snippet in a fresh interpreter with PATH, USERPROFILE/HOME and MY_ANTHROPIC_KEY set the way the AC states; only the two literal folder paths are swapped for sandbox folders. Every other test calls the public functions with the stand-in as ClaudeThreadConfig.claude_command and reads what the stand-in logged. The sandbox fixture has already dropped every ANTHROPIC_*/CLAUDE* variable of the shell running the tests, so the stand-in sees only what the SDK set.
 FUNCTION INVENTORY: native_section cuts the vidbyte/harnesses/native/ section out of REPO_MAP.md; the test_* functions are one behaviour each.
@@ -56,6 +56,10 @@ async def main() -> None:
 asyncio.run(main())
 '''
 FUNCTIONS = ("run_claude_thread", "continue_claude_thread", "fork_claude_thread")
+# r4 AC-23 (S4 R-4): the exact names live in the harnesses README;
+# the REPO_MAP section describes them in plain words only.
+README_TOKENS = (*FUNCTIONS, "claude-configs", "--setting-sources user", "ClaudeThreadConfig")
+MAP_FORBIDDEN = (*FUNCTIONS, "claude-configs", "--setting-sources", "CLAUDE.md")
 PERMISSION_MODES = (("DEFAULT", "default"), ("ACCEPT_EDITS", "acceptEdits"), ("DONT_ASK", "dontAsk"), ("PLAN", "plan"))
 
 
@@ -144,16 +148,19 @@ async def test_workspace_claude_settings_instructions_skills_and_mcp_servers_rea
 
 
 def test_harnesses_readme_and_repo_map_describe_the_claude_functions(pack) -> None:
-    # AC-23 / EC-20 / EC-37 / A009: both documents name the three
-    # functions, the private config folder and --setting-sources user;
-    # the README also names every permission mode and auto memory, and
-    # stays at or under 40,000 characters.
+    # AC-23 (r4, S4 R-4) / EC-20 / EC-37 / A009: the README names the
+    # three functions, the private config folder, --setting-sources
+    # user and ClaudeThreadConfig, every permission mode and auto
+    # memory, and stays at or under 40,000 characters; the REPO_MAP
+    # native section names Claude Code with no function name, file
+    # name, flag or path (the map's code-free rule).
     readme = (pack.REPO_ROOT / "vidbyte" / "harnesses" / "README.md").read_text(encoding="utf-8")
     section = native_section((pack.REPO_ROOT / "REPO_MAP.md").read_text(encoding="utf-8"))
-    for name, text in (("vidbyte/harnesses/README.md", readme), ("REPO_MAP.md native section", section)):
-        missing = [token for token in (*FUNCTIONS, "claude-configs", "--setting-sources user") if token not in text]
-        assert missing == [], f"{name} does not name {missing}"
-    assert "ClaudeThreadConfig" in readme
+    missing = [token for token in README_TOKENS if token not in readme]
+    assert missing == [], f"vidbyte/harnesses/README.md does not name {missing}"
+    assert "Claude Code" in section, "the REPO_MAP native section does not name Claude Code"
+    present = [token for token in MAP_FORBIDDEN if token in section]
+    assert present == [], f"the REPO_MAP native section must stay code-free (r4 AC-23) but holds {present}"
     unnamed = [member for member, value in PERMISSION_MODES if member not in readme and value not in readme]
     assert unnamed == [], f"EC-20: the README does not say what these permission modes allow: {unnamed}"
     assert "memory" in readme.lower(), "EC-37: the README does not mention Claude Code's auto memory"

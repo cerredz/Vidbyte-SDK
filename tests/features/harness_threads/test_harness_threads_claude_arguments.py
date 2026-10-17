@@ -1,6 +1,6 @@
 """FILE: tests/features/harness_threads/test_harness_threads_claude_arguments.py
 
-PURPOSE: Argument refusal through the three Claude Code thread functions (spec claude-thread-functions INV-5, INV-8): a thread id that is a session title, an upper-case UUID, dash-led or not a UUID, a prompt over 200,000 characters, blank or holding NUL, a malformed api_key, a relative or missing workspace, a skill folder without SKILL.md, a dash-led model, and a config that is another harness's record or a mapping each raise configuration.invalid_argument naming the argument, never quote the key, and happen before any process starts or any file or folder (the private config folder included) is created (AC-8, EC-6, EC-27); the boundary values the spec allows still run: a 200,000-character prompt on stdin and a quote-dense prompt that only the argv harnesses refuse on win32 (INV-5 rule 2, EC-27, D-5).
+PURPOSE: Argument refusal through the three Claude Code thread functions (spec claude-thread-functions INV-5, INV-8): a thread id that is a session title, an upper-case UUID, dash-led or not a UUID, a prompt over 200,000 characters, blank, holding NUL or holding a lone surrogate (r4 INV-5 rule 5, EC-38), a malformed api_key, a relative or missing workspace, a skill folder without SKILL.md, a dash-led model, and a config that is another harness's record or a mapping each raise configuration.invalid_argument naming the argument, never quote the key, and happen before any process starts or any file or folder (the private config folder included) is created (AC-8, EC-6, EC-27); the boundary values the spec allows still run: a 200,000-character prompt on stdin and a quote-dense prompt that only the argv harnesses refuse on win32 (INV-5 rule 2, EC-27, D-5).
 ROLE IN CODEBASE: Start here when a bad argument reaches claude, a refusal names the wrong argument, or a valid boundary value is refused.
 ARCHITECTURE NOTE: Each refusal builds the stand-in command first, snapshots the whole sandbox including the stand-in's log folder, calls the function, and compares; a stand-in that started would have claimed a launch number in that folder, and a private config folder would show as a new path under the home.
 FUNCTION INVENTORY: refuse runs one call that must be refused and checks the INV-5 shape; the test_* functions are one behaviour each.
@@ -22,7 +22,7 @@ THREAD_CASES = [
     ("not-uuid", "not-a-uuid"), ("short-uuid", VALID_THREAD[:-1]), ("braced-uuid", "{" + VALID_THREAD + "}"), ("uuid-newline", VALID_THREAD + "\n"),
     ("uuid-no-dashes", VALID_THREAD.replace("-", "")), ("path", "../" + VALID_THREAD), ("empty", ""), ("none", None),
 ]
-PROMPT_CASES = [("empty", ""), ("blank", "  \n\t "), ("nul", "list\x00files"), ("not-text", 3), ("over-cap", "p" * (PROMPT_CAP + 1))]
+PROMPT_CASES = [("empty", ""), ("blank", "  \n\t "), ("nul", "list\x00files"), ("not-text", 3), ("over-cap", "p" * (PROMPT_CAP + 1)), ("lone-surrogate", "list \ud800 files")]
 KEY_CASES = [("empty", ""), ("inner-space", "sk-ant key with space"), ("nul", "sk-ant-key\x00tail"), ("non-ascii", "sk-ant-kéy-tail"), ("too-long", "k" * 4097), ("none", None)]
 WORKSPACE_CASES = ["relative", "missing", "file", "not-text"]
 MODEL_CASES = [("flag", "-m"), ("double-flag", "--model"), ("space", "claude sonnet"), ("too-long", "s" * 161), ("not-text", 7)]
@@ -66,7 +66,10 @@ async def test_thread_id_that_is_not_a_lowercase_uuid_is_refused(refuse, verb, c
 @pytest.mark.parametrize(("case", "prompt"), PROMPT_CASES, ids=[case for case, _ in PROMPT_CASES])
 async def test_invalid_prompt_is_refused(refuse, case, prompt) -> None:
     # AC-8 / INV-5 rule 2: blank, NUL-holding, non-text or over
-    # NATIVE_PROMPT_MAX_CHARS (200,000).
+    # NATIVE_PROMPT_MAX_CHARS (200,000). INV-5 rule 5 / EC-38 (r4, S4
+    # R-2): a lone surrogate, which cannot be encoded as UTF-8 for
+    # stdin, is refused before claude starts (Claude only; opencode's
+    # same gap is a stated limitation, INV-20).
     observations = [("prompt cap", (str(PROMPT_CAP), f"{PROMPT_CAP:,}"))] if case == "over-cap" else []
     await refuse("prompt", prompt=prompt, observations=observations)
 

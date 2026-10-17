@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: argv[1] is the scenario path; everything after it is what the
 FUNCTION INVENTORY: main dispatches on the scenario's program; run_grok, run_opencode, run_muse_exec, run_muse_serve, run_claude and run_wsl play one program each; parse_claude reads Claude Code's separate-style options; claude_answer builds Claude Code's one JSON result object for each mode; FakeLog writes the per-process log; start_record captures argv, cwd, stdin kind, credential digests, plain variables and skill folders; hold waits for the release file or the hold limit; flood writes past an output cap; echo_text builds the AC-4 secret echo; early_stderr prints the scenario's stderr_text before any mode runs (R-6).
 COMMON MODIFICATION PATTERNS: Add a scenario field, read it here with .get and a default, and log anything a test must assert on.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import vidbyte or anything outside the standard library. 2. Do not contact the network or run a real vendor CLI or the real wsl.exe. 3. Do not log a credential value; only echo_secrets mode prints one, on purpose, into the vendor's own error output. 4. Never use shell=True.
-KNOWN EDGE CASES: A held process exits by itself after HOLD_LIMIT_SECONDS, so a broken stop cannot leak it for long; its grandchild sleeps GRANDCHILD_SECONDS. opencode and claude read stdin as bytes and decode UTF-8 (the Windows console code page is not UTF-8). `muse exec --session-id <unknown>` silently starts a new thread, as Muse 1.0.1 does (spec §15, probe 9). `claude --resume <id>` searches every project folder of its config folder (vendor-facts p07) and, when none holds the id, exits 1 with an empty stdout and Claude Code's marker on stderr (p05); a failed run still prints its JSON object with a session_id (p16), and `subtype` says "success" on a 401. The claude role logs only the names of the ANTHROPIC_*/CLAUDE* variables it saw, never their values.
+KNOWN EDGE CASES: A held process exits by itself after HOLD_LIMIT_SECONDS, so a broken stop cannot leak it for long; its grandchild sleeps GRANDCHILD_SECONDS. opencode and claude read stdin as bytes and decode UTF-8 (the Windows console code page is not UTF-8). `muse exec --session-id <unknown>` silently starts a new thread, as Muse 1.0.1 does (spec §15, probe 9). `claude --resume <id>` searches every project folder of its config folder (vendor-facts p07) and, when none holds the id, exits 1 with an empty stdout and Claude Code's marker on stderr (p05); a failed run still prints its JSON object with a session_id (p16), and `subtype` says "success" on a 401. The claude role logs only the names of the ANTHROPIC_*/CLAUDE* variables it saw, never their values. Its `answer_then_hold` mode prints a valid success answer, logs `printed`, and then holds like `hold` (spec claude-thread-functions r4, S4 R-3).
 RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §9.2, §13, §15; docs/spec/claude-thread-functions/spec.md §9.2, §13; docs/spec/claude-thread-functions/context/vendor-facts.md §4, §6, §7
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads
 """
@@ -747,6 +747,12 @@ def run_claude(scenario: dict[str, Any], args: list[str]) -> None:
     answer, status = claude_answer(scenario, mode, session, text, env, args, stdin_text)
     log.write("answer", session=session, text_chars=len(text), resumed=resume, forked=forking, exit_code=status)
     write_out(json.dumps(answer, ensure_ascii=False) + "\n")
+    if mode == "answer_then_hold":
+        # S4 R-3: Claude Code has printed its whole answer but does not
+        # exit (a background task still running), so only the SDK's
+        # timeout ends it.
+        log.write("printed", session=session)
+        log.write("held", outcome=hold(scenario))
     sys.exit(status)
 
 

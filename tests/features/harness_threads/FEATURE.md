@@ -63,14 +63,14 @@ A vendor that silently creates a new session for an unknown id (Muse `exec --ses
 - `test_harness_threads_wsl.py`: Muse WSL mode on win32.
 - `test_harness_threads_static_policy.py`: INV-15's two `ast` rules and INV-20's import rule, now also over the `claude` subpackage and `hostkit/folders.py`.
 - `test_harness_threads_claude_surface.py`: Claude exports and identities, `ClaudeFlag`/`ClaudePermissionMode`/`ClaudeReasoningEffort`, the §8.5 constants, the Claude rows of every table, `ClaudeThreadConfig` fields, defaults and refusals, the Claude request rules, and #1044's names, modules, files, extra and imports gone with the shared files restored (AC-18, AC-20).
-- `test_harness_threads_claude_acceptance.py`: the Claude spec's verbatim example (AC-1), run returning the answer (AC-2), hostile workspace settings (AC-22), README and REPO_MAP (AC-23).
+- `test_harness_threads_claude_acceptance.py`: the Claude spec's verbatim example (AC-1), run returning the answer (AC-2), hostile workspace settings (AC-22), the README naming the functions and the REPO_MAP native section staying code-free (AC-23 as rewritten in r4).
 - `test_harness_threads_claude_threads.py`: continue and fork identity (AC-3, AC-4), unknown and foreign threads (AC-12, EC-7), another workspace spelling, answers on another or upper-case id, a fork answering with its source (AC-14).
 - `test_harness_threads_claude_argv.py`: the exact §9.2 argv per verb and option (AC-5), each permission mode and effort, cwd, and the `CliInvocation` fields.
 - `test_harness_threads_claude_credentials.py`: the child's environment (AC-6), `os.environ` untouched, an echoed key scrubbed everywhere and never written, and `repr` (AC-7).
 - `test_harness_threads_claude_errors.py`: key rejected (AC-10), other API statuses and budget errors (AC-11), bare non-zero exits, unreadable answers and bad members (AC-13), stderr on success, and the thread id each failure reports.
-- `test_harness_threads_claude_process_bounds.py`: timeout with tree stop, output cap (AC-15), text cap, cancellation (AC-16).
+- `test_harness_threads_claude_process_bounds.py`: timeout with tree stop, output cap (AC-15), the newest thread id and Claude's stderr on a timeout after a printed answer and on the output cap (INV-6, EC-14, EC-15), text cap, cancellation (AC-16).
 - `test_harness_threads_claude_launcher.py`: PATH and `~/.local/bin` fallback, not installed, batch refusal (AC-17), the current folder never searched, an unpreparable config folder or home (EC-3).
-- `test_harness_threads_claude_arguments.py`: every argument refusal before any I/O (AC-8) and the 200,000-character and quote-dense prompts that must pass.
+- `test_harness_threads_claude_arguments.py`: every argument refusal before any I/O (AC-8), including a lone-surrogate prompt (INV-5 rule 5, EC-38), and the 200,000-character and quote-dense prompts that must pass.
 - `test_harness_threads_claude_skills.py`: the private config folder's `skills/` (AC-9), rebuild only on change, `NativePrivateFolders.prepare` with Grok's and Claude's constants.
 
 Run `PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads`.
