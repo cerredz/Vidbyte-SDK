@@ -4,7 +4,7 @@ Saves one short, typed memory entry to the workspace that every agent in this ru
 
 ## When to use it
 
-Remember only what will matter again: a decision that was made, a fact that was established, a lesson about what works or fails, an open question, or a pointer to a file that holds longer material. Do not record progress updates, plans that will soon change, or anything the workspace map already shows. Before saving, search memory with grep, so you supersede an existing entry instead of adding a second version of it.
+The default is not to remember: save an entry only when a later agent would be wrong or slower without it, such as a decision that was made, a fact that was established, a lesson about what works or fails, an open question, or a pointer to a file that holds longer material. Do not record progress updates, plans that will soon change, or anything the workspace map already shows. Before saving, search memory with grep, so you supersede an existing entry instead of adding a second version of it.
 
 ## How it behaves
 

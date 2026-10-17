@@ -8,7 +8,7 @@ When the file does not exist yet, this text becomes its whole content. When the 
 
 ## How to write it
 
-Write for a reader with no context: lead with the conclusion, keep each source next to the claim it supports, and give each appended section its own heading or label so later readers can find it.
+Write for a reader with no context: lead with the conclusion, keep each source next to the claim it supports, and give each appended section its own heading or label so later readers can find it. Append findings as you make them rather than at the end, because what you hold only in your history can be trimmed away.
 
 ## Rules
 
