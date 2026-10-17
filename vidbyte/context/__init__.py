@@ -88,6 +88,7 @@ from vidbyte.lib.dataclasses.context import (
 from vidbyte.context.handoff import (
     EngineeringHandoff,
     Handoff,
+    InfiniteHandoff,
     MinimalHandoff,
     ResearchHandoff,
 )
@@ -135,6 +136,7 @@ __all__ = [
     "GitDiffContextItem",
     "Handoff",
     "IndependentCriticAlgorithm",
+    "InfiniteHandoff",
     "InterventionRiskContextItem",
     "InvariantContextItem",
     "MemoryContextItem",

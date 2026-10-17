@@ -1,19 +1,19 @@
 """FILE: vidbyte/agents/infinite/settings.py
 
-PURPOSE: Defines the two public configuration objects of InfiniteMemoryAgent: InfiniteWorkspaceSettings, the one memory workspace folder with its memory preset, seed files, and caps; and InfiniteMemoryAgentSettings, the model, the prompt, the project folder, the developer's extra tools, the loop limits, and the delegation caps shared by every agent in the tree.
-ROLE IN CODEBASE: Built by the developer and passed to InfiniteMemoryAgent (vidbyte/agents/infinite/agent.py), which builds InfiniteWorkspace (workspace.py) from the workspace settings; read by the runtime, the launch tool, and the memory tools. Exported by vidbyte/agents/infinite/__init__.py, vidbyte/agents/__init__.py, and the root vidbyte package.
+PURPOSE: Defines the two public configuration objects of InfiniteMemoryAgent: InfiniteWorkspaceSettings, the one memory workspace folder with its memory preset, seed files, and caps; and InfiniteMemoryAgentSettings, the model, the prompt, the project folder, the developer's extra tools, the loop limits, and the delegation caps shared by every agent in the tree, plus the developer's on_event sink for run events.
+ROLE IN CODEBASE: Built by the developer and passed to InfiniteMemoryAgent (vidbyte/agents/infinite/agent.py), which builds InfiniteWorkspace (workspace.py) from the workspace settings; read by the runtime, the launch tool, and the memory tools; the runtime hands on_event to InfiniteEvents (events.py), which calls it once per run event. Exported by vidbyte/agents/infinite/__init__.py, vidbyte/agents/__init__.py, and the root vidbyte package.
 ARCHITECTURE NOTE: Settings objects live in the owning agent's settings.py (AGENTS.md Placement Rules, exception 1). Every check runs in __post_init__, so a constructed object is always valid and nothing downstream checks it again. Each field check is one call to the SDK's canonical RecordFieldValidator or RecordFieldConverter (vidbyte/lib/dataclasses/validation.py), the model check is ProviderModelRegistry's, and the key match is ProviderKeyMatcher's; only the rules that tie two fields together or name the reserved tools are written here. Paths are stored resolved and absolute, so a later change of the working directory never moves the project or the memory. Checking settings never touches the disk beyond reading: the workspace folder is created by InfiniteWorkspace, never here.
-FUNCTION INVENTORY: InfiniteWorkspaceSettings.__post_init__ and InfiniteMemoryAgentSettings.__post_init__ are narrated main functions with no private helpers, and InfiniteMemoryAgentSettings.delegation_limits builds the DelegationLimits record for the middleware: RecordFieldConverter.to_folder resolves root and root_dir, to_enum accepts the preset and the provider or their values, to_files checks and resolves the seed files, to_tuple and Tools(...) check the developer's tools, and RecordFieldValidator checks the text fields and the caps.
+FUNCTION INVENTORY: InfiniteWorkspaceSettings.__post_init__ and InfiniteMemoryAgentSettings.__post_init__ are narrated main functions with no private helpers, and InfiniteMemoryAgentSettings.delegation_limits builds the DelegationLimits record for the middleware: RecordFieldConverter.to_folder resolves root and root_dir, to_enum accepts the preset and the provider or their values, to_files checks and resolves the seed files, to_tuple and Tools(...) check the developer's tools, and RecordFieldValidator checks the text fields, the caps, and the on_event sink (require_callable, synchronous only).
 COMMON MODIFICATION PATTERNS: A new setting adds one field, one RecordFieldValidator or RecordFieldConverter call in its __post_init__ (a check they lack becomes a new option there, never a helper here), a named default in vidbyte/lib/constants/infinite.py, and one row in the folder README's limits table.
 WHAT NOT TO DO IN THIS FILE: 1. Do not create the workspace folder or any file here; a refused setting must leave the disk unchanged. 2. Do not put api_keys or vidbyte_api_key in an error message or in repr. 3. Do not accept a bare string where a sequence is expected; it would split into characters.
-KNOWN EDGE CASES: root="" and root_dir="" are refused even though Path("") is the current folder. A seed file is checked to exist now and copied later, at agent construction. Two seed files with the same file name are refused, because both would land at seed/<name>. True is refused for every cap, although Python counts it as an int. A refusal names the field as InfiniteWorkspaceSettings.<field> or InfiniteMemoryAgentSettings.<field>, in the message and in details["field"].
-RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 8.5 and 9.3); vidbyte/agents/infinite/README.md
-TESTS: tests/features/infinite_memory_agent/test_infinite_memory_contract.py
+KNOWN EDGE CASES: on_event must be None or a synchronous callable: an async function, a partial of one, or an object with an async __call__ is refused, because events are delivered from code that cannot await; its default None needs no named constant. root="" and root_dir="" are refused even though Path("") is the current folder. A seed file is checked to exist now and copied later, at agent construction. Two seed files with the same file name are refused, because both would land at seed/<name>. True is refused for every cap, although Python counts it as an int. A refusal names the field as InfiniteWorkspaceSettings.<field> or InfiniteMemoryAgentSettings.<field>, in the message and in details["field"].
+RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 8.5 and 9.3); docs/spec/infinite-memory-events/spec.md (sections 8.5 and 9.2); vidbyte/agents/infinite/README.md
+TESTS: tests/features/infinite_memory_agent/test_infinite_memory_contract.py; tests/features/infinite_memory_agent/test_infinite_memory_events_records.py (on_event)
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
@@ -38,6 +38,7 @@ from vidbyte.lib.constants.infinite import (
     INFINITE_TOOL_RESULT_MAX_CHARS,
 )
 from vidbyte.lib.dataclasses.agents import ProviderKeys
+from vidbyte.lib.dataclasses.infinite import InfiniteEvent
 from vidbyte.lib.dataclasses.middleware import DelegationLimits
 from vidbyte.lib.dataclasses.security import PermissionPolicy
 from vidbyte.lib.dataclasses.validation import (
@@ -101,7 +102,7 @@ class InfiniteWorkspaceSettings:
 
 @dataclass(frozen=True, slots=True)
 class InfiniteMemoryAgentSettings:
-    """Everything every agent in an InfiniteMemory tree shares: the model, the prompt, the project folder, the workspace, the extra tools, the loop limits, and the delegation caps.
+    """Everything every agent in an InfiniteMemory tree shares: the model, the prompt, the project folder, the workspace, the extra tools, the loop limits, the delegation caps, and the run event sink.
 
     root_dir keeps its raw type until __post_init__ checks it, because
     Path("") is the current folder. After __post_init__ it is a resolved
@@ -132,6 +133,7 @@ class InfiniteMemoryAgentSettings:
     max_agents: int = INFINITE_DEFAULT_MAX_AGENTS
     vidbyte_api_key: str | None = field(default=None, repr=False)
     model_mode: TextModelMode = TextModelMode.AUTO
+    on_event: Callable[[InfiniteEvent], None] | None = None
 
     def __post_init__(self) -> None:
         # @intent one-closed-surface-for-every-agent
@@ -198,6 +200,13 @@ class InfiniteMemoryAgentSettings:
         # every agent in the tree.
         for name, minimum in (("max_depth", INFINITE_MIN_CAP), ("max_parallel", INFINITE_MIN_CAP), ("max_agents", INFINITE_MIN_AGENTS)):
             RecordFieldValidator.require_int(getattr(self, name), f"InfiniteMemoryAgentSettings.{name}", minimum=minimum)
+
+        # @intent the-event-sink-is-synchronous
+        # Events are delivered inline on the loop thread, partly from
+        # code that cannot await, so the sink is None or a plain
+        # function. An async one would only make coroutines nobody
+        # awaits and lose every event without a word.
+        RecordFieldValidator.require_callable(self.on_event, "InfiniteMemoryAgentSettings.on_event", optional=True, synchronous=True)
 
     @property
     def delegation_limits(self) -> DelegationLimits:

@@ -89,7 +89,8 @@ EXPECTED_LEAVES = (
     "drop_entry_id_description",
 )
 
-# The twelve new modules of spec section 8.4 (the folder's 8 plus toolset, enums, constants, records).
+# The fourteen new modules: the twelve of spec section 8.4 (the folder's 8 plus toolset, enums, constants, records),
+# plus the events writer and the handoff of docs/spec/infinite-memory-events/spec.md section 12.3 row 22.
 BUDGET_MODULES = (
     "vidbyte/agents/infinite/__init__.py",
     "vidbyte/agents/infinite/agent.py",
@@ -103,6 +104,8 @@ BUDGET_MODULES = (
     "vidbyte/lib/enums/infinite.py",
     "vidbyte/lib/constants/infinite.py",
     "vidbyte/lib/dataclasses/infinite.py",
+    "vidbyte/agents/infinite/events.py",
+    "vidbyte/context/handoff/infinite.py",
 )
 
 # Words that would only appear in a coding-only or single-writer rule (INV-33).
@@ -469,14 +472,21 @@ def _lines_after_header(path: Path) -> int:
 
 
 def test_new_modules_stay_inside_the_complexity_budget() -> None:
-    """NFR-1, section 8.4: the agent package has at most its 8 modules, and each of the 12 new modules is at most 400 lines after its header."""
+    """NFR-1, section 8.4: the agent package has at most its 9 modules, and each of the 14 new modules is at most 400 lines after its header, except launch.py (410) and the lib records (620).
+
+    The infinite-memory-events spec (docs/spec/infinite-memory-events/spec.md section 12.3 row 22, D-1, D-2) adds the
+    events writer as the package's ninth module and the handoff as a new module, and raises the two caps because launch
+    gains the task-ordered event loop and the lib records gain the event envelope and its 13 details records.
+    """
+    caps = {"vidbyte/agents/infinite/launch.py": 410, "vidbyte/lib/dataclasses/infinite.py": 620}
     package = REPO_ROOT / "vidbyte" / "agents" / "infinite"
     assert package.is_dir(), "vidbyte/agents/infinite does not exist"
-    assert len(list(package.glob("*.py"))) <= 8
+    assert len(list(package.glob("*.py"))) <= 9
     for relative in BUDGET_MODULES:
         path = REPO_ROOT / relative
+        cap = caps.get(relative, 400)
         assert path.is_file(), f"{relative} is missing"
-        assert _lines_after_header(path) <= 400, f"{relative} is over 400 lines after its header"
+        assert _lines_after_header(path) <= cap, f"{relative} is over {cap} lines after its header"
 
 
 def test_entries_written_by_hand_in_the_documented_shape_are_accepted(tmp_path: Path) -> None:

@@ -1,23 +1,26 @@
 """FILE: vidbyte/lib/dataclasses/validation.py
 
-PURPOSE: Defines RecordFieldValidator, the one canonical field validator for validated records and settings (text, optional text, tuples of text items, positive finite numbers, bounded ints, strict bools, enum members, argv tuples and absolute directories), and RecordFieldConverter, the canonical conversions and checks records apply beside it (tuples, read-only mappings, enum members, paths, resolved folders, lists of existing files and plain instance checks).
-ROLE IN CODEBASE: Called from the __post_init__ of the records in vidbyte/lib/dataclasses/native_threads.py, process.py, infinite.py and middleware.py (DelegationLimits), of InfiniteWorkspaceSettings and InfiniteMemoryAgentSettings (vidbyte/agents/infinite/settings.py), by DelegationLimitsMiddleware for its depth, and, through accepts_text, by the output readers GrokWire, OpencodeWire, MuseWire and MuseExecOutput under vidbyte/harnesses/native/ to check a vendor's thread id.
+PURPOSE: Defines RecordFieldValidator, the one canonical field validator for validated records and settings (text, optional text, tuples of text items, positive finite numbers or numbers that may be zero, bounded ints, strict bools, enum members, argv tuples, absolute directories, UTC datetimes at a resolution, and callables that may be required to be synchronous), and RecordFieldConverter, the canonical conversions and checks records apply beside it (tuples, read-only mappings, enum members, paths, resolved folders, lists of existing files and plain instance checks).
+ROLE IN CODEBASE: Called from the __post_init__ of the records in vidbyte/lib/dataclasses/native_threads.py, process.py, infinite.py and middleware.py (DelegationLimits), of InfiniteWorkspaceSettings and InfiniteMemoryAgentSettings (vidbyte/agents/infinite/settings.py, whose on_event sink goes through require_callable), of the InfiniteMemory event records (InfiniteEvent.at through require_utc_datetime, cost_usd through require_number with allow_zero), by DelegationLimitsMiddleware for its depth, and, through accepts_text, by the output readers GrokWire, OpencodeWire, MuseWire and MuseExecOutput under vidbyte/harnesses/native/ to check a vendor's thread id.
 ARCHITECTURE NOTE: Two classes of static methods, each taking the checked value first and the field name second, returning the checked or converted value or raising ConfigurationError. The checked variable is always named value, so the bool guards here are the single owner lint rules C002, C006, C007 and C008 point at. Messages name the field and the expected type or range, and quote a value only when it is a short, non-secret scalar or text. Every ConfigurationError also carries details["field"], so a caller can name the bad argument without reading the message text.
-FUNCTION INVENTORY: require_text (an optional character cap, pattern and one-line rule), accepts_text (require_text's rule as a bool), require_optional_text, require_text_items (a tuple of texts, each under require_text's rule), require_command_line_units (a value's quoted Windows command-line length), require_number, require_int (maximum optional), require_bool, require_enum, require_argv, require_directory; _text_problem words what a text value fails, and _received renders the received value safely for a message. RecordFieldConverter: to_tuple, to_mapping, to_enum (a member or its exact value string), to_path (a str or os.PathLike, unchecked), to_folder (resolved, never a file, optionally existing), to_files (existing files, resolved, optionally with distinct names), require_instance.
+FUNCTION INVENTORY: require_text (an optional character cap, pattern and one-line rule), accepts_text (require_text's rule as a bool), require_optional_text, require_text_items (a tuple of texts, each under require_text's rule), require_command_line_units (a value's quoted Windows command-line length), require_number (allow_zero admits 0), require_int (maximum optional), require_bool, require_enum, require_argv, require_directory, require_utc_datetime (a zero UTC offset and a microsecond resolution), require_callable (optional admits None; synchronous refuses async callables); _text_problem words what a text value fails, and _received renders the received value safely for a message. RecordFieldConverter: to_tuple, to_mapping, to_enum (a member or its exact value string), to_path (a str or os.PathLike, unchecked), to_folder (resolved, never a file, optionally existing), to_files (existing files, resolved, optionally with distinct names), require_instance.
 COMMON MODIFICATION PATTERNS: Add a new check as one more static method with value first and field_name second, and call it from a record's __post_init__; never copy a check into a record.
 WHAT NOT TO DO IN THIS FILE: 1. Do not convert values silently; to_path only wraps a path in Path and never checks or resolves it. 2. Do not quote mapping values or long text in a message; they can hold secrets. 3. Do not import from a layer above vidbyte.lib.
-KNOWN EDGE CASES: bool is an int subclass, so every numeric check refuses bool first. A field whose last name segment reads as a credential (password, token, secret, api_key) is never quoted, whatever its length. require_argv refuses a list on purpose, because argv fields must be immutable tuples. require_directory must run on the path as given, before Path.resolve(), or a relative path would pass; to_folder and to_files are the opposite choice, for settings that accept a relative path and store it resolved against the working directory at construction. require_text_items refuses a list, as require_argv does, so a frozen record cannot be changed through its field.
+KNOWN EDGE CASES: bool is an int subclass, so every numeric check refuses bool first. A field whose last name segment reads as a credential (password, token, secret, api_key) is never quoted, whatever its length. require_argv refuses a list on purpose, because argv fields must be immutable tuples. require_directory must run on the path as given, before Path.resolve(), or a relative path would pass; to_folder and to_files are the opposite choice, for settings that accept a relative path and store it resolved against the working directory at construction. require_text_items refuses a list, as require_argv does, so a frozen record cannot be changed through its field. require_utc_datetime accepts any zone whose offset is zero, not only timezone.utc. require_callable with synchronous relies on inspect.iscoroutinefunction, which sees through functools.partial and bound methods; an object's async __call__ is checked on its type, for the value and for every partial layer inside it, so a partial subclass with its own async __call__ is refused whether it is passed alone or inside another partial.
 RELATED DOCS: vidbyte/lib/README.md; lint/rules/c008_shared_validator_owner.py
-TESTS: tests/features/harness_threads/test_harness_threads_records.py; tests/test_record_field_validation.py (the options added for InfiniteMemory); tests/features/infinite_memory_agent/test_infinite_memory_contract.py
+TESTS: tests/features/harness_threads/test_harness_threads_records.py; tests/test_record_field_validation.py (the options added for InfiniteMemory); tests/test_record_field_validation_event_options.py (allow_zero, require_utc_datetime, require_callable); tests/features/infinite_memory_agent/test_infinite_memory_contract.py
 """
 
 from __future__ import annotations
 
+import functools
+import inspect
 import math
 import os
 import re
 import subprocess
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
 from types import MappingProxyType
@@ -90,11 +93,13 @@ class RecordFieldValidator:
         return value
 
     @staticmethod
-    def require_number(value: Any, field_name: str, *, maximum: float) -> float:
-        # An int or float, not bool, finite, greater than 0
+    def require_number(value: Any, field_name: str, *, maximum: float, allow_zero: bool = False) -> float:
+        # An int or float, not bool, finite, greater than 0 (or 0
+        # itself with allow_zero, for an amount that may be nothing)
         # and at most maximum.
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0 or value > maximum:
-            raise ConfigurationError(f"{field_name} must be a finite number greater than 0 and at most {maximum}; got {RecordFieldValidator._received(value, field_name)}.", details={"field": field_name})
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0 or (value == 0 and not allow_zero) or value > maximum:
+            lower = "of at least 0" if allow_zero else "greater than 0"
+            raise ConfigurationError(f"{field_name} must be a finite number {lower} and at most {maximum}; got {RecordFieldValidator._received(value, field_name)}.", details={"field": field_name})
         return value
 
     @staticmethod
@@ -132,6 +137,39 @@ class RecordFieldValidator:
         # A Path that is absolute and an existing directory.
         if not isinstance(value, Path) or not value.is_absolute() or not value.is_dir():
             raise ConfigurationError(f"{field_name} must be an absolute path to an existing directory; got a value of type {type(value).__name__} that is not one.", details={"field": field_name})
+        return value
+
+    @staticmethod
+    def require_utc_datetime(value: Any, field_name: str, *, resolution_microseconds: int = 1) -> datetime:
+        # @intent utc-datetimes-have-a-zero-offset-and-a-resolution
+        # A timezone-aware datetime whose UTC offset is zero, in any
+        # zone that has one, and whose microseconds are a multiple of
+        # resolution_microseconds, so a stamp reads the same wherever
+        # it is serialized and never claims more precision than given.
+        offset = value.utcoffset() if isinstance(value, datetime) else None
+        if offset is None or offset != timedelta() or value.microsecond % resolution_microseconds:
+            raise ConfigurationError(f"{field_name} must be a timezone-aware UTC datetime whose microseconds are a multiple of {resolution_microseconds}; got {RecordFieldValidator._received(value, field_name)}.", details={"field": field_name})
+        return value
+
+    @staticmethod
+    def require_callable(value: Any, field_name: str, *, optional: bool = False, synchronous: bool = False) -> Callable[..., object] | None:
+        # @intent synchronous-callables-refuse-every-async-form
+        # A callable, or None when optional. With synchronous, an async
+        # function, a partial or bound method of one, or an object whose
+        # __call__ is async is refused: calling it only makes a
+        # coroutine, which a synchronous caller would never await.
+        # Each partial layer is checked as well as what it wraps, so a
+        # partial around such an object, or a partial subclass whose
+        # own __call__ is async, is refused too.
+        if value is None and optional:
+            return None
+        if not callable(value):
+            raise ConfigurationError(f"{field_name} must be a callable{' or None' if optional else ''}; got {RecordFieldValidator._received(value, field_name)}.", details={"field": field_name})
+        layers = [value]
+        while isinstance(layers[-1], functools.partial):
+            layers.append(layers[-1].func)
+        if synchronous and any(inspect.iscoroutinefunction(layer) or inspect.iscoroutinefunction(type(layer).__call__) for layer in layers):
+            raise ConfigurationError(f"{field_name} must be a plain synchronous function, for example one that only puts its argument on a queue; got an async callable of type {type(value).__name__}.", details={"field": field_name})
         return value
 
     @staticmethod
