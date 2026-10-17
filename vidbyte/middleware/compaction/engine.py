@@ -27,14 +27,13 @@ from vidbyte.middleware.compaction.strategies import (
     SummarizeByTopicBlocksCompaction,
     SummarizeOldestNCompaction,
     SummarizeRangeCompaction,
-    ToolOutputSlidingWindowCompaction,
     ToolResultClearingWithExclusionsCompaction,
     TrimToTokenBudgetCompaction,
-    TrimWithProviderBoundariesCompaction,
     TruncateToolResultMessagesCompaction,
     _head_tail_text,
     _scrub_bloat_text,
 )
+from vidbyte.middleware.compaction.windows import ToolOutputSlidingWindowCompaction, TrimWithProviderBoundariesCompaction
 
 
 class ContextCompactionEngine:
@@ -195,7 +194,8 @@ class ContextCompactionEngine:
         if mode is CompactionMode.TRIM_WITH_PROVIDER_BOUNDARIES:
             max_messages = options.get("max_messages")
             max_tokens = options.get("max_tokens")
-            return TrimWithProviderBoundariesCompaction(None if max_messages is None else int(max_messages), None if max_tokens is None else int(max_tokens), options.get("token_counter"))
+            # The low watermark goes through as given, so the strategy's own check refuses a bool, a float, or a negative number.
+            return TrimWithProviderBoundariesCompaction(None if max_messages is None else int(max_messages), None if max_tokens is None else int(max_tokens), options.get("token_counter"), low_watermark_tokens=options.get("low_watermark_tokens"))
         if mode is CompactionMode.DELETE_MESSAGES_BY_ID_OR_RANGE:
             start = options.get("start")
             end = options.get("end")
@@ -203,7 +203,7 @@ class ContextCompactionEngine:
         if mode is CompactionMode.TOOL_OUTPUT_SLIDING_WINDOW:
             raw_mode = options.get("window_mode", CompactionMode.TRUNCATE_TOOL_RESULTS)
             window_mode = raw_mode if isinstance(raw_mode, CompactionMode) else CompactionMode(str(raw_mode))
-            return ToolOutputSlidingWindowCompaction(int(options.get("keep_recent", 2)), window_mode, int(options.get("max_chars", 600)), str(options.get("placeholder", "[older tool result cleared by compaction]")), int(options.get("head_chars", 400)), int(options.get("tail_chars", 200)))
+            return ToolOutputSlidingWindowCompaction(int(options.get("keep_recent", 2)), window_mode, int(options.get("max_chars", 600)), str(options.get("placeholder", "[older tool result cleared by compaction]")), int(options.get("head_chars", 400)), int(options.get("tail_chars", 200)), tools=self._string_tuple(options.get("tools", ())))
         if mode is CompactionMode.TOOL_RESULT_CLEARING_WITH_EXCLUSIONS:
             return ToolResultClearingWithExclusionsCompaction(self._string_tuple(options.get("exclude_tools", ())), str(options.get("placeholder", "[tool result cleared by compaction]")))
         if mode is CompactionMode.HEAD_TAIL_TOOL_PREVIEW:
