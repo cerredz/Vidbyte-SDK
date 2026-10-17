@@ -490,7 +490,7 @@ def test_a_generator_that_raises_has_no_generator_finished_and_its_entries_drop_
 
 
 def test_two_spellings_of_one_note_are_one_relative_path_in_events_and_the_handoff(tmp_path: Path) -> None:
-    """AC-34, EC-16, D-23, INV-28: creating ./notes/a.md and appending to notes/a.md give two file_written events for notes/a.md, subagent_finished.files == ("notes/a.md",), a card that keeps both spellings, and one Files line with the description in the handoff."""
+    """AC-34, EC-16, D-23, INV-28: creating ./notes/a.md and appending to notes/a.md give two file_written events for notes/a.md, subagent_finished.files == ("notes/a.md",), a card whose files list that one relative path (main's #1169), and one Files line with the description in the handoff."""
     from vidbyte.context.handoff.infinite import InfiniteHandoff
     from vidbyte.lib.enums.infinite import InfiniteFileChange
 
@@ -514,7 +514,7 @@ def test_two_spellings_of_one_note_are_one_relative_path_in_events_and_the_hando
     written = [event.details for event in of_kind(seen, "file_written")]
     assert [(item.path, item.change) for item in written] == [("notes/a.md", InfiniteFileChange.CREATED), ("notes/a.md", InfiniteFileChange.APPENDED)]
     assert one(seen, "subagent_finished").details.files == ("notes/a.md",)
-    assert finished_cards(workspace_root(tmp_path))[pair_key(PAIR)]["files"] == ["./notes/a.md", "notes/a.md"]
+    assert finished_cards(workspace_root(tmp_path))[pair_key(PAIR)]["files"] == ["notes/a.md"]
     handoff = agent.run_handoff(answer.metadata["infinite_run_id"])
     assert handoff.sections["Files"] == InfiniteHandoff.FILE_LINE.format(path="notes/a.md", description=description)
     assert_portable(seen)
