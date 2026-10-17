@@ -205,7 +205,7 @@ Local gates ran at code head `335dd847` (verify-log Iteration 2); the later comm
 | Semgrep 1.170.1 | `semgrep --test …` then `semgrep scan --error --config .semgrep/typed-mapping-boundary-policy.yml vidbyte` | `1/1: ✓ All tests passed` · `Findings: 0 (0 blocking)` |
 | Related suites | `pytest tests/features/infinite_memory_agent tests/test_compaction_windows.py … tests/test_anthropic_cache_breakpoints.py` | `348 passed in 8.84s` |
 | S6: AC-1 by hand | spec §4 snippet from an empty scratch folder | exact match with §4 |
-| S6: touched test files (Windows) | `pytest` over the 11 new and 8 edited test files and the infinite feature folder | `329 passed, 11 skipped in 22.62s`; the 11 skips are POSIX-only bash process tests, which Linux CI runs |
+| S6: touched test files (Windows) | `pytest` over the 10 new test files, the 7 edited ones, and the rest of the infinite feature folder | `329 passed, 11 skipped in 22.62s`; the 11 skips are POSIX-only bash process tests, which Linux CI runs |
 | Remote `ci.yml` | run 39023135090 at `335dd847` | Source / Python 3.11 `6401 passed, 200 skipped` · Source / Python 3.12 `6401 passed, 200 skipped` · Package `CI passed.` (3/3 jobs success) |
 | Remote `static-policy.yml` | run 39023136622 at `335dd847` | 1/1 job success · `Findings: 0 (0 blocking)` |
 
@@ -234,7 +234,7 @@ Minors fixed: R-12 `3ec30b9e`, R-13 `1fbe3ede` and `8da92fb9`, R-14 `468303dc`, 
 ## Deviations from the spec
 Each item says what the spec said, what the code does, and why. Most come from the implementation (S3); the rest come from the review repairs (S5). Both lists are also recorded in spec §17.
 
-- **`FullTextIndex` export (§12.3 row 13).** The spec said to re-export it from `vidbyte.lib.util`. The code makes it a lazy export: `__getattr__` imports `vidbyte.lib.util.fulltext` by its literal name. An eager import made `import vidbyte` fail in a cycle (`validation` → `lib.util` → `fulltext` → `code_search` → `validation`). A first fix used `importlib.import_module`, which lint rule C003 rejects on a non-literal name.
+- **`FullTextIndex` export (§12.3 row 13).** The spec said to re-export it from `vidbyte.lib.util`. The code makes it a lazy export: `__getattr__` imports `vidbyte.lib.util.fulltext` by its literal name. An eager import made `import vidbyte` fail in a cycle (`validation` → `lib.util` → `fulltext` → `code_search` → `validation`). The R-13 repair first used `importlib.import_module(_LAZY_EXPORTS[name])`, which lint rule C003 rejects; the final code imports the literal module and returns the attribute by name, so a listed name the module lacks raises instead of resolving to `FullTextIndex`.
 - **`FullTextIndex.search` size checks (row 12).** The spec showed an inline guard. The code uses `RecordFieldValidator.require_int` and re-raises `ValueError`, with two new constants, `FULLTEXT_MIN_HITS` and `FULLTEXT_SNIPPET_MIN_TOKENS`. The inline guard was a new C002 finding.
 - **Read window local name (rows 1, 3).** The local variable is `window`, not `limit`, because a local named `limit` pulled existing literals into A007.
 - **Trim watermark check (row 7).** The middleware builds the trim for every mode (`None` passes), so `_validate_options` stays within C901.
@@ -268,11 +268,11 @@ Each item says what the spec said, what the code does, and why. Most come from t
 - R-26 (existed before this PR): an in-root link to a bookkeeping file, such as one under `.runs/`, is indexed under the target's name. Grep's walk does the same.
 - R-28: on Windows, `os.scandir` reports a stale size while another handle holds a file open for writing. Lines appended by such a writer are missed until it closes. This is the one known INV-8.4 gap. **Owner decision:** use `os.stat` per note (about 31 ms per warm search at 1,900 notes), or document the gap beside EC-8.5.
 - R-RR2-1: the `search_memory.py:9` header should name the byte-cap window. The comment at `:121-123` says "reads it again" where it should say "tries it again", because a file whose name UTF-8 cannot encode is never read.
-- R-RR2-2 (existed before this PR): a deeply nested `entries.jsonl` line raises `RecursionError`, which `_entry_rows` does not catch (`search_memory.py:220`), so every search fails until the line is removed. `workspace.py` has the same gap where it parses entries.
+- R-RR2-2 (existed before this PR): a deeply nested `entries.jsonl` line raises `RecursionError`, which `_entry_rows` does not catch (`search_memory.py:220`), so every search fails until the line is removed. `workspace.py:271` has the same gap where it parses entries (main's `workspace.py:254`).
 
 **Known limitations and next steps**
 - Run with a real key to confirm the cache marks pay off: `cache_read_input_tokens` should be above 0 from the third root call on, direct and through the gateway. The tests prove the body shape and the gateway rule, not the provider's billing.
-- The `harness_threads` surface tests fail locally on `main` itself (`167 == 120`), and they fail for any branch that touches `vidbyte/tools/` or the root exports. They need rebasing on main's counts, or scoping to their own branch.
+- The `harness_threads` surface tests fail locally on `main` itself (`167 == 120`), and they fail for any branch that touches `vidbyte/tools/` or the root exports. They need updating to main's counts, or scoping to their own branch.
 - `main`'s lint baseline is stale, so the eight IMPROVED verdicts above should be ratcheted in a PR of their own.
 - Whether to make DELEGATED recall the default should be decided from real-key traces: do root searches still take 2 or more calls after `search_memory`?
 
