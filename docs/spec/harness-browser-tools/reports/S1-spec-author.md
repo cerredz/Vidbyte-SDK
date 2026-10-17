@@ -198,3 +198,33 @@ Q-15 now lists these prerequisites and the posture, so the user can decide with 
 - The `(?i)` grammar pattern in `BROWSER_TOOL_STRING_PATTERN`: it is the first case-insensitive pattern run through `accepts_text`. An implementer may prefer to lower-case the item before checking it.
 
 **Counts:** G 5, NG 14, INV 18, AC 33, EC 45, FR 19, NFR 9, D 28, T 6, W 13, A 19, Q 18 (none blocking; Q-18 resolved). §12.3 still has 37 rows and 12 Add rows. The only undefined ID is INV-20, an external reference to #1036.
+
+## Addendum: revision r4 (aligned with the S2 tests; not a review round)
+
+Commit b125e64b (spec.md only). Frontmatter: `revision: 4`; `status: approved` is unchanged. Nothing about the architecture or behaviour changed. I only wrote down choices the S2 tests made where the spec said nothing (S2 report, "Spec defects and ambiguities", items 1 to 8).
+
+**What I read (read-only):**
+- `conftest.py`: `check_browser_error` asserts `error.next_step == NATIVE_THREAD_NEXT_STEPS[code]`, and checks the message order: function, code, label, workspace, thread id, observations, vendor text, cause, next step.
+- The AC-18, AC-19 and EC-12 tests: each looks for the situation detail (`narrow|fewer`, `jina`/`parallel`, the folder) anywhere in `str(error)`.
+- The registry test pins Playwright's exact `core` set, the count in each group and the 41-tool union. It pins only the trailing entry parts.
+- The surface test orders `BROWSER_FUNCTIONS` harness-major.
+- The EC-14 and EC-22 tests patch `Path.home` and `NATIVE_PS_PATHS`.
+- The Muse AC-12 test passes no thread id.
+- `hostkit/errors.py`: `failure` already prints the observation, built from its detail argument, before the cause and the next step.
+
+**Gap 2 decision (D-29):**
+- Each code keeps exactly one cause text and one next-step text, as FR-16, INV-6 and the #1036 tables already said.
+- The guidance for each situation (the budget, the tools that WSL mode can mount, the broken folder) goes in the observation.
+- It is the only reading that satisfies all three tests: a folder path cannot sit in a fixed next-step text, and the tests require the next step to equal the table's text.
+
+**Tests against decisions the spec made:** I found none. I checked:
+- the contract test's pinned names, constants, record fields and allowed sibling imports (threads → launcher is allowed, as D-27 implies);
+- the bindings in the test plan: the Grok agent body, the key routes and the children rules;
+- the AC-27 and AC-18 assertions.
+
+This was not an exhaustive audit of all 177 tests.
+
+**Counts:**
+- IDs: G 5, NG 14, INV 18, AC 33, EC 45, FR 19, NFR 9, D 29, T 6, W 13, A 19, Q 18.
+- §12.3 still has 37 rows, 12 of them Add rows.
+- The §8.4 budget is unchanged: 12 files and 34 classes.
