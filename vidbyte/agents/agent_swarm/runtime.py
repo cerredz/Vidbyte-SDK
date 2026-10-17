@@ -74,6 +74,9 @@ class AgentSwarmRuntime:
         if self._ran:
             raise ConfigurationError("This AgentSwarmRuntime has already run its swarm; AgentSwarm builds a fresh runtime for every arun.", details={"field": "arun"})
         self._ran = True
+        # Start the event clock now, so every event's time counts from
+        # the start of the run, not from when this runtime was built.
+        self._events = AgentSwarmEvents(self._settings.on_event)
 
         # Build a fresh agent for every member, each with an empty
         # conversation, the swarm tools, and the swarm prompt.
