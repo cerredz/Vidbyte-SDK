@@ -298,3 +298,65 @@ Small fixes made during the check:
 **Least sure after r3:** A-1, A-4, A-5 and A-8 stand as after r2. A-1 (Grok `PLAN` run headless) has the widest blast radius, and the backstop contains it. Also, a caller who logs `repr` of a record can show a key that a model printed. That follows from R-12 and is stated in T-3 and in the README bullet that row 26 requires, but it may surprise callers. Finally, the win32 bisection boundary noted after r2 is still unproven by test.
 
 **Git state:** one commit for r3 holds the spec and this addendum.
+
+## 12. Addendum: revision r4 (S2 test-author findings, not a review round)
+
+**Input.** The orchestrator relayed S2's defect S2-1, a Blocker for AC-23. It also asked me to check the test plan's "Interpretations the tests encode" against the spec. I read only the test plan's "Notes for the implementer" section, not the test code or the S2 report. The review cap stays at 2 of 2. The spec moves from `approved` to `tests-written`, revision 4. Worktree HEAD before the edit was b0f0a531, and the tree was clean.
+
+**S2-1: which primitive.**
+- The ban. `lint/ruff.toml:8` bans `asyncio.Lock` (TID251, "Use the SDK-owned concurrency boundary."), and `lint/baseline.json:66` holds S039 at 5. `py -3.11 -m ruff check pyproject.toml vidbyte --config lint/ruff.toml --select TID251 --no-cache` finds exactly five uses today: `vidbyte/harnesses/stores/memory.py:41`, `vidbyte/middleware/builtins/circuit_breaker.py:63`, and `vidbyte/tools/mcp/transport.py:139`, `:140` and `:144`. A sixth use fails `python lint/run.py`, and AC-23 forbids raising the baseline. The rule's repair text (`lint/rules/s039_banned_api_policy.py:35–39`) says to use the approved SDK abstraction, or to add the behavior to the boundary that owns it.
+- No such boundary exists. Outside `docs/`, the phrase appears only in `lint/ruff.toml`, and `vidbyte/` has no lock, mutex or keyed-lock class. `vidbyte/agents/skills/loader.py:5` also records the ban.
+- The SDK's own answer is a one-slot `Semaphore` sized by a named constant: `vidbyte/agents/codex/agent.py:82–86` ("A Semaphore rather than a Lock because the SDK bans asyncio.Lock …"), with `CODEX_MAX_CONCURRENT_TURNS = 1` (`vidbyte/lib/constants/codex.py:226`). `asyncio.Semaphore` also bounds concurrency in three other places: `vidbyte/agents/aggregation.py:87`, `vidbyte/evals/runner.py:60` and `vidbyte/paradigms/context_minimal_fanout/paradigm.py:113`.
+- Chosen: `asyncio.Semaphore(native_compose.COMPOSE_GROK_MAX_CONCURRENT_CALLS)`, with the new constant set to 1. There is one semaphore per running loop and normcased resolved workspace, kept in the class-level `WeakValueDictionary` as before. What stays unchanged:
+  - the behavior;
+  - the class name `GrokWorkspaceLocks`;
+  - every public name;
+  - the general term "Grok lock", which INV-13 now defines.
+- r4 probes (scratch folder `scratchpad/r4probe/`):
+  - `semprobe.py` on Python 3.11.0. Two calls on one workspace did not overlap: "a" ended before "b" started. A call on a second workspace ran beside them. After a holder and a waiter were cancelled, the next call on that workspace took the semaphore at once (0.0 s).
+  - `lockprobe.py`, checked with `--config lint/ruff.toml --select TID251,RUF012`. TID251 flags `asyncio.Lock()` but not `asyncio.Semaphore(1)`. RUF012 (lint S005) flags a class-level `{}` but not a class-level `WeakValueDictionary`.
+- Spec edits:
+  - D-5: the decision, the reason with this evidence, runner-up 3 and the flips-if;
+  - row 12: the semaphore, `async with` around one step call, and the lint and precedent citations;
+  - INV-13 and the §5 node label;
+  - §8.2: a new pattern bullet;
+  - §8.5: the class line and the constant;
+  - §11: the lint files, under "Rules read";
+  - §12.4: a new checklist line;
+  - T-4.
+
+**S2-2: the eleven readings.**
+
+| # | Reading in the test plan | Spec before r4 | Disposition |
+|---|---|---|---|
+| 1 | The omitted count is measured after NUL removal | INV-18 removed NULs and keys first, but did not say what the count measures | Clarified in INV-18: the value's length after NUL removal and key replacement, minus the kept prefix's length |
+| 2 | A cut is `text[:cap]` and `files[:cap]` | INV-8 gave the caps, not which part is kept | Clarified in INV-8: the start is kept, and no marker is added |
+| 3 | `WorkspaceDiff.text` is git's raw output | INV-4 and EC-71 kept it unscrubbed, but nothing was said about stripping | Clarified in INV-8: the stdout `CliRunner` returns, unchanged apart from the cut |
+| 4 | The problem constants follow their names, and the problem for an extra member names it | §8.5 listed the constants without saying when each applies; EC-27 already names the member | Clarified in INV-19: one clause per constant |
+| 5 | An unanchored fork passed as `to_step` is refused naming `to_step` | EC-44 said "naming `thread_id`, or the argument" | Clarified in EC-44: `thread_id` from a direct call, the argument from a composite |
+| 6 | The overlay is a subset of `{GIT_INDEX_FILE}`, and `rev-parse` runs in the workspace | The §9.2 cwd column already said "workspace", and §9.3 listed only `GIT_INDEX_FILE` as set | Clarified in INV-26: no other variable is set. The cwd was already explicit |
+| 7a | `likely_cause` and `next_step` are their constants verbatim | INV-6 said "from constants" | Clarified in INV-6: verbatim |
+| 7b | "The `add` failure appends both cause texts" | INV-6: "gets the two `add` texts instead" | Not adopted, and reported as an open item |
+| 8 | `findings` and `kept` are tuples | §8.5 typed them as tuples, but never said how a JSON list becomes one | Clarified in §9.1: stored by `RecordFieldConverter.to_tuple`, which accepts a list (`EnsemblePlan.roles` too) |
+| 9 | The problem text contains `str(ValueError)` from `JsonText.decode` | INV-20 said "error messages from `JsonText`" | Clarified in INV-19, with reading 4 |
+| 10 | The selection runs before the backstop, and no snapshot follows the implementer | INV-23 already put select before backstop; NG-13 rules out a diff of the implementer's work | Clarified in INV-23 step 5: no snapshot after the implementer. The order was already explicit |
+| 11 | The refusal names `StepOutcome.result` or `StepOutcome.error` | §9.1 said refusals name `<Record>.<field>`, but this rule covers two fields | Clarified in §9.1: both set, or neither, is refused naming `StepOutcome.result`, which is one of the two names the tests accept |
+
+**Open item: reading 7b.**
+- The test plan says: "`likely_cause` and `next_step` are their constants verbatim. The `add` failure appends both cause texts."
+- INV-6 says: "when the snapshot's `add` exits non-zero, its `GIT_FAILED` gets the two `add` texts instead". EC-73 agrees: "the likely cause and next step name both causes".
+- The reading agrees with the spec if the test asserts `likely_cause == THREAD_COMPOSE_ADD_LIKELY_CAUSE` and `next_step == THREAD_COMPOSE_ADD_NEXT_STEP`, each naming both causes, with the message ending in them.
+- It contradicts INV-6 if the test expects the generic `GIT_FAILED` texts with the `add` texts appended.
+- I could not read the test, so this part of the spec is unchanged.
+
+The section's other notes agree with the spec and need no change. They cover the seams, constants read at call time, the `tempfile` folders with the `index` file name, and prompt rendering, and match §8.5, §9.2, §9.3, §13, INV-17 and INV-18.
+
+**Self-check after r4:**
+- headings: 18 `## §` headings, the same set as r3, and §0.1 still matches request.md lines 21–31;
+- tables: 20, with 0 malformed rows;
+- references: every ID resolves (INV 36, AC 23, EC 78, FR 18, NFR 11, D 28, T 8, W 13, NG 13, A 11, Q 11);
+- work breakdown: 28 rows, 40 new and 9 modified files, 42 public names and 49 classes, all unchanged;
+- the AC table, including the Proof column S2 filled, is byte-identical (0 AC lines in the diff). Nothing under `tests/` is touched;
+- `git diff --check` is clean, the CRLF working copy is kept, and no backslash was added.
+
+**Git state:** one commit for r4 holds the spec and this addendum.
