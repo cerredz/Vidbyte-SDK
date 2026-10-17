@@ -4,7 +4,7 @@ PURPOSE: Proves the packaging promises of the CodexHost change: importing the pa
 ROLE IN CODEBASE: Packaging layer of tests/features/codex_host/ (spec AC-2, AC-36, INV-1, INV-3, INV-42, EC-1, FR-30; section 12.3 rows 2, 3, 6, 8, 9, 23, 24, 26, 27, 28). CI runs it: the SDK-blocked check needs no extra, and the one check that needs the installed SDK is gated.
 ARCHITECTURE NOTE: Import safety is checked in a fresh `python -I` interpreter, because earlier tests in this process may already have imported openai-codex; the child puts the worktree on sys.path itself, blocks openai_codex with a None entry in sys.modules when asked, and replaces shutil.which so no binary is ever resolved or run. Text files are compared after CRLF is turned into LF, which equals the committed LF blob on a core.autocrlf checkout and on Linux alike.
 COMMON MODIFICATION PATTERNS: The fixed texts below are copied from request.md section C through spec section 12.5; if request.md changes them, change them here, never by reading the files under test.
-KNOWN EDGE CASES: The marker's SHA-256 is of its 3855 LF bytes; the CRLF working copy hashes differently, so the bytes are normalized first. The enums and builtins export lists are not globally sorted, so only the spec's own ordering rules are asserted.
+KNOWN EDGE CASES: The marker's SHA-256 is of its 5261 LF bytes; the CRLF working copy hashes differently, so the bytes are normalized first. The enums and builtins export lists are not globally sorted, so only the spec's own ordering rules are asserted.
 RELATED DOCS: tests/features/codex_host/FEATURE.md; docs/spec/codex-host/spec.md sections 6.1 (INV-1, INV-42), 12.3 and 12.5; request.md section C.
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/codex_host/test_codex_host_packaging.py
 """
@@ -22,7 +22,7 @@ from tests.features.codex_host.codex_host_support import PIP_INSTALL_FRAGMENT, S
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-# request.md section C: the SHA-256 of the native marker's 3855 LF bytes (after the merge of origin/main, which made it the harness thread functions' re-export module).
+# request.md section C: the SHA-256 of the native marker's 5261 LF bytes (after the merge of origin/main, which made it the harness thread functions' re-export module).
 NATIVE_INIT_SHA256 = "6044725df61d3fdc4a9fd0ce5fd94bee306ea385293e3d802a1f2b7a1a4b950b"
 
 NATIVE_CODEX_EXPORTS = ["CodexHost", "check_codex_ready", "fork_codex_thread", "get_codex_rate_limits", "list_codex_models", "list_codex_threads", "read_codex_thread"]
