@@ -143,3 +143,65 @@ All of the following were scratchpad-only and never committed. They live under `
   - **R-5:** `models.py:172-194` handles the Vidbyte prefix and the sendable pattern. The 512-character limit lives in `TextModelConfig.credentials`, not in `find_provider_api_key`, and INV-4 cites both.
 - **Self-check:** the headings match the template, no key-shaped literals appear, and no stale wording remains. The leftover hits for "before any SDK release" and "merges only after" are A-3's description of Run A's A-7, a source quote, and a §16 quote.
 - **Still least sure of:** A-2. Its check is now executable and has an unambiguous verdict, but only the user or ops can run it.
+
+## r4 addendum
+
+A fresh S1 author wrote this revision on 2026-10-17, working in Revision mode from `review.md` (S4, NEEDS REWORK). The r1-r3 author is gone. Only `spec.md` and this report changed.
+
+### What I read
+- In full: house-style.md, spec-template.md, `review.md`, `request.md`, `spec.md` r3, `vidbyte/lib/registries/provider_keys.py` (313 lines), and `vidbyte/lib/registries/README.md` (78 lines).
+- In part: `AGENTS.md`; the S4 verifier report (§2, R-1 evidence and collision check); `pipeline.md` (decisions and niche facts); `context/wire-contract.md:1-20`; field-guide `init.md`, `comment-format.md`, and `provider-api-contracts.md`.
+- Code and test locations, each opened before I cited it:
+  - `jev.py:72-87`, `:101`, `:107-120`;
+  - `model_configs.py:88-100`, where matching runs in every mode, so INV-16 holds for `DIRECT` too;
+  - `dispatcher.py:55-83`, `:118-124`;
+  - `README.md:284-300`;
+  - `test_provider_keys_contract.py:1-12`, `:55-77`;
+  - `test_provider_keys_matching.py:134-188`, `:258-275`;
+  - `provider_keys_fixtures.py:9`, `:38-41`, `:168-174`;
+  - `test_provider_keys_property.py:1-10`, `:45-59`;
+  - `test_managed_text_acceptance.py:52-53`, `:64-72`, `:195-248`;
+  - `test_provider_keys_agents.py:425-495`;
+  - `test_provider_keys_failures.py:204-212`;
+  - `FEATURE.md:66-72`;
+  - `lint/ruff.toml`.
+
+### Independent checks
+- **Meta's pages, fetched with curl on 2026-10-17 at 12:20 UTC** into the scratchpad `s1r4_meta/`, both HTTP 200:
+  - `authentication.md:13`: "API keys start with `LLM_`, followed by a numeric ID and the secret, separated by underscores". The example has a 16-digit ID and an elided secret: three characters, five dots, three characters.
+  - `error-handling.md:70`, `:509`, and `:511` give the `LLM_{numeric_id}_{secret}` format.
+  - `grep -c 'LLM|'` returns 0 on both pages.
+- **Matcher behavior, my own in-memory script** `s1r4_meta/s1r4_shape_check.py`. It monkeypatches `KEY_FORMATS` only, builds keys by concatenation, and prints no key.
+  - At HEAD: `provider_of(LLM_)` is `None`, and eight providers accept the key unproven. `[ANT, LLM_]` with a meta primary gives M-6. With an anthropic primary plus kimi, the result is `{'anthropic', 'kimi': LLM_}`, so kimi gets the Meta key.
+  - Widened: `provider_of` gives META for both shapes, and no provider accepts any malformed `LLM_` key (word ID, dotted secret, no secret, empty secret). Kimi gets `None`. A lone `LLM_` key for a deepseek or kimi primary gives M-18.
+  - Collisions: no other prefix starts with `LLM`, and no other row fully matches either shape.
+- **Counts:** the tests make 65 references to `LLM|` fakes across 11 files (`git grep -c`, matching review.md). Outside `docs/` and `tests/`, only `README.md:292` and `provider_keys.py:7`, `:53`, and `:55` name a Meta key shape (`git grep`). No map, `llms.txt`, or skill needs an edit.
+- **Spec integrity:** my scratchpad `s1r4_meta/table_check.py` counts the cells in every table row, ignoring pipes inside code spans, and found every row consistent after one fix. The canonical merge sentence appears exactly 7 times. The regex text is byte-identical in §8.5, §12.3 row 4, and review.md. No key-shaped literal appears (`grep -E 'LLM[_|][0-9]{4,}'` finds nothing).
+
+### Triage (all recorded in §16)
+- **R-1 Blocker: accepted.** New IDs: D-8, D-9, FR-9, INV-16, INV-17, AC-16, AC-17, AC-18, EC-17, EC-18, EC-19, A-6, A-7, Q-7, NG-11, NG-12, W-5, and §12.3 rows 4 and 5. The change propagated through §1, §2, §4, §5, AC-1, AC-13, FR-7, D-1, D-7, EC-8, EC-10, §8.2, §8.3, §8.4, §8.5, §9.2, §9.4, T-1, §11, §12.1, §12.2, §12.4, §12.5, §12.6, §13, and §14.
+- **R-4: accepted.** The sentence now ends "after the pre-merge live check described in this PR has passed", in all 7 places.
+- **R-5: accepted.** INV-5, D-3, §8.4, and §9.3 cite the constants by name. `META_API_KEY` is the `ModelProvider.META` entry of `PROVIDER_API_KEY_ENV_VARS`, not a constant of its own.
+- **R-9: accepted.** Multi-agent team workers were added to EC-16, §9.4, and the PR disclosure.
+- **R-10: accepted.** The live check gains call (d), in `VIDBYTE_MANAGED`, beside R-1's call (c) through `api_keys`.
+- **R-11: recorded** in §9.2 and NG-1. `wire-contract.md` is untouched.
+- **R-2, R-3, R-6, R-7, R-8:** recorded as §13 facts. R-3 is closed by AC-17 (i). R-8 stays a follow-up.
+
+### Decisions I made, with reasons
+- **D-8: one Meta row with both prefixes and a two-branch pattern** (review.md's regex). It follows the Gemini and OpenAI rows. Runner-up: drop `LLM|`, which waits on Q-7 (default no). A second Meta row was rejected in §8.3.
+- **D-9: keep the secret class `[A-Za-z0-9_-]+`, not `[!-~]+`.** Three reasons decided it:
+  - the registries README already makes this choice when a vendor does not show its secret characters (the meta row `:55` and the gemini row `:54`);
+  - an existing test pins a dotted `LLM|` secret as unproven (`test_provider_keys_matching.py:160`), so one class for both branches keeps the rule coherent;
+  - the residual risk is fail-closed (M-6, nothing sent, and `META_API_KEY` still works), and it is caught before merge by live-check call (c). That is why A-6 exists.
+
+  The loose class would have been safer for the must-have, but it would have broken with the repo's established convention. The merge gate makes the strict choice cost nothing to users. D-9's flip: call (c) is refused while call (b) returns.
+- **The §4 snippet** keeps reading keys from the environment, so AC-1 stays literally runnable. Its comment shows both shapes as concatenations of placeholders. AC-1's Given now runs `META_API_KEY` in both shapes.
+- **INV-11 gained an r4 clause.** A documented-shape key in `api_keys` was refused in `DIRECT` at `base_commit`. It now reaches Meta, so "byte-identical to base_commit" applies only to keys that base accepted.
+
+### Budget
+New files: 0, equal to §12.3's count. Production files changed: 2 (`jev.py` and `provider_keys.py`), plus 2 docs (the root README and the registries README). No new class, constant, method, or row.
+
+### Least sure of
+- **A-6, the secret character set.** Only the live check can settle it.
+- **A-7, that no vendor issues `LLM_` keys.** This rests on the absence of evidence: the table A vendors have no sourced key format.
+- **The S2 grant.** Whether the r4 test delta fixes R-6 and R-7 is the orchestrator's call; §12.5 Follow-ups covers R-6 if it does not.
