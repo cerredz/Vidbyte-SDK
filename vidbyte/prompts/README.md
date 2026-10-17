@@ -54,6 +54,7 @@ prompt text.
 | Prompt | Key | Sub-prompts | Link |
 | --- | --- | --- | --- |
 | Actor Runtime | `actor_runtime` | planner, coder, reviewer, generator, critic, reasoner, summarization, decomposer, explorer, tradeoff, hypothesis_generator, refiner, formatter, safety, final_answer | [actor_runtime/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/actor_runtime) |
+| Agent Swarm | `agent_swarm` | system_prompt, message_tool_description, message_to_description, message_text_description, message_sent, message_unknown_recipient, message_stopped_recipient, message_blank_text, inbox, inbox_message | [agent_swarm/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agent_swarm) |
 | Agentic Engineering | `agentic_engineering` | system_prompt, error_messages, file_headers, folder_readme, function_design, intent_based_commenting, feature_test_packs | [agentic_engineering/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_engineering) |
 | Agentic Loop | `agentic_loop` | context_prompt | [agentic_loop.json](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_loop.json) |
 | Context Engineering | `context_engineering` | guideline_prompt | [context_engineering.json](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/context_engineering.json) |
@@ -96,6 +97,19 @@ summarization, decomposer, explorer, tradeoff, hypothesis_generator, refiner,
 formatter, safety, and final_answer.
 
 Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/actor_runtime>
+
+#### Agent Swarm — `agent_swarm`
+
+Instructions for AgentSwarm, where several user-defined agents share one folder
+and message each other. Every leaf is its own Markdown file in the folder, and
+`agent_swarm.json` maps each leaf key to its file. `system_prompt` follows each
+agent's own prompt and names the agent and its peers; it states no number, role,
+or workflow, because the limits are enforced in code. The three `*_description`
+leaves describe the `message` tool and its `to` and `text` parameters,
+`message_sent` and the three refusals are its replies, and `inbox` with one
+`inbox_message` per message is the user message that delivers them.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agent_swarm>
 
 #### Agentic Loop — `agentic_loop`
 
