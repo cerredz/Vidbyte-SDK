@@ -123,3 +123,50 @@ All are pushed to `feat/onboard-model-provider-skill` as a fast-forward (`b2101e
 - Pins for the R-11 and R-12 text. `reports/S5-repair-2.md` lists the exact command, the sentences and eight mutations that a pinned test should turn red.
 - Follow-ups R-E5, R-E6, R-E7 and the RR-2 observation (an unwritable checkout parent leaves stray branches), not in scope.
 - The §5 flowchart still says only "push or PR fails" for `PUBLISH_FAILED`. S6 owns it.
+
+## Iteration 3 — 2026-10-17 — agent report: reports/S5-repair-3.md
+Scratch reproducers: `<s5r3>` = `C:/Users/422mi/AppData/Local/Temp/claude/C--Users-422mi-vidbyte-repos/974874d5-52be-49ef-bbf6-f27795eaf01b/scratchpad/s5r3/`. `mut_s5r3.py` mutates the real file, runs the pack, and restores the file byte for byte. `meta_new_shape.py` runs the matcher on fakes built by concatenation.
+
+**Defects in:**
+- One coordinator-relayed lesson: #1027's Meta key rule (table F, `LLM|`) drifted from Meta's docs. It asked for (1) a verbatim, raw-fetched quote of the key-format sentence with its UTC fetch time and (2) keeping an existing rule and adding the new shape beside it, never replacing it. Each was wanted only if missing, within a budget of one spec sentence plus a §16 row.
+- Gates in: the S2 pack `63 passed`, at 5d1cc44a.
+
+**Hypotheses and attempts, in order:**
+- **Premise checked first.** The skill's own capture method was run on the live page (`<s5r3>/fetch-log.txt`: `2026-10-17T18:25:38Z https://dev.meta.ai/docs/authentication 200`). Its text form and `grep -F -b -o -f` print the sentence at offset 3218: "API keys start with LLM_ , followed by a numeric ID and the secret, separated by underscores:". The `.md` source holds the same sentence. The README's Meta quote, "API keys look like this:", is now on neither form, and it never contained the prefix.
+- **Requirement 1: already met.** A key prefix is a fact (provider-run.md :41). A summarizer is never the evidence (:43). Each page is captured raw by `curl`, with its UTC time in the fetch log (:45-51). Each quote is checked by `grep -F` with a byte offset (:59-65). C2 needs a quoted statement (:118). The Sources table (:349) and row C4 (:180) keep the quote, URL and UTC date after the evidence is deleted. Durable copies hold the date, not the time; that was kept, because the user's own requirement says "date".
+- **One gap closed.** §5 says to copy the Meta entry for a key rule, and the Meta README row is the one table F row whose quote holds no prefix. The new C4 note (:197) makes the row quote P as the Sources table does.
+- **Requirement 2: not covered before.** Nothing forbade editing another vendor's key entries. :20 allows every checklist file, and FR-11 cannot see such an edit (R-E7). The fix is a new paragraph in `## 3. Qualify` step 7 (:129):
+  - never edit or remove an existing vendor's `KEY_FORMATS`, `FORMAT_BOUND_PROVIDERS` or `RESERVED_PREFIXES` entry or the README lines that document them;
+  - an overlap stays `key-prefix-collision`;
+  - a newer shape on that vendor's own docs keeps the rule and goes to Follow-ups, with the URL, the fetch-log date and a Sources-style quote, for a separate PR that adds it beside the old one.
+
+  The Follow-ups bullet (:348) gained one sentence.
+- **Rejected:**
+  - firing on secondary sources, because the gitleaks `facebook-access-token` shape differs from Meta's by design and would add false drift to every PR;
+  - "change" instead of "edit or remove", because row C1 inserts a rule before others;
+  - a fifth FR-11 check, because it is beyond the budget (R-E7 stays a follow-up).
+- **Pins.** Every existing sentence is byte-identical. `git diff --word-diff` removes one token, the revision `8`. Ten mutations of the new text each give `63 passed`, and so does the control. Nothing pins it yet.
+- **Found, not fixed (outside this PR).** On fakes, a current-format Meta key is refused when meta is primary. With primary deepseek, other meta and that key alone, the lone-key rule binds it to DEEPSEEK.
+
+**Changes:**
+- `164ac9fd`: the skill text, with spec D-13, §16 s5r3-1, §17 r9 and `revision: 9`.
+
+It is pushed to `feat/onboard-model-provider-skill` as a fast-forward. `git diff --name-only 5d1cc44a..HEAD -- tests` is empty.
+
+**Gate matrix out:**
+| Gate | Command | Result | Final lines |
+|---|---|---|---|
+| new tests (S2 pack) | `PYTHONPATH="<worktree>" py -3.11 -m pytest tests/features/onboard_model_provider_skill -q -p no:cacheprovider` | PASS (63/63) | `63 passed in 2.80s` |
+| lint | `PYTHONIOENCODING=utf-8 py -3.11 lint/run.py` | PASS | `S064 RATCHETED: 4 known finding(s). …` / `SDK-LINT: PASS` |
+| full local gate, source | `PYTHONPATH="<worktree>" py -3.11 scripts/run_ci.py --stage source` | PASS except 1 inherited known-red test | `SDK-LINT: PASS` (log line 182) · `E       AssertionError: assert 148 == 120` · `FAILED tests/features/harness_threads/test_harness_threads_surface.py::test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes` · `1 failed, 5832 passed, 16 skipped in 120.72s (0:02:00)` · `CI failed: Command failed with exit code 1: … -m pytest` |
+| inherited proof | `git worktree add --detach …/vidbyte-sdk-r3-probe origin/main` (6f5a7310); `PYTHONPATH=<probe> py -3.11 -m pytest <node> -q -p no:cacheprovider`; `git worktree remove --force` | red on main | `E       AssertionError: assert 167 == 120` / `1 failed in 1.68s`. The harness file is unchanged against base 72a4ade1 (`diff --quiet` exit 0). The probe was removed (`remove exit 0`). |
+| MCP flake | — | not triggered | it passed inside the source stage |
+| import path | `PYTHONPATH="<worktree>" py -3.11 -c "import inspect, vidbyte; print(inspect.getfile(vidbyte))"` | PASS | `…\vidbyte-sdk-provider-onboarding-skill\vidbyte\__init__.py` |
+| full local gate, package | `py -3.11 scripts/run_ci.py --stage package` (`env -u PYTHONPATH`) | PASS | `Installed vidbyte-sdk 0.3.0 passed smoke checks.` / `CI passed.` |
+| semgrep | remote-only (dispatch) | not run, inputs unchanged | `git diff --name-only 72a4ade1..HEAD -- vidbyte .semgrep` lists nothing |
+| remote checks | `gh pr checks https://github.com/cerredz/Vidbyte-SDK/pull/1175` | none attached (CI is dispatch-only) | `no checks reported on the 'feat/onboard-model-provider-skill' branch` |
+
+**Still open:**
+- Pins for the s5r3-1 text. `reports/S5-repair-3.md` lists the four sentences and ten mutations that a pinned test should turn red.
+- R-E7 (a machine check that existing key entries are untouched) stays a follow-up.
+- The separate Meta PR: keep `LLM|` and add `LLM_` beside it. It is outside this PR, but a current Meta key can reach DeepSeek today.
