@@ -18,12 +18,12 @@ started: 2026-10-16 16:10
 | S2 tests | done | 2026-10-16 18:45 | 2026-10-16 20:40 | reports/S2-test-author.md | 51 tests / 161 cases, all red (missing symbols); S2_HEAD=9895d663 → 87c8ed14 after adjudicated fixture fix |
 | S3 implement | done | 2026-10-16 20:45 | 2026-10-16 22:30 | reports/S3-implementer.md | S3_HEAD=c0b167d3; draft PR #1174; 23 new + 13 modified = budget; 161/161 |
 | S4 adversarial review | done | 2026-10-16 22:35 | 2026-10-17 00:40 | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES — 1 Blocker (R-1), 4 Major (R-2..R-5), 10 Minor (R-6..R-15); 4 refuted |
-| S5 repair loop | pending | | | | |
+| S5 repair loop | running | 2026-10-17 02:10 | | reports/S5-repair-1.md | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 · S5 repair iterations: 1/8 (running) · S5 re-review rounds: 0/2 · S2_HEAD c71b1032
 
 ## Decisions the orchestrator made
 - 2026-10-16 16:08 — Base on origin/main (0f2aeb48), not on the unmerged InfiniteMemoryAgent branch (#1084) — the user said "inside of the vidbyte-sdk/", and #1084 is still open.
@@ -62,6 +62,10 @@ started: 2026-10-16 16:10
 
 - 2026-10-17 01:00 — Spec r4 @204f7609 (status reviewed). Spot-check: only spec.md changed (+41/-27). Frontmatter is revision 4. §8.4 now has 24 new files, row 38 creates vidbyte/middleware/builtins/agent_swarm_turn.py, EC-39 exists, §16 has six S4 rows, §17 has an r4 row. No README row for vidbyte/middleware: that README lists builtins/ as a single folder. The author extended EC-33 to cover `isDone`, which is in scope because it is the guarding EC for R-2. Accepted.
 - 2026-10-17 01:00 — Next: the S2 test author adds the R-5 gap tests (M2, M7/EC-18, M21+M22/EC-26) plus regression tests for EC-39 (R-3), EC-33/isDone (R-2) and the R-11 clock. The R-3 and R-2 tests must be red at HEAD; the R-5 tests must be green at HEAD and red under their mutant (mutate.py on a scratch copy only). A new S2_HEAD follows.
+
+- 2026-10-17 01:45 — The S2 test author hit the session usage limit mid-addendum. Its edits survived uncommitted, and I resumed the same agent.
+- 2026-10-17 02:05 — Spot-checked the S2 addendum at c71b1032. It touches only tests/features/agent_swarm/{FEATURE.md, README.md, test_agent_swarm_contract.py, test_agent_swarm_lifecycle.py} and test-plan.md, with no vidbyte/ source. I re-ran the pack myself: "6 failed, 164 passed in 12.28s". The 6 failures are exactly the expected-red regressions: the isDone refusal, EC-39 ×3, the R-11 clock, and the R-8 newline tool name. The agent reports that the M2, M7, M21 and M22 tests each fail under their mutant (on a scratch copy), and that the M7 test passed 10 of 10 runs. **New S2_HEAD = c71b1032.**
+- 2026-10-17 02:05 — I accepted the test author's choice to leave the shared oracle `assert_event_invariants` unchanged even though it is stricter than r4. It allows FAILED only while an agent is working, and it demands full replies on QUIET. The two affected tests, the EC-39 idle variant and EC-18, assert their events directly. This weakens no existing assertion.
 
 ## User replies (verbatim)
 - 2026-10-16 16:05 — answers to four clarifying questions: "One shared folder (Recommended)"; "Stay alive until quiet (Recommended)"; "Shared goal + per-agent prompts (Recommended)"; "Callback + list on result (Recommended)".
