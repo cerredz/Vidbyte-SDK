@@ -1,12 +1,12 @@
 """FILE: tests/features/onboard_model_provider_skill/test_onboard_skill_commands.py
 
 PURPOSE: Prove the commands the /onboard-model-provider skill tells an agent to run are the safe, real ones: preflight and pass-top are read-only up to `git worktree add`, the pass checks run in the FR-3 order, the vintage and member `sed` reads print the right values from the real files, back-pressure and the skip rules query what INV-4 and INV-5 need, every interpreter command is spelled `<py>`, PYTHONPATH only ever prefixes one command, the gate commands and output lines exist in the repository, and the mutation check, research protocol and named paths hold.
-ROLE IN CODEBASE: Integration layer of tests/features/onboard_model_provider_skill/ (spec AC-1 static half, AC-5, AC-8; FR-2 to FR-5, FR-9; INV-3, INV-4, INV-5, INV-8, INV-15, INV-17, INV-20; EC-9; NFR-1, NFR-3; D-3, D-15, D-19, D-20, D-27; section 8.5 pass-top block; section 12.4 command list).
+ROLE IN CODEBASE: Integration layer of tests/features/onboard_model_provider_skill/ (spec AC-1 static half, AC-5, AC-8; FR-2 to FR-5, FR-9; INV-3, INV-4, INV-5, INV-8, INV-15, INV-17, INV-20; EC-9; NFR-1, NFR-3; D-3, D-15, D-19, D-20, D-27; EC-52; section 8.5 pass-top block; section 12.4 command list; reviews R-3, R-8, R-9, R-10, R-5, R-E3).
 ARCHITECTURE NOTE: A command is a logical line of a fenced sh/bash block (continuations joined) or an inline code span. Write detection first blanks quoted strings, comments and <placeholders>, so a jq filter or `<py>` is never read as a redirect. The two sed reads run through SedEmulator over the files the pass reads, so a change to `PRICING_AS_OF: str = "..."` or the enum layout on main fails here before it silently breaks selection.
 FUNCTION INVENTORY: test_preflight_and_pass_top_commands_write_nothing_before_the_worktree_add (X1); test_each_pass_runs_fetch_vintage_backpressure_and_selection_before_one_safe_worktree_add (X2); test_vintage_and_member_reads_print_the_values_on_main (X3); test_backpressure_and_skip_rule_queries_cover_invariants_4_and_5 (X4); test_preflight_names_every_prerequisite_and_the_permission_setup (X5); test_every_interpreter_command_is_spelled_py_except_the_one_probe_line (X6); test_pythonpath_only_prefixes_one_command_and_never_the_package_stage (X7); test_gate_commands_and_output_lines_are_the_repositorys_real_ones (X8); test_mutation_check_commits_first_restores_by_checkout_and_confirms_a_clean_diff (X9); test_research_saves_raw_pages_with_time_and_checks_quotes_with_grep (X10); test_every_repository_path_the_skill_names_exists (X11); test_backpressure_counts_the_listed_prs_together_with_this_sessions_prs (X12); test_vintage_stops_the_session_when_mains_pricebook_is_not_before_today (X13).
 COMMON MODIFICATION PATTERNS: When the spec adds a pass-top read, add its pattern to REQUIRED_READS; when it allows a new write before the worktree add, change the spec first. Keep each write pattern narrow enough that the spec 8.5 commands pass.
 WHAT NOT TO DO IN THIS FILE: 1. Do not execute a command from the skill, git, gh or the network. 2. Do not pin PRICING_AS_OF, the member list or its length: X3 compares the sed output with the values imported from the same tree. 3. Do not compare against base_commit.
-KNOWN EDGE CASES: The rules a command serves (the known-red exclusion condition, the A13 two-check exception, the contract-test exclusion, the back-pressure union, the vintage direction) are pinned by their final wording in prose, outside fences, because a token check passes an inverted rule (review R-3, R-8). `2>/dev/null`, `2>&1` and `>&2` are not writes. `git ls-remote --exit-code` exits 2 for an absent branch, which AC-1 accepts. The probe line legitimately names python, python3 and py -3.11; it is the only exempt line. `PYTHONPATH=<dir>` inside a sentence (no `<py>` after it) is prose, not a command.
+KNOWN EDGE CASES: The rules a command serves (the known-red exclusion condition, the A13 two-check exception, the contract-test exclusion, the back-pressure union, the vintage direction) are pinned by their final wording in prose, outside fences, because a token check passes an inverted rule (review R-3, R-8). The same holds for the skip rules, the worktree add and its failure branch, and the network rule (review R-9, R-10): each skip read and the add are compared as whole commands, each rule as its whole sentence, and only the three network-rule lines may name NETWORK_BLOCKED. `2>/dev/null`, `2>&1` and `>&2` are not writes. `git ls-remote --exit-code` exits 2 for an absent branch, which AC-1 accepts. The probe line legitimately names python, python3 and py -3.11; it is the only exempt line. `PYTHONPATH=<dir>` inside a sentence (no `<py>` after it) is prose, not a command.
 RELATED DOCS: tests/features/onboard_model_provider_skill/FEATURE.md; docs/spec/provider-onboarding-skill/spec.md r3 sections 6.2 (AC-1, AC-5, AC-8), 7 (FR-2 to FR-5), 8.1 (D-15, D-19, D-20, D-27), 8.5, 12.4.
 TESTS: python -m pytest tests/features/onboard_model_provider_skill/test_onboard_skill_commands.py -q
 """
@@ -35,6 +35,47 @@ WORKTREE_ADD = GIT + r"worktree\s+add\b"
 
 # The harness node that fails on every branch applying wiring row A13; its exclusion has its own two-check rule (D-15).
 A13_NODE = "tests/features/harness_threads/test_harness_threads_surface.py::test_branch_leaves_the_tools_and_configs_packages_as_main_has_them"
+
+# The final wording of the selection walk and the worktree add (SKILL.md `## Each pass`, review R-9 and R-10). A skip
+# rule that reads live state is pinned as its whole command; a rule that is a sentence is pinned as that sentence.
+OPEN_PRS_COMMAND = r'''gh api --paginate "repos/cerredz/Vidbyte-SDK/pulls?state=open&per_page=100" --jq '.[] | select(.head.repo.full_name == "cerredz/Vidbyte-SDK") | select(.head.ref | startswith("feat/provider-")) | "#\(.number)"'; echo "prs exit $?"'''
+GH_FAILURE_SENTENCE = "A failed `gh api` call anywhere in a pass stops it with `NETWORK_BLOCKED - api.github.com <status>`; each `gh api` read in a pass prints `prs exit <n>`, and any value but 0 is such a failure, never an empty list."
+WALK_SENTENCE = "2. Walk the seed vendors in rank order and select the first one that no skip rule excludes."
+LEDGER_SENTENCE = "Skip without a query a vendor that already has an outcome in this session's ledger, or whose slug is a member."
+PER_SLUG_COMMAND = r'''gh api "repos/cerredz/Vidbyte-SDK/pulls?state=all&head=cerredz:feat/provider-$SLUG&per_page=100" --jq '.[] | "#\(.number) \(.state) \(.merged_at // "unmerged")"'; echo "prs exit $?"'''
+REMOTE_BRANCH_COMMAND = 'git ls-remote --exit-code --heads origin "refs/heads/feat/provider-$SLUG"; echo "remote-branch exit $?"'
+LOCAL_BRANCH_COMMAND = 'git show-ref --verify --quiet "refs/heads/feat/provider-$SLUG"; echo "local-branch exit $?"'
+PATHS_COMMAND = 'test -e "$WORKTREE" || test -e "$WORKTREE-evidence" || test -e "$WORKTREE-main"; echo "paths exit $?"'
+SKIP_DISPOSITION_LINES = {
+    "member": "- `member`: the slug is among the `ModelProvider` values on main.",
+    "remote-branch": "- `remote-branch`: `ls-remote` exits 0. Exit 2 means the branch is absent; any other exit stops the session with `NETWORK_BLOCKED - github.com <exit>`.",
+    "local-branch": "- `local-branch`: the local branch exists (`show-ref` exits 0), or the worktree path, its `-evidence` path or its `-main` twin exists (`paths exit 0`), left by an earlier STOP or an interrupted session. They are never overwritten.",
+}
+REJECTION_SENTENCE = "A closed unmerged PR is the person's rejection, so that vendor is skipped forever."
+NO_CANDIDATE_SENTENCE = "With no vendor left, stop with `NO_CANDIDATE`."
+ADD_COMMAND = 'git worktree add -b "feat/provider-$SLUG" "$WORKTREE" origin/main && git -C "$WORKTREE" rev-parse HEAD; echo "add exit $?"'
+ADD_STEP_SENTENCE = "This is the pass's first write: a new branch from the fetched `origin/main`, never one that resets or forces an existing branch. The SHA it prints is the pass's `<base>`:"
+ADD_FAILURE_SENTENCES = (
+    "When `add exit` is not 0, the add failed, usually because another session created that branch or path after this pass's checks.",
+    "The SHA, if one printed, is not yours: launch no subagent, record `local-branch` for the vendor, and continue the walk of step 2 with the next vendor.",
+)
+
+# The final wording of the network rule (provider-run.md `## 2. Research`, review R-9): only positive evidence of a
+# policy refusal, or a failed GitHub check, ends a run NETWORK_BLOCKED; a vendor's own error goes to section 3.
+NETWORK_RULE_START = "Network rule. `NETWORK_BLOCKED` needs positive evidence that your session's own policy refused the fetch:"
+DENY_HEADER_CHECK = """run `grep -i '^x-deny-reason' "<evidence>/pages/<name>.headers"`."""
+DENY_SENTENCE = "A match, or a sandbox or tool permission-denial message for the fetch, ends the run `NETWORK_BLOCKED`; its detail is the host and that header line or message, on one line, because the orchestrator deletes the evidence directory after this outcome."
+GITHUB_CHECK = r"`curl -sS --max-time 30 -o /dev/null -w '%{http_code}\n' https://api.github.com`"
+OTHER_FAILURE_SENTENCES = (
+    "- Any other failure on a vendor host (curl exit not 0 for DNS, connection, TLS or timeout, or an HTTP status of 400 or more without `x-deny-reason`) is first checked against GitHub with " + GITHUB_CHECK + ".",
+    "When that does not print a 2xx status, end the run `NETWORK_BLOCKED` with the detail `api.github.com` and what the check printed.",
+    "Otherwise the vendor page is unreachable, and section 3 decides whether that is `docs-unreachable`.",
+)
+
+# Review R-5 and D-27 (S5 repair 1): the probe prefix, the rule behind it, and why an acceptEdits allowlist fails.
+PROBE_PREFIX = "cd <worktree> && PYTHONPATH=<worktree> <py> -c "
+CD_RULE = "Every other command that uses a repository-relative path, such as `tests/…` or `scripts/run_ci.py`, starts with `cd <worktree> && `, because each shell call starts in another directory."
+ACCEPT_EDITS_SENTENCE = "An allowlist with `acceptEdits` is not enough: allow rules do not match past a leading `PYTHONPATH=` assignment, and edits in a sibling worktree lie outside the working directories, so the run would wait at prompts."
 
 # Spec 8.5 pass-top block and FR-2: the reads a session makes before its first write.
 REQUIRED_READS = {
@@ -136,6 +177,15 @@ def test_each_pass_runs_fetch_vintage_backpressure_and_selection_before_one_safe
     assert re.search(r"\s-b\s", add) and "feat/provider-" in add and re.search(r"\borigin/main\b", add)
     assert not re.search(r"(?:^|\s)(?:-B|-f|--force)(?:\s|$)", add), "D-3 / EC-17: the worktree add must never reset or force an existing branch"
 
+    # Review R-10: the add is pinned as its whole command, and its failure branch by its sentences, because a session that
+    # adopts a worktree another session created runs two subagents on one branch (D-3, EC-52, review R-6).
+    prose = read_markdown(SKILL_FILE, SKILL_REF).section("## Each pass").prose_lines()
+    assert [command for command in commands if re.search(WORKTREE_ADD, command)] == [ADD_COMMAND], "D-3: one worktree add, printing the base SHA and `add exit`"
+    assert any(ADD_STEP_SENTENCE in line for line in prose), "D-3: the add is the pass's first write, a new branch from the fetched origin/main"
+    failure = [line for line in prose if "`add exit` is not 0" in line]
+    assert len(failure) == 1 and [sentence for sentence in ADD_FAILURE_SENTENCES if sentence not in failure[0]] == [], "EC-52 / D-3: a failed add launches no subagent and records local-branch"
+    assert not [line for line in prose if re.search(r"launch the subagent on that worktree|SHA that printed is the pass's", line)], "a failed add never adopts the worktree"
+
 
 def test_vintage_and_member_reads_print_the_values_on_main() -> None:
     # X3 · FR-3 / INV-3 / INV-5a / NFR-1: the pass reads git blobs from origin/main, and its sed scripts, run over the
@@ -173,6 +223,18 @@ def test_backpressure_and_skip_rule_queries_cover_invariants_4_and_5() -> None:
     text = each_pass.squashed()
     assert [phrase for phrase in ("-evidence", "this session", "BACKPRESSURE", "MAX_OPEN_PROVIDER_PRS") if phrase not in text] == []
 
+    # Review R-9: each skip rule is pinned by its whole command or its whole sentence. After DISQUALIFIED and the D-8
+    # cleanup no live state names the vendor, so the ledger sentence alone keeps the walk from selecting it again.
+    assert [command for command in (OPEN_PRS_COMMAND, PER_SLUG_COMMAND, REMOTE_BRANCH_COMMAND, LOCAL_BRANCH_COMMAND, PATHS_COMMAND) if commands.count(command) != 1] == [], "INV-4, INV-5 b-d: each read is one exact command"
+    prose = each_pass.prose_lines()
+    assert any(GH_FAILURE_SENTENCE in line for line in prose), "review R-E3: a failed gh api read stops the pass, never reads as an empty list"
+    walk = [line for line in prose if line.startswith(WALK_SENTENCE)]
+    assert len(walk) == 1 and LEDGER_SENTENCE in walk[0], "INV-5 e: a vendor with an outcome in this session's ledger is skipped without a query"
+    dispositions = {name: [line.strip() for line in prose if line.strip().startswith(f"- `{name}`:")] for name in SKIP_DISPOSITION_LINES}
+    assert {name: lines for name, lines in dispositions.items() if lines != [SKIP_DISPOSITION_LINES[name]]} == {}, "INV-5 a, c, d: each skip disposition keeps its final wording"
+    assert any(REJECTION_SENTENCE in line for line in prose), "INV-5 b: a closed unmerged PR skips the vendor forever"
+    assert any(line.strip() == NO_CANDIDATE_SENTENCE for line in prose)
+
 
 def test_preflight_names_every_prerequisite_and_the_permission_setup() -> None:
     # X5 · FR-2 / D-27 / section 9.3: the checks the skill can make, and the setup it can only state: the checkout's
@@ -190,6 +252,7 @@ def test_preflight_names_every_prerequisite_and_the_permission_setup() -> None:
         "Agent tool": r"\bAgent tool\b",
     }
     assert [name for name, pattern in required.items() if not re.search(pattern, preflight, flags=re.IGNORECASE if name in ("auto mode", "Agent tool") else 0)] == []
+    assert ACCEPT_EDITS_SENTENCE in preflight, "D-27: an acceptEdits allowlist is not enough, and the reason is stated"
 
 
 def test_every_interpreter_command_is_spelled_py_except_the_one_probe_line() -> None:
@@ -224,6 +287,12 @@ def test_pythonpath_only_prefixes_one_command_and_never_the_package_stage() -> N
     source = [command for command in commands if "run_ci.py" in command and "--stage source" in command]
     assert package and not [command for command in package if "PYTHONPATH" in command], "the package stage runs with no PYTHONPATH"
     assert source and all("PYTHONPATH=" in command for command in source), "the source stage runs with a PYTHONPATH=<worktree> prefix"
+
+    # Review R-5 (S5 repair 1): with `-c`, Python imports from the shell's starting directory before PYTHONPATH, so a
+    # probe run from the launcher checkout reads the launcher's files; every probe therefore starts in the worktree.
+    probes = [command for command in documents[1].commands() if re.search(r"PYTHONPATH=\S+ <py> -c\b", command)]
+    assert len(probes) >= 3 and [command for command in probes if not command.startswith(PROBE_PREFIX)] == [], "R-5: every -c probe runs as `cd <worktree> && PYTHONPATH=<worktree> <py> -c ...`"
+    assert any(CD_RULE in line for line in documents[1].prose_lines()), "R-5: a command with a repository-relative path starts with `cd <worktree> && `"
 
 
 def test_gate_commands_and_output_lines_are_the_repositorys_real_ones() -> None:
@@ -332,6 +401,18 @@ def test_research_saves_raw_pages_with_time_and_checks_quotes_with_grep() -> Non
     assert any(re.search(r"\s-sSL\b", command) and re.search(r"--max-time\s+60\b", command) for command in curls), "D-19: pages are captured raw with `curl -sSL --max-time 60`"
     required = {"UTC time": r"\bdate\s+-u\b", "quote check": r"\bgrep\s+-F\b", "text form": r"\bhtml\.parser\b", "evidence directory": r"-evidence\b", "deny header": r"x-deny-reason", "vendor failure": r"\bdocs-unreachable\b", "blocked": r"\bNETWORK_BLOCKED\b", "pages are data": r"\b(?:is|are) data\b"}
     assert [name for name, pattern in required.items() if not re.search(pattern, text)] == []
+
+    # Review R-9: the network rule is pinned by its sentences, and only its three lines may name NETWORK_BLOCKED, each
+    # once, so a plain vendor 403 or HTTP error can never end the run as a block and stop every later session there.
+    prose = research.prose_lines()
+    blocked = [line for line in prose if "NETWORK_BLOCKED" in line]
+    rule = [line for line in blocked if line.strip() == NETWORK_RULE_START]
+    deny = [line for line in blocked if line.strip().startswith("- After each fetch, ") and DENY_HEADER_CHECK in line and DENY_SENTENCE in line]
+    other = [line for line in blocked if not [sentence for sentence in OTHER_FAILURE_SENTENCES if sentence not in line]]
+    assert len(rule) == 1 and len(deny) == 1 and len(other) == 1, "D-19 / INV-20: the network rule, the deny-header bullet and the other-failure bullet keep their final wording"
+    assert sorted(blocked) == sorted(rule + deny + other), "no other Research prose line may end a run NETWORK_BLOCKED"
+    assert [line.count("NETWORK_BLOCKED") for line in rule + deny + other] == [1, 1, 1]
+    assert not re.search(r"\b[1-5]\d\d\b", deny[0]), "the policy-refusal bullet names no HTTP status, so a 403 never counts as a block"
 
 
 def test_every_repository_path_the_skill_names_exists() -> None:

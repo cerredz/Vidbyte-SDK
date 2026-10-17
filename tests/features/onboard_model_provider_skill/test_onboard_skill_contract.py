@@ -1,12 +1,12 @@
 """FILE: tests/features/onboard_model_provider_skill/test_onboard_skill_contract.py
 
 PURPOSE: Pin the fixed interfaces of the /onboard-model-provider skill that spec r3 section 8.5 names as the contract: the frontmatter and size limits, the two-file folder, the H2 headings of both files, the constants, the seed table and its first-party hosts, the subagent brief, the PROVIDER RESULT block on both sides, every enumeration, the four result checks, the PR title and body rules, and the regenerated REPO_MAP.md entry for .claude/.
-ROLE IN CODEBASE: Contract layer of tests/features/onboard_model_provider_skill/ (spec AC-2, AC-5, AC-6, AC-7, AC-9; INV-9, INV-22; FR-6, FR-11, FR-16, FR-17; D-1, D-2, D-16, D-17, D-19, D-22, D-23, D-28; sections 8.4, 8.5, 9.1, 12.3 rows 2 and 3).
+ROLE IN CODEBASE: Contract layer of tests/features/onboard_model_provider_skill/ (spec AC-2, AC-5, AC-6, AC-7, AC-9; INV-9, INV-22; FR-6, FR-11, FR-16, FR-17; D-1, D-2, D-11, D-16, D-17, D-19, D-22, D-23, D-28; EC-30; sections 8.4, 8.5, 9.1, 12.3 rows 2 and 3; review R-7).
 ARCHITECTURE NOTE: The orchestrator (SKILL.md) and the provider subagent (references/provider-run.md) talk only through the brief and the PROVIDER RESULT block, so those are checked from both sides. Seed rows are parsed as a GFM table; the URL check is the security property (T-5, T-6), not a copy of the URLs.
-FUNCTION INVENTORY: test_frontmatter_has_only_name_description_and_manual_only_invocation (C1); test_skill_folder_holds_exactly_the_two_markdown_files (C12); test_h2_headings_are_exactly_the_spec_list_in_order (C2); test_constants_section_states_every_named_constant (C3); test_seed_table_lists_the_ten_vendors_in_rank_order_without_researched_facts (C4); test_every_seed_url_is_on_its_rows_first_party_hosts (C5); test_subagent_brief_carries_every_field_and_rule (C6); test_result_block_is_produced_and_read_with_the_same_fields_and_outcomes (C7); test_each_enumeration_is_named_in_full_where_it_is_decided (C8); test_verifying_a_result_runs_the_four_checks_without_a_copy_of_the_checklist (C9); test_publish_uses_the_pr_title_body_rules_and_quote_cap (C10); test_repo_map_claude_entry_describes_review_settings_and_invoked_skills (C11).
+FUNCTION INVENTORY: test_frontmatter_has_only_name_description_and_manual_only_invocation (C1); test_skill_folder_holds_exactly_the_two_markdown_files (C12); test_h2_headings_are_exactly_the_spec_list_in_order (C2); test_constants_section_states_every_named_constant (C3); test_seed_table_lists_the_ten_vendors_in_rank_order_without_researched_facts (C4); test_every_seed_url_is_on_its_rows_first_party_hosts (C5); test_subagent_brief_carries_every_field_and_rule (C6); test_result_block_is_produced_and_read_with_the_same_fields_and_outcomes (C7); test_each_enumeration_is_named_in_full_where_it_is_decided (C8); test_verifying_a_result_runs_the_four_checks_without_a_copy_of_the_checklist (C9); test_publish_uses_the_pr_title_body_rules_and_quote_cap (C10); test_repo_map_claude_entry_describes_review_settings_and_invoked_skills (C11); test_qualify_requires_the_chat_completions_response_and_usage_names (C13).
 COMMON MODIFICATION PATTERNS: When spec section 8.5 or 9.1 changes a heading, constant, enumeration or seed slug, change onboard_skill_fixtures.py; keep the assertions here.
 WHAT NOT TO DO IN THIS FILE: 1. Do not assert that a seed slug is not a ModelProvider member: it becomes one on the first provider branch. 2. Do not pin seed display names, URLs or reasons; vendors move pages and a reviewed seed edit must not need a second edit here. 3. Do not read git state.
-KNOWN EDGE CASES: The frontmatter is parsed with yaml.safe_load, so the string "true" is not the boolean the flag needs. Enumeration members are matched with hyphen-aware boundaries, so "merged" is not satisfied by "closed-unmerged" and "member" not by "members". REPO_MAP sentences are split at a period followed by a capital letter.
+KNOWN EDGE CASES: The frontmatter is parsed with yaml.safe_load, so the string "true" is not the boolean the flag needs. Enumeration members are matched with hyphen-aware boundaries, so "merged" is not satisfied by "closed-unmerged" and "member" not by "members". REPO_MAP sentences are split at a period followed by a capital letter. C10's quote cap and C13's dialect check are compared as whole sentences, because a number check passes "at least 200 characters".
 RELATED DOCS: tests/features/onboard_model_provider_skill/FEATURE.md; docs/spec/provider-onboarding-skill/spec.md r3 sections 6.2, 8.1, 8.5, 9.1, 9.2, 10, 12.3.
 TESTS: python -m pytest tests/features/onboard_model_provider_skill/test_onboard_skill_contract.py -q
 """
@@ -46,6 +46,17 @@ from tests.features.onboard_model_provider_skill.onboard_skill_fixtures import (
 # Model IDs and fragments the spec's own seed research cites; none may be baked into a seed row (AC-6, section 9.1).
 KNOWN_MODEL_ID_FRAGMENTS = ("gpt-oss", "qwen3", "qwen/", "jamba-mini", "jamba-large", "meta-llama/", "deepseek-ai/", "solar-pro", "accounts/fireworks", "openai/")
 KNOWN_KEY_PREFIXES = ("sk-", "csk-", "gsk_", "eyJ", "LLM|", "xai-")
+
+# INV-9 / D-16: the Sources quote rule of section 9, final wording at 7676468e (a cap check passes "at least 200").
+QUOTE_RULE = r"Each quote is at most 200 characters, contains the fact's value, and is rendered as inline code in a backtick run longer than any backtick run inside it, with each `|` escaped as `\|`."
+# D-11 / EC-30 / INV-9 / review R-7 (S5 repair 1): the Qualify dialect check and the fact kinds that let it record the
+# response text path and the usage names, final wording at 7676468e.
+FACT_KINDS = "- A fact is a base URL, chat path, auth scheme, response text path, usage key names, environment variable, model ID, price, price unit, key prefix, tool support or structured-output tier. Nothing else from a page enters code or the PR."
+DIALECT_SENTENCES = (
+    "2. **Dialect.** A first-party quote shows Bearer auth and chat completions at `<base URL>/chat/completions`, which is all `OpenAICompatibleProvider` speaks.",
+    "First-party quotes from a response example also show the generated text at `choices[0].message.content` and the usage as `prompt_tokens` and `completion_tokens`, the only names that `ChatCompletionUsage` (row A2) reads; under any other names the vendor's token counts, and so its cost, would silently be None.",
+    "Another path (`/chat`, `/messages`), another auth header (`x-api-key`), another request shape, no response example, or a response with other names (such as `input_tokens` and `output_tokens`) is `not-openai-compatible`.",
+)
 
 
 def _enumerated(name: str, text: str) -> bool:
@@ -235,6 +246,20 @@ def test_publish_uses_the_pr_title_body_rules_and_quote_cap() -> None:
     assert "body=@" in publish, "section 9.2: the body is sent from a file"
     skill_text = read_markdown(SKILL_FILE, SKILL_REF).text
     assert not re.search(r"draft\W{0,3}[=:]\W{0,3}true", procedure.text + skill_text, flags=re.IGNORECASE), "Q-4: provider PRs open ready for review"
+    # Re-review round 1 (R-3 class): the cap is compared as its sentence, so "at least 200 characters" fails here.
+    assert QUOTE_RULE in publish and not re.search(r"\b(?:at least|more than|over) 200\b", publish), "INV-9: each quote is capped at 200 characters and rendered as inline code"
+
+
+def test_qualify_requires_the_chat_completions_response_and_usage_names() -> None:
+    # C13 · D-11 / EC-30 / INV-9 / review R-7: OpenAICompatibleProvider and ChatCompletionUsage read only the
+    # chat-completions text path and usage names, so a vendor that reports other names would silently record no usage
+    # or cost; Qualify requires a first-party response example and records both as facts.
+    procedure = read_markdown(PROCEDURE_FILE, PROCEDURE_REF)
+    research = [line.strip() for line in procedure.section("## 2. Research").prose_lines()]
+    dialect = [line.strip() for line in procedure.section("## 3. Qualify").prose_lines() if "**Dialect.**" in line]
+
+    assert FACT_KINDS in research, "INV-9: the response text path and the usage key names are facts a run records"
+    assert len(dialect) == 1 and dialect[0].startswith(" ".join(DIALECT_SENTENCES)), "D-11 / EC-30: the dialect check names the response and usage names, and other names disqualify"
 
 
 def test_repo_map_claude_entry_describes_review_settings_and_invoked_skills() -> None:

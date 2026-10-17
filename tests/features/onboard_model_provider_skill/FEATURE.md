@@ -18,6 +18,7 @@ The skill is two Markdown files, `.claude/skills/onboard-model-provider/SKILL.md
 - **GitHub and git writes** (INV-18, INV-19, AC-15): GitHub only through `gh api`; the only write is one `POST .../pulls`; the only push is `HEAD:refs/heads/feat/provider-<slug>`, unforced.
 - **Key safety** (D-29, EC-60, INV-16): a one-`/` ID whose first segment is a `ModelProvider` value is ineligible and self-checked; no literal key shape in the skill.
 - **Forbidden constructs** (AC-3, INV-21): no `gh pr`/`gh issue`, `git stash`, force push, PowerShell, `$env:`, `.exe`, drive-letter or backslash paths, or `path:line` references.
+- **What a PR may carry** (INV-13, EC-63, D-16): every URL the run writes is the Endpoint fact or a page it fetched with a 2xx status, and the one exception is the session's attribution line, which section 9 puts last; the PR body passes the exact local-path guard, which prints `grep exit 1` only for a body with no local path or user name.
 - **The map** (AC-9): the `REPO_MAP.md` `.claude/` entry describes both the review-agent settings and invoked project skills, in 4 or 5 sentences with no file name or command.
 
 ## Actors / Callers
@@ -26,11 +27,11 @@ The person who types the command (operator); the orchestrator session executing 
 
 ## Inputs and Preconditions
 
-The two skill files and `REPO_MAP.md` on disk, and the repository files the skill names (the wiring checklist's paths, `scripts/run_ci.py`, `lint/rules/c010_pricebook_vintage_bump.py`, `vidbyte/lib/registries/pricing.py`, `vidbyte/lib/enums/model_provider.py`, `vidbyte/lib/runners/utility.py`). Tests read files only. They never call the network, `gh`, `git` or Claude.
+The two skill files and `REPO_MAP.md` on disk, and the repository files the skill names (the wiring checklist's paths, `scripts/run_ci.py`, `lint/rules/c010_pricebook_vintage_bump.py`, `vidbyte/lib/registries/pricing.py`, `vidbyte/lib/enums/model_provider.py`, `vidbyte/lib/runners/utility.py`). Tests read files, with one exception: G1 reads the PR-body guard line from provider-run.md and runs it through `sh` over a temporary body file, with a chosen `HOME`. They never call the network, `gh`, `git` or Claude.
 
 ## Observable Outcomes
 
-The text of the skill files (headings, tables, fenced shell commands, inline code), the result of running the skill's own `sed` extraction commands over the real sources in Python, and the answers of the real `Runner._normalize_provider_and_model` for provider-prefixed IDs.
+The text of the skill files (headings, tables, fenced shell commands, inline code), the result of running the skill's own `sed` extraction commands over the real sources in Python, the answers of the real `Runner._normalize_provider_and_model` for provider-prefixed IDs, and the output and exit line of the skill's own PR-body guard run over clean and dirty bodies.
 
 ## State Transitions
 
@@ -43,7 +44,7 @@ None at test time. The skill's state machine (candidate, skipped, DISQUALIFIED, 
 
 ## External Dependencies
 
-The filesystem only. PyYAML parses the frontmatter. `vidbyte` is imported for `ModelProvider`, `PRICING_AS_OF`, `Runner` and the self-check classes, so the parsing checks have an independent oracle.
+The filesystem only. PyYAML parses the frontmatter. `vidbyte` is imported for `ModelProvider`, `PRICING_AS_OF`, `Runner` and the self-check classes, so the parsing checks have an independent oracle. G1 needs a POSIX `sh` on `PATH` (dash on the Linux CI runners, the one from Git for Windows here); where none exists it is skipped with that reason, and S9 still pins the line's text.
 
 ## Known Failure Modes
 
@@ -100,6 +101,24 @@ The lines below are rules whose words, not only whose tokens, the tests pin (rev
 - The vintage check inverted to "is before today" → every normal day stops, and the day main is already current runs (FR-3, D-10, EC-19) (X13).
 - `FORMAT_BOUND_PROVIDERS` allowed on an example key, or the first-party statement weakened → a format-bound vendor refuses its own unprefixed key, and elimination hands that key to another vendor (D-13, EC-33) (S7).
 
+The lines below were found by implementation re-review round 1 (R-9 to R-12) and by the S2 probe that followed it. Each was proven by a mutation of a fresh copy of the skill that passed the 50-test pack and now fails the named test.
+
+- The ledger sentence cut back to members, or the paths read without its `-evidence` or `-main` test, or a skip disposition loosened → a DISQUALIFIED vendor is selected again on every pass, or a kept worktree is overwritten (INV-5, EC-52) (X4).
+- The open-PR read without `prs exit`, or a failed `gh api` read taken as an empty list → back-pressure counts no open PRs during an outage, and a fourth one opens (INV-4) (X4).
+- A vendor 403 without `x-deny-reason` that ends the run `NETWORK_BLOCKED`, or another Research line that ends a run that way → every later invocation stalls on that vendor (D-19, INV-20) (X10).
+- The failed-add sentence deleted, or rewritten to adopt the worktree whose SHA printed → a subagent works on a branch another session owns (D-3, EC-52) (X2).
+- "A URL you did not fetch may enter the PR", or the URL rule deleted → a remembered URL, possibly stale or not first-party, is published as a source (INV-13) (S8).
+- The attribution exception deleted or widened, or section 9 no longer putting that line last → every PR body breaks the URL rule, or other unfetched URLs pass as exceptions (S8).
+- The body guard with `dirname`, no URL strip, no `HOME` fallback, no unreadable-body sentinel, `-i`, a doubled backslash or no `/user/` pattern; its one rerun made a loop; its outcome renamed → a local path or user name reaches the public PR, a vendor URL blocks every PR, or a run never ends (EC-63, D-16) (S9, G1).
+- The proof rule without the body check's rerun clause → section 9 contradicts "each step runs once" (S9).
+- A `-c` probe run from the launcher checkout → Python imports the launcher's files before `PYTHONPATH`, so the probe checks the wrong tree (D-15, D-20) (X7).
+- The Dialect step without the response and usage names → a vendor with other usage keys silently records no usage or cost (D-11, EC-30) (C13).
+- The C9 comment back on one 94-column line → every provider PR carries it (§12 comments) (W7).
+- A disqualification that stops the session, a skill that merges, closing that skips a vendor for one session, stashing or several sessions allowed, each keeping the two words a token check looked for → the person cannot predict the run, or it writes where it must not (AC-13, FR-15, T-1) (A3, A4).
+- "Add the vendor to `VIDBYTE_MANAGED_TEXT_PROVIDERS`, never to a gateway relay table", where the line's "never" satisfied the old check → AUTO routes the vendor to the gateway (D-12) (S4).
+- "Each quote is at least 200 characters" → vendor text reaches the hosted `@claude` agent in bulk (T-2b) (C10).
+- `acceptEdits` called enough → the run waits at prompts in the sibling worktree (D-27) (X5).
+
 ## Historical Regressions
 
 - Spec review r1 R-1: a committed diff-against-base test would fail every provider PR. No test here reads git state.
@@ -107,15 +126,17 @@ The lines below are rules whose words, not only whose tokens, the tests pin (rev
 - Spec review r2 R-1: provider-prefixed one-`/` IDs misroute keys (S5).
 - Spec review r2 R-6: the checklist paths had no stated source in SKILL.md (W6, C9).
 - Implementation review R-3 and R-8 (2026-10-17): S5, X8, X9 and A5 checked that a token was present, so an inverted rule passed, and the C9 Bearer template, the back-pressure union and the D-13 example-key rule were unpinned. The tests now pin each rule's final sentence outside fences, forbid the inverted wording, bind each outcome to its bullet, pin the commands exactly, and compile the python fences (S5, X8, X9, A5, W7, X12, X13, S7).
+- Implementation re-review round 1 (R-9 to R-12, 2026-10-17): the network rule, the ledger sentence and paths read, the worktree add's failure branch, the URL rule and its one exception, and the PR-body guard changed with no test able to fail, and 15 further rules passed a token check when inverted. The tests now compare these rules, commands and dispositions whole, count the lines that may name `NETWORK_BLOCKED`, and run the guard line through `sh` (X2, X4, X5, X7, X10, A3, A4, S4, S8, S9, C10, C13, W7, G1).
 
 ## Test Suite Map
 
 - `onboard_skill_fixtures.py`: paths, the spec-r3 constants the tests compare against (headings, constants, enumerations, the 33 wiring rows, the seed slugs, the §9.2 grammar), a fence-aware Markdown reader that separates prose from fenced code, and a POSIX `sed -n 's/…/…/p'` emulator.
-- `test_onboard_skill_acceptance.py`: the invocation line and the §9.2 grammar (AC-1), the stop conditions, the continue-on-disqualify rule, the rules a person relies on, and what each outcome leaves behind (AC-13, FR-15, D-8).
-- `test_onboard_skill_contract.py`: frontmatter and size (AC-2), the two-file folder (D-1), headings (AC-5, AC-7), constants, seed table and hosts (AC-6, D-19), brief, result block both sides, enumerations, verification, publish rules, and the REPO_MAP entry (AC-9).
+- `test_onboard_skill_acceptance.py`: the invocation line and the §9.2 grammar (AC-1), the stop bullets and the continue-on-disqualify rule compared whole, every `## Rules` bullet in order, and what each outcome leaves behind (AC-13, FR-15, D-8).
+- `test_onboard_skill_contract.py`: frontmatter and size (AC-2), the two-file folder (D-1), headings (AC-5, AC-7), constants, seed table and hosts (AC-6, D-19), brief, result block both sides, enumerations, verification, publish rules and the 200-character quote rule, the fact kinds and Dialect step (D-11, EC-30), and the REPO_MAP entry (AC-9).
 - `test_onboard_skill_wiring_checklist.py`: the wiring table's header, refs, cell grammar, spec paths and symbols, existence at HEAD, silent markers, the C6 swap case (AC-4, AC-7), the C9 DIRECT wire-test template with its Bearer assertion (EC-43, D-12), and the orchestrator's extraction command run over the real table (FR-11, D-28).
-- `test_onboard_skill_commands.py`: read-only preflight and pass-top (AC-5), pass order (FR-3), the pass-top `sed` commands run over the real sources (AC-1), back-pressure and selection filters (INV-4, INV-5, T-4), the back-pressure union with this session's PRs (INV-3, EC-9), the vintage stop (FR-3, D-10), preflight and permission setup (FR-2, D-27), `<py>` spelling (AC-8), `PYTHONPATH` (D-15), gate commands (§12.4, INV-17), mutation order (AC-8, INV-15), research protocol (D-19, INV-20), and named paths (INV-21).
-- `test_onboard_skill_security.py`: forbidden constructs (AC-3), GitHub writes (INV-18, INV-19, AC-15), the push refspec, the managed provider set, D-29 key safety with the real `Runner` and the exact self-check, the D-13 first-party rule for format binding, and key shapes (INV-16).
+- `test_onboard_skill_commands.py`: read-only preflight and pass-top (AC-5), pass order (FR-3), the pass-top `sed` commands run over the real sources (AC-1), back-pressure and selection reads, the ledger sentence and the skip dispositions compared whole (INV-4, INV-5, T-4, EC-52), the worktree add and its failure branch (D-3), the back-pressure union with this session's PRs (INV-3, EC-9), the vintage stop (FR-3, D-10), preflight and permission setup (FR-2, D-27), `<py>` spelling (AC-8), `PYTHONPATH` (D-15), gate commands (§12.4, INV-17), mutation order (AC-8, INV-15), the probe prefix (D-15, D-20), research protocol and the three-line network rule (D-19, INV-20), and named paths (INV-21).
+- `test_onboard_skill_security.py`: forbidden constructs (AC-3), GitHub writes (INV-18, INV-19, AC-15), the push refspec, the managed provider set, D-29 key safety with the real `Runner` and the exact self-check, the D-13 first-party rule for format binding, key shapes (INV-16), the URL rule and its attribution exception (INV-13), and the PR-body guard command, its paragraph and the proof rule (EC-63, D-16).
+- `test_onboard_skill_publish_guard.py`: the PR-body guard line read from provider-run.md and run through `sh` over ten bodies: clean ones (with `HOME` set, `/` and empty) print only `grep exit 1`, and a worktree path, its `/c/` twin, the home directory, the user name between slashes or backslashes, or a missing body print `grep exit 0` (EC-63, D-16, NFR-1).
 
 Run `python -m pytest tests/features/onboard_model_provider_skill -q` from the repository root (on this machine `py -3.11 -m pytest …`).
 
@@ -126,7 +147,7 @@ Run `python -m pytest tests/features/onboard_model_provider_skill -q` from the r
 - **Diff and merge-base tests**: forbidden by spec §13 (R-1), because they would fail every provider PR.
 - **The optional `.claude/ci-settings.json` content guard** (§13): it already passes on main, so it proves nothing about this feature; INV-24 is PR-time evidence.
 - **Property-based, fuzz and metamorphic tests**: the feature has no algebraic invariant in code. Its selection and loop are prose executed by a model.
-- **Concurrency and idempotency** (EC-52, INV-5): two sessions and a re-invocation are behaviors of a model against live GitHub. The text guards (skip rules a to e, one session at a time, the unforced single refspec that makes GitHub refuse a second push) are tested; the runtime behavior is not testable offline.
+- **Concurrency and idempotency** (EC-52, INV-5): two sessions and a re-invocation are behaviors of a model against live GitHub. The text guards (skip rules a to e, one session at a time, the unforced single refspec that makes GitHub refuse a second push, and the failed-add branch that hands a raced vendor back to the walk) are tested by content; the runtime behavior is not testable offline.
 - **Liveness of seed URLs and first-party facts**: needs the network, and the facts drift by design (they are re-researched every run).
 - **Pinning display names, URLs and Reason text of the seed rows**: a reviewed seed edit would need a second edit here without protecting a spec rule; C5 checks the security property (URLs on the pinned hosts) instead.
 - **Asserting that seed slugs are not `ModelProvider` members**: false on the first provider branch.
