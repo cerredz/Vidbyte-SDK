@@ -60,7 +60,8 @@ from vidbyte import tool
 from vidbyte.lib.constants.infinite import INFINITE_TASK_NAME_PATTERN
 from vidbyte.lib.errors import VidbyteSdkError
 
-MEMORY_TOOLS = {"bash", "grep", "read_lines", "remember", "write_note"}
+# Deliberately changed by spec infinite-memory-context-economy r3, FR-8.1: every agent also holds search_memory.
+MEMORY_TOOLS = {"bash", "grep", "read_lines", "search_memory", "remember", "write_note"}
 GENERATOR_TOOLS = MEMORY_TOOLS | {"launch_subagent", "isDone"}
 VERIFIER_TOOLS = MEMORY_TOOLS | {"drop_entry", "isDone"}
 
@@ -131,7 +132,17 @@ async def test_two_tasks_run_concurrently_and_each_verifier_follows_its_own_gene
     assert not is_error(result)
     assert result.count(alpha_summary) == 1 and result.count(beta_summary) == 1
     assert result.index(alpha_summary) < result.index(beta_summary), "cards must come back in task order, not completion order"
-    assert renderings(prompt_text("result_card"), result) == 2
+    # Deliberately changed by spec infinite-memory-context-economy r3, INV-5.1 (was: two result_card renderings):
+    # a done/passed card renders as its finished-pair line, a newline, then its summary.
+    assert renderings(prompt_text("result_card"), result) == 0
+    from vidbyte.lib.constants.infinite import INFINITE_FINISHED_PAIR_LINE
+
+    cards = finished_cards(workspace_root(tmp_path))
+    compact = [
+        INFINITE_FINISHED_PAIR_LINE.format(name=card["name"], status=card["status"], verdict=card["verdict"], entries=", ".join(f"#{number}" for number in card["entries"]) or "-") + "\n" + card["summary"]
+        for card in (cards[pair_key("alpha")], cards[pair_key("beta")])
+    ]
+    assert result == "\n\n".join(compact)
     private = ("GEN-ALPHA-PRIVATE-QUERY", "GEN-BETA-PRIVATE-QUERY", "VER-ALPHA-PRIVATE-QUERY", "VER-BETA-PRIVATE-QUERY", "ALPHA-STAGED-PRIVATE", "BETA-STAGED-PRIVATE")
     for call in tree.calls_by(ROOT):
         leaked = [marker for marker in private if marker in seen_text(call)]

@@ -1,9 +1,9 @@
 """FILE: tests/features/infinite_memory_agent/test_infinite_memory_contract.py
 
-PURPOSE: Pins the InfiniteMemory agent's static contract: public import paths and exports, enum values, the 40-leaf prompt family, the runtime registry entry and its refusal outside InfiniteMemoryAgent, the session opt-out, settings validation and defaults, the exact tools and schemas the root's model is offered, the TokenEstimate helper, prompt text free of coding-only rules, and the complexity budget. Since the re-review it also proves that a read-only seed is copied again, unchanged, each time an agent attaches.
+PURPOSE: Pins the InfiniteMemory agent's static contract: public import paths and exports, enum values, the 50-leaf prompt family, the runtime registry entry and its refusal outside InfiniteMemoryAgent, the session opt-out, settings validation and defaults, the exact tools and schemas the root's model is offered, the TokenEstimate helper, prompt text free of coding-only rules, and the complexity budget. Since the re-review it also proves that a read-only seed is copied again, unchanged, each time an agent attaches.
 ROLE IN CODEBASE: Contract layer of tests/features/infinite_memory_agent/ (spec AC-2, AC-3, AC-4, AC-25, AC-27, AC-30, AC-39; INV-1..INV-3, INV-6, INV-21, INV-33, INV-36; EC-2, EC-3, EC-33, EC-34; FR-15; NFR-1; re-review finding R-26). Exercises vidbyte/agents/infinite/, vidbyte/lib/enums/infinite.py, vidbyte/lib/constants/infinite.py, vidbyte/lib/util/text.py, vidbyte/lib/registries/runtimes.py and the infinite_memory prompt family.
 ARCHITECTURE NOTE: Every feature symbol is imported inside the test that needs it, so before the feature exists each test fails on its own ImportError and the rest of the suite still collects. Tool offers are read from what the scripted runner receives on the root's first call, not from the agent's internals.
-FUNCTION INVENTORY: test_public_names_import_from_every_documented_path (AC-27, INV-1); test_prompt_family_has_exactly_the_forty_documented_leaves (AC-27, INV-36); test_enum_values_are_the_documented_lowercase_strings (section 8.5); test_runtime_type_resolves_and_refuses_outside_its_agent (AC-3, INV-3, EC-33); test_session_refuses_the_agent (AC-25, EC-34); test_loop_and_limit_defaults_match_the_spec (AC-39, section 9.3); test_construction_rejects_each_invalid_setting (AC-2, EC-2); test_attaching_a_workspace_already_over_a_cap_is_refused (INV-21, EC-3); test_a_read_only_seed_is_copied_again_each_time_an_agent_attaches (re-review R-26, INV-21, section 9.2, AC-30);test_root_is_offered_exactly_the_preset_tools_plus_its_extra (AC-4, INV-6); test_memory_tool_registry_covers_every_preset_and_role (INV-6, AC-17); test_launch_and_remember_schemas_follow_the_documented_shape (section 9.2, INV-9); test_token_estimate_counts_characters_and_cuts_to_a_prefix (FR-15, D-17); test_prompt_family_text_carries_no_coding_only_rules (INV-33, NFR-5); test_new_modules_stay_inside_the_complexity_budget (NFR-1); test_construction_rejects_a_non_settings_object (AC-2, INV-2); test_entries_written_by_hand_in_the_documented_shape_are_accepted (section 9.1).
+FUNCTION INVENTORY: test_public_names_import_from_every_documented_path (AC-27, INV-1); test_prompt_family_has_exactly_the_fifty_documented_leaves (AC-27, INV-36; FR-10.7 of spec infinite-memory-context-economy); test_enum_values_are_the_documented_lowercase_strings (section 8.5); test_runtime_type_resolves_and_refuses_outside_its_agent (AC-3, INV-3, EC-33); test_session_refuses_the_agent (AC-25, EC-34); test_loop_and_limit_defaults_match_the_spec (AC-39, section 9.3); test_construction_rejects_each_invalid_setting (AC-2, EC-2); test_attaching_a_workspace_already_over_a_cap_is_refused (INV-21, EC-3); test_a_read_only_seed_is_copied_again_each_time_an_agent_attaches (re-review R-26, INV-21, section 9.2, AC-30);test_root_is_offered_exactly_the_preset_tools_plus_its_extra (AC-4, INV-6); test_memory_tool_registry_covers_every_preset_and_role (INV-6, AC-17); test_launch_and_remember_schemas_follow_the_documented_shape (section 9.2, INV-9); test_token_estimate_counts_characters_and_cuts_to_a_prefix (FR-15, D-17); test_prompt_family_text_carries_no_coding_only_rules (INV-33, NFR-5); test_new_modules_stay_inside_the_complexity_budget (NFR-1); test_construction_rejects_a_non_settings_object (AC-2, INV-2); test_entries_written_by_hand_in_the_documented_shape_are_accepted (section 9.1).
 COMMON MODIFICATION PATTERNS: When the spec adds a prompt leaf, add it to EXPECTED_LEAVES. When a setting gains a bound, add one row to INVALID_SETTINGS with the field name and the bad value the error must name.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level (see infinite_memory_fixtures.py). 2. Do not compare tool descriptions to hand-written text; descriptions come from the prompt catalog. 3. Do not loosen the exact tool-name sets to subset checks; INV-6 is an exact list.
 KNOWN EDGE CASES: A ConfigurationError may carry the field in `details` instead of the message, so error_text joins both. The settings-level cases must leave no workspace folder behind, so they never build the agent past its settings.
@@ -45,7 +45,8 @@ from vidbyte.lib.errors import ConfigurationError
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
-# The 40 leaves of spec section 9.2, in its order.
+# The 40 leaves of spec section 9.2, in its order, then the 10 leaves spec infinite-memory-context-economy r3 adds.
+# Deliberately changed by spec infinite-memory-context-economy r3, FR-10.7 (was: 40 leaves).
 EXPECTED_LEAVES = (
     "root_system_prompt",
     "generator_system_prompt",
@@ -87,6 +88,16 @@ EXPECTED_LEAVES = (
     "edit_file_new_text_description",
     "drop_entry_tool_description",
     "drop_entry_id_description",
+    "masked_output",
+    "map_update",
+    "recall_tool_description",
+    "recall_question_description",
+    "recall_purpose_description",
+    "recall_known_description",
+    "recall_terms_description",
+    "retriever_system_prompt",
+    "retriever_task_prompt",
+    "recall_card",
 )
 
 # The twelve new modules of spec section 8.4 (the folder's 8 plus toolset, enums, constants, records).
@@ -115,7 +126,8 @@ CODING_ONLY_WORDS = (
     r"\brepo(?:s|sitory|sitories)?\b",
 )
 
-PRESET_TOOLS = {"bash", "grep", "read_lines", "launch_subagent", "remember", "write_note", "isDone"}
+# Deliberately changed by spec infinite-memory-context-economy r3, FR-8.1: the root also holds search_memory.
+PRESET_TOOLS = {"bash", "grep", "read_lines", "search_memory", "launch_subagent", "remember", "write_note", "isDone"}
 
 
 @tool(name="web_fetch")
@@ -169,8 +181,8 @@ def test_public_names_import_from_every_documented_path() -> None:
     assert root_names <= set(contract["exports"]), "the regenerated public-API contract must list the new root exports"
 
 
-def test_prompt_family_has_exactly_the_forty_documented_leaves() -> None:
-    """AC-27, INV-36: Prompt.INFINITE_MEMORY_* is exactly the 40 leaves of section 9.2, each backed by non-blank catalog text."""
+def test_prompt_family_has_exactly_the_fifty_documented_leaves() -> None:
+    """AC-27, INV-36, FR-10.7 (spec infinite-memory-context-economy r3): Prompt.INFINITE_MEMORY_* is exactly the 50 leaves, each backed by non-blank catalog text."""
     from vidbyte.lib.enums.prompts import Prompt
     from vidbyte.prompts import Prompts
 

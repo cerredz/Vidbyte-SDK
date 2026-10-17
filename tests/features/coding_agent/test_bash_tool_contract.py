@@ -172,20 +172,27 @@ async def test_invalid_utf8_output_is_decoded_with_replacement_characters(bash_m
 @pytest.mark.asyncio
 async def test_large_output_keeps_the_first_bytes_counts_the_rest_and_memory_stays_bounded(bash_module, tmp_path) -> None:
     # AC-13 / INV-10 / NFR-3: 20 MB pass through a 64 KB pipe; the tool keeps the cap, drains the rest, and reports the real exit code.
-    cap = bash_module.BASH_MAX_OUTPUT_BYTES
-    omitted = TWENTY_MEGABYTES - cap
+    # Deliberately changed by spec infinite-memory-context-economy INV-6.2 / INV-6.3 / AC-6.2: the cap is now split into a head of H
+    # bytes and a tail of T bytes with the omitted count between them, so the command's last line is the last line before the exit code.
+    tail_bytes = min(bash_module.BASH_TAIL_OUTPUT_BYTES, bash_module.BASH_MAX_OUTPUT_BYTES // 2)
+    head_bytes = bash_module.BASH_MAX_OUTPUT_BYTES - tail_bytes
+    last_line = "LAST-LINE-MARKER"
+    omitted = TWENTY_MEGABYTES + len("\n" + last_line) - head_bytes - tail_bytes
     tool = bash_module.BashTool(tmp_path)
 
     tracemalloc.start()
     try:
-        result = await tool.execute(_bash_call(f"head -c {TWENTY_MEGABYTES} /dev/zero | tr '\\0' a; exit 7"))
+        result = await tool.execute(_bash_call(f"head -c {TWENTY_MEGABYTES} /dev/zero | tr '\\0' a; printf '\\n{last_line}'; exit 7"))
         _, peak = tracemalloc.get_traced_memory()
     finally:
         tracemalloc.stop()
 
     assert result.status is ToolStatus.SUCCESS
-    assert len(result.output) - len(result.output.lstrip("a")) == cap
+    assert len(result.output) - len(result.output.lstrip("a")) == head_bytes
+    tail = "a" * (tail_bytes - len("\n" + last_line)) + "\n" + last_line
+    assert result.output == "a" * head_bytes + f"\n[output truncated: {omitted:,} bytes not shown]\n" + tail + "\nexit code: 7"
     assert re.search(f"{omitted}|{omitted:,}", result.output)
+    assert result.output.splitlines()[-2] == last_line
     assert result.output.splitlines()[-1] == "exit code: 7"
     assert result.metadata["exit_code"] == 7
     assert result.metadata["truncated"] is True

@@ -10,12 +10,16 @@ If this feature regresses, the failure is usually silent: unverified memories la
 
 - `from vidbyte import InfiniteMemoryAgent, InfiniteMemoryAgentSettings, InfiniteWorkspaceSettings, InfiniteMemoryPreset` works. The agent is built only from a validated `InfiniteMemoryAgentSettings`. Construction creates or attaches the workspace, creates `entries.jsonl`, `superseded.jsonl` and `files.jsonl`, copies seeds to `seed/<basename>`, and refuses a workspace already over a cap.
 - `run()`/`arun()` open a journal (`.runs/<run_id>.jsonl`): `run_started`, then `pair_started` per new pair before any agent of its batch starts, `pair_finished` after its commit, and `run_finished` only when the root's loop returns normally. Every record is one fsynced JSON line.
-- Every agent holds exactly the preset tools for its role (spec INV-6): `bash`, `grep`, `read_lines`, `remember`, `write_note`, plus `edit_file` under FULL, `launch_subagent` for the root and generators below `max_depth`, `drop_entry` for verifiers only, and the developer's extras (the root all of them; a pair exactly the ones its task card names).
+- Every agent holds exactly the preset tools for its role (spec INV-6): `bash`, `grep`, `read_lines`, `search_memory`, `remember`, `write_note`, plus `edit_file` under FULL, `launch_subagent` for the root and generators below `max_depth`, `drop_entry` for verifiers only, and the developer's extras (the root all of them; a pair exactly the ones its task card names). With `InfiniteRecallMode.DELEGATED`, the root and generators hold `recall` in place of `grep`; verifiers keep `grep` (context-economy INV-10.2).
 - `launch_subagent` validates the whole batch before starting anything. A bad batch returns `ToolResult.error`, starts no agent, writes no journal record, and leaves the tool usable.
 - A pair's verifier starts after its generator returns and sees the generator's status, capped summary, staged entries and written paths, never its transcript. The verdict is the last `VERDICT:` line; no line, or a verifier error, is `unchecked`, and then every staged entry is dropped.
 - A pair turns `VidbyteSdkError`, `OSError` and `ValueError` into its own card; siblings and the parent keep going. Cancellation propagates and leaves the journal resumable.
 - `resume(run_id=None)` continues the newest unfinished run (or the named one), replays finished pairs from the journal and re-runs interrupted ones; it refuses unsafe, unknown, finished or absent runs before any model call.
-- Each run starts from a clean context; the task, the rules and the workspace map reach every model call while old tool exchanges are trimmed past `INFINITE_HISTORY_MAX_TOKENS`.
+- Each run starts from a clean context; the task, the rules and the workspace map reach every model call while old tool exchanges are trimmed past `INFINITE_HISTORY_MAX_TOKENS`, down to `INFINITE_HISTORY_LOW_WATERMARK_TOKENS` in whole multiples of the gap between them.
+- The root's system string and tool list are the same on every call of a run: its map is drawn once, and each tool iteration appends one user status message with the changed map lines and the loop counters. Children keep the map and the loop block in their system strings.
+- Every agent reads in 200-line windows, greps smart-case with no context lines, and sees its older `grep`, `read_lines` and `search_memory` outputs (all but the newest three of each) as the `masked_output` leaf. Masking runs before the trim.
+- A `done` card with verdict `passed` or `fixed` reaches its parent as its finished-pair line plus its summary; every other card is the full `result_card`. The journal keeps every card whole.
+- `search_memory` ranks live entries and note lines through one shared FTS5 index; `recall` (DELEGATED only) runs a fresh retriever and returns a card whose found section is copied from disk by code.
 
 ## Actors / Callers
 
@@ -35,7 +39,7 @@ Entry: staged (in a pair's memory) → live (`entries.jsonl`) → superseded (`s
 
 ## Invariants
 
-- The parent's conversation receives only result cards; a card's summary and review are each at most `INFINITE_CARD_TEXT_MAX_TOKENS` tokens, cut text ending in `INFINITE_TRUNCATION_MARKER`, and the rendered card cuts its joined `dropped` and `files` text the same way (NFR-7 as amended in spec r5), while the journal keeps both lists whole.
+- The parent's conversation receives only result cards, compact for passed and fixed pairs; a card's summary and review are each at most `INFINITE_CARD_TEXT_MAX_TOKENS` tokens, cut text ending in `INFINITE_TRUNCATION_MARKER`, and the rendered card cuts its joined `dropped` and `files` text the same way (NFR-7 as amended in spec r5), while the journal keeps both lists whole.
 - Nothing a pair stages reaches disk before its verifier returns; nothing reaches disk on `unchecked`.
 - No tool write leaves the workspace above `max_files` or `max_tokens`, or a note above `max_file_tokens`; usage is recomputed from disk, so files `bash` wrote count. The bookkeeping files are bounded only by `max_tokens`.
 - A rejected tool call writes nothing and the tool stays usable.
@@ -68,7 +72,15 @@ Each line is *input + state → wrong output if unguarded*, with the test that c
 - Usage cached instead of recomputed from disk → bash fills the workspace and tools keep writing (`test_write_note_counts_files_bash_wrote_toward_the_token_cap`).
 - `max_file_tokens` applied to `entries.jsonl` → memory goes read-only after a few hundred entries (`test_entries_file_is_bounded_by_the_workspace_total_not_the_note_cap`).
 - Grep skips files over 1 MB → a large `entries.jsonl` becomes invisible (`test_grep_finds_a_live_entry_in_an_entries_file_over_one_megabyte`).
-- Map rendered once per run, or never into children → agents work from a stale picture (`test_every_agent_sees_the_map_and_the_roots_map_refreshes_after_each_tool_iteration`).
+- A map change never reported to the root, or the map never drawn into children → agents work from a stale picture (`test_every_agent_sees_the_map_and_the_roots_map_refreshes_after_each_tool_iteration`, `test_each_tool_iteration_appends_one_status_message_with_the_changed_map_lines_and_the_loop_block`).
+- The root's system string or tool schemas change between calls → no provider prompt cache ever hits (`test_one_root_run_keeps_one_system_string_and_one_tool_list_while_children_keep_their_block`).
+- One bash loop writes a thousand notes → one status message too large to trim, re-sent every call (`test_a_report_over_the_map_cap_is_cut_by_the_maps_rule_and_its_left_out_lines_are_never_repeated`).
+- `read_lines` without a window → one call floods the history with a whole long note (`test_every_agent_reads_a_long_note_in_a_200_line_window_with_a_footer`); a custom `max_read_lines` that stops at the root → children and the retriever read 200 lines anyway (`test_a_custom_read_window_reaches_every_agents_read_lines_including_the_retrievers`).
+- Masking after the trim, or of every tool → calls dropped that masking would have kept, or launch cards and memory replies hidden (`test_masking_runs_before_the_trim_so_a_masked_view_under_the_cap_keeps_every_call`, `test_only_read_lines_outputs_are_masked_among_launch_bash_and_remember_results`).
+- An exact-cap trim → the first kept message moves on nearly every call and every call misses the history cache (`test_with_equal_outputs_the_cut_moves_at_most_once_per_s_tokens_appended`).
+- Passed cards rendered in full → a batch of twenty puts about 64,000 tokens of reviews and file lists into the root (`test_passed_and_fixed_cards_are_compact_while_failed_unchecked_and_partial_cards_stay_whole`).
+- FTS5 operators in a query, or a stale index → `search_memory` raises, or misses what bash just wrote (`test_fts5_syntax_in_a_query_is_searched_as_text_and_never_raises`, `test_a_note_bash_writes_after_a_search_is_found_by_the_next_search`).
+- A recall card quoting the retriever, or transcribing superseded entries, raw JSON or journals → paraphrase or stale memory presented as found (`test_a_recall_card_holds_only_text_copied_from_disk_under_its_code_built_labels`, `test_every_invalid_citation_is_listed_as_rejected_and_only_the_valid_one_is_transcribed`).
 - Journal records buffered and fsynced late → a crash loses records the run already acted on (`test_every_journal_record_is_fsynced_before_the_next_one_is_written`).
 - A torn final journal line blocks resume, or a run_finished appended onto the torn fragment corrupts the journal (`test_resume_skips_a_torn_final_journal_line`); a malformed earlier line is silently skipped instead of refused (`test_resume_rejects_a_malformed_middle_journal_line`).
 - The workspace fills between staging and commit and the commit writes past `max_tokens` anyway (`test_an_entry_that_no_longer_fits_at_commit_is_dropped_with_the_cap_reason`).
@@ -101,6 +113,8 @@ The S4 code review (`docs/spec/infinite-memory-agent/review.md`, a separate R- n
 
 The S5 re-review found two more that the 107 tests at that point let through: R-26 (the R-7 fix copied a read-only seed's mode bits, so a second attach raised `PermissionError`) and R-27 (a refused two-file memory write could leave its first file changed, and one unwritable staged entry turned a pair's verdict `unchecked`). The four tests named above for those lines pin them.
 
+The context-economy layer (spec `docs/spec/infinite-memory-context-economy/spec.md` r3) was added red on 2026-10-16 in four new files. Its deliberately changed assertions are the tool sets (`search_memory`), the 50-leaf family, the compact card in the two-pair batch test, and the root map arriving as a status message.
+
 ## Test Suite Map
 
 - `test_infinite_memory_acceptance.py` — the §4 snippet as written, staging-then-commit, the usage roll-up, and a second agent attaching to the same workspace. Start here for a caller-visible regression.
@@ -110,6 +124,10 @@ The S5 re-review found two more that the 107 tests at that point let through: R-
 - `test_infinite_memory_workspace.py` — `remember`, supersede, `write_note`, `edit_file`, the caps (including bash bypass), large bookkeeping files, and the workspace map.
 - `test_infinite_memory_resume.py` — journal order and durability, `resume` replay and refusals, torn and malformed journals, cancellation, the reserved-name check before the journal, and key secrecy.
 - `test_infinite_memory_context.py` — history trimming and a clean context per run.
+- `test_infinite_memory_economy.py` — the read window and its setting, masking before the low-watermark trim, smart-case grep, how often the trim's cut moves, and compact cards.
+- `test_infinite_memory_stable_prefix.py` — the root's stable system string and tools, status messages, the map snapshot and its cut.
+- `test_infinite_memory_search.py` — `search_memory`, the shared FTS5 index, and a missing FTS5.
+- `test_infinite_memory_recall.py` — `InfiniteRecallMode`, the registry grants, the `recall` tool, the retriever, citations, the quota, and the card cap.
 - `infinite_memory_fixtures.py` — the scripted model tree, builders, and readers every module uses.
 
 Run: `PYTHONPATH=$(pwd) python -m pytest tests/features/infinite_memory_agent -q` from the repository root.

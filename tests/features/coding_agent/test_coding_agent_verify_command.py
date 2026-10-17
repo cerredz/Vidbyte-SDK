@@ -353,18 +353,25 @@ async def test_without_verify_command_the_run_is_unchanged(coding_agent_cls, tmp
 
 
 @pytest.mark.asyncio
-async def test_output_over_the_cap_reaches_the_model_truncated_by_bash(coding_agent_cls, tmp_path) -> None:
+async def test_output_over_the_cap_reaches_the_model_truncated_by_bash(coding_agent_cls, bash_module, tmp_path) -> None:
     # The feedback carries the bash tool's own capped output whole:
-    # the first 50,000 bytes, its truncation note, and the exit code,
-    # with nothing cut by the tool-error formatter on the isDone path.
+    # the first and the last bytes, the truncation note between them,
+    # and the exit code, with nothing cut by the tool-error formatter
+    # on the isDone path.
+    # Deliberately changed by spec infinite-memory-context-economy
+    # EC-6.4 (INV-6.2): bash now keeps a head of H bytes and a tail of
+    # T bytes, T = min(BASH_TAIL_OUTPUT_BYTES, cap // 2), with the
+    # omitted count between them, so the feedback ends with the tail.
     runner = ReplayRunner(finish_turn("Done."), finish_turn("Done again."))
     agent = _agent(coding_agent_cls, tmp_path, runner, verify_command=f"yes | head -c {OVER_CAP_BYTES}; exit 1", max_verify_attempts=2)
 
     reply = await agent.arun("Make the check pass.")
 
     [feedback] = _feedback_messages(runner.requests[1])
-    kept = "y\n" * (CAP_BYTES // 2)
-    assert feedback.endswith(f"again.\n\n{kept}\n[output truncated: {OVER_CAP_BYTES - CAP_BYTES:,} bytes not shown]\nexit code: 1")
+    tail_bytes = min(bash_module.BASH_TAIL_OUTPUT_BYTES, CAP_BYTES // 2)
+    head = "y\n" * ((CAP_BYTES - tail_bytes) // 2)
+    tail = "y\n" * (tail_bytes // 2)
+    assert feedback.endswith(f"again.\n\n{head}\n[output truncated: {OVER_CAP_BYTES - CAP_BYTES:,} bytes not shown]\n{tail}\nexit code: 1")
     assert reply.metadata["verify_command"] == {"passed": False, "attempts": 2, "last_exit_code": 1}
 
 
