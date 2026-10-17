@@ -13,6 +13,7 @@ TESTS: tests/features/infinite_memory_agent/test_infinite_memory_contract.py, te
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
@@ -128,7 +129,9 @@ class InfiniteMemoryRuntime(AgentRuntime):
         # so the root is told only the map lines that changed, in one
         # message appended after the tool results, with the loop
         # counters the system string no longer carries.
-        current = self.workspace.map_snapshot()
+        # Recount the workspace in a worker thread, so the event loop
+        # keeps serving the other agents of the tree meanwhile.
+        current = await asyncio.to_thread(self.workspace.map_snapshot)
 
         # Compare with the last report: every added or changed map line
         # in map order, then one removed line per file that is gone.
