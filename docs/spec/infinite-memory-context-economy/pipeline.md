@@ -14,7 +14,7 @@ started: 2026-10-16 16:05
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-16 16:05 | 2026-10-16 16:45 | reports/S0-scout.md | base_commit 0f2aeb48; code-map.md (4 sections, ~60 files) |
-| S1 spec + review | pending | | | | |
+| S1 spec + review | done | 2026-10-16 16:50 | 2026-10-16 20:40 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | spec r3 (75789419), approved; round 1 SOUND WITH FIXES (12 accepted), round 2 SOUND WITH FIXES (12 accepted) |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -23,7 +23,7 @@ started: 2026-10-16 16:05
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 0/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-16 16:05 — Item 10 (`recall`) is built opt-in, `DIRECT` default — the checklist said "only if measurement says so" but the user said "implement all of these in 1 pr"; opt-in builds it without changing any run's behavior (request.md §C Q-ORCH-1).
@@ -31,6 +31,10 @@ started: 2026-10-16 16:05
 - 2026-10-16 16:45 — Item 7 must also deal with the per-call iteration counter in the system string — the scout found `- max_iterations: {n}/{max}` (runtime.py:1690) rendered before the map in `_build_system_string`, so a frozen map alone leaves the system string different on every call and item 7 (and items 4 and 9) would save nothing. Under rule 11 this is the "requested behavior breaks without it" case, so the smallest fix that makes the InfiniteMemory root's prefix stable is in scope; making it SDK-wide for other agents is not (optional Q-n, default no).
 - 2026-10-16 16:45 — Item 9 must survive the Vidbyte gateway — AUTO mode (InfiniteMemory default) goes through the gateway, and the SDK wire test calls any new top-level Anthropic key "a guaranteed 422". The spec author verifies, read-only in `C:/Users/422mi/vidbyte-repos/vidbyte/backend`, whether block-level `cache_control` inside `system`/`messages` passes through; if it does not, the spec states the limitation and sends caching only where it is safe, as a stated limitation, not a new gateway change (the gateway is another repo).
 - 2026-10-16 16:45 — Gate command corrected — request.md says to run the gate with PYTHONPATH unset; the field guide `local-ci-verification.md` (which wins on how to verify from a worktree) says `PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source`, then `python scripts/run_ci.py --stage package` with no PYTHONPATH. Every later briefing uses the field-guide commands.
+
+- 2026-10-16 19:55 — Round-2 reviewer hit an API session limit mid-run; resumed the same agent after the reset rather than relaunching — its verified claims were in its context, nothing on disk had changed.
+- 2026-10-16 20:40 — Spec Q-1…Q-12 take their stated defaults: Q-1 yes (recall built opt-in, DIRECT default); Q-2…Q-12 no / not built (Q-12 is the round-2 reviewer's scope-adding suggestion). Logged per playbook; the user can interrupt.
+- 2026-10-16 20:40 — S2 test author may edit existing tests, but only those spec §13 lists as "deliberately changed" (bash head-only group, `test_infinite_memory_delegation.py:134` card count, exact tool-set pins, `EXPECTED_LEAVES` 40→50, `test_infinite_memory_workspace.py:340-372` map refresh, registry signature tests), updating each to the spec's new behavior and citing the spec ID; it may not weaken, skip or delete any other assertion — the template's "never modify an existing test" rule cannot hold for a PR whose requested behavior changes those pins (request.md §C Q-ORCH-5 planned exactly this). The implementer stays forbidden from touching any test.
 
 ## User replies (verbatim)
 - (none during the run)
@@ -51,3 +55,12 @@ started: 2026-10-16 16:05
 - Tests that pin behavior this PR changes: `test_infinite_memory_delegation.py:134` (2 `result_card` renderings for a passing batch), `test_infinite_memory_workspace.py:340-372` (root map refreshes after each tool iteration), the bash head-only tests above. — *source:* S0 scout
 - Gate from a worktree: `PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source`, then `python scripts/run_ci.py --stage package` with no PYTHONPATH; check `PYTHONPATH=$(pwd) python -c "import vidbyte,inspect;print(inspect.getfile(vidbyte))"` prints the worktree. Semgrep only scans git-tracked files (`git add -A` first; `semgrep==1.170.1` in its own venv). Two `harness_threads` surface tests fail locally on any branch touching `vidbyte/tools` (pre-existing; do not edit). — *source:* field guide local-ci-verification.md
 - SDK CI is dispatch-only: `gh workflow run ci.yml --ref <branch>` and `static-policy.yml`; read results via the check-runs API (`gh pr checks` stays empty). — *source:* orchestrator memory
+- No `.venv` in the worktree: use the global Python 3.11.0 (SQLite 3.38.4, FTS5 present) with `PYTHONPATH=$(pwd)`; CI tests 3.11 and 3.12. — *source:* S1 review r2
+- C006 (baseline 104): guards in the `x < 0 → ValueError` shape add findings; use `RecordFieldValidator.require_int`/`require_bool` or `isinstance(x, bool) or not isinstance(x, int) or x < bound`. S047/S052 do not cover sqlite3. — *source:* S1 review r1
+- `TokenEstimate.cap` returns `cut + marker` (overshoots by the marker); the recall card subtracts the marker's count first. — *source:* S1 review r2 / spec r3
+- `test_infinite_memory_context.py:46` patches the history cap to 250 and stays green only because a no-change status message is the ~33-token loop block (fails at ~110). — *source:* S1 review r2
+- `test_bash_tool_process_bounds.py:244` patches `BASH_MAX_OUTPUT_BYTES` to 1,000 → head 500 + tail 500 under `T = min(TAIL, MAX // 2)`; tests must patch both constants. — *source:* spec r3
+- One runner/adapter per BaseAgent (`_runner_cache`, `base.py:1659-1674`); children and retrievers start cold for the Anthropic repeat gate. The Anthropic adapter makes shallow copies, so marked content lists must be copied (INV-9.5). — *source:* S1 review r1/r2
+- FTS rows are deleted by recorded rowid, never by the UNINDEXED `source` column (full-table scan under the shared lock); fingerprint taken before the read. — *source:* spec r3
+- `Tools.without` (`tools/catalog.py:90`) takes tool objects, not names. Engine `:195-198` and `_validate_options` coerce options with `int()`. — *source:* S1 review r2
+- Contract names (spec r3 §4/§8.5): `FileSystemToolConfig.max_read_lines`, `LineLimit`, `InfiniteWorkspaceSettings.max_read_lines`/`.recall_mode`, `InfiniteRecallMode` (exported from `vidbyte`), `ToolOutputSlidingWindowCompaction(tools=, placeholder=)`, `TrimWithProviderBoundariesCompaction(low_watermark_tokens=)` in new `vidbyte/middleware/compaction/windows.py`, `FullTextIndex` (lib helper, `.lock` RLock), `InfiniteWorkspace.full_text`/`.fit_map_lines`, `INFINITE_BOOKKEEPING_NAMES`, `InfiniteSearchMemoryTool(workspace_root, *, index, max_file_bytes)`, `InfiniteRecallTool`, `InfiniteRecallCitation.parse`, `AnthropicProvider._attach_cache_breakpoints`, `BashTool._collect(process, head, tail, omitted: list[int]) -> int`. — *source:* S1 author
