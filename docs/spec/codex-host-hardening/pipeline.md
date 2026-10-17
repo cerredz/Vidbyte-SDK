@@ -17,8 +17,8 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 06:50 | 07:12 | reports/S0-scout.md | base_commit 6f5a7310; code-map 4 sections, 25 files |
 | S1 spec + review | done | 07:13 | 10:05 | reports/S1-spec-author.md, reports/S1-spec-review.md | r1 0f0d3118 (FR 37, AC 39, EC 52, W 13; 0 blocking Q); reviewer round 1 SOUND WITH FIXES (836b23ca); r2 2b6affc1 rebased on #1178 (FR+, 3 new files, 20 superseded tests); reviewer round 2 SOUND WITH FIXES (4548f58d, 0 Blocker); r3 804c6f0b status approved |
-| S2 tests | running | 10:10 | | reports/S2-test-author.md | |
-| S3 implement | pending | | | | |
+| S2 tests | done | 10:10 | 11:40 | reports/S2-test-author.md | **S2_HEAD 09524ff4**; 106 new tests (97 red, 8 guards, 1 live-skipped), 20 superseded + 7 support literals; red 125F/631P/3S vs baseline 1F/650P/2S; spec r4 (d3389171) aligned to test choices |
+| S3 implement | running | 11:45 | | reports/S3-implementer.md | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
@@ -65,6 +65,16 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
   - **No stage may run `pip install` against the global interpreter.**
   - Baseline in the venv at `fba99efd`: `tests/features/codex_host` + `tests/features/harness_threads` = 650 passed, 2 skipped, 1 failed (inherited `harness_threads:193`).
 - 2026-10-17 10:10: The S2 briefing authorizes the test author to edit exactly the 20 superseded tests and 7 support literals in spec §13, each to the behaviour its spec ID defines, every edit listed in test-plan.md. The template's "never modify an existing assertion" rule otherwise stands. *Reason:* the implementer may not touch tests, so §13's supersessions can only land at S2. S3/S5 then diff the test tree against S2_HEAD.
+- 2026-10-17 11:40: Checked S2 myself:
+  - every test edit is in a §13-named file;
+  - no test was removed or skipped;
+  - the red run reproduced (`test_codex_host_approvals.py` gave 11 failed);
+  - all 41 ACs are in the test plan;
+  - no production file was touched.
+  
+  The S2 agent's harness refused its report-file write ("Subagents should return findings as text, not write report files"), so I saved its inline report verbatim to `reports/S2-test-author.md`. **Every later briefing tells the agent to return the report inline if the write is refused.**
+- 2026-10-17 11:40: S2 listed 14 non-blocking spec defects, where the tests chose details the spec left open. I sent them to the S1 author as a clarification-only revision (r4, `d3389171`) so the S4 conformance reviewers judge the code against a spec that matches the tests. No test, test-plan or Proof cell changed (verified by diff). No reviewer round was run, because nothing in §8 architecture or scope changed. I then set `status: tests-written`.
+- 2026-10-17 11:45: S3's PR base is `ai/resolve-pr-1055-comments` while #1178 is open (see the 08:55 decision). Its drift check compares against `origin/ai/resolve-pr-1055-comments` (has #1178 moved?) and `origin/main` since `6f5a7310` (has main moved under the touched paths?), not against `origin/main` alone.
 
 ## User replies (verbatim)
 - (none yet)
@@ -159,3 +169,19 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
   
   Budget: 3 new files, 13 classes. *Source:* S1 author r2
 - C021 scans only git-tracked files. Run `git add` before `python lint/run.py --rule C021`. *Source:* S1 author r2
+- **S2_HEAD = 09524ff4.** Run `git diff 09524ff4..HEAD -- tests` and it must stay EMPTY for S3 and S5; only S2 may touch tests. *Source:* orchestrator
+- Exact names the tests patch or identity-check:
+  - `turn_events.CODEX_HOST_LOST_TURN_GRACE_SECONDS`;
+  - `connection.CODEX_TOOL_CALL_TIMEOUT_SECONDS`, read inside the router's `handle`;
+  - `connection.retry_on_overload`, bound with `from openai_codex.retry import retry_on_overload` (`assertIs`, so a wrapper fails).
+  
+  Watcher threads must be named `"codex-host-watcher"`. *Source:* S2 test author, spec r4
+- Log record shape:
+  - the event is the first word of a %-style `msg`;
+  - single-space `key=value` tokens follow, one token per value, `key=` when empty;
+  - no `exc_info`.
+  
+  Only a router built with a handler writes the fallback WARNING, and it must remember that after `cancel_pending`. `handled_by=default` whenever the default answer was sent. *Source:* S2, spec r4
+- `CodexSandbox.PROVIDER_DEFAULT == ""`, so messages render member names. `CodexSpawnRequest.__post_init__` check groups: the sandbox group goes before the goal group. *Source:* spec r4
+- 7 "collateral" red tests (in error_details, thread_helpers, threads, turns) go green from the lib §9.3 text changes alone. 8 green guards pass now and must stay green. *Source:* S2
+- Gate interpreter: `run_ci.py` uses `sys.executable` for every step, and its package stage makes its own temp venv. Running it with the `venv-codex163` interpreter is fully isolated from the global env. *Source:* orchestrator check of scripts/run_ci.py:82-201
