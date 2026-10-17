@@ -103,6 +103,9 @@ The folder holds 40 `.md` assets; `infinite_memory.json` top level is a dict wit
 
 - 2026-10-17 04:35 — **Re-review round 1/2:** MERGEABLE AFTER FIXES; 15/15 fixes confirmed, no regression; one new Major R-C101 (root:58 "one line per file" and note_path_description:7 "the workspace map lists every file by its path" are false once the map is capped, `workspace.py:219,229`; both #1113 text; the generator reads task:41 "as many as fit" and note_path:7 "every file" in one call). Per the playbook a scoped findings verifier checks R-C101 before it re-enters the loop (counts toward iteration 2 of 8). `vidbyte/agents/infinite/README.md:58` makes the same claim but was false at base → follow-up (Q-2/INV-20 scope only touches figures that this PR made false).
 
+- 2026-10-17 04:55 — **Scoped verifier: R-C101 CONFIRMED Major as R-27** (ran the real InfiniteWorkspace: the map cuts at 166–426 files depending on description length; in one 244-file run the root's own `plan.md` was not on the map). Fix: root:58 append ", as many as fit"; note_path:7 "lists every file by its path" → "lists files by their paths" (root 2,470 tik / 2,858 est; README:68 figures still hold; 23-sum 3,905 tik).
+- 2026-10-17 04:55 — **Orchestrator ruling — R-28 added to iteration 2 as a trivial Minor:** the scoped verifier showed (`scratchpad/s5-verifier-r27/plan_note_cut.py`) that a cut map can hide the plan note, and resume step 1 says "If you kept no plan note, write one now", so a resumed root on a large workspace can start a second plan note — against "supersede rather than duplicate" and "the workspace is the source of truth". Fix: tell the resumed root to search for its plan note before deciding it kept none, using a tool the root actually holds (verify in `vidbyte/lib/registries/infinite.py`). *Why:* a few words, true of the code, at the resume stage the user named; the final re-review checks it. Counts toward S5 iteration 2/8.
+
 ## User replies (verbatim)
 - (none yet)
 
