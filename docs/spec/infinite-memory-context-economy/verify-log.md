@@ -155,3 +155,69 @@ R-7 measured again at 8da92fb9 (`probe_scale_r7.py`, 1,900 files, 8,000 entries)
 - Follow-ups R-17, R-18, R-20, R-21 and R-22 are out of scope by the briefing. R-23 is waived.
 - The 3 inherited `harness_threads` surface failures stay local only; I did not edit them. The remote Source jobs pass, because those tests skip without `origin/main`.
 - Lint counts at 8da92fb9 equal origin/main 6f5a7310's on every rule. Main was linted in a scratch git copy, and `diff` of the two count lists is empty.
+
+## Iteration 2 — 2026-10-17 05:50–06:15 — agent report: reports/S5-repair-2.md
+
+**Defects in:**
+- Confirmed: R-25 (Major), a regression from iteration 1's R-7 walk (`7eb2942c`). Both row helpers in `search_memory.py` gated on `is_text_file`, which catches `OSError` and returns False. A changed file whose read failed once was stored under its new fingerprint with no rows, and it stayed hidden until it changed again.
+- Pinned by the test author at `1385c8e7`. `-k read_fails_once` gave `2 failed, 20 deselected` at `0002f0ca`, which I reproduced before editing.
+- No failing gate was handed in. Not handed in: R-26 and R-28 (follow-ups), R-27 (S6 PR author), R-23 (waived), and R-17, R-18, R-20, R-21 and R-22 (follow-ups).
+
+**Hypotheses and attempts** are listed in order.
+
+R-25:
+- Attempt 1 (kept): the verifier's proven fix (`s5-rrverify/fix_rr1.py`, `v4.diff`), retyped by hand because the diff is CRLF.
+  - Add `INFINITE_SEARCH_SNIFF_BYTES = 2_048` to the search_memory block of `vidbyte/lib/constants/infinite.py`, and add it to `__all__`. `2_048` follows the file's `1_000` digit grouping.
+  - In `_entry_rows` and `_note_rows`, sniff through `with path.open("rb") as handle:` / `if b"\x00" in handle.read(INFINITE_SEARCH_SNIFF_BYTES): return …`.
+  - An `OSError` now reaches `_lookup`'s `except (OSError, UnicodeError): continue`. The source is not kept, `retain` drops it, and no fingerprint is stored, so the next call reads it again.
+- Comments: the header's KNOWN EDGE CASES, `_lookup`'s refresh comment and both helper comments now say that a changed file that cannot be read for a moment is left out of that call and read again on the next. WHAT NOT TO DO item 6 forbids sniffing a changed file with `is_text_file`.
+- Each comment block was generated with `textwrap.wrap(width=72)`, counting the indent. The `_lookup` block's existing line 3 is not greedy (it stops at "A file"), so I kept lines 1–3 and rewrapped from line 4 only.
+- Kept, and each was checked:
+  - R-10: the sniff runs only for a changed fingerprint. The R-10 test is green, and probe P4.1 (locked, unchanged note) gives 1/1.
+  - The binary rule: the committed binary-note case is green, and so is the verifier's scratch pin "kept with no rows, warm search opens nothing".
+  - R-2: `source.encode` still runs before the open.
+  - Line numbers still come from `read_text_lines`.
+  - No exception was narrowed.
+  - `code_search/base.py` is unchanged.
+- One intended difference: `is_text_file` also checked the size against the byte cap again. The cap now comes only from `_listing`'s `stat`, the same one that gives the fingerprint. A file that grows past the cap between the listing and the read is indexed once, and then it is dropped on the next listing. 84e566bb had the same window.
+
+Gate tooling:
+- Calling `s5-repair1/semgrep170/Scripts/semgrep.exe` by its full path fails with `No module named 'mcp.server.fastmcp' … This is mcp 2.x`, although the venv holds mcp 1.23.3.
+- The cause: the launcher runs `pysemgrep` from PATH and finds the global `Python311\Scripts\pysemgrep.exe`.
+- The fix is to put the venv's Scripts folder first: `export PATH="$(cygpath -u "$V")/Scripts:$PATH"`, after which `semgrep --version` gives `1.170.1`.
+
+**Changes** (branch `feat/infinite-memory-context-economy`, from `0002f0ca`):
+
+| Commit | Defect |
+|---|---|
+| 335dd847 | R-25 |
+
+- `git log --first-parent 1385c8e7..HEAD -- tests` is empty.
+- No test file, lint baseline, suppression, CI file or Semgrep file changed.
+- `origin/main` is 0 commits ahead.
+
+**Gate matrix out** (local gates ran at 335dd847 in this worktree; remote runs are dispatched at 335dd847):
+| Gate | Command | Result | Final lines |
+|---|---|---|---|
+| new tests: R-25 pins | `-k read_fails_once` | PASS | `2 passed, 20 deselected in 0.75s` |
+| new tests: related suites | see gate set | PASS | `348 passed in 8.84s` (iteration 1: 346, plus the 2 pins) |
+| lint | `PYTHONIOENCODING=utf-8 python lint/run.py` | PASS | `A007   operational-constants                     255    255 RATCHETED` · `C016   public-api-contract-current                 0      0 CLEAN` · `S064 RATCHETED: 4 known finding(s).` · `SDK-LINT: PASS` |
+| full local gate: source | `run_ci.py --stage source` | lint, compileall, the context checks and the trace contracts PASS; pytest has only the 3 inherited failures | `SDK-LINT: PASS` · `context write-path integrity: ok` · `context primitive introductions: ok` · `reasoning trace contracts: ok (182 tools, 55 shapes)` · `FAILED …test_harness_threads_surface.py::test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes` · `…::test_branch_leaves_the_tools_and_configs_packages_as_main_has_them` · `…::test_import_vidbyte_starts_no_process_and_leaves_the_native_package_unloaded` · `3 failed, 6582 passed, 16 skipped in 112.00s (0:01:52)` |
+| full local gate: package | `env -u PYTHONPATH python scripts/run_ci.py --stage package` | PASS | `No broken requirements found.` · `Installed vidbyte-sdk 0.3.0 passed smoke checks.` · `CI passed.` |
+| contract | `python scripts/generate-sdk-public-api.py --check` | PASS | `contracts/sdk-public-api.json is current at 5ccc4926362e7f46620a1e1594d28f6b2686c959 (vidbyte-sdk 0.3.0, 645 exports).` |
+| Semgrep 1.170.1 | `--test` + `scan --error … vidbyte`, with the venv's Scripts first on PATH | PASS | `1/1: ✓ All tests passed` · `Findings: 0 (0 blocking)` · `Ran 1 rule on 1008 files: 0 findings.` (exit 0) |
+| remote: static-policy.yml | run 39023136622 @ 335dd847 | PASS (jobs API: 1/1 completed/success) | `1/1: ✓ All tests passed` · `Findings: 0 (0 blocking)` · `Ran 1 rule on 1008 files: 0 findings.` |
+| remote: ci.yml | run 39023135090 @ 335dd847 | PASS (jobs API: 3/3 completed/success) | `Source / Python 3.11: 6401 passed, 200 skipped in 90.83s` · `CI passed.` · `Source / Python 3.12: 6401 passed, 200 skipped, 19 warnings in 128.71s` · `CI passed.` · `Package: Installed vidbyte-sdk 0.3.0 passed smoke checks.` · `CI passed.` |
+
+The 3 source-stage failures are the same inherited set as in iteration 1, with the same reasons: `assert 167 == 120`, `vidbyte/tools/README.md` changed by design, and `At index 29 diff: 'InfiniteRecallMode'`. Remote Source rose from 6399 to 6401 passed with the same 200 skipped, so both pins run on Linux CI.
+
+Independent probes at 335dd847:
+- `probe_rr1.py`: `P1.3 … {'hits': 1, 'total': 1} | … rows=1`, `P2.2 … {'hits': 10, 'total': 41} | … rows=41`, `P2.4 … total 41`, `P3.2 … {'hits': 1, 'total': 1}`, and `P4.1 … 1/1`. At 72d1ca7f, P1.3, P2.2, P2.4 and P3.2 were 0.
+- `probe_transient.py`: `A3`, `A4` and `A6` each give `1 of 1`.
+- The verifier's 5 scratch pins (`test_rr1_pin.py`, including the real share-mode-0 lock, which reports PASSED): `5 passed in 0.72s`.
+
+**Still open:**
+- No confirmed finding is open. R-25 is `fixed @335dd847` in review.md.
+- R-27 (spec drift) belongs to the S6 PR author. Its §17 "Implementation deviations (S5)" block should now also name R-25's own sniff and `INFINITE_SEARCH_SNIFF_BYTES` (row 16).
+- R-26 and R-28 are follow-ups. R-23 is waived. R-17, R-18, R-20, R-21 and R-22 are follow-ups.
+- The 3 inherited `harness_threads` surface failures stay local only. I did not edit them.
