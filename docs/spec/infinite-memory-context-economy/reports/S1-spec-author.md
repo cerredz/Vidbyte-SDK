@@ -98,3 +98,25 @@ The verdict was SOUND WITH FIXES with 12 findings (2 Blocker, 5 Major, 5 Minor).
 **Remaining risks**
 - The root now appends a status message on every tool iteration. A no-change message carries the header and the loop block, about 110–150 tokens each. Over 50 retained iterations that is about 5–7K tokens of history. Sending only the loop block when nothing changed would save about 80 tokens an iteration, but EC-7.5 relies on the newest message carrying the totals. I kept the shape; it is a possible later trim, not built.
 - §8, §8.5, §9, and §12.3 changed (new `index` parameters, `full_text`, `fit_map_lines`, `_collect`'s signature, `INFINITE_BOOKKEEPING_NAMES`, the card order). A focused round-2 review is warranted.
+
+## Addendum: r3 (S1 review round 2, approved, commit 75789419)
+
+The verdict was SOUND WITH FIXES, with 12 findings: 2 Blocker, 2 Major, 8 Minor. I accepted all 12. R-13's scope-adding idea, masking every status message except the newest, is recorded as Q-12 and not built. Per the orchestrator, the frontmatter now says `status: approved`, `revision: 3`. §16 records each finding and what I did with it.
+
+**What I checked before editing**
+- **`test_infinite_memory_context.py:46` (R-13).** Its four `fetch_page` iterations write nothing to the workspace. With the R-13 fix, each status message is the loop block alone. I measured that block with the default loop at 130 characters, or 33 tokens. The review found the test passes at 89 tokens, so it stays green. A loop that also sets `max_tokens` and `max_tool_calls` gives 48 tokens, so NFR-7.2's no-change bound is 40 tokens with the default loop.
+- **`TokenEstimate.cap` (R-15).** It returns `text[:max*4] + marker`, so a cut card counts `max + ceil(len(marker)/4)` tokens. Capping at `CAP - TokenEstimate.count(MARKER)` keeps a cut card at most CAP while still using the one canonical helper. The cost is that a card within 2 tokens of the cap loses up to 8 characters it did not strictly need to lose.
+- **The loop-block call (R-22).** `runtime.py:396-407` passes `tool_call_count=len(self._non_internal_tool_contexts(state.call_contexts))` under `@intent internal-tools-never-spend-the-tool-budget`. Row 25 copies that call.
+- **`Tools.without` (`catalog.py:90`).** It removes exact tool objects, not names. Rows 22 and 23 and §11 now say to filter by `tool.name`.
+- **The request's recall wording (R-24).** It reads "code pre-runs `search_memory(terms)`". One search per term honors that wording and the settled AND-of-quoted-words search, and adds no new mechanism. An OR retry would be a fallback, and that stays Q-8, default no.
+
+**Choices inside the accepted fixes**
+- **R-14.** I dropped `why` from `{found}`. The alternative was a labelled `why`, which would have meant amending INV-10.4, AC-10.3, and T-2. `{rejected}` now rebuilds each citation from its parsed fields, so no retriever prose reaches the card except the NOT FOUND reasons, which AC-10.3 allows.
+- **R-16.** The record stays strict. `parse` lets `ConfigurationError` propagate, and the tool catches it per line and lists `- reply line {n}: {reason}`, so a hostile line cannot inject text there either.
+- **R-19.** The engine now forwards the value unchanged. `_validate_options` builds the trim once, as it already does for the sliding window, so a bad watermark fails at construction through one guard.
+- **R-20.** I moved the `search_memory` name constant into P3 instead of splitting `INFINITE_MASKED_TOOL_NAMES` across two phases. This edits one row and never has to be undone later.
+
+**Remaining risks (unchanged unless noted)**
+- **A-1.** FTS5 on Linux CI is unverified. The review notes that the CI matrix is 3.11 and 3.12 and that CPython ships FTS5.
+- **A-6.** Gateway forwarding is verified in code only, not with a live key.
+- **Q-11 and Q-12.** Each is decided by the §12.5 real-key trace: Q-11 by the cut-move count, Q-12 by how much of the kept history status messages take up.
