@@ -21,7 +21,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from vidbyte.lib.dataclasses.validation import RecordFieldConverter, RecordFieldValidator
+from vidbyte.lib.dataclasses.validation import (
+    RecordFieldConverter,
+    RecordFieldValidator,
+)
 
 
 @dataclass(frozen=True, slots=True)

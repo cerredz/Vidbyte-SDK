@@ -2,8 +2,8 @@
 
 PURPOSE: Defines FullTextIndex, the canonical in-memory full-text index: rows of text grouped by the source file they came from, matched by every query word (porter stemming, no letter case), ranked best first by bm25, and returned as short snippets with a count of every match.
 ROLE IN CODEBASE: Held once per InfiniteWorkspace as full_text (vidbyte/agents/infinite/workspace.py) and searched by InfiniteSearchMemoryTool (vidbyte/tools/builtins/code_search/search_memory.py), which every agent in one InfiniteMemory tree shares. Any feature that needs ranked word search over text it already holds in files should use this class instead of its own sqlite code.
-ARCHITECTURE NOTE: One stdlib sqlite3 connection to ":memory:" holds one FTS5 table, rows(source UNINDEXED, label UNINDEXED, body), tokenized with 'porter unicode61'. Nothing is opened in __init__: the first method that needs the table opens the connection, so building the owner never fails on an interpreter without FTS5, and that first use raises ConfigurationError naming FTS5 and the SQLite version. Each source's fingerprint and the rowids its rows were given live beside the table in plain dicts, so replace and retain delete by rowid; FTS5 keeps no index on the UNINDEXED source column, so a delete by source would scan the whole table. Every method takes the public reentrant lock, and the connection allows use from any thread, so a caller may refresh and search in a worker thread while holding the lock across both.
-FUNCTION INVENTORY: FullTextIndex.fingerprint(source) returns the fingerprint stored with a source; replace(source, fingerprint, rows) swaps a source's rows; retain(sources) drops every other source; search(words, limit=, snippet_tokens=) returns FullTextMatches; match_expression(words) is the static quoting rule. Helpers _table (the lazy table) and _delete (one source's rows) are flat.
+ARCHITECTURE NOTE: One stdlib sqlite3 connection to ":memory:" holds one FTS5 table, rows(source UNINDEXED, label UNINDEXED, body), tokenized with 'porter unicode61'. Nothing is opened in __init__: the first method that needs the table opens the connection, so building the owner never fails on an interpreter without FTS5, and that first use raises ConfigurationError naming FTS5 and the SQLite version. Each source's fingerprint and the rowids its rows were given live beside the table in plain dicts, so replace and retain delete by rowid; FTS5 keeps no index on the UNINDEXED source column, so a delete by source would scan the whole table. Every method that touches the index or its bookkeeping takes the public reentrant lock, and the connection allows use from any thread, so a caller may refresh and search in a worker thread while holding the lock across both.
+FUNCTION INVENTORY: FullTextIndex.fingerprint(source) returns the fingerprint stored with a source; replace(source, fingerprint, rows) swaps a source's rows; retain(sources) drops every other source; search(words, limit=, snippet_tokens=) returns FullTextMatches, refusing a bad size with ValueError through RecordFieldValidator; match_expression(words) is the static quoting rule. Helpers _table (the lazy table) and _delete (one source's rows) are flat.
 COMMON MODIFICATION PATTERNS: A new query option is a keyword on search with a refusal in the isinstance shape, forwarded as a bound parameter. A new stored field is a new UNINDEXED column, filled from a new FullTextRow field.
 WHAT NOT TO DO IN THIS FILE: 1. Do not open the connection in __init__; the owner is built before anyone knows whether FTS5 exists. 2. Do not put query text into the MATCH expression unquoted; any word could be an operator or a column filter. 3. Do not delete rows by source; delete by the rowids recorded for it. 4. Do not import from a layer above vidbyte/lib.
 KNOWN EDGE CASES: An empty word list matches nothing and runs no MATCH. A word holding no letter or digit quotes to a phrase FTS5 matches nothing with on SQLite 3.38, but callers drop such words first rather than rely on that. bm25 ties have no defined order. The snippet cap counts word tokens; the ellipsis FTS5 adds at a cut is not a word.
@@ -17,10 +17,18 @@ import sqlite3
 import threading
 from collections.abc import Collection, Sequence
 
-from vidbyte.lib.dataclasses.code_search import FullTextHit, FullTextMatches, FullTextRow
+from vidbyte.lib.dataclasses.code_search import (
+    FullTextHit,
+    FullTextMatches,
+    FullTextRow,
+)
+from vidbyte.lib.dataclasses.validation import RecordFieldValidator
 from vidbyte.lib.errors import ConfigurationError
 
-# The most word tokens one snippet may hold.
+# The fewest hits one search may ask for, and the fewest and most word
+# tokens one snippet may hold.
+FULLTEXT_MIN_HITS = 1
+FULLTEXT_SNIPPET_MIN_TOKENS = 1
 FULLTEXT_SNIPPET_MAX_TOKENS = 64
 
 
@@ -77,18 +85,21 @@ class FullTextIndex:
     def search(self, words: Sequence[str], *, limit: int, snippet_tokens: int) -> FullTextMatches:
         """Return the best rows holding every word, best first, with a snippet of each, and the count of every match."""
         # Refuse sizes the query cannot honor before touching the table.
-        if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
-            raise ValueError(f"limit must be an int of at least 1, got {limit!r}.")
-        if isinstance(snippet_tokens, bool) or not isinstance(snippet_tokens, int) or snippet_tokens < 1 or snippet_tokens > FULLTEXT_SNIPPET_MAX_TOKENS:
-            raise ValueError(f"snippet_tokens must be an int from 1 to {FULLTEXT_SNIPPET_MAX_TOKENS}, got {snippet_tokens!r}.")
+        # The shared validator checks them (no bool, no float), and a bad
+        # size is the caller's ValueError, not a configuration error.
+        try:
+            RecordFieldValidator.require_int(limit, "limit", minimum=FULLTEXT_MIN_HITS)
+            RecordFieldValidator.require_int(snippet_tokens, "snippet_tokens", minimum=FULLTEXT_SNIPPET_MIN_TOKENS, maximum=FULLTEXT_SNIPPET_MAX_TOKENS)
+        except ConfigurationError as exc:
+            raise ValueError(exc.message) from exc
+        # With no word there is nothing to match, so no MATCH runs.
+        if not words:
+            return FullTextMatches((), 0)
         with self.lock:
-            # Open the table on first use; with no word there is nothing
-            # to match, so no MATCH runs.
+            # Open the table on first use, then match the AND of the quoted
+            # words, best bm25 score first, and count every matching row
+            # for the total line.
             connection = self._table()
-            if not words:
-                return FullTextMatches((), 0)
-            # Match the AND of the quoted words, best bm25 score first, and
-            # count every matching row for the total line.
             expression = FullTextIndex.match_expression(words)
             found = connection.execute("select label, snippet(rows, 2, '', '', '…', ?) from rows where rows match ? order by bm25(rows) limit ?", (snippet_tokens, expression, limit)).fetchall()
             (total,) = connection.execute("select count(*) from rows where rows match ?", (expression,)).fetchone()
@@ -127,6 +138,8 @@ class FullTextIndex:
 
 
 __all__ = [
+    "FULLTEXT_MIN_HITS",
     "FULLTEXT_SNIPPET_MAX_TOKENS",
+    "FULLTEXT_SNIPPET_MIN_TOKENS",
     "FullTextIndex",
 ]
