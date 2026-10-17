@@ -196,9 +196,10 @@ class CodexAgentError(AgentExecutionError):
     def retryable(self) -> bool:
         """Whether the same call can succeed unchanged when it is made again."""
         # @intent retryable-is-read-from-the-code
-        # Read from the code on every access, so each copy that keeps the
-        # code keeps the answer and details never carry it (D-6). The
-        # import stays here so the error hierarchy loads no constants.
+        # Read from the code on every access, so each copy that keeps
+        # the code keeps the answer and details never carry it
+        # (D-6). The import stays here so the error hierarchy loads
+        # no constants.
         from vidbyte.lib.constants.codex_host import CODEX_HOST_RETRYABLE_CODES
 
         return self.failure_code in CODEX_HOST_RETRYABLE_CODES

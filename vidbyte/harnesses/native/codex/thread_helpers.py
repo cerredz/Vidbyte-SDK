@@ -318,11 +318,11 @@ class CodexThreadHelpers:
 
     async def _fork_point(self, operation: CodexHostOperation, thread_id: str, from_turn_id: str) -> str:
         # @intent fork-only-through-a-completed-turn
-        # Page the stored turns newest first, without their items, until
-        # a page decides the point. The walk ends on an empty or
-        # repeated cursor and after the page bound, and a point that is
-        # unknown, not completed or missing is refused before thread/fork
-        # (D-29, hardening INV-28 step 5).
+        # Page the stored turns newest first, without their items,
+        # until a page decides the point. The walk ends on an empty or
+        # repeated cursor and after the page bound, and a point that
+        # is unknown, not completed or missing is refused before
+        # thread/fork (D-29, hardening INV-28 step 5).
         connection = self._connection
         point: str | None = None
         sent: set[str] = set()

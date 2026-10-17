@@ -762,9 +762,10 @@ class CodexHost:
         # Start the thread with its dynamic tools. On a host without an
         # approval_handler, a user reviewer Codex reports stops here,
         # naming the thread, before any name, turn or goal is sent
-        # (D-32, hardening INV-20). The tool handler is registered last,
-        # so a failed step leaves none behind (hardening INV-26). The
-        # pricing names the model Codex resolved and its provider (D-19).
+        # (D-32, hardening INV-20). The tool handler is registered
+        # last, so a failed step leaves none behind (hardening
+        # INV-26). The pricing names the model Codex resolved and its
+        # provider (D-19).
         connection = self._connection
         dynamic_tools = bridge.dynamic_tools if bridge is not None else ()
         started = await connection.call(operation, CODEX_THREAD_START_METHOD, connection.client.thread_start, self._params.thread_start(request, dynamic_tools))

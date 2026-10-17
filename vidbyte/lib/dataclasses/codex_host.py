@@ -246,9 +246,9 @@ class CodexSpawnRequest:
 
     def _reject_bad_sandbox_fields(self) -> None:
         # @intent sandbox-overrides-need-the-sandbox-they-change
-        # Both fields are sent inside the turn's sandbox policy, and only
-        # some policies have them, so a sandbox without the setting is
-        # refused here rather than by Codex mid-run (INV-37).
+        # Both fields are sent inside the turn's sandbox policy, and
+        # only some policies have them, so a sandbox without the setting
+        # is refused here rather than by Codex mid-run (INV-37).
         if self.network_access is not None:
             _require_bool("Codex spawn request", "network_access", self.network_access)
             if self.turn.sandbox not in (CodexSandbox.READ_ONLY, CodexSandbox.WORKSPACE_WRITE):
@@ -791,8 +791,9 @@ class CodexServerRequest:
 
     @staticmethod
     def _wire_question(raw: object) -> CodexUserInputQuestion:
-        # A question and its options read absent and null values as the
-        # record defaults; a missing id or label fails the record checks.
+        # A question and its options read absent and null values
+        # as the record defaults; a missing id or label fails the
+        # record checks.
         if not isinstance(raw, Mapping):
             raise ConfigurationError("Codex server request questions must hold objects.")
         sent = {key: value for key, value in raw.items() if value is not None}

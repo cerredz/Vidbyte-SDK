@@ -129,8 +129,8 @@ class CodexTurnEvents:
             turn.stop_sent = True
             await connection.interrupt(CodexHostOperation.INTERRUPT_CODEX_TURN, turn.handle, turn.state, cleanup=True, quiet=True)
         # (d) Still running on an open host: the turn lost its events,
-        #     so it ends FAILED, then a goal run's stream closes. A close
-        #     or death that came first already ended it as exited.
+        #     so it ends FAILED, then a goal run's stream closes. A
+        #     close or death that came first already ended it as exited.
         if turn.snapshot is None and not connection.stopped():
             logger.warning("codex_host_turn_lost thread_id=%s turn_id=%s", turn.handle.thread_id, turn.handle.turn_id)
             self._registry.finish(turn, self._responses.failed(turn.handle, FailureCode.CODEX_API_ERROR, CODEX_HOST_LOST_EVENTS_MESSAGE))
