@@ -14,7 +14,7 @@ The outcome the generator was asked to achieve.
 
 {goal}
 
-Use it to settle what a criterion means when its wording is unclear, not to add requirements of your own. When the work meets every criterion yet plainly misses the goal, say so in your review; the criteria still decide the verdict.
+Use it to settle what a criterion means when its wording is unclear, not to add requirements of your own. When the work meets every criterion yet plainly misses the goal, say so in your review, and fix it when the fix stays inside the task; the criteria still decide the verdict.
 
 # Done criteria
 
