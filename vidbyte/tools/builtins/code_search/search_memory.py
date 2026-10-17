@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: A BaseCodeSearchTool subclass, so the ignore rules, the byte 
 FUNCTION INVENTORY: spec declares the tool with literal descriptions; execute is the narrated main function, which checks the query, runs _lookup in a worker thread, and renders the hits; _lookup is the worker thread's narrated step, which holds the lock across the refresh and the search; _stamp, _entry_rows, and _note_rows each do one step of the refresh, the two rows helpers taking the same (source, path) arguments so _lookup picks one per file.
 COMMON MODIFICATION PATTERNS: A new kind of indexed text is one more source in _lookup with a rows helper beside _entry_rows and _note_rows. A new query option is a parameter in spec and a keyword passed to FullTextIndex.search, whose bounds stay in vidbyte/lib/constants/infinite.py.
 WHAT NOT TO DO IN THIS FILE: 1. Do not read a file or call the index on the event loop; everything after the query check runs in _lookup through asyncio.to_thread. 2. Do not take the index's lock twice in one call; the refresh and the search share one hold. 3. Do not write to the workspace; the tool is READ. 4. Do not put a number in the model-facing descriptions; the caps are constants.
-KNOWN EDGE CASES: A file rewritten with the same size within one filesystem timestamp tick keeps its old rows until a later write changes the size or the time (spec EC-8.5). A file that vanishes between the listing and the read is left out of this call's index. A malformed entries.jsonl line is skipped, never an error. A query whose words hold no letter or digit matches nothing and runs no MATCH. Without FTS5 every call returns fts5_unavailable and every other tool keeps working.
+KNOWN EDGE CASES: A file rewritten with the same size within one filesystem timestamp tick keeps its old rows until a later write changes the size or the time (spec EC-8.5). A file that vanishes between the listing and the read is left out of this call's index. A malformed entries.jsonl line is skipped, never an error, and so is a line whose kind or text UTF-8 cannot encode (a lone surrogate written as a JSON escape). A file whose name UTF-8 cannot encode is left out of the call (spec EC-8.8). The blank-query check reads the query as given; after it, each NUL reads as a space and each lone surrogate is dropped, so no query text can fail the bind or the MATCH. A query whose words hold no letter or digit matches nothing and runs no MATCH. Without FTS5 every call returns fts5_unavailable and every other tool keeps working.
 RELATED DOCS: docs/spec/infinite-memory-context-economy/spec.md (sections 6.1 INV-8.1 to INV-8.9, 9.1, and 9.2); vidbyte/tools/README.md; vidbyte/agents/infinite/README.md
 TESTS: tests/features/infinite_memory_agent/test_infinite_memory_search.py
 """
@@ -65,12 +65,18 @@ class InfiniteSearchMemoryTool(BaseCodeSearchTool):
     async def execute(self, call: ToolCall) -> ToolResult:
         """Refresh the shared index from the disk, search it for every word of the query, and return the best hits and the total."""
         # Refuse a query with no text at all, so the model knows to send
-        # words; then keep only the words that hold a letter or a digit,
-        # because a word of punctuation alone would quote to an empty
-        # phrase whose meaning FTS5 does not promise.
+        # words. The check reads the query as given, so a query of NULs
+        # alone is searched and matches nothing.
         query = call.arguments.get("query")
         if not isinstance(query, str) or not query.strip():
             return ToolResult.error(self.name, "query must hold at least one word to search for.", metadata={"error": "invalid_argument"})
+        # Read each NUL as a space and drop each character UTF-8 cannot
+        # encode, a lone surrogate, because SQLite can bind neither and
+        # FTS5 stops reading at a NUL. Then keep only the words that
+        # hold a letter or a digit, because a word of punctuation alone
+        # would quote to an empty phrase whose meaning FTS5 does not
+        # promise.
+        query = query.replace("\x00", " ").encode("utf-8", "ignore").decode("utf-8")
         words = tuple(word for word in query.split() if any(character.isalnum() for character in word))
 
         # @intent search-memory-runs-off-the-event-loop
@@ -108,15 +114,16 @@ class InfiniteSearchMemoryTool(BaseCodeSearchTool):
 
             # Re-read only the files whose fingerprint changed, taking the
             # fingerprint before the read, so a write that lands during
-            # the read is read again next time; a file that vanished
-            # since the listing is left out.
+            # the read is read again next time. A file that vanished
+            # since the listing, or whose name UTF-8 cannot encode, is
+            # left out of this call.
             kept: list[str] = []
             for source, path in sources.items():
                 read_rows = self._entry_rows if source == INFINITE_ENTRIES_FILE else self._note_rows
                 try:
                     stamp = self._stamp(path)
                     rows = None if index.fingerprint(source) == stamp else read_rows(source, path)
-                except OSError:
+                except (OSError, UnicodeError):
                     continue
                 if rows is not None:
                     index.replace(source, stamp, rows)
@@ -145,14 +152,23 @@ class InfiniteSearchMemoryTool(BaseCodeSearchTool):
                 record = json.loads(line)
                 number = RecordFieldValidator.require_int(record["id"], "id", minimum=INFINITE_FIRST_ENTRY_ID)
                 kind = RecordFieldValidator.require_text(record["kind"], "kind", one_line=True)
-                rows.append(FullTextRow(source, f"#{number} {kind}", RecordFieldValidator.require_text(record["text"], "text", allow_blank=True)))
+                text = RecordFieldValidator.require_text(record["text"], "text", allow_blank=True)
+                # A kind or text UTF-8 cannot encode, a lone surrogate
+                # bash wrote as a JSON escape, is malformed too: SQLite
+                # could not store it, and the encode error is a
+                # ValueError.
+                f"{kind}{text}".encode("utf-8")
+                rows.append(FullTextRow(source, f"#{number} {kind}", text))
             except (ValueError, KeyError, TypeError, ConfigurationError):
                 continue
         return rows
 
     def _note_rows(self, source: str, path: Path) -> list[FullTextRow]:
         # One row per non-blank line, numbered as grep and read_lines
-        # number lines.
+        # number lines. A name UTF-8 cannot encode raises here, before
+        # the file is read, because SQLite could not store it as the
+        # label; the refresh then leaves the file out.
+        source.encode("utf-8")
         return [FullTextRow(source, f"{source}:{number}", line) for number, line in enumerate(self.read_text_lines(path), start=1) if line.strip()]
 
 
