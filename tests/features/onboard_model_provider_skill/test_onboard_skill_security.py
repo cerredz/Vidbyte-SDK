@@ -288,7 +288,8 @@ def test_a_run_never_edits_an_existing_vendors_key_rule_and_sends_a_newer_shape_
     # S10 · D-13 / EC-33 / spec r9 row s5r3-1: the SDK's Meta key rule drifted from Meta's docs, and a run that rewrote it
     # would strand every key issued in the old shape. Qualify step 7 keeps every existing vendor's key entries, calls an
     # overlap key-prefix-collision, and sends a newer documented shape to Follow-ups for a separate PR that adds it beside
-    # the old one. Both lines are pinned whole, and no prose line of either file may tell a run to edit a key rule.
+    # the old one. Both lines are pinned whole, and no prose line of either file may tell a run to edit a key rule in
+    # the calibrated forms below; a contradicting line in other words, such as one that names the vendor, is left to review.
     skill, procedure = _documents()
     qualify = [line.strip() for line in procedure.section("## 3. Qualify").prose_lines()]
     step_7 = [index for index, line in enumerate(qualify) if line.startswith("7. **Key format.**")]

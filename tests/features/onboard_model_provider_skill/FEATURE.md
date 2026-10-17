@@ -122,7 +122,7 @@ The lines below were found by implementation re-review round 1 (R-9 to R-12) and
 
 The lines below come from S5 repair 3 (spec r9 row s5r3-1). Each was proven by a mutation of a fresh copy of the skill that passed the 63-test pack and now fails the named test.
 
-- Step 7 lets a run edit, replace or narrow an existing vendor's key rule, makes an overlap a reason to edit it, or puts a newer shape in place of the old one; or any line of either file says so → every key issued in the old shape is refused or routed to another vendor (D-13, EC-33) (S10).
+- Step 7 lets a run edit, replace or narrow an existing vendor's key rule, makes an overlap a reason to edit it, or puts a newer shape in place of the old one; or a line of either file says so in those forms → every key issued in the old shape is refused or routed to another vendor (D-13, EC-33) (S10).
 - The newer shape no longer goes to Follow-ups, or the Follow-ups bullet drops it → the drift is lost, as the Meta rule's was (S10).
 - The Follow-ups bullet tells the run to close a conflicting PR → that vendor is skipped forever (INV-5 b) (S10).
 - The C4 note deleted, or allowing a paraphrase → a README row quotes a summary that lacks the prefix it is there to prove (FR-7, INV-9, G-2) (W8).

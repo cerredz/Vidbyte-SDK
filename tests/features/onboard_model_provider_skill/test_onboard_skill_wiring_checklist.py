@@ -191,7 +191,7 @@ def test_c9_template_proves_the_vendor_key_leaves_as_its_bearer_token_and_the_ot
 def test_row_c4_quotes_the_statement_that_documents_the_prefix_and_never_a_paraphrase() -> None:
     # W8 · FR-7 / INV-9 / G-2 / spec r9 row s5r3-1: a README quote that paraphrases the page can drop the prefix it is
     # there to prove, which is how the Meta row drifted from Meta's docs. The C4 note is pinned whole, and no other
-    # wiring-checklist line may allow a paraphrase.
+    # wiring-checklist line may mention a paraphrase.
     prose = [line.strip() for line in read_markdown(PROCEDURE_FILE, PROCEDURE_REF).section("## 5. Wiring checklist").prose_lines()]
 
     assert [line for line in prose if line.startswith("- **C4.**")] == [C4_NOTE], "s5r3-1: the C4 README row quotes what documents P, so the quote contains P"
