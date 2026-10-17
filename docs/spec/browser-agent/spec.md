@@ -1,7 +1,7 @@
 ---
 spec: browser-agent
 title: BrowserAgent: JevAgent-shaped agent and runtime for long-running browser tasks
-status: implemented
+status: reviewed
 revision: 4
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-browser-agent
