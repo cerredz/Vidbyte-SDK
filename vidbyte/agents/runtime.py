@@ -92,7 +92,7 @@ from vidbyte.agents.contracts.schema import SchemaConformance
 from vidbyte.agents.pricing import UsageTracker
 from vidbyte.agents.speed import AgentSpeedTracker
 from vidbyte.agents.types import AgentMessage
-from vidbyte.context.algorithms import ContextWindowAlgorithm, ToolResultAdmission
+from vidbyte.context.algorithms import ContextWindowAlgorithm
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.primitives import ContextItem
 from vidbyte.context.runtime import (
@@ -130,7 +130,7 @@ from vidbyte.lib.dataclasses.speed import (
     RecordToolCallInput,
 )
 from vidbyte.lib.dataclasses.strategies import AgentResult
-from vidbyte.lib.enums import AgentRuntimeStateKey, ModelModality, UsageKind
+from vidbyte.lib.enums import AgentRuntimeStateKey, ModelModality, ModelProvider, UsageKind
 from vidbyte.lib.errors import (
     AllModelsFailedError,
     PermissionDeniedError,
@@ -141,11 +141,11 @@ from vidbyte.lib.token_usage import token_usage_from_response
 from vidbyte.lib.tools import ToolsFormatter
 from vidbyte.lib.tracing import NullTracer, SpanContext, TracerBase
 from vidbyte.lib.util.credential_keys import CredentialKeyPolicy
+from vidbyte.lib.util.prompt_placement import PromptPlacement
 from vidbyte.middleware import AgentMiddleware, MiddlewarePipeline
-from vidbyte.middleware.builtins.context_compaction import (
-    ToolResultCompactionMiddleware,
-)
 from vidbyte.prompts.agentic_loop import append_agentic_loop_prompt
+from vidbyte.providers.anthropic import AnthropicProvider
+from vidbyte.providers.gemini import GeminiProvider
 from vidbyte.providers.output_schema import OutputSchemaFormatter
 from vidbyte.tools._internal import IS_DONE_TOOL_NAME, with_internal_agent_tools
 from vidbyte.tools.activity import ActivityToolFormatter
@@ -200,7 +200,7 @@ class AgentRuntime:
         self.run_id = run_id
         self.algorithm = ContextWindow.resolve_algorithm(algorithm)
         self._tracer: TracerBase = tracer or NullTracer()
-        self.middleware = MiddlewarePipeline((*tuple(middleware), *self._context_window_admission_middleware()))
+        self.middleware = MiddlewarePipeline(tuple(middleware))
         self.context_manager = context_manager
         # Run-scoped, read-only per-call manager (AgentInput.context_manager); rendered, never upserted into.
         self.input_context_manager: ContextManager | None = None
@@ -216,15 +216,6 @@ class AgentRuntime:
         # The model this run switched to and where its chain stands, so later stages and trials stay on the model that worked.
         self._fallback_handle: RunnerHandle | None = None
         self._fallback_progress: tuple[int, list[dict[str, str]], list[BaseException], bool] = (0, [], [], False)
-
-    def _context_window_admission_middleware(self) -> tuple[AgentMiddleware, ...]:
-        # Returns compatibility middleware for legacy tool-result admission presets.
-        admission = ToolResultAdmission(self.algorithm.tool_result_admission)
-        if admission is ToolResultAdmission.COMPACT:
-            return (ToolResultCompactionMiddleware.truncate(max_chars=self.algorithm.max_tool_result_chars),)
-        if admission is ToolResultAdmission.HIDE_RAW:
-            return (ToolResultCompactionMiddleware.hide(),)
-        return ()
 
     def build_context(
         self,
@@ -1537,8 +1528,11 @@ class AgentRuntime:
         trace_messages: list[dict[str, Any]] = []
         if system is not None:
             trace_messages.append({"role": "system", "content": _trace_text(system)})
-        trace_messages.extend(history_messages)
+        # Put the task where the provider puts it in the request, never after the run's own work.
+        position = self._traced_prompt_position(provider, call_options.get("messages") or (), call_options.get("prompt_index"))
+        trace_messages.extend(history_messages[:position])
         trace_messages.append({"role": "user", "content": safe_prompt})
+        trace_messages.extend(history_messages[position:])
         input_messages = tuple(trace_messages)
         inputs: dict[str, Any] = {
             "agent_name": self.agent_name,
@@ -1569,6 +1563,19 @@ class AgentRuntime:
             f"tools={len(list(tools)) if tools else 0}"
         )
         return inputs
+
+    @staticmethod
+    def _traced_prompt_position(provider: str, messages: Sequence[Mapping[str, Any]], boundary: int | None) -> int:
+        """Return where the provider puts the task among the request's messages, by that provider's own placement rule."""
+        # @intent traced-prompt-sits-where-the-request-put-it
+        # The span shows the task where the request put it: at the run boundary or in front of the tool exchange it
+        # provoked, never after the run's own work. Each wire family's own rule decides, on the unscrubbed messages, so
+        # the view cannot drift from the request; Gemini also puts the task ahead of a leading model turn.
+        wire = ToolsFormatter.wire_format(str(getattr(provider, "value", provider)))
+        if wire == ModelProvider.GEMINI.value:
+            return GeminiProvider._prompt_index([GeminiProvider._gemini_turn(message) for message in messages], boundary)
+        is_call_turn = AnthropicProvider._is_tool_use_turn if wire == ModelProvider.ANTHROPIC.value else PromptPlacement.is_chat_call_turn
+        return PromptPlacement.index(messages, is_call_turn=is_call_turn, boundary=boundary)
 
     @staticmethod
     def _runner_model_name(runner: object) -> str | None:
@@ -1801,7 +1808,8 @@ class AgentRuntime:
             # so later runs replay what the model saw rather than the raw, unprotected output.
             # @intent denials-are-never-truncated
             # A permission or middleware denial never ran, so result_max_chars must not cut its reason off.
-            visible_result = self._append_tool_result_message(messages, call, result, state.provider, after_decision, truncate=context_record.state is not ToolCallState.DENIED)
+            # Only here does the context-window algorithm admit (compact or hide) what a tool actually returned.
+            visible_result = self._append_tool_result_message(messages, call, result, state.provider, after_decision, truncate=context_record.state is not ToolCallState.DENIED, admit=True)
             context_record = self._with_model_visible_result(context_record, result, visible_result)
         state.call_contexts.append(context_record)
         if after_decision.action is MiddlewareAction.ABORT_RUN:
@@ -1933,9 +1941,10 @@ class AgentRuntime:
         decision: MiddlewareDecision,
         *,
         truncate: bool = True,
+        admit: bool = False,
     ) -> ToolResult:
         # Returns the model-visible result it appended so callers can record what the model saw.
-        visible_result = self._model_visible_tool_result(call, result, decision, truncate=truncate)
+        visible_result = self._model_visible_tool_result(call, result, decision, truncate=truncate, admit=admit)
         # Provider-specific result formatting remains the single place that
         # knows how Anthropic, Gemini, OpenAI Responses, and OpenAI-compatible
         # chat messages represent tool failures.
@@ -1950,6 +1959,7 @@ class AgentRuntime:
         decision: MiddlewareDecision,
         *,
         truncate: bool = True,
+        admit: bool = False,
     ) -> ToolResult:
         # Primitive binding is applied before any middleware-visible transform so
         # successful tool outputs can still be stored as primitives. Error results
@@ -1963,18 +1973,28 @@ class AgentRuntime:
         # @intent appended-middleware-notes-survive-truncation: truncation keeps the head, so a note a
         # middleware appended (canary watermark, loop-detection notice) would be cut off a long output.
         # Cap only the raw part and re-attach the appended tail; replaced outputs are capped whole.
-        if visible is not result and result.output and visible.output.startswith(result.output):
-            capped = self._truncate_for_tool_settings(call, result)
+        # An empty raw output counts too: the visible text is then all middleware note, which a hide admission
+        # would otherwise withhold whole, and there is no tool output in it to cap or hide.
+        if visible is not result and visible.output.startswith(result.output):
+            capped = self._truncate_for_tool_settings(call, result, admit=admit)
             tail = visible.output[len(result.output):]
             return ToolResult(tool_name=visible.tool_name, status=visible.status, output=capped.output + tail, metadata={**dict(capped.metadata), **dict(visible.metadata)})
-        return self._truncate_for_tool_settings(call, visible)
+        return self._truncate_for_tool_settings(call, visible, admit=admit)
 
-    def _truncate_for_tool_settings(self, call: ToolCall, result: ToolResult) -> ToolResult:
-        # Caps executed, non-internal tool output to ToolSettings.result_max_chars, leaving raw ToolResult intact.
+    def _truncate_for_tool_settings(self, call: ToolCall, result: ToolResult, *, admit: bool = False) -> ToolResult:
+        # Caps executed, non-internal tool output to the context-window admission and ToolSettings.result_max_chars, leaving raw ToolResult intact.
         settings = self.config.tool_settings
-        if settings is None or self._tool_is_internal(call):
+        if self._tool_is_internal(call):
             return result
-        return settings.truncate(result)
+        # @intent admission-is-a-cap-not-a-middleware
+        # The context-window admission (compact or hide) caps an executed tool's output here, like result_max_chars,
+        # so a note a middleware appended survives it and a denial's reason is never hidden or cut.
+        # @intent admission-spares-calls-that-never-ran
+        # An unknown tool or invalid arguments means the tool never ran: the text is the SDK's own guidance, not tool
+        # output, so hiding it would tell the model the tool "completed" and leave it no way to fix the call.
+        if admit and dict(result.metadata).get("error") not in ("unknown_tool", "validation_error"):
+            result = self.algorithm.model_visible_tool_result(call, result)
+        return result if settings is None else settings.truncate(result)
 
     def _tool_call_middleware_metadata(self, metadata: Mapping[str, Any], call: ToolCall) -> dict[str, Any]:
         call_metadata = dict(metadata)

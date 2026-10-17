@@ -1,14 +1,14 @@
 """FILE: vidbyte/lib/dataclasses/validation.py
 
-PURPOSE: Defines RecordFieldValidator, the one canonical field validator for validated records (text, optional text, positive finite numbers, bounded ints, strict bools, enum members, argv tuples and absolute directories), and RecordFieldConverter, the canonical conversions and checks records apply beside it (tuples, read-only mappings, enum members, paths and plain instance checks).
-ROLE IN CODEBASE: Called from the __post_init__ of the records in vidbyte/lib/dataclasses/native_threads.py and process.py, and, through accepts_text, by the output readers GrokWire, OpencodeWire, MuseWire and MuseExecOutput under vidbyte/harnesses/native/ to check a vendor's thread id.
+PURPOSE: Defines RecordFieldValidator, the one canonical field validator for validated records and settings (text, optional text, tuples of text items, positive finite numbers, bounded ints, strict bools, enum members, argv tuples and absolute directories), and RecordFieldConverter, the canonical conversions and checks records apply beside it (tuples, read-only mappings, enum members, paths, resolved folders, lists of existing files and plain instance checks).
+ROLE IN CODEBASE: Called from the __post_init__ of the records in vidbyte/lib/dataclasses/native_threads.py, process.py, infinite.py and middleware.py (DelegationLimits), of InfiniteWorkspaceSettings and InfiniteMemoryAgentSettings (vidbyte/agents/infinite/settings.py), by DelegationLimitsMiddleware for its depth, and, through accepts_text, by the output readers GrokWire, OpencodeWire, MuseWire and MuseExecOutput under vidbyte/harnesses/native/ to check a vendor's thread id.
 ARCHITECTURE NOTE: Two classes of static methods, each taking the checked value first and the field name second, returning the checked or converted value or raising ConfigurationError. The checked variable is always named value, so the bool guards here are the single owner lint rules C002, C006, C007 and C008 point at. Messages name the field and the expected type or range, and quote a value only when it is a short, non-secret scalar or text. Every ConfigurationError also carries details["field"], so a caller can name the bad argument without reading the message text.
-FUNCTION INVENTORY: require_text, accepts_text (require_text's rule as a bool), require_optional_text, require_command_line_units (a value's quoted Windows command-line length), require_number, require_int, require_bool, require_enum, require_argv, require_directory; _text_problem words what a text value fails, and _received renders the received value safely for a message. RecordFieldConverter: to_tuple, to_mapping, to_enum (a member or its exact value string), to_path (a str or os.PathLike, unchecked), require_instance.
+FUNCTION INVENTORY: require_text (an optional character cap, pattern and one-line rule), accepts_text (require_text's rule as a bool), require_optional_text, require_text_items (a tuple of texts, each under require_text's rule), require_command_line_units (a value's quoted Windows command-line length), require_number, require_int (maximum optional), require_bool, require_enum, require_argv, require_directory; _text_problem words what a text value fails, and _received renders the received value safely for a message. RecordFieldConverter: to_tuple, to_mapping, to_enum (a member or its exact value string), to_path (a str or os.PathLike, unchecked), to_folder (resolved, never a file, optionally existing), to_files (existing files, resolved, optionally with distinct names), require_instance.
 COMMON MODIFICATION PATTERNS: Add a new check as one more static method with value first and field_name second, and call it from a record's __post_init__; never copy a check into a record.
 WHAT NOT TO DO IN THIS FILE: 1. Do not convert values silently; to_path only wraps a path in Path and never checks or resolves it. 2. Do not quote mapping values or long text in a message; they can hold secrets. 3. Do not import from a layer above vidbyte.lib.
-KNOWN EDGE CASES: bool is an int subclass, so every numeric check refuses bool first. A field whose last name segment reads as a credential (password, token, secret, api_key) is never quoted, whatever its length. require_argv refuses a list on purpose, because argv fields must be immutable tuples. require_directory must run on the path as given, before Path.resolve(), or a relative path would pass.
+KNOWN EDGE CASES: bool is an int subclass, so every numeric check refuses bool first. A field whose last name segment reads as a credential (password, token, secret, api_key) is never quoted, whatever its length. require_argv refuses a list on purpose, because argv fields must be immutable tuples. require_directory must run on the path as given, before Path.resolve(), or a relative path would pass; to_folder and to_files are the opposite choice, for settings that accept a relative path and store it resolved against the working directory at construction. require_text_items refuses a list, as require_argv does, so a frozen record cannot be changed through its field.
 RELATED DOCS: vidbyte/lib/README.md; lint/rules/c008_shared_validator_owner.py
-TESTS: tests/features/harness_threads/test_harness_threads_records.py
+TESTS: tests/features/harness_threads/test_harness_threads_records.py; tests/test_record_field_validation.py (the options added for InfiniteMemory); tests/features/infinite_memory_agent/test_infinite_memory_contract.py
 """
 
 from __future__ import annotations
@@ -38,10 +38,11 @@ class RecordFieldValidator:
     """The canonical field checks every validated record uses."""
 
     @staticmethod
-    def require_text(value: Any, field_name: str, *, max_chars: int, pattern: str | None = None, allow_blank: bool = False) -> str:
-        # A str of at most max_chars, fully matching pattern when one
-        # is given; it may be empty or blank only with allow_blank.
-        problem = RecordFieldValidator._text_problem(value, max_chars=max_chars, pattern=pattern, allow_blank=allow_blank)
+    def require_text(value: Any, field_name: str, *, max_chars: int | None = None, pattern: str | None = None, allow_blank: bool = False, one_line: bool = False) -> str:
+        # A str of at most max_chars when a cap is given, fully
+        # matching pattern when one is given, on one line with
+        # one_line; it may be empty or blank only with allow_blank.
+        problem = RecordFieldValidator._text_problem(value, max_chars=max_chars, pattern=pattern, allow_blank=allow_blank, one_line=one_line)
         if problem is not None:
             raise ConfigurationError(f"{field_name} must {problem}; got {RecordFieldValidator._received(value, field_name)}.", details={"field": field_name})
         return value
@@ -50,14 +51,29 @@ class RecordFieldValidator:
     def accepts_text(value: Any, *, max_chars: int, pattern: str | None = None) -> bool:
         # Whether require_text would accept value, for a reader that
         # must not raise, such as a vendor answer it only inspects.
-        return RecordFieldValidator._text_problem(value, max_chars=max_chars, pattern=pattern, allow_blank=False) is None
+        return RecordFieldValidator._text_problem(value, max_chars=max_chars, pattern=pattern, allow_blank=False, one_line=False) is None
 
     @staticmethod
-    def require_optional_text(value: Any, field_name: str, *, max_chars: int, pattern: str | None = None) -> str | None:
+    def require_optional_text(value: Any, field_name: str, *, max_chars: int | None = None, pattern: str | None = None, one_line: bool = False) -> str | None:
         # None, or what require_text accepts.
-        problem = None if value is None else RecordFieldValidator._text_problem(value, max_chars=max_chars, pattern=pattern, allow_blank=False)
+        problem = None if value is None else RecordFieldValidator._text_problem(value, max_chars=max_chars, pattern=pattern, allow_blank=False, one_line=one_line)
         if problem is not None:
             raise ConfigurationError(f"{field_name} must {problem}; got {RecordFieldValidator._received(value, field_name)}.", details={"field": field_name})
+        return value
+
+    @staticmethod
+    def require_text_items(value: Any, field_name: str, *, max_items: int | None = None, max_chars: int | None = None, pattern: str | None = None, one_line: bool = False) -> tuple[str, ...]:
+        # @intent text-items-are-a-tuple-checked-item-by-item
+        # A tuple, never a list, so a frozen record cannot be changed
+        # through its field; each item passes require_text's rule and is
+        # named by its index, so the message points at the bad item.
+        if not isinstance(value, tuple) or (max_items is not None and len(value) > max_items):
+            size = f"at most {max_items} " if max_items is not None else ""
+            raise ConfigurationError(f"{field_name} must be a tuple of {size}text items; got {RecordFieldValidator._received(value, field_name)}.", details={"field": field_name})
+        for index, item in enumerate(value):
+            problem = RecordFieldValidator._text_problem(item, max_chars=max_chars, pattern=pattern, allow_blank=False, one_line=one_line)
+            if problem is not None:
+                raise ConfigurationError(f"{field_name}[{index}] must {problem}; got {RecordFieldValidator._received(item, field_name)}.", details={"field": f"{field_name}[{index}]"})
         return value
 
     @staticmethod
@@ -82,10 +98,12 @@ class RecordFieldValidator:
         return value
 
     @staticmethod
-    def require_int(value: Any, field_name: str, *, minimum: int, maximum: int) -> int:
-        # An int, not bool, in [minimum, maximum].
-        if isinstance(value, bool) or not isinstance(value, int) or value < minimum or value > maximum:
-            raise ConfigurationError(f"{field_name} must be an integer from {minimum} to {maximum}; got {RecordFieldValidator._received(value, field_name)}.", details={"field": field_name})
+    def require_int(value: Any, field_name: str, *, minimum: int, maximum: int | None = None) -> int:
+        # An int, not bool, at least minimum and, when maximum is
+        # given, at most maximum.
+        if isinstance(value, bool) or not isinstance(value, int) or value < minimum or (maximum is not None and value > maximum):
+            bound = f"from {minimum} to {maximum}" if maximum is not None else f"of at least {minimum}"
+            raise ConfigurationError(f"{field_name} must be an integer {bound}; got {RecordFieldValidator._received(value, field_name)}.", details={"field": field_name})
         return value
 
     @staticmethod
@@ -117,10 +135,13 @@ class RecordFieldValidator:
         return value
 
     @staticmethod
-    def _text_problem(value: Any, *, max_chars: int, pattern: str | None, allow_blank: bool) -> str | None:
+    def _text_problem(value: Any, *, max_chars: int | None, pattern: str | None, allow_blank: bool, one_line: bool) -> str | None:
         # What a text value fails, worded to follow "must", or None.
-        if not isinstance(value, str) or (not allow_blank and not value.strip()) or len(value) > max_chars:
-            return f"be {'text' if allow_blank else 'non-empty text'} of at most {max_chars} characters"
+        # One line means no line break of any kind, as str.splitlines
+        # sees it, so   and \x85 break a line too.
+        if not isinstance(value, str) or (not allow_blank and not value.strip()) or (max_chars is not None and len(value) > max_chars) or (one_line and value and value.splitlines() != [value]):
+            kind = "text" if allow_blank else "non-empty text"
+            return f"be {'one line of ' if one_line else ''}{kind}{f' of at most {max_chars} characters' if max_chars is not None else ''}"
         if pattern is not None and re.fullmatch(pattern, value) is None:
             return f"match {pattern}"
         return None
@@ -178,6 +199,44 @@ class RecordFieldConverter:
         if not isinstance(text, str):
             raise ConfigurationError(f"{field_name} must be a str or os.PathLike path; got a value of type {type(value).__name__}.", details={"field": field_name})
         return Path(text)
+
+    @staticmethod
+    def to_folder(value: Any, field_name: str, *, must_exist: bool = False) -> Path:
+        # @intent folders-are-stored-resolved-and-never-files
+        # A non-blank str or os.PathLike path, with ~ expanded and
+        # resolved now, so a later change of the working directory never
+        # moves it. A missing folder passes unless must_exist, for a
+        # caller that creates it later; an existing file never does.
+        text = os.fspath(value) if isinstance(value, (str, os.PathLike)) else None
+        if not isinstance(text, str) or not text.strip():
+            raise ConfigurationError(f"{field_name} must be a folder path; got {RecordFieldValidator._received(value, field_name)}.", details={"field": field_name})
+        folder = Path(text).expanduser().resolve()
+        if folder.exists() and not folder.is_dir():
+            raise ConfigurationError(f"{field_name} must be a folder, but {folder} is a file.", details={"field": field_name})
+        if must_exist and not folder.is_dir():
+            raise ConfigurationError(f"{field_name} must be an existing folder; {folder} does not exist.", details={"field": field_name})
+        return folder
+
+    @staticmethod
+    def to_files(value: Any, field_name: str, *, distinct_names: bool = False) -> tuple[Path, ...]:
+        # @intent listed-files-exist-and-keep-their-names-apart
+        # A tuple or list of existing files, each resolved like
+        # to_folder; a bare str is refused because it is one path, not a
+        # list. With distinct_names no two may share a file name, for a
+        # caller that copies them into one folder by name.
+        if not isinstance(value, (tuple, list)):
+            raise ConfigurationError(f"{field_name} must be a tuple or list of file paths; got a value of type {type(value).__name__}.", details={"field": field_name})
+        files: list[Path] = []
+        for index, item in enumerate(value):
+            text = os.fspath(item) if isinstance(item, (str, os.PathLike)) else None
+            path = Path(text).expanduser().resolve() if isinstance(text, str) and text.strip() else None
+            if path is None or not path.is_file():
+                raise ConfigurationError(f"{field_name}[{index}] must name an existing file; {item} is not one.", details={"field": f"{field_name}[{index}]"})
+            clash = next((known for known in files if known.name == path.name), None) if distinct_names else None
+            if clash is not None:
+                raise ConfigurationError(f"{field_name} must have distinct file names, but {clash} and {path} are both named {path.name}.", details={"field": f"{field_name}[{index}]"})
+            files.append(path)
+        return tuple(files)
 
     @staticmethod
     def require_instance(value: Any, field_name: str, expected: type[Any] | tuple[type[Any], ...], *, optional: bool = False) -> Any:

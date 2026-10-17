@@ -39,12 +39,23 @@ def _build_progress_log(raw_log: Mapping[str, object] | None) -> ProgressLog:
     if raw_log is None:
         return ProgressLog()
     return ProgressLog(
-        completed_tasks=tuple(str(item) for item in raw_log.get("completed_tasks", ())),
-        touched_files=tuple(str(item) for item in raw_log.get("touched_files", ())),
-        decisions=tuple(str(item) for item in raw_log.get("decisions", ())),
-        errors=tuple(str(item) for item in raw_log.get("errors", ())),
-        next_steps=tuple(str(item) for item in raw_log.get("next_steps", ())),
+        completed_tasks=_progress_entries(raw_log.get("completed_tasks")),
+        touched_files=_progress_entries(raw_log.get("touched_files")),
+        decisions=_progress_entries(raw_log.get("decisions")),
+        errors=_progress_entries(raw_log.get("errors")),
+        next_steps=_progress_entries(raw_log.get("next_steps")),
     )
+
+
+def _progress_entries(value: object) -> tuple[str, ...]:
+    # @intent a-lone-progress-entry-is-one-entry
+    # compact_context's progress_log is an untyped object, so a model writes one entry as a bare string and none as null;
+    # iterating the string would print a bullet per character, and iterating null would fail the compaction.
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        return (value,) if value.strip() else ()
+    return tuple(str(item) for item in value)
 
 
 def _approximate_token_count(text: str) -> int:
@@ -52,10 +63,20 @@ def _approximate_token_count(text: str) -> int:
     return max(1, math.ceil(len(text) / 4)) if text else 0
 
 
+def _message_text(message: ContextMessage) -> str:
+    # Returns the text a message sends, which token budgets count and relevance scoring reads.
+    # @intent call-turns-measure-their-call-arguments
+    # A chat call turn with text or list content (a narration, "" or []) also sends its tool calls, which that content leaves out,
+    # so their names and arguments join it; a None content and the Anthropic and Gemini shapes already render them.
+    raw = message.metadata.get("provider_message") if isinstance(message.metadata, Mapping) else None
+    narrated_call = isinstance(raw, Mapping) and isinstance(raw.get("content"), (str, list)) and bool(raw.get("tool_calls"))
+    return message.content + (tool_call_signature(message) or "") if narrated_call else message.content
+
+
 def _message_tokens(message: ContextMessage, token_counter: TokenCounter | None) -> int:
     # Counts one message body using an injected counter when available, otherwise the local heuristic.
     counter = token_counter or _approximate_token_count
-    return max(0, int(counter(message.content)))
+    return max(0, int(counter(_message_text(message))))
 
 
 def _message_identifier(message: ContextMessage, fallback_index: int) -> str:
@@ -99,8 +120,8 @@ def _message_tool_name(message: ContextMessage) -> str | None:
 
 
 def _message_terms(message: ContextMessage) -> set[str]:
-    # Tokenizes message content into lowercase terms for deterministic relevance scoring.
-    return {match.group(0).lower() for match in _TERM_PATTERN.finditer(message.content)}
+    # Tokenizes the text a message sends into lowercase terms for deterministic relevance scoring.
+    return {match.group(0).lower() for match in _TERM_PATTERN.finditer(_message_text(message))}
 
 
 def _replace_message_content(message: ContextMessage, content: str, metadata: Mapping[str, object]) -> ContextMessage:
@@ -762,6 +783,12 @@ class MechanicalBloatScrubberCompaction(BaseCompaction):
         # Scrubs ANSI escapes, long base64-like spans, and excess repeated lines.
         result = []
         for message in messages:
+            # @intent scrubber-leaves-call-turns-alone
+            # A call turn's content renders its calls (a repr of the message, tool_use block or part), not text the model
+            # wrote, and its arguments cannot be rewritten; scrubbing it would write that repr back in front of the call.
+            if message.kind == "tool_call":
+                result.append(message)
+                continue
             scrubbed, stats = _scrub_bloat_text(message.content, base64_min_chars=self.base64_min_chars, max_repeated_lines=self.max_repeated_lines, placeholder=self.placeholder)
             if scrubbed != message.content:
                 result.append(_replace_message_content(message, scrubbed, {"compaction": CompactionMode.MECHANICAL_BLOAT_SCRUBBER.value, **stats}))

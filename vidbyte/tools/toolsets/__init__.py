@@ -9,6 +9,7 @@ Architecture:
     - ParadigmMinimalToolset: Minimal universal filesystem toolset.
     - CodingAgentTools: The seven tools a CodingAgent starts with over one root folder.
     - CodexHostTools: One tool per CodexHost function over one host.
+    - InfiniteMemoryAgentTools: bash over the project folder plus grep and read_lines over the memory workspace.
 Relations:
     Consumed by vidbyte.paradigms harnesses; composes vidbyte.tools builtins.
 """
@@ -17,10 +18,12 @@ from __future__ import annotations
 
 from vidbyte.tools.toolsets.codex import CodexHostTools
 from vidbyte.tools.toolsets.coding import CodingAgentTools
+from vidbyte.tools.toolsets.infinite import InfiniteMemoryAgentTools
 from vidbyte.tools.toolsets.paradigm_minimal import ParadigmMinimalToolset
 
 __all__ = [
     "CodexHostTools",
     "CodingAgentTools",
+    "InfiniteMemoryAgentTools",
     "ParadigmMinimalToolset",
 ]

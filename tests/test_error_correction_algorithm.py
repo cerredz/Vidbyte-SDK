@@ -38,6 +38,8 @@ _EC_JSON = '{"corrections": [{"claim": "x is true", "why_wrong": "system prompt 
 _EC_EMPTY = '{"corrections": [], "stale_primitive_ids": [], "summary": "context is consistent"}'
 _EC_GHOST = '{"corrections": [], "stale_primitive_ids": ["problem_space_search:ghost"], "summary": "one stale note"}'
 _EC_PINNED = '{"corrections": [], "stale_primitive_ids": ["problem_space_search:pinned"], "summary": "one stale note"}'
+_EC_LONE = '{"corrections": [], "stale_primitive_ids": "problem_space_search:ghost", "summary": "one stale note"}'
+_EC_BLANK = '{"corrections": [{"claim": "", "why_wrong": ""}, {"claim": null, "why_wrong": null}, {"claim": "  ", "why_wrong": " "}, "", "  ", null], "stale_primitive_ids": [], "summary": "nothing new"}'
 
 
 class FakeResponse:
@@ -188,6 +190,11 @@ class ErrorCorrectionAlgorithmTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result), 2)
         self.assertIn("c1", result[0])
 
+    def test_format_corrections_drops_blank_entries(self) -> None:
+        # [Silent Failure] Blank, null, and whitespace-only entries correct nothing, so only the real entry is kept.
+        result = ErrorCorrectionAlgorithm()._format_corrections([{"claim": "", "why_wrong": ""}, {"claim": None, "why_wrong": None}, "  ", None, {"claim": "c1", "why_wrong": "w1"}])
+        self.assertEqual(result, ("c1 — w1",))
+
     def test_apply_removals_only_removes_allowlisted_ids(self) -> None:
         # [Hidden Assumption] Only allow-listed prefixes may be removed; others are skipped.
         manager = ContextManager()
@@ -317,6 +324,17 @@ class ErrorCorrectionAlgorithmTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.metadata["error_correction"]["pass_count"], 1)
         self.assertFalse(any("Correction Notice" in c["kwargs"].get("system", "") for c in runner.calls))
 
+    async def test_a_pass_with_only_blank_corrections_keeps_the_last_real_notice(self) -> None:
+        # [Silent Failure] An auditor that writes "nothing" as blank entries corrects nothing, so it must not replace the earlier real notice.
+        runner = FakeRunner([tool_response(), FakeResponse(_EC_JSON), tool_response(), FakeResponse(_EC_BLANK), is_done_response()])
+        runtime = algo_runtime(ErrorCorrectionAlgorithm(interval=1))
+        result = await runtime.arun("task", handle=runner_handle(runner), context=base_context())
+        passes = result.metadata["error_correction"]["passes"]
+        final_system = runner.calls[-1]["kwargs"].get("system", "")
+        self.assertEqual([entry["correction_count"] for entry in passes], [1, 0])
+        self.assertIn("- x is true — system prompt says x is false", final_system)
+        self.assertIn("Correction Pass: 1", final_system)
+
     async def test_runtime_skips_notice_when_auditor_names_only_missing_id(self) -> None:
         # [Silent Failure] A stale id the auditor invents removes nothing, so the pass posts no notice and counts no removal.
         runner = FakeRunner([tool_response(), FakeResponse(_EC_GHOST), is_done_response()])
@@ -340,6 +358,18 @@ class ErrorCorrectionAlgorithmTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(metadata["passes"][0]["removed"], ("problem_space_search:ghost",))
         self.assertIsNone(manager.get_by_id("problem_space_search:ghost"))
         self.assertIn("Correction Notice", runner.calls[-1]["kwargs"].get("system", ""))
+
+    async def test_a_lone_stale_id_string_removes_that_primitive(self) -> None:
+        # [Silent Failure] An auditor that writes its one stale id as a bare string, not a one-item array, still removes that primitive.
+        manager = ContextManager()
+        manager.upsert(ProblemSpaceSearchContextItem(primitive_id="problem_space_search:ghost", iteration=1, note_index=1, unconsidered="u", blind_spots="b", next_directions="n"))
+        runner = FakeRunner([tool_response(), FakeResponse(_EC_LONE), is_done_response()])
+        runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=lookup_tools(), permission_policy=PermissionPolicy(), algorithm=ContextWindowAlgorithm(name="error_correction", error_correction=ErrorCorrectionAlgorithm(interval=1)), context_manager=manager)
+        result = await runtime.arun("task", handle=runner_handle(runner), context=base_context())
+        metadata = result.metadata["error_correction"]
+        self.assertEqual(metadata["passes"][0]["removed"], ("problem_space_search:ghost",))
+        self.assertEqual(metadata["passes"][0]["skipped"], ())
+        self.assertIsNone(manager.get_by_id("problem_space_search:ghost"))
 
     async def test_runtime_keeps_frozen_primitive_auditor_names(self) -> None:
         # [Hidden Failure] An auditor that names only a frozen primitive removes nothing, so the pinned note survives and no notice is posted.

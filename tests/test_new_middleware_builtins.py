@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from vidbyte.agents import AgentRuntime
 from vidbyte.agents.settings import ToolErrorPolicy
 from vidbyte.agents.settings.tool import ToolSettings
+from vidbyte.context import ContextWindow
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.dataclasses.context import BaseContext
 from vidbyte.lib.dataclasses.middleware import (
@@ -985,6 +986,45 @@ class TestLoopDetectionMiddleware(unittest.IsolatedAsyncioTestCase):
         handle = RunnerHandle(runner=runner, provider="openai", invoke=_invoke_repeating_lookup, extract_text=lambda response: response.text, extract_metadata=lambda response: {"raw": response.raw})
         await runtime.arun("task", handle=handle, context=context)
         self.assertIn("tool output truncated by ToolSettings", runner.seen_tool_output)
+        self.assertIn(REPEATED_OUTPUT_LOOP_NOTICE, runner.seen_tool_output)
+
+    async def test_soft_notice_survives_context_window_admission(self) -> None:
+        # @intent admission-is-a-cap-not-a-middleware
+        # [Silent Failure] A compact or hide context-window algorithm caps only the raw output, so the loop notice still reaches the model.
+        @tool
+        def lookup() -> str:
+            # Returns the same page, longer than the compact cap, on every call so the soft threshold fires on the second.
+            return "same page " * 80
+
+        cases = {
+            "compact_tool_outputs": "[tool output compacted]",
+            "hide_tool_outputs": "Raw tool output was withheld",
+        }
+        for preset, marker in cases.items():
+            with self.subTest(preset=preset):
+                runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=Tools([lookup]), permission_policy=PermissionPolicy(), algorithm=getattr(ContextWindow.preset, preset), middleware=(LoopDetectionMiddleware(soft_max_repeated_outputs=2),))
+                context = runtime.build_context("task", base_context=BaseContext(), history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+                runner = _RepeatingLookupRunner()
+                handle = RunnerHandle(runner=runner, provider="openai", invoke=_invoke_repeating_lookup, extract_text=lambda response: response.text, extract_metadata=lambda response: {"raw": response.raw})
+                await runtime.arun("task", handle=handle, context=context)
+                self.assertIn(marker, runner.seen_tool_output)
+                self.assertNotIn("same page " * 80, runner.seen_tool_output)
+                self.assertIn(REPEATED_OUTPUT_LOOP_NOTICE, runner.seen_tool_output)
+
+    async def test_soft_notice_survives_hide_admission_of_an_empty_output(self) -> None:
+        # @intent admission-is-a-cap-not-a-middleware
+        # [Silent Failure] A tool that keeps returning "" is the loop the notice is for, so hide must not withhold the note-only output whole.
+        @tool
+        def lookup() -> str:
+            # Returns nothing on every call, like a poll with no news, so the soft threshold fires on the second.
+            return ""
+
+        runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=Tools([lookup]), permission_policy=PermissionPolicy(), algorithm=ContextWindow.preset.hide_tool_outputs, middleware=(LoopDetectionMiddleware(soft_max_repeated_outputs=2),))
+        context = runtime.build_context("task", base_context=BaseContext(), history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+        runner = _RepeatingLookupRunner()
+        handle = RunnerHandle(runner=runner, provider="openai", invoke=_invoke_repeating_lookup, extract_text=lambda response: response.text, extract_metadata=lambda response: {"raw": response.raw})
+        await runtime.arun("task", handle=handle, context=context)
+        self.assertIn("Raw tool output was withheld", runner.seen_tool_output)
         self.assertIn(REPEATED_OUTPUT_LOOP_NOTICE, runner.seen_tool_output)
 
 

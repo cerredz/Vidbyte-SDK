@@ -16,6 +16,7 @@ Functions:
     - ContextCompactionToolTests.test_truncate_tool_results_boundary_length: Verifies exact boundary values are not mutated.
     - ContextCompactionToolTests.test_truncate_tool_results_no_placeholder: Tests indicators without dynamic placeholders.
     - ContextCompactionToolTests.test_null_optional_arguments_behave_like_omitted: Verifies null optionals fall back to defaults.
+    - ContextCompactionToolTests.test_clear_except_system_and_log_reads_a_lone_entry_and_a_null_field: Verifies a bare-string progress field is one entry and null is none.
 Relations:
     Directly tests the implementation within vidbyte.tools.builtins.context.compaction.
 """
@@ -84,6 +85,23 @@ class ContextCompactionToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(state.messages()), 2)
         self.assertEqual(state.messages()[0].role, "system")
         self.assertIn("searched code", state.messages()[1].content)
+
+    async def test_clear_except_system_and_log_reads_a_lone_entry_and_a_null_field(self) -> None:
+        """A bare-string field is one entry and a null field is no entries, never a bullet per character or a failure."""
+        state = self._state()
+        result = await ContextCompactionTool(state).execute(
+            ToolCall(
+                "compact_context",
+                {
+                    "mode": CompactionMode.CLEAR_EXCEPT_SYSTEM_AND_LOG.value,
+                    "progress_log": {"completed_tasks": "searched code", "errors": None},
+                },
+            )
+        )
+        self.assertEqual(result.status.value, "success")
+        bullets = [line for line in state.messages()[1].content.splitlines() if line.startswith("- ")]
+        self.assertEqual(bullets.count("- searched code"), 1)
+        self.assertFalse([bullet for bullet in bullets if len(bullet) == 3])
 
     async def test_remove_all_tool_calls(self) -> None:
         """All tool traces are removed."""
