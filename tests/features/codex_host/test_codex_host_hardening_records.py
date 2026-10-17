@@ -17,7 +17,7 @@ import unittest
 from collections.abc import Callable
 from typing import Any
 
-from tests.features.codex_host.codex_host_support import GOAL_FIELD_MESSAGE, GOAL_REJECTED_FIELDS, NETWORK_ACCESS_MESSAGE, WRITABLE_ROOTS_MESSAGE
+from tests.features.codex_host.codex_host_support import GOAL_FIELD_MESSAGE, GOAL_REJECTED_FIELDS, GOAL_SPAWN_OWNER, NETWORK_ACCESS_MESSAGE, WRITABLE_ROOTS_MESSAGE
 from vidbyte.lib.errors import ConfigurationError
 
 WORKSPACE = os.path.abspath(os.path.join(os.sep, "hardening-workspace"))
@@ -419,7 +419,7 @@ class CodexSpawnRequestHardeningTests(unittest.TestCase):
             with self.subTest(fields=sorted(fields)):
                 with self.assertRaises(ConfigurationError) as caught:
                     self._spawn(goal=goal, **fields)
-                self.assertEqual(str(caught.exception), GOAL_FIELD_MESSAGE.format(name=name))
+                self.assertEqual(str(caught.exception), GOAL_FIELD_MESSAGE.format(owner=GOAL_SPAWN_OWNER, name=name))
                 self.assertTrue(str(caught.exception.details.get("field", "")).endswith(name), caught.exception.details)
         # The sandbox fields are refused too; whether the goal rule or the sandbox rule speaks first is open (spec defect).
         for name, fields in (("network_access", {"network_access": True}), ("writable_roots", {"writable_roots": (WORKSPACE,)})):

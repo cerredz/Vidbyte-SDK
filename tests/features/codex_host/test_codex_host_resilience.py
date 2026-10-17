@@ -1,7 +1,7 @@
 """FILE: tests/features/codex_host/test_codex_host_resilience.py
 
-PURPOSE: Proves how the hardened CodexHost behaves when Codex fails part-way: a spawn or launch whose turn start fails names the thread it left and leaves no tool registration behind; only the four idempotent reads are retried on overload, and every spending call is sent once with retryable set; a thread/read that fails for any reason but a refusal is an API error, not a missing thread, including inside a lineage walk; a turn being stopped cannot be steered, and a refused steer means the turn is gone; and an error escaping a run wrapper carries the wrapper's own operation with every other field kept.
-ROLE IN CODEBASE: Failure-path layer of the hardening tests in tests/features/codex_host/ (docs/spec/codex-host-hardening/spec.md AC-2, AC-3, AC-4, AC-6, AC-24, AC-26, INV-1, INV-3 to INV-6, INV-26, INV-31, EC-12, EC-13, EC-15, EC-40, D-7, D-8, D-11, D-22, D-23). Every class needs the optional openai-codex extra, so CI skips them.
+PURPOSE: Proves how the hardened CodexHost behaves when Codex fails part-way: a spawn or launch whose turn start fails names the thread it left and leaves no tool registration behind, while a cancelled spawn whose start is still in flight keeps its tools for the turn Codex adopts; only the four idempotent reads are retried on overload, and every spending call is sent once with retryable set; a thread/read that fails for any reason but a refusal is an API error, not a missing thread, including inside a lineage walk; a turn being stopped cannot be steered, and a refused steer means the turn is gone; and an error escaping a run wrapper carries the wrapper's own operation with every other field kept.
+ROLE IN CODEBASE: Failure-path layer of the hardening tests in tests/features/codex_host/ (docs/spec/codex-host-hardening/spec.md AC-2, AC-3, AC-4, AC-6, AC-24, AC-26, INV-1, INV-3 to INV-6, INV-26 (with its in-flight exception, EC-23 and the S4 review row R-6), INV-31, EC-12, EC-13, EC-15, EC-40, D-7, D-8, D-11, D-22, D-23). Every class needs the optional openai-codex extra, so CI skips them.
 ARCHITECTURE NOTE: Failures are scripted on the fake app-server with fail(...), so the real openai-codex retry helper, the real connection and the real CodexErrorMapper run; FieldCarryingMapper only records what the real mapper built, so the wrapper rows can compare the relabelled error with the original. The overload rows run the SDK's own retry with its real backoff, which adds under a second per exhausted read.
 COMMON MODIFICATION PATTERNS: A method that joins CODEX_HOST_RETRIED_METHODS moves from SENT_ONCE to RETRIED with the host call that sends it.
 KNOWN EDGE CASES: The fake numbers threads in creation order, so the third thread of a fresh launch is thr-3. A goal spawn starts no turn/start (Codex starts goal turns), so its wrapper row fails thread/start instead.
@@ -99,6 +99,32 @@ class CodexSpawnCleanupTests(ResilienceTestCase):
         await asyncio.wait_for(host.read_codex_thread("thr-3"), WAIT_SECONDS)
         self.assertEqual([self.count("turn/interrupt", _on(thread_id)) for thread_id in ("thr-1", "thr-2", "thr-3")], [1, 1, 0])
         self.assertEqual(await self.ask("item/tool/call", _tool_call("thr-3")), UNREGISTERED)
+
+    async def test_a_cancelled_spawn_whose_start_codex_adopts_keeps_its_tools_for_that_turn(self) -> None:
+        # INV-26's in-flight exception and EC-23 (S4 R-6, mutant M31): the spawn's caller leaves while turn/start is still in
+        # flight, so its tools stay registered. Codex accepts the start late and charges for the turn, the host adopts it with
+        # its one interrupt, and the turn's tool call still reaches the developer's tool.
+        from vidbyte.lib.dataclasses.codex_host import (
+            CodexSpawnRequest,
+            CodexTurnHandle,
+        )
+
+        host = await self.open_host()
+        held = self.server.hold("turn/start")
+        task = asyncio.ensure_future(host.spawn_codex_thread(CodexSpawnRequest(prompt="Use the tool.", tools=(make_echo_tool(),))))
+        try:
+            thread_id = (await asyncio.to_thread(held.wait_arrived)).params["threadId"]
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+        finally:
+            held.release()
+        await self.wait_for_request("turn/interrupt", _on(thread_id))
+        turn_id = self.server.threads[thread_id].turns[0].turn_id
+        answer = await self.ask("item/tool/call", _tool_call(thread_id, turn_id))
+        self.assertEqual(answer, {"success": True, "contentItems": [{"type": "inputText", "text": "echo: hi"}]})
+        await asyncio.wait_for(host.wait_codex_turn(CodexTurnHandle(thread_id=thread_id, turn_id=turn_id)), WAIT_SECONDS)
+        self.assertEqual(self.count("turn/interrupt", _on(thread_id)), 1)
 
 
 @requires_sdk

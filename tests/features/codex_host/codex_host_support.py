@@ -243,7 +243,10 @@ FORK_POINTS_MESSAGE = "fork_codex_thread before_turn_id cannot be combined with 
 EVENT_FAILED_MESSAGE = "CodexHost could not process one of the turn's events, so it stopped the turn."
 LOST_EVENTS_MESSAGE = "CodexHost stopped receiving the turn's events before it ended, so it stopped the turn."
 USER_REVIEWER_MESSAGE = "approvals_reviewer=USER sends the thread's approval requests to this process, and this CodexHost was built without an approval_handler to answer them."
-GOAL_FIELD_MESSAGE = "Codex spawn request goal does not use the field {name}, because Codex starts goal turns itself with the thread's settings; leave {name} at its default, or set the matching thread setting."
+GOAL_FIELD_MESSAGE = "{owner} does not use the field {name}, because Codex starts goal turns itself with the thread's settings; leave {name} at its default, or set the matching thread setting."
+# Spec r5 (S4 R-7): the {owner} of GOAL_FIELD_MESSAGE, by the record that refuses the field.
+GOAL_SPAWN_OWNER = "Codex spawn request goal"
+GOAL_RUN_OWNER = "run_codex_goal request"
 UNKNOWN_TIER_MESSAGE = "Codex lists no service tier {tier} for {models}. Listed tiers: {tiers}."
 CONTINUE_GOAL_UNFINISHED_MESSAGE = "Codex reports an unfinished goal (status {status}) on the thread, and loading the thread to continue it could let Codex continue that goal outside the turn this host tracks."
 NETWORK_ACCESS_MESSAGE = "Codex spawn request network_access needs turn.sandbox READ_ONLY or WORKSPACE_WRITE, because only those sandbox policies take it, and it got turn.sandbox {sandbox}."

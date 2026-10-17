@@ -205,3 +205,96 @@ The orchestrator granted these two edits on 2026-10-17, after S3 was blocked on 
    - **Why:** close ends the process, so the SDK reader always records that end-of-file error (`codex_host_fakes.py` `reader_failed`). Any other entry still means the router raised. The `turn/interrupt` count of 1 is kept.
 
 Run: `PYTHONPATH=$(pwd) "$V" -m pytest tests/features/codex_host/test_codex_host_function_rows.py tests/features/codex_host/test_codex_host_approvals.py -q -p no:cacheprovider` gives `24 passed in 2.20s`.
+
+## S4 additions
+
+- **Stage:** S2 test author, S4 round, from the verified review (`review.md`, `0c040d1f`) and spec r5 (`be733a0b`). Written on top of `b63c4b01`. Production code has not changed since S3's `c9150d63`.
+- **What this round adds:** 22 new tests, plus 2 changed pins and 3 new constant rows.
+  - **6 mutant-killing tests** (R-4, R-5, R-6, R-8). They pass today, and each fails under the mutant the old suite let live.
+  - **14 red regressions** (R-3, R-9, R-10). Each fails today by an assertion, not by an error, and turns green once the repair lands.
+  - **2 green guards** for R-10. They already hold and must stay green.
+  - **R-7 and section D.** Two existing assertions now expect the r5 `{owner}` text. `NEW_CONSTANTS` gains the three r5 constants.
+- **How the mutants were run.** Each mutant comes from `scratchpad/s4-eng/s4_mutants.py` and is applied in the module's own globals:
+
+```
+S4_MUTANT=<M> PYTHONPATH="$(pwd);<scratchpad>/s4-eng" "$V" -B -m pytest tests/features/codex_host -q -p no:cacheprovider -p s4_mutants
+```
+
+- **Mutant results.**
+  - With no mutant, `tests/features/codex_host` gives `17 failed, 325 passed, 1 skipped`. The 17 are the red set below.
+  - Under each mutant, the run gives exactly the 17 plus that mutant's test (M20 adds two). No other test changes.
+  - Full logs are in `scratchpad/s2-s4/`.
+- **Stability.** The six mutant-killing tests and the two guards passed 6 times in a row on the clean tree, in 3.9 s per run.
+
+| Finding | Test | Kind | Proof |
+|---|---|---|---|
+| R-4 | `observability::CodexObservabilityTests::test_a_handler_answer_to_a_secret_question_reaches_codex_and_no_record` | mutant-kill (M40) | M40: `AssertionError: 'answer-canary-91f3' unexpectedly found in 'codex_host_server_answer item_id=item-secret answers=answer-canary-91f3'`. Clean: passes; Codex received the canary. |
+| R-5 | `function_rows::CodexForgetTurnsTests::test_a_forgotten_thread_that_continues_counts_only_its_new_turn` | mutant-kill (M1) | M1: `AssertionError: 0.0033 != 0.0022 within 12 places`. The forgotten turn's 0.0011 is counted again. Clean: passes; the cost equals a fresh thread with the same usage. |
+| R-6 | `resilience::CodexSpawnCleanupTests::test_a_cancelled_spawn_whose_start_codex_adopts_keeps_its_tools_for_that_turn` | mutant-kill (M31) | M31: `AssertionError: {'success': False, 'contentItems': [...]} != {'success': True, 'contentItems': [{'type': 'inputText', 'text': 'echo: hi'}]}`. Clean: passes, with one interrupt on the adopted turn. |
+| R-8 (a) | `liveness::CodexLostWatcherTests::test_a_lost_turn_whose_stop_was_already_sent_gets_no_second_interrupt` | mutant-kill (M2) | M2: `AssertionError: 2 != 1` (`test_codex_host_liveness.py:217`). Clean: passes. |
+| R-8 (b) | `liveness::CodexLostWatcherTests::test_the_cleanup_interrupt_of_a_lost_turn_waits_out_the_grace` | mutant-kill (M20) | M20: `AssertionError: 0.0 not greater than or equal to 0.30000000000000004`. Clean: passes, with the grace patched to 0.4 s. |
+| R-8 (c) | `liveness::CodexLostWatcherTests::test_a_close_that_starts_inside_the_grace_wins_and_the_lost_turn_sends_nothing` | mutant-kill (M21, and M20) | M21: `AssertionError: 2 != 1` (the interrupts sent while close was held, past the grace). M20 fails this test too, with `2 != 1`. Clean: passes. |
+| R-3 | `liveness::CodexReviewCompletionFailureTests::test_a_review_read_back_as_ended_whose_snapshot_cannot_be_built_ends_failed_through_the_failure_path` | red-regression | `AssertionError: start_codex_review raised RuntimeError instead of returning the review's handle` |
+| R-3 | `liveness::CodexReviewCompletionFailureTests::test_a_late_review_read_back_as_ended_whose_snapshot_cannot_be_built_ends_failed` | red-regression | `AssertionError: the unbounded wait on turn turn-2 was still pending after 10.0 seconds` |
+| R-9 | `observability::CodexLogTokenRecordTests::test_hostile_ids_from_codex_log_as_one_token_in_each_record` | red-regression | `AssertionError: Lists differ: [..., 'thread_id', 'handled_by', '%s', 'answer', 'duration_ms'] != [..., 'thread_id', 'duration_ms']`. The `turn/start` record is split by the hostile thread id. |
+| R-9 | `observability::CodexLogTokenRecordTests::test_a_hostile_id_in_a_fallback_or_passed_by_a_caller_logs_as_one_token` | red-regression | `AssertionError: Lists differ: [..., 'handled_by', '%s', 'answer', 'reason', ...] != [..., 'reason', 'error_type', 'origin']` (the fallback WARNING) |
+| R-9 | `observability::CodexLogTokenRecordTests::test_hostile_handle_ids_log_as_one_token_when_a_turn_event_fails` | red-regression | `AssertionError: '\n' unexpectedly found in 'codex_host_call operation=spawn_codex_thread method=turn/start thread_id=thr-2\r\nthread_id=forged turn_id=forged duration_ms=0'` |
+| R-9 | `observability::CodexLogTokenRecordTests::test_hostile_handle_ids_log_as_one_token_when_a_watcher_is_lost` | red-regression | the same line as the row above |
+| R-9 | `hardening_contract::CodexLogTokenTests::*` (6 tests, CI-visible) | red-regression | `AssertionError: False is not true : spec r5 row 25 adds the LogToken class to vidbyte.lib.util.text` |
+| R-10 | `observability::CodexCallRecordTests::test_a_call_cancelled_after_it_was_sent_writes_one_record_once_its_worker_returns` | red-regression | `AssertionError: Lists differ: [] != [('codex_host_call', 10)]` (its success row; its failure row expects the WARNING) |
+| R-10 | `observability::CodexCallRecordTests::test_a_spending_start_handed_over_on_cancel_writes_one_record_for_its_late_outcome` | red-regression | `AssertionError: Lists differ: [] != [('codex_host_call', 10)]` |
+| R-10 | `observability::CodexCallRecordTests::test_a_call_whose_bound_ran_out_writes_one_record_even_after_its_worker_returns` | green guard | Passes today. A second record from the late outcome would fail it ("exactly one", not two). |
+| R-10, EC-57 | `observability::CodexCallRecordTests::test_a_call_refused_before_it_was_sent_writes_no_record` | green guard | Passes today. It has four rows: a queued call withdrawn, the call guard on another loop, the dead check, and the call guard of a closed host. |
+| R-7 | `hardening_contract::CodexHardeningInputRecordTests::test_a_goal_run_request_applies_the_goal_rule_to_its_request`; `turn_settings::CodexGoalRunFieldTests::test_each_turn_only_field_is_refused_before_any_request_and_thread_settings_still_start` | red pin (changed assertion) | `AssertionError: "Codex spawn request goal does not use the[138 chars]ing." != "run_codex_goal request does not use the f[136 chars]ing."` |
+| R-2, R-9, R-7 (section D) | `hardening_contract::CodexHardeningConstantTests::test_every_new_constant_holds_its_spec_value_and_is_exported_in_order` | red literal | `AssertionError: 'CODEX_HOST_FORK_EXPERIMENTAL_FIELDS' not found in [...]`. Its other subtests fail on `CODEX_HOST_LOG_TOKEN_MAX_CHARS`, `CODEX_HOST_ANY_MODEL_TEXT` and the `{owner}` value of `CODEX_HOST_GOAL_FIELD_MESSAGE`. |
+
+**How the tests are built**
+
+- **Barrier, not sleep (R-10).** `CodexCallRecordTests` opens its host with `CODEX_HOST_WORKER_THREADS` patched to 1. A later call that returns therefore proves that every earlier worker has returned and run its done-callbacks. The records are read after that call, never after a sleep.
+- **Owned, not polled (R-3, late path).** The late-path review is registered before it is read back. So the arrival of its read-back request (`is_review_read_back`) is the sign that the host owns it.
+- **Literal tokens (R-9).** The hostile ids are named through the new `FakeAppServer.name_next(thread_suffix=..., turn_suffix=...)`, so the ids from Codex keep the fake's `thr-` and `turn-` prefixes. Every expected token is a literal worked out by hand from the two `LogToken.of` rules. A regex was used once, while writing the tests, to check them; it is not in the tests.
+- **Every R-9 record is checked twice.**
+  - Its whole shape: one line, with exactly its event's keys in order (`EVENT_KEYS`).
+  - Its values: the token in each field that INV-10 names.
+- **Errors become assertion failures (R-3).** What escapes `start_codex_review`, a wait still pending at its bound, and a refused next review are each converted to a test failure.
+- **Missing names fail as assertions.** The `LogToken` unit rows check `hasattr` first. `CodexHardeningConstantTests` now checks the export before it reads the attribute.
+- **Negative checks bounded by time (R-8).**
+  - The close-inside-the-grace row sleeps until 2.5 graces after the read failed, then counts the interrupts sent meanwhile.
+  - The grace-gap row keeps a quarter of the 0.4 s grace in hand for the coarse Windows clock.
+- **What the owner pins say (R-7).** `GOAL_FIELD_MESSAGE` is now the r5 template, with `GOAL_SPAWN_OWNER` and `GOAL_RUN_OWNER` beside it in `codex_host_support.py`. The `CodexSpawnRequest` rows (`hardening_records`, `tools` T1, `tool_hardening`) pass `GOAL_SPAWN_OWNER` and stay green. The two `run_codex_goal` rows pass `GOAL_RUN_OWNER`, and the contract row also pins r5's whole text for `turn`.
+- **Export pins (section D).** No `__all__` pin for `vidbyte.lib.util.text` existed. The new `CodexLogTokenTests` pins three things:
+  - row 25's order: `["TOKEN_ESTIMATE_CHARS_PER_TOKEN", "LogToken", "SubstringCounter", "TokenEstimate"]`;
+  - row 10's re-export from `vidbyte.lib.util`;
+  - that the `vidbyte.lib.util` `__all__` stays sorted.
+
+  `RECORD_EXPORTS` does not change in r5, so it is untouched.
+
+**The red set after this round (17 in `tests/features/codex_host`, plus the inherited `harness_threads` failure):**
+
+- R-3: the 2 liveness rows.
+- R-9: the 4 `CodexLogTokenRecordTests` rows and the 6 `CodexLogTokenTests` rows.
+- R-10: the 2 red `CodexCallRecordTests` rows.
+- R-7: the 2 goal-run pins.
+- Section D: `CodexHardeningConstantTests::test_every_new_constant_holds_its_spec_value_and_is_exported_in_order`.
+
+**Runs**
+
+| Run | Before (`b63c4b01`) | After |
+|---|---|---|
+| `tests/features/codex_host` | `320 passed, 1 skipped` | `17 failed, 325 passed, 1 skipped` |
+| `tests/features/codex_host tests/features/harness_threads tests/test_codex_*.py` | `1 failed, 1024 passed, 3 skipped` | `18 failed, 1029 passed, 3 skipped` |
+
+- The count checks out. 1025 tests ran before, and 22 are new, so 1047 run now.
+  - **Failed:** 18 = 1 inherited + 14 new red + 3 existing tests turned red (the 2 R-7 pins and the constants row).
+  - **Passed:** 1029 = 1024 − 3 + 6 mutant-killing + 2 guards.
+- `lint/run.py` ends `SDK-LINT: PASS`.
+- `ruff check` on the edited files adds no finding.
+
+**For the repair agent.** Never edit these tests.
+- **R-9:** route each value through `LogToken.of(value, CODEX_HOST_LOG_TOKEN_MAX_CHARS)` at the logging call only. The tests read `handle.thread_id` back raw, and they route and answer on the raw ids.
+- **R-10:** the cancelled-call record must be written by the time the next call on the same single worker returns. The spec says the worker's done-callback writes it, before any post to the loop, and that satisfies this.
+- **R-3:** the tests do not name the renamed `fail`. They read only the outcome:
+  - `failed` / `codex.protocol_mismatch` with `CODEX_HOST_EVENT_FAILED_MESSAGE`;
+  - one `codex_host_turn_event_failed` WARNING with `error_type=RuntimeError`;
+  - at most one interrupt;
+  - and the thread taking the next review.

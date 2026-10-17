@@ -1,7 +1,7 @@
 """FILE: tests/features/codex_host/test_codex_host_hardening_contract.py
 
-PURPOSE: Proves the lib and error contracts of the codex-host-hardening slice that need no running host: CodexHostSetup's check of the constructor arguments; the fields appended to the fork, thread-list, review, skill-list and goal-run input records; CodexAgentError.retryable decided code by code and with_operation keeping every other field; CodexErrorMapper.relabel and its thread/read and turn/steer classification; ExceptionOrigin; the section 9.2 and 9.3 constants, verbatim and in sorted __all__; no top-level constant under the native hosts (C021); the 0.163 pin; and the docstrings section 3 asks for.
-ROLE IN CODEBASE: Contract layer of the hardening tests in tests/features/codex_host/ (docs/spec/codex-host-hardening/spec.md AC-5, AC-13, AC-34, AC-39, AC-40, AC-41 record half, INV-2, INV-4, INV-6, INV-19, INV-28 step 1, INV-29 to INV-32, INV-34, INV-47, INV-48, D-6, D-8, D-13, D-22, EC-54, EC-55). Every class but the classification one runs on CI; that one needs openai-codex to build the SDK's JSON-RPC errors.
+PURPOSE: Proves the lib and error contracts of the codex-host-hardening slice that need no running host: CodexHostSetup's check of the constructor arguments; the fields appended to the fork, thread-list, review, skill-list and goal-run input records; CodexAgentError.retryable decided code by code and with_operation keeping every other field; CodexErrorMapper.relabel and its thread/read and turn/steer classification; ExceptionOrigin; LogToken's two rules and its exports (spec r5, S4 R-9); the section 9.2 and 9.3 constants, the r5 additions included, verbatim and in sorted __all__; no top-level constant under the native hosts (C021); the 0.163 pin; and the docstrings section 3 asks for.
+ROLE IN CODEBASE: Contract layer of the hardening tests in tests/features/codex_host/ (docs/spec/codex-host-hardening/spec.md AC-5, AC-13, AC-34, AC-39, AC-40, AC-41 record half, INV-2, INV-4, INV-6, INV-19, INV-28 step 1, INV-29 to INV-32, INV-34, INV-47, INV-48, D-6, D-8, D-13, D-22, EC-54, EC-55, and the spec r5 rows for S4 R-2, R-7 and R-9). Every class but the classification one runs on CI; that one needs openai-codex to build the SDK's JSON-RPC errors.
 ARCHITECTURE NOTE: Feature names are imported inside each test, so a missing name fails that test while the module still collects. Expected texts and tables are the spec's literals from codex_host_support, never read back from the production constant they pin. The C021 check reads the native host sources with ast, the same scan lint/rules/c021_native_host_constants_in_lib.py runs.
 COMMON MODIFICATION PATTERNS: A new section 9.2 or 9.3 constant adds one row to NEW_CONSTANTS; a new input field adds its valid and invalid rows beside the record's other rows.
 KNOWN EDGE CASES: RecordFieldValidator puts the whole "<method> <field>" label in details["field"] while _reject_unused_fields puts the bare name, so the rows accept either by checking that the label ends with the field. The docstring checks are keyword-level, because section 3 fixes what each limitation says, not its wording.
@@ -30,6 +30,7 @@ from tests.features.codex_host.codex_host_support import (
     FORK_POINTS_MESSAGE,
     GOAL_FIELD_MESSAGE,
     GOAL_REJECTED_FIELDS,
+    GOAL_RUN_OWNER,
     LIMIT_MESSAGE,
     LOST_EVENTS_MESSAGE,
     NETWORK_ACCESS_MESSAGE,
@@ -48,6 +49,8 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.p
 NATIVE_ROOT = os.path.join(REPO_ROOT, "vidbyte", "harnesses", "native")
 CODEX_NATIVE = os.path.join(NATIVE_ROOT, "codex")
 UNUSED_FIELD = "{operation} does not use the CodexSpawnRequest field {name}"
+# Spec r5 section 9.2, verbatim: CODEX_HOST_GOAL_FIELD_MESSAGE for run_codex_goal with turn set (S4 R-7).
+RUN_GOAL_TURN_TEXT = "run_codex_goal request does not use the field turn, because Codex starts goal turns itself with the thread's settings; leave turn at its default, or set the matching thread setting."
 
 # Spec sections 9.2 and 9.3, verbatim: every new constant of vidbyte.lib.constants.codex_host and its value.
 NEW_CONSTANTS: dict[str, Any] = {
@@ -60,6 +63,9 @@ NEW_CONSTANTS: dict[str, Any] = {
     "CODEX_DEFAULT_SERVICE_TIER": "default",
     "CODEX_HOST_GOAL_REJECTED_FIELDS": GOAL_REJECTED_FIELDS,
     "CODEX_HOST_LOST_TURN_GRACE_SECONDS": 0.5,
+    # Spec r5 (S4 R-2 and R-9): the fork twin of the goal rule's field tuple, and the longest logged value.
+    "CODEX_HOST_FORK_EXPERIMENTAL_FIELDS": ("before_turn_id", "defer_goal_continuation"),
+    "CODEX_HOST_LOG_TOKEN_MAX_CHARS": 128,
     "CODEX_HOST_APPROVAL_HANDLER_MESSAGE": APPROVAL_HANDLER_MESSAGE,
     "CODEX_HOST_STEER_STOPPING_MESSAGE": STEER_STOPPING_MESSAGE,
     "CODEX_HOST_FORK_POINTS_MESSAGE": FORK_POINTS_MESSAGE,
@@ -68,11 +74,17 @@ NEW_CONSTANTS: dict[str, Any] = {
     "CODEX_HOST_USER_REVIEWER_MESSAGE": USER_REVIEWER_MESSAGE,
     "CODEX_HOST_GOAL_FIELD_MESSAGE": GOAL_FIELD_MESSAGE,
     "CODEX_HOST_UNKNOWN_TIER_MESSAGE": UNKNOWN_TIER_MESSAGE,
+    # Spec r5 (S4 R-2): the {models} fragment of the tier refusal when no model is named.
+    "CODEX_HOST_ANY_MODEL_TEXT": "any model",
     "CODEX_HOST_CONTINUE_GOAL_UNFINISHED_MESSAGE": CONTINUE_GOAL_UNFINISHED_MESSAGE,
     "CODEX_HOST_NETWORK_ACCESS_MESSAGE": NETWORK_ACCESS_MESSAGE,
     "CODEX_HOST_WRITABLE_ROOTS_MESSAGE": WRITABLE_ROOTS_MESSAGE,
     "CODEX_HOST_FORK_EXPERIMENTAL_MESSAGE": FORK_EXPERIMENTAL_MESSAGE,
 }
+# Spec r5 INV-10 (S4 R-9), verbatim: the LogToken.of example, its token, and the one character set a token keeps.
+LOG_TOKEN_SPEC_VALUE = "item-1 handled_by=handler answer=accept\ncodex_host_server_request"
+LOG_TOKEN_SPEC_TOKEN = "item-1_handled_by_handler_answer_accept_codex_host_server_request"
+LOG_TOKEN_ALLOWED = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.:/-"
 # The FORK_CODEX_THREAD row before this slice; section 9.3 appends three fields to it.
 FORK_ROW_BEFORE = ("prompt", "goal", "thread.personality", "thread.service_name", "thread.session_start_source", "turn", "tools", "disabled_plugin_ids", "output_schema", "max_output_tokens", "timeout_seconds")
 
@@ -267,7 +279,8 @@ class CodexHardeningInputRecordTests(unittest.TestCase):
                 _field_named(self, caught.exception, "force_reload")
 
     def test_a_goal_run_request_applies_the_goal_rule_to_its_request(self) -> None:
-        # INV-34: run_codex_goal refuses a turn-only field before any request, with the same text as a goal spawn.
+        # INV-34 and INV-48 (spec r5, S4 R-7): run_codex_goal refuses a turn-only field before any request, with the goal
+        # spawn's text under its own owner, so the refusal names run_codex_goal.
         from vidbyte.lib.dataclasses.codex import CodexThreadSettings, CodexTurnSettings
         from vidbyte.lib.dataclasses.codex_host import CodexGoal, CodexSpawnRequest
         from vidbyte.lib.dataclasses.codex_host_inputs import CodexGoalRunRequest
@@ -283,8 +296,11 @@ class CodexHardeningInputRecordTests(unittest.TestCase):
             with self.subTest(field=name):
                 with self.assertRaises(ConfigurationError) as caught:
                     CodexGoalRunRequest(goal=goal, request=request)
-                self.assertEqual(str(caught.exception), GOAL_FIELD_MESSAGE.format(name=name))
+                self.assertEqual(str(caught.exception), GOAL_FIELD_MESSAGE.format(owner=GOAL_RUN_OWNER, name=name))
                 _field_named(self, caught.exception, name)
+                if name == "turn":
+                    # Section 9.2's whole text for this row, verbatim, so a wrong template cannot pass with a matching owner.
+                    self.assertEqual(str(caught.exception), RUN_GOAL_TURN_TEXT)
         kept = CodexGoalRunRequest(goal=goal, request=CodexSpawnRequest(thread=CodexThreadSettings(model="gpt-5.5"), timeout_seconds=30.0))
         self.assertEqual(kept.request.thread.model, "gpt-5.5")
 
@@ -378,6 +394,86 @@ class CodexExceptionOriginTests(unittest.TestCase):
         self.assertEqual(ExceptionOrigin.describe(RuntimeError("never raised")), "")
 
 
+class CodexLogTokenTests(unittest.TestCase):
+    """INV-10 and spec r5 rows 10 and 25 (S4 R-9): any text as one bounded, space-free log token, by two fixed rules."""
+
+    def _log_token(self) -> Any:
+        from vidbyte.lib.util import text
+
+        self.assertTrue(hasattr(text, "LogToken"), "spec r5 row 25 adds the LogToken class to vidbyte.lib.util.text")
+        return text.LogToken
+
+    def test_the_spec_examples_hold_verbatim(self) -> None:
+        of = self._log_token().of
+        self.assertEqual(of(LOG_TOKEN_SPEC_VALUE, 128), LOG_TOKEN_SPEC_TOKEN)
+        self.assertEqual(of("a" * 200, 128), "a" * 128 + "...")
+
+    def test_every_character_outside_the_ascii_set_becomes_one_underscore(self) -> None:
+        # Rule 1. The look-alike digits are str.isalnum() and str.isdigit() in Python but not ASCII, so they go too.
+        of = self._log_token().of
+        rows = (
+            ("space", "a b", "a_b"),
+            ("tab", "a\tb", "a_b"),
+            ("carriage return", "a\rb", "a_b"),
+            ("newline", "a\nb", "a_b"),
+            ("CRLF", "a\r\nb", "a__b"),
+            ("equals", "key=value", "key_value"),
+            ("percent", "50%s", "50_s"),
+            ("double quote", 'say "hi"', "say__hi_"),
+            ("single quote", "it's", "it_s"),
+            ("backslash", "a\\b", "a_b"),
+            ("comma, semicolon and brackets", "a,b;c[d]", "a_b_c_d_"),
+            ("NUL", "a\x00b", "a_b"),
+            ("non-ASCII letter", "café", "caf_"),
+            ("line separator", "a b", "a_b"),
+            ("fullwidth and superscript digits", "１²", "__"),
+            ("emoji", "ok\U0001f600", "ok_"),
+        )
+        for label, value, expected in rows:
+            with self.subTest(case=label):
+                self.assertEqual(of(value, 128), expected)
+
+    def test_a_value_inside_the_set_and_the_limit_comes_back_unchanged(self) -> None:
+        of = self._log_token().of
+        for value in (LOG_TOKEN_ALLOWED, "019a3c1e-7b2f-7c43-9d1e-5f0a8b6c2d4e", "item/commandExecution/terminalInteraction", "turn-2", "client.py:_request_raw:384", ""):
+            with self.subTest(value=value):
+                self.assertEqual(of(value, 128), value)
+
+    def test_a_longer_result_keeps_the_first_limit_characters_and_appends_three_dots(self) -> None:
+        # Rule 2 runs after rule 1, so a token is never longer than limit + 3.
+        of = self._log_token().of
+        self.assertEqual(of("b" * 128, 128), "b" * 128)
+        self.assertEqual(of("b" * 129, 128), "b" * 128 + "...")
+        self.assertEqual(of(" " * 130, 128), "_" * 128 + "...")
+        self.assertEqual(of("abcdef", 3), "abc...")
+        self.assertEqual(of("abc", 3), "abc")
+        self.assertEqual(of("x=" * 100_000, 128), "x_" * 64 + "...")
+
+    def test_applying_it_twice_gives_the_same_token(self) -> None:
+        of = self._log_token().of
+        allowed = set(LOG_TOKEN_ALLOWED)
+        for limit in (3, 128):
+            for value in (LOG_TOKEN_SPEC_VALUE, "a" * 200, " " * 130, "café = %s\r\n", "", "abc"):
+                with self.subTest(limit=limit, value=value[:20]):
+                    token = of(value, limit)
+                    self.assertEqual(of(token, limit), token)
+                    self.assertLessEqual(len(token), limit + 3)
+                    self.assertLessEqual(set(token), allowed)
+
+    def test_it_is_a_static_method_exported_from_the_text_module_and_the_util_package(self) -> None:
+        from vidbyte.lib import util
+        from vidbyte.lib.util import text
+
+        log_token = self._log_token()
+        self.assertIsInstance(inspect.getattr_static(log_token, "of"), staticmethod)
+        # Row 25: LogToken goes after TOKEN_ESTIMATE_CHARS_PER_TOKEN, before SubstringCounter.
+        self.assertEqual(text.__all__, ["TOKEN_ESTIMATE_CHARS_PER_TOKEN", "LogToken", "SubstringCounter", "TokenEstimate"])
+        # Row 10: the util package re-exports it in its alphabetical __all__.
+        self.assertIs(getattr(util, "LogToken", None), log_token)
+        self.assertIn("LogToken", util.__all__)
+        self.assertEqual(list(util.__all__), sorted(util.__all__))
+
+
 class CodexHardeningConstantTests(unittest.TestCase):
     """AC-40, INV-47, D-31 and sections 9.2 and 9.3: every fixed value lives in lib, verbatim, in sorted __all__."""
 
@@ -388,8 +484,9 @@ class CodexHardeningConstantTests(unittest.TestCase):
         self.assertEqual(exported, sorted(exported))
         for name, expected in NEW_CONSTANTS.items():
             with self.subTest(constant=name):
-                value = getattr(codex_host, name)
+                # Checked before the read, so a constant the module lacks fails as a missing export, not an AttributeError.
                 self.assertIn(name, exported)
+                value = getattr(codex_host, name)
                 if isinstance(expected, dict):
                     self.assertEqual({key: dict(answer) for key, answer in value.items()}, expected)
                 else:

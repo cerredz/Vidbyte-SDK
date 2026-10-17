@@ -21,6 +21,7 @@ from typing import Any
 
 from tests.features.codex_host.codex_host_support import (
     GOAL_FIELD_MESSAGE,
+    GOAL_SPAWN_OWNER,
     NEXT_STEPS,
     TOOL_NAMES,
     TOOL_TABLE,
@@ -315,7 +316,7 @@ class CodexHostToolArgumentTests(_ToolCase):
         spawns = host.names().count("spawn_codex_thread")
         refused = await _call(tools, "spawn_codex_thread", {"goal_objective": "Ship the fix.", "goal_token_budget": 500, "prompt": None})
         self.assert_error_result(refused, "configuration.invalid_argument")
-        self.assertIn(GOAL_FIELD_MESSAGE.format(name="turn"), refused.output)
+        self.assertIn(GOAL_FIELD_MESSAGE.format(owner=GOAL_SPAWN_OWNER, name="turn"), refused.output)
         self.assertEqual(host.names().count("spawn_codex_thread"), spawns)
         # The same goal call on a posture without a turn setting reaches the host.
         goal_tools = _toolset(host, spawn_defaults=_defaults(turn=CodexTurnSettings()))

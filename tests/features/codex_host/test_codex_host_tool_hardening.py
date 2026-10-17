@@ -18,6 +18,7 @@ from typing import Any
 
 from tests.features.codex_host.codex_host_support import (
     GOAL_FIELD_MESSAGE,
+    GOAL_SPAWN_OWNER,
     NEXT_STEPS,
     TOOL_NAMES,
     TOOLS_LOGGER,
@@ -151,7 +152,7 @@ class CodexToolGoalEffortTests(unittest.IsolatedAsyncioTestCase):
         result = await _call(_toolset(host), "spawn_codex_thread", {"goal_objective": "Ship the fix.", "effort": "high"})
         self.assertEqual(result.status, ToolStatus.ERROR, result.output)
         self.assertEqual(result.metadata["code"], "configuration.invalid_argument")
-        self.assertIn(GOAL_FIELD_MESSAGE.format(name="turn"), result.output)
+        self.assertIn(GOAL_FIELD_MESSAGE.format(owner=GOAL_SPAWN_OWNER, name="turn"), result.output)
         self.assertNotIn("spawn_codex_thread", host.names())
 
 

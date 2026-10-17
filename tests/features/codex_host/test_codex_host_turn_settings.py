@@ -18,6 +18,7 @@ from typing import Any
 
 from tests.features.codex_host.codex_host_support import (
     GOAL_FIELD_MESSAGE,
+    GOAL_RUN_OWNER,
     WAIT_SECONDS,
     HostTestCase,
     requires_sdk,
@@ -56,7 +57,7 @@ class CodexGoalRunFieldTests(TurnSettingsTestCase):
             with self.subTest(field=name):
                 with self.assertRaises(ConfigurationError) as caught:
                     await asyncio.wait_for(host.run_codex_goal("Ship the fix.", request=request), WAIT_SECONDS)
-                self.assertEqual(str(caught.exception), GOAL_FIELD_MESSAGE.format(name=name))
+                self.assertEqual(str(caught.exception), GOAL_FIELD_MESSAGE.format(owner=GOAL_RUN_OWNER, name=name))
         workspace = CodexTurnSettings(sandbox=CodexSandbox.WORKSPACE_WRITE)
         for name, request in (("network_access", CodexSpawnRequest(turn=workspace, network_access=True)), ("writable_roots", CodexSpawnRequest(turn=workspace, writable_roots=(EXTRA_ROOT,)))):
             with self.subTest(field=name):

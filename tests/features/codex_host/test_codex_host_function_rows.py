@@ -1,7 +1,7 @@
 """FILE: tests/features/codex_host/test_codex_host_function_rows.py
 
-PURPOSE: Proves the per-function rows of the hardening slice on a real host over the in-memory app-server: forget_codex_turns releasing a thread's ended turns; readiness reporting used-up usage in its place; one model-list refresh for a model or tier the cache lacks; continue refusing a stored unfinished goal before it loads the thread; list_codex_threads sending a validated limit on the host and the one-shot; list_codex_skills sending forceReload only when asked; a skill run resolving its skill in the folder the turn runs in; and each new argument refused before any request.
-ROLE IN CODEBASE: Function-row layer of the hardening tests in tests/features/codex_host/ (docs/spec/codex-host-hardening/spec.md AC-16, AC-19, AC-20, AC-21, AC-23, AC-27, AC-28, AC-41, INV-22, INV-24, INV-25, INV-27, INV-29, INV-32, INV-33, INV-40, INV-48, EC-20 to EC-22, EC-41, D-10, D-20, D-25, D-26, D-30). Every class needs the optional openai-codex extra, so CI skips them.
+PURPOSE: Proves the per-function rows of the hardening slice on a real host over the in-memory app-server: forget_codex_turns releasing a thread's ended turns and its usage tracker, so a continued thread is counted from its new turn only; readiness reporting used-up usage in its place; one model-list refresh for a model or tier the cache lacks; continue refusing a stored unfinished goal before it loads the thread; list_codex_threads sending a validated limit on the host and the one-shot; list_codex_skills sending forceReload only when asked; a skill run resolving its skill in the folder the turn runs in; and each new argument refused before any request.
+ROLE IN CODEBASE: Function-row layer of the hardening tests in tests/features/codex_host/ (docs/spec/codex-host-hardening/spec.md AC-16, AC-19, AC-20, AC-21, AC-23, AC-27, AC-28, AC-41, INV-22, INV-24, INV-25, INV-27, INV-29, INV-32, INV-33, INV-40, INV-48, EC-20 to EC-22, EC-41, D-10, D-20, D-25, D-26, D-30, and the S4 review row R-5). Every class needs the optional openai-codex extra, so CI skips them.
 ARCHITECTURE NOTE: Each row drives the public host or one-shot function and reads what the fake app-server received; request counts are compared before and after a call, so a refusal that sent anything fails. Thread-scoped methods are filtered by threadId, so the preflight's own reads do not count against a row.
 COMMON MODIFICATION PATTERNS: A new per-function row adds one test here naming its INV and AC; a new input field adds one AC-41 row with the "<method> <field>" its refusal names.
 KNOWN EDGE CASES: The fake lists models on two pages, so one model-list walk is two model/list requests. A goal read on a notLoaded thread is the only goal read continue may send. Paths are built with os.path so they are absolute on Windows and POSIX alike.
@@ -89,6 +89,32 @@ class CodexForgetTurnsTests(RowTestCase):
         # The thread's dynamic tools stay registered, so a later tool call still reaches the developer's tool.
         call = {"threadId": first.thread_id, "turnId": second.turn_id, "callId": "call-1", "tool": "echo_text", "arguments": {"text": "hi"}}
         self.assertIs((await self.ask("item/tool/call", call))["success"], True)
+
+    async def test_a_forgotten_thread_that_continues_counts_only_its_new_turn(self) -> None:
+        # INV-22 (S4 R-5, mutant M1): forget drops the thread's usage tracker with its turns, so the next turn is counted
+        # from nothing: one turn, priced like the same usage on a fresh thread, and never the forgotten turn again.
+        from vidbyte.lib.dataclasses.codex import CodexThreadSettings
+
+        host = await self.open_host()
+        model = CodexThreadSettings(model="gpt-5.5")
+        first = await self.spawn(host, thread=model)
+        self.server.complete_turn(first.thread_id, first.turn_id, final="One.", usage=self.fakes.token_usage((100, 20), (100, 20)))
+        await self.wait_done(host, first)
+        self.assertEqual(await asyncio.wait_for(host.forget_codex_turns(first.thread_id), WAIT_SECONDS), 1)
+        second = await asyncio.wait_for(host.continue_codex_thread(first.thread_id, "Two."), WAIT_SECONDS)
+        # Codex's thread totals still include the forgotten turn; this turn's own use is the last 200 in and 40 out.
+        self.server.complete_turn(first.thread_id, second.turn_id, final="Two.", usage=self.fakes.token_usage((300, 60), (200, 40)))
+        await self.wait_done(host, second)
+        after = await asyncio.wait_for(host.track_codex_thread_usage(first.thread_id), WAIT_SECONDS)
+        # The independent price: the same usage on a thread that never had a forgotten turn.
+        fresh = await self.spawn(host, thread=model)
+        self.server.complete_turn(fresh.thread_id, fresh.turn_id, final="Two.", usage=self.fakes.token_usage((200, 40), (200, 40)))
+        await self.wait_done(host, fresh)
+        alone = await asyncio.wait_for(host.track_codex_thread_usage(fresh.thread_id), WAIT_SECONDS)
+        self.assertEqual([turn.turn_id for turn in after.turns], [second.turn_id])
+        self.assertEqual((after.total.input_tokens, after.total.output_tokens), (alone.total.input_tokens, alone.total.output_tokens))
+        self.assertIsNotNone(alone.cost_usd)
+        self.assertAlmostEqual(after.cost_usd, alone.cost_usd, places=12)
 
     async def test_forget_works_on_a_closed_host(self) -> None:
         host = await self.open_host()
