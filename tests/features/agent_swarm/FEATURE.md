@@ -2,7 +2,7 @@
 
 ## High-Level Feature Description
 
-A developer defines two or more agents, each with a name, a model and a system prompt. The developer points them at one shared folder and calls `await AgentSwarm(settings).arun(goal)`. Every agent gets the same goal and works with `bash`, `grep`, `read_lines`, `write_text` and `patch_file` in that folder. An agent can `message` any other agent without waiting. A message reaches a busy agent between its tool calls as a new user message, and it wakes an idle agent. The swarm ends when no agent is working and no message is waiting, or at a turn or time limit. It returns the full ordered tuple of events.
+A developer defines two or more agents, each with a name, a model and a system prompt. The developer points them at one shared folder and calls `await AgentSwarm(settings).arun(goal)`. Every agent gets the same goal and works with `bash`, `grep`, `read_lines`, `write_text` and `patch_file` in that folder. An agent can `message` any other agent without waiting. A message reaches a busy agent between its tool calls as a new user message, and it wakes an idle agent. The swarm ends once no agent is working, as QUIET, MAX_TURNS (the turn budget is spent and a message is still waiting) or FAILED, or at the time limit. It returns the full ordered tuple of events.
 
 Under the hood, each agent runs one long-lived ordinary SDK loop for the whole swarm. One `AgentSwarmRuntime` per run coordinates the agents through four entry points: `post_message`, `collect_messages`, `end_turn` and `record_tool_call`. All coordination state changes inside synchronous blocks on one event loop.
 
