@@ -180,6 +180,30 @@ The workspace holds `entries.jsonl` (short typed memory entries, committed for a
 
 `resume()` and `aresume()` continue the newest unfinished run, or the one named, from its journal: finished pairs are replayed from their recorded cards and interrupted ones run again. `Session` persistence and `fork()` are not supported. See `vidbyte/agents/infinite/README.md` for the layout, the limits, and the known edge cases.
 
+## AgentSwarm
+
+`AgentSwarm` runs several agents you define on one goal at once, in one shared folder, and lets them message each other.
+
+```python
+import asyncio
+
+from vidbyte import AgentSwarm, AgentSwarmMember, AgentSwarmSettings
+
+swarm = AgentSwarm(
+    AgentSwarmSettings(
+        agents=(
+            AgentSwarmMember(name="builder", system_prompt="You write the code.", provider="openai", model_name="gpt-4.1"),
+            AgentSwarmMember(name="tester", system_prompt="You write and run the tests.", provider="openai", model_name="gpt-4.1"),
+        ),
+        workplace="swarm-workplace",  # created if missing, never cleaned
+    )
+)
+result = asyncio.run(swarm.arun("Build a Celsius-to-Fahrenheit command-line tool with tests."))
+print(result.stop_reason.value)  # quiet
+```
+
+Every agent holds `bash`, `grep`, `read_lines`, `write_text`, and `patch_file` in the workplace, the optional `search_tool`, and `message`, which queues a text for one other agent and returns at once. A message reaches a working agent after its current tool call and wakes an idle one. A turn ends when the agent replies without a tool call or calls `isDone`. The swarm ends `quiet` when no agent is working and no message waits, `max_turns` when the turn budget is spent, `failed` when every agent failed, or `timeout` at `timeout_seconds`. `on_event` receives every event in order, and the result holds the stop reason, every event, and each agent's last reply. `Session` persistence and `fork()` are not supported. See `vidbyte/agents/agent_swarm/README.md` for the limits, the event kinds, and the known edge cases.
+
 ## Model Fallback
 
 An agent can declare an ordered chain of backup models. Array index sets precedence:
@@ -392,6 +416,7 @@ credential and limits.
 - `handoff.py`: structured handoff generation from a completed agent run.
 - `coding.py`: `CodingAgent`, a `BaseAgent` preloaded with bash, read, write, edit, glob, grep, and one web-fetch tool over one root folder; its checks live in `CodingAgentSettings` and its tools in `CodingAgentTools`.
 - `infinite/`: `InfiniteMemoryAgent`, a root agent that delegates work to generator and verifier subagent pairs through `launch_subagent` and keeps memory in one guarded workspace folder; resumable from its run journal.
+- `agent_swarm/`: `AgentSwarm`, several developer-defined agents that run at once in one shared folder, message each other, and stop when none has work left, with one numbered event record per run.
 - `coding_context/`: `CodingContextWindow` and one loader per section (`AgentsMdLoader`), which build the context a `CodingAgent` shows after its system prompt.
 - `skills/`: `SkillLoader` and one resolver per source, the agent-agnostic loader that turns declarative skill entries into `SkillDocument`s for `JevAgent`'s skill preload.
 - `multi/`: ledger-driven manager/worker orchestration and transfer controls.
