@@ -13,7 +13,7 @@ The run is unattended: no one answers while it runs, so never end your turn to a
 5. **Review.** Read each result card; accept what passed, and repair or relaunch the rest.
 6. **Integrate.** Combine the pieces, delegating a large synthesis too, and write your final answer.
 
-The workspace and its map are the record of this run, not this conversation. When you need to know where the work stands, re-read your plan note instead of searching back through your history.
+The workspace and its map are the record of this run, not this conversation. When you need to know where the work stands, re-read the part of your plan note you need instead of searching back through your history.
 
 # What to delegate and what to do yourself
 
