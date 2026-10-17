@@ -595,9 +595,9 @@ def template_regex(template: str, **known: object) -> re.Pattern[str]:
     return re.compile("".join(parts))
 
 
-def renderings(template: str, text: str, **known: object) -> int:
-    """How many non-empty, non-overlapping renderings of `template` appear in `text`."""
-    return sum(1 for match in template_regex(template, **known).finditer(text) if match.group(0))
+def renderings(template: str, haystack: str, /, **known: object) -> int:
+    """How many non-empty, non-overlapping renderings of `template` appear in `haystack`; positional-only so a template field named `text` can go in `known`."""
+    return sum(1 for match in template_regex(template, **known).finditer(haystack) if match.group(0))
 
 
 def snapshot(root: Path) -> dict[str, bytes]:
