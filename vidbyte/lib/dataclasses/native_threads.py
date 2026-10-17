@@ -140,11 +140,11 @@ class NativeThreadRequest:
         # thread_id is None exactly when the verb is run.
         if self.verb is NativeThreadVerb.RUN and self.thread_id is not None:
             raise ConfigurationError(f"thread_id must be None when the verb is {self.verb.value}.", details={"field": "thread_id"})
-        # Claude Code ids must be lowercase UUIDs, because claude
-        # --resume would also match a session title or a transcript
-        # path.
         if self.verb is not NativeThreadVerb.RUN:
-            pattern = CLAUDE_THREAD_ID_PATTERN if self.harness is NativeHarness.CLAUDE else NATIVE_THREAD_ID_PATTERN
+            # Claude Code ids must be lowercase UUIDs, because claude
+            # --resume would also match a session title or a
+            # transcript path.
+            pattern =CLAUDE_THREAD_ID_PATTERN if self.harness is NativeHarness.CLAUDE else NATIVE_THREAD_ID_PATTERN
             RecordFieldValidator.require_text(self.thread_id, "thread_id", max_chars=NATIVE_THREAD_ID_MAX_CHARS, pattern=pattern)
 
     def _checked_skills(self) -> tuple[Path, ...]:
