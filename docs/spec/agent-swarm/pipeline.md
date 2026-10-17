@@ -18,12 +18,12 @@ started: 2026-10-16 16:10
 | S2 tests | done | 2026-10-16 18:45 | 2026-10-16 20:40 | reports/S2-test-author.md | 51 tests / 161 cases, all red (missing symbols); S2_HEAD=9895d663 → 87c8ed14 after adjudicated fixture fix |
 | S3 implement | done | 2026-10-16 20:45 | 2026-10-16 22:30 | reports/S3-implementer.md | S3_HEAD=c0b167d3; draft PR #1174; 23 new + 13 modified = budget; 161/161 |
 | S4 adversarial review | done | 2026-10-16 22:35 | 2026-10-17 00:40 | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES — 1 Blocker (R-1), 4 Major (R-2..R-5), 10 Minor (R-6..R-15); 4 refuted |
-| S5 repair loop | running | 2026-10-17 02:10 | | reports/S5-repair-1.md | |
-| S5 re-review | pending | | | | |
+| S5 repair loop | done | 2026-10-17 02:10 | 2026-10-17 03:05 | reports/S5-repair-1.md | converged in 1/8; HEAD cd9d3189 → 87df4fc9 (guard test); all findings closed; CI green |
+| S5 re-review | running | 2026-10-17 03:05 | | reports/S5-rereview.md | |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 1/8 (running) · S5 re-review rounds: 0/2 · S2_HEAD c71b1032
+- S1 review rounds: 2/2 · S5 repair iterations: 1/8 (converged) · S5 re-review rounds: 1/2 (running) · S2_HEAD 87df4fc9
 
 ## Decisions the orchestrator made
 - 2026-10-16 16:08 — Base on origin/main (0f2aeb48), not on the unmerged InfiniteMemoryAgent branch (#1084) — the user said "inside of the vidbyte-sdk/", and #1084 is still open.
@@ -66,6 +66,11 @@ started: 2026-10-16 16:10
 - 2026-10-17 01:45 — The S2 test author hit the session usage limit mid-addendum. Its edits survived uncommitted, and I resumed the same agent.
 - 2026-10-17 02:05 — Spot-checked the S2 addendum at c71b1032. It touches only tests/features/agent_swarm/{FEATURE.md, README.md, test_agent_swarm_contract.py, test_agent_swarm_lifecycle.py} and test-plan.md, with no vidbyte/ source. I re-ran the pack myself: "6 failed, 164 passed in 12.28s". The 6 failures are exactly the expected-red regressions: the isDone refusal, EC-39 ×3, the R-11 clock, and the R-8 newline tool name. The agent reports that the M2, M7, M21 and M22 tests each fail under their mutant (on a scratch copy), and that the M7 test passed 10 of 10 runs. **New S2_HEAD = c71b1032.**
 - 2026-10-17 02:05 — I accepted the test author's choice to leave the shared oracle `assert_event_invariants` unchanged even though it is stricter than r4. It allows FAILED only while an agent is working, and it demands full replies on QUIET. The two affected tests, the EC-39 idle variant and EC-18, assert their events directly. This weakens no existing assertion.
+
+- 2026-10-17 02:50 — Spot-checked S5 iteration 1: DONE at cd9d3189 (pushed). The tree is clean. The pack diff since c71b1032 is empty. The only other test-tree changes come from the origin/main merge dc4710f9 (#1169–#1172). verify-log.md has "## Iteration 1". review.md has no `open` status: R-1, R-2, R-3, R-4, R-6..R-11 and R-13 are fixed @SHA; R-5 is closed by S2; R-12 is in §17; R-14 is in r4; R-15 is a follow-up. I re-ran the pack: 170 passed. Remote checks on cd9d3189 passed: CI 39006588451 and static-policy 39006589912.
+- 2026-10-17 02:55 — S5 mutation testing found one gap: removing the `_stop_reason is None` guard survived the pack. This behaviour is specified (r4 INV-17/EC-39), so I routed it to the S2 test author. It committed 87df4fc9 (pushed): one test, pack 171 passed (re-run by me), the guard mutant killed on a scratch copy, 10/10 stable. **New S2_HEAD = 87df4fc9.**
+- 2026-10-17 02:55 — I asked the test author for a clean `ruff check`/`ruff format --check` on the pack. It wasn't met, and that is not a defect. The repo has no [tool.ruff] config, and ruff defaults are not a gate here (SDK-LINT is). The 9 findings already existed at c71b1032, and 7 of 8 package source files would also be reformatted. I accepted this with no change, because reformatting the pack would be scope churn.
+- 2026-10-17 03:05 — My own source gate on cd9d3189 gave `SDK-LINT: PASS` and "3 failed, 6414 passed, 16 skipped". All 3 failures are the known inherited harness_threads tests (failure_codes, tools_and_configs, import_vidbyte). **S5 has converged after iteration 1.** I dispatched ci.yml and static-policy.yml on 87df4fc9 and launched the final conformance re-review (round 1/2), whose report goes to reports/S5-rereview.md.
 
 ## User replies (verbatim)
 - 2026-10-16 16:05 — answers to four clarifying questions: "One shared folder (Recommended)"; "Stay alive until quiet (Recommended)"; "Shared goal + per-agent prompts (Recommended)"; "Callback + list on result (Recommended)".
