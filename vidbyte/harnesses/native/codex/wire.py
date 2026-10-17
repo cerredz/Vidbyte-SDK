@@ -74,6 +74,20 @@ from vidbyte.lib.constants.codex import (
     CODEX_TURN_ITEMS_VIEW_FULL,
     CODEX_USAGE_PROVIDER,
 )
+from vidbyte.lib.constants.codex_host import (
+    CODEX_HOST_APPROVAL_FIELDS,
+    CODEX_HOST_EXITED_MESSAGE,
+    CODEX_HOST_MINIMUM_VERSION_PARTS,
+    CODEX_HOST_NO_COMPLETION_MESSAGE,
+    CODEX_HOST_NO_FINAL_ANSWER_MESSAGE,
+    CODEX_HOST_NO_GOAL_MODE_MESSAGE,
+    CODEX_HOST_PROMPT_CONTEXT_MESSAGE,
+    CODEX_HOST_SANDBOX_NOT_READY,
+    CODEX_HOST_SCHEMA_MESSAGE,
+    CODEX_HOST_SIGNED_OUT_MESSAGE,
+    CODEX_HOST_UNUSABLE_SCHEMA_MESSAGE,
+    CODEX_HOST_VERSION_PATTERN,
+)
 from vidbyte.lib.dataclasses.codex import (
     CodexAgentSettings,
     CodexClientSettings,
@@ -120,25 +134,6 @@ from vidbyte.lib.enums.codex import (
 from vidbyte.lib.enums.failure import FailureCode
 from vidbyte.lib.errors import CodexAgentError, ConfigurationError
 from vidbyte.providers.output_schema import OutputSchemaFormatter
-
-# A runtime version is three dot-separated numbers; anything else is
-# unreadable and refused (INV-4, D-5).
-VERSION_PATTERN = re.compile(r"(\d+)\.(\d+)\.(\d+)")
-MINIMUM_VERSION = tuple(int(part) for part in CODEX_HOST_MINIMUM_VERSION.split("."))
-# The two wire approval fields, in the order CODEX_APPROVAL_MODE_WIRE
-# lists their values.
-APPROVAL_FIELDS = ("approval_policy", "approvals_reviewer")
-# The Windows sandbox states that keep turns from running (D-28).
-SANDBOX_NOT_READY = frozenset({CodexSandboxReadiness.NOT_CONFIGURED, CodexSandboxReadiness.UPDATE_REQUIRED})
-# The fixed messages of problems the translator finds in Codex's
-# answers.
-SIGNED_OUT_MESSAGE = "Codex has no signed-in account, and this runtime requires one."
-NO_FINAL_ANSWER_MESSAGE = "Codex completed the turn without a final answer."
-SCHEMA_MESSAGE = "Codex's final answer is not JSON that matches output_schema."
-UNUSABLE_SCHEMA_MESSAGE = "output_schema must be a Pydantic model type or a mapping that serializes to JSON."
-NO_GOAL_MODE_MESSAGE = "The Codex runtime completed a goal turn without activating goal mode."
-NO_COMPLETION_MESSAGE = "Codex ended the turn without reporting its completion."
-EXITED_MESSAGE = "CodexHost closed, or its Codex app-server exited, while the turn was running."
 
 
 def final_answer(items: Sequence[ThreadItem]) -> str | None:
@@ -256,7 +251,7 @@ class CodexParamsTranslator:
         # is refused (section 9.1).
         run_input = CodexRunInput.text(prompt) if isinstance(prompt, str) else prompt
         if not isinstance(run_input, CodexRunInput) or run_input.context_items or run_input.context_manager is not None or run_input.context_placements:
-            raise ConfigurationError("A Codex prompt must be a str or a CodexRunInput without context_items, a context_manager or context_placements.")
+            raise ConfigurationError(CODEX_HOST_PROMPT_CONTEXT_MESSAGE)
         return [{**asdict(item), "type": item.type.value} for item in run_input.items]
 
     def reject_unusable_schema(self, request: CodexSpawnRequest) -> None:
@@ -271,7 +266,7 @@ class CodexParamsTranslator:
         try:
             to_jsonable_python(self._schemas.output_schema(request.output_schema))
         except (PydanticUserError, RecursionError, TypeError, ValueError) as exc:
-            raise ConfigurationError(f"{UNUSABLE_SCHEMA_MESSAGE} Got {type(exc).__name__}.") from None
+            raise ConfigurationError(CODEX_HOST_UNUSABLE_SCHEMA_MESSAGE.format(error_type=type(exc).__name__)) from None
 
     @staticmethod
     def thread_list(
@@ -368,7 +363,7 @@ class CodexParamsTranslator:
         chosen = {key: value for key, value in explicit.items() if value}
         if not chosen:
             pair = CODEX_APPROVAL_MODE_WIRE.get(mode.value if mode is not None else default_mode.value, ("", ""))
-            chosen = {key: value for key, value in zip(APPROVAL_FIELDS, pair, strict=True) if value}
+            chosen = {key: value for key, value in zip(CODEX_HOST_APPROVAL_FIELDS, pair, strict=True) if value}
         values.update(chosen)
 
     @staticmethod
@@ -411,10 +406,10 @@ class CodexResponseTranslator:
         # refused (INV-4, D-5).
         info = response.serverInfo
         raw = (info.version if info is not None else None) or response.userAgent or ""
-        match = VERSION_PATTERN.search(raw)
+        match = re.search(CODEX_HOST_VERSION_PATTERN, raw)
         if match is None:
             return raw, False
-        return match.group(), tuple(int(part) for part in match.groups()) >= MINIMUM_VERSION
+        return match.group(), tuple(int(part) for part in match.groups()) >= CODEX_HOST_MINIMUM_VERSION_PARTS
 
     @staticmethod
     def routes_to_user(response: ThreadStartResponse | ThreadResumeResponse) -> bool:
@@ -428,14 +423,14 @@ class CodexResponseTranslator:
     def sign_in_problem(response: GetAccountResponse) -> CodexProblem | None:
         # No account while the runtime requires one means not signed in.
         if response.account is None and response.requires_openai_auth:
-            return CodexErrorMapper.problem(FailureCode.CODEX_NOT_SIGNED_IN, SIGNED_OUT_MESSAGE)
+            return CodexErrorMapper.problem(FailureCode.CODEX_NOT_SIGNED_IN, CODEX_HOST_SIGNED_OUT_MESSAGE)
         return None
 
     @staticmethod
     def sandbox_problem(readiness: CodexSandboxReadiness) -> CodexProblem | None:
         # A Windows sandbox that is not configured or needs an update
         # keeps turns from running (D-28).
-        if readiness in SANDBOX_NOT_READY:
+        if readiness in CODEX_HOST_SANDBOX_NOT_READY:
             return CodexErrorMapper.problem(FailureCode.CODEX_SANDBOX_NOT_READY, f"The Codex Windows sandbox reports {readiness.value}.")
         return None
 
@@ -625,14 +620,14 @@ class CodexResponseTranslator:
     @staticmethod
     def exited(handle: CodexTurnHandle) -> CodexTurnSnapshot:
         # A turn still running when the host closed or its process died.
-        return CodexTurnSnapshot(handle=handle, status=CodexTurnStatus.FAILED, problem=CodexErrorMapper.problem(FailureCode.CODEX_PROCESS_EXITED, EXITED_MESSAGE))
+        return CodexTurnSnapshot(handle=handle, status=CodexTurnStatus.FAILED, problem=CodexErrorMapper.problem(FailureCode.CODEX_PROCESS_EXITED, CODEX_HOST_EXITED_MESSAGE))
 
     def turn_snapshot(self, turn: CodexLiveTurn, items: Sequence[ThreadItem], reported: Turn | None) -> CodexTurnSnapshot:
         # A plain or review turn ends with Codex's own status; Vidbyte's
         # stop reason labels it only when Codex reports it interrupted
         # (INV-18, INV-19).
         if reported is None:
-            return CodexTurnSnapshot(handle=turn.handle, status=CodexTurnStatus.FAILED, problem=CodexErrorMapper.problem(FailureCode.CODEX_PROTOCOL_MISMATCH, NO_COMPLETION_MESSAGE))
+            return CodexTurnSnapshot(handle=turn.handle, status=CodexTurnStatus.FAILED, problem=CodexErrorMapper.problem(FailureCode.CODEX_PROTOCOL_MISMATCH, CODEX_HOST_NO_COMPLETION_MESSAGE))
         status = CodexTurnStatus(reported.status.value)
         reason = turn.stop_reason if status is CodexTurnStatus.INTERRUPTED else None
         problem = CodexErrorMapper.stop_problem(reason) if reason is not None else None
@@ -645,7 +640,7 @@ class CodexResponseTranslator:
         rule = turn.rule
         reported = rule.failed or rule.last_completed
         if rule.mismatch or reported is None:
-            return CodexTurnSnapshot(handle=turn.handle, status=CodexTurnStatus.FAILED, problem=CodexErrorMapper.problem(FailureCode.CODEX_PROTOCOL_MISMATCH, NO_GOAL_MODE_MESSAGE))
+            return CodexTurnSnapshot(handle=turn.handle, status=CodexTurnStatus.FAILED, problem=CodexErrorMapper.problem(FailureCode.CODEX_PROTOCOL_MISMATCH, CODEX_HOST_NO_GOAL_MODE_MESSAGE))
         status, problem = self._goal_outcome(turn, reported)
         snapshot = self._snapshot(turn, reported, status, problem, turn.items)
         return replace(snapshot, goal_status=CodexGoalStatus.NONE if rule.cleared else rule.status)
@@ -694,14 +689,14 @@ class CodexResponseTranslator:
         try:
             result = replace(CodexResultSerializer.from_sdk(turn.handle.thread_id, collected), last_usage=turn.usage_delta())
         except CodexAgentError:
-            return CodexTurnSnapshot(handle=turn.handle, status=CodexTurnStatus.FAILED, problem=CodexErrorMapper.problem(FailureCode.CODEX_RESPONSE_INVALID, NO_FINAL_ANSWER_MESSAGE))
+            return CodexTurnSnapshot(handle=turn.handle, status=CodexTurnStatus.FAILED, problem=CodexErrorMapper.problem(FailureCode.CODEX_RESPONSE_INVALID, CODEX_HOST_NO_FINAL_ANSWER_MESSAGE))
         if status is CodexTurnStatus.FAILED and problem is None:
             problem = CodexErrorMapper.turn_problem(result.error)
         schema = turn.request.output_schema
         if status is CodexTurnStatus.COMPLETED and schema is not None:
             parsed, error = self._schemas.validate(result.final_response or "", schema)
             if error is not None:
-                problem = CodexErrorMapper.problem(FailureCode.CODEX_SCHEMA_VIOLATION, SCHEMA_MESSAGE)
+                problem = CodexErrorMapper.problem(FailureCode.CODEX_SCHEMA_VIOLATION, CODEX_HOST_SCHEMA_MESSAGE)
             else:
                 result = replace(result, structured=parsed)
         return CodexTurnSnapshot(handle=turn.handle, status=status, result=result, problem=problem)

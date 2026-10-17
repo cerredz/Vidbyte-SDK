@@ -26,6 +26,7 @@ from vidbyte.lib.constants.codex import (
     CODEX_HOST_MIN_TOKEN_LIMIT,
     CODEX_NEXT_STEPS,
 )
+from vidbyte.lib.constants.codex_host import CODEX_HOST_NEXT_STEP_SENTENCE
 from vidbyte.lib.dataclasses.codex_host import CodexSpawnRequest, CodexTurnHandle
 from vidbyte.lib.enums.codex import CodexHostOperation, CodexTurnStatus
 from vidbyte.lib.enums.failure import FailureCode
@@ -125,9 +126,12 @@ class _CodexHostTool(BaseTool):
 
     @staticmethod
     def _failure(name: str, code: str, message: str, next_step: str) -> ToolResult:
-        # The error text leads with the code and ends with the next
-        # step.
-        return ToolResult.error(name, f"{code}: {message} Next step: {next_step}", metadata={"code": code, "next_step": next_step})
+        # The error text leads with the code and states the next step
+        # once: a CodexHost error already carries it in its message, so
+        # only a message without it gets it appended.
+        sentence = CODEX_HOST_NEXT_STEP_SENTENCE.format(next_step=next_step)
+        text = f"{code}: {message}" if sentence in message else f"{code}: {message} {sentence}"
+        return ToolResult.error(name, text, metadata={"code": code, "next_step": next_step})
 
     @staticmethod
     def _resolve_text(call: ToolCall, name: str, *, required: bool = False) -> str:
