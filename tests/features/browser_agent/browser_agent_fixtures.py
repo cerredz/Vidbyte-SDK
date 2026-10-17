@@ -225,7 +225,8 @@ class _ScriptedRunner:
     def __init__(self, model: ScriptedModel, agent: str, recorded_model: str = "") -> None:
         self.model = model
         self.agent = agent
-        # Not named model_name: BaseAgent reads that attribute off a runner.
+        # Not named model_name: BaseAgent reads that attribute
+        # off a runner.
         self.recorded_model = recorded_model
 
     async def arun(self, prompt: str, **options: Any) -> object:
