@@ -252,11 +252,11 @@ class MessageHistoryCompactionMiddleware(AgentMiddleware):
         # Build the window once so a window_mode or a scope it cannot apply fails here instead of failing every model call at run time.
         if self.mode is CompactionMode.TOOL_OUTPUT_SLIDING_WINDOW:
             ToolOutputSlidingWindowCompaction(mode=self.options.get("window_mode", CompactionMode.TRUNCATE_TOOL_RESULTS), tools=self.options.get("tools", ()))
-        # Build the trim once when a low watermark is given, so the
+        # Build a trim with the given low watermark once, so the
         # strategy's own check refuses a bool, a float, or a negative
-        # value here; int() would accept True and 2.5.
-        if self.mode is CompactionMode.TRIM_WITH_PROVIDER_BOUNDARIES and self.options.get("low_watermark_tokens") is not None:
-            TrimWithProviderBoundariesCompaction(low_watermark_tokens=self.options["low_watermark_tokens"])
+        # value here; int() would accept True and 2.5. None, the
+        # default, always passes.
+        TrimWithProviderBoundariesCompaction(low_watermark_tokens=self.options.get("low_watermark_tokens"))
 
 
 class SummaryCompactionMiddleware(MessageHistoryCompactionMiddleware):
