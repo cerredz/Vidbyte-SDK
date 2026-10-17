@@ -4,7 +4,7 @@ repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-infinite-memory-context-economy
 branch: feat/infinite-memory-context-economy
 base_commit: 0f2aeb48382b49ecb179b3f3ca94f3807cd1edcc
-pr:
+pr: https://github.com/cerredz/Vidbyte-SDK/pull/1177
 until: none
 started: 2026-10-16 16:05
 ---
@@ -16,7 +16,7 @@ started: 2026-10-16 16:05
 | S0 worktree + capture + recon | done | 2026-10-16 16:05 | 2026-10-16 16:45 | reports/S0-scout.md | base_commit 0f2aeb48; code-map.md (4 sections, ~60 files) |
 | S1 spec + review | done | 2026-10-16 16:50 | 2026-10-16 20:40 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | spec r3 (75789419), approved; round 1 SOUND WITH FIXES (12 accepted), round 2 SOUND WITH FIXES (12 accepted) |
 | S2 tests | done | 2026-10-16 20:45 | 2026-10-17 |  reports/S2-test-author.md | 133 new tests in 10 files + §13 changed tests; red confirmed (orchestrator re-ran test_read_lines_window.py 10 failed, test_infinite_memory_stable_prefix.py 8 failed, right reasons); test commit 0d265474, proof 5e930f3b; 2 spec defects → spec r4 (fb702ba5), tests aligned acfec7a8; **S2_HEAD = acfec7a8** (S3/S5/S6 diff the test tree against it) |
-| S3 implement | pending | | | | |
+| S3 implement | done | 2026-10-17 00:00 | 2026-10-17 | reports/S3-implementer.md | **S3_HEAD = 84e566bb** (code e21463fe); draft PR #1177; 57/57 rows; budget 14/14 files, 4/4 modules, infinite pkg 9/9 (launch.py 381/400); orchestrator re-ran 249 new+changed tests: 249 passed; lint PASS; source gate 3 failed (harness_threads, pre-existing/branch-scoped), package gate PASS; contract --check current; semgrep 0 findings; CI 39009423722 success + Static policy 39009425314 success on 5f91b456 |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
@@ -38,10 +38,19 @@ started: 2026-10-16 16:05
 
 - 2026-10-17 — S2 reported two spec defects before S3 (playbook: resolve now, never let the implementer discover them): (1) INV-9.3 turns `tests/test_prompt_sits_at_run_boundary.py::CompactedRunBoundaryTests::test_a_top_note_replaced_by_the_trace_keeps_the_task_before_the_run_on_every_wire` red (A-5 wrong); (2) the infinite package's complexity-budget test (≤400 lines/module, ≤8 files) is not in §13 and `InfiniteRecallTool` does not fit `memory.py`. Sent both to the spec author for r4; then the test author updates the named tests. Open formats the spec leaves loose (rejection reasons, `{searches}` wording, `reply line {n}` base, error class) are accepted as content/order checks.
 
+- 2026-10-17 — S3 merged origin/main at 4f30a0d9 (#1169–#1172; 4 test files changed by main). The "no test edits" check is therefore `git log --first-parent acfec7a8..HEAD -- tests` listing only merge commits, plus `git diff <last-merge>..HEAD -- tests` empty — not a raw `git diff acfec7a8..HEAD -- tests`.
+- 2026-10-17 00:50 — S3 implementer hit an API session limit after 10 row commits (through d8bf47b3); resumed the same agent after the reset.
+
+- 2026-10-17 — S3 deviations D-1…D-10 accepted for review (not adjudicated by the orchestrator); S4 reviewers are told to look at row 13's lazy export, D-8 recall details, D-9 no baseline ratchet first. Lint IMPROVED verdicts (A002 703→562 etc.) come from main's stale baseline, verified by S3 on a scratch copy of main — not ratcheted in this PR.
+
 ## User replies (verbatim)
 - (none during the run)
 
 ## Niche facts accumulated (carried into every later briefing)
+- Source gate on this branch ends `3 failed` — all `tests/features/harness_threads/test_harness_threads_surface.py`: `test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes` fails on main itself (148 == 120); the other two are branch-scoped (tools change; new root export `InfiniteRecallMode`) and skip on CI's depth-1 checkout. Pre-existing; never edit. — *source:* S3
+- Branch upstream had been origin/main; S3 pushed with explicit refspec, now tracks origin/feat/infinite-memory-context-economy. Push with `git push origin HEAD:feat/infinite-memory-context-economy`. — *source:* S3
+- Lint traps hit: S009 (mypy; registry takes the enum, so call sites pass `InfiniteRecallMode(...)`), S024 (with/for/try/if nesting count), S051 (import sort, whole-tree ruff), S062 (adjacent string literals in tool descriptions). — *source:* S3
+- Semgrep venv at scratchpad/semgrep-venv works with `mcp<2`; its Scripts first on PATH (`/c/...` form). — *source:* S3
 - Hysteresis has nowhere to keep state in the strategy: `vidbyte/middleware/compaction/engine.py:161` builds a new strategy on every call. The per-run store is `MiddlewareContext.run_state: dict[type, Any]` (`vidbyte/lib/dataclasses/middleware.py:190-191`); the precedent keys it by `type(self)` (`verify_command.py:81`), which collides if masking and trim are two `MessageHistoryCompactionMiddleware` instances on one agent. The root's middleware instance persists across runs (`agent.py:80`); children rebuild per pair (`launch.py:290`). — *source:* S0 scout
 - `_trim_groups_to_tokens` can keep an older small group after skipping a newer large one (`strategies.py:632-635`), so its output is not always a suffix; it contains a nested function (principle 1 forbids it in changed code). — *source:* S0 scout
 - `AgentLoopSettings.compaction_trigger_tokens` / `compaction_target_tokens` already exist (`vidbyte/agents/settings/loop.py:60-61`) with no consumer. — *source:* S0 scout
