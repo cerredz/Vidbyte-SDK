@@ -98,11 +98,15 @@ class BrowserServerSettings:
         # @intent server-keys-come-only-from-env
         # Keep a read-only copy of env, so a key cannot change after
         # this check, and refuse a blank value, which the server would
-        # read as no key at all. Messages name the variable, never the
-        # value.
+        # read as no key at all. Messages name the variable and, for a
+        # preset server, the preset, never the value.
         env = RecordFieldConverter.to_mapping(self.env, "BrowserServerSettings.env")
+        owner = f" for the {self.preset.name!r} preset" if isinstance(self.preset, McpPresetDefinition) else ""
         for variable, value in env.items():
-            RecordFieldValidator.require_text(value, f"BrowserServerSettings.env[{variable}]")
+            try:
+                RecordFieldValidator.require_text(value, f"BrowserServerSettings.env[{variable}]")
+            except ConfigurationError as exc:
+                raise ConfigurationError(f"BrowserServerSettings.env[{variable}]{owner} must not be blank; put its value in env, since os.environ is never read.", details=exc.details) from exc
         object.__setattr__(self, "env", env)
         RecordFieldValidator.require_number(self.timeout, "BrowserServerSettings.timeout", maximum=BROWSER_MAX_SERVER_TIMEOUT_SECONDS)
 
