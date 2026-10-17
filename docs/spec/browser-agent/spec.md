@@ -1,7 +1,7 @@
 ---
 spec: browser-agent
 title: BrowserAgent: JevAgent-shaped agent and runtime for long-running browser tasks
-status: verified
+status: pr-open
 revision: 5
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-browser-agent
@@ -130,24 +130,29 @@ The developer no longer builds subagents, wires MCP tools to the right agent, wr
 
 ```mermaid
 flowchart TD
-  A["BrowserAgent.run / arun"] -->|task text| B["BaseAgent._ensure_mcp_connected"]
-  B -->|role-named server configs| S["browser MCP servers (stdio subprocesses)"]
-  B --> C["BrowserAgentRuntime.arun"]
-  C -->|live handles| T["BrowserAgentTools.tools by role"]
-  C -->|goal, no done_when given| K["BrowserGoalCheck.done_when"]
-  C -->|goal card at top of context| L["inherited linear loop"]
-  L -->|run_episode task, done_when| E["BrowserEpisodeTool.execute"]
-  E -->|ACTION tools, caps, diet| W["worker BaseAgent"]
-  W -->|browser tool calls| S
-  W -->|BrowserEpisodePayload| E
-  E -->|capped result card text| L
-  L -->|patch_goal section, text| G["BrowserGoal.patch"]
-  L -->|history over cap| RB["BrowserAgentRuntime._rebuild_history, after a tool iteration or a refused finish"]
-  RB -->|card + last tool exchange| L
-  L -->|finish attempt| R["BrowserGoalCheck.recheck"]
-  R -->|verdict, gap| L
-  L -->|AgentResult| P["BrowserResponse.finished"]
-  P -->|AgentMessage, agent.response| U["developer"]
+  CFG["BrowserServerSettings / BrowserAgentSettings __post_init__"] -->|"valid settings"| A["BrowserAgent.__init__"]
+  A -->|"queue each server as browser-ROLE-N with only its own env"| Q["McpAttachableMixin.with_preset_mcp_server / with_mcp_server"]
+  RUN["agent.run / agent.arun(task)"] --> CON["McpAttachableMixin._ensure_mcp_connected"]
+  CON -->|"start the stdio processes"| S["browser MCP servers"]
+  CON --> RT["BrowserAgentRuntime.arun, inside BrowserAgentUsage.scope"]
+  RT -->|"an MCP tool named run_episode or patch_goal, or no ACTION tools"| X1["ConfigurationError before any model call"]
+  RT -->|"done_when empty"| DW["BrowserGoalCheck.done_when: one structured call"]
+  RT -->|"card pinned at TOP_OF_CONTEXT, ACTION tools swapped for run_episode and patch_goal"| L["inherited linear loop: AgentRuntime.arun"]
+  L -->|"run_episode(task, done_when)"| E["BrowserEpisodeTool.execute"]
+  E -->|"ACTION tools only, action cap, screenshot cap, observation diet"| W["fresh worker BaseAgent, output_schema=BrowserEpisodePayload"]
+  W -->|"browser tool calls"| S
+  W -->|"card, or cap stop / schema miss / SDK error"| E
+  E -->|"result card text, at most 800 tokens, a stuck card on failure"| L
+  L -->|"patch_goal(section, text)"| G["BrowserGoal.patch"]
+  L -->|"after each tool iteration"| H["_after_tool_iteration: rebuild history past its cap, periodic recheck, pin card again"]
+  L -->|"finish attempt: final text or isDone"| F["_continue_finish_attempt: BrowserGoalCheck.recheck"]
+  F -->|"continue or stalled: rebuild, pin card again, append gap message"| L
+  L -->|"before each model call"| B["_budget_stop: max_stalls stalled rechecks end the run with goal_stalled"]
+  L -->|"AgentResult"| U["BrowserAgentUsage.settle"]
+  B -->|"AgentResult with the card as output"| U
+  U -->|"usage unrecorded or unpriced"| X2["run_stopped event, then UsageAccountingError"]
+  U -->|"rollup"| T["run_finished or run_stopped event, then BrowserResponse.finished"]
+  T --> D["AgentMessage and agent.response"]
 ```
 
 ```mermaid
@@ -186,7 +191,7 @@ Failures are caught in three places:
 - a recheck's failure fails open inside `BrowserGoalCheck.recheck`;
 - a sink's exception is recorded inside `BrowserAgentEvents.emit`.
 
-Cancellation always propagates.
+Usage that cannot be recorded or priced fails closed: `BrowserAgentUsage.settle` runs before the terminal event, so the run emits `run_stopped` and raises `UsageAccountingError`. Cancellation always propagates.
 
 ---
 
@@ -1233,6 +1238,7 @@ Auth on new endpoints: N/A, there are no endpoints. Tenant isolation: N/A, there
 | r4 | 2026-10-17 | S2 test author (spec defects) | The snippet model is now `gpt-5.4-mini`, which passes the pair check and is priced. The worker and recheck tool rules now allow the loop's `isDone`. A worker provider error's `stop_reason` is `AgentExecutionError`. `_LINEAR_LOOP_RUNTIMES` has four members (S2 defects 1 to 4). |
 | r4 | 2026-10-17 | S3 implementer | Rows 1 to 28 implemented in §12.6 phase order, one commit per work item (9b2af6f3 to 0982ad4c); draft PR #1182. After S2 corrected the AC-13 assertion (e35b2db3), all 106 browser tests pass, and CI run 39064133364 is green on 085d1887 (Source / Python 3.11, Source / Python 3.12, Package). Lint, semgrep, and the public-API check pass. Deviations below. |
 | r5 | 2026-10-17 | S1 spec (S4 review alignment) | r5: INV-12/FR-16/Q-1/D-17/§9.2 aligned to the implemented behavior per S4 review R-12, R-13, R-14; no design change. The restatements in FR-6, §9.1 `BrowserEpisodeResult`, and §12.3 row 15 follow. |
+| r5 | 2026-10-17 | S6 PR | finalized for review |
 
 ### Implementation deviations (S3)
 
@@ -1248,3 +1254,8 @@ Auth on new endpoints: N/A, there are no endpoints. Tenant isolation: N/A, there
 - **Facade typing.** The server loop tests `isinstance(server.preset, McpPresetDefinition)` and then `server.command is not None`, so mypy narrows both; the settings guarantee exactly one is set. The runtime keeps the run's `BrowserGoal` on `self.goal`, set in `arun` before the loop calls any hook.
 - **Docs placement.** The prompts README row and family section are in alphabetical position (after Agentic Loop and Agentic Engineering). The REPO_MAP paragraph follows the infinite row, as row 28 says, although that list is otherwise alphabetical.
 - **Foreseen merge conflicts with origin/main** (now `6f5a7310`, four commits past the base): none. `git merge-tree --write-tree origin/main HEAD` exits 0, and those four commits touch none of the shared files (`agent_runtime.py`, `runtimes.py`, `base.py`, the two export modules, the prompts enum, the contract). The contract records its source commit, so regenerate it after any rebase.
+
+### PR finalization (S6)
+
+- **§5 redrawn from the shipped code.** The §5 flow chart now matches the PR description's flow chart (`docs/spec/browser-agent/pr-body.md`). It adds what the r1 chart left out: the settings checks, the run-start refusals, the periodic recheck and the rebuild in `_after_tool_iteration`, the stall stop in `_budget_stop`, and the usage settle before the terminal event, with `run_stopped` and `UsageAccountingError` when usage cannot be settled (the S5 R-4 repair). The sequence diagram is unchanged.
+- **Left for S1 (re-review R-C2, R-C3).** §12.3 row 16 still emits the terminal event before the settle, §8.5 still shows `command` without `repr=False`, and the "Event details" note above still says `run_stopped` always carries the stop reason; INV-20 still says sink errors reach `agent.response.event_errors` on a run that raises `UsageAccountingError`. The code is right in each case. The PR lists all four under "Deviations from the spec".
