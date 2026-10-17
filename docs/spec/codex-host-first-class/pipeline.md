@@ -49,6 +49,12 @@ Slice 1 (`docs/spec/codex-host-hardening/`, status `verified`) is done on this b
   - **R-14 took a different form from the reviewer's fix.** The side-chat tool uses `DENY_ALL` approval modes, which send `approvalPolicy "never"` and no reviewer on both `thread/fork` and `turn/start`. The reviewer's explicit `NEVER` would have reached only `thread/fork`, because `turn_start` never sends explicit fields. I accepted it, since it narrows on both requests.
   - **The host stream bound is enforced (D-39):** `CodexTurnRegistry.charge_stream` with limits of 65,536 events and 32,000,000 chars.
 
+- 2026-10-18 05:45: **S2 came back BLOCKED** with 236 tests (fa27a3ad, f8146997; report 9d3aed8c) and two spec defects. I checked both myself and answered them from the spec, without asking the user:
+  - **Two missed 26-tool pins:** `test_codex_host_lifecycle.py:101` and `test_codex_host_helper_lifecycle.py:109`. §13 intends a 42-tool catalog that S3 can reach without editing tests, so this is option (a): §13 gains both rows, then S2 rewrites them.
+  - **`CODEX_HOST_NO_GOAL_MESSAGE` already exists** (`constants/codex_host.py:312`, used by `run_codex_goal` and pinned at `helper_surface.py:94`). INV-48 freezes `run_codex_goal`, so this is option (a): the new message is renamed `CODEX_HOST_NO_STORED_GOAL_MESSAGE`, unused, and chosen by me over S2's `GOAL_MISSING`. That keeps it in the `NO_*GOAL` family next to the pinned `CODEX_HOST_NO_GOAL_CAUSE` and `_NEXT_STEP`.
+  - **My sweep of all 47 constant names in the spec's tables** found no other collision.
+  - **The S1 author's r4** (an amendment, not a review round) also resolves S2's six ambiguities, choosing only options the tests already accept.
+
 ## User replies (verbatim)
 - (none yet)
 
