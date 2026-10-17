@@ -23,7 +23,7 @@ STACKED RUN. Base branch is `feat/infinite-memory-agent` (PR #1084), not `main`.
 | S4 adversarial review | done | 2026-10-16 23:20 | 2026-10-17 03:40 | reports/S4-review-*.md, reports/S4-findings-verifier.md | review.md: 1 Blocker + 5 Major confirmed, 20 Minor |
 | S5 repair loop | done (2 iterations) | 2026-10-17 03:45 | 2026-10-17 05:25 | reports/S5-repair-1.md, reports/S5-repair-2.md | converged at 5f41a5f4; verify-log.md iterations 1-2 |
 | S5 re-review | done (2 rounds) | 2026-10-17 04:05 | 2026-10-17 14:20 | reports/S5-rereview.md, reports/S5-rereview-2.md | round 1: 15/15 fixes confirmed, R-C101 → R-27; round 2: SOUND, R-27/R-28 confirmed, 0 new findings |
-| S6 PR | running | 2026-10-17 14:25 | | | |
+| S6 PR | done | 2026-10-17 14:25 | 2026-10-17 14:55 | reports/S6-pr-author.md | PR #1176 finalized: draft, base feat/infinite-memory-agent, title without [WIP], body from pr-body.md (4974e259, 88a14bca) |
 
 ## Counters and caps
 - S1 review rounds: 2/2 (round 1: SOUND WITH FIXES, 0 Blocker / 8 Major / 7 Minor, all 15 applied in r2 at b32566fe; round 2: SOUND WITH FIXES, 0 Blocker / 2 Major / 9 Minor, reports/S1-spec-review-r2.md, applied in r3) · S5 repair iterations: 2/8 · S5 re-review rounds: 2/2
@@ -112,6 +112,9 @@ The folder holds 40 `.md` assets; `infinite_memory.json` top level is a dict wit
 
 - 2026-10-17 14:20 — **Re-review round 2/2: SOUND.** R-27 and R-28 confirmed (the root holds grep under both presets, `agent.py:77`, reserved name `infinite/runtime.py:72`; grep found a map-hidden plan note in three cut workspaces, even under grep's own result cap, via `files.jsonl:1`); 0 new findings; module 131, pack 244, `SDK-LINT: PASS`, §4 snippet 2470/1490/1216/1142/1160/1151/1123 tik. Spec status set to `verified` (orchestrator one-line docs commit). S5 closed: 2/8 iterations, 2/2 re-review rounds.
 - 2026-10-17 14:25 — **S6 launched** (PR author, opus). Base re-fetched: still 7efceb55, no rebase. Code unchanged since 3825237d, so the orchestrator's gate run at 5f41a5f4 is the gate of record (module 131; pack 244; `SDK-LINT: PASS`; semgrep 0; public-API current; source = only the 3 inherited harness_threads failures; package `CI passed.`; no remote checks).
+
+- 2026-10-17 14:55 — **S6 spot-check held:** `gh pr view 1176` → OPEN, draft, base `feat/infinite-memory-agent`, head `feat/infinite-memory-prompts`, title "feat(prompts): InfiniteMemoryAgent prompts restate its principles at every stage; the seven behavior-shaping prompts exceed 1,100 tokens" (no [WIP]); remote body has 1 mermaid block, all nine template headings, Q-1/Q-3 defaults, the harness_threads note, the feat/infinite-memory-events conflict note, and ends with the Claude Code line; every test named in the AC→proof table exists on the branch (20 names checked); `gh pr checks` → no checks (Actions disabled); spec on origin `status: pr-open`, `pr:` #1176, `updated: 2026-10-17`; nothing unpushed. Final independent check: code unchanged since 3825237d; test tree unchanged since f4cad411; diff vs base touches only the 13 family assets, `vidbyte/agents/infinite/README.md`, S2's three pack files and this run's docs; 40 `.md` leaves; tiktoken 2470/1490/1216/1142/1160/1151/1123; pack 244 passed.
+- 2026-10-17 14:55 — **Worktree kept (deviation from the playbook's teardown):** the coordinator re-measures and re-runs the module and pack in it, and the user's next step (a goal-continuation check on these prompts) builds on this branch. Nothing is uncommitted or unpushed.
 
 ## User replies (verbatim)
 - (none yet)
