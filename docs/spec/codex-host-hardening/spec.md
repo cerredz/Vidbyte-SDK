@@ -1,7 +1,7 @@
 ---
 spec: codex-host-hardening
 title: CodexHost production hardening and missed settings (slice 1 of 2)
-status: tests-written
+status: implemented
 revision: 4
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-codex-host-first-class
@@ -9,7 +9,7 @@ branch: feat/codex-host-first-class
 base_commit: 8baff3514640a5c5f110c1e2c7cea996d1640ecb
 created: 2026-10-17
 updated: 2026-10-17
-pr:
+pr: https://github.com/cerredz/Vidbyte-SDK/pull/1181
 ---
 
 # Spec: CodexHost production hardening and missed settings (slice 1 of 2)
@@ -525,7 +525,7 @@ flowchart TD
 | AC-37 | the codex_host test pack and the `CodexHarnessAgent` test suite (§11) | they run after the §13 superseded tests are updated | all pass | P0 | `PYTHONPATH=$(pwd) python -m pytest -q tests/features/codex_host`, then `PYTHONPATH=$(pwd) python -m pytest -q tests/test_codex_*.py` (test-plan.md, Red run) |
 | AC-38 | a handler call pending on a host that then closes; separately, a routed request that arrives after close began, for a turn still awaiting its cleanup interrupt | close runs | the pending future is cancelled and its request gets its default answer; the late request gets its default answer and the handler is never called for it; close finishes within its existing bounds | P1 | `tests/features/codex_host/test_codex_host_approvals.py::CodexCloseHandlerTests` |
 | AC-39 | the docstrings of `CodexHost`, its methods, the one-shot functions and the enums | they are read | `spawn_codex_thread`, `wait_codex_turn`, `get_codex_turn_result`, `interrupt_codex_turn`, `track_codex_thread_usage`, `launch_codex_subagents`, `list_codex_threads`, `compact_codex_thread` and `delete_codex_thread` each name their §3 limitation; `read_codex_thread` (`include_turns`), `CodexReviewDelivery.DETACHED` and `CodexPersonality` carry their 0.163 deprecation notes; each one-shot function says it starts a process per call; the `CodexHost` docstring names EC-1 and EC-2 | P2 | `tests/features/codex_host/test_codex_host_hardening_contract.py::CodexHardeningPinAndDocsTests::test_each_documented_limitation_is_named_in_its_docstring` |
-| AC-40 | the slice's diff | the agent lint runs | the focused C021 lint run (§11 command) ends `AGENT-LINT: PASS`, with no new allowance; every new constant named in §9.2 and §9.3 is importable from `vidbyte.lib.constants.codex_host` and listed in its sorted `__all__`; no module under `vidbyte.harnesses.native` defines one | P0 | `tests/features/codex_host/test_codex_host_hardening_contract.py::CodexHardeningConstantTests`; `python lint/run.py --rule C021` (command, not a test) |
+| AC-40 | the slice's diff | the agent lint runs | the focused C021 lint run (§11 command) ends `AGENT-LINT: PASS`, with no new allowance; every new constant named in §9.2 and §9.3 is importable from `vidbyte.lib.constants.codex_host` and listed in its sorted `__all__`; no module under `vidbyte.harnesses.native` defines one | P0 | `tests/features/codex_host/test_codex_host_hardening_contract.py::CodexHardeningConstantTests`; `python lint/run.py --rule C021` (command, not a test): ends `SDK-LINT: PASS` at `2f31b1fc` (the runner prints `SDK-LINT`, not `AGENT-LINT`) |
 | AC-41 | an open host | each public method that takes input is called with one bad argument, including `forget_codex_turns("")`, `fork_codex_thread("thr-1", before_turn_id=5)`, `list_codex_threads(limit=0)`, `start_codex_review("thr-1", target, request={})` and `list_codex_skills(force_reload="yes")` | each raises `ConfigurationError` whose text names `"<method> <field>"` and whose `details["field"]` is set, and no request is sent | P0 | `tests/features/codex_host/test_codex_host_function_rows.py::CodexNewArgumentRefusalTests`; `tests/features/codex_host/test_codex_host_inputs.py::CodexHostInputBoundaryTests`; `tests/features/codex_host/test_codex_host_inputs.py::CodexHostInputRecordTests::test_every_exported_record_has_a_valid_baseline_that_is_frozen_and_slotted`; `tests/features/codex_host/test_codex_host_hardening_contract.py::CodexHardeningInputRecordTests` |
 
 ### 6.3 Edge cases and failure modes
@@ -1611,3 +1611,18 @@ The `FieldCarryingMapper` docstring is no longer on this list: #1178 rewrote it 
 | r2 | 2026-10-17 | S1 spec (review round 1) | Re-grounded on #1178 (`8baff351`), with every `path:line` and size re-verified. Adopted the user's #1055 conventions (D-31…D-34; INV-47, INV-48; NFR-11; AC-40, AC-41). Applied R-1…R-10, deferred R-11 to Q-18, and added Q-19. Split turn events into `CodexTurnEvents` and moved the fork body into `CodexThreadHelpers` (3 new files, 13 classes). Re-derived §13: 20 superseded tests (I1, I2 and T1 are new). |
 | r3 | 2026-10-17 | S1 spec (review round 2, final) | Applied R-12…R-17. Added the local `experimental_api` gate for fork's two experimental fields (INV-28 step 1, EC-56, `CODEX_HOST_FORK_EXPERIMENTAL_MESSAGE`). Stated the router lock's span and the snapshot cancel (INV-17, INV-21). The review default applies only to `None` (INV-30). Null and absent question fields map to defaults (§9.1, EC-4). Only a cached model list is refreshed (INV-25). Every goal run ends with one watcher read failure (A-10, INV-13). Status: approved. |
 | r4 | 2026-10-17 | S1 spec (S2 clarifications) | Text-only alignment with the S2 tests: corrected AC-22/B1 (`includeTurns` never true) and AC-32 (every other policy key `false`). Recorded the tests' choices for check order, `{sandbox}`, sandbox fields on fork/review/goal, fallback `closing`, `handled_by`, turn-end `status`, no fallback WARNING without a handler, and the tier message rendering. Wrote the test-imposed names (watcher thread, log record shape, three patch seams) into INV-10, §8.5 and §13, and added §13 notes for AC-20/25/27/39/40. Status stays approved. |
+| r4 | 2026-10-17 | S3 implement | All 24 §12.3 rows built in P1→P4 order (ea3fad66…2f31b1fc) with no test edits; the source gate leaves only the inherited `harness_threads` surface failure, the package gate passes, and the draft PR is open. |
+
+### Implementation deviations (S3)
+
+- Row 13's `readiness`, `fork_point` and `stored_turn` changes landed in P3 (739eb299, 74837c68) beside their callers, not in P2, so no commit left an unused helper.
+- `_reject_bad_list_limit` is one shared module function in `codex_host_inputs.py` (P1) for the records that take a `limit`.
+- `_reject_goal_fields(request)` takes no `owner` argument: `CODEX_HOST_GOAL_FIELD_MESSAGE` has only a `{name}` slot.
+- The tier problem's "any model" text is a call-site literal in `preflight.py`, per §9.2's slot text; no constant was added.
+- Interim commit 739eb299 passed `approvals_answered=False` to `CodexPreflight`; 91cc7d4d wires `approvals_answered=handler is not None`.
+- Row 19 (host.py) is split across 739eb299, 74837c68, 67973d2b, 5dda8707 and 91cc7d4d. The handler wiring and docstrings landed last, after the review and event moves shrank the file, so host.py stayed under 940 lines at every commit (923 at the end).
+- Row 12 follow-up 2f31b1fc: the full lint found `CodexServerRequestRouter.handle` over S008 and S024. `_schedule(coroutine)` now holds `run_coroutine_threadsafe` and the pending add. The close check, the parse and the scheduling stay under one lock in one `try`, and the single `finally` still closes a coroutine that was never scheduled (INV-17).
+- Row 22 uses a local `code = FailureCode.CODEX_API_ERROR.value` rather than a new module-level alias.
+- AC-40's text says `AGENT-LINT: PASS`; the runner prints `SDK-LINT: PASS`.
+- `CodexHostOperation.VALIDATE_SPAWN_REQUEST` is no longer used in source after the `USER` removal, but it stays because `test_codex_host_records.py` pins it and removing a member is a public contract change.
+- Semgrep: the global CLI cannot start here (mcp 2.x), so `.semgrep/typed-mapping-boundary-policy.yml` was run with the bundled `semgrep-core.exe`, one changed file per call: 0 results and 0 errors on all 23, and 1 result on a positive control.
