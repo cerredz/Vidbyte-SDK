@@ -4,7 +4,7 @@ repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-provider-onboarding-skill
 branch: feat/onboard-model-provider-skill
 base_commit: 72a4ade129d74bab45b4fc12764d951df6d1ec3b
-pr:
+pr: https://github.com/cerredz/Vidbyte-SDK/pull/1175
 until: none
 started: 2026-10-15 18:41
 ---
@@ -16,7 +16,7 @@ started: 2026-10-15 18:41
 | S0 worktree + capture + recon | done | 18:41 | 19:05 | reports/S0-scout.md | base 72a4ade1; code-map.md (4 sections, 37 per-provider touch points) |
 | S1 spec + review | done | 2026-10-15 19:10 | 2026-10-16 17:00 | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | spec r3 approved @014de415 (r1 SOUND WITH FIXES 1B/8M/4m; r2 SOUND WITH FIXES 1B/4M/2m; all Blockers fixed) |
 | S2 tests | done | 2026-10-16 17:05 | 2026-10-16 18:00 | reports/S2-test-author.md | 46 tests in tests/features/onboard_model_provider_skill/ (5 files), red confirmed; S2_HEAD=8e9b8b7f |
-| S3 implement | pending | | | | |
+| S3 implement | done | 2026-10-16 18:10 | 2026-10-16 22:00 | reports/S3-implementer.md | S3_HEAD=32ca7991; draft PR https://github.com/cerredz/Vidbyte-SDK/pull/1175; 46/46 green; SDK-LINT PASS; source stage 1 failed (known-red harness test, proved on base + origin/main probes); package stage CI passed; budget 2 new + 1 mod / 2+1 |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
@@ -54,6 +54,11 @@ started: 2026-10-15 18:41
 
 
 ## Niche facts accumulated (carried into every later briefing)
+- S3 result: provider-run.md 366 lines (90c199be, 5a60c216), SKILL.md 241 lines (37e721fa), REPO_MAP `.claude/` entry (50f8bb1b). Spec is now revision 5 (S3 added the §17 r5 row + "Implementation deviations"), `status: implemented`. — *source:* S3
+- Gate at S3_HEAD: source stage `SDK-LINT: PASS`, `1 failed, 5815 passed, 16 skipped` — the 1 is the known-red harness failure-code test (148 == 120), proved red on detached probes at base 72a4ade1 and at origin/main 845a4d9b; the MCP flake passed. Package stage (no PYTHONPATH): `Installed vidbyte-sdk 0.3.0 passed smoke checks.` / `CI passed.`; wheel and sdist contain no `.claude` path. — *source:* S3
+- origin/main is ~69 commits past base; `git merge-tree` is clean and a merged-tree probe gives 1009 passed on the area suite. Branch NOT rebased (S2_HEAD anchors the test-diff check). — *source:* S3
+- On this Git Bash the SKILL.md preflight probe picks `python` (Python311), the same interpreter as `py -3.11`. `date -u` may roll to the next day vs local time. Lint prints baseline IMPROVED lines for untouched code — not this PR's concern; never update baselines. — *source:* S3
+- AC-1 read-only run (preflight → per-slug walk, stopped before `git worktree add`) printed first pick = cerebras. Recorded in reports/S3-implementer.md "PR-time evidence". — *source:* S3
 - S2 contract (46 tests, `tests/features/onboard_model_provider_skill/`): run `PYTHONPATH="<worktree>" py -3.11 -m pytest tests/features/onboard_model_provider_skill -q`. Wiring rows unpadded (`| A1 | \`path\` | …`, one space after each pipe) or the §8.5 sed drops them (W6). Never write the literal `git stash` (say "never stash"). Every `git … push` written in full with `HEAD:refs/heads/feat/provider-<slug>`. Exactly one SKILL.md line may contain `python3` or `py -3.11` (the D-20 probe). Preflight/pass-top commands in fenced sh/bash blocks in FR-3 order; vintage/member reads as `git show origin/main:<path> | sed -n …`. The single GitHub write (in provider-run.md) is one line `gh api -X POST repos/cerredz/Vidbyte-SDK/pulls … -f head=feat/provider-<slug> -f base=main`; SKILL.md makes no GitHub write. — *source:* S2
 - Lint's tracked-file rules only see staged/tracked files: `git add` before `py -3.11 lint/run.py`. Final line `SDK-LINT: PASS`. — *source:* S2 + field guide local-ci-verification.md
 - Run the source stage with `PYTHONPATH=<worktree>` as a one-command prefix and the package stage WITHOUT it (`inspect.getfile(vidbyte)` check); a leaked PYTHONPATH breaks the package smoke. — *source:* field guide local-ci-verification.md (code-map §1.5)
