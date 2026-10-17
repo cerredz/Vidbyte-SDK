@@ -388,8 +388,10 @@ async def test_grok_denied_call_is_a_failed_tool_call(browser_api, browser_world
 async def test_grok_unlisted_server_tool_cancels_the_turn_loudly(browser_api, browser_world, sandbox, browse, check_browser_error) -> None:
     # EC-41 / EC-32 / D-8: a tool the registry does not list has neither
     # rule, so headless Grok cancels the turn: grok.run_failed naming
-    # the stop reason, never a silent extra tool.
-    fake = {"extra_tools": {"firecrawl": ["firecrawl_brand_new"]}, "browser_calls": ["firecrawl__firecrawl_brand_new"]}
+    # the stop reason, never a silent extra tool. The node stand-in
+    # plays the MCP servers, so the extra tool is set on it.
+    sandbox.node(extra_tools={"firecrawl": ["firecrawl_brand_new"]})
+    fake = {"browser_calls": ["firecrawl__firecrawl_brand_new"]}
     error = await refuse(browse, browser_api, "grok", tools=["firecrawl:search"], fake=fake)
     check_browser_error(error, harness="grok", verb="run", code="grok.run_failed", workspace=sandbox.workspace)
     assert "cancelled" in str(error)

@@ -170,8 +170,10 @@ async def test_opencode_without_a_mounted_tool_call_says_so(browser_world, brows
 @pytest.mark.asyncio
 async def test_muse_required_server_failure_carries_muses_reason(browser_world, browser_api, sandbox, browse, check_browser_error, pack, sweep) -> None:
     # AC-12 / EC-18: Muse fails the run on a required server's startup
-    # failure; its reason (naming the server) is the vendor text.
-    error = await refuse(browse, browser_api, "muse", tools=["playwright"], fake={"server_fail": ["playwright"]})
+    # failure; its reason (naming the server) is the vendor text. The
+    # node stand-in plays the MCP servers, so the failure is set on it.
+    sandbox.node(server_fail=["playwright"])
+    error = await refuse(browse, browser_api, "muse", tools=["playwright"])
     check_browser_error(error, harness="muse", verb="run", code="browser.tools_unavailable", workspace=sandbox.workspace, vendor=MUSE_REQUIRED_SERVER)
     assert sandbox.call_folders() == []
 
@@ -222,10 +224,13 @@ async def test_concurrent_calls_keep_their_own_folders_and_browsers(browser_worl
 @pytest.mark.asyncio
 async def test_tool_calls_and_artifacts_cap_at_a_thousand(browser_world, browser_api, sandbox, browse, sweep) -> None:
     # EC-29 / NFR-1: the first 1,000 are kept and the flags set; every
-    # artifact file stays on disk.
+    # artifact file stays on disk. The node stand-in plays the MCP
+    # servers, so the screenshot burst is set on it; only a screenshot
+    # call reads it, and the first call takes none.
+    sandbox.node(artifact_burst=OVER_CAP)
     calls = await browse("opencode", tools=["playwright"], fake={"repeat_calls": OVER_CAP})
     assert len(calls.tool_calls) == CAP and calls.tool_calls_truncated is True
-    files = await browse("opencode", tools=["playwright"], fake={"browser_calls": [SCREENSHOT_CALLS["opencode"]], "artifact_burst": OVER_CAP})
+    files = await browse("opencode", tools=["playwright"], fake={"browser_calls": [SCREENSHOT_CALLS["opencode"]]})
     assert len(files.artifacts) == CAP and files.artifacts_truncated is True
     (folder,) = sandbox.call_folders()
     assert len(list((folder / "artifacts").iterdir())) == OVER_CAP
