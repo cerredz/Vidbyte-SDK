@@ -1,17 +1,16 @@
 """FILE: vidbyte/harnesses/native/codex/preflight.py
 
-PURPOSE: Runs the checks CodexHost makes before anything spends: the account is signed in, ordinary usage is not used up, the Windows sandbox is ready, every model named is listed, the thread is idle and exists, and each request field is one its operation uses.
+PURPOSE: Runs the checks CodexHost makes before anything spends: the account is signed in, ordinary usage is not used up, the Windows sandbox is ready, every model named is listed, and the thread is idle and exists.
 ROLE IN CODEBASE: The check layer of vidbyte/harnesses/native/codex/; CodexHost calls it at the start of every operation that starts a turn, reads a thread or forks one.
 ARCHITECTURE NOTE: Imports no openai-codex module; it reaches Codex only through CodexConnection, so every check is bounded and mapped like any other call. sys.platform is read at call time through sys, as section 13 requires, and the all-pages model list is fetched at most once per host.
-COMMON MODIFICATION PATTERNS: A new check is one step in run(), in the section 9.2 order; a new per-operation field rule is one entry in REJECTED_FIELDS.
+COMMON MODIFICATION PATTERNS: A new check is one step in run(), in the section 9.2 order, with its message in vidbyte/lib/constants/codex_host.py. A per-operation field rule is an argument check, so it belongs to the operation's input record in vidbyte/lib/dataclasses/codex_host_inputs.py (CODEX_HOST_REJECTED_FIELDS), not here.
 KNOWN EDGE CASES: A rate-limit read error or a None allowance passes, so preflight never infers exhaustion or recovery (EC-8). A runtime that cannot report Windows sandbox readiness passes (EC-11), and FULL_ACCESS skips that check. A custom model_provider skips the model check, because the list describes the default provider (EC-13).
-RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.1 D-28, 9.2 per-operation field rules)
+RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.1 D-28 and 9.2 preflight order)
 TESTS: tests/features/codex_host/test_codex_host_threads.py, tests/features/codex_host/test_codex_host_turns.py
 """
 
 from __future__ import annotations
 
-import operator
 import sys
 from contextlib import suppress
 from typing import TYPE_CHECKING
@@ -23,6 +22,13 @@ from vidbyte.lib.constants.codex import (
     CODEX_RATE_LIMITS_READ_METHOD,
     CODEX_THREAD_READ_METHOD,
 )
+from vidbyte.lib.constants.codex_host import (
+    CODEX_HOST_BUSY_MESSAGE,
+    CODEX_HOST_LIST_SEPARATOR,
+    CODEX_HOST_MODEL_UNKNOWN_MESSAGE,
+    CODEX_HOST_SANDBOX_PLATFORM,
+    CODEX_HOST_USAGE_LIMITED_MESSAGE,
+)
 from vidbyte.lib.dataclasses.codex_host import CodexModelInfo, CodexSpawnRequest
 from vidbyte.lib.enums.codex import (
     CodexHostOperation,
@@ -30,7 +36,7 @@ from vidbyte.lib.enums.codex import (
     CodexSandboxReadiness,
 )
 from vidbyte.lib.enums.failure import FailureCode
-from vidbyte.lib.errors import CodexAgentError, ConfigurationError
+from vidbyte.lib.errors import CodexAgentError
 
 if TYPE_CHECKING:
     from openai_codex.generated.v2_all import Thread
@@ -41,42 +47,6 @@ if TYPE_CHECKING:
         CodexParamsTranslator,
         CodexResponseTranslator,
     )
-
-# The only platform with a sandbox readiness check (D-28).
-WINDOWS_PLATFORM = "win32"
-# The request every rejected field is compared with.
-DEFAULT_REQUEST = CodexSpawnRequest()
-# The fields each operation rejects when they differ from the default
-# (INV-27).
-REJECTED_FIELDS: dict[CodexHostOperation, tuple[str, ...]] = {
-    CodexHostOperation.CONTINUE_CODEX_THREAD: (
-        "prompt",
-        "goal",
-        "thread.ephemeral",
-        "thread.thread_source",
-        "thread.service_name",
-        "thread.session_start_source",
-        "tools",
-        "name",
-    ),
-    CodexHostOperation.FORK_CODEX_THREAD: (
-        "prompt",
-        "goal",
-        "thread.personality",
-        "thread.service_name",
-        "thread.session_start_source",
-        "turn",
-        "tools",
-        "disabled_plugin_ids",
-        "output_schema",
-        "max_output_tokens",
-        "timeout_seconds",
-    ),
-    CodexHostOperation.LAUNCH_CODEX_SUBAGENTS: ("prompt", "goal"),
-}
-USAGE_LIMITED_MESSAGE = "Codex reports that ordinary usage is not allowed right now."
-BUSY_MESSAGE = "The thread already has a running turn on this host."
-
 
 class CodexPreflight:
     """The section 9.2 checks CodexHost runs before any request that spends."""
@@ -114,7 +84,7 @@ class CodexPreflight:
             limits = await self._connection.call(operation, CODEX_RATE_LIMITS_READ_METHOD, self._connection.raw(CODEX_RATE_LIMITS_READ_METHOD, None))
             allowed = limits.ordinary_usage_allowed
         if allowed is False:
-            raise CodexErrorMapper.error(FailureCode.CODEX_USAGE_LIMITED, USAGE_LIMITED_MESSAGE, operation)
+            raise CodexErrorMapper.error(FailureCode.CODEX_USAGE_LIMITED, CODEX_HOST_USAGE_LIMITED_MESSAGE, operation)
         # 3. On Windows the sandbox must be ready, unless the turn's
         #    sandbox, else the thread's, is FULL_ACCESS.
         sandbox = request.turn.sandbox.value or request.thread.sandbox.value
@@ -132,14 +102,14 @@ class CodexPreflight:
         known = {model.model_id for model in self._models} | {model.model for model in self._models}
         unknown = sorted(names - known)
         if unknown:
-            visible = ", ".join(model.model_id for model in self._models if not model.hidden)
-            message = f"Codex lists no model named {', '.join(unknown)}. Listed models: {visible}."
+            visible = CODEX_HOST_LIST_SEPARATOR.join(model.model_id for model in self._models if not model.hidden)
+            message = CODEX_HOST_MODEL_UNKNOWN_MESSAGE.format(unknown=CODEX_HOST_LIST_SEPARATOR.join(unknown), visible=visible)
             raise CodexErrorMapper.error(FailureCode.CODEX_MODEL_UNKNOWN, message, operation)
 
     async def sandbox_status(self, operation: CodexHostOperation) -> CodexSandboxReadiness:
         # The readiness check exists only on Windows, read at call time;
         # elsewhere the sandbox is not checked.
-        if sys.platform != WINDOWS_PLATFORM:
+        if sys.platform != CODEX_HOST_SANDBOX_PLATFORM:
             return CodexSandboxReadiness.NOT_CHECKED
         return await self._connection.sandbox_status(operation)
 
@@ -164,23 +134,13 @@ class CodexPreflight:
         # still in flight after its caller left, takes no second one
         # (INV-24).
         if self._registry.busy(thread_id) or self._connection.starting(thread_id):
-            raise CodexErrorMapper.error(FailureCode.CODEX_SESSION_BUSY, BUSY_MESSAGE, operation, thread_id)
+            raise CodexErrorMapper.error(FailureCode.CODEX_SESSION_BUSY, CODEX_HOST_BUSY_MESSAGE, operation, thread_id)
 
     async def require_thread(self, operation: CodexHostOperation, thread_id: str, include_turns: bool = False) -> Thread:
         # The thread must exist; a failed read maps to
         # session_not_found.
         response = await self._connection.call(operation, CODEX_THREAD_READ_METHOD, self._connection.client.thread_read, thread_id, include_turns, thread_id=thread_id)
         return response.thread
-
-    @staticmethod
-    def reject_unusable_fields(request: CodexSpawnRequest, operation: CodexHostOperation) -> None:
-        # @intent no-setting-is-silently-ignored
-        # A field the operation does not use fails before any request,
-        # so a setting is never silently ignored (INV-27).
-        for name in REJECTED_FIELDS.get(operation, ()):
-            read = operator.attrgetter(name)
-            if read(request) != read(DEFAULT_REQUEST):
-                raise ConfigurationError(f"{operation.value} does not use the CodexSpawnRequest field {name}; leave it at its default.")
 
 
 __all__ = ["CodexPreflight"]
