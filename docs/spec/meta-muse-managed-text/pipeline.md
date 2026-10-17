@@ -16,7 +16,7 @@ Run B of two sequential runs. Run A (cerredz/Vidbyte, slug `meta-muse-gateway`) 
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-16 18:25 | 2026-10-16 21:55 | reports/S0-scout.md | base_commit 845a4d9b; code-map.md (4 sections, 303 lines); one gate in code (`_require_gateway_shape`) |
-| S1 spec + review | in progress | 2026-10-16 22:00 | | reports/S1-spec-author.md | spec r1 8ec7dda6 (one-constant change, 0 new files; 8 FR / 15 AC / 15 EC; 0 blocking Q-n); round-1 review running |
+| S1 spec + review | done | 2026-10-16 22:00 | 2026-10-17 03:40 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | spec r3 approved (d4c8a7d7); R1 SOUND WITH FIXES 0/3/3 all accepted → r2 4046e75c; R2 scoped SOUND WITH FIXES 0/2/3 all accepted → r3; one-constant change, 0 new files |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -25,7 +25,7 @@ Run B of two sequential runs. Run A (cerredz/Vidbyte, slug `meta-muse-gateway`) 
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 0/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-16 18:25 — Worktree from origin/main `845a4d9b`; upstream unset (`git worktree add` set it to origin/main). Push with `git push -u origin feat/meta-muse-managed-text`.
@@ -47,3 +47,7 @@ Run B of two sequential runs. Run A (cerredz/Vidbyte, slug `meta-muse-gateway`) 
 - **Gates.** One file: `PYTHONPATH=$(pwd) py -3.11 -m pytest <file>`. Area: `PYTHONPATH=$(pwd) py -3.11 -m pytest tests/features/sdk_managed_text tests/features/sdk_provider_keys`, with `DEEPSEEK_API_KEY` unset. Full: `PYTHONPATH=$(pwd) py -3.11 scripts/run_ci.py --stage source`, then `py -3.11 scripts/run_ci.py --stage package` with no PYTHONPATH, then the proof run `py -3.11 scripts/run_ci.py` with PYTHONPATH unset. Never export PYTHONPATH before a full run. — *source:* S0 scout, field guide `local-ci-verification.md`, memory
 - **Known red on pristine SDK main (as of 2026-10-15, unverified at 845a4d9b):** `test_harness_threads_surface.py::test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes` (148 != 120; PR #1147 may have fixed it) and `test_mcp_stdio_transport.py::...::test_cancelled_waiter_does_not_break_transport` (Windows timing flake). Confirm on a detached origin/main worktree before excusing either. SDK CI never attaches to PRs (0 checks). — *source:* coordinator prompt §4
 - Windows/Git Bash. Heredocs collapse `\\`, so scripts with backslashes are written with the Write tool. Working copies use CRLF. Use `py -3.11`. Fake keys are built by concatenation. Never use bare `git stash`. Do not touch the main checkouts. — *source:* coordinator
+- 2026-10-17 02:45 — Coordinator fact (cap): PR #710 requires an output cap; MetaProvider writes `max_tokens` only when `max_output_tokens` is set (`compatible.py:86-87`). Resolved: `VIDBYTE_MANAGED_DEFAULT_MAX_OUTPUT_TOKENS = 32_768` (`jev.py:84`) is applied by `TextModelRunner.__init__` (`text.py:57-62`) on every gateway route — proven by the round-1 reviewer's probe on Agent.run/arun, tool loop, fallbacks, fork, and the create_runner trial path. Spec r2/r3 cite `jev.py:84` and Meta's reasoning page ("cap reasoning tokens plus visible output tokens combined").
+- 2026-10-17 03:40 — Q-n defaults applied (no user reply): Q-1 append 502 subtitle → No; Q-2 SDK list of served Muse ids → No; Q-3 refuse -contributor ids in SDK → No; Q-4 `sk-svcacct-` README prefix → No; Q-5 providers README / skills docs gaps → No; Q-6 exclude meta from grader env-resolved trials → No (disclosed as EC-16 in the PR body instead).
+- 2026-10-17 03:40 — Merge prerequisites (canonical, spec §12.5): #710 deployed, then ops has provisioned the backend's `META_API_KEY`, then the pre-merge live check (capless call + control call with max_output_tokens=1024, run from this branch, commits nothing) passed.
+- 2026-10-17 03:40 — TEST-CHANGE GRANT for S2 (pre-adjudicated): the spec (§13, §12.3 row 3) says two existing tests fail by design once meta is served (`GatewayShapeTests` meta row `test_provider_keys_modes.py:223` and `SERVED` `:47`; `UNMANAGED_TEXT_PROVIDERS` in `managed_text_fixtures.py`). S2 may move `meta` from the unserved data into the served data in those tables, extend the per-provider tables the packs' COMMON MODIFICATION PATTERNS name (MANAGED_MODELS, ORACLE_KEYS, RELAY_KEYS, CAP_FIELD, EMITTED_KEYS, FULL_CONFIG, MANAGED_PROVIDERS, `_CHAT_PROVIDERS`, provider_answer, relayed_provider_error), and correct the now-false comment at `test_provider_keys_modes.py:379` and the "six" prose. No assertion logic may be weakened; before/after for each existing-test edit recorded in test-plan.md.
