@@ -9,7 +9,7 @@ Purpose:
     their category packages.
 Architecture:
     - VidbyteSDK: Root namespace client.
-    - Agent exports: BaseAgent, CodingAgent, CodingAgentSettings, CodingAgentTools, InfiniteMemoryAgent, InfiniteMemoryAgentSettings, InfiniteWorkspaceSettings, InfiniteMemoryPreset, AgentCard, AgentMessage, AgentRegistry, AgentRunnerConfig, AgentSpec.
+    - Agent exports: BaseAgent, CodingAgent, CodingAgentSettings, CodingAgentTools, InfiniteMemoryAgent, InfiniteMemoryAgentSettings, InfiniteWorkspaceSettings, InfiniteMemoryPreset, InfiniteRecallMode, AgentCard, AgentMessage, AgentRegistry, AgentRunnerConfig, AgentSpec.
     - Configuration exports: YamlLoader, AgentSettings, ToolDefinition, MiddlewareDefinition.
     - Tool exports: BaseTool, ToolActivity, ToolCall, ToolCallActivity, ToolExecutor, ToolParameter, ToolPermission, ToolRegistry, ToolResult, ToolSpec, ToolStatus, ToolsFormatter.
     - Middleware exports: AgentMiddleware, MiddlewarePipeline, policy events, and diagnostic hook invocations.
@@ -470,6 +470,7 @@ from vidbyte.lib.dataclasses.prosecutor_defender_judge import (
 from vidbyte.lib.enums import (
     BudgetPreset,
     InfiniteMemoryPreset,
+    InfiniteRecallMode,
     PermissionPreset,
     Prompt,
     StructuredOutputSupport,
@@ -758,6 +759,7 @@ __all__ = [
     "InfiniteMemoryAgent",
     "InfiniteMemoryAgentSettings",
     "InfiniteMemoryPreset",
+    "InfiniteRecallMode",
     "InfiniteWorkspaceSettings",
     "JevAgent",
     "JevAgentResponse",

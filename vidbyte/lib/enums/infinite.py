@@ -1,13 +1,13 @@
 """FILE: vidbyte/lib/enums/infinite.py
 
-PURPOSE: Defines the six closed vocabularies of the InfiniteMemory agent: the memory preset, the kind of a memory entry, a pair's result status and verdict, the journal event names, and the role an agent plays in the delegation tree.
-ROLE IN CODEBASE: Typed fields of the records in vidbyte/lib/dataclasses/infinite.py and of InfiniteWorkspaceSettings (vidbyte/agents/infinite/settings.py); read by the workspace, journal, memory tools, launch tool, and runtime in vidbyte/agents/infinite/. Re-exported from vidbyte/lib/enums/__init__.py, and InfiniteMemoryPreset also from the root vidbyte package.
+PURPOSE: Defines the seven closed vocabularies of the InfiniteMemory agent: the memory preset, the kind of a memory entry, a pair's result status and verdict, the journal event names, the role an agent plays in the delegation tree, and the recall mode.
+ROLE IN CODEBASE: Typed fields of the records in vidbyte/lib/dataclasses/infinite.py and of InfiniteWorkspaceSettings (vidbyte/agents/infinite/settings.py); read by the workspace, journal, memory tools, launch tool, and runtime in vidbyte/agents/infinite/. Re-exported from vidbyte/lib/enums/__init__.py, and InfiniteMemoryPreset and InfiniteRecallMode also from the root vidbyte package. InfiniteRecallMode is read by InfiniteMemoryToolRegistry (vidbyte/lib/registries/infinite.py) to grant recall and withhold grep.
 ARCHITECTURE NOTE: Every value is the member name in lowercase, and the values are what the on-disk JSON lines and the remember tool's schema carry, so a value is a file-format contract as well as a model-facing word.
-FUNCTION INVENTORY: No functions; six str Enums: InfiniteMemoryPreset, InfiniteEntryKind, InfiniteResultStatus, InfiniteVerdict, InfiniteJournalEvent, and InfiniteAgentRole.
+FUNCTION INVENTORY: No functions; seven str Enums: InfiniteMemoryPreset, InfiniteEntryKind, InfiniteResultStatus, InfiniteVerdict, InfiniteJournalEvent, InfiniteAgentRole, and InfiniteRecallMode.
 COMMON MODIFICATION PATTERNS: A new entry kind is one more InfiniteEntryKind member; the remember schema picks it up from the enum. A new preset needs one more case where InfiniteAgentMemory chooses its tools.
 WHAT NOT TO DO IN THIS FILE: 1. Do not change a value; workspaces and journals already on disk carry it. 2. Do not add behavior or methods. 3. Do not define a feature constant here; constants live in vidbyte/lib/constants/infinite.py.
 KNOWN EDGE CASES: InfiniteVerdict.UNCHECKED is never written by a verifier; it marks a verdict that was missing, a verifier that failed, or a verifier that was skipped.
-RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 8.5 and 9.1); vidbyte/agents/infinite/README.md
+RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 8.5 and 9.1); docs/spec/infinite-memory-context-economy/spec.md (FR-10.1, D-15); vidbyte/agents/infinite/README.md
 TESTS: tests/features/infinite_memory_agent/test_infinite_memory_contract.py
 """
 
@@ -67,4 +67,11 @@ class InfiniteAgentRole(str, Enum):
     VERIFIER = "verifier"
 
 
-__all__ = ["InfiniteAgentRole", "InfiniteEntryKind", "InfiniteJournalEvent", "InfiniteMemoryPreset", "InfiniteResultStatus", "InfiniteVerdict"]
+class InfiniteRecallMode(str, Enum):
+    """Whether the root and generators search memory themselves (DIRECT) or hand a memory question to a fresh retriever through recall instead of holding grep (DELEGATED)."""
+
+    DIRECT = "direct"
+    DELEGATED = "delegated"
+
+
+__all__ = ["InfiniteAgentRole", "InfiniteEntryKind", "InfiniteJournalEvent", "InfiniteMemoryPreset", "InfiniteRecallMode", "InfiniteResultStatus", "InfiniteVerdict"]
