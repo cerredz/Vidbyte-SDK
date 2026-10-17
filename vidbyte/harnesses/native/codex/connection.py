@@ -147,34 +147,30 @@ class CodexServerRequestRouter:
             # A tool call goes to its thread's own tool handler, which
             # answers every call itself (D-18, EC-47).
             tools = self._handlers.get(thread_id) if handled_by == "tool" else None
-            if tools is not None:
-                answer = tools.handle(method, params)
+            answer = None if tools is None else tools.handle(method, params)
             # An approval or a question goes to the developer's handler
-            # when the host has one (INV-16). Reading it into its record
-            # and scheduling the handler on the host's loop happen under
-            # the lock close takes too, so a closed router never calls
-            # the handler (INV-17, INV-21).
-            elif kind is not None and self._routes_requests:
+            # when the host has one (INV-16). The close check, reading
+            # the request into its record and scheduling the handler on
+            # the host's loop happen under the lock close takes too, so
+            # a closed router never calls the handler (INV-17, INV-21).
+            # CodexHostSetup admits only async handlers, so the call
+            # returns a coroutine (INV-19).
+            if kind is not None and self._routes_requests:
                 with self._lock:
-                    handler = self._approval_handler
-                    if self._closed or handler is None:
-                        fallback = ("closing", "", "")
-                    else:
-                        # CodexHostSetup admits only async handlers, so
-                        # the call returns a coroutine (INV-19).
-                        request = CodexServerRequest.from_params(kind, params)
-                        coroutine = cast("Coroutine[Any, Any, CodexServerAnswer]", handler(request))
-                        future = asyncio.run_coroutine_threadsafe(coroutine, self._loop)
-                        self._pending.add(future)
-                # The wait happens outside the lock, bounded by the
-                # timeout read now, and only an answer that fits its
-                # request is sent (INV-18).
-                if future is not None and request is not None:
-                    reply = future.result(timeout=CODEX_TOOL_CALL_TIMEOUT_SECONDS)
-                    if self._fits(request, reply):
-                        answer, handled_by = CodexParamsTranslator.server_answer(kind, reply), "handler"
-                    else:
-                        fallback = ("answer_invalid", type(reply).__name__, "")
+                    handler = None if self._closed else self._approval_handler
+                    request = None if handler is None else CodexServerRequest.from_params(kind, params)
+                    coroutine = None if handler is None or request is None else cast("Coroutine[Any, Any, CodexServerAnswer]", handler(request))
+                    future = None if coroutine is None else self._schedule(coroutine)
+                fallback = ("closing", "", "") if future is None else None
+            # The wait happens outside the lock, bounded by the timeout
+            # read now, and only an answer that fits its request is sent
+            # (INV-18).
+            if future is not None and request is not None:
+                reply = future.result(timeout=CODEX_TOOL_CALL_TIMEOUT_SECONDS)
+                if self._fits(request, reply):
+                    answer, handled_by = CodexParamsTranslator.server_answer(request.kind, reply), "handler"
+                else:
+                    fallback = ("answer_invalid", type(reply).__name__, "")
         except Exception as exc:
             fallback = (self._reason(exc, request, future), type(exc).__name__, ExceptionOrigin.describe(exc))
         finally:
@@ -196,6 +192,15 @@ class CodexServerRequestRouter:
             answer = self._unregistered() if handled_by == "tool" else CodexParamsTranslator.default_answer(method)
         logger.info("codex_host_server_request method=%s thread_id=%s turn_id=%s item_id=%s handled_by=%s answer=%s", method, thread_id, turn_id, item_id, handled_by, self._label(answer))
         return answer
+
+    def _schedule(self, coroutine: Coroutine[Any, Any, CodexServerAnswer]) -> Future[CodexServerAnswer]:
+        # Runs under the lock: the handler call is scheduled on the
+        # host's loop and held as pending, so close can cancel it
+        # (hardening INV-17, INV-21). A loop that refuses it raises
+        # before the call is held, and handle's finally closes it.
+        future = asyncio.run_coroutine_threadsafe(coroutine, self._loop)
+        self._pending.add(future)
+        return future
 
     @staticmethod
     def _ids(params: Mapping[str, Any] | None) -> tuple[str, str, str]:
