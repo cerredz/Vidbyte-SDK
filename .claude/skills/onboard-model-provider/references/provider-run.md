@@ -184,7 +184,7 @@ Apply every row that applies to this vendor, in order. `<E>` is the enum member 
 | C10 | `tests/features/sdk_provider_keys/test_provider_keys_modes.py` | `GatewayShapeTests` | `("<s>", "<default id>")` in its unserved-provider tuple | silent |
 | C11 | `tests/features/sdk_managed_text/managed_text_fixtures.py` | `UNMANAGED_TEXT_PROVIDERS` | `ModelProvider.<E>` | silent |
 | C12 | `tests/test_agent_pricing.py` | `test_usage_class_dispatches_compatible_providers` | `ModelProvider.<E>` in the tuple | that test (guards A2) |
-| D1 | `vidbyte/providers/README.md` | Endpoint And Auth Matrix; Official Provider Documentation | one row each (D-24) | silent (A009 ceiling 55,000) |
+| D1 | `vidbyte/providers/README.md` | Endpoint And Auth Matrix; Official Provider Documentation | an Official Provider Documentation row only; no Endpoint And Auth Matrix row, because its `Generic` row covers every `compatible.py` subclass (D-24) | silent (A009 ceiling 55,000) |
 | D2 | `README.md` | `Prefixes:`, `Other keys:` | the table F prefix in the `Prefixes:` bullet, or the vendor name in the `Other keys:` bullet | silent |
 
 Notes on the rows that need more than the table says:
@@ -212,7 +212,7 @@ Notes on the rows that need more than the table says:
         self.assertEqual(sent["json_body"]["model"], "<default id>")
 ```
 
-- **D1.** One row in each table, shaped like its neighbours; never a new section, because that README has a size ceiling. Each documentation link in the row is the final URL of a fetch-log line with a 2xx status, a first-party page this run opened, and the Sources table lists it.
+- **D1.** One row in Official Provider Documentation, shaped like its neighbours: the vendor's API overview page and its chat-completions reference page. Each documentation link in the row is the final URL of a fetch-log line with a 2xx status, a first-party page this run opened, and the Sources table lists it. Add no Endpoint And Auth Matrix row, because its `Generic` row already covers every `compatible.py` subclass, and never a new section, because that README has a size ceiling.
 
 Finish the wiring with `git -C <worktree> status --porcelain`. It must list only checklist paths, each modified and none untracked.
 
