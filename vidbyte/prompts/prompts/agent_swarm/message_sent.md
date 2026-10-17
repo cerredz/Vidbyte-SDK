@@ -1,1 +1,1 @@
-Message queued for {recipient}. Any reply arrives later as a user message, so keep working.
+Message queued for {recipient}. Any reply arrives later as a user message.

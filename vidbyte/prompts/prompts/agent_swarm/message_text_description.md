@@ -1,1 +1,1 @@
-The text the other agent receives, delivered whole and exactly as written. Write it so it stands on its own, because the recipient sees only this text and your name. Say what you did, what you need, or what changed, and name the files in the shared folder it concerns. The text must not be empty or blank.
+The text the other agent receives, delivered whole and exactly as written. The recipient sees only this text and your name. It reaches the recipient under a line that names you, together with any other messages waiting for that agent. The text must not be empty or blank.
