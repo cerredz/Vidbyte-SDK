@@ -31,14 +31,15 @@ The pack covers every acceptance criterion from AC-1 to AC-21, and `docs/spec/ag
   - refused messages;
   - long texts.
 - `test_agent_swarm_lifecycle.py` covers:
-  - the turn budget and the time limit;
-  - provider errors, all agents failing, and the last worker failing;
-  - tool exceptions;
+  - the turn budget and the time limit, including a limit that fires after the end was decided;
+  - provider errors, all agents failing, the last worker failing, and mail left for a failed agent;
+  - an unrequested `CancelledError` from a tool or from `on_event`, while working or idle;
+  - tool exceptions, and a model-made tool name with a newline;
   - the fail-closed turn middleware;
   - concurrent and repeated `arun`;
   - cancellation;
   - a raising, slow or cancelled `on_event`;
-  - concurrent flushes;
+  - concurrent flushes, and where the event clock starts;
   - `TOOL_CALLED` events.
 - `test_agent_swarm_workplace.py` covers:
   - creating the workplace and keeping its files across runs;
@@ -51,7 +52,8 @@ The pack covers every acceptance criterion from AC-1 to AC-21, and `docs/spec/ag
   - the prompt family and its text rules;
   - the runtime refusal outside a swarm;
   - the exact tools and message schema each agent is offered, and system prompt order;
-  - settings validation and defaults, and key secrecy;
+  - settings validation and defaults (including a search tool named `isDone`), and key secrecy;
+  - the tool-result cap and the history trim;
   - the event and result record rules;
   - the complexity budget and the entry-point type checks.
 - `test_agent_swarm_property.py` runs seeded random swarms: with the default budget, under a tight turn budget, and with one agent failing. It checks the oracle and reconciles events with transcripts on every one.
@@ -63,3 +65,4 @@ From the repository root: `PYTHONPATH=$(pwd) python -m pytest tests/features/age
 ## Logs
 
 - 2026-10-16 - Pack added red, ahead of the implementation, from spec r3 (S2 test author).
+- 2026-10-17 - S4 gap tests (mutants M2, M7, M21, M22) and spec r4 regression tests (EC-39, R-2, R-11, R-8) added; the r4 ones stay red until S5.

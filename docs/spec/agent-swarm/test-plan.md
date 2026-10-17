@@ -1,6 +1,6 @@
 # Test plan: AgentSwarm
 
-Spec: `docs/spec/agent-swarm/spec.md` r3 (approved). Pack: `tests/features/agent_swarm/` with 51 test functions and 161 test cases. All of them are red before the implementation.
+Spec: `docs/spec/agent-swarm/spec.md` r3 (approved), then r4 (S4 amendments). Pack: `tests/features/agent_swarm/` with 60 test functions and 170 test cases. The first 161 were written red before the implementation and pass against it. Round 2 of the S2 addendum added three S4 gap tests, which are green now, and six spec r4 regression tests, which stay red until S5 (see [S2 addendum: S4 gaps and spec r4](#s2-addendum-s4-gaps-and-spec-r4)).
 
 The only fake is the model runner, patched at `BaseAgent._runner_for_model` (spec §13). The agent loop, the middleware pipeline, the prompt catalog, the file tools, `bash`, the filesystem (under `tmp_path`), `asyncio` and the settings validation run for real.
 
@@ -79,6 +79,13 @@ Module prefixes: `acc` is `test_agent_swarm_acceptance.py`, `msg` is `_messaging
 | NFR-9 | AC-6 test | integration | See AC-6. The wall-clock bound is loose on purpose (limit + 10 s). | The stuck call's own guard is 20 s, so a time limit that does not cancel fails the bound. |
 | FR-14 | AC-17 test | contract | See AC-17. | See AC-17. |
 | FR-15 | Oracle replies rule; §9.1 result test | integration / contract | Caught: replies that are not each released agent's last IDLE text in member order, or replies on TIMEOUT or FAILED. | Exact `(sender, content)` lists. |
+| INV-10, EC-12 (S4 R-5, mutant M2) | `life::test_mail_left_for_an_agent_that_failed_does_not_turn_quiet_into_max_turns` | integration | builder's message is queued for reviewer while reviewer's model call is open (held on builder's MESSAGE_SENT); that call then raises a provider error. Caught: the end check counting a failed agent's inbox, which turns QUIET into MAX_TURNS. | The send's tool result is not an error, there is one SENT and no DELIVERED, reviewer's AGENT_FAILED names `ProviderRequestError`, the stop reason is QUIET with builder's reply, and the oracle passes. |
+| EC-18, INV-10, INV-11 (r4; S4 R-5 mutant M7, R-14) | `life::test_the_time_limit_firing_after_the_end_was_decided_keeps_the_decided_stop_reason` | integration | QUIET is decided when tester ends its turn, but the async callback for tester's AGENT_IDLE never returns, so the 1 s limit fires while tester is unwinding. Caught: the time limit overwriting the decided reason with TIMEOUT. | The events are exactly `[S b, S t, I b, I t, ENDED]`, ENDED carries QUIET, both IDLE texts survive, `replies` is a subset of the two last turns (r4 lets it be partial), and no task is left. It passed 10 of 10 runs at `956aa881`. |
+| EC-26, D-10, A-5 (S4 R-5, mutants M21, M22) | `con::test_tool_results_are_cut_and_a_long_history_is_trimmed_before_each_model_call` | contract | A search tool returns `3 × AGENT_SWARM_TOOL_RESULT_MAX_CHARS` characters on each of `budget // MAX_CHARS + 2` calls, where the budget is `AGENT_SWARM_HISTORY_MAX_TOKENS × TOKEN_ESTIMATE_CHARS_PER_TOKEN` characters. Caught: an uncut tool result (M22), or a history sent untrimmed (M21). | Every web_search result in every builder call is at most the cap plus 1 %. The last call keeps more than zero and fewer than all results, and its message content totals at most the budget. Every bound is derived from the constants. |
+| EC-39 (r4, S4 R-3), INV-17, D-7 | `life::test_a_cancelled_error_raised_by_a_tool_fails_that_agent_instead_of_waiting_for_the_time_limit`; `life::test_a_cancelled_error_raised_by_on_event_while_an_agent_works_fails_that_agent`; `life::test_a_cancelled_error_raised_by_on_event_on_an_idle_agent_fails_it_instead_of_waking_it` | integration | An `asyncio.CancelledError` the swarm never requested, raised in one of three places: by the search tool; by an async `on_event` on builder's TOOL_CALLED, which builder's own flush delivers; or by `on_event` on tester's AGENT_IDLE, after which builder messages tester. Caught: the member task dying silently, so the agent stays counted as working and the swarm waits out `timeout_seconds` (TIMEOUT); in the idle variant, a dead task woken by the message. | Each run has `timeout_seconds=2.0` and must end QUIET in under 1 s, with exactly one AGENT_FAILED for that agent whose text starts with `CancelledError`, the survivor's reply, and no stray task. The first two also pass the oracle with `log`. The idle variant needs IDLE < FAILED for tester, no AGENT_WOKE, no SENT, and builder's `message` result matching `message_stopped_recipient`. |
+| EC-33, FR-3, §9.3 (r4, S4 R-2) | `con::test_a_search_tool_named_isdone_is_refused_naming_the_reserved_names` | contract | `SearchTool(IS_DONE_TOOL_NAME)`. Caught: the name accepted, after which the loop silently replaces the search tool with its own `isDone`. | `details["field"] == "AgentSwarmSettings.search_tool"` exactly, the message names every reserved name and `isDone`, and `tmp_path` stays empty. |
+| D-16, §9.1 (r4, S4 R-11) | `life::test_event_time_counts_from_arun_not_from_building_the_runtime` | integration | An `AgentSwarmRuntime` is built, the test waits 0.3 s, then runs it. Caught: the event clock starting at construction, so the wait leaks into every `elapsed_ms`. | The first event is builder's AGENT_STARTED, with `elapsed_ms` below 150. It read 312 at `956aa881`. |
+| EC-16 (b), §9.1 (S4 R-8) | `life::test_a_tool_name_holding_a_newline_is_a_tool_error_not_a_failure` | integration | builder's model calls a tool named `"bash\nrm"`. Caught: the event record refusing a multi-line `tool_name` (`one_line=True`, stricter than §9.1's "non-blank name"), which aborts builder's run through the fail-closed middleware. | There is no AGENT_FAILED, TOOL_CALLED is `("bash\nrm", ERROR)`, builder reads an error tool result under that name and replies, and the oracle passes. The same body passes at `956aa881` for `bash_tool` and `bash rm`, so only the newline is red. |
 
 ## Tests deliberately not written
 
@@ -86,9 +93,7 @@ Module prefixes: `acc` is `test_agent_swarm_acceptance.py`, `msg` is `_messaging
 |---|---|
 | EC-38 | `KeyboardInterrupt`, `SystemExit` and uncontained `Exception`s propagate through Python 3.11's `TaskGroup`, which the spec does not change. The in-progress flag's `finally` is the one EC-19's test drives. |
 | EC-16 (a) | An exception in `collect_messages` or `end_turn` takes the same `VidbyteSdkError` containment branch as the AC-7 provider error. Forcing it would need a second fault injection into the feature. |
-| EC-18 | The time limit hitting after the end was decided lies between two awaits of member unwinding. Reaching it needs wall-clock timing, which would be flaky. |
 | EC-20, EC-24, EC-25, EC-32 | Stated limitations with no control to test. |
-| EC-26 | The trim is the existing `MessageHistoryCompactionMiddleware`, covered by its own tests. Its constant (90,000) is pinned in the boundary test. |
 | EC-37 | No cap exists (Q-8 default), so there is nothing to assert beyond the property runs. |
 | INV-25, INV-26, INV-28 (catalog load) | Covered by the neighbour suites, which pass: `tests/features/infinite_memory_agent`, `tests/test_agent_tool_loop.py`, `tests/test_jev_compute.py`, `tests/multi_agent`, `tests/test_prompts_interface.py`. S4 checks that the diff leaves those files untouched. |
 | A fork of a member (INV-24) | A fork builds a plain `BaseAgent` with the same runtime type, which the AC-12 test drives directly. |
@@ -116,6 +121,42 @@ Command: `PYTHONPATH=$(pwd) python -m pytest tests/features/agent_swarm -q`. Res
 Collection: 161 tests collected with no collection error.
 
 Neighbours: `PYTHONPATH=$(pwd) python -m pytest tests/features/infinite_memory_agent tests/test_agent_tool_loop.py tests/test_jev_compute.py tests/multi_agent tests/test_prompts_interface.py -q` gives `197 passed in 4.94s`. The repository lint, `python lint/run.py --all --format json`, exits 0 with no finding in the pack.
+
+## S2 addendum: S4 gaps and spec r4
+
+These tests were added in round 2 of the S2 addendum, at `956aa881`. They are the last seven rows of the coverage map.
+
+**Gap tests (S4 R-5), green now.** S4 found four textual mutants of the implementation that the pack missed. Each new test passes at HEAD and fails under its mutant.
+
+The mutants were run with S4's mutation driver (`mutate.py`'s five old/new strings, unchanged) on a scratch copy of `vidbyte/`, `tests/` and `pyproject.toml`. The worktree was never mutated. The copy has no `contracts/` folder, so its baseline is 7 failed: the six r4 tests below plus `test_public_names_import_from_every_documented_path`.
+
+| Mutant | Change | Result on the copy | Killed by |
+|---|---|---|---|
+| M2 | the end check counts every inbox, not only running agents' inboxes | 8 failed, 162 passed | `test_mail_left_for_an_agent_that_failed_does_not_turn_quiet_into_max_turns` |
+| M7 | the time limit always sets TIMEOUT | 8 failed, 162 passed | `test_the_time_limit_firing_after_the_end_was_decided_keeps_the_decided_stop_reason` |
+| M21 | no history trim | 8 failed, 162 passed | `test_tool_results_are_cut_and_a_long_history_is_trimmed_before_each_model_call` |
+| M22 | no tool-result cap | 8 failed, 162 passed | `test_tool_results_are_cut_and_a_long_history_is_trimmed_before_each_model_call` |
+| control | the end check never says FAILED | 8 failed, 162 passed | `test_every_agent_failing_ends_failed_with_no_replies` (unchanged) |
+
+**Spec r4 regression tests, expected red until S5.** Each one fails at `956aa881` on the behaviour that r4 changes, never on an import or a fixture:
+
+| Test | Spec | Red reason at `956aa881` |
+|---|---|---|
+| `life::test_a_cancelled_error_raised_by_a_tool_fails_that_agent_instead_of_waiting_for_the_time_limit` | EC-39 | `timeout after 2.02 s`: events `[S b, S t, I t, ENDED]`, with no AGENT_FAILED |
+| `life::test_a_cancelled_error_raised_by_on_event_while_an_agent_works_fails_that_agent` | EC-39 | `timeout after 2.00 s`: events end `tool_called builder, swarm_ended` |
+| `life::test_a_cancelled_error_raised_by_on_event_on_an_idle_agent_fails_it_instead_of_waking_it` | EC-39 idle variant | `timeout after 2.01 s`: `message_sent builder->tester, agent_woke tester` (a dead task woken) |
+| `con::test_a_search_tool_named_isdone_is_refused_naming_the_reserved_names` | EC-33 r4, R-2 | `DID NOT RAISE ConfigurationError` |
+| `life::test_event_time_counts_from_arun_not_from_building_the_runtime` | D-16, R-11 | first event `elapsed_ms` is 312 after the 0.3 s wait |
+| `life::test_a_tool_name_holding_a_newline_is_a_tool_error_not_a_failure` | §9.1, EC-16 (b), R-8 | `agent_failed builder` with stop reason `middleware_abort` |
+
+The pack run at `956aa881` (`PYTHONPATH=$(pwd) python -m pytest tests/features/agent_swarm -q`) gives `6 failed, 164 passed`, the same in three runs (11.1–11.6 s). The six failures are exactly the tests in the table above. The M7 test alone passed 10 of 10 runs.
+
+**Oracle limits under r4.** `assert_event_invariants` has two rules that spec r4 relaxes:
+
+- It lets an agent fail only while working. In the EC-39 idle variant an idle agent fails, which INV-14 permits (IDLE, then FAILED).
+- On QUIET it demands a reply from every running agent. Under EC-18, INV-11 lets `replies` be partial.
+
+The tests for those two runs check their events directly instead of calling the oracle. The oracle itself is unchanged.
 
 ## Notes for the implementer
 
@@ -159,6 +200,14 @@ Neighbours: `PYTHONPATH=$(pwd) python -m pytest tests/features/infinite_memory_a
 
 **Timing and replay**
 
-- The TIMEOUT tests use `timeout_seconds=0.5`. The only wall-clock assertion is `elapsed < 10.5 s`.
+- The TIMEOUT tests use `timeout_seconds=0.5`, the EC-18 test uses 1.0, and the EC-39 tests use 2.0. The wall-clock assertions are `elapsed < 10.5 s` (AC-6) and `elapsed < 1.0 s` (EC-39). The clock test asserts that the first `elapsed_ms` is below 150 after a 0.3 s wait.
 - Property seeds are 0–35. A failure prints its plan and replays from its seed.
-- No test sleeps. `yield_to_loop` is `asyncio.sleep(0)` in test code only. The budget test's no-sleep scan covers only the package and the toolset.
+- One test sleeps: the clock test waits 0.3 s between building the runtime and `arun`, because where the clock starts is what it tests. `yield_to_loop` is `asyncio.sleep(0)` in test code only. The budget test's no-sleep scan covers only the package and the toolset.
+
+**For S5 (spec r4)**
+
+- **EC-39, idle variant.** The `CancelledError` branch of `_run_member` must mark the agent failed before anything awaits. Builder sends as soon as tester's AGENT_IDLE callback has fired, two loop iterations later, so a suspension between the raise and the failed mark would let that send wake a dead task. The test does not wait for tester's AGENT_FAILED to be delivered, because r4 does not require that branch to flush.
+- **EC-39, `event_error_types`.** A `CancelledError` from `on_event` must not be added to `event_error_types`. The working variant calls the oracle with the default `error_types=()`, which follows INV-16: only `Exception`s are listed.
+- **R-2.** The refusal message must name all six `AGENT_SWARM_RESERVED_TOOL_NAMES` and `isDone`. The field is checked with `==`, not `startswith`.
+- **R-8.** `TOOL_CALLED.tool_name` needs only a non-blank name (§9.1). The test expects the event to carry the model's name byte for byte, newline included.
+- **R-11.** Start the event clock in `arun` (D-16).

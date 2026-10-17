@@ -6,15 +6,16 @@ PURPOSE: Pins AgentSwarm's static contract:
 - the ten-leaf agent_swarm prompt family with its format fields, and the prompt text rules (no digits, no infinite_memory role or workflow words, no examples; 4-5 sentence descriptions);
 - the agent_swarm_member runtime type and its refusal outside a swarm;
 - the exact tools and message schema each agent's model is offered, and the order of each agent's system prompt;
-- settings validation, boundaries and defaults, and API-key secrecy;
+- settings validation, boundaries and defaults (including a search tool named isDone), and API-key secrecy;
+- the tool-result cap and the history trim every member's model call goes through;
 - the per-kind field table of AgentSwarmEvent and the sequence rules of AgentSwarmResult;
 - the complexity budget, no polling, and the entry points' type checks.
-ROLE IN CODEBASE: Contract layer of tests/features/agent_swarm/ (spec AC-11, AC-12, AC-13, AC-14, AC-17, AC-21; INV-21, INV-22, INV-23, INV-24, INV-28; EC-33, EC-34, EC-35; FR-1, FR-3, FR-9, FR-12, FR-13, FR-14; NFR-2, NFR-3, NFR-4, NFR-5; sections 8.4, 8.5, 9.1, 9.2, 9.3).
+ROLE IN CODEBASE: Contract layer of tests/features/agent_swarm/ (spec AC-11, AC-12, AC-13, AC-14, AC-17, AC-21; INV-21, INV-22, INV-23, INV-24, INV-28; EC-26, EC-33, EC-34, EC-35; FR-1, FR-3, FR-9, FR-12, FR-13, FR-14; NFR-2, NFR-3, NFR-4, NFR-5; D-10; sections 8.4, 8.5, 9.1, 9.2, 9.3; S4 review R-2, R-5).
 ARCHITECTURE NOTE: Every feature symbol is imported inside the test that needs it, so before the feature exists each test fails on its own ImportError (or, for the budget test, on the missing package folder) and the rest of the suite still collects. Tool offers and system prompts are read from what the scripted runner receives on each agent's first call, never from the swarm's internals.
-FUNCTION INVENTORY: test_public_names_import_from_every_documented_path (AC-17, FR-14); test_records_and_settings_are_frozen_slotted_dataclasses_with_the_documented_fields (section 8.5, NFR-5); test_enum_values_are_the_documented_lowercase_strings (section 8.5); test_prompt_family_has_exactly_the_ten_documented_leaves_with_their_fields (W-2, INV-28); test_prompt_leaves_hold_no_digits_roles_or_examples (INV-22, NFR-4, NG-10); test_runtime_type_refuses_outside_a_swarm_without_calling_a_model (AC-12, INV-24, EC-35); test_each_agent_holds_exactly_the_swarm_tools_and_a_message_schema_of_its_peers (AC-13, INV-21, FR-3, D-13); test_each_system_prompt_is_own_prompt_then_swarm_prompt_then_agentic_loop_prompt (AC-14, FR-9); test_invalid_settings_are_refused_naming_the_field_and_creating_nothing (AC-11, EC-33, INV-18, FR-12); test_boundary_settings_are_accepted_with_documented_defaults (FR-1, section 9.3); test_api_keys_never_appear_in_reprs_events_model_calls_or_errors (AC-21, INV-23, EC-34, NFR-5); test_event_records_enforce_the_per_kind_field_table (section 9.1); test_result_records_enforce_one_ordered_sequence_ending_in_swarm_ended (section 9.1, FR-15); test_new_modules_stay_inside_the_complexity_budget_and_never_sleep (NFR-2, NFR-3, section 8.4); test_entry_points_refuse_anything_but_their_documented_types (section 9.2).
+FUNCTION INVENTORY: test_public_names_import_from_every_documented_path (AC-17, FR-14); test_records_and_settings_are_frozen_slotted_dataclasses_with_the_documented_fields (section 8.5, NFR-5); test_enum_values_are_the_documented_lowercase_strings (section 8.5); test_prompt_family_has_exactly_the_ten_documented_leaves_with_their_fields (W-2, INV-28); test_prompt_leaves_hold_no_digits_roles_or_examples (INV-22, NFR-4, NG-10); test_runtime_type_refuses_outside_a_swarm_without_calling_a_model (AC-12, INV-24, EC-35); test_each_agent_holds_exactly_the_swarm_tools_and_a_message_schema_of_its_peers (AC-13, INV-21, FR-3, D-13); test_each_system_prompt_is_own_prompt_then_swarm_prompt_then_agentic_loop_prompt (AC-14, FR-9); test_invalid_settings_are_refused_naming_the_field_and_creating_nothing (AC-11, EC-33, INV-18, FR-12); test_a_search_tool_named_isdone_is_refused_naming_the_reserved_names (EC-33, FR-3, section 9.3, R-2); test_tool_results_are_cut_and_a_long_history_is_trimmed_before_each_model_call (EC-26, D-10, A-5; mutants M21, M22); test_boundary_settings_are_accepted_with_documented_defaults (FR-1, section 9.3); test_api_keys_never_appear_in_reprs_events_model_calls_or_errors (AC-21, INV-23, EC-34, NFR-5); test_event_records_enforce_the_per_kind_field_table (section 9.1); test_result_records_enforce_one_ordered_sequence_ending_in_swarm_ended (section 9.1, FR-15); test_new_modules_stay_inside_the_complexity_budget_and_never_sleep (NFR-2, NFR-3, section 8.4); test_entry_points_refuse_anything_but_their_documented_types (section 9.2).
 COMMON MODIFICATION PATTERNS: When the spec adds a prompt leaf, add it to LEAF_FIELDS with its format fields. When a setting gains a bound, add one row to INVALID_SETTINGS with the field the error must name.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level. 2. Do not compare tool descriptions or refusals to hand-written text; they come from the prompt catalog. 3. Do not loosen the exact tool-name set to a subset check; INV-21 is an exact list.
-KNOWN EDGE CASES: A refusal's field may be named with an index suffix by a converter (AgentSwarmSettings.agents[1]), so field checks use startswith. The swarm segment of a system prompt is located between the member's own prompt and the agentic-loop prompt and must fully match the system_prompt template; a template that ends in a field would otherwise match too little.
+KNOWN EDGE CASES: A refusal's field may be named with an index suffix by a converter (AgentSwarmSettings.agents[1]), so field checks use startswith. The swarm segment of a system prompt is located between the member's own prompt and the agentic-loop prompt and must fully match the system_prompt template; a template that ends in a field would otherwise match too little. The trim test counts the history budget in characters with TOKEN_ESTIMATE_CHARS_PER_TOKEN, the four-characters-per-token estimate the constants module states and the trim uses; its search count is one cut result more than that budget holds, plus one, and the cut ceiling allows a one-percent truncation notice.
 RELATED DOCS: tests/features/agent_swarm/FEATURE.md; docs/spec/agent-swarm/spec.md sections 6.1, 6.2, 8.4, 8.5, 9.1, 9.2, 9.3 and 12.3.
 TESTS: PYTHONPATH=$(pwd) python -m pytest tests/features/agent_swarm/test_agent_swarm_contract.py -q
 """
@@ -54,6 +55,8 @@ from tests.features.agent_swarm.agent_swarm_fixtures import (
     send,
     snapshot,
     template_regex,
+    tool_call,
+    tool_results,
     workplace_path,
 )
 from vidbyte import BaseAgent
@@ -381,6 +384,63 @@ def test_invalid_settings_are_refused_naming_the_field_and_creating_nothing(tmp_
     after = sorted(path.name for path in tmp_path.iterdir())
     assert after == before or (field.endswith("workplace") and after == ["workplace.txt"])
     assert not workplace_path(tmp_path).exists()
+
+
+def test_a_search_tool_named_isdone_is_refused_naming_the_reserved_names(tmp_path: Path) -> None:
+    """EC-33, FR-3, section 9.3 (r4, S4 R-2): a search tool named like the loop's own isDone is refused with ConfigurationError on AgentSwarmSettings.search_tool, the message lists the reserved names and isDone, and nothing is created."""
+    from vidbyte.agents.agent_swarm import AgentSwarmSettings  # noqa: F401
+    from vidbyte.lib.constants.agent_swarm import AGENT_SWARM_RESERVED_TOOL_NAMES
+    from vidbyte.lib.errors import ConfigurationError
+    from vidbyte.tools._internal import IS_DONE_TOOL_NAME
+
+    with pytest.raises(ConfigurationError) as refused:
+        build_settings(tmp_path, NAMES, search_tool=SearchTool(IS_DONE_TOOL_NAME))
+    assert refused.value.details["field"] == "AgentSwarmSettings.search_tool", error_text(refused.value)
+    message = str(refused.value)
+    assert all(name in message for name in (*AGENT_SWARM_RESERVED_TOOL_NAMES, IS_DONE_TOOL_NAME)), message
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_tool_results_are_cut_and_a_long_history_is_trimmed_before_each_model_call(tmp_path: Path) -> None:
+    """EC-26, D-10, A-5: every search result the model reads is cut near AGENT_SWARM_TOOL_RESULT_MAX_CHARS, far below its raw size, and once the cut results outgrow AGENT_SWARM_HISTORY_MAX_TOKENS the oldest drop out of what the next model call is sent."""
+    from vidbyte.lib.constants.agent_swarm import (
+        AGENT_SWARM_HISTORY_MAX_TOKENS,
+        AGENT_SWARM_TOOL_RESULT_MAX_CHARS,
+    )
+    from vidbyte.lib.util.text import TOKEN_ESTIMATE_CHARS_PER_TOKEN
+    from vidbyte.tools.types import ToolCall, ToolResult
+
+    # Every bound comes from the constants; the history budget is counted with the SDK's characters-per-token estimate.
+    raw_chars = 3 * AGENT_SWARM_TOOL_RESULT_MAX_CHARS
+    budget_chars = AGENT_SWARM_HISTORY_MAX_TOKENS * TOKEN_ESTIMATE_CHARS_PER_TOKEN
+    cut_ceiling = AGENT_SWARM_TOOL_RESULT_MAX_CHARS + AGENT_SWARM_TOOL_RESULT_MAX_CHARS // 100
+    searches = budget_chars // AGENT_SWARM_TOOL_RESULT_MAX_CHARS + 2
+
+    class HugeSearch(SearchTool):
+        async def execute(self, call: ToolCall) -> ToolResult:
+            self.queries.append(str(call.arguments.get("query", "")))
+            return ToolResult.success(self.name, "x" * raw_chars)
+
+    search = HugeSearch()
+    scripted = ScriptedSwarm({"builder": [*(tool_call("web_search", {"query": f"q{index}"}) for index in range(searches)), reply("Builder done.")], "tester": [reply("Tester done.")]})
+    swarm = build_swarm(tmp_path, NAMES, search_tool=search)
+    with scripted.install():
+        await run_swarm(swarm)
+
+    builder_calls = scripted.calls_by("builder")
+    assert len(search.queries) == searches and len(builder_calls) == searches + 1
+    for call in builder_calls:
+        for name, content in tool_results(call):
+            if name == "web_search":
+                assert len(content) <= cut_ceiling, f"a {len(content)}-character search result reached the model; the cap is {AGENT_SWARM_TOOL_RESULT_MAX_CHARS}"
+    last = builder_calls[-1]
+    kept = [content for name, content in tool_results(last) if name == "web_search"]
+    assert 0 < len(kept) < searches, f"the last call kept {len(kept)} of {searches} search results: the history was not trimmed"
+    total = sum(len(str(message.get("content") or "")) for message in last.messages)
+    assert total <= budget_chars, f"the last call sent {total} characters of history; the budget is {budget_chars}"
+    assert last.system == builder_calls[0].system
+    scripted.assert_complete()
 
 
 def test_boundary_settings_are_accepted_with_documented_defaults(tmp_path: Path) -> None:
