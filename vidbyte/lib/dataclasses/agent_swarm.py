@@ -140,7 +140,7 @@ class AgentSwarmEvent:
         if kind in (AgentSwarmEventKind.MESSAGE_SENT, AgentSwarmEventKind.AGENT_FAILED, AgentSwarmEventKind.AGENT_IDLE):
             RecordFieldValidator.require_text(self.text, "AgentSwarmEvent.text", allow_blank=kind is AgentSwarmEventKind.AGENT_IDLE)
         if kind is AgentSwarmEventKind.TOOL_CALLED:
-            RecordFieldValidator.require_text(self.tool_name, "AgentSwarmEvent.tool_name", one_line=True)
+            RecordFieldValidator.require_text(self.tool_name, "AgentSwarmEvent.tool_name")
             RecordFieldValidator.require_enum(self.tool_status, ToolStatus, "AgentSwarmEvent.tool_status")
         if kind is AgentSwarmEventKind.SWARM_ENDED:
             RecordFieldValidator.require_enum(self.stop_reason, AgentSwarmStopReason, "AgentSwarmEvent.stop_reason")
