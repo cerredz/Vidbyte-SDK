@@ -24,7 +24,7 @@ SDK callers that build `BrowserAgent` and call `run`, `arun`, `get_usage`, and r
 
 ## Inputs and Preconditions
 
-A `BrowserAgentSettings` with at least one ACTION server, keys in each server's `env`, and caps within the bounds in spec §9.3. The tests use fake keys (`fc-test-only-…`, `sk-test-BROWSER-SECRET-…`) that exist only to be searched for, scripted model runners, and a fake transport factory. The fake replies report the priced `gpt-5.4-mini`, because the snippet's `gpt-4.1` has no pricebook row.
+A `BrowserAgentSettings` with at least one ACTION server, keys in each server's `env`, and caps within the bounds in spec §9.3. The tests use fake keys (`fc-test-only-…`, `sk-test-BROWSER-SECRET-…`) that exist only to be searched for, scripted model runners, and a fake transport factory. The settings and the fake replies use the snippet's priced `gpt-5.4-mini` (spec r4); a model with no pricebook row would make every run raise `UsageAccountingError`.
 
 ## Observable Outcomes
 

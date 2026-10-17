@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Only the model runner (ScriptedModel at BaseAgent._runner_for
 FUNCTION INVENTORY: test_section_4_snippet_prints_events_answer_stop_reason_and_progress (AC-1, FR-23); test_every_episode_of_one_run_uses_the_same_action_server_process (AC-6, INV-7, FR-4); test_sync_runs_get_their_own_servers_and_async_runs_on_one_loop_share_them (AC-23, EC-22, FR-4); test_building_the_runtime_has_no_side_effects (INV-23); test_each_run_starts_clean_and_never_changes_an_earlier_record (INV-24).
 COMMON MODIFICATION PATTERNS: Keep the section 4 snippet byte-for-byte as the spec prints it; if the spec's snippet changes, paste the new one.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level. 2. Do not edit the snippet to make it easier to test. 3. Do not count server processes by anything but the fake transport's instances.
-KNOWN EDGE CASES: The snippet assigns a variable named `reply`, so its scripted model is built by a module helper instead of the fixture's reply() inside the test body. The snippet's model is "gpt-4.1", which has no pricebook row; the fake replies report PRICED_MODEL so the agent's fail-closed usage can settle (see browser_agent_fixtures.py).
+KNOWN EDGE CASES: The snippet assigns a variable named `reply`, so its scripted model is built by a module helper instead of the fixture's reply() inside the test body. The snippet's model is "gpt-5.4-mini" (spec r4), which is priced; the fake replies report PRICED_MODEL, the same model, so the agent's fail-closed usage can settle (see browser_agent_fixtures.py).
 RELATED DOCS: tests/features/browser_agent/FEATURE.md; docs/spec/browser-agent/spec.md sections 4, 6.1 and 6.2.
 TESTS: PYTHONPATH=$(pwd) python -m pytest tests/features/browser_agent/test_browser_agent_acceptance.py -q
 """
@@ -86,7 +86,7 @@ def test_section_4_snippet_prints_events_answer_stop_reason_and_progress(capsys:
                 name="vc-scout",
                 system_prompt="You find seed-stage accelerator programs and record where to apply.",
                 provider="openai",
-                model_name="gpt-4.1",
+                model_name="gpt-5.4-mini",
                 action_servers=(BrowserServerSettings(PlaywrightMCP),),
                 search_servers=(BrowserServerSettings(FirecrawlMCP, env={"FIRECRAWL_API_KEY": "fc-your-key"}),),
                 done_when=("Twenty programs are listed, each with its application URL and deadline.",),

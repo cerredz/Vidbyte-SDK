@@ -102,7 +102,7 @@ FAILED tests/features/browser_agent/test_browser_agent_settings.py::test_keys_ne
 FAILED tests/features/browser_agent/test_browser_agent_settings.py::test_a_non_settings_object_is_refused_naming_its_type
 FAILED tests/features/browser_agent/test_browser_agent_settings.py::test_defaults_are_the_named_constants
 FAILED tests/features/browser_agent/test_browser_agent_settings.py::test_a_preset_is_stored_as_its_registered_definition_and_env_is_read_only
-106 failed in 2.07s
+106 failed in 2.08s
 ```
 
 No collection error and no "Interrupted". Every failure is the feature being absent (from `--tb=line`): 88 `ModuleNotFoundError: No module named 'vidbyte.agents.browser'`; 11 `No module named 'vidbyte.lib.constants.browser'`; 2 `cannot import name 'BrowserAgent' from 'vidbyte'`; 1 each of `cannot import name 'browser' from 'vidbyte.lib.constants'`, `'BrowserEpisodeOutcome' from 'vidbyte.lib.enums'`, `'BrowserAgentRuntime' from 'vidbyte.agents'`; 1 `AssertionError: vidbyte/agents/browser does not exist` (AC-28); 1 `assert {} == {'BROWSER_AGE…` (no `Prompt.BROWSER_AGENT_*` members yet, AC-25).
@@ -112,7 +112,7 @@ Neighbours stay green: `PYTHONPATH=$(pwd) python -m pytest tests/test_mcp_attach
 ## Notes for the implementer
 
 - Seams: the model runner is patched at `BaseAgent._runner_for_model` and answered by agent name: the orchestrator is `settings.name` (`vc-scout`), workers `vc-scout-episode-<n>` (1-based), rechecks `vc-scout-recheck`, the done-when agent `vc-scout-done-when`. The stdio transport is patched at `vidbyte.tools.mcp.attach.McpStdioTransport`. Keep those names and that import path.
-- Fake replies report `gpt-5.4-mini` (`PRICED_MODEL`): `gpt-4.1`, the §4 model, has no pricebook row, so a real run of the snippet with that model raises `UsageAccountingError` (see the S2 report).
+- Fake replies report `gpt-5.4-mini` (`PRICED_MODEL`), the §4 model since spec r4. A model with no pricebook row (such as `gpt-4.1`, the r1–r3 snippet model) makes the run raise `UsageAccountingError` (INV-21).
 - The property tests build `BrowserGoal(BrowserGoalCard(goal, done_when), settings, BrowserResponse(), BrowserAgentEvents(None))` directly, so `BrowserResponse()` must take no arguments (as `JevResponse()` does), and `BrowserGoal.patch` must raise `ConfigurationError` on refusal. `agent.response.goal` is checked only after an accepted patch.
 - Tool sets: the loop adds `isDone` to every `BaseAgent` catalog, so the tests allow `isDone` beside the ACTION tools (workers) and as the only tool of a recheck.
 - A worker's provider error reaches the episode tool wrapped in `AgentExecutionError` (cause `ProviderRequestError`); the stuck card's `stop_reason` may name either.
