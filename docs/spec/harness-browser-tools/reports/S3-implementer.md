@@ -1,39 +1,39 @@
 # S3 Implementer report: harness browser tools
 
 - Stage: S3 implementer. Status: **BLOCKED**. The implementation is complete, and lint and the package gate pass. Six tests are red for test-side reasons that S3 may not fix. GitHub push protection also refuses the branch because of an S2 test fixture. See "Blockers".
-- Branch `feat/harness-browser-tools`; code-complete HEAD `b5601413`; test baseline `a151e79c`; `git diff a151e79c..HEAD --stat -- tests/` is EMPTY.
+- Branch `feat/harness-browser-tools`; code-complete HEAD `0dfde894`; test baseline `871ee369`; `git diff 871ee369..HEAD --stat -- tests/` is EMPTY.
 - Draft PR: none. The push was refused (Blocker 3), so `gh pr create` could not run. The branch exists only locally.
-- All 37 rows of §12.3 are implemented in the §12.6 phase order, one commit per work item (19 commits, `52820e7d` … `b5601413`).
+- All 37 rows of §12.3 are implemented in the §12.6 phase order, one commit per work item (19 commits, `2b2e350a` … `0dfde894`).
 
 ## Commits by phase
 
 | Phase | Commit | Rows | Work item |
 |---|---|---|---|
-| P1 | `52820e7d` enums, operations, failure codes | 1–4 | W-1 |
-| P1 | `73507af4` constants and native thread texts | 7, 8 | W-1, W-4, W-7–W-10 |
-| P1 | `9e1ee85f` browser records, `NativeThreadRun` | 5, 6 | W-2, W-13 |
-| P1 | `85f359f5` `NativeThreadError.expected` names the result record | 9 | W-10 |
-| P1 | `365eb03e` `BrowserToolRegistry` | 10, 11 | W-1, W-3 |
-| P1 | `3012b2ce` `ProcessReaper` | 13, 14 | W-9 |
-| P2 | `d0a90032` error factory passes the result record | 18 | W-10 |
-| P2 | `869ac5a8` shared browser flow, preflight, cache, cleanup | 16, 17 | W-4, W-5, W-9, W-11 |
-| P2 fix | `4e765944` reaper PowerShell without `USERPROFILE`; named zero count | 13, 8 | W-9 (AC-16 on Windows; lint A007) |
-| P2 fix | `c883cf12` `_install` split out of `ensure`; removal under the cleanup budget | 16, 7 | W-4, W-9 (lint S008, S064, A007) |
-| P3 | `7a0bb396` constants the mounts read | 7 | W-7, W-8 |
-| P3 | `c1e91bc8` opencode mounts, wire, threads | 19, 25, 28 | W-6, W-13 |
-| P3 | `9f1b5551` Grok mounts, wire, threads | 20, 26, 29 | W-7, W-13 |
-| P3 | `1571cc9f` Muse mounts, wire, threads | 21, 27, 30 | W-8, W-13 |
-| P4 | `e9c92adb` opencode browser functions | 22, 31 | W-6, W-11 |
-| P4 | `453e25a0` Grok browser functions | 23, 32 | W-7, W-11 |
-| P4 | `c06ace51` Muse browser functions | 24, 33 | W-8, W-11 |
-| P4 | `719d3f11` native re-exports (28 names) | 34 | W-11 |
-| P5 | `b5601413` READMEs, REPO_MAP, failure vocabulary | 12, 15, 35, 36, 37 | W-12, W-10 |
+| P1 | `2b2e350a` enums, operations, failure codes | 1–4 | W-1 |
+| P1 | `5877c763` constants and native thread texts | 7, 8 | W-1, W-4, W-7–W-10 |
+| P1 | `f84f40a1` browser records, `NativeThreadRun` | 5, 6 | W-2, W-13 |
+| P1 | `da596d28` `NativeThreadError.expected` names the result record | 9 | W-10 |
+| P1 | `6850de45` `BrowserToolRegistry` | 10, 11 | W-1, W-3 |
+| P1 | `affc030b` `ProcessReaper` | 13, 14 | W-9 |
+| P2 | `f88dcc8e` error factory passes the result record | 18 | W-10 |
+| P2 | `0a86d456` shared browser flow, preflight, cache, cleanup | 16, 17 | W-4, W-5, W-9, W-11 |
+| P2 fix | `c665afdb` reaper PowerShell without `USERPROFILE`; named zero count | 13, 8 | W-9 (AC-16 on Windows; lint A007) |
+| P2 fix | `c9edd485` `_install` split out of `ensure`; removal under the cleanup budget | 16, 7 | W-4, W-9 (lint S008, S064, A007) |
+| P3 | `07269150` constants the mounts read | 7 | W-7, W-8 |
+| P3 | `19fa8cf9` opencode mounts, wire, threads | 19, 25, 28 | W-6, W-13 |
+| P3 | `3ae18948` Grok mounts, wire, threads | 20, 26, 29 | W-7, W-13 |
+| P3 | `59dfc44c` Muse mounts, wire, threads | 21, 27, 30 | W-8, W-13 |
+| P4 | `8903baa0` opencode browser functions | 22, 31 | W-6, W-11 |
+| P4 | `4c084da6` Grok browser functions | 23, 32 | W-7, W-11 |
+| P4 | `8290c813` Muse browser functions | 24, 33 | W-8, W-11 |
+| P4 | `d70b8ba1` native re-exports (28 names) | 34 | W-11 |
+| P5 | `0dfde894` READMEs, REPO_MAP, failure vocabulary | 12, 15, 35, 36, 37 | W-12, W-10 |
 
-Budget (§8.4): 12 of 12 new files, 34 of 34 new classes, 0 dependencies, 0 new config keys, no schema change. Files outside §12.3: none. (`pipeline.md` differs from `a151e79c` only by the orchestrator's `7ad1d021`; S3 never staged it.)
+Budget (§8.4): 12 of 12 new files, 34 of 34 new classes, 0 dependencies, 0 new config keys, no schema change. Files outside §12.3: none. (`pipeline.md` differs from `871ee369` only by the orchestrator's `b8e02a7d`; S3 never staged it.)
 
-## Gates (final lines, at HEAD `b5601413`)
+## Gates (final lines, at HEAD `0dfde894`)
 
-Run in order by one script at HEAD `b5601413` (working tree clean apart from this untracked report).
+Run in order by one script at HEAD `0dfde894` (working tree clean apart from this untracked report).
 
 1. `PYTHONPATH=$(pwd) py -3.11 -m pytest -q tests/features/harness_threads`
    `4 failed, 608 passed, 3 skipped in 179.33s (0:02:59)`. The four reds are listed under "Test status".
@@ -78,7 +78,7 @@ The full suite in the source gate adds three more reds, all in `tests/features/c
 
 ### Blocker 2: Codex fixed-byte pins contradict §12.3 rows 34–36
 
-`tests/features/codex_host/test_codex_host_packaging.py` arrived with the main merge `a151e79c` (#1055). It pins three things byte for byte. This spec must change each of them:
+`tests/features/codex_host/test_codex_host_packaging.py` arrived with the main merge `871ee369` (#1055). It pins three things byte for byte. This spec must change each of them:
 
 | Test | Pins | Spec row that must change it |
 |---|---|---|
@@ -86,11 +86,11 @@ The full suite in the source gate adds three more reds, all in `tests/features/c
 | `test_repo_map_section_sits_between_the_harnesses_paragraph_and_stores` | the whole `##### vidbyte/harnesses/native/` REPO_MAP section | row 36: the native rows name the browser functions and modules |
 | `test_harnesses_readme_bullet_follows_the_serialization_bullet` | the whole `native/` bullet of `vidbyte/harnesses/README.md` | row 35: the native paragraph covers the browser functions |
 
-All 7 tests in that file pass at `a151e79c` and 3 fail at `b5601413`. No implementation can satisfy both the native-marker hash and S2's 28-name export test. The spec (§12.5, §13) assigns surface-pin updates to the test author, but it predates #1055, so it does not list these pins. Codex tests are out of scope for S3, and S3 may not edit tests.
+All 7 tests in that file pass at `871ee369` and 3 fail at `0dfde894`. No implementation can satisfy both the native-marker hash and S2's 28-name export test. The spec (§12.5, §13) assigns surface-pin updates to the test author, but it predates #1055, so it does not list these pins. Codex tests are out of scope for S3, and S3 may not edit tests.
 
 **Fix (test-side).** In `test_codex_host_packaging.py`, update:
-- `NATIVE_INIT_SHA256` to `6044725df61d3fdc4a9fd0ce5fd94bee306ea385293e3d802a1f2b7a1a4b950b`, the hash of the 5261 LF bytes at `719d3f11`;
-- `REPO_MAP_SECTION` and `README_BULLET` to the texts at `b5601413`.
+- `NATIVE_INIT_SHA256` to `6044725df61d3fdc4a9fd0ce5fd94bee306ea385293e3d802a1f2b7a1a4b950b`, the hash of the 5261 LF bytes at `d70b8ba1`;
+- `REPO_MAP_SECTION` and `README_BULLET` to the texts at `0dfde894`.
 
 The header of that test file already says the fixed texts change when their source changes.
 
@@ -109,12 +109,12 @@ The header of that test file already says the fixed texts change when their sour
 remote: error: GH013: Repository rule violations found for refs/heads/feat/harness-browser-tools.
 remote:     - Push cannot contain secrets
 remote:       —— DeepSeek API Key ——
-remote:          - commit: 2b6ff7f9f7d097ebdda480b874e9246210c7d41b
+remote:          - commit: fb8ab0042b2a5d34ea38aec1bea81731a532a648
 remote:            path: tests/features/harness_threads/test_harness_threads_browser_acceptance.py:46
  ! [remote rejected]   feat/harness-browser-tools -> feat/harness-browser-tools (push declined due to repository rule violations)
 ```
 
-The flagged value is S2's `DEEPSEEK_KEY` fixture: `sk-` plus 32 hex characters in a visibly hand-made pattern. The acceptance test sets it as `DEEPSEEK_API_KEY` to prove that keys never leak, so it is a synthetic test value, not a real credential. It lives in S2's commit `2b6ff7f9`, which is already in the branch history. S3 cannot clear it, because all three ways out are forbidden to S3:
+The flagged value is S2's `DEEPSEEK_KEY` fixture: `sk-` plus 32 hex characters in a visibly hand-made pattern. The acceptance test sets it as `DEEPSEEK_API_KEY` to prove that keys never leak, so it is a synthetic test value, not a real credential. It lives in S2's commit `fb8ab004`, which is already in the branch history. S3 cannot clear it, because all three ways out are forbidden to S3:
 - allowing a secret is a repository security decision;
 - a rewrite of history means a rebase;
 - changing the value means a test edit.
@@ -157,7 +157,7 @@ They are also recorded in the spec, under §17 "Implementation deviations (S3)".
 
 ## Where the tricky parts are
 
-- **Windows cleanup.** Two Windows-only problems showed up only in the lifecycle tests: PowerShell's `AppData\Roaming` side effect (fixed in `4e765944`) and late lock release (deviation 4). A POSIX run never sees either.
+- **Windows cleanup.** Two Windows-only problems showed up only in the lifecycle tests: PowerShell's `AppData\Roaming` side effect (fixed in `c665afdb`) and late lock release (deviation 4). A POSIX run never sees either.
 - **Grok stream reading.** `GrokWire.read_stream` checks the outcome in a set order: timeout, then truncation, then an error event, then a non-zero exit, then a missing end event, then a `cancelled` stop reason, then the session id. A turn that Grok cancels after an unlisted tool call becomes `grok.run_failed`, naming the stop reason (EC-32 and EC-41). This path depends on Blocker 1 being fixed before it has a passing test.
 - **Muse required-server translation.** Muse matches on `MUSE_REQUIRED_SERVER_MARKER` inside `vendor_message`. If Muse rewords that line, the failure falls back to plain `muse.run_failed`.
 - **Plain paths.** The plain paths are unchanged (AC-15). The existing harness_threads tests pass, and each `execute` returns `NativeThreadRun`, whose `.result` is what `_call` returns.

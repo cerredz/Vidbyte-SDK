@@ -201,7 +201,7 @@ Q-15 now lists these prerequisites and the posture, so the user can decide with 
 
 ## Addendum: revision r4 (aligned with the S2 tests; not a review round)
 
-Commit b125e64b (spec.md only). Frontmatter: `revision: 4`; `status: approved` is unchanged. Nothing about the architecture or behaviour changed. I only wrote down choices the S2 tests made where the spec said nothing (S2 report, "Spec defects and ambiguities", items 1 to 8).
+Commit 39e1066c (spec.md only). Frontmatter: `revision: 4`; `status: approved` is unchanged. Nothing about the architecture or behaviour changed. I only wrote down choices the S2 tests made where the spec said nothing (S2 report, "Spec defects and ambiguities", items 1 to 8).
 
 **What I read (read-only):**
 - `conftest.py`: `check_browser_error` asserts `error.next_step == NATIVE_THREAD_NEXT_STEPS[code]`, and checks the message order: function, code, label, workspace, thread id, observations, vendor text, cause, next step.

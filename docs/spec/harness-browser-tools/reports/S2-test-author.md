@@ -1,8 +1,8 @@
 # S2 test author: harness-browser-tools
 
 **Status:** DONE. Spec r3 (approved). Branch `feat/harness-browser-tools`.
-- `2b6ff7f9`: tests, fakes, pins and test plan.
-- `72eb0fe9`: the spec §6.2 Proof column.
+- `fb8ab004`: tests, fakes, pins and test plan.
+- `6567f6aa`: the spec §6.2 Proof column.
 
 The coverage map, the tests deliberately not written, and the notes for the implementer are in `docs/spec/harness-browser-tools/test-plan.md`.
 
@@ -162,9 +162,9 @@ A scratch driver fed the fakes the exact §9.1 shapes. These checks show a spec-
 
 ## Post-S3 repair (orchestrator-adjudicated)
 
-S3 reported three test-side blockers (`reports/S3-implementer.md`, "Blockers"). The orchestrator adjudicated all three as test defects or test drift. Three test-only commits on top of `6d163420` fix them; no file under `vidbyte/` changed.
+S3 reported three test-side blockers (`reports/S3-implementer.md`, "Blockers"). The orchestrator adjudicated all three as test defects or test drift. Three test-only commits on top of `ef7729cc` fix them; no file under `vidbyte/` changed.
 
-### 1. Key-shaped fixtures are built at run time (`cf724cfc`, AC-1)
+### 1. Key-shaped fixtures are built at run time (`folded into fb8ab004`, AC-1)
 
 GitHub push protection (GH013) refused the branch: `DEEPSEEK_KEY` in `test_harness_threads_browser_acceptance.py:46` matched the DeepSeek key pattern. Every credential-shaped fixture literal in the S2 files is now a concatenation of short pieces, so the source text holds no provider-pattern token. The runtime value is byte-identical.
 
@@ -184,7 +184,7 @@ GitHub push protection (GH013) refused the branch: `DEEPSEEK_KEY` in `test_harne
   - A tokenizer scan of the S2 files finds no literal with a vendor prefix followed by a key body, and no alphanumeric run of 20 or more characters.
   - The five edited files: `3 failed, 125 passed, 1 skipped`. The three failures are exactly the routing tests below, as before.
 
-### 2. Node-side fake fields go through `sandbox.node` (`4ad61c26`, AC-12, EC-18, EC-29, EC-32, EC-41)
+### 2. Node-side fake fields go through `sandbox.node` (`305a9b67`, AC-12, EC-18, EC-29, EC-32, EC-41)
 
 Only the `node` stand-in reads `server_fail`, `artifact_burst` and `extra_tools` (`fake_browser.mcp_server` and `answer`). But `browse(fake=...)` writes `fake` only into the harness stand-in's scenario, so these three tests never delivered their fields. Each test now sets the field with `sandbox.node(<field>=...)` before `browse` and drops it from `fake`. The runtime and fakes tests already used this pattern.
 
@@ -203,7 +203,7 @@ Only the `node` stand-in reads `server_fail`, `artifact_burst` and `extra_tools`
   - Only a screenshot call reads `artifact_burst`. The first call's only tool call is the Playwright probe (`browser_navigate`), so its outcome is unchanged.
 - Run: the three tests gave `3 passed in 5.68s`. The lifecycle and mounts files gave `77 passed, 1 skipped`.
 
-### 3. Codex packaging pins refreshed (`93b19766`, AC-3; W-11, W-12)
+### 3. Codex packaging pins refreshed (`fd70e93d`, AC-3; W-11, W-12)
 
 `tests/features/codex_host/test_codex_host_packaging.py` (#1055) pins three texts that rows 34–36 of §12.3 must change. Before each pin was refreshed, the property it guards was checked against the current files.
 
@@ -214,9 +214,9 @@ Only the `node` stand-in reads `server_fail`, `artifact_burst` and `extra_tools`
 | `README_BULLET` | The `native/` bullet follows the serialization bullet and keeps the Codex-host import guidance (`vidbyte.harnesses.native.codex`). | The old bullet, up to " The shared plumbing", is a byte-identical prefix of the new one. The Codex sentence and "which only the harness subpackages import" are kept. Only the browser paragraph and the `hostkit/browser.py` mention are added. |
 
 - How the values were taken: they were recomputed the way the test reads them, from the working copy with CRLF turned into LF, and checked to equal the committed `HEAD` blob.
-  - The working copies of these three files have not changed since `b5601413`.
+  - The working copies of these three files have not changed since `0dfde894`.
   - `NATIVE_INIT_SHA256` is `6044725df61d3fdc4a9fd0ce5fd94bee306ea385293e3d802a1f2b7a1a4b950b`, the hash of 5261 LF bytes. This agrees with S3's figure.
-  - The same method gives the old pin for the `a151e79c` bytes (3855).
+  - The same method gives the old pin for the `871ee369` bytes (3855).
 - Why the strength is unchanged: the three assertions still compare exact bytes or exact text. Only the three constant lines changed.
 - Run: `7 passed`.
 - Not refreshed: the header (`KNOWN EDGE CASES: … its 3855 LF bytes`) and the comment above `NATIVE_INIT_SHA256` still say 3855 bytes, because the brief allowed only the pins to change. They are now stale; the marker is 5261 LF bytes.
