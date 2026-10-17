@@ -1,7 +1,7 @@
 ---
 spec: infinite-memory-prompts
 title: Rewrite and expand the InfiniteMemoryAgent prompt family so every prompt reinforces the agent's intended behavior
-status: reviewed       # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
+status: verified       # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
 revision: 4
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-infinite-memory-prompts
