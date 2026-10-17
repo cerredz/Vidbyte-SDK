@@ -20,8 +20,8 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
 | S2 tests | done | 10:10 | 11:40 | reports/S2-test-author.md | **S2_HEAD fadec47f** (was 09524ff4; moved by the orchestrator-granted correction of 2 assertions); 106 new tests (97 red, 8 guards, 1 live-skipped), 20 superseded + 7 support literals; red 125F/631P/3S vs baseline 1F/650P/2S; spec r4 (d3389171) aligned to test choices |
 | S3 implement | done | 11:45 | 14:20 | reports/S3-implementer.md | **S3_HEAD c9150d63**; draft PR #1181 (base `ai/resolve-pr-1055-comments`, 64 files +9688/−551); 24/24 rows; budget 3 files / 13 classes / 0 deps / 9 config keys (exact); host.py 923; area 1F(inherited)/1024P/3S; source 1F(inherited)/6555P/27S; package CI passed; SDK-LINT: PASS |
 | S4 adversarial review | done | 14:25 | 16:10 | reports/S4-review-{conformance,conventions,engineering}.md, reports/S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES — confirmed 4 Blocker / 6 Major / 7 Minor; refuted 0; downgraded 1 (R-V3). Owners: code R-1,R-2,R-3,R-9,R-10; test R-4,R-5,R-6,R-8; spec R-7 |
-| S5 repair loop | done | 16:15 | 18:10 | verify-log.md, reports/S5-repair-1.md | converged at iteration 1: **HEAD efb19043** (9 fix commits df460ec7..31622c00); S2_HEAD 6b59d390 untouched; area 1F(inherited)/1046P/3S; source 1F(inherited)/6577P/27S; package CI passed; SDK-LINT: PASS; review.md 0 open (m-3..m-7 follow-ups) |
-| S5 re-review | running | 18:15 | | reports/S5-rereview.md | conformance, FOCUS post-repair, diff `origin/ai/resolve-pr-1055-comments...efb19043` |
+| S5 repair loop | running (iteration 2 pending) | 16:15 | 18:10 | verify-log.md, reports/S5-repair-1.md | converged at iteration 1: **HEAD efb19043** (9 fix commits df460ec7..31622c00); S2_HEAD 6b59d390 untouched; area 1F(inherited)/1046P/3S; source 1F(inherited)/6577P/27S; package CI passed; SDK-LINT: PASS; review.md 0 open (m-3..m-7 follow-ups) |
+| S5 re-review | round 1 done; back into loop | 18:15 | 19:05 | reports/S5-rereview.md, reports/S5-findings-verifier.md | round 1: MERGEABLE AFTER FIXES — all 12 fixes held, no regression; new confirmed R-11 Blocker (handed-over start's unretrieved exception leaks stderr/RPC text via asyncio ERROR), R-12 Major (frozen-module origin splits into 2 tokens), m-8 Minor (spec wording); refuted 0 |
 | S6 PR | deferred to the end of slice 2 | | | | |
 
 ## Counters and caps
@@ -132,6 +132,28 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
   - `gh pr checks 1181` reports no checks (workflow_dispatch only).
   - All 10 confirmed findings are `fixed @<sha>`. m-1 and m-2 are fixed; m-3 to m-7 are follow-ups with reasons in review.md.
 - 2026-10-17 18:10: **I did not route the 178 PR-added test comment lines over 72 columns.** R-1's evidence is scoped to source: #1178's codex source files have 0 such lines. `tests/` at base 8baff351 already has 3,547, and 354 of those are in the codex host tests. So the test tree does not follow the 72-column lesson, and changing it would move S2_HEAD with no behavior change. It goes in the PR as a follow-up note.
+
+- 2026-10-17 19:05: **Re-review round 1 checked.**
+  - The verifier's `review.md` edit is append-only: +26/−1, and the one removed line is the Verdict sentence it was told to extend.
+  - **R-11 (Blocker).** The bug is inherited from base `connection.py:218`, but it is in scope: R-10 rewrote that hand-over, and INV-10 and NFR-1 govern it.
+  - **R-12 (Major).** This PR caused it, in row 9.
+  - **Routing**, with roles kept separate as in round S4:
+    1. **Spec author r6, text only, no budget change:**
+       - Row 9 and :258: `describe` replaces whitespace runs in the frame's fields with `_`, so the origin is always one token (INV-10).
+       - INV-7 and row 12 (m-8): the start record comes from its own done-callback, registered before `_post_late`.
+       - INV-10/T-5: a handed-over call's or start's exception is always retrieved, so no asyncio or concurrent.futures record ever carries its text.
+       - "shield" appears nowhere in the spec, so dropping it needs no contract change.
+    2. **S2 test author:**
+       - R-11 regression rows that capture the `asyncio` and `concurrent.futures` loggers, then run `gc.collect()` and `await asyncio.sleep(0)`. They cover the R-10 hand-over, death after hand-over, an ordinary close, and a loop that has already closed.
+       - An R-12 unit row using `exec(compile(..., "my script.py", "exec"))`, and an R-12 record row asserting on raw tokens, because `log_fields` drops tokens that have no `=`.
+       
+       This gives a new S2_HEAD.
+    3. **S5 iteration 2:**
+       - R-11: drop the shield at `:413` so `start` awaits the way `call` does, and update the `@intent` narration and the FILE header.
+       - R-12: one line in `describe`.
+       
+       The re-reviewer's `_consume` alternative is incomplete, per the verifier: it still leaks when the loop has closed.
+  - Iteration 2 counts toward the cap of 8. Re-review round 2 of 2 follows.
 
 ## User replies (verbatim)
 - (none yet)
