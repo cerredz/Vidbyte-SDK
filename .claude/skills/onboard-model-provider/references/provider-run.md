@@ -351,8 +351,10 @@ tail -n 3 "<evidence>/gate-package.log"
    The body writes `<worktree>` and `<evidence>` for those paths, never an absolute local path, a home directory or a user name. Before the push, this must print `grep exit 1`; look as well for the same paths in their other spelling (with a drive letter, or with a leading `/c/`):
 
 ```sh
-grep -n -i -F -e "$(dirname "<worktree>")" -e "$HOME" -e "$(id -un)" "<evidence>/pr-body.md"; echo "grep exit $?"
+grep -n -F -e "$(dirname "<worktree>")" -e "$HOME" -e "/$(basename "$HOME")/" -e "$(printf '\134%s\134' "$(basename "$HOME")")" "<evidence>/pr-body.md"; echo "grep exit $?"
 ```
+
+   It matches the user name, your home directory's last segment, only as a path segment between two slashes or two backslashes, so an ordinary word that equals a short name does not block the push. It has no `-i`, because Git for Windows' grep aborts on `-i -F` in the C locale (exit 134), and it spells the backslash as the octal `\134`, because a doubled backslash can reach the shell as one. When it prints a line, replace the path or name in that line of the body with `<worktree>` or `<evidence>`, and run it again. Any exit other than 1 means the body is not yet clean or the check did not run: never push until it prints `grep exit 1`.
 
 2. Push once. If it fails, never push again; the run ends `PUBLISH_FAILED push <reason>`:
 
