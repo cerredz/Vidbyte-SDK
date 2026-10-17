@@ -1,6 +1,6 @@
 # AgentSwarm
 
-`AgentSwarm` runs a group of agents the developer defines on one goal. Every agent works in the same folder with the same file and shell tools, and any agent can send a text message to any other agent with the `message` tool. Each agent works in turns: a turn ends when it replies without calling a tool, or calls `isDone`, and the agent then waits until a message wakes it. The swarm ends when no agent is working and no message is waiting, when the turn budget is spent, when every agent has failed, or when the time limit is reached. One `arun(goal)` call returns an `AgentSwarmResult` with the stop reason, every event in order, and each agent's last reply.
+`AgentSwarm` runs a group of agents the developer defines on one goal. Every agent works in the same folder with the same file and shell tools, and any agent can send a text message to any other agent with the `message` tool. Each agent works in turns: a turn ends when it replies without calling a tool, or calls `isDone`, and the agent then waits until a message wakes it. The swarm ends once no agent is working, or when the time limit is reached. A spent turn budget does not end it by itself: it stops further wakes, so the swarm ends `max_turns` only when a message is left waiting, and `quiet` otherwise. One `arun(goal)` call returns an `AgentSwarmResult` with the stop reason, every event in order, and each agent's last reply.
 
 ## Usage
 
@@ -39,7 +39,7 @@ The API keys come from the usual provider environment variables when `api_keys` 
 
 ## Lifecycle
 
-Every agent gets the goal as its first message and starts working at once. Each agent is one long agent run for the whole swarm, so it keeps its conversation from turn to turn. A message sent to a working agent is delivered after its current tool call finishes, or when its turn ends; a message sent to an idle agent wakes it, and the messages become its next user message, each labeled with its sender. Sending never waits for the recipient. An agent whose model call fails, or whose run stops on its own, leaves the swarm with an `agent_failed` event naming the cause, and later messages to it are refused; the others go on.
+Every agent gets the goal as its first message and starts working at once. Each agent is one long agent run for the whole swarm, so it keeps its conversation from turn to turn. A message sent to a working agent is delivered once the tool calls of its current model response have run, or when its turn ends; a message sent to an idle agent wakes it, and the messages become its next user message, each labeled with its sender. Sending never waits for the recipient. An agent whose model call fails, or whose run stops on its own, leaves the swarm with an `agent_failed` event naming the cause, and later messages to it are refused; the others go on.
 
 | Stop reason | When |
 |---|---|

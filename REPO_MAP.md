@@ -74,7 +74,7 @@ Executable agent actors and the logic that selects how they run — the primitiv
 
 ##### `vidbyte/agents/agent_swarm/`
 
-A group of agents the developer defines, running at once on one goal in one shared folder with the same file and shell tools. Any agent can send a short text message to any other: a message reaches a working agent between its tool calls and wakes an idle one, and sending never waits for the recipient. Every agent keeps one conversation across its turns, and the swarm ends when no agent is working and no message is waiting, when its turn budget or time limit runs out, or when every agent has failed. Every state change is recorded as a numbered event, handed in order to an optional callback, and returned with each agent's last reply. Its records, enums, constants, and prompt text live lower in the shared substrate, and its tool catalog in the toolsets folder.
+A group of agents the developer defines, running at once on one goal in one shared folder with the same file and shell tools. Any agent can send a short text message to any other: a message reaches a working agent before its next model call and wakes an idle one, and sending never waits for the recipient. Every agent keeps one conversation across its turns, and the swarm ends once no agent is working, or when its time limit runs out; a spent turn budget only stops further wakes. Every state change is recorded as a numbered event, handed in order to an optional callback, and returned with each agent's last reply. Its records, enums, constants, and prompt text live lower in the shared substrate, and its tool catalog in the toolsets folder.
 
 ##### `vidbyte/agents/algorithms/`
 
