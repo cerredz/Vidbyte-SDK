@@ -16,7 +16,7 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 06:50 | 07:12 | reports/S0-scout.md | base_commit 6f5a7310; code-map 4 sections, 25 files |
-| S1 spec + review | running | 07:13 | | reports/S1-spec-author.md | |
+| S1 spec + review | running | 07:13 | | reports/S1-spec-author.md, reports/S1-spec-review.md | r1 0f0d3118 (FR 37, AC 39, EC 52, W 13; 0 blocking Q); reviewer round 1 launched 08:18 |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -25,7 +25,7 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
 | S6 PR | deferred to the end of slice 2 | | | | |
 
 ## Counters and caps
-- S1 review rounds: 0/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 1/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-17 06:44: Waited for PR #1055 to merge (merged at 2026-10-17T06:44:08Z as `6f5a7310`) before creating the worktree, per Prompt 3.
@@ -34,6 +34,14 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
 - 2026-10-17 06:50: Ran `git branch --unset-upstream` on `feat/codex-host-first-class`. `git worktree add -b … origin/main` had set the upstream to `origin/main`, and a bare `git push` would have targeted main. Every push must be `git push -u origin feat/codex-host-first-class`.
 - 2026-10-17 06:50: Committed the research subagent's outputs as context: `context/codex-gap-report.md` and `context/coverage-matrix.md`, from the codex-cli 0.163.0 schema.
 - 2026-10-17 06:50: The PR #1044 round-2 comments run as a separate, parallel subagent that only posts comments. It is not part of this pipeline.
+- 2026-10-17 08:10: PR #1044 round 2 posted and verified with `gh api`:
+  - top-level comment issuecomment-6231230416;
+  - review 5556842425, state COMMENTED, 26 inline comments all anchored RIGHT at head 6ff98295;
+  - no email or key in either;
+  - the user's checkout untouched.
+  
+  Nothing else in this run touches #1044.
+- 2026-10-17 08:17: Accepted the S1 author's move of **S4 (`collaborationMode`/plan mode) into slice 2** (spec NG-1). §C.10 lists `collaboration_mode` among the P0 plan-mode functions, which are slice 2. **Slice 2's request.md must name S4 explicitly as carried over from slice 1.**
 
 ## User replies (verbatim)
 - (none yet)
@@ -61,4 +69,39 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
 - Full gate: `PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source`, then `python scripts/run_ci.py --stage package` with no PYTHONPATH (field guide `local-ci-verification.md`). Semgrep scans only tracked files, so run `git add` first. *Source:* S0
 - Remote CI: `.github/workflows/ci.yml` automatic triggers are TEMPORARILY DISABLED (workflow_dispatch/workflow_call only). It installs no codex extra, so the host tests run only locally. *Source:* S0
 - A pre-existing failure, independent of this slice: `tests/features/harness_threads/test_harness_threads_surface.py:193` expects 120 FailureCode members and there are 167. Classify it as inherited. *Source:* S0
+- **Contract names** (spec r1 §4/§8.5):
+  - `CodexHost(approval_handler=async fn)`, set when the host is built;
+  - enums `CodexServerRequestKind`, `CodexApprovalDecision`, `CodexReasoningEffort.MAX/ULTRA`, and `CodexHostOperation.FORGET_CODEX_TURNS`, placed before `START_CODEX_REVIEW`;
+  - records `CodexServerRequest.from_params`, `CodexServerAnswer`, `CodexUserInputQuestion/Option/Answer`, `CodexServiceTier`;
+  - `CodexAgentError.retryable` (a property) and `ExceptionOrigin.describe`;
+  - `forget_codex_turns`.
+  
+  The budget is 2 new files, `harnesses/native/codex/reviews.py` and `lib/util/exception_origin.py`, with no new FailureCodes. *Source:* S1 author
+- `lib/errors/base.py` must import `CODEX_FAILURE_CLASSIFICATION` inside the body of `retryable`. A module-level import creates a runtime cycle (vidbyte.lib.enums → native_threads → lib.errors; spec D-6). *Source:* S1 author
+- Ordering pins:
+  - new constants go in `__all__` before `"CODEX_HOST_THREAD_LIST_DEFAULT_LIMIT"`;
+  - `forget_codex_turns` is defined before `start_codex_review`;
+  - the helper-surface test pins both orders.
+  
+  *Source:* S1 author
+- Commit pairing:
+  - removing the two approval constants lands in the same commit as the router change (phase P2);
+  - removing the record's USER raise lands in the same commit as preflight step 0 (phase P3).
+  
+  *Source:* S1 author
+- Retry uses `openai_codex.retry.retry_on_overload` inside `CodexConnection.call`, and only for `CODEX_HOST_RETRIED_METHODS` (account/read, thread/read, thread/list, thread/name/set). *Source:* S1 author
+- Test seam:
+  - patch `connection.CodexClient` with the fake, and drive server requests through `HostTestCase.ask`;
+  - never mock the router, mapper or retry helper;
+  - the fake's `_thread_fork` ignores `beforeTurnId` and `deferGoalContinuation`.
+  
+  *Source:* S1 author
+- Spec §13 lists **17 superseded tests** (groups A, B, C, G) and 7 support literals. Only S2 may change them, and only those listed. *Source:* S1 author
+- Least-sure assumptions (spec §15):
+  - A-5: Codex's runtime reaction to the fail-closed defaults was never run;
+  - A-1/A-2: the real error codes for an unknown-thread read and an ended-turn steer come only from the fake;
+  - A-3: retrying `thread/name/set` is safe;
+  - A-9: fork auto-continues a goal unless `deferGoalContinuation` is set.
+  
+  *Source:* S1 author
 
