@@ -18,12 +18,12 @@ started: 2026-10-16 16:10
 | S2 tests | done | 2026-10-16 18:45 | 2026-10-16 20:40 | reports/S2-test-author.md | 51 tests / 161 cases, all red (missing symbols); S2_HEAD=9895d663 → 87c8ed14 after adjudicated fixture fix |
 | S3 implement | done | 2026-10-16 20:45 | 2026-10-16 22:30 | reports/S3-implementer.md | S3_HEAD=c0b167d3; draft PR #1174; 23 new + 13 modified = budget; 161/161 |
 | S4 adversarial review | done | 2026-10-16 22:35 | 2026-10-17 00:40 | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES — 1 Blocker (R-1), 4 Major (R-2..R-5), 10 Minor (R-6..R-15); 4 refuted |
-| S5 repair loop | done | 2026-10-17 02:10 | 2026-10-17 03:05 | reports/S5-repair-1.md | converged in 1/8; HEAD cd9d3189 → 87df4fc9 (guard test); all findings closed; CI green |
+| S5 repair loop | done | 2026-10-17 02:10 | 2026-10-17 04:20 | reports/S5-repair-1.md, S5-repair-2.md | converged in 2/8; HEAD cd9d3189 → 87df4fc9 (guard test) → b3852069 (R-17 docs); all findings closed; CI green |
 | S5 re-review | done | 2026-10-17 03:05 | 2026-10-17 03:30 | reports/S5-rereview.md | SOUND: 0 Blocker, 0 Major, 2 Minor (R-16 spec text, R-17 doc text) |
-| S6 PR | pending | | | | |
+| S6 PR | running | 2026-10-17 04:25 | | reports/S6-pr-author.md | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 1/8 (converged) · S5 re-review rounds: 1/2 (SOUND) · S2_HEAD 87df4fc9
+- S1 review rounds: 2/2 · S5 repair iterations: 2/8 (converged) · S5 re-review rounds: 1/2 (SOUND) · S2_HEAD 87df4fc9
 
 ## Decisions the orchestrator made
 - 2026-10-16 16:08 — Base on origin/main (0f2aeb48), not on the unmerged InfiniteMemoryAgent branch (#1084) — the user said "inside of the vidbyte-sdk/", and #1084 is still open.
@@ -73,6 +73,8 @@ started: 2026-10-16 16:10
 - 2026-10-17 03:05 — My own source gate on cd9d3189 gave `SDK-LINT: PASS` and "3 failed, 6414 passed, 16 skipped". All 3 failures are the known inherited harness_threads tests (failure_codes, tools_and_configs, import_vidbyte). **S5 has converged after iteration 1.** I dispatched ci.yml and static-policy.yml on 87df4fc9 and launched the final conformance re-review (round 1/2), whose report goes to reports/S5-rereview.md.
 
 - 2026-10-17 03:30 — Remote CI on 87df4fc9 passed: CI 39007165774 and static-policy 39007167332. The S5 re-review (round 1/2) came back SOUND: all 11 fixes hold on the real code path, with 0 Blocker, 0 Major, and 2 Minor (R-16, R-17). R-16 is spec text only: INV-11 and EC-39 do not describe three outcomes that the R-3 branch reaches, namely a dropped reply after a decided end, a MAX_TURNS end, and an async callback that is woken and then fails. R-17 is three stale doc sentences: the swarm.py:38 docstring, the README:58 limits row, and the events.py:9 header. I fixed both rather than leaving them as follow-ups, for two reasons. They are trivial and change no behaviour, and stale public docstrings are exactly the review comments the user is trying to reduce. R-16 goes to the S1 author (r5). R-17 goes to S5 iteration 2 (2/8), which runs after the spec commit to avoid index collisions. No further re-review is needed, because the playbook re-reviews only new Blocker or Major findings. I spot-check these myself.
+
+- 2026-10-17 04:20 — Spec r5 @c66a1ffe (R-16 text only, +5/-3, status reviewed) checked. S5 iteration 2 is DONE at b3852069 (pushed; fix 4a993f98). The R-17 doc text is fixed: swarm.py:38, README:58 and the events.py:9 header. The runtime.py:53 placeholder is kept, because deleting it would change behaviour for the public member methods called before arun (follow-up). Spot-check: tree clean, nothing unpushed, the tests diff since 87df4fc9 is empty, verify-log has Iteration 2, and only 3 one-line vidbyte/ edits. I re-ran lint and the pack myself: `SDK-LINT: PASS`, 171 passed. Remote CI on 4a993f98 passed: CI 39008866234 and static-policy 39008871160. **S5 is final: converged in 2/8 iterations, 1/2 re-review rounds, no open finding.** Spec status set to verified (orchestrator docs commit, per playbook).
 
 ## User replies (verbatim)
 - 2026-10-16 16:05 — answers to four clarifying questions: "One shared folder (Recommended)"; "Stay alive until quiet (Recommended)"; "Shared goal + per-agent prompts (Recommended)"; "Callback + list on result (Recommended)".
