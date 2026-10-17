@@ -699,6 +699,14 @@ class DeterministicMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         decision = await middleware.before_model_call(MiddlewareContext(hook=MiddlewareHook.BEFORE_MODEL_CALL, agent_name="agent", message="billing invoice", provider_messages=provider_messages))
         self.assertEqual(tuple(m["content"] for m in decision.transform.provider_messages), ("rules", "billing invoice"))
 
+    async def test_clear_except_system_and_log_factory_reads_a_lone_entry_and_a_null_field(self) -> None:
+        # [Silent Failure] A developer's bare-string field is one bullet and a null field is none, never a failed run.
+        middleware = MessageHistoryCompactionMiddleware.clear_except_system_and_log(progress_log={"touched_files": "src/parser.py", "errors": None, "next_steps": ["ship it"]})
+        provider_messages = ({"role": "system", "content": "rules"}, {"role": "user", "content": "parse it"}, {"role": "assistant", "content": "done"})
+        decision = await middleware.before_model_call(MiddlewareContext(hook=MiddlewareHook.BEFORE_MODEL_CALL, agent_name="agent", message="parse it", provider_messages=provider_messages))
+        log = decision.transform.provider_messages[-1]["content"]
+        self.assertEqual([line for line in log.splitlines() if line.startswith("- ")], ["- N/A", "- src/parser.py", "- N/A", "- N/A", "- ship it"])
+
     async def test_new_factories_validate_constructor_values(self) -> None:
         # [Hidden Assumption] Invalid public factory bounds fail before runtime.
         with self.assertRaises(ValueError):

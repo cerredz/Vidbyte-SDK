@@ -153,8 +153,8 @@ class InfiniteWorkspace:
                 self.backend.write_text(self.root / relative, text, encoding="utf-8", create_parents=True, newline="", atomic=True)
         return entry
 
-    def write_note(self, path: str, text: str, description: str | None, *, by: str, run: str, may_create: bool) -> bool:
-        """Create the note or append text to it, record a new note's description, and return True when the note was created."""
+    def write_note(self, path: str, text: str, description: str | None, *, by: str, run: str, may_create: bool) -> tuple[bool, str]:
+        """Create the note or append text to it, record a new note's description, and return whether the note was created and its workspace-relative path."""
         with self._lock:
             target, relative = self._note_path(path)
             created = not target.exists()
@@ -183,10 +183,10 @@ class InfiniteWorkspace:
                 content.encode("utf-8")
             for name, content in changed.items():
                 self.backend.write_text(self.root / name, content, encoding="utf-8", create_parents=True, newline="", atomic=True)
-        return created
+        return created, relative
 
-    def edit_file(self, path: str, old_text: str, new_text: str) -> None:
-        """Replace the one occurrence of old_text in an existing note with new_text."""
+    def edit_file(self, path: str, old_text: str, new_text: str) -> str:
+        """Replace the one occurrence of old_text in an existing note with new_text, and return the note's workspace-relative path."""
         with self._lock:
             target, relative = self._note_path(path)
             if not target.is_file():
@@ -203,6 +203,7 @@ class InfiniteWorkspace:
                 raise ToolExecutionError(f"{relative} would be {TokenEstimate.count(note)} tokens, over max_file_tokens ({self.settings.max_file_tokens}); write a shorter replacement.")
             self._room(FolderUsage.tokens_by_file(self.root, skip=INFINITE_UNCOUNTED_DIRNAMES), {relative: note})
             self.backend.write_text(target, note, encoding="utf-8", create_parents=True, newline="", atomic=True)
+        return relative
 
     def map_text(self) -> str:
         """Render the workspace map: the totals against their caps, then one line per file with its tokens and description."""

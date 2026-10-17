@@ -3,7 +3,7 @@
 PURPOSE: Proves what launch_subagent promises the root and every generator: pairs in one call run at the same time, each verifier follows its own generator, the parent sees only capped cards in task order, a bad batch starts nothing, depth and role decide who may delegate, max_agents bounds the run, one failing pair never sinks its siblings, extras reach children only by name, context entries are pasted, finished names replay, and the loop's tool limits never cut a batch. It also holds the S4 review's regression tests for this layer: a card or journal record that cannot be written as given, the card bound of NFR-7 as amended in r5, and replay of a pair whose context entry was superseded.
 ROLE IN CODEBASE: Delegation layer of tests/features/infinite_memory_agent/ (spec AC-5..AC-8, AC-12, AC-13, AC-26, AC-28, AC-29, AC-31, AC-32, AC-35, AC-36; INV-4, INV-6..INV-13, INV-24, INV-26, INV-29, INV-30, INV-38; NFR-7; EC-4..EC-11, EC-12, EC-38, EC-43; S4 review findings R-1, R-3, R-4). Exercises vidbyte/agents/infinite/launch.py through a real InfiniteMemoryAgent run.
 ARCHITECTURE NOTE: Every agent in the tree is driven by one ScriptedTree routed by agent name. What the parent saw is read from the tool messages in its next model call; what happened on disk is read from the journal and entries.jsonl. Concurrency is proven with a Gate that opens only when both generators are inside a model call at once, never with timing.
-FUNCTION INVENTORY: test_two_tasks_run_concurrently_and_each_verifier_follows_its_own_generator (AC-5, INV-4, INV-9, INV-12, INV-24); test_an_invalid_batch_starts_nothing_and_the_tool_stays_usable (AC-6, EC-4..EC-7, EC-38, EC-43); test_depth_cap_and_role_decide_who_holds_launch_subagent_and_drop_entry (AC-7, INV-8, INV-13, AC-17 SPARSE clause); test_a_batch_over_max_parallel_is_denied_by_the_middleware_and_starts_nothing (AC-6, EC-4); test_a_batch_that_would_pass_max_agents_is_refused_whole (AC-8, INV-10, EC-8); test_a_failed_or_blank_generator_skips_its_verifier_and_its_sibling_still_reports (AC-12, EC-9, EC-10, INV-29); test_a_generator_stopped_by_max_iterations_is_partial_and_still_verified (AC-13, EC-11, INV-30); test_a_long_generator_reply_is_cut_in_its_card_and_the_rest_never_reaches_the_root (AC-26, INV-4, NFR-7); test_a_task_card_grants_exactly_the_extras_it_names (AC-28, AC-36, INV-6, INV-7); test_context_pastes_named_entries_and_lists_named_paths (AC-29, D-14); test_relaunching_a_finished_name_replays_its_card_without_building_agents (AC-31, INV-26); test_the_verifier_gets_the_generators_outcome_but_never_its_transcript (AC-32, INV-12); test_launch_subagent_is_exempt_from_the_tool_timeout_and_result_cap (AC-35, INV-38); test_a_pair_whose_card_or_record_cannot_be_written_as_given_still_finishes_beside_its_sibling (R-1, INV-29, INV-32); test_an_unchecked_card_with_long_dropped_and_files_lists_stays_inside_the_nfr7_bound (R-3, NFR-7, INV-4, EC-12); test_a_finished_pair_replays_after_its_context_entry_was_superseded_and_new_pairs_still_run (R-4, INV-26, INV-9).
+FUNCTION INVENTORY: test_two_tasks_run_concurrently_and_each_verifier_follows_its_own_generator (AC-5, INV-4, INV-9, INV-12, INV-24); test_an_invalid_batch_starts_nothing_and_the_tool_stays_usable (AC-6, EC-4..EC-7, EC-38, EC-43); test_depth_cap_and_role_decide_who_holds_launch_subagent_and_drop_entry (AC-7, INV-8, INV-13, AC-17 SPARSE clause); test_a_batch_over_max_parallel_is_denied_by_the_middleware_and_starts_nothing (AC-6, EC-4); test_a_batch_that_would_pass_max_agents_is_refused_whole (AC-8, INV-10, EC-8); test_a_failed_or_blank_generator_skips_its_verifier_and_its_sibling_still_reports (AC-12, EC-9, EC-10, INV-29); test_a_generator_stopped_by_max_iterations_is_partial_and_still_verified (AC-13, EC-11, INV-30); test_a_long_generator_reply_is_cut_in_its_card_and_the_rest_never_reaches_the_root (AC-26, INV-4, NFR-7); test_a_task_card_grants_exactly_the_extras_it_names (AC-28, AC-36, INV-6, INV-7); test_context_pastes_named_entries_and_lists_named_paths (AC-29, D-14); test_relaunching_a_finished_name_replays_its_card_without_building_agents (AC-31, INV-26); test_the_verifier_gets_the_generators_outcome_but_never_its_transcript (AC-32, INV-12); test_launch_subagent_is_exempt_from_the_tool_timeout_and_result_cap (AC-35, INV-38); test_a_pair_whose_card_or_record_cannot_be_written_as_given_still_finishes_beside_its_sibling (R-1, INV-29, INV-32); test_an_unchecked_card_with_long_dropped_and_files_lists_stays_inside_the_nfr7_bound (R-3, NFR-7, INV-4, EC-12); test_a_finished_pair_replays_after_its_context_entry_was_superseded_and_new_pairs_still_run (R-4, INV-26, INV-9); test_a_note_written_under_several_spellings_is_listed_once_on_the_card (@intent one-note-is-listed-once, INV-12, AC-32).
 COMMON MODIFICATION PATTERNS: Add a rejected-batch case as one INVALID_BATCHES row naming the token the error must contain. Keep private markers (GEN-*-PRIVATE, VER-*-PRIVATE) unique strings so a leak check cannot match by accident.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level. 2. Do not prove concurrency or ordering with sleeps or wall-clock time; use Gate, Signal, and ScriptedTree.events. 3. Do not assert card wording beyond the catalog templates and the field values the spec fixes.
 KNOWN EDGE CASES: A runner AssertionError inside a child may be turned into a tool error by the parent, so every test ends with ScriptedTree.assert_complete, which also fails on unscripted calls. The result-card template is matched with its literal text only, so a template of bare placeholders would make renderings() weak. The R-1 path cases accept both spec-conformant outcomes: the path refused at write time, or accepted with the card error turned into an unchecked card; either way every key finishes and every card returns.
@@ -14,6 +14,7 @@ TESTS: PYTHONPATH=$(pwd) python -m pytest tests/features/infinite_memory_agent/t
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -582,3 +583,27 @@ def test_a_finished_pair_replays_after_its_context_entry_was_superseded_and_new_
         started = [record for record in records if record["event"] == "pair_started" and record["key"] == pair_key(name)]
         ended = [record for record in records if record["event"] == "pair_finished" and record["key"] == pair_key(name)]
         assert len(started) == len(ended) == 1, f"pair {name} must start and finish exactly once: {events(records)}"
+
+
+# ---------------------------------------------------------------- one note, one path (@intent one-note-is-listed-once)
+
+
+def test_a_note_written_under_several_spellings_is_listed_once_on_the_card(tmp_path: Path) -> None:
+    """@intent one-note-is-listed-once, INV-12, AC-32: a generator that writes notes/a.md and then appends to it as ./notes/a.md and notes//a.md (and notes\\a.md on Windows) leaves one note and one files.jsonl record, and its card and its verifier's first message name that note once, by the workspace's own path."""
+    root = workspace_root(tmp_path)
+    agent = build_agent(tmp_path)
+    # Every spelling below resolves to the same file inside the workspace; a backslash is a separator only on Windows.
+    spellings = ["./notes/a.md", "notes//a.md", *(["notes\\a.md"] if sys.platform == "win32" else [])]
+    steps = [tool_call("write_note", {"path": "notes/a.md", "text": "Acme Pro is 49 USD.\n", "description": "Acme prices"})]
+    steps += [tool_call("write_note", {"path": spelling, "text": f"Appended as {spelling}.\n"}) for spelling in spellings]
+    tree = ScriptedTree({ROOT: [launch(task("a")), reply("done")], generator("a"): [*steps, reply("A-SUMMARY")], verifier("a"): [reply(PASSED_REVIEW)]})
+    with tree.install():
+        agent.run(TASK)
+    tree.assert_complete()
+    refused = [content for _, content in tool_results(tree.calls_by(generator("a"))[-1]) if is_error(content)]
+    assert not refused, f"precondition: every write_note succeeded: {refused}"
+    assert [path.relative_to(root).as_posix() for path in (root / "notes").rglob("*")] == ["notes/a.md"], "precondition: one note on disk"
+    assert [record["path"] for record in read_jsonl(root / "files.jsonl")] == ["notes/a.md"], "precondition: one files.jsonl record"
+    assert finished_cards(root)[pair_key("a")]["files"] == ["notes/a.md"], "the card must list the note once, by its workspace path"
+    listed = re.findall(r"^- (.*a\.md)\s*$", tree.first_call(verifier("a")).prompt, re.MULTILINE)
+    assert listed == ["notes/a.md"], f"the verifier must be told to check the note once, not once per spelling: {listed}"

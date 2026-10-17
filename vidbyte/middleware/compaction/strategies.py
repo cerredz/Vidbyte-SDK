@@ -39,12 +39,23 @@ def _build_progress_log(raw_log: Mapping[str, object] | None) -> ProgressLog:
     if raw_log is None:
         return ProgressLog()
     return ProgressLog(
-        completed_tasks=tuple(str(item) for item in raw_log.get("completed_tasks", ())),
-        touched_files=tuple(str(item) for item in raw_log.get("touched_files", ())),
-        decisions=tuple(str(item) for item in raw_log.get("decisions", ())),
-        errors=tuple(str(item) for item in raw_log.get("errors", ())),
-        next_steps=tuple(str(item) for item in raw_log.get("next_steps", ())),
+        completed_tasks=_progress_entries(raw_log.get("completed_tasks")),
+        touched_files=_progress_entries(raw_log.get("touched_files")),
+        decisions=_progress_entries(raw_log.get("decisions")),
+        errors=_progress_entries(raw_log.get("errors")),
+        next_steps=_progress_entries(raw_log.get("next_steps")),
     )
+
+
+def _progress_entries(value: object) -> tuple[str, ...]:
+    # @intent a-lone-progress-entry-is-one-entry
+    # compact_context's progress_log is an untyped object, so a model writes one entry as a bare string and none as null;
+    # iterating the string would print a bullet per character, and iterating null would fail the compaction.
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        return (value,) if value.strip() else ()
+    return tuple(str(item) for item in value)
 
 
 def _approximate_token_count(text: str) -> int:
