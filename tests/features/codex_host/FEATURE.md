@@ -2,9 +2,9 @@
 
 ## High-Level Feature Description
 
-A developer opens `CodexHost()` with `async with`, and the host runs one `codex app-server` process through openai-codex 0.162. Twenty-seven small async methods sit on the host. The first fifteen come from `docs/spec/codex-host/spec.md`: check readiness, read rate limits, list models, spawn, continue and fork threads, list and read threads, wait on, get, steer and interrupt a turn, track a thread's usage, launch several subagents, and start a review. The twelve thread helpers come from `docs/spec/codex-host-thread-helpers/spec.md`: list recent threads, threads changed since a time and threads that match a search; walk a thread's lineage; list its stored turns; compact a thread, delete it and read its goal; and run a goal, list skills, run a skill and run the bundled `openai-docs` skill. Spawn returns a handle as soon as Codex accepts the turn, and the result comes later. Every failure is a `CodexAgentError` with a semantic code and a next step. `CodexHostTools(host, max_live_turns=N)` exposes twenty-six of the functions as agent tools: every one except `delete_codex_thread`, which no model may reach. Six module functions open a host for one call.
+A developer opens `CodexHost()` with `async with`, and the host runs one `codex app-server` process through openai-codex 0.163. Twenty-eight small async methods sit on the host. The first fifteen come from `docs/spec/codex-host/spec.md`: check readiness, read rate limits, list models, spawn, continue and fork threads, list and read threads, wait on, get, steer and interrupt a turn, track a thread's usage, launch several subagents, and start a review. The twelve thread helpers come from `docs/spec/codex-host-thread-helpers/spec.md`: list recent threads, threads changed since a time and threads that match a search; walk a thread's lineage; list its stored turns; compact a thread, delete it and read its goal; and run a goal, list skills, run a skill and run the bundled `openai-docs` skill. The hardening slice (`docs/spec/codex-host-hardening/spec.md`) adds the local `forget_codex_turns`; an optional async `approval_handler` keyword on `CodexHost`, which answers command, file-change and user-input requests while every other server request gets a fixed fail-closed answer; overload retries of four idempotent reads; redacted logs; and the turn settings `turn_service_tier`, `network_access`, `writable_roots` and the `max` and `ultra` efforts. Spawn returns a handle as soon as Codex accepts the turn, and the result comes later. Every failure is a `CodexAgentError` with a semantic code, a next step and a derived `retryable`. `CodexHostTools(host, max_live_turns=N)` exposes twenty-six of the functions as agent tools: every one except `delete_codex_thread`, which no model may reach, and `forget_codex_turns`, which is local and toolless. Six module functions open a host for one call.
 
-If this feature regresses, three things can go wrong. An agent can spend the user's Codex plan without control: a turn nobody owns, a cap that never fires, or a `user` reviewer that silently approves every escalation. A host call can hang, or a stack trace can reach the model. Or private data (the account email, environment values, the app-server's stderr) can leak into an error or a tool result.
+If this feature regresses, three things can go wrong. An agent can spend the user's Codex plan without control: a turn nobody owns, a cap that never fires, a paid call sent twice, or an approval request accepted that nobody approved. A host call or a wait can hang, or a stack trace can reach the model. Or private data (the account email, environment values, the app-server's stderr, a prompt or a command) can leak into an error, a tool result or a log record.
 
 ## Contract
 
@@ -13,12 +13,26 @@ If this feature regresses, three things can go wrong. An agent can spend the use
 - Spawn, continue, review and launch run their preflight checks before the first spending request. They return a handle at acceptance and register every turn before returning it (INV-12 to INV-14).
 - Each turn ends exactly once: COMPLETED, INTERRUPTED or FAILED. A wait never raises because time passed. A timeout or an output cap sends exactly one interrupt (INV-15 to INV-19).
 - Only `CodexAgentError`, `ConfigurationError` and `CancelledError` escape. Tools never raise, and they report `"<code>: <message> Next step: <next_step>"` (INV-8, INV-10).
-- A `user` reviewer fails closed: at construction, and after `thread/start` or `thread/resume` reports one (D-16, D-32).
+- A `user` reviewer fails closed on a host without an `approval_handler`: every spawning or continuing call refuses it before any request, and so does a `thread/start` or `thread/resume` that reports one (hardening INV-20 and D-5 moved the refusal out of record construction). With a handler it is allowed, and its approvals reach the handler.
 - Close cancels running tool calls, finalizes and interrupts running turns, closes goal streams in openai-codex's order, and then closes the process on a daemon thread (INV-7).
 - The thread helpers (thread-helpers spec) send no preflight request. The listing helpers send `sortKey`, `sortDirection: "desc"`, the five `sourceKinds` other than `subAgent`, and the count still missing as `limit`. The walk follows cursors until it has `limit` threads, a cursor repeats, the list ends or 1000 pages pass, and it never returns a thread twice (INV-10 to INV-14).
 - A lineage walk reads each ancestor without turns. It stops at a missing or refused ancestor, at a cycle, or after 100 summaries, and a timeout propagates (INV-16).
 - Compact and delete refuse a thread that runs a turn on this host before any request, and a thread Codex reports `active` after one read. Compact checks the goal of a `notLoaded` thread before it resumes it, and refuses an unfinished goal. No READ helper sends `thread/resume` (INV-8, INV-18, INV-33).
 - A goal run or a skill run returns a handle only when Codex shows that the goal or the skill entry took. Otherwise the run is stopped exactly once, and `codex.command_not_run` is raised (INV-21, INV-22, INV-34, INV-35). No tool deletes a thread (INV-2).
+
+The hardening slice adds these (`docs/spec/codex-host-hardening/spec.md`; the IDs below are that spec's):
+
+- Every server request gets exactly one answer, and the router never raises. Without a handler, approvals are declined, user input gets no answers, permissions grant nothing, and unknown requests get `{}`. With a handler, only command, file-change and user-input requests reach it, on the host's own loop; a parse failure, an error, a timeout, a non-answer or an answer that does not fit the request falls back to the default answer with one WARNING (INV-15 to INV-19, INV-21).
+- An error names the thread it left behind, and a failed spawn, launch or fork name-set unregisters that thread's dynamic tools (INV-1, INV-26, INV-28).
+- `retryable` is derived from the code and never stored in `details`. Only `account/read`, `thread/read`, `thread/list` and `thread/name/set` are retried on overload; every spending or state-changing call is sent once (INV-2, INV-3, INV-43).
+- `thread/read` means not found only when Codex refuses it (-32600 or -32602); an internal error or a lasting overload is `codex.api_error`, and a lineage walk raises it instead of ending early (INV-4, INV-5).
+- A failing event, a lost watcher or a failing review completion ends the turn `FAILED` with one stop, so `wait_codex_turn` with no timeout always returns; a process death is still `codex.process_exited` and is not a lost turn (INV-11 to INV-14, INV-45).
+- Every call, server request, turn item and turn end is logged once, %-style, with ids and labels only; no prompt, command, canary or exception text reaches a record (INV-7 to INV-10).
+- Tools never raise: an unexpected exception under a tool is a `codex.api_error` result naming the tool and the exception type, plus one WARNING with its origin (INV-23).
+- An error escaping `run_codex_goal`, `run_codex_skill` or `run_codex_openai_docs` carries the wrapper's operation in its field and message head, with every other field kept (INV-31).
+- Fork runs its checks in a fixed order; `before_turn_id` excludes `from_turn_id`, and it and `defer_goal_continuation` need the experimental API. Only `read_codex_thread` asks Codex for a thread's full history; fork points and review read-backs use `thread/turns/list` pages (INV-28, INV-38).
+- A goal run refuses every turn-only field when the request is built; a service tier is checked against the tiers `model/list` reports unless a custom provider is set; network access and writable roots go into the turn's sandbox policy and are refused on fork and review (INV-34 to INV-37).
+- Continue refuses a `notLoaded` thread whose stored goal is unfinished, readiness reports used-up usage, a model or tier the cached list lacks costs one fresh walk, and `forget_codex_turns` releases an idle thread's ended turns without a request (INV-22, INV-24, INV-25, INV-27).
 
 ## Actors / Callers
 
@@ -59,7 +73,7 @@ If this feature regresses, three things can go wrong. An agent can spend the use
 
 ## External Dependencies
 
-- openai-codex 0.162.1, the optional `codex` extra. The test modules that need it skip without it, as CI installs only `.[dev]`.
+- openai-codex 0.163.0, the optional `codex` extra, pinned `>=0.163.0,<0.164.0` by the hardening slice (INV-39). The test modules that need it skip without it, as CI installs only `.[dev]`. `test_codex_host_sdk_contract.py` pins the 0.163.0 surface the host reaches, so it is the first file to rerun after a pin bump.
 - The real `CodexContentTranslator`, `CodexResultSerializer`, `CodexMetricsTranslator`, `UsageTracker`, `ToolExecutor`, `PermissionPolicy`, `Tools` and `McpStudioServer`.
 
 ## Known Failure Modes
@@ -107,13 +121,40 @@ The thread helpers add these (thread-helpers spec):
 - A delete tool exists → a prompt-injected model deletes the user's history.
 - A skill path, a skill description or a goal objective is copied into an error → private paths and text reach the model.
 
+The hardening slice adds these (codex-host-hardening spec):
+
+- A command or file-change approval on a host without a handler is answered `accept` → every escalation runs unasked.
+- A handler that raises, hangs, returns a dict, picks a decision Codex did not offer, or answers an unknown question → the SDK reader thread dies, the request is never answered, or Codex gets an answer it cannot use.
+- Permission, MCP-elicitation or legacy approval requests are routed to the handler → code grants permissions the spec keeps fixed.
+- A handler is built from a sync function or a lambda → the reader thread blocks on it, or the host starts a process before refusing it.
+- A handler call pending at close is left running, or a request arriving after close began reaches the handler → an answer from a closing host.
+- A `user` reviewer is accepted on a host without a handler, or refused at record construction → silent approvals, or no way to build the request a handler host needs.
+- A spawn whose first `turn/start` or `thread/name/set` fails raises without the thread id and keeps the tool registration → an orphan thread the caller cannot find, still answering tool calls.
+- An overloaded `thread/start`, `turn/start` or `turn/steer` is retried → a paid call sent twice. An overloaded `account/read` is not retried → a spurious failure.
+- `thread/read` answering -32603, or overloaded three times, is reported as not found → a live thread treated as gone, and a lineage walk that ends early looks complete.
+- Processing a turn or goal event raises inside the loop callback, or the watcher's read fails → the turn never ends, and `wait_codex_turn` with no timeout hangs.
+- A process death is handled as a lost watcher → a misleading WARNING, a cleanup interrupt written after close.
+- A review's completion read-back raises a non-Codex error → the review never ends.
+- A steer sent while the turn's interrupt is in flight → Codex refuses it as a protocol error instead of a clear not-found.
+- An unexpected exception under a tool escapes → a stack trace reaches the model.
+- A log record carries the prompt, the command, the account email or an exception message → private data in the operator's logs.
+- A wrapper re-raises the inner call's error unchanged → the caller of `run_codex_goal` reads `get_codex_goal` as the failing operation.
+- Continue loads a `notLoaded` thread whose goal is active → Codex resumes the goal as untracked paid turns.
+- A goal request keeps a turn setting, an output schema, a tier or a sandbox field → the setting is silently ignored for every goal turn.
+- An unlisted service tier is sent → Codex refuses only after `thread/start` created a thread.
+- `network_access` with full access, or a relative writable root → a setting Codex ignores or refuses late.
+- A fork takes both fork points, or sends experimental fields without the capability → Codex refuses after the checks that should have caught it, or forks from the wrong turn.
+- A review or fork reads the thread with `includeTurns: true` → a whole transcript read for one item, on the path Codex 0.163 deprecates.
+- Readiness ignores used-up usage → a host reports ready and its first spawn is refused. A cached model list is never refreshed → a newly enabled model is refused for the life of the host.
+- `forget_codex_turns` drops a running turn, sends a request, or unregisters the thread's tools → a turn nobody owns, or a continued thread whose tools stop answering.
+
 ## Historical Regressions
 
-None yet. Add one line per fixed bug, with the test that protects it.
+- PR #1178 (codex-host-hardening AC-2 and AC-3): a spawn or launch whose `turn/start` failed raised without the new thread's id, and its tool registration stayed behind. Protected by `test_codex_host_resilience.py::CodexSpawnCleanupTests`, red until the hardening slice lands.
 
 ## Test Suite Map
 
-- `test_codex_host_records.py` checks each record's validation rules as an invalid-record table, with exhaustive tables for the review target kinds and snapshot states. It also covers the USER reviewer refusal, the new failure codes with their rows and next steps, the section 9.3 constants, `next_step` on `CodexAgentError`, and the enum wire values. It is CI-visible, except one test that cross-checks the wire values against the SDK.
+- `test_codex_host_records.py` checks each record's validation rules as an invalid-record table, with exhaustive tables for the review target kinds and snapshot states. It also covers a USER reviewer request that now builds (hardening D-5), the new failure codes with their rows and next steps, the section 9.3 constants, `next_step` on `CodexAgentError`, and the enum wire values. It is CI-visible, except one test that cross-checks the wire values against the SDK.
 - `test_codex_host_packaging.py` checks import safety in a fresh interpreter (AC-2, INV-1), the native marker's bytes (AC-36), the export lists, and the REPO_MAP and README texts. It is CI-visible, except one test that needs the SDK installed to prove the imports leave it unloaded.
 - `test_codex_host_bridge.py` checks `CodexToolTranslator.validate_names` and `CodexToolBridge.handler`. It is CI-visible.
 - `test_codex_host_tools.py` checks the toolset's shape and permissions, error results, the live-turn cap and ownership, `spawn_defaults` with JSON `null`, argument checks, output shapes, the wait clamp, and MCP. It runs over a stub host and is CI-visible.
@@ -133,6 +174,22 @@ None yet. Add one line per fixed bug, with the test that protects it.
 - `test_codex_host_goal_skills.py` covers `get_codex_goal`, the goal run and its read-back, the skill listing, the skill run and the docs run with the bounded read-back, and the stop sent on every miss, failure and cancel, with a failed check's error re-raised with every field it carried (AC-24 to AC-32, AC-39, AC-40, AC-42, AC-43; review R-17).
 - `test_codex_host_helper_lifecycle.py` covers the thread-helpers section 4 snippet, the call guards, no preflight and no resume on the READ helpers, `-32601` per method, and the privacy canaries (AC-1, AC-34, AC-37).
 - The seven modules from `test_codex_host_lifecycle.py` to `test_codex_host_sdk_contract.py` need the `codex` extra, so CI skips them. So do `test_codex_host_thread_helpers.py`, `test_codex_host_goal_skills.py` and `test_codex_host_helper_lifecycle.py`.
+
+The hardening slice (`docs/spec/codex-host-hardening/spec.md`, test plan `docs/spec/codex-host-hardening/test-plan.md`) adds these:
+
+- `test_codex_host_hardening_records.py` checks the three new enums and the `MAX`, `ULTRA` and `FORGET_CODEX_TURNS` members, the six wire-mirroring records, `CodexServerRequest.from_params` on full, sparse and broken params, the three new `CodexSpawnRequest` fields with the goal rule, and the tier fields of `CodexModelInfo` (AC-11, AC-29 to AC-32). It is CI-visible.
+- `test_codex_host_hardening_contract.py` checks `CodexHostSetup` and the constructor keyword, the fields appended to the input records, `retryable`, `with_operation` and `relabel`, `ExceptionOrigin`, every new constant verbatim in its sorted `__all__`, the C021 rule by an AST scan, the two new modules, the 0.163 pin and the documented limitations (AC-5, AC-13, AC-34, AC-39 to AC-41). It is CI-visible, except the class that maps JSON-RPC errors through the SDK's classes.
+- `test_codex_host_approvals.py` covers the section 4 snippet, the default answers with and without a handler, what the handler sees and how its answer is encoded, every fallback, the USER reviewer per operation, and close with a pending handler (AC-1, AC-10 to AC-15, AC-38).
+- `test_codex_host_resilience.py` covers the thread id and tool cleanup of a failed spawn and launch, the overload retries, the `thread/read` classification and lineage, steer while stopping, and the wrapper operation (AC-2 to AC-4, AC-6, AC-24, AC-26).
+- `test_codex_host_liveness.py` covers a failing turn or goal event, a lost watcher, a process death that is not a loss, a goal run that ends normally, and a failing review completion (AC-7 to AC-9).
+- `test_codex_host_observability.py` covers every log event with its fields and the privacy canaries in the logs (AC-18).
+- `test_codex_host_function_rows.py` covers `forget_codex_turns`, readiness usage, the model-list refresh, continue's goal check, `limit` and `force_reload`, the skill folder, and the new bad arguments (AC-16, AC-19 to AC-21, AC-23, AC-27, AC-28, AC-41).
+- `test_codex_host_fork_review.py` covers the fork points, the deferred goal, the experimental gate, the fork's failed name-set, the capped review and the one-page read-backs (AC-22, AC-25, AC-33).
+- `test_codex_host_turn_settings.py` covers the goal-run field refusals, the new efforts on the wire, service tiers and the sandbox policy (AC-29 to AC-32).
+- `test_codex_host_tool_hardening.py` covers the tool local-failure result, the 26-tool surface with no forbidden parameter, the new efforts in the schemas, a goal spawn with an effort, and a USER reviewer in `spawn_defaults` (AC-17, AC-30, AC-36). Its stub-host classes are CI-visible.
+- `test_codex_host_live_smoke.py` is the one live module: opt-in with `VIDBYTE_CODEX_LIVE_TESTS=1`, it opens a real host and calls only non-spending reads, while a spy on the SDK's writer proves nothing else was sent (AC-35). Its gate class is CI-visible; the live class is skipped unless enabled.
+- `test_codex_host_sdk_contract.py` gains `CodexHardeningSdkContractTests`, which pins openai-codex 0.163, `retry_on_overload` and the wire fields the slice sends.
+- Every hardening module except the records, the contract (minus one class), the tool class and the live gate needs the `codex` extra, so CI skips it.
 - `codex_host_support.py` holds the spec literals, canaries, `HostTestCase` and `StubCodexHost`. `codex_host_fakes.py` holds the in-memory app-server, and `codex_host_helper_fakes.py` holds its thread-helper, goal and skill handlers, a mixin `FakeAppServer` inherits.
 
 Run it with `PYTHONPATH=$(pwd) python -m pytest -q tests/features/codex_host`, from the worktree root, with the venv that has the `codex` extra.
@@ -140,7 +197,7 @@ Run it with `PYTHONPATH=$(pwd) python -m pytest -q tests/features/codex_host`, f
 ## Omitted Testing Strategies
 
 - **Property-based and fuzz:** `hypothesis` is not a dependency. The algebraic rules (the review-target kinds, snapshot states, the field rules and the error tables) are exhaustive tables over their small domains.
-- **Live Codex runs:** these spend the user's plan and CI has no credentials (NG-13). AC-1 is proven at the seam, and a live run is manual QA.
+- **Paid live Codex runs:** these spend the user's plan and CI has no credentials (NG-13). AC-1 is proven at the seam, and a live turn is manual QA. The hardening slice adds one opt-in live module, `test_codex_host_live_smoke.py` (X9, D-28), which calls only non-spending reads and is skipped unless `VIDBYTE_CODEX_LIVE_TESTS=1`.
 - **Windows npm launcher process trees (EC-3, EC-69) and long silences (EC-5, EC-35, EC-70):** they need a real process or a 300 s wait. The bound itself is proven by patching it small.
 - **Load and stress:** the host keeps per-turn state for its lifetime (EC-65), and no limit depends on volume.
 - **The controls not built (Q-7, Q-8, Q-9):** there is nothing to test.
@@ -148,3 +205,9 @@ Run it with `PYTHONPATH=$(pwd) python -m pytest -q tests/features/codex_host`, f
 - **The accepted thread-helpers limits (EC-19, EC-20, EC-21, EC-33, EC-41, EC-43, EC-44):** they describe what Codex does after an accepted request, so the fake would only replay the assumption.
 - **A live goal run, skill run or `openai-docs` run:** each spends the user's plan (NG-15). AC-1 is proven at the seam.
 - **The sentence counts of the new tool descriptions (NFR-7):** a count of sentences says nothing about meaning, so review checks them.
+- **A handler that calls its own host, or a slow handler stalling other turns (hardening EC-1, EC-2, EC-50):** they need a 300 s stall or a second turn racing the SDK's single reader thread, and the spec accepts both; AC-39 checks that the `CodexHost` docstring names them.
+- **The SDK's retry backoff running past the request bound (hardening EC-14):** it needs the SDK's real backoff sleeps; the bound itself is the existing one, already proven by patching it small.
+- **What Codex does after an accepted request (hardening EC-10, EC-27, EC-28, EC-36, EC-47):** a schema-invalid `{}` answer, an unknown `before_turn_id`, a goal continuing on a fork, an unversioned CLI and a retried delete are Codex's or the SDK's behaviour, so the fake would only replay the spec's assumption.
+- **`forget_codex_turns` racing a handed-over start (hardening EC-19):** the window is a few instructions wide; the busy row proves the same `require_idle` refusal deterministically.
+- **The focused C021 agent lint (hardening AC-40):** it is a command the implementer and reviewer run (`AGENT-LINT: PASS`); the pack scans `vidbyte/harnesses/native` with `ast` for the same rule.
+- **Stdlib logging when a handler raises (hardening EC-44):** that is the standard library's behaviour, not the host's.

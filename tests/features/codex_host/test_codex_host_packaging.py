@@ -27,6 +27,7 @@ NATIVE_INIT_SHA256 = "0f77815ce4a68854b26f79420614caa1aa2f6c00ebb80b9c094398469d
 
 NATIVE_CODEX_EXPORTS = ["CodexHost", "check_codex_ready", "fork_codex_thread", "get_codex_rate_limits", "list_codex_models", "list_codex_threads", "read_codex_thread"]
 
+# docs/spec/codex-host-hardening/spec.md section 12.5: the six new wire-mirroring records join the list, in alphabetical order.
 RECORD_EXPORTS = [
     "CodexGoal",
     "CodexModelInfo",
@@ -35,6 +36,9 @@ RECORD_EXPORTS = [
     "CodexRateLimits",
     "CodexReadiness",
     "CodexReviewTarget",
+    "CodexServerAnswer",
+    "CodexServerRequest",
+    "CodexServiceTier",
     "CodexSkillInfo",
     "CodexSpawnRequest",
     "CodexStoredTurn",
@@ -48,6 +52,9 @@ RECORD_EXPORTS = [
     "CodexTurnSnapshot",
     "CodexTurnSummary",
     "CodexTurnUsage",
+    "CodexUserInputAnswer",
+    "CodexUserInputOption",
+    "CodexUserInputQuestion",
 ]
 
 NEW_ENUMS = (
@@ -67,12 +74,15 @@ NEW_ENUMS = (
     "CodexTurnStatus",
 )
 
-# Spec section 12.3 row 3, verbatim: the Codex* order in vidbyte.lib.enums.__all__.
+# Spec section 12.3 row 3, verbatim: the Codex* order in vidbyte.lib.enums.__all__. docs/spec/codex-host-hardening/spec.md
+# section 12.3 row 2 places its three new enums in the same alphabetical block.
 ENUMS_CODEX_ORDER = [
     "CodexAccountKind",
+    "CodexApprovalDecision",
     "CodexApprovalMode",
     "CodexApprovalPolicy",
     "CodexApprovalsReviewer",
+    "CodexCommandApprovalKind",
     "CodexContextAnchor",
     "CodexGoalStatus",
     "CodexHostOperation",
@@ -84,6 +94,7 @@ ENUMS_CODEX_ORDER = [
     "CodexReviewTargetKind",
     "CodexSandbox",
     "CodexSandboxReadiness",
+    "CodexServerRequestKind",
     "CodexSkillScope",
     "CodexSortDirection",
     "CodexThreadSortKey",

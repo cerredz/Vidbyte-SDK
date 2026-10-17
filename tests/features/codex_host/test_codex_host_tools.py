@@ -20,6 +20,7 @@ import unittest
 from typing import Any
 
 from tests.features.codex_host.codex_host_support import (
+    GOAL_FIELD_MESSAGE,
     NEXT_STEPS,
     TOOL_NAMES,
     TOOL_TABLE,
@@ -280,6 +281,7 @@ class CodexHostToolArgumentTests(_ToolCase):
     """AC-26, INV-34, EC-53 to EC-55: the posture comes from spawn_defaults; arguments are checked by the tool."""
 
     async def test_spawn_takes_the_posture_from_defaults_and_six_values_from_the_model(self) -> None:
+        from vidbyte.lib.dataclasses.codex import CodexTurnSettings
         from vidbyte.lib.dataclasses.codex_host import CodexGoal
         from vidbyte.lib.enums.codex import CodexReasoningEffort
 
@@ -307,7 +309,17 @@ class CodexHostToolArgumentTests(_ToolCase):
         await _call(tools, "spawn_codex_thread", {**nulls, "prompt": "Fix the failing test."})
         self.assertEqual(host.last("spawn_codex_thread")[0][0], dataclasses.replace(defaults, prompt="Fix the failing test."))
 
-        await _call(tools, "spawn_codex_thread", {"goal_objective": "Ship the fix.", "goal_token_budget": 500, "prompt": None})
+        # docs/spec/codex-host-hardening/spec.md INV-34, D-15, Q-19 and EC-32: a goal request refuses a non-default turn when it
+        # is built, and this posture's turn sets effort and summary, so the goal call is an error result naming turn and the
+        # host is never called.
+        spawns = host.names().count("spawn_codex_thread")
+        refused = await _call(tools, "spawn_codex_thread", {"goal_objective": "Ship the fix.", "goal_token_budget": 500, "prompt": None})
+        self.assert_error_result(refused, "configuration.invalid_argument")
+        self.assertIn(GOAL_FIELD_MESSAGE.format(name="turn"), refused.output)
+        self.assertEqual(host.names().count("spawn_codex_thread"), spawns)
+        # The same goal call on a posture without a turn setting reaches the host.
+        goal_tools = _toolset(host, spawn_defaults=_defaults(turn=CodexTurnSettings()))
+        await _call(goal_tools, "spawn_codex_thread", {"goal_objective": "Ship the fix.", "goal_token_budget": 500, "prompt": None})
         goal_request = host.last("spawn_codex_thread")[0][0]
         self.assertEqual((goal_request.prompt, goal_request.goal), ("", CodexGoal(objective="Ship the fix.", token_budget=500)))
 

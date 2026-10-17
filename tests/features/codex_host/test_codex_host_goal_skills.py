@@ -208,13 +208,14 @@ class CodexRunGoalTests(_GoalSkillCase):
         self.assertEqual(mapped_summary(self, error), NO_GOAL_MESSAGE + thread_suffix(self.started_thread()))
 
     async def test_a_goal_check_that_fails_cancels_the_run_and_keeps_its_error(self) -> None:
-        # AC-27, INV-22: the check's api_error keeps operation get_codex_goal and gains GOAL_UNCHECKED_MESSAGE.
+        # AC-27, INV-22: the check's api_error gains GOAL_UNCHECKED_MESSAGE. docs/spec/codex-host-hardening/spec.md INV-31 and
+        # D-22 supersede its operation: the error now carries the wrapper's own, run_codex_goal.
         self.patch_connection("CODEX_HOST_WORKER_THREADS", 1)
         host = await self.opened()
         self.server.fail("thread/goal/get", self.fakes.FakeRpcError(-32603, "goal read failed"))
         error = await self.assert_codex_error(host.run_codex_goal("ship it", token_budget=500), "codex.api_error")
         thread_id = self.started_thread()
-        self.assertEqual(error.operation, "get_codex_goal")
+        self.assertEqual(error.operation, "run_codex_goal")
         self.assertTrue(error.message.endswith(GOAL_UNCHECKED_MESSAGE.format(thread_id=thread_id)), error.message)
         self.assertEqual(error.next_step, NEXT_STEPS["codex.api_error"])
         await self.barrier(host, thread_id)
@@ -571,14 +572,15 @@ class CodexSkillReadBackTests(_GoalSkillCase):
         self.assertEqual(self.interrupts(self.started_thread()), 1)
 
     async def test_a_read_back_that_fails_interrupts_once_and_keeps_its_error(self) -> None:
-        # AC-40, INV-35: the read's api_error keeps operation list_codex_turns and gains SKILL_UNCHECKED_MESSAGE.
+        # AC-40, INV-35: the read's api_error gains SKILL_UNCHECKED_MESSAGE. docs/spec/codex-host-hardening/spec.md INV-31 and
+        # D-22 supersede its operation: the error now carries the wrapper's own, run_codex_skill.
         self.patch_connection("CODEX_HOST_WORKER_THREADS", 1)
         self.server.record_turn_input = True
         self.server.fail("thread/turns/list", self.fakes.FakeRpcError(-32603, "history read failed"))
         host = await self.opened()
         error = await self.assert_codex_error(host.run_codex_skill("s", "do it"), "codex.api_error")
         thread_id = self.started_thread()
-        self.assertEqual(error.operation, "list_codex_turns")
+        self.assertEqual(error.operation, "run_codex_skill")
         self.assertTrue(error.message.endswith(SKILL_UNCHECKED_MESSAGE.format(thread_id=thread_id)), error.message)
         self.assertEqual(error.next_step, NEXT_STEPS["codex.api_error"])
         await self.barrier(host, thread_id)
@@ -628,32 +630,40 @@ class CodexRunReRaiseTests(_GoalSkillCase):
         self.patch_connection("CodexErrorMapper", mapper)
         return host, mapper
 
-    def assert_every_field_kept(self, error: Any, mapper: FieldCarryingMapper, suffix: str) -> None:
-        original = mapper.only(error.operation)
+    def assert_every_field_kept(self, error: Any, mapper: FieldCarryingMapper, inner: str, wrapper: str, suffix: str) -> None:
+        # docs/spec/codex-host-hardening/spec.md INV-31 and D-22: the wrapper relabels the inner check's error, so the original
+        # is found by its own operation, and only the operation, the message head and the fields derived from the operation
+        # (expected, and safe_runtime_details["operation"]) may differ from it.
+        original = mapper.only(inner)
         # The check's own error carried both fields, so a re-raise that drops either one is visible here.
         self.assertTrue(original.thread_id)
         self.assertTrue(original.safe_runtime_details["error_type"])
-        self.assertEqual(error.message, original.message + suffix)
-        self.assertEqual(changed_error_fields(error, original), {})
+        self.assertEqual(error.operation, wrapper)
+        head = f"{inner} failed with {original.failure_code}. "
+        self.assertTrue(original.message.startswith(head), original.message)
+        self.assertEqual(error.message, f"{wrapper} failed with {original.failure_code}. " + original.message[len(head) :] + suffix)
+        derived = {"operation", "expected", "safe_runtime_details"}
+        self.assertEqual({name: pair for name, pair in changed_error_fields(error, original).items() if name not in derived}, {})
+        kept_details = {key: value for key, value in original.safe_runtime_details.items() if key != "operation"}
+        self.assertEqual({key: value for key, value in error.safe_runtime_details.items() if key != "operation"}, kept_details)
+        self.assertEqual(error.method, original.method)
 
     async def test_a_goal_check_error_keeps_every_field_it_carried(self) -> None:
-        # R-17, AC-27, INV-22, D-16: only the message changes, by GOAL_UNCHECKED_MESSAGE.
+        # R-17, AC-27, INV-22, D-16: the message gains GOAL_UNCHECKED_MESSAGE; hardening INV-31 relabels the operation.
         host, mapper = await self.opened_with_full_errors()
         self.server.fail("thread/goal/get", self.fakes.FakeRpcError(-32603, "goal read failed"))
         error = await self.assert_codex_error(host.run_codex_goal("ship it", token_budget=500), "codex.api_error")
         thread_id = self.started_thread()
-        self.assertEqual(error.operation, "get_codex_goal")
-        self.assert_every_field_kept(error, mapper, GOAL_UNCHECKED_MESSAGE.format(thread_id=thread_id))
+        self.assert_every_field_kept(error, mapper, "get_codex_goal", "run_codex_goal", GOAL_UNCHECKED_MESSAGE.format(thread_id=thread_id))
 
     async def test_a_skill_read_back_error_keeps_every_field_it_carried(self) -> None:
-        # R-17, AC-40, INV-35, D-17: only the message changes, by SKILL_UNCHECKED_MESSAGE.
+        # R-17, AC-40, INV-35, D-17: the message gains SKILL_UNCHECKED_MESSAGE; hardening INV-31 relabels the operation.
         self.server.record_turn_input = True
         host, mapper = await self.opened_with_full_errors()
         self.server.fail("thread/turns/list", self.fakes.FakeRpcError(-32603, "history read failed"))
         error = await self.assert_codex_error(host.run_codex_skill("s", "do it"), "codex.api_error")
         thread_id = self.started_thread()
-        self.assertEqual(error.operation, "list_codex_turns")
-        self.assert_every_field_kept(error, mapper, SKILL_UNCHECKED_MESSAGE.format(thread_id=thread_id))
+        self.assert_every_field_kept(error, mapper, "list_codex_turns", "run_codex_skill", SKILL_UNCHECKED_MESSAGE.format(thread_id=thread_id))
 
 
 if __name__ == "__main__":
