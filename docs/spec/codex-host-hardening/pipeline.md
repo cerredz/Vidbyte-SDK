@@ -75,6 +75,19 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
   The S2 agent's harness refused its report-file write ("Subagents should return findings as text, not write report files"), so I saved its inline report verbatim to `reports/S2-test-author.md`. **Every later briefing tells the agent to return the report inline if the write is refused.**
 - 2026-10-17 11:40: S2 listed 14 non-blocking spec defects, where the tests chose details the spec left open. I sent them to the S1 author as a clarification-only revision (r4, `d3389171`) so the S4 conformance reviewers judge the code against a spec that matches the tests. No test, test-plan or Proof cell changed (verified by diff). No reviewer round was run, because nothing in §8 architecture or scope changed. I then set `status: tests-written`.
 - 2026-10-17 11:45: S3's PR base is `ai/resolve-pr-1055-comments` while #1178 is open (see the 08:55 decision). Its drift check compares against `origin/ai/resolve-pr-1055-comments` (has #1178 moved?) and `origin/main` since `6f5a7310` (has main moved under the touched paths?), not against `origin/main` alone.
+- 2026-10-17 13:30: **S3 BLOCKED on 3 source-stage failures. I adjudicated them myself, by running the tests and reading only the cited lines.**
+  1. **Inherited, accepted (already decided):** `harness_threads` surface :193 (expects 120 FailureCode members, finds 167). It fails the same way on main and on #1178.
+  2. **GRANTED, a test that contradicts the spec:** `test_codex_host_function_rows.py:85` asserts `details["field"] == "thread_id"`.
+     - AC-41 requires only that `details["field"]` is set.
+     - D-33 makes `forget_codex_turns` reuse #1178's `CodexThreadRef`, which labels the field `"forget_codex_turns thread_id"`.
+     - S2's own I1 row (`test_codex_host_inputs.py:198`) and its `_field_named` helper (`test_codex_host_hardening_contract.py:110`, which accepts the bare or `"<method> <field>"` form) agree with D-33.
+     - The run shows `'forget_codex_turns thread_id' != 'thread_id'`.
+  3. **GRANTED, an assertion no correct implementation can pass:** `test_codex_host_approvals.py:463` asserts `reader_errors == []` after close.
+     - The run shows `[TransportClosedError('Codex process closed stdout. stderr_tail=')]`, which is the SDK reader's normal EOF when close ends the process (the fake records it at `codex_host_fakes.py:521-525` on every close).
+     - The test's intent, INV-15/16 "the router never raises on the reader thread", is already asserted while the host is open (approvals :183/:204/:295/:345, router :75, resilience :86).
+  
+  Both edits go to the S2 test author, who resumes narrowed to those two assertions. S2_HEAD moves to its fix commit.
+- 2026-10-17 13:30: S3's commits cite W-/FR-/AC-/INV- IDs in the commit **bodies** ("Row 20 (P3): … FR-25, INV-31, D-22, AC-26"), not in a `[W-n]` subject tag. Commit `91cc7d4d` bundles several rows. Both were accepted as traceable; there was no history rewrite before the first push. The conventions reviewer may still comment on them.
 
 ## User replies (verbatim)
 - (none yet)
