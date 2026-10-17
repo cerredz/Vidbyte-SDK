@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: The skill is Markdown an agent executes, so its acceptance su
 FUNCTION INVENTORY: test_skill_md_carries_the_invocation_as_a_line_of_its_own (A1); test_output_section_holds_every_pass_stop_remedy_and_ledger_line_form (A2); test_intro_names_the_three_user_stops_and_disqualified_vendors_are_skipped_not_stopped (A3); test_rules_section_states_the_promises_a_person_relies_on (A4); test_each_outcome_states_what_it_leaves_behind (A5).
 COMMON MODIFICATION PATTERNS: When spec section 9.2 changes a line form, change OUTPUT_GRAMMAR in onboard_skill_fixtures.py, not the assertion here.
 WHAT NOT TO DO IN THIS FILE: 1. Do not run the skill, Claude, git, gh or the network. 2. Do not compare against base_commit or a merge-base: these tests run inside every provider PR the skill opens (spec section 13, R-1).
-KNOWN EDGE CASES: Lines are compared after collapsing whitespace, so a form may sit in a text fence, a list or a table cell. The rules checks look for one line holding both words, so a rule split across two bullets fails on purpose.
+KNOWN EDGE CASES: A5 binds each outcome to its bullet (keep or cleanup) and pins the cleanup as one && chain, because a check that each outcome is merely named passes when PROOF_FAILED moves into the cleanup (review R-3). Lines are compared after collapsing whitespace, so a form may sit in a text fence, a list or a table cell. The rules checks look for one line holding both words, so a rule split across two bullets fails on purpose.
 RELATED DOCS: tests/features/onboard_model_provider_skill/FEATURE.md; docs/spec/provider-onboarding-skill/spec.md r3 sections 4, 6.2 (AC-1, AC-13, AC-15), 8.1 (D-7, D-8), 9.2.
 TESTS: python -m pytest tests/features/onboard_model_provider_skill/test_onboard_skill_acceptance.py -q
 """
@@ -22,6 +22,17 @@ from tests.features.onboard_model_provider_skill.onboard_skill_fixtures import (
     SKILL_REF,
     read_markdown,
 )
+
+ALL_OUTCOMES = (*PROVIDER_OUTCOMES, "RESULT_UNVERIFIED")
+# Spec D-8: what each outcome leaves behind.
+KEPT_OUTCOMES = {"PROOF_FAILED", "PUBLISH_FAILED", "RESULT_UNVERIFIED"}
+CLEANED_OUTCOMES = {"PR_OPENED", "DISQUALIFIED", "NETWORK_BLOCKED"}
+# The final cleanup block of SKILL.md (S5 repair 1, R-6): each step runs only after the one before it succeeded.
+CLEANUP_COMMAND = 'git worktree remove --force "$WORKTREE" && git branch -D "feat/provider-$SLUG" && test -n "$SLUG" && rm -rf -- "$WORKTREE-evidence"; echo "cleanup exit $?"'
+
+
+def _outcomes_named(text: str) -> set[str]:
+    return {outcome for outcome in ALL_OUTCOMES if re.search(rf"\b{outcome}\b", text)}
 
 
 def _lines_with_all(text: str, *patterns: str) -> list[str]:
@@ -79,3 +90,15 @@ def test_each_outcome_states_what_it_leaves_behind() -> None:
     assert re.search(r"\bgit(?:\s+-C\s+\S+)?\s+branch\s+-D\b", behind), "the cleanup must name `git branch -D`"
     assert "-evidence" in behind, "D-8: the evidence directory is deleted with the worktree, or kept with it"
     assert re.search(r"\bkeep|\bkept\b", behind, flags=re.IGNORECASE), "D-8: the failing outcomes keep the worktree"
+
+    # Review R-3: each outcome sits in the right bullet, so moving PROOF_FAILED into the cleanup deletes unpushed work and fails.
+    section = read_markdown(SKILL_FILE, SKILL_REF).section("## What each outcome leaves behind")
+    bullets = [line for line in section.prose_lines() if line.startswith("- ")]
+    keep = [bullet for bullet in bullets if "keep the worktree" in bullet]
+    clean = [bullet for bullet in bullets if "remove the worktree" in bullet]
+    assert len(keep) == 1 and _outcomes_named(keep[0]) == KEPT_OUTCOMES, "D-8: exactly PROOF_FAILED, PUBLISH_FAILED and RESULT_UNVERIFIED keep their work"
+    assert "keep the worktree, its `-evidence` directory and the branch" in keep[0] and 'git worktree remove --force "$WORKTREE-main"' in keep[0]
+    assert len(clean) == 1 and _outcomes_named(clean[0]) == CLEANED_OUTCOMES, "D-8: only PR_OPENED, DISQUALIFIED and NETWORK_BLOCKED are cleaned up"
+    assert "`PR_OPENED`, after all four checks pass" in clean[0] and "`DISQUALIFIED` and `NETWORK_BLOCKED`, after the clean check passes" in clean[0], "D-8: cleanup waits for verification, or for HEAD at base with a clean status"
+    cleanup = [command for command in section.shell_commands() if "worktree remove --force" in command]
+    assert cleanup == [CLEANUP_COMMAND], "D-8: one && chain, so a failed remove keeps the branch and the evidence"

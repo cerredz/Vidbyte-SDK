@@ -3,7 +3,7 @@
 PURPOSE: Shared reading tools and spec facts for the onboard-model-provider skill pack: the paths of the two skill files and REPO_MAP.md, the values spec r3 fixes (headings, constants, enumerations, the 33 wiring rows, the ten seed slugs, the output grammar), a Markdown reader that knows fenced code from prose, and an emulator for the skill's own `sed -n 's/.../.../p'` commands.
 ROLE IN CODEBASE: Imported by every test module in tests/features/onboard_model_provider_skill/. It reads files only; the skill files themselves are the feature under test.
 ARCHITECTURE NOTE: Every expected value here is spelled from docs/spec/provider-onboarding-skill/spec.md r3 (sections 8.5, 9.1, 9.2 and 12.3), never read from the skill files, so the tests and the skill cannot share one defect. MarkdownDoc classifies each line once (prose, fence delimiter, or code with its info string) so headings and tables inside code fences are never mistaken for structure. SedEmulator translates a POSIX basic regular expression to Python and prints what `sed -n 's/P/R/p'` would print, so a test can run the skill's own extraction command over the real repository files without a shell.
-FUNCTION INVENTORY: read_markdown(path, spec_ref) parses a skill file or fails naming the spec row that creates it; MarkdownDoc.h2_headings / section / text / squashed / shell_commands / code_spans / fenced_blocks / commands / table_rows read one document; split_row(line) splits a GFM table row on unescaped pipes; sed_print_expressions(command) finds the `sed -n 's...p'` scripts in a command; SedEmulator.translate / print_lines run one; first_index(commands, pattern) locates a command.
+FUNCTION INVENTORY: read_markdown(path, spec_ref) parses a skill file or fails naming the spec row that creates it; MarkdownDoc.h2_headings / section / text / squashed / shell_commands / code_spans / fenced_blocks / fenced_blocks_with_info / prose_lines / commands / table_rows read one document; split_row(line) splits a GFM table row on unescaped pipes; sed_print_expressions(command) finds the `sed -n 's...p'` scripts in a command; SedEmulator.translate / print_lines run one; first_index(commands, pattern) locates a command.
 COMMON MODIFICATION PATTERNS: When the spec changes a heading, a constant, an enumeration, a wiring row or a seed slug, change the matching constant here in the same change and cite the spec section. Keep the constants literal.
 WHAT NOT TO DO IN THIS FILE: 1. Do not read an expected value from the skill files or from code under test. 2. Do not create, stub or copy a skill file; a missing file must keep the pack red. 3. Do not run a shell, git, gh or the network; the emulator exists so no test needs them.
 KNOWN EDGE CASES: Files are read in text mode, so CRLF working copies parse like the LF git blobs the skill reads. An unclosed fence runs to the end of the file, as in GitHub's renderer. The emulator supports the BRE subset the skill uses (groups, bracket expressions with POSIX classes, anchors, `*`, GNU `\\+ \\? \\|`) and sed's leftmost match, which equals POSIX leftmost-longest for the anchored `.*` patterns the skill writes.
@@ -259,16 +259,24 @@ class MarkdownDoc:
 
     def fenced_blocks(self) -> list[list[str]]:
         # The body lines of each fenced block, in order, delimiters excluded.
-        blocks: list[list[str]] = []
+        return [body for _info, body in self.fenced_blocks_with_info()]
+
+    def fenced_blocks_with_info(self) -> list[tuple[str, list[str]]]:
+        # Each fenced block as (info word, body lines), in order, so a test can pick the python or sh fence it means.
+        blocks: list[tuple[str, list[str]]] = []
         inside = False
         for line in self.lines:
             if line.kind == "fence":
                 inside = not inside
                 if inside:
-                    blocks.append([])
+                    blocks.append((line.info, []))
             elif line.kind == "code" and blocks:
-                blocks[-1].append(line.text)
+                blocks[-1][1].append(line.text)
         return blocks
+
+    def prose_lines(self) -> list[str]:
+        # The lines outside every fence, where the skill states its rules in words.
+        return [line.text for line in self.lines if line.kind == "prose"]
 
     def commands(self) -> list[str]:
         # Everything an agent could run verbatim, in document order: each prose line's code spans, and each fenced

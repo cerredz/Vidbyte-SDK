@@ -1,9 +1,9 @@
 """FILE: tests/features/onboard_model_provider_skill/test_onboard_skill_wiring_checklist.py
 
 PURPOSE: Prove the wiring checklist in references/provider-run.md is the spec r3 section 12.3 table and still matches the tree: the header and the 33 refs in order, the section 8.5 cell grammar, every path and symbol present in the file it names, the silent rows marked, the swap regression in row C6, and the checklist paths that SKILL.md's own sed command prints for result check (2).
-ROLE IN CODEBASE: Integration layer of tests/features/onboard_model_provider_skill/ (spec AC-4, AC-5 last clause, AC-7 C6 and collision clauses; INV-14, INV-21 path + symbol; NFR-7; D-13, D-21, D-28; section 12.3 "Wiring checklist").
+ROLE IN CODEBASE: Integration layer of tests/features/onboard_model_provider_skill/ (spec AC-4, AC-5 last clause, AC-7 C6 and collision clauses; INV-14, INV-21 path + symbol; NFR-7; D-12, D-13, D-21, D-28; EC-43; review R-8; section 12.3 "Wiring checklist").
 ARCHITECTURE NOTE: These tests read the real repository files the checklist names, so a rename of DEFAULT_ENDPOINTS or a README heading on main fails here, in every provider PR, instead of misleading the next provider run (spec section 13, version split). The sed check runs the skill's own command through SedEmulator, so a padded or reformatted row that the command would skip fails here rather than in a live result check.
-FUNCTION INVENTORY: test_wiring_table_has_the_spec_header_and_the_33_refs_in_order (W1); test_each_wiring_row_follows_the_cell_grammar_and_names_the_spec_path_and_symbols (W2); test_every_wiring_path_and_symbol_exists_in_the_tree (W3); test_exactly_the_silent_rows_say_silent (W4); test_row_c6_requires_the_swap_case_and_qualify_runs_the_cross_vendor_collision_check (W5); test_verifying_command_prints_exactly_the_checklist_paths (W6).
+FUNCTION INVENTORY: test_wiring_table_has_the_spec_header_and_the_33_refs_in_order (W1); test_each_wiring_row_follows_the_cell_grammar_and_names_the_spec_path_and_symbols (W2); test_every_wiring_path_and_symbol_exists_in_the_tree (W3); test_exactly_the_silent_rows_say_silent (W4); test_row_c6_requires_the_swap_case_and_qualify_runs_the_cross_vendor_collision_check (W5); test_verifying_command_prints_exactly_the_checklist_paths (W6); test_c9_template_proves_the_vendor_key_leaves_as_its_bearer_token_and_the_other_key_stays (W7).
 COMMON MODIFICATION PATTERNS: When a provider PR legitimately renames a symbol a row names, the provider PR must update the row in provider-run.md; this test is what tells it to. When the spec adds a row, add it to WIRING_ROWS in onboard_skill_fixtures.py.
 WHAT NOT TO DO IN THIS FILE: 1. Do not check line numbers; D-21 forbids them and they drift on every merge. 2. Do not assert anything about the provider list; every provider PR grows it. 3. Do not run a shell to execute the sed command.
 KNOWN EDGE CASES: Table cells are split on unescaped pipes, so the escaped pipes in the C4 Add cell stay inside it. A dotted symbol A.B passes when both A and B appear with identifier boundaries. Heading texts are matched verbatim anywhere in the file, as the grammar says. Row B3's symbol is the exempt dash.
@@ -14,6 +14,7 @@ TESTS: python -m pytest tests/features/onboard_model_provider_skill/test_onboard
 from __future__ import annotations
 
 import re
+import textwrap
 
 from tests.features.onboard_model_provider_skill.onboard_skill_fixtures import (
     CODE,
@@ -38,6 +39,23 @@ EXEMPT_SYMBOL = "—"
 _PATH_CELL = re.compile(r"`([^`]+)`")
 _CODE_CELL = re.compile(r"`[^`]+`(?:, `[^`]+`)*")
 _HEADING_CELL = re.compile(r"[^`;|]+(?:; [^`;|]+)*")
+
+# Row C9's test template in section 5 (final wording, S5 repair 1): each statement the DIRECT key proof rests on.
+C9_TEST_DEF = "def test_a_<s>_key_from_a_mixed_list_reaches_<s>_unchanged_in_direct(self) -> None:"
+C9_MODEL_TEST = "test_a_meta_key_from_a_mixed_list_reaches_meta_unchanged_in_direct"
+C9_STATEMENTS = (
+    C9_TEST_DEF,
+    "from vidbyte.lib.config import TextModelMode",
+    "vendor = ScriptedGateway(provider_answer(ModelProvider.<E>))",
+    "with patch.dict(os.environ, {}, clear=True):",
+    'TextModelRunner(TextModelConfig(provider="<s>", model="<default id>", api_keys=[K_ANTHROPIC, K_<E>], mode=TextModelMode.DIRECT), transport=vendor).run("Hi")',
+    "[sent] = vendor.requests",
+    'self.assertTrue(str(sent["url"]).startswith("<base URL>/"), sent["url"])',
+    'self.assertEqual(header(sent, "authorization"), f"Bearer {K_<E>}")',
+    "self.assertNotIn(K_ANTHROPIC, flat(sent))",
+    'self.assertEqual(sent["json_body"]["model"], "<default id>")',
+)
+C9_NAMES = ("ScriptedGateway", "provider_answer", "header", "flat", "K_ANTHROPIC", "TextModelRunner", "TextModelConfig", "ModelProvider", "patch", "os", "UnsendableKeyTests")
 
 
 def _wiring_rows() -> list[list[str]]:
@@ -136,6 +154,26 @@ def test_row_c6_requires_the_swap_case_and_qualify_runs_the_cross_vendor_collisi
     qualify = read_markdown(PROCEDURE_FILE, PROCEDURE_REF).section("## 3. Qualify").squashed()
     assert re.search(r"gitleaks", qualify, flags=re.IGNORECASE) and re.search(r"secret[- ]scanning", qualify, flags=re.IGNORECASE)
     assert "key-prefix-collision" in qualify
+
+
+def test_c9_template_proves_the_vendor_key_leaves_as_its_bearer_token_and_the_other_key_stays() -> None:
+    # W7 · C9 row "new proof" / D-12 / EC-43 / review R-8: the one test that proves a key reaches the vendor's endpoint in
+    # its auth header sends a mixed key list in DIRECT mode and asserts the Bearer header, the absent other key, the URL
+    # and the model; it must compile, and every name it uses must exist in the file it is added to.
+    section = read_markdown(PROCEDURE_FILE, PROCEDURE_REF).section("## 5. Wiring checklist")
+    blocks = [body for info, body in section.fenced_blocks_with_info() if info == "python" and any(C9_TEST_DEF in line for line in body)]
+    assert len(blocks) == 1, "## 5. Wiring checklist holds the C9 test template as one python fence"
+    lines = [line.strip() for line in blocks[0]]
+
+    assert [statement for statement in C9_STATEMENTS if not any(line.startswith(statement) for line in lines)] == []
+    assert not [line for line in lines if re.search(r"x-api-key|TextModelMode\.AUTO", line)], "the template asserts the Bearer header in DIRECT mode only"
+    source = "\n".join(blocks[0]).replace("<E>", "VENDOR").replace("<s>", "vendor")
+    compile(textwrap.dedent(source), "c9_template.py", "exec")
+    target = (REPO_ROOT / "tests/features/sdk_provider_keys/test_provider_keys_modes.py").read_text(encoding="utf-8")
+    assert [name for name in C9_NAMES if not re.search(rf"(?<![\w]){re.escape(name)}(?![\w])", target)] == [], "every name the template uses is importable in the C9 file"
+    assert f"def {C9_MODEL_TEST}(" in target and f"`{C9_MODEL_TEST}`" in section.text, "the template is modelled on the existing Meta test"
+    rows = {row[0]: row for row in _wiring_rows()}
+    assert "C9" in rows and "`authorization` is `Bearer <fake>`" in rows["C9"][3] and "the other key is absent" in rows["C9"][3]
 
 
 def test_verifying_command_prints_exactly_the_checklist_paths() -> None:

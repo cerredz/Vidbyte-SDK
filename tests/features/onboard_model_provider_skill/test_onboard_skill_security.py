@@ -2,8 +2,8 @@
 
 PURPOSE: Prove the /onboard-model-provider skill cannot instruct the writes and leaks its threat model rules out: no Windows-only construct, `gh pr`, `gh issue`, `git stash`, force push or `path:line`; GitHub only through `gh api`, with one PR-create POST as the only write; one push of the single provider refspec; no change to VIDBYTE_MANAGED_TEXT_PROVIDERS; the D-29 rule that keeps a provider-prefixed model ID from being catalogued under the wrong vendor; and no literal key shape.
 ROLE IN CODEBASE: Security layer of tests/features/onboard_model_provider_skill/ (spec AC-3, AC-15, AC-8 "never git stash"; INV-8, INV-12, INV-14, INV-16, INV-18, INV-19, INV-21; NFR-4; D-12, D-29; threats T-1 to T-4).
-ARCHITECTURE NOTE: The skill runs with push rights under a person's identity, often in auto or bypassPermissions mode (D-27), so its text is the control. Each scan reads both files whole, prose and fences alike, because an agent follows a prose instruction as readily as a command; each scan also asserts the file is long enough to have been scanned. The D-29 test also checks the runtime behaviour the rule relies on, so a change to Runner's provider derivation fails here.
-FUNCTION INVENTORY: test_skill_files_hold_no_forbidden_construct (S1); test_github_is_reached_only_through_gh_api_and_the_only_write_is_the_pr_create (S2); test_every_push_is_the_single_unforced_provider_refspec (S3); test_the_managed_text_provider_set_is_only_ever_named_as_untouched (S4); test_qualify_rejects_provider_prefixed_ids_and_the_self_check_proves_it (S5); test_no_literal_key_shape_appears_and_fakes_are_built_by_concatenation (S6).
+ARCHITECTURE NOTE: The skill runs with push rights under a person's identity, often in auto or bypassPermissions mode (D-27), so its text is the control. Each scan reads both files whole, prose and fences alike, because an agent follows a prose instruction as readily as a command; each scan also asserts the file is long enough to have been scanned. The D-29 test also checks the runtime behaviour the rule relies on, so a change to Runner's provider derivation fails here. Rules are pinned by their content, not by a token (review R-3): the D-29 condition must read "is None" in prose, every self-check relation must keep its polarity as a statement, and both python fences must compile, so an inverted condition or an assert turned into a bare call fails.
+FUNCTION INVENTORY: test_skill_files_hold_no_forbidden_construct (S1); test_github_is_reached_only_through_gh_api_and_the_only_write_is_the_pr_create (S2); test_every_push_is_the_single_unforced_provider_refspec (S3); test_the_managed_text_provider_set_is_only_ever_named_as_untouched (S4); test_qualify_rejects_provider_prefixed_ids_and_the_self_check_proves_it (S5); test_no_literal_key_shape_appears_and_fakes_are_built_by_concatenation (S6); test_format_binding_needs_a_first_party_statement_not_an_example_key (S7).
 COMMON MODIFICATION PATTERNS: When the spec allows a new GitHub write or a new git ref, change the spec first, then the matching pattern here. Keep the forbidden patterns literal enough that a reviewer can read them.
 WHAT NOT TO DO IN THIS FILE: 1. Do not call GitHub, git or a vendor. 2. Do not write a real key, or a literal that looks like one, into this file: S6 patterns are built from short pieces. 3. Do not assert that a seed slug is or is not a ModelProvider member.
 KNOWN EDGE CASES: `git worktree remove --force` is allowed (not a push). Regex and sed escapes (an escaped pipe, an escaped group parenthesis, a backreference, an escaped dot, a class such as the whitespace class) are not Windows paths. A pytest node ID `file.py::Test` is not a `path:line` reference. A `gh api -X POST` fragment in prose with no endpoint is a mention, not a command.
@@ -60,8 +60,32 @@ _NEGATION = re.compile(r"\b(?:never|not|no|untouched|unchanged|without|leave|lea
 _PULLS_CREATE = re.compile(r"(?<![\w/])/?repos/(?:cerredz/Vidbyte-SDK|\$REPO|\$\{REPO\})/pulls(?=[\"'\s]|$)")
 
 
+# Spec 8.5 "Self-check assertions", as the final provider-run.md spells each one: every relation keeps its polarity.
+SELF_CHECK_STATEMENTS = (
+    "ProviderModelRegistry.validate_provider_model_pair(SLUG, model)",
+    "assert ProviderModelRegistry.provider_for_model(model) == SLUG",
+    "assert ModalityDetector.detect_modality(model) is ModelModality.TEXT",
+    "price = ModelPricingRegistry.default().resolve(ModelProvider(SLUG), model)",
+    "assert price is not None and (price.input_per_million, price.output_per_million, price.cache_read_per_million) == (rate_in, rate_out, rate_cache)",
+    'assert Runner(provider=SLUG, model_name=model).resolve_runner_type() == "text"',
+    'assert ToolsFormatter.provider_from_model(model) == "openai"',
+    "assert Runner._normalize_provider_and_model(None, model)[0] is None",
+    'assert Runner(provider=SLUG, model_name=None).resolve_runner_type() == "text"',
+    'assert ToolsFormatter.provider_from_model(SLUG) == "openai"',
+    "assert ModelProvider(SLUG).usage_class() is not None",
+)
+_UNQUOTED_PLACEHOLDER = re.compile(r"(?<![\"'\w])<[a-z][^<>\"']*>(?![\"'\w])")
+
+
 def _documents() -> tuple[MarkdownDoc, MarkdownDoc]:
     return read_markdown(SKILL_FILE, SKILL_REF), read_markdown(PROCEDURE_FILE, PROCEDURE_REF)
+
+
+def _python_block(section: MarkdownDoc, marker: str) -> str:
+    # The one python fence in a section that holds the marker, with bare <placeholders> made literals so it compiles.
+    blocks = ["\n".join(body) for info, body in section.fenced_blocks_with_info() if info == "python" and marker in "\n".join(body)]
+    assert len(blocks) == 1, f"{section.label}: expected one python fence holding {marker!r}, found {len(blocks)}"
+    return _UNQUOTED_PLACEHOLDER.sub("0", blocks[0])
 
 
 def _gh_method(command: str) -> str:
@@ -134,6 +158,32 @@ def test_qualify_rejects_provider_prefixed_ids_and_the_self_check_proves_it() ->
     derived = {f"{case}/example-model-1": Runner._normalize_provider_and_model(None, f"{case}/example-model-1")[0] for member in ModelProvider for case in (member.value, member.value.upper())}
     assert derived and [model for model, provider in derived.items() if provider is None] == [], "D-29 relies on a provider-prefixed ID deriving its provider"
     assert Runner._normalize_provider_and_model(None, "example-labs/example-model-1")[0] is None
+
+    # Review R-3: the rule is pinned by its content, so an inverted condition or a bare call fails, not only a deletion.
+    qualify = procedure.section("## 3. Qualify")
+    qualify_prose = qualify.prose_lines()
+    assert any(re.search(r"`Runner\._normalize_provider_and_model\(None, <id>\)\[0\]` is None\b", line) and "Otherwise `no-usable-model-id`" in line for line in qualify_prose), "D-29: Qualify's prose makes eligibility require the derived provider to be None"
+    assert not [line for line in qualify_prose if re.search(r"_normalize_provider_and_model\([^)]*\)\[0\]`? is not None", line)], "D-29 inverted: a derived provider must make an ID ineligible"
+    eligible = [line for line in qualify_prose if "An ID is eligible when its line reads" in line]
+    assert len(eligible) == 1 and "derived provider None" in eligible[0], "the probe's eligibility reading requires `derived provider None`"
+    probe = [line.text for line in qualify.lines if line.kind == "code"]
+    assert any("derived provider {Runner._normalize_provider_and_model(None, model)[0]}" in line for line in probe), "the Qualify probe prints the derived provider it judges"
+    compile(_python_block(qualify, "_normalize_provider_and_model"), "qualify_ids.py", "exec")
+    self_check = procedure.section("## 6. Self-check")
+    script = [line.text.strip() for line in self_check.lines if line.kind == "code"]
+    assert [statement for statement in SELF_CHECK_STATEMENTS if sum(line.startswith(statement) for line in script) != 1] == [], "each section 8.5 self-check relation is one statement with its polarity, never a bare call"
+    compile(_python_block(self_check, "self-check passed"), "self_check.py", "exec")
+
+
+def test_format_binding_needs_a_first_party_statement_not_an_example_key() -> None:
+    # S7 · D-13 / EC-33 / review R-8: a vendor joins FORMAT_BOUND_PROVIDERS only on a quoted first-party statement that its
+    # keys begin with P; bound on an example key alone, it refuses its own unprefixed key and elimination hands that key
+    # to another vendor, the cross-vendor leak the swap tests exist for.
+    qualify_prose = read_markdown(PROCEDURE_FILE, PROCEDURE_REF).section("## 3. Qualify").prose_lines()
+    bound = [line for line in qualify_prose if "FORMAT_BOUND_PROVIDERS" in line]
+
+    assert any("Add the vendor to `FORMAT_BOUND_PROVIDERS` (row C2) only with a quoted first-party statement that its keys begin with P." in line and "An example key alone is not enough" in line for line in bound), "D-13: format binding needs a quoted first-party statement, and an example key alone is not enough"
+    assert not [line for line in qualify_prose if re.search(r"example key (?:alone )?is enough|whenever an example key", line, flags=re.IGNORECASE)], "D-13 inverted: an example key must never be enough to bind the format"
 
 
 def test_no_literal_key_shape_appears_and_fakes_are_built_by_concatenation() -> None:

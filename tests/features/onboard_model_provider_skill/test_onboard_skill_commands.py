@@ -1,12 +1,12 @@
 """FILE: tests/features/onboard_model_provider_skill/test_onboard_skill_commands.py
 
 PURPOSE: Prove the commands the /onboard-model-provider skill tells an agent to run are the safe, real ones: preflight and pass-top are read-only up to `git worktree add`, the pass checks run in the FR-3 order, the vintage and member `sed` reads print the right values from the real files, back-pressure and the skip rules query what INV-4 and INV-5 need, every interpreter command is spelled `<py>`, PYTHONPATH only ever prefixes one command, the gate commands and output lines exist in the repository, and the mutation check, research protocol and named paths hold.
-ROLE IN CODEBASE: Integration layer of tests/features/onboard_model_provider_skill/ (spec AC-1 static half, AC-5, AC-8; FR-2 to FR-5, FR-9; INV-4, INV-5, INV-8, INV-15, INV-17, INV-20; NFR-1, NFR-3; D-3, D-15, D-19, D-20, D-27; section 8.5 pass-top block; section 12.4 command list).
+ROLE IN CODEBASE: Integration layer of tests/features/onboard_model_provider_skill/ (spec AC-1 static half, AC-5, AC-8; FR-2 to FR-5, FR-9; INV-3, INV-4, INV-5, INV-8, INV-15, INV-17, INV-20; EC-9; NFR-1, NFR-3; D-3, D-15, D-19, D-20, D-27; section 8.5 pass-top block; section 12.4 command list).
 ARCHITECTURE NOTE: A command is a logical line of a fenced sh/bash block (continuations joined) or an inline code span. Write detection first blanks quoted strings, comments and <placeholders>, so a jq filter or `<py>` is never read as a redirect. The two sed reads run through SedEmulator over the files the pass reads, so a change to `PRICING_AS_OF: str = "..."` or the enum layout on main fails here before it silently breaks selection.
-FUNCTION INVENTORY: test_preflight_and_pass_top_commands_write_nothing_before_the_worktree_add (X1); test_each_pass_runs_fetch_vintage_backpressure_and_selection_before_one_safe_worktree_add (X2); test_vintage_and_member_reads_print_the_values_on_main (X3); test_backpressure_and_skip_rule_queries_cover_invariants_4_and_5 (X4); test_preflight_names_every_prerequisite_and_the_permission_setup (X5); test_every_interpreter_command_is_spelled_py_except_the_one_probe_line (X6); test_pythonpath_only_prefixes_one_command_and_never_the_package_stage (X7); test_gate_commands_and_output_lines_are_the_repositorys_real_ones (X8); test_mutation_check_commits_first_restores_by_checkout_and_confirms_a_clean_diff (X9); test_research_saves_raw_pages_with_time_and_checks_quotes_with_grep (X10); test_every_repository_path_the_skill_names_exists (X11).
+FUNCTION INVENTORY: test_preflight_and_pass_top_commands_write_nothing_before_the_worktree_add (X1); test_each_pass_runs_fetch_vintage_backpressure_and_selection_before_one_safe_worktree_add (X2); test_vintage_and_member_reads_print_the_values_on_main (X3); test_backpressure_and_skip_rule_queries_cover_invariants_4_and_5 (X4); test_preflight_names_every_prerequisite_and_the_permission_setup (X5); test_every_interpreter_command_is_spelled_py_except_the_one_probe_line (X6); test_pythonpath_only_prefixes_one_command_and_never_the_package_stage (X7); test_gate_commands_and_output_lines_are_the_repositorys_real_ones (X8); test_mutation_check_commits_first_restores_by_checkout_and_confirms_a_clean_diff (X9); test_research_saves_raw_pages_with_time_and_checks_quotes_with_grep (X10); test_every_repository_path_the_skill_names_exists (X11); test_backpressure_counts_the_listed_prs_together_with_this_sessions_prs (X12); test_vintage_stops_the_session_when_mains_pricebook_is_not_before_today (X13).
 COMMON MODIFICATION PATTERNS: When the spec adds a pass-top read, add its pattern to REQUIRED_READS; when it allows a new write before the worktree add, change the spec first. Keep each write pattern narrow enough that the spec 8.5 commands pass.
 WHAT NOT TO DO IN THIS FILE: 1. Do not execute a command from the skill, git, gh or the network. 2. Do not pin PRICING_AS_OF, the member list or its length: X3 compares the sed output with the values imported from the same tree. 3. Do not compare against base_commit.
-KNOWN EDGE CASES: `2>/dev/null`, `2>&1` and `>&2` are not writes. `git ls-remote --exit-code` exits 2 for an absent branch, which AC-1 accepts. The probe line legitimately names python, python3 and py -3.11; it is the only exempt line. `PYTHONPATH=<dir>` inside a sentence (no `<py>` after it) is prose, not a command.
+KNOWN EDGE CASES: The rules a command serves (the known-red exclusion condition, the A13 two-check exception, the contract-test exclusion, the back-pressure union, the vintage direction) are pinned by their final wording in prose, outside fences, because a token check passes an inverted rule (review R-3, R-8). `2>/dev/null`, `2>&1` and `>&2` are not writes. `git ls-remote --exit-code` exits 2 for an absent branch, which AC-1 accepts. The probe line legitimately names python, python3 and py -3.11; it is the only exempt line. `PYTHONPATH=<dir>` inside a sentence (no `<py>` after it) is prose, not a command.
 RELATED DOCS: tests/features/onboard_model_provider_skill/FEATURE.md; docs/spec/provider-onboarding-skill/spec.md r3 sections 6.2 (AC-1, AC-5, AC-8), 7 (FR-2 to FR-5), 8.1 (D-15, D-19, D-20, D-27), 8.5, 12.4.
 TESTS: python -m pytest tests/features/onboard_model_provider_skill/test_onboard_skill_commands.py -q
 """
@@ -32,6 +32,9 @@ from vidbyte.lib.registries.pricing import PRICING_AS_OF
 
 GIT = r"\bgit(?:\s+-C\s+\S+)*\s+"
 WORKTREE_ADD = GIT + r"worktree\s+add\b"
+
+# The harness node that fails on every branch applying wiring row A13; its exclusion has its own two-check rule (D-15).
+A13_NODE = "tests/features/harness_threads/test_harness_threads_surface.py::test_branch_leaves_the_tools_and_configs_packages_as_main_has_them"
 
 # Spec 8.5 pass-top block and FR-2: the reads a session makes before its first write.
 REQUIRED_READS = {
@@ -253,6 +256,24 @@ def test_gate_commands_and_output_lines_are_the_repositorys_real_ones() -> None:
     assert "SDK-LINT: PASS" in (REPO_ROOT / "lint/core/report.py").read_text(encoding="utf-8")
     assert "--refresh-lock" in (REPO_ROOT / "lint/rules/c010_pricebook_vintage_bump.py").read_text(encoding="utf-8")
 
+    # Review R-3: the known-red exclusion is pinned by its condition, so a rule that only logs the diff, or excludes a
+    # changed file, fails here; a failing test the branch added must never pass as pre-existing (D-15, review r2-2).
+    gate_section = procedure.section("## 8. Gate")
+    gate_prose = gate_section.prose_lines()
+    unchanged = [line for line in gate_prose if "diff --quiet <base> HEAD -- <file>" in line]
+    assert unchanged and all("only when its file is unchanged, meaning `git -C <worktree> diff --quiet <base> HEAD -- <file>` exits 0" in line for line in unchanged), "D-15: exclude a failing node only when its file is unchanged, the scoped diff exiting 0"
+    assert not [line for line in unchanged if re.search(r"\bexits 1\b|\bis changed\b|\bchanged file\b", line)]
+    # The A13 control-edit exception excludes one node, never its file, and only when both checks hold (S5 R-2 bullet).
+    a13 = [line for line in gate_prose if A13_NODE.split("::")[1] in line]
+    assert len(a13) == 1, "## 8. Gate names the A13 harness node in one bullet"
+    assert [phrase for phrase in ("never its whole file", "only when both checks below hold", "prints exactly one line, `vidbyte/lib/configs/structured_output.py`") if phrase not in a13[0]] == []
+    assert any("the same `AssertionError` line as on the branch" in line for line in gate_prose), "the control edit must reproduce the branch's own AssertionError line"
+    gate_commands = gate_section.shell_commands()
+    assert "git -C <worktree> diff --name-only <base> HEAD -- vidbyte/tools vidbyte/lib/configs" in gate_commands, "the first A13 check is the scoped diff"
+    edits = [command for command in gate_commands if "# control edit" in command]
+    assert edits and all(">> <worktree>-main/vidbyte/lib/configs/structured_output.py" in command for command in edits), "the control edit goes to the twin, never to the branch worktree"
+    assert f"def {A13_NODE.split('::')[1]}(" in (REPO_ROOT / A13_NODE.split("::")[0]).read_text(encoding="utf-8")
+
 
 def test_mutation_check_commits_first_restores_by_checkout_and_confirms_a_clean_diff() -> None:
     # X9 · AC-8 / INV-15 / D-15: commit, green run, then per key rule revert, rerun, record the node IDs that newly fail,
@@ -273,6 +294,32 @@ def test_mutation_check_commits_first_restores_by_checkout_and_confirms_a_clean_
     assert [phrase for phrase in ("mutation-survived", "wire-test", "gate-source") if phrase not in text] == []
     assert re.search(r"\bnode\b", text, flags=re.IGNORECASE), "the mutation record names the node IDs that newly fail"
     assert re.search(r"test_provider_keys_contract|\bC5\b", text), "INV-15: the failing test must be outside the table-pinning contract test"
+    # Review R-3: every sentence naming the contract test must exclude it, so "it counts too" fails here.
+    naming = [line for line in section.prose_lines() if "test_provider_keys_contract" in line]
+    assert naming and all("At least one must be outside `test_provider_keys_contract.py`" in line for line in naming), "AC-8 / INV-15: at least one newly failing node must be outside the contract test"
+    assert any("`PROOF_FAILED mutation-survived`" in line for line in naming)
+    assert not [line for line in section.prose_lines() if re.search(r"test_provider_keys_contract\.py`? (?:included|counts)|may be `test_provider_keys_contract", line)]
+
+
+def test_backpressure_counts_the_listed_prs_together_with_this_sessions_prs() -> None:
+    # X12 · INV-3 / EC-9 / D-5 / review R-8: GitHub's list lags, so the count is the union of the listed PRs and the PRs
+    # this session opened; counting only the list lets a session open a fourth PR before GitHub shows the third.
+    prose = read_markdown(SKILL_FILE, SKILL_REF).section("## Each pass").prose_lines()
+    union = [line for line in prose if re.search(r"\bunion\b", line)]
+
+    assert len(union) == 1, "## Each pass states the back-pressure union in one bullet"
+    phrases = ("the open provider PRs are the union of the numbers printed and the PRs this session opened", "because GitHub's list can lag", "When that count reaches `MAX_OPEN_PROVIDER_PRS`, stop with `BACKPRESSURE`", "Only PRs whose head repository is `cerredz/Vidbyte-SDK` count")
+    assert [phrase for phrase in phrases if phrase not in union[0]] == []
+
+
+def test_vintage_stops_the_session_when_mains_pricebook_is_not_before_today() -> None:
+    # X13 · FR-3 / INV-3 / D-10 / EC-19 / EC-20: a run may only move PRICING_AS_OF forward, so the session stops
+    # when main's vintage is not before today (UTC); the inverted rule would stop every normal day and run on the bad one.
+    prose = read_markdown(SKILL_FILE, SKILL_REF).section("## Each pass").prose_lines()
+    vintage = [line for line in prose if line.lstrip().startswith("- Vintage:")]
+
+    assert len(vintage) == 1, "## Each pass states the vintage rule in one bullet"
+    assert "when main's `PRICING_AS_OF` is not before today (UTC)" in vintage[0] and "stop with `VINTAGE_DEFERRED`" in vintage[0]
 
 
 def test_research_saves_raw_pages_with_time_and_checks_quotes_with_grep() -> None:

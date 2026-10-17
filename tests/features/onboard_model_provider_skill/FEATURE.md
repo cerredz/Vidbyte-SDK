@@ -88,21 +88,34 @@ Each line is input + state → wrong output. The test that catches it is in the 
 - A literal key shape in the skill → push protection trips, or a key-shaped string sits in the tree (INV-16) (S6).
 - The intro hides the three stops, a disqualification stops the loop, or closing a PR is not said to skip the vendor forever → the person cannot predict the run (AC-13, FR-15) (A3, A4, A5).
 
+The lines below are rules whose words, not only whose tokens, the tests pin (review R-3 and R-8). Each was proven by a mutation of the real skill that passed the 46-test pack and now fails the named test.
+
+- The D-29 condition inverted to "is not None", the eligibility reading without "derived provider None", or the self-check `assert` turned into a bare call, while the probe still names `_normalize_provider_and_model` → provider-prefixed IDs qualify again (S5).
+- The known-red exclusion rewritten to "when its file is changed … exits 1", or `diff --quiet` only logged → a failing test the branch edited is excluded as pre-existing (D-15) (X8).
+- The A13 exception widened to the whole file or to either check, "exactly one line" weakened, "the same `AssertionError` line" dropped, the scoped diff unscoped, or the control edit appended on the branch instead of the twin → a real tools or configs regression is waved through (D-15) (X8).
+- "Any one counts, `test_provider_keys_contract.py` included", or "Prefer one outside" → a mutation proof that only the table-pinning test caught (INV-15) (X9).
+- `PROOF_FAILED` or `PUBLISH_FAILED` moved into the cleanup bullet, cleanup run "always", or the cleanup chain's `&&` replaced by `;` → unpushed work deleted, or the branch deleted after a failed worktree remove (D-8) (A5).
+- The C9 template without the `authorization` Bearer assertion, asserting `x-api-key`, without the other-key absence check, with one key instead of a mixed list, in AUTO mode, or the C9 Add cell without the Bearer outcome → the only wire proof passes when the key leaves in the wrong header or beside another vendor's key (EC-43, D-12) (W7).
+- Back-pressure counting only the PRs GitHub lists, without the union with this session's PRs → list lag lets a fourth provider PR open (INV-3, EC-9, D-5) (X12).
+- The vintage check inverted to "is before today" → every normal day stops, and the day main is already current runs (FR-3, D-10, EC-19) (X13).
+- `FORMAT_BOUND_PROVIDERS` allowed on an example key, or the first-party statement weakened → a format-bound vendor refuses its own unprefixed key, and elimination hands that key to another vendor (D-13, EC-33) (S7).
+
 ## Historical Regressions
 
 - Spec review r1 R-1: a committed diff-against-base test would fail every provider PR. No test here reads git state.
 - Spec review r1 R-7: literal `python …` commands fail on the user's machine (X6).
 - Spec review r2 R-1: provider-prefixed one-`/` IDs misroute keys (S5).
 - Spec review r2 R-6: the checklist paths had no stated source in SKILL.md (W6, C9).
+- Implementation review R-3 and R-8 (2026-10-17): S5, X8, X9 and A5 checked that a token was present, so an inverted rule passed, and the C9 Bearer template, the back-pressure union and the D-13 example-key rule were unpinned. The tests now pin each rule's final sentence outside fences, forbid the inverted wording, bind each outcome to its bullet, pin the commands exactly, and compile the python fences (S5, X8, X9, A5, W7, X12, X13, S7).
 
 ## Test Suite Map
 
-- `onboard_skill_fixtures.py`: paths, the spec-r3 constants the tests compare against (headings, constants, enumerations, the 33 wiring rows, the seed slugs, the §9.2 grammar), a fence-aware Markdown reader, and a POSIX `sed -n 's/…/…/p'` emulator.
+- `onboard_skill_fixtures.py`: paths, the spec-r3 constants the tests compare against (headings, constants, enumerations, the 33 wiring rows, the seed slugs, the §9.2 grammar), a fence-aware Markdown reader that separates prose from fenced code, and a POSIX `sed -n 's/…/…/p'` emulator.
 - `test_onboard_skill_acceptance.py`: the invocation line and the §9.2 grammar (AC-1), the stop conditions, the continue-on-disqualify rule, the rules a person relies on, and what each outcome leaves behind (AC-13, FR-15, D-8).
 - `test_onboard_skill_contract.py`: frontmatter and size (AC-2), the two-file folder (D-1), headings (AC-5, AC-7), constants, seed table and hosts (AC-6, D-19), brief, result block both sides, enumerations, verification, publish rules, and the REPO_MAP entry (AC-9).
-- `test_onboard_skill_wiring_checklist.py`: the wiring table's header, refs, cell grammar, spec paths and symbols, existence at HEAD, silent markers, the C6 swap case (AC-4, AC-7), and the orchestrator's extraction command run over the real table (FR-11, D-28).
-- `test_onboard_skill_commands.py`: read-only preflight and pass-top (AC-5), pass order (FR-3), the pass-top `sed` commands run over the real sources (AC-1), back-pressure and selection filters (INV-4, INV-5, T-4), preflight and permission setup (FR-2, D-27), `<py>` spelling (AC-8), `PYTHONPATH` (D-15), gate commands (§12.4, INV-17), mutation order (AC-8, INV-15), research protocol (D-19, INV-20), and named paths (INV-21).
-- `test_onboard_skill_security.py`: forbidden constructs (AC-3), GitHub writes (INV-18, INV-19, AC-15), the push refspec, the managed provider set, D-29 key safety with the real `Runner`, and key shapes (INV-16).
+- `test_onboard_skill_wiring_checklist.py`: the wiring table's header, refs, cell grammar, spec paths and symbols, existence at HEAD, silent markers, the C6 swap case (AC-4, AC-7), the C9 DIRECT wire-test template with its Bearer assertion (EC-43, D-12), and the orchestrator's extraction command run over the real table (FR-11, D-28).
+- `test_onboard_skill_commands.py`: read-only preflight and pass-top (AC-5), pass order (FR-3), the pass-top `sed` commands run over the real sources (AC-1), back-pressure and selection filters (INV-4, INV-5, T-4), the back-pressure union with this session's PRs (INV-3, EC-9), the vintage stop (FR-3, D-10), preflight and permission setup (FR-2, D-27), `<py>` spelling (AC-8), `PYTHONPATH` (D-15), gate commands (§12.4, INV-17), mutation order (AC-8, INV-15), research protocol (D-19, INV-20), and named paths (INV-21).
+- `test_onboard_skill_security.py`: forbidden constructs (AC-3), GitHub writes (INV-18, INV-19, AC-15), the push refspec, the managed provider set, D-29 key safety with the real `Runner` and the exact self-check, the D-13 first-party rule for format binding, and key shapes (INV-16).
 
 Run `python -m pytest tests/features/onboard_model_provider_skill -q` from the repository root (on this machine `py -3.11 -m pytest …`).
 
