@@ -1,9 +1,9 @@
 """FILE: vidbyte/agents/infinite/settings.py
 
-PURPOSE: Defines the two public configuration objects of InfiniteMemoryAgent: InfiniteWorkspaceSettings, the one memory workspace folder with its memory preset, seed files, caps, and the read window every agent's read_lines uses; and InfiniteMemoryAgentSettings, the model, the prompt, the project folder, the developer's extra tools, the loop limits, and the delegation caps shared by every agent in the tree.
+PURPOSE: Defines the two public configuration objects of InfiniteMemoryAgent: InfiniteWorkspaceSettings, the one memory workspace folder with its memory preset, seed files, caps, the read window every agent's read_lines uses, and the recall mode; and InfiniteMemoryAgentSettings, the model, the prompt, the project folder, the developer's extra tools, the loop limits, and the delegation caps shared by every agent in the tree.
 ROLE IN CODEBASE: Built by the developer and passed to InfiniteMemoryAgent (vidbyte/agents/infinite/agent.py), which builds InfiniteWorkspace (workspace.py) from the workspace settings; read by the runtime, the launch tool, and the memory tools. Exported by vidbyte/agents/infinite/__init__.py, vidbyte/agents/__init__.py, and the root vidbyte package.
 ARCHITECTURE NOTE: Settings objects live in the owning agent's settings.py (AGENTS.md Placement Rules, exception 1). Every check runs in __post_init__, so a constructed object is always valid and nothing downstream checks it again. Each field check is one call to the SDK's canonical RecordFieldValidator or RecordFieldConverter (vidbyte/lib/dataclasses/validation.py), the model check is ProviderModelRegistry's, and the key match is ProviderKeyMatcher's; only the rules that tie two fields together or name the reserved tools are written here. Paths are stored resolved and absolute, so a later change of the working directory never moves the project or the memory. Checking settings never touches the disk beyond reading: the workspace folder is created by InfiniteWorkspace, never here.
-FUNCTION INVENTORY: InfiniteWorkspaceSettings.__post_init__ and InfiniteMemoryAgentSettings.__post_init__ are narrated main functions with no private helpers, and InfiniteMemoryAgentSettings.delegation_limits builds the DelegationLimits record for the middleware: RecordFieldConverter.to_folder resolves root and root_dir, to_enum accepts the preset and the provider or their values, to_files checks and resolves the seed files, to_tuple and Tools(...) check the developer's tools, and RecordFieldValidator checks the text fields, the caps, and the read window.
+FUNCTION INVENTORY: InfiniteWorkspaceSettings.__post_init__ and InfiniteMemoryAgentSettings.__post_init__ are narrated main functions with no private helpers, and InfiniteMemoryAgentSettings.delegation_limits builds the DelegationLimits record for the middleware: RecordFieldConverter.to_folder resolves root and root_dir, to_enum accepts the preset, the recall mode, and the provider or their values, to_files checks and resolves the seed files, to_tuple and Tools(...) check the developer's tools, and RecordFieldValidator checks the text fields, the caps, and the read window.
 COMMON MODIFICATION PATTERNS: A new setting adds one field, one RecordFieldValidator or RecordFieldConverter call in its __post_init__ (a check they lack becomes a new option there, never a helper here), a named default in vidbyte/lib/constants/infinite.py, and one row in the folder README's limits table.
 WHAT NOT TO DO IN THIS FILE: 1. Do not create the workspace folder or any file here; a refused setting must leave the disk unchanged. 2. Do not put api_keys or vidbyte_api_key in an error message or in repr. 3. Do not accept a bare string where a sequence is expected; it would split into characters.
 KNOWN EDGE CASES: root="" and root_dir="" are refused even though Path("") is the current folder. A seed file is checked to exist now and copied later, at agent construction. Two seed files with the same file name are refused, because both would land at seed/<name>. True is refused for every cap, although Python counts it as an int. A refusal names the field as InfiniteWorkspaceSettings.<field> or InfiniteMemoryAgentSettings.<field>, in the message and in details["field"].
@@ -45,7 +45,7 @@ from vidbyte.lib.dataclasses.validation import (
     RecordFieldConverter,
     RecordFieldValidator,
 )
-from vidbyte.lib.enums.infinite import InfiniteMemoryPreset
+from vidbyte.lib.enums.infinite import InfiniteMemoryPreset, InfiniteRecallMode
 from vidbyte.lib.enums.model_provider import ModelProvider
 from vidbyte.lib.enums.text_model import TextModelMode
 from vidbyte.lib.errors import ConfigurationError, ToolRegistrationError
@@ -57,7 +57,7 @@ from vidbyte.tools.catalog import Tools
 
 @dataclass(frozen=True, slots=True)
 class InfiniteWorkspaceSettings:
-    """The one memory workspace: its folder, the memory preset, the seed files copied into it, its caps, and the read window.
+    """The one memory workspace: its folder, the memory preset, the seed files copied into it, its caps, the read window, and the recall mode.
 
     root and seed_files keep their raw types until __post_init__ checks
     them, because Path("") is the current folder and a bare string is a
@@ -74,6 +74,7 @@ class InfiniteWorkspaceSettings:
     max_entry_tokens: int = INFINITE_DEFAULT_MAX_ENTRY_TOKENS
     max_entries_per_agent: int = INFINITE_DEFAULT_MAX_ENTRIES_PER_AGENT
     max_read_lines: int = INFINITE_DEFAULT_MAX_READ_LINES
+    recall_mode: InfiniteRecallMode | str = InfiniteRecallMode.DIRECT
 
     def __post_init__(self) -> None:
         # Keep the workspace folder as an absolute path. The folder may
@@ -84,6 +85,10 @@ class InfiniteWorkspaceSettings:
         # Accept the preset's value as text too, and keep the enum; the
         # preset decides which memory tools every agent holds.
         object.__setattr__(self, "preset", RecordFieldConverter.to_enum(self.preset, InfiniteMemoryPreset, "InfiniteWorkspaceSettings.preset"))
+
+        # Accept the recall mode's value as text too, and keep the enum;
+        # DELEGATED gives the root and generators recall instead of grep.
+        object.__setattr__(self, "recall_mode", RecordFieldConverter.to_enum(self.recall_mode, InfiniteRecallMode, "InfiniteWorkspaceSettings.recall_mode"))
 
         # @intent seeds-exist-and-keep-their-names-apart
         # Each seed is copied to seed/<file name>, so each must be an
