@@ -4,7 +4,7 @@ PURPOSE: Defines the twenty-six validated records CodexHost takes and returns: t
 ROLE IN CODEBASE: The data layer under vidbyte/harnesses/native/codex/ (the host and its translators) and vidbyte/tools/builtins/codex/ (the twenty-six tools), which build and read these records; the Codex settings, input, result and usage records they hold come from vidbyte/lib/dataclasses/codex.py.
 ARCHITECTURE NOTE: Every record is frozen with slots and checks itself in __post_init__, raising ConfigurationError that names the field; the one exception is a USER approvals reviewer, refused with the CodexAgentError the host's tools report (D-16). Behaviour that acts on these records lives in the host, never here, and every runtime import stays inside vidbyte.lib.
 COMMON MODIFICATION PATTERNS: Add a field with its check in the same record's __post_init__, reusing the codex.py helpers; a new record is added here and to the alphabetical __all__. A new routed server request adds one parse branch to CodexServerRequest.from_params; its wire encoding lives in CodexParamsTranslator, because a lib record exposes no dict encoder.
-KNOWN EDGE CASES: bool is an int, so every integer check refuses bool first; NaN and infinity fail the finite checks; vendor text such as plan types, reasoning efforts and service tier ids stays str because Codex owns those open sets. CodexServerRequest.from_params reads an absent and a null optional field alike, and keeps only the string decisions Codex offers, so available_decisions is None when Codex sent no list and a tuple, maybe empty, when it sent one.
+KNOWN EDGE CASES: bool is an int, so every integer check refuses bool first; NaN and infinity fail the finite checks; vendor text such as plan types, reasoning efforts and service tier ids stays str because Codex owns those open sets. CodexServerRequest.from_params reads an absent and a null optional field alike, and keeps only the string decisions Codex offers, so available_decisions is None when Codex sent no list and a tuple, maybe empty, when it sent one. A goal request refuses the first non-default field of CODEX_HOST_GOAL_REJECTED_FIELDS through _reject_goal_fields, which CodexGoalRunRequest shares; the sandbox-field checks run before it, so a goal request that sets network_access with a default turn is refused for the sandbox (hardening INV-34).
 RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.5 and 9.1); docs/spec/codex-host-thread-helpers/spec.md (sections 8.5 and 9.1); docs/spec/codex-host-hardening/spec.md (sections 8.5 and 9.1)
 TESTS: tests/features/codex_host/test_codex_host_records.py, tests/features/codex_host/test_codex_host_helper_surface.py and tests/features/codex_host/test_codex_host_hardening_records.py
 """
@@ -24,6 +24,8 @@ from vidbyte.lib.constants.codex import (
     CODEX_THREAD_SUMMARY_HARNESS,
 )
 from vidbyte.lib.constants.codex_host import (
+    CODEX_HOST_GOAL_FIELD_MESSAGE,
+    CODEX_HOST_GOAL_REJECTED_FIELDS,
     CODEX_HOST_NETWORK_ACCESS_MESSAGE,
     CODEX_HOST_WRITABLE_ROOTS_MESSAGE,
 )
@@ -154,6 +156,13 @@ class CodexSpawnRequest:
     sandbox: network access needs a READ_ONLY or WORKSPACE_WRITE
     ``turn.sandbox``, and the extra writable folders, each an absolute
     path, need WORKSPACE_WRITE.
+
+    A ``goal`` run takes its posture from the thread settings alone,
+    because Codex starts each goal turn itself with the thread's
+    settings. A goal request therefore refuses ``turn``,
+    ``output_schema``, ``disabled_plugin_ids``, ``turn_service_tier``,
+    ``network_access`` and ``writable_roots``; Vidbyte's own caps,
+    ``max_output_tokens`` and ``timeout_seconds``, still apply.
     """
 
     prompt: str | CodexRunInput = ""
@@ -271,6 +280,19 @@ class CodexSpawnRequest:
             raise ConfigurationError("Codex spawn request goal cannot be combined with a prompt; the goal objective is the prompt.")
         if self.thread.ephemeral:
             raise ConfigurationError("Codex spawn request goal needs a stored thread, so thread.ephemeral must be False.")
+        _reject_goal_fields(self)
+
+
+def _reject_goal_fields(request: CodexSpawnRequest) -> None:
+    # @intent a-goal-run-takes-only-thread-settings
+    # Codex starts a goal's turns itself with the thread's settings, so
+    # a turn-only field would be dropped unapplied; the first one set,
+    # in table order, is refused instead (hardening INV-34). A goal
+    # spawn and CodexGoalRunRequest share this rule.
+    default = CodexSpawnRequest()
+    for name in CODEX_HOST_GOAL_REJECTED_FIELDS:
+        if getattr(request, name) != getattr(default, name):
+            raise ConfigurationError(CODEX_HOST_GOAL_FIELD_MESSAGE.format(name=name), details={"field": name})
 
 
 @dataclass(frozen=True, slots=True)

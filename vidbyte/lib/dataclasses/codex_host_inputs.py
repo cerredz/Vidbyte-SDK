@@ -48,6 +48,7 @@ from vidbyte.lib.dataclasses.codex_host import (
     CodexSpawnRequest,
     CodexTurnHandle,
     _reject_bad_seconds,
+    _reject_goal_fields,
     _reject_small_int,
 )
 from vidbyte.lib.dataclasses.validation import (
@@ -110,7 +111,7 @@ class CodexHostSetup:
         # (INV-19).
         RecordFieldConverter.require_instance(self.settings, "CodexHost settings", CodexClientSettings, optional=True)
         handler = self.approval_handler
-        if handler is not None and not (callable(handler) and (inspect.iscoroutinefunction(handler) or inspect.iscoroutinefunction(handler.__call__))):
+        if handler is not None and not (callable(handler) and (inspect.iscoroutinefunction(handler) or inspect.iscoroutinefunction(type(handler).__call__))):
             raise ConfigurationError(CODEX_HOST_APPROVAL_HANDLER_MESSAGE.format(kind=type(handler).__name__), details={"field": "approval_handler"})
 
 
@@ -352,11 +353,15 @@ class CodexGoalRunRequest:
 
     def __post_init__(self) -> None:
         # The run sets the goal itself, so a request that carries its
-        # own prompt or goal would be ambiguous (INV-6, EC-37).
+        # own prompt or goal would be ambiguous (INV-6, EC-37). Codex
+        # starts goal turns with the thread's settings, so the turn-only
+        # fields a goal spawn refuses are refused here too (hardening
+        # INV-34).
         RecordFieldConverter.require_instance(self.goal, "run_codex_goal goal", CodexGoal)
         RecordFieldConverter.require_instance(self.request, "run_codex_goal request", CodexSpawnRequest)
         if isinstance(self.request.prompt, CodexRunInput) or self.request.prompt or self.request.goal is not None:
             raise ConfigurationError(CODEX_HOST_OWN_INPUT_MESSAGE.format(operation=CodexHostOperation.RUN_CODEX_GOAL.value), details={"field": "request"})
+        _reject_goal_fields(self.request)
 
 
 @dataclass(frozen=True, slots=True)
