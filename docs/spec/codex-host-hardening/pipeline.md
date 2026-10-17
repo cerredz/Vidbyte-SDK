@@ -19,8 +19,8 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
 | S1 spec + review | done | 07:13 | 10:05 | reports/S1-spec-author.md, reports/S1-spec-review.md | r1 0f0d3118 (FR 37, AC 39, EC 52, W 13; 0 blocking Q); reviewer round 1 SOUND WITH FIXES (836b23ca); r2 2b6affc1 rebased on #1178 (FR+, 3 new files, 20 superseded tests); reviewer round 2 SOUND WITH FIXES (4548f58d, 0 Blocker); r3 804c6f0b status approved |
 | S2 tests | done | 10:10 | 11:40 | reports/S2-test-author.md | **S2_HEAD fadec47f** (was 09524ff4; moved by the orchestrator-granted correction of 2 assertions); 106 new tests (97 red, 8 guards, 1 live-skipped), 20 superseded + 7 support literals; red 125F/631P/3S vs baseline 1F/650P/2S; spec r4 (d3389171) aligned to test choices |
 | S3 implement | done | 11:45 | 14:20 | reports/S3-implementer.md | **S3_HEAD c9150d63**; draft PR #1181 (base `ai/resolve-pr-1055-comments`, 64 files +9688/−551); 24/24 rows; budget 3 files / 13 classes / 0 deps / 9 config keys (exact); host.py 923; area 1F(inherited)/1024P/3S; source 1F(inherited)/6555P/27S; package CI passed; SDK-LINT: PASS |
-| S4 adversarial review | running | 14:25 | | reports/S4-review-{conformance,conventions,engineering}.md, reports/S4-findings-verifier.md | |
-| S5 repair loop | pending | | | | |
+| S4 adversarial review | done | 14:25 | 16:10 | reports/S4-review-{conformance,conventions,engineering}.md, reports/S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES — confirmed 4 Blocker / 6 Major / 7 Minor; refuted 0; downgraded 1 (R-V3). Owners: code R-1,R-2,R-3,R-9,R-10; test R-4,R-5,R-6,R-8; spec R-7 |
+| S5 repair loop | running | 16:15 | | verify-log.md, reports/S5-repair-<k>.md | pre-step: spec r5 (R-7 + budget), S2 test additions |
 | S5 re-review | pending | | | | |
 | S6 PR | deferred to the end of slice 2 | | | | |
 
@@ -95,6 +95,18 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
   - the spec has `status: implemented` and `pr:` set;
   - my own run of the area suite gave 1 failed (inherited), 1024 passed, 3 skipped, and my own `lint/run.py` ended `SDK-LINT: PASS`.
 - 2026-10-17 14:20: **Correction:** the lint runner's final line is `SDK-LINT: PASS`. `AGENT-LINT` does not exist under `lint/`; earlier briefings said otherwise. The global `semgrep` CLI is broken here (mcp 2.x), and `lint/run.py` does not call semgrep. S3 used the bundled `semgrep-core.exe` per changed file: 0 results on 23 files, and 1 on a file planted to break the rule. Accepted as the semgrep evidence. Nothing was installed or repaired.
+- 2026-10-17 16:10: S4 checked. `review.md` has 10 confirmed rows, each with a path:line, own evidence and status `open`; nothing was refused. Spec `status: reviewed`. **Routing plan, so each role stays separate:**
+  1. **Spec author r5:**
+     - R-7: the `run_codex_goal` refusal must name the method. §9.2's text contradicts INV-48 and §8.5's `owner` argument.
+     - The §8.4/§9.2 budget amendments the verifier says the code fixes need: config keys 9→10 and messages 12→13 for R-2; classes 13→14 for R-9's log-token helper in the existing `vidbyte/lib/util/text.py`.
+     - R-10's stated limitation: calls refused before sending stay unlogged.
+     - Pre-authorising the budget now avoids a predictable S5 BLOCKED. Every amendment traces to a confirmed finding of the user's own bar, so none of it adds scope.
+  2. **S2 test author:**
+     - mutant-killing tests for R-4 (M40), R-5 (M1), R-6 (M31) and R-8 (M2/M20/M21), each proven with the engineering reviewer's mutation plugin;
+     - regression tests for R-3, R-9 and R-10, plus the two R-7 text pins (`turn_settings.py:59`, `hardening_contract.py:286`) updated to spec r5.
+     
+     The new S2_HEAD then follows.
+  3. **S5 repair loop:** code fixes for R-1, R-2, R-3, R-7 (code side), R-9 and R-10. Minors are fixed only where trivial.
 
 ## User replies (verbatim)
 - (none yet)
@@ -210,3 +222,8 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
 - Semgrep evidence: run `site-packages/semgrep/bin/semgrep-core.exe -rules .semgrep/<rule>.yml -lang python -json <file>` on one file at a time. The global `semgrep` cannot start. *Source:* S3
 - `CodexHostOperation.VALIDATE_SPAWN_REQUEST` is now unused in source but pinned by `test_codex_host_records.py:65`, so it was kept. *Source:* S3
 - The workflows run only on `workflow_dispatch`, so pushing triggers no remote checks and the local gate decides. *Source:* S3, S0
+- Mutation plugin: `C:/Users/422mi/AppData/Local/Temp/claude/C--Users-422mi-vidbyte-repos/bc193043-e6a6-4003-b534-2ea6e3af726a/scratchpad/s4-eng/s4_mutants.py`. Run it with `S4_MUTANT=<M> PYTHONPATH="$(pwd);<scratch>/s4-eng" "$V" -B -m pytest tests/features/codex_host -q -p no:cacheprovider -p s4_mutants`; the baseline is `320 passed, 1 skipped`. Mutants run in the module's own globals, because a copied namespace gives false kills. Verifier probes: `<scratch>/s4-verify/probe_s4v_code.py`. *Source:* S4 engineering, verifier
+- R-10's fix logs the late landing only on the cancel hand-over. The TimeoutError path already logs, so an unconditional `_land` log would double-record. *Source:* verifier
+- R-3's fix wraps `reviews.py:141` the way its sibling paths are wrapped, and renames `CodexTurnEvents._fail` to `fail`. It has 2 callers plus the FILE inventory, and no test references it. *Source:* verifier
+- R-9's log-token helper applies to every record that shows a Codex-issued id: `_log_call`, `finish` and the `turn_events` warnings, not just the router. *Source:* verifier
+- R-1: re-read the field guide's `comment-format.md` before re-wrapping. Wrapped comments must still keep A002's `@intent` within 20 lines of its `def`. *Source:* verifier
