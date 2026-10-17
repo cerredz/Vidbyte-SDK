@@ -669,19 +669,22 @@ class CodexResponseTranslator:
         return CodexTurnPage(turns=turns, next_cursor=response.next_cursor or "")
 
     @staticmethod
-    def fork_point(thread: Thread, from_turn_id: str) -> str:
-        # D-29: a fork goes through a completed turn; an empty
-        # from_turn_id means the last completed one, and "" means there
-        # is none.
-        completed = [turn.id for turn in thread.turns if turn.status.value == CodexTurnStatus.COMPLETED.value]
-        if from_turn_id:
-            return from_turn_id if from_turn_id in completed else ""
-        return next(reversed(completed), "")
+    def fork_point(turns: Sequence[Turn], from_turn_id: str) -> str | None:
+        # D-29: a fork goes through a completed turn. The turns come
+        # newest first, one page at a time: an empty from_turn_id means
+        # the first completed turn, and a named turn counts only when
+        # completed. "" means these turns rule the point out, and None
+        # means they do not decide it (hardening INV-28 step 5).
+        completed = CodexTurnStatus.COMPLETED.value
+        for turn in turns:
+            if turn.id == from_turn_id or (not from_turn_id and turn.status.value == completed):
+                return turn.id if turn.status.value == completed else ""
+        return None
 
     @staticmethod
-    def stored_turn(thread: Thread, turn_id: str) -> Turn | None:
+    def stored_turn(turns: Sequence[Turn], turn_id: str) -> Turn | None:
         # The turn a read-back found, if Codex stored it already (D-23).
-        return next((turn for turn in thread.turns if turn.id == turn_id), None)
+        return next((turn for turn in turns if turn.id == turn_id), None)
 
     @staticmethod
     def pricing(model: str, provider: str, turn_model: str) -> CodexAgentSettings:

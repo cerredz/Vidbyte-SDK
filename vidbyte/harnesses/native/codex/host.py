@@ -34,7 +34,6 @@ from vidbyte.lib.constants.codex import (
     CODEX_RATE_LIMITS_READ_METHOD,
     CODEX_REVIEW_START_METHOD,
     CODEX_SKILLS_LIST_METHOD,
-    CODEX_THREAD_FORK_METHOD,
     CODEX_THREAD_LIST_METHOD,
     CODEX_THREAD_NAME_SET_METHOD,
     CODEX_THREAD_RESUME_METHOD,
@@ -45,11 +44,9 @@ from vidbyte.lib.constants.codex import (
 from vidbyte.lib.constants.codex_host import (
     CODEX_GOAL_START_CALL,
     CODEX_HOST_BUDGET_ECHO_MESSAGE,
-    CODEX_HOST_LATEST_FORK_POINT,
+    CODEX_HOST_FORK_EXPERIMENTAL_MESSAGE,
     CODEX_HOST_LAUNCH_INTERRUPTED_SENTENCE,
-    CODEX_HOST_NAMED_FORK_POINT,
     CODEX_HOST_NEVER_RAN_MESSAGE,
-    CODEX_HOST_NO_FORK_POINT_MESSAGE,
     CODEX_HOST_NOT_OPEN_MESSAGE,
     CODEX_HOST_OTHER_LOOP_MESSAGE,
     CODEX_HOST_REOPEN_MESSAGE,
@@ -322,10 +319,13 @@ class CodexHost:
         self._preflight.require_idle(operation, thread_id)
         self._registry.reserve(thread_id)
         try:
-            # Check the account, usage, sandbox and models, then that
-            # the thread exists, then resume it and check its reviewer.
+            # Check the reviewer, account, usage, sandbox and models,
+            # then that the thread exists. A thread not loaded here is
+            # resumed only when no unfinished goal could continue
+            # (hardening INV-27); then check its reviewer.
             await self._preflight.run(operation, request)
-            await self._preflight.require_thread(operation, thread_id)
+            thread = await self._preflight.require_thread(operation, thread_id)
+            await self._threads.refuse_unfinished_goal(operation, thread)
             connection = self._connection
             resume = self._params.thread_resume(thread_id, request)
             resumed = await connection.call(operation, CODEX_THREAD_RESUME_METHOD, connection.client.thread_resume, thread_id, resume, thread_id=thread_id)
@@ -345,37 +345,31 @@ class CodexHost:
         from_turn_id: str = "",
         exclude_turns: bool = False,
         overrides: CodexSpawnRequest | None = None,
+        before_turn_id: str = "",
+        defer_goal_continuation: bool = False,
     ) -> CodexThreadInfo:
         # @intent fork-only-through-a-completed-turn
-        # Copy a thread through one of its completed turns into a new
-        # thread. exclude_turns only leaves the turns out of the answer;
-        # the fork still holds them (D-29).
+        # Copy a thread through one of its completed turns, or up to the
+        # turn named in before_turn_id, into a new thread. exclude_turns
+        # only leaves the turns out of the answer; the fork still holds
+        # them (D-29).
         operation = CodexHostOperation.FORK_CODEX_THREAD
         self._guard(operation, talks=True)
-        # Check the thread id, the fork point and the overrides a fork
-        # can apply before anything is sent.
-        forking = CodexForkRequest(thread_id=thread_id, from_turn_id=from_turn_id, exclude_turns=exclude_turns, overrides=overrides or CodexSpawnRequest())
-        request = forking.overrides
-        self._preflight.reject_user_reviewer(operation, request)
-        # Read the thread with its turns and pick the fork point
-        # locally, so a wrong point stops before thread/fork.
-        source = await self._preflight.require_thread(operation, thread_id, include_turns=True)
-        point = self._responses.fork_point(source, forking.from_turn_id)
-        if not point:
-            named = CODEX_HOST_NAMED_FORK_POINT.format(turn_id=forking.from_turn_id) if forking.from_turn_id else CODEX_HOST_LATEST_FORK_POINT
-            raise CodexErrorMapper.error(FailureCode.CODEX_FORK_FAILED, CODEX_HOST_NO_FORK_POINT_MESSAGE.format(point=named), operation, thread_id)
-        connection = self._connection
-        fork = self._params.thread_fork(thread_id, point, forking.exclude_turns, request)
-        forked = await connection.call(operation, CODEX_THREAD_FORK_METHOD, connection.client.thread_fork, thread_id, fork, thread_id=thread_id)
-        # The fork inherits the parent's tools, so it shares its
-        # handler.
-        fork_id = forked.thread.id
-        handler = connection.router.handler_for(thread_id)
-        if handler is not None:
-            connection.router.register(fork_id, handler)
-        if request.name:
-            await connection.call(operation, CODEX_THREAD_NAME_SET_METHOD, connection.client.thread_set_name, fork_id, request.name, thread_id=fork_id)
-        return self._responses.thread_info(forked.thread)
+        # Check every argument and the overrides a fork can apply, then
+        # the experimental fields this host allows, before anything is
+        # sent (hardening INV-28 step 1).
+        forking = CodexForkRequest(
+            thread_id=thread_id,
+            from_turn_id=from_turn_id,
+            exclude_turns=exclude_turns,
+            overrides=overrides or CodexSpawnRequest(),
+            before_turn_id=before_turn_id,
+            defer_goal_continuation=defer_goal_continuation,
+        )
+        self._reject_experimental_fork_fields(forking)
+        # The thread helpers run the remaining checks in order, then
+        # fork, share the parent's tools and name the fork.
+        return await self._threads.fork(operation, forking)
 
     async def list_codex_threads(
         self,
@@ -673,6 +667,18 @@ class CodexHost:
             raise CodexErrorMapper.error(FailureCode.CODEX_SESSION_NOT_FOUND, message, operation)
         return turn
 
+    def _reject_experimental_fork_fields(self, forking: CodexForkRequest) -> None:
+        # @intent experimental-fork-fields-need-the-experimental-api
+        # Codex takes beforeTurnId and deferGoalContinuation only from
+        # clients that opt in to its experimental API, so without it
+        # each is refused here, before any request, as dynamic tools are
+        # (hardening INV-28 step 1, EC-56).
+        if self._settings.experimental_api:
+            return
+        for name, value in (("before_turn_id", forking.before_turn_id), ("defer_goal_continuation", forking.defer_goal_continuation)):
+            if value:
+                raise ConfigurationError(CODEX_HOST_FORK_EXPERIMENTAL_MESSAGE.format(field=name), details={"field": name})
+
     def _tool_bridge(self, request: CodexSpawnRequest) -> CodexToolBridge | None:
         # @intent tools-are-checked-before-any-call
         # Dynamic tools need the experimental API and names Codex
@@ -836,8 +842,7 @@ class CodexHost:
         # owned: it is watched and stopped with one interrupt (INV-11).
         try:
             with suppress(CodexAgentError):
-                thread = await self._preflight.require_thread(operation, handle.thread_id, include_turns=True)
-                stored = self._responses.stored_turn(thread, handle.turn_id)
+                stored = await self._threads.review_turn(operation, handle.thread_id, handle.turn_id)
         except BaseException:
             turn.watch(connection, self._on_turn_event)
             turn.stop(connection, None)
@@ -863,13 +868,13 @@ class CodexHost:
     async def _complete_review(self, turn: CodexLiveTurn) -> None:
         # @intent build-a-review-from-its-stored-items
         # When a review turn completes, its result comes from the review
-        # thread read back with its turns, since its last item can be
-        # lost; the items seen live are used when the read fails (D-23).
+        # turn read back from one page, since its last item can be lost;
+        # the items seen live are used when the read fails (D-23,
+        # hardening INV-38).
         handle = turn.handle
         stored = None
         with suppress(CodexAgentError):
-            thread = await self._preflight.require_thread(CodexHostOperation.START_CODEX_REVIEW, handle.thread_id, include_turns=True)
-            stored = self._responses.stored_turn(thread, handle.turn_id)
+            stored = await self._threads.review_turn(CodexHostOperation.START_CODEX_REVIEW, handle.thread_id, handle.turn_id)
         items = stored.items if stored is not None else turn.items
         self._registry.finish(turn, self._responses.turn_snapshot(turn, items, turn.completed))
 
