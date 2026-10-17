@@ -71,8 +71,17 @@ class AnthropicProvider:
         self._attach_response_format(payload, config)
         self._attach_metadata(payload, config, metadata)
         self._attach_extra_body(payload, config)
-        # Mark a repeat request's prefix for Anthropic's prompt cache.
-        self._attach_cache_breakpoints(payload, config)
+        # Mark a repeat request's prefix for Anthropic's prompt cache,
+        # unless the caller marked the request itself.
+        # @intent anthropic-marks-only-repeated-prefixes
+        # A mark costs 1.25x on the cache write and pays back only when
+        # the same prefix is read again, so the first send of a
+        # tools-and-system pair goes out exactly as before and only a
+        # repeat is marked. A caller that set its own cache_control owns
+        # caching, and more marks could pass Anthropic's limit of four
+        # breakpoints, so its request records no digest either.
+        if not self._holds_cache_control(payload) and self._is_repeat(payload):
+            self._attach_cache_breakpoints(payload, config)
         return payload
 
     def _attach_response_format(self, payload: dict[str, Any], config: TextModelConfig) -> None:
@@ -139,14 +148,6 @@ class AnthropicProvider:
     def _attach_cache_breakpoints(self, payload: dict[str, Any], config: TextModelConfig) -> None:
         # Marks the system and two message blocks of a repeat request with
         # block-level cache_control, never a top-level key or a ttl.
-        # @intent anthropic-marks-only-repeated-prefixes
-        # A mark costs 1.25x on the cache write and pays back only when the
-        # same prefix is read again, so the first send of a tools-and-system
-        # pair goes out exactly as before and only a repeat is marked. A
-        # caller that set its own cache_control owns caching, and more
-        # marks could pass Anthropic's limit of four breakpoints.
-        if self._holds_cache_control(payload) or not self._is_repeat(payload):
-            return
         # Send a non-empty system as one marked text block.
         system = payload.get("system")
         if isinstance(system, str) and system:
@@ -156,17 +157,28 @@ class AnthropicProvider:
         # Mark the last message, which the next call reads back, and the
         # message right before the newest assistant turn, which this call
         # reads back from the previous one.
-        # @intent anthropic-marks-copies-never-the-callers-messages
-        # The payload's messages are shallow copies that share the caller's
-        # content lists, so a marked message is a new dict with a new list;
-        # marking in place would pile marks up across calls.
         messages = payload["messages"]
         assistants = [index for index, message in enumerate(messages) if message.get("role") == "assistant"]
         targets = {len(messages) - 1}
         if assistants and assistants[-1] > 0:
             targets.add(assistants[-1] - 1)
+        # @intent anthropic-marks-copies-never-the-callers-messages
+        # The payload's messages are shallow copies that share the
+        # caller's content lists, so a marked message is a new dict with
+        # a new list; marking in place would pile marks up across calls.
+        # A non-empty string content becomes one marked text block, a
+        # list gets the mark on its last markable block, and a message
+        # with nothing markable is left as it is.
         for index in sorted(targets):
-            messages[index] = self._marked_message(messages[index])
+            content = messages[index].get("content")
+            if isinstance(content, str):
+                blocks: list[Any] = [{"type": "text", "text": content}] if content else []
+            else:
+                blocks = list(content) if isinstance(content, list) else []
+            markable = [position for position, block in enumerate(blocks) if isinstance(block, Mapping) and block.get("type") in _ANTHROPIC_MARKABLE_TYPES and (block.get("type") != "text" or block.get("text"))]
+            if markable:
+                blocks[markable[-1]] = {**blocks[markable[-1]], "cache_control": {"type": "ephemeral"}}
+                messages[index] = {**messages[index], "content": blocks}
 
     @staticmethod
     def _holds_cache_control(payload: Mapping[str, Any]) -> bool:
@@ -197,23 +209,6 @@ class AnthropicProvider:
             self._seen_prefixes.clear()
         self._seen_prefixes.add(digest)
         return False
-
-    @staticmethod
-    def _marked_message(message: Mapping[str, Any]) -> Mapping[str, Any]:
-        # A copy of the message whose last markable block carries the mark;
-        # a non-empty string content becomes one marked text block, and a
-        # message with nothing markable comes back unchanged.
-        content = message.get("content")
-        if isinstance(content, str):
-            return {**message, "content": [{"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}]} if content else message
-        if not isinstance(content, list):
-            return message
-        markable = [index for index, block in enumerate(content) if isinstance(block, Mapping) and block.get("type") in _ANTHROPIC_MARKABLE_TYPES and (block.get("type") != "text" or block.get("text"))]
-        if not markable:
-            return message
-        blocks = list(content)
-        blocks[markable[-1]] = {**blocks[markable[-1]], "cache_control": {"type": "ephemeral"}}
-        return {**message, "content": blocks}
 
     def stream_text(self, *, prompt: str, system: str | None, metadata: Mapping[str, object] | None, transport: SyncHttpTransport, config: TextModelConfig | None = None) -> Iterator[str]:
         # POST to /messages with stream=True and yield text from content_block_delta events.
