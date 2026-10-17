@@ -37,7 +37,7 @@ print("\n".join(agent.response.goal.progress))
 - No bulk harvest runtime with ledgers, deduplication, or a URL frontier; the goal card holds about 480 to 800 progress lines.
 - No replay of recorded recipes; a recipe is recorded on a `done` card only.
 - No run journal, `resume()`, durable `Session` persistence, or working `fork()`.
-- No auto-submit: a worker reports `ready_to_submit`, and nothing acts on it.
+- No auto-submit: a worker reports `ready_to_submit`, and nothing in code acts on it. The rule itself is in the prompts only; see Notes for agents.
 - No image passthrough: the MCP bridge turns every image into a text placeholder.
 - No pricing of vendor-billed MCP usage; `agent.response.usage` counts model calls only.
 - No CLI command; build the agent from Python.
@@ -81,6 +81,7 @@ This package builds on canonical helpers rather than private copies: `RecordFiel
 
 ## Notes for agents
 
+- The no-submit rule lives only in the worker and orchestrator prompts. Browser MCP tools are generic, so code cannot tell a submit from any other click, and an injected page instruction can still lead a worker to submit, send, or pay. `settings.permission_policy` (allow-all by default) applies to every worker and orchestrator tool call; it is the code gate the developer controls.
 - Overlapping `arun` calls on one agent are unsupported: the response writer belongs to the agent, so the runs overwrite each other's record.
 - Each synchronous `run()` closes the servers and starts them again, so cookies and tabs do not survive between sync runs; use `arun` or `async with agent:` to keep one browser.
 - An explicit `system=` run option replaces the system prompt and the goal card for that run; the runtime leaves the caller's option alone.
