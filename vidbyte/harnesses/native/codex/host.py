@@ -16,7 +16,7 @@ import shutil
 from collections.abc import Sequence
 from contextlib import suppress
 from functools import partial
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from vidbyte.agents.codex.tools import CodexToolBridge, CodexToolTranslator
 from vidbyte.harnesses.native.codex.errors import CodexErrorMapper
@@ -114,11 +114,10 @@ if TYPE_CHECKING:
         ReviewStartResponse,
         TurnStartResponse,
     )
-    from openai_codex.models import Notification
 
     from vidbyte.harnesses.native.codex.connection import CodexConnection
+    from vidbyte.harnesses.native.codex.turn_events import CodexTurnEvents
     from vidbyte.harnesses.native.codex.turns import (
-        CodexGoalTurn,
         CodexLiveTurn,
         CodexTurnRegistry,
     )
@@ -135,8 +134,8 @@ class CodexHost:
     def __init__(self, settings: CodexClientSettings | None = None) -> None:
         # Nothing starts here; the host opens once, in __aenter__
         # (INV-2). The connection, translators, registry, preflight,
-        # _threads (thread helpers) and _skills (goal and skill runs)
-        # exist only once the host opened.
+        # _threads (thread helpers), _events (turn events) and _skills
+        # (goal and skill runs) exist only once the host opened.
         self._settings = settings or CodexClientSettings()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._opened = False
@@ -149,6 +148,7 @@ class CodexHost:
         self._registry: CodexTurnRegistry
         self._preflight: CodexPreflight
         self._threads: CodexThreadHelpers
+        self._events: CodexTurnEvents
         self._skills: CodexSkillFunctions
 
     async def __aenter__(self) -> CodexHost:
@@ -176,6 +176,7 @@ class CodexHost:
         # missing.
         try:
             from vidbyte.harnesses.native.codex.connection import CodexConnection
+            from vidbyte.harnesses.native.codex.turn_events import CodexTurnEvents
             from vidbyte.harnesses.native.codex.turns import CodexTurnRegistry
             from vidbyte.harnesses.native.codex.wire import (
                 CodexParamsTranslator,
@@ -202,9 +203,11 @@ class CodexHost:
         self._connection = CodexConnection(self._params.client_config(binary), loop)
         self._connected = True
         self._preflight = CodexPreflight(self._connection, self._params, self._responses, self._registry, approvals_answered=False)
-        # The thread helpers share the host's parts; the run wrappers
-        # go through the host's own public functions.
+        # The thread helpers and the turn events share the host's
+        # parts; the run wrappers go through the host's own public
+        # functions.
         self._threads = CodexThreadHelpers(self._connection, self._params, self._responses, self._preflight, self._registry)
+        self._events = CodexTurnEvents(self._connection, self._responses, self._registry, self._threads)
         self._skills = CodexSkillFunctions(self)
         found, supported = self._responses.version(await self._connection.launch(target))
         if not supported:
@@ -775,7 +778,7 @@ class CodexHost:
                 connection.client.unregister_turn_notifications(turn.handle.turn_id)
             turn.close_goal_stream(connection.client)
             raise CodexErrorMapper.process_exited(operation, turn.handle.thread_id)
-        turn.watch(connection, self._on_turn_event)
+        turn.watch(connection, self._events.on_event, self._events.on_lost)
         return turn.handle
 
     def _adopt_late_turn(self, thread_id: str, request: CodexSpawnRequest, pricing: CodexAgentSettings, response: TurnStartResponse) -> None:
@@ -790,7 +793,7 @@ class CodexHost:
             connection.client.unregister_turn_notifications(turn.handle.turn_id)
             self._registry.finish(turn, self._responses.exited(turn.handle))
             return
-        turn.watch(connection, self._on_turn_event)
+        turn.watch(connection, self._events.on_event, self._events.on_lost)
         turn.stop(connection, None)
 
     def _adopt_late_goal(
@@ -811,7 +814,7 @@ class CodexHost:
             self._registry.finish(turn, self._responses.exited(turn.handle))
             turn.close_goal_stream(connection.client)
             return
-        turn.watch(connection, self._on_turn_event)
+        turn.watch(connection, self._events.on_event, self._events.on_lost)
         turn.stop(connection, None)
 
     def _adopt_late_review(self, operation: CodexHostOperation, pricing: CodexAgentSettings, response: ReviewStartResponse) -> None:
@@ -844,7 +847,7 @@ class CodexHost:
             with suppress(CodexAgentError):
                 stored = await self._threads.review_turn(operation, handle.thread_id, handle.turn_id)
         except BaseException:
-            turn.watch(connection, self._on_turn_event)
+            turn.watch(connection, self._events.on_event, self._events.on_lost)
             turn.stop(connection, None)
             raise
         # Close wins: the turn ends as exited and nothing more is sent.
@@ -860,46 +863,10 @@ class CodexHost:
             self._registry.finish(turn, self._responses.turn_snapshot(turn, stored.items, stored))
             return handle
         # Otherwise watch it; a late review also gets its one interrupt.
-        turn.watch(connection, self._on_turn_event)
+        turn.watch(connection, self._events.on_event, self._events.on_lost)
         if late:
             turn.stop(connection, None)
         return handle
-
-    async def _complete_review(self, turn: CodexLiveTurn) -> None:
-        # @intent build-a-review-from-its-stored-items
-        # When a review turn completes, its result comes from the review
-        # turn read back from one page, since its last item can be lost;
-        # the items seen live are used when the read fails (D-23,
-        # hardening INV-38).
-        handle = turn.handle
-        stored = None
-        with suppress(CodexAgentError):
-            stored = await self._threads.review_turn(CodexHostOperation.START_CODEX_REVIEW, handle.thread_id, handle.turn_id)
-        items = stored.items if stored is not None else turn.items
-        self._registry.finish(turn, self._responses.turn_snapshot(turn, items, turn.completed))
-
-    def _on_turn_event(self, turn: CodexLiveTurn, note: Notification) -> None:
-        # @intent the-first-outcome-ends-a-turn
-        # Runs on the loop for each notification a watcher posts. A turn
-        # that already ended ignores later events (INV-15). Passing the
-        # output cap sends one interrupt (D-7).
-        if turn.snapshot is not None:
-            return
-        ended = turn.observe(note)
-        if turn.over_cap():
-            turn.stop(self._connection, FailureCode.CODEX_BUDGET_EXHAUSTED)
-        if not ended:
-            return
-        # The end builds the snapshot: a review from its read-back, a
-        # goal run by the goal table, any other turn from its
-        # completion.
-        if turn.review:
-            self._connection.spawn_task(self._complete_review(turn))
-        elif turn.state is not None:
-            self._registry.finish(turn, self._responses.goal_snapshot(cast("CodexGoalTurn", turn)))
-            turn.close_goal_stream(self._connection.client)
-        else:
-            self._registry.finish(turn, self._responses.turn_snapshot(turn, turn.items, turn.completed))
 
     def _end_running_turns(self) -> list[CodexLiveTurn]:
         # Cancel every running tool call, release each plain turn's
