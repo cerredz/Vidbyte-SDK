@@ -66,7 +66,7 @@ class BrowserServerSettings:
     """
 
     preset: str | McpPresetDefinition | None = None
-    command: tuple[str, ...] | None = None
+    command: tuple[str, ...] | None = field(default=None, repr=False)
     env: Mapping[str, str] = field(default_factory=dict, repr=False)
     timeout: float = BROWSER_DEFAULT_SERVER_TIMEOUT_SECONDS
 
