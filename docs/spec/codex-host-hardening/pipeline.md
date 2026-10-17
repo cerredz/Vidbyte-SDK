@@ -16,8 +16,8 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 06:50 | 07:12 | reports/S0-scout.md | base_commit 6f5a7310; code-map 4 sections, 25 files |
-| S1 spec + review | running | 07:13 | | reports/S1-spec-author.md, reports/S1-spec-review.md | r1 0f0d3118 (FR 37, AC 39, EC 52, W 13; 0 blocking Q); reviewer round 1 SOUND WITH FIXES (836b23ca); r2 2b6affc1 rebased on #1178 (FR+, 3 new files, 20 superseded tests); reviewer round 2 launched 09:40 |
-| S2 tests | pending | | | | |
+| S1 spec + review | done | 07:13 | 10:05 | reports/S1-spec-author.md, reports/S1-spec-review.md | r1 0f0d3118 (FR 37, AC 39, EC 52, W 13; 0 blocking Q); reviewer round 1 SOUND WITH FIXES (836b23ca); r2 2b6affc1 rebased on #1178 (FR+, 3 new files, 20 superseded tests); reviewer round 2 SOUND WITH FIXES (4548f58d, 0 Blocker); r3 804c6f0b status approved |
+| S2 tests | running | 10:10 | | reports/S2-test-author.md | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
@@ -50,6 +50,21 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
   - At S3, open the PR with base `ai/resolve-pr-1055-comments` while #1178 is open. GitHub retargets it to main when that branch is deleted on merge. Otherwise retarget it with `gh pr edit --base main`.
 - 2026-10-17 08:55: S1 review round 1 returned SOUND WITH FIXES: 1 Blocker (R-1, #1178 conventions), 4 Major (R-2 to R-5), 6 Minor (one scope-adding, Q-18). All of it was forwarded to the author as one revision, together with the rebase.
 - 2026-10-17 09:40: S1 review round 2 is focused on what r2 reshaped: §8, §8.4, §8.5, §9, §12, §13, plus INV-47/48, NFR-11 and AC-40/41. The playbook requires another round when §8, §8.5 or §12 change. This is the last allowed round (2/2), and whatever is still disputed afterwards becomes a Q-n with its default. PR #1178's head was re-checked and is still `8baff351` (open).
+- 2026-10-17 10:05: Spec r3 approved after 2 review rounds (cap reached; nothing disputed). The open questions take their defaults:
+  - Q-1: no P2;
+  - Q-2: `VIDBYTE_CODEX_LIVE_TESTS=1`;
+  - Q-3: unresolved, nothing depends on it;
+  - Q-4/Q-5: permissions and elicitations keep their fixed refusals;
+  - Q-6 to Q-12 and Q-15 to Q-18: no;
+  - Q-13: tiers shown read-only in the `list_codex_models` tool;
+  - Q-14: `max`/`ultra` stay in the tools' effort enum;
+  - Q-19: refuse, never drop.
+- 2026-10-17 10:08: **Test and gate interpreter = an isolated venv** at `C:/Users/422mi/AppData/Local/Temp/claude/C--Users-422mi-vidbyte-repos/bc193043-e6a6-4003-b534-2ea6e3af726a/scratchpad/venv-codex163`. It holds `pip install -e ".[dev]"` from the worktree, plus `openai-codex==0.163.0`.
+  - *Why the venv:* the installed 0.162.1 models lack `ModelListParams.forceReload` and `ThreadStartParams.serviceTierForTurn`, which the spec sends as stable 0.163.0 fields (S10 raises the pin). Under 0.162.1 they would be silently dropped, and the tests could never go green.
+  - *Why not global:* the global env has `vidbyte-sdk` as an editable install pointing at the user's main checkout, plus openai-codex 0.162.1. A `pip install -e` from the worktree, or an SDK upgrade, would rewire or break the user's checkout. Neither was done; both were verified untouched.
+  - **No stage may run `pip install` against the global interpreter.**
+  - Baseline in the venv at `fba99efd`: `tests/features/codex_host` + `tests/features/harness_threads` = 650 passed, 2 skipped, 1 failed (inherited `harness_threads:193`).
+- 2026-10-17 10:10: The S2 briefing authorizes the test author to edit exactly the 20 superseded tests and 7 support literals in spec §13, each to the behaviour its spec ID defines, every edit listed in test-plan.md. The template's "never modify an existing assertion" rule otherwise stands. *Reason:* the implementer may not touch tests, so §13's supersessions can only land at S2. S3/S5 then diff the test tree against S2_HEAD.
 
 ## User replies (verbatim)
 - (none yet)
