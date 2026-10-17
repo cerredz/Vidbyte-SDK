@@ -17,7 +17,7 @@ started: 2026-10-16 17:17
 | S1 spec + review | done | 2026-10-16 22:40 | 2026-10-17 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | spec r3 approved @0adeae0b; round 1 SOUND WITH FIXES (2B/4M/2m), round 2 SOUND WITH FIXES (0B/4M); 12 findings applied |
 | S2 tests | done | 2026-10-17 04:00 | 2026-10-17 | reports/S2-test-author.md | 106 test items (69 functions, 8 modules) in tests/features/browser_agent/, red confirmed (106 failed, no collection error); S2_HEAD 5db0eaa0 |
 | S3 implement | done | 2026-10-17 | 2026-10-17 | reports/S3-implementer.md | S3_HEAD 3f9e63c9; draft PR https://github.com/cerredz/Vidbyte-SDK/pull/1182; 106/106 new tests; CI 39064133364 + Static policy 39064135009 green on 085d1887 (docs-only after); budget 10 modules ≤251 body lines, 34 new/12 modified |
-| S4 adversarial review | running | 2026-10-17 | | reports/S4-review-{conformance,conventions,engineering}.md | |
+| S4 adversarial review | running | 2026-10-17 | | reports/S4-review-{conformance,conventions,engineering}.md | reviewers done on origin/main...3f9e63c9, all MERGEABLE AFTER FIXES: conformance 0B/1M/5m (R-C1..C6), conventions 0B/3M/5m (R-V1..V8), engineering 0B/2M/6m (R-E1..E8); findings verifier next |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
@@ -54,6 +54,11 @@ started: 2026-10-16 17:17
 - none yet
 
 ## Niche facts accumulated (carried into every later briefing)
+- S4: reviewers' probes live in the scratchpad, not the worktree: engineering in `browser-agent/probes/` (`probe_engine_shapes.py`, `mutant_keep_one.py` as a pytest plugin `-p mutant_keep_one`, `probe_unpriced_events.py`); conformance at `<scratchpad>/s4c_probe_events.py`; conventions' base-lint diff harness in `<scratchpad>/s4conv/` (`git archive 08f67e7f` + `run_base_lint.py` patching `SourceCatalog._tracked_paths`). — *source:* S4 reviewers
+- S4: lint count deltas vs merge base: only A002 moves (562 → 563, `browser/agent.py:91 _runtime_extension_kwargs`); S051/I001 at `vidbyte/lib/registries/runtimes.py:33` pre-exists at base (S051 stays 259). `ruff format --check` is not a repo gate. — *source:* S4 conventions
+- S4: `BROWSER_FIRST_INDEX`/`BROWSER_MIN_COUNT` are wanted by strict-config-dataclasses.md (bound constants) even though A007 does not need them; keep them. — *source:* S4 conventions
+- S4: `run_episode` and `patch_goal` are internal tools, so `loop.max_tool_calls` never counts them (runtime.py:1836-1837, :1866-1868); episodes are bounded only by `loop.max_iterations`. — *source:* S4 engineering
+- S4: leave alone (verified correct by reviewers): runtime.py:136-177 (rebuild), tools.py:47 (role split), goal.py:126-145 (stall rule). — *source:* S4 conformance
 - S3: the granted AC-13 test fix landed at e35b2db3 (test author); `git diff 5db0eaa0..HEAD -- tests/` = exactly that one line in `test_browser_agent_recheck.py:112`. Any later test diff beyond it is a hard failure. — *source:* orchestrator
 - S3: this shell may hold LIVE provider keys in env (ANTHROPIC, GEMINI, VIDBYTE, GROK, DEEPSEEK); run every gate and test under `env -u` for each provider key variable so nothing can reach a paid model. — *source:* S3 implementer
 - S3: the global `semgrep` CLI crashes at import (its mcp subcommand needs mcp<2); the implementer used a scratchpad wrapper `C:/Users/422mi/AppData/Local/Temp/claude/C--Users-422mi-vidbyte-repos/d4409101-4281-402b-989c-fb71871586cd/scratchpad/run_semgrep.py` (stubs only that module at import; Windows spawn needs it). Remote Static policy passed. — *source:* S3 implementer
