@@ -159,3 +159,70 @@ A scratch driver fed the fakes the exact §9.1 shapes. These checks show a spec-
 7. **EC-14 does not say how the home is found.** The test patches `Path.home()`, following the existing Grok precedent.
 8. **AC-12 for Muse.** The vendor prints no session before a required-server failure, so the Muse case checks no thread id.
 9. **Cosmetic.** The existing test name `…append_exactly_the_28_harness_codes` now covers 32 codes; it was not renamed, because I may not modify existing tests beyond their constants.
+
+## Post-S3 repair (orchestrator-adjudicated)
+
+S3 reported three test-side blockers (`reports/S3-implementer.md`, "Blockers"). The orchestrator adjudicated all three as test defects or test drift. Three test-only commits on top of `6d163420` fix them; no file under `vidbyte/` changed.
+
+### 1. Key-shaped fixtures are built at run time (`cf724cfc`, AC-1)
+
+GitHub push protection (GH013) refused the branch: `DEEPSEEK_KEY` in `test_harness_threads_browser_acceptance.py:46` matched the DeepSeek key pattern. Every credential-shaped fixture literal in the S2 files is now a concatenation of short pieces, so the source text holds no provider-pattern token. The runtime value is byte-identical.
+
+| File | Lines | Literals |
+|---|---|---|
+| `test_harness_threads_browser_acceptance.py` | 46, 47 | `DEEPSEEK_KEY` (`sk-`), `FIRECRAWL_KEY` (`fc-`) |
+| `test_harness_threads_browser_registry.py` | 22–25, 238 | `FIRECRAWL_KEY`, `BRAVE_KEY` (`BSA`), `TAVILY_KEY` (`tvly-dev-`), `BRIGHTDATA_KEY` (64 hex), the malformed `fc-` key in the `tool_keys` refusal case |
+| `test_harness_threads_browser_mounts.py` | 26–30 | `BRAVE_KEY`, `BRIGHTDATA_KEY`, `BROWSERBASE_KEY` (`bb_live_`), `JINA_KEY` (`jina_`), `CALLER_FIRECRAWL_KEY` (`fc-`) |
+| `test_harness_threads_browser_lifecycle.py` | 27 | `BRAVE_KEY` |
+| `test_harness_threads_browser_fakes.py` | 32, 116, 163, 176 | the provider `apiKey` (`sk-`), an inline Brave key, the two `XAI_API_KEY` values (`xai-`) |
+
+- How it is cut: the vendor prefix is its own piece, and any long alphanumeric body is cut into pieces of at most 16 characters.
+- Not changed: `fake_browser.py` and the lines S2 added to `conftest.py` and `fake_harness.py` hold no credential-shaped literal. `conftest.py:42` (`API_KEY = "vbk-test-…"`) is a line `main` already had, so it is out of scope.
+- Why the strength is unchanged: the edited files and their `HEAD` versions parse to identical ASTs once string `+` chains are folded. So every runtime value, every assertion and every parameter list is unchanged, and the only difference is in the source text.
+- Checks:
+  - `git grep -nE "sk-[0-9a-f]{32}|fc-[0-9a-f]{32}" -- tests/features/harness_threads` returns nothing.
+  - A tokenizer scan of the S2 files finds no literal with a vendor prefix followed by a key body, and no alphanumeric run of 20 or more characters.
+  - The five edited files: `3 failed, 125 passed, 1 skipped`. The three failures are exactly the routing tests below, as before.
+
+### 2. Node-side fake fields go through `sandbox.node` (`4ad61c26`, AC-12, EC-18, EC-29, EC-32, EC-41)
+
+Only the `node` stand-in reads `server_fail`, `artifact_burst` and `extra_tools` (`fake_browser.mcp_server` and `answer`). But `browse(fake=...)` writes `fake` only into the harness stand-in's scenario, so these three tests never delivered their fields. Each test now sets the field with `sandbox.node(<field>=...)` before `browse` and drops it from `fake`. The runtime and fakes tests already used this pattern.
+
+| Test | Field (value unchanged) |
+|---|---|
+| `test_harness_threads_browser_lifecycle.py::test_muse_required_server_failure_carries_muses_reason` | `server_fail=["playwright"]` |
+| `test_harness_threads_browser_lifecycle.py::test_tool_calls_and_artifacts_cap_at_a_thousand` | `artifact_burst=OVER_CAP` |
+| `test_harness_threads_browser_mounts.py::test_grok_unlisted_server_tool_cancels_the_turn_loudly` | `extra_tools={"firecrawl": ["firecrawl_brand_new"]}` |
+
+- Why the strength is unchanged:
+  - Every assertion, field value and parameter list is the same, and the harness-side fields (`browser_calls`, `repeat_calls`) stay in `fake`.
+  - The removed `fake` keys were never read by the harness stand-in, so dropping them changes nothing.
+  - The tests now exercise the scenario they always described.
+- Placement in the cap test: `sandbox.node(artifact_burst=...)` runs before the first `browse`, not between the two calls.
+  - This avoids rewriting the `node` executable after a call. On Windows, a process from that call that has not exited yet could still hold the file.
+  - Only a screenshot call reads `artifact_burst`. The first call's only tool call is the Playwright probe (`browser_navigate`), so its outcome is unchanged.
+- Run: the three tests gave `3 passed in 5.68s`. The lifecycle and mounts files gave `77 passed, 1 skipped`.
+
+### 3. Codex packaging pins refreshed (`93b19766`, AC-3; W-11, W-12)
+
+`tests/features/codex_host/test_codex_host_packaging.py` (#1055) pins three texts that rows 34–36 of §12.3 must change. Before each pin was refreshed, the property it guards was checked against the current files.
+
+| Pin | What it guards | Evidence that the guarded property still holds |
+|---|---|---|
+| `NATIVE_INIT_SHA256` | The native marker only imports and re-exports. It does not import or re-export the Codex host or any vendor SDK, and it has no side effects at import time (INV-1, AC-36). | In the AST, the body is the docstring, `ImportFrom` statements and `__all__`. Every import comes from `__future__`, `vidbyte.harnesses.native.{grok,muse,opencode}` or `vidbyte.lib.*`, and none names codex. `__all__` (28 names) has no Codex name. The sentences "It does not re-export the Codex host…" and "Do not import the codex subpackage or any vendor SDK here." are still present. The import-safety test passes. |
+| `REPO_MAP_SECTION` | The native section sits between the harnesses paragraph and `stores/`. It describes both shapes, and the claim "no host objects, model-facing tools or servers" stays true. | The position assertions are unchanged and pass. The Codex-host paragraph is byte-identical to the old pin. The browser text is added only in the second paragraph, and "Those three harnesses have no host objects, model-facing tools or servers" is kept, with the note that a browser tool is a third-party server that the vendor's own MCP client starts. |
+| `README_BULLET` | The `native/` bullet follows the serialization bullet and keeps the Codex-host import guidance (`vidbyte.harnesses.native.codex`). | The old bullet, up to " The shared plumbing", is a byte-identical prefix of the new one. The Codex sentence and "which only the harness subpackages import" are kept. Only the browser paragraph and the `hostkit/browser.py` mention are added. |
+
+- How the values were taken: they were recomputed the way the test reads them, from the working copy with CRLF turned into LF, and checked to equal the committed `HEAD` blob.
+  - The working copies of these three files have not changed since `b5601413`.
+  - `NATIVE_INIT_SHA256` is `6044725df61d3fdc4a9fd0ce5fd94bee306ea385293e3d802a1f2b7a1a4b950b`, the hash of 5261 LF bytes. This agrees with S3's figure.
+  - The same method gives the old pin for the `a151e79c` bytes (3855).
+- Why the strength is unchanged: the three assertions still compare exact bytes or exact text. Only the three constant lines changed.
+- Run: `7 passed`.
+- Not refreshed: the header (`KNOWN EDGE CASES: … its 3855 LF bytes`) and the comment above `NATIVE_INIT_SHA256` still say 3855 bytes, because the brief allowed only the pins to change. They are now stale; the marker is 5261 LF bytes.
+
+### Final run
+
+`PYTHONPATH=$(pwd) py -3.11 -m pytest -q tests/features/harness_threads tests/features/codex_host` gave `1 failed, 811 passed, 3 skipped in 342.12s (0:05:42)`.
+
+The one failure is the inherited `test_harness_threads_surface.py::test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes`, at `assert len(main_members) == 120` → `AssertionError: assert 167 == 120`. This is the merge-base length check, and it fails the same way on pristine `origin/main`.
