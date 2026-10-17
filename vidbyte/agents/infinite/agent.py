@@ -2,13 +2,13 @@
 
 PURPOSE: Exposes InfiniteMemoryAgent, a root agent that ruthlessly delegates work to generator and verifier subagent pairs and keeps its memory in one guarded workspace folder, built from one validated InfiniteMemoryAgentSettings; and its resume/aresume, which continue an interrupted run from its journal.
 ROLE IN CODEBASE: Maps the settings into BaseAgent with AgentRuntimeType.INFINITE_MEMORY, which RuntimeRegistry resolves to InfiniteMemoryRuntime (runtime.py). Builds the InfiniteWorkspace (workspace.py) once, and passes it, the settings, and a resumed run's journal (journal.py) to each run-local runtime through _runtime_extension_kwargs.
-ARCHITECTURE NOTE: A closed construction surface like JevAgent: callers pass only the settings object, and the runtime, the preset tools, and the history trim are fixed here. The root holds bash, grep, and read_lines from InfiniteMemoryAgentTools plus the developer's extras; the runtime adds the run-bound tools for each run. Durable sessions are not supported, because a restored agent would be a plain BaseAgent that the runtime refuses; the run journal is the resume path instead.
+ARCHITECTURE NOTE: A closed construction surface like JevAgent: callers pass only the settings object, and the runtime, the preset tools, and the middleware are fixed here. The middleware order is masking (older grep, read_lines, and search_memory outputs become the masked_output leaf, the calls stay), then the history trim with its low watermark, then the delegation limits, so the trim measures the masked view. The root holds bash, grep, and read_lines from InfiniteMemoryAgentTools plus the developer's extras; the runtime adds the run-bound tools for each run. Durable sessions are not supported, because a restored agent would be a plain BaseAgent that the runtime refuses; the run journal is the resume path instead.
 FUNCTION INVENTORY: __init__ is the narrated main function; _runtime_extension_kwargs hands the run-time objects to the runtime; resume and aresume find an unfinished run and continue it; _resume_prompt writes the resumed root's first message.
 COMMON MODIFICATION PATTERNS: A new agent-level capability is a validated field on InfiniteMemoryAgentSettings (settings.py) used here or passed to the runtime through _runtime_extension_kwargs.
 WHAT NOT TO DO IN THIS FILE: 1. Do not accept BaseAgent keyword arguments; everything comes from the settings. 2. Do not start a run in resume before the journal checks pass. 3. Do not share one middleware instance between agents; each agent builds its own.
 KNOWN EDGE CASES: Building the agent creates the workspace folder and copies the seeds, and refuses a workspace already over a cap. A resumed root starts with a fresh conversation: its first message holds the original task, one short line per finished root-level pair, and the names of interrupted ones. resume() cannot run inside an active event loop; use aresume() there.
-RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 4, 6.1 INV-1, INV-2, INV-23, INV-27, INV-28, and 8.5); vidbyte/agents/infinite/README.md; vidbyte/agents/jev/agent.py (the pattern this follows)
-TESTS: tests/features/infinite_memory_agent/test_infinite_memory_contract.py, tests/features/infinite_memory_agent/test_infinite_memory_acceptance.py, tests/features/infinite_memory_agent/test_infinite_memory_resume.py, and tests/features/infinite_memory_agent/test_infinite_memory_context.py
+RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 4, 6.1 INV-1, INV-2, INV-23, INV-27, INV-28, and 8.5); docs/spec/infinite-memory-context-economy/spec.md (INV-0.4, FR-2.2, FR-4.2); vidbyte/agents/infinite/README.md; vidbyte/agents/jev/agent.py (the pattern this follows)
+TESTS: tests/features/infinite_memory_agent/test_infinite_memory_contract.py, tests/features/infinite_memory_agent/test_infinite_memory_acceptance.py, tests/features/infinite_memory_agent/test_infinite_memory_resume.py, tests/features/infinite_memory_agent/test_infinite_memory_context.py, and tests/features/infinite_memory_agent/test_infinite_memory_economy.py
 """
 
 from __future__ import annotations
@@ -23,7 +23,10 @@ from vidbyte.agents.infinite.launch import InfinitePair
 from vidbyte.agents.infinite.settings import InfiniteMemoryAgentSettings
 from vidbyte.agents.infinite.workspace import InfiniteWorkspace
 from vidbyte.lib.constants.infinite import (
+    INFINITE_HISTORY_LOW_WATERMARK_TOKENS,
     INFINITE_HISTORY_MAX_TOKENS,
+    INFINITE_MASK_KEEP_RECENT,
+    INFINITE_MASKED_TOOL_NAMES,
     INFINITE_ROOT_DEPTH,
     INFINITE_ROOT_KEY,
 )
@@ -35,6 +38,7 @@ from vidbyte.middleware import (
     DelegationLimitsMiddleware,
     MessageHistoryCompactionMiddleware,
 )
+from vidbyte.middleware.compaction import CompactionMode
 from vidbyte.prompts.catalog import Prompts
 from vidbyte.tools.toolsets import InfiniteMemoryAgentTools
 
@@ -63,8 +67,9 @@ class InfiniteMemoryAgent(BaseAgent):
 
         # Build the root: the developer's prompt plus the delegation
         # rules, the preset tools plus the developer's extras, its own
-        # history trim, so old tool results drop out past the cap while
-        # the task, the rules, and the map stay, and the delegation caps.
+        # masking of older search and read outputs, its own history trim,
+        # so old tool results drop out past the cap while the task, the
+        # rules, and the map stay, and the delegation caps.
         # @intent limits-in-code-behavior-in-the-prompt
         # The rules describe how to delegate; the depth and batch caps
         # are enforced by DelegationLimitsMiddleware, so the prompt holds
@@ -74,10 +79,14 @@ class InfiniteMemoryAgent(BaseAgent):
             name=settings.name,
             system_prompt=f"{settings.system_prompt}\n\n{rules}",
             runtime=AgentRuntimeType.INFINITE_MEMORY,
-            tools=(*InfiniteMemoryAgentTools(Path(settings.root_dir), self.workspace.root, settings.workspace.max_tokens).all(), *settings.tools),
+            tools=(*InfiniteMemoryAgentTools(Path(settings.root_dir), self.workspace.root, settings.workspace.max_tokens, settings.workspace.max_read_lines).all(), *settings.tools),
             permission_policy=settings.permission_policy,
             agent_loop_settings=settings.loop,
-            middleware=(MessageHistoryCompactionMiddleware.trim_with_provider_boundaries(max_tokens=INFINITE_HISTORY_MAX_TOKENS), DelegationLimitsMiddleware(settings.delegation_limits, depth=INFINITE_ROOT_DEPTH)),
+            middleware=(
+                MessageHistoryCompactionMiddleware.tool_output_sliding_window(INFINITE_MASK_KEEP_RECENT, CompactionMode.STRIP_TOOL_RESULT_BODIES, placeholder=Prompts().get(Prompt.INFINITE_MEMORY_MASKED_OUTPUT), tools=INFINITE_MASKED_TOOL_NAMES),
+                MessageHistoryCompactionMiddleware.trim_with_provider_boundaries(max_tokens=INFINITE_HISTORY_MAX_TOKENS, low_watermark_tokens=INFINITE_HISTORY_LOW_WATERMARK_TOKENS),
+                DelegationLimitsMiddleware(settings.delegation_limits, depth=INFINITE_ROOT_DEPTH),
+            ),
             api_keys=settings.api_keys,
             model_mode=settings.model_mode,
             provider=settings.provider,
