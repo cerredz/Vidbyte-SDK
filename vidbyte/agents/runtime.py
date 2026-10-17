@@ -76,6 +76,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import functools
 import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -91,7 +92,7 @@ from vidbyte.agents.contracts.schema import SchemaConformance
 from vidbyte.agents.pricing import UsageTracker
 from vidbyte.agents.speed import AgentSpeedTracker
 from vidbyte.agents.types import AgentMessage
-from vidbyte.context.algorithms import ContextWindowAlgorithm, ToolResultAdmission
+from vidbyte.context.algorithms import ContextWindowAlgorithm
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.primitives import ContextItem
 from vidbyte.context.runtime import (
@@ -129,7 +130,7 @@ from vidbyte.lib.dataclasses.speed import (
     RecordToolCallInput,
 )
 from vidbyte.lib.dataclasses.strategies import AgentResult
-from vidbyte.lib.enums import AgentRuntimeStateKey, ModelModality, UsageKind
+from vidbyte.lib.enums import AgentRuntimeStateKey, ModelModality, ModelProvider, UsageKind
 from vidbyte.lib.errors import (
     AllModelsFailedError,
     PermissionDeniedError,
@@ -140,18 +141,18 @@ from vidbyte.lib.token_usage import token_usage_from_response
 from vidbyte.lib.tools import ToolsFormatter
 from vidbyte.lib.tracing import NullTracer, SpanContext, TracerBase
 from vidbyte.lib.util.credential_keys import CredentialKeyPolicy
+from vidbyte.lib.util.prompt_placement import PromptPlacement
 from vidbyte.middleware import AgentMiddleware, MiddlewarePipeline
-from vidbyte.middleware.builtins.context_compaction import (
-    ToolResultCompactionMiddleware,
-)
 from vidbyte.prompts.agentic_loop import append_agentic_loop_prompt
+from vidbyte.providers.anthropic import AnthropicProvider
+from vidbyte.providers.gemini import GeminiProvider
 from vidbyte.providers.output_schema import OutputSchemaFormatter
 from vidbyte.tools._internal import IS_DONE_TOOL_NAME, with_internal_agent_tools
 from vidbyte.tools.activity import ActivityToolFormatter
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.operations.base import PricedOperationTool
 from vidbyte.tools.catalog import Tools
-from vidbyte.tools.security import PermissionDecision, PermissionPolicy
+from vidbyte.tools.security import PermissionCeiling, PermissionDecision, PermissionPolicy
 from vidbyte.tools.types import ToolCall, ToolCallContext, ToolCallState, ToolResult
 
 
@@ -199,7 +200,7 @@ class AgentRuntime:
         self.run_id = run_id
         self.algorithm = ContextWindow.resolve_algorithm(algorithm)
         self._tracer: TracerBase = tracer or NullTracer()
-        self.middleware = MiddlewarePipeline((*tuple(middleware), *self._context_window_admission_middleware()))
+        self.middleware = MiddlewarePipeline(tuple(middleware))
         self.context_manager = context_manager
         # Run-scoped, read-only per-call manager (AgentInput.context_manager); rendered, never upserted into.
         self.input_context_manager: ContextManager | None = None
@@ -215,15 +216,6 @@ class AgentRuntime:
         # The model this run switched to and where its chain stands, so later stages and trials stay on the model that worked.
         self._fallback_handle: RunnerHandle | None = None
         self._fallback_progress: tuple[int, list[dict[str, str]], list[BaseException], bool] = (0, [], [], False)
-
-    def _context_window_admission_middleware(self) -> tuple[AgentMiddleware, ...]:
-        # Returns compatibility middleware for legacy tool-result admission presets.
-        admission = ToolResultAdmission(self.algorithm.tool_result_admission)
-        if admission is ToolResultAdmission.COMPACT:
-            return (ToolResultCompactionMiddleware.truncate(max_chars=self.algorithm.max_tool_result_chars),)
-        if admission is ToolResultAdmission.HIDE_RAW:
-            return (ToolResultCompactionMiddleware.hide(),)
-        return ()
 
     def build_context(
         self,
@@ -365,8 +357,12 @@ class AgentRuntime:
                     runner_output_text=handle.extract_text,
                     runner_output_metadata=handle.extract_metadata,
                     options=run_options,
-                    messages=messages,
-                    system_prompt=self.system_prompt,
+                    # @intent inner-algorithms-see-the-task
+                    # The task reaches the runner apart from messages, so hand side models the conversation the main model sees, task at the run boundary.
+                    messages=self._messages_with_task(messages, caller_messages, message),
+                    # @intent inner-algorithms-see-the-run-system-prompt
+                    # A run's base context may replace the agent's prompt, so side models get the prompt this run's main model follows.
+                    system_prompt=context.system_prompt,
                 )
             stop_result = self._budget_stop(
                 iteration_count=state.iteration_count,
@@ -748,7 +744,7 @@ class AgentRuntime:
                     state.model_call_count,
                     compaction_count,
                 )
-            compaction_count += self._compaction_event_delta(decision)
+            compaction_count += self._compaction_event_delta(decision, self._provider_messages_from_options(current_call_options))
             current_call_options = self._apply_before_model_call_transform(current_call_options, decision)
             state.model_call_count += 1
             # @intent model-call-count-survives-fallback-switch
@@ -1029,7 +1025,9 @@ class AgentRuntime:
                     iteration=iteration,
                     runner=runner,
                     provider=provider,
-                    invoke_runner=invoke_runner,
+                    # @intent side-calls-count-toward-the-token-budget
+                    # max_tokens covers every model call in the run, so each side call's tokens join the loop's count before the next budget check.
+                    invoke_runner=functools.partial(self._invoke_and_count_side_call, state, invoke_runner, runner_output_metadata) if invoke_runner is not None else None,
                     runner_output_text=runner_output_text,
                     runner_output_metadata=runner_output_metadata,
                     options=options,
@@ -1049,6 +1047,14 @@ class AgentRuntime:
         response = await runner.invoke(prompt, **options)
         # Algorithm side calls are billed like loop calls, so they land in the same usage ledger.
         self.usage_tracker.record_call(response)
+        return response
+
+    async def _invoke_and_count_side_call(self, state: BaseAgentRuntimeLoopState, invoke_runner: Callable[..., Any], runner_output_metadata: Callable[[object], Mapping[str, Any]] | None, runner: RunnerHandle, prompt: str, **options: Any) -> object:
+        """Invoke an inner-loop algorithm's side call and add its tokens to this run's token count."""
+        # Uses the same token extraction as loop calls, so the budget and the usage ledger agree.
+        response = await invoke_runner(runner, prompt, **options)
+        runner_metadata = dict(runner_output_metadata(response)) if runner_output_metadata is not None else {}
+        state.tokens_used = self._add_token_usage(state.tokens_used, token_usage_from_response(response, runner_metadata))
         return response
 
     @staticmethod
@@ -1087,11 +1093,20 @@ class AgentRuntime:
         if transform.provider_messages is not None:
             transformed["messages"] = tuple(dict(message) for message in transform.provider_messages)
             # @intent prompt-sits-at-the-run-boundary
-            # A rewritten list keeps the run boundary only while everything in front of it is unchanged; otherwise the
-            # provider places the prompt by the shape of the turns.
+            # A rewritten list keeps the run boundary while everything in front of it is unchanged. A rewritten head moves it to
+            # the first message of this run the rewrite kept: the shape rule cannot tell a rewrite's user-role note from a
+            # caller's question and would send the task after the run's work. Compaction builds new dicts, so this matches by
+            # equality, and a message equal to one in front of the boundary cannot anchor. With none kept, the provider places
+            # the task by shape.
             boundary = transformed.get("prompt_index")
-            if boundary is not None and transformed["messages"][:boundary] != tuple(call_options.get("messages", ()))[:boundary]:
-                transformed.pop("prompt_index")
+            original = tuple(call_options.get("messages", ()))
+            if boundary is not None and transformed["messages"][:boundary] != original[:boundary]:
+                head, own = original[:boundary], original[boundary:]
+                kept = next((index for index, message in enumerate(transformed["messages"]) if message in own and message not in head), None)
+                if kept is None:
+                    transformed.pop("prompt_index")
+                else:
+                    transformed["prompt_index"] = kept
         return transformed
 
     def _provider_messages_from_options(self, call_options: Mapping[str, Any]) -> tuple[Mapping[str, Any], ...]:
@@ -1441,7 +1456,7 @@ class AgentRuntime:
         decision = self.permission_policy.check(spec, call)
         if decision is PermissionDecision.DENY:
             raise PermissionDeniedError(
-                f"Permission denied for tool '{spec.name}' requiring {spec.permission.value}",
+                f"Permission denied for tool '{spec.name}' requiring {spec.permission.value}{PermissionCeiling.denial_note(spec.permission)}",
                 details={"tool_name": spec.name, "permission": spec.permission.value},
             )
 
@@ -1513,8 +1528,11 @@ class AgentRuntime:
         trace_messages: list[dict[str, Any]] = []
         if system is not None:
             trace_messages.append({"role": "system", "content": _trace_text(system)})
-        trace_messages.extend(history_messages)
+        # Put the task where the provider puts it in the request, never after the run's own work.
+        position = self._traced_prompt_position(provider, call_options.get("messages") or (), call_options.get("prompt_index"))
+        trace_messages.extend(history_messages[:position])
         trace_messages.append({"role": "user", "content": safe_prompt})
+        trace_messages.extend(history_messages[position:])
         input_messages = tuple(trace_messages)
         inputs: dict[str, Any] = {
             "agent_name": self.agent_name,
@@ -1545,6 +1563,19 @@ class AgentRuntime:
             f"tools={len(list(tools)) if tools else 0}"
         )
         return inputs
+
+    @staticmethod
+    def _traced_prompt_position(provider: str, messages: Sequence[Mapping[str, Any]], boundary: int | None) -> int:
+        """Return where the provider puts the task among the request's messages, by that provider's own placement rule."""
+        # @intent traced-prompt-sits-where-the-request-put-it
+        # The span shows the task where the request put it: at the run boundary or in front of the tool exchange it
+        # provoked, never after the run's own work. Each wire family's own rule decides, on the unscrubbed messages, so
+        # the view cannot drift from the request; Gemini also puts the task ahead of a leading model turn.
+        wire = ToolsFormatter.wire_format(str(getattr(provider, "value", provider)))
+        if wire == ModelProvider.GEMINI.value:
+            return GeminiProvider._prompt_index([GeminiProvider._gemini_turn(message) for message in messages], boundary)
+        is_call_turn = AnthropicProvider._is_tool_use_turn if wire == ModelProvider.ANTHROPIC.value else PromptPlacement.is_chat_call_turn
+        return PromptPlacement.index(messages, is_call_turn=is_call_turn, boundary=boundary)
 
     @staticmethod
     def _runner_model_name(runner: object) -> str | None:
@@ -1599,6 +1630,15 @@ class AgentRuntime:
             if isinstance(contract, SchemaConformance) and contract.schema is self.output_schema:
                 return contract.evaluate({contract.key: output})
         return self._schema_formatter.validate(output, self.output_schema)
+
+    @staticmethod
+    def _messages_with_task(messages: Sequence[dict[str, Any]], caller_messages: Sequence[dict[str, Any]], message: str) -> list[dict[str, Any]]:
+        """Return a copy of the run's messages with its task as a user turn after the caller's own messages, where the provider sends it."""
+        # Like _run_boundary, trust the caller's messages only while they still open the list as the same objects; a
+        # fallback reset that rewrote them leaves the task opening the list. The live list is never changed.
+        caller_count = len(caller_messages)
+        boundary = caller_count if len(messages) >= caller_count and all(messages[index] is caller for index, caller in enumerate(caller_messages)) else 0
+        return [*messages[:boundary], {"role": "user", "content": message}, *messages[boundary:]]
 
     @staticmethod
     def _run_boundary(conversation: Sequence[Mapping[str, Any]], messages: Sequence[Mapping[str, Any]], caller_messages: Sequence[Mapping[str, Any]]) -> int | None:
@@ -1768,7 +1808,8 @@ class AgentRuntime:
             # so later runs replay what the model saw rather than the raw, unprotected output.
             # @intent denials-are-never-truncated
             # A permission or middleware denial never ran, so result_max_chars must not cut its reason off.
-            visible_result = self._append_tool_result_message(messages, call, result, state.provider, after_decision, truncate=context_record.state is not ToolCallState.DENIED)
+            # Only here does the context-window algorithm admit (compact or hide) what a tool actually returned.
+            visible_result = self._append_tool_result_message(messages, call, result, state.provider, after_decision, truncate=context_record.state is not ToolCallState.DENIED, admit=True)
             context_record = self._with_model_visible_result(context_record, result, visible_result)
         state.call_contexts.append(context_record)
         if after_decision.action is MiddlewareAction.ABORT_RUN:
@@ -1900,9 +1941,10 @@ class AgentRuntime:
         decision: MiddlewareDecision,
         *,
         truncate: bool = True,
+        admit: bool = False,
     ) -> ToolResult:
         # Returns the model-visible result it appended so callers can record what the model saw.
-        visible_result = self._model_visible_tool_result(call, result, decision, truncate=truncate)
+        visible_result = self._model_visible_tool_result(call, result, decision, truncate=truncate, admit=admit)
         # Provider-specific result formatting remains the single place that
         # knows how Anthropic, Gemini, OpenAI Responses, and OpenAI-compatible
         # chat messages represent tool failures.
@@ -1917,6 +1959,7 @@ class AgentRuntime:
         decision: MiddlewareDecision,
         *,
         truncate: bool = True,
+        admit: bool = False,
     ) -> ToolResult:
         # Primitive binding is applied before any middleware-visible transform so
         # successful tool outputs can still be stored as primitives. Error results
@@ -1930,18 +1973,28 @@ class AgentRuntime:
         # @intent appended-middleware-notes-survive-truncation: truncation keeps the head, so a note a
         # middleware appended (canary watermark, loop-detection notice) would be cut off a long output.
         # Cap only the raw part and re-attach the appended tail; replaced outputs are capped whole.
-        if visible is not result and result.output and visible.output.startswith(result.output):
-            capped = self._truncate_for_tool_settings(call, result)
+        # An empty raw output counts too: the visible text is then all middleware note, which a hide admission
+        # would otherwise withhold whole, and there is no tool output in it to cap or hide.
+        if visible is not result and visible.output.startswith(result.output):
+            capped = self._truncate_for_tool_settings(call, result, admit=admit)
             tail = visible.output[len(result.output):]
             return ToolResult(tool_name=visible.tool_name, status=visible.status, output=capped.output + tail, metadata={**dict(capped.metadata), **dict(visible.metadata)})
-        return self._truncate_for_tool_settings(call, visible)
+        return self._truncate_for_tool_settings(call, visible, admit=admit)
 
-    def _truncate_for_tool_settings(self, call: ToolCall, result: ToolResult) -> ToolResult:
-        # Caps executed, non-internal tool output to ToolSettings.result_max_chars, leaving raw ToolResult intact.
+    def _truncate_for_tool_settings(self, call: ToolCall, result: ToolResult, *, admit: bool = False) -> ToolResult:
+        # Caps executed, non-internal tool output to the context-window admission and ToolSettings.result_max_chars, leaving raw ToolResult intact.
         settings = self.config.tool_settings
-        if settings is None or self._tool_is_internal(call):
+        if self._tool_is_internal(call):
             return result
-        return settings.truncate(result)
+        # @intent admission-is-a-cap-not-a-middleware
+        # The context-window admission (compact or hide) caps an executed tool's output here, like result_max_chars,
+        # so a note a middleware appended survives it and a denial's reason is never hidden or cut.
+        # @intent admission-spares-calls-that-never-ran
+        # An unknown tool or invalid arguments means the tool never ran: the text is the SDK's own guidance, not tool
+        # output, so hiding it would tell the model the tool "completed" and leave it no way to fix the call.
+        if admit and dict(result.metadata).get("error") not in ("unknown_tool", "validation_error"):
+            result = self.algorithm.model_visible_tool_result(call, result)
+        return result if settings is None else settings.truncate(result)
 
     def _tool_call_middleware_metadata(self, metadata: Mapping[str, Any], call: ToolCall) -> dict[str, Any]:
         call_metadata = dict(metadata)
@@ -2127,23 +2180,18 @@ class AgentRuntime:
                 return middleware.estimated_spend_usd_for(run_state or {})
         return 0.0
 
-    def _compaction_event_delta(self, decision: MiddlewareDecision) -> int:
+    def _compaction_event_delta(self, decision: MiddlewareDecision, messages: Sequence[Mapping[str, Any]]) -> int:
         # Returns 1 when a history compaction transform actually mutated provider messages.
         transform = decision.transform
         if transform is None or transform.provider_messages is None:
             return 0
-        meta = dict(transform.metadata or {})
-        if "compaction" not in meta:
+        if "compaction" not in dict(transform.metadata or {}):
             return 0
         # @intent content-rewrites-count-as-compactions
-        # Prefer the middleware's own changed flag, because an in-place rewrite keeps the message count.
-        if isinstance(meta.get("changed"), bool):
-            return 1 if meta["changed"] else 0
-        before = meta.get("before_count")
-        after = meta.get("after_count")
-        if before is not None and after is not None:
-            return 1 if int(before) != int(after) else 0
-        return 1
+        # @intent stacked-compactions-all-count
+        # Compare the history itself: an in-place rewrite keeps the message count, and stacked middleware merge their
+        # metadata later-wins, so a later no-op's flag or counts would hide an earlier middleware's compaction.
+        return 1 if tuple(dict(message) for message in transform.provider_messages) != tuple(messages) else 0
 
     def _publish_contract_evaluations(self, run_state: dict[Any, Any], counters: Mapping[str, Any]) -> None:
         # Records each contract's evaluation into run_state so _with_run_state_metadata lifts it into the result.

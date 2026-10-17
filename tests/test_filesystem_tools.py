@@ -164,6 +164,19 @@ class FileSystemToolHappyPathTests(unittest.TestCase):
             self.assertEqual(result.status, ToolStatus.SUCCESS)
             self.assertEqual(result.output, "a.txt")
 
+    def test_find_trailing_globstar_lists_files_and_directories(self) -> None:
+        # Before Python 3.13 pathlib yields only directories for "sub/**", so find never listed the files below sub.
+        # A trailing separator still asks for directories only, as it does on Python 3.13.
+        expected = {"sub/**": ["sub", "sub/inner", "sub/inner/a.txt"], "sub/**/": ["sub", "sub/inner"]}
+        with TemporaryDirectory() as tmp:
+            (Path(tmp) / "sub" / "inner").mkdir(parents=True)
+            (Path(tmp) / "sub" / "inner" / "a.txt").write_text("x", encoding="utf-8")
+            for pattern, paths in expected.items():
+                with self.subTest(pattern=pattern):
+                    result = run(FindTool(FileSystemToolConfig(root=tmp)).execute(ToolCall("find", {"pattern": pattern})))
+                    self.assertEqual(result.status, ToolStatus.SUCCESS)
+                    self.assertEqual(result.output.replace("\\", "/").splitlines(), paths)
+
     def test_find_returns_empty_string_when_no_matches(self) -> None:
         with TemporaryDirectory() as tmp:
             config = FileSystemToolConfig(root=tmp)

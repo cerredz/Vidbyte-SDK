@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 from vidbyte.lib.errors import ToolRegistryError
 from vidbyte.tools.activity import ActivityToolFormatter
 from vidbyte.tools.catalog import Tools
-from vidbyte.tools.security import PermissionDecision, PermissionPolicy
+from vidbyte.tools.security import PermissionCeiling, PermissionDecision, PermissionPolicy
 from vidbyte.tools.types import ToolCall, ToolResult
 
 if TYPE_CHECKING:
@@ -54,7 +54,7 @@ class ToolExecutor:
         if decision is PermissionDecision.DENY:
             return ToolResult.error(
                 spec.name,
-                f"Permission denied for tool '{spec.name}' requiring {spec.permission.value}",
+                f"Permission denied for tool '{spec.name}' requiring {spec.permission.value}{PermissionCeiling.denial_note(spec.permission)}",
                 metadata={"error": "permission_denied", "permission": spec.permission.value},
             )
 

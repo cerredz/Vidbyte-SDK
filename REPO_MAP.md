@@ -80,6 +80,10 @@ Reusable multi-agent reasoning strategies packaged as ready-to-use agent behavio
 
 The invariants an agent's configuration must satisfy before it is allowed to run. This spans both the shape a structured output must conform to and the minimum acceptable settings below which a configuration is considered actively misconfigured rather than merely unusual. The folder is small, but its effect is outsized: it turns a bad configuration into an error raised at construction time instead of a confusing failure partway through a run. Anyone adding a new class of agent configuration should consider whether it needs a floor defined here.
 
+##### `vidbyte/agents/infinite/`
+
+A delegating agent for long tasks of any kind, built to treat its own context window as scarce. Its root hands work to fresh subagents that run in pairs, a generator that does one task and a verifier that checks and fixes it, and gets back only a short, capped result card per pair. Every agent in the tree shares one memory folder guarded by fixed limits on files, tokens, entry size, and per-agent writes, and a pair's memory entries are saved only after its verifier gives a verdict. Its delegation caps are enforced by a built-in middleware, not by its prompts. Each run is journaled, so an interrupted run resumes without redoing finished pairs. Its records, enums, constants, and prompt text live lower in the shared substrate, and its preset tools in the toolsets folder.
+
 ##### `vidbyte/agents/jev/`
 
 The opinionated JEV agent: its facade, its single public settings object, and a dedicated runtime that runs named, Jev-backed preflights before handing off to the ordinary linear loop. The preflight gate asks every enabled fixed-question preset's questions in one Jev request and decides whether the generative agent runs at all. A clarification agent turns an unclear request into structured questions for the user, and a tool selector narrows the tool catalog before the loop starts. One response writer is the only place a run's JEV outcomes are recorded. The question text, records, enums, and constants this agent uses deliberately live lower in the shared substrate; see [JEV File Locations](#jev-file-locations) for every file.
@@ -254,7 +258,7 @@ Deterministic hooks that run around a full run, around individual iterations, ar
 
 ##### `vidbyte/middleware/builtins/`
 
-The shipped set of policy middleware available out of the box, covering a wide range of concerns: audit logging, retry handling around transient failures, enforcing token and runtime budget limits, detecting unproductive repetition, enforcing tool-use policy, and a set of security-focused safeguards against certain classes of prompt manipulation. These represent the guardrails available for free without writing any custom middleware. Reading through this folder before writing new custom middleware is worthwhile, since the needed behavior may already exist here in some form. Each one plugs into the same general middleware interface described in the parent folder.
+The shipped set of policy middleware available out of the box, covering a wide range of concerns: audit logging, retry handling around transient failures, enforcing token and runtime budget limits, capping how deep and how wide an agent may delegate, detecting unproductive repetition, enforcing tool-use policy, and a set of security-focused safeguards against certain classes of prompt manipulation. These represent the guardrails available for free without writing any custom middleware. Reading through this folder before writing new custom middleware is worthwhile, since the needed behavior may already exist here in some form. Each one plugs into the same general middleware interface described in the parent folder.
 
 ##### `vidbyte/middleware/compaction/`
 
@@ -354,7 +358,7 @@ The authorization boundary that all tool execution passes through: the policy mo
 
 ##### `vidbyte/tools/toolsets/`
 
-Named, pre-assembled bundles of tools that ship together for a particular use case, so a caller can attach a coherent, related set of capabilities in a single call rather than assembling them one at a time. It currently holds one such bundle, assembled for a specific paradigm shipped elsewhere in the package. A new toolset is worth adding whenever the same combination of individual tools keeps being assembled by hand across more than one place. This folder is about convenience and consistency rather than introducing any new tool capability itself.
+Named, pre-assembled bundles of tools that ship together for a particular use case, so a caller can attach a coherent, related set of capabilities in a single call rather than assembling them one at a time. It holds three such bundles: a minimal set assembled for a paradigm shipped elsewhere in the package, the coding agent's shell, file, search, and web-fetch tools over one project folder, and the delegating memory agent's shell over the project plus search and read tools over its memory folder. A new toolset is worth adding whenever the same combination of individual tools keeps being assembled by hand across more than one place. This folder is about convenience and consistency rather than introducing any new tool capability itself.
 
 #### `vidbyte/trace/`
 
@@ -385,7 +389,8 @@ JEV covers TypeSafe's Jev calibrated decision model and `JevAgent`, the opiniona
 | `JevAgent` facade | `vidbyte/agents/jev/agent.py` |
 | `JevAgentSettings`, the whole public configuration surface | `vidbyte/agents/jev/settings.py` |
 | `JevRuntime` (runs the gate, then the inherited loop) | `vidbyte/agents/jev/runtime.py`; resolved from `AgentRuntimeType.JEV` in `vidbyte/lib/registries/runtimes.py` |
-| `JevPreflightGate` and `JevClarificationAgent` | `vidbyte/agents/jev/gate/` |
+| `JevPreflightGate`, `JevClarificationAgent`, and `JevReadOnly` (the READ_ONLY case's tool limit) | `vidbyte/agents/jev/gate/` |
+| `PermissionCeiling`, the run-scoped permission cap every `PermissionPolicy.check` honors | `vidbyte/lib/permission_ceiling.py`; re-exported from `vidbyte/tools/security/` |
 | `JevPreflight` contract and the `JevPreflightTools` tool selector | `vidbyte/agents/jev/preflight.py` |
 | `JevResponse`, the only writer of `JevAgentResponse` | `vidbyte/agents/jev/response.py` |
 | Structured note-taking compaction: `JevRunBriefKeeper` and its tool-free writer | `vidbyte/agents/jev/brief/` |
@@ -398,7 +403,7 @@ JEV covers TypeSafe's Jev calibrated decision model and `JevAgent`, the opiniona
 | The four per-assignment SWARM plan questions and `JevSwarmPlanRegistry` | `vidbyte/lib/jev/compute/plan.py` |
 | Run-brief writer prompt family | `vidbyte/prompts/prompts/jev_run_brief/`; keys in `vidbyte/lib/enums/prompts.py` |
 | `JevPresets`: the preflight flags and the question keys each flag asks | `vidbyte/lib/jev/presets.py` |
-| Fixed preflight questions, one dataclass per question, one module per preset | `vidbyte/lib/jev/preflight/<preset>.py` (`clarity.py`) |
+| Fixed preflight questions, one dataclass per question, one module per preset | `vidbyte/lib/jev/preflight/<preset>.py` (`clarity.py`, `bulk_work.py`, `read_only.py`) |
 | `JevPreflightRegistry` | `vidbyte/lib/jev/preflight/preflight.py` |
 | Fixed done questions, one module per check (`multi_part.py`, `claims.py`, `motivating_case.py`) | `vidbyte/lib/jev/done/` |
 | `JevDoneRegistry` (question, threshold, and enabled-check validation) | `vidbyte/lib/jev/done/done.py` |

@@ -14,6 +14,7 @@ Relations:
 
 from __future__ import annotations
 
+import string
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
@@ -23,6 +24,9 @@ from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.prompts import Prompts
 from vidbyte.lib.dataclasses.context import BaseAgentContext
 from vidbyte.lib.dataclasses.strategies import AgentResult
+
+_AGENT_PROMPT_PLACEHOLDERS = frozenset({"system_prompt", "task", "reflections", "previous_attempt"})
+_REFLECT_PROMPT_PLACEHOLDERS = frozenset({"task", "failed_attempt", "reflections"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,13 +42,19 @@ class ReflexionAlgorithm:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        """Validate Reflexion limits."""
+        """Validate Reflexion limits and prompt templates."""
         if self.max_trials <= 0:
             raise ValueError("max_trials must be greater than zero.")
         if self.max_reflection_chars <= 0:
             raise ValueError("max_reflection_chars must be greater than zero.")
         if self.max_attempt_chars <= 0:
             raise ValueError("max_attempt_chars must be greater than zero.")
+        # @intent templates-render-or-are-refused
+        # Both templates are filled by str.format from a fixed set of names, so any other {name} (an example JSON object) would fail only after a paid trial.
+        for field_name, template, allowed in (("agent_system_prompt", self.agent_system_prompt, _AGENT_PROMPT_PLACEHOLDERS), ("reflect_prompt", self.reflect_prompt, _REFLECT_PROMPT_PLACEHOLDERS)):
+            unknown = {name for _, name, _, _ in string.Formatter().parse(template or "") if name is not None} - allowed
+            if unknown:
+                raise ValueError(f"{field_name} has unknown formatting placeholders {sorted(unknown)}; write literal braces as {{{{ and }}}}.")
 
     def context_for_trial(
         self,

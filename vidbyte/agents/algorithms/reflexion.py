@@ -26,6 +26,8 @@ from vidbyte.lib.dataclasses.strategies import AgentResult
 if TYPE_CHECKING:
     from vidbyte.agents import AgentRuntime
 
+_TRIAL_ACCOUNTING_KEYS = ("iteration_count", "tokens_used", "tool_call_count", "tool_call_states", "tool_calls")
+
 
 class ReflexionRuntimeAlgorithm:
     """Runtime adapter for the Reflexion context-window algorithm."""
@@ -76,6 +78,10 @@ class ReflexionRuntimeAlgorithm:
                 trace_context=trace_context,
             )
             if isinstance(reflected, AgentResult):
+                # @intent reflection-abort-keeps-the-trial-accounting
+                # The abort was built for the reflection call alone, so it carries the finished trial's tool calls, iterations and tokens.
+                accounting = {key: value for key, value in dict(result.metadata).items() if key in _TRIAL_ACCOUNTING_KEYS}
+                reflected = AgentResult(output=reflected.output, strategy_name=reflected.strategy_name, calls=result.calls, metadata={**dict(reflected.metadata), **accounting})
                 return self._with_reflexion_metadata(reflected, reflections=reflections, attempts=attempt_summaries)
             if reflected:
                 reflections.append(reflected)

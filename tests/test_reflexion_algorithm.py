@@ -20,6 +20,7 @@ from vidbyte.agents.algorithms import ReflexionRuntimeAlgorithm
 from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
 from vidbyte.agents import AgentFallback, AgentRuntime, FallbackModel
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
+from vidbyte.lib.dataclasses.context import BaseAgentContext
 from vidbyte.lib.dataclasses.middleware import MiddlewareDecision, MiddlewareTransform
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.middleware import AgentMiddleware
@@ -130,6 +131,30 @@ class ReflexionAlgorithmTests(unittest.IsolatedAsyncioTestCase):
             failed_attempt="failed",
             reflections=("memory",),
         ))
+
+    def test_reflexion_algorithm_refuses_a_template_with_an_unknown_placeholder(self) -> None:
+        # [Hidden Failure] An example JSON object is an unknown {name} to str.format, so it is refused before any paid trial.
+        for field_name in ("agent_system_prompt", "reflect_prompt"):
+            with self.subTest(field_name=field_name):
+                with self.assertRaises(ValueError) as ctx:
+                    ReflexionAlgorithm(**{field_name: 'Retry. {reflections} Reply as JSON like {"answer": "..."}'})
+                self.assertIn(field_name, str(ctx.exception))
+                self.assertIn('"answer"', str(ctx.exception))
+
+    def test_reflexion_algorithm_renders_escaped_braces_literally(self) -> None:
+        # [Edge Case] Escaped braces construct and reach the model as a literal JSON example.
+        algorithm = ReflexionAlgorithm(
+            agent_system_prompt='AGENT {system_prompt} {reflections} Reply as JSON like {{"answer": "..."}}',
+            reflect_prompt='REFLECT {failed_attempt} Reply as JSON like {{"lesson": "..."}}',
+        )
+
+        context = algorithm.context_for_trial(BaseAgentContext(system_prompt="Base."), task="task", reflections=("memory",), failed_attempts=("failed",))
+        self.assertTrue(context.system_prompt.startswith("AGENT Base."))
+        self.assertTrue(context.system_prompt.endswith('Reply as JSON like {"answer": "..."}'))
+        self.assertEqual(
+            algorithm.render_reflection_prompt(task="task", failed_attempt="failed", reflections=()),
+            'REFLECT failed Reply as JSON like {"lesson": "..."}',
+        )
 
     async def test_runtime_reflects_after_failed_trial_and_retries_with_memory(self) -> None:
         @tool

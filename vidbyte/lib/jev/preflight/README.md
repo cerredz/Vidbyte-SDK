@@ -18,6 +18,7 @@ Feedback on one question applies to every question, so when you change the patte
 - `clarity.py` holds the clarity preset's questions.
 - `run_state_relation.py` holds the fixed relationship question for an existing run-state record.
 - `bulk_work.py` holds the BULK_WORK preset's eight questions, each one separate piece of evidence that a request's work can be split across fresh agents.
+- `read_only.py` holds the READ_ONLY preset's eight questions, each one separate piece of evidence that a request asks for an assessment (an explanation, a diagnosis, an opinion, a recommendation, a plan, a review, or a report) and not a change.
 - `skills.py` builds the dynamic indexed relevance question for each configured skill document.
 - `specialist.py` holds the specialist Choice question; its options are built per run from `JevAgentSettings.agents`, with `none` always last.
 - `preflight.py` holds `JevPreflightRegistry` (`get`, `questions`, `specialists`, `validate`).
@@ -25,3 +26,5 @@ Feedback on one question applies to every question, so when you change the patte
 - The logic that asks Jev and acts on the answers is `JevPreflightGate` in `vidbyte/agents/jev/gate/`.
 
 The bulk-work questions are submitted in the same batched Jev request as every other enabled fixed question and any specialist Choice question. They only recognize request structure; when every answer reaches `JevBulkSettings.threshold`, the main agent is offered the `run_bulk_work` tool in `vidbyte/agents/jev/bulk_work.py`, writes the tasks itself, and gets the agents' handoffs back as the tool result.
+
+The read-only questions ride in the same batched request. Every true side is evidence for a read-only run, so "asks for a change" is asked as `read_only.unchanged`, and the threshold is also the veto: one clear no keeps the full tool catalog. When every answer reaches `JEV_READ_ONLY_THRESHOLD`, `JevReadOnly` in `vidbyte/agents/jev/gate/read_only.py` limits the run, and every agent it starts, to SAFE and READ tools.

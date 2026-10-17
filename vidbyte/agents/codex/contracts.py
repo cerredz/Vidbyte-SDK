@@ -126,7 +126,8 @@ class CodexContractTranslator:
                 cls._verdict(contract, counters)
                 for contract in contracts
             ),
-            counters=dict(counters),
+            # The final text is already the reply's content; the evidence keeps the numbers.
+            counters={key: value for key, value in counters.items() if key != "final_output"},
         )
 
     @staticmethod
@@ -219,8 +220,11 @@ class CodexContractTranslator:
         # duration_ms is the provider's own report; dividing is what keeps a
         # MinElapsedSeconds floor from being satisfied by a factor of 1000.
         duration = result.duration_ms or 0
+        final_output = result.final_response or ""
         return {
-            "final_output_chars": len(result.final_response or ""),
+            # SchemaConformance reads the text itself, not only its length.
+            "final_output": final_output,
+            "final_output_chars": len(final_output),
             "elapsed_seconds": duration / CODEX_MILLISECONDS_PER_SECOND,
         }
 

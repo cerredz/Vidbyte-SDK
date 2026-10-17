@@ -6,10 +6,28 @@ from typing import Any
 from vidbyte.lib.dataclasses.context import ContextMessage
 from vidbyte.middleware.compaction.base import CompactionMode, Summarizer, TokenCounter
 from vidbyte.middleware.compaction.engine import ContextCompactionEngine
-from vidbyte.middleware.compaction.strategies import ReplaceWithTraceCompaction, _provider_groups
+from vidbyte.middleware.compaction.strategies import ReplaceWithTraceCompaction, ToolOutputSlidingWindowCompaction, _provider_groups
 from vidbyte.middleware.compaction.trace_render import TraceArtifactRenderer
 from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision, MiddlewareTransform
 from vidbyte.middleware.base import AgentMiddleware
+
+
+# The modes engine.compact_tool_result applies to one tool result; it returns the result unchanged for any other mode.
+_TOOL_RESULT_MODES = frozenset({
+    CompactionMode.TRUNCATE_TOOL_RESULTS,
+    CompactionMode.STRIP_TOOL_RESULT_BODIES,
+    CompactionMode.HIDE_TOOL_RESULTS,
+    CompactionMode.TOOL_RESULT_CLEARING_WITH_EXCLUSIONS,
+    CompactionMode.HEAD_TAIL_TOOL_PREVIEW,
+    CompactionMode.MECHANICAL_BLOAT_SCRUBBER,
+})
+
+# The history modes the engine runs only with an injected summarizer; without one they raise on every call.
+_SUMMARY_MODES = frozenset({
+    CompactionMode.SUMMARIZE_OLDEST_N,
+    CompactionMode.SUMMARIZE_RANGE,
+    CompactionMode.SUMMARIZE_BY_TOPIC_BLOCKS,
+})
 
 
 class ToolResultCompactionMiddleware(AgentMiddleware):
@@ -74,6 +92,10 @@ class ToolResultCompactionMiddleware(AgentMiddleware):
 
     def _validate_options(self) -> None:
         # Raises ValueError for invalid constructor options before runtime starts.
+        # @intent compaction-middlewares-refuse-modes-they-cannot-apply
+        # A history mode here would leave every tool result unchanged, so refuse it instead of compacting nothing.
+        if self.mode not in _TOOL_RESULT_MODES:
+            raise ValueError(f"ToolResultCompactionMiddleware mode must be one of {sorted(item.value for item in _TOOL_RESULT_MODES)}, got '{self.mode.value}'; use MessageHistoryCompactionMiddleware for history modes.")
         if "max_chars" in self.options and int(self.options["max_chars"]) < 0:
             raise ValueError("max_chars must be non-negative.")
         if "head_chars" in self.options and int(self.options["head_chars"]) < 0:
@@ -96,6 +118,10 @@ class MessageHistoryCompactionMiddleware(AgentMiddleware):
         self.mode = mode if isinstance(mode, CompactionMode) else CompactionMode(str(mode))
         self.options = dict(options)
         self.engine = ContextCompactionEngine()
+        # @intent summarize-modes-need-a-summarizer-at-construction
+        # This engine has no summarizer, so a summarize mode would stop every run at its first compaction; refuse it here.
+        if self.mode in _SUMMARY_MODES and self.engine.summarizer is None:
+            raise ValueError(f"{self.mode.value} needs a summarizer; use SummaryCompactionMiddleware(mode=..., summarizer=...), or pass summarizer= to the trace middleware that runs it.")
         self._validate_options()
 
     @classmethod
@@ -204,6 +230,10 @@ class MessageHistoryCompactionMiddleware(AgentMiddleware):
 
     def _validate_options(self) -> None:
         # Raises ValueError for invalid message compaction constructor options.
+        # @intent compaction-middlewares-refuse-modes-they-cannot-apply
+        # The history engine has no hide strategy and would run a no-op, so point to the per-result middleware instead.
+        if self.mode is CompactionMode.HIDE_TOOL_RESULTS:
+            raise ValueError("hide_tool_results hides single tool results; use ToolResultCompactionMiddleware.hide(), or strip_tool_result_bodies for history.")
         if "percentage" in self.options and not 0 <= float(self.options["percentage"]) <= 1:
             raise ValueError("percentage must be between 0 and 1.")
         if "order" in self.options and self.options["order"] not in {"oldest", "newest"}:
@@ -217,6 +247,10 @@ class MessageHistoryCompactionMiddleware(AgentMiddleware):
             raise ValueError("max_repeated_lines must be non-negative.")
         if self.mode is CompactionMode.CONTEXT_SNAPSHOT_BRANCH_TRIM and not str(self.options.get("active_branch", "")).strip():
             raise ValueError("active_branch must be provided.")
+        # @intent sliding-window-refuses-modes-it-cannot-apply
+        # Build the window once so a window_mode it cannot apply fails here instead of failing every model call at run time.
+        if self.mode is CompactionMode.TOOL_OUTPUT_SLIDING_WINDOW:
+            ToolOutputSlidingWindowCompaction(mode=self.options.get("window_mode", CompactionMode.TRUNCATE_TOOL_RESULTS))
 
 
 class SummaryCompactionMiddleware(MessageHistoryCompactionMiddleware):
@@ -276,12 +310,15 @@ class TraceReplacementCompactionMiddleware(AgentMiddleware):
         if not ctx.provider_messages:
             return MiddlewareDecision.continue_()
         artifact = await self._resolve_artifact(ctx)
-        if TraceArtifactRenderer.is_empty(artifact):
+        if TraceArtifactRenderer.is_empty(artifact, self.render.get("fields")):
             return await self._apply_fallback(ctx)
         trace_text = self._render_trace(artifact)
         messages, stats = await self._replace_history(ctx, trace_text)
         messages, stats = await self._compose(messages, stats)
-        transform = MiddlewareTransform(provider_messages=messages, metadata={"compaction": stats.mode, "scope": self.strategy_options["scope"], "before_count": stats.before_count, "after_count": stats.after_count, "trace_chars": len(trace_text), "fallback_used": False})
+        # @intent content-rewrites-count-as-compactions
+        # A composed pass reports its own counts, taken after the replacement, so report whether the history really changed.
+        changed = messages != tuple(dict(message) for message in ctx.provider_messages)
+        transform = MiddlewareTransform(provider_messages=messages, metadata={"compaction": stats.mode, "scope": self.strategy_options["scope"], "before_count": stats.before_count, "after_count": stats.after_count, "trace_chars": len(trace_text), "fallback_used": False, "changed": changed})
         return MiddlewareDecision.continue_(transform=transform)
 
     # Family A — scope/retention presets
@@ -430,13 +467,28 @@ class TraceReplacementCompactionMiddleware(AgentMiddleware):
         if self.fallback_mode is None:
             return MiddlewareDecision.continue_()
         messages, stats = await self.engine.compact_provider_messages(ctx.provider_messages, mode=self.fallback_mode, options=self.fallback_options)
-        transform = MiddlewareTransform(provider_messages=messages, metadata={"compaction": stats.mode, "fallback_used": True, "before_count": stats.before_count, "after_count": stats.after_count})
+        # @intent content-rewrites-count-as-compactions
+        # Fallback modes may rewrite tool results in place, keeping the message count.
+        changed = messages != tuple(dict(message) for message in ctx.provider_messages)
+        transform = MiddlewareTransform(provider_messages=messages, metadata={"compaction": stats.mode, "fallback_used": True, "before_count": stats.before_count, "after_count": stats.after_count, "changed": changed})
         return MiddlewareDecision.continue_(transform=transform)
 
     def _validate_options(self) -> None:
         # Validates render bounds and replacement options by constructing them once at init time.
         TraceArtifactRenderer(**self.render)
         ReplaceWithTraceCompaction("validation", **self.strategy_options)
+        # @intent trace-fallback-and-compose-options-validate-eagerly
+        # The fallback and composed passes run history modes, so their bad options must fail here, not fail open on every call.
+        summarizer = self.engine.summarizer
+        for mode, options in ((self.fallback_mode, self.fallback_options), (self.compose_after, self.compose_after_options)):
+            if mode is None:
+                continue
+            if summarizer is None:
+                MessageHistoryCompactionMiddleware(mode=mode, **options)
+            else:
+                # @intent summarize-modes-need-a-summarizer-at-construction
+                # These passes run on this middleware's summarizer, so validate them with it.
+                SummaryCompactionMiddleware(mode=mode, summarizer=summarizer, **options)
 
     @staticmethod
     def _coerce_mode(mode: CompactionMode | str | None) -> CompactionMode | None:
@@ -455,6 +507,11 @@ class TraceSummaryTailCompactionMiddleware(TraceReplacementCompactionMiddleware)
         # Stores the tail summarizer and the number of recent groups to summarize.
         if summarizer is None:
             raise ValueError("trace_then_summarize_tail requires an injected summarizer.")
+        # @intent summary-tail-refuses-options-it-ignores
+        # The rebuild always puts one assistant trace before one summary of the whole tail, so these would be accepted and silently dropped.
+        ignored = sorted(set(kw) & {"placement", "compose_after", "compose_after_options", "keep_last_user", "keep_pinned", "keep_errors", "keep_active_branch", "n", "percentage"})
+        if ignored:
+            raise ValueError(f"trace_then_summarize_tail does not support {', '.join(ignored)}; use TraceReplacementCompactionMiddleware for retention, placement or composition.")
         self._summarizer = summarizer
         self.keep_last_groups = keep_last_groups
         super().__init__(scope="all_non_system", keep_last_groups=keep_last_groups, summarizer=summarizer, **kw)
@@ -469,13 +526,16 @@ class TraceSummaryTailCompactionMiddleware(TraceReplacementCompactionMiddleware)
         if not ctx.provider_messages:
             return MiddlewareDecision.continue_()
         artifact = await self._resolve_artifact(ctx)
-        if TraceArtifactRenderer.is_empty(artifact):
+        if TraceArtifactRenderer.is_empty(artifact, self.render.get("fields")):
             return await self._apply_fallback(ctx)
         trace_text = self._render_trace(artifact)
         context_messages = self.engine.to_context_messages(ctx.provider_messages)
         rebuilt = await self._replace_and_summarize_tail(context_messages, trace_text)
         provider = self.engine.from_context_messages(rebuilt)
-        transform = MiddlewareTransform(provider_messages=provider, metadata={"compaction": CompactionMode.REPLACE_WITH_TRACE.value, "tail_summarized": True, "before_count": len(context_messages), "after_count": len(provider)})
+        # @intent content-rewrites-count-as-compactions
+        # The trace and tail summary can replace as many messages as they add, keeping the message count.
+        changed = provider != tuple(dict(message) for message in ctx.provider_messages)
+        transform = MiddlewareTransform(provider_messages=provider, metadata={"compaction": CompactionMode.REPLACE_WITH_TRACE.value, "tail_summarized": True, "before_count": len(context_messages), "after_count": len(provider), "changed": changed})
         return MiddlewareDecision.continue_(transform=transform)
 
     async def _replace_and_summarize_tail(self, messages: Sequence[ContextMessage], trace_text: str) -> list[ContextMessage]:

@@ -27,7 +27,8 @@ FUNCTION INVENTORY:
     object; _attach() attaches a bridge through CodexToolAttachRequest;
     _call() answers one tool call through a
     handler from a worker thread; _run_transport() runs CodexTransport against
-    the fake SDK.
+    the fake SDK. _from_reader_thread() and _answer_on_reader_thread() run
+    one server request on a plain thread and hand its answer to the loop.
 
 COMMON MODIFICATION PATTERNS:
     Add a handler behavior to CodexToolCallHandler, then add its case to
@@ -41,7 +42,10 @@ WHAT NOT TO DO IN THIS FILE:
 
 KNOWN EDGE CASES:
     Timeout tests patch CODEX_TOOL_CALL_TIMEOUT_SECONDS in the tools module,
-    because the module binds the constant at import time.
+    because the module binds the constant at import time. Server requests are
+    answered from a plain threading.Thread, never asyncio.to_thread: to_thread
+    copies the caller's context, so it would hide a handler that loses the
+    turn's context, permission ceiling included, as the SDK reader thread does.
 
 RELATED DOCS: docs/design/codex-harness-tools.md
 TESTS: python -m pytest tests/test_codex_tools.py
@@ -56,6 +60,7 @@ import threading
 import time
 import unittest
 from collections.abc import Mapping
+from contextvars import ContextVar
 from types import SimpleNamespace
 from typing import Any
 from unittest import mock
@@ -87,6 +92,7 @@ from vidbyte.lib.dataclasses.codex import (
 from vidbyte.lib.dataclasses.security import PermissionPolicy
 from vidbyte.lib.enums.failure import FailureCode
 from vidbyte.lib.errors import CodexAgentError, ConfigurationError, ToolRegistrationError
+from vidbyte.lib.permission_ceiling import PermissionCeiling
 from vidbyte.lib.tools import ToolsFormatter
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.catalog import Tools
@@ -95,6 +101,7 @@ from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolRes
 
 TOOL_CALL = "item/tool/call"
 APPROVAL = "item/commandExecution/requestApproval"
+_RUN_MARKER: ContextVar[str | None] = ContextVar("codex_tools_test_run_marker", default=None)
 
 
 @tool
@@ -109,7 +116,7 @@ def shout(text: str) -> str:
 
 
 class _ProbeTool(BaseTool):
-    """Async BaseTool that records the thread and call it executed with."""
+    """Async BaseTool that records the thread, call, and run marker it executed with."""
 
     def __init__(self, name: str = "probe", permission: ToolPermission = ToolPermission.SAFE) -> None:
         # Stores the declared name and permission plus observation lists.
@@ -117,6 +124,7 @@ class _ProbeTool(BaseTool):
         self._permission = permission
         self.thread_ids: list[int] = []
         self.calls: list[ToolCall] = []
+        self.markers: list[str | None] = []
 
     def spec(self) -> ToolSpec:
         # Declares one optional text argument under the configured permission.
@@ -128,9 +136,10 @@ class _ProbeTool(BaseTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Records the executing thread and call, then succeeds.
+        # Records the executing thread, call, and run marker, then succeeds.
         self.thread_ids.append(threading.get_ident())
         self.calls.append(call)
+        self.markers.append(_RUN_MARKER.get())
         return ToolResult.success(self._name, f"ran:{call.arguments.get('note', '')}")
 
 
@@ -194,9 +203,30 @@ def _attach(bridge: CodexToolBridge, codex: object, loop: asyncio.AbstractEventL
     return bridge.attach(CodexToolAttachRequest(client=codex, loop=loop))
 
 
+def _answer_on_reader_thread(
+    handle: Any, method: str, params: Mapping[str, Any] | None, loop: asyncio.AbstractEventLoop, answered: asyncio.Future[Any]
+) -> None:
+    # Runs one server request on the calling plain thread and hands the answer or error back to the loop.
+    try:
+        answer = handle(method, params)
+    except BaseException as exc:
+        loop.call_soon_threadsafe(answered.set_exception, exc)
+    else:
+        loop.call_soon_threadsafe(answered.set_result, answer)
+
+
+async def _from_reader_thread(handle: Any, method: str, params: Mapping[str, Any] | None) -> dict[str, Any]:
+    # Answers one server request from a new plain thread while the loop stays free. Like the SDK
+    # reader thread, it starts with an empty context; asyncio.to_thread would copy the caller's.
+    loop = asyncio.get_running_loop()
+    answered: asyncio.Future[Any] = loop.create_future()
+    threading.Thread(target=_answer_on_reader_thread, args=(handle, method, params, loop, answered), daemon=True).start()
+    return await answered
+
+
 async def _call(handler: CodexToolCallHandler, params: Mapping[str, Any] | None, method: str = TOOL_CALL) -> dict[str, Any]:
-    # Answers one server request from a worker thread while the loop stays free, as the SDK reader does.
-    return await asyncio.to_thread(handler.handle, method, params)
+    # Answers one server request through a handler from a reader thread, as the SDK does.
+    return await _from_reader_thread(handler.handle, method, params)
 
 
 class _FakeSyncClient:
@@ -225,7 +255,7 @@ class _FakeThread:
         # Answers each scripted server request through whatever handler is installed.
         sync = self._codex._client._sync
         for method, params in _FakeAsyncCodex.script:
-            answer = await asyncio.to_thread(sync._approval_handler, method, params)
+            answer = await _from_reader_thread(sync._approval_handler, method, params)
             _FakeAsyncCodex.answers.append(answer)
         return object()
 
@@ -479,6 +509,32 @@ class CodexToolCallHandlerTests(unittest.IsolatedAsyncioTestCase):
         allowed = await _call(self._handler(_ProbeTool("writer", ToolPermission.WRITE), policy=PermissionPolicy.allow_all()), params)
         self.assertTrue(allowed["success"])
 
+    async def test_read_only_ceiling_refuses_a_write_tool_answered_on_the_reader_thread(self) -> None:
+        writer = _ProbeTool("writer", ToolPermission.WRITE)
+        with PermissionCeiling.scope(PermissionCeiling.READ_ONLY):
+            handler = self._handler(writer, policy=PermissionPolicy.allow_all())
+            answer = await _call(handler, _wire("writer", {}))
+        self.assertFalse(answer["success"])
+        self.assertIn("this run allows only read, safe tools", answer["contentItems"][0]["text"])
+        self.assertEqual(writer.calls, [])
+
+    async def test_tool_sees_the_context_the_handler_was_attached_in(self) -> None:
+        probe = _ProbeTool()
+        token = _RUN_MARKER.set("turn")
+        try:
+            handler = self._handler(probe)
+        finally:
+            _RUN_MARKER.reset(token)
+        answer = await _call(handler, _wire("probe", {}))
+        self.assertTrue(answer["success"])
+        self.assertEqual(probe.markers, ["turn"])
+
+    async def test_write_tool_allowed_by_policy_runs_outside_any_ceiling(self) -> None:
+        writer = _ProbeTool("writer", ToolPermission.WRITE)
+        answer = await _call(self._handler(writer, policy=PermissionPolicy.allow_all()), _wire("writer", {"note": "x"}))
+        self.assertEqual(answer, {"success": True, "contentItems": [{"type": "inputText", "text": "ran:x"}]})
+        self.assertEqual(len(writer.calls), 1)
+
     async def test_null_arguments_become_empty_object(self) -> None:
         answer = await _call(self._handler(_ProbeTool()), _wire("probe", None))
         self.assertEqual(answer["contentItems"][0]["text"], "ran:")
@@ -624,6 +680,19 @@ class CodexTransportToolIntegrationTests(unittest.IsolatedAsyncioTestCase):
             reply = await agent.arun("shout ok")
         self.assertEqual(reply.content, "done")
         self.assertEqual(_FakeAsyncCodex.answers[0]["contentItems"][0]["text"], "OK")
+
+    async def test_agent_run_inside_a_read_only_ceiling_refuses_its_write_tool(self) -> None:
+        _reset_fake([(TOOL_CALL, _wire("writer", {}))])
+        writer = _ProbeTool("writer", ToolPermission.WRITE)
+        agent = CodexHarnessAgent(_settings(tools=(writer,), tool_permission_policy=PermissionPolicy.allow_all()))
+        with mock.patch.object(CodexTransport, "_load_sdk", return_value=_fake_sdk()), mock.patch(
+            "vidbyte.agents.codex.transport.CodexResultSerializer.from_sdk",
+            side_effect=lambda tid, result: _run_result(tid),
+        ), PermissionCeiling.scope(PermissionCeiling.READ_ONLY):
+            await agent.arun("write a file")
+        self.assertFalse(_FakeAsyncCodex.answers[0]["success"])
+        self.assertIn("this run allows only read, safe tools", _FakeAsyncCodex.answers[0]["contentItems"][0]["text"])
+        self.assertEqual(writer.calls, [])
 
 
 class CodexToolForkTests(unittest.TestCase):

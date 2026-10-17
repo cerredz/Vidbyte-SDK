@@ -2,7 +2,7 @@
 
 PURPOSE: Attaches Vidbyte tools to a Codex harness agent as app-server dynamic tools.
 ROLE IN CODEBASE: The Codex translator builds one bridge at construction; the transport attaches it to each run's connection.
-ARCHITECTURE NOTE: Tool code runs in-process through ToolExecutor on the agent's event loop, never on the SDK reader thread.
+ARCHITECTURE NOTE: Tool code runs in-process through ToolExecutor on the agent's event loop, never on the SDK reader thread, and in the turn's context, so run-scoped ContextVars such as PermissionCeiling bind it.
 COMMON MODIFICATION PATTERNS: Keep every private openai-codex attribute access inside CodexToolBridge._sync_client; add Codex wire fields to the request/response records in vidbyte/lib/dataclasses/codex.py.
 WHAT NOT TO DO IN THIS FILE: Raise from CodexToolCallHandler.handle; an exception there stops the SDK reader loop.
 KNOWN EDGE CASES: Codex accepts dynamicTools only on thread/start, so resumed and forked threads keep their original definitions.
@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import contextvars
 import re
 from collections.abc import Callable, Coroutine, Mapping
 from typing import Any
@@ -128,6 +129,9 @@ class CodexToolCallHandler:
         self._loop = loop
         self._fallback = fallback
         self._pending: set[concurrent.futures.Future[ToolResult]] = set()
+        # Built on the loop inside the turn, so this is the turn's context; handle() runs on the
+        # SDK reader thread, whose context lacks run-scoped state such as the permission ceiling.
+        self._context = contextvars.copy_context()
 
     def handle(self, method: str, params: Mapping[str, Any] | None) -> dict[str, Any]:
         # @intent tools-only-server-requests
@@ -145,7 +149,7 @@ class CodexToolCallHandler:
             coroutine = self._executor.execute_call(
                 ToolCall(tool_name=call.tool, arguments=dict(call.arguments), call_id=call.call_id)
             )
-            future = asyncio.run_coroutine_threadsafe(coroutine, self._loop)
+            future = self._context.copy().run(asyncio.run_coroutine_threadsafe, coroutine, self._loop)
             self._pending.add(future)
             result = future.result(timeout=CODEX_TOOL_CALL_TIMEOUT_SECONDS)
             response = CodexToolCallResponse(success=result.status == ToolStatus.SUCCESS, text=result.output)

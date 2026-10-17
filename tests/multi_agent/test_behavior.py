@@ -24,7 +24,7 @@ from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage
 from vidbyte.context.multi_agent import MultiAgentContext
 from vidbyte.lib.dataclasses.agents import AgentForkSettings
 from vidbyte.lib.dataclasses.context import BaseContext
-from vidbyte.lib.dataclasses.multi_agent import AgentDispatch, AgentReport, MultiAgentSettings, OrchestrationContext, OrchestratorDecision, OrchestratorPlan, TaskEvidence, TaskLedgerSnapshot, TaskSpec
+from vidbyte.lib.dataclasses.multi_agent import AgentDispatch, AgentReport, MultiAgentSettings, OrchestrationContext, OrchestratorDecision, OrchestratorPlan, TaskBlocker, TaskEvidence, TaskLedgerSnapshot, TaskSpec
 from vidbyte.lib.enums.multi_agent import MultiAgentStopReason, OrchestratorAction, TaskStatus
 from vidbyte.agents.pricing import UsageTracker
 from vidbyte.lib.enums import ModelProvider
@@ -32,23 +32,28 @@ from vidbyte.lib.errors import AgentTransferError
 from vidbyte.lib.runners import TextModelResponse
 from vidbyte.lib.usage_ledger import usage_ledger_scope
 
+# The reply shape AgentRuntime returns when a worker's own middleware aborts its run.
+_ABORT_TEXT = "Agent runtime stopped by middleware: honeypot_triggered"
+_ABORT_METADATA = {"stop_reason": "middleware_abort", "middleware_abort_reason": "honeypot_triggered"}
+
 
 class ScriptedWorker(BaseAgent):
     """Isolated BaseAgent worker that records invocation and cleanup events."""
 
-    def __init__(self, events: list[str], *, name: str = "worker", content: str = "worker output") -> None:
+    def __init__(self, events: list[str], *, name: str = "worker", content: str = "worker output", metadata: dict[str, Any] | None = None) -> None:
         super().__init__(name=name, system_prompt="work")
         self._events = events
         self._content = content
+        self._metadata = dict(metadata or {})
 
     def fork(self, settings: AgentForkSettings | None = None) -> "ScriptedWorker":
         # Run isolation returns a distinct worker while sharing only the test event sink.
-        return ScriptedWorker(self._events, name=self.name, content=self._content)
+        return ScriptedWorker(self._events, name=self.name, content=self._content, metadata=self._metadata)
 
     async def generate_reply(self, message: str | AgentInput, **options: Any) -> AgentMessage:
         # Record the exact protocol position before returning a deterministic reply.
         self._events.append("worker.generate_reply")
-        return AgentMessage(sender=self.name, recipient="team", content=self._content)
+        return AgentMessage(sender=self.name, recipient="team", content=self._content, metadata=self._metadata)
 
     async def close_mcp_servers(self) -> None:
         # Cleanup observability confirms the run-local fork was closed.
@@ -126,6 +131,24 @@ class MeteredOrchestrator(ScriptedOrchestrator):
     async def finalize(self, context: Any) -> str:
         await self._manager.generate_reply("finalize")
         return await super().finalize(context)
+
+
+class ReopeningOrchestrator(ScriptedOrchestrator):
+    """Scripted orchestrator whose replan reopens the work under a fresh task id."""
+
+    def fork(self) -> "ReopeningOrchestrator":
+        return ReopeningOrchestrator(tuple(self._decisions), final_content=self._final_content)
+
+    async def replan(self, context: OrchestrationContext) -> OrchestratorPlan:
+        # A fresh task id supersedes the blocked task so the replan can recover the run.
+        return OrchestratorPlan(plan_summary="retry", tasks=(TaskSpec(task_id="task-2", goal="do work again", owner="worker"),))
+
+
+def _block_first_task(dispatch: AgentDispatch, _: TaskLedgerSnapshot) -> TaskBlocker | None:
+    # The approval gate denies the original task for good, so only a replan can reopen the work.
+    if dispatch.task_id == "task-1":
+        return TaskBlocker(code="policy", message="task-1 needs approval", retryable=False)
+    return None
 
 
 class MultiAgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
@@ -242,6 +265,94 @@ class MultiAgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.completed)
         self.assertFalse(result.ledger.tasks[0].evidence[0].verified)
 
+    async def test_rejected_premature_finishes_reach_the_stall_replan_threshold(self) -> None:
+        # [Hidden Failure] A rejected finish is one stall, so finishing early with open work must still trigger the promised replan.
+        events: list[str] = []
+        decisions = (
+            OrchestratorDecision(action=OrchestratorAction.DELEGATE, task_id="task-1", owner="worker", instruction="run"),
+            OrchestratorDecision(action=OrchestratorAction.FINISH, final_answer="guess"),
+            OrchestratorDecision(action=OrchestratorAction.DELEGATE, task_id="task-2", owner="worker", instruction="run"),
+            OrchestratorDecision(action=OrchestratorAction.FINISH, final_answer="candidate"),
+        )
+        binding = AgentBinding(ScriptedWorker(events), transfer=AgentTransfer(before_dispatch=_block_first_task))
+        settings = MultiAgentSettings(max_rounds=4, max_replans=1, replan_after_stalls=2)
+        team = MultiAgent(name="team", system_prompt="coordinate", orchestrator=ReopeningOrchestrator(decisions), agents=(binding,), settings=settings)
+
+        await team.generate_reply("complete the task")
+
+        result = team.last_result
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(result.replans, 1)
+        self.assertEqual(result.stop_reason, MultiAgentStopReason.COMPLETED)
+        self.assertEqual({task.task_id: task.status for task in result.ledger.tasks}, {"task-1": TaskStatus.SUPERSEDED, "task-2": TaskStatus.COMPLETED})
+
+    async def test_rejected_finishes_stop_at_max_replans_once_the_replan_budget_is_spent(self) -> None:
+        # [Edge Case] Rejected finishes at the stall threshold end exactly like stalled delegates when no replan is left.
+        events: list[str] = []
+        decisions = (
+            OrchestratorDecision(action=OrchestratorAction.FINISH, final_answer="guess"),
+            OrchestratorDecision(action=OrchestratorAction.FINISH, final_answer="guess"),
+        )
+        team = self._team(events, transfer=AgentTransfer(), decisions=decisions, settings=MultiAgentSettings(max_rounds=2, max_replans=0, replan_after_stalls=2))
+
+        await team.generate_reply("complete the task")
+
+        result = team.last_result
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(result.stop_reason, MultiAgentStopReason.MAX_REPLANS)
+        self.assertEqual(result.replans, 0)
+        self.assertFalse(result.completed)
+        self.assertEqual(events.count("worker.generate_reply"), 0)
+
+    async def test_worker_stopped_by_its_middleware_blocks_its_task_instead_of_completing_it(self) -> None:
+        # [Silent Failure] A worker's middleware abort (a tripwire, a kill switch) is a security stop, never finished work.
+        events: list[str] = []
+        worker = ScriptedWorker(events, content=_ABORT_TEXT, metadata=_ABORT_METADATA)
+        team = self._team(events, transfer=AgentTransfer(), settings=MultiAgentSettings(max_rounds=2), worker=worker)
+
+        await team.generate_reply("complete the task")
+
+        result = team.last_result
+        self.assertIsNotNone(result)
+        assert result is not None
+        task = result.ledger.tasks[0]
+        self.assertEqual(task.status, TaskStatus.BLOCKED)
+        self.assertNotEqual(task.result, _ABORT_TEXT)
+        self.assertEqual([(blocker.code, blocker.retryable) for blocker in task.blockers], [("middleware_abort", False)])
+        self.assertIn("honeypot_triggered", task.blockers[0].message)
+        self.assertEqual(task.attempts, 1)
+        self.assertEqual(events.count("worker.generate_reply"), 1)
+        self.assertFalse(result.completed)
+        self.assertNotEqual(result.stop_reason, MultiAgentStopReason.COMPLETED)
+
+    def test_default_report_parser_blocks_a_middleware_aborted_reply(self) -> None:
+        # [Silent Failure] The SDK's stop text is not output, so the default parser never reports it as completed.
+        dispatch = AgentDispatch(run_id="run", base_revision=0, task_id="task", owner="worker", goal="goal", instruction="run")
+        reply = AgentMessage(sender="worker", recipient="team", content=_ABORT_TEXT, metadata=_ABORT_METADATA)
+
+        report = AgentTransfer.default_report_parser(reply, dispatch, TaskLedgerSnapshot(run_id="run", goal="goal"))
+
+        self.assertEqual(report.status, TaskStatus.BLOCKED)
+        self.assertIsNone(report.result)
+        self.assertEqual(report.evidence, ())
+        self.assertEqual(report.blockers, (TaskBlocker(code="middleware_abort", message="Worker run stopped by middleware: honeypot_triggered", retryable=False),))
+
+    def test_default_report_parser_keeps_completed_and_empty_reply_outcomes(self) -> None:
+        # [Edge Case] Ordinary non-blank output still completes unverified, and a blank reply still fails retryably.
+        dispatch = AgentDispatch(run_id="run", base_revision=0, task_id="task", owner="worker", goal="goal", instruction="run")
+        ledger = TaskLedgerSnapshot(run_id="run", goal="goal")
+
+        done = AgentTransfer.default_report_parser(AgentMessage(sender="worker", recipient="team", content="EMEA churn is 7%.", metadata={"stop_reason": "is_done"}), dispatch, ledger)
+        blank = AgentTransfer.default_report_parser(AgentMessage(sender="worker", recipient="team", content="  "), dispatch, ledger)
+
+        self.assertEqual(done.status, TaskStatus.COMPLETED)
+        self.assertEqual(done.result, "EMEA churn is 7%.")
+        self.assertEqual([(item.value, item.verified) for item in done.evidence], [("EMEA churn is 7%.", False)])
+        self.assertEqual(blank.status, TaskStatus.FAILED)
+        self.assertEqual([(item.code, item.retryable) for item in blank.blockers], [("empty_reply", True)])
+
     async def test_default_request_builder_rejects_non_json_payload(self) -> None:
         # [Edge Case] Opaque payloads fail safely instead of being stringified into assignments.
         dispatch = AgentDispatch(run_id="run", base_revision=0, task_id="task", owner="worker", goal="goal", instruction="run", payload=object())
@@ -279,13 +390,14 @@ class MultiAgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         decisions: Sequence[OrchestratorDecision] | None = None,
         settings: MultiAgentSettings | None = None,
         on_event: Any = None,
+        worker: ScriptedWorker | None = None,
     ) -> MultiAgent:
         # Build a public facade over provider-free fakes for each isolated test.
         scripted = decisions or (
             OrchestratorDecision(action=OrchestratorAction.DELEGATE, task_id="task-1", owner="worker", instruction="run"),
             OrchestratorDecision(action=OrchestratorAction.FINISH, final_answer="candidate"),
         )
-        binding = AgentBinding(ScriptedWorker(events), transfer=transfer)
+        binding = AgentBinding(worker or ScriptedWorker(events), transfer=transfer)
         return MultiAgent(name="team", system_prompt="coordinate", orchestrator=ScriptedOrchestrator(scripted), agents=(binding,), settings=settings, on_event=on_event)
 
 

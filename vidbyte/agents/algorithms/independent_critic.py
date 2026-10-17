@@ -28,6 +28,7 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from vidbyte.context.algorithms.independent_critic import CriticFailurePolicy, IndependentCriticAlgorithm
+from vidbyte.context.manager import ContextManager
 from vidbyte.lib.agents.modality_detector import ModalityDetector
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig, AgentStopReason
 from vidbyte.lib.dataclasses.context import BaseAgentContext, BaseContext, ContextArtifact
@@ -36,6 +37,7 @@ from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.enums import ModelModality
 from vidbyte.lib.errors import AgentExecutionError, ConfigurationError
 from vidbyte.lib.tracing import SpanContext
+from vidbyte.tools.base import BaseTool, _unwrap_tool
 from vidbyte.tools.catalog import Tools
 
 if TYPE_CHECKING:
@@ -171,11 +173,11 @@ class IndependentCriticRuntimeAlgorithm:
         return Tools(detached)
 
     def _detach_tool(self, tool: object) -> object:
-        # Fail closed when an SDK tool can retain producer agent, session, or MCP authority.
+        # Fail closed when an SDK tool can retain producer agent, session, MCP, or live context authority.
         tool_name = str(getattr(tool, "name", tool.__class__.__name__))
         if self._tool_requires_owner(tool):
             raise ConfigurationError(
-                f"Independent critic tool {tool_name!r} is agent/session/MCP-bound and cannot be isolated in version 1."
+                f"Independent critic tool {tool_name!r} is agent/session/MCP/context-bound and cannot be isolated in version 1."
             )
         clone = getattr(tool, "clone_for_fork", None)
         if not callable(clone):
@@ -187,14 +189,20 @@ class IndependentCriticRuntimeAlgorithm:
         if detached_name != tool_name:
             raise ConfigurationError(f"Independent critic tool {tool_name!r} cloned to unexpected tool name {detached_name!r}.")
         if self._tool_requires_owner(detached):
-            raise ConfigurationError(f"Independent critic tool {tool_name!r} remained agent/session/MCP-bound after clone_for_fork().")
+            raise ConfigurationError(f"Independent critic tool {tool_name!r} remained agent/session/MCP/context-bound after clone_for_fork().")
         return detached
 
     @staticmethod
     def _tool_requires_owner(tool: object) -> bool:
         # Identify SDK and structural owner-binding surfaces that cannot cross the critic boundary.
-        module_name = tool.__class__.__module__
-        return module_name.startswith(_UNSAFE_REVIEWER_TOOL_MODULE_PREFIXES) or any(callable(getattr(tool, name, None)) for name in ("bind_agent", "bind_session", "bind_context_getter"))
+        # @intent review-refuses-live-context-tools
+        # Authority travels with the reference that executes: judge the tool behind customize()/with_activity() views,
+        # and refuse tools holding the producer's live ContextManager in _manager (what fork rebinds), since the
+        # reviewer's context_manager=None does not detach them.
+        inner = _unwrap_tool(tool) if isinstance(tool, BaseTool) else tool
+        module_name = inner.__class__.__module__
+        bound = any(callable(getattr(inner, name, None)) for name in ("bind_agent", "bind_session", "bind_context_getter"))
+        return module_name.startswith(_UNSAFE_REVIEWER_TOOL_MODULE_PREFIXES) or bound or isinstance(getattr(inner, "_manager", None), ContextManager)
 
     def _reviewer_handle(self, producer_handle: RunnerHandle) -> RunnerHandle:
         # Reuse only invocation transport by default, or create the explicit reviewer model.

@@ -149,9 +149,11 @@ class CodexAgentError(AgentExecutionError):
         "relevant_tests",
     )
 
-    def __init__(self, message: str, *, failure_code: str, operation: str, error_type: str = "") -> None:
+    def __init__(self, message: str, *, failure_code: str, operation: str, error_type: str = "", thread_id: str = "") -> None:
         self.failure_code = failure_code
         self.operation = operation
+        # The native thread the failed operation ran on, or "" when none was open yet.
+        self.thread_id = thread_id
         self.error_kind = failure_code
         self.expected = f"Codex adapter operation {operation!r} completing successfully"
         self.actual = message

@@ -26,6 +26,7 @@ Architecture:
     - ConfusedDeputyGuardMiddleware: Authorization check to prevent confused deputy exploits.
     - HoneypotToolMiddleware: Traps unauthorized tool usages with fake honey tools.
     - FailureMiddleware: Bridges a Session's FailureRouter into the runtime lifecycle.
+    - DelegationLimitsMiddleware: Denies a delegating tool's call past its depth or batch cap.
 Relations:
     Related to vidbyte.middleware and vidbyte.agents.runtime.
 """
@@ -38,6 +39,7 @@ from vidbyte.middleware.builtins.circuit_breaker import CircuitBreakerMiddleware
 from vidbyte.middleware.builtins.confused_deputy import ConfusedDeputyGuardMiddleware
 from vidbyte.middleware.builtins.context_compaction import MessageHistoryCompactionMiddleware, SummaryCompactionMiddleware, ToolResultCompactionMiddleware, TraceReplacementCompactionMiddleware, TraceSummaryTailCompactionMiddleware
 from vidbyte.middleware.builtins.cost_budget import CostBudgetMiddleware
+from vidbyte.middleware.builtins.delegation_limits import DelegationLimitsMiddleware
 from vidbyte.middleware.builtins.exponential_backoff_retry import ExponentialBackoffRetryMiddleware
 from vidbyte.middleware.builtins.honeypot_tool import HoneypotToolMiddleware
 from vidbyte.middleware.builtins.loop_detection import LoopDetectionMiddleware
@@ -56,6 +58,7 @@ __all__ = [
     "CircuitState",
     "ConfusedDeputyGuardMiddleware",
     "CostBudgetMiddleware",
+    "DelegationLimitsMiddleware",
     "ExponentialBackoffRetryMiddleware",
     "FailureMiddleware",
     "HoneypotToolMiddleware",

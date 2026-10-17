@@ -1,11 +1,11 @@
 """FILE: vidbyte/agents/jev/gate/gate.py
 
-PURPOSE: Implements JevPreflightGate, the gate in front of JevAgent's generative agent: it combines every enabled fixed-question preset's questions and the specialist question into one Jev request, then one match statement acts on the answers and decides whether the generative agent runs, and which specialist runs instead of it.
+PURPOSE: Implements JevPreflightGate, the gate in front of JevAgent's generative agent: it combines every enabled fixed-question preset's questions and the specialist question into one Jev request, then one match statement acts on the answers and decides whether the generative agent runs, which specialist runs instead of it, and whether the run is limited to SAFE and READ tools.
 ROLE IN CODEBASE: JevAgent builds one JevPreflightGate from its settings at construction and passes it to JevRuntime, which calls pass_() before the inherited linear loop, stops the run when it returns False, and hands the run to `specialist` when the gate chose one.
 ARCHITECTURE NOTE: Question text and flags stay in vidbyte/lib/jev/ (JevPreflightRegistry, JevPresets), and DecisionModelHelper handles request execution and answer scoring; this class owns failing open, the action each preset triggers (JevClarificationAgent), and choosing the JevSpecialist, and it reports every outcome through JevResponse. The tool selector is not a gate case: it keeps its own path in vidbyte/agents/jev/preflight.py.
 COMMON MODIFICATION PATTERNS: Add a fixed-question preset by adding its definition to JevPresets and one commented case to the match in pass_(); never add preset checks to JevRuntime.
 KNOWN EDGE CASES: No enabled fixed-question preset and no specialist makes no Jev call; direct TypeSafe credential failures and transient managed failures mark every preset unavailable, while managed credential/access denials propagate; a missing answer marks only its own preset unavailable. Every unavailable preset fails open, and an unavailable or `none` specialist answer leaves the main JevAgent on the run.
-RELATED DOCS: docs/design/jev-preflight-clarity.md, docs/design/jev-specialist-routing.md, skills/jev-agent/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+RELATED DOCS: docs/design/jev-preflight-clarity.md, docs/design/jev-specialist-routing.md, docs/design/jev-read-only-intent.md, skills/jev-agent/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_preflight.py and scripts/test-jev-preflight.py.
 """
 
@@ -55,6 +55,7 @@ class JevPreflightGate:
         self.run_state_related: bool | None = None
         self.bulk_work_threshold = settings.bulk_work.threshold
         self.bulk_work_requested = False
+        self.read_only_requested = False
 
     def combine(self, message: str, run_state: JevRunStateRecord | None = None) -> JevDecisionRequest | None:
         # Builds one request, omitting the relation question until there is a typed record to compare.
@@ -78,7 +79,9 @@ class JevPreflightGate:
         self.specialist = None
         self.run_state_related = None
         self.bulk_work_requested = False
+        self.read_only_requested = False
         bulk_work_passed = False
+        read_only_passed = False
         answers = await self._ask(message, run_state)
         for preset in self.presets:
             if preset is JevPreflightPreset.RUN_STATE_RELATION and run_state is None:
@@ -102,10 +105,16 @@ class JevPreflightGate:
                     # Every bulk-work question reached the threshold, so the main agent is offered the tool that splits
                     # the work across fresh agents; it still decides whether to use it.
                     bulk_work_passed = True
+                case JevPresetResult(preset=JevPreflightPreset.READ_ONLY, available=True, passed=True):
+                    # Every read-only question reached the threshold, so the request asks for an assessment and not a
+                    # change: the run keeps only SAFE and READ tools, and still answers in full.
+                    read_only_passed = True
                 case _:
                     # A preset that passed needs no action.
                     continue
         self.bulk_work_requested = bulk_work_passed
+        self.read_only_requested = read_only_passed
+        self.response.read_only(read_only_passed)
         self.specialist = self._choose(answers)
         return True
 

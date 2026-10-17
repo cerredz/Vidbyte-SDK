@@ -15,11 +15,14 @@ Relations:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from vidbyte.tools.builtins.sessions.descriptions import CHECKPOINT_ID_DESCRIPTION, FORK_TOOL_DESCRIPTION, SESSION_ID_DESCRIPTION
 from vidbyte.tools.builtins.sessions._base import _SessionBuiltinTool
 from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec
+
+if TYPE_CHECKING:
+    from vidbyte.context.algorithms import ContextWindowAlgorithm
 
 _TOOL_NAME = "fork"
 
@@ -79,9 +82,22 @@ class ForkTool(_SessionBuiltinTool):
         if source_id is None:
             return ToolResult.error(_TOOL_NAME, f"Unknown or empty session: {session_id}.")
         from vidbyte.sessions.session import Session
-        branch = Session.fork_from(self._store, source_id)
+        branch = Session.fork_from(self._store, source_id, algorithm=self._stored_algorithm(source_id))
         self._scope.allow(branch.id)
         return ToolResult.success(_TOOL_NAME, branch.id)
+
+    def _stored_algorithm(self, source_id: str) -> ContextWindowAlgorithm | None:
+        # Return a name-only stand-in for a user-named stored algorithm, or None so a preset name resolves as before.
+        from vidbyte.context.algorithms import ContextWindowAlgorithm
+        from vidbyte.context.window import ContextWindow
+        stored = self._store.get(source_id).run_state.algorithm
+        # @intent cross-session-fork-keeps-stored-algorithm-name
+        # The tool never runs the branch and a user-named algorithm is not a preset, so the branch carries the stored name and a later resume re-supplies the real algorithm.
+        try:
+            ContextWindow.resolve_algorithm(stored or None)
+        except ValueError:
+            return ContextWindowAlgorithm(name=stored)
+        return None
 
     def _target_head_id(self, session_id: str) -> str | None:
         # Return the target session's head checkpoint id, or None when empty.

@@ -77,6 +77,14 @@ from vidbyte.lib.enums.failure import (
     FailureStatus,
     RuleErrorMode,
 )
+from vidbyte.lib.enums.infinite import (
+    InfiniteAgentRole,
+    InfiniteEntryKind,
+    InfiniteJournalEvent,
+    InfiniteMemoryPreset,
+    InfiniteResultStatus,
+    InfiniteVerdict,
+)
 from vidbyte.lib.enums.jev import (
     JevBoundaryKind,
     JevClaimKind,
@@ -218,6 +226,12 @@ __all__ = [
     "HypothesisStatus",
     "IdentityVerdict",
     "ImpactLevel",
+    "InfiniteAgentRole",
+    "InfiniteEntryKind",
+    "InfiniteJournalEvent",
+    "InfiniteMemoryPreset",
+    "InfiniteResultStatus",
+    "InfiniteVerdict",
     "JevBoundaryKind",
     "JevClaimKind",
     "JevCompletionStatus",
