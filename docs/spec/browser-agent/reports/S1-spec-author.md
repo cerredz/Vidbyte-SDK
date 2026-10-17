@@ -191,3 +191,13 @@ These were raised by the S2 test author, not by a review round. I accepted all f
 Counts are unchanged: FR 23, NFR 8, INV 30, AC 33, EC 37, D 28, W 10, Q 10, 29 rows in §12.3, and a budget of 34 new and 12 modified files.
 
 Open: test_browser_agent_acceptance.py:89 still has `"gpt-4.1"`. The test passes either way, because the fake replies report PRICED_MODEL, but it should copy the snippet byte for byte. The test author will change it to `"gpt-5.4-mini"`.
+
+## r5 addendum
+
+These are post-S4 text fixes, not a review round. They make the spec state what the implementation does; no design changes. The spec change is commit 33807544. `status: reviewed` is kept, and the revision is now 5.
+
+- **R-12.** INV-12 now covers only calls that are not cancelled and whose `task` and `done_when` are non-blank. A blank argument starts no worker, returns a model-visible error, and records no card (`episode.py:97-101`). I made the same change where the rule is restated: FR-6, the §9.1 `BrowserEpisodeResult` entry, and row 15 step 1.
+- **R-13.** FR-16, the Q-1 default, D-17, and row 15 step 7 now say the recipe event is emitted for each `done` card with at least one successful call (`episode.py:132-133`).
+- **R-14.** §9.2 step 4 now says that a blank value is refused with a message naming the field `BrowserServerSettings.env[<NAME>]` and, for a preset server, the preset name. FR-2 and INV-2 are unchanged. The repair agent makes the code match (`settings.py:104-105`).
+- In review.md, R-12 and R-13 are marked `fixed @33807544`. R-14 stays open for the repair agent.
+- No IDs changed, and no AC Proof cell changed. The spec still has 18 sections and 29 rows in §12.3.
