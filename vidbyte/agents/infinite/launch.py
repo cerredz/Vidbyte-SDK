@@ -288,7 +288,7 @@ class InfinitePair(BasePipeline):
             model_mode=settings.model_mode,
             temperature=settings.temperature,
             timeout_seconds=settings.timeout_seconds,
-            tools=(*InfiniteMemoryAgentTools.get_tools(Path(settings.root_dir), launch.workspace.root, launch.workspace.settings.max_tokens, launch.workspace.settings.max_read_lines), *memory.tools(), *delegation, *(AgentForker._clone_tool(tool, None, None) for tool in granted)),
+            tools=(*InfiniteMemoryAgentTools.get_tools(Path(settings.root_dir), launch.workspace.root, launch.workspace.settings.max_tokens, launch.workspace.settings.max_read_lines, launch.workspace.full_text), *memory.tools(), *delegation, *(AgentForker._clone_tool(tool, None, None) for tool in granted)),
             permission_policy=settings.permission_policy,
             agent_loop_settings=settings.loop,
             context_manager=context,
