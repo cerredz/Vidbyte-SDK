@@ -174,3 +174,20 @@ Final counts: FR 23, NFR 8, INV 30, AC 33, EC 37, D 28, W 10, T 6, A 9, Q 10, an
 
 Least sure in r3:
 - The orchestrator recipe's arithmetic: about 5,070 tokens per turn, leaving 11 turns about 4,000 tokens under the cap. It rests on the JSON overhead and the ToolSettings suffix. The test author should assert the first call whose `messages` shrink, not a fixed call index.
+
+## Addendum: revision r4 (S2 test-author spec defects)
+
+These were raised by the S2 test author, not by a review round. I accepted all four after checking each against the code. The status stays approved. I added no field, knob, or behavior, and every Proof cell in §6.2 is byte-identical to the test author's (checked by a script).
+
+- **S2 defect 1 (snippet model).** The §4 snippet now uses `model_name="gpt-5.4-mini"`. I checked it by calling both registries offline, with no model call:
+  - `ProviderModelRegistry.validate_provider_model_pair("openai", "gpt-5.4-mini")` passes (models.py:344-361; catalogued at runners.py:54 and 213).
+  - `ModelPricingRegistry.default().resolve(OPENAI, "gpt-5.4-mini")` returns the row at pricing.py:168.
+  - For `gpt-4.1` the pair check passes but `resolve` returns None. That is the defect: my A-5 had checked only the pair.
+  - A-5 is restated. No pricebook row was added.
+- **S2 defect 2 (`isDone`).** `AgentRuntime.__init__` wraps every catalog with `with_internal_agent_tools` (runtime.py:194, _internal.py:51-53). INV-7, INV-15, AC-5, AC-12, FR-6, FR-12 and D-13 now say "no tool but the loop's `isDone`".
+- **S2 defect 3 (stop reason of a provider error).** `stop_reason` is `type(error).__name__` of the caught exception. `BaseAgent` wraps a provider error in `AgentExecutionError` (base.py:976-979), so the value is `AgentExecutionError`. The change is in INV-12 and row 15.
+- **S2 defect 4 (runtime set).** INV-27 now says `_LINEAR_LOOP_RUNTIMES` holds exactly four members, including BROWSER, as row 21 adds.
+
+Counts are unchanged: FR 23, NFR 8, INV 30, AC 33, EC 37, D 28, W 10, Q 10, 29 rows in §12.3, and a budget of 34 new and 12 modified files.
+
+Open: test_browser_agent_acceptance.py:89 still has `"gpt-4.1"`. The test passes either way, because the fake replies report PRICED_MODEL, but it should copy the snippet byte for byte. The test author will change it to `"gpt-5.4-mini"`.
