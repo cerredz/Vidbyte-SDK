@@ -103,7 +103,7 @@ class InfiniteHandoff(Handoff):
         # A model's summary or review can hold line breaks and any
         # length, so each line is collapsed to one line and, past its
         # cap, keeps what fits before the marker the events use, with
-        # the SDK's one character cut; no lines means EMPTY.
+        # the cut OutputText.truncate shares; no lines means EMPTY.
         shown = [TokenEstimate.truncate_chars(" ".join(line.split()), INFINITE_HANDOFF_LINE_MAX_CHARS, INFINITE_TRUNCATION_MARKER) for line in lines]
         return "\n".join(shown) or InfiniteHandoff.EMPTY
 
