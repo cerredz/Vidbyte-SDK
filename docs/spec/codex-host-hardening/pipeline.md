@@ -4,7 +4,7 @@ repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-codex-host-first-class
 branch: feat/codex-host-first-class
 base_commit: 8baff3514640a5c5f110c1e2c7cea996d1640ecb  # stacked on PR #1178 (was 6f5a7310, main after #1055)
-pr:
+pr: https://github.com/cerredz/Vidbyte-SDK/pull/1181
 until: none
 started: 2026-10-17 06:50
 ---
@@ -18,8 +18,8 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
 | S0 worktree + capture + recon | done | 06:50 | 07:12 | reports/S0-scout.md | base_commit 6f5a7310; code-map 4 sections, 25 files |
 | S1 spec + review | done | 07:13 | 10:05 | reports/S1-spec-author.md, reports/S1-spec-review.md | r1 0f0d3118 (FR 37, AC 39, EC 52, W 13; 0 blocking Q); reviewer round 1 SOUND WITH FIXES (836b23ca); r2 2b6affc1 rebased on #1178 (FR+, 3 new files, 20 superseded tests); reviewer round 2 SOUND WITH FIXES (4548f58d, 0 Blocker); r3 804c6f0b status approved |
 | S2 tests | done | 10:10 | 11:40 | reports/S2-test-author.md | **S2_HEAD fadec47f** (was 09524ff4; moved by the orchestrator-granted correction of 2 assertions); 106 new tests (97 red, 8 guards, 1 live-skipped), 20 superseded + 7 support literals; red 125F/631P/3S vs baseline 1F/650P/2S; spec r4 (d3389171) aligned to test choices |
-| S3 implement | running | 11:45 | | reports/S3-implementer.md | |
-| S4 adversarial review | pending | | | | |
+| S3 implement | done | 11:45 | 14:20 | reports/S3-implementer.md | **S3_HEAD c9150d63**; draft PR #1181 (base `ai/resolve-pr-1055-comments`, 64 files +9688/−551); 24/24 rows; budget 3 files / 13 classes / 0 deps / 9 config keys (exact); host.py 923; area 1F(inherited)/1024P/3S; source 1F(inherited)/6555P/27S; package CI passed; SDK-LINT: PASS |
+| S4 adversarial review | running | 14:25 | | reports/S4-review-{conformance,conventions,engineering}.md, reports/S4-findings-verifier.md | |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
 | S6 PR | deferred to the end of slice 2 | | | | |
@@ -88,6 +88,13 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
   
   Both edits go to the S2 test author, who resumes narrowed to those two assertions. S2_HEAD moves to its fix commit.
 - 2026-10-17 13:30: S3's commits cite W-/FR-/AC-/INV- IDs in the commit **bodies** ("Row 20 (P3): … FR-25, INV-31, D-22, AC-26"), not in a `[W-n]` subject tag. Commit `91cc7d4d` bundles several rows. Both were accepted as traceable; there was no history rewrite before the first push. The conventions reviewer may still comment on them.
+- 2026-10-17 14:20: Checked S3 myself:
+  - the tree is clean and in step with origin at `c9150d63`;
+  - `git diff fadec47f..HEAD -- tests` is empty, and `lint/` is unchanged since 8baff351, so no baseline moved;
+  - PR #1181 is a draft, its title starts with `[WIP]`, and its base is `ai/resolve-pr-1055-comments`;
+  - the spec has `status: implemented` and `pr:` set;
+  - my own run of the area suite gave 1 failed (inherited), 1024 passed, 3 skipped, and my own `lint/run.py` ended `SDK-LINT: PASS`.
+- 2026-10-17 14:20: **Correction:** the lint runner's final line is `SDK-LINT: PASS`. `AGENT-LINT` does not exist under `lint/`; earlier briefings said otherwise. The global `semgrep` CLI is broken here (mcp 2.x), and `lint/run.py` does not call semgrep. S3 used the bundled `semgrep-core.exe` per changed file: 0 results on 23 files, and 1 on a file planted to break the rule. Accepted as the semgrep evidence. Nothing was installed or repaired.
 
 ## User replies (verbatim)
 - (none yet)
@@ -198,3 +205,8 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
 - `CodexSandbox.PROVIDER_DEFAULT == ""`, so messages render member names. `CodexSpawnRequest.__post_init__` check groups: the sandbox group goes before the goal group. *Source:* spec r4
 - 7 "collateral" red tests (in error_details, thread_helpers, threads, turns) go green from the lib §9.3 text changes alone. 8 green guards pass now and must stay green. *Source:* S2
 - Gate interpreter: `run_ci.py` uses `sys.executable` for every step, and its package stage makes its own temp venv. Running it with the `venv-codex163` interpreter is fully isolated from the global env. *Source:* orchestrator check of scripts/run_ci.py:82-201
+- **S3_HEAD = c9150d63.** S4 reviews `git diff origin/ai/resolve-pr-1055-comments...c9150d63`, never `origin/main`, which would include #1178's 25 files. *Source:* orchestrator
+- Lint keeps a separate baseline for each rule, so the focused rules can pass while the full `lint/run.py` fails. S008 allows complexity ≤10 and ≤12 branches; S024 allows nesting ≤3 (try, if and with each add a level, elif does not). Always run the full lint before a push. *Source:* S3
+- Semgrep evidence: run `site-packages/semgrep/bin/semgrep-core.exe -rules .semgrep/<rule>.yml -lang python -json <file>` on one file at a time. The global `semgrep` cannot start. *Source:* S3
+- `CodexHostOperation.VALIDATE_SPAWN_REQUEST` is now unused in source but pinned by `test_codex_host_records.py:65`, so it was kept. *Source:* S3
+- The workflows run only on `workflow_dispatch`, so pushing triggers no remote checks and the local gate decides. *Source:* S3, S0
