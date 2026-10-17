@@ -1,14 +1,14 @@
 ---
 spec: claude-thread-functions
 title: Run, continue and fork Claude Code threads with the caller's API key
-status: verified
+status: pr-open
 revision: 4
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-claude-thread-functions
 branch: feat/claude-host
 base_commit: 72a4ade129d74bab45b4fc12764d951df6d1ec3b
 created: 2026-10-15
-updated: 2026-10-16
+updated: 2026-10-17
 pr: https://github.com/cerredz/Vidbyte-SDK/pull/1044
 ---
 
@@ -102,17 +102,19 @@ On success the first line printed is exactly `claude True True`, and the second 
 
 ```mermaid
 flowchart TD
-  A["caller: run / continue / fork_claude_thread"] -->|"prompt, thread_id, api_key, workspace, model, skills, config"| B["ClaudeThreads._call"]
-  B -->|"NativeThreadRequest + ClaudeThreadConfig"| C["ClaudeThreadRun.execute"]
-  B -.->|"ConfigurationError"| X["NativeThreadError configuration.invalid_argument"]
-  C -->|"claude_command, PATH, ~/.local/bin"| D["NativeLauncher.resolve"]
-  C -->|"skills, resolved workspace"| E["hostkit NativePrivateFolders.prepare (asyncio.to_thread)"]
-  E -->|"private config folder"| C
-  C -->|"argv, env overlay, env_remove, prompt on stdin, cwd"| F["CliRunner.run: claude --print ..."]
-  F -->|"CliOutcome"| G["ClaudeWire.read"]
-  G -->|"NativeThreadResult"| R["caller"]
-  G -.->|"NativeThreadError claude.*"| R
-  D -.->|"claude.not_installed / launcher_refused"| R
+  A["caller awaits run_ / continue_ / fork_claude_thread"] --> B["ClaudeThreads._call<br/>builds NativeThreadRequest and ClaudeThreadConfig"]
+  B -.->|"bad argument"| E1["configuration.invalid_argument (nothing found, written or started)"]
+  B --> C["ClaudeThreadRun.execute"]
+  C --> D["NativeLauncher.resolve<br/>claude_command, then PATH (never the current folder), then ~/.local/bin/claude[.exe]"]
+  D -.->|"none found, or a .cmd/.bat on Windows"| E2["claude.not_installed / claude.launcher_refused"]
+  D --> F["NativePrivateFolders.prepare, in asyncio.to_thread<br/>~/.vidbyte/claude-configs/KEY, KEY = 16 hex of SHA-256(workspace)<br/>skills/ = exactly the caller's skills"]
+  F -.->|"home unknown or OSError"| E3["claude.launch_failed"]
+  F --> G["errors.register_secret(api_key)"]
+  G --> H["CliRunner.run, one child<br/>claude --print --output-format json --setting-sources user --permission-mode MODE<br/>[--model M] [--effort E] [--resume ID] [--fork-session]<br/>env: adds ANTHROPIC_API_KEY, CLAUDE_CONFIG_DIR, 2 switches; drops inherited ANTHROPIC_* and CLAUDE*<br/>stdin: the prompt, then EOF; cwd: workspace; timeout; 64 MiB stdout cap"]
+  H -.->|"the OS would not start it"| E4["claude.not_installed / claude.launch_failed"]
+  H --> I["ClaudeWire.read (pure)"]
+  I -->|"exit 0, is_error false, lowercase-UUID session_id, result text"| R["NativeThreadResult(harness, thread_id, text, text_truncated)"]
+  I -.->|"checked in order"| E5["claude.* NativeThreadError<br/>1 timed_out, 2 output_too_large<br/>3 is_error: 401/403 key_rejected, else run_failed<br/>4 non-zero exit: thread_not_found or run_failed<br/>5 bad answer shape: protocol_mismatch<br/>6 wrong thread: thread_not_found / protocol_mismatch"]
 ```
 
 ```mermaid
@@ -123,14 +125,14 @@ sequenceDiagram
   participant API as Anthropic API
   Dev->>SDK: await run_claude_thread(prompt, api_key=..., workspace=...)
   SDK->>SDK: validate (NativeThreadRequest), find claude, prepare private config + skills
-  SDK->>CLI: start once: --print --output-format json --setting-sources user ...; env ANTHROPIC_API_KEY, CLAUDE_CONFIG_DIR; prompt on stdin, then EOF
+  SDK->>CLI: start once: --print --output-format json --setting-sources user ..., env ANTHROPIC_API_KEY and CLAUDE_CONFIG_DIR, prompt on stdin, then EOF
   CLI->>API: Messages requests with x-api-key = caller's key
   API-->>CLI: answers
   CLI-->>SDK: exit code + one JSON object on stdout
   SDK-->>Dev: NativeThreadResult(harness, thread_id, text, text_truncated) or NativeThreadError
 ```
 
-Validation happens first, in `ClaudeThreads._call`, when `NativeThreadRequest` and the config are built; a refused argument raises before anything is found, written or started. The only state the SDK changes is the private config folder's `skills/` (in `NativePrivateFolders.prepare`, off the event loop). Claude Code itself writes its transcript, its auto-memory notes and `.claude.json` in that folder, and acts in the workspace as the permission mode allows. Failures are caught in three places: the launcher (not installed, batch launcher), the runner outcome (launch failure), and `ClaudeWire.read` (timeout, output cap, Claude's error object, exit status, answer shape, wrong thread). Each becomes one `NativeThreadError` built by `NativeErrorFactory`.
+Validation happens first, in `ClaudeThreads._call`, when `NativeThreadRequest` and the config are built; a refused argument raises `configuration.invalid_argument` before anything is found, written or started. The only state the SDK changes is the private config folder and its `skills/` (in `NativePrivateFolders.prepare`, off the event loop). Claude Code itself writes its transcript, its auto-memory notes and `.claude.json` in that folder, and acts in the workspace as the permission mode allows. *(S6)* Failures are caught in five places: the argument check (`configuration.invalid_argument`), the launcher (not installed, batch launcher), the private-folder step (`claude.launch_failed`: home unknown or `OSError`), the runner outcome (a launch failure: not installed or launch failed), and `ClaudeWire.read` (timeout, output cap, Claude's error object, exit status, answer shape, wrong thread, in that order). Each becomes one `NativeThreadError` built by `NativeErrorFactory`; any other exception becomes `runtime.error`, and `asyncio.CancelledError` passes through after the process tree is stopped.
 
 ---
 
@@ -789,6 +791,7 @@ Blocking questions: 0.
 | r3 | 2026-10-15 | S1 revision (review round 2, final; status approved) | R-12 to R-15 accepted (§16). Grok switched to `NativePrivateFolders.prepare` with unchanged behaviour (row 34, NG-13 withdrawn, D-15, INV-20); `ClaudeWire._text` and one combined narrowing check keep S009 at 350 (row 20, §8.5, §12.4); auto-memory text corrected (FR-3, D-6, D-22, EC-37, A-14, §9.1, T-4, Q-8, README row 29); row 23 comment and row 32 absolute imports; vendor and repo facts added to §11, §13, D-5 and D-8 |
 | r3 | 2026-10-15 | S3 implement | All §12.3 rows built in P1 to P4 order, one commit each; 4 new files and 8 classes (at budget), `claude/*.py` 360 lines; pack 630 passed, `SDK-LINT: PASS` with `lint/baseline.json` unchanged, Semgrep 0 findings, package stage `CI passed`; caught up with main twice by merge (`8cfe3e93`, then `b28c3027`) |
 | r4 | 2026-10-16 | S1 amendment after the S4 adversarial review (not a review round; status stays reviewed) | Corrects the record to the confirmed S4 findings (§16). Both bound errors carry stderr and the newest id read from an answer already printed (S4 R-1, R-3: INV-6, INV-7, EC-14, D-9, Q-3, row 20; deviation 3 reversed). The Claude-only `CLAUDE_PROMPT_PATTERN` refuses lone-surrogate prompts, with opencode's gap as a stated limitation (S4 R-2: INV-5, AC-8, EC-38, §8.5, rows 16–17). AC-23 and row 30 keep code tokens out of REPO_MAP (S4 R-4). §12.4 matches row 19 on `@intent` (S4 R-5). INV-11 excepts `taskkill` (S4 R-7) |
+| r4 | 2026-10-17 | S6 PR | finalized for review: status `pr-open`; §5 flow chart and failure-point text brought in line with the code and the PR body, and the sequence diagram made parseable (deviation 7) |
 
 **Implementation deviations (S3)**
 
@@ -798,3 +801,4 @@ Blocking questions: 0.
 4. Beyond the row 29 and row 30 content, the README's hostkit sentence now also lists the private per-workspace folders, and the REPO_MAP section says "Plumbing the harnesses share" instead of "the three", because both were made wrong by this change.
 5. *(S5 repair iteration 1, R-8)* Deviation 2 is resolved: `ClaudeWire._missing_member(answer, session)` no longer takes the unused `text` parameter; `read` checks `text` itself.
 6. *(S5 repair iteration 2, R-C1)* Row 20's header sentence was corrected after the S5 re-review: it said only a run that timed out before printing carries no new id, but a bare non-zero exit and an exit-0 stdout that is not JSON carry none either. Row 20 and both headers now state INV-6's rule; the code is unchanged.
+7. *(S6 PR author)* §5 drifted from the code: its flow chart left out the argument-check, private-folder and launch-failure branches, and its text said failures are caught in three places. The code catches them in five (`ClaudeThreads._call`, `NativeLauncher.resolve`, `NativePrivateFolders.prepare`, the `CliRunner` launch outcome, `ClaudeWire.read`), plus the `runtime.error` catch-all and cancellation pass-through in `_call`. §5's flow chart is now the PR body's, and its text names the five places. The sequence diagram's content was already right, but its `SDK->>CLI` message held two semicolons, which Mermaid reads as statement breaks, so the diagram did not parse (mermaid 10.9.1 `parse`); they are now commas. No code change.
