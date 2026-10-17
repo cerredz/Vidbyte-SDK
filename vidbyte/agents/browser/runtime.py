@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: A subclass of AgentRuntime that adds per-run setup around sup
 FUNCTION INVENTORY: __init__ refuses construction outside BrowserAgent; arun is the narrated main function; _after_tool_iteration rebuilds, rechecks when due, and pins the card; _continue_finish_attempt rechecks a finish and sends a refused one back with its gap; _rebuild_history keeps only the newest call/result group once the stored conversation passes its cap; _budget_stop adds the stall stop to the loop's own budgets.
 COMMON MODIFICATION PATTERNS: Per-run setup goes in arun before super().arun; per-iteration work goes in _after_tool_iteration. A new run-bound tool adds its name to BROWSER_RESERVED_TOOL_NAMES, which the clash check in arun reads.
 WHAT NOT TO DO IN THIS FILE: 1. Do not start a server, emit an event, or touch the response in __init__; BaseAgent builds this class twice per run. 2. Do not change the agent's own context manager; copy it. 3. Do not summarize or edit messages by hand; the rebuild keeps whole groups through the shared engine. 4. Do not give the orchestrator an action tool.
-KNOWN EDGE CASES: A caller's explicit system option replaces the system prompt and the card for that run (EC-24). After a refused final-text finish, the loop appends the model's own answer after the gap message (EC-36). A newest group that alone passes the cap is kept whole, so nothing is removed and nothing is recorded (EC-35). A cancelled or failed run emits no run_finished or run_stopped.
+KNOWN EDGE CASES: A caller's explicit system option replaces the system prompt and the card for that run (EC-24). After a refused final-text finish, the loop appends the model's own answer after the gap message (EC-36). A newest group that alone passes the cap is kept whole, so nothing is removed and nothing is recorded (EC-35). A run whose usage cannot be priced emits run_stopped, naming UsageAccountingError, and then raises it; a cancelled run, or one whose loop raises, emits no run_finished or run_stopped.
 RELATED DOCS: docs/spec/browser-agent/spec.md (sections 6.1 INV-14 to INV-18, INV-22, INV-23, INV-30, and 8.1 D-2, D-11, D-13); vidbyte/agents/infinite/runtime.py (the pattern this follows)
 TESTS: tests/features/browser_agent/test_browser_agent_contract.py, tests/features/browser_agent/test_browser_agent_recheck.py, tests/features/browser_agent/test_browser_agent_rebuild.py, and tests/features/browser_agent/test_browser_agent_observability.py
 """
@@ -41,7 +41,7 @@ from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.enums.browser import BrowserEventKind, BrowserToolRole, BrowserVerdict
 from vidbyte.lib.enums.prompts import Prompt
-from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.errors import ConfigurationError, UsageAccountingError
 from vidbyte.lib.tracing import SpanContext
 from vidbyte.lib.util import TokenEstimate
 from vidbyte.prompts.catalog import Prompts
@@ -127,11 +127,20 @@ class BrowserAgentRuntime(AgentRuntime):
             # and stop a stalled run.
             result = await super().arun(message, handle=handle, context=context, metadata=metadata, options=run_options, trace_context=trace_context)
 
+            # Total the run's usage before saying how it ended: a run
+            # whose cost is partly unknown raises instead of returning,
+            # so its last event is run_stopped, never run_finished.
+            try:
+                usage = self.usage.settle()
+            except UsageAccountingError as exc:
+                self.events.emit(BrowserEventKind.RUN_STOPPED, type(exc).__name__)
+                raise
+
             # Say how the run ended, then close the record with the
-            # run's whole usage, which fails closed on any gap.
+            # run's whole usage.
             stop_reason = str(result.metadata.get("stop_reason") or "")
             self.events.emit(BrowserEventKind.RUN_FINISHED if stop_reason in _FINISHED else BrowserEventKind.RUN_STOPPED, stop_reason)
-            return self.response.finished(result, self.usage.settle(), self.events.errors)
+            return self.response.finished(result, usage, self.events.errors)
 
     async def _after_tool_iteration(self, state: BaseAgentRuntimeLoopState, messages: list[dict[str, Any]]) -> None:
         """Rebuild the stored conversation once it passes its cap, run the periodic recheck when it is due, and pin the card again."""
