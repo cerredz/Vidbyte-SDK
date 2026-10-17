@@ -2,7 +2,7 @@
 
 PURPOSE: Defines the three validated records of AgentSwarm: AgentSwarmMember, one agent a developer puts in a swarm; AgentSwarmEvent, one state change of a swarm run; and AgentSwarmResult, what one run returns. Also defines AgentSwarmEventCallback, the type of the developer's on_event callback.
 ROLE IN CODEBASE: AgentSwarmMember is built by the developer and held by AgentSwarmSettings (vidbyte/agents/agent_swarm/settings.py); AgentSwarmEvent is built by AgentSwarmEvents and handed to on_event; AgentSwarmResult is built by AgentSwarmRuntime at the end of a run. AgentSwarmMember is also exported from the root vidbyte package.
-ARCHITECTURE NOTE: Validation only. Every check runs in __post_init__, so a constructed record is always valid and its callers never check it again. Each field check is one call to the SDK's canonical RecordFieldValidator or RecordFieldConverter (vidbyte/lib/dataclasses/validation.py), and the model check is ProviderModelRegistry's; only this feature's own rules, which fields each event kind carries and how a result's events are numbered, are written here.
+ARCHITECTURE NOTE: Validation only. Every check runs in __post_init__, so a constructed record is always valid and its callers never check it again. Each field check is one call to the SDK's canonical RecordFieldValidator or RecordFieldConverter (vidbyte/lib/dataclasses/validation.py), except the member's provider, which is coerced with ModelProvider itself and its model checked with ProviderModelRegistry, the two proofs lint rule C012 recognizes; only this feature's own rules, which fields each event kind carries and how a result's events are numbered, are written here.
 FUNCTION INVENTORY: Three frozen, slotted records, each with a __post_init__: AgentSwarmMember checks the name pattern, the prompt, the provider, and the model; AgentSwarmEvent checks the numbers, the kind, and the per-kind field table through _check_agent, _check_unlisted_fields, and _check_kind_fields; AgentSwarmResult checks the stop reason, the event sequence, the replies, and the callback error names. AgentSwarmEventCallback is a type alias.
 COMMON MODIFICATION PATTERNS: A new event kind adds its row to _KIND_FIELDS and one case in AgentSwarmEvent._check_kind_fields. A new record field adds one field and one RecordFieldValidator or RecordFieldConverter call; its bound goes in vidbyte/lib/constants/agent_swarm.py.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import from vidbyte.agents, vidbyte.tools, or any other layer above vidbyte/lib. 2. Do not add to_dict or from_dict methods or dict[str, Any] signatures. 3. Do not quote message text or reply text in an error; it can be long.
@@ -64,8 +64,13 @@ class AgentSwarmMember:
         # so it is one short line of letters, digits, "_" and "-".
         RecordFieldValidator.require_text(self.name, "AgentSwarmMember.name", pattern=AGENT_SWARM_NAME_PATTERN, one_line=True)
         RecordFieldValidator.require_text(self.system_prompt, "AgentSwarmMember.system_prompt")
-        # Developers may name the provider as text; the enum is stored.
-        object.__setattr__(self, "provider", RecordFieldConverter.to_enum(self.provider, ModelProvider, "AgentSwarmMember.provider"))
+        # Developers may name the provider as text; the enum is stored,
+        # and a name the SDK does not know is refused with the known ones.
+        try:
+            provider = ModelProvider(self.provider)
+        except ValueError as exc:
+            raise ConfigurationError(f"AgentSwarmMember.provider must be one of {', '.join(member.value for member in ModelProvider)}; got {self.provider!r}.", details={"field": "AgentSwarmMember.provider"}) from exc
+        object.__setattr__(self, "provider", provider)
         RecordFieldValidator.require_text(self.model_name, "AgentSwarmMember.model_name")
         # A model the SDK cannot run under the provider is refused here,
         # before any swarm starts, not at the agent's first model call.
