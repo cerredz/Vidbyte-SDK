@@ -52,3 +52,39 @@ Gate set (from context/code-map.md §1; run from the worktree root, in CI order)
 | remote checks | ci.yml run 38991106870, static-policy.yml run 38991108133, on 821af103 | PASS (4/4) | `Package completed success` · `Static policy completed success` · `Source / Python 3.11 completed success` · `Source / Python 3.12 completed success` (check-runs API) |
 
 **Still open:** none of the confirmed findings. Follow-ups left for the user, with their status unchanged: R-5's `@intent` blocks, R-6, R-10, R-11, R-12, R-13, R-14 `[scope-adding]`, and opencode's lone-surrogate gap (EC-38).
+
+## Iteration 2 — 2026-10-16 — agent report: reports/S5-repair-2.md
+
+**Defects in:**
+- The three Minors from the post-repair re-review (`reports/S5-rereview-conformance.md`, verdict SOUND). They are recorded in `review.md` as R-16 (R-C1), R-17 (R-C2) and R-18 (R-C3). All three are comment, docstring or whitespace only.
+- No red gate. origin/main is still 845a4d9b, so no catch-up merge was needed.
+
+**Hypotheses and attempts (in order):**
+1. **R-C1 (809e60bc).** First I worked out the real rule from the code and from probes. I did not copy the suggested wording.
+   - The code: `newest` in `ClaudeWire.read`, the factory fallback in `hostkit/errors.py` (`thread_id if not None else request.thread_id`), `from_launch_failure` and `from_configuration_error`.
+   - The probes: `ClaudeWire.read` over 9 outcomes for each of the three verbs, plus a missing launcher and a failed launch. They used a nonexistent `claude_command`, so no real `claude` ran.
+   - The rule: a run or fork error carries the printed id only when stdout is one JSON object whose `session_id` is a lowercase UUID. Otherwise a run carries `None` and a fork its source id. A bare exit 1 (`run_failed`), an exit-0 stdout that is not JSON or holds an upper-case id (`protocol_mismatch`), and `not_installed`/`launch_failed` all fall in the "otherwise" case. A continue's `claude.*` error always carries the caller's id.
+   - One exception kept the `threads.py` wording at "a continue's claude.* error". A refused request record gives `configuration.invalid_argument` with `None` for every verb, because `request` is then `None` (#1036's shared behaviour).
+   - Both headers now state the rule and give their cases as examples, not as a complete list. They say "an answer cut at the cap", because a cut JSON object can never parse.
+   - Spec row 20's sentence now matches the headers, and spec §17 gains deviation item 6. `revision:` and `status:` are unchanged.
+2. **R-C2 (547da5bf).** Both shared headers now read "(claude-thread-functions spec EC-38)". I confirmed that `spec.md:260` EC-38 is the lone-surrogate row.
+3. **R-C3 (ee3b4e88).** I restored both spaces. Each line is now byte-identical to its version before 687141f7 and 821af103 (`git show <sha>^`, then `diff`). Independent check: `ruff check --isolated --preview --select E2` flags exactly these two lines at 547da5bf (`missing-whitespace-around-operator`). It passes on the fixed files and on all 19 touched `vidbyte/*.py` files. `ruff format --diff` proposes only line wrapping, which the repo does not use, so nothing else was reformatted.
+4. The Claude pack ran after each fix: 200 passed each time. No timing flake appeared, so no test needed a rerun alone.
+
+**Changes:** 809e60bc [R-C1], 547da5bf [R-C2], ee3b4e88 [R-C3]. A docs commit with this log, `review.md` rows R-16 to R-18, `reports/S5-repair-2.md` and `reports/S5-rereview-conformance.md` follows.
+
+**Gate matrix out (all run at ee3b4e88 in this iteration):**
+| Gate | Command | Result | Final lines |
+|---|---|---|---|
+| new tests (Claude pack) | `PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider tests/features/harness_threads/ -k claude < /dev/null` | PASS | `200 passed, 437 deselected in 23.83s` (after R-C3; 24.46s after R-C1, 24.22s after R-C2) |
+| full local gate, source stage | `PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source < /dev/null` | PASS | `SDK-LINT: PASS` · `reasoning trace contracts: ok (182 tools, 55 shapes)` · `6445 passed, 16 skipped in 147.15s (0:02:27)` · `CI passed.` (HEAD ee3b4e88 at start and end) |
+| lint ratchets (inside the source stage) | `lint/run.py` | PASS; baseline unchanged | S008 19/19, A007 255/255, A006 34/34, A001 642/642, S015 13/13, S017 79/79, S019 5/5, S051 259/259, C006 104/104, C008 45/45 RATCHETED; S009 346/350 and A002 566/703 IMPROVED (unchanged from iteration 1; never `--update-baseline`) |
+| import order on touched paths | `python -m ruff check $(git diff --name-only origin/main...HEAD -- 'vidbyte/*.py') --config lint/ruff.toml --select I001 --no-cache` | PASS | `All checks passed!` on the 19 touched files (tree-wide 223, as on main) |
+| operator spacing on touched paths (extra, for R-C3) | `python -m ruff check <19 touched files> --isolated --preview --select E2 --no-cache` | PASS | `All checks passed!` (at 547da5bf the same check gives `Found 2 errors.`, the two R-C3 lines) |
+| package stage | `env -u PYTHONPATH python scripts/run_ci.py --stage package < /dev/null` | PASS | `No broken requirements found.` · `Installed vidbyte-sdk 0.3.0 passed smoke checks.` · `CI passed.` |
+| Semgrep | `semgrep scan --error --config .semgrep/typed-mapping-boundary-policy.yml vidbyte` (semgrep 1.170.1, own venv, after committing) | PASS | `Ran 1 rule on 987 files: 0 findings.` |
+| test-contract check | `git log --no-merges --oneline 4806c697..HEAD --not origin/main -- tests` | PASS | empty |
+| lint/ unchanged | `git diff --stat origin/main...HEAD -- lint/ contracts/ pyproject.toml` | PASS | empty |
+| remote checks | ci.yml run 38993797470, static-policy.yml run 38993799112, on ee3b4e88 | PASS (4/4) | `Package completed success` · `Static policy completed success` · `Source / Python 3.11 completed success` · `Source / Python 3.12 completed success` (check-runs API) |
+
+**Still open:** none. All gates are green and no confirmed finding is open. The user's follow-ups are unchanged: R-5's `@intent` blocks, R-6, R-10 to R-14, opencode's lone-surrogate gap (EC-38), and the unfiled RecursionError-on-deep-JSON note.
