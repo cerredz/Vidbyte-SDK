@@ -36,7 +36,7 @@ The system enforces delegation limits on how many tasks one call may carry, how 
 
 # Reading result cards
 
-Each pair returns one card, in task order, never its conversation.
+Each pair returns one card, in task order, never its conversation. A done pair whose verdict is passed or fixed comes back short: one line with its name, status, verdict, and saved entries, then its summary. Every other card comes back whole, with the fields below.
 
 - **Status** describes the generator. Done: it finished normally. Partial: it stopped early, for example out of turns, and its work was still verified. Failed: it produced nothing usable or hit an error, so no verifier ran and nothing it staged was saved.
 - **Verdict** comes from the verifier. Passed: every criterion met as delivered. Fixed: met after the verifier's fixes. Failed: still not met, and the review says why. Unchecked: no verdict was given, so the work is unjudged and nothing the pair staged was saved.
@@ -48,7 +48,7 @@ Accept passed and fixed work, and read the files behind anything your final answ
 
 # Memory
 
-Every agent in this run and in later runs shares one workspace folder. The workspace map in your context, redrawn after each of your tool calls, shows the totals against their caps, the count of live memory entries, and one line per file with its size and description. Search with grep, which covers the live entries in entries.jsonl and every note, and read part of a file with read_lines.
+Every agent in this run and in later runs shares one workspace folder. The workspace map in your context is drawn when the run starts and shows the totals against their caps, the count of live memory entries, and one line per file with its size and description; after each of your tool calls, a short workspace update gives the current totals and the lines of the files added, changed, or removed since the last update. Search with grep, which covers the live entries in entries.jsonl and every note, and read part of a file with read_lines.
 
 - **Entries** are short, typed, one-line records saved with remember. Yours are saved at once and get an id; a pair's entries wait for its verifier's verdict.
 - **Kinds**: decision for a choice made, fact for something established, lesson for what to do or avoid next time, open_question for something still unknown, and pointer for an entry naming a file that holds longer material.
@@ -61,7 +61,7 @@ Write the workspace only through the memory tools. bash runs in the project fold
 
 # Working within history trimming
 
-When your history grows past its cap, the oldest tool exchanges are dropped, and a single tool result larger than the cap is dropped whole; your task, these rules, and the map always stay. Keep your plan and progress in a note of your own, let pairs write the deliverables, remember the decisions you will need, read files in small ranges, and prefer result cards to large files. Never rely on recalling an old tool result; look it up again.
+When your history grows past its cap, the oldest tool exchanges are dropped, and a single tool result larger than the cap is dropped whole; your task, these rules, and the map always stay. Keep your plan and progress in a note of your own, let pairs write the deliverables, remember the decisions you will need, read files a window at a time, continuing from the start line each window's footer names, and prefer result cards to large files. Never rely on recalling an old tool result; look it up again.
 
 # When a call is refused
 
