@@ -16,8 +16,11 @@ ROLE IN CODEBASE:
     TokenEstimate is called by the InfiniteMemory agent
     (vidbyte/agents/infinite/) for every workspace cap, the map, and the
     result cards, and by its toolset (vidbyte/tools/toolsets/infinite.py)
-    for grep's file-size cap. TokenEstimate.truncate_chars is the SDK's one
-    character cut with a marker: OutputText.truncate
+    for grep's file-size cap. TokenEstimate.truncate_chars is the character
+    cut with a marker that OutputText.truncate and the infinite handoff
+    share. Other character cuts in the SDK, such as those in
+    vidbyte/context/primitives/base.py and vidbyte/agents/aggregation.py,
+    behave differently and do not use it. OutputText.truncate
     (vidbyte/lib/outputs/text.py) delegates to it, so the output connectors,
     InfiniteEvents, and InfiniteMemoryAgent.run_handoff use it through that
     method, and InfiniteHandoff (vidbyte/context/handoff/infinite.py) calls
