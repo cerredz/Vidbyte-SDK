@@ -198,7 +198,8 @@ Notes on the rows that need more than the table says:
 
 ```python
     def test_a_<s>_key_from_a_mixed_list_reaches_<s>_unchanged_in_direct(self) -> None:
-        # The gateway does not serve <s>, so the call is DIRECT, and only the <s> key leaves.
+        # The gateway does not serve <s>, so the call is
+        # DIRECT, and only the <s> key leaves.
         from vidbyte.lib.config import TextModelMode
 
         vendor = ScriptedGateway(provider_answer(ModelProvider.<E>))
