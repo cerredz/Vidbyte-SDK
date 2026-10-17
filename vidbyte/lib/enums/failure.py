@@ -170,6 +170,15 @@ class FailureCode(str, Enum):
     MUSE_PROTOCOL_MISMATCH = "muse.protocol_mismatch"
     MUSE_RUN_FAILED = "muse.run_failed"
     MUSE_WSL_UNAVAILABLE = "muse.wsl_unavailable"
+    CLAUDE_NOT_INSTALLED = "claude.not_installed"
+    CLAUDE_LAUNCHER_REFUSED = "claude.launcher_refused"
+    CLAUDE_LAUNCH_FAILED = "claude.launch_failed"
+    CLAUDE_KEY_REJECTED = "claude.key_rejected"
+    CLAUDE_THREAD_NOT_FOUND = "claude.thread_not_found"
+    CLAUDE_TIMED_OUT = "claude.timed_out"
+    CLAUDE_OUTPUT_TOO_LARGE = "claude.output_too_large"
+    CLAUDE_PROTOCOL_MISMATCH = "claude.protocol_mismatch"
+    CLAUDE_RUN_FAILED = "claude.run_failed"
 
     @property
     def category(self) -> str:

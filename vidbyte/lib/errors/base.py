@@ -43,7 +43,7 @@ Architecture:
     - SourcePinMismatchError: Raised when fetched content does not match the pinned hash.
     - SourceParseError: Raised when an artifact cannot be parsed into a valid typed IR.
     - SourceSecurityError: Raised when a URL is disallowed or a response violates a guard.
-    - NativeThreadError: Raised by the Grok, opencode and Muse thread functions with a failure code, a likely cause and a next step.
+    - NativeThreadError: Raised by the Grok, opencode, Muse and Claude Code thread functions with a failure code, a likely cause and a next step.
     - FailureRaisedError: Raised when a Session recovery policy escalates a deterministic failure to raise.
     - AgentSpeedError: Base exception for agent speed-tracking failures.
     - AgentSpeedValidationError: Raised when a speed-tracking dataclass has an invalid shape.

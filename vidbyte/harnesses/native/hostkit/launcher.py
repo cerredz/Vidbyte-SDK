@@ -1,7 +1,7 @@
 """FILE: vidbyte/harnesses/native/hostkit/launcher.py
 
 PURPOSE: Defines NativeLauncher, the one way the thread functions find the program to start: an explicit <harness>_command, then the program on PATH, then a fallback install path, refusing a Windows batch launcher wherever it is found.
-ROLE IN CODEBASE: Called by GrokThreadRun (grok/threads.py), OpencodeThreadRun (opencode/threads.py) and MuseLauncher (muse/launcher.py) before anything is written or started; it raises the NativeThreadError that NativeErrorFactory (hostkit/errors.py) builds.
+ROLE IN CODEBASE: Called by GrokThreadRun (grok/threads.py), OpencodeThreadRun (opencode/threads.py), MuseLauncher (muse/launcher.py) and ClaudeThreadRun (claude/threads.py) before anything is written or started; it raises the NativeThreadError that NativeErrorFactory (hostkit/errors.py) builds.
 ARCHITECTURE NOTE: Synchronous and read-only: it looks at PATH and at the fallback file and never writes. The platform and every name it compares come from vidbyte/lib/constants/native_threads.py (spec INV-15). Programs are found by CliRunner.find_program, the lookup CliRunner itself launches with: the absolute PATH folders (with PATHEXT on Windows) and never the current folder, so a program a cloned repository ships under a vendor's name never runs (spec T-6), and on Windows the batch check sees the file that would really run.
 FUNCTION INVENTORY: resolve is the narrated main function; _is_batch says whether a program is a Windows batch file.
 COMMON MODIFICATION PATTERNS: A new harness passes its program name and, when its installer has one, its fallback path; the order and the batch refusal stay here.

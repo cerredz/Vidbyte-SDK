@@ -1,7 +1,7 @@
 """FILE: vidbyte/lib/process/argv.py
 
 PURPOSE: Defines CliArgv, the canonical builder of a command line: the launcher, the subcommand words, the options in one of two styles, and the operands, returned as a tuple of plain strings.
-ROLE IN CODEBASE: Called by every harness thread function under vidbyte/harnesses/native/ (Grok and opencode in the joined style, Muse and its WSL launcher in the separate style) before it hands the argv to CliRunner in vidbyte/lib/process/runner.py.
+ROLE IN CODEBASE: Called by every harness thread function under vidbyte/harnesses/native/ (Grok and opencode in the joined style, Muse, its WSL launcher and Claude Code in the separate style) before it hands the argv to CliRunner in vidbyte/lib/process/runner.py.
 ARCHITECTURE NOTE: Pure and synchronous: no I/O and no environment reads. Every element it returns is a plain str, so an enum member never reaches argv; str(member) gives the value because every flag enum is a StrEnum. The order is exactly as given.
 FUNCTION INVENTORY: CliArgv.build is the narrated main function; _option_elements turns one option into its argv elements for a style.
 COMMON MODIFICATION PATTERNS: A new option style adds a CliOptionStyle member (vidbyte/lib/enums/process.py) and its branch in _option_elements.

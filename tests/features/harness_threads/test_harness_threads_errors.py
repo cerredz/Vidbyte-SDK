@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-HARNESSES = ("grok", "opencode", "muse")
+HARNESSES = ("grok", "opencode", "muse", "claude")
 EXIT = 93
 UNKNOWN_ID = "0192f0c4-beef-7bee-8f00-000000000000"
 DEFECT_THREAD = "0192f0c4-feed-7bee-8f00-000000000001"
@@ -191,8 +191,9 @@ async def test_error_class_carries_the_diagnostic_packet_for_this_feature(api, s
 
 
 def test_every_code_has_its_own_likely_cause_and_next_step(lib_api) -> None:
-    # D-10 / comment 1: texts written per code, for the 28 harness codes
-    # plus invalid_argument and runtime.error.
+    # D-10 / comment 1: texts written per code, for the 28 harness codes,
+    # the nine claude.* codes (claude-thread-functions INV-6, §12.3 row
+    # 16), invalid_argument and runtime.error.
     codes = lib_api.FailureCode
     harness_codes = [codes(f"{harness}.{problem}") for harness in HARNESSES for problem in PROBLEMS] + [codes("muse.wsl_unavailable")]
     expected = {*harness_codes, codes.CONFIGURATION_INVALID_ARGUMENT, codes.RUNTIME_ERROR}
