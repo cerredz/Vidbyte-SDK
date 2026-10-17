@@ -45,7 +45,7 @@ print(default_model, api_key_env, openai_models, gpt56_luna_price)
 - `runners/`: runner handles, concrete model runners, and runner inference helpers.
 - `tools/`: provider-specific tool schema formatting; `ToolArguments.records`, which reads a model's list-of-objects argument into validated records; and under `tools/filesystem/`, `FolderUsage`, which counts a folder's files and tokens from disk and projects a write's effect on them.
 - `tracing/`: tracer base classes and null tracer.
-- `util/`: small canonical helpers, including `TokenEstimate` (count, cut, and cap text by the four-characters-per-token estimate), `AppendOnlyJsonl` (an fsynced append-only JSON-lines log that leaves out and repairs a torn last line), and `ExceptionOrigin` (the innermost frame of an exception, for redacted logs).
+- `util/`: small canonical helpers, including `TokenEstimate` (count, cut, and cap text by the four-characters-per-token estimate), `AppendOnlyJsonl` (an fsynced append-only JSON-lines log that leaves out and repairs a torn last line), `ExceptionOrigin` (the innermost frame of an exception, for redacted logs), and `LogToken` (any text as one bounded, space-free log token).
 - `system_prompt_presets.py`: `SystemPromptPresetScope`, the run-scoped ContextVar that hands an agent's system-prompt presets to every agent its run starts.
 
 ## Related Layers

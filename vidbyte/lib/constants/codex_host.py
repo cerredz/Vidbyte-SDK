@@ -1,6 +1,6 @@
 """FILE: vidbyte/lib/constants/codex_host.py
 
-PURPOSE: Defines every fixed value CodexHost and its collaborators use: the wire tables, field rules and bounds the host modules read, the summary sentence of each failure they report, and the per-code likely cause, related docs and relevant tests that make each CodexAgentError a full diagnostic packet. The hardening slice adds the fail-closed answer of each server request a host gets without an approval_handler, the typed reads retried on overload and the codes CodexAgentError.retryable reports, the goal-run field rule, the fork fields that need the experimental API, the lost-turn grace, and the texts of its new refusals.
+PURPOSE: Defines every fixed value CodexHost and its collaborators use: the wire tables, field rules and bounds the host modules read, the summary sentence of each failure they report, and the per-code likely cause, related docs and relevant tests that make each CodexAgentError a full diagnostic packet. The hardening slice adds the fail-closed answer of each server request a host gets without an approval_handler, the typed reads retried on overload and the codes CodexAgentError.retryable reports, the goal-run field rule, the fork fields that need the experimental API, the lost-turn grace, the longest value a log record shows, and the texts of its new refusals.
 ROLE IN CODEBASE: The constants layer under vidbyte/harnesses/native/codex/ and vidbyte/lib/dataclasses/codex_host_inputs.py; those modules define no module-level values of their own and read every one from here or from vidbyte/lib/constants/codex.py.
 ARCHITECTURE NOTE: Imports only lib enums and the shared Codex constants, so importing it never loads openai-codex: CODEX_HOST_RAW_RESPONSE_MODELS names each generated response model as text, and CodexConnection resolves the class from openai_codex.generated.v2_all when it sends the call. CODEX_NEXT_STEPS stays in codex.py, where the records and tools already read it; CODEX_HOST_LIKELY_CAUSES has exactly the same keys.
 COMMON MODIFICATION PATTERNS: A new CodexHost failure adds its summary sentence here; a new failure code adds one row to CODEX_HOST_LIKELY_CAUSES and one to CODEX_NEXT_STEPS. A new raw app-server call adds its model name to CODEX_HOST_RAW_RESPONSE_MODELS, and to CODEX_HOST_SPENDING_RAW_METHODS when it spends usage.
@@ -171,6 +171,12 @@ CODEX_HOST_USAGE_COUNTERS = frozenset(
 # its cleanup interrupt, so a process death reaches the liveness
 # monitor first (hardening D-9, A-14).
 CODEX_HOST_LOST_TURN_GRACE_SECONDS = 0.5
+# The logs: the longest id or method a record shows before LogToken.of
+# cuts it. A Codex thread id is a 36-character UUID and the longest
+# 0.163.0 method has 41 characters, so this leaves room for longer
+# turn and item ids while a crafted huge id cannot fill a record
+# (hardening INV-10).
+CODEX_HOST_LOG_TOKEN_MAX_CHARS = 128
 
 # The thread helpers: the fork scan reads pages of turns without their
 # items, and a review read-back reads the one newest turn with every
@@ -389,6 +395,7 @@ __all__ = [
     "CODEX_HOST_LISTING_OPERATION_MESSAGE",
     "CODEX_HOST_LIST_SEPARATOR",
     "CODEX_HOST_LOCAL_FAILURE_MESSAGE",
+    "CODEX_HOST_LOG_TOKEN_MAX_CHARS",
     "CODEX_HOST_LOST_EVENTS_MESSAGE",
     "CODEX_HOST_LOST_TURN_GRACE_SECONDS",
     "CODEX_HOST_MESSAGE_HEAD",

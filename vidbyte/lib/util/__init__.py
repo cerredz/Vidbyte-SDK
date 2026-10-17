@@ -8,7 +8,8 @@ PURPOSE:
 ROLE IN CODEBASE:
     Re-exports MathHelper from vidbyte/lib/util/math.py,
     CredentialKeyPolicy from vidbyte/lib/util/credential_keys.py,
-    SubstringCounter and TokenEstimate from vidbyte/lib/util/text.py,
+    LogToken, SubstringCounter and TokenEstimate from
+    vidbyte/lib/util/text.py,
     AppendOnlyJsonl from vidbyte/lib/util/jsonl.py,
     ExceptionOrigin from vidbyte/lib/util/exception_origin.py,
     PromptPlacement from
@@ -16,7 +17,8 @@ ROLE IN CODEBASE:
     vidbyte/lib/util/call_options.py. Imported by
     vidbyte/agents/speed/tracker.py, by vidbyte/agents/infinite/ for
     TokenEstimate and AppendOnlyJsonl, by vidbyte/harnesses/native/codex/
-    and vidbyte/tools/builtins/codex/ for ExceptionOrigin, and by any
+    for ExceptionOrigin and LogToken, by vidbyte/tools/builtins/codex/ for
+    ExceptionOrigin, and by any
     future SDK code that needs the same general-purpose helpers.
 
 ARCHITECTURE NOTE:
@@ -25,8 +27,8 @@ ARCHITECTURE NOTE:
 
 FUNCTION INVENTORY:
     No functions of its own; re-exports MathHelper, CredentialKeyPolicy,
-    SubstringCounter, TokenEstimate, AppendOnlyJsonl, ExceptionOrigin,
-    PromptPlacement, and SupportedKwargs. See
+    LogToken, SubstringCounter, TokenEstimate, AppendOnlyJsonl,
+    ExceptionOrigin, PromptPlacement, and SupportedKwargs. See
     vidbyte/lib/util/math.py for MathHelper's own inventory.
 
 COMMON MODIFICATION PATTERNS:
@@ -50,7 +52,8 @@ TESTS:
     tests/features/infinite_memory_agent/test_infinite_memory_contract.py
     imports TokenEstimate from here;
     tests/features/codex_host/test_codex_host_hardening_contract.py
-    (CodexExceptionOriginTests) imports ExceptionOrigin from here.
+    (CodexExceptionOriginTests) imports ExceptionOrigin from here, and
+    its CodexLogTokenTests import LogToken from here.
 """
 
 from __future__ import annotations
@@ -61,6 +64,6 @@ from vidbyte.lib.util.exception_origin import ExceptionOrigin
 from vidbyte.lib.util.jsonl import AppendOnlyJsonl
 from vidbyte.lib.util.math import MathHelper
 from vidbyte.lib.util.prompt_placement import PromptPlacement
-from vidbyte.lib.util.text import SubstringCounter, TokenEstimate
+from vidbyte.lib.util.text import LogToken, SubstringCounter, TokenEstimate
 
-__all__ = ["AppendOnlyJsonl", "CredentialKeyPolicy", "ExceptionOrigin", "MathHelper", "PromptPlacement", "SubstringCounter", "SupportedKwargs", "TokenEstimate"]
+__all__ = ["AppendOnlyJsonl", "CredentialKeyPolicy", "ExceptionOrigin", "LogToken", "MathHelper", "PromptPlacement", "SubstringCounter", "SupportedKwargs", "TokenEstimate"]
