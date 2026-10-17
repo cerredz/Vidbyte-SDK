@@ -38,6 +38,13 @@ TESTS:
 from __future__ import annotations
 
 from vidbyte.lib.enums.agent_runtime import AgentRuntimeStateKey, AgentRuntimeType
+from vidbyte.lib.enums.browser import (
+    BrowserEpisodeOutcome,
+    BrowserEventKind,
+    BrowserGoalSection,
+    BrowserToolRole,
+    BrowserVerdict,
+)
 from vidbyte.lib.enums.codex import (
     CodexApprovalMode,
     CodexContextAnchor,
@@ -185,6 +192,11 @@ __all__ = [
     "AgentType",
     "AssumptionAction",
     "BasisType",
+    "BrowserEpisodeOutcome",
+    "BrowserEventKind",
+    "BrowserGoalSection",
+    "BrowserToolRole",
+    "BrowserVerdict",
     "BudgetPreset",
     "BurdenOfProofVerdict",
     "CircularityVerdict",
