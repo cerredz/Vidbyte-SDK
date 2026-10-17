@@ -137,10 +137,12 @@ INFINITE_MASK_KEEP_RECENT = 3
 INFINITE_MASKED_TOOL_NAMES = ("grep", "read_lines", INFINITE_SEARCH_MEMORY_TOOL_NAME)
 INFINITE_GREP_CONTEXT_LINES = 0
 
-# search_memory: the most hits one search shows, and the most word
-# tokens in each hit's snippet.
+# search_memory: the most hits one search shows, the most word tokens in
+# each hit's snippet, and how many leading bytes of a changed file it
+# reads for a NUL, grep's sign of a binary file.
 INFINITE_SEARCH_MAX_HITS = 10
 INFINITE_SEARCH_SNIPPET_TOKENS = 12
+INFINITE_SEARCH_SNIFF_BYTES = 2_048
 
 # recall: the most retrievers one agent may start, a refused call
 # costing none; the most pre-search terms in one request; the
@@ -244,6 +246,7 @@ __all__ = [
     "INFINITE_RUN_ID_TIME_FORMAT",
     "INFINITE_SEARCH_MAX_HITS",
     "INFINITE_SEARCH_MEMORY_TOOL_NAME",
+    "INFINITE_SEARCH_SNIFF_BYTES",
     "INFINITE_SEARCH_SNIPPET_TOKENS",
     "INFINITE_SEED_DIRNAME",
     "INFINITE_SEED_LABEL",
