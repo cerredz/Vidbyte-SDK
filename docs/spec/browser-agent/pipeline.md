@@ -14,7 +14,7 @@ started: 2026-10-16 17:17
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-16 17:17 | 2026-10-16 22:35 | reports/S0-scout.md | base_commit 08f67e7f; code-map.md (4 sections, 17 notes) |
-| S1 spec + review | pending | | | | |
+| S1 spec + review | running | 2026-10-16 22:40 | | reports/S1-spec-author.md | |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -23,7 +23,7 @@ started: 2026-10-16 17:17
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 0/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 1/2 (round 1 reviewer launched 2026-10-16 on r1 @85fe040a) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Fixed values
 - REPO_ROOT: C:/Users/422mi/vidbyte-repos/vidbyte-sdk (origin https://github.com/cerredz/Vidbyte-SDK.git; gh logged in as cerredz)
@@ -46,6 +46,13 @@ started: 2026-10-16 17:17
 - none yet
 
 ## Niche facts accumulated (carried into every later briefing)
+- S1 author (r1 @85fe040a): `_budget_stop` checks `max_tool_calls` at the top of each iteration (`vidbyte/agents/runtime.py:2071-2080`), so a worker that hits the action cap gets no turn to report (EC-11, Q-9). — *source:* S1 author
+- S1 author: the runtime's `max_tool_calls` count includes DENIED calls (`_non_internal_tool_contexts`); `ToolSettings` budgets skip denied calls. — *source:* S1 author
+- S1 author: `BaseAgent` builds the runtime 3 times per run (`base.py:1280/1319/1388`), so the runtime `__init__` must have no side effects (INV-23); MCP connects at `base.py:916`, before `_runtime()`. — *source:* S1 author
+- S1 author: on the final-text finish path the loop appends the assistant reply after the hook's user message (`runtime.py:598-601`), as with Jev. — *source:* S1 author
+- S1 author: tests route scripted runners by agent name: `{name}`, `{name}-episode-{n}`, `{name}-recheck`, `{name}-done-when`; the MCP fake is patched at `vidbyte.tools.mcp.attach.McpStdioTransport`. — *source:* S1 author
+- S1 author: the `vidbyte/lib/enums/prompts.py` header counts ("139 … 35") are hand-kept and already stale; recount from the tree. `vidbyte/middleware/compaction/strategies.py` is 1,020 lines, so the shared sliding window cannot be extended in this PR. — *source:* S1 author
+- S1 author: baseline at 08f67e7f in the worktree: 1 failed, 6240 passed, 16 skipped; the failure is a pre-existing `harness_threads` surface test (recorded in spec §11). — *source:* S1 author
 - MCP screenshots never reach a model as pixels: `McpClient._content_to_text` turns every image/audio block into the text `[image: <mime>, <n> base64 chars omitted]` and truncates each result to 8,000 chars (`vidbyte/tools/mcp/client.py:31`, `:109-115`, `:136-143`, @intent `mcp-binary-content-stays-out-of-prompts`); the loop stores provider-formatted text dicts only (`vidbyte/agents/runtime.py:1935-1953`). The observation diet prunes text tool results. — *source:* S0 scout (code-map §4.1)
 - Preset keys: `McpPresetRegistry.build_config` checks `required_env` only against `preset.default_env` merged with the caller's `env` (`vidbyte/tools/mcp/presets.py:400-404`) and raises `McpPresetConfigurationError` (:104); the server subprocess gets an allowlisted env (`vidbyte/tools/mcp/transport.py:34-62`, `build_child_env` :80-89), so a key only in `os.environ` never reaches the server unless passed in `env`; `vidbyte/tools/toolsets/coding.py:8` says do not read keys from env vars. — *source:* S0 scout (§4.2)
 - No event sink exists on main at 08f67e7f: no `InfiniteEvents`, `JevEvents`, or `on_event` on Jev/Infinite; the only `on_event` is `MultiAgent` (`vidbyte/agents/multi/agent.py:65`). — *source:* S0 scout (§4.3)
