@@ -76,3 +76,21 @@ See the test plan's "Tests deliberately NOT written". In short: AC-29 is proved 
 - Do not edit these tests (§14). If one looks wrong, report it with the spec ID.
 - Keep the agent-name templates, the two seam paths, and the §8.5 names; the tests bind to them.
 - The S020 rule now indexes this pack's README; a new file in the pack must be added to its File Index.
+
+## S5 grant (R-5, R-4, R-19, R-20)
+
+2026-10-17, on the S4 review of `3f9e63c9` (branch head `5d1d6f30` before these commits). Only additions under `tests/`: no assertion was weakened or removed, and no source file was changed. All runs are offline (`env -u` on every provider key, `-p no:cacheprovider`). The mutants are the S4 probes, loaded as pytest plugins from the scratchpad.
+
+| Finding | Commit | Test | Proof |
+|---|---|---|---|
+| R-5 | `4f73cf31` | epi → `test_default_settings_keep_the_two_newest_observations_of_each_tool` | Branch: `1 passed in 0.74s`. `-p mutant_keep_one` ("MUTANT ACTIVE: keep_recent forced to 1") and `-p mutant_default_one` ("MUTANT ACTIVE: keep_observations default and constant forced to 1") both fail on `E AssertionError: the settled default keeps the two newest snapshots of a tool whole` (`1 failed in 0.25s` / `0.28s`). |
+| R-4 | `6dae8247` | obs → `test_an_unpriced_call_raises_usage_accounting_error` gains an `EventLog` sink and two asserts: the last event is `run_stopped`, and `run_finished` never appears | Red on the branch, for the right reason: `E AssertionError: ['run_started', 'goal_set', 'goal_rechecked', 'run_finished']` / `E assert 'run_finished' == 'run_stopped'`. With the S4 `fix_r_e1` probe loaded as a plugin (not applied to source): "FIX R-E1 ACTIVE", `109 passed in 0.73s`. The UsageAccountingError assertion is kept as it was. |
+| R-19 | `5753478b`, `447c5896` (comment wrap) | epi → `test_episode_and_recheck_models_reach_their_own_agents`; `ModelCall.model` records each calling agent's `runner_config.model_name` | Branch: `1 passed`. A mutant that pins every worker and recheck `BaseAgent` to `model_name` ("MUTANT ACTIVE: model overrides ignored") fails on `assert ['gpt-5.4-min...gpt-5.4-mini'] == ['gpt-5.4-nan...gpt-5.4-nano']`. The overrides are `gpt-5.4-nano` and `gpt-5.4`: both are priced and pass the pair check (`gpt-4.1` passes the pair check but has no price). The fixture field is named `recorded_model`, not `model_name`, because `BaseAgent` reads `model_name` off a runner. |
+| R-20 | `169f548c` | obs → `test_attached_tools_carry_no_server_key` | Branch: `1 passed`. It reads every tool's `repr` and `spec()` after `arun` and before `close_mcp_servers()`. Positive controls: the SEARCH, FETCH and ACTION tools are present, and the key is in the SEARCH server's env. A key planted in the tool description fails both this test and the AC-3 test (`2 failed`). A key planted only in the spec metadata fails this test alone (`1 failed, 1 passed`), so the new test is not vacuous. The existing `repr(agent.tools)` clause is unchanged, and no assertion is made on the `McpServerConfig` repr (Q-8/T-3). |
+
+Pack at the docs commit: `1 failed, 108 passed in 1.57s`. The only failure is the R-4 assertion above, which turns green once `runtime.py` settles usage before it emits the terminal event. Focused lint: `S020`, `A001` and `A009` print `SDK-LINT: PASS`. Every full-line comment added to the tests is at most 72 columns wide. `FEATURE.md` gains four failure-mode bullets (`24c6f212`).
+
+`git diff 5db0eaa0..HEAD -- tests/` shows the AC-13 line (`test_browser_agent_recheck.py:112`) plus the additions above. Some lines show as replaced rather than added:
+- the fixture signatures and call sites that now pass the model through (each with a defaulted argument);
+- the fixture's ARCHITECTURE NOTE and the function inventories, which are extended;
+- the R-4 test's docstring and its `build_agent()` call, which now passes `on_event=log`.
