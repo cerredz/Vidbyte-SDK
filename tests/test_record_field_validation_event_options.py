@@ -3,10 +3,10 @@
 PURPOSE: Proves the RecordFieldValidator options added for the InfiniteMemory event records and the on_event setting: require_number with allow_zero, require_utc_datetime with a resolution, and require_callable with optional and synchronous; and that a caller who passes none of the new options keeps today's behavior.
 ROLE IN CODEBASE: Unit tests for vidbyte/lib/dataclasses/validation.py, row 23 of docs/spec/infinite-memory-events/spec.md section 12.3 (AC-37 b, c, d; INV-36, INV-38; D-27). tests/test_record_field_validation.py covers the older options and is not edited.
 ARCHITECTURE NOTE: The validators are called directly with qualified field names such as X.f, as records do, and each refusal is checked by details['field'], which is what a record's caller reads. Each test pairs the new option with the unchanged default, so the default cannot drift while the option is added.
-FUNCTION INVENTORY: test_require_number_accepts_zero_only_with_allow_zero (AC-37 d, INV-38); test_require_utc_datetime_accepts_only_a_zero_offset_at_the_resolution (AC-37 b); test_require_callable_refuses_none_unless_optional_and_async_sinks_when_synchronous (AC-37 c, INV-36, D-27); test_require_callable_sees_through_partials_of_an_object_with_an_async_call (INV-36, EC-31, D-27). _field reads the refused field; _async_sink, _AsyncCall, and _PlainCall are the sinks.
+FUNCTION INVENTORY: test_require_number_accepts_zero_only_with_allow_zero (AC-37 d, INV-38); test_require_utc_datetime_accepts_only_a_zero_offset_at_the_resolution (AC-37 b); test_require_callable_refuses_none_unless_optional_and_async_sinks_when_synchronous (AC-37 c, INV-36, D-27); test_require_callable_sees_through_partials_of_an_object_with_an_async_call (INV-36, EC-31, D-27); test_require_callable_refuses_a_partial_subclass_whose_own_call_is_async (INV-36, EC-31, D-27). _field reads the refused field; _async_sink, _AsyncCall, _PlainCall, _AsyncPartial, and _PlainPartial are the sinks.
 COMMON MODIFICATION PATTERNS: A new option adds one accept case and one refuse case naming the field, next to a case proving the call without the option is unchanged.
 WHAT NOT TO DO IN THIS FILE: 1. Do not split the unchanged-default cases into their own tests; alone they pass before the option exists and prove nothing about it. 2. Do not compare messages word for word beyond the field name; the spec fixes the field, not the sentence.
-KNOWN EDGE CASES: inspect.iscoroutinefunction sees through functools.partial, so a partial of an async function is refused like the function itself; a partial of an object with an async __call__ is not seen through by it, so the validator unwraps partials itself. A timezone other than timezone.utc whose offset is zero is still UTC.
+KNOWN EDGE CASES: inspect.iscoroutinefunction sees through functools.partial, so a partial of an async function is refused like the function itself; a partial of an object with an async __call__ is not seen through by it, so the validator unwraps partials itself. From Python 3.13, functools.partial merges a partial subclass that has no instance attributes into a partial around it, dropping the subclass's own __call__; the nested case therefore gives the inner partial an attribute. A timezone other than timezone.utc whose offset is zero is still UTC.
 RELATED DOCS: vidbyte/lib/README.md (dataclasses/validation.py); docs/spec/infinite-memory-events/spec.md sections 8.5, 9.1 and 12.3; docs/spec/infinite-memory-events/test-plan.md.
 TESTS: PYTHONPATH=$(pwd) python -m pytest tests/test_record_field_validation_event_options.py -q
 """
@@ -43,6 +43,15 @@ class _AsyncCall:
 class _PlainCall:
     def __call__(self, event: object) -> None:
         return None
+
+
+class _AsyncPartial(functools.partial):
+    async def __call__(self, *args: object, **kwargs: object) -> None:
+        return None
+
+
+class _PlainPartial(functools.partial):
+    pass
 
 
 def test_require_number_accepts_zero_only_with_allow_zero() -> None:
@@ -98,3 +107,17 @@ def test_require_callable_sees_through_partials_of_an_object_with_an_async_call(
         assert _field(raised) == FIELD
     for sink in (functools.partial(_PlainCall()), functools.partial(print, end="")):
         assert RecordFieldValidator.require_callable(sink, FIELD, optional=True, synchronous=True) is sink
+
+
+def test_require_callable_refuses_a_partial_subclass_whose_own_call_is_async() -> None:
+    """INV-36, EC-31, D-27: with synchronous=True, a functools.partial subclass whose own __call__ is async is refused naming the field, alone or inside another partial, while a partial subclass that keeps partial's __call__ is returned unchanged."""
+    # A partial that holds attributes is never merged into a partial
+    # around it, so the async layer stays inside on every Python.
+    inner = _AsyncPartial(print)
+    inner.label = "sink"
+    for sink in (_AsyncPartial(print), functools.partial(inner)):
+        with pytest.raises(ConfigurationError, match=r"X\.f") as raised:
+            RecordFieldValidator.require_callable(sink, FIELD, optional=True, synchronous=True)
+        assert _field(raised) == FIELD, sink
+    plain = _PlainPartial(print, end="")
+    assert RecordFieldValidator.require_callable(plain, FIELD, optional=True, synchronous=True) is plain
