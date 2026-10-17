@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Every check lives in __post_init__, so a constructed record i
 FUNCTION INVENTORY: NativeThreadRequest.__post_init__ is the narrated main function and picks the prompt cap and pattern for the harness; _checked_workspace checks and resolves the workspace; _checked_model checks the model for the harness; _checked_thread_id ties the thread id to the verb; _checked_skills checks, resolves and names each skill folder. GrokThreadConfig, OpencodeThreadConfig, MuseThreadConfig, ClaudeThreadConfig and NativeThreadResult have only __post_init__.
 COMMON MODIFICATION PATTERNS: A new config field adds one field and one validator call to its record, and its bound or pattern to vidbyte/lib/constants/native_threads.py. A config record never gets a model field: the model is an argument of every call.
 WHAT NOT TO DO IN THIS FILE: 1. Do not read keys from environment variables. 2. Do not put a key value in an error message or its details; name the parameter instead. 3. Do not drop repr=False from a key field. 4. Do not import from vidbyte.harnesses; vidbyte/lib is the bottom layer.
-KNOWN EDGE CASES: The prompt cap is NATIVE_PROMPT_MAX_CHARS for opencode and Claude Code, which read the prompt from stdin (NATIVE_STDIN_PROMPT_HARNESSES), and NATIVE_ARGV_PROMPT_MAX_CHARS for Grok and Muse, which take it on argv; on Windows the Grok and Muse prompt must also fit NATIVE_WINDOWS_ARGV_PROMPT_MAX_UNITS once quoted and counted in UTF-16 units, the way CreateProcess counts it; that ceiling leaves room for the rest of the command line, and a launch that still passes the limit is reported as launch_failed. A skill item that is not a path is refused naming skills[<i>], while a skill list that is a str or holds too many items is refused naming skills. Two skill folders with the same folder name are refused, because each harness finds a skill by its folder name. A Claude Code thread id must be a lowercase UUID (CLAUDE_THREAD_ID_PATTERN), because claude --resume also matches a session title or a transcript path. A Claude Code prompt that holds a lone surrogate is refused (CLAUDE_PROMPT_PATTERN), because UTF-8 cannot encode it for stdin; opencode's prompt is not checked for one (claude-thread-functions spec EC-38).
+KNOWN EDGE CASES: The prompt cap is NATIVE_PROMPT_MAX_CHARS for opencode and Claude Code, which read the prompt from stdin (NATIVE_STDIN_PROMPT_HARNESSES), and NATIVE_ARGV_PROMPT_MAX_CHARS for Grok and Muse, which take it on argv; on Windows the Grok and Muse prompt must also fit NATIVE_WINDOWS_ARGV_PROMPT_MAX_UNITS once quoted and counted in UTF-16 units, the way CreateProcess counts it; that ceiling leaves room for the rest of the command line, and a launch that still passes the limit is reported as launch_failed. A skill item that is not a path is refused naming skills[<i>], while a skill list that is a str or holds too many items is refused naming skills. Two skill folders with the same folder name are refused, because each harness finds a skill by its folder name. A Claude Code thread id must be a lowercase UUID (CLAUDE_THREAD_ID_PATTERN), because claude --resume also matches a session title or a transcript path. A Claude Code prompt that holds a lone surrogate is refused (CLAUDE_PROMPT_PATTERN), because UTF-8 cannot encode it for stdin; opencode's prompt is not checked for one (claude-thread-functions spec EC-38). claude_command and grok_command hold the executable alone (require_program), because a further item would reach the program ahead of the SDK's options: --settings could move the endpoint the key is sent to and --dangerously-skip-permissions would approve every tool (PR #1044 review).
 RELATED DOCS: vidbyte/harnesses/README.md
 TESTS: tests/features/harness_threads/test_harness_threads_records.py, tests/features/harness_threads/test_harness_threads_arguments.py
 """
@@ -181,7 +181,7 @@ class GrokThreadConfig:
         object.__setattr__(self, "permission_mode", RecordFieldConverter.to_enum(self.permission_mode, GrokPermissionMode, "GrokThreadConfig.permission_mode"))
         RecordFieldValidator.require_number(self.timeout_seconds, "GrokThreadConfig.timeout_seconds", maximum=NATIVE_THREAD_MAX_SECONDS)
         if self.grok_command is not None:
-            RecordFieldValidator.require_argv(self.grok_command, "GrokThreadConfig.grok_command")
+            RecordFieldValidator.require_program(self.grok_command, "GrokThreadConfig.grok_command")
 
 
 @dataclass(frozen=True, slots=True)
@@ -236,7 +236,7 @@ class ClaudeThreadConfig:
         object.__setattr__(self, "permission_mode", RecordFieldConverter.to_enum(self.permission_mode, ClaudePermissionMode, "ClaudeThreadConfig.permission_mode"))
         RecordFieldValidator.require_number(self.timeout_seconds, "ClaudeThreadConfig.timeout_seconds", maximum=NATIVE_THREAD_MAX_SECONDS)
         if self.claude_command is not None:
-            RecordFieldValidator.require_argv(self.claude_command, "ClaudeThreadConfig.claude_command")
+            RecordFieldValidator.require_program(self.claude_command, "ClaudeThreadConfig.claude_command")
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,6 +1,6 @@
 """FILE: tests/features/harness_threads/conftest.py
 
-PURPOSE: Shared offline fixtures for the harness_threads pack: lazy imports of the spec §8.5 contract names, a sandbox with a redirected user home, a workspace, skill folders and an empty PATH folder, the scripted stand-in (fake_harness.py) with its log reader, `.exe`/script stand-ins for PATH lookups, the INV-5 error check, and process liveness checks for both platforms.
+PURPOSE: Shared offline fixtures for the harness_threads pack: lazy imports of the spec §8.5 contract names, a sandbox with a redirected user home, a workspace, skill folders and an empty PATH folder, the scripted stand-in (fake_harness.py) with its log reader, `.exe`/script stand-ins for PATH lookups and for the Grok and Claude Code launchers (which hold the executable alone), the INV-5 error check, and process liveness checks for both platforms.
 ROLE IN CODEBASE: Loaded by pytest for every module in tests/features/harness_threads/. The stand-in runs as a real child process through the config records' <harness>_command fields (spec §13 "Real seams"); nothing in the thread functions, CliRunner or the filesystem is mocked.
 ARCHITECTURE NOTE: Every vidbyte import happens inside a fixture (lib_api, api), so a missing module fails each test at setup instead of aborting collection of the whole suite; lib_api needs only the vidbyte.lib names, so the process, argv and record tests can pass before the harness modules land. The api namespace resolves each thread function and config record only when a test asks for it (ThreadFunctions, ConfigRecords, ContractNames), so a harness that has not landed yet (Claude Code, spec claude-thread-functions) fails its own tests with an AttributeError naming the missing name and leaves the other harnesses' tests green. The sandbox is made by tmp_path_factory.mktemp("case") so no path holds a harness name, and the user home and the workspace are sibling folders (spec §13, R-17). PATH holds only the sandbox's own bin folder, so no test can reach a real grok, opencode, muse, claude or wsl.exe, and the sandbox drops every ANTHROPIC_*/CLAUDE* variable of the shell running the tests (claude-thread-functions §13: that shell carries a real key and its own Claude Code session).
 FUNCTION INVENTORY: lib_api and api return namespaces of contract names (ContractNames looks a name it lacks up in the records module; ThreadFunctions and ConfigRecords look functions and config records up on first use); private_home and private_config give the private Grok home and Claude Code config folder of a workspace; Sandbox builds the folders, scenarios, stand-ins and snapshots and reads the stand-in logs; sandbox builds one per test with the home, PATH, temp folder and Anthropic variables redirected; call runs one thread function against the stand-in; check_error asserts the INV-5 attributes and message order; fast_stop shrinks NATIVE_KILL_WAIT_SECONDS; wait_until polls with a deadline; process_alive reports liveness on win32 and POSIX; launcher_bytes finds pip's console-script launcher for `.exe` stand-ins.
@@ -37,6 +37,7 @@ HARNESSES = ("grok", "opencode", "muse", "claude")
 VERBS = ("run", "continue", "fork")
 LABELS = {"grok": "Grok Build", "opencode": "opencode", "muse": "Muse Code", "claude": "Claude Code"}
 COMMAND_FIELDS = {"grok": "grok_command", "opencode": "opencode_command", "muse": "muse_command", "claude": "claude_command"}
+PROGRAM_ONLY_HARNESSES = ("grok", "claude")
 CONFIG_NAMES = {"grok": "GrokThreadConfig", "opencode": "OpencodeThreadConfig", "muse": "MuseThreadConfig", "claude": "ClaudeThreadConfig"}
 CLAUDE_NAME_PREFIXES = ("ANTHROPIC_", "CLAUDE")
 OPENCODE_MODEL = "deepseek/deepseek-v4-pro"
@@ -157,6 +158,11 @@ class Sandbox:
         return path
 
     def command(self, program: str, **fields: Any) -> tuple[str, ...]:
+        # Grok and Claude Code take the executable alone
+        # (require_program), so their launcher is a one-file stand-in;
+        # opencode and Muse still take the interpreter and the script.
+        if program in PROGRAM_ONLY_HARNESSES:
+            return (str(self.stand_in(self.fake_root / "launchers", f"{program}-{self.scenarios + 1:03d}", program, **fields)),)
         return (sys.executable, "-u", str(FAKE), str(self.scenario(program, **fields)))
 
     def stand_in(self, folder: Path, name: str, program: str, *, as_wsl: bool = False, **fields: Any) -> Path:

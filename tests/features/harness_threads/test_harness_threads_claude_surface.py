@@ -56,6 +56,11 @@ BAD_CONFIG_FIELDS = [
     ("timeout_seconds", 0), ("timeout_seconds", -1.0), ("timeout_seconds", math.nan), ("timeout_seconds", math.inf), ("timeout_seconds", 14400.5),
     ("timeout_seconds", True), ("timeout_seconds", "60"), ("claude_command", ()), ("claude_command", ("",)), ("claude_command", "claude"),
     ("claude_command", ["claude"]), ("claude_command", ("cl\x00aude",)),
+    # PR #1044 review (P0): anything after the executable reaches claude
+    # ahead of the SDK's options, so each form is refused when built.
+    ("claude_command", ("claude-bin", "--settings", '{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:18777"}}')),
+    ("claude_command", ("claude-bin", "--dangerously-skip-permissions")), ("claude_command", ("claude-bin", "--permission-mode=bypassPermissions")),
+    ("claude_command", ("claude-bin", "--mcp-config", "servers.json")), ("claude_command", ("claude-bin", "mcp")), ("claude_command", ("wsl.exe", "-e", "claude")),
 ]
 OLD_NAMES = [
     ("vidbyte.harnesses.native.claude", "ClaudeHost"), ("vidbyte.harnesses.native.claude", "ClaudeLiveSession"), ("vidbyte.harnesses.native", "ClaudeHost"),
@@ -187,9 +192,9 @@ def test_claude_thread_config_has_the_spec_fields_and_defaults(lib_api) -> None:
     default = cls()
     assert (default.reasoning_effort, default.permission_mode, default.timeout_seconds, default.claude_command) == (None, enums.ClaudePermissionMode.DEFAULT, 1800.0, None)
     assert default.permission_mode is enums.ClaudePermissionMode.DEFAULT and default.timeout_seconds == lib_api.constants.NATIVE_THREAD_DEFAULT_SECONDS
-    built = cls(reasoning_effort="xhigh", permission_mode="acceptEdits", timeout_seconds=14400, claude_command=("claude-bin", "--debug"))
+    built = cls(reasoning_effort="xhigh", permission_mode="acceptEdits", timeout_seconds=14400, claude_command=("claude-bin",))
     assert built.reasoning_effort is enums.ClaudeReasoningEffort.XHIGH and built.permission_mode is enums.ClaudePermissionMode.ACCEPT_EDITS
-    assert built.timeout_seconds == 14400 and built.claude_command == ("claude-bin", "--debug")
+    assert built.timeout_seconds == 14400 and built.claude_command == ("claude-bin",)
     with pytest.raises(TypeError):
         cls(model="sonnet")
 
