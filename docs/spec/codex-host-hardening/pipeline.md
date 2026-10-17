@@ -17,7 +17,7 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 06:50 | 07:12 | reports/S0-scout.md | base_commit 6f5a7310; code-map 4 sections, 25 files |
 | S1 spec + review | done | 07:13 | 10:05 | reports/S1-spec-author.md, reports/S1-spec-review.md | r1 0f0d3118 (FR 37, AC 39, EC 52, W 13; 0 blocking Q); reviewer round 1 SOUND WITH FIXES (836b23ca); r2 2b6affc1 rebased on #1178 (FR+, 3 new files, 20 superseded tests); reviewer round 2 SOUND WITH FIXES (4548f58d, 0 Blocker); r3 804c6f0b status approved |
-| S2 tests | done | 10:10 | 11:40 | reports/S2-test-author.md | **S2_HEAD 09524ff4**; 106 new tests (97 red, 8 guards, 1 live-skipped), 20 superseded + 7 support literals; red 125F/631P/3S vs baseline 1F/650P/2S; spec r4 (d3389171) aligned to test choices |
+| S2 tests | done | 10:10 | 11:40 | reports/S2-test-author.md | **S2_HEAD fadec47f** (was 09524ff4; moved by the orchestrator-granted correction of 2 assertions); 106 new tests (97 red, 8 guards, 1 live-skipped), 20 superseded + 7 support literals; red 125F/631P/3S vs baseline 1F/650P/2S; spec r4 (d3389171) aligned to test choices |
 | S3 implement | running | 11:45 | | reports/S3-implementer.md | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
@@ -182,7 +182,7 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
   
   Budget: 3 new files, 13 classes. *Source:* S1 author r2
 - C021 scans only git-tracked files. Run `git add` before `python lint/run.py --rule C021`. *Source:* S1 author r2
-- **S2_HEAD = 09524ff4.** Run `git diff 09524ff4..HEAD -- tests` and it must stay EMPTY for S3 and S5; only S2 may touch tests. *Source:* orchestrator
+- **S2_HEAD = fadec47f** (was 09524ff4). Run `git diff fadec47f..HEAD -- tests` and it must stay EMPTY for S3 and S5; only S2 may touch tests. The granted correction (`fadec47f`) changed exactly `function_rows.py:85` (field label `endswith("thread_id")`) and `approvals.py:463` (`closed == 1`, and every reader error must be the close-time `TransportClosedError`). *Source:* orchestrator
 - Exact names the tests patch or identity-check:
   - `turn_events.CODEX_HOST_LOST_TURN_GRACE_SECONDS`;
   - `connection.CODEX_TOOL_CALL_TIMEOUT_SECONDS`, read inside the router's `handle`;
