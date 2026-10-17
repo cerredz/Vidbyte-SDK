@@ -72,9 +72,9 @@ class AgentSwarmEvents:
 
     async def _deliver(self, event: AgentSwarmEvent) -> None:
         # @intent a-callback-error-never-stops-the-swarm
-        # The callback is the developer's code: an Exception it raises is
-        # kept by type name and the swarm goes on, while cancellation and
-        # other BaseExceptions pass through untouched.
+        # The callback is the developer's code: an Exception it raises
+        # is kept by type name and the swarm goes on, while cancellation
+        # and other BaseExceptions pass through untouched.
         if self._on_event is None:
             return
         try:

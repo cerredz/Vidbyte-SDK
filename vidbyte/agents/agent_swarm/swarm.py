@@ -27,7 +27,8 @@ class AgentSwarm:
     """A group of agents that work on one goal in one shared folder and message each other until none has work left."""
 
     def __init__(self, settings: AgentSwarmSettings) -> None:
-        # Only checked settings are accepted, so every run can trust them.
+        # Only checked settings are accepted, so every run can trust
+        # them.
         if not isinstance(settings, AgentSwarmSettings):
             raise ConfigurationError(f"AgentSwarm requires an AgentSwarmSettings instance; got {type(settings).__name__}.", details={"field": "settings", "received_type": type(settings).__name__})
         self.settings = settings
@@ -37,8 +38,8 @@ class AgentSwarm:
         """Run the swarm on the goal until no agent has work left, the turn budget is spent, every agent failed, or the time limit is reached."""
         # @intent one-run-at-a-time-per-swarm
         # A second run on the same swarm while one is in progress would
-        # share its folder and callback, so it is refused before anything
-        # happens, as is a goal that is not text.
+        # share its folder and callback, so it is refused before
+        # anything happens, as is a goal that is not text.
         if self._running:
             raise ConfigurationError("This AgentSwarm is already running; wait for its arun to return before starting another run.", details={"field": "arun"})
         RecordFieldValidator.require_text(goal, "goal")

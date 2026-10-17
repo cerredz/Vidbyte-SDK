@@ -65,7 +65,8 @@ class AgentSwarmMember:
         RecordFieldValidator.require_text(self.name, "AgentSwarmMember.name", pattern=AGENT_SWARM_NAME_PATTERN, one_line=True)
         RecordFieldValidator.require_text(self.system_prompt, "AgentSwarmMember.system_prompt")
         # Developers may name the provider as text; the enum is stored,
-        # and a name the SDK does not know is refused with the known ones.
+        # and a name the SDK does not know is refused with the known
+        # ones.
         try:
             provider = ModelProvider(self.provider)
         except ValueError as exc:

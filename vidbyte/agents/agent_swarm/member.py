@@ -48,8 +48,8 @@ class AgentSwarmMemberRuntime(AgentRuntime):
 
     def __init__(self, *, swarm_runtime: AgentSwarmRuntime | None = None, **kwargs: Any) -> None:
         # @intent member-runtime-needs-its-swarm
-        # AgentRuntimeType.AGENT_SWARM_MEMBER is selectable by string, so
-        # a plain BaseAgent or a fork can reach this class without a
+        # AgentRuntimeType.AGENT_SWARM_MEMBER is selectable by string,
+        # so a plain BaseAgent or a fork can reach this class without a
         # swarm; refusing here names the entry point to use instead.
         if swarm_runtime is None:
             raise ConfigurationError(
@@ -121,9 +121,9 @@ class AgentSwarmMessageTool(BaseTool):
     async def execute(self, call: ToolCall) -> ToolResult:
         """Queue the message and return the swarm's reply, or its refusal as a tool error."""
         # @intent a-refused-send-is-a-tool-error
-        # The swarm checks the recipient and the text again, whatever the
-        # schema allowed, and a refusal reaches the model as a tool error
-        # it can act on; nothing is queued then.
+        # The swarm checks the recipient and the text again, whatever
+        # the schema allowed, and a refusal reaches the model as a tool
+        # error it can act on; nothing is queued then.
         try:
             reply = await self.swarm_runtime.post_message(self.sender, call.arguments.get(AGENT_SWARM_MESSAGE_TO_ARGUMENT), call.arguments.get(AGENT_SWARM_MESSAGE_TEXT_ARGUMENT))
         except ToolExecutionError as exc:
@@ -158,7 +158,8 @@ class AgentSwarmMemberAgent(BaseAgent):
         )
 
     def _runtime_extension_kwargs(self) -> dict[str, Any]:
-        # Hands the run's AgentSwarmRuntime to each AgentSwarmMemberRuntime.
+        # Hands the run's AgentSwarmRuntime to each
+        # AgentSwarmMemberRuntime.
         return {"swarm_runtime": self.swarm_runtime}
 
 

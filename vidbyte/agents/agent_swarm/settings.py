@@ -69,7 +69,8 @@ class AgentSwarmSettings:
         agents = RecordFieldConverter.to_tuple(self.agents, "AgentSwarmSettings.agents", item_type=AgentSwarmMember, max_items=AGENT_SWARM_MAX_AGENTS)
         if len(agents) < AGENT_SWARM_MIN_AGENTS:
             raise ConfigurationError(f"AgentSwarmSettings.agents must hold at least {AGENT_SWARM_MIN_AGENTS} members; got {len(agents)}.", details={"field": "AgentSwarmSettings.agents"})
-        # Names are how agents address each other, so no two may share one.
+        # Names are how agents address each other, so no two may share
+        # one.
         names = [member.name for member in agents]
         repeated = next((name for index, name in enumerate(names) if name in names[:index]), None)
         if repeated is not None:
@@ -89,7 +90,8 @@ class AgentSwarmSettings:
         RecordFieldValidator.require_int(self.max_turns, "AgentSwarmSettings.max_turns", minimum=len(agents))
         RecordFieldValidator.require_number(self.timeout_seconds, "AgentSwarmSettings.timeout_seconds", maximum=AGENT_SWARM_MAX_TIMEOUT_SECONDS)
 
-        # The callback is optional, and called once per event when given.
+        # The callback is optional, and called once per event when
+        # given.
         if self.on_event is not None and not callable(self.on_event):
             raise ConfigurationError(f"AgentSwarmSettings.on_event must be None or a callable that takes one AgentSwarmEvent; got a value of type {type(self.on_event).__name__}.", details={"field": "AgentSwarmSettings.on_event"})
 

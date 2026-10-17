@@ -36,9 +36,9 @@ class AgentSwarmTools(Tools):
     @staticmethod
     def get_tools(root: Path) -> tuple[BaseTool, ...]:
         """Return bash, grep, read_lines, write_text, and patch_file over root."""
-        # Reading and writing share one configuration that allows writing,
-        # so both resolve paths against the same folder and refuse any
-        # path outside it.
+        # Reading and writing share one configuration that allows
+        # writing, so both resolve paths against the same folder and
+        # refuse any path outside it.
         file_config = FileSystemToolConfig(root=root, allow_write=True)
         return (BashTool(root), GrepTool(root), ReadLinesTool(file_config), WriteTextTool(file_config), PatchTool(root))
 

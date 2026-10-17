@@ -69,8 +69,8 @@ class AgentSwarmRuntime:
         # so a refused call leaves this runtime unused.
         RecordFieldValidator.require_text(goal, "goal")
         # @intent a-swarm-runtime-runs-once
-        # All run state lives on this object, so a second run would start
-        # from the first one's inboxes, turns, and events.
+        # All run state lives on this object, so a second run would
+        # start from the first one's inboxes, turns, and events.
         if self._ran:
             raise ConfigurationError("This AgentSwarmRuntime has already run its swarm; AgentSwarm builds a fresh runtime for every arun.", details={"field": "arun"})
         self._ran = True
@@ -86,9 +86,9 @@ class AgentSwarmRuntime:
             self._events.record(AgentSwarmEventKind.AGENT_STARTED, agent.name)
         self._turns = len(agents)
 
-        # Deliver the start events, then run every agent at once, each in
-        # its own task, until the end check releases them all. The time
-        # limit cancels whatever is still running, including a slow
+        # Deliver the start events, then run every agent at once, each
+        # in its own task, until the end check releases them all. The
+        # time limit cancels whatever is still running, including a slow
         # delivery of the start events.
         try:
             async with asyncio.timeout(self._settings.timeout_seconds), asyncio.TaskGroup() as group:
@@ -142,11 +142,11 @@ class AgentSwarmRuntime:
         """Queue one message for another agent and wake it when it is idle and turns remain; never waits for the recipient."""
         # @intent a-send-is-decided-and-queued-in-one-step
         # Everything from the checks to the wake runs with no await, so
-        # the recipient cannot end its turn or go idle in between: either
-        # it is still working and collects the message at its next tool
-        # iteration or turn end, or it is idle and this send wakes it.
-        # Either way the message is delivered once, or it stays queued
-        # only when no turn is left to wake it with.
+        # the recipient cannot end its turn or go idle in between:
+        # either it is still working and collects the message at its
+        # next tool iteration or turn end, or it is idle and this send
+        # wakes it. Either way the message is delivered once, or it
+        # stays queued only when no turn is left to wake it with.
         peers = [member.name for member in self._settings.agents if member.name != sender]
         if not isinstance(text, str) or not text.strip():
             raise ToolExecutionError(self._texts[Prompt.AGENT_SWARM_MESSAGE_BLANK_TEXT])
@@ -183,9 +183,9 @@ class AgentSwarmRuntime:
         """End an agent's turn: return its next turn's messages, at once or when a message wakes it, or "" when the swarm ends."""
         # @intent a-turn-end-is-decided-in-one-step
         # The idle mark and the inbox check run with no await between
-        # them, so a message accepted before this point is found here and
-        # one accepted after it finds the agent idle and wakes it; no
-        # message can arrive in a gap and sit unseen.
+        # them, so a message accepted before this point is found here
+        # and one accepted after it finds the agent idle and wakes it;
+        # no message can arrive in a gap and sit unseen.
         self._events.record(AgentSwarmEventKind.AGENT_IDLE, name, text=reply)
         if self._inboxes[name] and self._turns < self._settings.max_turns:
             # Mail is already waiting and a turn is left: start the next
@@ -205,8 +205,8 @@ class AgentSwarmRuntime:
         await self._events.flush()
         await wake
 
-        # A send marks the agent working before it resolves the wait; the
-        # end of the swarm resolves it without doing so.
+        # A send marks the agent working before it resolves the wait;
+        # the end of the swarm resolves it without doing so.
         if name not in self._working:
             return ""
         text = self._drain(name)
@@ -234,7 +234,8 @@ class AgentSwarmRuntime:
         # Take every waiting message out of the inbox and record its
         # delivery in the same step, so none is delivered twice; render
         # them, oldest first and each labeled with its sender, as one
-        # user message. Message text is a format value, never a template.
+        # user message. Message text is a format value, never a
+        # template.
         messages, self._inboxes[name] = self._inboxes[name], []
         for sent in messages:
             self._events.record(AgentSwarmEventKind.MESSAGE_DELIVERED, name, peer=sent.agent, message_id=sent.message_id)
@@ -254,7 +255,8 @@ class AgentSwarmRuntime:
         # no agent is working no message is in flight and none can
         # arrive. The reason is FAILED when everyone failed, MAX_TURNS
         # when a running agent still holds mail the budget could not
-        # wake it for, and QUIET otherwise; every idle agent is released.
+        # wake it for, and QUIET otherwise; every idle agent is
+        # released.
         if self._working or self._stop_reason is not None:
             return
         running = [member.name for member in self._settings.agents if member.name not in self._failed]
@@ -270,8 +272,9 @@ class AgentSwarmRuntime:
 
     @staticmethod
     def _failure_text(error: VidbyteSdkError) -> str:
-        # BaseAgent wraps the real failure, such as the provider's error,
-        # as the cause of a generic one, so the cause names the problem.
+        # BaseAgent wraps the real failure, such as the provider's
+        # error, as the cause of a generic one, so the cause names the
+        # problem.
         cause = error.__cause__ if error.__cause__ is not None else error
         detail = str(cause).strip()
         return f"{type(cause).__name__}: {detail}" if detail else type(cause).__name__
