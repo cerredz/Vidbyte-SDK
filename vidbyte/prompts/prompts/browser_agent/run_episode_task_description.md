@@ -1,0 +1,1 @@
+What the worker must do, written so that it makes sense without this conversation. Name the page or URL to start from, and the facts to read or the fields to fill. Keep it to one page or one form, so the worker can finish within its budget. Put any value the worker must type into the task itself.

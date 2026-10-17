@@ -4,7 +4,7 @@ FILE:
     vidbyte/lib/enums/prompts.py
 
 PURPOSE:
-    Defines the stable typed identifiers for all 139 static prompt assets across 35
+    Defines the stable typed identifiers for all 158 static prompt assets across 36
     JSON/Markdown-backed families, and the opt-in system-prompt presets an agent can
     attach. This file owns identifiers only; prompt text and family metadata belong
     under ``vidbyte/prompts/prompts/``.
@@ -150,6 +150,25 @@ class Prompt(str, Enum):
     INFINITE_MEMORY_EDIT_FILE_NEW_TEXT_DESCRIPTION = "infinite_memory.edit_file_new_text_description"
     INFINITE_MEMORY_DROP_ENTRY_TOOL_DESCRIPTION = "infinite_memory.drop_entry_tool_description"
     INFINITE_MEMORY_DROP_ENTRY_ID_DESCRIPTION = "infinite_memory.drop_entry_id_description"
+    BROWSER_AGENT_ORCHESTRATOR_SYSTEM_PROMPT = "browser_agent.orchestrator_system_prompt"
+    BROWSER_AGENT_WORKER_SYSTEM_PROMPT = "browser_agent.worker_system_prompt"
+    BROWSER_AGENT_EPISODE_PROMPT = "browser_agent.episode_prompt"
+    BROWSER_AGENT_DONE_WHEN_SYSTEM_PROMPT = "browser_agent.done_when_system_prompt"
+    BROWSER_AGENT_RECHECK_SYSTEM_PROMPT = "browser_agent.recheck_system_prompt"
+    BROWSER_AGENT_RECHECK_PROMPT = "browser_agent.recheck_prompt"
+    BROWSER_AGENT_GOAL_CARD = "browser_agent.goal_card"
+    BROWSER_AGENT_RESULT_CARD = "browser_agent.result_card"
+    BROWSER_AGENT_RUN_EPISODE_DESCRIPTION = "browser_agent.run_episode_description"
+    BROWSER_AGENT_RUN_EPISODE_TASK_DESCRIPTION = "browser_agent.run_episode_task_description"
+    BROWSER_AGENT_RUN_EPISODE_DONE_WHEN_DESCRIPTION = "browser_agent.run_episode_done_when_description"
+    BROWSER_AGENT_PATCH_GOAL_DESCRIPTION = "browser_agent.patch_goal_description"
+    BROWSER_AGENT_PATCH_GOAL_SECTION_DESCRIPTION = "browser_agent.patch_goal_section_description"
+    BROWSER_AGENT_PATCH_GOAL_TEXT_DESCRIPTION = "browser_agent.patch_goal_text_description"
+    BROWSER_AGENT_PATCH_REFUSED = "browser_agent.patch_refused"
+    BROWSER_AGENT_PROGRESS_FULL = "browser_agent.progress_full"
+    BROWSER_AGENT_CONTINUE_PROMPT = "browser_agent.continue_prompt"
+    BROWSER_AGENT_STUCK_SUMMARY = "browser_agent.stuck_summary"
+    BROWSER_AGENT_STALLED_OUTPUT = "browser_agent.stalled_output"
     CONTINUAL_TRACE_SYSTEM_PROMPT = "continual_trace.system_prompt"
     CONTEXT_ENGINEERING_GUIDELINE_PROMPT = "context_engineering.guideline_prompt"
     EXPERT_PROMPTING_EXPERT_PROMPT = "expert_prompting.expert_prompt"
