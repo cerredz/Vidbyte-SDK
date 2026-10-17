@@ -38,7 +38,7 @@ Files in the shared workspace to read before you begin. A dash means none.
 
 {paths}
 
-Each was named because your task depends on it, so read the parts you need before you produce anything it could contradict, and when one is missing, work from what exists and report the gap. The map at the top of your context lists every other file with its size and description, so decide from it before you open anything else, since every file you read fills your context.
+Each was named because your task depends on it, so read the parts you need before you produce anything it could contradict, and when one is missing, work from what exists and report the gap. The map at the top of your context lists the workspace's files with their sizes and descriptions, as many as fit, so decide from it before you open anything else, since every file you read fills your context.
 
 # Your subagent pairs that already finished in this run
 
