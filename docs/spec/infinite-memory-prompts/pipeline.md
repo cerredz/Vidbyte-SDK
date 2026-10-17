@@ -108,6 +108,8 @@ The folder holds 40 `.md` assets; `infinite_memory.json` top level is a dict wit
 
 - 2026-10-17 05:25 — **S5 iteration 2 converged** (fixed R-27 @fe04ab8c, R-28 @3825237d; verify-log at 5f41a5f4, pushed). Orchestrator's own gate run at 5f41a5f4 (`scratchpad/gates-s5-2/`): module 131; pack 244; `SDK-LINT: PASS`; semgrep 0; public-API current; source = only the 3 inherited harness_threads failures (`3 failed, 6174 passed, 16 skipped`); package `CI passed.`. Test diff vs f4cad411 empty. Tiktoken: root 2470, generator 1490, verifier 1216, task 1142, verifier_task 1160, resume 1151, launch 1123; 23-sum 3,905. Re-review round 2/2 (final) launched, scoped to fe04ab8c and 3825237d plus regressions since 689599d3.
 
+- 2026-10-17 14:00 — **Session limit interruption (after 05:25, reset ~14:00).** The round-2 re-reviewer died mid-review at the limit (HTTP 429) with no report on disk (`reports/S5-rereview-2.md` absent). Tree clean at c77bc7c6 = origin; base still 7efceb55, no rebase. The same re-reviewer is resumed by message (its saved progress kept; it is the only writer of its one report file, so no second writer exists), with the briefing unchanged; if resumption fails, a fresh re-reviewer is launched with the identical briefing. Still re-review round 2/2.
+
 ## User replies (verbatim)
 - (none yet)
 
