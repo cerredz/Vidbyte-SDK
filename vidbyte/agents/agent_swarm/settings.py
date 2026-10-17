@@ -2,7 +2,7 @@
 
 PURPOSE: Defines AgentSwarmSettings, the one public configuration object of AgentSwarm: the agents, the shared workplace folder, the API keys, the optional search tool, the optional on_event callback, the turn budget, and the time limit.
 ROLE IN CODEBASE: Built by the developer and passed to AgentSwarm (swarm.py), which hands it to one AgentSwarmRuntime (runtime.py) per run. Exported by vidbyte/agents/agent_swarm/__init__.py, vidbyte/agents/__init__.py, and the root vidbyte package.
-ARCHITECTURE NOTE: Settings objects live in the owning agent's settings.py (AGENTS.md Placement Rules, exception 1). Every check runs in __post_init__, so a constructed object is always valid and nothing downstream checks it again. Each field check is one call to the SDK's canonical RecordFieldValidator or RecordFieldConverter, and the key match is ProviderKeyMatcher's; only the rules that tie fields together (distinct names, a turn budget of at least one turn per agent, a search tool that takes no swarm tool's name) are written here. Checking settings never touches the disk: the workplace folder is created when a run starts.
+ARCHITECTURE NOTE: Settings objects live in the owning agent's settings.py (AGENTS.md Placement Rules, exception 1). Every check runs in __post_init__, so a constructed object is always valid and nothing downstream checks it again. Each field check is one call to the SDK's canonical RecordFieldValidator or RecordFieldConverter, and the key match is ProviderKeyMatcher's; only the rules that tie fields together (distinct names, a turn budget of at least one turn per agent, a search tool that takes neither a swarm tool's name nor the loop's own isDone) are written here. Checking settings never touches the disk: the workplace folder is created when a run starts.
 FUNCTION INVENTORY: AgentSwarmSettings.__post_init__ is the narrated main function, with no private helpers.
 COMMON MODIFICATION PATTERNS: A new setting adds one field, one RecordFieldValidator or RecordFieldConverter call in __post_init__, a named default in vidbyte/lib/constants/agent_swarm.py, and one row in the package README's limits table.
 WHAT NOT TO DO IN THIS FILE: 1. Do not create the workplace folder or any file here; a refused setting must leave the disk unchanged. 2. Do not put api_keys in an error message or in repr. 3. Do not accept a bare string where a sequence is expected; it would split into characters.
@@ -36,6 +36,7 @@ from vidbyte.lib.dataclasses.validation import (
 )
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.registries.provider_keys import ProviderKeyMatcher
+from vidbyte.tools._internal import IS_DONE_TOOL_NAME
 from vidbyte.tools.base import BaseTool
 
 
@@ -96,12 +97,14 @@ class AgentSwarmSettings:
             raise ConfigurationError(f"AgentSwarmSettings.on_event must be None or a callable that takes one AgentSwarmEvent; got a value of type {type(self.on_event).__name__}.", details={"field": "AgentSwarmSettings.on_event"})
 
         # @intent the-search-tool-never-shadows-a-swarm-tool
-        # Every agent holds the swarm's own tools, so a search tool that
-        # took one of their names would leave the model unable to tell
-        # which one it is calling.
+        # Every agent holds the swarm's own tools and the loop's isDone,
+        # so a search tool that took one of their names would leave the
+        # model unable to tell which one it is calling, and the loop
+        # would replace a search tool named isDone with its own.
         RecordFieldConverter.require_instance(self.search_tool, "AgentSwarmSettings.search_tool", BaseTool, optional=True)
-        if self.search_tool is not None and self.search_tool.name in AGENT_SWARM_RESERVED_TOOL_NAMES:
-            raise ConfigurationError(f"AgentSwarmSettings.search_tool must not take a swarm tool's name; got {self.search_tool.name!r}. Reserved: {', '.join(AGENT_SWARM_RESERVED_TOOL_NAMES)}.", details={"field": "AgentSwarmSettings.search_tool"})
+        reserved = (*AGENT_SWARM_RESERVED_TOOL_NAMES, IS_DONE_TOOL_NAME)
+        if self.search_tool is not None and self.search_tool.name in reserved:
+            raise ConfigurationError(f"AgentSwarmSettings.search_tool must not take a swarm tool's name; got {self.search_tool.name!r}. Reserved: {', '.join(reserved)}.", details={"field": "AgentSwarmSettings.search_tool"})
 
         # Match the developer's keys once against every member's
         # provider, in member order; each agent carries this one record,
