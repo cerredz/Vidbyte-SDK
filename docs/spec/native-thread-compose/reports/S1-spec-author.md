@@ -257,3 +257,44 @@ Small fixes made during the check:
 **Self-check after r2:** 18 `## §` headings, identical heading set; §0.1 still equals request.md lines 21–31; 20 tables, 0 malformed rows; every ID reference resolves (INV 36, AC 23, EC 76, FR 18, NFR 11, D 28, T 8, W 13, NG 13, A 11, Q 11); §12.3 has 28 rows from `| 1 |`, with 40 new files and 9 modified; 42 public names and 49 classes, unchanged; no test-case text. The committed blob is LF-only.
 
 **Least sure after r2:** that the bisection's monotonicity holds on win32 at the boundary where a value's trailing backslashes meet a quote in the fixed text. A one-unit wobble there could make the search settle on a slightly smaller share than the true largest, but every share it returns is checked to fit, so it can cut more than needed and can never overflow. Also, whether review accepts D-2's argument; the fallback is ready if not.
+
+## 11. Addendum: revision r3 (review round 2, the last round)
+
+**Input.** The round-2 reviewer's R-12 to R-17 (1 Blocker, 2 Major, 3 Minor); the orchestrator's adjudication for R-13 (build the injected-invoker form now, the reviewer's first option); and its instruction to set `status: approved`, because two review rounds are the cap. All six findings were accepted. None was disputed, so no new Q-n was needed.
+
+**Dispositions, one line each** (the full log is spec §16, rows r2-12 to r2-17):
+- R-12 (Blocker): INV-4 now lists only text compose itself produces: git argv and environment, `ThreadStep` reprs, the error's message and every attribute but `result` and `diff`, `ConfigurationError`, files compose writes, and spliced values. It also says step output stays raw, `error.result` and `.diff` included. AC-15 matches, and it also checks that the raw texts keep the echoed key, so a build that scrubs too much fails as surely as one that scrubs too little. EC-71, T-3 (a second residual), §12.4 and §14 follow.
+- R-13: one design remains. `ThreadStep.invoker` is `field(default=None, repr=False, compare=False)`, and the binders set it to `ThreadBinder.invoke`. `__call__` only awaits it, and raises `ConfigurationError` naming `ThreadStep.invoker` when it is `None`. Composites call `ThreadBinder.invoke(step, prompt)` directly. D-2 (the r2 forward is now its runner-up), INV-2, INV-3, §5, §8.2, §8.5, §9.1, rows 7, 11 and 12, §13 and r1-5 follow. EC-78 records the two cases the reviewer raised: a step built without a binder, and one whose invoker was replaced.
+- R-14: in INV-24, D-18 and rows 19 and 20, `__call__` first binds with `self.__signature__.bind(prompt, **steps)`, so a missing or unknown keyword raises `TypeError` on await, before any check (EC-77). The §9.2 boundary paragraph now says that a signature mismatch is Python's `TypeError`, for the aliases as for the general composites.
+- R-15: INV-26 defers to the §9.2 cwd column (§15 fact 13).
+- R-16: only an `add` that exited non-zero gets the two `add` texts, which now name both causes; a timeout keeps the generic texts. EC-73's trigger now includes the unreadable file (§15 fact 14).
+- R-17: the `role_system` port rule quotes both CLI sentences, and AC-21 also forbids "cannot write" and "will fail".
+
+**r3 probes** (scratch folder `scratchpad/r3probe/`, no checkout touched):
+- git 2.49.0.windows.1, `diff.relative=true`: a tree-to-tree `diff --name-only` run from `sub` printed `b.txt` and `new_by_writer.txt` and dropped `c.txt`. Run from the root, it printed `c.txt`, `sub/b.txt` and `sub/new_by_writer.txt`. The real index was untouched. This reproduces the reviewer's result independently.
+- A file opened from PowerShell with `FileShare.None` made `add -A` into a temporary index exit 128 (`Permission denied`, `unable to index file`, `adding files failed`). Once the handle was closed, the same command exited 0.
+- Python 3.11.0, injected invoker: a frozen, slotted record with `invoker = field(default=None, repr=False, compare=False)` leaves it out of `repr`, `==` and `hash`, and `dataclasses.replace` keeps it. A replaced invoker runs on a direct await but not through the composite path. With no invoker, `__call__` raises before anything runs.
+- Python 3.11.0, aliases: for an alias instance with `async __call__`, `Signature.bind` raised "missing a required argument: 'grok'" and "got an unexpected keyword argument 'muze'" on await, and a step passed positionally failed at the call itself.
+- CLI read-only check (abd31b4): `role_system.md:37–38` holds both sentences. A grep of the ten ported CLI prompts for sandbox, read-only, write-access and will-fail claims found only three outside the dropped `<examples>` blocks (`implementer_system.md:84–546`, `planner_system.md:112–728`): that pair, `fork_turn.md:7` and `implementer_system.md:58`. The port rules already cover the last two.
+
+**Self-check after r3:**
+- headings: 18 `## §` headings, the same set as r2; §0.1 still equals request.md lines 21–31;
+- tables: 20, with 0 malformed rows;
+- references: every ID resolves (INV 36, AC 23, EC 78, FR 18, NFR 11, D 28, T 8, W 13, NG 13, A 11, Q 11); every EC has a guard and every T a control;
+- work breakdown: §12.3 still has 28 rows, 40 new files and 9 modified, and every row names a W; 42 public names and 49 classes, unchanged;
+- text: no test-case text; `git diff --check` is clean.
+
+**Decisions in the approved spec that depart from request §B,** listed for the owner:
+- Ledger 2 (D-25): `chain_threads` and `verify_with` add a required keyword-only `prompt`; the ledger's positional order still binds.
+- Ledger 2 (NG-7, Q-1, Q-3): only the six distinct-harness pairs and the three trios become aliases, and there are no default roster helpers.
+- Ledger 2, "any set of verifiers" (INV-5, INV-9, INV-10, D-3): every step works in one workspace, opencode and Muse readers must be `RUN` steps, Grok readers must use `PLAN` or `DEFAULT`, and fork roles exist only on Grok.
+- Ledger 3 (D-2, INV-3): `ThreadStep` is a validated record awaited through an injected invoker, not a bare `Callable` alias, and composites refuse other callables.
+- Ledger 3, key rule (INV-4, EC-71, T-3): compose scrubs only text it produces. Answers and diffs stay raw in records, and a reader can open a key file that a writer saved.
+- Ledger 5 (D-6, Q-10): snapshots are git trees built through a temporary index, not the literal `status --porcelain` and `diff` texts, and an untracked repository with no commit fails the snapshot (EC-73).
+- Ledger 7 (D-26): a compose-owned failure (git, worktree, backstop) raises `ThreadComposeError` carrying the partial record.
+- Ledger 8 (D-22): each git child has its own `COMPOSE_GIT_TIMEOUT_SECONDS`, which `CliInvocation` requires. That is not a step timeout.
+- Ledger 10 (D-10, D-12, D-13): the ported prompts drop their `<examples>` and their own output contracts, and `{{x}}` becomes `{x}`.
+
+**Least sure after r3:** A-1, A-4, A-5 and A-8 stand as after r2. A-1 (Grok `PLAN` run headless) has the widest blast radius, and the backstop contains it. Also, a caller who logs `repr` of a record can show a key that a model printed. That follows from R-12 and is stated in T-3 and in the README bullet that row 26 requires, but it may surprise callers. Finally, the win32 bisection boundary noted after r2 is still unproven by test.
+
+**Git state:** one commit for r3 holds the spec and this addendum.
