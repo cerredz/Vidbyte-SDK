@@ -25,10 +25,10 @@ class ReadLinesTool(FileSystemTool):
         )
         # Tell the model up front that a long range comes back in
         # windows, so it reads on from the line the footer names.
-        limit = self._config.max_read_lines
-        if limit is None:
+        window = self._config.max_read_lines
+        if window is None:
             return spec
-        return dataclasses.replace(spec, description=f"{spec.description} At most {limit:,} lines come back from one call; when more lines remain in the requested range, the result ends with a line naming the next start line.")
+        return dataclasses.replace(spec, description=f"{spec.description} At most {window:,} lines come back from one call; when more lines remain in the requested range, the result ends with a line naming the next start line.")
 
     async def execute(self, call: ToolCall) -> ToolResult:
         # Validate range bounds, read and slice the lines, and return them
@@ -51,18 +51,18 @@ class ReadLinesTool(FileSystemTool):
             selected = lines[start - 1 : end]
             metadata = {"path": str(target), "start": start, "end": end}
             # Without a window the whole requested range comes back.
-            limit = self._config.max_read_lines
-            if limit is None:
+            window = self._config.max_read_lines
+            if window is None:
                 return ToolResult.success(self.name, "\n".join(selected), metadata=metadata)
             # @intent one-read-returns-at-most-one-window
             # One read of a long file floods the history the model
             # re-sends on every call, so a range longer than the window
             # is cut, and a footer names the line to read on from.
-            truncated = len(selected) > limit
-            next_start = start + limit if truncated else None
-            text = "\n".join(selected[:limit])
+            truncated = len(selected) > window
+            next_start = start + window if truncated else None
+            text = "\n".join(selected[:window])
             if truncated:
-                text = f"{text}\n[lines {start}-{start + limit - 1} of {len(lines)} shown; read on with start={next_start}]"
+                text = f"{text}\n[lines {start}-{start + window - 1} of {len(lines)} shown; read on with start={next_start}]"
             return ToolResult.success(self.name, text, metadata={**metadata, "truncated": truncated, "total_lines": len(lines), "next_start": next_start})
         except Exception as exc:
             return ToolResult.error(self.name, str(exc))
