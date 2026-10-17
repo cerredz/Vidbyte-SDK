@@ -289,8 +289,8 @@ offline = Agent(
   works.
 - **Prefixes:** a key whose prefix proves its provider goes to that provider:
   `sk-ant-` (Anthropic), `sk-or-` (OpenRouter), `sk-proj-` and `sk-admin-`
-  (OpenAI), `xai-` (xAI), `LLM|` (Meta), and `AIza` or `AQ.` (Gemini). A
-  Vidbyte key in the list is the Vidbyte key.
+  (OpenAI), `xai-` (xAI), `LLM_` or `LLM|` (Meta), and `AIza` or `AQ.`
+  (Gemini). A Vidbyte key in the list is the Vidbyte key.
 - **Other keys:** a key without such a prefix, such as a DeepSeek, Kimi, or
   Mistral key, goes to the one configured model (the agent's own model or a
   fallback) that can take it. When it is the list's only such key and the
