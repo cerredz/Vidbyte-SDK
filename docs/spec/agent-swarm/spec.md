@@ -1,7 +1,7 @@
 ---
 spec: agent-swarm
 title: AgentSwarm — a minimal runtime where user-defined agents run their tools and message each other
-status: verified
+status: pr-open
 revision: 5
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-agent-swarm
@@ -14,7 +14,7 @@ pr: https://github.com/cerredz/Vidbyte-SDK/pull/1174
 
 # Spec: AgentSwarm — a minimal runtime where user-defined agents run their tools and message each other
 
-> **TL;DR** — Adds `AgentSwarm`: the developer defines two or more agents (name, model, system prompt), points them at one shared folder, and calls `await swarm.arun(goal)`. Every agent gets the same goal, works with bash, grep, read, write and patch in that folder, and can `message` any other agent without waiting. A message reaches a busy agent between its tool calls as a new user message, and wakes an idle one. The swarm ends when no agent is working and no message is waiting, or at a turn or time limit, and returns the full ordered tuple of events. The decision that matters most: each agent runs **one long-lived ordinary SDK tool loop for the whole swarm**, coordinated by one `AgentSwarmRuntime` per run, and the swarm adds only two narrow seams to each agent's loop — a member loop subclass (`AgentSwarmMemberRuntime`) that appends waiting messages after each tool iteration, and a finish-review middleware that turns "the agent ended its turn" into idle/wake. No change to the shared agent loop, the actor runtime, or InfiniteMemoryAgent.
+> **TL;DR** — Adds `AgentSwarm`: the developer defines two or more agents (name, model, system prompt), points them at one shared folder, and calls `await swarm.arun(goal)`. Every agent gets the same goal, works with bash, grep, read, write and patch in that folder, and can `message` any other agent without waiting. A message reaches a busy agent between its tool calls as a new user message, and wakes an idle one. The swarm ends once no agent is working (QUIET, or MAX_TURNS when a spent turn budget left a message waiting, or FAILED when every agent failed), or at the time limit, and returns the full ordered tuple of events. The decision that matters most: each agent runs **one long-lived ordinary SDK tool loop for the whole swarm**, coordinated by one `AgentSwarmRuntime` per run, and the swarm adds only two narrow seams to each agent's loop — a member loop subclass (`AgentSwarmMemberRuntime`) that appends waiting messages after each tool iteration, and a finish-review middleware that turns "the agent ended its turn" into idle/wake. No change to the shared agent loop, the actor runtime, or InfiniteMemoryAgent.
 
 ## §0 User prompts
 
@@ -105,26 +105,45 @@ While the swarm runs, `show` prints one line per event as it happens (`1 agent_s
 
 ## §5 Flow diagram
 
+One run, from `arun` to the result (r5, S6: redrawn from the shipped code):
+
 ```mermaid
 flowchart TD
-  D[Developer: AgentSwarm.arun goal] -->|goal| C{AgentSwarm.arun: goal non-blank, no run in progress}
-  C --> W[AgentSwarmWorkplace.prepare]
-  W -->|folder path| N[new AgentSwarmRuntime for this run]
-  N --> B[build one AgentSwarmMemberAgent per AgentSwarmMember]
-  B -->|goal as first user message| L[member BaseAgent.arun on AgentSwarmMemberRuntime]
-  L -->|message tool call| P[AgentSwarmRuntime.post_message]
-  P -->|queued message| I[(recipient inbox)]
-  I -->|after each tool iteration| R[AgentSwarmMemberRuntime._after_tool_iteration: collect_messages]
-  R -->|new user message| L
-  L -->|turn ends| T[AgentSwarmTurnMiddleware.review_finish: AgentSwarmRuntime.end_turn]
-  T -->|mail waiting| L
-  T -->|no mail: idle, wait| Q{any agent still working?}
-  P -->|recipient idle: wake| T
-  Q -->|no| E[record SWARM_ENDED, release idle agents]
-  E --> Z[AgentSwarmResult]
-  P -.->|AgentSwarmEvent| V[AgentSwarmEvents.record then flush to on_event]
-  R -.-> V
-  T -.-> V
+  dev["Developer: await AgentSwarm(settings).arun(goal)"] --> guard{"goal is text and no run in progress?"}
+  guard -->|no| refused["ConfigurationError, nothing created"]
+  guard -->|yes| prep["AgentSwarmWorkplace.prepare: create the folder, keep its contents"]
+  prep --> run["AgentSwarmRuntime(settings, root).arun(goal): a fresh runtime per run"]
+  run --> build["_build_member per member: own prompt + swarm prompt, AgentSwarmTools + message + search_tool"]
+  build --> started["record AGENT_STARTED per agent, turns = agent count"]
+  started --> group["asyncio.timeout + TaskGroup: one _run_member task per agent"]
+  group --> member["each task: member BaseAgent.arun(goal) on AgentSwarmMemberRuntime, see the next chart"]
+  member -->|"released by the end check"| kept["the run returns, its last reply is kept"]
+  member -->|"VidbyteSdkError, early return, or a CancelledError the swarm did not request"| fail["_fail records AGENT_FAILED, then _end_check, the others go on"]
+  kept --> ended["every task done: record SWARM_ENDED, flush"]
+  fail --> ended
+  group -.->|"timeout_seconds reached: cancel every task, TIMEOUT unless the end was already decided"| ended
+  ended --> result["AgentSwarmResult: stop_reason, events, replies, event_error_types"]
+```
+
+Inside one member's run, turn by turn:
+
+```mermaid
+flowchart TD
+  loop["member loop: model call, then its tool calls"] -->|"message tool call"| post["AgentSwarmRuntime.post_message: refuse blank text, unknown or failed recipient"]
+  post -->|"MESSAGE_SENT, the tool returns at once"| inbox[("recipient's inbox")]
+  inbox -->|"after each tool iteration"| collect["AgentSwarmMemberRuntime._after_tool_iteration: collect_messages"]
+  collect -->|"MESSAGE_DELIVERED, one user message"| loop
+  loop -->|"reply with no tool call, or isDone"| review["AgentSwarmTurnMiddleware.review_finish"]
+  review --> turnEnd["AgentSwarmRuntime.end_turn: AGENT_IDLE"]
+  turnEnd -->|"mail waiting and turns left: AGENT_WOKE"| drain["drain the inbox: MESSAGE_DELIVERED"]
+  turnEnd -->|"otherwise: mark idle"| check{"_end_check: is any agent working?"}
+  check -->|"yes"| waiting["idle agent waits on its wake future"]
+  check -->|"no: decide FAILED, MAX_TURNS or QUIET"| release["resolve every idle agent's future"]
+  post -->|"recipient idle and turns left: AGENT_WOKE, resolve its future"| waiting
+  release --> waiting
+  waiting -->|"woken by a send"| drain
+  drain -->|"FinishReview.continue_with(messages)"| loop
+  waiting -->|"released: FinishReview.accept"| out["the member's run returns its last reply"]
 ```
 
 ```mermaid
@@ -982,6 +1001,7 @@ There is no new endpoint or command, so no auth surface. Secrets follow the repo
 | r3 | 2026-10-16 | S3 implement | Every §12.3 row implemented in phase order (P1 `afa6aec8`; P2 `38eda3dc`, `ee51520f`, `28444b65`; P3 `1144fcf5`, `d138f5c3`, `f97170ec`, `d3651954`; P4 `698f913b`, `3f4f22c4`, `a917dd64`, `0c38226f`; comment wrap `0d64078a`): 23 new and 13 modified files, the §8.4 budget exactly. Pack 161 passed on the S2 baseline `87c8ed14` (after S2 fixed its `renderings` helper); lint PASS, contract current, Semgrep 0 findings, package stage passed; the source stage fails only the three `harness_threads` surface tests shown not to be caused by this branch. Draft PR https://github.com/cerredz/Vidbyte-SDK/pull/1174. Deviations below. |
 | r4 | 2026-10-17 | S4 review | Applied the S4 findings that change the spec (R-2, R-3, R-4, R-11, R-12, R-14): a search tool named `isDone` is refused; an unrequested `CancelledError` fails its agent and is re-raised (EC-39); the turn middleware moves to `vidbyte/middleware/builtins/agent_swarm_turn.py` (row 38, 24 new files); `replies` may be partial under EC-18; the event-clock deviation is withdrawn for S5 to fix; the `post_message` type widening is recorded. Status set to reviewed. |
 | r5 | 2026-10-17 | S5 re-review | Applied R-16 (spec text only): INV-11 and EC-39 now cover an unrequested `CancelledError` after the end was decided (reply may be missing; last text in `AGENT_IDLE`), EC-39's stop reason follows INV-10 including MAX_TURNS, and its idle variant notes that an async callback that awaits first may let a wake happen before the failure. |
+| r5 | 2026-10-17 | S6 PR | Finalized for review: status `pr-open`; §5's flow chart redrawn as the PR's two charts of the shipped code (`SWARM_ENDED` is recorded after every member task returns, not at the end check, and the failure and time-limit paths are drawn); the TL;DR no longer says a turn limit ends the swarm (INV-9, INV-10, EC-9). No behavior, ID or scope change. |
 
 ### Implementation deviations (S3, accepted by the orchestrator as repo-forced)
 
