@@ -4,9 +4,9 @@ PURPOSE: Defines closed Codex SDK option vocabularies used by validated settings
 ROLE IN CODEBASE: Replaces free-form provider strings with discoverable public enum contracts.
 ARCHITECTURE NOTE: Empty PROVIDER_DEFAULT sentinels are omitted before SDK calls.
 COMMON MODIFICATION PATTERNS: Add an SDK-supported member when upgrading the pinned compatibility range.
-KNOWN EDGE CASES: Enum values must match openai-codex 0.162 wire values exactly.
-RELATED DOCS: https://developers.openai.com/codex/sdk; docs/design/codex-harness-agent.md; docs/spec/codex-host-thread-helpers/spec.md (CodexSkillScope and the helper operations, section 9.1).
-TESTS: python scripts/run_ci.py; tests/features/codex_host/test_codex_host_helper_surface.py and tests/features/codex_host/test_codex_host_records.py.
+KNOWN EDGE CASES: Enum values must match openai-codex 0.163 wire values exactly. The three server-request enums (CodexServerRequestKind, CodexApprovalDecision, CodexCommandApprovalKind) mirror the approval and user-input requests CodexHost routes to its approval_handler; object decisions such as policy amendments have no member, because no answer this release sends can carry them.
+RELATED DOCS: https://developers.openai.com/codex/sdk; docs/design/codex-harness-agent.md; docs/spec/codex-host-thread-helpers/spec.md (CodexSkillScope and the helper operations, section 9.1); docs/spec/codex-host-hardening/spec.md (the server-request enums, MAX and ULTRA, FORGET_CODEX_TURNS, section 8.5).
+TESTS: python scripts/run_ci.py; tests/features/codex_host/test_codex_host_helper_surface.py, tests/features/codex_host/test_codex_host_records.py and tests/features/codex_host/test_codex_host_hardening_records.py.
 """
 
 from __future__ import annotations
@@ -23,7 +23,11 @@ class CodexApprovalMode(str, Enum):
 
 
 class CodexPersonality(str, Enum):
-    """Codex response personalities exposed by the installed SDK."""
+    """Codex response personalities exposed by the installed SDK.
+
+    Since Codex 0.163, FRIENDLY and PRAGMATIC no longer select a
+    response style; they only replace a stored NONE setting.
+    """
 
     PROVIDER_DEFAULT = ""
     NONE = "none"
@@ -32,7 +36,11 @@ class CodexPersonality(str, Enum):
 
 
 class CodexReasoningEffort(str, Enum):
-    """Reasoning effort values accepted by the installed SDK."""
+    """Reasoning effort values accepted by the installed SDK.
+
+    MAX and ULTRA are the 0.163 efforts above XHIGH; a model accepts
+    only the efforts list_codex_models reports for it.
+    """
 
     PROVIDER_DEFAULT = ""
     NONE = "none"
@@ -41,6 +49,8 @@ class CodexReasoningEffort(str, Enum):
     MEDIUM = "medium"
     HIGH = "high"
     XHIGH = "xhigh"
+    MAX = "max"
+    ULTRA = "ultra"
 
 
 class CodexReasoningSummary(str, Enum):
@@ -124,6 +134,30 @@ class CodexApprovalsReviewer(str, Enum):
     GUARDIAN_SUBAGENT = "guardian_subagent"
 
 
+class CodexServerRequestKind(str, Enum):
+    """The server requests CodexHost routes to its approval_handler."""
+
+    COMMAND_EXECUTION = "item/commandExecution/requestApproval"
+    FILE_CHANGE = "item/fileChange/requestApproval"
+    USER_INPUT = "item/tool/requestUserInput"
+
+
+class CodexApprovalDecision(str, Enum):
+    """The decisions an approval_handler can send back to Codex."""
+
+    ACCEPT = "accept"
+    ACCEPT_FOR_SESSION = "acceptForSession"
+    DECLINE = "decline"
+    CANCEL = "cancel"
+
+
+class CodexCommandApprovalKind(str, Enum):
+    """What a command approval asks for: a new command, or input typed into a running one."""
+
+    COMMAND = "command"
+    WRITE_STDIN = "writeStdin"
+
+
 class CodexTurnStatus(str, Enum):
     """The state of one Codex turn, as the app-server reports it."""
 
@@ -203,7 +237,7 @@ class CodexReviewTargetKind(str, Enum):
 
 
 class CodexReviewDelivery(str, Enum):
-    """Where a review runs; Codex has deprecated DETACHED."""
+    """Where a review runs; Codex 0.163 has deprecated DETACHED, so prefer INLINE."""
 
     INLINE = "inline"
     DETACHED = "detached"
@@ -248,6 +282,7 @@ class CodexHostOperation(str, Enum):
     STEER_CODEX_TURN = "steer_codex_turn"
     INTERRUPT_CODEX_TURN = "interrupt_codex_turn"
     TRACK_CODEX_THREAD_USAGE = "track_codex_thread_usage"
+    FORGET_CODEX_TURNS = "forget_codex_turns"
     LAUNCH_CODEX_SUBAGENTS = "launch_codex_subagents"
     START_CODEX_REVIEW = "start_codex_review"
     LIST_RECENT_CODEX_THREADS = "list_recent_codex_threads"
@@ -267,9 +302,11 @@ class CodexHostOperation(str, Enum):
 __all__ = [
     "CodexFailureClass",
     "CodexAccountKind",
+    "CodexApprovalDecision",
     "CodexApprovalMode",
     "CodexApprovalPolicy",
     "CodexApprovalsReviewer",
+    "CodexCommandApprovalKind",
     "CodexContextAnchor",
     "CodexGoalStatus",
     "CodexHostOperation",
@@ -281,6 +318,7 @@ __all__ = [
     "CodexReviewTargetKind",
     "CodexSandbox",
     "CodexSandboxReadiness",
+    "CodexServerRequestKind",
     "CodexSkillScope",
     "CodexSortDirection",
     "CodexThreadSortKey",
