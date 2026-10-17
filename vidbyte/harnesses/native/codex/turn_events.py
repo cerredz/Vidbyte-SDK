@@ -5,7 +5,7 @@ ROLE IN CODEBASE: A host collaborator of vidbyte/harnesses/native/codex/; CodexH
 ARCHITECTURE NOTE: Everything here runs on the host's event loop. It imports no openai-codex module at module level, and the connection, translators, turns and thread helpers only under TYPE_CHECKING, so importing CodexHost still loads no SDK module (codex-host D-21, hardening INV-41). CODEX_HOST_LOST_TURN_GRACE_SECONDS is bound by name and read at call time, so the tests can patch it here (section 13).
 FUNCTION INVENTORY: on_event(turn, note) folds one notification into its turn and ends the turn when the notification ends it, failing the turn if that raises (INV-11); on_lost(turn) starts _end_lost_turn when a watcher read failed (INV-13); complete_review(turn) ends a completed review from its read-back, failing it if that raises anything but a CodexAgentError (INV-12); _end_lost_turn(turn) ends a turn whose watcher stopped while the host stays open; fail(turn, exc) logs, stops and fails a turn whose events failed, and CodexReviews calls it for a review read back as ended whose snapshot cannot be built (INV-12).
 COMMON MODIFICATION PATTERNS: A new way a turn ends from its events is one branch in on_event, finished through CodexTurnRegistry.finish so the first outcome still wins; its failure needs nothing extra, because on_event already guards it.
-WHAT NOT TO DO: Do not log an exception's text or pass exc_info; log its type name and ExceptionOrigin only (hardening INV-10). Do not close a goal run's stream before its turn is finished: _end_lost_turn relies on the snapshot to tell a normal goal end from a lost one (INV-13). Do not catch BaseException, so cancellation propagates.
+WHAT NOT TO DO: Do not log an exception's text or pass exc_info; log its type name and ExceptionOrigin only, and the handle's ids through LogToken.of, because a handle checks only that they are non-empty text (hardening INV-10). Do not close a goal run's stream before its turn is finished: _end_lost_turn relies on the snapshot to tell a normal goal end from a lost one (INV-13). Do not catch BaseException, so cancellation propagates.
 KNOWN EDGE CASES: A goal run's watcher always ends with a failed read once its stream closes, so on_lost runs for every goal run and returns at once, because the run already ended. A process death can reach a watcher before the liveness monitor, so _end_lost_turn waits the grace and checks again, and a close or death that lands before its last step wins as process_exited. The cleanup interrupt of a lost turn is quiet and sent once; its failure does not keep the turn running (EC-18).
 RELATED DOCS: docs/spec/codex-host-hardening/spec.md (sections 6.1 INV-9 to INV-14, 8.1 D-9 and D-14, and 8.5); docs/spec/codex-host/spec.md (sections 8.1 D-7 and D-23)
 TESTS: tests/features/codex_host/test_codex_host_liveness.py, tests/features/codex_host/test_codex_host_turns.py, tests/features/codex_host/test_codex_host_review_goals.py, tests/features/codex_host/test_codex_host_observability.py
@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, cast
 
 from vidbyte.lib.constants.codex_host import (
     CODEX_HOST_EVENT_FAILED_MESSAGE,
+    CODEX_HOST_LOG_TOKEN_MAX_CHARS,
     CODEX_HOST_LOST_EVENTS_MESSAGE,
     CODEX_HOST_LOST_TURN_GRACE_SECONDS,
 )
@@ -27,6 +28,7 @@ from vidbyte.lib.enums.codex import CodexHostOperation
 from vidbyte.lib.enums.failure import FailureCode
 from vidbyte.lib.errors import CodexAgentError
 from vidbyte.lib.util.exception_origin import ExceptionOrigin
+from vidbyte.lib.util.text import LogToken
 
 if TYPE_CHECKING:
     from openai_codex.models import Notification
@@ -132,17 +134,20 @@ class CodexTurnEvents:
         #     so it ends FAILED, then a goal run's stream closes. A
         #     close or death that came first already ended it as exited.
         if turn.snapshot is None and not connection.stopped():
-            logger.warning("codex_host_turn_lost thread_id=%s turn_id=%s", turn.handle.thread_id, turn.handle.turn_id)
+            limit = CODEX_HOST_LOG_TOKEN_MAX_CHARS
+            logger.warning("codex_host_turn_lost thread_id=%s turn_id=%s", LogToken.of(turn.handle.thread_id, limit), LogToken.of(turn.handle.turn_id, limit))
             self._registry.finish(turn, self._responses.failed(turn.handle, FailureCode.CODEX_API_ERROR, CODEX_HOST_LOST_EVENTS_MESSAGE))
             turn.close_goal_stream(connection.client)
 
     def fail(self, turn: CodexLiveTurn, exc: Exception) -> None:
         # @intent a-turn-whose-events-fail-is-stopped-then-failed
-        # In this order: log the failure by type and origin only, send
-        # the turn at most one quiet stop, end it FAILED, then close a
-        # goal run's stream (hardening INV-11, INV-12).
+        # In this order: log the failure by type and origin only, with
+        # the turn's ids as bounded tokens, send the turn at most one
+        # quiet stop, end it FAILED, then close a goal run's stream
+        # (hardening INV-10, INV-11, INV-12).
         handle = turn.handle
-        logger.warning("codex_host_turn_event_failed thread_id=%s turn_id=%s error_type=%s origin=%s", handle.thread_id, handle.turn_id, type(exc).__name__, ExceptionOrigin.describe(exc))
+        limit = CODEX_HOST_LOG_TOKEN_MAX_CHARS
+        logger.warning("codex_host_turn_event_failed thread_id=%s turn_id=%s error_type=%s origin=%s", LogToken.of(handle.thread_id, limit), LogToken.of(handle.turn_id, limit), type(exc).__name__, ExceptionOrigin.describe(exc))
         connection = self._connection
         turn.stop(connection, None)
         self._registry.finish(turn, self._responses.failed(handle, FailureCode.CODEX_PROTOCOL_MISMATCH, CODEX_HOST_EVENT_FAILED_MESSAGE))

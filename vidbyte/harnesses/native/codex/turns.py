@@ -2,7 +2,7 @@
 
 PURPOSE: Holds the live state of every turn a CodexHost started: what Codex reported so far (items, usage, the completion), how the turn ended, the goal finish rule of goal runs, the daemon thread that reads each turn's notifications and reports a failed read, and the per-host registry with each thread's usage ledger, which forget_codex_turns can release.
 ROLE IN CODEBASE: The live-state layer of vidbyte/harnesses/native/codex/; CodexHost creates turns here, its watchers feed them through CodexTurnEvents, each turn sends its own one stop through CodexConnection, and the response translator in wire.py turns them into snapshots.
-ARCHITECTURE NOTE: openai-codex's notification models are imported at module level, so only CodexHost.__aenter__ imports this module (D-21). Everything except CodexTurnWatcher runs on the host's event loop; a watcher only reads and posts with call_soon_threadsafe, its events to on_event and a failed read to on_lost, so no state here needs a lock. Turn items and turn ends are logged by id, type, status and code only (hardening INV-9, INV-10).
+ARCHITECTURE NOTE: openai-codex's notification models are imported at module level, so only CodexHost.__aenter__ imports this module (D-21). Everything except CodexTurnWatcher runs on the host's event loop; a watcher only reads and posts with call_soon_threadsafe, its events to on_event and a failed read to on_lost, so no state here needs a lock. Turn items and turn ends are logged by id, type, status and code only, and each id and item type goes through LogToken.of, because Codex chose it (hardening INV-9, INV-10).
 COMMON MODIFICATION PATTERNS: Collect a new notification kind in CodexLiveTurn.observe; change goal finishing only together with openai-codex's private _GoalStreamCursor.process, which CodexGoalFinishRule mirrors. A new way a turn ends goes through CodexTurnRegistry.finish, which logs the first outcome.
 KNOWN EDGE CASES: Usage notifications carry the thread's cumulative totals, so a turn's own tokens are its latest totals minus the totals before its first report; a goal run spans several physical turns, so its items and usage cover all of them. A goal run's watcher always ends with a failed read once its stream closes, so on_lost runs for every goal run and finds it ended (hardening INV-13). forget drops ended turns and the ledger only; the host checks the thread is idle first (hardening INV-22).
 RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.1 D-6 to D-8 and D-19, and 9.2 goal finish rule); docs/spec/codex-host-hardening/spec.md (sections 6.1 INV-9, INV-13 and INV-22, and 8.5)
@@ -36,7 +36,10 @@ from openai_codex.models import Notification
 from vidbyte.agents.codex.metrics import CodexMetricsTranslator
 from vidbyte.agents.pricing.tracker import UsageTracker
 from vidbyte.lib.constants.codex import CODEX_GOAL_TERMINAL_STATUSES
-from vidbyte.lib.constants.codex_host import CODEX_HOST_USAGE_COUNTERS
+from vidbyte.lib.constants.codex_host import (
+    CODEX_HOST_LOG_TOKEN_MAX_CHARS,
+    CODEX_HOST_USAGE_COUNTERS,
+)
 from vidbyte.lib.dataclasses.codex import (
     CodexAgentSettings,
     CodexRunResult,
@@ -56,6 +59,7 @@ from vidbyte.lib.enums.codex import (
     CodexTurnStatus,
 )
 from vidbyte.lib.enums.failure import FailureCode
+from vidbyte.lib.util.text import LogToken
 
 if TYPE_CHECKING:
     from openai_codex._goal import _GoalOperationState
@@ -95,14 +99,16 @@ class CodexLiveTurn:
         self.stream_closed = False
 
     def observe(self, note: Notification) -> bool:
-        # Keep every completed item, logged by id and type only, and
-        # the latest usage, and say whether this notification ends the
-        # turn (hardening INV-9).
+        # Keep every completed item, logged by id and type only, each
+        # as one bounded token because Codex chose them, and the latest
+        # usage, and say whether this notification ends the turn
+        # (hardening INV-9, INV-10).
         payload = note.payload
         if isinstance(payload, ItemCompletedNotification):
             self.items.append(payload.item)
             item = payload.item.root
-            logger.debug("codex_host_turn_item thread_id=%s turn_id=%s item_id=%s item_type=%s", self.handle.thread_id, self.handle.turn_id, item.id, item.type)
+            limit = CODEX_HOST_LOG_TOKEN_MAX_CHARS
+            logger.debug("codex_host_turn_item thread_id=%s turn_id=%s item_id=%s item_type=%s", LogToken.of(self.handle.thread_id, limit), LogToken.of(self.handle.turn_id, limit), LogToken.of(item.id, limit), LogToken.of(item.type, limit))
         if isinstance(payload, ThreadTokenUsageUpdatedNotification):
             self.first_usage = self.first_usage or payload.token_usage
             self.latest_usage = payload.token_usage
@@ -383,13 +389,15 @@ class CodexTurnRegistry:
         return tuple(turn for turn in self._turns.values() if turn.snapshot is None)
 
     def finish(self, turn: CodexLiveTurn, snapshot: CodexTurnSnapshot) -> bool:
-        # End a turn once, log how it ended, then file its usage; a
-        # second outcome for the same turn changes nothing (INV-15,
-        # INV-36, hardening INV-9).
+        # End a turn once, log how it ended, with its ids as bounded
+        # tokens, then file its usage; a second outcome for the same
+        # turn changes nothing (INV-15, INV-36, hardening INV-9,
+        # INV-10).
         if not turn.finish(snapshot):
             return False
         code = snapshot.problem.code.value if snapshot.problem is not None else ""
-        logger.info("codex_host_turn_ended thread_id=%s turn_id=%s status=%s failure_code=%s", turn.handle.thread_id, turn.handle.turn_id, snapshot.status.value, code)
+        limit = CODEX_HOST_LOG_TOKEN_MAX_CHARS
+        logger.info("codex_host_turn_ended thread_id=%s turn_id=%s status=%s failure_code=%s", LogToken.of(turn.handle.thread_id, limit), LogToken.of(turn.handle.turn_id, limit), snapshot.status.value, code)
         self._record(turn, snapshot)
         return True
 
