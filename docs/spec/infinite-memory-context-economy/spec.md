@@ -1,7 +1,7 @@
 ---
 spec: infinite-memory-context-economy
 title: InfiniteMemoryAgent context economy
-status: verified
+status: pr-open
 revision: 5
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-infinite-memory-context-economy
@@ -1425,6 +1425,7 @@ Each phase leaves the package importable and the full gate green, except the del
 | r4 | 2026-10-16 | S2 defects from the test author; status stays approved | Defect 1: the marked task goes out as one text block, so the run-boundary test joins §13 as deliberately changed. A-5 is restated with full-suite prototype evidence, and EC-9.10 is new. Defect 2: `InfiniteRecallTool` moves to a 9th module `recall.py` (D-18, CREATE row 57), and the budget test joins §13 with 9 files and 13 modules. Nothing from the S2 notes is pinned. |
 | r4 | 2026-10-17 | S3 implement | All 57 §12.3 rows built in phase order P1-P5 on `feat/infinite-memory-context-economy` (first-parent commits 241908f9..e21463fe after the origin/main merge 4f30a0d9), no test edited, lint and the local gate pass; every §6.2 Proof was already a test node id, so no Proof cell was blank; the deviations are listed below. |
 | r5 | 2026-10-17 | S4 amendment from the verified review; status stays reviewed | R-3: INV-2.3 keeps every scoped output after the newest model turn (role `assistant` or `model`) whole and still counts it toward `keep_recent`; the AC-2.1 and AC-2.2 Givens say one call per model turn; new AC-2.5 (P0, three wires, Proof left for the test author) and EC-2.5. R-2: INV-8.2 normalizes NULs and lone surrogates so no query raises; new EC-8.8; INV-8.5 excludes file names UTF-8 cannot encode. R-16: rows 58 and 59 add `InfiniteSearchMemoryTool` to `llms.txt` and `artifacts/file_index.md`, and §12.5 is corrected. R-23 waived, logged only. |
+| r5 | 2026-10-17 | S6 PR | finalized for review |
 
 ### Implementation deviations (S3)
 
@@ -1439,3 +1440,18 @@ Each phase leaves the package importable and the full gate green, except the del
 - Row 57: a found range is labelled by its resolved workspace-relative POSIX path, and a rejected line rebuilds the citation from the parsed path; `_sort` also catches `ValueError` (the int digit limit); the retriever-failure result and the rejection reasons are inline code text, not leaves, because they carry numbers; missing `question`/`purpose` arguments read as blank text, which `InfiniteRecallRequest` refuses by name; the withheld tool is the literal `"grep"` because no grep name constant exists.
 - Row 56 / NFR-0.3: no baseline count is lowered. `lint/run.py` on a scratch copy of the main base 845a4d9b and on this branch reports the same count for every rule, so the eight IMPROVED verdicts (A002, C011, S001, S009, S010, S025, S061, S063) belong to main's baseline, not to this change; A007 never reports IMPROVED (255).
 - Docs: the infinite README and the constants header restate the context budget as about 107,000 tokens (root prompt about 2,300, at most about 6,700 of tool descriptions under FULL and DELEGATED, the 8,000 map, the 90,000 history).
+
+### Implementation deviations (S5)
+
+The S5 repairs (review.md R-1 to R-25) changed the code in the ways below. Rows 15, 16, and 20, §8.2 line 528, §8.5, and §11 line 1024 keep their r5 text; where they differ, this block and the code at `335dd847` win (review R-27). §5 was compared with the code at `335dd847` and needed no change.
+
+- Row 20 (also §8.2 and §11, which name `iter_files`): `search_memory` lists the workspace with its own `os.scandir` walk, `InfiniteSearchMemoryTool._listing`, not `BaseCodeSearchTool.iter_files`, which read every file to sniff it. The walk keeps grep's rules (the ignored names, no linked folder, the in-root and once-per-file guards, the byte cap), takes each fingerprint from the listing's stat, and sniffs only a file whose fingerprint changed, so a warm search opens no unchanged file (NFR-8.1). A folder reached twice, through a link or a junction, is walked once. `code_search/base.py` changes only by the named byte-cap constant (R-7, `7eb2942c`).
+- Rows 16 and 20: the two row helpers sniff a changed file themselves, reading its first `INFINITE_SEARCH_SNIFF_BYTES` (2,048, a new constant) for a NUL, instead of calling `is_text_file`, which reported a failed read as binary. A changed file that cannot be read for a moment now raises into `_lookup`, is left out of that call, and is tried again on the next (R-25, `335dd847`, pinned at `1385c8e7`). The byte cap now comes only from `_listing`'s stat: a file that grows past the cap between the listing and the read is indexed once under its old fingerprint and left out from the next listing on. `84e566bb` had the same window.
+- Known gap, not fixed (R-28): on Windows, `DirEntry.stat()` can lag `os.stat` while another handle holds a file open for writing, so lines appended by a writer that keeps the file open are missed until it closes. It is the one known INV-8.4 gap besides EC-8.5. The owner decides between `os.stat` per note (about 31 ms per warm search at 1,900 notes) and documenting it beside EC-8.5.
+- Row 15 and §8.5: the repeat gate sits in `_create_payload` (`if not self._holds_cache_control(payload) and self._is_repeat(payload): self._attach_cache_breakpoints(payload, config)`), not inside `_attach_cache_breakpoints`, so every helper stays one call level deep. The short-circuit is the same, so a request whose caller set `cache_control` records no digest (R-4, `7d6d7449`). The digest encodes the JSON with `surrogatepass`, so a lone surrogate in the system or a tool no longer fails the first request (R-6, `5698fdab`).
+- Row 13 (continuing S3's lazy export): `vidbyte.lib.util.__getattr__` imports `vidbyte.lib.util.fulltext` by its literal name and returns the attribute named, because C003 rejects `importlib.import_module` on a non-literal module name (R-13, `1fbe3ede`, then `8da92fb9`).
+- Row 57: the term pre-search runs inside the same `try` as the retriever, so a failing pre-search returns the recall's own error. It still spends the quota slot, as INV-10.6 and EC-10.3 count an attempt that started (R-19, `d7bb1f4a`).
+- Row 25: `_after_tool_iteration` recounts the map with `asyncio.to_thread(self.workspace.map_snapshot)`, off the event loop (R-14, `468303dc`).
+- Masking (row 4): the amended r5 INV-2.3 is built in `windows.py`; every scoped output after the newest model turn (role `assistant`, or `model` on Gemini) stays whole and still counts toward `keep_recent` (R-3, `5634b579`).
+- `search_memory` input hardening per r5 INV-8.2 and EC-8.8: a NUL in the query reads as a space and a lone surrogate is dropped; an `entries.jsonl` line, or a file name, that UTF-8 cannot encode is left out (R-2, `0e41b3a2`).
+- `llms.txt`: besides rows 58 and 59, the "Direct utilities and search" table row (`llms.txt:815`) lists `InfiniteSearchMemoryTool`, under the orchestrator's extended R-16 grant (`7ab9a924`).
