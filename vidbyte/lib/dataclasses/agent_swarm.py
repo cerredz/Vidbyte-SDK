@@ -3,8 +3,8 @@
 PURPOSE: Defines the three validated records of AgentSwarm: AgentSwarmMember, one agent a developer puts in a swarm; AgentSwarmEvent, one state change of a swarm run; and AgentSwarmResult, what one run returns. Also defines AgentSwarmEventCallback, the type of the developer's on_event callback.
 ROLE IN CODEBASE: AgentSwarmMember is built by the developer and held by AgentSwarmSettings (vidbyte/agents/agent_swarm/settings.py); AgentSwarmEvent is built by AgentSwarmEvents and handed to on_event; AgentSwarmResult is built by AgentSwarmRuntime at the end of a run. AgentSwarmMember is also exported from the root vidbyte package.
 ARCHITECTURE NOTE: Validation only. Every check runs in __post_init__, so a constructed record is always valid and its callers never check it again. Each field check is one call to the SDK's canonical RecordFieldValidator or RecordFieldConverter (vidbyte/lib/dataclasses/validation.py), except the member's provider, which is coerced with ModelProvider itself and its model checked with ProviderModelRegistry, the two proofs lint rule C012 recognizes; only this feature's own rules, which fields each event kind carries and how a result's events are numbered, are written here.
-FUNCTION INVENTORY: Three frozen, slotted records, each with a __post_init__: AgentSwarmMember checks the name pattern, the prompt, the provider, and the model; AgentSwarmEvent checks the numbers, the kind, and the per-kind field table through _check_agent, _check_unlisted_fields, and _check_kind_fields; AgentSwarmResult checks the stop reason, the event sequence, the replies, and the callback error names. AgentSwarmEventCallback is a type alias.
-COMMON MODIFICATION PATTERNS: A new event kind adds its row to _KIND_FIELDS and one case in AgentSwarmEvent._check_kind_fields. A new record field adds one field and one RecordFieldValidator or RecordFieldConverter call; its bound goes in vidbyte/lib/constants/agent_swarm.py.
+FUNCTION INVENTORY: Three frozen, slotted records, each with a __post_init__: AgentSwarmMember checks the name pattern, the prompt, the provider, and the model; AgentSwarmEvent checks the numbers, the kind, the agent, and the per-kind field table, all in its __post_init__; AgentSwarmResult checks the stop reason, the event sequence, the replies, and the callback error names. AgentSwarmEventCallback is a type alias.
+COMMON MODIFICATION PATTERNS: A new event kind adds its row to _KIND_FIELDS and one case at the end of AgentSwarmEvent.__post_init__. A new record field adds one field and one RecordFieldValidator or RecordFieldConverter call; its bound goes in vidbyte/lib/constants/agent_swarm.py.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import from vidbyte.agents, vidbyte.tools, or any other layer above vidbyte/lib. 2. Do not add to_dict or from_dict methods or dict[str, Any] signatures. 3. Do not quote message text or reply text in an error; it can be long.
 KNOWN EDGE CASES: AGENT_IDLE text may be empty, because a model may end its turn with an empty reply. elapsed_ms may be 0 and two events may share one value; order is carried by sequence. True is refused wherever a whole number is expected, although Python counts it as an int. A refusal names the field as Record.field in the message and in details["field"].
 RELATED DOCS: docs/spec/agent-swarm/spec.md (sections 8.5 and 9.1); vidbyte/agents/agent_swarm/README.md
@@ -102,35 +102,29 @@ class AgentSwarmEvent:
         RecordFieldValidator.require_int(self.sequence, "AgentSwarmEvent.sequence", minimum=1)
         RecordFieldValidator.require_enum(self.kind, AgentSwarmEventKind, "AgentSwarmEvent.kind")
         RecordFieldValidator.require_int(self.elapsed_ms, "AgentSwarmEvent.elapsed_ms", minimum=0)
-        # Every event names its agent, except the swarm's own end.
-        self._check_agent()
-        # A field the kind does not carry must keep its default, so a
-        # reader never mistakes a stray value for data.
-        self._check_unlisted_fields()
-        # The fields the kind carries must hold what the kind means.
-        self._check_kind_fields()
+        kind = self.kind
 
-    def _check_agent(self) -> None:
-        # The swarm's end belongs to no agent; every other event to one.
-        if self.kind is AgentSwarmEventKind.SWARM_ENDED and self.agent != "":
+        # Every event names its agent, except the swarm's own end, which
+        # belongs to no agent.
+        if kind is AgentSwarmEventKind.SWARM_ENDED and self.agent != "":
             raise ConfigurationError("AgentSwarmEvent.agent must be empty for a swarm_ended event.", details={"field": "AgentSwarmEvent.agent"})
-        RecordFieldValidator.require_text(self.agent, "AgentSwarmEvent.agent", allow_blank=self.kind is AgentSwarmEventKind.SWARM_ENDED)
+        RecordFieldValidator.require_text(self.agent, "AgentSwarmEvent.agent", allow_blank=kind is AgentSwarmEventKind.SWARM_ENDED)
 
-    def _check_unlisted_fields(self) -> None:
-        # Compare type and value, so 0.0 or False never pass for 0.
+        # A field the kind does not carry must keep its default, so a
+        # reader never mistakes a stray value for data. Type and value
+        # are compared, so 0.0 or False never pass for 0.
         defaults = {item.name: item.default for item in fields(self)}
         for name in _OPTIONAL_FIELDS:
             value = getattr(self, name)
-            if name not in _KIND_FIELDS[self.kind] and (type(value), value) != (type(defaults[name]), defaults[name]):
-                raise ConfigurationError(f"AgentSwarmEvent.{name} must keep its default for a {self.kind.value} event.", details={"field": f"AgentSwarmEvent.{name}"})
+            if name not in _KIND_FIELDS[kind] and (type(value), value) != (type(defaults[name]), defaults[name]):
+                raise ConfigurationError(f"AgentSwarmEvent.{name} must keep its default for a {kind.value} event.", details={"field": f"AgentSwarmEvent.{name}"})
 
-    def _check_kind_fields(self) -> None:
         # @intent events-carry-what-their-kind-means
-        # A sent message's id is its own sequence, and a delivery names
+        # The fields the kind carries must hold what the kind means. A
+        # sent message's id is its own sequence, and a delivery names
         # an earlier one, so a reader can pair every delivery with its
         # send; the stop reason, a tool call's name and status, and a
         # failure's cause are always present.
-        kind = self.kind
         if kind in (AgentSwarmEventKind.MESSAGE_SENT, AgentSwarmEventKind.MESSAGE_DELIVERED):
             RecordFieldValidator.require_text(self.peer, "AgentSwarmEvent.peer")
         if kind is AgentSwarmEventKind.MESSAGE_SENT:
