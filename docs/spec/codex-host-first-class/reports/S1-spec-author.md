@@ -126,3 +126,58 @@
 - A-13: loading a non-active goal does not restart it, which the new load guard now depends on as well;
 - A-20: no goal continuation on a side fork;
 - A-14: the inject item shape.
+
+## Addendum r3 (S1 review round 2, final, 2026-10-17)
+
+**Input.** `reports/S1-spec-review-r2.md` (verdict SOUND WITH FIXES: 3 Major, 2 Minor; 11 round-1 fixes held, R-5 and R-7 held partly). All five findings were accepted, and §16 has one row each (r2-1…r2-5), plus r2-6 for the review's verified-claims notes. The spec is now `status: approved`, `revision: 3`. This was the last round, and no finding was disputed, so no new Q-n was needed.
+
+**Re-checked before applying, independently of the reviewer:**
+- `wire.py` `_approvals`, `thread_fork` and `turn_start`: `turn_start` passes an empty explicit map, so only the turn's `approval_mode` reaches `turn/start`;
+- `CODEX_APPROVAL_MODE_WIRE` (`deny_all` → `("never", "")`), and openai-codex's `ApprovalMode.deny_all`, which maps to `never` with no reviewer (`_approval_mode.py:13-16,34-35`);
+- `codex_host.py:220-231`: explicit fields together with a mode raise `ConfigurationError`;
+- `connection.py:293-294`: one approval router serves every thread;
+- the 0.163.0 `ApprovalsReviewer` text, which names sandbox escapes;
+- `_base.py` `_json` and `_model_json`, and `live.py`'s two `without_items=True` callers;
+- `test_codex_host_packaging.py:249-255`, the pinned bullet;
+- `connection.py:521-532` and `host.py:923-934`, close versus death;
+- `thread_goal_actions.rs:78-84` and `:353-366`;
+- that `CodexGoalTurn` calls `super().__init__(handle, request, pricing, loop)`, and that only the registry builds live turns (`turns.py:363,369`).
+
+**Where I chose differently from the reviewer's smallest fix:**
+- **R-14.** The reviewer proposed an explicit `approval_policy=NEVER` with both modes reset. `turn_start` never sends the explicit fields, so `never` would reach `thread/fork` only, and AC-36's own assertion on `turn/start` would fail. I set `thread.approval_mode` and `turn.approval_mode` to `DENY_ALL` instead, with both explicit fields at `PROVIDER_DEFAULT`. That sends `approvalPolicy: "never"` and no reviewer on both requests, passes the record's no-mixing check, and only narrows. A-21 records the one unverified link: that `never` denies escalations without asking anyone.
+- **R-15, the host-wide bound.** The reviewer's smallest fix covered only the cursor. The orchestrator also asked for an enforced, named host-wide bound, so I added D-39:
+  - `CodexTurnRegistry` keeps two integer totals;
+  - `charge_stream(chars, events)` is passed to each log by `_add`, through `CodexTurnEventLog.attach`;
+  - a log past `CODEX_HOST_STREAM_HOST_EVENT_LIMIT` (65,536) or `CODEX_HOST_STREAM_HOST_TEXT_LIMIT_CHARS` (32,000,000) drops its own oldest events, then the new one;
+  - `ENDED` is never counted, so ended turns cannot fill the pool.
+  
+  This needs no 70th class, and `CodexGoalTurn` stays unchanged, because `_add` serves every turn kind. Config keys go from 44 to 46.
+
+**Rejected while designing D-39:**
+- Passing the bound to `CodexLiveTurn.__init__`: `CodexGoalTurn`'s `super()` call would have to change, against INV-51.
+- Typing the log against the registry: `turn_stream` would then import `turns`, a cycle.
+- A cap on live turns: it refuses valid paid work.
+- Eviction from the largest log: a scan of every turn per event.
+
+**Sections changed, for the record:**
+- **Frontmatter:** status and revision.
+- **§6:** INV-20 (per-turn and per-host bounds, what is dropped, `ENDED` uncounted), INV-21 (the integer count, finalization, `aclosing`), INV-22 (positions), INV-27 step 4 (the tool never reaches the reviewer refusal), INV-43 (the side chat's posture); AC-26, AC-36, AC-37, the new AC-44; EC-17, EC-18, EC-59, EC-60, the new EC-62.
+- **§7:** NFR-3.
+- **§8.1:** D-14, D-22, D-37, the new D-39.
+- **§8.4:** 46 config keys.
+- **§8.5:** `attach`, `close`, `subscribe`, and `CodexTurnRegistry.charge_stream`.
+- **§9.1:** the log lifecycle and the volume bullet.
+- **§9.2:** tool 34, the tool rules (four `_json` exceptions, `TURN_SETTINGS_STATUS_TEXT`, multi-wait without items, the side-chat description) and the not-resumable next step.
+- **§9.3:** two host limits.
+- **§10:** T-2.
+- **§11:** the source index (`_approval_mode.py`, `thread_goal_actions.rs`).
+- **§12:** W-5, W-10, and §12.3 rows 18, 19, 31, 32, 33, 35 and 38. There are still 39 rows and 13 new files.
+- **§13:** four patchable stream limits, the fake's `approvalPolicy` override, and the pinned builtins bullet.
+- **§15:** A-13 (citation; an "If wrong" path that no longer loops), A-20 (citation), and the new A-21.
+- **§16 and §17.**
+
+**Final counts:**
+- **IDs:** G 6, NG 19, INV 55, AC 44, EC 62, FR 36, NFR 12, D 39, T 8, W 19, A 21, Q 11. None duplicated, none missing, none undefined (`ids.py`); every table well formed (`tables.py`).
+- **Budget:** 13 new files, 69 classes, 0 dependencies, 46 config keys, 0 tables, 42 endpoints.
+
+**Least-sure assumptions now:** A-1 and A-19 (a status-only active set starts a goal turn), A-13, A-20 and A-21 (`never` asks no one). The binary is never run here, so all four rest on source and schema reading.
