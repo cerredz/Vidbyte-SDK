@@ -2,7 +2,7 @@
 spec: harness-browser-tools
 title: "Browser tools for every harness thread: run_<harness>_with_browser"
 status: draft
-revision: 1
+revision: 2
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-harness-browser-tools
 branch: feat/harness-browser-tools
@@ -14,7 +14,7 @@ pr:
 
 # Spec: Browser tools for every harness thread: run_<harness>_with_browser
 
-> **TL;DR** — Nine coroutines, `<verb>_<harness>_with_browser` for `run`/`continue`/`fork` × `grok`/`opencode`/`muse`, run the existing harness thread flow with browser tools the caller names as strings (`"playwright"`, `"firecrawl:search"`). A pinned registry resolves the strings; the SDK installs each tool once into a user-level cache, mounts it through the harness's own per-call channel, allows exactly the chosen tools with the harness's own web tools off, reads back which tools ran, and kills every browser the call started. The decision that matters most: each harness's existing `ThreadRun.execute` gains one optional `mount` argument, so the nine plain `_thread` functions stay byte-identical and every browser function inherits #1036's key, workspace and failure-code guarantees.
+> **TL;DR** — Nine coroutines, `<verb>_<harness>_with_browser` for `run`/`continue`/`fork` × `grok`/`opencode`/`muse`, run the existing harness thread flow with browser tools the caller names as strings (`"playwright"`, `"firecrawl:search"`). A pinned registry resolves the strings; the SDK installs each tool once into a user-level cache, mounts it through the harness's own per-call channel, allows exactly the chosen tools with the harness's own web tools off, reads back which tools ran, and kills every browser the call started. The decision that matters most: one shared twelve-layer main function (`NativeBrowserRun.execute`) drives a small per-harness seam, and each harness's existing `ThreadRun.execute` gains one optional `mount` argument, so the nine plain `_thread` functions stay byte-identical and every browser function inherits #1036's key, workspace and failure-code guarantees.
 
 ## §0 User prompts
 
@@ -62,8 +62,14 @@ The vendor CLI remains the agent and the MCP client. The SDK only does the follo
 - reads the harness's output;
 - kills every process whose command line carries the call's own folder.
 
+**What each harness can mount** (stated limitation, D-9, Q-15, Q-18):
+- **opencode:** every registry tool, keyed or not, stdio or remote.
+- **Grok:** every stdio tool, keyed or not. Remote tools (browserbase, jina, parallel) are refused with `browser.mount_unsupported`.
+- **Muse on Linux or macOS (native):** keyless stdio tools (playwright, chromedevtools, firecrawl and exa without keys) and keyless remote tools (jina, parallel). Any keyed tool is refused, because Muse takes a key only as a literal in a file (KD-6).
+- **Muse on Windows (through WSL):** only keyless remote tools, jina and parallel. Both are search and fetch services, and keyless Jina is fetch-only. **No browser can be mounted there:** every stdio tool, including `playwright` and `chromedevtools`, is refused with `browser.mount_unsupported`.
+
 Done means:
-- the full local gate `python scripts/run_ci.py` passes, apart from the pre-existing reds listed in §11;
+- the full local gate `python scripts/run_ci.py` passes, apart from the pre-existing reds listed in §11, with no lint baseline raised;
 - the nine plain functions behave byte-identically;
 - every combination a harness cannot honour safely is refused with `browser.mount_unsupported` before anything runs.
 
@@ -114,21 +120,22 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-The developer gets back the thread id, the answer, the browser tool calls the harness made and the artifact paths, with `playwright`'s core tools and `firecrawl_search` allowed and opencode's own `webfetch`/`websearch` off. They no longer install packages, write MCP config or permission rules, start or stop Chrome, or parse vendor output; Grok and Muse callers swap only the harness word, key and model.
+The developer gets back the thread id, the answer, the browser tool calls the harness made and the artifact paths, with `playwright`'s core tools and `firecrawl_search` allowed and opencode's own `webfetch`/`websearch` off. They no longer install packages, write MCP config or permission rules, start or stop Chrome, or parse vendor output; Grok and Muse callers swap only the harness word, key and model, within the per-harness limits of §2 (on Windows, `run_muse_with_browser(..., tools=["playwright"])` raises `browser.mount_unsupported`).
 
 ## §5 Flow diagram
 
 ```mermaid
 flowchart TD
   A["run_<harness>_with_browser (<H>BrowserThreads._call)"] -->|"prompt, api_key, workspace, model, tools, tool_keys, skills, config"| B["1 NativeThreadRequest + BrowserToolRequest"]
-  B --> C["3 errors.register_secret: harness key + tool keys"]
+  B -->|"request, tools, <H>Mounts(config)"| R["NativeBrowserRun.execute (one shared main function)"]
+  R --> C["3 errors.register_secret: harness key + tool keys"]
   C -->|BrowserToolRequest| D["2 BrowserToolRegistry.select"]
-  D -->|"tuple of BrowserToolSelection"| E["6a <H>Mounts.check: refuse unsupported before any I/O"]
+  D -->|"tuple of BrowserToolSelection"| E["6a seam.check (<H>Mounts): refuse unsupported before any I/O"]
   E --> F["4+5 NativeBrowserTools.prepare: Node, Chrome, BrowserToolCache.ensure, per-call folder"]
-  F -->|BrowserMount| G["6b+7 <H>ThreadRun.execute(mount): config, allow/deny, web tools off, keys in child env"]
+  F -->|BrowserMount| G["6b+7 seam.run: <H>ThreadRun.execute(mount): config, allow rules, web tools off, keys in child env"]
   G -->|"vendor CLI runs; it is the MCP client"| H["NativeThreadRun(result, outcome)"]
-  H --> I["8 <H>Wire tool_calls / connected"]
-  I --> J{"9 <H>Mounts.missing (Muse: MuseMounts.startup_failed)"}
+  H --> I["8 seam.tool_calls: BrowserToolCalls from <H>Wire"]
+  I --> J{"9 seam.missing (Muse: vendor required-server failure, raised inside seam.run)"}
   J -->|"a server never ran"| K["NativeBrowserTools.require: browser.tools_unavailable"]
   J -->|ok| L["10+11 NativeBrowserTools.complete: ProcessReaper.reap, artifacts, BrowserThreadResult"]
   G -.->|"any failure or cancel"| M["10 NativeBrowserTools.discard (shielded), then re-raise"]
@@ -136,7 +143,7 @@ flowchart TD
   M --> N["12 one NativeThreadError, closed FailureCode"]
 ```
 
-Validation happens in the two record constructors and `BrowserToolRegistry.select`, and `<H>Mounts.check` refuses what the harness cannot honour, all before any process starts or file is written. State changes only in the shared tool cache (first install of a pinned package), the per-call folder (profiles, artifacts, Grok agent file) and the vendor's own thread store. Every failure is caught by the one guarded `try` in `_call` and becomes one `NativeThreadError`; failures after `prepare` first pass through `discard`, shielded from cancellation, so no browser outlives the call.
+Validation happens in the two record constructors and `BrowserToolRegistry.select`, and the harness seam's `check` refuses what the harness cannot honour, all before any process starts or file is written; every layer runs inside the one shared `NativeBrowserRun.execute`, so no harness can skip one. State changes only in the shared tool cache (first install of a pinned package), the per-call folder (profiles, artifacts, Grok agent file) and the vendor's own thread store. Every failure is caught by the one guarded `try` in `_call` and becomes one `NativeThreadError`; failures after `prepare` first pass through `discard`, shielded from cancellation, so no browser outlives the call.
 
 ---
 
@@ -146,7 +153,7 @@ Validation happens in the two record constructors and `BrowserToolRegistry.selec
 
 ### 6.1 Invariants
 
-- **INV-1** — **"each … all layers":** every one of the nine functions runs all twelve layers of §5 in that order. A layer with nothing to do for a selection still runs and passes. Two examples: there is no Chrome check when no selected tool needs Chrome, and no install when every tool is remote.
+- **INV-1** — **"each … all layers":** every one of the nine functions runs all twelve layers of §5 in that order, through the one shared `NativeBrowserRun.execute`; a harness supplies only its seam (`check`, `run`, `tool_calls`, `missing`) and never its own copy of the sequence. A layer with nothing to do for a selection still runs and passes. Two examples: there is no Chrome check when no selected tool needs Chrome, and no install when every tool is remote.
 - **INV-2** — **"same":** the names are exactly `<verb>_<harness>_with_browser`. Each function's parameters are its plain `_thread` sibling's parameters, with the same names, kinds, types, defaults and order. `tools` (required) and `tool_keys` (default `None`) are inserted as keyword-only parameters directly after `model`.
 - **INV-3** — **"actually":** the harness CLI is the only agent and the only MCP client. The SDK never connects to a tool server, never calls a tool and never runs an agent loop (KD-5). Every `BrowserToolCall` comes from the vendor's own output.
 - **INV-4** — The harness key and every tool key never appear on any command line, in any file the SDK writes, in the SDK process's `os.environ`, or in any error text. A key reaches only a child's environment overlay. For opencode, it travels inside `OPENCODE_CONFIG_CONTENT`. Each key is registered with `NativeErrorFactory.register_secret` before any step that can produce error text (KD-6).
@@ -158,14 +165,14 @@ Validation happens in the two record constructors and `BrowserToolRegistry.selec
 - **INV-10** — **"Dont think about use cases now", "all types":** the caller's prompt reaches the harness unchanged. The functions hold no use-case logic. Capabilities are generic tool subsets.
 - **INV-11** — **"pass in strings":** resolving `tools` is deterministic. The same strings always give the same selections and the same compiled mount bytes, and no network or model is used.
 - **INV-12** — Browser state is fresh per call:
-  - every profile lives in the per-call folder and is removed before the function returns or raises;
-  - no process whose command line carries the per-call folder survives the call, within `BROWSER_REAP_TIMEOUT_SECONDS`.
+  - each call starts its browsers from a new, empty profile folder inside a new per-call folder; no call ever reads another call's profile;
+  - after the harness exits, the call attempts, within `BROWSER_REAP_TIMEOUT_SECONDS`, to kill every process whose command line carries the per-call folder and to remove the profiles; that removal is best effort (EC-22), and a leftover is never reused.
 - **INV-13** — A tool key comes only from `tool_keys`. A mounted tool's key variable that the caller did not pass is removed from the harness child's environment, so a key in the caller's own environment is never used silently.
 
 **Must not regress:**
-- **INV-14** — The nine plain `_thread` functions keep the same argv, environment overlay, output cap, Grok `--output-format=json`, result and errors as on `main` (`vidbyte.harnesses.native.{grok,opencode,muse}.threads` and `.wire`).
+- **INV-14** — The nine plain `_thread` functions keep the same argv, environment overlay, output cap, Grok `--output-format=json`, result and errors as on `main` (`vidbyte.harnesses.native.{grok,opencode,muse}.threads` and `.wire`), except the six cause and next-step texts that D-19 and D-22 widen.
 - **INV-15** — Harness modules hold no literals of their own. Flags are enum members, and every other value comes from a `vidbyte.lib.constants` module (header of `vidbyte.lib.constants.native_threads`, #1036 INV-15, lint A007).
-- **INV-16** — The existing `FailureCode` values, the existing `NATIVE_THREAD_FAILURE_CODES` pairs, and the `NativeThreadError.expected` text of the plain functions stay unchanged (`vidbyte.lib.errors.base.NativeThreadError`). The one exception is the `grok.output_too_large` likely-cause text, which widens to name both Grok caps (D-19).
+- **INV-16** — The existing `FailureCode` values, the existing `NATIVE_THREAD_FAILURE_CODES` pairs, and the `NativeThreadError.expected` text of the plain functions stay unchanged (`vidbyte.lib.errors.base.NativeThreadError`). The exceptions are the `grok.output_too_large` likely-cause text, which widens to name both Grok caps (D-19), and five next-step texts that name a plain function and widen to also name its `_with_browser` sibling (D-22).
 - **INV-17** — The Muse WSL peer mark and reap keep their behaviour (`vidbyte.harnesses.native.muse.launcher.MuseLauncher.reap`).
 - **INV-18** — Grok's private home stays at `~/.vidbyte/grok-homes/<hash>`, keyed by workspace, and Muse's private config folder stays per call and is removed however the call ends (`GrokThreadRun._prepare_home`, `MuseThreadRun._prepare_config`).
 
@@ -174,29 +181,33 @@ Validation happens in the two record constructors and `BrowserToolRegistry.selec
 | ID | Given | When | Then | Priority | Proof |
 |---|---|---|---|---|---|
 | AC-1 | A clean checkout of this branch, with the offline fake opencode, a fake MCP server reached through a fake `node`, and a pre-populated tool cache | The §4 snippet runs | It produces exactly the shown result: two `BrowserThreadResult`s with the fake's thread id and text, `tool_calls` holding `BrowserToolCall(tool=BrowserTool.PLAYWRIGHT, name="browser_navigate", status=BrowserToolCallStatus.COMPLETED)`, and the second result's `artifacts` naming files under the per-call `artifacts` folder | P0 | fake-harness run |
-| AC-2 | Each of the nine functions, with fakes for Grok, opencode, Muse native and Muse WSL | It is called with `tools=["playwright"]` (`["jina"]` for Muse WSL) | It returns a `BrowserThreadResult` whose `tool_calls` are read from the fake's output. The harness's own web tools are off (opencode permission deny, `--disable-web-search`, `--disable-web-tools`). The compiled mount names a per-call folder outside the workspace. | P0 | fake-harness run |
+| AC-2 | Each of the nine functions, with fakes for Grok, opencode, Muse native and Muse WSL | It is called with `tools=["playwright"]` (`["jina"]` for Muse WSL, the only kind of tool Muse WSL can mount; its `playwright` refusal is AC-19) | It returns a `BrowserThreadResult` whose `tool_calls` are read from the fake's output. The harness's own web tools are off (opencode permission deny, `--disable-web-search`, `--disable-web-tools`). The compiled mount names a per-call folder outside the workspace. | P0 | fake-harness run |
 | AC-3 | The installed package | `vidbyte.harnesses.native` and each harness subpackage are imported | `__all__` lists the nine functions, plus `BrowserThreadResult` and `BrowserToolCall` at the native level. Each signature equals its plain sibling's with `tools` and `tool_keys` inserted after `model` (INV-2). | P0 | surface pin |
-| AC-4 | `tools=["playwrite"]` | Any browser function is called | `configuration.invalid_argument` naming `tools[0]`, whose observation suggests `playwright`. No process starts and no file is written. | P0 | fake-harness run |
+| AC-4 | `tools=["playwrite"]` | Any browser function is called | `configuration.invalid_argument` naming `tools[0]`, whose observation suggests `playwright` and does not quote the item. No process starts and no file is written. | P0 | fake-harness run |
 | AC-5 | `tools=["puppeteer"]` (an excluded name) or `tools=["playwright@browserbase"]` | Any browser function is called | `configuration.invalid_argument` naming `tools[0]`, with the recorded exclusion reason or "hosts are not supported in this release" | P0 | fake-harness run |
-| AC-6 | `tools=["firecrawl:search"]` | It is run on opencode, Grok and Muse | opencode's compiled permission allows `firecrawl_*` and denies the other 25 Firecrawl tools exactly. Grok's argv carries `--allow=MCPTool(firecrawl__*)` and one `--deny=` per other tool. Muse raises `browser.mount_unsupported`. | P0 | fake-harness run |
+| AC-6 | `tools=["firecrawl:search"]` | It is run on opencode, Grok and Muse | Narrowing fails closed. opencode's compiled permission is `"vidbyte-firecrawl_*":"deny"` followed by one exact allow, `"vidbyte-firecrawl_firecrawl_search":"allow"`. Grok's argv carries exactly one `--allow=MCPTool(firecrawl__firecrawl_search)`, one `--deny=` per other known Firecrawl tool, and no wildcard allow. Muse raises `browser.mount_unsupported`. | P0 | fake-harness run |
 | AC-7 | `tools=["brave"]`, `tool_keys={"brave": K}` | It is run on Grok and opencode | `K` appears only in Grok's child environment overlay (`BRAVE_API_KEY`) or inside opencode's `OPENCODE_CONFIG_CONTENT`. It appears in no argv, no SDK-written file, not in `os.environ`, and no error text. Muse raises `browser.mount_unsupported`. | P0 | fake-harness run |
 | AC-8 | `tools=["brave"]` with no `tool_keys`; or a key for `playwright`; or a key for a tool not in `tools` | Any browser function is called | `configuration.invalid_argument` naming `tool_keys[brave]` or `tool_keys[playwright]`. The key value is never echoed. | P0 | fake-harness run |
 | AC-9 | The caller's environment holds `FIRECRAWL_API_KEY`, and `tools=["firecrawl"]` has no key | It is run on Grok or opencode | The harness child's environment has no `FIRECRAWL_API_KEY` (INV-13) | P0 | fake-harness run |
 | AC-10 | There is no `node` on PATH, or it is a batch file, or its version is below 22.12.0; or `playwright` is selected and no Chrome stable is at any searched location | Any browser function is called | `browser.runtime_missing` naming what was searched or found. The harness is not started. | P0 | fake-harness run |
 | AC-11 | An empty tool cache | Two calls select `playwright` | The first runs one install and publishes `~/.vidbyte/tools/playwright-0.0.83`. The second runs no install. A failing install raises `browser.tool_install_failed` and leaves no published folder. | P0 | fake-harness run with fake npm |
-| AC-12 | The fake Grok never lists a mounted server; fake opencode makes no mounted-tool call; or fake Muse reports a required server's startup failure | The call finishes | `browser.tools_unavailable` naming the server, with the thread id when the vendor printed one | P0 | fake-harness run |
+| AC-12 | The fake Grok never lists a mounted server; fake opencode makes no mounted-tool call; or fake Muse reports a required server's startup failure | The call finishes | `browser.tools_unavailable` with the thread id when the vendor printed one. For Grok it names each server never listed or called; for Muse it carries Muse's reason, which names the server; for opencode it says that no mounted tool was used and lists the mounted servers, without claiming which one failed. | P0 | fake-harness run |
 | AC-13 | A fake browser process whose command line carries the per-call folder outlives the fake harness | The call returns, raises, is cancelled or times out | That process is gone within `BROWSER_REAP_TIMEOUT_SECONDS` and the profiles are removed. The artifacts folder remains only after a successful return that produced artifacts. | P0 | fake-harness run |
 | AC-14 | Any Grok browser call | It runs | The child environment has `GROK_CLAUDE_MCPS_ENABLED=0` and `GROK_CURSOR_MCPS_ENABLED=0`. A plain `run_grok_thread` call's environment does not. | P0 | fake-harness run |
 | AC-15 | The nine plain functions with the inputs used by the existing tests | They run on this branch | Argv, environment overlay, output cap and results are identical to `main`. The existing tests pass unchanged, except the pins §13 lists. | P0 | existing tests |
 | AC-16 | Any browser call, successful or failing | It ends | Apart from files the fake agent itself wrote, the workspace tree is byte-identical to before | P0 | fake-harness run |
 | AC-17 | Any browser-function failure | The error is read | `error.expected` is `"<function> returning a BrowserThreadResult"`. The message names the browser function, the code, the cause and the next step. | P0 | fake-harness run |
 | AC-18 | Grok with selections whose deny rules exceed `GROK_BROWSER_RULES_MAX_UNITS` | It is called | `browser.mount_unsupported`, whose next step says to narrow the capabilities or mount fewer tools | P1 | fake-harness run |
-| AC-19 | Muse in WSL mode | `tools=["playwright"]`, or `["jina"]` | `playwright` raises `browser.mount_unsupported`. `jina` mounts as `{"transport":"streamable_http","url":…}` in the per-call `muse/settings.json`. | P0 | fake-harness run |
-| AC-20 | The finished branch | `python scripts/run_ci.py` runs | It passes, apart from the known reds of §11. Lint ends with `AGENT-LINT: PASS`, and the semgrep scan is clean. | P0 | full local gate |
+| AC-19 | Muse in WSL mode | Each stdio tool (`playwright`, `chromedevtools`, keyless `firecrawl`, keyless `exa`), then `["jina"]` | Every stdio tool raises `browser.mount_unsupported`, whose next step says Muse on Windows can mount only keyless remote tools. `jina` mounts as `{"transport":"streamable_http","url":…}` in the per-call `muse/settings.json`. | P0 | fake-harness run |
+| AC-20 | The finished branch | `python scripts/run_ci.py` runs | It passes, apart from the known reds of §11. Lint ends with `AGENT-LINT: PASS` with `lint/baseline.json` unchanged (in particular S020, S061, S041, S047, S052, A007 and S009 do not exceed their counts), and the semgrep scan is clean. | P0 | full local gate |
 | AC-21 | Two concurrent calls in one workspace with different tool sets | Both run | Each has its own per-call folder and agent file, and both succeed. One call's cleanup never kills the other call's browser. | P1 | fake-harness run |
 | AC-22 | `tools=["browserbase"]` with a key | It is run on opencode, then on Grok | opencode's content has `"type":"remote"`, `"oauth":false` and an `Authorization` header holding the key. Grok raises `browser.mount_unsupported`. | P1 | fake-harness run |
 | AC-23 | Every registry row | The registry is loaded | Each mountable row has an exact version (stdio) or `https` URL (remote), a key rule, and capability tool names that match vendor facts §4. Each exclusion has a non-empty reason. | P0 | registry pin |
 | AC-24 | The finished branch | The folder docs are read | The harnesses README `native/` paragraph names the nine functions, `tools`/`tool_keys`, the tool cache and the unsupported combinations; the registries README has a "Browser Tool Sources" section; the REPO_MAP native rows name the new modules; the failure vocabulary lists the four `browser.*` codes. Each README stays ≤ 40,000 characters. | P1 | review + lint A009 |
+| AC-25 | A key-shaped item, for example `tools=["fc-0123456789abcdef0123456789abcdef"]` | Any browser function is called | `configuration.invalid_argument` naming `tools[0]`. No part of the item appears in the message, `str(error)`, `vendor_message` or any detail field. | P0 | fake-harness run |
+| AC-26 | Any Muse browser call | The per-call `muse/settings.json` is read | Its top level is exactly `{"schema_version": 1, "mcpServers": {…}}`. Every stdio entry has a string `command` and a separate `args` list. Every remote entry has `"transport": "streamable_http"` and a `url`, and no `env`. A fake Muse that, like the real one, refuses a file without `schema_version` (exit 1) and disables MCP on a bad entry accepts the file. | P0 | fake-harness run |
+| AC-27 | `tools=["playwright:devtools,pdf"]` | It is run on opencode, Grok and Muse native | Playwright starts with `--caps=devtools,pdf`. The allowed set is the 25 core tools plus 13 devtools tools plus 1 pdf tool (39), and no tool is denied, so Muse native accepts it. | P0 | fake-harness run |
+| AC-28 | Any opencode browser call, and a user global opencode config that defines `mcp.playwright` | It runs | Every compiled server id is `vidbyte-<tool>` with `"enabled": true`, so the user's `playwright` entry is neither merged into nor disabling the SDK's server. | P1 | fake-harness run |
 
 ### 6.3 Edge cases and failure modes
 
@@ -204,7 +215,7 @@ Validation happens in the two record constructors and `BrowserToolRegistry.selec
 |---|---|---|---|---|
 | EC-1 | `tools="playwright"` (a bare string) | The record refuses it; a string is never split into characters | `configuration.invalid_argument` naming `tools` | INV-11, D-14 |
 | EC-2 | `tools=[]`, or more than `BROWSER_TOOLS_MAX_PER_CALL` (8) items | Refused | invalid argument naming `tools` | INV-11 |
-| EC-3 | An item that is not one line, is longer than 128 characters, or does not match the grammar | Refused. A shape refusal (record) names the index and never quotes the item; a grammar refusal (registry) quotes it only after every key is registered for scrubbing | invalid argument naming `tools[i]` | INV-4, INV-11 |
+| EC-3 | An item that is not one line, is longer than 128 characters, or does not match the grammar | Refused. No refusal, from the record or the registry, ever quotes the item: it names the index and, where one exists, the suggested registry name or the exclusion's recorded reason. A key pasted into `tools` is never registered as a secret, so not quoting it is the only control. | invalid argument naming `tools[i]` | INV-4, INV-11, D-14 |
 | EC-4 | The same tool twice (`"playwright"`, `"playwright:vision"`) | Refused | invalid argument naming the second index and the first | INV-11 |
 | EC-5 | An unknown capability (`"firecrawl:serch"`) | Refused, with a did-you-mean from that tool's capabilities | invalid argument naming `tools[i]` | INV-11 |
 | EC-6 | A key for a tool whose rule is `none`, or for a tool not in `tools` | Refused | invalid argument naming `tool_keys[<name>]` | INV-13 |
@@ -218,12 +229,12 @@ Validation happens in the two record constructors and `BrowserToolRegistry.selec
 | EC-14 | The user's home folder cannot be determined | No cache can exist | `browser.tool_install_failed` with the detail | D-5 |
 | EC-15 | The per-call folder cannot be created (disk full, permissions) | Nothing has started yet | `<harness>.launch_failed` with the folder detail, the same as Grok's home failure | D-3 |
 | EC-16 | A Grok server is slower than Grok's roughly 2 s startup grace | Absent from `available_commands` | `browser.tools_unavailable` naming it | D-11 |
-| EC-17 | An opencode run where the agent used no mounted tool | opencode prints no server status in a run, so no call means no evidence the server ran | `browser.tools_unavailable`, carrying the thread id and the answer text as vendor text, so the caller can continue | D-11, Q-9 |
+| EC-17 | An opencode run where the agent used no mounted tool, whether because a server never started or because the agent did not need one | opencode prints no server status in a run, so the check can only say "no mounted tool was used". A run with two servers where only one was used passes even if the other never started. | `browser.tools_unavailable` saying no mounted tool was used, listing the mounted servers, and carrying the thread id and the answer text as vendor text, so the caller can continue | D-11, Q-9 |
 | EC-18 | A Muse required server fails at startup | Muse fails the whole run (vendor rule) | `browser.tools_unavailable` with Muse's reason | D-11 |
 | EC-19 | The harness times out | Existing `<harness>.timed_out`; cleanup still runs; artifacts are discarded | the timeout error | INV-12, D-12 |
 | EC-20 | The caller cancels | `discard` runs shielded from the cancel, then `CancelledError` propagates | the cancellation | INV-12 |
 | EC-21 | On POSIX, Chrome leads its own process group (Playwright `detached`), so the harness group kill misses it | `ProcessReaper.reap` kills it by marker | nothing | INV-12, D-12 |
-| EC-22 | The reaper's own program (PowerShell or `ps`) cannot start, or times out | Not raised. The profile removal is still attempted and a leftover profile is ignored. | nothing. *Accepted:* best effort, bounded. | D-12 |
+| EC-22 | The reaper's own program (PowerShell or `ps`) cannot start, or times out | Not raised. The profile removal is still attempted; a leftover profile stays in its own per-call folder, which no later call reuses (INV-12). | nothing. *Accepted:* best effort, bounded. | INV-12, D-12 |
 | EC-23 | A stdio server without a profile or output option (exa, firecrawl, …) is orphaned by a harness crash | Its command line carries no per-call folder, so the reaper cannot see it. The harness tree stop still applies. | nothing. *Accepted:* it holds no browser. | D-12 |
 | EC-24 | The agent asks Playwright to save a file under an explicit name | Playwright resolves explicit names against its workspace root, so the file lands in the workspace | the file in the workspace. *Accepted:* an agent-authored write, like any edit the coding agent makes. Auto-named files go to the artifacts folder. | INV-5 (SDK writes only) |
 | EC-25 | Grok deny rules exceed the argv budget | Refused before I/O | `browser.mount_unsupported` | INV-9, D-10 |
@@ -232,7 +243,7 @@ Validation happens in the two record constructors and `BrowserToolRegistry.selec
 | EC-28 | On Grok, the agent calls a denied tool | Grok answers "Denied by permission policy" and the turn continues | a `BrowserToolCall` with status `failed` | D-10 |
 | EC-29 | More than 1,000 tool calls, or more than 1,000 artifact files | The first 1,000 are kept and the `_truncated` flag is set. All artifact files stay on disk. | truncated flags | NFR-1 |
 | EC-30 | A continue or fork of a browser thread with a different tool set | Tools are re-mounted fresh for this call | normal result | INV-12, D-16 |
-| EC-31 | A browser thread continued by a plain `continue_<harness>_thread` | Runs without tools; Grok falls back to its default agent | normal `NativeThreadResult` | A-14 |
+| EC-31 | A browser thread continued by a plain `continue_<harness>_thread` (for example by following a next step) | Runs without tools; Grok falls back to its default agent. The five next-step texts that name a plain function also name its `_with_browser` sibling, so the advice no longer drops the tools silently. | normal `NativeThreadResult` | A-14, D-22 |
 | EC-32 | Grok's turn ends with `stopReason` `cancelled` (a tool needing approval in headless mode) | Treated as a failed run | `grok.run_failed` with the stop reason | D-8 |
 | EC-33 | The user's global opencode config and external skills, or Grok's `~/.agents/skills` and `~/.claude` hooks | Still load, as in the plain path (vendor facts §7) | the vendor's behavior. *Accepted* (NG-13). | — |
 | EC-34 | A keyless server calls home at start (Apify and Sentry, Bright Data; Chrome DevTools unless quieted) | Chrome DevTools is started quiet. The others are documented per registry row. | nothing. *Accepted.* | D-21 |
@@ -240,6 +251,11 @@ Validation happens in the two record constructors and `BrowserToolRegistry.selec
 | EC-36 | A workspace's own `opencode.json` adds servers or permissions | Read by opencode, as in the plain path (#1036 T-6) | *Accepted:* pass only trusted workspaces | — |
 | EC-37 | A node or entry path with spaces or non-ASCII characters | Argv elements are never shell-joined. Configs are JSON-encoded. | normal result | INV-8 |
 | EC-38 | The harness program is missing after a cold install | The install is kept, and the existing `<harness>.not_installed` is raised | that error | D-3 |
+| EC-39 | Muse rejects its settings file without failing: any bad entry disables all MCP while the run exits 0, traced only in `session.jsonl` (vendor facts §1) | Prevented by construction: the file is compiled only from constants into the one verified shape (AC-26). If Muse still disables MCP, the run returns success with no tool calls. | a `BrowserThreadResult` with empty `tool_calls`. *Accepted residual* (Q-17). | D-11 |
+| EC-40 | The user's global opencode config defines a server with the same name as a browser tool (`playwright`, `firecrawl`) | opencode deep-merges `OPENCODE_CONFIG_CONTENT` onto global entries of the same id, so the SDK uses prefixed ids (`vidbyte-<tool>`) and sets every member, including `"enabled": true` | normal result; the user's own entry stays loaded beside it | D-23 |
+| EC-41 | A Grok narrowed selection, and the pinned server exposes a tool the registry does not list | That tool has no allow rule. Headless Grok cancels the whole turn when a tool with no allow rule is called (vendor facts §7). | `grok.run_failed` with stop reason `cancelled`: a loud failure, never a silent extra tool | D-10, EC-32 |
+| EC-42 | On Windows, `run_muse_with_browser` with any stdio tool (`playwright`, `chromedevtools`, keyless `firecrawl` or `exa`) | Refused before I/O. Muse in WSL has no Linux Node, and Windows Node through interop fails for stdio (vendor facts §1). | `browser.mount_unsupported`, whose next step names the keyless remote tools Muse on Windows can mount. *Stated limitation* (§2, Q-15). | D-9 |
+| EC-43 | A tool whose server writes to its own working folder | Muse ignores an entry's `cwd` and starts servers in the workspace (vendor facts §1); opencode and Grok start them in the harness's working folder | As EC-24: such files are the server's, at the agent's request. Auto-named Playwright files still go to the artifacts folder. | INV-5 (SDK writes only) |
 
 **Rollback of the user action:** a browser call changes three things outside the vendor's thread store:
 - **The per-call artifacts folder,** which is kept only on success. Delete it when the files are no longer needed.
@@ -257,18 +273,18 @@ Nothing the SDK wrote is in the workspace. Edits the agent made there are undone
 | FR-2 | Each function takes its plain sibling's parameters unchanged (name, kind, type, default, order), plus keyword-only `tools: Sequence[str]` (required) and `tool_keys: Mapping[str, str] \| None = None`, inserted directly after `model`. | P0 | Prompt 3 "same"; G-1 |
 | FR-3 | Each function returns `BrowserThreadResult(harness, thread_id, text, text_truncated, tool_calls, tool_calls_truncated, artifacts, artifacts_truncated)`. | P0 | KD-3 layer 11; G-2 |
 | FR-4 | `tools` and `tool_keys` are validated at the boundary by `BrowserToolRequest`:<br>• a sequence, not a string; 1–8 items;<br>• each item one line and at most 128 characters;<br>• a mapping of text to text;<br>• each key matching `NATIVE_API_KEY_PATTERN`, at most 4,096 characters.<br>A refusal is `configuration.invalid_argument` naming `tools[i]` or `tool_keys[<name>]`. | P0 | KD-3 layer 1; G-2 |
-| FR-5 | `BrowserToolRegistry.select` resolves each item by the grammar `<tool>[:<capability>[,<capability>…]]`, as follows:<br>• an unknown tool or capability is refused with a did-you-mean suggestion;<br>• an excluded name is refused with its recorded reason;<br>• a `@<host>` suffix is refused as unsupported in this release;<br>• a duplicate tool is refused;<br>• with no capability named, the tool's default capabilities apply. | P0 | Prompt 1 "pass in strings"; KD-4; G-3 |
+| FR-5 | `BrowserToolRegistry.select` resolves each item by the grammar `<tool>[:<capability>[,<capability>…]]`, as follows:<br>• an unknown tool or capability is refused with a did-you-mean suggestion;<br>• an excluded name is refused with its recorded reason;<br>• a `@<host>` suffix is refused as unsupported in this release;<br>• a duplicate tool is refused;<br>• with no capability named, the tool's default capabilities apply;<br>• a capability that maps to a server flag (Playwright `--caps`) is additive: it adds its tools to the default ones instead of replacing them (D-24);<br>• no refusal quotes the item; it names `tools[i]` and at most a registry-owned suggestion or reason. | P0 | Prompt 1 "pass in strings"; KD-4; G-3 |
 | FR-6 | The registry ships 13 mountable tools: playwright, chromedevtools, firecrawl, exa, tavily, brave, perplexity, brightdata, apify, linkup, browserbase, jina and parallel.<br>Each row pins the exact package version, entry and arguments (stdio) or URL (remote), the key rule and variable, and each capability's exact tool names, with a source comment.<br>18 more names are answered with their reason: browserstack, searxng, wdio, fetch, duckduckgo, agentbrowser, playwrightcli, midscene, devbrowser, crawl4ai, browseruse, scrapling, kernel, cloudflare, puppeteer, hyperbrowser, steel and browserless. | P0 | Prompts 1–2 "all", "more extensive", "15-20 popular ones"; KD-4; G-3 |
 | FR-7 | Tool keys come only from `tool_keys`. A missing required key is refused. A key for a `none`-rule tool, or for a tool not in `tools`, is refused. A mounted tool's key variable that was not passed is removed from the harness child's environment. Every key is registered as a secret before `select` runs. | P0 | KD-3 layer 3; KD-6; G-4 |
 | FR-8 | Preflight finds `node` on PATH, refusing a batch file, and requires `node --version` ≥ 22.12.0. When a selected tool needs Chrome, it requires Chrome stable at one of Playwright's channel locations. Otherwise it raises `browser.runtime_missing`, naming what was searched or found. | P0 | KD-3 layer 4; G-2 |
 | FR-9 | Each stdio tool is installed at most once into `~/.vidbyte/tools/<tool>-<version>`. The install runs `<node> <bundled npm-cli.js> install --no-audit --no-fund --prefix <staging> <package>@<version>` with a bound, verifies the entry, and publishes by atomic rename. Servers start as `<node> <absolute entry> <arguments>`. `npx` is never used. A failure raises `browser.tool_install_failed`. | P0 | KD-3 layer 4; request "Rejected alternatives" (npx @latest); G-2 |
 | FR-10 | Each call creates its own folder outside the workspace, with `artifacts/` and `profiles/<tool>/`. Every browser profile and Playwright's output directory point into it. | P0 | KD-3 layer 5; Q-6; G-2 |
-| FR-11 | Each harness compiles the mount through its own per-call channel, as listed in §9.1 "Mount by harness". A combination the table marks unsupported raises `browser.mount_unsupported` before any I/O. | P0 | KD-3 layer 6; KD-2 "every harness"; G-1 |
-| FR-12 | Each mount allows every mounted server's tools, denies exactly the exposed tools outside the selected capabilities, and turns off the harness's own web tools: opencode `webfetch`/`websearch`, Grok `--disable-web-search`, Muse `--disable-web-tools`. No approve-everything mode is used. | P0 | KD-3 layer 7; KD-6; G-2 |
+| FR-11 | Each harness compiles the mount through its own per-call channel, as listed in §9.1 "Mount by harness". A combination the table marks unsupported raises `browser.mount_unsupported` before any I/O, with a next step that names what that harness can mount (§2 limits; on Windows, Muse mounts only keyless remote tools). | P0 | KD-3 layer 6; KD-2 "every harness"; G-1 |
+| FR-12 | Each mount allows exactly the selected tools and fails closed: an unnarrowed server gets a wildcard allow; a narrowed server gets no wildcard allow, only exact allows for the selected tools (opencode adds a wildcard deny before them; Grok adds exact denies for the other known tools), so a tool the registry does not list is never silently allowed. The harness's own web tools are off: opencode `webfetch`/`websearch`, Grok `--disable-web-search`, Muse `--disable-web-tools`. No approve-everything mode is used. | P0 | KD-3 layer 7; KD-6; G-2 |
 | FR-13 | A reader per harness records, in order, each call the harness made to a mounted server's tool, as `BrowserToolCall(tool, name, status)`, capped at 1,000. | P0 | KD-3 layer 8; G-2 |
-| FR-14 | A required check per harness raises `browser.tools_unavailable` with the thread id and answer text when a mounted server never ran. The evidence is:<br>• Grok: each server listed in `available_commands` or called;<br>• opencode: at least one call of a mounted tool;<br>• Muse: the vendor's required-server startup failure. | P0 | KD-3 layer 9; G-2 |
+| FR-14 | A required check per harness raises `browser.tools_unavailable` with the thread id and answer text when the vendor's own output shows the mount did not work. The evidence, and so the guarantee, differs by harness:<br>• Grok: each mounted server must be listed in `available_commands` or called; the error names each missing server;<br>• opencode: at least one mounted tool must have been called; the error says "no mounted tool was used" and lists the servers, because opencode prints no per-server status (EC-17);<br>• Muse: the vendor's own required-server startup failure (every configured server is required), translated with its reason; Muse's silent MCP disable on a malformed file is prevented by construction (AC-26, EC-39). | P0 | KD-3 layer 9; G-2 |
 | FR-15 | However the call ends, every process whose command line carries the per-call folder is killed after the harness exits, within 10 s, and the profiles are removed. Artifacts are kept and returned only on success; otherwise the whole folder is removed. | P0 | KD-3 layer 10; G-2 |
-| FR-16 | Four closed codes are added: `browser.mount_unsupported`, `browser.runtime_missing`, `browser.tool_install_failed` and `browser.tools_unavailable`. Each has its own likely cause and next step, and each is mapped for all three harnesses. A browser function's errors say it returns a `BrowserThreadResult`. Bad tool strings and keys use the existing `configuration.invalid_argument`. | P0 | KD-3 layer 12; KD-6; G-4 |
+| FR-16 | Four closed codes are added: `browser.mount_unsupported`, `browser.runtime_missing`, `browser.tool_install_failed` and `browser.tools_unavailable`. Each has its own likely cause and next step, and each is mapped for all three harnesses. A browser function's errors say it returns a `BrowserThreadResult`. Bad tool strings and keys use the existing `configuration.invalid_argument`. The five existing next-step texts that name a plain function also name its `_with_browser` sibling (D-22). | P0 | KD-3 layer 12; KD-6; G-4 |
 | FR-17 | Grok browser runs set `GROK_CLAUDE_MCPS_ENABLED=0` and `GROK_CURSOR_MCPS_ENABLED=0`. The plain Grok path is unchanged. | P0 | request open question "Grok compat leak"; Q-3 |
 | FR-18 | The docs describe the feature: the `native/` paragraph of the harnesses README, a "Browser Tool Sources" section in the registries README, the lib README entries, the REPO_MAP native rows, and a `browser` section in the failure vocabulary. | P1 | AGENTS.md (README per folder, REPO_MAP); failure.py header |
 | FR-19 | The nine plain `_thread` functions stay byte-identical (INV-14). The shared flow gains only an optional `mount` and returns `NativeThreadRun`, whose `.result` is today's result. | P0 | KD-6; field guide review-scope.md |
@@ -282,7 +298,7 @@ Nothing the SDK wrote is in the workspace. Edits the agent made there are undone
 | NFR-4 | Cleanup bound | P0 | Reap finishes within `BROWSER_REAP_TIMEOUT_SECONDS` (10 s). No surviving process carries the per-call folder. |
 | NFR-5 | Warm-cache overhead | P1 | With the tools cached and nothing to install, a call starts exactly one extra child before the harness (`node --version`) and one after it (the reaper). It does no network I/O of its own. |
 | NFR-6 | Windows argv budget | P0 | Grok browser options (agent path, allow/deny rules, switches) stay within `GROK_BROWSER_RULES_MAX_UNITS` (1,800 UTF-16 units), so the measured 608-unit worst case plus the 30,000-unit prompt stays under 32,766 |
-| NFR-7 | Code shape | P0 | Every new file under 1,000 lines (target ≤ 450). Call chains one level deep. Narrated main functions. `AGENT-LINT: PASS` with no new suppressions or baseline changes. |
+| NFR-7 | Code shape and lint ratchets | P0 | Every new file under 1,000 lines (target ≤ 450). Call chains one level deep. Narrated main functions. `AGENT-LINT: PASS` with no new suppressions and `lint/baseline.json` unchanged. New findings allowed at base: S020 0 (count 1 of 1), S061 0 (5 of 6; target 0 so the last slack stays), S041/S047/S052 0 (0 of 0), A007 0 (255 of 255), S009 mypy ≤ 4 (346 of 350; target 0). Semgrep `typed-mapping-boundary-policy` clean. |
 | NFR-8 | Extensibility | P1 | A new harness needs 2 modules (`browser`, `mounts`) plus one reader, with 0 registry changes. A new tool needs 1 registry row plus constants, with 0 harness changes. |
 | NFR-9 | Concurrency | P1 | Concurrent calls never share a profile, an agent file or a reap marker. Install races converge on one published copy. |
 
@@ -309,13 +325,16 @@ The feature is three layers stacked on #1036's harness thread flow.
    - `BrowserToolRegistry`, which turns strings into selections.
    - `ProcessReaper`, which kills processes by command-line marker.
    - `NativeThreadRun`, which carries a result and its process outcome.
-2. **hostkit (harness-shared).** `NativeBrowserTools`, with `BrowserRuntimes` and `BrowserToolCache`, turns selections into a `BrowserMount`: preflight, pinned install, per-call folder and server commands. It also finishes or discards that mount.
-3. **Per harness.** Each harness gets three pieces:
-   - `<H>Mounts` checks and compiles the harness-specific mount;
-   - `<H>Wire` gains a tool-call reader;
-   - `<H>BrowserThreads` and `<H>BrowserRun` are the public functions and the narrated twelve-layer main function.
+2. **hostkit (harness-shared).**
+   - `NativeBrowserRun.execute` is the one narrated twelve-layer main function for all nine functions. It drives a per-harness seam that satisfies the `NativeBrowserHarness` protocol: `check`, `run`, `tool_calls`, `missing`.
+   - `NativeBrowserTools`, with `BrowserRuntimes` and `BrowserToolCache`, turns selections into a `BrowserMount` (preflight, pinned install, per-call folder, server commands), writes the per-call files through the reviewed filesystem backend, and finishes or discards the mount.
+3. **Per harness.** Each harness gets two pieces:
+   - `<H>Mounts(config)` is that harness's seam: what it can mount (`check`), how it runs with a mount (`run`, which calls `<H>ThreadRun.execute(mount=…)`), what its output proves (`tool_calls` through `<H>Wire`, `missing`), plus the private compile helpers for its channel;
+   - `<H>BrowserThreads` holds the three public coroutines and the one guarded `_call`.
 
-The existing `<H>ThreadRun.execute` gains `mount: BrowserMount | None = None` and returns `NativeThreadRun`. With `mount=None` its behaviour is unchanged.
+   `<H>Wire` gains the harness's tool-call reader. The existing `<H>ThreadRun.execute` gains `mount: BrowserMount | None = None` and returns `NativeThreadRun`. With `mount=None` its behaviour is unchanged.
+
+The SDK serves no tool of its own: it only configures each vendor's MCP client to start pinned third-party servers (or reach remote ones) and reads the vendor's output, so the field-guide rule that model-facing tools for a harness do not belong in `native/` is not engaged (§11).
 
 ### 8.1 Decisions
 
@@ -323,25 +342,30 @@ The existing `<H>ThreadRun.execute` gains `mount: BrowserMount | None = None` an
 |---|---|---|---|---|
 | D-1 | Nine new functions beside the plain ones | Prompt 3 names `run_<harness>_with_browser`. The plain functions stay byte-identical (INV-14). | A `tools=` argument on the plain functions | The user asks for one function family |
 | D-2 | A new `BrowserThreadResult` record, not new fields on `NativeThreadResult` | `NativeThreadResult` is pinned by the surface tests and returned by nine functions that never browse | A `NativeThreadResult` subclass | Reviewers want a single result type |
-| D-3 | Reuse each `<H>ThreadRun.execute` through an optional `mount` and a `NativeThreadRun` return. A per-call folder failure reuses `<harness>.launch_failed`. | One flow per harness keeps the launcher, key, timeout and reader rules in one place (AGENTS principle 5) | Separate browser run classes copying launcher and argv code | `execute` would need a second level of helpers to take the mount |
+| D-3 | One shared `NativeBrowserRun.execute` (hostkit) runs the twelve layers for every harness through the `NativeBrowserHarness` seam, and each seam's `run` reuses its `<H>ThreadRun.execute` through an optional `mount` and a `NativeThreadRun` return. A per-call folder failure reuses `<harness>.launch_failed`. | One sequence, one cancellation path and one cleanup order for all nine functions (INV-1 by construction; AGENTS principle 5); one flow per harness keeps the launcher, key, timeout and reader rules in one place | r1: a `<H>BrowserRun` main function copied per harness | A harness needs a layer order the others cannot share |
 | D-4 | The registry is a class-held table in lib's registries, with all literals in lib's constants and each row citing its source | The house shape (field guide declarative-config-resolution.md; `RuntimeRegistry`, `ProviderKeyMatcher`) | Extending `McpPresetRegistry` | Q-4 is answered "fix and reuse the catalog" |
 | D-5 | Pinned install with the npm bundled with the found Node, into `~/.vidbyte/tools/<tool>-<version>`, staged and published by `os.rename`. A broken published folder is reported, not repaired. | Exact versions. No `npx` (a batch file on Windows, unpinned, and slow on first run). Safe under concurrency. | `npx -y <pkg>@<version>` per call | npm stops shipping `npm-cli.js` beside Node |
 | D-6 | One global Node floor of 22.12.0, the version every seed package was verified on. Batch-file `node` is refused. | Apify and Firecrawl declare Node 22 or later; vendor facts verified 22.12.0. One rule is simpler than per-tool floors. | A per-tool floor field | A user needs Node 20 for Playwright alone (Q-10) |
 | D-7 | Grok mounts through a per-call `--agent=<per-call folder>/<agent file>` plus argv rules. Keys travel in Grok's environment overlay, which the servers inherit. | The private home's `config.toml` is shared by every call in a workspace, so different tool sets would collide. The agent file is per call, and its sequence form is verified. | `config.toml` in the private home, guarded by a per-home lock | A-5 turns out wrong (the agent body weakens the coding prompt) |
 | D-8 | Grok uses `--output-format=streaming-json` and a new `GrokWire.read_stream` only on the browser path. `stopReason` `cancelled` is a failed run. | Tool calls and connected servers are visible only in the stream. The plain path stays on `json` (INV-14). | Streaming for both paths | The plain path needs tool visibility |
-| D-9 | Refuse with `browser.mount_unsupported`: Grok remote tools; Muse keyed tools; Muse WSL stdio tools | Grok has no verified per-run remote channel. Muse takes secrets only as literals in a file (KD-6). Windows Node through WSL interop fails for stdio (vendor facts §7). | An SDK-hosted loopback HTTP bridge for Muse WSL | A per-run remote channel for Grok is verified |
-| D-10 | Capabilities narrow by exact denies (opencode `permission`, Grok `--deny`) plus server flags (Playwright `--caps`). On Muse, any non-empty deny is refused. | opencode removes denied tools from the list. Grok deny beats allow (verified). Muse `enabled_tools` does not filter. | Grok `disabled_mcp_tools` in the shared `config.toml` | Muse gains a per-run tool filter |
-| D-11 | Required evidence per harness: Grok `available_commands` or a call; opencode at least one mounted-tool call; Muse the vendor's own required-server failure | This is the only evidence each vendor prints in a headless run | Parsing opencode log lines | opencode prints MCP status in `run --format json` |
+| D-9 | Refuse with `browser.mount_unsupported`: Grok remote tools; Muse keyed tools; Muse WSL stdio tools. So Muse on Windows mounts only jina and parallel, and no browser (§2). | **Grok remote:** the guide documents HTTP entries with headers in agent `mcpServers` (07-mcp-servers.md:407, 16-subagents.md:220), but not their keys, and no probe ran; a keyed entry would put the key in the agent file (KD-6). **Muse keyed:** no env inheritance and no `${VAR}` expansion, so a key could only be a literal in a file (KD-6). **Muse WSL stdio:** no Linux Node in the distro, and Windows Node through interop fails for stdio (vendor facts §1). | An SDK-hosted loopback bridge for Muse WSL: start each keyless stdio tool on Windows in HTTP mode on `127.0.0.1` and mount its URL. Vendor facts §1 verified that a Windows `127.0.0.1` HTTP MCP is reachable from WSL, but only under mirrored networking (not WSL's default NAT mode). Only Playwright's `--port` is known among the stdio tools, and the bridge needs a new SDK-owned server lifecycle (port choice, readiness, stop) and adds an unauthenticated local endpoint that any local process could drive during the call (T-4). Too large and too unverified for this PR (Q-15). | Q-15 or Q-18 is answered yes after a probe |
+| D-10 | Narrowing fails closed. opencode: `"vidbyte-<tool>_*":"deny"` then one exact allow per selected tool (last match wins). Grok: exact `--allow=MCPTool(<tool>__<name>)` per selected tool plus exact `--deny=` for the other known tools, never a wildcard allow; an unlisted tool has no allow rule and cancels the turn. Server-flag capabilities (Playwright `--caps`) are additive (D-24). On Muse, any non-empty deny set is refused. | A pinned server can expose tools the registry does not list (Firecrawl: 26 tools probed keyless, 27 per its README keyed), and a caller who narrows wants least privilege; the request's endorsed compiled form was deny-then-allow. opencode removes denied tools from the list; Grok deny beats allow, and a tool with no allow rule cancels the headless turn (vendor facts §2, §7). Muse `enabled_tools` does not filter. | r1: wildcard allow plus exact denies (fails open); Grok `disabled_mcp_tools` in the shared `config.toml` | Muse gains a per-run tool filter |
+| D-11 | Required evidence per harness: Grok `available_commands` or a call, per server; opencode at least one mounted-tool call, reported honestly as "no mounted tool was used"; Muse the vendor's own required-server failure, with its silent-disable path prevented by compiling only the verified settings shape | This is the only evidence each vendor prints in a headless run. On Muse, adding "≥ 1 call" would make every Muse browser call depend on A-1, the unverified tool-call record format. | Parsing opencode log lines; reading Muse's per-call `session.jsonl` status record (inside the WSL distro on Windows) | opencode prints MCP status in `run --format json`; A-1 is verified (Q-17) |
 | D-12 | Cleanup is `ProcessReaper.reap(marker=<per-call folder>)` after the harness exits, then profile removal. Artifacts are kept only on success. | Chrome leaves the harness tree on POSIX (Playwright `detached`), and `taskkill /T` misses grandchildren of an exited leader (runner header). The folder path is on every browser command line. | Wrapping each server in a tree-killing launcher | The marker proves unreliable on a platform |
 | D-13 | Four shared `browser.*` codes, mapped for all three harnesses through `NATIVE_THREAD_FAILURE_CODES` | The cause is the tool, not the harness. The 9-problem × 3-harness grid stays intact. | Twelve per-harness codes (`grok.tools_unavailable`, …) | Reviewers want per-harness codes |
 | D-14 | Bad `tools` or `tool_keys` raise the existing `configuration.invalid_argument` through `ConfigurationError(details={"field": …})` | That code already carries the argument name and rule text (`from_configuration_error`) | A new `browser.invalid_tools` code | — |
-| D-15 | `NativeThreadError` gains `result_record: str \| None = None`. `NATIVE_THREAD_RESULT_RECORDS[operation]` names the record. `None` keeps today's text. | `expected` must be true for browser functions (INV-6) without changing plain errors (INV-16) | Leave `expected` naming `NativeThreadResult` | — |
+| D-15 | A two-member `NativeThreadResultRecord` StrEnum (`NativeThreadResult`, `BrowserThreadResult`). `NativeThreadError` gains `result_record: NativeThreadResultRecord \| None = None`; the factory passes `NATIVE_THREAD_RESULT_RECORDS[operation]`, a table covering all 18 operations. `None` keeps today's text byte-identical. | `expected` must be true for browser functions (INV-6) without changing plain errors (INV-16); a closed set is typed with an enum (AGENTS.md §Enums). `vidbyte.lib.errors.base` imports enums only under `TYPE_CHECKING`, so the annotation adds no runtime import. | r1: `result_record: str`; deriving the record inside `NativeThreadError` from `operation` (needs a constants import in `vidbyte.lib.errors`) | — |
 | D-16 | Fresh profile and artifacts folder per call; continue and fork re-mount | MCP servers die with the harness process. A shared profile would leak cookies across calls. | A persisted profile per thread | Q-6 is answered "persist" |
-| D-17 | No env-filter launcher | The vendor-facts probe works, but it does not hide keys from the agent's own shell: for Grok and opencode, keys sit in the harness environment. Killing the wrapper alone orphans the server on Windows (vendor facts §6c). | Wrap every stdio server | Q-7 is answered yes |
+| D-17 | No env-filter launcher. The accepted cost is T-6: on Grok every stdio server (and its npm dependencies) inherits the caller's whole environment plus the harness key and every tool key of the call; on opencode every server inherits `OPENCODE_CONFIG_CONTENT`, which holds the provider key and every tool key and header. | The wrapper works for server environments (vendor facts §6), but on Grok and opencode the harness process, its shell tool and every server it starts already hold those keys, so filtering servers alone does not remove the keys from the agent; it adds one wrapper process per server and its own kill semantics (on Windows, killing the wrapper alone orphans the server, §6c). Unrequested scope. | Wrap every stdio server | Q-7 is answered yes |
 | D-18 | No prompt add-on. The Grok agent file's mandatory body is one fixed, neutral constant. | INV-10. Grok injects its own MCP reminder. | A browser skill per call | Q-8 is answered yes |
 | D-19 | Grok browser runs cap output at `NATIVE_PROCESS_MAX_OUTPUT_BYTES`. The `grok.output_too_large` cause text widens to name both caps. | Streamed tool results (screenshots) can exceed 4 MiB. The text must stay true. | Keep 4 MiB for both | — |
 | D-20 | A mounted tool's unpassed key variable goes into `CliInvocation.env_remove` (Grok, opencode). Muse needs nothing because its servers inherit no environment. | INV-13: a caller's own environment key is never used silently | Leave it inherited | — |
-| D-21 | Seed set: 13 mountable tools and 18 named exclusions. Chrome DevTools always starts with `--no-usage-statistics` and `CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS=1`. | Only tools verified to start on Node 22.12 headless, and mountable with per-call keys, are mountable (vendor facts §4, §7) | Ship every C.0.2 name as mountable | A named tool is verified later |
+| D-21 | Seed set: 13 mountable tools and 18 named exclusions, below the request's "15-20" (Q-16, default: ship 13). Chrome DevTools always starts with `--no-usage-statistics` and `CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS=1`. | Only tools verified to start on Node 22.12 headless, and mountable with per-call keys through a runtime the SDK pins, are mountable (vendor facts §4, §7) | Ship every C.0.2 name as mountable | A named tool is verified later, or Q-16 is answered "add more" |
+| D-22 | The five existing next-step texts that name a plain function (`GROK_THREAD_NOT_FOUND`, `OPENCODE_THREAD_NOT_FOUND`, `OPENCODE_OUTPUT_TOO_LARGE`, `MUSE_THREAD_NOT_FOUND`, `MUSE_OUTPUT_TOO_LARGE`) also name its `_with_browser` sibling | The browser functions raise these same codes; advice that names only `continue_opencode_thread` drops the caller's tools silently (EC-31). Texts are per code, not per function. | Accept the gap in EC-31 and the README | — |
+| D-23 | On opencode only, server ids are `vidbyte-<tool>` (`BROWSER_OPENCODE_SERVER_PREFIX`), and every entry sets each member it relies on, including `"enabled": true` | opencode deep-merges `OPENCODE_CONFIG_CONTENT` onto a global `mcp.<id>` of the same id (vendor facts §3), and `playwright`/`firecrawl` are common global ids. opencode's sanitizer keeps `-`, so tool names stay `vidbyte-<tool>_<name>` and split at the first `_`. Grok (private home) and Muse (fresh config folder) cannot collide, and their naming of `-` in server names is unprobed, so they keep bare ids. | Explicit members only, with bare ids | A user's global config uses the `vidbyte-` prefix |
+| D-24 | A capability that maps to a server flag (`server_value`) is additive: selecting it adds `--caps=<value>` and its tools to the default capabilities' tools | The endorsed meaning of `--caps=devtools` adds tools; r1's rule turned `playwright:devtools` into "devtools only", denying `browser_navigate` and making Muse refuse it | r1: every selection replaces the defaults | — |
+| D-25 | The two per-call files (Grok agent file, Muse `settings.json`) are written through one hostkit helper, `NativeBrowserTools.write_file`, which calls the reviewed `LocalFileSystemBackend.write_text` held as a class attribute named `backend`, with an explicit encoding, `atomic=True`, off the event loop | Lint S061 has one slack (5 of 6) and exempts the `….backend.write_text` receiver form; S041/S047 are at 0. The house precedent is `self.backend.write_text(...)` (`vidbyte.agents.infinite.workspace`). | Two `Path.write_text` calls (would make S061 7 of 6) | S061's exemption changes |
+| D-26 | `BrowserToolCache` (pinned npm install) stays in hostkit and is not moved to `vidbyte.lib.process` | Only this feature installs pinned npm packages; moving it would add an outcome record and an error-mapping layer for no second caller (AGENTS principle 5: "Logic that only one feature will ever need can stay with that feature") | A `lib/process` installer returning an outcome record | A second feature (for example desktop tools) needs pinned npm installs |
 
 ### 8.2 Patterns inherited
 
@@ -356,6 +380,9 @@ The existing `<H>ThreadRun.execute` gains `mount: BrowserMount | None = None` an
 - **Class-held registry tables.** `RuntimeRegistry` and `ProviderKeyMatcher` keep a source comment per row.
 - **Validated records.** `RecordFieldValidator` and `RecordFieldConverter` (`to_tuple` refuses a string, `to_mapping`), and `_received` hides credential-named fields.
 - **Muse's private-folder pattern.** `tempfile.mkdtemp()`, then removal in `finally` under `suppress(OSError)`. The marker-based reap of `MuseLauncher.reap` is the precedent for `ProcessReaper`.
+- **Reviewed file writes.** `LocalFileSystemBackend.write_text(path, content, *, encoding, create_parents, atomic=True)` held as an attribute named `backend`, as `vidbyte.agents.infinite.workspace` does (`self.backend.write_text(...)`); lint S061 exempts that receiver form.
+- **Instance seams with config.** `MuseLauncher(config, errors)` is an instance class with I/O-free properties; each `<H>Mounts(config)` seam follows it.
+- **Inline JSON checks in readers.** The existing wire readers check `isinstance(x, dict)` inline and never write an `object`-parameter helper that returns early on a non-mapping (semgrep `typed-mapping-boundary-policy`).
 
 ### 8.3 Smaller design rejected
 
@@ -365,13 +392,13 @@ The smallest design was a `tools=` argument that takes raw MCP server configs, p
 - FR-14 and FR-15 (required check, browser cleanup);
 - INV-1 ("each function has all layers").
 
-The next smallest built only the `run_` verbs. It fails FR-1, because a continue must re-mount: MCP servers live only as long as the harness process (request §C open question "Verbs", Q-1). A third option put browser support only into opencode. It fails "every harness" (KD-2).
+r1's own shape, one twelve-layer main function copied into each harness, was smaller per file but fails INV-1's guarantee by construction (three copies must stay in step) and AGENTS principle 5 (review r1, R-12); r2 shares one `NativeBrowserRun.execute`. The next smallest built only the `run_` verbs. It fails FR-1, because a continue must re-mount: MCP servers live only as long as the harness process (request §C open question "Verbs", Q-1). A third option put browser support only into opencode. It fails "every harness" (KD-2).
 
 ### 8.4 Complexity budget
 | Item | Count | Justification for each |
 |---|---|---|
-| New files | 12 | • lib: the `browser_tools` enums, dataclasses, constants and registry modules (4, placement rules); the process reaper (1, canonical helper).<br>• hostkit: `browser` (1, shared preflight and cleanup).<br>• Per harness, `browser` and `mounts` (6): public functions and main flow; mount compiler.<br>Tests are the test author's and are not counted. |
-| New classes/modules | 30 classes in 12 modules | • 7 enums: `BrowserTool`, `BrowserToolExclusion`, `BrowserCapability`, `BrowserToolTransport`, `BrowserKeyRequirement`, `BrowserToolCallStatus`, `BrowserToolVariable`.<br>• 9 records: 8 `Browser*` and `NativeThreadRun`.<br>• `BrowserToolRegistry` and `ProcessReaper`.<br>• `BrowserRuntimes`, `BrowserToolCache` and `NativeBrowserTools`.<br>• 9 per-harness classes: `<H>BrowserThreads`, `<H>BrowserRun` and `<H>Mounts`.<br>Each owns one subsystem (AGENTS principle 3). |
+| New files | 12 | • lib: the `browser_tools` enums, dataclasses, constants and registry modules (4, placement rules); the process reaper (1, canonical helper).<br>• hostkit: `browser` (1, the shared main function, preflight, file writes and cleanup).<br>• Per harness, `browser` and `mounts` (6): public functions; the harness seam.<br>Tests are the test author's and are not counted. |
+| New classes/modules | 31 classes in 12 new modules and 2 existing ones | • 8 enums: `BrowserTool`, `BrowserToolExclusion`, `BrowserCapability`, `BrowserToolTransport`, `BrowserKeyRequirement`, `BrowserToolCallStatus`, `BrowserToolVariable` (new module), `NativeThreadResultRecord` (existing `native_threads` enums module).<br>• 10 records: 9 `Browser*` (with `BrowserToolCalls`) and `NativeThreadRun` (existing `native_threads` dataclasses module).<br>• `BrowserToolRegistry` and `ProcessReaper`.<br>• hostkit: `NativeBrowserRun`, the `NativeBrowserHarness` protocol, `BrowserRuntimes`, `BrowserToolCache` and `NativeBrowserTools`.<br>• 6 per-harness classes: `<H>BrowserThreads` and `<H>Mounts`.<br>Each owns one subsystem (AGENTS principle 3). |
 | New dependencies | 0 | No Python package. npm packages are installed at run time into the user's cache and are not package dependencies. |
 | New config keys | 0 | No new `*ThreadConfig` field. The bounds are constants. |
 | New collections/tables | 0 | No database. There is one new on-disk location, `~/.vidbyte/tools/`, beside the existing `~/.vidbyte/grok-homes/`. |
@@ -425,14 +452,37 @@ class NativeThreadRun:
     result: NativeThreadResult
     outcome: CliOutcome
 
+@dataclass(frozen=True, slots=True)
+class BrowserToolCalls:
+    calls: tuple[BrowserToolCall, ...]
+    truncated: bool
+
+class NativeThreadResultRecord(StrEnum):   # lib enums, native_threads module
+    NATIVE_THREAD_RESULT = "NativeThreadResult"
+    BROWSER_THREAD_RESULT = "BrowserThreadResult"
+# NativeThreadError.__init__(..., result_record: NativeThreadResultRecord | None = None)
+
 # hostkit
+class NativeBrowserHarness(Protocol):   # the per-harness seam
+    def check(self, selections: tuple[BrowserToolSelection, ...], request: NativeThreadRequest, errors: NativeErrorFactory) -> None: ...
+    async def run(self, request: NativeThreadRequest, mount: BrowserMount, errors: NativeErrorFactory) -> NativeThreadRun: ...
+    def tool_calls(self, run: NativeThreadRun, mount: BrowserMount) -> BrowserToolCalls: ...
+    def missing(self, run: NativeThreadRun, mount: BrowserMount, calls: BrowserToolCalls) -> tuple[BrowserTool, ...]: ...
+
+class NativeBrowserRun:
+    @staticmethod
+    async def execute(request: NativeThreadRequest, tools: BrowserToolRequest, harness: NativeBrowserHarness, errors: NativeErrorFactory) -> BrowserThreadResult: ...   # the one twelve-layer main function
+
 class NativeBrowserTools:
+    backend: ClassVar[LocalFileSystemBackend]   # the reviewed writer (D-25)
     @staticmethod
     async def prepare(selections: tuple[BrowserToolSelection, ...], request: NativeThreadRequest, errors: NativeErrorFactory) -> BrowserMount: ...
     @staticmethod
-    def require(missing: tuple[BrowserTool, ...], run: NativeThreadRun, request: NativeThreadRequest, errors: NativeErrorFactory) -> None: ...
+    async def write_file(path: Path, text: str) -> None: ...   # off the event loop, explicit encoding, atomic
     @staticmethod
-    async def complete(mount: BrowserMount, run: NativeThreadRun, calls: tuple[BrowserToolCall, ...], calls_truncated: bool) -> BrowserThreadResult: ...
+    def require(missing: tuple[BrowserTool, ...], run: NativeThreadRun, mount: BrowserMount, request: NativeThreadRequest, errors: NativeErrorFactory) -> None: ...
+    @staticmethod
+    async def complete(mount: BrowserMount, run: NativeThreadRun, calls: BrowserToolCalls) -> BrowserThreadResult: ...
     @staticmethod
     async def discard(mount: BrowserMount) -> None: ...
 
@@ -440,20 +490,19 @@ class NativeBrowserTools:
 class OpencodeThreadRun:
     @staticmethod
     async def execute(request: NativeThreadRequest, config: OpencodeThreadConfig, errors: NativeErrorFactory, *, mount: BrowserMount | None = None) -> NativeThreadRun: ...
-class OpencodeBrowserRun:
-    @staticmethod
-    async def execute(request: NativeThreadRequest, tools: BrowserToolRequest, config: OpencodeThreadConfig, errors: NativeErrorFactory) -> BrowserThreadResult: ...
-class OpencodeMounts:   # check(selections, request, config, errors) -> None; config(mount) -> dict; env_remove(mount) -> tuple[str, ...]; missing(mount, calls) -> tuple[BrowserTool, ...]
+class OpencodeBrowserThreads:   # run_/continue_/fork_opencode_with_browser and _call
     ...
-class OpencodeWire:     # config_content(request, mount=None) -> str; tool_calls(outcome, mount) -> tuple[tuple[BrowserToolCall, ...], bool]
+class OpencodeMounts:   # NativeBrowserHarness: __init__(config: OpencodeThreadConfig); check; run; tool_calls; missing; static config(mount) -> dict; env_remove(mount) -> tuple[str, ...]
     ...
-class GrokMounts:       # check; write_agent(mount, request, errors) -> Path; options(mount) -> tuple[CliOption, ...]; environment(mount) -> dict[str, str]; env_remove(mount); missing(mount, connected, calls)
+class OpencodeWire:     # config_content(request, mount=None) -> str; tool_calls(outcome, mount) -> BrowserToolCalls
     ...
-class GrokWire:         # read_stream(outcome, request, errors, *, timeout_seconds) -> NativeThreadResult; tool_calls(outcome, mount); connected(outcome, mount) -> tuple[BrowserTool, ...]
+class GrokMounts:       # NativeBrowserHarness: __init__(config: GrokThreadConfig); check (transport, budget); run (writes the agent file, then GrokThreadRun.execute); tool_calls; missing; static agent_text(mount) -> str; options(mount) -> tuple[CliOption, ...]; environment(mount) -> dict[str, str]; env_remove(mount)
     ...
-class MuseMounts:       # check(selections, request, config, errors); settings(mount) -> str; startup_failed(error: NativeThreadError) -> bool
+class GrokWire:         # read_stream(outcome, request, errors, *, timeout_seconds) -> NativeThreadResult; tool_calls(outcome, mount) -> BrowserToolCalls; connected(outcome, mount) -> tuple[BrowserTool, ...]
     ...
-class MuseExecOutput:   # tool_calls(outcome, mount) -> tuple[tuple[BrowserToolCall, ...], bool]
+class MuseMounts:       # NativeBrowserHarness: __init__(config: MuseThreadConfig); check (uses MuseLauncher.wsl_mode); run (MuseThreadRun.execute; a required-server failure becomes browser.tools_unavailable); tool_calls; missing -> (); static settings(mount) -> str
+    ...
+class MuseExecOutput:   # tool_calls(outcome, mount) -> BrowserToolCalls
     ...
 ```
 
@@ -468,10 +517,11 @@ class MuseExecOutput:   # tool_calls(outcome, mount) -> tuple[tuple[BrowserToolC
 | `BrowserCapabilityDefinition` | `name: BrowserCapability`, `tools: tuple[str, ...]`, `server_value: str \| None = None` | Tools are non-empty, unique, and each `NATIVE_NAME_PATTERN` ≤ 64. `server_value` is the server flag value that turns this group on (Playwright `--caps`). |
 | `BrowserToolDefinition` | `tool: BrowserTool`, `transport: BrowserToolTransport`, `package: str \| None`, `version: str \| None`, `entry: tuple[str, ...]`, `url: str \| None`, `key_rule: BrowserKeyRequirement`, `key_variable: BrowserToolVariable \| None`, `arguments: tuple[str, ...]`, `environment: Mapping[str, str]`, `profile_option: str \| None`, `output_option: str \| None`, `caps_option: str \| None`, `needs_chrome: bool`, `capabilities: tuple[BrowserCapabilityDefinition, ...]`, `default_capabilities: tuple[BrowserCapability, ...]` | **stdio:** package, exact `x.y.z` version and entry parts (relative to the install prefix) are required, and there is no URL.<br>**remote:** an `https://` URL is required, there is no package, and a key travels as a Bearer header (`key_variable` is `None`).<br>**Always:** `environment` holds non-secret values only; the defaults are a subset of the capabilities; capability names are unique. |
 | `BrowserToolRequest` | `tools: tuple[str, ...]`, `tool_keys: Mapping[str, str]` (`repr=False`) | `tools`: `to_tuple` refuses a string; 1 to `BROWSER_TOOLS_MAX_PER_CALL` items; each one line and ≤ `BROWSER_TOOL_STRING_MAX_CHARS`.<br>`tool_keys`: `None` becomes empty; `to_mapping`; each value `NATIVE_API_KEY_PATTERN` and ≤ `NATIVE_API_KEY_MAX_CHARS`, named `tool_keys[<name>]`.<br>Shape only; meaning is the registry's job. Refusals name the index or key name and never quote a value (the record is built before any key is registered). |
-| `BrowserToolSelection` | `definition`, `capabilities: tuple[BrowserCapability, ...]`, `allowed: tuple[str, ...]`, `denied: tuple[str, ...]`, `server_capabilities: tuple[str, ...]`, `key: str \| None` (`repr=False`) | `allowed` is the union of the selected capabilities' tools.<br>`exposed` is the tools of every capability with no `server_value`, plus the tools of each selected capability with a `server_value`.<br>`denied` is `exposed` minus `allowed`, in registry order. |
+| `BrowserToolSelection` | `definition`, `capabilities: tuple[BrowserCapability, ...]`, `allowed: tuple[str, ...]`, `denied: tuple[str, ...]`, `server_capabilities: tuple[str, ...]`, `key: str \| None` (`repr=False`) | A capability with a `server_value` is *additive*; one without is a *base* capability.<br>`base` is the named base capabilities, or the tool's defaults when none is named. `allowed` is the tools of `base` plus the tools of each named additive capability.<br>`exposed` is the tools of every base capability of the tool, plus the tools of each named additive capability.<br>`denied` is `exposed` minus `allowed`, in registry order; the selection is *narrowed* when `denied` is non-empty.<br>`server_capabilities` is the named additive capabilities' `server_value`s, in registry order.<br>Examples: `playwright:devtools` allows core + devtools (38) and denies none; `firecrawl:search` allows 1 and denies 25. |
 | `BrowserServer` | `selection: BrowserToolSelection`, `command: tuple[str, ...]` | A remote server's command is `()`. A stdio command is `(node, entry, *arguments, *profile and output and caps options)`. |
 | `BrowserMount` | `servers: tuple[BrowserServer, ...]`, `folder: Path`, `artifacts: Path` | `folder` is absolute and outside the workspace. `artifacts` is `folder/artifacts`. |
 | `BrowserToolCall` | `tool: BrowserTool`, `name: str`, `status: BrowserToolCallStatus` | `name` follows `NATIVE_NAME_PATTERN` ≤ 64 |
+| `BrowserToolCalls` | `calls: tuple[BrowserToolCall, ...]`, `truncated: bool` | at most `BROWSER_TOOL_CALLS_MAX_ITEMS` calls; what every reader returns across the wire → seam → hostkit boundary |
 | `BrowserThreadResult` | see §8.5 | `thread_id` follows `NATIVE_THREAD_ID_PATTERN`; the tuples respect their caps; artifacts are absolute paths |
 | `NativeThreadRun` | `result: NativeThreadResult`, `outcome: CliOutcome` | instances checked |
 
@@ -485,6 +535,7 @@ class MuseExecOutput:   # tool_calls(outcome, mount) -> tuple[tuple[BrowserToolC
 | `BrowserToolTransport` | `stdio`, `remote` |
 | `BrowserKeyRequirement` | `required`, `optional`, `none` |
 | `BrowserToolCallStatus` | `completed`, `failed` |
+| `NativeThreadResultRecord` (existing `native_threads` enums module) | `NATIVE_THREAD_RESULT`=`NativeThreadResult`, `BROWSER_THREAD_RESULT`=`BrowserThreadResult` |
 | `BrowserToolVariable` | Member names never end in a credential word (lint S054): `FIRECRAWL`=`FIRECRAWL_API_KEY`, `EXA`=`EXA_API_KEY`, `TAVILY`=`TAVILY_API_KEY`, `BRAVE`=`BRAVE_API_KEY`, `PERPLEXITY`=`PERPLEXITY_API_KEY`, `BRIGHTDATA`=`API_TOKEN`, `APIFY`=`APIFY_TOKEN`, `LINKUP`=`LINKUP_API_KEY`, `CHROME_DEVTOOLS_UPDATE_CHECKS`=`CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS` |
 
 **Seed registry.** These values come from S0 vendor facts §4 (`npm install` on Node 22.12.0 and `tools/list` probes) and the remote docs. A `*` marks a default capability. Every stdio entry path is relative to `node_modules/<package>/`.
@@ -512,36 +563,38 @@ class MuseExecOutput:   # tool_calls(outcome, mount) -> tuple[tuple[BrowserToolC
 | Two credentials | browserstack |
 | Needs an instance URL | searxng |
 | Fails to start on Node 22.12 | wdio |
-| Needs a Python `uvx` runtime, and its 2.6–2.9 s cold start exceeds Grok's roughly 2 s grace | fetch, duckduckgo, scrapling |
+| Needs a Python `uvx` runtime the SDK does not pin; the first-ever start (2.6–2.9 s) exceeds Grok's roughly 2 s grace (warm starts are 0.6–0.8 s) | fetch, duckduckgo |
 | A CLI plus a skill, not an MCP server | agentbrowser, playwrightcli, midscene, devbrowser |
 | Docker | crawl4ai |
 | Its own LLM key plus uv | browseruse |
 | OAuth only | kernel, cloudflare |
 | Archived | puppeteer |
 | Unmaintained | hyperbrowser |
-| Not verified for this release | steel, browserless |
+| Not verified for this release | scrapling, steel, browserless |
 
 **Grammar and resolution.**
 - `BROWSER_TOOL_STRING_PATTERN` accepts `^[a-z0-9-]+(:[a-z0-9-]+(,[a-z0-9-]+)*)?(@[a-z0-9-]+)?$`. Matching is applied to the item lower-cased.
 - Suggestions come from `difflib.get_close_matches(name, candidates, n=1, cutoff=BROWSER_SUGGESTION_CUTOFF)`, where `BROWSER_SUGGESTION_CUTOFF` is 0.6. The candidates are the mountable and excluded names, or that tool's capability names.
+- No refusal text quotes the item or any part of it. It names `tools[i]` and, where one exists, the suggested registry name, the tool's capability list, or the exclusion's recorded reason (all registry-owned text). A key pasted into `tools` is never registered as a secret, so this is its only protection (T-1).
 
 **Mount by harness** (FR-11; ✗ means `browser.mount_unsupported` before I/O):
 
 | | opencode | Grok | Muse native | Muse WSL |
 |---|---|---|---|---|
-| **Channel** | `mcp` and `permission` members added to `OPENCODE_CONFIG_CONTENT` | `--agent=<folder>/<agent file>` (sequence-form `mcpServers`) plus argv rules | `$XDG_CONFIG_HOME/muse/settings.json` in the existing per-call config folder | same as native |
-| **stdio, no key** | `{"type":"local","command":[…],"environment":{non-secret}}` | `{name, command: node, args: [entry, …], env: [{name, value} non-secret]}` | `{"command": node, "args": […], "env": {non-secret}}` | ✗ (no Linux Node; interop fails) |
+| **Channel** | `mcp` and `permission` members added to `OPENCODE_CONFIG_CONTENT` | `--agent=<folder>/<agent file>` (sequence-form `mcpServers`) plus argv rules | `$XDG_CONFIG_HOME/muse/settings.json` in the existing per-call config folder, whose top level is exactly `{"schema_version": 1, "mcpServers": {<srv>: entry, …}}` (`MUSE_SETTINGS_SCHEMA_VERSION`; without it Muse exits 1) | same as native |
+| **Server id** | `vidbyte-<tool>` (D-23), every entry with `"enabled": true` | `<tool>` | `<tool>` | same |
+| **stdio, no key** | `{"type":"local","command":[…],"environment":{non-secret},"enabled":true}` | `{name, command: node, args: [entry, …], env: [{name, value} non-secret]}` | `{"command": node, "args": […], "env": {non-secret}}`: `command` a string, `args` a separate list | ✗ (no Linux Node; interop fails) |
 | **stdio, keyed** | key in that server's `environment` | key in Grok's environment overlay (servers inherit it) | ✗ (the key would be a literal in a file) | ✗ |
-| **remote, no key** | `{"type":"remote","url":U,"oauth":false}` | ✗ (no verified per-run remote channel) | `{"transport":"streamable_http","url":U}` | same as native |
+| **remote, no key** | `{"type":"remote","url":U,"oauth":false,"enabled":true}` | ✗ (documented, unprobed; Q-18) | `{"transport":"streamable_http","url":U}`, exactly that transport value and never `env` (either mistake silently disables all MCP) | same as native |
 | **remote, keyed** | adds `"headers":{"Authorization":"Bearer <key>"}` | ✗ | ✗ | ✗ |
-| **Allow** | `"<srv>_*":"allow"` | `--allow=MCPTool(<srv>__*)` | vendor default (A-2) | same |
-| **Narrow** | `"<srv>_<tool>":"deny"`, exact | `--deny=MCPTool(<srv>__<tool>)`, within the budget | ✗ if any deny | ✗ if any deny |
+| **Allow, unnarrowed** | `"vidbyte-<tool>_*":"allow"` | `--allow=MCPTool(<tool>__*)` | vendor default (A-2) | same |
+| **Allow, narrowed** (fails closed, D-10) | `"vidbyte-<tool>_*":"deny"`, then `"vidbyte-<tool>_<name>":"allow"` per allowed tool | `--allow=MCPTool(<tool>__<name>)` per allowed tool and `--deny=MCPTool(<tool>__<name>)` per denied tool, within the budget; no wildcard | ✗ (Muse cannot filter) | ✗ |
 | **Web off** | `"webfetch":"deny","websearch":"deny"` | `--disable-web-search` | `--disable-web-tools` | `--disable-web-tools` |
 | **Other** | `env_remove` for unpassed key variables | `GROK_CLAUDE_MCPS_ENABLED=0`, `GROK_CURSOR_MCPS_ENABLED=0`; `--output-format=streaming-json`; `env_remove` | — | — |
-| **Tool names** | `<srv>_<tool>` | `<srv>__<tool>` | `mcp__<srv>__<tool>` | same |
-| **Required evidence** | ≥ 1 mounted-tool call | each server in `available_commands` or called | vendor's required-server failure | same |
+| **Tool names** | `vidbyte-<tool>_<name>` | `<tool>__<name>` | `mcp__<tool>__<name>` | same |
+| **Required evidence** | ≥ 1 mounted-tool call ("no mounted tool was used") | each server in `available_commands` or called | vendor's required-server failure; silent disable prevented by construction (AC-26) | same |
 
-Server names are `BrowserTool` values. None contains `_`, so each tool name splits unambiguously at the first separator.
+Server names are `BrowserTool` values, optionally behind the opencode prefix. None contains `_`, so each tool name splits unambiguously at the first `_` (opencode) or `__` (Grok, Muse), and the opencode prefix is stripped after the split. Muse normalizes `-` in server names to `_`, which no `BrowserTool` value contains.
 
 Example Grok agent file. JSON is valid YAML flow style, so `json.dumps` escapes Windows paths:
 
@@ -552,8 +605,8 @@ Example Grok agent file. JSON is valid YAML flow style, so `json.dumps` escapes 
 <GROK_BROWSER_AGENT_BODY>
 ```
 
-**Readers** (FR-13). Each returns `(calls, truncated)` in the order the vendor printed them.
-- **opencode:** each `{"type":"tool_use","part":{"tool":"<srv>_<tool>","state":{"status":…}}}` whose server is mounted. `completed` maps to completed, and anything else to failed (A-7).
+**Readers** (FR-13). Each returns a `BrowserToolCalls` record, calls in the order the vendor printed them. JSON shapes are checked inline (`isinstance(x, dict)`), never through an `object`-parameter early-return helper (semgrep).
+- **opencode:** each `{"type":"tool_use","part":{"tool":"vidbyte-<tool>_<name>","state":{"status":…}}}` whose server is mounted. `completed` maps to completed, and anything else to failed (A-7).
 - **Grok:** `tool_call` events whose `toolName` is `use_tool` and whose `rawInput.tool_name` is `<srv>__<tool>`. The status comes from the last `tool_call_update` with the same `toolCallId`: `completed` maps to completed, anything else or missing to failed. `connected` lists the servers seen in any `available_commands.tools` entry or call.
 - **Muse:** `task.lifecycle.proposed` and `side_effect_intent` records whose `task_kind` or `operation` is `mcp__<srv>__<tool>`. The status comes from the same `task_id`'s `task.lifecycle.completed` or `failed` (A-1).
 
@@ -588,11 +641,13 @@ Example Grok agent file. JSON is valid YAML flow style, so `json.dumps` escapes 
 
 - **Existing codes reused:** `configuration.invalid_argument` and every `<harness>.*` code, with the same meanings as for the plain functions.
 - **Internal seams:**
+  - `NativeBrowserRun.execute(request, tools, harness: NativeBrowserHarness, errors) -> BrowserThreadResult`, the one main function;
+  - the `NativeBrowserHarness` protocol (`check`, `run`, `tool_calls`, `missing`), implemented by `OpencodeMounts`, `GrokMounts` and `MuseMounts`;
   - `<H>ThreadRun.execute(..., *, mount=None) -> NativeThreadRun`;
   - `OpencodeWire.config_content(request, mount=None)`;
-  - `MuseThreadRun._prepare_config(request, errors, settings=None)`;
-  - `NativeThreadError(..., result_record=None)`;
-  - the constant table `NATIVE_THREAD_RESULT_RECORDS: MappingProxyType[NativeThreadOperation, str]`.
+  - `MuseThreadRun._prepare_config(request, errors, settings=None)`, which writes the settings text through `NativeBrowserTools.write_file`;
+  - `NativeThreadError(..., result_record: NativeThreadResultRecord | None = None)`;
+  - the constant table `NATIVE_THREAD_RESULT_RECORDS: MappingProxyType[NativeThreadOperation, NativeThreadResultRecord]`, covering all 18 operations.
 
 ### 9.3 Configuration and flags
 
@@ -608,6 +663,9 @@ Example Grok agent file. JSON is valid YAML flow style, so `json.dumps` escapes 
 | tool key variables | child env | caller's `tool_keys` | Grok overlay; opencode `environment` | Removed when not passed (D-20) |
 | `CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS` | server env | `"1"` | chromedevtools rows | Non-secret |
 | `VIDBYTE_REAP_MARKER` | env of the reaper's own child | the per-call folder path | `ProcessReaper` (Windows) | Keeps the path out of the script text |
+| `BROWSER_OPENCODE_SERVER_PREFIX` | constant | `"vidbyte-"` | `OpencodeMounts`, `OpencodeWire.tool_calls` | D-23 |
+| `MUSE_SETTINGS_SCHEMA_VERSION` | constant | `1` | `MuseMounts.settings` | Mandatory top-level field (vendor facts §1) |
+| `BROWSER_FILE_ENCODING` | constant | `"utf-8"` | `NativeBrowserTools.write_file` | Explicit encoding (lint S041) |
 
 There is no new `*ThreadConfig` field and no feature flag.
 
@@ -616,7 +674,9 @@ There is no new `*ThreadConfig` field and no feature flag.
 There is no data migration. All changes are additive:
 - New enum members are appended after the existing ones.
 - `FailureCode` gains four members after `MUSE_WSL_UNAVAILABLE`.
-- `NativeThreadError` gains a keyword with a default that keeps today's text.
+- `vidbyte.lib.enums.native_threads` gains one enum, `NativeThreadResultRecord`.
+- `NativeThreadError` gains an enum-typed keyword with a default that keeps today's text.
+- Six existing message texts widen without changing meaning: one likely cause (D-19) and five next steps (D-22).
 - `<H>ThreadRun.execute` gains a keyword-only parameter and returns a wrapper. Its only callers are the `_call`s in this package, and the tests reference no internals.
 
 The plain functions are unchanged for callers (INV-14). The tool cache is new and versioned by folder name. A pin bump installs beside the old folder, which can then be deleted.
@@ -627,11 +687,12 @@ The surface pins in the existing tests change exactly as §13 lists. No pin is r
 
 | ID | Attacker | Shortest path to harm | Control | Where the control sits |
 |---|---|---|---|---|
-| T-1 | Careless user | Pastes a tool key into `tools`, or a harness key into `tool_keys` for the wrong tool; leaves artifacts with screenshots of private pages | Keys are registered before `select` can echo text. Refusals name `tool_keys[<name>]`, never the value. Artifacts are kept only on success, outside the workspace, and returned by path. | `<H>BrowserRun.execute` and `NativeErrorFactory.scrub`; the `BrowserToolRequest` validator; `NativeBrowserTools.complete` |
+| T-1 | Careless user | Pastes a tool key into `tools`, or a harness key into `tool_keys` for the wrong tool; leaves artifacts with screenshots of private pages | No refusal ever quotes a `tools` item (a key pasted there is never registered, so it could not be scrubbed). Every `tool_keys` value is registered before `select` runs, and refusals name `tool_keys[<name>]`, never the value. Artifacts are kept only on success, outside the workspace, and returned by path. | `BrowserToolRegistry.select` and the `BrowserToolRequest` validator (refusal texts); `NativeBrowserRun.execute` and `NativeErrorFactory.scrub`; `NativeBrowserTools.complete` |
 | T-2 | Hostile web content (prompt injection through a browsed page) | The page tells the agent to read keys from its shell environment and navigate to an attacker URL with them | Each key reaches only the processes the harness starts. No approve-everything mode; per-tool allow rules; the harness's own permission mode still applies. *Residual accepted* (EC-35): Grok and opencode servers and shells inherit the harness environment (Q-7). | `<H>Mounts` (allow/deny compile); the vendor's permission engine |
 | T-3 | Compromised teammate / leaked credential / supply chain | A malicious version of a tool package, or a workspace `opencode.json` adding a server | Exact version pins; the entry is verified before publish; no `@latest` and no `npx`; Chrome DevTools telemetry and update checks off. *Residual accepted:* transitive npm dependencies float within their ranges; workspace `opencode.json` (#1036 T-6). | `BrowserToolCache.ensure`; registry constants |
 | T-4 | Another tenant (another local user or process, or another concurrent call) | Reads another call's browser profile, or one call's cleanup kills another's browser | `mkdtemp` folders (0700 on POSIX) per call. The reap marker is that call's unique folder path. Profiles are removed at the end. | `NativeBrowserTools.prepare` and `complete`; `ProcessReaper` |
 | T-5 | A malicious workspace | Files in the workspace shape the mount (`.mcp.json`, `.grok/config.toml`, `opencode.json` servers) | The SDK writes nothing there (INV-5). The Grok mount lives in the per-call agent file, and the compat scans are off. opencode's project config is the accepted #1036 T-6. | `GrokMounts`; `GrokThreadRun._environment` |
+| T-6 | A malicious or compromised third-party tool server (or one of its npm dependencies, or an npm install script) | Reads the keys and environment it inherits and sends them home (Apify already calls Sentry at start, EC-34) | What each server sees: **Grok** — the caller's whole environment, plus `XAI_API_KEY`, `GROK_CODE_XAI_API_KEY` and every tool key of the call. **opencode** — the caller's whole environment, plus `OPENCODE_CONFIG_CONTENT`, which holds the harness provider key and every tool key and header of the call. **Muse** — only `HOME LANG LOGNAME PATH SHELL TERM USER` plus its non-secret entry `env`; no key ever. **npm install** — runs package lifecycle scripts with the caller's environment (no `--ignore-scripts`). Controls: exact version pins, unpassed key variables removed (D-20), keyless tools get no key. *Residual accepted:* every mounted server on Grok and opencode can read every key the call holds, including the harness key (D-17, Q-7, Q-14). | `BrowserToolCache.ensure` (pins); `<H>Mounts` (`env_remove`); the vendor process model |
 
 ## §11 Codebase grounding
 
@@ -652,6 +713,7 @@ The surface pins in the existing tests change exactly as §13 lists. No pin is r
   - `comment-format.md` — comments wrap at 72 columns, and `@intent` goes on its own line.
   - `review-scope.md` — files this change does not need stay byte-identical.
   - `prebuilt-agents.md` — no SDK CLI.
+  - `blocking-lint-invariants.md` also says code that serves model-facing tools for a harness does not belong in `native/` (REPO_MAP's native row: "no host objects, model-facing tools or servers here"). This change serves no tool: the SDK only configures the vendor's own MCP client to start pinned third-party servers or reach remote ones, and reads the vendor's output. The rule is therefore not engaged, and row 36 keeps that sentence true when it updates the REPO_MAP row.
 - **Stack (from manifests):**
   - Python ≥ 3.11 (`pyproject.toml:10`); package version 0.3.0.
   - Tests: pytest 8.3.5 and pytest-asyncio 1.3.0, with `asyncio_default_fixture_loop_scope = "function"` and `--strict-config --strict-markers` (`pyproject.toml:48-49,78-81`).
@@ -660,7 +722,7 @@ The surface pins in the existing tests change exactly as §13 lists. No pin is r
 - **Commands (exact, from `context/code-map.md` §1 / AGENTS.md):**
   - Install: `python -m pip install -e ".[dev]"`
   - Lint: `python lint/run.py`. Single rule: `--rule <ID>`. The last line must read `AGENT-LINT: PASS`. Import sort: `python -m ruff check vidbyte --config lint/ruff.toml --select I001 --no-cache`.
-  - Typecheck: none is defined in AGENTS.md or code-map. `compileall vidbyte` runs inside the source gate.
+  - Typecheck: staged mypy runs inside `python lint/run.py` as rule S009 (`python lint/run.py --rule S009`); its baseline is 350 and the current count 346. `compileall vidbyte` runs inside the source gate.
   - Test (focused): `PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads/<file>.py`, or the whole area with `PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads`
   - Test (full): `python -m pytest`
   - Full local gate: `python scripts/run_ci.py`. It runs the source and package stages. For the source stage alone, use `PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source` from a worktree. Run `--stage package` without `PYTHONPATH`.
@@ -673,6 +735,7 @@ The surface pins in the existing tests change exactly as §13 lists. No pin is r
   - The MCP stdio flake `tests/test_mcp_stdio_transport.py::…::test_cancelled_waiter_does_not_break_transport`.
   - Branch-scoped tests are red when `vidbyte/tools`, `lib/configs` or root exports are touched; this change touches none of them.
   - Everything else passes.
+  - Lint ratchets this change can hit (`lint/baseline.json` vs current count, from review r1): S020 1/1, S061 6/5, S041 0/0, S047 0/0, S052 0/0, A007 255/255, S009 350/346. S061 flags `open(<dynamic>)` and any `write_text`/`write_bytes`/`read_text`/`read_bytes`/`copy`/`move` whose first argument is not a literal (for `write_text` that is the content), unless the receiver is `….backend` (`lint/rules/s061_bounded_safe_path.py:37-40,63-68`).
 - **Directory layout relevant to this change:**
   ```text
   vidbyte/
@@ -709,6 +772,7 @@ The surface pins in the existing tests change exactly as §13 lists. No pin is r
   - `vidbyte/lib/process/argv.py:CliArgv.build(launcher, *, command, options, style, operands)` and `vidbyte/lib/dataclasses/process.py:CliOption`, `CliInvocation` (with `env_overlay`, `env_remove`, `cwd` and `stdin_text`) and `CliOutcome`.
   - `vidbyte/lib/dataclasses/validation.py:RecordFieldValidator.require_text` and `require_text_items`, and `RecordFieldConverter.to_tuple`, `to_mapping`, `to_enum` and `require_instance`.
   - `vidbyte/lib/registries/runtimes.py` and `provider_keys.py:ProviderKeyMatcher` — the class-table shape with source comments.
+  - `vidbyte/lib/tools/filesystem/backends/local.py:LocalFileSystemBackend.write_text(path, content, *, encoding, create_parents, newline=None, atomic=False)` — the reviewed writer behind `NativeBrowserTools.write_file` (D-25); precedent `vidbyte/agents/infinite/workspace.py:68,153`.
   - `vidbyte/harnesses/native/muse/launcher.py:MuseLauncher.wsl_mode` — an I/O-free property that `MuseMounts.check` reads. `MuseLauncher.reap` is the precedent for marker-based reaping.
   - `vidbyte/harnesses/native/opencode/wire.py:OpencodeWire.config_content`, `vidbyte/harnesses/native/grok/wire.py:GrokWire.read` and `vidbyte/harnesses/native/muse/wire.py:MuseExecOutput.read` — the readers the browser readers sit beside.
 - **Code-style exemplar** (`vidbyte/harnesses/native/opencode/threads.py`, `OpencodeThreadRun.execute`):
@@ -736,7 +800,7 @@ The surface pins in the existing tests change exactly as §13 lists. No pin is r
   - *reap marker* — the per-call folder path, searched for in process command lines.
   - *required check* — FR-14.
   - *host* — where the browser runs (reserved, NG-6).
-- **Prior specs / design docs / ADRs that constrain this:** #1036's spec, whose IDs are cited in code headers (INV-15, INV-20, D-24, EC-27, T-6). S1 did not read it, because `docs/` is opaque. Its rules are taken from those headers.
+- **Prior specs / design docs / ADRs that constrain this:** #1036's spec, whose IDs are cited in code headers (#1036 INV-15, INV-20, D-24, EC-27 and T-6, in #1036's numbering; this spec's D-24 and T-6 are unrelated). S1 did not read it, because `docs/` is opaque. Its rules are taken from those headers.
 - **Conflicts between house style and AGENTS.md:** none found.
   - `MuseFlag.END_OF_OPTIONS` is the last member; appending after it is harmless, because argv order comes from code, not enum order.
   - Tool names inside capability tuples are vendor strings, not an enum. They are vendor data pinned per version, like `NATIVE_TASKKILL_ARGUMENTS`.
@@ -778,40 +842,40 @@ The surface pins in the existing tests change exactly as §13 lists. No pin is r
 |---|---|---|---|---|---|---|---|
 | 1 | Add | `vidbyte/lib/enums/browser_tools.py` | enum module | `BrowserTool`, `BrowserToolExclusion`, `BrowserCapability`, `BrowserToolTransport`, `BrowserKeyRequirement`, `BrowserToolCallStatus`, `BrowserToolVariable` with the §9.1 members; literal `__all__` | AGENTS.md §Enums go in `vidbyte/lib/enums/`; A001; S054 (no credential-word member name bound to a string) | FR-5, FR-6, W-1 | P1 |
 | 2 | Modify | `vidbyte/lib/enums/__init__.py` | export façade | Import the 7 enums and add them to `__all__` | AGENTS.md §Enums ("every public enum is added to the export list"); S015 | W-1 | P1 |
-| 3 | Modify | `vidbyte/lib/enums/native_threads.py` | enum module | Append:<br>• `GrokFlag.ALLOW="--allow"`, `DENY="--deny"`, `AGENT="--agent"`, `DISABLE_WEB_SEARCH="--disable-web-search"`;<br>• `MuseFlag.DISABLE_WEB_TOOLS="--disable-web-tools"`;<br>• `NativeEnvironmentVariable.GROK_CLAUDE_MCPS_ENABLED`, `GROK_CURSOR_MCPS_ENABLED`, `VIDBYTE_REAP_MARKER` (name equals value);<br>• `OpencodeEventType.TOOL_USE="tool_use"`;<br>• `NativeThreadOperation` +9 (`RUN_GROK_WITH_BROWSER="run_grok_with_browser"` … for all 9);<br>• `NativeThreadProblem.MOUNT_UNSUPPORTED`, `RUNTIME_MISSING`, `TOOL_INSTALL_FAILED`, `TOOLS_UNAVAILABLE`.<br>Update the header inventory. | AGENTS.md §Existing code ("adding a member is fine"); file header (no approve-everything member); INV-15 | FR-12, FR-16, FR-17, W-7, W-10 | P1 |
+| 3 | Modify | `vidbyte/lib/enums/native_threads.py` | enum module | Append:<br>• `GrokFlag.ALLOW="--allow"`, `DENY="--deny"`, `AGENT="--agent"`, `DISABLE_WEB_SEARCH="--disable-web-search"`;<br>• `MuseFlag.DISABLE_WEB_TOOLS="--disable-web-tools"`;<br>• `NativeEnvironmentVariable.GROK_CLAUDE_MCPS_ENABLED`, `GROK_CURSOR_MCPS_ENABLED`, `VIDBYTE_REAP_MARKER` (name equals value);<br>• `OpencodeEventType.TOOL_USE="tool_use"`;<br>• `NativeThreadOperation` +9 (`RUN_GROK_WITH_BROWSER="run_grok_with_browser"` … for all 9);<br>• `NativeThreadProblem.MOUNT_UNSUPPORTED`, `RUNTIME_MISSING`, `TOOL_INSTALL_FAILED`, `TOOLS_UNAVAILABLE`;<br>• a new enum `NativeThreadResultRecord` (`NATIVE_THREAD_RESULT`, `BROWSER_THREAD_RESULT`), added to this module's `__all__` and to `vidbyte/lib/enums/__init__.py`.<br>Update the header inventory. | AGENTS.md §Existing code ("adding a member is fine"); file header (no approve-everything member); INV-15 | FR-12, FR-16, FR-17, W-7, W-10 | P1 |
 | 4 | Modify | `vidbyte/lib/enums/failure.py` | enum | Append `BROWSER_MOUNT_UNSUPPORTED="browser.mount_unsupported"`, `BROWSER_RUNTIME_MISSING="browser.runtime_missing"`, `BROWSER_TOOL_INSTALL_FAILED="browser.tool_install_failed"` and `BROWSER_TOOLS_UNAVAILABLE="browser.tools_unavailable"` after `MUSE_WSL_UNAVAILABLE`, with docs | `failure.py` header ("Add a category-prefixed code with docs, mapping coverage, and a focused test"); C019 | FR-16, W-10 | P1 |
-| 5 | Add | `vidbyte/lib/dataclasses/browser_tools.py` | validated records | `BrowserCapabilityDefinition`, `BrowserToolDefinition`, `BrowserToolRequest`, `BrowserToolSelection`, `BrowserServer`, `BrowserMount`, `BrowserToolCall` and `BrowserThreadResult`, as in §9.1 | AGENTS.md §Dataclasses go in `vidbyte/lib/dataclasses/`; principle 4; field guide `strict-config-dataclasses.md`; S039/S060 (no TypedDict) | FR-3, FR-4, W-2 | P1 |
+| 5 | Add | `vidbyte/lib/dataclasses/browser_tools.py` | validated records | `BrowserCapabilityDefinition`, `BrowserToolDefinition`, `BrowserToolRequest`, `BrowserToolSelection`, `BrowserServer`, `BrowserMount`, `BrowserToolCall`, `BrowserToolCalls` and `BrowserThreadResult`, as in §9.1. Every bound comes from constants; refusal texts never quote a `tools` item. | AGENTS.md §Dataclasses go in `vidbyte/lib/dataclasses/`; principle 4; field guide `strict-config-dataclasses.md`; S039/S060 (no TypedDict); A007 (0 slack) | FR-3, FR-4, FR-13, W-2 | P1 |
 | 6 | Modify | `vidbyte/lib/dataclasses/native_threads.py` | records | Add `NativeThreadRun(result: NativeThreadResult, outcome: CliOutcome)` and list it in `__all__` | AGENTS.md §Dataclasses | FR-19, W-13 | P1 |
-| 7 | Add | `vidbyte/lib/constants/browser_tools.py` | constants | Contents:<br>• per-tool registry data under tool prefixes: package, version, entry parts, URL, arguments, options, environment, capability tool tuples;<br>• `BROWSER_TOOL_EXCLUSION_REASONS`;<br>• grammar pattern, separators, `BROWSER_SUGGESTION_CUTOFF`;<br>• `BROWSER_TOOLS_MAX_PER_CALL`, `BROWSER_TOOL_STRING_MAX_CHARS`, `BROWSER_TOOL_CALLS_MAX_ITEMS`, `BROWSER_ARTIFACTS_MAX_ITEMS`;<br>• cache, staging and folder names; `BROWSER_NODE_MIN_VERSION`; the node version pattern;<br>• npm-cli parts for Windows and POSIX, and the npm install arguments;<br>• Chrome locations; timeouts;<br>• Grok rule templates and `GROK_BROWSER_RULES_MAX_UNITS`; the Grok agent name, description, body and file name;<br>• the Authorization header name and Bearer prefix;<br>• the opencode `mcp` and `permission` field names and the web tool names;<br>• the Muse transport value;<br>• refusal and observation texts. | A007; INV-15; S054; `constants/native_threads.py` header rules 1, 2 and 4 | FR-5, FR-6, FR-8, FR-9, W-1, W-4 | P1 |
-| 8 | Modify | `vidbyte/lib/constants/native_threads.py` | constants | Changes:<br>• 12 new pairs in `NATIVE_THREAD_FAILURE_CODES`;<br>• 4 own texts each in `NATIVE_THREAD_LIKELY_CAUSES` and `NATIVE_THREAD_NEXT_STEPS`, plus the widened `GROK_OUTPUT_TOO_LARGE` cause (D-19);<br>• summaries and observations for the 4 problems;<br>• `NATIVE_THREAD_RESULT_RECORDS`;<br>• `GROK_STREAMING_JSON_OUTPUT_FORMAT` and the Grok stream type and field constants (`tool_call`, `tool_call_update`, `available_commands`, `usage`, `end`, `use_tool`, `cancelled`, …);<br>• the Muse task type and field constants and the required-server marker; `MUSE_SETTINGS_PARTS`;<br>• `NATIVE_DISABLED_SWITCH="0"`;<br>• the reaper's PowerShell path parts, arguments and fixed script, and the `ps` arguments.<br>Update the header. | Header rule 4 (own text per code); the HarnessRedactor note (no credential word before ":" or "="); A007 | FR-15, FR-16, W-7, W-8, W-9, W-10 | P1 |
-| 9 | Modify | `vidbyte/lib/errors/base.py` | error class | `NativeThreadError.__init__` gains the keyword `result_record: str \| None = None`. `expected` uses it, and `None` keeps today's text byte-identical. | INV-16; A003 (DIAGNOSTIC_FIELDS unchanged) | FR-16, W-10 | P1 |
-| 10 | Add | `vidbyte/lib/registries/browser_tools.py` | registry | `BrowserToolRegistry` with a class-held table of the 13 `BrowserToolDefinition` rows (a source comment per row), `select(request)` and `definition(tool)` | Field guide `declarative-config-resolution.md`; S021; A006; the `runtimes.py` and `provider_keys.py` shape | FR-5, FR-6, FR-7, W-1, W-3 | P1 |
+| 7 | Add | `vidbyte/lib/constants/browser_tools.py` | constants | Contents:<br>• per-tool registry data under tool prefixes: package, version, entry parts, URL, arguments, options, environment, capability tool tuples;<br>• `BROWSER_TOOL_EXCLUSION_REASONS`;<br>• grammar pattern, separators, `BROWSER_SUGGESTION_CUTOFF`;<br>• `BROWSER_TOOLS_MAX_PER_CALL`, `BROWSER_TOOL_STRING_MAX_CHARS`, `BROWSER_TOOL_CALLS_MAX_ITEMS`, `BROWSER_ARTIFACTS_MAX_ITEMS`;<br>• cache, staging and folder names; `BROWSER_NODE_MIN_VERSION`; the node version pattern;<br>• npm-cli parts for Windows and POSIX, and the npm install arguments;<br>• Chrome locations; timeouts;<br>• Grok rule templates and `GROK_BROWSER_RULES_MAX_UNITS`; the Grok agent name, description, body and file name;<br>• the Authorization header name and Bearer prefix;<br>• the opencode `mcp`, `permission` and `enabled` field names, `BROWSER_OPENCODE_SERVER_PREFIX`, and the web tool names;<br>• the Muse transport value and `MUSE_SETTINGS_SCHEMA_VERSION` with the `schema_version`/`mcpServers` field names;<br>• `BROWSER_FILE_ENCODING`;<br>• refusal and observation texts, none of which embeds the refused item. | A007; INV-15; S054; `constants/native_threads.py` header rules 1, 2 and 4 | FR-5, FR-6, FR-8, FR-9, W-1, W-4 | P1 |
+| 8 | Modify | `vidbyte/lib/constants/native_threads.py` | constants | Changes:<br>• 12 new pairs in `NATIVE_THREAD_FAILURE_CODES`;<br>• 4 own texts each in `NATIVE_THREAD_LIKELY_CAUSES` and `NATIVE_THREAD_NEXT_STEPS`, plus the widened `GROK_OUTPUT_TOO_LARGE` cause (D-19) and the five widened next steps of D-22 (`GROK_THREAD_NOT_FOUND`, `OPENCODE_THREAD_NOT_FOUND`, `OPENCODE_OUTPUT_TOO_LARGE`, `MUSE_THREAD_NOT_FOUND`, `MUSE_OUTPUT_TOO_LARGE`), each still unique per harness;<br>• summaries and observations for the 4 problems;<br>• `NATIVE_THREAD_RESULT_RECORDS: MappingProxyType[NativeThreadOperation, NativeThreadResultRecord]`, all 18 operations;<br>• `GROK_STREAMING_JSON_OUTPUT_FORMAT` and the Grok stream type and field constants (`tool_call`, `tool_call_update`, `available_commands`, `usage`, `end`, `use_tool`, `cancelled`, …);<br>• the Muse task type and field constants and the required-server marker; `MUSE_SETTINGS_PARTS`;<br>• `NATIVE_DISABLED_SWITCH="0"`;<br>• the reaper's PowerShell path parts, arguments and fixed script, and the `ps` arguments.<br>Update the header. | Header rule 4 (own text per code); the HarnessRedactor note (no credential word before ":" or "="); A007 | FR-15, FR-16, W-7, W-8, W-9, W-10 | P1 |
+| 9 | Modify | `vidbyte/lib/errors/base.py` | error class | `NativeThreadError.__init__` gains the keyword `result_record: NativeThreadResultRecord \| None = None`, imported under `TYPE_CHECKING` like the module's other enums. `expected` uses its value, and `None` keeps today's text byte-identical. | AGENTS.md §Enums (closed set typed with an enum); INV-16; A003 (DIAGNOSTIC_FIELDS unchanged) | FR-16, W-10 | P1 |
+| 10 | Add | `vidbyte/lib/registries/browser_tools.py` | registry | `BrowserToolRegistry` with a class-held table of the 13 `BrowserToolDefinition` rows (a source comment per row), `select(request)` (additive server-flag capabilities, D-24; refusals never quote the item) and `definition(tool)` | Field guide `declarative-config-resolution.md`; S021; A006; A007 (0 slack); the `runtimes.py` and `provider_keys.py` shape | FR-5, FR-6, FR-7, W-1, W-3 | P1 |
 | 11 | Modify | `vidbyte/lib/registries/__init__.py` | export façade | Import and export `BrowserToolRegistry` | S015 | W-1 | P1 |
 | 12 | Modify | `vidbyte/lib/registries/README.md` | README | Add a "Browser Tool Sources" section: each tool's evidence (package README, probe, docs URL) and how to add or bump a tool | A009 | FR-18, W-12 | P5 |
-| 13 | Add | `vidbyte/lib/process/reaper.py` | canonical process helper | `ProcessReaper.reap(marker, *, timeout_seconds) -> int`.<br>• Windows: System32 PowerShell, `-NoProfile -NonInteractive -Command <fixed script>`, with `VIDBYTE_REAP_MARKER` in the overlay.<br>• POSIX: `ps -A -ww -o pid=,args=` through `CliRunner.find_program`, then `os.kill(pid, SIGKILL)` for matches, skipping its own pid.<br>• Never raises on failure or timeout. | AGENTS.md principle 5; S055 (argv only); A006; field guide `cli-backed-source-integrations.md` | FR-15, W-9 | P1 |
+| 13 | Add | `vidbyte/lib/process/reaper.py` | canonical process helper | `ProcessReaper.reap(marker, *, timeout_seconds) -> int`.<br>• Windows: System32 PowerShell, `-NoProfile -NonInteractive -Command <fixed script>`, with `VIDBYTE_REAP_MARKER` in the overlay.<br>• POSIX: `ps -A -ww -o pid=,args=` through `CliRunner.find_program`, then `os.kill(pid, SIGKILL)` for matches, skipping its own pid.<br>• Never raises on failure or timeout.<br>• Children only through `CliRunner` (S052); every bound from constants (A007). | AGENTS.md principle 5; S055 (argv only); S052; A006; A007; field guide `cli-backed-source-integrations.md` | FR-15, W-9 | P1 |
 | 14 | Modify | `vidbyte/lib/process/__init__.py` | export façade | Add `ProcessReaper` to `__all__` | S015 | W-9 | P1 |
 | 15 | Modify | `vidbyte/lib/README.md` | README | Name the new `browser_tools` modules and `ProcessReaper` where the README lists lib contents | A009 | FR-18, W-12 | P5 |
-| 16 | Add | `vidbyte/harnesses/native/hostkit/browser.py` | harness plumbing | `BrowserRuntimes.node` and `.chrome`; `BrowserToolCache.ensure`; `NativeBrowserTools.prepare`, `.require`, `.complete` and `.discard` (§8.5) | AGENTS.md principles 1–3; A001 (native header); A002 (`@intent` on boundaries); INV-15 | FR-8, FR-9, FR-10, FR-14, FR-15, W-4, W-5, W-9 | P2 |
-| 17 | Modify | `vidbyte/harnesses/native/hostkit/__init__.py` | export façade | `__all__` adds `BrowserRuntimes`, `BrowserToolCache` and `NativeBrowserTools` | S015; hostkit header | W-4 | P2 |
+| 16 | Add | `vidbyte/harnesses/native/hostkit/browser.py` | harness plumbing | `NativeBrowserHarness` (protocol) and `NativeBrowserRun.execute`, the one narrated twelve-layer main function; `BrowserRuntimes.node` and `.chrome`; `BrowserToolCache.ensure`; `NativeBrowserTools.prepare`, `.write_file` (class attribute `backend = LocalFileSystemBackend()`, explicit encoding, `atomic=True`, through `asyncio.to_thread`), `.require`, `.complete` and `.discard` (§8.5). All file and folder work in its coroutines runs through `asyncio.to_thread`; all children through `CliRunner`. | AGENTS.md principles 1–3 and 5; A001 (native header); A002 (`@intent` on boundaries); INV-15; S061 (receiver form, 0 new); S041/S047/S052 (0 slack) | FR-1, FR-8, FR-9, FR-10, FR-14, FR-15, W-4, W-5, W-9, W-11 | P2 |
+| 17 | Modify | `vidbyte/harnesses/native/hostkit/__init__.py` | export façade | `__all__` adds `BrowserRuntimes`, `BrowserToolCache`, `NativeBrowserHarness`, `NativeBrowserRun` and `NativeBrowserTools` | S015; hostkit header | W-4 | P2 |
 | 18 | Modify | `vidbyte/harnesses/native/hostkit/errors.py` | error factory | `_error` passes `result_record=NATIVE_THREAD_RESULT_RECORDS[operation]`. Update the header inventory. | INV-16 | FR-16, W-10 | P2 |
-| 19 | Add | `vidbyte/harnesses/native/opencode/mounts.py` | mount compiler | `OpencodeMounts.check`, `.config`, `.env_remove` and `.missing` | A001; INV-15; AGENTS.md principle 1 | FR-11, FR-12, FR-14, W-6 | P3 |
-| 20 | Add | `vidbyte/harnesses/native/grok/mounts.py` | mount compiler | `GrokMounts.check` (transport, budget), `.write_agent`, `.options`, `.environment`, `.env_remove` and `.missing` | A001; INV-15; S054 | FR-11, FR-12, FR-14, FR-17, W-7 | P3 |
-| 21 | Add | `vidbyte/harnesses/native/muse/mounts.py` | mount compiler | `MuseMounts.check` (uses `MuseLauncher.wsl_mode`), `.settings` and `.startup_failed` | A001; INV-15 | FR-11, FR-12, FR-14, W-8 | P3 |
-| 22 | Add | `vidbyte/harnesses/native/opencode/browser.py` | public functions + main flow | `OpencodeBrowserThreads`: the 3 public coroutines plus `_call` (one guarded try). `OpencodeBrowserRun.execute`: the narrated 12-layer main function. | AGENTS.md principles 1–2; the #1036 sibling shape; A001; A002 | FR-1, FR-2, FR-3, W-11 | P4 |
-| 23 | Add | `vidbyte/harnesses/native/grok/browser.py` | public functions + main flow | `GrokBrowserThreads` and `GrokBrowserRun.execute` | same | FR-1, FR-2, FR-3, W-11 | P4 |
-| 24 | Add | `vidbyte/harnesses/native/muse/browser.py` | public functions + main flow | `MuseBrowserThreads` and `MuseBrowserRun.execute`. It translates a `muse.run_failed` that carries the required-server marker into `browser.tools_unavailable`. | same | FR-1, FR-2, FR-3, FR-14, W-11 | P4 |
+| 19 | Add | `vidbyte/harnesses/native/opencode/mounts.py` | harness seam + mount compiler | `OpencodeMounts(config)`, a `NativeBrowserHarness`: `check`, `run` (calls `OpencodeThreadRun.execute(mount=…)`), `tool_calls`, `missing` ("no mounted tool was used"), and the compile helpers `config` (prefixed ids, `"enabled": true`, fail-closed permission) and `env_remove` | A001; INV-15; AGENTS.md principle 1 | FR-11, FR-12, FR-13, FR-14, W-6 | P3 |
+| 20 | Add | `vidbyte/harnesses/native/grok/mounts.py` | harness seam + mount compiler | `GrokMounts(config)`, a `NativeBrowserHarness`: `check` (transport, budget), `run` (writes the agent file through `NativeBrowserTools.write_file`, then `GrokThreadRun.execute(mount=…)`), `tool_calls`, `missing`, and the compile helpers `agent_text`, `options` (exact allows and denies when narrowed), `environment` and `env_remove` | A001; INV-15; S054; S061 (no direct writes) | FR-11, FR-12, FR-13, FR-14, FR-17, W-7 | P3 |
+| 21 | Add | `vidbyte/harnesses/native/muse/mounts.py` | harness seam + mount compiler | `MuseMounts(config)`, a `NativeBrowserHarness`: `check` (uses `MuseLauncher.wsl_mode`; every stdio tool refused in WSL mode with the §2 next step), `run` (`MuseThreadRun.execute(mount=…)`; a `muse.run_failed` whose vendor message carries the required-server marker becomes `browser.tools_unavailable`), `tool_calls`, `missing` (always empty), and the compile helper `settings` (`{"schema_version": 1, "mcpServers": …}` with the §9.1 entry rules) | A001; INV-15 | FR-11, FR-12, FR-13, FR-14, W-8 | P3 |
+| 22 | Add | `vidbyte/harnesses/native/opencode/browser.py` | public functions | `OpencodeBrowserThreads`: the 3 public coroutines plus `_call` (one guarded try), which builds the two request records and returns `await NativeBrowserRun.execute(request, tools, OpencodeMounts(settings), errors)` | AGENTS.md principles 1–2; the #1036 sibling shape; A001; A002 | FR-1, FR-2, FR-3, W-11 | P4 |
+| 23 | Add | `vidbyte/harnesses/native/grok/browser.py` | public functions | `GrokBrowserThreads`, the same shape with `GrokMounts(settings)` | same | FR-1, FR-2, FR-3, W-11 | P4 |
+| 24 | Add | `vidbyte/harnesses/native/muse/browser.py` | public functions | `MuseBrowserThreads`, the same shape with `MuseMounts(settings)` | same | FR-1, FR-2, FR-3, W-11 | P4 |
 | 25 | Modify | `vidbyte/harnesses/native/opencode/threads.py` | harness flow | `OpencodeThreadRun.execute(..., *, mount=None) -> NativeThreadRun`. It passes `mount` to `config_content` and adds `env_remove` when mounted. `OpencodeThreads._call` returns `.result`. Update the header. | INV-14; field guide `review-scope.md` | FR-19, FR-11, W-13 | P3 |
 | 26 | Modify | `vidbyte/harnesses/native/grok/threads.py` | harness flow | `GrokThreadRun.execute(..., *, mount=None) -> NativeThreadRun`. When mounted, it adds:<br>• `streaming-json` output;<br>• `GrokMounts.options` before `--single`;<br>• the compat and key variables in the overlay;<br>• `env_remove`;<br>• the `NATIVE_PROCESS_MAX_OUTPUT_BYTES` cap;<br>• `GrokWire.read_stream`.<br>`_call` returns `.result`. Update the header. | INV-14; INV-15 | FR-19, FR-11, FR-17, W-7, W-13 | P3 |
-| 27 | Modify | `vidbyte/harnesses/native/muse/threads.py` | harness flow | `MuseThreadRun.execute(..., *, mount=None) -> NativeThreadRun`. `_prepare_config(request, errors, settings=None)` writes `muse/settings.json` when given. The exec options append `--disable-web-tools` when mounted. `_call` returns `.result`. Update the header. | INV-14; INV-18 | FR-19, FR-11, W-8, W-13 | P3 |
-| 28 | Modify | `vidbyte/harnesses/native/opencode/wire.py` | reader | `config_content(request, mount=None)` adds the `mcp` and `permission` members from `OpencodeMounts.config`. Add `tool_calls(outcome, mount)`. | INV-14 | FR-11, FR-13, W-6 | P3 |
-| 29 | Modify | `vidbyte/harnesses/native/grok/wire.py` | reader | Add `read_stream`, `tool_calls` and `connected` (§9.1) | INV-15 | FR-13, FR-14, W-7 | P3 |
-| 30 | Modify | `vidbyte/harnesses/native/muse/wire.py` | reader | Add `MuseExecOutput.tool_calls` | INV-15 | FR-13, W-8 | P3 |
+| 27 | Modify | `vidbyte/harnesses/native/muse/threads.py` | harness flow | `MuseThreadRun.execute(..., *, mount=None) -> NativeThreadRun`. `_prepare_config(request, errors, settings=None)` writes `muse/settings.json` when given, through `NativeBrowserTools.write_file` (never a direct `Path.write_text`, S061). The exec options append `--disable-web-tools` when mounted. `_call` returns `.result`. Update the header. | INV-14; INV-18 | FR-19, FR-11, W-8, W-13 | P3 |
+| 28 | Modify | `vidbyte/harnesses/native/opencode/wire.py` | reader | `config_content(request, mount=None)` adds the `mcp` and `permission` members from `OpencodeMounts.config`. Add `tool_calls(outcome, mount) -> BrowserToolCalls` (strips `BROWSER_OPENCODE_SERVER_PREFIX`). | INV-14; semgrep `typed-mapping-boundary-policy` (inline `isinstance`) | FR-11, FR-13, W-6 | P3 |
+| 29 | Modify | `vidbyte/harnesses/native/grok/wire.py` | reader | Add `read_stream`, `tool_calls -> BrowserToolCalls` and `connected` (§9.1) | INV-15; semgrep (inline `isinstance`) | FR-13, FR-14, W-7 | P3 |
+| 30 | Modify | `vidbyte/harnesses/native/muse/wire.py` | reader | Add `MuseExecOutput.tool_calls -> BrowserToolCalls` | INV-15; semgrep (inline `isinstance`) | FR-13, W-8 | P3 |
 | 31 | Modify | `vidbyte/harnesses/native/opencode/__init__.py` | package init | Bind `run_opencode_with_browser`, `continue_opencode_with_browser` and `fork_opencode_with_browser` from `OpencodeBrowserThreads`; literal `__all__` of 6 | Subpackage header ("bind each public function … literal `__all__`"); S015 | FR-1, W-11 | P4 |
 | 32 | Modify | `vidbyte/harnesses/native/grok/__init__.py` | package init | Bind `run_grok_with_browser`, `continue_grok_with_browser` and `fork_grok_with_browser` from `GrokBrowserThreads`; literal `__all__` of 6 | same | FR-1, W-11 | P4 |
 | 33 | Modify | `vidbyte/harnesses/native/muse/__init__.py` | package init | Bind `run_muse_with_browser`, `continue_muse_with_browser` and `fork_muse_with_browser` from `MuseBrowserThreads`; literal `__all__` of 6 | same | FR-1, W-11 | P4 |
 | 34 | Modify | `vidbyte/harnesses/native/__init__.py` | package init | Re-export the 9 functions plus `BrowserThreadResult` and `BrowserToolCall` (28 names); update the header | Native `__init__` header ("re-exports them in the literal `__all__`"); S015 | FR-1, W-11 | P4 |
-| 35 | Modify | `vidbyte/harnesses/README.md` | README | The `native/` paragraph covers the browser functions, `tools`/`tool_keys`, the tool cache, artifacts, the unsupported combinations and the accepted limits (EC-24, EC-33, EC-35) | A009; AGENTS.md (read and update the folder README) | FR-18, W-12 | P5 |
-| 36 | Modify | `REPO_MAP.md` | repo map | The native rows (lines 163–165) name the browser functions, `hostkit/browser.py` and the per-harness `mounts`/`browser` modules | AGENTS.md §Repository Map ("regenerate a wrong entry from the tree") | FR-18, W-12 | P5 |
+| 35 | Modify | `vidbyte/harnesses/README.md` | README | The `native/` paragraph covers the browser functions, `tools`/`tool_keys`, the tool cache, artifacts, what each harness can mount (§2: in particular, Muse on Windows mounts only jina and parallel and no browser), and the accepted limits (EC-17, EC-24, EC-33, EC-35, T-6) | A009; AGENTS.md (read and update the folder README) | FR-18, W-12 | P5 |
+| 36 | Modify | `REPO_MAP.md` | repo map | The native rows (lines 163–165) name the browser functions, `hostkit/browser.py` and the per-harness `mounts`/`browser` modules, and keep "no model-facing tools or servers here" true (the SDK only configures vendor MCP clients, §11) | AGENTS.md §Repository Map ("regenerate a wrong entry from the tree") | FR-18, W-12 | P5 |
 | 37 | Modify | `skills/failure/vocabulary.md` | failure docs | Add a `browser` category section with the four codes, each with its cause and next step | `failure.py` header ("with docs") | FR-16, FR-18, W-10, W-12 | P5 |
 
 ### 12.4 Standards checklist for this change
@@ -863,6 +927,14 @@ The surface pins in the existing tests change exactly as §13 lists. No pin is r
 **Failure docs** (row 37)
 - [ ] Every new code is documented under its category. — *source:* `failure.py` header
 
+**Lint ratchets with no slack** (all rows; counts in §11)
+- [ ] A007 (255 of 255): every limit, timeout, cap, count and threshold in every lib module (records, registry, reaper), not only in constants modules, comes from a constant. — *source:* A007; `lint/baseline.json`
+- [ ] S061 (5 of 6): no direct `write_text`/`write_bytes`/`read_text`/`read_bytes`/`copy`/`move`/`open` on a non-literal first argument; per-call files go through `NativeBrowserTools.write_file` and its `backend` attribute. Target 0 new findings. — *source:* S061; D-25
+- [ ] S041 (0): every text file operation passes an explicit encoding from constants. — *source:* S041
+- [ ] S047 (0) and S052 (0): no `open` and no blocking file, folder or subprocess call inside a coroutine; use `asyncio.to_thread` for file and folder work (as `GrokThreadRun._prepare_home` does) and `CliRunner` for every child. — *source:* S047, S052
+- [ ] S009 staged mypy (346 of 350): new code type-checks cleanly; target 0 new errors. — *source:* S009
+- [ ] Semgrep `typed-mapping-boundary-policy`: readers check JSON shapes inline (`isinstance(x, dict)`); no helper takes an `object`/`Any` parameter and returns early on a non-mapping. — *source:* `.semgrep/typed-mapping-boundary-policy.yml`
+
 **All files**
 - [ ] No lint suppressions, no baseline raises, no weakened tests. — *source:* brief hard rules
 - [ ] The full gate passes before completion. — *source:* AGENTS.md ("run the full local gate"); field guide `local-ci-verification.md`
@@ -887,7 +959,7 @@ None. There is no CI change, dependency change, secret, release or version bump.
 - **Framework:** pytest 8.3.5 with pytest-asyncio 1.3.0. `testpaths = ["tests"]`, `--strict-config --strict-markers`, and `asyncio_default_fixture_loop_scope = "function"` (`pyproject.toml`).
 - **Layout and naming:**
   - The area is `tests/features/harness_threads/`, with files named `test_harness_threads_<aspect>.py`.
-  - `FEATURE.md` and `README.md` describe the area.
+  - `FEATURE.md` and `README.md` describe the area. `README.md` has a `## File Index` that lint S020 checks against the tracked files, with zero slack (1 of 1): every new test or helper file must be listed there, and in `FEATURE.md`'s suite map, in the same commit.
   - `NativeThreadError.relevant_tests` points at this folder, so tests placed there keep that pointer true.
 - **Prior art to copy:**
   - `tests/features/harness_threads/conftest.py`: the `Sandbox`, `call`, `check_error`, `fast_stop`, `alive`, `wsl_ready`, `lib_api` and `api` fixtures.
@@ -902,10 +974,12 @@ None. There is no CI change, dependency change, secret, release or version bump.
   - opencode reads `OPENCODE_CONFIG_CONTENT`. Grok reads `--agent=<file>`, `--allow=` and `--deny=` (repeated) and the bare switch `--disable-web-search`, and prints `streaming-json`. Muse reads `$XDG_CONFIG_HOME/muse/settings.json` and `--disable-web-tools`.
   - The fake harness must start the compiled server command (`node <entry> …`) for the required check and readers to see real evidence.
   - The fake currently has none of the following: Grok streaming-json output; bare-switch or repeated-flag parsing in `parse_joined`; MCP config reading; an `npm` role.
+  - The real Muse exits 1 on a `settings.json` without `"schema_version": 1`, and silently disables all MCP (exit 0) on a bad entry: `command` as a list, a `transport` other than `streamable_http`, or `env` on an HTTP entry (vendor facts §1). A fake that does not apply these rules cannot tell a working Muse mount from a dead one.
+  - opencode deep-merges `OPENCODE_CONFIG_CONTENT` onto a global `mcp.<id>` of the same id (vendor facts §3).
   - `ProcessReaper` acts on real processes: a stand-in child whose command line carries the per-call folder.
 - **Per-area config:**
   - These pins change:
-    - `test_harness_threads_surface.py`: `EXPECTED_EXPORTS` +11; the subpackage `__all__` +3 each; `EXPECTED_ENUMS` lists for `GrokFlag`, `MuseFlag`, `NativeEnvironmentVariable`, `OpencodeEventType`, `NativeThreadOperation` and `NativeThreadProblem`; the 28-code tail grows to 32; `CONTRACT_CONSTANTS`; `lib.process.__all__` gains `ProcessReaper`.
+    - `test_harness_threads_surface.py`: `EXPECTED_EXPORTS` +11; the subpackage `__all__` +3 each; `EXPECTED_ENUMS` lists for `GrokFlag`, `MuseFlag`, `NativeEnvironmentVariable`, `OpencodeEventType`, `NativeThreadOperation` and `NativeThreadProblem`; the 28-code tail grows to 32; `lib.process.__all__` gains `ProcessReaper`. `CONTRACT_CONSTANTS` needs no change. `NativeThreadResultRecord` is a new enum that no existing pin lists.
     - `test_harness_threads_errors.py::test_every_code_has_its_own_likely_cause_and_next_step`: the table key set gains the 4 browser codes.
     - `test_harness_threads_static_policy.py` `NAMED_MODULES` (14 modules, plus an rglob of `native/`): the new modules.
   - Several tests keep their own `PROBLEMS` list of the 9 per-harness problems. The new problems map to `browser.*`, not `<harness>.*`.
@@ -927,7 +1001,8 @@ None. There is no CI change, dependency change, secret, release or version bump.
   - changing a public name or signature in §8.5 or §9.2;
   - a vendor fact proving an A-n wrong in a way that changes a §9.1 row (for example the Grok agent body weakening the prompt, A-5, or the Muse tool-call record differing, A-1);
   - modifying any test file;
-  - needing an approve-everything mode to make a harness call tools.
+  - needing an approve-everything mode to make a harness call tools;
+  - any lint finding that would need a `lint/baseline.json` change (§12.4 lists the ratchets with no slack).
 - **Never:**
   - commit secrets, or put a key on argv, in a file or in `os.environ`;
   - write into the workspace;
@@ -966,6 +1041,8 @@ None. There is no CI change, dependency change, secret, release or version bump.
 - **A-13** — `ps -A -ww -o pid=,args=` exists on the supported POSIX hosts (procps, BSD and macOS). BusyBox lacks `-ww`. — *If wrong:* the reaper finds nothing there (EC-22).
 - **A-14** — A plain continue of a browser thread runs without the tools, and Grok falls back to its default agent. — *If wrong:* the README tells callers to continue browser threads with the browser functions.
 - **A-15** — opencode applies `OPENCODE_CONFIG_CONTENT`'s `permission` after the global config, so the SDK's rules win under "last match wins". — *If wrong:* a user's global `"*":"ask"` could still reject calls, which shows up as `browser.tools_unavailable`.
+- **A-17** — In opencode, `"vidbyte-<tool>_*":"deny"` followed by an exact `"vidbyte-<tool>_<name>":"allow"` keeps that tool in the model's list. The "last match wins" rule is source-verified (request §C.9.2) and the reverse order (wildcard allow, exact deny) was probed (vendor facts §3); this order was not probed. — *If wrong:* a narrowed opencode call has no tools and raises `browser.tools_unavailable`; the fix is in `OpencodeMounts.config` only.
+- **A-18** — Grok accepts an exact `MCPTool(<tool>__<name>)` in `--allow`, as the probed exact `--deny` form (vendor facts §2). — *If wrong:* a narrowed Grok call cancels its turn (`grok.run_failed`); the fix is in `GrokMounts.options` only.
 - **A-16** — Apart from the pins §13 names, no test pins `vidbyte.lib.enums.__all__`, `vidbyte.lib.registries.__all__` or the wording of `grok.output_too_large`'s cause. The wording was verified: the tests compare against the table, not a literal. — *If wrong:* the test author adds the pin change.
 
 **Open questions** (max 5 blocking):
@@ -977,19 +1054,40 @@ None. There is no CI change, dependency change, secret, release or version bump.
 | Q-4 | Should the new registry fix or reuse `McpPresetRegistry`? | no | No; the catalog stays untouched (NG-4). |
 | Q-5 | Is the host layer (`"playwright@browserbase"`) in this PR? | no | No; `@<host>` is reserved and refused (NG-6). |
 | Q-6 | Should browser state be fresh per call or persisted per thread? | no | Fresh per call (D-16). |
-| Q-7 | Should an env-filter launcher give each server only its own variables? | no | No (D-17). |
+| Q-7 | Should an env-filter launcher give each server only its own variables? Without it (T-6), on Grok every mounted server sees the caller's whole environment, the harness key and every tool key of the call; on opencode every server sees the harness provider key and every tool key and header through `OPENCODE_CONFIG_CONTENT`. Muse servers see no key. | no | No (D-17); the exposure is documented in the README. |
 | Q-8 | Should each function add a browser skill or prompt text? | no | No (D-18). |
 | Q-9 | Is "at least one mounted-tool call" acceptable as opencode's required evidence (EC-17)? | no | Yes (D-11). |
 | Q-10 | One global Node floor (22.12.0), or a floor per tool? | no | Global (D-6). |
 | Q-11 | Optional, unrequested: should opencode browser runs set `OPENCODE_DISABLE_EXTERNAL_SKILLS=1` and `OPENCODE_DISABLE_CLAUDE_CODE=1`? | no | No. |
 | Q-12 | Optional, unrequested: should Grok browser runs set `USERPROFILE` to a private folder to hide user skills and hooks? | no | No. |
 | Q-13 | Optional, unrequested: should artifacts be kept when a call fails? | no | No. |
+| Q-14 | Optional, scope-adding: should the pinned install pass `--ignore-scripts`, so no package lifecycle script runs with the caller's environment (T-6)? Each seed package would need re-verification that it starts without its install scripts. | no | Not built. |
+| Q-15 | Scope-adding: should Muse on Windows get a browser? Two routes exist: (a) an SDK-hosted loopback bridge that starts each keyless stdio tool on Windows in HTTP mode on `127.0.0.1` and mounts its URL (verified reachable from WSL only under mirrored networking; needs a server lifecycle, port choice, readiness detection and a local-endpoint threat review, D-9); (b) a Linux Node, npm and Chrome inside the distro, with an in-distro tool cache. | no | Not built. Muse on Windows mounts jina and parallel only, and every stdio tool raises `browser.mount_unsupported` (§2, EC-42). |
+| Q-16 | Ship 13 mountable tools, below the requested "15-20 popular ones"? The other 18 named tools are answered with their reason (§9.1). | no | Yes, ship 13 (D-21). |
+| Q-17 | Should Muse also require at least one mounted-tool call, to catch Muse's silent MCP disable (EC-39)? It depends on A-1 (the unverified Muse tool-call record). | no | No, until A-1 is verified. |
+| Q-18 | Should Grok mount keyless remote tools (jina, parallel) through HTTP entries in the agent file? The Grok guide documents HTTP entries with headers in agent `mcpServers`, but not their keys, and no probe ran. Keyed remote stays refused (KD-6). | no | Not built; refused with `browser.mount_unsupported` until probed. |
 
 ## §16 Review log
 | Round | ID | Severity | Section | Finding (one line) | Disposition | Change made / reason |
 |---|---|---|---|---|---|---|
+| r1-1 | R-1 | Blocker | §9.1 | Muse `settings.json` omits mandatory `"schema_version": 1`; every real Muse call would exit 1 | accepted | §9.1 Muse channel gives the top-level object and three entry rules; constant `MUSE_SETTINGS_SCHEMA_VERSION`; AC-26; EC-39; §13 fact on the real Muse's checks; row 21 |
+| r1-1 | R-2 | Blocker | §11, §12.4, §13 | Zero/one-slack lint ratchets (S020, S061, S041, S047, S052, A007) unbudgeted; S009 mypy runs in lint, so "Typecheck: none" was false; semgrep pattern unmentioned | accepted | §11 typecheck and ratchet counts; §12.4 "Lint ratchets with no slack"; NFR-7 targets; AC-20; D-25 (writes through `LocalFileSystemBackend` held as `backend`, 0 new S061); §13 S020 File Index; rows 5, 10, 13, 16, 20, 27–30; §14 ask-first |
+| r1-1 | R-3 | Blocker | §8.1 D-15, §12.3 row 9 | `result_record: str` types a closed set as a plain str | accepted | New `NativeThreadResultRecord` StrEnum; keyword typed with it (TYPE_CHECKING import); table typed; rows 3, 8, 9; §8.5; §9.1 |
+| r1-1 | R-4 | Major | §9.1, D-10, AC-6 | Narrowing fails open: wildcard allow plus exact denies leaves unlisted tools allowed | accepted | Narrowed mounts fail closed: opencode wildcard deny then exact allows; Grok exact allows plus exact denies, no wildcard; FR-12; D-10; AC-6; EC-41; A-17; A-18 |
+| r1-1 | R-5 | Major | §9.1 selection rules | `playwright:devtools` denied all 25 core tools | accepted | Server-flag capabilities are additive (D-24); §9.1 rules with examples; FR-5; AC-27 |
+| r1-1 | R-6 | Major | §9.1 opencode channel | Server ids deep-merge onto a user's global `mcp.<same id>` | accepted | opencode ids `vidbyte-<tool>` with `"enabled": true` (D-23); reader strips the prefix; AC-28; EC-40; §9.3 constant |
+| r1-1 | R-7 | Major | §10 T-1, EC-3, §9.1 grammar | Did-you-mean refusal can echo a key pasted into `tools` | accepted | No refusal quotes a `tools` item (FR-5, §9.1, EC-3, T-1, rows 5, 7, 10); AC-25 |
+| r1-1 | R-8 | Major | §10, D-17, Q-7 | Cost of declining the env-filter launcher understated | accepted | T-6 per-harness exposure; D-17 reasoning restated; Q-7 restated; scope-adding Q-14 (`--ignore-scripts`, default not built) |
+| r1-1 | R-9 | Major | §2, §4, D-9 | Muse on Windows can mount no browser, unstated | accepted (limitation) + → Q-15 | §2 per-harness limits; §4 note; FR-11 next step; AC-19 widened; EC-42; README row 35. The loopback bridge was weighed against the coordinator's steer: verified reachable only under WSL mirrored networking, needs an SDK-owned server lifecycle and adds an unauthenticated local endpoint, so it is scope-adding Q-15 (default not built), analysed in D-9 |
+| r1-1 | R-10 | Major | FR-14, D-11, AC-12 | Required check has holes on Muse (silent disable) and opencode (cannot name the server) | accepted | opencode guarantee renamed honestly ("no mounted tool was used", lists servers); Muse silent disable prevented by construction (AC-26) with residual EC-39 and Q-17 (a "≥ 1 call" rule would rest on unverified A-1) |
+| r1-1 | R-11 | Major | D-21, FR-6, §9.1 | Seed set below "15-20" decided silently; uvx reason inaccurate; scrapling unmeasured | accepted | Q-16 (default ship 13); uvx reason reworded to first-start only; scrapling moved to "Not verified for this release" |
+| r1-1 | R-12 | Major | §8, §8.4, §12.3 | Twelve-layer main function copied three times | accepted in part | One shared `NativeBrowserRun.execute` with the `NativeBrowserHarness` seam implemented by `<H>Mounts(config)`; `<H>BrowserRun` removed (D-3, §8, §8.4, §8.5, rows 16, 17, 19–24, INV-1). Rejected: moving `BrowserToolCache` to `vidbyte.lib.process`; only this feature installs npm packages (D-26) |
+| r1-1 | R-13 | Minor | INV-14, D-19, EC-31 | INV-14 contradicted D-19; next steps naming plain functions drop a browser caller's tools | accepted | INV-14 and INV-16 name the exceptions; D-22 widens five next-step texts; FR-16; EC-31; row 8 |
+| r1-1 | R-14 | Minor | INV-12, EC-22 | "Fresh per call" promised removal that EC-22 makes best effort | accepted | INV-12 reworded: new empty profile per call; removal best effort; EC-22 aligned |
+| r1-1 | R-15 | Minor | §8.5, §11 | Readers return a bare tuple; native/ "no model-facing tools" rationale missing | accepted | `BrowserToolCalls` record; §8 and §11 state that the SDK serves no tool; row 36 keeps the REPO_MAP sentence true |
 
 ## §17 Revision history
 | Revision | Date | Stage | Summary |
 |---|---|---|---|
 | r1 | 2026-10-17 | S1 spec | Initial spec |
+| r2 | 2026-10-17 | S1 spec (revision) | Applied review r1 (R-1–R-15): Muse schema_version and entry rules; lint ratchet budget and reviewed file writer; enum-typed result record; fail-closed narrowing; additive Playwright caps; prefixed opencode ids; refusals never quote items; T-6 exposure; per-harness mount limits stated (Muse on Windows has no browser, Q-15); honest required-check guarantees; one shared main function; Q-14–Q-18 |
