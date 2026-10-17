@@ -198,6 +198,7 @@ class FailureCode(str, Enum):
     CLAUDE_OUTPUT_TOO_LARGE = "claude.output_too_large"
     CLAUDE_PROTOCOL_MISMATCH = "claude.protocol_mismatch"
     CLAUDE_RUN_FAILED = "claude.run_failed"
+    CLAUDE_API_ERROR = "claude.api_error"
 
     @property
     def category(self) -> str:

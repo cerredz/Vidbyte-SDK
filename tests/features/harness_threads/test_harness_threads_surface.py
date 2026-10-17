@@ -38,7 +38,7 @@ EXPECTED_ENUMS = {
     "NativeHarness": ["grok", "opencode", "muse", "claude"],
     "NativeThreadVerb": ["run", "continue", "fork"],
     "NativeThreadOperation": list(FUNCTIONS),
-    "NativeThreadProblem": ["not_installed", "launcher_refused", "launch_failed", "key_rejected", "thread_not_found", "timed_out", "output_too_large", "protocol_mismatch", "run_failed", "wsl_unavailable"],
+    "NativeThreadProblem": ["not_installed", "launcher_refused", "launch_failed", "key_rejected", "api_error", "thread_not_found", "timed_out", "output_too_large", "protocol_mismatch", "run_failed", "wsl_unavailable"],
     "GrokPermissionMode": ["default", "acceptEdits", "dontAsk", "plan"],
     "GrokReasoningEffort": ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
     "MuseReasoningEffort": ["none", "minimal", "low", "medium", "high", "xhigh", "ultra"],
@@ -52,7 +52,7 @@ EXPECTED_ENUMS = {
 }
 PROBLEMS = ["not_installed", "launcher_refused", "launch_failed", "key_rejected", "thread_not_found", "timed_out", "output_too_large", "protocol_mismatch", "run_failed"]
 HARNESS_FAILURE_CODES = [f"{harness}.{problem}" for harness in ("grok", "opencode", "muse") for problem in PROBLEMS] + ["muse.wsl_unavailable"]
-CLAUDE_FAILURE_CODES = [f"claude.{problem}" for problem in PROBLEMS]
+CLAUDE_FAILURE_CODES = [f"claude.{problem}" for problem in PROBLEMS] + ["claude.api_error"]
 MAIN_MEMBER_COUNT = 167
 CONTRACT_CONSTANTS = {
     "NATIVE_THREAD_DEFAULT_SECONDS": 1800.0, "NATIVE_THREAD_MAX_SECONDS": 14400.0, "NATIVE_CONTROL_TIMEOUT_SECONDS": 30.0,
@@ -177,13 +177,14 @@ def test_vocabularies_are_str_enums_carrying_the_vendor_values(lib_api) -> None:
         assert getattr(lib_api.enums_package, cls.__name__) is cls
 
 
-def test_failure_codes_keep_main_and_append_exactly_the_nine_claude_codes(lib_api) -> None:
+def test_failure_codes_keep_main_and_append_exactly_the_ten_claude_codes(lib_api) -> None:
     # INV-22 / D-10 (#1036) and claude-thread-functions INV-21 / D-18:
     # main at the merge base already ends with the 28 harness codes (167
     # members since #1055 added the codex.* codes); this branch keeps
     # every one of them in name, value and
-    # order and appends exactly the nine claude.* codes after
-    # MUSE_WSL_UNAVAILABLE.
+    # order and appends exactly the ten claude.* codes after
+    # MUSE_WSL_UNAVAILABLE: the spec's nine, then claude.api_error
+    # from the PR #1044 review.
     members = list(lib_api.FailureCode)
     names = [member.name for member in members]
     harness_tail = members[names.index("RULE_EVALUATION_FAILED") + 1 : names.index("MUSE_WSL_UNAVAILABLE") + 1]

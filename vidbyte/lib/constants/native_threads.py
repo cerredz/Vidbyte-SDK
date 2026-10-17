@@ -236,6 +236,10 @@ CLAUDE_SESSION_NOT_FOUND_MARKER = "No conversation found with session ID"
 # the tested one (protocol_mismatch, not run_failed).
 CLAUDE_REJECTED_OPTION_MARKERS = ("error: unknown option", "error: option '", "error: missing required argument")
 CLAUDE_KEY_REJECTED_STATUSES = frozenset({401, 403})
+# The API statuses a later retry can clear: 408 (timeout), 429 (rate
+# limited) and every 5xx, 529 (overloaded) included. An error answer with
+# one of them is api_error, which NativeThreadError marks retryable.
+CLAUDE_RETRYABLE_STATUSES = frozenset({408, 429, *range(500, 600)})
 
 # Tested vendor versions: the releases these contracts were checked
 # against, named in protocol_mismatch errors.
@@ -332,6 +336,7 @@ NATIVE_THREAD_SUMMARIES: MappingProxyType[NativeThreadProblem, str] = MappingPro
         NativeThreadProblem.LAUNCHER_REFUSED: "{harness} was not started because its launcher is a Windows batch file.",
         NativeThreadProblem.LAUNCH_FAILED: "{harness} could not be started.",
         NativeThreadProblem.KEY_REJECTED: "{harness} rejected the API key.",
+        NativeThreadProblem.API_ERROR: "{harness} stopped on an API error that a later retry can clear.",
         NativeThreadProblem.THREAD_NOT_FOUND: "{harness} could not find the requested thread.",
         NativeThreadProblem.TIMED_OUT: "{harness} did not finish in time.",
         NativeThreadProblem.OUTPUT_TOO_LARGE: "{harness} printed more output than the SDK reads.",
@@ -346,6 +351,7 @@ NATIVE_THREAD_OBSERVATIONS: MappingProxyType[NativeThreadProblem, str] = Mapping
         NativeThreadProblem.LAUNCHER_REFUSED: "cmd.exe would re-read the arguments of a batch file as a command line, so the SDK never starts one.",
         NativeThreadProblem.LAUNCH_FAILED: "The SDK could not start the program or prepare its private folder.",
         NativeThreadProblem.KEY_REJECTED: "The vendor refused the key passed as api_key, and the SDK never falls back to a stored login.",
+        NativeThreadProblem.API_ERROR: "The vendor's API answered with a timeout, rate-limit, overload or server error status.",
         NativeThreadProblem.THREAD_NOT_FOUND: "The vendor could not continue the requested thread, or answered on another one.",
         NativeThreadProblem.TIMED_OUT: "The SDK waited {seconds} seconds and then stopped the whole process tree, so the thread may hold a partial turn.",
         NativeThreadProblem.OUTPUT_TOO_LARGE: "Standard output passed the cap of {cap_bytes} bytes, so the SDK did not read it as an answer.",
@@ -431,6 +437,7 @@ NATIVE_THREAD_FAILURE_CODES: MappingProxyType[tuple[NativeHarness, NativeThreadP
         (NativeHarness.CLAUDE, NativeThreadProblem.OUTPUT_TOO_LARGE): FailureCode.CLAUDE_OUTPUT_TOO_LARGE,
         (NativeHarness.CLAUDE, NativeThreadProblem.PROTOCOL_MISMATCH): FailureCode.CLAUDE_PROTOCOL_MISMATCH,
         (NativeHarness.CLAUDE, NativeThreadProblem.RUN_FAILED): FailureCode.CLAUDE_RUN_FAILED,
+        (NativeHarness.CLAUDE, NativeThreadProblem.API_ERROR): FailureCode.CLAUDE_API_ERROR,
     }
 )
 
@@ -468,12 +475,13 @@ NATIVE_THREAD_LIKELY_CAUSES: MappingProxyType[FailureCode, str] = MappingProxyTy
         FailureCode.CLAUDE_NOT_INSTALLED: "Claude Code is not on PATH and has no native install under ~/.local/bin, or the claude_command you passed names a file that does not exist.",
         FailureCode.CLAUDE_LAUNCHER_REFUSED: "The claude found first is a Windows .cmd or .bat shim, such as the npm claude.cmd, and cmd.exe would re-read its arguments as a command line.",
         FailureCode.CLAUDE_LAUNCH_FAILED: "The operating system refused to start claude, or the SDK could not create the private config folder under ~/.vidbyte/claude-configs; concurrent Claude Code calls in one workspace with different skill sets can also collide while its skills folder is rebuilt.",
-        FailureCode.CLAUDE_KEY_REJECTED: "Anthropic rejected the API key passed as api_key because it is wrong, revoked or lacks permission (Claude Code retries it for about three minutes first), and the SDK never falls back to a stored claude login.",
+        FailureCode.CLAUDE_KEY_REJECTED: "Anthropic rejected the API key passed as api_key because it is wrong, revoked or lacks permission, and the SDK never falls back to a stored claude login.",
         FailureCode.CLAUDE_THREAD_NOT_FOUND: "The thread is not in this workspace's private config folder: another workspace created it, Claude Code swept it after 30 days, it never existed, or Claude Code answered on another thread.",
-        FailureCode.CLAUDE_TIMED_OUT: "The Claude Code run needed more than timeout_seconds, for example because the task is large, or because a rejected key is retried for about three minutes before Claude Code reports it.",
+        FailureCode.CLAUDE_TIMED_OUT: "The Claude Code run needed more than timeout_seconds, for example because the task is large or the API did not answer.",
         FailureCode.CLAUDE_OUTPUT_TOO_LARGE: "Claude Code printed more than NATIVE_PROCESS_MAX_OUTPUT_BYTES, so its one JSON answer could not be read whole.",
         FailureCode.CLAUDE_PROTOCOL_MISMATCH: "The installed Claude Code printed output this SDK cannot read, refused an option or value the SDK passes, or a fork returned its source thread; it may differ from the release this SDK was checked against.",
-        FailureCode.CLAUDE_RUN_FAILED: "Claude Code reported a failure of its own, such as an API error, a rate limit, an overload, a billing or budget limit, or an unknown model.",
+        FailureCode.CLAUDE_RUN_FAILED: "Claude Code reported a failure without a status that a later retry can clear, such as a billing or budget limit, an unknown model, a refused request or an API it could not reach.",
+        FailureCode.CLAUDE_API_ERROR: "The Anthropic API rate-limited the key (429), was overloaded (529), timed out (408) or failed on its side (another 5xx), which a later retry can clear.",
         FailureCode.CONFIGURATION_INVALID_ARGUMENT: "An argument failed its check before anything started; the message names the argument and the rule it broke.",
         FailureCode.RUNTIME_ERROR: "An unexpected exception inside the SDK, which is a defect in the SDK rather than a vendor failure.",
     }
@@ -515,11 +523,16 @@ NATIVE_THREAD_NEXT_STEPS: MappingProxyType[FailureCode, str] = MappingProxyType(
         FailureCode.CLAUDE_LAUNCH_FAILED: "Check that claude --version runs from a terminal and that ~/.vidbyte/claude-configs is a writable folder, then retry; run concurrent Claude Code calls in one workspace only with a skill set an earlier call already prepared.",
         FailureCode.CLAUDE_KEY_REJECTED: "Pass a valid Anthropic API key as api_key and retry.",
         FailureCode.CLAUDE_THREAD_NOT_FOUND: "Continue or fork a Claude Code thread only from the workspace that created it, with the thread_id that run_claude_thread or fork_claude_thread returned.",
-        FailureCode.CLAUDE_TIMED_OUT: "Raise ClaudeThreadConfig.timeout_seconds, narrow the prompt, or check the key; continue the thread named by this error's thread_id to finish the partial turn, which may already have changed files in the workspace.",
+        FailureCode.CLAUDE_TIMED_OUT: "Raise ClaudeThreadConfig.timeout_seconds or narrow the prompt; continue the thread named by this error's thread_id to finish the partial turn, which may already have changed files in the workspace.",
         FailureCode.CLAUDE_OUTPUT_TOO_LARGE: "Ask Claude Code for a shorter answer, for example by having it write long results to a file in the workspace.",
         FailureCode.CLAUDE_PROTOCOL_MISMATCH: "Run claude --version and install the Claude Code release named in this message, then retry.",
         FailureCode.CLAUDE_RUN_FAILED: "Read the vendor text in this message, fix the cause it names, and retry or continue the thread.",
+        FailureCode.CLAUDE_API_ERROR: "Wait and retry (error.retryable is True and error.api_status holds the HTTP status); continue the thread named by this error's thread_id rather than starting over.",
         FailureCode.CONFIGURATION_INVALID_ARGUMENT: "Fix the argument named in this message and call again; nothing ran and nothing was written.",
         FailureCode.RUNTIME_ERROR: "Report the defect with the exception class named in this message; a retry may succeed if the cause was transient.",
     }
 )
+
+# The failure codes a caller may simply retry; the error factory marks
+# their NativeThreadError retryable.
+NATIVE_RETRYABLE_CODES = frozenset({FailureCode.CLAUDE_API_ERROR})

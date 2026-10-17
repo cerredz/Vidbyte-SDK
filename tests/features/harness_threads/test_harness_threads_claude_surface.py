@@ -48,12 +48,13 @@ CLAUDE_CONSTANTS = {
     "CLAUDE_SESSION_FIELD": "session_id", "CLAUDE_RESULT_FIELD": "result", "CLAUDE_IS_ERROR_FIELD": "is_error", "CLAUDE_API_ERROR_STATUS_FIELD": "api_error_status",
     "CLAUDE_TERMINAL_REASON_FIELD": "terminal_reason", "CLAUDE_SUBTYPE_FIELD": "subtype", "CLAUDE_ERRORS_FIELD": "errors",
     "CLAUDE_SESSION_NOT_FOUND_MARKER": "No conversation found with session ID",
-    "CLAUDE_REJECTED_OPTION_MARKERS": ("error: unknown option", "error: option '", "error: missing required argument"),"CLAUDE_KEY_REJECTED_STATUSES": frozenset({401, 403}),
+    "CLAUDE_REJECTED_OPTION_MARKERS": ("error: unknown option", "error: option '", "error: missing required argument"),
+    "CLAUDE_KEY_REJECTED_STATUSES": frozenset({401, 403}), "CLAUDE_RETRYABLE_STATUSES": frozenset({408, 429, *range(500, 600)}),
     "CLAUDE_ERROR_TEXT": "{reason}: {message}", "CLAUDE_ERROR_STATUS_TEXT": "{reason} (status {status}): {message}", "CLAUDE_TESTED_VERSION": "2.1.302",
     "CLAUDE_CONFIG_FAILURE_DETAIL": "The private Claude Code config folder {home} could not be prepared ({error_type}: {reason}).",
     "CLAUDE_CONFIG_UNKNOWN_DETAIL": "The user home folder, where the private Claude Code config folder lives, could not be determined ({error_type}); set HOME (POSIX) or USERPROFILE (Windows) for this process.",
 }
-PROBLEMS = ["not_installed", "launcher_refused", "launch_failed", "key_rejected", "thread_not_found", "timed_out", "output_too_large", "protocol_mismatch", "run_failed"]
+PROBLEMS = ["not_installed", "launcher_refused", "launch_failed", "key_rejected", "api_error", "thread_not_found", "timed_out", "output_too_large", "protocol_mismatch", "run_failed"]
 BAD_CONFIG_FIELDS = [
     ("permission_mode", "bypassPermissions"), ("permission_mode", "auto"), ("permission_mode", "default"), ("permission_mode", "yolo"),
     ("reasoning_effort", "turbo"), ("reasoning_effort", "none"), ("reasoning_effort", "minimal"), ("reasoning_effort", "ultra"),
@@ -193,9 +194,10 @@ def test_claude_contract_constants_hold_the_spec_values(lib_api) -> None:
 
 
 def test_every_harness_and_code_table_has_its_claude_rows(lib_api) -> None:
-    # AC-18 / INV-6 / INV-7: the label, the tested version, the nine
-    # failure codes by problem (and no WSL row), a text per code, and
-    # Claude among the stdin-prompt harnesses.
+    # AC-18 / INV-6 / INV-7: the label, the tested version, the ten
+    # failure codes by problem (and no WSL row; api_error from the PR
+    # #1044 review), a text per code, only claude.api_error retryable,
+    # and Claude among the stdin-prompt harnesses.
     constants, enums, codes = lib_api.constants, lib_api.enums, lib_api.FailureCode
     claude = enums.NativeHarness.CLAUDE
     assert constants.NATIVE_HARNESS_LABELS[claude] == "Claude Code"
@@ -204,6 +206,7 @@ def test_every_harness_and_code_table_has_its_claude_rows(lib_api) -> None:
     assert rows == {problem: codes(f"claude.{problem}") for problem in PROBLEMS}
     for code in rows.values():
         assert constants.NATIVE_THREAD_LIKELY_CAUSES[code].strip() and constants.NATIVE_THREAD_NEXT_STEPS[code].strip(), code
+    assert constants.NATIVE_RETRYABLE_CODES == frozenset({codes("claude.api_error")})
     assert constants.NATIVE_STDIN_PROMPT_HARNESSES == frozenset({enums.NativeHarness.OPENCODE, claude})
 
 
@@ -296,10 +299,16 @@ def test_branch_changes_only_the_files_the_spec_lists() -> None:
     assert restored.stdout.split() == [], f"D-17: not byte-identical to the merge base: {restored.stdout.split()}"
 
 
-def test_errors_base_differs_from_the_merge_base_in_one_docstring_line_only() -> None:
+def test_errors_base_differs_from_the_merge_base_in_one_docstring_line_and_the_retry_fields() -> None:
     # AC-20 / §12.3 rows 5 and 28: ClaudeOperationError is gone and the
-    # NativeThreadError line names Claude Code.
+    # NativeThreadError line names Claude Code. PR #1044 review
+    # 4301898270 adds only NativeThreadError's retryable and api_status,
+    # stored and shown in safe_runtime_details.
     removed, added = changed_lines(merge_base(), "vidbyte/lib/errors/base.py")
-    assert len(removed) == 1 and len(added) == 1, f"removed {removed!r}, added {added!r}"
+    assert len(removed) == 1, f"removed {removed!r}"
     assert "NativeThreadError" in removed[0] and "Grok, opencode and Muse thread functions" in removed[0]
     assert "NativeThreadError" in added[0] and "Grok, opencode, Muse and Claude Code thread functions" in added[0]
+    assert [line.strip() for line in added[1:]] == [
+        "retryable: bool = False,", "api_status: int | None = None,", "self.retryable = retryable", "self.api_status = api_status",
+        '"retryable": str(retryable).lower(),', '"api_status": "" if api_status is None else str(api_status),',
+    ]

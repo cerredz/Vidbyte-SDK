@@ -95,6 +95,7 @@ class NativeErrorFactory:
         cap_bytes: int | None = None,
         missing_member: str | None = None,
         searched: str | None = None,
+        api_status: int | None = None,
     ) -> NativeThreadError:
         # The code comes from the closed table of harness and problem,
         # so every code this builds is a FailureCode member.
@@ -125,7 +126,7 @@ class NativeErrorFactory:
         ]
         if vendor is not None:
             sentences.append(native_threads.NATIVE_VENDOR_TEXT_SENTENCE.format(vendor_text=vendor))
-        return self._error(code, sentences, thread_id=newest_id, exit_code=exit_code, vendor_message=vendor)
+        return self._error(code, sentences, thread_id=newest_id, exit_code=exit_code, vendor_message=vendor, api_status=api_status)
 
     def from_configuration_error(self, exc: ConfigurationError, request: NativeThreadRequest | None) -> NativeThreadError:
         # A record or validator refusal names its argument in
@@ -200,9 +201,10 @@ class NativeErrorFactory:
             sentences.append(native_threads.NATIVE_EXIT_STATUS_SENTENCE.format(exit_code=exit_code))
         return sentences
 
-    def _error(self, code: FailureCode, sentences: list[str], *, thread_id: str | None = None, exit_code: int | None = None, vendor_message: str | None = None, error_type: str = "") -> NativeThreadError:
+    def _error(self, code: FailureCode, sentences: list[str], *, thread_id: str | None = None, exit_code: int | None = None, vendor_message: str | None = None, error_type: str = "", api_status: int | None = None) -> NativeThreadError:
         # Puts the head first and the likely cause and next step last,
-        # then builds the error with every INV-5 attribute.
+        # then builds the error with every INV-5 attribute; only a code
+        # in NATIVE_RETRYABLE_CODES says a plain retry can succeed.
         likely_cause = native_threads.NATIVE_THREAD_LIKELY_CAUSES[code]
         next_step = native_threads.NATIVE_THREAD_NEXT_STEPS[code]
         head = native_threads.NATIVE_MESSAGE_HEAD.format(operation=self._operation.value, code=code.value)
@@ -219,6 +221,8 @@ class NativeErrorFactory:
             exit_code=exit_code,
             vendor_message=vendor_message,
             error_type=error_type,
+            retryable=code in native_threads.NATIVE_RETRYABLE_CODES,
+            api_status=api_status,
         )
 
 

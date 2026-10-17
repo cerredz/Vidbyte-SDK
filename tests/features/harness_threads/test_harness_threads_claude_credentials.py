@@ -110,7 +110,7 @@ async def test_key_echoed_by_claude_is_redacted_everywhere_and_never_written(api
     with pytest.raises(api.NativeThreadError) as caught:
         await call("claude", api_key=key, fake={"mode": "echo_secrets", "echo_key": key, "echo_cap": api.constants.NATIVE_VENDOR_MESSAGE_MAX_CHARS})
     error = caught.value
-    assert error.failure_code.value == "claude.run_failed", str(error)
+    assert error.failure_code.value == "claude.api_error", str(error)
     assert api.constants.NATIVE_REDACTED in str(error) and api.constants.NATIVE_REDACTED in (error.vendor_message or "")
     surfaces = {
         "str": str(error), "repr": repr(error), "vendor_message": error.vendor_message or "", "details": json.dumps(error.details, default=str),
