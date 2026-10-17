@@ -80,6 +80,8 @@ The folder holds 40 `.md` assets; `infinite_memory.json` top level is a dict wit
 - 2026-10-16 22:20 — **r4 spot-check held:** a255373a `docs(spec): revise infinite-memory-prompts spec r4 (S2-found defects)` (spec.md only) + b3afb3b7 (report addendum); frontmatter status tests-written / revision 4; 18 `## §` sections; §16 rows S2-1…S2-4; §17 r4 row; §8.5 (4) and outlines 39/40 mark "uses no file quota" / "found with grep" keep (review). The author went three small steps past the briefing (AC-7/EC-11 say "five words or more"; §13 names verifier_system_prompt as tiktoken-only sub-floor; outline 31 / §8.5 (4) "six" → "seven" card labels, matching the test's `RESULT_CARD_LABELS`). Accepted: each restates an existing rule or a measured fact consistently and adds no requirement; all recorded in §16/§17.
 - 2026-10-16 22:20 — **S2 spot-check re-run by the new orchestrator:** new module 37 failed / 94 passed; `git diff --stat f4cad411 HEAD -- tests/` empty. `git fetch origin`: `origin/feat/infinite-memory-agent` = 7efceb55 (= base_commit), no rebase needed. Independent measure (`scratchpad/measure_seven.py`, `Prompts().get` + `TokenEstimate.count` + tiktoken) reproduces the baseline table exactly and the 23-description sums 4,455 est / 3,803 tik; family has 40 leaves.
 
+- 2026-10-16 22:30 — **Process exit between 22:25 and 22:29.** The Claude Code process exited and stopped the orchestrator before the S3 implementer started any work (HEAD fc4a7f34, tree clean, nothing pushed, no PR). Coordinator confirmed no live child. Base re-fetched: still 7efceb55, no rebase. S3 implementer (re)launched fresh with model opus and the S3 briefing; it commits per §12.3 row so a later cut-off loses at most one row.
+
 ## User replies (verbatim)
 - (none yet)
 
