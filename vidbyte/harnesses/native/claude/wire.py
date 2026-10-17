@@ -88,7 +88,7 @@ class ClaudeWire:
         # otherwise, with the text cut at the result cap. The None
         # test only narrows the type for mypy: the request record
         # already checked that a continue has an id.
-        thread_id =request.thread_id if request.verb is NativeThreadVerb.CONTINUE and request.thread_id is not None else session
+        thread_id = request.thread_id if request.verb is NativeThreadVerb.CONTINUE and request.thread_id is not None else session
         cap = native_threads.NATIVE_RESULT_TEXT_MAX_CHARS
         return NativeThreadResult(harness=NativeHarness.CLAUDE, thread_id=thread_id, text=text[:cap], text_truncated=len(text) > cap)
 

@@ -144,7 +144,7 @@ class NativeThreadRequest:
             # Claude Code ids must be lowercase UUIDs, because claude
             # --resume would also match a session title or a
             # transcript path.
-            pattern =CLAUDE_THREAD_ID_PATTERN if self.harness is NativeHarness.CLAUDE else NATIVE_THREAD_ID_PATTERN
+            pattern = CLAUDE_THREAD_ID_PATTERN if self.harness is NativeHarness.CLAUDE else NATIVE_THREAD_ID_PATTERN
             RecordFieldValidator.require_text(self.thread_id, "thread_id", max_chars=NATIVE_THREAD_ID_MAX_CHARS, pattern=pattern)
 
     def _checked_skills(self) -> tuple[Path, ...]:
