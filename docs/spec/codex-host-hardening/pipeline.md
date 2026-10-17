@@ -3,7 +3,7 @@ slug: codex-host-hardening
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-codex-host-first-class
 branch: feat/codex-host-first-class
-base_commit: 6f5a7310c00fa919dac1b1b40f321496298e89da
+base_commit: 8baff3514640a5c5f110c1e2c7cea996d1640ecb  # stacked on PR #1178 (was 6f5a7310, main after #1055)
 pr:
 until: none
 started: 2026-10-17 06:50
@@ -42,6 +42,13 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
   
   Nothing else in this run touches #1044.
 - 2026-10-17 08:17: Accepted the S1 author's move of **S4 (`collaborationMode`/plan mode) into slice 2** (spec NG-1). §C.10 lists `collaboration_mode` among the P0 plan-mode functions, which are slice 2. **Slice 2's request.md must name S4 explicitly as carried over from slice 1.**
+- 2026-10-17 08:55: **Stacked the run on the user's open PR #1178** (`ai/resolve-pr-1055-comments`, head `8baff351`, one commit on top of `6f5a7310`, MERGEABLE, not a draft).
+  - *Evidence:* the S1 reviewer's R-1, which I checked myself with `gh pr view 1178` and the five #1055 review comments.
+  - #1178 applies the user's own #1055 review comments (now verbatim in request.md §B.1) to 11 of the 21 files in spec r1 §12.3, and adds lint C021 at baseline 0. Building on bare main would conflict in all 11 and fail C021 once #1178 merges.
+  - Done with `git rebase --onto 8baff351 6f5a7310`. Docs-only commits, no conflicts. The local tag `pre-stack-backup` marks the old head; it is local only and never pushed.
+  - When #1178 merges, bring main into the branch with `git merge origin/main`, never rebase plus force-push.
+  - At S3, open the PR with base `ai/resolve-pr-1055-comments` while #1178 is open. GitHub retargets it to main when that branch is deleted on merge. Otherwise retarget it with `gh pr edit --base main`.
+- 2026-10-17 08:55: S1 review round 1 returned SOUND WITH FIXES: 1 Blocker (R-1, #1178 conventions), 4 Major (R-2 to R-5), 6 Minor (one scope-adding, Q-18). All of it was forwarded to the author as one revision, together with the rebase.
 
 ## User replies (verbatim)
 - (none yet)
@@ -104,4 +111,26 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
   - A-9: fork auto-continues a goal unless `deferGoalContinuation` is set.
   
   *Source:* S1 author
-
+- **The base is #1178's head `8baff351`, not main.** New files on it:
+  - `vidbyte/lib/constants/codex_host.py` (342 lines), where every native-host constant and message lives;
+  - `vidbyte/lib/dataclasses/codex_host_inputs.py` (372 lines, 16 input records, `REJECTED_FIELDS` moved in);
+  - lint `lint/rules/c021_native_host_constants_in_lib.py`, which blocks top-level UPPER_CASE bindings under `vidbyte/harnesses/native/`, with a baseline of 0.
+  
+  `host.py` is 919 lines and `lib/dataclasses/codex.py` 1,205. *Source:* orchestrator check after S1 review
+- The error format since #1178 is "`<operation> failed with <code>. <summary> The thread id was <id>. Likely cause: <cause> Next step: <step>`", built through `CodexAgentError` keywords (`likely_cause`, `method`, `related_docs`, `relevant_tests`) and `with_sentence()`. *Source:* #1178 body, S1 reviewer
+- TRANSIENT failure codes in `CODEX_FAILURE_CLASSIFICATION`: `thread_resume_failed`, `fork_failed`, `response_invalid`, `usage_limited`, `session_busy`, `api_error`, `process_exited`, `turn_timed_out`. A `retryable` that only reads the class is wrong for deterministic `fork_failed` refusals and for `process_exited` on a dead host (R-4). *Source:* S1 reviewer
+- Server-request wire facts (0.163.0 schema):
+  - command approvals require `itemId`, `startedAtMs`, `threadId` and `turnId`;
+  - they also carry `kind` (`command`, the default, or `writeStdin`), `approvalId` and `environmentId`;
+  - file-change approvals have no `availableDecisions`;
+  - `{}` is not a valid answer to the token-refresh or attestation requests.
+  
+  *Source:* S1 reviewer
+- Close order: `host.py` cancels pending work at ~:213 *before* awaiting the cleanup interrupts at ~:215-223, so approvals can arrive after the cancel (R-5). `CodexClient.close` waits at most 0.5 s for the reader thread (`client.py:301-302`). `run_coroutine_threadsafe` raises only on a closed loop. *Source:* S1 reviewer
+- Lazy loading: host.py loads connection, turns and wire inside `_open` (~:162-170). Any new module that depends on `turns.py` (for example `reviews.py`) must load the same way, or importing the package loads the SDK and fails the packaging test. *Source:* S1 reviewer
+- Test patching:
+  - watchers bind `client.next_turn_notification` and `next_goal_notification` when they start (`turns.py:157-160`), so a test must patch them before the spawn;
+  - `patch_connection` patches without `create=True`;
+  - `connection.py` does not import `CODEX_TOOL_CALL_TIMEOUT_SECONDS`.
+  
+  *Source:* S1 reviewer

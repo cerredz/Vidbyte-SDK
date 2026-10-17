@@ -39,12 +39,47 @@ great, I am going to merge pr #1055 into the repo,  before you kick off what I a
 ````
 
 ## B. Handoff block and decision ledger (verbatim, if present)
-none
+No handoff block.
+
+### B.1 The user's own review comments on PR #1055 (verbatim; added at S1)
+The user (GitHub `cerredz`, the repo owner) left five inline review comments on PR #1055 on 2026-10-17. Their open PR **#1178** "fix: resolve review comments from PR #1055" (branch `ai/resolve-pr-1055-comments`, head `8baff351`, one commit on top of `6f5a7310`) applies them.
+
+These comments are the user's stated conventions for this exact code. They bind every new or changed line in this run just as much as §A does.
+
+- `vidbyte/harnesses/native/codex/connection.py:91` (4301484278):
+  ````
+  wrong file location, put inside of lib
+  ````
+- `vidbyte/harnesses/native/codex/errors.py:45` (4301488494):
+  ````
+  wrong file location, shold be in lib folder, also error messages need to go into way more details, the way we havve them formatted in erorr folder in lib folder
+  ````
+- `vidbyte/harnesses/native/codex/host.py:114` (4301489517):
+  ````
+  same feedback for error messages here
+  ````
+- `vidbyte/harnesses/native/codex/host.py:323` (4301496612):
+  ````
+  all these functions in this file should have dataclasses with strict input validation
+  ````
+- `vidbyte/harnesses/native/codex/preflight.py:78` (4301744297):
+  ````
+  wrong file locations, in lib folder
+  ````
+
+**What #1178 turned them into** (the conventions this run follows):
+- Every fixed value the native host reads goes in `vidbyte/lib/constants/codex_host.py`. Lint **C021** `native-host-constants-in-lib` blocks any top-level UPPER_CASE binding under `vidbyte/harnesses/native/`, with a baseline of 0.
+- Every `CodexAgentError` reads `<operation> failed with <code>. <summary> The thread id was <id>. Likely cause: <cause> Next step: <step>`, with the lib error-packet fields filled in.
+- Every public `CodexHost` method that takes input builds a frozen, validated record from `vidbyte/lib/dataclasses/codex_host_inputs.py` right after `_guard`. `REJECTED_FIELDS` now lives in those records.
 
 ## C. Structured conversation notes
 
 ### Key decisions
 - **Start only after PR #1055 merged into main.** The user asked for this explicitly (Prompt 3). The base commit of this run is `origin/main` after the merge, which contains the whole CodexHost package from #1055.
+- **The run is stacked on the user's open PR #1178** (decided at S1 review round 1, orchestrator decision, logged in pipeline.md).
+  - The branch was rebased from `6f5a7310` onto #1178's head `8baff351`, so the base commit is now `8baff3514640a5c5f110c1e2c7cea996d1640ecb`.
+  - #1178 applies the user's own #1055 review comments (§B.1) to 11 of the files this slice changes. Building beside it would conflict in every one of them and would fail C021 once it merges.
+  - When #1178 merges into main, the branch takes main by merge, never by force-push.
 - **"The codex functions that you thought about" means the ranked P0 and P1 proposals in §C.10**, plus the settings that were missed inside existing functions (S1–S10 in §C.10). Each proposal names its Codex app-server method; build each one over that protocol method, never by sending slash-command text. #1055 set this precedent for goal and skill runs.
 - **The production bar is the user's own words in Prompt 2:** "each function to kind of have 'all layers' required to push to production and exception handle everything that could potentially go wrong". Every new function must meet the L1–L16 layer list in §C.9. Because new and old functions share one connection, error mapper, registry and tool base, the cross-cutting gaps X1–X9 and the per-function gaps in §C.9 are fixed as well.
   - This is an orchestrator decision: the user asked for the checklist and stated the bar, but did not say "fix them" in Prompt 3. It is logged in pipeline.md, and the user can interrupt.
