@@ -67,6 +67,9 @@ VALID_RECORDS: dict[str, Callable[[], Any]] = {
     "CodexGoalRunRequest": lambda: CodexGoalRunRequest(goal=GOAL),
     "CodexSkillListRequest": lambda: CodexSkillListRequest(cwd="/work"),
     "CodexSkillRunRequest": lambda: CodexSkillRunRequest(operation=Op.RUN_CODEX_SKILL, skill="s", prompt="Do it."),
+    # docs/spec/codex-host-hardening/spec.md INV-19 and D-33: the constructor's record. Read from the module at call time,
+    # so this file still imports before the record exists.
+    "CodexHostSetup": lambda: codex_host_inputs.CodexHostSetup(),
 }
 
 # (label, factory, text the refusal must contain): each row breaks one rule of a valid baseline.
@@ -191,6 +194,8 @@ class CodexHostInputBoundaryTests(HostTestCase):
             ("steer_codex_turn", lambda: host.steer_codex_turn(HANDLE, 5), "steer_codex_turn input"),
             ("interrupt_codex_turn", lambda: host.interrupt_codex_turn(None), "interrupt_codex_turn handle"),
             ("track_codex_thread_usage", lambda: host.track_codex_thread_usage(""), "track_codex_thread_usage thread_id"),
+            # docs/spec/codex-host-hardening/spec.md INV-22 and INV-48: the new local method builds CodexThreadRef first.
+            ("forget_codex_turns", lambda: host.forget_codex_turns(""), "forget_codex_turns thread_id"),
             ("launch_codex_subagents", lambda: host.launch_codex_subagents("One prompt."), "not one string"),
             ("start_codex_review", lambda: host.start_codex_review("thr-1", "uncommitted"), "start_codex_review target"),
             ("list_recent_codex_threads", lambda: host.list_recent_codex_threads("", limit=0), "list_recent_codex_threads limit"),

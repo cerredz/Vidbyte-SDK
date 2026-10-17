@@ -3,11 +3,11 @@
 PURPOSE: Shared helpers for the CodexHost feature pack: the spec's literal texts and tables, the privacy canaries, the openai-codex skip gate, a duck-typed stub host for the tool tests, and HostTestCase, which runs a real CodexHost against the in-memory app-server.
 ROLE IN CODEBASE: Imported by every test module in tests/features/codex_host/. It imports nothing the feature adds and nothing from openai-codex at module level, so every module still collects before the feature exists and on CI, which installs only the dev extra.
 ARCHITECTURE NOTE: HostTestCase.asyncSetUp patches the one seam spec section 13 names, vidbyte.harnesses.native.codex.connection.CodexClient, with the fake client from codex_host_fakes.py, and shutil.which with a recorder. Everything above the seam (CodexHost, its translators, preflight, pricing, records) runs unmocked. StubCodexHost stands in for CodexHost only in the tool tests, which spec section 13 allows because the tools import CodexHost under TYPE_CHECKING only.
-FUNCTION INVENTORY: requires_sdk skips a class when openai-codex is missing; error_texts(exc) returns every text an error shows, its visible chain included; input_texts(params) reads a turn request's input items; HostTestCase.open_host / close_host / spawn / wait_done / assert_problem / assert_codex_error / run_in_other_loop drive a host, and patch_connection / patch_skill_functions / patch_platform / wait_for_request / wait_until / ask / count script and observe the fake app-server; StubCodexHost answers the twenty-seven host methods from scripted records; make_echo_tool builds a small dynamic tool; mapped_summary checks a CodexErrorMapper message's head and its likely-cause and next-step tail and returns what lies between, and thread_suffix is the thread sentence the mapper adds there; FieldCarryingMapper maps as the host's CodexErrorMapper does and records every error, and changed_error_fields lists the KEPT_ERROR_FIELDS a rebuilt error lost (thread-helpers review R-17, R-18). The thread-helpers spec adds HELPER_METHODS, its message texts, four codes, four rows and eleven tool rows.
+FUNCTION INVENTORY: requires_sdk skips a class when openai-codex is missing; error_texts(exc) returns every text an error shows, its visible chain included; input_texts(params) reads a turn request's input items; HostTestCase.open_host / close_host / spawn / wait_done / assert_problem / assert_codex_error / run_in_other_loop drive a host, and patch_connection / patch_skill_functions / patch_platform / wait_for_request / wait_until / ask / count script and observe the fake app-server; StubCodexHost answers the twenty-seven host methods from scripted records; make_echo_tool builds a small dynamic tool; mapped_summary checks a CodexErrorMapper message's head and its likely-cause and next-step tail and returns what lies between, and thread_suffix is the thread sentence the mapper adds there; FieldCarryingMapper maps as the host's CodexErrorMapper does and records every error, and changed_error_fields lists the KEPT_ERROR_FIELDS a rebuilt error lost (thread-helpers review R-17, R-18). The thread-helpers spec adds HELPER_METHODS, its message texts, four codes, four rows and eleven tool rows. The codex-host-hardening spec adds its section 9.2 messages, the changed causes and next steps, the INV-15 DEFAULT_ANSWERS table, RETRYABLE_CODES, RETRIED_METHODS and GOAL_REJECTED_FIELDS; open_host takes an optional approval_handler; capture_logs, LogRecorder, log_events and log_fields read the INV-7 to INV-10 log records, and log_fields refuses a word with no "=" (S5 R-12).
 COMMON MODIFICATION PATTERNS: When the spec changes a next-step text, a tool name or a classification row, change the literal here, never by reading the production constant. Add a host helper here only when two or more modules need it.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import vidbyte.harnesses.native, vidbyte.lib.dataclasses.codex_host, the new enums or openai_codex at module level: a missing feature must fail each test, not abort collection. 2. Do not start a process or touch the network. 3. Do not copy production logic; tests assert the spec's literal values.
 KNOWN EDGE CASES: The privacy canaries are unique strings, so finding one in any output proves a leak. StubCodexHost reports a handle RUNNING until a test marks it finished, which is how the live-turn cap sees running turns.
-RELATED DOCS: tests/features/codex_host/FEATURE.md; docs/spec/codex-host/spec.md sections 9.2, 9.3 and 13; docs/spec/codex-host-thread-helpers/spec.md sections 8.5, 9.2 and 13.
+RELATED DOCS: tests/features/codex_host/FEATURE.md; docs/spec/codex-host/spec.md sections 9.2, 9.3 and 13; docs/spec/codex-host-thread-helpers/spec.md sections 8.5, 9.2 and 13; docs/spec/codex-host-hardening/spec.md sections 9.2, 9.3 and 13.
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/codex_host
 """
 
@@ -17,6 +17,7 @@ import asyncio
 import importlib
 import importlib.util
 import itertools
+import logging
 import os
 import threading
 import unittest
@@ -54,7 +55,8 @@ MINIMUM_VERSION = "0.151.0"
 
 # Spec section 9.3, verbatim.
 EXPERIMENTAL_API_TEXT = "Dynamic tools on CodexHost require CodexClientSettings(experimental_api=True)."
-USER_REVIEWER_TEXT = "Set approvals_reviewer=AUTO_REVIEW or GUARDIAN_SUBAGENT, and set it whenever approval_policy is set. To continue a thread whose reviewer is user, pass overrides=CodexSpawnRequest(approvals_reviewer=AUTO_REVIEW), or set it in the CodexHostTools spawn_defaults. Answering approval requests in code needs set_codex_approval_handler, which this release does not include."
+# docs/spec/codex-host-hardening/spec.md section 9.3 changed this text: the handler now exists (D-1, D-5).
+USER_REVIEWER_TEXT = "Set approvals_reviewer=AUTO_REVIEW or GUARDIAN_SUBAGENT, and set it whenever approval_policy is set. To continue a thread whose reviewer is user, pass overrides=CodexSpawnRequest(approvals_reviewer=AUTO_REVIEW), or set it in the CodexHostTools spawn_defaults. To answer approval requests in code instead, open the host as CodexHost(approval_handler=...)."
 UNREGISTERED_TOOL_TEXT = "No Vidbyte tool is registered for this thread on this host."
 PIP_INSTALL_FRAGMENT = 'pip install "vidbyte-sdk[codex]"'
 
@@ -64,7 +66,8 @@ NEXT_STEPS = {
     "codex.version_unsupported": "Run codex update, then open a new CodexHost.",
     "codex.not_signed_in": "Run codex login, then retry.",
     "codex.usage_limited": "Wait until the usage window resets, or sign Codex in with an API key.",
-    "codex.model_unknown": "Pick a model from list_codex_models.",
+    # docs/spec/codex-host-hardening/spec.md section 9.3: the next step now covers service tiers.
+    "codex.model_unknown": "Pick a model, and a service tier it lists, from list_codex_models.",
     "codex.session_not_found": "Find the thread with list_codex_threads, or use a handle this host returned; continue a finished turn instead of steering it.",
     "codex.session_busy": "Steer or wait on the running turn, or fork the thread.",
     "codex.budget_exhausted": "Raise max_output_tokens or the goal token_budget, or split the work.",
@@ -83,7 +86,8 @@ NEXT_STEPS = {
     "codex.command_not_run": "Read what Codex recorded with get_codex_goal or list_codex_turns, then start the run again.",
     "codex.skill_not_found": "Pick a skill that list_codex_skills reports for the same working folder, and pass its exact name.",
     "codex.skill_disabled": "Enable the skill in your Codex configuration, or pick an enabled skill that list_codex_skills reports.",
-    "codex.goal_unfinished": "Continue the thread with continue_codex_thread until its goal is complete, or clear the goal from a Codex client, then compact the thread again.",
+    # docs/spec/codex-host-hardening/spec.md section 9.3: continue now refuses an unfinished goal too, so the step no longer names it.
+    "codex.goal_unfinished": "Let the goal finish or clear it from a Codex client, then call again.",
 }
 
 # Spec section 12.3 row 1: the fifteen new FailureCode members, in their required order, then the four the
@@ -231,6 +235,58 @@ APP_SERVER_PLACE = "the app-server's working folder"
 SKILL_FUNCTIONS_MODULE = "vidbyte.harnesses.native.codex.skill_functions"
 # The existing preflight text for a thread with a running turn on this host (codex-host BUSY_MESSAGE, spec EC-17).
 BUSY_TEXT = "The thread already has a running turn on this host."
+
+# docs/spec/codex-host-hardening/spec.md section 9.2 "New message constants", verbatim.
+APPROVAL_HANDLER_MESSAGE = "CodexHost approval_handler must be None or an async function that takes a CodexServerRequest and returns a CodexServerAnswer, and it got a value of type {kind}."
+STEER_STOPPING_MESSAGE = "Turn {turn_id} is being interrupted, so it cannot be steered; wait for it to end with wait_codex_turn, then add the input with continue_codex_thread."
+FORK_POINTS_MESSAGE = "fork_codex_thread before_turn_id cannot be combined with from_turn_id; pass from_turn_id to fork through a completed turn, or before_turn_id to fork just before a turn."
+EVENT_FAILED_MESSAGE = "CodexHost could not process one of the turn's events, so it stopped the turn."
+LOST_EVENTS_MESSAGE = "CodexHost stopped receiving the turn's events before it ended, so it stopped the turn."
+USER_REVIEWER_MESSAGE = "approvals_reviewer=USER sends the thread's approval requests to this process, and this CodexHost was built without an approval_handler to answer them."
+GOAL_FIELD_MESSAGE = "{owner} does not use the field {name}, because Codex starts goal turns itself with the thread's settings; leave {name} at its default, or set the matching thread setting."
+# Spec r5 (S4 R-7): the {owner} of GOAL_FIELD_MESSAGE, by the record that refuses the field.
+GOAL_SPAWN_OWNER = "Codex spawn request goal"
+GOAL_RUN_OWNER = "run_codex_goal request"
+UNKNOWN_TIER_MESSAGE = "Codex lists no service tier {tier} for {models}. Listed tiers: {tiers}."
+CONTINUE_GOAL_UNFINISHED_MESSAGE = "Codex reports an unfinished goal (status {status}) on the thread, and loading the thread to continue it could let Codex continue that goal outside the turn this host tracks."
+NETWORK_ACCESS_MESSAGE = "Codex spawn request network_access needs turn.sandbox READ_ONLY or WORKSPACE_WRITE, because only those sandbox policies take it, and it got turn.sandbox {sandbox}."
+WRITABLE_ROOTS_MESSAGE = "Codex spawn request writable_roots must be a tuple of non-empty absolute paths, and it needs turn.sandbox WORKSPACE_WRITE."
+FORK_EXPERIMENTAL_MESSAGE = "fork_codex_thread {field} needs CodexClientSettings(experimental_api=True), because Codex accepts it only from clients that opt in to its experimental API."
+# Section 9.2 "Changed lib texts", verbatim.
+REVIEWER_MESSAGE = "Codex routes this thread's approval requests to a user reviewer, and this CodexHost has no approval_handler to answer them."
+CHANGED_LIKELY_CAUSES = {
+    "configuration.unsupported_combination": "The thread's approval requests go to a user reviewer, and this CodexHost was built without an approval_handler that could answer them.",
+    "codex.goal_unfinished": "The thread is not loaded on this host and still holds an unfinished goal, and loading it to compact or continue could let Codex resume that goal as untracked paid turns.",
+    "codex.model_unknown": "The model or service tier named in the thread or turn settings is not in the model list Codex reports for this account, often because of a typo or a model or tier the account cannot use.",
+}
+# Section 9.3: the codes whose same call can succeed unchanged (INV-2), and the four typed reads retried on overload (INV-3).
+RETRYABLE_CODES = frozenset({"codex.api_error", "codex.session_busy", "codex.usage_limited", "codex.thread_resume_failed", "codex.response_invalid"})
+RETRIED_METHODS = frozenset({"account/read", "thread/read", "thread/list", "thread/name/set"})
+GOAL_REJECTED_FIELDS = ("turn", "output_schema", "disabled_plugin_ids", "turn_service_tier", "network_access", "writable_roots")
+# INV-15 and section 9.3: the fixed fail-closed answer of each server request a host without a handler gets.
+DEFAULT_ANSWERS = {
+    "item/commandExecution/requestApproval": {"decision": "decline"},
+    "item/fileChange/requestApproval": {"decision": "decline"},
+    "item/tool/requestUserInput": {"answers": {}},
+    "item/permissions/requestApproval": {"permissions": {}},
+    "mcpServer/elicitation/request": {"action": "decline"},
+    "applyPatchApproval": {"decision": "denied"},
+    "execCommandApproval": {"decision": "denied"},
+}
+# Section 9.3: the module where CodexTurnEvents reads the lost-turn grace at call time (section 13 "Real seams").
+TURN_EVENTS_MODULE = "vidbyte.harnesses.native.codex.turn_events"
+# INV-10: every logger is logging.getLogger(__name__), so all of them sit under these two names.
+HOST_LOGGER = "vidbyte.harnesses.native.codex"
+TOOLS_LOGGER = "vidbyte.tools.builtins.codex"
+
+
+def is_review_read_back(params: dict[str, Any]) -> bool:
+    """Whether thread/turns/list params are a review read-back: one page, newest first, with every item.
+
+    docs/spec/codex-host-hardening/spec.md INV-38, D-18 and section 9.2 "review read-back" replaced the full-history
+    thread/read of codex-host D-23 with this page.
+    """
+    return params.get("sortDirection") == "desc" and params.get("itemsView") == "full" and params.get("limit") == 1
 
 
 def thread_suffix(thread_id: str) -> str:
@@ -388,13 +444,30 @@ class HostTestCase(unittest.IsolatedAsyncioTestCase):
         """How many matching requests the fake app-server has received so far."""
         return len(self.server.matching(method, predicate))
 
-    async def open_host(self, settings: Any = None) -> Any:
+    async def open_host(self, settings: Any = None, approval_handler: Any = None) -> Any:
         from vidbyte.harnesses.native.codex import CodexHost
 
-        host = CodexHost(settings)
+        # The handler keyword is passed only when a test gives one, so every older call builds CodexHost(settings) as before
+        # (docs/spec/codex-host-hardening/spec.md section 12.5: a host-opening helper that passes approval_handler).
+        host = CodexHost(settings) if approval_handler is None else CodexHost(settings, approval_handler=approval_handler)
         await asyncio.wait_for(host.__aenter__(), WAIT_SECONDS)
         self.addAsyncCleanup(self.close_host, host)
         return host
+
+    def capture_logs(self, *names: str) -> list[logging.LogRecord]:
+        """Record every log record of the named loggers, DEBUG and up, for the rest of the test.
+
+        assertLogs fails when nothing is logged, so the hardening tests that must prove a record is absent use this
+        recorder instead; it restores each logger's level and handlers at cleanup.
+        """
+        recorder = LogRecorder()
+        for name in names or (HOST_LOGGER, TOOLS_LOGGER):
+            logger = logging.getLogger(name)
+            self.addCleanup(logger.setLevel, logger.level)
+            self.addCleanup(logger.removeHandler, recorder)
+            logger.setLevel(logging.DEBUG)
+            logger.addHandler(recorder)
+        return recorder.records
 
     async def close_host(self, host: Any) -> None:
         await asyncio.wait_for(host.__aexit__(None, None, None), CLOSE_SECONDS)
@@ -450,6 +523,36 @@ class HostTestCase(unittest.IsolatedAsyncioTestCase):
         await asyncio.get_running_loop().run_in_executor(None, worker.join, WAIT_SECONDS)
         self.assertEqual(len(outcome), 1, "the call on the other loop never finished")
         return outcome[0]
+
+
+class LogRecorder(logging.Handler):
+    """A logging handler that keeps every record it receives, in order, for log assertions (spec INV-7 to INV-10)."""
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.DEBUG)
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+
+
+def log_events(records: list[logging.LogRecord], event: str) -> list[logging.LogRecord]:
+    """The records whose %-style format string starts with the event name (spec INV-7 to INV-9, INV-23)."""
+    return [record for record in list(records) if isinstance(record.msg, str) and record.msg.split(" ", 1)[0] == event]
+
+
+def log_fields(record: logging.LogRecord) -> dict[str, str]:
+    """The key=value fields of one event record, read from its format string and arguments.
+
+    Every word after the event name must be one key=value field (INV-10). A word with no "=" means a value split in
+    two, so it fails the test rather than being dropped (S5 R-12: an origin such as "<frozen os>" would split).
+    """
+    text = record.getMessage()
+    parts = text.split(" ")[1:]
+    orphans = [part for part in parts if "=" not in part]
+    if orphans:
+        raise AssertionError(f"a value split into words with no '=': {orphans} in {text[:300]!r}")
+    return dict(part.split("=", 1) for part in parts)
 
 
 class _EchoTool(BaseTool):
@@ -706,11 +809,13 @@ class StubCodexHost:
         await self._enter("run_codex_goal", objective=objective, token_budget=token_budget, request=request)
         return self._handle()
 
-    async def list_codex_skills(self, cwd: str = "") -> Any:
+    async def list_codex_skills(self, cwd: str = "", force_reload: bool = False) -> Any:
         from vidbyte.lib.dataclasses.codex_host import CodexSkillInfo
         from vidbyte.lib.enums.codex import CodexSkillScope
 
-        await self._enter("list_codex_skills", cwd=cwd)
+        # docs/spec/codex-host-hardening/spec.md D-30: force_reload mirrors the host's signature. It is recorded only when
+        # set, because no tool may pass it (NG-3), so a recorded force_reload is itself a finding.
+        await self._enter("list_codex_skills", cwd=cwd, **({"force_reload": force_reload} if force_reload else {}))
         path = os.path.abspath(os.path.join(os.sep, "stub-skills", "openai-docs", "SKILL.md"))
         return (CodexSkillInfo(name="openai-docs", description="Stub skill.", path=path, scope=CodexSkillScope.SYSTEM, enabled=True),)
 

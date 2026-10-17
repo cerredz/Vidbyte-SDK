@@ -26,6 +26,7 @@ from tests.features.codex_host.codex_host_support import (
     HostTestCase,
     assert_no_canary,
     error_texts,
+    is_review_read_back,
     requires_sdk,
 )
 from vidbyte.lib.dataclasses.tools import ToolCall, ToolResult
@@ -130,7 +131,8 @@ class CodexHostLateAcceptanceTests(HostTestCase):
             await asyncio.wait_for(task, WAIT_SECONDS)
         hold.release()
         await self.wait_until(lambda: len(seeded.turns) == 2, "Codex to accept the late review")
-        await self.wait_for_request("thread/read", lambda params: params["threadId"] == seeded.thread_id and bool(params.get("includeTurns")))
+        # docs/spec/codex-host-hardening/spec.md INV-38 and D-18: the read-back is one thread/turns/list page of the thread.
+        await self.wait_for_request("thread/turns/list", lambda params: params["threadId"] == seeded.thread_id and is_review_read_back(params))
         await self._assert_owned_and_interrupted_once(host, seeded.thread_id, seeded.turns[-1].turn_id)
 
     async def test_a_start_still_queued_behind_a_blocked_worker_is_never_sent(self) -> None:

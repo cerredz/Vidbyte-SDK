@@ -109,7 +109,7 @@ class CodexClientSettings:
     env: Mapping[str, str] = field(default_factory=dict)
     client_name: str = "codex_python_sdk"
     client_title: str = "Codex Python SDK"
-    client_version: str = "0.162.1"
+    client_version: str = "0.163.0"
     experimental_api: bool = True
 
     def __post_init__(self) -> None:

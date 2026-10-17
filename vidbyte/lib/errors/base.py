@@ -136,7 +136,13 @@ class AgentExecutionError(VidbyteSdkError):
 
 
 class CodexAgentError(AgentExecutionError):
-    """Carries one safe, vocabulary-backed Codex adapter failure."""
+    """Carries one safe, vocabulary-backed Codex adapter failure.
+
+    ``retryable`` says whether the same call can succeed unchanged when it
+    is made again; it is read from ``failure_code`` and is never stored in
+    ``details``. ``with_sentence`` and ``with_operation`` return copies
+    with a longer message or another operation, keeping every other field.
+    """
 
     DIAGNOSTIC_FIELDS = (
         "error_kind",
@@ -185,6 +191,33 @@ class CodexAgentError(AgentExecutionError):
         self.related_docs = related_docs or ("https://developers.openai.com/codex/sdk", "https://developers.openai.com/codex/app-server")
         self.relevant_tests = relevant_tests or ("python scripts/run_ci.py",)
         super().__init__(message, details={"error_kind": self.error_kind, "expected": self.expected, "actual": self.actual, "safe_runtime_details": self.safe_runtime_details, "likely_causes": self.likely_causes, "repair_approaches": self.repair_approaches, "related_docs": self.related_docs, "relevant_tests": self.relevant_tests})
+
+    @property
+    def retryable(self) -> bool:
+        """Whether the same call can succeed unchanged when it is made again."""
+        # @intent retryable-is-read-from-the-code
+        # Read from the code on every access, so each copy that keeps
+        # the code keeps the answer and details never carry it
+        # (D-6). The import stays here so the error hierarchy loads
+        # no constants.
+        from vidbyte.lib.constants.codex_host import CODEX_HOST_RETRYABLE_CODES
+
+        return self.failure_code in CODEX_HOST_RETRYABLE_CODES
+
+    def with_operation(self, operation: str, message: str) -> CodexAgentError:
+        """The same failure under another operation and its message; every other field is kept."""
+        return CodexAgentError(
+            message,
+            failure_code=self.failure_code,
+            operation=operation,
+            error_type=self.safe_runtime_details.get("error_type", ""),
+            next_step=self.next_step,
+            thread_id=self.thread_id,
+            likely_cause=self.likely_cause,
+            method=self.method,
+            related_docs=self.related_docs,
+            relevant_tests=self.relevant_tests,
+        )
 
     def with_sentence(self, sentence: str) -> CodexAgentError:
         """The same failure with sentence appended to its message; every other field is kept."""

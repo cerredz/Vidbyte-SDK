@@ -1,17 +1,19 @@
 """FILE: vidbyte/harnesses/native/codex/wire.py
 
 PURPOSE: Translates between CodexHost and the openai-codex wire: the JSON params of every app-server call the host sends, and the records, snapshots and results it builds from what Codex answers.
-ROLE IN CODEBASE: The wire layer of vidbyte/harnesses/native/codex/; CodexHost and CodexPreflight build every params object with CodexParamsTranslator and read every answer through CodexResponseTranslator.
-ARCHITECTURE NOTE: openai-codex's generated models are imported at module level, so only CodexHost.__aenter__ imports this module (D-21). Thread and turn params reuse CodexContentTranslator's settings translation, are validated with the generated params model and dumped by alias, so their wire shape comes from openai-codex itself.
-COMMON MODIFICATION PATTERNS: A new params field goes through its settings record and CodexContentTranslator first; a new record gets one CodexResponseTranslator method that reads the generated model's typed fields, never the account email.
-KNOWN EDGE CASES: CodexContentTranslator always writes config["agents"], so unless subagents are set the caller's own agents entry is put back or the key dropped (INV-30); a granular approval policy has no plain value, so it never counts as never (D-32); a goal run's result spans every physical turn it ran.
-RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.1 D-17, D-20, D-29, D-32 and D-34, and 9.2 wire translation and goal table); docs/spec/codex-host-thread-helpers/spec.md (sections 6.1 INV-11, INV-15, INV-17, INV-20, INV-23 and 9.2 wire calls)
-TESTS: tests/features/codex_host/test_codex_host_turns.py, tests/features/codex_host/test_codex_host_threads.py, tests/features/codex_host/test_codex_host_review_goals.py, tests/features/codex_host/test_codex_host_thread_helpers.py, tests/features/codex_host/test_codex_host_goal_skills.py
+ROLE IN CODEBASE: The wire layer of vidbyte/harnesses/native/codex/; CodexHost, CodexPreflight and the server-request router build every params object and every server-request answer with CodexParamsTranslator, and read every answer through CodexResponseTranslator.
+ARCHITECTURE NOTE: openai-codex's generated models are imported at module level, so only CodexHost.__aenter__ imports this module (D-21). Thread and turn params reuse CodexContentTranslator's settings translation, are validated with the generated params model and dumped by alias, so their wire shape comes from openai-codex itself; a field the params model lacks, such as dynamicTools or the experimental fork fields, is added after validation (hardening section 8.5).
+COMMON MODIFICATION PATTERNS: A new params field goes through its settings record and CodexContentTranslator first; a new record gets one CodexResponseTranslator method that reads the generated model's typed fields, never the account email. A new routed server-request kind adds one encoding branch to server_answer, and a new fixed answer goes in CODEX_HOST_SERVER_REQUEST_DEFAULT_ANSWERS (vidbyte/lib/constants/codex_host.py), which default_answer copies.
+KNOWN EDGE CASES: CodexContentTranslator always writes config["agents"], so unless subagents are set the caller's own agents entry is put back or the key dropped (INV-30); a granular approval policy has no plain value, so it never counts as never (D-32); a goal run's result spans every physical turn it ran. default_answer hands out a copy, never the shared table's own object, and answers currentTime/read with the time now. A fork with before_turn_id sends no lastTurnId (hardening INV-28).
+RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.1 D-17, D-20, D-29, D-32 and D-34, and 9.2 wire translation and goal table); docs/spec/codex-host-thread-helpers/spec.md (sections 6.1 INV-11, INV-15, INV-17, INV-20, INV-23 and 9.2 wire calls); docs/spec/codex-host-hardening/spec.md (sections 6.1 INV-15, INV-28, INV-32, INV-36 to INV-38, and 8.5)
+TESTS: tests/features/codex_host/test_codex_host_turns.py, tests/features/codex_host/test_codex_host_threads.py, tests/features/codex_host/test_codex_host_review_goals.py, tests/features/codex_host/test_codex_host_thread_helpers.py, tests/features/codex_host/test_codex_host_goal_skills.py, tests/features/codex_host/test_codex_host_approvals.py, tests/features/codex_host/test_codex_host_turn_settings.py, tests/features/codex_host/test_codex_host_fork_review.py
 """
 
 from __future__ import annotations
 
+import copy
 import re
+import time
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, replace
 from typing import Any
@@ -75,6 +77,7 @@ from vidbyte.lib.constants.codex import (
     CODEX_USAGE_PROVIDER,
 )
 from vidbyte.lib.constants.codex_host import (
+    CODEX_CURRENT_TIME_READ_METHOD,
     CODEX_HOST_APPROVAL_FIELDS,
     CODEX_HOST_EXITED_MESSAGE,
     CODEX_HOST_MINIMUM_VERSION_PARTS,
@@ -82,11 +85,14 @@ from vidbyte.lib.constants.codex_host import (
     CODEX_HOST_NO_FINAL_ANSWER_MESSAGE,
     CODEX_HOST_NO_GOAL_MODE_MESSAGE,
     CODEX_HOST_PROMPT_CONTEXT_MESSAGE,
+    CODEX_HOST_REVIEW_READ_BACK_LIMIT,
     CODEX_HOST_SANDBOX_NOT_READY,
     CODEX_HOST_SCHEMA_MESSAGE,
+    CODEX_HOST_SERVER_REQUEST_DEFAULT_ANSWERS,
     CODEX_HOST_SIGNED_OUT_MESSAGE,
     CODEX_HOST_UNUSABLE_SCHEMA_MESSAGE,
     CODEX_HOST_VERSION_PATTERN,
+    CODEX_TURN_ITEMS_VIEW_NOT_LOADED,
 )
 from vidbyte.lib.dataclasses.codex import (
     CodexAgentSettings,
@@ -104,6 +110,8 @@ from vidbyte.lib.dataclasses.codex_host import (
     CodexRateLimitWindow,
     CodexReadiness,
     CodexReviewTarget,
+    CodexServerAnswer,
+    CodexServiceTier,
     CodexSkillInfo,
     CodexSpawnRequest,
     CodexStoredTurn,
@@ -124,6 +132,7 @@ from vidbyte.lib.enums.codex import (
     CodexGoalStatus,
     CodexReviewDelivery,
     CodexSandboxReadiness,
+    CodexServerRequestKind,
     CodexSkillScope,
     CodexSortDirection,
     CodexThreadSortKey,
@@ -212,35 +221,62 @@ class CodexParamsTranslator:
         values.update(thread_id=thread_id, exclude_turns=True)
         return ThreadResumeParams.model_validate(values).model_dump(by_alias=True, exclude_none=True, mode="json")
 
-    def thread_fork(self, thread_id: str, last_turn_id: str, exclude_turns: bool, request: CodexSpawnRequest) -> dict[str, Any]:
+    def thread_fork(
+        self,
+        thread_id: str,
+        last_turn_id: str,
+        exclude_turns: bool,
+        request: CodexSpawnRequest,
+        before_turn_id: str = "",
+        defer_goal_continuation: bool = False,
+    ) -> dict[str, Any]:
         # @intent fork-through-one-completed-turn
-        # A fork copies the thread through last_turn_id; excludeTurns is
-        # sent only when asked for, and only shapes Codex's answer
-        # (D-29).
+        # A fork copies the thread through last_turn_id, or up to the
+        # turn the caller named in before_turn_id, which then replaces
+        # it; excludeTurns is sent only when asked for, and only shapes
+        # Codex's answer (D-29). The two experimental fields are added
+        # after validation, because the params model lacks them
+        # (hardening INV-28 steps 5 and 6).
         values = CodexContentTranslator.thread_fork_kwargs(request.developer_instructions, self._agent(request), self._sdk)
         self._approvals(values, self._explicit(request), CodexApprovalMode.PROVIDER_DEFAULT)
         self._thread_sandbox(values)
         self._agents_config(values, request)
-        values.update(thread_id=thread_id, last_turn_id=last_turn_id)
+        values["thread_id"] = thread_id
+        if not before_turn_id:
+            values["last_turn_id"] = last_turn_id
         if exclude_turns:
             values["exclude_turns"] = True
-        return ThreadForkParams.model_validate(values).model_dump(by_alias=True, exclude_none=True, mode="json")
+        params = ThreadForkParams.model_validate(values).model_dump(by_alias=True, exclude_none=True, mode="json")
+        if before_turn_id:
+            params["beforeTurnId"] = before_turn_id
+        if defer_goal_continuation:
+            params["deferGoalContinuation"] = True
+        return params
 
     def turn_start(self, thread_id: str, request: CodexSpawnRequest) -> dict[str, Any]:
         # @intent a-turn-sends-only-its-own-posture
-        # The turn's approval_mode, sandbox, plugins and output schema
-        # go on the turn. The explicit approval fields belong to the
-        # thread, so a turn never repeats them (INV-28). The input items
-        # are set by openai-codex's turn_start, so an empty list stands
-        # in here.
+        # The turn's approval_mode, sandbox, plugins, output schema and
+        # service tier go on the turn. The explicit approval fields
+        # belong to the thread, so a turn never repeats them (INV-28).
+        # Network access and writable roots ride inside the sandbox
+        # policy, whose sandbox the request record already checked
+        # (hardening INV-36, INV-37). The input items are set by
+        # openai-codex's turn_start, so an empty list stands in here.
         output_schema = self._schemas.output_schema(request.output_schema)
         values = CodexContentTranslator.turn_kwargs(self._agent(request), output_schema, self._sdk)
         self._approvals(values, {}, CodexApprovalMode.PROVIDER_DEFAULT)
         sandbox = values.pop("sandbox", None)
         if sandbox is not None:
-            values["sandbox_policy"] = {"type": CODEX_SANDBOX_TURN_POLICY[sandbox.value]}
+            policy: dict[str, Any] = {"type": CODEX_SANDBOX_TURN_POLICY[sandbox.value]}
+            if request.network_access is not None:
+                policy["networkAccess"] = request.network_access
+            if request.writable_roots:
+                policy["writableRoots"] = list(request.writable_roots)
+            values["sandbox_policy"] = policy
         if request.disabled_plugin_ids is not None:
             values["disabled_plugin_ids"] = list(request.disabled_plugin_ids)
+        if request.turn_service_tier:
+            values["service_tier_for_turn"] = request.turn_service_tier
         values.update(thread_id=thread_id, input=[])
         return TurnStartParams.model_validate(values).model_dump(by_alias=True, exclude_none=True, mode="json")
 
@@ -281,7 +317,7 @@ class CodexParamsTranslator:
     ) -> dict[str, Any]:
         # Every set argument goes under its wire name; empty ones, a
         # None limit, and archived when False, are left out (section
-        # 9.2), so list_codex_threads never sends a limit.
+        # 9.2), so a limit is sent only when given (hardening INV-29).
         values = {
             "cwd": cwd,
             "searchTerm": search,
@@ -312,10 +348,52 @@ class CodexParamsTranslator:
         return params
 
     @staticmethod
-    def skills_list(cwd: str) -> dict[str, Any]:
+    def turns_scan(thread_id: str, cursor: str) -> dict[str, Any]:
+        # One page of a thread's turns, newest first and without their
+        # items, which is all a fork point needs (hardening INV-28 step
+        # 5); the cursor is sent only when set.
+        params: dict[str, Any] = {"threadId": thread_id, "sortDirection": CodexSortDirection.DESC.value, "itemsView": CODEX_TURN_ITEMS_VIEW_NOT_LOADED}
+        if cursor:
+            params["cursor"] = cursor
+        return params
+
+    @staticmethod
+    def review_read_back(thread_id: str) -> dict[str, Any]:
+        # The newest stored turn with every item: one page holds the
+        # review turn that just ended, never the whole history
+        # (hardening INV-38).
+        return {"threadId": thread_id, "sortDirection": CodexSortDirection.DESC.value, "itemsView": CODEX_TURN_ITEMS_VIEW_FULL, "limit": CODEX_HOST_REVIEW_READ_BACK_LIMIT}
+
+    @staticmethod
+    def skills_list(cwd: str, force_reload: bool = False) -> dict[str, Any]:
         # The skills of one folder, or of the app-server's own working
-        # folder when cwd is empty (INV-23).
-        return {"cwds": [cwd]} if cwd else {}
+        # folder when cwd is empty (INV-23); forceReload is sent only
+        # when asked for (hardening INV-32).
+        params: dict[str, Any] = {"cwds": [cwd]} if cwd else {}
+        if force_reload:
+            params["forceReload"] = True
+        return params
+
+    @staticmethod
+    def server_answer(kind: CodexServerRequestKind, answer: CodexServerAnswer) -> dict[str, Any]:
+        # @intent a-handler-answer-in-the-wire-shape
+        # A question gets its answers keyed by question id, which are
+        # none unless the handler accepted; an approval gets its
+        # decision (hardening INV-15). The router checked that the
+        # answer fits its request before this runs (INV-18).
+        if kind is CodexServerRequestKind.USER_INPUT:
+            return {"answers": {item.question_id: {"answers": list(item.answers)} for item in answer.answers}}
+        return {"decision": answer.decision.value}
+
+    @staticmethod
+    def default_answer(method: str) -> dict[str, Any]:
+        # The fixed fail-closed answer of a server request, as a fresh
+        # copy so the shared table is never handed out. The current
+        # time is read now, in whole seconds, and a method the table
+        # does not list gets an empty answer (hardening INV-15, EC-10).
+        if method == CODEX_CURRENT_TIME_READ_METHOD:
+            return {"currentTimeAt": int(time.time())}
+        return copy.deepcopy(dict(CODEX_HOST_SERVER_REQUEST_DEFAULT_ANSWERS.get(method, {})))
 
     @staticmethod
     def review(thread_id: str, target: CodexReviewTarget, delivery: CodexReviewDelivery) -> dict[str, Any]:
@@ -434,12 +512,13 @@ class CodexResponseTranslator:
             return CodexErrorMapper.problem(FailureCode.CODEX_SANDBOX_NOT_READY, f"The Codex Windows sandbox reports {readiness.value}.")
         return None
 
-    def readiness(self, version: str, response: GetAccountResponse, sandbox: CodexSandboxReadiness) -> CodexReadiness:
+    def readiness(self, version: str, response: GetAccountResponse, usage: CodexProblem | None, sandbox: CodexSandboxReadiness) -> CodexReadiness:
         # The account maps to its kind and ChatGPT plan only; the email
         # is never read (INV-9). Each problem found is reported, not
-        # raised.
+        # raised, in the order sign-in, usage, sandbox; the usage
+        # problem is the preflight's own (hardening INV-24, D-25).
         account = response.account.root if response.account is not None else None
-        problems = tuple(problem for problem in (self.sign_in_problem(response), self.sandbox_problem(sandbox)) if problem is not None)
+        problems = tuple(problem for problem in (self.sign_in_problem(response), usage, self.sandbox_problem(sandbox)) if problem is not None)
         return CodexReadiness(
             ready=not problems,
             version=version,
@@ -472,7 +551,9 @@ class CodexResponseTranslator:
 
     @staticmethod
     def model_info(model: Model) -> CodexModelInfo:
-        # One listed model with its reasoning efforts by wire value.
+        # One listed model with its reasoning efforts by wire value and
+        # the service tiers it offers; Codex may send no tier list
+        # (hardening INV-36).
         return CodexModelInfo(
             model_id=model.id,
             model=model.model,
@@ -482,6 +563,8 @@ class CodexResponseTranslator:
             is_default=model.is_default,
             default_effort=model.default_reasoning_effort.value,
             efforts=tuple(option.reasoning_effort.value for option in model.supported_reasoning_efforts),
+            service_tiers=tuple(CodexServiceTier(tier_id=tier.id, name=tier.name, description=tier.description) for tier in model.service_tiers or ()),
+            default_service_tier=model.default_service_tier or "",
         )
 
     @staticmethod
@@ -586,19 +669,22 @@ class CodexResponseTranslator:
         return CodexTurnPage(turns=turns, next_cursor=response.next_cursor or "")
 
     @staticmethod
-    def fork_point(thread: Thread, from_turn_id: str) -> str:
-        # D-29: a fork goes through a completed turn; an empty
-        # from_turn_id means the last completed one, and "" means there
-        # is none.
-        completed = [turn.id for turn in thread.turns if turn.status.value == CodexTurnStatus.COMPLETED.value]
-        if from_turn_id:
-            return from_turn_id if from_turn_id in completed else ""
-        return next(reversed(completed), "")
+    def fork_point(turns: Sequence[Turn], from_turn_id: str) -> str | None:
+        # D-29: a fork goes through a completed turn. The turns come
+        # newest first, one page at a time: an empty from_turn_id means
+        # the first completed turn, and a named turn counts only when
+        # completed. "" means these turns rule the point out, and None
+        # means they do not decide it (hardening INV-28 step 5).
+        completed = CodexTurnStatus.COMPLETED.value
+        for turn in turns:
+            if turn.id == from_turn_id or (not from_turn_id and turn.status.value == completed):
+                return turn.id if turn.status.value == completed else ""
+        return None
 
     @staticmethod
-    def stored_turn(thread: Thread, turn_id: str) -> Turn | None:
+    def stored_turn(turns: Sequence[Turn], turn_id: str) -> Turn | None:
         # The turn a read-back found, if Codex stored it already (D-23).
-        return next((turn for turn in thread.turns if turn.id == turn_id), None)
+        return next((turn for turn in turns if turn.id == turn_id), None)
 
     @staticmethod
     def pricing(model: str, provider: str, turn_model: str) -> CodexAgentSettings:
@@ -621,6 +707,12 @@ class CodexResponseTranslator:
     def exited(handle: CodexTurnHandle) -> CodexTurnSnapshot:
         # A turn still running when the host closed or its process died.
         return CodexTurnSnapshot(handle=handle, status=CodexTurnStatus.FAILED, problem=CodexErrorMapper.problem(FailureCode.CODEX_PROCESS_EXITED, CODEX_HOST_EXITED_MESSAGE))
+
+    @staticmethod
+    def failed(handle: CodexTurnHandle, code: FailureCode, message: str) -> CodexTurnSnapshot:
+        # A turn the host ended itself, because handling its events
+        # failed or its events were lost (hardening INV-11 to INV-13).
+        return CodexTurnSnapshot(handle=handle, status=CodexTurnStatus.FAILED, problem=CodexErrorMapper.problem(code, message))
 
     def turn_snapshot(self, turn: CodexLiveTurn, items: Sequence[ThreadItem], reported: Turn | None) -> CodexTurnSnapshot:
         # A plain or review turn ends with Codex's own status; Vidbyte's

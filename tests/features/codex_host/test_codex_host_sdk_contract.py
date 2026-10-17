@@ -1,9 +1,9 @@
 """FILE: tests/features/codex_host/test_codex_host_sdk_contract.py
 
 PURPOSE: Pins the openai-codex surface CodexHost reaches past the package root for, so that a pin bump which moves or renames it fails here instead of in a live run: the openai_codex.client import path the connection module binds as its test seam, the parameters of every CodexClient method in the spec's section 12.4 call list, the private goal cursor and goal state CodexGoalFinishRule and the goal watcher rely on, and the required reviewer and policy fields D-32 reads.
-ROLE IN CODEBASE: Contract layer of tests/features/codex_host/ (spec D-1, D-32, NFR-8 and section 13 "SDK surface outside the public API"). Each test also binds the host module that depends on the fact, so it fails until that module exists. The class needs the optional openai-codex extra, so CI skips it.
+ROLE IN CODEBASE: Contract layer of tests/features/codex_host/ (spec D-1, D-32, NFR-8 and section 13 "SDK surface outside the public API"; docs/spec/codex-host-hardening/spec.md AC-34, INV-3, INV-39, D-7, D-16, D-18, D-19, D-24 and section 13 "SDK contract", which extends this file). Each test also binds the host module that depends on the fact, so it fails until that module exists. The classes need the optional openai-codex extra, so CI skips them.
 ARCHITECTURE NOTE: The scripted fake client subclasses the real CodexClient, so it cannot notice a pin bump that renames a parameter the host passes by keyword or a private goal hook the host calls. These tests read the installed SDK directly: signatures through inspect, response fields through the generated pydantic models, and one real _GoalOperationState. Nothing starts a process.
-COMMON MODIFICATION PATTERNS: When the host starts calling another CodexClient method, add its row to CALL_LIST with the parameters the host passes. When the openai-codex pin moves, rerun this file before anything else.
+COMMON MODIFICATION PATTERNS: When the host starts calling another CodexClient method, add its row to CALL_LIST with the parameters the host passes. When the openai-codex pin moves, rerun this file before anything else. A wire field the hardening slice sends joins HARDENING_WIRE_FIELDS with its alias.
 KNOWN EDGE CASES: A parameter the host does not pass may be added by a later SDK release as long as it has a default, so the call-list check pins the host's own parameters, their order and kind, and that no other parameter is required.
 RELATED DOCS: tests/features/codex_host/FEATURE.md; docs/spec/codex-host/spec.md sections 8.1 (D-1, D-32), 12.3 rows 11 to 13, 12.4 (the S012 call list) and 13.
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/codex_host/test_codex_host_sdk_contract.py
@@ -51,6 +51,22 @@ CALL_LIST: dict[str, tuple[str, ...]] = {
 RAW_CALL_KEYWORDS = ("response_model", "max_attempts")
 
 POSITIONAL_KINDS = (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+
+# docs/spec/codex-host-hardening/spec.md: each generated params model the slice sends through, the field it sets and its wire alias.
+HARDENING_WIRE_FIELDS: tuple[tuple[str, str, str], ...] = (
+    ("TurnStartParams", "service_tier_for_turn", "serviceTierForTurn"),
+    ("TurnStartParams", "sandbox_policy", "sandboxPolicy"),
+    ("WorkspaceWriteSandboxPolicy", "network_access", "networkAccess"),
+    ("WorkspaceWriteSandboxPolicy", "writable_roots", "writableRoots"),
+    ("ReadOnlySandboxPolicy", "network_access", "networkAccess"),
+    ("SkillsListParams", "force_reload", "forceReload"),
+    ("ThreadListParams", "limit", "limit"),
+    ("ThreadTurnsListParams", "sort_direction", "sortDirection"),
+    ("ThreadTurnsListParams", "items_view", "itemsView"),
+    ("ThreadTurnsListParams", "limit", "limit"),
+    ("Model", "service_tiers", "serviceTiers"),
+    ("Model", "default_service_tier", "defaultServiceTier"),
+)
 
 
 def _parameters(function: Callable[..., Any]) -> list[inspect.Parameter]:
@@ -125,6 +141,46 @@ class CodexHostSdkContractTests(unittest.TestCase):
                     field_info = model.model_fields[field_name]
                     self.assertTrue(field_info.is_required())
                     self.assertEqual(field_info.alias, alias)
+
+
+@requires_sdk
+class CodexHardeningSdkContractTests(unittest.TestCase):
+    """AC-34, INV-3 and the 0.163.0 wire the hardening slice sends: pinned so the next pin bump fails here first."""
+
+    def test_the_installed_sdk_is_the_pinned_0_163_release(self) -> None:
+        import importlib.metadata
+
+        self.assertTrue(importlib.metadata.version("openai-codex").startswith("0.163."), importlib.metadata.version("openai-codex"))
+
+    def test_the_connection_retries_reads_with_the_sdks_own_helper_and_its_default_policy(self) -> None:
+        # INV-3 and D-7: row 12 binds openai_codex.retry.retry_on_overload at module level; three attempts is the default policy.
+        import openai_codex.retry
+
+        from vidbyte.harnesses.native.codex import connection
+
+        self.assertIs(connection.retry_on_overload, openai_codex.retry.retry_on_overload)
+        parameters = inspect.signature(openai_codex.retry.retry_on_overload).parameters
+        self.assertEqual(parameters["max_attempts"].default, 3)
+        self.assertEqual(list(parameters)[0], "op")
+
+    def test_the_generated_models_carry_each_field_the_slice_sends(self) -> None:
+        from openai_codex.generated import v2_all
+
+        for model_name, field_name, alias in HARDENING_WIRE_FIELDS:
+            with self.subTest(model=model_name, field=field_name):
+                field_info = getattr(v2_all, model_name).model_fields[field_name]
+                self.assertEqual(field_info.alias or field_name, alias)
+        self.assertEqual(set(v2_all.ModelServiceTier.model_fields), {"id", "name", "description"})
+
+    def test_the_fork_params_lack_the_experimental_fields_so_they_are_added_after_validation(self) -> None:
+        # Section 8.5 seam 2 and D-19: beforeTurnId and deferGoalContinuation are not on the generated model, so
+        # CodexParamsTranslator.thread_fork adds them to the dumped dict; if 0.164 adds them, that code can move.
+        from openai_codex.generated.v2_all import ThreadForkParams
+
+        aliases = {info.alias or name for name, info in ThreadForkParams.model_fields.items()}
+        self.assertIn("lastTurnId", aliases)
+        self.assertNotIn("beforeTurnId", aliases)
+        self.assertNotIn("deferGoalContinuation", aliases)
 
 
 if __name__ == "__main__":

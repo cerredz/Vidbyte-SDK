@@ -4,7 +4,9 @@ PURPOSE:
     Counts every start position where a substring occurs, including matches
     that overlap, so "exactly once" edit checks cannot mistake two overlapping
     matches for one. Also estimates how many tokens a text holds, and cuts a
-    text to a token budget, with one fixed characters-per-token rule.
+    text to a token budget, with one fixed characters-per-token rule. And
+    writes any text as one bounded, space-free log token, so a value a
+    peer chose cannot split or forge a key=value log record.
 
 ROLE IN CODEBASE:
     SubstringCounter is called by the unique-match edit tools: PatchTool
@@ -15,7 +17,10 @@ ROLE IN CODEBASE:
     TokenEstimate is called by the InfiniteMemory agent
     (vidbyte/agents/infinite/) for every workspace cap, the map, and the
     result cards, and by its toolset (vidbyte/tools/toolsets/infinite.py)
-    for grep's file-size cap. Calls only str methods and math.ceil.
+    for grep's file-size cap. LogToken is called by the Codex host
+    (vidbyte/harnesses/native/codex/) for every id it logs, with its own
+    limit, CODEX_HOST_LOG_TOKEN_MAX_CHARS. Calls only str methods and
+    math.ceil.
 
 ARCHITECTURE NOTE:
     Static-method-only classes with no SDK dependencies. Python's str.count
@@ -32,7 +37,10 @@ FUNCTION INVENTORY:
     otherwise its prefix of max_tokens times four characters.
     TokenEstimate.cap(text, max_tokens, marker) -> str: the text when it
     fits, otherwise its cut followed by the marker, so a reader sees that
-    text was left out.
+    text was left out. LogToken.of(value, limit) -> str: value with every
+    character outside ASCII letters, digits and _.:/- replaced by _, and,
+    when it is longer than limit, its first limit characters followed by
+    "...".
 
 COMMON MODIFICATION PATTERNS:
     Add another general text helper as a @staticmethod here.
@@ -42,22 +50,31 @@ WHAT NOT TO DO IN THIS FILE:
     2. Do not replace the loop with str.count; it misses overlapping matches.
     3. Do not change TOKEN_ESTIMATE_CHARS_PER_TOKEN without checking every
        cap that is counted with it.
+    4. Do not give LogToken a limit of its own; each caller passes the
+       limit its logs need.
 
 KNOWN EDGE CASES:
     An empty search raises ValueError; every caller rejects it earlier.
     TokenEstimate counts characters, not bytes, so five euro signs are 2
     tokens. cap adds the marker after the cut, so a capped text can be
-    the marker's length over max_tokens.
+    the marker's length over max_tokens. LogToken maps code points, so an
+    emoji or a non-ASCII digit is one _, and a token is at most limit + 3
+    characters; "" stays "", and a token maps to itself.
 
 RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/unique-edit-overlapping-matches.md;
-    docs/spec/infinite-memory-agent/spec.md (TokenEstimate, FR-15)
+    docs/spec/infinite-memory-agent/spec.md (TokenEstimate, FR-15);
+    docs/spec/codex-host-hardening/spec.md (LogToken, INV-10)
 
 TESTS:
     tests/test_patch_tool.py, tests/test_filesystem_tools.py, and
     tests/test_context_primitives_builtins.py cover SubstringCounter through
     its callers. tests/features/infinite_memory_agent/test_infinite_memory_contract.py
     covers TokenEstimate, count, cut, and cap.
+    tests/features/codex_host/test_codex_host_hardening_contract.py
+    (CodexLogTokenTests) covers LogToken, and
+    tests/features/codex_host/test_codex_host_observability.py
+    (CodexLogTokenRecordTests) covers it in the Codex host's records.
 """
 
 from __future__ import annotations
@@ -108,4 +125,20 @@ class TokenEstimate:
         return f"{TokenEstimate.cut(text, max_tokens)}{marker}"
 
 
-__all__ = ["TOKEN_ESTIMATE_CHARS_PER_TOKEN", "SubstringCounter", "TokenEstimate"]
+class LogToken:
+    """Static-method home for writing any text as one bounded log token."""
+
+    @staticmethod
+    def of(value: str, limit: int) -> str:
+        """Return value as one space-free token: each character outside ASCII letters, digits and _.:/- becomes _, and a value longer than limit keeps its first limit characters followed by "..."."""
+        # @intent a-logged-value-is-one-bounded-token
+        # A value a peer chose can carry a space, "=" or a newline that
+        # splits or forges a key=value record, or be long enough to
+        # flood it. Each character maps to one character, so mapping
+        # only the first limit characters gives the same token as
+        # mapping the whole value first, and a huge value costs no more.
+        kept = "".join(character if character.isascii() and (character.isalnum() or character in "_.:/-") else "_" for character in value[:limit])
+        return kept if len(value) <= limit else f"{kept}..."
+
+
+__all__ = ["TOKEN_ESTIMATE_CHARS_PER_TOKEN", "LogToken", "SubstringCounter", "TokenEstimate"]

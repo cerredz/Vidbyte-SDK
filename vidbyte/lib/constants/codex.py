@@ -4,8 +4,8 @@ PURPOSE: Defines shared operational constants for the Codex harness adapter.
 ROLE IN CODEBASE: Supplies stable bounds, counters, provider labels, and item vocabularies.
 ARCHITECTURE NOTE: Constants live below agent modules so every collaborator can import them safely.
 COMMON MODIFICATION PATTERNS: Add a CODEX-prefixed value when adapter behavior needs a shared literal.
-KNOWN EDGE CASES: Supported item kinds track the pinned openai-codex compatibility range.
-RELATED DOCS: docs/design/codex-harness-agent.md; docs/spec/codex-host-thread-helpers/spec.md (section 9.3).
+KNOWN EDGE CASES: Supported item kinds track the pinned openai-codex compatibility range. CodexHost's own fixed values live in vidbyte/lib/constants/codex_host.py; this module keeps the values shared with the harness agent, and the hardening slice changes three of their texts and removes CODEX_ACCEPTED_APPROVAL_METHODS and CODEX_APPROVAL_ACCEPT_DECISION, because the host's router no longer accepts approvals: it declines them unless the developer's approval_handler answers (hardening section 9.3, D-3).
+RELATED DOCS: docs/design/codex-harness-agent.md; docs/spec/codex-host-thread-helpers/spec.md (section 9.3); docs/spec/codex-host-hardening/spec.md (section 9.3).
 TESTS: python scripts/run_ci.py; tests/features/codex_host/test_codex_host_helper_surface.py and tests/features/codex_host/test_codex_host_records.py.
 """
 
@@ -370,8 +370,9 @@ CODEX_HOST_CLOSE_WAIT_SECONDS = 10.0
 # The host's dynamic-tools opt-in message (INV-29).
 CODEX_HOST_EXPERIMENTAL_API_TEXT = "Dynamic tools on CodexHost require CodexClientSettings(experimental_api=True)."
 # The next step of every configuration.unsupported_combination refusal:
-# a USER reviewer at construction (D-16) or reported by Codex (D-32).
-CODEX_HOST_USER_REVIEWER_TEXT = "Set approvals_reviewer=AUTO_REVIEW or GUARDIAN_SUBAGENT, and set it whenever approval_policy is set. To continue a thread whose reviewer is user, pass overrides=CodexSpawnRequest(approvals_reviewer=AUTO_REVIEW), or set it in the CodexHostTools spawn_defaults. Answering approval requests in code needs set_codex_approval_handler, which this release does not include."
+# a USER reviewer on a host without an approval_handler, refused before
+# any request or reported by Codex (D-32, hardening D-5).
+CODEX_HOST_USER_REVIEWER_TEXT = "Set approvals_reviewer=AUTO_REVIEW or GUARDIAN_SUBAGENT, and set it whenever approval_policy is set. To continue a thread whose reviewer is user, pass overrides=CodexSpawnRequest(approvals_reviewer=AUTO_REVIEW), or set it in the CodexHostTools spawn_defaults. To answer approval requests in code instead, open the host as CodexHost(approval_handler=...)."
 # The oldest codex runtime the host talks to, the SDK's own floor (D-5).
 CODEX_HOST_MINIMUM_VERSION = "0.151.0"
 # The executable name the host resolves on PATH (D-4).
@@ -463,12 +464,6 @@ CODEX_SANDBOX_TURN_POLICY: Mapping[str, str] = {
     "workspace-write": "workspaceWrite",
     "full-access": "dangerFullAccess",
 }
-# Approval requests the host's router accepts, mirroring the SDK's own
-# default handler (D-16).
-CODEX_ACCEPTED_APPROVAL_METHODS = frozenset(
-    {"item/commandExecution/requestApproval", "item/fileChange/requestApproval"}
-)
-CODEX_APPROVAL_ACCEPT_DECISION = "accept"
 # Maps a turn error's codexErrorInfo key to a failure code; every other
 # key means codex.api_error.
 CODEX_ERROR_INFO_CODES: Mapping[str, str] = {
@@ -498,7 +493,7 @@ CODEX_NEXT_STEPS: Mapping[str, str] = {
     FailureCode.CODEX_VERSION_UNSUPPORTED.value: "Run codex update, then open a new CodexHost.",
     FailureCode.CODEX_NOT_SIGNED_IN.value: "Run codex login, then retry.",
     FailureCode.CODEX_USAGE_LIMITED.value: "Wait until the usage window resets, or sign Codex in with an API key.",
-    FailureCode.CODEX_MODEL_UNKNOWN.value: "Pick a model from list_codex_models.",
+    FailureCode.CODEX_MODEL_UNKNOWN.value: "Pick a model, and a service tier it lists, from list_codex_models.",
     FailureCode.CODEX_SESSION_NOT_FOUND.value: "Find the thread with list_codex_threads, or use a handle this host returned; continue a finished turn instead of steering it.",
     FailureCode.CODEX_SESSION_BUSY.value: "Steer or wait on the running turn, or fork the thread.",
     FailureCode.CODEX_BUDGET_EXHAUSTED.value: "Raise max_output_tokens or the goal token_budget, or split the work.",
@@ -512,7 +507,7 @@ CODEX_NEXT_STEPS: Mapping[str, str] = {
     FailureCode.CODEX_COMMAND_NOT_RUN.value: "Read what Codex recorded with get_codex_goal or list_codex_turns, then start the run again.",
     FailureCode.CODEX_SKILL_NOT_FOUND.value: "Pick a skill that list_codex_skills reports for the same working folder, and pass its exact name.",
     FailureCode.CODEX_SKILL_DISABLED.value: "Enable the skill in your Codex configuration, or pick an enabled skill that list_codex_skills reports.",
-    FailureCode.CODEX_GOAL_UNFINISHED.value: "Continue the thread with continue_codex_thread until its goal is complete, or clear the goal from a Codex client, then compact the thread again.",
+    FailureCode.CODEX_GOAL_UNFINISHED.value: "Let the goal finish or clear it from a Codex client, then call again.",
     FailureCode.CODEX_FORK_FAILED.value: "Fork from a completed turn.",
     FailureCode.CODEX_RESPONSE_INVALID.value: "Continue the thread and ask for a final answer.",
     FailureCode.CONFIGURATION_INVALID_ARGUMENT.value: "Fix the argument or setup named in the message, then call again.",
@@ -606,8 +601,6 @@ __all__ = [
     "CODEX_APPROVAL_MODE_WIRE",
     "CODEX_SANDBOX_THREAD_MODE",
     "CODEX_SANDBOX_TURN_POLICY",
-    "CODEX_ACCEPTED_APPROVAL_METHODS",
-    "CODEX_APPROVAL_ACCEPT_DECISION",
     "CODEX_ERROR_INFO_CODES",
     "CODEX_GOAL_TERMINAL_STATUSES",
     "CODEX_NEXT_STEPS",

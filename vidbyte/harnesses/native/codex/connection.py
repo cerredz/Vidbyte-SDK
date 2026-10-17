@@ -1,34 +1,36 @@
 """FILE: vidbyte/harnesses/native/codex/connection.py
 
-PURPOSE: Owns one CodexHost's openai-codex client: the host's own call executor, every bounded app-server call, the shielded spending starts and their late acceptance, the liveness monitor, the close thread, and the server-request router that answers approvals and dynamic tool calls.
-ROLE IN CODEBASE: The process and transport layer of vidbyte/harnesses/native/codex/; CodexHost and CodexPreflight reach Codex only through CodexConnection.
-ARCHITECTURE NOTE: "from openai_codex.client import CodexClient, CodexConfig" at module level is the test seam (section 13), so only CodexHost.__aenter__ imports this module (D-21). Every call runs on the host's own ThreadPoolExecutor, bounded by asyncio.wait_for, never on the loop or its default executor (D-1); the bounds are read from this module's namespace at call time.
-COMMON MODIFICATION PATTERNS: A new app-server call goes through call() with a typed CodexClient method, or through raw() when openai-codex has no typed method, with its generated response model's name in CODEX_HOST_RAW_RESPONSE_MODELS (vidbyte/lib/constants/codex_host.py); a raw call that spends usage is added to CODEX_HOST_SPENDING_RAW_METHODS there, so it is sent once (D-2).
-KNOWN EDGE CASES: A spending start that outlives its caller or its bound is owned, never orphaned: a queued start is withdrawn, and a running one posts its outcome to the loop when it returns (INV-11). The router and the done-callback run on openai-codex's threads, so they never raise. Once close began or the process died, only cleanup calls are sent.
-RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.1 D-1 to D-3, D-18 and D-27, and 12.4 call list); docs/spec/codex-host-thread-helpers/spec.md (section 9.2 wire calls)
-TESTS: tests/features/codex_host/test_codex_host_lifecycle.py, tests/features/codex_host/test_codex_host_failures.py, tests/features/codex_host/test_codex_host_router.py, tests/features/codex_host/test_codex_host_helper_lifecycle.py
+PURPOSE: Owns one CodexHost's openai-codex client: the host's own call executor, every bounded app-server call and its log record, the overload retries of the idempotent reads, the spending starts and their late acceptance, the liveness monitor, the close thread, and the server-request router that answers approvals, questions and dynamic tool calls.
+ROLE IN CODEBASE: The process and transport layer of vidbyte/harnesses/native/codex/; CodexHost and CodexPreflight reach Codex only through CodexConnection, and the developer's approval_handler is reached only through CodexServerRequestRouter.
+ARCHITECTURE NOTE: "from openai_codex.client import CodexClient, CodexConfig" and "from openai_codex.retry import retry_on_overload" at module level are test seams (section 13), so only CodexHost.__aenter__ imports this module (D-21). Every call runs on the host's own ThreadPoolExecutor, bounded by asyncio.wait_for, never on the loop or its default executor (D-1); the bounds, including CODEX_TOOL_CALL_TIMEOUT_SECONDS for the approval handler, are read from this module's namespace at call time. The router schedules the handler on the host's loop and waits for it on openai-codex's reader thread, under one lock shared with close (hardening INV-17, INV-21).
+COMMON MODIFICATION PATTERNS: A new app-server call goes through call() with a typed CodexClient method, or through raw() when openai-codex has no typed method, with its generated response model's name in CODEX_HOST_RAW_RESPONSE_MODELS (vidbyte/lib/constants/codex_host.py); a raw call that spends usage is added to CODEX_HOST_SPENDING_RAW_METHODS there, so it is sent once (D-2), and a typed idempotent read joins CODEX_HOST_RETRIED_METHODS there to be retried on overload (hardening D-7). A new routed server-request kind is a CodexServerRequestKind member; the router needs no change beyond its fit check (INV-18).
+KNOWN EDGE CASES: A spending start that outlives its caller or its bound is owned, never orphaned: a queued start is withdrawn, and a running one posts its outcome to the loop when it returns (INV-11). A start is awaited without asyncio.shield, so its caller leaving cancels the asyncio copy of its outcome too, and a late failure is never stored where nothing reads it, which would let the asyncio or concurrent.futures logger write its text (hardening INV-10, EC-58). The router and the done-callback run on openai-codex's threads, so they never raise. Once close began or the process died, only cleanup calls are sent; a call refused for that reason, or withdrawn while still queued because its caller was cancelled, sent nothing, so it writes no log record (EC-57). A call or start whose caller was cancelled after it was sent writes its one record from the worker once it returns; one whose bound ran out was already logged, so its late outcome writes none (hardening INV-7). A host without an approval_handler answers every routed request with its fail-closed default and writes no fallback WARNING, because that default is its designed answer (hardening INV-8, INV-16). The router never holds its lock while it waits for the handler, because close takes that lock on the loop the handler needs. Codex chooses the method and ids of a server request and a caller or Codex the thread id of a call, so each record shows them through LogToken.of, cut at CODEX_HOST_LOG_TOKEN_MAX_CHARS, while routing, answers and errors keep the raw values (hardening INV-10).
+RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.1 D-1 to D-3, D-18 and D-27, and 12.4 call list); docs/spec/codex-host-thread-helpers/spec.md (section 9.2 wire calls); docs/spec/codex-host-hardening/spec.md (sections 6.1 INV-3, INV-7, INV-8, INV-10, INV-15 to INV-18 and INV-21, and 8.1 D-3, D-7, D-12)
+TESTS: tests/features/codex_host/test_codex_host_lifecycle.py, tests/features/codex_host/test_codex_host_failures.py, tests/features/codex_host/test_codex_host_router.py, tests/features/codex_host/test_codex_host_helper_lifecycle.py, tests/features/codex_host/test_codex_host_approvals.py, tests/features/codex_host/test_codex_host_observability.py, tests/features/codex_host/test_codex_host_resilience.py, tests/features/codex_host/test_codex_host_sdk_contract.py
 """
 
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
-from collections.abc import Callable, Coroutine, Mapping
-from concurrent.futures import Future, ThreadPoolExecutor
+import time
+from collections.abc import Awaitable, Callable, Coroutine, Mapping
+from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
 from contextlib import suppress
 from functools import partial
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from openai_codex.client import CodexClient, CodexConfig
 from openai_codex.errors import JsonRpcError
 from openai_codex.generated import v2_all
 from openai_codex.generated.v2_all import WindowsSandboxReadinessResponse
 from openai_codex.models import InitializeResponse
+from openai_codex.retry import retry_on_overload
 
 from vidbyte.harnesses.native.codex.errors import CodexErrorMapper
+from vidbyte.harnesses.native.codex.wire import CodexParamsTranslator
 from vidbyte.lib.constants.codex import (
-    CODEX_ACCEPTED_APPROVAL_METHODS,
-    CODEX_APPROVAL_ACCEPT_DECISION,
     CODEX_GOAL_CANCEL_CALL,
     CODEX_HOST_CLOSE_INTERRUPT_SECONDS,
     CODEX_HOST_CLOSE_WAIT_SECONDS,
@@ -36,18 +38,30 @@ from vidbyte.lib.constants.codex import (
     CODEX_HOST_SINGLE_ATTEMPT,
     CODEX_HOST_WORKER_THREADS,
     CODEX_INITIALIZE_METHOD,
+    CODEX_MILLISECONDS_PER_SECOND,
     CODEX_SANDBOX_READINESS_METHOD,
     CODEX_TOOL_CALL_METHOD,
+    CODEX_TOOL_CALL_TIMEOUT_SECONDS,
     CODEX_TURN_INTERRUPT_METHOD,
     CODEX_UNREGISTERED_TOOL_TEXT,
 )
 from vidbyte.lib.constants.codex_host import (
+    CODEX_HOST_LOG_TOKEN_MAX_CHARS,
     CODEX_HOST_PROCESS_START,
     CODEX_HOST_RAW_RESPONSE_MODELS,
+    CODEX_HOST_RETRIED_METHODS,
     CODEX_HOST_SPENDING_RAW_METHODS,
 )
-from vidbyte.lib.enums.codex import CodexHostOperation, CodexSandboxReadiness
+from vidbyte.lib.dataclasses.codex_host import CodexServerAnswer, CodexServerRequest
+from vidbyte.lib.enums.codex import (
+    CodexApprovalDecision,
+    CodexHostOperation,
+    CodexSandboxReadiness,
+    CodexServerRequestKind,
+)
 from vidbyte.lib.errors import CodexAgentError
+from vidbyte.lib.util.exception_origin import ExceptionOrigin
+from vidbyte.lib.util.text import LogToken
 
 if TYPE_CHECKING:
     from openai_codex._goal import _GoalOperationState
@@ -56,15 +70,31 @@ if TYPE_CHECKING:
     from vidbyte.lib.dataclasses.codex_host import CodexTurnHandle
 
 ResultT = TypeVar("ResultT")
+logger = logging.getLogger(__name__)
 
 
 class CodexServerRequestRouter:
-    """Answers every server request of one host's client: approvals, and tool calls by thread."""
+    """Answers every server request of one host's client: approvals and questions through the developer's handler, tool calls by thread, and the rest with fixed defaults."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        approval_handler: Callable[[CodexServerRequest], Awaitable[CodexServerAnswer]] | None,
+    ) -> None:
         # Each thread with Vidbyte tools has its own tool-call handler
-        # (D-18).
+        # (D-18). The developer's approval handler runs on the host's
+        # loop. One lock guards the handler, the closed flag and the
+        # handler calls still pending, because the reader thread and
+        # the loop both reach them (hardening INV-17, INV-21). Whether
+        # the router was built with a handler never changes, so a
+        # host without one never logs a fallback (INV-8).
         self._handlers: dict[str, CodexToolCallHandler] = {}
+        self._loop = loop
+        self._approval_handler = approval_handler
+        self._routes_requests = approval_handler is not None
+        self._lock = threading.Lock()
+        self._closed = False
+        self._pending: set[Future[CodexServerAnswer]] = set()
 
     def register(self, thread_id: str, handler: CodexToolCallHandler) -> None:
         # A fork registers its parent's handler, as it inherits the
@@ -75,6 +105,12 @@ class CodexServerRequestRouter:
         # The handler of a thread, or None when it has no Vidbyte tools.
         return self._handlers.get(thread_id)
 
+    def unregister(self, thread_id: str) -> None:
+        # A thread whose start failed loses its tool handler. The
+        # handler is not closed, because a fork shares its parent's
+        # (hardening INV-26, INV-28 step 8).
+        self._handlers.pop(thread_id, None)
+
     def remove_all(self) -> tuple[CodexToolCallHandler, ...]:
         # At close every thread's handler is removed and handed back, so
         # the host can cancel the tool calls still running (INV-7 step
@@ -83,25 +119,154 @@ class CodexServerRequestRouter:
         self._handlers = {}
         return handlers
 
+    def cancel_pending(self) -> None:
+        # @intent close-stops-the-approval-handler-first
+        # Hardening INV-21: under the lock, the router closes, drops the
+        # handler and cancels every handler call still running. It
+        # cancels a snapshot, because each cancelled request's own
+        # cleanup discards from the live set.
+        with self._lock:
+            self._closed = True
+            self._approval_handler = None
+            for future in tuple(self._pending):
+                future.cancel()
+
     def handle(self, method: str, params: Mapping[str, Any] | None) -> dict[str, Any]:
         # @intent answer-every-server-request-without-raising
-        # Runs on openai-codex's reader thread, so one try spans it all
-        # and nothing escapes: approvals are accepted as the SDK's own
-        # default handler does, a tool call goes to its thread's
-        # handler, and every other request gets an empty answer (D-16,
-        # D-18).
+        # Runs on openai-codex's reader thread, where a raise would stop
+        # the host, so one try spans reading the request, scheduling the
+        # developer's handler, waiting for it and checking its answer
+        # (D-3, hardening INV-15, INV-17).
+        thread_id, turn_id, item_id = self._ids(params)
+        kind = next((kind for kind in CodexServerRequestKind if kind.value == method), None)
+        handled_by = "tool" if method == CODEX_TOOL_CALL_METHOD else "default"
+        answer: dict[str, Any] | None = None
+        fallback: tuple[str, str, str] | None = None
+        request: CodexServerRequest | None = None
+        coroutine: Coroutine[Any, Any, CodexServerAnswer] | None = None
+        future: Future[CodexServerAnswer] | None = None
         try:
-            if method in CODEX_ACCEPTED_APPROVAL_METHODS:
-                return {"decision": CODEX_APPROVAL_ACCEPT_DECISION}
-            if method != CODEX_TOOL_CALL_METHOD:
-                return {}
-            thread_id = (params or {}).get("threadId")
-            handler = self._handlers.get(thread_id) if isinstance(thread_id, str) else None
-            if handler is not None:
-                return handler.handle(method, params)
-        except Exception:
-            return self._unregistered()
-        return self._unregistered()
+            # A tool call goes to its thread's own tool handler, which
+            # answers every call itself (D-18, EC-47).
+            tools = self._handlers.get(thread_id) if handled_by == "tool" else None
+            answer = None if tools is None else tools.handle(method, params)
+            # An approval or a question goes to the developer's handler
+            # when the host has one (INV-16). The close check, reading
+            # the request into its record and scheduling the handler on
+            # the host's loop happen under the lock close takes too, so
+            # a closed router never calls the handler (INV-17, INV-21).
+            # CodexHostSetup admits only async handlers, so the call
+            # returns a coroutine (INV-19).
+            if kind is not None and self._routes_requests:
+                with self._lock:
+                    handler = None if self._closed else self._approval_handler
+                    request = None if handler is None else CodexServerRequest.from_params(kind, params)
+                    coroutine = None if handler is None or request is None else cast("Coroutine[Any, Any, CodexServerAnswer]", handler(request))
+                    future = None if coroutine is None else self._schedule(coroutine)
+                fallback = ("closing", "", "") if future is None else None
+            # The wait happens outside the lock, bounded by the timeout
+            # read now, and only an answer that fits its request is sent
+            # (INV-18).
+            if future is not None and request is not None:
+                reply = future.result(timeout=CODEX_TOOL_CALL_TIMEOUT_SECONDS)
+                if self._fits(request, reply):
+                    answer, handled_by = CodexParamsTranslator.server_answer(request.kind, reply), "handler"
+                else:
+                    fallback = ("answer_invalid", type(reply).__name__, "")
+        except Exception as exc:
+            fallback = (self._reason(exc, request, future), type(exc).__name__, ExceptionOrigin.describe(exc))
+        finally:
+            # The handler call never outlives its request: it leaves the
+            # pending set and is cancelled, or a call never scheduled is
+            # closed.
+            with self._lock:
+                if future is not None:
+                    future.cancel()
+                    self._pending.discard(future)
+            if future is None and asyncio.iscoroutine(coroutine):
+                coroutine.close()
+        # A misfit is logged by kind and type only, never by its text,
+        # and then answered with the fixed default (INV-8, INV-10).
+        # Codex chooses the method and the ids, so each is logged as
+        # one bounded token; routing used the raw values (S4 R-9).
+        limit = CODEX_HOST_LOG_TOKEN_MAX_CHARS
+        if fallback is not None:
+            reason, error_type, origin = fallback
+            logger.warning("codex_host_server_request_fallback method=%s thread_id=%s reason=%s error_type=%s origin=%s", LogToken.of(method, limit), LogToken.of(thread_id, limit), reason, error_type, origin)
+        if answer is None:
+            answer = self._unregistered() if handled_by == "tool" else CodexParamsTranslator.default_answer(method)
+        logger.info("codex_host_server_request method=%s thread_id=%s turn_id=%s item_id=%s handled_by=%s answer=%s", LogToken.of(method, limit), LogToken.of(thread_id, limit), LogToken.of(turn_id, limit), LogToken.of(item_id, limit), handled_by, self._label(answer))
+        return answer
+
+    def _schedule(self, coroutine: Coroutine[Any, Any, CodexServerAnswer]) -> Future[CodexServerAnswer]:
+        # Runs under the lock: the handler call is scheduled on the
+        # host's loop and held as pending, so close can cancel it
+        # (hardening INV-17, INV-21). A loop that refuses it raises
+        # before the call is held, and handle's finally closes it.
+        future = asyncio.run_coroutine_threadsafe(coroutine, self._loop)
+        self._pending.add(future)
+        return future
+
+    @staticmethod
+    def _ids(params: Mapping[str, Any] | None) -> tuple[str, str, str]:
+        # The request's thread, turn and item ids, each "" when Codex
+        # sent none or sent something that is not text.
+        values = params if isinstance(params, Mapping) else {}
+        thread_id, turn_id, item_id = (values.get(key) for key in ("threadId", "turnId", "itemId"))
+        return (
+            thread_id if isinstance(thread_id, str) else "",
+            turn_id if isinstance(turn_id, str) else "",
+            item_id if isinstance(item_id, str) else "",
+        )
+
+    @staticmethod
+    def _fits(request: CodexServerRequest, reply: object) -> bool:
+        # @intent only-a-fitting-answer-is-sent
+        # Hardening INV-18: an approval carries no answers, a question
+        # takes accept, decline or cancel, a listed decision or a
+        # refusal is required when Codex sent a list, and every answer
+        # names one of the request's questions.
+        if not isinstance(reply, CodexServerAnswer):
+            return False
+        refusals = (CodexApprovalDecision.DECLINE, CodexApprovalDecision.CANCEL)
+        if request.kind is CodexServerRequestKind.USER_INPUT:
+            kind_fits = reply.decision in (CodexApprovalDecision.ACCEPT, *refusals)
+        else:
+            kind_fits = not reply.answers
+        offered = request.available_decisions
+        listed = offered is None or reply.decision in refusals or reply.decision in offered
+        asked = {question.question_id for question in request.questions}
+        return kind_fits and listed and all(item.question_id in asked for item in reply.answers)
+
+    def _reason(self, exc: Exception, request: CodexServerRequest | None, future: Future[CodexServerAnswer] | None) -> str:
+        # Why a routed request fell back (hardening INV-8): it did not
+        # read as a request, the loop was gone, the handler ran past
+        # its bound, close cancelled it, or the handler failed.
+        if request is None:
+            return "parse_failed"
+        if future is None:
+            return "closing" if self._loop.is_closed() else "handler_failed"
+        if isinstance(exc, TimeoutError) and not future.done():
+            return "handler_timed_out"
+        if isinstance(exc, CancelledError) and self._closed:
+            return "closing"
+        return "handler_failed"
+
+    @staticmethod
+    def _label(answer: Mapping[str, Any]) -> str:
+        # A short label of what was sent, never its content (hardening
+        # INV-8): a tool result by whether it succeeded, a decision or
+        # an action by its value, and every other answer by its kind.
+        if "success" in answer:
+            return "success" if answer["success"] is True else "failure"
+        if "answers" in answer:
+            return "answers"
+        if "permissions" in answer:
+            return "no_permissions"
+        if "currentTimeAt" in answer:
+            return "current_time"
+        value = answer.get("decision", answer.get("action"))
+        return value if isinstance(value, str) else "empty"
 
     @staticmethod
     def _unregistered() -> dict[str, Any]:
@@ -113,12 +278,19 @@ class CodexServerRequestRouter:
 class CodexConnection:
     """One host's openai-codex client, its call executor, its liveness monitor and its close thread."""
 
-    def __init__(self, config: CodexConfig, loop: asyncio.AbstractEventLoop) -> None:
-        # The router answers the client's server requests. The executor
-        # is the host's own, sized when it is built, so no call ever
-        # uses the loop's default executor (D-1). The monitor sets the
-        # death flag before it tells the loop (D-27).
-        self.router = CodexServerRequestRouter()
+    def __init__(
+        self,
+        config: CodexConfig,
+        loop: asyncio.AbstractEventLoop,
+        approval_handler: Callable[[CodexServerRequest], Awaitable[CodexServerAnswer]] | None = None,
+    ) -> None:
+        # The router answers the client's server requests, through the
+        # developer's approval handler when the host has one (hardening
+        # INV-17). The executor is the host's own, sized when it is
+        # built, so no call ever uses the loop's default executor
+        # (D-1). The monitor sets the death flag before it tells the
+        # loop (D-27).
+        self.router = CodexServerRequestRouter(loop, approval_handler)
         self.client = CodexClient(config, approval_handler=self.router.handle)
         self._loop = loop
         self._executor = ThreadPoolExecutor(max_workers=CODEX_HOST_WORKER_THREADS, thread_name_prefix="codex-host")
@@ -156,16 +328,38 @@ class CodexConnection:
         # Every app-server call runs on the host's own executor, bounded
         # by the request timeout, or by the close bound for cleanup
         # calls (D-1, D-3). Once close began only cleanup is sent, and
-        # after a death nothing is (INV-6). A failure is mapped and
-        # raised from None, so no openai-codex text travels with it
-        # (INV-9).
+        # after a death nothing is (INV-6).
         if self._dead.is_set() or (self._closing and not cleanup):
             raise CodexErrorMapper.process_exited(operation, thread_id)
         bound = CODEX_HOST_CLOSE_INTERRUPT_SECONDS if cleanup else CODEX_HOST_REQUEST_TIMEOUT_SECONDS
+        # The idempotent reads go through openai-codex's own overload
+        # retry, inside the same bound; every other call is sent once
+        # (hardening INV-3, D-7).
+        work = partial(function, *args)
+        if method in CODEX_HOST_RETRIED_METHODS:
+            work = partial(retry_on_overload, work)
+        # A failure is mapped and raised from None, so no openai-codex
+        # text travels with it (INV-9), and each call is logged once
+        # (hardening INV-7).
+        started = time.monotonic()
+        future: Future[ResultT] | None = None
         try:
-            return await asyncio.wait_for(self._loop.run_in_executor(self._executor, partial(function, *args)), bound)
+            future = self._executor.submit(work)
+            result = await asyncio.wait_for(asyncio.wrap_future(future), bound)
+        except asyncio.CancelledError:
+            # A caller that left after the call was sent leaves its one
+            # record to the worker, which writes it once Codex answers.
+            # A call still queued is withdrawn: it sent nothing, so it
+            # writes nothing (hardening INV-7, EC-57).
+            if future is not None and not future.cancel():
+                future.add_done_callback(partial(self._log_late, operation, method, thread_id, started, bound))
+            raise
         except Exception as exc:
-            raise CodexErrorMapper.from_exception(exc, operation, method, dead=self._dead.is_set(), bound_seconds=bound, thread_id=thread_id) from None
+            error = CodexErrorMapper.from_exception(exc, operation, method, dead=self._dead.is_set(), bound_seconds=bound, thread_id=thread_id)
+            self._log_call(operation, method, thread_id, started, exc, error)
+            raise error from None
+        self._log_call(operation, method, thread_id, started)
+        return result
 
     def raw(self, method: str, params: Mapping[str, Any] | None) -> Callable[[], Any]:
         # @intent raw-calls-that-spend-are-sent-once
@@ -204,8 +398,8 @@ class CodexConnection:
         thread_id: str,
     ) -> ResultT:
         # @intent own-every-start-codex-accepts
-        # A spending start runs on a host worker and is awaited through
-        # a shield, bounded by the request timeout read now. If the
+        # A spending start runs on a host worker, bounded by the request
+        # timeout read now, and is awaited the way every call is. If the
         # caller is cancelled or the bound elapses, the start is handed
         # over: one still queued is withdrawn, so nothing was sent, and
         # one already running reports to on_late on the loop when it
@@ -213,29 +407,95 @@ class CodexConnection:
         if self._dead.is_set() or self._closing:
             raise CodexErrorMapper.process_exited(operation, thread_id)
         bound = CODEX_HOST_REQUEST_TIMEOUT_SECONDS
+        started = time.monotonic()
         future = self._executor.submit(function)
         try:
-            return await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(future)), bound)
+            # No shield: a caller that leaves also cancels the loop's
+            # copy of the outcome, so a late failure is read only from
+            # the worker's future and is never left for asyncio to log
+            # with its text (hardening INV-10, EC-58).
+            result = await asyncio.wait_for(asyncio.wrap_future(future), bound)
         except asyncio.CancelledError:
-            self._hand_over(future, on_late, thread_id)
+            # A start handed over because its caller left writes its
+            # one record when it lands (hardening INV-7).
+            self._hand_over(future, on_late, thread_id, partial(self._log_late, operation, method, thread_id, started, bound))
             raise
         except Exception as exc:
+            # A start whose bound ran out is logged here, so its late
+            # outcome writes no second record.
             if isinstance(exc, TimeoutError):
-                self._hand_over(future, on_late, thread_id)
-            raise CodexErrorMapper.from_exception(exc, operation, method, dead=self._dead.is_set(), bound_seconds=bound, thread_id=thread_id) from None
+                self._hand_over(future, on_late, thread_id, None)
+            error = CodexErrorMapper.from_exception(exc, operation, method, dead=self._dead.is_set(), bound_seconds=bound, thread_id=thread_id)
+            self._log_call(operation, method, thread_id, started, exc, error)
+            raise error from None
+        # Each start is logged once, as every call is (hardening INV-7).
+        self._log_call(operation, method, thread_id, started)
+        return result
+
+    @staticmethod
+    def _log_call(
+        operation: CodexHostOperation,
+        method: str,
+        thread_id: str,
+        started: float,
+        exc: Exception | None = None,
+        error: CodexAgentError | None = None,
+    ) -> None:
+        # Hardening INV-7: a success at DEBUG, a failure at WARNING with
+        # its code, the type of what was raised and where it was raised,
+        # never its text (INV-10). The caller or Codex chose the thread
+        # id, so it is logged as one bounded token (S4 R-9).
+        duration_ms = int((time.monotonic() - started) * CODEX_MILLISECONDS_PER_SECOND)
+        thread_token = LogToken.of(thread_id, CODEX_HOST_LOG_TOKEN_MAX_CHARS)
+        if exc is None or error is None:
+            logger.debug("codex_host_call operation=%s method=%s thread_id=%s duration_ms=%d", operation.value, method, thread_token, duration_ms)
+            return
+        logger.warning(
+            "codex_host_call_failed operation=%s method=%s thread_id=%s failure_code=%s error_type=%s origin=%s duration_ms=%d",
+            operation.value,
+            method,
+            thread_token,
+            error.failure_code,
+            type(exc).__name__,
+            ExceptionOrigin.describe(exc),
+            duration_ms,
+        )
+
+    def _log_late(self, operation: CodexHostOperation, method: str, thread_id: str, started: float, bound: float, future: Future[Any]) -> None:
+        # @intent a-call-sent-is-logged-once-it-lands
+        # Runs on the worker that finished a call or start whose caller
+        # left, before anything is posted to the loop, so a closed loop
+        # cannot drop the record: DEBUG when Codex answered, or the
+        # WARNING its failure maps to (hardening INV-7). It never
+        # raises, because concurrent.futures would log the raise with
+        # its text (INV-10).
+        with suppress(Exception):
+            raised = future.exception()
+            exc = raised if isinstance(raised, Exception) else None
+            error = None if exc is None else CodexErrorMapper.from_exception(exc, operation, method, dead=self._dead.is_set(), bound_seconds=bound, thread_id=thread_id)
+            self._log_call(operation, method, thread_id, started, exc, error)
 
     def starting(self, thread_id: str) -> bool:
         # Whether a start on the thread outlived its caller and is still
         # in flight, which keeps the thread busy (INV-24).
         return thread_id in self._starting
 
-    def _hand_over(self, future: Future[ResultT], on_late: Callable[[ResultT], None], thread_id: str) -> None:
+    def _hand_over(
+        self,
+        future: Future[ResultT],
+        on_late: Callable[[ResultT], None],
+        thread_id: str,
+        record: Callable[[Future[ResultT]], None] | None,
+    ) -> None:
         # A start still queued is withdrawn, so it is never sent; one
         # already running keeps its thread busy and posts its outcome
-        # when it returns.
+        # when it returns. A record, when given, is registered first,
+        # so the worker writes it before the post (hardening INV-7).
         if future.cancel():
             return
         self._starting.add(thread_id)
+        if record is not None:
+            future.add_done_callback(record)
         future.add_done_callback(partial(self._post_late, on_late, thread_id))
 
     def _post_late(self, on_late: Callable[[ResultT], None], thread_id: str, future: Future[ResultT]) -> None:

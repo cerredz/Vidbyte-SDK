@@ -3,10 +3,10 @@
 PURPOSE: Builds every failure CodexHost reports: the CodexProblem records snapshots and readiness carry, the CodexAgentError its methods raise, and the mapping from openai-codex exceptions and turn errors to the section 9.2 failure codes.
 ROLE IN CODEBASE: The error layer of vidbyte/harnesses/native/codex/; the host, its connection, preflight, collaborators and response translator call it, so each failure code, operation, likely cause and next step is chosen in one place.
 ARCHITECTURE NOTE: A static helper class with no values of its own: every sentence, table and bound comes from vidbyte/lib/constants/codex_host.py and vidbyte/lib/constants/codex.py. error() composes each message the way the lib error packets read (operation and code, what happened, the thread, the likely cause, the next step) and fills CodexAgentError's diagnostic fields with that code's own cause, the host's docs and its tests. openai-codex is imported inside from_exception only, so importing this module never loads the SDK (D-21).
-COMMON MODIFICATION PATTERNS: A new failure source gets a branch in from_exception or a small builder here that passes its summary sentence to error(); a new code needs its row in CODEX_HOST_LIKELY_CAUSES and CODEX_NEXT_STEPS. Callers raise the result from None.
-KNOWN EDGE CASES: A plain CodexError is exactly that class, never a subclass; once the connection's death flag is set every failure is codex.process_exited, because openai-codex fails every waiter with the reader's own error, which can quote a raw stdout line (EC-72). No message carries an exception's own text, stderr, env values or the account email; Codex's JSON-RPC message, the method, the code and a type name are the only variable parts (INV-9).
-RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.1 D-13 and D-27, and 9.2 error codes); vidbyte/lib/errors/base.py (CodexAgentError's packet)
-TESTS: tests/features/codex_host/test_codex_host_failures.py, tests/features/codex_host/test_codex_host_turns.py, tests/features/codex_host/test_codex_host_error_details.py
+COMMON MODIFICATION PATTERNS: A new failure source gets a branch in from_exception or a small builder here that passes its summary sentence to error(); a new code needs its row in CODEX_HOST_LIKELY_CAUSES and CODEX_NEXT_STEPS. Callers raise the result from None. A wrapper that re-raises an inner call's error under its own name passes it through relabel(), which keeps every other field.
+KNOWN EDGE CASES: A plain CodexError is exactly that class, never a subclass; once the connection's death flag is set every failure is codex.process_exited, because openai-codex fails every waiter with the reader's own error, which can quote a raw stdout line (EC-72). No message carries an exception's own text, stderr, env values or the account email; Codex's JSON-RPC message, the method, the code and a type name are the only variable parts (INV-9). A thread/read error means an unknown thread only when Codex refused the request (InvalidRequest or InvalidParams); an overload or internal error is codex.api_error, so a busy app-server never reads as a missing thread (hardening D-8, which supersedes codex-host D-13's thread/read clause). A turn/steer InvalidRequest means the turn ended before the steer arrived.
+RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.1 D-13 and D-27, and 9.2 error codes); docs/spec/codex-host-hardening/spec.md (INV-4, INV-6, INV-31, D-8 and D-22); vidbyte/lib/errors/base.py (CodexAgentError's packet)
+TESTS: tests/features/codex_host/test_codex_host_failures.py, tests/features/codex_host/test_codex_host_turns.py, tests/features/codex_host/test_codex_host_error_details.py, tests/features/codex_host/test_codex_host_hardening_contract.py (classification and relabel)
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ from vidbyte.lib.constants.codex import (
     CODEX_SDK_EXTRA,
     CODEX_THREAD_FORK_METHOD,
     CODEX_THREAD_READ_METHOD,
+    CODEX_TURN_STEER_METHOD,
 )
 from vidbyte.lib.constants.codex_host import (
     CODEX_GOAL_START_CALL,
@@ -143,10 +144,14 @@ class CodexErrorMapper:
 
     @staticmethod
     def _rpc_code(method: str, *, malformed: bool, refused: bool) -> FailureCode:
-        # Two methods' JSON-RPC errors carry a context meaning of their
-        # own: a failed thread read means the thread is unknown, and a
-        # refused fork means the fork point is wrong (D-13).
-        if method == CODEX_THREAD_READ_METHOD:
+        # Three methods' refusals carry a context meaning of their own:
+        # a refused thread read means the thread is unknown (hardening
+        # D-8), a steer refused as an invalid request means the turn
+        # already ended (INV-6), and a refused fork means the fork point
+        # is wrong. Overload and internal errors keep the general rule.
+        if method == CODEX_THREAD_READ_METHOD and refused:
+            return FailureCode.CODEX_SESSION_NOT_FOUND
+        if method == CODEX_TURN_STEER_METHOD and refused and not malformed:
             return FailureCode.CODEX_SESSION_NOT_FOUND
         if method == CODEX_THREAD_FORK_METHOD and refused:
             return FailureCode.CODEX_FORK_FAILED
@@ -163,6 +168,19 @@ class CodexErrorMapper:
         if isinstance(exc, TimeoutError):
             return FailureCode.CODEX_API_ERROR, CODEX_HOST_NO_ANSWER_MESSAGE.format(method=method, seconds=bound_seconds)
         return FailureCode.CODEX_API_ERROR, CODEX_HOST_LOCAL_FAILURE_MESSAGE.format(method=method, error_type=type(exc).__name__)
+
+    @staticmethod
+    def relabel(error: CodexAgentError, operation: CodexHostOperation) -> CodexAgentError:
+        # A wrapper reports an inner call's failure under its own name,
+        # in the operation field and the message head, and keeps every
+        # other field and the rest of the message (INV-31). An error
+        # that already names the wrapper is returned as it is (EC-55).
+        if error.operation == operation.value:
+            return error
+        old_head = CODEX_HOST_MESSAGE_HEAD.format(operation=error.operation, code=error.failure_code)
+        new_head = CODEX_HOST_MESSAGE_HEAD.format(operation=operation.value, code=error.failure_code)
+        message = new_head + error.message.removeprefix(old_head) if error.message.startswith(old_head) else error.message
+        return error.with_operation(operation.value, message)
 
     @classmethod
     def missing_sdk(cls) -> CodexAgentError:

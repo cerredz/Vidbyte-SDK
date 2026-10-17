@@ -206,12 +206,13 @@ class CodexHelperProtocolTests(HostTestCase):
                 error = await self.assert_codex_error(start(), "codex.protocol_mismatch")
                 self.assertEqual(error.operation, operation)
 
-        # A skill run's listing failure keeps the listing's operation, and no thread starts.
+        # A skill run's listing failure carries the run's own operation (docs/spec/codex-host-hardening/spec.md INV-31, D-22),
+        # and no thread starts.
         for name, start in (("run_codex_skill", lambda: host.run_codex_skill("openai-docs", "Find it.")), ("run_codex_openai_docs", lambda: host.run_codex_openai_docs("Which event?"))):
             with self.subTest(run=name):
                 self.server.fail("skills/list", self.fakes.FakeRpcError(-32601, "method not found: skills/list"), times=1)
                 error = await self.assert_codex_error(start(), "codex.protocol_mismatch")
-                self.assertEqual(error.operation, "list_codex_skills")
+                self.assertEqual(error.operation, name)
         self.assertEqual(self.count("thread/start"), 0)
 
 

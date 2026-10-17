@@ -15,7 +15,7 @@ import asyncio
 import unittest
 from typing import Any
 
-from tests.features.codex_host.codex_host_support import WAIT_SECONDS, HostTestCase, requires_sdk
+from tests.features.codex_host.codex_host_support import WAIT_SECONDS, HostTestCase, is_review_read_back, requires_sdk
 
 GOAL_CALLS = ("cancel_goal_operation", "finish", "wake_notification_reader", "unregister_goal_operation")
 STREAM_CLOSE = ["finish", "wake_notification_reader", "unregister_goal_operation"]
@@ -35,10 +35,12 @@ def _goal_calls(server: Any, thread_id: str) -> list[str]:
     return [entry[0] for entry in server.kinds(*GOAL_CALLS) if entry[1] == thread_id]
 
 
-def _include_turns_reads_after_review(server: Any, thread_id: str) -> int:
+def _review_read_backs_after_review(server: Any, thread_id: str) -> int:
+    # docs/spec/codex-host-hardening/spec.md INV-38 and D-18: each review read-back is one thread/turns/list page, newest
+    # first, with every item and a limit of one, in place of codex-host D-23's full-history thread/read.
     methods = [(request.method, request.params) for request in server.requests]
     start = next(index for index, (method, _) in enumerate(methods) if method == "review/start")
-    return sum(1 for method, params in methods[start:] if method == "thread/read" and params.get("threadId") == thread_id and params.get("includeTurns"))
+    return sum(1 for method, params in methods[start:] if method == "thread/turns/list" and params.get("threadId") == thread_id and is_review_read_back(params))
 
 
 @requires_sdk
@@ -96,7 +98,7 @@ class CodexHostReviewTests(HostTestCase):
             return [self.server.item_note(params["threadId"], dropped["turn_id"], dropped["item"])]
 
         self.server.before_response("review/start", write_only_the_item)
-        read_back = self.server.hold("thread/read", lambda params: bool(params.get("includeTurns")) and bool(self.server.matching("review/start")))
+        read_back = self.server.hold("thread/turns/list", lambda params: is_review_read_back(params) and bool(self.server.matching("review/start")))
         task = asyncio.ensure_future(host.start_codex_review(seeded.thread_id, self._commit_target()))
         await asyncio.to_thread(read_back.wait_arrived)
         read_back.release()
@@ -111,7 +113,7 @@ class CodexHostReviewTests(HostTestCase):
         self.assert_problem(snapshot, "completed", None)
         self.assertEqual(snapshot.result.final_response, "Two issues found.")
         self.assertFalse(snapshot.result.usage_available)
-        self.assertEqual(_include_turns_reads_after_review(self.server, seeded.thread_id), 2)
+        self.assertEqual(_review_read_backs_after_review(self.server, seeded.thread_id), 2)
 
     async def test_a_detached_review_is_tracked_on_the_new_review_thread(self) -> None:
         # EC-46: Codex reviews in a new thread, which the handle names.

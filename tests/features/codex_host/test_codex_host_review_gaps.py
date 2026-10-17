@@ -24,6 +24,7 @@ from tests.features.codex_host.codex_host_support import (
     StubCodexHost,
     changed_error_fields,
     input_texts,
+    is_review_read_back,
     requires_sdk,
 )
 
@@ -53,7 +54,8 @@ class CodexHostReviewReadBackCancellationTests(HostTestCase):
         self.patch_connection("CODEX_HOST_WORKER_THREADS", 1)
         host = await self.open_host()
         seeded = self.server.seed_thread(completed_turns=1)
-        read_back = self.server.hold("thread/read", lambda params: bool(params.get("includeTurns")))
+        # docs/spec/codex-host-hardening/spec.md INV-38 and D-18: the registration read-back is one thread/turns/list page.
+        read_back = self.server.hold("thread/turns/list", is_review_read_back)
         task = asyncio.ensure_future(host.start_codex_review(seeded.thread_id, CodexReviewTarget(kind=CodexReviewTargetKind.UNCOMMITTED_CHANGES)))
         await asyncio.to_thread(read_back.wait_arrived)
         task.cancel()

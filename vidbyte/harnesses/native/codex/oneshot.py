@@ -4,9 +4,9 @@ PURPOSE: The six module functions that each open one CodexHost, make one read or
 ROLE IN CODEBASE: The one-call entry points of vidbyte/harnesses/native/codex/, exported beside CodexHost for callers that need a single answer rather than a long-lived host.
 ARCHITECTURE NOTE: Each function is "async with CodexHost(settings) as host: return await host.<same name>(...)", so it opens, answers and closes exactly as the method does. Nothing here starts a turn, so no module function can leave one running.
 COMMON MODIFICATION PATTERNS: A new module function mirrors one CodexHost method with the same name and arguments, plus a keyword-only settings argument.
-KNOWN EDGE CASES: check_codex_ready never raises a CodexAgentError: a host that cannot open, or a check that fails, comes back as ready=False with that failure as its one problem (AC-31).
-RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.5 module functions and 9.2)
-TESTS: tests/features/codex_host/test_codex_host_lifecycle.py
+KNOWN EDGE CASES: check_codex_ready never raises a CodexAgentError: a host that cannot open, or a check that fails, comes back as ready=False with that failure as its one problem (AC-31). Each call starts and initializes a whole app-server process, so these functions are unsuitable for loops; a caller making many calls opens one CodexHost instead (hardening FR-35).
+RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.5 module functions and 9.2); docs/spec/codex-host-hardening/spec.md (sections 6.1 INV-40 and 9.2)
+TESTS: tests/features/codex_host/test_codex_host_lifecycle.py, tests/features/codex_host/test_codex_host_function_rows.py, tests/features/codex_host/test_codex_host_hardening_contract.py
 """
 
 from __future__ import annotations
@@ -35,7 +35,10 @@ from vidbyte.lib.errors import CodexAgentError
 
 
 async def check_codex_ready(*, settings: CodexClientSettings | None = None) -> CodexReadiness:
-    """Open a CodexHost, check that Codex is ready to run turns, and close it; failures are reported, not raised."""
+    """Open a CodexHost, check that Codex is ready to run turns, and close it; failures are reported, not raised.
+
+    Each call starts and initializes a whole app-server process, so do not call it in a loop; open one CodexHost instead.
+    """
     # A host that cannot open, or a check that fails, is a not-ready
     # answer carrying that failure as its one problem (AC-31).
     try:
@@ -56,13 +59,19 @@ async def check_codex_ready(*, settings: CodexClientSettings | None = None) -> C
 
 
 async def get_codex_rate_limits(*, settings: CodexClientSettings | None = None) -> CodexRateLimits:
-    """Open a CodexHost, read the account's usage windows, and close it."""
+    """Open a CodexHost, read the account's usage windows, and close it.
+
+    Each call starts and initializes a whole app-server process, so do not call it in a loop; open one CodexHost instead.
+    """
     async with CodexHost(settings) as host:
         return await host.get_codex_rate_limits()
 
 
 async def list_codex_models(include_hidden: bool = False, *, settings: CodexClientSettings | None = None) -> tuple[CodexModelInfo, ...]:
-    """Open a CodexHost, list every model Codex offers, and close it."""
+    """Open a CodexHost, list every model Codex offers, and close it.
+
+    Each call starts and initializes a whole app-server process, so do not call it in a loop; open one CodexHost instead.
+    """
     async with CodexHost(settings) as host:
         return await host.list_codex_models(include_hidden)
 
@@ -75,19 +84,27 @@ async def list_codex_threads(
     sort: CodexThreadSortKey = CodexThreadSortKey.PROVIDER_DEFAULT,
     sort_direction: CodexSortDirection = CodexSortDirection.PROVIDER_DEFAULT,
     cursor: str = "",
+    limit: int | None = None,
     *,
     settings: CodexClientSettings | None = None,
 ) -> CodexThreadPage:
-    """Open a CodexHost, list one page of stored Codex threads, and close it."""
+    """Open a CodexHost, list one page of stored Codex threads, and close it.
+
+    Each call starts and initializes a whole app-server process, so do not page through threads in a loop of these calls; open one CodexHost instead.
+    """
     # @intent a-one-shot-listing-owns-its-host
     # The host opens for this one page and closes on return, so a caller
-    # that lists once never keeps an app-server process alive.
+    # that lists once never keeps an app-server process alive. The host
+    # method validates the limit before any request (hardening INV-40).
     async with CodexHost(settings) as host:
-        return await host.list_codex_threads(cwd, search, archived, source_kinds, sort, sort_direction, cursor)
+        return await host.list_codex_threads(cwd, search, archived, source_kinds, sort, sort_direction, cursor, limit)
 
 
 async def read_codex_thread(thread_id: str, include_turns: bool = False, *, settings: CodexClientSettings | None = None) -> CodexThreadInfo:
-    """Open a CodexHost, read one stored Codex thread, and close it."""
+    """Open a CodexHost, read one stored Codex thread, and close it.
+
+    Each call starts and initializes a whole app-server process, so do not call it in a loop; open one CodexHost instead.
+    """
     async with CodexHost(settings) as host:
         return await host.read_codex_thread(thread_id, include_turns)
 
@@ -97,12 +114,17 @@ async def fork_codex_thread(
     from_turn_id: str = "",
     exclude_turns: bool = False,
     overrides: CodexSpawnRequest | None = None,
+    before_turn_id: str = "",
+    defer_goal_continuation: bool = False,
     *,
     settings: CodexClientSettings | None = None,
 ) -> CodexThreadInfo:
-    """Open a CodexHost, fork a Codex thread through one of its completed turns, and close it."""
+    """Open a CodexHost, fork a Codex thread through one of its completed turns, and close it.
+
+    Each call starts and initializes a whole app-server process, so do not call it in a loop; open one CodexHost instead.
+    """
     async with CodexHost(settings) as host:
-        return await host.fork_codex_thread(thread_id, from_turn_id, exclude_turns, overrides)
+        return await host.fork_codex_thread(thread_id, from_turn_id, exclude_turns, overrides, before_turn_id, defer_goal_continuation)
 
 
 __all__ = [
