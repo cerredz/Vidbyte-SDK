@@ -5,8 +5,8 @@ ROLE IN CODEBASE: Built by AgentSwarm.arun (swarm.py) once per run over the prep
 ARCHITECTURE NOTE: Every agent runs on one event loop, so a block of code with no await in it runs without any other agent running in between. Every state change here (queueing a message, waking an agent, ending a turn, failing, deciding the end) happens inside such a block, together with the event that records it; delivery to on_event is awaited only afterwards. That is why nothing is ever lost or doubled: a send and the recipient's turn end cannot interleave, so whichever runs first decides; a message is taken out of its inbox in the same block that records its delivery; and because a send is queued in the sender's own step, "no agent is working" also means no message is in flight, so the end of the swarm is detected exactly, with no polling. The time limit is asyncio.timeout around one TaskGroup that owns every member task.
 FUNCTION INVENTORY: arun is the narrated main function of a run; _run_member is the main function of each member task; post_message, collect_messages, end_turn, and record_tool_call are the member parts' entry points; _build_member builds one agent; _drain takes an inbox and records its deliveries; _fail marks a member failed; _end_check decides the end and releases every idle agent; _failure_text and _early_exit_text word an AGENT_FAILED event.
 COMMON MODIFICATION PATTERNS: A new state change goes in one synchronous block that also records its event, followed by one await of the event flush. A new end condition belongs in _end_check.
-WHAT NOT TO DO IN THIS FILE: 1. Do not put an await between a state check and the change it decides. 2. Do not wait for a recipient in post_message; only the event flush may be awaited. 3. Do not poll or sleep. 4. Do not catch CancelledError, or any member exception other than VidbyteSdkError. 5. Do not format a member's own system prompt or a message text with str.format; only the catalog templates are formatted.
-KNOWN EDGE CASES: A message to an idle agent when the turn budget is spent is queued but wakes nobody, and the swarm then ends MAX_TURNS. A member whose run returns before the swarm released it has failed, with the run's own stop reason as the cause. On TIMEOUT every member task is cancelled, so no member gets AGENT_FAILED and replies is empty; when the swarm had already decided to end, the decided reason stands. An exception from this module's own code inside a member task, or a KeyboardInterrupt, is not contained and leaves arun without a result.
+WHAT NOT TO DO IN THIS FILE: 1. Do not put an await between a state check and the change it decides. 2. Do not wait for a recipient in post_message; only the event flush may be awaited. 3. Do not poll or sleep. 4. Do not contain any member exception other than VidbyteSdkError and a CancelledError the swarm did not request, and never swallow a CancelledError: its branch in _run_member records AGENT_FAILED only when the member task's cancelling() is 0 and no stop reason is decided, and always raises it again. 5. Do not format a member's own system prompt or a message text with str.format; only the catalog templates are formatted.
+KNOWN EDGE CASES: A message to an idle agent when the turn budget is spent is queued but wakes nobody, and the swarm then ends MAX_TURNS. A member whose run returns before the swarm released it has failed, with the run's own stop reason as the cause. A CancelledError the swarm did not request, raised by a tool or by an on_event callback, fails only that agent, even an idle one, and is raised again; Python 3.11's TaskGroup ignores the cancelled task, so the other agents go on and the swarm never waits out its time limit for it. On TIMEOUT every member task still running is cancelled without an AGENT_FAILED, so only a member that failed before the limit has one, and replies is empty; when the swarm had already decided to end, the decided reason stands, and an agent still unwinding at that moment may be missing from replies. An exception from this module's own code inside a member task, or a KeyboardInterrupt, is not contained and leaves arun without a result.
 RELATED DOCS: docs/spec/agent-swarm/spec.md (sections 6.1, 8.1 D-4 to D-8 and D-11, and 8.5); vidbyte/agents/agent_swarm/README.md
 TESTS: tests/features/agent_swarm/test_agent_swarm_lifecycle.py, tests/features/agent_swarm/test_agent_swarm_messaging.py, and tests/features/agent_swarm/test_agent_swarm_property.py
 """
@@ -115,14 +115,30 @@ class AgentSwarmRuntime:
         # @intent one-failing-agent-never-stops-the-others
         # Each agent runs one long run for the whole swarm. An SDK error
         # (BaseAgent wraps every model, turn-end, and delivery error in
-        # one, with the original as its cause) or a run that returns
-        # before the swarm released it removes only this agent; anything
-        # else, including cancellation, passes through.
+        # one, with the original as its cause), a cancel the swarm did
+        # not ask for, or a run that returns before the swarm released
+        # it removes only this agent; anything else passes through.
         name = agent.name
         try:
             reply = await agent.arun(goal)
         except VidbyteSdkError as error:
             text = self._failure_text(error)
+        except asyncio.CancelledError as cancel:
+            # @intent a-stray-cancel-fails-its-agent-and-is-raised-again
+            # The task group ignores a cancelled task, so an agent whose
+            # tool or on_event callback raised CancelledError would stay
+            # counted as working until the time limit. The swarm's own
+            # cancels (the time limit, the caller) leave cancelling()
+            # above zero and are only raised again, and so is a cancel
+            # that comes after the swarm decided to end. The failure is
+            # marked before anything awaits, so no send can wake the
+            # agent first.
+            task = asyncio.current_task()
+            if task is not None and task.cancelling() == 0 and self._stop_reason is None:
+                detail = str(cancel).strip() or "the run was cancelled, but not by the swarm"
+                self._fail(name, f"CancelledError: {detail}")
+                self._end_check()
+            raise
         else:
             # A run that returns after the swarm released it ends
             # normally, and its reply is the agent's last turn's reply.
