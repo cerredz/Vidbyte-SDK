@@ -24,7 +24,8 @@ started: 2026-10-16 21:43
 
 ## Counters and caps
 - S1 review rounds: 2/2 (cap reached) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
-- S2_HEAD (test-tree baseline; S3/S5/S6 must show `git diff 72eb0fe9..HEAD -- tests/` EMPTY): 72eb0fe9 (tests 2b6ff7f9 + proof)
+- S2_HEAD (test-tree baseline): 72eb0fe9 (tests 2b6ff7f9 + proof). Main-merge a151e79c brought only main's own test changes (codex_host/*, 2 harness_threads pins). Test-edit check from now on: `git diff a151e79c..HEAD --stat -- tests/` must be EMPTY.
+- Effective base after merge: origin/main 6f5a7310 (drift checks diff 6f5a7310..origin/main)
 
 ## Decisions the orchestrator made
 - 2026-10-16 21:43 — Slug `harness-browser-tools`, not `browser-agent` — another session's unrelated run already owns `worktrees/vidbyte-sdk-browser-agent` (branch `feat/browser-agent`, "BrowserAgent: JevAgent-shaped agent"); no subagent may read it or use the name `BrowserAgent`.
@@ -56,6 +57,9 @@ started: 2026-10-16 21:43
 
 - 2026-10-17 — Spec r4 @ b125e64b (non-architectural alignment, not a review round): spot-check passed — revision 4, status approved, commit touches only spec.md, `git diff 72eb0fe9..HEAD -- tests/` empty, §8 gains only D-29 (situation guidance in the error observation; one cause/next-step text per code) and a §8.5 comment naming BROWSER_CHROME_PATHS; budget (12 files / 34 classes) and 37 §12.3 rows unchanged. Author found no test contradicting a spec decision (not a line-by-line audit). Orchestrator set spec `status: tests-written` (playbook S2 close) and committed the author's r4 report addendum.
 - 2026-10-17 — S3 launched with code-map §1 corrected in the briefing: lint pass line is `SDK-LINT: PASS` (code-map §1 says AGENT-LINT), gate commands use `py -3.11`, PYTHONPATH prefix only for pytest and `--stage source`, never for `--stage package`. Placeholder PR body: scratchpad/s3-placeholder-body.md.
+
+- 2026-10-17 — Drift: origin/main gained #1055 (6f5a7310, CodexHost) after base 845a4d9b. `git merge-tree` clean, no source yet on the branch → merged origin/main into the branch (a151e79c, merge commit so recorded SHAs stay valid). Post-merge red re-run identical to S2: 18 failed / 439 passed / 3 skipped / 155 errors; the two static-policy failures say "§12.3 names these modules … missing" (expected red). #1055 touched §12.3 paths mechanically only: `native/__init__.py` header (now distinguishes thread harnesses from the codex host), `lib/enums/__init__.py`, `lib/enums/failure.py` (19 `codex.*` codes inserted mid-enum at lines 47–65, not at the tail), `lib/errors/base.py`, `harnesses/README.md`; harness_threads static-policy/surface tests now skip `native/codex` (HOST_SUBPACKAGE). Lint slack figures in spec §12.4 were measured at 845a4d9b → implementer re-measures.
+- 2026-10-17 — Scope call (default, surfaced to the user, interruptible): Codex is NOT added to this PR. Reason: #1055 Codex is a host harness (`CodexHost` over the openai-codex SDK app-server, not the CLI `run_/continue_/fork_<h>_thread` shape this spec extends; main's own `native/__init__.py` header separates the two shapes and does not re-export codex); adding it needs a new mount channel, new tests and a spec change past the S1 cap. Recorded as follow-up Q-19 "`run_codex_with_browser` through CodexHost (MCP config via the app-server) as its own run, plugging into the `NativeBrowserHarness` seam"; S6 PR body lists it under limitations/follow-ups.
 
 ## User replies (verbatim)
 - (none yet)
