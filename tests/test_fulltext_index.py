@@ -104,6 +104,29 @@ def _labels(matches: Any) -> list[str]:
     return [hit.label for hit in matches.hits]
 
 
+@contextmanager
+def _traced_statements() -> Iterator[list[str]]:
+    # Yield every statement the real connection runs, in order, as
+    # SQLite's trace callback reports it. It observes the same seam
+    # without_fts5() wraps and changes no behaviour. FTS5's own inner
+    # statements arrive prefixed with "--".
+    import vidbyte.lib.util.fulltext as fulltext
+
+    real_connect = sqlite3.connect
+    statements: list[str] = []
+
+    def connect(*args: Any, **kwargs: Any) -> sqlite3.Connection:
+        connection = real_connect(*args, **kwargs)
+        connection.set_trace_callback(statements.append)
+        return connection
+
+    with ExitStack() as stack:
+        stack.enter_context(patch.object(sqlite3, "connect", connect))
+        if hasattr(fulltext, "connect"):
+            stack.enter_context(patch.object(fulltext, "connect", connect))
+        yield statements
+
+
 class FullTextQueryTests(unittest.TestCase):
     def test_match_expression_quotes_each_word_and_doubles_inner_quotes(self) -> None:
         # INV-8.2, EC-8.1: every word becomes one quoted phrase, so no word is an operator or a column filter.
@@ -191,6 +214,32 @@ class FullTextRefreshTests(unittest.TestCase):
         self.assertEqual(_labels(index.search(["globex"], limit=10, snippet_tokens=12)), ["notes/b.md:1"])
         index.replace("notes/b.md", "f3", [])
         self.assertEqual((index.fingerprint("notes/b.md"), index.search(["globex"], limit=10, snippet_tokens=12).total), ("f3", 0))
+
+    def test_replace_and_retain_delete_by_recorded_rowid_never_by_source(self) -> None:
+        # Section 9.1 Refresh, row 12 (review R-24): replace() and
+        # retain() delete a source's rows by the rowids recorded for
+        # it. FTS5 keeps no index on the UNINDEXED source column, so a
+        # delete by source would scan the whole table under the lock.
+        from vidbyte.lib.dataclasses.code_search import FullTextRow
+
+        with _traced_statements() as statements:
+            index = _index(ROWS_A, ROWS_B)
+            index.replace("notes/a.md", "f2", [FullTextRow("notes/a.md", "notes/a.md:1", "Omicron replaced the old text")])
+            index.retain(["notes/a.md"])
+        own = [line.strip().lower() for line in statements if not line.startswith("--")]
+        # The trace saw the helper's own inserts, so a missing delete
+        # below is a real absence, not a trace that heard nothing.
+        self.assertTrue(any(line.startswith("insert into rows") for line in own), statements)
+        deletes = [line for line in own if line.startswith("delete")]
+        # One delete for the replaced source, one for the dropped one.
+        self.assertGreaterEqual(len(deletes), 2, statements)
+        for line in deletes:
+            with self.subTest(delete=line):
+                self.assertRegex(line, r"\browid\b")
+                self.assertNotRegex(line, r"\bsource\b")
+        self.assertEqual(_labels(index.search(["omicron"], limit=10, snippet_tokens=12)), ["notes/a.md:1"])
+        self.assertEqual(index.search(["zeta"], limit=10, snippet_tokens=12).total, 0)
+        self.assertEqual(index.search(["globex"], limit=10, snippet_tokens=12).total, 0)
 
 
 class FullTextLifecycleTests(unittest.TestCase):

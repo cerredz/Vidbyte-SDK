@@ -14,9 +14,13 @@ TESTS: PYTHONPATH=$(pwd) python -m pytest tests/features/infinite_memory_agent/t
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import shutil
+import sys
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -468,3 +472,158 @@ def test_a_developer_tool_named_search_memory_is_refused(tmp_path: Path) -> None
     with pytest.raises(ConfigurationError) as caught:
         build_settings(tmp_path, tools=(developer_search_memory,))
     assert "search_memory" in str(caught.value)
+
+
+# -------- S5: text UTF-8 cannot encode (EC-8.8)
+
+# A note name UTF-8 cannot encode on both CI hosts: a lone surrogate on
+# Windows, and the byte 0xFF on Linux, which Python lists back as
+# \udcff through surrogateescape.
+UNENCODABLE_NAME = "bad\udcff.md"
+
+
+def test_a_query_holding_a_nul_or_a_lone_surrogate_gives_the_result_of_its_clean_words(tmp_path: Path) -> None:
+    """INV-8.2, EC-8.8, T-1 (review R-2, R-8): a NUL reads as a space and a lone surrogate is removed, so each query returns exactly what its clean twin returns; a query of NULs or surrogates alone is 0 of 0, not invalid_argument."""
+    workspace = _workspace(tmp_path)
+    write_jsonl(workspace.root / "entries.jsonl", [entry_record(7, ZETA_ENTRY), entry_record(8, "Alpha beta gamma pricing")])
+    _write(workspace.root, "notes/prices.md", "Zeta price sheet\n")
+    search_tool = _search_tool(workspace, tmp_path)
+    # "ze\ud800ta" pins removal: a surrogate read as a space would
+    # search "ze" and "ta" and match nothing.
+    twins = (("alpha\x00beta", "alpha beta"), ("zeta\x00", "zeta"), ("\ud800zeta", "zeta"), ("ze\ud800ta", "zeta"), ("zeta \udcff", "zeta"))
+    for dirty, clean in twins:
+        expected = _search(search_tool, clean)
+        assert expected.metadata["total"] > 0, f"precondition: the clean twin {clean!r} matches"
+        result = _search(search_tool, dirty)
+        assert result.status is ToolStatus.SUCCESS, (ascii(dirty), result.output)
+        assert (result.output, result.metadata) == (expected.output, expected.metadata), ascii(dirty)
+    for nothing in ("\x00", "\x00 \x00\x00", "\ud800", "\udcff \x00"):
+        empty = _search(search_tool, nothing)
+        assert empty.status is ToolStatus.SUCCESS, (ascii(nothing), empty.output)
+        assert empty.metadata == {"hits": 0, "total": 0} and _counts(empty.output) == [0, 0], ascii(nothing)
+
+
+def test_an_entry_line_holding_a_lone_surrogate_is_left_out_and_every_later_search_still_works(tmp_path: Path) -> None:
+    """INV-8.8, EC-8.8, INV-8.5 (review R-2, R-8): lines whose text or kind hold an escaped lone surrogate are skipped as malformed; the other entries and a note are found on the next search, the one after it, and from a fresh index."""
+    from vidbyte.lib.util import FullTextIndex
+
+    workspace = _workspace(tmp_path)
+    entries = workspace.root / "entries.jsonl"
+    alpha, omega = entry_record(1, "Alpha lists Basic at 49 USD"), entry_record(4, "Omega lists Basic at 89 USD")
+    write_jsonl(entries, [alpha])
+    _write(workspace.root, "notes/plans.md", "Gamma plan costs 79 USD\n")
+    search_tool = _search_tool(workspace, tmp_path)
+    # Build the index from clean files first: the bad lines then arrive
+    # through the refresh, the path that left every later search
+    # failing.
+    assert _hit_lines(_search(search_tool, "alpha").output) == ["#1 fact: Alpha lists Basic at 49 USD"]
+    # Valid JSON as bash can write it: json.dumps escapes each lone
+    # surrogate as \ud800. The workspace itself refuses such text.
+    bad_text = entry_record(2, "Delta lists Basic at 59 USD \ud800")
+    bad_kind = entry_record(3, "Epsilon lists Basic at 69 USD", kind="fa\ud800ct")
+    write_jsonl(entries, [alpha, bad_text, bad_kind, omega])
+    assert entries.read_text(encoding="utf-8").count("\\ud800") == 2, "precondition: both bad lines are on disk as JSON escapes"
+    expected_basic = ["#1 fact: Alpha lists Basic at 49 USD", "#4 fact: Omega lists Basic at 89 USD"]
+    for attempt in ("first", "second"):
+        basic = _search(search_tool, "basic")
+        assert basic.status is ToolStatus.SUCCESS, (attempt, basic.output)
+        assert sorted(_hit_lines(basic.output)) == expected_basic and basic.metadata == {"hits": 2, "total": 2}, (attempt, basic.output)
+        assert _hit_lines(_search(search_tool, "gamma").output) == ["notes/plans.md:1: Gamma plan costs 79 USD"], attempt
+        for left_out in ("delta", "epsilon"):
+            assert _search(search_tool, left_out).metadata == {"hits": 0, "total": 0}, (attempt, left_out)
+    fresh = _search(_search_tool(workspace, tmp_path, index=FullTextIndex()), "basic")
+    assert sorted(_hit_lines(fresh.output)) == expected_basic, fresh.output
+
+
+def test_a_note_whose_name_utf8_cannot_encode_is_left_out_and_every_other_search_works(tmp_path: Path) -> None:
+    """EC-8.8, INV-8.5 (review R-2, R-8): a note named with a lone surrogate (Windows) or a non-UTF-8 byte (Linux) gives no hits; the entries and the other note are found on this search and the next."""
+    workspace = _workspace(tmp_path)
+    write_jsonl(workspace.root / "entries.jsonl", [entry_record(1, "Alpha lists Basic at 49 USD")])
+    _write(workspace.root, "notes/plans.md", "Kappa plan costs 79 USD\n")
+    search_tool = _search_tool(workspace, tmp_path)
+    assert _hit_lines(_search(search_tool, "kappa").output) == ["notes/plans.md:1: Kappa plan costs 79 USD"]
+    try:
+        _write(workspace.root, f"notes/{UNENCODABLE_NAME}", "Kappa hidden line\n")
+    except OSError as exc:
+        # A filesystem that refuses such names (macOS APFS) can never
+        # hold the file this case is about.
+        pytest.skip(f"this filesystem refuses a name UTF-8 cannot encode: {exc}")
+    assert UNENCODABLE_NAME in [path.name for path in (workspace.root / "notes").iterdir()], "precondition: the name is listed back unencodable"
+    for attempt in ("first", "second"):
+        kappa = _search(search_tool, "kappa")
+        assert kappa.status is ToolStatus.SUCCESS, (attempt, kappa.output)
+        assert _hit_lines(kappa.output) == ["notes/plans.md:1: Kappa plan costs 79 USD"] and kappa.metadata == {"hits": 1, "total": 1}, (attempt, kappa.output)
+        assert _search(search_tool, "hidden").metadata == {"hits": 0, "total": 0}, attempt
+        assert _hit_lines(_search(search_tool, "alpha").output) == ["#1 fact: Alpha lists Basic at 49 USD"], attempt
+
+
+# -------- S5: a warm search reads only what changed (NFR-8.1)
+
+# Every path opened while _files_opened_under is active, recorded by
+# one audit hook; a hook cannot be removed, so it is added once per
+# process and records nothing outside that block.
+_OPENED_PATHS: list[str] = []
+_RECORDING: list[bool] = []
+_AUDIT_HOOK_ADDED: list[bool] = []
+
+
+def _record_file_open(event: str, args: tuple[Any, ...]) -> None:
+    # Python raises "open" for open, io.open, os.open and every pathlib
+    # read, in the opening thread, so the worker thread's reads count;
+    # stat, resolve and scandir raise no "open" event.
+    if _RECORDING and event == "open" and args and isinstance(args[0], (str, bytes)):
+        _OPENED_PATHS.append(os.fsdecode(args[0]))
+
+
+@contextmanager
+def _files_opened_under(root: Path) -> Iterator[list[str]]:
+    """Yields a list that, once the block ends, holds the root-relative POSIX path of every file opened under root inside it, by any API."""
+    if not _AUDIT_HOOK_ADDED:
+        sys.addaudithook(_record_file_open)
+        _AUDIT_HOOK_ADDED.append(True)
+    opened: list[str] = []
+    _OPENED_PATHS.clear()
+    _RECORDING.append(True)
+    try:
+        yield opened
+    finally:
+        _RECORDING.clear()
+        bases = (root.resolve(), root)
+        for raw in _OPENED_PATHS:
+            path = Path(os.path.abspath(raw))
+            base = next((candidate for candidate in bases if path.is_relative_to(candidate)), None)
+            if base is not None:
+                opened.append(path.relative_to(base).as_posix())
+
+
+def test_a_warm_search_opens_no_unchanged_file_and_reads_a_changed_one_again(tmp_path: Path) -> None:
+    """NFR-8.1 stand-in, INV-8.4 (review R-7, R-10): a search with nothing changed opens no workspace file; after one note and the entries change, the next search opens exactly those two, and the one after opens nothing again."""
+    workspace = _workspace(tmp_path)
+    root = workspace.root
+    write_jsonl(root / "entries.jsonl", [entry_record(7, ZETA_ENTRY)])
+    notes = [f"notes/n{number:02d}.md" for number in range(12)]
+    for number, relative in enumerate(notes):
+        _write(root, relative, f"Kappa fact number {number}\n")
+    search_tool = _search_tool(workspace, tmp_path)
+    with _files_opened_under(root) as cold:
+        first = _search(search_tool, "kappa")
+    # The cold search builds the index, so it must read every file. If
+    # the hook missed this platform's reads, this fails here rather
+    # than letting the warm check below pass on an empty list.
+    assert {"entries.jsonl", *notes} <= set(cold), sorted(set(cold))
+    assert first.metadata == {"hits": 10, "total": 12}
+    with _files_opened_under(root) as warm:
+        second = _search(search_tool, "kappa")
+    assert second.metadata == first.metadata
+    assert warm == [], f"a search with nothing changed opened {len(warm)} workspace files: {sorted(set(warm))}"
+    # A new size changes each fingerprint, so both are read again.
+    _write(root, "notes/n03.md", "Kappa fact three now rewritten\n")
+    write_jsonl(root / "entries.jsonl", [entry_record(7, ZETA_ENTRY), entry_record(8, "Kappa entry added later")])
+    with _files_opened_under(root) as changed:
+        third = _search(search_tool, "rewritten")
+    assert set(changed) == {"notes/n03.md", "entries.jsonl"}, sorted(set(changed))
+    assert _hit_lines(third.output) == ["notes/n03.md:1: Kappa fact three now rewritten"], third.output
+    with _files_opened_under(root) as settled:
+        fourth = _search(search_tool, "added")
+    assert settled == [], sorted(set(settled))
+    assert _hit_lines(fourth.output) == ["#8 fact: Kappa entry added later"], fourth.output

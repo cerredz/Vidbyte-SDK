@@ -548,3 +548,19 @@ def test_the_recall_card_leaf_renders_its_fields_in_the_spec_order() -> None:
     """INV-10.7, row 43, the leaf contract table: recall_card holds {question}, {not_found}, {rejected}, {searches}, then {found} last."""
     assert re.findall(r"\{(\w+)\}", prompt_text("recall_card")) == CARD_FIELDS
     assert sorted(re.findall(r"\{(\w+)\}", prompt_text("retriever_task_prompt"))) == ["hits", "known", "purpose", "question"]
+
+
+def test_a_term_holding_a_nul_or_a_lone_surrogate_is_searched_and_the_retriever_still_starts(tmp_path: Path) -> None:
+    """INV-10.10, INV-8.2, EC-8.8 (review R-2, R-8): the pre-search reads a NUL as a space and drops a lone surrogate, so it never raises; the term's hit reaches the retriever's first message and the root gets its card."""
+    root = _seed(tmp_path)
+    _write(root, "notes/acme.md", "Acme price sheet for this quarter\n")
+    agent = build_agent(tmp_path, workspace=DELEGATED)
+    tree = ScriptedTree({ROOT: [_recall(terms=["acme\x00price", "\ud800zeta"]), reply("done")], RETRIEVER: [reply("NOT FOUND (the acme price)")]})
+    with tree.install():
+        agent.run(TASK)
+    assert len(tree.calls_by(RETRIEVER)) == 1, "the pre-search raised, so the retriever never started"
+    tree.assert_complete()
+    assert "notes/acme.md:1: Acme price sheet for this quarter" in tree.first_call(RETRIEVER).prompt
+    card = tool_result(tree.calls_by(ROOT)[1], "recall")
+    assert not is_error(card), card
+    assert "the acme price" in _card_sections(card)["not_found"], card

@@ -112,6 +112,33 @@ class FirstSendTests(unittest.TestCase):
         self.assertEqual(json.dumps(_provider()._create_payload(_config(), PROMPT, SYSTEM, None)), MAIN_BODY_JSON)
 
 
+class LoneSurrogateTests(unittest.TestCase):
+    def test_a_lone_surrogate_in_the_system_or_a_tool_sends_mains_body_first_and_marks_the_repeat(self) -> None:
+        # INV-9.2, INV-0.2 (review R-6, R-11). A workspace file name
+        # puts a lone surrogate in the root's system through the map,
+        # and a tool description can hold one too. The first body is
+        # main's with that text, unmarked, and main's transport
+        # serializes it with json.dumps; the repeat carries the three
+        # marks.
+        system = f"{SYSTEM} Notes: notes/caf\ud800.md"
+        tools = ({**TOOLS[0], "description": "Find a fact in notes/caf\ud800.md."},)
+        for label, config, sent_system in (("system", _config(), system), ("tool", _config(tools=tools), SYSTEM)):
+            with self.subTest(surrogate_in=label):
+                provider = _provider()
+                first = provider._create_payload(config, PROMPT, sent_system, None)
+                main_first = json.loads(MAIN_BODY_JSON)
+                main_first["system"] = sent_system
+                main_first["tools"] = [dict(tool) for tool in config.tools]
+                self.assertEqual(first, main_first)
+                self.assertEqual(json.dumps(first), json.dumps(main_first))
+                self.assertEqual(_marks(first), [])
+                second = _payload(provider, config, system=sent_system)
+                repeat = _expected_repeat()
+                repeat["system"][0]["text"] = sent_system
+                repeat["tools"] = [dict(tool) for tool in config.tools]
+                self.assertEqual(second, repeat)
+
+
 class RepeatMarkTests(unittest.TestCase):
     def test_a_repeat_marks_the_system_the_last_message_and_the_message_before_the_newest_assistant(self) -> None:
         # AC-9.1, INV-9.3: exactly three marks, each exactly {"type": "ephemeral"}.

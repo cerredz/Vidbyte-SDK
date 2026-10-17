@@ -291,6 +291,40 @@ class ScopedWindowTests(unittest.IsolatedAsyncioTestCase):
         after, _ = await ContextCompactionEngine().compact_messages(history, mode=CompactionMode.TOOL_OUTPUT_SLIDING_WINDOW, options={"keep_recent": 3, "window_mode": STRIP.value, "placeholder": "ENGINE-MASK", "tools": SEARCH_SCOPE})
         self.assertEqual(after, _window(history, 3, "ENGINE-MASK", SEARCH_SCOPE))
 
+    async def test_a_scope_keeps_outputs_after_the_newest_model_turn_whole_on_every_wire_role(self) -> None:
+        # INV-2.3, EC-2.5 at strategy level (review R-3, R-9). Each
+        # wire's (role, kind) pairs from spec section 13: five parallel
+        # results after the newest model turn stay whole; once the
+        # model answers, main's window applies; with no model turn,
+        # nothing is read yet.
+        from vidbyte.middleware.compaction.windows import ToolOutputSlidingWindowCompaction
+
+        strategy = ToolOutputSlidingWindowCompaction(keep_recent=3, mode=STRIP, placeholder="MASKED", tools=SEARCH_SCOPE)
+        for model_role, result_role in (("assistant", "tool"), ("assistant", "user"), ("model", "user")):
+            with self.subTest(model_role=model_role, result_role=result_role):
+                batch = tuple(msg(result_role, f"READ-OUTPUT-{number} " + "r" * 50, "tool_result", tool_name="read_lines") for number in range(5))
+                pending = (msg("user", "Compare the prices."), msg(model_role, "read five notes", "tool_call", tool_name="read_lines"), *batch)
+                self.assertEqual(await strategy.compact(pending), pending, "an output after the newest model turn was masked")
+                answered = (*pending, msg(model_role, "add them up", "tool_call", tool_name="bash"), msg(result_role, "BASH-OUTPUT", "tool_result", tool_name="bash"))
+                after = await strategy.compact(answered)
+                self.assertEqual(after, _window(answered, 3, "MASKED", SEARCH_SCOPE))
+                self.assertEqual([message.content for message in after[2:7]], ["MASKED", "MASKED", *(message.content for message in batch[2:])])
+                no_model_turn = (msg("user", "Compare the prices."), *batch)
+                self.assertEqual(await strategy.compact(no_model_turn), no_model_turn, "with no model turn every output is unread")
+
+    async def test_without_a_scope_an_unanswered_batch_is_compacted_exactly_as_on_main(self) -> None:
+        # INV-2.1 under the r5 INV-2.3 (review R-3, R-9): the unread
+        # rule needs a non-empty scope, so tools=() still compacts a
+        # batch the model has not answered exactly as main's window
+        # does.
+        from vidbyte.middleware.compaction.windows import ToolOutputSlidingWindowCompaction
+
+        batch = tuple(result("read_lines", f"READ-OUTPUT-{number} " + "r" * 50) for number in range(5))
+        pending = (msg("user", "Compare the prices."), call("read_lines", "read five notes"), *batch)
+        expected = _window(pending, 3, "P")
+        self.assertNotEqual(expected, pending, "precondition: main's window compacts part of the batch")
+        self.assertEqual(await ToolOutputSlidingWindowCompaction(keep_recent=3, mode=STRIP, placeholder="P").compact(pending), expected)
+
 
 class QuantizedTrimTests(unittest.IsolatedAsyncioTestCase):
     async def test_a_91k_history_keeps_one_suffix_between_65_5k_and_66k(self) -> None:

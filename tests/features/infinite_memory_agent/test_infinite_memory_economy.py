@@ -438,3 +438,95 @@ def test_a_replayed_passed_card_is_the_label_then_the_compact_card(tmp_path: Pat
     card = finished_cards(workspace_root(tmp_path))[pair_key("a")]
     assert tool_result(tree.calls_by(ROOT)[1], "launch_subagent") == _compact(card)
     assert tool_result(tree.calls_by(ROOT)[2], "launch_subagent") == f"{prompt_text('replayed_label')}\n{_compact(card)}"
+
+
+# -------- S5: masking never hides an unread output (AC-2.5)
+
+WIRES = ("openai", "anthropic", "gemini")
+WireCall = tuple[str, str, dict[str, Any]]
+
+
+def _wire_user_turn(wire: str, text: str) -> dict[str, Any]:
+    # The task turn: Gemini carries text in parts, the others in
+    # content.
+    return {"role": "user", "parts": [{"text": text}]} if wire == "gemini" else {"role": "user", "content": text}
+
+
+def _wire_call_turn(wire: str, calls: Sequence[WireCall]) -> dict[str, Any]:
+    # One model turn issuing every (call id, tool, arguments) at once,
+    # in each wire's assistant-turn shape; Gemini's model turn has role
+    # "model", the other two "assistant".
+    match wire:
+        case "anthropic":
+            return {"role": "assistant", "content": [{"type": "tool_use", "id": call_id, "name": name, "input": arguments} for call_id, name, arguments in calls]}
+        case "gemini":
+            return {"role": "model", "parts": [{"functionCall": {"name": name, "args": arguments}} for _, name, arguments in calls]}
+        case _:
+            return {"role": "assistant", "content": None, "tool_calls": [{"id": call_id, "type": "function", "function": {"name": name, "arguments": json.dumps(arguments)}} for call_id, name, arguments in calls]}
+
+
+def _wire_result(wire: str, call: WireCall, output: str) -> dict[str, Any]:
+    # One message per result, built by the formatter the runtime uses,
+    # which appends one message per tool result on every wire.
+    from vidbyte.lib.tools.formatter import ToolsFormatter
+    from vidbyte.tools.types import ToolCall, ToolResult
+
+    call_id, name, arguments = call
+    return dict(ToolsFormatter.format_tool_result(ToolCall(name, arguments, call_id=call_id), ToolResult.success(name, output), wire))
+
+
+def _wire_outputs(wire: str, messages: Sequence[dict[str, Any]]) -> list[str]:
+    # Every tool output text, oldest first, read where each wire keeps
+    # it.
+    match wire:
+        case "anthropic":
+            return [block["content"] for message in messages if isinstance(message.get("content"), list) for block in message["content"] if block.get("type") == "tool_result"]
+        case "gemini":
+            return [part["functionResponse"]["response"]["output"] for message in messages for part in message.get("parts", ()) if "functionResponse" in part]
+        case _:
+            return [message["content"] for message in messages if message.get("role") == "tool"]
+
+
+def _wire_inputs(wire: str, messages: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    # Every message that is not a tool result: the task and each call.
+    return [message for message in messages if not _wire_outputs(wire, [message])]
+
+
+@pytest.mark.parametrize("wire", WIRES)
+def test_a_parallel_batch_of_reads_stays_whole_until_the_model_has_answered_it(tmp_path: Path, wire: str) -> None:
+    """AC-2.5, EC-2.5, INV-2.3, INV-2.4 (review R-3, R-9): the root's masking on each wire; the newest model turn holds keep_recent + 2 parallel read_lines calls, so the next view shows every output whole; after one more turn that calls only bash, exactly the oldest two are the masked_output leaf; every call is unchanged in both views."""
+    from vidbyte.lib.constants.infinite import INFINITE_MASK_KEEP_RECENT
+
+    masking = build_agent(tmp_path).middleware[0]
+    batch = INFINITE_MASK_KEEP_RECENT + 2
+    reads = [(f"read-{number}", "read_lines", {"path": f"notes/n{number}.md"}) for number in range(batch)]
+    outputs = [f"READ-BODY-{number} " + "r" * 200 for number in range(batch)]
+    history = [_wire_user_turn(wire, TASK), _wire_call_turn(wire, reads), *(_wire_result(wire, read, output) for read, output in zip(reads, outputs, strict=True))]
+    first = _view(masking, history)
+    assert _wire_outputs(wire, first) == outputs, "masking hid an output the model has not read yet"
+    assert len(first) == len(history) and _wire_inputs(wire, first) == _wire_inputs(wire, history)
+    bash: WireCall = ("bash-0", "bash", {"command": "echo checked"})
+    history += [_wire_call_turn(wire, [bash]), _wire_result(wire, bash, "BASH-OUTPUT")]
+    second = _view(masking, history)
+    masked = batch - INFINITE_MASK_KEEP_RECENT
+    assert _wire_outputs(wire, second) == [prompt_text("masked_output")] * masked + outputs[masked:] + ["BASH-OUTPUT"]
+    assert len(second) == len(history) and _wire_inputs(wire, second) == _wire_inputs(wire, history)
+
+
+@pytest.mark.parametrize("wire", WIRES)
+def test_reads_made_one_per_model_turn_still_mask_all_but_the_newest_three(tmp_path: Path, wire: str) -> None:
+    """INV-2.3 regression guard (review R-3, R-9): keep_recent + 2 read_lines, one per model turn, mask the oldest two on every wire. A model-turn check of role assistant alone reads every Gemini output as unread and masks none."""
+    from vidbyte.lib.constants.infinite import INFINITE_MASK_KEEP_RECENT
+
+    masking = build_agent(tmp_path).middleware[0]
+    count = INFINITE_MASK_KEEP_RECENT + 2
+    history = [_wire_user_turn(wire, TASK)]
+    outputs = []
+    for number in range(count):
+        read: WireCall = (f"read-{number}", "read_lines", {"path": f"notes/n{number}.md"})
+        outputs.append(f"READ-BODY-{number} " + "r" * 200)
+        history += [_wire_call_turn(wire, [read]), _wire_result(wire, read, outputs[-1])]
+    view = _view(masking, history)
+    masked = count - INFINITE_MASK_KEEP_RECENT
+    assert _wire_outputs(wire, view) == [prompt_text("masked_output")] * masked + outputs[masked:]
+    assert len(view) == len(history) and _wire_inputs(wire, view) == _wire_inputs(wire, history)
