@@ -53,6 +53,8 @@ started: 2026-10-15 18:04
 - 2026-10-16 17:40 — Author revision r2 committed at 25358062 (`docs(spec): revise native-thread-compose spec r2 (review round 1, R-1 to R-11)`): all 11 findings accepted; R-3 restored the ledger signatures `chain_threads(steps, template=None, *, prompt)` and `verify_with(writer, verifiers, *, prompt)`; EC-73..EC-76 added; Q-11 added (default not built); budget 40 new files, 9 modified (row 28 docstring-only edit of `native/__init__.py`). Spot-check: revision 2, 18 sections, §16 rows r1-1..r1-11 all dispositioned.
 - 2026-10-16 17:42 — Round 2 required by the playbook (accepted findings changed §8, §8.5, §9): launching a fresh scoped reviewer (report `reports/S1-spec-review-r2.md`). This is the last review round (cap 2).
 
+- 2026-10-16 ~18:25 — Interruption 4: the S1 round-2 reviewer was stopped by an API rate limit (HTTP 429, session limit, reset 9:40pm) before writing its report. Verified 2026-10-16 21:41: HEAD edac7d93, clean, no reports/S1-spec-review-r2.md; it left probe scripts and run folders in `C:/Users/422mi/AppData/Local/Temp/claude/C--Users-422mi-vidbyte-repos/d2d5110d-c484-4b56-acef-651ebe9a78a5/scratchpad/s1probe-r2/` (git_table_probe.py, concurrency_probe.py, measure_prompts.py, python_facts.py, runs/, runs2/; last write 18:22). Coordinator (21:4x): resume the same reviewer, do not relaunch; round 2 is the cap. Resumed via SendMessage.
+
 ## User replies (verbatim)
 - none (coordinator relay messages on 2026-10-15 20:0x and 2026-10-16 01:3x concerned rate-limit resumption only; no product decisions)
 
