@@ -120,3 +120,33 @@ The verdict was SOUND WITH FIXES, with 12 findings: 2 Blocker, 2 Major, 8 Minor.
 - **A-1.** FTS5 on Linux CI is unverified. The review notes that the CI matrix is 3.11 and 3.12 and that CPython ships FTS5.
 - **A-6.** Gateway forwarding is verified in code only, not with a live key.
 - **Q-11 and Q-12.** Each is decided by the §12.5 real-key trace: Q-11 by the cut-move count, Q-12 by how much of the kept history status messages take up.
+
+## Addendum: r4 (S2 defects, status stays approved, commit fb702ba5)
+
+The S2 test author found two defects. Per the orchestrator this is a defect fix, not a review round: `revision: 4`, `status: approved`, and the §6.2 Proof column is unchanged (no AC was renamed). §16 holds the rows "S2 defect 1", "S2 defect 2", and "S2 notes".
+
+**How I checked defect 1 (independently of the test author)**
+- I wrote a scratch prototype of INV-9.1–9.7: a patched `AnthropicProvider._create_payload` in the scratchpad, never committed. I ran the full suite (6,378 tests collected) three ways: unpatched, with the r3 rule (option a), and with "never convert a string content, move the mark to the nearest earlier list message" (option b).
+- **r3 rule.** Exactly one existing test went from green to red: the compacted run-boundary test, Anthropic subtest. All 14 tests in `tests/test_anthropic_cache_breakpoints.py` went green, and nothing else changed result.
+- **Option b.** The run-boundary test stays green, but three of the new cache tests stay red. A string-only history also gets no message breakpoint, which loses G-4's caching for plain chats.
+- **The wire, dumped.** In requests 2–4 the payload messages are: the trace as a string, then the task as `[text* TASK]`, then `tool_use`, then `tool_result*`. The task is the message right before the newest assistant turn. The test's matcher compares `content == TASK`, so it finds no task.
+- **Choice: option (a).** Anthropic documents a string content as shorthand for one text block, so the model reads the same input. The test checks the task's position, and only its matcher compares the shape. A-5 is restated with this evidence, and EC-9.10 is new.
+
+**Defect 2: measured, then option (b)**
+- **Lines after the header**, counted the way the budget test counts them (headroom in brackets): memory 251 (149), launch 368 (32), workspace 332 (68), runtime 106 (294), agent 111 (289), journal 157 (243), settings 196 (204).
+- **Why not (a).** The modules with room each own another subsystem (AGENTS.md principle 3). The toolsets module sits in the tools layer, which cannot import the retriever's `BaseAgent`.
+- **D-18.** `vidbyte/agents/infinite/recall.py` is CREATE row 57. `memory.py` keeps the builder entry and imports the class. `recall.py` imports `InfiniteAgentMemory` only under `TYPE_CHECKING`. A006 skips those edges (`a006_directed_dependency_graph.py:74`, `:138`), so there is no cycle.
+- **Repo-forced follow-on.** The README File Index must list `recall.py` (S020, row 50).
+- **The recall test's import.** `test_infinite_memory_recall.py:203` imports `InfiniteRecallTool` from `...memory`. That still resolves through `memory.py`'s import.
+
+**Tests the test author must now update**
+1. **The run-boundary test.** `tests/test_prompt_sits_at_run_boundary.py::CompactedRunBoundaryTests::test_a_top_note_replaced_by_the_trace_keeps_the_task_before_the_run_on_every_wire`, through its helper `_task_and_first_call` (`:128`). Also accept a task turn whose content is `[{"type": "text", "text": TASK, "cache_control": {"type": "ephemeral"}}]`. The assertions are unchanged: one task turn, before the first call turn (index 1 before 2 on requests 2–4).
+2. **The budget test.** `tests/features/infinite_memory_agent/test_infinite_memory_contract.py::test_new_modules_stay_inside_the_complexity_budget`:
+   - the bound becomes `<= 9` `.py` files;
+   - `BUDGET_MODULES` (`:104-117`) gains `"vidbyte/agents/infinite/recall.py"`, giving 13 modules at `<= 400` lines each;
+   - the docstring and comment change to match.
+3. **Optional.** Switch `test_infinite_memory_recall.py:203` to import from `vidbyte.agents.infinite.recall`.
+
+**S2 notes**
+- I agree with them and pinned none. The open formats and accepted variants stay open.
+- One fact went into §13 Per-area config. The POSIX-only endless-printer test is skipped on Windows, so INV-6.4 is proven only by the Linux CI run.
