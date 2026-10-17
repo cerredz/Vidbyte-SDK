@@ -3,7 +3,7 @@
 PURPOSE: Defines every named default, limit, pattern, tool name, workspace file name, and short label of the InfiniteMemory agent: the delegation caps, the workspace caps, the entry and card sizes, the history cap, the run-id and verdict formats, and the map's fixed labels.
 ROLE IN CODEBASE: Read by the settings and every module in vidbyte/agents/infinite/, by the records in vidbyte/lib/dataclasses/infinite.py, and by InfiniteMemoryAgentTools (vidbyte/tools/toolsets/infinite.py). The feature tests import the labels and caps to check output against them.
 ARCHITECTURE NOTE: Immutable constants only; behavior lives in the workspace, journal, memory, launch, and runtime modules. The limits are generous on purpose, because this agent exists to take on work that outgrows one context: each one only stops a runaway run, and the context caps are sized for a 128,000-token model: the role prompt, the tool descriptions, the map, and the trimmed history take about 105,000 tokens, which leaves room for the developer's own prompt and the reply. The history also holds the root's status messages and, past its cap, is cut back toward the low watermark. Patterns are raw strings compiled where they are used, and the label templates are filled with str.format.
-FUNCTION INVENTORY: No functions; defaults (INFINITE_DEFAULT_*), limits, patterns (INFINITE_*_PATTERN), tool names (INFINITE_*_TOOL_NAME and INFINITE_RESERVED_TOOL_NAMES), workspace layout names, and labels.
+FUNCTION INVENTORY: No functions; defaults (INFINITE_DEFAULT_*), limits, patterns (INFINITE_*_PATTERN), tool names (INFINITE_*_TOOL_NAME and INFINITE_RESERVED_TOOL_NAMES), workspace layout names (and INFINITE_BOOKKEEPING_NAMES, the ones search_memory never indexes as notes), the search_memory caps, and labels.
 COMMON MODIFICATION PATTERNS: Change a cap or label here, never at its use site, so the settings, the tools, the tests, and the folder README stay in step. Add a named constant here before writing another InfiniteMemory policy literal.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import from any layer above vidbyte/lib. 2. Do not put model-facing sentences here; they belong in vidbyte/prompts/prompts/infinite_memory/. 3. Do not rename a workspace file name; workspaces already on disk use it.
 KNOWN EDGE CASES: Every token figure is TokenEstimate's characters-divided-by-four estimate, not a real tokenizer count. The verdict pattern accepts Markdown emphasis and a trailing period, and the last matching line wins. Grep's file-size cap is derived from max_tokens with INFINITE_UTF8_MAX_BYTES_PER_CHAR, so no workspace file is too large to search.
@@ -94,7 +94,7 @@ INFINITE_RUN_ID_TIME_FORMAT = "%Y%m%dT%H%M%SZ"
 
 # The model-facing names of the run-bound tools, which each run adds to
 # its agents, the name of the launch tool's task list, and the name of
-# the ranked memory search. The reserved names add the three preset
+# the ranked memory search. The reserved names add the four preset
 # tools, so no developer tool may take any of them.
 INFINITE_LAUNCH_TOOL_NAME = "launch_subagent"
 INFINITE_LAUNCH_TASKS_ARGUMENT = "tasks"
@@ -115,6 +115,7 @@ INFINITE_RESERVED_TOOL_NAMES = (
     "bash",
     "grep",
     "read_lines",
+    INFINITE_SEARCH_MEMORY_TOOL_NAME,
 )
 
 # Masking and the workspace grep: every agent keeps the newest outputs
@@ -125,6 +126,11 @@ INFINITE_RESERVED_TOOL_NAMES = (
 INFINITE_MASK_KEEP_RECENT = 3
 INFINITE_MASKED_TOOL_NAMES = ("grep", "read_lines", INFINITE_SEARCH_MEMORY_TOOL_NAME)
 INFINITE_GREP_CONTEXT_LINES = 0
+
+# search_memory: the most hits one search shows, and the most word
+# tokens in each hit's snippet.
+INFINITE_SEARCH_MAX_HITS = 10
+INFINITE_SEARCH_SNIPPET_TOKENS = 12
 
 # Agent keys and workspace layout: the root's key, the last part of a
 # pair's generator and verifier keys, the journal and seed folders, the
@@ -141,6 +147,9 @@ INFINITE_FILES_FILE = "files.jsonl"
 INFINITE_NOTE_SUFFIXES = (".md", ".txt", ".json", ".jsonl")
 # Top-level folders whose files never count toward the workspace caps.
 INFINITE_UNCOUNTED_DIRNAMES = (INFINITE_RUNS_DIRNAME,)
+# The journal folder and the three bookkeeping files: search_memory
+# never indexes them as notes, and it indexes entries.jsonl by entry.
+INFINITE_BOOKKEEPING_NAMES = (INFINITE_RUNS_DIRNAME, INFINITE_ENTRIES_FILE, INFINITE_SUPERSEDED_FILE, INFINITE_FILES_FILE)
 INFINITE_MAP_PRIMITIVE_ID = "infinite_memory_map"
 
 # Short fixed labels: the map's title, the end of cut card text, the
@@ -156,6 +165,7 @@ INFINITE_FINISHED_PAIR_LINE = "- {name}: {status}, verdict {verdict}, entries {e
 INFINITE_MAP_REMOVED_LINE = "- {path}: removed"
 
 __all__ = [
+    "INFINITE_BOOKKEEPING_NAMES",
     "INFINITE_CARD_TEXT_MAX_TOKENS",
     "INFINITE_CONTEXT_MAX_ITEMS",
     "INFINITE_DEFAULT_MAX_AGENTS",
@@ -205,7 +215,9 @@ __all__ = [
     "INFINITE_RUN_BOUND_TOOL_NAMES",
     "INFINITE_RUN_ID_PATTERN",
     "INFINITE_RUN_ID_TIME_FORMAT",
+    "INFINITE_SEARCH_MAX_HITS",
     "INFINITE_SEARCH_MEMORY_TOOL_NAME",
+    "INFINITE_SEARCH_SNIPPET_TOKENS",
     "INFINITE_SEED_DIRNAME",
     "INFINITE_SEED_LABEL",
     "INFINITE_STAGED_KEY_PATTERN",
