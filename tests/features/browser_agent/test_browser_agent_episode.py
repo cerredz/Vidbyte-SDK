@@ -3,7 +3,7 @@
 PURPOSE: Proves the run_episode tool and its worker: the orchestrator never holds an ACTION tool and a worker holds only them; the action cap, the per-tool screenshot cap, the per-tool observation window and the worker history trim hold; every non-cancelled episode returns one capped card and records one result, including stuck cards built from a cap stop, a schema miss, or a provider error; cancellation propagates; ready_to_submit is only recorded; a done card carries the recipe of its successful calls; episodes run one at a time; only the card text reaches the orchestrator; and the developer's permission policy binds every worker.
 ROLE IN CODEBASE: Episode layer of tests/features/browser_agent/ (spec AC-5, AC-7, AC-8, AC-9, AC-17, AC-26, AC-27, AC-31; INV-5..INV-12, INV-19; EC-11..EC-15, EC-31, EC-34; D-8, D-9, D-10, D-16, D-17, D-24, D-25, D-27; T-2, T-6). Exercises vidbyte/agents/browser/episode.py, tools.py and runtime.py through BrowserAgent.run / arun.
 ARCHITECTURE NOTE: Workers are scripted by name ("vc-scout-episode-<n>") and their browser calls reach FakeBrowserServers, so every count here is a count of real tools/call requests, and every stuck card is built from the worker's real loop metadata. Ordering checks yield to the event loop with asyncio.sleep(0); nothing waits on the clock.
-FUNCTION INVENTORY: test_orchestrator_never_holds_action_tools_and_workers_hold_only_them (AC-5, INV-5, INV-7, D-24); test_action_cap_stops_the_worker_and_returns_a_stuck_card_with_evidence (AC-7, INV-9, INV-12, EC-11); test_a_call_past_the_action_cap_in_the_same_turn_is_not_executed (INV-9); test_a_second_screenshot_is_denied_in_context_and_the_worker_finishes_its_card (AC-8, INV-10); test_screenshot_cap_counts_each_screenshot_tool_case_insensitively_and_spares_other_tools (INV-10, A-1); test_older_observations_are_cut_and_the_newest_is_whole (AC-9, INV-11); test_default_settings_keep_the_two_newest_observations_of_each_tool (S4 R-5, Q-4, Q-6); test_worker_history_stays_within_its_token_cap_with_whole_call_groups (AC-31, INV-11); test_a_free_text_worker_reply_becomes_a_stuck_card_with_evidence (EC-12, INV-12); test_a_worker_provider_error_becomes_a_stuck_card_and_the_run_continues (AC-27, EC-13, D-27); test_cancelling_during_an_episode_propagates_and_records_no_card (AC-27, EC-14); test_ready_to_submit_is_recorded_and_nothing_acts_on_it (AC-17, INV-19); test_a_done_card_records_the_recipe_of_successful_calls_and_the_event_names_only_the_count (AC-26, D-17, EC-31, T-6); test_an_oversized_worker_card_is_capped_on_the_record_and_in_the_orchestrator_view (INV-6, D-25, section 9.1); test_two_episodes_in_one_turn_run_one_after_the_other_in_call_order (INV-8, EC-15); test_only_the_card_text_reaches_the_orchestrator (INV-6); test_the_developer_permission_policy_binds_every_worker (T-2, D-16); test_each_role_is_enforced_by_the_catalog_not_by_the_prompt (EC-34, INV-5, INV-7).
+FUNCTION INVENTORY: test_orchestrator_never_holds_action_tools_and_workers_hold_only_them (AC-5, INV-5, INV-7, D-24); test_episode_and_recheck_models_reach_their_own_agents (section 9.3, D-13, S4 R-19); test_action_cap_stops_the_worker_and_returns_a_stuck_card_with_evidence (AC-7, INV-9, INV-12, EC-11); test_a_call_past_the_action_cap_in_the_same_turn_is_not_executed (INV-9); test_a_second_screenshot_is_denied_in_context_and_the_worker_finishes_its_card (AC-8, INV-10); test_screenshot_cap_counts_each_screenshot_tool_case_insensitively_and_spares_other_tools (INV-10, A-1); test_older_observations_are_cut_and_the_newest_is_whole (AC-9, INV-11); test_default_settings_keep_the_two_newest_observations_of_each_tool (S4 R-5, Q-4, Q-6); test_worker_history_stays_within_its_token_cap_with_whole_call_groups (AC-31, INV-11); test_a_free_text_worker_reply_becomes_a_stuck_card_with_evidence (EC-12, INV-12); test_a_worker_provider_error_becomes_a_stuck_card_and_the_run_continues (AC-27, EC-13, D-27); test_cancelling_during_an_episode_propagates_and_records_no_card (AC-27, EC-14); test_ready_to_submit_is_recorded_and_nothing_acts_on_it (AC-17, INV-19); test_a_done_card_records_the_recipe_of_successful_calls_and_the_event_names_only_the_count (AC-26, D-17, EC-31, T-6); test_an_oversized_worker_card_is_capped_on_the_record_and_in_the_orchestrator_view (INV-6, D-25, section 9.1); test_two_episodes_in_one_turn_run_one_after_the_other_in_call_order (INV-8, EC-15); test_only_the_card_text_reaches_the_orchestrator (INV-6); test_the_developer_permission_policy_binds_every_worker (T-2, D-16); test_each_role_is_enforced_by_the_catalog_not_by_the_prompt (EC-34, INV-5, INV-7).
 COMMON MODIFICATION PATTERNS: Give a fake tool distinct, long results with FakeBrowserServers.add when a test needs to tell observations apart. Take every bound from vidbyte.lib.constants.browser.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level. 2. Do not assert on mock calls; count tools/call requests the fake server received. 3. Do not raise AssertionError inside a scripted worker step: the worker wraps it into an AgentExecutionError and the episode tool turns it into a stuck card, hiding the failure; record a flag and assert in the test body.
 KNOWN EDGE CASES: Every BaseAgent's catalog gets the loop's internal isDone tool, so a worker's offered set is the ACTION tools plus isDone (AC-5's "only the ACTION tools" is read as "no other non-internal tool"). A worker's provider error reaches the episode tool wrapped in AgentExecutionError, so the stuck card's error type name may be the wrapper's or the cause's; the test accepts either and checks the summary renders the same name.
@@ -25,6 +25,7 @@ from tests.features.browser_agent.browser_agent_fixtures import (
     ACTION_COMMAND,
     ACTION_TOOLS,
     FETCH_COMMAND,
+    MODEL,
     NAME,
     RECHECK,
     SCREENSHOT_DATA,
@@ -112,6 +113,29 @@ def test_orchestrator_never_holds_action_tools_and_workers_hold_only_them() -> N
     assert SYSTEM_PROMPT in first.system and worker_rules in first.system
     assert SYSTEM_PROMPT in orchestrator[0].system and orchestrator_rules in orchestrator[0].system
     assert orchestrator_rules not in first.system and worker_rules not in orchestrator[0].system
+
+
+def test_episode_and_recheck_models_reach_their_own_agents() -> None:
+    """Section 9.3, D-13, S4 R-19: episode_model_name drives every worker call and recheck_model_name the recheck call, while the orchestrator keeps model_name; with neither set, every agent of the run uses model_name."""
+    # Both overrides are priced OpenAI models that pass the pair check.
+    episode_model, recheck_model = "gpt-5.4-nano", "gpt-5.4"
+    assert len({MODEL, episode_model, recheck_model}) == 3
+    steps = [tool_call("browser_navigate", {"url": "https://seedcamp.com/apply"}), card("done", "Opened the page.")]
+    model = ScriptedModel(_one_episode(list(steps)))
+    agent = build_agent(episode_model_name=episode_model, recheck_model_name=recheck_model)
+    with installed(model, FakeBrowserServers()):
+        agent.run(TASK)
+    model.assert_complete()
+    assert [call.model for call in model.calls_by(NAME)] == [MODEL, MODEL]
+    assert [call.model for call in model.calls_by(worker(1))] == [episode_model, episode_model]
+    assert [call.model for call in model.calls_by(RECHECK)] == [recheck_model]
+    # Neither override set: every agent of the run uses model_name.
+    plain = ScriptedModel(_one_episode(list(steps)))
+    with installed(plain, FakeBrowserServers()):
+        build_agent().run(TASK)
+    plain.assert_complete()
+    assert {call.agent for call in plain.calls} == {NAME, worker(1), RECHECK}
+    assert {call.model for call in plain.calls} == {MODEL}
 
 
 # ---------------------------------------------------------------- the action cap (INV-9)

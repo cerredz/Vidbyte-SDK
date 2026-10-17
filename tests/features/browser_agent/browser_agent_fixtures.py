@@ -2,7 +2,7 @@
 
 PURPOSE: Shared offline harness for the BrowserAgent feature pack: one scripted model runner that answers the orchestrator, every episode worker, every recheck, and the done-when agent by name; a fake stdio MCP transport that plays the ACTION, SEARCH, and FETCH browser servers; builders for settings and agents; an event sink that records when each event arrived; and readers for the goal card, tool results, prompt templates, and history sizes.
 ROLE IN CODEBASE: Imported by every test module in tests/features/browser_agent/. It replaces only the two seams spec section 13 allows: the model runner at BaseAgent._runner_for_model and the MCP stdio transport at vidbyte.tools.mcp.attach.McpStdioTransport. BaseAgent, the linear loop, BrowserAgentRuntime, the MCP mixin, attach, client and bridge, the compaction middleware and engine, ToolSettings, the prompt catalog, and the usage tracker all run for real.
-ARCHITECTURE NOTE: ScriptedModel routes each model call by agent name (the orchestrator is NAME, workers are "<NAME>-episode-<n>", rechecks "<NAME>-recheck", the done-when agent "<NAME>-done-when") to that agent's list of steps and records what it was sent: prompt, system string, message history, offered tool names, schemas, and descriptions. A step is one or more tool calls, a final reply, an error to raise, a step that answers forever, or a callable that observes the call and then returns a step. A call with no step left is recorded as unscripted and fails, so an agent the feature must not run can never pass silently. FakeBrowserServers is a transport factory: every instance it builds is kept, with the command, env, and timeout it was built with and every tools/call it received.
+ARCHITECTURE NOTE: ScriptedModel routes each model call by agent name (the orchestrator is NAME, workers are "<NAME>-episode-<n>", rechecks "<NAME>-recheck", the done-when agent "<NAME>-done-when") to that agent's list of steps and records what it was sent: prompt, system string, message history, offered tool names, schemas, and descriptions, plus the agent's configured model. A step is one or more tool calls, a final reply, an error to raise, a step that answers forever, or a callable that observes the call and then returns a step. A call with no step left is recorded as unscripted and fails, so an agent the feature must not run can never pass silently. FakeBrowserServers is a transport factory: every instance it builds is kept, with the command, env, and timeout it was built with and every tools/call it received.
 FUNCTION INVENTORY: worker / action_server / search_server / fetch_server / build_settings / build_agent build the subject; tool_call / tool_calls / reply / card / verdict / criteria / fail / forever / observe build steps; ScriptedModel.install / calls_by / first_call / position / assert_complete run and read the script; FakeBrowserServers.install / instances_for / calls_to / serve / add read and shape the fake servers; text_result / image_result / error_result build MCP results; EventLog records events with the orchestrator call count at emit time; installed combines both seams; card_section / tool_results / tool_messages / assistant_turns / is_error / seen_text / prompt_text / template_regex / int_token / error_text / find_error / stored_tokens / content_tokens / unpaired read what happened.
 COMMON MODIFICATION PATTERNS: Add a new step kind as a frozen dataclass plus one branch in ScriptedModel._respond. Add a fake server tool with FakeBrowserServers.add or replace a role's catalog with serve. Keep every helper free of feature imports at module level; import feature symbols inside the helper that needs them.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import anything from vidbyte.agents.browser, vidbyte.lib.constants.browser, vidbyte.lib.enums.browser, vidbyte.lib.dataclasses.browser, or the new Prompt members at module level: before the feature exists that would make every module in the pack a collection error and abort the whole session. 2. Do not mock BaseAgent, the loop, the MCP client or bridge, the compaction middleware, ToolSettings, or the usage tracker (spec section 13, real seams). 3. Do not wait on wall-clock time; ordering checks yield to the event loop with asyncio.sleep(0) only. 4. Do not encode feature logic (caps, wording) here; tests take bounds from the BROWSER_* constants and wording from the prompt catalog. 5. Never put a real key here; the keys below are fakes that exist only to be searched for.
@@ -217,15 +217,19 @@ class ModelCall:
     tools: tuple[str, ...]
     tool_schemas: dict[str, Any] = field(default_factory=dict)
     tool_descriptions: dict[str, str] = field(default_factory=dict)
+    # The calling agent's configured model (runner_config.model_name).
+    model: str = ""
 
 
 class _ScriptedRunner:
-    def __init__(self, model: ScriptedModel, agent: str) -> None:
+    def __init__(self, model: ScriptedModel, agent: str, recorded_model: str = "") -> None:
         self.model = model
         self.agent = agent
+        # Not named model_name: BaseAgent reads that attribute off a runner.
+        self.recorded_model = recorded_model
 
     async def arun(self, prompt: str, **options: Any) -> object:
-        return await self.model.answer(self.agent, prompt, options)
+        return await self.model.answer(self.agent, prompt, options, self.recorded_model)
 
 
 class ScriptedModel:
@@ -245,13 +249,13 @@ class ScriptedModel:
         model = self
 
         def runner_for(agent: BaseAgent) -> tuple[object, str]:
-            return _ScriptedRunner(model, agent.name), RUNNER_TYPE_TEXT
+            return _ScriptedRunner(model, agent.name, str(agent.runner_config.model_name or "")), RUNNER_TYPE_TEXT
 
         with patch.object(BaseAgent, "_runner_for_model", new=runner_for):
             yield self
 
-    async def answer(self, agent: str, prompt: str, options: Mapping[str, Any]) -> object:
-        call = self._record(agent, prompt, options)
+    async def answer(self, agent: str, prompt: str, options: Mapping[str, Any], recorded_model: str = "") -> object:
+        call = self._record(agent, prompt, options, recorded_model)
         steps = self.scripts.get(agent, [])
         index = self.cursor.get(agent, 0)
         number = len(self.calls_by(agent))
@@ -274,7 +278,7 @@ class ScriptedModel:
         self.events.append(f"{agent} answered {number}")
         return response
 
-    def _record(self, agent: str, prompt: str, options: Mapping[str, Any]) -> ModelCall:
+    def _record(self, agent: str, prompt: str, options: Mapping[str, Any], recorded_model: str = "") -> ModelCall:
         schemas: dict[str, Any] = {}
         descriptions: dict[str, str] = {}
         for spec in options.get("tools") or ():
@@ -290,6 +294,7 @@ class ScriptedModel:
             tools=tuple(schemas),
             tool_schemas=schemas,
             tool_descriptions=descriptions,
+            model=recorded_model,
         )
         self.calls.append(call)
         return call
