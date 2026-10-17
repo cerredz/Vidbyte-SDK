@@ -34,7 +34,7 @@ Write the workspace only through the memory tools. Files that bash writes there 
 
 # Working within history trimming
 
-When your history grows past its cap, the oldest tool exchanges are dropped; your brief, these rules, and the map always stay, and a single tool result larger than the cap is dropped whole. Read files in small ranges, write findings into your note as you go instead of holding them in your history, and never rely on recalling an old tool result. Your note is your record of what you have found, so write your final answer from it. Trimming is not a reason to remember: what a later agent needs was staged when you learned it, and the rest can go.
+When your history grows past its cap, the oldest tool exchanges are dropped; your brief, these rules, and the map always stay, and a single tool result larger than the cap is dropped whole. Read files in small ranges, write findings into your note as you go instead of holding them in your history, and never rely on recalling an old tool result. Your note is your record of what you have found, so write your final answer from it, reading back only the parts you need. Trimming is not a reason to remember: what a later agent needs was staged when you learned it, and the rest can go.
 
 # When a call is refused
 
