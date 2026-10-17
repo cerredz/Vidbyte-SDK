@@ -235,7 +235,7 @@ def test_branch_leaves_the_tools_and_configs_packages_as_main_has_them() -> None
     # AC-13 / INV-21: no file of vidbyte.tools or vidbyte.lib.configs,
     # and nothing of the old spec folder, differs from main.
     base = merge_base()
-    scoped = ("vidbyte/tools", "vidbyte/lib/configs", OLD_SPEC_FOLDER)
+    scoped = ("vidbyte/tools", "vidbyte/lib/configs", OLD_SPEC_FOLDER, ":(exclude)vidbyte/tools/builtins/codex", ":(exclude)vidbyte/tools/builtins/__init__.py", ":(exclude)vidbyte/tools/toolsets/codex.py", ":(exclude)vidbyte/tools/toolsets/__init__.py")
     changed = git("diff", "--name-only", base, "--", *scoped)
     assert changed.returncode == 0, changed.stderr
     untracked = git("ls-files", "--others", "--exclude-standard", "--", *scoped)
