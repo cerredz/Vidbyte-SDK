@@ -72,3 +72,84 @@ HEAD: 09524ff4
 SUMMARY: 106 new tests (97 red, 8 green guards, 1 live-skipped); red confirmed 125 failed / 631 passed / 3 skipped (baseline 1/650/2), no collection errors; 97 new + 20 superseded + 7 collateral + 1 inherited; 20 deliberately omitted; 20 superseded tests + 7 support literals edited. Most likely to catch a real bug: test_codex_host_approvals.py::CodexHandlerFallbackTests::test_every_misbehaving_handler_gets_the_default_answer_and_one_warning.
 OPEN ITEMS: spec defects 1–14 (none blocking); report file not written by the agent (harness block).
 ```
+
+## S4 additions
+
+This round worked from the verified S4 review (`review.md`, `0c040d1f`) and spec r5 (`be733a0b`), on top of `b63c4b01`. Production code is unchanged since `c9150d63`.
+
+**Commits**
+- `75bfae7d` `test(codex-host): add S4 finding tests for codex-host-hardening [R-3..R-10]`, which also carries the test plan's "S4 additions" section and the pack README's log line.
+- `89c641aa` `docs(spec): record S4 test proof for codex-host-hardening`, which changes the §6.2 Proof cells only (AC-2 and AC-18).
+
+Nothing was pushed or installed, and nothing under `vidbyte/`, `lint/` or `scripts/` changed.
+
+### 1. What was added
+There are 22 new tests: 6 kill a mutant, 14 are red regressions, and 2 are green guards. Two existing pins also changed (R-7), and three constant rows were added (section D). The full id-by-id table, with each proof line, is in `test-plan.md` under "S4 additions".
+
+- **R-4 (M40)** — `observability::CodexObservabilityTests::test_a_handler_answer_to_a_secret_question_reaches_codex_and_no_record`.
+- **R-5 (M1)** — `function_rows::CodexForgetTurnsTests::test_a_forgotten_thread_that_continues_counts_only_its_new_turn`. It compares the cost with a fresh thread given the same usage.
+- **R-6 (M31)** — `resilience::CodexSpawnCleanupTests::test_a_cancelled_spawn_whose_start_codex_adopts_keeps_its_tools_for_that_turn`.
+- **R-8** — three tests in `liveness::CodexLostWatcherTests`:
+  - (a) M2: `test_a_lost_turn_whose_stop_was_already_sent_gets_no_second_interrupt`;
+  - (b) M20: `test_the_cleanup_interrupt_of_a_lost_turn_waits_out_the_grace`;
+  - (c) M21: `test_a_close_that_starts_inside_the_grace_wins_and_the_lost_turn_sends_nothing`.
+- **R-3 (red)** — two rows in `liveness::CodexReviewCompletionFailureTests`: the inline review and the late review.
+- **R-9 (red)** — four host rows in `observability::CodexLogTokenRecordTests`. They cover:
+  - the router's method and its three ids, and the fallback's thread_id;
+  - `_log_call`'s thread_id, both from Codex and from a caller;
+  - the turn item, and the turn end;
+  - both `turn_events` warnings.
+
+  There are also six CI-visible unit rows in `hardening_contract::CodexLogTokenTests`. They cover the spec examples, the allowed set (the look-alike digits included), the cut at limit + `...`, `""`, idempotence, and the row 10 and row 25 exports.
+- **R-10** — four rows in `observability::CodexCallRecordTests`:
+  - two red: a cancelled `thread/read` (success and failure rows), and a handed-over `turn/start` (accepted and failed rows);
+  - two green guards: a timed-out call writes exactly one record, and EC-57's four refusals write none.
+- **R-7** — `GOAL_FIELD_MESSAGE` now has an `{owner}` slot, with `GOAL_SPAWN_OWNER` and `GOAL_RUN_OWNER` beside it. The two `run_codex_goal` pins are red, and the contract row also pins r5's whole `turn` text. The three `CodexSpawnRequest` uses stay green.
+- **Section D** — `NEW_CONSTANTS` gains three constants: `CODEX_HOST_ANY_MODEL_TEXT`, `CODEX_HOST_FORK_EXPERIMENTAL_FIELDS` and `CODEX_HOST_LOG_TOKEN_MAX_CHARS`.
+  - The row now checks the export before it reads the value, so a missing constant fails as an assertion, not an `AttributeError`.
+  - No `__all__` pin for `vidbyte.lib.util.text` existed, so `CodexLogTokenTests` pins row 25's order.
+  - `RECORD_EXPORTS` does not change in r5.
+- **Fake** — `FakeAppServer.name_next(thread_suffix=..., turn_suffix=...)` names the next thread and turn, as a hostile Codex could.
+
+### 2. Mutant proof
+The mutants came from `scratchpad/s4-eng/s4_mutants.py`, run with `-p s4_mutants` over `tests/features/codex_host`. Without a mutant, the run gives `17 failed, 325 passed, 1 skipped`. Under each mutant, the failures are those 17 plus the mutant's own test, and no other test changes.
+
+| Mutant | Run | Failure line | Without the mutant |
+|---|---|---|---|
+| M1 | `18 failed, 324 passed` | `AssertionError: 0.0033 != 0.0022 within 12 places` | passes |
+| M2 | `18 failed` | `AssertionError: 2 != 1` (`test_codex_host_liveness.py:217`) | passes |
+| M20 | `19 failed` | `AssertionError: 0.0 not greater than or equal to 0.30000000000000004`. Test (c) also fails, with `2 != 1`. | passes |
+| M21 | `18 failed` | `AssertionError: 2 != 1` | passes |
+| M31 | `18 failed` | `AssertionError: {'success': False, ...} != {'success': True, 'contentItems': [{'type': 'inputText', 'text': 'echo: hi'}]}` | passes |
+| M40 | `18 failed` | `AssertionError: 'answer-canary-91f3' unexpectedly found in 'codex_host_server_answer item_id=item-secret answers=answer-canary-91f3'` | passes |
+
+The 6 mutant-killing tests and the 2 guards then passed 6 times in a row on the clean tree.
+
+### 3. Runs
+**Full run** (`tests/features/codex_host tests/features/harness_threads tests/test_codex_*.py`):
+- before: `1 failed, 1024 passed, 3 skipped`;
+- after: `18 failed, 1029 passed, 3 skipped in 76.44s`.
+
+The 18 failures are:
+- 14 B regressions (R-3 ×2, R-9 ×10, R-10 ×2);
+- 2 R-7 pins;
+- 1 section D row;
+- the inherited `test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes` (`167 != 120`).
+
+**Checks**
+- `lint/run.py` ends `SDK-LINT: PASS`.
+- `ruff check` finds nothing new in the edited files.
+- The one "Task exception was never retrieved" in the log is R-3 itself: the late-accept task dies with the `RuntimeError`, inside the red late-review row.
+
+### Niche facts for the next agent
+- **R-10's barrier.** `CodexCallRecordTests` opens its host with `CODEX_HOST_WORKER_THREADS=1`. Records are read once a later call on the same worker returns, so the cancelled call's record must be written by the worker's done-callback, or by a post that runs before that later call ends. Do not log a second time on the timeout path.
+- **R-9's hostile ids.**
+  - Caller ids that pass through `CodexThreadReadRequest` must be on one line. So the caller row uses only spaces, `=` and `%`, while the Codex-made ids and the router ids carry CR/LF.
+  - The hostile thread from Codex is read back raw with `read_codex_thread`, so only log arguments may change.
+- **R-3's checks.** The tests never name `_fail` or `fail`. A late review is found through its read-back request (`is_review_read_back`) and a `CodexTurnHandle` built from the fake's last turn.
+- **Running the mutants after the repair.** The mutant strings in `s4_mutants.py` match today's source lines. Once the repair edits `_end_lost_turn`, `handle` or `forget`, a mutant may no longer apply, and `pytest_configure` will assert on that. Re-derive the mutant from the new line rather than reading that as a test failure.
+
+### Open items
+- Two uncovered risks are left to S5 rather than built here:
+  - the connection's closing check, as opposed to its dead check, refusing a call while a close is in progress (EC-57, second bullet);
+  - a late start whose loop has already closed, which spec INV-7 says still writes its record.
