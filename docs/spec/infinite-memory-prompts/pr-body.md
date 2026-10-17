@@ -200,7 +200,7 @@ Every test named below exists on this branch (`--collect-only`). "Pack" is `test
 
 ## Verification
 
-All gates are local. GitHub Actions are disabled repo-wide, so `gh pr checks` reports no checks and the local gate is the gate of record. The run below is at the PR head, `77171eeb`, whose code is identical to `3825237d` (every later commit is docs only). It gives the same results as the orchestrator's earlier run at `5f41a5f4`.
+All gates are local. GitHub Actions are disabled repo-wide, so `gh pr checks` reports no checks and the local gate is the gate of record. The run below is at `77171eeb`. Its code is identical to `3825237d`, the last commit that changed a prompt, and every commit after `3825237d` is docs only, including the one that adds this body. It gives the same results as the orchestrator's earlier run at `5f41a5f4`.
 
 | Gate | Command | Final lines |
 |---|---|---|
