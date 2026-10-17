@@ -35,7 +35,7 @@ class AgentSwarm:
         self._running = False
 
     async def arun(self, goal: str) -> AgentSwarmResult:
-        """Run the swarm on the goal until no agent has work left, the turn budget is spent, every agent failed, or the time limit is reached."""
+        """Run the swarm on the goal until no agent is working, or the time limit is reached."""
         # @intent one-run-at-a-time-per-swarm
         # A second run on the same swarm while one is in progress would
         # share its folder and callback, so it is refused before

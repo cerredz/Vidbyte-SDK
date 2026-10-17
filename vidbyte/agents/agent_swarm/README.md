@@ -55,7 +55,7 @@ Every agent gets the goal as its first message and starts working at once. Each 
 | `agents` | required | 2 to 100 members with distinct names matching `AGENT_SWARM_NAME_PATTERN` |
 | `workplace` | required | a folder path; created with its parents when a run starts; never a file |
 | `api_keys` | the environment | matched once against every member's provider; never shown |
-| `search_tool` | `None` | one extra tool every agent holds; may not take a swarm tool's name |
+| `search_tool` | `None` | one extra tool every agent holds; may not take a swarm tool's name or `isDone` |
 | `on_event` | `None` | sync or async; called once per event, in order, never twice at once |
 | `max_turns` | 500 | every first turn and every wake counts; at least the number of agents |
 | `timeout_seconds` | 3600.0 | finite, above zero, at most one week |
