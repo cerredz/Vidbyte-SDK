@@ -108,17 +108,18 @@ class InfiniteRecallTool(BaseTool):
         memory.recalled += 1
 
         # Give the retriever the workspace's read-only tools, without
-        # bash, over the tree's one search index, and search each term
-        # on its own, in the order given, before it starts.
+        # bash, over the tree's one search index.
         workspace = memory.workspace
         _, grep, read, search = InfiniteMemoryAgentTools.get_tools(Path(memory.settings.root_dir), workspace.root, workspace.settings.max_tokens, workspace.settings.max_read_lines, workspace.full_text)
-        hits = [f"{search.name}: {term}\n{(await search.execute(ToolCall(search.name, {'query': term}))).output}" for term in request.terms]
 
-        # Run the fresh retriever on the request and the pre-search hits.
-        # An error ends this recall, which still counts; cancelling the
-        # run is not caught, so it stops the retriever too.
-        task = prompts.get(Prompt.INFINITE_MEMORY_RETRIEVER_TASK_PROMPT).format(question=request.question, purpose=request.purpose, known=request.known or "-", hits="\n\n".join(hits) or "-")
+        # Search each term on its own, in the order given, then run the
+        # fresh retriever on the request and those hits. An error in
+        # either ends this recall, which still counts, with the recall's
+        # own error; cancelling the run is not caught, so it stops the
+        # retriever too.
         try:
+            hits = [f"{search.name}: {term}\n{(await search.execute(ToolCall(search.name, {'query': term}))).output}" for term in request.terms]
+            task = prompts.get(Prompt.INFINITE_MEMORY_RETRIEVER_TASK_PROMPT).format(question=request.question, purpose=request.purpose, known=request.known or "-", hits="\n\n".join(hits) or "-")
             reply = await self._retriever((grep, read, search)).arun(task)
         except (VidbyteSdkError, OSError, ValueError) as exc:
             return ToolResult.error(INFINITE_RECALL_TOOL_NAME, f"This recall used one of your recalls and failed with {type(exc).__name__}: {str(exc.__cause__ or exc).strip()}")
