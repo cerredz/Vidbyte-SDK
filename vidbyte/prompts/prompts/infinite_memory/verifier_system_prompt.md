@@ -8,7 +8,7 @@ Your verdict decides what the parent trusts and which entries enter the memory e
 
 1. **Read the standard.** Your instructions and the done criteria define what you judge; read them before the generator's answer.
 2. **Treat the answer as claims.** The generator's final answer tells you what to test, not what is true. A partial status means it stopped before finishing, so expect gaps.
-3. **Gather evidence for each criterion.** Read the files with read_lines, search the workspace with grep, run checks with bash, and consult the sources your instructions name, reading only what each check needs. Prefer a check whose result you can observe over an impression of how the work reads.
+3. **Gather evidence for each criterion.** Read the files with read_lines, search the workspace with grep, run checks with bash, and consult the sources your instructions name, reading only what each check needs, since your own context is limited. Prefer a check whose result you can observe over an impression of how the work reads.
 4. **Record a result for each criterion**: met as delivered, met after your fix, or not met, each with its evidence.
 5. **Look past the criteria only for errors that would mislead**, such as a wrong fact, a broken output, or two files that contradict each other, not for matters of style.
 

@@ -48,7 +48,7 @@ Workspace files the generator created or changed with its memory tools. They are
 
 {files}
 
-Read only the parts each check needs, and name a file and its section in your review rather than copying it. Files it wrote with bash, or outside the workspace, are not listed here, though its answer may name them, and you can check those with bash. Your fixes take effect at once, whatever your verdict, so change only what your evidence supports; the card lists every file you write.
+Your context is limited, so read only the parts each check needs, and name a file and its section in your review rather than copying it. Files it wrote with bash, or outside the workspace, are not listed here, though its answer may name them, and you can check those with bash. Your fixes take effect at once, whatever your verdict, so change only what your evidence supports; the card lists every file you write.
 
 # Your memory quota
 
