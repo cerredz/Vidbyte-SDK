@@ -156,7 +156,7 @@ The last gate matrix ran at ee3b4e88, the last commit that changed code (`docs/s
 | Package stage | `python scripts/run_ci.py --stage package` (no `PYTHONPATH`) | `Installed vidbyte-sdk 0.3.0 passed smoke checks.` · `CI passed.` |
 | Semgrep | `semgrep scan --error --config .semgrep/typed-mapping-boundary-policy.yml vidbyte` | `Ran 1 rule on 987 files: 0 findings.` |
 | Protected paths | `git diff --stat origin/main...HEAD -- lint/ contracts/ pyproject.toml` | empty |
-| Remote CI, dispatched by hand (auto-triggers are off) | `gh workflow run ci.yml` and `gh workflow run static-policy.yml` on `feat/claude-host` | ee3b4e88: Package, Static policy, Source / Python 3.11 and Source / Python 3.12 all `completed success` (runs 38993797470, 38993799112) |
+| Remote CI, dispatched by hand (auto-triggers are off) | `gh workflow run ci.yml` and `gh workflow run static-policy.yml` on `feat/claude-host` | ee3b4e88: Package, Static policy, Source / Python 3.11 and Source / Python 3.12 all `completed success` (runs 38993797470, 38993799112). The same four on 3244af75, the spec-finalize commit (runs 39004603149, 39004604870) |
 
 ## Adversarial review
 18 findings were confirmed. 15 came from the S4 review across three lenses (spec conformance, repo conventions, engineering), and an independent verifier checked each one: none was refuted and two were downgraded from Major to Minor. 3 more came from the conformance re-review after the repairs. 11 are fixed, R-5 is half fixed, 6 are left as follow-ups, and none is waived. Full record: `docs/spec/claude-thread-functions/review.md`.
