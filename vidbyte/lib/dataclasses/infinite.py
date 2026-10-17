@@ -1,14 +1,14 @@
 """FILE: vidbyte/lib/dataclasses/infinite.py
 
-PURPOSE: Defines the six validated records of the InfiniteMemory agent: InfiniteTaskCard, one task a parent hands to a generator and verifier pair; InfiniteEntryDraft, one memory entry before it has an id; InfiniteEntry, one committed entry; InfiniteStagedEntry, a pair's entry waiting for its verdict; InfiniteResultCard, what a parent learns about one finished pair; and InfiniteWorkspaceUsage, the workspace's file count and token total.
-ROLE IN CODEBASE: Built and read by vidbyte/agents/infinite/: the launch tool turns the model's task list into InfiniteTaskCards and each finished pair into an InfiniteResultCard, the memory tools build InfiniteEntryDrafts and InfiniteStagedEntries, the workspace returns InfiniteEntry and InfiniteWorkspaceUsage records, and the journal stores and reloads the result cards.
+PURPOSE: Defines the seven validated records of the InfiniteMemory agent: InfiniteTaskCard, one task a parent hands to a generator and verifier pair; InfiniteEntryDraft, one memory entry before it has an id; InfiniteEntry, one committed entry; InfiniteStagedEntry, a pair's entry waiting for its verdict; InfiniteResultCard, what a parent learns about one finished pair; InfiniteWorkspaceUsage, the workspace's file count and token total; and InfiniteMapSnapshot, the workspace map before its cut.
+ROLE IN CODEBASE: Built and read by vidbyte/agents/infinite/: the launch tool turns the model's task list into InfiniteTaskCards and each finished pair into an InfiniteResultCard, the memory tools build InfiniteEntryDrafts and InfiniteStagedEntries, the workspace returns InfiniteEntry, InfiniteWorkspaceUsage, and InfiniteMapSnapshot records, the runtime diffs two snapshots for the root's status message, and the journal stores and reloads the result cards.
 ARCHITECTURE NOTE: Validation only. Every check runs in __post_init__, so a constructed record is always valid and its callers never check it again. Each field check is one call to the SDK's canonical RecordFieldValidator or RecordFieldConverter (vidbyte/lib/dataclasses/validation.py); only this feature's own rules, such as what a context item may name, are written here. Sequence fields must already be tuples; the agents layer converts the model's JSON lists. Reading and writing the JSON-lines shapes lives in the workspace and journal modules, not here.
-FUNCTION INVENTORY: Six frozen, slotted records, each with a __post_init__ that checks its fields through RecordFieldValidator and RecordFieldConverter and then applies its own rules.
+FUNCTION INVENTORY: Seven frozen, slotted records, each with a __post_init__ that checks its fields through RecordFieldValidator and RecordFieldConverter and then applies its own rules.
 COMMON MODIFICATION PATTERNS: A new record field adds one field here and one RecordFieldValidator or RecordFieldConverter call in its record's __post_init__; its bound goes in vidbyte/lib/constants/infinite.py. A check the canonical validators lack becomes a new option or method there, never a helper here. A new task-card field is also one property in the launch_subagent schema and one prompt leaf for its description.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import from vidbyte.agents, vidbyte.tools, or any other layer above vidbyte/lib. 2. Do not add to_dict or from_dict methods or dict[str, Any] signatures; serialization lives in the workspace and the journal. 3. Do not convert a list or a string into a tuple here; a bare string would split into characters, so the caller converts and the record refuses anything else.
 KNOWN EDGE CASES: One line means no line break of any kind, as str.splitlines sees it. A context item that starts with "#" must be an entry id ("#42"); any other item is a relative path. InfiniteResultCard.summary and review may be empty, because a failed pair has neither. True is refused wherever a whole number is expected, although Python counts it as an int. A refusal names the field as Record.field, or Record.field[index] for one item of a tuple.
-RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 8.5 and 9.1); vidbyte/agents/infinite/README.md
-TESTS: tests/features/infinite_memory_agent/test_infinite_memory_delegation.py, tests/features/infinite_memory_agent/test_infinite_memory_workspace.py, tests/features/infinite_memory_agent/test_infinite_memory_verification.py, and tests/features/infinite_memory_agent/test_infinite_memory_resume.py
+RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 8.5 and 9.1); docs/spec/infinite-memory-context-economy/spec.md (sections 8.5 and 9.1); vidbyte/agents/infinite/README.md
+TESTS: tests/features/infinite_memory_agent/test_infinite_memory_delegation.py, tests/features/infinite_memory_agent/test_infinite_memory_workspace.py, tests/features/infinite_memory_agent/test_infinite_memory_verification.py, tests/features/infinite_memory_agent/test_infinite_memory_resume.py, and tests/features/infinite_memory_agent/test_infinite_memory_stable_prefix.py
 """
 
 from __future__ import annotations
@@ -186,4 +186,29 @@ class InfiniteWorkspaceUsage:
             RecordFieldValidator.require_int(getattr(self, name), f"InfiniteWorkspaceUsage.{name}", minimum=INFINITE_MIN_COUNT)
 
 
-__all__ = ["InfiniteEntry", "InfiniteEntryDraft", "InfiniteResultCard", "InfiniteStagedEntry", "InfiniteTaskCard", "InfiniteWorkspaceUsage"]
+@dataclass(frozen=True, slots=True)
+class InfiniteMapSnapshot:
+    """The workspace map before its cut: the header line and one (workspace-relative path, map line) pair per file, in map order."""
+
+    header: str
+    lines: tuple[tuple[str, str], ...]
+
+    def __post_init__(self) -> None:
+        # @intent a-snapshot-names-each-file-once
+        # The runtime diffs two snapshots path by path, so every line is
+        # a tuple of two texts, the path and its map line, and no path
+        # appears twice.
+        RecordFieldValidator.require_text(self.header, "InfiniteMapSnapshot.header", allow_blank=True)
+        RecordFieldConverter.require_instance(self.lines, "InfiniteMapSnapshot.lines", tuple)
+        seen: set[str] = set()
+        for index, pair in enumerate(self.lines):
+            name = f"InfiniteMapSnapshot.lines[{index}]"
+            if not isinstance(pair, tuple) or len(pair) != 2:
+                raise ConfigurationError(f"{name} must be a (path, map line) tuple; got {pair!r}.", details={"field": name})
+            path, _ = RecordFieldValidator.require_text_items(pair, name)
+            if path in seen:
+                raise ConfigurationError(f"{name} repeats the path {path!r}; each file has one map line.", details={"field": name})
+            seen.add(path)
+
+
+__all__ = ["InfiniteEntry", "InfiniteEntryDraft", "InfiniteMapSnapshot", "InfiniteResultCard", "InfiniteStagedEntry", "InfiniteTaskCard", "InfiniteWorkspaceUsage"]
