@@ -130,3 +130,16 @@ All of the following were scratchpad-only and never committed. They live under `
 - **Coordinator's cap confirmation:** INV-5 and D-3 now cite `VIDBYTE_MANAGED_DEFAULT_MAX_OUTPUT_TOKENS` at `jev.py:84`, applied by `text.py:57-62`. D-2 quotes https://dev.meta.ai/docs/reasoning ("cap reasoning tokens plus visible output tokens combined"), which I re-checked against the saved page (reasoning.md:390).
 - **One propagation beyond the review:** INV-3 said `VIDBYTE_MANAGED` "never reads `META_API_KEY`". EC-16 shows the grader reads it to choose members, so INV-3 is now scoped to the call's credential resolution. Otherwise a test author could write a test that fails on correct code.
 - **Assumption still least sure of:** A-2, the output limit for `muse-spark-1.1`. It now has a named pre-merge check, but only the user or ops can run it: it needs real keys and a deployed #710.
+
+## Revision r3 (review round 2, final, 2026-10-17)
+
+- **Commit:** `d4c8a7d7 docs(spec): revise meta-muse-managed-text spec r3 (review round 2: R-1..R-5)`, spec only. Frontmatter is `status: approved`, `revision: 3`.
+- **Triage:** all five findings were accepted, and all five changes are text only. I disputed none, so no new Q-n was needed. The design (one constant), the budget (0 new files), and every ID are unchanged, and no new ID was added.
+- **Independent checks before accepting:**
+  - **R-1:** `.github/workflows/publish.yml` is a manual `workflow_dispatch` that validates the tag, so merging and releasing are separate events. I found no evidence against the stricter list, so the backend key is a merge gate. One canonical sentence appears verbatim 7 times: TL;DR, §2, §9.4, FR-8, AC-15, §12.5, and A-3. It keeps "merges only after cerredz/Vidbyte#710 is deployed" first.
+  - **R-2:** I read the critic try and except (`independent_critic.py:79-85`, `:211`), the judge preflight and failure policy (`prosecutor_defender_judge.py:250`, `:457-466`, `:494-496`, `:539-541`), and the brief writer's `except VidbyteSdkError` (`writer.py:146`, `:160`; `JevRunBriefWriter(BaseAgent)`). I confirmed the grader runs a full agent loop per trial (`:96`). I re-ran `s1r2_critic_probe.py`: base sent 1 `anthropic` request with `review_failed`; widened added 4 `meta` relays, and the result was still `review_failed`. So a user can be billed for a member whose result is not used, and EC-16 now says so.
+  - **R-3:** confirmed that the relayed 400 withholds Meta's message (`vidbyte_gateway.py:100-104`). The two-call design isolates the cap with the control call (`max_output_tokens=1024`), so the verdict does not depend on message text.
+  - **R-4:** `CONTRIBUTING.md:72`.
+  - **R-5:** `models.py:172-194` handles the Vidbyte prefix and the sendable pattern. The 512-character limit lives in `TextModelConfig.credentials`, not in `find_provider_api_key`, and INV-4 cites both.
+- **Self-check:** the headings match the template, no key-shaped literals appear, and no stale wording remains. The leftover hits for "before any SDK release" and "merges only after" are A-3's description of Run A's A-7, a source quote, and a §16 quote.
+- **Still least sure of:** A-2. Its check is now executable and has an unambiguous verdict, but only the user or ops can run it.
