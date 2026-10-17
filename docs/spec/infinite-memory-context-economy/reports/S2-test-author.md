@@ -129,3 +129,21 @@ No test is skipped or xfailed to stand in for red. The 12 coding-agent skips are
    - The numbering base of `reply line {n}` is not stated (0 or 1).
    - A retriever that raises can reach the root as `AgentExecutionError` (BaseAgent's wrapper) or as the raised class.
 5. **One changed test this host cannot run.** `test_bash_tool_process_bounds.py::test_endless_printer_times_out_with_the_first_bytes_and_a_truncation_marker` is POSIX-only and skipped on Windows. Its new pattern was checked only against synthetic head-and-tail text. CI on Linux runs it.
+
+## Addendum: spec r4 alignment
+
+Spec r4 (`fb702ba5`) resolved defects 1 and 2 and put both tests on §13's deliberately changed list. Each edit carries a comment citing its spec ID.
+
+- **`tests/test_prompt_sits_at_run_boundary.py::CompactedRunBoundaryTests::test_a_top_note_replaced_by_the_trace_keeps_the_task_before_the_run_on_every_wire`** (INV-9.3, EC-9.10, option (a)).
+  - **Change.** `_task_and_first_call` now accepts the task as the plain string, or as exactly `[{"type": "text", "text": TASK, "cache_control": {"type": "ephemeral"}}]`. Its assertions and the DeepSeek and Gemini subtests are unchanged.
+  - **On main: green** (`13 passed` for the file). The helper only widened, and main's adapter sends the string form.
+  - **Under the Anthropic reference:** the HEAD helper fails and the new helper passes (27 passed with ACB).
+- **`test_infinite_memory_contract.py::test_new_modules_stay_inside_the_complexity_budget`** (NFR-0.2, D-18, option (b)).
+  - **Change.** The package bound is `<= 9`. `BUDGET_MODULES` gains `vidbyte/agents/infinite/recall.py`, so 13 modules are checked at 400 lines each. The docstring and the comment say so.
+  - **On main: red** with `vidbyte/agents/infinite/recall.py is missing`. The HEAD version passed on main.
+- **`test_infinite_memory_recall.py::test_the_recall_spec_is_internal_read_only_and_built_from_the_five_leaves`** (D-18, the optional step).
+  - **Change.** It imports `InfiniteRecallTool` from `vidbyte.agents.infinite.recall`, its canonical home.
+  - **On main:** still red, now with `No module named 'vidbyte.agents.infinite.recall'`.
+  - **Other tests.** No test was added for what `memory.py` re-exports: §13 says `memory.py` imports the class for its builder table, and neither §13 nor §8.5 asks for a re-export check.
+- **Red run.** The InfiniteMemory pack gives `60 failed, 105 passed` (was 59/106; the +1 is the budget test).
+- **Reference check.** The scratch reference was reshaped per D-18, with the tool moved to `recall.py` and `InfiniteAgentMemory` imported only under `TYPE_CHECKING`. The InfiniteMemory pack plus RLW, CW, GSC, and FTI give `211 passed`, with 9 package files, `memory.py` at 271 lines after its header, and `recall.py` at 182. Nothing from the reference is committed.

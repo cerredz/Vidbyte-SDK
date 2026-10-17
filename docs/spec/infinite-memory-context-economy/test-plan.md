@@ -100,6 +100,8 @@ Files, by short name:
 | INV-10.7 (leaf order) | RCL → `test_the_recall_card_leaf_renders_its_fields_in_the_spec_order` | unit | `{found}` not last, so the cap cuts the wrong section | Placeholder order read from the catalog. |
 | FR-8.1, FR-10.7 | changed → `test_infinite_memory_contract.py::test_prompt_family_has_exactly_the_fifty_documented_leaves`, `test_root_is_offered_exactly_the_preset_tools_plus_its_extra`; `test_infinite_memory_delegation.py` `MEMORY_TOOLS` | contract | a missing leaf or tool | Exact sets, as before. |
 | INV-7.2, INV-7.3 | changed → `test_infinite_memory_workspace.py::test_every_agent_sees_the_map_and_the_roots_map_refreshes_after_each_tool_iteration` | agent | the root map redrawn, or the change never reported | The set of root systems has one element, and the status message names the new note and its description. |
+| NFR-0.2, D-18 (r4) | changed → `test_infinite_memory_contract.py::test_new_modules_stay_inside_the_complexity_budget`; RCL → `test_the_recall_spec_is_internal_read_only_and_built_from_the_five_leaves` (imports `InfiniteRecallTool` from `vidbyte.agents.infinite.recall`) | contract | `recall.py` is missing; the package has a 10th `.py` file; or any of the 13 listed modules is over 400 lines after its header | The test reads the real files and counts lines after the AST docstring. It is red on main only because `recall.py` is missing (the HEAD version passed on main). A scratch reference shaped as D-18 passes it: 9 files, with `memory.py` at 271 lines and `recall.py` at 182 after their headers. |
+| INV-9.3, EC-9.10 (r4) | changed → `tests/test_prompt_sits_at_run_boundary.py::CompactedRunBoundaryTests::test_a_top_note_replaced_by_the_trace_keeps_the_task_before_the_run_on_every_wire` | agent + adapter (scripted transport) | on any of the three wires, the task turn moves behind the first call or appears twice | The helper accepts exactly two forms: the plain string, and the one text block with `cache_control: {"type": "ephemeral"}`. Any other shape is not the task, so `len(tasks) == 1` fails. The assertions are unchanged. The test is green on main, because main sends no marks and the string form matches. Against the Anthropic reference, the HEAD helper fails and the new helper passes. |
 
 ## Tests deliberately NOT written
 
@@ -137,6 +139,22 @@ What each red count is made of:
   - The changed workspace map test fails with "the root's system string changed between calls".
 - **Row 4.** The shared suites the changes extend stay green on main.
 
+### Addendum: spec r4 (S2 defects 1–2)
+
+The checkout is `e9bfddf6` with only the r4 test changes applied; the bootstrap is the same.
+
+| Command (`python -m pytest -p no:cacheprovider -q …`) | Final line |
+|---|---|
+| `tests/test_prompt_sits_at_run_boundary.py` | `13 passed in 1.34s` |
+| `tests/features/infinite_memory_agent/test_infinite_memory_contract.py` | `4 failed, 23 passed in 1.01s` |
+| `tests/features/infinite_memory_agent/test_infinite_memory_recall.py` | `16 failed in 1.15s` |
+| `tests/features/infinite_memory_agent` | `60 failed, 105 passed in 6.71s` |
+
+- **The run-boundary test is green on main.** The helper only widened: it also accepts the one marked text block, and main's adapter sends the plain string. It is green under the Anthropic reference too, where the HEAD helper fails, so the widening is what INV-9.3 needs. The DeepSeek and Gemini subtests and the assertions are unchanged.
+- **The budget test is red on main** with `vidbyte/agents/infinite/recall.py is missing`. The HEAD version passed on main, which is why the pack goes from 59 to 60 failed. The contract file's 4 failures are the 3 earlier ones plus this test.
+- **The recall spec test** still fails, now on `No module named 'vidbyte.agents.infinite.recall'`, so the recall file count stays at 16.
+- **Against the scratch reference reshaped per D-18** (`InfiniteRecallTool` moved to `recall.py`, which imports `InfiniteAgentMemory` only under `TYPE_CHECKING`): the InfiniteMemory pack plus RLW, CW, GSC, and FTI give `211 passed in 9.96s`.
+
 ## Notes for the implementer
 
 - **The names the tests bind to.**
@@ -160,5 +178,9 @@ What each red count is made of:
   - A retriever that raises may surface as `AgentExecutionError` or as the raised class; both are accepted.
 - **Cards.** The five-card test runs its `slow` pair with `max_iterations=3`, so the pair ends `partial` with a `passed` verdict and must keep the full card.
 - **Lint.** Run lint with the files staged (S020 reads tracked files) and with `PYTHONIOENCODING=utf-8` (otherwise `lint/run.py` crashes on cp1252).
-- **The complexity budget.** `test_infinite_memory_contract.py::test_new_modules_stay_inside_the_complexity_budget` (≤400 lines after the header per module, ≤8 files in `vidbyte/agents/infinite`) is not on the §13 list. A bare reference `InfiniteRecallTool` in `memory.py` already reached 402 lines, so place the transcription and retriever building where the budget allows (see the S2 report's Spec defects).
-- **The run-boundary test.** `tests/test_prompt_sits_at_run_boundary.py::…test_a_top_note_replaced_by_the_trace_keeps_the_task_before_the_run_on_every_wire` turns red under INV-9.3 (Anthropic subtest) and is not on the §13 list (S2 report, Spec defects).
+- **The complexity budget (r4, D-18).**
+  - `InfiniteRecallTool` belongs in `vidbyte/agents/infinite/recall.py`.
+  - The recall spec test imports it from there; `memory.py` imports it for its builder table.
+  - The budget test allows 9 package files and checks 13 modules at ≤400 lines after the header each.
+  - `recall.py` must import `InfiniteAgentMemory` only under `TYPE_CHECKING`.
+- **The run-boundary test (r4, EC-9.10).** The helper accepts the task as a plain string or as exactly `[{"type": "text", "text": TASK, "cache_control": {"type": "ephemeral"}}]`. A mark with any other shape, such as one carrying `ttl`, extra keys, or a second block, is not found as the task.

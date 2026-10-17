@@ -113,7 +113,7 @@ The S4 code review (`docs/spec/infinite-memory-agent/review.md`, a separate R- n
 
 The S5 re-review found two more that the 107 tests at that point let through: R-26 (the R-7 fix copied a read-only seed's mode bits, so a second attach raised `PermissionError`) and R-27 (a refused two-file memory write could leave its first file changed, and one unwritable staged entry turned a pair's verdict `unchecked`). The four tests named above for those lines pin them.
 
-The context-economy layer (spec `docs/spec/infinite-memory-context-economy/spec.md` r3) was added red on 2026-10-16 in four new files. Its deliberately changed assertions are the tool sets (`search_memory`), the 50-leaf family, the compact card in the two-pair batch test, and the root map arriving as a status message.
+The context-economy layer (spec `docs/spec/infinite-memory-context-economy/spec.md` r3) was added red on 2026-10-16 in four new files. Its deliberately changed assertions are the tool sets (`search_memory`), the 50-leaf family, the compact card in the two-pair batch test, and the root map arriving as a status message. Spec r4 added one more: the complexity budget allows 9 package modules, its 8 plus `recall.py`, which holds `InfiniteRecallTool` (D-18). Each of the 13 budget modules still has at most 400 lines after its header.
 
 ## Test Suite Map
 

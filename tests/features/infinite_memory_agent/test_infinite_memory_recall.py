@@ -7,7 +7,7 @@ FUNCTION INVENTORY: _recall builds a recall call; _card_sections / _card_prefix 
 COMMON MODIFICATION PATTERNS: Add a citation case as one reply line plus its expected rejected or found section; add a tool-set case through the _offered sets.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level. 2. Do not pin a rejection reason's wording; the spec fixes only the citation, the line form, and the found text. 3. Do not patch the recall quota or cap constants; drive them with real calls.
 KNOWN EDGE CASES: "reply line {n}" is accepted with n counted from 1 or from 0, which the spec does not fix. The retriever's error is accepted under the class the tool caught (AgentExecutionError, BaseAgent's wrapper) or the class the model raised.
-RELATED DOCS: tests/features/infinite_memory_agent/FEATURE.md; docs/spec/infinite-memory-context-economy/spec.md sections 6.1 (INV-10.x), 6.2 (AC-10.x), 7 (EC-10.x), 8.5, 9.1, 9.2 (recall), 12.3 rows 17, 26-33, 36-43.
+RELATED DOCS: tests/features/infinite_memory_agent/FEATURE.md; docs/spec/infinite-memory-context-economy/spec.md sections 6.1 (INV-10.x), 6.2 (AC-10.x), 7 (EC-10.x), 8.5, 9.1, 9.2 (recall), 12.3 rows 17, 26-33, 36-43, 57 (recall.py, D-18).
 TESTS: PYTHONPATH=$(pwd) python -m pytest tests/features/infinite_memory_agent/test_infinite_memory_recall.py -q
 """
 
@@ -200,7 +200,9 @@ def test_each_agent_is_offered_its_modes_tools(tmp_path: Path, workspace: dict[s
 
 def test_the_recall_spec_is_internal_read_only_and_built_from_the_five_leaves(tmp_path: Path) -> None:
     """INV-10.9, EC-10.4, section 9.2, rows 27, 36-40: recall is READ and internal, takes question and purpose (required) and known and terms (optional), and every description is its leaf with no number."""
-    from vidbyte.agents.infinite.memory import InfiniteAgentMemory, InfiniteRecallTool
+    from vidbyte.agents.infinite.memory import InfiniteAgentMemory
+    # D-18 (spec r4): the class's own module is recall.py; memory.py only imports it for its builder table.
+    from vidbyte.agents.infinite.recall import InfiniteRecallTool
     from vidbyte.agents.infinite.workspace import InfiniteWorkspace
     from vidbyte.lib.constants.infinite import INFINITE_RECALL_TOOL_NAME
     from vidbyte.lib.enums import InfiniteAgentRole

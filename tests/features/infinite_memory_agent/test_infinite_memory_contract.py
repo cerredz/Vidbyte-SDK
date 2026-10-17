@@ -100,7 +100,8 @@ EXPECTED_LEAVES = (
     "recall_card",
 )
 
-# The twelve new modules of spec section 8.4 (the folder's 8 plus toolset, enums, constants, records).
+# The thirteen new modules of spec section 8.4 (the folder's 9 plus toolset, enums, constants, records).
+# D-18, NFR-0.2 (spec infinite-memory-context-economy r4): recall.py is the folder's 9th module and joins the list.
 BUDGET_MODULES = (
     "vidbyte/agents/infinite/__init__.py",
     "vidbyte/agents/infinite/agent.py",
@@ -110,6 +111,7 @@ BUDGET_MODULES = (
     "vidbyte/agents/infinite/journal.py",
     "vidbyte/agents/infinite/memory.py",
     "vidbyte/agents/infinite/launch.py",
+    "vidbyte/agents/infinite/recall.py",
     "vidbyte/tools/toolsets/infinite.py",
     "vidbyte/lib/enums/infinite.py",
     "vidbyte/lib/constants/infinite.py",
@@ -481,10 +483,11 @@ def _lines_after_header(path: Path) -> int:
 
 
 def test_new_modules_stay_inside_the_complexity_budget() -> None:
-    """NFR-1, section 8.4: the agent package has at most its 8 modules, and each of the 12 new modules is at most 400 lines after its header."""
+    """NFR-1, section 8.4, and NFR-0.2 / D-18 of spec infinite-memory-context-economy: the agent package has at most its 9 modules (its 8 plus recall.py), and each of the 13 new modules is at most 400 lines after its header."""
     package = REPO_ROOT / "vidbyte" / "agents" / "infinite"
     assert package.is_dir(), "vidbyte/agents/infinite does not exist"
-    assert len(list(package.glob("*.py"))) <= 8
+    # D-18, NFR-0.2: InfiniteRecallTool lives in a 9th module, recall.py, so the bound moves from 8 to 9.
+    assert len(list(package.glob("*.py"))) <= 9
     for relative in BUDGET_MODULES:
         path = REPO_ROOT / relative
         assert path.is_file(), f"{relative} is missing"
