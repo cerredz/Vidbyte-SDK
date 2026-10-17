@@ -49,6 +49,8 @@ started: 2026-10-16 16:05
 - 2026-10-17 — Test-pack rows R-8..R-11 and R-24 go to a fresh test author before S5 iteration 1 (the repair agent stays forbidden from touching tests). It writes only new tests (no edit to any existing assertion), proves R-8..R-11 red at the current HEAD for the right reason, and proves R-24 kills the `s4-eng/mut_delete.py` mutation while passing on HEAD. R-9 waits for spec r5.
 - 2026-10-17 — Minors: S5 fixes the `trivial` rows (R-12, R-13, R-14, R-15, R-16, R-19); `follow-up` rows R-17, R-18, R-20, R-21, R-22 stay open as follow-ups for the PR body.
 
+- 2026-10-17 — Spec r5 (987d156e) applied S4 R-3 (INV-2.3 unread outputs stay whole; AC-2.1/AC-2.2 one call per turn; new AC-2.5, EC-2.5), R-2 (INV-8.2 extended: NUL → whitespace, lone surrogate dropped; new EC-8.8; INV-8.5 excludes names UTF-8 cannot encode), R-16 (new MODIFY rows 58 `llms.txt:519`, 59 `artifacts/file_index.md:422`). The R-16 grant is extended to `llms.txt:815` (the "Direct utilities and search" tool table, same file, same omission, same repo-forced reason) — the repair agent adds `InfiniteSearchMemoryTool` there in the table's existing format.
+
 ## User replies (verbatim)
 - (none during the run)
 
@@ -88,4 +90,5 @@ started: 2026-10-16 16:05
 - R-2 guard belongs in `search_memory` (`execute`, `_entry_rows`, `_note_rows`, `_lookup`), not in `FullTextIndex`/`FullTextRow` — a ConfigurationError from the row would surface as `fts5_unavailable`. `UnicodeEncodeError` is a `ValueError`, so encoding inside `_entry_rows`' existing try skips a bad line. Proven plugin: scratchpad `s4-verify/fix_r1.py`. — *source:* S4 verifier / engineering
 - R-3 fix model: scratchpad `s4-verify/fix_mask_batch.py` (`m.role in ("assistant","model")`; 152 related tests pass). Engineering's `== "assistant"` version turns masking off on Gemini and also passes 152 tests — no test covers Gemini masking. — *source:* S4 verifier
 - Width check for R-5: `git diff -U0 845a4d9b HEAD -- 'vidbyte/*.py'` piped through awk (track `@@ +N`, print added `^[ 	]*#` lines > 72 cols); then `PYTHONIOENCODING=utf-8 python lint/run.py --rule A002`. Lint rule counts on main and the branch are identical for all 90 rules (scratch export of main 845a4d9b at scratchpad `main-base`, git-init'ed). — *source:* S4 conformance / conventions
-- Probe hygiene: `python -I` ignores PYTHONIOENCODING (use `sys.stdout.reconfigure(encoding='utf-8', errors='backslashreplace')`); `-X pycache_prefix=<scratch>` defeats false passes from bytecode cache; Windows stdout is CRLF (`tr -d ''`); plugins load with `PYTHONPATH="<win wt>;<win dir>" ... -p <name>`. — *source:* S4 reviewers
+- Probe hygiene: `python -I` ignores PYTHONIOENCODING (use `sys.stdout.reconfigure(encoding='utf-8', errors='backslashreplace')`); `-X pycache_prefix=<scratch>` defeats false passes from bytecode cache; Windows stdout is CRLF (`tr -d '
+'`); plugins load with `PYTHONPATH="<win wt>;<win dir>" ... -p <name>`. — *source:* S4 reviewers
