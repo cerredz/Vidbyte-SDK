@@ -16,7 +16,7 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 06:50 | 07:12 | reports/S0-scout.md | base_commit 6f5a7310; code-map 4 sections, 25 files |
-| S1 spec + review | running | 07:13 | | reports/S1-spec-author.md, reports/S1-spec-review.md | r1 0f0d3118 (FR 37, AC 39, EC 52, W 13; 0 blocking Q); reviewer round 1 launched 08:18 |
+| S1 spec + review | running | 07:13 | | reports/S1-spec-author.md, reports/S1-spec-review.md | r1 0f0d3118 (FR 37, AC 39, EC 52, W 13; 0 blocking Q); reviewer round 1 SOUND WITH FIXES (836b23ca); r2 2b6affc1 rebased on #1178 (FR+, 3 new files, 20 superseded tests); reviewer round 2 launched 09:40 |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -25,7 +25,7 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
 | S6 PR | deferred to the end of slice 2 | | | | |
 
 ## Counters and caps
-- S1 review rounds: 1/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-17 06:44: Waited for PR #1055 to merge (merged at 2026-10-17T06:44:08Z as `6f5a7310`) before creating the worktree, per Prompt 3.
@@ -49,6 +49,7 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
   - When #1178 merges, bring main into the branch with `git merge origin/main`, never rebase plus force-push.
   - At S3, open the PR with base `ai/resolve-pr-1055-comments` while #1178 is open. GitHub retargets it to main when that branch is deleted on merge. Otherwise retarget it with `gh pr edit --base main`.
 - 2026-10-17 08:55: S1 review round 1 returned SOUND WITH FIXES: 1 Blocker (R-1, #1178 conventions), 4 Major (R-2 to R-5), 6 Minor (one scope-adding, Q-18). All of it was forwarded to the author as one revision, together with the rebase.
+- 2026-10-17 09:40: S1 review round 2 is focused on what r2 reshaped: §8, §8.4, §8.5, §9, §12, §13, plus INV-47/48, NFR-11 and AC-40/41. The playbook requires another round when §8, §8.5 or §12 change. This is the last allowed round (2/2), and whatever is still disputed afterwards becomes a Q-n with its default. PR #1178's head was re-checked and is still `8baff351` (open).
 
 ## User replies (verbatim)
 - (none yet)
@@ -134,3 +135,12 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
   - `connection.py` does not import `CODEX_TOOL_CALL_TIMEOUT_SECONDS`.
   
   *Source:* S1 reviewer
+- Spec r2 contract additions:
+  - `CodexHostSetup`, a new input record. `VALID_RECORDS` must equal `__all__` in #1178's `test_codex_host_inputs.py`, and its boundary test (:178) needs a row for `forget_codex_turns`, which uses `CodexThreadRef`;
+  - `CodexCommandApprovalKind`, a new enum;
+  - `CodexTurnEvents`, which takes host.py's turn-event handling (target ~890 lines; ask-first threshold 940);
+  - `CodexPreflight.reject_user_reviewer`;
+  - `retryable`, decided code by code (`fork_failed`, `process_exited` and `turn_timed_out` are not retryable).
+  
+  Budget: 3 new files, 13 classes. *Source:* S1 author r2
+- C021 scans only git-tracked files. Run `git add` before `python lint/run.py --rule C021`. *Source:* S1 author r2
