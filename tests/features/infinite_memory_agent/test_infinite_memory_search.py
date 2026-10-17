@@ -14,6 +14,7 @@ TESTS: PYTHONPATH=$(pwd) python -m pytest tests/features/infinite_memory_agent/t
 from __future__ import annotations
 
 import asyncio
+import errno
 import os
 import re
 import shutil
@@ -627,3 +628,82 @@ def test_a_warm_search_opens_no_unchanged_file_and_reads_a_changed_one_again(tmp
         fourth = _search(search_tool, "added")
     assert settled == [], sorted(set(settled))
     assert _hit_lines(fourth.output) == ["#8 fact: Kappa entry added later"], fourth.output
+
+
+# -------- S5 re-review: a read that fails once is retried (R-25)
+
+# The one open to fail while _one_open_fails is active: every spelling
+# of the target and the error to raise. A second audit hook, added
+# once per process like the recorder above, raises that error from the
+# first matching open by any API (open, io.open, os.open, a pathlib
+# read), in the opening thread, as a sharing lock or EMFILE would, and
+# then disarms itself, so the next open of the file works.
+_FAILING_OPEN: list[tuple[frozenset[str], OSError]] = []
+_FAILED_OPENS: list[str] = []
+_FAILING_HOOK_ADDED: list[bool] = []
+
+
+def _fail_armed_open(event: str, args: tuple[Any, ...]) -> None:
+    if _FAILING_OPEN and event == "open" and args and isinstance(args[0], (str, bytes, os.PathLike)):
+        targets, error = _FAILING_OPEN[0]
+        opened = os.path.normcase(os.path.abspath(os.fsdecode(args[0])))
+        if opened in targets:
+            _FAILING_OPEN.clear()
+            _FAILED_OPENS.append(opened)
+            raise error
+
+
+@contextmanager
+def _one_open_fails(target: Path, error: OSError) -> Iterator[list[str]]:
+    """Inside the block, the first open of target by any API raises error; yields a list that, once the block ends, holds each open that failed."""
+    if not _FAILING_HOOK_ADDED:
+        sys.addaudithook(_fail_armed_open)
+        _FAILING_HOOK_ADDED.append(True)
+    failed: list[str] = []
+    spellings = frozenset(os.path.normcase(os.path.abspath(path)) for path in (target, target.resolve()))
+    _FAILED_OPENS.clear()
+    _FAILING_OPEN.append((spellings, error))
+    try:
+        yield failed
+    finally:
+        _FAILING_OPEN.clear()
+        failed.extend(_FAILED_OPENS)
+
+
+def test_a_changed_note_whose_read_fails_once_is_found_by_the_next_search(tmp_path: Path) -> None:
+    """INV-8.4, S3 deviation row 20 (review R-25): a rewritten note whose first read raises PermissionError is skipped for that call only; the next search and the one after find its new line, so one bad moment never hides it until it changes again."""
+    workspace = _workspace(tmp_path)
+    note = _write(workspace.root, "notes/plans.md", "Sigma plan 49 USD\n")
+    search_tool = _search_tool(workspace, tmp_path)
+    assert _hit_lines(_search(search_tool, "sigma").output) == ["notes/plans.md:1: Sigma plan 49 USD"]
+    # A new size changes the fingerprint, so the next search reads the
+    # note again, and that read fails once, as under a scanner's lock.
+    note.write_text("Sigma plan now costs 129 USD\n", encoding="utf-8", newline="\n")
+    with _one_open_fails(note, PermissionError(errno.EACCES, "held by another process", str(note))) as failed:
+        locked = _search(search_tool, "costs")
+    assert len(failed) == 1, "precondition: the changed note's read failed once"
+    assert locked.status is ToolStatus.SUCCESS, locked.output
+    for attempt in ("next", "after"):
+        found = _search(search_tool, "costs")
+        assert _hit_lines(found.output) == ["notes/plans.md:1: Sigma plan now costs 129 USD"], f"{attempt} search after one failed read: {found.output!r}"
+
+
+def test_a_changed_entries_file_whose_read_fails_once_has_every_entry_found_by_the_next_search(tmp_path: Path) -> None:
+    """INV-8.4, INV-8.5, S3 deviation row 20 (review R-25): entries.jsonl gains an entry and its first read raises EMFILE; the next search and the one after find the old entry and the new one, not 0 of 0."""
+    workspace = _workspace(tmp_path)
+    entries = workspace.root / "entries.jsonl"
+    alpha, beta = entry_record(1, "Alpha lists Basic at 49 USD"), entry_record(2, "Beta lists Basic at 59 USD")
+    write_jsonl(entries, [alpha])
+    search_tool = _search_tool(workspace, tmp_path)
+    assert _hit_lines(_search(search_tool, "basic").output) == ["#1 fact: Alpha lists Basic at 49 USD"]
+    # One more entry grows the file, so the next search reads it
+    # again, and that read fails once, as when no handle is free.
+    write_jsonl(entries, [alpha, beta])
+    with _one_open_fails(entries, OSError(errno.EMFILE, "Too many open files", str(entries))) as failed:
+        crowded = _search(search_tool, "basic")
+    assert len(failed) == 1, "precondition: the changed entries file's read failed once"
+    assert crowded.status is ToolStatus.SUCCESS, crowded.output
+    expected_basic = ["#1 fact: Alpha lists Basic at 49 USD", "#2 fact: Beta lists Basic at 59 USD"]
+    for attempt in ("next", "after"):
+        basic = _search(search_tool, "basic")
+        assert sorted(_hit_lines(basic.output)) == expected_basic and basic.metadata == {"hits": 2, "total": 2}, f"{attempt} search after one failed read: {basic.output!r}"

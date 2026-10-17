@@ -243,3 +243,48 @@ The verifier's `fix_r1` fails one of these tests on purpose. It normalizes befor
 | R-3 through a full `ScriptedTree` run | `ScriptedTree` takes one tool call per step. ECO drives the root's own middleware with messages from the runtime's formatter instead, which is the shape the runtime appends. |
 | The exact wording of the FR-8.6 refusal | The wording is not behaviour, and the blank check's outcome is pinned by the R-8 query test. |
 | New file-header lines (FUNCTION INVENTORY) for the five touched test files | The existing header lines cannot be changed: comment-only edits are forbidden and R-23 is waived. The new tests are listed in `FEATURE.md` (Known Failure Modes and Historical Regressions) instead. |
+
+## S5 re-review pin (R-25)
+
+Re-review round 1 (`review.md`, "Re-review round 1 — verified findings") found that the R-7 fix's row helpers sniff a changed file through `is_text_file` (`code_search/base.py:110-118`), which swallows `OSError`. One failed read of a changed file therefore stores the new fingerprint with no rows, and every later search skips the file until it changes again. These 2 tests pin INV-8.4 and the S3 deviation for row 20 ("a file that raises `OSError` mid-refresh is skipped for that call") at HEAD `bb1f9306` (code `72d1ca7f`), before the fix.
+
+**The seam.** A second `sys.addaudithook` on the `"open"` event, armed by the context manager `_one_open_fails(target, error)`, raises the given `OSError` from the first open of the target and then disarms itself. The R-10 recorder is the precedent, and the arming follows the same rule: a hook cannot be removed, so it is added once per process and does nothing unless armed. The hook fires for `open`, `io.open`, `os.open`, and every `pathlib` read, in the worker thread that opens. So the test does not depend on how a fix opens the file, and it needs no real lock, which Linux CI could not make. Nothing else is mocked: the filesystem, `InfiniteWorkspace`, the toolset, and SQLite FTS5 are real (§13).
+
+| Spec ID | Test (file → name) | Level | Failure it catches (input + state → wrong output) | How it could pass vacuously, and why it does not |
+|---|---|---|---|---|
+| INV-8.4, §17 S3 deviation row 20 (review R-25) | SRCH → `test_a_changed_note_whose_read_fails_once_is_found_by_the_next_search` | agent tool, real FTS5, audit-hook fault | A note is indexed. It is rewritten with a new size, and the next search's first open of it raises `PermissionError(EACCES)`. Then the next search and every later one return 0 of 0 for its new line (HEAD: `next search after one failed read: '0 of 0 matching entries and note lines shown.'`). | A precondition requires exactly one failed open, so a seam that never fires, or a search that never reads the changed note, fails the test. The rewrite changes the size, so no timestamp tick is involved (EC-8.5). The query `costs` is only on the new line, so the old rows cannot satisfy it. The failing call itself must return SUCCESS, but its hits are not asserted, so skipping the file and keeping its old rows are both allowed. Two later searches must both show the exact hit line. |
+| INV-8.4, INV-8.5, §17 S3 deviation row 20 (review R-25; G-2) | SRCH → `test_a_changed_entries_file_whose_read_fails_once_has_every_entry_found_by_the_next_search` | agent tool, real FTS5, audit-hook fault | Entry #1 is indexed, then `entries.jsonl` gains entry #2, and the next search's first open of it raises `OSError(EMFILE)`. After that, every remembered entry is hidden, the old one included (HEAD: 0 of 0 for `basic`). | The same precondition and SUCCESS check as the note test. The error is a plain `OSError` (`EMFILE`), not a `PermissionError`, so a fix that handles only lock errors fails. Both entries must be found with metadata `{"hits": 2, "total": 2}`, on the next search and on the one after it. |
+
+### Red run (S5 re-review, before the repair)
+
+Commands run from the worktree, as `PYTHONPATH="<worktree>[;<plugin dir>]" python -m pytest <paths> -q -p no:cacheprovider [-p <plugin>]`. Related suites: `tests/features/infinite_memory_agent tests/test_fulltext_index.py tests/test_code_search_tools.py`. `fix_rr1` is the verifier's proven fix, in scratch `s5-rrverify/`. The variant plugins are in scratch `s5-pin-r25/`, built by `make_variants.py`, and are never committed.
+
+| Run | Final line |
+|---|---|
+| Related suites at HEAD, before the edit | `205 passed in 8.07s` |
+| The 2 pins at HEAD (`-k read_fails_once`) | `2 failed, 20 deselected in 0.98s`. Both fail on the `next` search with `'0 of 0 matching entries and note lines shown.'`, after their preconditions pass. |
+| Related suites at HEAD with the pins | `2 failed, 205 passed in 8.27s` |
+| The 2 pins, `-p fix_rr1` | `2 passed, 20 deselected in 0.11s` |
+| Related suites, `-p fix_rr1` | `207 passed in 7.50s` |
+| Whole `tests/`, `-p fix_rr1` | `3 failed, 6582 passed, 16 skipped in 113.49s`. The 3 failures are the `harness_threads` surface tests, which fail in this environment with or without the change (S5-rereview-verifier §3.2). |
+| The 2 pins, `-p fixv_builtin_open` (the sniff uses builtin `open`) | `2 passed, 20 deselected in 0.11s` |
+| The 2 pins, `-p fixv_os_open` (the sniff uses `os.open` and `os.read`) | `2 passed, 20 deselected in 0.11s` |
+| The 2 pins, `-p fixv_keep_rows` (a read error keeps the old rows; verifier §3.4 option) | `2 passed, 20 deselected in 0.11s` |
+| The 2 pins, `-p mutv_swallow` (a wrong fix: the sniff uses builtin `open` and swallows `OSError`) | `2 failed, 20 deselected in 0.27s` |
+| The 2 pins, the R-10 warm test, and the INV-8.5 test in one process, in both orders, at HEAD and with `-p fix_rr1` | At HEAD the 2 pins fail and the others pass; with the fix all pass. The raising hook does not disturb the recorder. |
+| The 2 pins plus the R-10 warm test on 84e566bb (`PYTHONPATH="v84;<worktree>" --import-mode=append`) | `1 failed, 2 passed, 19 deselected in 1.73s`. The pins pass on the commit before the R-7 fix, and only the R-10 warm test fails, by design, which shows the old tree was the one loaded. |
+| Cross-check: the verifier's real Windows share-mode-0 lock pin (`s5-rrverify/test_rr1_pin.py -k share_mode`) | At HEAD: `1 failed, 4 deselected in 16.34s`. With `-p fix_rr1`: `1 passed, 4 deselected in 15.00s`. The real lock and the hook give the same verdict. |
+
+**What a repair must keep for these tests to pass.**
+
+- A changed file whose open raises `OSError` during the refresh must not have its new fingerprint stored with no rows. The error must reach `_lookup`'s skip, or the old rows must stay, so that the next search reads the file again.
+- The failing call itself must still return SUCCESS.
+- The tests do not care which API opens the file, or how often. Only the first open of the target fails.
+
+### R-25 tests deliberately NOT written
+
+| Candidate | Why it would not earn its keep |
+|---|---|
+| A real Windows share-mode-0 lock in the repository | It is not portable: Linux CI would skip it, so it cannot be the pin (hard rule 2). The cross-check above ran the verifier's scratch version instead. |
+| What the failing call itself returns for the changed file | Row 20 says only "skipped for that call". Keeping the old rows for that call is an open question for the owner (verifier §3.4), so neither 0 hits nor the old line is asserted. |
+| R-26, R-27, R-28 | The orchestrator ruled them out of scope for this pin. R-28 (the Windows `scandir` size lag while a writer holds the file open) is a follow-up. |
