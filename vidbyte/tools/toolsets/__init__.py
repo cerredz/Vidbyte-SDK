@@ -9,7 +9,7 @@ Architecture:
     - ParadigmMinimalToolset: Minimal universal filesystem toolset.
     - CodingAgentTools: The seven tools a CodingAgent starts with over one root folder.
     - CodexHostTools: One tool per CodexHost function over one host.
-    - InfiniteMemoryAgentTools: bash over the project folder plus grep and read_lines over the memory workspace.
+    - InfiniteMemoryAgentTools: bash over the project folder plus grep, read_lines, and search_memory over the memory workspace.
 Relations:
     Consumed by vidbyte.paradigms harnesses; composes vidbyte.tools builtins.
 """

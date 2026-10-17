@@ -251,13 +251,20 @@ async def test_endless_printer_times_out_with_the_first_bytes_and_a_truncation_m
     assert result.status is ToolStatus.ERROR
     assert result.metadata["error"] == "timeout"
     assert result.metadata["truncated"] is True
-    kept = re.match(r"(?:y\n)+", result.output)
-    assert kept is not None
-    assert len(kept.group(0).encode("utf-8")) == SMALL_CAP_BYTES
-    # Spec §8.5: the timeout truncation line names the cap but no omitted-byte count (that count is unknown while the command runs).
-    marker_lines = [line for line in result.output[kept.end():].splitlines() if "truncated" in line.lower()]
-    assert len(marker_lines) == 1
-    assert set(re.findall(r"\d[\d,]*", marker_lines[0])) <= {str(SMALL_CAP_BYTES), f"{SMALL_CAP_BYTES:,}"}
+    # Deliberately changed by spec infinite-memory-context-economy INV-6.4 (EC-6.2, EC-6.3): the timeout result is the head held so
+    # far, the INV-6.2 marker with the count left out so far, the tail held so far, then main's stopped line. A 1,000-byte cap keeps
+    # T = min(BASH_TAIL_OUTPUT_BYTES, cap // 2) tail bytes and a head of cap - T bytes.
+    tail_bytes = min(bash_module.BASH_TAIL_OUTPUT_BYTES, SMALL_CAP_BYTES // 2)
+    head_bytes = SMALL_CAP_BYTES - tail_bytes
+    stopped = f"\n[command stopped: it did not finish within the {TIME_LIMIT_SECONDS:g}-second time limit]"
+    shape = re.fullmatch(r"((?:y\n)+)\n\[output truncated: ([\d,]+) bytes not shown\]\n([y\n]+)" + re.escape(stopped), result.output)
+    assert shape is not None, result.output[-300:]
+    head, count, tail = shape.groups()
+    assert len(head.encode("utf-8")) == head_bytes
+    assert int(count.replace(",", "")) > 0
+    # The tail is the last bytes read, so it may start at either half of a "y\n" pair, but it is always yes's output.
+    assert len(tail.encode("utf-8")) == tail_bytes
+    assert "yy" not in tail and "\n\n" not in tail
 
 
 @needs_setsid

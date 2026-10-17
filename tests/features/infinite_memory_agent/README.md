@@ -2,9 +2,9 @@
 
 ## Folder Description / Intent
 
-This folder holds the feature tests for `InfiniteMemoryAgent`: a root agent that hands work to generator→verifier pairs of fresh subagents through `launch_subagent`, keeps memory in one guarded workspace folder, and resumes a crashed or cancelled run from its journal. The tests are offline. The only fake is the model runner, patched at `BaseAgent._runner_for_model` so it reaches every agent in the tree. The workspace, the journal, `ParallelPipeline`, the prompt catalog, the filesystem, and `bash` all run for real under `tmp_path`. The behavior itself lives in `vidbyte/agents/infinite/`, with its records, enums, and constants in `vidbyte/lib/`, not here. The contract comes from `docs/spec/infinite-memory-agent/spec.md`.
+This folder holds the feature tests for `InfiniteMemoryAgent`: a root agent that hands work to generator→verifier pairs of fresh subagents through `launch_subagent`, keeps memory in one guarded workspace folder, and resumes a crashed or cancelled run from its journal. The tests are offline. The only fake is the model runner, patched at `BaseAgent._runner_for_model` so it reaches every agent in the tree. The workspace, the journal, `ParallelPipeline`, the prompt catalog, the filesystem, and `bash` all run for real under `tmp_path`. The behavior itself lives in `vidbyte/agents/infinite/`, with its records, enums, and constants in `vidbyte/lib/`, not here. The contract comes from `docs/spec/infinite-memory-agent/spec.md`, and the context-economy layer (read windows, masking, the low-watermark trim, compact cards, the stable root prompt with status messages, `search_memory`, and delegated `recall`) from `docs/spec/infinite-memory-context-economy/spec.md`.
 
-The pack covers every acceptance criterion from AC-1 to AC-42, plus the regression and guardrail tests added after the S4 review, and `docs/spec/infinite-memory-agent/test-plan.md` maps each test to the spec IDs it proves.
+The pack covers every acceptance criterion from AC-1 to AC-42, plus the regression and guardrail tests added after the S4 review, and `docs/spec/infinite-memory-agent/test-plan.md` maps each test to the spec IDs it proves. The four context-economy files are mapped in `docs/spec/infinite-memory-context-economy/test-plan.md`.
 
 ## File Index
 
@@ -18,6 +18,10 @@ The pack covers every acceptance criterion from AC-1 to AC-42, plus the regressi
 - `test_infinite_memory_workspace.py` covers `remember` and its EC-18 advice, supersede, `write_note`, `edit_file` and its caps, the caps including a bash bypass, writes the disk refuses, large bookkeeping files, grep, and the workspace map.
 - `test_infinite_memory_resume.py` covers journal order and fsync, `resume` replay and refusals, torn and malformed journals, cancellation, the reserved-name check, and key secrecy.
 - `test_infinite_memory_context.py` covers history trimming and a clean context for each run.
+- `test_infinite_memory_economy.py` covers the 200-line read window and its setting, masking of older `grep`, `read_lines`, and `search_memory` outputs before the low-watermark trim, smart-case grep with no context lines, how often the trim's cut moves as history grows, and compact cards for passed and fixed pairs.
+- `test_infinite_memory_stable_prefix.py` covers the root's unchanging system string and tool list, the status message after each tool iteration (map changes and loop counters), the map snapshot and its lifted cut, and the cap on a large change report.
+- `test_infinite_memory_search.py` covers `search_memory`: its contract, ranked entry and note-line hits with a total line, quoted queries, a refresh that sees bash writes, edits, and deletes, the index's exclusions, a missing FTS5, the caps, one shared index per tree searched in a worker thread, and the reserved name.
+- `test_infinite_memory_recall.py` covers `InfiniteRecallMode`, the registry's recall grants, each agent's tool set per mode, the `recall` spec, the request and citation records, the retriever, cards that hold only text copied from disk, rejected citations, the quota, the card cap, the terms pre-search, and usage, `max_agents`, and journal effects.
 
 ## Run
 
@@ -28,3 +32,5 @@ From the repository root: `PYTHONPATH=$(pwd) python -m pytest tests/features/inf
 - 2026-10-15 - Pack added red, ahead of the implementation, from spec r3 (S2 test author).
 - 2026-10-15 - S4 review additions (S2 test author, spec r5): guardrail tests for stage-time entry rules, the verifier's `by` stamp, and `edit_file`'s caps; regression tests for findings R-1, R-3, R-4, R-6 and R-8.
 - 2026-10-15 - S5 re-review additions (S2 test author, spec r5): regression tests for findings R-26 (a read-only seed on a second attach) and R-27 (refused two-file memory writes, and an unwritable staged entry in a pair).
+- 2026-10-16 - Context-economy tests added red (S2, spec infinite-memory-context-economy r3): four new files, `ModelCall.raw_tools` and `ScriptedTree.agents` in the fixtures, and the deliberately changed tool sets, leaf list, compact-card and map-refresh assertions in the delegation, contract, and workspace files.
+- 2026-10-16 - Spec r4 alignment (S2): the complexity budget now allows 9 package modules and checks 13 (`recall.py` added, D-18), and the recall spec test imports `InfiniteRecallTool` from `vidbyte.agents.infinite.recall`.

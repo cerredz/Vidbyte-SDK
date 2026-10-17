@@ -1,0 +1,1 @@
+What you will do with the answer. The helper uses it to judge which entries and lines are worth citing and how much of them to return. Name the decision, step, or deliverable the answer feeds. A clear purpose keeps the reply short and on point.

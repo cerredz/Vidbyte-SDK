@@ -1,0 +1,1 @@
+What you already know about the question, if anything. The helper skips what you list here and looks for what is missing. Give the facts you hold and the entry ids or files you have already read, so it does not cite them again. Leave it out when you know nothing yet.

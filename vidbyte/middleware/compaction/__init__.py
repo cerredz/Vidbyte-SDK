@@ -24,13 +24,12 @@ from vidbyte.middleware.compaction.strategies import (
     SummarizeByTopicBlocksCompaction,
     SummarizeOldestNCompaction,
     SummarizeRangeCompaction,
-    ToolOutputSlidingWindowCompaction,
     ToolResultClearingWithExclusionsCompaction,
     TrimToTokenBudgetCompaction,
-    TrimWithProviderBoundariesCompaction,
     TruncateToolResultMessagesCompaction,
 )
 from vidbyte.middleware.compaction.trace_render import TraceArtifactRenderer
+from vidbyte.middleware.compaction.windows import ToolOutputSlidingWindowCompaction, TrimWithProviderBoundariesCompaction
 
 __all__ = [
     "BaseCompaction",

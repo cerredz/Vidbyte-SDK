@@ -99,6 +99,7 @@ from vidbyte.lib.enums.infinite import (
     InfiniteEntryKind,
     InfiniteJournalEvent,
     InfiniteMemoryPreset,
+    InfiniteRecallMode,
     InfiniteResultStatus,
     InfiniteVerdict,
 )
@@ -255,6 +256,7 @@ __all__ = [
     "InfiniteEntryKind",
     "InfiniteJournalEvent",
     "InfiniteMemoryPreset",
+    "InfiniteRecallMode",
     "InfiniteResultStatus",
     "InfiniteVerdict",
     "JevBoundaryKind",

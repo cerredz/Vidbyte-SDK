@@ -1,1 +1,1 @@
-Files: {files} of {max_files}. Tokens: {tokens} of {max_tokens}. Live memory entries: {entries}, kept in entries.jsonl and found with grep. Each line below is one workspace file with its token count and description.
+Files: {files} of {max_files}. Tokens: {tokens} of {max_tokens}. Live memory entries: {entries}, kept in entries.jsonl and found with search_memory or grep. Each line below is one workspace file with its token count and description.

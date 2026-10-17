@@ -419,9 +419,9 @@ production-ready tools instead of writing their own. Each capability lives in it
 subfolder below.
 
 #### `vidbyte/tools/builtins/code_search/`
-Repository search tools: `GlobTool`, `GrepTool`, and `SemanticSearchTool`. Let an agent
-locate files and code by pattern or meaning within a workspace. Common building blocks for
-repository-analyst and coding agents.
+Repository search tools: `GlobTool`, `GrepTool`, `SemanticSearchTool`, and
+`InfiniteSearchMemoryTool`. Let an agent locate files and code by pattern or meaning
+within a workspace. Common building blocks for repository-analyst and coding agents.
 
 #### `vidbyte/tools/builtins/context/`
 The manual/legacy context-compaction tool (`ContextCompactionTool`) for tool-driven

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Iterator
 from typing import Any, Mapping
@@ -16,6 +17,13 @@ from vidbyte.lib.runners.types import TextModelResponse
 from vidbyte.lib.util import PromptPlacement
 from vidbyte.providers.output_schema import OutputSchemaFormatter
 
+# The most tools-and-system digests one adapter remembers; a full set is
+# cleared before the next one is added.
+ANTHROPIC_CACHE_SEEN_PREFIX_LIMIT = 256
+# The block types Anthropic lets carry a cache mark (a text block only
+# when it is non-empty); thinking blocks never may.
+_ANTHROPIC_MARKABLE_TYPES = frozenset({"text", "tool_result", "tool_use", "image", "document"})
+
 
 class AnthropicProvider:
     provider = ModelProvider.ANTHROPIC
@@ -24,6 +32,9 @@ class AnthropicProvider:
         # Keep response parsing injectable for tests and alternate transports.
         self._text_config = text_config or self._build_text_config(model=model, config_options=config_options)
         self._parser = response_parser or HttpResponseParser()
+        # The tools-and-system digests this adapter has sent, so only a
+        # repeat of one is marked for caching.
+        self._seen_prefixes: set[str] = set()
 
     async def run_text(self, *, prompt: str, system: str | None, metadata: Mapping[str, object] | None, transport: HttpTransport, config: TextModelConfig | None = None) -> TextModelResponse:
         # Execute an Anthropic Messages API request with optional tools/history.
@@ -60,6 +71,17 @@ class AnthropicProvider:
         self._attach_response_format(payload, config)
         self._attach_metadata(payload, config, metadata)
         self._attach_extra_body(payload, config)
+        # Mark a repeat request's prefix for Anthropic's prompt cache,
+        # unless the caller marked the request itself.
+        # @intent anthropic-marks-only-repeated-prefixes
+        # A mark costs 1.25x on the cache write and pays back only when
+        # the same prefix is read again, so the first send of a
+        # tools-and-system pair goes out exactly as before and only a
+        # repeat is marked. A caller that set its own cache_control owns
+        # caching, and more marks could pass Anthropic's limit of four
+        # breakpoints, so its request records no digest either.
+        if not self._holds_cache_control(payload) and self._is_repeat(payload):
+            self._attach_cache_breakpoints(payload, config)
         return payload
 
     def _attach_response_format(self, payload: dict[str, Any], config: TextModelConfig) -> None:
@@ -123,6 +145,72 @@ class AnthropicProvider:
         if config.extra_body:
             payload.update(dict(config.extra_body))
 
+    def _attach_cache_breakpoints(self, payload: dict[str, Any], config: TextModelConfig) -> None:
+        # Marks the system and two message blocks of a repeat request
+        # with block-level cache_control, never a top-level key or a
+        # ttl. Send a non-empty system as one marked text block.
+        system = payload.get("system")
+        if isinstance(system, str) and system:
+            payload["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
+        if not config.messages:
+            return
+        # Mark the last message, which the next call reads back, and the
+        # message right before the newest assistant turn, which this
+        # call reads back from the previous one.
+        messages = payload["messages"]
+        assistants = [index for index, message in enumerate(messages) if message.get("role") == "assistant"]
+        targets = {len(messages) - 1}
+        if assistants and assistants[-1] > 0:
+            targets.add(assistants[-1] - 1)
+        # @intent anthropic-marks-copies-never-the-callers-messages
+        # The payload's messages are shallow copies that share the
+        # caller's content lists, so a marked message is a new dict with
+        # a new list; marking in place would pile marks up across calls.
+        # A non-empty string content becomes one marked text block, a
+        # list gets the mark on its last markable block, and a message
+        # with nothing markable is left as it is.
+        for index in sorted(targets):
+            content = messages[index].get("content")
+            if isinstance(content, str):
+                blocks: list[Any] = [{"type": "text", "text": content}] if content else []
+            else:
+                blocks = list(content) if isinstance(content, list) else []
+            markable = [position for position, block in enumerate(blocks) if isinstance(block, Mapping) and block.get("type") in _ANTHROPIC_MARKABLE_TYPES and (block.get("type") != "text" or block.get("text"))]
+            if markable:
+                blocks[markable[-1]] = {**blocks[markable[-1]], "cache_control": {"type": "ephemeral"}}
+                messages[index] = {**messages[index], "content": blocks}
+
+    @staticmethod
+    def _holds_cache_control(payload: Mapping[str, Any]) -> bool:
+        # Whether any dict anywhere in the payload already has a
+        # cache_control key: the top level, the system, a tool, or a
+        # block.
+        pending: list[Any] = [payload]
+        while pending:
+            node = pending.pop()
+            if isinstance(node, Mapping):
+                if "cache_control" in node:
+                    return True
+                pending.extend(node.values())
+            elif isinstance(node, (list, tuple)):
+                pending.extend(node)
+        return False
+
+    def _is_repeat(self, payload: Mapping[str, Any]) -> bool:
+        # Whether this adapter sent these tools and this system before;
+        # a new pair is remembered, clearing a full memory first. The
+        # digest encodes a lone surrogate as it is, which strict UTF-8
+        # refuses; the body sent is untouched, and the transport's own
+        # json.dumps escapes it as on main.
+        encoded = json.dumps([payload.get("tools"), payload.get("system")], sort_keys=True, ensure_ascii=False).encode("utf-8", "surrogatepass")
+        digest = hashlib.sha256(encoded).hexdigest()
+        if digest in self._seen_prefixes:
+            return True
+        if len(self._seen_prefixes) >= ANTHROPIC_CACHE_SEEN_PREFIX_LIMIT:
+            self._seen_prefixes.clear()
+        self._seen_prefixes.add(digest)
+        return False
+
     def stream_text(self, *, prompt: str, system: str | None, metadata: Mapping[str, object] | None, transport: SyncHttpTransport, config: TextModelConfig | None = None) -> Iterator[str]:
         # POST to /messages with stream=True and yield text from content_block_delta events.
         config = self._config(config)
@@ -182,5 +270,6 @@ class AnthropicProvider:
 
 
 __all__ = [
+    "ANTHROPIC_CACHE_SEEN_PREFIX_LIMIT",
     "AnthropicProvider",
 ]
