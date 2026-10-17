@@ -4,7 +4,7 @@ PURPOSE: Defines shared operational constants for the Codex harness adapter.
 ROLE IN CODEBASE: Supplies stable bounds, counters, provider labels, and item vocabularies.
 ARCHITECTURE NOTE: Constants live below agent modules so every collaborator can import them safely.
 COMMON MODIFICATION PATTERNS: Add a CODEX-prefixed value when adapter behavior needs a shared literal.
-KNOWN EDGE CASES: Supported item kinds track the pinned openai-codex compatibility range. CodexHost's own fixed values live in vidbyte/lib/constants/codex_host.py; this module keeps the values shared with the harness agent, and the hardening slice changes three of their texts (hardening section 9.3).
+KNOWN EDGE CASES: Supported item kinds track the pinned openai-codex compatibility range. CodexHost's own fixed values live in vidbyte/lib/constants/codex_host.py; this module keeps the values shared with the harness agent, and the hardening slice changes three of their texts and removes CODEX_ACCEPTED_APPROVAL_METHODS and CODEX_APPROVAL_ACCEPT_DECISION, because the host's router no longer accepts approvals: it declines them unless the developer's approval_handler answers (hardening section 9.3, D-3).
 RELATED DOCS: docs/design/codex-harness-agent.md; docs/spec/codex-host-thread-helpers/spec.md (section 9.3); docs/spec/codex-host-hardening/spec.md (section 9.3).
 TESTS: python scripts/run_ci.py; tests/features/codex_host/test_codex_host_helper_surface.py and tests/features/codex_host/test_codex_host_records.py.
 """
@@ -464,12 +464,6 @@ CODEX_SANDBOX_TURN_POLICY: Mapping[str, str] = {
     "workspace-write": "workspaceWrite",
     "full-access": "dangerFullAccess",
 }
-# Approval requests the host's router accepts, mirroring the SDK's own
-# default handler (D-16).
-CODEX_ACCEPTED_APPROVAL_METHODS = frozenset(
-    {"item/commandExecution/requestApproval", "item/fileChange/requestApproval"}
-)
-CODEX_APPROVAL_ACCEPT_DECISION = "accept"
 # Maps a turn error's codexErrorInfo key to a failure code; every other
 # key means codex.api_error.
 CODEX_ERROR_INFO_CODES: Mapping[str, str] = {
@@ -607,8 +601,6 @@ __all__ = [
     "CODEX_APPROVAL_MODE_WIRE",
     "CODEX_SANDBOX_THREAD_MODE",
     "CODEX_SANDBOX_TURN_POLICY",
-    "CODEX_ACCEPTED_APPROVAL_METHODS",
-    "CODEX_APPROVAL_ACCEPT_DECISION",
     "CODEX_ERROR_INFO_CODES",
     "CODEX_GOAL_TERMINAL_STATUSES",
     "CODEX_NEXT_STEPS",
