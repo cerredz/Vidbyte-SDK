@@ -16,7 +16,7 @@ started: 2026-10-16 17:17
 | S0 worktree + capture + recon | done | 2026-10-16 17:17 | 2026-10-16 22:35 | reports/S0-scout.md | base_commit 08f67e7f; code-map.md (4 sections, 17 notes) |
 | S1 spec + review | done | 2026-10-16 22:40 | 2026-10-17 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | spec r3 approved @0adeae0b; round 1 SOUND WITH FIXES (2B/4M/2m), round 2 SOUND WITH FIXES (0B/4M); 12 findings applied |
 | S2 tests | done | 2026-10-17 04:00 | 2026-10-17 | reports/S2-test-author.md | 106 test items (69 functions, 8 modules) in tests/features/browser_agent/, red confirmed (106 failed, no collection error); S2_HEAD 5db0eaa0 |
-| S3 implement | pending | | | | |
+| S3 implement | running | 2026-10-17 | | reports/S3-implementer.md | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
