@@ -25,7 +25,7 @@ reply = agent.run("Compare the list prices of our five competitors.")
 - Memory that survives history trimming and restarts. Agents save short typed entries with `remember` and longer material with `write_note`. A pair's entries are staged and reach `entries.jsonl` only after its verifier gives a verdict.
 - Runs that must be resumable. `resume()` or `aresume()` continues the newest unfinished run, or a named one.
 
-Every agent holds `bash` (in `root_dir`), `grep` and `read_lines` (in the workspace), `remember`, and `write_note`. The FULL preset adds `edit_file`, the root and every generator hold `launch_subagent`, and verifiers hold `drop_entry`. Which memory tools each agent holds is one table, `InfiniteMemoryToolRegistry` in `vidbyte/lib/registries/infinite.py`. The root also holds every developer tool it was given, including tools added with `add_tool` and MCP tools; a pair gets only the extras its task card names.
+Every agent holds `bash` (in `root_dir`), `grep`, `read_lines`, and `search_memory` (in the workspace), `remember`, and `write_note`. `search_memory` ranks the live entries and every note line by how well they match the query's words and shows the best ten as short snippets with the total; all agents of a tree share its one index, `InfiniteWorkspace.full_text`, which it brings up to date from each file's size and modification time before every search. The FULL preset adds `edit_file`, the root and every generator hold `launch_subagent`, and verifiers hold `drop_entry`. Which memory tools each agent holds is one table, `InfiniteMemoryToolRegistry` in `vidbyte/lib/registries/infinite.py`. The root also holds every developer tool it was given, including tools added with `add_tool` and MCP tools; a pair gets only the extras its task card names.
 
 ## What it is not for
 
@@ -37,7 +37,7 @@ Every agent holds `bash` (in `root_dir`), `grep` and `read_lines` (in the worksp
 - No domain write policies such as one writer per file.
 - No cost cap, token budget, budget split between pairs, or wind-down.
 - No scan or undo of what `bash` does to the workspace.
-- No semantic or vector search; agents use `grep` and `read_lines`.
+- No semantic or vector search; agents use `search_memory`, `grep`, and `read_lines`.
 - The SDK's other private token heuristics are not moved onto `TokenEstimate`.
 - No durable `Session` persistence and no working `fork()`.
 - No "save now" or "consider delegating" reminders and no structured run-state file.
@@ -50,7 +50,7 @@ Every agent holds `bash` (in `root_dir`), `grep` and `read_lines` (in the worksp
 Everything lives as plain files under the workspace root, so a person or `bash` can read and repair it.
 
 - `entries.jsonl` holds one live memory entry per line: `id`, `kind` (decision, fact, lesson, open_question, or pointer), one-line `text`, up to eight `tags` and eight `refs`, `supersedes`, the author `by`, the verifier `verified_by` (null for the root), the `run` id, and a UTC `at` stamp. Ids never repeat.
-- `superseded.jsonl` holds entries that a newer entry replaced, moved there unchanged; `grep` skips it.
+- `superseded.jsonl` holds entries that a newer entry replaced, moved there unchanged; `grep` and `search_memory` skip it.
 - `files.jsonl` holds one line per note created through `write_note`, with its one-line description for the map.
 - Notes are any other text files (`.md`, `.txt`, `.json`, `.jsonl`) under the root. Seed files are copied to `seed/` when the agent is built and are read-only to the tools.
 - `.runs/<run_id>.jsonl` is one journal per run: `run_started` with the task, `pair_started` and `pair_finished` with each pair's card, and `run_finished` with the stop reason. Journals do not count toward the caps and are never deleted for you.
