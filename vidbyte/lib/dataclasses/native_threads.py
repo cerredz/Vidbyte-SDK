@@ -129,8 +129,8 @@ class NativeThreadRequest:
         return workspace.resolve()
 
     def _checked_model(self) -> None:
-        # opencode needs "<provider>/<model>"; Grok and Muse take an
-        # optional bare model id.
+        # opencode needs "<provider>/<model>"; Grok, Muse and Claude
+        # Code take an optional bare model id.
         if self.harness is NativeHarness.OPENCODE:
             RecordFieldValidator.require_text(self.model, "model", max_chars=NATIVE_MODEL_MAX_CHARS, pattern=OPENCODE_MODEL_PATTERN)
         else:
