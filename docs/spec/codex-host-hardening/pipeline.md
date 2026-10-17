@@ -20,12 +20,12 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
 | S2 tests | done | 10:10 | 11:40 | reports/S2-test-author.md | **S2_HEAD fadec47f** (was 09524ff4; moved by the orchestrator-granted correction of 2 assertions); 106 new tests (97 red, 8 guards, 1 live-skipped), 20 superseded + 7 support literals; red 125F/631P/3S vs baseline 1F/650P/2S; spec r4 (d3389171) aligned to test choices |
 | S3 implement | done | 11:45 | 14:20 | reports/S3-implementer.md | **S3_HEAD c9150d63**; draft PR #1181 (base `ai/resolve-pr-1055-comments`, 64 files +9688/−551); 24/24 rows; budget 3 files / 13 classes / 0 deps / 9 config keys (exact); host.py 923; area 1F(inherited)/1024P/3S; source 1F(inherited)/6555P/27S; package CI passed; SDK-LINT: PASS |
 | S4 adversarial review | done | 14:25 | 16:10 | reports/S4-review-{conformance,conventions,engineering}.md, reports/S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES — confirmed 4 Blocker / 6 Major / 7 Minor; refuted 0; downgraded 1 (R-V3). Owners: code R-1,R-2,R-3,R-9,R-10; test R-4,R-5,R-6,R-8; spec R-7 |
-| S5 repair loop | running | 16:15 | | verify-log.md, reports/S5-repair-<k>.md | pre-steps done: spec r5 be733a0b; S2 S4-round tests **S2_HEAD 6b59d390** (22 new tests; red 18F/1029P/3S = 14 regressions + 2 R-7 pins + 1 constants row + 1 inherited) |
-| S5 re-review | pending | | | | |
+| S5 repair loop | done | 16:15 | 18:10 | verify-log.md, reports/S5-repair-1.md | converged at iteration 1: **HEAD efb19043** (9 fix commits df460ec7..31622c00); S2_HEAD 6b59d390 untouched; area 1F(inherited)/1046P/3S; source 1F(inherited)/6577P/27S; package CI passed; SDK-LINT: PASS; review.md 0 open (m-3..m-7 follow-ups) |
+| S5 re-review | running | 18:15 | | reports/S5-rereview.md | conformance, FOCUS post-repair, diff `origin/ai/resolve-pr-1055-comments...efb19043` |
 | S6 PR | deferred to the end of slice 2 | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 · S5 repair iterations: 1/8 · S5 re-review rounds: 1/2
 
 ## Decisions the orchestrator made
 - 2026-10-17 06:44: Waited for PR #1055 to merge (merged at 2026-10-17T06:44:08Z as `6f5a7310`) before creating the worktree, per Prompt 3.
@@ -121,6 +121,17 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
   - My own area run gives 18 failed, 1029 passed, 3 skipped. That is exactly the 14 B regressions (R-3 ×2, R-9 ×10, R-10 ×2), the 2 R-7 pins, the 1 constants row and the inherited failure.
   - My own mutant proofs: M40 and M31 each add exactly one failure to the clean 17, and it is the test the author named (diffed with `comm`).
   - The author's two OPEN items are not built: the closing-check refusal (EC-57's second bullet) and a late start whose loop has already closed. Both stay with S5 as code behavior already in r5, with no new tests. I logged them rather than reopening S2.
+
+- 2026-10-17 18:10: **S5 iteration 1 converged.** Checks I ran myself:
+  - `git status` is clean, and origin is at efb19043, so the branch is pushed.
+  - `git diff 6b59d390..HEAD -- tests` is empty.
+  - The verify-log "Iteration 1" entry exists.
+  - Source stage: `1 failed, 6577 passed, 27 skipped`. The only failure is the inherited 167 != 120.
+  - Package stage: `CI passed.`
+  - `lint/run.py` ends `SDK-LINT: PASS`.
+  - `gh pr checks 1181` reports no checks (workflow_dispatch only).
+  - All 10 confirmed findings are `fixed @<sha>`. m-1 and m-2 are fixed; m-3 to m-7 are follow-ups with reasons in review.md.
+- 2026-10-17 18:10: **I did not route the 178 PR-added test comment lines over 72 columns.** R-1's evidence is scoped to source: #1178's codex source files have 0 such lines. `tests/` at base 8baff351 already has 3,547, and 354 of those are in the codex host tests. So the test tree does not follow the 72-column lesson, and changing it would move S2_HEAD with no behavior change. It goes in the PR as a follow-up note.
 
 ## User replies (verbatim)
 - (none yet)
@@ -261,3 +272,11 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
 - R-10 tests run with `CODEX_HOST_WORKER_THREADS=1` and read records only after a later call on the same worker returns. The cancelled call's record must therefore come from the worker's done-callback, or from a post that runs before that later call ends. The timeout path must not log a second time. *Source:* S2 S4-round
 - R-9 expectations are hand-worked literals. The tests read handle ids back raw, so only the log arguments may change. *Source:* S2 S4-round
 - If the repair edits `_end_lost_turn`, `handle` or `forget`, the mutant strings in `s4_mutants.py` may stop matching, and `pytest_configure` then asserts. That is a tool artifact, not a test failure. *Source:* S2 S4-round
+- **S5 HEAD = efb19043.**
+  - R-10's done-callbacks run in the order they were registered, so the record callback must stay ahead of `_post_late`.
+  - `host.py` is 927 lines; the ask-first threshold the repair agent used is 940.
+  - Several files are CRLF on disk, so a Python `"
+"` replace misses. Use the Edit tool.
+  - The mutation plugin was not re-run, because `_end_lost_turn` and `handle` changed.
+  
+  *Source:* S5 repair 1
