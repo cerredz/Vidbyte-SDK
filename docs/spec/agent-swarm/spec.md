@@ -1,7 +1,7 @@
 ---
 spec: agent-swarm
 title: AgentSwarm — a minimal runtime where user-defined agents run their tools and message each other
-status: tests-written
+status: implemented
 revision: 3
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-agent-swarm
@@ -9,7 +9,7 @@ branch: feat/agent-swarm
 base_commit: 0f2aeb48382b49ecb179b3f3ca94f3807cd1edcc
 created: 2026-10-16
 updated: 2026-10-16
-pr:
+pr: https://github.com/cerredz/Vidbyte-SDK/pull/1174
 ---
 
 # Spec: AgentSwarm — a minimal runtime where user-defined agents run their tools and message each other
