@@ -88,7 +88,7 @@ class InfiniteMemoryRuntime(AgentRuntime):
         # Give the root its memory tools and launch_subagent for this
         # run, and start from a clean context: nothing from an earlier
         # run of this agent object reaches the model.
-        memory = InfiniteAgentMemory(self.workspace, key=INFINITE_ROOT_KEY, role=InfiniteAgentRole.ROOT, run_id=journal.run_id)
+        memory = InfiniteAgentMemory(self.workspace, key=INFINITE_ROOT_KEY, role=InfiniteAgentRole.ROOT, run_id=journal.run_id, settings=self.settings)
         launch = InfiniteLaunchTool(self.settings, self.workspace, journal, key=INFINITE_ROOT_KEY, depth=INFINITE_ROOT_DEPTH, extras=extras)
         self.tools = self.tools.extend((launch, *memory.tools()))
         context = replace(context, tools=self.tools.specs(), tool_calls=(), history=())
