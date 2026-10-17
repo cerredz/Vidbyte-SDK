@@ -1,6 +1,6 @@
 {
   "name": "InfiniteMemory Agent",
-  "description": "Instructions for InfiniteMemoryAgent, one Markdown file per leaf: the root, generator, and verifier operating manuals that each agent's system prompt carries, the messages that brief a generator, a verifier, and a resumed root, the result card a parent receives for each pair, the replies of the memory tools and their quota line, the workspace map's header, and the model-facing descriptions of launch_subagent, remember, write_note, edit_file, and drop_entry and of their parameters.",
+  "description": "Instructions for InfiniteMemoryAgent, one Markdown file per leaf: the root, generator, and verifier operating manuals that each agent's system prompt carries, the messages that brief a generator, a verifier, and a resumed root, the result card a parent receives for each pair, the replies of the memory tools and their quota line, the workspace map's header, the placeholder that masks an older search or read output, the root's update on what changed in the workspace, and the model-facing descriptions of launch_subagent, remember, write_note, edit_file, and drop_entry and of their parameters.",
   "key": "infinite_memory",
   "prompts": {
     "root_system_prompt": {
@@ -162,6 +162,14 @@
     "drop_entry_id_description": {
       "path": "drop_entry_id_description.md",
       "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/drop_entry_id_description.md"
+    },
+    "masked_output": {
+      "path": "masked_output.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/masked_output.md"
+    },
+    "map_update": {
+      "path": "map_update.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/map_update.md"
     }
   }
 }

@@ -4,7 +4,7 @@ FILE:
     vidbyte/lib/enums/prompts.py
 
 PURPOSE:
-    Defines the stable typed identifiers for all 139 static prompt assets across 35
+    Defines the stable typed identifiers for all 141 static prompt assets across 35
     JSON/Markdown-backed families, and the opt-in system-prompt presets an agent can
     attach. This file owns identifiers only; prompt text and family metadata belong
     under ``vidbyte/prompts/prompts/``.
@@ -150,6 +150,8 @@ class Prompt(str, Enum):
     INFINITE_MEMORY_EDIT_FILE_NEW_TEXT_DESCRIPTION = "infinite_memory.edit_file_new_text_description"
     INFINITE_MEMORY_DROP_ENTRY_TOOL_DESCRIPTION = "infinite_memory.drop_entry_tool_description"
     INFINITE_MEMORY_DROP_ENTRY_ID_DESCRIPTION = "infinite_memory.drop_entry_id_description"
+    INFINITE_MEMORY_MASKED_OUTPUT = "infinite_memory.masked_output"
+    INFINITE_MEMORY_MAP_UPDATE = "infinite_memory.map_update"
     CONTINUAL_TRACE_SYSTEM_PROMPT = "continual_trace.system_prompt"
     CONTEXT_ENGINEERING_GUIDELINE_PROMPT = "context_engineering.guideline_prompt"
     EXPERT_PROMPTING_EXPERT_PROMPT = "expert_prompting.expert_prompt"
