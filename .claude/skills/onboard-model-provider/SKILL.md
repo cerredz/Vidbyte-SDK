@@ -216,7 +216,7 @@ onboard-model-provider: STOP RESULT_UNVERIFIED <slug> <what>; kept <worktree>; o
 
 ## Seed vendors
 
-Walked in rank order. A row's first-party hosts, with their subdomains, are the only hosts whose pages count as evidence for that vendor. Prices, model IDs, base URLs and key prefixes are researched fresh by every run, so no row holds one. The list changes only by a reviewed edit.
+Walked in rank order. A row's first-party hosts, with their subdomains, are the only hosts whose pages count as evidence for that vendor. Prices, model IDs, base URLs and key prefixes are researched fresh by every run, so no row holds one. The list changes only by a reviewed edit. A vendor joins it only when it suits the SDK's agent use, has an HTTP API with key auth, and has first-party docs. Rows are ranked by first-party evidence that every check in the procedure's Qualify section can pass, then by stated tool support, then by fewest wiring hazards.
 
 | Slug | Rank | Enum | Display name | First-party hosts | Docs URL | Pricing URL | Reason |
 |---|---|---|---|---|---|---|---|
