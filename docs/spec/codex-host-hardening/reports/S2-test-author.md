@@ -153,3 +153,78 @@ The 18 failures are:
 - Two uncovered risks are left to S5 rather than built here:
   - the connection's closing check, as opposed to its dead check, refusing a call while a close is in progress (EC-57, second bullet);
   - a late start whose loop has already closed, which spec INV-7 says still writes its record.
+
+## Re-review round 1 additions
+
+This round worked from the post-repair re-review (`review.md`, "Post-repair re-review round 1"; verifier `reports/S5-findings-verifier.md`) and spec r6 (`a0c9b489`), on top of `a0c9b489`. Production code is the repair's `efb19043`.
+
+**Commits**
+- `48228a1d` `test(codex-host): add re-review round 1 regression tests for codex-host-hardening [R-11, R-12]`. It also carries the test plan's "Re-review round 1 additions" section, the pack README's log line, and the strict `log_fields`.
+- `b4127a6a` `docs(spec): record re-review round 1 test proof for codex-host-hardening`, which changes the AC-18 Proof cell only.
+
+Nothing was pushed or installed, and nothing under `vidbyte/`, `lint/` or `scripts/` changed.
+
+### 1. What was added
+There are 11 new tests, all red today, plus one stricter helper. The id-by-id table, with each red reason, is in `test-plan.md` under "Re-review round 1 additions".
+
+- **R-11.** Five rows in `observability::CodexCallRecordTests`, one per path. Each row:
+  - plants a canary in the error that ends a handed-over start;
+  - records the `asyncio` and `concurrent.futures` loggers and collects garbage;
+  - asserts that no record carries the canary in its message or its traceback;
+  - checks that the start keeps exactly one INV-7 WARNING.
+
+  The paths are:
+  - a cancel hand-over (R-10's path), with Codex's RPC error text;
+  - a timeout hand-over;
+  - a process death after a cancel hand-over, with the stderr tail;
+  - an ordinary host close after a cancel hand-over, with a stderr line written earlier;
+  - a loop that closed before the start failed, where the leak is `concurrent.futures`' callback error.
+- **R-12.** Six rows:
+  - Two unit rows in `hardening_contract::CodexExceptionOriginTests`, which run on CI: the spec's `my script.py` example, and whitespace runs in a file name and a function name.
+  - Four record rows in `observability::CodexLogTokenRecordTests`, one for each origin field: the router fallback, the tool failure, the turn event failure and the failed call. They compare raw words.
+- **Section C, adopted.** `log_fields` now raises when a word has no `=`. With only that change, `tests/features/codex_host` stayed at `342 passed, 1 skipped`.
+- **The R-10 row and #1178's in-flight-start row** still trip R-11 today and stay green. Neither was changed; the new cancel row is a separate test.
+
+### 2. Proof against the candidate fixes
+These runs used the verifier's in-memory plugin, `s5v_patch_plugin`, over `tests/features/codex_host`.
+
+| Variant | Result | Stray ERROR records |
+|---|---|---|
+| as is | `11 failed, 342 passed, 1 skipped` | 7 |
+| `no_shield,origin_split` (the planned fix) | `353 passed, 1 skipped` | 0 |
+| `cancel_wrapper` (alternative A) | `6 failed, 347 passed, 1 skipped`: the R-12 rows only | 0 |
+| `consume` (alternative B) | `7 failed, 346 passed, 1 skipped`: R-12 and the closed-loop row | 1 |
+| `origin_logtoken` | `7 failed, 346 passed, 1 skipped`: R-11 and the two unit rows | 7 |
+
+What this shows:
+- Every new row turns green under the planned fix.
+- The closed-loop row is the one that rejects the re-reviewer's `_consume` callback.
+- The unit rows reject the `LogToken.of` route, which rewrites `<module>` as `_module_`.
+
+The observability and contract files ran 5 times as is and 5 times under the fix, with the same result each time.
+
+### 3. Runs
+**Full run** (`tests/features/codex_host tests/features/harness_threads tests/test_codex_*.py`):
+- before: `1 failed, 1046 passed, 3 skipped`;
+- after: `12 failed, 1046 passed, 3 skipped in 67.92s`.
+
+The 12 failures are the 11 new rows and the inherited `test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes`.
+
+**Checks**
+- `lint/run.py` ends `SDK-LINT: PASS`.
+- `ruff check` finds nothing new in the edited files. The three `exec` calls each carry `noqa: S102` with a reason.
+
+### Niche facts for the next agent
+- **Collect before you read.** asyncio reports an unread failure from `Future.__del__`. So a row must drop its references and run `gc.collect()` before it reads the records.
+  - `cancel_while_held` and `cancel_mid_start` consume the `CancelledError` through `assertRaises`, which clears the traceback's frames.
+  - A traceback held anywhere keeps the wrapper alive, and that hides the leak.
+- **The closed-loop path.** `run_in_other_loop` runs the caller under `asyncio.run`, so the loop is closed when it returns.
+  - The host it opened can never be closed, so a cleanup calls `server.die("")` to end the fake process.
+  - The monitor thread is a daemon, and it suppresses the closed loop's `RuntimeError`.
+- **What the timeout record says.** The timeout WARNING reads `failure_code=codex.api_error error_type=TimeoutError origin=tasks.py:wait_for:492`. The rows pin only its event and level.
+- **R-12 without frozen modules.** `compile` names the frame's file. So the rows never touch the disk or `os`, and they do not depend on whether the build freezes the stdlib.
+
+### Open items
+- Round 3's open item, "a late start whose loop has already closed, which spec INV-7 says still writes its record", is now covered: the closed-loop row asserts that record.
+- The connection's closing check, as opposed to its dead check, still has no row (EC-57, second bullet). It is left to S5.
+- m-8 is a spec wording item, so it has no test.
