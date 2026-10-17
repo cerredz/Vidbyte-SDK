@@ -16,7 +16,7 @@ Slice 1 (`docs/spec/codex-host-hardening/`, status `verified`) is done on this b
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 recon | done | 22:40 | 23:05 | reports/S0-scout.md | code-map.md: 4 sections, 564 lines; per-function protocol table (§4.1); pins table (§3.4) |
-| S1 spec + review | running | 23:10 | | | |
+| S1 spec + review | running | 23:10 | | reports/S1-spec-author.md | r1 fde5a8b0: 1,832 lines; FR 36, AC 41, EC 55; budget 13 files / 70 classes / 0 deps / 43 config keys; Q-1 (queue) blocking, default not built |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -33,6 +33,14 @@ Slice 1 (`docs/spec/codex-host-hardening/`, status `verified`) is done on this b
 - 2026-10-17 23:05: **`create_codex_worktree` has no app-server method.** The research's own proposal is to implement it with `git worktree add` under a Vidbyte-owned root (codex-gap-report.md:314-315). That is the design input.
   - The alternative, shelling out to `codex exec --worktree`, is out: it starts a paid Codex run.
   - Codex's managed-worktree default root is unverified, because the `codex_worktree` crate is not in the scratchpad. The spec must not claim compatibility with that root.
+
+- 2026-10-18 00:40: **Spec r1 (fde5a8b0) checked.** It has 18 sections, 73 §12.3 rows, base_commit a7730107 and the right commit message.
+  - **The queue (NG-1 / D-20 / Q-1, default "not built"): I accepted the author's evidence.** It overrides my own 23:05 scope decision.
+  - **Evidence I verified myself:** `codex-src/codex-rs/tui/src/session_queue_commands.rs:34` refuses `codex queue` without the shared daemon ("Queuing must discover the shared server to avoid writing through a separate server"), and `:42-48` refuses queuing through an embedded app-server. CodexHost is always a private stdio app-server.
+  - **The author's other points:**
+    - the TUI never calls `thread/queue/start` or `list`, so Codex drains the queue itself and the resulting turns are untracked by the host (slice-1 INV-11);
+    - inside one private server, the queue is redundant with `continue_codex_thread` and with `wait_codex_turn` followed by continue.
+  - **Not stopping for the user:** the default is evidence-backed and conservative, so I don't stop. It is named in the S1 summary so the user can interrupt.
 
 ## User replies (verbatim)
 - (none yet)
