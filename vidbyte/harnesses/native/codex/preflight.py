@@ -25,6 +25,7 @@ from vidbyte.lib.constants.codex import (
 )
 from vidbyte.lib.constants.codex_host import (
     CODEX_DEFAULT_SERVICE_TIER,
+    CODEX_HOST_ANY_MODEL_TEXT,
     CODEX_HOST_BUSY_MESSAGE,
     CODEX_HOST_LIST_SEPARATOR,
     CODEX_HOST_MODEL_UNKNOWN_MESSAGE,
@@ -202,7 +203,7 @@ class CodexPreflight:
         unlisted = [tier for tier in tiers if tier not in listed]
         if not listed or not unlisted:
             return ""
-        named = CODEX_HOST_LIST_SEPARATOR.join(sorted(names)) if names else "any model"
+        named = CODEX_HOST_LIST_SEPARATOR.join(sorted(names)) if names else CODEX_HOST_ANY_MODEL_TEXT
         return CODEX_HOST_UNKNOWN_TIER_MESSAGE.format(tier=unlisted[0], models=named, tiers=CODEX_HOST_LIST_SEPARATOR.join(listed))
 
 

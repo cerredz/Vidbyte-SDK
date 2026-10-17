@@ -43,6 +43,7 @@ from vidbyte.lib.constants.codex import (
 from vidbyte.lib.constants.codex_host import (
     CODEX_GOAL_START_CALL,
     CODEX_HOST_BUDGET_ECHO_MESSAGE,
+    CODEX_HOST_FORK_EXPERIMENTAL_FIELDS,
     CODEX_HOST_FORK_EXPERIMENTAL_MESSAGE,
     CODEX_HOST_LAUNCH_INTERRUPTED_SENTENCE,
     CODEX_HOST_NEVER_RAN_MESSAGE,
@@ -741,8 +742,8 @@ class CodexHost:
         # (hardening INV-28 step 1, EC-56).
         if self._settings.experimental_api:
             return
-        for name, value in (("before_turn_id", forking.before_turn_id), ("defer_goal_continuation", forking.defer_goal_continuation)):
-            if value:
+        for name in CODEX_HOST_FORK_EXPERIMENTAL_FIELDS:
+            if getattr(forking, name):
                 raise ConfigurationError(CODEX_HOST_FORK_EXPERIMENTAL_MESSAGE.format(field=name), details={"field": name})
 
     def _tool_bridge(self, request: CodexSpawnRequest) -> CodexToolBridge | None:

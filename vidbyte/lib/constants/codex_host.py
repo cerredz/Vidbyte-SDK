@@ -1,6 +1,6 @@
 """FILE: vidbyte/lib/constants/codex_host.py
 
-PURPOSE: Defines every fixed value CodexHost and its collaborators use: the wire tables, field rules and bounds the host modules read, the summary sentence of each failure they report, and the per-code likely cause, related docs and relevant tests that make each CodexAgentError a full diagnostic packet. The hardening slice adds the fail-closed answer of each server request a host gets without an approval_handler, the typed reads retried on overload and the codes CodexAgentError.retryable reports, the goal-run field rule, the lost-turn grace, and the texts of its new refusals.
+PURPOSE: Defines every fixed value CodexHost and its collaborators use: the wire tables, field rules and bounds the host modules read, the summary sentence of each failure they report, and the per-code likely cause, related docs and relevant tests that make each CodexAgentError a full diagnostic packet. The hardening slice adds the fail-closed answer of each server request a host gets without an approval_handler, the typed reads retried on overload and the codes CodexAgentError.retryable reports, the goal-run field rule, the fork fields that need the experimental API, the lost-turn grace, and the texts of its new refusals.
 ROLE IN CODEBASE: The constants layer under vidbyte/harnesses/native/codex/ and vidbyte/lib/dataclasses/codex_host_inputs.py; those modules define no module-level values of their own and read every one from here or from vidbyte/lib/constants/codex.py.
 ARCHITECTURE NOTE: Imports only lib enums and the shared Codex constants, so importing it never loads openai-codex: CODEX_HOST_RAW_RESPONSE_MODELS names each generated response model as text, and CodexConnection resolves the class from openai_codex.generated.v2_all when it sends the call. CODEX_NEXT_STEPS stays in codex.py, where the records and tools already read it; CODEX_HOST_LIKELY_CAUSES has exactly the same keys.
 COMMON MODIFICATION PATTERNS: A new CodexHost failure adds its summary sentence here; a new failure code adds one row to CODEX_HOST_LIKELY_CAUSES and one to CODEX_NEXT_STEPS. A new raw app-server call adds its model name to CODEX_HOST_RAW_RESPONSE_MODELS, and to CODEX_HOST_SPENDING_RAW_METHODS when it spends usage.
@@ -154,6 +154,10 @@ CODEX_HOST_REJECTED_FIELDS: Mapping[CodexHostOperation, tuple[str, ...]] = {
 # turns itself with the thread's settings and would ignore them; the
 # first one set is named (hardening D-15, INV-34).
 CODEX_HOST_GOAL_REJECTED_FIELDS = ("turn", "output_schema", "disabled_plugin_ids", "turn_service_tier", "network_access", "writable_roots")
+# The fork fields Codex takes only from clients that opt in to its
+# experimental API; a host without it refuses the first one set, in
+# this order (hardening INV-28 step 1, EC-56).
+CODEX_HOST_FORK_EXPERIMENTAL_FIELDS = ("before_turn_id", "defer_goal_continuation")
 # The service tier every model accepts, so it is never checked against
 # the listed tiers (hardening D-16).
 CODEX_DEFAULT_SERVICE_TIER = "default"
@@ -284,6 +288,8 @@ CODEX_HOST_USAGE_LIMITED_MESSAGE = "Codex reports that ordinary usage is not all
 CODEX_HOST_BUSY_MESSAGE = "The thread already has a running turn on this host."
 CODEX_HOST_MODEL_UNKNOWN_MESSAGE = "Codex lists no model named {unknown}. Listed models: {visible}."
 CODEX_HOST_UNKNOWN_TIER_MESSAGE = "Codex lists no service tier {tier} for {models}. Listed tiers: {tiers}."
+# The {models} of the tier refusal when the request names no model.
+CODEX_HOST_ANY_MODEL_TEXT = "any model"
 CODEX_HOST_USER_REVIEWER_MESSAGE = "approvals_reviewer=USER sends the thread's approval requests to this process, and this CodexHost was built without an approval_handler to answer them."
 CODEX_HOST_LIST_SEPARATOR = ", "
 
@@ -349,6 +355,7 @@ __all__ = [
     "CODEX_CURRENT_TIME_READ_METHOD",
     "CODEX_DEFAULT_SERVICE_TIER",
     "CODEX_GOAL_START_CALL",
+    "CODEX_HOST_ANY_MODEL_TEXT",
     "CODEX_HOST_APPROVAL_FIELDS",
     "CODEX_HOST_APPROVAL_HANDLER_MESSAGE",
     "CODEX_HOST_APP_SERVER_PLACE",
@@ -362,6 +369,7 @@ __all__ = [
     "CODEX_HOST_EXITED_DURING_MESSAGE",
     "CODEX_HOST_EXITED_MESSAGE",
     "CODEX_HOST_FOLDER_PLACE",
+    "CODEX_HOST_FORK_EXPERIMENTAL_FIELDS",
     "CODEX_HOST_FORK_EXPERIMENTAL_MESSAGE",
     "CODEX_HOST_FORK_POINTS_MESSAGE",
     "CODEX_HOST_GOAL_FIELD_MESSAGE",
