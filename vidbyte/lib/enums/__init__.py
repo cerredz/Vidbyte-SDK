@@ -33,21 +33,38 @@ RELATED DOCS:
 TESTS:
     tests/test_jev_agent.py and tests/test_jev_run_brief.py.
     Configuration and runtime tests cover the exported enum namespace.
+    tests/features/codex_host/test_codex_host_helper_surface.py and
+    tests/features/codex_host/test_codex_host_packaging.py (the Codex*
+    export order).
 """
 
 from __future__ import annotations
 
 from vidbyte.lib.enums.agent_runtime import AgentRuntimeStateKey, AgentRuntimeType
 from vidbyte.lib.enums.codex import (
+    CodexAccountKind,
     CodexApprovalMode,
+    CodexApprovalPolicy,
+    CodexApprovalsReviewer,
     CodexContextAnchor,
+    CodexGoalStatus,
+    CodexHostOperation,
     CodexInputType,
     CodexPersonality,
     CodexReasoningEffort,
     CodexReasoningSummary,
+    CodexReviewDelivery,
+    CodexReviewTargetKind,
     CodexSandbox,
+    CodexSandboxReadiness,
+    CodexSkillScope,
+    CodexSortDirection,
+    CodexThreadSortKey,
     CodexThreadSource,
+    CodexThreadSourceKind,
     CodexThreadStartSource,
+    CodexThreadStatus,
+    CodexTurnStatus,
 )
 from vidbyte.lib.enums.coding import CodingContextSection
 from vidbyte.lib.enums.config import AgentType, DocumentType
@@ -190,15 +207,29 @@ __all__ = [
     "BurdenOfProofVerdict",
     "CircularityVerdict",
     "CliOptionStyle",
+    "CodexAccountKind",
     "CodexApprovalMode",
+    "CodexApprovalPolicy",
+    "CodexApprovalsReviewer",
     "CodexContextAnchor",
+    "CodexGoalStatus",
+    "CodexHostOperation",
     "CodexInputType",
     "CodexPersonality",
     "CodexReasoningEffort",
     "CodexReasoningSummary",
+    "CodexReviewDelivery",
+    "CodexReviewTargetKind",
     "CodexSandbox",
+    "CodexSandboxReadiness",
+    "CodexSkillScope",
+    "CodexSortDirection",
+    "CodexThreadSortKey",
     "CodexThreadSource",
+    "CodexThreadSourceKind",
     "CodexThreadStartSource",
+    "CodexThreadStatus",
+    "CodexTurnStatus",
     "CodingContextSection",
     "CompositionDivisionValidity",
     "ConsistencyStatus",
