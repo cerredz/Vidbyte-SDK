@@ -20,8 +20,8 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
 | S2 tests | done | 10:10 | 11:40 | reports/S2-test-author.md | **S2_HEAD fadec47f** (was 09524ff4; moved by the orchestrator-granted correction of 2 assertions); 106 new tests (97 red, 8 guards, 1 live-skipped), 20 superseded + 7 support literals; red 125F/631P/3S vs baseline 1F/650P/2S; spec r4 (d3389171) aligned to test choices |
 | S3 implement | done | 11:45 | 14:20 | reports/S3-implementer.md | **S3_HEAD c9150d63**; draft PR #1181 (base `ai/resolve-pr-1055-comments`, 64 files +9688/−551); 24/24 rows; budget 3 files / 13 classes / 0 deps / 9 config keys (exact); host.py 923; area 1F(inherited)/1024P/3S; source 1F(inherited)/6555P/27S; package CI passed; SDK-LINT: PASS |
 | S4 adversarial review | done | 14:25 | 16:10 | reports/S4-review-{conformance,conventions,engineering}.md, reports/S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES — confirmed 4 Blocker / 6 Major / 7 Minor; refuted 0; downgraded 1 (R-V3). Owners: code R-1,R-2,R-3,R-9,R-10; test R-4,R-5,R-6,R-8; spec R-7 |
-| S5 repair loop | done | 16:15 | 21:00 | verify-log.md, reports/S5-repair-{1,2}.md | iteration 1 (efb19043) fixed R-1..R-10; iteration 2 (**HEAD 127173b5**: R-11 @8e5c649b, R-12 @b40b6562); S2_HEAD 68562b22 untouched; area 1F(inherited)/1057P/3S; source 1F(inherited)/6588P/27S; package CI passed; SDK-LINT: PASS; review.md 0 open |
-| S5 re-review | round 2 running | 18:15 | | reports/S5-rereview.md, reports/S5-findings-verifier.md, reports/S5-rereview-2.md | round 1: R-11 Blocker, R-12 Major, m-8 → all fixed; round 2 (last allowed) on `...127173b5` |
+| S5 repair loop | running (iteration 3: m-9 only) | 16:15 | 21:00 | verify-log.md, reports/S5-repair-{1,2}.md | iteration 1 (efb19043) fixed R-1..R-10; iteration 2 (**HEAD 127173b5**: R-11 @8e5c649b, R-12 @b40b6562); S2_HEAD 68562b22 untouched; area 1F(inherited)/1057P/3S; source 1F(inherited)/6588P/27S; package CI passed; SDK-LINT: PASS; review.md 0 open |
+| S5 re-review | done (2/2) | 18:15 | 21:40 | reports/S5-rereview.md, reports/S5-findings-verifier.md, reports/S5-rereview-2.md | round 1: R-11 Blocker, R-12 Major, m-8, all fixed; round 2: MERGEABLE AFTER FIXES, 0 Blocker / 0 Major / 1 Minor (m-9, FR-36 docstrings), fixes held, kill-tested (5 R-11 and 6 R-12 tests fail under revert) |
 | S6 PR | deferred to the end of slice 2 | | | | |
 
 ## Counters and caps
@@ -174,6 +174,14 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
   - The fix diff touches only `connection.py` and `exception_origin.py`.
   - I flipped m-8's status cell to `fixed @a0c9b489` myself, as a docs-only status flip, because spec r6 fixed it and the repair agent could edit only the R-11 and R-12 cells.
   - Re-review round 2 is the last one the cap allows. If it confirms a new Blocker or Major, I stop and report to the user rather than run a round 3.
+
+- 2026-10-17 21:40: **Re-review round 2 checked.**
+  - It found 0 Blockers and 0 Majors, so the cap is not hit.
+  - Its one Minor, m-9, is FR-36: the three rows 16–18 functions have no docstrings. I verified it myself: `__doc__` is empty for `search_codex_threads`, and the reviewer checked all three.
+  - **Decision:** run a minimal S5 iteration 3 (3/8) for m-9, instead of marking the spec verified with a stated FR unmet. The fix is trivial and spec-required, and the user's bar is "all layers".
+  - **No new test:** FR-36 is P2, and AC-39's NG-10 row lives on `list_codex_threads`. An AC-39 row for `search_codex_threads` would need another S2 round for a docs-only P2 item, so I verify `__doc__` directly with a one-liner instead.
+  - **No round 3 re-review:** the cap is 2, and a docstring cannot regress behavior. I check the diff myself: docstrings only, the gates, and `__doc__` non-empty.
+  - I transcribed m-9 into `review.md` under "Post-repair re-review round 2 — minor findings".
 
 ## User replies (verbatim)
 - (none yet)

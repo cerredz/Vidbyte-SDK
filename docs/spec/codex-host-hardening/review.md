@@ -123,3 +123,11 @@ Tier changes and merges:
 | ID | Where | Finding | Status |
 |---|---|---|---|
 | m-8 (R-C3) | `vidbyte/harnesses/native/codex/connection.py:493-495`; spec.md:261 (INV-7) and :1330 (§12.3 row 12) | R-10's start record is its own done-callback, registered before `_post_late`'s. INV-7 says "the done-callback that already posts the late outcome … writes the record first", and row 12 says "`_post_late` writes the record". Behaviour is the same, because callbacks run in registration order on one thread, and `_post_late` is unchanged from base `8baff351` :241-245. The reason, that AGENTS.md §1 forbids a three-deep chain, is recorded only in verify-log.md:32-33. | fixed @a0c9b489 (spec r6 rewords INV-7 and §12.3 row 12; the record callback is registered before `_post_late`'s) |
+
+## Post-repair re-review round 2 — minor findings
+
+Transcribed by the orchestrator from `reports/S5-rereview-2.md` R-C1. Round 2 confirmed 0 Blockers and 0 Majors; R-11, R-12 and m-8 hold with no regression.
+
+| ID | Where | Claim | Evidence | Smallest fix | Tag | Status |
+|---|---|---|---|---|---|---|
+| m-9 (R-C1, round 2) | `vidbyte/harnesses/native/codex/host.py:617` (`search_codex_threads`) and the other two row 16–18 functions, `list_recent_codex_threads` and `list_codex_threads_since` | FR-36 (spec.md:664) says the accepted rows 16–18 (NG-10, title-only search) are documented in their functions' docstrings. None of the three functions has a docstring, so a developer calling the method gets no `help()` text saying the query matches titles only. | At 127173b5, `CodexHost.<name>.__doc__` is empty for all three (the re-reviewer's and the orchestrator's own check). The limit lives only in a code comment at `host.py:618-619` and in the tool description `vidbyte/tools/builtins/codex/descriptions.py:31`. AC-39's test checks NG-10 on `list_codex_threads`, so no gate catches it. | Give each of the three a one-line docstring that states the accepted limit (title-only matching, NG-10), turning the `host.py:618-619` comment into the docstring. Net lines about 0, budget unchanged. No test change: FR-36 is P2, and the orchestrator verifies `__doc__` directly. | trivial | open |
