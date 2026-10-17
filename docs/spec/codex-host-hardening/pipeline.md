@@ -20,12 +20,12 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
 | S2 tests | done | 10:10 | 11:40 | reports/S2-test-author.md | **S2_HEAD fadec47f** (was 09524ff4; moved by the orchestrator-granted correction of 2 assertions); 106 new tests (97 red, 8 guards, 1 live-skipped), 20 superseded + 7 support literals; red 125F/631P/3S vs baseline 1F/650P/2S; spec r4 (d3389171) aligned to test choices |
 | S3 implement | done | 11:45 | 14:20 | reports/S3-implementer.md | **S3_HEAD c9150d63**; draft PR #1181 (base `ai/resolve-pr-1055-comments`, 64 files +9688/−551); 24/24 rows; budget 3 files / 13 classes / 0 deps / 9 config keys (exact); host.py 923; area 1F(inherited)/1024P/3S; source 1F(inherited)/6555P/27S; package CI passed; SDK-LINT: PASS |
 | S4 adversarial review | done | 14:25 | 16:10 | reports/S4-review-{conformance,conventions,engineering}.md, reports/S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES — confirmed 4 Blocker / 6 Major / 7 Minor; refuted 0; downgraded 1 (R-V3). Owners: code R-1,R-2,R-3,R-9,R-10; test R-4,R-5,R-6,R-8; spec R-7 |
-| S5 repair loop | running (iteration 2 pending) | 16:15 | 18:10 | verify-log.md, reports/S5-repair-1.md | converged at iteration 1: **HEAD efb19043** (9 fix commits df460ec7..31622c00); S2_HEAD 6b59d390 untouched; area 1F(inherited)/1046P/3S; source 1F(inherited)/6577P/27S; package CI passed; SDK-LINT: PASS; review.md 0 open (m-3..m-7 follow-ups) |
-| S5 re-review | round 1 done; back into loop | 18:15 | 19:05 | reports/S5-rereview.md, reports/S5-findings-verifier.md | round 1: MERGEABLE AFTER FIXES — all 12 fixes held, no regression; new confirmed R-11 Blocker (handed-over start's unretrieved exception leaks stderr/RPC text via asyncio ERROR), R-12 Major (frozen-module origin splits into 2 tokens), m-8 Minor (spec wording); refuted 0 |
+| S5 repair loop | done | 16:15 | 21:00 | verify-log.md, reports/S5-repair-{1,2}.md | iteration 1 (efb19043) fixed R-1..R-10; iteration 2 (**HEAD 127173b5**: R-11 @8e5c649b, R-12 @b40b6562); S2_HEAD 68562b22 untouched; area 1F(inherited)/1057P/3S; source 1F(inherited)/6588P/27S; package CI passed; SDK-LINT: PASS; review.md 0 open |
+| S5 re-review | round 2 running | 18:15 | | reports/S5-rereview.md, reports/S5-findings-verifier.md, reports/S5-rereview-2.md | round 1: R-11 Blocker, R-12 Major, m-8 → all fixed; round 2 (last allowed) on `...127173b5` |
 | S6 PR | deferred to the end of slice 2 | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 1/8 · S5 re-review rounds: 1/2
+- S1 review rounds: 2/2 · S5 repair iterations: 2/8 · S5 re-review rounds: 2/2
 
 ## Decisions the orchestrator made
 - 2026-10-17 06:44: Waited for PR #1055 to merge (merged at 2026-10-17T06:44:08Z as `6f5a7310`) before creating the worktree, per Prompt 3.
@@ -165,6 +165,15 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
     - the cancel-wrapper alternative still fails the 6 R-12 rows;
     - the `_consume` alternative fails the closed-loop row;
     - the `LogToken.of` route for origins fails the 2 unit rows.
+
+- 2026-10-17 21:00: **S5 iteration 2 converged.** Checks I ran myself:
+  - `git status` is clean, and origin is at 127173b5.
+  - `git diff 68562b22..HEAD -- tests` is empty.
+  - The verify-log has an "Iteration 2" entry.
+  - Source stage: `1 failed (inherited), 6588 passed, 27 skipped`. Package stage: `CI passed.` Lint: `SDK-LINT: PASS`.
+  - The fix diff touches only `connection.py` and `exception_origin.py`.
+  - I flipped m-8's status cell to `fixed @a0c9b489` myself, as a docs-only status flip, because spec r6 fixed it and the repair agent could edit only the R-11 and R-12 cells.
+  - Re-review round 2 is the last one the cap allows. If it confirms a new Blocker or Major, I stop and report to the user rather than run a round 3.
 
 ## User replies (verbatim)
 - (none yet)
@@ -320,3 +329,10 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
   - My R-10 row and #1178's in-flight-start row still leak and stay green, unchanged.
   
   *Source:* S2 re-review round
+- **S5 HEAD = 127173b5.**
+  - `start` now awaits `wait_for(wrap_future(future), bound)` with no shield.
+  - `host.py:461` and `connection.py:595` still shield, but both only ever get `set_result`, so neither can leak.
+  - The verifier's model and race probes no longer import. Use `scratchpad/s5-repair-2/probe_r11_start.py` (`R11_CONTROL=1` gives a positive control).
+  - Lint prints `S063 IMPROVED 4 -> 3`; do not lower the baseline in this PR.
+  
+  *Source:* S5 repair 2
