@@ -109,7 +109,7 @@ def test_a_refused_finish_appends_one_gap_message_and_the_next_call_shows_the_ve
     second_recheck = model.calls_by(RECHECK)[1]
     assert second_recheck.messages == [] and GAP not in seen_text(second_recheck), "the second recheck is not a fresh agent"
     assert result.content == FINAL
-    assert agent.response.stop_reason == finish
+    assert agent.response.stop_reason == {"final_text": "final_response", "is_done": "is_done"}[finish]
     assert [(item.verdict, item.gap, item.at_finish) for item in agent.response.rechecks] == [("continue", GAP, True), ("done", "Nothing is missing.", True)]
     assert agent.response.rechecks[0].stalls == 0, "a continue with new progress is not a stall"
     assert log.kinds()[-1] == "run_finished"

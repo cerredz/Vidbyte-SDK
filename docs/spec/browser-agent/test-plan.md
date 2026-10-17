@@ -119,3 +119,4 @@ Neighbours stay green: `PYTHONPATH=$(pwd) python -m pytest tests/test_mcp_attach
 - Prompt wording is read from the catalog (`Prompt.BROWSER_AGENT_<LEAF>`), never copied into tests; `template_regex` matches a filled leaf, and `distinctive_line` picks a line that only one leaf has. Changing a leaf's wording is safe; changing its placeholders is not.
 - Role names must come from `BROWSER_SERVER_NAME_TEMPLATE` (`browser-<role>-<n>`); the tests accept 0- or 1-based `<n>`, consecutive per role.
 - Do not modify these tests (§14). If one looks wrong, report it with the spec ID instead.
+- 2026-10-17, S2 fix after S3: the AC-13 test compared `agent.response.stop_reason` with its own parametrize label, so the `final_text` case expected `"final_text"`, which no `AgentStopReason` value is. AC-13 says a final-text finish ends with `final_response`, so the test now maps `final_text` to `final_response` and `is_done` to `is_done`. Every other assertion is unchanged.
