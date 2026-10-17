@@ -170,7 +170,7 @@ Test files: **stream**, **pairs**, **records**, and **lifecycle** are `tests/fea
 | §4 snippet | §4 run as written under the scripted model (no network) | `e7c1c950` | The output is identical to the spec's text block. `.runs` holds `<id>.jsonl` and `<id>.handoff.md`, and the file's bytes equal `to_context_text()` with no `\r`. |
 | Worst-case size | AC-30 builders in a full `InfiniteEvent` (512-character key, 280-character summary, millisecond `at`), under 4 `json.dumps` settings | `e7c1c950` | `max details 27015 max event 31093` |
 | Replay onto `main` | `git merge-tree --write-tree --merge-base=7efceb55 origin/main HEAD`, then the focused pack on that tree | `main` `6f5a7310` + `e7c1c950` | No conflicts (tree `908eab5a`). `1 failed, 193 passed`: `test_two_spellings_of_one_note_are_one_relative_path_in_events_and_the_handoff` at `:517` |
-| Remote checks | `gh workflow run CI` and `gh workflow run "Static policy"` on the branch | `900be217` (same source) | 4/4 green: `Package`, `Static policy`, `Source / Python 3.11`, and `Source / Python 3.12` all `completed success` (runs 39011862131 and 39011863558) |
+| Remote checks | `gh workflow run CI` and `gh workflow run "Static policy"` on the branch, then `gh api repos/cerredz/Vidbyte-SDK/commits/<sha>/check-runs` | `cfd64939` (finalize commit; same source) | 4/4 green: `Package`, `Static policy`, `Source / Python 3.11`, and `Source / Python 3.12` all `completed success` (runs 39013426908 and 39013428202). Earlier, `900be217` was also 4/4 green (runs 39011862131 and 39011863558). These are dispatched runs, so `gh pr checks` lists none. |
 
 ## Adversarial review
 
