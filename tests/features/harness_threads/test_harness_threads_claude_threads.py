@@ -2,7 +2,7 @@
 
 PURPOSE: Claude Code thread ids across the verbs (spec claude-thread-functions INV-12): continue sends `--resume <id>` without `--fork-session` and returns exactly the given id (AC-3, FR-2), fork sends `--resume <id> --fork-session` and returns the new id (AC-4, FR-3), an id Claude Code does not know is claude.thread_not_found carrying the caller's id (AC-12, EC-5), a thread is found only from the workspace that created it and from any spelling of that workspace (EC-7, INV-13), a continue answered on another id is claude.thread_not_found and one answered in upper case is claude.protocol_mismatch (AC-14, AC-13, INV-12, R-1), and a fork answered with its source id is claude.protocol_mismatch (AC-14, EC-19).
 ROLE IN CODEBASE: Start here when continue or fork reaches the wrong Claude Code thread, or when a missing thread surfaces as something other than thread_not_found.
-ARCHITECTURE NOTE: The stand-in keeps each thread as a transcript file under CLAUDE_CONFIG_DIR/projects/<cwd key>/<id>.jsonl and resolves `--resume` by searching every project folder of that config folder, as Claude Code 2.1.301 does (vendor-facts p07, p08), so continue and fork are checked against real vendor-side state. An unknown id gets Claude Code's own pre-run failure: exit 1, empty stdout, `No conversation found with session ID: <id>` on stderr (p05).
+ARCHITECTURE NOTE: The stand-in keeps each thread as a transcript file under CLAUDE_CONFIG_DIR/projects/<cwd key>/<id>.jsonl and resolves `--resume` by searching every project folder of that config folder, as Claude Code 2.1.302 does (vendor-facts p07, p08), so continue and fork are checked against real vendor-side state. An unknown id gets Claude Code's own pre-run failure: exit 1, empty stdout, `No conversation found with session ID: <id>` on stderr (p05).
 FUNCTION INVENTORY: the test_* functions are one behaviour each.
 COMMON MODIFICATION PATTERNS: A new thread rule is a spec change first (INV-12), then one stand-in mode and one test here.
 WHAT NOT TO DO IN THIS FILE: Do not fabricate thread ids for the success paths; read them from the stand-in's answer records. UNKNOWN_ID is a well-formed lowercase UUID on purpose, so it passes the argument check and reaches the stand-in.
@@ -20,7 +20,7 @@ import pytest
 
 UNKNOWN_ID = "11111111-2222-4333-8444-555555555555"
 NOT_FOUND_MARKER = "No conversation found with session ID"
-TESTED_VERSION = "2.1.301"
+TESTED_VERSION = "2.1.302"
 
 
 @pytest.mark.asyncio

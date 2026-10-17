@@ -1,8 +1,8 @@
 """FILE: tests/features/harness_threads/test_harness_threads_claude_errors.py
 
-PURPOSE: How a Claude Code answer is classified (spec claude-thread-functions INV-7, D-10): a JSON object with is_error true and an integer api_error_status of 401 or 403 is claude.key_rejected carrying the reason, status and result text and the answer's session_id (AC-11, EC-4, EC-34); any other status, no status, a non-integer status or an `errors` list instead of `result` is claude.run_failed with that text (AC-11, EC-17, EC-18, EC-36); `subtype` never decides; any other non-zero exit is claude.run_failed carrying stderr (AC-12); exit 0 with output that is not one JSON object, an is_error that is not false, a session_id that is not a lowercase UUID or a result that is not a string is claude.protocol_mismatch naming the member and the tested version 2.1.301 (AC-10, AC-13, EC-16); stderr on a successful answer is ignored (EC-35); and a failed fork reports the fork's new id while a failed continue reports the caller's (INV-6, D-14).
+PURPOSE: How a Claude Code answer is classified (spec claude-thread-functions INV-7, D-10): a JSON object with is_error true and an integer api_error_status of 401 or 403 is claude.key_rejected carrying the reason, status and result text and the answer's session_id (AC-11, EC-4, EC-34); any other status, no status, a non-integer status or an `errors` list instead of `result` is claude.run_failed with that text (AC-11, EC-17, EC-18, EC-36); `subtype` never decides; any other non-zero exit is claude.run_failed carrying stderr (AC-12); exit 0 with output that is not one JSON object, an is_error that is not false, a session_id that is not a lowercase UUID or a result that is not a string is claude.protocol_mismatch naming the member and the tested version 2.1.302 (AC-10, AC-13, EC-16); stderr on a successful answer is ignored (EC-35); and a failed fork reports the fork's new id while a failed continue reports the caller's (INV-6, D-14).
 ROLE IN CODEBASE: Start here when a Claude Code failure gets the wrong code, loses Claude's own text, or reports the wrong thread.
-ARCHITECTURE NOTE: The stand-in prints Claude Code 2.1.301's one JSON result object (vendor-facts §6): success, the 401 shape with subtype "success", the budget shape with `errors` and no `result`, a generic in-run error, and any member overridden or dropped by the scenario's `override` and `drop` fields. check_error (conftest.py) asserts the INV-6 attributes, that likely_cause and next_step are the table texts for the code, and the message order. Vendor text is compared with the spec's own templates, CLAUDE_ERROR_TEXT and CLAUDE_ERROR_STATUS_TEXT, read from the constants module.
+ARCHITECTURE NOTE: The stand-in prints Claude Code 2.1.302's one JSON result object (vendor-facts §6): success, the 401 shape with subtype "success", the budget shape with `errors` and no `result`, a generic in-run error, and any member overridden or dropped by the scenario's `override` and `drop` fields. check_error (conftest.py) asserts the INV-6 attributes, that likely_cause and next_step are the table texts for the code, and the message order. Vendor text is compared with the spec's own templates, CLAUDE_ERROR_TEXT and CLAUDE_ERROR_STATUS_TEXT, read from the constants module.
 FUNCTION INVENTORY: printed_session reads the session id the stand-in printed; vendor_text formats the expected vendor text from the spec templates; the test_* functions are one behaviour each.
 COMMON MODIFICATION PATTERNS: A new answer shape is a spec change first (INV-7), then one row in a case table here.
 WHAT NOT TO DO IN THIS FILE: Do not compare the free text of likely causes or next steps; compare them to the constants maps.
@@ -16,7 +16,7 @@ from __future__ import annotations
 import pytest
 
 RUN_EXIT = 93
-TESTED_VERSION = "2.1.301"
+TESTED_VERSION = "2.1.302"
 KEY_TEXT = "Invalid API key · Fix external API key"
 VENDOR = "Overloaded: the API is busy, retry later"
 BUDGET = "Reached maximum budget ($0.00001)"
@@ -133,7 +133,7 @@ async def test_exit_zero_without_one_json_object_is_protocol_mismatch(api, sandb
 async def test_exit_zero_with_a_bad_member_is_protocol_mismatch_naming_it(api, sandbox, call, check_error, case, override, drop, member) -> None:
     # AC-13 / EC-16 / INV-7 step 10 / R-13: is_error not false, a
     # session_id that is not a lowercase UUID, or a result that is not a
-    # str; the member and 2.1.301 are named; a valid session_id still
+    # str; the member and 2.1.302 are named; a valid session_id still
     # becomes thread_id.
     with pytest.raises(api.NativeThreadError) as caught:
         await call("claude", fake={"mode": "ok", "override": override, "drop": drop})

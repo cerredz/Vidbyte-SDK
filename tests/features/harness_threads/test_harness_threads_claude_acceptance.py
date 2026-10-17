@@ -60,7 +60,7 @@ FUNCTIONS = ("run_claude_thread", "continue_claude_thread", "fork_claude_thread"
 # the REPO_MAP section describes them in plain words only.
 README_TOKENS = (*FUNCTIONS, "claude-configs", "--setting-sources user", "ClaudeThreadConfig")
 MAP_FORBIDDEN = (*FUNCTIONS, "claude-configs", "--setting-sources", "CLAUDE.md")
-PERMISSION_MODES = (("DEFAULT", "default"), ("ACCEPT_EDITS", "acceptEdits"), ("DONT_ASK", "dontAsk"), ("PLAN", "plan"))
+PERMISSION_MODES = (("DEFAULT", "manual"), ("ACCEPT_EDITS", "acceptEdits"), ("DONT_ASK", "dontAsk"), ("PLAN", "plan"))
 
 
 def native_section(text: str) -> str:

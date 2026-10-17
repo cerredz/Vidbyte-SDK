@@ -1,6 +1,6 @@
 """FILE: tests/features/harness_threads/test_harness_threads_claude_surface.py
 
-PURPOSE: The public surface the Claude Code thread functions add and the removal of PR #1044's host stack (spec claude-thread-functions): the exports and identities of the six new names and the `claude` subpackage's three functions (INV-1, AC-18), the new StrEnums and their vendor values (§8.5, INV-18), the contract constants and the Claude rows of every harness- or code-keyed table (§8.5, AC-18), ClaudeThreadConfig's fields, defaults and refusals (AC-18, INV-5 rule 4, D-13), NativeThreadRequest's Claude-only thread-id and stdin prompt rules (INV-5 rules 1-2, §9.1), the hostkit export (§12.3 row 22), and every #1044 name, module, file, extra and import gone, with the shared files restored to the merge base (INV-19, AC-20, D-17).
+PURPOSE: The public surface the Claude Code thread functions add and the removal of PR #1044's host stack (spec claude-thread-functions): the exports and identities of the six new names and the `claude` subpackage's three functions (INV-1, AC-18), the new StrEnums and their vendor values (§8.5, INV-18) and, where Claude Code is installed, that each permission mode is a choice its --help lists, the contract constants and the Claude rows of every harness- or code-keyed table (§8.5, AC-18), ClaudeThreadConfig's fields, defaults and refusals (AC-18, INV-5 rule 4, D-13), NativeThreadRequest's Claude-only thread-id and stdin prompt rules (INV-5 rules 1-2, §9.1), the hostkit export (§12.3 row 22), and every #1044 name, module, file, extra and import gone, with the shared files restored to the merge base (INV-19, AC-20, D-17).
 ROLE IN CODEBASE: Start here when a Claude export, enum value, constant or config rule changes, or when a piece of the rejected ClaudeHost design comes back.
 ARCHITECTURE NOTE: Names are read through the lazy lib_api/api fixtures, so a missing name fails its own test. The git checks compare against `git merge-base origin/main HEAD` (so a newer main cannot fail them) and skip when origin/main is missing, as in a shallow CI clone; they diff the working tree, so uncommitted work counts. The pins that every harness shares (the native __all__, signatures, NativeHarness, NativeThreadOperation, NativeEnvironmentVariable and the FailureCode tail) live in test_harness_threads_surface.py.
 FUNCTION INVENTORY: git runs one bounded read-only git command; merge_base returns the merge base or skips; importable says whether `from <module> import <name>` works; changed_lines lists the added and removed lines of one file's diff; the test_* functions are one behaviour each.
@@ -19,7 +19,10 @@ import importlib
 import importlib.util
 import math
 import os
+import re
+import shutil
 import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
@@ -30,7 +33,7 @@ FUNCTIONS = ["continue_claude_thread", "fork_claude_thread", "run_claude_thread"
 NEW_EXPORTS = ["ClaudePermissionMode", "ClaudeReasoningEffort", "ClaudeThreadConfig", *FUNCTIONS]
 INTERNAL_NAMES = ["ClaudeThreads", "ClaudeThreadRun", "ClaudeWire", "ClaudeFlag"]
 CLAUDE_ENUMS = {
-    "ClaudePermissionMode": [("DEFAULT", "default"), ("ACCEPT_EDITS", "acceptEdits"), ("DONT_ASK", "dontAsk"), ("PLAN", "plan")],
+    "ClaudePermissionMode": [("DEFAULT", "manual"), ("ACCEPT_EDITS", "acceptEdits"), ("DONT_ASK", "dontAsk"), ("PLAN", "plan")],
     "ClaudeReasoningEffort": [("LOW", "low"), ("MEDIUM", "medium"), ("HIGH", "high"), ("XHIGH", "xhigh"), ("MAX", "max")],
     "ClaudeFlag": [
         ("PRINT", "--print"), ("OUTPUT_FORMAT", "--output-format"), ("SETTING_SOURCES", "--setting-sources"), ("PERMISSION_MODE", "--permission-mode"),
@@ -45,13 +48,13 @@ CLAUDE_CONSTANTS = {
     "CLAUDE_SESSION_FIELD": "session_id", "CLAUDE_RESULT_FIELD": "result", "CLAUDE_IS_ERROR_FIELD": "is_error", "CLAUDE_API_ERROR_STATUS_FIELD": "api_error_status",
     "CLAUDE_TERMINAL_REASON_FIELD": "terminal_reason", "CLAUDE_SUBTYPE_FIELD": "subtype", "CLAUDE_ERRORS_FIELD": "errors",
     "CLAUDE_SESSION_NOT_FOUND_MARKER": "No conversation found with session ID", "CLAUDE_KEY_REJECTED_STATUSES": frozenset({401, 403}),
-    "CLAUDE_ERROR_TEXT": "{reason}: {message}", "CLAUDE_ERROR_STATUS_TEXT": "{reason} (status {status}): {message}", "CLAUDE_TESTED_VERSION": "2.1.301",
+    "CLAUDE_ERROR_TEXT": "{reason}: {message}", "CLAUDE_ERROR_STATUS_TEXT": "{reason} (status {status}): {message}", "CLAUDE_TESTED_VERSION": "2.1.302",
     "CLAUDE_CONFIG_FAILURE_DETAIL": "The private Claude Code config folder {home} could not be prepared ({error_type}: {reason}).",
     "CLAUDE_CONFIG_UNKNOWN_DETAIL": "The user home folder, where the private Claude Code config folder lives, could not be determined ({error_type}); set HOME (POSIX) or USERPROFILE (Windows) for this process.",
 }
 PROBLEMS = ["not_installed", "launcher_refused", "launch_failed", "key_rejected", "thread_not_found", "timed_out", "output_too_large", "protocol_mismatch", "run_failed"]
 BAD_CONFIG_FIELDS = [
-    ("permission_mode", "bypassPermissions"), ("permission_mode", "auto"), ("permission_mode", "manual"), ("permission_mode", "yolo"),
+    ("permission_mode", "bypassPermissions"), ("permission_mode", "auto"), ("permission_mode", "default"), ("permission_mode", "yolo"),
     ("reasoning_effort", "turbo"), ("reasoning_effort", "none"), ("reasoning_effort", "minimal"), ("reasoning_effort", "ultra"),
     ("timeout_seconds", 0), ("timeout_seconds", -1.0), ("timeout_seconds", math.nan), ("timeout_seconds", math.inf), ("timeout_seconds", 14400.5),
     ("timeout_seconds", True), ("timeout_seconds", "60"), ("claude_command", ()), ("claude_command", ("",)), ("claude_command", "claude"),
@@ -161,6 +164,27 @@ def test_claude_vocabularies_are_str_enums_carrying_claude_codes_values(lib_api)
     assert not values & {"bypassPermissions", "auto"}, "INV-18: no approve-everything permission mode"
 
 
+def test_claude_permission_modes_are_choices_the_installed_claude_lists(lib_api, tmp_path) -> None:
+    # PR #1044 review 4301626295: every mode the SDK sends is one of the
+    # --permission-mode choices a real claude lists in --help, so a
+    # vendor rename fails here instead of in a caller's run. It runs
+    # only where Claude Code is installed (PATH or ~/.local/bin), with
+    # every ANTHROPIC_*/CLAUDE* variable dropped and a scratch config
+    # folder, so it never reads the developer's key or session.
+    constants = lib_api.constants
+    native = Path.home().joinpath(*constants.CLAUDE_INSTALL_FOLDERS, constants.CLAUDE_PROGRAM + (".exe" if sys.platform == "win32" else ""))
+    program = shutil.which(constants.CLAUDE_PROGRAM) or (str(native) if native.is_file() else None)
+    if program is None:
+        pytest.skip("Claude Code is not installed here, so there is no --help to read")
+    environment = {name: value for name, value in os.environ.items() if not name.upper().startswith(constants.CLAUDE_INHERITED_ENVIRONMENT_PREFIXES)}
+    environment.update(CLAUDE_CONFIG_DIR=str(tmp_path), DISABLE_AUTOUPDATER="1", CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1")
+    shown = subprocess.run([program, "--help"], cwd=tmp_path, env=environment, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120, stdin=subprocess.DEVNULL, check=False)
+    listed = re.search(r"--permission-mode\s+<\w+>.*?\(choices:([^)]*)\)", shown.stdout, re.DOTALL)
+    assert shown.returncode == 0 and listed is not None, (shown.stdout + shown.stderr)[-3000:]
+    choices = set(re.findall(r'"([^"]+)"', listed.group(1)))
+    assert {mode.value for mode in lib_api.enums.ClaudePermissionMode} <= choices, sorted(choices)
+
+
 def test_claude_contract_constants_hold_the_spec_values(lib_api) -> None:
     # §8.5: every new constant, exactly.
     wrong = {name: getattr(lib_api.constants, name, "<missing>") for name, value in CLAUDE_CONSTANTS.items() if getattr(lib_api.constants, name, "<missing>") != value}
@@ -174,7 +198,7 @@ def test_every_harness_and_code_table_has_its_claude_rows(lib_api) -> None:
     constants, enums, codes = lib_api.constants, lib_api.enums, lib_api.FailureCode
     claude = enums.NativeHarness.CLAUDE
     assert constants.NATIVE_HARNESS_LABELS[claude] == "Claude Code"
-    assert constants.NATIVE_TESTED_VERSIONS[claude] == constants.CLAUDE_TESTED_VERSION == "2.1.301"
+    assert constants.NATIVE_TESTED_VERSIONS[claude] == constants.CLAUDE_TESTED_VERSION == "2.1.302"
     rows = {problem.value: code for (harness, problem), code in constants.NATIVE_THREAD_FAILURE_CODES.items() if harness is claude}
     assert rows == {problem: codes(f"claude.{problem}") for problem in PROBLEMS}
     for code in rows.values():

@@ -2,11 +2,11 @@
 
 PURPOSE: Defines the closed vocabularies of the harness thread functions: which harness a call drives (NativeHarness), the verb and public function it is (NativeThreadVerb, NativeThreadOperation), the problems a call can fail with (NativeThreadProblem), the Grok permission modes and reasoning efforts, the Muse reasoning efforts, the Claude Code permission modes and reasoning efforts, every command-line flag the SDK passes to grok, opencode, muse, claude, wsl.exe and the reap's sh (GrokFlag, OpencodeFlag, MuseFlag, ClaudeFlag, WslFlag, ShellFlag), the child environment variable names (NativeEnvironmentVariable), the Muse serve methods (MuseMethod) and the opencode event types the SDK reads (OpencodeEventType).
 ROLE IN CODEBASE: Imported by the records in vidbyte/lib/dataclasses/native_threads.py, by the texts in vidbyte/lib/constants/native_threads.py, by NativeThreadError in vidbyte/lib/errors/base.py and by the thread functions under vidbyte/harnesses/native/. Exported from vidbyte/lib/enums/__init__.py; GrokPermissionMode, GrokReasoningEffort, MuseReasoningEffort, ClaudePermissionMode and ClaudeReasoningEffort are also re-exported from vidbyte.harnesses.native.
-ARCHITECTURE NOTE: Every enum here is a StrEnum, so str(member) and an f-string give the value; Python 3.11 formats a (str, Enum) member as Class.MEMBER, which would corrupt argv and environment entries. Flag values are the exact spellings of grok 1.0.52, opencode 1.18.31, Muse Code 1.0.1 and Claude Code 2.1.301.
+ARCHITECTURE NOTE: Every enum here is a StrEnum, so str(member) and an f-string give the value; Python 3.11 formats a (str, Enum) member as Class.MEMBER, which would corrupt argv and environment entries. Flag values are the exact spellings of grok 1.0.52, opencode 1.18.31, Muse Code 1.0.1 and Claude Code 2.1.302.
 FUNCTION INVENTORY: No functions. NativeHarness, NativeThreadVerb, NativeThreadOperation, NativeThreadProblem, GrokPermissionMode, GrokReasoningEffort, MuseReasoningEffort, ClaudePermissionMode, ClaudeReasoningEffort, GrokFlag, OpencodeFlag, MuseFlag, ClaudeFlag, WslFlag, ShellFlag, NativeEnvironmentVariable, MuseMethod and OpencodeEventType.
 COMMON MODIFICATION PATTERNS: Add a member only when the vendor CLI adds the value, and use it in the harness module that builds the argv or reads the output in the same change. A new problem also needs its FailureCode members and its texts in vidbyte/lib/constants/native_threads.py.
 WHAT NOT TO DO IN THIS FILE: 1. Do not add an approve-everything member (bypassPermissions, --yolo, --auto, --always-approve); the SDK never approves everything. 2. Do not import anything from vidbyte; enums sit at the bottom layer. 3. Do not turn an enum here back into a (str, Enum).
-KNOWN EDGE CASES: NativeEnvironmentVariable values equal their names. ClaudePermissionMode.DEFAULT is "default", which Claude Code 2.1.301 still accepts as a hidden alias of "manual". MuseFlag.END_OF_OPTIONS is the bare "--" operand that keeps the Muse prompt from being read as a flag. WSL_UNAVAILABLE is a Muse-only problem.
+KNOWN EDGE CASES: NativeEnvironmentVariable values equal their names. ClaudePermissionMode.DEFAULT is "manual", the name Claude Code 2.1.302 lists for its default mode; it still accepts the older "default" as a hidden alias, which the SDK never sends, and the flag is always passed so a managed setting cannot pick another mode. MuseFlag.END_OF_OPTIONS is the bare "--" operand that keeps the Muse prompt from being read as a flag. WSL_UNAVAILABLE is a Muse-only problem.
 RELATED DOCS: vidbyte/harnesses/README.md
 TESTS: tests/features/harness_threads/test_harness_threads_surface.py, tests/features/harness_threads/test_harness_threads_argv.py
 """
@@ -101,7 +101,7 @@ class MuseReasoningEffort(StrEnum):
 class ClaudePermissionMode(StrEnum):
     """The Claude Code headless permission modes the SDK allows; there is no approve-everything mode."""
 
-    DEFAULT = "default"
+    DEFAULT = "manual"
     ACCEPT_EDITS = "acceptEdits"
     DONT_ASK = "dontAsk"
     PLAN = "plan"

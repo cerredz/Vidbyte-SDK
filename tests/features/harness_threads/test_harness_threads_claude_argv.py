@@ -20,7 +20,7 @@ import pytest
 
 VERBS = ("run", "continue", "fork")
 FLAG_PROMPT = "--yolo"
-PERMISSION_VALUES = ("default", "acceptEdits", "dontAsk", "plan")
+PERMISSION_VALUES = ("manual", "acceptEdits", "dontAsk", "plan")
 EFFORT_VALUES = ("low", "medium", "high", "xhigh", "max")
 APPROVE_EVERYTHING = ("--dangerously-skip-permissions", "--allow-dangerously-skip-permissions", "bypassPermissions", "auto")
 OVERLAY_NAMES = {"ANTHROPIC_API_KEY", "CLAUDE_CONFIG_DIR", "DISABLE_AUTOUPDATER", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"}
@@ -40,7 +40,7 @@ def spy_runner(api, monkeypatch) -> list:
     return seen
 
 
-def expected_argv(verb: str, *, thread: str | None, mode: str = "default", model: str | None = None, effort: str | None = None) -> list[str]:
+def expected_argv(verb: str, *, thread: str | None, mode: str = "manual", model: str | None = None, effort: str | None = None) -> list[str]:
     # §9.2, in its order: the four fixed options, then --model, --effort,
     # --resume and --fork-session when they apply; no operand.
     argv = ["--print", "--output-format", "json", "--setting-sources", "user", "--permission-mode", mode]
@@ -85,7 +85,7 @@ async def test_every_option_keeps_the_separate_style_and_a_flag_like_prompt_stay
 @pytest.mark.parametrize("mode", PERMISSION_VALUES)
 async def test_each_permission_mode_reaches_argv_as_its_vendor_value(api, sandbox, call, mode) -> None:
     # INV-18 / D-12: the four modes, passed as members, become their
-    # 2.1.301 values; nothing approves everything.
+    # 2.1.302 values; nothing approves everything.
     await call("claude", config={"permission_mode": api.enums.ClaudePermissionMode(mode)})
     argv = sandbox.only_start("claude")["argv"]
     assert argv == expected_argv("run", thread=None, mode=mode)
