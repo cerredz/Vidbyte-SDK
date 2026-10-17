@@ -28,28 +28,31 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 FUNCTIONS = tuple(f"{verb}_{harness}_thread" for harness in ("grok", "opencode", "muse") for verb in ("run", "continue", "fork"))
+BROWSER_FUNCTIONS = tuple(f"{verb}_{harness}_with_browser" for harness in ("grok", "opencode", "muse") for verb in ("run", "continue", "fork"))
+SUBPACKAGE_SUFFIXES = ("thread", "with_browser")
 EXPECTED_EXPORTS = {
     *FUNCTIONS, "NativeThreadResult", "GrokThreadConfig", "OpencodeThreadConfig", "MuseThreadConfig",
     "NativeThreadError", "GrokPermissionMode", "GrokReasoningEffort", "MuseReasoningEffort",
+    *BROWSER_FUNCTIONS, "BrowserThreadResult", "BrowserToolCall",
 }
 EXPECTED_ENUMS = {
     "NativeHarness": ["grok", "opencode", "muse"],
     "NativeThreadVerb": ["run", "continue", "fork"],
-    "NativeThreadOperation": list(FUNCTIONS),
-    "NativeThreadProblem": ["not_installed", "launcher_refused", "launch_failed", "key_rejected", "thread_not_found", "timed_out", "output_too_large", "protocol_mismatch", "run_failed", "wsl_unavailable"],
+    "NativeThreadOperation": [*FUNCTIONS, *BROWSER_FUNCTIONS],
+    "NativeThreadProblem": ["not_installed", "launcher_refused", "launch_failed", "key_rejected", "thread_not_found", "timed_out", "output_too_large", "protocol_mismatch", "run_failed", "wsl_unavailable", "mount_unsupported", "runtime_missing", "tool_install_failed", "tools_unavailable"],
     "GrokPermissionMode": ["default", "acceptEdits", "dontAsk", "plan"],
     "GrokReasoningEffort": ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
     "MuseReasoningEffort": ["none", "minimal", "low", "medium", "high", "xhigh", "ultra"],
-    "GrokFlag": ["--single", "--output-format", "--cwd", "--permission-mode", "--model", "--reasoning-effort", "--resume", "--fork-session"],
+    "GrokFlag": ["--single", "--output-format", "--cwd", "--permission-mode", "--model", "--reasoning-effort", "--resume", "--fork-session", "--allow", "--deny", "--agent", "--disable-web-search"],
     "OpencodeFlag": ["--format", "--dir", "--model", "--agent", "--variant", "--session", "--fork"],
-    "MuseFlag": ["--json", "--provider", "--workspace", "--session-id", "--model", "--reasoning-effort", "--user-input-auto-resolve", "--"],
+    "MuseFlag": ["--json", "--provider", "--workspace", "--session-id", "--model", "--reasoning-effort", "--user-input-auto-resolve", "--", "--disable-web-tools"],
     "WslFlag": ["-d", "-e", "-l", "-q"],
-    "NativeEnvironmentVariable": ["XAI_API_KEY", "GROK_CODE_XAI_API_KEY", "GROK_HOME", "GROK_DISABLE_AUTOUPDATER", "OPENCODE_CONFIG_CONTENT", "OPENCODE_DISABLE_AUTOUPDATE", "META_API_KEY", "MUSE_NO_AUTO_UPDATE", "MUSE_AUTH_PATH", "XDG_CONFIG_HOME", "WSLENV", "VIDBYTE_PEER_MARK"],
+    "NativeEnvironmentVariable": ["XAI_API_KEY", "GROK_CODE_XAI_API_KEY", "GROK_HOME", "GROK_DISABLE_AUTOUPDATER", "OPENCODE_CONFIG_CONTENT", "OPENCODE_DISABLE_AUTOUPDATE", "META_API_KEY", "MUSE_NO_AUTO_UPDATE", "MUSE_AUTH_PATH", "XDG_CONFIG_HOME", "WSLENV", "VIDBYTE_PEER_MARK", "GROK_CLAUDE_MCPS_ENABLED", "GROK_CURSOR_MCPS_ENABLED", "VIDBYTE_REAP_MARKER"],
     "MuseMethod": ["initialize", "initialized", "session/read", "session/fork"],
-    "OpencodeEventType": ["text", "error"],
+    "OpencodeEventType": ["text", "error", "tool_use"],
 }
 PROBLEMS = ["not_installed", "launcher_refused", "launch_failed", "key_rejected", "thread_not_found", "timed_out", "output_too_large", "protocol_mismatch", "run_failed"]
-NEW_FAILURE_CODES = [f"{harness}.{problem}" for harness in ("grok", "opencode", "muse") for problem in PROBLEMS] + ["muse.wsl_unavailable"]
+NEW_FAILURE_CODES = [f"{harness}.{problem}" for harness in ("grok", "opencode", "muse") for problem in PROBLEMS] + ["muse.wsl_unavailable"] + ["browser.mount_unsupported", "browser.runtime_missing", "browser.tool_install_failed", "browser.tools_unavailable"]
 CONTRACT_CONSTANTS = {
     "NATIVE_THREAD_DEFAULT_SECONDS": 1800.0, "NATIVE_THREAD_MAX_SECONDS": 14400.0, "NATIVE_CONTROL_TIMEOUT_SECONDS": 30.0,
     "NATIVE_KILL_WAIT_SECONDS": 1.0, "MUSE_REAP_TIMEOUT_SECONDS": 10.0, "NATIVE_ARGV_PROMPT_MAX_CHARS": 24000,
@@ -131,7 +134,7 @@ def test_native_package_exports_exactly_the_nine_functions_and_their_records(api
     assert (native.GrokPermissionMode, native.GrokReasoningEffort, native.MuseReasoningEffort) == (api.enums.GrokPermissionMode, api.enums.GrokReasoningEffort, api.enums.MuseReasoningEffort)
     for harness in ("grok", "opencode", "muse"):
         subpackage = importlib.import_module(f"vidbyte.harnesses.native.{harness}")
-        names = [f"{verb}_{harness}_thread" for verb in ("run", "continue", "fork")]
+        names = [f"{verb}_{harness}_{suffix}" for suffix in SUBPACKAGE_SUFFIXES for verb in ("run", "continue", "fork")]
         assert sorted(subpackage.__all__) == sorted(names), harness
         for name in names:
             assert getattr(subpackage, name) is getattr(native, name), name
@@ -209,7 +212,7 @@ def test_old_public_names_no_longer_import(lib_api) -> None:
     # managed process are gone.
     still_there = [f"{module}.{name}" for module, name in OLD_NAMES if importable(module, name)]
     assert still_there == []
-    assert sorted(lib_api.process.__all__) == ["CliArgv", "CliRunner", "ProcessStopper"]
+    assert sorted(lib_api.process.__all__) == ["CliArgv", "CliRunner", "ProcessReaper", "ProcessStopper"]
 
 
 def test_rejected_design_files_are_deleted() -> None:
