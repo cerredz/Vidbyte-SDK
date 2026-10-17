@@ -15,8 +15,8 @@ started: 2026-10-16 16:10
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-16 16:10 | 2026-10-16 16:30 | reports/S0-scout.md | base_commit 0f2aeb48; code-map.md (4 §, 14 contradictions) |
 | S1 spec + review | done | 2026-10-16 16:35 | 2026-10-16 18:40 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-2.md | spec r3 approved @d2746a4d; R1 SOUND WITH FIXES (7 applied), R2 SOUND WITH FIXES (6 applied) |
-| S2 tests | running | 2026-10-16 18:45 | | reports/S2-test-author.md | |
-| S3 implement | pending | | | | |
+| S2 tests | done | 2026-10-16 18:45 | 2026-10-16 20:40 | reports/S2-test-author.md | 51 tests / 161 cases, all red (missing symbols); S2_HEAD=9895d663 |
+| S3 implement | running | 2026-10-16 20:45 | | reports/S3-implementer.md | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
@@ -43,6 +43,11 @@ started: 2026-10-16 16:10
 
 - 2026-10-16 18:40 — Spec r3 approved (status: approved, @d2746a4d). Q-1..Q-11 all take their stated defaults (all "No / not built"): Q-1 no sync run twin; Q-2 one recipient only; Q-3 no message length cap; Q-4 fixed allow-all permissions + SDK defaults; Q-5 no usage on result; Q-6 TOOL_CALLED carries name+status only; Q-7 contain failures per agent; Q-8 keep full events tuple; Q-9 no shared-workplace guard; Q-10 five root exports; Q-11 private root-cause helper. Summary printed to the user; continuing to S2 without waiting.
 - 2026-10-16 18:45 — Environment: the global Python 3.11.0 has an EDITABLE vidbyte-sdk install pointing at the MAIN checkout, plus pytest 8.3.5 and pytest-asyncio 1.3.0. Do NOT run `pip install -e` in the worktree (it would repoint the shared global install away from main for every other session). Run everything with `PYTHONPATH=$(pwd)` from the worktree root (verified: vidbyte imports from the worktree that way).
+
+- 2026-10-16 19:55 — S2 test author hit the account usage limit mid-run (no files written in the worktree). It had copied the repo to scratchpad/s2proto to build a "throwaway reference prototype" of the swarm — rejected (hard rule 1: the test author never writes an implementation; it anchors tests to its own design). Deleted the copy (pristine files only) and resumed the same agent with instructions to write the tests directly; probes of existing repo behaviour stay allowed.
+
+- 2026-10-16 20:40 — Spot-check S2: 3 commits (ecfbac79 tests, cf403857 proof, 9895d663 report); every AC-1..AC-21 cited in test-plan.md; re-ran the pack myself: "161 failed in 2.26s", all ImportError/ModuleNotFoundError/KeyError('agent_swarm') — red for the right reason. S2_HEAD = 9895d663 (test tree frozen from here). Spec status → tests-written.
+- 2026-10-16 20:40 — Accepted the test author's handling of three non-blocking spec ambiguities (cross-field refusal field names; a refused goal does not consume the run per §8.5 pseudocode; INV-1 goal arrives as the call's `prompt`). Logged here; no spec revision needed.
 
 ## User replies (verbatim)
 - 2026-10-16 16:05 — answers to four clarifying questions: "One shared folder (Recommended)"; "Stay alive until quiet (Recommended)"; "Shared goal + per-agent prompts (Recommended)"; "Callback + list on result (Recommended)".
@@ -87,4 +92,12 @@ started: 2026-10-16 16:10
 - A006 counts function-local imports (skips only TYPE_CHECKING blocks and `__init__.py` targets); never hide a cycle with a local import — *source:* S1 reviewer r2
 - Local interpreter is Python 3.11.0: `asyncio.timeout` around a TaskGroup unwinds children parked on futures (probe 0.22 s for 0.2 s); KeyboardInterrupt/SystemExit re-raised bare — *source:* S1 reviewer r2
 - No default run-wide timeout (AgentRuntimeConfig.timeout_seconds None; BaseAgent timeout_seconds is per model call); fork tool enum (fork.py:471) and YAML choices (config.py:668) derive from AgentRuntimeType; no test pins the runtime list — *source:* S1 reviewer r2
+- Test pack `tests/features/agent_swarm/` (FEATURE.md, README.md, agent_swarm_fixtures.py, test_agent_swarm_{acceptance,messaging,lifecycle,workplace,contract,property}.py); run with `PYTHONPATH=$(pwd) python -m pytest tests/features/agent_swarm -q` — *source:* S2
+- Only `BaseAgent._runner_for_model` is patched and calls route by agent name → each member agent's name must equal the member's name — *source:* S2
+- `end_turn` must mark the agent idle AND create its wait future BEFORE flushing AGENT_IDLE (EC-1 test sends from inside the idle callback); `AgentSwarmRuntime.arun` checks the goal before marking itself run (AC-18) — *source:* S2
+- The loop does not enforce the schema `enum` before `execute`; `AgentSwarmMessageTool.execute` must refuse self/unknown recipients itself — *source:* S2
+- EC-16(c) monkeypatches `AgentSwarmRuntime.record_tool_call` on the class; the middleware must call it through the runtime instance with the name first or as `name=`; an early return's AGENT_FAILED text must contain "middleware_abort" — *source:* S2
+- Refusals put `AgentSwarmSettings.<f>` / `AgentSwarmMember.<f>` in `details["field"]` and repeat it in the message; event errors name exactly `AgentSwarmEvent.<f>` — *source:* S2
+- Budget test: exactly 7 .py files in vidbyte/agents/agent_swarm; each of the 11 new modules ≤ 400 lines after its header; AST scan forbids any `sleep` call in the package and toolset — *source:* S2
+- AC-6 uses timeout_seconds=0.5 with elapsed < 10.5 s; AC-16/AC-19 need Git bash on Windows — *source:* S2
 - vidbyte-gates.md is wrong for the SDK: lint marker is `SDK-LINT: PASS`; run_ci.py runs no semgrep; `--stage source` needs `PYTHONPATH=$(pwd)` while the package stage must run without it — *source:* S0 scout
