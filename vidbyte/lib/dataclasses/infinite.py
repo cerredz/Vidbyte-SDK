@@ -1,18 +1,19 @@
 """FILE: vidbyte/lib/dataclasses/infinite.py
 
-PURPOSE: Defines the seven validated records of the InfiniteMemory agent: InfiniteTaskCard, one task a parent hands to a generator and verifier pair; InfiniteEntryDraft, one memory entry before it has an id; InfiniteEntry, one committed entry; InfiniteStagedEntry, a pair's entry waiting for its verdict; InfiniteResultCard, what a parent learns about one finished pair; InfiniteWorkspaceUsage, the workspace's file count and token total; and InfiniteMapSnapshot, the workspace map before its cut.
-ROLE IN CODEBASE: Built and read by vidbyte/agents/infinite/: the launch tool turns the model's task list into InfiniteTaskCards and each finished pair into an InfiniteResultCard, the memory tools build InfiniteEntryDrafts and InfiniteStagedEntries, the workspace returns InfiniteEntry, InfiniteWorkspaceUsage, and InfiniteMapSnapshot records, the runtime diffs two snapshots for the root's status message, and the journal stores and reloads the result cards.
-ARCHITECTURE NOTE: Validation only. Every check runs in __post_init__, so a constructed record is always valid and its callers never check it again. Each field check is one call to the SDK's canonical RecordFieldValidator or RecordFieldConverter (vidbyte/lib/dataclasses/validation.py); only this feature's own rules, such as what a context item may name, are written here. Sequence fields must already be tuples; the agents layer converts the model's JSON lists. Reading and writing the JSON-lines shapes lives in the workspace and journal modules, not here.
-FUNCTION INVENTORY: Seven frozen, slotted records, each with a __post_init__ that checks its fields through RecordFieldValidator and RecordFieldConverter and then applies its own rules.
+PURPOSE: Defines the nine validated records of the InfiniteMemory agent: InfiniteTaskCard, one task a parent hands to a generator and verifier pair; InfiniteEntryDraft, one memory entry before it has an id; InfiniteEntry, one committed entry; InfiniteStagedEntry, a pair's entry waiting for its verdict; InfiniteResultCard, what a parent learns about one finished pair; InfiniteWorkspaceUsage, the workspace's file count and token total; InfiniteMapSnapshot, the workspace map before its cut; InfiniteRecallRequest, one recall call; and InfiniteRecallCitation, one citation line of a retriever's reply.
+ROLE IN CODEBASE: Built and read by vidbyte/agents/infinite/: the launch tool turns the model's task list into InfiniteTaskCards and each finished pair into an InfiniteResultCard, the memory tools build InfiniteEntryDrafts and InfiniteStagedEntries, the workspace returns InfiniteEntry, InfiniteWorkspaceUsage, and InfiniteMapSnapshot records, the runtime diffs two snapshots for the root's status message, the journal stores and reloads the result cards, and the recall tool (recall.py) builds an InfiniteRecallRequest from the model's arguments and parses the retriever's reply into InfiniteRecallCitations.
+ARCHITECTURE NOTE: Validation only. Every check runs in __post_init__, so a constructed record is always valid and its callers never check it again. Each field check is one call to the SDK's canonical RecordFieldValidator or RecordFieldConverter (vidbyte/lib/dataclasses/validation.py); only this feature's own rules, such as what a context item may name, are written here. Sequence fields must already be tuples; the agents layer converts the model's JSON lists. Reading and writing the JSON-lines shapes lives in the workspace and journal modules, not here. The one parser here is InfiniteRecallCitation.parse, because the reply grammar belongs with the record it builds (as SystemPromptPresetSelection.parse in vidbyte/lib/dataclasses/prompts.py); its patterns live in vidbyte/lib/constants/infinite.py.
+FUNCTION INVENTORY: Nine frozen, slotted records, each with a __post_init__ that checks its fields through RecordFieldValidator and RecordFieldConverter and then applies its own rules; InfiniteRecallCitation.parse turns one reply line into a citation or None.
 COMMON MODIFICATION PATTERNS: A new record field adds one field here and one RecordFieldValidator or RecordFieldConverter call in its record's __post_init__; its bound goes in vidbyte/lib/constants/infinite.py. A check the canonical validators lack becomes a new option or method there, never a helper here. A new task-card field is also one property in the launch_subagent schema and one prompt leaf for its description.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import from vidbyte.agents, vidbyte.tools, or any other layer above vidbyte/lib. 2. Do not add to_dict or from_dict methods or dict[str, Any] signatures; serialization lives in the workspace and the journal. 3. Do not convert a list or a string into a tuple here; a bare string would split into characters, so the caller converts and the record refuses anything else.
-KNOWN EDGE CASES: One line means no line break of any kind, as str.splitlines sees it. A context item that starts with "#" must be an entry id ("#42"); any other item is a relative path. InfiniteResultCard.summary and review may be empty, because a failed pair has neither. True is refused wherever a whole number is expected, although Python counts it as an int. A refusal names the field as Record.field, or Record.field[index] for one item of a tuple.
+KNOWN EDGE CASES: One line means no line break of any kind, as str.splitlines sees it. A context item that starts with "#" must be an entry id ("#42"); any other item is a relative path. InfiniteResultCard.summary and review may be empty, because a failed pair has neither. True is refused wherever a whole number is expected, although Python counts it as an int. A refusal names the field as Record.field, or Record.field[index] for one item of a tuple. A reply line in a citation form whose numbers are refused, such as FOUND #0 or a range that ends before it starts, raises from parse instead of returning None, so the recall tool can list it as rejected.
 RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 8.5 and 9.1); docs/spec/infinite-memory-context-economy/spec.md (sections 8.5 and 9.1); vidbyte/agents/infinite/README.md
 TESTS: tests/features/infinite_memory_agent/test_infinite_memory_delegation.py, tests/features/infinite_memory_agent/test_infinite_memory_workspace.py, tests/features/infinite_memory_agent/test_infinite_memory_verification.py, tests/features/infinite_memory_agent/test_infinite_memory_resume.py, and tests/features/infinite_memory_agent/test_infinite_memory_stable_prefix.py
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import PurePath
 
@@ -22,6 +23,10 @@ from vidbyte.lib.constants.infinite import (
     INFINITE_MAX_REFS,
     INFINITE_MAX_TAGS,
     INFINITE_MIN_COUNT,
+    INFINITE_RECALL_FOUND_ENTRY_PATTERN,
+    INFINITE_RECALL_FOUND_RANGE_PATTERN,
+    INFINITE_RECALL_MAX_TERMS,
+    INFINITE_RECALL_NOT_FOUND_PATTERN,
     INFINITE_STAGED_KEY_PATTERN,
     INFINITE_TAG_PATTERN,
     INFINITE_TASK_NAME_PATTERN,
@@ -211,4 +216,66 @@ class InfiniteMapSnapshot:
             seen.add(path)
 
 
-__all__ = ["InfiniteEntry", "InfiniteEntryDraft", "InfiniteMapSnapshot", "InfiniteResultCard", "InfiniteStagedEntry", "InfiniteTaskCard", "InfiniteWorkspaceUsage"]
+@dataclass(frozen=True, slots=True)
+class InfiniteRecallRequest:
+    """One recall call: the question, what the answer is for, what the caller already knows, and the terms to search before the retriever starts."""
+
+    question: str
+    purpose: str
+    known: str = ""
+    terms: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        # @intent a-refused-request-starts-nothing
+        # The recall tool builds this record before any retriever
+        # starts, so a question or purpose with no text, or a terms list
+        # that is not a short tuple of words, is refused at no cost.
+        RecordFieldValidator.require_text(self.question, "InfiniteRecallRequest.question")
+        RecordFieldValidator.require_text(self.purpose, "InfiniteRecallRequest.purpose")
+        RecordFieldValidator.require_text(self.known, "InfiniteRecallRequest.known", allow_blank=True)
+        RecordFieldValidator.require_text_items(self.terms, "InfiniteRecallRequest.terms", max_items=INFINITE_RECALL_MAX_TERMS)
+
+
+@dataclass(frozen=True, slots=True)
+class InfiniteRecallCitation:
+    """One citation line of a retriever's reply: a live entry by id, a line range of a file, or, naming neither, what was not found."""
+
+    why: str
+    entry_id: int | None = None
+    path: str | None = None
+    start: int | None = None
+    end: int | None = None
+
+    def __post_init__(self) -> None:
+        # @intent a-citation-names-one-place
+        # A citation names an entry or a line range, never both; a range
+        # names its file and both ends, numbered from 1 as read_lines
+        # numbers lines, with the start never after the end. A citation
+        # naming neither records what the retriever did not find.
+        RecordFieldValidator.require_text(self.why, "InfiniteRecallCitation.why", allow_blank=True)
+        names_range = (self.path, self.start, self.end) != (None, None, None)
+        if self.entry_id is not None:
+            RecordFieldValidator.require_int(self.entry_id, "InfiniteRecallCitation.entry_id", minimum=INFINITE_FIRST_ENTRY_ID)
+            if names_range:
+                raise ConfigurationError("InfiniteRecallCitation names an entry or a line range, not both.", details={"field": "InfiniteRecallCitation.entry_id"})
+        elif names_range:
+            RecordFieldValidator.require_text(self.path, "InfiniteRecallCitation.path")
+            start = RecordFieldValidator.require_int(self.start, "InfiniteRecallCitation.start", minimum=1)
+            RecordFieldValidator.require_int(self.end, "InfiniteRecallCitation.end", minimum=start)
+
+    @classmethod
+    def parse(cls, line: str) -> InfiniteRecallCitation | None:
+        """Return the citation one reply line states, or None for any other line; a citation line whose numbers this record refuses raises ConfigurationError."""
+        # @intent only-the-three-line-forms-are-citations
+        # Prose and every other line are ignored, so nothing the
+        # retriever writes outside the three forms is read as a citation.
+        if entry := re.match(INFINITE_RECALL_FOUND_ENTRY_PATTERN, line):
+            return cls(why=entry.group(2), entry_id=int(entry.group(1)))
+        if lines := re.match(INFINITE_RECALL_FOUND_RANGE_PATTERN, line):
+            return cls(why=lines.group(4), path=lines.group(1), start=int(lines.group(2)), end=int(lines.group(3)))
+        if missing := re.match(INFINITE_RECALL_NOT_FOUND_PATTERN, line):
+            return cls(why=missing.group(1))
+        return None
+
+
+__all__ = ["InfiniteEntry", "InfiniteEntryDraft", "InfiniteMapSnapshot", "InfiniteRecallCitation", "InfiniteRecallRequest", "InfiniteResultCard", "InfiniteStagedEntry", "InfiniteTaskCard", "InfiniteWorkspaceUsage"]
