@@ -77,9 +77,11 @@ if TYPE_CHECKING:
     from vidbyte.sessions.session import Session
     from vidbyte.sessions.store import SessionStore
 
-# Runtimes that execute the direct model/tool loop and so accept its usage, speed, output-contract,
-# fallback, and session-failure wiring. JEV is the opinionated JevAgent's linear-loop subclass,
-# INFINITE_MEMORY is InfiniteMemoryAgent's, and BROWSER is BrowserAgent's.
+# Runtimes that execute the direct model/tool loop and
+# so accept its usage, speed, output-contract, fallback,
+# and session-failure wiring. JEV is the opinionated
+# JevAgent's linear-loop subclass, INFINITE_MEMORY is
+# InfiniteMemoryAgent's, and BROWSER is BrowserAgent's.
 _LINEAR_LOOP_RUNTIMES = frozenset({AgentRuntimeType.LINEAR, AgentRuntimeType.JEV, AgentRuntimeType.INFINITE_MEMORY, AgentRuntimeType.BROWSER})
 # Metadata key for the developer diagnostic a restore records when the re-supplied tools differ from the checkpoint's.
 _RESUME_TOOL_MISMATCH_KEY = "__resume_tool_mismatch__"
