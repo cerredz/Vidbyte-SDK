@@ -695,6 +695,7 @@ class CodexHost:
         return self._responses.skills(await connection.call(operation, CODEX_SKILLS_LIST_METHOD, listing))
 
     async def run_codex_skill(self, skill: str, prompt: str, request: CodexSpawnRequest | None = None) -> CodexTurnHandle:
+        """Run one skill on a new thread with a text prompt; a run takes no images, no mentions and no second skill."""
         # @intent a-skill-run-is-confirmed-before-its-handle-returns
         # Start a new thread whose first turn carries the skill as a
         # first-class input item, and return its handle only once Codex
@@ -706,6 +707,7 @@ class CodexHost:
         return await self._skills.run_skill(skill_run)
 
     async def run_codex_openai_docs(self, question: str, request: CodexSpawnRequest | None = None) -> CodexTurnHandle:
+        """Ask the openai-docs skill a text question on a new thread; as with run_codex_skill, no images, mentions or second skill."""
         # @intent the-docs-run-is-the-openai-docs-skill-run
         # run_codex_skill for the bundled openai-docs skill, which
         # answers from the official OpenAI documentation (INV-26).
