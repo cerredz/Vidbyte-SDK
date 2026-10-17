@@ -3,10 +3,10 @@
 PURPOSE: Defines the two history-window strategies an agent runs on every model call: TrimWithProviderBoundariesCompaction, which drops the oldest whole call/result groups to fit a token or message budget (optionally cut down to a low watermark, so the cut moves rarely), and ToolOutputSlidingWindowCompaction, which compacts every tool output older than the newest few per tool (optionally only for named tools).
 ROLE IN CODEBASE: Built by vidbyte/middleware/compaction/engine.py (ContextCompactionEngine._build_strategy) for the trim_with_provider_boundaries and tool_output_sliding_window modes, validated once by vidbyte/middleware/compaction/context_compaction.py (MessageHistoryCompactionMiddleware._validate_options), and exported unchanged from vidbyte/middleware/compaction/__init__.py. It imports the shared message helpers from vidbyte/middleware/compaction/strategies.py; strategies never imports this module.
 ARCHITECTURE NOTE: The engine builds a new strategy on every call, so both strategies are pure functions of the history they receive: the same messages always give the same view, and nothing is remembered between calls. The low watermark is therefore a quantized cut, not a stored cut point: with S = max_tokens - low_watermark_tokens, the trim drops the shortest prefix of non-system groups whose tokens reach the next whole multiple of S above the overflow, so the first kept message moves about once per S tokens of growth. A low watermark of None, or one at or above max_tokens, keeps the original newest-first greedy fit exactly.
-FUNCTION INVENTORY: TrimWithProviderBoundariesCompaction.__init__ checks the bounds; compact is the narrated main function; _group_tokens costs one group; _greedy_keep is the original fit; _quantized_keep is the low-watermark cut. ToolOutputSlidingWindowCompaction.__init__ checks the window, mode, and scope; compact walks the outputs newest first; _compact_older_result applies the mode to one output.
+FUNCTION INVENTORY: TrimWithProviderBoundariesCompaction.__init__ checks the bounds; compact is the narrated main function; _group_tokens costs one group; _greedy_keep is the original fit; _quantized_keep is the low-watermark cut. ToolOutputSlidingWindowCompaction.__init__ checks the window, mode, and scope; compact finds the newest model turn and walks the outputs newest first; _compact_older_result applies the mode to one output.
 COMMON MODIFICATION PATTERNS: A new option gets a keyword with a default that keeps today's output, a check in __init__, a forwarding line in the engine branch, and a keyword on the middleware builder. Keep compact's helpers flat (none calls another).
 WHAT NOT TO DO IN THIS FILE: 1. Do not keep state between calls; the engine rebuilds the strategy every call. 2. Do not split a call from its results; trim whole provider groups only. 3. Do not import this module from strategies.py (it would make a cycle). 4. Do not change the defaults' output; every caller that sets no new option must see main's view.
-KNOWN EDGE CASES: Without a low watermark, the greedy fit can keep an older small group after skipping a newer large one, so its output is not always a suffix; with one, the kept non-system groups are always one contiguous suffix, and a newest group larger than the budget drops every non-system group. System groups larger than max_tokens make the budget negative, which drops every non-system group. A tool result whose name cannot be read is outside every non-empty scope, so it is never compacted by a scoped window.
+KNOWN EDGE CASES: Without a low watermark, the greedy fit can keep an older small group after skipping a newer large one, so its output is not always a suffix; with one, the kept non-system groups are always one contiguous suffix, and a newest group larger than the budget drops every non-system group. System groups larger than max_tokens make the budget negative, which drops every non-system group. A tool result whose name cannot be read is outside every non-empty scope, so it is never compacted by a scoped window. With a scope, every scoped output after the newest model turn (role assistant, or model on Gemini) stays whole, because the model has not read it, and still counts toward keep_recent, so a parallel turn of more outputs than the window keeps loses none before the model answers; a history with no model turn has no output read yet (spec INV-2.3, EC-2.5).
 RELATED DOCS: docs/spec/infinite-memory-context-economy/spec.md (INV-2.1 to INV-2.5, INV-4.1 to INV-4.4, D-3, D-5, D-6); vidbyte/middleware/README.md
 TESTS: tests/test_compaction_windows.py, tests/test_deterministic_compaction_middleware.py, tests/test_context_compaction_middleware.py
 """
@@ -142,6 +142,18 @@ class ToolOutputSlidingWindowCompaction(BaseCompaction):
 
     async def compact(self, messages: Sequence[ContextMessage]) -> tuple[ContextMessage, ...]:
         # Counts tool outputs from newest to oldest and compacts those outside each tool window.
+        # @intent unread-outputs-stay-whole
+        # With a scope, an output after the newest model turn has not
+        # been read yet, so it stays whole even when one parallel turn
+        # returns more outputs than the window keeps: masking it would
+        # make the model call again and lose the same outputs again. It
+        # still counts toward its window, so once the model answers it
+        # is masked as usual. A model turn's role is assistant, or model
+        # on Gemini; assistant alone would read every Gemini output as
+        # unread and switch masking off there. Without a scope the
+        # window is main's.
+        newest_turn = max((index for index, message in enumerate(messages) if message.role in ("assistant", "model")), default=-1)
+        unread_from = newest_turn + 1 if self.tools else len(messages)
         remaining: dict[str, int] = {}
         result: list[ContextMessage] = list(messages)
         for index in range(len(messages) - 1, -1, -1):
@@ -156,7 +168,9 @@ class ToolOutputSlidingWindowCompaction(BaseCompaction):
             tool_name = name or "_unknown"
             seen = remaining.get(tool_name, 0)
             remaining[tool_name] = seen + 1
-            if seen >= self.keep_recent:
+            # Compact an output past its tool's window, unless the model
+            # has not read it yet.
+            if seen >= self.keep_recent and index < unread_from:
                 result[index] = self._compact_older_result(message)
         return tuple(result)
 
