@@ -115,3 +115,18 @@ All of the following were scratchpad-only and never committed. They live under `
 - The missing-key 502 `subtitle` never reaches SDK users (Q-1, default no). The PR body's deploy order is the mitigation.
 - The `-contributor` ids under Vidbyte's key are Run A's Q-4 (Q-3 here, default no).
 - Run A's A-3 is answered by Meta's `reasoning` page (quoted above). Run A may close it.
+
+## Revision r2 (review round 1, 2026-10-17)
+
+- **Commit:** `4046e75c docs(spec): revise meta-muse-managed-text spec r2 (review round 1: R-1..R-6)`, spec only.
+- **Triage:** all six findings were accepted, after I re-verified each one's evidence against the code. None was rejected. The design, the budget (0 new files), and the IDs are unchanged, and the only new IDs are EC-16 and Q-6.
+- **Independent checks I ran before accepting:**
+  - **R-1:** I re-ran the reviewer's `s1_grader_probe.py` myself. At base it sent 2 `anthropic` requests. Widened, it also sent 1 `meta` request that relayed `META_API_KEY` with `max_tokens` 32,768. I also read `resolve_active` and `_resolve_from_environment` (`models.py:274-279`, `:418-428`); the grader at `:61`, `:87`, `:93`, `:121`; `aggregation.py:97`, `:129`; `ContextMinimalFanoutSettings.return_exceptions` (`types.py:486`); and the fork and handoff pass-through (`fork.py:68`, `handoff.py:68`, `provider_keys.py:124-135`).
+  - **R-2:** `base.py:317-321` (`max_tokens` is the loop budget) and `:1662` (only `timeout_seconds` reaches the runner).
+  - **R-3:** `CONTRIBUTING.md:75-83` and `.github/pull_request_template.md`.
+  - **R-4:** `README.md:290-297`. A grep of the tests that read `README.md` found none that binds the Prefixes bullet.
+  - **R-5:** found the log seam (`test_provider_keys_security.py:106-121`). No trace seam exists, so the INV-9 trace clause is handed to byok INV-22 instead of being claimed.
+  - **R-6:** checked read-only in the Run A worktree that `c395349bd` is on `origin/feat/meta-muse-gateway` and that spec §9.2-9.4 are identical through `da96273c0`.
+- **Coordinator's cap confirmation:** INV-5 and D-3 now cite `VIDBYTE_MANAGED_DEFAULT_MAX_OUTPUT_TOKENS` at `jev.py:84`, applied by `text.py:57-62`. D-2 quotes https://dev.meta.ai/docs/reasoning ("cap reasoning tokens plus visible output tokens combined"), which I re-checked against the saved page (reasoning.md:390).
+- **One propagation beyond the review:** INV-3 said `VIDBYTE_MANAGED` "never reads `META_API_KEY`". EC-16 shows the grader reads it to choose members, so INV-3 is now scoped to the call's credential resolution. Otherwise a test author could write a test that fails on correct code.
+- **Assumption still least sure of:** A-2, the output limit for `muse-spark-1.1`. It now has a named pre-merge check, but only the user or ops can run it: it needs real keys and a deployed #710.
