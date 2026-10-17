@@ -180,6 +180,34 @@ The workspace holds `entries.jsonl` (short typed memory entries, committed for a
 
 `resume()` and `aresume()` continue the newest unfinished run, or the one named, from its journal: finished pairs are replayed from their recorded cards and interrupted ones run again. `Session` persistence and `fork()` are not supported. See `vidbyte/agents/infinite/README.md` for the layout, the limits, and the known edge cases.
 
+## Browser Agent
+
+`BrowserAgent` runs long browser tasks through the developer's own browser MCP servers: an orchestrator plans and keeps a goal card, and each piece of page work runs as an episode in a fresh worker that returns one short result card.
+
+```python
+from vidbyte import BrowserAgent, BrowserAgentSettings, BrowserServerSettings
+from vidbyte.tools.mcp import FirecrawlMCP, PlaywrightMCP
+
+agent = BrowserAgent(
+    BrowserAgentSettings(
+        name="vc-scout",
+        system_prompt="You find seed-stage accelerator programs and record where to apply.",
+        provider="openai",
+        model_name="gpt-5.4-mini",
+        action_servers=(BrowserServerSettings(PlaywrightMCP),),
+        search_servers=(BrowserServerSettings(FirecrawlMCP, env={"FIRECRAWL_API_KEY": "fc-your-key"}),),
+        done_when=("Twenty programs are listed, each with its application URL and deadline.",),
+        on_event=lambda event: print(event.kind.value, event.detail),
+    )
+)
+reply = agent.run("Find twenty seed-stage accelerator programs that accept applications this quarter.")
+print(agent.response.stop_reason, len(agent.response.episodes))
+```
+
+Each server gets a role: `action_servers` act on pages, and `search_servers` and `fetch_servers` read. A server is a registered preset or a `command`, with its own `env` (keys go there, never in `os.environ`) and `timeout`. The workers hold only the action tools; the orchestrator holds the search and fetch tools, your `tools`, `run_episode`, and `patch_goal`, and never an action tool.
+
+The goal card (goal, done criteria, plan, progress, blockers, latest verdict) sits at the top of the orchestrator's context on every call. Every finish attempt is rechecked by a fresh agent that sees only the goal, the criteria, and the progress; a refused finish continues the same loop with the gap. Rechecks that keep finding no progress stop the run with `goal_stalled`, and the orchestrator's stored conversation is rebuilt to its newest call/result group once it passes its cap. Every cap is enforced in code. `Session` persistence and `fork()` are not supported. See `vidbyte/agents/browser/README.md` for the run, the limits, and the known edge cases.
+
 ## Model Fallback
 
 An agent can declare an ordered chain of backup models. Array index sets precedence:
@@ -392,6 +420,7 @@ credential and limits.
 - `handoff.py`: structured handoff generation from a completed agent run.
 - `coding.py`: `CodingAgent`, a `BaseAgent` preloaded with bash, read, write, edit, glob, grep, and one web-fetch tool over one root folder; its checks live in `CodingAgentSettings` and its tools in `CodingAgentTools`.
 - `infinite/`: `InfiniteMemoryAgent`, a root agent that delegates work to generator and verifier subagent pairs through `launch_subagent` and keeps memory in one guarded workspace folder; resumable from its run journal.
+- `browser/`: `BrowserAgent`, an orchestrator that plans long browser tasks over the developer's role-assigned MCP servers and hands page work to fresh episode workers, with a pinned goal card, fresh-context rechecks, and a stall stop.
 - `coding_context/`: `CodingContextWindow` and one loader per section (`AgentsMdLoader`), which build the context a `CodingAgent` shows after its system prompt.
 - `skills/`: `SkillLoader` and one resolver per source, the agent-agnostic loader that turns declarative skill entries into `SkillDocument`s for `JevAgent`'s skill preload.
 - `multi/`: ledger-driven manager/worker orchestration and transfer controls.

@@ -1,0 +1,1 @@
+The new content of the section. For progress, each non-blank line is appended as one fact, so write one fact per line with the URL that proves it. For plan and blockers, the text replaces the section, and an empty text clears it. Every line and every section has a size cap that the system enforces.

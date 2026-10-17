@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "source": {"repository": "cerredz/Vidbyte-SDK", "commit": "9eca4a33ddb5ea1a21c07f840e556487a8770e19", "generator": "scripts/generate-sdk-public-api.py"},
+  "source": {"repository": "cerredz/Vidbyte-SDK", "commit": "8183aa6f65fa79eb0488c6fea9eb30933239d9fb", "generator": "scripts/generate-sdk-public-api.py"},
   "distribution": "vidbyte-sdk",
   "version": "0.3.0",
   "exports": [
@@ -61,6 +61,10 @@
     "BatchForkTool",
     "Behavior",
     "BoundaryContextItem",
+    "BrowserAgent",
+    "BrowserAgentSettings",
+    "BrowserEvent",
+    "BrowserServerSettings",
     "BudgetPreset",
     "CREATE_TOOL_REGISTRY",
     "CalibrationTrace",

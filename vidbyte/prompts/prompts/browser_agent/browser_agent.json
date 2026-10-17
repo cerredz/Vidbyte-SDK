@@ -1,0 +1,83 @@
+{
+  "name": "Browser Agent",
+  "description": "Instructions for BrowserAgent, one Markdown file per leaf: the orchestrator and worker operating manuals, the episode brief a worker receives, the done-criteria and recheck instructions and message, the pinned goal card and the result card an episode returns, the replies of patch_goal and the message appended after a refused finish, the summary of a stuck card and the output of a stalled stop, and the model-facing descriptions of run_episode and patch_goal and of their parameters.",
+  "key": "browser_agent",
+  "prompts": {
+    "orchestrator_system_prompt": {
+      "path": "orchestrator_system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/browser_agent/orchestrator_system_prompt.md"
+    },
+    "worker_system_prompt": {
+      "path": "worker_system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/browser_agent/worker_system_prompt.md"
+    },
+    "episode_prompt": {
+      "path": "episode_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/browser_agent/episode_prompt.md"
+    },
+    "done_when_system_prompt": {
+      "path": "done_when_system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/browser_agent/done_when_system_prompt.md"
+    },
+    "recheck_system_prompt": {
+      "path": "recheck_system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/browser_agent/recheck_system_prompt.md"
+    },
+    "recheck_prompt": {
+      "path": "recheck_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/browser_agent/recheck_prompt.md"
+    },
+    "goal_card": {
+      "path": "goal_card.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/browser_agent/goal_card.md"
+    },
+    "result_card": {
+      "path": "result_card.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/browser_agent/result_card.md"
+    },
+    "run_episode_description": {
+      "path": "run_episode_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/browser_agent/run_episode_description.md"
+    },
+    "run_episode_task_description": {
+      "path": "run_episode_task_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/browser_agent/run_episode_task_description.md"
+    },
+    "run_episode_done_when_description": {
+      "path": "run_episode_done_when_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/browser_agent/run_episode_done_when_description.md"
+    },
+    "patch_goal_description": {
+      "path": "patch_goal_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/browser_agent/patch_goal_description.md"
+    },
+    "patch_goal_section_description": {
+      "path": "patch_goal_section_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/browser_agent/patch_goal_section_description.md"
+    },
+    "patch_goal_text_description": {
+      "path": "patch_goal_text_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/browser_agent/patch_goal_text_description.md"
+    },
+    "patch_refused": {
+      "path": "patch_refused.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/browser_agent/patch_refused.md"
+    },
+    "progress_full": {
+      "path": "progress_full.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/browser_agent/progress_full.md"
+    },
+    "continue_prompt": {
+      "path": "continue_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/browser_agent/continue_prompt.md"
+    },
+    "stuck_summary": {
+      "path": "stuck_summary.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/browser_agent/stuck_summary.md"
+    },
+    "stalled_output": {
+      "path": "stalled_output.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/browser_agent/stalled_output.md"
+    }
+  }
+}

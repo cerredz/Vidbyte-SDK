@@ -1,0 +1,1 @@
+Which section of the goal card to change. Use plan for how you will reach the goal, progress for facts already established, and blockers for what currently stops the task. The goal and the done criteria are not sections you can change. Each call changes exactly one section.

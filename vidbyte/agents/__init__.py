@@ -25,6 +25,12 @@ from vidbyte.agents.aggregation import (
     MultiProviderAggregator,
 )
 from vidbyte.agents.base import BaseAgent
+from vidbyte.agents.browser import (
+    BrowserAgent,
+    BrowserAgentRuntime,
+    BrowserAgentSettings,
+    BrowserServerSettings,
+)
 from vidbyte.agents.client import AgentClient
 from vidbyte.agents.codex import (
     CodexAgentInput,
@@ -393,6 +399,10 @@ __all__ = [
     "InfiniteMemoryAgentSettings",
     "InfiniteMemoryRuntime",
     "InfiniteWorkspaceSettings",
+    "BrowserAgent",
+    "BrowserAgentRuntime",
+    "BrowserAgentSettings",
+    "BrowserServerSettings",
     "JevAgent",
     "JevAgentResponse",
     "JevAgentSettings",

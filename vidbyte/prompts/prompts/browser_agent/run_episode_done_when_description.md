@@ -1,0 +1,1 @@
+The check that tells the worker this episode is finished. State one observable condition that the worker can verify on the page itself. Do not repeat the whole goal here, because the goal card already keeps it. The worker still stops with ready_to_submit before any final submission, whatever this check says.
