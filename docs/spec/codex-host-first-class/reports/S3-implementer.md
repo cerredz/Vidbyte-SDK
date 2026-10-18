@@ -1,41 +1,33 @@
 # S3 implementer report: codex-host-first-class
 
 - **Date:** 2026-10-18
-- **Status:** BLOCKED. All 39 §12.3 rows are implemented and committed. Seven S2 tests and one lint rule cannot pass without a decision the implementer may not make.
-- **HEAD:** see the STATUS block (the last commit is this report).
-- **Branch:** `feat/codex-host-first-class`. Nothing has been pushed.
-- **Draft PR:** https://github.com/cerredz/Vidbyte-SDK/pull/1181. It is still a draft, its body was not edited, and its title and base are unchanged.
-- **S2_HEAD:** 625279c6. `git diff 625279c6..HEAD -- tests` is empty, with 0 lines.
+- **Status:** DONE. All 39 §12.3 rows are implemented and committed, and D-40 (spec r5) is applied. Lint passes. `run_ci.py --stage source` fails only on the inherited harness_threads FailureCode-count test, and `--stage package` passes.
+- **HEAD:** see the STATUS block. The last commit is this report.
+- **Branch:** `feat/codex-host-first-class`, pushed to `origin` with `git push -u origin feat/codex-host-first-class`.
+- **Draft PR:** https://github.com/cerredz/Vidbyte-SDK/pull/1181.
+  - Its body was replaced with `gh pr edit 1181 --body-file` using the placeholder body.
+  - It is still a draft (`isDraft: true`).
+  - Its title (`[WIP] feat: CodexHost production hardening and first-class Codex features`) and base (`ai/resolve-pr-1055-comments`) are unchanged.
+- **S2_HEAD:** e3d41513. `git diff e3d41513..HEAD -- tests` is empty, with 0 lines. Over the whole run, no byte under `tests/` was written by S3.
 
-## 1. Blockers
+## 1. Blockers and how they were resolved
 
-Each blocker below is a test, or a lint baseline, that disagrees with the spec, the installed openai-codex 0.163, or a slice-1 contract that INV-48 keeps unchanged. Everything else in the area passes.
+The first pass stopped on five blockers. The coordinator ruled on each one, and none of the fixes changed production behaviour.
 
-| # | Where | Spec / contract | Failing output | Why the implementer cannot fix it |
-|---|---|---|---|---|
-| B-1 | `tests/features/codex_host/test_codex_host_hardening_records.py:356` (`test_the_new_fields_default_to_unset_and_build_with_the_sandbox_they_need`) | §12.3 row 7 and D-5: `collaboration_mode` is the **last** field of `CodexSpawnRequest`, appended after `writable_roots`. | `Lists differ: ['turn_service_tier', 'network_access', 'writable_roots', 'collaboration_mode'] != ['turn_service_tier', 'network_access', 'writable_roots']` | This slice-1 pin lists exactly the three fields that follow `name`. §13's superseded-pins table updates the goal-field literal but not this pin. Satisfying the pin means dropping or moving the spec's field. |
-| B-2 | `tests/features/codex_host/test_codex_host_feature_records.py:309` (`CodexTurnEventRecordTests.test_a_snapshot_is_there_exactly_when_the_kind_is_ended`; its fixture `_snapshot()` is at `:308`) | The slice-1 `CodexTurnSnapshot` (`vidbyte/lib/dataclasses/codex_host.py:354`) refuses `COMPLETED` without a result. This slice does not change that record (INV-48). | `AssertionError: False is not true : ('snapshot', {}, 'Codex turn snapshot status COMPLETED requires a result.')` | The fixture builds `CodexTurnSnapshot(handle=..., status=COMPLETED)` with no result. That record raises before any `CodexTurnEvent` check runs, so `refused()` catches the wrong error, one that has no `field`. |
-| B-3 | `tests/features/codex_host/test_codex_host_mcp_memory.py:159` (`test_a_paused_goal_thread_is_loaded_then_its_memory_set_then_status_and_reset_are_sent`) | §9.2: `set_codex_thread_memory_mode` sends `thread/read` through the existing `require_thread`, which calls openai-codex's typed `thread_read`. | `First differing element 0: ('thread/read', {'threadId': 'thr-1', 'includeTurns': False}) != ('thread/read', {'threadId': 'thr-1'})` | `openai_codex/client.py:498-503` always sends `includeTurns`. The other S2 tests already expect it (`test_codex_host_thread_helpers.py:299`, and the `KNOWN EDGE CASES` notes of `test_codex_host_threads.py` and `test_codex_host_fork_review.py`). Only element 0 differs. |
-| B-4 | `tests/features/codex_host/codex_host_feature_support.py:334`, the stub `rename_codex_thread`, calls `self._enter("rename_codex_thread", thread_id=thread_id, name=name)`. `codex_host_support.py:630` declares `_enter(self, name, *args, **kwargs)`. | §8.5 and §9.2: `rename_codex_thread(thread_id, name)`, and `RenameCodexThreadTool` calls it once. | `TypeError` ("got multiple values for argument 'name'") raised inside the stub, so the tool answers `codex.api_error: rename_codex_thread failed with TypeError.` | Any call to the stub's `rename_codex_thread` raises before it records anything. Four tests fail on this one line: `test_codex_host_feature_tools.py::CodexFeatureToolCatalogTests::test_running_every_new_tool_never_reaches_a_function_that_has_no_tool`, `test_codex_host_feature_tools.py::CodexFeatureToolArgumentTests::test_the_settings_listing_and_memory_tools_pass_only_their_own_arguments`, `test_codex_host_tools.py::CodexHostToolErrorTests::test_every_tool_turns_host_errors_into_error_results` and `test_codex_host_tool_hardening.py::CodexToolLocalFailureTests::test_a_runtime_or_key_error_becomes_an_api_error_result_naming_only_the_tool_and_type`. In every one, the rename subtest is the only failing subtest. |
-| B-5 | Lint S054 (`bandit-security-subset`) is at 4 against an allowance of 3, from `vidbyte/lib/enums/codex.py:288` `BEARER_TOKEN = "bearerToken"`. | §9.1 names the member `CodexMcpAuthStatus.BEARER_TOKEN = "bearerToken"`, and `test_codex_host_records.py:83` and `test_codex_host_mcp_memory.py:83` pin it. | `S054 REGRESSED: 4 finding(s), allowance 3.` (ruff S105: "Possible hardcoded password assigned to: BEARER_TOKEN"). The repo already counts `TRIM_TO_TOKEN_BUDGET` and `PASS = "pass"` the same way. | Raising `lint/baseline.json` and adding a suppression are both forbidden, and renaming the member changes a pinned public name. `run_ci.py --stage source` stops at lint, so neither gate stage can pass. |
-
-### Options for the coordinator
-
-1. **S2 repairs its tests and support files** (B-1 to B-4), and the user approves raising S054 to 4 (B-5).
-   - B-1: add `"collaboration_mode"` to the pin at `:356`.
-   - B-2: give `_snapshot()` a result, or use a status that needs none.
-   - B-3: expect `{"threadId": ..., "includeTurns": False}`.
-   - B-4: rename `_enter`'s first parameter, or record the rename under another key.
-   - Consequence: no production change is needed. The implementer then runs both gate stages, pushes, and updates PR #1181.
-2. **Change production to match the tests.** This would move `collaboration_mode`, relax `CodexTurnSnapshot`, send a raw `thread/read`, and rename `BEARER_TOKEN`. Consequence: it breaks D-5, INV-48, the `require_thread` behaviour other tests pin, and the §9.1 enum name. Not recommended.
-
-**Recommendation:** option 1. Each test defect is a single line. B-5 is the same false positive the baseline already counts twice.
+| # | What failed | Ruling | Fixed in |
+|---|---|---|---|
+| B-1 | `test_codex_host_hardening_records.py:356` pinned the three fields after `name` in `CodexSpawnRequest`, but D-5 and row 7 append `collaboration_mode`. | A missed §13 pin. Spec r5 adds it (§16 S3-1). | S2, 32e1a404 (spec 5f6c4fc4) |
+| B-2 | The `_snapshot()` fixture in `test_codex_host_feature_records.py` built a `COMPLETED` `CodexTurnSnapshot` with no result. The slice-1 record refuses that before any `CodexTurnEvent` check runs. | A test defect. | S2, 32e1a404 |
+| B-3 | `test_codex_host_mcp_memory.py:159` expected `thread/read` without `includeTurns`. openai-codex's typed `thread_read` always sends it (`openai_codex/client.py:498-503`). | A test defect. | S2, 32e1a404 |
+| B-4 | The stub's `self._enter("rename_codex_thread", ..., name=name)` collided with `_enter(self, name, *args, **kwargs)`. It failed 4 tests, in each case on the rename subtest only. | A support-file defect. `_enter(self, name, /, *args, **kwargs)` is now positional-only. | S2, 32e1a404 |
+| B-5 | Lint S054 rose from 3 to 4. ruff S105 flags `BEARER_TOKEN = "bearerToken"` on the member name alone. | Raising the baseline was refused. Spec r5 D-40 renames the member to `BEARER` and keeps the value `"bearerToken"`. | S3, b5ffd64d (spec 5f6c4fc4; S2 updated its two pins) |
 
 ## 2. Rows to commits
 
 | Rows | Commit(s) |
 |---|---|
-| 1 (enums, GitFlag) | 43ebb0bb |
+| 1 (enums, GitFlag) | 43ebb0bb, plus the D-40 rename `CodexMcpAuthStatus.BEARER` in b5ffd64d |
+| 2, 3 (`enums/process.py`, `enums/__init__.py`) | 43ebb0bb |
 | 4 (constants and messages) | ead9795a |
 | 5 (git values) | ad71fb89 |
 | 6, 7 (mode records, spawn field) | 6626ed0f |
@@ -43,32 +35,33 @@ Each blocker below is a test, or a lint baseline, that disagrees with the spec, 
 | 9 (17 input records) | 98f1ccf5 |
 | 10 (GitWorktreeSpec) | 6ff014f6 |
 | 11, 12, 13 (GitWorktrees, `lib.process` export, lib README) | 7d761619 |
-| 2, 3 (`enums/process.py`, `enums/__init__.py`) | 43ebb0bb |
-| 14 (connection: unmodeled raw, parse step) | 37b88408, plus the `_log_call` tweak in 9d3e9966 |
+| 14 (connection: unmodeled raw, parse step) | 37b88408, plus the `_log_call` change in 9d3e9966 |
 | 15 (errors) | f192b538, plus the goal-resume naming in 9d3e9966 |
 | 16 (wire: collaboration mode, plan-only turns) | 15ef339e |
 | 17 (feature_wire) | 365e1594, plus the typing fix in c788a097 |
 | 18 (turn_stream) | 294eb192, plus the typing and A007 fix in c788a097 |
 | 19, 20 (turns, turn_events) | bba8c3aa |
 | 21 to 25 (host_core, turn_starts, preflight, thread_helpers, skill_functions) | 7abf98ac |
-| 26 to 29 (four mixins) | 9d3e9966 |
+| 26 to 29 (the four mixins) | 9d3e9966 |
 | 30 (host composition) | 068a812e |
-| 31, 32 (tool base, descriptions) | 1dc5e129, plus 1226e06a |
+| 31, 32 (tool base, descriptions) | 1dc5e129, plus the `_resolve_handles` narrowing in 1226e06a |
 | 33 to 36 (controls, thread_actions, live, tool skill functions) | ff2350eb |
 | 37 to 39 (exports, CodexHostTools at 42) | 3a602eef |
+| Spec frontmatter, §17 row, deviations | the docs commit after b5ffd64d |
 
-The files changed since S2_HEAD match the §12.3 file list exactly. The only other file in that range is `pipeline.md`, from the coordinator's commit 84462e82.
+The files S3 changed match the §12.3 file list exactly. The only other files in the range are the coordinator's and S2's docs and tests commits.
 
 ## 3. Budget (§8.4)
 
 | Item | Budget | Actual |
 |---|---|---|
 | New files | 13 | 13 |
-| New classes | 69 | 69. 70 `+class` lines minus `CodexHost`, whose line changed only its bases. |
+| New classes | 69 | 69: 70 `+class` lines, less `CodexHost`, whose line changed only its bases |
 | New dependencies | 0 | 0 |
 | New public endpoints | 42 | 42: 25 methods, the `collaboration_mode` field and 16 tools |
+| New FailureCodes | 0 | 0 |
 
-**INV-47 ceilings:**
+**INV-47 ceilings,** rechecked at the final HEAD:
 
 | File | Lines | Ceiling |
 |---|---|---|
@@ -76,95 +69,118 @@ The files changed since S2_HEAD match the §12.3 file list exactly. The only oth
 | `wire.py` | 839 | 840 |
 | `feature_wire.py` | 362 | 599 |
 | `thread_methods.py` | 320 | 599 |
-| `controls.py` | 206 | 599 |
 | `thread_actions.py` | 303 | 599 |
 | `turn_stream.py` | 277 | 599 |
 | `turn_starts.py` | 258 | 599 |
 | `settings_methods.py` | 245 | 599 |
+| `controls.py` | 206 | 599 |
 | `goal_methods.py` | 172 | 599 |
 
-## 4. Implementation deviations (for spec §17 once unblocked)
+`wire.py` is one line under its ceiling, so any later change there needs a split first.
 
-1. **Goal-resume error naming** (`errors.py` and `connection.py`). A JSON-RPC error inside the goal resume's start names `thread/goal/set`, the one request Codex refused, in the packet summary and on the `codex_host_call_failed` record. It does not name the call `resume_goal_operation`. EC-37 and the S2 test expect this.
-2. **`host_core.py` holds a third shared helper.** Besides `_guard` and `_owned`, it holds `_change_idle`, the one idle-thread history change that archive, revert, inject and clear share (INV-34). It sits in the core because all four mixins need it.
-3. **`CodexTurnStarts._resume_now`** suppresses a failing goal cancel, then still finishes, unregisters and raises the original error. A failed cleanup never hides the start's own failure.
-4. **Defaults apply only to `None`.** `run_codex_plan`, `start_codex_side_chat` and `resume_codex_goal` replace `request` only when it is `None`, so a wrong-type value such as `{}` reaches the record and is refused, as `test_codex_host_inputs.py` requires.
-5. **Gate feature words.** The `require_experimental_api` feature word is the wire method constant, or the literal `"collaboration_mode"` for a mode. For `run_codex_plan` that is `collaborationMode/list`, and for `list_codex_child_threads` it is `thread/list`.
-6. **The stream translator narrows by type.** It narrows each payload to its openai-codex notification class and raises `TypeError(<payload type>)` for a delta openai-codex delivered as `UnknownNotification` (EC-20), which `record` logs once and shows as a GAP.
-   - So `turn_stream` loads openai-codex at module level, as the §8.4 and INV-45 list of SDK modules allows.
-   - The window checks were split into `_fits`, `_drop_oldest`, `_size` and `_log_drop`, so no bound literal sits beside a bound name (A007).
-7. **`feature_wire` reads with `require_instance`.** `memory_status` and `hit_thread` read their members through `RecordFieldConverter.require_instance`, so a missing or wrong-type member is still a `ConfigurationError` and mypy sees typed values.
-   - `hit_thread` now returns `CodexThreadInfo` and is no longer optional.
+## 4. Implementation deviations
+
+These are also in spec §17, under the S3 row. D-40 is not a deviation: the spec asked for it in r5.
+
+1. **Goal-resume error naming** (`errors.py`, `connection.py`). A JSON-RPC error inside the goal resume's start names `thread/goal/set`, the one request Codex refused, in two places: the packet summary and the `codex_host_call_failed` record. It does not name `resume_goal_operation` (EC-37).
+2. **`host_core.py` holds a third shared helper,** `_change_idle`. It is the one idle-thread history change that archive, revert, inject and clear share (INV-34), and all four mixins need it.
+3. **`CodexTurnStarts._resume_now` suppresses a failing goal cancel.** It then still finishes, unregisters and raises the original error, so a failed cleanup never hides the start's own failure.
+4. **Defaults apply only to `None`.** `run_codex_plan`, `start_codex_side_chat` and `resume_codex_goal` replace `request` only when it is `None`. A wrong-type value such as `{}` reaches the record and is refused.
+5. **Gate feature words.** The `require_experimental_api` feature word is the wire method constant, or the literal `"collaboration_mode"` for a mode.
+   - `run_codex_plan` uses `collaborationMode/list`.
+   - `list_codex_child_threads` uses `thread/list`.
+6. **The stream translator narrows by type.** It narrows each payload to its openai-codex notification class. A delta delivered as `UnknownNotification` raises `TypeError(<payload type>)` (EC-20), which `record` logs once and shows as a GAP.
+   - So `turn_stream` loads openai-codex at module level, which INV-45's list of SDK modules allows.
+   - The window checks are split into `_fits`, `_drop_oldest`, `_size` and `_log_drop`, to satisfy A007.
+7. **`feature_wire` reads with `RecordFieldConverter.require_instance`.**
+   - `memory_status` and `hit_thread` read their members this way, so a missing or wrong-type member is still a `ConfigurationError` and mypy sees typed values.
+   - `hit_thread` returns `CodexThreadInfo` and is not optional.
    - `mcp_server` and `hit_thread` are public helpers that the spec does not list.
    - `goal()` returns `CodexThreadGoal | None`.
 8. **Records.**
-   - `CodexPlanStep.step`, the search snippet, and the event's `item_id`, `item_type` and `text` allow blank text.
+   - Blank text is allowed in `CodexPlanStep.step`, the search snippet, and the event's `item_id`, `item_type` and `text`.
    - The rename record takes a one-line name.
    - `GitWorktreeSpec` bounds its timeout by `NATIVE_THREAD_MAX_SECONDS` and its output by `NATIVE_PROCESS_MAX_OUTPUT_BYTES`.
 9. **Wire.**
-   - `CodexParamsTranslator.collaboration_mode` is a public static method, so `feature_wire` reuses it.
+   - `CodexParamsTranslator.collaboration_mode` is a public static method, so `feature_wire` can reuse it.
    - `sandbox_policy` dumps through openai-codex's `SandboxPolicy` model.
    - `CodexLiveTurn.finish` closes the stream after `set_result`, so the ENDED event carries the final snapshot.
-10. **Side chat.** The side chat's turn view is the request unchanged. The fork view carries the overrides.
-11. **Tool texts.** `THREAD_SETTINGS_UPDATED_TEXT`, `THREAD_ARCHIVED_TEXT` and `THREAD_RENAMED_TEXT` are one sentence each. §9.2 gives only their role, so the wording is the implementer's.
+10. **Side chat.** Its turn view is the request unchanged, and the fork view carries the overrides.
+11. **Tool texts.**
+    - `THREAD_SETTINGS_UPDATED_TEXT`, `THREAD_ARCHIVED_TEXT` and `THREAD_RENAMED_TEXT` are one sentence each. §9.2 gives only their role, so the wording is the implementer's.
     - `TURN_SETTINGS_STATUS_TEXT` is the §9.2 text, verbatim.
-    - The tool modules' `__all__` lists the classes only, matching `COMPACT_STARTED_TEXT`.
-12. **Resume tool.** `ResumeCodexGoalTool` clears from `spawn_defaults` every path in `CODEX_HOST_REJECTED_FIELDS[RESUME_CODEX_GOAL]` and `CODEX_HOST_GOAL_REJECTED_FIELDS`, reset to a fresh record's value, so it follows the host's own tables.
-13. **Tool headers.** The tool headers and the `CodexHostTools` docstring name `forget_codex_turns` as well as `delete_codex_thread` and the nine INV-42 functions, because none of them has a tool.
+    - The tool modules' `__all__` lists only classes.
+12. **Resume tool.** `ResumeCodexGoalTool` resets every path in `CODEX_HOST_REJECTED_FIELDS[RESUME_CODEX_GOAL]` and `CODEX_HOST_GOAL_REJECTED_FIELDS` to a fresh record's value, so it follows the host's own tables.
+13. **Tool headers.** The tool headers and the `CodexHostTools` docstring name `forget_codex_turns`, `delete_codex_thread` and the nine INV-42 functions, because none of them has a tool.
 
 ## 5. Gates
 
-**Area tests:** `tests/features/codex_host` and `tests/test_codex_*.py`, at `3a602eef`, plus the `_base` narrowing.
+All gates ran at b5ffd64d, one at a time, using `venv-codex163`.
+
+**Area suite:** `pytest -q tests/features/codex_host tests/features/harness_threads tests/test_codex_*.py`
 
 ```
-7 failed, 851 passed, 1 skipped in 48.40s
+FAILED tests/features/harness_threads/test_harness_threads_surface.py::test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes
+1 failed, 1293 passed, 3 skipped in 84.98s (0:01:24)
 ```
 
-The 7 failures are exactly B-1, B-2, B-3 and the four B-4 tests.
-
-**Lint:** `lint/run.py` with everything staged.
+**Lint:** `lint/run.py`. These are the lines for the rules this slice touched, and the last line.
 
 ```
-S009   staged-mypy-contracts                     347    350 IMPROVED   (346 after 1226e06a; none in touched modules)
-A007   operational-constants                     255    255 RATCHETED
-S054   bandit-security-subset                      4      3 REGRESSED
-SDK-LINT: FAIL
+S009 IMPROVED 350 -> 346. Lower it with: python lint/run.py --rule S009 --update-baseline
+S015 RATCHETED: 13 known finding(s). Inspect with: python lint/run.py --rule S015 --all
+S025 IMPROVED 263 -> 261. Lower it with: python lint/run.py --rule S025 --update-baseline
+S054 RATCHETED: 3 known finding(s). Inspect with: python lint/run.py --rule S054 --all
+A007 RATCHETED: 255 known finding(s). Inspect with: python lint/run.py --rule A007 --all
+SDK-LINT: PASS
 ```
 
-S054 (B-5) is the only regression.
+**Semgrep:** `.semgrep/typed-mapping-boundary-policy.yml`, run through `semgrep-core`. It found 0 results and 0 errors on every changed `.py` file, including the two the rename touched (`vidbyte/lib/enums/codex.py` and `vidbyte/tools/builtins/codex/_base.py`).
 
-**Semgrep:** `.semgrep/typed-mapping-boundary-policy.yml` reports 0 results and 0 errors on every changed `.py` file.
-
-**Full gate:**
-- `run_ci.py --stage source` stops at lint on S054:
-
-  ```
-  SDK-LINT: FAIL
-  CI failed: Command failed with exit code 1: ...lint\run.py
-  ```
-
-- The remaining source steps were run by hand after lint: compileall, the three `check_*` scripts and the full pytest. They are in the next section.
-- The package stage was not run, because the source stage cannot pass.
-
-## 6. Remaining source steps (run by hand)
-
-These are the `run_source` steps after lint, run at `3a602eef` with `PYTHONPATH` set to the worktree. Their output:
+**`PYTHONPATH=$(pwd) run_ci.py --stage source`,** run alone:
 
 ```
-compileall ok
-write_paths exit=0
-primitives exit=0
-reasoning exit=0
-9 failed, 6816 passed, 27 skipped in 153.02s (0:02:33)
+SDK-LINT: PASS
+context write-path integrity: ok
+context primitive introductions: ok
+reasoning trace contracts: ok (182 tools, 55 shapes)
+FAILED tests/features/harness_threads/test_harness_threads_surface.py::test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes
+=========== 1 failed, 6824 passed, 27 skipped in 153.20s (0:02:33) ============
+CI failed: Command failed with exit code 1: ...python.exe -m pytest (cwd=...vidbyte-sdk-codex-host-first-class).
 ```
 
-The 9 failures:
-- **The 7 blocker tests above.**
-- **`tests/features/harness_threads/test_harness_threads_surface.py::test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes`:** this failure is inherited from the base branch. This slice adds no FailureCode.
-- **`tests/test_mcp_stdio_transport.py::McpStdioTransportHardeningTests::test_cancelled_waiter_does_not_break_transport`:** this test is flaky under full-suite load (`stdin_write_failed`). It passed 3 times out of 3 when its file ran alone (`22 passed in 2.19s`, `22 passed in 2.07s`, `22 passed in 2.11s`), and this branch touches no MCP code.
+The one failure is inherited from the base branch. It asserts `len(main_members) == 120`, and this slice adds no FailureCode. The MCP stdio test that flaked in the first pass passed this time.
 
-## 7. Not done, by rule
+**`run_ci.py --stage package`,** run alone with no `PYTHONPATH`:
 
-- The branch has not been pushed, and the PR #1181 body has not been updated (`gh pr edit`), because both gate stages must pass first.
-- The `spec.md` frontmatter `status`, the §17 r4 row and "Implementation deviations" have not been written, so the spec does not claim it is implemented while it is blocked. Section 4 above holds the deviation text, ready to paste.
-- §6.2 has no blank Proof cells to fill. Every AC row already names its test.
+```
+Successfully built vidbyte_sdk-0.3.0.tar.gz and vidbyte_sdk-0.3.0-py3-none-any.whl
+...vidbyte_sdk-0.3.0-py3-none-any.whl: PASSED
+...vidbyte_sdk-0.3.0.tar.gz: PASSED
+No broken requirements found.
+Installed vidbyte-sdk 0.3.0 passed smoke checks.
+CI passed.
+```
+
+## 6. Tricky parts, for the next agent
+
+- **A007's context rule.** A numeric literal within seven ancestor nodes of a name holding an operational token (`timeout`, `limit`, `token`, `char` and others) counts as a finding, even a literal `1` in `sequence + 1`.
+  - Writing the constant out does not help.
+  - Moving the arithmetic into a small helper method, away from the bound name, does.
+- **S009 is a whole-file mypy ratchet.** openai-codex's notification payloads are wide unions, so one unnarrowed `.delta` produced 483 findings.
+  - Use `isinstance` narrowing with a `TypeError` tail.
+  - On raw mappings, use `RecordFieldConverter.require_instance`.
+  - Narrow in the same condition, not in a later statement. `_resolve_handles` needed this.
+- **S015 reads `__all__` literally.** A script that rewrote a long `__all__` turned the `# Memory providers` comment into a string entry. Check the diff of every `__all__` you regenerate.
+- **openai-codex's `thread_read` always sends `includeTurns`.** Any test or fake that matches `thread/read` params must expect it (B-3).
+- **Name-only security hits.** ruff S105 flags any name holding "token" or "password" that is assigned a string. Name enum members for what they are, not for the wire value (D-40).
+- **The test support's `_enter` takes `name` as a positional-only parameter.** A stub that passes `name=` as a keyword needs that signature (B-4).
+- **The semgrep-core JSON output starts with a "." progress line.** Parse it from the first `{`.
+- **Test flakiness.** `test_mcp_stdio_transport.py::test_cancelled_waiter_does_not_break_transport` can fail under full-suite load (`stdin_write_failed`). It passes when its file runs alone, so re-run the stage if it flakes.
+
+## 7. Open items
+
+- **The inherited harness_threads failure** (`main_members == 120`) still makes `--stage source` exit 1. It predates this branch, and fixing it is outside §12.3.
+- **Lint reports several IMPROVED rules:** A002, S001, S009, S010, S025, S061 and S063. Lowering their baselines means editing `lint/`, which S3 may not do. Someone allowed to edit `lint/` can lower them with `--update-baseline`.
+- **The §17 row date.** The brief said `2026-10-19`, but the row is dated `2026-10-18`, the system date when the row was written.
+- **§6.2 had no blank Proof cells.** Every AC row already names its test.
