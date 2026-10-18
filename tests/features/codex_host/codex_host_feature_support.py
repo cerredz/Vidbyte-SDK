@@ -208,6 +208,10 @@ WORKTREE_TIMED_OUT_NEXT_STEP = "Run git worktree add in the repository by hand t
 WORKTREE_FAILED_MESSAGE = "git worktree add exited with code {exit_code}: {detail}"
 WORKTREE_FAILED_CAUSE = "The folder is not inside a git work tree, the branch already exists, or the base ref is unknown."
 WORKTREE_FAILED_NEXT_STEP = "Fix the repository, branch or base ref that git names, then call again."
+# Spec r6, section 9.2 and EC-63: a worktree root that cannot be prepared; the text names only the exception's type.
+WORKTREE_ROOT_MESSAGE = "create_codex_worktree did not run git, because preparing the worktree root ~/.vidbyte/codex-worktrees raised {error_type}."
+WORKTREE_ROOT_CAUSE = "The home folder cannot be found, a file stands where ~/.vidbyte or ~/.vidbyte/codex-worktrees should be a folder, or this process may not read or create folders there."
+WORKTREE_ROOT_NEXT_STEP = "Make sure the home folder exists and that ~/.vidbyte/codex-worktrees is a folder this process can write to, moving aside any file in its place, then call again."
 # Section 9.3, the side-chat texts, verbatim.
 SIDE_CHAT_INSTRUCTIONS = "This thread is a side conversation forked from another thread so the user can ask a quick question without changing the main work. Answer the side question using the inherited history as background only. Do not continue, finish or change the main task, and do not edit files unless the user explicitly asks for that in this side conversation."
 SIDE_CHAT_BOUNDARY = "The side conversation starts here. Everything above is history from the main thread, given as background; the messages below belong only to this side conversation."

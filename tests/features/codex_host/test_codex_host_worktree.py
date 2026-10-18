@@ -1,7 +1,7 @@
 """FILE: tests/features/codex_host/test_codex_host_worktree.py
 
-PURPOSE: Proves create_codex_worktree and the canonical GitWorktrees helper with the real git on temporary repositories: one git worktree add under Path.home()/.vidbyte/codex-worktrees on a new branch from HEAD or a base ref, a folder name built from the repository name and the branch, an existing folder refused before git runs, git missing, a nonzero exit with git's first stderr line cut to the cap, a hang stopped at the bound, the branch rule refused before git, logs that carry no path, branch or git output, and never a Codex request.
-ROLE IN CODEBASE: Worktree layer of the slice-2 tests in tests/features/codex_host/ (docs/spec/codex-host-first-class/spec.md AC-24, INV-8, INV-9, INV-29, FR-13, FR-35, D-19, EC-34 to EC-36, T-5, NFR-7). The host class needs the optional openai-codex extra, so CI skips it; the GitWorktrees class needs only git and runs everywhere.
+PURPOSE: Proves create_codex_worktree and the canonical GitWorktrees helper with the real git on temporary repositories: one git worktree add under Path.home()/.vidbyte/codex-worktrees on a new branch from HEAD or a base ref, a folder name built from the repository name and the branch, an existing folder refused before git runs, a worktree root that cannot be prepared refused by the exception's type alone, git missing, a nonzero exit with git's first stderr line cut to the cap, a hang stopped at the bound, the branch rule refused before git, logs that carry no path, branch or git output, and never a Codex request.
+ROLE IN CODEBASE: Worktree layer of the slice-2 tests in tests/features/codex_host/ (docs/spec/codex-host-first-class/spec.md AC-24, INV-8, INV-9, INV-2, INV-29, FR-13, FR-35, D-19, EC-34 to EC-36, EC-63, T-5, NFR-7). The host class needs the optional openai-codex extra, so CI skips it; the GitWorktrees class needs only git and runs everywhere.
 ARCHITECTURE NOTE: Spec section 13 makes git a real seam: CliRunner and CliArgv stay real and only Path.home is patched. The repositories are built with subprocess git under a private global config (GIT_CONFIG_GLOBAL to an empty file, GIT_CONFIG_NOSYSTEM, GIT_CEILING_DIRECTORIES at the temporary root), so a developer's own git settings, hooks or a parent repository cannot change an answer. Expected git messages come from an oracle: the test runs the same git worktree add argv the spec gives and reads its exit code and first stderr line, so no git wording is hard-coded. A post-checkout hook is the child that observes git's environment or hangs; git worktree add runs it after the checkout.
 COMMON MODIFICATION PATTERNS: Add a git failure as one row of the EC-34 table with the setup that causes it; the oracle supplies the expected text. Keep repository and branch names to safe characters unless the test is about the folder name.
 KNOWN EDGE CASES: A hook's script is written with LF line endings, because Git for Windows runs it with sh. The timeout test patches vidbyte.harnesses.native.codex.thread_methods.CODEX_HOST_WORKTREE_TIMEOUT_SECONDS to 1.5 seconds and its hook sleeps a bounded 20 seconds, so the test waits for the bound by design. For a branch that already exists, git 2.49 prints "Preparing worktree (new branch ...)" before the fatal line, so the spec's first stderr line is that progress line (reported in test-plan.md). git worktree add creates the branch before it finds the target folder taken, so a missing branch proves git never ran.
@@ -12,6 +12,7 @@ TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/codex_host/test_code
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import subprocess
@@ -36,6 +37,9 @@ from tests.features.codex_host.codex_host_feature_support import (
     WORKTREE_GIT_MISSING_NEXT_STEP,
     WORKTREE_REF_MESSAGE,
     WORKTREE_REPOSITORY_MESSAGE,
+    WORKTREE_ROOT_CAUSE,
+    WORKTREE_ROOT_MESSAGE,
+    WORKTREE_ROOT_NEXT_STEP,
     WORKTREE_TIMED_OUT_CAUSE,
     WORKTREE_TIMED_OUT_MESSAGE,
     WORKTREE_TIMED_OUT_NEXT_STEP,
@@ -273,6 +277,57 @@ class CodexWorktreeHostTests(_GitSandbox, FeatureHostCase):
         self.assertEqual(str(error), WORKTREE_REPOSITORY_MESSAGE)
         self.assertFalse((self.home / ".vidbyte").exists())
         self.assertEqual(self.branches(repo), [self.branch_of(repo)])
+
+    def root_error_type(self, home: Path) -> str:
+        """The type the root's own mkdir raises under this home: FileExistsError on Windows, NotADirectoryError on Linux."""
+        try:
+            home.joinpath(*ROOT_PARTS).mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            return type(exc).__name__
+        self.fail("the worktree root could be made, so this case does not reach EC-63")
+
+    async def test_a_worktree_root_that_cannot_be_prepared_is_refused_by_type_without_the_home_path_and_git_never_runs(self) -> None:
+        # EC-63, INV-2, INV-29 (spec r6, review R-1): the home lookup or the root's mkdir raises, and the packet names only
+        # the exception's type, raised from None: no home path or exception text, no log record, no branch, no request.
+        repo = self.make_repo("notes")
+        home = self.root / f"home-{PATH_CANARY}"
+        home.mkdir()
+        host = await self.opened(linux=False)
+        records = self.capture_logs(HOST_LOGGER)
+        real_mkdir = Path.mkdir
+
+        def denied(path: Path, *args: Any, **kwargs: Any) -> None:
+            # A home this process may not write to. A read-only folder does not stop mkdir on Windows, so the
+            # refusal is simulated; like the real one, it quotes the absolute path.
+            if path == home or home in path.parents:
+                raise PermissionError(13, "Permission denied", str(path))
+            real_mkdir(path, *args, **kwargs)
+
+        def at_home() -> Any:
+            return mock.patch("pathlib.Path.home", return_value=home)
+
+        rows = (
+            ("no home folder", (mock.patch("pathlib.Path.home", side_effect=RuntimeError(f"Could not determine home directory {PATH_CANARY}.")),), lambda: None, lambda: "RuntimeError"),
+            ("home not writable", (at_home(), mock.patch("pathlib.Path.mkdir", denied)), lambda: None, lambda: "PermissionError"),
+            ("~/.vidbyte is a file", (at_home(),), lambda: (home / ROOT_PARTS[0]).write_text("not a folder", encoding="utf-8"), lambda: self.root_error_type(home)),
+        )
+        for label, patches, prepare, error_type in rows:
+            with self.subTest(case=label):
+                prepare()
+                with contextlib.ExitStack() as stack:
+                    for patch in patches:
+                        stack.enter_context(patch)
+                    error = await self.worktree_error(host.create_codex_worktree(repo, "feat/x"))
+                message = WORKTREE_ROOT_MESSAGE.format(error_type=error_type())
+                assert_packet(self, error, operation=OPERATION, code=INVALID, message=message, cause=WORKTREE_ROOT_CAUSE, next_step=WORKTREE_ROOT_NEXT_STEP)
+                # Raised from None: the original exception, whose text holds the home path, is not chained.
+                self.assertIsNone(error.__cause__)
+                self.assertTrue(error.__suppress_context__)
+                assert_no_canary(self, [error.message, str(error), error.next_step], (PATH_CANARY, str(home)))
+        # git worktree add makes its branch first, so an unchanged branch list proves git never ran.
+        self.assertEqual(self.branches(repo), [self.branch_of(repo)])
+        self.assertEqual([record.getMessage() for record in records], [])
+        self.assertEqual(self.sent_methods(), [])
 
 
 @requires_sdk

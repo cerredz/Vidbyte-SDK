@@ -1,7 +1,7 @@
 """FILE: tests/features/codex_host/test_codex_host_goal_control.py
 
 PURPOSE: Proves the four goal controls over the in-memory app-server: pause_codex_goal sending one user-origin paused set and ending a tracked goal run through its finish rule; resume_codex_goal resuming a paused, blocked, usage-limited or raised budget-limited goal with a status-only set under connection.start and tracking the run, refusing an active, complete or spent goal before thread/resume, and cleaning up a failed start exactly once; edit_codex_goal changing only the objective or budget; and clear_codex_goal clearing a stored goal on an idle thread.
-ROLE IN CODEBASE: Goal layer of the slice-2 tests in tests/features/codex_host/ (docs/spec/codex-host-first-class/spec.md AC-25 to AC-29, INV-7, INV-30 to INV-34, D-17, D-38, EC-37 to EC-41, EC-58). Every class needs the optional openai-codex extra, so CI skips them.
+ROLE IN CODEBASE: Goal layer of the slice-2 tests in tests/features/codex_host/ (docs/spec/codex-host-first-class/spec.md AC-25 to AC-29, INV-7, INV-30 to INV-34, D-17, D-38, EC-37 to EC-41, EC-58, EC-64). Every class needs the optional openai-codex extra, so CI skips them.
 ARCHITECTURE NOTE: The fake's thread/goal/set answers a status-only active set on a goal that was not active by starting a goal turn, as Codex does (A-1, A-19); goal_resume_starts_turn turns that off to elapse the start window. RecordingGoalState logs finish and the fake client logs cancel_goal_operation and unregister_goal_operation, so the cleanup order is read from server.kinds. The no-goal packet is checked with the text of CODEX_HOST_NO_STORED_GOAL_MESSAGE (section 9.2, r4) through codex_host_feature_support; test_codex_host_feature_constants.py pins the name, and run_codex_goal keeps the older CODEX_HOST_NO_GOAL_MESSAGE.
 COMMON MODIFICATION PATTERNS: Add a goal status to RESUMABLE or NOT_RESUMABLE when CODEX_HOST_GOAL_RESUME_FROM_STATUSES changes. Keep each request sequence whole; section 9.2 calls its order normative.
 KNOWN EDGE CASES: The resume start window is patched to 0.2 seconds in vidbyte.harnesses.native.codex.turn_starts, where section 13 says it is read at call time; that test waits for the window by design. The SDK's own goal cancel sends its pause set without an origin, so the cancel is counted by status, not by origin.
@@ -121,7 +121,7 @@ class CodexGoalPauseHostTests(_GoalCase):
 
 @requires_sdk
 class CodexGoalResumeHostTests(_GoalCase):
-    """AC-26, AC-27, INV-31, D-17, D-38, EC-37 to EC-39 and EC-58."""
+    """AC-26, AC-27, INV-31, D-17, D-38, EC-37 to EC-39, EC-58 and EC-64."""
 
     async def test_a_resumable_goal_is_resumed_with_a_status_only_set_and_its_run_is_tracked(self) -> None:
         # AC-26: no objective, no tokenBudget and no clear; the handle follows the goal run to its end.
@@ -234,6 +234,29 @@ class CodexGoalResumeHostTests(_GoalCase):
         self.assertIn(RPC_ERROR_TEXT.format(method="thread/goal/set", code=-32600, message="goal is locked by another client"), error.message)
         self.assertEqual(self.goal_calls(thread.thread_id), ["finish", "unregister_goal_operation"])
         self.assertEqual(len(self.goal_sets(thread.thread_id)), 1)
+        self.assertFalse(host._registry.busy(thread.thread_id))
+
+    async def test_a_resume_set_codex_applied_but_answered_badly_is_cancelled_once_and_cleaned_up(self) -> None:
+        # EC-64, INV-31 (spec r6, review R-4): Codex applies the active set, but its answer does not validate. That is not
+        # a JSON-RPC refusal (EC-37), so the set counts as sent: one pause set, at most one interrupt, finish, unregister.
+        thread = self.with_goal("paused")
+
+        def answer_badly(params: dict[str, Any], result: Any) -> list[Any]:
+            # The set was applied; the echoed goal carries a status the SDK does not know.
+            result["goal"]["status"] = "notAStatus"
+            return []
+
+        self.server.before_response("thread/goal/set", answer_badly, predicate=lambda params: params.get("status") == "active")
+        host = await self.opened()
+        error = await self.codex_error(host.resume_codex_goal(thread.thread_id), "codex.protocol_mismatch")
+        self.assertEqual(error.operation, "resume_codex_goal")
+        self.assertEqual(self.goal_calls(thread.thread_id), START_FAILURE_CLEANUP)
+        self.assertEqual([params.get("status") for params in self.goal_sets(thread.thread_id)], ["active", "paused"])
+        self.assertEqual(thread.goal["status"], "paused")
+        self.assertLessEqual(self.count("turn/interrupt", lambda params: params["threadId"] == thread.thread_id), 1)
+        # The goal turn the applied set started is not left running untracked.
+        self.assertNotEqual(thread.turns[-1].status, "inProgress")
+        self.assertIsNone(host._registry.usage(thread.thread_id))
         self.assertFalse(host._registry.busy(thread.thread_id))
 
     async def test_a_resume_cancelled_after_its_set_was_sent_adopts_the_late_run_and_stops_it_once(self) -> None:

@@ -1,6 +1,6 @@
 """FILE: tests/features/codex_host/test_codex_host_feature_tools.py
 
-PURPOSE: Proves the sixteen first-class agent tools beyond their table shape: no tool for the nine INV-42 functions, no posture parameter in any new schema, a paid-work sentence in every new WRITE description, the arguments each tool passes to its host method, the side-chat tool's narrowed read-only, never-ask posture on a stub host and on the wire, the plan, side-chat and resume tools' cap slots and owned handles, handle ownership for the wait and turn-settings tools, the turn-settings status text, the multi-wait JSON without items, and host refusals (a mode in the defaults, the experimental gate) returned as error results.
+PURPOSE: Proves the sixteen first-class agent tools beyond their table shape: no tool for the nine INV-42 functions, no posture parameter in any new schema, a paid-work sentence in every new WRITE description, the arguments each tool passes to its host method, the side-chat tool's narrowed read-only, never-ask posture on a stub host and on the wire, with the fields a side chat refuses reset first, the plan, side-chat and resume tools' cap slots and owned handles, handle ownership for the wait and turn-settings tools, the turn-settings status text, the multi-wait JSON without items, and host refusals (a mode in the defaults, the experimental gate) returned as error results.
 ROLE IN CODEBASE: Tool layer of the slice-2 tests in tests/features/codex_host/ (docs/spec/codex-host-first-class/spec.md AC-35 to AC-37, INV-41 to INV-44, D-21, D-22, EC-52 to EC-54, EC-59, T-2). The stub-host classes run on CI without openai-codex; the real-host class needs the optional extra, so CI skips it.
 ARCHITECTURE NOTE: Tools are executed directly, the way McpStudioServer runs them. StubCodexHost records each host method's arguments by keyword (FeatureStubMethods in codex_host_feature_support.py), and a handle stays RUNNING until the test finishes it, which is how the cap sees a live run. The pinned tests in test_codex_host_tools.py, test_codex_host_helper_tools.py and test_codex_host_tool_hardening.py already check the 42-tool table, FORBIDDEN_PARAMETERS and the error results for every tool; this module does not repeat them.
 COMMON MODIFICATION PATTERNS: A new tool adds one row to the arguments table here, besides its rows in TOOL_TABLE, _valid_arguments and NO_HANDLE_ARGUMENTS. A field that the side-chat tool narrows adds one replace() term to _side_chat_view.
@@ -19,8 +19,8 @@ import re
 import unittest
 from typing import Any
 
-from tests.features.codex_host.codex_host_feature_support import FEATURE_METHODS, NO_TOOL_FUNCTIONS, OLDER_NO_TOOL_FUNCTIONS, TURN_SETTINGS_STATUS_TEXT
-from tests.features.codex_host.codex_host_support import NEXT_STEPS, TOOL_TABLE, WAIT_SECONDS, FeatureHostCase, StubCodexHost, requires_sdk
+from tests.features.codex_host.codex_host_feature_support import FEATURE_METHODS, NO_TOOL_FUNCTIONS, OLDER_NO_TOOL_FUNCTIONS, SIDE_CHAT_REJECTED_FIELDS, TURN_SETTINGS_STATUS_TEXT
+from tests.features.codex_host.codex_host_support import NEXT_STEPS, TOOL_TABLE, WAIT_SECONDS, FeatureHostCase, StubCodexHost, make_echo_tool, requires_sdk
 from vidbyte.lib.dataclasses.tools import ToolCall, ToolResult, ToolStatus
 
 WORKSPACE = os.path.abspath(os.path.join(os.sep, "agent-workspace"))
@@ -84,14 +84,24 @@ def _writable_defaults(*, cwd: str = WORKSPACE) -> Any:
     )
 
 
+def _refused_field_defaults(*, cwd: str = WORKSPACE) -> Any:
+    """AC-36 extended (spec r6): the writable posture plus one Vidbyte tool, a name and a personality, which a side chat refuses."""
+    from vidbyte.lib.enums.codex import CodexPersonality
+
+    defaults = _writable_defaults(cwd=cwd)
+    return dataclasses.replace(defaults, tools=(make_echo_tool(),), name="Fixer", thread=dataclasses.replace(defaults.thread, personality=CodexPersonality.NONE))
+
+
 def _side_chat_view(defaults: Any) -> Any:
-    """INV-43: spawn_defaults with only the sandboxes, roots, network and approvals narrowed; everything else kept."""
+    """INV-43 (spec r6): every path of the side chat's rejected-fields row back at a fresh request's value, then the
+    sandboxes, roots, network and approvals narrowed; every other field of spawn_defaults is kept."""
     from vidbyte.lib.enums.codex import CodexApprovalMode, CodexApprovalPolicy, CodexApprovalsReviewer, CodexSandbox
 
+    reset = _reset(defaults, SIDE_CHAT_REJECTED_FIELDS)
     return dataclasses.replace(
-        defaults,
-        thread=dataclasses.replace(defaults.thread, sandbox=CodexSandbox.READ_ONLY, approval_mode=CodexApprovalMode.DENY_ALL),
-        turn=dataclasses.replace(defaults.turn, sandbox=CodexSandbox.READ_ONLY, approval_mode=CodexApprovalMode.DENY_ALL),
+        reset,
+        thread=dataclasses.replace(reset.thread, sandbox=CodexSandbox.READ_ONLY, approval_mode=CodexApprovalMode.DENY_ALL),
+        turn=dataclasses.replace(reset.turn, sandbox=CodexSandbox.READ_ONLY, approval_mode=CodexApprovalMode.DENY_ALL),
         writable_roots=(),
         network_access=None,
         approval_policy=CodexApprovalPolicy.PROVIDER_DEFAULT,
@@ -235,6 +245,25 @@ class CodexFeatureToolArgumentTests(_ToolCase):
         # The scope owns the side chat's handle.
         self.assert_success(await _call(tools, "get_codex_turn_result", handle))
 
+    async def test_the_side_chat_tool_resets_the_fields_a_side_chat_refuses_before_it_narrows(self) -> None:
+        # AC-36 extended, INV-43, D-22 (spec r6, review R-5): tools, name and personality go back to a fresh request's
+        # values, so the host can accept the request, and the read-only, never-asking posture still holds.
+        from vidbyte.lib.dataclasses.codex import CodexThreadSettings
+        from vidbyte.lib.dataclasses.codex_host import CodexSpawnRequest
+        from vidbyte.lib.enums.codex import CodexApprovalMode, CodexSandbox
+
+        defaults = _refused_field_defaults()
+        host = StubCodexHost()
+        tools = _toolset(host, spawn_defaults=defaults)
+        self.assert_success(await _call(tools, "start_codex_side_chat", {"thread_id": "thr-7", "prompt": "Why?"}))
+        request = host.last("start_codex_side_chat")[1]["request"]
+        fresh, fresh_thread = CodexSpawnRequest(), CodexThreadSettings()
+        self.assertEqual((request.tools, request.name, request.thread.personality), (fresh.tools, fresh.name, fresh_thread.personality))
+        self.assertEqual((request.thread.sandbox, request.turn.sandbox), (CodexSandbox.READ_ONLY, CodexSandbox.READ_ONLY))
+        self.assertEqual((request.thread.approval_mode, request.turn.approval_mode), (CodexApprovalMode.DENY_ALL, CodexApprovalMode.DENY_ALL))
+        self.assertEqual(request, _side_chat_view(defaults))
+        self.assertEqual(request.developer_instructions, defaults.developer_instructions)
+
     async def test_the_plan_tool_passes_the_scope_posture_and_the_resume_tool_drops_the_fields_resume_refuses(self) -> None:
         # INV-43: the plan's request is spawn_defaults; resume's is spawn_defaults with its continue- and goal-refused fields reset.
         from vidbyte.lib.dataclasses.codex import CodexThreadSettings
@@ -375,6 +404,23 @@ class CodexFeatureToolHostTests(FeatureHostCase):
         result = await _call(tools, "start_codex_side_chat", {"thread_id": parent.thread_id, "prompt": "Why?"})
         self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
         self.assertEqual(self.count("thread/inject_items"), 1)
+
+    async def test_the_side_chat_tool_starts_under_defaults_that_set_tools_a_name_and_a_personality(self) -> None:
+        # AC-36 extended (spec r6, review R-5): the reset fields are ones the method refuses for a side chat, so it starts,
+        # and both the fork and the turn still carry approvalPolicy "never" with no reviewer and a read-only sandbox.
+        parent = self.server.seed_thread(completed_turns=1)
+        host = await self.opened()
+        tools = _toolset(host, spawn_defaults=_refused_field_defaults(cwd=self.fakes.DEFAULT_CWD))
+        result = await _call(tools, "start_codex_side_chat", {"thread_id": parent.thread_id, "prompt": "Why?"})
+        self.assertEqual(result.status, ToolStatus.SUCCESS, result.output)
+        fork = self.server.matching("thread/fork")[-1].params
+        start = self.server.matching("turn/start")[-1].params
+        for label, params in (("thread/fork", fork), ("turn/start", start)):
+            with self.subTest(request=label):
+                self.assertEqual(params.get("approvalPolicy"), "never")
+                self.assertNotIn("approvalsReviewer", params)
+        self.assertEqual(fork.get("sandbox"), "read-only")
+        self.assertEqual(start["sandboxPolicy"]["type"], "readOnly")
 
     async def test_a_mode_in_the_scope_defaults_makes_the_plan_tool_return_an_error_naming_it(self) -> None:
         # EC-53: run_codex_plan's record refuses collaboration_mode, so the tool answers configuration.invalid_argument.

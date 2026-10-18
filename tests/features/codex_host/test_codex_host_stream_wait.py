@@ -1,6 +1,6 @@
 """FILE: tests/features/codex_host/test_codex_host_stream_wait.py
 
-PURPOSE: Proves stream_codex_turn and wait_codex_turns over the in-memory app-server: one ordered, numbered event per streamed notification ending in exactly one ENDED whose snapshot is wait_codex_turn's; no raw reasoning text in any event or log; the per-turn and per-host bounds dropping each log's own oldest events and showing a lagging subscriber one GAP; a subscription counted as reading only while its generator runs, so an un-iterated, abandoned or closed one releases the window at the turn's end; the eager handle check at the call; and wait_codex_turns returning one snapshot per handle in order without touching any turn.
+PURPOSE: Proves stream_codex_turn and wait_codex_turns over the in-memory app-server: one ordered, numbered event per streamed notification ending in exactly one ENDED whose snapshot is wait_codex_turn's; no raw reasoning text in any event or log; the per-turn and per-host bounds, by event count and by cumulative characters, dropping each log's own oldest events and showing a lagging subscriber one GAP, with an event that alone passes the character bound costing only its own GAP; a subscription made mid-turn starting at the oldest kept event; a subscription counted as reading only while its generator runs, so an un-iterated, abandoned or closed one releases the window at the turn's end; the eager handle check at the call; and wait_codex_turns returning one snapshot per handle in order without touching any turn.
 ROLE IN CODEBASE: Stream and wait layer of the slice-2 tests in tests/features/codex_host/ (docs/spec/codex-host-first-class/spec.md AC-12 to AC-18, AC-43, AC-44, INV-18 to INV-23, D-9 to D-13, D-37, D-39, EC-3, EC-4, EC-17 to EC-22, EC-55, EC-60, EC-62, and section 13's dedicated stream_codex_turn boundary test). Every class needs the optional openai-codex extra, so CI skips them.
 ARCHITECTURE NOTE: A subscriber reads its first event with anext right after the first notification is emitted, so it is counted as reading before the rest arrive; the rest are emitted in one block, which the fake writes in order and the host records in order. The bounds are patched in vidbyte.harnesses.native.codex.turn_stream, where section 13 says they are read at call time. The host's kept totals are read with CodexTurnRegistry.charge_stream(0, 0), which adds nothing.
 COMMON MODIFICATION PATTERNS: Add a notification row to the AC-12 order test when CODEX_HOST_STREAM_NOTIFICATION_KINDS gains a method. Keep every bound test's arithmetic in its comment, so a changed bound rule shows which count moved.
@@ -104,6 +104,13 @@ class _StreamCase(FeatureHostCase):
                 return
             await asyncio.sleep(0)
         self.fail(f"{what} did not happen within {LOOP_YIELDS} loop yields")
+
+    async def read_through(self, stream: AsyncIterator[Any], sequence: int) -> None:
+        """Read a subscription until it yields the kept event with this sequence, so every earlier one is recorded."""
+        while True:
+            event = await self.first(stream)
+            if event.kind.value != "gap" and event.sequence >= sequence:
+                return
 
 
 @requires_sdk
@@ -357,6 +364,110 @@ class CodexTurnStreamHostTests(_StreamCase):
         self.assertEqual((events[1].sequence, events[1].dropped), (2, 1))
         self.assertEqual(events[2].sequence, 3)
         self.assertEqual(events[-1].snapshot.result.final_response, "Hi there")
+
+    async def test_an_oversize_event_costs_a_lagging_subscriber_only_its_own_gap(self) -> None:
+        # EC-19, INV-20 (review R-3): limit 300; the subscriber read 1 and lags over 2 and 3 when a 1,000-character diff
+        # arrives. Only the diff is dropped, so it reads 2 and 3, then GAP(4, dropped=1), then 5; nothing older is lost.
+        self.patch_stream("CODEX_HOST_STREAM_TEXT_LIMIT_CHARS", 300)
+        host = await self.opened()
+        handle = await self.spawn(host)
+        stream = host.stream_codex_turn(handle)
+        self.server.emit([self.delta(handle, "a")])
+        events = [await self.first(stream)]
+        oversize = self.server.diff_note(handle.thread_id, handle.turn_id, "+" * 1000)
+        self.server.emit([self.delta(handle, "b"), self.delta(handle, "c"), oversize, self.delta(handle, "d"), *self.end(handle, final=None)])
+        # The turn ends before the subscriber reads on, so it lags over every event the diff could have pushed out.
+        await self.wait_done(host, handle)
+        events += await self.drain(stream)
+        self.assertEqual(_kinds(events), ["message_delta", "message_delta", "message_delta", "gap", "message_delta", "ended"])
+        self.assertEqual([event.sequence for event in events], [1, 2, 3, 4, 5, 6])
+        self.assertEqual(events[3].dropped, 1)
+        self.assertEqual([event.text for event in events if event.kind.value == "message_delta"], ["a", "b", "c", "d"])
+
+    async def test_a_subscription_made_mid_turn_starts_at_the_oldest_kept_event(self) -> None:
+        # INV-22 (review R-6): three deltas are kept before the call, so the new subscription starts at sequence 1.
+        host = await self.opened()
+        handle = await self.spawn(host)
+        witness = host.stream_codex_turn(handle)
+        self.server.emit([self.delta(handle, "a"), self.delta(handle, "b"), self.delta(handle, "c")])
+        await self.read_through(witness, 3)
+        late = host.stream_codex_turn(handle)
+        # The read is bounded: a start fixed at the next event would wait here for sequence 4 and fail at the bound.
+        first = await self.first(late)
+        self.assertEqual((first.kind.value, first.sequence, first.text), ("message_delta", 1, "a"))
+        self.server.emit(self.end(handle, final=None))
+        rest = await self.drain(late)
+        self.assertEqual(_kinds(rest), ["message_delta", "message_delta", "ended"])
+        self.assertEqual([event.sequence for event in rest], [2, 3, 4])
+        self.assertEqual([event.text for event in rest[:2]], ["b", "c"])
+        self.assertEqual(_kinds(await self.drain(witness))[-1], "ended")
+
+    async def test_a_subscription_made_mid_turn_over_a_full_window_starts_at_the_oldest_event_still_kept(self) -> None:
+        # INV-20, INV-22 (review R-6): limit 2 and events 1..3, so 2 and 3 are kept and the new subscription starts at 2.
+        self.patch_stream("CODEX_HOST_STREAM_EVENT_LIMIT", 2)
+        host = await self.opened()
+        handle = await self.spawn(host)
+        witness = host.stream_codex_turn(handle)
+        self.server.emit([self.delta(handle, "a"), self.delta(handle, "b"), self.delta(handle, "c")])
+        await self.read_through(witness, 3)
+        late = host.stream_codex_turn(handle)
+        # Bounded as above; the start is a kept event, so no GAP comes first.
+        first = await self.first(late)
+        self.assertEqual((first.kind.value, first.sequence, first.text), ("message_delta", 2, "b"))
+        self.server.emit(self.end(handle, final=None))
+        rest = await self.drain(late)
+        self.assertEqual(_kinds(rest), ["message_delta", "ended"])
+        self.assertEqual([(event.sequence, event.text) for event in rest[:1]], [(3, "c")])
+        self.assertEqual(_kinds(await self.drain(witness))[-1], "ended")
+
+    async def test_the_turn_character_bound_counts_every_kept_event_not_only_the_new_one(self) -> None:
+        # NFR-3, INV-20 (review R-7a): limit 300 and six 100-character deltas, each under the bound on its own; the
+        # subscriber read 1, so 4..6 (300 characters) are kept and GAP(2) counts 2 and 3.
+        self.patch_stream("CODEX_HOST_STREAM_TEXT_LIMIT_CHARS", 300)
+        host = await self.opened()
+        handle = await self.spawn(host)
+        stream = host.stream_codex_turn(handle)
+        self.server.emit([self.delta(handle, "a" * 100)])
+        await self.first(stream)
+        self.server.emit([*(self.delta(handle, letter * 100) for letter in "bcdef"), *self.end(handle, final=None)])
+        await self.wait_done(host, handle)
+        # The subscription is still reading, so the kept events stay charged to the host until it finishes.
+        self.assertEqual(self.kept(host), (300, 3))
+        rest = await self.drain(stream)
+        self.assertEqual(_kinds(rest), ["gap", "message_delta", "message_delta", "message_delta", "ended"])
+        self.assertEqual((rest[0].sequence, rest[0].dropped), (2, 2))
+        self.assertEqual([event.text for event in rest[1:4]], ["d" * 100, "e" * 100, "f" * 100])
+        self.assertEqual(self.kept(host), (0, 0))
+
+    async def test_the_host_character_bound_drops_each_turns_own_oldest_events(self) -> None:
+        # NFR-3, D-39 (review R-7b): a host limit of 300 characters across two turns of 100-character deltas, each under
+        # every bound on its own; together the logs keep at most 300 characters, and each drops only its own oldest.
+        self.patch_stream("CODEX_HOST_STREAM_HOST_TEXT_LIMIT_CHARS", 300)
+        host = await self.opened()
+        first_turn = await self.spawn(host)
+        second_turn = await self.spawn(host)
+        streams = {first_turn: host.stream_codex_turn(first_turn), second_turn: host.stream_codex_turn(second_turn)}
+        for handle, stream in streams.items():
+            self.server.emit([self.delta(handle, "a" * 100)])
+            await self.first(stream)
+        self.server.emit([*(self.delta(handle, letter * 100) for handle in streams for letter in "bcde")])
+        self.server.emit([note for handle in streams for note in self.end(handle, final=None)])
+        for handle in streams:
+            await self.wait_done(host, handle)
+        chars, events = self.kept(host)
+        self.assertLessEqual(chars, 300)
+        self.assertEqual(chars, 100 * events)
+        rests = {handle: await self.drain(stream) for handle, stream in streams.items()}
+        middles = {handle: [event for event in rest if event.kind.value == "message_delta"] for handle, rest in rests.items()}
+        self.assertLessEqual(sum(len(event.text) for middle in middles.values() for event in middle), 300)
+        for handle, rest in rests.items():
+            with self.subTest(turn=handle.turn_id):
+                kept = len(middles[handle])
+                self.assertTrue(all(event.handle == handle for event in rest))
+                self.assertEqual(_kinds(rest), ["gap", *["message_delta"] * kept, "ended"])
+                self.assertEqual((rest[0].sequence, rest[0].dropped), (2, 4 - kept))
+                self.assertEqual([event.sequence for event in middles[handle]], list(range(6 - kept, 6)))
+        self.assertEqual(self.kept(host), (0, 0))
 
     async def test_a_notification_that_cannot_be_translated_is_logged_once_and_shown_as_a_gap(self) -> None:
         # EC-20, INV-19: record never raises; the drop is logged once with ids, method and type, and the turn ends normally.
