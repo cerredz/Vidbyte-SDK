@@ -11,7 +11,7 @@
 - Git: `git` is needed exactly when a diff, a phase snapshot or a worktree is needed, and its failures are a `ThreadComposeError` with a closed `ThreadComposeProblem`. Snapshots never touch the working tree, the real index, `HEAD` or a ref.
 - One writer: in `verify_with` only the writer, and in `run_ensemble` only the implementer, may change the workspace. Grok readers run in place in `PLAN` or `DEFAULT` mode. opencode and Muse readers run in their own disposable worktrees. A snapshot backstop turns any change during a read-only phase into `READER_CHANGED_WORKSPACE`.
 - Results: a composite returns its record however many steps failed. It raises only `ConfigurationError` (before any I/O), `ThreadComposeError` (with the record so far), `asyncio.CancelledError`, or a defect.
-- Prompts: every text sent to a model comes from the 22 Markdown files in `compose/prompts/`. Spliced values are never parsed as templates, have every bound key replaced by `[redacted]`, lose their NUL characters, and are shortened to fit the receiving harness.
+- Prompts: every text sent to a model comes from the 22 Markdown files in `compose/prompts/`. Spliced values are never parsed as templates, have every bound key replaced by `[redacted]`, lose their NUL characters, have their surrogate halves repaired, and are shortened to fit the receiving harness.
 - Structured answers: an answer goes through `parse_json_answer` with at most two repair turns on the same thread. A cut answer is never decoded.
 
 ## Actors / Callers
@@ -104,6 +104,7 @@ Each is an input and state that leads to a wrong output, and each has a test her
   - a 100,000-character answer that makes the next Grok step fail;
   - ten long proposals cut first come, first served, so later ones reach the selector as their note alone;
   - a NUL that makes the next step refuse its prompt;
+  - a surrogate half in an answer that makes the next Grok or Muse step raise `UnicodeEncodeError` with no record, or leaves an opencode child running;
   - an answer full of quotes cut by characters only, so on win32 the next Grok step exceeds the command-line unit ceiling;
   - braces in model output that are parsed again as a template.
 - Aliases: an alias that silently ignores a misspelled step keyword.
@@ -121,6 +122,7 @@ Each is an input and state that leads to a wrong output, and each has a test her
 - R-15: a step compose derived after I/O was checked again and raised a bare `ConfigurationError`.
 - R-10: a second cancel, or an anyio cancel scope, cut the cleanup short.
 - R-14: a cancel during a slow worktree add left a registration locked.
+- R-12: a surrogate half in an answer crashed the next step's prompt, or left its opencode child running.
 
 ## Test Suite Map
 
@@ -129,7 +131,7 @@ Each is an input and state that leads to a wrong output, and each has a test her
 - `test_harness_compose_prompts.py`: the 22 prompt files, their field sets, the ported files' forbidden texts, the 12,000-character room and the package-data entry (AC-21 static part, INV-20, NFR-11).
 - `test_harness_compose_binding.py`: the binders' six functions, the checked fields of a step, direct calls, the `invoker` rules and the same child process as a direct call (INV-2, INV-3, INV-28, INV-31, EC-43, EC-44, EC-78).
 - `test_harness_compose_validation.py`: every invalid input refused before any I/O, alias arguments bound first, and the command-line unit count unchanged (AC-14, INV-3, INV-5, INV-36, EC-39 to EC-48, EC-62, EC-76, EC-77).
-- `test_harness_compose_chain.py`: the pair alias with answer and diff splicing, the early stop and the prompt fit, in characters and in win32 command-line units (AC-2, AC-7, AC-19, EC-36).
+- `test_harness_compose_chain.py`: the pair alias with answer and diff splicing, the early stop, the prompt fit, in characters and in win32 command-line units, and surrogate halves repaired before they are sent (AC-2, AC-7, AC-19, EC-36, EC-80).
 - `test_harness_compose_verify.py`: the trio alias with isolated verifiers, reader writes caught or kept in their worktrees, and a failed writer (AC-3, AC-8a, AC-8b, EC-52).
 - `test_harness_compose_answers.py`: cut answers, repair turns and their problems, `parse_json_answer` with a caller parser, `JsonText.decode`, and the record bounds (AC-9, AC-16, INV-19, NFR-8, EC-24 to EC-33).
 - `test_harness_compose_handoff.py`: a handoff to a new harness, and the stop after a failed summary (AC-4, EC-64).

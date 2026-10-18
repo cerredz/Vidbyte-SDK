@@ -1,18 +1,19 @@
 """FILE: tests/features/harness_compose/test_harness_compose_chain.py
 
-PURPOSE: chain_threads and the pair aliases (AC-2, AC-7, AC-19, INV-6, INV-12, INV-15, INV-16, INV-17, INV-18, INV-29, EC-34, EC-36, EC-37): step 1 gets exactly the caller's prompt and step k the template rendered with the previous answer and diff, braces in model output arriving literally; the writer's diff is the oracle's diff; a failed step ends the chain with the very error the function raised and later steps never start; a chain without {diff} runs no git at all; and a 100,000-character answer holding a NUL is shortened to fit a Grok step, ending with the truncation note, while the record keeps the raw text; an answer of double quotes is cut by the win32 command-line unit ceiling as well as the character cap.
+PURPOSE: chain_threads and the pair aliases (AC-2, AC-7, AC-19, INV-6, INV-12, INV-15, INV-16, INV-17, INV-18, INV-29, EC-34, EC-36, EC-37, EC-80): step 1 gets exactly the caller's prompt and step k the template rendered with the previous answer and diff, braces in model output arriving literally; the writer's diff is the oracle's diff; a failed step ends the chain with the very error the function raised and later steps never start; a chain without {diff} runs no git at all; and a 100,000-character answer holding a NUL is shortened to fit a Grok step, ending with the truncation note, while the record keeps the raw text; an answer of double quotes is cut by the win32 command-line unit ceiling as well as the character cap; surrogate halves in an answer reach a Grok, Muse or opencode next step repaired, a lone half as U+FFFD and a pair that only NULs kept apart as the one character it encodes, while the record keeps the raw text, no stand-in is left running, and a truncation note counts the answer's length after the repair.
 ROLE IN CODEBASE: Start here when a chain sends the wrong prompt, mis-attributes a diff, keeps going after a failure or sends a prompt the next step refuses.
 ARCHITECTURE NOTE: Expected diffs come from the conftest tree oracle (the test's own git and a temporary index), and expected prompts from rendering the prompt files directly, so neither comes from the code under test. Prompts are read from the stand-in logs: Grok's --single, opencode's stdin, Muse's operand.
-FUNCTION INVENTORY: traceback_files lists the source files of an exception's traceback; the test_* functions are one behaviour each.
+FUNCTION INVENTORY: traceback_files lists the source files of an exception's traceback; surrogate_points lists the surrogate code points of a text; the test_* functions are one behaviour each.
 COMMON MODIFICATION PATTERNS: A new chain behaviour gets its own test with its own labelled stand-ins; keep labels unique within a test.
 WHAT NOT TO DO IN THIS FILE: Do not compare against text compose produced; render the prompt files or ask the oracle.
-KNOWN EDGE CASES: The omitted count of the truncation note is measured on the answer after its NUL is removed, because INV-18 removes NULs before it shortens. NATIVE_ARGV_PROMPT_MAX_CHARS is imported by name into the request record, so the 24,000 cap holds whatever the constants module says (spec §13).
-RELATED DOCS: tests/features/harness_compose/FEATURE.md; docs/spec/native-thread-compose/spec.md §6.1 INV-6, INV-12, INV-15 to INV-18, §6.2 AC-2, AC-7, AC-19, §6.3 EC-34, EC-36, EC-37
+KNOWN EDGE CASES: The omitted count of the truncation note is measured on the answer after its NUL is removed, because INV-18 removes NULs before it shortens. NATIVE_ARGV_PROMPT_MAX_CHARS is imported by name into the request record, so the 24,000 cap holds whatever the constants module says (spec §13). A surrogate half reaches compose only through a JSON escape such as \ud83d in a stand-in's output: json.loads joins two escapes side by side into one character, and opencode's text parts are joined with a line break, so a pair split across two parts arrives as two lone halves. Two halves side by side therefore exist only inside compose, once it removed the NULs between them, which is the case these tests send.
+RELATED DOCS: tests/features/harness_compose/FEATURE.md; docs/spec/native-thread-compose/spec.md §6.1 INV-6, INV-12, INV-15 to INV-18, §6.2 AC-2, AC-7, AC-19, §6.3 EC-34, EC-36, EC-37, EC-80; docs/spec/native-thread-compose/review.md R-12
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_compose/test_harness_compose_chain.py
 """
 
 from __future__ import annotations
 
+import asyncio
 import re
 import sys
 
@@ -21,6 +22,21 @@ import pytest
 NOTES = "NOTES-CONTENT-7f3a\nsecond line\n"
 GROK_TEXT = "Use {curly} braces, {{doubled}} ones and a lone } here."
 VENDOR = "the model refused because the request was ambiguous"
+HIGH, LOW, NUL = chr(0xD83D), chr(0xDE00), chr(0)
+REPLACEMENT, JOINED = chr(0xFFFD), chr(0x1F600)
+# Each case: the opencode answer's text parts, and the answer
+# as the next step must receive it.
+SURROGATE_CASES = {
+    "lone high half": (["answer " + HIGH + " end"], "answer " + REPLACEMENT + " end"),
+    "lone low half": (["answer " + LOW + " end"], "answer " + REPLACEMENT + " end"),
+    "pair split across two parts": (["answer " + HIGH, LOW + " end"], "answer " + REPLACEMENT + "\n" + REPLACEMENT + " end"),
+    "pair with a NUL between": (["answer " + HIGH + NUL + LOW + " end"], "answer " + JOINED + " end"),
+    "pair with two NULs between": (["answer " + HIGH + NUL + NUL + LOW + " end"], "answer " + JOINED + " end"),
+}
+# 30,004 code points; 30,002 once the NUL is gone and the pair
+# is joined into one character.
+LONG_SURROGATE_ANSWER = "x" * 30_000 + HIGH + NUL + LOW + "y"
+REPAIRED_LONG_CHARS = 30_002
 
 
 def traceback_files(error: BaseException) -> list[str]:
@@ -30,6 +46,10 @@ def traceback_files(error: BaseException) -> list[str]:
         files.append(trace.tb_frame.f_code.co_filename.replace("\\", "/"))
         trace = trace.tb_next
     return files
+
+
+def surrogate_points(text: str) -> list[str]:
+    return [hex(ord(char)) for char in text if 0xD800 <= ord(char) <= 0xDFFF]
 
 
 @pytest.mark.asyncio
@@ -149,3 +169,52 @@ async def test_quote_dense_answer_is_shortened_by_command_line_units_as_well(com
     note = pack.render("truncation_note", omitted=len(answer) - kept)
     assert prompt[run.end() :].lstrip().startswith(note), "the shortened answer ends with the truncation note giving the omitted count"
     assert runs.git_calls() == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", sorted(SURROGATE_CASES))
+@pytest.mark.parametrize("harness", ["grok", "muse", "opencode"])
+async def test_surrogate_halves_in_an_answer_reach_the_next_step_repaired(compose_api, sandbox, steps, pack, alive, case, harness) -> None:
+    # EC-80 / INV-18 / INV-15: nothing is refused. The next step
+    # gets U+FFFD for each lone half and the joined character for a
+    # pair that only NULs kept apart, the chain returns its record
+    # with the raw answer, and no stand-in is left running. Red until
+    # review R-12 lands: a Grok or Muse step raised
+    # UnicodeEncodeError with no record, and an opencode step failed
+    # with its child left running.
+    api = compose_api
+    parts, expected = SURROGATE_CASES[case]
+    first = steps.bind("opencode", label="halves", fake={"final_parts": parts})
+    second = steps.bind(harness, label="next")
+    result = await asyncio.wait_for(api.compose.chain_threads([first, second], "Answer was: {previous}", prompt=pack.PROMPT), pack.WAIT_SECONDS)
+    living = [launch["pid"] for launch in sandbox.launches() if alive(launch["pid"])]
+    assert result.failed_step is None and result.outcomes[1].ok, f"the {harness} step failed: {result.outcomes[1].error!r}"
+    assert result.outcomes[0].text == "\n".join(parts), "the record keeps the raw answer"
+    prompt = pack.launch_prompt(sandbox.only_launch("next"))
+    assert prompt == "Answer was: " + expected, f"the {harness} step got {ascii(prompt)}"
+    assert surrogate_points(prompt) == [] and NUL not in prompt
+    assert living == [], f"stand-in processes still running after the chain returned: {living}"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("harness", ["grok", "muse"])
+async def test_the_truncation_note_counts_an_answer_after_its_surrogate_repair(compose_api, sandbox, steps, pack, harness) -> None:
+    # EC-80 / INV-18: a 30,004-character answer whose surrogate pair
+    # only a NUL keeps apart is cut to fit a Grok or Muse step. The
+    # note's omitted count is the length after the NUL is removed
+    # and the pair joined, 30,002, minus the kept prefix. Red until
+    # review R-12 lands: the step raised UnicodeEncodeError.
+    api = compose_api
+    first = steps.bind("opencode", label="long-halves", fake={"final_parts": [LONG_SURROGATE_ANSWER]})
+    second = steps.bind(harness, label="after-long")
+    result = await asyncio.wait_for(api.compose.chain_threads([first, second], "Answer: {previous}", prompt=pack.PROMPT), pack.WAIT_SECONDS)
+    assert result.failed_step is None and result.outcomes[1].ok, f"the {harness} step failed: {result.outcomes[1].error!r}"
+    assert result.outcomes[0].text == LONG_SURROGATE_ANSWER, "the record keeps the raw answer"
+    prompt = pack.launch_prompt(sandbox.only_launch("after-long"))
+    cap = api.threads_constants.NATIVE_ARGV_PROMPT_MAX_CHARS
+    assert cap - 100 <= len(prompt) <= cap, f"the shortened prompt uses the room it has: {len(prompt)}"
+    assert surrogate_points(prompt) == [] and NUL not in prompt
+    run = max(re.finditer("x+", prompt), key=lambda match: len(match.group()))
+    kept = len(run.group())
+    note = pack.render("truncation_note", omitted=REPAIRED_LONG_CHARS - kept)
+    assert prompt[run.end() :].lstrip().startswith(note), f"the note must count {REPAIRED_LONG_CHARS - kept} omitted characters: {ascii(prompt[run.end() :])}"
