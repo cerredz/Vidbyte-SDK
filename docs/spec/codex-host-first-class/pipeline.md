@@ -18,8 +18,8 @@ Slice 1 (`docs/spec/codex-host-hardening/`, status `verified`) is done on this b
 | S0 recon | done | 22:40 | 23:05 | reports/S0-scout.md | code-map.md: 4 sections, 564 lines; per-function protocol table (§4.1); pins table (§3.4) |
 | S1 spec + review | done | 23:10 | 03:10 | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | r1 fde5a8b0; round 1 SOUND WITH FIXES (1B/6M/6m, 040e56c1); r2 603519bb; round 2 SOUND WITH FIXES (0B/3M/2m, 4db45a23); **r3 d9072cdb status approved**. Budget 13 files / 69 classes / 0 deps / 46 config keys / 42 endpoints; INV 55, AC 44, EC 62, FR 36 |
 | S2 tests | done | 03:15 | 06:40 | reports/S2-test-author.md | 236 tests in 14 new modules plus the §13 pin rewrites (fa27a3ad, ab13e1e7, 893f1df4); **S2_HEAD 625279c6, then e3d41513 after S3's blockers**; red set 253 = 233 new + 19 superseded pins + 1 inherited; spec r4 d0529d15 |
-| S3 implement | running | 06:45 | | | |
-| S4 adversarial review | pending | | | | |
+| S3 implement | done | 06:45 | 03:40 | reports/S3-implementer.md | 39 rows; budget exact (13/69/0/42); **S3_HEAD 8ea8734f** pushed; #1181 body updated, still draft; area 1 failed (inherited) / 1293 passed; source gate 1 failed (inherited) / 6824 passed; package `CI passed.`; 13 implementation deviations in spec §17 |
+| S4 adversarial review | running | 03:45 | | | |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
 | S6 PR (both slices) | pending | | | | |
@@ -64,7 +64,7 @@ Slice 1 (`docs/spec/codex-host-hardening/`, status `verified`) is done on this b
 - 2026-10-18 06:45: **The S3 drift check came back clean.** origin/main is still 6f5a7310 (the #1055 merge), and #1178's head 8baff351 is an ancestor of HEAD. #1181 already exists as a draft with title `[WIP] feat: CodexHost production hardening and first-class Codex features`, so S3 updates its body (`gh pr edit`) instead of creating a PR.
 
 - 2026-10-18 22:35: **S3 stopped with an API usage limit** before committing anything. I resumed the same agent with SendMessage once the limit reset.
-- 2026-10-19 01:30: **S3 came back BLOCKED** at f0d52eca: all 39 rows committed, budget exact, and `git diff 625279c6..HEAD -- tests` empty. My area run gave `8 failed, 1286 passed, 3 skipped`, the 7 blocker tests plus the inherited one. I verified each blocker and decided all five without asking the user:
+- 2026-10-18 01:30: **S3 came back BLOCKED** at f0d52eca: all 39 rows committed, budget exact, and `git diff 625279c6..HEAD -- tests` empty. My area run gave `8 failed, 1286 passed, 3 skipped`, the 7 blocker tests plus the inherited one. I verified each blocker and decided all five without asking the user:
   - **B-1** `test_codex_host_hardening_records.py:356` pins `CodexSpawnRequest`'s tail after `name` as 3 fields. D-5 appends `collaboration_mode`, so this is a third missed §13 pin. Route: spec r5 §13 row, then S2 rewrites it.
   - **B-2** `test_codex_host_feature_records.py:309`'s `_snapshot()` builds a COMPLETED snapshot with no result, which the INV-48-frozen record refuses (`codex_host.py:354`). Test defect, so S2.
   - **B-3** `test_codex_host_mcp_memory.py:159` expects `thread/read {"threadId"}`, but openai-codex `thread_read` always sends `includeTurns` (`client.py:498-503`). Test defect, so S2.
@@ -73,11 +73,22 @@ Slice 1 (`docs/spec/codex-host-hardening/`, status `verified`) is done on this b
   
   **Order:** spec author r5, then S2 (S2_HEAD moves), then S3 resumes (rename, gates, push, PR edit).
 
-- 2026-10-19 02:10: **Spec r5 (5f6c4fc4) and S2 round 3 (32e1a404, e3d41513) checked.**
+- 2026-10-18 02:10: **Spec r5 (5f6c4fc4) and S2 round 3 (32e1a404, e3d41513) checked.**
   - r5 adds §13's third missed pin row and D-40, which renames `BEARER_TOKEN` to `BEARER`. The author's sweep found no other `CodexSpawnRequest` field pin.
   - **S2 fixed B-4 in the shared fixture,** making `_enter(self, name, /, *args, **kwargs)` positional-only. That changes a fixture signature, not an assertion, so rule 5 allows it. Every caller already passed the name positionally.
   - **My area run:** `3 failed, 1291 passed, 3 skipped`. The two failures are the B-5 pins waiting on S3's production rename; the third is the inherited failure.
   - **S2_HEAD is now e3d41513.** S3's no-test-edit check is `git diff e3d41513..HEAD -- tests`.
+
+- 2026-10-18 03:40: **S3 checked myself at 8ea8734f:**
+  - HEAD equals origin; the tree is clean;
+  - `git diff e3d41513..HEAD -- tests` is 0 lines, and `lint/` is unchanged since a7730107;
+  - the spec says `status: implemented`, r5;
+  - #1181 is a draft, with title and base unchanged and the placeholder body in place;
+  - my area run: `1 failed (inherited), 1293 passed, 3 skipped`; `SDK-LINT: PASS`;
+  - file sizes: host.py 786/900, wire.py 839/840, dataclasses/codex_host.py 891/900, every new module ≤ 779.
+  
+  The source and package gate tails are S3's, quoted in its report. (An earlier note in this log was dated 2026-10-19 by mistake; corrected to 10-18.)
+- 2026-10-18 03:45: **S4 diff scope** is `a7730107..8ea8734f`, slice 2 only. Slice 1 was already reviewed and verified (its review.md has R-1…R-12 and m-1…m-9). Reviewers may read the full PR diff against `origin/ai/resolve-pr-1055-comments` for context, but they file findings only against slice-2 changes.
 
 ## User replies (verbatim)
 - (none yet)
@@ -156,3 +167,10 @@ Slice 1 (`docs/spec/codex-host-hardening/`, status `verified`) is done on this b
   - Lint prints "S063 IMPROVED 4 -> 3" and still passes; never edit `lint/` to ratchet it.
   
   *Source:* S2
+- **S3 facts:**
+  - wire.py is at 839/840, so a repair that adds to it must split it first.
+  - A007 flags any numeric literal within 7 ancestor nodes of a name containing timeout, limit or token. Moving the arithmetic into a helper fixes it; a named constant does not.
+  - S009 is a whole-file mypy ratchet. Narrow SDK unions with `isinstance` plus a `TypeError` tail.
+  - semgrep-core JSON starts with a "." line, so parse from the first `{`.
+  
+  *Source:* S3
