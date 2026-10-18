@@ -181,3 +181,28 @@
 - **Budget:** 13 new files, 69 classes, 0 dependencies, 46 config keys, 0 tables, 42 endpoints.
 
 **Least-sure assumptions now:** A-1 and A-19 (a status-only active set starts a goal turn), A-13, A-20 and A-21 (`never` asks no one). The binary is never run here, so all four rest on source and schema reading.
+
+## r4 addendum (S2 findings, 2026-10-18)
+
+**Input.** `test-plan.md` § "Spec defects and ambiguities" (8 items) and the coordinator's r4 request. This is an amendment, not a review round, so the status stays `approved`. §16 has rows S2-1…S2-8, and §17 has r4.
+
+**Defects:**
+- **S2-1, §13.** I added `test_codex_host_lifecycle.py::CodexHostSnippetTests::test_the_section_4_snippet_prints_its_three_lines` (`:101`, `"26 check_codex_ready"` → `"42 check_codex_ready"`) and `test_codex_host_helper_lifecycle.py::CodexHelperSnippetTests::test_the_section_4_snippet_prints_its_seven_lines` (`:109`, `"26 False"` → `"42 False"`). Both print `len(tools)`. My r1 sweep looked for `len(tools) == 26` and missed two that print the count instead.
+- **S2-2.** The new message is now `CODEX_HOST_NO_STORED_GOAL_MESSAGE`, with the same text. The existing `CODEX_HOST_NO_GOAL_MESSAGE` (`codex_host.py:312`, `skill_functions.py:217`, pinned at `test_codex_host_helper_surface.py:94`) is untouched. `_CAUSE` and `_NEXT_STEP` keep their names.
+
+**Sweep for other catalog or operation counts:**
+- **Searched:** `grep -rn "26"` over `tests/features/codex_host`, `tests/features/harness_threads` and `tests/test_codex_*.py`, each hit read by eye. I also searched for `len(tools|TOOL_TABLE|TOOL_NAMES|CodexHostOperation)`, printed counts, the `TOOL_TABLE[`/`names()[` slices, loops over the whole catalog, and the operation-order pins.
+- **Count pins:** none besides the two above. The other "26" hits are spec IDs, rows already superseded and rewritten by S2, or test names.
+- **Operation-order pins:** `helper_surface.py:245-251` and `hardening_records.py:108-115` still hold, because the 25 new members go in before `LAUNCH_CODEX_SUBAGENTS`, which comes before `START_CODEX_REVIEW`.
+- **No operation-count literal:** no test asserts `len(CodexHostOperation)`.
+- **Prose drift, not asserted:** `tests/features/codex_host/FEATURE.md:190,207` and `README.md:51` still say "26-tool".
+
+**Clarifications chosen (each within S2's accepted set):**
+- **(3)** All 15 method constants named in §9.3. They follow the two pinned names (`CODEX_THREAD_SETTINGS_UPDATE_METHOD`, `CODEX_THREAD_SEARCH_METHOD`) and the module's existing `CODEX_GOAL_SET_METHOD` style. So they are `CODEX_<...>_METHOD`, not `CODEX_HOST_<...>_METHOD`: the request's pattern contradicts the two pinned names it says to follow.
+- **(4)** `reasoning_effort`, the `CodexCollaborationMode` field the sentence names as its subject.
+- **(5)** `.name`, not the recommended `.value`: `PROVIDER_DEFAULT`'s value is `""`, and network access with the default sandbox is exactly a case this message refuses.
+- **(6)** Required, as in §8.5 and the wire schema.
+- **(7)** Yes, through `handle.thread_id`, as slice 1's `steer_codex_turn` does.
+- **(8)** Omitted, because the schema treats false and null alike.
+
+**Counts:** unchanged. IDs: G6 NG19 INV55 AC44 EC62 FR36 NFR12 D39 T8 W19 A21 Q11. Budget: 13 / 69 / 0 / 46 / 0 / 42.
