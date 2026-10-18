@@ -3,9 +3,9 @@
 PURPOSE: Runs the closed set of git commands compose needs for one workspace and turns every failure into a ThreadComposeError: ComposeGit finds git and the repository, snapshots the whole working tree into a temporary index, diffs two snapshots, and adds, fills, re-indexes and removes disposable worktrees; ComposeFailures builds each ThreadComposeError with its message, git's text and the texts for its problem.
 ROLE IN CODEBASE: Used by DiffCapture and DisposableWorktree (workspace.py) and by the composites that need git (chain.py for a template with {diff}, verify.py, ensemble.py and selection.py); ComposeFailures also builds the read-only backstop error the composites raise.
 ARCHITECTURE NOTE: Every git child goes through CliRunner with the program found by CliRunner.find_program, the no-optional-locks flag and the two -c settings first, the 15 repository-location variables removed, no standard input, and the COMPOSE_GIT_TIMEOUT_SECONDS and COMPOSE_GIT_MAX_OUTPUT_BYTES bounds (spec INV-26, §9.2, §9.3). No argument holds a caret, a caller value or model text: the only operands are HEAD, tree ids and temporary folder paths. A snapshot writes only to a fresh temporary index named by GIT_INDEX_FILE and to the object store, so the working tree, the real index, HEAD and every ref stay as they are (INV-7). ComposeFailures replaces every bound key in git's text as exact text before HarnessRedactor and the tail cap, so a cap never cuts a key in half, and writes the message in the INV-6 order: the problem and its summary, the workspace, what compose observed, git's text, the likely cause and the next step.
-FUNCTION INVENTORY: ComposeGit.locate finds git; toplevel and has_commit find the repository root and whether HEAD names a commit, which has_commit(required=True) demands for a worktree; snapshot is the narrated main function of a snapshot; diff compares two trees; add_worktree, set_index and remove_worktree manage a reader's worktree; _run starts one git child; _failure, _folder and _delete are leaves. ComposeFailures.error builds one ThreadComposeError; changed names the files a read-only phase changed.
+FUNCTION INVENTORY: ComposeGit.locate finds git; toplevel and has_commit find the repository root and whether HEAD names a commit, which has_commit(required=True) demands for a worktree; snapshot is the narrated main function of a snapshot; diff compares two trees; worktree_folder, add_worktree, fill_worktree, set_index and remove_worktree manage a reader's worktree; _run starts one git child; _failure, _folder and _delete are leaves. ComposeFailures.error builds one ThreadComposeError; changed names the files a read-only phase changed.
 COMMON MODIFICATION PATTERNS: A new git command is a §9.2 row first: its subcommand word in vidbyte/lib/constants/native_compose.py, its flags as GitFlag members, and one method here that goes through _run. A new failure kind is a ThreadComposeProblem member with its own summary, likely cause and next step.
-WHAT NOT TO DO IN THIS FILE: 1. Do not run a git command that changes the working tree, the real index, HEAD or a ref; snapshots use a temporary index and worktrees are detached. 2. Do not pass --ignore-errors to add; a file git cannot read must fail the snapshot (EC-73). 3. Do not put a caret in an argument; cmd.exe strips it when git is a batch launcher (D-24). 4. Do not let an OSError escape; folder failures are ThreadComposeError too.
+WHAT NOT TO DO IN THIS FILE: 1. Do not run a git command that changes the working tree, the real index, HEAD or a ref; snapshots use a temporary index and worktrees are detached. 2. Do not pass --ignore-errors to add; a file git cannot read must fail the snapshot (EC-73). 3. Do not put a caret in an argument; cmd.exe strips it when git is a batch launcher (D-24). 4. Do not let an OSError escape; folder failures are ThreadComposeError too. 5. Do not clean up a half-made worktree here; DisposableWorktree.__aenter__ removes it, waiting for a started add to end first (EC-17).
 KNOWN EDGE CASES: rev-parse --verify --quiet HEAD exits 1 in a repository with no commit, so snapshots skip read-tree HEAD there, while a worktree needs HEAD and is refused as WORKTREE_FAILED (EC-5). An add that exits non-zero gets the two add texts, and one that passes its time bound keeps the generic texts (EC-73, EC-9). A worktree whose removal fails is deleted from disk anyway, and the error names its folder; the registration git keeps is cleared by git worktree prune (EC-16). git prints the repository root with forward slashes on win32, so it is resolved before use.
 RELATED DOCS: vidbyte/harnesses/README.md
 TESTS: tests/features/harness_compose/test_harness_compose_git.py, tests/features/harness_compose/test_harness_compose_workspace.py, tests/features/harness_compose/test_harness_compose_keys.py
@@ -14,7 +14,6 @@ TESTS: tests/features/harness_compose/test_harness_compose_git.py, tests/feature
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import shutil
 import tempfile
 from collections.abc import Sequence
@@ -157,24 +156,21 @@ class ComposeGit:
         truncated = len(files) > max_files or len(patch.stdout) > max_chars or names.stdout_truncated or patch.stdout_truncated
         return WorkspaceDiff(files=files[:max_files], text=patch.stdout[:max_chars], truncated=truncated)
 
-    async def add_worktree(self, tree: str) -> Path:
-        """A new detached worktree in a fresh temporary folder, its files filled from tree; WORKTREE_FAILED when git refuses (INV-9)."""
-        folder = await self._folder(native_compose.COMPOSE_WORKTREE_PREFIX, ThreadComposeProblem.WORKTREE_FAILED)
-        try:
-            outcome = await self._run((native_compose.COMPOSE_GIT_WORKTREE, native_compose.COMPOSE_GIT_WORKTREE_ADD), (CliOption(GitFlag.DETACH), CliOption(GitFlag.NO_CHECKOUT)), (str(folder), native_compose.COMPOSE_GIT_HEAD), cwd=self.root, problem=ThreadComposeProblem.WORKTREE_FAILED)
-            if outcome.exit_code != 0:
-                raise self._failure(ThreadComposeProblem.WORKTREE_FAILED, (native_compose.COMPOSE_GIT_WORKTREE, native_compose.COMPOSE_GIT_WORKTREE_ADD), outcome)
-            outcome = await self._run((native_compose.COMPOSE_GIT_READ_TREE,), (CliOption(GitFlag.UPDATE), CliOption(GitFlag.RESET)), (tree,), cwd=folder, problem=ThreadComposeProblem.WORKTREE_FAILED)
-            if outcome.exit_code != 0:
-                raise self._failure(ThreadComposeProblem.WORKTREE_FAILED, (native_compose.COMPOSE_GIT_READ_TREE,), outcome)
-        except BaseException:
-            # A half-made worktree is removed before the failure or the
-            # cancellation goes on, in a task a second cancel cannot
-            # stop; the first error wins over a removal error.
-            with contextlib.suppress(ThreadComposeError):
-                await asyncio.shield(asyncio.ensure_future(self.remove_worktree(folder)))
-            raise
-        return folder
+    async def worktree_folder(self) -> Path:
+        """A fresh temporary folder for a reader's worktree; WORKTREE_FAILED, naming the temporary folder, when none can be made."""
+        return await self._folder(native_compose.COMPOSE_WORKTREE_PREFIX, ThreadComposeProblem.WORKTREE_FAILED)
+
+    async def add_worktree(self, folder: Path) -> None:
+        """Register a new detached worktree at HEAD in folder, its files not yet written; WORKTREE_FAILED when git refuses (INV-9)."""
+        outcome = await self._run((native_compose.COMPOSE_GIT_WORKTREE, native_compose.COMPOSE_GIT_WORKTREE_ADD), (CliOption(GitFlag.DETACH), CliOption(GitFlag.NO_CHECKOUT)), (str(folder), native_compose.COMPOSE_GIT_HEAD), cwd=self.root, problem=ThreadComposeProblem.WORKTREE_FAILED)
+        if outcome.exit_code != 0:
+            raise self._failure(ThreadComposeProblem.WORKTREE_FAILED, (native_compose.COMPOSE_GIT_WORKTREE, native_compose.COMPOSE_GIT_WORKTREE_ADD), outcome)
+
+    async def fill_worktree(self, folder: Path, tree: str) -> None:
+        """Write tree's files and index into the worktree in folder; WORKTREE_FAILED when git refuses."""
+        outcome = await self._run((native_compose.COMPOSE_GIT_READ_TREE,), (CliOption(GitFlag.UPDATE), CliOption(GitFlag.RESET)), (tree,), cwd=folder, problem=ThreadComposeProblem.WORKTREE_FAILED)
+        if outcome.exit_code != 0:
+            raise self._failure(ThreadComposeProblem.WORKTREE_FAILED, (native_compose.COMPOSE_GIT_READ_TREE,), outcome)
 
     async def set_index(self, folder: Path, tree: str) -> None:
         """Set the worktree's index to tree and leave its files as they are, so git there shows the change from tree."""

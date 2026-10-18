@@ -2,7 +2,7 @@
 
 PURPOSE: The ensemble composite: ThreadEnsembles.run_ensemble has a planner write one role per proposer, runs the proposers at the same time, each writing a proposal for its own role, has the selector narrow the proposals to one through EnsembleSelector, checks that none of these readers changed the workspace, and then has the implementer build the chosen proposal in place.
 ROLE IN CODEBASE: run_ensemble is bound as a public name in vidbyte/harnesses/native/compose/__init__.py. It builds on the plumbing modules: steps.py for the role rules, the anchors and the relocation, git.py for the repository checks and the snapshot, workspace.py for the reader worktrees and the backstop, texts.py for the prompt files and the fit, answers.py for the plan, and calls.py for the calls and the fan-out; selection.py runs the selector stage.
-ARCHITECTURE NOTE: The CLI ensemble's plan, propose, select and implement shape on the nine thread functions (spec INV-23, D-3, D-13, D-20), any role on any harness within the reader rules. The planner, the proposers and the selector form one read-only phase: one snapshot before the planner is the tree every opencode or Muse reader's worktree is filled from and what the backstop compares the working tree with once the phase ends, early or not (INV-9, INV-11); a Grok reader runs in place in its own plan or default permission mode. The plan is a JSON answer repaired on the planner's thread, and proposals are free text (D-13). An unanchored Grok fork in a role other than the planner is anchored at the planner's thread and opens with fork_turn. The implementer, the one writer, runs once, in place, after the backstop passed, and no snapshot follows it (INV-12, NG-13). The module holds no literals (base spec INV-15).
+ARCHITECTURE NOTE: The CLI ensemble's plan, propose, select and implement shape on the nine thread functions (spec INV-23, D-3, D-13, D-20), any role on any harness within the reader rules. The planner, the proposers and the selector form one read-only phase: one snapshot before the planner is the tree every opencode or Muse reader's worktree is filled from and what the backstop compares the working tree with once the phase ends, early or not (INV-9, INV-11); a Grok reader runs in place in its own plan or default permission mode. The plan is a JSON answer repaired on the planner's thread, and proposals are free text (D-13). An unanchored Grok fork in a role other than the planner is anchored at the planner's thread and opens with fork_turn. The planner and the selector each run as the one child of a ComposeCalls.fan_out, as the proposers do, so a cancel of the composite, however often it repeats, reaches each reader once and waits for its process stop and worktree removal (INV-14, EC-17). The implementer, the one writer, runs once, in place, after the backstop passed, and no snapshot follows it (INV-12, NG-13). The module holds no literals (base spec INV-15).
 FUNCTION INVENTORY: ThreadEnsembles.run_ensemble is the narrated main function; _roles checks the roster; _question builds the planner's question; _frame builds a proposer's or the implementer's first turn; _fit checks the planner's, the proposers' and the implementer's prompts; _plan asks the planner; _propose runs one proposer; _role_texts and _brief collect what a proposer's and the implementer's turns splice.
 COMMON MODIFICATION PATTERNS: A new fact for proposers is one field in role_system.md or role_turn.md and COMPOSE_PROMPT_FIELDS, added to _role_texts; _frame splices every field but the task and the approach range. A change to the narrowing rounds or the selection belongs in selection.py.
 WHAT NOT TO DO IN THIS FILE: 1. Do not start the implementer before the selector has finished and the backstop has passed (INV-12). 2. Do not run an opencode or Muse reader in place, or change any step's permission mode; refuse it instead (D-21). 3. Do not show a proposer another role's identity or another proposal. 4. Do not skip the backstop after a failed plan, no successful proposal or a failed selection; it is skipped only on a cancellation or a defect (INV-11).
@@ -81,8 +81,9 @@ class ThreadEnsembles:
         record: EnsembleResult | None = None
         try:
             # Plan: the planner answers one role per proposer, repaired
-            # on its own thread when the answer does not parse.
-            plan = await ThreadEnsembles._plan(git, tree, planner, question, schema, len(proposers), keys)
+            # on its own thread when the answer does not parse; it runs
+            # as a child, so a repeated cancel waits for its cleanup.
+            (plan,) = await ComposeCalls.fan_out([ThreadEnsembles._plan(git, tree, planner, question, schema, len(proposers), keys)])
             record = EnsembleResult(plan=plan)
 
             # Propose: with a plan, every proposer writes a proposal for
@@ -93,10 +94,10 @@ class ThreadEnsembles:
                 proposals = await ComposeCalls.fan_out([ThreadEnsembles._propose(git, tree, step, frame, plan.thread_id, keys) for step, frame in zip(proposers, frames, strict=True)])
                 record = EnsembleResult(plan=plan, proposals=proposals)
 
-            # Select: with at least one proposal, the selector narrows
-            # them to the one the implementer will build.
+            # Select: with at least one proposal, the selector, a child
+            # too, narrows them to the one the implementer will build.
             if any(outcome.ok for outcome in record.proposals):
-                record = await EnsembleSelector.select(git, tree, selector, record, prompt, keys)
+                (record,) = await ComposeCalls.fan_out([EnsembleSelector.select(git, tree, selector, record, prompt, keys)])
 
             # With every reader done and every worktree gone, the working
             # tree must still match the snapshot, also when the phase

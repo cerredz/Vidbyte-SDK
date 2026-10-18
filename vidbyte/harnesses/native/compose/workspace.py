@@ -1,12 +1,12 @@
 """FILE: vidbyte/harnesses/native/compose/workspace.py
 
 PURPOSE: Holds the two workspace context managers and the read-only backstop: DiffCapture snapshots the whole repository when its block starts and ends and keeps the change between them as .diff, and DisposableWorktree adds a detached worktree filled from a snapshot, yields the folder that matches the workspace inside it, and always removes it; DisposableWorktree.backstop fails a read-only phase that changed the workspace.
-ROLE IN CODEBASE: capture_diff and in_worktree are bound as public names in vidbyte/harnesses/native/compose/__init__.py. verify.py, ensemble.py and selection.py run their opencode and Muse readers inside a DisposableWorktree made from a tree they already snapshotted, and verify.py and ensemble.py end each read-only phase with DisposableWorktree.backstop.
-ARCHITECTURE NOTE: Both managers check the workspace when they are built, the way the nine thread functions do (an absolute existing folder, stored resolved), and start no git process until their block is entered (spec §9.2). All git work goes through ComposeGit (git.py), so every failure is a ThreadComposeError. A reader's worktree is built from a tree id the composite took, with a verifier's index set to the before-writer tree so git inside the worktree shows the writer's change (D-20, INV-9). Removal runs as its own task under asyncio.shield, as the private folders of muse/threads.py are removed, so a cancellation cannot stop it half-way (EC-17).
-FUNCTION INVENTORY: DiffCapture.capture_diff builds the manager; __aenter__ takes the before-snapshot and __aexit__ the after-snapshot and the diff. DisposableWorktree.in_worktree builds the manager for a caller and from_tree for a reader; backstop compares a read-only phase's snapshots; __aenter__ adds, fills and re-indexes the worktree and makes the matching folder; __aexit__ removes it; _prepared and _matching are leaves.
+ROLE IN CODEBASE: capture_diff and in_worktree are bound as public names in vidbyte/harnesses/native/compose/__init__.py. It runs git through ComposeGit (git.py) and waits for its git steps with ComposeCalls.settle (calls.py). verify.py, ensemble.py and selection.py run their opencode and Muse readers inside a DisposableWorktree made from a tree they already snapshotted, and verify.py and ensemble.py end each read-only phase with DisposableWorktree.backstop.
+ARCHITECTURE NOTE: Both managers check the workspace when they are built, the way the nine thread functions do (an absolute existing folder, stored resolved), and start no git process until their block is entered (spec §9.2). All git work goes through ComposeGit (git.py), so every failure is a ThreadComposeError. A reader's worktree is built from a tree id the composite took, with a verifier's index set to the before-writer tree so git inside the worktree shows the writer's change (D-20, INV-9). The add and every removal run as tasks of their own that ComposeCalls.settle waits for through any number of cancels, so git never stops half-way through registering or unregistering a worktree, and the cancel goes on once git is done; each git step stays bounded by COMPOSE_GIT_TIMEOUT_SECONDS (EC-17, INV-30).
+FUNCTION INVENTORY: DiffCapture.capture_diff builds the manager; __aenter__ takes the before-snapshot and __aexit__ the after-snapshot and the diff. DisposableWorktree.in_worktree builds the manager for a caller and from_tree for a reader; backstop compares a read-only phase's snapshots; __aenter__ makes the folder, adds, fills and re-indexes the worktree and makes the matching folder, and removes the worktree again when any of that fails; __aexit__ removes it; _prepared, _settled and _matching are leaves.
 COMMON MODIFICATION PATTERNS: A new kind of reader workspace is another DisposableWorktree constructor that hands __aenter__ what to fill the worktree from. A new use of a diff goes through DiffCapture or through ComposeGit.snapshot and ComposeGit.diff directly.
 WHAT NOT TO DO IN THIS FILE: 1. Do not run git here; call ComposeGit. 2. Do not let a removal failure hide the block's own exception. 3. Do not take a diff after a block that raised; .diff stays None. 4. Do not leave a worktree behind when entering fails half-way.
-KNOWN EDGE CASES: A workspace folder that no snapshot holds (empty, or holding only ignored files) is created inside the worktree after the fill (EC-74). A repository with no commit allows capture_diff but refuses in_worktree with WORKTREE_FAILED (EC-5). A cancel that lands during a removal waits for the removal, then propagates. The backstop cannot tell who changed the files, so an edit by another process during a read-only phase is reported too (EC-11).
+KNOWN EDGE CASES: A workspace folder that no snapshot holds (empty, or holding only ignored files) is created inside the worktree after the fill (EC-74). A repository with no commit allows capture_diff but refuses in_worktree with WORKTREE_FAILED (EC-5). A cancel that lands during the add or a removal, once or many times, waits for that git step, then propagates; a git step past its time bound is stopped all the same. The backstop cannot tell who changed the files, so an edit by another process during a read-only phase is reported too (EC-11).
 RELATED DOCS: vidbyte/harnesses/README.md
 TESTS: tests/features/harness_compose/test_harness_compose_workspace.py, tests/features/harness_compose/test_harness_compose_git.py, tests/features/harness_compose/test_harness_compose_verify.py
 """
@@ -15,10 +15,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from collections.abc import Awaitable
 from pathlib import Path
 from types import TracebackType
 from typing import Self
 
+from vidbyte.harnesses.native.compose.calls import ComposeCalls
 from vidbyte.harnesses.native.compose.git import ComposeFailures, ComposeGit
 from vidbyte.lib.constants import native_compose
 from vidbyte.lib.dataclasses.native_compose import WorkspaceDiff
@@ -108,21 +110,26 @@ class DisposableWorktree:
         git = await self._prepared()
         tree = self._tree if self._tree is not None else await git.snapshot()
 
-        # Add the detached worktree, filled from the snapshot; a failed
-        # add removes what it made before the error goes on.
-        folder = await git.add_worktree(tree)
+        # Make the worktree's folder, add the detached worktree there
+        # and fill it from the snapshot. An add that started runs to its
+        # end through any cancel: git stopped while it holds the new
+        # worktree's lock leaves a registration nothing can remove.
+        folder = await git.worktree_folder()
         try:
+            await DisposableWorktree._settled(git.add_worktree(folder))
+            await git.fill_worktree(folder, tree)
+
             # A verifier's index is the before-writer snapshot, so git
             # status and git diff inside the worktree show the change.
             if self._index is not None:
                 await git.set_index(folder, self._index)
             matching = await self._matching(git, folder)
         except BaseException:
-            # Entering failed after the add, so the worktree goes now,
-            # in a task a second cancel cannot stop; the first error
-            # wins over a removal error.
+            # Entering failed half-way, so the worktree goes now, waited
+            # for through any cancel; the first error wins over a
+            # removal error.
             with contextlib.suppress(ThreadComposeError):
-                await asyncio.shield(asyncio.ensure_future(git.remove_worktree(folder)))
+                await DisposableWorktree._settled(git.remove_worktree(folder))
             raise
         self._folder = folder
         return matching
@@ -131,18 +138,11 @@ class DisposableWorktree:
         """Remove the worktree however the block ended; a removal failure is the error only after a normal exit."""
         if self._git is None or self._folder is None:
             return
-        removal = asyncio.ensure_future(self._git.remove_worktree(self._folder))
         try:
-            # The removal is its own task, so a cancel cannot stop git
-            # half-way through unregistering the worktree.
-            await asyncio.shield(removal)
-        except asyncio.CancelledError:
-            # A cancel that lands during the removal waits for it, then
-            # goes on; a removal failure then gives way to the cancel.
-            await asyncio.wait({removal})
-            if not removal.cancelled():
-                removal.exception()
-            raise
+            # The removal is waited for through any cancel, so git never
+            # stops half-way through unregistering the worktree; a
+            # cancel that lands meanwhile goes on once it is done.
+            await DisposableWorktree._settled(self._git.remove_worktree(self._folder))
         except ThreadComposeError:
             # After a block that raised, its own exception wins.
             if error is None:
@@ -159,6 +159,15 @@ class DisposableWorktree:
         await git.has_commit(required=True)
         self._git = git
         return git
+
+    @staticmethod
+    async def _settled(step: Awaitable[None]) -> None:
+        # One git step as a task of its own, waited for through any
+        # number of cancels; its own failure goes on, and so does a
+        # cancel that arrived meanwhile, once the step has ended.
+        task = asyncio.ensure_future(step)
+        await ComposeCalls.settle((task,))
+        task.result()
 
     async def _matching(self, git: ComposeGit, folder: Path) -> Path:
         # The workspace's own folder inside the worktree, made when no
