@@ -24,7 +24,7 @@ FLAG_PROMPT = "--yolo"
 PERMISSION_VALUES = ("manual", "acceptEdits", "dontAsk", "plan")
 EFFORT_VALUES = ("low", "medium", "high", "xhigh", "max")
 APPROVE_EVERYTHING = ("--dangerously-skip-permissions", "--allow-dangerously-skip-permissions", "bypassPermissions", "auto")
-OVERLAY_NAMES = {"ANTHROPIC_API_KEY", "CLAUDE_CONFIG_DIR", "DISABLE_AUTOUPDATER", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"}
+OVERLAY_NAMES = {"ANTHROPIC_API_KEY", "CLAUDE_CONFIG_DIR", "DISABLE_AUTOUPDATER", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "CLAUDE_CODE_DISABLE_AUTO_MEMORY"}
 # Permission rules without a shell, so they stand beside any mode.
 RULES = ("Edit", "Read(./src/**)", "mcp__github__create_issue")
 SHELL_RULES = [(("Bash(git *)",), True), (("PowerShell",), True), (("Edit", "Read(//tmp/**)", "BashOutput"), False)]
@@ -108,6 +108,18 @@ async def test_an_allowed_shell_rule_has_claude_scrub_the_key_from_its_commands(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(("auto_memory", "switch"), [(False, "1"), (True, None)], ids=["off-by-default", "turned-on"])
+async def test_auto_memory_is_off_unless_the_config_turns_it_on(sandbox, call, monkeypatch, auto_memory, switch) -> None:
+    # PR #1044 review 4301898256 (C15, Q-8): auto memory notes reach every
+    # later thread of the workspace (EC-37), so the child gets
+    # CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 unless auto_memory is True; the
+    # caller's own copy is dropped either way, so only the config decides.
+    monkeypatch.setenv("CLAUDE_CODE_DISABLE_AUTO_MEMORY", "0")
+    await call("claude", config={"auto_memory": auto_memory})
+    assert sandbox.starts("claude")[-1]["plain"]["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] == switch
+
+
+@pytest.mark.asyncio
 async def test_tool_rules_at_their_caps_fit_a_windows_command_line(api, sandbox, call, monkeypatch) -> None:
     # PR #1044 review 4301898216: 32 allowed and 32 denied rules of the
     # longest length, each holding spaces, still fit a Windows command
@@ -162,8 +174,8 @@ async def test_child_runs_in_the_resolved_workspace_whatever_pwd_says(sandbox, c
 async def test_runner_gets_plain_strings_the_call_timeout_the_cap_stdin_and_the_overlay(api, sandbox, call, pack, monkeypatch, verb) -> None:
     # INV-9 / INV-11 / §9.2: one invocation per call with plain str
     # argv and variables, config.timeout_seconds, the 64 MiB cap, the
-    # prompt as stdin_text, the workspace as cwd and exactly the four
-    # overlay variables.
+    # prompt as stdin_text, the workspace as cwd and exactly the five
+    # overlay variables (auto memory off by default, PR #1044 review C15).
     thread = (await call("claude", config={"timeout_seconds": 45.5})).thread_id if verb != "run" else None
     invocations = spy_runner(api, monkeypatch)
     result = await call("claude", verb, pack.PROMPT, thread_id=thread, config={"timeout_seconds": 45.5})
@@ -174,7 +186,8 @@ async def test_runner_gets_plain_strings_the_call_timeout_the_cap_stdin_and_the_
     assert Path(invocation.cwd).resolve() == sandbox.workspace
     assert set(invocation.env_overlay) == OVERLAY_NAMES
     assert invocation.env_overlay["ANTHROPIC_API_KEY"] == pack.API_KEY
-    assert invocation.env_overlay["DISABLE_AUTOUPDATER"] == invocation.env_overlay["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] == api.constants.NATIVE_ENABLED_SWITCH == "1"
+    overlay = invocation.env_overlay
+    assert overlay["DISABLE_AUTOUPDATER"] == overlay["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] == overlay["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] == api.constants.NATIVE_ENABLED_SWITCH == "1"
     assert os.path.normcase(invocation.env_overlay["CLAUDE_CONFIG_DIR"]) == os.path.normcase(str(sandbox.claude_config()))
     assert pack.API_KEY not in invocation.argv and not any(pack.API_KEY in element for element in invocation.argv)
     expected = expected_argv(verb, thread=thread, minted=result.thread_id)

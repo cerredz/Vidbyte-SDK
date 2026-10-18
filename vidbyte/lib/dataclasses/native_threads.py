@@ -230,7 +230,7 @@ class MuseThreadConfig:
 
 @dataclass(frozen=True, slots=True)
 class ClaudeThreadConfig:
-    """Settings of the Claude Code thread functions: reasoning effort, permission mode, time limit, an explicit claude launcher, the turn and spending limits of one call, and the permission rules that allow or deny tools."""
+    """Settings of the Claude Code thread functions: reasoning effort, permission mode, time limit, an explicit claude launcher, the turn and spending limits of one call, the permission rules that allow or deny tools, and whether Claude Code's auto memory is on."""
 
     reasoning_effort: ClaudeReasoningEffort | None = None
     permission_mode: ClaudePermissionMode = ClaudePermissionMode.DEFAULT
@@ -240,6 +240,7 @@ class ClaudeThreadConfig:
     max_budget_usd: float | None = None
     allowed_tools: tuple[str, ...] = ()
     disallowed_tools: tuple[str, ...] = ()
+    auto_memory: bool = False
 
     def __post_init__(self) -> None:
         if self.reasoning_effort is not None:
@@ -254,6 +255,7 @@ class ClaudeThreadConfig:
             RecordFieldValidator.require_number(self.max_budget_usd, "ClaudeThreadConfig.max_budget_usd", maximum=CLAUDE_MAX_BUDGET_USD_LIMIT)
         RecordFieldValidator.require_text_items(self.allowed_tools, "ClaudeThreadConfig.allowed_tools", max_items=CLAUDE_TOOL_RULES_MAX_ITEMS, max_chars=CLAUDE_TOOL_RULE_MAX_CHARS, pattern=CLAUDE_TOOL_RULE_PATTERN, one_line=True)
         RecordFieldValidator.require_text_items(self.disallowed_tools, "ClaudeThreadConfig.disallowed_tools", max_items=CLAUDE_TOOL_RULES_MAX_ITEMS, max_chars=CLAUDE_TOOL_RULE_MAX_CHARS, pattern=CLAUDE_TOOL_RULE_PATTERN, one_line=True)
+        RecordFieldValidator.require_bool(self.auto_memory, "ClaudeThreadConfig.auto_memory")
         # @intent claude-shell-rules-scrub-the-key
         # A shell rule lets the model run commands that could print the
         # key, so the SDK has Claude Code scrub it from them, and Claude

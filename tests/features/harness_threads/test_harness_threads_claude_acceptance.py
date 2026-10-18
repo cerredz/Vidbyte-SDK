@@ -138,7 +138,7 @@ async def test_workspace_claude_settings_instructions_skills_and_mcp_servers_rea
     start = sandbox.only_start("claude")
     argv = start["argv"]
     assert argv[argv.index("--setting-sources") + 1] == "user", f"INV-4 control 3: {argv}"
-    assert start["claude_names"] == ["ANTHROPIC_API_KEY", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "CLAUDE_CONFIG_DIR"]
+    assert start["claude_names"] == ["ANTHROPIC_API_KEY", "CLAUDE_CODE_DISABLE_AUTO_MEMORY", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "CLAUDE_CONFIG_DIR"]
     assert start["credentials"]["ANTHROPIC_API_KEY"] == pack.key_digest(pack.API_KEY)
     assert os.path.normcase(start["plain"]["CLAUDE_CONFIG_DIR"]) == os.path.normcase(str(sandbox.claude_config()))
     assert start["skills"] in (None, {}), "INV-14: the workspace's own skill is never copied"

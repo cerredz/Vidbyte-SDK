@@ -61,7 +61,8 @@ async def test_child_sees_only_the_callers_key_the_private_folder_and_the_switch
     # AC-6 / INV-4 / INV-17 / D-6 / D-20: the caller's environment holds
     # other keys, tokens, a base URL, Bedrock, a parent Claude Code
     # session and its config folder; the child gets api_key, the private
-    # config folder and the two switches, keeps only
+    # config folder and the three switches (auto memory off by default,
+    # PR #1044 review C15), keeps only
     # CLAUDE_CODE_GIT_BASH_PATH of the prefixed names, and gets the
     # unrelated variable unchanged.
     thread = (await call("claude")).thread_id if verb != "run" else None
@@ -70,7 +71,7 @@ async def test_child_sees_only_the_callers_key_the_private_folder_and_the_switch
     before = dict(os.environ)
     await call("claude", verb, "Again.", thread_id=thread)
     start = sandbox.starts("claude")[-1]
-    assert start["claude_names"] == ["ANTHROPIC_API_KEY", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "CLAUDE_CODE_GIT_BASH_PATH", "CLAUDE_CONFIG_DIR"]
+    assert start["claude_names"] == ["ANTHROPIC_API_KEY", "CLAUDE_CODE_DISABLE_AUTO_MEMORY", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "CLAUDE_CODE_GIT_BASH_PATH", "CLAUDE_CONFIG_DIR"]
     assert start["credentials"]["ANTHROPIC_API_KEY"] == pack.key_digest(pack.API_KEY)
     plain = start["plain"]
     assert os.path.normcase(plain["CLAUDE_CONFIG_DIR"]) == os.path.normcase(str(sandbox.claude_config())), "INV-13: <home>/.vidbyte/claude-configs/<sha256 key>"

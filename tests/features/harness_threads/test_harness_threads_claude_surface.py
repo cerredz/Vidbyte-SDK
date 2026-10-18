@@ -81,6 +81,8 @@ BAD_CONFIG_FIELDS = [
     ("allowed_tools", ("--dangerously-skip-permissions",)), ("allowed_tools", ("Read Edit",)), ("allowed_tools", ("Bash,Edit",)),
     ("allowed_tools", ("Bash(git *)\nEdit",)), ("allowed_tools", ("Bash(a(b))",)), ("allowed_tools", ("Edit",) * 33), ("allowed_tools", ("Bash(" + "x" * 251 + ")",)),
     ("disallowed_tools", ("-x",)), ("disallowed_tools", ("WebFetch", 7)), ("disallowed_tools", ("Write(/etc/**)",)),
+    # PR #1044 review 4301898216 (C15): auto memory is a plain switch.
+    ("auto_memory", 1), ("auto_memory", "true"), ("auto_memory", None),
 ]
 OLD_NAMES = [
     ("vidbyte.harnesses.native.claude", "ClaudeHost"), ("vidbyte.harnesses.native.claude", "ClaudeLiveSession"), ("vidbyte.harnesses.native", "ClaudeHost"),
@@ -228,17 +230,18 @@ def test_every_harness_and_code_table_has_its_claude_rows(lib_api) -> None:
 
 
 def test_claude_thread_config_has_the_spec_fields_and_defaults(lib_api) -> None:
-    # AC-18 / D-13 / §9.1: frozen and slotted; exactly eight fields (the
-    # turn and spending limits and the tool rules from the PR #1044
-    # review) and no model; defaults (None, DEFAULT, 1800.0, None, None,
-    # None, (), ()); a member or its exact value is accepted; the
-    # timeout, turn, budget and rule bounds are inclusive.
+    # AC-18 / D-13 / §9.1: frozen and slotted; exactly nine fields (the
+    # turn and spending limits, the tool rules and the auto memory switch
+    # from the PR #1044 review) and no model; defaults (None, DEFAULT,
+    # 1800.0, None, None, None, (), (), False); a member or its exact
+    # value is accepted; the timeout, turn, budget and rule bounds are
+    # inclusive.
     cls, enums = lib_api.ClaudeThreadConfig, lib_api.enums
     assert dataclasses.is_dataclass(cls) and cls.__dataclass_params__.frozen and "__slots__" in vars(cls)
-    assert [field.name for field in dataclasses.fields(cls)] == ["reasoning_effort", "permission_mode", "timeout_seconds", "claude_command", "max_turns", "max_budget_usd", "allowed_tools", "disallowed_tools"]
+    assert [field.name for field in dataclasses.fields(cls)] == ["reasoning_effort", "permission_mode", "timeout_seconds", "claude_command", "max_turns", "max_budget_usd", "allowed_tools", "disallowed_tools", "auto_memory"]
     default = cls()
     assert (default.reasoning_effort, default.permission_mode, default.timeout_seconds, default.claude_command, default.max_turns, default.max_budget_usd) == (None, enums.ClaudePermissionMode.DEFAULT, 1800.0, None, None, None)
-    assert (default.allowed_tools, default.disallowed_tools, default.subprocess_scrub) == ((), (), False)
+    assert (default.allowed_tools, default.disallowed_tools, default.subprocess_scrub, default.auto_memory) == ((), (), False, False)
     assert default.permission_mode is enums.ClaudePermissionMode.DEFAULT and default.timeout_seconds == lib_api.constants.NATIVE_THREAD_DEFAULT_SECONDS
     built = cls(reasoning_effort="xhigh", permission_mode="acceptEdits", timeout_seconds=14400, claude_command=("claude-bin",), max_turns=1000, max_budget_usd=1000.0)
     assert built.reasoning_effort is enums.ClaudeReasoningEffort.XHIGH and built.permission_mode is enums.ClaudePermissionMode.ACCEPT_EDITS
