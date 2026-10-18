@@ -5,7 +5,7 @@ ROLE IN CODEBASE: BrowserToolDefinition rows live in BrowserToolRegistry (vidbyt
 ARCHITECTURE NOTE: Every check lives in __post_init__, so a constructed record is always valid. BrowserToolRequest holds caller text that may be a key (a tools item, a tool_keys name or value), so it never passes that text to require_text or require_text_items, whose messages quote short values; it checks it with the non-raising accepts_text and refuses with a constant message from vidbyte/lib/constants/browser_tools.py that names only an index, a registry name or a position (spec D-28). The other records hold SDK-built values and use the ordinary validators.
 FUNCTION INVENTORY: BrowserToolRequest.__post_init__ is the narrated main function; _checked_tools checks the tools items and _checked_tool_keys the tool_keys entries. BrowserToolDefinition.__post_init__ checks the common fields and then, by transport, _checked_stdio or _checked_remote. BrowserCapabilityDefinition, BrowserToolSelection, BrowserServer, BrowserMount, BrowserToolCall, BrowserToolCalls and BrowserThreadResult have only __post_init__.
 COMMON MODIFICATION PATTERNS: A new bound adds its constant to vidbyte/lib/constants/browser_tools.py and one validator call here. A new field of BrowserThreadResult is a public contract change of the nine browser functions and needs a spec change first.
-WHAT NOT TO DO IN THIS FILE: 1. Do not quote a tools item, a tool_keys name or a tool_keys value in a message, and do not pass one to a quoting validator. 2. Do not drop repr=False from BrowserToolRequest.tool_keys or BrowserToolSelection.key. 3. Do not import from vidbyte.harnesses; vidbyte/lib is the bottom layer. 4. Do not resolve a tool string's meaning here; that is the registry's job.
+WHAT NOT TO DO IN THIS FILE: 1. Do not quote a tools item, a tool_keys name or a tool_keys value in a message, and do not pass one to a quoting validator. 2. Do not drop repr=False from BrowserToolRequest.tools, BrowserToolRequest.tool_keys or BrowserToolSelection.key. 3. Do not import from vidbyte.harnesses; vidbyte/lib is the bottom layer. 4. Do not resolve a tool string's meaning here; that is the registry's job.
 KNOWN EDGE CASES: tools must be a list or tuple; a bare string is refused naming tools, never split into characters. A tool_keys name that is not a registry name (mountable or excluded) is refused by position, as `tool_keys entry <i>`, whatever its value, because the name may be a key the caller swapped with the tool name. A remote server's command is the empty tuple. Artifacts must be absolute; the readers build a BrowserToolCall only after accepts_text passed on the vendor's name, so its own name check never fires on vendor output.
 RELATED DOCS: vidbyte/harnesses/README.md
 TESTS: tests/features/harness_threads/test_harness_threads_browser_contract.py, tests/features/harness_threads/test_harness_threads_browser_registry.py
@@ -160,7 +160,7 @@ class BrowserToolDefinition:
 
 @dataclass(frozen=True, slots=True)
 class BrowserToolRequest:
-    """The caller's tools and tool_keys, checked for shape only; the keys never show in repr.
+    """The caller's tools and tool_keys, checked for shape only; neither shows in repr, because a key may sit in either.
 
     tools is typed Sequence[str] because the record must see the raw
     value: a bare string is refused, not split into characters. After
@@ -168,7 +168,7 @@ class BrowserToolRequest:
     None becomes an empty mapping.
     """
 
-    tools: Sequence[str]
+    tools: Sequence[str] = field(repr=False)
     tool_keys: Mapping[str, str] = field(repr=False)
 
     def __post_init__(self) -> None:
