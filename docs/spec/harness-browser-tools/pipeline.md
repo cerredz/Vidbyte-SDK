@@ -18,12 +18,12 @@ started: 2026-10-16 21:43
 | S2 tests | done | 2026-10-17 | 2026-10-17 | reports/S2-test-author.md | 177 new cases (pack 438→615); red: 18 failed / 155 errors (ModuleNotFoundError vidbyte.lib.enums.browser_tools) / existing 429 pass; tests fb8ab004, proof 6567f6aa |
 | S3 implement | done | 2026-10-17 | 2026-10-17 | reports/S3-implementer.md | HEAD d00bd8ba (pushed); draft PR #1183; 37/37 rows; 12/12 files, 34/34 classes; 177 browser cases 176 pass + 1 win32 skip |
 | S4 adversarial review | done | 2026-10-17 | 2026-10-17 | reports/S4-review-{conformance,conventions,engineering}.md, reports/S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; confirmed 3 Blocker / 3 Major; 13 Minor; 0 refuted (21 raw → 19) |
-| S5 repair loop | running | 2026-10-17 | | | | |
-| S5 re-review | pending | | | | |
+| S5 repair loop | done (converged, 1/8) | 2026-10-17 | 2026-10-18 | | | | |
+| S5 re-review | running | 2026-10-18 | | | | |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 (cap reached) · S5 repair iterations: 1/8 (iteration 1 launched 2026-10-17) · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 (cap reached) · S5 repair iterations: 1/8 (iteration 1 launched 2026-10-17) · S5 re-review rounds: 1/2 (round 1 launched 2026-10-18)
 - S2_HEAD (test-tree baseline): 6567f6aa (tests fb8ab004 + proof; fixture fold applied). Post-S3 repairs end at 9e81a7d0; post-S4 additions end at fb7be13e. Test-edit check from now on: `git diff fb7be13e..HEAD --stat -- tests/` must be EMPTY (S5/S6) unless the orchestrator adjudicates.
 - Effective base after merge: origin/main 6f5a7310 (drift checks diff 6f5a7310..origin/main)
 
@@ -76,6 +76,9 @@ started: 2026-10-16 21:43
 
 - 2026-10-17 — Spec r5 @ 7364f514 (spec author): R-2 evidence rule → "listed in available_commands or completed a call; a failed call ("Tool not found") never counts" across FR-14, D-11, AC-12, EC-16/44/45, §8.5 comment, §9.1 evidence row + Grok reader bullet; NG-2/§2 corrected (#1055 merged; CodexHost is a host harness) and Q-19 added (Codex follow-up). Spot-check: revision 5, status reviewed, pr kept, only spec.md, §8.4 + 37 §12.3 rows byte-identical. Left §12.3 row 23 "nor called" as is (§9.1 defines it as a completed call) to avoid churn.
 - 2026-10-17 — Post-S4 test additions (fresh test author): 8b02afdd R-2 regression (2 new AC-12 cases, playwright + jina, RED on current code: orchestrator re-ran → `DID NOT RAISE NativeThreadError`, 2 failed / 2 passed), 131b854f R-16 second-cancel sibling test (passes shipped; fails under no-shield mutation), 5979eabb R-17 user's-own-enabled-server sibling test (passes shipped; fails under counting mutant), fb7be13e docs. No vidbyte/ change; 0 credential-pattern literals added. Test baseline moves to fb7be13e.
+
+- 2026-10-18 — S5 iteration 1 DONE @ e2fdf0e2 (pushed): fixed R-1 8286f1aa, R-2 fb8c0508, R-3 4c686557, R-4 36e5129e, R-5 1990e363 (+ spec r5), R-6 103a27a5, R-7 07ac09b6, R-8 e8e543a9, R-9 31ae9ba4, R-10 ece025b3; R-16/R-17 by test commits. Agent gates: lint `SDK-LINT: PASS` (A002 562/703, S024 25/25, S064 4/4, A007 255/255); source gate `1 failed, 6628 passed, 17 skipped` (inherited only); package `CI passed.`; CI 39096073590 + Static policy 39096074746 success on e2fdf0e2. Orchestrator convergence check: tree clean; HEAD == origin == e2fdf0e2; `git diff fb7be13e..HEAD -- tests/` = only the pre-granted README_BULLET line in test_codex_host_packaging.py; verify-log "## Iteration 1" present; all 6 confirmed findings `fixed @<sha>`; independent area run harness_threads + codex_host `1 failed, 818 passed, 3 skipped` (inherited `assert 167 == 120` only). CONVERGED at iteration 1/8. Agent-noted trade-offs for the re-review: R-3 first removal try always runs (worst case = 10 s budget + one rmtree; a hung rmtree is no longer cut off); reaper.py keeps the `"win32"` literal because `mypy --platform win32` flags `signal.SIGKILL` behind the constant.
+- 2026-10-18 — Pre-granted test change (adjudicated before launch): R-5 README rewording required updating ONLY `README_BULLET` in tests/features/codex_host/test_codex_host_packaging.py (pinned byte-for-byte by #1055); granted because the pin's guarded property (Codex import guidance) survives and the alternative kept the misleading "Each harness" text. Verified as a 1-line diff.
 
 ## User replies (verbatim)
 - (none yet)
