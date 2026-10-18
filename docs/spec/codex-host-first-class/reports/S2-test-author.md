@@ -379,3 +379,34 @@ Proof:
 - The stream tests call `wait_done` before `drain`. A suspended async generator does not interleave, so this is how they make a subscriber lag deterministically.
 
 **Open items.** None for S2. The repair agent's fixes for R-1, R-3, R-4 and R-5 should turn the 7 red tests green, with no test edits.
+
+## Round 5 (re-review R-RR1, HEAD `2d0f5216`)
+
+Tests commit: `4de2c91d`. Two regression tests pin INV-2 for a repository whose `stat` is refused. `CodexWorktreeRequest.__post_init__` catches only `ConfigurationError`, and `Path.is_dir()` raises the refused stat again (Python 3.11 ignores only errnos 2, 9, 20 and 10062), so a raw `OSError` that quotes the absolute path reaches the caller. No production file was touched.
+
+What was added:
+- **Shared helper.** `codex_host_feature_support.py` gains `STAT_REFUSALS` and `refused_stat(path, type, errno, text)`, copied from the reviewer's probe. It patches `pathlib.Path.stat` for one path only. The rows are `PermissionError(EACCES)` and `OSError(ENAMETOOLONG)`, and the second exists so that a repair catching only `PermissionError` fails.
+- **Record test.** `feature_records::CodexFeatureInputRecordTests::test_a_worktree_repository_whose_stat_is_refused_is_the_repository_refusal_raised_from_none` runs on CI, because it needs no SDK. It has four subtests: 2 refusals × (`Path`, `str`). Each expects the message, `details == {"field": "repository"}`, `__cause__ is None` and `__suppress_context__`, with no canary. The unrefused folder is accepted.
+- **Host test.** `worktree::CodexWorktreeHostTests::test_a_repository_whose_stat_is_refused_is_refused_as_the_repository_field_without_its_path_and_git_never_runs` has two subtests on a real repository. Each expects `refused_locally(…, "repository")`, the message and details, and the `from None` chain. No canary may appear in the error or the logs, and no record may carry `exc_info`. Afterwards there is no `~/.vidbyte`, the branch list is unchanged, and no request was sent.
+
+Evidence:
+- **Red on the current code** (production as of `ec17d5ce`): all 6 subtests raise the raw `PermissionError: [Errno 13] Permission denied: '…\repo-pathcanary5e13'` or `OSError: [Errno 38] File name too long: '…'`. Under `unittest` the result is `FAILED (errors=6)`.
+- **In memory** (`scratchpad/round5/fixcheck_rr1.py`, on the worktree and records files):
+  - none: 2 failed, 56 passed.
+  - `FIX` (`except (ConfigurationError, OSError):`): exit 0, 58 passed.
+  - `PERMISSION-ONLY`: 2 failed, from the ENAMETOOLONG rows.
+  - `CHAINED` (`from exc`): 2 failed on `__cause__`.
+- **Area on the current code:**
+  ```
+  FAILED tests/features/codex_host/test_codex_host_feature_records.py::CodexFeatureInputRecordTests::test_a_worktree_repository_whose_stat_is_refused_is_the_repository_refusal_raised_from_none
+  FAILED tests/features/codex_host/test_codex_host_worktree.py::CodexWorktreeHostTests::test_a_repository_whose_stat_is_refused_is_refused_as_the_repository_field_without_its_path_and_git_never_runs
+  FAILED tests/features/harness_threads/test_harness_threads_surface.py::test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes
+  3 failed, 1302 passed, 3 skipped in 86.20s (0:01:26)
+  ```
+- **Area under `FIX`:** `1 failed, 1304 passed, 3 skipped in 87.67s (0:01:27)`, which is only the inherited failure.
+- **Lint:** `SDK-LINT: PASS`.
+- **File sizes:** worktree 458 lines, records 622, support 385.
+
+**Niche fact.** Without the pytest-subtests plugin, pytest shows only the first failing subtest of each test. Run `python -m unittest <test ids>` to see all 6.
+
+**Open items.** None for S2. The repair `except (ConfigurationError, OSError):` at `codex_host_inputs.py:591` should turn both tests green without test edits.
