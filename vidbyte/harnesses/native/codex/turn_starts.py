@@ -2,9 +2,9 @@
 
 PURPOSE: CodexTurnStarts, the CodexHost collaborator that starts every turn that spends: a plain turn, a goal run, and the resume of a stored goal. Each start is sent once through CodexConnection.start, so a start whose caller left is still adopted and stopped; accept then watches the started turn, or ends it as exited when close or a death came first, and release_tools drops the tool handler of a thread whose first turn never started.
 ROLE IN CODEBASE: A host collaborator of vidbyte/harnesses/native/codex/; CodexHost._open builds it, spawn, continue and launch call it from host.py, and the side chat and goal resume call it from the thread and goal mixins (first-class D-2).
-ARCHITECTURE NOTE: Loads openai-codex at module level, for the SDK's own CodexError, so only CodexHost._open imports this module (first-class INV-45). Every client call here runs inside CodexConnection.start's worker or a bounded CodexConnection.call, so it writes one call record (INV-3). The goal resume's worker is one method run inside connection.start under CODEX_GOAL_RESUME_CALL; its start window is read from this module's namespace at call time, so a test patches it here.
+ARCHITECTURE NOTE: Loads openai-codex at module level, for the SDK's own CodexError and JsonRpcError, so only CodexHost._open imports this module (first-class INV-45). Every client call here runs inside CodexConnection.start's worker or a bounded CodexConnection.call, so it writes one call record (INV-3). The goal resume's worker is one method run inside connection.start under CODEX_GOAL_RESUME_CALL; its start window is read from this module's namespace at call time, so a test patches it here.
 COMMON MODIFICATION PATTERNS: A new kind of spending start is one public method here built the same way: one worker or SDK call inside connection.start, a private adopt-late method that registers then stops a late start, and the registry's track or track_goal. A check a start needs before it sends goes in the method, before connection.start, with its message in vidbyte/lib/constants/codex_host.py.
-KNOWN EDGE CASES: A collaboration mode needs a model on the wire, so a mode turn on a thread Codex reported no model for, with no mode or turn model, is refused before turn/start (first-class INV-13, EC-14). A goal run registers only once its budget echo matches (INV-25). A resume cancels its goal operation only when its status set was sent, and always finishes and unregisters it (EC-37, EC-38); its start window elapsing is codex.api_error. Close wins over a turn still starting (EC-79).
+KNOWN EDGE CASES: A collaboration mode needs a model on the wire, so a mode turn on a thread Codex reported no model for, with no mode or turn model, is refused before turn/start (first-class INV-13, EC-14). A goal run registers only once its budget echo matches (INV-25). A resume cancels its goal operation from the moment its status set is sent, unless Codex answered the set with a JSON-RPC error, which is a refusal that changed nothing; an answer that does not validate counts as sent and is cancelled (EC-64). It always finishes and unregisters the operation (EC-37, EC-38); its start window elapsing is codex.api_error. Close wins over a turn still starting (EC-79).
 RELATED DOCS: docs/spec/codex-host-first-class/spec.md (sections 8.1 D-2 and D-17, 8.5 and 12.3 row 22, INV-3, INV-13, INV-31); docs/spec/codex-host/spec.md (INV-11, INV-25, D-35, EC-79); docs/spec/codex-host-hardening/spec.md (INV-26)
 TESTS: tests/features/codex_host/test_codex_host_turns.py, tests/features/codex_host/test_codex_host_review_goals.py, tests/features/codex_host/test_codex_host_settings_modes.py, tests/features/codex_host/test_codex_host_goal_control.py, tests/features/codex_host/test_codex_host_side_chat.py, tests/features/codex_host/test_codex_host_resilience.py
 """
@@ -16,7 +16,7 @@ from contextlib import suppress
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
-from openai_codex.errors import CodexError
+from openai_codex.errors import CodexError, JsonRpcError
 
 from vidbyte.harnesses.native.codex.errors import CodexErrorMapper
 from vidbyte.harnesses.native.codex.feature_wire import CodexFeatureParamsTranslator
@@ -189,30 +189,33 @@ class CodexTurnStarts:
             connection.router.unregister(thread_id)
 
     def _resume_now(self, thread_id: str, activate: Callable[[], Any]) -> tuple[_GoalOperationState, str]:
-        # @intent a-resume-cancels-only-a-goal-it-set-active
+        # @intent a-resume-cancels-a-set-codex-did-not-refuse
         # Runs on a host worker inside connection.start, in
         # openai-codex's own goal-start order without its clear: route
         # the goal's turns to one goal operation, set the goal active
         # once, then wait for Codex's first turn within the resume
-        # window, read now. A failure cancels the operation only once
-        # the set was sent, and always finishes and unregisters it, so
-        # nothing is left routed; a cancel that fails is ignored, so the
-        # caller sees why the resume failed (first-class INV-31, EC-37,
-        # EC-38).
+        # window, read now. From the moment the set is sent, a failure
+        # cancels the operation, unless Codex answered the set with a
+        # JSON-RPC error: that is a refusal, so the goal never changed.
+        # An answer that does not validate may still have been applied,
+        # so it is cancelled. The operation is always finished and
+        # unregistered, so nothing is left routed; a cancel that fails
+        # is ignored, so the caller sees why the resume failed
+        # (first-class INV-31, EC-37, EC-38, EC-64).
         client = self._connection.client
         state = client.reserve_goal_operation(thread_id)
         sent = False
         try:
             state.activate_turn_routing()
-            activate()
             sent = True
+            activate()
             turn_id = state.wait_for_start(CODEX_HOST_GOAL_RESUME_START_SECONDS)
             if turn_id is None:
                 raise CodexError
             return state, turn_id
-        except BaseException:
+        except BaseException as exc:
             with suppress(Exception):
-                if sent:
+                if sent and not isinstance(exc, JsonRpcError):
                     client.cancel_goal_operation(state)
             state.finish()
             client.unregister_goal_operation(state)
