@@ -474,8 +474,8 @@ Slice 2 also had minor findings:
 - **R-RR2's shared helper.** Give `_CodexHostTool` in `_base.py` one reset helper. The side-chat and resume tools copy the same reset loop, and both modules define `THREAD_FIELD_PREFIX`. By orchestrator decision, this waits for a later PR.
 
 **A separate PR for `vidbyte/lib/dataclasses/validation.py`.** It is the canonical place to map a path that cannot be read. This PR fixed two cases at the record boundary in `CodexWorktreeRequest`, because `validation.py` was outside its scope:
-- **`RecordFieldValidator.require_directory` (`:131`).** It should map a refused `stat`. Its other callers, `vidbyte/lib/dataclasses/native_threads.py:120` and `:146`, likely leak a raw `OSError`, the bug fixed here as R-RR1.
-- **`RecordFieldConverter.to_path` (`:198`).** It lets `os.fspath`'s `TypeError` escape, the bug fixed here as R-RR2-1. The same pattern sits in `to_folder` (`:210`) and `to_files` (`:231`).
+- **`RecordFieldValidator.require_directory` (`:131`).** It should map a refused `stat`. Its other callers, `vidbyte/lib/dataclasses/native_threads.py:120` and `:146`, leak a raw `OSError`, the bug fixed here as R-RR1. An S6 probe confirmed it: `NativeThreadRequest` with a refused `stat` raised `PermissionError`.
+- **`RecordFieldConverter.to_path` (`:198`).** It lets `os.fspath`'s `TypeError` escape, the bug fixed here as R-RR2-1. The same probe, given a `__fspath__` that returns an int, raised `TypeError`. The same pattern sits in `to_folder` (`:210`) and `to_files` (`:231`).
 
 That PR should map "the value is not a valid path". It should let a caller's own `__fspath__` exception (`ValueError`, `KeyError`) pass through, as `open()` does.
 
