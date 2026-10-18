@@ -1,6 +1,6 @@
 """FILE: tests/features/harness_threads/test_harness_threads_browser_lifecycle.py
 
-PURPOSE: What a browser call leaves behind and how it ends (docs/spec/harness-browser-tools/spec.md §5 layers 9 to 12, FR-14, FR-15, INV-4, INV-5, INV-12): the orphaned browser is reaped by its per-call folder marker however the call ends (AC-13, EC-19 to EC-22), artifacts survive only a successful return (FR-15), the required check per harness (AC-12, EC-16 to EC-18, EC-45), the workspace stays untouched (AC-16), concurrent calls keep their own browsers (AC-21), the 1,000 caps (EC-29), the Grok browser output cap (D-19), keys never reach error text (INV-4) and ProcessReaper itself (§8.5).
+PURPOSE: What a browser call leaves behind and how it ends (docs/spec/harness-browser-tools/spec.md §5 layers 9 to 12, FR-14, FR-15, INV-4, INV-5, INV-12): the orphaned browser is reaped by its per-call folder marker however the call ends (AC-13, EC-19 to EC-22), artifacts survive only a successful return (FR-15), the required check per harness, where a failed call never counts as evidence (AC-12, EC-16 to EC-18, EC-44, EC-45), the workspace stays untouched (AC-16), concurrent calls keep their own browsers (AC-21), the 1,000 caps (EC-29), the Grok browser output cap (D-19), keys never reach error text (INV-4) and ProcessReaper itself (§8.5).
 ROLE IN CODEBASE: Start here when the reaper, the discard path, the required check or the artifact collection changes.
 ARCHITECTURE NOTE: A fake server started with a profile option spawns a "browser" through a short-lived spawner, so it is an orphan on every platform and leads its own session on POSIX (fake_browser.start_browser); no tree stop of the harness reaches it, and only a reap by command-line marker ends it before its 30 s limit. Each test reads the browser pids the fakes logged and checks them with the pack's process_alive. The `sweep` fixture kills any browser a failing implementation left behind.
 FUNCTION INVENTORY: sweep kills leftover fake browsers after each test; gone waits until every pid is dead; changed lists the sandbox paths a call added, changed or removed; refuse runs a call that must raise; the test_* functions are one behaviour each.
@@ -145,14 +145,27 @@ async def test_a_missing_ps_is_not_raised(browser_world, browser_api, sandbox, b
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("tool", ["playwright", "jina"])
-async def test_grok_names_each_server_it_never_listed(browser_world, browser_api, sandbox, browse, check_browser_error, pack, sweep, tool) -> None:
+@pytest.mark.parametrize(
+    ("tool", "guessed"),
+    [
+        pytest.param("playwright", {}, id="playwright"),
+        pytest.param("jina", {}, id="jina"),
+        pytest.param("playwright", {"browser_calls": ["playwright__browser_navigate"]}, id="playwright-only-call-failed"),
+        pytest.param("jina", {"browser_calls": ["jina__read_url"]}, id="jina-only-call-failed"),
+    ],
+)
+async def test_grok_names_each_server_it_never_listed(browser_world, browser_api, sandbox, browse, check_browser_error, pack, sweep, tool, guessed) -> None:
     # AC-12 / EC-16 / EC-45 / FR-14: browser.tools_unavailable with the
-    # new thread id, naming the missing server.
-    error = await refuse(browse, browser_api, "grok", tools=[tool], fake={"grok_unlisted": [tool]})
+    # new thread id, naming the missing server. In the -only-call-failed
+    # cases the model calls the dead server's tool by name anyway; Grok
+    # answers "Tool not found" and exits 0. Only a listed server or a
+    # completed call counts (D-11, EC-44), so it is still missing.
+    error = await refuse(browse, browser_api, "grok", tools=[tool], fake={"grok_unlisted": [tool], **guessed})
     session = sandbox.answers("grok")[-1]["session"]
     check_browser_error(error, harness="grok", verb="run", code="browser.tools_unavailable", workspace=sandbox.workspace, thread_id=session, observations=[("missing server", (tool,))])
     assert sandbox.call_folders() == []
+    (made,) = sandbox.records("browser_calls", "grok")
+    assert made["calls"] == [[name, "failed"] for name in guessed.get("browser_calls", [])], "the fake Grok did not make exactly the guessed call, failed"
 
 
 @pytest.mark.asyncio
