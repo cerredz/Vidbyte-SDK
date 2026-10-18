@@ -1,6 +1,6 @@
 """FILE: tests/features/harness_compose/test_harness_compose_surface.py
 
-PURPOSE: The public surface of compose (AC-22, INV-1, INV-24, INV-27, INV-32, INV-33, §8.5): the literal 42-name `__all__`, re-exports that are the very `vidbyte.lib` objects, the seven enum exports and the other lib exports, the unchanged existing surfaces, the exact vocabularies and contract constants, every function's kind and parameters, the alias signatures, the ThreadComposeError packet, a side-effect-free import, the import layering, and no sleep in any compose module (INV-22).
+PURPOSE: The public surface of compose (AC-22, INV-1, INV-24, INV-27, INV-32, INV-33, §8.5): the literal 42-name `__all__`, re-exports that are the very `vidbyte.lib` objects, the seven enum exports and the other lib exports, SecretText among them, the unchanged existing surfaces, the exact vocabularies and contract constants, every function's kind and parameters, the alias signatures, the ThreadComposeError packet, a side-effect-free import, the import layering, and no sleep in any compose module (INV-22).
 ROLE IN CODEBASE: Start here when a public name, a signature, an enum member or a constant drifts from spec §8.5.
 ARCHITECTURE NOTE: Expected names, values and parameters are written out here from the spec, never read from the code under test. The import probes run in a fresh interpreter with `-B`, so no bytecode write is mistaken for a file the import touched. The layering and sleep checks read the source with `ast` and never import it.
 FUNCTION INVENTORY: compose_modules and imported_modules read the compose sources; the test_* functions are one behaviour each.
@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import ast
 import enum
+import importlib
 import inspect
 import json
 import os
@@ -183,6 +184,23 @@ def test_lib_packages_export_the_new_enums_error_and_decoder(compose_api) -> Non
     assert "JsonText" in compose_api.util.__all__
     assert compose_api.util.JsonText is compose_api.JsonText
     assert issubclass(compose_api.ThreadComposeError, compose_api.AgentExecutionError)
+
+
+def test_lib_util_exports_secret_text_beside_json_text(compose_api) -> None:
+    # INV-1 / AC-22 / §8.5: vidbyte.lib.util exports SecretText as
+    # the very class of its own module. replace_all swaps every
+    # non-empty secret as exact text, the longest first, so a secret
+    # that holds a shorter one is replaced whole. Red until S5
+    # grant (b) lands: the module did not exist.
+    util = compose_api.util
+    assert "SecretText" in util.__all__ and "JsonText" in util.__all__
+    module = importlib.import_module("vidbyte.lib.util.secret_text")
+    assert "SecretText" in module.__all__
+    assert util.SecretText is module.SecretText
+    replace_all = util.SecretText.replace_all
+    assert replace_all("key-long, then key.", ["key", "key-long"], "[x]") == "[x], then [x]."
+    assert replace_all("abc", ["", "b"], "*") == "a*c", "an empty secret is ignored"
+    assert replace_all("no secret here", [], "*") == "no secret here"
 
 
 def test_existing_public_surfaces_are_unchanged(compose_api) -> None:
