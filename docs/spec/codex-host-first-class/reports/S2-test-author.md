@@ -325,3 +325,8 @@ The spec's §6.2 Proof column is unchanged, because no cited node id changed.
 
 - `CODEX_HOST_NO_STORED_GOAL_MESSAGE` is pinned only by text. A by-name pin would mean adding `NO_STORED_GOAL_MESSAGE` to `TEXT_NAMES`, with the support literal renamed to match. That takes about six lines and is the coordinator's call.
 - The pack README's change log has no round-2 entry, because the task limited doc edits.
+
+**Round 2b (coordinator follow-up, commit `893f1df4`).** All three open items above are now closed in the test tree.
+- Name pin: `TEXT_NAMES` gains `NO_STORED_GOAL_MESSAGE`, and the support literal is renamed to match (goal_control updated, imports kept sorted). The test fails because `vidbyte.lib.constants.codex_host` has no attribute `CODEX_HOST_NO_STORED_GOAL_MESSAGE`, which is the right reason. The shared-constants guard stays green.
+- `FEATURE.md:5` now describes 53 methods: the 25 slice-2 functions, `collaboration_mode`, and 42 tools, with the nine INV-42 functions kept from the model. `:40` now says forty-two tools. `:230` now says eleven older modules. I also fixed the stale "named only first and last" header in `codex_host_feature_support.py`. The pack README gains a round-2 change-log entry.
+- Area: `253 failed, 1041 passed, 3 skipped in 75.52s (0:01:15)`, with the same failing set and exception mix as round 2, so test-plan counts did not move. Only defect 1 and the implementer note were updated. Lint: `SDK-LINT: PASS`.
