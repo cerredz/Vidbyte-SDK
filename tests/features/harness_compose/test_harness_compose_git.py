@@ -125,9 +125,10 @@ async def test_git_the_os_will_not_start_is_git_unavailable(compose_api, sandbox
 
 @pytest.mark.asyncio
 async def test_every_git_child_is_the_spec_command_in_the_spec_place_with_a_clean_environment(compose_api, sandbox, steps, runs, pack, monkeypatch) -> None:
-    # INV-26 / INV-7 / INV-9 / EC-10 / EC-58 / T-8: a workspace in a
-    # subfolder, a decoy repository named by the caller's location
-    # variables; every git child is checked against §9.2 and the oracle.
+    # INV-26 / INV-7 / INV-9 / EC-10 / EC-58 / T-8:
+    # a workspace in a subfolder, a decoy repository
+    # named by the caller's location variables; every
+    # git child is checked against §9.2 and the oracle.
     api = compose_api
     sandbox.make_repo(files={**pack.DEFAULT_FILES, "pkg/__init__.py": "VERSION = 1\n"})
     workspace = sandbox.workspace / "pkg"

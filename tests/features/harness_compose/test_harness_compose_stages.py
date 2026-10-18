@@ -60,8 +60,8 @@ def stage_case(api, steps, case: str):
 
 
 def test_stage_decisions_are_the_spec_table(compose_api) -> None:
-    # §9.2 STAGE_DECISIONS / D-14 / EC-54: every NativeThreadProblem has
-    # its decision; a code with no problem gets ABORT.
+    # §9.2 STAGE_DECISIONS / D-14 / EC-54: every NativeThreadProblem
+    # has its decision; a code with no problem gets ABORT.
     constants = compose_api.constants
     assert {problem.value: decision.value for problem, decision in constants.STAGE_DECISIONS.items()} == DECISIONS
     assert set(constants.STAGE_DECISIONS) == set(compose_api.NativeThreadProblem)

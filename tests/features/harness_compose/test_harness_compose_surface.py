@@ -202,7 +202,8 @@ def test_existing_public_surfaces_are_unchanged(compose_api) -> None:
 
 
 def test_vocabularies_are_exactly_the_spec_members(compose_api) -> None:
-    # §8.5 / §9.2: every new enum is a StrEnum with exactly its members.
+    # §8.5 / §9.2: every new enum is a
+    # StrEnum with exactly its members.
     enums = compose_api.enums
     for name in LIB_ENUMS:
         assert issubclass(getattr(enums, name), enum.StrEnum), name
@@ -286,8 +287,8 @@ def test_each_alias_has_its_exact_signature_and_returns_a_coroutine(compose_api,
 
 
 def test_thread_compose_error_carries_the_a003_packet(compose_api) -> None:
-    # §8.5 / §12.3 row 9: error_kind is the problem value; details holds
-    # the eight A003 fields and never the diff text or the result;
+    # §8.5 / §12.3 row 9: error_kind is the problem value; details
+    # holds the eight A003 fields and never the diff text or the result;
     # safe_runtime_details holds problem, workspace and git_message.
     api = compose_api
     marker = "DIFF-TEXT-MARKER-5b1f"

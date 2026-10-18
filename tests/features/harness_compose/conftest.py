@@ -298,7 +298,7 @@ class Sandbox:
         self.oracle_indexes = 0
         self.labels: dict[str, str] = {}
 
-    # ---- scenarios and stand-ins -------------------------------------------------
+    # ---- scenarios and stand-ins -------------------------------------
 
     def scenario(self, program: str, *, label: str | None = None, **fields: Any) -> Path:
         self.scenarios += 1
@@ -343,12 +343,12 @@ class Sandbox:
     def release(self) -> None:
         self.release_file.write_text("go", encoding="utf-8")
 
-    # ---- stand-in logs -------------------------------------------------------------
+    # ---- stand-in logs -----------------------------------------------
 
     def launches(self, role: str | None = None, label: str | None = None) -> list[dict[str, Any]]:
-        # One entry per stand-in process, in launch order: its role, its
-        # start record (argv, cwd, options, stdin, label, turn, rule) and
-        # every record it wrote.
+        # One entry per stand-in process, in launch order:
+        # its role, its start record (argv, cwd, options,
+        # stdin, label, turn, rule) and every record it wrote.
         found: list[dict[str, Any]] = []
         for path in sorted(self.log_dir.glob("*.jsonl"), key=lambda item: int(item.name.split("-", 1)[0])):
             records: list[dict[str, Any]] = []
@@ -376,7 +376,7 @@ class Sandbox:
     def started_labels(self) -> list[str | None]:
         return [item["label"] for item in self.launches()]
 
-    # ---- git helpers ---------------------------------------------------------------
+    # ---- git helpers -------------------------------------------------
 
     def git_env(self, extra: dict[str, str] | None = None) -> dict[str, str]:
         environment = {name: value for name, value in os.environ.items() if name not in GIT_LOCATION_VARIABLES}
@@ -647,9 +647,9 @@ def steps(compose_api: SimpleNamespace, sandbox: Sandbox) -> StepBinder:
 @pytest.fixture
 def check_compose_error(compose_api: SimpleNamespace) -> Callable[..., None]:
     def check(error: BaseException, *, problem: str, workspace: Path | str, observations: Iterable[tuple[str, tuple[str, ...]]] = (), git_text: str | None = None, add_texts: bool = False) -> None:
-        # The ThreadComposeError packet (spec §8.5, §12.3 row 9) and the
-        # INV-6 message order: problem and workspace, the observation,
-        # git's text, the likely cause, the next step.
+        # The ThreadComposeError packet (spec §8.5, §12.3 row 9)
+        # and the INV-6 message order: problem and workspace, the
+        # observation, git's text, the likely cause, the next step.
         api = compose_api
         assert isinstance(error, api.ThreadComposeError), f"expected ThreadComposeError, got {type(error).__name__}: {error}"
         assert isinstance(error, api.AgentExecutionError)
@@ -685,8 +685,8 @@ def check_compose_error(compose_api: SimpleNamespace) -> Callable[..., None]:
 
 @pytest.fixture
 def fast_stop(compose_api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
-    # Base timing knob, read through vidbyte.lib.constants.native_threads
-    # at call time.
+    # Base timing knob, read through
+    # vidbyte.lib.constants.native_threads at call time.
     monkeypatch.setattr(compose_api.threads_constants, "NATIVE_KILL_WAIT_SECONDS", FAST_KILL_WAIT_SECONDS)
     return SimpleNamespace(kill_wait=FAST_KILL_WAIT_SECONDS, slack=SLACK_SECONDS)
 

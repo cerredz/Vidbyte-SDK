@@ -70,8 +70,8 @@ async def test_trio_runs_the_writer_alone_then_reviews_its_diff_in_place_and_in_
     assert pack.launch_observed(muse_launch) == {"feature.txt": pack.text_digest(FEATURE), "README.md": pack.text_digest(pack.DEFAULT_FILES["README.md"])}
     assert not Path(folder).exists(), "the worktree folder is removed"
 
-    # Each verifier prompt carries the diff and the verdict schema, never
-    # the writer's answer.
+    # Each verifier prompt carries the diff and the
+    # verdict schema, never the writer's answer.
     for launch in (grok_launch, muse_launch):
         prompt = pack.launch_prompt(launch)
         assert pack.PROMPT in prompt and "feature.txt" in prompt and "+FEATURE-9c1e" in prompt

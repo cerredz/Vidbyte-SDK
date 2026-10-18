@@ -112,7 +112,8 @@ class Records:
 RECORD_THREAD_ID = "0192f0c4-beef-7bee-8f00-000000000003"
 OUTCOME_FIELDS = ("StepOutcome.result", "StepOutcome.error")
 BOUND_CASES = {
-    # case: (a value past the bound, the same record at the bound, the field the refusal names)
+    # case: (a value past the bound, the same record
+    # at the bound, the field the refusal names)
     "verdict with 51 findings": (lambda r: r.verdict(findings=("f",) * 51), lambda r: r.verdict(findings=("f",) * 50), "ThreadVerdict.findings"),
     "verdict with a blank summary": (lambda r: r.verdict(summary="   "), lambda r: r.verdict(summary="s"), "ThreadVerdict.summary"),
     "verdict summary past the answer cap": (lambda r: r.verdict(summary="s" * (r.cap + 1)), lambda r: r.verdict(summary="s" * r.cap), "ThreadVerdict.summary"),
@@ -143,10 +144,10 @@ BOUND_CASES = {
 
 @pytest.mark.asyncio
 async def test_cut_verdicts_are_repaired_on_the_same_thread_and_never_graded(compose_api, sandbox, steps, runs, pack, monkeypatch) -> None:
-    # AC-9 / EC-29 / EC-30: opencode's first answer is cut yet its prefix
-    # is a valid approve; the repair on the same thread and worktree
-    # gives reject. Grok's every answer is cut: three turns, no value,
-    # the problem names the cut, and the record still returns.
+    # AC-9 / EC-29 / EC-30: opencode's first answer is cut yet its
+    # prefix is a valid approve; the repair on the same thread and
+    # worktree gives reject. Grok's every answer is cut: three turns,
+    # no value, the problem names the cut, and the record still returns.
     api = compose_api
     monkeypatch.setattr(api.threads_constants, "NATIVE_RESULT_TEXT_MAX_CHARS", CUT_CHARS)
     sandbox.make_repo()
@@ -221,9 +222,9 @@ async def test_each_problem_gets_a_repair_naming_it_and_an_error_ends_the_answer
 
 @pytest.mark.asyncio
 async def test_parse_json_answer_never_passes_a_cut_answer_to_parse(compose_api, sandbox, steps, runs, pack, monkeypatch) -> None:
-    # INV-19 / EC-26 / EC-29: the cut first answer is skipped unread; the
-    # fenced second answer is decoded; parse sees a read-only mapping
-    # once; no git runs.
+    # INV-19 / EC-26 / EC-29: the cut first answer is
+    # skipped unread; the fenced second answer is decoded;
+    # parse sees a read-only mapping once; no git runs.
     api = compose_api
     monkeypatch.setattr(api.threads_constants, "NATIVE_RESULT_TEXT_MAX_CHARS", CUT_CHARS)
     fenced = "```json\n" + json.dumps({"answer": 42}) + "\n```"
@@ -293,8 +294,8 @@ def test_json_text_accepts_one_object_with_whitespace_or_one_fence(compose_api, 
     pytest.param('{"a": ' + "[" * 100_000 + "]" * 100_000 + "}", id="nested-100000-deep"),
 ])
 def test_json_text_refuses_everything_else_with_value_error(compose_api, text) -> None:
-    # INV-19 / EC-24 / EC-25 / EC-26 / EC-32 / EC-33: a ValueError, never
-    # a fallback, a RecursionError or another type.
+    # INV-19 / EC-24 / EC-25 / EC-26 / EC-32 / EC-33: a ValueError,
+    # never a fallback, a RecursionError or another type.
     with pytest.raises(ValueError):
         compose_api.JsonText.decode(text)
 

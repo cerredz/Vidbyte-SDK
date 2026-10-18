@@ -151,6 +151,7 @@ def test_every_fixed_combination_leaves_half_the_argv_room(compose_api, pack) ->
 
 
 def test_pyproject_ships_the_prompt_files(compose_api, pack) -> None:
-    # §12.3 row 18 / AC-21: the package-data entry, exactly as specified.
+    # §12.3 row 18 / AC-21: the package-data
+    # entry, exactly as specified.
     data = tomllib.loads((pack.REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     assert data["tool"]["setuptools"]["package-data"]["vidbyte.harnesses.native.compose"] == ["prompts/*.md"]

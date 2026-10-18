@@ -126,7 +126,8 @@ CASES = {
     "no verifiers": lambda i: i.verify(i.opencode(), []),
     "11 verifiers": lambda i: i.verify(i.opencode(), [i.plan()] * 11),
     "writer that is not a step": lambda i: i.verify("opencode", [i.plan()]),
-    # INV-18 / EC-35: a caller prompt the fixed prompt files leave no room for.
+    # INV-18 / EC-35: a caller prompt the
+    # fixed prompt files leave no room for.
     "prompt too long for a grok verifier": lambda i: i.verify(i.opencode(), [i.plan()], prompt=LONG_PROMPT),
     "prompt too long for a later grok step": lambda i: i.chain([i.opencode(), i.grok()], prompt=LONG_PROMPT),
     "prompt too long for a grok planner": lambda i: i.compose.run_ensemble(LONG_PROMPT, i.roster()),
@@ -150,7 +151,8 @@ CASES = {
     "proposer on another workspace": lambda i: i.compose.run_ensemble(i.pack.TASK, i.roster(proposers=[i.plan(workspace=i.other)])),
     "selector with accept edits": lambda i: i.compose.run_ensemble(i.pack.TASK, i.roster(selector=i.grok(edits=True))),
     "unanchored fork implementer under an opencode planner": lambda i: i.compose.run_ensemble(i.pack.TASK, i.roster(planner=i.opencode(), proposers=[i.opencode()], implementer=i.fork(edits=True))),
-    # INV-3 / §9.2: parse_json_answer takes any step but an unanchored fork.
+    # INV-3 / §9.2: parse_json_answer
+    # takes any step but an unanchored fork.
     "unanchored fork to parse_json_answer": lambda i: i.compose.parse_json_answer(i.fork(), i.pack.PROMPT, schema="{}", parse=dict),
     "string to parse_json_answer": lambda i: i.compose.parse_json_answer("grok", i.pack.PROMPT, schema="{}", parse=dict),
 }
@@ -232,10 +234,11 @@ async def test_alias_keyword_mistakes_raise_type_error_before_anything_runs(comp
 
 @pytest.mark.parametrize(("value", "units"), UNIT_CASES)
 def test_command_line_units_is_the_count_require_command_line_units_enforces(compose_api, value, units) -> None:
-    # INV-36 / §8.5: the new helper counts one argument as CreateProcess
-    # does (quoted as subprocess quotes it, in UTF-16 code units; the
-    # expected counts are worked out by hand), and the existing check
-    # keeps its result and its exact error at that boundary.
+    # INV-36 / §8.5: the new helper counts one argument
+    # as CreateProcess does (quoted as subprocess quotes
+    # it, in UTF-16 code units; the expected counts are
+    # worked out by hand), and the existing check keeps
+    # its result and its exact error at that boundary.
     validator = compose_api.RecordFieldValidator
     assert validator.command_line_units(value) == units
     assert validator.require_command_line_units(value, "prompt", max_units=units) is value

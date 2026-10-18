@@ -20,8 +20,8 @@ SUMMARY = "SUMMARY-6d2e: refactor cli.py next; keep {braces} and {{doubles}} lit
 
 @pytest.mark.asyncio
 async def test_handoff_resumes_the_source_thread_and_seeds_a_new_target_thread(compose_api, sandbox, steps, runs, pack) -> None:
-    # AC-4 / INV-17: summary on the same Grok thread (no fork), seed on a
-    # new opencode thread, both thread ids in the record, no git.
+    # AC-4 / INV-17: summary on the same Grok thread (no fork), seed
+    # on a new opencode thread, both thread ids in the record, no git.
     api = compose_api
     origin = await steps.bind("grok", label="origin")("Plan the refactor.")
     source = steps.bind("grok", "continue", origin.thread_id, label="summary", fake={"text": SUMMARY})

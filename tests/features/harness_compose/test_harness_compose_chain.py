@@ -64,11 +64,11 @@ async def test_opencode_then_grok_sends_the_answer_and_the_writers_diff(compose_
 
 @pytest.mark.asyncio
 async def test_failed_middle_step_ends_the_chain_with_the_functions_own_error(compose_api, sandbox, steps, runs, pack) -> None:
-    # AC-7 / INV-15 / INV-16 / INV-29 / INV-6 / INV-17: Grok answers with
-    # braces, opencode gets the template rendered literally and fails
-    # run_failed; the record holds that very error, Muse never starts,
-    # and a template without {diff} runs no git (the folder is not a
-    # repository).
+    # AC-7 / INV-15 / INV-16 / INV-29 / INV-6 / INV-17: Grok
+    # answers with braces, opencode gets the template rendered
+    # literally and fails run_failed; the record holds that
+    # very error, Muse never starts, and a template without
+    # {diff} runs no git (the folder is not a repository).
     api = compose_api
     grok = steps.bind("grok", label="first", fake={"text": GROK_TEXT})
     opencode = steps.bind("opencode", label="second", fake={"mode": "fail", "vendor_text": VENDOR, "exit_code": 93})
@@ -122,11 +122,11 @@ async def test_long_answer_with_a_nul_is_shortened_to_fit_the_grok_step(compose_
 
 @pytest.mark.asyncio
 async def test_quote_dense_answer_is_shortened_by_command_line_units_as_well(compose_api, sandbox, steps, runs, pack) -> None:
-    # EC-36 / INV-18 / D-19: an answer of 100,000 double quotes takes two
-    # command-line units per character, so on win32 the unit ceiling,
-    # not the character cap, sets the cut; the Grok step still succeeds,
-    # the kept prefix ends with its truncation note, and the prompt uses
-    # the room its binding cap leaves.
+    # EC-36 / INV-18 / D-19: an answer of 100,000 double quotes
+    # takes two command-line units per character, so on win32 the
+    # unit ceiling, not the character cap, sets the cut; the Grok
+    # step still succeeds, the kept prefix ends with its truncation
+    # note, and the prompt uses the room its binding cap leaves.
     api = compose_api
     answer = '"' * api.threads_constants.NATIVE_RESULT_TEXT_MAX_CHARS
     opencode = steps.bind("opencode", label="quotes", fake={"final_parts": [answer]})
