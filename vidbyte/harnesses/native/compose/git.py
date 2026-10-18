@@ -3,10 +3,10 @@
 PURPOSE: Runs the closed set of git commands compose needs for one workspace and turns every failure into a ThreadComposeError: ComposeGit finds git and the repository, snapshots the whole working tree into a temporary index, diffs two snapshots, and adds, fills, re-indexes and removes disposable worktrees; ComposeFailures builds each ThreadComposeError with its message, git's text and the texts for its problem.
 ROLE IN CODEBASE: Used by DiffCapture and DisposableWorktree (workspace.py) and by the composites that need git (chain.py for a template with {diff}, verify.py, ensemble.py and selection.py); ComposeFailures also builds the read-only backstop error the composites raise.
 ARCHITECTURE NOTE: Every git child goes through CliRunner with the program found by CliRunner.find_program, the no-optional-locks flag and the two -c settings first, the 15 repository-location variables removed, no standard input, and the COMPOSE_GIT_TIMEOUT_SECONDS and COMPOSE_GIT_MAX_OUTPUT_BYTES bounds (spec INV-26, §9.2, §9.3). No argument holds a caret, a caller value or model text: the only operands are HEAD, tree ids and temporary folder paths. A snapshot writes only to a fresh temporary index named by GIT_INDEX_FILE and to the object store, so the working tree, the real index, HEAD and every ref stay as they are (INV-7). ComposeFailures replaces every bound key in git's text as exact text before HarnessRedactor and the tail cap, so a cap never cuts a key in half, and writes the message in the INV-6 order: the problem and its summary, the workspace, what compose observed, git's text, the likely cause and the next step.
-FUNCTION INVENTORY: ComposeGit.locate finds git; toplevel and has_commit find the repository root and whether HEAD names a commit; snapshot is the narrated main function of a snapshot; diff compares two trees; add_worktree, set_index and remove_worktree manage a reader's worktree; _run starts one git child; _failure, _folder and _delete are leaves. ComposeFailures.error builds one ThreadComposeError; changed names the files a read-only phase changed.
+FUNCTION INVENTORY: ComposeGit.locate finds git; toplevel and has_commit find the repository root and whether HEAD names a commit, which has_commit(required=True) demands for a worktree; snapshot is the narrated main function of a snapshot; diff compares two trees; add_worktree, set_index and remove_worktree manage a reader's worktree; _run starts one git child; _failure, _folder and _delete are leaves. ComposeFailures.error builds one ThreadComposeError; changed names the files a read-only phase changed.
 COMMON MODIFICATION PATTERNS: A new git command is a §9.2 row first: its subcommand word in vidbyte/lib/constants/native_compose.py, its flags as GitFlag members, and one method here that goes through _run. A new failure kind is a ThreadComposeProblem member with its own summary, likely cause and next step.
 WHAT NOT TO DO IN THIS FILE: 1. Do not run a git command that changes the working tree, the real index, HEAD or a ref; snapshots use a temporary index and worktrees are detached. 2. Do not pass --ignore-errors to add; a file git cannot read must fail the snapshot (EC-73). 3. Do not put a caret in an argument; cmd.exe strips it when git is a batch launcher (D-24). 4. Do not let an OSError escape; folder failures are ThreadComposeError too.
-KNOWN EDGE CASES: rev-parse --verify --quiet HEAD exits 1 in a repository with no commit, so snapshots skip read-tree HEAD there, while worktree add HEAD fails (EC-5). An add that exits non-zero gets the two add texts, and one that passes its time bound keeps the generic texts (EC-73, EC-9). A worktree whose removal fails is deleted from disk anyway, and the error names its folder; the registration git keeps is cleared by git worktree prune (EC-16). git prints the repository root with forward slashes on win32, so it is resolved before use.
+KNOWN EDGE CASES: rev-parse --verify --quiet HEAD exits 1 in a repository with no commit, so snapshots skip read-tree HEAD there, while a worktree needs HEAD and is refused as WORKTREE_FAILED (EC-5). An add that exits non-zero gets the two add texts, and one that passes its time bound keeps the generic texts (EC-73, EC-9). A worktree whose removal fails is deleted from disk anyway, and the error names its folder; the registration git keeps is cleared by git worktree prune (EC-16). git prints the repository root with forward slashes on win32, so it is resolved before use.
 RELATED DOCS: vidbyte/harnesses/README.md
 TESTS: tests/features/harness_compose/test_harness_compose_git.py, tests/features/harness_compose/test_harness_compose_workspace.py, tests/features/harness_compose/test_harness_compose_keys.py
 """
@@ -104,12 +104,14 @@ class ComposeGit:
         self.root = Path(outcome.stdout.strip()).resolve()
         return self.root
 
-    async def has_commit(self) -> bool:
-        """Whether HEAD names a commit, kept as commit; a repository with no commit yet answers False (EC-5)."""
+    async def has_commit(self, *, required: bool = False) -> bool:
+        """Whether HEAD names a commit, kept as commit. A repository with no commit yet answers False, or with required is WORKTREE_FAILED, because worktree add needs HEAD (EC-5)."""
         outcome = await self._run((native_compose.COMPOSE_GIT_REV_PARSE,), (CliOption(GitFlag.VERIFY), CliOption(GitFlag.QUIET)), (native_compose.COMPOSE_GIT_HEAD,), cwd=self.workspace, problem=ThreadComposeProblem.GIT_FAILED)
         if outcome.exit_code not in (0, native_compose.COMPOSE_GIT_UNBORN_EXIT_CODE):
             raise self._failure(ThreadComposeProblem.GIT_FAILED, (native_compose.COMPOSE_GIT_REV_PARSE,), outcome)
         self.commit = outcome.exit_code == 0
+        if required and not self.commit:
+            raise self._failure(ThreadComposeProblem.WORKTREE_FAILED, (native_compose.COMPOSE_GIT_REV_PARSE,), outcome)
         return self.commit
 
     async def snapshot(self) -> str:
