@@ -21,11 +21,11 @@ Slice 1 (`docs/spec/codex-host-hardening/`, status `verified`) is done on this b
 | S3 implement | done | 06:45 | 03:40 | reports/S3-implementer.md | 39 rows; budget exact (13/69/0/42); **S3_HEAD 8ea8734f** pushed; #1181 body updated, still draft; area 1 failed (inherited) / 1293 passed; source gate 1 failed (inherited) / 6824 passed; package `CI passed.`; 13 implementation deviations in spec §17 |
 | S4 adversarial review | done | 03:45 | 05:10 | reports/S4-review-{conformance,conventions,engineering}.md, reports/S4-findings-verifier.md | review.md: 8 confirmed (2 Blockers R-1, R-2; 6 Majors R-3…R-8), 7 Minors m-1…m-7, 0 refuted |
 | S5 repair loop | done | 06:20 | 07:15 | reports/S5-repair-1.md, verify-log.md | iteration 1/8 closed R-1…R-5, R-8, m-2…m-5 (R-6/R-7 by S2 9ad2771e, m-1 by r6); HEAD ec17d5ce pushed; area 1 failed (inherited)/1302 passed; source 1 failed (inherited)/6833 passed; package `CI passed.` |
-| S5 re-review | running | 07:20 | | | |
+| S5 re-review | round 1 done | 07:20 | 07:50 | reports/S5-rereview.md | MERGEABLE AFTER FIXES: R-RR1 Blocker (record `is_dir()` re-raises EACCES), R-RR2 Minor, R-RR3 Minor (spec); 8 of 10 S4 items CLOSED with revert-mutant proof; spec r7 e736c93f (deviation 5) |
 | S6 PR (both slices) | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 1/8 · S5 re-review rounds: 1/2
+- S1 review rounds: 2/2 · S5 repair iterations: 2/8 · S5 re-review rounds: 1/2
 
 ## Decisions the orchestrator made
 - 2026-10-17 22:40: **The same branch, worktree and PR as slice 1.** The precedent is #1055's two specs in one PR. Slice 2's base is slice 1's verified HEAD a7730107. request.md is slice 1's verbatim conversation capture with a slice-2 header (scope, what slice 1 already built, and the machinery to reuse).
@@ -126,6 +126,15 @@ Slice 1 (`docs/spec/codex-host-hardening/`, status `verified`) is done on this b
   **Two things to judge:**
   - **R-3's variant.** `_fits_alone` applies only the per-turn bound on a log never attached to the host. On an attached log it matches the verifier's proven fix. Sent to the re-reviewer to judge.
   - **Spec deviation 5 is stale.** It still says `thread/list` after m-2 renamed the refusal to `parentThreadId`/`ancestorThreadId`. The spec author fixes it (r7, docs only), in parallel with the re-review.
+
+- 2026-10-18 07:50: **Re-review round 1 checked.**
+  - **I reproduced R-RR1 myself.** The `probe_rr_repo_stat` output: Python 3.11 pathlib ignores errnos [2, 9, 20, 10062], so EACCES from `CodexWorktreeRequest.__post_init__`'s `require_directory` (`codex_host_inputs.py:590-591`) escapes as a raw `PermissionError` with the absolute path, which breaks INV-2 (r6 names OSError).
+  - **Routing:**
+    1. spec author r8 for R-RR3: INV-20's "What is dropped" and D-39 still describe evicting everything for an oversize event, so add r6's missing EC-19 sentence;
+    2. S2 round 5: a red regression row for R-RR1, copying the probe (expect the `CODEX_HOST_WORKTREE_REPOSITORY_MESSAGE` packet with `__cause__ is None`);
+    3. S5 iteration 2: R-RR1 (`except (ConfigurationError, OSError)`), plus R-RR2's wrong comment at `thread_actions.py:118-119`. The repair agent also appends the R-RR rows to `review.md`;
+    4. re-review round 2, the last allowed.
+  - **R-RR2's shared-helper refactor** (one `_base.py` helper for the resume and side-chat resets) is a follow-up: the reviewer marked it optional, and it is churn this late.
 
 ## User replies (verbatim)
 - (none yet)
