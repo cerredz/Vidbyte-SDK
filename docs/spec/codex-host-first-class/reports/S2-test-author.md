@@ -249,3 +249,79 @@ The options:
   - `autocomplete` completes turns as they start.
 - **The slow-handler stream test (EC-55)** holds the SDK reader with an `asyncio.Event`, writes the later events, then releases. Every event must arrive with consecutive sequences.
 - **The report file is not committed.** Slice 1's orchestrator saved its S2 report in a commit of its own.
+
+## Round 2 (spec r4, `d0529d15`)
+
+r4 answered both blocking questions with option (a) and settled the six ambiguities. Tests commit: `ab13e1e7`.
+
+**Pins rewritten (§13, r4 S2-1).** Each line now carries a comment citing §13 r4.
+
+| File:line (before → after) | Before | After |
+|---|---|---|
+| `test_codex_host_lifecycle.py:101` → `:102` | `"26 check_codex_ready"` | `"42 check_codex_ready"` |
+| `test_codex_host_helper_lifecycle.py:109` → `:110` | `"26 False"` | `"42 False"` |
+
+Both passed before the rewrite and fail now for one reason: the only element that differs is the printed count, `26` against `42`. They stay red until S3 adds the sixteen tools.
+
+**Stale 26-tool prose, now 42.**
+
+- `FEATURE.md:190` and `:207`, and `README.md:51`, as asked.
+- Also the same staleness in four more places: `README.md:26` ("twenty-six tools" → "forty-two"), the docstrings at `test_codex_host_helper_tools.py:3` and `:126`, and `test_codex_host_tool_hardening.py:3`. These are prose only, with no assertion change.
+- Left alone: `FEATURE.md:5` and `:40`, which describe the shipped host (26 tools today), and the test name `test_the_toolset_holds_26_tools_and_offers_no_forbidden_parameter`. Renaming it would change a node id the plan cites.
+
+**Tightenings.** Each one picks r4's side of an ambiguity the test used to accept either way. All were red before and are still red for the right reason.
+
+1. S2-3, `feature_constants::CodexFeatureTableTests`: the method-name test is renamed `test_the_fifteen_method_names_are_named_constants_that_hold_their_wire_strings`. It pins each of the fifteen names to its wire string and its place in `__all__`, through the new `FEATURE_METHOD_CONSTANTS`, which replaces `FEATURE_METHOD_NAMES` in `codex_host_feature_support.py`. It is now red with an `AssertionError` listing all fifteen missing names; before, it was an `AttributeError` on the first one. No plan or spec row cited the old name.
+2. S2-3: `test_the_export_list_stays_ascii_sorted_and_names_every_new_constant` now checks all fifteen names, and is still red. The green guard `test_no_new_name_goes_into_the_shared_codex_constants` now checks that none of the fifteen is in `vidbyte.lib.constants.codex`. It is still green. It catches a plausible slip: `CODEX_GOAL_SET_METHOD` lives in that module.
+3. S2-4: three `feature_records` effort rows check the whole text with `name="reasoning_effort"`. They are still red with `ImportError` (`codex_host_modes` or `codex_host_features`).
+4. S2-5: `test_network_access_needs_a_read_only_or_workspace_write_sandbox` checks the whole text with `sandbox.name`, and `NETWORK_PREFIX` is gone. It is still red with `ImportError`.
+5. S2-7: `settings_modes::test_an_ended_or_unknown_turn_is_refused_locally_and_sends_nothing` requires `summary == TEXT + thread_suffix(thread_id)`. It is still red with `AttributeError` (`update_codex_turn_settings`).
+6. S2-8: `thread_admin::test_search_names_every_top_level_source_and_finds_this_hosts_threads` requires `"archived" not in params`. It is still red with `AttributeError` (`search_codex_thread_content`).
+
+The two `KNOWN EDGE CASES` headers (`feature_constants`, `feature_records`) now describe r4.
+
+Not tightened:
+
+- S2-6: the tests always pass both `command` and `cwd`, and a refusal row for a missing one would be a new test.
+- S2-2: the coordinator said no change is needed. The new text is checked by value, and nothing pins the name `CODEX_HOST_NO_STORED_GOAL_MESSAGE` itself (see Open items).
+
+**Runs.**
+
+```
+area:     253 failed, 1041 passed, 3 skipped in 75.50s (0:01:15)
+no SDK:   100 failed, 803 passed, 394 skipped in 51.21s
+full:     253 failed, 6572 passed, 27 skipped in 129.26s (0:02:09)
+```
+
+Area failures break down as follows:
+
+- 233 new red tests, the same count as before;
+- 19 tests red through rewritten §13 pins (17 from round 1, plus these 2);
+- 1 inherited `harness_threads` test.
+
+By exception, the area failures are now 128 `AttributeError`, 48 `ImportError`, 45 `AssertionError`, 28 `ModuleNotFoundError`, 2 `FileNotFoundError`, 1 `TypeError` and 1 `RuntimeError`. Compared with round 1, `AssertionError` is up 3 (the two pins and the method test) and `AttributeError` is down 1. The full suite's only failure outside `tests/features/codex_host/` is the inherited one. The no-SDK view is unchanged, because both snippet modules need the extra.
+
+**Lint**, with the changes staged:
+
+```
+S063 IMPROVED 4 -> 3. Lower it with: python lint/run.py --rule S063 --update-baseline
+
+S064 RATCHETED: 4 known finding(s). Inspect with: python lint/run.py --rule S064 --all
+
+SDK-LINT: PASS
+```
+
+The S063 line was already there in round 1. Lowering it means editing `lint/`, which S2 may not touch.
+
+**test-plan.md.**
+
+- The two rows are added under "Superseded pins rewritten".
+- Spec defects 1 to 8 are each marked "Resolved by r4", with the matching S2 row and the test change.
+- The run numbers, the exception table and the implementer notes are refreshed.
+
+The spec's §6.2 Proof column is unchanged, because no cited node id changed.
+
+**Open items.**
+
+- `CODEX_HOST_NO_STORED_GOAL_MESSAGE` is pinned only by text. A by-name pin would mean adding `NO_STORED_GOAL_MESSAGE` to `TEXT_NAMES`, with the support literal renamed to match. That takes about six lines and is the coordinator's call.
+- The pack README's change log has no round-2 entry, because the task limited doc edits.
