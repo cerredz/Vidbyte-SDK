@@ -64,11 +64,13 @@ class OpencodeBrowserThreads:
 
     @staticmethod
     async def _call(operation: NativeThreadOperation, verb: NativeThreadVerb, thread_id: str | None, prompt: str, *, api_key: str, workspace: str | Path, model: str, tools: Sequence[str], tool_keys: Mapping[str, str] | None, skills: Sequence[str | Path], config: OpencodeThreadConfig | None) -> BrowserThreadResult:
-        # One guarded try per call: cancellation and the feature's own
-        # errors pass through, a refused argument names the argument,
-        # and anything else is a defect named only by its class. The
-        # thread request comes first, so a refused tools argument still
-        # names the workspace; no tool_keys is no keys.
+        # @intent opencode-browser-call-raises-one-native-thread-error
+        # One guarded try per call, so every failure reaches the caller
+        # as one NativeThreadError (spec INV-6): cancellation and the
+        # feature's own errors pass through, a refused argument names
+        # the argument, and anything else is a defect named only by its
+        # class. The thread request comes first, so a refused tools
+        # argument still names the workspace; no tool_keys is no keys.
         errors = NativeErrorFactory(NativeHarness.OPENCODE, operation)
         request: NativeThreadRequest | None = None
         try:

@@ -66,9 +66,11 @@ class MuseMounts:
 
     @staticmethod
     def _server(server: BrowserServer) -> dict[str, object]:
+        # @intent muse-server-entry-has-the-verified-shape
         # A remote entry is the streamable HTTP transport and its URL,
         # never env; a stdio entry is node as one string, the entry and
-        # arguments as a list, and the non-secret environment.
+        # arguments as a list, and the non-secret environment. Any
+        # other shape makes Muse drop every server silently (EC-39).
         definition = server.selection.definition
         if definition.transport is BrowserToolTransport.REMOTE:
             return {browser_tools.MUSE_SERVER_TRANSPORT_FIELD: browser_tools.MUSE_STREAMABLE_HTTP_TRANSPORT, browser_tools.MUSE_SERVER_URL_FIELD: definition.url}

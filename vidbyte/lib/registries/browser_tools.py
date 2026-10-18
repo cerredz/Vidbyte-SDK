@@ -280,8 +280,12 @@ class BrowserToolRegistry:
 
     @classmethod
     def _checked_keys(cls, request: BrowserToolRequest, definitions: list[BrowserToolDefinition]) -> None:
-        # The record already refused a name that is not a registry name,
-        # so every name shown here is registry-owned text.
+        # @intent browser-keys-match-the-selected-tools
+        # A key for a tool that is not selected or takes none, and a
+        # selected tool that needs a key but has none, are refused
+        # before anything starts (spec AC-8). The record already
+        # refused a name that is not a registry name, so every name
+        # shown here is registry-owned text, never a pasted key.
         selected = {definition.tool.value: definition for definition in definitions}
         for name in request.tool_keys:
             field = tools_data.BROWSER_TOOL_KEY_NAME_FIELD.format(name=name)

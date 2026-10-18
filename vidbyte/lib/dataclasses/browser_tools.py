@@ -105,8 +105,11 @@ class BrowserToolDefinition:
     default_capabilities: tuple[BrowserCapability, ...]
 
     def __post_init__(self) -> None:
-        # Pin the closed vocabularies first, because the transport
-        # decides which of the other fields are required.
+        # @intent browser-tool-row-fails-at-load-not-mid-call
+        # A registry row is checked whole when the registry module
+        # loads, so a bad pin fails at import, never inside a caller's
+        # run. Pin the closed vocabularies first, because the
+        # transport decides which of the other fields are required.
         object.__setattr__(self, "tool", RecordFieldConverter.to_enum(self.tool, BrowserTool, "BrowserToolDefinition.tool"))
         object.__setattr__(self, "transport", RecordFieldConverter.to_enum(self.transport, BrowserToolTransport, "BrowserToolDefinition.transport"))
         object.__setattr__(self, "key_rule", RecordFieldConverter.to_enum(self.key_rule, BrowserKeyRequirement, "BrowserToolDefinition.key_rule"))
@@ -236,6 +239,10 @@ class BrowserServer:
     command: tuple[str, ...]
 
     def __post_init__(self) -> None:
+        # @intent browser-server-command-matches-its-transport
+        # A stdio server needs the command that starts it and a remote
+        # one has none, so a mount never starts a URL as a program or
+        # leaves a stdio server without its command.
         RecordFieldConverter.require_instance(self.selection, "BrowserServer.selection", BrowserToolSelection)
         command = RecordFieldConverter.to_tuple(self.command, "BrowserServer.command", item_type=str)
         if bool(command) is not (self.selection.definition.transport is BrowserToolTransport.STDIO):

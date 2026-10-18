@@ -201,9 +201,11 @@ class BrowserToolCache:
 
     @staticmethod
     async def _install(definition: BrowserToolDefinition, argv: tuple[str, ...], package: str, staging: Path, request: NativeThreadRequest, errors: NativeErrorFactory) -> None:
+        # @intent browser-install-failures-name-the-package
         # The bundled npm installs the pinned package into the staging
         # folder; a start failure, a timeout, a non-zero exit or a
-        # missing entry each name the package and fail the install.
+        # missing entry each name the package and fail the install, so
+        # a broken install is never published to the cache.
         invocation = CliInvocation(
             argv=argv,
             env_overlay={},

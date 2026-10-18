@@ -60,9 +60,12 @@ class OpencodeMounts:
 
     @staticmethod
     def _server(server: BrowserServer) -> dict[str, object]:
+        # @intent opencode-key-travels-only-in-the-server-entry
         # A remote entry is its URL, with the key as a Bearer header
         # when one was passed; a local entry is the node command with
         # the server's non-secret environment and the key variable.
+        # The key reaches opencode only here, inside
+        # OPENCODE_CONFIG_CONTENT, never on argv or in a file (INV-4).
         selection = server.selection
         definition = selection.definition
         if definition.transport is BrowserToolTransport.REMOTE:
@@ -87,9 +90,11 @@ class OpencodeMounts:
 
     @staticmethod
     def _rules(name: str, selection: BrowserToolSelection) -> dict[str, str]:
+        # @intent opencode-rules-deny-the-server-before-exact-allows
         # A whole server is allowed by one wildcard; a narrowed server
         # is denied by the wildcard first, then each allowed tool is
-        # allowed by its exact name, because the last match wins.
+        # allowed by its exact name, because the last match wins; a
+        # tool the caller did not name stays denied (spec AC-6).
         wildcard = browser_tools.OPENCODE_PERMISSION_RULE.format(server=name, tool=browser_tools.OPENCODE_PERMISSION_WILDCARD)
         if not selection.denied:
             return {wildcard: browser_tools.OPENCODE_PERMISSION_ALLOW}

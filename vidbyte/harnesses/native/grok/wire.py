@@ -90,6 +90,7 @@ class GrokWire:
 
     @staticmethod
     def read_stream(outcome: CliOutcome, request: NativeThreadRequest, errors: NativeErrorFactory, *, timeout_seconds: float) -> NativeThreadResult:
+        # @intent grok-stream-failures-carry-the-named-thread
         # Read the streamed events and the closing end event first, so
         # every failure below carries the thread Grok already named.
         events = CliRunner.json_objects(outcome.stdout)
