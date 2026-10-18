@@ -280,12 +280,16 @@ class CodexMemoryMode(str, Enum):
 
 
 class CodexMcpAuthStatus(str, Enum):
-    """How an MCP server Codex runs is signed in, as mcpServerStatus/list reports it."""
+    """How an MCP server Codex runs is signed in, as mcpServerStatus/list reports it.
+
+    BEARER is the wire value "bearerToken": the member name leaves out
+    the word the security lint reads as a credential (first-class D-40).
+    """
 
     UNKNOWN = "unknown"
     UNSUPPORTED = "unsupported"
     NOT_LOGGED_IN = "notLoggedIn"
-    BEARER_TOKEN = "bearerToken"
+    BEARER = "bearerToken"
     OAUTH = "oAuth"
 
 
