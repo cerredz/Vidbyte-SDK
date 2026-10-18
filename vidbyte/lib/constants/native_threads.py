@@ -1,14 +1,14 @@
 """FILE: vidbyte/lib/constants/native_threads.py
 
 PURPOSE: Holds every fixed value and text of the harness thread functions and the canonical process helpers: time, size and count bounds, record patterns, program names, folder names, option values, JSON member names, vendor markers, tested vendor versions, and the error texts (harness labels, summary and observation templates, the failure code of each harness and problem, and one likely cause and one next step per failure code).
-ROLE IN CODEBASE: Imported by the records in vidbyte/lib/dataclasses/native_threads.py, process.py and validation.py, by CliRunner in vidbyte/lib/process/runner.py, and by every module under vidbyte/harnesses/native/.
+ROLE IN CODEBASE: Imported by the records in vidbyte/lib/dataclasses/native_threads.py, process.py and validation.py, by CliRunner in vidbyte/lib/process/runner.py, by GitWorktrees in vidbyte/lib/process/git_worktree.py, and by every module under vidbyte/harnesses/native/.
 ARCHITECTURE NOTE: The harness modules hold no literals of their own (spec INV-15): every flag is an enum member in vidbyte/lib/enums/native_threads.py, and every other value they need lives here, so a reviewer finds each vendor fact in one place. The timing knobs NATIVE_KILL_WAIT_SECONDS, MUSE_REAP_TIMEOUT_SECONDS and NATIVE_CONTROL_TIMEOUT_SECONDS are read through this module object at call time, never bound by a from-import, so one patch reaches every user.
-FUNCTION INVENTORY: No functions. Constants grouped as contract bounds, record patterns, process helper values, programs and folders, option values and separators, JSON member names, vendor markers, tested versions, then the error texts.
+FUNCTION INVENTORY: No functions. Constants grouped as contract bounds, record patterns, process helper values (with the git values of GitWorktrees), programs and folders, option values and separators, JSON member names, vendor markers, tested versions, then the error texts.
 COMMON MODIFICATION PATTERNS: A value a harness module needs is added here under its feature prefix and used by name (lint A007, spec INV-15). A new failure code adds its pair to NATIVE_THREAD_FAILURE_CODES and its own texts to NATIVE_THREAD_LIKELY_CAUSES and NATIVE_THREAD_NEXT_STEPS.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import from vidbyte above vidbyte.lib.enums. 2. Do not name a constant with a password, token or secret word and give it a string (lint S054). 3. Do not add a carriage return to MUSE_REAP_SCRIPT; sh in the distro reads it from stdin. 4. Do not share one likely cause or next step between two codes of a harness; each code gets text written for it.
 KNOWN EDGE CASES: Patterns are applied with re.fullmatch, so each one describes the whole value. The texts must not contain a credential word followed by ":" or "=", because HarnessRedactor would rewrite such a phrase in vendor text. MUSE_REAP_SCRIPT runs with the caller's environment, which lacks the peer mark, so it never matches itself.
 RELATED DOCS: vidbyte/harnesses/README.md
-TESTS: tests/features/harness_threads/test_harness_threads_surface.py, tests/features/harness_threads/test_harness_threads_errors.py
+TESTS: tests/features/harness_threads/test_harness_threads_surface.py, tests/features/harness_threads/test_harness_threads_errors.py, tests/features/codex_host/test_codex_host_feature_constants.py
 """
 
 from __future__ import annotations
@@ -94,6 +94,17 @@ NATIVE_WINDOWS_DEFAULT_PATHEXT = ".COM;.EXE;.BAT;.CMD;.VBS;.JS;.WS;.MSC"
 NATIVE_WINDOWS_COMMAND_LINE_ENCODING = "utf-16-le"
 NATIVE_UTF16_UNIT_BYTES = 2
 NATIVE_COMMAND_LINE_TOO_LONG_WINERROR = 206
+# GitWorktrees: git runs as `git -C <repository> worktree add -b
+# <branch> -- <path> <base>`, never prompts for credentials, and takes
+# a branch or base ref only in this shape (codex-host-first-class
+# D-19, T-5).
+GIT_PROGRAM = "git"
+GIT_WORKTREE_ADD_COMMAND = ("worktree", "add")
+GIT_END_OF_OPTIONS = "--"
+GIT_DEFAULT_BASE_REF = "HEAD"
+GIT_NO_PROMPT_ENV: MappingProxyType[str, str] = MappingProxyType({"GIT_TERMINAL_PROMPT": "0"})
+GIT_REF_PATTERN = r"^(?!.*\.\.)(?!.*//)(?!.*\.lock$)[A-Za-z0-9][A-Za-z0-9._/-]*(?<![./])$"
+GIT_REF_MAX_CHARS = 200
 
 # Programs, subcommands, files and folders.
 GROK_PROGRAM = "grok"
