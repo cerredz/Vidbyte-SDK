@@ -429,3 +429,88 @@ The section's other notes agree with the spec and need no change. They cover the
 - §4's sha256 and the AC rows are unchanged, `git diff --check` is clean, the CRLF working copy is kept (1,620 CRLF, no lone LF or CR), and no backslash was added.
 
 **Git state:** one commit for r5 holds the spec and this addendum. It is not pushed.
+
+**Follow-up commit: the orchestrator's decisions on the r5 open items.**
+
+**Input.** The orchestrator checked `ec38a8da` and decided open items 1 to 4:
+- name `SecretText` beside `JsonText` in INV-1 and AC-22, and keep the 18 records and the 42 compose names;
+- record the blank refusal (S4 review R-13) and the surrogate handling (S4 review R-12) in INV-18 and in new EC rows;
+- keep EC-17 as written.
+
+Every new or extended row was to describe the code at HEAD and give its location. The code and tests at HEAD are identical to `3a21352b`, because `git diff --quiet 3a21352b HEAD -- vidbyte tests` succeeds.
+
+**Changes.**
+
+| Section | Before | After | Checked against |
+|---|---|---|---|
+| INV-1, AC-22 | `vidbyte.lib.util` exports `JsonText` | `JsonText` and `SecretText`. AC-22's Proof column is unchanged | `vidbyte/lib/util/__init__.py:61`, `:64` |
+| INV-18, guarantees | "no NUL character, and not blank" | "no NUL character and no surrogate code point, and not blank" | `texts.py:182–197` |
+| INV-18, up front | One check, the longest-form fit, naming `prompt`, `template` or `stages[i].template` | Three checks in code order, each a `ConfigurationError` with `details["field"]`. First a blank shortest form (`COMPOSE_BLANK_PROMPT`, EC-79), then a surrogate code point in fixed text (`COMPOSE_UNENCODABLE_TEXT`, EC-81), then the fit. `schema` joins the arguments named | `texts.py:94–118`; `chain.py:118–132`; `stages.py:111–119`; `answers.py:57–68` |
+| INV-18, send time | NUL removal, then key replacement. The omitted count was taken after both | NUL removal, the UTF-16-LE round trip (EC-80), then key replacement. The omitted count is taken after all three | `texts.py:121–160`, `:182–189`, `:222–242` |
+| §6.3 | Last row EC-78 | EC-79 (blank template), EC-80 (surrogate halves in a spliced value), EC-81 (a surrogate code point in caller text) | the code lines below and the probe |
+| D-19, §5, §9.2, row 13 | The send-time steps without the surrogate repair, and the up-front check described as a fit only | The surrogate repair in its place, and the two refusals | as for INV-18 |
+| §17 r5 row | "No ID, AC row, §4 line or requirement meaning changed" | That sentence now covers only the first r5 commit. A new sentence names this follow-up and EC-79 to EC-81 | none needed |
+
+D-19, §5 and the §9.2 question were not on the decision list. Each one lists the send-time steps or the up-front checks, so leaving it unchanged would have made it disagree with INV-18. No §16 row and no stated EC total depends on these rows.
+
+**Code at HEAD, line by line.**
+- `PromptFitter.check` (`vidbyte/harnesses/native/compose/texts.py:94–118`) runs three checks in order:
+  - It joins the frame's fixed segments (lines 101–103). If the result is blank by `str.strip`, it raises `COMPOSE_BLANK_PROMPT`.
+  - It renders the longest form, with each spliced value replaced by the truncation note at `sys.maxsize` (104–106). If `_encodable` fails on that form, it raises `COMPOSE_UNENCODABLE_TEXT` (111–112).
+  - Last comes the size check (113–118).
+
+  All three pass `details={NATIVE_FIELD_DETAIL_KEY: argument}`, and that key is `"field"` (`native_threads.py:273`).
+- `_encodable` (`texts.py:192–197`) checks whether the text survives a round trip unchanged: encoded with `COMPOSE_SURROGATE_CODEC` and `surrogatepass`, then decoded with `replace`. Any surrogate code point fails it. A lone half comes back as U+FFFD, and two halves come back as one character.
+- `PromptFitter.fit` (`texts.py:121–160`) scrubs only the spliced segments (line 135) and passes the fixed segments through unchanged.
+  - `_scrub` (182–189) removes NULs, then runs the round trip, then calls `SecretText.replace_all`.
+  - `_render` (222–242) takes `length = len(text)` of the scrubbed text (229). The note's omitted count, `length - low` (240), is therefore taken after all three steps.
+- Constants in `vidbyte/lib/constants/native_compose.py`:
+  - `:165–171`: the comment, and `COMPOSE_SURROGATE_CODEC = "utf-16-le"`, `COMPOSE_SURROGATE_ENCODE_ERRORS = "surrogatepass"` and `COMPOSE_SURROGATE_DECODE_ERRORS = "replace"`;
+  - `:321`: `COMPOSE_BLANK_PROMPT`;
+  - `:322`: `COMPOSE_UNENCODABLE_TEXT`.
+- The argument each refusal names:
+  - `chain.py:118–132` names `prompt` for the first step. Each later step is measured twice: first with `{prompt}` as `""`, naming `template`, then with the caller's prompt, naming `prompt`. The check runs before `_gits` and before any step (`chain.py:53–62`).
+  - `stages.py:111–119` names `stages[i].template` for every stage, the first included. It runs before any stage (47–48).
+  - `answers.py:64–68` names `schema` for the repair turn and for the question without the prompt, and `prompt` for the first turn.
+  - `verify.py:134–141`, `ensemble.py:185–194` and `selection.py:105–120` name `prompt`. In `verify.py` and `ensemble.py` the check runs before `ComposeGit.locate`: line 57 comes before line 63 in `verify.py`, and lines 70–71 come before line 76 in `ensemble.py`.
+
+**Probe** (`scratchpad/r5probe/public_probe.py`, output in `public_probe.txt`). It calls the public functions with `ComposeCalls.call`, `JsonAnswers.ask` and `ComposeGit.locate` replaced by a sentinel, so no process starts and git never runs. It ran with `py -3.11 -B -I`, and the tree stayed clean.
+- **`chain_threads` blank templates.** The templates were `{previous}`, `{previous}{diff}`, `  {previous}  `, `{prompt}{previous}`, and `{prompt}` and `{previous}` with a line break between them. Each one was refused with `COMPOSE_BLANK_PROMPT` and `field='template'`. The message was "template must hold text besides its placeholders, or steps[1] can be sent a blank prompt when the values spliced into it are blank." `Answer: {previous}` reached the step-call sentinel.
+- **`run_staged_threads` blank templates.** A second-stage template of `{previous}`, or of a space, a line break and `{previous}`, was refused with `field='stages[1].template'`, and the message named `stages[1].step`. `Then: {previous}` reached the sentinel.
+- **Surrogate code points in fixed text.** A lone half, or a pair given as two halves, was refused with `COMPOSE_UNENCODABLE_TEXT`. The probe covered:
+  - the `chain_threads` prompt and template;
+  - `stages[0].template` and `stages[1].template`;
+  - the `parse_json_answer` schema and prompt;
+  - the `verify_with` and `run_ensemble` prompts.
+
+  Each refusal named its argument: `prompt`, `template`, `stages[i].template` or `schema`. The same prompt with the joined character U+1F600 reached the sentinel, and a plain `run_ensemble` prompt reached the git sentinel.
+- **What a later step receives.** `fit` got a 30,004-character spliced value that ends in a pair split by a NUL. It sent 24,000 characters, none of them a surrogate. The note said 6,080 characters were left out. That is 30,002 (the length after the repair) minus the 23,922 kept, not 30,004 minus 23,922. In the same probe, `_scrub` turned a lone high or low half into U+FFFD. It joined a pair given as two halves, with or without a NUL between them (`refusal_probe.py`).
+
+**Where the code differs from the decisions as worded.** The spec now records what the code does.
+1. **The blank refusal looks only at the template's own text.** It does not consider which placeholders the template holds. In `chain_threads` the first measure sets `{prompt}` to empty (`chain.py:130–132`), so the check refuses two templates, naming `template`:
+   - `{prompt}{previous}`;
+   - `{prompt}` and `{previous}` with a line break between them.
+
+   The caller's prompt is never blank, because `require_text` refuses a blank one at `chain.py:54`. For these templates, the message's claim that steps[1] "can be sent a blank prompt" is therefore not true. INV-18 and EC-79 say so. If this is a defect, the fix belongs in the code: run the blank check only in the measure that holds the caller's prompt. INV-18 and EC-79 would then drop their `{prompt}` sentence.
+2. **The surrogate refusal is not limited to a lone half.** Any surrogate code point in fixed text is refused, including both halves of a pair given as two code points. My r5 open item 3 said "a lone surrogate", which was imprecise. The comment at `texts.py:108–110` also says "a lone surrogate", while the comment on `_encodable` (193–195) names both cases.
+3. **The refusals can also name `schema`.** `parse_json_answer` does so at `answers.py:65–66`. INV-18's too-long list had left `schema` out since r4, so it is added there too.
+4. **`COMPOSE_BLANK_PROMPT` can only name a template.** That is the `chain_threads` template, or `stages[i].template` for a stage after the first. Every other frame holds prompt-file text or the caller's prompt. The first stage's template has no placeholder and must not be blank.
+
+**Code comments that now cite the wrong row.** I left the code unchanged, so whoever next edits it can fix these:
+- The comment in `PromptFitter.check` (`texts.py:97–100`) and the `stages.py` header (KNOWN EDGE CASES, line 9) cite EC-37 for the blank refusal. The row is now EC-79.
+- The `texts.py` header (PURPOSE and KNOWN EDGE CASES) and the docstring of `fit` (line 122) list only NUL and key removal. They also give the omitted count without the surrogate repair.
+
+**Test gaps.** I left the tests unchanged.
+- AC-22's proof test is `test_lib_packages_export_the_new_enums_error_and_decoder` (`tests/features/harness_compose/test_harness_compose_surface.py:176–185`). It checks that `JsonText` is exported and does not check `SecretText`. Covering `SecretText` needs a new test, not a change to that assertion.
+- No compose test covers EC-79, EC-80 or EC-81. `git grep` over `tests/features/harness_compose` finds no `COMPOSE_BLANK_PROMPT`, no `COMPOSE_UNENCODABLE_TEXT` and no surrogate.
+- `test-plan.md` maps EC rows only up to EC-78.
+
+**Self-check after the follow-up:**
+- references: every ID resolves (INV 36, AC 23, EC 81, FR 18, NFR 11, D 28, T 8, W 13, NG 13, A 11, Q 11). EC-79 to EC-81 follow EC-78, and no existing EC row changed;
+- tables: 20, with 0 malformed rows. The new rows have the header's five cells;
+- AC rows: only AC-22 changed;
+- §4: its sha256 is still `26d2678440b2d9bad9b272739f5a43e7227fe8aeff462996dab6ce029e49eb6c`;
+- line endings: CRLF is kept (1,627 CRLF, no lone LF or CR), the backslash count is still 6, and `git diff --check` is clean;
+- names: every constant and name cited exists at HEAD.
+
+**Git state:** a second r5 commit holds the spec and this follow-up. Neither r5 commit is pushed.
