@@ -107,11 +107,11 @@ class StartCodexSideChatTool(_CodexHostTool):
     def _side_chat_defaults(defaults: CodexSpawnRequest) -> CodexSpawnRequest:
         # @intent a-tool-side-chat-resets-then-narrows
         # Every field a side chat refuses goes back to a fresh request's
-        # value, read from the host's own table as the continue and
-        # resume tools do, so a scope whose defaults set tools, a name
-        # or a personality can still start one. Then only the
-        # sandboxes, writable roots, network setting and approvals are
-        # narrowed; everything else is kept (first-class INV-43, D-22).
+        # value, read from the host's own table as the resume tool does,
+        # so a scope whose defaults set tools, a name or a personality
+        # can still start one. Then only the sandboxes, writable roots,
+        # network setting and approvals are narrowed; everything else
+        # is kept (first-class INV-43, D-22).
         fresh, fresh_thread = CodexSpawnRequest(), CodexThreadSettings()
         paths = CODEX_HOST_REJECTED_FIELDS[SIDE_CHAT]
         thread_names = [path.removeprefix(THREAD_FIELD_PREFIX) for path in paths if path.startswith(THREAD_FIELD_PREFIX)]
