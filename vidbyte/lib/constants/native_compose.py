@@ -148,6 +148,12 @@ COMPOSE_PROMPT_SEPARATOR = "\n\n"
 COMPOSE_PROBE_PROMPT = "…"
 COMPOSE_REDACTED_KEY = "[redacted]"
 COMPOSE_NUL = "\x00"
+# Counting a prompt as the Windows command line does (EC-36): a double
+# quote is sent as a backslash and a quote and doubles the backslashes
+# right before it, and a character past U+FFFF takes two UTF-16 units.
+COMPOSE_QUOTE = '"'
+COMPOSE_BACKSLASH = "\\"
+COMPOSE_BMP_MAX_CODE_POINT = 0xFFFF
 
 # Git words (INV-26). Every command starts with the program, the
 # no-optional-locks flag and the two settings; HEAD is named alone,
