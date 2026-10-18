@@ -206,3 +206,28 @@
 - **(8)** Omitted, because the schema treats false and null alike.
 
 **Counts:** unchanged. IDs: G6 NG19 INV55 AC44 EC62 FR36 NFR12 D39 T8 W19 A21 Q11. Budget: 13 / 69 / 0 / 46 / 0 / 42.
+
+## r5 addendum (S3 findings, 2026-10-18)
+
+**Input.** The coordinator's r5 request (A1 and A2) and `reports/S3-implementer.md` (S3 labels them B-1 and B-5). This is an amendment, not a review round, so the status stays `approved`. The spec is committed at 5f6c4fc4 (revision 5). §16 has rows S3-1 and S3-2, and §17 has r5.
+
+**A1 (S3-1).** §13 now supersedes `test_codex_host_hardening_records.py::CodexSpawnRequestHardeningTests::test_the_new_fields_default_to_unset_and_build_with_the_sandbox_they_need` (`:356`). The tail after `name` gains `"collaboration_mode"`, as D-5 and row 7 require.
+
+**Sweep.** I grepped `turn_service_tier`, `writable_roots`, `network_access` and `dataclasses.fields(` across `tests/features/codex_host` and `tests/features/harness_threads`, and read every hit. No other test pins `CodexSpawnRequest`'s field list or order:
+- **Already superseded and rewritten by S2:** the fork-row tail (`hardening_contract.py:548`), `GOAL_REJECTED_FIELDS` (`codex_host_support.py:284`, `hardening_records.py:438`) and `GOAL_REFUSED`.
+- **Computed from the fields, so they follow automatically:** the review row (`hardening_contract.py:543-544`) and `feature_constants.py:209`.
+- **About other records:** `CodexForkRequest`'s last two fields, `CodexThreadListRequest`'s last field, `CodexThreadInfo`'s tier fields, and the helper records' `RECORD_FIELDS`.
+- **Not order pins:** first-field-only frozen checks, and `FORBIDDEN_PARAMETERS`, which lists tool parameter names, not record fields.
+- **Elsewhere:** no test outside `tests/features/codex_host` names `CodexSpawnRequest`.
+
+My r1 and r4 sweeps looked for counts of tools and operations. They missed this order pin because it asserts the exact tail list rather than a count.
+
+**A2 (S3-2).**
+- **Renamed** `CodexMcpAuthStatus.BEARER_TOKEN` → `BEARER` in §8.5 (the only spec line that named the member), keeping `"bearerToken"`.
+- **Rationale** is D-40: lint S054 (ruff S105, allowance 3) flags the name alone, the baseline may not be raised for a new violation, and §14 forbids suppressions.
+- **§13:** the `EXPECTED_ENUMS` row (`test_codex_host_records.py:83`) now notes the member name, and a new row covers `test_codex_host_mcp_memory.py:83`. S2 updates both.
+- **No other mentions:** §9.1 lists no members.
+
+**Cited only:** S3's B-2, B-3 and B-4 are test defects with no spec change.
+
+**Counts:** D-40 added, so D goes to 40. Every other ID count and the §8.4 budget are unchanged (13 / 69 / 0 / 46 / 0 / 42). `ids.py` and `tables.py` are clean.
