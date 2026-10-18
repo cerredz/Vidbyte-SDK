@@ -541,7 +541,7 @@ CODEX_HOST_LOAD_GOAL_UNFINISHED_CAUSE = "The thread is not loaded in this host's
 CODEX_HOST_LOAD_GOAL_UNFINISHED_NEXT_STEP = "Pause the goal with pause_codex_goal or clear it with clear_codex_goal, then call again."
 # The worktree: refusals before git runs, and git failures. The failed
 # message shows only git's exit code and its first stderr line, cut to
-# CODEX_HOST_WORKTREE_DETAIL_MAX_CHARS (first-class INV-38).
+# CODEX_HOST_WORKTREE_DETAIL_MAX_CHARS (first-class INV-29).
 CODEX_HOST_WORKTREE_EXISTS_MESSAGE = "create_codex_worktree did not run git, because the worktree folder for this repository and branch already exists under the Vidbyte worktree root."
 CODEX_HOST_WORKTREE_EXISTS_CAUSE = "A worktree for the same repository folder name and branch was created before."
 CODEX_HOST_WORKTREE_EXISTS_NEXT_STEP = "Use the existing worktree, choose another branch name, or remove the old one with git worktree remove."

@@ -60,8 +60,8 @@ class CodexStreamMethods(CodexHostCore):
         """
         # @intent waiting-on-many-turns-never-touches-them
         # Check every handle before any wait, then wait on the turns'
-        # own ended futures, which asyncio.wait never cancels (first-
-        # class INV-23, D-13).
+        # own ended futures, which asyncio.wait never cancels
+        # (first-class INV-23, D-13).
         operation = CodexHostOperation.WAIT_CODEX_TURNS
         self._guard(operation, talks=False)
         waiting = CodexTurnsWaitRequest(handles=handles, return_when=return_when, timeout_seconds=timeout_seconds)
