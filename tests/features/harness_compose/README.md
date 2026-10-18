@@ -22,9 +22,10 @@ This folder tests `vidbyte.harnesses.native.compose`, the composites over the ni
 - `test_harness_compose_ensemble.py` checks the ensemble's roles, narrowing, repairs, the selector's prompt room and stops.
 - `test_harness_compose_git.py` checks git availability, repository checks, git hygiene and git failures.
 - `test_harness_compose_workspace.py` checks `capture_diff` and `in_worktree`.
-- `test_harness_compose_concurrency.py` checks cancellation and Grok serialization.
+- `test_harness_compose_concurrency.py` checks cancellation, a failed worktree add that stops its siblings, and Grok serialization.
 - `test_harness_compose_keys.py` checks that no bound key leaks into prompts, errors, reprs or git.
 
 ## Logs
 
 - 2026-10-17 - Created at S2 of the spec pipeline for `docs/spec/native-thread-compose/spec.md` r3, before the implementation existed; every test is red until compose lands (`docs/spec/native-thread-compose/test-plan.md`). The base pack's stand-in gained the scenario fields `label`, `answers`, `replies`, `observe_files` and `write_files`, and the `marker` program, all read with defaults so the base pack runs unchanged.
+- 2026-10-18 - After the S4 review (`docs/spec/native-thread-compose/review.md`): the comment lines were rewrapped to 72 columns (R-11), and the EC-19 fan-out tests were added (R-16), with a `reference-transaction` hook as the outside fault; the two-failed-adds case is red until R-10 lands.

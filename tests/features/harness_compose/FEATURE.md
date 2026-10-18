@@ -20,7 +20,7 @@ Python callers of `vidbyte.harnesses.native.compose`. Underneath it are the nine
 
 ## Inputs and Preconditions
 
-The tests run offline only. Every vendor program is the base pack's stand-in `tests/features/harness_threads/fake_harness.py`. Each bound step points at its own scenario of the stand-in through its config's `<harness>_command`. AC-1 instead puts `.exe` (win32) or script (POSIX) stand-ins on `PATH`. The real `git` is reachable on `PATH`: on win32 its Git for Windows folder is appended, and on POSIX a symbolic link inside the sandbox is used. The machine's git configuration is shut out with `GIT_CONFIG_NOSYSTEM=1`, an empty `GIT_CONFIG_GLOBAL` and `GIT_CEILING_DIRECTORIES` set to the sandbox root, and the 15 repository-location variables are removed. The user home and the temporary folder point into the sandbox, so compose's worktrees and temporary indexes land outside every test repository. No real key, network or vendor CLI is used.
+The tests run offline only. Every vendor program is the base pack's stand-in `tests/features/harness_threads/fake_harness.py`. Each bound step points at its own scenario of the stand-in through its config's `<harness>_command`. AC-1 instead puts `.exe` (win32) or script (POSIX) stand-ins on `PATH`. The real `git` is reachable on `PATH`: on win32 its Git for Windows folder is appended, and on POSIX a symbolic link inside the sandbox is used. The machine's git configuration is shut out with `GIT_CONFIG_NOSYSTEM=1`, an empty `GIT_CONFIG_GLOBAL` and `GIT_CEILING_DIRECTORIES` set to the sandbox root, and the 15 repository-location variables are removed. The user home and the temporary folder point into the sandbox, so compose's worktrees and temporary indexes land outside every test repository. Two tests make one fan-out child fail from outside compose with a `reference-transaction` hook that the sandbox repository's own `core.hooksPath` names (EC-59: compose's git still runs it during `worktree add`). No real key, network or vendor CLI is used.
 
 ## Observable Outcomes
 
@@ -67,7 +67,7 @@ The spec's INV-1 to INV-36 (`docs/spec/native-thread-compose/spec.md` §6.1). Th
 At test time there are two:
 
 - The real `git`, 2.17 or later, which must be on the machine's `PATH` when the tests start. Without it, the tests that need a sandbox skip.
-- pip's distlib `t64.exe` launcher, which builds AC-1's `.exe` stand-ins on win32. That test skips when pip does not ship it.
+- pip's distlib `t64.exe` launcher, which builds AC-1's `.exe` stand-ins and the EC-19 tests' `.exe` hook on win32. Those tests skip when pip does not ship it.
 
 ## Known Failure Modes
 
@@ -87,6 +87,7 @@ Each is an input and state that leads to a wrong output, and each has a test her
   - a hostile `diff.external` or textconv that runs during a diff;
   - a caret argument that cmd.exe strips.
 - Worktrees: a worktree left registered or on disk after a raise or a cancel.
+- Fan-out: when one child's worktree cannot be added, a sibling left running or a task left pending as the error propagates, or the error held back until the sibling ends by itself.
 - Diffs: earlier uncommitted edits mixed into the writer's diff, a new untracked file missing from it, or diff paths made relative to a subfolder workspace.
 - Concurrency: Grok verifiers on one workspace overlapping, or one lock per composite instead of per workspace.
 - Stopping:
@@ -123,7 +124,7 @@ Each is an input and state that leads to a wrong output, and each has a test her
 - `test_harness_compose_ensemble.py`: every role in its place, narrowing and repairs, long proposals sharing a selector's room fairly, no successful proposal, and a writing proposer (AC-6, AC-8c, AC-20, INV-18, EC-23, EC-49 to EC-51, EC-70).
 - `test_harness_compose_git.py`: a folder outside any repository, no usable git, git hygiene, a hostile repository configuration, an untracked nested repository and an unborn `HEAD` (AC-13, INV-6, INV-26, T-6, T-8, EC-1 to EC-5, EC-10, EC-58, EC-73).
 - `test_harness_compose_workspace.py`: `capture_diff` and `in_worktree` (AC-17, AC-18, INV-7, INV-8, EC-74).
-- `test_harness_compose_concurrency.py`: cancellation, Grok serialization within a composite, and the lock per workspace across composites (AC-10, AC-11, INV-13, INV-14, EC-22).
+- `test_harness_compose_concurrency.py`: cancellation, a failed worktree add that stops its siblings before its error propagates, Grok serialization within a composite, and the lock per workspace across composites (AC-10, AC-11, INV-13, INV-14, EC-17, EC-19, EC-22).
 - `test_harness_compose_keys.py`: no key in another step's prompt, an error, a `repr` or git's argv or environment, while the raw records keep the step's own text (AC-15, INV-4, EC-71, T-3).
 
 Run `PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_compose`.
@@ -135,7 +136,6 @@ The tests leave these out:
 - real vendor CLIs and real keys;
 - the wheel itself: AC-21's installed-copy load is left to the package stage, and lint C015 proves statically that the files ship;
 - the gate run of AC-23;
-- a fan-out child failing with something other than `NativeThreadError` (EC-19), which no outside fault can cause in exactly one child without mocking compose;
 - a worktree that cannot be removed (EC-16);
 - Muse in WSL mode inside a worktree (EC-55, EC-56);
 - timing budgets and repository-size limits (EC-9, EC-66);
