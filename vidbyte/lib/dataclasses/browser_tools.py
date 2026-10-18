@@ -150,12 +150,18 @@ class BrowserToolDefinition:
         if len(entry) <= len(prefix) or entry[: len(prefix)] != prefix or self.url is not None:
             raise ConfigurationError("A stdio BrowserToolDefinition needs a package, an exact version and an entry under node_modules/<package>, and no url.", details={NATIVE_FIELD_DETAIL_KEY: "BrowserToolDefinition.entry"})
 
+        # A stdio server reads its key from one variable, so a row that
+        # takes a key must name it, or the key would never arrive.
+        if self.key_rule is not BrowserKeyRequirement.NONE and self.key_variable is None:
+            raise ConfigurationError("A stdio BrowserToolDefinition that takes a key needs the key_variable its server reads the key from.", details={NATIVE_FIELD_DETAIL_KEY: "BrowserToolDefinition.key_variable"})
+
     def _checked_remote(self) -> None:
-        # A remote row is an https URL; there is nothing to install, and
-        # a key travels as a Bearer header, never in a variable.
+        # A remote row is an https URL; there is nothing to install or
+        # start, so no arguments, options or environment, and a key
+        # travels as a Bearer header, never in a variable.
         url = RecordFieldValidator.require_text(self.url, "BrowserToolDefinition.url", max_chars=NATIVE_PROCESS_FLAG_MAX_CHARS)
-        if not url.startswith(BROWSER_REMOTE_URL_PREFIX) or self.package is not None or self.version is not None or self.entry or self.key_variable is not None or self.needs_chrome:
-            raise ConfigurationError("A remote BrowserToolDefinition needs an https url and no package, version, entry, key variable or Chrome.", details={NATIVE_FIELD_DETAIL_KEY: "BrowserToolDefinition.url"})
+        if not url.startswith(BROWSER_REMOTE_URL_PREFIX) or self.package is not None or self.version is not None or self.entry or self.key_variable is not None or self.needs_chrome or self.arguments or self.environment or self.profile_option is not None or self.output_option is not None or self.caps_option is not None:
+            raise ConfigurationError("A remote BrowserToolDefinition needs an https url and no package, version, entry, key variable, arguments, options, environment or Chrome.", details={NATIVE_FIELD_DETAIL_KEY: "BrowserToolDefinition.url"})
 
 
 @dataclass(frozen=True, slots=True)
