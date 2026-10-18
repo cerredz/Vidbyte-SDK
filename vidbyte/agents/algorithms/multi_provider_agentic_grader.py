@@ -10,7 +10,7 @@ Architecture:
 Key Functions:
     - arun: Orchestrates concurrent agent trials across providers, captures outputs, and runs the meta-grader.
     - _run_provider_trial: Runs the agentic loop for a single provider and captures output text.
-    - _collect_candidates: Filters trial results into a candidates dict and aggregates tokens/calls.
+    - _collect_candidates: Keeps answered trials as candidates, failing raised or stopped ones, and aggregates tokens/calls.
     - _build_candidates_text: Formats the candidates dict into a labeled text block for the grader.
     - _run_grader: Invokes the meta-grader model call via middleware.
     - _select_winner: Picks the best candidate from the grader's output.
@@ -34,6 +34,7 @@ from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.enums import ModelModality
 from vidbyte.lib.errors import AgentExecutionError
 from vidbyte.lib.agents.modality_detector import ModalityDetector
+from vidbyte.lib.constants.outputs import OUTPUT_DELIVERABLE_STOP_REASONS
 from vidbyte.lib.models import ProviderModelRegistry
 from vidbyte.lib.tracing import SpanContext
 from vidbyte.lib.dataclasses.agents import AgentStopReason
@@ -57,8 +58,13 @@ class MultiProviderAgenticGraderRuntimeAlgorithm:
     async def arun(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: SpanContext | None = None) -> AgentResult:
         # Orchestrates concurrent provider trials followed by a meta-grader selection pass.
         started_at = self.runtime.middleware.clock()
-        active_models = ProviderModelRegistry.resolve_active(self.algorithm.provider_models, options)
+        active_models = ProviderModelRegistry.resolve_active(self.algorithm.provider_models, options, api_keys=handle.api_keys, model_mode=handle.model_mode)
         results = await self._run_provider_trials(message, context, handle, metadata, options, trace_context, active_models)
+        # @intent middleware-abort-ends-the-run
+        # A middleware abort in any trial stops the whole run, so its result is returned instead of grading the SDK's stop text.
+        aborted = next((res for res in results if isinstance(res, AgentResult) and res.metadata.get("stop_reason") == AgentStopReason.MIDDLEWARE_ABORT.value), None)
+        if aborted is not None:
+            return aborted
         candidates, total_tokens, call_contexts = self._collect_candidates(active_models, results)
         candidates_text = self._build_candidates_text(candidates)
         raw_result = await self._run_grader(message, candidates_text, context, handle, metadata, started_at, trace_context)
@@ -84,7 +90,7 @@ class MultiProviderAgenticGraderRuntimeAlgorithm:
         # Runs a single provider's agentic loop, capturing output text via wrap_text for grading.
         trial_prompt = self.algorithm.agent_system_prompt_text(context.system_prompt or "")
         trial_context = dataclasses.replace(context, system_prompt=trial_prompt)
-        p_runner = ModalityDetector.create_runner(modality=ModelModality.TEXT, provider=provider_name, model=model_name)
+        p_runner = ModalityDetector.create_runner(modality=ModelModality.TEXT, provider=provider_name, model=model_name, api_keys=handle.api_keys, mode=handle.model_mode)
         captured_output: list[str] = []
         trial_handle = handle.with_runner(p_runner, provider_name).wrap_text(captured_output.append)
         res = await self.runtime._arun_once(
@@ -94,28 +100,40 @@ class MultiProviderAgenticGraderRuntimeAlgorithm:
             metadata={**dict(metadata or {}), "context_window_algorithm": "multi_provider_agentic_grader", "grader_stage": "agent_loop", "loop_provider": provider_name, "loop_model": model_name},
             options=dict(options or {}),
             trace_context=trace_context,
+            # @intent trials-stay-on-their-provider
+            # A trial stands for one provider, so a failed one drops out instead of running on the agent's fallback model under that provider's name.
+            pin_model=True,
         )
         # @intent isdone-answer-is-the-candidate
         # An isDone finish already returns its final_answer; the last captured text is that tool-call turn's text, not the answer.
-        if captured_output and res.metadata.get("stop_reason") != AgentStopReason.IS_DONE.value:
+        # A middleware abort keeps its stop text as well, so arun can return it as the run's result.
+        if captured_output and res.metadata.get("stop_reason") not in (AgentStopReason.IS_DONE.value, AgentStopReason.MIDDLEWARE_ABORT.value):
             res = dataclasses.replace(res, output=captured_output[-1])
         return res
 
     def _collect_candidates(self, active_models: dict[str, str], results: list[Any]) -> tuple[dict[str, str], int, list[Any]]:
-        # Extracts successful trial outputs and accumulates token counts and tool call records.
+        # Extracts answered trial outputs and accumulates token counts and tool call records.
         candidates: dict[str, str] = {}
         total_tokens = 0
         call_contexts: list[Any] = []
+        stopped: list[str] = []
         for (p_name, _m_name), res in zip(active_models.items(), results):
             if isinstance(res, Exception):
                 continue
-            candidates[p_name] = res.output
+            # @intent stopped-trials-are-failures
+            # A trial stopped by its own limit, a guard, or an unmet contract never reached an accepted answer, so its last text is never graded.
+            stop_reason = (res.metadata or {}).get("stop_reason")
+            if stop_reason is None or stop_reason in OUTPUT_DELIVERABLE_STOP_REASONS:
+                candidates[p_name] = res.output
+            else:
+                stopped.append(f"{p_name} stopped: {stop_reason}")
+            # A stopped trial still spent tokens and made tool calls, so they stay on the run's record.
             if res.metadata:
                 total_tokens += res.metadata.get("tokens_used", 0) or 0
                 if "tool_calls" in res.metadata:
                     call_contexts.extend(res.metadata["tool_calls"])
         if not candidates:
-            failures = [str(r) for r in results if isinstance(r, Exception)]
+            failures = [str(r) for r in results if isinstance(r, Exception)] + stopped
             raise AgentExecutionError(f"All provider loops failed: {', '.join(failures)}")
         return candidates, total_tokens, call_contexts
 
@@ -126,7 +144,7 @@ class MultiProviderAgenticGraderRuntimeAlgorithm:
     async def _run_grader(self, message: str, candidates_text: str, context: BaseAgentContext, handle: RunnerHandle, metadata: Mapping[str, Any] | None, started_at: Any, trace_context: SpanContext | None) -> Any:
         # Invokes the meta-grader model call via middleware and returns its raw result.
         grader_prompt = self.algorithm.render_grader_prompt(message, candidates_text)
-        grader_runner = ModalityDetector.create_runner(modality=ModelModality.TEXT, provider=self.algorithm.grader_provider, model=self.algorithm.grader_model)
+        grader_runner = ModalityDetector.create_runner(modality=ModelModality.TEXT, provider=self.algorithm.grader_provider, model=self.algorithm.grader_model, api_keys=handle.api_keys, mode=handle.model_mode)
         grader_handle = handle.with_runner(grader_runner, self.algorithm.grader_provider)
         raw_result, _, _ = await self.runtime._invoke_with_middleware(
             grader_handle,
@@ -156,7 +174,9 @@ class MultiProviderAgenticGraderRuntimeAlgorithm:
         # Otherwise the longest candidate quoted in the grader's output is the most specific match.
         contained = sorted((p_name for p_name, text in stripped.items() if text in grader_output), key=lambda p_name: -len(stripped[p_name]))
         # Otherwise the shortest candidate that contains the grader's output is the closest match.
-        containing = sorted((p_name for p_name, text in stripped.items() if grader_output in text), key=lambda p_name: len(stripped[p_name]))
+        # @intent a-blank-verdict-selects-no-candidate
+        # A blank grader reply is contained in every candidate, so it matches none rather than crowning the shortest.
+        containing = sorted((p_name for p_name, text in stripped.items() if grader_output and grader_output in text), key=lambda p_name: len(stripped[p_name]))
         ranked = exact + contained + containing
         if ranked:
             return candidates[ranked[0]], ranked[0]

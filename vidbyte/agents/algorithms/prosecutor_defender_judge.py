@@ -34,10 +34,11 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, ValidationError
 
 from vidbyte.context.algorithms.prosecutor_defender_judge import DebateStageSettings, ProsecutorDefenderJudgeAlgorithm, ProsecutorDefenderJudgeFailurePolicy
+from vidbyte.context.manager import ContextManager
 from vidbyte.context.templates import NullRecorder
 from vidbyte.lib.agents.modality_detector import ModalityDetector
 from vidbyte.lib.agents.prosecutor_defender_judge import dump_payload, json_safe_mapping, optional_int, runner_model_name, safe_error_category, safe_tool_call_summary, safe_trace_error
-from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
+from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig, AgentStopReason
 from vidbyte.lib.dataclasses.context import BaseAgentContext, ContextArtifact
 from vidbyte.lib.dataclasses.prosecutor_defender_judge import AllegationRecord, DebateStageRecord, DefenderReportPayload, DefenseRecord, EvidenceCitationPayload, EvidenceCitationRecord, EvidenceSource, JudgeDecision, JudgeDecisionRecord, JudgeReasonCode, JudgeReportPayload, ProsecutorDefenderJudgeReport, ProsecutorReportPayload
 from vidbyte.lib.dataclasses.runner import RunnerHandle
@@ -45,6 +46,7 @@ from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.enums import ModelModality
 from vidbyte.lib.errors import AgentExecutionError, ConfigurationError
 from vidbyte.lib.tracing import SpanContext
+from vidbyte.tools.base import BaseTool, _unwrap_tool
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.types import ToolCallContext, ToolPermission
 
@@ -111,7 +113,7 @@ class _StageInvocationCounter:
 
     def handle(self) -> RunnerHandle:
         # Exposes a normal RunnerHandle backed by the counting invocation boundary.
-        return RunnerHandle(runner=self.inner.runner, provider=self.inner.provider, invoke=self.invoke, extract_text=self.inner.extract_text, extract_metadata=self.inner.extract_metadata)
+        return RunnerHandle(runner=self.inner.runner, provider=self.inner.provider, invoke=self.invoke, extract_text=self.inner.extract_text, extract_metadata=self.inner.extract_metadata, api_keys=self.inner.api_keys, model_mode=self.inner.model_mode)
 
 
 @dataclass(frozen=True, slots=True)
@@ -213,10 +215,15 @@ class DebateResourceProjector:
         metadata = dict(spec.metadata)
         if metadata.get("source") == "mcp" or metadata.get("internal_agent_tool"):
             raise ConfigurationError(f"Review tool {spec.name!r} is a remote or agent-delegation capability and cannot be projected.")
-        if tool.__class__.__name__ in _REJECTED_TOOL_CLASSES:
-            raise ConfigurationError(f"Review tool {spec.name!r} uses unsupported live-bound type {tool.__class__.__name__}.")
-        if callable(getattr(tool, "bind_agent", None)) or callable(getattr(tool, "bind_context_getter", None)):
+        # @intent review-refuses-live-context-tools
+        # Judge the tool behind customize()/with_activity() views; context tools keep the parent's live manager in _manager.
+        inner = _unwrap_tool(tool) if isinstance(tool, BaseTool) else tool
+        if inner.__class__.__name__ in _REJECTED_TOOL_CLASSES:
+            raise ConfigurationError(f"Review tool {spec.name!r} uses unsupported live-bound type {inner.__class__.__name__}.")
+        if callable(getattr(inner, "bind_agent", None)) or callable(getattr(inner, "bind_context_getter", None)):
             raise ConfigurationError(f"Review tool {spec.name!r} can bind live parent-agent state and cannot be projected.")
+        if isinstance(getattr(inner, "_manager", None), ContextManager):
+            raise ConfigurationError(f"Review tool {spec.name!r} reads or writes the parent's live context manager and cannot be projected.")
 
 
 class DebateStageRuntimeFactory:
@@ -240,7 +247,7 @@ class DebateStageRuntimeFactory:
         # Resolves inherited transport or creates a dedicated validated text runner.
         if settings.provider is None or settings.model is None:
             return handle, handle.provider, runner_model_name(handle.runner)
-        runner = ModalityDetector.create_runner(ModelModality.TEXT, provider=settings.provider, model=settings.model)
+        runner = ModalityDetector.create_runner(ModelModality.TEXT, provider=settings.provider, model=settings.model, api_keys=handle.api_keys, mode=handle.model_mode)
         return handle.with_runner(runner, settings.provider), settings.provider, settings.model
 
 
@@ -390,6 +397,10 @@ class ProsecutorDefenderJudgeRuntimeAlgorithm:
         # state (tools, middleware, options, output contract) fully intact.
         self.runtime.recorder.append("system_prompt")
         producer = await self._run_producer(message, handle, context, metadata, options, trace_context)
+        # @intent middleware-abort-ends-the-run
+        # An aborted producer left the SDK's stop text, not a candidate, and the abort ends the run, so no debate runs.
+        if producer.metadata.get("stop_reason") == AgentStopReason.MIDDLEWARE_ABORT.value:
+            return producer
 
         # Freeze the exact producer candidate and fingerprint it. This sha256 is
         # the referential anchor the review stages and returned metadata are bound
@@ -401,7 +412,8 @@ class ProsecutorDefenderJudgeRuntimeAlgorithm:
 
         # Delegate the three strictly sequential review stages to run(). arun stays
         # thin so the producer contract and the review contract remain separable.
-        return await self.run(message=message, candidate=candidate, candidate_sha256=candidate_sha256, producer=producer, context=context, handle=handle, trace_context=trace_context)
+        # The stages inherit the model the producer finished on, so a failover sticks.
+        return await self.run(message=message, candidate=candidate, candidate_sha256=candidate_sha256, producer=producer, context=context, handle=self.runtime._active_handle(handle), trace_context=trace_context)
 
     async def run(self, *, message: str, candidate: str, candidate_sha256: str, producer: AgentResult, context: BaseAgentContext, handle: RunnerHandle, trace_context: SpanContext | None) -> AgentResult:
         # Executes the isolated prosecutor -> defender -> judge protocol against a

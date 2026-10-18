@@ -5,7 +5,7 @@ ROLE IN CODEBASE: JevPreflightRegistry.validate normalizes JevRuntimeSettings.pr
 ARCHITECTURE NOTE: The flag vocabulary is JevPreflightPreset in vidbyte/lib/enums/jev.py and the definition record is JevPresetDefinition in vidbyte/lib/dataclasses/jev.py; this module holds only the mapping and the flag logic.
 COMMON MODIFICATION PATTERNS: Add a JevPreflightPreset member; if its questions are fixed, add its question keys and one JevPresetDefinition entry here and register every new question in vidbyte/lib/jev/preflight/.
 KNOWN EDGE CASES: A bare string is rejected rather than iterated character by character, and enabling the same flag twice is an error because it would ask Jev every question twice. TOOL_SELECTOR is a valid flag with no definition, because it asks one question per configured tool and builds them at run time.
-RELATED DOCS: docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, skills/jev-agent/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+RELATED DOCS: docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-read-only-intent.md, skills/jev-agent/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, and scripts/test-jev-preflight.py.
 """
 
@@ -18,6 +18,7 @@ from vidbyte.lib.constants.jev import (
     JEV_BULK_WORK_THRESHOLD,
     JEV_CLARITY_THRESHOLD,
     JEV_CLARITY_VETO_THRESHOLD,
+    JEV_READ_ONLY_THRESHOLD,
     JEV_RUN_STATE_RELATION_THRESHOLD,
 )
 from vidbyte.lib.dataclasses.jev import JevPresetDefinition
@@ -73,6 +74,22 @@ class JevPresets:
                 # Every question must reach the threshold on its own, so one clear no keeps the work on one agent.
                 threshold=JEV_BULK_WORK_THRESHOLD,
                 veto=JEV_BULK_WORK_THRESHOLD,
+            ),
+            JevPreflightPreset.READ_ONLY: JevPresetDefinition(
+                preset=JevPreflightPreset.READ_ONLY,
+                question_keys=(
+                    JevPreflightQuestionKey.READ_ONLY_ASSESSMENT,
+                    JevPreflightQuestionKey.READ_ONLY_SOLE_RESULT,
+                    JevPreflightQuestionKey.READ_ONLY_UNCHANGED,
+                    JevPreflightQuestionKey.READ_ONLY_DESCRIBED,
+                    JevPreflightQuestionKey.READ_ONLY_USER_DECIDES,
+                    JevPreflightQuestionKey.READ_ONLY_IN_REPLY,
+                    JevPreflightQuestionKey.READ_ONLY_READING,
+                    JevPreflightQuestionKey.READ_ONLY_ANSWER_MEETS_GOAL,
+                ),
+                # Every question must reach the threshold on its own, so one clear no keeps the full tool catalog.
+                threshold=JEV_READ_ONLY_THRESHOLD,
+                veto=JEV_READ_ONLY_THRESHOLD,
             ),
         }
     )

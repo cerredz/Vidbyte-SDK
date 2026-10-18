@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+import json
 import unittest
 
 from vidbyte.agents import AgentRuntime
@@ -68,6 +70,21 @@ def _parallel_tool_history() -> tuple[dict, ...]:
         return {"role": "tool", "tool_call_id": call_id, "content": call_id}
 
     return ({"role": "system", "content": "sys"}, {"role": "user", "content": "go"}, call("c1", "c2"), result("c1"), result("c2"), call("c3", "c4", "c5"), result("c3"), result("c4"), result("c5"), call("c6"), result("c6"))
+
+
+_BASE64_ASSET = "ICON = '" + "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo" * 6 + "'\n"
+
+
+def _bloated_call_histories() -> dict[str, tuple[dict, ...]]:
+    # Returns a write_file call whose arguments hold a long base64 run, then a result echoing it, in chat and Anthropic shapes.
+    arguments = json.dumps({"path": "gen.py", "content": _BASE64_ASSET})
+    chat_call = {"role": "assistant", "content": None, "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "write_file", "arguments": arguments}}]}
+    chat = ({"role": "user", "content": "Generate the module."}, chat_call, {"role": "tool", "tool_call_id": "call_1", "content": "wrote " + _BASE64_ASSET})
+    tool_use = {"type": "tool_use", "id": "toolu_1", "name": "write_file", "input": {"path": "gen.py", "content": _BASE64_ASSET}}
+    anthropic_result = {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": "wrote " + _BASE64_ASSET}]}
+    anthropic = ({"role": "user", "content": "Generate the module."}, {"role": "assistant", "content": [tool_use]}, anthropic_result)
+    narrated = ({"role": "user", "content": "Generate the module."}, {"role": "assistant", "content": [{"type": "text", "text": "Writing it now."}, tool_use]}, anthropic_result)
+    return {"chat": chat, "anthropic": anthropic, "anthropic narrated": narrated}
 
 
 def _assert_valid_tool_transcript(test: unittest.TestCase, messages: tuple[dict, ...]) -> None:
@@ -280,10 +297,138 @@ class CompactionMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(tuple(decision.transform.provider_messages)), 1)
         self.assertEqual(tuple(decision.transform.provider_messages)[0]["content"], "new")
 
+    async def test_scrub_bloat_leaves_a_chat_call_turn_byte_for_byte_unchanged(self) -> None:
+        # [Hidden Failure] A content=None call turn's content is a repr of the message; scrubbing it wrote that repr into the assistant text in front of the unchanged call.
+        history = _bloated_call_histories()["chat"]
+        original = copy.deepcopy(history)
+        decision = await MessageHistoryCompactionMiddleware.scrub_bloat().before_model_call(MiddlewareContext(hook=MiddlewareHook.BEFORE_MODEL_CALL, agent_name="worker", provider_messages=history))
+        after = tuple(decision.transform.provider_messages)
+        self.assertEqual(after[1], original[1])
+        self.assertIsNone(after[1]["content"])
+        self.assertEqual(after[1]["tool_calls"], original[1]["tool_calls"])
+        _assert_valid_tool_transcript(self, after)
+        # With the bloat only in the call's arguments there is nothing to scrub, so the pass must report no change.
+        call_only = (*history[:2], {"role": "tool", "tool_call_id": "call_1", "content": "wrote 219 chars"})
+        decision = await MessageHistoryCompactionMiddleware.scrub_bloat().before_model_call(MiddlewareContext(hook=MiddlewareHook.BEFORE_MODEL_CALL, agent_name="worker", provider_messages=call_only))
+        self.assertEqual(tuple(decision.transform.provider_messages), call_only)
+        self.assertFalse(decision.transform.metadata["changed"])
+
+    async def test_scrub_bloat_leaves_an_anthropic_tool_use_turn_unchanged(self) -> None:
+        # [Hidden Failure] An Anthropic call turn's content renders the tool_use block's repr; scrubbing it added a text block holding that repr.
+        for shape in ("anthropic", "anthropic narrated"):
+            with self.subTest(shape=shape):
+                history = _bloated_call_histories()[shape]
+                original = copy.deepcopy(history)
+                after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.MECHANICAL_BLOAT_SCRUBBER)
+                self.assertEqual(after[1]["content"], original[1]["content"])
+                self.assertFalse(any("tool_use" in str(block.get("text", "")) for block in after[1]["content"] if block.get("type") == "text"))
+
+    async def test_scrub_bloat_still_scrubs_the_tool_result_after_a_call_turn(self) -> None:
+        # Verifies the call-turn skip leaves the strategy working: the tool result carrying the same base64 run is still scrubbed.
+        blob = "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo" * 6
+        for shape, history in _bloated_call_histories().items():
+            with self.subTest(shape=shape):
+                decision = await MessageHistoryCompactionMiddleware.scrub_bloat().before_model_call(MiddlewareContext(hook=MiddlewareHook.BEFORE_MODEL_CALL, agent_name="worker", provider_messages=history))
+                after = tuple(decision.transform.provider_messages)
+                result_text = after[2]["content"] if shape == "chat" else after[2]["content"][0]["content"]
+                self.assertIn("[scrubbed base64:", result_text)
+                self.assertNotIn(blob, result_text)
+                self.assertTrue(decision.transform.metadata["changed"])
+
     async def test_summary_middleware_requires_summarizer(self) -> None:
         # Verifies summary middleware requires explicit summarizer dependency injection.
         with self.assertRaises(ValueError):
             SummaryCompactionMiddleware(mode=CompactionMode.SUMMARIZE_OLDEST_N, summarizer=None)  # type: ignore[arg-type]
+
+    async def test_tool_result_middleware_refuses_history_modes(self) -> None:
+        # [Hidden Failure] A history mode on the per-result middleware compacted nothing, so it must fail at construction and name the valid modes.
+        for mode, options in (("keep_last_n_messages", {"n": 1}), ("tool_output_sliding_window", {}), ("trim_to_token_budget", {"max_tokens": 10})):
+            with self.subTest(mode=mode):
+                with self.assertRaises(ValueError) as caught:
+                    ToolResultCompactionMiddleware(mode=mode, **options)
+                for expected in ("truncate_tool_results", "strip_tool_result_bodies", "hide_tool_results", "tool_result_clearing_with_exclusions", "head_tail_tool_preview", "mechanical_bloat_scrubber", "MessageHistoryCompactionMiddleware", mode):
+                    self.assertIn(expected, str(caught.exception))
+
+    async def test_tool_result_middleware_still_accepts_per_result_modes(self) -> None:
+        # Verifies the six per-result modes and the disabled raw() middleware still construct.
+        for mode in ("truncate_tool_results", "strip_tool_result_bodies", "hide_tool_results", "tool_result_clearing_with_exclusions", "head_tail_tool_preview", "mechanical_bloat_scrubber"):
+            with self.subTest(mode=mode):
+                self.assertEqual(ToolResultCompactionMiddleware(mode=mode).mode.value, mode)
+        self.assertFalse(ToolResultCompactionMiddleware.raw().options["enabled"])
+
+    async def test_tool_result_middleware_accepts_exactly_the_modes_the_engine_applies(self) -> None:
+        # [Hidden Failure] Every mode the middleware accepts must change a bloated result, and every mode it refuses must be one the engine leaves unchanged.
+        raw = ToolResult.success("lookup", "\x1b[31mred\x1b[0m " + "word " * 300)
+        ctx = MiddlewareContext(hook=MiddlewareHook.AFTER_TOOL_CALL, agent_name="worker", tool_call=ToolCall("lookup"), tool_result=raw)
+        for mode in CompactionMode:
+            with self.subTest(mode=mode):
+                applied = ContextCompactionEngine().compact_tool_result(ToolCall("lookup"), raw, mode=mode)[0].output != raw.output
+                try:
+                    middleware = ToolResultCompactionMiddleware(mode=mode)
+                except ValueError:
+                    self.assertFalse(applied, f"{mode.value} is applied by the engine but refused by the middleware")
+                    continue
+                self.assertTrue(applied, f"{mode.value} is accepted by the middleware but leaves tool results unchanged")
+                decision = await middleware.after_tool_call(ctx)
+                self.assertNotEqual(decision.transform.model_visible_tool_result.output, raw.output)
+
+    async def test_message_history_middleware_refuses_hide_tool_results(self) -> None:
+        # [Hidden Failure] The history engine has no hide strategy, so hide_tool_results must fail at construction and point to the per-result middleware.
+        with self.assertRaises(ValueError) as caught:
+            MessageHistoryCompactionMiddleware(mode="hide_tool_results")
+        self.assertIn("ToolResultCompactionMiddleware.hide()", str(caught.exception))
+        self.assertIn("strip_tool_result_bodies", str(caught.exception))
+
+    async def test_message_history_middleware_still_accepts_every_other_mode(self) -> None:
+        # Verifies every history mode except hide_tool_results and the summarize modes still constructs, and the summarize modes construct with a summarizer.
+        summarize_modes = {CompactionMode.SUMMARIZE_OLDEST_N, CompactionMode.SUMMARIZE_RANGE, CompactionMode.SUMMARIZE_BY_TOPIC_BLOCKS}
+        for mode in CompactionMode:
+            if mode is CompactionMode.HIDE_TOOL_RESULTS:
+                continue
+            with self.subTest(mode=mode):
+                options = {"active_branch": "main"} if mode is CompactionMode.CONTEXT_SNAPSHOT_BRANCH_TRIM else {}
+                middleware = SummaryCompactionMiddleware(mode=mode, summarizer=FakeSummarizer()) if mode in summarize_modes else MessageHistoryCompactionMiddleware(mode=mode, **options)
+                self.assertIs(middleware.mode, mode)
+
+    async def test_message_history_middleware_refuses_summarize_modes_without_a_summarizer(self) -> None:
+        # [Hidden Failure] This middleware's engine has no summarizer, so a summarize mode stopped every run at its first compaction; it must fail at construction and point to SummaryCompactionMiddleware.
+        for mode in ("summarize_oldest_n", "summarize_range", "summarize_by_topic_blocks"):
+            with self.subTest(mode=mode):
+                with self.assertRaises(ValueError) as caught:
+                    MessageHistoryCompactionMiddleware(mode=mode)
+                self.assertIn(f"{mode} needs a summarizer", str(caught.exception))
+                self.assertIn("SummaryCompactionMiddleware", str(caught.exception))
+
+    async def test_message_history_middleware_refuses_a_summarizer_passed_as_an_option(self) -> None:
+        # [Hidden Failure] A summarizer= keyword lands in the options, which the engine never reads, so the run failed claiming none was injected.
+        with self.assertRaisesRegex(ValueError, "summarize_oldest_n needs a summarizer; use SummaryCompactionMiddleware"):
+            MessageHistoryCompactionMiddleware(mode="summarize_oldest_n", summarizer=FakeSummarizer(), n=4)
+
+    async def test_message_history_middleware_accepts_exactly_the_modes_its_engine_can_run(self) -> None:
+        # [Hidden Failure] Every mode the middleware accepts must run on its engine, and every summarize mode it refuses must be one that engine raises on.
+        ctx = MiddlewareContext(hook=MiddlewareHook.BEFORE_MODEL_CALL, agent_name="worker", provider_messages=_sequential_tool_history())
+        for mode in CompactionMode:
+            if mode is CompactionMode.HIDE_TOOL_RESULTS:
+                continue
+            with self.subTest(mode=mode):
+                options = {"active_branch": "main"} if mode is CompactionMode.CONTEXT_SNAPSHOT_BRANCH_TRIM else {}
+                try:
+                    middleware = MessageHistoryCompactionMiddleware(mode=mode, **options)
+                except ValueError:
+                    with self.assertRaisesRegex(ValueError, "requires an injected summarizer"):
+                        await ContextCompactionEngine().compact_provider_messages(ctx.provider_messages, mode=mode, options=options)
+                    continue
+                decision = await middleware.before_model_call(ctx)
+                self.assertEqual(decision.transform.metadata["compaction"], mode.value)
+
+    async def test_summary_middleware_still_constructs_and_summarizes_every_summarize_mode(self) -> None:
+        # Verifies the refusal leaves SummaryCompactionMiddleware, which wires the summarizer into its engine, able to run all three modes.
+        ctx = MiddlewareContext(hook=MiddlewareHook.BEFORE_MODEL_CALL, agent_name="worker", provider_messages=_sequential_tool_history())
+        for build in (SummaryCompactionMiddleware.summarize_oldest_n, SummaryCompactionMiddleware.summarize_range, SummaryCompactionMiddleware.summarize_by_topic_blocks):
+            with self.subTest(build=build.__name__):
+                decision = await build(FakeSummarizer()).before_model_call(ctx)
+                self.assertTrue(decision.transform.metadata["changed"])
+                self.assertTrue(any(str(message.get("content") or "").startswith("summarized") for message in decision.transform.provider_messages))
 
 
 class RuntimeCompactionIntegrationTests(unittest.IsolatedAsyncioTestCase):

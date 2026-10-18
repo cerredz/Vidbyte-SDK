@@ -15,7 +15,15 @@ Key Functions / Test Cases:
     - test_grader_filler_parsing: Assures meta-grader verbatim output matching works correctly.
     - test_grader_keeps_the_winners_structured_output: Assures the selected trial's output_schema instance is returned.
     - test_select_winner_prefers_faithful_match: Assures the grader's exact choice is not overridden by substring candidates.
+    - test_select_winner_blank_grader_reply_selects_no_candidate: Assures an empty or whitespace grader reply matches no candidate.
+    - test_blank_grader_reply_is_reported_as_grader_raw: Assures a blank grader reply is recorded as grader_raw, never as a trial's win.
+    - test_grader_prompt_with_an_unknown_placeholder_is_refused_at_construction: Assures an unrenderable grader_prompt fails before any trial.
+    - test_grader_prompt_with_escaped_braces_renders_them_literally: Assures {{ }} in grader_prompt renders as literal braces.
     - test_isdone_trials_are_graded_on_their_final_answers: Assures an isDone finish is graded on its final_answer, not its tool-call text.
+    - test_direct_agent_grader_runners_carry_its_keys_and_mode: Assures a DIRECT BaseAgent's trial and grader runners get its matched keys and mode.
+    - GraderTrialsStayOnTheirProviderTests: Assures a down provider's trial drops out instead of running on the agent's fallback model under its name.
+    - ExplicitProviderKeyCheckTests: Assures resolve_active demands a provider's own key only in DIRECT mode, counting a matched key.
+    - GraderStoppedTrialTests: Assures a trial stopped by its own limit is a failed trial, never a graded candidate or the run's answer.
 Relations:
     Validates MultiProviderAgenticGraderAlgorithm and MultiProviderAgenticGraderRuntimeAlgorithm within the test framework.
 Similar Files:
@@ -32,18 +40,28 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from vidbyte import ContextWindow, ContextWindowAlgorithm, MultiProviderAgenticGraderAlgorithm
+from vidbyte import BaseAgent, ContextWindow, ContextWindowAlgorithm, MultiProviderAgenticGraderAlgorithm
+from vidbyte.agents import AgentFallback, FallbackModel
 from vidbyte.agents.algorithms.multi_provider_agentic_grader import MultiProviderAgenticGraderRuntimeAlgorithm
 from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
 from vidbyte.agents.runtime import AgentRuntime
-from vidbyte.lib.errors import AgentExecutionError, ConfigurationError
-from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
+from vidbyte.lib.enums import TextModelMode
+from vidbyte.lib.errors import AgentExecutionError, ConfigurationError, ProviderRequestError
+from vidbyte.middleware import ModelRetryMiddleware
+from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig, AgentStopReason, ProviderKeys
+from vidbyte.lib.registries.models import ProviderModelRegistry
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.config.constants import API_KEY_ENV_VARS
+from vidbyte.lib.constants.outputs import OUTPUT_DELIVERABLE_STOP_REASONS
+from vidbyte.tools import tool
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.security import PermissionPolicy
 from vidbyte.lib.dataclasses.context import BaseAgentContext
 from vidbyte.lib.dataclasses.strategies import AgentResult as StrategyResult
+
+# Dummy, format-valid provider keys; nothing here is a real credential and no request leaves the process.
+_DEEPSEEK_TEST_KEY = "sk-test-deepseek"
+_GEMINI_TEST_KEY = "AIza" + "t" * 35
 
 
 class FakeResponse:
@@ -70,6 +88,31 @@ class FakeRunner:
         return FakeResponse(self.output, self.raw)
 
 
+class DownRunner:
+    """Mock runner for a provider that is down: every request fails with a fallback-eligible 503."""
+
+    def __init__(self, provider: str) -> None:
+        # Records each request so a test can count how often the down provider was tried.
+        self.provider = provider
+        self.calls: list[dict[str, Any]] = []
+
+    async def arun(self, prompt: str, **kwargs: Any) -> FakeResponse:
+        # Fails the way a provider outage reaches the runtime.
+        self.calls.append({"prompt": prompt, "kwargs": kwargs})
+        raise ProviderRequestError(f"{self.provider} is down", provider=self.provider, status_code=503)
+
+
+class ScriptedFallbackChain(AgentFallback):
+    """The agent's chain deepseek -> gemini, whose backup is a scripted runner, so no real runner is built."""
+
+    def __init__(self, backup: FakeRunner) -> None:
+        super().__init__([FallbackModel(provider="deepseek", model="deepseek-chat"), FallbackModel(provider="gemini", model="gemini-3.5-flash")])
+        self.backup = backup
+
+    def build_runner(self, index: int) -> object:
+        return self.backup
+
+
 async def _invoke_runner_helper(runner: Any, prompt: str, **kwargs: Any) -> Any:
     # Awaits the fake runner's arun implementation for test execution.
     return await runner.arun(prompt, **kwargs)
@@ -80,6 +123,12 @@ class Ticket(BaseModel):
 
     title: str
     urgency: int
+
+
+@tool
+def lookup(query: str) -> str:
+    """Look up a fact."""
+    return f"no result for {query}"
 
 
 class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
@@ -205,10 +254,11 @@ class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
             existing_tool_calls=(),
         )
 
+        # Only a DIRECT agent must hold the provider's own key; the gateway modes can run on the Vidbyte key.
         with self.assertRaises(ConfigurationError) as ctx:
             await runtime.arun(
                 "task",
-                handle=RunnerHandle(runner=FakeRunner("ignored"), provider="openai", invoke=_invoke_runner_helper, extract_text=lambda r: getattr(r, "text", str(r)), extract_metadata=lambda r: {}),
+                handle=RunnerHandle(runner=FakeRunner("ignored"), provider="openai", invoke=_invoke_runner_helper, extract_text=lambda r: getattr(r, "text", str(r)), extract_metadata=lambda r: {}, model_mode=TextModelMode.DIRECT),
                 context=context,
             )
         self.assertIn("Missing API key for explicitly requested provider 'openai'", str(ctx.exception))
@@ -437,6 +487,53 @@ class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
         # With no match at all, the grader's own text is returned.
         self.assertEqual(selector._select_winner({"openai": "  ", "deepseek": "7"}, FakeResponse("unrelated"), handle), ("unrelated", "grader_raw"))
 
+    def test_select_winner_blank_grader_reply_selects_no_candidate(self) -> None:
+        # [Silent Failure] A blank reply is contained in every candidate, so the shortest one was reported as the grader's choice.
+        selector = MultiProviderAgenticGraderRuntimeAlgorithm(MagicMock(), MultiProviderAgenticGraderAlgorithm())
+        handle = RunnerHandle(runner=FakeRunner("ignored"), provider="openai", invoke=_invoke_runner_helper, extract_text=lambda r: getattr(r, "text", str(r)), extract_metadata=lambda r: {})
+        candidates = {"deepseek": "DeepSeek says Paris.", "gemini": "Paris is the capital of France."}
+        for reply in ("", "  \n"):
+            with self.subTest(reply=reply):
+                self.assertEqual(selector._select_winner(candidates, FakeResponse(reply), handle), ("", "grader_raw"))
+        # Control: a non-blank reply quoted from a candidate still selects the shortest candidate containing it.
+        self.assertEqual(selector._select_winner(candidates, FakeResponse("Paris"), handle), ("DeepSeek says Paris.", "deepseek"))
+
+    @patch("vidbyte.agents.algorithms.multi_provider_agentic_grader.ModalityDetector.create_runner")
+    async def test_blank_grader_reply_is_reported_as_grader_raw(self, mock_create_runner: MagicMock) -> None:
+        # [Silent Failure] An empty grader reply, such as a reasoning model that spent its budget thinking, chose no trial.
+        os.environ["DEEPSEEK_API_KEY"] = "fake-deepseek-key"
+        os.environ["GEMINI_API_KEY"] = "fake-gemini-key"
+        runners = {"deepseek": FakeRunner("DeepSeek says Paris."), "gemini": FakeRunner("Paris is the capital of France.")}
+        grader_runner = FakeRunner("")
+        mock_create_runner.side_effect = lambda modality, provider, model, **kwargs: runners.get(provider, grader_runner)
+
+        algorithm = MultiProviderAgenticGraderAlgorithm(provider_models={"deepseek": "deepseek-chat", "gemini": "gemini-3.5-flash"}, grader_provider="openai", grader_model="gpt-4o")
+        runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=Tools(), permission_policy=PermissionPolicy(), config=AgentRuntimeConfig(max_iterations=1), algorithm=ContextWindowAlgorithm(name="multi_provider_agentic_grader", multi_provider_agentic_grader=algorithm))
+        context = runtime.build_context("task", base_context=None, history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+
+        result = await runtime.arun(
+            "task",
+            handle=RunnerHandle(runner=FakeRunner("ignored"), provider="openai", invoke=_invoke_runner_helper, extract_text=lambda r: getattr(r, "text", str(r)), extract_metadata=lambda r: {}),
+            context=context,
+        )
+
+        grader_metadata = result.metadata["multi_provider_agentic_grader"]
+        self.assertEqual(len(grader_runner.calls), 1)
+        self.assertEqual(grader_metadata["grader_decision"], {"selected_provider": "grader_raw", "model": "gpt-4o"})
+        self.assertEqual(result.output, "")
+        self.assertIsNone(result.structured)
+
+    def test_grader_prompt_with_an_unknown_placeholder_is_refused_at_construction(self) -> None:
+        # [Hidden Failure] An example JSON object is an unknown {name} to str.format, so it is refused before any trial is paid for.
+        with self.assertRaises(ConfigurationError) as ctx:
+            MultiProviderAgenticGraderAlgorithm(grader_prompt='{request}\n{candidates}\nReply as JSON like {"winner": "openai"}.')
+        self.assertIn('"winner"', str(ctx.exception))
+
+    def test_grader_prompt_with_escaped_braces_renders_them_literally(self) -> None:
+        # [Edge Case] Escaped braces construct and reach the grader as a literal JSON example.
+        algorithm = MultiProviderAgenticGraderAlgorithm(grader_prompt='{request}\n{candidates}\nReply as JSON like {{"winner": "openai"}}.')
+        self.assertEqual(algorithm.render_grader_prompt("task", "cands"), 'task\ncands\nReply as JSON like {"winner": "openai"}.')
+
     @patch("vidbyte.agents.algorithms.multi_provider_agentic_grader.ModalityDetector.create_runner")
     async def test_isdone_trials_are_graded_on_their_final_answers(self, mock_create_runner: MagicMock) -> None:
         # [Silent Failure] A trial that finishes through isDone is graded on its final_answer, not on its tool-call turn's text.
@@ -474,6 +571,245 @@ class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(gemini_answer, runner_grader.calls[0]["prompt"])
         self.assertEqual(grader_metadata["grader_decision"]["selected_provider"], "gemini")
         self.assertEqual(result.output, gemini_answer)
+
+    @patch("vidbyte.agents.algorithms.multi_provider_agentic_grader.ModalityDetector.create_runner")
+    async def test_direct_agent_grader_runners_carry_its_keys_and_mode(self, mock_create_runner: MagicMock) -> None:
+        # [Silent Failure] A child runner built without the agent's keys and mode falls back to AUTO and bills the Vidbyte gateway.
+        runners = {"deepseek": FakeRunner("Canberra (from deepseek)."), "gemini": FakeRunner("Canberra (from gemini).")}
+        grader_runner = FakeRunner("Canberra (from gemini).")
+        mock_create_runner.side_effect = lambda modality, provider, model, **kwargs: grader_runner if model == "deepseek-v4-pro" else runners[provider]
+        keys = ProviderKeys(providers=("deepseek", "gemini"), keys=(_DEEPSEEK_TEST_KEY, _GEMINI_TEST_KEY))
+        algorithm = MultiProviderAgenticGraderAlgorithm(provider_models={"deepseek": "deepseek-chat", "gemini": "gemini-3.5-flash"}, grader_provider="deepseek", grader_model="deepseek-v4-pro")
+        # No provider variable is set, so the agent's api_keys are the only keys there are.
+        agent = BaseAgent(name="worker", system_prompt="Work.", provider="deepseek", model_name="deepseek-chat", api_keys=keys, model_mode=TextModelMode.DIRECT, max_iterations=1, algorithm=ContextWindowAlgorithm(name="multi_provider_agentic_grader", multi_provider_agentic_grader=algorithm))
+
+        result = await agent.arun("Capital of Australia?")
+
+        self.assertEqual(result.content, "Canberra (from gemini).")
+        self.assertEqual(sorted((call.kwargs["provider"], call.kwargs["model"]) for call in mock_create_runner.call_args_list), [("deepseek", "deepseek-chat"), ("deepseek", "deepseek-v4-pro"), ("gemini", "gemini-3.5-flash")])
+        for call in mock_create_runner.call_args_list:
+            self.assertIs(call.kwargs["api_keys"], agent.runner_config.api_keys)
+            self.assertIs(call.kwargs["mode"], TextModelMode.DIRECT)
+
+
+class GraderTrialsStayOnTheirProviderTests(unittest.IsolatedAsyncioTestCase):
+    """A trial stands for one provider, so the agent's fallback chain never answers in a down provider's name."""
+
+    DEEPSEEK_ANSWER = "Canberra (from deepseek)."
+    GEMINI_ANSWER = "Canberra (from gemini)."
+
+    def setUp(self) -> None:
+        # Hide every provider variable; the gateway mode needs no provider key and no request leaves the process.
+        environment = patch.dict(os.environ)
+        environment.start()
+        self.addCleanup(environment.stop)
+        for env_var in API_KEY_ENV_VARS.values():
+            os.environ.pop(env_var, None)
+        self.deepseek = DownRunner("deepseek")
+        self.gemini = FakeRunner(self.GEMINI_ANSWER)
+        # The agent's backup is the same Gemini model the grader compares, so it writes the same answer.
+        self.backup = FakeRunner(self.GEMINI_ANSWER)
+        self.grader = FakeRunner(self.GEMINI_ANSWER)
+
+    def _runtime(self, *, algorithm: ContextWindowAlgorithm | None = None, middleware: tuple[Any, ...] = (), fallback: AgentFallback | None = None) -> AgentRuntime:
+        # A one-iteration runtime for an agent whose primary is deepseek.
+        return AgentRuntime(agent_name="worker", system_prompt="Work.", tools=Tools(), permission_policy=PermissionPolicy(), config=AgentRuntimeConfig(max_iterations=1), algorithm=algorithm, middleware=middleware, fallback=fallback)
+
+    def _handle(self, runner: Any) -> RunnerHandle:
+        return RunnerHandle(runner=runner, provider="deepseek", invoke=_invoke_runner_helper, extract_text=lambda r: getattr(r, "text", str(r)), extract_metadata=lambda r: {})
+
+    async def _grade_with_deepseek_down(self) -> tuple[StrategyResult, AgentRuntime]:
+        # The agent declares deepseek -> gemini; the grader compares deepseek and gemini and deepseek answers 503.
+        algorithm = MultiProviderAgenticGraderAlgorithm(provider_models={"deepseek": "deepseek-chat", "gemini": "gemini-3.5-flash"}, grader_provider="openai", grader_model="gpt-4.1-mini")
+        runtime = self._runtime(algorithm=ContextWindowAlgorithm(name="multi_provider_agentic_grader", multi_provider_agentic_grader=algorithm), fallback=ScriptedFallbackChain(self.backup))
+        runners = {"deepseek": self.deepseek, "gemini": self.gemini, "openai": self.grader}
+        context = runtime.build_context("task", base_context=None, history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+        with patch("vidbyte.agents.algorithms.multi_provider_agentic_grader.ModalityDetector.create_runner", side_effect=lambda modality, provider, model, **kwargs: runners[provider]):
+            result = await runtime.arun("task", handle=self._handle(FakeRunner("ignored")), context=context)
+        return result, runtime
+
+    async def test_down_provider_drops_out_instead_of_running_on_the_fallback_model(self) -> None:
+        # [Silent Failure] The deepseek trial failed over to Gemini, so Gemini's text was stored and graded as deepseek's.
+        result, runtime = await self._grade_with_deepseek_down()
+
+        self.assertEqual(result.metadata["multi_provider_agentic_grader"]["candidates"], {"gemini": self.GEMINI_ANSWER})
+        self.assertEqual(result.metadata["multi_provider_agentic_grader"]["total_runs"], 1)
+        # The down provider was tried once and its trial never reached the agent's backup model.
+        self.assertEqual(len(self.deepseek.calls), 1)
+        self.assertEqual(self.backup.calls, [])
+        # No model switch happened, so none is reported and none is remembered for the rest of the run.
+        self.assertNotIn("fallback", result.metadata)
+        self.assertIsNone(runtime._fallback_handle)
+        self.assertEqual(runtime._fallback_progress, (0, [], [], False))
+
+    async def test_healthy_provider_keeps_its_candidate_and_wins(self) -> None:
+        # [Silent Failure] With Gemini's text under both names, the grader's pick was reported as the down provider.
+        result, _ = await self._grade_with_deepseek_down()
+
+        grader_metadata = result.metadata["multi_provider_agentic_grader"]
+        self.assertEqual(grader_metadata["candidates"]["gemini"], self.GEMINI_ANSWER)
+        self.assertEqual(grader_metadata["grader_decision"]["selected_provider"], "gemini")
+        self.assertEqual(result.output, self.GEMINI_ANSWER)
+        self.assertEqual(len(self.gemini.calls), 1)
+
+    async def test_pinned_run_reraises_the_provider_error_and_leaves_the_chain_untouched(self) -> None:
+        runtime = self._runtime(fallback=ScriptedFallbackChain(self.backup))
+        context = runtime.build_context("task", base_context=None, history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+
+        with self.assertRaises(ProviderRequestError):
+            await runtime._arun_once("task", handle=self._handle(self.deepseek), context=context, pin_model=True)
+
+        self.assertEqual(self.backup.calls, [])
+        self.assertIsNone(runtime._fallback_handle)
+        self.assertEqual(runtime._fallback_progress, (0, [], [], False))
+
+    async def test_pinned_run_stops_on_a_spent_retry_budget_like_an_agent_without_a_chain(self) -> None:
+        # A spent retry budget only hands the error to the chain when the run may switch; a pinned run keeps the abort result.
+        results = []
+        for fallback in (None, ScriptedFallbackChain(self.backup)):
+            runtime = self._runtime(middleware=(ModelRetryMiddleware(max_attempts=1),), fallback=fallback)
+            context = runtime.build_context("task", base_context=None, history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+            results.append(await runtime._arun_once("task", handle=self._handle(self.deepseek), context=context, pin_model=True))
+
+        without_chain, pinned = results
+        self.assertEqual(pinned.metadata["middleware_abort_reason"], "model_retry_exhausted")
+        self.assertEqual((pinned.output, pinned.metadata["stop_reason"]), (without_chain.output, without_chain.metadata["stop_reason"]))
+        self.assertEqual(self.backup.calls, [])
+
+    async def test_unpinned_run_still_fails_over(self) -> None:
+        # An ordinary run is unaffected: the same outage switches to the backup and reports the switch.
+        runtime = self._runtime(fallback=ScriptedFallbackChain(self.backup))
+        context = runtime.build_context("task", base_context=None, history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+
+        result = await runtime._arun_once("task", handle=self._handle(self.deepseek), context=context)
+
+        self.assertEqual(len(self.deepseek.calls), 1)
+        self.assertEqual(len(self.backup.calls), 1)
+        self.assertEqual(result.metadata["fallback"]["final_model"], "gemini/gemini-3.5-flash")
+        self.assertIsNotNone(runtime._fallback_handle)
+
+
+class ExplicitProviderKeyCheckTests(unittest.TestCase):
+    """resolve_active demands a provider's own key only when the agent calls providers directly."""
+
+    PROVIDER_MODELS = {"deepseek": "deepseek-chat", "gemini": "gemini-3.5-flash"}
+
+    def setUp(self) -> None:
+        # Hide every provider variable, so only the agent's matched keys can count.
+        environment = patch.dict(os.environ)
+        environment.start()
+        self.addCleanup(environment.stop)
+        for env_var in API_KEY_ENV_VARS.values():
+            os.environ.pop(env_var, None)
+
+    def test_direct_counts_a_key_matched_into_api_keys(self) -> None:
+        keys = ProviderKeys(providers=("deepseek", "gemini"), keys=(_DEEPSEEK_TEST_KEY, _GEMINI_TEST_KEY))
+        active = ProviderModelRegistry.resolve_active(self.PROVIDER_MODELS, None, api_keys=keys, model_mode=TextModelMode.DIRECT)
+        self.assertEqual(active, self.PROVIDER_MODELS)
+
+    def test_direct_without_a_key_for_a_provider_still_raises(self) -> None:
+        # The deepseek key must not stand in for gemini: a key reaches only the provider it was matched to.
+        keys = ProviderKeys(providers=("deepseek",), keys=(_DEEPSEEK_TEST_KEY,))
+        with self.assertRaises(ConfigurationError) as ctx:
+            ProviderModelRegistry.resolve_active(self.PROVIDER_MODELS, None, api_keys=keys, model_mode=TextModelMode.DIRECT)
+        self.assertIn("Missing API key for explicitly requested provider 'gemini'", str(ctx.exception))
+
+    def test_gateway_modes_need_no_provider_key(self) -> None:
+        for mode in (TextModelMode.AUTO, TextModelMode.VIDBYTE_MANAGED):
+            with self.subTest(mode=mode):
+                self.assertEqual(ProviderModelRegistry.resolve_active(self.PROVIDER_MODELS, None, model_mode=mode), self.PROVIDER_MODELS)
+
+
+class GraderStoppedTrialTests(unittest.IsolatedAsyncioTestCase):
+    """A trial stopped by its own limit never reached an answer, so it is a failed trial, never a graded candidate."""
+
+    INTERIM = "Let me look that up."
+    DEEPSEEK_ANSWER = "Canberra (from deepseek)."
+    GEMINI_ANSWER = "Canberra (from gemini)."
+    PROVIDER_MODELS = {"deepseek": "deepseek-chat", "gemini": "gemini-3.5-flash"}
+
+    def setUp(self) -> None:
+        # Hide every provider variable; the gateway mode needs no provider key and no request leaves the process.
+        environment = patch.dict(os.environ)
+        environment.start()
+        self.addCleanup(environment.stop)
+        for env_var in API_KEY_ENV_VARS.values():
+            os.environ.pop(env_var, None)
+
+    def _deepseek_looping(self) -> FakeRunner:
+        # Every turn narrates and calls lookup, so the trial stops on max_iterations instead of answering.
+        arguments = json.dumps({"query": "capital"})
+        return FakeRunner(self.INTERIM, raw={"choices": [{"message": {"role": "assistant", "content": self.INTERIM, "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "lookup", "arguments": arguments}}]}}]})
+
+    def _gemini_looping(self) -> FakeRunner:
+        # The same narrate-and-call-lookup turn on Gemini's wire.
+        return FakeRunner(self.INTERIM, raw={"candidates": [{"content": {"role": "model", "parts": [{"text": self.INTERIM}, {"functionCall": {"name": "lookup", "args": {"query": "capital"}}}]}}]})
+
+    def _algorithm(self) -> MultiProviderAgenticGraderRuntimeAlgorithm:
+        # The runtime adapter for a deepseek-vs-gemini comparison graded by openai.
+        algorithm = MultiProviderAgenticGraderAlgorithm(provider_models=self.PROVIDER_MODELS, grader_provider="openai", grader_model="gpt-4.1-mini")
+        runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=Tools([lookup]), permission_policy=PermissionPolicy(), config=AgentRuntimeConfig(max_iterations=1), algorithm=ContextWindowAlgorithm(name="multi_provider_agentic_grader", multi_provider_agentic_grader=algorithm))
+        return MultiProviderAgenticGraderRuntimeAlgorithm(runtime, algorithm)
+
+    async def _grade(self, runners: dict[str, FakeRunner]) -> StrategyResult:
+        # A one-iteration run with a lookup tool; each provider's trial and the openai grader read their scripted runner.
+        adapter = self._algorithm()
+        runtime = adapter.runtime
+        context = runtime.build_context("task", base_context=None, history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+        handle = RunnerHandle(runner=FakeRunner("ignored"), provider="deepseek", invoke=_invoke_runner_helper, extract_text=lambda r: getattr(r, "text", str(r)), extract_metadata=lambda r: {})
+        with patch("vidbyte.agents.algorithms.multi_provider_agentic_grader.ModalityDetector.create_runner", side_effect=lambda modality, provider, model, **kwargs: runners[provider]):
+            return await runtime.arun("task", handle=handle, context=context)
+
+    async def test_stopped_trial_is_not_graded_and_the_answering_trial_wins(self) -> None:
+        # [Silent Failure] The stopped trial's last tool-call narration was graded as its answer and could be selected.
+        grader = FakeRunner(self.GEMINI_ANSWER)
+        result = await self._grade({"deepseek": self._deepseek_looping(), "gemini": FakeRunner(self.GEMINI_ANSWER), "openai": grader})
+
+        grader_metadata = result.metadata["multi_provider_agentic_grader"]
+        self.assertEqual(grader_metadata["candidates"], {"gemini": self.GEMINI_ANSWER})
+        self.assertEqual(grader_metadata["total_runs"], 1)
+        self.assertNotIn(self.INTERIM, grader.calls[0]["prompt"])
+        self.assertEqual(grader_metadata["grader_decision"]["selected_provider"], "gemini")
+        self.assertEqual(result.output, self.GEMINI_ANSWER)
+        # The stopped trial's tool call was still made, so it stays on the run's record.
+        self.assertIn("lookup", [call.tool_name for call in result.calls])
+
+    async def test_every_trial_stopped_fails_like_every_trial_raised(self) -> None:
+        # [Silent Failure] With every trial stopped, one trial's narration came back as the answer with no stop_reason.
+        grader = FakeRunner(self.INTERIM)
+
+        with self.assertRaises(AgentExecutionError) as ctx:
+            await self._grade({"deepseek": self._deepseek_looping(), "gemini": self._gemini_looping(), "openai": grader})
+
+        self.assertIn("All provider loops failed", str(ctx.exception))
+        self.assertIn("deepseek stopped: max_iterations", str(ctx.exception))
+        self.assertIn("gemini stopped: max_iterations", str(ctx.exception))
+        self.assertEqual(grader.calls, [])
+
+    def test_only_deliverable_stop_reasons_become_candidates(self) -> None:
+        # [Hidden Failure] A budget, guard, or unmet contract stop is a failed trial, the same as max_iterations.
+        adapter = self._algorithm()
+        # arun returns an aborted trial before candidates are collected, so a middleware abort never reaches this step.
+        for reason in (r for r in AgentStopReason if r is not AgentStopReason.MIDDLEWARE_ABORT):
+            with self.subTest(stop_reason=reason.value):
+                results = [StrategyResult(output="text", strategy_name="direct_runner", metadata={"stop_reason": reason.value}), StrategyResult(output=self.GEMINI_ANSWER, strategy_name="direct_runner", metadata={})]
+                candidates, _, _ = adapter._collect_candidates(self.PROVIDER_MODELS, results)
+                self.assertEqual("deepseek" in candidates, reason.value in OUTPUT_DELIVERABLE_STOP_REASONS)
+                self.assertEqual(candidates["gemini"], self.GEMINI_ANSWER)
+
+    async def test_isdone_and_final_response_trials_are_both_candidates(self) -> None:
+        # Control: an isDone finish and a plain final reply both answered, so both are graded.
+        arguments = json.dumps({"final_answer": self.DEEPSEEK_ANSWER})
+        deepseek = FakeRunner(arguments, raw={"choices": [{"message": {"role": "assistant", "content": None, "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "isDone", "arguments": arguments}}]}}]})
+        grader = FakeRunner(self.DEEPSEEK_ANSWER)
+        result = await self._grade({"deepseek": deepseek, "gemini": FakeRunner(self.GEMINI_ANSWER), "openai": grader})
+
+        grader_metadata = result.metadata["multi_provider_agentic_grader"]
+        self.assertEqual(grader_metadata["candidates"], {"deepseek": self.DEEPSEEK_ANSWER, "gemini": self.GEMINI_ANSWER})
+        self.assertIn(self.DEEPSEEK_ANSWER, grader.calls[0]["prompt"])
+        self.assertIn(self.GEMINI_ANSWER, grader.calls[0]["prompt"])
+        self.assertEqual(result.output, self.DEEPSEEK_ANSWER)
+
 
 if __name__ == "__main__":
     unittest.main()

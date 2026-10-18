@@ -50,7 +50,16 @@ agent = Agent(
 Built-ins are available from `vidbyte.middleware.builtins` and include rate
 limits, token and cost budgets, runtime limits, retry, circuit breaker, audit,
 tool policy, tool-result compaction, message-history compaction, canary tripwire,
-confused-deputy guard, and honeypot tool checks.
+confused-deputy guard, honeypot tool checks, and delegation limits.
+
+`DelegationLimitsMiddleware(limits, depth=...)` holds one delegating tool to a
+depth cap and a per-call batch cap from a `DelegationLimits` record. It denies a
+call at or past `max_depth`, or one whose task list is longer than
+`max_parallel`, before the tool runs, with a reason that names the cap; every
+other tool passes untouched. Give each agent in a tree its own instance at its
+own depth. `InfiniteMemoryAgent` uses it for `launch_subagent`, so its prompts
+describe how to delegate and never state the caps. Deterministic limits like
+these belong in middleware; behavior belongs in the prompt.
 
 `TokenBudgetMiddleware(max_tokens=...)` is a hard cap by default: once
 provider-reported cumulative usage reaches the limit, the run stops before the

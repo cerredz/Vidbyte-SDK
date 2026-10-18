@@ -40,11 +40,11 @@ from vidbyte.middleware.base import AgentMiddleware
 from vidbyte.tools import ToolActivity, ToolParameter
 from vidbyte.tools.builtins.operations.base import PricedOperationTool
 from vidbyte.agents.types import AgentMessage
-from vidbyte.context import ContextArtifact, ContextManager, ContextPermissions, ContextResponse, ContextToolCall, ContextWindow, ContextWindowAlgorithm, DocumentContextItem, TaskContextItem, TextContextItem, TrajectoryCheckpointAlgorithm
-from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
+from vidbyte.context import ContextArtifact, ContextManager, ContextPermissions, ContextResponse, ContextToolCall, ContextWindow, ContextWindowAlgorithm, DocumentContextItem, TaskContextItem, TextContextItem, ToolResultAdmission, TrajectoryCheckpointAlgorithm
+from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig, AgentStopReason
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.enums import AgentRuntimeType, ModelModality
-from vidbyte.lib.errors import AgentExecutionError
+from vidbyte.lib.errors import AgentExecutionError, ConfigurationError
 from vidbyte.lib.dataclasses.context import BaseContext as StrategyContext
 from vidbyte.tools import BaseTool, ToolCall, ToolCallContext, ToolPermission, ToolResult, ToolSpec, Tools, tool
 from vidbyte.tools.security import PermissionPolicy
@@ -404,6 +404,65 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Raw tool output was withheld", visible_tool_message["content"])
         raw_context = result.metadata["tool_calls"][0]
         self.assertEqual(raw_context.result.output, "raw secret result for sdk")
+
+    async def _model_visible_tool_text(self, tools: Tools, algorithm: ContextWindowAlgorithm, name: str, arguments: str) -> tuple[str, ToolResult]:
+        # Runs one model tool call then isDone, returning the tool text the model saw next and the raw result.
+        runner = FakeRunner(
+            [
+                FakeResponse("", {"output": [{"type": "function_call", "name": name, "arguments": arguments, "call_id": "call_1"}]}),
+                FakeResponse("", {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}', "call_id": "call_2"}]}),
+            ]
+        )
+        runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=tools, permission_policy=PermissionPolicy(), algorithm=algorithm)
+        context = runtime.build_context("task", base_context=None, history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+        result = await runtime.arun(
+            "task",
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
+            context=context,
+        )
+        return str(runner.calls[1]["kwargs"]["messages"][-1]["content"]), result.metadata["tool_calls"][0].result
+
+    async def test_hidden_tool_output_still_explains_a_call_that_never_ran(self) -> None:
+        # @intent admission-spares-calls-that-never-ran
+        # [Silent Failure] An unknown tool or invalid arguments never ran the tool, so hide or compact must not replace
+        # the SDK's guidance with "completed with status 'error'", or the model can never learn how to fix its call.
+        @tool
+        def deploy(env: str, replicas: int) -> str:
+            """Deploy the service."""
+            return f"deployed {replicas} to {env}"
+
+        calls = {
+            "missing_argument": ("deploy", '{"replicas": 2}', "validation_error", "env: Field required"),
+            "wrong_type": ("deploy", '{"env": 5, "replicas": "many"}', "validation_error", "replicas: Input should be a valid integer"),
+            "unknown_tool": ("nosuch", "{}", "unknown_tool", "Tool 'nosuch' is not registered."),
+        }
+        algorithms = {
+            "hide_tool_outputs": ContextWindow.preset.hide_tool_outputs,
+            "tiny_compact": ContextWindowAlgorithm(name="tiny_compact", tool_result_admission=ToolResultAdmission.COMPACT, max_tool_result_chars=20),
+        }
+        for case, (name, arguments, error, guidance) in calls.items():
+            for algorithm_name, algorithm in algorithms.items():
+                with self.subTest(case=case, algorithm=algorithm_name):
+                    seen, raw = await self._model_visible_tool_text(Tools([deploy]), algorithm, name, arguments)
+                    self.assertEqual(raw.metadata["error"], error)
+                    self.assertIn(guidance, seen)
+                    self.assertNotIn("completed with status", seen)
+                    self.assertNotIn("[tool output compacted]", seen)
+
+    async def test_hidden_tool_output_still_withholds_a_raising_tools_error(self) -> None:
+        # @intent admission-spares-calls-that-never-ran
+        # [Regression] The exemption covers only calls that never ran: a tool's own exception text is its output and stays hidden.
+        @tool
+        def lookup(topic: str) -> str:
+            """Look up a topic."""
+            raise RuntimeError(f"secret backend detail for {topic}")
+
+        seen, raw = await self._model_visible_tool_text(Tools([lookup]), ContextWindow.preset.hide_tool_outputs, "lookup", '{"topic": "sdk"}')
+
+        self.assertEqual(raw.metadata["error"], "execution_error")
+        self.assertIn("secret backend detail for sdk", raw.output)
+        self.assertNotIn("secret backend detail", seen)
+        self.assertIn("Raw tool output was withheld", seen)
 
     async def test_inner_context_window_lifecycle_writes_to_next_system_context(self) -> None:
         json_output = '{"reasoning_summary": "res", "trajectory": "traj", "output": "out", "score": 0.85, "feedback": "feed"}'
@@ -1203,6 +1262,24 @@ class NonLinearRuntimeRegressionTests(unittest.TestCase):
                 result, _ = self._run(ActorRuntime(topology=topology))
                 self.assertEqual(result.content, "ANSWER")
 
+    def test_actor_runtime_rejects_a_non_actor_topology(self) -> None:
+        # @intent actor-runtime-needs-an-actor-topology
+        # [Regression] A linear, search, or JEV topology was accepted and silently ran that runtime without the actor settings.
+        for topology in (AgentRuntimeType.LINEAR, AgentRuntimeType.MCTS_SEARCH, AgentRuntimeType.JEV):
+            for value in (topology, topology.value):
+                with self.subTest(topology=value):
+                    with self.assertRaises(ConfigurationError) as caught:
+                        ActorRuntime(topology=value, max_loop=2)
+                    self.assertIn(topology.value, str(caught.exception))
+
+    def test_actor_runtime_accepts_every_actor_topology(self) -> None:
+        # @intent actor-runtime-needs-an-actor-topology
+        # ACTOR_MODEL stays a supported alias of the point-to-point topology next to the two explicit ones.
+        for topology in (AgentRuntimeType.ACTOR_MODEL, AgentRuntimeType.ACTOR_MODEL_P2P, AgentRuntimeType.ACTOR_MODEL_BROADCAST):
+            for value in (topology, topology.value):
+                with self.subTest(topology=value):
+                    self.assertIs(ActorRuntime(topology=value).runtime_type, topology)
+
     def test_actor_quiescence_does_not_complete_the_run_twice(self) -> None:
         # [Regression] A reply that completed the run during the quiescence poll was set again.
         result, _ = self._run(ActorRuntime(termination_mode="quiescence", include_actors=[]))
@@ -1249,6 +1326,25 @@ class NonLinearRuntimeRegressionTests(unittest.TestCase):
         result, runner = self._run(ActorRuntime(include_actors=[], max_loop=2))
         self.assertEqual(result.content, "ANSWER")
         self.assertEqual(runner.calls, 1)
+
+    def test_actor_max_loop_stop_reports_max_iterations(self) -> None:
+        # @intent max-loop-stop-is-not-an-answer
+        # [Regression] A run cut off by max_loop returned the SDK's notice with no stop_reason, so output connectors posted it as the answer.
+        for topology in (AgentRuntimeType.ACTOR_MODEL_P2P, AgentRuntimeType.ACTOR_MODEL_BROADCAST):
+            with self.subTest(topology=topology):
+                result, runner = self._run(ActorRuntime(topology=topology, include_actors=[], max_loop=1))
+                self.assertEqual(result.content, "Execution terminated. Max loops (1) reached.")
+                self.assertEqual(result.metadata.get("stop_reason"), AgentStopReason.MAX_ITERATIONS.value)
+                self.assertEqual(runner.calls, 1)
+
+    def test_actor_answer_within_max_loop_has_no_stop_reason(self) -> None:
+        # @intent max-loop-stop-is-not-an-answer
+        # A root answer that fits under the ceiling is an accepted answer, so the run carries no stop_reason.
+        for topology in (AgentRuntimeType.ACTOR_MODEL_P2P, AgentRuntimeType.ACTOR_MODEL_BROADCAST):
+            with self.subTest(topology=topology):
+                result, _ = self._run(ActorRuntime(topology=topology, include_actors=[], max_loop=2))
+                self.assertEqual(result.content, "ANSWER")
+                self.assertIsNone(result.metadata.get("stop_reason"))
 
     def test_actor_broadcast_coordinator_returns_the_root_answer(self) -> None:
         # @intent coordinator-completes-only-from-the-root

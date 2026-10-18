@@ -18,8 +18,8 @@ class BaseFileSystemBackend(ABC):
         """Read bytes from a scoped path."""
 
     @abstractmethod
-    def write_text(self, path: Path, content: str, *, encoding: str, create_parents: bool, newline: str | None = None) -> None:
-        """Write text to a scoped path; a non-None newline writes that style instead of the platform default."""
+    def write_text(self, path: Path, content: str, *, encoding: str, create_parents: bool, newline: str | None = None, atomic: bool = False) -> None:
+        """Write text to a scoped path; a non-None newline writes that style instead of the platform default, and atomic swaps in a whole file so no reader sees a partial one."""
 
     @abstractmethod
     def append_text(self, path: Path, content: str, *, encoding: str, create_parents: bool, newline: str | None = None) -> None:

@@ -1,7 +1,7 @@
 """FILE: tests/test_algorithm_side_call_usage.py
 
 PURPOSE: Regression tests that model calls made by context-window algorithms reach the run's usage ledger.
-ROLE IN CODEBASE: Guards AgentRuntime.usage_tracker against missing reflection and inner-loop explorer calls, which understated get_usage() and get_cost_usd().
+ROLE IN CODEBASE: Guards AgentRuntime.usage_tracker against missing reflection and inner-loop explorer calls, which understated get_usage() and get_cost_usd(), and guards max_tokens against uncounted inner-loop side calls.
 ARCHITECTURE NOTE: Offline fake runner whose responses carry provider, model, and token usage; each test compares recorded model calls with runner invocations.
 COMMON MODIFICATION PATTERNS: Add a case here when a new algorithm makes its own model call outside the main loop.
 KNOWN EDGE CASES: Middleware AgentResult aborts are not provider responses and are never recorded.
@@ -16,7 +16,7 @@ from typing import Any
 
 from vidbyte import ContextWindow, ContextWindowAlgorithm, ProblemSpaceSearchAlgorithm
 from vidbyte.agents.runtime import AgentRuntime
-from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
+from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig, AgentStopReason
 from vidbyte.lib.dataclasses.context import BaseAgentContext
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.tools import Tools, tool
@@ -86,6 +86,18 @@ class AlgorithmSideCallUsageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.metadata["problem_space_search"]["note_count"], 1)
         self.assertEqual(len(runner.calls), 4)
         self.assertEqual(runtime.usage_tracker.rollup().model_call_count, len(runner.calls))
+
+    async def test_inner_loop_side_calls_count_toward_max_tokens(self) -> None:
+        # [Silent Failure] Explorer calls spend the same budget as loop calls, so max_tokens must count them.
+        runner = FakeRunner([response for _ in range(6) for response in (tool_call(), UsageResponse(_EXPLORER_JSON))])
+        algorithm = ContextWindowAlgorithm(name="problem_space_search", problem_space_search=ProblemSpaceSearchAlgorithm(interval=1))
+        runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=Tools([lookup]), permission_policy=PermissionPolicy(), config=AgentRuntimeConfig(max_tokens=3000), algorithm=algorithm)
+        context = BaseAgentContext(system_prompt="sys", history=(), file_paths=(), tools=(), budget=None)
+        result = await runtime.arun("task", handle=handle_for(runner), context=context)
+        self.assertEqual(result.metadata["stop_reason"], AgentStopReason.MAX_TOKENS.value)
+        # Two loop calls and two explorer calls reach 4,040 tokens; counting loop calls alone would allow a third of each.
+        self.assertEqual(len(runner.calls), 4)
+        self.assertEqual(result.metadata["tokens_used"], runtime.usage_tracker.rollup().total_tokens)
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import tempfile
 import uuid
 import zipfile
 from pathlib import Path
@@ -21,15 +22,30 @@ class LocalFileSystemBackend(BaseFileSystemBackend):
     def read_binary(self, path: Path) -> bytes:
         return path.read_bytes()
 
-    def write_text(self, path: Path, content: str, *, encoding: str, create_parents: bool, newline: str | None = None) -> None:
+    def write_text(self, path: Path, content: str, *, encoding: str, create_parents: bool, newline: str | None = None, atomic: bool = False) -> None:
         # @intent failed-edit-leaves-file-untouched
         # Opening for writing empties the file at once, so text the encoding
         # cannot hold must fail here, before the file is opened.
         content.encode(encoding)
         if create_parents:
             path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("w", encoding=encoding, newline=newline) as handle:
-            handle.write(content)
+        if not atomic:
+            with path.open("w", encoding=encoding, newline=newline) as handle:
+                handle.write(content)
+            return
+        # @intent atomic-write-swaps-in-a-whole-file
+        # Write a temporary file beside the target and swap it in, so a
+        # reader sees the old file or the new one, never half of one. A
+        # failed write or swap removes the temporary file, which would
+        # otherwise linger beside the target, and leaves the target as it was.
+        descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+        try:
+            with os.fdopen(descriptor, "w", encoding=encoding, newline=newline) as handle:
+                handle.write(content)
+            os.replace(temporary, path)
+        except BaseException:
+            os.unlink(temporary)
+            raise
 
     def append_text(self, path: Path, content: str, *, encoding: str, create_parents: bool, newline: str | None = None) -> None:
         # @intent failed-edit-leaves-file-untouched
@@ -79,7 +95,12 @@ class LocalFileSystemBackend(BaseFileSystemBackend):
         return FileStat(path=str(path), exists=True, is_file=path.is_file(), is_dir=path.is_dir(), size=metadata.st_size, modified_time=metadata.st_mtime)
 
     def find(self, root: Path, pattern: str) -> tuple[str, ...]:
-        return tuple(str(path.relative_to(root)) for path in sorted(root.rglob(pattern), key=lambda item: str(item).lower()))
+        matches = set(root.rglob(pattern))
+        # See @intent trailing-globstar-matches-files: before Python 3.13 a last "**" segment matched directories only,
+        # so add everything below the matched directories, as Python 3.13 does.
+        if pattern.endswith("**") and Path(pattern).name == "**":
+            matches.update(root.rglob(pattern + "/*"))
+        return tuple(str(path.relative_to(root)) for path in sorted(matches, key=lambda item: str(item).lower()))
 
     def diff_text(self, left: Path, right_content: str, *, encoding: str, label: str) -> str:
         current = left.read_text(encoding=encoding) if left.exists() else ""

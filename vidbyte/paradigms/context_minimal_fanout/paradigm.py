@@ -21,6 +21,8 @@ from typing import Any
 
 from vidbyte.agents import BaseAgent
 from vidbyte.lib.constants import RUNNER_TYPE_TEXT
+from vidbyte.lib.constants.outputs import OUTPUT_DELIVERABLE_STOP_REASONS
+from vidbyte.lib.errors import AgentExecutionError
 from vidbyte.middleware.builtins import CostBudgetMiddleware, TokenBudgetMiddleware
 from vidbyte.paradigms.base import ParadigmHarness
 from vidbyte.paradigms.context_minimal_fanout.prompts import ContextMinimalFanoutPrompts
@@ -89,14 +91,19 @@ class ContextMinimalFanoutParadigm(ParadigmHarness):
         )
         self._bind_role_runner(agent, settings.context)
         reply = await agent.arun(self._build_context_message(prompt))
-        return EnvironmentContext.from_snapshot(builder.snapshot(), fallback_text=reply.content)
+        # A context agent stopped before answering left an SDK notice, not prose about the environment.
+        return EnvironmentContext.from_snapshot(builder.snapshot(), fallback_text=reply.content if self._answered(reply) else "")
 
     async def _run_splitter(self, prompt: str, environment: EnvironmentContext, settings: ContextMinimalFanoutSettings) -> PromptSplitPlan:
         # Runs the splitter agent and maps its snapshot to a PromptSplitPlan.
         builder = OutputSchemaBuilder()
         agent = self._build_planning_agent(settings.splitter, "splitter", builder, settings)
         message = self._build_splitter_message(prompt, environment)
-        await agent.arun(message)
+        reply = await agent.arun(message)
+        # @intent a-stopped-planner-never-shrinks-the-plan
+        # A planner stopped by its own limit or middleware may have written only part of the plan, so its snapshot is no plan.
+        if not self._answered(reply):
+            raise AgentExecutionError(f"The splitter agent stopped before finishing the split plan: {reply.metadata.get('stop_reason')}.", details={"role": "splitter", "stop_reason": reply.metadata.get("stop_reason")})
         return PromptSplitPlan.from_snapshot(builder.snapshot())
 
     async def _run_adversarial_loop(self, prompt: str, plan: PromptSplitPlan, environment: EnvironmentContext, settings: ContextMinimalFanoutSettings) -> PromptSplitPlan:
@@ -106,7 +113,11 @@ class ContextMinimalFanoutParadigm(ParadigmHarness):
             builder = OutputSchemaBuilder()
             agent = self._build_planning_agent(settings.adversarial, "adversarial", builder, settings)
             message = self._build_adversarial_message(prompt, current, environment)
-            await agent.arun(message)
+            reply = await agent.arun(message)
+            # @intent a-stopped-planner-never-shrinks-the-plan
+            # Each round rewrites the whole plan into a fresh builder, so a stopped round would replace the plan with a part of it.
+            if not self._answered(reply):
+                raise AgentExecutionError(f"The adversarial agent stopped before finishing the split plan: {reply.metadata.get('stop_reason')}.", details={"role": "adversarial", "stop_reason": reply.metadata.get("stop_reason")})
             current = PromptSplitPlan.from_snapshot(builder.snapshot())
             if not current.overlap_conflicts():
                 break
@@ -129,7 +140,9 @@ class ContextMinimalFanoutParadigm(ParadigmHarness):
         message = self._build_implementation_message(split_prompt, plan, environment)
         try:
             reply = await agent.arun(message)
-            return ImplementationOutput(prompt_id=split_prompt.id, title=split_prompt.title, content=reply.content, metadata=dict(reply.metadata))
+            # A branch stopped by a budget, guard, or middleware did not finish its slice, so it counts as failed.
+            error = None if self._answered(reply) else f"Branch stopped before answering: {reply.metadata.get('stop_reason')}"
+            return ImplementationOutput(prompt_id=split_prompt.id, title=split_prompt.title, content=reply.content, metadata=dict(reply.metadata), error=error)
         except Exception as exc:
             if not settings.return_exceptions:
                 raise
@@ -188,6 +201,13 @@ class ContextMinimalFanoutParadigm(ParadigmHarness):
             **options,
         )
         return self._bind_role_runner(agent, settings.implementation)
+
+    @staticmethod
+    def _answered(reply: Any) -> bool:
+        # @intent stopped-stage-agents-did-not-answer
+        # Only a final_response / is_done run ended with an answer; any other stop left the SDK's notice as content.
+        stop_reason = reply.metadata.get("stop_reason")
+        return stop_reason is None or stop_reason in OUTPUT_DELIVERABLE_STOP_REASONS
 
     def _bind_role_runner(self, agent: BaseAgent, role_settings: AgentRoleSettings) -> BaseAgent:
         # Uses a caller-supplied runner in place of the one inferred from provider and model.

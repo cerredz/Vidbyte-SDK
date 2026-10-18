@@ -83,12 +83,14 @@ class CodexTransport:
                 except asyncio.CancelledError:
                     raise
                 # SDK execution raises on failed turns, protocol faults, or lost connections.
+                # The thread is already open, so the error names it for a retry to continue on.
                 except Exception as exc:
                     raise CodexAgentError(
                         "Codex failed to execute the requested turn.",
                         failure_code=FailureCode.CODEX_TURN_FAILED.value,
                         operation="turn_run",
                         error_type=type(exc).__name__,
+                        thread_id=str(thread.id),
                     ) from exc
                 try:
                     return CodexResultSerializer.from_sdk(thread.id, result)

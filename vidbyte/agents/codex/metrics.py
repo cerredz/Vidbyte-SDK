@@ -55,7 +55,11 @@ class CodexMetricsTranslator:
         # Return the turn delta only when the provider actually reported one. An
         # unknown backend also yields nothing, because pricing it under OpenAI rates
         # would invent a dollar figure for a model the account is not billed for.
-        if request.settings.thread.model_provider:
+        # @intent openai-spelled-out-is-not-custom
+        # "openai" is Codex's built-in provider, the same one an empty model_provider
+        # selects, so it resolves exactly as fallback.primary_model resolves it.
+        provider = request.settings.thread.model_provider or CODEX_USAGE_PROVIDER
+        if provider != CODEX_USAGE_PROVIDER:
             return None
         if not request.result.usage_available:
             return None

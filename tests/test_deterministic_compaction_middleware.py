@@ -10,6 +10,7 @@ from vidbyte.lib.dataclasses.tools import ToolCall as RuntimeToolCall
 from vidbyte.lib.dataclasses.tools import ToolResult as RuntimeToolResult
 from vidbyte.lib.tools import ToolsFormatter
 from vidbyte.middleware.builtins import MessageHistoryCompactionMiddleware, ToolResultCompactionMiddleware
+from vidbyte.middleware.compaction import ToolOutputSlidingWindowCompaction
 from vidbyte.tools.builtins.context import ContextCompactionTool
 from vidbyte.tools.types import ToolCall
 
@@ -49,6 +50,23 @@ def _two_lookup_history(provider: str) -> tuple[dict[str, object], ...]:
     # Returns a user turn followed by lookups A and B, so deleting indexes 2-3 leaves A's call beside B's result.
     ask = {"role": "user", "parts": [{"text": "look up A and B"}]} if provider == "gemini" else {"role": "user", "content": "look up A and B"}
     return (ask, *_lookup_pair(provider, "A", "out A"), *_lookup_pair(provider, "B", "out B"))
+
+
+def _write_file_history(contents: Sequence[object]) -> tuple[dict[str, object], ...]:
+    # Returns a coding-agent history: one write_file call per content, each sending a whole module (~1,000 tokens) as arguments.
+    history: list[dict[str, object]] = [{"role": "user", "content": "write the modules"}]
+    for index, content in enumerate(contents, start=1):
+        arguments = '{"path": "m%d.py", "content": "%s"}' % (index, "x" * 4000)
+        history.append({"role": "assistant", "content": content, "tool_calls": [{"id": f"c{index}", "type": "function", "function": {"name": "write_file", "arguments": arguments}}]})
+        history.append({"role": "tool", "tool_call_id": f"c{index}", "content": "ok"})
+    return tuple(history)
+
+
+_CALL_TURN_CONTENTS = {
+    "none": (None, None, None),
+    "narrated": ("Writing m1.py now.", "", "Writing m3.py now."),
+    "text parts": ([{"type": "text", "text": "Writing m1.py now."}], [], [{"type": "text", "text": "Writing m3.py now."}]),
+}
 
 
 def _gemini_tool_history(result: RuntimeToolResult) -> tuple[dict[str, object], ...]:
@@ -232,6 +250,32 @@ class DeterministicStrategyTests(unittest.IsolatedAsyncioTestCase):
         after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.DEDUPLICATE_TOOL_CALLS)
         self.assertEqual(list(after), [history[0], history[1], history[2], history[5], history[6]])
 
+    async def test_deduplicate_tool_calls_keeps_a_rerun_whose_result_changed(self) -> None:
+        # [Silent Failure] Re-running the same call after a fix (tests FAIL, then PASS) is a new pair, so the model sees the PASS.
+        def call(call_id: str) -> dict[str, object]:
+            return {"role": "assistant", "content": None, "tool_calls": [{"id": call_id, "type": "function", "function": {"name": "run_tests", "arguments": "{}"}}]}
+        history = ({"role": "user", "content": "fix the tests"}, call("c1"), {"role": "tool", "tool_call_id": "c1", "content": "FAIL"}, call("c2"), {"role": "tool", "tool_call_id": "c2", "content": "PASS"})
+        after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.DEDUPLICATE_TOOL_CALLS)
+        self.assertEqual(list(after), list(history))
+        _assert_valid_tool_transcript(self, after)
+
+    async def test_deduplicate_tool_calls_keeps_an_anthropic_rerun_whose_result_changed(self) -> None:
+        # [Silent Failure] Anthropic tool_result blocks are compared by their content, so a changed result survives as on OpenAI.
+        def call(call_id: str) -> dict[str, object]:
+            return {"role": "assistant", "content": [{"type": "tool_use", "id": call_id, "name": "run_tests", "input": {}}]}
+
+        def result(call_id: str, output: str) -> dict[str, object]:
+            return {"role": "user", "content": [{"type": "tool_result", "tool_use_id": call_id, "content": output}]}
+        history = ({"role": "user", "content": "fix the tests"}, call("t1"), result("t1", "FAIL"), call("t2"), result("t2", "PASS"))
+        after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.DEDUPLICATE_TOOL_CALLS)
+        self.assertEqual(list(after), list(history))
+
+    async def test_deduplicate_tool_calls_drops_every_result_of_a_repeated_parallel_call(self) -> None:
+        # [Hidden Failure] A repeated parallel-call turn loses all of its results, not just the first, so none is left orphaned.
+        turn = (msg("assistant", "read_file x2", kind="tool_call"), msg("tool", "a", kind="tool_result"), msg("tool", "b", kind="tool_result"))
+        after, _ = await ContextCompactionEngine().compact_messages((*turn, *turn), mode=CompactionMode.DEDUPLICATE_TOOL_CALLS)
+        self.assertEqual(after, turn)
+
     async def test_salience_eviction_keeps_newest_tool_pair_on_every_provider_shape(self) -> None:
         # [Silent Failure] Anthropic tool_use and Gemini functionCall turns score as tool calls, so the newest pair survives as on OpenAI.
         shapes = {
@@ -287,6 +331,18 @@ class DeterministicStrategyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(function_response["name"], "read_file")
         self.assertTrue(function_response["response"]["output"].startswith("# a.py\ndef"))
         self.assertLess(len(function_response["response"]["output"]), len(output))
+
+    async def test_truncation_leaves_an_empty_anthropic_tool_result_empty(self) -> None:
+        # [Silent Failure] An empty Anthropic tool result stays "", not a truncated repr of its tool_result block shown to the model as tool output.
+        # @intent empty-block-text-is-text
+        call = {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_01A09q90qw90lq917835lq9", "name": "tail_log", "input": {"path": "app.log"}}]}
+        history = ({"role": "user", "content": "watch the log"}, call, {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01A09q90qw90lq917835lq9", "content": ""}]})
+        cases = ((CompactionMode.TRUNCATE_TOOL_RESULTS, {"max_chars": 20}), (CompactionMode.HEAD_TAIL_TOOL_PREVIEW, {"head_chars": 10, "tail_chars": 5}))
+        for mode, options in cases:
+            with self.subTest(mode=mode.value):
+                after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=mode, options=options)
+                self.assertEqual(after[2]["content"][0]["content"], "")
+                self.assertEqual(list(after), list(history))
 
     async def test_scrub_bloat_reduces_gemini_function_response_output(self) -> None:
         # [Silent Failure] Line-based bloat detection sees the Gemini tool output's real lines, as it does for OpenAI and Anthropic.
@@ -374,6 +430,27 @@ class DeterministicStrategyTests(unittest.IsolatedAsyncioTestCase):
         # [Hidden Assumption] Unsupported window sub-modes fail during strategy construction.
         with self.assertRaises(ValueError):
             await ContextCompactionEngine().compact_messages((msg("tool", "x", "tool_result"),), mode=CompactionMode.TOOL_OUTPUT_SLIDING_WINDOW, options={"window_mode": "not_a_mode"})
+
+    async def test_tool_output_sliding_window_refuses_modes_it_cannot_apply(self) -> None:
+        # [Silent Failure] A mode the window cannot apply is refused by name instead of silently becoming truncation.
+        for window_mode in (CompactionMode.HIDE_TOOL_RESULTS, CompactionMode.MECHANICAL_BLOAT_SCRUBBER, CompactionMode.KEEP_LAST_N_MESSAGES, "hide_tool_results", "not_a_mode"):
+            with self.subTest(window_mode=window_mode):
+                with self.assertRaises(ValueError) as caught:
+                    ToolOutputSlidingWindowCompaction(mode=window_mode)
+                for valid in ("truncate_tool_results", "strip_tool_result_bodies", "head_tail_tool_preview"):
+                    self.assertIn(valid, str(caught.exception))
+
+    async def test_tool_output_sliding_window_applies_each_supported_mode_given_as_enum_or_string(self) -> None:
+        # [Hidden Assumption] Supported window modes keep their treatment whether passed as an enum member or its string value.
+        messages = (msg("tool", "x" * 50, "tool_result", tool_name="lookup"), msg("tool", "new-output", "tool_result", tool_name="lookup"))
+        expected = {CompactionMode.TRUNCATE_TOOL_RESULTS: "[... truncated 40 characters ...]", CompactionMode.STRIP_TOOL_RESULT_BODIES: "[older tool result cleared by compaction]", CompactionMode.HEAD_TAIL_TOOL_PREVIEW: "...[omitted 40 characters]..."}
+        for mode, marker in expected.items():
+            for given in (mode, mode.value):
+                with self.subTest(window_mode=given):
+                    after = await ToolOutputSlidingWindowCompaction(keep_recent=1, mode=given, max_chars=10, head_chars=5, tail_chars=5).compact(messages)
+                    self.assertIn(marker, after[0].content)
+                    self.assertEqual(after[0].metadata["compaction"], mode.value)
+                    self.assertEqual(after[1].content, "new-output")
 
     async def test_clear_tool_results_exclusions_and_metadata(self) -> None:
         # [Edge Case] Empty exclusions clear all results and record original size.
@@ -473,6 +550,28 @@ class DeterministicStrategyTests(unittest.IsolatedAsyncioTestCase):
         after, _ = await ContextCompactionEngine().compact_messages(messages, mode=CompactionMode.SELECTIVE_CONTEXT_PRUNING, options={"min_unique_terms": 2})
         self.assertEqual(tuple(m.content for m in after), ("alpha beta",))
 
+    async def test_selective_pruning_keeps_different_calls_whose_results_read_the_same(self) -> None:
+        # [Silent Failure] Two calls whose results both read "saved" are two exchanges, so the second is not pruned as a duplicate and erased with its call.
+        for provider in ("openai", "gemini"):
+            with self.subTest(provider=provider):
+                history = _two_lookup_history(provider)[:1] + _lookup_pair(provider, "a", "saved") + _lookup_pair(provider, "b", "saved")
+                after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.SELECTIVE_CONTEXT_PRUNING)
+                self.assertEqual(list(after), list(history))
+        # A parallel turn keeps both calls, and a repeated plain reply is still pruned.
+        turn = {"role": "assistant", "content": None, "tool_calls": [{"id": f"c{i}", "type": "function", "function": {"name": "save", "arguments": f'{{"note": "{i}"}}'}} for i in (1, 2)]}
+        history = ({"role": "user", "content": "save both"}, turn, {"role": "tool", "tool_call_id": "c1", "content": "saved"}, {"role": "tool", "tool_call_id": "c2", "content": "saved"}, {"role": "assistant", "content": "done"}, {"role": "assistant", "content": "done"})
+        after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.SELECTIVE_CONTEXT_PRUNING)
+        self.assertEqual(list(after), list(history[:-1]))
+        _assert_valid_tool_transcript(self, after)
+
+    async def test_selective_pruning_keeps_a_call_whose_result_is_empty(self) -> None:
+        # [Silent Failure] An empty tool result is still the record that the call ran, so pruning it would erase the call and the model would repeat it.
+        for provider in ("openai", "gemini"):
+            with self.subTest(provider=provider):
+                history = _two_lookup_history(provider)[:1] + _lookup_pair(provider, "a", "")
+                after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.SELECTIVE_CONTEXT_PRUNING)
+                self.assertEqual(list(after), list(history))
+
     async def test_salience_eviction_pinned_error_and_chronology(self) -> None:
         # [Hidden Failure] Pinned metadata and tool errors outrank ordinary messages, returned chronologically.
         messages = (msg("assistant", "ordinary"), msg("tool", "success", "tool_result", status="success"), msg("tool", "error", "tool_result", status="error"), msg("assistant", "pinned", pinned=True))
@@ -504,9 +603,44 @@ class DeterministicStrategyTests(unittest.IsolatedAsyncioTestCase):
         def call(call_id: str, text: str) -> dict[str, object]:
             return {"role": "assistant", "content": text, "tool_calls": [{"id": call_id, "type": "function", "function": {"name": "lookup", "arguments": "{}"}}]}
         history = ({"role": "user", "content": "go"}, call("c1", "a"), {"role": "tool", "tool_call_id": "c1", "content": "ok"}, call("c2", "x" * 50), {"role": "tool", "tool_call_id": "c2", "content": "fact"})
-        after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.SALIENCE_SCORE_EVICTION, options={"max_messages": 10, "max_tokens": 8, "token_counter": len})
+        # Each call also costs its 18-character signature now: the c1 pair is 21, the user turn 2, and the c2 pair 72.
+        after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.SALIENCE_SCORE_EVICTION, options={"max_messages": 10, "max_tokens": 30, "token_counter": len})
         self.assertEqual(list(after), list(history[:3]))
         _assert_valid_tool_transcript(self, after)
+
+    async def test_trim_to_token_budget_counts_a_narrated_call_turns_arguments(self) -> None:
+        # [Silent Failure] A chat call turn with text content ("", a narration, or text parts) is charged for its arguments, as a None-content turn is.
+        for name, contents in _CALL_TURN_CONTENTS.items():
+            with self.subTest(call_turn_content=name):
+                history = _write_file_history(contents)
+                after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.TRIM_TO_TOKEN_BUDGET, options={"max_tokens": 1500})
+                _assert_valid_tool_transcript(self, after)
+                self.assertEqual([call["id"] for m in after for call in m.get("tool_calls") or ()], ["c3"])
+                self.assertEqual(list(after), [history[0], history[-2], history[-1]])
+
+    async def test_group_token_budgets_count_a_narrated_call_turns_arguments(self) -> None:
+        # [Silent Failure] Whole-group budgets evict the same big narrated pairs that they evict for None-content call turns.
+        modes = ((CompactionMode.TRIM_WITH_PROVIDER_BOUNDARIES, {"max_tokens": 1500}), (CompactionMode.SALIENCE_SCORE_EVICTION, {"max_messages": 10, "max_tokens": 1500}))
+        for mode, options in modes:
+            baseline, _ = await ContextCompactionEngine().compact_provider_messages(_write_file_history(_CALL_TURN_CONTENTS["none"]), mode=mode, options=options)
+            for name, contents in _CALL_TURN_CONTENTS.items():
+                with self.subTest(mode=mode.value, call_turn_content=name):
+                    after, _ = await ContextCompactionEngine().compact_provider_messages(_write_file_history(contents), mode=mode, options=options)
+                    _assert_valid_tool_transcript(self, after)
+                    self.assertEqual(len([m for m in after if m.get("tool_calls")]), 1, "the 1,500-token budget fits one ~1,000-token write_file call")
+                    self.assertEqual([m.get("tool_call_id") for m in after], [m.get("tool_call_id") for m in baseline])
+
+    async def test_query_relevance_matches_a_narrated_call_turns_arguments(self) -> None:
+        # [Silent Failure] A chat call turn with "" or narrated content matches the query on its arguments, as its None-content twin does, so its pair survives.
+        def lookup(content: object, city: str) -> tuple[dict[str, object], dict[str, object]]:
+            call = {"role": "assistant", "content": content, "tool_calls": [{"id": f"call_{city}", "type": "function", "function": {"name": "lookup", "arguments": f'{{"q": "{city}"}}'}}]}
+            return call, {"role": "tool", "tool_call_id": f"call_{city}", "content": f"{city} weather: sunny"}
+        for content in (None, "", "Checking the forecast."):
+            with self.subTest(call_turn_content=content):
+                history = ({"role": "user", "content": "plan a trip"}, *lookup(content, "rome"), *lookup(content, "paris"))
+                after, _ = await ContextCompactionEngine().compact_provider_messages(history, mode=CompactionMode.QUERY_RELEVANCE_FILTER, options={"query": "paris weather", "min_score": 1})
+                self.assertEqual(list(after), list(history[-2:]))
+                _assert_valid_tool_transcript(self, after)
 
     async def test_query_relevance_empty_query_and_lexical_matching(self) -> None:
         # [Hidden Assumption] Empty queries keep system/recent only, and punctuation/case tokenization is stable.
@@ -565,6 +699,14 @@ class DeterministicMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         decision = await middleware.before_model_call(MiddlewareContext(hook=MiddlewareHook.BEFORE_MODEL_CALL, agent_name="agent", message="billing invoice", provider_messages=provider_messages))
         self.assertEqual(tuple(m["content"] for m in decision.transform.provider_messages), ("rules", "billing invoice"))
 
+    async def test_clear_except_system_and_log_factory_reads_a_lone_entry_and_a_null_field(self) -> None:
+        # [Silent Failure] A developer's bare-string field is one bullet and a null field is none, never a failed run.
+        middleware = MessageHistoryCompactionMiddleware.clear_except_system_and_log(progress_log={"touched_files": "src/parser.py", "errors": None, "next_steps": ["ship it"]})
+        provider_messages = ({"role": "system", "content": "rules"}, {"role": "user", "content": "parse it"}, {"role": "assistant", "content": "done"})
+        decision = await middleware.before_model_call(MiddlewareContext(hook=MiddlewareHook.BEFORE_MODEL_CALL, agent_name="agent", message="parse it", provider_messages=provider_messages))
+        log = decision.transform.provider_messages[-1]["content"]
+        self.assertEqual([line for line in log.splitlines() if line.startswith("- ")], ["- N/A", "- src/parser.py", "- N/A", "- N/A", "- ship it"])
+
     async def test_new_factories_validate_constructor_values(self) -> None:
         # [Hidden Assumption] Invalid public factory bounds fail before runtime.
         with self.assertRaises(ValueError):
@@ -573,6 +715,34 @@ class DeterministicMiddlewareTests(unittest.IsolatedAsyncioTestCase):
             MessageHistoryCompactionMiddleware.trim_to_token_budget(max_tokens=-1)
         with self.assertRaises(ValueError):
             MessageHistoryCompactionMiddleware.context_snapshot_branch_trim(active_branch="")
+
+    async def test_tool_output_sliding_window_factory_refuses_window_modes_it_cannot_apply(self) -> None:
+        # [Silent Failure] An unsupported window_mode fails at construction rather than truncating older results on every call.
+        for window_mode in ("hide_tool_results", "mechanical_bloat_scrubber", CompactionMode.KEEP_LAST_N_MESSAGES, "not_a_mode"):
+            with self.subTest(window_mode=window_mode):
+                with self.assertRaisesRegex(ValueError, "window_mode must be one of"):
+                    MessageHistoryCompactionMiddleware.tool_output_sliding_window(keep_recent=1, window_mode=window_mode)
+
+    async def test_tool_output_sliding_window_factory_applies_supported_window_modes(self) -> None:
+        # [Edge Case] The three supported window modes still construct and compact older provider tool results.
+        provider_messages = ({"role": "user", "content": "go"}, *_lookup_pair("openai", "a", "x" * 900), *_lookup_pair("openai", "b", "new-output"))
+        expected = {"truncate_tool_results": "[... truncated 890 characters ...]", "strip_tool_result_bodies": "[older tool result cleared by compaction]", "head_tail_tool_preview": "...[omitted 300 characters]..."}
+        for window_mode, marker in expected.items():
+            for given in (window_mode, CompactionMode(window_mode)):
+                with self.subTest(window_mode=given):
+                    middleware = MessageHistoryCompactionMiddleware.tool_output_sliding_window(keep_recent=1, window_mode=given, max_chars=10)
+                    decision = await middleware.before_model_call(MiddlewareContext(hook=MiddlewareHook.BEFORE_MODEL_CALL, agent_name="agent", message="go", provider_messages=provider_messages))
+                    contents = [m["content"] for m in decision.transform.provider_messages if m["role"] == "tool"]
+                    self.assertIn(marker, contents[0])
+                    self.assertEqual(contents[1], "new-output")
+
+    async def test_legacy_tool_sliding_window_refuses_unsupported_window_mode(self) -> None:
+        # [Hidden Failure] compact_context reports an unsupported window_mode as an error and leaves the history untouched.
+        state = MemoryState((msg("tool", "x" * 900, "tool_result", tool_name="fetch"), msg("tool", "new", "tool_result", tool_name="fetch")))
+        result = await ContextCompactionTool(state).execute(ToolCall("compact_context", {"mode": CompactionMode.TOOL_OUTPUT_SLIDING_WINDOW.value, "keep_recent": 1, "window_mode": "hide_tool_results"}))
+        self.assertEqual(result.status.value, "error")
+        self.assertIn("window_mode must be one of", result.output)
+        self.assertEqual(state.messages()[0].content, "x" * 900)
 
     async def test_legacy_tool_supports_head_tail_preview(self) -> None:
         # [Edge Case] ContextCompactionTool delegates new head/tail preview mode.
