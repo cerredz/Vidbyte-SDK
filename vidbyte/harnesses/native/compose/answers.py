@@ -24,6 +24,7 @@ from vidbyte.lib.constants import native_compose, native_threads
 from vidbyte.lib.dataclasses.native_compose import (
     AnswerT,
     JsonAnswer,
+    PromptSegment,
     StepOutcome,
     ThreadStep,
     ThreadVerdict,
@@ -63,7 +64,7 @@ class JsonAnswers:
         repair = await ComposeTexts.load(ComposePrompt.JSON_REPAIR)
         await PromptFitter.check(ComposeTexts.render(repair, {ComposeField.PROBLEM: ComposeTexts.spliced(""), ComposeField.SCHEMA: schema}), checked, argument=native_compose.COMPOSE_SCHEMA_ARGUMENT, receiver=native_compose.COMPOSE_STEP_ARGUMENT)
         await PromptFitter.check(await JsonAnswers.wrapped((), schema), checked, argument=native_compose.COMPOSE_SCHEMA_ARGUMENT, receiver=native_compose.COMPOSE_STEP_ARGUMENT)
-        message = await JsonAnswers.wrapped(((prompt, False),), schema)
+        message = await JsonAnswers.wrapped(ComposeTexts.fixed(prompt), schema)
         await PromptFitter.check(message, checked, argument=native_compose.COMPOSE_PROMPT_PARAMETER, receiver=native_compose.COMPOSE_STEP_ARGUMENT)
 
         # Ask, and repair on the step's own thread; the step's key is
@@ -71,7 +72,7 @@ class JsonAnswers:
         return await JsonAnswers.ask(checked, message, schema, parse, (checked.api_key,))
 
     @staticmethod
-    async def ask(step: ThreadStep, message: Sequence[tuple[str, bool]], schema: str, parse: Callable[[Mapping[str, object]], AnswerT], keys: Sequence[str]) -> JsonAnswer[AnswerT]:
+    async def ask(step: ThreadStep, message: Sequence[PromptSegment], schema: str, parse: Callable[[Mapping[str, object]], AnswerT], keys: Sequence[str]) -> JsonAnswer[AnswerT]:
         """Send message, a question already wrapped with schema and checked to fit, and repair the answer on its own thread until parse accepts it."""
         # Load the repair prompt first, so a broken prompt file fails
         # before any step runs.
@@ -105,7 +106,7 @@ class JsonAnswers:
         return JsonAnswer(value=None, turns=tuple(turns), problem=last)
 
     @staticmethod
-    async def wrapped(question: Sequence[tuple[str, bool]], schema: str) -> tuple[tuple[str, bool], ...]:
+    async def wrapped(question: Sequence[PromptSegment], schema: str) -> tuple[PromptSegment, ...]:
         """question wrapped in json_answer with schema, the first turn of every structured answer."""
         template = await ComposeTexts.load(ComposePrompt.JSON_ANSWER)
         return ComposeTexts.render(template, {ComposeField.PROMPT: tuple(question), ComposeField.SCHEMA: schema})

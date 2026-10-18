@@ -21,6 +21,7 @@ from vidbyte.harnesses.native.compose.steps import StepRoles, ThreadBinder
 from vidbyte.harnesses.native.compose.texts import ComposeTexts, PromptFitter
 from vidbyte.lib.constants import native_compose, native_threads
 from vidbyte.lib.dataclasses.native_compose import (
+    PromptSegment,
     StageAttempt,
     StagedResult,
     StageOutcome,
@@ -118,7 +119,7 @@ class ThreadStages:
             await PromptFitter.check(frame, stage.step, argument=StepRoles.member(argument, native_compose.COMPOSE_TEMPLATE_ARGUMENT), receiver=StepRoles.member(argument, native_compose.COMPOSE_STEP_ARGUMENT))
 
     @staticmethod
-    def _values(outcomes: Sequence[StageOutcome]) -> dict[ComposeField, str | tuple[tuple[str, bool], ...]]:
+    def _values(outcomes: Sequence[StageOutcome]) -> dict[ComposeField, str | tuple[PromptSegment, ...]]:
         # No values for stage 1, so a doubled brace becomes one; the
         # previous stage's answer, spliced, for every later stage.
         if not outcomes:

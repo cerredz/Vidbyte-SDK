@@ -26,7 +26,12 @@ from vidbyte.harnesses.native.compose.git import ComposeGit
 from vidbyte.harnesses.native.compose.steps import StepRoles, ThreadBinder
 from vidbyte.harnesses.native.compose.texts import ComposeTexts, PromptFitter
 from vidbyte.lib.constants import native_compose, native_threads
-from vidbyte.lib.dataclasses.native_compose import ChainResult, StepOutcome, ThreadStep
+from vidbyte.lib.dataclasses.native_compose import (
+    ChainResult,
+    PromptSegment,
+    StepOutcome,
+    ThreadStep,
+)
 from vidbyte.lib.dataclasses.validation import (
     RecordFieldConverter,
     RecordFieldValidator,
@@ -57,7 +62,7 @@ class ThreadChains:
         gits = await ThreadChains._gits(checked, text, keys)
 
         outcomes: list[StepOutcome] = []
-        frame: tuple[tuple[str, bool], ...] = ((prompt, False),)
+        frame: tuple[PromptSegment, ...] = ComposeTexts.fixed(prompt)
         try:
             for step, git in zip(checked, gits, strict=True):
                 # Snapshot the step's repository just before it runs
@@ -117,7 +122,7 @@ class ThreadChains:
         for index, step in enumerate(steps):
             receiver = StepRoles.item(native_compose.COMPOSE_STEPS_ARGUMENT, index)
             if not index:
-                await PromptFitter.check(((prompt, False),), step, argument=native_compose.COMPOSE_PROMPT_PARAMETER, receiver=receiver)
+                await PromptFitter.check(ComposeTexts.fixed(prompt), step, argument=native_compose.COMPOSE_PROMPT_PARAMETER, receiver=receiver)
                 continue
             for argument, text in ((native_compose.COMPOSE_TEMPLATE_ARGUMENT, ""), (native_compose.COMPOSE_PROMPT_PARAMETER, prompt)):
                 frame = ComposeTexts.render(template, {ComposeField.PROMPT: text, ComposeField.PREVIOUS: ComposeTexts.spliced(""), ComposeField.DIFF: ComposeTexts.spliced("")})
@@ -141,7 +146,7 @@ class ThreadChains:
         return (*(found[os.path.normcase(str(step.workspace))] for step in steps[:-1]), None)
 
     @staticmethod
-    def _values(prompt: str, outcome: StepOutcome) -> dict[ComposeField, str | tuple[tuple[str, bool], ...]]:
+    def _values(prompt: str, outcome: StepOutcome) -> dict[ComposeField, str | tuple[PromptSegment, ...]]:
         # The next step's template values: the caller's prompt as fixed
         # text, and the answer and the diff spliced, the diff empty when
         # none was taken.

@@ -1,12 +1,12 @@
 """FILE: vidbyte/lib/dataclasses/native_compose.py
 
-PURPOSE: Defines the validated records of the composite thread functions: ThreadStep, one bound call of a thread function that is awaited as step(prompt); StepOutcome, what one step call gave; WorkspaceDiff, the change between two workspace snapshots; JsonAnswer, a structured answer with its repair turns; ThreadVerdict, a verifier's decision; ChainResult, VerifyResult, HandoffResult and StagedResult, what the composites return; and StageSpec, StageAttempt and StageOutcome, the parts of a staged run.
-ROLE IN CODEBASE: Built and read by the composites under vidbyte/harnesses/native/compose/ (ThreadStep by the binders in steps.py, the results by chain.py, verify.py, handoff.py, stages.py and answers.py) and re-exported from vidbyte.harnesses.native.compose; callers build StageSpec themselves. The ensemble records live beside these in native_ensemble.py.
+PURPOSE: Defines the validated records of the composite thread functions: ThreadStep, one bound call of a thread function that is awaited as step(prompt); PromptSegment, one fixed or spliced piece of a prompt compose sends; StepOutcome, what one step call gave; WorkspaceDiff, the change between two workspace snapshots; JsonAnswer, a structured answer with its repair turns; ThreadVerdict, a verifier's decision; ChainResult, VerifyResult, HandoffResult and StagedResult, what the composites return; and StageSpec, StageAttempt and StageOutcome, the parts of a staged run.
+ROLE IN CODEBASE: Built and read by the composites under vidbyte/harnesses/native/compose/ (ThreadStep by the binders in steps.py, PromptSegment by texts.py and every module that builds a prompt, the results by chain.py, verify.py, handoff.py, stages.py and answers.py) and re-exported from vidbyte.harnesses.native.compose; callers build StageSpec themselves. The ensemble records live beside these in native_ensemble.py.
 ARCHITECTURE NOTE: Every check lives in __post_init__, so a constructed record is always valid. Each field's own type, size and item count goes through RecordFieldValidator and RecordFieldConverter; only the rules that relate fields to each other (exactly one of result and error, a thread id for a continue step, a run step for a stage) and the callable checks of ThreadStep are written here. ThreadStep checks its key, workspace, model, skills and thread id by building the NativeThreadRequest the nine functions use, with a probe prompt that is never sent, and stores the resolved values. It only stores and awaits an injected invoker (spec D-2): calling a function in its verb's argument order is behavior of the compose layer, which also checks the function against its table of the nine. Flags such as ok and failed_step are properties derived from the stored outcomes, never stored beside them.
 FUNCTION INVENTORY: ThreadStep.__post_init__ is the narrated main function, _checked_config stores the harness's own config record, and __call__ awaits the invoker. StepOutcome.ok, thread_id and text; JsonAnswer.ok, text and thread_id; ChainResult.failed_step; VerifyResult.agreement and failed_verifiers; HandoffResult.failed_step; StageOutcome.ok, text and thread_id; StagedResult.failed_stage. The other records have only __post_init__.
 COMMON MODIFICATION PATTERNS: A new bound adds its constant to vidbyte/lib/constants/native_compose.py and one validator call to its record. A new derived flag is a property, never a stored field.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import from vidbyte.harnesses; vidbyte/lib is the bottom layer, so ThreadStep checks only that function and invoker are callable. 2. Do not drop repr=False from ThreadStep.api_key or ThreadStep.invoker, or compare=False from invoker. 3. Do not dispatch on the verb or guard forks in ThreadStep.__call__; ThreadBinder.invoke owns that. 4. Do not build JsonAnswer[X](...); Python 3.11.0 refuses a subscripted call on this slotted generic record.
-KNOWN EDGE CASES: ThreadStep.workspace is typed Path | str and skills Sequence[str | Path] because the record must see the raw values: a relative path is refused before it is resolved, and a bare string is a sequence of characters, not a list of skills. After __post_init__ workspace is the resolved Path, skills a tuple of resolved Paths and config the harness's own record. A fork step without a thread id is checked as a run, because compose anchors it later. The decoded JSON lists (ThreadVerdict.findings) are stored as tuples.
+KNOWN EDGE CASES: ThreadStep.workspace is typed Path | str and skills Sequence[str | Path] because the record must see the raw values: a relative path is refused before it is resolved, and a bare string is a sequence of characters, not a list of skills. After __post_init__ workspace is the resolved Path, skills a tuple of resolved Paths and config the harness's own record. A fork step without a thread id is checked as a run, because compose anchors it later. The decoded JSON lists (ThreadVerdict.findings) are stored as tuples. PromptSegment checks only its types: a spliced value may be long or hold a NUL until PromptFitter.fit removes and cuts it, so a cap or a pattern would refuse it after I/O began (INV-15, EC-37).
 RELATED DOCS: vidbyte/harnesses/README.md
 TESTS: tests/features/harness_compose/test_harness_compose_binding.py, tests/features/harness_compose/test_harness_compose_answers.py
 """
@@ -134,6 +134,22 @@ class ThreadStep:
         if self.invoker is None:
             raise ConfigurationError("ThreadStep.invoker is None, so this step cannot be awaited by itself; build it with bind_thread or bind_continue, or pass it to a composite.", details={"field": "ThreadStep.invoker"})
         return await self.invoker(self, prompt)
+
+
+@dataclass(frozen=True, slots=True)
+class PromptSegment:
+    """One piece of a prompt compose sends: fixed text, sent whole, or a spliced value, model output or workspace content that PromptFitter.fit scrubs and may cut."""
+
+    text: str
+    spliced: bool
+
+    def __post_init__(self) -> None:
+        # Only the types are checked. A spliced value may be long or
+        # hold a NUL until fit removes and cuts it, so a cap or a
+        # pattern here would refuse it after I/O began (spec INV-15,
+        # EC-37).
+        RecordFieldConverter.require_instance(self.text, "PromptSegment.text", str)
+        RecordFieldValidator.require_bool(self.spliced, "PromptSegment.spliced")
 
 
 @dataclass(frozen=True, slots=True)
@@ -366,4 +382,4 @@ class StagedResult:
         return next((index for index, stage in enumerate(self.stages) if not stage.ok), None)
 
 
-__all__ = ["AnswerT", "ChainResult", "HandoffResult", "JsonAnswer", "StageAttempt", "StageOutcome", "StageSpec", "StagedResult", "StepOutcome", "ThreadStep", "ThreadVerdict", "VerifyResult", "WorkspaceDiff"]
+__all__ = ["AnswerT", "ChainResult", "HandoffResult", "JsonAnswer", "PromptSegment", "StageAttempt", "StageOutcome", "StageSpec", "StagedResult", "StepOutcome", "ThreadStep", "ThreadVerdict", "VerifyResult", "WorkspaceDiff"]

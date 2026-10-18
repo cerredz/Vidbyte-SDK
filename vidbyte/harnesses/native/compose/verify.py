@@ -28,6 +28,7 @@ from vidbyte.harnesses.native.compose.workspace import DisposableWorktree
 from vidbyte.lib.constants import native_compose, native_threads
 from vidbyte.lib.dataclasses.native_compose import (
     JsonAnswer,
+    PromptSegment,
     ThreadStep,
     ThreadVerdict,
     VerifyResult,
@@ -68,7 +69,7 @@ class ThreadVerifiers:
         # second snapshot is the end of its diff, the tree every worktree
         # verifier is filled from, and what the verifiers must leave.
         before = await git.snapshot()
-        record = VerifyResult(writer=await ComposeCalls.call(checked, await PromptFitter.fit(((prompt, False),), checked, keys)))
+        record = VerifyResult(writer=await ComposeCalls.call(checked, await PromptFitter.fit(ComposeTexts.fixed(prompt), checked, keys)))
         kept: list[JsonAnswer[ThreadVerdict] | None] = [None] * len(readers)
         try:
             after = await git.snapshot()
@@ -119,7 +120,7 @@ class ThreadVerifiers:
         return checked, tuple(readers)
 
     @staticmethod
-    async def _question(prompt: str, files: Sequence[str], text: str, schema: str) -> tuple[tuple[str, bool], ...]:
+    async def _question(prompt: str, files: Sequence[str], text: str, schema: str) -> tuple[PromptSegment, ...]:
         # A verifier's first turn: the caller's prompt, the changed files
         # one per line and the diff, wrapped with the verdict schema.
         turn = await ComposeTexts.load(ComposePrompt.VERIFY_TURN)
@@ -127,16 +128,16 @@ class ThreadVerifiers:
         return await JsonAnswers.wrapped(ComposeTexts.render(turn, {ComposeField.PROMPT: prompt, ComposeField.FILES: ComposeTexts.spliced(listing), ComposeField.DIFF: ComposeTexts.spliced(text)}), schema)
 
     @staticmethod
-    async def _fit(writer: ThreadStep, readers: Sequence[ThreadStep], prompt: str, question: Sequence[tuple[str, bool]]) -> None:
+    async def _fit(writer: ThreadStep, readers: Sequence[ThreadStep], prompt: str, question: Sequence[PromptSegment]) -> None:
         # The writer must take the caller's prompt as it is, and every
         # verifier its question with the file list and the diff at their
         # longest truncation notes; only the prompt can make either long.
-        await PromptFitter.check(((prompt, False),), writer, argument=native_compose.COMPOSE_PROMPT_PARAMETER, receiver=native_compose.COMPOSE_WRITER_PARAMETER)
+        await PromptFitter.check(ComposeTexts.fixed(prompt), writer, argument=native_compose.COMPOSE_PROMPT_PARAMETER, receiver=native_compose.COMPOSE_WRITER_PARAMETER)
         for index, reader in enumerate(readers):
             await PromptFitter.check(question, reader, argument=native_compose.COMPOSE_PROMPT_PARAMETER, receiver=StepRoles.item(native_compose.COMPOSE_VERIFIERS_ARGUMENT, index))
 
     @staticmethod
-    async def _review(git: ComposeGit, reader: ThreadStep, trees: tuple[str, str], question: Sequence[tuple[str, bool]], schema: str, keys: Sequence[str], kept: list[JsonAnswer[ThreadVerdict] | None], index: int) -> JsonAnswer[ThreadVerdict]:
+    async def _review(git: ComposeGit, reader: ThreadStep, trees: tuple[str, str], question: Sequence[PromptSegment], schema: str, keys: Sequence[str], kept: list[JsonAnswer[ThreadVerdict] | None], index: int) -> JsonAnswer[ThreadVerdict]:
         # A Grok verifier reviews in place, in its own read-only mode.
         if not StepRoles.needs_worktree(reader):
             answer = await JsonAnswers.ask(reader, question, schema, AnswerDecoders.verdict, keys)

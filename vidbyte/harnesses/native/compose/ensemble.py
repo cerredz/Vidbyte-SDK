@@ -26,7 +26,12 @@ from vidbyte.harnesses.native.compose.steps import StepRoles, ThreadBinder
 from vidbyte.harnesses.native.compose.texts import ComposeTexts, PromptFitter
 from vidbyte.harnesses.native.compose.workspace import DisposableWorktree
 from vidbyte.lib.constants import native_compose, native_threads
-from vidbyte.lib.dataclasses.native_compose import JsonAnswer, StepOutcome, ThreadStep
+from vidbyte.lib.dataclasses.native_compose import (
+    JsonAnswer,
+    PromptSegment,
+    StepOutcome,
+    ThreadStep,
+)
 from vidbyte.lib.dataclasses.native_ensemble import (
     EnsemblePlan,
     EnsembleResult,
@@ -151,7 +156,7 @@ class ThreadEnsembles:
         return planner, tuple(readers), selector, implementer
 
     @staticmethod
-    async def _question(task: str, count: int, schema: str) -> tuple[tuple[str, bool], ...]:
+    async def _question(task: str, count: int, schema: str) -> tuple[PromptSegment, ...]:
         # The planner's first turn: its system text and the task, both
         # asking for exactly count roles, wrapped with the plan schema.
         values = {ComposeField.TASK: task, ComposeField.ROLES: str(count)}
@@ -160,7 +165,7 @@ class ThreadEnsembles:
         return await JsonAnswers.wrapped(ComposeTexts.join((system, turn)), schema)
 
     @staticmethod
-    async def _frame(step: ThreadStep, system: ComposePrompt, turn: ComposePrompt, task: str, texts: Mapping[ComposeField, str] | None) -> tuple[tuple[str, bool], ...]:
+    async def _frame(step: ThreadStep, system: ComposePrompt, turn: ComposePrompt, task: str, texts: Mapping[ComposeField, str] | None) -> tuple[PromptSegment, ...]:
         # A proposer's or the implementer's first turn: its system text,
         # then its turn. The task and the approach range are fixed text;
         # every other field is model output, spliced, and empty when
@@ -168,14 +173,14 @@ class ThreadEnsembles:
         # An unanchored fork opens on the planner's thread with fork_turn.
         fixed = {ComposeField.TASK: task, ComposeField.MINIMUM: str(native_compose.ENSEMBLE_MIN_APPROACHES), ComposeField.MAXIMUM: str(native_compose.ENSEMBLE_MAX_APPROACHES)}
         fields = native_compose.COMPOSE_PROMPT_FIELDS[system].union(native_compose.COMPOSE_PROMPT_FIELDS[turn]).difference(fixed)
-        values: dict[ComposeField, str | tuple[tuple[str, bool], ...]] = {field: ComposeTexts.spliced("" if texts is None else texts[field]) for field in fields}
+        values: dict[ComposeField, str | tuple[PromptSegment, ...]] = {field: ComposeTexts.spliced("" if texts is None else texts[field]) for field in fields}
         values.update(fixed)
         opening = ComposeTexts.render(await ComposeTexts.load(system), values)
         body = ComposeTexts.render(await ComposeTexts.load(turn), values)
         return await ComposeTexts.opening(opening, body, fork=StepRoles.unanchored(step))
 
     @staticmethod
-    async def _fit(planner: ThreadStep, question: Sequence[tuple[str, bool]], proposers: Sequence[ThreadStep], frames: Sequence[Sequence[tuple[str, bool]]], implementer: ThreadStep, brief: Sequence[tuple[str, bool]]) -> None:
+    async def _fit(planner: ThreadStep, question: Sequence[PromptSegment], proposers: Sequence[ThreadStep], frames: Sequence[Sequence[PromptSegment]], implementer: ThreadStep, brief: Sequence[PromptSegment]) -> None:
         # The planner's question, each proposer's first turn and the
         # implementer's, each for its own step; the task is the only
         # caller text in them, so it is the argument a refusal names.
@@ -187,7 +192,7 @@ class ThreadEnsembles:
         await PromptFitter.check(brief, implementer, argument=argument, receiver=StepRoles.member(name, native_compose.COMPOSE_IMPLEMENTER_MEMBER))
 
     @staticmethod
-    async def _plan(git: ComposeGit, tree: str, planner: ThreadStep, question: Sequence[tuple[str, bool]], schema: str, count: int, keys: Sequence[str]) -> JsonAnswer[EnsemblePlan]:
+    async def _plan(git: ComposeGit, tree: str, planner: ThreadStep, question: Sequence[PromptSegment], schema: str, count: int, keys: Sequence[str]) -> JsonAnswer[EnsemblePlan]:
         # A plan must hold exactly count roles, one per proposer.
         parse = functools.partial(AnswerDecoders.plan, roles=count)
 
@@ -210,7 +215,7 @@ class ThreadEnsembles:
             raise
 
     @staticmethod
-    async def _propose(git: ComposeGit, tree: str, proposer: ThreadStep, frame: Sequence[tuple[str, bool]], planner_thread: str, keys: Sequence[str], kept: list[StepOutcome | None], index: int) -> StepOutcome:
+    async def _propose(git: ComposeGit, tree: str, proposer: ThreadStep, frame: Sequence[PromptSegment], planner_thread: str, keys: Sequence[str], kept: list[StepOutcome | None], index: int) -> StepOutcome:
         # An unanchored fork branches the planner's thread.
         step = ThreadBinder.anchor(proposer, planner_thread, NativeThreadVerb.FORK) if StepRoles.unanchored(proposer) else proposer
 

@@ -26,7 +26,7 @@ from vidbyte.harnesses.native.compose.steps import StepRoles, ThreadBinder
 from vidbyte.harnesses.native.compose.texts import ComposeTexts, PromptFitter
 from vidbyte.harnesses.native.compose.workspace import DisposableWorktree
 from vidbyte.lib.constants import native_compose
-from vidbyte.lib.dataclasses.native_compose import JsonAnswer, ThreadStep
+from vidbyte.lib.dataclasses.native_compose import JsonAnswer, PromptSegment, ThreadStep
 from vidbyte.lib.dataclasses.native_ensemble import (
     EnsembleResult,
     EnsembleRound,
@@ -75,7 +75,7 @@ class EnsembleSelector:
                 # answer after its repairs ends the stage.
                 while (target := max(math.ceil(len(offered) / native_compose.ENSEMBLE_NARROWING_FACTOR), 1)) > 1:
                     schema = (await ComposeTexts.load(ComposePrompt.ROUND_SCHEMA)).format_map({ComposeField.TARGET: target})
-                    values: dict[ComposeField, str | tuple[tuple[str, bool], ...]] = {ComposeField.TASK: task, ComposeField.ROUND: str(len(rounds) + 1), ComposeField.SURVIVING: str(len(offered)), ComposeField.TARGET: str(target), ComposeField.CANDIDATES: await EnsembleSelector._blocks(offered, names, texts)}
+                    values: dict[ComposeField, str | tuple[PromptSegment, ...]] = {ComposeField.TASK: task, ComposeField.ROUND: str(len(rounds) + 1), ComposeField.SURVIVING: str(len(offered)), ComposeField.TARGET: str(target), ComposeField.CANDIDATES: await EnsembleSelector._blocks(offered, names, texts)}
                     message = await EnsembleSelector._message(ComposePrompt.SELECTOR_ROUND_TURN, values, schema, first=not rounds, fork=fork)
                     answer = await JsonAnswers.ask(step, message, schema, functools.partial(AnswerDecoders.round, offered=tuple(offered), target=target), keys)
                     rounds.append(answer)
@@ -108,7 +108,7 @@ class EnsembleSelector:
         # and the survivors counted as count, which no real turn
         # exceeds. A round turn is sent only when its target is above 1.
         target = max(math.ceil(count / native_compose.ENSEMBLE_NARROWING_FACTOR), 1)
-        values: dict[ComposeField, str | tuple[tuple[str, bool], ...]] = {ComposeField.TASK: task, ComposeField.ROUND: str(count), ComposeField.SURVIVING: str(count), ComposeField.TARGET: str(target), ComposeField.CANDIDATES: await EnsembleSelector._blocks(range(1, count + 1), {}, {})}
+        values: dict[ComposeField, str | tuple[PromptSegment, ...]] = {ComposeField.TASK: task, ComposeField.ROUND: str(count), ComposeField.SURVIVING: str(count), ComposeField.TARGET: str(target), ComposeField.CANDIDATES: await EnsembleSelector._blocks(range(1, count + 1), {}, {})}
         turns = [(ComposePrompt.SELECTOR_FINAL_TURN, (await ComposeTexts.load(ComposePrompt.SELECTION_SCHEMA)).format_map({}))]
         if target > 1:
             turns.append((ComposePrompt.SELECTOR_ROUND_TURN, (await ComposeTexts.load(ComposePrompt.ROUND_SCHEMA)).format_map({ComposeField.TARGET: target})))
@@ -118,7 +118,7 @@ class EnsembleSelector:
             await PromptFitter.check(message, selector, argument=native_compose.COMPOSE_PROMPT_PARAMETER, receiver=receiver)
 
     @staticmethod
-    async def _blocks(numbers: Iterable[int], names: Mapping[int, str], texts: Mapping[int, str]) -> tuple[tuple[str, bool], ...]:
+    async def _blocks(numbers: Iterable[int], names: Mapping[int, str], texts: Mapping[int, str]) -> tuple[PromptSegment, ...]:
         # One proposal_block per number, with the role's name and the
         # proposal spliced, so keys are scrubbed and a long proposal is
         # cut to its share; a name or text not given is empty, the form
@@ -127,14 +127,14 @@ class EnsembleSelector:
         return ComposeTexts.join([ComposeTexts.render(template, {ComposeField.NUMBER: str(number), ComposeField.ROLE_NAME: ComposeTexts.spliced(names.get(number, "")), ComposeField.TEXT: ComposeTexts.spliced(texts.get(number, ""))}) for number in numbers])
 
     @staticmethod
-    async def _message(turn: ComposePrompt, values: Mapping[ComposeField, str | tuple[tuple[str, bool], ...]], schema: str, *, first: bool, fork: bool) -> tuple[tuple[str, bool], ...]:
+    async def _message(turn: ComposePrompt, values: Mapping[ComposeField, str | tuple[PromptSegment, ...]], schema: str, *, first: bool, fork: bool) -> tuple[PromptSegment, ...]:
         # One selector turn wrapped with its schema; the first turn
         # carries selector_system before it, or fork_turn around both
         # for an unanchored fork.
         message = ComposeTexts.render(await ComposeTexts.load(turn), values)
         if first:
             system = await ComposeTexts.load(ComposePrompt.SELECTOR_SYSTEM)
-            message = await ComposeTexts.opening(((system, False),), message, fork=fork)
+            message = await ComposeTexts.opening(ComposeTexts.fixed(system), message, fork=fork)
         return await JsonAnswers.wrapped(message, schema)
 
 
