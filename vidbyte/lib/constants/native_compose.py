@@ -162,6 +162,13 @@ COMPOSE_PROMPT_SEPARATOR = "\n\n"
 COMPOSE_PROBE_PROMPT = "…"
 COMPOSE_REDACTED_KEY = "[redacted]"
 COMPOSE_NUL = "\x00"
+# Spliced text goes through UTF-16 with surrogatepass and back with
+# replace, so two halves of a surrogate pair split apart are joined
+# and a lone half becomes U+FFFD; fixed text that this would change
+# is refused instead, because it is never altered (INV-5, INV-18).
+COMPOSE_SURROGATE_CODEC = "utf-16-le"
+COMPOSE_SURROGATE_ENCODE_ERRORS = "surrogatepass"
+COMPOSE_SURROGATE_DECODE_ERRORS = "replace"
 # Counting a prompt as the Windows command line does (EC-36): a double
 # quote is sent as a backslash and a quote and doubles the backslashes
 # right before it, and a character past U+FFFF takes two UTF-16 units.
@@ -311,6 +318,7 @@ COMPOSE_WORKSPACE_RULE = "{argument} has another workspace than {reference}; eve
 COMPOSE_PROMPT_TOO_LONG = "{argument} is too long for {receiver}: with the fixed prompt text, the longest prompt that step can receive needs {needed} {units}, and it takes at most {cap}."
 COMPOSE_CHARACTER_UNITS = "characters"
 COMPOSE_COMMAND_LINE_UNITS = "UTF-16 command-line units"
+COMPOSE_UNENCODABLE_TEXT = "{argument} holds a surrogate code point, which cannot be encoded for any step; replace it with the character it is half of, or remove it."
 COMPOSE_ALIAS_HARNESS_RULE = "{argument} must be a step on {expected}; got a step on {actual}."
 COMPOSE_FIRST_STAGE_RULE = "{argument} must not use {{previous}}: the first stage has no earlier answer to splice."
 COMPOSE_NOT_CALLABLE = "{argument} must be callable; got a value of type {type_name}."
