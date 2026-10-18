@@ -342,11 +342,13 @@ def test_hosts_errors_tools_and_records_of_the_rejected_design_are_gone() -> Non
 
 
 def test_no_module_under_vidbyte_imports_claude_agent_sdk() -> None:
-    # INV-19 / AC-20 / NG-3: `git grep claude_agent_sdk -- vidbyte` is
-    # empty.
-    found = git("grep", "-n", "claude_agent_sdk", "--", "vidbyte")
-    assert found.returncode in (0, 1), found.stderr
-    assert found.stdout.strip() == ""
+    # INV-19 / AC-20 / NG-3: no file under vidbyte/ names
+    # claude_agent_sdk. The package folder is walked rather than `git
+    # grep`ped, so the check also runs outside a git checkout, such as an
+    # sdist (PR #1044 review L15).
+    package = REPO_ROOT / "vidbyte"
+    found = [path.relative_to(REPO_ROOT).as_posix() for path in sorted(package.rglob("*")) if path.is_file() and "__pycache__" not in path.parts and b"claude_agent_sdk" in path.read_bytes()]
+    assert found == [], f"INV-19: these files name claude_agent_sdk: {found}"
 
 
 def test_branch_changes_only_the_files_the_spec_lists() -> None:
