@@ -27,7 +27,10 @@ from vidbyte.harnesses.native.compose.steps import StepRoles, ThreadBinder
 from vidbyte.harnesses.native.compose.texts import ComposeTexts, PromptFitter
 from vidbyte.lib.constants import native_compose, native_threads
 from vidbyte.lib.dataclasses.native_compose import ChainResult, StepOutcome, ThreadStep
-from vidbyte.lib.dataclasses.validation import RecordFieldValidator
+from vidbyte.lib.dataclasses.validation import (
+    RecordFieldConverter,
+    RecordFieldValidator,
+)
 from vidbyte.lib.enums.native_compose import ComposeField, ComposePrompt
 from vidbyte.lib.enums.native_threads import NativeHarness
 from vidbyte.lib.errors import ThreadComposeError
@@ -87,7 +90,7 @@ class ThreadChains:
         # Two to twenty-five steps, each one of the nine functions with
         # its own arguments; a fork must name the thread it forks,
         # because a chain has no thread to give it.
-        items = StepRoles.counted(steps, native_compose.COMPOSE_STEPS_ARGUMENT, minimum=native_compose.COMPOSE_MIN_CHAIN_STEPS, maximum=native_compose.COMPOSE_MAX_STEPS)
+        items = RecordFieldConverter.to_tuple(steps, native_compose.COMPOSE_STEPS_ARGUMENT, item_type=object, min_items=native_compose.COMPOSE_MIN_CHAIN_STEPS, max_items=native_compose.COMPOSE_MAX_STEPS)
         checked: list[ThreadStep] = []
         for index, item in enumerate(items):
             argument = StepRoles.item(native_compose.COMPOSE_STEPS_ARGUMENT, index)

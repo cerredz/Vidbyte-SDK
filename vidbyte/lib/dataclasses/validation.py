@@ -3,7 +3,7 @@
 PURPOSE: Defines RecordFieldValidator, the one canonical field validator for validated records (text, optional text, Windows command-line length, str.format templates, positive finite numbers, bounded ints, strict bools, enum members, argv tuples and absolute directories), and RecordFieldConverter, the canonical conversions and checks records apply beside it (tuples, read-only mappings, enum members, paths and plain instance checks).
 ROLE IN CODEBASE: Called from the __post_init__ of the records in vidbyte/lib/dataclasses/native_threads.py, native_compose.py, native_ensemble.py and process.py, by the composites under vidbyte/harnesses/native/compose/ to check caller templates and prompt files and to measure prompts, and, through accepts_text, by the output readers GrokWire, OpencodeWire, MuseWire and MuseExecOutput under vidbyte/harnesses/native/ to check a vendor's thread id.
 ARCHITECTURE NOTE: Two classes of static methods, each taking the checked value first and the field name second, returning the checked or converted value or raising ConfigurationError. The checked variable is always named value, so the bool guards here are the single owner lint rules C002, C006, C007 and C008 point at. Messages name the field and the expected type or range, and quote a value only when it is a short, non-secret scalar or text. Every ConfigurationError also carries details["field"], so a caller can name the bad argument without reading the message text.
-FUNCTION INVENTORY: require_text, accepts_text (require_text's rule as a bool), require_optional_text, require_command_line_units (a value's quoted Windows command-line length must fit), command_line_units (that length, in UTF-16 code units), require_template (a str.format template of bare names from an allowed set, with the required names), require_number, require_int, require_bool, require_enum, require_argv, require_directory; _text_problem words what a text value fails, and _received renders the received value safely for a message. RecordFieldConverter: to_tuple, to_mapping, to_enum (a member or its exact value string), to_path (a str or os.PathLike, unchecked), require_instance.
+FUNCTION INVENTORY: require_text, accepts_text (require_text's rule as a bool), require_optional_text, require_command_line_units (a value's quoted Windows command-line length must fit), command_line_units (that length, in UTF-16 code units), require_template (a str.format template of bare names from an allowed set, with the required names), require_number, require_int, require_bool, require_enum, require_argv, require_directory; _text_problem words what a text value fails, and _received renders the received value safely for a message. RecordFieldConverter: to_tuple (with optional item-count bounds), to_mapping, to_enum (a member or its exact value string), to_path (a str or os.PathLike, unchecked), require_instance.
 COMMON MODIFICATION PATTERNS: Add a new check as one more static method with value first and field_name second, and call it from a record's __post_init__; never copy a check into a record.
 WHAT NOT TO DO IN THIS FILE: 1. Do not convert values silently; to_path only wraps a path in Path and never checks or resolves it. 2. Do not quote mapping values or long text in a message; they can hold secrets. 3. Do not import from a layer above vidbyte.lib.
 KNOWN EDGE CASES: bool is an int subclass, so every numeric check refuses bool first. A field whose last name segment reads as a credential (password, token, secret, api_key) is never quoted, whatever its length. require_argv refuses a list on purpose, because argv fields must be immutable tuples. require_directory must run on the path as given, before Path.resolve(), or a relative path would pass.
@@ -171,12 +171,15 @@ class RecordFieldConverter:
     """The canonical conversions records apply: tuple fields to tuples, mapping fields to read-only copies, enum values to members, paths to Path, and plain instance checks."""
 
     @staticmethod
-    def to_tuple(value: Any, field_name: str, *, item_type: type[Any] | tuple[type[Any], ...], max_items: int | None = None) -> tuple[Any, ...]:
+    def to_tuple(value: Any, field_name: str, *, item_type: type[Any] | tuple[type[Any], ...], min_items: int | None = None, max_items: int | None = None) -> tuple[Any, ...]:
         # A tuple or list whose items are all item_type
         # instances, stored as a tuple; a str is refused because
-        # it is not a list of items.
+        # it is not a list of items. min_items and max_items, when
+        # given, bound how many items it holds.
         if not isinstance(value, (tuple, list)) or not all(isinstance(item, item_type) and not isinstance(item, bool) for item in value):
             raise ConfigurationError(f"{field_name} must be a tuple of {RecordFieldConverter._type_names(item_type)} items; got a value of type {type(value).__name__}.", details={"field": field_name})
+        if min_items is not None and len(value) < min_items:
+            raise ConfigurationError(f"{field_name} must hold {min_items} or more items; got {len(value)}.", details={"field": field_name})
         if max_items is not None and len(value) > max_items:
             raise ConfigurationError(f"{field_name} may hold at most {max_items} items; got {len(value)}.", details={"field": field_name})
         return tuple(value)

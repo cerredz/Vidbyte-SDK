@@ -2,7 +2,7 @@
 
 PURPOSE: Defines the validated records of the composite thread functions: ThreadStep, one bound call of a thread function that is awaited as step(prompt); StepOutcome, what one step call gave; WorkspaceDiff, the change between two workspace snapshots; JsonAnswer, a structured answer with its repair turns; ThreadVerdict, a verifier's decision; ChainResult, VerifyResult, HandoffResult and StagedResult, what the composites return; and StageSpec, StageAttempt and StageOutcome, the parts of a staged run.
 ROLE IN CODEBASE: Built and read by the composites under vidbyte/harnesses/native/compose/ (ThreadStep by the binders in steps.py, the results by chain.py, verify.py, handoff.py, stages.py and answers.py) and re-exported from vidbyte.harnesses.native.compose; callers build StageSpec themselves. The ensemble records live beside these in native_ensemble.py.
-ARCHITECTURE NOTE: Every check lives in __post_init__ and goes through RecordFieldValidator and RecordFieldConverter, so a constructed record is always valid. ThreadStep checks its key, workspace, model, skills and thread id by building the NativeThreadRequest the nine functions use, with a probe prompt that is never sent, and stores the resolved values. It only stores and awaits an injected invoker (spec D-2): calling a function in its verb's argument order is behavior of the compose layer, which also checks the function against its table of the nine. Flags such as ok and failed_step are properties derived from the stored outcomes, never stored beside them.
+ARCHITECTURE NOTE: Every check lives in __post_init__, so a constructed record is always valid. Each field's own type, size and item count goes through RecordFieldValidator and RecordFieldConverter; only the rules that relate fields to each other (exactly one of result and error, a thread id for a continue step, a run step for a stage) and the callable checks of ThreadStep are written here. ThreadStep checks its key, workspace, model, skills and thread id by building the NativeThreadRequest the nine functions use, with a probe prompt that is never sent, and stores the resolved values. It only stores and awaits an injected invoker (spec D-2): calling a function in its verb's argument order is behavior of the compose layer, which also checks the function against its table of the nine. Flags such as ok and failed_step are properties derived from the stored outcomes, never stored beside them.
 FUNCTION INVENTORY: ThreadStep.__post_init__ is the narrated main function, _checked_config stores the harness's own config record, and __call__ awaits the invoker. StepOutcome.ok, thread_id and text; JsonAnswer.ok, text and thread_id; ChainResult.failed_step; VerifyResult.agreement and failed_verifiers; HandoffResult.failed_step; StageOutcome.ok, text and thread_id; StagedResult.failed_stage. The other records have only __post_init__.
 COMMON MODIFICATION PATTERNS: A new bound adds its constant to vidbyte/lib/constants/native_compose.py and one validator call to its record. A new derived flag is a property, never a stored field.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import from vidbyte.harnesses; vidbyte/lib is the bottom layer, so ThreadStep checks only that function and invoker are callable. 2. Do not drop repr=False from ThreadStep.api_key or ThreadStep.invoker, or compare=False from invoker. 3. Do not dispatch on the verb or guard forks in ThreadStep.__call__; ThreadBinder.invoke owns that. 4. Do not build JsonAnswer[X](...); Python 3.11.0 refuses a subscripted call on this slotted generic record.
@@ -27,6 +27,9 @@ from vidbyte.lib.constants.native_compose import (
     COMPOSE_MAX_STAGES,
     COMPOSE_MAX_STEPS,
     COMPOSE_MAX_VERIFIERS,
+    COMPOSE_MIN_CHAIN_OUTCOMES,
+    COMPOSE_MIN_JSON_TURNS,
+    COMPOSE_MIN_STAGES,
     COMPOSE_PROBE_PROMPT,
     COMPOSE_PROBLEM_MAX_CHARS,
     COMPOSE_VERDICT_MAX_FINDINGS,
@@ -143,8 +146,8 @@ class WorkspaceDiff:
 
     def __post_init__(self) -> None:
         files = RecordFieldConverter.to_tuple(self.files, "WorkspaceDiff.files", item_type=str, max_items=COMPOSE_DIFF_MAX_FILES)
-        if not all(item.strip() for item in files):
-            raise ConfigurationError("WorkspaceDiff.files must hold non-blank paths.", details={"field": "WorkspaceDiff.files"})
+        for name in files:
+            RecordFieldValidator.require_text(name, "WorkspaceDiff.files", max_chars=COMPOSE_DIFF_MAX_CHARS)
         object.__setattr__(self, "files", files)
         RecordFieldValidator.require_text(self.text, "WorkspaceDiff.text", max_chars=COMPOSE_DIFF_MAX_CHARS, allow_blank=True)
         RecordFieldValidator.require_bool(self.truncated, "WorkspaceDiff.truncated")
@@ -192,9 +195,7 @@ class JsonAnswer(Generic[AnswerT]):
     problem: str | None = None
 
     def __post_init__(self) -> None:
-        turns = RecordFieldConverter.to_tuple(self.turns, "JsonAnswer.turns", item_type=StepOutcome, max_items=1 + COMPOSE_JSON_REPAIR_TURNS)
-        if not turns:
-            raise ConfigurationError("JsonAnswer.turns must hold at least one turn.", details={"field": "JsonAnswer.turns"})
+        turns = RecordFieldConverter.to_tuple(self.turns, "JsonAnswer.turns", item_type=StepOutcome, min_items=COMPOSE_MIN_JSON_TURNS, max_items=1 + COMPOSE_JSON_REPAIR_TURNS)
         object.__setattr__(self, "turns", turns)
         RecordFieldValidator.require_optional_text(self.problem, "JsonAnswer.problem", max_chars=COMPOSE_PROBLEM_MAX_CHARS)
 
@@ -238,9 +239,7 @@ class ChainResult:
     outcomes: tuple[StepOutcome, ...]
 
     def __post_init__(self) -> None:
-        outcomes = RecordFieldConverter.to_tuple(self.outcomes, "ChainResult.outcomes", item_type=StepOutcome, max_items=COMPOSE_MAX_STEPS)
-        if not outcomes:
-            raise ConfigurationError("ChainResult.outcomes must hold at least one outcome.", details={"field": "ChainResult.outcomes"})
+        outcomes = RecordFieldConverter.to_tuple(self.outcomes, "ChainResult.outcomes", item_type=StepOutcome, min_items=COMPOSE_MIN_CHAIN_OUTCOMES, max_items=COMPOSE_MAX_STEPS)
         object.__setattr__(self, "outcomes", outcomes)
 
     @property
@@ -358,9 +357,7 @@ class StagedResult:
     stages: tuple[StageOutcome, ...]
 
     def __post_init__(self) -> None:
-        stages = RecordFieldConverter.to_tuple(self.stages, "StagedResult.stages", item_type=StageOutcome, max_items=COMPOSE_MAX_STAGES)
-        if not stages:
-            raise ConfigurationError("StagedResult.stages must hold at least one stage.", details={"field": "StagedResult.stages"})
+        stages = RecordFieldConverter.to_tuple(self.stages, "StagedResult.stages", item_type=StageOutcome, min_items=COMPOSE_MIN_STAGES, max_items=COMPOSE_MAX_STAGES)
         object.__setattr__(self, "stages", stages)
 
     @property

@@ -32,6 +32,9 @@ from vidbyte.lib.enums.native_threads import GrokPermissionMode, NativeThreadPro
 # named beside its cap, even when it is 0 or 1 (lint A007).
 COMPOSE_MIN_CHAIN_STEPS = 2
 COMPOSE_MAX_STEPS = 25
+# A chain stops at its first failed step, so its result holds at
+# least the first step's outcome.
+COMPOSE_MIN_CHAIN_OUTCOMES = 1
 COMPOSE_MIN_VERIFIERS = 1
 COMPOSE_MAX_VERIFIERS = 10
 COMPOSE_MIN_STAGES = 1
@@ -57,6 +60,9 @@ ENSEMBLE_ROLE_NAME_MAX_CHARS = NATIVE_NAME_MAX_CHARS
 COMPOSE_ANSWER_TEXT_MAX_CHARS = NATIVE_RESULT_TEXT_MAX_CHARS
 COMPOSE_VERDICT_MAX_FINDINGS = 50
 COMPOSE_JSON_REPAIR_TURNS = 2
+# A structured answer holds its first turn, then up to
+# COMPOSE_JSON_REPAIR_TURNS repairs.
+COMPOSE_MIN_JSON_TURNS = 1
 COMPOSE_PROBLEM_MAX_CHARS = 2000
 COMPOSE_DIFF_MAX_CHARS = NATIVE_RESULT_TEXT_MAX_CHARS
 COMPOSE_DIFF_MAX_FILES = 2000
@@ -296,7 +302,6 @@ COMPOSE_BIND_CONTINUE_RULE = "function must be continue_grok_thread, continue_op
 COMPOSE_UNKNOWN_STEP_FUNCTION = "{argument} holds a function that is not one of the nine thread functions; build the step with bind_thread or bind_continue."
 COMPOSE_STEP_MISMATCH = "{argument} says harness {harness} and verb {verb}, but its function is the {function_verb} function of {function_harness}; build the step with bind_thread or bind_continue."
 COMPOSE_UNANCHORED_FORK_CALL = "thread_id is missing: this fork step has no thread to fork, so it cannot be called by itself. Bind it with bind_continue and a thread id, or give it to run_ensemble, which forks the planner's thread."
-COMPOSE_COUNT_RULE = "{argument} must hold {minimum} to {maximum} items; got {count}."
 COMPOSE_UNANCHORED_FORK_RULE = "{argument} is a fork step with no thread id, and there is no thread to fork here; bind it with bind_continue and a thread id."
 COMPOSE_FORK_ROLE_RULE = "{argument} is a fork step with no thread id; run_ensemble forks only a Grok planner's thread, for a Grok step on the planner's workspace, so bind a run step or use a Grok planner."
 COMPOSE_FROM_THREAD_RULE = "{argument} must continue or fork an existing thread; a run step starts a new thread with nothing to summarize. Bind it with bind_continue and a thread id."

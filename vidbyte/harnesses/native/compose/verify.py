@@ -32,7 +32,10 @@ from vidbyte.lib.dataclasses.native_compose import (
     ThreadVerdict,
     VerifyResult,
 )
-from vidbyte.lib.dataclasses.validation import RecordFieldValidator
+from vidbyte.lib.dataclasses.validation import (
+    RecordFieldConverter,
+    RecordFieldValidator,
+)
 from vidbyte.lib.enums.native_compose import ComposeField, ComposePrompt
 from vidbyte.lib.enums.native_threads import NativeHarness
 from vidbyte.lib.errors import ThreadComposeError
@@ -104,7 +107,7 @@ class ThreadVerifiers:
         # in the writer's workspace, where the change it reviews is.
         checked = ThreadBinder.require_step(writer, native_compose.COMPOSE_WRITER_PARAMETER)
         StepRoles.anchored(checked, native_compose.COMPOSE_WRITER_PARAMETER)
-        items = StepRoles.counted(verifiers, native_compose.COMPOSE_VERIFIERS_ARGUMENT, minimum=native_compose.COMPOSE_MIN_VERIFIERS, maximum=native_compose.COMPOSE_MAX_VERIFIERS)
+        items = RecordFieldConverter.to_tuple(verifiers, native_compose.COMPOSE_VERIFIERS_ARGUMENT, item_type=object, min_items=native_compose.COMPOSE_MIN_VERIFIERS, max_items=native_compose.COMPOSE_MAX_VERIFIERS)
         readers: list[ThreadStep] = []
         for index, item in enumerate(items):
             argument = StepRoles.item(native_compose.COMPOSE_VERIFIERS_ARGUMENT, index)

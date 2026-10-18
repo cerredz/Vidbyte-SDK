@@ -2,7 +2,7 @@
 
 PURPOSE: Defines the validated records of run_ensemble: EnsembleRoster, the four caller-chosen roles; EnsembleRole, EnsemblePlan, EnsembleRound and EnsembleSelection, the structured answers of the planner and the selector; and EnsembleResult, what the run returns as far as it got.
 ROLE IN CODEBASE: EnsembleRoster is built by the caller and read by ThreadEnsembles in vidbyte/harnesses/native/compose/ensemble.py; AnswerDecoders in answers.py builds the answer records from decoded JSON, and EnsembleSelector in selection.py and ThreadEnsembles build EnsembleResult. All six are re-exported from vidbyte.harnesses.native.compose.
-ARCHITECTURE NOTE: Every check lives in __post_init__ and goes through RecordFieldValidator and RecordFieldConverter, with bounds from vidbyte/lib/constants/native_compose.py, so an oversized or malformed model answer is a refusal (and so a repair turn), never a record. The rules that relate records to each other (exactly one role per proposer, numbers that were offered, fork roles, one workspace) are compose policy in AnswerDecoders and StepRoles, not record validation.
+ARCHITECTURE NOTE: Every check lives in __post_init__, with bounds from vidbyte/lib/constants/native_compose.py, so an oversized or malformed model answer is a refusal (and so a repair turn), never a record. Each field's own type, size and item count goes through RecordFieldValidator and RecordFieldConverter; only the rules that relate a field's items to each other (every role its own name, different kept numbers of at least ENSEMBLE_MIN_PROPOSAL_NUMBER) are written here. The rules that relate records to each other (exactly one role per proposer, numbers that were offered, fork roles, one workspace) are compose policy in AnswerDecoders and StepRoles, not record validation.
 FUNCTION INVENTORY: EnsembleResult.failed_stage; the other records have only __post_init__.
 COMMON MODIFICATION PATTERNS: A new member of a planner or selector answer is one field here, one validator call, and the matching text in the schema prompt file; the decoders read member names from dataclasses.fields, so they follow without change.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import from vidbyte.harnesses; vidbyte/lib is the bottom layer. 2. Do not check offered numbers or the role count here; they depend on the run, which only compose knows. 3. Do not store a failed-stage flag; it is derived from the stored answers.
@@ -48,9 +48,7 @@ class EnsembleRoster:
 
     def __post_init__(self) -> None:
         RecordFieldConverter.require_instance(self.planner, "EnsembleRoster.planner", ThreadStep)
-        proposers = RecordFieldConverter.to_tuple(self.proposers, "EnsembleRoster.proposers", item_type=ThreadStep, max_items=ENSEMBLE_MAX_PROPOSERS)
-        if len(proposers) < ENSEMBLE_MIN_PROPOSERS:
-            raise ConfigurationError(f"EnsembleRoster.proposers must hold {ENSEMBLE_MIN_PROPOSERS} to {ENSEMBLE_MAX_PROPOSERS} steps; got {len(proposers)}.", details={"field": "EnsembleRoster.proposers"})
+        proposers = RecordFieldConverter.to_tuple(self.proposers, "EnsembleRoster.proposers", item_type=ThreadStep, min_items=ENSEMBLE_MIN_PROPOSERS, max_items=ENSEMBLE_MAX_PROPOSERS)
         object.__setattr__(self, "proposers", proposers)
         RecordFieldConverter.require_instance(self.selector, "EnsembleRoster.selector", ThreadStep)
         RecordFieldConverter.require_instance(self.implementer, "EnsembleRoster.implementer", ThreadStep)
@@ -91,9 +89,7 @@ class EnsemblePlan:
         RecordFieldValidator.require_text(self.task_analysis, "EnsemblePlan.task_analysis", max_chars=COMPOSE_ANSWER_TEXT_MAX_CHARS)
         RecordFieldValidator.require_text(self.roster_strategy, "EnsemblePlan.roster_strategy", max_chars=COMPOSE_ANSWER_TEXT_MAX_CHARS)
         RecordFieldValidator.require_text(self.coverage_summary, "EnsemblePlan.coverage_summary", max_chars=COMPOSE_ANSWER_TEXT_MAX_CHARS)
-        roles = RecordFieldConverter.to_tuple(self.roles, "EnsemblePlan.roles", item_type=EnsembleRole, max_items=ENSEMBLE_MAX_PROPOSERS)
-        if not roles:
-            raise ConfigurationError(f"EnsemblePlan.roles must hold {ENSEMBLE_MIN_PROPOSERS} to {ENSEMBLE_MAX_PROPOSERS} roles; got none.", details={"field": "EnsemblePlan.roles"})
+        roles = RecordFieldConverter.to_tuple(self.roles, "EnsemblePlan.roles", item_type=EnsembleRole, min_items=ENSEMBLE_MIN_PROPOSERS, max_items=ENSEMBLE_MAX_PROPOSERS)
         if len({role.name for role in roles}) != len(roles):
             raise ConfigurationError("EnsemblePlan.roles must give every role its own name.", details={"field": "EnsemblePlan.roles"})
         object.__setattr__(self, "roles", roles)
@@ -107,9 +103,9 @@ class EnsembleRound:
     summary: str
 
     def __post_init__(self) -> None:
-        kept = RecordFieldConverter.to_tuple(self.kept, "EnsembleRound.kept", item_type=int, max_items=ENSEMBLE_MAX_PROPOSERS)
-        if not kept or len(set(kept)) != len(kept) or min(kept) < ENSEMBLE_MIN_PROPOSAL_NUMBER:
-            raise ConfigurationError(f"EnsembleRound.kept must hold {ENSEMBLE_MIN_PROPOSERS} to {ENSEMBLE_MAX_PROPOSERS} different proposal numbers of at least {ENSEMBLE_MIN_PROPOSAL_NUMBER}.", details={"field": "EnsembleRound.kept"})
+        kept = RecordFieldConverter.to_tuple(self.kept, "EnsembleRound.kept", item_type=int, min_items=ENSEMBLE_MIN_PROPOSERS, max_items=ENSEMBLE_MAX_PROPOSERS)
+        if len(set(kept)) != len(kept) or min(kept) < ENSEMBLE_MIN_PROPOSAL_NUMBER:
+            raise ConfigurationError(f"EnsembleRound.kept must hold different proposal numbers of at least {ENSEMBLE_MIN_PROPOSAL_NUMBER}.", details={"field": "EnsembleRound.kept"})
         object.__setattr__(self, "kept", kept)
         RecordFieldValidator.require_text(self.summary, "EnsembleRound.summary", max_chars=COMPOSE_ANSWER_TEXT_MAX_CHARS)
 
