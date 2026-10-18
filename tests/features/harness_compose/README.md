@@ -23,9 +23,11 @@ This folder tests `vidbyte.harnesses.native.compose`, the composites over the ni
 - `test_harness_compose_git.py` checks git availability, repository checks, git hygiene and git failures.
 - `test_harness_compose_workspace.py` checks `capture_diff` and `in_worktree`.
 - `test_harness_compose_concurrency.py` checks cancellation, a failed worktree add that stops its siblings, and Grok serialization.
+- `test_harness_compose_removal.py` checks a reader worktree that cannot be removed: the record keeps every finished answer, and a running sibling is stopped first.
 - `test_harness_compose_keys.py` checks that no bound key leaks into prompts, errors (refusals of caller text that holds a key included), reprs or git.
 
 ## Logs
 
 - 2026-10-17 - Created at S2 of the spec pipeline for `docs/spec/native-thread-compose/spec.md` r3, before the implementation existed; every test is red until compose lands (`docs/spec/native-thread-compose/test-plan.md`). The base pack's stand-in gained the scenario fields `label`, `answers`, `replies`, `observe_files` and `write_files`, and the `marker` program, all read with defaults so the base pack runs unchanged.
 - 2026-10-18 - After the S4 review (`docs/spec/native-thread-compose/review.md`): the comment lines were rewrapped to 72 columns (R-11), the EC-19 fan-out tests were added (R-16), with a `reference-transaction` hook as the outside fault, and the caller-text refusal cases were added with a 16-character key (R-17). The two-failed-adds case is red until R-10 lands, and the caller-text cases until R-3 lands.
+- 2026-10-18 - After S5 repair 1, each confirmed fix that only scratch probes had proven got a test that fails on S3's code (`e1bf20d8`) and passes on the repair (`docs/spec/native-thread-compose/test-plan.md`, Coverage added after S5 repair 1): R-8 (a reader worktree that cannot be removed).
