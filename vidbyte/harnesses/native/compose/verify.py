@@ -3,10 +3,10 @@
 PURPOSE: The verify composite and its three trio aliases: ThreadVerifiers.verify_with runs one writer alone, then has one to ten verifiers review the change it made at the same time, each answering a structured verdict, and fails the call when a verifier changed the workspace; ThreadVerifyTrio is one generated alias such as run_opencode_verify_with_grok_and_muse, and ThreadVerifyTrios holds the three.
 ROLE IN CODEBASE: verify_with and the three run_<w>_verify_with_<x>_and_<y> aliases are bound as public names in vidbyte/harnesses/native/compose/__init__.py. It builds on the plumbing modules: steps.py for the step and reader rules, git.py for the snapshots and the diff, workspace.py for the reader worktrees and the backstop, answers.py for the verdicts and calls.py for the calls and the fan-out.
 ARCHITECTURE NOTE: One writer, then readers (spec INV-9 to INV-12, D-20): the writer runs alone between two snapshots, and the second snapshot serves three uses, the end of the writer's diff, the tree each worktree verifier is filled from, and the start of the backstop. A Grok verifier reviews in place in its own plan or default permission mode; an opencode or Muse verifier reviews in a disposable worktree whose index is the before-writer snapshot, so git there shows the writer's change. The verifiers run concurrently through ComposeCalls.fan_out, so a step failure is recorded while any other exception stops them all. The aliases are generated as in chain.py (INV-24, D-18). The module holds no literals (base spec INV-15).
-FUNCTION INVENTORY: ThreadVerifiers.verify_with is the narrated main function; _steps checks the writer and the verifiers; _question builds a verifier's first turn; _fit checks every prompt against its step; _review runs one verifier in place or in its worktree. ThreadVerifyTrio.__init__ builds an alias's signature and __call__ runs the alias; ThreadVerifyTrios holds the three aliases.
+FUNCTION INVENTORY: ThreadVerifiers.verify_with is the narrated main function; _steps checks the writer and the verifiers; _question builds a verifier's first turn; _fit checks every prompt against its step; _review runs one verifier in place or in its worktree and keeps its answer as it arrives; _kept builds the record a compose failure carries. ThreadVerifyTrio.__init__ builds an alias's signature and __call__ runs the alias; ThreadVerifyTrios holds the three aliases.
 COMMON MODIFICATION PATTERNS: A new fact for verifiers is one field in verify_turn.md and COMPOSE_PROMPT_FIELDS, filled in _question, spliced when it holds model output or workspace content. A new verdict member is a ThreadVerdict field, a line in verdict_schema.md and nothing here.
 WHAT NOT TO DO IN THIS FILE: 1. Do not start a verifier before the writer's after-snapshot. 2. Do not run an opencode or Muse verifier in place, or change a Grok verifier's permission mode; refuse it instead (D-21). 3. Do not send verifiers the writer's answer; they review its change. 4. Do not skip the backstop after a verifier failed; skip it only on a cancellation or a defect.
-KNOWN EDGE CASES: A failed writer gets no verifier, but its diff is taken (EC-52). A repository with no commit allows Grok verifiers and refuses worktree verifiers with WORKTREE_FAILED before any step (EC-5). A writer that leaves an untracked repository with no commit fails the after-snapshot's add, carrying the writer's outcome (EC-73). Two verifiers on one workspace that are both Grok take turns (INV-13).
+KNOWN EDGE CASES: A failed writer gets no verifier, but its diff is taken (EC-52). A repository with no commit allows Grok verifiers and refuses worktree verifiers with WORKTREE_FAILED before any step (EC-5). A writer that leaves an untracked repository with no commit fails the after-snapshot's add, carrying the writer's outcome (EC-73). Two verifiers on one workspace that are both Grok take turns (INV-13). A worktree that cannot be removed after every verifier answered raises WORKTREE_FAILED whose result holds the writer and every verdict; when the failure stopped a verifier before it answered, the result holds the writer only, because the positional verdicts cannot show the gap (EC-16).
 RELATED DOCS: vidbyte/harnesses/README.md
 TESTS: tests/features/harness_compose/test_harness_compose_verify.py, tests/features/harness_compose/test_harness_compose_git.py, tests/features/harness_compose/test_harness_compose_concurrency.py, tests/features/harness_compose/test_harness_compose_keys.py
 """
@@ -66,6 +66,7 @@ class ThreadVerifiers:
         # verifier is filled from, and what the verifiers must leave.
         before = await git.snapshot()
         record = VerifyResult(writer=await ComposeCalls.call(checked, await PromptFitter.fit(((prompt, False),), checked, keys)))
+        kept: list[JsonAnswer[ThreadVerdict] | None] = [None] * len(readers)
         try:
             after = await git.snapshot()
             diff = await git.diff(before, after)
@@ -78,9 +79,10 @@ class ThreadVerifiers:
 
             # Every verifier reviews the change at the same time and
             # answers a verdict, repaired on its own thread when it does
-            # not parse; one verifier's failure stops no other.
+            # not parse; one verifier's failure stops no other. Each
+            # answer is kept as it arrives, before its worktree goes.
             question = await ThreadVerifiers._question(prompt, diff.files, diff.text, schema)
-            verdicts = await ComposeCalls.fan_out([ThreadVerifiers._review(git, reader, (after, before), question, schema, keys) for reader in readers])
+            verdicts = await ComposeCalls.fan_out([ThreadVerifiers._review(git, reader, (after, before), question, schema, keys, kept, index) for index, reader in enumerate(readers)])
             record = VerifyResult(writer=record.writer, verdicts=verdicts)
 
             # With every verifier done and every worktree gone, the
@@ -88,9 +90,10 @@ class ThreadVerifiers:
             await DisposableWorktree.backstop(git, after, record)
         except ThreadComposeError as error:
             # A compose failure after the writer ran carries the record
-            # so far, unless it already carries a fuller one.
+            # so far, with every verdict once every verifier answered,
+            # unless it already carries a fuller one (EC-16).
             if error.result is None:
-                error.result = record
+                error.result = ThreadVerifiers._kept(record, kept)
             raise
         return record
 
@@ -130,17 +133,33 @@ class ThreadVerifiers:
             await PromptFitter.check(question, reader, argument=native_compose.COMPOSE_PROMPT_PARAMETER, receiver=StepRoles.item(native_compose.COMPOSE_VERIFIERS_ARGUMENT, index))
 
     @staticmethod
-    async def _review(git: ComposeGit, reader: ThreadStep, trees: tuple[str, str], question: Sequence[tuple[str, bool]], schema: str, keys: Sequence[str]) -> JsonAnswer[ThreadVerdict]:
+    async def _review(git: ComposeGit, reader: ThreadStep, trees: tuple[str, str], question: Sequence[tuple[str, bool]], schema: str, keys: Sequence[str], kept: list[JsonAnswer[ThreadVerdict] | None], index: int) -> JsonAnswer[ThreadVerdict]:
         # A Grok verifier reviews in place, in its own read-only mode.
         if not StepRoles.needs_worktree(reader):
-            return await JsonAnswers.ask(reader, question, schema, AnswerDecoders.verdict, keys)
+            answer = await JsonAnswers.ask(reader, question, schema, AnswerDecoders.verdict, keys)
+            kept[index] = answer
+            return answer
 
         # An opencode or Muse verifier reviews in a worktree of its own,
         # filled with the writer's result and indexed at the snapshot
         # before the writer, so git there shows the writer's change.
+        # Its answer is kept before the worktree goes, so a removal
+        # that fails cannot lose it (EC-16).
         after, before = trees
         async with DisposableWorktree.from_tree(git, after, before) as folder:
-            return await JsonAnswers.ask(ThreadBinder.relocate(reader, folder), question, schema, AnswerDecoders.verdict, keys)
+            answer = await JsonAnswers.ask(ThreadBinder.relocate(reader, folder), question, schema, AnswerDecoders.verdict, keys)
+            kept[index] = answer
+        return answer
+
+    @staticmethod
+    def _kept(record: VerifyResult, kept: Sequence[JsonAnswer[ThreadVerdict] | None]) -> VerifyResult:
+        # The record so far, with the verdicts once every verifier has
+        # answered; a verifier stopped before it answered leaves a gap
+        # the positional verdicts cannot show, so then none are added.
+        verdicts = tuple(answer for answer in kept if answer is not None)
+        if len(verdicts) < len(kept):
+            return record
+        return VerifyResult(writer=record.writer, verdicts=verdicts)
 
 
 class ThreadVerifyTrio:
