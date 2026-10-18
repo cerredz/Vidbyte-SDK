@@ -187,6 +187,10 @@ class ClaudeThreadRun:
             options.append(CliOption(ClaudeFlag.MODEL, request.model))
         if config.reasoning_effort is not None:
             options.append(CliOption(ClaudeFlag.EFFORT, config.reasoning_effort.value))
+        if config.max_turns is not None:
+            options.append(CliOption(ClaudeFlag.MAX_TURNS, str(config.max_turns)))
+        if config.max_budget_usd is not None:
+            options.append(CliOption(ClaudeFlag.MAX_BUDGET_USD, str(config.max_budget_usd)))
         if request.thread_id is not None:
             options.append(CliOption(ClaudeFlag.RESUME, request.thread_id))
         if request.verb is NativeThreadVerb.FORK:

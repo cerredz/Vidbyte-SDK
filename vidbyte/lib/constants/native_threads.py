@@ -24,6 +24,10 @@ NATIVE_THREAD_MAX_SECONDS = 14400.0
 NATIVE_CONTROL_TIMEOUT_SECONDS = 30.0
 NATIVE_KILL_WAIT_SECONDS = 1.0
 MUSE_REAP_TIMEOUT_SECONDS = 10.0
+# The highest ClaudeThreadConfig.max_turns and max_budget_usd a call may
+# set, so a typo cannot lift the limit a caller meant to keep.
+CLAUDE_MAX_TURNS_LIMIT = 1000
+CLAUDE_MAX_BUDGET_USD_LIMIT = 1000.0
 NATIVE_ARGV_PROMPT_MAX_CHARS = 24000
 # A Windows command line holds at most 32,766 UTF-16 units (measured).
 # A Grok or Muse prompt may take 30,000 of them once quoted; the 2,766
@@ -240,6 +244,9 @@ CLAUDE_KEY_REJECTED_STATUSES = frozenset({401, 403})
 # limited) and every 5xx, 529 (overloaded) included. An error answer with
 # one of them is api_error, which NativeThreadError marks retryable.
 CLAUDE_RETRYABLE_STATUSES = frozenset({408, 429, *range(500, 600)})
+# The subtypes of an error answer that stopped at the call's own
+# --max-turns or --max-budget-usd (budget_exhausted, not run_failed).
+CLAUDE_BUDGET_SUBTYPES = frozenset({"error_max_turns", "error_max_budget_usd"})
 
 # Tested vendor versions: the releases these contracts were checked
 # against, named in protocol_mismatch errors.
@@ -337,6 +344,7 @@ NATIVE_THREAD_SUMMARIES: MappingProxyType[NativeThreadProblem, str] = MappingPro
         NativeThreadProblem.LAUNCH_FAILED: "{harness} could not be started.",
         NativeThreadProblem.KEY_REJECTED: "{harness} rejected the API key.",
         NativeThreadProblem.API_ERROR: "{harness} stopped on an API error that a later retry can clear.",
+        NativeThreadProblem.BUDGET_EXHAUSTED: "{harness} stopped at the turn or spending limit of this call.",
         NativeThreadProblem.THREAD_NOT_FOUND: "{harness} could not find the requested thread.",
         NativeThreadProblem.TIMED_OUT: "{harness} did not finish in time.",
         NativeThreadProblem.OUTPUT_TOO_LARGE: "{harness} printed more output than the SDK reads.",
@@ -352,6 +360,7 @@ NATIVE_THREAD_OBSERVATIONS: MappingProxyType[NativeThreadProblem, str] = Mapping
         NativeThreadProblem.LAUNCH_FAILED: "The SDK could not start the program or prepare its private folder.",
         NativeThreadProblem.KEY_REJECTED: "The vendor refused the key passed as api_key, and the SDK never falls back to a stored login.",
         NativeThreadProblem.API_ERROR: "The vendor's API answered with a timeout, rate-limit, overload or server error status.",
+        NativeThreadProblem.BUDGET_EXHAUSTED: "The vendor stopped the run at the max_turns or max_budget_usd the call set, and the thread keeps the turns made so far.",
         NativeThreadProblem.THREAD_NOT_FOUND: "The vendor could not continue the requested thread, or answered on another one.",
         NativeThreadProblem.TIMED_OUT: "The SDK waited {seconds} seconds and then stopped the whole process tree, so the thread may hold a partial turn.",
         NativeThreadProblem.OUTPUT_TOO_LARGE: "Standard output passed the cap of {cap_bytes} bytes, so the SDK did not read it as an answer.",
@@ -438,6 +447,7 @@ NATIVE_THREAD_FAILURE_CODES: MappingProxyType[tuple[NativeHarness, NativeThreadP
         (NativeHarness.CLAUDE, NativeThreadProblem.PROTOCOL_MISMATCH): FailureCode.CLAUDE_PROTOCOL_MISMATCH,
         (NativeHarness.CLAUDE, NativeThreadProblem.RUN_FAILED): FailureCode.CLAUDE_RUN_FAILED,
         (NativeHarness.CLAUDE, NativeThreadProblem.API_ERROR): FailureCode.CLAUDE_API_ERROR,
+        (NativeHarness.CLAUDE, NativeThreadProblem.BUDGET_EXHAUSTED): FailureCode.CLAUDE_BUDGET_EXHAUSTED,
     }
 )
 
@@ -480,8 +490,9 @@ NATIVE_THREAD_LIKELY_CAUSES: MappingProxyType[FailureCode, str] = MappingProxyTy
         FailureCode.CLAUDE_TIMED_OUT: "The Claude Code run needed more than timeout_seconds, for example because the task is large or the API did not answer.",
         FailureCode.CLAUDE_OUTPUT_TOO_LARGE: "Claude Code printed more than NATIVE_PROCESS_MAX_OUTPUT_BYTES, so its one JSON answer could not be read whole.",
         FailureCode.CLAUDE_PROTOCOL_MISMATCH: "The installed Claude Code printed output this SDK cannot read, refused an option or value the SDK passes, or a fork returned its source thread; it may differ from the release this SDK was checked against.",
-        FailureCode.CLAUDE_RUN_FAILED: "Claude Code reported a failure without a status that a later retry can clear, such as a billing or budget limit, an unknown model, a refused request or an API it could not reach.",
+        FailureCode.CLAUDE_RUN_FAILED: "Claude Code reported a failure without a status that a later retry can clear, such as a billing limit, an unknown model, a refused request or an API it could not reach.",
         FailureCode.CLAUDE_API_ERROR: "The Anthropic API rate-limited the key (429), was overloaded (529), timed out (408) or failed on its side (another 5xx), which a later retry can clear.",
+        FailureCode.CLAUDE_BUDGET_EXHAUSTED: "The run took ClaudeThreadConfig.max_turns model turns, or spent ClaudeThreadConfig.max_budget_usd, before it finished the task.",
         FailureCode.CONFIGURATION_INVALID_ARGUMENT: "An argument failed its check before anything started; the message names the argument and the rule it broke.",
         FailureCode.RUNTIME_ERROR: "An unexpected exception inside the SDK, which is a defect in the SDK rather than a vendor failure.",
     }
@@ -528,6 +539,7 @@ NATIVE_THREAD_NEXT_STEPS: MappingProxyType[FailureCode, str] = MappingProxyType(
         FailureCode.CLAUDE_PROTOCOL_MISMATCH: "Run claude --version and install the Claude Code release named in this message, then retry.",
         FailureCode.CLAUDE_RUN_FAILED: "Read the vendor text in this message, fix the cause it names, and retry or continue the thread.",
         FailureCode.CLAUDE_API_ERROR: "Wait and retry (error.retryable is True and error.api_status holds the HTTP status); continue the thread named by this error's thread_id rather than starting over.",
+        FailureCode.CLAUDE_BUDGET_EXHAUSTED: "Continue the thread named by this error's thread_id with a higher ClaudeThreadConfig.max_turns or max_budget_usd; the budget applies to one call, and the run stops after the request that crosses it.",
         FailureCode.CONFIGURATION_INVALID_ARGUMENT: "Fix the argument named in this message and call again; nothing ran and nothing was written.",
         FailureCode.RUNTIME_ERROR: "Report the defect with the exception class named in this message; a retry may succeed if the cause was transient.",
     }

@@ -40,14 +40,17 @@ def spy_runner(api, monkeypatch) -> list:
     return seen
 
 
-def expected_argv(verb: str, *, thread: str | None, minted: str | None = None, mode: str = "manual", model: str | None = None, effort: str | None = None) -> list[str]:
+def expected_argv(verb: str, *, thread: str | None, minted: str | None = None, mode: str = "manual", model: str | None = None, effort: str | None = None, turns: str | None = None, budget: str | None = None) -> list[str]:
     # §9.2, in its order: the four fixed options, then --model, --effort,
-    # --resume and --fork-session when they apply, then --session-id with
-    # the id a run or fork mints (PR #1044 review); no operand. A
+    # --max-turns, --max-budget-usd, --resume and --fork-session when
+    # they apply, then --session-id with the id a run or fork mints (the
+    # limits and the minted id from the PR #1044 review); no operand. A
     # continue never sends --session-id.
     argv = ["--print", "--output-format", "json", "--setting-sources", "user", "--permission-mode", mode]
     argv += ["--model", model] if model is not None else []
     argv += ["--effort", effort] if effort is not None else []
+    argv += ["--max-turns", turns] if turns is not None else []
+    argv += ["--max-budget-usd", budget] if budget is not None else []
     argv += ["--resume", thread] if verb != "run" else []
     argv += ["--fork-session"] if verb == "fork" else []
     return argv + (["--session-id", minted] if verb != "continue" else [])
@@ -73,12 +76,12 @@ async def test_every_option_keeps_the_separate_style_and_a_flag_like_prompt_stay
     # "--yolo" reaches Claude Code only as stdin text.
     thread = (await call("claude")).thread_id if verb != "run" else None
     enums = api.enums
-    config = {"permission_mode": enums.ClaudePermissionMode.ACCEPT_EDITS, "reasoning_effort": enums.ClaudeReasoningEffort.XHIGH}
+    config = {"permission_mode": enums.ClaudePermissionMode.ACCEPT_EDITS, "reasoning_effort": enums.ClaudeReasoningEffort.XHIGH, "max_turns": 7, "max_budget_usd": 2.5}
     result = await call("claude", verb, FLAG_PROMPT, thread_id=thread, model="claude-opus-5-5", config=config)
     assert result.text == f"claude answer to: {FLAG_PROMPT}"
     start = sandbox.starts("claude")[-1]
     argv = start["argv"]
-    assert argv == expected_argv(verb, thread=thread, minted=result.thread_id, mode="acceptEdits", model="claude-opus-5-5", effort="xhigh")
+    assert argv == expected_argv(verb, thread=thread, minted=result.thread_id, mode="acceptEdits", model="claude-opus-5-5", effort="xhigh", turns="7", budget="2.5")
     assert FLAG_PROMPT not in argv and start["stdin_text"] == FLAG_PROMPT
     flags = {member.value for member in enums.ClaudeFlag}
     assert all(element in flags for element in argv if element.startswith("-")), "INV-16: every flag is a ClaudeFlag member"

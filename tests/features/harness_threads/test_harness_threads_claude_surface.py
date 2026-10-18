@@ -37,7 +37,8 @@ CLAUDE_ENUMS = {
     "ClaudeReasoningEffort": [("LOW", "low"), ("MEDIUM", "medium"), ("HIGH", "high"), ("XHIGH", "xhigh"), ("MAX", "max")],
     "ClaudeFlag": [
         ("PRINT", "--print"), ("OUTPUT_FORMAT", "--output-format"), ("SETTING_SOURCES", "--setting-sources"), ("PERMISSION_MODE", "--permission-mode"),
-        ("MODEL", "--model"), ("EFFORT", "--effort"), ("RESUME", "--resume"), ("FORK_SESSION", "--fork-session"), ("SESSION_ID", "--session-id"),
+        ("MODEL", "--model"), ("EFFORT", "--effort"), ("MAX_TURNS", "--max-turns"), ("MAX_BUDGET_USD", "--max-budget-usd"), ("RESUME", "--resume"),
+        ("FORK_SESSION", "--fork-session"), ("SESSION_ID", "--session-id"),
     ],
 }
 CLAUDE_CONSTANTS = {
@@ -50,11 +51,12 @@ CLAUDE_CONSTANTS = {
     "CLAUDE_SESSION_NOT_FOUND_MARKER": "No conversation found with session ID",
     "CLAUDE_REJECTED_OPTION_MARKERS": ("error: unknown option", "error: option '", "error: missing required argument"),
     "CLAUDE_KEY_REJECTED_STATUSES": frozenset({401, 403}), "CLAUDE_RETRYABLE_STATUSES": frozenset({408, 429, *range(500, 600)}),
+    "CLAUDE_BUDGET_SUBTYPES": frozenset({"error_max_turns", "error_max_budget_usd"}), "CLAUDE_MAX_TURNS_LIMIT": 1000, "CLAUDE_MAX_BUDGET_USD_LIMIT": 1000.0,
     "CLAUDE_ERROR_TEXT": "{reason}: {message}", "CLAUDE_ERROR_STATUS_TEXT": "{reason} (status {status}): {message}", "CLAUDE_TESTED_VERSION": "2.1.302",
     "CLAUDE_CONFIG_FAILURE_DETAIL": "The private Claude Code config folder {home} could not be prepared ({error_type}: {reason}).",
     "CLAUDE_CONFIG_UNKNOWN_DETAIL": "The user home folder, where the private Claude Code config folder lives, could not be determined ({error_type}); set HOME (POSIX) or USERPROFILE (Windows) for this process.",
 }
-PROBLEMS = ["not_installed", "launcher_refused", "launch_failed", "key_rejected", "api_error", "thread_not_found", "timed_out", "output_too_large", "protocol_mismatch", "run_failed"]
+PROBLEMS = ["not_installed", "launcher_refused", "launch_failed", "key_rejected", "api_error", "budget_exhausted", "thread_not_found", "timed_out", "output_too_large", "protocol_mismatch", "run_failed"]
 BAD_CONFIG_FIELDS = [
     ("permission_mode", "bypassPermissions"), ("permission_mode", "auto"), ("permission_mode", "default"), ("permission_mode", "yolo"),
     ("reasoning_effort", "turbo"), ("reasoning_effort", "none"), ("reasoning_effort", "minimal"), ("reasoning_effort", "ultra"),
@@ -66,6 +68,10 @@ BAD_CONFIG_FIELDS = [
     ("claude_command", ("claude-bin", "--settings", '{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:18777"}}')),
     ("claude_command", ("claude-bin", "--dangerously-skip-permissions")), ("claude_command", ("claude-bin", "--permission-mode=bypassPermissions")),
     ("claude_command", ("claude-bin", "--mcp-config", "servers.json")), ("claude_command", ("claude-bin", "mcp")), ("claude_command", ("wsl.exe", "-e", "claude")),
+    # PR #1044 review 4301898216: the turn and spending limits of a call.
+    ("max_turns", 0), ("max_turns", 1001), ("max_turns", 2.0), ("max_turns", True), ("max_turns", "5"),
+    ("max_budget_usd", 0), ("max_budget_usd", -1.0), ("max_budget_usd", math.nan), ("max_budget_usd", math.inf), ("max_budget_usd", 1000.5),
+    ("max_budget_usd", True), ("max_budget_usd", "5"),
 ]
 OLD_NAMES = [
     ("vidbyte.harnesses.native.claude", "ClaudeHost"), ("vidbyte.harnesses.native.claude", "ClaudeLiveSession"), ("vidbyte.harnesses.native", "ClaudeHost"),
@@ -194,10 +200,11 @@ def test_claude_contract_constants_hold_the_spec_values(lib_api) -> None:
 
 
 def test_every_harness_and_code_table_has_its_claude_rows(lib_api) -> None:
-    # AC-18 / INV-6 / INV-7: the label, the tested version, the ten
-    # failure codes by problem (and no WSL row; api_error from the PR
-    # #1044 review), a text per code, only claude.api_error retryable,
-    # and Claude among the stdin-prompt harnesses.
+    # AC-18 / INV-6 / INV-7: the label, the tested version, the eleven
+    # failure codes by problem (and no WSL row; api_error and
+    # budget_exhausted from the PR #1044 review), a text per code, only
+    # claude.api_error retryable, and Claude among the stdin-prompt
+    # harnesses.
     constants, enums, codes = lib_api.constants, lib_api.enums, lib_api.FailureCode
     claude = enums.NativeHarness.CLAUDE
     assert constants.NATIVE_HARNESS_LABELS[claude] == "Claude Code"
@@ -211,18 +218,20 @@ def test_every_harness_and_code_table_has_its_claude_rows(lib_api) -> None:
 
 
 def test_claude_thread_config_has_the_spec_fields_and_defaults(lib_api) -> None:
-    # AC-18 / D-13 / §9.1: frozen and slotted; exactly four fields and
-    # no model; defaults (None, DEFAULT, 1800.0, None); a member or its
-    # exact value is accepted; the timeout bound is inclusive.
+    # AC-18 / D-13 / §9.1: frozen and slotted; exactly six fields (the
+    # turn and spending limits from the PR #1044 review) and no model;
+    # defaults (None, DEFAULT, 1800.0, None, None, None); a member or its
+    # exact value is accepted; the timeout, turn and budget bounds are
+    # inclusive.
     cls, enums = lib_api.ClaudeThreadConfig, lib_api.enums
     assert dataclasses.is_dataclass(cls) and cls.__dataclass_params__.frozen and "__slots__" in vars(cls)
-    assert [field.name for field in dataclasses.fields(cls)] == ["reasoning_effort", "permission_mode", "timeout_seconds", "claude_command"]
+    assert [field.name for field in dataclasses.fields(cls)] == ["reasoning_effort", "permission_mode", "timeout_seconds", "claude_command", "max_turns", "max_budget_usd"]
     default = cls()
-    assert (default.reasoning_effort, default.permission_mode, default.timeout_seconds, default.claude_command) == (None, enums.ClaudePermissionMode.DEFAULT, 1800.0, None)
+    assert (default.reasoning_effort, default.permission_mode, default.timeout_seconds, default.claude_command, default.max_turns, default.max_budget_usd) == (None, enums.ClaudePermissionMode.DEFAULT, 1800.0, None, None, None)
     assert default.permission_mode is enums.ClaudePermissionMode.DEFAULT and default.timeout_seconds == lib_api.constants.NATIVE_THREAD_DEFAULT_SECONDS
-    built = cls(reasoning_effort="xhigh", permission_mode="acceptEdits", timeout_seconds=14400, claude_command=("claude-bin",))
+    built = cls(reasoning_effort="xhigh", permission_mode="acceptEdits", timeout_seconds=14400, claude_command=("claude-bin",), max_turns=1000, max_budget_usd=1000.0)
     assert built.reasoning_effort is enums.ClaudeReasoningEffort.XHIGH and built.permission_mode is enums.ClaudePermissionMode.ACCEPT_EDITS
-    assert built.timeout_seconds == 14400 and built.claude_command == ("claude-bin",)
+    assert built.timeout_seconds == 14400 and built.claude_command == ("claude-bin",) and built.max_turns == 1000 and built.max_budget_usd == 1000.0
     with pytest.raises(TypeError):
         cls(model="sonnet")
 

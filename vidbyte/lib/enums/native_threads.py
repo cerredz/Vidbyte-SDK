@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Every enum here is a StrEnum, so str(member) and an f-string 
 FUNCTION INVENTORY: No functions. NativeHarness, NativeThreadVerb, NativeThreadOperation, NativeThreadProblem, GrokPermissionMode, GrokReasoningEffort, MuseReasoningEffort, ClaudePermissionMode, ClaudeReasoningEffort, GrokFlag, OpencodeFlag, MuseFlag, ClaudeFlag, WslFlag, ShellFlag, NativeEnvironmentVariable, MuseMethod and OpencodeEventType.
 COMMON MODIFICATION PATTERNS: Add a member only when the vendor CLI adds the value, and use it in the harness module that builds the argv or reads the output in the same change. A new problem also needs its FailureCode members and its texts in vidbyte/lib/constants/native_threads.py.
 WHAT NOT TO DO IN THIS FILE: 1. Do not add an approve-everything member (bypassPermissions, --yolo, --auto, --always-approve); the SDK never approves everything. 2. Do not import anything from vidbyte; enums sit at the bottom layer. 3. Do not turn an enum here back into a (str, Enum).
-KNOWN EDGE CASES: NativeEnvironmentVariable values equal their names. ClaudePermissionMode.DEFAULT is "manual", the name Claude Code 2.1.302 lists for its default mode; it still accepts the older "default" as a hidden alias, which the SDK never sends, and the flag is always passed so a managed setting cannot pick another mode. MuseFlag.END_OF_OPTIONS is the bare "--" operand that keeps the Muse prompt from being read as a flag. WSL_UNAVAILABLE is a Muse-only problem, and API_ERROR (an API status a later retry can clear) is so far raised only for Claude Code.
+KNOWN EDGE CASES: NativeEnvironmentVariable values equal their names. ClaudePermissionMode.DEFAULT is "manual", the name Claude Code 2.1.302 lists for its default mode; it still accepts the older "default" as a hidden alias, which the SDK never sends, and the flag is always passed so a managed setting cannot pick another mode. MuseFlag.END_OF_OPTIONS is the bare "--" operand that keeps the Muse prompt from being read as a flag. WSL_UNAVAILABLE is a Muse-only problem, and API_ERROR (an API status a later retry can clear) and BUDGET_EXHAUSTED (the call's turn or spending limit) are so far raised only for Claude Code. ClaudeFlag.MAX_TURNS is a hidden option of Claude Code 2.1.302: it works in --print mode but --help does not list it.
 RELATED DOCS: vidbyte/harnesses/README.md
 TESTS: tests/features/harness_threads/test_harness_threads_surface.py, tests/features/harness_threads/test_harness_threads_argv.py
 """
@@ -58,6 +58,7 @@ class NativeThreadProblem(StrEnum):
     LAUNCH_FAILED = "launch_failed"
     KEY_REJECTED = "key_rejected"
     API_ERROR = "api_error"
+    BUDGET_EXHAUSTED = "budget_exhausted"
     THREAD_NOT_FOUND = "thread_not_found"
     TIMED_OUT = "timed_out"
     OUTPUT_TOO_LARGE = "output_too_large"
@@ -165,6 +166,8 @@ class ClaudeFlag(StrEnum):
     PERMISSION_MODE = "--permission-mode"
     MODEL = "--model"
     EFFORT = "--effort"
+    MAX_TURNS = "--max-turns"
+    MAX_BUDGET_USD = "--max-budget-usd"
     RESUME = "--resume"
     FORK_SESSION = "--fork-session"
     SESSION_ID = "--session-id"

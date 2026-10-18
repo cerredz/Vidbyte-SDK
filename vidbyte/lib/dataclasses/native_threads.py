@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from vidbyte.lib.constants.native_threads import (
+    CLAUDE_MAX_BUDGET_USD_LIMIT,
+    CLAUDE_MAX_TURNS_LIMIT,
     CLAUDE_PROMPT_PATTERN,
     CLAUDE_THREAD_ID_PATTERN,
     MUSE_DEFAULT_PATH,
@@ -223,12 +225,14 @@ class MuseThreadConfig:
 
 @dataclass(frozen=True, slots=True)
 class ClaudeThreadConfig:
-    """Settings of the Claude Code thread functions: reasoning effort, permission mode, time limit and an explicit claude launcher."""
+    """Settings of the Claude Code thread functions: reasoning effort, permission mode, time limit, an explicit claude launcher, and the turn and spending limits of one call."""
 
     reasoning_effort: ClaudeReasoningEffort | None = None
     permission_mode: ClaudePermissionMode = ClaudePermissionMode.DEFAULT
     timeout_seconds: float = NATIVE_THREAD_DEFAULT_SECONDS
     claude_command: tuple[str, ...] | None = None
+    max_turns: int | None = None
+    max_budget_usd: float | None = None
 
     def __post_init__(self) -> None:
         if self.reasoning_effort is not None:
@@ -237,6 +241,10 @@ class ClaudeThreadConfig:
         RecordFieldValidator.require_number(self.timeout_seconds, "ClaudeThreadConfig.timeout_seconds", maximum=NATIVE_THREAD_MAX_SECONDS)
         if self.claude_command is not None:
             RecordFieldValidator.require_program(self.claude_command, "ClaudeThreadConfig.claude_command")
+        if self.max_turns is not None:
+            RecordFieldValidator.require_int(self.max_turns, "ClaudeThreadConfig.max_turns", minimum=1, maximum=CLAUDE_MAX_TURNS_LIMIT)
+        if self.max_budget_usd is not None:
+            RecordFieldValidator.require_number(self.max_budget_usd, "ClaudeThreadConfig.max_budget_usd", maximum=CLAUDE_MAX_BUDGET_USD_LIMIT)
 
 
 @dataclass(frozen=True, slots=True)

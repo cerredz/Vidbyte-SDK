@@ -2,11 +2,11 @@
 
 PURPOSE: Defines ClaudeWire, the reader of one `claude --print --output-format json` run: it turns the run's CliOutcome into a NativeThreadResult, or into the NativeThreadError that names what went wrong.
 ROLE IN CODEBASE: Called by ClaudeThreadRun.execute in vidbyte/harnesses/native/claude/threads.py after CliRunner returns; it raises through the call's NativeErrorFactory (hostkit/errors.py) and checks the answered thread id with RecordFieldValidator.accepts_text.
-ARCHITECTURE NOTE: Pure: no process, no file and no await. Claude Code 2.1.302 writes one JSON object at exit, {"is_error", "session_id", "result", "api_error_status", "terminal_reason", "subtype", "errors", ...}, on success and on an in-run failure alike, and a failure before the run (an unknown --resume id) as text on stderr with exit 1. Every member name and marker comes from vidbyte/lib/constants/native_threads.py (spec INV-16). The answer is read first, as opencode/wire.py does, and the checks then run in the INV-7 order: timeout, output cap, the answer's own is_error (key rejected, a retryable API error or run failed), a bare non-zero exit (thread not found, an option the installed claude refused, which is protocol_mismatch, or run failed), then the shape of the success answer and the thread id.
-FUNCTION INVENTORY: read is the narrated main function; _answer parses stdout as one JSON object, or None; _session returns the answer's session_id when it is a lowercase UUID; _text returns its result when it is text; _missing_member names the member that makes a success answer unusable; _error_text builds the vendor text of an is_error answer.
+ARCHITECTURE NOTE: Pure: no process, no file and no await. Claude Code 2.1.302 writes one JSON object at exit, {"is_error", "session_id", "result", "api_error_status", "terminal_reason", "subtype", "errors", ...}, on success and on an in-run failure alike, and a failure before the run (an unknown --resume id) as text on stderr with exit 1. Every member name and marker comes from vidbyte/lib/constants/native_threads.py (spec INV-16). The answer is read first, as opencode/wire.py does, and the checks then run in the INV-7 order: timeout, output cap, the answer's own is_error (budget exhausted, key rejected, a retryable API error or run failed), a bare non-zero exit (thread not found, an option the installed claude refused, which is protocol_mismatch, or run failed), then the shape of the success answer and the thread id.
+FUNCTION INVENTORY: read is the narrated main function; _answer parses stdout as one JSON object, or None; _session returns the answer's session_id when it is a lowercase UUID; _text returns its result when it is text; _missing_member names the member that makes a success answer unusable; _error_problem picks the problem of an is_error answer from its subtype and API status; _error_text builds the vendor text of an is_error answer.
 COMMON MODIFICATION PATTERNS: A new answer member the SDK must read gets its name constant and one check in read; a new failure shape is a spec change first (INV-7).
 WHAT NOT TO DO IN THIS FILE: 1. Do not decide success by subtype; Claude Code reports "success" on a rejected key. 2. Do not copy vendor text into an error unscrubbed; pass it as vendor_text and the factory scrubs and caps it. 3. Do not accept a cut stdout; a truncated answer is output_too_large and only its thread id is ever used. 4. Do not start processes or await anything here.
-KNOWN EDGE CASES: True is not taken as a status, so "api_error_status": true is run_failed with api_status None (the vendor text still shows it), never key_rejected or api_error. An is_error answer with no status at all (the API could not be reached) is run_failed, not api_error, because nothing says a retry will help. A failed run or fork still reports the session_id of its answer, because Claude Code writes a resumable transcript even then; a failed continue reports the caller's id. That holds for timed_out and output_too_large too. A run or fork that printed no usable session_id reports the id it passed as --session-id (minted_id), because Claude Code writes that transcript as soon as the turn starts: after a timeout before it printed its answer, an answer cut at the cap or an exit-0 stdout that is not JSON. Only a non-zero exit that printed nothing but stderr (an unknown source thread, a refused option) reports no new id, because it never started the thread: a run then carries None and a fork its source id (spec INV-6, EC-14, EC-15; PR #1044 review reverses D-9). A run or fork answered on an id other than minted_id is protocol_mismatch. A continue answered on another lowercase UUID is thread_not_found; one answered in upper case is a bad session_id, protocol_mismatch. A fork answered with its source id is protocol_mismatch. Stderr on a successful answer is ignored, because Claude Code prints notices there.
+KNOWN EDGE CASES: A stop at the call's own max_turns or max_budget_usd (subtype error_max_turns or error_max_budget_usd) is budget_exhausted whatever its status. True is not taken as a status, so "api_error_status": true is run_failed with api_status None (the vendor text still shows it), never key_rejected or api_error. An is_error answer with no status at all (the API could not be reached) is run_failed, not api_error, because nothing says a retry will help. A failed run or fork still reports the session_id of its answer, because Claude Code writes a resumable transcript even then; a failed continue reports the caller's id. That holds for timed_out and output_too_large too. A run or fork that printed no usable session_id reports the id it passed as --session-id (minted_id), because Claude Code writes that transcript as soon as the turn starts: after a timeout before it printed its answer, an answer cut at the cap or an exit-0 stdout that is not JSON. Only a non-zero exit that printed nothing but stderr (an unknown source thread, a refused option) reports no new id, because it never started the thread: a run then carries None and a fork its source id (spec INV-6, EC-14, EC-15; PR #1044 review reverses D-9). A run or fork answered on an id other than minted_id is protocol_mismatch. A continue answered on another lowercase UUID is thread_not_found; one answered in upper case is a bad session_id, protocol_mismatch. A fork answered with its source id is protocol_mismatch. Stderr on a successful answer is ignored, because Claude Code prints notices there.
 RELATED DOCS: vidbyte/harnesses/README.md
 TESTS: tests/features/harness_threads/test_harness_threads_claude_errors.py, tests/features/harness_threads/test_harness_threads_claude_threads.py, tests/features/harness_threads/test_harness_threads_claude_process_bounds.py
 """
@@ -55,15 +55,14 @@ class ClaudeWire:
         if outcome.stdout_truncated:
             raise errors.failure(NativeThreadProblem.OUTPUT_TOO_LARGE, request=request, thread_id=newest, outcome=outcome, vendor_text=outcome.stderr, cap_bytes=native_threads.NATIVE_PROCESS_MAX_OUTPUT_BYTES)
 
-        # Claude Code's own error answer, sorted by the API status it
-        # carries: a 401 or 403 means the key was refused; a timeout,
-        # rate limit, overload or server error is an API error a later
-        # retry can clear; anything else is a failed run. The status
-        # travels on the error so a caller can decide when to retry.
+        # Claude Code's own error answer: a stop at the call's own turn
+        # or spending limit, a refused key, an API error a later retry
+        # can clear, or any other failed run. The API status travels on
+        # the error so a caller can decide when to retry.
         if answer is not None and answer.get(native_threads.CLAUDE_IS_ERROR_FIELD) is True:
             status = answer.get(native_threads.CLAUDE_API_ERROR_STATUS_FIELD)
             number = status if type(status) is int else None
-            problem = NativeThreadProblem.KEY_REJECTED if number in native_threads.CLAUDE_KEY_REJECTED_STATUSES else NativeThreadProblem.API_ERROR if number in native_threads.CLAUDE_RETRYABLE_STATUSES else NativeThreadProblem.RUN_FAILED
+            problem = ClaudeWire._error_problem(answer, number)
             raise errors.failure(problem, request=request, thread_id=newest, outcome=outcome, vendor_text=ClaudeWire._error_text(answer), api_status=number)
 
         # A non-zero exit without an error answer: Claude Code's own
@@ -144,6 +143,21 @@ class ClaudeWire:
         if session is None:
             return native_threads.CLAUDE_SESSION_FIELD
         return native_threads.CLAUDE_RESULT_FIELD
+
+    @staticmethod
+    def _error_problem(answer: Mapping[str, object], status: int | None) -> NativeThreadProblem:
+        # A stop at --max-turns or --max-budget-usd first, whatever its
+        # status; then a 401 or 403, which means the key was refused;
+        # then a timeout, rate limit, overload or server error; anything
+        # else is a failed run.
+        subtype = answer.get(native_threads.CLAUDE_SUBTYPE_FIELD)
+        if isinstance(subtype, str) and subtype in native_threads.CLAUDE_BUDGET_SUBTYPES:
+            return NativeThreadProblem.BUDGET_EXHAUSTED
+        if status in native_threads.CLAUDE_KEY_REJECTED_STATUSES:
+            return NativeThreadProblem.KEY_REJECTED
+        if status in native_threads.CLAUDE_RETRYABLE_STATUSES:
+            return NativeThreadProblem.API_ERROR
+        return NativeThreadProblem.RUN_FAILED
 
     @staticmethod
     def _error_text(answer: Mapping[str, object]) -> str | None:

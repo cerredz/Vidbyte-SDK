@@ -1,6 +1,6 @@
 """FILE: tests/features/harness_threads/test_harness_threads_claude_errors.py
 
-PURPOSE: How a Claude Code answer is classified (spec claude-thread-functions INV-7, D-10): a JSON object with is_error true and an integer api_error_status of 401 or 403 is claude.key_rejected carrying the reason, status and result text and the answer's session_id (AC-11, EC-4, EC-34); one of 408, 429 or a 5xx is claude.api_error, the one retryable code, carrying the status as api_status (PR #1044 review); any other status, no status, a non-integer status or an `errors` list instead of `result` is claude.run_failed with that text (AC-11, EC-17, EC-18, EC-36); `subtype` never decides; a non-zero exit whose stderr holds the option parser's error line (unknown option, invalid choice, missing argument) is claude.protocol_mismatch naming the tested version (PR #1044 review); any other non-zero exit is claude.run_failed carrying stderr (AC-12); exit 0 with output that is not one JSON object, an is_error that is not false, a session_id that is not a lowercase UUID or a result that is not a string is claude.protocol_mismatch naming the member and the tested version 2.1.302 (AC-10, AC-13, EC-16); stderr on a successful answer is ignored (EC-35); and a failed fork reports the fork's new id while a failed continue reports the caller's (INV-6, D-14).
+PURPOSE: How a Claude Code answer is classified (spec claude-thread-functions INV-7, D-10): a JSON object with is_error true and an integer api_error_status of 401 or 403 is claude.key_rejected carrying the reason, status and result text and the answer's session_id (AC-11, EC-4, EC-34); one of 408, 429 or a 5xx is claude.api_error, the one retryable code, carrying the status as api_status (PR #1044 review); any other status, no status or a non-integer status is claude.run_failed with that text (AC-11, EC-18, EC-36); `subtype` decides only a stop at the call's own limit, error_max_budget_usd or error_max_turns, which is claude.budget_exhausted whatever its status, with the text built from the `errors` list when there is no `result` (EC-17, PR #1044 review); a non-zero exit whose stderr holds the option parser's error line (unknown option, invalid choice, missing argument) is claude.protocol_mismatch naming the tested version (PR #1044 review); any other non-zero exit is claude.run_failed carrying stderr (AC-12); exit 0 with output that is not one JSON object, an is_error that is not false, a session_id that is not a lowercase UUID or a result that is not a string is claude.protocol_mismatch naming the member and the tested version 2.1.302 (AC-10, AC-13, EC-16); stderr on a successful answer is ignored (EC-35); and a failed fork reports the fork's new id while a failed continue reports the caller's (INV-6, D-14).
 ROLE IN CODEBASE: Start here when a Claude Code failure gets the wrong code, loses Claude's own text, or reports the wrong thread.
 ARCHITECTURE NOTE: The stand-in prints Claude Code 2.1.302's one JSON result object (vendor-facts §6): success, the 401 shape with subtype "success", the budget shape with `errors` and no `result`, a generic in-run error, and any member overridden or dropped by the scenario's `override` and `drop` fields. check_error (conftest.py) asserts the INV-6 attributes, that likely_cause and next_step are the table texts for the code, and the message order. Vendor text is compared with the spec's own templates, CLAUDE_ERROR_TEXT and CLAUDE_ERROR_STATUS_TEXT, read from the constants module.
 FUNCTION INVENTORY: printed_session reads the session id the stand-in printed; vendor_text formats the expected vendor text from the spec templates; the test_* functions are one behaviour each.
@@ -20,6 +20,7 @@ TESTED_VERSION = "2.1.302"
 KEY_TEXT = "Invalid API key · Fix external API key"
 VENDOR = "Overloaded: the API is busy, retry later"
 BUDGET = "Reached maximum budget ($0.00001)"
+TURNS = "Reached maximum number of turns (2)"
 OTHER_SESSION = "22222222-3333-4444-8555-666666666666"
 REJECTED_STATUSES = [401, 403]
 # 2.1.302's option parser errors, as printed for a refused argv.
@@ -34,6 +35,13 @@ RETRYABLE_STATUSES = [("timeout", 408), ("rate-limited", 429), ("server", 500), 
 OTHER_STATUSES = [
     ("billing", 400, True, 400), ("null", None, False, None), ("true", True, True, None),
     ("string-401", "401", False, None), ("list", [401], False, None), ("object", {"code": 401}, False, None),
+]
+# PR #1044 review 4301898270: the stops at the call's own limits, as
+# 2.1.302 prints them: the subtype, the terminal reason and an errors
+# list, with no result member.
+LIMIT_STOPS = [
+    ("budget", {}, "budget_exhausted", BUDGET),
+    ("turns", {"subtype": "error_max_turns", "terminal_reason": "max_turns"}, "max_turns", TURNS),
 ]
 BAD_MEMBERS = [
     ("is_error-missing", {}, ["is_error"], "is_error"), ("is_error-string", {"is_error": "false"}, [], "is_error"), ("is_error-null", {"is_error": None}, [], "is_error"),
@@ -103,15 +111,29 @@ async def test_any_other_error_status_is_run_failed_with_claudes_text(api, sandb
 
 
 @pytest.mark.asyncio
-async def test_budget_answer_without_result_is_run_failed_from_its_errors_list(api, sandbox, call, check_error) -> None:
-    # AC-11 / EC-17 / f7: subtype error_max_budget_usd, terminal_reason
-    # budget_exhausted, an errors list and no result member.
+@pytest.mark.parametrize(("case", "override", "reason", "text"), LIMIT_STOPS, ids=[case for case, _, _, _ in LIMIT_STOPS])
+async def test_stop_at_the_calls_own_limit_is_budget_exhausted_from_its_errors_list(api, sandbox, call, check_error, case, override, reason, text) -> None:
+    # AC-11 / EC-17 / f7 and PR #1044 review 4301898270: subtype
+    # error_max_budget_usd or error_max_turns, an errors list and no
+    # result member is claude.budget_exhausted, not retryable, carrying
+    # the answer's session to continue with a higher limit.
     with pytest.raises(api.NativeThreadError) as caught:
-        await call("claude", fake={"mode": "budget", "errors": [BUDGET, "Second note"]})
+        await call("claude", fake={"mode": "budget", "errors": [text, "Second note"], "override": override})
     error = caught.value
-    check_error(error, harness="claude", verb="run", code="claude.run_failed", workspace=sandbox.workspace, thread_id=printed_session(sandbox), vendor="budget_exhausted", exit_code=1)
-    assert error.vendor_message.startswith("budget_exhausted: ") and BUDGET in error.vendor_message and "Second note" in error.vendor_message
-    assert "(status" not in error.vendor_message
+    check_error(error, harness="claude", verb="run", code="claude.budget_exhausted", workspace=sandbox.workspace, thread_id=printed_session(sandbox), vendor=reason, exit_code=1)
+    assert error.vendor_message.startswith(f"{reason}: ") and text in error.vendor_message and "Second note" in error.vendor_message
+    assert "(status" not in error.vendor_message and error.retryable is False and error.api_status is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("override", "code"), [({"subtype": "error_max_turns", "api_error_status": 429}, "claude.budget_exhausted"), ({"subtype": ["error_max_turns"], "api_error_status": 429}, "claude.api_error")], ids=["limit-with-429", "list-subtype"])
+async def test_only_a_text_limit_subtype_decides_before_the_api_status(api, sandbox, call, override, code) -> None:
+    # PR #1044 review 4301898270: the subtype is read before the status,
+    # so a limit stop that also carries a 429 is budget_exhausted; a
+    # subtype that is not text never decides, so the 429 does.
+    with pytest.raises(api.NativeThreadError) as caught:
+        await call("claude", fake={"mode": "budget", "override": override})
+    assert caught.value.failure_code.value == code and caught.value.api_status == 429
 
 
 @pytest.mark.asyncio

@@ -192,11 +192,12 @@ async def test_error_class_carries_the_diagnostic_packet_for_this_feature(api, s
 
 def test_every_code_has_its_own_likely_cause_and_next_step(lib_api) -> None:
     # D-10 / comment 1: texts written per code, for the 28 harness codes,
-    # the ten claude.* codes (claude-thread-functions INV-6, §12.3 row
-    # 16, and claude.api_error from the PR #1044 review),
+    # the eleven claude.* codes (claude-thread-functions INV-6, §12.3
+    # row 16, and claude.api_error and claude.budget_exhausted from the
+    # PR #1044 review),
     # invalid_argument and runtime.error.
     codes = lib_api.FailureCode
-    harness_codes = [codes(f"{harness}.{problem}") for harness in HARNESSES for problem in PROBLEMS] + [codes("muse.wsl_unavailable"), codes("claude.api_error")]
+    harness_codes = [codes(f"{harness}.{problem}") for harness in HARNESSES for problem in PROBLEMS] + [codes("muse.wsl_unavailable"), codes("claude.api_error"), codes("claude.budget_exhausted")]
     expected = {*harness_codes, codes.CONFIGURATION_INVALID_ARGUMENT, codes.RUNTIME_ERROR}
     for table in (lib_api.constants.NATIVE_THREAD_LIKELY_CAUSES, lib_api.constants.NATIVE_THREAD_NEXT_STEPS):
         assert set(table) == expected
