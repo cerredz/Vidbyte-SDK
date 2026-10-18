@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: A sequential pipeline (spec D-27): one step runs at a time an
 FUNCTION INVENTORY: ThreadChains.chain_threads is the narrated main function; _steps checks the steps; _template picks and checks the template; _fit checks every prompt against the step that receives it; _gits finds git for the steps whose diff is read; _values fills the next step's template. ThreadChainPair.__init__ builds an alias's signature and __call__ runs the alias; ThreadChainPairs holds the six aliases.
 COMMON MODIFICATION PATTERNS: A new value for chain templates is one ComposeField member in CHAIN_TEMPLATE_FIELDS and one entry in _values and in _fit, spliced there when it holds model output or workspace content. A fourth harness adds its ordered pairs as ThreadChainPairs members and binds them in __init__.py.
 WHAT NOT TO DO IN THIS FILE: 1. Do not run git for a template without {diff}, or for the last step. 2. Do not hand-write an alias; build it as a ThreadChainPair. 3. Do not splice or shorten the caller's prompt or template; only answers and diffs are scrubbed and cut. 4. Do not start a step after a failed one.
-KNOWN EDGE CASES: Steps on one workspace share one git check. A step's diff includes any edit made outside the chain while it ran (EC-12). A git failure after a step ran carries the chain so far in ThreadComposeError.result. A template made only of placeholders is refused before any I/O, because it would send a blank prompt when the previous answer is blank (INV-18, EC-37).
+KNOWN EDGE CASES: Steps on one workspace share one git check. A step's diff includes any edit made outside the chain while it ran (EC-12). A git failure after a step ran carries the chain so far in ThreadComposeError.result. A template that is blank once the answer and the diff are empty, such as {previous} alone, is refused before any I/O, because it would send a blank prompt when they are blank; {prompt} counts as the caller's prompt there, which is never blank, so a template that holds it is never refused (INV-18, EC-79).
 RELATED DOCS: vidbyte/harnesses/README.md
 TESTS: tests/features/harness_compose/test_harness_compose_chain.py, tests/features/harness_compose/test_harness_compose_keys.py, tests/features/harness_compose/test_harness_compose_validation.py
 """
@@ -121,15 +121,18 @@ class ThreadChains:
         # step must take the template with the answer and the diff at
         # their longest truncation notes: measured first without the
         # prompt, so a template too long by itself is blamed on the
-        # template.
+        # template. The blank check reads the whole prompt, in which
+        # {prompt} is the caller's own prompt and never blank, so only
+        # the template can make it blank (EC-79).
+        alone = ComposeTexts.render(template, {ComposeField.PROMPT: "", ComposeField.PREVIOUS: ComposeTexts.spliced(""), ComposeField.DIFF: ComposeTexts.spliced("")})
+        whole = ComposeTexts.render(template, {ComposeField.PROMPT: prompt, ComposeField.PREVIOUS: ComposeTexts.spliced(""), ComposeField.DIFF: ComposeTexts.spliced("")})
         for index, step in enumerate(steps):
             receiver = StepRoles.item(native_compose.COMPOSE_STEPS_ARGUMENT, index)
             if not index:
                 await PromptFitter.check(ComposeTexts.fixed(prompt), step, argument=native_compose.COMPOSE_PROMPT_PARAMETER, receiver=receiver)
                 continue
-            for argument, text in ((native_compose.COMPOSE_TEMPLATE_ARGUMENT, ""), (native_compose.COMPOSE_PROMPT_PARAMETER, prompt)):
-                frame = ComposeTexts.render(template, {ComposeField.PROMPT: text, ComposeField.PREVIOUS: ComposeTexts.spliced(""), ComposeField.DIFF: ComposeTexts.spliced("")})
-                await PromptFitter.check(frame, step, argument=argument, receiver=receiver)
+            await PromptFitter.check(alone, step, argument=native_compose.COMPOSE_TEMPLATE_ARGUMENT, receiver=receiver, whole=whole)
+            await PromptFitter.check(whole, step, argument=native_compose.COMPOSE_PROMPT_PARAMETER, receiver=receiver)
 
     @staticmethod
     async def _gits(steps: Sequence[ThreadStep], template: str, keys: Sequence[str]) -> tuple[ComposeGit | None, ...]:
