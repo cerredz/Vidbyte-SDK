@@ -3,7 +3,7 @@
 PURPOSE: A standard-library stand-in for the three vendor CLIs the harness thread functions drive (`grok --single`, `opencode run --format json`, `muse exec --json` and batch `muse serve`) and for `wsl.exe`, scripted by a JSON scenario file and logging what each process received.
 ROLE IN CODEBASE: Run as a real child process by the harness_threads tests, and from its path by the harness_compose tests, and never imported. The tests hand it to the SDK through GrokThreadConfig.grok_command, OpencodeThreadConfig.opencode_command and MuseThreadConfig.muse_command (spec §13 "Real seams"), or put an `.exe`/script stand-in that runs it first on PATH.
 ARCHITECTURE NOTE: argv[1] is the scenario path; everything after it is what the SDK appended. A stand-in built for `wsl.exe` inserts `--as-wsl` first, and the muse role then sees only the variables that WSLENV names, as the real wsl.exe forwards. Each process logs to its own JSONL file named after its launch number, so logs read back in launch order and never interleave. Credentials are logged as a SHA-256 digest and a length, never as values. Threads persist as files (Grok under GROK_HOME keyed by --cwd, as Grok does; opencode and Muse under the scenario's state folder), so continue and fork behave like the vendors.
-FUNCTION INVENTORY: main dispatches on the scenario's program; run_grok, run_opencode, run_muse_exec, run_muse_serve and run_wsl play one program each; FakeLog writes the per-process log; start_record captures argv, cwd, stdin kind, credential digests, plain variables and skill folders; hold waits for the release file or the hold limit; flood writes past an output cap; echo_text builds the AC-4 secret echo; early_stderr prints the scenario's stderr_text before any mode runs (R-6). For harness_compose: scripted applies the per-launch `answers` and the prompt-matched `replies` and names the launch's `label`; claim_turn numbers the launches of one scenario; touch_workspace logs the digests of `observe_files`, writes `write_files` into the working folder and deletes `delete_paths`; run_marker leaves a marker file for the hostile git configuration test.
+FUNCTION INVENTORY: main dispatches on the scenario's program; run_grok, run_opencode, run_muse_exec, run_muse_serve and run_wsl play one program each; FakeLog writes the per-process log; start_record captures argv, cwd, stdin kind, credential digests, plain variables and skill folders; hold waits for the release file or the hold limit; flood writes past an output cap; echo_text builds the AC-4 secret echo; early_stderr prints the scenario's stderr_text before any mode runs (R-6). For harness_compose: scripted applies the per-launch `answers` and the prompt-matched `replies` and names the launch's `label`; claim_turn numbers the launches of one scenario; touch_workspace logs the digests of `observe_files`, writes `write_files` into the working folder and deletes `delete_paths`; linger_on_term makes a `term_linger` process outlast SIGTERM on POSIX; run_marker leaves a marker file for the hostile git configuration test.
 COMMON MODIFICATION PATTERNS: Add a scenario field, read it here with .get and a default, and log anything a test must assert on.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import vidbyte or anything outside the standard library. 2. Do not contact the network or run a real vendor CLI or the real wsl.exe. 3. Do not log a credential value; only echo_secrets mode prints one, on purpose, into the vendor's own error output. 4. Never use shell=True.
 KNOWN EDGE CASES: A held process exits by itself after HOLD_LIMIT_SECONDS, so a broken stop cannot leak it for long; its grandchild sleeps GRANDCHILD_SECONDS. opencode reads stdin as bytes and decodes UTF-8 (the Windows console code page is not UTF-8). `muse exec --session-id <unknown>` silently starts a new thread, as Muse 1.0.1 does (spec §15, probe 9).
@@ -192,6 +192,16 @@ def hold(scenario: dict[str, Any]) -> str:
     return "limit"
 
 
+def linger_on_term(scenario: dict[str, Any], log: FakeLog) -> None:
+    # harness_compose: with "term_linger", a POSIX process logs a
+    # "terminating" record on SIGTERM and keeps running, as a vendor
+    # CLI that is slow to stop would, so only the stop's forced kill
+    # ends it. Windows stops a tree with taskkill /F, which no
+    # handler sees, so the field does nothing there.
+    if scenario.get("term_linger") and sys.platform != "win32":
+        signal.signal(signal.SIGTERM, lambda number, _frame: log.write("terminating", signal=number))
+
+
 def start_grandchild(log: FakeLog) -> None:
     # A grandchild that inherits the pipes, so only a whole-tree stop
     # ends it.
@@ -357,6 +367,7 @@ def run_grok(scenario: dict[str, Any], args: list[str]) -> None:
     log = FakeLog(scenario["log_dir"], "grok")
     start_record(log, "grok", args, env, via_wsl=False, skills_folder=None if home is None else Path(home) / "skills", extra={"options": options, "switches": switches, "stray": stray, **script})
     touch_workspace(scenario, log)
+    linger_on_term(scenario, log)
     mode = scenario.get("mode", "ok")
     if scenario.get("grandchild"):
         start_grandchild(log)
@@ -441,6 +452,7 @@ def run_opencode(scenario: dict[str, Any], args: list[str]) -> None:
     skills_paths = (config or {}).get("skills", {}).get("paths", []) if isinstance(config, dict) else []
     start_record(log, "opencode", args, env, via_wsl=False, skills_folder=None, extra={"options": options, "switches": switches, "stray": stray, "stdin_text": stdin_text, "skill_paths_loadable": [Path(path).is_absolute() and (Path(path) / "SKILL.md").is_file() for path in skills_paths], **script})
     touch_workspace(scenario, log)
+    linger_on_term(scenario, log)
     mode = scenario.get("mode", "ok")
     if scenario.get("grandchild"):
         start_grandchild(log)
@@ -554,6 +566,7 @@ def run_muse_exec(scenario: dict[str, Any], args: list[str], env: dict[str, str]
     log = FakeLog(scenario["log_dir"], "muse-exec")
     start_record(log, "muse-exec", args, env, via_wsl=via_wsl, skills_folder=None if xdg is None else xdg / "muse" / "skills", extra={"options": options, "switches": switches, "operands": operands, "launcher_args": launcher_args, **script})
     touch_workspace(scenario, log)
+    linger_on_term(scenario, log)
     mode = scenario.get("mode", "ok")
     if via_wsl:
         register_mark(scenario, env)
