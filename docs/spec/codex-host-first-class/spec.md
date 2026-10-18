@@ -1,7 +1,7 @@
 ---
 spec: codex-host-first-class
 title: CodexHost first-class Codex features (slice 2 of 2)
-status: reviewed
+status: verified
 revision: 8
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-codex-host-first-class

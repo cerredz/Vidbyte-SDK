@@ -20,12 +20,12 @@ Slice 1 (`docs/spec/codex-host-hardening/`, status `verified`) is done on this b
 | S2 tests | done | 03:15 | 06:40 | reports/S2-test-author.md | 236 tests in 14 new modules plus the §13 pin rewrites (fa27a3ad, ab13e1e7, 893f1df4); **S2_HEAD 625279c6, then e3d41513 after S3's blockers**; red set 253 = 233 new + 19 superseded pins + 1 inherited; spec r4 d0529d15 |
 | S3 implement | done | 06:45 | 03:40 | reports/S3-implementer.md | 39 rows; budget exact (13/69/0/42); **S3_HEAD 8ea8734f** pushed; #1181 body updated, still draft; area 1 failed (inherited) / 1293 passed; source gate 1 failed (inherited) / 6824 passed; package `CI passed.`; 13 implementation deviations in spec §17 |
 | S4 adversarial review | done | 03:45 | 05:10 | reports/S4-review-{conformance,conventions,engineering}.md, reports/S4-findings-verifier.md | review.md: 8 confirmed (2 Blockers R-1, R-2; 6 Majors R-3…R-8), 7 Minors m-1…m-7, 0 refuted |
-| S5 repair loop | done | 06:20 | 07:15 | reports/S5-repair-1.md, verify-log.md | iteration 1/8 closed R-1…R-5, R-8, m-2…m-5 (R-6/R-7 by S2 9ad2771e, m-1 by r6); HEAD ec17d5ce pushed; area 1 failed (inherited)/1302 passed; source 1 failed (inherited)/6833 passed; package `CI passed.` |
-| S5 re-review | round 1 done | 07:20 | 07:50 | reports/S5-rereview.md | MERGEABLE AFTER FIXES: R-RR1 Blocker (record `is_dir()` re-raises EACCES), R-RR2 Minor, R-RR3 Minor (spec); 8 of 10 S4 items CLOSED with revert-mutant proof; spec r7 e736c93f (deviation 5) |
+| S5 repair loop | done | 06:20 | 09:55 | reports/S5-repair-{1,2,3}.md, verify-log.md | 3 iterations: 2 (bff67286) R-RR1 + R-RR2 comment; 3 (**HEAD 8bac8d24**, fix bd89e5b8) R-RR2-1. S2_HEAD 2bdb5e95 untouched; area 1F(inherited)/1306P/3S; source 1F(inherited)/6837P/27S; package CI passed; SDK-LINT: PASS; **spec status: verified**. Iteration 1/8 closed R-1…R-5, R-8, m-2…m-5 (R-6/R-7 by S2 9ad2771e, m-1 by r6); HEAD ec17d5ce pushed; area 1 failed (inherited)/1302 passed; source 1 failed (inherited)/6833 passed; package `CI passed.` |
+| S5 re-review | 2 rounds done | 07:20 | 09:20 | reports/S5-rereview.md, reports/S5-rereview-2.md | round 2: SOUND, 1 Minor R-RR2-1 (fixed in iteration 3). Round 1: MERGEABLE AFTER FIXES: R-RR1 Blocker (record `is_dir()` re-raises EACCES), R-RR2 Minor, R-RR3 Minor (spec); 8 of 10 S4 items CLOSED with revert-mutant proof; spec r7 e736c93f (deviation 5) |
 | S6 PR (both slices) | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 2/8 · S5 re-review rounds: 2/2
+- S1 review rounds: 2/2 · S5 repair iterations: 3/8 · S5 re-review rounds: 2/2
 
 ## Decisions the orchestrator made
 - 2026-10-17 22:40: **The same branch, worktree and PR as slice 1.** The precedent is #1055's two specs in one PR. Slice 2's base is slice 1's verified HEAD a7730107. request.md is slice 1's verbatim conversation capture with a slice-2 header (scope, what slice 1 already built, and the machinery to reuse).
@@ -167,6 +167,31 @@ Slice 1 (`docs/spec/codex-host-hardening/`, status `verified`) is done on this b
     3. I verify it myself with a revert mutant and the gates.
     
     There is no round-3 re-review, because the cap is 2. The root fix in `validation.py` `to_path` joins the separate follow-up PR, with `require_directory` and `native_threads.py:120,146`.
+
+- 2026-10-18 09:40: S2 round 6 checked myself.
+  - **S2_HEAD is now 2bdb5e95.** It adds two tests with four subtests: an `__fspath__` returning int, and one returning None. `bytes` is already refused, so it gets no row.
+  - Red at e1f9cb4f: `FAILED (errors=4)`, all four a raw `TypeError`.
+  - The 4 removed lines are header and coverage-map rewrites, not assertions.
+
+- 2026-10-18 09:55: **Slice 2 verified.** Checks I ran myself at 8bac8d24:
+  - HEAD equals the live remote, and the tree is clean.
+  - `git diff 2bdb5e95..HEAD -- tests` is 0 lines, and `lint/` is unchanged since a7730107.
+  - Since 2bdb5e95 the source diff is one file, `codex_host_inputs.py` (+5/-3): the tuple gets `TypeError`, plus the comment and the header's KNOWN EDGE CASES.
+  - In-memory revert mutants (`scratchpad/s5-iter3-verify/rr21_mutant.py`), run on the records and worktree files:
+    - NONE gives `60 passed`;
+    - DROP-TYPE gives `2 failed`, exactly the R-RR2-1 tests;
+    - DROP-OS gives `2 failed`, exactly the R-RR1 tests, so each fix is pinned by its own tests.
+  - Area: `1 failed (inherited), 1306 passed, 3 skipped`. `SDK-LINT: PASS`, nothing REGRESSED.
+  - Iteration 3 quoted source `1 failed (inherited), 6837 passed, 27 skipped` and package `CI passed.`
+  - I set the spec's `status: verified` as a docs status flip, as I did for slice 1.
+  
+  **Decision (the repair agent's open observation):** a caller's own `__fspath__` that *raises* `ValueError`, `KeyError` or `AttributeError` still escapes the record. I rule this outside INV-2 and change no code.
+  - INV-2 governs failures the method raises. An exception thrown inside the caller's own callback is the caller's bug, and `open()` and `Path()` pass it through the same way.
+  - `except Exception` would hide real bugs in user code.
+  - **The rule:** the SDK maps "this value is not a valid path", which is `os.fspath`'s own `TypeError` about the return type, and passes through "your code raised". The one exception is a callback that itself raises `TypeError`, which the tuple now also maps.
+  - The `validation.py` follow-up PR should apply this rule consistently in `to_path`.
+  
+  **Next:** S6, covering both slices.
 
 ## User replies (verbatim)
 - (none yet)
