@@ -226,8 +226,7 @@ class _CodexHostTool(BaseTool):
         value = call.arguments.get(name)
         if value is None and not required:
             return ()
-        entries_ok = isinstance(value, list) and all(isinstance(entry, dict) and set(entry) == HANDLE_KEYS and all(isinstance(entry[key], str) and entry[key].strip() for key in HANDLE_KEYS) for entry in value)
-        if not entries_ok or (required and not value):
+        if not isinstance(value, list) or (required and not value) or not all(isinstance(entry, dict) and set(entry) == HANDLE_KEYS and all(isinstance(entry[key], str) and entry[key].strip() for key in HANDLE_KEYS) for entry in value):
             raise ToolExecutionError(f"'{name}' must be a {'non-empty ' if required else ''}list of objects, each with exactly a non-empty string thread_id and turn_id.", details={"parameter": name})
         return tuple(CodexTurnHandle(thread_id=entry["thread_id"], turn_id=entry["turn_id"]) for entry in value)
 
