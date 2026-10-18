@@ -295,7 +295,7 @@ THREAD_COMPOSE_NEXT_STEP_SENTENCE = "Next step: {next_step}"
 
 # Answer problems: why an answer was not accepted, sent back to the
 # model in a repair turn (INV-19, INV-23).
-COMPOSE_TRUNCATED_PROBLEM = "The answer was cut at the length limit, so it was not read. Answer again with a shorter JSON object."
+COMPOSE_TRUNCATED_PROBLEM = "The answer was cut at the length limit, so it was not read."
 COMPOSE_EXTRA_MEMBERS_PROBLEM = "The JSON object has members the schema does not allow: {members}."
 COMPOSE_MISSING_MEMBERS_PROBLEM = "The JSON object lacks members the schema requires: {members}."
 COMPOSE_ROLE_COUNT_PROBLEM = "The plan must list exactly {expected} roles, one for each proposer; it lists {actual}."
