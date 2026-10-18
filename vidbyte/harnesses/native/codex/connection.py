@@ -460,8 +460,10 @@ class CodexConnection:
     ) -> None:
         # Hardening INV-7: a success at DEBUG, a failure at WARNING with
         # its code, the type of what was raised and where it was raised,
-        # never its text (INV-10). The caller or Codex chose the thread
-        # id, so it is logged as one bounded token (S4 R-9).
+        # never its text (INV-10). A failure names the method its error
+        # names, which for a goal resume is the thread/goal/set Codex
+        # refused (first-class EC-37). The caller or Codex chose the
+        # thread id, so it is logged as one bounded token (S4 R-9).
         duration_ms = int((time.monotonic() - started) * CODEX_MILLISECONDS_PER_SECOND)
         thread_token = LogToken.of(thread_id, CODEX_HOST_LOG_TOKEN_MAX_CHARS)
         if exc is None or error is None:
@@ -470,7 +472,7 @@ class CodexConnection:
         logger.warning(
             "codex_host_call_failed operation=%s method=%s thread_id=%s failure_code=%s error_type=%s origin=%s duration_ms=%d",
             operation.value,
-            method,
+            error.method or method,
             thread_token,
             error.failure_code,
             type(exc).__name__,
