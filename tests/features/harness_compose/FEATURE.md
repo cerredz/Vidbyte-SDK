@@ -20,7 +20,7 @@ Python callers of `vidbyte.harnesses.native.compose`. Underneath it are the nine
 
 ## Inputs and Preconditions
 
-The tests run offline only. Every vendor program is the base pack's stand-in `tests/features/harness_threads/fake_harness.py`. Each bound step points at its own scenario of the stand-in through its config's `<harness>_command`. AC-1 instead puts `.exe` (win32) or script (POSIX) stand-ins on `PATH`. The real `git` is reachable on `PATH`: on win32 its Git for Windows folder is appended, and on POSIX a symbolic link inside the sandbox is used. The machine's git configuration is shut out with `GIT_CONFIG_NOSYSTEM=1`, an empty `GIT_CONFIG_GLOBAL` and `GIT_CEILING_DIRECTORIES` set to the sandbox root, and the 15 repository-location variables are removed. The user home and the temporary folder point into the sandbox, so compose's worktrees and temporary indexes land outside every test repository. Two tests make one fan-out child fail from outside compose with a `reference-transaction` hook that the sandbox repository's own `core.hooksPath` names (EC-59: compose's git still runs it during `worktree add`). Three tests keep a reader's worktree folder from being deleted, from outside compose: on win32 they hold a file open inside it, and on POSIX they take write permission away from a folder inside it, so as root, where permissions do not hold, they skip. No real key, network or vendor CLI is used.
+The tests run offline only. Every vendor program is the base pack's stand-in `tests/features/harness_threads/fake_harness.py`. Each bound step points at its own scenario of the stand-in through its config's `<harness>_command`. AC-1 instead puts `.exe` (win32) or script (POSIX) stand-ins on `PATH`. The real `git` is reachable on `PATH`: on win32 its Git for Windows folder is appended, and on POSIX a symbolic link inside the sandbox is used. The machine's git configuration is shut out with `GIT_CONFIG_NOSYSTEM=1`, an empty `GIT_CONFIG_GLOBAL` and `GIT_CEILING_DIRECTORIES` set to the sandbox root, and the 15 repository-location variables are removed. The user home and the temporary folder point into the sandbox, so compose's worktrees and temporary indexes land outside every test repository. Two tests make one fan-out child fail from outside compose with a `reference-transaction` hook that the sandbox repository's own `core.hooksPath` names (EC-59: compose's git still runs it during `worktree add`). Three tests keep a reader's worktree folder from being deleted, from outside compose: on win32 they hold a file open inside it, and on POSIX they take write permission away from a folder inside it, so as root, where permissions do not hold, they skip. The stand-in's `delete_paths` field deletes a skill folder while a step runs, so a step compose derives later meets a folder that is gone. No real key, network or vendor CLI is used.
 
 ## Observable Outcomes
 
@@ -89,6 +89,7 @@ Each is an input and state that leads to a wrong output, and each has a test her
   - a caret argument that cmd.exe strips.
 - Worktrees: a worktree left registered or on disk after a raise or a cancel.
 - Removal: a reader worktree that cannot be removed after its reader answered drops the finished verdicts or proposals and their thread ids from the error's record, or leaves a running sibling, a task or a registration behind.
+- Derived steps: a verifier relocated into its worktree, a repair turn anchored on its thread or a stage attempt on a ladder rung is checked again after I/O, so a skill folder deleted meanwhile raises a bare `ConfigurationError` and the record is lost.
 - Fan-out: when one child's worktree cannot be added, a sibling left running or a task left pending as the error propagates, or the error held back until the sibling ends by itself.
 - Diffs: earlier uncommitted edits mixed into the writer's diff, a new untracked file missing from it, or diff paths made relative to a subfolder workspace.
 - Concurrency: Grok verifiers on one workspace overlapping, or one lock per composite instead of per workspace.
@@ -114,6 +115,7 @@ Each is an input and state that leads to a wrong output, and each has a test her
 2026-10-18: after S5 repair 1, each fix that only scratch probes had proven got a test here that fails on S3's code (`e1bf20d8`) and passes on the repair (`docs/spec/native-thread-compose/test-plan.md`, Coverage added after S5 repair 1):
 
 - R-8: a reader worktree that could not be removed lost every finished answer from the error's record.
+- R-15: a step compose derived after I/O was checked again and raised a bare `ConfigurationError`.
 
 ## Test Suite Map
 
@@ -132,6 +134,7 @@ Each is an input and state that leads to a wrong output, and each has a test her
 - `test_harness_compose_workspace.py`: `capture_diff` and `in_worktree` (AC-17, AC-18, INV-7, INV-8, EC-74).
 - `test_harness_compose_concurrency.py`: cancellation, a failed worktree add that stops its siblings before its error propagates, Grok serialization within a composite, and the lock per workspace across composites (AC-10, AC-11, INV-13, INV-14, EC-17, EC-19, EC-22).
 - `test_harness_compose_removal.py`: a reader worktree that cannot be removed after its reader answered, with the record keeping every verdict or proposal and its thread id, and a running sibling stopped first (EC-16, INV-14, INV-15, D-26).
+- `test_harness_compose_derived_steps.py`: a relocated verifier, an anchored repair turn and a ladder rung that meet a deleted skill folder are recorded failures, never a raise (INV-9, INV-15, INV-19, INV-21, D-26).
 - `test_harness_compose_keys.py`: no key in another step's prompt, an error (the refusal of every caller text that holds a key included), a `repr` or git's argv or environment, while the raw records keep the step's own text (AC-15, INV-4, INV-5, EC-71, T-3).
 
 Run `PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_compose`.

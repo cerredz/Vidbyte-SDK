@@ -3,7 +3,7 @@
 PURPOSE: A standard-library stand-in for the three vendor CLIs the harness thread functions drive (`grok --single`, `opencode run --format json`, `muse exec --json` and batch `muse serve`) and for `wsl.exe`, scripted by a JSON scenario file and logging what each process received.
 ROLE IN CODEBASE: Run as a real child process by the harness_threads tests, and from its path by the harness_compose tests, and never imported. The tests hand it to the SDK through GrokThreadConfig.grok_command, OpencodeThreadConfig.opencode_command and MuseThreadConfig.muse_command (spec §13 "Real seams"), or put an `.exe`/script stand-in that runs it first on PATH.
 ARCHITECTURE NOTE: argv[1] is the scenario path; everything after it is what the SDK appended. A stand-in built for `wsl.exe` inserts `--as-wsl` first, and the muse role then sees only the variables that WSLENV names, as the real wsl.exe forwards. Each process logs to its own JSONL file named after its launch number, so logs read back in launch order and never interleave. Credentials are logged as a SHA-256 digest and a length, never as values. Threads persist as files (Grok under GROK_HOME keyed by --cwd, as Grok does; opencode and Muse under the scenario's state folder), so continue and fork behave like the vendors.
-FUNCTION INVENTORY: main dispatches on the scenario's program; run_grok, run_opencode, run_muse_exec, run_muse_serve and run_wsl play one program each; FakeLog writes the per-process log; start_record captures argv, cwd, stdin kind, credential digests, plain variables and skill folders; hold waits for the release file or the hold limit; flood writes past an output cap; echo_text builds the AC-4 secret echo; early_stderr prints the scenario's stderr_text before any mode runs (R-6). For harness_compose: scripted applies the per-launch `answers` and the prompt-matched `replies` and names the launch's `label`; claim_turn numbers the launches of one scenario; touch_workspace logs the digests of `observe_files` and writes `write_files` into the working folder; run_marker leaves a marker file for the hostile git configuration test.
+FUNCTION INVENTORY: main dispatches on the scenario's program; run_grok, run_opencode, run_muse_exec, run_muse_serve and run_wsl play one program each; FakeLog writes the per-process log; start_record captures argv, cwd, stdin kind, credential digests, plain variables and skill folders; hold waits for the release file or the hold limit; flood writes past an output cap; echo_text builds the AC-4 secret echo; early_stderr prints the scenario's stderr_text before any mode runs (R-6). For harness_compose: scripted applies the per-launch `answers` and the prompt-matched `replies` and names the launch's `label`; claim_turn numbers the launches of one scenario; touch_workspace logs the digests of `observe_files`, writes `write_files` into the working folder and deletes `delete_paths`; run_marker leaves a marker file for the hostile git configuration test.
 COMMON MODIFICATION PATTERNS: Add a scenario field, read it here with .get and a default, and log anything a test must assert on.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import vidbyte or anything outside the standard library. 2. Do not contact the network or run a real vendor CLI or the real wsl.exe. 3. Do not log a credential value; only echo_secrets mode prints one, on purpose, into the vendor's own error output. 4. Never use shell=True.
 KNOWN EDGE CASES: A held process exits by itself after HOLD_LIMIT_SECONDS, so a broken stop cannot leak it for long; its grandchild sleeps GRANDCHILD_SECONDS. opencode reads stdin as bytes and decodes UTF-8 (the Windows console code page is not UTF-8). `muse exec --session-id <unknown>` silently starts a new thread, as Muse 1.0.1 does (spec §15, probe 9).
@@ -17,6 +17,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import signal
 import stat
 import subprocess
@@ -309,7 +310,9 @@ def touch_workspace(scenario: dict[str, Any], log: FakeLog) -> None:
     # harness_compose: log the SHA-256 of each "observe_files" path in
     # the working folder (None when it is not a file), then write each
     # "write_files" entry ({relative path: text}) there as UTF-8 bytes,
-    # as a vendor CLI editing its workspace would.
+    # as a vendor CLI editing its workspace would, then delete each
+    # "delete_paths" entry that exists: a file or a whole folder,
+    # named by an absolute path or one relative to the working folder.
     observe = scenario.get("observe_files") or []
     if observe:
         found: dict[str, str | None] = {}
@@ -324,6 +327,18 @@ def touch_workspace(scenario: dict[str, Any], log: FakeLog) -> None:
         path.write_bytes(text.encode("utf-8"))
     if writes:
         log.write("wrote", files=sorted(writes))
+    deleted: list[str] = []
+    for name in scenario.get("delete_paths") or []:
+        path = Path(os.getcwd()) / name
+        if path.is_dir():
+            shutil.rmtree(path)
+        elif path.exists():
+            path.unlink()
+        else:
+            continue
+        deleted.append(name)
+    if deleted:
+        log.write("deleted", paths=deleted)
 
 
 def run_marker(scenario: dict[str, Any], args: list[str]) -> None:
