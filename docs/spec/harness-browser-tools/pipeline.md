@@ -23,7 +23,7 @@ started: 2026-10-16 21:43
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 (cap reached) · S5 repair iterations: 1/8 (iteration 1 launched 2026-10-17) · S5 re-review rounds: 1/2 (round 1 launched 2026-10-18)
+- S1 review rounds: 2/2 (cap reached) · S5 repair iterations: 2/8 (iteration 2 launched 2026-10-18, scoped to R-C1) · S5 re-review rounds: 1/2 (round 1 launched 2026-10-18)
 - S2_HEAD (test-tree baseline): 6567f6aa (tests fb8ab004 + proof; fixture fold applied). Post-S3 repairs end at 9e81a7d0; post-S4 additions end at fb7be13e. Test-edit check from now on: `git diff fb7be13e..HEAD --stat -- tests/` must be EMPTY (S5/S6) unless the orchestrator adjudicates.
 - Effective base after merge: origin/main 6f5a7310 (drift checks diff 6f5a7310..origin/main)
 
@@ -79,6 +79,9 @@ started: 2026-10-16 21:43
 
 - 2026-10-18 — S5 iteration 1 DONE @ e2fdf0e2 (pushed): fixed R-1 8286f1aa, R-2 fb8c0508, R-3 4c686557, R-4 36e5129e, R-5 1990e363 (+ spec r5), R-6 103a27a5, R-7 07ac09b6, R-8 e8e543a9, R-9 31ae9ba4, R-10 ece025b3; R-16/R-17 by test commits. Agent gates: lint `SDK-LINT: PASS` (A002 562/703, S024 25/25, S064 4/4, A007 255/255); source gate `1 failed, 6628 passed, 17 skipped` (inherited only); package `CI passed.`; CI 39096073590 + Static policy 39096074746 success on e2fdf0e2. Orchestrator convergence check: tree clean; HEAD == origin == e2fdf0e2; `git diff fb7be13e..HEAD -- tests/` = only the pre-granted README_BULLET line in test_codex_host_packaging.py; verify-log "## Iteration 1" present; all 6 confirmed findings `fixed @<sha>`; independent area run harness_threads + codex_host `1 failed, 818 passed, 3 skipped` (inherited `assert 167 == 120` only). CONVERGED at iteration 1/8. Agent-noted trade-offs for the re-review: R-3 first removal try always runs (worst case = 10 s budget + one rmtree; a hung rmtree is no longer cut off); reaper.py keeps the `"win32"` literal because `mypy --platform win32` flags `signal.SIGKILL` behind the constant.
 - 2026-10-18 — Pre-granted test change (adjudicated before launch): R-5 README rewording required updating ONLY `README_BULLET` in tests/features/codex_host/test_codex_host_packaging.py (pinned byte-for-byte by #1055); granted because the pin's guarded property (Codex import guidance) survives and the alternative kept the misleading "Each harness" text. Verified as a 1-line diff.
+
+- 2026-10-18 — S5 re-review round 1 (conformance, alone on the post-repair diff): SOUND — 12/12 fixes confirmed (several by in-memory mutation), 0 Blocker / 0 Major / 2 Minor; test tree only the pre-granted line since fb7be13e; budget 12/34; baseline untouched. R-3 judged to meet INV-12 read with EC-22 (overrun ≤ one pause + one rmtree per `_remove`; `complete` makes two). Minor R-C1: `BROWSER_TOOLS_UNAVAILABLE_DETAIL` (vidbyte/lib/constants/browser_tools.py:398) still says "neither a connection to nor a call on" — false for the R-2 case where a FAILED call was recorded (a regression of the R-2 fix in user-facing error text; orchestrator verified the string). Minor R-C2: no test proves a completed call on a server absent from `available_commands` still counts (mutant M2 survives; the fake Grok cannot stage it) → follow-up for the PR body.
+- 2026-10-18 — Orchestrator: run a scoped S5 iteration 2 for R-C1 only (one-word fix "nor a completed call on"; user-facing text made false by the R-2 fix; cheap) rather than shipping it as a follow-up; R-C2 stays a follow-up (needs a new fake scenario key — test infra). No further re-review round needed for a one-word constant if iteration 2 converges (focused tests + lint + remote CI green); counts toward the 8-iteration cap (2/8).
 
 ## User replies (verbatim)
 - (none yet)
