@@ -47,12 +47,18 @@ from vidbyte.lib.enums.codex import (
     CodexApprovalMode,
     CodexApprovalPolicy,
     CodexApprovalsReviewer,
+    CodexCollaborationModeKind,
     CodexCommandApprovalKind,
     CodexContextAnchor,
     CodexGoalStatus,
     CodexHostOperation,
     CodexInputType,
+    CodexMcpAuthStatus,
+    CodexMcpConnectionStatus,
+    CodexMcpServerDetail,
+    CodexMemoryMode,
     CodexPersonality,
+    CodexPlanStepStatus,
     CodexReasoningEffort,
     CodexReasoningSummary,
     CodexReviewDelivery,
@@ -67,7 +73,10 @@ from vidbyte.lib.enums.codex import (
     CodexThreadSourceKind,
     CodexThreadStartSource,
     CodexThreadStatus,
+    CodexTurnEventKind,
+    CodexTurnSettingsStatus,
     CodexTurnStatus,
+    CodexTurnWaitMode,
 )
 from vidbyte.lib.enums.coding import CodingContextSection
 from vidbyte.lib.enums.config import AgentType, DocumentType
@@ -160,7 +169,7 @@ from vidbyte.lib.enums.outputs import (
     TypefullyPlatform,
 )
 from vidbyte.lib.enums.platform import Platform
-from vidbyte.lib.enums.process import CliOptionStyle, ProcessLaunchFailure
+from vidbyte.lib.enums.process import CliOptionStyle, GitFlag, ProcessLaunchFailure
 from vidbyte.lib.enums.prompts import Prompt, SystemPromptPreset
 from vidbyte.lib.enums.reasoning_strategies import (
     AbsenceEvidenceSignificance,
@@ -214,12 +223,18 @@ __all__ = [
     "CodexApprovalMode",
     "CodexApprovalPolicy",
     "CodexApprovalsReviewer",
+    "CodexCollaborationModeKind",
     "CodexCommandApprovalKind",
     "CodexContextAnchor",
     "CodexGoalStatus",
     "CodexHostOperation",
     "CodexInputType",
+    "CodexMcpAuthStatus",
+    "CodexMcpConnectionStatus",
+    "CodexMcpServerDetail",
+    "CodexMemoryMode",
     "CodexPersonality",
+    "CodexPlanStepStatus",
     "CodexReasoningEffort",
     "CodexReasoningSummary",
     "CodexReviewDelivery",
@@ -234,7 +249,10 @@ __all__ = [
     "CodexThreadSourceKind",
     "CodexThreadStartSource",
     "CodexThreadStatus",
+    "CodexTurnEventKind",
+    "CodexTurnSettingsStatus",
     "CodexTurnStatus",
+    "CodexTurnWaitMode",
     "CodingContextSection",
     "CompositionDivisionValidity",
     "ConsistencyStatus",
@@ -250,6 +268,7 @@ __all__ = [
     "FailurePhase",
     "FailureSeverity",
     "FailureStatus",
+    "GitFlag",
     "GitHeadState",
     "GrokFlag",
     "GrokPermissionMode",
