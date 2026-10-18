@@ -50,17 +50,26 @@ class DiffCapture:
 
     async def __aenter__(self) -> Self:
         """Find git and the repository, then snapshot the working tree before the block runs."""
+        # Find git and the repository root. A diff needs no commit, so
+        # has_commit only learns whether HEAD names one, which the
+        # snapshot reads.
         git = ComposeGit.locate(self.workspace, ())
         await git.toplevel()
         await git.has_commit()
+
+        # Snapshot the whole working tree before the block runs.
         self._before = await git.snapshot()
         self._git = git
         return self
 
     async def __aexit__(self, kind: type[BaseException] | None, error: BaseException | None, trace: TracebackType | None) -> None:
         """After a block that ended normally, snapshot again and keep the diff; after one that raised, keep none and let its exception go on."""
+        # A block that raised, or a manager that never entered, keeps
+        # no diff; the block's exception goes on.
         if error is not None or self._git is None or self._before is None:
             return
+
+        # Snapshot again and keep the change between the two snapshots.
         after = await self._git.snapshot()
         self.diff = await self._git.diff(self._before, after)
 
