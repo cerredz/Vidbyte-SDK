@@ -4,9 +4,9 @@ PURPOSE: Defines the twenty-six validated records CodexHost takes and returns: t
 ROLE IN CODEBASE: The data layer under vidbyte/harnesses/native/codex/ (the host and its translators) and vidbyte/tools/builtins/codex/ (the twenty-six tools), which build and read these records; the Codex settings, input, result and usage records they hold come from vidbyte/lib/dataclasses/codex.py.
 ARCHITECTURE NOTE: Every record is frozen with slots and checks itself in __post_init__, raising ConfigurationError that names the field. A USER approvals reviewer builds, because only the host knows whether an approval_handler can answer it; CodexPreflight refuses it on a host without one (hardening INV-20, D-5). Behaviour that acts on these records lives in the host, never here, and every runtime import stays inside vidbyte.lib.
 COMMON MODIFICATION PATTERNS: Add a field with its check in the same record's __post_init__, reusing the codex.py helpers; a new record is added here and to the alphabetical __all__. A new routed server request adds one parse branch to CodexServerRequest.from_params; its wire encoding lives in CodexParamsTranslator, because a lib record exposes no dict encoder.
-KNOWN EDGE CASES: bool is an int, so every integer check refuses bool first; NaN and infinity fail the finite checks; vendor text such as plan types, reasoning efforts and service tier ids stays str because Codex owns those open sets. CodexServerRequest.from_params reads an absent and a null optional field alike, and keeps only the string decisions Codex offers, so available_decisions is None when Codex sent no list and a tuple, maybe empty, when it sent one. A goal request refuses the first non-default field of CODEX_HOST_GOAL_REJECTED_FIELDS through _reject_goal_fields(owner, request), which CodexGoalRunRequest shares under its own owner, so each refusal names the caller's function (hardening INV-48); the sandbox-field checks run before it, so a goal request that sets network_access with a default turn is refused for the sandbox (hardening INV-34).
-RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.5 and 9.1); docs/spec/codex-host-thread-helpers/spec.md (sections 8.5 and 9.1); docs/spec/codex-host-hardening/spec.md (sections 8.5 and 9.1)
-TESTS: tests/features/codex_host/test_codex_host_records.py, tests/features/codex_host/test_codex_host_helper_surface.py and tests/features/codex_host/test_codex_host_hardening_records.py
+KNOWN EDGE CASES: CodexSpawnRequest.collaboration_mode is the last field, so positional construction is unchanged, and its record comes from the codex_host_modes leaf, which imports nothing from this module (first-class D-5). bool is an int, so every integer check refuses bool first; NaN and infinity fail the finite checks; vendor text such as plan types, reasoning efforts and service tier ids stays str because Codex owns those open sets. CodexServerRequest.from_params reads an absent and a null optional field alike, and keeps only the string decisions Codex offers, so available_decisions is None when Codex sent no list and a tuple, maybe empty, when it sent one. A goal request refuses the first non-default field of CODEX_HOST_GOAL_REJECTED_FIELDS through _reject_goal_fields(owner, request), which CodexGoalRunRequest shares under its own owner, so each refusal names the caller's function (hardening INV-48); the sandbox-field checks run before it, so a goal request that sets network_access with a default turn is refused for the sandbox (hardening INV-34).
+RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.5 and 9.1); docs/spec/codex-host-thread-helpers/spec.md (sections 8.5 and 9.1); docs/spec/codex-host-hardening/spec.md (sections 8.5 and 9.1); docs/spec/codex-host-first-class/spec.md (section 9.1)
+TESTS: tests/features/codex_host/test_codex_host_records.py, tests/features/codex_host/test_codex_host_helper_surface.py, tests/features/codex_host/test_codex_host_hardening_records.py and tests/features/codex_host/test_codex_host_feature_records.py
 """
 
 from __future__ import annotations
@@ -42,7 +42,9 @@ from vidbyte.lib.dataclasses.codex import (
     _require_non_negative_int,
     _require_text,
 )
+from vidbyte.lib.dataclasses.codex_host_modes import CodexCollaborationMode
 from vidbyte.lib.dataclasses.security import PermissionPolicy
+from vidbyte.lib.dataclasses.validation import RecordFieldConverter
 from vidbyte.lib.enums.codex import (
     CodexAccountKind,
     CodexApprovalDecision,
@@ -159,8 +161,14 @@ class CodexSpawnRequest:
     because Codex starts each goal turn itself with the thread's
     settings. A goal request therefore refuses ``turn``,
     ``output_schema``, ``disabled_plugin_ids``, ``turn_service_tier``,
-    ``network_access`` and ``writable_roots``; Vidbyte's own caps,
-    ``max_output_tokens`` and ``timeout_seconds``, still apply.
+    ``network_access``, ``writable_roots`` and ``collaboration_mode``;
+    Vidbyte's own caps, ``max_output_tokens`` and ``timeout_seconds``,
+    still apply.
+
+    ``collaboration_mode`` sends a plan or default collaboration mode
+    with the turn, which needs Codex's experimental API. Codex lets the
+    mode take precedence over ``turn.model`` and ``turn.effort``, so a
+    model or effort set in both places must agree.
     """
 
     prompt: str | CodexRunInput = ""
@@ -181,6 +189,7 @@ class CodexSpawnRequest:
     turn_service_tier: str = ""
     network_access: bool | None = None
     writable_roots: tuple[str, ...] = ()
+    collaboration_mode: CodexCollaborationMode | None = None
 
     def __post_init__(self) -> None:
         # Check each group of fields in turn, so a bad request fails
@@ -190,6 +199,7 @@ class CodexSpawnRequest:
         self._reject_bad_approvals()
         self._reject_bad_tools()
         self._reject_bad_sandbox_fields()
+        self._reject_bad_mode()
         self._reject_bad_goal()
 
         # The caps are Vidbyte's own interrupts, so they must be real
@@ -259,6 +269,14 @@ class CodexSpawnRequest:
         bad_roots = not isinstance(roots, tuple) or any(not isinstance(root, str) or not root or not os.path.isabs(root) for root in roots)
         if bad_roots or self.turn.sandbox is not CodexSandbox.WORKSPACE_WRITE:
             raise ConfigurationError(CODEX_HOST_WRITABLE_ROOTS_MESSAGE, details={"field": "writable_roots"})
+
+    def _reject_bad_mode(self) -> None:
+        # A collaboration mode and the turn must agree on any model or
+        # effort both set, because Codex applies the mode's (first-class
+        # INV-14).
+        mode = RecordFieldConverter.require_instance(self.collaboration_mode, "Codex spawn request collaboration_mode", CodexCollaborationMode, optional=True)
+        if mode is not None:
+            mode.reject_conflict("Codex spawn request", self.turn.model, self.turn.effort)
 
     def _reject_bad_goal(self) -> None:
         # A goal is its own run: it replaces the prompt, and Codex keeps
