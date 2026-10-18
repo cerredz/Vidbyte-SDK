@@ -1564,7 +1564,7 @@ These are S3 choices where the spec was silent or named only a lower-level shape
   - `ComposeTexts.spliced`, `join` and `opening`, and `ComposeFailures.changed`;
   - `StepRoles.counted`, `item`, `member`, `unanchored` and `on_harness`;
   - `DisposableWorktree.from_tree` and `backstop`, `JsonAnswers.ask` and `wrapped`, and `AnswerDecoders.read`;
-  - `ThreadStep.CONFIG_TYPES` and `JSON_KIND_NAMES`.
+  - `ThreadStep.CONFIG_TYPES`, and `JSON_KIND_NAMES`, a module constant in `vidbyte/lib/util/json_text.py` beside `JSON_FENCE` and `JSON_FENCE_LANGUAGES`.
 - **Shapes of some plumbing.**
   - `ThreadBinder.anchor` takes a verb: `CONTINUE`, or `FORK` for an unanchored fork.
   - `bind_continue` checks `thread_id` up front.
