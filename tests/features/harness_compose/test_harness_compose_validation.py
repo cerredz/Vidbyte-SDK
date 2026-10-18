@@ -1,13 +1,13 @@
 """FILE: tests/features/harness_compose/test_harness_compose_validation.py
 
-PURPOSE: Validate first (AC-14, INV-3, INV-5, INV-9, INV-10, INV-18, INV-24, INV-36, D-3, EC-35, EC-39 to EC-48, EC-62, EC-76, EC-77): every invalid input is refused with ConfigurationError whose details["field"] names the argument path and whose message never quotes a key, and after the refusal no git process or vendor launcher has started, no temporary folder or Grok home exists and the workspace is untouched; an alias given a missing or misspelled step keyword raises TypeError when awaited, and a positional step fails at the call itself; the new RecordFieldValidator.command_line_units counts one argument as CreateProcess does, and require_command_line_units keeps its result and its exact error at that count.
+PURPOSE: Validate first (AC-14, INV-3, INV-5, INV-9, INV-10, INV-18, INV-24, INV-36, D-3, EC-35, EC-39 to EC-48, EC-62, EC-76, EC-77, EC-79): every invalid input is refused with ConfigurationError whose details["field"] names the argument path and whose message never quotes a key, and after the refusal no git process or vendor launcher has started, no temporary folder or Grok home exists and the workspace is untouched; a chain or later-stage template that renders blank once every spliced value is empty is refused the same way, naming the template and the step that could be sent a blank prompt, while a chain template that holds {prompt} is never refused as blank and runs; an alias given a missing or misspelled step keyword raises TypeError when awaited, and a positional step fails at the call itself; the new RecordFieldValidator.command_line_units counts one argument as CreateProcess does, and require_command_line_units keeps its result and its exact error at that count.
 ROLE IN CODEBASE: Start here when a composite starts git or a step before refusing an input, or names the wrong argument.
 ARCHITECTURE NOTE: The workspace is a repository with one commit, so a composite that ran its git checks before validating would show git children in the CliRunner spy; the stand-in log folder shows any vendor launch. Record-level refusals (StageSpec, EnsembleRoster) happen when the record is built, so their field is the `<Record>.<field>` name of spec §9.1.
-FUNCTION INVENTORY: unrelated_async is a callable that is not one of the nine; Inputs builds the valid and invalid steps a case needs; CASES maps each case to the call that must be refused; UNIT_CASES pairs a value with its hand-counted command-line units; the test_* functions are one behaviour each.
+FUNCTION INVENTORY: unrelated_async is a callable that is not one of the nine; Inputs builds the valid and invalid steps a case needs; CASES maps each case to the call that must be refused; BLANK_CASES maps each blank template to its call, its field and the step its refusal names; nothing_started checks that a refusal left no child, launch, folder, Grok home or workspace change; UNIT_CASES pairs a value with its hand-counted command-line units; the test_* functions are one behaviour each.
 COMMON MODIFICATION PATTERNS: A new refusal is one CASES entry and one parametrize row naming the expected field.
 WHAT NOT TO DO IN THIS FILE: Do not make the workspace a non-repository here; the git-free proof depends on git being reachable.
 KNOWN EDGE CASES: A 24,000-character caller prompt fits a Grok writer exactly, so the too-long prompt cases put it in front of a Grok reader or a later Grok step, where the fixed prompt files add to it.
-RELATED DOCS: tests/features/harness_compose/FEATURE.md; docs/spec/native-thread-compose/spec.md §6.1 INV-3, INV-5, INV-18, INV-24, INV-36, §6.2 AC-14, §6.3 EC-35, EC-39 to EC-48, EC-62, EC-76, EC-77, §9.1
+RELATED DOCS: tests/features/harness_compose/FEATURE.md; docs/spec/native-thread-compose/spec.md §6.1 INV-3, INV-5, INV-18, INV-24, INV-36, §6.2 AC-14, §6.3 EC-35, EC-39 to EC-48, EC-62, EC-76, EC-77, EC-79, §9.1; docs/spec/native-thread-compose/review.md R-13, R-32
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_compose/test_harness_compose_validation.py
 """
 
@@ -182,6 +182,33 @@ FIELDS = {
 }
 
 
+# EC-79: each case is (the call, the refused field, the step the
+# message names as the one a blank prompt could reach).
+BLANK_CASES = {
+    "previous alone": (lambda i: _template(i, "{previous}"), "template", "steps[1]"),
+    "previous with whitespace around it": (lambda i: _template(i, "  {previous} \n\t"), "template", "steps[1]"),
+    "previous and diff": (lambda i: _template(i, "{previous}{diff}"), "template", "steps[1]"),
+    "previous alone in the second stage": (lambda i: i.compose.run_staged_threads([i.stage(i.grok(), "Start."), i.stage(i.grok(), "{previous}")]), "stages[1].template", "stages[1].step"),
+    "previous with whitespace in the third stage": (lambda i: i.compose.run_staged_threads([i.stage(i.grok(), "Start."), i.stage(i.grok()), i.stage(i.grok(), " \n{previous}\n ")]), "stages[2].template", "stages[2].step"),
+}
+# EC-79 / R-32: templates that hold {prompt}, each with the text
+# between the caller's prompt and the previous answer.
+PROMPT_TEMPLATES = {
+    "prompt then previous": ("{prompt}{previous}", ""),
+    "prompt and previous on two lines": ("{prompt}\n{previous}", "\n"),
+}
+
+
+def nothing_started(sandbox, runs, before: tuple) -> None:
+    # After a refusal: no child process, no launch, no temporary
+    # folder, no Grok home and no change to the workspace.
+    assert runs.invocations == [], f"a child started before the refusal: {[item.argv for item in runs.invocations]}"
+    assert sandbox.launches() == []
+    assert sandbox.leftovers() == []
+    assert not (sandbox.home / ".vidbyte").exists()
+    assert (sandbox.status(), sandbox.files(), sandbox.refs(), sandbox.worktrees()) == before
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("case", sorted(CASES))
 async def test_invalid_input_is_refused_before_any_git_launch_or_folder(compose_api, sandbox, steps, runs, pack, case) -> None:
@@ -204,6 +231,43 @@ async def test_invalid_input_is_refused_before_any_git_launch_or_folder(compose_
     assert sandbox.leftovers() == []
     assert not (sandbox.home / ".vidbyte").exists()
     assert (sandbox.status(), sandbox.files(), sandbox.refs(), sandbox.worktrees()) == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", sorted(BLANK_CASES))
+async def test_a_template_blank_without_its_spliced_values_is_refused_before_any_io(compose_api, sandbox, steps, runs, pack, case) -> None:
+    # EC-79 / INV-18 / INV-5: rendered with every spliced value
+    # empty, the template is blank, so a blank answer would give the
+    # next step a blank prompt. ConfigurationError names the
+    # template and the step at risk before any git command or step.
+    # Red until review R-13 lands: such a chain ran its steps.
+    api = compose_api
+    call, field, step_name = BLANK_CASES[case]
+    sandbox.make_repo()
+    before = (sandbox.status(), sandbox.files(), sandbox.refs(), sandbox.worktrees())
+    with pytest.raises(api.ConfigurationError) as caught:
+        await call(Inputs(api, steps, sandbox, pack))
+    error = caught.value
+    assert error.details.get("field") == field, f"{case}: {error} {error.details}"
+    assert step_name in str(error), f"the refusal names {step_name}, the step a blank prompt could reach: {error}"
+    nothing_started(sandbox, runs, before)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", sorted(PROMPT_TEMPLATES))
+async def test_a_chain_template_that_holds_prompt_is_never_refused_as_blank(compose_api, sandbox, steps, pack, case) -> None:
+    # EC-79 / INV-18: the blank check renders {prompt} as the
+    # caller's prompt, which is never blank, so a template that holds
+    # it is accepted and the chain runs: the second step gets the
+    # caller's prompt and the first answer. Red at HEAD until review
+    # R-32 lands: the check refuses these templates as blank.
+    api = compose_api
+    template, joiner = PROMPT_TEMPLATES[case]
+    first = steps.bind("opencode", label="first", fake={"final_parts": ["FIRST-ANSWER-5c1e"]})
+    second = steps.bind("grok", label="second")
+    result = await api.compose.chain_threads([first, second], template, prompt=pack.PROMPT)
+    assert result.failed_step is None and len(result.outcomes) == 2
+    assert pack.launch_prompt(sandbox.only_launch("second")) == pack.PROMPT + joiner + "FIRST-ANSWER-5c1e"
 
 
 @pytest.mark.asyncio
