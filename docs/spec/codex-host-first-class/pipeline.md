@@ -22,7 +22,7 @@ Slice 1 (`docs/spec/codex-host-hardening/`, status `verified`) is done on this b
 | S4 adversarial review | done | 03:45 | 05:10 | reports/S4-review-{conformance,conventions,engineering}.md, reports/S4-findings-verifier.md | review.md: 8 confirmed (2 Blockers R-1, R-2; 6 Majors R-3…R-8), 7 Minors m-1…m-7, 0 refuted |
 | S5 repair loop | done | 06:20 | 09:55 | reports/S5-repair-{1,2,3}.md, verify-log.md | 3 iterations: 2 (bff67286) R-RR1 + R-RR2 comment; 3 (**HEAD 8bac8d24**, fix bd89e5b8) R-RR2-1. S2_HEAD 2bdb5e95 untouched; area 1F(inherited)/1306P/3S; source 1F(inherited)/6837P/27S; package CI passed; SDK-LINT: PASS; **spec status: verified**. Iteration 1/8 closed R-1…R-5, R-8, m-2…m-5 (R-6/R-7 by S2 9ad2771e, m-1 by r6); HEAD ec17d5ce pushed; area 1 failed (inherited)/1302 passed; source 1 failed (inherited)/6833 passed; package `CI passed.` |
 | S5 re-review | 2 rounds done | 07:20 | 09:20 | reports/S5-rereview.md, reports/S5-rereview-2.md | round 2: SOUND, 1 Minor R-RR2-1 (fixed in iteration 3). Round 1: MERGEABLE AFTER FIXES: R-RR1 Blocker (record `is_dir()` re-raises EACCES), R-RR2 Minor, R-RR3 Minor (spec); 8 of 10 S4 items CLOSED with revert-mutant proof; spec r7 e736c93f (deviation 5) |
-| S6 PR (both slices) | pending | | | | |
+| S6 PR (both slices) | done | 10:00 | 10:35 | reports/S6-pr-author.md, pr-body.md | PR #1181 retitled `feat(codex-host): production hardening plus 25 first-class Codex functions and 16 tools`, still a draft, base `ai/resolve-pr-1055-comments`; body 63,963 characters (9 headings, 85 AC rows); both specs `pr-open`; HEAD 55b80466 pushed; no remote checks configured |
 
 ## Counters and caps
 - S1 review rounds: 2/2 · S5 repair iterations: 3/8 · S5 re-review rounds: 2/2
@@ -192,6 +192,20 @@ Slice 1 (`docs/spec/codex-host-hardening/`, status `verified`) is done on this b
   - The `validation.py` follow-up PR should apply this rule consistently in `to_path`.
   
   **Next:** S6, covering both slices.
+
+- 2026-10-18 10:40: **S6 checked myself.**
+  - Local, tracking ref and live remote all agree on 55b80466, and the tree is clean.
+  - Since 6cd11f99 there are 0 lines changed in `vidbyte/`, `tests/` and `lint/`. S6 changed 4 docs files.
+  - **The live PR** (`gh pr view`):
+    - the title has no `[WIP]`; it is a draft, with base `ai/resolve-pr-1055-comments`;
+    - the body is 63,963 characters, under 65,536, with all 9 headings in order and 85 AC rows (41 + 44);
+    - it has the #1178 stack note and the live-run disclaimer, ends with the Claude Code attribution line, and contains no email.
+  - Both specs say `status: pr-open`.
+  - **S6 corrected my briefing:** the canonical helper is `vidbyte/lib/dataclasses/validation.py`, not `vidbyte/lib/validation.py`. The body cites the real path.
+  - **`/app` was not built,** and the body says so correctly. My S6 briefing wrongly listed "apps" among the slice-2 features. The gap report says `/app` is an OS deep link (`codex://threads/<id>`) with no protocol call, and NG-3 left it out as P2 with a default of no. `/apps` (`app/list`) is not built either.
+  - **S6's OPEN ITEMS:** `validation.py:133/:198/:210/:231` (`require_directory`, `to_path`, `to_folder`, `to_files`) leak raw OSError or TypeError. S6 probed `native_threads.py:119-120` read-only and got a raw `TypeError` and a raw `PermissionError`. This belongs to the follow-up PR. The `codex_host_features.py:134` label is cosmetic (m-7).
+  - The `pre-stack-backup` tag (93941a32) is kept until #1178 merges and the stack retargets.
+  - **Pipeline complete.**
 
 ## User replies (verbatim)
 - (none yet)

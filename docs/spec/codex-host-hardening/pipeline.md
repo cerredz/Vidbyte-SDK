@@ -22,7 +22,7 @@ The run has two slices on one branch and ships one PR. Slice 2 (`codex-host-firs
 | S4 adversarial review | done | 14:25 | 16:10 | reports/S4-review-{conformance,conventions,engineering}.md, reports/S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES — confirmed 4 Blocker / 6 Major / 7 Minor; refuted 0; downgraded 1 (R-V3). Owners: code R-1,R-2,R-3,R-9,R-10; test R-4,R-5,R-6,R-8; spec R-7 |
 | S5 repair loop | done | 16:15 | 22:30 | verify-log.md, reports/S5-repair-{1,2,3}.md | 3 iterations: 1 (efb19043) R-1..R-10; 2 (127173b5) R-11, R-12; 3 (**HEAD 91544b51**, fix 14509eda) m-9. S2_HEAD 68562b22 untouched; source 1F(inherited)/6588P/27S; package CI passed; SDK-LINT: PASS; review.md 0 open; **spec status: verified** |
 | S5 re-review | done (2/2) | 18:15 | 21:40 | reports/S5-rereview.md, reports/S5-findings-verifier.md, reports/S5-rereview-2.md | round 1: R-11 Blocker, R-12 Major, m-8, all fixed; round 2: MERGEABLE AFTER FIXES, 0 Blocker / 0 Major / 1 Minor (m-9, FR-36 docstrings), fixes held, kill-tested (5 R-11 and 6 R-12 tests fail under revert) |
-| S6 PR | deferred to the end of slice 2 | | | | |
+| S6 PR | done in the slice-2 run | | | ../codex-host-first-class/reports/S6-pr-author.md | one PR body for both slices; status `pr-open`; HEAD 55b80466 |
 
 ## Counters and caps
 - S1 review rounds: 2/2 · S5 repair iterations: 3/8 · S5 re-review rounds: 2/2
