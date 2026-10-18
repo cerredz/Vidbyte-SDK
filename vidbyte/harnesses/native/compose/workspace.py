@@ -1,12 +1,12 @@
 """FILE: vidbyte/harnesses/native/compose/workspace.py
 
-PURPOSE: Holds the two workspace context managers: DiffCapture snapshots the whole repository when its block starts and ends and keeps the change between them as .diff, and DisposableWorktree adds a detached worktree filled from a snapshot, yields the folder that matches the workspace inside it, and always removes it.
-ROLE IN CODEBASE: capture_diff and in_worktree are bound as public names in vidbyte/harnesses/native/compose/__init__.py. verify.py, ensemble.py and selection.py run their opencode and Muse readers inside a DisposableWorktree made from a tree they already snapshotted.
+PURPOSE: Holds the two workspace context managers and the read-only backstop: DiffCapture snapshots the whole repository when its block starts and ends and keeps the change between them as .diff, and DisposableWorktree adds a detached worktree filled from a snapshot, yields the folder that matches the workspace inside it, and always removes it; DisposableWorktree.backstop fails a read-only phase that changed the workspace.
+ROLE IN CODEBASE: capture_diff and in_worktree are bound as public names in vidbyte/harnesses/native/compose/__init__.py. verify.py, ensemble.py and selection.py run their opencode and Muse readers inside a DisposableWorktree made from a tree they already snapshotted, and verify.py and ensemble.py end each read-only phase with DisposableWorktree.backstop.
 ARCHITECTURE NOTE: Both managers check the workspace when they are built, the way the nine thread functions do (an absolute existing folder, stored resolved), and start no git process until their block is entered (spec §9.2). All git work goes through ComposeGit (git.py), so every failure is a ThreadComposeError. A reader's worktree is built from a tree id the composite took, with a verifier's index set to the before-writer tree so git inside the worktree shows the writer's change (D-20, INV-9). Removal runs as its own task under asyncio.shield, as the private folders of muse/threads.py are removed, so a cancellation cannot stop it half-way (EC-17).
-FUNCTION INVENTORY: DiffCapture.capture_diff builds the manager; __aenter__ takes the before-snapshot and __aexit__ the after-snapshot and the diff. DisposableWorktree.in_worktree builds the manager for a caller and from_tree for a reader; __aenter__ adds, fills and re-indexes the worktree and makes the matching folder; __aexit__ removes it; _prepared and _matching are leaves.
+FUNCTION INVENTORY: DiffCapture.capture_diff builds the manager; __aenter__ takes the before-snapshot and __aexit__ the after-snapshot and the diff. DisposableWorktree.in_worktree builds the manager for a caller and from_tree for a reader; backstop compares a read-only phase's snapshots; __aenter__ adds, fills and re-indexes the worktree and makes the matching folder; __aexit__ removes it; _prepared and _matching are leaves.
 COMMON MODIFICATION PATTERNS: A new kind of reader workspace is another DisposableWorktree constructor that hands __aenter__ what to fill the worktree from. A new use of a diff goes through DiffCapture or through ComposeGit.snapshot and ComposeGit.diff directly.
 WHAT NOT TO DO IN THIS FILE: 1. Do not run git here; call ComposeGit. 2. Do not let a removal failure hide the block's own exception. 3. Do not take a diff after a block that raised; .diff stays None. 4. Do not leave a worktree behind when entering fails half-way.
-KNOWN EDGE CASES: A workspace folder that no snapshot holds (empty, or holding only ignored files) is created inside the worktree after the fill (EC-74). A repository with no commit allows capture_diff but refuses in_worktree with WORKTREE_FAILED (EC-5). A cancel that lands during a removal waits for the removal, then propagates.
+KNOWN EDGE CASES: A workspace folder that no snapshot holds (empty, or holding only ignored files) is created inside the worktree after the fill (EC-74). A repository with no commit allows capture_diff but refuses in_worktree with WORKTREE_FAILED (EC-5). A cancel that lands during a removal waits for the removal, then propagates. The backstop cannot tell who changed the files, so an edit by another process during a read-only phase is reported too (EC-11).
 RELATED DOCS: vidbyte/harnesses/README.md
 TESTS: tests/features/harness_compose/test_harness_compose_workspace.py, tests/features/harness_compose/test_harness_compose_git.py, tests/features/harness_compose/test_harness_compose_verify.py
 """
@@ -86,6 +86,20 @@ class DisposableWorktree:
     def from_tree(git: ComposeGit, tree: str, index: str | None = None) -> DisposableWorktree:
         """A reader's worktree filled from tree, a snapshot the composite took; with index, its index is set to that tree (a verifier's view of the writer's change)."""
         return DisposableWorktree(git.workspace, git=git, tree=tree, index=index)
+
+    @staticmethod
+    async def backstop(git: ComposeGit, before: str, result: object) -> None:
+        """Raise READER_CHANGED_WORKSPACE, carrying result and the change, when the working tree no longer matches before, the snapshot taken when a read-only phase began (spec INV-11)."""
+        # @intent read-only-phases-leave-the-workspace-as-they-found-it
+        # Readers are kept from writing by mechanism, Grok's permission
+        # mode and these worktrees; this comparison, made once every
+        # reader worktree is gone, catches whatever got past them.
+        # Compose reports the change and never restores the workspace.
+        after = await git.snapshot()
+        if after == before:
+            return
+        changed = await git.diff(before, after)
+        raise ComposeFailures.error(ThreadComposeProblem.READER_CHANGED_WORKSPACE, git.workspace, ComposeFailures.changed(changed.files), git.keys, diff=changed, result=result)
 
     async def __aenter__(self) -> Path:
         """Add the worktree, fill it, set its index when asked, and yield the workspace's folder inside it."""
