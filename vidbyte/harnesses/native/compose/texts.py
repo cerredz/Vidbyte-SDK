@@ -26,6 +26,7 @@ from vidbyte.lib.dataclasses.validation import RecordFieldValidator
 from vidbyte.lib.enums.native_compose import ComposeField, ComposePrompt
 from vidbyte.lib.enums.native_threads import NativeHarness
 from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.util.secret_text import SecretText
 
 
 class ComposeTexts:
@@ -116,7 +117,7 @@ class PromptFitter:
 
         # Take NULs and every bound key out of what a model or the
         # workspace wrote; the caller's own texts stay as given.
-        bound = sorted(set(keys), key=len, reverse=True)
+        bound = tuple(keys)
         segments = [PromptSegment(text=PromptFitter._scrub(segment.text, bound), spliced=True) if segment.spliced else segment for segment in frame]
         prompt = "".join(segment.text for segment in segments)
         if PromptFitter._fits(prompt, caps):
@@ -167,10 +168,7 @@ class PromptFitter:
     def _scrub(text: str, bound: Sequence[str]) -> str:
         # NULs go first, so a key split by one is whole again; then each
         # key, longest first, becomes COMPOSE_REDACTED_KEY.
-        text = text.replace(native_compose.COMPOSE_NUL, "")
-        for key in bound:
-            text = text.replace(key, native_compose.COMPOSE_REDACTED_KEY)
-        return text
+        return SecretText.replace_all(text.replace(native_compose.COMPOSE_NUL, ""), bound, native_compose.COMPOSE_REDACTED_KEY)
 
     @staticmethod
     def _sizes(text: str, windows: bool) -> Sequence[int]:

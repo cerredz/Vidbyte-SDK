@@ -2,7 +2,7 @@
 
 PURPOSE: Runs the closed set of git commands compose needs for one workspace and turns every failure into a ThreadComposeError: ComposeGit finds git and the repository, snapshots the whole working tree into a temporary index, diffs two snapshots, and adds, fills, re-indexes and removes disposable worktrees; ComposeFailures builds each ThreadComposeError with its message, git's text and the texts for its problem.
 ROLE IN CODEBASE: Used by DiffCapture and DisposableWorktree (workspace.py) and by the composites that need git (chain.py for a template with {diff}, verify.py, ensemble.py and selection.py); ComposeFailures also builds the read-only backstop error the composites raise.
-ARCHITECTURE NOTE: Every git child goes through CliRunner with the program found by CliRunner.find_program, the no-optional-locks flag and the two -c settings first, the 15 repository-location variables removed, no standard input, and the COMPOSE_GIT_TIMEOUT_SECONDS and COMPOSE_GIT_MAX_OUTPUT_BYTES bounds (spec INV-26, §9.2, §9.3). No argument holds a caret, a caller value or model text: the only operands are HEAD, tree ids and temporary folder paths. A snapshot writes only to a fresh temporary index named by GIT_INDEX_FILE and to the object store, so the working tree, the real index, HEAD and every ref stay as they are (INV-7). ComposeFailures replaces every bound key in git's text as exact text before HarnessRedactor and the tail cap, so a cap never cuts a key in half, and writes the message in the INV-6 order: the problem and its summary, the workspace, what compose observed, git's text, the likely cause and the next step.
+ARCHITECTURE NOTE: Every git child goes through CliRunner with the program found by CliRunner.find_program, the no-optional-locks flag and the two -c settings first, the 15 repository-location variables removed, no standard input, and the COMPOSE_GIT_TIMEOUT_SECONDS and COMPOSE_GIT_MAX_OUTPUT_BYTES bounds (spec INV-26, §9.2, §9.3). No argument holds a caret, a caller value or model text: the only operands are HEAD, tree ids and temporary folder paths. A snapshot writes only to a fresh temporary index named by GIT_INDEX_FILE and to the object store, so the working tree, the real index, HEAD and every ref stay as they are (INV-7). ComposeFailures replaces every bound key in git's text as exact text, through SecretText.replace_all, before HarnessRedactor and the tail cap, so a cap never cuts a key in half, and writes the message in the INV-6 order: the problem and its summary, the workspace, what compose observed, git's text, the likely cause and the next step.
 FUNCTION INVENTORY: ComposeGit.locate finds git; toplevel and has_commit find the repository root and whether HEAD names a commit, which has_commit(required=True) demands for a worktree; snapshot is the narrated main function of a snapshot; diff compares two trees; worktree_folder, add_worktree, fill_worktree, set_index and remove_worktree manage a reader's worktree; _run starts one git child; _failure, _folder and _delete are leaves. ComposeFailures.error builds one ThreadComposeError; changed names the files a read-only phase changed.
 COMMON MODIFICATION PATTERNS: A new git command is a §9.2 row first: its subcommand word in vidbyte/lib/constants/native_compose.py, its flags as GitFlag members, and one method here that goes through _run. A new failure kind is a ThreadComposeProblem member with its own summary, likely cause and next step.
 WHAT NOT TO DO IN THIS FILE: 1. Do not run a git command that changes the working tree, the real index, HEAD or a ref; snapshots use a temporary index and worktrees are detached. 2. Do not pass --ignore-errors to add; a file git cannot read must fail the snapshot (EC-73). 3. Do not put a caret in an argument; cmd.exe strips it when git is a batch launcher (D-24). 4. Do not let an OSError escape; folder failures are ThreadComposeError too. 5. Do not clean up a half-made worktree here; DisposableWorktree.__aenter__ removes it, waiting for a started add to end first (EC-17).
@@ -28,6 +28,7 @@ from vidbyte.lib.enums.process import CliOptionStyle
 from vidbyte.lib.errors import ThreadComposeError
 from vidbyte.lib.process.argv import CliArgv
 from vidbyte.lib.process.runner import CliRunner
+from vidbyte.lib.util.secret_text import SecretText
 
 
 class ComposeFailures:
@@ -41,9 +42,8 @@ class ComposeFailures:
         # every bound key is replaced as exact text on the whole text
         # first; then the shared redactor scrubs credential assignments
         # and the tail is kept, because git prints its final error last.
-        bound = sorted(set(keys), key=len, reverse=True)
-        place = ComposeFailures._replace(str(workspace), bound)
-        printed = ComposeFailures._replace(git_text.strip(), bound)
+        place = SecretText.replace_all(str(workspace), keys, native_compose.COMPOSE_REDACTED_KEY)
+        printed = SecretText.replace_all(git_text.strip(), keys, native_compose.COMPOSE_REDACTED_KEY)
         git_message = str(HarnessRedactor().redact(printed))[-native_compose.COMPOSE_GIT_MESSAGE_MAX_CHARS :] or None
         cause = native_compose.THREAD_COMPOSE_ADD_LIKELY_CAUSE if add else native_compose.THREAD_COMPOSE_LIKELY_CAUSES[problem]
         step = native_compose.THREAD_COMPOSE_ADD_NEXT_STEP if add else native_compose.THREAD_COMPOSE_NEXT_STEPS[problem]
@@ -51,7 +51,7 @@ class ComposeFailures:
             native_compose.THREAD_COMPOSE_MESSAGE_HEAD.format(problem=problem.value),
             native_compose.THREAD_COMPOSE_SUMMARIES[problem],
             native_compose.THREAD_COMPOSE_WORKSPACE_SENTENCE.format(workspace=place),
-            ComposeFailures._replace(observation, bound),
+            SecretText.replace_all(observation, keys, native_compose.COMPOSE_REDACTED_KEY),
             native_compose.THREAD_COMPOSE_GIT_TEXT_SENTENCE.format(git_message=git_message) if git_message else "",
             native_compose.THREAD_COMPOSE_LIKELY_CAUSE_SENTENCE.format(likely_cause=cause),
             native_compose.THREAD_COMPOSE_NEXT_STEP_SENTENCE.format(next_step=step),
@@ -66,13 +66,6 @@ class ComposeFailures:
         more = len(files) - native_compose.COMPOSE_MESSAGE_MAX_FILES
         listing = native_compose.THREAD_COMPOSE_MORE_FILES.format(names=shown, count=more) if more > 0 else shown
         return native_compose.THREAD_COMPOSE_CHANGED_FILES_OBSERVATION.format(files=listing)
-
-    @staticmethod
-    def _replace(text: str, bound: Sequence[str]) -> str:
-        # Each bound key, longest first, becomes COMPOSE_REDACTED_KEY.
-        for key in bound:
-            text = text.replace(key, native_compose.COMPOSE_REDACTED_KEY)
-        return text
 
 
 class ComposeGit:
