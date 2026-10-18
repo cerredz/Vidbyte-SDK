@@ -514,3 +514,44 @@ D-19, §5 and the §9.2 question were not on the decision list. Each one lists t
 - names: every constant and name cited exists at HEAD.
 
 **Git state:** a second r5 commit holds the spec and this follow-up. Neither r5 commit is pushed.
+
+**Second follow-up: EC-79 as intended (defect R-32).**
+
+**Input.** The orchestrator ruled on item 1 under "Where the code differs" above. The `{prompt}` over-refusal is a defect in the S4 review R-13 fix, now tracked as R-32, and S5 iteration 2 will fix the code. It asked for the spec to state the intended behaviour. Its reasons:
+- INV-5 refuses only invalid caller input.
+- INV-18 exists so that no prompt is sent blank.
+- The caller's prompt must not be blank, so a template that holds `{prompt}` can never render blank.
+
+**Changes.**
+- **INV-18, shortest form.** The shortest form keeps the fixed text, the caller's prompt included, and empties every spliced value. So `{prompt}` keeps the caller's own text. The sentence saying that a chain template holding `{prompt}` is refused is gone, and a template that holds `{prompt}` is never refused by this check. "Only a template can make the shortest form blank" is still true and stays:
+  - chain step 1 and the `verify_with` writer get the caller's prompt;
+  - every other frame holds prompt-file text;
+  - a stage template cannot hold `{prompt}`.
+- **EC-79.** The trigger is now a template whose rendering, with every spliced value empty, is empty or only whitespace. The examples are `{previous}` alone, `{previous}` with only whitespace around it, and `{previous}{diff}`. The behaviour cell now says that a template holding `{prompt}` is never refused, and the over-refusal sentence is gone. The refusal, the error type, the constant and the fields are unchanged.
+- **§17 r5 row.** I added the orchestrator's sentence word for word.
+- **Mirrors.** D-19, the §5 bullet, the §9.2 spliced-fields question and row 13 do not mention `{prompt}`. Where they say "shortest form", they rely on INV-18's definition, so they are unchanged.
+
+**May `StageSpec.template` hold `{prompt}`? No.** The spec says so in four places:
+- §9.1 line 987: "`template` passes `require_template(fields=STAGE_TEMPLATE_FIELDS)`";
+- §8.5 line 954: `STAGE_TEMPLATE_FIELDS = frozenset({ComposeField.PREVIOUS})`;
+- §8.5 line 831: "fields ⊆ STAGE_TEMPLATE_FIELDS; none in stage 1";
+- INV-5: "a stage template may use only `{previous}`".
+
+The code at HEAD agrees. Constructing a `StageSpec` with template `"{prompt} {previous}"` or `"Then {prompt}"` raises `ConfigurationError` naming `StageSpec.template` (`vidbyte/lib/dataclasses/native_compose.py:324`). The probe is `scratchpad/r5probe/stage_prompt_probe.py`. Also, `run_staged_threads(stages)` takes no caller prompt. The stage rule therefore needs no change: a stage template's shortest form is blank exactly when its text outside `{previous}` is blank.
+
+**For the R-32 fix in S5 iteration 2.** I left the code unchanged.
+- **Where the fix goes.** The fix is in `chain.py:130–132`. The first measure there passes `""` for `{prompt}`, so that a template that is too long by itself is blamed on `template`. The blank check needs the caller's prompt in place of `{prompt}`, but the refusal must still name `template` (EC-79). Moving the blank check to the second measure alone would name `prompt`, so it would not match the spec.
+- **The message.** After the fix, a template can also pass by holding `{prompt}`, so the text of `COMPOSE_BLANK_PROMPT` ("must hold text besides its placeholders") will tell only half the story. If the message changes, EC-79's "User sees" cell should change with it.
+- **The code comment.** The comment in `PromptFitter.check` (`texts.py:97–100`, "A template of placeholders alone gives a blank prompt") also needs updating. It cites EC-37, but the row is now EC-79.
+- **Tests.** A test that `{prompt}{previous}` is accepted fails at HEAD until R-32 is fixed. A test that `{previous}` alone is refused naming `template` passes at HEAD.
+
+**Self-check after the second follow-up:**
+- references: every ID resolves (EC 81);
+- tables: 20, with 0 malformed rows;
+- AC rows: unchanged;
+- EC rows: only EC-79 changed;
+- §4: its sha256 is still `26d2678440b2d9bad9b272739f5a43e7227fe8aeff462996dab6ce029e49eb6c`;
+- line endings: CRLF is kept (1,627 CRLF), the backslash count is still 6, and `git diff --check` is clean;
+- the over-refusal wording is gone from the spec.
+
+**Git state:** a third r5 commit holds the spec and this part. None of the three r5 commits is pushed.
