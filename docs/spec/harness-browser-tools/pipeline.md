@@ -21,7 +21,7 @@ started: 2026-10-16 21:43
 | S5 repair loop | done (converged, 1/8) | 2026-10-17 | 2026-10-18 | reports/S5-repair-1.md, verify-log.md | HEAD e2fdf0e2; R-1..R-10 fixed; CI 39096073590 + Static policy 39096074746 green |
 | S5 re-review | done (round 1/2) | 2026-10-18 | 2026-10-18 | reports/S5-rereview.md | SOUND: 12/12 fixes confirmed; 0 Blocker / 0 Major / 2 Minor (R-C1 → iteration 2; R-C2 → follow-up) |
 | S5 repair iteration 2 | done (converged, 2/8) | 2026-10-18 | 2026-10-18 | reports/S5-repair-2.md | R-C1 fixed @a44fb17f; HEAD 43735a6c; CI 39099160961 + Static policy 39099162854 green; orchestrator source gate 1 failed (inherited) / 6628 passed / 17 skipped |
-| S6 PR | pending | | | | |
+| S6 PR | done | 2026-10-18 | 2026-10-18 | reports/S6-pr-author.md | PR #1183 draft, title `feat(harnesses): browser tools for the Grok, opencode and Muse threads (run_<harness>_with_browser)`; body 47,203 chars, 2 mermaid; spec pr-open @ce998fa2; CI 39101133502 + Static policy 39101134962 green on 72e1bc53 |
 
 ## Counters and caps
 - S1 review rounds: 2/2 (cap reached) · S5 repair iterations: 2/8 (converged 2026-10-18) · S5 re-review rounds: 1/2 (SOUND)
@@ -85,6 +85,9 @@ started: 2026-10-16 21:43
 - 2026-10-18 — Orchestrator: run a scoped S5 iteration 2 for R-C1 only (one-word fix "nor a completed call on"; user-facing text made false by the R-2 fix; cheap) rather than shipping it as a follow-up; R-C2 stays a follow-up (needs a new fake scenario key — test infra). No further re-review round needed for a one-word constant if iteration 2 converges (focused tests + lint + remote CI green); counts toward the 8-iteration cap (2/8).
 
 - 2026-10-18 — S5 iteration 2 verified by orchestrator: tree clean, all pushed, `git diff 68105f8d..HEAD -- tests/` empty, only source change is the one-word constant (a44fb17f), `## Iteration 2` in verify-log, CI 39099160961 + Static policy 39099162854 success on 43735a6c, own `run_ci.py --stage source` → `1 failed, 6628 passed, 17 skipped` (inherited 167==120 only). No second re-review: the change is one word in a constant whose only consumer is unchanged, re-reviewed in round 1 as the R-C1 fix text verbatim. Spec → `status: verified`.
+
+- 2026-10-18 — S6 verified by orchestrator: draft, no [WIP], base main, 2 mermaid blocks, attribution line last, spec on origin `status: pr-open`, tree clean, nothing unpushed, no source/test diff since fd4baede; CI 39101133502 (3 jobs) + Static policy 39101134962 success on 72e1bc53. AC spot-checks re-run: AC-12 `-k never_listed` → 4 passed (incl. failed-call params); AC-4 two registry tests → 10 passed.
+- 2026-10-18 — S6 OPEN ITEM `muse/wire.py:209-218` (one Muse task counted twice if real Muse prints both `task.lifecycle.proposed` and `side_effect_intent` for one `task_id`) NOT routed to S5: it rests on the unverified Muse record shape (A-1/Q-17; the echo provider cannot call tools), a repair agent cannot add the covering test, and the body discloses it with path:line under Q-17/A-1. Same for `grok/wire.py:162,172` (missing `toolCallId`, low risk) and stale D-28/EC-6 spec text (harmless). User may overrule.
 
 ## User replies (verbatim)
 - (none yet)
