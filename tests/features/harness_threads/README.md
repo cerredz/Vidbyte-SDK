@@ -41,3 +41,4 @@ This folder tests the twelve harness thread functions of `vidbyte.harnesses.nati
 - 2026-10-15 - Added regression tests for the S4 review findings R-4, R-6 to R-11 and R-24 (`docs/spec/harness-thread-functions/review.md`).
 - 2026-10-15 - Added regression tests for the re-review findings R-27 to R-30, and made the current-folder tests remove `NoDefaultCurrentDirectoryInExePath` (R-31).
 - 2026-10-15 - Added the Claude Code thread function tests (spec `docs/spec/claude-thread-functions/spec.md` r3), extended the shared pins to a fourth harness, and removed the superseded `claude_host` pack of PR #1044.
+- 2026-10-17 - Added regression tests for PR #1044's review: launcher flags, permission-mode choices, option refusals, minted thread ids, retryable and budget errors, success reports, tool rules and the key scrub, auto memory, dropped switches, and a cold fan-out over one workspace.
