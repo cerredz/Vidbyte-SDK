@@ -1,12 +1,12 @@
 """FILE: vidbyte/harnesses/native/codex/preflight.py
 
-PURPOSE: Runs the checks CodexHost makes before anything spends: a USER approvals reviewer has a handler to answer it, the account is signed in, ordinary usage is not used up, the Windows sandbox is ready, every model and service tier named is listed, and the thread is idle and exists.
-ROLE IN CODEBASE: The check layer of vidbyte/harnesses/native/codex/; CodexHost calls it at the start of every operation that starts a turn, reads a thread or forks one, check_codex_ready reuses its usage read, and the run wrappers and the fork call its reviewer check on their own.
+PURPOSE: Runs the checks CodexHost makes before anything spends: a USER approvals reviewer has a handler to answer it, a feature that needs Codex's experimental API is used only on a host that opted in, the account is signed in, ordinary usage is not used up, the Windows sandbox is ready, every model and service tier named is listed, and the thread is idle and exists.
+ROLE IN CODEBASE: The check layer of vidbyte/harnesses/native/codex/; CodexHost and its feature mixins call it at the start of every operation that starts a turn, changes settings, reads a thread or forks one, check_codex_ready reuses its usage read, the run wrappers and the fork call its reviewer checks on their own, and every experimental function calls its one experimental gate right after its input record (first-class D-15).
 ARCHITECTURE NOTE: Imports no openai-codex module; it reaches Codex only through CodexConnection, so every check is bounded and mapped like any other call. sys.platform is read at call time through sys, as section 13 requires. The all-pages model list is cached per host and read once more only when the cached list misses a model or tier the request names (hardening INV-25, D-26).
-COMMON MODIFICATION PATTERNS: A new check is one step in run(), in the section 9.2 order, with its message in vidbyte/lib/constants/codex_host.py. A per-operation field rule is an argument check, so it belongs to the operation's input record in vidbyte/lib/dataclasses/codex_host_inputs.py (CODEX_HOST_REJECTED_FIELDS), not here.
-KNOWN EDGE CASES: A rate-limit read error or a None allowance passes, so preflight never infers exhaustion or recovery (EC-8). A runtime that cannot report Windows sandbox readiness passes (EC-11), and FULL_ACCESS skips that check. A custom model_provider skips the model and tier checks, because the list describes the default provider (EC-13); a tier is checked only against models that list tiers, so a tierless model leaves the choice to Codex (hardening EC-35). A fork runs only step 0 and the model and tier check (spends=False), and a USER reviewer passes on a host whose approval_handler answers it (hardening INV-20).
-RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.1 D-28 and 9.2 preflight order); docs/spec/codex-host-hardening/spec.md (sections 6.1 INV-20, INV-24, INV-25 and INV-36, and 8.1 D-5, D-25 and D-26)
-TESTS: tests/features/codex_host/test_codex_host_threads.py, tests/features/codex_host/test_codex_host_turns.py, tests/features/codex_host/test_codex_host_function_rows.py, tests/features/codex_host/test_codex_host_turn_settings.py, tests/features/codex_host/test_codex_host_approvals.py
+COMMON MODIFICATION PATTERNS: A new check is one step in run(), in the section 9.2 order, with its message in vidbyte/lib/constants/codex_host.py. A new function that needs Codex's experimental API calls require_experimental_api right after its record, never a gate of its own. A per-operation field rule is an argument check, so it belongs to the operation's input record in vidbyte/lib/dataclasses/codex_host_inputs.py (CODEX_HOST_REJECTED_FIELDS), not here.
+KNOWN EDGE CASES: A rate-limit read error or a None allowance passes, so preflight never infers exhaustion or recovery (EC-8). A runtime that cannot report Windows sandbox readiness passes (EC-11), and FULL_ACCESS skips that check. A custom model_provider skips the model and tier checks, because the list describes the default provider (EC-13); a tier is checked only against models that list tiers, so a tierless model leaves the choice to Codex (hardening EC-35). A fork runs only step 0 and the model and tier check (spends=False), and a USER reviewer passes on a host whose approval_handler answers it (hardening INV-20). A collaboration mode is refused locally on a host opened without the experimental API, and its model is checked like the turn's; the gate is local, so its refusal sends nothing (first-class INV-4, INV-12). A reviewer Codex resolved, which the request never named, is refused by reject_routed_reviewer only on a host without an approval_handler (first-class D-36).
+RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.1 D-28 and 9.2 preflight order); docs/spec/codex-host-hardening/spec.md (sections 6.1 INV-20, INV-24, INV-25 and INV-36, and 8.1 D-5, D-25 and D-26); docs/spec/codex-host-first-class/spec.md (INV-4, INV-12, INV-13, D-15, D-36)
+TESTS: tests/features/codex_host/test_codex_host_threads.py, tests/features/codex_host/test_codex_host_turns.py, tests/features/codex_host/test_codex_host_function_rows.py, tests/features/codex_host/test_codex_host_turn_settings.py, tests/features/codex_host/test_codex_host_approvals.py, tests/features/codex_host/test_codex_host_feature_contract.py, tests/features/codex_host/test_codex_host_settings_modes.py, tests/features/codex_host/test_codex_host_side_chat.py
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ from vidbyte.lib.constants.codex_host import (
     CODEX_DEFAULT_SERVICE_TIER,
     CODEX_HOST_ANY_MODEL_TEXT,
     CODEX_HOST_BUSY_MESSAGE,
+    CODEX_HOST_EXPERIMENTAL_FEATURE_MESSAGE,
     CODEX_HOST_LIST_SEPARATOR,
     CODEX_HOST_MODEL_UNKNOWN_MESSAGE,
     CODEX_HOST_SANDBOX_PLATFORM,
@@ -46,7 +47,7 @@ from vidbyte.lib.enums.codex import (
     CodexSandboxReadiness,
 )
 from vidbyte.lib.enums.failure import FailureCode
-from vidbyte.lib.errors import CodexAgentError
+from vidbyte.lib.errors import CodexAgentError, ConfigurationError
 
 if TYPE_CHECKING:
     from openai_codex.generated.v2_all import Thread
@@ -69,15 +70,19 @@ class CodexPreflight:
         registry: CodexTurnRegistry,
         *,
         approvals_answered: bool,
+        experimental_api: bool = True,
     ) -> None:
         # The model list is fetched with hidden models and reused until
         # it misses a name. approvals_answered says whether the host has
-        # an approval_handler, which a USER reviewer needs.
+        # an approval_handler, which a USER reviewer needs, and
+        # experimental_api whether the host opted in to Codex's
+        # experimental API (first-class D-15).
         self._connection = connection
         self._params = params
         self._responses = responses
         self._registry = registry
         self._approvals_answered = approvals_answered
+        self._experimental_api = experimental_api
         self._models: tuple[CodexModelInfo, ...] = ()
 
     async def run(self, operation: CodexHostOperation, request: CodexSpawnRequest, *, check_model: bool = True, spends: bool = True) -> None:
@@ -87,6 +92,9 @@ class CodexPreflight:
         # 0. A USER reviewer needs a handler to answer its approvals;
         #    this check is local, so its refusal sends nothing.
         self.reject_user_reviewer(operation, request)
+        # A collaboration mode needs the experimental API; this gate is
+        # local too (first-class INV-4).
+        self.require_experimental_api(operation, "collaboration_mode", used=request.collaboration_mode is not None)
         # A fork spends nothing, so it skips the account, usage and
         # sandbox and keeps only the model and tier check.
         if spends:
@@ -109,9 +117,11 @@ class CodexPreflight:
                     raise CodexErrorMapper.error(problem.code, problem.message, operation)
         # 4. Every model and service tier named must be listed, hidden
         #    models included, unless a custom provider is set, whose
-        #    models the list does not show. The default tier and an
-        #    empty one leave the choice to Codex.
-        names = {request.thread.model, request.turn.model} - {""}
+        #    models the list does not show. A collaboration mode's model
+        #    wins over the turn's, so it is the one checked (first-class
+        #    INV-13). The default tier and an empty one leave the choice
+        #    to Codex.
+        names = {request.thread.model, self._params.turn_model(request)} - {""}
         asked = (request.thread.service_tier, request.turn.service_tier, request.turn_service_tier)
         tiers = tuple(tier for tier in asked if tier not in ("", CODEX_DEFAULT_SERVICE_TIER))
         if not check_model or not (names or tiers) or request.thread.model_provider:
@@ -135,6 +145,24 @@ class CodexPreflight:
         # refused here, locally, before any request (hardening INV-20).
         if request.approvals_reviewer is CodexApprovalsReviewer.USER and not self._approvals_answered:
             raise CodexErrorMapper.error(FailureCode.CONFIGURATION_UNSUPPORTED_COMBINATION, CODEX_HOST_USER_REVIEWER_MESSAGE, operation, next_step=CODEX_HOST_USER_REVIEWER_TEXT)
+
+    def require_experimental_api(self, operation: CodexHostOperation, feature: str, *, used: bool = True) -> None:
+        # @intent one-gate-for-every-experimental-feature
+        # A feature Codex accepts only from clients that opt in to its
+        # experimental API is refused here, locally, on a host opened
+        # without it, so the refusal sends nothing (first-class INV-4,
+        # D-15). used is False when the request does not use it.
+        if used and not self._experimental_api:
+            raise ConfigurationError(CODEX_HOST_EXPERIMENTAL_FEATURE_MESSAGE.format(operation=operation.value, feature=feature), details={"field": "experimental_api"})
+
+    def reject_routed_reviewer(self, operation: CodexHostOperation, thread_id: str, routed: bool) -> None:
+        # @intent a-reviewer-codex-resolved-needs-a-handler-too
+        # A thread Codex opened with its approvals routed to a person,
+        # from config.toml or a parent, though the request named no
+        # reviewer, is refused on a host without an approval_handler,
+        # naming that thread (first-class D-36, hardening D-32).
+        if routed and not self._approvals_answered:
+            raise CodexErrorMapper.reviewer_refusal(operation, thread_id)
 
     async def usage_problem(self, operation: CodexHostOperation) -> CodexProblem | None:
         # Ordinary usage used up is a problem. A read error or a None
