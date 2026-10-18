@@ -318,6 +318,7 @@ COMPOSE_WORKSPACE_RULE = "{argument} has another workspace than {reference}; eve
 COMPOSE_PROMPT_TOO_LONG = "{argument} is too long for {receiver}: with the fixed prompt text, the longest prompt that step can receive needs {needed} {units}, and it takes at most {cap}."
 COMPOSE_CHARACTER_UNITS = "characters"
 COMPOSE_COMMAND_LINE_UNITS = "UTF-16 command-line units"
+COMPOSE_BLANK_PROMPT = "{argument} must hold text besides its placeholders, or {receiver} can be sent a blank prompt when the values spliced into it are blank."
 COMPOSE_UNENCODABLE_TEXT = "{argument} holds a surrogate code point, which cannot be encoded for any step; replace it with the character it is half of, or remove it."
 COMPOSE_ALIAS_HARNESS_RULE = "{argument} must be a step on {expected}; got a step on {actual}."
 COMPOSE_FIRST_STAGE_RULE = "{argument} must not use {{previous}}: the first stage has no earlier answer to splice."
