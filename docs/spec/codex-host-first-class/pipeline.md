@@ -17,7 +17,7 @@ Slice 1 (`docs/spec/codex-host-hardening/`, status `verified`) is done on this b
 |---|---|---|---|---|---|
 | S0 recon | done | 22:40 | 23:05 | reports/S0-scout.md | code-map.md: 4 sections, 564 lines; per-function protocol table (§4.1); pins table (§3.4) |
 | S1 spec + review | done | 23:10 | 03:10 | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | r1 fde5a8b0; round 1 SOUND WITH FIXES (1B/6M/6m, 040e56c1); r2 603519bb; round 2 SOUND WITH FIXES (0B/3M/2m, 4db45a23); **r3 d9072cdb status approved**. Budget 13 files / 69 classes / 0 deps / 46 config keys / 42 endpoints; INV 55, AC 44, EC 62, FR 36 |
-| S2 tests | done | 03:15 | 06:40 | reports/S2-test-author.md | 236 tests in 14 new modules plus the §13 pin rewrites (fa27a3ad, ab13e1e7, 893f1df4); **S2_HEAD 625279c6**; red set 253 = 233 new + 19 superseded pins + 1 inherited; spec r4 d0529d15 |
+| S2 tests | done | 03:15 | 06:40 | reports/S2-test-author.md | 236 tests in 14 new modules plus the §13 pin rewrites (fa27a3ad, ab13e1e7, 893f1df4); **S2_HEAD 625279c6, then e3d41513 after S3's blockers**; red set 253 = 233 new + 19 superseded pins + 1 inherited; spec r4 d0529d15 |
 | S3 implement | running | 06:45 | | | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
@@ -72,6 +72,12 @@ Slice 1 (`docs/spec/codex-host-hardening/`, status `verified`) is done on this b
   - **B-5** ruff S105 (S054, allowance 3) flags `CodexMcpAuthStatus.BEARER_TOKEN = "bearerToken"` on its NAME alone. S3 proposed raising the allowance, but the rule's own guidance says "Raising lint/baseline.json for a newly introduced violation ... does not authorize new debt", and spec §14 forbids it too. Decision: spec r5 renames the member `BEARER`, with the wire value `"bearerToken"` unchanged, which removes a purely name-based false positive. S2 updates the two pins (`test_codex_host_records.py:83`, `test_codex_host_mcp_memory.py:83`), and S3 renames it in production. No user approval needed, because no baseline moves.
   
   **Order:** spec author r5, then S2 (S2_HEAD moves), then S3 resumes (rename, gates, push, PR edit).
+
+- 2026-10-19 02:10: **Spec r5 (5f6c4fc4) and S2 round 3 (32e1a404, e3d41513) checked.**
+  - r5 adds §13's third missed pin row and D-40, which renames `BEARER_TOKEN` to `BEARER`. The author's sweep found no other `CodexSpawnRequest` field pin.
+  - **S2 fixed B-4 in the shared fixture,** making `_enter(self, name, /, *args, **kwargs)` positional-only. That changes a fixture signature, not an assertion, so rule 5 allows it. Every caller already passed the name positionally.
+  - **My area run:** `3 failed, 1291 passed, 3 skipped`. The two failures are the B-5 pins waiting on S3's production rename; the third is the inherited failure.
+  - **S2_HEAD is now e3d41513.** S3's no-test-edit check is `git diff e3d41513..HEAD -- tests`.
 
 ## User replies (verbatim)
 - (none yet)
