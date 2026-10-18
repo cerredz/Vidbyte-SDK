@@ -20,11 +20,11 @@ started: 2026-10-16 21:43
 | S4 adversarial review | done | 2026-10-17 | 2026-10-17 | reports/S4-review-{conformance,conventions,engineering}.md, reports/S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; confirmed 3 Blocker / 3 Major; 13 Minor; 0 refuted (21 raw → 19) |
 | S5 repair loop | done (converged, 1/8) | 2026-10-17 | 2026-10-18 | reports/S5-repair-1.md, verify-log.md | HEAD e2fdf0e2; R-1..R-10 fixed; CI 39096073590 + Static policy 39096074746 green |
 | S5 re-review | done (round 1/2) | 2026-10-18 | 2026-10-18 | reports/S5-rereview.md | SOUND: 12/12 fixes confirmed; 0 Blocker / 0 Major / 2 Minor (R-C1 → iteration 2; R-C2 → follow-up) |
-| S5 repair iteration 2 | running | 2026-10-18 | | reports/S5-repair-2.md | scoped to R-C1 |
+| S5 repair iteration 2 | done (converged, 2/8) | 2026-10-18 | 2026-10-18 | reports/S5-repair-2.md | R-C1 fixed @a44fb17f; HEAD 43735a6c; CI 39099160961 + Static policy 39099162854 green; orchestrator source gate 1 failed (inherited) / 6628 passed / 17 skipped |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 (cap reached) · S5 repair iterations: 2/8 (iteration 2 launched 2026-10-18, scoped to R-C1) · S5 re-review rounds: 1/2 (round 1 launched 2026-10-18)
+- S1 review rounds: 2/2 (cap reached) · S5 repair iterations: 2/8 (converged 2026-10-18) · S5 re-review rounds: 1/2 (SOUND)
 - S2_HEAD (test-tree baseline): 6567f6aa (tests fb8ab004 + proof; fixture fold applied). Post-S3 repairs end at 9e81a7d0; post-S4 additions end at fb7be13e. Test-edit check from now on: `git diff fb7be13e..HEAD --stat -- tests/` must be EMPTY (S5/S6) unless the orchestrator adjudicates.
 - Effective base after merge: origin/main 6f5a7310 (drift checks diff 6f5a7310..origin/main)
 
@@ -83,6 +83,8 @@ started: 2026-10-16 21:43
 
 - 2026-10-18 — S5 re-review round 1 (conformance, alone on the post-repair diff): SOUND — 12/12 fixes confirmed (several by in-memory mutation), 0 Blocker / 0 Major / 2 Minor; test tree only the pre-granted line since fb7be13e; budget 12/34; baseline untouched. R-3 judged to meet INV-12 read with EC-22 (overrun ≤ one pause + one rmtree per `_remove`; `complete` makes two). Minor R-C1: `BROWSER_TOOLS_UNAVAILABLE_DETAIL` (vidbyte/lib/constants/browser_tools.py:398) still says "neither a connection to nor a call on" — false for the R-2 case where a FAILED call was recorded (a regression of the R-2 fix in user-facing error text; orchestrator verified the string). Minor R-C2: no test proves a completed call on a server absent from `available_commands` still counts (mutant M2 survives; the fake Grok cannot stage it) → follow-up for the PR body.
 - 2026-10-18 — Orchestrator: run a scoped S5 iteration 2 for R-C1 only (one-word fix "nor a completed call on"; user-facing text made false by the R-2 fix; cheap) rather than shipping it as a follow-up; R-C2 stays a follow-up (needs a new fake scenario key — test infra). No further re-review round needed for a one-word constant if iteration 2 converges (focused tests + lint + remote CI green); counts toward the 8-iteration cap (2/8).
+
+- 2026-10-18 — S5 iteration 2 verified by orchestrator: tree clean, all pushed, `git diff 68105f8d..HEAD -- tests/` empty, only source change is the one-word constant (a44fb17f), `## Iteration 2` in verify-log, CI 39099160961 + Static policy 39099162854 success on 43735a6c, own `run_ci.py --stage source` → `1 failed, 6628 passed, 17 skipped` (inherited 167==120 only). No second re-review: the change is one word in a constant whose only consumer is unchanged, re-reviewed in round 1 as the R-C1 fix text verbatim. Spec → `status: verified`.
 
 ## User replies (verbatim)
 - (none yet)
