@@ -108,6 +108,7 @@ Each is an input and state that leads to a wrong output, and each has a test her
   - an answer full of quotes cut by characters only, so on win32 the next Grok step exceeds the command-line unit ceiling;
   - braces in model output that are parsed again as a template.
 - Templates: a template that is blank once its spliced values are empty is accepted, so a blank answer later sends the next step a blank prompt; or a template that holds `{prompt}` is refused as blank.
+- Caller text: a surrogate code point in the caller's prompt, a template or a schema raises `UnicodeEncodeError` instead of a refusal that names the argument.
 - Aliases: an alias that silently ignores a misspelled step keyword.
 - Missing preconditions:
   - an untracked nested repository with no commit that fails the snapshot after the writer ran, without the record so far;
@@ -125,6 +126,7 @@ Each is an input and state that leads to a wrong output, and each has a test her
 - R-14: a cancel during a slow worktree add left a registration locked.
 - R-12: a surrogate half in an answer crashed the next step's prompt, or left its opencode child running.
 - R-13: a template blank without its spliced values was accepted, and a later step was sent a blank prompt.
+- EC-81, from R-12: a surrogate code point in caller text raised `UnicodeEncodeError` instead of a refusal.
 
 ## Test Suite Map
 
@@ -132,7 +134,7 @@ Each is an input and state that leads to a wrong output, and each has a test her
 - `test_harness_compose_surface.py`: the 42 names and the lib exports, the vocabularies, the function kinds and parameters, the alias signatures, a side-effect-free import, and the import layering (AC-22, INV-1, INV-24, INV-27, INV-32).
 - `test_harness_compose_prompts.py`: the 22 prompt files, their field sets, the ported files' forbidden texts, the 12,000-character room and the package-data entry (AC-21 static part, INV-20, NFR-11).
 - `test_harness_compose_binding.py`: the binders' six functions, the checked fields of a step, direct calls, the `invoker` rules and the same child process as a direct call (INV-2, INV-3, INV-28, INV-31, EC-43, EC-44, EC-78).
-- `test_harness_compose_validation.py`: every invalid input refused before any I/O, a template blank without its spliced values among them, alias arguments bound first, and the command-line unit count unchanged (AC-14, INV-3, INV-5, INV-36, EC-39 to EC-48, EC-62, EC-76, EC-77, EC-79).
+- `test_harness_compose_validation.py`: every invalid input refused before any I/O, a template blank without its spliced values and caller text holding a surrogate among them, alias arguments bound first, and the command-line unit count unchanged (AC-14, INV-3, INV-5, INV-36, EC-39 to EC-48, EC-62, EC-76, EC-77, EC-79, EC-81).
 - `test_harness_compose_chain.py`: the pair alias with answer and diff splicing, the early stop, the prompt fit, in characters and in win32 command-line units, and surrogate halves repaired before they are sent (AC-2, AC-7, AC-19, EC-36, EC-80).
 - `test_harness_compose_verify.py`: the trio alias with isolated verifiers, reader writes caught or kept in their worktrees, and a failed writer (AC-3, AC-8a, AC-8b, EC-52).
 - `test_harness_compose_answers.py`: cut answers, repair turns and their problems, `parse_json_answer` with a caller parser, `JsonText.decode`, and the record bounds (AC-9, AC-16, INV-19, NFR-8, EC-24 to EC-33).

@@ -1,13 +1,13 @@
 """FILE: tests/features/harness_compose/test_harness_compose_validation.py
 
-PURPOSE: Validate first (AC-14, INV-3, INV-5, INV-9, INV-10, INV-18, INV-24, INV-36, D-3, EC-35, EC-39 to EC-48, EC-62, EC-76, EC-77, EC-79): every invalid input is refused with ConfigurationError whose details["field"] names the argument path and whose message never quotes a key, and after the refusal no git process or vendor launcher has started, no temporary folder or Grok home exists and the workspace is untouched; a chain or later-stage template that renders blank once every spliced value is empty is refused the same way, naming the template and the step that could be sent a blank prompt, while a chain template that holds {prompt} is never refused as blank and runs; an alias given a missing or misspelled step keyword raises TypeError when awaited, and a positional step fails at the call itself; the new RecordFieldValidator.command_line_units counts one argument as CreateProcess does, and require_command_line_units keeps its result and its exact error at that count.
+PURPOSE: Validate first (AC-14, INV-3, INV-5, INV-9, INV-10, INV-18, INV-24, INV-36, D-3, EC-35, EC-39 to EC-48, EC-62, EC-76, EC-77, EC-79, EC-81): every invalid input is refused with ConfigurationError whose details["field"] names the argument path and whose message never quotes a key, and after the refusal no git process or vendor launcher has started, no temporary folder or Grok home exists and the workspace is untouched; a chain or later-stage template that renders blank once every spliced value is empty is refused the same way, naming the template and the step that could be sent a blank prompt, while a chain template that holds {prompt} is never refused as blank and runs; a surrogate code point in the caller's prompt, a chain or stage template or a parse_json_answer schema, whether a lone half or the two halves of a pair, is refused naming that argument; an alias given a missing or misspelled step keyword raises TypeError when awaited, and a positional step fails at the call itself; the new RecordFieldValidator.command_line_units counts one argument as CreateProcess does, and require_command_line_units keeps its result and its exact error at that count.
 ROLE IN CODEBASE: Start here when a composite starts git or a step before refusing an input, or names the wrong argument.
 ARCHITECTURE NOTE: The workspace is a repository with one commit, so a composite that ran its git checks before validating would show git children in the CliRunner spy; the stand-in log folder shows any vendor launch. Record-level refusals (StageSpec, EnsembleRoster) happen when the record is built, so their field is the `<Record>.<field>` name of spec §9.1.
-FUNCTION INVENTORY: unrelated_async is a callable that is not one of the nine; Inputs builds the valid and invalid steps a case needs; CASES maps each case to the call that must be refused; BLANK_CASES maps each blank template to its call, its field and the step its refusal names; nothing_started checks that a refusal left no child, launch, folder, Grok home or workspace change; UNIT_CASES pairs a value with its hand-counted command-line units; the test_* functions are one behaviour each.
+FUNCTION INVENTORY: unrelated_async is a callable that is not one of the nine; Inputs builds the valid and invalid steps a case needs; CASES maps each case to the call that must be refused; BLANK_CASES maps each blank template to its call, its field and the step its refusal names; HALVES and SURROGATE_SITES give the surrogate texts and where each goes; nothing_started checks that a refusal left no child, launch, folder, Grok home or workspace change; UNIT_CASES pairs a value with its hand-counted command-line units; the test_* functions are one behaviour each.
 COMMON MODIFICATION PATTERNS: A new refusal is one CASES entry and one parametrize row naming the expected field.
 WHAT NOT TO DO IN THIS FILE: Do not make the workspace a non-repository here; the git-free proof depends on git being reachable.
 KNOWN EDGE CASES: A 24,000-character caller prompt fits a Grok writer exactly, so the too-long prompt cases put it in front of a Grok reader or a later Grok step, where the fixed prompt files add to it.
-RELATED DOCS: tests/features/harness_compose/FEATURE.md; docs/spec/native-thread-compose/spec.md §6.1 INV-3, INV-5, INV-18, INV-24, INV-36, §6.2 AC-14, §6.3 EC-35, EC-39 to EC-48, EC-62, EC-76, EC-77, EC-79, §9.1; docs/spec/native-thread-compose/review.md R-13, R-32
+RELATED DOCS: tests/features/harness_compose/FEATURE.md; docs/spec/native-thread-compose/spec.md §6.1 INV-3, INV-5, INV-18, INV-24, INV-36, §6.2 AC-14, §6.3 EC-35, EC-39 to EC-48, EC-62, EC-76, EC-77, EC-79, EC-81, §9.1; docs/spec/native-thread-compose/review.md R-12, R-13, R-32
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_compose/test_harness_compose_validation.py
 """
 
@@ -197,6 +197,20 @@ PROMPT_TEMPLATES = {
     "prompt then previous": ("{prompt}{previous}", ""),
     "prompt and previous on two lines": ("{prompt}\n{previous}", "\n"),
 }
+# EC-81: surrogate code points no step can encode, and where each
+# goes: the call that carries it and the field the refusal names.
+HALVES = {"lone high half": chr(0xD83D), "lone low half": chr(0xDE00), "pair as two code points": chr(0xD83D) + chr(0xDE00)}
+SURROGATE_SITES = {
+    "chain prompt": (lambda i, text: i.chain([i.grok(), i.grok()], prompt=f"Review {text} now."), "prompt"),
+    "pair alias prompt": (lambda i, text: i.compose.run_opencode_then_grok(f"Review {text} now.", opencode=i.opencode(), grok=i.grok()), "prompt"),
+    "verify prompt": (lambda i, text: i.verify(i.opencode(), [i.plan()], prompt=f"Review {text} now."), "prompt"),
+    "ensemble prompt": (lambda i, text: i.compose.run_ensemble(f"Review {text} now.", i.roster()), "prompt"),
+    "parse_json_answer prompt": (lambda i, text: i.compose.parse_json_answer(i.grok(), f"Review {text} now.", schema="{}", parse=dict), "prompt"),
+    "chain template": (lambda i, text: _template(i, f"Answer {text}: {{previous}}"), "template"),
+    "first stage template": (lambda i, text: i.compose.run_staged_threads([i.stage(i.grok(), f"Start {text}.")]), "stages[0].template"),
+    "second stage template": (lambda i, text: i.compose.run_staged_threads([i.stage(i.grok(), "Start."), i.stage(i.grok(), f"Review {text}: {{previous}}")]), "stages[1].template"),
+    "parse_json_answer schema": (lambda i, text: i.compose.parse_json_answer(i.grok(), i.pack.PROMPT, schema=f'{{"a": "{text}"}}', parse=dict), "schema"),
+}
 
 
 def nothing_started(sandbox, runs, before: tuple) -> None:
@@ -268,6 +282,28 @@ async def test_a_chain_template_that_holds_prompt_is_never_refused_as_blank(comp
     result = await api.compose.chain_threads([first, second], template, prompt=pack.PROMPT)
     assert result.failed_step is None and len(result.outcomes) == 2
     assert pack.launch_prompt(sandbox.only_launch("second")) == pack.PROMPT + joiner + "FIRST-ANSWER-5c1e"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("half", sorted(HALVES))
+@pytest.mark.parametrize("site", sorted(SURROGATE_SITES))
+async def test_a_surrogate_in_caller_text_is_refused_before_any_io(compose_api, sandbox, steps, runs, pack, site, half) -> None:
+    # EC-81 / INV-18 / INV-5: compose never alters the caller's
+    # text, and no step can encode a surrogate code point, so a lone
+    # half, or a pair given as two code points, is refused with
+    # ConfigurationError naming the argument before any git command
+    # or step. Red until review R-12 lands: each case raised
+    # UnicodeEncodeError instead.
+    api = compose_api
+    call, field = SURROGATE_SITES[site]
+    sandbox.make_repo()
+    before = (sandbox.status(), sandbox.files(), sandbox.refs(), sandbox.worktrees())
+    with pytest.raises(api.ConfigurationError) as caught:
+        await call(Inputs(api, steps, sandbox, pack), HALVES[half])
+    error = caught.value
+    assert error.details.get("field") == field, f"{site}: {error} {error.details}"
+    assert "surrogate" in str(error).lower(), f"the refusal says the text holds a surrogate code point: {error}"
+    nothing_started(sandbox, runs, before)
 
 
 @pytest.mark.asyncio
