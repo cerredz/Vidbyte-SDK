@@ -33,6 +33,8 @@ from vidbyte.lib.constants.native_compose import (
     STAGE_DEFAULT_RETRIES,
     STAGE_MAX_LADDER,
     STAGE_MAX_RETRIES,
+    STAGE_MIN_RETRIES,
+    STAGE_MIN_RUNG,
     STAGE_TEMPLATE_FIELDS,
 )
 from vidbyte.lib.constants.native_threads import NATIVE_CONFIG_ARGUMENT
@@ -305,7 +307,7 @@ class StageSpec:
         if self.step.verb is not NativeThreadVerb.RUN:
             raise ConfigurationError("StageSpec.step must be a run step, because every attempt starts a fresh thread.", details={"field": "StageSpec.step"})
         RecordFieldValidator.require_template(self.template, "StageSpec.template", fields=STAGE_TEMPLATE_FIELDS)
-        RecordFieldValidator.require_int(self.retries, "StageSpec.retries", minimum=0, maximum=STAGE_MAX_RETRIES)
+        RecordFieldValidator.require_int(self.retries, "StageSpec.retries", minimum=STAGE_MIN_RETRIES, maximum=STAGE_MAX_RETRIES)
         object.__setattr__(self, "ladder", RecordFieldConverter.to_tuple(self.ladder, "StageSpec.ladder", item_type=type(self.step.config), max_items=STAGE_MAX_LADDER))
 
 
@@ -318,7 +320,7 @@ class StageAttempt:
     decision: StageDecision | None = None
 
     def __post_init__(self) -> None:
-        RecordFieldValidator.require_int(self.rung, "StageAttempt.rung", minimum=0, maximum=STAGE_MAX_LADDER)
+        RecordFieldValidator.require_int(self.rung, "StageAttempt.rung", minimum=STAGE_MIN_RUNG, maximum=STAGE_MAX_LADDER)
         RecordFieldConverter.require_instance(self.outcome, "StageAttempt.outcome", StepOutcome)
         if self.decision is not None:
             object.__setattr__(self, "decision", RecordFieldConverter.to_enum(self.decision, StageDecision, "StageAttempt.decision"))

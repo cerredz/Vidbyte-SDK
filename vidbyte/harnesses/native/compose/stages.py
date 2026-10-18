@@ -93,7 +93,7 @@ class ThreadStages:
         # One to twenty-five stages. Each step must be one of the nine
         # functions with its own arguments, each template must be text a
         # step can take, and the first template has no answer to splice.
-        items = StepRoles.counted(stages, native_compose.COMPOSE_STAGES_ARGUMENT, minimum=1, maximum=native_compose.COMPOSE_MAX_STAGES)
+        items = StepRoles.counted(stages, native_compose.COMPOSE_STAGES_ARGUMENT, minimum=native_compose.COMPOSE_MIN_STAGES, maximum=native_compose.COMPOSE_MAX_STAGES)
         checked: list[StageSpec] = []
         for index, item in enumerate(items):
             argument = StepRoles.item(native_compose.COMPOSE_STAGES_ARGUMENT, index)

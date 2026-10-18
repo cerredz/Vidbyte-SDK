@@ -104,7 +104,7 @@ class ThreadVerifiers:
         # in the writer's workspace, where the change it reviews is.
         checked = ThreadBinder.require_step(writer, native_compose.COMPOSE_WRITER_PARAMETER)
         StepRoles.anchored(checked, native_compose.COMPOSE_WRITER_PARAMETER)
-        items = StepRoles.counted(verifiers, native_compose.COMPOSE_VERIFIERS_ARGUMENT, minimum=1, maximum=native_compose.COMPOSE_MAX_VERIFIERS)
+        items = StepRoles.counted(verifiers, native_compose.COMPOSE_VERIFIERS_ARGUMENT, minimum=native_compose.COMPOSE_MIN_VERIFIERS, maximum=native_compose.COMPOSE_MAX_VERIFIERS)
         readers: list[ThreadStep] = []
         for index, item in enumerate(items):
             argument = StepRoles.item(native_compose.COMPOSE_VERIFIERS_ARGUMENT, index)

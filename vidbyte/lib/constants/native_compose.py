@@ -28,16 +28,24 @@ from vidbyte.lib.enums.native_compose import (
 from vidbyte.lib.enums.native_threads import GrokPermissionMode, NativeThreadProblem
 
 # Counts: chain steps, verifiers, stages, retries, ladder rungs,
-# proposers and the approaches each proposer writes.
+# proposers and the approaches each proposer writes. Each floor is
+# named beside its cap, even when it is 0 or 1 (lint A007).
 COMPOSE_MIN_CHAIN_STEPS = 2
 COMPOSE_MAX_STEPS = 25
+COMPOSE_MIN_VERIFIERS = 1
 COMPOSE_MAX_VERIFIERS = 10
+COMPOSE_MIN_STAGES = 1
 COMPOSE_MAX_STAGES = 25
 STAGE_DEFAULT_RETRIES = 1
+STAGE_MIN_RETRIES = 0
 STAGE_MAX_RETRIES = 3
+# Rung 0 is the step's own config; rung n is ladder item n.
+STAGE_MIN_RUNG = 0
 STAGE_MAX_LADDER = 4
 ENSEMBLE_MIN_PROPOSERS = 1
 ENSEMBLE_MAX_PROPOSERS = 10
+# A proposal's number is its proposer's 1-based position.
+ENSEMBLE_MIN_PROPOSAL_NUMBER = 1
 # A narrowing round keeps at most one proposal in five, rounded up.
 ENSEMBLE_NARROWING_FACTOR = 5
 ENSEMBLE_MIN_APPROACHES = 2

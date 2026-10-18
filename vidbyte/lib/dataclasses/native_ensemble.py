@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from vidbyte.lib.constants.native_compose import (
     COMPOSE_ANSWER_TEXT_MAX_CHARS,
     ENSEMBLE_MAX_PROPOSERS,
+    ENSEMBLE_MIN_PROPOSAL_NUMBER,
     ENSEMBLE_MIN_PROPOSERS,
     ENSEMBLE_ROLE_NAME_MAX_CHARS,
 )
@@ -92,7 +93,7 @@ class EnsemblePlan:
         RecordFieldValidator.require_text(self.coverage_summary, "EnsemblePlan.coverage_summary", max_chars=COMPOSE_ANSWER_TEXT_MAX_CHARS)
         roles = RecordFieldConverter.to_tuple(self.roles, "EnsemblePlan.roles", item_type=EnsembleRole, max_items=ENSEMBLE_MAX_PROPOSERS)
         if not roles:
-            raise ConfigurationError(f"EnsemblePlan.roles must hold 1 to {ENSEMBLE_MAX_PROPOSERS} roles; got none.", details={"field": "EnsemblePlan.roles"})
+            raise ConfigurationError(f"EnsemblePlan.roles must hold {ENSEMBLE_MIN_PROPOSERS} to {ENSEMBLE_MAX_PROPOSERS} roles; got none.", details={"field": "EnsemblePlan.roles"})
         if len({role.name for role in roles}) != len(roles):
             raise ConfigurationError("EnsemblePlan.roles must give every role its own name.", details={"field": "EnsemblePlan.roles"})
         object.__setattr__(self, "roles", roles)
@@ -107,8 +108,8 @@ class EnsembleRound:
 
     def __post_init__(self) -> None:
         kept = RecordFieldConverter.to_tuple(self.kept, "EnsembleRound.kept", item_type=int, max_items=ENSEMBLE_MAX_PROPOSERS)
-        if not kept or len(set(kept)) != len(kept) or min(kept) < 1:
-            raise ConfigurationError(f"EnsembleRound.kept must hold 1 to {ENSEMBLE_MAX_PROPOSERS} different positive proposal numbers.", details={"field": "EnsembleRound.kept"})
+        if not kept or len(set(kept)) != len(kept) or min(kept) < ENSEMBLE_MIN_PROPOSAL_NUMBER:
+            raise ConfigurationError(f"EnsembleRound.kept must hold {ENSEMBLE_MIN_PROPOSERS} to {ENSEMBLE_MAX_PROPOSERS} different proposal numbers of at least {ENSEMBLE_MIN_PROPOSAL_NUMBER}.", details={"field": "EnsembleRound.kept"})
         object.__setattr__(self, "kept", kept)
         RecordFieldValidator.require_text(self.summary, "EnsembleRound.summary", max_chars=COMPOSE_ANSWER_TEXT_MAX_CHARS)
 
@@ -123,7 +124,7 @@ class EnsembleSelection:
     guidance: str
 
     def __post_init__(self) -> None:
-        RecordFieldValidator.require_int(self.proposal, "EnsembleSelection.proposal", minimum=1, maximum=ENSEMBLE_MAX_PROPOSERS)
+        RecordFieldValidator.require_int(self.proposal, "EnsembleSelection.proposal", minimum=ENSEMBLE_MIN_PROPOSAL_NUMBER, maximum=ENSEMBLE_MAX_PROPOSERS)
         RecordFieldValidator.require_text(self.approach, "EnsembleSelection.approach", max_chars=COMPOSE_ANSWER_TEXT_MAX_CHARS)
         RecordFieldValidator.require_text(self.rationale, "EnsembleSelection.rationale", max_chars=COMPOSE_ANSWER_TEXT_MAX_CHARS)
         RecordFieldValidator.require_text(self.guidance, "EnsembleSelection.guidance", max_chars=COMPOSE_ANSWER_TEXT_MAX_CHARS)
