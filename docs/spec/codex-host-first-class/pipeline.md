@@ -136,6 +136,12 @@ Slice 1 (`docs/spec/codex-host-hardening/`, status `verified`) is done on this b
     4. re-review round 2, the last allowed.
   - **R-RR2's shared-helper refactor** (one `_base.py` helper for the resume and side-chat resets) is a follow-up: the reviewer marked it optional, and it is churn this late.
 
+- 2026-10-18 08:20: **Spec r8 (2d0f5216) and S2 round 5 (4de2c91d, d11c5d9d) checked.**
+  - r8 adds the `_fits_alone` rule to INV-20 and D-39.
+  - Round 5 adds 2 tests: a record test that runs without the SDK, and a host test. They cover two refusal kinds, EACCES and ENAMETOOLONG, so a `PermissionError`-only fix fails too; a `from exc` fix also fails.
+  - My area run: `3 failed, 1302 passed, 3 skipped`, the 2 intended red tests plus the inherited one. The diff is tests and docs only.
+  - **S2_HEAD is now d11c5d9d.** S5 iteration 2 launches.
+
 ## User replies (verbatim)
 - (none yet)
 
