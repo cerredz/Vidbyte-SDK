@@ -138,9 +138,14 @@ class CodexGoalMethods(CodexHostCore):
         A thread any client is running is refused. run_codex_goal sets a
         new goal with fresh usage.
         """
+        # Check the host and the thread id before anything is sent.
         operation = CodexHostOperation.CLEAR_CODEX_GOAL
         self._guard(operation, talks=True)
         ref = CodexThreadRef(operation=operation, thread_id=thread_id)
+        # Clear the goal only while no client runs the thread: it is
+        # reserved here, Codex's status is checked, and the reservation
+        # is always released. Codex's answer says whether it had a goal
+        # (first-class INV-33, INV-34).
         clear = self._connection.raw(CODEX_GOAL_CLEAR_METHOD, self._feature_params.goal_clear(ref.thread_id), parse=self._feature_responses.cleared)
         return await self._change_idle(operation, ref.thread_id, CODEX_GOAL_CLEAR_METHOD, clear, loads=False)
 

@@ -100,9 +100,13 @@ class CodexSettingsMethods(CodexHostCore):
         stays open text, so an effort newer than CodexReasoningEffort is
         shown rather than refused.
         """
+        # Codex marks the preset list experimental, so a host without
+        # its experimental API is refused before anything is sent.
         operation = CodexHostOperation.LIST_CODEX_COLLABORATION_MODES
         self._guard(operation, talks=True)
         self._preflight.require_experimental_api(operation, CODEX_COLLABORATION_MODE_LIST_METHOD)
+        # Ask once, and return the presets in Codex's order
+        # (first-class INV-15).
         connection = self._connection
         listing = connection.raw(CODEX_COLLABORATION_MODE_LIST_METHOD, None, parse=self._feature_responses.modes)
         return await connection.call(operation, CODEX_COLLABORATION_MODE_LIST_METHOD, listing)
@@ -144,9 +148,14 @@ class CodexSettingsMethods(CodexHostCore):
         thread_id is Codex's own refusal, as codex.api_error, because the
         filter is optional and nothing reads the thread first.
         """
+        # Check the host and the filter and page arguments. The thread
+        # filter is optional, so the thread is not read first, and
+        # Codex itself refuses an unknown one.
         operation = CodexHostOperation.LIST_CODEX_MCP_SERVERS
         self._guard(operation, talks=True)
         listing = CodexMcpServerListRequest(thread_id=thread_id, server_name=server_name, detail=detail, cursor=cursor, limit=limit)
+        # Ask Codex for one page of servers with their sign-in and
+        # connection status; listing may start a server.
         connection = self._connection
         page = connection.raw(CODEX_MCP_SERVER_STATUS_LIST_METHOD, self._feature_params.mcp_servers(listing), parse=self._feature_responses.mcp_page)
         return await connection.call(operation, CODEX_MCP_SERVER_STATUS_LIST_METHOD, page, thread_id=listing.thread_id)
@@ -221,10 +230,14 @@ class CodexSettingsMethods(CodexHostCore):
 
     async def get_codex_memory_status(self, min_consolidated_threads: int | None = None) -> CodexMemoryStatus:
         """How many threads Codex has consolidated into memories, and whether they are ready; it needs Codex's experimental API."""
+        # Check the host and the threshold, then refuse at once on a
+        # host without Codex's experimental API (first-class INV-4).
         operation = CodexHostOperation.GET_CODEX_MEMORY_STATUS
         self._guard(operation, talks=True)
         reading = CodexMemoryStatusRequest(min_consolidated_threads=min_consolidated_threads)
         self._preflight.require_experimental_api(operation, CODEX_MEMORY_STATUS_METHOD)
+        # Ask Codex once how far its memories are consolidated
+        # (INV-26).
         connection = self._connection
         status = connection.raw(CODEX_MEMORY_STATUS_METHOD, self._feature_params.memory_status(reading), parse=self._feature_responses.memory_status)
         return await connection.call(operation, CODEX_MEMORY_STATUS_METHOD, status)
@@ -234,9 +247,13 @@ class CodexSettingsMethods(CodexHostCore):
 
         It is a plain function and never a tool, so no model can reach it.
         """
+        # There is no argument to check, so refuse at once on a host
+        # without Codex's experimental API (first-class INV-4).
         operation = CodexHostOperation.RESET_CODEX_MEMORIES
         self._guard(operation, talks=True)
         self._preflight.require_experimental_api(operation, CODEX_MEMORY_RESET_METHOD)
+        # Ask Codex once to delete every stored memory; this cannot be
+        # undone, so no tool reaches it (INV-26, INV-42).
         connection = self._connection
         reset = connection.raw(CODEX_MEMORY_RESET_METHOD, None, parse=self._feature_responses.empty)
         await connection.call(operation, CODEX_MEMORY_RESET_METHOD, reset)

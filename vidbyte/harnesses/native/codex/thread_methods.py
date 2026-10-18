@@ -198,19 +198,27 @@ class CodexThreadMethods(CodexHostCore):
 
         A thread any client is running is refused with codex.session_busy.
         """
+        # Check the host and the thread id before anything is sent.
         operation = CodexHostOperation.ARCHIVE_CODEX_THREAD
         self._guard(operation, talks=True)
         ref = CodexThreadRef(operation=operation, thread_id=thread_id)
+        # Archive the thread only while no client runs it: it is
+        # reserved here, Codex's status is checked, and the reservation
+        # is always released. An archive needs no load (INV-34).
         archive = partial(self._connection.client.thread_archive, ref.thread_id)
         await self._change_idle(operation, ref.thread_id, CODEX_THREAD_ARCHIVE_METHOD, archive, loads=False)
 
     async def unarchive_codex_thread(self, thread_id: str) -> CodexThreadInfo:
         """Bring an archived thread back and return it; a thread that is not archived, or does not exist, is Codex's own refusal."""
+        # Check the host and the thread id before anything is sent.
         operation = CodexHostOperation.UNARCHIVE_CODEX_THREAD
         self._guard(operation, talks=True)
         ref = CodexThreadRef(operation=operation, thread_id=thread_id)
+        # Send the unarchive with no read first: Codex itself refuses a
+        # thread that is unknown or not archived (first-class INV-35).
         connection = self._connection
         restored = await connection.call(operation, CODEX_THREAD_UNARCHIVE_METHOD, connection.client.thread_unarchive, ref.thread_id, thread_id=ref.thread_id)
+        # Return the restored thread in the host's own thread shape.
         return self._responses.thread_info(restored.thread)
 
     async def revert_codex_thread(self, thread_id: str, before_turn_id: str) -> CodexThreadInfo:
@@ -222,18 +230,26 @@ class CodexThreadMethods(CodexHostCore):
         and a thread not loaded here is loaded first unless its stored
         goal is active.
         """
+        # Check the host, the thread id and the turn id first.
         operation = CodexHostOperation.REVERT_CODEX_THREAD
         self._guard(operation, talks=True)
         reverting = CodexThreadRevertRequest(thread_id=thread_id, before_turn_id=before_turn_id)
+        # Build the one thread/revert call, whose answer is the thread
+        # as Codex now stores it (first-class INV-36).
         params = self._feature_params.revert(reverting.thread_id, reverting.before_turn_id)
         revert = self._connection.raw(CODEX_THREAD_REVERT_METHOD, params, parse=self._feature_responses.reverted)
+        # Run it only while no client runs the thread, loading the
+        # thread first when it is not loaded here (INV-34).
         return await self._change_idle(operation, reverting.thread_id, CODEX_THREAD_REVERT_METHOD, revert, loads=True)
 
     async def rename_codex_thread(self, thread_id: str, name: str) -> None:
         """Give a stored thread a new name."""
+        # Check the host, the thread id and the new name first.
         operation = CodexHostOperation.RENAME_CODEX_THREAD
         self._guard(operation, talks=True)
         renaming = CodexThreadRenameRequest(thread_id=thread_id, name=name)
+        # Read the thread first, so an unknown one is refused as
+        # codex.session_not_found, then send the rename (INV-35).
         await self._preflight.require_thread(operation, renaming.thread_id)
         connection = self._connection
         await connection.call(operation, CODEX_THREAD_NAME_SET_METHOD, connection.client.thread_set_name, renaming.thread_id, renaming.name, thread_id=renaming.thread_id)
@@ -244,11 +260,17 @@ class CodexThreadMethods(CodexHostCore):
         A thread any client is running is refused, and a thread not
         loaded here is loaded first unless its stored goal is active.
         """
+        # Check the host and the thread id, and take a JSON copy of the
+        # items, so a later change by the caller changes nothing sent.
         operation = CodexHostOperation.INJECT_CODEX_ITEMS
         self._guard(operation, talks=True)
         injecting = CodexItemsInjectRequest(thread_id=thread_id, items=items)
+        # Build the one thread/inject_items call with the items in the
+        # order given (first-class INV-37).
         params = self._feature_params.inject(injecting.thread_id, injecting.items)
         inject = self._connection.raw(CODEX_THREAD_INJECT_ITEMS_METHOD, params, parse=self._feature_responses.empty)
+        # Run it only while no client runs the thread, loading the
+        # thread first when it is not loaded here (INV-34).
         await self._change_idle(operation, injecting.thread_id, CODEX_THREAD_INJECT_ITEMS_METHOD, inject, loads=True)
 
     async def list_codex_background_terminals(self, thread_id: str, cursor: str = "", limit: int | None = None) -> CodexBackgroundTerminalPage:
@@ -256,11 +278,16 @@ class CodexThreadMethods(CodexHostCore):
 
         A thread that is not loaded here is not loaded first.
         """
+        # Check the host and the page arguments, then refuse at once on
+        # a host without Codex's experimental API (first-class INV-4).
         operation = CodexHostOperation.LIST_CODEX_BACKGROUND_TERMINALS
         self._guard(operation, talks=True)
         listing = CodexTerminalListRequest(thread_id=thread_id, cursor=cursor, limit=limit)
         self._preflight.require_experimental_api(operation, CODEX_THREAD_BACKGROUND_TERMINALS_LIST_METHOD)
+        # Read the thread first, so an unknown one is refused; a thread
+        # that is not loaded is not loaded for this (INV-38, EC-47).
         await self._preflight.require_thread(operation, listing.thread_id)
+        # Ask Codex for one page of the thread's background terminals.
         connection = self._connection
         page = connection.raw(CODEX_THREAD_BACKGROUND_TERMINALS_LIST_METHOD, self._feature_params.terminals(listing), parse=self._feature_responses.terminals)
         return await connection.call(operation, CODEX_THREAD_BACKGROUND_TERMINALS_LIST_METHOD, page, thread_id=listing.thread_id)
@@ -270,11 +297,16 @@ class CodexThreadMethods(CodexHostCore):
 
         It is a plain function and never a tool, so no model can reach it.
         """
+        # Check the host and the thread id, then refuse at once on a
+        # host without Codex's experimental API (first-class INV-4).
         operation = CodexHostOperation.CLEAN_CODEX_BACKGROUND_TERMINALS
         self._guard(operation, talks=True)
         ref = CodexThreadRef(operation=operation, thread_id=thread_id)
         self._preflight.require_experimental_api(operation, CODEX_THREAD_BACKGROUND_TERMINALS_CLEAN_METHOD)
+        # Read the thread first, so an unknown one is refused before
+        # any terminal is stopped (INV-38).
         await self._preflight.require_thread(operation, ref.thread_id)
+        # Ask Codex to stop every background terminal of the thread.
         connection = self._connection
         clean = connection.raw(CODEX_THREAD_BACKGROUND_TERMINALS_CLEAN_METHOD, self._params.thread_params(ref.thread_id), parse=self._feature_responses.empty)
         await connection.call(operation, CODEX_THREAD_BACKGROUND_TERMINALS_CLEAN_METHOD, clean, thread_id=ref.thread_id)
@@ -286,10 +318,14 @@ class CodexThreadMethods(CodexHostCore):
         created are found. Sub-agent threads are not; list them with
         list_codex_child_threads.
         """
+        # Check the host and the search arguments, then refuse at once
+        # on a host without Codex's experimental API (INV-4).
         operation = CodexHostOperation.SEARCH_CODEX_THREAD_CONTENT
         self._guard(operation, talks=True)
         search = CodexThreadSearchRequest(query=query, archived=archived, cursor=cursor, limit=limit)
         self._preflight.require_experimental_api(operation, CODEX_THREAD_SEARCH_METHOD)
+        # Search every top-level thread source, so threads this host
+        # created are found, and return one page of hits (INV-39).
         connection = self._connection
         page = connection.raw(CODEX_THREAD_SEARCH_METHOD, self._feature_params.search(search), parse=self._feature_responses.search)
         return await connection.call(operation, CODEX_THREAD_SEARCH_METHOD, page)
