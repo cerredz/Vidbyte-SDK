@@ -5,7 +5,7 @@ worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-native-thread-compo
 branch: feat/native-thread-compose
 base_commit: 5c08c35edcb1827e190ca4e2b2b1370808ef24be
 pr_base: feat/native-grok-opencode-meta-hosts
-pr:
+pr: https://github.com/cerredz/Vidbyte-SDK/pull/1186
 until: none
 started: 2026-10-15 18:04
 ---
@@ -17,8 +17,8 @@ started: 2026-10-15 18:04
 | S0 worktree + capture + recon | done | 2026-10-15 18:04 | 2026-10-15 18:52 | reports/S0-scout.md | base_commit 5c08c35e; code-map.md (4 sections, ~90 files read) |
 | S1 spec + review | done (2 review rounds: r1 → SOUND WITH FIXES 0B/8M/3m → r2 → SOUND WITH FIXES 1B/2M/3m → r3 approved) | 2026-10-15 19:05 | 2026-10-16 22:09 | reports/S1-spec-author.md; reports/S1-spec-review.md; reports/S1-spec-review-r2.md | spec r3 e22cc06b, status approved: 18 sections, 28 §12.3 rows, 40 new (18 .py + 22 .md) + 9 modified files, 49 classes, 42 public names + 9 lib exports, 0 deps, 0 config keys; FR 18, NFR 11, AC 23, EC 78, INV 36, D 28, W 13, A 11, Q 11 (none blocking), T 8, NG 13 |
 | S2 tests | done (spec defect D-5 `asyncio.Lock` routed to the spec author as r4 before S3) | 2026-10-16 22:12 | 2026-10-17 18:16 | reports/S2-test-author.md | 276 cases (76 test functions, 15 files) in tests/features/harness_compose/ + fake_harness.py optional fields; red: 276 errors, all `ModuleNotFoundError: No module named 'vidbyte.harnesses.native.compose'`; base pack 436 passed, 2 skipped (= baseline); SDK-LINT: PASS |
-| S3 implement | running | 2026-10-17 18:48 | | reports/S3-implementer.md (pending) | |
-| S4 adversarial review | pending | | | | |
+| S3 implement | done | 2026-10-17 18:48 | 2026-10-18 06:34 | reports/S3-implementer.md | 28 rows in 25 row commits + 1 fix (feea90c8, EC-16); code HEAD feea90c8, S3_HEAD e1bf20d8; draft PR #1186 (base feat/native-grok-opencode-meta-hosts); budget exact: 40 new + 9 modified files, 42 exported names; compose pack 276 passed |
+| S4 adversarial review | running | 2026-10-18 06:34 | | reports/S4-review-{conformance,conventions,engineering}.md (pending) | |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
@@ -29,6 +29,7 @@ started: 2026-10-15 18:04
 ## Key SHAs
 - BASE_COMMIT: 5c08c35edcb1827e190ca4e2b2b1370808ef24be (head of PR #1036 at S0; the base moved from 4a7987c7 during S0 via a merge of main that touched 2 unrelated files)
 - Spec r1 7df09460 · r2 25358062 · r3 (approved) e22cc06b · r4 (tests-written; S2 defect fix) 91bb3b8b
+- S3_HEAD: e1bf20d8 (last code commit feea90c8) · PR: https://github.com/cerredz/Vidbyte-SDK/pull/1186 (draft, base feat/native-grok-opencode-meta-hosts)
 - S2_HEAD: 2ef11f3a (tests + plan 2ec1ce7c · spec proof 90eec511 · report 2ef11f3a). Test tree paths S3+ must never touch: `tests/features/harness_compose/`, `tests/features/harness_threads/fake_harness.py`, `tests/features/harness_threads/README.md` (check with `git diff 2ef11f3a..HEAD --stat -- tests`) · S3_HEAD: (pending)
 
 ## Decisions the orchestrator made
@@ -85,6 +86,10 @@ started: 2026-10-15 18:04
 
 - 2026-10-17 ~19:02 — Interruption 9: the S3 implementer (launched 18:48) was stopped by an API rate limit (HTTP 429, session limit, reset 10:40pm) during orientation (its last words: "Now the test pack: listing files and reading conftest first."). Verified 2026-10-18 02:12: HEAD 18d7b4e6, clean, no untracked files, no `vidbyte/harnesses/native/compose/`, no remote branch, no PR; its saved context exists (transcript last written 19:02). Coordinator (02:1x): resume the same implementer. Resumed the SAME S3 implementer via SendMessage.
 
+- 2026-10-18 06:34 — S3 implementer DONE (after interruption 9). Orchestrator spot-check: `git status --porcelain` empty; local HEAD = origin/feat/native-thread-compose = e1bf20d8 (pushed); every code commit cites W-/FR-/AC- IDs; `git diff 2ef11f3a..HEAD --stat -- tests` EMPTY; `git diff 2ef11f3a..HEAD --stat -- lint .semgrep .github scripts contracts` EMPTY; `gh pr view` → #1186 draft=true OPEN base=feat/native-grok-opencode-meta-hosts title `[WIP] feat: Composite thread functions across Grok, opencode and Muse`; spec frontmatter `status: implemented`, `pr:` set; `PYTHONPATH=<worktree> python -m pytest -q tests/features/harness_compose` → `276 passed in 49.20s`; surface + static policy → `12 passed`. Implementer-reported local gate at feea90c8: source stage `5917 passed, 16 skipped` + `CI passed.`; package stage `Installed vidbyte-sdk 0.3.0 passed smoke checks.` + `CI passed.`; SDK-LINT PASS; semgrep 0; TID251 5; I001 223 (= baseline); AC-21 wheel half PASS. Remote: CI 39118223998 and Static policy 39118225434 success at e05f812b (before the EC-16 fix); Static policy 39119541758 success at ce8ad488; CI 39119540221 at ce8ad488 in progress at spot-check time.
+- 2026-10-18 06:34 — S3 OPEN ITEMS forwarded to the S4 reviewers as claims to check (not adjudicated by me): (1) INV-4/AC-15 — `RecordFieldValidator._received` quotes a short (≤ 80-char repr) invalid prompt/template in the `ConfigurationError` message, so a key inside it would show; (2) ledger 7/EC-16 — with several readers, one worktree that cannot be removed drops the other readers' finished answers (fan_out raises once and cancels the rest); (3) a template of only `{previous}` with an empty previous answer sends a blank prompt, recorded as a configuration failure; (4) lone surrogates pass through untested; (5) EC-23 per-proposal share measured ~1,560 chars vs the spec's 1,100 (README says ~1,500).
+- 2026-10-18 06:34 — S4 launched: three parallel fresh reviewers (conformance C, conventions V, engineering E), diff `origin/feat/native-grok-opencode-meta-hosts...e1bf20d8`, FOCUS full review.
+
 ## User replies (verbatim)
 - none (coordinator relay messages on 2026-10-15 20:0x and 2026-10-16 01:3x concerned rate-limit resumption only; no product decisions)
 
@@ -140,3 +145,6 @@ started: 2026-10-15 18:04
 - Compose pack: red run takes ~4–12 s (import errors only); green run time still unmeasured; base pack ~55–140 s on this host — *source:* S2 test author + orchestrator.
 - Grok serialization primitive: `asyncio.Semaphore(native_compose.COMPOSE_GROK_MAX_CONCURRENT_CALLS)` (= 1), one per (running loop, normcased resolved workspace), held in a class-level `weakref.WeakValueDictionary` (RUF012/S005 flags a class-level `{}` but not a WeakValueDictionary); a Semaphore binds to a loop on first wait, so the key includes the loop. Re-run `python -m ruff check pyproject.toml vidbyte --config lint/ruff.toml --select TID251 --no-cache` — it must still report exactly 5 — *source:* S1 author r4.
 - Remote-only flake: `tests/features/coding_agent/test_coding_agent_environment.py::test_real_bash_reports_its_version_and_git` can time out on the GitHub runner ("bash did not finish within 15 seconds") though it passes locally in ~3 s; rerun with `gh run rerun <id> --failed` — *source:* owner memory note (sdk-main-known-red-tests).
+- run_ci package stage: run with PYTHONPATH unset (`env -u PYTHONPATH`) and an empty `--dist-dir`; AC-21 wheel check script `C:/Users/422mi/AppData/Local/Temp/claude/C--Users-422mi-vidbyte-repos/d2d5110d-c484-4b56-acef-651ebe9a78a5/scratchpad/s3/check_wheel_prompts.py` (run with the installed venv's `python -I` from outside the checkout); a scratch test can reuse the compose fixtures with `-p tests.features.harness_compose.conftest` (example `.../scratchpad/s3/scratch_ec16_check.py`) — *source:* S3 implementer.
+- spec.md uses CRLF line endings (edit at byte level); `lint/run.py` prints pre-existing IMPROVED hints (A002, C011, S001, S010, S025, S061, S063) that are not this PR's to act on; I001 whole-tree count is 223 = baseline — *source:* S3 implementer.
+- Compose pack green run time: ~49–50 s on this Windows host — *source:* orchestrator.
