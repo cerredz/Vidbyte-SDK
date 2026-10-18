@@ -360,3 +360,72 @@ The section's other notes agree with the spec and need no change. They cover the
 - `git diff --check` is clean, the CRLF working copy is kept, and no backslash was added.
 
 **Git state:** one commit for r4 holds the spec and this addendum.
+
+## 13. Addendum: revision r5 (as-built corrections after S5 repair 1, not a review round)
+
+**Input.** The orchestrator asked me to correct, as built, the passages that S5 iteration 1 made stale and that `reports/S5-repair-1.md` §6 lists, together with anything that depends on them. It also asked me to sweep for `gather`, `counted`, `add_worktree`, `shielded`, `(text, spliced)`, `(text, bool)`, `40 new files`, and the record and class counts.
+- Worktree HEAD before the edit was a4092e7c, and the tree was clean.
+- The code there is the code S5 left at 3a21352b: `git diff --stat 3a21352b a4092e7c -- vidbyte tests pyproject.toml REPO_MAP.md` is empty.
+- `status:` is left as the orchestrator set it, and the revision is now 5.
+
+**Method.**
+- I checked each statement against the code at HEAD, not against the repair report. I read:
+  - `ComposeCalls.fan_out` and `settle` (`calls.py:71–113`);
+  - `DisposableWorktree.__aenter__`, `__aexit__` and `_settled` (`workspace.py:115–179`);
+  - the `ComposeGit` worktree methods (`git.py:152–183`);
+  - `ComposeTexts.render` and `fixed`, and `PromptFitter.check`, `_scrub` and `_encodable` (`texts.py:50–197`);
+  - `ThreadBinder._derived` and `_withheld` (`steps.py:143–167`);
+  - the `kept` lists and `_kept` in `verify.py:73–171` and `ensemble.py:85–248`, and the selector's handler (`selection.py:95–101`);
+  - `PromptSegment` (`native_compose.py:139–152`) and `SecretText` (`secret_text.py:55–67`);
+  - the two keywords (`validation.py:42` and `:177`).
+- I diffed the class and `def` names between e1bf20d8 (the S3 report commit) and HEAD. The result is exactly the §6 list:
+  - added: `PromptSegment`, `SecretText`, `replace_all`, `settle`, `fixed`, `worktree_folder`, `fill_worktree`, `_settled`, `_derived`, `_withheld`, `_encodable` and `_kept`;
+  - removed: `counted` and `_replace`.
+- No call to `asyncio.gather(`, `asyncio.shield(` or `TaskGroup(` is left in compose.
+- Probe `scratchpad/r5probe/cancel_probe.py` (Python 3.11.0). A child's cleanup takes 0.2 s, and its waiter is cancelled twice. This is the evidence behind D-17's new reason:
+  - `gather`: `['cleanup-cut', 'outer-ended child_done=True']`, so the second cancel reaches the child;
+  - `shield`: `['outer-ended child_done=False', 'cleanup-finished']`, so the waiter stops while the child runs on;
+  - `asyncio.wait` in a loop, as `settle` does: `['cleanup-finished', 'outer-ended child_done=True']`.
+
+**Passages changed.**
+
+| Section | Before | After | Checked against |
+|---|---|---|---|
+| D-17 | Tasks with `gather` plus explicit cancellation. S006, S019 and S063 "fit the gather shape" | One task per child and `asyncio.wait(FIRST_EXCEPTION)`. Then whatever still runs is cancelled, and `ComposeCalls.settle` waits for every child. One exception propagates: the first failure in child order, or the cancel. No gather and no `TaskGroup`. The reason cites the probe. Gather is added as the r1 to r4 runner-up. The intent (one raise, the rest cancelled) is unchanged | `calls.py:71–113` |
+| §8.2 | "Shielded cleanup" after `muse/threads.py:109–116`; "Fan-out with gather" after `aggregation.py:89` | The muse intent without its shield, with git steps settled. No gather precedent applies | `workspace.py:173–179`, `calls.py:71–113` |
+| EC-17 | The removal runs as a shielded task | An add that has started runs to its end, then the removal runs. Each is a settled task, with git bounded by `COMPOSE_GIT_TIMEOUT_SECONDS` | `workspace.py:122–142` |
+| INV-30 | "shielded cleanups" | "settled cleanups" (one word) | `calls.py:94–113` |
+| §8.5 | `ComposeGit` listed `add_worktree`, and `ComposeCalls` listed `call` and `fan_out`. There was no `PromptSegment` and no `SecretText` | `worktree_folder() -> Path`, `add_worktree(folder) -> None` and `fill_worktree(folder, tree) -> None`. `ComposeCalls` gains `settle(tasks)`. A `PromptSegment` record and a `SecretText` block are added | `git.py:152–167`, `calls.py:94`, `native_compose.py:139–152`, `secret_text.py:55–67` |
+| §8.4 | "51 classes in 19 modules" | "51 classes: 50 in the 19 new modules, and `ThreadComposeError` in `base.py`". The same imprecision was there in r1 to r4 | AST count over the 19 added modules |
+| §9.1, §9.4 | No `PromptSegment` row. `JsonText` was the only `vidbyte.lib.util` export, and the keywords were missing | A `PromptSegment` row (types only), `SecretText`, and the two grant (c) keywords | `native_compose.py:146–152`, `util/__init__.py:64`, `validation.py:42` and `:177` |
+| §11 | The muse shield was the template and the aggregation gather a reusable piece. The util layout had no `secret_text.py` | Each of the two lines now says that compose does not copy it (D-17). The layout lists `secret_text.py [NEW]` | as for D-17 |
+| §12.3 | Rows 12, 14 and 15 named gather, `add_worktree` and shielded removal. Rows 4, 6, 7 and 13 did not mention the grants. The table had 28 rows, with 5 lib modules and 40 new files | Rows 12, 14 and 15 describe the code as built. Rows 4, 6, 7 and 13 name the grants. New row 29 is `secret_text.py`. The count is 6 lib modules and 41 new files | the PR diff (see the self-check) |
+| §12.4, §12.6, §14 | Gather results "checked against `BaseException`". P1 was rows 1–10. "More than 40 new files" | No gather and no shield, only `settle`. Row 29 joins P1. The limit is 41 | `calls.py` header, WHAT NOT TO DO item 5 |
+| §17 | Rendering used `(text, spliced)`. The helpers list had `StepRoles.counted`. Fan-out was wait, then gather. Several readers gave the record from before their stage | Rendering uses `PromptSegment` records. `counted` is removed, and the S5 helpers are added with their S4 review IDs. Fan-out is as in D-17, with the planner and the selector as one-child fan-outs. The record holds every verdict or every proposal once every verifier or every proposer has answered, and otherwise the writer or the plan alone. An r5 row is added | `verify.py:163–171`, `ensemble.py:240–248`, `ensemble.py:92` and `:106` |
+
+**Sweep: left as they are.**
+- INV-1 "18 records": these are the records compose exports. `PromptSegment` is not exported, so the 42 names still hold.
+- EC-19 "A plain `gather` would leave siblings running": this describes a rejected alternative and is still true.
+- The S5 grant sub-bullets in §17 that mention `(text, spliced)` tuples and `StepRoles.counted`: they record what the grants replaced.
+- INV-17 says templates are "rendered with `str.format_map`". The code splits them with the parser that `format_map` uses, so the text is the same. §17 Rendering records this, and row 13 now says it too.
+- §0 and §4 are byte-identical, and the AC table is unchanged.
+
+**r4 open item 7b is resolved.** `tests/features/harness_compose/conftest.py:659–661` checks `likely_cause` and `next_step` against `THREAD_COMPOSE_ADD_LIKELY_CAUSE` and `THREAD_COMPOSE_ADD_NEXT_STEP` when the add texts apply. So the add texts replace the generic ones, as INV-6's "instead" says. The spec needs no change.
+
+**Open items (requirement level; the spec is unchanged).**
+1. INV-1 and AC-22 name `JsonText` as the `vidbyte.lib.util` export but not `SecretText`. Neither says "only", so the code passes both, and §8.4 and §9.4 count `SecretText`. The owner decides whether INV-1 should name it.
+2. R-13. Before any I/O, `PromptFitter.check` refuses a prompt whose fixed text is blank (`COMPOSE_BLANK_PROMPT`, naming `template` or `stages[i].template`). INV-18 requires that no prompt is sent blank, but it describes the up-front check only as a longest-form fit. No INV, EC or AC row names this refusal.
+3. R-12. At send time, compose rejoins surrogate halves that were split apart in a spliced value and turns a lone half into U+FFFD. This happens after NUL removal and before the key scrub. It refuses fixed text that holds a lone surrogate up front (`COMPOSE_UNENCODABLE_TEXT`). INV-18 lists only NUL removal and key replacement at send time, and no EC covers surrogates.
+4. EC-17 now says that an add that has started runs to its end before the removal (S4 review R-14). The expected result is unchanged. If the orchestrator wants only the one-word change, the Behavior cell becomes "The removal runs as a settled task, then `CancelledError` propagates".
+
+**Note.** When two children fail before the cancel lands, `fan_out` raises the one that comes first in child order (`calls.py:87–90`). D-17 now says so, and INV-14's "that one exception" can be read this way.
+
+**Self-check after r5:**
+- headings: 18 `## §` headings, the same set as at HEAD;
+- tables: 20, with 0 malformed rows;
+- references: every ID resolves (INV 36, AC 23, EC 78, FR 18, NFR 11, D 28, T 8, W 13, NG 13, A 11, Q 11);
+- work breakdown: 29 rows, with 41 new and 9 modified files. Every row matches `git diff --name-status origin/feat/native-grok-opencode-meta-hosts...HEAD -- vidbyte pyproject.toml REPO_MAP.md`, which lists 50 files, 22 of them prompts. `--stat` gives the same 50 files changed;
+- every name added to §8.5 or §17 has a `def` or `class` at HEAD (`git grep -n` for `def <name>` or `class <name>`);
+- §4's sha256 and the AC rows are unchanged, `git diff --check` is clean, the CRLF working copy is kept (1,620 CRLF, no lone LF or CR), and no backslash was added.
+
+**Git state:** one commit for r5 holds the spec and this addendum. It is not pushed.
