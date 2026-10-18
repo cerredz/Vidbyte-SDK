@@ -156,6 +156,18 @@ Slice 1 (`docs/spec/codex-host-hardening/`, status `verified`) is done on this b
   
   Re-review round 2, the last allowed, launches on `ec17d5ce...bff67286`.
 
+- 2026-10-18 09:20: **Re-review round 2 checked.** Report: `reports/S5-rereview-2.md`.
+  - **Verdict:** SOUND, with 0 Blockers, 0 Majors and 1 Minor, so the cap is not hit.
+  - R-RR1 is closed: five in-memory mutants each fail S2's two tests. R-RR2's comment is true, and r7 and r8 match the code.
+  - Area run: `1 failed (inherited), 1304 passed, 3 skipped`. `SDK-LINT: PASS`.
+  - **R-RR2-1 (Minor), checked myself.** `CodexWorktreeRequest(repository=<PathLike whose __fspath__ returns 5>, ...)` raises a raw `TypeError` from `os.fspath`, inside `RecordFieldConverter.to_path`. INV-2 says that no `TypeError` ever reaches the caller. A grep of every `vidbyte/` file changed since 6f5a7310 finds one `to_path` call: `codex_host_inputs.py:590`. The only other path conversion, `thread_methods.py:162`, wraps a value the record has already validated.
+  - **Decision:** run a minimal S5 iteration 3 (3/8), as slice 1 did for m-9. INV-2 is a weighted word, and the user's bar is "exception handle everything".
+    1. The S2 author adds one red regression test, as for R-RR1.
+    2. A fresh repair agent adds `TypeError` to the record's except tuple, with no spec change: the code is being brought up to INV-2.
+    3. I verify it myself with a revert mutant and the gates.
+    
+    There is no round-3 re-review, because the cap is 2. The root fix in `validation.py` `to_path` joins the separate follow-up PR, with `require_directory` and `native_threads.py:120,146`.
+
 ## User replies (verbatim)
 - (none yet)
 
