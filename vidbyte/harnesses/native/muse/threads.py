@@ -8,7 +8,7 @@ COMMON MODIFICATION PATTERNS: A new Muse option is a MuseThreadConfig field (vid
 WHAT NOT TO DO IN THIS FILE: 1. Do not put the key on argv or in a file, and do not give it to `muse serve`. 2. Do not start exec for a continue or fork whose serve answer failed; `muse exec --session-id <unknown>` would silently create a thread. 3. Do not give the temp folder a fixed location; tempfile.mkdtemp picks it (S054).
 KNOWN EDGE CASES: Without a mount the call is exactly the plain call: no settings file and no --disable-web-tools (spec INV-14); the settings go only into the per-call config folder, never into the caller's own Muse config. The temp folder is removed in a finally block, after the reap, so a cancelled call still cleans up before CancelledError propagates (spec INV-9); a cancel that lands while the folder is still being prepared waits for that work, then removes it, and a second cancel stops only that waiting, never the removal, which then ends in the background. On Windows the temp folder and the workspace reach muse in their /mnt form; a workspace with no /mnt form is refused naming workspace before anything is written. A fork that fails after session/fork answered carries the fork's new id (spec INV-5).
 RELATED DOCS: vidbyte/harnesses/README.md
-TESTS: tests/features/harness_threads/
+TESTS: tests/features/harness_threads/; the mounted path: tests/features/harness_threads/test_harness_threads_browser_mounts.py, tests/features/harness_threads/test_harness_threads_browser_lifecycle.py
 """
 
 from __future__ import annotations

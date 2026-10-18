@@ -8,7 +8,7 @@ COMMON MODIFICATION PATTERNS: A new sign-in failure text from grok is one more m
 WHAT NOT TO DO IN THIS FILE: 1. Do not copy vendor text into an error unscrubbed; pass it as vendor_text and the factory scrubs and caps it. 2. Do not accept a cut stdout; a truncated answer is output_too_large, never parsed. 3. Do not start processes or await anything here.
 KNOWN EDGE CASES: A browser run whose stop reason is cancelled is a failed run, because a headless run cancels the turn when the agent calls a tool no rule allows (spec EC-41). The readers never raise on vendor text: a name whose server is not mounted, or whose tool part fails NATIVE_NAME_PATTERN, is skipped (EC-44). A continue is matched case-insensitively and returns the id the caller gave. A fork whose answer is its source thread is protocol_mismatch, because grok then continued the source instead of copying it. A thread id that the result record would refuse is protocol_mismatch, not an argument error. A timed-out run carries no new thread id, because grok prints it only at exit.
 RELATED DOCS: vidbyte/harnesses/README.md
-TESTS: tests/features/harness_threads/test_harness_threads_errors.py, tests/features/harness_threads/test_harness_threads_threads.py
+TESTS: tests/features/harness_threads/test_harness_threads_errors.py, tests/features/harness_threads/test_harness_threads_threads.py, tests/features/harness_threads/test_harness_threads_browser_mounts.py, tests/features/harness_threads/test_harness_threads_browser_lifecycle.py
 """
 
 from __future__ import annotations

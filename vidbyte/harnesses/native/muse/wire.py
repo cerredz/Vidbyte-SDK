@@ -8,7 +8,7 @@ COMMON MODIFICATION PATTERNS: A new MSP request is one MuseMethod member and one
 WHAT NOT TO DO IN THIS FILE: 1. Do not copy vidbyte.__version__ at import time; batch_frames reads it on every call. 2. Do not send a commandId that is not from new_command_id. 3. Do not copy vendor text into an error unscrubbed; pass it as vendor_text and the factory scrubs and caps it.
 KNOWN EDGE CASES: tool_calls pairs each proposed task or side-effect intent named mcp__<server>__<tool> with the completed or failed record of the same task_id (spec A-1), skips a name whose server is not mounted or whose tool part fails NATIVE_NAME_PATTERN (EC-44), and never raises. `muse exec --session-id <unknown>` silently starts a new thread, so a continue checks the id with session/read first, and an exec whose session stream is not the id it was given is thread_not_found carrying the stream's id. A fork whose serve answer is its source id is protocol_mismatch before exec starts. The session stream id is looked for before the runner checks, so a timed-out or cut run still reports it (spec INV-5). Lines that are not JSON objects are skipped.
 RELATED DOCS: vidbyte/harnesses/README.md
-TESTS: tests/features/harness_threads/test_harness_threads_threads.py, tests/features/harness_threads/test_harness_threads_errors.py
+TESTS: tests/features/harness_threads/test_harness_threads_threads.py, tests/features/harness_threads/test_harness_threads_errors.py, tests/features/harness_threads/test_harness_threads_browser_mounts.py, tests/features/harness_threads/test_harness_threads_browser_lifecycle.py
 """
 
 from __future__ import annotations

@@ -8,7 +8,7 @@ COMMON MODIFICATION PATTERNS: A new opencode option is an OpencodeThreadConfig f
 WHAT NOT TO DO IN THIS FILE: 1. Do not put the key on argv, on stdin or in a file; it travels only inside OPENCODE_CONFIG_CONTENT of the child. 2. Do not drop --dir or the cwd; an inherited PWD must never choose the project. 3. Do not copy skills; opencode reads the folders the caller passed.
 KNOWN EDGE CASES: Without a mount the call is exactly the plain call: the same config, environment and command line (spec INV-14). opencode also reads the workspace's own opencode.json, so a workspace can add providers, agents or plugins; pass only trusted workspaces (spec T-6). The key works only for providers that take an API key (EC-39). An unknown provider or model is reported by opencode and becomes run_failed with its text (EC-24).
 RELATED DOCS: vidbyte/harnesses/README.md
-TESTS: tests/features/harness_threads/
+TESTS: tests/features/harness_threads/; the mounted path: tests/features/harness_threads/test_harness_threads_browser_mounts.py, tests/features/harness_threads/test_harness_threads_browser_lifecycle.py
 """
 
 from __future__ import annotations

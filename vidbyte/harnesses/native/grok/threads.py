@@ -8,7 +8,7 @@ COMMON MODIFICATION PATTERNS: A new Grok option is a GrokThreadConfig field (vid
 WHAT NOT TO DO IN THIS FILE: 1. Do not put the key on argv or in a file; it travels only in XAI_API_KEY and GROK_CODE_XAI_API_KEY of the child. 2. Do not create the private home inside the workspace, and do not write anything into the workspace. 3. Do not pass an approve-everything permission mode; GrokPermissionMode has none.
 KNOWN EDGE CASES: Without a mount the call is exactly the plain call: json output, no agent file, no rules and the GROK_CLI_MAX_OUTPUT_BYTES cap (spec INV-14); a browser call streams, because tool calls and connected servers show only in the stream, and caps output at NATIVE_PROCESS_MAX_OUTPUT_BYTES, because streamed tool results can pass 4 MiB (D-8, D-19). Concurrent Grok calls in one workspace share one private home, so calls whose skill sets differ can collide while its skills folder is rebuilt (spec EC-27, an accepted limit; the GROK_LAUNCH_FAILED likely cause says so). An unknown model is not checked first: grok silently uses its default model (EC-25). The default permission mode refuses edits in a headless run (A-3). Grok prints the thread id only in the JSON answer at exit, so a run that fails before exit carries no new id (D-27).
 RELATED DOCS: vidbyte/harnesses/README.md
-TESTS: tests/features/harness_threads/
+TESTS: tests/features/harness_threads/; the mounted path: tests/features/harness_threads/test_harness_threads_browser_mounts.py, tests/features/harness_threads/test_harness_threads_browser_lifecycle.py
 """
 
 from __future__ import annotations
