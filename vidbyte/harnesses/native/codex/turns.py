@@ -1,12 +1,12 @@
 """FILE: vidbyte/harnesses/native/codex/turns.py
 
-PURPOSE: Holds the live state of every turn a CodexHost started: what Codex reported so far (items, usage, the completion), how the turn ended, the goal finish rule of goal runs, the daemon thread that reads each turn's notifications and reports a failed read, and the per-host registry with each thread's usage ledger, which forget_codex_turns can release.
+PURPOSE: Holds the live state of every turn a CodexHost started: what Codex reported so far (items, usage, the completion), how the turn ended, the goal finish rule of goal runs, the daemon thread that reads each turn's notifications and reports a failed read, and the per-host registry with each thread's usage ledger, which forget_codex_turns can release, and the host's running totals of kept stream events. Every live turn owns one CodexTurnEventLog (turn_stream.py) as its events attribute.
 ROLE IN CODEBASE: The live-state layer of vidbyte/harnesses/native/codex/; CodexHost creates turns here, its watchers feed them through CodexTurnEvents, each turn sends its own one stop through CodexConnection, and the response translator in wire.py turns them into snapshots.
 ARCHITECTURE NOTE: openai-codex's notification models are imported at module level, so only CodexHost.__aenter__ imports this module (D-21). Everything except CodexTurnWatcher runs on the host's event loop; a watcher only reads and posts with call_soon_threadsafe, its events to on_event and a failed read to on_lost, so no state here needs a lock. Turn items and turn ends are logged by id, type, status and code only, and each id and item type goes through LogToken.of, because Codex chose it (hardening INV-9, INV-10).
-COMMON MODIFICATION PATTERNS: Collect a new notification kind in CodexLiveTurn.observe; change goal finishing only together with openai-codex's private _GoalStreamCursor.process, which CodexGoalFinishRule mirrors. A new way a turn ends goes through CodexTurnRegistry.finish, which logs the first outcome.
+COMMON MODIFICATION PATTERNS: Collect a new notification kind in CodexLiveTurn.observe, and stream it through CODEX_HOST_STREAM_NOTIFICATION_KINDS, never here; change goal finishing only together with openai-codex's private _GoalStreamCursor.process, which CodexGoalFinishRule mirrors. A new way a turn ends goes through CodexTurnRegistry.finish, which logs the first outcome.
 KNOWN EDGE CASES: Usage notifications carry the thread's cumulative totals, so a turn's own tokens are its latest totals minus the totals before its first report; a goal run spans several physical turns, so its items and usage cover all of them. A goal run's watcher always ends with a failed read once its stream closes, so on_lost runs for every goal run and finds it ended (hardening INV-13). forget drops ended turns and the ledger only; the host checks the thread is idle first (hardening INV-22).
-RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.1 D-6 to D-8 and D-19, and 9.2 goal finish rule); docs/spec/codex-host-hardening/spec.md (sections 6.1 INV-9, INV-13 and INV-22, and 8.5)
-TESTS: tests/features/codex_host/test_codex_host_turns.py, tests/features/codex_host/test_codex_host_review_goals.py, tests/features/codex_host/test_codex_host_liveness.py, tests/features/codex_host/test_codex_host_observability.py, tests/features/codex_host/test_codex_host_function_rows.py
+RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.1 D-6 to D-8 and D-19, and 9.2 goal finish rule); docs/spec/codex-host-hardening/spec.md (sections 6.1 INV-9, INV-13 and INV-22, and 8.5); docs/spec/codex-host-first-class/spec.md (INV-18, INV-20, INV-21, INV-51, D-39)
+TESTS: tests/features/codex_host/test_codex_host_turns.py, tests/features/codex_host/test_codex_host_review_goals.py, tests/features/codex_host/test_codex_host_liveness.py, tests/features/codex_host/test_codex_host_observability.py, tests/features/codex_host/test_codex_host_function_rows.py, tests/features/codex_host/test_codex_host_stream_wait.py
 """
 
 from __future__ import annotations
@@ -35,6 +35,7 @@ from openai_codex.models import Notification
 
 from vidbyte.agents.codex.metrics import CodexMetricsTranslator
 from vidbyte.agents.pricing.tracker import UsageTracker
+from vidbyte.harnesses.native.codex.turn_stream import CodexTurnEventLog
 from vidbyte.lib.constants.codex import CODEX_GOAL_TERMINAL_STATUSES
 from vidbyte.lib.constants.codex_host import (
     CODEX_HOST_LOG_TOKEN_MAX_CHARS,
@@ -97,6 +98,9 @@ class CodexLiveTurn:
         # closes.
         self.state: _GoalOperationState | None = None
         self.stream_closed = False
+        # Every live turn streams its events through its own bounded
+        # log from the moment it is tracked (first-class INV-18).
+        self.events = CodexTurnEventLog(handle, loop)
 
     def observe(self, note: Notification) -> bool:
         # Keep every completed item, logged by id and type only, each
@@ -133,22 +137,26 @@ class CodexLiveTurn:
         window = self.latest_usage.model_context_window
         return CodexUsage(**(latest - before), **({"model_context_window": window} if window is not None else {}))
 
-    def over_cap(self) -> bool:
+    def over_cap(self, delta: CodexUsage | None) -> bool:
         # @intent output-cap-counts-only-this-turn
         # Vidbyte's output cap fires once, when this turn's own output
         # tokens pass max_output_tokens; reaching it exactly is allowed.
+        # The caller computes the delta once per notification and
+        # shares it with the stream (first-class INV-18).
         cap = self.request.max_output_tokens
-        delta = self.usage_delta()
         return cap is not None and not self.stop_sent and delta is not None and delta.output_tokens > cap
 
     def finish(self, snapshot: CodexTurnSnapshot) -> bool:
         # A turn ends exactly once; later outcomes are ignored (INV-15).
+        # Its stream then ends with the one ENDED event carrying the
+        # same snapshot (first-class INV-21).
         if self.snapshot is not None:
             return False
         self.snapshot = snapshot
         if self.timer is not None:
             self.timer.cancel()
         self.ended.set_result(snapshot)
+        self.events.close(snapshot)
         return True
 
     def watch(
@@ -341,6 +349,10 @@ class CodexTurnRegistry:
         self._reserved: set[str] = set()
         self._trackers: dict[str, UsageTracker] = {}
         self._ledgers: dict[str, list[CodexTurnUsage]] = {}
+        # The characters and events every turn's stream log keeps, so
+        # all of one host's logs stay within the host bound (D-39).
+        self._stream_chars = 0
+        self._stream_events = 0
 
     def busy(self, thread_id: str) -> bool:
         # A thread with a running or reserved turn takes no second one
@@ -370,8 +382,19 @@ class CodexTurnRegistry:
         self._add(turn)
         return turn
 
+    def charge_stream(self, chars: int, events: int) -> tuple[int, int]:
+        # Add a stream log's charge, or its refund when negative, to the
+        # host's kept totals and return both; adding zero reads them
+        # (first-class D-39).
+        self._stream_chars += chars
+        self._stream_events += events
+        return self._stream_chars, self._stream_events
+
     def _add(self, turn: CodexLiveTurn) -> CodexLiveTurn:
-        # The turn runs on its thread until it ends.
+        # The turn runs on its thread until it ends, and its stream log
+        # counts toward the host's totals before its handle is returned,
+        # so plain, review and goal turns are all bounded (D-39).
+        turn.events.attach(self.charge_stream)
         thread_id = turn.handle.thread_id
         self._turns[turn.handle] = turn
         self._running[thread_id] = turn

@@ -1,14 +1,14 @@
 """FILE: vidbyte/harnesses/native/codex/turn_events.py
 
-PURPOSE: CodexTurnEvents, the CodexHost collaborator that ends each live turn from its events: it folds every notification a watcher posts into its turn and finishes the turn from Codex's completion, the goal finish rule or a review's one-page read-back. A turn whose events cannot be processed, or whose watcher can no longer read them, is stopped and ended FAILED, so no turn is left running and no wait hangs.
+PURPOSE: CodexTurnEvents, the CodexHost collaborator that ends each live turn from its events: it folds every notification a watcher posts into its turn, records it in the turn's stream log, and finishes the turn from Codex's completion, the goal finish rule or a review's one-page read-back. A turn whose events cannot be processed, or whose watcher can no longer read them, is stopped and ended FAILED, so no turn is left running and no wait hangs.
 ROLE IN CODEBASE: A host collaborator of vidbyte/harnesses/native/codex/; CodexHost builds it in _open() after CodexThreadHelpers and hands on_event and on_lost to every CodexLiveTurn.watch, and CodexReviews watches review turns the same way.
 ARCHITECTURE NOTE: Everything here runs on the host's event loop. It imports no openai-codex module at module level, and the connection, translators, turns and thread helpers only under TYPE_CHECKING, so importing CodexHost still loads no SDK module (codex-host D-21, hardening INV-41). CODEX_HOST_LOST_TURN_GRACE_SECONDS is bound by name and read at call time, so the tests can patch it here (section 13).
-FUNCTION INVENTORY: on_event(turn, note) folds one notification into its turn and ends the turn when the notification ends it, failing the turn if that raises (INV-11); on_lost(turn) starts _end_lost_turn when a watcher read failed (INV-13); complete_review(turn) ends a completed review from its read-back, failing it if that raises anything but a CodexAgentError (INV-12); _end_lost_turn(turn) ends a turn whose watcher stopped while the host stays open; fail(turn, exc) logs, stops and fails a turn whose events failed, and CodexReviews calls it for a review read back as ended whose snapshot cannot be built (INV-12).
+FUNCTION INVENTORY: on_event(turn, note) folds one notification into its turn, computes the turn's usage delta once for the output cap and the stream log, records the notification in that log, and ends the turn when the notification ends it, failing the turn if that raises (INV-11, first-class INV-18); on_lost(turn) starts _end_lost_turn when a watcher read failed (INV-13); complete_review(turn) ends a completed review from its read-back, failing it if that raises anything but a CodexAgentError (INV-12); _end_lost_turn(turn) ends a turn whose watcher stopped while the host stays open; fail(turn, exc) logs, stops and fails a turn whose events failed, and CodexReviews calls it for a review read back as ended whose snapshot cannot be built (INV-12).
 COMMON MODIFICATION PATTERNS: A new way a turn ends from its events is one branch in on_event, finished through CodexTurnRegistry.finish so the first outcome still wins; its failure needs nothing extra, because on_event already guards it.
 WHAT NOT TO DO: Do not log an exception's text or pass exc_info; log its type name and ExceptionOrigin only, and the handle's ids through LogToken.of, because a handle checks only that they are non-empty text (hardening INV-10). Do not close a goal run's stream before its turn is finished: _end_lost_turn relies on the snapshot to tell a normal goal end from a lost one (INV-13). Do not catch BaseException, so cancellation propagates.
 KNOWN EDGE CASES: A goal run's watcher always ends with a failed read once its stream closes, so on_lost runs for every goal run and returns at once, because the run already ended. A process death can reach a watcher before the liveness monitor, so _end_lost_turn waits the grace and checks again, and a close or death that lands before its last step wins as process_exited. The cleanup interrupt of a lost turn is quiet and sent once; its failure does not keep the turn running (EC-18).
-RELATED DOCS: docs/spec/codex-host-hardening/spec.md (sections 6.1 INV-9 to INV-14, 8.1 D-9 and D-14, and 8.5); docs/spec/codex-host/spec.md (sections 8.1 D-7 and D-23)
-TESTS: tests/features/codex_host/test_codex_host_liveness.py, tests/features/codex_host/test_codex_host_turns.py, tests/features/codex_host/test_codex_host_review_goals.py, tests/features/codex_host/test_codex_host_observability.py
+RELATED DOCS: docs/spec/codex-host-hardening/spec.md (sections 6.1 INV-9 to INV-14, 8.1 D-9 and D-14, and 8.5); docs/spec/codex-host/spec.md (sections 8.1 D-7 and D-23); docs/spec/codex-host-first-class/spec.md (INV-18, NFR-3)
+TESTS: tests/features/codex_host/test_codex_host_liveness.py, tests/features/codex_host/test_codex_host_turns.py, tests/features/codex_host/test_codex_host_review_goals.py, tests/features/codex_host/test_codex_host_observability.py, tests/features/codex_host/test_codex_host_stream_wait.py
 """
 
 from __future__ import annotations
@@ -72,8 +72,14 @@ class CodexTurnEvents:
             if turn.snapshot is not None:
                 return
             ended = turn.observe(note)
-            if turn.over_cap():
+            # The turn's own usage is computed once and shared by the
+            # output cap and the stream log, which records the
+            # notification before the end check, so ENDED comes last
+            # (first-class INV-18, NFR-3).
+            delta = turn.usage_delta()
+            if turn.over_cap(delta):
                 turn.stop(self._connection, FailureCode.CODEX_BUDGET_EXHAUSTED)
+            turn.events.record(note, delta)
             if not ended:
                 return
             # The end builds the snapshot: a review from its read-back,
