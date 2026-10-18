@@ -131,8 +131,8 @@ class GrokWire:
         if stop == native_threads.GROK_CANCELLED_STOP_REASON:
             raise errors.failure(NativeThreadProblem.RUN_FAILED, request=request, thread_id=known, outcome=outcome, searched=native_threads.GROK_STOP_REASON_DETAIL.format(reason=stop))
 
-        # The end event must name a usable thread; a continue must answer
-        # on the thread it was given and a fork on a new one.
+        # The end event must name a usable thread; a continue must
+        # answer on the thread it was given and a fork on a new one.
         if known is None:
             raise errors.failure(NativeThreadProblem.PROTOCOL_MISMATCH, request=request, outcome=outcome, missing_member=native_threads.GROK_SESSION_FIELD)
         wrong = NativeErrorFactory.wrong_thread(request, known)

@@ -33,8 +33,9 @@ BROWSER_REAP_TIMEOUT_SECONDS = 10.0
 GROK_BROWSER_RULES_MAX_UNITS = 1800
 MUSE_SETTINGS_SCHEMA_VERSION = 1
 
-# The tool-string grammar <tool>[:<capability>[,<capability>...]][@<host>],
-# applied with re.fullmatch; a host is reserved for a later release.
+# The tool-string grammar
+# <tool>[:<capability>[,<capability>...]][@<host>], applied with
+# re.fullmatch; a host is reserved for a later release.
 BROWSER_TOOL_STRING_PATTERN = r"(?i)[a-z0-9-]+(:[a-z0-9-]+(,[a-z0-9-]+)*)?(@[a-z0-9-]+)?"
 BROWSER_CAPABILITY_SEPARATOR = ":"
 BROWSER_CAPABILITY_LIST_SEPARATOR = ","
@@ -127,7 +128,8 @@ PLAYWRIGHT_NETWORK_TOOLS = ("browser_network_state_set", "browser_route", "brows
 PLAYWRIGHT_PDF_TOOLS = ("browser_pdf_save",)
 PLAYWRIGHT_VISION_TOOLS = ("browser_mouse_move_xy", "browser_mouse_click_xy", "browser_mouse_drag_xy", "browser_mouse_down", "browser_mouse_up", "browser_mouse_wheel")
 
-# Chrome DevTools: chrome-devtools-mcp 1.11.0, started quiet (spec D-21).
+# Chrome DevTools: chrome-devtools-mcp 1.11.0, started quiet
+# (spec D-21).
 CHROMEDEVTOOLS_PACKAGE = "chrome-devtools-mcp"
 CHROMEDEVTOOLS_VERSION = "1.11.0"
 CHROMEDEVTOOLS_ENTRY = ("node_modules", "chrome-devtools-mcp", "build", "src", "bin", "chrome-devtools-mcp.js")
@@ -231,7 +233,8 @@ LINKUP_SEARCH_TOOLS = ("linkup-search",)
 LINKUP_FETCH_TOOLS = ("linkup-fetch",)
 LINKUP_RESEARCH_TOOLS = ("linkup-research", "linkup-get-research")
 
-# Remote endpoints (vendor docs, A-12); a key travels as a Bearer header.
+# Remote endpoints (vendor docs, A-12); a key travels as a Bearer
+# header.
 BROWSERBASE_URL = "https://mcp.browserbase.com/mcp"
 BROWSERBASE_ALL_TOOLS = ("start", "end", "navigate", "act", "observe", "extract")
 JINA_URL = "https://mcp.jina.ai/v1"
@@ -307,8 +310,8 @@ GROK_MCP_TOOL_RULE = "MCPTool({server}__{tool})"
 GROK_MCP_TOOL_WILDCARD = "*"
 GROK_TOOL_NAME_SEPARATOR = "__"
 
-# opencode: the `mcp` and `permission` members of OPENCODE_CONFIG_CONTENT
-# (spec D-10, D-23).
+# opencode: the `mcp` and `permission` members of
+# OPENCODE_CONFIG_CONTENT (spec D-10, D-23).
 BROWSER_OPENCODE_SERVER_PREFIX = "vidbyte-"
 OPENCODE_CONFIG_MCP_FIELD = "mcp"
 OPENCODE_CONFIG_PERMISSION_FIELD = "permission"

@@ -109,10 +109,10 @@ NATIVE_POWERSHELL_PATH_PARTS = ("System32", "WindowsPowerShell", "v1.0", "powers
 NATIVE_POWERSHELL_ARGUMENTS = ("-NoProfile", "-NonInteractive", "-Command")
 NATIVE_REAP_POWERSHELL_SCRIPT = "$marker = $env:VIDBYTE_REAP_MARKER; $count = 0; if ($marker) { Get-CimInstance -ClassName Win32_Process | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -and $_.CommandLine.IndexOf($marker, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 } | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop; $count++ } catch { } } }; Write-Output $count"
 NATIVE_PS_PATHS = ("/bin/ps", "/usr/bin/ps")
-# Windows PowerShell creates an AppData Roaming folder in USERPROFILE when it
-# starts, so the reaper's PowerShell runs without USERPROFILE and
-# Windows takes the profile from the user's logon token: a redirected
-# USERPROFILE never gets a folder written into it.
+# Windows PowerShell creates an AppData Roaming folder in USERPROFILE
+# when it starts, so the reaper's PowerShell runs without USERPROFILE
+# and Windows takes the profile from the user's logon token: a
+# redirected USERPROFILE never gets a folder written into it.
 NATIVE_USER_PROFILE_VARIABLE = "USERPROFILE"
 # The count ProcessReaper.reap returns when it cannot list or stop
 # anything (no PowerShell or ps, a timeout, a defect): nothing that

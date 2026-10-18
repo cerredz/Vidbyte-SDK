@@ -87,9 +87,9 @@ class NativeBrowserRun:
         mount = await NativeBrowserTools.prepare(selections, request, errors)
 
         # @intent browser-call-cleans-up-however-it-ends
-        # From here on a failure or a cancel first reaps the browser and
-        # removes the per-call folder, shielded so a second cancel cannot
-        # stop the cleanup half-way, then propagates.
+        # From here on a failure or a cancel first reaps the browser
+        # and removes the per-call folder, shielded so a second cancel
+        # cannot stop the cleanup half-way, then propagates.
         try:
             # Run the harness with the tools mounted; the vendor CLI is
             # the MCP client.

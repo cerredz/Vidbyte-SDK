@@ -62,7 +62,8 @@ class BrowserToolRegistry:
             default_capabilities=(BrowserCapability.CORE,),
         ),
         # chrome-devtools-mcp@1.11.0: its installed README
-        # (CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS) and a `tools/list` probe.
+        # (CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS) and a `tools/list`
+        # probe.
         BrowserToolDefinition(
             tool=BrowserTool.CHROMEDEVTOOLS, transport=BrowserToolTransport.STDIO, package=tools_data.CHROMEDEVTOOLS_PACKAGE, version=tools_data.CHROMEDEVTOOLS_VERSION,
             entry=tools_data.CHROMEDEVTOOLS_ENTRY, url=None, key_rule=BrowserKeyRequirement.NONE, key_variable=None, arguments=tools_data.CHROMEDEVTOOLS_ARGUMENTS,
@@ -299,8 +300,9 @@ class BrowserToolRegistry:
         chosen = base | additive
         allowed = tuple(dict.fromkeys(tool for capability in definition.capabilities if capability.name in chosen for tool in capability.tools))
 
-        # Every base tool the server exposes, plus what the named server
-        # flags turn on, that is not allowed is denied, in registry order.
+        # Every base tool the server exposes, plus what the named
+        # server flags turn on, that is not allowed is denied, in
+        # registry order.
         exposed = dict.fromkeys(tool for capability in definition.capabilities if capability.server_value is None or capability.name in additive for tool in capability.tools)
         denied = tuple(tool for tool in exposed if tool not in allowed)
         server_capabilities = tuple(capability.server_value for capability in definition.capabilities if capability.server_value is not None and capability.name in additive)

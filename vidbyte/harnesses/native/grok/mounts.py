@@ -73,9 +73,9 @@ class GrokMounts:
     @staticmethod
     def agent_text(mount: BrowserMount) -> str:
         # @intent grok-agent-file-is-json-frontmatter-and-a-neutral-body
-        # The frontmatter is one JSON object (valid YAML flow style, with
-        # Windows paths escaped) naming the servers; the body is the
-        # fixed neutral text that names no tool.
+        # The frontmatter is one JSON object (valid YAML flow style,
+        # with Windows paths escaped) naming the servers; the body is
+        # the fixed neutral text that names no tool.
         front = {
             browser_tools.GROK_AGENT_NAME_FIELD: browser_tools.GROK_BROWSER_AGENT_NAME,
             browser_tools.GROK_AGENT_DESCRIPTION_FIELD: browser_tools.GROK_BROWSER_AGENT_DESCRIPTION,
