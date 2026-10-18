@@ -346,3 +346,36 @@ Results:
   - the two B-5 tests: `AttributeError: BEARER`, and the `EXPECTED_ENUMS` diff `BEARER_TOKEN` against `BEARER`;
   - the inherited `harness_threads` test.
 - Lint shows `SDK-LINT: FAIL` from one cause, S054 REGRESSED (4 against an allowance of 3). That finding is production's `vidbyte/lib/enums/codex.py:288 BEARER_TOKEN = "bearerToken"`, which S3 must rename. Lint reports no finding in the test tree.
+
+## Round 4 (S4 review, spec r6 `4d972438`)
+
+Tests commit: `9ad2771e`. It adds 9 tests for review rows R-1 and R-3 to R-7, updates `_side_chat_view` to r6 row 34, and adds the r6 worktree-root triple to the support module and `TEXT_NAMES`. It also corrects the NFR-3 row of `test-plan.md` (R-7) and adds the R-6 tests to the INV-22 row. No production file was touched, and no worktree file was edited to make a mutant or apply a fix: every fix check and mutant runs in memory.
+
+New tests, and what they show on `8ea8734f`:
+- R-6 (INV-22): `stream_wait::test_a_subscription_made_mid_turn_starts_at_the_oldest_kept_event` and `…_over_a_full_window_starts_at_the_oldest_event_still_kept`. Both pass now. Each one kills S7 (`TimeoutError` at the bounded first read).
+- R-7 (NFR-3): `stream_wait::test_the_turn_character_bound_counts_every_kept_event_not_only_the_new_one` and `stream_wait::test_the_host_character_bound_drops_each_turns_own_oldest_events`. Every event is under the bound. Both pass now. They kill S3c (`(600, 6) != (300, 3)`) and S3b (`1000 not less than or equal to 300`).
+- R-3 (EC-19): `stream_wait::test_an_oversize_event_costs_a_lagging_subscriber_only_its_own_gap`, which uses the shared `patch_stream`. It is red now: it gets `[md, gap, md, ended]`, because `GAP(2, 3)` loses b and c. It is green under `fixcheck2.py RE3` and under the S9 fix mutant (2 passed with the existing oversize test).
+- R-4 (INV-31, EC-64): `goal_control::…::test_a_resume_set_codex_applied_but_answered_badly_is_cancelled_once_and_cleaned_up`, built on `before_response("thread/goal/set", …)`. It is red now: goal calls are `['finish', 'unregister_goal_operation']`, with no cancel. It is green under `fixcheck2.py RE2`, and EC-37's refusal test stays green with no cancel.
+- R-1 (EC-63): `worktree::…::test_a_worktree_root_that_cannot_be_prepared_is_refused_by_type_without_the_home_path_and_git_never_runs`. It has three subtests: no home folder (RuntimeError), home not writable (simulated PermissionError, since a read-only folder does not stop `mkdir` on Windows), and `~/.vidbyte` as a file (the type comes from the real `mkdir`: FileExistsError on Windows, NotADirectoryError on POSIX). It is red now: each subtest raises the raw exception. It is green under S2's in-memory version of the review's fix (`scratchpad/round4/fixcheck_r1.py`: 32 passed across worktree and constants). Two existing constants tests are now red by design, because `TEXT_NAMES` names the triple: the value test (attribute missing) and the `__all__` test.
+- R-5 (AC-36 extended): `feature_tools::…::test_the_side_chat_tool_resets_the_fields_a_side_chat_refuses_before_it_narrows` (stub) and `…::test_the_side_chat_tool_starts_under_defaults_that_set_tools_a_name_and_a_personality` (host). They are red now: the stub keeps tools, name and personality, and the host refuses with `does not use the CodexSpawnRequest field name`. Both are green under `fixcheck_re6.py`.
+
+Proof:
+- Mutant runner, run on `tests/features/codex_host` with the 7 red tests deselected:
+
+  | Run | Exit | Result |
+  |---|---|---|
+  | NONE | 0 | 591 passed, 1 skipped |
+  | S7 | 1 | killed |
+  | S3b | 1 | killed |
+  | S3c | 1 | killed |
+
+  The outputs are in `scratchpad/round4/mut-*.txt`.
+- Area run: `8 failed, 1295 passed, 3 skipped in 85.03s (0:01:25)`. The failures are the 7 red tests above (5 new and 2 constants) plus the inherited `harness_threads::test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes`.
+- Lint: `SDK-LINT: PASS`, with no `tests/features` findings.
+- Test files: the largest is `test_codex_host_stream_wait.py` at 651 lines.
+
+**Niche facts.**
+- `mutant.py` runs with `-x`, and unittest methods run in alphabetical order. A kill therefore names the first failing test only, so the second R-6 kill was proven with `-k`.
+- The stream tests call `wait_done` before `drain`. A suspended async generator does not interleave, so this is how they make a subscriber lag deterministically.
+
+**Open items.** None for S2. The repair agent's fixes for R-1, R-3, R-4 and R-5 should turn the 7 red tests green, with no test edits.
