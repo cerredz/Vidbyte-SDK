@@ -19,7 +19,8 @@ started: 2026-10-16 21:43
 | S3 implement | done | 2026-10-17 | 2026-10-17 | reports/S3-implementer.md | HEAD d00bd8ba (pushed); draft PR #1183; 37/37 rows; 12/12 files, 34/34 classes; 177 browser cases 176 pass + 1 win32 skip |
 | S4 adversarial review | done | 2026-10-17 | 2026-10-17 | reports/S4-review-{conformance,conventions,engineering}.md, reports/S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; confirmed 3 Blocker / 3 Major; 13 Minor; 0 refuted (21 raw → 19) |
 | S5 repair loop | done (converged, 1/8) | 2026-10-17 | 2026-10-18 | reports/S5-repair-1.md, verify-log.md | HEAD e2fdf0e2; R-1..R-10 fixed; CI 39096073590 + Static policy 39096074746 green |
-| S5 re-review | running | 2026-10-18 | | reports/S5-rereview.md | |
+| S5 re-review | done (round 1/2) | 2026-10-18 | 2026-10-18 | reports/S5-rereview.md | SOUND: 12/12 fixes confirmed; 0 Blocker / 0 Major / 2 Minor (R-C1 → iteration 2; R-C2 → follow-up) |
+| S5 repair iteration 2 | running | 2026-10-18 | | reports/S5-repair-2.md | scoped to R-C1 |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
