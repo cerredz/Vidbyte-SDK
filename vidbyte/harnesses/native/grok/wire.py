@@ -3,7 +3,7 @@
 PURPOSE: Defines GrokWire, the reader of one `grok --single` run: it turns the run's CliOutcome into a NativeThreadResult, or into the NativeThreadError that names what went wrong, from the one JSON answer of a plain call or the streamed events of a browser call, and reads a browser call's tool calls and connected servers from that stream.
 ROLE IN CODEBASE: Called by GrokThreadRun.execute in vidbyte/harnesses/native/grok/threads.py after CliRunner returns (read on a plain call, read_stream on a browser call); GrokBrowserHarness (grok/browser.py) calls tool_calls and connected on a browser call's outcome. It raises through the call's NativeErrorFactory (hostkit/errors.py).
 ARCHITECTURE NOTE: Pure: no process, no file and no await. With --output-format=json Grok writes one JSON object at exit: on success {"text", "sessionId", ...}, on failure {"type": "error", "message"} with a non-zero exit. With --output-format=streaming-json (browser calls only, spec D-8) it writes one event per line: available_commands with the connected tools, text chunks between usage events, tool_call and tool_call_update events, and a closing end event with stopReason and sessionId; read_stream applies read's checks in the same order (spec section 9.1). Every member name and marker comes from vidbyte/lib/constants/native_threads.py (spec INV-15). The checks run in the INV-6 order: timeout, output cap, the vendor's error object (key rejected or run failed), a bare non-zero exit, then the shape of the success answer and the thread id.
-FUNCTION INVENTORY: read is the narrated main function of a plain call; read_stream is the narrated main function of a browser call; tool_calls reads the mounted-tool calls of a browser call; connected names the mounted servers the stream shows; _answer parses stdout as one JSON object, or None; _stream_text joins the last non-empty run of text chunks.
+FUNCTION INVENTORY: read is the narrated main function of a plain call; read_stream is the narrated main function of a browser call; tool_calls reads the mounted-tool calls of a browser call; connected names the mounted servers the stream lists in available_commands; _answer parses stdout as one JSON object, or None; _stream_text joins the last non-empty run of text chunks.
 COMMON MODIFICATION PATTERNS: A new sign-in failure text from grok is one more marker in GROK_NOT_SIGNED_IN_MARKERS; a new answer member the SDK must read gets its name constant and one check in read.
 WHAT NOT TO DO IN THIS FILE: 1. Do not copy vendor text into an error unscrubbed; pass it as vendor_text and the factory scrubs and caps it. 2. Do not accept a cut stdout; a truncated answer is output_too_large, never parsed. 3. Do not start processes or await anything here.
 KNOWN EDGE CASES: A browser run whose stop reason is cancelled is a failed run, because a headless run cancels the turn when the agent calls a tool no rule allows (spec EC-41). The readers never raise on vendor text: a name whose server is not mounted, or whose tool part fails NATIVE_NAME_PATTERN, is skipped (EC-44). A continue is matched case-insensitively and returns the id the caller gave. A fork whose answer is its source thread is protocol_mismatch, because grok then continued the source instead of copying it. A thread id that the result record would refuse is protocol_mismatch, not an argument error. A timed-out run carries no new thread id, because grok prints it only at exit.
@@ -175,19 +175,17 @@ class GrokWire:
 
     @staticmethod
     def connected(outcome: CliOutcome, mount: BrowserMount) -> tuple[BrowserTool, ...]:
-        # @intent grok-servers-show-in-the-tool-list-or-a-call
-        # A mounted server counts as connected when one of its tools is
-        # in an available_commands list or the agent called one of them;
-        # this is the only per-server evidence a headless run prints.
+        # @intent grok-servers-show-only-in-the-tool-list
+        # A mounted server counts as connected only when one of its
+        # tools is in an available_commands list, the one per-server
+        # evidence a headless run prints. A call never adds a server:
+        # the model can name a tool whose server never connected, and
+        # Grok then answers "Tool not found" (spec D-11).
         names: list[object] = []
         for event in CliRunner.json_objects(outcome.stdout):
-            kind = event.get(native_threads.GROK_TYPE_FIELD)
             listed = event.get(native_threads.GROK_TOOLS_FIELD)
-            raw = event.get(native_threads.GROK_RAW_INPUT_FIELD)
-            if kind == native_threads.GROK_AVAILABLE_COMMANDS_EVENT and isinstance(listed, list):
+            if event.get(native_threads.GROK_TYPE_FIELD) == native_threads.GROK_AVAILABLE_COMMANDS_EVENT and isinstance(listed, list):
                 names.extend(listed)
-            if kind == native_threads.GROK_TOOL_CALL_EVENT and isinstance(raw, dict):
-                names.append(raw.get(native_threads.GROK_RAW_TOOL_NAME_FIELD))
         parts = [name.partition(browser_tools.GROK_TOOL_NAME_SEPARATOR) for name in names if isinstance(name, str)]
         seen = {server for server, separator, _tool in parts if separator}
         return tuple(server.selection.definition.tool for server in mount.servers if server.selection.definition.tool.value in seen)

@@ -2,11 +2,11 @@
 
 PURPOSE: Defines the three public Grok Build browser functions (GrokBrowserThreads: run_grok_with_browser, continue_grok_with_browser, fork_grok_with_browser), which run one Grok call with the caller's browser tools mounted and return a BrowserThreadResult, and GrokBrowserHarness, the Grok side of the shared browser flow.
 ROLE IN CODEBASE: The functions are bound as module names in vidbyte/harnesses/native/grok/__init__.py and re-exported from vidbyte.harnesses.native. Each call hands NativeBrowserRun.execute (hostkit/browser.py) a GrokBrowserHarness, whose steps use GrokMounts (grok/mounts.py), GrokThreadRun (grok/threads.py), GrokWire (grok/wire.py) and NativeBrowserTools.write_file from hostkit.
-ARCHITECTURE NOTE: The functions take the plain Grok parameters with tools and tool_keys after model (spec INV-2) and share one guarded try, like the plain functions, so every failure is one NativeThreadError naming the browser function. The harness writes the per-call agent file through the reviewed writer (D-25), then reuses the plain flow through GrokThreadRun.execute with a mount (D-3), which streams and adds the rules, the compat switches and the tool keys. Grok lists each connected server's tools in its stream, so the evidence that the tools worked is each mounted server listed or called (D-11). Imports run browser -> threads, wire, mounts (D-27). The module holds no literals of its own (spec INV-15).
-FUNCTION INVENTORY: GrokBrowserThreads.run_grok_with_browser, continue_grok_with_browser and fork_grok_with_browser are the public functions; GrokBrowserThreads._call is the one guarded try they share. GrokBrowserHarness.check refuses before any I/O what Grok cannot mount, run writes the agent file and runs grok with the mount, tool_calls reads the calls on the mounted tools, and missing names each mounted server the stream never shows.
+ARCHITECTURE NOTE: The functions take the plain Grok parameters with tools and tool_keys after model (spec INV-2) and share one guarded try, like the plain functions, so every failure is one NativeThreadError naming the browser function. The harness writes the per-call agent file through the reviewed writer (D-25), then reuses the plain flow through GrokThreadRun.execute with a mount (D-3), which streams and adds the rules, the compat switches and the tool keys. Grok lists each connected server's tools in its stream, so the evidence that the tools worked is each mounted server listed in available_commands or the server of a completed call; a failed call, Grok's "Tool not found" included, shows the server never connected and is no evidence (D-11, FR-14). Imports run browser -> threads, wire, mounts (D-27). The module holds no literals of its own (spec INV-15).
+FUNCTION INVENTORY: GrokBrowserThreads.run_grok_with_browser, continue_grok_with_browser and fork_grok_with_browser are the public functions; GrokBrowserThreads._call is the one guarded try they share. GrokBrowserHarness.check refuses before any I/O what Grok cannot mount, run writes the agent file and runs grok with the mount, tool_calls reads the calls on the mounted tools, and missing names each mounted server the stream neither lists nor shows a completed call on.
 COMMON MODIFICATION PATTERNS: A new mount rule goes in GrokMounts; a new reader rule in GrokWire; the steps of a call change in NativeBrowserRun.execute, never here.
 WHAT NOT TO DO IN THIS FILE: 1. Do not write the agent file with a direct file call; it goes through NativeBrowserTools.write_file (lint S061, D-25). 2. Do not put a key into the agent file; keys travel in Grok's environment. 3. Do not import another harness's modules.
-KNOWN EDGE CASES: A server that is still connecting after Grok's start-up grace is not listed and is named as missing, with the new thread id and the answer (spec EC-16, EC-45). An agent file that cannot be written is launch_failed, naming the per-call folder. A continue or fork mounts only the tools of that call (EC-30).
+KNOWN EDGE CASES: A server that is still connecting after Grok's start-up grace is not listed and is named as missing, with the new thread id and the answer, unless a call to it completed; a call to it that failed, "Tool not found" included, leaves it missing (spec EC-16, EC-45). An agent file that cannot be written is launch_failed, naming the per-call folder. A continue or fork mounts only the tools of that call (EC-30).
 RELATED DOCS: vidbyte/harnesses/README.md
 TESTS: tests/features/harness_threads/test_harness_threads_browser_mounts.py, tests/features/harness_threads/test_harness_threads_browser_lifecycle.py, tests/features/harness_threads/test_harness_threads_browser_contract.py
 """
@@ -39,7 +39,7 @@ from vidbyte.lib.dataclasses.native_threads import (
     NativeThreadRun,
 )
 from vidbyte.lib.dataclasses.validation import RecordFieldConverter
-from vidbyte.lib.enums.browser_tools import BrowserTool
+from vidbyte.lib.enums.browser_tools import BrowserTool, BrowserToolCallStatus
 from vidbyte.lib.enums.native_threads import (
     NativeHarness,
     NativeThreadOperation,
@@ -119,10 +119,13 @@ class GrokBrowserHarness:
         return GrokWire.tool_calls(run.outcome, mount)
 
     def missing(self, run: NativeThreadRun, mount: BrowserMount, calls: BrowserToolCalls) -> tuple[BrowserTool, ...]:
-        # @intent grok-evidence-is-each-server-listed-or-called
+        # @intent grok-evidence-is-a-listed-server-or-a-completed-call
         # Each mounted server must show in Grok's tool list or in a
-        # call; the rest are named as missing.
-        seen = {*GrokWire.connected(run.outcome, mount), *(call.tool for call in calls.calls)}
+        # completed call; a failed call, "Tool not found" included,
+        # shows that its server never connected, so it proves
+        # nothing. The rest are named as missing (spec FR-14).
+        completed = (call.tool for call in calls.calls if call.status is BrowserToolCallStatus.COMPLETED)
+        seen = {*GrokWire.connected(run.outcome, mount), *completed}
         return tuple(server.selection.definition.tool for server in mount.servers if server.selection.definition.tool not in seen)
 
 
