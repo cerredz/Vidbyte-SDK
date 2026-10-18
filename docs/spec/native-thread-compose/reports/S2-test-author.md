@@ -313,3 +313,44 @@ No baseline was touched. The `IMPROVED` notices that lint prints were already th
 - API rate limits and context limits interrupted the stage several times. The work stayed staged through every interruption, and no `git reset`, `git checkout -- <path>`, `git stash` or `git clean` was used.
 - The throwaway self-check files (`tests/features/harness_compose/test_zz_selfcheck_tmp.py`) were created in the pack folder so that they could use its fixtures. They were deleted after each run and never staged.
 - Files written outside the test tree: `test-plan.md`, the §6.2 Proof column and this report. Nothing under `vidbyte/`, `lint/`, `scripts/`, `.github/` or `pyproject.toml` was touched.
+
+## 10. Addendum: S4 rows R-11, R-16 and R-17 (2026-10-18)
+
+The S4 review (`review.md`) sent three test-pack rows back to S2. They were fixed on top of `23d48569`, still blind to the implementation. S3's code (`e1bf20d8`) and every existing assertion were left unchanged.
+
+| Row | Commit | Change |
+|---|---|---|
+| R-11 | `4d3ee613` | The 22 comment lines past 72 columns were refilled. The awk check prints nothing for any pack file, and the AST of every touched file is unchanged. |
+| R-16 | `742db6bf` | Two EC-19 tests in `test_harness_compose_concurrency.py`: one failed worktree add beside a Grok verifier that holds with a grandchild, and two failed adds. |
+| R-17 | `c81d8596` | `test_a_refusal_of_caller_text_never_quotes_the_key_it_holds` in `test_harness_compose_keys.py`: 21 caller-text sites, each holding a 16-character key. |
+
+`test-plan.md` gives each new case's proof under "Coverage added after the S4 review". In short:
+
+- **The first EC-19 test** is green on HEAD. `s4v_mut_gather` kills it (`INV-14: tasks still pending when the error propagated: ['CliRunner._drain', 'CliRunner._drain', 'ThreadVerifiers._review']`), and so does `s4v_mut_nocancel` (`the error propagated 30.0 s after the add failed: the sibling was not cancelled`).
+- **The two-failed-adds test** stays red on HEAD until R-10 lands. It failed in 8 of 8 runs, with `['CliRunner._drain', 'CliRunner._drain', 'ComposeGit.remove_worktree']` still pending at the raise. It passes in 6 of 6 runs under `s4v_fix_add_settle`.
+- **The 21 caller-text cases** stay red on HEAD until R-3 lands. They pass under a scratch plugin in which no refusal quotes its value. Under a partial fix that still quotes one binder's model refusal, only that binder's model case fails. The final lines of one failing case on HEAD:
+
+```
+>       assert pack.leaks(shown, [text.key]) == [], f"INV-4: the {site} refusal quotes the key: {str(error)!r}"
+E       AssertionError: INV-4: the chain_threads template refusal quotes the key: "template must match [^\\x00]+; got '{previous} vbk-7f1cd7192793\\x00'."
+E       assert ['-7f1cd71927...vbk-7f1cd719'] == []
+E         Left contains 5 more items, first extra item: '-7f1cd719279'
+```
+
+Method notes:
+
+- **The outside fault is a git hook.** It is a `reference-transaction` hook that exits 1 at "prepared", so git prints `fatal: ref updates aborted by hook`, exits 128 and removes the half-added worktree itself. The sandbox repository names the hook folder in its own `core.hooksPath`, as an absolute path. On win32 the hook is an `.exe` built from pip's `t64.exe`, because Git for Windows finds no `sh` on the sandbox's closed `PATH` and cannot start a hook named by a relative path. The hook waits for its cue (the stand-in's grandchild record, or the other add's arrival) and records whether the cue came.
+- **The R-10 window is about one removal wide.** That is about 7 ms of git on this host. A fixed delay made the two-failed-adds test red in only 5 of 8 runs, so the test now times a failing `git worktree remove` and sweeps the second failure's delay from 1/6 to 5/6 of that time.
+- **Short keys reach the quote.** A refusal quotes a value only while its repr fits in 80 characters, so `short_key` makes 16-character keys and leaves `fresh_key` unchanged. The bad value's repr is then 33 characters, so a cheat fix that only lowers the quote limit still fails all 21 cases at any limit of 33 or more. A first version with 41-character keys passed all 21 at a limit of 40 (scratch plugin `s2b_mut_quote_limit`), and was replaced before it was reported.
+
+Gates on `c81d8596`:
+
+- `PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_compose` gives `22 failed, 277 passed`. The failures are the two-failed-adds test and the 21 caller-text cases, which stay red by design until R-10 and R-3 land.
+- `tests/features/harness_threads` gives `436 passed, 2 skipped`, and `python lint/run.py` ends `SDK-LINT: PASS`.
+- The awk check prints 0 lines, and `procs.py --kill` and psutil show no stand-in left.
+
+Open items:
+
+1. **The model sites go past R-3's list.** `bind_thread` and `bind_continue` refuse a bad model with `model must match ^[A-Za-z0-9]\S*$; got '...'`, key included. INV-4 covers "any `ConfigurationError` compose raises", so a case for each binder asserts it. The check appears to belong to the base `NativeThreadRequest` (INV-2), so `quote=False` at R-3's eight compose sites will not reach it. If the spec owner rules base-record refusals out of INV-4, those two cases go and nothing else changes.
+2. **The model pattern accepts a NUL.** A NUL is not whitespace, so `\S` matches it, and an opencode model of `openai/` plus a key and a NUL binds without an error. The spec states no rule for this, so no test pins it. It is base behaviour, for the spec owner.
+3. **One probe broke a process rule.** While timing a failing removal for R-16, one probe ran `git worktree remove --force` on a folder that did not exist, with the worktree root as its working folder. That addressed this worktree's own repository, which the rules forbid. Git refused (`is not a working tree`) and changed nothing. Every later probe used a scratch repository.
