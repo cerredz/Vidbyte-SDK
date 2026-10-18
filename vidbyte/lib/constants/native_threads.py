@@ -34,6 +34,10 @@ CLAUDE_MAX_BUDGET_USD_LIMIT = 1000.0
 # characters, which the quoting doubles, could pass it (launch_failed).
 CLAUDE_TOOL_RULES_MAX_ITEMS = 32
 CLAUDE_TOOL_RULE_MAX_CHARS = 256
+# The longest tool name, tool-use id or terminal reason a Claude Code
+# answer may carry into a ClaudeThreadResult; a longer one reads as
+# missing.
+CLAUDE_ANSWER_NAME_MAX_CHARS = 256
 NATIVE_ARGV_PROMPT_MAX_CHARS = 24000
 # A Windows command line holds at most 32,766 UTF-16 units (measured).
 # A Grok or Muse prompt may take 30,000 of them once quoted; the 2,766
@@ -234,6 +238,10 @@ CLAUDE_API_ERROR_STATUS_FIELD = "api_error_status"
 CLAUDE_TERMINAL_REASON_FIELD = "terminal_reason"
 CLAUDE_SUBTYPE_FIELD = "subtype"
 CLAUDE_ERRORS_FIELD = "errors"
+CLAUDE_NUM_TURNS_FIELD = "num_turns"
+CLAUDE_PERMISSION_DENIALS_FIELD = "permission_denials"
+CLAUDE_TOOL_NAME_FIELD = "tool_name"
+CLAUDE_TOOL_USE_ID_FIELD = "tool_use_id"
 
 # Vendor markers: texts, names and codes the vendors print.
 GROK_NOT_SIGNED_IN_MARKERS = ("not signed in", "not authenticated", "auth token is invalid or expired")

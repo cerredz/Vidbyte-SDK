@@ -1,6 +1,6 @@
 """FILE: tests/features/harness_threads/test_harness_threads_claude_surface.py
 
-PURPOSE: The public surface the Claude Code thread functions add and the removal of PR #1044's host stack (spec claude-thread-functions): the exports and identities of the six new names and the `claude` subpackage's three functions (INV-1, AC-18), the new StrEnums and their vendor values (§8.5, INV-18) and, where Claude Code is installed, that each permission mode is a choice its --help lists, the contract constants and the Claude rows of every harness- or code-keyed table (§8.5, AC-18), ClaudeThreadConfig's fields, defaults and refusals (AC-18, INV-5 rule 4, D-13), NativeThreadRequest's Claude-only thread-id and stdin prompt rules (INV-5 rules 1-2, §9.1), the hostkit export (§12.3 row 22), and every #1044 name, module, file, extra and import gone, with the shared files restored to the merge base (INV-19, AC-20, D-17).
+PURPOSE: The public surface the Claude Code thread functions add and the removal of PR #1044's host stack (spec claude-thread-functions): the exports and identities of the eight new names and the `claude` subpackage's three functions (INV-1, AC-18; ClaudeThreadResult and ClaudePermissionDenial from the PR #1044 review), the new StrEnums and their vendor values (§8.5, INV-18) and, where Claude Code is installed, that each permission mode is a choice its --help lists, the contract constants and the Claude rows of every harness- or code-keyed table (§8.5, AC-18), ClaudeThreadConfig's fields, defaults and refusals (AC-18, INV-5 rule 4, D-13), NativeThreadRequest's Claude-only thread-id and stdin prompt rules (INV-5 rules 1-2, §9.1), the hostkit export (§12.3 row 22), and every #1044 name, module, file, extra and import gone, with the shared files restored to the merge base (INV-19, AC-20, D-17).
 ROLE IN CODEBASE: Start here when a Claude export, enum value, constant or config rule changes, or when a piece of the rejected ClaudeHost design comes back.
 ARCHITECTURE NOTE: Names are read through the lazy lib_api/api fixtures, so a missing name fails its own test. The git checks compare against `git merge-base origin/main HEAD` (so a newer main cannot fail them) and skip when origin/main is missing, as in a shallow CI clone; they diff the working tree, so uncommitted work counts. The pins that every harness shares (the native __all__, signatures, NativeHarness, NativeThreadOperation, NativeEnvironmentVariable and the FailureCode tail) live in test_harness_threads_surface.py.
 FUNCTION INVENTORY: git runs one bounded read-only git command; merge_base returns the merge base or skips; importable says whether `from <module> import <name>` works; changed_lines lists the added and removed lines of one file's diff; the test_* functions are one behaviour each.
@@ -30,7 +30,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 FUNCTIONS = ["continue_claude_thread", "fork_claude_thread", "run_claude_thread"]
-NEW_EXPORTS = ["ClaudePermissionMode", "ClaudeReasoningEffort", "ClaudeThreadConfig", *FUNCTIONS]
+NEW_EXPORTS = ["ClaudePermissionDenial", "ClaudePermissionMode", "ClaudeReasoningEffort", "ClaudeThreadConfig", "ClaudeThreadResult", *FUNCTIONS]
 INTERNAL_NAMES = ["ClaudeThreads", "ClaudeThreadRun", "ClaudeWire", "ClaudeFlag"]
 CLAUDE_ENUMS = {
     "ClaudePermissionMode": [("DEFAULT", "manual"), ("ACCEPT_EDITS", "acceptEdits"), ("DONT_ASK", "dontAsk"), ("PLAN", "plan")],
@@ -135,14 +135,15 @@ def changed_lines(base: str, path: str) -> tuple[list[str], list[str]]:
 
 
 def test_native_package_exports_the_claude_names_and_the_subpackage_its_three_functions(api) -> None:
-    # INV-1 / AC-18 / §12.3 rows 18 and 21: the six new names are the
+    # INV-1 / AC-18 / §12.3 rows 18 and 21: the eight new names are the
     # records' and enums' own objects; the claude subpackage exports
     # exactly the three functions, the same objects; the flow, wire and
     # flag classes are exported from neither.
     native = api.native
     claude = importlib.import_module("vidbyte.harnesses.native.claude")
     assert set(NEW_EXPORTS) <= set(native.__all__)
-    assert native.ClaudeThreadConfig is api.records.ClaudeThreadConfig
+    for name in ("ClaudeThreadConfig", "ClaudeThreadResult", "ClaudePermissionDenial"):
+        assert getattr(native, name) is getattr(api.records, name), name
     for name in ("ClaudePermissionMode", "ClaudeReasoningEffort"):
         assert getattr(native, name) is getattr(api.enums, name) is getattr(api.enums_package, name), name
     assert sorted(claude.__all__) == FUNCTIONS and len(claude.__all__) == 3
@@ -247,6 +248,28 @@ def test_claude_thread_config_has_the_spec_fields_and_defaults(lib_api) -> None:
     assert rules.allowed_tools == ("Edit",) * 32 and rules.disallowed_tools[0] == longest and len(longest) == 256
     with pytest.raises(TypeError):
         cls(model="sonnet")
+
+
+def test_claude_thread_result_extends_the_shared_result_with_checked_reports(lib_api) -> None:
+    # PR #1044 review 4301626286 / 4301898218: a frozen, slotted subclass
+    # of NativeThreadResult adding num_turns, terminal_reason and the
+    # denied tool calls by name and tool-use id only; a list of denials is
+    # stored as a tuple, and a bad value is refused when built.
+    cls, denial = lib_api.ClaudeThreadResult, lib_api.ClaudePermissionDenial
+    assert issubclass(cls, lib_api.NativeThreadResult) and cls.__dataclass_params__.frozen and "__slots__" in vars(cls)
+    assert [field.name for field in dataclasses.fields(cls)] == ["harness", "thread_id", "text", "text_truncated", "num_turns", "terminal_reason", "permission_denials"]
+    assert [field.name for field in dataclasses.fields(denial)] == ["tool_name", "tool_use_id"]
+    shared = {"harness": "claude", "thread_id": "c3f73f50-b50c-4f3a-8369-f97267313173", "text": "done", "text_truncated": False}
+    built = cls(**shared, num_turns=2, terminal_reason="completed", permission_denials=[denial("Bash", "toolu_01")])
+    assert built.permission_denials == (denial("Bash", "toolu_01"),) and built.harness is lib_api.enums.NativeHarness.CLAUDE
+    assert (cls(**shared).num_turns, cls(**shared).terminal_reason, cls(**shared).permission_denials) == (0, None, ())
+    for field, bad in (("num_turns", -1), ("num_turns", True), ("terminal_reason", 5), ("terminal_reason", "x" * 257), ("permission_denials", ({"tool_name": "Bash"},)), ("thread_id", "")):
+        with pytest.raises(lib_api.ConfigurationError) as caught:
+            cls(**{**shared, field: bad})
+        assert f"ClaudeThreadResult.{field}" in str(caught.value) or f"NativeThreadResult.{field}" in str(caught.value), (field, str(caught.value))
+    for name, use_id in (("", "toolu_01"), ("Bash", ""), ("Bash", 7)):
+        with pytest.raises(lib_api.ConfigurationError):
+            denial(name, use_id)
 
 
 @pytest.mark.parametrize("mode", ["acceptEdits", "dontAsk", "plan"])

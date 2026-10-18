@@ -1,6 +1,6 @@
 """FILE: tests/features/harness_threads/test_harness_threads_claude_errors.py
 
-PURPOSE: How a Claude Code answer is classified (spec claude-thread-functions INV-7, D-10): a JSON object with is_error true and an integer api_error_status of 401 or 403 is claude.key_rejected carrying the reason, status and result text and the answer's session_id (AC-11, EC-4, EC-34); one of 408, 429 or a 5xx is claude.api_error, the one retryable code, carrying the status as api_status (PR #1044 review); any other status, no status or a non-integer status is claude.run_failed with that text (AC-11, EC-18, EC-36); `subtype` decides only a stop at the call's own limit, error_max_budget_usd or error_max_turns, which is claude.budget_exhausted whatever its status, with the text built from the `errors` list when there is no `result` (EC-17, PR #1044 review); a non-zero exit whose stderr holds the option parser's error line (unknown option, invalid choice, missing argument) is claude.protocol_mismatch naming the tested version (PR #1044 review); any other non-zero exit is claude.run_failed carrying stderr (AC-12); exit 0 with output that is not one JSON object, an is_error that is not false, a session_id that is not a lowercase UUID or a result that is not a string is claude.protocol_mismatch naming the member and the tested version 2.1.302 (AC-10, AC-13, EC-16); stderr on a successful answer is ignored (EC-35); and a failed fork reports the fork's new id while a failed continue reports the caller's (INV-6, D-14).
+PURPOSE: How a Claude Code answer is classified (spec claude-thread-functions INV-7, D-10): a JSON object with is_error true and an integer api_error_status of 401 or 403 is claude.key_rejected carrying the reason, status and result text and the answer's session_id (AC-11, EC-4, EC-34); one of 408, 429 or a 5xx is claude.api_error, the one retryable code, carrying the status as api_status (PR #1044 review); any other status, no status or a non-integer status is claude.run_failed with that text (AC-11, EC-18, EC-36); `subtype` decides only a stop at the call's own limit, error_max_budget_usd or error_max_turns, which is claude.budget_exhausted whatever its status, with the text built from the `errors` list when there is no `result` (EC-17, PR #1044 review); a non-zero exit whose stderr holds the option parser's error line (unknown option, invalid choice, missing argument) is claude.protocol_mismatch naming the tested version (PR #1044 review); any other non-zero exit is claude.run_failed carrying stderr (AC-12); exit 0 with output that is not one JSON object, an is_error that is not false, a session_id that is not a lowercase UUID or a result that is not a string is claude.protocol_mismatch naming the member and the tested version 2.1.302 (AC-10, AC-13, EC-16); stderr on a successful answer is ignored (EC-35); a success returns a ClaudeThreadResult whose num_turns, terminal_reason and permission_denials (tool name and tool-use id only) come from the answer, an unusable or missing one reading as its default (PR #1044 review); and a failed fork reports the fork's new id while a failed continue reports the caller's (INV-6, D-14).
 ROLE IN CODEBASE: Start here when a Claude Code failure gets the wrong code, loses Claude's own text, or reports the wrong thread.
 ARCHITECTURE NOTE: The stand-in prints Claude Code 2.1.302's one JSON result object (vendor-facts §6): success, the 401 shape with subtype "success", the budget shape with `errors` and no `result`, a generic in-run error, and any member overridden or dropped by the scenario's `override` and `drop` fields. check_error (conftest.py) asserts the INV-6 attributes, that likely_cause and next_step are the table texts for the code, and the message order. Vendor text is compared with the spec's own templates, CLAUDE_ERROR_TEXT and CLAUDE_ERROR_STATUS_TEXT, read from the constants module.
 FUNCTION INVENTORY: printed_session reads the session id the stand-in printed; vendor_text formats the expected vendor text from the spec templates; the test_* functions are one behaviour each.
@@ -42,6 +42,17 @@ OTHER_STATUSES = [
 LIMIT_STOPS = [
     ("budget", {}, "budget_exhausted", BUDGET),
     ("turns", {"subtype": "error_max_turns", "terminal_reason": "max_turns"}, "max_turns", TURNS),
+]
+# PR #1044 review 4301626286: denied tool calls as 2.1.302 lists them,
+# with unusable entries the reader skips.
+DENIALS = [
+    {"tool_name": "Bash", "tool_use_id": "toolu_01", "tool_input": {"command": "cat .env", "description": "Read the env file"}},
+    {"tool_name": 7, "tool_use_id": "toolu_02"}, "Bash", {"tool_name": "Edit"}, {"tool_name": "Write", "tool_use_id": "x" * 257},
+]
+UNUSABLE_REPORTS = [
+    ({"num_turns": True, "terminal_reason": 5, "permission_denials": {"tool_name": "Bash"}}, []),
+    ({"num_turns": -1, "terminal_reason": "x" * 257}, []),
+    ({}, ["num_turns", "terminal_reason", "permission_denials"]),
 ]
 BAD_MEMBERS = [
     ("is_error-missing", {}, ["is_error"], "is_error"), ("is_error-string", {"is_error": "false"}, [], "is_error"), ("is_error-null", {"is_error": None}, [], "is_error"),
@@ -212,6 +223,29 @@ async def test_stderr_on_a_successful_answer_is_ignored(sandbox, call, pack) -> 
     result = await call("claude", fake={"stderr_text": "[claude-code:unrecognized_model] the model name is not known to this release"})
     assert result.thread_id == sandbox.answers("claude")[0]["session"]
     assert result.text == f"claude answer to: {pack.PROMPT}"
+
+
+@pytest.mark.asyncio
+async def test_success_reports_its_turns_reason_and_denied_tools_by_name_and_id(api, sandbox, call) -> None:
+    # PR #1044 review 4301626286 / 4301898273: a success can hold the tool
+    # calls its mode denied (seen on 2.1.302 with exit 0 and subtype
+    # success); the result keeps each usable one by tool name and
+    # tool-use id, never its input, beside num_turns and terminal_reason.
+    result = await call("claude", fake={"override": {"num_turns": 2, "permission_denials": DENIALS}})
+    assert isinstance(result, api.ClaudeThreadResult) and isinstance(result, api.NativeThreadResult)
+    assert (result.num_turns, result.terminal_reason) == (2, "completed")
+    assert result.permission_denials == (api.ClaudePermissionDenial(tool_name="Bash", tool_use_id="toolu_01"),)
+    assert "cat .env" not in repr(result)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("override", "drop"), UNUSABLE_REPORTS, ids=["wrong-types", "out-of-range", "missing"])
+async def test_unusable_or_missing_reports_read_as_defaults_not_protocol_mismatch(sandbox, call, override, drop) -> None:
+    # PR #1044 review 4301898273: only is_error, session_id and result are
+    # required; num_turns, terminal_reason and permission_denials are
+    # reports, so an unusable or missing one reads as 0, None or ().
+    result = await call("claude", fake={"override": override, "drop": drop})
+    assert (result.num_turns, result.terminal_reason, result.permission_denials) == (0, None, ())
 
 
 @pytest.mark.asyncio

@@ -32,7 +32,7 @@ FUNCTIONS = tuple(f"{verb}_{harness}_thread" for harness in HARNESSES for verb i
 EXPECTED_EXPORTS = {
     *FUNCTIONS, "NativeThreadResult", "GrokThreadConfig", "OpencodeThreadConfig", "MuseThreadConfig",
     "NativeThreadError", "GrokPermissionMode", "GrokReasoningEffort", "MuseReasoningEffort",
-    "ClaudeThreadConfig", "ClaudePermissionMode", "ClaudeReasoningEffort",
+    "ClaudeThreadConfig", "ClaudePermissionMode", "ClaudeReasoningEffort", "ClaudeThreadResult", "ClaudePermissionDenial",
 }
 EXPECTED_ENUMS = {
     "NativeHarness": ["grok", "opencode", "muse", "claude"],

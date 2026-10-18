@@ -29,8 +29,8 @@ from vidbyte.harnesses.native.hostkit import (
 from vidbyte.lib.constants import native_threads
 from vidbyte.lib.dataclasses.native_threads import (
     ClaudeThreadConfig,
+    ClaudeThreadResult,
     NativeThreadRequest,
-    NativeThreadResult,
 )
 from vidbyte.lib.dataclasses.process import CliInvocation, CliOption
 from vidbyte.lib.dataclasses.validation import RecordFieldConverter
@@ -50,22 +50,22 @@ class ClaudeThreads:
     """The public Claude Code thread functions: start, continue or fork one thread headless with the caller's key."""
 
     @staticmethod
-    async def run_claude_thread(prompt: str, *, api_key: str, workspace: str | Path, model: str | None = None, skills: Sequence[str | Path] = (), config: ClaudeThreadConfig | None = None) -> NativeThreadResult:
+    async def run_claude_thread(prompt: str, *, api_key: str, workspace: str | Path, model: str | None = None, skills: Sequence[str | Path] = (), config: ClaudeThreadConfig | None = None) -> ClaudeThreadResult:
         """Start a new Claude Code thread in workspace, run prompt once with api_key, and return its id and answer."""
         return await ClaudeThreads._call(NativeThreadOperation.RUN_CLAUDE_THREAD, NativeThreadVerb.RUN, None, prompt, api_key=api_key, workspace=workspace, model=model, skills=skills, config=config)
 
     @staticmethod
-    async def continue_claude_thread(thread_id: str, prompt: str, *, api_key: str, workspace: str | Path, model: str | None = None, skills: Sequence[str | Path] = (), config: ClaudeThreadConfig | None = None) -> NativeThreadResult:
+    async def continue_claude_thread(thread_id: str, prompt: str, *, api_key: str, workspace: str | Path, model: str | None = None, skills: Sequence[str | Path] = (), config: ClaudeThreadConfig | None = None) -> ClaudeThreadResult:
         """Run prompt once more on the Claude Code thread thread_id, which only the workspace that created it can reach."""
         return await ClaudeThreads._call(NativeThreadOperation.CONTINUE_CLAUDE_THREAD, NativeThreadVerb.CONTINUE, thread_id, prompt, api_key=api_key, workspace=workspace, model=model, skills=skills, config=config)
 
     @staticmethod
-    async def fork_claude_thread(thread_id: str, prompt: str, *, api_key: str, workspace: str | Path, model: str | None = None, skills: Sequence[str | Path] = (), config: ClaudeThreadConfig | None = None) -> NativeThreadResult:
+    async def fork_claude_thread(thread_id: str, prompt: str, *, api_key: str, workspace: str | Path, model: str | None = None, skills: Sequence[str | Path] = (), config: ClaudeThreadConfig | None = None) -> ClaudeThreadResult:
         """Copy the Claude Code thread thread_id into a new thread, run prompt on the copy, and return the new id."""
         return await ClaudeThreads._call(NativeThreadOperation.FORK_CLAUDE_THREAD, NativeThreadVerb.FORK, thread_id, prompt, api_key=api_key, workspace=workspace, model=model, skills=skills, config=config)
 
     @staticmethod
-    async def _call(operation: NativeThreadOperation, verb: NativeThreadVerb, thread_id: str | None, prompt: str, *, api_key: str, workspace: str | Path, model: str | None, skills: Sequence[str | Path], config: ClaudeThreadConfig | None) -> NativeThreadResult:
+    async def _call(operation: NativeThreadOperation, verb: NativeThreadVerb, thread_id: str | None, prompt: str, *, api_key: str, workspace: str | Path, model: str | None, skills: Sequence[str | Path], config: ClaudeThreadConfig | None) -> ClaudeThreadResult:
         # One guarded try per call: cancellation and the feature's own
         # errors pass through, a refused argument names the argument,
         # and anything else is a defect named only by its class.
@@ -89,7 +89,7 @@ class ClaudeThreadRun:
     """One Claude Code call: launcher, private config folder, environment, argv, run and answer."""
 
     @staticmethod
-    async def execute(request: NativeThreadRequest, config: ClaudeThreadConfig, errors: NativeErrorFactory) -> NativeThreadResult:
+    async def execute(request: NativeThreadRequest, config: ClaudeThreadConfig, errors: NativeErrorFactory) -> ClaudeThreadResult:
         # Find claude: the caller's command, then PATH, then the copy
         # the native installer puts under the user's home folder.
         launcher = NativeLauncher.resolve(config.claude_command, program=native_threads.CLAUDE_PROGRAM, fallback=ClaudeThreadRun._fallback(), errors=errors, request=request)

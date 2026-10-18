@@ -1,9 +1,9 @@
 """FILE: vidbyte/lib/dataclasses/native_threads.py
 
-PURPOSE: Defines the validated records of the harness thread functions: NativeThreadRequest, the checked arguments of one call; GrokThreadConfig, OpencodeThreadConfig, MuseThreadConfig and ClaudeThreadConfig, the per-harness settings a caller may pass; and NativeThreadResult, what a successful call returns.
+PURPOSE: Defines the validated records of the harness thread functions: NativeThreadRequest, the checked arguments of one call; GrokThreadConfig, OpencodeThreadConfig, MuseThreadConfig and ClaudeThreadConfig, the per-harness settings a caller may pass; NativeThreadResult, what a successful call returns; and ClaudeThreadResult with its ClaudePermissionDenial items, what a successful Claude Code call returns.
 ROLE IN CODEBASE: NativeThreadRequest is built by the twelve public functions under vidbyte/harnesses/native/ (grok/threads.py, opencode/threads.py, muse/threads.py, claude/threads.py) and read by every step of their flows. The four config records and NativeThreadResult are re-exported from vidbyte.harnesses.native; callers build the configs, the functions return the result.
 ARCHITECTURE NOTE: Every check lives in __post_init__, so a constructed record is always valid. Field checks go through RecordFieldValidator and RecordFieldConverter (vidbyte/lib/dataclasses/validation.py); the four rules that relate a field to another value (thread_id against the verb, a skill folder's SKILL.md, unique skill folder names, an allowed Claude Code shell rule against the permission mode) raise ConfigurationError inline. A refused field raises ConfigurationError whose details["field"] is the public argument name (api_key, skills[2]); the thread functions turn it into a NativeThreadError naming that argument. The workspace and each skill path are checked as given, absolute and existing, and then stored resolved, so a relative path never passes because of the current folder.
-FUNCTION INVENTORY: NativeThreadRequest.__post_init__ is the narrated main function and picks the prompt cap and pattern for the harness; _checked_workspace checks and resolves the workspace; _checked_model checks the model for the harness; _checked_thread_id ties the thread id to the verb; _checked_skills checks, resolves and names each skill folder. GrokThreadConfig, OpencodeThreadConfig, MuseThreadConfig, ClaudeThreadConfig and NativeThreadResult have only __post_init__.
+FUNCTION INVENTORY: NativeThreadRequest.__post_init__ is the narrated main function and picks the prompt cap and pattern for the harness; _checked_workspace checks and resolves the workspace; _checked_model checks the model for the harness; _checked_thread_id ties the thread id to the verb; _checked_skills checks, resolves and names each skill folder. GrokThreadConfig, OpencodeThreadConfig, MuseThreadConfig, ClaudeThreadConfig, NativeThreadResult, ClaudePermissionDenial and ClaudeThreadResult have only __post_init__, and ClaudeThreadConfig also the subprocess_scrub property.
 COMMON MODIFICATION PATTERNS: A new config field adds one field and one validator call to its record, and its bound or pattern to vidbyte/lib/constants/native_threads.py. A config record never gets a model field: the model is an argument of every call.
 WHAT NOT TO DO IN THIS FILE: 1. Do not read keys from environment variables. 2. Do not put a key value in an error message or its details; name the parameter instead. 3. Do not drop repr=False from a key field. 4. Do not import from vidbyte.harnesses; vidbyte/lib is the bottom layer.
 KNOWN EDGE CASES: The prompt cap is NATIVE_PROMPT_MAX_CHARS for opencode and Claude Code, which read the prompt from stdin (NATIVE_STDIN_PROMPT_HARNESSES), and NATIVE_ARGV_PROMPT_MAX_CHARS for Grok and Muse, which take it on argv; on Windows the Grok and Muse prompt must also fit NATIVE_WINDOWS_ARGV_PROMPT_MAX_UNITS once quoted and counted in UTF-16 units, the way CreateProcess counts it; that ceiling leaves room for the rest of the command line, and a launch that still passes the limit is reported as launch_failed. A skill item that is not a path is refused naming skills[<i>], while a skill list that is a str or holds too many items is refused naming skills. Two skill folders with the same folder name are refused, because each harness finds a skill by its folder name. A Claude Code thread id must be a lowercase UUID (CLAUDE_THREAD_ID_PATTERN), because claude --resume also matches a session title or a transcript path. A Claude Code prompt that holds a lone surrogate is refused (CLAUDE_PROMPT_PATTERN), because UTF-8 cannot encode it for stdin; opencode's prompt is not checked for one (claude-thread-functions spec EC-38). claude_command and grok_command hold the executable alone (require_program), because a further item would reach the program ahead of the SDK's options: --settings could move the endpoint the key is sent to and --dangerously-skip-permissions would approve every tool (PR #1044 review).
@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from vidbyte.lib.constants.native_threads import (
+    CLAUDE_ANSWER_NAME_MAX_CHARS,
     CLAUDE_MAX_BUDGET_USD_LIMIT,
     CLAUDE_MAX_TURNS_LIMIT,
     CLAUDE_PROMPT_PATTERN,
@@ -283,4 +284,33 @@ class NativeThreadResult:
         RecordFieldValidator.require_bool(self.text_truncated, "NativeThreadResult.text_truncated")
 
 
-__all__ = ["ClaudeThreadConfig", "GrokThreadConfig", "MuseThreadConfig", "NativeThreadRequest", "NativeThreadResult", "OpencodeThreadConfig"]
+@dataclass(frozen=True, slots=True)
+class ClaudePermissionDenial:
+    """One tool call the permission mode of a Claude Code call denied: the tool's name and its tool-use id, never its input, which can hold file contents or secrets."""
+
+    tool_name: str
+    tool_use_id: str
+
+    def __post_init__(self) -> None:
+        RecordFieldValidator.require_text(self.tool_name, "ClaudePermissionDenial.tool_name", max_chars=CLAUDE_ANSWER_NAME_MAX_CHARS)
+        RecordFieldValidator.require_text(self.tool_use_id, "ClaudePermissionDenial.tool_use_id", max_chars=CLAUDE_ANSWER_NAME_MAX_CHARS)
+
+
+@dataclass(frozen=True, slots=True)
+class ClaudeThreadResult(NativeThreadResult):
+    """What a successful Claude Code call returns: the NativeThreadResult fields, plus the turns the call took, Claude Code's terminal reason and the tool calls its permission mode denied, so a success that left part of the task undone shows it."""
+
+    num_turns: int = 0
+    terminal_reason: str | None = None
+    permission_denials: tuple[ClaudePermissionDenial, ...] = ()
+
+    def __post_init__(self) -> None:
+        # The shared fields go through the parent's own checks, called by
+        # name because a slotted dataclass breaks the zero-argument super().
+        NativeThreadResult.__post_init__(self)
+        RecordFieldValidator.require_int(self.num_turns, "ClaudeThreadResult.num_turns", minimum=0)
+        RecordFieldValidator.require_optional_text(self.terminal_reason, "ClaudeThreadResult.terminal_reason", max_chars=CLAUDE_ANSWER_NAME_MAX_CHARS)
+        object.__setattr__(self, "permission_denials", RecordFieldConverter.to_tuple(self.permission_denials, "ClaudeThreadResult.permission_denials", item_type=ClaudePermissionDenial))
+
+
+__all__ = ["ClaudePermissionDenial", "ClaudeThreadConfig", "ClaudeThreadResult", "GrokThreadConfig", "MuseThreadConfig", "NativeThreadRequest", "NativeThreadResult", "OpencodeThreadConfig"]

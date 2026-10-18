@@ -1,12 +1,12 @@
 """FILE: vidbyte/harnesses/native/claude/wire.py
 
-PURPOSE: Defines ClaudeWire, the reader of one `claude --print --output-format json` run: it turns the run's CliOutcome into a NativeThreadResult, or into the NativeThreadError that names what went wrong.
+PURPOSE: Defines ClaudeWire, the reader of one `claude --print --output-format json` run: it turns the run's CliOutcome into a ClaudeThreadResult, or into the NativeThreadError that names what went wrong.
 ROLE IN CODEBASE: Called by ClaudeThreadRun.execute in vidbyte/harnesses/native/claude/threads.py after CliRunner returns; it raises through the call's NativeErrorFactory (hostkit/errors.py) and checks the answered thread id with RecordFieldValidator.accepts_text.
 ARCHITECTURE NOTE: Pure: no process, no file and no await. Claude Code 2.1.302 writes one JSON object at exit, {"is_error", "session_id", "result", "api_error_status", "terminal_reason", "subtype", "errors", ...}, on success and on an in-run failure alike, and a failure before the run (an unknown --resume id) as text on stderr with exit 1. Every member name and marker comes from vidbyte/lib/constants/native_threads.py (spec INV-16). The answer is read first, as opencode/wire.py does, and the checks then run in the INV-7 order: timeout, output cap, the answer's own is_error (budget exhausted, key rejected, a retryable API error or run failed), a bare non-zero exit (thread not found, an option the installed claude refused, which is protocol_mismatch, or run failed), then the shape of the success answer and the thread id.
-FUNCTION INVENTORY: read is the narrated main function; _answer parses stdout as one JSON object, or None; _session returns the answer's session_id when it is a lowercase UUID; _text returns its result when it is text; _missing_member names the member that makes a success answer unusable; _error_problem picks the problem of an is_error answer from its subtype and API status; _error_text builds the vendor text of an is_error answer.
+FUNCTION INVENTORY: read is the narrated main function; _answer parses stdout as one JSON object, or None; _session returns the answer's session_id when it is a lowercase UUID; _text returns its result when it is text; _missing_member names the member that makes a success answer unusable; _error_problem picks the problem of an is_error answer from its subtype and API status; _denials reads the denied tool calls by name and tool-use id; _error_text builds the vendor text of an is_error answer.
 COMMON MODIFICATION PATTERNS: A new answer member the SDK must read gets its name constant and one check in read; a new failure shape is a spec change first (INV-7).
 WHAT NOT TO DO IN THIS FILE: 1. Do not decide success by subtype; Claude Code reports "success" on a rejected key. 2. Do not copy vendor text into an error unscrubbed; pass it as vendor_text and the factory scrubs and caps it. 3. Do not accept a cut stdout; a truncated answer is output_too_large and only its thread id is ever used. 4. Do not start processes or await anything here.
-KNOWN EDGE CASES: A stop at the call's own max_turns or max_budget_usd (subtype error_max_turns or error_max_budget_usd) is budget_exhausted whatever its status. True is not taken as a status, so "api_error_status": true is run_failed with api_status None (the vendor text still shows it), never key_rejected or api_error. An is_error answer with no status at all (the API could not be reached) is run_failed, not api_error, because nothing says a retry will help. A failed run or fork still reports the session_id of its answer, because Claude Code writes a resumable transcript even then; a failed continue reports the caller's id. That holds for timed_out and output_too_large too. A run or fork that printed no usable session_id reports the id it passed as --session-id (minted_id), because Claude Code writes that transcript as soon as the turn starts: after a timeout before it printed its answer, an answer cut at the cap or an exit-0 stdout that is not JSON. Only a non-zero exit that printed nothing but stderr (an unknown source thread, a refused option) reports no new id, because it never started the thread: a run then carries None and a fork its source id (spec INV-6, EC-14, EC-15; PR #1044 review reverses D-9). A run or fork answered on an id other than minted_id is protocol_mismatch. A continue answered on another lowercase UUID is thread_not_found; one answered in upper case is a bad session_id, protocol_mismatch. A fork answered with its source id is protocol_mismatch. Stderr on a successful answer is ignored, because Claude Code prints notices there.
+KNOWN EDGE CASES: A stop at the call's own max_turns or max_budget_usd (subtype error_max_turns or error_max_budget_usd) is budget_exhausted whatever its status. True is not taken as a status, so "api_error_status": true is run_failed with api_status None (the vendor text still shows it), never key_rejected or api_error. An is_error answer with no status at all (the API could not be reached) is run_failed, not api_error, because nothing says a retry will help. A failed run or fork still reports the session_id of its answer, because Claude Code writes a resumable transcript even then; a failed continue reports the caller's id. That holds for timed_out and output_too_large too. A run or fork that printed no usable session_id reports the id it passed as --session-id (minted_id), because Claude Code writes that transcript as soon as the turn starts: after a timeout before it printed its answer, an answer cut at the cap or an exit-0 stdout that is not JSON. Only a non-zero exit that printed nothing but stderr (an unknown source thread, a refused option) reports no new id, because it never started the thread: a run then carries None and a fork its source id (spec INV-6, EC-14, EC-15; PR #1044 review reverses D-9). A run or fork answered on an id other than minted_id is protocol_mismatch. A continue answered on another lowercase UUID is thread_not_found; one answered in upper case is a bad session_id, protocol_mismatch. A fork answered with its source id is protocol_mismatch. Stderr on a successful answer is ignored, because Claude Code prints notices there. A success can still hold permission_denials, the tool calls its mode refused (checked on 2.1.302); num_turns, terminal_reason and permission_denials are reports, not the answer, so a missing or unusable one reads as 0, None or no denial, never as protocol_mismatch.
 RELATED DOCS: vidbyte/harnesses/README.md
 TESTS: tests/features/harness_threads/test_harness_threads_claude_errors.py, tests/features/harness_threads/test_harness_threads_claude_threads.py, tests/features/harness_threads/test_harness_threads_claude_process_bounds.py
 """
@@ -19,8 +19,9 @@ from collections.abc import Mapping
 from vidbyte.harnesses.native.hostkit import NativeErrorFactory
 from vidbyte.lib.constants import native_threads
 from vidbyte.lib.dataclasses.native_threads import (
+    ClaudePermissionDenial,
+    ClaudeThreadResult,
     NativeThreadRequest,
-    NativeThreadResult,
 )
 from vidbyte.lib.dataclasses.process import CliOutcome
 from vidbyte.lib.dataclasses.validation import RecordFieldValidator
@@ -35,7 +36,7 @@ class ClaudeWire:
     """Reads the one JSON answer of a headless claude run."""
 
     @staticmethod
-    def read(outcome: CliOutcome, request: NativeThreadRequest, errors: NativeErrorFactory, *, timeout_seconds: float, minted_id: str | None) -> NativeThreadResult:
+    def read(outcome: CliOutcome, request: NativeThreadRequest, errors: NativeErrorFactory, *, timeout_seconds: float, minted_id: str | None) -> ClaudeThreadResult:
         # Read the answer once, before any check. A continue always
         # reports the id the caller gave. A run or fork reports the id
         # its answer printed, else the one it passed as --session-id,
@@ -105,7 +106,22 @@ class ClaudeWire:
         # already checked that a continue has an id.
         thread_id = request.thread_id if request.verb is NativeThreadVerb.CONTINUE and request.thread_id is not None else session
         cap = native_threads.NATIVE_RESULT_TEXT_MAX_CHARS
-        return NativeThreadResult(harness=NativeHarness.CLAUDE, thread_id=thread_id, text=text[:cap], text_truncated=len(text) > cap)
+
+        # Add what Claude Code reports about the run: its turns, its
+        # terminal reason and the tool calls its mode denied, which a
+        # success can hold when part of the task could not be done.
+        turns = answer.get(native_threads.CLAUDE_NUM_TURNS_FIELD)
+        reason = answer.get(native_threads.CLAUDE_TERMINAL_REASON_FIELD)
+        usable_reason = isinstance(reason, str) and RecordFieldValidator.accepts_text(reason, max_chars=native_threads.CLAUDE_ANSWER_NAME_MAX_CHARS)
+        return ClaudeThreadResult(
+            harness=NativeHarness.CLAUDE,
+            thread_id=thread_id,
+            text=text[:cap],
+            text_truncated=len(text) > cap,
+            num_turns=turns if type(turns) is int and turns >= 0 else 0,
+            terminal_reason=reason if usable_reason and isinstance(reason, str) else None,
+            permission_denials=ClaudeWire._denials(answer),
+        )
 
     @staticmethod
     def _answer(stdout: str) -> Mapping[str, object] | None:
@@ -143,6 +159,21 @@ class ClaudeWire:
         if session is None:
             return native_threads.CLAUDE_SESSION_FIELD
         return native_threads.CLAUDE_RESULT_FIELD
+
+    @staticmethod
+    def _denials(answer: Mapping[str, object]) -> tuple[ClaudePermissionDenial, ...]:
+        # The denied tool calls by tool name and tool-use id only: their
+        # input can hold file contents or secrets. An entry without a
+        # usable name and id is skipped.
+        listed = answer.get(native_threads.CLAUDE_PERMISSION_DENIALS_FIELD)
+        entries = [entry for entry in listed if isinstance(entry, dict)] if isinstance(listed, list) else []
+        pairs = [(entry.get(native_threads.CLAUDE_TOOL_NAME_FIELD), entry.get(native_threads.CLAUDE_TOOL_USE_ID_FIELD)) for entry in entries]
+        cap = native_threads.CLAUDE_ANSWER_NAME_MAX_CHARS
+        return tuple(
+            ClaudePermissionDenial(tool_name=name, tool_use_id=use_id)
+            for name, use_id in pairs
+            if isinstance(name, str) and isinstance(use_id, str) and RecordFieldValidator.accepts_text(name, max_chars=cap) and RecordFieldValidator.accepts_text(use_id, max_chars=cap)
+        )
 
     @staticmethod
     def _error_problem(answer: Mapping[str, object], status: int | None) -> NativeThreadProblem:
