@@ -153,6 +153,11 @@ CLAUDE_INSTALL_FOLDERS = (".local", "bin")
 CLAUDE_PRIVATE_CONFIGS_PARTS = (".vidbyte", "claude-configs")
 CLAUDE_CONFIG_KEY_HEX_CHARS = 16
 CLAUDE_SKILLS_DIR = "skills"
+# The mode of a private per-workspace folder (the Grok home, the Claude
+# Code config folder): its owner only, because it holds the vendor's
+# transcripts of prompts and tool output. Windows keeps only the
+# read-only bit, which this mode leaves off.
+NATIVE_PRIVATE_FOLDER_MODE = 0o700
 NATIVE_SKILL_FILE_NAME = "SKILL.md"
 MUSE_WSL_MOUNT_ROOT = "/mnt"
 MUSE_WINDOWS_DRIVE_PATTERN = r"[A-Za-z]:"
@@ -492,7 +497,7 @@ NATIVE_THREAD_LIKELY_CAUSES: MappingProxyType[FailureCode, str] = MappingProxyTy
     {
         FailureCode.GROK_NOT_INSTALLED: "Grok Build is not on PATH and has no ~/.grok/bin install, or the grok_command you passed names a file that does not exist.",
         FailureCode.GROK_LAUNCHER_REFUSED: "The grok found first is a Windows .cmd or .bat shim, such as the npm grok.cmd, and cmd.exe would re-read the prompt as a command line.",
-        FailureCode.GROK_LAUNCH_FAILED: "The operating system refused to start grok, or the SDK could not create the private Grok home under ~/.vidbyte/grok-homes; concurrent Grok calls in one workspace with different skill sets can also collide while its skills folder is rebuilt.",
+        FailureCode.GROK_LAUNCH_FAILED: "The operating system refused to start grok, or the SDK could not create the private Grok home under ~/.vidbyte/grok-homes; Grok calls in one workspace with different skill sets, or calls from separate processes preparing its home at the same moment, can also collide while its skills folder is rebuilt.",
         FailureCode.GROK_KEY_REJECTED: "xAI rejected the API key passed as api_key because it is wrong, revoked or lacks access, and the SDK never falls back to a stored grok login.",
         FailureCode.GROK_THREAD_NOT_FOUND: "Grok answered on a different session than the thread_id you passed, so the requested thread was not continued.",
         FailureCode.GROK_TIMED_OUT: "The Grok run needed more than timeout_seconds, often because it waited for an approval that a headless run cannot give, or because the task is large.",
@@ -520,7 +525,7 @@ NATIVE_THREAD_LIKELY_CAUSES: MappingProxyType[FailureCode, str] = MappingProxyTy
         FailureCode.MUSE_WSL_UNAVAILABLE: "On Windows Muse Code runs only inside WSL, and WSL is missing, the named distro does not exist, or neither wsl_distro nor muse_command was set.",
         FailureCode.CLAUDE_NOT_INSTALLED: "Claude Code is not on PATH and has no native install under ~/.local/bin, or the claude_command you passed names a file that does not exist.",
         FailureCode.CLAUDE_LAUNCHER_REFUSED: "The claude found first is a Windows .cmd or .bat shim, such as the npm claude.cmd, and cmd.exe would re-read its arguments as a command line.",
-        FailureCode.CLAUDE_LAUNCH_FAILED: "The operating system refused to start claude, or the SDK could not create the private config folder under ~/.vidbyte/claude-configs; concurrent Claude Code calls in one workspace with different skill sets can also collide while its skills folder is rebuilt.",
+        FailureCode.CLAUDE_LAUNCH_FAILED: "The operating system refused to start claude, or the SDK could not create the private config folder under ~/.vidbyte/claude-configs; Claude Code calls in one workspace with different skill sets, or calls from separate processes preparing its folder at the same moment, can also collide while its skills folder is rebuilt.",
         FailureCode.CLAUDE_KEY_REJECTED: "Anthropic rejected the API key passed as api_key because it is wrong, revoked or lacks permission, and the SDK never falls back to a stored claude login.",
         FailureCode.CLAUDE_THREAD_NOT_FOUND: "The thread is not in this workspace's private config folder: another workspace created it, Claude Code swept it after 30 days, it never existed, or Claude Code answered on another thread.",
         FailureCode.CLAUDE_TIMED_OUT: "The Claude Code run needed more than timeout_seconds, for example because the task is large or the API did not answer.",
@@ -539,7 +544,7 @@ NATIVE_THREAD_NEXT_STEPS: MappingProxyType[FailureCode, str] = MappingProxyType(
     {
         FailureCode.GROK_NOT_INSTALLED: "Install Grok Build, or pass the full path of its executable in GrokThreadConfig(grok_command=(...,)).",
         FailureCode.GROK_LAUNCHER_REFUSED: "Pass the real grok.exe in GrokThreadConfig(grok_command=(...,)), or install Grok Build's own binary under ~/.grok/bin.",
-        FailureCode.GROK_LAUNCH_FAILED: "Check that grok runs from a terminal and that ~/.vidbyte/grok-homes is a writable folder, then retry; run concurrent Grok calls in one workspace only with a skill set an earlier call already prepared.",
+        FailureCode.GROK_LAUNCH_FAILED: "Check that grok runs from a terminal and that ~/.vidbyte/grok-homes is a writable folder, then retry; give concurrent Grok calls in one workspace one skill set and start them from one process, or use separate workspaces.",
         FailureCode.GROK_KEY_REJECTED: "Pass a valid xAI API key as api_key and retry.",
         FailureCode.GROK_THREAD_NOT_FOUND: "Continue a Grok thread only from the workspace that created it, with the thread_id that run_grok_thread or fork_grok_thread returned.",
         FailureCode.GROK_TIMED_OUT: "Raise GrokThreadConfig.timeout_seconds, narrow the prompt, or choose a permission_mode that lets the run proceed; continue the thread to finish a partial turn.",
@@ -567,7 +572,7 @@ NATIVE_THREAD_NEXT_STEPS: MappingProxyType[FailureCode, str] = MappingProxyType(
         FailureCode.MUSE_WSL_UNAVAILABLE: "Install WSL and a distro that holds Muse Code, then pass MuseThreadConfig(wsl_distro=...) with a name that wsl.exe -l -q lists.",
         FailureCode.CLAUDE_NOT_INSTALLED: "Install Claude Code's native build, or pass the full path of its executable in ClaudeThreadConfig(claude_command=(...,)).",
         FailureCode.CLAUDE_LAUNCHER_REFUSED: "Pass the real claude.exe in ClaudeThreadConfig(claude_command=(...,)), or install Claude Code's native build under ~/.local/bin.",
-        FailureCode.CLAUDE_LAUNCH_FAILED: "Check that claude --version runs from a terminal and that ~/.vidbyte/claude-configs is a writable folder, then retry; run concurrent Claude Code calls in one workspace only with a skill set an earlier call already prepared.",
+        FailureCode.CLAUDE_LAUNCH_FAILED: "Check that claude --version runs from a terminal and that ~/.vidbyte/claude-configs is a writable folder, then retry; give concurrent Claude Code calls in one workspace one skill set and start them from one process, or use separate workspaces.",
         FailureCode.CLAUDE_KEY_REJECTED: "Pass a valid Anthropic API key as api_key and retry.",
         FailureCode.CLAUDE_THREAD_NOT_FOUND: "Continue or fork a Claude Code thread only from the workspace that created it, with the thread_id that run_claude_thread or fork_claude_thread returned.",
         FailureCode.CLAUDE_TIMED_OUT: "Raise ClaudeThreadConfig.timeout_seconds or narrow the prompt; continue the thread named by this error's thread_id to finish the partial turn, which may already have changed files in the workspace.",

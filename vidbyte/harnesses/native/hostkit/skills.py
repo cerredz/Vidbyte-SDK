@@ -2,7 +2,7 @@
 
 PURPOSE: Defines NativeSkillFolders, which makes one SDK-owned skills folder hold exactly the caller's skill folders, copying them only when the folder does not already hold identical copies.
 ROLE IN CODEBASE: Called by NativePrivateFolders.prepare (hostkit/folders.py) for the skills folder of the private Grok home (GrokThreadRun, grok/threads.py) and of the private Claude Code config folder (ClaudeThreadRun, claude/threads.py), each caller running it through asyncio.to_thread, and through asyncio.to_thread by MuseThreadRun (muse/threads.py) for the skills folder of the per-call Muse config home. opencode reads the caller's folders in place and does not use it.
-ARCHITECTURE NOTE: Synchronous file work, so callers move it off the event loop (lint S052). Comparing before copying matters for the private Grok home and the private Claude Code config folder, each shared by every call in one workspace: an unchanged skill set is never removed and copied again, so a concurrent call with the same skills never sees the folder half-built.
+ARCHITECTURE NOTE: Synchronous file work, so callers move it off the event loop (lint S052). Comparing before copying matters for the private Grok home and the private Claude Code config folder, each shared by every call in one workspace: an unchanged skill set is never removed and copied again, and NativePrivateFolders.prepare runs the calls of one process one at a time, so a call with the same skills never sees the folder half-built (PR #1044 review L11).
 FUNCTION INVENTORY: replace is the narrated main function; remove deletes an SDK-owned folder of skill copies even when they kept read-only bits; _matches says whether the destination already holds exactly the requested folders with identical files.
 COMMON MODIFICATION PATTERNS: A harness that needs its skills copied passes its own destination; the copy rules stay here.
 WHAT NOT TO DO IN THIS FILE: 1. Do not write into a caller's skill folder; it is only read. 2. Do not follow symbolic links when copying; a link is copied as a link. 3. Do not leave a skill in the destination that the caller did not pass.
@@ -29,8 +29,9 @@ class NativeSkillFolders:
         # The harness reads every folder in the destination as a skill,
         # so it must hold the caller's skills and nothing else; a
         # destination that already holds identical copies is left
-        # untouched so concurrent calls with the same skills never see
-        # it half-built.
+        # untouched, so calls with the same skills, which
+        # NativePrivateFolders.prepare runs one at a time, never see it
+        # half-built.
         if NativeSkillFolders._matches(skills, destination):
             return
 

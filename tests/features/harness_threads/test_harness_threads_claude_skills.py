@@ -3,7 +3,7 @@
 PURPOSE: The private per-workspace Claude Code config folder and the skills in it (spec claude-thread-functions INV-13, INV-14, D-3, D-15): a run and a continue in one workspace get the same CLAUDE_CONFIG_DIR, `<home>/.vidbyte/claude-configs/<16 hex of sha256(normcase(resolved workspace))>`, whose `skills/` holds copies of exactly the passed skills, and the workspace gains nothing (AC-9); `skills/` is rebuilt only when the passed set changes and is emptied by a call with no skills (INV-14); the SDK writes nothing outside that folder and nothing inside it but `skills/` (INV-13); and the shared hostkit helper NativePrivateFolders.prepare honours every parameter it is given and maps a folder it cannot prepare to <harness>.launch_failed, for Claude and for Grok, whose private home it now prepares with Grok's own constants (§8.5, D-15, INV-20, EC-3).
 ROLE IN CODEBASE: Start here when Claude misses a skill, sees a stale one, a continue cannot find its run's thread because the folder moved, or the SDK writes into the workspace or the user's own ~/.claude.
 ARCHITECTURE NOTE: The stand-in lists, at start, the skill folders it can see in $CLAUDE_CONFIG_DIR/skills (file names and SHA-256 per file). The "not rebuilt" proof is a hard link made from outside the config folder to the copied SKILL.md, as the Grok skills test does: a removed and re-copied folder breaks the link's identity. The hostkit tests build NativeThreadRequest and NativeErrorFactory for real and call NativePrivateFolders.prepare directly with made-up parts, key length, folder name and templates, so a helper that ignores a parameter and uses Grok's or Claude's constants fails. The Grok guard wraps the real helper (it still runs) to see which constants a Grok call hands it.
-FUNCTION INVENTORY: digest_tree lists a source skill folder the way the stand-in does; native_request builds a Claude request for the hostkit tests; the test_* functions are one behaviour each.
+FUNCTION INVENTORY: digest_tree lists a source skill folder the way the stand-in does; native_request builds a Claude request for the hostkit tests; prepare_helper calls NativePrivateFolders.prepare with test parts; the test_* functions are one behaviour each.
 COMMON MODIFICATION PATTERNS: A new file the SDK may write in the config folder is a spec change first (INV-13), then one name in SDK_FOLDER_ENTRIES.
 WHAT NOT TO DO IN THIS FILE: Do not write into the config folder from a test except the one hard link's target count.
 KNOWN EDGE CASES: The stand-in itself writes `projects/` into the config folder, as Claude Code writes its transcripts there; that is vendor state, not an SDK write.
@@ -13,9 +13,12 @@ TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads/test
 
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
 import importlib
 import os
+import stat
+import threading
 from pathlib import Path
 
 import pytest
@@ -31,6 +34,12 @@ def digest_tree(folder: Path) -> dict[str, str]:
 def native_request(lib_api, sandbox, pack, skills=()):
     enums = lib_api.enums
     return lib_api.NativeThreadRequest(harness=enums.NativeHarness.CLAUDE, verb=enums.NativeThreadVerb.RUN, prompt="Explain.", api_key=pack.API_KEY, workspace=sandbox.workspace, skills=list(skills))
+
+
+def prepare_helper(lib_api, request) -> Path:
+    hostkit = importlib.import_module("vidbyte.harnesses.native.hostkit")
+    errors = hostkit.NativeErrorFactory(lib_api.enums.NativeHarness.CLAUDE, lib_api.enums.NativeThreadOperation.RUN_CLAUDE_THREAD)
+    return Path(hostkit.NativePrivateFolders.prepare(request, errors, parts=("x-parts", "y-part"), key_hex_chars=8, skills_dir="loaded", unknown_detail="Home unknown ({error_type}).", failure_detail="Folder {home} failed ({error_type}: {reason})."))
 
 
 @pytest.mark.asyncio
@@ -132,6 +141,42 @@ def test_private_folders_helper_maps_an_unpreparable_folder_to_launch_failed(lib
     error = caught.value
     assert error.failure_code.value == "claude.launch_failed"
     assert "Folder " in str(error) and " failed (" in str(error) and pack.API_KEY not in str(error)
+
+
+@pytest.mark.parametrize("sets", [1, 2], ids=["one-skill-set", "two-skill-sets"])
+def test_a_cold_fan_out_over_one_workspace_prepares_every_call(lib_api, sandbox, pack, sets) -> None:
+    # PR #1044 review 4301626279 / 4301898279 (L11): 16 calls released
+    # together on a cold home, as asyncio.gather over to_thread runs
+    # them, all prepare the one folder, because one call at a time fills
+    # its skills folder; the review measured 3 of 4 cold calls failing.
+    skills = [sandbox.make_skill(f"fan-skill-{index}", extra_files={f"notes/{part}.md": "x" * 4096 for part in range(8)}) for index in range(3)]
+    requests = [native_request(lib_api, sandbox, pack, skills[: 2 + index % sets]) for index in range(16)]
+    released = threading.Barrier(len(requests))
+
+    def prepare(request) -> Path:
+        released.wait()
+        return prepare_helper(lib_api, request)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(requests)) as pool:
+        folders = list(pool.map(prepare, requests))
+    assert len(set(folders)) == 1
+    assert sorted(path.name for path in (folders[0] / "loaded").iterdir()) in (["fan-skill-0", "fan-skill-1"], ["fan-skill-0", "fan-skill-1", "fan-skill-2"])
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX permission bits; Windows has no owner-only mode")
+@pytest.mark.parametrize("existing", [False, True], ids=["new", "older-0755"])
+def test_private_folder_is_open_to_its_owner_only(lib_api, sandbox, pack, existing) -> None:
+    # PR #1044 review 4301626279 (L11): the folder holds the vendor's
+    # transcripts of prompts and tool output (EC-28), so a new folder is
+    # created 0700 and an older one is set to 0700.
+    request = native_request(lib_api, sandbox, pack)
+    key = hashlib.sha256(os.path.normcase(str(sandbox.workspace.resolve())).encode("utf-8")).hexdigest()[:8]
+    if existing:
+        older = sandbox.home / "x-parts" / "y-part" / key
+        older.mkdir(parents=True)
+        older.chmod(0o755)
+    folder = prepare_helper(lib_api, request)
+    assert stat.S_IMODE(folder.stat().st_mode) == 0o700
 
 
 @pytest.mark.asyncio
