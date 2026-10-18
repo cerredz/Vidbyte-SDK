@@ -2,7 +2,7 @@
 
 PURPOSE: The seven CodexHost tools that act on stored threads: start_codex_side_chat, archive_codex_thread, unarchive_codex_thread and rename_codex_thread, which start or change paid Codex work, and list_codex_background_terminals, search_codex_thread_content and list_codex_child_threads, which only read.
 ROLE IN CODEBASE: Part of vidbyte/tools/builtins/codex/; CodexHostTools lists these among the sixteen first-class tools, in the order of the CodexHost functions.
-ARCHITECTURE NOTE: Each tool reads its arguments with the _CodexHostTool resolve_ helpers, calls its host function once and answers through _run, so it never raises (INV-10). The side-chat tool holds one cap slot while the host starts the fork's turn, releases it in finally and then owns the fork's handle, as the run tools do (codex-host INV-32 and INV-33). Its request is the developer's spawn_defaults narrowed to read-only sandboxes, no writable roots, no network setting, never-asking approvals and no approval policy or reviewer, so Codex's own commands in a side chat cannot write or ask; the parent thread's Vidbyte tools stay callable, because the fork inherits them (first-class INV-43, D-22).
+ARCHITECTURE NOTE: Each tool reads its arguments with the _CodexHostTool resolve_ helpers, calls its host function once and answers through _run, so it never raises (INV-10). The side-chat tool holds one cap slot while the host starts the fork's turn, releases it in finally and then owns the fork's handle, as the run tools do (codex-host INV-32 and INV-33). Its request is the developer's spawn_defaults with every field a side chat refuses (the START_CODEX_SIDE_CHAT row of CODEX_HOST_REJECTED_FIELDS) reset to a fresh request's value, as the continue and resume tools reset theirs, then narrowed to read-only sandboxes, no writable roots, no network setting, never-asking approvals and no approval policy or reviewer, so Codex's own commands in a side chat cannot write or ask; the parent thread's Vidbyte tools stay callable, because the fork inherits them (first-class INV-43, D-22).
 COMMON MODIFICATION PATTERNS: A new thread action is one tool class here over its CodexHost function, with its texts in descriptions.py and its line in CodexHostTools. A posture field the side chat must narrow is one more replace() term in _side_chat_defaults.
 KNOWN EDGE CASES: clean_codex_background_terminals has no tool, so no model can stop a developer's terminals (first-class INV-42). The archive and rename tools answer THREAD_ARCHIVED_TEXT and THREAD_RENAMED_TEXT, because their functions return nothing for _json to write. JSON null means omitted, so a null cursor reads the first page and a null limit lets Codex choose the page size.
 RELATED DOCS: docs/spec/codex-host-first-class/spec.md (section 9.2 tool table, rows 34 and 37 to 42, and the tool rules; INV-41 to INV-44, D-21, D-22)
@@ -17,6 +17,8 @@ from vidbyte.lib.constants.codex import (
     CODEX_HOST_MIN_LIST_LIMIT,
     CODEX_HOST_THREAD_LIST_MAX_LIMIT,
 )
+from vidbyte.lib.constants.codex_host import CODEX_HOST_REJECTED_FIELDS
+from vidbyte.lib.dataclasses.codex import CodexThreadSettings
 from vidbyte.lib.dataclasses.codex_host import CodexSpawnRequest
 from vidbyte.lib.enums.codex import (
     CodexApprovalMode,
@@ -52,6 +54,7 @@ RENAME = CodexHostOperation.RENAME_CODEX_THREAD
 TERMINALS = CodexHostOperation.LIST_CODEX_BACKGROUND_TERMINALS
 SEARCH_CONTENT = CodexHostOperation.SEARCH_CODEX_THREAD_CONTENT
 CHILD_THREADS = CodexHostOperation.LIST_CODEX_CHILD_THREADS
+THREAD_FIELD_PREFIX = "thread."
 ONE_TURN = 1
 THREAD_ARCHIVED_TEXT = "Codex archived thread {thread_id}; the unarchive tool brings it back."
 THREAD_RENAMED_TEXT = "Codex renamed thread {thread_id}."
@@ -86,8 +89,9 @@ class StartCodexSideChatTool(_CodexHostTool):
         # Read the parent thread and the question.
         thread_id = self._resolve_text(call, "thread_id", required=True)
         prompt = self._resolve_text(call, "prompt", required=True)
-        # The fork runs under the developer's posture narrowed so that
-        # Codex's own commands can neither write nor ask (INV-43, D-22).
+        # The fork runs under the developer's posture, cleared of the
+        # fields a side chat refuses and narrowed so that Codex's own
+        # commands can neither write nor ask (INV-43, D-22).
         request = self._side_chat_defaults(self._scope.spawn_defaults)
         # Hold one cap slot while the host starts the fork's turn, then
         # own the fork's handle (codex-host INV-32, INV-33).
@@ -101,10 +105,19 @@ class StartCodexSideChatTool(_CodexHostTool):
 
     @staticmethod
     def _side_chat_defaults(defaults: CodexSpawnRequest) -> CodexSpawnRequest:
-        # The developer's posture with only the sandboxes, writable
-        # roots, network setting and approvals narrowed; everything else
-        # is kept (first-class INV-43).
-        thread = replace(defaults.thread, sandbox=CodexSandbox.READ_ONLY, approval_mode=CodexApprovalMode.DENY_ALL)
+        # @intent a-tool-side-chat-resets-then-narrows
+        # Every field a side chat refuses goes back to a fresh request's
+        # value, read from the host's own table as the continue and
+        # resume tools do, so a scope whose defaults set tools, a name
+        # or a personality can still start one. Then only the
+        # sandboxes, writable roots, network setting and approvals are
+        # narrowed; everything else is kept (first-class INV-43, D-22).
+        fresh, fresh_thread = CodexSpawnRequest(), CodexThreadSettings()
+        paths = CODEX_HOST_REJECTED_FIELDS[SIDE_CHAT]
+        thread_names = [path.removeprefix(THREAD_FIELD_PREFIX) for path in paths if path.startswith(THREAD_FIELD_PREFIX)]
+        request_reset = {path: getattr(fresh, path) for path in paths if not path.startswith(THREAD_FIELD_PREFIX)}
+        thread_reset = {name: getattr(fresh_thread, name) for name in thread_names}
+        thread = replace(defaults.thread, sandbox=CodexSandbox.READ_ONLY, approval_mode=CodexApprovalMode.DENY_ALL, **thread_reset)
         turn = replace(defaults.turn, sandbox=CodexSandbox.READ_ONLY, approval_mode=CodexApprovalMode.DENY_ALL)
         return replace(
             defaults,
@@ -114,6 +127,7 @@ class StartCodexSideChatTool(_CodexHostTool):
             network_access=None,
             approval_policy=CodexApprovalPolicy.PROVIDER_DEFAULT,
             approvals_reviewer=CodexApprovalsReviewer.PROVIDER_DEFAULT,
+            **request_reset,
         )
 
 
