@@ -1,6 +1,6 @@
 """FILE: tests/features/harness_threads/test_harness_threads_browser_mounts.py
 
-PURPOSE: What each harness is given and what it reports back (docs/spec/harness-browser-tools/spec.md §9.1 "Mount by harness", FR-11 to FR-13, FR-17): all nine functions mount a tool and read the vendor's own calls (AC-2), web tools off, fail-closed narrowing (AC-6), where a tool key travels (AC-7, AC-9), Grok's compat switches (AC-14), the argv budget (AC-18), Muse in WSL mode (AC-19, AC-31), remote tools (AC-22, AC-32), the Muse settings shape (AC-26), additive Playwright caps (AC-27), prefixed opencode ids (AC-28), byte-stable compiles (INV-11), the server command (INV-8, D-21) and readers that skip vendor-written names (AC-33, EC-28, EC-30, EC-41).
+PURPOSE: What each harness is given and what it reports back (docs/spec/harness-browser-tools/spec.md §9.1 "Mount by harness", FR-11 to FR-13, FR-17): all nine functions mount a tool and read the vendor's own calls (AC-2), web tools off, fail-closed narrowing (AC-6), where a tool key travels (AC-7, AC-9), Grok's compat switches (AC-14), the argv budget (AC-18), Muse in WSL mode (AC-19, AC-31), remote tools (AC-22, AC-32), the Muse settings shape (AC-26), additive Playwright caps (AC-27), prefixed opencode ids, whose reader never counts a call on the user's own same-named server (AC-28, EC-40), byte-stable compiles (INV-11), the server command (INV-8, D-21) and readers that skip vendor-written names (AC-33, EC-28, EC-30, EC-41).
 ROLE IN CODEBASE: Start here when a compiled mount, a permission rule, a reader or a refusal of an unsupported combination changes.
 ARCHITECTURE NOTE: Every call is a real browser function against the fake vendor, which reads the compiled mount the way the vendor does and starts the fake node servers it names (fake_browser.py); assertions read what those processes logged, never the SDK's internals. Refusals are checked to start nothing (no `node --version` either) and write nothing, which proves they come before preflight (INV-9).
 FUNCTION INVENTORY: expect_call builds one BrowserToolCall; exec_start reads the harness's last start record; refuse runs a call that must raise and returns the error; strip_folder replaces a per-call folder path in a compiled config; the test_* functions are one behaviour each.
@@ -336,6 +336,30 @@ async def test_opencode_ids_are_prefixed_and_enabled_beside_a_users_own_entry(br
     servers = {record["name"]: record for record in sandbox.records("mcp_server", "opencode")}
     assert servers["playwright"]["enabled"] is False and servers["vidbyte-playwright"]["connected"] is True
     assert expect_call(browser_api, "playwright", "browser_navigate") in result.tool_calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("beside_a_mounted_call", [True, False], ids=["beside-a-mounted-call", "alone"])
+async def test_opencode_never_counts_a_call_on_a_users_own_enabled_server(browser_api, browser_world, sandbox, browse, check_browser_error, pack, beside_a_mounted_call) -> None:
+    # AC-28 / EC-40 / FR-13 / FR-14: the user's own enabled `playwright`
+    # stays loaded beside `vidbyte-playwright` and really answers a
+    # call. The reader keeps only calls on the prefixed mounted ids, so
+    # that call is not in tool_calls, and alone it is not evidence that
+    # a mounted tool was used.
+    user = {"mcp": {"playwright": {"type": "local", "command": [str(browser_world.node), str(sandbox.tool_entry("playwright"))], "enabled": True}}}
+    calls = ["playwright_browser_navigate", *(["vidbyte-playwright_browser_navigate"] if beside_a_mounted_call else [])]
+    fake = {"global_config": user, "browser_calls": calls}
+    if beside_a_mounted_call:
+        result = await browse("opencode", tools=["playwright"], fake=fake)
+        assert result.tool_calls == (expect_call(browser_api, "playwright", "browser_navigate"),)
+    else:
+        error = await refuse(browse, browser_api, "opencode", tools=["playwright"], fake=fake)
+        session = sandbox.answers("opencode")[-1]["session"]
+        check_browser_error(error, harness="opencode", verb="run", code="browser.tools_unavailable", workspace=sandbox.workspace, thread_id=session, observations=[("no tool used", ("no mounted tool was used",))], vendor=f"opencode answer to: {pack.PROMPT}")
+    servers = {record["name"]: record for record in sandbox.records("mcp_server", "opencode")}
+    assert servers["playwright"]["enabled"] is True and servers["playwright"]["connected"] is True and servers["vidbyte-playwright"]["connected"] is True
+    (made,) = sandbox.records("browser_calls", "opencode")
+    assert made["calls"] == [[call, "completed"] for call in calls], "the user's own server did not answer the call"
 
 
 @pytest.mark.asyncio
