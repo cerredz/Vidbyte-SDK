@@ -3,7 +3,7 @@
 PURPOSE: Builds every prompt compose sends: ComposeTexts loads the 22 prompt files and renders a template into segments that keep each spliced value apart from the fixed text around it, and PromptFitter checks before any I/O that the longest form of a prompt fits its receiving step, then at send time removes NULs and bound keys from the spliced values and cuts them to a fair share when the whole prompt is too long.
 ROLE IN CODEBASE: Used by JsonAnswers (answers.py) and by every composite (chain.py, verify.py, handoff.py, stages.py, ensemble.py, selection.py) for each prompt they send.
 ARCHITECTURE NOTE: The prompt files live in the prompts folder next to this module and are read as package resources in UTF-8, off the event loop, once per process; each is checked with RecordFieldValidator.require_template against its COMPOSE_PROMPT_FIELDS entry and kept stripped (spec D-9, D-10, INV-20). render splits a template with string.Formatter, the parser str.format_map uses, so the joined segments are exactly what format_map would give while a value is never read as a template (INV-17). A segment is (text, spliced): fixed text is the caller's prompt, templates, schema texts, counted numbers and the prompt files; spliced text is model output or workspace content. Prompt fit follows spec INV-18 and D-19: check counts each spliced value as its longest truncation note, so at send time the share search always has a fitting floor; fit measures characters, and for Grok and Muse on win32 also command-line units.
-FUNCTION INVENTORY: ComposeTexts.load reads and checks one prompt file; render fills a template into segments; spliced marks one value as spliced; join puts prompts one after another. PromptFitter.check refuses a prompt whose longest form does not fit; fit is the narrated main function of the send-time scrub and cut; _caps, _fits, _scrub, _sizes and _render are its leaves.
+FUNCTION INVENTORY: ComposeTexts.load reads and checks one prompt file; render fills a template into segments; spliced marks one value as spliced; join puts prompts one after another; opening builds an ensemble role's first turn, its system text then its turn, or fork_turn around both for an unanchored fork. PromptFitter.check refuses a prompt whose longest form does not fit; fit is the narrated main function of the send-time scrub and cut; _caps, _fits, _scrub, _sizes and _render are its leaves.
 COMMON MODIFICATION PATTERNS: A new prompt file needs its ComposePrompt member and COMPOSE_PROMPT_FIELDS entry, and nothing here. A new spliced value is passed to render through spliced, so the scrub and the cut reach it.
 WHAT NOT TO DO IN THIS FILE: 1. Do not hold prompt prose here; every sentence to a model comes from a prompt file (INV-20). 2. Do not scrub with HarnessRedactor; it rewrites credential-like lines inside diffs, so keys are replaced as exact text (D-28). 3. Do not cut a fixed segment; the caller's prompt, templates and schemas are sent whole or refused up front. 4. Do not read a prompt file at import time.
 KNOWN EDGE CASES: A larger share never makes the prompt shorter, so the bisection finds the largest share that fits. A value no longer than its own note stays whole, and a long value at share 0 becomes its note alone, which check reserved room for, so no spliced value is sent blank in place of its content. The omitted count is the value's length after NUL removal and key replacement minus the kept prefix. A backslash run at a value's edge that meets a quote in the fixed text is counted only in the whole-prompt check, which is exact.
@@ -72,6 +72,14 @@ class ComposeTexts:
                 segments.append((native_compose.COMPOSE_PROMPT_SEPARATOR, False))
             segments.extend(part)
         return tuple(segments)
+
+    @staticmethod
+    async def opening(system: Sequence[tuple[str, bool]], turn: Sequence[tuple[str, bool]], *, fork: bool) -> tuple[tuple[str, bool], ...]:
+        """An ensemble role's first turn: its system text, then its turn; for an unanchored fork, which opens on the planner's thread, fork_turn holding both (spec INV-23, D-3)."""
+        if not fork:
+            return ComposeTexts.join((system, turn))
+        wrapper = await ComposeTexts.load(ComposePrompt.FORK_TURN)
+        return ComposeTexts.render(wrapper, {ComposeField.INSTRUCTIONS: tuple(system), ComposeField.TURN: tuple(turn)})
 
 
 class PromptFitter:
