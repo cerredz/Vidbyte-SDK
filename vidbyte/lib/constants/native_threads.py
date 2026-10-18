@@ -167,6 +167,16 @@ CLAUDE_USER_SETTING_SOURCE = "user"
 # and the one such name it keeps (the Git Bash path on Windows).
 CLAUDE_INHERITED_ENVIRONMENT_PREFIXES = ("ANTHROPIC_", "CLAUDE")
 CLAUDE_INHERITED_ENVIRONMENT_KEPT = frozenset({"CLAUDE_CODE_GIT_BASH_PATH"})
+# The caller's variables without those prefixes that a claude child
+# never inherits either: Claude Code's own behaviour switches, which
+# belong to the caller's own sessions as much as the ~/.claude settings
+# the private config folder keeps out; NODE_OPTIONS, which can load
+# code into the process that holds the key; and
+# NODE_TLS_REJECT_UNAUTHORIZED, which would send the key with TLS
+# verification off. The proxy and CA variables (HTTPS_PROXY, NO_PROXY,
+# NODE_EXTRA_CA_CERTS, SSL_CERT_FILE) pass through on purpose: they are
+# the caller's network setup.
+CLAUDE_INHERITED_ENVIRONMENT_DROPPED = frozenset({"API_TIMEOUT_MS", "BASH_DEFAULT_TIMEOUT_MS", "BASH_MAX_OUTPUT_LENGTH", "BASH_MAX_TIMEOUT_MS", "DISABLE_COMPACT", "ENABLE_TOOL_SEARCH", "MAX_THINKING_TOKENS", "MCP_TIMEOUT", "NODE_OPTIONS", "NODE_TLS_REJECT_UNAUTHORIZED"})
 # The tools that run shell commands. An allowed rule naming one makes
 # the SDK set CLAUDE_CODE_SUBPROCESS_ENV_SCRUB, so the commands the
 # model runs never see ANTHROPIC_API_KEY.

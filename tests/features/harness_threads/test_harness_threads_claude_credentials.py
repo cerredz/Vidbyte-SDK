@@ -1,6 +1,6 @@
 """FILE: tests/features/harness_threads/test_harness_threads_claude_credentials.py
 
-PURPOSE: The caller's Anthropic key and the Claude Code child's environment (spec claude-thread-functions INV-3, INV-4, INV-17): the child authenticates only with api_key, every inherited ANTHROPIC_*/CLAUDE* variable is dropped except CLAUDE_CODE_GIT_BASH_PATH, CLAUDE_CONFIG_DIR is the private config folder, self-update and nonessential traffic are off, an unrelated variable passes through and os.environ is never written (AC-6, EC-11 to EC-13, D-6, D-20); a key the vendor echoes on stdout and stderr is scrubbed from every surface and never reaches argv, stdin, a written file, a repr or a log (AC-7, INV-3).
+PURPOSE: The caller's Anthropic key and the Claude Code child's environment (spec claude-thread-functions INV-3, INV-4, INV-17): the child authenticates only with api_key, every inherited ANTHROPIC_*/CLAUDE* variable is dropped except CLAUDE_CODE_GIT_BASH_PATH, and so are Claude Code's unprefixed behaviour switches, NODE_OPTIONS and NODE_TLS_REJECT_UNAUTHORIZED while the proxy and CA variables pass (PR #1044 review L12, C23), CLAUDE_CONFIG_DIR is the private config folder, self-update and nonessential traffic are off, an unrelated variable passes through and os.environ is never written (AC-6, EC-11 to EC-13, D-6, D-20); a key the vendor echoes on stdout and stderr is scrubbed from every surface and never reaches argv, stdin, a written file, a repr or a log (AC-7, INV-3).
 ROLE IN CODEBASE: Start here when a Claude run could bill another account, reach another endpoint, join the caller's own Claude Code session, or show the key anywhere.
 ARCHITECTURE NOTE: The stand-in logs the names of every ANTHROPIC_*/CLAUDE* variable it saw (never their values), the digest of ANTHROPIC_API_KEY, and the plain values of CLAUDE_CONFIG_DIR, DISABLE_AUTOUPDATER, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, CLAUDE_CODE_GIT_BASH_PATH and VIDBYTE_UNRELATED_SETTING. The sandbox fixture first drops the test shell's own Anthropic variables (the agent shell carries a real key, CLAUDECODE and CLAUDE_CONFIG_DIR), so each test sets exactly the caller environment it describes with monkeypatch. The AC-7 stand-in echoes argv, stdin and its key into both its JSON `result` and its stderr, with copies straddling NATIVE_VENDOR_MESSAGE_MAX_CHARS.
 FUNCTION INVENTORY: fragments lists the 8-character windows of a key; spy_runner wraps CliRunner.run; the test_* functions are one behaviour each.
@@ -23,6 +23,10 @@ import pytest
 
 GIT_BASH = r"D:\Tools\Git\bin\bash.exe"
 UNRELATED = "kept-as-is"
+# PR #1044 review 4301626292 / 4301898260 (L12, C23): the unprefixed
+# variables the child never inherits, and the network setup it does.
+DROPPED = ("API_TIMEOUT_MS", "BASH_DEFAULT_TIMEOUT_MS", "BASH_MAX_OUTPUT_LENGTH", "BASH_MAX_TIMEOUT_MS", "DISABLE_COMPACT", "ENABLE_TOOL_SEARCH", "MAX_THINKING_TOKENS", "MCP_TIMEOUT", "NODE_OPTIONS", "NODE_TLS_REJECT_UNAUTHORIZED")
+NETWORK = {"HTTPS_PROXY": "http://127.0.0.1:9", "NO_PROXY": "localhost", "NODE_EXTRA_CA_CERTS": "corp-ca.pem", "SSL_CERT_FILE": "corp-ca.pem"}
 
 
 def fragments(secret: str, width: int = 8) -> list[str]:
@@ -78,6 +82,23 @@ async def test_child_sees_only_the_callers_key_the_private_folder_and_the_switch
     assert (plain["DISABLE_AUTOUPDATER"], plain["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"]) == ("1", "1")
     assert plain["CLAUDE_CODE_GIT_BASH_PATH"] == GIT_BASH and plain["VIDBYTE_UNRELATED_SETTING"] == UNRELATED
     assert dict(os.environ) == before
+
+
+@pytest.mark.asyncio
+async def test_claude_switches_node_options_and_disabled_tls_are_dropped_while_the_network_setup_stays(api, sandbox, call, monkeypatch) -> None:
+    # PR #1044 review 4301626292 / 4301898260 (L12, C23): Claude Code's
+    # own behaviour switches, NODE_OPTIONS and NODE_TLS_REJECT_UNAUTHORIZED
+    # never reach the child; the proxy and CA variables are the caller's
+    # network setup and do.
+    for name in DROPPED:
+        monkeypatch.setenv(name, "0")
+    for name, value in NETWORK.items():
+        monkeypatch.setenv(name, value)
+    invocations = spy_runner(api, monkeypatch)
+    await call("claude")
+    (invocation,) = invocations
+    assert set(DROPPED) <= set(invocation.env_remove)
+    assert not set(NETWORK) & set(invocation.env_remove)
 
 
 @pytest.mark.asyncio
