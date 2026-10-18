@@ -353,7 +353,8 @@ class CodexSpawnRequestHardeningTests(unittest.TestCase):
         self.assertEqual((request.turn_service_tier, request.network_access, request.writable_roots), ("", None, ()))
         names = [field.name for field in dataclasses.fields(request)]
         # NFR-8: new fields are appended after name, so every positional and keyword call keeps working.
-        self.assertEqual(names[names.index("name") + 1 :], ["turn_service_tier", "network_access", "writable_roots"])
+        # docs/spec/codex-host-first-class/spec.md section 13 (r5): D-5 and section 12.3 row 7 append collaboration_mode last.
+        self.assertEqual(names[names.index("name") + 1 :], ["turn_service_tier", "network_access", "writable_roots", "collaboration_mode"])
         for sandbox in ("READ_ONLY", "WORKSPACE_WRITE"):
             with self.subTest(network_sandbox=sandbox):
                 self.assertIs(self._spawn(prompt="Fix it.", turn=self._turn(sandbox), network_access=True).network_access, True)

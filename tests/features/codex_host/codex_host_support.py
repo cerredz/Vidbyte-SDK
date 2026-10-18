@@ -627,7 +627,8 @@ class StubCodexHost(FeatureStubMethods):
     def finish(self, handle: Any) -> None:
         self.finished.add((handle.thread_id, handle.turn_id))
 
-    async def _enter(self, name: str, *args: Any, **kwargs: Any) -> None:
+    async def _enter(self, name: str, /, *args: Any, **kwargs: Any) -> None:
+        # name is positional-only so a host method's own name parameter (rename_codex_thread) records as a keyword.
         self.calls.append((name, args, kwargs))
         gate = self.gates.get(name)
         if gate is not None:

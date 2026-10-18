@@ -80,7 +80,8 @@ class CodexMcpServerHostTests(FeatureHostCase):
         self.assertEqual(page.next_cursor, "cursor-3")
         expected = _server(
             "docs",
-            auth_status=CodexMcpAuthStatus.BEARER_TOKEN,
+            # docs/spec/codex-host-first-class/spec.md section 13 (r5), D-40: BEARER, not BEARER_TOKEN, with the same wire value.
+            auth_status=CodexMcpAuthStatus.BEARER,
             connection_status=CodexMcpConnectionStatus.CONNECTED,
             tool_names=("search",),
             resource_count=0,
@@ -156,7 +157,8 @@ class CodexMemoryHostTests(FeatureHostCase):
         self.assertEqual(
             [(request.method, request.params) for request in self.sent()],
             [
-                ("thread/read", {"threadId": thread.thread_id}),
+                # openai-codex's thread_read always sends includeTurns, false unless asked (client.py:498-503).
+                ("thread/read", {"threadId": thread.thread_id, "includeTurns": False}),
                 ("thread/goal/get", {"threadId": thread.thread_id}),
                 ("thread/resume", self.server.matching("thread/resume")[-1].params),
                 ("thread/memoryMode/set", {"threadId": thread.thread_id, "mode": "disabled"}),

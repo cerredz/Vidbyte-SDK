@@ -77,10 +77,10 @@ EXPECTED_ENUMS: dict[str, dict[str, str]] = {
         "INJECT_CODEX_ITEMS": "inject_codex_items",
         "CLEAN_CODEX_BACKGROUND_TERMINALS": "clean_codex_background_terminals",
     },
-    # docs/spec/codex-host-first-class/spec.md section 8.5, verbatim: the nine new enums.
+    # docs/spec/codex-host-first-class/spec.md section 8.5, verbatim: the nine new enums. CodexMcpAuthStatus names "bearerToken" BEARER (r5, D-40).
     "CodexCollaborationModeKind": {"NONE": "", "PLAN": "plan", "DEFAULT": "default"},
     "CodexMemoryMode": {"ENABLED": "enabled", "DISABLED": "disabled"},
-    "CodexMcpAuthStatus": {"UNKNOWN": "unknown", "UNSUPPORTED": "unsupported", "NOT_LOGGED_IN": "notLoggedIn", "BEARER_TOKEN": "bearerToken", "OAUTH": "oAuth"},
+    "CodexMcpAuthStatus": {"UNKNOWN": "unknown", "UNSUPPORTED": "unsupported", "NOT_LOGGED_IN": "notLoggedIn", "BEARER": "bearerToken", "OAUTH": "oAuth"},
     "CodexMcpConnectionStatus": {
         "NOT_REPORTED": "",
         "NOT_STARTED": "notStarted",

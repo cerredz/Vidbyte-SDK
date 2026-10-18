@@ -306,7 +306,10 @@ class CodexTurnEventRecordTests(_RecordCase):
         return _features().CodexTurnEvent(sequence=fields.pop("sequence", 1), kind=getattr(_enums().CodexTurnEventKind, kind), handle=_handle(), **fields)
 
     def _snapshot(self) -> Any:
-        return _host_records().CodexTurnSnapshot(handle=_handle(), status=_enums().CodexTurnStatus.COMPLETED)
+        # A terminal snapshot the slice-1 record accepts: COMPLETED requires a result, a rule INV-48 keeps frozen.
+        handle = _handle()
+        result = _codex().CodexRunResult(thread_id=handle.thread_id, turn_id=handle.turn_id, status="completed", final_response="Done.", duration_ms=10, usage=_codex().CodexUsage(), items=())
+        return _host_records().CodexTurnSnapshot(handle=handle, status=_enums().CodexTurnStatus.COMPLETED, result=result)
 
     def test_a_sequence_below_one_is_refused(self) -> None:
         for sequence in (0, -1):
