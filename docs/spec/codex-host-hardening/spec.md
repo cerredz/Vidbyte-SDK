@@ -1,14 +1,14 @@
 ---
 spec: codex-host-hardening
 title: CodexHost production hardening and missed settings (slice 1 of 2)
-status: verified
+status: pr-open
 revision: 6
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-codex-host-first-class
 branch: feat/codex-host-first-class
 base_commit: 8baff3514640a5c5f110c1e2c7cea996d1640ecb
 created: 2026-10-17
-updated: 2026-10-17
+updated: 2026-10-18
 pr: https://github.com/cerredz/Vidbyte-SDK/pull/1181
 ---
 
@@ -1654,6 +1654,7 @@ The `FieldCarryingMapper` docstring is no longer on this list: #1178 rewrote it 
 | r4 | 2026-10-17 | S3 implement | All 24 §12.3 rows built in P1→P4 order (ea3fad66…2f31b1fc) with no test edits; the source gate leaves only the inherited `harness_threads` surface failure, the package gate passes, and the draft PR is open. |
 | r5 | 2026-10-17 | S1 spec (S4 findings) | The spec side of S4's verified review. R-7: `CODEX_HOST_GOAL_FIELD_MESSAGE` gains an `{owner}` slot, so `run_codex_goal`'s refusal names `run_codex_goal request`, and §8.5's `_reject_goal_fields(owner, request)` stays (INV-34, §9.2, rows 5 and 6). R-2: `CODEX_HOST_ANY_MODEL_TEXT` and `CODEX_HOST_FORK_EXPERIMENTAL_FIELDS` (§9.2, §9.3, rows 3, 14 and 19). R-9: `LogToken.of` in `vidbyte.lib.util.text` with `CODEX_HOST_LOG_TOKEN_MAX_CHARS` (INV-10, T-3, row 25, §12.4). R-10: a cancelled call logs its outcome, and the refused-before-send limitation is recorded (INV-7, EC-57). Budget: 3 files, 14 classes, 11 config keys, 13 messages, 0 dependencies. The 10 findings are in §16. Status stays reviewed. |
 | r6 | 2026-10-17 | S1 spec (S5 re-review round 1) | Text only; the budget is unchanged (3 files, 14 classes, 11 config keys, 13 messages, 0 dependencies). R-12: `ExceptionOrigin.describe` turns each whitespace run in the basename and function name into `_`, so an origin is always one token (INV-7, INV-10, §8.5, row 9). R-11: no `asyncio` or `concurrent.futures` record carries a call's or start's failure text, because `start` awaits without `asyncio.shield` (INV-10, T-5, EC-58, row 12). m-8: the start's late record is its own done-callback, registered before `_post_late`'s (INV-7, row 12). The findings are in §16. Status stays reviewed. |
+| r6 | 2026-10-18 | S6 PR | finalized for review |
 
 ### Implementation deviations (S3)
 

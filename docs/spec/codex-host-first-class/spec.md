@@ -1,7 +1,7 @@
 ---
 spec: codex-host-first-class
 title: CodexHost first-class Codex features (slice 2 of 2)
-status: verified
+status: pr-open
 revision: 8
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-codex-host-first-class
@@ -1973,6 +1973,7 @@ New files: 13 (rows 6, 8, 11, 17, 18, 21, 22, 26–29, 33, 34). This matches §8
 | r6 | 2026-10-18 | Amendment from the S4 adversarial review (not a review round) | Four items (§16 S4-1…S4-4, from `review.md`):<br>• **Worktree root (R-1).** The worktree root's file-system failures map to `configuration.invalid_argument` with the new triple `CODEX_HOST_WORKTREE_ROOT_MESSAGE` / `_CAUSE` / `_NEXT_STEP`. Its text names only the root and the exception's type. Changed: INV-2, INV-29, EC-63, row 28.<br>• **Side-chat tool (R-5).** It resets its rejected-fields row to fresh-request values, then narrows as before. Changed: INV-43, D-22, rows 34 and 36, AC-36.<br>• **Goal resume (R-4).** A goal resume cancels from the set on, unless Codex answered the set with a JSON-RPC error. Changed: INV-31, EC-37, EC-64, the §9.2 resume row.<br>• **Deviation 14 (m-1)** recorded.<br>Added EC-63 and EC-64. No budget count changed: 13 files, 69 classes, 0 dependencies, 46 config keys (a message is not config), 0 tables, 42 endpoints. Status set to reviewed. |
 | r7 | 2026-10-18 | Docs correction from S5 repair iteration 1 (not a review round; status stays reviewed) | Deviation 5 now names `list_codex_child_threads`'s gate word as the experimental filter key (`parentThreadId` or `ancestorThreadId`, from `child_filter_key`) instead of `thread/list`, matching m-2's fix in 2aa6eb0b (§16 S5-1). No other change; no count changed. |
 | r8 | 2026-10-18 | Docs correction from re-review round 1, R-RR3 (not a review round; status stays reviewed) | INV-20 and D-39 gain the oversize-event rule (§16 S5-2). An event too large to fit even on its own (`_fits_alone`) is dropped at once without dropping older events, costing a lagging subscriber exactly `GAP(dropped=1)` (EC-19). No other change; no count changed. |
+| r8 | 2026-10-18 | S6 PR | finalized for review |
 
 ### Implementation deviations
 1. **Goal-resume error naming** (`errors.py`, `connection.py`). A JSON-RPC error inside the goal resume's start names `thread/goal/set`, the one request Codex refused, in the packet summary and on the `codex_host_call_failed` record, not `resume_goal_operation` (EC-37).
