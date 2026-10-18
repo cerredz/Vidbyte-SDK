@@ -3,10 +3,10 @@
 PURPOSE: Binds the nine thread functions into checked steps and holds the step rules every composite applies: ThreadBinder (bind_thread, bind_continue, the table of the nine functions, require_step, and invoke, the only path by which compose calls a step) and StepRoles (the reader, unanchored-fork, fork-role, from_thread, one-workspace and alias harness rules, argument path names and needs_worktree).
 ROLE IN CODEBASE: bind_thread and bind_continue are bound as public names in vidbyte/harnesses/native/compose/__init__.py. ComposeCalls (calls.py), JsonAnswers (answers.py) and every composite call ThreadBinder.invoke, require_step, anchor, relocate and rung, and check their inputs with StepRoles before any I/O (spec INV-5).
 ARCHITECTURE NOTE: ThreadStep (vidbyte/lib/dataclasses/native_compose.py) validates its own arguments but holds no calling convention (spec D-2): the binders store ThreadBinder.invoke as its invoker, and invoke calls the step's function in its verb's argument order. Composites call ThreadBinder.invoke directly, never a step's stored invoker, and re-check every step against FUNCTIONS, which is keyed by the imported function objects themselves, so a step whose function or invoker was swapped still runs only one of the nine functions with its checked arguments (INV-3, EC-78). The module holds no literals (base spec INV-15): every text and argument name comes from vidbyte/lib/constants/native_compose.py.
-FUNCTION INVENTORY: ThreadBinder.bind_thread and bind_continue build a step from one of the nine functions; invoke makes the one call a step stands for; require_step re-checks a step a composite received; anchor, relocate and rung give the same step on another thread, workspace or config, checking only what they change; _derived copies a checked step with fields changed; _identify finds a function's harness and verb. StepRoles.item and member name an argument path; anchored refuses an unanchored fork and unanchored tells one apart; reader applies the reader rules; fork_role applies the ensemble fork rule; from_thread applies the handoff source rule; same_workspace applies the one-workspace rule; on_harness applies an alias's harness rule; needs_worktree says whether a reader is relocated.
+FUNCTION INVENTORY: ThreadBinder.bind_thread and bind_continue build a step from one of the nine functions; invoke makes the one call a step stands for; require_step re-checks a step a composite received; anchor, relocate and rung give the same step on another thread, workspace or config, checking only what they change; _derived copies a checked step with fields changed; _withheld makes a refusal that quotes the model again without it; _identify finds a function's harness and verb. StepRoles.item and member name an argument path; anchored refuses an unanchored fork and unanchored tells one apart; reader applies the reader rules; fork_role applies the ensemble fork rule; from_thread applies the handoff source rule; same_workspace applies the one-workspace rule; on_harness applies an alias's harness rule; needs_worktree says whether a reader is relocated.
 COMMON MODIFICATION PATTERNS: A tenth thread function is one more FUNCTIONS entry. A new role rule is one StepRoles method that raises ConfigurationError naming the argument path, with its message template in the constants module, called by each composite before any I/O.
 WHAT NOT TO DO IN THIS FILE: 1. Do not call a step's stored invoker; call ThreadBinder.invoke. 2. Do not change a step's config or permission mode to make it fit a role; refuse it instead (spec D-21). 3. Do not quote a key, a workspace path or any other caller value in a refusal; name the argument path only. 4. Do not import a composite module; this is plumbing.
-KNOWN EDGE CASES: A fork step bound with bind_thread has no thread id; it can only become an ensemble role, where compose anchors it at a Grok planner's thread on the same workspace (spec D-3). Workspaces are compared after os.path.normcase of the resolved path, so two spellings of one folder on Windows are one workspace. A functools.partial or a lambda wrapping one of the nine functions is not one of them and is refused. A step derived after I/O began keeps the fields it was bound with unchecked, so a skill folder a writer removed meanwhile fails that call as the step's own error, not the composite (INV-15).
+KNOWN EDGE CASES: A fork step bound with bind_thread has no thread id; it can only become an ensemble role, where compose anchors it at a Grok planner's thread on the same workspace (spec D-3). Workspaces are compared after os.path.normcase of the resolved path, so two spellings of one folder on Windows are one workspace. A functools.partial or a lambda wrapping one of the nine functions is not one of them and is refused. A refused model is named by its type only: the record the nine functions use would quote a short one, key and all (INV-4). A step derived after I/O began keeps the fields it was bound with unchecked, so a skill folder a writer removed meanwhile fails that call as the step's own error, not the composite (INV-15).
 RELATED DOCS: vidbyte/harnesses/README.md
 TESTS: tests/features/harness_compose/test_harness_compose_binding.py, tests/features/harness_compose/test_harness_compose_validation.py
 """
@@ -72,15 +72,27 @@ class ThreadBinder:
     def bind_thread(function: Callable[..., Awaitable[NativeThreadResult]], *, api_key: str, workspace: str | Path, model: str | None = None, skills: Sequence[str | Path] = (), config: GrokThreadConfig | OpencodeThreadConfig | MuseThreadConfig | None = None) -> ThreadStep:
         """Bind a run_ function, or a fork_ function whose thread run_ensemble supplies later, with its arguments checked now."""
         harness, verb = ThreadBinder._identify(function, (NativeThreadVerb.RUN, NativeThreadVerb.FORK), native_compose.COMPOSE_BIND_THREAD_RULE)
-        return ThreadStep(function=function, harness=harness, verb=verb, api_key=api_key, workspace=workspace, model=model, skills=skills, config=config, invoker=ThreadBinder.invoke)
+        try:
+            return ThreadStep(function=function, harness=harness, verb=verb, api_key=api_key, workspace=workspace, model=model, skills=skills, config=config, invoker=ThreadBinder.invoke)
+        except ConfigurationError as error:
+            refusal = ThreadBinder._withheld(error, model)
+        # Raised after the handler, so the refusal that quoted the
+        # model is not kept as its context.
+        raise refusal
 
     @staticmethod
     def bind_continue(function: Callable[..., Awaitable[NativeThreadResult]], thread_id: str, *, api_key: str, workspace: str | Path, model: str | None = None, skills: Sequence[str | Path] = (), config: GrokThreadConfig | OpencodeThreadConfig | MuseThreadConfig | None = None) -> ThreadStep:
         """Bind a continue_ or fork_ function to the thread thread_id, with its arguments checked now."""
         harness, verb = ThreadBinder._identify(function, (NativeThreadVerb.CONTINUE, NativeThreadVerb.FORK), native_compose.COMPOSE_BIND_CONTINUE_RULE)
         # A fork bound here is anchored, so its thread id must be given.
-        RecordFieldValidator.require_text(thread_id, native_compose.COMPOSE_THREAD_ID_ARGUMENT, max_chars=native_threads.NATIVE_THREAD_ID_MAX_CHARS, pattern=native_threads.NATIVE_THREAD_ID_PATTERN)
-        return ThreadStep(function=function, harness=harness, verb=verb, api_key=api_key, workspace=workspace, model=model, skills=skills, config=config, thread_id=thread_id, invoker=ThreadBinder.invoke)
+        RecordFieldValidator.require_text(thread_id, native_compose.COMPOSE_THREAD_ID_ARGUMENT, max_chars=native_threads.NATIVE_THREAD_ID_MAX_CHARS, pattern=native_threads.NATIVE_THREAD_ID_PATTERN, quote=False)
+        try:
+            return ThreadStep(function=function, harness=harness, verb=verb, api_key=api_key, workspace=workspace, model=model, skills=skills, config=config, thread_id=thread_id, invoker=ThreadBinder.invoke)
+        except ConfigurationError as error:
+            refusal = ThreadBinder._withheld(error, model)
+        # Raised after the handler, so the refusal that quoted the
+        # model is not kept as its context.
+        raise refusal
 
     @staticmethod
     async def invoke(step: ThreadStep, prompt: str) -> NativeThreadResult:
@@ -111,7 +123,7 @@ class ThreadBinder:
     @staticmethod
     def anchor(step: ThreadStep, thread_id: str, verb: NativeThreadVerb = NativeThreadVerb.CONTINUE) -> ThreadStep:
         """The same bound step on thread_id through verb's function: a repair turn continues its thread, and an unanchored fork forks the planner's; only the thread id is checked."""
-        RecordFieldValidator.require_text(thread_id, native_compose.COMPOSE_THREAD_ID_ARGUMENT, max_chars=native_threads.NATIVE_THREAD_ID_MAX_CHARS, pattern=native_threads.NATIVE_THREAD_ID_PATTERN)
+        RecordFieldValidator.require_text(thread_id, native_compose.COMPOSE_THREAD_ID_ARGUMENT, max_chars=native_threads.NATIVE_THREAD_ID_MAX_CHARS, pattern=native_threads.NATIVE_THREAD_ID_PATTERN, quote=False)
         return ThreadBinder._derived(step, function=ThreadBinder.FUNCTIONS[(step.harness, verb)], verb=verb, thread_id=thread_id)
 
     @staticmethod
@@ -138,6 +150,20 @@ class ThreadBinder:
         for item in dataclasses.fields(ThreadStep):
             object.__setattr__(derived, item.name, changes.get(item.name, getattr(step, item.name)))
         return derived
+
+    @staticmethod
+    def _withheld(error: ConfigurationError, model: object) -> ConfigurationError:
+        # The record the nine functions use quotes a short bad value,
+        # and a model is caller text that can hold a key, so a refusal
+        # that quotes the model is made again naming it by its type
+        # only, with the same field (spec INV-4, INV-5). Any other
+        # refusal is returned as it is.
+        if not isinstance(model, str):
+            return error
+        head, quoted, tail = str(error).rpartition(repr(model))
+        if not quoted:
+            return error
+        return ConfigurationError(head + native_compose.COMPOSE_WITHHELD_VALUE.format(type_name=type(model).__name__) + tail, details=error.details)
 
     @staticmethod
     def _identify(function: object, verbs: tuple[NativeThreadVerb, ...], rule: str) -> tuple[NativeHarness, NativeThreadVerb]:

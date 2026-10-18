@@ -54,8 +54,8 @@ class JsonAnswers:
         StepRoles.anchored(checked, native_compose.COMPOSE_STEP_ARGUMENT)
         if not callable(parse):
             raise ConfigurationError(native_compose.COMPOSE_NOT_CALLABLE.format(argument=native_compose.COMPOSE_PARSE_ARGUMENT, type_name=type(parse).__name__), details={native_threads.NATIVE_FIELD_DETAIL_KEY: native_compose.COMPOSE_PARSE_ARGUMENT})
-        RecordFieldValidator.require_text(prompt, native_compose.COMPOSE_PROMPT_PARAMETER, max_chars=native_threads.NATIVE_PROMPT_MAX_CHARS, pattern=native_threads.NATIVE_PROMPT_PATTERN)
-        RecordFieldValidator.require_text(schema, native_compose.COMPOSE_SCHEMA_ARGUMENT, max_chars=native_threads.NATIVE_PROMPT_MAX_CHARS, pattern=native_threads.NATIVE_PROMPT_PATTERN)
+        RecordFieldValidator.require_text(prompt, native_compose.COMPOSE_PROMPT_PARAMETER, max_chars=native_threads.NATIVE_PROMPT_MAX_CHARS, pattern=native_threads.NATIVE_PROMPT_PATTERN, quote=False)
+        RecordFieldValidator.require_text(schema, native_compose.COMPOSE_SCHEMA_ARGUMENT, max_chars=native_threads.NATIVE_PROMPT_MAX_CHARS, pattern=native_threads.NATIVE_PROMPT_PATTERN, quote=False)
 
         # Make sure every turn fits the step before the first one goes:
         # the longest repair turn and the question with no prompt blame

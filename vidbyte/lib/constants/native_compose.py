@@ -314,3 +314,7 @@ COMPOSE_COMMAND_LINE_UNITS = "UTF-16 command-line units"
 COMPOSE_ALIAS_HARNESS_RULE = "{argument} must be a step on {expected}; got a step on {actual}."
 COMPOSE_FIRST_STAGE_RULE = "{argument} must not use {{previous}}: the first stage has no earlier answer to splice."
 COMPOSE_NOT_CALLABLE = "{argument} must be callable; got a value of type {type_name}."
+# How a refusal names a caller value it does not show: by its type
+# only, in the words RecordFieldValidator uses for a value it never
+# quotes.
+COMPOSE_WITHHELD_VALUE = "a value of type {type_name}"

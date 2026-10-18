@@ -46,7 +46,7 @@ class ThreadChains:
         # caller's prompt and template, and that the longest prompt each
         # step can receive still fits that step.
         checked = ThreadChains._steps(steps)
-        RecordFieldValidator.require_text(prompt, native_compose.COMPOSE_PROMPT_PARAMETER, max_chars=native_threads.NATIVE_PROMPT_MAX_CHARS, pattern=native_threads.NATIVE_PROMPT_PATTERN)
+        RecordFieldValidator.require_text(prompt, native_compose.COMPOSE_PROMPT_PARAMETER, max_chars=native_threads.NATIVE_PROMPT_MAX_CHARS, pattern=native_threads.NATIVE_PROMPT_PATTERN, quote=False)
         text = await ThreadChains._template(template)
         await ThreadChains._fit(checked, text, prompt)
 
@@ -106,7 +106,7 @@ class ThreadChains:
         if template is None:
             return await ComposeTexts.load(ComposePrompt.CHAIN_TURN)
         RecordFieldValidator.require_template(template, native_compose.COMPOSE_TEMPLATE_ARGUMENT, fields=native_compose.CHAIN_TEMPLATE_FIELDS, required=native_compose.CHAIN_REQUIRED_FIELDS)
-        return RecordFieldValidator.require_text(template, native_compose.COMPOSE_TEMPLATE_ARGUMENT, max_chars=native_threads.NATIVE_PROMPT_MAX_CHARS, pattern=native_threads.NATIVE_PROMPT_PATTERN)
+        return RecordFieldValidator.require_text(template, native_compose.COMPOSE_TEMPLATE_ARGUMENT, max_chars=native_threads.NATIVE_PROMPT_MAX_CHARS, pattern=native_threads.NATIVE_PROMPT_PATTERN, quote=False)
 
     @staticmethod
     async def _fit(steps: Sequence[ThreadStep], template: str, prompt: str) -> None:

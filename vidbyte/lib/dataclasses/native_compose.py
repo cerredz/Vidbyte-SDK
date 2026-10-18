@@ -147,7 +147,7 @@ class WorkspaceDiff:
     def __post_init__(self) -> None:
         files = RecordFieldConverter.to_tuple(self.files, "WorkspaceDiff.files", item_type=str, max_items=COMPOSE_DIFF_MAX_FILES)
         for name in files:
-            RecordFieldValidator.require_text(name, "WorkspaceDiff.files", max_chars=COMPOSE_DIFF_MAX_CHARS)
+            RecordFieldValidator.require_text(name, "WorkspaceDiff.files", max_chars=COMPOSE_DIFF_MAX_CHARS, quote=False)
         object.__setattr__(self, "files", files)
         RecordFieldValidator.require_text(self.text, "WorkspaceDiff.text", max_chars=COMPOSE_DIFF_MAX_CHARS, allow_blank=True)
         RecordFieldValidator.require_bool(self.truncated, "WorkspaceDiff.truncated")

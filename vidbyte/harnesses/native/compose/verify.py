@@ -51,7 +51,7 @@ class ThreadVerifiers:
         # verifiers that can only read and share its workspace, the
         # caller's prompt, and that every prompt fits its step.
         checked, readers = ThreadVerifiers._steps(writer, verifiers)
-        RecordFieldValidator.require_text(prompt, native_compose.COMPOSE_PROMPT_PARAMETER, max_chars=native_threads.NATIVE_PROMPT_MAX_CHARS, pattern=native_threads.NATIVE_PROMPT_PATTERN)
+        RecordFieldValidator.require_text(prompt, native_compose.COMPOSE_PROMPT_PARAMETER, max_chars=native_threads.NATIVE_PROMPT_MAX_CHARS, pattern=native_threads.NATIVE_PROMPT_PATTERN, quote=False)
         schema = (await ComposeTexts.load(ComposePrompt.VERDICT_SCHEMA)).format_map({})
         await ThreadVerifiers._fit(checked, readers, prompt, await ThreadVerifiers._question(prompt, (), "", schema))
 

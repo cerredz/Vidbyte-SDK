@@ -51,7 +51,7 @@ class ThreadEnsembles:
         # Check every input before anything runs: the four roles, with
         # the reader and fork rules and one workspace, and the task.
         planner, proposers, selector, implementer = ThreadEnsembles._roles(roster)
-        RecordFieldValidator.require_text(prompt, native_compose.COMPOSE_PROMPT_PARAMETER, max_chars=native_threads.NATIVE_PROMPT_MAX_CHARS, pattern=native_threads.NATIVE_PROMPT_PATTERN)
+        RecordFieldValidator.require_text(prompt, native_compose.COMPOSE_PROMPT_PARAMETER, max_chars=native_threads.NATIVE_PROMPT_MAX_CHARS, pattern=native_threads.NATIVE_PROMPT_PATTERN, quote=False)
 
         # Make sure every first turn fits its step before anything runs.
         # The planner's question holds no model output, so it is checked

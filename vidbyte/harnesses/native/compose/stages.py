@@ -100,7 +100,7 @@ class ThreadStages:
             stage: StageSpec = RecordFieldConverter.require_instance(item, argument, StageSpec)
             ThreadBinder.require_step(stage.step, StepRoles.member(argument, native_compose.COMPOSE_STEP_ARGUMENT))
             template = StepRoles.member(argument, native_compose.COMPOSE_TEMPLATE_ARGUMENT)
-            RecordFieldValidator.require_text(stage.template, template, max_chars=native_threads.NATIVE_PROMPT_MAX_CHARS, pattern=native_threads.NATIVE_PROMPT_PATTERN)
+            RecordFieldValidator.require_text(stage.template, template, max_chars=native_threads.NATIVE_PROMPT_MAX_CHARS, pattern=native_threads.NATIVE_PROMPT_PATTERN, quote=False)
             names = {name for _literal, name, _spec, _conversion in string.Formatter().parse(stage.template)}
             if not index and ComposeField.PREVIOUS in names:
                 raise ConfigurationError(native_compose.COMPOSE_FIRST_STAGE_RULE.format(argument=template), details={native_threads.NATIVE_FIELD_DETAIL_KEY: template})
