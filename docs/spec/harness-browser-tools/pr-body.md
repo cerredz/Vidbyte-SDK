@@ -327,7 +327,7 @@ Every test named here exists on the branch, and every commit is an ancestor of H
 
 ## Verification
 
-The last commit that changes code or tests is `a44fb17f`. Every commit after it changes only files under `docs/spec/harness-browser-tools/`; `git diff --stat a44fb17f HEAD -- vidbyte tests lint scripts .github pyproject.toml` prints nothing.
+The last commit that changes code or tests is `a44fb17f`. Every commit after it changes only files under `docs/spec/harness-browser-tools/`; `git diff --stat a44fb17f HEAD -- vidbyte tests lint scripts .github pyproject.toml` prints nothing. The commit after `ce998fa2` adds only the S6 report and the two `ce998fa2` rows below, and both workflows were dispatched again on it.
 
 | Gate | Where, SHA | Command | Final lines |
 |---|---|---|---|
@@ -339,6 +339,8 @@ The last commit that changes code or tests is `a44fb17f`. Every commit after it 
 | Package gate | local, `a44fb17f` (S5) | `py -3.11 scripts/run_ci.py --stage package` (no `PYTHONPATH`) | `No broken requirements found.` · `Installed vidbyte-sdk 0.3.0 passed smoke checks.` · `CI passed.` |
 | Remote CI | run 39099160961, `43735a6c` | `gh workflow run CI --ref feat/harness-browser-tools` | success, 3/3 jobs. Source / Python 3.11: `SDK-LINT: PASS` · `6441 passed, 205 skipped in 157.59s` · `CI passed.` Source / Python 3.12: `6441 passed, 205 skipped, 19 warnings in 156.55s` · `CI passed.` Package: `Installed vidbyte-sdk 0.3.0 passed smoke checks.` · `CI passed.` |
 | Remote Static policy | run 39099162854, `43735a6c` | `gh workflow run "Static policy" --ref feat/harness-browser-tools` | success: `✓ All tests passed` · `Findings: 0 (0 blocking)` · `Ran 1 rule on 1016 files: 0 findings.` |
+| Remote CI | run 39100749669, `ce998fa2` (adds this body) | `gh workflow run CI --ref feat/harness-browser-tools` | success, 3/3 jobs. Source / Python 3.11: `SDK-LINT: PASS` · `6441 passed, 205 skipped in 154.79s (0:02:34)` · `CI passed.` Source / Python 3.12: `SDK-LINT: PASS` · `6441 passed, 205 skipped, 19 warnings in 165.69s (0:02:45)` · `CI passed.` Package: `No broken requirements found.` · `Installed vidbyte-sdk 0.3.0 passed smoke checks.` · `CI passed.` |
+| Remote Static policy | run 39100751670, `ce998fa2` | `gh workflow run "Static policy" --ref feat/harness-browser-tools` | success: `✓ All tests passed` · `Findings: 0 (0 blocking)` · `Ran 1 rule on 1016 files: 0 findings.` |
 
 **The inherited red.** `test_harness_threads_surface.py::test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes` fails locally with `assert 167 == 120`. It fails the same way on `origin/main` (verify-log), and CI skips it because the runner has no `origin/main` ref. It is not this branch's failure.
 
