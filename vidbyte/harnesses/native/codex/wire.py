@@ -2,11 +2,11 @@
 
 PURPOSE: Translates between CodexHost and the openai-codex wire: the JSON params of every app-server call the host sends, and the records, snapshots and results it builds from what Codex answers.
 ROLE IN CODEBASE: The wire layer of vidbyte/harnesses/native/codex/; CodexHost, CodexPreflight and the server-request router build every params object and every server-request answer with CodexParamsTranslator, and read every answer through CodexResponseTranslator.
-ARCHITECTURE NOTE: openai-codex's generated models are imported at module level, so only CodexHost.__aenter__ imports this module (D-21). Thread and turn params reuse CodexContentTranslator's settings translation, are validated with the generated params model and dumped by alias, so their wire shape comes from openai-codex itself; a field the params model lacks, such as dynamicTools or the experimental fork fields, is added after validation (hardening section 8.5).
+ARCHITECTURE NOTE: openai-codex's generated models are imported at module level, so only CodexHost.__aenter__ imports this module (D-21). Thread and turn params reuse CodexContentTranslator's settings translation, are validated with the generated params model and dumped by alias, so their wire shape comes from openai-codex itself; a field the params model lacks, such as dynamicTools, the experimental fork fields or a turn's collaborationMode, is added after validation (hardening section 8.5, first-class INV-5). sandbox_policy builds the one sandboxPolicy shape both a turn and a thread settings update send, and collaboration_mode the one collaborationMode shape.
 COMMON MODIFICATION PATTERNS: A new params field goes through its settings record and CodexContentTranslator first; a new record gets one CodexResponseTranslator method that reads the generated model's typed fields, never the account email. A new routed server-request kind adds one encoding branch to server_answer, and a new fixed answer goes in CODEX_HOST_SERVER_REQUEST_DEFAULT_ANSWERS (vidbyte/lib/constants/codex_host.py), which default_answer copies.
-KNOWN EDGE CASES: CodexContentTranslator always writes config["agents"], so unless subagents are set the caller's own agents entry is put back or the key dropped (INV-30); a granular approval policy has no plain value, so it never counts as never (D-32); a goal run's result spans every physical turn it ran. default_answer hands out a copy, never the shared table's own object, and answers currentTime/read with the time now. A fork with before_turn_id sends no lastTurnId (hardening INV-28).
-RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.1 D-17, D-20, D-29, D-32 and D-34, and 9.2 wire translation and goal table); docs/spec/codex-host-thread-helpers/spec.md (sections 6.1 INV-11, INV-15, INV-17, INV-20, INV-23 and 9.2 wire calls); docs/spec/codex-host-hardening/spec.md (sections 6.1 INV-15, INV-28, INV-32, INV-36 to INV-38, and 8.5)
-TESTS: tests/features/codex_host/test_codex_host_turns.py, tests/features/codex_host/test_codex_host_threads.py, tests/features/codex_host/test_codex_host_review_goals.py, tests/features/codex_host/test_codex_host_thread_helpers.py, tests/features/codex_host/test_codex_host_goal_skills.py, tests/features/codex_host/test_codex_host_approvals.py, tests/features/codex_host/test_codex_host_turn_settings.py, tests/features/codex_host/test_codex_host_fork_review.py
+KNOWN EDGE CASES: CodexContentTranslator always writes config["agents"], so unless subagents are set the caller's own agents entry is put back or the key dropped (INV-30); a granular approval policy has no plain value, so it never counts as never (D-32); a goal run's result spans every physical turn it ran. default_answer hands out a copy, never the shared table's own object, and answers currentTime/read with the time now. A fork with before_turn_id sends no lastTurnId (hardening INV-28). A turn with a collaboration mode sends the first non-empty of the mode's model, the turn's model and the model Codex resolved for the thread, and is priced as turn_model, the mode's model or the turn's (first-class INV-13). A plan-mode turn that ends in a plan alone answers with its last plan's text (first-class INV-17).
+RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.1 D-17, D-20, D-29, D-32 and D-34, and 9.2 wire translation and goal table); docs/spec/codex-host-thread-helpers/spec.md (sections 6.1 INV-11, INV-15, INV-17, INV-20, INV-23 and 9.2 wire calls); docs/spec/codex-host-hardening/spec.md (sections 6.1 INV-15, INV-28, INV-32, INV-36 to INV-38, and 8.5); docs/spec/codex-host-first-class/spec.md (INV-5, INV-13, INV-17, D-36)
+TESTS: tests/features/codex_host/test_codex_host_turns.py, tests/features/codex_host/test_codex_host_threads.py, tests/features/codex_host/test_codex_host_review_goals.py, tests/features/codex_host/test_codex_host_thread_helpers.py, tests/features/codex_host/test_codex_host_goal_skills.py, tests/features/codex_host/test_codex_host_approvals.py, tests/features/codex_host/test_codex_host_turn_settings.py, tests/features/codex_host/test_codex_host_fork_review.py, tests/features/codex_host/test_codex_host_settings_modes.py
 """
 
 from __future__ import annotations
@@ -38,12 +38,15 @@ from openai_codex.generated.v2_all import (
     MessagePhase,
     Model,
     Personality,
+    PlanThreadItem,
     RateLimitWindow,
     ReasoningEffort,
     ReasoningSummary,
+    SandboxPolicy,
     SkillsListResponse,
     Thread,
     ThreadForkParams,
+    ThreadForkResponse,
     ThreadGoalGetResponse,
     ThreadItem,
     ThreadListResponse,
@@ -124,13 +127,16 @@ from vidbyte.lib.dataclasses.codex_host import (
     CodexTurnSnapshot,
     CodexTurnSummary,
 )
+from vidbyte.lib.dataclasses.codex_host_modes import CodexCollaborationMode
 from vidbyte.lib.enums.codex import (
     CodexAccountKind,
     CodexApprovalMode,
     CodexApprovalPolicy,
     CodexApprovalsReviewer,
     CodexGoalStatus,
+    CodexReasoningEffort,
     CodexReviewDelivery,
+    CodexSandbox,
     CodexSandboxReadiness,
     CodexServerRequestKind,
     CodexSkillScope,
@@ -147,17 +153,21 @@ from vidbyte.providers.output_schema import OutputSchemaFormatter
 
 def final_answer(items: Sequence[ThreadItem]) -> str | None:
     # openai-codex's own rule: the last final-answer message wins, else
-    # the last message without a phase, else there is no answer.
+    # the last message without a phase; only when neither exists does
+    # the last plan's text answer (first-class INV-17).
     unphased: str | None = None
+    plan: str | None = None
     for item in reversed(items):
         message = item.root
+        if isinstance(message, PlanThreadItem) and plan is None:
+            plan = message.text
         if not isinstance(message, AgentMessageThreadItem):
             continue
         if message.phase == MessagePhase.final_answer:
             return message.text
         if message.phase is None and unphased is None:
             unphased = message.text
-    return unphased
+    return unphased if unphased is not None else plan
 
 
 class CodexParamsTranslator:
@@ -253,7 +263,7 @@ class CodexParamsTranslator:
             params["deferGoalContinuation"] = True
         return params
 
-    def turn_start(self, thread_id: str, request: CodexSpawnRequest) -> dict[str, Any]:
+    def turn_start(self, thread_id: str, request: CodexSpawnRequest, resolved_model: str = "") -> dict[str, Any]:
         # @intent a-turn-sends-only-its-own-posture
         # The turn's approval_mode, sandbox, plugins, output schema and
         # service tier go on the turn. The explicit approval fields
@@ -267,18 +277,50 @@ class CodexParamsTranslator:
         self._approvals(values, {}, CodexApprovalMode.PROVIDER_DEFAULT)
         sandbox = values.pop("sandbox", None)
         if sandbox is not None:
-            policy: dict[str, Any] = {"type": CODEX_SANDBOX_TURN_POLICY[sandbox.value]}
-            if request.network_access is not None:
-                policy["networkAccess"] = request.network_access
-            if request.writable_roots:
-                policy["writableRoots"] = list(request.writable_roots)
-            values["sandbox_policy"] = policy
+            values["sandbox_policy"] = self.sandbox_policy(sandbox, request.network_access, request.writable_roots)
         if request.disabled_plugin_ids is not None:
             values["disabled_plugin_ids"] = list(request.disabled_plugin_ids)
         if request.turn_service_tier:
             values["service_tier_for_turn"] = request.turn_service_tier
         values.update(thread_id=thread_id, input=[])
-        return TurnStartParams.model_validate(values).model_dump(by_alias=True, exclude_none=True, mode="json")
+        params = TurnStartParams.model_validate(values).model_dump(by_alias=True, exclude_none=True, mode="json")
+        # The params model has no collaboration mode, so it is added
+        # after validation; its model is the mode's, the turn's or the
+        # thread's resolved one (first-class INV-5, INV-13).
+        mode = request.collaboration_mode
+        if mode is not None:
+            effort = mode.reasoning_effort if mode.reasoning_effort is not CodexReasoningEffort.PROVIDER_DEFAULT else request.turn.effort
+            params["collaborationMode"] = self.collaboration_mode(mode, mode.model or request.turn.model or resolved_model, effort)
+        return params
+
+    @staticmethod
+    def sandbox_policy(sandbox: Sandbox | CodexSandbox, network_access: bool | None, writable_roots: Sequence[str]) -> dict[str, Any]:
+        # @intent one-sandbox-policy-shape-for-turns-and-threads
+        # openai-codex's own model validates and dumps the policy, so a
+        # turn and a thread settings update send one shape; network
+        # access and writable roots go only when set (first-class INV-11).
+        policy: dict[str, Any] = {"type": CODEX_SANDBOX_TURN_POLICY[sandbox.value]}
+        if network_access is not None:
+            policy["networkAccess"] = network_access
+        if writable_roots:
+            policy["writableRoots"] = list(writable_roots)
+        return SandboxPolicy.model_validate(policy).model_dump(by_alias=True, exclude_none=True, mode="json")
+
+    @staticmethod
+    def collaboration_mode(mode: CodexCollaborationMode, model: str, effort: CodexReasoningEffort) -> dict[str, Any]:
+        # The schema requires the model; an effort goes only when named,
+        # and never developer instructions (first-class INV-13, A-2).
+        settings: dict[str, Any] = {"model": model}
+        if effort is not CodexReasoningEffort.PROVIDER_DEFAULT:
+            settings["reasoning_effort"] = effort.value
+        return {"mode": mode.mode.value, "settings": settings}
+
+    @staticmethod
+    def turn_model(request: CodexSpawnRequest) -> str:
+        # Codex lets a mode's model win over the turn's, so the turn is
+        # priced as the mode's model when it names one (INV-13).
+        mode = request.collaboration_mode
+        return mode.model if mode is not None and mode.model else request.turn.model
 
     @staticmethod
     def input_items(prompt: str | CodexRunInput) -> list[dict[str, Any]]:
@@ -490,7 +532,7 @@ class CodexResponseTranslator:
         return match.group(), tuple(int(part) for part in match.groups()) >= CODEX_HOST_MINIMUM_VERSION_PARTS
 
     @staticmethod
-    def routes_to_user(response: ThreadStartResponse | ThreadResumeResponse) -> bool:
+    def routes_to_user(response: ThreadStartResponse | ThreadResumeResponse | ThreadForkResponse) -> bool:
         # D-32: a user reviewer with any policy but never would send
         # approval requests to a person nothing on the host answers; a
         # granular policy has no plain value, so it is not never.
