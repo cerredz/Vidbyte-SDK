@@ -296,9 +296,9 @@ class CodexParamsTranslator:
     @staticmethod
     def sandbox_policy(sandbox: Sandbox | CodexSandbox, network_access: bool | None, writable_roots: Sequence[str]) -> dict[str, Any]:
         # @intent one-sandbox-policy-shape-for-turns-and-threads
-        # openai-codex's own model validates and dumps the policy, so a
-        # turn and a thread settings update send one shape; network
-        # access and writable roots go only when set (first-class INV-11).
+        # openai-codex's model validates and dumps the policy, so turns
+        # and thread settings updates send one shape; network access and
+        # writable roots go only when set (first-class INV-11).
         policy: dict[str, Any] = {"type": CODEX_SANDBOX_TURN_POLICY[sandbox.value]}
         if network_access is not None:
             policy["networkAccess"] = network_access

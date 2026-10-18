@@ -70,7 +70,7 @@ class UpdateCodexThreadSettingsTool(_CodexHostTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Return the fixed confirmation, since the function returns nothing.
+        # Return the fixed confirmation; the function returns nothing.
         return await self._run(THREAD_SETTINGS.value, self._perform(call))
 
     async def _perform(self, call: ToolCall) -> str:
@@ -160,14 +160,14 @@ class UpdateCodexTurnSettingsTool(_CodexHostTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Return the status sentence, since the function returns an enum.
+        # Return the status sentence; the function returns an enum.
         return await self._run(TURN_SETTINGS.value, self._perform(call))
 
     async def _perform(self, call: ToolCall) -> str:
         # @intent the-turn-settings-tool-reaches-only-model-and-effort
-        # Only this scope's handles are changed, and only their model and
-        # effort; Codex's answer is a status, and targetUnavailable is a
-        # normal result (first-class INV-25, INV-43).
+        # Only this scope's handles are changed, and only their model
+        # and effort; Codex's answer is a status, and targetUnavailable
+        # is a normal result (first-class INV-25, INV-43).
         handle = CodexTurnHandle(thread_id=self._resolve_text(call, "thread_id", required=True), turn_id=self._resolve_text(call, "turn_id", required=True))
         model = self._resolve_text(call, "model")
         effort = self._resolve_choice(call, "effort", CodexReasoningEffort)

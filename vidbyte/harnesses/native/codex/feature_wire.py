@@ -194,7 +194,7 @@ class CodexFeatureParamsTranslator:
 
     @staticmethod
     def side_chat_views(request: CodexSpawnRequest) -> tuple[CodexSpawnRequest, CodexSpawnRequest]:
-        # @intent a-side-chat-fork-is-ephemeral-and-told-it-is-a-side-chat
+        # @intent a-side-chat-fork-is-ephemeral
         # The fork takes only what a fork can apply: every field of the
         # fork row is reset, the thread is ephemeral, and the side-chat
         # instructions follow the request's own after a blank line. The

@@ -130,7 +130,7 @@ class ArchiveCodexThreadTool(_CodexHostTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Return the fixed confirmation, since the function returns nothing.
+        # Return the fixed confirmation; the function returns nothing.
         return await self._run(ARCHIVE.value, self._perform(call))
 
     async def _perform(self, call: ToolCall) -> str:
@@ -180,7 +180,7 @@ class RenameCodexThreadTool(_CodexHostTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Return the fixed confirmation, since the function returns nothing.
+        # Return the fixed confirmation; the function returns nothing.
         return await self._run(RENAME.value, self._perform(call))
 
     async def _perform(self, call: ToolCall) -> str:

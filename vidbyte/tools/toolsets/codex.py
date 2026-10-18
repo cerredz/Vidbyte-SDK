@@ -136,7 +136,8 @@ class CodexHostTools(Tools):
         # delete_codex_thread, forget_codex_turns, stream_codex_turn,
         # reset_codex_memories, revert_codex_thread, inject_codex_items,
         # create_codex_worktree, edit_codex_goal, clear_codex_goal,
-        # set_codex_thread_memory_mode or clean_codex_background_terminals.
+        # set_codex_thread_memory_mode or
+        # clean_codex_background_terminals.
         super().__init__([tool_class(host, scope) for tool_class in tool_classes])
 
 

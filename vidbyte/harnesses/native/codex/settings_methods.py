@@ -170,8 +170,8 @@ class CodexSettingsMethods(CodexHostCore):
         """
         # @intent a-turn-settings-update-targets-a-running-owned-turn
         # Change only a turn this host registered and that is still
-        # running, after the reviewer, model and tier checks (first-class
-        # INV-25).
+        # running, after the reviewer, model and tier checks
+        # (first-class INV-25).
         operation = CodexHostOperation.UPDATE_CODEX_TURN_SETTINGS
         self._guard(operation, talks=True)
         update = CodexTurnSettingsRequest(
@@ -184,7 +184,7 @@ class CodexSettingsMethods(CodexHostCore):
             approvals_reviewer=approvals_reviewer,
         )
         self._preflight.require_experimental_api(operation, CODEX_TURN_SETTINGS_UPDATE_METHOD)
-        # An unknown or ended turn is refused locally, naming its thread.
+        # An unknown or ended turn is refused here, naming its thread.
         turn = self._registry.get(update.handle)
         if turn is None or turn.snapshot is not None:
             message = CODEX_HOST_TURN_SETTINGS_FINISHED_MESSAGE.format(turn_id=update.handle.turn_id, thread_id=update.handle.thread_id)

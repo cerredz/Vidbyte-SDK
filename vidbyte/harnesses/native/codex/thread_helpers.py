@@ -228,8 +228,8 @@ class CodexThreadHelpers:
         # let Codex continue it as paid turns this host does not track,
         # so its stored goal is read first and only a goal status in the
         # load-safe allow-list, or no goal, lets it load; a paused,
-        # blocked, limited or complete goal does not restart (first-class
-        # INV-12, D-14, A-13).
+        # blocked, limited or complete goal does not restart
+        # (first-class INV-12, D-14, A-13).
         if status is not CodexThreadStatus.NOT_LOADED:
             return
         goal = await self._stored_goal(operation, thread_id)

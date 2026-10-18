@@ -675,7 +675,8 @@ class CodexItemsInjectRequest:
         # Each item is a JSON object with a non-empty string type, kept
         # as a JSON round-trip copy, so a later change by the caller
         # changes nothing sent; NaN and infinity are not JSON, and a str
-        # or one mapping is not a sequence of items (first-class INV-37).
+        # or one mapping is not a sequence of items (first-class
+        # INV-37).
         RecordFieldValidator.require_text(self.thread_id, "inject_codex_items thread_id", one_line=True)
         items = self.items
         sized = isinstance(items, Sequence) and not isinstance(items, str) and 1 <= len(items) <= CODEX_HOST_INJECT_MAX_ITEMS

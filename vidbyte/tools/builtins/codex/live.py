@@ -234,7 +234,7 @@ class WaitCodexTurnsTool(_CodexHostTool):
             self._scope.require_owned(handle, WAIT_MANY)
         bound = min(timeout_seconds, CODEX_HOST_TOOL_MAX_WAIT_SECONDS) if timeout_seconds is not None else CODEX_HOST_TOOL_MAX_WAIT_SECONDS
         mode = return_when if return_when is not None else CodexTurnWaitMode.FIRST_COMPLETED
-        # Every snapshot leaves out result.items, as the single wait does.
+        # Every snapshot omits result.items, as the single wait does.
         return self._json(await self._host.wait_codex_turns(handles, return_when=mode, timeout_seconds=bound), without_items=True)
 
 

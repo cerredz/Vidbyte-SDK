@@ -95,8 +95,8 @@ class CodexGoalMethods(CodexHostCore):
             await self._preflight.run(operation, spawn)
             goal = await self._require_goal(CodexThreadRef(operation=operation, thread_id=thread_id))
             self._refuse_unresumable(operation, thread_id, goal)
-            # Load the thread as continue does, and stop if its approvals
-            # would go to a person nothing here answers.
+            # Load the thread as continue does, and stop if its
+            # approvals would go to a person nothing here answers.
             connection = self._connection
             resume = self._params.thread_resume(thread_id, spawn)
             resumed = await connection.call(operation, CODEX_THREAD_RESUME_METHOD, connection.client.thread_resume, thread_id, resume, thread_id=thread_id)
