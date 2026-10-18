@@ -124,8 +124,9 @@ class ThreadChains:
         # template. The blank check reads the whole prompt, in which
         # {prompt} is the caller's own prompt and never blank, so only
         # the template can make it blank (EC-79).
-        alone = ComposeTexts.render(template, {ComposeField.PROMPT: "", ComposeField.PREVIOUS: ComposeTexts.spliced(""), ComposeField.DIFF: ComposeTexts.spliced("")})
-        whole = ComposeTexts.render(template, {ComposeField.PROMPT: prompt, ComposeField.PREVIOUS: ComposeTexts.spliced(""), ComposeField.DIFF: ComposeTexts.spliced("")})
+        empty: dict[ComposeField, str | tuple[PromptSegment, ...]] = {ComposeField.PREVIOUS: ComposeTexts.spliced(""), ComposeField.DIFF: ComposeTexts.spliced("")}
+        alone = ComposeTexts.render(template, {ComposeField.PROMPT: "", **empty})
+        whole = ComposeTexts.render(template, {ComposeField.PROMPT: prompt, **empty})
         for index, step in enumerate(steps):
             receiver = StepRoles.item(native_compose.COMPOSE_STEPS_ARGUMENT, index)
             if not index:
