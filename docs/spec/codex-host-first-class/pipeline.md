@@ -17,8 +17,8 @@ Slice 1 (`docs/spec/codex-host-hardening/`, status `verified`) is done on this b
 |---|---|---|---|---|---|
 | S0 recon | done | 22:40 | 23:05 | reports/S0-scout.md | code-map.md: 4 sections, 564 lines; per-function protocol table (§4.1); pins table (§3.4) |
 | S1 spec + review | done | 23:10 | 03:10 | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | r1 fde5a8b0; round 1 SOUND WITH FIXES (1B/6M/6m, 040e56c1); r2 603519bb; round 2 SOUND WITH FIXES (0B/3M/2m, 4db45a23); **r3 d9072cdb status approved**. Budget 13 files / 69 classes / 0 deps / 46 config keys / 42 endpoints; INV 55, AC 44, EC 62, FR 36 |
-| S2 tests | running | 03:15 | | | |
-| S3 implement | pending | | | | |
+| S2 tests | done | 03:15 | 06:40 | reports/S2-test-author.md | 236 tests in 14 new modules plus the §13 pin rewrites (fa27a3ad, ab13e1e7, 893f1df4); **S2_HEAD 625279c6**; red set 253 = 233 new + 19 superseded pins + 1 inherited; spec r4 d0529d15 |
+| S3 implement | running | 06:45 | | | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
@@ -54,6 +54,14 @@ Slice 1 (`docs/spec/codex-host-hardening/`, status `verified`) is done on this b
   - **`CODEX_HOST_NO_GOAL_MESSAGE` already exists** (`constants/codex_host.py:312`, used by `run_codex_goal` and pinned at `helper_surface.py:94`). INV-48 freezes `run_codex_goal`, so this is option (a): the new message is renamed `CODEX_HOST_NO_STORED_GOAL_MESSAGE`, unused, and chosen by me over S2's `GOAL_MISSING`. That keeps it in the `NO_*GOAL` family next to the pinned `CODEX_HOST_NO_GOAL_CAUSE` and `_NEXT_STEP`.
   - **My sweep of all 47 constant names in the spec's tables** found no other collision.
   - **The S1 author's r4** (an amendment, not a review round) also resolves S2's six ambiguities, choosing only options the tests already accept.
+
+- 2026-10-18 06:40: **Spec r4 (d0529d15) accepted**, including three of the author's deviations from my wording:
+  - the method constants use the `CODEX_` prefix, matching the two §9.3 names that were already pinned (my `CODEX_HOST_` anchor was wrong);
+  - the sandbox slot uses `.name`, because `.value` prints an empty name for `PROVIDER_DEFAULT`;
+  - unregistered handles also get the thread sentence (INV-25).
+  
+  I sent S2 back once more to close its three open items. They live in the test tree, where S3 cannot follow up: the stored-goal name pin, FEATURE.md :5/:40, and the README log. My own run at 625279c6: `253 failed, 1041 passed, 3 skipped`, `SDK-LINT: PASS`, and an empty diff of production paths since a7730107. **S2_HEAD = 625279c6.** From now on, `git diff 625279c6..HEAD -- tests` must stay empty.
+- 2026-10-18 06:45: **The S3 drift check came back clean.** origin/main is still 6f5a7310 (the #1055 merge), and #1178's head 8baff351 is an ancestor of HEAD. #1181 already exists as a draft with title `[WIP] feat: CodexHost production hardening and first-class Codex features`, so S3 updates its body (`gh pr edit`) instead of creating a PR.
 
 ## User replies (verbatim)
 - (none yet)
@@ -124,3 +132,11 @@ Slice 1 (`docs/spec/codex-host-hardening/`, status `verified`) is done on this b
   - the fake's fork copies the parent's reviewer and policy unless params override them (`codex_host_fakes.py:857`).
   
   *Source:* S1 author r3
+- **S2 bindings for S3:**
+  - `CODEX_HOST_NO_STORED_GOAL_MESSAGE` is new and listed in `__all__`. `CODEX_HOST_NO_GOAL_MESSAGE` keeps its text, which `helper_surface.py:94` pins.
+  - The 15 `CODEX_*_METHOD` constants go in `lib/constants/codex_host.py`, never in `codex.py`; a guard test checks this.
+  - Expected texts are in `tests/features/codex_host/codex_host_feature_support.py`, and the fake's slice-2 answers in `codex_host_feature_fakes.FeatureHandlers` (`feature_answers[method]` scripts a malformed reply).
+  - The worktree tests use the real git with `Path.home` patched. "git missing" means `PATH` points at an empty folder, because `CliRunner.find_program` walks `PATH`.
+  - Lint prints "S063 IMPROVED 4 -> 3" and still passes; never edit `lint/` to ratchet it.
+  
+  *Source:* S2
