@@ -3,8 +3,8 @@
 PURPOSE: Streams one live Codex turn's events: CodexTurnEventLog keeps a bounded, ordered window of a turn's events, ends it with exactly one ENDED event, and hands each subscriber an independent async iterator over it; CodexTurnEventTranslator turns one app-server notification into one CodexTurnEvent.
 ROLE IN CODEBASE: The stream layer of vidbyte/harnesses/native/codex/. Every CodexLiveTurn in turns.py owns one CodexTurnEventLog as its events attribute; CodexTurnRegistry._add attaches it to the host's stream totals, CodexTurnEvents.on_event records each notification right after the turn observes it, CodexLiveTurn.finish closes it, and CodexHost's stream_codex_turn returns its subscribe().
 ARCHITECTURE NOTE: Everything here runs on the host's event loop, from on_event, finish and the subscribers' own steps, so the log needs no lock (slice-1 INV-12); subscribers wait on one asyncio.Event, set on every change. record never raises and never awaits, so a slow or absent reader never delays the turn (first-class INV-19). A subscription is a private async generator: it counts itself as reading from its first step until its finally, keeps its next sequence as a local, and computes its GAP from the log's kept sequences, so the log holds an integer count and no per-subscriber object, weak reference or cursor class (D-37). The four window bounds are imported by name and read at call time, so section 13's patches here apply. The translator narrows each payload to its openai-codex notification class, so this module loads openai-codex; only turns.py, which also loads it and which only CodexHost._open imports, imports this module, so importing the host never loads either (INV-45).
-COMMON MODIFICATION PATTERNS: A new streamed notification adds its method and CodexTurnEventKind to CODEX_HOST_STREAM_NOTIFICATION_KINDS (vidbyte/lib/constants/codex_host.py) and, for a text delta, its notification class to the delta check in CodexTurnEventTranslator.event, or, when its payload has a new shape, one isinstance branch there. A new bound is read in CodexTurnEventLog._fits at call time.
-KNOWN EDGE CASES: An event the translator cannot build, such as a delta openai-codex could not parse and so delivers as an UnknownNotification, spends its sequence, is logged once as codex_host_stream_event_dropped by type and origin, and shows up as a GAP. An event that alone passes the character bound is dropped and counted. ENDED is kept outside every bound and is never charged or dropped. Once the turn has ended and no subscription is reading, every kept event is released and refunded to the host's totals; a subscription read later sees one GAP for them, then ENDED. A subscription opened after the turn ended yields only ENDED. Iterating a subscription on another loop than the host's raises ConfigurationError at its first step.
+COMMON MODIFICATION PATTERNS: A new streamed notification adds its method and CodexTurnEventKind to CODEX_HOST_STREAM_NOTIFICATION_KINDS (vidbyte/lib/constants/codex_host.py) and, for a text delta, its notification class to the delta check in CodexTurnEventTranslator.event, or, when its payload has a new shape, one isinstance branch there. A new bound is read in CodexTurnEventLog._fits at call time, and a new character bound in _fits_alone as well.
+KNOWN EDGE CASES: An event the translator cannot build, such as a delta openai-codex could not parse and so delivers as an UnknownNotification, spends its sequence, is logged once as codex_host_stream_event_dropped by type and origin, and shows up as a GAP. An event that alone passes a character bound is dropped and counted at once, and no older event is dropped for it (EC-19). ENDED is kept outside every bound and is never charged or dropped. Once the turn has ended and no subscription is reading, every kept event is released and refunded to the host's totals; a subscription read later sees one GAP for them, then ENDED. A subscription opened after the turn ended yields only ENDED. Iterating a subscription on another loop than the host's raises ConfigurationError at its first step.
 RELATED DOCS: docs/spec/codex-host-first-class/spec.md (sections 6.1 INV-18 to INV-22 and 9.1 "Lifecycle: one live turn's CodexTurnEventLog", D-9 to D-12, D-37, D-39, NFR-3)
 TESTS: tests/features/codex_host/test_codex_host_stream_wait.py
 """
@@ -137,9 +137,12 @@ class CodexTurnEventLog:
             self._next = sequence + 1
             size = self._size(event)
             # Drop this log's own oldest events until the new one fits
-            # the turn's and the host's bounds; a new event that still
-            # does not fit is dropped and counted (INV-20).
-            while self._events and not self._fits(size):
+            # the turn's and the host's bounds. An event that alone
+            # passes a character bound could never fit, so it is dropped
+            # at once and older events are kept; any other event that
+            # still does not fit is dropped too. Each drop is counted
+            # (INV-20, EC-19).
+            while self._events and self._fits_alone(size) and not self._fits(size):
                 self._drop_oldest()
             if self._fits(size):
                 self._append(event, size)
@@ -235,6 +238,13 @@ class CodexTurnEventLog:
             return turn_fits
         host_chars, host_events = self._charge(0, 0)
         return turn_fits and host_events < CODEX_HOST_STREAM_HOST_EVENT_LIMIT and host_chars + size <= CODEX_HOST_STREAM_HOST_TEXT_LIMIT_CHARS
+
+    def _fits_alone(self, size: int) -> bool:
+        # Whether an event of this size fits the turn's character bound,
+        # and once attached the host's, with nothing else kept; one that
+        # does not is never worth room made by dropping older events
+        # (INV-20, EC-19).
+        return size <= CODEX_HOST_STREAM_TEXT_LIMIT_CHARS and (self._charge is None or size <= CODEX_HOST_STREAM_HOST_TEXT_LIMIT_CHARS)
 
     def _drop_oldest(self) -> None:
         # Drop this log's own oldest event and refund it to the host's
