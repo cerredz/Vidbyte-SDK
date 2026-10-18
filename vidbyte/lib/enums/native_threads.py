@@ -168,6 +168,8 @@ class ClaudeFlag(StrEnum):
     EFFORT = "--effort"
     MAX_TURNS = "--max-turns"
     MAX_BUDGET_USD = "--max-budget-usd"
+    ALLOWED_TOOLS = "--allowedTools"
+    DISALLOWED_TOOLS = "--disallowedTools"
     RESUME = "--resume"
     FORK_SESSION = "--fork-session"
     SESSION_ID = "--session-id"
@@ -207,6 +209,7 @@ class NativeEnvironmentVariable(StrEnum):
     CLAUDE_CONFIG_DIR = "CLAUDE_CONFIG_DIR"
     DISABLE_AUTOUPDATER = "DISABLE_AUTOUPDATER"
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"
+    CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"
 
 
 class MuseMethod(StrEnum):

@@ -28,6 +28,12 @@ MUSE_REAP_TIMEOUT_SECONDS = 10.0
 # set, so a typo cannot lift the limit a caller meant to keep.
 CLAUDE_MAX_TURNS_LIMIT = 1000
 CLAUDE_MAX_BUDGET_USD_LIMIT = 1000.0
+# At most this many --allowedTools and as many --disallowedTools rules,
+# each this long, so both lists at their caps still fit a Windows
+# command line beside the rest of the argv; only rules full of quote
+# characters, which the quoting doubles, could pass it (launch_failed).
+CLAUDE_TOOL_RULES_MAX_ITEMS = 32
+CLAUDE_TOOL_RULE_MAX_CHARS = 256
 NATIVE_ARGV_PROMPT_MAX_CHARS = 24000
 # A Windows command line holds at most 32,766 UTF-16 units (measured).
 # A Grok or Muse prompt may take 30,000 of them once quoted; the 2,766
@@ -68,6 +74,14 @@ NATIVE_THREAD_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_-]*$"
 # Claude Code ids are lowercase UUIDs; --resume also takes a session
 # title or a transcript path, which this pattern refuses.
 CLAUDE_THREAD_ID_PATTERN = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+# A Claude Code permission rule: a tool name, then at most one
+# parenthesised specifier on one line. The name starts with a letter,
+# so a rule is never read as an option, and claude splits a value only
+# at a space or comma outside parentheses, so one rule stays one rule.
+# A Read, Edit, Write or NotebookEdit path may not start with a single
+# "/", which Claude Code resolves against the settings source rather
+# than the filesystem root; write "//abs" or "./rel" instead.
+CLAUDE_TOOL_RULE_PATTERN = r"(?!(?:Read|Edit|Write|NotebookEdit)\(/(?!/))[A-Za-z][A-Za-z0-9_-]*(?:\([^()\x00-\x1f\x7f]+\))?"
 NATIVE_NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]*$"
 NATIVE_SKILL_NAME_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
 MUSE_DISTRO_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
@@ -149,6 +163,10 @@ CLAUDE_USER_SETTING_SOURCE = "user"
 # and the one such name it keeps (the Git Bash path on Windows).
 CLAUDE_INHERITED_ENVIRONMENT_PREFIXES = ("ANTHROPIC_", "CLAUDE")
 CLAUDE_INHERITED_ENVIRONMENT_KEPT = frozenset({"CLAUDE_CODE_GIT_BASH_PATH"})
+# The tools that run shell commands. An allowed rule naming one makes
+# the SDK set CLAUDE_CODE_SUBPROCESS_ENV_SCRUB, so the commands the
+# model runs never see ANTHROPIC_API_KEY.
+CLAUDE_SHELL_TOOL_NAMES = frozenset({"Bash", "PowerShell"})
 NATIVE_ENABLED_SWITCH = "1"
 NATIVE_WSLENV_SEPARATOR = ":"
 NATIVE_WSLENV_UNIX_FLAG = "/u"

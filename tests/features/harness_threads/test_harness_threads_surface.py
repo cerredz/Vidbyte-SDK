@@ -46,7 +46,7 @@ EXPECTED_ENUMS = {
     "OpencodeFlag": ["--format", "--dir", "--model", "--agent", "--variant", "--session", "--fork"],
     "MuseFlag": ["--json", "--provider", "--workspace", "--session-id", "--model", "--reasoning-effort", "--user-input-auto-resolve", "--"],
     "WslFlag": ["-d", "-e", "-l", "-q"],
-    "NativeEnvironmentVariable": ["XAI_API_KEY", "GROK_CODE_XAI_API_KEY", "GROK_HOME", "GROK_DISABLE_AUTOUPDATER", "OPENCODE_CONFIG_CONTENT", "OPENCODE_DISABLE_AUTOUPDATE", "META_API_KEY", "MUSE_NO_AUTO_UPDATE", "MUSE_AUTH_PATH", "XDG_CONFIG_HOME", "WSLENV", "VIDBYTE_PEER_MARK", "ANTHROPIC_API_KEY", "CLAUDE_CONFIG_DIR", "DISABLE_AUTOUPDATER", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"],
+    "NativeEnvironmentVariable": ["XAI_API_KEY", "GROK_CODE_XAI_API_KEY", "GROK_HOME", "GROK_DISABLE_AUTOUPDATER", "OPENCODE_CONFIG_CONTENT", "OPENCODE_DISABLE_AUTOUPDATE", "META_API_KEY", "MUSE_NO_AUTO_UPDATE", "MUSE_AUTH_PATH", "XDG_CONFIG_HOME", "WSLENV", "VIDBYTE_PEER_MARK", "ANTHROPIC_API_KEY", "CLAUDE_CONFIG_DIR", "DISABLE_AUTOUPDATER", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"],
     "MuseMethod": ["initialize", "initialized", "session/read", "session/fork"],
     "OpencodeEventType": ["text", "error"],
 }

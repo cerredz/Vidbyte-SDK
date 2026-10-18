@@ -14,6 +14,7 @@ TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads/test
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -24,6 +25,9 @@ PERMISSION_VALUES = ("manual", "acceptEdits", "dontAsk", "plan")
 EFFORT_VALUES = ("low", "medium", "high", "xhigh", "max")
 APPROVE_EVERYTHING = ("--dangerously-skip-permissions", "--allow-dangerously-skip-permissions", "bypassPermissions", "auto")
 OVERLAY_NAMES = {"ANTHROPIC_API_KEY", "CLAUDE_CONFIG_DIR", "DISABLE_AUTOUPDATER", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"}
+# Permission rules without a shell, so they stand beside any mode.
+RULES = ("Edit", "Read(./src/**)", "mcp__github__create_issue")
+SHELL_RULES = [(("Bash(git *)",), True), (("PowerShell",), True), (("Edit", "Read(//tmp/**)", "BashOutput"), False)]
 
 
 def spy_runner(api, monkeypatch) -> list:
@@ -40,17 +44,20 @@ def spy_runner(api, monkeypatch) -> list:
     return seen
 
 
-def expected_argv(verb: str, *, thread: str | None, minted: str | None = None, mode: str = "manual", model: str | None = None, effort: str | None = None, turns: str | None = None, budget: str | None = None) -> list[str]:
+def expected_argv(verb: str, *, thread: str | None, minted: str | None = None, mode: str = "manual", model: str | None = None, effort: str | None = None, turns: str | None = None, budget: str | None = None, allowed: tuple[str, ...] = (), disallowed: tuple[str, ...] = ()) -> list[str]:
     # §9.2, in its order: the four fixed options, then --model, --effort,
-    # --max-turns, --max-budget-usd, --resume and --fork-session when
-    # they apply, then --session-id with the id a run or fork mints (the
-    # limits and the minted id from the PR #1044 review); no operand. A
-    # continue never sends --session-id.
+    # --max-turns, --max-budget-usd, one --allowedTools and one
+    # --disallowedTools per rule, --resume and --fork-session when they
+    # apply, then --session-id with the id a run or fork mints (the
+    # limits, the rules and the minted id from the PR #1044 review); no
+    # operand. A continue never sends --session-id.
     argv = ["--print", "--output-format", "json", "--setting-sources", "user", "--permission-mode", mode]
     argv += ["--model", model] if model is not None else []
     argv += ["--effort", effort] if effort is not None else []
     argv += ["--max-turns", turns] if turns is not None else []
     argv += ["--max-budget-usd", budget] if budget is not None else []
+    argv += [element for rule in allowed for element in ("--allowedTools", rule)]
+    argv += [element for rule in disallowed for element in ("--disallowedTools", rule)]
     argv += ["--resume", thread] if verb != "run" else []
     argv += ["--fork-session"] if verb == "fork" else []
     return argv + (["--session-id", minted] if verb != "continue" else [])
@@ -76,15 +83,45 @@ async def test_every_option_keeps_the_separate_style_and_a_flag_like_prompt_stay
     # "--yolo" reaches Claude Code only as stdin text.
     thread = (await call("claude")).thread_id if verb != "run" else None
     enums = api.enums
-    config = {"permission_mode": enums.ClaudePermissionMode.ACCEPT_EDITS, "reasoning_effort": enums.ClaudeReasoningEffort.XHIGH, "max_turns": 7, "max_budget_usd": 2.5}
+    config = {"permission_mode": enums.ClaudePermissionMode.ACCEPT_EDITS, "reasoning_effort": enums.ClaudeReasoningEffort.XHIGH, "max_turns": 7, "max_budget_usd": 2.5, "allowed_tools": RULES, "disallowed_tools": ("WebFetch",)}
     result = await call("claude", verb, FLAG_PROMPT, thread_id=thread, model="claude-opus-5-5", config=config)
     assert result.text == f"claude answer to: {FLAG_PROMPT}"
     start = sandbox.starts("claude")[-1]
     argv = start["argv"]
-    assert argv == expected_argv(verb, thread=thread, minted=result.thread_id, mode="acceptEdits", model="claude-opus-5-5", effort="xhigh", turns="7", budget="2.5")
+    assert argv == expected_argv(verb, thread=thread, minted=result.thread_id, mode="acceptEdits", model="claude-opus-5-5", effort="xhigh", turns="7", budget="2.5", allowed=RULES, disallowed=("WebFetch",))
     assert FLAG_PROMPT not in argv and start["stdin_text"] == FLAG_PROMPT
     flags = {member.value for member in enums.ClaudeFlag}
     assert all(element in flags for element in argv if element.startswith("-")), "INV-16: every flag is a ClaudeFlag member"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("allowed", "scrubbed"), SHELL_RULES, ids=["bash", "powershell", "no-shell"])
+async def test_an_allowed_shell_rule_has_claude_scrub_the_key_from_its_commands(api, sandbox, call, monkeypatch, allowed, scrubbed) -> None:
+    # PR #1044 review 4301898216 (C4): an allowed Bash or PowerShell rule
+    # adds CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 to the overlay, so the
+    # commands the model runs never see the key; other rules add nothing.
+    invocations = spy_runner(api, monkeypatch)
+    await call("claude", config={"allowed_tools": allowed})
+    (invocation,) = invocations
+    assert set(invocation.env_overlay) == OVERLAY_NAMES | ({"CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"} if scrubbed else set())
+    assert invocation.env_overlay.get("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB") == ("1" if scrubbed else None)
+
+
+@pytest.mark.asyncio
+async def test_tool_rules_at_their_caps_fit_a_windows_command_line(api, sandbox, call, monkeypatch) -> None:
+    # PR #1044 review 4301898216: 32 allowed and 32 denied rules of the
+    # longest length, each holding spaces, still fit a Windows command
+    # line (32,766 UTF-16 units, measured) once quoted, and the call
+    # starts on every platform.
+    caps = api.constants
+    rule = "Bash(" + "x " * ((caps.CLAUDE_TOOL_RULE_MAX_CHARS - len("Bash()")) // 2) + ")"
+    assert len(rule) == caps.CLAUDE_TOOL_RULE_MAX_CHARS
+    invocations = spy_runner(api, monkeypatch)
+    rules = (rule,) * caps.CLAUDE_TOOL_RULES_MAX_ITEMS
+    result = await call("claude", config={"allowed_tools": rules, "disallowed_tools": rules})
+    (invocation,) = invocations
+    assert len(subprocess.list2cmdline(invocation.argv)) < 32766
+    assert result.thread_id
 
 
 @pytest.mark.asyncio

@@ -2,7 +2,7 @@
 
 PURPOSE: Defines the validated records of the harness thread functions: NativeThreadRequest, the checked arguments of one call; GrokThreadConfig, OpencodeThreadConfig, MuseThreadConfig and ClaudeThreadConfig, the per-harness settings a caller may pass; and NativeThreadResult, what a successful call returns.
 ROLE IN CODEBASE: NativeThreadRequest is built by the twelve public functions under vidbyte/harnesses/native/ (grok/threads.py, opencode/threads.py, muse/threads.py, claude/threads.py) and read by every step of their flows. The four config records and NativeThreadResult are re-exported from vidbyte.harnesses.native; callers build the configs, the functions return the result.
-ARCHITECTURE NOTE: Every check lives in __post_init__, so a constructed record is always valid. Field checks go through RecordFieldValidator and RecordFieldConverter (vidbyte/lib/dataclasses/validation.py); the three rules that relate a field to another value (thread_id against the verb, a skill folder's SKILL.md, unique skill folder names) raise ConfigurationError inline. A refused field raises ConfigurationError whose details["field"] is the public argument name (api_key, skills[2]); the thread functions turn it into a NativeThreadError naming that argument. The workspace and each skill path are checked as given, absolute and existing, and then stored resolved, so a relative path never passes because of the current folder.
+ARCHITECTURE NOTE: Every check lives in __post_init__, so a constructed record is always valid. Field checks go through RecordFieldValidator and RecordFieldConverter (vidbyte/lib/dataclasses/validation.py); the four rules that relate a field to another value (thread_id against the verb, a skill folder's SKILL.md, unique skill folder names, an allowed Claude Code shell rule against the permission mode) raise ConfigurationError inline. A refused field raises ConfigurationError whose details["field"] is the public argument name (api_key, skills[2]); the thread functions turn it into a NativeThreadError naming that argument. The workspace and each skill path are checked as given, absolute and existing, and then stored resolved, so a relative path never passes because of the current folder.
 FUNCTION INVENTORY: NativeThreadRequest.__post_init__ is the narrated main function and picks the prompt cap and pattern for the harness; _checked_workspace checks and resolves the workspace; _checked_model checks the model for the harness; _checked_thread_id ties the thread id to the verb; _checked_skills checks, resolves and names each skill folder. GrokThreadConfig, OpencodeThreadConfig, MuseThreadConfig, ClaudeThreadConfig and NativeThreadResult have only __post_init__.
 COMMON MODIFICATION PATTERNS: A new config field adds one field and one validator call to its record, and its bound or pattern to vidbyte/lib/constants/native_threads.py. A config record never gets a model field: the model is an argument of every call.
 WHAT NOT TO DO IN THIS FILE: 1. Do not read keys from environment variables. 2. Do not put a key value in an error message or its details; name the parameter instead. 3. Do not drop repr=False from a key field. 4. Do not import from vidbyte.harnesses; vidbyte/lib is the bottom layer.
@@ -22,7 +22,11 @@ from vidbyte.lib.constants.native_threads import (
     CLAUDE_MAX_BUDGET_USD_LIMIT,
     CLAUDE_MAX_TURNS_LIMIT,
     CLAUDE_PROMPT_PATTERN,
+    CLAUDE_SHELL_TOOL_NAMES,
     CLAUDE_THREAD_ID_PATTERN,
+    CLAUDE_TOOL_RULE_MAX_CHARS,
+    CLAUDE_TOOL_RULE_PATTERN,
+    CLAUDE_TOOL_RULES_MAX_ITEMS,
     MUSE_DEFAULT_PATH,
     MUSE_DISTRO_MAX_CHARS,
     MUSE_DISTRO_PATTERN,
@@ -225,7 +229,7 @@ class MuseThreadConfig:
 
 @dataclass(frozen=True, slots=True)
 class ClaudeThreadConfig:
-    """Settings of the Claude Code thread functions: reasoning effort, permission mode, time limit, an explicit claude launcher, and the turn and spending limits of one call."""
+    """Settings of the Claude Code thread functions: reasoning effort, permission mode, time limit, an explicit claude launcher, the turn and spending limits of one call, and the permission rules that allow or deny tools."""
 
     reasoning_effort: ClaudeReasoningEffort | None = None
     permission_mode: ClaudePermissionMode = ClaudePermissionMode.DEFAULT
@@ -233,6 +237,8 @@ class ClaudeThreadConfig:
     claude_command: tuple[str, ...] | None = None
     max_turns: int | None = None
     max_budget_usd: float | None = None
+    allowed_tools: tuple[str, ...] = ()
+    disallowed_tools: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.reasoning_effort is not None:
@@ -245,6 +251,20 @@ class ClaudeThreadConfig:
             RecordFieldValidator.require_int(self.max_turns, "ClaudeThreadConfig.max_turns", minimum=1, maximum=CLAUDE_MAX_TURNS_LIMIT)
         if self.max_budget_usd is not None:
             RecordFieldValidator.require_number(self.max_budget_usd, "ClaudeThreadConfig.max_budget_usd", maximum=CLAUDE_MAX_BUDGET_USD_LIMIT)
+        RecordFieldValidator.require_text_items(self.allowed_tools, "ClaudeThreadConfig.allowed_tools", max_items=CLAUDE_TOOL_RULES_MAX_ITEMS, max_chars=CLAUDE_TOOL_RULE_MAX_CHARS, pattern=CLAUDE_TOOL_RULE_PATTERN, one_line=True)
+        RecordFieldValidator.require_text_items(self.disallowed_tools, "ClaudeThreadConfig.disallowed_tools", max_items=CLAUDE_TOOL_RULES_MAX_ITEMS, max_chars=CLAUDE_TOOL_RULE_MAX_CHARS, pattern=CLAUDE_TOOL_RULE_PATTERN, one_line=True)
+        # @intent claude-shell-rules-scrub-the-key
+        # A shell rule lets the model run commands that could print the
+        # key, so the SDK has Claude Code scrub it from them, and Claude
+        # Code 2.1.302 then forces its default mode; another mode is
+        # refused here rather than dropped without a word.
+        if self.subprocess_scrub and self.permission_mode is not ClaudePermissionMode.DEFAULT:
+            raise ConfigurationError(f"ClaudeThreadConfig.permission_mode must be DEFAULT when allowed_tools grants Bash or PowerShell, because the SDK then sets CLAUDE_CODE_SUBPROCESS_ENV_SCRUB so the commands Claude Code runs never see the API key, and Claude Code forces its default mode while that is set; keep DEFAULT and grant edits with allowed_tools such as ('Edit', 'Write'); got {self.permission_mode.name}.", details={"field": "ClaudeThreadConfig.permission_mode"})
+
+    @property
+    def subprocess_scrub(self) -> bool:
+        """Whether an allowed rule grants a shell tool, so the SDK sets CLAUDE_CODE_SUBPROCESS_ENV_SCRUB for the call."""
+        return any(rule.partition("(")[0] in CLAUDE_SHELL_TOOL_NAMES for rule in self.allowed_tools)
 
 
 @dataclass(frozen=True, slots=True)

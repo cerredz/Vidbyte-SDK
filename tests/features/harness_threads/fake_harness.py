@@ -38,7 +38,7 @@ PLAIN_NAMES = (
     "XDG_CONFIG_HOME", "MUSE_AUTH_PATH", "WSLENV", "VIDBYTE_PEER_MARK",
     "CLAUDE_CONFIG_DIR", "DISABLE_AUTOUPDATER", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "CLAUDE_CODE_GIT_BASH_PATH", "VIDBYTE_UNRELATED_SETTING",
 )
-CLAUDE_VALUED = ("--output-format", "--setting-sources", "--permission-mode", "--model", "--effort", "--max-turns", "--max-budget-usd", "--resume", "--session-id")
+CLAUDE_VALUED = ("--output-format", "--setting-sources", "--permission-mode", "--model", "--effort", "--max-turns", "--max-budget-usd", "--allowedTools", "--disallowedTools", "--resume", "--session-id")
 CLAUDE_SWITCHES = ("--print", "--fork-session")
 # What Claude Code 2.1.302 accepts for --permission-mode and --effort
 # (vendor-facts f2, f2b); the SDK may pass only some of them.
