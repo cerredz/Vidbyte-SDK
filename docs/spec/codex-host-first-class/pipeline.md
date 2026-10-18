@@ -25,7 +25,7 @@ Slice 1 (`docs/spec/codex-host-hardening/`, status `verified`) is done on this b
 | S6 PR (both slices) | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 2/8 · S5 re-review rounds: 1/2
+- S1 review rounds: 2/2 · S5 repair iterations: 2/8 · S5 re-review rounds: 2/2
 
 ## Decisions the orchestrator made
 - 2026-10-17 22:40: **The same branch, worktree and PR as slice 1.** The precedent is #1055's two specs in one PR. Slice 2's base is slice 1's verified HEAD a7730107. request.md is slice 1's verbatim conversation capture with a slice-2 header (scope, what slice 1 already built, and the machinery to reuse).
@@ -141,6 +141,20 @@ Slice 1 (`docs/spec/codex-host-hardening/`, status `verified`) is done on this b
   - Round 5 adds 2 tests: a record test that runs without the SDK, and a host test. They cover two refusal kinds, EACCES and ENAMETOOLONG, so a `PermissionError`-only fix fails too; a `from exc` fix also fails.
   - My area run: `3 failed, 1302 passed, 3 skipped`, the 2 intended red tests plus the inherited one. The diff is tests and docs only.
   - **S2_HEAD is now d11c5d9d.** S5 iteration 2 launches.
+
+- 2026-10-18 08:55: **S5 iteration 2 checked myself at bff67286:**
+  - HEAD equals origin;
+  - the tests diff since d11c5d9d is 0, and `lint/` is unchanged;
+  - the code diff since ec17d5ce is 2 files, +10/-7;
+  - area `1 failed (inherited), 1304 passed, 3 skipped`; `SDK-LINT: PASS`.
+  
+  Iteration 2 also quoted source `1 failed (inherited)/6835 passed` and package `CI passed.`
+  
+  **My briefing error:** I gave `codex_host_inputs.py` a 600-line ceiling, but spec NFR-1 says 900. The agent caught it, and nothing depended on it.
+  
+  **New follow-up for the PR body:** `RecordFieldValidator.require_directory` (`validation.py`) is the canonical place to map a refused stat. `native_threads.py:120` and `:146` call it with no OSError handling, so they likely leak the same raw OSError. That is outside §12.3, so it needs its own PR.
+  
+  Re-review round 2, the last allowed, launches on `ec17d5ce...bff67286`.
 
 ## User replies (verbatim)
 - (none yet)
