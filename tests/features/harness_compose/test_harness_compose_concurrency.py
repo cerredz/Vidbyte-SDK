@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Overlap is proven from the CliRunner spy's enter and exit ord
 FUNCTION INVENTORY: started counts the launches of some labels; finish releases the stand-ins and waits for a task without raising; plant_add_gate installs the hook that fails worktree adds on cue; removal_seconds times this machine's git for the removal that follows a failed add; gate_failures reads when, and after what wait, the hook failed each add; holder_pids lists a held stand-in's process and its grandchild; task_name names a pending task; settle releases the stand-ins and waits for every task a composite left; the test_* functions are one behaviour each.
 COMMON MODIFICATION PATTERNS: Release held stand-ins in a finally block, and wait for the composite before asserting on its record. To check the state at the moment an error propagates, read it right after the raise and before any await.
 WHAT NOT TO DO IN THIS FILE: Do not sleep for a fixed time to wait for a start; poll with wait_until and a deadline. Do not mock compose or git to make a child fail; plant the hook.
-KNOWN EDGE CASES: A held stand-in ends by itself after its 30-second hold limit, so a broken stop cannot leak it for long. The grandchild of a held stand-in inherits its pipes, so only a whole-tree stop ends it. A reference-transaction hook that exits 1 when the add's transaction is prepared makes git print "ref updates aborted by hook", exit 128 and remove the new folder and its registration itself; worktree remove runs no such hook. The hook waits at most GATE_BOUND_SECONDS for its cue and then fails the add anyway, recording that it timed out. Two adds that fail must be staggered by less than one removal's time for the second verifier to be mid-removal when the first one's error arrives, so that case sweeps the stagger across the measured window in STAGGER_STEPS runs and fails on the first run that leaves a task behind.
+KNOWN EDGE CASES: A held stand-in ends by itself after its 30-second hold limit, so a broken stop cannot leak it for long. The grandchild of a held stand-in inherits its pipes, so only a whole-tree stop ends it. A reference-transaction hook that exits 1 when the add's transaction is prepared makes git print "ref updates aborted by hook" (git 2.53 and earlier) or "in 'prepared' phase, update aborted by the reference-transaction hook" (git 2.54 and later), exit 128 and remove the new folder and its registration itself; worktree remove runs no such hook. The hook waits at most GATE_BOUND_SECONDS for its cue and then fails the add anyway, recording that it timed out. Two adds that fail must be staggered by less than one removal's time for the second verifier to be mid-removal when the first one's error arrives, so that case sweeps the stagger across the measured window in STAGGER_STEPS runs and fails on the first run that leaves a task behind.
 RELATED DOCS: tests/features/harness_compose/FEATURE.md; docs/spec/native-thread-compose/spec.md §6.1 INV-9, INV-13, INV-14, INV-30, §6.2 AC-10, AC-11, §6.3 EC-17, EC-19, EC-20, EC-22, EC-59; docs/spec/native-thread-compose/review.md R-10, R-16
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_compose/test_harness_compose_concurrency.py
 """
@@ -222,7 +222,7 @@ async def test_a_failed_worktree_add_stops_the_holding_sibling_before_its_error_
         await settle(sandbox, before, pack.WAIT_SECONDS)
     failures = gate_failures(claims)
     assert [failure["outcome"] for failure in failures] == ["cue"], "the add failed once, while the Grok verifier held with its grandchild"
-    check_compose_error(caught.value, problem="worktree_failed", workspace=sandbox.workspace, git_text="aborted by hook")
+    check_compose_error(caught.value, problem="worktree_failed", workspace=sandbox.workspace, git_text="aborted by")
     assert len(pids) == 2, "the Grok verifier and its grandchild were running"
     assert sandbox.launches(label="oc-add") == [], "the verifier without a worktree never starts"
     assert pending == [], f"INV-14: tasks still pending when the error propagated: {pending}"
@@ -263,7 +263,7 @@ async def test_two_failed_worktree_adds_propagate_one_error_after_both_cleanups_
         finally:
             await settle(sandbox, before, pack.WAIT_SECONDS)
         assert [failure["outcome"] for failure in gate_failures(claims)] == ["cue", "cue"], "both adds were held until both had arrived, then failed"
-        check_compose_error(caught.value, problem="worktree_failed", workspace=sandbox.workspace, git_text="aborted by hook")
+        check_compose_error(caught.value, problem="worktree_failed", workspace=sandbox.workspace, git_text="aborted by")
         assert sandbox.launches(label=f"oc-add-{step}-a") == [] and sandbox.launches(label=f"oc-add-{step}-b") == []
         assert pending == [], f"INV-14: with the second add failing {stagger * 1000:.0f} ms after the first, tasks were still pending when the error propagated: {pending}"
         assert (registered, leftovers) == (1, []), f"EC-17: {registered} worktrees registered and {leftovers} left when the error propagated"
