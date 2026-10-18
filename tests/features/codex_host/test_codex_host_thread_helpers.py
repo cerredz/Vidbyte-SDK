@@ -27,6 +27,7 @@ from tests.features.codex_host.codex_host_support import (
     WAIT_SECONDS,
     HostTestCase,
     requires_sdk,
+    mapped_summary,
     thread_suffix,
 )
 from vidbyte.lib.errors import ConfigurationError
@@ -520,7 +521,7 @@ class CodexThreadCompactTests(_HelperCase):
                 self.remark()
                 error = await self.assert_codex_error(host.compact_codex_thread(thread.thread_id), "codex.goal_unfinished")
                 self.assertEqual(error.operation, "compact_codex_thread")
-                self.assertEqual(error.message, GOAL_UNFINISHED_MESSAGE.format(status=status) + thread_suffix(thread.thread_id))
+                self.assertEqual(mapped_summary(self, error), GOAL_UNFINISHED_MESSAGE.format(status=status) + thread_suffix(thread.thread_id))
                 self.assertEqual(self.sent_methods(), ["thread/read", "thread/goal/get"])
                 self.assertEqual(thread.status, "notLoaded")
                 # The reservation was released: a second compact meets the same goal check, not session_busy.
@@ -540,7 +541,7 @@ class CodexThreadBusyAndUnknownTests(_HelperCase):
             with self.subTest(method=name):
                 error = await self.assert_codex_error(getattr(host, name)(handle.thread_id), "codex.session_busy")
                 self.assertEqual(error.operation, name)
-                self.assertEqual(error.message, BUSY_TEXT + thread_suffix(handle.thread_id))
+                self.assertEqual(mapped_summary(self, error), BUSY_TEXT + thread_suffix(handle.thread_id))
         self.assertEqual(self.sent(), [])
 
     async def test_a_thread_codex_reports_active_refuses_compact_and_delete_after_one_read(self) -> None:
@@ -552,7 +553,7 @@ class CodexThreadBusyAndUnknownTests(_HelperCase):
                 self.remark()
                 error = await self.assert_codex_error(getattr(host, name)(thread.thread_id), "codex.session_busy")
                 self.assertEqual(error.operation, name)
-                self.assertEqual(error.message, RUNNING_THREAD_MESSAGE + thread_suffix(thread.thread_id))
+                self.assertEqual(mapped_summary(self, error), RUNNING_THREAD_MESSAGE + thread_suffix(thread.thread_id))
                 self.assertEqual(self.sent_methods(), ["thread/read"])
         self.assertIn(thread.thread_id, self.server.threads)
 
@@ -670,7 +671,7 @@ class CodexThreadReservationTests(_HelperCase):
             with self.subTest(method=name):
                 error = await self.assert_codex_error(start(), "codex.session_busy")
                 self.assertEqual(error.operation, name)
-                self.assertEqual(error.message, BUSY_TEXT + thread_suffix(thread.thread_id))
+                self.assertEqual(mapped_summary(self, error), BUSY_TEXT + thread_suffix(thread.thread_id))
         self.assertEqual(self.sent(), [])
         hold.release()
         self.assertIsNone(await self.call(task))

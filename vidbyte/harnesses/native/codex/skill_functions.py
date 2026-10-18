@@ -26,6 +26,23 @@ from vidbyte.lib.constants.codex import (
     CODEX_HOST_SKILL_NAMES_IN_ERROR,
     CODEX_USER_MESSAGE_ITEM_TYPE,
 )
+from vidbyte.lib.constants.codex_host import (
+    CODEX_HOST_APP_SERVER_PLACE,
+    CODEX_HOST_BUDGET_DIFFERS_MESSAGE,
+    CODEX_HOST_CONTENT_FIELD,
+    CODEX_HOST_FOLDER_PLACE,
+    CODEX_HOST_GOAL_UNCHECKED_SENTENCE,
+    CODEX_HOST_INPUT_NOT_RECORDED_MESSAGE,
+    CODEX_HOST_LIST_SEPARATOR,
+    CODEX_HOST_MORE_NAMES_TEXT,
+    CODEX_HOST_NO_GOAL_MESSAGE,
+    CODEX_HOST_NO_NAMES_TEXT,
+    CODEX_HOST_OBJECTIVE_DIFFERS_MESSAGE,
+    CODEX_HOST_SKILL_DISABLED_MESSAGE,
+    CODEX_HOST_SKILL_DROPPED_MESSAGE,
+    CODEX_HOST_SKILL_NOT_FOUND_MESSAGE,
+    CODEX_HOST_SKILL_UNCHECKED_SENTENCE,
+)
 from vidbyte.lib.dataclasses.codex import (
     CodexRunInput,
     CodexSkillInput,
@@ -39,30 +56,13 @@ from vidbyte.lib.dataclasses.codex_host import (
     CodexTurnHandle,
     CodexTurnPage,
 )
+from vidbyte.lib.dataclasses.codex_host_inputs import (
+    CodexGoalRunRequest,
+    CodexSkillRunRequest,
+)
 from vidbyte.lib.enums.codex import CodexHostOperation, CodexInputType
 from vidbyte.lib.enums.failure import FailureCode
-from vidbyte.lib.errors import CodexAgentError, ConfigurationError
-
-OWN_INPUT_MESSAGE = "{operation} takes its input as arguments; leave request.prompt and request.goal at their defaults."
-EPHEMERAL_SKILL_MESSAGE = "{operation} needs a stored thread to confirm the skill run, so request.thread.ephemeral must be False."
-SKILL_NAME_MESSAGE = "{operation} skill must be a non-empty string."
-SKILL_NOT_FOUND_MESSAGE = "Codex lists no skill named '{skill}' for {place}. Enabled skills: {names}."
-SKILL_DISABLED_MESSAGE = "The Codex skill '{skill}' is disabled for {place}."
-NO_GOAL_MESSAGE = "Codex reports no goal on the thread after the goal run started."
-OBJECTIVE_DIFFERS_MESSAGE = "Codex reports a goal objective different from the one sent."
-BUDGET_DIFFERS_MESSAGE = "Codex reports a goal token budget of {stored}, not the {sent} that was sent."
-GOAL_UNCHECKED_MESSAGE = " The goal run on thread {thread_id} was interrupted because its goal could not be checked."
-INPUT_NOT_RECORDED_MESSAGE = "Codex recorded no input for the turn of skill '{skill}' within {seconds} seconds, so the skill run could not be confirmed."
-SKILL_DROPPED_MESSAGE = "Codex recorded the turn's input without the skill '{skill}', so the run did not use the skill."
-SKILL_UNCHECKED_MESSAGE = " The skill run on thread {thread_id} was interrupted because its input could not be checked."
-# How the skill messages name the folder whose skills were listed.
-FOLDER_PLACE = "the folder {cwd}"
-APP_SERVER_PLACE = "the app-server's working folder"
-# The enabled-names list of a skill_not_found message: its separator,
-# its capped tail, and its text when nothing is enabled.
-NAME_SEPARATOR = ", "
-MORE_NAMES_TEXT = " and {count} more"
-NO_NAMES_TEXT = "none"
+from vidbyte.lib.errors import CodexAgentError
 
 
 class CodexSkillHost(Protocol):
@@ -86,30 +86,23 @@ class CodexSkillFunctions:
         # The host whose public functions every run goes through.
         self._host = host
 
-    async def run_goal(
-        self,
-        operation: CodexHostOperation,
-        objective: str,
-        token_budget: int | None,
-        request: CodexSpawnRequest | None,
-    ) -> CodexTurnHandle:
+    async def run_goal(self, operation: CodexHostOperation, goal_run: CodexGoalRunRequest) -> CodexTurnHandle:
         # @intent a-goal-run-returns-only-once-its-goal-is-confirmed
         # A goal run is started through spawn's goal path, then its
         # stored goal is read back; a goal that is missing or differs,
         # or a check that fails, gets one interrupt so the run never
         # keeps spending unseen (INV-21, INV-22).
-        # Take the caller's posture unchanged, apart from the goal.
-        spawn = request or CodexSpawnRequest()
-        self._reject_own_input(operation, spawn)
-        goal = CodexGoal(objective=objective, token_budget=token_budget)
-        handle = await self._host.spawn_codex_thread(replace(spawn, goal=goal))
+        # Take the caller's posture unchanged, apart from the goal; the
+        # record already refused a request with its own prompt or goal.
+        goal = goal_run.goal
+        handle = await self._host.spawn_codex_thread(replace(goal_run.request, goal=goal))
         # Read the stored goal back. A failed or cancelled read stops
         # the run, and a host error says the run was interrupted.
         try:
             stored = await self._host.get_codex_goal(handle.thread_id)
         except CodexAgentError as exc:
             await self._interrupt(handle)
-            raise self._unchecked(exc, GOAL_UNCHECKED_MESSAGE.format(thread_id=handle.thread_id)) from None
+            raise exc.with_sentence(CODEX_HOST_GOAL_UNCHECKED_SENTENCE.format(thread_id=handle.thread_id)) from None
         except BaseException:
             await self._interrupt(handle)
             raise
@@ -120,25 +113,17 @@ class CodexSkillFunctions:
             raise CodexErrorMapper.error(FailureCode.CODEX_COMMAND_NOT_RUN, problem, operation, handle.thread_id)
         return handle
 
-    async def run_skill(
-        self,
-        operation: CodexHostOperation,
-        skill: str,
-        prompt: str,
-        request: CodexSpawnRequest | None,
-    ) -> CodexTurnHandle:
+    async def run_skill(self, skill_run: CodexSkillRunRequest) -> CodexTurnHandle:
         # @intent a-skill-run-returns-only-once-codex-recorded-the-skill
         # The skill is resolved before any thread starts, sent as a
         # first-class input item after the caller's text, and then read
         # back from the stored turn; a run whose input cannot be
         # confirmed gets one interrupt and is reported (INV-24, INV-25,
         # INV-34, INV-35).
-        # Check the request, the skill name and the text first, so a
-        # bad argument sends nothing.
-        spawn = request or CodexSpawnRequest()
-        self._reject_own_input(operation, spawn)
-        self._reject_skill_arguments(operation, skill, spawn)
-        text = CodexTextInput(text=prompt)
+        # The record already checked the request, the skill name and
+        # the text, so a bad argument sent nothing.
+        operation, skill, spawn = skill_run.operation, skill_run.skill, skill_run.request
+        text = CodexTextInput(text=skill_run.prompt)
         # Find the first enabled skill of that exact name for the
         # folder the thread will run in.
         cwd = spawn.thread.cwd
@@ -151,7 +136,7 @@ class CodexSkillFunctions:
             content = await self._recorded_input(handle)
         except CodexAgentError as exc:
             await self._interrupt(handle)
-            raise self._unchecked(exc, SKILL_UNCHECKED_MESSAGE.format(thread_id=handle.thread_id)) from None
+            raise exc.with_sentence(CODEX_HOST_SKILL_UNCHECKED_SENTENCE.format(thread_id=handle.thread_id)) from None
         except BaseException:
             await self._interrupt(handle)
             raise
@@ -159,26 +144,10 @@ class CodexSkillFunctions:
         # the run and is reported.
         if content is None or not any(entry.get("type") == CodexInputType.SKILL.value and entry.get("name") == skill for entry in content):
             await self._interrupt(handle)
-            missing = INPUT_NOT_RECORDED_MESSAGE.format(skill=skill, seconds=CODEX_HOST_INPUT_CHECK_DEADLINE_SECONDS)
-            message = missing if content is None else SKILL_DROPPED_MESSAGE.format(skill=skill)
+            missing = CODEX_HOST_INPUT_NOT_RECORDED_MESSAGE.format(skill=skill, seconds=CODEX_HOST_INPUT_CHECK_DEADLINE_SECONDS)
+            message = missing if content is None else CODEX_HOST_SKILL_DROPPED_MESSAGE.format(skill=skill)
             raise CodexErrorMapper.error(FailureCode.CODEX_COMMAND_NOT_RUN, message, operation, handle.thread_id)
         return handle
-
-    @staticmethod
-    def _reject_own_input(operation: CodexHostOperation, spawn: CodexSpawnRequest) -> None:
-        # The wrapper sets the prompt or goal itself, so a request that
-        # carries its own would be ambiguous (INV-6, EC-37).
-        if isinstance(spawn.prompt, CodexRunInput) or spawn.prompt or spawn.goal is not None:
-            raise ConfigurationError(OWN_INPUT_MESSAGE.format(operation=operation.value))
-
-    @staticmethod
-    def _reject_skill_arguments(operation: CodexHostOperation, skill: str, spawn: CodexSpawnRequest) -> None:
-        # An ephemeral thread keeps no history, so its skill run could
-        # never be confirmed and would only spend (INV-6, EC-48).
-        if spawn.thread.ephemeral:
-            raise ConfigurationError(EPHEMERAL_SKILL_MESSAGE.format(operation=operation.value))
-        if not isinstance(skill, str) or not skill.strip():
-            raise ConfigurationError(SKILL_NAME_MESSAGE.format(operation=operation.value))
 
     @staticmethod
     def _skill_path(operation: CodexHostOperation, skill: str, cwd: str, listed: Sequence[CodexSkillInfo]) -> str:
@@ -190,14 +159,14 @@ class CodexSkillFunctions:
         enabled = next((info.path for info in matches if info.enabled), None)
         if enabled is not None:
             return enabled
-        place = FOLDER_PLACE.format(cwd=cwd) if cwd else APP_SERVER_PLACE
+        place = CODEX_HOST_FOLDER_PLACE.format(cwd=cwd) if cwd else CODEX_HOST_APP_SERVER_PLACE
         if matches:
-            raise CodexErrorMapper.error(FailureCode.CODEX_SKILL_DISABLED, SKILL_DISABLED_MESSAGE.format(skill=skill, place=place), operation)
+            raise CodexErrorMapper.error(FailureCode.CODEX_SKILL_DISABLED, CODEX_HOST_SKILL_DISABLED_MESSAGE.format(skill=skill, place=place), operation)
         names = list(dict.fromkeys(info.name for info in listed if info.enabled))
-        shown = NAME_SEPARATOR.join(names[:CODEX_HOST_SKILL_NAMES_IN_ERROR]) or NO_NAMES_TEXT
+        shown = CODEX_HOST_LIST_SEPARATOR.join(names[:CODEX_HOST_SKILL_NAMES_IN_ERROR]) or CODEX_HOST_NO_NAMES_TEXT
         capped = len(names) > CODEX_HOST_SKILL_NAMES_IN_ERROR
-        tail = MORE_NAMES_TEXT.format(count=len(names) - CODEX_HOST_SKILL_NAMES_IN_ERROR) if capped else ""
-        raise CodexErrorMapper.error(FailureCode.CODEX_SKILL_NOT_FOUND, SKILL_NOT_FOUND_MESSAGE.format(skill=skill, place=place, names=shown + tail), operation)
+        tail = CODEX_HOST_MORE_NAMES_TEXT.format(count=len(names) - CODEX_HOST_SKILL_NAMES_IN_ERROR) if capped else ""
+        raise CodexErrorMapper.error(FailureCode.CODEX_SKILL_NOT_FOUND, CODEX_HOST_SKILL_NOT_FOUND_MESSAGE.format(skill=skill, place=place, names=shown + tail), operation)
 
     async def _recorded_input(self, handle: CodexTurnHandle) -> list[Any] | None:
         # @intent the-input-read-back-is-bounded-twice
@@ -216,7 +185,7 @@ class CodexSkillFunctions:
                     return None
                 await asyncio.sleep(CODEX_HOST_INPUT_CHECK_INTERVAL_SECONDS)
             page = await self._host.list_codex_turns(handle.thread_id, limit=CODEX_HOST_INPUT_CHECK_TURN_LIMIT)
-            content = next((item.fields["content"] for turn in page.turns if turn.turn_id == handle.turn_id for item in turn.items if item.type == CODEX_USER_MESSAGE_ITEM_TYPE), None)
+            content = next((item.fields[CODEX_HOST_CONTENT_FIELD] for turn in page.turns if turn.turn_id == handle.turn_id for item in turn.items if item.type == CODEX_USER_MESSAGE_ITEM_TYPE), None)
             if content is not None:
                 return list(content)
         return None
@@ -233,19 +202,12 @@ class CodexSkillFunctions:
         # Why the stored goal does not match the one sent, or "" when
         # it does; a budget is compared only when one was sent (INV-21).
         if stored is None:
-            return NO_GOAL_MESSAGE
+            return CODEX_HOST_NO_GOAL_MESSAGE
         if stored.objective != goal.objective:
-            return OBJECTIVE_DIFFERS_MESSAGE
+            return CODEX_HOST_OBJECTIVE_DIFFERS_MESSAGE
         if goal.token_budget is not None and stored.token_budget != goal.token_budget:
-            return BUDGET_DIFFERS_MESSAGE.format(stored=stored.token_budget, sent=goal.token_budget)
+            return CODEX_HOST_BUDGET_DIFFERS_MESSAGE.format(stored=stored.token_budget, sent=goal.token_budget)
         return ""
-
-    @staticmethod
-    def _unchecked(exc: CodexAgentError, sentence: str) -> CodexAgentError:
-        # The check's own error with every field it carried (code,
-        # operation, error type, next step, thread id), plus the
-        # sentence that says the run was interrupted.
-        return CodexAgentError(exc.message + sentence, failure_code=exc.failure_code, operation=exc.operation, error_type=exc.safe_runtime_details.get("error_type", ""), next_step=exc.next_step, thread_id=exc.thread_id)
 
 
 __all__ = ["CodexSkillFunctions", "CodexSkillHost"]

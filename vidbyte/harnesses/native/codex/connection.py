@@ -3,7 +3,7 @@
 PURPOSE: Owns one CodexHost's openai-codex client: the host's own call executor, every bounded app-server call, the shielded spending starts and their late acceptance, the liveness monitor, the close thread, and the server-request router that answers approvals and dynamic tool calls.
 ROLE IN CODEBASE: The process and transport layer of vidbyte/harnesses/native/codex/; CodexHost and CodexPreflight reach Codex only through CodexConnection.
 ARCHITECTURE NOTE: "from openai_codex.client import CodexClient, CodexConfig" at module level is the test seam (section 13), so only CodexHost.__aenter__ imports this module (D-21). Every call runs on the host's own ThreadPoolExecutor, bounded by asyncio.wait_for, never on the loop or its default executor (D-1); the bounds are read from this module's namespace at call time.
-COMMON MODIFICATION PATTERNS: A new app-server call goes through call() with a typed CodexClient method, or through raw() with its generated response model when openai-codex has no typed method; a raw call that spends usage is added to SPENDING_RAW_METHODS, so it is sent once (D-2).
+COMMON MODIFICATION PATTERNS: A new app-server call goes through call() with a typed CodexClient method, or through raw() when openai-codex has no typed method, with its generated response model's name in CODEX_HOST_RAW_RESPONSE_MODELS (vidbyte/lib/constants/codex_host.py); a raw call that spends usage is added to CODEX_HOST_SPENDING_RAW_METHODS there, so it is sent once (D-2).
 KNOWN EDGE CASES: A spending start that outlives its caller or its bound is owned, never orphaned: a queued start is withdrawn, and a running one posts its outcome to the loop when it returns (INV-11). The router and the done-callback run on openai-codex's threads, so they never raise. Once close began or the process died, only cleanup calls are sent.
 RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.1 D-1 to D-3, D-18 and D-27, and 12.4 call list); docs/spec/codex-host-thread-helpers/spec.md (section 9.2 wire calls)
 TESTS: tests/features/codex_host/test_codex_host_lifecycle.py, tests/features/codex_host/test_codex_host_failures.py, tests/features/codex_host/test_codex_host_router.py, tests/features/codex_host/test_codex_host_helper_lifecycle.py
@@ -21,43 +21,30 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from openai_codex.client import CodexClient, CodexConfig
 from openai_codex.errors import JsonRpcError
-from openai_codex.generated.v2_all import (
-    GetAccountRateLimitsResponse,
-    ModelListResponse,
-    ReviewStartResponse,
-    SkillsListResponse,
-    ThreadDeleteResponse,
-    ThreadGoalGetResponse,
-    ThreadGoalSetResponse,
-    ThreadTurnsListResponse,
-    WindowsSandboxReadinessResponse,
-)
+from openai_codex.generated import v2_all
+from openai_codex.generated.v2_all import WindowsSandboxReadinessResponse
 from openai_codex.models import InitializeResponse
-from pydantic import BaseModel
 
 from vidbyte.harnesses.native.codex.errors import CodexErrorMapper
 from vidbyte.lib.constants.codex import (
     CODEX_ACCEPTED_APPROVAL_METHODS,
     CODEX_APPROVAL_ACCEPT_DECISION,
     CODEX_GOAL_CANCEL_CALL,
-    CODEX_GOAL_GET_METHOD,
-    CODEX_GOAL_SET_METHOD,
     CODEX_HOST_CLOSE_INTERRUPT_SECONDS,
     CODEX_HOST_CLOSE_WAIT_SECONDS,
     CODEX_HOST_REQUEST_TIMEOUT_SECONDS,
     CODEX_HOST_SINGLE_ATTEMPT,
     CODEX_HOST_WORKER_THREADS,
     CODEX_INITIALIZE_METHOD,
-    CODEX_MODEL_LIST_METHOD,
-    CODEX_RATE_LIMITS_READ_METHOD,
-    CODEX_REVIEW_START_METHOD,
     CODEX_SANDBOX_READINESS_METHOD,
-    CODEX_SKILLS_LIST_METHOD,
-    CODEX_THREAD_DELETE_METHOD,
-    CODEX_THREAD_TURNS_LIST_METHOD,
     CODEX_TOOL_CALL_METHOD,
     CODEX_TURN_INTERRUPT_METHOD,
     CODEX_UNREGISTERED_TOOL_TEXT,
+)
+from vidbyte.lib.constants.codex_host import (
+    CODEX_HOST_PROCESS_START,
+    CODEX_HOST_RAW_RESPONSE_MODELS,
+    CODEX_HOST_SPENDING_RAW_METHODS,
 )
 from vidbyte.lib.enums.codex import CodexHostOperation, CodexSandboxReadiness
 from vidbyte.lib.errors import CodexAgentError
@@ -69,26 +56,6 @@ if TYPE_CHECKING:
     from vidbyte.lib.dataclasses.codex_host import CodexTurnHandle
 
 ResultT = TypeVar("ResultT")
-
-# The generated response model of each call made through the raw path,
-# which openai-codex offers no typed method for (codex-host section
-# 12.4; the last four rows are thread-helpers section 9.2).
-RAW_RESPONSES: Mapping[str, type[BaseModel]] = {
-    CODEX_RATE_LIMITS_READ_METHOD: GetAccountRateLimitsResponse,
-    CODEX_SANDBOX_READINESS_METHOD: WindowsSandboxReadinessResponse,
-    CODEX_MODEL_LIST_METHOD: ModelListResponse,
-    CODEX_REVIEW_START_METHOD: ReviewStartResponse,
-    CODEX_GOAL_SET_METHOD: ThreadGoalSetResponse,
-    CODEX_THREAD_DELETE_METHOD: ThreadDeleteResponse,
-    CODEX_GOAL_GET_METHOD: ThreadGoalGetResponse,
-    CODEX_SKILLS_LIST_METHOD: SkillsListResponse,
-    CODEX_THREAD_TURNS_LIST_METHOD: ThreadTurnsListResponse,
-}
-# Raw calls that spend usage, so each is sent once and never retried
-# (D-2).
-SPENDING_RAW_METHODS = frozenset({CODEX_REVIEW_START_METHOD, CODEX_GOAL_SET_METHOD})
-# How a failed process start is named in the messages the mapper builds.
-PROCESS_START = "the app-server start"
 
 
 class CodexServerRequestRouter:
@@ -172,7 +139,7 @@ class CodexConnection:
             await asyncio.wait_for(self._loop.run_in_executor(self._executor, self.client.start), bound)
         except Exception as exc:
             missing = isinstance(exc, OSError) and not isinstance(exc, TimeoutError)
-            error = CodexErrorMapper.not_installed(target) if missing else CodexErrorMapper.from_exception(exc, CodexHostOperation.OPEN_HOST, PROCESS_START, dead=False, bound_seconds=bound)
+            error = CodexErrorMapper.not_installed(target) if missing else CodexErrorMapper.from_exception(exc, CodexHostOperation.OPEN_HOST, CODEX_HOST_PROCESS_START, dead=False, bound_seconds=bound)
             raise error from None
         return await self.call(CodexHostOperation.OPEN_HOST, CODEX_INITIALIZE_METHOD, self.client.initialize)
 
@@ -204,10 +171,13 @@ class CodexConnection:
         # @intent raw-calls-that-spend-are-sent-once
         # The raw path, for the calls openai-codex has no typed method
         # for. A call that spends usage gets a single attempt; the
-        # others keep the SDK's own overload retries (D-2).
+        # others keep the SDK's own overload retries (D-2). The lib
+        # table names each response model, and the class is read from
+        # openai-codex's generated models here.
         payload = dict(params) if params is not None else None
-        send = partial(self.client.request_with_retry_on_overload, method, payload, response_model=RAW_RESPONSES[method])
-        return partial(send, max_attempts=CODEX_HOST_SINGLE_ATTEMPT) if method in SPENDING_RAW_METHODS else send
+        model = getattr(v2_all, CODEX_HOST_RAW_RESPONSE_MODELS[method])
+        send = partial(self.client.request_with_retry_on_overload, method, payload, response_model=model)
+        return partial(send, max_attempts=CODEX_HOST_SINGLE_ATTEMPT) if method in CODEX_HOST_SPENDING_RAW_METHODS else send
 
     async def sandbox_status(self, operation: CodexHostOperation) -> CodexSandboxReadiness:
         # The Windows sandbox readiness, or NOT_CHECKED when this

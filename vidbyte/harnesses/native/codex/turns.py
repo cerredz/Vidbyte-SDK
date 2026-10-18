@@ -35,6 +35,7 @@ from openai_codex.models import Notification
 from vidbyte.agents.codex.metrics import CodexMetricsTranslator
 from vidbyte.agents.pricing.tracker import UsageTracker
 from vidbyte.lib.constants.codex import CODEX_GOAL_TERMINAL_STATUSES
+from vidbyte.lib.constants.codex_host import CODEX_HOST_USAGE_COUNTERS
 from vidbyte.lib.dataclasses.codex import (
     CodexAgentSettings,
     CodexRunResult,
@@ -60,11 +61,6 @@ if TYPE_CHECKING:
     from openai_codex.client import CodexClient
 
     from vidbyte.harnesses.native.codex.connection import CodexConnection
-
-# The token counters a usage delta subtracts, named as on CodexUsage.
-USAGE_COUNTERS = frozenset(
-    {"input_tokens", "cached_input_tokens", "cache_write_input_tokens", "output_tokens", "reasoning_output_tokens", "total_tokens"}
-)
 
 
 class CodexLiveTurn:
@@ -118,7 +114,7 @@ class CodexLiveTurn:
         # (INV-19).
         if self.first_usage is None or self.latest_usage is None:
             return None
-        counters = set(USAGE_COUNTERS)
+        counters = set(CODEX_HOST_USAGE_COUNTERS)
         before = Counter(self.first_usage.total.model_dump(mode="python", include=counters, exclude_none=True))
         before.subtract(self.first_usage.last.model_dump(mode="python", include=counters, exclude_none=True))
         latest = Counter(self.latest_usage.total.model_dump(mode="python", include=counters, exclude_none=True))
@@ -410,7 +406,7 @@ class CodexTurnRegistry:
             return None
         total: Counter[str] = Counter()
         for entry in ledger:
-            total.update({name: getattr(entry.usage, name) for name in USAGE_COUNTERS})
+            total.update({name: getattr(entry.usage, name) for name in CODEX_HOST_USAGE_COUNTERS})
         rollup = self._trackers[thread_id].rollup()
         complete = rollup.cost_complete and all(entry.usage_available for entry in ledger)
         return CodexThreadUsage(thread_id=thread_id, total=CodexUsage(**total), turns=tuple(ledger), cost_usd=rollup.cost_usd, cost_complete=complete)
