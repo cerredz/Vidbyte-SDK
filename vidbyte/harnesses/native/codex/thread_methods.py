@@ -339,7 +339,10 @@ class CodexThreadMethods(CodexHostCore):
         operation = CodexHostOperation.LIST_CODEX_CHILD_THREADS
         self._guard(operation, talks=True)
         listing = CodexChildThreadsRequest(thread_id=thread_id, descendants=descendants, cursor=cursor, limit=limit)
-        self._preflight.require_experimental_api(operation, CODEX_THREAD_LIST_METHOD)
+        # thread/list itself is stable; only the parent or ancestor
+        # filter it carries here is experimental, so a host without
+        # that API is refused naming the filter (first-class D-24).
+        self._preflight.require_experimental_api(operation, self._feature_params.child_filter_key(listing))
         # The parent must exist; then list its children of every source
         # kind (first-class INV-40).
         await self._preflight.require_thread(operation, listing.thread_id)

@@ -232,8 +232,15 @@ class CodexFeatureParamsTranslator:
         # the sub-agent children the default filter hides are listed;
         # openai-codex passes the dict through (first-class INV-5,
         # INV-40, D-24).
-        key = "ancestorThreadId" if request.descendants else "parentThreadId"
+        key = CodexFeatureParamsTranslator.child_filter_key(request)
         return {**params, key: request.thread_id, "sourceKinds": [kind.value for kind in CodexThreadSourceKind]}
+
+    @staticmethod
+    def child_filter_key(request: CodexChildThreadsRequest) -> str:
+        # The thread/list key a child listing filters on: the parent
+        # for direct children, or the ancestor for every depth. Only
+        # these keys need the experimental API (first-class D-24).
+        return "ancestorThreadId" if request.descendants else "parentThreadId"
 
 
 class CodexFeatureResponseTranslator:
