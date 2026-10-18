@@ -23,8 +23,8 @@ started: 2026-10-16 21:43
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 (cap reached) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
-- S2_HEAD (test-tree baseline): 6567f6aa (tests fb8ab004 + proof; fixture fold applied). Post-S3 test repairs end at 9e81a7d0. Test-edit check from now on: `git diff 9e81a7d0..HEAD --stat -- tests/` must be EMPTY (S4/S5/S6) unless the orchestrator adjudicates.
+- S1 review rounds: 2/2 (cap reached) · S5 repair iterations: 1/8 (iteration 1 launched 2026-10-17) · S5 re-review rounds: 0/2
+- S2_HEAD (test-tree baseline): 6567f6aa (tests fb8ab004 + proof; fixture fold applied). Post-S3 repairs end at 9e81a7d0; post-S4 additions end at fb7be13e. Test-edit check from now on: `git diff fb7be13e..HEAD --stat -- tests/` must be EMPTY (S5/S6) unless the orchestrator adjudicates.
 - Effective base after merge: origin/main 6f5a7310 (drift checks diff 6f5a7310..origin/main)
 
 ## Decisions the orchestrator made
@@ -73,6 +73,9 @@ started: 2026-10-16 21:43
 
 - 2026-10-17 — S4: three lens reviews (conformance 0B/1M/2m; conventions 2B/2M/6m; engineering 0B/1M/7m), all MERGEABLE AFTER FIXES; verifier (hit a 429, resumed; candidate fixes only in scratch copies, worktree verified clean) merged 21 → 19: CONFIRMED R-1 comments >72 cols (Blocker), R-2 Grok counts a failed "Tool not found" call as a connected server → dead mount returns success (raised Major→Blocker; reproduced with shipped fakes), R-3 three-level cleanup chain + per-removal 10 s budgets vs INV-12 (Blocker; merges R-C2/R-V5/R-V1), R-4 tavily comment/README contradict registry row (Major), R-5 spec NG-2 says #1055 open, no Q-19, README silent on CodexHost (Major), R-6 12 new A002 @intent misses hidden by ratchet slack (Major); Minors R-7..R-19 (R-7/R-8/R-9 trivial). Spot-check passed: 6 confirmed rows each with path:line + evidence; 0 refuted. CI 39075450892 + Static policy 39075452414 green on d00bd8ba.
 - 2026-10-17 — S5 sequencing (orchestrator): R-2's root cause includes the spec's own wording ("listed or called" in FR-14/D-11/§9.1/AC-12 — a failed call proves NON-connection), so (1) resume the S1 spec author for r5: that wording → "completed a call", plus R-5's spec part (NG-2 fact, add Q-19 Codex follow-up) — not a review round; the post-S5 re-review covers it; (2) a fresh test author (S2 role) adds the R-2 regression test (must be red on current code for the right reason) and strengthens R-16 (cancel test survives shield removal) and R-17 (AC-28 vacuous with the user's entry disabled) — mutation-proved; (3) S5 repair iteration 1 fixes R-1..R-6 + trivial Minors R-7/R-8/R-9, makes the new test green, full gate, push, dispatch CI. Follow-up Minors (R-10..R-15, R-18, R-19) go to the PR body.
+
+- 2026-10-17 — Spec r5 @ 7364f514 (spec author): R-2 evidence rule → "listed in available_commands or completed a call; a failed call ("Tool not found") never counts" across FR-14, D-11, AC-12, EC-16/44/45, §8.5 comment, §9.1 evidence row + Grok reader bullet; NG-2/§2 corrected (#1055 merged; CodexHost is a host harness) and Q-19 added (Codex follow-up). Spot-check: revision 5, status reviewed, pr kept, only spec.md, §8.4 + 37 §12.3 rows byte-identical. Left §12.3 row 23 "nor called" as is (§9.1 defines it as a completed call) to avoid churn.
+- 2026-10-17 — Post-S4 test additions (fresh test author): 8b02afdd R-2 regression (2 new AC-12 cases, playwright + jina, RED on current code: orchestrator re-ran → `DID NOT RAISE NativeThreadError`, 2 failed / 2 passed), 131b854f R-16 second-cancel sibling test (passes shipped; fails under no-shield mutation), 5979eabb R-17 user's-own-enabled-server sibling test (passes shipped; fails under counting mutant), fb7be13e docs. No vidbyte/ change; 0 credential-pattern literals added. Test baseline moves to fb7be13e.
 
 ## User replies (verbatim)
 - (none yet)
