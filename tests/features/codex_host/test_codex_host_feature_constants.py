@@ -4,7 +4,7 @@ PURPOSE: Pins every fixed value the first-class-features spec adds: the section 
 ROLE IN CODEBASE: Constants layer of the slice-2 tests in tests/features/codex_host/ (docs/spec/codex-host-first-class/spec.md sections 8.5, 9.2 and 9.3, D-13, D-28, D-29, INV-10, INV-18, INV-46, INV-50). Nothing here needs openai-codex, so these tests also run on CI.
 ARCHITECTURE NOTE: The expected values are the spec's literals from codex_host_feature_support.py; each production module is imported inside the test that reads it, so a constant the feature has not added yet fails that test alone.
 COMMON MODIFICATION PATTERNS: When the spec changes a text or a table, change the literal in codex_host_feature_support.py; the tables here pick it up by name.
-KNOWN EDGE CASES: Section 9.3 (r4) names all fifteen new method-name constants, so each is pinned by its name, its wire string, its place in __all__ and its absence from vidbyte.lib.constants.codex. The pause, resume and edit message is CODEX_HOST_NO_STORED_GOAL_MESSAGE in r4, because CODEX_HOST_NO_GOAL_MESSAGE keeps the thread-helpers text pinned at test_codex_host_helper_surface.py:94; its text is pinned through pause_codex_goal's behaviour in test_codex_host_goal_control.py, and its cause and next step keep the NO_GOAL names pinned here.
+KNOWN EDGE CASES: Section 9.3 (r4) names all fifteen new method-name constants, so each is pinned by its name, its wire string, its place in __all__ and its absence from vidbyte.lib.constants.codex. The pause, resume and edit message is pinned here by its r4 name, CODEX_HOST_NO_STORED_GOAL_MESSAGE, next to its cause and next step, which keep the NO_GOAL names; CODEX_HOST_NO_GOAL_MESSAGE keeps the thread-helpers text pinned at test_codex_host_helper_surface.py:94.
 RELATED DOCS: tests/features/codex_host/FEATURE.md; docs/spec/codex-host-first-class/spec.md sections 8.5, 9.2, 9.3 and 13.
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/codex_host/test_codex_host_feature_constants.py
 """
@@ -46,6 +46,7 @@ TEXT_NAMES = (
     "MODE_MODEL_MISSING_CAUSE",
     "MODE_MODEL_MISSING_NEXT_STEP",
     "TURN_SETTINGS_FINISHED_MESSAGE",
+    "NO_STORED_GOAL_MESSAGE",
     "NO_GOAL_CAUSE",
     "NO_GOAL_NEXT_STEP",
     "GOAL_NOT_RESUMABLE_MESSAGE",

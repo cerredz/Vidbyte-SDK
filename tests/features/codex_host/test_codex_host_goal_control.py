@@ -2,7 +2,7 @@
 
 PURPOSE: Proves the four goal controls over the in-memory app-server: pause_codex_goal sending one user-origin paused set and ending a tracked goal run through its finish rule; resume_codex_goal resuming a paused, blocked, usage-limited or raised budget-limited goal with a status-only set under connection.start and tracking the run, refusing an active, complete or spent goal before thread/resume, and cleaning up a failed start exactly once; edit_codex_goal changing only the objective or budget; and clear_codex_goal clearing a stored goal on an idle thread.
 ROLE IN CODEBASE: Goal layer of the slice-2 tests in tests/features/codex_host/ (docs/spec/codex-host-first-class/spec.md AC-25 to AC-29, INV-7, INV-30 to INV-34, D-17, D-38, EC-37 to EC-41, EC-58). Every class needs the optional openai-codex extra, so CI skips them.
-ARCHITECTURE NOTE: The fake's thread/goal/set answers a status-only active set on a goal that was not active by starting a goal turn, as Codex does (A-1, A-19); goal_resume_starts_turn turns that off to elapse the start window. RecordingGoalState logs finish and the fake client logs cancel_goal_operation and unregister_goal_operation, so the cleanup order is read from server.kinds. The no-goal packet is checked with the spec's new text (section 9.2) through codex_host_feature_support, because the constant name it shares with run_codex_goal's older text is reported as a spec defect (test-plan.md).
+ARCHITECTURE NOTE: The fake's thread/goal/set answers a status-only active set on a goal that was not active by starting a goal turn, as Codex does (A-1, A-19); goal_resume_starts_turn turns that off to elapse the start window. RecordingGoalState logs finish and the fake client logs cancel_goal_operation and unregister_goal_operation, so the cleanup order is read from server.kinds. The no-goal packet is checked with the text of CODEX_HOST_NO_STORED_GOAL_MESSAGE (section 9.2, r4) through codex_host_feature_support; test_codex_host_feature_constants.py pins the name, and run_codex_goal keeps the older CODEX_HOST_NO_GOAL_MESSAGE.
 COMMON MODIFICATION PATTERNS: Add a goal status to RESUMABLE or NOT_RESUMABLE when CODEX_HOST_GOAL_RESUME_FROM_STATUSES changes. Keep each request sequence whole; section 9.2 calls its order normative.
 KNOWN EDGE CASES: The resume start window is patched to 0.2 seconds in vidbyte.harnesses.native.codex.turn_starts, where section 13 says it is read at call time; that test waits for the window by design. The SDK's own goal cancel sends its pause set without an origin, so the cancel is counted by status, not by origin.
 RELATED DOCS: tests/features/codex_host/FEATURE.md; docs/spec/codex-host-first-class/spec.md sections 6.1, 6.2, 6.3, 9.1 ("a stored goal under this slice's calls") and 9.2.
@@ -26,8 +26,8 @@ from tests.features.codex_host.codex_host_feature_support import (
     GOAL_NOT_RESUMABLE_MESSAGE,
     GOAL_NOT_RESUMABLE_NEXT_STEP,
     NO_GOAL_CAUSE,
-    NO_GOAL_MESSAGE,
     NO_GOAL_NEXT_STEP,
+    NO_STORED_GOAL_MESSAGE,
     OBJECTIVE_CANARY,
     THREAD_RUNNING_MESSAGE,
     assert_packet,
@@ -93,7 +93,7 @@ class CodexGoalPauseHostTests(_GoalCase):
         self.assertIs(snapshot.goal_status, CodexGoalStatus.PAUSED)
 
     async def test_a_thread_without_a_stored_goal_is_refused_after_the_goal_read(self) -> None:
-        # EC-40, INV-30: codex.session_not_found with the no-goal message, its cause and its next step.
+        # EC-40, INV-30: codex.session_not_found with the stored-goal message, its cause and its next step.
         thread = self.with_goal(None)
         host = await self.opened()
         error = await self.codex_error(host.pause_codex_goal(thread.thread_id), "codex.session_not_found")
@@ -102,7 +102,7 @@ class CodexGoalPauseHostTests(_GoalCase):
             error,
             operation="pause_codex_goal",
             code="codex.session_not_found",
-            message=NO_GOAL_MESSAGE.format(operation="pause_codex_goal"),
+            message=NO_STORED_GOAL_MESSAGE.format(operation="pause_codex_goal"),
             cause=NO_GOAL_CAUSE,
             next_step=NO_GOAL_NEXT_STEP,
             thread_id=thread.thread_id,
@@ -200,7 +200,7 @@ class CodexGoalResumeHostTests(_GoalCase):
             error,
             operation="resume_codex_goal",
             code="codex.session_not_found",
-            message=NO_GOAL_MESSAGE.format(operation="resume_codex_goal"),
+            message=NO_STORED_GOAL_MESSAGE.format(operation="resume_codex_goal"),
             cause=NO_GOAL_CAUSE,
             next_step=NO_GOAL_NEXT_STEP,
             thread_id=thread.thread_id,
@@ -321,7 +321,7 @@ class CodexGoalEditClearHostTests(_GoalCase):
             error,
             operation="edit_codex_goal",
             code="codex.session_not_found",
-            message=NO_GOAL_MESSAGE.format(operation="edit_codex_goal"),
+            message=NO_STORED_GOAL_MESSAGE.format(operation="edit_codex_goal"),
             cause=NO_GOAL_CAUSE,
             next_step=NO_GOAL_NEXT_STEP,
             thread_id=thread.thread_id,

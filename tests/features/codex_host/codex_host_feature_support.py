@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: This module imports nothing the feature adds, nothing from op
 FUNCTION INVENTORY: FEATURE_METHODS lists the twenty-five new methods in CodexHostOperation order; NO_TOOL_FUNCTIONS, EXPERIMENTAL_FUNCTIONS, UNMODELED_METHODS, STREAM_KINDS and the other tables mirror sections 6.1 and 9.3; the *_MESSAGE, *_CAUSE and *_NEXT_STEP texts mirror section 9.2; priced_cost prices usage deltas with the repo's own tracker (the pricing oracle); packet_text builds the full CodexErrorMapper message for an override cause and next step, and assert_packet checks an error against it; FeatureStubMethods answers update_codex_thread_settings through list_codex_child_threads from scripted records.
 COMMON MODIFICATION PATTERNS: When the spec changes one of these texts or tables, change the literal here. Add a stub method here, with the host's parameter names recorded as keywords, when a new tool calls a new host method.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import codex_host_support, vidbyte.harnesses.native, codex_host_features, codex_host_modes, the new enums or openai_codex at module level. 2. Do not copy production logic; the tables are the spec's words. 3. Do not start a process or touch the network.
-KNOWN EDGE CASES: Three of the fifteen method-name constants are named by the spec (the first and the last); the others are pinned by value only, because section 9.3 does not name them. StubCodexHost.wait_codex_turns answers each handle with its current stub snapshot, so a test that wants snapshots with items marks the handles finished first.
+KNOWN EDGE CASES: Section 9.3 (r4) names all fifteen method-name constants; FEATURE_METHOD_CONSTANTS maps each name to its wire string. StubCodexHost.wait_codex_turns answers each handle with its current stub snapshot, so a test that wants snapshots with items marks the handles finished first.
 RELATED DOCS: tests/features/codex_host/FEATURE.md; tests/features/codex_host/codex_host_support.py; docs/spec/codex-host-first-class/spec.md sections 6.1, 8.5, 9.2, 9.3 and 13.
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/codex_host
 """
@@ -183,7 +183,7 @@ MODE_MODEL_MISSING_MESSAGE = "Codex reported no model for the thread, and neithe
 MODE_MODEL_MISSING_CAUSE = "The thread was started without a resolved model, and a collaboration mode must name one."
 MODE_MODEL_MISSING_NEXT_STEP = "Set collaboration_mode.model or turn.model, then call again."
 TURN_SETTINGS_FINISHED_MESSAGE = "update_codex_turn_settings changes only a running turn this host started, and turn {turn_id} on thread {thread_id} is not running on this host."
-NO_GOAL_MESSAGE = "{operation} needs a goal on the thread, and Codex stores none."
+NO_STORED_GOAL_MESSAGE = "{operation} needs a goal on the thread, and Codex stores none."
 NO_GOAL_CAUSE = "The thread exists, but no goal was ever set on it, or the goal was cleared."
 NO_GOAL_NEXT_STEP = "Start a goal with run_codex_goal, or check the thread with get_codex_goal."
 GOAL_NOT_RESUMABLE_MESSAGE = "resume_codex_goal resumes only a paused, blocked, usage-limited or budget-limited goal, and this goal is {status}."
