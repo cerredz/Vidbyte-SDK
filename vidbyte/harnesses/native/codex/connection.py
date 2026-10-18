@@ -1,12 +1,12 @@
 """FILE: vidbyte/harnesses/native/codex/connection.py
 
-PURPOSE: Owns one CodexHost's openai-codex client: the host's own call executor, every bounded app-server call and its log record, the overload retries of the idempotent reads, the spending starts and their late acceptance, the liveness monitor, the close thread, and the server-request router that answers approvals, questions and dynamic tool calls.
+PURPOSE: Owns one CodexHost's openai-codex client: the host's own call executor, every bounded app-server call and its log record, the overload retries of the idempotent reads, the spending starts and their late acceptance, the liveness monitor, the close thread, and the server-request router that answers approvals, questions and dynamic tool calls. CodexJsonObjectResponse is the passthrough response class of the raw calls openai-codex has no response model for.
 ROLE IN CODEBASE: The process and transport layer of vidbyte/harnesses/native/codex/; CodexHost and CodexPreflight reach Codex only through CodexConnection, and the developer's approval_handler is reached only through CodexServerRequestRouter.
 ARCHITECTURE NOTE: "from openai_codex.client import CodexClient, CodexConfig" and "from openai_codex.retry import retry_on_overload" at module level are test seams (section 13), so only CodexHost.__aenter__ imports this module (D-21). Every call runs on the host's own ThreadPoolExecutor, bounded by asyncio.wait_for, never on the loop or its default executor (D-1); the bounds, including CODEX_TOOL_CALL_TIMEOUT_SECONDS for the approval handler, are read from this module's namespace at call time. The router schedules the handler on the host's loop and waits for it on openai-codex's reader thread, under one lock shared with close (hardening INV-17, INV-21).
-COMMON MODIFICATION PATTERNS: A new app-server call goes through call() with a typed CodexClient method, or through raw() when openai-codex has no typed method, with its generated response model's name in CODEX_HOST_RAW_RESPONSE_MODELS (vidbyte/lib/constants/codex_host.py); a raw call that spends usage is added to CODEX_HOST_SPENDING_RAW_METHODS there, so it is sent once (D-2), and a typed idempotent read joins CODEX_HOST_RETRIED_METHODS there to be retried on overload (hardening D-7). A new routed server-request kind is a CodexServerRequestKind member; the router needs no change beyond its fit check (INV-18).
-KNOWN EDGE CASES: A spending start that outlives its caller or its bound is owned, never orphaned: a queued start is withdrawn, and a running one posts its outcome to the loop when it returns (INV-11). A start is awaited without asyncio.shield, so its caller leaving cancels the asyncio copy of its outcome too, and a late failure is never stored where nothing reads it, which would let the asyncio or concurrent.futures logger write its text (hardening INV-10, EC-58). The router and the done-callback run on openai-codex's threads, so they never raise. Once close began or the process died, only cleanup calls are sent; a call refused for that reason, or withdrawn while still queued because its caller was cancelled, sent nothing, so it writes no log record (EC-57). A call or start whose caller was cancelled after it was sent writes its one record from the worker once it returns; one whose bound ran out was already logged, so its late outcome writes none (hardening INV-7). A host without an approval_handler answers every routed request with its fail-closed default and writes no fallback WARNING, because that default is its designed answer (hardening INV-8, INV-16). The router never holds its lock while it waits for the handler, because close takes that lock on the loop the handler needs. Codex chooses the method and ids of a server request and a caller or Codex the thread id of a call, so each record shows them through LogToken.of, cut at CODEX_HOST_LOG_TOKEN_MAX_CHARS, while routing, answers and errors keep the raw values (hardening INV-10).
-RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.1 D-1 to D-3, D-18 and D-27, and 12.4 call list); docs/spec/codex-host-thread-helpers/spec.md (section 9.2 wire calls); docs/spec/codex-host-hardening/spec.md (sections 6.1 INV-3, INV-7, INV-8, INV-10, INV-15 to INV-18 and INV-21, and 8.1 D-3, D-7, D-12)
-TESTS: tests/features/codex_host/test_codex_host_lifecycle.py, tests/features/codex_host/test_codex_host_failures.py, tests/features/codex_host/test_codex_host_router.py, tests/features/codex_host/test_codex_host_helper_lifecycle.py, tests/features/codex_host/test_codex_host_approvals.py, tests/features/codex_host/test_codex_host_observability.py, tests/features/codex_host/test_codex_host_resilience.py, tests/features/codex_host/test_codex_host_sdk_contract.py
+COMMON MODIFICATION PATTERNS: A new app-server call goes through call() with a typed CodexClient method, or through raw() when openai-codex has no typed method, with its generated response model's name in CODEX_HOST_RAW_RESPONSE_MODELS (vidbyte/lib/constants/codex_host.py), or its method in CODEX_HOST_UNMODELED_RAW_METHODS when openai-codex has no model for it, and a parse function from CodexFeatureResponseTranslator when its answer becomes a record; a raw call that spends usage is added to CODEX_HOST_SPENDING_RAW_METHODS there, so it is sent once (D-2), and a typed idempotent read joins CODEX_HOST_RETRIED_METHODS there to be retried on overload (hardening D-7). A new routed server-request kind is a CodexServerRequestKind member; the router needs no change beyond its fit check (INV-18).
+KNOWN EDGE CASES: A raw call's parse runs inside the worker, right after the answer is validated, so a malformed answer fails as that call's own failure (first-class D-3). CodexJsonObjectResponse hands parse a read-only copy of the answer, never the SDK's own dict. A spending start that outlives its caller or its bound is owned, never orphaned: a queued start is withdrawn, and a running one posts its outcome to the loop when it returns (INV-11). A start is awaited without asyncio.shield, so its caller leaving cancels the asyncio copy of its outcome too, and a late failure is never stored where nothing reads it, which would let the asyncio or concurrent.futures logger write its text (hardening INV-10, EC-58). The router and the done-callback run on openai-codex's threads, so they never raise. Once close began or the process died, only cleanup calls are sent; a call refused for that reason, or withdrawn while still queued because its caller was cancelled, sent nothing, so it writes no log record (EC-57). A call or start whose caller was cancelled after it was sent writes its one record from the worker once it returns; one whose bound ran out was already logged, so its late outcome writes none (hardening INV-7). A host without an approval_handler answers every routed request with its fail-closed default and writes no fallback WARNING, because that default is its designed answer (hardening INV-8, INV-16). The router never holds its lock while it waits for the handler, because close takes that lock on the loop the handler needs. Codex chooses the method and ids of a server request and a caller or Codex the thread id of a call, so each record shows them through LogToken.of, cut at CODEX_HOST_LOG_TOKEN_MAX_CHARS, while routing, answers and errors keep the raw values (hardening INV-10).
+RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.1 D-1 to D-3, D-18 and D-27, and 12.4 call list); docs/spec/codex-host-thread-helpers/spec.md (section 9.2 wire calls); docs/spec/codex-host-hardening/spec.md (sections 6.1 INV-3, INV-7, INV-8, INV-10, INV-15 to INV-18 and INV-21, and 8.1 D-3, D-7, D-12); docs/spec/codex-host-first-class/spec.md (D-3, INV-6)
+TESTS: tests/features/codex_host/test_codex_host_lifecycle.py, tests/features/codex_host/test_codex_host_failures.py, tests/features/codex_host/test_codex_host_router.py, tests/features/codex_host/test_codex_host_helper_lifecycle.py, tests/features/codex_host/test_codex_host_approvals.py, tests/features/codex_host/test_codex_host_observability.py, tests/features/codex_host/test_codex_host_resilience.py, tests/features/codex_host/test_codex_host_sdk_contract.py, tests/features/codex_host/test_codex_host_feature_contract.py
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from collections.abc import Awaitable, Callable, Coroutine, Mapping
 from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
 from contextlib import suppress
 from functools import partial
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from openai_codex.client import CodexClient, CodexConfig
@@ -51,6 +52,7 @@ from vidbyte.lib.constants.codex_host import (
     CODEX_HOST_RAW_RESPONSE_MODELS,
     CODEX_HOST_RETRIED_METHODS,
     CODEX_HOST_SPENDING_RAW_METHODS,
+    CODEX_HOST_UNMODELED_RAW_METHODS,
 )
 from vidbyte.lib.dataclasses.codex_host import CodexServerAnswer, CodexServerRequest
 from vidbyte.lib.enums.codex import (
@@ -71,6 +73,17 @@ if TYPE_CHECKING:
 
 ResultT = TypeVar("ResultT")
 logger = logging.getLogger(__name__)
+
+
+class CodexJsonObjectResponse:
+    """The response class of a raw call openai-codex has no model for: it hands back the JSON object as a read-only copy."""
+
+    @staticmethod
+    def model_validate(value: Mapping[str, Any]) -> Mapping[str, Any]:
+        # openai-codex validates every answer through its response
+        # class, so this one only copies the object and freezes the
+        # copy; the parse function reads its members (first-class D-3).
+        return MappingProxyType(dict(value))
 
 
 class CodexServerRequestRouter:
@@ -361,17 +374,21 @@ class CodexConnection:
         self._log_call(operation, method, thread_id, started)
         return result
 
-    def raw(self, method: str, params: Mapping[str, Any] | None) -> Callable[[], Any]:
+    def raw(self, method: str, params: Mapping[str, Any] | None, parse: Callable[[Any], Any] | None = None) -> Callable[[], Any]:
         # @intent raw-calls-that-spend-are-sent-once
         # The raw path, for the calls openai-codex has no typed method
         # for. A call that spends usage gets a single attempt; the
         # others keep the SDK's own overload retries (D-2). The lib
         # table names each response model, and the class is read from
-        # openai-codex's generated models here.
+        # openai-codex's generated models here; a method with no model
+        # gets the passthrough class. A parse function, when given,
+        # turns the answer into a record inside the worker, so a bad
+        # answer fails as this call's own failure (first-class D-3).
         payload = dict(params) if params is not None else None
-        model = getattr(v2_all, CODEX_HOST_RAW_RESPONSE_MODELS[method])
+        model = CodexJsonObjectResponse if method in CODEX_HOST_UNMODELED_RAW_METHODS else getattr(v2_all, CODEX_HOST_RAW_RESPONSE_MODELS[method])
         send = partial(self.client.request_with_retry_on_overload, method, payload, response_model=model)
-        return partial(send, max_attempts=CODEX_HOST_SINGLE_ATTEMPT) if method in CODEX_HOST_SPENDING_RAW_METHODS else send
+        bounded = partial(send, max_attempts=CODEX_HOST_SINGLE_ATTEMPT) if method in CODEX_HOST_SPENDING_RAW_METHODS else send
+        return bounded if parse is None else lambda: parse(bounded())
 
     async def sandbox_status(self, operation: CodexHostOperation) -> CodexSandboxReadiness:
         # The Windows sandbox readiness, or NOT_CHECKED when this
@@ -601,4 +618,4 @@ class CodexConnection:
             self._executor.shutdown(wait=False, cancel_futures=True)
 
 
-__all__ = ["CodexConnection", "CodexServerRequestRouter"]
+__all__ = ["CodexConnection", "CodexJsonObjectResponse", "CodexServerRequestRouter"]
