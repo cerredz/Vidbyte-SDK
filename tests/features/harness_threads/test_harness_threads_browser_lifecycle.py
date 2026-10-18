@@ -2,7 +2,7 @@
 
 PURPOSE: What a browser call leaves behind and how it ends (docs/spec/harness-browser-tools/spec.md §5 layers 9 to 12, FR-14, FR-15, INV-4, INV-5, INV-12): the orphaned browser is reaped by its per-call folder marker however the call ends (AC-13, EC-19 to EC-22), artifacts survive only a successful return (FR-15), the required check per harness, where a failed call never counts as evidence (AC-12, EC-16 to EC-18, EC-44, EC-45), the workspace stays untouched (AC-16), concurrent calls keep their own browsers (AC-21), the 1,000 caps (EC-29), the Grok browser output cap (D-19), keys never reach error text (INV-4) and ProcessReaper itself (§8.5).
 ROLE IN CODEBASE: Start here when the reaper, the discard path, the required check or the artifact collection changes.
-ARCHITECTURE NOTE: A fake server started with a profile option spawns a "browser" through a short-lived spawner, so it is an orphan on every platform and leads its own session on POSIX (fake_browser.start_browser); no tree stop of the harness reaches it, and only a reap by command-line marker ends it before its 30 s limit. Each test reads the browser pids the fakes logged and checks them with the pack's process_alive. The `sweep` fixture kills any browser a failing implementation left behind.
+ARCHITECTURE NOTE: A fake server started with a profile option spawns a "browser" through a short-lived spawner, so it is an orphan on every platform and leads its own session on POSIX (fake_browser.start_browser); no tree stop of the harness reaches it, and only a reap by command-line marker ends it before its 30 s limit. Each test reads the browser pids the fakes logged and checks them with the pack's process_alive. The `sweep` fixture kills any browser a failing implementation left behind. The second-cancel test holds ProcessReaper.reap at its start until the test has cancelled again, then runs the real reap; that is the only SDK name the file wraps, and only to place the cancel inside the cleanup.
 FUNCTION INVENTORY: sweep kills leftover fake browsers after each test; gone waits until every pid is dead; changed lists the sandbox paths a call added, changed or removed; refuse runs a call that must raise; the test_* functions are one behaviour each.
 COMMON MODIFICATION PATTERNS: A new way for a call to end gets a test here that the browser is gone and the per-call folder handled; a new harness adds its screenshot call name to SCREENSHOT_CALLS.
 WHAT NOT TO DO IN THIS FILE: 1. Do not sleep to wait for a process; poll with wait_until. 2. Do not kill a fake browser before the assertion that the SDK killed it.
@@ -119,6 +119,43 @@ async def test_a_cancelled_call_reaps_and_re_raises(browser_world, browser_api, 
         await task
     assert await gone(wait_until, alive, sandbox.browser_pids(), REAP_SECONDS + pack.SLACK_SECONDS)
     assert sandbox.call_folders() == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("harness", HARNESSES)
+async def test_a_second_cancel_cannot_stop_the_cleanup(browser_world, browser_api, sandbox, browse, pack, alive, wait_until, fast_stop, monkeypatch, sweep, harness) -> None:
+    # AC-13 / EC-20 / INV-12: a second cancel that lands while discard
+    # runs (a TaskGroup teardown, or a timeout plus the caller's own
+    # cancel) still propagates, but the shielded cleanup goes on: the
+    # browser is reaped and the folder removed. The reap is held at its
+    # start until the second cancel has landed and then runs for real
+    # (nothing is stubbed), so the cancel always lands mid-cleanup;
+    # without the shield it would end the cleanup right there.
+    reaper = browser_api.process.ProcessReaper
+    real_reap = reaper.reap
+    reaping = asyncio.Event()
+    cleanups: list[asyncio.Task[Any]] = []
+
+    async def held_reap(marker: str, *, timeout_seconds: float) -> int:
+        cleanups.append(asyncio.current_task())
+        await reaping.wait()
+        return await real_reap(marker, timeout_seconds=timeout_seconds)
+
+    monkeypatch.setattr(reaper, "reap", staticmethod(held_reap))
+    task = asyncio.create_task(browse(harness, tools=["playwright"], fake={"mode": "hold"}))
+    try:
+        assert await wait_until(lambda: bool(sandbox.browser_pids()), START_SECONDS), "the fake browser never started"
+        task.cancel()
+        assert await wait_until(lambda: bool(cleanups), START_SECONDS), "the cancelled call never began its cleanup"
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        reaping.set()
+    assert await gone(wait_until, alive, sandbox.browser_pids(), REAP_SECONDS + pack.SLACK_SECONDS), "EC-20: the second cancel stopped the cleanup before the reap"
+    assert await wait_until(lambda: sandbox.call_folders() == [], pack.SLACK_SECONDS), "EC-20: the second cancel stopped the cleanup before the folder was removed"
+    finished, _pending = await asyncio.wait(cleanups, timeout=pack.SLACK_SECONDS)
+    assert finished == set(cleanups) and not any(cleanup.cancelled() for cleanup in cleanups), "EC-20: the cleanup itself was cancelled"
 
 
 @pytest.mark.asyncio
