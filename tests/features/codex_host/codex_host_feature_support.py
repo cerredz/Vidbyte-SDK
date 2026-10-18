@@ -3,7 +3,7 @@
 PURPOSE: The first-class-features half of the CodexHost test support: the spec's literal texts, tables and bounds for the twenty-five new host methods, a packet helper that checks a CodexErrorMapper message whose likely cause and next step are the spec's own overrides, and FeatureStubMethods, the sixteen methods StubCodexHost answers for the new agent tools.
 ROLE IN CODEBASE: Imported by the slice-2 test modules of tests/features/codex_host/ and by codex_host_support.py, whose StubCodexHost inherits FeatureStubMethods. The literals are written from docs/spec/codex-host-first-class/spec.md sections 8.5, 9.2 and 9.3, never read from the production constants, so a changed text fails a test.
 ARCHITECTURE NOTE: This module imports nothing the feature adds, nothing from openai-codex and nothing from codex_host_support at module level, so every module that imports it still collects before the feature exists, on CI, and without an import cycle. FeatureStubMethods reaches the records it returns only inside each method, and it calls StubCodexHost._enter, _handle, _snapshot and _thread_info through self, so a tool error raised by the stub still names codex_host_support.py:_enter as its origin.
-FUNCTION INVENTORY: FEATURE_METHODS lists the twenty-five new methods in CodexHostOperation order; NO_TOOL_FUNCTIONS, EXPERIMENTAL_FUNCTIONS, UNMODELED_METHODS, STREAM_KINDS and the other tables mirror sections 6.1 and 9.3; the *_MESSAGE, *_CAUSE and *_NEXT_STEP texts mirror section 9.2; priced_cost prices usage deltas with the repo's own tracker (the pricing oracle); packet_text builds the full CodexErrorMapper message for an override cause and next step, and assert_packet checks an error against it; STAT_REFUSALS and refused_stat simulate a stat of one path that the operating system refuses (re-review R-RR1); FeatureStubMethods answers update_codex_thread_settings through list_codex_child_threads from scripted records.
+FUNCTION INVENTORY: FEATURE_METHODS lists the twenty-five new methods in CodexHostOperation order; NO_TOOL_FUNCTIONS, EXPERIMENTAL_FUNCTIONS, UNMODELED_METHODS, STREAM_KINDS and the other tables mirror sections 6.1 and 9.3; the *_MESSAGE, *_CAUSE and *_NEXT_STEP texts mirror section 9.2; priced_cost prices usage deltas with the repo's own tracker (the pricing oracle); packet_text builds the full CodexErrorMapper message for an override cause and next step, and assert_packet checks an error against it; STAT_REFUSALS and refused_stat simulate a stat of one path that the operating system refuses (re-review R-RR1); NON_PATH_FSPATHS and NonPathFspath give an os.PathLike whose __fspath__ returns a non-path (re-review R-RR2-1); FeatureStubMethods answers update_codex_thread_settings through list_codex_child_threads from scripted records.
 COMMON MODIFICATION PATTERNS: When the spec changes one of these texts or tables, change the literal here. Add a stub method here, with the host's parameter names recorded as keywords, when a new tool calls a new host method.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import codex_host_support, vidbyte.harnesses.native, codex_host_features, codex_host_modes, the new enums or openai_codex at module level. 2. Do not copy production logic; the tables are the spec's words. 3. Do not start a process or touch the network.
 KNOWN EDGE CASES: Section 9.3 (r4) names all fifteen method-name constants; FEATURE_METHOD_CONSTANTS maps each name to its wire string. StubCodexHost.wait_codex_turns answers each handle with its current stub snapshot, so a test that wants snapshots with items marks the handles finished first.
@@ -287,6 +287,24 @@ def refused_stat(path: Path, error_type: type[OSError], number: int, text: str) 
         return real_stat(self, *args, **kwargs)
 
     return mock.patch("pathlib.Path.stat", stat)
+
+
+# Re-review R-RR2-1 (INV-2): values that os.fspath refuses with TypeError when __fspath__ returns them, because they are
+# neither str nor bytes. Each row is (label, value). A bytes value is not here, because the record refuses it as a ConfigurationError.
+NON_PATH_FSPATHS = (("__fspath__ returns an int", 5), ("__fspath__ returns None", None))
+
+
+class NonPathFspath:
+    """An os.PathLike that breaks the protocol: its __fspath__ returns the given value, which is not a path."""
+
+    def __init__(self, value: Any) -> None:
+        self.value = value
+
+    def __fspath__(self) -> Any:
+        return self.value
+
+    def __repr__(self) -> str:
+        return f"NonPathFspath({self.value!r})"
 
 
 class FeatureStubMethods:

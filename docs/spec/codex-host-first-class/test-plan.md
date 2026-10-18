@@ -76,7 +76,7 @@ Each row lists the tests that name the ID in their own comment or docstring, plu
 | Spec ID | Tests | Note |
 |---|---|---|
 | INV-1 | `stream_wait::test_stream_codex_turn_checks_its_argument_at_the_call`; `inputs::test_every_public_method_refuses_a_bad_argument_before_any_request` |  |
-| INV-2 | `feature_contract::test_a_json_rpc_error_on_each_functions_own_method_is_its_own_packet_with_one_failed_call_record`; `mcp_memory::test_a_server_answer_the_sdk_model_rejects_is_a_protocol_mismatch`; `mcp_memory::test_codex_refusing_the_memory_mode_names_the_thread`; `settings_modes::test_codex_refusing_the_update_is_an_api_error_with_codexs_own_message`; `stream_wait::test_streaming_without_a_running_loop_raises_pythons_own_runtime_error`; `feature_records::test_a_worktree_repository_whose_stat_is_refused_is_the_repository_refusal_raised_from_none`; `worktree::test_a_repository_whose_stat_is_refused_is_refused_as_the_repository_field_without_its_path_and_git_never_runs` | The two refused-stat rows were added in round 5 (re-review R-RR1): an `OSError` from the repository record's `is_dir` must never reach the caller. |
+| INV-2 | `feature_contract::test_a_json_rpc_error_on_each_functions_own_method_is_its_own_packet_with_one_failed_call_record`; `mcp_memory::test_a_server_answer_the_sdk_model_rejects_is_a_protocol_mismatch`; `mcp_memory::test_codex_refusing_the_memory_mode_names_the_thread`; `settings_modes::test_codex_refusing_the_update_is_an_api_error_with_codexs_own_message`; `stream_wait::test_streaming_without_a_running_loop_raises_pythons_own_runtime_error`; `feature_records::test_a_worktree_repository_whose_stat_is_refused_is_the_repository_refusal_raised_from_none`; `worktree::test_a_repository_whose_stat_is_refused_is_refused_as_the_repository_field_without_its_path_and_git_never_runs`; `feature_records::test_a_worktree_repository_whose_fspath_returns_a_non_path_is_the_repository_refusal_raised_from_none`; `worktree::test_a_repository_whose_fspath_returns_a_non_path_is_refused_as_the_repository_field_before_the_root_is_made` | The two refused-stat rows were added in round 5 (re-review R-RR1): an `OSError` from the repository record's `is_dir` must never reach the caller. The two non-path `__fspath__` rows were added in round 6 (R-RR2-1): a `TypeError` from `os.fspath` must not reach it either. |
 | INV-3 | `feature_contract::test_a_json_rpc_error_on_each_functions_own_method_is_its_own_packet_with_one_failed_call_record` |  |
 | INV-4 | `feature_contract::test_without_the_experimental_api_the_stable_functions_still_talk_to_codex`; `mcp_memory::test_the_listing_works_on_a_host_without_the_experimental_api` |  |
 | INV-5 | `settings_modes::test_a_plan_mode_spawn_sends_the_model_codex_resolved_and_is_priced_as_it`; `settings_modes::test_an_update_sends_one_settings_call_holding_only_the_fields_that_were_set`; `goal_control::test_an_edit_sends_only_the_objective_or_the_budget_with_the_user_origin`; `thread_admin::test_child_listing_names_the_parent_or_ancestor_and_every_source_kind`; `sdk_contract::test_the_experimental_fields_are_missing_from_the_generated_params_so_they_are_added_after_validation` | The mode and the lineage filters on the wire, and JSON null for a cleared tier and a removed budget. |
@@ -428,3 +428,20 @@ The shared helper `refused_stat` and its table `STAT_REFUSALS` live in `codex_ho
 | `CHAINED`: `… as exc: … from exc` | 1 | 2 failed: `PermissionError(13, 'Permission denied') is not None` |
 
 **The area.** On the current code: `3 failed, 1302 passed, 3 skipped in 86.20s (0:01:26)`, which is the two new tests plus the inherited `harness_threads` test. Under `FIX`: `1 failed, 1304 passed, 3 skipped in 87.67s (0:01:27)`. Lint: `SDK-LINT: PASS`.
+
+## Round 6 (re-review R-RR2-1, HEAD `e1f9cb4f`): a non-path `__fspath__`
+
+Re-review round 2 (`reports/S5-rereview-2.md`) rated R-RR2-1 Minor. `RecordFieldConverter.to_path` calls `os.fspath`, which raises `TypeError` when an `os.PathLike`'s `__fspath__` returns neither `str` nor `bytes`. The record's `try` catches only `(ConfigurationError, OSError)`, so the raw `TypeError` reaches the caller, and INV-2 says no `TypeError` ever may. The review's in-scope repair is `except (ConfigurationError, OSError, TypeError):` (`codex_host_inputs.py:591`).
+
+The shared `NON_PATH_FSPATHS` table and `NonPathFspath` class are in `codex_host_feature_support.py`. The table rows are an `__fspath__` that returns an int and one that returns None. A `bytes` return was checked and does not reproduce: `to_path` refuses it, and the record turns that into its repository refusal, raised from None. So it is not a row.
+
+| Test | Review | Spec | Evidence at `e1f9cb4f` |
+|---|---|---|---|
+| `feature_records::test_a_worktree_repository_whose_fspath_returns_a_non_path_is_the_repository_refusal_raised_from_none` | R-RR2-1 | INV-2, INV-1 | Red. Both subtests raise `TypeError: expected NonPathFspath.__fspath__() to return str or bytes, not int` (or `not NoneType`). Each expects the repository message, `details == {"field": "repository"}`, not a `TypeError`, and `from None`. It runs on CI. |
+| `worktree::test_a_repository_whose_fspath_returns_a_non_path_is_refused_as_the_repository_field_before_the_root_is_made` | R-RR2-1 | INV-2, INV-1 | Red, with the same two `TypeError`s through `create_codex_worktree`. Each subtest expects `refused_locally(…, "repository")`, the same message, details and chain, and afterwards no `exc_info` in any log record, no `~/.vidbyte` and no request. |
+
+**Proof.**
+- `python -m unittest` on the two tests ends `FAILED (errors=4)`.
+- With the repair applied in memory (`scratchpad/round6/fixcheck_rr2.py FIX`, which edits no file), the worktree and records files give 60 passed, against 2 failed and 58 passed without it.
+- The area gives `3 failed, 1304 passed, 3 skipped in 82.41s (0:01:22)`: the two tests above plus the inherited `harness_threads` failure.
+- Lint: `SDK-LINT: PASS`.

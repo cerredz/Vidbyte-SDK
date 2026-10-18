@@ -1,6 +1,6 @@
 """FILE: tests/features/codex_host/test_codex_host_worktree.py
 
-PURPOSE: Proves create_codex_worktree and the canonical GitWorktrees helper with the real git on temporary repositories: one git worktree add under Path.home()/.vidbyte/codex-worktrees on a new branch from HEAD or a base ref, a folder name built from the repository name and the branch, an existing folder refused before git runs, a worktree root that cannot be prepared refused by the exception's type alone, git missing, a nonzero exit with git's first stderr line cut to the cap, a hang stopped at the bound, the branch rule refused before git, a repository whose stat is refused turned into the record's own refusal without its path, logs that carry no path, branch or git output, and never a Codex request.
+PURPOSE: Proves create_codex_worktree and the canonical GitWorktrees helper with the real git on temporary repositories: one git worktree add under Path.home()/.vidbyte/codex-worktrees on a new branch from HEAD or a base ref, a folder name built from the repository name and the branch, an existing folder refused before git runs, a worktree root that cannot be prepared refused by the exception's type alone, git missing, a nonzero exit with git's first stderr line cut to the cap, a hang stopped at the bound, the branch rule refused before git, a repository whose stat is refused or whose __fspath__ returns a non-path turned into the record's own refusal without its path, logs that carry no path, branch or git output, and never a Codex request.
 ROLE IN CODEBASE: Worktree layer of the slice-2 tests in tests/features/codex_host/ (docs/spec/codex-host-first-class/spec.md AC-24, INV-8, INV-9, INV-2, INV-29, FR-13, FR-35, D-19, EC-34 to EC-36, EC-63, T-5, NFR-7). The host class needs the optional openai-codex extra, so CI skips it; the GitWorktrees class needs only git and runs everywhere.
 ARCHITECTURE NOTE: Spec section 13 makes git a real seam: CliRunner and CliArgv stay real and only Path.home is patched. The repositories are built with subprocess git under a private global config (GIT_CONFIG_GLOBAL to an empty file, GIT_CONFIG_NOSYSTEM, GIT_CEILING_DIRECTORIES at the temporary root), so a developer's own git settings, hooks or a parent repository cannot change an answer. Expected git messages come from an oracle: the test runs the same git worktree add argv the spec gives and reads its exit code and first stderr line, so no git wording is hard-coded. A post-checkout hook is the child that observes git's environment or hangs; git worktree add runs it after the checkout.
 COMMON MODIFICATION PATTERNS: Add a git failure as one row of the EC-34 table with the setup that causes it; the oracle supplies the expected text. Keep repository and branch names to safe characters unless the test is about the folder name.
@@ -25,6 +25,7 @@ from unittest import mock
 from tests.features.codex_host.codex_host_feature_support import (
     BRANCH_CANARY,
     GIT_STDERR_CANARY,
+    NON_PATH_FSPATHS,
     PATH_CANARY,
     STAT_REFUSALS,
     WORKTREE_EXISTS_CAUSE,
@@ -44,6 +45,7 @@ from tests.features.codex_host.codex_host_feature_support import (
     WORKTREE_TIMED_OUT_CAUSE,
     WORKTREE_TIMED_OUT_MESSAGE,
     WORKTREE_TIMED_OUT_NEXT_STEP,
+    NonPathFspath,
     assert_packet,
     refused_stat,
 )
@@ -301,6 +303,23 @@ class CodexWorktreeHostTests(_GitSandbox, FeatureHostCase):
         self.assertFalse((self.home / ".vidbyte").exists())
         # git worktree add makes its branch first, so an unchanged branch list proves git never ran.
         self.assertEqual(self.branches(repo), [self.branch_of(repo)])
+        self.assertEqual(self.sent_methods(), [])
+
+    async def test_a_repository_whose_fspath_returns_a_non_path_is_refused_as_the_repository_field_before_the_root_is_made(self) -> None:
+        # INV-2, INV-1 (re-review R-RR2-1): os.fspath raises TypeError for an os.PathLike whose __fspath__ returns neither
+        # str nor bytes. The call must refuse the repository field, raised from None, before the root is made or a request is sent.
+        host = await self.opened(linux=False)
+        records = self.capture_logs(HOST_LOGGER)
+        for label, value in NON_PATH_FSPATHS:
+            with self.subTest(case=label):
+                error = await self.refused_locally(host.create_codex_worktree(NonPathFspath(value), "feat/x"), "repository")
+                self.assertNotIsInstance(error, TypeError)
+                self.assertEqual(str(error), WORKTREE_REPOSITORY_MESSAGE)
+                self.assertEqual(error.details, {"field": "repository"})
+                self.assertIsNone(error.__cause__)
+                self.assertTrue(error.__suppress_context__)
+        self.assertTrue(all(record.exc_info is None for record in records))
+        self.assertFalse((self.home / ".vidbyte").exists())
         self.assertEqual(self.sent_methods(), [])
 
     def root_error_type(self, home: Path) -> str:
