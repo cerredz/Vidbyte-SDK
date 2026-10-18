@@ -76,7 +76,7 @@ Each row lists the tests that name the ID in their own comment or docstring, plu
 | Spec ID | Tests | Note |
 |---|---|---|
 | INV-1 | `stream_wait::test_stream_codex_turn_checks_its_argument_at_the_call`; `inputs::test_every_public_method_refuses_a_bad_argument_before_any_request` |  |
-| INV-2 | `feature_contract::test_a_json_rpc_error_on_each_functions_own_method_is_its_own_packet_with_one_failed_call_record`; `mcp_memory::test_a_server_answer_the_sdk_model_rejects_is_a_protocol_mismatch`; `mcp_memory::test_codex_refusing_the_memory_mode_names_the_thread`; `settings_modes::test_codex_refusing_the_update_is_an_api_error_with_codexs_own_message`; `stream_wait::test_streaming_without_a_running_loop_raises_pythons_own_runtime_error` |  |
+| INV-2 | `feature_contract::test_a_json_rpc_error_on_each_functions_own_method_is_its_own_packet_with_one_failed_call_record`; `mcp_memory::test_a_server_answer_the_sdk_model_rejects_is_a_protocol_mismatch`; `mcp_memory::test_codex_refusing_the_memory_mode_names_the_thread`; `settings_modes::test_codex_refusing_the_update_is_an_api_error_with_codexs_own_message`; `stream_wait::test_streaming_without_a_running_loop_raises_pythons_own_runtime_error`; `feature_records::test_a_worktree_repository_whose_stat_is_refused_is_the_repository_refusal_raised_from_none`; `worktree::test_a_repository_whose_stat_is_refused_is_refused_as_the_repository_field_without_its_path_and_git_never_runs` | The two refused-stat rows were added in round 5 (re-review R-RR1): an `OSError` from the repository record's `is_dir` must never reach the caller. |
 | INV-3 | `feature_contract::test_a_json_rpc_error_on_each_functions_own_method_is_its_own_packet_with_one_failed_call_record` |  |
 | INV-4 | `feature_contract::test_without_the_experimental_api_the_stable_functions_still_talk_to_codex`; `mcp_memory::test_the_listing_works_on_a_host_without_the_experimental_api` |  |
 | INV-5 | `settings_modes::test_a_plan_mode_spawn_sends_the_model_codex_resolved_and_is_priced_as_it`; `settings_modes::test_an_update_sends_one_settings_call_holding_only_the_fields_that_were_set`; `goal_control::test_an_edit_sends_only_the_objective_or_the_budget_with_the_user_origin`; `thread_admin::test_child_listing_names_the_parent_or_ancestor_and_every_source_kind`; `sdk_contract::test_the_experimental_fields_are_missing_from_the_generated_params_so_they_are_added_after_validation` | The mode and the lineage filters on the wire, and JSON null for a cleared tier and a removed budget. |
@@ -164,7 +164,7 @@ Each row lists the tests that name the ID in their own comment or docstring, plu
 | EC-32 | `feature_records::test_the_plan_side_chat_and_resume_records_refuse_every_field_their_row_names`; `side_chat::test_a_name_tools_an_ephemeral_setting_a_prompt_or_a_goal_in_the_request_is_refused_before_any_request` |  |
 | EC-33 | `side_chat::test_a_side_chat_cancelled_after_codex_accepted_its_turn_has_that_turn_interrupted_once` |  |
 | EC-34 | `worktree::test_a_folder_outside_git_a_branch_that_exists_or_an_unknown_base_ref_reports_gits_exit_code_and_first_stderr_line`; `worktree::test_a_first_stderr_line_longer_than_the_cap_is_cut_to_500_characters_and_never_logged` |  |
-| EC-35 | `worktree::test_a_bad_branch_base_ref_or_repository_is_refused_before_git_runs_or_the_root_is_made` |  |
+| EC-35 | `worktree::test_a_bad_branch_base_ref_or_repository_is_refused_before_git_runs_or_the_root_is_made`; `worktree::test_a_repository_whose_stat_is_refused_is_refused_as_the_repository_field_without_its_path_and_git_never_runs` | Round 5: a repository whose stat is refused is the same repository refusal, before the root is made or git runs. |
 | EC-36 | `worktree::test_a_git_run_that_outlives_the_bound_is_stopped_and_reported_as_timed_out` |  |
 | EC-37 | `goal_control::test_a_refused_resume_set_sends_no_cancel_and_still_cleans_up` |  |
 | EC-38 | `goal_control::test_a_resume_cancelled_after_its_set_was_sent_adopts_the_late_run_and_stops_it_once` |  |
@@ -404,3 +404,27 @@ Review rows R-1 and R-3 to R-7 (`review.md`), with the verifier's evidence (`rep
 | S3c-fits-ignores-cumulative-turn-text | 1 | killed by the turn character test |
 
 **The area** (`tests/features/codex_host tests/features/harness_threads tests/test_codex_*.py`): `8 failed, 1295 passed, 3 skipped in 85.03s`. That is the 7 red tests above plus the inherited `harness_threads` test, and every other test passes as before. Lint: `SDK-LINT: PASS`.
+
+## Round 5 (re-review R-RR1, HEAD `2d0f5216`): the refused repository stat
+
+Re-review round 1 (`reports/S5-rereview.md`) found that `create_codex_worktree` still lets a raw `PermissionError` reach the caller. `CodexWorktreeRequest.__post_init__` (`codex_host_inputs.py:589-592`) calls `RecordFieldValidator.require_directory`, whose `Path.is_dir()` raises a refused `stat` again: Python 3.11's pathlib ignores only errnos 2, 9, 20 and 10062. The record catches only `ConfigurationError`, so the `OSError`, whose text quotes the absolute path, escapes. That breaks INV-2. The repair is `except (ConfigurationError, OSError):`.
+
+The shared helper `refused_stat` and its table `STAT_REFUSALS` live in `codex_host_feature_support.py`. They copy the reviewer's probe (`scratchpad/s5-rereview/probe_rr_repo_stat.py`): `pathlib.Path.stat` is patched to raise for the one repository path, with `PermissionError(EACCES)` and `OSError(ENAMETOOLONG)`, and each refusal quotes the path, as the real one does. The second row is there so that a repair catching only `PermissionError` fails. The refusal is simulated, because a folder that refuses `stat` cannot be made the same way on Windows.
+
+| Test | Spec | Evidence |
+|---|---|---|
+| `feature_records::test_a_worktree_repository_whose_stat_is_refused_is_the_repository_refusal_raised_from_none` | INV-2 | Runs on CI, because it needs no SDK. There are four subtests, {EACCES, ENAMETOOLONG} × {`Path`, `str`}. Each expects `WORKTREE_REPOSITORY_MESSAGE` and `details == {"field": "repository"}`, raised from None (`__cause__ is None` and `__suppress_context__`), with no path canary. The same folder with its stat answered is accepted. |
+| `worktree::test_a_repository_whose_stat_is_refused_is_refused_as_the_repository_field_without_its_path_and_git_never_runs` | INV-2, EC-35, T-5 | Two subtests, on a real repository named with `PATH_CANARY`. Each expects a `ConfigurationError` naming `repository` (through `refused_locally`), the message, the details and the `from None` chain, with no canary in the error or any `HOST_LOGGER` record and no `exc_info`. Afterwards there is no `~/.vidbyte`, the branch list is unchanged (git never ran), and no app-server request was sent. |
+
+**Red on the current code** (production unchanged since `ec17d5ce`): all 6 subtests raise the raw exception, `PermissionError: [Errno 13] Permission denied: '…\\repo-pathcanary5e13'` or `OSError: [Errno 38] File name too long: '…'`. The proof is `python -m unittest` on the two tests: `FAILED (errors=6)`.
+
+**The fix, applied in memory** (`scratchpad/round5/fixcheck_rr1.py`, which edits no worktree file), on the worktree and records files:
+
+| Variant | Exit | Result |
+|---|---|---|
+| none | 1 | 2 failed, 56 passed |
+| `FIX`: `except (ConfigurationError, OSError):` | 0 | 58 passed |
+| `PERMISSION-ONLY`: `except (ConfigurationError, PermissionError):` | 1 | 2 failed, from the ENAMETOOLONG rows: `OSError: [Errno 38]` |
+| `CHAINED`: `… as exc: … from exc` | 1 | 2 failed: `PermissionError(13, 'Permission denied') is not None` |
+
+**The area.** On the current code: `3 failed, 1302 passed, 3 skipped in 86.20s (0:01:26)`, which is the two new tests plus the inherited `harness_threads` test. Under `FIX`: `1 failed, 1304 passed, 3 skipped in 87.67s (0:01:27)`. Lint: `SDK-LINT: PASS`.

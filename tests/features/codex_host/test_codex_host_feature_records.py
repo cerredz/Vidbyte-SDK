@@ -1,7 +1,7 @@
 """FILE: tests/features/codex_host/test_codex_host_feature_records.py
 
 PURPOSE: Proves the records the first-class-features spec adds check themselves when they are built: the collaboration-mode records and their from_preset and reject_conflict rules, CodexSpawnRequest.collaboration_mode, CodexThreadSettingsUpdate, CodexTurnEvent and the other output records, GitWorktreeSpec with its git-ref rule (a seeded property test against the spec's own pattern), and the stored forms and refusals of the seventeen input records.
-ROLE IN CODEBASE: Record layer of the slice-2 tests in tests/features/codex_host/ (docs/spec/codex-host-first-class/spec.md section 9.1, INV-1, INV-10, INV-14, AC-4, AC-6, AC-18, AC-32, EC-7, EC-12, EC-13, EC-28, EC-32, EC-35, EC-41, EC-46, EC-48, EC-51, T-5). Nothing here needs openai-codex or a host, so these tests also run on CI.
+ROLE IN CODEBASE: Record layer of the slice-2 tests in tests/features/codex_host/ (docs/spec/codex-host-first-class/spec.md section 9.1, INV-1, INV-10, INV-14, AC-4, AC-6, AC-18, AC-32, EC-7, EC-12, EC-13, EC-28, EC-32, EC-35, EC-41, EC-46, EC-48, EC-51, T-5, INV-2 for a refused stat). Nothing here needs openai-codex or a host, so these tests also run on CI.
 ARCHITECTURE NOTE: Each test reaches the new modules through a small importer function, so a module the feature has not built yet fails that test with ModuleNotFoundError instead of stopping collection. The expected texts are the spec's literals in codex_host_feature_support.py, never the production constants.
 COMMON MODIFICATION PATTERNS: When section 9.1 adds a check, add one refused row and one accepted row to the class of that record. Keep the property test's seed fixed, so a failure is reproducible.
 KNOWN EDGE CASES: Section 9.2 (r4) names an effort conflict by the collaboration mode's own field, "reasoning_effort", in CODEX_HOST_MODE_CONFLICT_MESSAGE, and fills the network-access message's {sandbox} slot with the CodexSandbox member's .name, so PROVIDER_DEFAULT never leaves the slot empty; both rows check the whole text.
@@ -30,15 +30,18 @@ from tests.features.codex_host.codex_host_feature_support import (
     INJECT_ITEMS_MESSAGE,
     MODE_CONFLICT_MESSAGE,
     MODE_KIND_MESSAGE,
+    PATH_CANARY,
     SETTINGS_EMPTY_MESSAGE,
     SETTINGS_MODE_MODEL_MESSAGE,
     SETTINGS_NETWORK_ACCESS_MESSAGE,
     SETTINGS_WRITABLE_ROOTS_MESSAGE,
     SIDE_CHAT_REJECTED_FIELDS,
+    STAT_REFUSALS,
     TIER_CLEAR_CONFLICT_MESSAGE,
     WAIT_HANDLES_MESSAGE,
     WORKTREE_REF_MESSAGE,
     WORKTREE_REPOSITORY_MESSAGE,
+    refused_stat,
 )
 from tests.features.codex_host.codex_host_support import GOAL_FIELD_MESSAGE, GOAL_REJECTED_FIELDS, LIMIT_MESSAGE, make_echo_tool
 from vidbyte.lib.errors import ConfigurationError
@@ -487,6 +490,23 @@ class CodexFeatureInputRecordTests(_RecordCase):
                 with self.subTest(field=field, value=value):
                     fields = {"repository": folder, "branch": "feat/x", field: value}
                     self.refused(lambda fields=fields: inputs.CodexWorktreeRequest(**fields), field, WORKTREE_REF_MESSAGE.format(field=field, maximum=200))
+
+    def test_a_worktree_repository_whose_stat_is_refused_is_the_repository_refusal_raised_from_none(self) -> None:
+        # INV-2 (re-review R-RR1): Path.is_dir raises a refused stat again, so the record maps it to its own refusal. That
+        # refusal is raised from None, because the OSError's text quotes the absolute path. A str and a Path are both refused.
+        inputs = _inputs()
+        with tempfile.TemporaryDirectory() as folder:
+            repository = Path(folder).resolve() / f"repo-{PATH_CANARY}"
+            repository.mkdir()
+            for (label, *refusal), given in itertools.product(STAT_REFUSALS, (repository, str(repository))):
+                with self.subTest(case=label, given=type(given).__name__), refused_stat(repository, *refusal):
+                    error = self.refused(lambda given=given: inputs.CodexWorktreeRequest(repository=given, branch="feat/x"), "repository", WORKTREE_REPOSITORY_MESSAGE)
+                    self.assertEqual(error.details, {"field": "repository"})
+                    self.assertIsNone(error.__cause__)
+                    self.assertTrue(error.__suppress_context__)
+                    self.assertNotIn(PATH_CANARY, str(error))
+            # The same folder with its stat answered is accepted, so the refusal above came from the stat alone.
+            self.assertEqual(inputs.CodexWorktreeRequest(repository=repository, branch="feat/x").repository, repository)
 
     def test_a_goal_edit_changes_something_and_never_sets_and_clears_the_budget_together(self) -> None:
         # EC-41.

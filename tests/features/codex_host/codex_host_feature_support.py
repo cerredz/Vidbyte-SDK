@@ -3,7 +3,7 @@
 PURPOSE: The first-class-features half of the CodexHost test support: the spec's literal texts, tables and bounds for the twenty-five new host methods, a packet helper that checks a CodexErrorMapper message whose likely cause and next step are the spec's own overrides, and FeatureStubMethods, the sixteen methods StubCodexHost answers for the new agent tools.
 ROLE IN CODEBASE: Imported by the slice-2 test modules of tests/features/codex_host/ and by codex_host_support.py, whose StubCodexHost inherits FeatureStubMethods. The literals are written from docs/spec/codex-host-first-class/spec.md sections 8.5, 9.2 and 9.3, never read from the production constants, so a changed text fails a test.
 ARCHITECTURE NOTE: This module imports nothing the feature adds, nothing from openai-codex and nothing from codex_host_support at module level, so every module that imports it still collects before the feature exists, on CI, and without an import cycle. FeatureStubMethods reaches the records it returns only inside each method, and it calls StubCodexHost._enter, _handle, _snapshot and _thread_info through self, so a tool error raised by the stub still names codex_host_support.py:_enter as its origin.
-FUNCTION INVENTORY: FEATURE_METHODS lists the twenty-five new methods in CodexHostOperation order; NO_TOOL_FUNCTIONS, EXPERIMENTAL_FUNCTIONS, UNMODELED_METHODS, STREAM_KINDS and the other tables mirror sections 6.1 and 9.3; the *_MESSAGE, *_CAUSE and *_NEXT_STEP texts mirror section 9.2; priced_cost prices usage deltas with the repo's own tracker (the pricing oracle); packet_text builds the full CodexErrorMapper message for an override cause and next step, and assert_packet checks an error against it; FeatureStubMethods answers update_codex_thread_settings through list_codex_child_threads from scripted records.
+FUNCTION INVENTORY: FEATURE_METHODS lists the twenty-five new methods in CodexHostOperation order; NO_TOOL_FUNCTIONS, EXPERIMENTAL_FUNCTIONS, UNMODELED_METHODS, STREAM_KINDS and the other tables mirror sections 6.1 and 9.3; the *_MESSAGE, *_CAUSE and *_NEXT_STEP texts mirror section 9.2; priced_cost prices usage deltas with the repo's own tracker (the pricing oracle); packet_text builds the full CodexErrorMapper message for an override cause and next step, and assert_packet checks an error against it; STAT_REFUSALS and refused_stat simulate a stat of one path that the operating system refuses (re-review R-RR1); FeatureStubMethods answers update_codex_thread_settings through list_codex_child_threads from scripted records.
 COMMON MODIFICATION PATTERNS: When the spec changes one of these texts or tables, change the literal here. Add a stub method here, with the host's parameter names recorded as keywords, when a new tool calls a new host method.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import codex_host_support, vidbyte.harnesses.native, codex_host_features, codex_host_modes, the new enums or openai_codex at module level. 2. Do not copy production logic; the tables are the spec's words. 3. Do not start a process or touch the network.
 KNOWN EDGE CASES: Section 9.3 (r4) names all fifteen method-name constants; FEATURE_METHOD_CONSTANTS maps each name to its wire string. StubCodexHost.wait_codex_turns answers each handle with its current stub snapshot, so a test that wants snapshots with items marks the handles finished first.
@@ -13,9 +13,12 @@ TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/codex_host
 
 from __future__ import annotations
 
+import errno
 import os
 import unittest
+from pathlib import Path
 from typing import Any
+from unittest import mock
 
 # Section 8.5: the twenty-five new CodexHost methods, in the CodexHostOperation order D-29 fixes.
 FEATURE_METHODS = (
@@ -260,6 +263,30 @@ def assert_packet(case: unittest.TestCase, error: Any, *, operation: str, code: 
     case.assertEqual(error.operation, operation, error.message)
     case.assertEqual(error.message, packet_text(operation, code, message, cause, next_step, thread_id))
     case.assertEqual(error.next_step, next_step)
+
+
+# Re-review R-RR1 (INV-2): stat refusals that Path.is_dir raises again, because Python 3.11's pathlib ignores only ENOENT,
+# ENOTDIR, EBADF and ELOOP. Each row is (label, exception type, errno, strerror). Like the real refusal, each quotes the path.
+STAT_REFUSALS = (
+    ("stat refused (EACCES)", PermissionError, errno.EACCES, "Permission denied"),
+    ("name too long (ENAMETOOLONG)", OSError, errno.ENAMETOOLONG, "File name too long"),
+)
+
+
+def refused_stat(path: Path, error_type: type[OSError], number: int, text: str) -> Any:
+    """Patch pathlib.Path.stat for a with block, so that a stat of this one path raises error_type(number, text, path).
+
+    A folder this process may not search refuses the stat of every path under it on POSIX, but no such folder can be
+    made the same way on Windows, so the refusal is simulated, as the worktree root's mkdir refusal is (EC-63).
+    """
+    real_stat = Path.stat
+
+    def stat(self: Path, *args: Any, **kwargs: Any) -> Any:
+        if self == path:
+            raise error_type(number, text, str(self))
+        return real_stat(self, *args, **kwargs)
+
+    return mock.patch("pathlib.Path.stat", stat)
 
 
 class FeatureStubMethods:
