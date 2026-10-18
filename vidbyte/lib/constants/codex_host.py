@@ -545,6 +545,11 @@ CODEX_HOST_LOAD_GOAL_UNFINISHED_NEXT_STEP = "Pause the goal with pause_codex_goa
 CODEX_HOST_WORKTREE_EXISTS_MESSAGE = "create_codex_worktree did not run git, because the worktree folder for this repository and branch already exists under the Vidbyte worktree root."
 CODEX_HOST_WORKTREE_EXISTS_CAUSE = "A worktree for the same repository folder name and branch was created before."
 CODEX_HOST_WORKTREE_EXISTS_NEXT_STEP = "Use the existing worktree, choose another branch name, or remove the old one with git worktree remove."
+# The root refusal names only the exception's type, never the home
+# path or the exception's text (first-class INV-29, EC-63).
+CODEX_HOST_WORKTREE_ROOT_MESSAGE = "create_codex_worktree did not run git, because preparing the worktree root ~/.vidbyte/codex-worktrees raised {error_type}."
+CODEX_HOST_WORKTREE_ROOT_CAUSE = "The home folder cannot be found, a file stands where ~/.vidbyte or ~/.vidbyte/codex-worktrees should be a folder, or this process may not read or create folders there."
+CODEX_HOST_WORKTREE_ROOT_NEXT_STEP = "Make sure the home folder exists and that ~/.vidbyte/codex-worktrees is a folder this process can write to, moving aside any file in its place, then call again."
 CODEX_HOST_WORKTREE_GIT_MISSING_MESSAGE = "create_codex_worktree could not start the git program."
 CODEX_HOST_WORKTREE_GIT_MISSING_CAUSE = "git is not installed, is not on PATH, or cannot be run by this process."
 CODEX_HOST_WORKTREE_GIT_MISSING_NEXT_STEP = "Install git or put it on PATH, then call again."
@@ -732,6 +737,9 @@ __all__ = [
     "CODEX_HOST_WORKTREE_NAME_SEPARATOR",
     "CODEX_HOST_WORKTREE_REF_MESSAGE",
     "CODEX_HOST_WORKTREE_REPOSITORY_MESSAGE",
+    "CODEX_HOST_WORKTREE_ROOT_CAUSE",
+    "CODEX_HOST_WORKTREE_ROOT_MESSAGE",
+    "CODEX_HOST_WORKTREE_ROOT_NEXT_STEP",
     "CODEX_HOST_WORKTREE_ROOT_PARTS",
     "CODEX_HOST_WORKTREE_TIMED_OUT_CAUSE",
     "CODEX_HOST_WORKTREE_TIMED_OUT_MESSAGE",

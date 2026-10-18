@@ -4,7 +4,7 @@ PURPOSE: CodexThreadMethods, the CodexHost mixin for side chats, worktrees and t
 ROLE IN CODEBASE: One of the four feature mixins of vidbyte/harnesses/native/codex/; CodexHost inherits its eleven public methods (first-class D-1). Each method is a thin narrated main function over the host's collaborators: CodexThreadHelpers for the fork, the existence read, the idle status and the load, CodexTurnStarts for the side chat's turn, and the canonical GitWorktrees helper of vidbyte/lib/process/git_worktree.py for the worktree.
 ARCHITECTURE NOTE: Imports no openai-codex module and none of the host's SDK-loading collaborators at module level, so importing this mixin, or CodexHost, still loads no SDK (first-class INV-45). Every Codex request goes through CodexConnection.call, and the side chat's turn through CodexTurnStarts, so each writes one call record (INV-3). The worktree never talks to Codex: it builds its target under Path.home() at call time and reads its git bound from this module's namespace at call time, so a test patches both (section 13). The history-changing calls run CodexHostCore._change_idle (INV-34).
 COMMON MODIFICATION PATTERNS: A new thread function is one public method here: guard, its record from vidbyte/lib/dataclasses/codex_host_inputs.py, the experimental gate when Codex marks the call experimental, the existence read when Codex would not refuse an unknown thread itself, then one call. A call that changes stored history goes through _change_idle. Its messages go in vidbyte/lib/constants/codex_host.py, never here.
-KNOWN EDGE CASES: A side chat forks through the parent's latest completed turn and never touches the parent, which may be running; a fork whose approvals Codex routes to a person nothing here answers is refused before it shares the parent's tool handler, and a later failure releases that handler, so a failed side chat registers nothing (INV-27, INV-28, D-36). The ephemeral fork stays loaded until the host closes (EC-30). A worktree whose folder already exists is refused before git runs, and every git failure is configuration.invalid_argument with git's first stderr line cut to CODEX_HOST_WORKTREE_DETAIL_MAX_CHARS; its logs carry no path, branch or git output (INV-9, INV-29). Background terminals are not loaded first (EC-47).
+KNOWN EDGE CASES: A side chat forks through the parent's latest completed turn and never touches the parent, which may be running; a fork whose approvals Codex routes to a person nothing here answers is refused before it shares the parent's tool handler, and a later failure releases that handler, so a failed side chat registers nothing (INV-27, INV-28, D-36). The ephemeral fork stays loaded until the host closes (EC-30). A worktree whose folder already exists is refused before git runs; so is a worktree root that cannot be prepared, named by the exception's type alone and raised from None, so the home path never reaches the caller (EC-63); and every git failure is configuration.invalid_argument with git's first stderr line cut to CODEX_HOST_WORKTREE_DETAIL_MAX_CHARS; its logs carry no path, branch or git output (INV-9, INV-29). Background terminals are not loaded first (EC-47).
 RELATED DOCS: docs/spec/codex-host-first-class/spec.md (sections 8.5, 9.2 and 12.3 row 28, INV-1, INV-4, INV-9, INV-27 to INV-29, INV-34 to INV-40, D-18, D-19, D-22, D-24, D-25, D-35, D-36)
 TESTS: tests/features/codex_host/test_codex_host_side_chat.py, tests/features/codex_host/test_codex_host_worktree.py, tests/features/codex_host/test_codex_host_thread_admin.py, tests/features/codex_host/test_codex_host_feature_contract.py, tests/features/codex_host/test_codex_host_feature_structure.py, tests/features/codex_host/test_codex_host_feature_docs.py
 """
@@ -39,6 +39,9 @@ from vidbyte.lib.constants.codex_host import (
     CODEX_HOST_WORKTREE_GIT_MISSING_NEXT_STEP,
     CODEX_HOST_WORKTREE_MAX_OUTPUT_BYTES,
     CODEX_HOST_WORKTREE_NAME_SEPARATOR,
+    CODEX_HOST_WORKTREE_ROOT_CAUSE,
+    CODEX_HOST_WORKTREE_ROOT_MESSAGE,
+    CODEX_HOST_WORKTREE_ROOT_NEXT_STEP,
     CODEX_HOST_WORKTREE_ROOT_PARTS,
     CODEX_HOST_WORKTREE_TIMED_OUT_CAUSE,
     CODEX_HOST_WORKTREE_TIMED_OUT_MESSAGE,
@@ -150,20 +153,28 @@ class CodexThreadMethods(CodexHostCore):
         worktree with git worktree remove; its branch stays.
         """
         # @intent a-worktree-is-one-bounded-git-run
-        # Make the folder name, refuse one that exists, then run git
-        # once and map any failure to its own packet (first-class
-        # INV-29, D-19).
+        # Make the folder name, refuse one that exists or a root that
+        # cannot be prepared, then run git once and map any failure to
+        # its own packet (first-class INV-29, D-19, EC-63).
         operation = CodexHostOperation.CREATE_CODEX_WORKTREE
         self._guard(operation, talks=False)
         worktree = CodexWorktreeRequest(repository=repository, branch=branch, base_ref=base_ref)
         repo = Path(worktree.repository)
         # The target is under the home folder read now, named
-        # <repository folder>-<branch made safe>.
-        root = Path.home().joinpath(*CODEX_HOST_WORKTREE_ROOT_PARTS)
-        target = root / f"{repo.name}{CODEX_HOST_WORKTREE_NAME_SEPARATOR}{re.sub(CODEX_HOST_WORKTREE_UNSAFE_NAME_PATTERN, CODEX_HOST_WORKTREE_NAME_SEPARATOR, worktree.branch)}"
-        if target.exists():
-            raise CodexErrorMapper.error(FailureCode.CONFIGURATION_INVALID_ARGUMENT, CODEX_HOST_WORKTREE_EXISTS_MESSAGE, operation, likely_cause=CODEX_HOST_WORKTREE_EXISTS_CAUSE, next_step=CODEX_HOST_WORKTREE_EXISTS_NEXT_STEP)
-        root.mkdir(parents=True, exist_ok=True)
+        # <repository folder>-<branch made safe>. The root is made
+        # before git runs, because git makes the branch first.
+        try:
+            root = Path.home().joinpath(*CODEX_HOST_WORKTREE_ROOT_PARTS)
+            target = root / f"{repo.name}{CODEX_HOST_WORKTREE_NAME_SEPARATOR}{re.sub(CODEX_HOST_WORKTREE_UNSAFE_NAME_PATTERN, CODEX_HOST_WORKTREE_NAME_SEPARATOR, worktree.branch)}"
+            if target.exists():
+                raise CodexErrorMapper.error(FailureCode.CONFIGURATION_INVALID_ARGUMENT, CODEX_HOST_WORKTREE_EXISTS_MESSAGE, operation, likely_cause=CODEX_HOST_WORKTREE_EXISTS_CAUSE, next_step=CODEX_HOST_WORKTREE_EXISTS_NEXT_STEP)
+            root.mkdir(parents=True, exist_ok=True)
+        except (OSError, RuntimeError) as exc:
+            # A home that cannot be found or a root that cannot be made
+            # is named by its type alone, because the exception's text
+            # holds the home path; nothing is logged (EC-63).
+            failed = CODEX_HOST_WORKTREE_ROOT_MESSAGE.format(error_type=type(exc).__name__)
+            raise CodexErrorMapper.error(FailureCode.CONFIGURATION_INVALID_ARGUMENT, failed, operation, likely_cause=CODEX_HOST_WORKTREE_ROOT_CAUSE, next_step=CODEX_HOST_WORKTREE_ROOT_NEXT_STEP) from None
         # Run git once, within the bound read now, and time it for the
         # log.
         bound = CODEX_HOST_WORKTREE_TIMEOUT_SECONDS
