@@ -1,7 +1,7 @@
 ---
 spec: harness-browser-tools
 title: "Browser tools for every harness thread: run_<harness>_with_browser"
-status: implemented
+status: reviewed
 revision: 4
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-harness-browser-tools
