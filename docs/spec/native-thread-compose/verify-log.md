@@ -7,14 +7,14 @@ Gate set (from context/code-map.md §1.3 and the S5 briefing §4; run from the w
 | 1 | Lint | `python lint/run.py` → last line `SDK-LINT: PASS` | local (also inside gate 6 and the remote source job) |
 | 2 | Ratchet counts | `python -m ruff check vidbyte --config lint/ruff.toml --select I001 --no-cache` → 223, must not rise; `python -m ruff check pyproject.toml vidbyte --config lint/ruff.toml --select TID251 --no-cache` → exactly 5 | local |
 | 3 | Semgrep | `semgrep --test --config .semgrep/typed-mapping-boundary-policy.yml .semgrep/typed-mapping-boundary-policy.py`, then `semgrep scan --error --config .semgrep/typed-mapping-boundary-policy.yml vidbyte` → 0 findings (semgrep from the scratch `semgrep-venv`) | local; remote in `static-policy.yml` |
-| 4 | New tests | `PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_compose` → 299 pass | local |
+| 4 | New tests | `PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_compose` → 363 pass (299 before the test author's 64 regression cases, d9cc9ff6) | local |
 | 5 | Base pack | `PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads` → `436 passed, 2 skipped` | local |
 | 6 | CI source stage | `PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source` → `CI passed.` | local |
 | 7 | CI package stage | `env -u PYTHONPATH python scripts/run_ci.py --stage package --dist-dir <new empty scratch folder>` → `passed smoke checks.` | local |
 | 8 | AC-21 wheel half | `<installed copy>/python.exe -I <scratch>/s3/check_wheel_prompts.py <worktree>`, run from a folder outside the checkout → `AC-21 WHEEL HALF: PASS` | local only |
 | 9 | Comment width | `awk 'length($0) > 72' <file>`, piped to `grep -E '^[[:space:]]*#'`, over every changed source file → 0 lines | local only |
 | 10 | Remote checks | `gh workflow run ci.yml --ref feat/native-thread-compose` (Source / Python 3.11, Source / Python 3.12, Package on ubuntu-latest) and `gh workflow run static-policy.yml --ref feat/native-thread-compose`, then `gh run watch <id> --exit-status` | remote only; dispatch-only, so `gh pr checks` shows nothing |
-| — | Frozen test tree | `git diff 34fe19b7..HEAD --stat -- tests` → empty | local |
+| — | Frozen test tree | `git diff d9cc9ff6..HEAD --stat -- tests` → empty (the test tree was last changed at d9cc9ff6, by the test author; iteration 1 used 34fe19b7) | local |
 
 ## Iteration 1 — 2026-10-18 12:57 -0400 — agent report: reports/S5-repair-1.md
 
@@ -134,3 +134,83 @@ Gate set (from context/code-map.md §1.3 and the S5 briefing §4; run from the w
 The runner's git is still 2.55.0. Both EC-19 tests now run to their end on Linux and pass: 5900 passed and 0 failed, where run 39146593515 had 5898 passed and 2 failed. That includes the lines after the old assertion, which had never run there (process tree stopped, no pending task, one registered worktree, no leftover folder, error within the stop bound). The remote-only real-bash flake did not occur, so no rerun was needed.
 
 **Still open after the addendum:** none. Every gate is green at code HEAD 3a21352b, and no confirmed finding is open. The follow-ups R-24 to R-31 stay outside this loop. The orchestrator is routing the stale spec passages to the spec author, so they are untouched here.
+
+## Iteration 2 — 2026-10-18 16:45 -0400 — agent report: reports/S5-repair-2.md
+
+**Defects in:**
+- **R-32** (Major). The R-13 blank-template check refused chain templates that hold `{prompt}`, such as `{prompt}{previous}`, with a false message. The orchestrator ruled it a defect, and this iteration added its row to review.md's confirmed table.
+- **The stale comments and docs at the same spot** (briefing item 2):
+  - the comment at `texts.py:97–100` and `stages.py:9` cited EC-37 for the blank refusal, where the row is now EC-79;
+  - the `texts.py` header and `fit`'s docstring listed only NUL removal and key replacement at send time.
+- **Failing gate 4, local and remote, on the same two cases:** `test_a_chain_template_that_holds_prompt_is_never_refused_as_blank[prompt then previous]` and `[prompt and previous on two lines]`.
+  - Local: `2 failed, 361 passed`.
+  - Remote: CI 39160511817 at d9cc9ff6 failed both source legs (`2 failed, 5962 passed, 56 skipped`), and Package was skipped. Static policy 39160513848 had succeeded.
+- Not handed to this loop: the follow-ups R-24 to R-31.
+
+**Hypotheses and attempts** (R-32 is new in this iteration, so no earlier attempt applied):
+- **Root cause, confirmed by the traceback and the code.** `ThreadChains._fit` checks each later step's template twice:
+  - first with `{prompt}` rendered as `""`, naming `template`, so that a template too long by itself is blamed on the template;
+  - then with the caller's prompt, naming `prompt`.
+
+  `PromptFitter.check` ran the R-13 blank check on whichever frame it was given. In the first pass the only fixed text of `{prompt}{previous}` is `""`, so the check refused it. The failing frame was `(PromptSegment(text='', spliced=False), PromptSegment(text='', spliced=True))`, raised at `texts.py:103` from `chain.py:132`.
+- **Options weighed before coding.** No option was coded and then dropped.
+  1. **Chosen:** an optional `whole` frame on `PromptFitter.check`. Only the blank check reads it, and it defaults to `frame`. The chain's template pass passes the template rendered with the caller's prompt.
+     - This keeps the blank check inside `check`, where spec r5 row 13 and §5 put it.
+     - The refusal still names `template` and `steps[i]`.
+     - Every other caller is unchanged.
+     - It follows the strict-config lesson: add a missing option as a keyword with a backward-compatible default.
+  2. **Runner-up:** a separate `PromptFitter` method for the blank check, called from both composites' `_fit`.
+     - It needs no keyword.
+     - But it contradicts spec r5 row 13 ("`PromptFitter.check` … refuses a blank shortest form") and the §5 list, so the spec would need an edit that this iteration may not make.
+     - It flips if the reviewer judges a one-caller keyword worse than that spec edit.
+  3. **Rejected:** running the blank check in the prompt pass. Its refusal would name `prompt`, which breaks EC-79 and the five pinned refusals.
+  4. **Rejected:** rendering the template pass with the caller's prompt and still blaming `template`.
+     - A too-long caller prompt would then be blamed on `template`.
+     - That breaks the AC-14 case "prompt too long for a later grok step" (field `prompt`) and INV-18's "naming the argument that makes it too long".
+  5. **Rejected:** rendering `{prompt}` as a spliced segment in the template pass.
+     - The blank check reads only fixed segments, so it would still refuse.
+     - The length check would count the prompt as a truncation note.
+- **Second commit, docs only (3600d47b).** The send-time order in the docs is now NUL removal, then surrogate repair, then key replacement (INV-18, EC-80 r5). This covers the `texts.py` PURPOSE, the truncation-note count in KNOWN EDGE CASES, the `PromptFitter` and `fit` docstrings, and `fit`'s narration.
+- **Third commit, a self-review fix (bc351671).** dc631222's two render lines in `_fit` each repeated the empty answer and diff. A new spliced template value would then have needed two entries in `_fit`, which made the `chain.py` header's COMMON MODIFICATION PATTERNS ("one entry in _values and in _fit") untrue. Both frames now share one annotated dict, written as `ensemble.py` writes its values dict. The full gate was re-run from the top afterwards.
+- **Independent evidence beyond the frozen pack:**
+  - `s5-2/probe_r32.py` runs only the up-front checks of `chain_threads` and `run_staged_threads` (`_steps`, `_template`, `_fit`), never a step. That matters because grok and opencode are installed on this machine.
+    - Before the fix: `PROBE R-32: 13/21 as the spec states`. All 7 templates that hold `{prompt}` were refused as blank, `"{prompt}\n\n{previous}"` included. A 23,990-character prompt in `{prompt}{previous}` was refused as a blank `template` instead of a too-long `prompt`.
+    - After the fix: `21/21`.
+  - `s5-2/test_s52_natural_template.py` is a scratch test that runs with the pack's conftest as a plugin. It runs three natural templates end to end, each into a Grok, Muse or opencode second step, and checks the exact prompt the second step receives.
+    - At bc351671: `9 passed`.
+    - Against a `git archive` of 43bd0024: `6 failed, 3 passed`. The 3 that pass are the control template, which has fixed text.
+- **HEAD moved during the iteration.** The orchestrator's docs commit 74d770da (pipeline.md only) landed on the branch right after launch. This iteration's commits sit on it, and the first push carried it.
+- **Tooling trap.** Here, Git Bash's `grep -c $'\r$'` misreports line endings: it showed CRLF for LF files and 0 for a CRLF file. Count bytes with Python.
+  - The compose sources and this file are LF in the working tree; review.md is CRLF.
+  - `s5-2/apply_edits.py` keeps each file's own ending.
+
+**Changes:**
+
+| SHA | Commit |
+|---|---|
+| dc631222 | fix(compose): keep the caller's prompt in a chain template's blank check [R-32] |
+| 3600d47b | fix(compose): name the surrogate repair in the prompt-fit docs [R-32] |
+| bc351671 | fix(compose): share the empty spliced values between the chain's fit frames [R-32] |
+| this records commit | docs(spec): verify-log iteration 2 for native-thread-compose. It also carries the review.md R-32 row and status and reports/S5-repair-2.md. |
+
+**Gate matrix out** (gates 1–9 at bc351671, the final code HEAD, run in this worktree in this iteration; outputs in `s5-2/final/`):
+
+| Gate | Command | Result | Final lines |
+|---|---|---|---|
+| 1 lint | `python lint/run.py` | PASS. The count table matches iteration 1's line for line. | `S063 IMPROVED 4 -> 3. Lower it with: python lint/run.py --rule S063 --update-baseline`<br>`S064 RATCHETED: 4 known finding(s). Inspect with: python lint/run.py --rule S064 --all`<br>`SDK-LINT: PASS` |
+| 2 ratchets | ruff I001 / TID251 | PASS (223 / 5) | `Found 223 errors.`<br>``[*] 223 fixable with the `--fix` option.``<br>`Found 5 errors.` |
+| 3 semgrep | `--test`, then `scan --error` | PASS | `1/1: ✓ All tests passed`<br>`Ran 1 rule on 977 files: 0 findings.` (exit 0) |
+| 4 new tests | `pytest -q tests/features/harness_compose` | PASS (was 2 failed) | `363 passed in 89.59s (0:01:29)` |
+| 5 base pack | `pytest -q tests/features/harness_threads` | PASS | `436 passed, 2 skipped in 50.92s` |
+| 6 source stage | `run_ci.py --stage source` | PASS | `================ 6004 passed, 16 skipped in 184.31s (0:03:04) =================`<br>`CI passed.` |
+| 7 package stage | `run_ci.py --stage package --dist-dir s5-2/final/dist-3` | PASS | `Installed vidbyte-sdk 0.3.0 passed smoke checks.`<br>`CI passed.` |
+| 8 AC-21 wheel half | `wheel-venv-3/Scripts/python.exe -I s3/check_wheel_prompts.py <worktree>`, from `s5-2/final/wheel-run-3`; the briefing's copy recipe, unchanged | PASS | `installed vidbyte: ...\s5-2\final\wheel-venv-3\Lib\site-packages\vidbyte\__init__.py (outside the checkout: True)`<br>`fixed combinations: 17, longest planner = 8304 chars, over 12000: {}`<br>`AC-21 WHEEL HALF: PASS` |
+| 9 comment width | awk over chain.py, stages.py and texts.py | PASS | `over72=0` for each of the 3 files |
+| frozen tests | `git diff d9cc9ff6..HEAD --stat -- tests` | PASS | empty |
+| 10 remote: Static policy | run 39163919767 at bc351671 | PASS; watch exit 0 | `1/1: ✓ All tests passed`<br>`Ran 1 rule on 977 files: 0 findings.` |
+| 10 remote: CI | run 39163918203 at bc351671 | PASS: Source / Python 3.11, Source / Python 3.12 and Package; watch exit 0 | 3.12: `========== 5964 passed, 56 skipped, 19 warnings in 141.19s (0:02:21) ===========`, then `CI passed.`<br>3.11: `================= 5964 passed, 56 skipped in 135.85s (0:02:15) =================`, then `CI passed.`<br>Package: `Installed vidbyte-sdk 0.3.0 passed smoke checks.`, then `CI passed.` |
+| 10 remote, intermediate | CI 39162945987 and Static policy 39162947311 at 3600d47b | PASS; watch exit 0 for both | 3.11: `================= 5964 passed, 56 skipped in 136.17s (0:02:16) =================`<br>3.12: `========== 5964 passed, 56 skipped, 19 warnings in 139.17s (0:02:19) ===========`<br>Package: `Installed vidbyte-sdk 0.3.0 passed smoke checks.` |
+
+Afterwards, `procs.py` printed `stand-in or grandchild processes: []`.
+
+**Still open:** none. R-32 is fixed and every gate is green at code HEAD bc351671. The follow-ups R-24 to R-31 stay outside this loop. The one judgement call for the re-review is the one-caller `whole` keyword (option 1 above). Its runner-up and flip condition are recorded above.
