@@ -135,3 +135,61 @@ All rows were run in this worktree in this iteration, at `819eed3e`, which is th
   - R-RR2's shared `_CodexHostTool` reset helper;
   - m-6 and m-7;
   - widening `RecordFieldValidator.require_directory` to map a refused stat. By reading only (not probed), `native_threads.py:120` and `:146` call it with no `OSError` handling, so they have the same raw-`OSError` path. The change is outside §12.3, so it needs its own PR.
+
+## Iteration 3 — 2026-10-18 — agent report: reports/S5-repair-3.md
+**Defects in:** R-RR2-1 (Minor, code), from re-review round 2 (`reports/S5-rereview-2.md`), which otherwise ruled SOUND. The orchestrator chose to fix it rather than defer it, because INV-2's "ever" is a weighted word.
+
+Failing gates at `2bdb5e95`:
+- The two S2 rows (4 subtests) gave `FAILED (errors=4)`, each a `TypeError: expected NonPathFspath.__fspath__() to return str or bytes, not int|NoneType`.
+- The area suite gave only those rows plus the inherited failure.
+- S2_HEAD is now `2bdb5e95`, so the test-contract gate is `git diff 2bdb5e95..HEAD -- tests`.
+
+**Hypotheses and attempts:**
+- **Root cause, confirmed by running it.** `CodexWorktreeRequest.__post_init__` (`codex_host_inputs.py:591`) caught `(ConfigurationError, OSError)`. But `RecordFieldConverter.to_path` (`validation.py:198`) calls `os.fspath`, which raises `TypeError` when `__fspath__` returns neither str nor bytes. Iteration 2's sentence "`to_path` raises only `ConfigurationError`" is the false premise behind this miss.
+- **What else in the `try` can raise `TypeError`** (read, then probed): nothing.
+  - `isinstance` against `(str, os.PathLike)` does not raise it.
+  - `Path(str)` does not raise it.
+  - `require_directory`'s `is_absolute` and `is_dir` do not raise it (`is_dir` already swallows `ValueError` and now has its `OSError` caught).
+  - A bytes result reaches the `isinstance(text, str)` check and is already a `ConfigurationError`.
+- **Three structurally different fixes were weighed.** None had been tried before, because iteration 2 never considered `TypeError`.
+  1. **Chosen:** add `TypeError` to the record's tuple. It is one token in §12.3 row 9 and keeps §9.1 row 9's message, `details` and `from None`.
+  2. **Rejected:** map the `TypeError` inside `RecordFieldConverter.to_path`. That is the root and the canonical-helper home, but `validation.py` is outside §12.3. Changing it also shifts behaviour for other callers (`native_threads.py:120`, `:146`), so it joins the logged `validation.py` follow-up PR.
+  3. **Rejected:** check `__fspath__`'s result in the record before calling `to_path`. That duplicates the shared converter with a second rule, the same reason iteration 2 rejected its `os.path.isdir` pre-check.
+- **Comment and header, in the same edit.** The `except` comment now says that a path object whose `__fspath__` returns neither str nor bytes is refused the same way, and why (`os.fspath` raises `TypeError`). The header's KNOWN EDGE CASES clause names the case too. The file is now 785 of its 900 lines (NFR-1), and every comment is within 72 columns.
+- **Revert mutants**, applied in place after the commit and restored each time with `git checkout`; `git diff HEAD --quiet` was clean afterwards and the file stayed CRLF:
+  - drop `TypeError`: `FAILED (errors=4)`;
+  - `as exc` with `from exc`: `FAILED (failures=4)`;
+  - `(ConfigurationError, TypeError)`, dropping `OSError`: `2 failed, 58 passed`. These are the R-RR1 rows, so the fix did not loosen R-RR1's pin.
+- **Independent probe** (not S2's tests), giving `__fspath__` each of: int, None, float, list, bytes, raising `TypeError`, and raising `PermissionError` with a path.
+  - Every one gives `ConfigurationError details={'field': 'repository'} cause=None suppress=True`.
+  - A `__fspath__` that itself raises `ValueError` still propagates. That is the caller's own exception, which this record has never mapped, and it is not in scope (see the report's OPEN ITEMS).
+- **Inherited failure, re-proved this iteration.** A `git archive` extract of merge-base `6f5a7310`, run with `GIT_DIR` set to this worktree's git dir, gives `assert 167 == 120`.
+
+**Changes:**
+- `bd89e5b8` R-RR2-1.
+
+**Gate matrix out:**
+All rows were run in this worktree in this iteration, at `bd89e5b8`, the only source commit. The docs commit after it changes no code.
+
+| Gate | Command | Result | Final lines |
+|---|---|---|---|
+| new tests (the 2 S2 R-RR2-1 rows, 4 subtests) | `PYTHONPATH=$(pwd) "$V" -m unittest <the 2 ids>` | PASS (red at `2bdb5e95`: `FAILED (errors=4)`) | `Ran 2 tests in 0.378s` · `OK` |
+| record, worktree and input modules | `PYTHONPATH=$(pwd) "$V" -m pytest tests/features/codex_host/test_codex_host_feature_records.py tests/features/codex_host/test_codex_host_worktree.py tests/features/codex_host/test_codex_host_inputs.py -q -p no:cacheprovider` | PASS | `65 passed in 6.95s` |
+| area tests | `PYTHONPATH=$(pwd) "$V" -m pytest tests/features/codex_host tests/features/harness_threads tests/test_codex_*.py -q -p no:cacheprovider` | PASS except the inherited failure | `FAILED tests/features/harness_threads/test_harness_threads_surface.py::test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes` · `1 failed, 1306 passed, 3 skipped in 82.65s (0:01:22)` |
+| inherited failure at the base | that node from a `git archive` extract of `6f5a7310`, with `PYTHONPATH` set to it and `GIT_DIR` set to this worktree's git dir | FAILS there too, so inherited | `E       AssertionError: assert 167 == 120` · `1 failed in 1.67s` |
+| lint | `PYTHONIOENCODING=utf-8 "$V" lint/run.py` | PASS: rc 0, nothing REGRESSED or ERRORED, C021 CLEAN, S008 19/19, A001 642/642, A002 IMPROVED 703→582 | `S064 RATCHETED: 4 known finding(s). Inspect with: python lint/run.py --rule S064 --all` · `SDK-LINT: PASS` |
+| ruff (extra) | `"$V" -m ruff check vidbyte/lib/dataclasses/codex_host_inputs.py --config lint/ruff.toml --no-cache` | PASS | `All checks passed!` |
+| semgrep | `scratchpad/s5r1/semgrep_all.py` (semgrep-core per rule per file) on the touched file, then on all 38 `vidbyte/*.py` changed since `a7730107` | PASS | `rules=1 files=1 findings=0 errors=0` · `rules=1 files=38 findings=0 errors=0`. Sanity: the rule's own fixture gives `findings=2 errors=0`. |
+| 72-column comments | `tr -d '\r' < f \| awk 'length($0)>72 && /^[ \t]*#/'` over the 38 `vidbyte/*.py` changed since `a7730107` | PASS | no output |
+| line ceilings (INV-47, NFR-1) | `wc -l` (CR stripped) | PASS | host.py 786/900 · wire.py 839/840 · lib/dataclasses/codex_host.py 891/900 · codex_host_inputs.py 785/900 · thread_methods.py 370/600 |
+| test contract | `git diff 2bdb5e95..HEAD -- tests \| wc -l` | PASS | `0` |
+| full gate, source stage (run alone) | `PYTHONPATH=$(pwd) "$V" scripts/run_ci.py --stage source` | PASS except the inherited failure (its embedded lint printed `SDK-LINT: PASS`) | `FAILED tests/features/harness_threads/test_harness_threads_surface.py::test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes` · `=========== 1 failed, 6837 passed, 27 skipped in 138.01s (0:02:18) ============` · `CI failed: Command failed with exit code 1: …python.exe -m pytest (cwd=…vidbyte-sdk-codex-host-first-class).` |
+| full gate, package stage (run alone, no PYTHONPATH) | `"$V" scripts/run_ci.py --stage package` | PASS | `No broken requirements found.` · `Installed vidbyte-sdk 0.3.0 passed smoke checks.` · `CI passed.` |
+| remote checks | `gh pr checks https://github.com/cerredz/Vidbyte-SDK/pull/1181` | 0/0: none configured (the workflows are `workflow_dispatch` only), so the local gate is authoritative | `no checks reported on the 'feat/codex-host-first-class' branch` |
+
+**Still open:**
+- No confirmed finding.
+- Follow-ups, none of them a defect in this PR's scope:
+  - R-RR2's shared `_CodexHostTool` reset helper;
+  - m-6 and m-7;
+  - one `validation.py` PR that makes `RecordFieldValidator.require_directory` map a refused stat and makes `RecordFieldConverter.to_path` map `os.fspath`'s `TypeError`. That would close the record's two catches at the root, along with `native_threads.py:120` and `:146`.
