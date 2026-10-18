@@ -22,6 +22,7 @@ from vidbyte.lib.constants.native_threads import (
     CLAUDE_ANSWER_NAME_MAX_CHARS,
     CLAUDE_MAX_BUDGET_USD_LIMIT,
     CLAUDE_MAX_TURNS_LIMIT,
+    CLAUDE_MAX_TURNS_MIN,
     CLAUDE_PROMPT_PATTERN,
     CLAUDE_SHELL_TOOL_NAMES,
     CLAUDE_THREAD_ID_PATTERN,
@@ -250,7 +251,7 @@ class ClaudeThreadConfig:
         if self.claude_command is not None:
             RecordFieldValidator.require_program(self.claude_command, "ClaudeThreadConfig.claude_command")
         if self.max_turns is not None:
-            RecordFieldValidator.require_int(self.max_turns, "ClaudeThreadConfig.max_turns", minimum=1, maximum=CLAUDE_MAX_TURNS_LIMIT)
+            RecordFieldValidator.require_int(self.max_turns, "ClaudeThreadConfig.max_turns", minimum=CLAUDE_MAX_TURNS_MIN, maximum=CLAUDE_MAX_TURNS_LIMIT)
         if self.max_budget_usd is not None:
             RecordFieldValidator.require_number(self.max_budget_usd, "ClaudeThreadConfig.max_budget_usd", maximum=CLAUDE_MAX_BUDGET_USD_LIMIT)
         RecordFieldValidator.require_text_items(self.allowed_tools, "ClaudeThreadConfig.allowed_tools", max_items=CLAUDE_TOOL_RULES_MAX_ITEMS, max_chars=CLAUDE_TOOL_RULE_MAX_CHARS, pattern=CLAUDE_TOOL_RULE_PATTERN, one_line=True)

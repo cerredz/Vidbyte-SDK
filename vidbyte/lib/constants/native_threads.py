@@ -25,8 +25,10 @@ NATIVE_CONTROL_TIMEOUT_SECONDS = 30.0
 NATIVE_KILL_WAIT_SECONDS = 1.0
 MUSE_REAP_TIMEOUT_SECONDS = 10.0
 # The highest ClaudeThreadConfig.max_turns and max_budget_usd a call may
-# set, so a typo cannot lift the limit a caller meant to keep.
+# set, so a typo cannot lift the limit a caller meant to keep, and the
+# fewest turns a call may allow: one model turn.
 CLAUDE_MAX_TURNS_LIMIT = 1000
+CLAUDE_MAX_TURNS_MIN = 1
 CLAUDE_MAX_BUDGET_USD_LIMIT = 1000.0
 # At most this many --allowedTools and as many --disallowedTools rules,
 # each this long, so both lists at their caps still fit a Windows

@@ -52,7 +52,7 @@ CLAUDE_CONSTANTS = {
     "CLAUDE_SESSION_NOT_FOUND_MARKER": "No conversation found with session ID",
     "CLAUDE_REJECTED_OPTION_MARKERS": ("error: unknown option", "error: option '", "error: missing required argument"),
     "CLAUDE_KEY_REJECTED_STATUSES": frozenset({401, 403}), "CLAUDE_RETRYABLE_STATUSES": frozenset({408, 429, *range(500, 600)}),
-    "CLAUDE_BUDGET_SUBTYPES": frozenset({"error_max_turns", "error_max_budget_usd"}), "CLAUDE_MAX_TURNS_LIMIT": 1000, "CLAUDE_MAX_BUDGET_USD_LIMIT": 1000.0,
+    "CLAUDE_BUDGET_SUBTYPES": frozenset({"error_max_turns", "error_max_budget_usd"}), "CLAUDE_MAX_TURNS_LIMIT": 1000, "CLAUDE_MAX_TURNS_MIN": 1, "CLAUDE_MAX_BUDGET_USD_LIMIT": 1000.0,
     "CLAUDE_TOOL_RULES_MAX_ITEMS": 32, "CLAUDE_TOOL_RULE_MAX_CHARS": 256, "CLAUDE_SHELL_TOOL_NAMES": frozenset({"Bash", "PowerShell"}),
     "CLAUDE_TOOL_RULE_PATTERN": r"(?!(?:Read|Edit|Write|NotebookEdit)\(/(?!/))[A-Za-z][A-Za-z0-9_-]*(?:\([^()\x00-\x1f\x7f]+\))?",
     "CLAUDE_ERROR_TEXT": "{reason}: {message}", "CLAUDE_ERROR_STATUS_TEXT": "{reason} (status {status}): {message}", "CLAUDE_TESTED_VERSION": "2.1.302",
