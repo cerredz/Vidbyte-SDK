@@ -1,7 +1,7 @@
 ---
 spec: native-thread-compose
 title: "Composite thread functions across Grok, opencode and Muse"
-status: tests-written
+status: implemented
 revision: 4
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-native-thread-compose
@@ -10,7 +10,7 @@ base_commit: 5c08c35edcb1827e190ca4e2b2b1370808ef24be
 pr_base: feat/native-grok-opencode-meta-hosts
 created: 2026-10-15
 updated: 2026-10-17
-pr:
+pr: https://github.com/cerredz/Vidbyte-SDK/pull/1186
 ---
 
 # Spec: Composite thread functions across Grok, opencode and Muse
