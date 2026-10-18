@@ -1,12 +1,12 @@
 """FILE: vidbyte/lib/constants/native_threads.py
 
-PURPOSE: Holds every fixed value and text of the harness thread functions and the canonical process helpers: time, size and count bounds, record patterns, program names, folder names, option values, JSON member names, vendor markers, tested vendor versions, and the error texts (harness labels, summary and observation templates, the failure code of each harness and problem, and one likely cause and one next step per failure code).
-ROLE IN CODEBASE: Imported by the records in vidbyte/lib/dataclasses/native_threads.py, process.py and validation.py, by CliRunner in vidbyte/lib/process/runner.py, and by every module under vidbyte/harnesses/native/.
+PURPOSE: Holds every fixed value and text of the harness thread functions (Grok Build, opencode, Muse Code and Claude Code) and the canonical process helpers: time, size and count bounds, record patterns, program names, folder names, option values, JSON member names, vendor markers, tested vendor versions, and the error texts (harness labels, summary and observation templates, the failure code of each harness and problem, and one likely cause and one next step per failure code).
+ROLE IN CODEBASE: Imported by the records in vidbyte/lib/dataclasses/native_threads.py, process.py and validation.py, by CliRunner in vidbyte/lib/process/runner.py, and by every module under vidbyte/harnesses/native/ (grok, opencode, muse, claude and hostkit).
 ARCHITECTURE NOTE: The harness modules hold no literals of their own (spec INV-15): every flag is an enum member in vidbyte/lib/enums/native_threads.py, and every other value they need lives here, so a reviewer finds each vendor fact in one place. The timing knobs NATIVE_KILL_WAIT_SECONDS, MUSE_REAP_TIMEOUT_SECONDS and NATIVE_CONTROL_TIMEOUT_SECONDS are read through this module object at call time, never bound by a from-import, so one patch reaches every user.
 FUNCTION INVENTORY: No functions. Constants grouped as contract bounds, record patterns, process helper values, programs and folders, option values and separators, JSON member names, vendor markers, tested versions, then the error texts.
 COMMON MODIFICATION PATTERNS: A value a harness module needs is added here under its feature prefix and used by name (lint A007, spec INV-15). A new failure code adds its pair to NATIVE_THREAD_FAILURE_CODES and its own texts to NATIVE_THREAD_LIKELY_CAUSES and NATIVE_THREAD_NEXT_STEPS.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import from vidbyte above vidbyte.lib.enums. 2. Do not name a constant with a password, token or secret word and give it a string (lint S054). 3. Do not add a carriage return to MUSE_REAP_SCRIPT; sh in the distro reads it from stdin. 4. Do not share one likely cause or next step between two codes of a harness; each code gets text written for it.
-KNOWN EDGE CASES: Patterns are applied with re.fullmatch, so each one describes the whole value. The texts must not contain a credential word followed by ":" or "=", because HarnessRedactor would rewrite such a phrase in vendor text. MUSE_REAP_SCRIPT runs with the caller's environment, which lacks the peer mark, so it never matches itself.
+KNOWN EDGE CASES: Patterns are applied with re.fullmatch, so each one describes the whole value. CLAUDE_PROMPT_PATTERN also refuses a lone surrogate, because the Claude Code prompt is written to stdin as UTF-8; opencode's stdin prompt still uses NATIVE_PROMPT_PATTERN (claude-thread-functions spec EC-38). The texts must not contain a credential word followed by ":" or "=", because HarnessRedactor would rewrite such a phrase in vendor text. MUSE_REAP_SCRIPT runs with the caller's environment, which lacks the peer mark, so it never matches itself.
 RELATED DOCS: vidbyte/harnesses/README.md
 TESTS: tests/features/harness_threads/test_harness_threads_surface.py, tests/features/harness_threads/test_harness_threads_errors.py
 """
@@ -24,6 +24,22 @@ NATIVE_THREAD_MAX_SECONDS = 14400.0
 NATIVE_CONTROL_TIMEOUT_SECONDS = 30.0
 NATIVE_KILL_WAIT_SECONDS = 1.0
 MUSE_REAP_TIMEOUT_SECONDS = 10.0
+# The highest ClaudeThreadConfig.max_turns and max_budget_usd a call may
+# set, so a typo cannot lift the limit a caller meant to keep, and the
+# fewest turns a call may allow: one model turn.
+CLAUDE_MAX_TURNS_LIMIT = 1000
+CLAUDE_MAX_TURNS_MIN = 1
+CLAUDE_MAX_BUDGET_USD_LIMIT = 1000.0
+# At most this many --allowedTools and as many --disallowedTools rules,
+# each this long, so both lists at their caps still fit a Windows
+# command line beside the rest of the argv; only rules full of quote
+# characters, which the quoting doubles, could pass it (launch_failed).
+CLAUDE_TOOL_RULES_MAX_ITEMS = 32
+CLAUDE_TOOL_RULE_MAX_CHARS = 256
+# The longest tool name, tool-use id or terminal reason a Claude Code
+# answer may carry into a ClaudeThreadResult; a longer one reads as
+# missing.
+CLAUDE_ANSWER_NAME_MAX_CHARS = 256
 NATIVE_ARGV_PROMPT_MAX_CHARS = 24000
 # A Windows command line holds at most 32,766 UTF-16 units (measured).
 # A Grok or Muse prompt may take 30,000 of them once quoted; the 2,766
@@ -31,6 +47,9 @@ NATIVE_ARGV_PROMPT_MAX_CHARS = 24000
 # worst case is 608 units.
 NATIVE_WINDOWS_ARGV_PROMPT_MAX_UNITS = 30000
 NATIVE_PROMPT_MAX_CHARS = 200000
+# opencode and Claude Code read the prompt from stdin, so they take
+# NATIVE_PROMPT_MAX_CHARS and skip the Windows command-line check.
+NATIVE_STDIN_PROMPT_HARNESSES = frozenset({NativeHarness.OPENCODE, NativeHarness.CLAUDE})
 NATIVE_API_KEY_MAX_CHARS = 4096
 NATIVE_THREAD_MAX_SKILLS = 32
 NATIVE_RESULT_TEXT_MAX_CHARS = 100000
@@ -52,9 +71,23 @@ NATIVE_PROCESS_FLAG_MAX_CHARS = 64
 # opencode can never read a key as an {env:...} or {file:...} token.
 NATIVE_API_KEY_PATTERN = r"^[!-z|~]+$"
 NATIVE_PROMPT_PATTERN = r"[^\x00]+"
+# The Claude Code prompt goes on stdin as UTF-8, so its pattern also
+# refuses a lone surrogate, which UTF-8 cannot encode.
+CLAUDE_PROMPT_PATTERN = r"[^\x00\ud800-\udfff]+"
 NATIVE_MODEL_PATTERN = r"^[A-Za-z0-9]\S*$"
 OPENCODE_MODEL_PATTERN = r"^[a-z0-9][a-z0-9._-]*/[A-Za-z0-9]\S*$"
 NATIVE_THREAD_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_-]*$"
+# Claude Code ids are lowercase UUIDs; --resume also takes a session
+# title or a transcript path, which this pattern refuses.
+CLAUDE_THREAD_ID_PATTERN = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+# A Claude Code permission rule: a tool name, then at most one
+# parenthesised specifier on one line. The name starts with a letter,
+# so a rule is never read as an option, and claude splits a value only
+# at a space or comma outside parentheses, so one rule stays one rule.
+# A Read, Edit, Write or NotebookEdit path may not start with a single
+# "/", which Claude Code resolves against the settings source rather
+# than the filesystem root; write "//abs" or "./rel" instead.
+CLAUDE_TOOL_RULE_PATTERN = r"(?!(?:Read|Edit|Write|NotebookEdit)\(/(?!/))[A-Za-z][A-Za-z0-9_-]*(?:\([^()\x00-\x1f\x7f]+\))?"
 NATIVE_NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]*$"
 NATIVE_SKILL_NAME_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
 MUSE_DISTRO_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
@@ -99,6 +132,7 @@ NATIVE_COMMAND_LINE_TOO_LONG_WINERROR = 206
 GROK_PROGRAM = "grok"
 OPENCODE_PROGRAM = "opencode"
 MUSE_PROGRAM = "muse"
+CLAUDE_PROGRAM = "claude"
 WSL_PROGRAM = "wsl.exe"
 OPENCODE_RUN_COMMAND = "run"
 MUSE_EXEC_COMMAND = "exec"
@@ -115,6 +149,17 @@ GROK_HOME_KEY_HEX_CHARS = 16
 GROK_SKILLS_DIR = "skills"
 MUSE_CONFIG_SKILLS_PARTS = ("muse", "skills")
 MUSE_AUTH_FILE_PARTS = ("muse", "auth.json")
+# The native Claude Code installer's folder, and the private config
+# folders the SDK keeps for Claude Code under the user home.
+CLAUDE_INSTALL_FOLDERS = (".local", "bin")
+CLAUDE_PRIVATE_CONFIGS_PARTS = (".vidbyte", "claude-configs")
+CLAUDE_CONFIG_KEY_HEX_CHARS = 16
+CLAUDE_SKILLS_DIR = "skills"
+# The mode of a private per-workspace folder (the Grok home, the Claude
+# Code config folder): its owner only, because it holds the vendor's
+# transcripts of prompts and tool output. Windows keeps only the
+# read-only bit, which this mode leaves off.
+NATIVE_PRIVATE_FOLDER_MODE = 0o700
 NATIVE_SKILL_FILE_NAME = "SKILL.md"
 MUSE_WSL_MOUNT_ROOT = "/mnt"
 MUSE_WINDOWS_DRIVE_PATTERN = r"[A-Za-z]:"
@@ -123,6 +168,26 @@ NATIVE_WINDOWS_ROOT = "\\"
 # Fixed option values and separators.
 GROK_JSON_OUTPUT_FORMAT = "json"
 OPENCODE_JSON_FORMAT = "json"
+CLAUDE_JSON_OUTPUT_FORMAT = "json"
+CLAUDE_USER_SETTING_SOURCE = "user"
+# The caller's variables a claude child never inherits, by prefix,
+# and the one such name it keeps (the Git Bash path on Windows).
+CLAUDE_INHERITED_ENVIRONMENT_PREFIXES = ("ANTHROPIC_", "CLAUDE")
+CLAUDE_INHERITED_ENVIRONMENT_KEPT = frozenset({"CLAUDE_CODE_GIT_BASH_PATH"})
+# The caller's variables without those prefixes that a claude child
+# never inherits either: Claude Code's own behaviour switches, which
+# belong to the caller's own sessions as much as the ~/.claude settings
+# the private config folder keeps out; NODE_OPTIONS, which can load
+# code into the process that holds the key; and
+# NODE_TLS_REJECT_UNAUTHORIZED, which would send the key with TLS
+# verification off. The proxy and CA variables (HTTPS_PROXY, NO_PROXY,
+# NODE_EXTRA_CA_CERTS, SSL_CERT_FILE) pass through on purpose: they are
+# the caller's network setup.
+CLAUDE_INHERITED_ENVIRONMENT_DROPPED = frozenset({"API_TIMEOUT_MS", "BASH_DEFAULT_TIMEOUT_MS", "BASH_MAX_OUTPUT_LENGTH", "BASH_MAX_TIMEOUT_MS", "DISABLE_COMPACT", "ENABLE_TOOL_SEARCH", "MAX_THINKING_TOKENS", "MCP_TIMEOUT", "NODE_OPTIONS", "NODE_TLS_REJECT_UNAUTHORIZED"})
+# The tools that run shell commands. An allowed rule naming one makes
+# the SDK set CLAUDE_CODE_SUBPROCESS_ENV_SCRUB, so the commands the
+# model runs never see ANTHROPIC_API_KEY.
+CLAUDE_SHELL_TOOL_NAMES = frozenset({"Bash", "PowerShell"})
 NATIVE_ENABLED_SWITCH = "1"
 NATIVE_WSLENV_SEPARATOR = ":"
 NATIVE_WSLENV_UNIX_FLAG = "/u"
@@ -182,6 +247,18 @@ JSONRPC_MESSAGE_FIELD = "message"
 MUSE_INITIALIZE_REQUEST_ID = 1
 MUSE_SESSION_REQUEST_ID = 2
 MUSE_CLIENT_NAME = "vidbyte_sdk"
+# The members of Claude Code's one --output-format json answer.
+CLAUDE_SESSION_FIELD = "session_id"
+CLAUDE_RESULT_FIELD = "result"
+CLAUDE_IS_ERROR_FIELD = "is_error"
+CLAUDE_API_ERROR_STATUS_FIELD = "api_error_status"
+CLAUDE_TERMINAL_REASON_FIELD = "terminal_reason"
+CLAUDE_SUBTYPE_FIELD = "subtype"
+CLAUDE_ERRORS_FIELD = "errors"
+CLAUDE_NUM_TURNS_FIELD = "num_turns"
+CLAUDE_PERMISSION_DENIALS_FIELD = "permission_denials"
+CLAUDE_TOOL_NAME_FIELD = "tool_name"
+CLAUDE_TOOL_USE_ID_FIELD = "tool_use_id"
 
 # Vendor markers: texts, names and codes the vendors print.
 GROK_NOT_SIGNED_IN_MARKERS = ("not signed in", "not authenticated", "auth token is invalid or expired")
@@ -200,17 +277,32 @@ MUSE_TERMINAL_RECORD_MEMBER = "run.terminal.*"
 MUSE_FORK_SESSION_MEMBER = "result.session.sessionId"
 MUSE_COMPLETED_TERMINAL = "completed"
 MUSE_SESSION_STREAM_KIND = "session"
+CLAUDE_SESSION_NOT_FOUND_MARKER = "No conversation found with session ID"
+# The starts of the option parser's own error lines: claude refused an
+# option or value the SDK passes, so the installed release differs from
+# the tested one (protocol_mismatch, not run_failed).
+CLAUDE_REJECTED_OPTION_MARKERS = ("error: unknown option", "error: option '", "error: missing required argument")
+CLAUDE_KEY_REJECTED_STATUSES = frozenset({401, 403})
+# The API statuses a later retry can clear: 408 (timeout), 429 (rate
+# limited) and every 5xx, 529 (overloaded) included. An error answer with
+# one of them is api_error, which NativeThreadError marks retryable.
+CLAUDE_RETRYABLE_STATUSES = frozenset({408, 429, *range(500, 600)})
+# The subtypes of an error answer that stopped at the call's own
+# --max-turns or --max-budget-usd (budget_exhausted, not run_failed).
+CLAUDE_BUDGET_SUBTYPES = frozenset({"error_max_turns", "error_max_budget_usd"})
 
 # Tested vendor versions: the releases these contracts were checked
 # against, named in protocol_mismatch errors.
 GROK_TESTED_VERSION = "1.0.52"
 OPENCODE_TESTED_VERSION = "1.18.31"
 MUSE_TESTED_VERSION = "1.0.1"
+CLAUDE_TESTED_VERSION = "2.1.302"
 NATIVE_TESTED_VERSIONS: MappingProxyType[NativeHarness, str] = MappingProxyType(
     {
         NativeHarness.GROK: GROK_TESTED_VERSION,
         NativeHarness.OPENCODE: OPENCODE_TESTED_VERSION,
         NativeHarness.MUSE: MUSE_TESTED_VERSION,
+        NativeHarness.CLAUDE: CLAUDE_TESTED_VERSION,
     }
 )
 
@@ -267,6 +359,7 @@ NATIVE_HARNESS_LABELS: MappingProxyType[NativeHarness, str] = MappingProxyType(
         NativeHarness.GROK: "Grok Build",
         NativeHarness.OPENCODE: "opencode",
         NativeHarness.MUSE: "Muse Code",
+        NativeHarness.CLAUDE: "Claude Code",
     }
 )
 NATIVE_REDACTED = "<redacted>"
@@ -293,6 +386,8 @@ NATIVE_THREAD_SUMMARIES: MappingProxyType[NativeThreadProblem, str] = MappingPro
         NativeThreadProblem.LAUNCHER_REFUSED: "{harness} was not started because its launcher is a Windows batch file.",
         NativeThreadProblem.LAUNCH_FAILED: "{harness} could not be started.",
         NativeThreadProblem.KEY_REJECTED: "{harness} rejected the API key.",
+        NativeThreadProblem.API_ERROR: "{harness} stopped on an API error that a later retry can clear.",
+        NativeThreadProblem.BUDGET_EXHAUSTED: "{harness} stopped at the turn or spending limit of this call.",
         NativeThreadProblem.THREAD_NOT_FOUND: "{harness} could not find the requested thread.",
         NativeThreadProblem.TIMED_OUT: "{harness} did not finish in time.",
         NativeThreadProblem.OUTPUT_TOO_LARGE: "{harness} printed more output than the SDK reads.",
@@ -307,6 +402,8 @@ NATIVE_THREAD_OBSERVATIONS: MappingProxyType[NativeThreadProblem, str] = Mapping
         NativeThreadProblem.LAUNCHER_REFUSED: "cmd.exe would re-read the arguments of a batch file as a command line, so the SDK never starts one.",
         NativeThreadProblem.LAUNCH_FAILED: "The SDK could not start the program or prepare its private folder.",
         NativeThreadProblem.KEY_REJECTED: "The vendor refused the key passed as api_key, and the SDK never falls back to a stored login.",
+        NativeThreadProblem.API_ERROR: "The vendor's API answered with a timeout, rate-limit, overload or server error status.",
+        NativeThreadProblem.BUDGET_EXHAUSTED: "The vendor stopped the run at the max_turns or max_budget_usd the call set, and the thread keeps the turns made so far.",
         NativeThreadProblem.THREAD_NOT_FOUND: "The vendor could not continue the requested thread, or answered on another one.",
         NativeThreadProblem.TIMED_OUT: "The SDK waited {seconds} seconds and then stopped the whole process tree, so the thread may hold a partial turn.",
         NativeThreadProblem.OUTPUT_TOO_LARGE: "Standard output passed the cap of {cap_bytes} bytes, so the SDK did not read it as an answer.",
@@ -324,6 +421,8 @@ NATIVE_REFUSED_LAUNCHER = "The refused launcher is {program}."
 NATIVE_LAUNCH_FAILURE_DETAIL = "Starting {program} failed with {kind}."
 GROK_HOME_FAILURE_DETAIL = "The private Grok home {home} could not be prepared ({error_type}: {reason})."
 GROK_HOME_UNKNOWN_DETAIL = "The user home folder, where the private Grok home lives, could not be determined ({error_type}); set HOME (POSIX) or USERPROFILE (Windows) for this process."
+CLAUDE_CONFIG_FAILURE_DETAIL = "The private Claude Code config folder {home} could not be prepared ({error_type}: {reason})."
+CLAUDE_CONFIG_UNKNOWN_DETAIL = "The user home folder, where the private Claude Code config folder lives, could not be determined ({error_type}); set HOME (POSIX) or USERPROFILE (Windows) for this process."
 MUSE_CONFIG_FAILURE_DETAIL = "The private Muse config folder could not be prepared ({error_type}: {reason})."
 MUSE_NO_WSL_DETAIL = "Neither wsl_distro nor muse_command was set, and on Windows the SDK runs Muse Code only through one of them."
 MUSE_NO_WSL_PROGRAM_DETAIL = "The SDK searched for {program} on PATH and found none."
@@ -343,6 +442,11 @@ NATIVE_WRONG_THREAD_DETAILS: MappingProxyType[NativeThreadProblem, str] = Mappin
 # status when it has one, and its message.
 OPENCODE_ERROR_EVENT_TEXT = "{name}: {message}"
 OPENCODE_ERROR_EVENT_STATUS_TEXT = "{name} (status {status}): {message}"
+# The vendor text of a Claude Code error answer: its terminal reason
+# (or subtype), its API status when it has one, and its result text
+# (or errors list).
+CLAUDE_ERROR_TEXT = "{reason}: {message}"
+CLAUDE_ERROR_STATUS_TEXT = "{reason} (status {status}): {message}"
 
 # The failure code of each harness and problem, a closed table, so the
 # error factory never builds a code from text.
@@ -376,6 +480,17 @@ NATIVE_THREAD_FAILURE_CODES: MappingProxyType[tuple[NativeHarness, NativeThreadP
         (NativeHarness.MUSE, NativeThreadProblem.PROTOCOL_MISMATCH): FailureCode.MUSE_PROTOCOL_MISMATCH,
         (NativeHarness.MUSE, NativeThreadProblem.RUN_FAILED): FailureCode.MUSE_RUN_FAILED,
         (NativeHarness.MUSE, NativeThreadProblem.WSL_UNAVAILABLE): FailureCode.MUSE_WSL_UNAVAILABLE,
+        (NativeHarness.CLAUDE, NativeThreadProblem.NOT_INSTALLED): FailureCode.CLAUDE_NOT_INSTALLED,
+        (NativeHarness.CLAUDE, NativeThreadProblem.LAUNCHER_REFUSED): FailureCode.CLAUDE_LAUNCHER_REFUSED,
+        (NativeHarness.CLAUDE, NativeThreadProblem.LAUNCH_FAILED): FailureCode.CLAUDE_LAUNCH_FAILED,
+        (NativeHarness.CLAUDE, NativeThreadProblem.KEY_REJECTED): FailureCode.CLAUDE_KEY_REJECTED,
+        (NativeHarness.CLAUDE, NativeThreadProblem.THREAD_NOT_FOUND): FailureCode.CLAUDE_THREAD_NOT_FOUND,
+        (NativeHarness.CLAUDE, NativeThreadProblem.TIMED_OUT): FailureCode.CLAUDE_TIMED_OUT,
+        (NativeHarness.CLAUDE, NativeThreadProblem.OUTPUT_TOO_LARGE): FailureCode.CLAUDE_OUTPUT_TOO_LARGE,
+        (NativeHarness.CLAUDE, NativeThreadProblem.PROTOCOL_MISMATCH): FailureCode.CLAUDE_PROTOCOL_MISMATCH,
+        (NativeHarness.CLAUDE, NativeThreadProblem.RUN_FAILED): FailureCode.CLAUDE_RUN_FAILED,
+        (NativeHarness.CLAUDE, NativeThreadProblem.API_ERROR): FailureCode.CLAUDE_API_ERROR,
+        (NativeHarness.CLAUDE, NativeThreadProblem.BUDGET_EXHAUSTED): FailureCode.CLAUDE_BUDGET_EXHAUSTED,
     }
 )
 
@@ -384,7 +499,7 @@ NATIVE_THREAD_LIKELY_CAUSES: MappingProxyType[FailureCode, str] = MappingProxyTy
     {
         FailureCode.GROK_NOT_INSTALLED: "Grok Build is not on PATH and has no ~/.grok/bin install, or the grok_command you passed names a file that does not exist.",
         FailureCode.GROK_LAUNCHER_REFUSED: "The grok found first is a Windows .cmd or .bat shim, such as the npm grok.cmd, and cmd.exe would re-read the prompt as a command line.",
-        FailureCode.GROK_LAUNCH_FAILED: "The operating system refused to start grok, or the SDK could not create the private Grok home under ~/.vidbyte/grok-homes; concurrent Grok calls in one workspace with different skill sets can also collide while its skills folder is rebuilt.",
+        FailureCode.GROK_LAUNCH_FAILED: "The operating system refused to start grok, or the SDK could not create the private Grok home under ~/.vidbyte/grok-homes; Grok calls in one workspace with different skill sets, or calls from separate processes preparing its home at the same moment, can also collide while its skills folder is rebuilt.",
         FailureCode.GROK_KEY_REJECTED: "xAI rejected the API key passed as api_key because it is wrong, revoked or lacks access, and the SDK never falls back to a stored grok login.",
         FailureCode.GROK_THREAD_NOT_FOUND: "Grok answered on a different session than the thread_id you passed, so the requested thread was not continued.",
         FailureCode.GROK_TIMED_OUT: "The Grok run needed more than timeout_seconds, often because it waited for an approval that a headless run cannot give, or because the task is large.",
@@ -410,6 +525,17 @@ NATIVE_THREAD_LIKELY_CAUSES: MappingProxyType[FailureCode, str] = MappingProxyTy
         FailureCode.MUSE_PROTOCOL_MISMATCH: "muse printed no terminal record or no session stream, or muse serve answered a fork with its source id; the installed Muse Code may differ from the release this SDK was checked against.",
         FailureCode.MUSE_RUN_FAILED: "Muse Code reported a failure of its own: a terminal state other than completed, a muse serve error, or a non-zero exit.",
         FailureCode.MUSE_WSL_UNAVAILABLE: "On Windows Muse Code runs only inside WSL, and WSL is missing, the named distro does not exist, or neither wsl_distro nor muse_command was set.",
+        FailureCode.CLAUDE_NOT_INSTALLED: "Claude Code is not on PATH and has no native install under ~/.local/bin, or the claude_command you passed names a file that does not exist.",
+        FailureCode.CLAUDE_LAUNCHER_REFUSED: "The claude found first is a Windows .cmd or .bat shim, such as the npm claude.cmd, and cmd.exe would re-read its arguments as a command line.",
+        FailureCode.CLAUDE_LAUNCH_FAILED: "The operating system refused to start claude, or the SDK could not create the private config folder under ~/.vidbyte/claude-configs; Claude Code calls in one workspace with different skill sets, or calls from separate processes preparing its folder at the same moment, can also collide while its skills folder is rebuilt.",
+        FailureCode.CLAUDE_KEY_REJECTED: "Anthropic rejected the API key passed as api_key because it is wrong, revoked or lacks permission, and the SDK never falls back to a stored claude login.",
+        FailureCode.CLAUDE_THREAD_NOT_FOUND: "The thread is not in this workspace's private config folder: another workspace created it, Claude Code swept it after 30 days, it never existed, or Claude Code answered on another thread.",
+        FailureCode.CLAUDE_TIMED_OUT: "The Claude Code run needed more than timeout_seconds, for example because the task is large or the API did not answer.",
+        FailureCode.CLAUDE_OUTPUT_TOO_LARGE: "Claude Code printed more than NATIVE_PROCESS_MAX_OUTPUT_BYTES, so its one JSON answer could not be read whole.",
+        FailureCode.CLAUDE_PROTOCOL_MISMATCH: "The installed Claude Code printed output this SDK cannot read, refused an option or value the SDK passes, or a fork returned its source thread; it may differ from the release this SDK was checked against.",
+        FailureCode.CLAUDE_RUN_FAILED: "Claude Code reported a failure without a status that a later retry can clear, such as a billing limit, an unknown model, a refused request or an API it could not reach.",
+        FailureCode.CLAUDE_API_ERROR: "The Anthropic API rate-limited the key (429), was overloaded (529), timed out (408) or failed on its side (another 5xx), which a later retry can clear.",
+        FailureCode.CLAUDE_BUDGET_EXHAUSTED: "The run took ClaudeThreadConfig.max_turns model turns, or spent ClaudeThreadConfig.max_budget_usd, before it finished the task.",
         FailureCode.CONFIGURATION_INVALID_ARGUMENT: "An argument failed its check before anything started; the message names the argument and the rule it broke.",
         FailureCode.RUNTIME_ERROR: "An unexpected exception inside the SDK, which is a defect in the SDK rather than a vendor failure.",
     }
@@ -420,7 +546,7 @@ NATIVE_THREAD_NEXT_STEPS: MappingProxyType[FailureCode, str] = MappingProxyType(
     {
         FailureCode.GROK_NOT_INSTALLED: "Install Grok Build, or pass the full path of its executable in GrokThreadConfig(grok_command=(...,)).",
         FailureCode.GROK_LAUNCHER_REFUSED: "Pass the real grok.exe in GrokThreadConfig(grok_command=(...,)), or install Grok Build's own binary under ~/.grok/bin.",
-        FailureCode.GROK_LAUNCH_FAILED: "Check that grok runs from a terminal and that ~/.vidbyte/grok-homes is a writable folder, then retry; run concurrent Grok calls in one workspace only with a skill set an earlier call already prepared.",
+        FailureCode.GROK_LAUNCH_FAILED: "Check that grok runs from a terminal and that ~/.vidbyte/grok-homes is a writable folder, then retry; give concurrent Grok calls in one workspace one skill set and start them from one process, or use separate workspaces.",
         FailureCode.GROK_KEY_REJECTED: "Pass a valid xAI API key as api_key and retry.",
         FailureCode.GROK_THREAD_NOT_FOUND: "Continue a Grok thread only from the workspace that created it, with the thread_id that run_grok_thread or fork_grok_thread returned.",
         FailureCode.GROK_TIMED_OUT: "Raise GrokThreadConfig.timeout_seconds, narrow the prompt, or choose a permission_mode that lets the run proceed; continue the thread to finish a partial turn.",
@@ -446,7 +572,22 @@ NATIVE_THREAD_NEXT_STEPS: MappingProxyType[FailureCode, str] = MappingProxyType(
         FailureCode.MUSE_PROTOCOL_MISMATCH: "Run muse --version and install the Muse Code release named in this message, then retry.",
         FailureCode.MUSE_RUN_FAILED: "Read the vendor text in this message; a muse serve error usually clears once no other client holds the session.",
         FailureCode.MUSE_WSL_UNAVAILABLE: "Install WSL and a distro that holds Muse Code, then pass MuseThreadConfig(wsl_distro=...) with a name that wsl.exe -l -q lists.",
+        FailureCode.CLAUDE_NOT_INSTALLED: "Install Claude Code's native build, or pass the full path of its executable in ClaudeThreadConfig(claude_command=(...,)).",
+        FailureCode.CLAUDE_LAUNCHER_REFUSED: "Pass the real claude.exe in ClaudeThreadConfig(claude_command=(...,)), or install Claude Code's native build under ~/.local/bin.",
+        FailureCode.CLAUDE_LAUNCH_FAILED: "Check that claude --version runs from a terminal and that ~/.vidbyte/claude-configs is a writable folder, then retry; give concurrent Claude Code calls in one workspace one skill set and start them from one process, or use separate workspaces.",
+        FailureCode.CLAUDE_KEY_REJECTED: "Pass a valid Anthropic API key as api_key and retry.",
+        FailureCode.CLAUDE_THREAD_NOT_FOUND: "Continue or fork a Claude Code thread only from the workspace that created it, with the thread_id that run_claude_thread or fork_claude_thread returned.",
+        FailureCode.CLAUDE_TIMED_OUT: "Raise ClaudeThreadConfig.timeout_seconds or narrow the prompt; continue the thread named by this error's thread_id to finish the partial turn, which may already have changed files in the workspace.",
+        FailureCode.CLAUDE_OUTPUT_TOO_LARGE: "Ask Claude Code for a shorter answer, for example by having it write long results to a file in the workspace.",
+        FailureCode.CLAUDE_PROTOCOL_MISMATCH: "Run claude --version and install the Claude Code release named in this message, then retry.",
+        FailureCode.CLAUDE_RUN_FAILED: "Read the vendor text in this message, fix the cause it names, and retry or continue the thread.",
+        FailureCode.CLAUDE_API_ERROR: "Wait and retry (error.retryable is True and error.api_status holds the HTTP status); continue the thread named by this error's thread_id rather than starting over.",
+        FailureCode.CLAUDE_BUDGET_EXHAUSTED: "Continue the thread named by this error's thread_id with a higher ClaudeThreadConfig.max_turns or max_budget_usd; the budget applies to one call, and the run stops after the request that crosses it.",
         FailureCode.CONFIGURATION_INVALID_ARGUMENT: "Fix the argument named in this message and call again; nothing ran and nothing was written.",
         FailureCode.RUNTIME_ERROR: "Report the defect with the exception class named in this message; a retry may succeed if the cause was transient.",
     }
 )
+
+# The failure codes a caller may simply retry; the error factory marks
+# their NativeThreadError retryable.
+NATIVE_RETRYABLE_CODES = frozenset({FailureCode.CLAUDE_API_ERROR})

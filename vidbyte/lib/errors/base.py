@@ -43,7 +43,7 @@ Architecture:
     - SourcePinMismatchError: Raised when fetched content does not match the pinned hash.
     - SourceParseError: Raised when an artifact cannot be parsed into a valid typed IR.
     - SourceSecurityError: Raised when a URL is disallowed or a response violates a guard.
-    - NativeThreadError: Raised by the Grok, opencode and Muse thread functions with a failure code, a likely cause and a next step.
+    - NativeThreadError: Raised by the Grok, opencode, Muse and Claude Code thread functions with a failure code, a likely cause and a next step.
     - FailureRaisedError: Raised when a Session recovery policy escalates a deterministic failure to raise.
     - AgentSpeedError: Base exception for agent speed-tracking failures.
     - AgentSpeedValidationError: Raised when a speed-tracking dataclass has an invalid shape.
@@ -621,6 +621,8 @@ class NativeThreadError(AgentExecutionError):
         exit_code: int | None = None,
         vendor_message: str | None = None,
         error_type: str = "",
+        retryable: bool = False,
+        api_status: int | None = None,
     ) -> None:
         # The factory in vidbyte/harnesses/native/hostkit/errors.py has
         # already composed and scrubbed the message and picked the texts
@@ -634,6 +636,8 @@ class NativeThreadError(AgentExecutionError):
         self.exit_code = exit_code
         self.vendor_message = vendor_message
         self.error_type = error_type
+        self.retryable = retryable
+        self.api_status = api_status
         self.error_kind = failure_code.value
         self.expected = f"{operation.value} returning a NativeThreadResult"
         self.actual = message
@@ -644,6 +648,8 @@ class NativeThreadError(AgentExecutionError):
             "exit_code": "" if exit_code is None else str(exit_code),
             "vendor_message": "" if vendor_message is None else vendor_message,
             "error_type": error_type,
+            "retryable": str(retryable).lower(),
+            "api_status": "" if api_status is None else str(api_status),
         }
         self.likely_causes = (likely_cause,)
         self.repair_approaches = (next_step,)

@@ -134,6 +134,9 @@ from vidbyte.lib.enums.multi_agent import (
     TaskStatus,
 )
 from vidbyte.lib.enums.native_threads import (
+    ClaudeFlag,
+    ClaudePermissionMode,
+    ClaudeReasoningEffort,
     GrokFlag,
     GrokPermissionMode,
     GrokReasoningEffort,
@@ -205,6 +208,9 @@ __all__ = [
     "BudgetPreset",
     "BurdenOfProofVerdict",
     "CircularityVerdict",
+    "ClaudeFlag",
+    "ClaudePermissionMode",
+    "ClaudeReasoningEffort",
     "CliOptionStyle",
     "CodexAccountKind",
     "CodexApprovalMode",

@@ -23,6 +23,7 @@ BAD_CONFIG_FIELDS = [
     ("GrokThreadConfig", "reasoning_effort", "turbo"), ("GrokThreadConfig", "reasoning_effort", "ultra"),
     ("GrokThreadConfig", "permission_mode", "bypassPermissions"), ("GrokThreadConfig", "permission_mode", "yolo"),
     ("GrokThreadConfig", "grok_command", ()), ("GrokThreadConfig", "grok_command", ("",)),
+    ("GrokThreadConfig", "grok_command", ("grok-bin", "--permission-mode", "bypassPermissions")), ("GrokThreadConfig", "grok_command", ("grok-bin", "--permission-mode=bypassPermissions")),
     ("OpencodeThreadConfig", "timeout_seconds", 0), ("OpencodeThreadConfig", "agent", "--auto"), ("OpencodeThreadConfig", "agent", "has space"),
     ("OpencodeThreadConfig", "agent", "a" * 65), ("OpencodeThreadConfig", "agent", ""), ("OpencodeThreadConfig", "variant", "-x"),
     ("OpencodeThreadConfig", "variant", "b" * 65), ("OpencodeThreadConfig", "opencode_command", ()),
@@ -36,8 +37,9 @@ BAD_CONFIG_FIELDS = [
 @pytest.mark.parametrize(("record", "field", "bad"), BAD_CONFIG_FIELDS, ids=[f"{record}.{field}={bad!r}"[:60] for record, field, bad in BAD_CONFIG_FIELDS])
 def test_config_record_refuses_a_bad_field_when_built(lib_api, record, field, bad) -> None:
     # §9.1: enums by to_enum, timeout by require_number(max 14400),
-    # commands by require_argv, names, distro and path by their
-    # patterns.
+    # the grok command by require_program (the executable alone, PR
+    # #1044 review), the other commands by require_argv, names, distro
+    # and path by their patterns.
     with pytest.raises(lib_api.ConfigurationError) as caught:
         getattr(lib_api, record)(**{field: bad})
     assert field in str(caught.value), str(caught.value)
