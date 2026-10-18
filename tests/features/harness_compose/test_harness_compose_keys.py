@@ -1,26 +1,97 @@
 """FILE: tests/features/harness_compose/test_harness_compose_keys.py
 
-PURPOSE: Key hygiene (AC-15, INV-4, INV-6, INV-26, T-3, D-28, EC-71): with every step bound to its own distinctive key and stand-ins that print keys into answers, plans, proposals, guidance and files, no fragment of any bound key reaches a later step's prompt or argv (COMPOSE_REDACTED_KEY stands in its place), any git argv or environment, the repr of a ThreadStep, StageSpec or EnsembleRoster, a ThreadComposeError's message or any attribute but result and diff (also when git's own text or a changed file's name holds the key), or a ConfigurationError even when the caller put a key in a bad template; the records keep the raw text, error.result and error.diff included; each key reaches only its own step's child; os.environ is unchanged.
+PURPOSE: Key hygiene (AC-15, INV-4, INV-5, INV-6, INV-26, T-3, D-28, EC-71): with every step bound to its own distinctive key and stand-ins that print keys into answers, plans, proposals, guidance and files, no fragment of any bound key reaches a later step's prompt or argv (COMPOSE_REDACTED_KEY stands in its place), any git argv or environment, the repr of a ThreadStep, StageSpec or EnsembleRoster, a ThreadComposeError's message or any attribute but result and diff (also when git's own text or a changed file's name holds the key), or a ConfigurationError, whether the caller put a key in a bad template or in any caller text that compose refuses (every composite's and alias's prompt, the chain and stage templates, the schema, a thread id, either binder's model); the records keep the raw text, error.result and error.diff included; each key reaches only its own step's child; os.environ is unchanged.
 ROLE IN CODEBASE: Start here when a key shows up anywhere compose produced text.
-ARCHITECTURE NOTE: Keys are random placeholders (fresh_key), and leaks are searched as every 12-character fragment, so a partly scrubbed key is still caught. Prompts and argv are read from the stand-in logs, git children from the CliRunner spy. The stand-in scenarios hold the keys as answer text, the way a model would print them; the stand-in logs credentials only as digests.
-FUNCTION INVENTORY: assert_clean fails with the leaked fragments; credential_digests lists the key digests one launch received, opencode's inline config included; the test_* functions are one behaviour each.
+ARCHITECTURE NOTE: Keys are random placeholders (fresh_key, short_key), and leaks are searched as every 12-character fragment, so a partly scrubbed key is still caught. Prompts and argv are read from the stand-in logs, git children from the CliRunner spy. The stand-in scenarios hold the keys as answer text, the way a model would print them; the stand-in logs credentials only as digests.
+FUNCTION INVENTORY: assert_clean fails with the leaked fragments; credential_digests lists the key digests one launch received, opencode's inline config included; short_key makes a placeholder short enough for a refusal to quote; CallerText binds steps to one short key and holds a bad caller text with it; the test_* functions are one behaviour each.
 COMMON MODIFICATION PATTERNS: A new spliced value gets a key planted in it here and a clean-prompt assertion on the step that receives it.
 WHAT NOT TO DO IN THIS FILE: Never use a real key; fresh_key makes a random placeholder in the base key pattern.
-KNOWN EDGE CASES: The raw answer and diff texts in the returned records are meant to keep the keys (EC-71); only text compose produces or splices is scrubbed.
-RELATED DOCS: tests/features/harness_compose/FEATURE.md; docs/spec/native-thread-compose/spec.md §6.1 INV-4, INV-26, §6.2 AC-15, §6.3 EC-71, §10 T-3
+KNOWN EDGE CASES: The raw answer and diff texts in the returned records are meant to keep the keys (EC-71); only text compose produces or splices is scrubbed. A refusal quotes a bad value only while its repr fits in 80 characters, so fresh_key's 75-character keys can never show such a leak; the caller-text cases use short_key's 16 characters, so the bad value's repr (33 characters) would still be quoted under a limit cut to less than half, and a value that gets past the template checks (only {previous}) but holds a brace, a space and a NUL, so a later text check is the one that refuses.
+RELATED DOCS: tests/features/harness_compose/FEATURE.md; docs/spec/native-thread-compose/spec.md §6.1 INV-4, INV-5, INV-26, §6.2 AC-15, §6.3 EC-71, §10 T-3; docs/spec/native-thread-compose/review.md R-3, R-17
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_compose/test_harness_compose_keys.py
 """
 
 from __future__ import annotations
 
+import inspect
 import os
+import uuid
 
 import pytest
+
+NUL = "\x00"
+# A well-formed thread id: only the model is bad.
+THREAD_ID = "0192f0c4-beef-7bee-8f00-000000000005"
 
 
 def assert_clean(pack, text: str, keys, where: str) -> None:
     found = pack.leaks(text, keys)
     assert found == [], f"{where} holds key fragments {found[:3]}"
+
+
+def short_key() -> str:
+    # A random placeholder of 16 characters in the base key pattern.
+    # A bad value holding it and a NUL has a 33-character repr, well
+    # inside the 80 characters a refusal quotes, so even a limit cut
+    # by half could not hide the leak (review R-3, R-17).
+    return f"vbk-{uuid.uuid4().hex[:12]}"
+
+
+class CallerText:
+    """Steps bound to one short key, and a bad caller text holding it."""
+
+    def __init__(self, api, steps, pack, key: str) -> None:
+        self.api = api
+        self.compose = api.compose
+        self.steps = steps
+        self.pack = pack
+        self.key = key
+        # Gets past the template checks, which allow {previous}, and
+        # fails the text checks after them: the brace, the space or
+        # the NUL breaks each one's pattern.
+        self.bad = "{previous} " + key + NUL
+
+    def grok(self, **fields):
+        return self.steps.bind("grok", key=self.key, **fields)
+
+    def opencode(self, **fields):
+        return self.steps.bind("opencode", key=self.key, **fields)
+
+    def muse(self, **fields):
+        return self.steps.bind("muse", key=self.key, **fields)
+
+    def roster(self):
+        return self.api.ensemble.EnsembleRoster(planner=self.grok(plan=True), proposers=[self.grok(plan=True)], selector=self.grok(plan=True), implementer=self.opencode())
+
+    def stages(self, *templates: str):
+        return [self.api.records.StageSpec(step=self.grok(), template=template) for template in templates]
+
+
+# site: (the field its refusal names,
+# the call that puts the bad text there)
+CALLER_TEXT_SITES = {
+    "chain_threads prompt": ("prompt", lambda t: t.compose.chain_threads([t.grok(), t.opencode()], prompt=t.bad)),
+    "chain_threads template": ("template", lambda t: t.compose.chain_threads([t.grok(), t.opencode()], t.bad, prompt=t.pack.PROMPT)),
+    "verify_with prompt": ("prompt", lambda t: t.compose.verify_with(t.opencode(), [t.grok(plan=True)], prompt=t.bad)),
+    "run_ensemble prompt": ("prompt", lambda t: t.compose.run_ensemble(t.bad, t.roster())),
+    "later StageSpec.template": ("stages[1].template", lambda t: t.compose.run_staged_threads(t.stages("Start.", t.bad))),
+    "first StageSpec.template": ("stages[0].template", lambda t: t.compose.run_staged_threads(t.stages(t.key + NUL))),
+    "parse_json_answer prompt": ("prompt", lambda t: t.compose.parse_json_answer(t.grok(), t.bad, schema="{}", parse=dict)),
+    "parse_json_answer schema": ("schema", lambda t: t.compose.parse_json_answer(t.grok(), t.pack.PROMPT, schema=t.bad, parse=dict)),
+    "bind_continue thread_id of a continue function": ("thread_id", lambda t: t.steps.bind("grok", "continue", t.bad, key=t.key)),
+    "bind_continue thread_id of a fork function": ("thread_id", lambda t: t.steps.bind("opencode", "fork", t.bad, key=t.key)),
+    "bind_thread model": ("model", lambda t: t.steps.bind("grok", key=t.key, model=t.bad)),
+    "bind_continue model": ("model", lambda t: t.steps.bind("grok", "continue", THREAD_ID, key=t.key, model=t.bad)),
+    "run_grok_then_opencode prompt": ("prompt", lambda t: t.compose.run_grok_then_opencode(t.bad, grok=t.grok(), opencode=t.opencode())),
+    "run_grok_then_muse prompt": ("prompt", lambda t: t.compose.run_grok_then_muse(t.bad, grok=t.grok(), muse=t.muse())),
+    "run_opencode_then_grok prompt": ("prompt", lambda t: t.compose.run_opencode_then_grok(t.bad, opencode=t.opencode(), grok=t.grok())),
+    "run_opencode_then_muse prompt": ("prompt", lambda t: t.compose.run_opencode_then_muse(t.bad, opencode=t.opencode(), muse=t.muse())),
+    "run_muse_then_grok prompt": ("prompt", lambda t: t.compose.run_muse_then_grok(t.bad, muse=t.muse(), grok=t.grok())),
+    "run_muse_then_opencode prompt": ("prompt", lambda t: t.compose.run_muse_then_opencode(t.bad, muse=t.muse(), opencode=t.opencode())),
+    "run_grok_verify_with_opencode_and_muse prompt": ("prompt", lambda t: t.compose.run_grok_verify_with_opencode_and_muse(t.bad, writer=t.grok(edits=True), opencode=t.opencode(), muse=t.muse())),
+    "run_opencode_verify_with_grok_and_muse prompt": ("prompt", lambda t: t.compose.run_opencode_verify_with_grok_and_muse(t.bad, writer=t.opencode(), grok=t.grok(plan=True), muse=t.muse())),
+    "run_muse_verify_with_grok_and_opencode prompt": ("prompt", lambda t: t.compose.run_muse_verify_with_grok_and_opencode(t.bad, writer=t.muse(), grok=t.grok(plan=True), opencode=t.opencode())),
+}
 
 
 def credential_digests(launch) -> list[dict]:
@@ -139,6 +210,28 @@ async def test_errors_and_reprs_never_show_a_key_while_result_and_diff_stay_raw(
         await api.compose.chain_threads([writer, reader], f"Use {key_w} then {{nope}} and {{previous}}", prompt=pack.PROMPT)
     assert refused.value.details.get("field") == "template"
     assert_clean(pack, str(refused.value) + repr(refused.value.details), keys, "the ConfigurationError")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("site", sorted(CALLER_TEXT_SITES))
+async def test_a_refusal_of_caller_text_never_quotes_the_key_it_holds(compose_api, sandbox, steps, pack, site) -> None:
+    # AC-15 / INV-4 / INV-5 / T-3: a caller text that holds a key bound
+    # to the call's steps gets past any template check and fails the
+    # text check after it. The ConfigurationError names the argument,
+    # holds no fragment of the key in its message, args or any
+    # attribute, and nothing has started. Red until review R-3 lands.
+    api = compose_api
+    field, call = CALLER_TEXT_SITES[site]
+    text = CallerText(api, steps, pack, short_key())
+    with pytest.raises(api.ConfigurationError) as refused:
+        outcome = call(text)
+        if inspect.isawaitable(outcome):
+            await outcome
+    error = refused.value
+    assert error.details.get("field") == field, f"{site}: {error} {error.details}"
+    shown = " ".join([str(error), repr(error.args), *(repr(value) for value in vars(error).values())])
+    assert pack.leaks(shown, [text.key]) == [], f"INV-4: the {site} refusal quotes the key: {str(error)!r}"
+    assert sandbox.launches() == [], "refused before any process starts"
 
 
 @pytest.mark.asyncio

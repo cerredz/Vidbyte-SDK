@@ -79,6 +79,7 @@ Each is an input and state that leads to a wrong output, and each has a test her
 - Keys:
   - a key that one model printed, or a writer saved into a file, reaches another vendor's prompt;
   - a key string passed as a step is quoted in the refusal;
+  - a key inside a caller's prompt, template, schema, thread id or model is quoted in the refusal of that text;
   - a key is shown by a `functools.partial` `repr`;
   - a key inside git's error text, or in the name of a file a reader changed, is shown by a `ThreadComposeError` message.
 - Git:
@@ -125,7 +126,7 @@ Each is an input and state that leads to a wrong output, and each has a test her
 - `test_harness_compose_git.py`: a folder outside any repository, no usable git, git hygiene, a hostile repository configuration, an untracked nested repository and an unborn `HEAD` (AC-13, INV-6, INV-26, T-6, T-8, EC-1 to EC-5, EC-10, EC-58, EC-73).
 - `test_harness_compose_workspace.py`: `capture_diff` and `in_worktree` (AC-17, AC-18, INV-7, INV-8, EC-74).
 - `test_harness_compose_concurrency.py`: cancellation, a failed worktree add that stops its siblings before its error propagates, Grok serialization within a composite, and the lock per workspace across composites (AC-10, AC-11, INV-13, INV-14, EC-17, EC-19, EC-22).
-- `test_harness_compose_keys.py`: no key in another step's prompt, an error, a `repr` or git's argv or environment, while the raw records keep the step's own text (AC-15, INV-4, EC-71, T-3).
+- `test_harness_compose_keys.py`: no key in another step's prompt, an error (the refusal of every caller text that holds a key included), a `repr` or git's argv or environment, while the raw records keep the step's own text (AC-15, INV-4, INV-5, EC-71, T-3).
 
 Run `PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_compose`.
 
