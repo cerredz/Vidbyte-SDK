@@ -57,7 +57,8 @@ class ThreadVerifiers:
         await ThreadVerifiers._fit(checked, readers, prompt, await ThreadVerifiers._question(prompt, (), "", schema))
 
         # Find git and the repository before any step runs. A worktree
-        # starts at HEAD, so an opencode or Muse verifier needs a commit.
+        # starts at HEAD, so an opencode or Muse verifier needs a
+        # commit.
         keys = tuple(step.api_key for step in (checked, *readers))
         git = ComposeGit.locate(Path(checked.workspace), keys)
         await git.toplevel()
@@ -66,8 +67,9 @@ class ThreadVerifiers:
         # @intent the-writer-runs-alone-and-readers-see-its-snapshot
         # The writer is the only step that may change the workspace, so
         # it runs alone, between two snapshots, before any verifier. The
-        # second snapshot is the end of its diff, the tree every worktree
-        # verifier is filled from, and what the verifiers must leave.
+        # second snapshot is the end of its diff, the tree every
+        # worktree verifier is filled from, and what the verifiers must
+        # leave.
         before = await git.snapshot()
         record = VerifyResult(writer=await ComposeCalls.call(checked, await PromptFitter.fit(ComposeTexts.fixed(prompt), checked, keys)))
         kept: list[JsonAnswer[ThreadVerdict] | None] = [None] * len(readers)
@@ -76,8 +78,8 @@ class ThreadVerifiers:
             diff = await git.diff(before, after)
             record = VerifyResult(writer=dataclasses.replace(record.writer, diff=diff))
 
-            # A failed writer gets no review, but keeps its diff, because
-            # it may have edited files before it failed.
+            # A failed writer gets no review, but keeps its diff,
+            # because it may have edited files before it failed.
             if not record.writer.ok:
                 return record
 
@@ -121,8 +123,9 @@ class ThreadVerifiers:
 
     @staticmethod
     async def _question(prompt: str, files: Sequence[str], text: str, schema: str) -> tuple[PromptSegment, ...]:
-        # A verifier's first turn: the caller's prompt, the changed files
-        # one per line and the diff, wrapped with the verdict schema.
+        # A verifier's first turn: the caller's prompt, the changed
+        # files one per line and the diff, wrapped with the verdict
+        # schema.
         turn = await ComposeTexts.load(ComposePrompt.VERIFY_TURN)
         listing = native_threads.NATIVE_LINE_SEPARATOR.join(files)
         return await JsonAnswers.wrapped(ComposeTexts.render(turn, {ComposeField.PROMPT: prompt, ComposeField.FILES: ComposeTexts.spliced(listing), ComposeField.DIFF: ComposeTexts.spliced(text)}), schema)
@@ -131,7 +134,8 @@ class ThreadVerifiers:
     async def _fit(writer: ThreadStep, readers: Sequence[ThreadStep], prompt: str, question: Sequence[PromptSegment]) -> None:
         # The writer must take the caller's prompt as it is, and every
         # verifier its question with the file list and the diff at their
-        # longest truncation notes; only the prompt can make either long.
+        # longest truncation notes; only the prompt can make either
+        # long.
         await PromptFitter.check(ComposeTexts.fixed(prompt), writer, argument=native_compose.COMPOSE_PROMPT_PARAMETER, receiver=native_compose.COMPOSE_WRITER_PARAMETER)
         for index, reader in enumerate(readers):
             await PromptFitter.check(question, reader, argument=native_compose.COMPOSE_PROMPT_PARAMETER, receiver=StepRoles.item(native_compose.COMPOSE_VERIFIERS_ARGUMENT, index))

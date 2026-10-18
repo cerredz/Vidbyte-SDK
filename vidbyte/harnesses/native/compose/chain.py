@@ -74,7 +74,8 @@ class ThreadChains:
                 outcomes.append(await ComposeCalls.call(step, await PromptFitter.fit(frame, step, keys)))
 
                 # Its diff is what changed while it ran, taken also when
-                # it failed, because a failed step may have edited files.
+                # it failed, because a failed step may have edited
+                # files.
                 if git is not None and before is not None:
                     outcomes[-1] = dataclasses.replace(outcomes[-1], diff=await git.diff(before, await git.snapshot()))
 
@@ -106,8 +107,9 @@ class ThreadChains:
 
     @staticmethod
     async def _template(template: str | None) -> str:
-        # The caller's template, which must splice {previous} and may use
-        # only {prompt}, {previous} and {diff}, or chain_turn without one.
+        # The caller's template, which must splice {previous} and may
+        # use only {prompt}, {previous} and {diff}, or chain_turn
+        # without one.
         if template is None:
             return await ComposeTexts.load(ComposePrompt.CHAIN_TURN)
         RecordFieldValidator.require_template(template, native_compose.COMPOSE_TEMPLATE_ARGUMENT, fields=native_compose.CHAIN_TEMPLATE_FIELDS, required=native_compose.CHAIN_REQUIRED_FIELDS)
@@ -115,10 +117,11 @@ class ThreadChains:
 
     @staticmethod
     async def _fit(steps: Sequence[ThreadStep], template: str, prompt: str) -> None:
-        # Step 1 must take the caller's prompt as it is. Every later step
-        # must take the template with the answer and the diff at their
-        # longest truncation notes: measured first without the prompt,
-        # so a template too long by itself is blamed on the template.
+        # Step 1 must take the caller's prompt as it is. Every later
+        # step must take the template with the answer and the diff at
+        # their longest truncation notes: measured first without the
+        # prompt, so a template too long by itself is blamed on the
+        # template.
         for index, step in enumerate(steps):
             receiver = StepRoles.item(native_compose.COMPOSE_STEPS_ARGUMENT, index)
             if not index:

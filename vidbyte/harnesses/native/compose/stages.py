@@ -62,11 +62,11 @@ class ThreadStages:
             # @intent stage-attempts-follow-the-decision-table
             # Every attempt is a fresh run of the stage's step with the
             # same prompt, on rung 0 (the step's own config) or on a
-            # ladder config. After a failure the decision table says what
-            # comes next: RETRY keeps the rung, RAISE_EFFORT climbs one
-            # rung and stays on the top one, ABORT ends the stage. Each
-            # attempt is bounded by its own config's timeout, so there is
-            # no sleep and no backoff between attempts.
+            # ladder config. After a failure the decision table says
+            # what comes next: RETRY keeps the rung, RAISE_EFFORT climbs
+            # one rung and stays on the top one, ABORT ends the stage.
+            # Each attempt is bounded by its own config's timeout, so
+            # there is no sleep and no backoff between attempts.
             tried: list[StageAttempt] = []
             rung = 0
             while len(tried) <= stage.retries:
@@ -110,9 +110,9 @@ class ThreadStages:
 
     @staticmethod
     async def _fit(stages: Sequence[StageSpec]) -> None:
-        # Each template must fit its step with the previous answer at its
-        # longest truncation note; every rung is the same harness, so the
-        # step's own config stands for its whole ladder.
+        # Each template must fit its step with the previous answer at
+        # its longest truncation note; every rung is the same harness,
+        # so the step's own config stands for its whole ladder.
         for index, stage in enumerate(stages):
             argument = StepRoles.item(native_compose.COMPOSE_STAGES_ARGUMENT, index)
             frame = ComposeTexts.render(stage.template, {ComposeField.PREVIOUS: ComposeTexts.spliced("")})

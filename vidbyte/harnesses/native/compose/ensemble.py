@@ -60,9 +60,9 @@ class ThreadEnsembles:
 
         # Make sure every first turn fits its step before anything runs.
         # The planner's question holds no model output, so it is checked
-        # as it will be sent; every other turn is checked at its longest,
-        # each spliced value as its longest truncation note, so only the
-        # task can make a turn too long.
+        # as it will be sent; every other turn is checked at its
+        # longest, each spliced value as its longest truncation note, so
+        # only the task can make a turn too long.
         schema = (await ComposeTexts.load(ComposePrompt.PLAN_SCHEMA)).format_map({ComposeField.ROLES: len(proposers)})
         question = await ThreadEnsembles._question(prompt, len(proposers), schema)
         longest_roles = [await ThreadEnsembles._frame(step, ComposePrompt.ROLE_SYSTEM, ComposePrompt.ROLE_TURN, prompt, None) for step in proposers]
@@ -105,9 +105,9 @@ class ThreadEnsembles:
             if any(outcome.ok for outcome in record.proposals):
                 (record,) = await ComposeCalls.fan_out([EnsembleSelector.select(git, tree, selector, record, prompt, keys)])
 
-            # With every reader done and every worktree gone, the working
-            # tree must still match the snapshot, also when the phase
-            # stopped early.
+            # With every reader done and every worktree gone, the
+            # working tree must still match the snapshot, also when the
+            # phase stopped early.
             await DisposableWorktree.backstop(git, tree, record)
         except ThreadComposeError as error:
             # A compose failure carries the record so far, with every
@@ -130,10 +130,11 @@ class ThreadEnsembles:
 
     @staticmethod
     def _roles(roster: object) -> tuple[ThreadStep, tuple[ThreadStep, ...], ThreadStep, ThreadStep]:
-        # The planner reads, and starts or continues a thread of its own.
-        # Every other role works in the planner's workspace, a proposer
-        # and the selector may only read, and an unanchored fork may hold
-        # such a role only beside a Grok planner on the same workspace.
+        # The planner reads, and starts or continues a thread of its
+        # own. Every other role works in the planner's workspace, a
+        # proposer and the selector may only read, and an unanchored
+        # fork may hold such a role only beside a Grok planner on the
+        # same workspace.
         checked: EnsembleRoster = RecordFieldConverter.require_instance(roster, native_compose.COMPOSE_ROSTER_ARGUMENT, EnsembleRoster)
         name = native_compose.COMPOSE_ROSTER_ARGUMENT
         planner_argument = StepRoles.member(name, native_compose.COMPOSE_PLANNER_MEMBER)
@@ -170,7 +171,8 @@ class ThreadEnsembles:
         # then its turn. The task and the approach range are fixed text;
         # every other field is model output, spliced, and empty when
         # texts is None, the longest form the up-front check measures.
-        # An unanchored fork opens on the planner's thread with fork_turn.
+        # An unanchored fork opens on the planner's thread with
+        # fork_turn.
         fixed = {ComposeField.TASK: task, ComposeField.MINIMUM: str(native_compose.ENSEMBLE_MIN_APPROACHES), ComposeField.MAXIMUM: str(native_compose.ENSEMBLE_MAX_APPROACHES)}
         fields = native_compose.COMPOSE_PROMPT_FIELDS[system].union(native_compose.COMPOSE_PROMPT_FIELDS[turn]).difference(fixed)
         values: dict[ComposeField, str | tuple[PromptSegment, ...]] = {field: ComposeTexts.spliced("" if texts is None else texts[field]) for field in fields}
@@ -263,9 +265,9 @@ class ThreadEnsembles:
 
     @staticmethod
     def _brief(record: EnsembleResult) -> dict[ComposeField, str] | None:
-        # What the implementer's turn splices: the chosen proposal's role
-        # name and text, and the selection's approach, rationale and
-        # guidance; None when the run stopped before a selection.
+        # What the implementer's turn splices: the chosen proposal's
+        # role name and text, and the selection's approach, rationale
+        # and guidance; None when the run stopped before a selection.
         plan = record.plan.value
         chosen = record.selection.value if record.selection is not None else None
         if plan is None or chosen is None:

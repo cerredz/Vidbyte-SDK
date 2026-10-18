@@ -69,10 +69,11 @@ class EnsembleSelector:
 
                 # @intent each-round-keeps-at-most-one-proposal-in-five
                 # While more than one proposal may survive, the selector
-                # keeps at most target of the numbers offered, one in five
-                # rounded up, and the numbers it kept, in proposer order, are
-                # offered next on the same thread. A round with no usable
-                # answer after its repairs ends the stage.
+                # keeps at most target of the numbers offered, one in
+                # five rounded up, and the numbers it kept, in proposer
+                # order, are offered next on the same thread. A round
+                # with no usable answer after its repairs ends the
+                # stage.
                 while (target := max(math.ceil(len(offered) / native_compose.ENSEMBLE_NARROWING_FACTOR), 1)) > 1:
                     schema = (await ComposeTexts.load(ComposePrompt.ROUND_SCHEMA)).format_map({ComposeField.TARGET: target})
                     values: dict[ComposeField, str | tuple[PromptSegment, ...]] = {ComposeField.TASK: task, ComposeField.ROUND: str(len(rounds) + 1), ComposeField.SURVIVING: str(len(offered)), ComposeField.TARGET: str(target), ComposeField.CANDIDATES: await EnsembleSelector._blocks(offered, names, texts)}
@@ -85,8 +86,9 @@ class EnsembleSelector:
                     offered = [number for number in offered if number in narrowing.kept]
                     step = ThreadBinder.anchor(step, thread)
 
-                # Then the selector names one offered number, the proposal
-                # the implementer will build, still on the same thread.
+                # Then the selector names one offered number, the
+                # proposal the implementer will build, still on the same
+                # thread.
                 values = {ComposeField.TASK: task, ComposeField.ROUND: str(len(rounds) + 1), ComposeField.SURVIVING: str(len(offered)), ComposeField.CANDIDATES: await EnsembleSelector._blocks(offered, names, texts)}
                 message = await EnsembleSelector._message(ComposePrompt.SELECTOR_FINAL_TURN, values, selection_schema, first=not rounds, fork=fork)
                 selection = await JsonAnswers.ask(step, message, selection_schema, functools.partial(AnswerDecoders.selection, offered=tuple(offered)), keys)

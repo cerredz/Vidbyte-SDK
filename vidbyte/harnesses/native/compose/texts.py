@@ -121,10 +121,11 @@ class PromptFitter:
     async def fit(frame: Sequence[PromptSegment], step: ThreadStep, keys: Iterable[str]) -> str:
         """The prompt step receives: spliced values without NULs or bound keys, each cut to the largest fair share when the whole prompt is too long."""
         # @intent spliced-values-never-carry-a-key-or-break-a-step
-        # A model can print a key and a writer can save one, so every key
-        # bound in the composite leaves spliced text before it reaches
-        # another vendor's argv; and a step refuses a prompt past its
-        # cap, so a long answer is cut instead of failing the step.
+        # A model can print a key and a writer can save one, so every
+        # key bound in the composite leaves spliced text before it
+        # reaches another vendor's argv; and a step refuses a prompt
+        # past its cap, so a long answer is cut instead of failing the
+        # step.
         note = await ComposeTexts.load(ComposePrompt.TRUNCATION_NOTE)
         caps = PromptFitter._caps(step)
 
