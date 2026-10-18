@@ -20,12 +20,12 @@ Slice 1 (`docs/spec/codex-host-hardening/`, status `verified`) is done on this b
 | S2 tests | done | 03:15 | 06:40 | reports/S2-test-author.md | 236 tests in 14 new modules plus the §13 pin rewrites (fa27a3ad, ab13e1e7, 893f1df4); **S2_HEAD 625279c6, then e3d41513 after S3's blockers**; red set 253 = 233 new + 19 superseded pins + 1 inherited; spec r4 d0529d15 |
 | S3 implement | done | 06:45 | 03:40 | reports/S3-implementer.md | 39 rows; budget exact (13/69/0/42); **S3_HEAD 8ea8734f** pushed; #1181 body updated, still draft; area 1 failed (inherited) / 1293 passed; source gate 1 failed (inherited) / 6824 passed; package `CI passed.`; 13 implementation deviations in spec §17 |
 | S4 adversarial review | done | 03:45 | 05:10 | reports/S4-review-{conformance,conventions,engineering}.md, reports/S4-findings-verifier.md | review.md: 8 confirmed (2 Blockers R-1, R-2; 6 Majors R-3…R-8), 7 Minors m-1…m-7, 0 refuted |
-| S5 repair loop | pending | | | | |
+| S5 repair loop | running | 06:20 | | | |
 | S5 re-review | pending | | | | |
 | S6 PR (both slices) | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 · S5 repair iterations: 1/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-17 22:40: **The same branch, worktree and PR as slice 1.** The precedent is #1055's two specs in one PR. Slice 2's base is slice 1's verified HEAD a7730107. request.md is slice 1's verbatim conversation capture with a slice-2 header (scope, what slice 1 already built, and the machinery to reuse).
@@ -106,6 +106,15 @@ Slice 1 (`docs/spec/codex-host-hardening/`, status `verified`) is done on this b
        
        Then a new S2_HEAD.
     3. **S5 repair iteration 1:** R-1…R-5 and R-8 code, plus the trivial Minors m-2…m-5 (m-6 and m-7 only if the verifier tagged them trivial), then every gate.
+
+- 2026-10-18 06:20: **Spec r6 and S2 round 4 checked.**
+  - **r6 (4d972438, `status: reviewed`):**
+    - adds the `CODEX_HOST_WORKTREE_ROOT_*` trio, EC-63, the INV-31 cancel rule plus EC-64, the INV-43/D-22 side-chat default reset, and deviation 14;
+    - config keys stay at 46, because §8.4 counts only §9.3 non-message constants. That matches the earlier worktree trios, so I accepted it.
+  - **S2 round 4 (9ad2771e, 25c2de9b)** adds 9 tests, with no production diff. My checks:
+    - area run: `8 failed, 1295 passed, 3 skipped`, which is the 7 intended red regression tests plus the inherited one;
+    - mutant runner on `stream_wait`: NONE exits 0 (26 passed), while S7, S3b and S3c each exit 1 (S3b with `AssertionError: 1000 not less than or equal to 300`).
+  - **S2_HEAD is now 25c2de9b.** R-6 and R-7 are closed by tests. S5 iteration 1 launches for R-1…R-5, R-8 and the trivial m-2…m-5; m-1 is closed by r6 deviation 14, and m-6/m-7 are follow-ups.
 
 ## User replies (verbatim)
 - (none yet)
