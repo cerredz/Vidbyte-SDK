@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: The CLI ensemble's selection shape (services/ensemble/service
 FUNCTION INVENTORY: EnsembleSelector.select is the narrated main function of the selector stage; check is the up-front fit check of every selector turn; _blocks renders the candidates; _message builds one selector turn wrapped with its schema.
 COMMON MODIFICATION PATTERNS: How fast the rounds narrow is ENSEMBLE_NARROWING_FACTOR, not a branch here. A new fact for the selector is one field in selector_round_turn.md or selector_final_turn.md and COMPOSE_PROMPT_FIELDS, filled in select and in check, spliced when it holds model output.
 WHAT NOT TO DO IN THIS FILE: 1. Do not offer a failed proposal or renumber the others; a number is its proposer's position. 2. Do not start a new thread for a later turn; every round and the selection continue the selector's thread, so it keeps what it already weighed. 3. Do not run an opencode or Muse selector in place, or change a Grok selector's permission mode (D-21). 4. Do not import ensemble.py; it imports this module.
-KNOWN EDGE CASES: With one to five successful proposals the target is 1 from the start, so there is no round and the first turn is the final selection (EC-70). A round that keeps fewer numbers than its target offers fewer next. Role names and proposals too long for the selector's prompt are cut to one fair share each (EC-23). The up-front check measures every turn as a first turn holding one block per proposer, with the round number and the survivors counted as the number of proposers, which no real turn exceeds.
+KNOWN EDGE CASES: With one to five successful proposals the target is 1 from the start, so there is no round and the first turn is the final selection (EC-70). A round that keeps fewer numbers than its target offers fewer next. Role names and proposals too long for the selector's prompt are cut to one fair share each (EC-23). The up-front check measures every turn as a first turn holding one block per proposer, with the round number and the survivors counted as the number of proposers, which no real turn exceeds. A worktree that cannot be removed after the last turn raises WORKTREE_FAILED with the rounds and the selection so far in its result (EC-16).
 RELATED DOCS: vidbyte/harnesses/README.md
 TESTS: tests/features/harness_compose/test_harness_compose_ensemble.py, tests/features/harness_compose/test_harness_compose_keys.py, tests/features/harness_compose/test_harness_compose_validation.py
 """
@@ -27,9 +27,14 @@ from vidbyte.harnesses.native.compose.texts import ComposeTexts, PromptFitter
 from vidbyte.harnesses.native.compose.workspace import DisposableWorktree
 from vidbyte.lib.constants import native_compose
 from vidbyte.lib.dataclasses.native_compose import JsonAnswer, ThreadStep
-from vidbyte.lib.dataclasses.native_ensemble import EnsembleResult, EnsembleRound
+from vidbyte.lib.dataclasses.native_ensemble import (
+    EnsembleResult,
+    EnsembleRound,
+    EnsembleSelection,
+)
 from vidbyte.lib.enums.native_compose import ComposeField, ComposePrompt
 from vidbyte.lib.enums.native_threads import NativeThreadVerb
+from vidbyte.lib.errors import ThreadComposeError
 
 
 class EnsembleSelector:
@@ -56,33 +61,42 @@ class EnsembleSelector:
         # unanchored fork's first turn branches the planner's thread.
         place: contextlib.AbstractAsyncContextManager[Path | None] = DisposableWorktree.from_tree(git, tree) if StepRoles.needs_worktree(selector) else contextlib.nullcontext()
         rounds: list[JsonAnswer[EnsembleRound]] = []
-        async with place as folder:
-            step = selector if folder is None else ThreadBinder.relocate(selector, folder)
-            step = ThreadBinder.anchor(step, planner_thread, NativeThreadVerb.FORK) if fork else step
+        selection: JsonAnswer[EnsembleSelection] | None = None
+        try:
+            async with place as folder:
+                step = selector if folder is None else ThreadBinder.relocate(selector, folder)
+                step = ThreadBinder.anchor(step, planner_thread, NativeThreadVerb.FORK) if fork else step
 
-            # @intent each-round-keeps-at-most-one-proposal-in-five
-            # While more than one proposal may survive, the selector
-            # keeps at most target of the numbers offered, one in five
-            # rounded up, and the numbers it kept, in proposer order, are
-            # offered next on the same thread. A round with no usable
-            # answer after its repairs ends the stage.
-            while (target := max(math.ceil(len(offered) / native_compose.ENSEMBLE_NARROWING_FACTOR), 1)) > 1:
-                schema = (await ComposeTexts.load(ComposePrompt.ROUND_SCHEMA)).format_map({ComposeField.TARGET: target})
-                values: dict[ComposeField, str | tuple[tuple[str, bool], ...]] = {ComposeField.TASK: task, ComposeField.ROUND: str(len(rounds) + 1), ComposeField.SURVIVING: str(len(offered)), ComposeField.TARGET: str(target), ComposeField.CANDIDATES: await EnsembleSelector._blocks(offered, names, texts)}
-                message = await EnsembleSelector._message(ComposePrompt.SELECTOR_ROUND_TURN, values, schema, first=not rounds, fork=fork)
-                answer = await JsonAnswers.ask(step, message, schema, functools.partial(AnswerDecoders.round, offered=tuple(offered), target=target), keys)
-                rounds.append(answer)
-                narrowing, thread = answer.value, answer.thread_id
-                if narrowing is None or thread is None:
-                    return dataclasses.replace(record, rounds=tuple(rounds))
-                offered = [number for number in offered if number in narrowing.kept]
-                step = ThreadBinder.anchor(step, thread)
+                # @intent each-round-keeps-at-most-one-proposal-in-five
+                # While more than one proposal may survive, the selector
+                # keeps at most target of the numbers offered, one in five
+                # rounded up, and the numbers it kept, in proposer order, are
+                # offered next on the same thread. A round with no usable
+                # answer after its repairs ends the stage.
+                while (target := max(math.ceil(len(offered) / native_compose.ENSEMBLE_NARROWING_FACTOR), 1)) > 1:
+                    schema = (await ComposeTexts.load(ComposePrompt.ROUND_SCHEMA)).format_map({ComposeField.TARGET: target})
+                    values: dict[ComposeField, str | tuple[tuple[str, bool], ...]] = {ComposeField.TASK: task, ComposeField.ROUND: str(len(rounds) + 1), ComposeField.SURVIVING: str(len(offered)), ComposeField.TARGET: str(target), ComposeField.CANDIDATES: await EnsembleSelector._blocks(offered, names, texts)}
+                    message = await EnsembleSelector._message(ComposePrompt.SELECTOR_ROUND_TURN, values, schema, first=not rounds, fork=fork)
+                    answer = await JsonAnswers.ask(step, message, schema, functools.partial(AnswerDecoders.round, offered=tuple(offered), target=target), keys)
+                    rounds.append(answer)
+                    narrowing, thread = answer.value, answer.thread_id
+                    if narrowing is None or thread is None:
+                        return dataclasses.replace(record, rounds=tuple(rounds))
+                    offered = [number for number in offered if number in narrowing.kept]
+                    step = ThreadBinder.anchor(step, thread)
 
-            # Then the selector names one offered number, the proposal
-            # the implementer will build, still on the same thread.
-            values = {ComposeField.TASK: task, ComposeField.ROUND: str(len(rounds) + 1), ComposeField.SURVIVING: str(len(offered)), ComposeField.CANDIDATES: await EnsembleSelector._blocks(offered, names, texts)}
-            message = await EnsembleSelector._message(ComposePrompt.SELECTOR_FINAL_TURN, values, selection_schema, first=not rounds, fork=fork)
-            selection = await JsonAnswers.ask(step, message, selection_schema, functools.partial(AnswerDecoders.selection, offered=tuple(offered)), keys)
+                # Then the selector names one offered number, the proposal
+                # the implementer will build, still on the same thread.
+                values = {ComposeField.TASK: task, ComposeField.ROUND: str(len(rounds) + 1), ComposeField.SURVIVING: str(len(offered)), ComposeField.CANDIDATES: await EnsembleSelector._blocks(offered, names, texts)}
+                message = await EnsembleSelector._message(ComposePrompt.SELECTOR_FINAL_TURN, values, selection_schema, first=not rounds, fork=fork)
+                selection = await JsonAnswers.ask(step, message, selection_schema, functools.partial(AnswerDecoders.selection, offered=tuple(offered)), keys)
+        except ThreadComposeError as error:
+            # A worktree that cannot be removed after the last turn
+            # fails the run, with the rounds and the selection so far
+            # in the record (spec EC-16).
+            if error.result is None:
+                error.result = dataclasses.replace(record, rounds=tuple(rounds), selection=selection)
+            raise
         return dataclasses.replace(record, rounds=tuple(rounds), selection=selection)
 
     @staticmethod

@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: The CLI ensemble's plan, propose, select and implement shape 
 FUNCTION INVENTORY: ThreadEnsembles.run_ensemble is the narrated main function; _roles checks the roster; _question builds the planner's question; _frame builds a proposer's or the implementer's first turn; _fit checks the planner's, the proposers' and the implementer's prompts; _plan asks the planner; _propose runs one proposer; _role_texts and _brief collect what a proposer's and the implementer's turns splice.
 COMMON MODIFICATION PATTERNS: A new fact for proposers is one field in role_system.md or role_turn.md and COMPOSE_PROMPT_FIELDS, added to _role_texts; _frame splices every field but the task and the approach range. A change to the narrowing rounds or the selection belongs in selection.py.
 WHAT NOT TO DO IN THIS FILE: 1. Do not start the implementer before the selector has finished and the backstop has passed (INV-12). 2. Do not run an opencode or Muse reader in place, or change any step's permission mode; refuse it instead (D-21). 3. Do not show a proposer another role's identity or another proposal. 4. Do not skip the backstop after a failed plan, no successful proposal or a failed selection; it is skipped only on a cancellation or a defect (INV-11).
-KNOWN EDGE CASES: No successful proposal stops before the selector, yet the backstop runs (EC-51). One proposer means no narrowing round (EC-70). A planner and a selector bound to the same run step work on two threads, because the selector's first turn starts its own. A repository with no commit allows Grok readers and refuses opencode and Muse readers with WORKTREE_FAILED before any step (EC-5).
+KNOWN EDGE CASES: No successful proposal stops before the selector, yet the backstop runs (EC-51). One proposer means no narrowing round (EC-70). A planner and a selector bound to the same run step work on two threads, because the selector's first turn starts its own. A repository with no commit allows Grok readers and refuses opencode and Muse readers with WORKTREE_FAILED before any step (EC-5). A worktree that cannot be removed after the planner or the selector answered raises WORKTREE_FAILED whose result holds that answer; after one of several proposers running at once, the result holds the plan only, because the first failure stops the other proposers (EC-16).
 RELATED DOCS: vidbyte/harnesses/README.md
 TESTS: tests/features/harness_compose/test_harness_compose_ensemble.py, tests/features/harness_compose/test_harness_compose_keys.py, tests/features/harness_compose/test_harness_compose_git.py, tests/features/harness_compose/test_harness_compose_validation.py, tests/features/harness_compose/test_harness_compose_acceptance.py
 """
@@ -193,9 +193,18 @@ class ThreadEnsembles:
             return await JsonAnswers.ask(planner, question, schema, parse, keys)
 
         # An opencode or Muse planner answers, repairs included, in a
-        # worktree of its own filled from the snapshot.
-        async with DisposableWorktree.from_tree(git, tree) as folder:
-            return await JsonAnswers.ask(ThreadBinder.relocate(planner, folder), question, schema, parse, keys)
+        # worktree of its own filled from the snapshot. A worktree that
+        # cannot be removed after the planner answered fails the run
+        # with the answer in the record so far (spec EC-16).
+        answer: JsonAnswer[EnsemblePlan] | None = None
+        try:
+            async with DisposableWorktree.from_tree(git, tree) as folder:
+                answer = await JsonAnswers.ask(ThreadBinder.relocate(planner, folder), question, schema, parse, keys)
+                return answer
+        except ThreadComposeError as error:
+            if error.result is None and answer is not None:
+                error.result = EnsembleResult(plan=answer)
+            raise
 
     @staticmethod
     async def _propose(git: ComposeGit, tree: str, proposer: ThreadStep, frame: Sequence[tuple[str, bool]], planner_thread: str, keys: Sequence[str]) -> StepOutcome:
