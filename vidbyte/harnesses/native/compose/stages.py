@@ -67,17 +67,17 @@ class ThreadStages:
             # one rung and stays on the top one, ABORT ends the stage.
             # Each attempt is bounded by its own config's timeout, so
             # there is no sleep and no backoff between attempts.
-            tried: list[StageAttempt] = []
+            attempts: list[StageAttempt] = []
             rung = 0
-            while len(tried) <= stage.retries:
+            while len(attempts) <= stage.retries:
                 step = ThreadBinder.rung(stage.step, stage.ladder[rung - 1]) if rung else stage.step
                 outcome = await ComposeCalls.call(step, await PromptFitter.fit(frame, step, keys))
                 decision = ThreadStages.classify(outcome)
-                tried.append(StageAttempt(rung=rung, outcome=outcome, decision=decision))
+                attempts.append(StageAttempt(rung=rung, outcome=outcome, decision=decision))
                 if decision is None or decision is StageDecision.ABORT:
                     break
                 rung = min(rung + 1, len(stage.ladder)) if decision is StageDecision.RAISE_EFFORT else rung
-            outcomes.append(StageOutcome(attempts=tuple(tried)))
+            outcomes.append(StageOutcome(attempts=tuple(attempts)))
         return StagedResult(stages=tuple(outcomes))
 
     @staticmethod
