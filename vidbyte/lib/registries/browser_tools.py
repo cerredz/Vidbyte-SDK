@@ -102,7 +102,8 @@ class BrowserToolRegistry:
             default_capabilities=(BrowserCapability.ALL,),
         ),
         # tavily-mcp@0.2.22: its installed README and a `tools/list`
-        # probe; it exits at start without TAVILY_API_KEY (spec A-10).
+        # probe; it starts without TAVILY_API_KEY but answers no call
+        # without one (spec A-10).
         BrowserToolDefinition(
             tool=BrowserTool.TAVILY, transport=BrowserToolTransport.STDIO, package=tools_data.TAVILY_PACKAGE, version=tools_data.TAVILY_VERSION,
             entry=tools_data.TAVILY_ENTRY, url=None, key_rule=BrowserKeyRequirement.REQUIRED, key_variable=BrowserToolVariable.TAVILY, arguments=(),
@@ -244,7 +245,8 @@ class BrowserToolRegistry:
             resolved.append((definition, named))
 
         # Each key must belong to a selected tool that takes one, and
-        # each selected tool that cannot start without a key needs one.
+        # each selected tool that cannot answer a call without a key
+        # needs one.
         cls._checked_keys(request, [definition for definition, _ in resolved])
 
         # Work out what each selection allows, denies and turns on.

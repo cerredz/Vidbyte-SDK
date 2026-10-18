@@ -171,7 +171,8 @@ EXA_ALL_TOOLS = ("web_search_exa", "web_fetch_exa")
 EXA_SEARCH_TOOLS = ("web_search_exa",)
 EXA_FETCH_TOOLS = ("web_fetch_exa",)
 
-# Tavily: tavily-mcp 0.2.22 (exits at start without its key, A-10).
+# Tavily: tavily-mcp 0.2.22 (starts without its key but answers no
+# call without one, A-10).
 TAVILY_PACKAGE = "tavily-mcp"
 TAVILY_VERSION = "0.2.22"
 TAVILY_ENTRY = ("node_modules", "tavily-mcp", "build", "index.js")

@@ -95,7 +95,7 @@ The source comment above each row repeats its evidence.
 | chromedevtools | `chrome-devtools-mcp@1.11.0` (`build/src/bin/chrome-devtools-mcp.js`) | none | installed README (`--no-usage-statistics`, `CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS`); `tools/list`; a network watch at start, quiet with both |
 | firecrawl | `firecrawl-mcp@3.30.2` (`dist/index.js`) | optional `FIRECRAWL_API_KEY` | installed README.md:40-72; `tools/list`; starts without a key |
 | exa | `exa-mcp-server@3.4.2` (`dist/stdio.cjs`) | optional `EXA_API_KEY` | installed README:25-30, 105-130; `tools/list`; starts without a key |
-| tavily | `tavily-mcp@0.2.22` (`build/index.js`) | required `TAVILY_API_KEY` | installed README:20-30, 54-62; `tools/list`; spec A-10 |
+| tavily | `tavily-mcp@0.2.22` (`build/index.js`) | required `TAVILY_API_KEY` | installed README:20-30, 54-62; `tools/list`; starts without the key but answers no call without it (spec A-10) |
 | brave | `@brave/brave-search-mcp-server@2.1.4` (`dist/index.js`) | required `BRAVE_API_KEY` | installed README; `tools/list`; exits at start without the key |
 | perplexity | `@perplexity-ai/mcp-server@1.3.0` (`dist/index.js`) | required `PERPLEXITY_API_KEY` | installed README; `tools/list`; exits at start without the key |
 | brightdata | `@brightdata/mcp@3.1.0` (`server.js`) | required `API_TOKEN` | installed README; `tools/list` (the 14 `scraping_browser_*` tools); calls api.brightdata.com at start |
@@ -125,8 +125,8 @@ one stays until the user deletes it.
 
 **To add a tool:** add a `BrowserTool` member, the tool's constants under
 its own prefix, a row in `BrowserTool` order with its source comment, and a
-row here. A tool that needs a key at start is `REQUIRED`; one that starts
-without a key but takes one is `OPTIONAL`. A remote tool takes its key only
-as a Bearer header. The registry tests in
+row here. A tool that cannot answer a call without a key is `REQUIRED`;
+one that works without a key but takes one is `OPTIONAL`. A remote tool
+takes its key only as a Bearer header. The registry tests in
 `tests/features/harness_threads/test_harness_threads_browser_registry.py`
 pin every row against the vendor facts, so they change with it.
