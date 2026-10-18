@@ -19,7 +19,7 @@ Slice 1 (`docs/spec/codex-host-hardening/`, status `verified`) is done on this b
 | S1 spec + review | done | 23:10 | 03:10 | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-r2.md | r1 fde5a8b0; round 1 SOUND WITH FIXES (1B/6M/6m, 040e56c1); r2 603519bb; round 2 SOUND WITH FIXES (0B/3M/2m, 4db45a23); **r3 d9072cdb status approved**. Budget 13 files / 69 classes / 0 deps / 46 config keys / 42 endpoints; INV 55, AC 44, EC 62, FR 36 |
 | S2 tests | done | 03:15 | 06:40 | reports/S2-test-author.md | 236 tests in 14 new modules plus the §13 pin rewrites (fa27a3ad, ab13e1e7, 893f1df4); **S2_HEAD 625279c6, then e3d41513 after S3's blockers**; red set 253 = 233 new + 19 superseded pins + 1 inherited; spec r4 d0529d15 |
 | S3 implement | done | 06:45 | 03:40 | reports/S3-implementer.md | 39 rows; budget exact (13/69/0/42); **S3_HEAD 8ea8734f** pushed; #1181 body updated, still draft; area 1 failed (inherited) / 1293 passed; source gate 1 failed (inherited) / 6824 passed; package `CI passed.`; 13 implementation deviations in spec §17 |
-| S4 adversarial review | running | 03:45 | | | |
+| S4 adversarial review | done | 03:45 | 05:10 | reports/S4-review-{conformance,conventions,engineering}.md, reports/S4-findings-verifier.md | review.md: 8 confirmed (2 Blockers R-1, R-2; 6 Majors R-3…R-8), 7 Minors m-1…m-7, 0 refuted |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
 | S6 PR (both slices) | pending | | | | |
@@ -89,6 +89,23 @@ Slice 1 (`docs/spec/codex-host-hardening/`, status `verified`) is done on this b
   
   The source and package gate tails are S3's, quoted in its report. (An earlier note in this log was dated 2026-10-19 by mistake; corrected to 10-18.)
 - 2026-10-18 03:45: **S4 diff scope** is `a7730107..8ea8734f`, slice 2 only. Slice 1 was already reviewed and verified (its review.md has R-1…R-12 and m-1…m-9). Reviewers may read the full PR diff against `origin/ai/resolve-pr-1055-comments` for context, but they file findings only against slice-2 changes.
+
+- 2026-10-18 05:10: **S4 checked.**
+  - The reviews found: conformance 1B/0M/2m, conventions 1B/1M/5m, engineering 1B/5M (29/33 mutants killed).
+  - The verifier merged them into 8 confirmed and 7 Minors, refuting nothing. Each row has a fixer tag and its own repro under `scratchpad/s4-slice2/verifier/`.
+  - **Routing plan, so each role stays separate (the slice-1 pattern):**
+    1. **Spec author r6:**
+       - R-1: a new §9.2 worktree-root failure message trio, with §8.4 config keys pre-authorised (+3);
+       - R-5: the side-chat tool resets the rejected spawn defaults (name, tools, personality), as the resume and continue tools do; this is §9.2 rows 34/36 and D-22;
+       - R-4: check that the §9.2 resume row states the cancel, and add an EC row if it is ambiguous;
+       - m-1: record the reviewer restyle as deviation 14;
+       - set `status: reviewed`.
+    2. **S2 round 4:**
+       - mutant-killing tests for R-6 (S7, mid-turn subscription, with the first read bounded by a timeout) and R-7 (S3b/S3c cumulative bounds), proven with the engineering `mutant.py`;
+       - red regression tests for R-1, R-3 (oversize event, EC-19 GAP(1)), R-4 (malformed goal/set answer → cancel) and R-5 (`_side_chat_view` plus a tool run under name/tools/personality defaults).
+       
+       Then a new S2_HEAD.
+    3. **S5 repair iteration 1:** R-1…R-5 and R-8 code, plus the trivial Minors m-2…m-5 (m-6 and m-7 only if the verifier tagged them trivial), then every gate.
 
 ## User replies (verbatim)
 - (none yet)
