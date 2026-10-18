@@ -91,17 +91,19 @@ class ProcessReaper:
     @staticmethod
     def _windows_count(outcome: CliOutcome) -> int:
         # The script's last word is the number of processes it stopped.
-        if outcome.exit_code != 0 or outcome.timed_out:
-            return 0
+        if outcome.exit_code != native_threads.NATIVE_SUCCESS_EXIT_CODE or outcome.timed_out:
+            return native_threads.NATIVE_REAP_NONE_COUNT
         match = re.fullmatch(native_threads.NATIVE_REAP_COUNT_PATTERN, outcome.stdout)
-        return int(match.group(1)) if match is not None else 0
+        return int(match.group(1)) if match is not None else native_threads.NATIVE_REAP_NONE_COUNT
 
     @staticmethod
     def _kill_marked(listing: CliOutcome, marker: str) -> int:
         # Each ps line is "<pid> <command line>"; a process that is gone
-        # or not ours to kill is skipped.
-        if sys.platform == "win32" or listing.exit_code != 0 or listing.timed_out:
-            return 0
+        # or not ours to kill is skipped. The platform check keeps the
+        # "win32" literal, as runner.py does, because type checkers
+        # narrow on it, and signal.SIGKILL exists only off Windows.
+        if sys.platform == "win32" or listing.exit_code != native_threads.NATIVE_SUCCESS_EXIT_CODE or listing.timed_out:
+            return native_threads.NATIVE_REAP_NONE_COUNT
         killed = 0
         for line in listing.stdout.splitlines():
             pid_text, _, command_line = line.strip().partition(" ")

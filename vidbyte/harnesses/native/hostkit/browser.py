@@ -129,7 +129,7 @@ class BrowserRuntimes:
             raise errors.failure(NativeThreadProblem.RUNTIME_MISSING, request=request, searched=browser_tools.BROWSER_NODE_BATCH_DETAIL.format(program=program))
         invocation = CliInvocation(argv=(program, browser_tools.BROWSER_NODE_VERSION_OPTION), env_overlay={}, timeout_seconds=native_threads.NATIVE_CONTROL_TIMEOUT_SECONDS, max_output_bytes=native_threads.NATIVE_PROCESS_MAX_OUTPUT_BYTES)
         outcome = await CliRunner().run(invocation)
-        match = re.search(browser_tools.BROWSER_NODE_VERSION_PATTERN, outcome.stdout) if outcome.exit_code == 0 else None
+        match = re.search(browser_tools.BROWSER_NODE_VERSION_PATTERN, outcome.stdout) if outcome.exit_code == native_threads.NATIVE_SUCCESS_EXIT_CODE else None
         if match is None:
             raise errors.failure(NativeThreadProblem.RUNTIME_MISSING, request=request, searched=browser_tools.BROWSER_NODE_UNREADABLE_DETAIL.format(program=program))
         if tuple(int(part) for part in match.groups()) < browser_tools.BROWSER_NODE_MIN_VERSION:
