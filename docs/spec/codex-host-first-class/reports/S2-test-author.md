@@ -330,3 +330,19 @@ The spec's §6.2 Proof column is unchanged, because no cited node id changed.
 - Name pin: `TEXT_NAMES` gains `NO_STORED_GOAL_MESSAGE`, and the support literal is renamed to match (goal_control updated, imports kept sorted). The test fails because `vidbyte.lib.constants.codex_host` has no attribute `CODEX_HOST_NO_STORED_GOAL_MESSAGE`, which is the right reason. The shared-constants guard stays green.
 - `FEATURE.md:5` now describes 53 methods: the 25 slice-2 functions, `collaboration_mode`, and 42 tools, with the nine INV-42 functions kept from the model. `:40` now says forty-two tools. `:230` now says eleven older modules. I also fixed the stale "named only first and last" header in `codex_host_feature_support.py`. The pack README gains a round-2 change-log entry.
 - Area: `253 failed, 1041 passed, 3 skipped in 75.52s (0:01:15)`, with the same failing set and exception mix as round 2, so test-plan counts did not move. Only defect 1 and the implementer note were updated. Lint: `SDK-LINT: PASS`.
+
+## Round 3 (spec r5, `5f6c4fc4`)
+
+Tests commit: `32e1a404`. I fixed the five items from the S3 block against the spec and the SDK, not against the implementation:
+- B-1: the §13 r5 field-tail pin now ends with `collaboration_mode`.
+- B-2: the ENDED event's snapshot is now COMPLETED with a minimal `CodexRunResult`, because the slice-1 record refuses COMPLETED without a result (INV-48).
+- B-3: `thread/read` now expects `includeTurns: False`, which openai-codex's `thread_read` always sends (`client.py:498-503`).
+- B-4: `StubCodexHost._enter` now takes its own `name` positional-only (`name, /, *args, **kwargs`), so the rename stub can record a `name` keyword. This is the only clean fix: every caller passes the name positionally, and the alternatives copy `_enter`'s gate and raise logic or drop the keyword that `feature_tools` asserts.
+- B-5: the bearer member is now `BEARER` (D-40) in both pins, and no `BEARER_TOKEN` remains in the test tree.
+
+Results:
+- Before the fixes the area run was `8 failed, 1286 passed, 3 skipped`.
+- After them it is `3 failed, 1291 passed, 3 skipped in 95.04s (0:01:35)`. The three failures are:
+  - the two B-5 tests: `AttributeError: BEARER`, and the `EXPECTED_ENUMS` diff `BEARER_TOKEN` against `BEARER`;
+  - the inherited `harness_threads` test.
+- Lint shows `SDK-LINT: FAIL` from one cause, S054 REGRESSED (4 against an allowance of 3). That finding is production's `vidbyte/lib/enums/codex.py:288 BEARER_TOKEN = "bearerToken"`, which S3 must rename. Lint reports no finding in the test tree.
