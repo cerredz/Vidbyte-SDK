@@ -1,9 +1,9 @@
 """FILE: tests/features/harness_compose/test_harness_compose_concurrency.py
 
-PURPOSE: Fan-out, stopping and Grok serialization (AC-10, AC-11, INV-13, INV-14, INV-30, EC-17, EC-19, EC-20, EC-22): cancelling a composite while a Grok verifier and an opencode verifier hold stops both process trees within the stop bound, removes the worktree, frees the Grok lock and propagates CancelledError unchanged; a second cancel during that cleanup, or an anyio cancel scope that cancels again and again, still leaves no task, process, worktree folder, registration or held Grok lock; a verifier whose worktree cannot be added cancels its sibling, and its one WORKTREE_FAILED propagates only after every sibling has stopped and cleaned up; Grok steps on one workspace never overlap while an opencode step runs beside them; composites on different repositories overlap, composites on the same one do not.
+PURPOSE: Fan-out, stopping and Grok serialization (AC-10, AC-11, INV-13, INV-14, INV-30, EC-17, EC-19, EC-20, EC-22): cancelling a composite while a Grok verifier and an opencode verifier hold stops both process trees within the stop bound, removes the worktree, frees the Grok lock and propagates CancelledError unchanged; a second cancel during that cleanup, or an anyio cancel scope that cancels again and again, still leaves no task, process, worktree folder, registration or held Grok lock; a cancel that lands while a slow worktree add holds git's lock lets the add run to its end and then removes the worktree, leaving no admin entry, locked registration or folder; a verifier whose worktree cannot be added cancels its sibling, and its one WORKTREE_FAILED propagates only after every sibling has stopped and cleaned up; Grok steps on one workspace never overlap while an opencode step runs beside them; composites on different repositories overlap, composites on the same one do not.
 ROLE IN CODEBASE: Start here when a composite leaks a process, a task, a worktree or a Grok lock on cancellation or on a sibling's failure, or when Grok steps collide or wait for each other needlessly.
-ARCHITECTURE NOTE: Overlap is proven from the CliRunner spy's enter and exit order, never from a clock. Held stand-ins wait for the sandbox's single release file, which a test writes only after the starts it expects; a start that must not happen is checked with a bounded settle wait, which can let a broken implementation pass on a very slow machine but can never fail a correct one. A fan-out child is made to fail from outside compose through the sandbox repository's own reference-transaction hook, which git runs during worktree add (spec EC-59, T-6): the hook fails the add only once the scene it waits for is in place, so the failure always lands while the sibling holds. A cleanup is made long enough for a second cancel to land inside it: on POSIX each stand-in lingers after SIGTERM (`term_linger`), so its stop takes the whole kill wait, and on Windows taskkill takes longer than the 50 ms gap by itself.
-FUNCTION INVENTORY: started counts the launches of some labels; finish releases the stand-ins and waits for a task without raising; plant_add_gate installs the hook that fails worktree adds on cue; removal_seconds times this machine's git for the removal that follows a failed add; gate_failures reads when, and after what wait, the hook failed each add; holder_pids lists a held stand-in's process and its grandchild; task_name names a pending task; settle releases the stand-ins and waits for every task a composite left; lingering_verifiers binds three held verifiers that are slow to stop; cleanup_state reads what a composite left at the moment its cancel propagated; in_cancel_scope awaits a composite inside an anyio cancel scope; the test_* functions are one behaviour each.
+ARCHITECTURE NOTE: Overlap is proven from the CliRunner spy's enter and exit order, never from a clock. Held stand-ins wait for the sandbox's single release file, which a test writes only after the starts it expects; a start that must not happen is checked with a bounded settle wait, which can let a broken implementation pass on a very slow machine but can never fail a correct one. A fan-out child is made to fail from outside compose through the sandbox repository's own reference-transaction hook, which git runs during worktree add (spec EC-59, T-6): the hook fails the add only once the scene it waits for is in place, so the failure always lands while the sibling holds. A cleanup is made long enough for a second cancel to land inside it: on POSIX each stand-in lingers after SIGTERM (`term_linger`), so its stop takes the whole kill wait, and on Windows taskkill takes longer than the 50 ms gap by itself. A slow add is made with a second reference-transaction hook that pauses in the add's prepared phase, with git's "initializing" lock held, and leaves a marker when the pause starts and when it ends.
+FUNCTION INVENTORY: started counts the launches of some labels; finish releases the stand-ins and waits for a task without raising; plant_add_gate installs the hook that fails worktree adds on cue; plant_slow_add installs the hook that makes worktree adds slow; removal_seconds times this machine's git for the removal that follows a failed add; gate_failures reads when, and after what wait, the hook failed each add; holder_pids lists a held stand-in's process and its grandchild; task_name names a pending task; settle releases the stand-ins and waits for every task a composite left; lingering_verifiers binds three held verifiers that are slow to stop; cleanup_state reads what a composite left at the moment its cancel propagated; in_cancel_scope awaits a composite inside an anyio cancel scope; the test_* functions are one behaviour each.
 COMMON MODIFICATION PATTERNS: Release held stand-ins in a finally block, and wait for the composite before asserting on its record. To check the state at the moment an error propagates, read it right after the raise and before any await.
 WHAT NOT TO DO IN THIS FILE: Do not sleep for a fixed time to wait for a start; poll with wait_until and a deadline. Do not mock compose or git to make a child fail; plant the hook.
 KNOWN EDGE CASES: A held stand-in ends by itself after its 30-second hold limit, so a broken stop cannot leak it for long. The grandchild of a held stand-in inherits its pipes, so only a whole-tree stop ends it. A reference-transaction hook that exits 1 when the add's transaction is prepared makes git print "ref updates aborted by hook" (git 2.53 and earlier) or "in 'prepared' phase, update aborted by the reference-transaction hook" (git 2.54 and later), exit 128 and remove the new folder and its registration itself; worktree remove runs no such hook. The hook waits at most GATE_BOUND_SECONDS for its cue and then fails the add anyway, recording that it timed out. Two adds that fail must be staggered by less than one removal's time for the second verifier to be mid-removal when the first one's error arrives, so that case sweeps the stagger across the measured window in STAGGER_STEPS runs and fails on the first run that leaves a task behind. anyio is not a declared dependency (httpx brings it), so the anyio case skips without it.
@@ -25,6 +25,7 @@ import pytest
 
 SETTLE_SECONDS = 1.5
 SECOND_CANCEL_SECONDS = 0.05
+SLOW_ADD_SECONDS = 3.0
 LINGER_LABELS = ("g-linger", "oc-linger", "muse-linger")
 GATE_BOUND_SECONDS = 20.0
 STAGGER_STEPS = 5
@@ -77,6 +78,23 @@ def main(state):
 
 sys.exit(main(sys.argv[1]))
 """
+SLOW_ADD_SCRIPT = """import sys
+import time
+from pathlib import Path
+
+
+def main(state):
+    sys.stdin.read()
+    if state != "prepared":
+        return 0
+    Path(MARKS, "started").write_text("started", encoding="utf-8")
+    time.sleep(SECONDS)
+    Path(MARKS, "finished").write_text("finished", encoding="utf-8")
+    return 0
+
+
+sys.exit(main(sys.argv[1]))
+"""
 
 
 def started(sandbox, *labels: str) -> list[str]:
@@ -124,6 +142,34 @@ def plant_add_gate(sandbox, pack, *, arrivals: int = 1, grandchildren: int = 0, 
         hook.chmod(0o755)
     sandbox.git("config", "core.hooksPath", hooks.as_posix())
     return claims
+
+
+def plant_slow_add(sandbox, pack, seconds: float) -> Path:
+    # Every worktree add in the sandbox repository pauses `seconds`
+    # in its reference-transaction hook, while git holds the new
+    # registration's "initializing" lock, then goes on. The hook
+    # leaves a "started" marker when the pause begins and a
+    # "finished" one when it ends, in the folder returned. It is
+    # built and named as plant_add_gate builds and names its own.
+    slow = sandbox.root / "slow-add"
+    marks, hooks = slow / "marks", slow / "hooks"
+    for folder in (marks, hooks):
+        folder.mkdir(parents=True)
+    body = f"MARKS = {str(marks)!r}\nSECONDS = {seconds!r}\n{SLOW_ADD_SCRIPT}"
+    if sys.platform == "win32":
+        launcher = pack.launcher_bytes()
+        if launcher is None:
+            pytest.skip("pip's console-script launcher (distlib t64.exe) is needed to build an .exe hook")
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as bundle:
+            bundle.writestr("__main__.py", body)
+        (hooks / "reference-transaction.exe").write_bytes(launcher + f'#!"{sys.executable}"\r\n'.encode("utf-8") + archive.getvalue())
+    else:
+        hook = hooks / "reference-transaction"
+        hook.write_text(f"#!{sys.executable}\n{body}", encoding="utf-8")
+        hook.chmod(0o755)
+    sandbox.git("config", "core.hooksPath", hooks.as_posix())
+    return marks
 
 
 def removal_seconds(sandbox) -> float:
@@ -418,3 +464,40 @@ async def test_an_anyio_cancel_scope_around_a_verify_leaves_no_task_process_or_w
     follow = steps.bind("grok", plan=True, label="follow")
     after = await asyncio.wait_for(api.compose.run_staged_threads([api.records.StageSpec(step=follow, template="Go.")]), 30)
     assert after.failed_stage is None, "the Grok lock for the workspace is free"
+
+
+@pytest.mark.asyncio
+async def test_a_cancel_during_a_slow_worktree_add_lets_the_add_finish_and_leaves_no_registration(compose_api, sandbox, steps, pack, wait_until) -> None:
+    # EC-17 / INV-30 / INV-9: the cancel lands while git's worktree
+    # add pauses in a slow reference-transaction hook with its
+    # "initializing" lock held. The add runs to its end, then the
+    # removal runs: when CancelledError propagates, the hook has
+    # finished, no admin entry is left under .git/worktrees, no
+    # registration is locked and no folder is left. Red until review
+    # R-14 lands: the cancel stopped the add's process tree, which on
+    # Windows left a registration locked as "initializing".
+    api = compose_api
+    sandbox.make_repo()
+    marks = plant_slow_add(sandbox, pack, SLOW_ADD_SECONDS)
+    writer = steps.bind("opencode", label="writer", fake={"write_files": {"feature.txt": "feature\n"}})
+    reader = steps.bind("opencode", label="oc-slow", fake={"final_parts": [pack.verdict_json("approve")]})
+    before = asyncio.all_tasks()
+    task = asyncio.ensure_future(api.compose.verify_with(writer, [reader], prompt=pack.PROMPT))
+    try:
+        assert await wait_until(lambda: (marks / "started").exists(), pack.WAIT_SECONDS), "the worktree add reached the slow hook"
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, pack.WAIT_SECONDS)
+        finished = (marks / "finished").exists()
+        admin = sandbox.workspace / ".git" / "worktrees"
+        entries = sorted(path.name for path in admin.iterdir()) if admin.is_dir() else []
+        listing = sandbox.git("worktree", "list", "--porcelain").stdout.decode("utf-8")
+        registered, leftovers = sandbox.worktrees(), sandbox.leftovers()
+    finally:
+        await settle(sandbox, before, pack.WAIT_SECONDS)
+    assert finished, "EC-17: the started worktree add ran to its end before CancelledError propagated"
+    assert entries == [], f"EC-17: admin entries left under .git/worktrees: {entries}"
+    locked = [line for line in listing.splitlines() if line.startswith("locked")]
+    assert locked == [], f"EC-17: a registration is still locked: {listing!r}"
+    assert (registered, leftovers) == (1, []), f"EC-17: {registered} worktrees registered and {leftovers} left when CancelledError propagated"
+    assert sandbox.launches(label="oc-slow") == [], "the reader whose worktree was being added never started"
