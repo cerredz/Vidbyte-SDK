@@ -1,7 +1,7 @@
 ---
 spec: harness-browser-tools
 title: "Browser tools for every harness thread: run_<harness>_with_browser"
-status: verified
+status: pr-open
 revision: 5
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-harness-browser-tools
@@ -1159,6 +1159,7 @@ None. There is no CI change, dependency change, secret, release or version bump.
 | r4 | 2026-10-17 | S1 spec (alignment with S2 tests; not a review round) | Wrote down the S2 tests' choices where the spec was silent: `BROWSER_CHROME_PATHS`; one next-step text per code with situation detail in the observation (D-29); Playwright group contract (counts and union); entry-part root; `NativeThreadOperation` order; call-time constants including `NATIVE_PS_PATHS`; `Path.home()` for EC-14; no Muse thread id in AC-12. No architecture or behavior change; status stays approved |
 | r4 | 2026-10-17 | S3 implement | Implemented all 37 rows of §12.3 in phase order (P1–P5); harness_threads 608 passed / 4 red (three S2 fixture-routing defects, one inherited); three Codex fixed-byte pins red by rows 34–36; lint PASS, package gate PASS; push blocked by GitHub push protection on S2's synthetic DeepSeek key fixture; deviations below |
 | r5 | 2026-10-17 | S1 spec (S4 review findings; not a review round) | R-2: Grok's required evidence is "listed in `available_commands` or completed a call", and a failed call, including "Tool not found", is evidence that the server did not connect (FR-14, D-11, §8.5, §9.1, AC-12, EC-16, EC-44, EC-45); opencode and Muse checked, unchanged. R-5: NG-2 corrected (`CodexHost`, #1055, is on `main` as a host harness, not the `_thread` shape); §2 names the three thread harnesses on `main`; Q-19 records the Codex follow-up. No architecture or budget change: §8.4 and the 37 rows of §12.3 are unchanged; status stays reviewed |
+| r5 | 2026-10-18 | S6 PR | finalized for review |
 
 ### Implementation deviations (S3)
 
