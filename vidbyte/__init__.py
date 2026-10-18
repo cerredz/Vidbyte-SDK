@@ -22,7 +22,7 @@ Architecture:
     - Native harness thread exports: everything in vidbyte.harnesses.native.__all__, which is the nine run_/continue_/fork_ thread functions for Grok, opencode and Muse, plus NativeThreadResult, NativeThreadError, GrokThreadConfig, OpencodeThreadConfig, MuseThreadConfig, GrokPermissionMode, GrokReasoningEffort and MuseReasoningEffort. The records, enums and error import eagerly from vidbyte.lib. The functions load on first use through _LAZY_NATIVE_THREAD_EXPORTS and __getattr__, so `import vidbyte` never imports vidbyte.harnesses.native (harness thread spec INV-23). A new name in vidbyte.harnesses.native.__all__ joins that mapping (functions) or the vidbyte.lib imports (records, enums, errors) and this __all__, and then contracts/sdk-public-api.json is regenerated.
     - Multi-agent exports: MultiAgent, MagenticOneOrchestrator, TaskLedger, AgentBinding, AgentTransfer, and immutable ledger contracts.
     - Workflow exports: StateGraph, StateMachine, stages, validators, routers, policies, records, and typed errors.
-    - Error exports: MCP, pipeline, workflow, multi-agent execution, task-ledger, and agent-transfer error families.
+    - Error exports: MCP, pipeline, workflow, multi-agent execution, task-ledger, and agent-transfer error families, plus the general ConfigurationError raised for invalid configuration.
 Key Functions / Exports:
     - VidbyteSDK: Main SDK entry point.
     - BaseAgent: Base class for building agents.
@@ -38,7 +38,7 @@ Similar files:
 
 from __future__ import annotations
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 
 import typing as _typing
 
@@ -305,6 +305,7 @@ from vidbyte.agents.output import (
     WebhookOutput,
 )
 from vidbyte.agents.pricing import ProviderUsage
+from vidbyte.agents.skills.loader import SkillLoader
 from vidbyte.client import VidbyteSDK
 from vidbyte.config import (
     AgentSettings,
@@ -476,6 +477,7 @@ from vidbyte.lib.dataclasses.prosecutor_defender_judge import (
     ProsecutorDefenderJudgeReport,
     ProsecutorReportPayload,
 )
+from vidbyte.lib.dataclasses.skills import SkillResolution
 from vidbyte.lib.enums import (
     BudgetPreset,
     GrokPermissionMode,
@@ -491,6 +493,7 @@ from vidbyte.lib.enums.config import AgentType
 from vidbyte.lib.errors import (
     AgentTransferError,
     CodexAgentError,
+    ConfigurationError,
     McpAttachmentError,
     McpConnectionError,
     McpError,
@@ -911,6 +914,9 @@ __all__ = [
     "SkillsShSkill",
     "SkillSourceType",
     "SkillUnavailableReason",
+    "SkillLoader",
+    "SkillResolution",
+    "ConfigurationError",
     "JevTargetOutcome",
     "JevTargetOutcomeEvidence",
     "JevTargetOutcomeEvidenceItem",

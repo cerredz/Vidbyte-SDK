@@ -43,7 +43,7 @@ class McpClient:
             {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": {"name": "vidbyte-sdk", "version": "0.3.1"},
+                "clientInfo": {"name": "vidbyte-sdk", "version": "0.4.0"},
             },
         )
         # @intent mcp-client-sends-initialized-notification
