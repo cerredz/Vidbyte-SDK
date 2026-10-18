@@ -1,14 +1,14 @@
 """FILE: vidbyte/lib/dataclasses/validation.py
 
-PURPOSE: Defines RecordFieldValidator, the one canonical field validator for validated records (text, optional text, positive finite numbers, bounded ints, strict bools, enum members, argv tuples and absolute directories), and RecordFieldConverter, the canonical conversions and checks records apply beside it (tuples, read-only mappings, enum members, paths and plain instance checks).
-ROLE IN CODEBASE: Called from the __post_init__ of the records in vidbyte/lib/dataclasses/native_threads.py and process.py, and, through accepts_text, by the output readers GrokWire, OpencodeWire, MuseWire and MuseExecOutput under vidbyte/harnesses/native/ to check a vendor's thread id.
+PURPOSE: Defines RecordFieldValidator, the one canonical field validator for validated records (text, optional text, Windows command-line length, str.format templates, positive finite numbers, bounded ints, strict bools, enum members, argv tuples and absolute directories), and RecordFieldConverter, the canonical conversions and checks records apply beside it (tuples, read-only mappings, enum members, paths and plain instance checks).
+ROLE IN CODEBASE: Called from the __post_init__ of the records in vidbyte/lib/dataclasses/native_threads.py, native_compose.py, native_ensemble.py and process.py, by the composites under vidbyte/harnesses/native/compose/ to check caller templates and prompt files and to measure prompts, and, through accepts_text, by the output readers GrokWire, OpencodeWire, MuseWire and MuseExecOutput under vidbyte/harnesses/native/ to check a vendor's thread id.
 ARCHITECTURE NOTE: Two classes of static methods, each taking the checked value first and the field name second, returning the checked or converted value or raising ConfigurationError. The checked variable is always named value, so the bool guards here are the single owner lint rules C002, C006, C007 and C008 point at. Messages name the field and the expected type or range, and quote a value only when it is a short, non-secret scalar or text. Every ConfigurationError also carries details["field"], so a caller can name the bad argument without reading the message text.
-FUNCTION INVENTORY: require_text, accepts_text (require_text's rule as a bool), require_optional_text, require_command_line_units (a value's quoted Windows command-line length), require_number, require_int, require_bool, require_enum, require_argv, require_directory; _text_problem words what a text value fails, and _received renders the received value safely for a message. RecordFieldConverter: to_tuple, to_mapping, to_enum (a member or its exact value string), to_path (a str or os.PathLike, unchecked), require_instance.
+FUNCTION INVENTORY: require_text, accepts_text (require_text's rule as a bool), require_optional_text, require_command_line_units (a value's quoted Windows command-line length must fit), command_line_units (that length, in UTF-16 code units), require_template (a str.format template of bare names from an allowed set, with the required names), require_number, require_int, require_bool, require_enum, require_argv, require_directory; _text_problem words what a text value fails, and _received renders the received value safely for a message. RecordFieldConverter: to_tuple, to_mapping, to_enum (a member or its exact value string), to_path (a str or os.PathLike, unchecked), require_instance.
 COMMON MODIFICATION PATTERNS: Add a new check as one more static method with value first and field_name second, and call it from a record's __post_init__; never copy a check into a record.
 WHAT NOT TO DO IN THIS FILE: 1. Do not convert values silently; to_path only wraps a path in Path and never checks or resolves it. 2. Do not quote mapping values or long text in a message; they can hold secrets. 3. Do not import from a layer above vidbyte.lib.
 KNOWN EDGE CASES: bool is an int subclass, so every numeric check refuses bool first. A field whose last name segment reads as a credential (password, token, secret, api_key) is never quoted, whatever its length. require_argv refuses a list on purpose, because argv fields must be immutable tuples. require_directory must run on the path as given, before Path.resolve(), or a relative path would pass.
 RELATED DOCS: vidbyte/lib/README.md; lint/rules/c008_shared_validator_owner.py
-TESTS: tests/features/harness_threads/test_harness_threads_records.py
+TESTS: tests/features/harness_threads/test_harness_threads_records.py, tests/features/harness_compose/test_harness_compose_validation.py
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from __future__ import annotations
 import math
 import os
 import re
+import string
 import subprocess
 from collections.abc import Mapping
 from enum import Enum
@@ -62,15 +63,44 @@ class RecordFieldValidator:
 
     @staticmethod
     def require_command_line_units(value: str, field_name: str, *, max_units: int) -> str:
+        # The value's quoted Windows command-line length, counted by
+        # command_line_units, must fit max_units.
+        units = RecordFieldValidator.command_line_units(value)
+        if units > max_units:
+            raise ConfigurationError(f"{field_name} must take at most {max_units} UTF-16 code units once quoted for the Windows command line; got {units}.", details={"field": field_name})
+        return value
+
+    @staticmethod
+    def command_line_units(value: str) -> int:
         # @intent windows-command-line-counts-quoted-utf16-units
         # Windows quotes each argument (a " becomes \", and the whole
         # value is wrapped when it holds a space) and counts the command
         # line in UTF-16 code units, so a value within its character cap
-        # can still pass the CreateProcess limit; the quoted form, built
-        # as subprocess builds it, must fit max_units.
-        units = len(subprocess.list2cmdline([value]).encode(NATIVE_WINDOWS_COMMAND_LINE_ENCODING)) // NATIVE_UTF16_UNIT_BYTES
-        if units > max_units:
-            raise ConfigurationError(f"{field_name} must take at most {max_units} UTF-16 code units once quoted for the Windows command line; got {units}.", details={"field": field_name})
+        # can still pass the CreateProcess limit; this is the quoted
+        # form's length, built as subprocess builds it.
+        return len(subprocess.list2cmdline([value]).encode(NATIVE_WINDOWS_COMMAND_LINE_ENCODING)) // NATIVE_UTF16_UNIT_BYTES
+
+    @staticmethod
+    def require_template(value: Any, field_name: str, *, fields: frozenset[str], required: frozenset[str] = frozenset()) -> str:
+        # @intent templates-take-bare-named-fields-only
+        # A str.format template whose placeholders are bare names from
+        # fields and that uses every name in required. A positional,
+        # attribute or index field, a conversion, a format spec and an
+        # unmatched brace are refused, and the message lists the allowed
+        # names rather than quoting the caller's text.
+        allowed = ", ".join(f"{{{name}}}" for name in sorted(fields)) or "none"
+        if not isinstance(value, str):
+            raise ConfigurationError(f"{field_name} must be a str template; got a value of type {type(value).__name__}.", details={"field": field_name})
+        try:
+            parts = list(string.Formatter().parse(value))
+        except ValueError:
+            raise ConfigurationError(f"{field_name} has an unmatched brace; write a literal brace twice.", details={"field": field_name}) from None
+        used = {name for _literal, name, _spec, _conversion in parts if name is not None}
+        if any(name is not None and (name not in fields or spec or conversion) for _literal, name, spec, conversion in parts):
+            raise ConfigurationError(f"{field_name} may use only these placeholders, each as a bare name with no index, attribute, conversion or format spec: {allowed}.", details={"field": field_name})
+        missing = sorted(required - used)
+        if missing:
+            raise ConfigurationError(f"{field_name} must use the placeholders {', '.join(f'{{{name}}}' for name in missing)}.", details={"field": field_name})
         return value
 
     @staticmethod
