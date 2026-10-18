@@ -354,3 +354,42 @@ Open items:
 1. **The model sites go past R-3's list.** `bind_thread` and `bind_continue` refuse a bad model with `model must match ^[A-Za-z0-9]\S*$; got '...'`, key included. INV-4 covers "any `ConfigurationError` compose raises", so a case for each binder asserts it. The check appears to belong to the base `NativeThreadRequest` (INV-2), so `quote=False` at R-3's eight compose sites will not reach it. If the spec owner rules base-record refusals out of INV-4, those two cases go and nothing else changes.
 2. **The model pattern accepts a NUL.** A NUL is not whitespace, so `\S` matches it, and an opencode model of `openai/` plus a key and a NUL binds without an error. The spec states no rule for this, so no test pins it. It is base behaviour, for the spec owner.
 3. **One probe broke a process rule.** While timing a failing removal for R-16, one probe ran `git worktree remove --force` on a folder that did not exist, with the worktree root as its working folder. That addressed this worktree's own repository, which the rules forbid. Git refused (`is not a working tree`) and changed nothing. Every later probe used a scratch repository.
+
+## 11. Addendum: regression tests after S5 repair 1 (2026-10-18)
+
+The orchestrator sent eight items back to S2. Each fix of S5 repair 1 that only scratch probes had proven needed a permanent test that fails on S3's code (`e1bf20d8`) and passes on the repair. The tests were written on top of `8f6df9f8`, blind to the implementation as before, from spec r5, the `review.md` rows R-8 and R-10 to R-15, the S4 verifier's probes and the pack's own fixtures. No existing case was changed, skipped or marked xfail.
+
+| Item | Commit | Change |
+|---|---|---|
+| R-8 | `d56ed18a` | New `test_harness_compose_removal.py`, 3 tests. A verifier's or a proposer's worktree that cannot be removed keeps every finished answer and thread id in the error's record, and a running sibling is stopped first. |
+| R-15 | `83b2787e` | New `test_harness_compose_derived_steps.py`, 3 functions and 6 cases. A relocated verifier, an anchored repair turn and a ladder rung that meet a deleted skill folder are recorded failures, never a raise. The stand-in gained `delete_paths`. |
+| R-10 | `e6993e96` | Two tests in `test_harness_compose_concurrency.py`: a second cancel 50 ms after the first, and an anyio cancel scope. The stand-in gained `term_linger`. |
+| R-14 | `137f9a4d` | One test in `test_harness_compose_concurrency.py`: a cancel during a worktree add that a hook makes slow. |
+| R-12 | `ba45b709` | Two tests in `test_harness_compose_chain.py`, 17 cases. Surrogate halves in an answer reach a Grok, Muse or opencode step repaired, and the truncation note counts the repaired answer. |
+| R-13 | `1ceb60d1` | Two tests in `test_harness_compose_validation.py`: 5 blank templates refused before any I/O, and 2 templates that hold `{prompt}` accepted, which stay red on HEAD until R-32. |
+| EC-81 | `722ea43f` | One test in `test_harness_compose_validation.py`, 27 cases. A surrogate in caller text is refused, naming its field, before any I/O. |
+| AC-22 | `b846925e` | `test_lib_util_exports_secret_text_beside_json_text` in `test_harness_compose_surface.py`, beside the unchanged JsonText test. |
+
+The pack now has 17 test files, 94 test functions and 363 cases. `test-plan.md` gives each case's proof under "Coverage added after S5 repair 1". In short:
+
+- **61 of the 64 new cases** fail on `e1bf20d8` and pass on HEAD.
+- **The running-sibling case** is a guard that passes on both. On `e1bf20d8` it fails under the S4 verifier's `s4v_mut_gather` (`INV-14: tasks still pending when the error propagated: ['CliRunner._drain', 'CliRunner._drain', 'ThreadVerifiers._review']`) and `s4v_mut_nocancel` (`the error came 30.0 s after the release: the sibling was not cancelled`).
+- **The two `{prompt}` cases** fail on HEAD until R-32 lands, with `ConfigurationError: template must hold text besides its placeholders, or steps[1] can be sent a blank prompt when the values spliced into it are blank.` They pass on `e1bf20d8`, which had no blank check.
+
+Method notes:
+
+- **The red runs used an exported tree.** `git archive e1bf20d8` was unpacked under the scratch folder, HEAD's pack and stand-in were copied in, and the runs set `PYTHONPATH` to it. The worktree itself was never checked out at another commit.
+- **The removal seam is held from outside compose.** On win32 the test holds a file open inside the worktree folder. On POSIX it takes write permission away from a folder inside it, so the module skips as root, where permissions do not hold. Each test undoes its hold in a `finally` block and then deletes the folder.
+- **The second cancel needs a window.** On win32, `taskkill` and the removals keep the task running well past 50 ms. On POSIX the stand-ins log SIGTERM and keep running until the forced kill (`term_linger`), so each stop lasts at least its grace. A first trigger, a second cancel at the first removal, did not catch R-10 on `e1bf20d8`, so it was dropped for the 50 ms gap the orchestrator named.
+- **The slow add is R-16's hook, made to wait.** It sleeps 3 s at "prepared", while git holds the new registration's lock, between a "started" and a "finished" marker. So the test cancels inside the add and can tell whether the add was killed.
+
+Gates on the final commit:
+
+- `PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_compose` gives `2 failed, 361 passed`. The failures are the two `{prompt}` cases, which stay red by design until R-32 lands.
+- `tests/features/harness_threads` gives `436 passed, 2 skipped`, and `python lint/run.py` ends `SDK-LINT: PASS`.
+- The 72-column comment check prints 0 lines for every changed test file, and `procs.py --kill` and psutil show no stand-in left.
+
+Open items:
+
+1. **The POSIX seams have not run.** The WSL2 instance on this host does not start, and the WSL1 one has no pytest or pydantic, so the `chmod 0o500` blocker, the `term_linger` window and the slow-add hook ran on win32 only. If CI fails one of these tests on Ubuntu, check the seam before the code. A removal that restores permissions before it deletes would defeat the blocker. A killed add on POSIX may clean its own registration, so there the "finished" marker is the assertion that catches it.
+2. **One traceback showed compose code.** The failing `{prompt}` cases end in a frame at `vidbyte/harnesses/native/compose/texts.py:103`, where the blank-template refusal is raised, and pytest printed that frame. No compose file was opened, and no test relies on what it showed.
