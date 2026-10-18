@@ -4,7 +4,7 @@ PURPOSE: Pins every fixed value the first-class-features spec adds: the section 
 ROLE IN CODEBASE: Constants layer of the slice-2 tests in tests/features/codex_host/ (docs/spec/codex-host-first-class/spec.md sections 8.5, 9.2 and 9.3, D-13, D-28, D-29, INV-10, INV-18, INV-46, INV-50). Nothing here needs openai-codex, so these tests also run on CI.
 ARCHITECTURE NOTE: The expected values are the spec's literals from codex_host_feature_support.py; each production module is imported inside the test that reads it, so a constant the feature has not added yet fails that test alone.
 COMMON MODIFICATION PATTERNS: When the spec changes a text or a table, change the literal in codex_host_feature_support.py; the tables here pick it up by name.
-KNOWN EDGE CASES: Section 9.3 names only the first and last of the fifteen new method-name constants, so the other thirteen are pinned by value: some *_METHOD constant of vidbyte.lib.constants.codex_host must hold each. CODEX_HOST_NO_GOAL_MESSAGE is not pinned by name here: that name already holds the thread-helpers text pinned at test_codex_host_helper_surface.py:94, which section 13 does not supersede, so the spec's new text is pinned through pause_codex_goal's behaviour in test_codex_host_goal_control.py instead (reported as a spec defect).
+KNOWN EDGE CASES: Section 9.3 (r4) names all fifteen new method-name constants, so each is pinned by its name, its wire string, its place in __all__ and its absence from vidbyte.lib.constants.codex. The pause, resume and edit message is CODEX_HOST_NO_STORED_GOAL_MESSAGE in r4, because CODEX_HOST_NO_GOAL_MESSAGE keeps the thread-helpers text pinned at test_codex_host_helper_surface.py:94; its text is pinned through pause_codex_goal's behaviour in test_codex_host_goal_control.py, and its cause and next step keep the NO_GOAL names pinned here.
 RELATED DOCS: tests/features/codex_host/FEATURE.md; docs/spec/codex-host-first-class/spec.md sections 8.5, 9.2, 9.3 and 13.
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/codex_host/test_codex_host_feature_constants.py
 """
@@ -121,13 +121,13 @@ class CodexFeatureTextTests(unittest.TestCase):
         # D-28: the module's __all__ stays sorted (test_codex_host_hardening_contract.py:519-520).
         constants = _host_constants()
         self.assertEqual(list(constants.__all__), sorted(constants.__all__))
-        new_names = [*(f"CODEX_HOST_{name}" for name in TEXT_NAMES), *SET_NAMES, *spec.FEATURE_NUMBERS, "CODEX_THREAD_SETTINGS_UPDATE_METHOD", "CODEX_THREAD_SEARCH_METHOD"]
+        new_names = [*(f"CODEX_HOST_{name}" for name in TEXT_NAMES), *SET_NAMES, *spec.FEATURE_NUMBERS, *spec.FEATURE_METHOD_CONSTANTS]
         self.assertEqual([name for name in new_names if name not in constants.__all__], [])
 
     def test_no_new_name_goes_into_the_shared_codex_constants(self) -> None:
         # Section 12.4: "no new name goes into vidbyte/lib/constants/codex.py".
         shared = importlib.import_module("vidbyte.lib.constants.codex")
-        added = [f"CODEX_HOST_{name}" for name in TEXT_NAMES] + list(SET_NAMES) + ["CODEX_THREAD_SETTINGS_UPDATE_METHOD", "CODEX_THREAD_SEARCH_METHOD", "CODEX_GOAL_RESUME_CALL"]
+        added = [f"CODEX_HOST_{name}" for name in TEXT_NAMES] + list(SET_NAMES) + [*spec.FEATURE_METHOD_CONSTANTS, "CODEX_GOAL_RESUME_CALL"]
         self.assertEqual([name for name in added if hasattr(shared, name)], [])
 
 
@@ -140,12 +140,11 @@ class CodexFeatureTableTests(unittest.TestCase):
             with self.subTest(constant=name):
                 self.assertEqual(getattr(constants, name), value)
 
-    def test_the_fifteen_method_names_are_constants_and_the_first_and_last_are_named(self) -> None:
+    def test_the_fifteen_method_names_are_named_constants_that_hold_their_wire_strings(self) -> None:
+        # Section 9.3 (r4) names all fifteen; a constant that is missing, unexported or holding another string is listed.
         constants = _host_constants()
-        self.assertEqual(constants.CODEX_THREAD_SETTINGS_UPDATE_METHOD, "thread/settings/update")
-        self.assertEqual(constants.CODEX_THREAD_SEARCH_METHOD, "thread/search")
-        held = {getattr(constants, name) for name in constants.__all__ if name.endswith("_METHOD")}
-        self.assertEqual(sorted(set(spec.FEATURE_METHOD_NAMES) - held), [])
+        wrong = [name for name, value in spec.FEATURE_METHOD_CONSTANTS.items() if getattr(constants, name, None) != value or name not in constants.__all__]
+        self.assertEqual(wrong, [])
 
     def test_the_unmodeled_methods_are_the_nine_raw_rows_without_a_response_model(self) -> None:
         # D-3: these use the passthrough response class; the four modeled raw rows join the model table.

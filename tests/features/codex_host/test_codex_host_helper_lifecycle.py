@@ -106,7 +106,8 @@ class CodexHelperSnippetTests(HostTestCase):
                 "active 200000",
                 f"completed {DOCS_ANSWER}",
                 "1 completed 2",
-                "26 False",
+                # docs/spec/codex-host-first-class/spec.md section 13 (r4): 42 tools once the sixteen first-class tools land.
+                "42 False",
             ],
         )
         self.assertNotIn(docs_threads[0], self.server.threads)

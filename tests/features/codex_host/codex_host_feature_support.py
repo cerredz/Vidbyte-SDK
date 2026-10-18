@@ -72,24 +72,24 @@ EXPERIMENTAL_FUNCTIONS = (
     "search_codex_thread_content",
     "list_codex_child_threads",
 )
-# Section 9.3: the fifteen new method names; the spec names only the first and the last constant.
-FEATURE_METHOD_NAMES = (
-    "thread/settings/update",
-    "turn/settings/update",
-    "collaborationMode/list",
-    "mcpServerStatus/list",
-    "thread/memoryMode/set",
-    "memory/status",
-    "memory/reset",
-    "thread/inject_items",
-    "thread/archive",
-    "thread/unarchive",
-    "thread/revert",
-    "thread/goal/clear",
-    "thread/backgroundTerminals/list",
-    "thread/backgroundTerminals/clean",
-    "thread/search",
-)
+# Section 9.3 (r4): the fifteen new method-name constants of vidbyte.lib.constants.codex_host and their wire strings, in the spec's order.
+FEATURE_METHOD_CONSTANTS = {
+    "CODEX_THREAD_SETTINGS_UPDATE_METHOD": "thread/settings/update",
+    "CODEX_TURN_SETTINGS_UPDATE_METHOD": "turn/settings/update",
+    "CODEX_COLLABORATION_MODE_LIST_METHOD": "collaborationMode/list",
+    "CODEX_MCP_SERVER_STATUS_LIST_METHOD": "mcpServerStatus/list",
+    "CODEX_THREAD_MEMORY_MODE_SET_METHOD": "thread/memoryMode/set",
+    "CODEX_MEMORY_STATUS_METHOD": "memory/status",
+    "CODEX_MEMORY_RESET_METHOD": "memory/reset",
+    "CODEX_THREAD_INJECT_ITEMS_METHOD": "thread/inject_items",
+    "CODEX_THREAD_ARCHIVE_METHOD": "thread/archive",
+    "CODEX_THREAD_UNARCHIVE_METHOD": "thread/unarchive",
+    "CODEX_THREAD_REVERT_METHOD": "thread/revert",
+    "CODEX_GOAL_CLEAR_METHOD": "thread/goal/clear",
+    "CODEX_THREAD_BACKGROUND_TERMINALS_LIST_METHOD": "thread/backgroundTerminals/list",
+    "CODEX_THREAD_BACKGROUND_TERMINALS_CLEAN_METHOD": "thread/backgroundTerminals/clean",
+    "CODEX_THREAD_SEARCH_METHOD": "thread/search",
+}
 # Section 9.2 "(raw, unmodeled)" rows, which CODEX_HOST_UNMODELED_RAW_METHODS lists (D-3).
 UNMODELED_METHODS = frozenset(
     {

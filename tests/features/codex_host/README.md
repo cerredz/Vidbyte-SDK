@@ -23,7 +23,7 @@ The implementation belongs in `vidbyte/harnesses/native/codex/` (the host, conne
 - `test_codex_host_records.py` checks record validation, a USER reviewer request that now builds, the new failure codes and constants, `next_step` on `CodexAgentError`, and the enum wire values.
 - `test_codex_host_packaging.py` checks import safety in a fresh interpreter, the native package marker's bytes, the export lists, and the REPO_MAP and README texts.
 - `test_codex_host_bridge.py` checks `CodexToolTranslator.validate_names` and `CodexToolBridge.handler`.
-- `test_codex_host_tools.py` checks the twenty-six tools over a stub host: schemas, permissions, error results, the live-turn cap, `spawn_defaults`, argument checks, outputs and MCP.
+- `test_codex_host_tools.py` checks the forty-two tools over a stub host: schemas, permissions, error results, the live-turn cap, `spawn_defaults`, argument checks, outputs and MCP.
 - `test_codex_host_lifecycle.py` checks the section 4 snippet, binary resolution, the version gate, the call guards, close order and the module functions.
 - `test_codex_host_turns.py` checks spawn, preflight, waits, results, the timeout and output cap, process death, the turn-error table, structured output, steer, interrupt and usage tracking.
 - `test_codex_host_threads.py` checks continue, the field rules, launch, fork, list and read, readiness, rate limits and models, the reviewer check, dynamic tools and the agents config.
@@ -48,7 +48,7 @@ The implementation belongs in `vidbyte/harnesses/native/codex/` (the host, conne
 - `test_codex_host_function_rows.py` checks `forget_codex_turns`, readiness usage, the model-list refresh, continue's goal check, `limit`, `force_reload`, the skill folder and the new bad arguments.
 - `test_codex_host_fork_review.py` checks the fork points and their order, the experimental gate, the fork's failed name-set, the capped review and the one-page read-backs.
 - `test_codex_host_turn_settings.py` checks the goal-run field refusals, the new efforts, service tiers and the sandbox policy as the host sends them.
-- `test_codex_host_tool_hardening.py` checks the tool local-failure result, the 26-tool surface, the new efforts in the schemas, a goal spawn with an effort and a USER reviewer in `spawn_defaults`.
+- `test_codex_host_tool_hardening.py` checks the tool local-failure result, the 42-tool surface, the new efforts in the schemas, a goal spawn with an effort and a USER reviewer in `spawn_defaults`.
 - `test_codex_host_live_smoke.py` is the opt-in live smoke test and its gate.
 - `codex_host_feature_support.py` holds the first-class-features spec's literal texts, tables and bounds, `assert_packet` for a mapped message with the spec's own cause and next step, and `FeatureStubMethods`, the sixteen new tool methods `StubCodexHost` inherits.
 - `codex_host_feature_fakes.py` is the first-class-features half of the in-memory app-server, a mixin `FakeAppServer` inherits: the slice-2 switches and the handlers for the settings, mode, MCP, memory, archive, revert, inject, terminal, search, child-listing and goal-edit methods.

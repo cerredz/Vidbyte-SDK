@@ -350,7 +350,8 @@ class CodexTerminalSearchChildHostTests(_AdminCase):
         params = self.sent()[0].params
         self.assertEqual(params["searchTerm"], "login")
         self.assertEqual(sorted(params["sourceKinds"]), sorted(HELPER_SOURCE_KINDS))
-        self.assertIn(params.get("archived"), (None, False))
+        # INV-39 (r4): archived=False is omitted, never sent as false.
+        self.assertNotIn("archived", params)
         self.assertEqual(sorted(hit.thread.thread_id for hit in page.hits), sorted((made_here.thread_id, by_exec.thread_id)))
         for hit in page.hits:
             self.assertEqual(hit.snippet, self.server.search_snippet)

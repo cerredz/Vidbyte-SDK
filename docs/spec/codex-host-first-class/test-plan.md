@@ -1,6 +1,6 @@
 # Test plan: CodexHost first-class features (slice 2 of 2)
 
-- **Stage:** S2 test author, pipeline `codex-host-first-class`, from `spec.md` r3 (approved).
+- **Stage:** S2 test author, pipeline `codex-host-first-class`, from `spec.md` r3 (approved). Round 2 follows r4 (`d0529d15`), which answered the eight spec defects and ambiguities below.
 - **Branch:** `feat/codex-host-first-class`, written on top of `5c16c588` (slice base `a7730107`).
 - **Date:** 2026-10-17.
 - **Pack:** `tests/features/codex_host/`. Its `FEATURE.md` has the failure inventory these tests were chosen from, and its `README.md` has the boundary.
@@ -215,7 +215,7 @@ Each row lists the tests that name the ID in their own comment or docstring, plu
 
 ### Test counts
 
-The slice adds 236 tests: 232 in 14 new modules, and 4 in a new class of `test_codex_host_sdk_contract.py`. It also rewrites the §13 pins in 9 older modules.
+The slice adds 236 tests: 232 in 14 new modules, and 4 in a new class of `test_codex_host_sdk_contract.py`. It also rewrites the §13 pins in 11 older modules: 9 in round 1, and the two catalog-count pins r4 added to §13 in round 2.
 
 | File | Tests | Red now | Green guards | Without the extra: red / pass / skipped |
 |---|---|---|---|---|
@@ -271,24 +271,24 @@ PYTHONPATH=$(pwd) "$V" -m pytest tests/features/codex_host tests/features/harnes
 FAILED tests/features/codex_host/test_codex_host_worktree.py::GitWorktreesHelperTests::test_add_makes_the_worktree_on_a_new_branch_and_git_runs_with_terminal_prompts_off
 FAILED tests/features/codex_host/test_codex_host_worktree.py::GitWorktreesHelperTests::test_add_starts_the_branch_at_the_base_ref_when_one_is_given
 FAILED tests/features/harness_threads/test_harness_threads_surface.py::test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes
-251 failed, 1043 passed, 3 skipped in 77.66s (0:01:17)
+253 failed, 1041 passed, 3 skipped in 75.50s (0:01:15)
 ```
 
-The 1,043 that pass are every pre-existing test outside the 17 rewritten pins (1,040) plus the 3 guards. The 251 failures are the 233 new red tests, the 17 §13 pins, and the inherited `harness_threads` test, which fails on the slice base too.
+The 1,041 that pass are every pre-existing test outside the 19 tests red through rewritten pins (1,038) plus the 3 guards. The 253 failures are the 233 new red tests, the 19 tests red through §13 pins (17 from round 1, plus the two snippet tests r4 added), and the inherited `harness_threads` test, which fails on the slice base too.
 
 **Why each test is red.** One line per failing test, from the `--tb=line` output above:
 
 | Count | Exception |
 |---|---|
-| 129 | `AttributeError` |
+| 128 | `AttributeError` |
 | 48 | `ImportError` |
-| 42 | `AssertionError` |
+| 45 | `AssertionError` |
 | 28 | `ModuleNotFoundError` |
 | 2 | `FileNotFoundError` |
 | 1 | `TypeError` |
 | 1 | `RuntimeError` |
 
-Every `ImportError`, `ModuleNotFoundError` and `AttributeError` names a module, class, function or constant from spec §8.5, §9.2, §9.3 or §12.3. Every `AssertionError` compares against a spec value the code does not have yet: the 42-tool catalog, the new enum members and export lists, the seventh goal-rejected field, the fork row's new tail, `host.py`'s 937 lines against its ceiling of 900, the `parse` parameter of `CodexConnection.raw`, the plan fallback of `final_answer`, and the modeled raw answers the connection does not map yet. `TypeError` is `CodexSpawnRequest` refusing the new `collaboration_mode` keyword, `RuntimeError: coroutine raised StopIteration` is `tool_hardening`'s row lookup finding no tool for a new name, and `FileNotFoundError` is `host_core.py`, which does not exist yet. One `AssertionError` is the inherited `harness_threads` test (`assert 167 == 120`).
+Every `ImportError`, `ModuleNotFoundError` and `AttributeError` names a module, class, function or constant from spec §8.5, §9.2, §9.3 or §12.3. Every `AssertionError` compares against a spec value the code does not have yet: the 42-tool catalog (also the count the two section-4 snippets print, `26` today), the fifteen method-name constants r4 names, the new enum members and export lists, the seventh goal-rejected field, the fork row's new tail, `host.py`'s 937 lines against its ceiling of 900, the `parse` parameter of `CodexConnection.raw`, the plan fallback of `final_answer`, and the modeled raw answers the connection does not map yet. `TypeError` is `CodexSpawnRequest` refusing the new `collaboration_mode` keyword, `RuntimeError: coroutine raised StopIteration` is `tool_hardening`'s row lookup finding no tool for a new name, and `FileNotFoundError` is `host_core.py`, which does not exist yet. One `AssertionError` is the inherited `harness_threads` test (`assert 167 == 120`).
 
 **Without the extra** (CI's view), with `openai_codex` blocked by a plugin that sets `sys.modules["openai_codex"] = None`:
 
@@ -299,7 +299,7 @@ PYTHONPATH="$(pwd);<scratch>/nosdk" "$V" -m pytest tests/features/codex_host tes
 
 PYTHONPATH="$(pwd);<scratch>/nosdk" "$V" -m pytest tests/features/codex_host tests/features/harness_threads tests/test_codex_*.py -q -p no:cacheprovider -p nosdk_plugin --tb=line
 FAILED tests/features/harness_threads/test_harness_threads_surface.py::test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes
-100 failed, 803 passed, 394 skipped in 49.89s
+100 failed, 803 passed, 394 skipped in 51.21s
 ```
 
 Every module collects without the SDK, and every host class is skipped rather than broken.
@@ -309,10 +309,10 @@ Every module collects without the SDK, and every host class is skipped rather th
 ```
 PYTHONPATH=$(pwd) "$V" -m pytest -q -p no:cacheprovider --tb=line
 FAILED tests/features/harness_threads/test_harness_threads_surface.py::test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes
-251 failed, 6574 passed, 27 skipped in 130.05s (0:02:10)
+253 failed, 6572 passed, 27 skipped in 129.26s (0:02:09)
 ```
 
-All 251 failures are in `tests/features/codex_host/` plus the inherited `harness_threads` test, the same set as the area run, so nothing outside the area was disturbed.
+All 253 failures are in `tests/features/codex_host/` plus the inherited `harness_threads` test, the same set as the area run, so nothing outside the area was disturbed.
 
 **Lint**, with the new files staged so C021 and the header rules see them:
 
@@ -339,6 +339,8 @@ Each change follows §13's "After this spec" column, with a comment that cites i
 | `test_codex_host_hardening_contract.py` | The fork row's tail gains `"collaboration_mode"`; `test_every_new_constant_holds_its_spec_value_and_is_exported_in_order` is red through `GOAL_REJECTED_FIELDS`. |
 | `test_codex_host_hardening_records.py` | The goal-request test refuses `collaboration_mode` as the seventh field, with `GOAL_FIELD_MESSAGE` naming it. |
 | `test_codex_host_inputs.py` | `VALID_RECORDS` has 34 records; the boundary test gains the 22 new coroutine methods that take an argument. `stream_codex_turn`'s own boundary test is `stream_wait::test_stream_codex_turn_checks_its_argument_at_the_call`. |
+| `test_codex_host_lifecycle.py` | Round 2 (r4, S2-1): `:101` (`:102` after the cited comment), the snippet's last printed line `"26 check_codex_ready"` → `"42 check_codex_ready"`. `CodexHostSnippetTests::test_the_section_4_snippet_prints_its_three_lines` is red until the sixteen tools exist. |
+| `test_codex_host_helper_lifecycle.py` | Round 2 (r4, S2-1): `:109` (`:110` after the cited comment), `"26 False"` → `"42 False"`. `CodexHelperSnippetTests::test_the_section_4_snippet_prints_its_seven_lines` is red until the sixteen tools exist. |
 | `test_codex_host_sdk_contract.py` | `CALL_LIST` gains the typed calls and goal-state hooks §13 lists (they exist in 0.163.0, so the old contract tests stay green); the new class `CodexFirstClassSdkContractTests` pins the fork response, the goal-state hooks, the experimental params and the modeled raw answers. |
 
 ## Notes for the implementer
@@ -347,15 +349,19 @@ Each change follows §13's "After this spec" column, with a comment that cites i
 - **The worktree tests run the real `git`.** `CliRunner.find_program` walks `PATH` on Windows, so "git missing" is `PATH` set to an empty folder. They patch `pathlib.Path.home` and check that a failed run left no branch, which proves git never ran. They also check that `GIT_TERMINAL_PROMPT=0` wins over a caller's `1`, through a hook that records the variable.
 - **The fake answers every slice-2 method** (the 15 §13 lists, plus the child filters of `thread/list` and the edit and resume forms of `thread/goal/set`) through `codex_host_feature_fakes.FeatureHandlers`. `feature_answers[method]` scripts a malformed answer (AC-41). `thread/fork` copies the parent's reviewer, policy and model unless the params name them.
 - **Literal texts come from `codex_host_feature_support.py`,** written from §9.2 and §9.3, never read from production. A changed text therefore fails a test.
-- **Do not edit any test.** If a test looks wrong, raise it with the orchestrator. Two older pins will go red once the catalog has 42 tools; see the spec defects below.
+- **Do not edit any test.** If a test looks wrong, raise it with the orchestrator.
+- **The two section-4 snippet tests print the catalog size.** `lifecycle::CodexHostSnippetTests::test_the_section_4_snippet_prints_its_three_lines` and `helper_lifecycle::CodexHelperSnippetTests::test_the_section_4_snippet_prints_its_seven_lines` expect 42 (r4 §13), so they stay red until all sixteen new tools exist.
+- **Names r4 settled are pinned by name:** the fifteen `CODEX_*_METHOD` constants of §9.3 (in `vidbyte.lib.constants.codex_host`, each in `__all__`, none in `vidbyte.lib.constants.codex`). `CODEX_HOST_NO_STORED_GOAL_MESSAGE` is pinned by its text, through pause, resume and edit; `CODEX_HOST_NO_GOAL_MESSAGE` must keep its thread-helpers text.
 
 ## Spec defects and ambiguities
 
-1. **`CODEX_HOST_NO_GOAL_MESSAGE` is already taken (major).** It exists today with the text "Codex reports no goal on the thread after the goal run started.", `run_codex_goal` uses it (`skill_functions.py:217`), and `test_codex_host_helper_surface.py:94` pins it, a pin §13 does not supersede. §9.2 redefines the same name as "{operation} needs a goal on the thread, and Codex stores none." for pause, resume and edit (EC-40). Both cannot hold. The tests check the new text, cause and next step through `assert_packet` and never import the name; `CODEX_HOST_NO_GOAL_CAUSE` and `CODEX_HOST_NO_GOAL_NEXT_STEP` are new names and are pinned. **Recommendation:** rename the new message, for example `CODEX_HOST_GOAL_MISSING_MESSAGE`, and keep the old one.
-2. **Two 26-tool pins are missing from §13's superseded list (major).** `test_codex_host_lifecycle.py:101` expects the printed line `"26 check_codex_ready"`, and `test_codex_host_helper_lifecycle.py:109` expects `"26 False"`. Both count the catalog, so both go red as soon as the 16 tools exist, and neither S2 (rule 5) nor S3 may edit them. **Recommendation:** add both to §13's table (26 to 42), and let S2 rewrite them before S3 starts.
-3. **13 of the 15 new method-name constants are unnamed.** §9.3 names only the first and the last. The tests pin the other 13 by value: some `*_METHOD` constant of `vidbyte.lib.constants.codex_host` must hold each.
-4. **The `{name}` of an effort conflict in `CODEX_HOST_MODE_CONFLICT_MESSAGE`** may be `effort` or `reasoning_effort`; §9.2 does not say. The effort rows accept either.
-5. **The `{sandbox}` slot of the network-access message** may show the member's name, its value or its str; the tests accept any of the three.
-6. **`CodexBackgroundTerminal`'s `command` and `cwd`** are required in §8.5 and default to `""` in §9.1. The tests always pass both.
-7. **Whether the turn-settings packet for an ended turn ends with the thread sentence** is unspecified, so the test checks that the summary starts with the spec's text.
-8. **Whether content search omits `archived` when it is false** is unspecified; the test accepts an absent key or `false`.
+All eight are resolved by spec r4 (`d0529d15`, §16 rows S2-1 to S2-8). The r3 finding is kept for the record; the resolution and the round-2 test change follow it.
+
+1. **`CODEX_HOST_NO_GOAL_MESSAGE` was already taken (major).** It exists with the text "Codex reports no goal on the thread after the goal run started.", `run_codex_goal` uses it (`skill_functions.py:217`), and `test_codex_host_helper_surface.py:94` pins it; r3's §9.2 reused the name for pause, resume and edit (EC-40). **Resolved by r4 (S2-2):** the new message is `CODEX_HOST_NO_STORED_GOAL_MESSAGE`, with the same text; `CODEX_HOST_NO_GOAL_CAUSE` and `CODEX_HOST_NO_GOAL_NEXT_STEP` keep their names, and the old message is untouched. No test change: the tests check the new text by value through `assert_packet`, and pin the cause and next step by name.
+2. **Two 26-tool pins were missing from §13's superseded list (major).** `test_codex_host_lifecycle.py:101` expected `"26 check_codex_ready"` and `test_codex_host_helper_lifecycle.py:109` expected `"26 False"`. **Resolved by r4 (S2-1):** both are in §13 (26 → 42), and the spec author's sweep found no third pin. Rewritten in round 2; see **Superseded pins rewritten**.
+3. **13 of the 15 new method-name constants were unnamed.** **Resolved by r4 (S2-3):** §9.3 names all fifteen. Tightened: `feature_constants::CodexFeatureTableTests::test_the_fifteen_method_names_are_named_constants_that_hold_their_wire_strings` (renamed from `..._and_the_first_and_last_are_named`) pins each name to its wire string and its place in `__all__`, through `FEATURE_METHOD_CONSTANTS` in `codex_host_feature_support.py`. The export-list test checks all fifteen names, and the green guard `test_no_new_name_goes_into_the_shared_codex_constants` checks that none lands in `vidbyte.lib.constants.codex`.
+4. **The `{name}` of an effort conflict in `CODEX_HOST_MODE_CONFLICT_MESSAGE`.** **Resolved by r4 (S2-4):** `reasoning_effort`. Tightened: the three effort rows (`feature_records::CodexCollaborationModeRecordTests::test_a_conflicting_effort_is_refused_and_a_providers_default_never_conflicts`, `CodexSpawnRequestModeTests::test_a_mode_whose_model_or_effort_differs_from_the_turns_is_refused_when_built`, `CodexThreadSettingsUpdateTests::test_a_mode_that_conflicts_with_the_updates_model_is_refused_naming_the_method`) check the whole text with `reasoning_effort`.
+5. **The `{sandbox}` slot of the network-access message.** **Resolved by r4 (S2-5):** the member's `.name`. Tightened: `feature_records::CodexThreadSettingsUpdateTests::test_network_access_needs_a_read_only_or_workspace_write_sandbox` checks the whole text with `PROVIDER_DEFAULT` and `FULL_ACCESS`.
+6. **`CodexBackgroundTerminal`'s `command` and `cwd`** were required in §8.5 and defaulted in §9.1. **Resolved by r4 (S2-6):** required. No test change: the tests always pass both, and a refusal row for a missing one would be a new assertion, not a tightening.
+7. **Whether the ended-turn packet ends with the thread sentence.** **Resolved by r4 (S2-7):** it does. Tightened: `settings_modes::CodexTurnSettingsHostTests::test_an_ended_or_unknown_turn_is_refused_locally_and_sends_nothing` checks the summary equals the text plus "The thread id was <id>.", for the ended and the unregistered handle.
+8. **Whether content search omits `archived` when it is false.** **Resolved by r4 (S2-8):** omitted. Tightened: `thread_admin::CodexTerminalSearchChildHostTests::test_search_names_every_top_level_source_and_finds_this_hosts_threads` checks that `archived` is not in the params.

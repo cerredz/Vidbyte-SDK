@@ -547,7 +547,8 @@ class CodexTurnSettingsHostTests(_SettingsCase):
                 error = await self.codex_error(host.update_codex_turn_settings(target, effort=CodexReasoningEffort.LOW), "codex.session_not_found")
                 self.assertEqual(error.operation, TURN_UPDATE)
                 summary = mapped_summary(self, error)
-                self.assertTrue(summary.startswith(TURN_SETTINGS_FINISHED_MESSAGE.format(turn_id=target.turn_id, thread_id=target.thread_id)), summary)
+                # Section 9.2 (r4): the packet is built with handle.thread_id, so the thread sentence follows the text.
+                self.assertEqual(summary, TURN_SETTINGS_FINISHED_MESSAGE.format(turn_id=target.turn_id, thread_id=target.thread_id) + thread_suffix(target.thread_id))
                 self.assertEqual(self.sent_methods(), [])
 
     async def test_a_goal_run_is_targeted_through_its_current_physical_turn(self) -> None:

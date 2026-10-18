@@ -4,7 +4,7 @@ PURPOSE: Proves the records the first-class-features spec adds check themselves 
 ROLE IN CODEBASE: Record layer of the slice-2 tests in tests/features/codex_host/ (docs/spec/codex-host-first-class/spec.md section 9.1, INV-1, INV-10, INV-14, AC-4, AC-6, AC-18, AC-32, EC-7, EC-12, EC-13, EC-28, EC-32, EC-35, EC-41, EC-46, EC-48, EC-51, T-5). Nothing here needs openai-codex or a host, so these tests also run on CI.
 ARCHITECTURE NOTE: Each test reaches the new modules through a small importer function, so a module the feature has not built yet fails that test with ModuleNotFoundError instead of stopping collection. The expected texts are the spec's literals in codex_host_feature_support.py, never the production constants.
 COMMON MODIFICATION PATTERNS: When section 9.1 adds a check, add one refused row and one accepted row to the class of that record. Keep the property test's seed fixed, so a failure is reproducible.
-KNOWN EDGE CASES: Section 9.2 does not say whether a conflicting effort is named "effort" or "reasoning_effort" in CODEX_HOST_MODE_CONFLICT_MESSAGE, so the effort rows accept either. The {sandbox} slot of the network-access message may show the member name or its value, so those rows check the text before the slot.
+KNOWN EDGE CASES: Section 9.2 (r4) names an effort conflict by the collaboration mode's own field, "reasoning_effort", in CODEX_HOST_MODE_CONFLICT_MESSAGE, and fills the network-access message's {sandbox} slot with the CodexSandbox member's .name, so PROVIDER_DEFAULT never leaves the slot empty; both rows check the whole text.
 RELATED DOCS: tests/features/codex_host/FEATURE.md; docs/spec/codex-host-first-class/spec.md sections 8.5, 9.1, 9.2 and 9.3.
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/codex_host/test_codex_host_feature_records.py
 """
@@ -47,7 +47,6 @@ WORKSPACE = os.path.abspath(os.path.join(os.sep, "first-class-workspace"))
 OTHER_ROOT = os.path.abspath(os.path.join(os.sep, "first-class-workspace", "src"))
 SETTINGS_OWNER = "update_codex_thread_settings"
 SPAWN_OWNER = "Codex spawn request"
-NETWORK_PREFIX = SETTINGS_NETWORK_ACCESS_MESSAGE.split("{sandbox}")[0]
 UNUSED_FIELD_MESSAGE = "{operation} does not use the CodexSpawnRequest field {name}; leave it at its default, because {operation} would otherwise drop the value without applying it."
 # Section 9.1 "page": limit from 1 to CODEX_HOST_THREAD_LIST_MAX_LIMIT (1000).
 PAGE_LIMIT_MAXIMUM = 1000
@@ -146,9 +145,8 @@ class CodexCollaborationModeRecordTests(_RecordCase):
 
     def test_a_conflicting_effort_is_refused_and_a_providers_default_never_conflicts(self) -> None:
         efforts = _enums().CodexReasoningEffort
-        error = self.refused(lambda: _plan(reasoning_effort=efforts.HIGH).reject_conflict(SETTINGS_OWNER, "", efforts.LOW), "collaboration_mode")
-        # Section 9.2 leaves the effort's {name} open, so both spellings of the field are accepted.
-        self.assertIn(str(error), {MODE_CONFLICT_MESSAGE.format(owner=SETTINGS_OWNER, name=name) for name in ("effort", "reasoning_effort")})
+        # Section 9.2 (r4): {name} is the collaboration mode's own field, reasoning_effort.
+        self.refused(lambda: _plan(reasoning_effort=efforts.HIGH).reject_conflict(SETTINGS_OWNER, "", efforts.LOW), "collaboration_mode", MODE_CONFLICT_MESSAGE.format(owner=SETTINGS_OWNER, name="reasoning_effort"))
         for mode_effort, own_effort in ((efforts.HIGH, efforts.HIGH), (efforts.PROVIDER_DEFAULT, efforts.LOW), (efforts.HIGH, efforts.PROVIDER_DEFAULT)):
             with self.subTest(mode_effort=mode_effort, own_effort=own_effort):
                 self.assertIsNone(_plan(reasoning_effort=mode_effort).reject_conflict(SETTINGS_OWNER, "", own_effort))
@@ -216,8 +214,7 @@ class CodexSpawnRequestModeTests(_RecordCase):
         turn_settings = _codex().CodexTurnSettings
         efforts = _enums().CodexReasoningEffort
         self.refused(lambda: spawn_request(prompt="p", turn=turn_settings(model="gpt-5.5"), collaboration_mode=_plan(model="gpt-5.4-mini")), "collaboration_mode", MODE_CONFLICT_MESSAGE.format(owner=SPAWN_OWNER, name="model"))
-        error = self.refused(lambda: spawn_request(prompt="p", turn=turn_settings(effort=efforts.LOW), collaboration_mode=_plan(reasoning_effort=efforts.HIGH)), "collaboration_mode")
-        self.assertIn(str(error), {MODE_CONFLICT_MESSAGE.format(owner=SPAWN_OWNER, name=name) for name in ("effort", "reasoning_effort")})
+        self.refused(lambda: spawn_request(prompt="p", turn=turn_settings(effort=efforts.LOW), collaboration_mode=_plan(reasoning_effort=efforts.HIGH)), "collaboration_mode", MODE_CONFLICT_MESSAGE.format(owner=SPAWN_OWNER, name="reasoning_effort"))
         # The same model in both places, or a model in only one, is accepted.
         spawn_request(prompt="p", turn=turn_settings(model="gpt-5.5"), collaboration_mode=_plan(model="gpt-5.5"))
         spawn_request(prompt="p", turn=turn_settings(effort=efforts.LOW), collaboration_mode=_plan(model="gpt-5.4-mini"))
@@ -270,9 +267,8 @@ class CodexThreadSettingsUpdateTests(_RecordCase):
         sandboxes = _enums().CodexSandbox
         for sandbox in (sandboxes.PROVIDER_DEFAULT, sandboxes.FULL_ACCESS):
             with self.subTest(sandbox=sandbox):
-                error = self.refused(lambda sandbox=sandbox: self._update(sandbox=sandbox, network_access=True), "network_access")
-                self.assertTrue(str(error).startswith(NETWORK_PREFIX), str(error))
-                self.assertIn(str(error)[len(NETWORK_PREFIX) :], {f"{sandbox.name}.", f"{sandbox.value}.", f"{sandbox}."})
+                # Section 9.2 (r4): the slot shows the member's name.
+                self.refused(lambda sandbox=sandbox: self._update(sandbox=sandbox, network_access=True), "network_access", SETTINGS_NETWORK_ACCESS_MESSAGE.format(sandbox=sandbox.name))
         for sandbox in (sandboxes.READ_ONLY, sandboxes.WORKSPACE_WRITE):
             with self.subTest(allowed=sandbox):
                 self.assertIs(self._update(sandbox=sandbox, network_access=False).network_access, False)
@@ -295,8 +291,7 @@ class CodexThreadSettingsUpdateTests(_RecordCase):
     def test_a_mode_that_conflicts_with_the_updates_model_is_refused_naming_the_method(self) -> None:
         self.refused(lambda: self._update(model="gpt-5.5", collaboration_mode=_plan(model="gpt-5.4-mini")), "collaboration_mode", MODE_CONFLICT_MESSAGE.format(owner=SETTINGS_OWNER, name="model"))
         efforts = _enums().CodexReasoningEffort
-        error = self.refused(lambda: self._update(effort=efforts.LOW, collaboration_mode=_plan(model="gpt-5.5", reasoning_effort=efforts.HIGH)), "collaboration_mode")
-        self.assertIn(str(error), {MODE_CONFLICT_MESSAGE.format(owner=SETTINGS_OWNER, name=name) for name in ("effort", "reasoning_effort")})
+        self.refused(lambda: self._update(effort=efforts.LOW, collaboration_mode=_plan(model="gpt-5.5", reasoning_effort=efforts.HIGH)), "collaboration_mode", MODE_CONFLICT_MESSAGE.format(owner=SETTINGS_OWNER, name="reasoning_effort"))
 
     def test_a_relative_cwd_a_blank_plugin_id_and_a_multi_line_model_are_refused(self) -> None:
         self.refused(lambda: self._update(cwd="relative/folder"), "cwd")
