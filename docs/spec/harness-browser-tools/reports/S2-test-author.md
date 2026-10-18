@@ -226,3 +226,70 @@ Only the `node` stand-in reads `server_fail`, `artifact_burst` and `extra_tools`
 `PYTHONPATH=$(pwd) py -3.11 -m pytest -q tests/features/harness_threads tests/features/codex_host` gave `1 failed, 811 passed, 3 skipped in 342.12s (0:05:42)`.
 
 The one failure is the inherited `test_harness_threads_surface.py::test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes`, at `assert len(main_members) == 120` → `AssertionError: assert 167 == 120`. This is the merge-base length check, and it fails the same way on pristine `origin/main`.
+
+## Post-S4 additions (orchestrator-adjudicated)
+
+S4 confirmed three places where the suite let a real defect through (`review.md` R-2, R-16, R-17). Three test-only commits on top of `7364f514` close them; no file under `vidbyte/` changed. Each test was checked the way mutation testing checks a test: it must fail on the defective behaviour, for the right reason, and pass on the correct behaviour. Every mutant and fix below is a scratch pytest plugin loaded with `-p`, applied in memory; none is committed. No test file was added (S020), and no existing case, assertion or asserted value was removed or changed.
+
+### 1. R-2: a Grok server whose only call failed (`8b02afdd`; FR-14, AC-12, EC-44, EC-45)
+
+- **Test:** `test_harness_threads_browser_lifecycle.py::test_grok_names_each_server_it_never_listed`, two new parameters:
+  - `[playwright-only-call-failed]`: `fake={"grok_unlisted": ["playwright"], "browser_calls": ["playwright__browser_navigate"]}`;
+  - `[jina-only-call-failed]`: `fake={"grok_unlisted": ["jina"], "browser_calls": ["jina__read_url"]}`.
+
+  The fake Grok leaves the server out of `available_commands`, still makes the model's guessed `use_tool` call, answers it "Tool not found" with status `failed` (`fake_browser.py:688-689`), and exits 0. The ids `[playwright]` and `[jina]` and their fake dicts are unchanged.
+- **Added to all four cases:** the fake's own call log must hold exactly the guessed calls, each `failed`. So no case can pass because the call was never made.
+- **Mutant it kills:** the shipped code itself. `GrokWire.connected` counts any `use_tool` call (`grok/wire.py:189-190`), and `GrokBrowserHarness.missing` counts FAILED calls (`grok/browser.py:125`).
+- **Red on shipped code** (both new cases, for the R-2 reason only):
+  ```
+  tests\...\test_harness_threads_browser_lifecycle.py:66: in refuse
+      with pytest.raises(lib.NativeThreadError) as caught:
+  E   Failed: DID NOT RAISE <class 'vidbyte.lib.errors.base.NativeThreadError'>
+  2 failed, 2 passed in 15.92s
+  ```
+  Whole file: `2 failed, 31 passed, 1 skipped in 110.96s` (the two failures are exactly these cases; the skip is the POSIX-only EC-22 test).
+- **Green under the fix:** `r2_fix_plugin.py` applies only the S4 verifier's R-2 fix (`connected` reads only `available_commands.tools`; `missing` adds only COMPLETED calls).
+  - The test: `4 passed in 10.45s`.
+  - Whole file: `33 passed, 1 skipped in 131.80s (0:02:11)`, so the fix breaks nothing else in the file.
+- **This test is red on purpose** until S5 lands the fix in `vidbyte/`.
+
+### 2. R-16: cleanup survives a second cancellation (`131b854f`; INV-12, AC-13, EC-20)
+
+- **Test:** the new sibling `test_harness_threads_browser_lifecycle.py::test_a_second_cancel_cannot_stop_the_cleanup` (grok, opencode, muse).
+  1. The call is held, its browser starts, and the test cancels it.
+  2. The cleanup enters `ProcessReaper.reap`, which the test holds at its start (a wrapper that waits, then calls the real reap; nothing is stubbed). The test cancels the call again.
+  3. `CancelledError` must propagate. The hold is released and the real reap runs.
+  4. The browser must be gone, the per-call folder removed, and the cleanup task finished without being cancelled.
+
+  The hold puts the second cancel inside the cleanup on every platform. Without it, the cancel's timing would decide the result: a POSIX `ps` reap can end before a 50 ms poll cancels again, so the mutant could survive on the Linux CI runner (reasoned, not measured; this machine runs the win32 reaper).
+- **Why a sibling, not an edit:** `test_a_cancelled_call_reaps_and_re_raises` is kept unchanged because the two tests kill different mutants. A second cancel raises `CancelledError` by itself, so a double-cancel test cannot see an `execute` that cleans up and then swallows the cancel. Only the single-cancel test sees that.
+- **Mutation evidence** (`-k cancel` on the lifecycle file; 3 single-cancel + 3 second-cancel cases):
+
+| Code | Result | What fails |
+|---|---|---|
+| shipped | `6 passed, 28 deselected in 24.86s` | nothing |
+| `noshield_plugin` (shield → identity; the S4 R-E6 mutant) | `3 failed, 3 passed, 28 deselected in 64.60s` | every second-cancel case: `AssertionError: EC-20: the second cancel stopped the cleanup before the reap` |
+| `boomshield_plugin` (control: shield raises) | `6 failed, 28 deselected in 16.46s` | all six, so the patch reaches the shield line in both tests |
+| `noraise_plugin` (cleanup runs shielded, then `return None`) | `3 failed, 3 passed, 28 deselected in 24.64s` | every single-cancel case: `Failed: DID NOT RAISE <class 'asyncio.exceptions.CancelledError'>` |
+
+### 3. R-17: AC-28 fails when the user's own server is counted (`5979eabb`; AC-28, EC-40, FR-13, FR-14)
+
+- **Test:** the new sibling `test_harness_threads_browser_mounts.py::test_opencode_never_counts_a_call_on_a_users_own_enabled_server`, with two cases:
+  - `[beside-a-mounted-call]`: the model calls `playwright_browser_navigate` (the user's server) and `vidbyte-playwright_browser_navigate`. `tool_calls` must equal exactly the one `vidbyte-playwright` call.
+  - `[alone]`: the model calls only `playwright_browser_navigate`. The call must raise `browser.tools_unavailable` with "no mounted tool was used", the thread id and the answer as vendor text.
+- **Setup:** the user's global `mcp.playwright` is `"enabled": true` and runs a real fake server (the node stand-in with the cached Playwright entry, no profile option, so no browser). The SDK's permission member allows only `vidbyte-<tool>_*` and denies the web tools, so it does not hide the user's tools, and the call really completes. Both cases check from the fakes' logs that the user's server was enabled and connected, and that it answered every planned call `completed`.
+- **Existing test kept:** `test_opencode_ids_are_prefixed_and_enabled_beside_a_users_own_entry` still pins that a disabled user entry neither merges into nor disables the SDK's server.
+- **Mutant it kills:** `usercount_plugin.py`, a copy of `OpencodeWire.tool_calls` whose `mounted` map also accepts the unprefixed id (one line differs).
+
+| Code | Result (`-k users_own` on the mounts file) | What fails |
+|---|---|---|
+| shipped | `3 passed, 48 deselected in 13.39s` | nothing |
+| `usercount_plugin` | `2 failed, 1 passed, 48 deselected in 9.27s` | `[beside-a-mounted-call]`: `AssertionError: assert (BrowserToolC...'completed'>)) == (BrowserToolC...completed'>),)`; `[alone]`: `Failed: DID NOT RAISE <class 'vidbyte.lib.errors.base.NativeThreadError'>`. The old AC-28 test passes, which is the S4 gap. |
+
+Whole mounts file on shipped code: `51 passed in 137.76s (0:02:17)`.
+
+### Notes
+
+- The scratch plugins are in `C:/Users/422mi/AppData/Local/Temp/claude/C--Users-422mi-vidbyte-repos/1da32edd-ec0f-4839-ba1f-52db538ed13c/scratchpad/`: `s2post/r2_fix_plugin.py`, `s2post/noraise_plugin.py`, `s2post/usercount_plugin.py`, and the reviewer's `noshield_plugin.py` and `boomshield_plugin.py`. Run with the worktree and the plugin folder on `PYTHONPATH` in Windows form, joined by `;`, for example `PYTHONPATH="$(pwd -W);<scratchpad>/s2post" py -3.11 -m pytest -q -p r2_fix_plugin <file>`.
+- The test plan's opening paragraph still says "Only module constants are monkeypatched". The held reap is a second wrapper of that kind beside `runner_spy`. It is described in the coverage map's AC-13 row and in the lifecycle file header, because this round could edit only the coverage map.
+- No opencode or Muse failed-call test was added: their evidence rules are unchanged in spec r5 (Q-9, Q-17).
