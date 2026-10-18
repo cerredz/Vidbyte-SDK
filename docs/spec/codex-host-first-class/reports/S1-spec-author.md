@@ -231,3 +231,40 @@ My r1 and r4 sweeps looked for counts of tools and operations. They missed this 
 **Cited only:** S3's B-2, B-3 and B-4 are test defects with no spec change.
 
 **Counts:** D-40 added, so D goes to 40. Every other ID count and the §8.4 budget are unchanged (13 / 69 / 0 / 46 / 0 / 42). `ids.py` and `tables.py` are clean.
+
+## r6 addendum (S4 adversarial review, 2026-10-18)
+
+**Input.** The coordinator's r6 request (S4-1…S4-4), `review.md` (R-1, R-4, R-5 and m-1, plus the m-4 and "Fix interactions" notes) and the source lines it cites. This is an amendment, not a review round. The spec is committed at 4d972438 with `revision: 6` and `status: reviewed`. §16 has rows S4-1…S4-4, and §17 has an r6 row and deviation 14.
+
+**S4-1 (R-1, Blocker).**
+- **The new triple** goes in §9.2: `CODEX_HOST_WORKTREE_ROOT_MESSAGE` / `_CAUSE` / `_NEXT_STEP`. A grep of `vidbyte/` and `tests/` found only `CODEX_HOST_WORKTREE_ROOT_PARTS`, so the three names are free.
+- **Text.** It names `~/.vidbyte/codex-worktrees` literally, as the docstring does (a configurable root is Q-6), plus `{error_type}` = `type(exc).__name__`. It never holds the home path or the exception's text, so `CODEX_HOST_WORKTREE_FAILED_MESSAGE` stays the one stderr-quoting message (m-4).
+- **INV-29** gains a "When the root cannot be prepared" paragraph:
+  - the home lookup, the target check and the `mkdir` are mapped and raised `from None`;
+  - the existing-folder refusal passes through unchanged;
+  - this path writes no log;
+  - the `mkdir` stays before git, because git makes the branch first.
+- **Other rows.** INV-2 names `OSError`, and any `RuntimeError` but EC-3's. EC-63 added, the method row lists "root not prepared", and row 28 describes the `try`.
+- **§8.4: still 46 config keys.** The row counts only §9.3's non-message constants and says §9.2 texts are not config. The four earlier worktree triples follow the same rule, and so does the review. The triple reuses `ROOT_PARTS` and adds no setting.
+- **Deviation number.** The review proposed recording the triple as deviation 14. It is spec text now, so 14 is m-1's.
+- **No §13 pin.** The only `codex_host.__all__` pin checks that it is sorted (`hardening_contract.py:519`), and no test lists the worktree messages exhaustively.
+
+**S4-2 (R-5, Major).**
+- **The reset.** INV-43, D-22 and row 34: the side-chat tool first resets the `START_CODEX_SIDE_CHAT` rejected-fields row to fresh-request values, as the continue tool and the resume tool (deviation 12) do. It then narrows as before and keeps every other field.
+- **Kept as it was:** the R-14 posture.
+- **Row 36** now names its two tables, matching deviation 12.
+- **AC-36.** I also extended it with a tool, a name and a personality in the defaults, and a started side chat in the outcome, because the review asks S2 to extend that test. This is the one edit beyond the coordinator's list, and it stays inside S4-2's contract.
+- **No §13 pin.** The review reports that the 53 tool tests stay green under the code fix.
+
+**S4-3 (R-4, Major): checked first.**
+- **The wording was split.** §9.2's resume row already required the cancel ("fails after the set was sent"). INV-31's "only if the status was set" was ambiguous, and EC-37 did not say what a refusal is.
+- **INV-31 now spells out the rule:**
+  - before the set, no cancel;
+  - from the set on, cancel unless the failure is a `JsonRpcError` answer;
+  - a malformed answer, a transport failure and an elapsed window count as sent.
+- **The SDK's rule, checked in the venv's `openai_codex/client.py:643-645`:** it exempts only `InvalidRequestError`, and `JsonRpcError` is a `CodexError` subclass (`errors.py:10`).
+- **Other rows.** EC-37 names the JSON-RPC answer, and EC-64 is new. The §9.2 row adds the exception.
+
+**S4-4 (m-1).** Deviation 14 was checked against `host.py:202`, `:347` and `:749` and `preflight.py:158-165`. It also names the other two callers (`goal_methods.py:103`, `thread_helpers.py:270`).
+
+**Counts.** EC goes 62 → 64. Every other ID count is unchanged (G6 NG19 INV55 AC44 FR36 NFR12 D40 T8 W19 A21 Q11), and so is the §8.4 budget (13 / 69 / 0 / 46 / 0 / 42). `ids.py` and `tables.py` are clean. Only spec.md is committed; this addendum is not.
