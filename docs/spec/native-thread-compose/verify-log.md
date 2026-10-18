@@ -101,3 +101,36 @@ Gate set (from context/code-map.md §1.3 and the S5 briefing §4; run from the w
 - **Remote CI.** The two frozen EC-19 tests above expect git's pre-2.54 wording. This needs a test change, which only the orchestrator can approve (BLOCKED). The proposal: at `tests/features/harness_compose/test_harness_compose_concurrency.py:225` and `:266`, change `git_text="aborted by hook"` to `git_text="aborted by"`. The header's KNOWN EDGE CASES sentence (line 9) should name both wordings. Evidence and the before/after runs are in reports/S5-repair-1.md.
 - **No confirmed finding is open.** R-24 to R-31 remain follow-ups, outside this loop.
 - **Spec passages made stale by the fixes.** Their edits are outside the allowed set and await a ruling (listed in the report): D-17, §8.2, §8.5, §12.3 rows 14 and the count sentence, and the §17 Fan-out, Rendering, Plumbing helpers and Record-so-far bullets.
+
+### Iteration 1 addendum — 2026-10-18 13:24 -0400 — the granted test change
+
+**The grant** (orchestrator, quoted as received): "GRANT (orchestrator, test change): In tests/features/harness_compose/test_harness_compose_concurrency.py, change `git_text="aborted by hook"` to `git_text="aborted by"` at the two call sites (:225 and :266), and update the header's KNOWN EDGE CASES entry (line 9) to name both git wordings. Git 2.53 and earlier print "ref updates aborted by hook". Git 2.54 and later print "in 'prepared' phase, update aborted by the reference-transaction hook". Change nothing else in the test tree. Reason: the spec requires the error to carry git's own text, not one git version's wording (INV-6, EC-19, EC-59/T-6). The hard-coded phrase makes a spec-conforming implementation fail on the CI runner's git 2.55.0 (run 39146593515). I checked this myself against the run log, which shows `fatal: in 'prepared' phase, update aborted by the reference-transaction hook`, and against local git 2.49.0."
+
+**The change.** One commit: 3a21352b `test(compose): accept both git wordings of a hook-aborted worktree add [gate:ci]`. It is the only change to the test tree since 34fe19b7, and it touches only the three granted lines of `tests/features/harness_compose/test_harness_compose_concurrency.py`:
+
+| Line | Before | After |
+|---|---|---|
+| 225 | `    check_compose_error(caught.value, problem="worktree_failed", workspace=sandbox.workspace, git_text="aborted by hook")` | `    check_compose_error(caught.value, problem="worktree_failed", workspace=sandbox.workspace, git_text="aborted by")` |
+| 266 | `        check_compose_error(caught.value, problem="worktree_failed", workspace=sandbox.workspace, git_text="aborted by hook")` | `        check_compose_error(caught.value, problem="worktree_failed", workspace=sandbox.workspace, git_text="aborted by")` |
+| 9 (KNOWN EDGE CASES; only this sentence changed) | `A reference-transaction hook that exits 1 when the add's transaction is prepared makes git print "ref updates aborted by hook", exit 128 and remove the new folder and its registration itself; worktree remove runs no such hook.` | `A reference-transaction hook that exits 1 when the add's transaction is prepared makes git print "ref updates aborted by hook" (git 2.53 and earlier) or "in 'prepared' phase, update aborted by the reference-transaction hook" (git 2.54 and later), exit 128 and remove the new folder and its registration itself; worktree remove runs no such hook.` |
+
+**Local verification at 3a21352b:**
+- The two tests under the local git 2.49 wording: `2 passed, 3 deselected in 3.84s`.
+- The two tests under the 2.54+ wording (`-p s5_git254`): `2 passed, 3 deselected in 3.62s` and `s5_git254: git messages rewritten: 11`.
+- The compose pack, `PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_compose`: `299 passed in 54.82s`.
+- Lint, `python lint/run.py`: `S064 RATCHETED: 4 known finding(s). Inspect with: python lint/run.py --rule S064 --all` and `SDK-LINT: PASS`. The count table is identical to S4's.
+- The source stage, `PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source`: `================ 5940 passed, 16 skipped in 137.70s (0:02:17) =================` and `CI passed.`
+- The comment-width check on the test file: 0 lines. `procs.py --kill` afterwards: `stand-in or grandchild processes: []`.
+- `git diff 34fe19b7..HEAD --stat -- tests`: `tests/features/harness_compose/test_harness_compose_concurrency.py | 6 +++---`, which is the three granted lines.
+- Not re-run: the ratchet counts, semgrep, the base pack, the package stage and the AC-21 wheel check. Nothing they read changed after ca4f2bdd, where all of them passed: `git diff --stat ca4f2bdd..HEAD -- vidbyte pyproject.toml scripts lint .semgrep .github` is empty.
+
+**Remote at 3a21352b** (each watch's exit code was captured before any pipe):
+
+| Run | Result | Final lines |
+|---|---|---|
+| CI 39148626228 | success: Source / Python 3.12, Source / Python 3.11 and Package; watch exit 0 | 3.12: `========== 5900 passed, 56 skipped, 19 warnings in 129.76s (0:02:09) ===========`, then `CI passed.`<br>3.11: `================= 5900 passed, 56 skipped in 127.35s (0:02:07) =================`, then `CI passed.`<br>Package: `Installed vidbyte-sdk 0.3.0 passed smoke checks.`, then `CI passed.`<br>`✓ feat/native-thread-compose CI cerredz/Vidbyte-SDK#1186 · 39148626228` |
+| Static policy 39148628122 | success; watch exit 0 | `1/1: ✓ All tests passed`<br>`Ran 1 rule on 977 files: 0 findings.`<br>`✓ Static policy in 25s (ID 117737539967)` |
+
+The runner's git is still 2.55.0. Both EC-19 tests now run to their end on Linux and pass: 5900 passed and 0 failed, where run 39146593515 had 5898 passed and 2 failed. That includes the lines after the old assertion, which had never run there (process tree stopped, no pending task, one registered worktree, no leftover folder, error within the stop bound). The remote-only real-bash flake did not occur, so no rerun was needed.
+
+**Still open after the addendum:** none. Every gate is green at code HEAD 3a21352b, and no confirmed finding is open. The follow-ups R-24 to R-31 stay outside this loop. The orchestrator is routing the stale spec passages to the spec author, so they are untouched here.

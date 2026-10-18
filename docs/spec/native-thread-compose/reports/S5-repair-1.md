@@ -1,6 +1,6 @@
 # S5 repair, iteration 1 of 8: native-thread-compose
 
-- **Status:** BLOCKED. Every confirmed finding handed to this loop is fixed, and every local gate is green. The remote CI is red on two frozen tests, which expect git's pre-2.54 wording for a failed reference-transaction hook. The test change they need is for the orchestrator to approve (section 3).
+- **Status:** DONE after the addendum (section 9). The iteration first returned BLOCKED on one test change: two frozen tests expected the pre-2.54 git wording for a failed reference-transaction hook. The orchestrator granted the change, and every gate, remote ones included, is green at code HEAD 3a21352b.
 - **Branch:** `feat/native-thread-compose`, in the worktree `C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-native-thread-compose`.
 - **PR:** draft https://github.com/cerredz/Vidbyte-SDK/pull/1186, stacked on `feat/native-grok-opencode-meta-hosts`.
 - **History:** iteration start 0006acaf; code HEAD ca4f2bdd (pushed). The records commit, which touches only docs/spec, sits on top.
@@ -154,7 +154,7 @@ None.
 
 ## 7. Open items and what I would try next
 
-1. **Remote CI: two frozen tests pin git's pre-2.54 wording (section 3).**
+1. **Remote CI: two frozen tests pin git's pre-2.54 wording (section 3).** Resolved: the orchestrator granted the change, and section 9 records it.
    - After approval, the change is three lines in one test file.
    - Then push and dispatch `ci.yml`, and watch the lines after the assertion run on Linux for the first time.
    - If anything else fails there, reproduce it locally with `-p s5_git254`, which keeps the new wording, before changing source.
@@ -171,3 +171,55 @@ None.
 - **Wheel check without pip:** run `python -m zipfile -e <wheel> s5-1/wheel-venv-1/Lib/site-packages` after removing the old `vidbyte` and its dist-info. Then run the check with that venv's `python.exe -I`, from a folder outside the checkout.
 - **The S4 probe `blank_previous`** now "fails" on purpose: R-13 refuses the template before any I/O.
 - **After any cancel probe,** run `python <scratch>/s4-verifier/procs.py --kill`. Every probe in this iteration left nothing behind.
+
+## 9. Addendum: the granted test change
+
+**The grant** (orchestrator, quoted as received): "GRANT (orchestrator, test change): In tests/features/harness_compose/test_harness_compose_concurrency.py, change `git_text="aborted by hook"` to `git_text="aborted by"` at the two call sites (:225 and :266), and update the header's KNOWN EDGE CASES entry (line 9) to name both git wordings. Git 2.53 and earlier print "ref updates aborted by hook". Git 2.54 and later print "in 'prepared' phase, update aborted by the reference-transaction hook". Change nothing else in the test tree. Reason: the spec requires the error to carry git's own text, not one git version's wording (INV-6, EC-19, EC-59/T-6). The hard-coded phrase makes a spec-conforming implementation fail on the CI runner's git 2.55.0 (run 39146593515). I checked this myself against the run log, which shows `fatal: in 'prepared' phase, update aborted by the reference-transaction hook`, and against local git 2.49.0."
+
+The orchestrator also ruled that the stale spec passages in section 6 go to the spec author, so this iteration leaves them untouched.
+
+**The commit.** 3a21352b, `test(compose): accept both git wordings of a hook-aborted worktree add [gate:ci]`, on top of the orchestrator's 16e7a07d (pipeline.md). It is the only test-tree change since 34fe19b7: `tests/features/harness_compose/test_harness_compose_concurrency.py | 6 +++---`.
+
+Lines 225 and 266, before:
+```python
+    check_compose_error(caught.value, problem="worktree_failed", workspace=sandbox.workspace, git_text="aborted by hook")
+        check_compose_error(caught.value, problem="worktree_failed", workspace=sandbox.workspace, git_text="aborted by hook")
+```
+After:
+```python
+    check_compose_error(caught.value, problem="worktree_failed", workspace=sandbox.workspace, git_text="aborted by")
+        check_compose_error(caught.value, problem="worktree_failed", workspace=sandbox.workspace, git_text="aborted by")
+```
+
+Header, line 9 (KNOWN EDGE CASES); only this sentence changed. Before:
+> A reference-transaction hook that exits 1 when the add's transaction is prepared makes git print "ref updates aborted by hook", exit 128 and remove the new folder and its registration itself; worktree remove runs no such hook.
+
+After:
+> A reference-transaction hook that exits 1 when the add's transaction is prepared makes git print "ref updates aborted by hook" (git 2.53 and earlier) or "in 'prepared' phase, update aborted by the reference-transaction hook" (git 2.54 and later), exit 128 and remove the new folder and its registration itself; worktree remove runs no such hook.
+
+No `#` comment line was edited. The comment-width check on the file gives 0 lines.
+
+**Local verification at 3a21352b:**
+
+| Check | Final lines |
+|---|---|
+| The two tests, local git 2.49 wording | `2 passed, 3 deselected in 3.84s` |
+| The two tests, 2.54+ wording (`-p s5_git254`) | `2 passed, 3 deselected in 3.62s` / `s5_git254: git messages rewritten: 11` |
+| `PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_compose` | `299 passed in 54.82s` |
+| `python lint/run.py` | `S064 RATCHETED: 4 known finding(s). Inspect with: python lint/run.py --rule S064 --all` / `SDK-LINT: PASS` (count table identical to S4's) |
+| `PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source` | `tests\test_workflow_agent_forks.py ......  [100%]` / `================ 5940 passed, 16 skipped in 137.70s (0:02:17) =================` / `CI passed.` |
+| `git diff 34fe19b7..HEAD --stat -- tests` | `tests/features/harness_compose/test_harness_compose_concurrency.py \| 6 +++---` (only the granted lines) |
+| `procs.py --kill` | `stand-in or grandchild processes: []` |
+
+The other gates were not re-run: the ratchet counts, semgrep, the base pack, the package stage and the AC-21 wheel check. They read nothing that changed after ca4f2bdd, where they passed (`git diff --stat ca4f2bdd..HEAD -- vidbyte pyproject.toml scripts lint .semgrep .github` is empty).
+
+**Remote at 3a21352b.** Each watch's exit code was captured before any pipe.
+
+| Run | Result | Final lines |
+|---|---|---|
+| CI 39148626228 | success: Source / Python 3.12, Source / Python 3.11 and Package; watch exit 0 | 3.12: `========== 5900 passed, 56 skipped, 19 warnings in 129.76s (0:02:09) ===========` / `CI passed.`<br>3.11: `================= 5900 passed, 56 skipped in 127.35s (0:02:07) =================` / `CI passed.`<br>Package: `Installed vidbyte-sdk 0.3.0 passed smoke checks.` / `CI passed.`<br>`✓ feat/native-thread-compose CI cerredz/Vidbyte-SDK#1186 · 39148626228` |
+| Static policy 39148628122 | success; watch exit 0 | `1/1: ✓ All tests passed` / `Ran 1 rule on 977 files: 0 findings.` / `✓ Static policy in 25s (ID 117737539967)` |
+
+The runner still has git 2.55.0. Section 3's caveat is now closed: both EC-19 tests ran to their end on Linux and passed, the lines after the old assertion included (5900 passed, 0 failed, against 5898 and 2 in run 39146593515). The remote-only real-bash flake did not occur, so no rerun was needed.
+
+**Final state.** Every gate is green at code HEAD 3a21352b, and no confirmed finding is open. The follow-ups R-24 to R-31 stay outside this loop. The stale spec passages belong to the spec author, and are untouched here.
