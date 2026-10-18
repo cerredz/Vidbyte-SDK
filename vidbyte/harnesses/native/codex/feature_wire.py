@@ -296,8 +296,12 @@ class CodexFeatureResponseTranslator:
     @staticmethod
     def memory_status(answer: Mapping[str, Any]) -> CodexMemoryStatus:
         # The consolidated-thread count and readiness of Codex's
-        # memories (first-class INV-26).
-        return CodexMemoryStatus(consolidated_threads=answer.get("v2ConsolidatedThreads"), ready=answer.get("v2Ready"))
+        # memories; a member that is missing or of another type is
+        # refused here by type and by the record by range (first-class
+        # INV-26).
+        consolidated = RecordFieldConverter.require_instance(answer.get("v2ConsolidatedThreads"), "Codex memory status consolidated_threads", int)
+        ready = RecordFieldConverter.require_instance(answer.get("v2Ready"), "Codex memory status ready", bool)
+        return CodexMemoryStatus(consolidated_threads=consolidated, ready=ready)
 
     @staticmethod
     def terminals(answer: Mapping[str, Any]) -> CodexBackgroundTerminalPage:
@@ -328,10 +332,11 @@ class CodexFeatureResponseTranslator:
         hits = tuple(CodexThreadSearchHit(thread=self.hit_thread(entry.get("thread")), snippet=entry.get("snippet")) for entry in entries)
         return CodexThreadSearchPage(hits=hits, next_cursor=answer.get("nextCursor") or "", backwards_cursor=answer.get("backwardsCursor") or "")
 
-    def hit_thread(self, thread: object) -> CodexThreadInfo | None:
+    def hit_thread(self, thread: object) -> CodexThreadInfo:
         # A JSON object becomes the host's thread record; anything else
-        # is None, which the hit record refuses.
-        return self._responses.thread_info(Thread.model_validate(thread)) if isinstance(thread, Mapping) else None
+        # is refused as the hit's thread.
+        RecordFieldConverter.require_instance(thread, "Codex thread search hit thread", Mapping)
+        return self._responses.thread_info(Thread.model_validate(thread))
 
     def goal(self, answer: ThreadGoalSetResponse) -> CodexThreadGoal | None:
         # The goal Codex stored after the set, read as a goal read is

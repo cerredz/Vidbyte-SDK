@@ -2,9 +2,9 @@
 
 PURPOSE: Streams one live Codex turn's events: CodexTurnEventLog keeps a bounded, ordered window of a turn's events, ends it with exactly one ENDED event, and hands each subscriber an independent async iterator over it; CodexTurnEventTranslator turns one app-server notification into one CodexTurnEvent.
 ROLE IN CODEBASE: The stream layer of vidbyte/harnesses/native/codex/. Every CodexLiveTurn in turns.py owns one CodexTurnEventLog as its events attribute; CodexTurnRegistry._add attaches it to the host's stream totals, CodexTurnEvents.on_event records each notification right after the turn observes it, CodexLiveTurn.finish closes it, and CodexHost's stream_codex_turn returns its subscribe().
-ARCHITECTURE NOTE: Everything here runs on the host's event loop, from on_event, finish and the subscribers' own steps, so the log needs no lock (slice-1 INV-12); subscribers wait on one asyncio.Event, set on every change. record never raises and never awaits, so a slow or absent reader never delays the turn (first-class INV-19). A subscription is a private async generator: it counts itself as reading from its first step until its finally, keeps its next sequence as a local, and computes its GAP from the log's kept sequences, so the log holds an integer count and no per-subscriber object, weak reference or cursor class (D-37). The four window bounds are imported by name and read at call time, so section 13's patches here apply. Only turns.py, which loads openai-codex and which only CodexHost._open imports, imports this module, so importing the host never loads it (INV-45).
-COMMON MODIFICATION PATTERNS: A new streamed notification adds its method and CodexTurnEventKind to CODEX_HOST_STREAM_NOTIFICATION_KINDS (vidbyte/lib/constants/codex_host.py) and, when its payload has a new shape, one branch in CodexTurnEventTranslator.event. A new bound is read in CodexTurnEventLog._make_room at call time.
-KNOWN EDGE CASES: An event the translator cannot build spends its sequence, is logged once as codex_host_stream_event_dropped by type and origin, and shows up as a GAP. An event that alone passes the character bound is dropped and counted. ENDED is kept outside every bound and is never charged or dropped. Once the turn has ended and no subscription is reading, every kept event is released and refunded to the host's totals; a subscription read later sees one GAP for them, then ENDED. A subscription opened after the turn ended yields only ENDED. Iterating a subscription on another loop than the host's raises ConfigurationError at its first step.
+ARCHITECTURE NOTE: Everything here runs on the host's event loop, from on_event, finish and the subscribers' own steps, so the log needs no lock (slice-1 INV-12); subscribers wait on one asyncio.Event, set on every change. record never raises and never awaits, so a slow or absent reader never delays the turn (first-class INV-19). A subscription is a private async generator: it counts itself as reading from its first step until its finally, keeps its next sequence as a local, and computes its GAP from the log's kept sequences, so the log holds an integer count and no per-subscriber object, weak reference or cursor class (D-37). The four window bounds are imported by name and read at call time, so section 13's patches here apply. The translator narrows each payload to its openai-codex notification class, so this module loads openai-codex; only turns.py, which also loads it and which only CodexHost._open imports, imports this module, so importing the host never loads either (INV-45).
+COMMON MODIFICATION PATTERNS: A new streamed notification adds its method and CodexTurnEventKind to CODEX_HOST_STREAM_NOTIFICATION_KINDS (vidbyte/lib/constants/codex_host.py) and, for a text delta, its notification class to the delta check in CodexTurnEventTranslator.event, or, when its payload has a new shape, one isinstance branch there. A new bound is read in CodexTurnEventLog._fits at call time.
+KNOWN EDGE CASES: An event the translator cannot build, such as a delta openai-codex could not parse and so delivers as an UnknownNotification, spends its sequence, is logged once as codex_host_stream_event_dropped by type and origin, and shows up as a GAP. An event that alone passes the character bound is dropped and counted. ENDED is kept outside every bound and is never charged or dropped. Once the turn has ended and no subscription is reading, every kept event is released and refunded to the host's totals; a subscription read later sees one GAP for them, then ENDED. A subscription opened after the turn ended yields only ENDED. Iterating a subscription on another loop than the host's raises ConfigurationError at its first step.
 RELATED DOCS: docs/spec/codex-host-first-class/spec.md (sections 6.1 INV-18 to INV-22 and 9.1 "Lifecycle: one live turn's CodexTurnEventLog", D-9 to D-12, D-37, D-39, NFR-3)
 TESTS: tests/features/codex_host/test_codex_host_stream_wait.py
 """
@@ -19,6 +19,19 @@ from collections import deque
 from collections.abc import AsyncIterator, Callable
 from operator import attrgetter
 from typing import TYPE_CHECKING
+
+from openai_codex.generated.v2_all import (
+    AgentMessageDeltaNotification,
+    CommandExecutionOutputDeltaNotification,
+    FileChangeOutputDeltaNotification,
+    ItemCompletedNotification,
+    ItemStartedNotification,
+    PlanDeltaNotification,
+    ReasoningSummaryTextDeltaNotification,
+    ThreadTokenUsageUpdatedNotification,
+    TurnDiffUpdatedNotification,
+    TurnPlanUpdatedNotification,
+)
 
 from vidbyte.agents.codex.result import CodexResultSerializer
 from vidbyte.lib.constants.codex_host import (
@@ -63,16 +76,22 @@ class CodexTurnEventTranslator:
         if kind is None:
             return None
         payload = note.payload
-        if kind in (CodexTurnEventKind.ITEM_STARTED, CodexTurnEventKind.ITEM_COMPLETED):
+        if isinstance(payload, (ItemStartedNotification, ItemCompletedNotification)):
             item = CodexResultSerializer.items((payload.item,))[0]
             return CodexTurnEvent(sequence=sequence, kind=kind, handle=handle, item_id=item.id, item_type=item.type, item=item)
-        if kind is CodexTurnEventKind.PLAN_UPDATED:
+        if isinstance(payload, TurnPlanUpdatedNotification):
             steps = tuple(CodexPlanStep(step=entry.step, status=CodexPlanStepStatus(entry.status.value)) for entry in payload.plan)
             return CodexTurnEvent(sequence=sequence, kind=kind, handle=handle, text=payload.explanation or "", plan_steps=steps)
-        if kind is CodexTurnEventKind.DIFF_UPDATED:
+        if isinstance(payload, TurnDiffUpdatedNotification):
             return CodexTurnEvent(sequence=sequence, kind=kind, handle=handle, text=payload.diff)
-        if kind is CodexTurnEventKind.USAGE_UPDATED:
+        if isinstance(payload, ThreadTokenUsageUpdatedNotification):
             return CodexTurnEvent(sequence=sequence, kind=kind, handle=handle, usage=usage)
+        # Every other streamed method is one item's text delta. A delta
+        # openai-codex could not parse arrives as an UnknownNotification
+        # with nothing to keep, so it is refused here and record counts
+        # it as a GAP (EC-20).
+        if not isinstance(payload, (AgentMessageDeltaNotification, ReasoningSummaryTextDeltaNotification, PlanDeltaNotification, CommandExecutionOutputDeltaNotification, FileChangeOutputDeltaNotification)):
+            raise TypeError(type(payload).__name__)
         return CodexTurnEvent(sequence=sequence, kind=kind, handle=handle, item_id=payload.item_id, text=payload.delta)
 
 
@@ -116,17 +135,17 @@ class CodexTurnEventLog:
             if event is None:
                 return
             self._next = sequence + 1
-            size = len(event.text) + (len(json.dumps({"id": event.item.id, "type": event.item.type, "fields": dict(event.item.fields)}, default=str)) if event.item is not None else 0)
+            size = self._size(event)
             # Drop this log's own oldest events until the new one fits
             # the turn's and the host's bounds; a new event that still
             # does not fit is dropped and counted (INV-20).
-            if self._make_room(size):
+            while self._events and not self._fits(size):
+                self._drop_oldest()
+            if self._fits(size):
                 self._append(event, size)
         except Exception as exc:
             self._next = sequence + 1
-            limit = CODEX_HOST_LOG_TOKEN_MAX_CHARS
-            ids = (LogToken.of(self._handle.thread_id, limit), LogToken.of(self._handle.turn_id, limit), LogToken.of(note.method, limit))
-            logger.warning("codex_host_stream_event_dropped thread_id=%s turn_id=%s method=%s error_type=%s origin=%s", *ids, type(exc).__name__, ExceptionOrigin.describe(exc))
+            self._log_drop(note, exc)
         # Wake every subscription, which reads what changed.
         self._changed.set()
 
@@ -198,22 +217,41 @@ class CodexTurnEventLog:
             return self._ended, position + 1
         return None, position
 
-    def _make_room(self, size: int) -> bool:
-        # Drop this log's own oldest events, refunding each, until the
-        # new event fits the turn's bounds and, once attached, the
-        # host's; say whether it fits. The bounds are read now, so a
-        # patched bound applies (INV-20, D-39).
-        while True:
-            host_chars, host_events = self._charge(0, 0) if self._charge is not None else (0, 0)
-            turn_fits = len(self._events) < CODEX_HOST_STREAM_EVENT_LIMIT and self._chars + size <= CODEX_HOST_STREAM_TEXT_LIMIT_CHARS
-            host_fits = self._charge is None or (host_events < CODEX_HOST_STREAM_HOST_EVENT_LIMIT and host_chars + size <= CODEX_HOST_STREAM_HOST_TEXT_LIMIT_CHARS)
-            if (turn_fits and host_fits) or not self._events:
-                return turn_fits and host_fits
-            self._events.popleft()
-            dropped = self._sizes.popleft()
-            self._chars -= dropped
-            if self._charge is not None:
-                self._charge(-dropped, -1)
+    @staticmethod
+    def _size(event: CodexTurnEvent) -> int:
+        # What an event costs against the character bounds: its text
+        # plus its item serialized as the model would read it (INV-20).
+        if event.item is None:
+            return len(event.text)
+        return len(event.text) + len(json.dumps({"id": event.item.id, "type": event.item.type, "fields": dict(event.item.fields)}, default=str))
+
+    def _fits(self, size: int) -> bool:
+        # Whether an event of this size fits the turn's bounds and, once
+        # attached, the host's. The bounds are read now, so a patched
+        # bound applies; charging nothing reads the host's totals
+        # (INV-20, D-39).
+        turn_fits = len(self._events) < CODEX_HOST_STREAM_EVENT_LIMIT and self._chars + size <= CODEX_HOST_STREAM_TEXT_LIMIT_CHARS
+        if self._charge is None:
+            return turn_fits
+        host_chars, host_events = self._charge(0, 0)
+        return turn_fits and host_events < CODEX_HOST_STREAM_HOST_EVENT_LIMIT and host_chars + size <= CODEX_HOST_STREAM_HOST_TEXT_LIMIT_CHARS
+
+    def _drop_oldest(self) -> None:
+        # Drop this log's own oldest event and refund it to the host's
+        # totals (INV-20, D-39).
+        self._events.popleft()
+        dropped = self._sizes.popleft()
+        self._chars -= dropped
+        if self._charge is not None:
+            self._charge(-dropped, -1)
+
+    def _log_drop(self, note: Notification, exc: Exception) -> None:
+        # One WARNING per event that could not be recorded, by type and
+        # origin, never its text, with the ids as bounded tokens
+        # (INV-19, EC-20).
+        limit = CODEX_HOST_LOG_TOKEN_MAX_CHARS
+        ids = (LogToken.of(self._handle.thread_id, limit), LogToken.of(self._handle.turn_id, limit), LogToken.of(note.method, limit))
+        logger.warning("codex_host_stream_event_dropped thread_id=%s turn_id=%s method=%s error_type=%s origin=%s", *ids, type(exc).__name__, ExceptionOrigin.describe(exc))
 
     def _append(self, event: CodexTurnEvent, size: int) -> None:
         # Keep the event and charge it to the host's totals.
