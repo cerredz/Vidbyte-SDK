@@ -1165,7 +1165,7 @@ None. There is no CI change, dependency change, secret, release or version bump.
 1. `BrowserToolRequest` itself refuses a `tool_keys` name that is not a registry name ("tool_keys entry i"), because the S2 registry tests require refusal at record level; §9.1 puts that check in `select`, which keeps its meaning checks.
 2. The Grok argv budget is an estimate made before the per-call folder exists: the UTF-16 units of `list2cmdline` over the `--agent=` option (temp folder + `BROWSER_CALL_FOLDER_ESTIMATE` + file name), every rule option and `--disable-web-search`; the 10-unit `streaming-json`/`json` difference is not counted.
 3. Constants (rows 7, 8) were committed before the records (rows 5, 6), because the records import them.
-4. Profile and folder removal is tried `BROWSER_REMOVE_ATTEMPTS` (5) times, `BROWSER_REMOVE_PAUSE_SECONDS` (0.2 s) apart, because Windows releases a killed browser's lock late; the tries run under `asyncio.timeout(BROWSER_REAP_TIMEOUT_SECONDS)` (lint S064), and a folder that stays is left behind.
+4. Profile and folder removal is tried `BROWSER_REMOVE_ATTEMPTS` (5) times, `BROWSER_REMOVE_PAUSE_SECONDS` (0.2 s) apart, because Windows releases a killed browser's lock late; `complete` and `discard` compute one deadline, `loop.time() + BROWSER_REAP_TIMEOUT_SECONDS`, before the reap, and the tries stop at it, so the reap and every removal of a call share one budget (INV-12; the clock check satisfies lint S064). The first try always runs, and a folder that stays is left behind (S5 R-3; the S3 shape gave each removal its own `asyncio.timeout`).
 5. `MUSE_SETTINGS_PARTS` lives in `constants/native_threads.py` (row 8), not `browser_tools.py`.
 6. The tool and capability suggestion refusals also list the mountable tools or capabilities, because difflib suggests "kernel" for "skyvern" and the S2 test expects the 13 names.
 7. The stdio entry prefix check uses two extra constants.
@@ -1174,7 +1174,7 @@ None. There is no CI change, dependency change, secret, release or version bump.
 10. Grok's tool-call status is the last `tool_call_update` that carries a string status; updates with a null status are ignored.
 11. `OpencodeMounts.check` refuses nothing (opencode carries every selection); it exists so the three seams have one shape.
 12. Constants not named in §9: `BROWSER_CALL_FOLDER_ESTIMATE`, `MUSE_TOOL_NAME_SEPARATOR`, `BROWSER_GROK_AGENT_FILE_DETAIL`, `NATIVE_USER_PROFILE_VARIABLE`, `NATIVE_REAP_NONE_COUNT`.
-13. Private helpers not named in §9: `GrokMounts.agent_path`, `BrowserToolCache._install` (lint S008) and `NativeBrowserTools._remove_attempts` (lint S064).
+13. Private helpers not named in §9: `GrokMounts.agent_path`, `BrowserToolCache._install` (lint S008) and `NativeBrowserTools._remove(folder, deadline)`, which holds the removal tries (S5 R-3 folded S3's `_remove_attempts` into it, so `complete` and `discard` call one helper level).
 14. A Grok agent file that cannot be written is `grok.launch_failed` with `BROWSER_GROK_AGENT_FILE_DETAIL`.
 15. The reaper's Windows PowerShell runs without `USERPROFILE`: PowerShell creates `AppData\Roaming` under that folder at start, which broke AC-16 under a redirected profile; without it Windows uses the logon token's profile and the CIM query still works.
 16. The browser functions pass `{}` to `BrowserToolRequest` when `tool_keys` is None (the record still turns None into an empty mapping), so the record's field keeps its §9.1 type `Mapping[str, str]` under mypy.

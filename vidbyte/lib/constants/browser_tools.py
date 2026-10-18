@@ -56,9 +56,10 @@ BROWSER_ARTIFACTS_FOLDER = "artifacts"
 BROWSER_PROFILES_FOLDER = "profiles"
 BROWSER_FILE_ENCODING = "utf-8"
 # Removing a profile right after its browser was killed can race the
-# operating system releasing the browser's lock file, so the removal is
-# tried a few times, a short pause apart, all within the cleanup budget
-# BROWSER_REAP_TIMEOUT_SECONDS that also bounds the reap.
+# operating system releasing the browser's lock file, so the removal
+# is tried a few times, a short pause apart, until one deadline set
+# BROWSER_REAP_TIMEOUT_SECONDS after the reap starts, which the reap
+# and every removal of the call share.
 BROWSER_REMOVE_ATTEMPTS = 5
 BROWSER_REMOVE_PAUSE_SECONDS = 0.2
 
