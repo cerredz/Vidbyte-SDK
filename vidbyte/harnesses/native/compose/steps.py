@@ -3,19 +3,19 @@
 PURPOSE: Binds the nine thread functions into checked steps and holds the step rules every composite applies: ThreadBinder (bind_thread, bind_continue, the table of the nine functions, require_step, and invoke, the only path by which compose calls a step) and StepRoles (the reader, unanchored-fork, fork-role, from_thread, one-workspace and alias harness rules, the count rule, argument path names and needs_worktree).
 ROLE IN CODEBASE: bind_thread and bind_continue are bound as public names in vidbyte/harnesses/native/compose/__init__.py. ComposeCalls (calls.py), JsonAnswers (answers.py) and every composite call ThreadBinder.invoke, require_step, anchor, relocate and rung, and check their inputs with StepRoles before any I/O (spec INV-5).
 ARCHITECTURE NOTE: ThreadStep (vidbyte/lib/dataclasses/native_compose.py) validates its own arguments but holds no calling convention (spec D-2): the binders store ThreadBinder.invoke as its invoker, and invoke calls the step's function in its verb's argument order. Composites call ThreadBinder.invoke directly, never a step's stored invoker, and re-check every step against FUNCTIONS, which is keyed by the imported function objects themselves, so a step whose function or invoker was swapped still runs only one of the nine functions with its checked arguments (INV-3, EC-78). The module holds no literals (base spec INV-15): every text and argument name comes from vidbyte/lib/constants/native_compose.py.
-FUNCTION INVENTORY: ThreadBinder.bind_thread and bind_continue build a step from one of the nine functions; invoke makes the one call a step stands for; require_step re-checks a step a composite received; anchor, relocate and rung give the same step on another thread, workspace or config; _identify finds a function's harness and verb. StepRoles.counted applies a count rule; item and member name an argument path; anchored refuses an unanchored fork and unanchored tells one apart; reader applies the reader rules; fork_role applies the ensemble fork rule; from_thread applies the handoff source rule; same_workspace applies the one-workspace rule; on_harness applies an alias's harness rule; needs_worktree says whether a reader is relocated.
+FUNCTION INVENTORY: ThreadBinder.bind_thread and bind_continue build a step from one of the nine functions; invoke makes the one call a step stands for; require_step re-checks a step a composite received; anchor, relocate and rung give the same step on another thread, workspace or config, checking only what they change; _derived copies a checked step with fields changed; _identify finds a function's harness and verb. StepRoles.counted applies a count rule; item and member name an argument path; anchored refuses an unanchored fork and unanchored tells one apart; reader applies the reader rules; fork_role applies the ensemble fork rule; from_thread applies the handoff source rule; same_workspace applies the one-workspace rule; on_harness applies an alias's harness rule; needs_worktree says whether a reader is relocated.
 COMMON MODIFICATION PATTERNS: A tenth thread function is one more FUNCTIONS entry. A new role rule is one StepRoles method that raises ConfigurationError naming the argument path, with its message template in the constants module, called by each composite before any I/O.
 WHAT NOT TO DO IN THIS FILE: 1. Do not call a step's stored invoker; call ThreadBinder.invoke. 2. Do not change a step's config or permission mode to make it fit a role; refuse it instead (spec D-21). 3. Do not quote a key, a workspace path or any other caller value in a refusal; name the argument path only. 4. Do not import a composite module; this is plumbing.
-KNOWN EDGE CASES: A fork step bound with bind_thread has no thread id; it can only become an ensemble role, where compose anchors it at a Grok planner's thread on the same workspace (spec D-3). Workspaces are compared after os.path.normcase of the resolved path, so two spellings of one folder on Windows are one workspace. A functools.partial or a lambda wrapping one of the nine functions is not one of them and is refused.
+KNOWN EDGE CASES: A fork step bound with bind_thread has no thread id; it can only become an ensemble role, where compose anchors it at a Grok planner's thread on the same workspace (spec D-3). Workspaces are compared after os.path.normcase of the resolved path, so two spellings of one folder on Windows are one workspace. A functools.partial or a lambda wrapping one of the nine functions is not one of them and is refused. A step derived after I/O began keeps the fields it was bound with unchecked, so a skill folder a writer removed meanwhile fails that call as the step's own error, not the composite (INV-15).
 RELATED DOCS: vidbyte/harnesses/README.md
 TESTS: tests/features/harness_compose/test_harness_compose_binding.py, tests/features/harness_compose/test_harness_compose_validation.py
 """
 
 from __future__ import annotations
 
+import dataclasses
 import os
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import replace
 from pathlib import Path
 from types import MappingProxyType
 from typing import ClassVar
@@ -110,18 +110,34 @@ class ThreadBinder:
 
     @staticmethod
     def anchor(step: ThreadStep, thread_id: str, verb: NativeThreadVerb = NativeThreadVerb.CONTINUE) -> ThreadStep:
-        """The same bound step on thread_id through verb's function: a repair turn continues its thread, and an unanchored fork forks the planner's."""
-        return replace(step, function=ThreadBinder.FUNCTIONS[(step.harness, verb)], verb=verb, thread_id=thread_id)
+        """The same bound step on thread_id through verb's function: a repair turn continues its thread, and an unanchored fork forks the planner's; only the thread id is checked."""
+        RecordFieldValidator.require_text(thread_id, native_compose.COMPOSE_THREAD_ID_ARGUMENT, max_chars=native_threads.NATIVE_THREAD_ID_MAX_CHARS, pattern=native_threads.NATIVE_THREAD_ID_PATTERN)
+        return ThreadBinder._derived(step, function=ThreadBinder.FUNCTIONS[(step.harness, verb)], verb=verb, thread_id=thread_id)
 
     @staticmethod
     def relocate(step: ThreadStep, workspace: Path) -> ThreadStep:
-        """The same bound step with its workspace moved to workspace, the folder a worktree reader runs in."""
-        return replace(step, workspace=workspace)
+        """The same bound step with its workspace moved to workspace, the folder a worktree reader runs in; only that folder is checked, and kept resolved."""
+        folder = RecordFieldConverter.to_path(workspace, native_compose.COMPOSE_WORKSPACE_ARGUMENT)
+        RecordFieldValidator.require_directory(folder, native_compose.COMPOSE_WORKSPACE_ARGUMENT)
+        return ThreadBinder._derived(step, workspace=folder.resolve())
 
     @staticmethod
     def rung(step: ThreadStep, config: GrokThreadConfig | OpencodeThreadConfig | MuseThreadConfig) -> ThreadStep:
-        """The same bound step with config, one rung of a stage's ladder."""
-        return replace(step, config=config)
+        """The same bound step with config, one rung of a stage's ladder; only the config is checked, against the step's harness."""
+        checked: GrokThreadConfig | OpencodeThreadConfig | MuseThreadConfig = RecordFieldConverter.require_instance(config, native_threads.NATIVE_CONFIG_ARGUMENT, ThreadStep.CONFIG_TYPES[step.harness])
+        return ThreadBinder._derived(step, config=checked)
+
+    @staticmethod
+    def _derived(step: ThreadStep, **changes: object) -> ThreadStep:
+        # @intent derived-steps-check-only-what-they-change
+        # A step was checked in full when it was bound. Building a copy
+        # through the record again would check its other fields after
+        # I/O began, so a skill folder a writer removed would become a
+        # ConfigurationError there; the call reports it instead.
+        derived = object.__new__(ThreadStep)
+        for item in dataclasses.fields(ThreadStep):
+            object.__setattr__(derived, item.name, changes.get(item.name, getattr(step, item.name)))
+        return derived
 
     @staticmethod
     def _identify(function: object, verbs: tuple[NativeThreadVerb, ...], rule: str) -> tuple[NativeHarness, NativeThreadVerb]:
