@@ -14,8 +14,8 @@ started: 2026-10-19 20:30
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-19 20:30 | 2026-10-19 20:50 | reports/S0-scout.md | base_commit 181f1992; code-map.md (4 sections, ~45 files) |
-| S1 spec + review | running | 2026-10-19 20:55 | | reports/S1-spec-author.md, S1-spec-reviewer-r1.md | spec r2 @c9aeb7f3; review r1 SOUND WITH FIXES (3B/4M/6m, all applied) |
-| S2 tests | pending | | | | |
+| S1 spec + review | done | 2026-10-19 20:55 | 2026-10-20 | reports/S1-spec-author.md, S1-spec-reviewer-r1.md, S1-spec-reviewer-r2.md | spec r3 @c639e390 approved; r1 SOUND WITH FIXES (13 applied); r2 SOUND WITH FIXES (1B/2M/3m, 6 applied) |
+| S2 tests | running | 2026-10-20 | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
@@ -23,7 +23,7 @@ started: 2026-10-19 20:30
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 (round 2 running on r2) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 (cap reached; spec approved at r3) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-19 — Asked 3 alignment questions instead of 8–10 — the user's invocation said "No need to ask 8-10 questions for this, keep to 3".
@@ -32,6 +32,8 @@ started: 2026-10-19 20:30
 
 - 2026-10-19 — Launched S1 review round 2 (final) scoped to §6, §8.1, §8.5, §9, §10, §12, §13 — r2 changed §8, §8.5, §9, §10 and the shape of §12 (skill rule).
 - 2026-10-19 — Passed review r1 findings to the author by report path, not pasted — keeps orchestrator context lean; the author read the committed report.
+- 2026-10-20 — Spec r3 approved after round 2 (cap). Open questions take their stated defaults, per the no-stop rule: Q-1 keep records in `vidbyte/lib/dataclasses/infinite.py` and raise its cap (no new module); Q-2 root heartbeat every 10th tool iteration; Q-3 permission-policy denials of `launch_subagent` are not announced. A-5 (Ruff complexity defaults) left unverified; the spec's fallback (extract the verifier step, report it) applies.
+- 2026-10-20 — Earlier docs commits by the orchestrator lacked the Co-Authored-By trailer; every commit from here on carries it.
 
 ## User replies (verbatim)
 - 2026-10-19 (alignment answers) — "1) i am working on merging  1159 into main and it will land soon, maybe just start the run after this pr merges, so no confusions.  2) you can leave this out for now. 3) thats fine, I just want you to build these events into the agent that we have for now, I am sync them to dashboard later"
@@ -51,4 +53,8 @@ started: 2026-10-19 20:30
 - A child agent's Exception reaches InfinitePair wrapped as AgentExecutionError (base.py:965-979, a VidbyteSdkError) with the original in __cause__; only BaseException passes unwrapped; subagent_aborted(failed) fires only for pair-owned code defects (seam: patch InfiniteWorkspace.commit_entry to raise RuntimeError) — *source:* S1 review r1 / spec r2
 - An Exception escaping InfiniteLaunchTool.execute becomes the tool result "Tool execution failed: …" (runtime.py:1341-1348); the root continues, no run_stopped — *source:* S1 review r1
 - error_type = type(error.__cause__ or error).__name__ (same rule as _error_text); P2 must land as one checkpoint (changed signatures raise TypeError at call sites outside the shield) — *source:* spec r2
-- Size caps planned in spec row 13 (S2 executes): events.py 400→650, launch.py 410→460, lib dataclasses 620→850; 0 new files; 22 kinds (8 new appended after TOOL_REFUSED) — *source:* spec r2
+- ~~Size caps 650/460/850~~ superseded by r3: S2 executes row 13 with events.py 400→660, launch.py 410→470, lib dataclasses 620→870 (estimates ~625/451/829 plus ~5 %); 0 new files; 22 kinds (8 appended after TOOL_REFUSED); 3 new enums; 8 new + 8 enriched records; 18 new constants. The implementer stops BLOCKED rather than squeeze code or narration under a cap — *source:* spec r3
+- test_infinite_memory_handoff.py:248 pins `_entry_lines` error details `{"file": "entries.jsonl", "line": 2}`; P1 row 9 adds `"rule": InfiniteRefusalRule.MALFORMED_MEMORY`, so S2 must update that pin before P1 — *source:* S1 review r2 (R-14)
+- Lint A002 maps the name `attempt` to "retries" and scans every `ast.Name`/`ast.Attribute` in a function: never bind a local `attempt` or read `self.attempt`; the keyword argument `attempt=` is safe; `subagent_launched` carries `# @intent an-attempt-counts-journal-starts` within def−4..def+20 — *source:* S1 review r2 (R-18) / spec r3
+- `subagent_aborted` decrements `in_flight` only when `journal.finished(pair.key) is None`, as the first statement in the shield; `phase = COMMIT` is set after the `if status is not FAILED:` block, just before `if verdict is not UNCHECKED:` — *source:* spec r3 (R-17)
+- P2 (row 4's P2 bullet, then rows 5, 8, 6, 7, 11) is one atomic checkpoint; the pack runs only at the end of P2 — *source:* spec r3
