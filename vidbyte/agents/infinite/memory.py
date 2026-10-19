@@ -1,14 +1,14 @@
 """FILE: vidbyte/agents/infinite/memory.py
 
 PURPOSE: Defines InfiniteAgentMemory, one agent's handle on the shared workspace with its role, its remember quota, its new-file allowance, and its pair's staged entries; and the four memory tools built on it: remember, write_note, edit_file (FULL preset only), and drop_entry (verifiers only).
-ROLE IN CODEBASE: Built by InfiniteMemoryRuntime (runtime.py) for the root and by InfinitePair (launch.py) for each generator and verifier, whose two memories share one staged list and one dropped list. Calls InfiniteWorkspace (workspace.py) for every rule and write; InfinitePair reads files_written and the staged and dropped lists after each agent returns.
+ROLE IN CODEBASE: Built by InfiniteMemoryRuntime (runtime.py) for the root and by InfinitePair (launch.py) for each generator and verifier, whose two memories share one staged list and one dropped list. Calls InfiniteWorkspace (workspace.py) for every rule and write; InfinitePair reads files_written and the staged and dropped lists after each agent returns. Each memory holds its agent's depth and the run's InfiniteEvents (events.py), and reports every saved, staged, or dropped entry, every note write, and every refused call through it.
 ARCHITECTURE NOTE: The root's remember commits at once, while a pair agent's remember only stages the entry in memory, after the same rule check, so nothing a pair wrote reaches entries.jsonl before its verifier has judged it. Every tool returns ToolResult.error with what to fix and the remaining quota instead of raising, for a broken rule and for a write the disk refused or text UTF-8 cannot encode alike, so a refused call changes nothing and the tool stays usable. Every model-facing description and reply comes from the infinite_memory prompt family.
-FUNCTION INVENTORY: InfiniteAgentMemory.tools builds the tools InfiniteMemoryToolRegistry (vidbyte/lib/registries/infinite.py) grants the preset and role; remember, write_note, edit_file, and drop carry out one tool call each and return its message; answer and refusal add the quota line to a message or a problem; quota renders the quota line, which InfinitePair also puts in a pair agent's first message. InfiniteRememberTool, InfiniteWriteNoteTool, InfiniteEditFileTool, and InfiniteDropEntryTool each have spec and execute; InfiniteRememberTool._draft turns the model's arguments into an InfiniteEntryDraft and refuses a multi-line paste with the advice to keep it in a note.
+FUNCTION INVENTORY: InfiniteAgentMemory.tools builds the tools InfiniteMemoryToolRegistry (vidbyte/lib/registries/infinite.py) grants the preset and role; remember, write_note, edit_file, and drop carry out one tool call each and return its message; answer and refusal add the quota line to a message or a problem; quota renders the quota line, which InfinitePair also puts in a pair agent's first message. InfiniteRememberTool, InfiniteWriteNoteTool, InfiniteEditFileTool, and InfiniteDropEntryTool each have spec and execute; InfiniteRememberTool._draft turns the model's arguments into an InfiniteEntryDraft and refuses a multi-line paste with the advice to keep it in a note. remember, write_note, edit_file, and drop each announce their change through InfiniteEvents after it is made, and each tool's execute announces a refusal before it returns the error.
 COMMON MODIFICATION PATTERNS: A new memory tool is one BaseTool subclass here, one method on InfiniteAgentMemory, one builder in tools, its name in the InfiniteMemoryToolRegistry rows that grant it, its name in vidbyte/lib/constants/infinite.py (and INFINITE_RESERVED_TOOL_NAMES), and its description leaves in the prompt family.
 WHAT NOT TO DO IN THIS FILE: 1. Do not write to entries.jsonl from a pair agent; stage instead. 2. Do not count a refused call against the quota. 3. Do not raise out of execute for a rule violation; return ToolResult.error. 4. Do not put module-level constants here; they live in vidbyte/lib/constants/infinite.py.
-KNOWN EDGE CASES: A staged key is s<staged + dropped + 1>, so keys never repeat within a pair even after drops. A generator and its verifier have separate quotas but share the staged list, so a verifier sees and can drop the generator's entries. write_note records a path once per agent in files_written even when the agent writes it several times.
-RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 6.1 INV-15 to INV-18 and INV-32, and 9.2); vidbyte/agents/infinite/README.md
-TESTS: tests/features/infinite_memory_agent/test_infinite_memory_workspace.py and tests/features/infinite_memory_agent/test_infinite_memory_verification.py
+KNOWN EDGE CASES: A staged key is s<staged + dropped + 1>, so keys never repeat within a pair even after drops. A generator and its verifier have separate quotas but share the staged list, so a verifier sees and can drop the generator's entries. write_note records a path once per agent in files_written even when the agent writes it several times. An event is announced only after its change is on disk or in the staged list, so a refused or failed call announces tool_refused and nothing else; the refusal event carries the same problem text the model is told. A dropped entry is kept as an InfiniteDroppedEntry with the note "dropped by the verifier"; the pair renders it into the card's text.
+RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 6.1 INV-15 to INV-18 and INV-32, and 9.2); docs/spec/infinite-memory-events/spec.md (sections 6.1 and 9.1); vidbyte/agents/infinite/README.md
+TESTS: tests/features/infinite_memory_agent/test_infinite_memory_workspace.py, tests/features/infinite_memory_agent/test_infinite_memory_verification.py, and tests/features/infinite_memory_agent/test_infinite_memory_events_stream.py
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any
 
+from vidbyte.agents.infinite.events import InfiniteEvents
 from vidbyte.agents.infinite.workspace import InfiniteWorkspace
 from vidbyte.lib.constants.infinite import (
     INFINITE_DROP_ENTRY_TOOL_NAME,
@@ -26,8 +27,17 @@ from vidbyte.lib.constants.infinite import (
     INFINITE_REMEMBER_TOOL_NAME,
     INFINITE_WRITE_NOTE_TOOL_NAME,
 )
-from vidbyte.lib.dataclasses.infinite import InfiniteEntryDraft, InfiniteStagedEntry
-from vidbyte.lib.enums.infinite import InfiniteAgentRole, InfiniteEntryKind
+from vidbyte.lib.dataclasses.infinite import (
+    InfiniteDroppedEntry,
+    InfiniteEntryDraft,
+    InfiniteStagedEntry,
+)
+from vidbyte.lib.enums.infinite import (
+    InfiniteAgentRole,
+    InfiniteDropReason,
+    InfiniteEntryKind,
+    InfiniteFileChange,
+)
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import ConfigurationError, ToolExecutionError
 from vidbyte.lib.registries.infinite import InfiniteMemoryToolRegistry
@@ -39,11 +49,13 @@ from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec
 class InfiniteAgentMemory:
     """One agent's view of the shared workspace: its role, quota, new-file allowance, and its pair's staged entries."""
 
-    def __init__(self, workspace: InfiniteWorkspace, *, key: str, role: InfiniteAgentRole, run_id: str, staged: list[InfiniteStagedEntry] | None = None, dropped: list[str] | None = None) -> None:
+    def __init__(self, workspace: InfiniteWorkspace, *, key: str, role: InfiniteAgentRole, run_id: str, depth: int, events: InfiniteEvents, staged: list[InfiniteStagedEntry] | None = None, dropped: list[InfiniteDroppedEntry] | None = None) -> None:
         self.workspace = workspace
         self.key = key
         self.role = role
         self.run_id = run_id
+        self.depth = depth
+        self.events = events
         # A generator and its verifier share these two lists; the root
         # has none, because its entries are committed at once.
         self.staged = staged if staged is not None else []
@@ -67,14 +79,20 @@ class InfiniteAgentMemory:
         if self.accepted >= self.workspace.settings.max_entries_per_agent:
             raise ToolExecutionError(f"You have used all {self.workspace.settings.max_entries_per_agent} of your memory entries; keep only what matters most, or write it into a note.")
         prompts = Prompts()
+        # @intent an-event-follows-its-durable-change
+        # Each event below is announced only once the change it reports
+        # is on disk or in the staged list, so a sink never hears of a
+        # change a crash could still undo.
         if self.role is InfiniteAgentRole.ROOT:
             entry = self.workspace.commit_entry(draft, by=self.key, verified_by=None, run=self.run_id)
             self.accepted += 1
+            self.events.memory_saved(self, entry)
             return prompts.get(Prompt.INFINITE_MEMORY_REMEMBER_SAVED_PROMPT).format(id=entry.id)
         self.workspace.check_entry(draft, tuple(self.staged))
         staged = InfiniteStagedEntry(key=f"s{len(self.staged) + len(self.dropped) + 1}", author=self.key, draft=draft)
         self.staged.append(staged)
         self.accepted += 1
+        self.events.memory_staged(self, staged)
         return prompts.get(Prompt.INFINITE_MEMORY_REMEMBER_STAGED_PROMPT).format(key=staged.key)
 
     def write_note(self, path: str, text: str, description: str | None) -> str:
@@ -87,6 +105,8 @@ class InfiniteAgentMemory:
         self.created += int(created)
         if path not in self.files_written:
             self.files_written.append(path)
+        # @intent an-event-follows-its-durable-change
+        self.events.file_written(self, path, InfiniteFileChange.CREATED if created else InfiniteFileChange.APPENDED, text, description if created else None)
         return Prompts().get(Prompt.INFINITE_MEMORY_NOTE_SAVED_PROMPT).format(path=path)
 
     def edit_file(self, path: str, old_text: str, new_text: str) -> str:
@@ -94,6 +114,8 @@ class InfiniteAgentMemory:
         path = self.workspace.edit_file(path, old_text, new_text)
         if path not in self.files_written:
             self.files_written.append(path)
+        # @intent an-event-follows-its-durable-change
+        self.events.file_written(self, path, InfiniteFileChange.EDITED, new_text, None)
         return Prompts().get(Prompt.INFINITE_MEMORY_NOTE_SAVED_PROMPT).format(path=path)
 
     def drop(self, key: str) -> str:
@@ -102,7 +124,10 @@ class InfiniteAgentMemory:
         if staged is None:
             raise ToolExecutionError(f"{key!r} is not a staged entry; the staged keys are {', '.join(item.key for item in self.staged) or 'none'}.")
         self.staged.remove(staged)
-        self.dropped.append(f"{staged.key} ({staged.draft.text}): dropped by the verifier")
+        dropped = InfiniteDroppedEntry(key=staged.key, text=staged.draft.text, reason=InfiniteDropReason.VERIFIER, note="dropped by the verifier")
+        self.dropped.append(dropped)
+        # @intent an-event-follows-its-durable-change
+        self.events.memory_dropped(self, dropped)
         remaining = ", ".join(item.key for item in self.staged) or "-"
         return Prompts().get(Prompt.INFINITE_MEMORY_ENTRY_DROPPED_PROMPT).format(key=key, remaining=remaining)
 
@@ -148,6 +173,7 @@ class InfiniteRememberTool(BaseTool):
         try:
             message = self.memory.remember(self._draft(call.arguments))
         except (ConfigurationError, ToolExecutionError, OSError, ValueError) as exc:
+            self.memory.events.tool_refused(self.memory, INFINITE_REMEMBER_TOOL_NAME, str(exc))
             return ToolResult.error(INFINITE_REMEMBER_TOOL_NAME, self.memory.refusal(str(exc)))
         return ToolResult.success(INFINITE_REMEMBER_TOOL_NAME, self.memory.answer(message))
 
@@ -202,6 +228,7 @@ class InfiniteWriteNoteTool(BaseTool):
                 raise ToolExecutionError("path and text must both be text, and text must not be empty.")
             message = self.memory.write_note(path, text, description if isinstance(description, str) else None)
         except (ConfigurationError, ToolExecutionError, OSError, ValueError) as exc:
+            self.memory.events.tool_refused(self.memory, INFINITE_WRITE_NOTE_TOOL_NAME, str(exc))
             return ToolResult.error(INFINITE_WRITE_NOTE_TOOL_NAME, self.memory.refusal(str(exc)))
         return ToolResult.success(INFINITE_WRITE_NOTE_TOOL_NAME, self.memory.answer(message))
 
@@ -235,6 +262,7 @@ class InfiniteEditFileTool(BaseTool):
                 raise ToolExecutionError("path, old_text, and new_text must all be text.")
             message = self.memory.edit_file(path, old_text, new_text)
         except (ConfigurationError, ToolExecutionError, OSError, ValueError) as exc:
+            self.memory.events.tool_refused(self.memory, INFINITE_EDIT_FILE_TOOL_NAME, str(exc))
             return ToolResult.error(INFINITE_EDIT_FILE_TOOL_NAME, self.memory.refusal(str(exc)))
         return ToolResult.success(INFINITE_EDIT_FILE_TOOL_NAME, self.memory.answer(message))
 
@@ -260,6 +288,7 @@ class InfiniteDropEntryTool(BaseTool):
         try:
             message = self.memory.drop(str(call.arguments.get("id")))
         except ToolExecutionError as exc:
+            self.memory.events.tool_refused(self.memory, INFINITE_DROP_ENTRY_TOOL_NAME, exc.message)
             return ToolResult.error(INFINITE_DROP_ENTRY_TOOL_NAME, self.memory.refusal(exc.message))
         return ToolResult.success(INFINITE_DROP_ENTRY_TOOL_NAME, self.memory.answer(message))
 
