@@ -123,3 +123,5 @@ None. No shared fixture, conftest or helper module was touched. Each file holds 
 - **After commit A**, only `test_public_api_contract_lists_the_four_names_at_the_package_version` stays red, by design. It turns green after commit B.
 - **Bind eagerly** (D-1). A lazy mapping fails `test_fresh_import_binds_the_four_eagerly_without_loading_native_or_starting_a_process`.
 - **Run from the worktree root** with `PYTHONPATH=$(pwd)`. The probes pass that path to their child interpreters.
+
+Lesson: run the full lint/run.py, not only A001/S020, before finishing.

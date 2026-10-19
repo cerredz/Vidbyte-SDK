@@ -17,7 +17,7 @@ Program: JevAgent in vidbyte-cli, run R1 of 8 (see request.md §C "This run's sc
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-19 | 2026-10-19 | reports/S0-scout.md | base_commit b7350ed6423642c9c178361eef87f3d9cda5589b |
 | S1 spec + review | done | 2026-10-19 | 2026-10-19 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | approved r3 4f988bdb (r1 b53eeeb9, r2 a9d04b51) |
-| S2 tests | done | 2026-10-19 | 2026-10-19 | reports/S2-test-author.md | S2_HEAD dc5108e6 (tests 5c3aa147); 21 red, re-run by orchestrator: contract file 18 failed |
+| S2 tests | done | 2026-10-19 | 2026-10-19 | reports/S2-test-author.md | S2_HEAD 09b4ef23 (was dc5108e6; S062 fix by the S2 author); 21 red at S2, re-run by orchestrator: contract file 18 failed |
 | S3 implement | running | 2026-10-19 | | reports/S3-implementer.md | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
@@ -43,6 +43,8 @@ Program: JevAgent in vidbyte-cli, run R1 of 8 (see request.md §C "This run's sc
 
 - 2026-10-19 — S2 open item (INV-7 pinned member order as permanent) resolved through the spec author before S3: r3.1 5bb8b967 "existing members keep values and relative order; later PRs may add". Tests untouched.
 
+- 2026-10-19 — S3 stopped BLOCKED at lint: S062 892>889, all 3 findings in the S2 pack (adjacent string literals in assert messages). Adjudicated: test tree belongs to S2, so the S2 author applied the join patch (message text and AST unchanged) as 09b4ef23; orchestrator re-ran lint → SDK-LINT: PASS. S2_HEAD moves to 09b4ef23. Root cause: my S2 briefing named only A001/S020; every later S2 briefing requires the full lint/run.py.
+
 ## User replies (verbatim)
 - 2026-10-19 — answers to the alignment questions: request.md §A Prompt 3.
 
@@ -62,5 +64,7 @@ Program: JevAgent in vidbyte-cli, run R1 of 8 (see request.md §C "This run's sc
 - INV-2 name→path table: AgentLoopSettings {agents.settings.loop, agents.settings, agents}; PermissionPolicy {lib.dataclasses.security, lib.dataclasses, tools.security(.permissions)}; TextModelMode {lib.enums.text_model, lib.enums, lib.config}; JevDynamicComputeOption {lib.enums.jev, lib.enums} — source: S1 review R-3
 - Do NOT run `pip install -e` in this worktree: the global py -3.11 editable install points at the canonical checkout and other sessions rely on it. Bootstrap = inline PYTHONPATH=$(pwd) per command — source: code-map §1, local env traps
 - origin/main = 0cce5781 (b7350ed6 + #1184 + #1188); its delta touches no R1-gated path, so merging main in P4 is optional for correctness — source: S1 review r2
-- S2_HEAD = dc5108e6. Test tree: tests/features/jev_cli_root_exports/{FEATURE.md,README.md,test_jev_cli_root_exports_{acceptance,contract,import_time}.py}. S3/S5/S6 diff tests/ against it — must be empty — source: S2
+- S2_HEAD = 09b4ef23 (moved from dc5108e6 by the S062 fix). Test tree: tests/features/jev_cli_root_exports/{FEATURE.md,README.md,test_jev_cli_root_exports_{acceptance,contract,import_time}.py}. S3/S5/S6 diff tests/ against it — must be empty — source: S2
 - Bind eagerly; a lazy __getattr__ mapping passes S015 + identity tests but fails the S2 fresh-interpreter eager probe — source: S2
+- S062 (no implicit string concatenation) lints tests too; write each assert message as one literal — source: S3 block
+- Redirecting lint/run.py output on this machine needs PYTHONIOENCODING=utf-8 (cp1252 crashes on the report arrow) — source: S2
