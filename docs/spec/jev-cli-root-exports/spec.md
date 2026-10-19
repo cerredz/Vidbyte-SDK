@@ -1,8 +1,8 @@
 ---
 spec: jev-cli-root-exports
 title: Root-export the loop, permission, text-mode, and compute names the CLI's JevAgent needs
-status: approved         # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
-revision: 3
+status: tests-written    # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
+revision: 3              # r3.1: INV-7 wording only, per the S2 note
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-jev-cli-root-exports
 branch: feat/jev-cli-root-exports
@@ -168,7 +168,7 @@ The reason no test may assert a 6.1.b fact: a test that compares against `base_c
   - `JevComputeSettings().dynamic_compute == (FRESH_AGENT, FORK_AGENT, SUBAGENT)`.
   - `AgentLoopSettings()` has no iteration, token, or tool-call limit, with `max_queued_prompts == 25` and `max_contract_rejections == 3`.
   - A string `model_mode` is still rejected with `ConfigurationError`.
-  - The members of `TextModelMode` are `auto`, `vidbyte_managed` and `direct`, and the members of `JevDynamicComputeOption` are `fresh_agent`, `fork_agent`, `subagent`, `clone` and `swarm`, in that order.
+  - The existing members of `TextModelMode` (`auto`, `vidbyte_managed`, `direct`) and of `JevDynamicComputeOption` (`fresh_agent`, `fork_agent`, `subagent`, `clone`, `swarm`) keep their values and relative order; a later PR may add members. Adding a compute option is a normal change (AGENTS.md "New JEV code": "A new dynamic-compute option adds its enum member …"), so no test pins the full member list (r3.1, S2 note).
 
   At this PR, INV-7 follows from INV-2 (the same objects) and INV-6 (byte-identical definitions). Existing tests already pin parts of it (`tests/test_jev_compute_clone.py:70`, `tests/features/sdk_loop_settings/test_contract.py`, `tests/test_restore_permission_policy.py:103`).
 - **INV-9** — `from vidbyte import *` binds every name in `vidbyte.__all__`, including the four. The names it binds are the root's own objects.
@@ -658,3 +658,4 @@ So merging `main` is optional for correctness. If S3 merges it, `$MB` moves with
 | r1 | 2026-10-19 | S1 spec | Initial spec |
 | r2 | 2026-10-19 | S1 spec (review round 1) | Applied R-1 to R-6 and two verified-claim notes: permanent vs one-time facts split in §6.1/§6.2 (new INV-15 to INV-17, AC-13 to AC-15, NG-13); three commits with the release note last (D-8, §12.6); INV-2 name → path table; `ModelProvider` recorded as optional Q-3, not built; process ECs withdrawn; D-9 precedent; T-1 and the S015 citation corrected. Version unchanged (D-P2) |
 | r3 | 2026-10-19 | S1 spec (review round 2, final) | Applied R-1 to R-4 and the stale-fact notes. One-time proofs are measured against `MB=$(git merge-base origin/main HEAD)`, and main's 0cce5781 delta was re-verified as touching no gated path. INV-15 and AC-13 follow the generator's provenance rule. INV-2 has no absence claim, and the lazy-block sentence moved from INV-11 to INV-6. S3 makes commit C right after `gh pr create`. #1184 is recorded as merged. A follow-up records the release note's stale "#1184 gate" sentence. Status: approved. Scope and version unchanged |
+| r3.1 | 2026-10-19 | S2 note (not a review round) | r3.1 — INV-7 wording per S2 note: the existing members of `TextModelMode` and `JevDynamicComputeOption` keep their values and relative order, and a later PR may add members (AGENTS.md treats a new compute option as a normal change). The rest of INV-7 is unchanged. Status: tests-written (S2 baseline dc5108e6) |
