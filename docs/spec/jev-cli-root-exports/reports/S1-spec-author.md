@@ -98,3 +98,37 @@ Spec r2 is commit `a9d04b51`. I applied every finding, and §16 logs each one.
   - The contract-reading test lines are now `test_infinite_memory_contract.py:166-169` and `test_root_native_thread_exports_contract.py:138-141`. Only the latter compares versions.
 - **Unchanged.** The four names, the row 1 edits, the version (D-P2) and `status: draft` all stay as they were.
 - **Self-check.** All 18 sections are present. Every referenced ID is defined, and none is defined twice. The only remaining `#<n>` is the row 2 template plus the rules that forbid committing it. "Two commits" survives only as D-8's runner-up.
+
+## Addendum r3 (review round 2, final: SOUND WITH FIXES, approved)
+
+Spec r3 is commit `4f988bdb`, with `status: approved` and `revision: 3`. I applied every finding, and §16 logs each one as round 2.
+
+- **R-1 (Major), accepted.** Every one-time proof now measures against `MB=$(git merge-base origin/main HEAD)`, not a fixed SHA.
+  - This covers AC-5, 6, 9, 14 and 15, NFR-3, and INV-3, 6, 8 and 16.
+  - I named the variable `MB`, not `B`, because "commit B" already names the contract commit.
+  - I re-verified the optional line myself before adding it to P4. `origin/main` is `0cce5781` (#1184 `513aa614`, #1188), with 51 files changed. The gated-path diff is empty. The four other version-literal files have no diff. Under `vidbyte/`, only `provider_keys.py` and Markdown change. A `git archive` of `0cce5781` loads the same 948 `vidbyte*` modules with SHA-256 prefix `ff657e9052f220c0`, the same as `b7350ed6`.
+- **R-2 (Major), accepted.** INV-15 and AC-13 now follow the generator's own provenance rule:
+  - `--check` reports `current at <source.commit>`.
+  - `source.commit` is an ancestor of HEAD.
+  - `git show <source.commit>:vidbyte/__init__.py` lists the four names.
+
+  I verified that the generator keeps `source.commit` when the derived data is unchanged (`scripts/generate-sdk-public-api.py:65-67`). EC-6 is reworded to match.
+- **R-3 (Major), accepted.**
+  - INV-2 no longer claims the names are absent elsewhere. The `__all__` listings are context only, and no test may sweep attributes.
+  - The lazy-block "unchanged" sentence moved from INV-11 to INV-6. AC-5 proves it: 9 lines added, 0 removed.
+  - §13 now says "the positive pairings".
+- **R-4 (Minor), accepted.** P3, §14 Always and A-1 now say that S3 makes commit C right after `gh pr create` in its Phase 6. Row 2 is pending only if that command fails.
+- **Stale facts, accepted.**
+  - NG-4, §9.4 and A-3 now record that #1184 merged as `513aa614` on 2026-10-19.
+  - The §11 baseline now names `0e7a8eb0` as this branch's first commit.
+  - The native contract citation now reads `:139-142`.
+- **Coordinator item, accepted as a follow-up only.**
+  - The release note's "Do not tag until the Meta key fix, #1184 …" sentence (line 19) is stale. I verified on `0cce5781` that META accepts `("LLM|", "LLM_")` at `provider_keys.py:59`.
+  - The follow-up is recorded in §12.5 and in the S6 PR-body list.
+  - Row 2's edits are unchanged. I did not merge `main`.
+- **Unchanged.** The scope stays at four names, the version stays 0.4.0, `ModelProvider` stays non-root (Q-3), and no edit touches `vidbyte/tools/**` or the module headers.
+- **Self-check (Stage E).**
+  - All 18 sections are present.
+  - Every referenced ID is defined, and none is defined twice.
+  - None of these stale phrases remains: "at no other place", "identical to the head's", the empty-diff clause, "waits on SDK #1184", "and only it", `:138-141`, or a fixed-SHA diff in a one-time proof.
+  - The file uses LF line endings.
