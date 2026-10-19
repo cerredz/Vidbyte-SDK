@@ -10,11 +10,11 @@ Read it again in full: the deliverables you listed in your plan note may be inco
 
 # Subagent pairs that already finished
 
-One line per pair: its name, status, verdict, and the entries it saved. Launching one of these names again returns its recorded result card without running it, which is how to read a card in full. A dash means none.
+One line per pair: its name, status, verdict, and the entries it saved. Launching one of these names again returns its recorded result card without running it: a done pair that passed or was fixed comes back as its line and its summary, and any other pair as its whole card. A dash means none.
 
 {finished}
 
-Their work is done as their verdicts say, so do not redo it. The verdict, not the status, says whether a pair counts: a passed or fixed pair counts toward a deliverable even when it stopped early, while a failed or unchecked one does not, and the piece it covered needs a corrected task under a new name. The ids on a line are live entries, unless a later entry superseded them, so you can find them with grep or name them in a card's context. Search those entries before you replay a card, and read a card in full only when its line and its entries do not tell you enough, since every card you replay lands in your context. Only the pairs you launched yourself are listed; work they delegated further shows in their cards and in the files they wrote. A card describes the workspace as it stood when that pair finished, and later pairs may have changed the files since, so check a file itself before you build on what a card says it holds.
+Their work is done as their verdicts say, so do not redo it. The verdict, not the status, says whether a pair counts: a passed or fixed pair counts toward a deliverable even when it stopped early, while a failed or unchecked one does not, and the piece it covered needs a corrected task under a new name. The ids on a line are live entries, unless a later entry superseded them, so you can name them in a card's context, or look them up with grep, or with recall when it takes the place of grep. Search those entries before you replay a card, and replay a card only when its line and its entries do not tell you enough, since every card you replay lands in your context. Only the pairs you launched yourself are listed; work they delegated further shows in their cards and in the files they wrote. A card describes the workspace as it stood when that pair finished, and later pairs may have changed the files since, so check a file itself before you build on what a card says it holds.
 
 # Subagent pairs that started but never finished
 

@@ -1,6 +1,6 @@
 """FILE: tests/features/infinite_memory_agent/test_infinite_memory_prompts.py
 
-PURPOSE: Pins the text contract of the infinite_memory prompt family after the rewrite of docs/spec/infinite-memory-prompts/spec.md: the token floors of the seven behavior-shaping assets, the distinctive phrases that prove each principle is stated where its stage reads it, the exact placeholder set and brace-freedom of every formatted leaf, the trailing-newline split between fragments and whole texts, the digit rule, the size bounds on the 33 compact leaves, the no-repeated-sentence rule, the result card's labels, the quota line's standalone integers, the heading sets, and the folder-to-JSON parity of the 40 assets.
+PURPOSE: Pins the text contract of the infinite_memory prompt family after the rewrite of docs/spec/infinite-memory-prompts/spec.md: the token floors of the seven behavior-shaping assets, the distinctive phrases that prove each principle is stated where its stage reads it, the exact placeholder set and brace-freedom of every formatted leaf, the trailing-newline split between fragments and whole texts, the digit rule, the size bounds on the 33 compact leaves, the no-repeated-sentence rule, the result card's labels, the quota line's standalone integers, the heading sets, and the folder-to-JSON parity of the 50 assets.
 ROLE IN CODEBASE: Prompt-contract layer of tests/features/infinite_memory_agent/ (prompt spec AC-1, AC-3..AC-8, AC-10, AC-13; INV-6, INV-10..INV-17, INV-19; EC-1..EC-3, EC-5..EC-8, EC-11, EC-15, EC-16). Reads only vidbyte/prompts/prompts/infinite_memory/ through the catalog, plus vidbyte/lib/util/text.py and the family JSON.
 ARCHITECTURE NOTE: Every count goes through Prompts().get, never through the file bytes, so a CRLF working tree measures exactly what the model receives. tiktoken is optional: the "tiktoken" measure is skipped with a message when it is not installed, and the SDK estimate is always checked. Phrases are matched after the D-9 normalization (lowercase, typographic quotes folded, `*`, `_`, backtick and comma removed, whitespace collapsed); sentences are the S025 SentenceCounter units, copied from lint/rules/s025_model_facing_description_depth.py because lint/ is not importable from tests.
 FUNCTION INVENTORY: test_section_4_snippet_prints_seven_lines_each_at_or_over_the_floor (AC-1); test_behavior_asset_clears_the_floor_and_never_shrinks_below_baseline (INV-14, AC-7); test_pinned_phrase_is_present_in_its_leaf (INV-16, AC-4); test_verifier_system_prompt_states_the_three_verdict_literals_exactly (INV-6, AC-4, EC-8); test_formatted_leaf_renders_each_placeholder_once_and_leaves_no_brace (INV-11, AC-3, EC-1); test_raw_leaves_hold_no_brace_at_all (INV-11, INV-22, AC-3); test_fragments_end_without_a_newline_and_whole_texts_with_exactly_one (INV-12, AC-8, EC-2); test_digits_appear_only_as_ordered_list_markers (INV-13, AC-5, EC-3); test_compact_description_sum_stays_within_ten_percent_of_baseline (INV-15 a, AC-6, EC-7); test_every_compact_description_has_at_least_four_sentences (INV-15 b, AC-6); test_every_reply_leaf_stays_within_eighty_tokens (INV-15 c, AC-6); test_shape_leaf_never_grows_past_its_baseline (INV-15 d, AC-6); test_no_rule_sentence_repeats_inside_a_behavior_asset (INV-15 e, AC-7, EC-11); test_result_card_keeps_its_labels_in_order_and_never_carries_the_cut_marker (INV-17, AC-10, EC-5); test_quota_line_renders_each_count_as_a_standalone_integer (INV-17, AC-10, EC-6); test_every_base_heading_survives_in_order (INV-19, AC-13, EC-15, EC-16); test_family_folder_holds_exactly_the_leaf_assets_as_path_and_source_url (INV-10, AC-2).
@@ -85,7 +85,7 @@ PINNED_PHRASES: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
 VERDICT_LITERALS = ("VERDICT: passed", "VERDICT: fixed", "VERDICT: failed")
 
 # Spec section 8.5 and the .format calls in launch.py, memory.py,
-# workspace.py and agent.py: the 12 formatted leaves and their exact
+# workspace.py, agent.py, runtime.py and recall.py: the 15 formatted leaves and their exact
 # placeholder sets.
 PLACEHOLDERS: dict[str, tuple[str, ...]] = {
     "task_prompt": ("goal", "criteria", "instructions", "entries", "paths", "finished", "quota"),
@@ -100,8 +100,14 @@ PLACEHOLDERS: dict[str, tuple[str, ...]] = {
     "entry_dropped_prompt": ("key", "remaining"),
     "quota_line": ("entries_left", "entries_max", "files_left", "files_max"),
     "map_header": ("files", "max_files", "tokens", "max_tokens", "entries"),
+    # The context-economy leaves (PR #1177): runtime.py formats the
+    # root's workspace update, recall.py the retriever's first message
+    # and the recall card.
+    "map_update": ("header", "changes"),
+    "retriever_task_prompt": ("question", "purpose", "known", "hits"),
+    "recall_card": ("question", "not_found", "rejected", "searches", "found"),
 }
-# INV-12: the 13 leaves inserted into a larger string end without a
+# INV-12: the 16 leaves inserted into a larger string end without a
 # newline; every other leaf ends with exactly one.
 FRAGMENTS = frozenset(PLACEHOLDERS) | {"replayed_label"}
 REPLIES = ("remember_saved_prompt", "remember_staged_prompt", "note_saved_prompt", "entry_dropped_prompt", "memory_rejected_prompt", "launch_rejected_prompt", "replayed_label")
@@ -109,10 +115,16 @@ REPLY_BOUND = 80
 # INV-15 (a): the sum of the per-leaf counts of the 23 descriptions at
 # 110 % of its baseline (3,803 tiktoken, 4,455 estimate).
 COMPACT_SUM_BOUND = {"estimate": 4_900, "tiktoken": 4_183}
+# The five recall-mode descriptions PR #1177 added ride only in the
+# schemas of a DELEGATED root or generator. They are held to the
+# sentence floor below but stay outside the 23-leaf sum, whose set and
+# bound are unchanged.
+RECALL_DESCRIPTIONS = frozenset({"recall_tool_description", "recall_question_description", "recall_purpose_description", "recall_known_description", "recall_terms_description"})
 MINIMUM_SENTENCES = 4
 # INV-15 (d): the three shape leaves may not grow past their baseline,
-# given as (estimate, tiktoken).
-SHAPE_BASELINES = {"quota_line": (38, 38), "map_header": (54, 51), "result_card": (54, 56)}
+# given as (estimate, tiktoken). map_header was re-measured after PR
+# #1177 added "search_memory or" to it (it was (54, 51)).
+SHAPE_BASELINES = {"quota_line": (38, 38), "map_header": (58, 54), "result_card": (54, 56)}
 RESULT_CARD_LABELS = ("### Pair {name} ({key})", "Status:", "Verdict:", "Generator summary:", "Verifier review:", "Entries saved to memory:", "Entries dropped, with reasons:", "Files written:")
 CUT_MARKER = " … [cut]"
 
@@ -128,6 +140,8 @@ HEADINGS: dict[str, tuple[str, ...]] = {
     "verifier_task_prompt": ("# Your instructions", "# Goal", "# Done criteria", "# What the generator reported", "# Memory entries the generator staged", "# Files the generator wrote", "# Your memory quota", "# What to do next"),
     "resume_prompt": ("# The original task", "# Subagent pairs that already finished", "# Subagent pairs that started but never finished", "# What to do next"),
     "launch_tool_description": TOOL_HEADINGS,
+    "retriever_system_prompt": ("# Your role: retriever", "# How to search", "# Your final reply"),
+    "retriever_task_prompt": ("# The question", "# What the answer is for", "# What the asker already knows", "# Searches run before you started"),
     **{leaf: TOOL_HEADINGS for leaf in ("remember_tool_description", "write_note_tool_description", "edit_file_tool_description", "drop_entry_tool_description")},
     **{leaf: PARAMETER_HEADINGS for leaf in ("launch_tasks_description", "launch_name_description", "launch_goal_description", "launch_done_criteria_description", "launch_generator_prompt_description", "launch_verifier_prompt_description", "launch_context_description", "launch_tools_description", "remember_text_description", "remember_tags_description", "remember_refs_description", "note_path_description", "write_note_file_description", "edit_file_old_text_description")},
     "remember_kind_description": ("## Purpose", "## How to choose", "## Rules"),
@@ -294,13 +308,13 @@ def test_formatted_leaf_renders_each_placeholder_once_and_leaves_no_brace(leaf: 
 
 
 def test_raw_leaves_hold_no_brace_at_all() -> None:
-    """INV-11, INV-22, AC-3: the 28 leaves the code never formats contain no brace, so none can be mistaken for a placeholder or weaken a template regex."""
+    """INV-11, INV-22, AC-3: the 35 leaves the code never formats contain no brace, so none can be mistaken for a placeholder or weaken a template regex."""
     offenders = [leaf for leaf, text in family().items() if leaf not in PLACEHOLDERS and ("{" in text or "}" in text)]
     assert not offenders, f"raw leaves holding a brace: {offenders}"
 
 
 def test_fragments_end_without_a_newline_and_whole_texts_with_exactly_one() -> None:
-    """INV-12, AC-8, EC-2: the 13 fragments the code joins into larger strings end without a newline; the 27 whole texts end with exactly one."""
+    """INV-12, AC-8, EC-2: the 16 fragments the code joins into larger strings end without a newline; the 34 whole texts end with exactly one."""
     offenders = []
     for leaf, text in family().items():
         if leaf in FRAGMENTS:
@@ -322,8 +336,8 @@ def test_digits_appear_only_as_ordered_list_markers() -> None:
 
 
 def compact_descriptions(leaves: dict[str, str]) -> dict[str, str]:
-    """The 23 compact descriptions: every `*_description` leaf except the launch tool's own."""
-    return {leaf: text for leaf, text in leaves.items() if leaf.endswith("_description") and leaf != "launch_tool_description"}
+    """The 23 compact descriptions: every `*_description` leaf except the launch tool's own and the five recall-mode ones."""
+    return {leaf: text for leaf, text in leaves.items() if leaf.endswith("_description") and leaf != "launch_tool_description" and leaf not in RECALL_DESCRIPTIONS}
 
 
 @pytest.mark.parametrize("which", MEASURES)
@@ -337,8 +351,10 @@ def test_compact_description_sum_stays_within_ten_percent_of_baseline(which: str
 
 
 def test_every_compact_description_has_at_least_four_sentences() -> None:
-    """INV-15 (b), AC-6, FR-6: each of the 23 descriptions reads as at least four S025 sentences, the field guide's depth for model-facing contracts."""
-    short = {leaf: len(sentences(text)) for leaf, text in compact_descriptions(family()).items() if len(sentences(text)) < MINIMUM_SENTENCES}
+    """INV-15 (b), AC-6, FR-6: each of the 23 descriptions, and each of the five recall-mode descriptions, reads as at least four S025 sentences, the field guide's depth for model-facing contracts."""
+    leaves = family()
+    described = {**compact_descriptions(leaves), **{leaf: leaves[leaf] for leaf in sorted(RECALL_DESCRIPTIONS)}}
+    short = {leaf: len(sentences(text)) for leaf, text in described.items() if len(sentences(text)) < MINIMUM_SENTENCES}
     assert not short, f"descriptions under {MINIMUM_SENTENCES} sentences: {short}"
 
 
@@ -405,7 +421,8 @@ def test_family_folder_holds_exactly_the_leaf_assets_as_path_and_source_url() ->
     """INV-10, AC-2, NG-2, D-D: the family JSON lists each leaf as {path, source_url} with no inline text, and the folder's .md files are exactly those paths: no stray asset ships, none is missing."""
     data = json.loads((FAMILY_DIR / "infinite_memory.json").read_text(encoding="utf-8"))
     leaves = data["prompts"]
-    assert len(leaves) == 40, sorted(leaves)
+    # 40 after the prompt rewrite, plus the ten leaves PR #1177 added.
+    assert len(leaves) == 50, sorted(leaves)
     not_files = {leaf: value for leaf, value in leaves.items() if not isinstance(value, dict) or set(value) != {"path", "source_url"}}
     assert not not_files, f"leaves that are not {{path, source_url}} records: {not_files}"
     assert {leaf: value["path"] for leaf, value in leaves.items()} == {leaf: f"{leaf}.md" for leaf in leaves}

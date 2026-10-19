@@ -338,7 +338,7 @@ def test_grep_finds_a_live_entry_in_an_entries_file_over_one_megabyte(tmp_path: 
 
 
 def test_every_agent_sees_the_map_and_the_roots_map_refreshes_after_each_tool_iteration(tmp_path: Path) -> None:
-    """AC-18, INV-22: every root call's system has the map with the existing note; calls after write_note list the new file; a generator's first call has the map too."""
+    """AC-18, INV-22; INV-7.2, INV-7.3 of spec infinite-memory-context-economy r3: every root call's system has the run-start map; the new file arrives as a status message after write_note; a generator's first call has the map too."""
     root = workspace_root(tmp_path)
     existing = root / "notes" / "existing.md"
     existing.parent.mkdir(parents=True)
@@ -363,9 +363,13 @@ def test_every_agent_sees_the_map_and_the_roots_map_refreshes_after_each_tool_it
         current = map_section(call.system)
         assert "notes/existing.md" in current and "Existing pricing notes" in current
     assert "notes/new.md" not in map_section(root_calls[0].system)
-    for call in root_calls[1:]:
-        current = map_section(call.system)
-        assert "notes/new.md" in current and "Fresh pricing findings" in current, "the root's map was not rendered again after its tool iteration"
+    # Deliberately changed by spec infinite-memory-context-economy r3, INV-7.2 and INV-7.3 (was: the root's system map
+    # listed notes/new.md from the second call on): the root's system string never changes within a run, and the new
+    # file reaches the root as a user status message after the tool result of the iteration that wrote it.
+    assert {call.system for call in root_calls} == {root_calls[0].system}, "the root's system string changed between calls"
+    status = root_calls[1].messages[-1]
+    assert status["role"] == "user", root_calls[1].messages
+    assert "notes/new.md" in str(status["content"]) and "Fresh pricing findings" in str(status["content"]), "the root was not told about the note it wrote"
     for child in (generator("alpha"), verifier("alpha")):
         assert MAP_HEADER in tree.first_call(child).system
         assert "notes/new.md" in map_section(tree.first_call(child).system)

@@ -32,7 +32,7 @@ Status: {status}
 
 {summary}
 
-With a partial status, check what exists, fix what you can, and say in your review what is still missing. The answer may have been cut to a fixed length, so read the files it names for the detail. When it says it chose one reading of an unclear criterion, that choice is a claim too, so name in your review the reading you judged by. The parent reads this answer on the result card beside your review, so name in your review any claim in it that you found false, or the parent will believe it.
+With a partial status, check what exists, fix what you can, and say in your review what is still missing. The answer may have been cut to a fixed length, so read the files it names for the detail. When it says it chose one reading of an unclear criterion, that choice is a claim too, so name in your review the reading you judged by. The parent reads this answer on the result card, and reads your review beside it only when the card comes back whole, which it does unless the pair is done and you pass or fix it. Name in your review any claim in the answer that you found false, and when you pass or fix the work, fix in the files what such a claim describes, since the parent then sees the answer without your review.
 
 # Memory entries the generator staged
 

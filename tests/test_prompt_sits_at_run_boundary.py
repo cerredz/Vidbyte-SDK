@@ -128,7 +128,11 @@ def _roles(turns: list[Mapping[str, Any]]) -> list[str]:
 def _task_and_first_call(request: Mapping[str, Any]) -> tuple[list[int], int | None]:
     # Where the task turn sits and where the first call turn sits, on the chat, Anthropic or Gemini wire.
     turns = request.get("messages") or request.get("contents") or []
-    tasks = [index for index, turn in enumerate(turns) if turn.get("content") == TASK or turn.get("parts") == [{"text": TASK}]]
+    # INV-9.3, EC-9.10 (spec infinite-memory-context-economy r4, section 13): on a repeat Anthropic request the task is the
+    # message right before the newest assistant turn, so it goes out as one text block carrying the mark. Only that one
+    # block form is accepted beside the plain string; any other shape is not the task turn.
+    task_contents = (TASK, [{"type": "text", "text": TASK, "cache_control": {"type": "ephemeral"}}])
+    tasks = [index for index, turn in enumerate(turns) if turn.get("content") in task_contents or turn.get("parts") == [{"text": TASK}]]
     blocks = [(turn["content"] if isinstance(turn.get("content"), list) else []) + list(turn.get("parts") or []) for turn in turns]
     calls = [index for index, turn in enumerate(turns) if turn.get("tool_calls") or any(block.get("type") == "tool_use" or "functionCall" in block for block in blocks[index])]
     return tasks, (calls[0] if calls else None)

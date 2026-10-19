@@ -2,13 +2,13 @@
 
 PURPOSE: Defines BashTool, a minimal unsandboxed tool that runs one model-supplied command per call as `bash -c <command>` in a fresh process started in a root folder, and returns the combined output and the exit code.
 ROLE IN CODEBASE: Exported by vidbyte/tools/builtins/__init__.py, preloaded by vidbyte/agents/coding.py (CodingAgent), and executed by vidbyte/agents/runtime.py after the agent's PermissionPolicy allows EXECUTE. vidbyte/agents/coding_context/setup_commands.py (SetupCommandsLoader) reuses find_bash, not_found_message, and the BASH_* time limits to run CodingAgent's setup commands. vidbyte/middleware/builtins/verify_command.py also executes one directly to run CodingAgent's verification command.
-ARCHITECTURE NOTE: The command reaches bash through asyncio.create_subprocess_exec as one argv item, never a shell string; bash runs in its own session (POSIX process group) with stdin closed and stderr merged into stdout. One time limit, BASH_TIMEOUT_SECONDS, covers reading the output to its end and waiting for the exit; only the first BASH_MAX_OUTPUT_BYTES are kept and the rest is read and counted. On timeout or cancellation the command is stopped (POSIX: the whole process group is killed), the wait for exit after the kill is bounded by BASH_KILL_GRACE_SECONDS, and the subprocess transport is closed, so every call returns. A command that finishes on its own is never killed. The four BASH_* constants are read as module globals at call time.
-FUNCTION INVENTORY: BashTool.__init__ resolves the root and the executable once; executable reports that lookup (VerifyCommandMiddleware reads it to fail at construction); find_bash picks the executable per OS; not_found_message says bash is missing and how to install it; spec declares the model-facing contract; validate_call requires a non-blank command string; execute is the narrated main function; _spawn starts bash; _collect reads the bounded output and waits for the exit; _stop kills, waits within the grace bound, and closes the pipe; _render builds the completed-command result.
+ARCHITECTURE NOTE: The command reaches bash through asyncio.create_subprocess_exec as one argv item, never a shell string; bash runs in its own session (POSIX process group) with stdin closed and stderr merged into stdout. One time limit, BASH_TIMEOUT_SECONDS, covers reading the output to its end and waiting for the exit; of an output longer than BASH_MAX_OUTPUT_BYTES, only the first H and the last T bytes are kept (T = min(BASH_TAIL_OUTPUT_BYTES, BASH_MAX_OUTPUT_BYTES // 2), H = BASH_MAX_OUTPUT_BYTES - T) and the bytes between are read and counted, so a test summary or stack trace at the end of a long output survives. On timeout or cancellation the command is stopped (POSIX: the whole process group is killed), the wait for exit after the kill is bounded by BASH_KILL_GRACE_SECONDS, and the subprocess transport is closed, so every call returns. A command that finishes on its own is never killed. The five BASH_* constants are read as module globals at call time.
+FUNCTION INVENTORY: BashTool.__init__ resolves the root and the executable once; executable reports that lookup (VerifyCommandMiddleware reads it to fail at construction); find_bash picks the executable per OS; not_found_message says bash is missing and how to install it; spec declares the model-facing contract; validate_call requires a non-blank command string; execute is the narrated main function; _spawn starts bash; _collect fills the head, keeps a rolling tail, counts what it drops, and waits for the exit; _stop kills, waits within the grace bound, and closes the pipe; _render builds the result of a finished or a stopped command.
 COMMON MODIFICATION PATTERNS: Change a bound by editing its BASH_* constant here; add a new stop path by routing it through _stop so the kill, the bounded wait, and the pipe close stay together; keep execute's helpers flat (none calls another).
 WHAT NOT TO DO IN THIS FILE: 1. No shell=True, asyncio.create_subprocess_shell, or os.system. 2. No SandboxTransport; the tool is unsandboxed by the user's decision. 3. No environment filtering; commands inherit the parent environment. 4. No persistent shell session between calls. 5. No unbounded process.wait(); every wait sits under BASH_TIMEOUT_SECONDS or BASH_KILL_GRACE_SECONDS.
 KNOWN EDGE CASES: On Windows the bash on PATH can be the WSL launcher, so only Git for Windows' bin/bash.exe found next to git is used. On Windows the kill stops only Git's bash launcher, so a timed-out or cancelled command may keep running after the call returns. On POSIX a descendant that leaves the process group (setsid) survives the group kill. A background process that still holds the output pipe makes the call wait for the time limit, where it is killed. Python 3.12+ Process.wait() returns only after every pipe closes, which is why both waits are bounded. When a stop leaves such an orphan, the parent still closes its end of the pipe before the call returns.
-RELATED DOCS: docs/spec/coding-agent/spec.md (INV-9 to INV-15, INV-25, INV-26; D-10 to D-15, D-17 to D-19); vidbyte/tools/README.md
-TESTS: tests/features/coding_agent/test_bash_tool_contract.py and tests/features/coding_agent/test_bash_tool_process_bounds.py
+RELATED DOCS: docs/spec/coding-agent/spec.md (INV-9 to INV-15, INV-25, INV-26; D-10 to D-15, D-17 to D-19); docs/spec/infinite-memory-context-economy/spec.md (INV-6.1 to INV-6.6, D-8); vidbyte/tools/README.md
+TESTS: tests/features/coding_agent/test_bash_tool_contract.py, tests/features/coding_agent/test_bash_tool_process_bounds.py and tests/features/coding_agent/test_bash_tool_head_tail.py
 """
 
 from __future__ import annotations
@@ -34,6 +34,9 @@ BASH_TIMEOUT_SECONDS = 600.0
 BASH_MAX_OUTPUT_BYTES = 50_000
 BASH_READ_CHUNK_BYTES = 65_536
 BASH_KILL_GRACE_SECONDS = 5.0
+# The most bytes kept from the end of a long output; the tail is never
+# more than half of BASH_MAX_OUTPUT_BYTES.
+BASH_TAIL_OUTPUT_BYTES = 25_000
 
 
 class BashTool(BaseTool):
@@ -78,10 +81,11 @@ class BashTool(BaseTool):
 
     def spec(self) -> ToolSpec:
         """Declare the bash tool, its single command parameter, and its EXECUTE permission."""
+        tail_bytes = min(BASH_TAIL_OUTPUT_BYTES, BASH_MAX_OUTPUT_BYTES // 2)
         return ToolSpec(
             name="bash",
             description=(
-                f"Runs one command in a fresh bash process that starts in the agent's root folder with standard input closed, and returns what the command printed. Changes of directory and shell variables do not carry over from one call to the next, and the command is not confined to the root folder. Standard output and standard error come back together in the order they were written, and only the first {BASH_MAX_OUTPUT_BYTES:,} bytes are kept, so filter a long output or write it to a file and read that file in parts. When the command finishes, its exit code is the last line of the result; a command still running after {BASH_TIMEOUT_SECONDS:g} seconds is stopped instead, except that on Windows only Git's bash launcher is stopped and the command itself may keep running. A background process must redirect both its standard output and its standard error to a file, otherwise the call waits for the time limit and the process is killed."
+                f"Runs one command in a fresh bash process that starts in the agent's root folder with standard input closed, and returns what the command printed. Changes of directory and shell variables do not carry over from one call to the next, and the command is not confined to the root folder. Standard output and standard error come back together in the order they were written; of an output longer than {BASH_MAX_OUTPUT_BYTES:,} bytes, only the first {BASH_MAX_OUTPUT_BYTES - tail_bytes:,} and the last {tail_bytes:,} bytes are kept, with a count of the bytes left out between them, so filter a long output or write it to a file and read that file in parts. When the command finishes, its exit code is the last line of the result; a command still running after {BASH_TIMEOUT_SECONDS:g} seconds is stopped instead, except that on Windows only Git's bash launcher is stopped and the command itself may keep running. A background process must redirect both its standard output and its standard error to a file, otherwise the call waits for the time limit and the process is killed."
             ),
             parameters=(
                 ToolParameter(
@@ -123,19 +127,20 @@ class BashTool(BaseTool):
             return process
 
         # Read the output and wait for the exit under one time limit, so
-        # a command that never ends cannot hang the run.
-        buffer = bytearray()
+        # a command that never ends cannot hang the run. The head, the
+        # tail, and the count of bytes left out live here, so what was
+        # read before a timeout is still shown after it.
+        head = bytearray()
+        tail = bytearray()
+        omitted = [0]
         try:
-            omitted, exit_code = await asyncio.wait_for(self._collect(process, buffer), BASH_TIMEOUT_SECONDS)
+            exit_code = await asyncio.wait_for(self._collect(process, head, tail, omitted), BASH_TIMEOUT_SECONDS)
         except TimeoutError:
             # At the limit, stop the command and show the model what it
-            # printed so far, and whether that was cut.
+            # printed so far, with the count of bytes left out so far.
             await self._stop(process)
-            truncated = len(buffer) >= BASH_MAX_OUTPUT_BYTES
-            marker = f"\n[output truncated at {BASH_MAX_OUTPUT_BYTES:,} bytes]" if truncated else ""
-            stopped = f"\n[command stopped: it did not finish within the {BASH_TIMEOUT_SECONDS:g}-second time limit]"
-            text = buffer.decode("utf-8", errors="replace")
-            return ToolResult.error(self.name, text + marker + stopped, metadata={"error": "timeout", "truncated": truncated})
+            (dropped,) = omitted
+            return self._render(head, tail, dropped, None)
         except asyncio.CancelledError:
             # A cancelled call still stops the command before the
             # cancellation moves on.
@@ -144,7 +149,8 @@ class BashTool(BaseTool):
 
         # The command finished on its own: report its output and exit
         # code, and kill nothing.
-        return self._render(buffer, omitted, exit_code)
+        (dropped,) = omitted
+        return self._render(head, tail, dropped, exit_code)
 
     async def _spawn(self, executable: str, command: str) -> asyncio.subprocess.Process | ToolResult:
         """Start `bash -c command` in the root folder, or return a spawn_failed result."""
@@ -173,24 +179,35 @@ class BashTool(BaseTool):
             # paths or the command itself (S017).
             return ToolResult.error(self.name, f"bash could not start this command ({type(exc).__name__}). Check that the root folder still exists, and that the command has no NUL characters and is not too long.", metadata={"error": "spawn_failed"})
 
-    async def _collect(self, process: asyncio.subprocess.Process, buffer: bytearray) -> tuple[int, int]:
-        """Read the output into buffer up to the cap, count the rest, and return (bytes not kept, exit code)."""
+    async def _collect(self, process: asyncio.subprocess.Process, head: bytearray, tail: bytearray, omitted: list[int]) -> int:
+        """Fill head with the first bytes and tail with the last, count the bytes dropped in omitted[0], and return the exit code."""
         # @intent one-limit-over-reading-and-waiting
         # Reading to the end of the output and waiting for the exit run
         # as one step, so the caller's single wait_for bounds both: a
         # command that closes its output and keeps running would
-        # otherwise block process.wait() for as long as it runs. Only
-        # the first BASH_MAX_OUTPUT_BYTES are kept; everything after is
-        # still read and counted so the command is never blocked on a
-        # full pipe and memory stays bounded. The read loop holds no
-        # numeric literal (A007).
-        omitted = 0
+        # otherwise block process.wait() for as long as it runs. Every
+        # byte is still read, so the command is never blocked on a full
+        # pipe, and memory stays bounded by the head, the tail, and one
+        # chunk. The read loop holds no numeric literal (A007).
+        # @intent bash-keeps-the-first-and-the-last-bytes
+        # A test summary or a stack trace sits at the end of a long
+        # output and the opening errors sit at its start, so the first
+        # bytes fill the head, a rolling tail keeps the last ones, and
+        # the bytes the tail drops are counted. The count lives in the
+        # caller's one-item list, so it survives a timeout that cancels
+        # this read.
+        tail_bytes = min(BASH_TAIL_OUTPUT_BYTES, BASH_MAX_OUTPUT_BYTES // 2)
+        head_bytes = BASH_MAX_OUTPUT_BYTES - tail_bytes
         output = process.stdout
         while output is not None and (chunk := await output.read(BASH_READ_CHUNK_BYTES)):
-            kept = chunk[: BASH_MAX_OUTPUT_BYTES - len(buffer)]
-            buffer.extend(kept)
-            omitted += len(chunk) - len(kept)
-        return omitted, await process.wait()
+            room = head_bytes - len(head)
+            head.extend(chunk[:room])
+            tail.extend(chunk[room:])
+            if len(tail) > tail_bytes:
+                dropped = len(tail) - tail_bytes
+                del tail[:dropped]
+                omitted.append(omitted.pop() + dropped)
+        return await process.wait()
 
     async def _stop(self, process: asyncio.subprocess.Process) -> None:
         """Kill the command, wait at most BASH_KILL_GRACE_SECONDS for the exit, and close the subprocess transport."""
@@ -233,11 +250,19 @@ class BashTool(BaseTool):
                 with contextlib.suppress(PermissionError):
                     transport.close()
 
-    def _render(self, buffer: bytearray, omitted: int, exit_code: int) -> ToolResult:
-        """Build the success result: the kept output, a note on what was cut, and the exit code as the last line."""
-        text = buffer.decode("utf-8", errors="replace")
-        note = f"\n[output truncated: {omitted:,} bytes not shown]" if omitted else ""
-        return ToolResult.success(self.name, f"{text}{note}\nexit code: {exit_code}", metadata={"exit_code": exit_code, "truncated": bool(omitted)})
+    def _render(self, head: bytearray, tail: bytearray, omitted: int, exit_code: int | None) -> ToolResult:
+        """Build the result: the kept output, then the exit code as the last line, or, for a command stopped at the time limit (exit_code None), the stopped line."""
+        # With nothing left out, head and tail are one run of bytes,
+        # decoded together so a character across the edge reads as one;
+        # otherwise the counted marker sits between them.
+        if omitted:
+            text = head.decode("utf-8", errors="replace") + f"\n[output truncated: {omitted:,} bytes not shown]\n" + tail.decode("utf-8", errors="replace")
+        else:
+            text = (head + tail).decode("utf-8", errors="replace")
+        if exit_code is None:
+            stopped = f"\n[command stopped: it did not finish within the {BASH_TIMEOUT_SECONDS:g}-second time limit]"
+            return ToolResult.error(self.name, text + stopped, metadata={"error": "timeout", "truncated": bool(omitted)})
+        return ToolResult.success(self.name, f"{text}\nexit code: {exit_code}", metadata={"exit_code": exit_code, "truncated": bool(omitted)})
 
 
 __all__ = ["BashTool"]

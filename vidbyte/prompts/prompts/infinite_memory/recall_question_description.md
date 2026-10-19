@@ -1,0 +1,1 @@
+The one question the helper should answer from memory. Ask it plainly and completely, because the helper sees neither this conversation nor your task. Name the subject, the values you need, and any limit on the answer. Ask one question per call, and send a second question as a second recall.

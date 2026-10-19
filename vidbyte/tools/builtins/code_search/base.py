@@ -20,6 +20,10 @@ from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.tools.filesystem import LineEndings
 from vidbyte.tools.base import BaseTool
 
+# Files larger than this are skipped by every code-search tool unless
+# the tool is built with another max_file_bytes.
+CODE_SEARCH_MAX_FILE_BYTES = 1_000_000
+
 
 class BaseCodeSearchTool(BaseTool):
     """Common base for root-scoped code search tools."""
@@ -29,7 +33,7 @@ class BaseCodeSearchTool(BaseTool):
         root_dir: str | Path,
         *,
         ignore_patterns: Sequence[str] | None = None,
-        max_file_bytes: int = 1_000_000,
+        max_file_bytes: int = CODE_SEARCH_MAX_FILE_BYTES,
     ) -> None:
         """Store the resolved root and search safety settings."""
         self.root_dir = Path(root_dir).resolve()

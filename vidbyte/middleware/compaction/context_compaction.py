@@ -6,8 +6,9 @@ from typing import Any
 from vidbyte.lib.dataclasses.context import ContextMessage
 from vidbyte.middleware.compaction.base import CompactionMode, Summarizer, TokenCounter
 from vidbyte.middleware.compaction.engine import ContextCompactionEngine
-from vidbyte.middleware.compaction.strategies import ReplaceWithTraceCompaction, ToolOutputSlidingWindowCompaction, _provider_groups
+from vidbyte.middleware.compaction.strategies import ReplaceWithTraceCompaction, _provider_groups
 from vidbyte.middleware.compaction.trace_render import TraceArtifactRenderer
+from vidbyte.middleware.compaction.windows import ToolOutputSlidingWindowCompaction, TrimWithProviderBoundariesCompaction
 from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision, MiddlewareTransform
 from vidbyte.middleware.base import AgentMiddleware
 
@@ -160,9 +161,10 @@ class MessageHistoryCompactionMiddleware(AgentMiddleware):
         return cls(mode=CompactionMode.TRIM_TO_TOKEN_BUDGET, max_tokens=max_tokens, token_counter=token_counter, preserve_system=preserve_system)
 
     @classmethod
-    def trim_with_provider_boundaries(cls, max_messages: int | None = None, max_tokens: int | None = None, token_counter: TokenCounter | None = None) -> "MessageHistoryCompactionMiddleware":
-        # Builds middleware that trims history while preserving adjacent tool boundaries.
-        return cls(mode=CompactionMode.TRIM_WITH_PROVIDER_BOUNDARIES, max_messages=max_messages, max_tokens=max_tokens, token_counter=token_counter)
+    def trim_with_provider_boundaries(cls, max_messages: int | None = None, max_tokens: int | None = None, token_counter: TokenCounter | None = None, *, low_watermark_tokens: int | None = None) -> "MessageHistoryCompactionMiddleware":
+        # Builds middleware that trims history while preserving adjacent
+        # tool boundaries, down to low_watermark_tokens when one is set.
+        return cls(mode=CompactionMode.TRIM_WITH_PROVIDER_BOUNDARIES, max_messages=max_messages, max_tokens=max_tokens, token_counter=token_counter, low_watermark_tokens=low_watermark_tokens)
 
     @classmethod
     def delete_messages(cls, message_ids: tuple[str, ...] = (), start: int | None = None, end: int | None = None) -> "MessageHistoryCompactionMiddleware":
@@ -170,9 +172,10 @@ class MessageHistoryCompactionMiddleware(AgentMiddleware):
         return cls(mode=CompactionMode.DELETE_MESSAGES_BY_ID_OR_RANGE, message_ids=message_ids, start=start, end=end)
 
     @classmethod
-    def tool_output_sliding_window(cls, keep_recent: int = 2, window_mode: CompactionMode | str = CompactionMode.TRUNCATE_TOOL_RESULTS, max_chars: int = 600) -> "MessageHistoryCompactionMiddleware":
-        # Builds middleware that compacts older tool outputs per tool name.
-        return cls(mode=CompactionMode.TOOL_OUTPUT_SLIDING_WINDOW, keep_recent=keep_recent, window_mode=window_mode, max_chars=max_chars)
+    def tool_output_sliding_window(cls, keep_recent: int = 2, window_mode: CompactionMode | str = CompactionMode.TRUNCATE_TOOL_RESULTS, max_chars: int = 600, *, placeholder: str = "[older tool result cleared by compaction]", tools: tuple[str, ...] = ()) -> "MessageHistoryCompactionMiddleware":
+        # Builds middleware that compacts older tool outputs per tool
+        # name, only for the named tools when tools is not empty.
+        return cls(mode=CompactionMode.TOOL_OUTPUT_SLIDING_WINDOW, keep_recent=keep_recent, window_mode=window_mode, max_chars=max_chars, placeholder=placeholder, tools=tools)
 
     @classmethod
     def clear_tool_results_except(cls, exclude_tools: tuple[str, ...] = (), placeholder: str = "[tool result cleared by compaction]") -> "MessageHistoryCompactionMiddleware":
@@ -248,9 +251,16 @@ class MessageHistoryCompactionMiddleware(AgentMiddleware):
         if self.mode is CompactionMode.CONTEXT_SNAPSHOT_BRANCH_TRIM and not str(self.options.get("active_branch", "")).strip():
             raise ValueError("active_branch must be provided.")
         # @intent sliding-window-refuses-modes-it-cannot-apply
-        # Build the window once so a window_mode it cannot apply fails here instead of failing every model call at run time.
+        # Build the window once so a window_mode or a scope it cannot
+        # apply fails here instead of failing every model call at run
+        # time.
         if self.mode is CompactionMode.TOOL_OUTPUT_SLIDING_WINDOW:
-            ToolOutputSlidingWindowCompaction(mode=self.options.get("window_mode", CompactionMode.TRUNCATE_TOOL_RESULTS))
+            ToolOutputSlidingWindowCompaction(mode=self.options.get("window_mode", CompactionMode.TRUNCATE_TOOL_RESULTS), tools=self.options.get("tools", ()))
+        # Build a trim with the given low watermark once, so the
+        # strategy's own check refuses a bool, a float, or a negative
+        # value here; int() would accept True and 2.5. None, the
+        # default, always passes.
+        TrimWithProviderBoundariesCompaction(low_watermark_tokens=self.options.get("low_watermark_tokens"))
 
 
 class SummaryCompactionMiddleware(MessageHistoryCompactionMiddleware):

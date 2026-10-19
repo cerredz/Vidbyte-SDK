@@ -4,7 +4,7 @@ FILE:
     vidbyte/lib/enums/prompts.py
 
 PURPOSE:
-    Defines the stable typed identifiers for all 139 static prompt assets across 35
+    Defines the stable typed identifiers for all 149 static prompt assets across 35
     JSON/Markdown-backed families, and the opt-in system-prompt presets an agent can
     attach. This file owns identifiers only; prompt text and family metadata belong
     under ``vidbyte/prompts/prompts/``.
@@ -150,6 +150,16 @@ class Prompt(str, Enum):
     INFINITE_MEMORY_EDIT_FILE_NEW_TEXT_DESCRIPTION = "infinite_memory.edit_file_new_text_description"
     INFINITE_MEMORY_DROP_ENTRY_TOOL_DESCRIPTION = "infinite_memory.drop_entry_tool_description"
     INFINITE_MEMORY_DROP_ENTRY_ID_DESCRIPTION = "infinite_memory.drop_entry_id_description"
+    INFINITE_MEMORY_MASKED_OUTPUT = "infinite_memory.masked_output"
+    INFINITE_MEMORY_MAP_UPDATE = "infinite_memory.map_update"
+    INFINITE_MEMORY_RECALL_TOOL_DESCRIPTION = "infinite_memory.recall_tool_description"
+    INFINITE_MEMORY_RECALL_QUESTION_DESCRIPTION = "infinite_memory.recall_question_description"
+    INFINITE_MEMORY_RECALL_PURPOSE_DESCRIPTION = "infinite_memory.recall_purpose_description"
+    INFINITE_MEMORY_RECALL_KNOWN_DESCRIPTION = "infinite_memory.recall_known_description"
+    INFINITE_MEMORY_RECALL_TERMS_DESCRIPTION = "infinite_memory.recall_terms_description"
+    INFINITE_MEMORY_RETRIEVER_SYSTEM_PROMPT = "infinite_memory.retriever_system_prompt"
+    INFINITE_MEMORY_RETRIEVER_TASK_PROMPT = "infinite_memory.retriever_task_prompt"
+    INFINITE_MEMORY_RECALL_CARD = "infinite_memory.recall_card"
     CONTINUAL_TRACE_SYSTEM_PROMPT = "continual_trace.system_prompt"
     CONTEXT_ENGINEERING_GUIDELINE_PROMPT = "context_engineering.guideline_prompt"
     EXPERT_PROMPTING_EXPERT_PROMPT = "expert_prompting.expert_prompt"

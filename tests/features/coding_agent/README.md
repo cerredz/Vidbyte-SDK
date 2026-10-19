@@ -30,6 +30,7 @@ The implementations belong in `vidbyte/agents/coding.py`, `vidbyte/lib/dataclass
 - `test_coding_agent_verify_command.py` checks `verify_command`: feedback and retries on both finish paths, the attempt limit and its metadata, argument checks, the output cap and time limit it inherits from bash, and that a plain `BaseAgent` finishes as before.
 - `test_bash_tool_contract.py` checks `BashTool`'s input and output contract: the spec, validation, streams, `cwd`, argv, stdin, spawn errors, decoding, the output cap, and the bash lookup.
 - `test_bash_tool_process_bounds.py` checks the time limit, process-group kill, cancellation and pipe cleanup on real processes. Start here for a hang or a leftover process.
+- `test_bash_tool_head_tail.py` checks the head-and-tail output cap: the first and last bytes kept around a counted marker, the split for small and patched caps, output within the cap unchanged from before, both timeout shapes, the unchanged constants, and the reworded spec sentence.
 - `test_coding_agent_readonly_paths.py` checks that `readonly_paths` files can be read but not edited with `write_text` or `replace_text`, however the model spells the path, and that construction rejects a bare string.
 
 ## Logs
@@ -46,3 +47,4 @@ The implementations belong in `vidbyte/agents/coding.py`, `vidbyte/lib/dataclass
 - 2026-10-11 - Added `test_coding_agent_verify_command.py` with `verify_command` (docs/design/coding-agent-verify-command.md).
 - 2026-10-12 - Declared dependencies now keep a name followed by a parenthesized version (Poetry 2) or a requirements.txt inline comment; `test_coding_agent_environment.py` gained the regression and the URL, VCS, and path cases.
 - 2026-10-12 - Manifests with a UTF-8 byte-order mark now list their dependency names (`test_declared_dependencies_read_manifests_with_a_byte_order_mark`).
+- 2026-10-16 - Added `test_bash_tool_head_tail.py` red for spec infinite-memory-context-economy r3 item 6 (bash keeps the first and last bytes); the large-output, endless-printer and verify-feedback tests and `FEATURE.md` now expect head, marker, tail.
