@@ -63,3 +63,38 @@
 - **A-6, the package stage.** It was not run at S1, because it needs a network install into a fresh venv.
 - **AC-7, the unchanged set of loaded modules.** This is easy for the implementer to check by comparison. It is harder for a test written blind, so I gave the test author the 948-module fingerprint as a fact.
 - **D-4, the `__all__` placement.** I placed each name beside its domain sibling, a judgment call between two precedents. A reviewer may prefer one cluster; the flip is free.
+
+## Addendum r2 (review round 1: SOUND WITH FIXES)
+
+Spec r2 is commit `a9d04b51`. I applied every finding, and §16 logs each one.
+
+- **R-1 (Blocker), accepted.** §6.1 now has two parts:
+  - 6.1.a holds the permanent properties, which the test author tests.
+  - 6.1.b holds the one-time diff facts, which the implementer proves once with command output and which no test may assert. These are INV-3, 6, 8 and 14, plus the new INV-15 (provenance), INV-16 (module set) and INV-17 (release note).
+  - INV-4 is now a superset check plus a version equality.
+  - §6.2 is split the same way, with the new AC-13, AC-14 and AC-15.
+  - NG-13, §13 and §14 forbid tests that compare against base or merge base, or that pin counts, hashes or versions.
+  - §13 no longer offers the 948/hash fingerprint, and it marks the harness_threads merge-base helpers "do not copy".
+- **R-2 (Major), accepted.** The work is now three commits, with the draft PR opened between B and C:
+  - Commit A is row 1.
+  - Commit B is the regenerated contract.
+  - Commit C is the release note, with the number from `gh pr view`.
+
+  I verified that commit C touches no generator input (`lint/core/public_api_contract.py:431`). If no PR exists when P2 ends, row 2 is reported as pending, not BLOCKED.
+- **R-3 (Major), accepted.** INV-2 is now a name-to-path table, verified on base. `vidbyte.lib.config` carries only `TextModelMode`.
+- **R-4 (Minor, scope-adding).** I applied the text fixes but added no scope:
+  - `JevDynamicComputeOption` now rests on request.md §C naming it.
+  - NG-2 and A-2 name `ModelProvider` as the one closed vocabulary that stays non-root, with a root-only check. Re-verified: `JevAgentSettings(provider='x')` raises `ConfigurationError: Unsupported model provider: 'x'`, and `'ModelProvider' in vidbyte.__all__` is False.
+  - New Q-3 records the question, with the default "No: not built".
+- **R-5 (Minor), accepted.**
+  - EC-8 to EC-12 and EC-16 to EC-21 are struck through as withdrawn.
+  - AC-8 is marked as implied by INV-2 and INV-6, needing at most one smoke test.
+  - AC-10 points to the existing misspelled-name test.
+- **R-6 (Minor), accepted.** D-9 now cites #1099's ROLE and README edits as the runner-up's precedent. The difference: those texts listed consumers as if the list were complete, while these four headers already omit most of their re-exporters (`security.py:12` against `vidbyte/lib/dataclasses/__init__.py:201`).
+- **Notes from the review's verified-claims section, both accepted.**
+  - The citation for keeping `__all__` one literal list now points at S015's `_exports` (`s015_public_export_integrity.py:48-53`).
+  - T-1 now says that `PermissionCeiling` defaults to `None` and that `allow_all()` was already public through `vidbyte.tools.security`.
+- **Citations corrected in passing.**
+  - The contract-reading test lines are now `test_infinite_memory_contract.py:166-169` and `test_root_native_thread_exports_contract.py:138-141`. Only the latter compares versions.
+- **Unchanged.** The four names, the row 1 edits, the version (D-P2) and `status: draft` all stay as they were.
+- **Self-check.** All 18 sections are present. Every referenced ID is defined, and none is defined twice. The only remaining `#<n>` is the row 2 template plus the rules that forbid committing it. "Two commits" survives only as D-8's runner-up.
