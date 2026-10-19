@@ -18,8 +18,8 @@ Program: JevAgent in vidbyte-cli, run R1 of 8 (see request.md §C "This run's sc
 | S0 worktree + capture + recon | done | 2026-10-19 | 2026-10-19 | reports/S0-scout.md | base_commit b7350ed6423642c9c178361eef87f3d9cda5589b |
 | S1 spec + review | done | 2026-10-19 | 2026-10-19 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | approved r3 4f988bdb (r1 b53eeeb9, r2 a9d04b51) |
 | S2 tests | done | 2026-10-19 | 2026-10-19 | reports/S2-test-author.md | S2_HEAD 09b4ef23 (was dc5108e6; S062 fix by the S2 author); 21 red at S2, re-run by orchestrator: contract file 18 failed |
-| S3 implement | running | 2026-10-19 | | reports/S3-implementer.md | |
-| S4 adversarial review | pending | | | | |
+| S3 implement | done | 2026-10-19 | 2026-10-19 | reports/S3-implementer.md | S3_HEAD b1e17f66; draft PR #1190; budget 0 new / 3 changed; merged main twice (#1189, #1159) + regenerated contract each time; 682 exports, --check current at 76c61ffb |
+| S4 adversarial review | running | 2026-10-19 | | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md | |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
@@ -44,6 +44,9 @@ Program: JevAgent in vidbyte-cli, run R1 of 8 (see request.md §C "This run's sc
 - 2026-10-19 — S2 open item (INV-7 pinned member order as permanent) resolved through the spec author before S3: r3.1 5bb8b967 "existing members keep values and relative order; later PRs may add". Tests untouched.
 
 - 2026-10-19 — S3 stopped BLOCKED at lint: S062 892>889, all 3 findings in the S2 pack (adjacent string literals in assert messages). Adjudicated: test tree belongs to S2, so the S2 author applied the join patch (message text and AST unchanged) as 09b4ef23; orchestrator re-ran lint → SDK-LINT: PASS. S2_HEAD moves to 09b4ef23. Root cause: my S2 briefing named only A001/S020; every later S2 briefing requires the full lint/run.py.
+
+- 2026-10-19 — S3 spot-check by orchestrator: pack unchanged vs 09b4ef23; only tests differing from origin/main are the pack; pack 21 passed; --check current at 76c61ffb; origin/main 181f1992 ancestor of HEAD. Full pytest 2 failed = named inherited reds (failure-codes 171==120 red on main; import-no-process local-only).
+- 2026-10-19 — Main moved twice during S3 (#1189, #1159); implementer merged (EC-7) and regenerated the contract after each merge; release-note counts recomputed (682, 43 added: 11 #1189 + 3 #1159 + 4 #1190 ...). S4 conformance lens must re-prove the counts.
 
 ## User replies (verbatim)
 - 2026-10-19 — answers to the alignment questions: request.md §A Prompt 3.
