@@ -69,7 +69,7 @@ agent = Agent(
     name="tool-user",
     system_prompt="Use tools when they help.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
     tools=catalog,
 )
 

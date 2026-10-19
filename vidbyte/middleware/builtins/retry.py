@@ -44,7 +44,14 @@ class ModelRetryMiddleware(AgentMiddleware):
         return MiddlewareDecision.continue_()
 
     async def on_model_error(self, ctx: MiddlewareContext) -> MiddlewareDecision:
-        """Retry until the configured attempt budget is exhausted."""
+        """Retry until the configured attempt budget is exhausted, except an error marked as one no retry can fix."""
+        # @intent a-final-refusal-is-not-retried
+        # An error its sender marked retryable=False (the Vidbyte gateway's empty-wallet or unpriced-model
+        # refusal) fails the same way on every retry, so it goes back to the runtime unretried: the run
+        # raises it with its reason, or a fallback chain switches models, instead of spending the budget
+        # and ending on a bare abort. An error without the mark keeps the old retry behavior.
+        if getattr(ctx.error, "retryable", None) is False:
+            return MiddlewareDecision.continue_()
         state: _ModelRetryRunState = ctx.run_state.get(self.__class__) or _ModelRetryRunState()
         state.attempts += 1
         ctx.run_state[self.__class__] = state

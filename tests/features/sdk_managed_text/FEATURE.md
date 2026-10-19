@@ -38,6 +38,9 @@ The mode is fixed in the config, and a gateway-mode runner resolves its Vidbyte 
 - One `Idempotency-Key` per `arun` call; the same key and byte-identical envelope on that call's retries; different keys for different calls, including concurrent ones.
 - `DIRECT` requests stay byte-identical to the base commit's BYOK requests (INV-6).
 - An `AUTO` call with no provider key sends exactly what the base commit sends in managed state (INV-16).
+- A gateway error code is matched against `VidbyteGatewayErrorCode` and never copied; an unknown code gets the status wording.
+- `ProviderRequestError.retryable` is `False` only for the gateway's own refusal (a known final code, or no known code at 401, 402, 403, 413, or 422); a relayed provider error, an edge page, or a missing answer is `None`.
+- An agent's `AgentExecutionError` repeats only a `ProviderRequestError` whose provider is `"vidbyte"`; any other cause stays on `__cause__`.
 
 ## External Dependencies
 
@@ -66,10 +69,13 @@ Each line is input + state → wrong output.
 - Default cap applied with `max`/`min` → a caller's 100 or 20,000 is overridden.
 - Streaming refusal keyed on "`VIDBYTE_API_KEY` is set" instead of on the mode → `DIRECT` streaming breaks, or an `AUTO` stream bypasses the gateway (byok-api-keys INV-11).
 - `mode` inserted before `timeout_seconds` → positional construction breaks.
+- Gateway code text copied into the message → a future code that echoes caller data leaks it.
+- Agent message built from any cause's `str()` → a DIRECT vendor error that echoes the prompt lands in the agent's error.
+- Retry middleware retrying a `retryable=False` refusal → an empty wallet or unpriced model is sent `max_attempts` times and the run ends on a bare "model_retry_exhausted".
 
 ## Historical Regressions
 
-None yet. Add one line per fixed bug with the test that protects it.
+- 2026-10-19: an Agent's gateway failure read only "failed to generate a reply."; retry middleware re-sent a 402 or 422 that could not succeed; 422, 429, 502, and 503 named no single cause. Protected by `test_managed_text_error_surfacing.py`.
 
 ## Test Suite Map
 
@@ -77,6 +83,7 @@ None yet. Add one line per fixed bug with the test that protects it.
 - `test_managed_text_selection.py`: the key-resolution table (relay in `AUTO`, vendor only in `DIRECT`), explicit mode, credential errors, endpoint and provider refusals, streaming refusal, runner pinning, other modalities untouched, the config field contract, repr, the adapter placeholder, and the resolver shared with `DecisionModelConfig`.
 - `test_managed_text_wire_contract.py`: output caps per dialect, `extra_body` passthrough, the 630 s attempt floor, and the emitted-key allowlist per dialect (AC-26).
 - `test_managed_text_failures.py`: credential-safe errors per status, remedy wording, relayed provider errors, missing responses, edge pages, unexpected exceptions, cancellation, same-key retries, one key per call, and concurrent calls.
+- `test_managed_text_error_surfacing.py`: the cause each known gateway code names, the fresh-call verdict on the raised error, the reason an agent's error repeats and the text it never repeats, and retry middleware on final and transient gateway failures.
 - `managed_text_fixtures.py`: the scripted inner transport, provider-shaped answers, gateway error bodies carrying a canary and a key-shaped string, and the retry-wait recorder.
 
 Run `python -m pytest tests/features/sdk_managed_text` (from a worktree, with `PYTHONPATH` set to the worktree).

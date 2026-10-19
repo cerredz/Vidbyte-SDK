@@ -119,12 +119,12 @@ from vidbyte import BaseAgent, JevAgent, JevAgentSettings, JevContinualSettings,
 from vidbyte.lib.config import DecisionModelConfig
 from vidbyte.lib.enums import DecisionModelMode
 
-schema = BaseAgent(name="schema", system_prompt="Change the database schema safely.", provider="openai", model_name="gpt-4.1")
+schema = BaseAgent(name="schema", system_prompt="Change the database schema safely.", provider="openai", model_name="gpt-5.5")
 settings = JevAgentSettings(
     name="researcher",
     system_prompt="Research carefully and report evidence.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
     agents=(JevSpecialist("schema", "Changes to the database schema and its migrations.", schema),),
 )
 agent = JevAgent(settings, JevRuntimeSettings(preflight=(JevPreflightPreset.CLARITY,), continual=JevContinualSettings(checks=(JevDoneCheck.MULTI_PART, JevDoneCheck.SCOPE_COVERAGE), max_continuations=2)))

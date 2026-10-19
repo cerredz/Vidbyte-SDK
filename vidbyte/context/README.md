@@ -142,7 +142,7 @@ review = ProsecutorDefenderJudgeAlgorithm(
     ),
     judge=DebateStageSettings(
         provider="openai",
-        model="gpt-4.1",
+        model="gpt-5.5",
         artifact_names=("requirements",),
     ),
 )

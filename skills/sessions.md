@@ -9,7 +9,7 @@ Durable sessions add a harness-level primitive that wraps persistable agents in 
 ```python
 from vidbyte import Agent, Session
 
-agent = Agent(name="researcher", system_prompt="Investigate carefully.", provider="openai", model_name="gpt-4.1")
+agent = Agent(name="researcher", system_prompt="Investigate carefully.", provider="openai", model_name="gpt-5.5")
 session = Session(agent)                 # defaults to InMemorySessionStore
 reply = await session.arun("Investigate the failing test")
 print(session.id, session.head)         # se_…  ck_…
@@ -100,7 +100,7 @@ completed = store.list_sessions(status=SessionStatus.COMPLETED)
 `Session.usage(...)` folds the head checkpoint's cumulative message history into a typed rollup. It reads usage metadata already stored on messages; it does not call a provider or estimate hidden tokens.
 
 ```python
-rollup = session.usage(prices={"gpt-4.1": 0.00001})
+rollup = session.usage(prices={"gpt-5.5": 0.00001})
 print(rollup.tokens, rollup.tool_calls, rollup.turns, rollup.latency, rollup.cost)
 for agent_usage in rollup.per_agent:
     print(agent_usage.agent_name, agent_usage.tokens, agent_usage.tool_calls)
@@ -149,7 +149,7 @@ from vidbyte.tools.builtins import (
 )
 
 store = FileSessionStore("./.vidbyte/sessions")
-agent = Agent(name="researcher", system_prompt="...", provider="openai", model_name="gpt-4.1",
+agent = Agent(name="researcher", system_prompt="...", provider="openai", model_name="gpt-5.5",
               tools=[CheckpointTool(store), ForkTool(store), BatchForkTool(store), RewindTool(store),
                      ResumeReplaceTool(store), ResumeAppendTool(store), ResumeOutputTool(store),
                      SessionTool(store)])

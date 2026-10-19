@@ -26,7 +26,7 @@ from vidbyte.lib.config import TextModelConfig
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.providers import ModelProviders
 
-config = TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-4.1")
+config = TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-5.5")
 provider = ModelProviders.text(config)
 ```
 

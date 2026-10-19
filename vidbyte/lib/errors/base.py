@@ -342,16 +342,26 @@ class ProviderSelectionError(VidbyteSdkError):
 class ProviderRequestError(VidbyteSdkError):
     """Raised when a provider request fails or returns an invalid response."""
 
-    def __init__(self, message: str, *, provider: str, status_code: int | None = None, response_excerpt: str | None = None) -> None:
+    def __init__(self, message: str, *, provider: str, status_code: int | None = None, response_excerpt: str | None = None, retryable: bool | None = None) -> None:
+        # @intent retryable-is-the-senders-verdict
+        # retryable says whether a fresh call of the same request can
+        # succeed: False when the server refused it for good (an empty
+        # wallet, an unpriced model), True when it called the failure
+        # transient, None when the sender cannot tell. Retry middleware
+        # skips only False, so every error that predates the field keeps
+        # its old retry behavior.
         details: dict[str, Any] = {"provider": provider}
         if status_code is not None:
             details["status_code"] = status_code
         if response_excerpt:
             details["response_excerpt"] = response_excerpt[:500]
+        if retryable is not None:
+            details["retryable"] = retryable
         super().__init__(message, details=details)
         self.provider = provider
         self.status_code = status_code
         self.response_excerpt = response_excerpt
+        self.retryable = retryable
 
 
 class ProviderConfigurationError(VidbyteSdkError):

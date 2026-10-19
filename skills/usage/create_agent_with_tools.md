@@ -27,7 +27,7 @@ agent = Agent(
     system_prompt="You have access to tools. Use get_time for the current time and calculator for math.",
     tools=[get_time, calculator],
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
 )
 
 reply = await agent.arun("What is 15 * 23 plus the current time?")
@@ -57,7 +57,7 @@ agent = Agent(
         ForkConversationTool(),       # run an isolated child conversation now
     ],
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
 )
 ```
 
@@ -74,9 +74,9 @@ from vidbyte.tools.builtins import ForkConversationTool
 agent = Agent(
     name="planner",
     system_prompt="Fork isolated checks when useful.",
-    tools=[ForkConversationTool(allowed_models=["gpt-4.1-mini"])],
+    tools=[ForkConversationTool(allowed_models=["gpt-5.4-mini"])],
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
 )
 ```
 
@@ -114,7 +114,7 @@ agent = Agent(
         SessionTool(store),
     ],
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
 )
 session = Session(agent, store=store)
 ```
@@ -145,7 +145,7 @@ agent = Agent(
     ],
     permission_policy=PermissionPolicy.allow_all(),  # needed for WRITE/EXECUTE tools
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
 )
 ```
 
@@ -172,7 +172,7 @@ Permission decisions are made per tool call, not per tool. An agent with `WRITE`
 Tools can be added to an existing agent without re-creating it. `add_tool()` returns `self` for chaining:
 
 ```python
-agent = Agent(name="base", system_prompt="...", provider="openai", model_name="gpt-4.1")
+agent = Agent(name="base", system_prompt="...", provider="openai", model_name="gpt-5.5")
 agent = agent.add_tool(get_time)      # returns self for chaining
 agent = agent.add_tool(calculator)
 ```
@@ -189,7 +189,7 @@ agent = await Agent(
     name="mcp-agent",
     system_prompt="You have filesystem access via MCP.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
 ).attach_mcp_server(
     ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/files"],
     name="filesystem",

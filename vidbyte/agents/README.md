@@ -40,7 +40,7 @@ agent = Agent(
     name="analyst",
     system_prompt="Answer directly and cite uncertainty.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
     tools=[lookup_metric],
 )
 
@@ -111,7 +111,7 @@ agent = CodingAgent(
     setup_commands=["uv sync"],       # optional; run once in my-project before the first turn
     progress_notes=True,              # default; keeps my-project/.vidbyte/coding-agent/progress.md
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
 )
 ```
 
@@ -161,7 +161,7 @@ agent = InfiniteMemoryAgent(
         name="analyst",
         system_prompt="You research markets and report sourced findings.",
         provider="openai",
-        model_name="gpt-4.1",
+        model_name="gpt-5.5",
         root_dir=".",
         workspace=InfiniteWorkspaceSettings(root="memory", seed_files=("brief.md",)),
     )
@@ -193,9 +193,9 @@ agent = Agent(
     name="analyst",
     system_prompt="Answer directly.",
     provider="openai",
-    model_name="gpt-5.2",
+    model_name="gpt-5.5",
     fallback=[
-        "gpt-5-mini",                 # bare name inherits provider and temperature; keys come from the agent's api_keys
+        "gpt-5.4-mini",               # bare name inherits provider and temperature; keys come from the agent's api_keys
         "anthropic/claude-sonnet-5",  # provider-prefixed, overrides the provider
     ],
 )
@@ -212,7 +212,7 @@ agent = Agent(
     name="analyst",
     system_prompt="Answer directly.",
     provider="openai",
-    model_name="gpt-5.2",
+    model_name="gpt-5.5",
     api_keys=[OPENAI_KEY, ANTHROPIC_KEY],  # any order; the backup's key goes here too
     fallback=AgentFallbackSettings(
         models=[FallbackModel(provider="anthropic", model="claude-sonnet-5", temperature=0.2)],
@@ -228,7 +228,10 @@ Rules worth knowing:
   `UnsupportedProviderError`, and `TimeoutError`. Tool errors, permission denials,
   and cancellation propagate untouched. Override with `AgentFallbackSettings(fallback_on=...)`.
 - **Retries happen first.** Retry middleware exhausts its budget on the current model
-  before the chain advances, and the chain does not reset that budget.
+  before the chain advances, and the chain does not reset that budget. A gateway
+  refusal marked `retryable=False` (an empty wallet, a model with no price) spends no
+  retry: the chain advances at once, and without a chain the agent raises
+  `AgentExecutionError` with the gateway's reason in its message.
 - **Same-wire-format switches keep the transcript.** OpenAI, DeepSeek, xAI, and
   OpenRouter share one payload shape, so an in-flight run carries its tool history over
   intact. Switching across wire formats (OpenAI ↔ Anthropic ↔ Gemini) resets the
@@ -261,7 +264,7 @@ unless you turn it on.
 ```python
 from vidbyte import BaseAgent, SystemPromptPreset
 
-agent = BaseAgent(name="analyst", system_prompt="Answer directly.", provider="openai", model_name="gpt-5.2",
+agent = BaseAgent(name="analyst", system_prompt="Answer directly.", provider="openai", model_name="gpt-5.5",
                   system_prompt_presets=[SystemPromptPreset.WORKING_PRINCIPLES])
 ```
 
@@ -358,7 +361,7 @@ agent = Agent(
     name="checkout-scout",
     system_prompt="Find the worst bug in the checkout flow.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
     output_schema=BugReport,  # a model with title and body fields
     outputs=[
         SlackOutput(),                                         # reads SLACK_WEBHOOK_URL

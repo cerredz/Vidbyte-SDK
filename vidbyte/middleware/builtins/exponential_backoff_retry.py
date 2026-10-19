@@ -77,7 +77,14 @@ class ExponentialBackoffRetryMiddleware(AgentMiddleware):
         return MiddlewareDecision.continue_()
 
     async def on_model_error(self, ctx: MiddlewareContext) -> MiddlewareDecision:
-        """Retry with backoff until max_attempts is reached, then abort."""
+        """Retry with backoff until max_attempts is reached, then abort; pass on an error no retry can fix."""
+        # @intent a-final-refusal-is-not-retried
+        # An error its sender marked retryable=False (the Vidbyte gateway's empty-wallet or unpriced-model
+        # refusal) fails the same way after any backoff, so it goes back to the runtime unretried: the run
+        # raises it with its reason, or a fallback chain switches models. It is checked before retry_on,
+        # because listing ProviderRequestError there cannot make a final refusal succeed.
+        if getattr(ctx.error, "retryable", None) is False:
+            return MiddlewareDecision.continue_()
         if not self._error_is_retryable(ctx.error):
             return MiddlewareDecision.abort(
                 "model_error_not_retryable",

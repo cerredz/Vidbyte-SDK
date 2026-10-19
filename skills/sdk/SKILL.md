@@ -96,7 +96,7 @@ agent = Agent(
     name="guarded-agent",
     system_prompt="You are helpful.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
     middleware=[ToolRateLimitMiddleware(max_tool_calls=30)],
 )
 ```

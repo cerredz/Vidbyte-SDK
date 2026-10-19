@@ -10,7 +10,7 @@ agent = InfiniteMemoryAgent(
         name="analyst",
         system_prompt="You research markets and report sourced findings.",
         provider="openai",
-        model_name="gpt-4.1",
+        model_name="gpt-5.5",
         root_dir=".",
         workspace=InfiniteWorkspaceSettings(root="memory", seed_files=("brief.md",)),
     )

@@ -13,7 +13,7 @@ agent = Agent(
     name="helper",
     system_prompt="You are a helpful assistant.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
 )
 reply = await agent.arun("Explain quantum computing")
 ```
@@ -124,7 +124,7 @@ agent = Agent(
     name="logged-agent",
     system_prompt="You are helpful.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
     middleware=[LoggingMiddleware()],
 )
 ```
@@ -142,7 +142,7 @@ agent = Agent(
     name="resilient-tool-user",
     system_prompt="Use tools and recover from transient failures.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
     agent_loop_settings=AgentLoopSettings(
         tool_error_policy=ToolErrorPolicy(
             max_retries_per_tool_call=2,
@@ -162,7 +162,7 @@ Bind an agent to a durable session when its turns need to survive process restar
 from vidbyte import Agent, FileSessionStore
 
 store = FileSessionStore("./.vidbyte/sessions")
-agent = Agent(name="researcher", system_prompt="...", provider="openai", model_name="gpt-4.1")
+agent = Agent(name="researcher", system_prompt="...", provider="openai", model_name="gpt-5.5")
 
 session = agent.persist(store=store)
 await agent.arun("start")       # writes one checkpoint through the bound session

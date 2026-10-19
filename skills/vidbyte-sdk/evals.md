@@ -109,7 +109,7 @@ class MyTemplate(EvalTemplate):
 from vidbyte import Agent
 from vidbyte.evals import EvalSuite, EvalCase, EvalRunner, ContainsGrader
 
-agent = Agent(name="qa", system_prompt="Answer concisely.", provider="openai", model_name="gpt-4.1")
+agent = Agent(name="qa", system_prompt="Answer concisely.", provider="openai", model_name="gpt-5.5")
 
 suite = EvalSuite("smoke", [
     EvalCase(prompt="Capital of France?", expected="Paris", tags=("geography",)),

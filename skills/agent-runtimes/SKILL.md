@@ -105,7 +105,7 @@ If `dynamic_actors=True` is configured, the broker automatically registers the `
   "arguments": {
     "actor_name": "data_parser_3",
     "system_prompt": "You are a specialized parser focusing strictly on regex sanitization.",
-    "model_name": "gpt-4o-mini"
+    "model_name": "gpt-5.4-mini"
   }
 }
 ```
@@ -118,7 +118,7 @@ Developers can customize the execution loop through the following constructor op
 * **`termination_mode`** (str):
   * `"coordinator"` (Default): Execution terminates as soon as the root coordinator actor completes the task.
   * `"quiescence"`: Swarm mode; runs until all actor mailboxes are empty and no worker tasks remain.
-* **`worker_model`** (str): Option to run spawned actors with a different, cheaper model (e.g., `gpt-3.5-turbo`) while reserving the strong orchestrator model for the coordinator.
+* **`worker_model`** (str): Option to run spawned actors with a different, cheaper model (e.g., `gpt-5.4-mini`) while reserving the strong orchestrator model for the coordinator.
 
 ### Code Example: Configuring Actor Swarms
 ```python
@@ -132,7 +132,7 @@ actor_swarm = BaseAgent(
     dynamic_actors=True,
     max_loop=30,
     termination_mode="quiescence",
-    worker_model="gpt-4o-mini"  # Cheap model for spawned workers
+    worker_model="gpt-5.4-mini"  # Cheap model for spawned workers
 )
 
 reply = actor_swarm.run("Code a snake game and perform an exhaustive security review.")
