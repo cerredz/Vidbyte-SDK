@@ -9,7 +9,7 @@ Purpose:
     their category packages.
 Architecture:
     - VidbyteSDK: Root namespace client.
-    - Agent exports: BaseAgent, CodingAgent, CodingAgentSettings, CodingAgentTools, InfiniteMemoryAgent, InfiniteMemoryAgentSettings, InfiniteWorkspaceSettings, InfiniteMemoryPreset, AgentCard, AgentMessage, AgentRegistry, AgentRunnerConfig, AgentSpec.
+    - Agent exports: BaseAgent, CodingAgent, CodingAgentSettings, CodingAgentTools, InfiniteMemoryAgent, InfiniteMemoryAgentSettings, InfiniteWorkspaceSettings, InfiniteMemoryPreset, InfiniteEvent, InfiniteEventKind, InfiniteHandoff, AgentCard, AgentMessage, AgentRegistry, AgentRunnerConfig, AgentSpec.
     - Agent setting exports: AgentLoopSettings (loop limits), PermissionPolicy (which ToolPermission levels tools may use) and TextModelMode (gateway or direct text calls), which BaseAgent and JevAgentSettings take, plus JevDynamicComputeOption, the values of JevComputeSettings.dynamic_compute, so a caller limited to root names, such as vidbyte-cli, can set JevAgent's loop, permission, text-mode and compute options.
     - Configuration exports: YamlLoader, AgentSettings, ToolDefinition, MiddlewareDefinition.
     - Tool exports: BaseTool, ToolActivity, ToolCall, ToolCallActivity, ToolExecutor, ToolParameter, ToolPermission, ToolRegistry, ToolResult, ToolSpec, ToolStatus, ToolsFormatter.
@@ -108,6 +108,9 @@ from vidbyte.agents import (
     FinalizationContext,
     GitHubSkill,
     HandoffAgent,
+    InfiniteEvent,
+    InfiniteEventKind,
+    InfiniteHandoff,
     InfiniteMemoryAgent,
     InfiniteMemoryAgentSettings,
     InfiniteWorkspaceSettings,
@@ -801,6 +804,9 @@ __all__ = [
     "CodingAgent",
     "CodingAgentSettings",
     "CodingAgentTools",
+    "InfiniteEvent",
+    "InfiniteEventKind",
+    "InfiniteHandoff",
     "InfiniteMemoryAgent",
     "InfiniteMemoryAgentSettings",
     "InfiniteMemoryPreset",
