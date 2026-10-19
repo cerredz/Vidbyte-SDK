@@ -1,13 +1,13 @@
 """FILE: tests/features/harness_threads/conftest.py
 
-PURPOSE: Shared offline fixtures for the harness_threads pack: lazy imports of the spec §8.5 contract names, a sandbox with a redirected user home, a workspace, skill folders and an empty PATH folder, the scripted stand-in (fake_harness.py) with its log reader, `.exe`/script stand-ins for PATH lookups, the INV-5 error check, and process liveness checks for both platforms.
+PURPOSE: Shared offline fixtures for the harness_threads pack: lazy imports of the spec §8.5 contract names, a sandbox with a redirected user home, a workspace, skill folders and an empty PATH folder, the scripted stand-in (fake_harness.py) with its log reader, `.exe`/script stand-ins for PATH lookups, the INV-5 error check, and process liveness checks for both platforms. For the browser functions (docs/spec/harness-browser-tools/spec.md): a `node` stand-in with its bundled npm-cli.js, a pre-populated tool cache, a fake Chrome, the browser contract imports, a call helper and an error check that expects a BrowserThreadResult.
 ROLE IN CODEBASE: Loaded by pytest for every module in tests/features/harness_threads/. The stand-in runs as a real child process through the config records' <harness>_command fields (spec §13 "Real seams"); nothing in the thread functions, CliRunner or the filesystem is mocked.
 ARCHITECTURE NOTE: Every vidbyte import happens inside a fixture (lib_api, api), so a missing module fails each test at setup instead of aborting collection of the whole suite; lib_api needs only the vidbyte.lib names, so the process, argv and record tests can pass before the harness modules land. The sandbox is made by tmp_path_factory.mktemp("case") so no path holds a harness name, and the user home and the workspace are sibling folders (spec §13, R-17). PATH holds only the sandbox's own bin folder, so no test can reach a real grok, opencode, muse or wsl.exe.
-FUNCTION INVENTORY: lib_api and api return namespaces of contract names; Sandbox builds the folders, scenarios, stand-ins and snapshots and reads the stand-in logs; sandbox builds one per test with the home, PATH and temp folder redirected; call runs one thread function against the stand-in; check_error asserts the INV-5 attributes and message order; fast_stop shrinks NATIVE_KILL_WAIT_SECONDS; wait_until polls with a deadline; process_alive reports liveness on win32 and POSIX; launcher_bytes finds pip's console-script launcher for `.exe` stand-ins.
-COMMON MODIFICATION PATTERNS: Add a stand-in behaviour as a scenario field read by fake_harness.py; add a fixture here only when two or more modules in this pack need it.
+FUNCTION INVENTORY: lib_api and api return namespaces of contract names; browser_lib and browser_api add the browser contract names; browser_world builds the default offline browser world (node, cache, Chrome); no_chrome points the Chrome search at a missing file; browse runs one browser function against the stand-in; check_browser_error asserts the INV-6 attributes of a browser function's error; runner_spy records every CliInvocation; fragments, same_path, server_option, call_folder and files_holding are pure helpers for the browser tests (secret fragments, path equality, a fake server's option value, the per-call folder from a browser server's profile option, files holding a secret), also handed out on `pack`; Sandbox builds the folders, scenarios, stand-ins (node with its npm-cli.js, the tool cache, Chrome) and snapshots and reads the stand-in logs (per-call folders, fake browser pids); sandbox builds one per test with the home, PATH and temp folder redirected; call runs one thread function against the stand-in; check_error asserts the INV-5 attributes and message order; fast_stop shrinks NATIVE_KILL_WAIT_SECONDS; wait_until polls with a deadline; process_alive reports liveness on win32 and POSIX; launcher_bytes finds pip's console-script launcher for `.exe` stand-ins.
+COMMON MODIFICATION PATTERNS: Add a stand-in behaviour as a scenario field read by fake_harness.py (or fake_browser.py for node, servers and mounts); add a fixture here only when two or more modules in this pack need it. A pinned tool version change in spec §9.1 changes BROWSER_PACKAGES.
 WHAT NOT TO DO IN THIS FILE: 1. Do not stub the thread functions, CliRunner or the filesystem; a missing feature must stay red. 2. Do not leave PATH, USERPROFILE or HOME pointing at the developer's machine: the Grok fallback is `~/.grok/bin/grok.exe`, which exists on the author's machine. 3. Never name the WSL distro MuseUbuntu1; the stand-in distro is FAKE_DISTRO.
-KNOWN EDGE CASES: pip's distlib `t64.exe` is the launcher behind every `.exe` stand-in; tests that need one skip when pip lacks it. Liveness on win32 uses OpenProcess/GetExitCodeProcess (STILL_ACTIVE 259). Path text in messages is compared in both native and POSIX spelling, and case-insensitively on win32 (shutil.which returns PATHEXT suffixes in upper case).
-RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §6, §8.5, §9, §13
+KNOWN EDGE CASES: pip's distlib `t64.exe` is the launcher behind every `.exe` stand-in; tests that need one skip when pip lacks it. The spec names no constant for Chrome's searched locations (§9.3 'Chrome location constants'); the browser fixtures bind vidbyte.lib.constants.browser_tools.BROWSER_CHROME_PATHS, a tuple of path strings searched in order after os.path.expandvars, and replace it so no test depends on the machine's own Chrome. Liveness on win32 uses OpenProcess/GetExitCodeProcess (STILL_ACTIVE 259). Path text in messages is compared in both native and POSIX spelling, and case-insensitively on win32 (shutil.which returns PATHEXT suffixes in upper case).
+RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §6, §8.5, §9, §13; docs/spec/harness-browser-tools/spec.md §8.5, §9.1, §9.3, §13
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads
 """
 
@@ -49,6 +49,22 @@ FAST_KILL_WAIT_SECONDS = 0.5
 SLACK_SECONDS = 5.0
 POLL_SECONDS = 0.05
 EXCLUDED_FROM_SNAPSHOT = ("fake",)
+# Spec §9.1 seed registry, stdio rows: package, pinned version, and the
+# entry path relative to node_modules/<package>/.
+BROWSER_PACKAGES = {
+    "playwright": ("@playwright/mcp", "0.0.83", ("cli.js",)),
+    "chromedevtools": ("chrome-devtools-mcp", "1.11.0", ("build", "src", "bin", "chrome-devtools-mcp.js")),
+    "firecrawl": ("firecrawl-mcp", "3.30.2", ("dist", "index.js")),
+    "exa": ("exa-mcp-server", "3.4.2", ("dist", "stdio.cjs")),
+    "tavily": ("tavily-mcp", "0.2.22", ("build", "index.js")),
+    "brave": ("@brave/brave-search-mcp-server", "2.1.4", ("dist", "index.js")),
+    "perplexity": ("@perplexity-ai/mcp-server", "1.3.0", ("dist", "index.js")),
+    "brightdata": ("@brightdata/mcp", "3.1.0", ("server.js",)),
+    "apify": ("@apify/actors-mcp-server", "0.18.4", ("dist", "stdio.js")),
+    "linkup": ("linkup-mcp-server", "3.4.0", ("bin", "linkup-mcp-server.js")),
+}
+BROWSER_CHROME_PATHS_NAME = "BROWSER_CHROME_PATHS"
+EXEC_ROLES = {"grok": "grok", "opencode": "opencode", "muse": "muse-exec"}
 
 
 def sha256(text: str) -> str:
@@ -202,6 +218,57 @@ class Sandbox:
 
     def grok_home(self, workspace: Path | None = None) -> Path:
         return private_home(self.home, workspace or self.workspace)
+
+    def node(self, **fields: Any) -> Path:
+        # A `node` stand-in on PATH (fake_browser.run_node) and the
+        # npm-cli.js that Node installers put beside it (spec §13).
+        packages = {f"{package}@{version}": {"tool": tool, "package": package, "entry": list(entry)} for tool, (package, version, entry) in BROWSER_PACKAGES.items()}
+        node = self.stand_in(self.bin, "node", "node", packages=packages, **fields)
+        npm = self.npm_cli(node)
+        npm.parent.mkdir(parents=True, exist_ok=True)
+        npm.write_text("// fake npm-cli.js; the node stand-in plays npm\n", encoding="utf-8")
+        return node
+
+    @staticmethod
+    def npm_cli(node: Path) -> Path:
+        # <node dir>/node_modules/npm/bin on Windows; <node dir>/../lib
+        # /node_modules/npm/bin on POSIX (spec §13).
+        if sys.platform == "win32":
+            return node.parent / "node_modules" / "npm" / "bin" / "npm-cli.js"
+        return node.parent.parent / "lib" / "node_modules" / "npm" / "bin" / "npm-cli.js"
+
+    @property
+    def tool_cache(self) -> Path:
+        return self.home / ".vidbyte" / "tools"
+
+    def tool_folder(self, tool: str) -> Path:
+        return self.tool_cache / f"{tool}-{BROWSER_PACKAGES[tool][1]}"
+
+    def tool_entry(self, tool: str) -> Path:
+        package, _, entry = BROWSER_PACKAGES[tool]
+        return self.tool_folder(tool).joinpath("node_modules", *package.split("/"), *entry)
+
+    def cache_tools(self, *tools: str) -> None:
+        # A published cache folder per tool whose entry file tells the
+        # node stand-in which server to play.
+        for tool in tools or tuple(BROWSER_PACKAGES):
+            entry = self.tool_entry(tool)
+            entry.parent.mkdir(parents=True, exist_ok=True)
+            entry.write_text(json.dumps({"fake_mcp_server": tool}), encoding="utf-8")
+
+    def chrome(self) -> Path:
+        target = self.root / "chrome" / ("chrome.exe" if sys.platform == "win32" else "google-chrome")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("fake chrome\n", encoding="utf-8")
+        if sys.platform != "win32":
+            target.chmod(0o755)
+        return target
+
+    def call_folders(self) -> list[Path]:
+        return sorted(self.tmp.glob("vidbyte-browser-*"))
+
+    def browser_pids(self) -> list[int]:
+        return [record["browser_pid"] for record in self.records("browser")]
 
 
 @pytest.fixture
@@ -403,6 +470,167 @@ def wsl_ready(sandbox: Sandbox) -> None:
 
 
 @pytest.fixture
+def browser_lib(lib_api: SimpleNamespace) -> SimpleNamespace:
+    # The vidbyte.lib browser contract (spec §8.5, §9.1), imported
+    # lazily like lib_api.
+    enums = importlib.import_module("vidbyte.lib.enums.browser_tools")
+    records = importlib.import_module("vidbyte.lib.dataclasses.browser_tools")
+    return SimpleNamespace(
+        **vars(lib_api),
+        browser_enums=enums,
+        browser_records=records,
+        browser_constants=importlib.import_module("vidbyte.lib.constants.browser_tools"),
+        BrowserToolRegistry=importlib.import_module("vidbyte.lib.registries.browser_tools").BrowserToolRegistry,
+        BrowserToolRequest=records.BrowserToolRequest,
+        BrowserThreadResult=records.BrowserThreadResult,
+        BrowserToolCall=records.BrowserToolCall,
+        BrowserTool=enums.BrowserTool,
+        BrowserCapability=enums.BrowserCapability,
+        BrowserToolCallStatus=enums.BrowserToolCallStatus,
+    )
+
+
+@pytest.fixture
+def browser_api(api: SimpleNamespace, browser_lib: SimpleNamespace) -> SimpleNamespace:
+    # The nine browser functions (spec §8.5), from
+    # vidbyte.harnesses.native.
+    functions = {(harness, verb): getattr(api.native, f"{verb}_{harness}_with_browser") for harness in HARNESSES for verb in VERBS}
+    return SimpleNamespace(**vars(browser_lib), native=api.native, configs=api.configs, plain=api.functions, functions=functions)
+
+
+@pytest.fixture
+def browser_world(browser_lib: SimpleNamespace, sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    # The default offline world: node on PATH, every stdio tool in the
+    # cache, and Chrome found at the one searched location.
+    node = sandbox.node()
+    sandbox.cache_tools()
+    chrome = sandbox.chrome()
+    monkeypatch.setattr(browser_lib.browser_constants, BROWSER_CHROME_PATHS_NAME, (str(chrome),))
+    return SimpleNamespace(node=node, chrome=chrome)
+
+
+@pytest.fixture
+def no_chrome(browser_lib: SimpleNamespace, sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch) -> Path:
+    missing = sandbox.root / "no-chrome" / ("chrome.exe" if sys.platform == "win32" else "google-chrome")
+    monkeypatch.setattr(browser_lib.browser_constants, BROWSER_CHROME_PATHS_NAME, (str(missing),))
+    return missing
+
+
+@pytest.fixture
+def browse(browser_api: SimpleNamespace, sandbox: Sandbox) -> Callable[..., Awaitable[Any]]:
+    async def run(harness: str, verb: str = "run", prompt: str = PROMPT, *, tools: Any, tool_keys: Any = None, thread_id: str | None = None, command: tuple[str, ...] | None = None, fake: dict[str, Any] | None = None, config: dict[str, Any] | None = None, **arguments: Any) -> Any:
+        # One browser function against the stand-in; `fake` is its
+        # scenario, `config` extra config fields (a WSL-mode config
+        # sets muse_command to None).
+        function = browser_api.functions[(harness, verb)]
+        launcher = command if command is not None else sandbox.command(harness, **(fake or {}))
+        config_fields = {COMMAND_FIELDS[harness]: launcher, "timeout_seconds": CALL_TIMEOUT_SECONDS, **(config or {})}
+        keywords: dict[str, Any] = {"api_key": API_KEY, "workspace": sandbox.workspace, "config": browser_api.configs[harness](**config_fields), "tools": tools}
+        if tool_keys is not None:
+            keywords["tool_keys"] = tool_keys
+        if harness == "opencode":
+            keywords["model"] = OPENCODE_MODEL
+        keywords.update(arguments)
+        positional = (prompt,) if verb == "run" else (thread_id, prompt)
+        return await function(*positional, **keywords)
+
+    return run
+
+
+def fragments(secret: str, width: int = 8) -> list[str]:
+    return [secret[index : index + width] for index in range(len(secret) - width + 1)]
+
+
+def same_path(left: Path | str, right: Path | str) -> bool:
+    # One spelling rule for both sides: absolute, normcased (win32 is
+    # case-insensitive and shutil.which upper-cases PATHEXT).
+    return os.path.normcase(os.path.abspath(str(left))) == os.path.normcase(os.path.abspath(str(right)))
+
+
+def server_option(start: dict[str, Any], flag: str) -> str | None:
+    # A compiled server's option value, joined or separate form.
+    return start["options"]["values"].get(flag)
+
+
+def call_folder(start: dict[str, Any]) -> Path:
+    # FR-10: <per-call folder>/profiles/<tool> is the profile option of
+    # a browser server, so its grandparent is the per-call folder.
+    profile = server_option(start, "--user-data-dir") or server_option(start, "--userDataDir")
+    assert profile is not None, f"the browser server got no profile option: {start['argv']}"
+    return Path(profile).parent.parent
+
+
+def files_holding(root: Path, secret: str) -> list[str]:
+    # Every file under root whose bytes hold the secret (UTF-8 or
+    # UTF-16), for INV-4's "in no file" checks.
+    needles = (secret.encode("utf-8"), secret.encode("utf-16-le"))
+    found: list[str] = []
+    for path in sorted(root.rglob("*")):
+        try:
+            data = path.read_bytes() if path.is_file() else b""
+        except OSError:
+            continue
+        if any(needle in data for needle in needles):
+            found.append(path.relative_to(root).as_posix())
+    return found
+
+
+@pytest.fixture
+def check_browser_error(browser_api: SimpleNamespace) -> Callable[..., None]:
+    def check(error: BaseException, *, harness: str, verb: str, code: str, workspace: Path | None = None, thread_id: str | None | bool = False, observations: Iterable[tuple[str, tuple[str, ...]]] = (), vendor: str | None = None, secrets: Iterable[str] = ()) -> None:
+        # INV-6 / AC-17: one NativeThreadError naming the browser
+        # function, a closed code, the texts written for that code and
+        # an `expected` that names BrowserThreadResult; no secret in any
+        # text it carries.
+        api = browser_api
+        assert isinstance(error, api.NativeThreadError), f"expected NativeThreadError, got {type(error).__name__}: {error}"
+        assert error.failure_code.value == code, f"expected {code}, got {error.failure_code.value}: {error}"
+        assert isinstance(error.failure_code, api.FailureCode)
+        function = f"{verb}_{harness}_with_browser"
+        assert error.harness == api.enums.NativeHarness(harness)
+        assert error.operation == api.enums.NativeThreadOperation(function)
+        assert error.expected == f"{function} returning a BrowserThreadResult" and error.details["expected"] == error.expected
+        assert error.likely_cause == api.constants.NATIVE_THREAD_LIKELY_CAUSES[error.failure_code]
+        assert error.next_step == api.constants.NATIVE_THREAD_NEXT_STEPS[error.failure_code]
+        if thread_id is not False:
+            assert error.thread_id == thread_id, f"thread_id {error.thread_id!r} != {thread_id!r}"
+        message = str(error)
+        parts: list[tuple[str, tuple[str, ...]]] = [("function name", (function,)), ("failure code", (code,)), ("harness label", (LABELS[harness],))]
+        if workspace is not None:
+            parts.append(("workspace", path_spellings(workspace.resolve())))
+        if isinstance(thread_id, str):
+            parts.append(("thread id", (thread_id,)))
+        parts.extend(observations)
+        if vendor is not None:
+            parts.append(("vendor text", (vendor,)))
+            assert error.vendor_message is not None and vendor in error.vendor_message
+        parts.extend([("likely cause", (error.likely_cause,)), ("next step", (error.next_step,))])
+        find_in_order(message, parts, fold=sys.platform == "win32")
+        surfaces = {"str": message, "repr": repr(error), "vendor_message": error.vendor_message or "", "details": json.dumps(error.details, default=str)}
+        for secret in secrets:
+            for surface, text in surfaces.items():
+                leaked = [piece for piece in fragments(secret) if piece in text]
+                assert leaked == [], f"{surface} holds a fragment of a secret: {leaked[:3]}"
+
+    return check
+
+
+@pytest.fixture
+def runner_spy(lib_api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+    # Records every CliInvocation handed to CliRunner.run, then runs it
+    # for real.
+    seen: list[Any] = []
+    real_run = lib_api.CliRunner.run
+
+    async def recording_run(self: Any, invocation: Any) -> Any:
+        seen.append(invocation)
+        return await real_run(self, invocation)
+
+    monkeypatch.setattr(lib_api.CliRunner, "run", recording_run)
+    return seen
+
+
+@pytest.fixture
 def pack() -> SimpleNamespace:
     # Pack constants and pure helpers; test modules cannot import
     # conftest by name (no __init__.py in pack folders).
@@ -411,4 +639,6 @@ def pack() -> SimpleNamespace:
         FAKE_DISTRO=FAKE_DISTRO, OTHER_DISTRO=OTHER_DISTRO, REPO_ROOT=REPO_ROOT, FAKE=FAKE, CALL_TIMEOUT_SECONDS=CALL_TIMEOUT_SECONDS,
         COMMAND_FIELDS=COMMAND_FIELDS, SLACK_SECONDS=SLACK_SECONDS, key_digest=key_digest, private_home=private_home, wsl_form=wsl_form,
         path_spellings=path_spellings, find_in_order=find_in_order, launcher_bytes=launcher_bytes,
+        BROWSER_PACKAGES=BROWSER_PACKAGES, EXEC_ROLES=EXEC_ROLES, fragments=fragments, process_alive=process_alive,
+        same_path=same_path, server_option=server_option, call_folder=call_folder, files_holding=files_holding,
     )

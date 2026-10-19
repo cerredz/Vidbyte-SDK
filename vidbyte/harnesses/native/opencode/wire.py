@@ -1,14 +1,14 @@
 """FILE: vidbyte/harnesses/native/opencode/wire.py
 
-PURPOSE: Defines OpencodeWire, the codec of one `opencode run --format=json` call: it builds the inline config that binds the caller's key to the provider its model names, and turns the run's CliOutcome into a NativeThreadResult, or into the NativeThreadError that names what went wrong.
-ROLE IN CODEBASE: Called by OpencodeThreadRun.execute in vidbyte/harnesses/native/opencode/threads.py: config_content before the run, read after CliRunner returns. It raises through the call's NativeErrorFactory (hostkit/errors.py).
-ARCHITECTURE NOTE: Pure: no process, no file and no await. opencode prints one JSON event per line, each with "type" and "sessionID"; "text" events carry part.text and part.messageID, "error" events carry error.name and error.data.message/statusCode; an unknown session is "Session not found" on stderr with exit 1. Every member name and marker comes from vidbyte/lib/constants/native_threads.py (spec INV-15). The checks run in the INV-6 order: timeout, output cap, a refused key, an unknown session, a failed run, then the shape of the answer and the thread id.
-FUNCTION INVENTORY: config_content builds the OPENCODE_CONFIG_CONTENT value; read is the narrated main function, reading the JSON lines through CliRunner.json_objects; _session finds the first usable sessionID; _error classifies the first error event and builds its vendor text; _text joins the text parts of the last message.
+PURPOSE: Defines OpencodeWire, the codec of one `opencode run --format=json` call: it builds the inline config that binds the caller's key to the provider its model names (and, on a browser call, mounts the browser tools), turns the run's CliOutcome into a NativeThreadResult, or into the NativeThreadError that names what went wrong, and reads the calls the agent made on the mounted tools.
+ROLE IN CODEBASE: Called by OpencodeThreadRun.execute in vidbyte/harnesses/native/opencode/threads.py: config_content before the run, read after CliRunner returns. OpencodeBrowserHarness (opencode/browser.py) calls tool_calls on a browser call's outcome. It raises through the call's NativeErrorFactory (hostkit/errors.py) and takes the mcp and permission members from OpencodeMounts (opencode/mounts.py).
+ARCHITECTURE NOTE: Pure: no process, no file and no await. opencode prints one JSON event per line, each with "type" and "sessionID"; "text" events carry part.text and part.messageID, "tool_use" events carry part.tool and part.state.status, "error" events carry error.name and error.data.message/statusCode; an unknown session is "Session not found" on stderr with exit 1. Every member name and marker comes from vidbyte/lib/constants/native_threads.py (spec INV-15). The checks run in the INV-6 order: timeout, output cap, a refused key, an unknown session, a failed run, then the shape of the answer and the thread id.
+FUNCTION INVENTORY: config_content builds the OPENCODE_CONFIG_CONTENT value; read is the narrated main function, reading the JSON lines through CliRunner.json_objects; tool_calls reads the mounted-tool calls of a browser call; _session finds the first usable sessionID; _error classifies the first error event and builds its vendor text; _text joins the text parts of the last message.
 COMMON MODIFICATION PATTERNS: A new key-refusal signal from opencode is one more name in OPENCODE_KEY_REJECTED_ERROR_NAMES or status in OPENCODE_KEY_REJECTED_STATUSES; a new config member is one more key in config_content.
 WHAT NOT TO DO IN THIS FILE: 1. Do not return the config value anywhere but the child's environment; it holds the key, and the caller registers it as a secret. 2. Do not copy vendor text into an error unscrubbed; pass it as vendor_text and the factory scrubs and caps it. 3. Do not start processes or await anything here.
-KNOWN EDGE CASES: The thread id is looked for before the runner checks, so a timed-out or cut stream still reports the session opencode printed (spec INV-5). Lines that are not JSON objects, such as plugin log lines, are skipped. The answer text is only the last message's text parts, so earlier narration ("Let me look at the files first.") is left out; a run whose last message has no text returns "". A continue is matched case-insensitively and returns the id the caller gave; a fork whose answer is its source is protocol_mismatch.
+KNOWN EDGE CASES: tool_calls never raises on vendor text: a tool name whose server is not mounted, or whose tool part fails NATIVE_NAME_PATTERN, is skipped (spec EC-44), and only the first BROWSER_TOOL_CALLS_MAX_ITEMS calls are kept. The thread id is looked for before the runner checks, so a timed-out or cut stream still reports the session opencode printed (spec INV-5). Lines that are not JSON objects, such as plugin log lines, are skipped. The answer text is only the last message's text parts, so earlier narration ("Let me look at the files first.") is left out; a run whose last message has no text returns "". A continue is matched case-insensitively and returns the id the caller gave; a fork whose answer is its source is protocol_mismatch.
 RELATED DOCS: vidbyte/harnesses/README.md
-TESTS: tests/features/harness_threads/test_harness_threads_errors.py, tests/features/harness_threads/test_harness_threads_threads.py, tests/features/harness_threads/test_harness_threads_acceptance.py
+TESTS: tests/features/harness_threads/test_harness_threads_errors.py, tests/features/harness_threads/test_harness_threads_threads.py, tests/features/harness_threads/test_harness_threads_acceptance.py, tests/features/harness_threads/test_harness_threads_browser_mounts.py, tests/features/harness_threads/test_harness_threads_browser_lifecycle.py
 """
 
 from __future__ import annotations
@@ -17,13 +17,20 @@ import json
 from collections.abc import Mapping
 
 from vidbyte.harnesses.native.hostkit import NativeErrorFactory
-from vidbyte.lib.constants import native_threads
+from vidbyte.harnesses.native.opencode.mounts import OpencodeMounts
+from vidbyte.lib.constants import browser_tools, native_threads
+from vidbyte.lib.dataclasses.browser_tools import (
+    BrowserMount,
+    BrowserToolCall,
+    BrowserToolCalls,
+)
 from vidbyte.lib.dataclasses.native_threads import (
     NativeThreadRequest,
     NativeThreadResult,
 )
 from vidbyte.lib.dataclasses.process import CliOutcome
 from vidbyte.lib.dataclasses.validation import RecordFieldValidator
+from vidbyte.lib.enums.browser_tools import BrowserToolCallStatus
 from vidbyte.lib.enums.native_threads import (
     NativeHarness,
     NativeThreadProblem,
@@ -37,16 +44,19 @@ class OpencodeWire:
     """Builds the inline opencode config and reads the JSON events of one headless opencode run."""
 
     @staticmethod
-    def config_content(request: NativeThreadRequest) -> str:
+    def config_content(request: NativeThreadRequest, mount: BrowserMount | None = None) -> str:
         # @intent opencode-config-binds-the-key-to-the-models-provider
         # The key is bound to the provider before the slash in model,
         # because inline config beats a stored auth.json login; the
-        # skills member appears only when the caller passed skills.
+        # skills member appears only when the caller passed skills, and
+        # the mcp and permission members only on a browser call.
         provider, _slash, _model = (request.model or "").partition(native_threads.OPENCODE_MODEL_PROVIDER_SEPARATOR)
         options = {native_threads.OPENCODE_CONFIG_KEY_FIELD: request.api_key}
         config: dict[str, object] = {native_threads.OPENCODE_CONFIG_PROVIDER_FIELD: {provider: {native_threads.OPENCODE_CONFIG_OPTIONS_FIELD: options}}}
         if request.skills:
             config[native_threads.OPENCODE_CONFIG_SKILLS_FIELD] = {native_threads.OPENCODE_CONFIG_PATHS_FIELD: [str(skill) for skill in request.skills]}
+        if mount is not None:
+            config.update(OpencodeMounts.config(mount))
         return json.dumps(config)
 
     @staticmethod
@@ -95,6 +105,31 @@ class OpencodeWire:
         text = OpencodeWire._text(events)
         cap = native_threads.NATIVE_RESULT_TEXT_MAX_CHARS
         return NativeThreadResult(harness=NativeHarness.OPENCODE, thread_id=thread_id, text=text[:cap], text_truncated=len(text) > cap)
+
+    @staticmethod
+    def tool_calls(outcome: CliOutcome, mount: BrowserMount) -> BrowserToolCalls:
+        # @intent opencode-reader-skips-vendor-names-it-cannot-trust
+        # Each tool_use event on a mounted server, in the order
+        # opencode printed them: the name splits at the first
+        # underscore into the prefixed server id and the tool, a name
+        # that fails the record's rule is skipped rather than raised,
+        # and only a completed state counts as completed.
+        mounted = {browser_tools.BROWSER_OPENCODE_SERVER_PREFIX + server.selection.definition.tool.value: server.selection.definition.tool for server in mount.servers}
+        calls: list[BrowserToolCall] = []
+        for event in CliRunner.json_objects(outcome.stdout):
+            part = event.get(native_threads.OPENCODE_PART_FIELD)
+            name = part.get(native_threads.OPENCODE_TOOL_FIELD) if isinstance(part, dict) else None
+            state = part.get(native_threads.OPENCODE_STATE_FIELD) if isinstance(part, dict) else None
+            status = state.get(native_threads.OPENCODE_STATE_STATUS_FIELD) if isinstance(state, dict) else None
+            if event.get(native_threads.OPENCODE_TYPE_FIELD) != OpencodeEventType.TOOL_USE.value or not isinstance(name, str):
+                continue
+            server, separator, tool = name.partition(browser_tools.OPENCODE_TOOL_NAME_SEPARATOR)
+            if not separator or server not in mounted or not RecordFieldValidator.accepts_text(tool, max_chars=native_threads.NATIVE_NAME_MAX_CHARS, pattern=native_threads.NATIVE_NAME_PATTERN):
+                continue
+            finished = BrowserToolCallStatus.COMPLETED if status == native_threads.OPENCODE_COMPLETED_STATUS else BrowserToolCallStatus.FAILED
+            calls.append(BrowserToolCall(tool=mounted[server], name=tool, status=finished))
+        cap = browser_tools.BROWSER_TOOL_CALLS_MAX_ITEMS
+        return BrowserToolCalls(calls=tuple(calls[:cap]), truncated=len(calls) > cap)
 
     @staticmethod
     def _session(events: list[Mapping[str, object]]) -> str | None:

@@ -2,7 +2,7 @@
 
 ## High-Level Feature Description
 
-Nine async library functions run a vendor coding harness as a one-shot CLI process and return its answer and thread id: `run_`, `continue_` and `fork_` for Grok Build (`grok --single`), opencode (`opencode run --format json`) and Muse Code (`muse exec --json`, natively or through `wsl.exe` on Windows). They live in `vidbyte.harnesses.native`. The caller's API key, workspace, model and skill folders reach the vendor only through the child process's argv, environment and stdin, and every failure is one `NativeThreadError` with a closed failure code and a detailed message.
+Nine async library functions run a vendor coding harness as a one-shot CLI process and return its answer and thread id: `run_`, `continue_` and `fork_` for Grok Build (`grok --single`), opencode (`opencode run --format json`) and Muse Code (`muse exec --json`, natively or through `wsl.exe` on Windows). They live in `vidbyte.harnesses.native`, beside nine `<verb>_<harness>_with_browser` siblings that take the same parameters plus `tools` and `tool_keys`, mount the selected browser and web tools as MCP servers for that one call, and return a `BrowserThreadResult` with the tool calls the harness made and the artifact paths (`docs/spec/harness-browser-tools/spec.md`). The caller's API key, workspace, model and skill folders reach the vendor only through the child process's argv, environment and stdin, and every failure is one `NativeThreadError` with a closed failure code and a detailed message.
 
 ## Contract
 
@@ -14,7 +14,7 @@ Python callers of `vidbyte.harnesses.native`. Underneath: `CliArgv.build` and `C
 
 ## Inputs and Preconditions
 
-Offline only. Every vendor program is `fake_harness.py`, reached through the config records' `<harness>_command` fields or as an `.exe` (win32) or script (POSIX) stand-in placed on a PATH that holds only the sandbox's own folder. The user home (`USERPROFILE`, `HOME`) and the temp folder point into the sandbox. No real key, network, vendor CLI or WSL distro is used.
+Offline only. Every vendor program is `fake_harness.py`, reached through the config records' `<harness>_command` fields or as an `.exe` (win32) or script (POSIX) stand-in placed on a PATH that holds only the sandbox's own folder. The user home (`USERPROFILE`, `HOME`) and the temp folder point into the sandbox. No real key, network, vendor CLI or WSL distro is used. For the browser functions, `node` is a stand-in on that PATH that also plays the npm bundled beside it and the pinned MCP servers (`fake_browser.py`), the tool cache under the sandbox home is pre-populated or installed by that fake npm, and Chrome is a file at a patched search location; no real Node, npm, Chrome or MCP endpoint is used.
 
 ## Observable Outcomes
 
@@ -60,9 +60,16 @@ A vendor that silently creates a new session for an unknown id (Muse `exec --ses
 - `test_harness_threads_runner.py`: `CliRunner` and `CliInvocation` with the environment overlay, a run that ends at its leader's exit, and a cancel in the wait that follows.
 - `test_harness_threads_wsl.py`: Muse WSL mode on win32.
 - `test_harness_threads_static_policy.py`: INV-15's two `ast` rules and INV-20's import rule.
+- `test_harness_threads_browser_fakes.py`: the browser stand-ins themselves (node, npm, servers, the orphan browser, and the opencode, Grok and Muse mount rules) with no SDK code.
+- `test_harness_threads_browser_contract.py`: the browser surface (AC-3), records, enums, the four `browser.*` codes, constants, result records and the D-27 import layering.
+- `test_harness_threads_browser_registry.py`: the seed registry (AC-23), selection semantics, the `tools` grammar and every `tools`/`tool_keys` refusal without quoting (AC-4, AC-5, AC-8, AC-25, AC-29, AC-30).
+- `test_harness_threads_browser_mounts.py`: all nine functions (AC-2), narrowing (AC-6), key routes (AC-7, AC-9), Grok switches and budget (AC-14, AC-18), Muse WSL mode (AC-19, AC-31), remote tools (AC-22, AC-32), the Muse settings shape (AC-26), caps (AC-27), prefixed opencode ids (AC-28), determinism and the readers (AC-33).
+- `test_harness_threads_browser_runtime.py`: Node and Chrome checks (AC-10), the tool cache install and its failures (AC-11, EC-10 to EC-14), the per-call folder (EC-15), a missing harness after an install (EC-38) and the warm-call child count (NFR-5).
+- `test_harness_threads_browser_lifecycle.py`: the reap on return, raise, cancel and timeout (AC-13), artifacts, the required check (AC-12), the workspace (AC-16), concurrency (AC-21), caps (EC-29), echoed keys (INV-4) and `ProcessReaper`.
+- `test_harness_threads_browser_acceptance.py`: the browser spec's verbatim §4 snippet (AC-1).
 
 Run `PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads`.
 
 ## Omitted Testing Strategies
 
-Real vendor CLIs and real keys (they spend money and need accounts; the spec's live checks cover them), network probes, a UNC workspace in WSL mode (no UNC path a non-admin test can create), timing budgets (NFR-1) and source line counts (NFR-2), and the full local gate (AC-18, run by the gate itself). See `docs/spec/harness-thread-functions/test-plan.md` for every candidate that was left out and why.
+Real vendor CLIs and real keys (they spend money and need accounts; the spec's live checks cover them), network probes, a UNC workspace in WSL mode (no UNC path a non-admin test can create), timing budgets (NFR-1) and source line counts (NFR-2), and the full local gate (AC-18, run by the gate itself). See `docs/spec/harness-thread-functions/test-plan.md` for every candidate that was left out and why. For the browser functions: real Node, npm, Chrome, MCP servers and remote endpoints, a real Muse WSL-mode run off win32, the lint ratchets and line counts (NFR-7), the README checks (AC-24) and the full gate (AC-20); see `docs/spec/harness-browser-tools/test-plan.md`.
