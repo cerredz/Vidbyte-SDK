@@ -66,7 +66,7 @@ The defaults are generous on purpose: the point of this agent is work that outgr
 - Workspace: `max_files` 2,000, `max_tokens` 2,000,000 in total, `max_file_tokens` 100,000 per note or seed. The bookkeeping files count only toward the total.
 - Memory: entries of at most `max_entry_tokens` (150) tokens with up to eight tags and eight refs, `max_entries_per_agent` (25) accepted `remember` calls per agent, ten new files per agent, and up to 100 context items per task card.
 - Every agent stops after 500 model turns and cuts each ordinary tool result at 200,000 characters, unless you pass another `loop`; one `loop` applies to every agent in the tree.
-- Each agent's history is trimmed to 90,000 tokens by dropping the oldest tool exchanges first; the task, the rules, and the map are never trimmed. With the largest role prompt (about 2,100 tokens), the tool descriptions (about 5,000), and an 8,000-token map, an agent's whole context stays near 105,000 tokens, inside a 128,000-token model.
+- Each agent's history is trimmed to 90,000 tokens by dropping the oldest tool exchanges first; the task, the rules, and the map are never trimmed. With the largest role prompt (about 2,900 tokens), the tool descriptions (about 5,900), and an 8,000-token map, an agent's whole context stays near 107,000 tokens, inside a 128,000-token model.
 - A card's summary and review are each cut to 800 tokens, and so are its dropped entries and its files in the text the parent reads; the journal keeps both lists whole. The map is cut at 8,000 tokens.
 - Tokens are estimated as characters divided by four everywhere (`TokenEstimate`).
 - `on_event` defaults to `None`: no events are built and nothing is logged for them.

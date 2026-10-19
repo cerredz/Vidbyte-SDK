@@ -3,7 +3,7 @@
 PURPOSE: Shared helpers for the CodexHost feature pack: the spec's literal texts and tables, the privacy canaries, the openai-codex skip gate, a duck-typed stub host for the tool tests, and HostTestCase, which runs a real CodexHost against the in-memory app-server.
 ROLE IN CODEBASE: Imported by every test module in tests/features/codex_host/. It imports nothing the feature adds and nothing from openai-codex at module level, so every module still collects before the feature exists and on CI, which installs only the dev extra.
 ARCHITECTURE NOTE: HostTestCase.asyncSetUp patches the one seam spec section 13 names, vidbyte.harnesses.native.codex.connection.CodexClient, with the fake client from codex_host_fakes.py, and shutil.which with a recorder. Everything above the seam (CodexHost, its translators, preflight, pricing, records) runs unmocked. StubCodexHost stands in for CodexHost only in the tool tests, which spec section 13 allows because the tools import CodexHost under TYPE_CHECKING only.
-FUNCTION INVENTORY: requires_sdk skips a class when openai-codex is missing; error_texts(exc) returns every text an error shows, its visible chain included; input_texts(params) reads a turn request's input items; HostTestCase.open_host / close_host / spawn / wait_done / assert_problem / assert_codex_error / run_in_other_loop drive a host, and patch_connection / patch_skill_functions / patch_platform / wait_for_request / wait_until / ask / count script and observe the fake app-server; StubCodexHost answers the twenty-seven host methods from scripted records; make_echo_tool builds a small dynamic tool; thread_suffix is the " Thread: <id>." the error mapper appends; FieldCarryingMapper maps as the host's CodexErrorMapper does and also sets error_type and thread_id, and changed_error_fields lists the KEPT_ERROR_FIELDS a rebuilt error lost (thread-helpers review R-17, R-18). The thread-helpers spec adds HELPER_METHODS, its message texts, four codes, four rows and eleven tool rows.
+FUNCTION INVENTORY: requires_sdk skips a class when openai-codex is missing; error_texts(exc) returns every text an error shows, its visible chain included; input_texts(params) reads a turn request's input items; HostTestCase.open_host / close_host / spawn / wait_done / assert_problem / assert_codex_error / run_in_other_loop drive a host, and patch_connection / patch_skill_functions / patch_platform / wait_for_request / wait_until / ask / count script and observe the fake app-server; StubCodexHost answers the twenty-seven host methods from scripted records; make_echo_tool builds a small dynamic tool; mapped_summary checks a CodexErrorMapper message's head and its likely-cause and next-step tail and returns what lies between, and thread_suffix is the thread sentence the mapper adds there; FieldCarryingMapper maps as the host's CodexErrorMapper does and records every error, and changed_error_fields lists the KEPT_ERROR_FIELDS a rebuilt error lost (thread-helpers review R-17, R-18). The thread-helpers spec adds HELPER_METHODS, its message texts, four codes, four rows and eleven tool rows.
 COMMON MODIFICATION PATTERNS: When the spec changes a next-step text, a tool name or a classification row, change the literal here, never by reading the production constant. Add a host helper here only when two or more modules need it.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import vidbyte.harnesses.native, vidbyte.lib.dataclasses.codex_host, the new enums or openai_codex at module level: a missing feature must fail each test, not abort collection. 2. Do not start a process or touch the network. 3. Do not copy production logic; tests assert the spec's literal values.
 KNOWN EDGE CASES: The privacy canaries are unique strings, so finding one in any output proves a leak. StubCodexHost reports a handle RUNNING until a test marks it finished, which is how the live-turn cap sees running turns.
@@ -24,6 +24,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 from unittest import mock
 
+from vidbyte.lib.constants.codex_host import CODEX_HOST_LIKELY_CAUSES
 from vidbyte.lib.dataclasses.tools import ToolCall, ToolPermission, ToolResult, ToolSpec
 from vidbyte.tools.base import BaseTool
 
@@ -233,8 +234,23 @@ BUSY_TEXT = "The thread already has a running turn on this host."
 
 
 def thread_suffix(thread_id: str) -> str:
-    """The text CodexErrorMapper.error appends to a message when it names a thread (spec section 9.2)."""
-    return f" Thread: {thread_id}."
+    """The sentence CodexErrorMapper.error adds after the summary when it names a thread (PR #1055 review)."""
+    return f" The thread id was {thread_id}."
+
+
+def mapped_summary(case: unittest.TestCase, error: Any) -> str:
+    """What a CodexErrorMapper message says between its head and its tail, after checking both.
+
+    The PR #1055 review asked for messages in the lib error-packet shape: "<operation> failed with
+    <code>.", the summary and the thread sentence, then "Likely cause: <cause>" and "Next step: <step>"
+    for that code. The head and tail are written out here, so a test reads only the summary.
+    """
+    code = error.failure_code
+    head = f"{error.operation} failed with {code}. "
+    tail = f" Likely cause: {CODEX_HOST_LIKELY_CAUSES[code]} Next step: {NEXT_STEPS[code]}"
+    case.assertTrue(error.message.startswith(head), error.message)
+    case.assertTrue(error.message.endswith(tail), error.message)
+    return error.message[len(head) : len(error.message) - len(tail)]
 
 
 def error_texts(exc: BaseException) -> list[str]:
@@ -277,11 +293,11 @@ def changed_error_fields(error: Any, original: Any) -> dict[str, tuple[Any, Any]
 
 
 class FieldCarryingMapper:
-    """The connection's CodexErrorMapper, plus the error_type and thread_id fields that CodexAgentError gained on main (#1116).
+    """The connection's CodexErrorMapper, recording every error it maps.
 
-    No codex-host path sets either field today, because CodexErrorMapper.error passes neither. This mapper stands in for
-    one that does, so a rebuild that drops them is visible. Install it with HostTestCase.patch_connection("CodexErrorMapper",
-    mapper) after the host opens. It records every error it maps.
+    CodexErrorMapper.error sets error_type, thread_id, method and the packet's likely cause, docs and tests (PR #1055
+    review), so a rebuild that drops any of them is visible. Install it with HostTestCase.patch_connection("CodexErrorMapper",
+    mapper) after the host opens.
     """
 
     def __init__(self) -> None:
@@ -295,12 +311,9 @@ class FieldCarryingMapper:
         return getattr(self._real, name)
 
     def from_exception(self, exc: Exception, operation: Any, method: str, *, dead: bool, bound_seconds: float, thread_id: str = "") -> Any:
-        from vidbyte.lib.errors import CodexAgentError
-
         error = self._real.from_exception(exc, operation, method, dead=dead, bound_seconds=bound_seconds, thread_id=thread_id)
-        carried = CodexAgentError(error.message, failure_code=error.failure_code, operation=error.operation, error_type=type(exc).__name__, next_step=error.next_step, thread_id=thread_id)
-        self.mapped.append(carried)
-        return carried
+        self.mapped.append(error)
+        return error
 
     def only(self, operation: str) -> Any:
         """The one error mapped for the operation; the tests rely on there being exactly one."""

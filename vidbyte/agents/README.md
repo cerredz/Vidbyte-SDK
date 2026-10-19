@@ -395,7 +395,7 @@ credential and limits.
 - `coding.py`: `CodingAgent`, a `BaseAgent` preloaded with bash, read, write, edit, glob, grep, and one web-fetch tool over one root folder; its checks live in `CodingAgentSettings` and its tools in `CodingAgentTools`.
 - `infinite/`: `InfiniteMemoryAgent`, a root agent that delegates work to generator and verifier subagent pairs through `launch_subagent` and keeps memory in one guarded workspace folder; resumable from its run journal; streams typed run events and builds a deterministic run handoff.
 - `coding_context/`: `CodingContextWindow` and one loader per section (`AgentsMdLoader`), which build the context a `CodingAgent` shows after its system prompt.
-- `skills/`: `SkillLoader` and one resolver per source, the agent-agnostic loader that turns declarative skill entries into `SkillDocument`s for `JevAgent`'s skill preload.
+- `skills/`: `SkillLoader` and one resolver per source, the agent-agnostic loader that turns declarative skill entries into `SkillDocument`s for `JevAgent`'s skill preload and for any caller that imports `SkillLoader` from the package root.
 - `multi/`: ledger-driven manager/worker orchestration and transfer controls.
 - `output/`: the `OutputConnector` contract, reply shaping, and `OutputDispatcher`, which delivers each finished reply to the configured `outputs`.
 - `types.py`: agent messages, input envelopes, cards, and specs.
