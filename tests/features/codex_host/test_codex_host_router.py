@@ -1,11 +1,11 @@
 """FILE: tests/features/codex_host/test_codex_host_router.py
 
-PURPOSE: Proves CodexServerRequestRouter answers every server request the app-server sends, on the openai-codex reader thread, without ever raising: a registered thread's tool runs, an unregistered thread's tool call fails with the fixed text, both approval methods get accept, any other method gets an empty answer, and a tool that raises or a call with no params gets a failed tool response.
-ROLE IN CODEBASE: Router layer of tests/features/codex_host/ (spec AC-30, INV-28, INV-29, D-18, EC-47). The class needs the optional openai-codex extra, so CI skips it.
+PURPOSE: Proves CodexServerRequestRouter answers every server request the app-server sends, on the openai-codex reader thread, without ever raising: a registered thread's tool runs, an unregistered thread's tool call fails with the fixed text, both approval methods are declined on a host without an approval_handler, any other method gets an empty answer, and a tool that raises or a call with no params gets a failed tool response.
+ROLE IN CODEBASE: Router layer of tests/features/codex_host/ (spec AC-30, INV-29, D-18, EC-47; docs/spec/codex-host-hardening/spec.md INV-15, INV-16 and D-3 supersede the accept answer of codex-host INV-28 and D-16). The class needs the optional openai-codex extra, so CI skips it. The handler path and every other server-request method are proved in test_codex_host_approvals.py.
 ARCHITECTURE NOTE: Each request goes through the fake's stdout to the real SDK reader thread, which calls the approval_handler the host gave CodexClient (the router, spec section 13) and writes its answer back; the test reads that answer. A router that raised would kill the reader, which the fake records in reader_errors.
 COMMON MODIFICATION PATTERNS: Add a server-request method as one more ask() with its expected answer.
 KNOWN EDGE CASES: openai-codex passes params as None when they are not a JSON object, so the router must treat a None tool call as malformed rather than index into it.
-RELATED DOCS: tests/features/codex_host/FEATURE.md; docs/spec/codex-host/spec.md sections 6.1 (INV-28, INV-29) and 8.1 (D-18).
+RELATED DOCS: tests/features/codex_host/FEATURE.md; docs/spec/codex-host/spec.md sections 6.1 (INV-28, INV-29) and 8.1 (D-18); docs/spec/codex-host-hardening/spec.md sections 6.1 (INV-15, INV-16) and 8.1 (D-3).
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/codex_host/test_codex_host_router.py
 """
 
@@ -44,7 +44,7 @@ class _ExplodingTool(BaseTool):
 
 @requires_sdk
 class CodexHostRouterTests(HostTestCase):
-    """AC-30: the router answers every server request and never raises."""
+    """AC-30 and hardening INV-15/INV-16: the router answers every server request, fail-closed, and never raises."""
 
     async def test_the_router_answers_every_server_request_and_never_raises(self) -> None:
         from vidbyte.lib.dataclasses.codex_host import CodexSpawnRequest
@@ -59,11 +59,12 @@ class CodexHostRouterTests(HostTestCase):
         # EC-47: a thread with no tools on this host gets the fixed text, not an exception.
         unregistered = {**call, "threadId": plain.thread_id, "turnId": plain.turn_id, "callId": "call-2"}
         self.assertEqual(await self.ask("item/tool/call", unregistered), {"success": False, "contentItems": [{"type": "inputText", "text": UNREGISTERED_TOOL_TEXT}]})
-        # INV-28: the SDK's fallback answers, for approvals that still reach the host and for unknown requests.
+        # Hardening INV-15, INV-16 and D-3: without an approval_handler, approvals that still reach the host are declined,
+        # and an unknown request still gets an empty answer.
         for method in APPROVAL_METHODS:
             with self.subTest(method=method):
                 params = {"threadId": tooled.thread_id, "turnId": tooled.turn_id, "itemId": "item-1"}
-                self.assertEqual(await self.ask(method, params), {"decision": "accept"})
+                self.assertEqual(await self.ask(method, params), {"decision": "decline"})
         self.assertEqual(await self.ask("item/somethingNew/request", {"threadId": tooled.thread_id}), {})
         # A tool that raises, and a tool call with no params, both get a failed tool response.
         exploding = await self.ask("item/tool/call", {**call, "callId": "call-3", "tool": "explode", "arguments": {}})

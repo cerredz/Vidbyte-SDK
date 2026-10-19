@@ -20,6 +20,8 @@ import unittest
 from typing import Any
 
 from tests.features.codex_host.codex_host_support import (
+    GOAL_FIELD_MESSAGE,
+    GOAL_SPAWN_OWNER,
     NEXT_STEPS,
     TOOL_NAMES,
     TOOL_TABLE,
@@ -67,6 +69,23 @@ def _valid_arguments(handle: dict[str, str]) -> dict[str, dict[str, Any]]:
         "list_codex_skills": {},
         "run_codex_skill": {"skill": "openai-docs", "prompt": "Find the event that streams text."},
         "run_codex_openai_docs": {"question": "Which event streams text deltas?"},
+        # docs/spec/codex-host-first-class/spec.md section 9.2 tools 27 to 42; the handle tools use the scope's own handle.
+        "update_codex_thread_settings": {"thread_id": "thr-elsewhere", "effort": "high"},
+        "list_codex_collaboration_modes": {},
+        "run_codex_plan": {"prompt": "Plan a fix for the failing test."},
+        "wait_codex_turns": {"turns": [dict(handle)]},
+        "list_codex_mcp_servers": {},
+        "update_codex_turn_settings": {**handle, "effort": "low"},
+        "get_codex_memory_status": {},
+        "start_codex_side_chat": {"thread_id": "thr-elsewhere", "prompt": "Which step of the plan is riskiest?"},
+        "pause_codex_goal": {"thread_id": "thr-elsewhere"},
+        "resume_codex_goal": {"thread_id": "thr-elsewhere"},
+        "archive_codex_thread": {"thread_id": "thr-elsewhere"},
+        "unarchive_codex_thread": {"thread_id": "thr-elsewhere"},
+        "rename_codex_thread": {"thread_id": "thr-elsewhere", "name": "Login fix"},
+        "list_codex_background_terminals": {"thread_id": "thr-elsewhere"},
+        "search_codex_thread_content": {"query": "login"},
+        "list_codex_child_threads": {"thread_id": "thr-elsewhere"},
     }
 
 
@@ -150,7 +169,8 @@ class CodexHostToolsShapeTests(_ToolCase):
         import vidbyte.tools.builtins.codex as builtin_codex
 
         tools = _toolset(StubCodexHost(), max_live_turns=2)
-        self.assertEqual(len(tools), 26)
+        # docs/spec/codex-host-first-class/spec.md section 13: the catalog grows from 26 to 42 tools (INV-41).
+        self.assertEqual(len(tools), 42)
         self.assertEqual(tuple(tools.names()), TOOL_NAMES)
         for tool, (name, class_name, permission, parameters, required) in zip(tools, TOOL_TABLE):
             with self.subTest(tool=name):
@@ -280,6 +300,7 @@ class CodexHostToolArgumentTests(_ToolCase):
     """AC-26, INV-34, EC-53 to EC-55: the posture comes from spawn_defaults; arguments are checked by the tool."""
 
     async def test_spawn_takes_the_posture_from_defaults_and_six_values_from_the_model(self) -> None:
+        from vidbyte.lib.dataclasses.codex import CodexTurnSettings
         from vidbyte.lib.dataclasses.codex_host import CodexGoal
         from vidbyte.lib.enums.codex import CodexReasoningEffort
 
@@ -307,7 +328,17 @@ class CodexHostToolArgumentTests(_ToolCase):
         await _call(tools, "spawn_codex_thread", {**nulls, "prompt": "Fix the failing test."})
         self.assertEqual(host.last("spawn_codex_thread")[0][0], dataclasses.replace(defaults, prompt="Fix the failing test."))
 
-        await _call(tools, "spawn_codex_thread", {"goal_objective": "Ship the fix.", "goal_token_budget": 500, "prompt": None})
+        # docs/spec/codex-host-hardening/spec.md INV-34, D-15, Q-19 and EC-32: a goal request refuses a non-default turn when it
+        # is built, and this posture's turn sets effort and summary, so the goal call is an error result naming turn and the
+        # host is never called.
+        spawns = host.names().count("spawn_codex_thread")
+        refused = await _call(tools, "spawn_codex_thread", {"goal_objective": "Ship the fix.", "goal_token_budget": 500, "prompt": None})
+        self.assert_error_result(refused, "configuration.invalid_argument")
+        self.assertIn(GOAL_FIELD_MESSAGE.format(owner=GOAL_SPAWN_OWNER, name="turn"), refused.output)
+        self.assertEqual(host.names().count("spawn_codex_thread"), spawns)
+        # The same goal call on a posture without a turn setting reaches the host.
+        goal_tools = _toolset(host, spawn_defaults=_defaults(turn=CodexTurnSettings()))
+        await _call(goal_tools, "spawn_codex_thread", {"goal_objective": "Ship the fix.", "goal_token_budget": 500, "prompt": None})
         goal_request = host.last("spawn_codex_thread")[0][0]
         self.assertEqual((goal_request.prompt, goal_request.goal), ("", CodexGoal(objective="Ship the fix.", token_budget=500)))
 

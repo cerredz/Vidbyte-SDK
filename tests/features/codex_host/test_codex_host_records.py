@@ -1,6 +1,6 @@
 """FILE: tests/features/codex_host/test_codex_host_records.py
 
-PURPOSE: Proves the lib contracts CodexHost is built on: every new record rejects bad input with a ConfigurationError naming the field, the USER reviewer is refused with the D-16 CodexAgentError, the fifteen new failure codes sit where section 12.3 puts them with their classification rows and next steps, CodexAgentError gains next_step without changing old packets, and the enums carry openai-codex's wire values.
+PURPOSE: Proves the lib contracts CodexHost is built on: every new record rejects bad input with a ConfigurationError naming the field, a USER reviewer request now builds (codex-host-hardening D-5 moved the refusal to the host), the fifteen new failure codes sit where section 12.3 puts them with their classification rows and next steps, CodexAgentError gains next_step without changing old packets, and the enums carry openai-codex's wire values.
 ROLE IN CODEBASE: Contract layer of tests/features/codex_host/ (spec AC-29, AC-35, INV-26, INV-40, INV-41, EC-38, EC-63; sections 8.5, 9.1, 9.3, 12.3 rows 1, 2, 4, 5, 6). It needs no host and no openai-codex, so CI runs it; one cross-check against the SDK's generated enums is gated.
 ARCHITECTURE NOTE: Each invalid-record row starts from a valid baseline and breaks one rule, so a failure names exactly the rule that did not hold. The review-target and snapshot rules are small closed domains, so they are checked exhaustively instead of by sampling.
 COMMON MODIFICATION PATTERNS: When section 9.1 adds a rule, add one row to INVALID_ROWS; when an enum gains a member, add it to EXPECTED_ENUMS from the spec, never from the production module.
@@ -59,7 +59,56 @@ EXPECTED_ENUMS: dict[str, dict[str, str]] = {
     "CodexReviewDelivery": {"INLINE": "inline", "DETACHED": "detached"},
     "CodexGoalStatus": {"NONE": "", "ACTIVE": "active", "PAUSED": "paused", "BLOCKED": "blocked", "USAGE_LIMITED": "usageLimited", "BUDGET_LIMITED": "budgetLimited", "COMPLETE": "complete"},
     # docs/spec/codex-host-thread-helpers/spec.md section 13: DELETE_CODEX_THREAD is the one operation without a tool.
-    "CodexHostOperation": {"OPEN_HOST": "open_host", "VALIDATE_SPAWN_REQUEST": "validate_spawn_request", **{name.upper(): name for name in TOOL_NAMES}, "DELETE_CODEX_THREAD": "delete_codex_thread"},
+    # docs/spec/codex-host-hardening/spec.md section 8.5: FORGET_CODEX_TURNS is the second, local and toolless (NG-3).
+    "CodexHostOperation": {
+        "OPEN_HOST": "open_host",
+        "VALIDATE_SPAWN_REQUEST": "validate_spawn_request",
+        **{name.upper(): name for name in TOOL_NAMES},
+        "DELETE_CODEX_THREAD": "delete_codex_thread",
+        "FORGET_CODEX_TURNS": "forget_codex_turns",
+        # docs/spec/codex-host-first-class/spec.md section 13: the nine new operations without a tool (INV-42).
+        "STREAM_CODEX_TURN": "stream_codex_turn",
+        "SET_CODEX_THREAD_MEMORY_MODE": "set_codex_thread_memory_mode",
+        "RESET_CODEX_MEMORIES": "reset_codex_memories",
+        "CREATE_CODEX_WORKTREE": "create_codex_worktree",
+        "EDIT_CODEX_GOAL": "edit_codex_goal",
+        "CLEAR_CODEX_GOAL": "clear_codex_goal",
+        "REVERT_CODEX_THREAD": "revert_codex_thread",
+        "INJECT_CODEX_ITEMS": "inject_codex_items",
+        "CLEAN_CODEX_BACKGROUND_TERMINALS": "clean_codex_background_terminals",
+    },
+    # docs/spec/codex-host-first-class/spec.md section 8.5, verbatim: the nine new enums. CodexMcpAuthStatus names "bearerToken" BEARER (r5, D-40).
+    "CodexCollaborationModeKind": {"NONE": "", "PLAN": "plan", "DEFAULT": "default"},
+    "CodexMemoryMode": {"ENABLED": "enabled", "DISABLED": "disabled"},
+    "CodexMcpAuthStatus": {"UNKNOWN": "unknown", "UNSUPPORTED": "unsupported", "NOT_LOGGED_IN": "notLoggedIn", "BEARER": "bearerToken", "OAUTH": "oAuth"},
+    "CodexMcpConnectionStatus": {
+        "NOT_REPORTED": "",
+        "NOT_STARTED": "notStarted",
+        "STARTING": "starting",
+        "CONNECTED": "connected",
+        "AUTHENTICATION_REQUIRED": "authenticationRequired",
+        "FAILED": "failed",
+        "CANCELLED": "cancelled",
+        "DISABLED": "disabled",
+    },
+    "CodexMcpServerDetail": {"FULL": "full", "TOOLS_AND_AUTH_ONLY": "toolsAndAuthOnly"},
+    "CodexTurnSettingsStatus": {"APPLIED": "applied", "TARGET_UNAVAILABLE": "targetUnavailable"},
+    "CodexTurnEventKind": {
+        "ITEM_STARTED": "item_started",
+        "ITEM_COMPLETED": "item_completed",
+        "MESSAGE_DELTA": "message_delta",
+        "REASONING_SUMMARY_DELTA": "reasoning_summary_delta",
+        "PLAN_DELTA": "plan_delta",
+        "COMMAND_OUTPUT_DELTA": "command_output_delta",
+        "FILE_CHANGE_DELTA": "file_change_delta",
+        "PLAN_UPDATED": "plan_updated",
+        "DIFF_UPDATED": "diff_updated",
+        "USAGE_UPDATED": "usage_updated",
+        "GAP": "gap",
+        "ENDED": "ended",
+    },
+    "CodexPlanStepStatus": {"PENDING": "pending", "IN_PROGRESS": "inProgress", "COMPLETED": "completed"},
+    "CodexTurnWaitMode": {"FIRST_COMPLETED": "FIRST_COMPLETED", "ALL_COMPLETED": "ALL_COMPLETED"},
 }
 
 # The openai-codex 0.162.1 generated type each spec enum mirrors, and how its wire values are read.
@@ -77,6 +126,13 @@ SDK_WIRE_SOURCES = {
     "CodexReviewDelivery": ("ReviewDelivery", "enum"),
     "CodexGoalStatus": ("ThreadGoalStatus", "enum"),
     "CodexSkillScope": ("SkillScope", "enum"),
+    # docs/spec/codex-host-first-class/spec.md section 13: the wire enums the new enums mirror; "" stands for null or absent.
+    "CodexCollaborationModeKind": ("ModeKind", "enum"),
+    "CodexMcpAuthStatus": ("McpAuthStatus", "enum"),
+    "CodexMcpConnectionStatus": ("McpServerConnectionStatus", "enum"),
+    "CodexMcpServerDetail": ("McpServerStatusDetail", "enum"),
+    "CodexMemoryMode": ("ThreadMemoryMode", "enum"),
+    "CodexPlanStepStatus": ("TurnPlanStepStatus", "enum"),
 }
 
 RECORD_NAMES = (
@@ -355,19 +411,21 @@ class CodexHostRecordValidationTests(unittest.TestCase):
 
     # AC-35, EC-63, D-16: the one exception to the error type.
     def test_user_reviewer_is_refused_when_any_spawn_request_is_built(self) -> None:
+        # docs/spec/codex-host-hardening/spec.md INV-20 and D-5 supersede the construction-time refusal: the request
+        # builds, and the refusal moves to the first host call on a host without an approval_handler
+        # (test_codex_host_approvals.py proves that half). The test keeps its name so its history stays traceable.
         from vidbyte.lib.dataclasses.codex_host import CodexSpawnRequest
         from vidbyte.lib.enums.codex import CodexApprovalsReviewer
 
         # A request, and the empty-prompt shape that overrides and spawn_defaults use.
         for prompt in ("Fix the failing test.", ""):
             with self.subTest(prompt=prompt):
-                with self.assertRaises(CodexAgentError) as caught:
-                    CodexSpawnRequest(prompt=prompt, approvals_reviewer=CodexApprovalsReviewer.USER)
-                error = caught.exception
-                self.assertEqual(error.failure_code, "configuration.unsupported_combination")
-                self.assertEqual(error.operation, "validate_spawn_request")
-                self.assertEqual(error.next_step, USER_REVIEWER_TEXT)
-                self.assertIn("approvals_reviewer", error.message)
+                request = CodexSpawnRequest(prompt=prompt, approvals_reviewer=CodexApprovalsReviewer.USER)
+                self.assertIs(request.approvals_reviewer, CodexApprovalsReviewer.USER)
+                self.assertEqual(request.prompt, prompt)
+        # The type check stays (section 9.1 "(-)" row): a value of another type is still refused.
+        with self.assertRaises(ConfigurationError):
+            CodexSpawnRequest(prompt="Fix it.", approvals_reviewer="nobody")
 
     def test_review_target_fields_follow_their_kind_exhaustively(self) -> None:
         from vidbyte.lib.dataclasses.codex_host import CodexReviewTarget
@@ -468,7 +526,6 @@ class CodexHostErrorContractTests(unittest.TestCase):
             "CODEX_USAGE_UPDATED_NOTIFICATION": "thread/tokenUsage/updated",
             "CODEX_GOAL_UPDATED_NOTIFICATION": "thread/goal/updated",
             "CODEX_GOAL_CLEARED_NOTIFICATION": "thread/goal/cleared",
-            "CODEX_APPROVAL_ACCEPT_DECISION": "accept",
             "CODEX_UNREGISTERED_TOOL_TEXT": UNREGISTERED_TOOL_TEXT,
         }
         for name, value in expected.items():
@@ -479,7 +536,12 @@ class CodexHostErrorContractTests(unittest.TestCase):
             {key: tuple(pair) for key, pair in constants.CODEX_APPROVAL_MODE_WIRE.items()},
             {"auto_review": ("on-request", "auto_review"), "deny_all": ("never", "")},
         )
-        self.assertEqual(set(constants.CODEX_ACCEPTED_APPROVAL_METHODS), {"item/commandExecution/requestApproval", "item/fileChange/requestApproval"})
+        # docs/spec/codex-host-hardening/spec.md D-3 and section 9.4 item 3: the accept fallback's two constants are gone,
+        # from the module and from its __all__.
+        for removed in ("CODEX_APPROVAL_ACCEPT_DECISION", "CODEX_ACCEPTED_APPROVAL_METHODS"):
+            with self.subTest(removed=removed):
+                self.assertFalse(hasattr(constants, removed))
+                self.assertNotIn(removed, constants.__all__)
         # D-3 and D-31: the request bound is the bridge bound, and the tool wait clamp stays strictly below it.
         self.assertEqual(constants.CODEX_HOST_REQUEST_TIMEOUT_SECONDS, constants.CODEX_TOOL_CALL_TIMEOUT_SECONDS)
         self.assertLess(constants.CODEX_HOST_TOOL_MAX_WAIT_SECONDS, constants.CODEX_TOOL_CALL_TIMEOUT_SECONDS)

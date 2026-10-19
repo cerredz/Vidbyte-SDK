@@ -3,10 +3,10 @@
 PURPOSE: Builds every failure CodexHost reports: the CodexProblem records snapshots and readiness carry, the CodexAgentError its methods raise, and the mapping from openai-codex exceptions and turn errors to the section 9.2 failure codes.
 ROLE IN CODEBASE: The error layer of vidbyte/harnesses/native/codex/; the host, its connection, preflight, collaborators and response translator call it, so each failure code, operation, likely cause and next step is chosen in one place.
 ARCHITECTURE NOTE: A static helper class with no values of its own: every sentence, table and bound comes from vidbyte/lib/constants/codex_host.py and vidbyte/lib/constants/codex.py. error() composes each message the way the lib error packets read (operation and code, what happened, the thread, the likely cause, the next step) and fills CodexAgentError's diagnostic fields with that code's own cause, the host's docs and its tests. openai-codex is imported inside from_exception only, so importing this module never loads the SDK (D-21).
-COMMON MODIFICATION PATTERNS: A new failure source gets a branch in from_exception or a small builder here that passes its summary sentence to error(); a new code needs its row in CODEX_HOST_LIKELY_CAUSES and CODEX_NEXT_STEPS. Callers raise the result from None.
-KNOWN EDGE CASES: A plain CodexError is exactly that class, never a subclass; once the connection's death flag is set every failure is codex.process_exited, because openai-codex fails every waiter with the reader's own error, which can quote a raw stdout line (EC-72). No message carries an exception's own text, stderr, env values or the account email; Codex's JSON-RPC message, the method, the code and a type name are the only variable parts (INV-9).
-RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.1 D-13 and D-27, and 9.2 error codes); vidbyte/lib/errors/base.py (CodexAgentError's packet)
-TESTS: tests/features/codex_host/test_codex_host_failures.py, tests/features/codex_host/test_codex_host_turns.py, tests/features/codex_host/test_codex_host_error_details.py
+COMMON MODIFICATION PATTERNS: A new failure source gets a branch in from_exception or a small builder here that passes its summary sentence to error(); a new code needs its row in CODEX_HOST_LIKELY_CAUSES and CODEX_NEXT_STEPS. Callers raise the result from None. A wrapper that re-raises an inner call's error under its own name passes it through relabel(), which keeps every other field.
+KNOWN EDGE CASES: A plain CodexError is exactly that class, never a subclass; once the connection's death flag is set every failure is codex.process_exited, because openai-codex fails every waiter with the reader's own error, which can quote a raw stdout line (EC-72). No message carries an exception's own text, stderr, env values or the account email; Codex's JSON-RPC message, the method, the code and a type name are the only variable parts (INV-9). The one exception is CODEX_HOST_WORKTREE_FAILED_MESSAGE, which CodexThreadMethods fills with git's exit code and first stderr line, cut to CODEX_HOST_WORKTREE_DETAIL_MAX_CHARS (first-class INV-29, EC-34). A thread/read error means an unknown thread only when Codex refused the request (InvalidRequest or InvalidParams); an overload or internal error is codex.api_error, so a busy app-server never reads as a missing thread (hardening D-8, which supersedes codex-host D-13's thread/read clause). A turn/steer InvalidRequest means the turn ended before the steer arrived. A ConfigurationError from a raw call's parse step means Codex answered in a shape the record refuses, so it is codex.protocol_mismatch like a rejected SDK model (first-class D-4). A plain CodexError from either goal start, the start or the resume, is that start's window elapsing (first-class INV-31). A JSON-RPC error inside the goal resume's start can come only from its one thread/goal/set, so it names that method, as Codex answered it, not the start's call name.
+RELATED DOCS: docs/spec/codex-host/spec.md (sections 8.1 D-13 and D-27, and 9.2 error codes); docs/spec/codex-host-hardening/spec.md (INV-4, INV-6, INV-31, D-8 and D-22); docs/spec/codex-host-first-class/spec.md (D-4, INV-2, INV-31); vidbyte/lib/errors/base.py (CodexAgentError's packet)
+TESTS: tests/features/codex_host/test_codex_host_failures.py, tests/features/codex_host/test_codex_host_turns.py, tests/features/codex_host/test_codex_host_error_details.py, tests/features/codex_host/test_codex_host_hardening_contract.py (classification and relabel), tests/features/codex_host/test_codex_host_feature_contract.py
 """
 
 from __future__ import annotations
@@ -15,16 +15,19 @@ from pydantic import ValidationError
 
 from vidbyte.lib.constants.codex import (
     CODEX_ERROR_INFO_CODES,
+    CODEX_GOAL_SET_METHOD,
     CODEX_HOST_MINIMUM_VERSION,
     CODEX_NEXT_STEPS,
     CODEX_SDK_EXTRA,
     CODEX_THREAD_FORK_METHOD,
     CODEX_THREAD_READ_METHOD,
+    CODEX_TURN_STEER_METHOD,
 )
 from vidbyte.lib.constants.codex_host import (
-    CODEX_GOAL_START_CALL,
+    CODEX_GOAL_RESUME_CALL,
     CODEX_HOST_EXITED_DURING_MESSAGE,
     CODEX_HOST_GOAL_PROBLEM_CODES,
+    CODEX_HOST_GOAL_START_CALLS,
     CODEX_HOST_GOAL_STOPPED_MESSAGE,
     CODEX_HOST_LIKELY_CAUSE_SENTENCE,
     CODEX_HOST_LIKELY_CAUSES,
@@ -54,7 +57,7 @@ from vidbyte.lib.dataclasses.codex import CodexTurnError
 from vidbyte.lib.dataclasses.codex_host import CodexProblem
 from vidbyte.lib.enums.codex import CodexGoalStatus, CodexHostOperation
 from vidbyte.lib.enums.failure import FailureCode
-from vidbyte.lib.errors import CodexAgentError
+from vidbyte.lib.errors import CodexAgentError, ConfigurationError
 
 
 class CodexErrorMapper:
@@ -123,16 +126,20 @@ class CodexErrorMapper:
             return cls.error(FailureCode.CODEX_PROCESS_EXITED, summary, operation, thread_id, method=method, error_type=error_type)
         # A JSON-RPC error carries Codex's own message and code, which
         # are safe to show; the method decides what the error means.
+        # The goal resume's start sends one thread/goal/set, so its
+        # refusal names that method (first-class INV-31, EC-37).
         if isinstance(exc, sdk.JsonRpcError):
+            sent = CODEX_GOAL_SET_METHOD if method == CODEX_GOAL_RESUME_CALL else method
             malformed = isinstance(exc, (sdk.InvalidParamsError, sdk.MethodNotFoundError, sdk.ParseError))
             refused = isinstance(exc, (sdk.InvalidRequestError, sdk.InvalidParamsError))
-            code = cls._rpc_code(method, malformed=malformed, refused=refused)
-            summary = CODEX_HOST_RPC_ERROR_MESSAGE.format(method=method, code=exc.code, message=exc.message)
-            return cls.error(code, summary, operation, thread_id, method=method, error_type=error_type)
-        # A plain CodexError from the goal start is its start window
-        # elapsing; any other SDK error is the SDK refusing the call.
+            code = cls._rpc_code(sent, malformed=malformed, refused=refused)
+            summary = CODEX_HOST_RPC_ERROR_MESSAGE.format(method=sent, code=exc.code, message=exc.message)
+            return cls.error(code, summary, operation, thread_id, method=sent, error_type=error_type)
+        # A plain CodexError from a goal start or resume is its start
+        # window elapsing; any other SDK error is the SDK refusing the
+        # call.
         if isinstance(exc, sdk.CodexError):
-            window = type(exc) is sdk.CodexError and method == CODEX_GOAL_START_CALL
+            window = type(exc) is sdk.CodexError and method in CODEX_HOST_GOAL_START_CALLS
             code = FailureCode.CODEX_API_ERROR if window else FailureCode.CODEX_PROTOCOL_MISMATCH
             summary = CODEX_HOST_SDK_REFUSED_MESSAGE.format(method=method)
             return cls.error(code, summary, operation, thread_id, method=method, error_type=error_type)
@@ -143,10 +150,14 @@ class CodexErrorMapper:
 
     @staticmethod
     def _rpc_code(method: str, *, malformed: bool, refused: bool) -> FailureCode:
-        # Two methods' JSON-RPC errors carry a context meaning of their
-        # own: a failed thread read means the thread is unknown, and a
-        # refused fork means the fork point is wrong (D-13).
-        if method == CODEX_THREAD_READ_METHOD:
+        # Three methods' refusals carry a context meaning of their own:
+        # a refused thread read means the thread is unknown (hardening
+        # D-8), a steer refused as an invalid request means the turn
+        # already ended (INV-6), and a refused fork means the fork point
+        # is wrong. Overload and internal errors keep the general rule.
+        if method == CODEX_THREAD_READ_METHOD and refused:
+            return FailureCode.CODEX_SESSION_NOT_FOUND
+        if method == CODEX_TURN_STEER_METHOD and refused and not malformed:
             return FailureCode.CODEX_SESSION_NOT_FOUND
         if method == CODEX_THREAD_FORK_METHOD and refused:
             return FailureCode.CODEX_FORK_FAILED
@@ -157,12 +168,26 @@ class CodexErrorMapper:
     @staticmethod
     def _local_failure(exc: Exception, method: str, bound_seconds: float) -> tuple[FailureCode, str]:
         # Only the method, the bound and the exception's type name are
-        # shown.
-        if isinstance(exc, ValidationError):
+        # shown. A record that refuses Codex's answer is the same
+        # mismatch as an SDK model that rejects it (first-class D-4).
+        if isinstance(exc, (ValidationError, ConfigurationError)):
             return FailureCode.CODEX_PROTOCOL_MISMATCH, CODEX_HOST_MODEL_MISMATCH_MESSAGE.format(method=method)
         if isinstance(exc, TimeoutError):
             return FailureCode.CODEX_API_ERROR, CODEX_HOST_NO_ANSWER_MESSAGE.format(method=method, seconds=bound_seconds)
         return FailureCode.CODEX_API_ERROR, CODEX_HOST_LOCAL_FAILURE_MESSAGE.format(method=method, error_type=type(exc).__name__)
+
+    @staticmethod
+    def relabel(error: CodexAgentError, operation: CodexHostOperation) -> CodexAgentError:
+        # A wrapper reports an inner call's failure under its own name,
+        # in the operation field and the message head, and keeps every
+        # other field and the rest of the message (INV-31). An error
+        # that already names the wrapper is returned as it is (EC-55).
+        if error.operation == operation.value:
+            return error
+        old_head = CODEX_HOST_MESSAGE_HEAD.format(operation=error.operation, code=error.failure_code)
+        new_head = CODEX_HOST_MESSAGE_HEAD.format(operation=operation.value, code=error.failure_code)
+        message = new_head + error.message.removeprefix(old_head) if error.message.startswith(old_head) else error.message
+        return error.with_operation(operation.value, message)
 
     @classmethod
     def missing_sdk(cls) -> CodexAgentError:

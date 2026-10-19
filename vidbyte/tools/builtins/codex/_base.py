@@ -1,17 +1,18 @@
 """FILE: vidbyte/tools/builtins/codex/_base.py
 
-PURPOSE: The shared parts of the twenty-six CodexHost tools: CodexToolScope, which holds one toolset's live-turn cap, the developer's spawn defaults and the turn handles the toolset created, and _CodexHostTool, the base that turns every failure into an error result, reads model-written arguments and writes records as JSON.
+PURPOSE: The shared parts of the forty-two CodexHost tools: CodexToolScope, which holds one toolset's live-turn cap, the developer's spawn defaults and the turn handles the toolset created, and _CodexHostTool, the base that turns every failure into an error result, reads model-written arguments and writes records as JSON.
 ROLE IN CODEBASE: The base layer of vidbyte/tools/builtins/codex/; every tool module subclasses _CodexHostTool, and CodexHostTools in vidbyte/tools/toolsets/codex.py builds one CodexToolScope for its tools.
-ARCHITECTURE NOTE: CodexHost is imported under TYPE_CHECKING only, so importing the tools never needs openai-codex. The scope's cap check and its reservation run with no await between them, so two concurrent calls can never pass the cap together (INV-32). The argument readers are BaseTool resolve_ helpers: JSON null means the argument was omitted, and a wrong type is a ToolExecutionError.
+ARCHITECTURE NOTE: CodexHost is imported under TYPE_CHECKING only, so importing the tools never needs openai-codex. The scope's cap check and its reservation run with no await between them, so two concurrent calls can never pass the cap together (INV-32). The argument readers are BaseTool resolve_ helpers: JSON null means the argument was omitted, and a wrong type is a ToolExecutionError. Any other exception under a tool becomes a codex.api_error result naming only the tool and the exception type, logged once at WARNING as codex_host_tool_failed with the innermost frame from ExceptionOrigin and never the exception text (hardening FR-16, INV-23).
 COMMON MODIFICATION PATTERNS: A new argument type gets one _resolve_ helper here; a new tool calls the helpers in its own execute and returns through _run.
-KNOWN EDGE CASES: A cap check reads each live handle's status through get_codex_turn_result, a local read that sends nothing to Codex. A structured answer parsed into a pydantic model is written as that model's JSON.
-RELATED DOCS: docs/spec/codex-host/spec.md (section 9.2 Tools and Scope rules; INV-10 and INV-32 to INV-35); docs/spec/codex-host-thread-helpers/spec.md (section 9.2 argument readers)
-TESTS: tests/features/codex_host/test_codex_host_tools.py, tests/features/codex_host/test_codex_host_helper_tools.py
+KNOWN EDGE CASES: A cap check reads each live handle's status through get_codex_turn_result, a local read that sends nothing to Codex. A list of turn handles is read by _resolve_handles, which refuses any entry that is not an object of exactly a thread_id and a turn_id, and _json(..., without_items=True) leaves result.items out of a single snapshot and out of every snapshot of a tuple (first-class INV-43). A structured answer parsed into a pydantic model is written as that model's JSON. A local failure's text may hold a prompt or a path, so neither the result nor the log carries it (EC-43); cancellation still propagates, because only Exception is caught.
+RELATED DOCS: docs/spec/codex-host/spec.md (section 9.2 Tools and Scope rules; INV-10 and INV-32 to INV-35); docs/spec/codex-host-thread-helpers/spec.md (section 9.2 argument readers); docs/spec/codex-host-hardening/spec.md (sections 6.1 INV-23 and 8.5); docs/spec/codex-host-first-class/spec.md (section 9.2 tool rules; INV-43, INV-44)
+TESTS: tests/features/codex_host/test_codex_host_tools.py, tests/features/codex_host/test_codex_host_helper_tools.py, tests/features/codex_host/test_codex_host_tool_hardening.py, tests/features/codex_host/test_codex_host_observability.py, tests/features/codex_host/test_codex_host_feature_tools.py
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import math
 from collections.abc import Awaitable, Iterable, Mapping
 from dataclasses import asdict
@@ -26,16 +27,22 @@ from vidbyte.lib.constants.codex import (
     CODEX_HOST_MIN_TOKEN_LIMIT,
     CODEX_NEXT_STEPS,
 )
-from vidbyte.lib.constants.codex_host import CODEX_HOST_NEXT_STEP_SENTENCE
+from vidbyte.lib.constants.codex_host import (
+    CODEX_HOST_LOCAL_FAILURE_MESSAGE,
+    CODEX_HOST_NEXT_STEP_SENTENCE,
+)
 from vidbyte.lib.dataclasses.codex_host import CodexSpawnRequest, CodexTurnHandle
 from vidbyte.lib.enums.codex import CodexHostOperation, CodexTurnStatus
 from vidbyte.lib.enums.failure import FailureCode
 from vidbyte.lib.errors import CodexAgentError, ConfigurationError, ToolExecutionError
+from vidbyte.lib.util.exception_origin import ExceptionOrigin
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.types import ToolCall, ToolResult
 
 if TYPE_CHECKING:
     from vidbyte.harnesses.native.codex import CodexHost
+
+logger = logging.getLogger(__name__)
 
 ChoiceT = TypeVar("ChoiceT", bound=Enum)
 
@@ -43,6 +50,7 @@ SESSION_BUSY = FailureCode.CODEX_SESSION_BUSY.value
 SESSION_NOT_FOUND = FailureCode.CODEX_SESSION_NOT_FOUND.value
 INVALID_ARGUMENT = FailureCode.CONFIGURATION_INVALID_ARGUMENT.value
 NOT_OWNED_MESSAGE = "This toolset did not start the turn with that handle, so it cannot wait on, read, steer or interrupt it."
+HANDLE_KEYS = frozenset({"thread_id", "turn_id"})
 
 
 class CodexToolScope:
@@ -122,6 +130,15 @@ class _CodexHostTool(BaseTool):
             return self._failure(name, exc.failure_code, exc.message, exc.next_step)
         except (ConfigurationError, ToolExecutionError) as exc:
             return self._failure(name, INVALID_ARGUMENT, exc.message, CODEX_NEXT_STEPS[INVALID_ARGUMENT])
+        except Exception as exc:
+            # Anything else is a local fault the model cannot fix by
+            # arguments: answer codex.api_error naming only the tool and
+            # the exception type, and log where it was raised, never its
+            # text (hardening FR-16, INV-23, EC-43).
+            logger.warning("codex_host_tool_failed tool=%s error_type=%s origin=%s", name, type(exc).__name__, ExceptionOrigin.describe(exc))
+            code = FailureCode.CODEX_API_ERROR.value
+            message = CODEX_HOST_LOCAL_FAILURE_MESSAGE.format(method=name, error_type=type(exc).__name__)
+            return self._failure(name, code, message, CODEX_NEXT_STEPS[code])
         return ToolResult.success(name, output)
 
     @staticmethod
@@ -202,6 +219,18 @@ class _CodexHostTool(BaseTool):
         return tuple(value)
 
     @staticmethod
+    def _resolve_handles(call: ToolCall, name: str, *, required: bool) -> tuple[CodexTurnHandle, ...]:
+        # A list of {thread_id, turn_id} objects, each naming one turn;
+        # an omitted optional list is (), and a required one holds at
+        # least one entry (first-class INV-43).
+        value = call.arguments.get(name)
+        if value is None and not required:
+            return ()
+        if not isinstance(value, list) or (required and not value) or not all(isinstance(entry, dict) and set(entry) == HANDLE_KEYS and all(isinstance(entry[key], str) and entry[key].strip() for key in HANDLE_KEYS) for entry in value):
+            raise ToolExecutionError(f"'{name}' must be a {'non-empty ' if required else ''}list of objects, each with exactly a non-empty string thread_id and turn_id.", details={"parameter": name})
+        return tuple(CodexTurnHandle(thread_id=entry["thread_id"], turn_id=entry["turn_id"]) for entry in value)
+
+    @staticmethod
     def _resolve_schema(call: ToolCall, name: str) -> Mapping[str, Any] | None:
         # A JSON Schema object, or None when omitted.
         value = call.arguments.get(name)
@@ -215,12 +244,14 @@ class _CodexHostTool(BaseTool):
     def _json(record: Any, *, without_items: bool = False) -> str:
         # @intent tool-output-is-the-record-json
         # A record, or a tuple of records, becomes its JSON: enums as
-        # their values and nested records as objects (INV-35). Wait and
-        # get leave out result.items, which the final answer already
-        # sums up.
+        # their values and nested records as objects (INV-35). The
+        # wait and get tools leave out result.items, which the final
+        # answer already sums up, from one snapshot or from each of a
+        # tuple (first-class INV-43).
         data: Any = [asdict(item) for item in record] if isinstance(record, tuple) else asdict(record)
-        if without_items and isinstance(data, dict) and isinstance(data.get("result"), dict):
-            data["result"].pop("items", None)
+        for element in (data if isinstance(data, list) else [data]) if without_items else ():
+            if isinstance(element, dict) and isinstance(element.get("result"), dict):
+                element["result"].pop("items", None)
         return json.dumps(data, default=_CodexHostTool._model_json)
 
     @staticmethod

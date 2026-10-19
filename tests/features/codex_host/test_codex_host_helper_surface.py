@@ -115,7 +115,8 @@ HOST_SIGNATURES: dict[str, tuple[tuple[str, Any], ...]] = {
     "delete_codex_thread": (("thread_id", _REQUIRED),),
     "get_codex_goal": (("thread_id", _REQUIRED),),
     "run_codex_goal": (("objective", _REQUIRED), ("token_budget", None), ("request", None)),
-    "list_codex_skills": (("cwd", ""),),
+    # docs/spec/codex-host-hardening/spec.md INV-32 and D-30: force_reload is appended, positional-or-keyword like cwd.
+    "list_codex_skills": (("cwd", ""), ("force_reload", False)),
     "run_codex_skill": (("skill", _REQUIRED), ("prompt", _REQUIRED), ("request", None)),
     "run_codex_openai_docs": (("question", _REQUIRED), ("request", None)),
 }

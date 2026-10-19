@@ -27,6 +27,7 @@ NATIVE_INIT_SHA256 = "0f77815ce4a68854b26f79420614caa1aa2f6c00ebb80b9c094398469d
 
 NATIVE_CODEX_EXPORTS = ["CodexHost", "check_codex_ready", "fork_codex_thread", "get_codex_rate_limits", "list_codex_models", "list_codex_threads", "read_codex_thread"]
 
+# docs/spec/codex-host-hardening/spec.md section 12.5: the six new wire-mirroring records join the list, in alphabetical order.
 RECORD_EXPORTS = [
     "CodexGoal",
     "CodexModelInfo",
@@ -35,6 +36,9 @@ RECORD_EXPORTS = [
     "CodexRateLimits",
     "CodexReadiness",
     "CodexReviewTarget",
+    "CodexServerAnswer",
+    "CodexServerRequest",
+    "CodexServiceTier",
     "CodexSkillInfo",
     "CodexSpawnRequest",
     "CodexStoredTurn",
@@ -48,6 +52,9 @@ RECORD_EXPORTS = [
     "CodexTurnSnapshot",
     "CodexTurnSummary",
     "CodexTurnUsage",
+    "CodexUserInputAnswer",
+    "CodexUserInputOption",
+    "CodexUserInputQuestion",
 ]
 
 NEW_ENUMS = (
@@ -67,23 +74,34 @@ NEW_ENUMS = (
     "CodexTurnStatus",
 )
 
-# Spec section 12.3 row 3, verbatim: the Codex* order in vidbyte.lib.enums.__all__.
+# Spec section 12.3 row 3, verbatim: the Codex* order in vidbyte.lib.enums.__all__. docs/spec/codex-host-hardening/spec.md
+# section 12.3 row 2 places its three new enums in the same alphabetical block. docs/spec/codex-host-first-class/spec.md
+# section 13: the nine new enums join it, 35 names, ASCII-sorted (its section 12.3 row 3).
 ENUMS_CODEX_ORDER = [
     "CodexAccountKind",
+    "CodexApprovalDecision",
     "CodexApprovalMode",
     "CodexApprovalPolicy",
     "CodexApprovalsReviewer",
+    "CodexCollaborationModeKind",
+    "CodexCommandApprovalKind",
     "CodexContextAnchor",
     "CodexGoalStatus",
     "CodexHostOperation",
     "CodexInputType",
+    "CodexMcpAuthStatus",
+    "CodexMcpConnectionStatus",
+    "CodexMcpServerDetail",
+    "CodexMemoryMode",
     "CodexPersonality",
+    "CodexPlanStepStatus",
     "CodexReasoningEffort",
     "CodexReasoningSummary",
     "CodexReviewDelivery",
     "CodexReviewTargetKind",
     "CodexSandbox",
     "CodexSandboxReadiness",
+    "CodexServerRequestKind",
     "CodexSkillScope",
     "CodexSortDirection",
     "CodexThreadSortKey",
@@ -91,7 +109,10 @@ ENUMS_CODEX_ORDER = [
     "CodexThreadSourceKind",
     "CodexThreadStartSource",
     "CodexThreadStatus",
+    "CodexTurnEventKind",
+    "CodexTurnSettingsStatus",
     "CodexTurnStatus",
+    "CodexTurnWaitMode",
 ]
 
 # request.md section C, through spec section 12.5: the repo-map section and the README bullet.
@@ -169,7 +190,8 @@ class CodexHostImportSafetyTests(unittest.TestCase):
     def test_imports_never_load_the_sdk_and_entering_reports_the_pip_extra(self) -> None:
         outcome = _run_import_probe("blocked")
         self.assertEqual(outcome["loaded"], [])
-        self.assertEqual((outcome["tools"], outcome["first"]), (26, "check_codex_ready"))
+        # docs/spec/codex-host-first-class/spec.md section 13: the catalog holds 42 tools (INV-41).
+        self.assertEqual((outcome["tools"], outcome["first"]), (42, "check_codex_ready"))
         self.assertEqual(outcome["error"], "CodexAgentError")
         self.assertEqual(outcome["code"], "codex.not_installed")
         self.assertIn(PIP_INSTALL_FRAGMENT, outcome["next_step"])

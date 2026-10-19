@@ -1,14 +1,14 @@
 """FILE: vidbyte/lib/dataclasses/process.py
 
-PURPOSE: Defines the records of the canonical process helpers: CliOption (one command-line option, a flag with an optional value), CliInvocation (what to run, which environment names to add or leave out, the time and output bounds and the optional standard input) and CliOutcome (what a finished CLI run produced).
-ROLE IN CODEBASE: CliOption is taken by CliArgv.build in vidbyte/lib/process/argv.py; CliInvocation is taken and CliOutcome returned by CliRunner in vidbyte/lib/process/runner.py. The harness thread functions under vidbyte/harnesses/native/ build all three.
+PURPOSE: Defines the records of the canonical process helpers: CliOption (one command-line option, a flag with an optional value), CliInvocation (what to run, which environment names to add or leave out, the time and output bounds and the optional standard input), CliOutcome (what a finished CLI run produced) and GitWorktreeSpec (the repository, new branch, target folder, base ref and bounds of one git worktree add).
+ROLE IN CODEBASE: CliOption is taken by CliArgv.build in vidbyte/lib/process/argv.py; CliInvocation is taken and CliOutcome returned by CliRunner in vidbyte/lib/process/runner.py. The harness thread functions under vidbyte/harnesses/native/ build all three. GitWorktreeSpec is taken by GitWorktrees.add in vidbyte/lib/process/git_worktree.py, and CodexHost's create_codex_worktree builds it.
 ARCHITECTURE NOTE: Data only; frozen, slotted, validated in __post_init__. The environment overlay and the standard-input text are repr=False because they can hold keys and prompts; env_remove holds only names, so it stays in the repr. The runner starts the child with the caller's environment minus env_remove, then env_overlay on top. stdin_text set means a pipe that receives it and is then closed; None means the child gets DEVNULL, so no child ever reads the caller's standard input.
-FUNCTION INVENTORY: CliOption, CliInvocation, CliOutcome; each has only __post_init__.
+FUNCTION INVENTORY: CliOption, CliInvocation, CliOutcome, GitWorktreeSpec; each has only __post_init__.
 COMMON MODIFICATION PATTERNS: A new process option adds a validated field to CliInvocation and its use in vidbyte/lib/process/runner.py in the same change.
 WHAT NOT TO DO IN THIS FILE: 1. Do not accept a list for argv; argv is an immutable tuple. 2. Do not show env_overlay or stdin_text in repr. 3. Do not import from a layer above vidbyte.lib.
-KNOWN EDGE CASES: exit_code is None when the process never started, and launch_failure then says why. A timed-out run still reports the exit code the tree stop produced. A CliOption flag keeps the enum member it was given; CliArgv turns it into plain text.
-RELATED DOCS: vidbyte/lib/README.md
-TESTS: tests/features/harness_threads/test_harness_threads_runner.py, tests/features/harness_threads/test_harness_threads_records.py
+KNOWN EDGE CASES: exit_code is None when the process never started, and launch_failure then says why. GitWorktreeSpec checks only that its paths are absolute, never the filesystem: the caller checked the repository exists and refused an existing target folder, and git refuses either if that changes before it runs. Its branch and base ref follow GIT_REF_PATTERN, which never starts with a dash, so neither can reach git as an option. A timed-out run still reports the exit code the tree stop produced. A CliOption flag keeps the enum member it was given; CliArgv turns it into plain text.
+RELATED DOCS: vidbyte/lib/README.md; docs/spec/codex-host-first-class/spec.md (section 9.1 GitWorktreeSpec, T-5)
+TESTS: tests/features/harness_threads/test_harness_threads_runner.py, tests/features/harness_threads/test_harness_threads_records.py, tests/features/codex_host/test_codex_host_feature_records.py
 """
 
 from __future__ import annotations
@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from vidbyte.lib.constants.native_threads import (
+    GIT_REF_MAX_CHARS,
+    GIT_REF_PATTERN,
     NATIVE_PROCESS_FLAG_MAX_CHARS,
     NATIVE_PROCESS_FLAG_PATTERN,
     NATIVE_PROCESS_MAX_OUTPUT_BYTES,
@@ -30,6 +32,7 @@ from vidbyte.lib.dataclasses.validation import (
     RecordFieldValidator,
 )
 from vidbyte.lib.enums.process import ProcessLaunchFailure
+from vidbyte.lib.errors import ConfigurationError
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,4 +95,32 @@ class CliOutcome:
             RecordFieldValidator.require_enum(self.launch_failure, ProcessLaunchFailure, "CliOutcome.launch_failure")
 
 
-__all__ = ["CliInvocation", "CliOption", "CliOutcome"]
+@dataclass(frozen=True, slots=True)
+class GitWorktreeSpec:
+    """One git worktree add: the repository, the new branch, the absolute target folder, the time and output bounds, and the base ref ("" for HEAD)."""
+
+    repository: Path
+    branch: str
+    path: Path
+    timeout_seconds: float
+    max_output_bytes: int
+    base_ref: str = ""
+
+    def __post_init__(self) -> None:
+        # @intent a-worktree-spec-never-lets-a-ref-become-a-git-option
+        # Both paths must be absolute, so git never resolves them
+        # against its own working folder; the branch, and the base ref
+        # when set, follow git's ref shape, which never starts with a
+        # dash, so neither can reach git as an option (first-class T-5).
+        for name, value in (("repository", self.repository), ("path", self.path)):
+            RecordFieldConverter.require_instance(value, f"GitWorktreeSpec {name}", Path)
+            if not value.is_absolute():
+                raise ConfigurationError(f"GitWorktreeSpec {name} must be an absolute path; got a relative one.", details={"field": f"GitWorktreeSpec {name}"})
+        RecordFieldValidator.require_text(self.branch, "GitWorktreeSpec branch", max_chars=GIT_REF_MAX_CHARS, pattern=GIT_REF_PATTERN)
+        if self.base_ref != "":
+            RecordFieldValidator.require_text(self.base_ref, "GitWorktreeSpec base_ref", max_chars=GIT_REF_MAX_CHARS, pattern=GIT_REF_PATTERN)
+        RecordFieldValidator.require_number(self.timeout_seconds, "GitWorktreeSpec timeout_seconds", maximum=NATIVE_THREAD_MAX_SECONDS)
+        RecordFieldValidator.require_int(self.max_output_bytes, "GitWorktreeSpec max_output_bytes", minimum=1, maximum=NATIVE_PROCESS_MAX_OUTPUT_BYTES)
+
+
+__all__ = ["CliInvocation", "CliOption", "CliOutcome", "GitWorktreeSpec"]

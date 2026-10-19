@@ -1,6 +1,6 @@
 """FILE: tests/features/codex_host/test_codex_host_helper_tools.py
 
-PURPOSE: Proves the eleven thread-helper tools and their place in CodexHostTools: twenty-six tools in section 9.2 order with no tool for delete_codex_thread, each new schema in section 9.2 parameter order, the arguments each tool passes to the host (the default listing limit, the list_codex_turns default page of three, the since timestamp, the scope's spawn_defaults for the run tools), argument checks before the host, the live-turn cap and handle ownership for the three run tools, error results with the new codes' next steps, and the JSON or text each tool returns.
+PURPOSE: Proves the eleven thread-helper tools and their place in CodexHostTools: rows 16 to 26 of the forty-two tools in section 9.2 order with no tool for delete_codex_thread, each new schema in section 9.2 parameter order, the arguments each tool passes to the host (the default listing limit, the list_codex_turns default page of three, the since timestamp, the scope's spawn_defaults for the run tools), argument checks before the host, the live-turn cap and handle ownership for the three run tools, error results with the new codes' next steps, and the JSON or text each tool returns.
 ROLE IN CODEBASE: Tool layer of the thread-helpers additions to tests/features/codex_host/ (docs/spec/codex-host-thread-helpers/spec.md AC-21, AC-33, AC-41, INV-2, INV-27, INV-28, EC-38, EC-39, EC-47). It runs the tools over StubCodexHost, as spec section 13 allows, so CI runs it without openai-codex.
 ARCHITECTURE NOTE: Tools are executed directly, the way McpStudioServer runs them. StubCodexHost records every new method's arguments by name, however the tool passed them, so a test compares one normalized mapping with what the spec says the tool sends; a handle stays RUNNING until the test finishes it, which is how the cap sees a live run.
 COMMON MODIFICATION PATTERNS: When section 9.2 adds a tool, add its row to TOOL_TABLE in codex_host_support.py, its argument set to VALID_ARGUMENTS here and to _valid_arguments in test_codex_host_tools.py, and a StubCodexHost method.
@@ -30,7 +30,8 @@ from vidbyte.lib.dataclasses.tools import ToolCall, ToolResult, ToolStatus
 from vidbyte.lib.errors import CodexAgentError
 
 WORKSPACE = os.path.abspath(os.path.join(os.sep, "agent-workspace"))
-NEW_ROWS = TOOL_TABLE[15:]
+# docs/spec/codex-host-first-class/spec.md section 13: the thread-helper rows end at 26, before the sixteen first-class rows.
+NEW_ROWS = TOOL_TABLE[15:26]
 NEW_TOOLS = tuple(row[0] for row in NEW_ROWS)
 RUN_TOOLS = ("run_codex_goal", "run_codex_skill", "run_codex_openai_docs")
 # Spec section 9.2 tool table: the JSON type of each new parameter.
@@ -122,7 +123,7 @@ class _ToolCase(unittest.IsolatedAsyncioTestCase):
 
 
 class CodexHelperToolShapeTests(_ToolCase):
-    """AC-33, INV-2 and EC-39: twenty-six tools, the new schemas, and no way to delete a thread."""
+    """AC-33, INV-2 and EC-39: forty-two tools, the new schemas, and no way to delete a thread."""
 
     def test_the_toolset_appends_eleven_tools_and_none_is_delete(self) -> None:
         import vidbyte.tools.builtins as builtins
@@ -130,7 +131,8 @@ class CodexHelperToolShapeTests(_ToolCase):
 
         tools = _toolset(StubCodexHost(), max_live_turns=1)
         self.assertEqual(tuple(tools.names()), TOOL_NAMES)
-        self.assertEqual(len(tools), 26)
+        # docs/spec/codex-host-first-class/spec.md section 13: 42 tools once the sixteen first-class tools follow.
+        self.assertEqual(len(tools), 42)
         self.assertNotIn("delete_codex_thread", tools.names())
         for tool, (name, class_name, permission, parameters, required) in zip(list(tools)[15:], NEW_ROWS):
             with self.subTest(tool=name):

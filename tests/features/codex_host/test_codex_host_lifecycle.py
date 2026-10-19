@@ -98,7 +98,8 @@ class CodexHostSnippetTests(HostTestCase):
         printed = io.StringIO()
         with contextlib.redirect_stdout(printed):
             await asyncio.wait_for(main(), CLOSE_SECONDS)
-        self.assertEqual(printed.getvalue().splitlines(), ["True", "completed The readme describes the SDK.", "26 check_codex_ready"])
+        # docs/spec/codex-host-first-class/spec.md section 13 (r4): the catalog holds 42 tools once the sixteen first-class tools land.
+        self.assertEqual(printed.getvalue().splitlines(), ["True", "completed The readme describes the SDK.", "42 check_codex_ready"])
 
 
 @requires_sdk

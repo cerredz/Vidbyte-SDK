@@ -194,8 +194,13 @@ class CodexHostLaunchAndForkTests(HostTestCase):
         source = self.server.seed_thread(completed_turns=2)
         first, second = (turn.turn_id for turn in source.turns)
         info = await asyncio.wait_for(host.fork_codex_thread(source.thread_id, from_turn_id=first, exclude_turns=True), WAIT_SECONDS)
-        self.assertEqual(_thread_methods(self.server, source.thread_id), ["thread/read", "thread/fork"])
-        self.assertIs(self.server.matching("thread/read")[0].params["includeTurns"], True)
+        # docs/spec/codex-host-hardening/spec.md INV-28, INV-38, D-18 and D-21: the thread must exist (one metadata read without
+        # turns; the SDK's typed read always sends includeTurns, so false is the wire form of "without"), then the fork point comes
+        # from item-less thread/turns/list pages, newest first.
+        self.assertEqual(_thread_methods(self.server, source.thread_id), ["thread/read", "thread/turns/list", "thread/fork"])
+        self.assertFalse(self.server.matching("thread/read")[0].params.get("includeTurns", False))
+        scan = self.server.matching("thread/turns/list")[0].params
+        self.assertEqual((scan.get("sortDirection"), scan.get("itemsView")), ("desc", "notLoaded"))
         fork = self.server.matching("thread/fork")[0].params
         self.assertEqual((fork["lastTurnId"], fork["excludeTurns"]), (first, True))
         self.assertNotEqual(info.thread_id, source.thread_id)
