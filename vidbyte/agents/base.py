@@ -54,8 +54,9 @@ from vidbyte.lib.dataclasses.speed import RecordStreamInput
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.dataclasses.trace import TraceField, TraceOption, TraceSchema
 from vidbyte.lib.constants import RUNNER_TYPE_TEXT
+from vidbyte.lib.constants.jev import VIDBYTE_GATEWAY_ERROR_PROVIDER
 from vidbyte.lib.enums import AgentRuntimeType, ModelProvider, SystemPromptPreset, TextModelMode
-from vidbyte.lib.errors import AgentExecutionError, AllModelsFailedError, ConfigurationError, FailureRaisedError, OutputSchemaViolationError, UsageAccountingError
+from vidbyte.lib.errors import AgentExecutionError, AllModelsFailedError, ConfigurationError, FailureRaisedError, OutputSchemaViolationError, ProviderRequestError, UsageAccountingError
 from vidbyte.lib.registries.provider_keys import ProviderKeyMatcher
 from vidbyte.lib.runners import Runner
 from vidbyte.lib.system_prompt_presets import SystemPromptPresetScope
@@ -974,7 +975,7 @@ class BaseAgent(McpAttachableMixin):
                 # contract; it is an AgentExecutionError, so `except AgentExecutionError` still catches it.
                 raise
             raise AgentExecutionError(
-                f"Agent '{self.name}' failed to generate a reply.",
+                self._reply_failure_message(exc),
                 details={"agent": self.name, "error_type": type(exc).__name__},
             ) from exc
         except BaseException as exc:
@@ -1045,6 +1046,18 @@ class BaseAgent(McpAttachableMixin):
             self._queued_prompts.clear()
             self._notify_session_exception(exc)
             raise
+
+    def _reply_failure_message(self, exc: Exception) -> str:
+        # Words the error a failed reply raises, adding the cause's own message only when the SDK wrote all of it.
+        # @intent gateway-reason-reaches-the-agent-caller
+        # A Vidbyte gateway failure (an empty wallet, an unpriced model, an outage) is a ProviderRequestError the
+        # SDK words from fixed text, never from a response body, so its message is safe to repeat and is the only
+        # place the caller learns why. Any other cause, a subclass included, may hold a provider's or a tool's raw
+        # text, which can carry request content, so it stays on __cause__ only.
+        message = f"Agent '{self.name}' failed to generate a reply."
+        if type(exc) is ProviderRequestError and exc.provider == VIDBYTE_GATEWAY_ERROR_PROVIDER:
+            return f"{message} {exc.message}"
+        return message
 
     def _close_failed_reply(self, exc: BaseException, trace_ctx: Any) -> None:
         # Notifies the session, finalizes the root trace and speed run, and clears the active prompt for a failed reply.

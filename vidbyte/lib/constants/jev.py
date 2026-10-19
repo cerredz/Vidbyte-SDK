@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 
 from vidbyte.lib.enums.model_provider import ModelProvider
+from vidbyte.lib.enums.text_model import VidbyteGatewayErrorCode
 
 # Models and endpoints (https://docs.typesafe.ai/models.md). `jev-latest` and `jev-preview`
 # are aliases; the response reports the versioned ID (currently `jev-1.13.0`) that answered.
@@ -136,6 +137,34 @@ VIDBYTE_STATUS_PAYMENT_REQUIRED: int = 402
 VIDBYTE_STATUS_FORBIDDEN: int = 403
 VIDBYTE_STATUS_RATE_LIMITED: int = JEV_STATUS_RATE_LIMITED
 VIDBYTE_MANAGED_ACCESS_DENIAL_STATUS_CODES: frozenset[int] = frozenset({VIDBYTE_STATUS_UNAUTHORIZED, VIDBYTE_STATUS_PAYMENT_REQUIRED, VIDBYTE_STATUS_FORBIDDEN, VIDBYTE_STATUS_RATE_LIMITED})
+VIDBYTE_STATUS_REQUEST_TOO_LARGE: int = 413
+# The provider label on every ProviderRequestError the Vidbyte gateway
+# transport raises. Those messages are written by the SDK from fixed
+# text, never from a response body, so an agent may repeat them.
+VIDBYTE_GATEWAY_ERROR_PROVIDER: str = "vidbyte"
+# The generative gateway's own error codes after which a fresh call of
+# the same request can succeed: the backend marks the first three
+# retryable, and a reused Idempotency-Key cannot recur because every
+# SDK call mints a new key. Every other known code refuses until the
+# caller changes something (funds the wallet, picks a priced model,
+# reshapes the request), so a retry would only fail the same way.
+VIDBYTE_GATEWAY_TRANSIENT_ERROR_CODES: frozenset[VidbyteGatewayErrorCode] = frozenset({
+    VidbyteGatewayErrorCode.UPSTREAM_FAILED,
+    VidbyteGatewayErrorCode.UNAVAILABLE,
+    VidbyteGatewayErrorCode.IDEMPOTENCY_IN_PROGRESS,
+    VidbyteGatewayErrorCode.IDEMPOTENCY_KEY_REUSED,
+})
+# Statuses at which a gateway error body ("error": true) is final even
+# without a known code: the API-key gatekeeper answers a wrong key (401)
+# or a missing scope (403) with no code, and the gateway uses 402, 413,
+# and 422 only for refusals that an identical request meets again.
+VIDBYTE_GATEWAY_FINAL_STATUS_CODES: frozenset[int] = frozenset({
+    VIDBYTE_STATUS_UNAUTHORIZED,
+    VIDBYTE_STATUS_PAYMENT_REQUIRED,
+    VIDBYTE_STATUS_FORBIDDEN,
+    VIDBYTE_STATUS_REQUEST_TOO_LARGE,
+    JEV_STATUS_UNPROCESSABLE,
+})
 
 # Noul wire literals: the optional criteria keys and the two outcomes a noul answer expands to.
 JEV_NOUL_TRUE: str = "true"

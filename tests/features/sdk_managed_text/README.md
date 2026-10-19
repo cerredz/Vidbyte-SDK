@@ -13,9 +13,11 @@ This folder holds the feature tests for Vidbyte-managed text calls. With only `V
 - `test_managed_text_selection.py` covers key selection, explicit managed mode, the refusals managed state owes before any request, runner pinning, other modalities, the config field contract, and key hygiene.
 - `test_managed_text_wire_contract.py` covers output caps per dialect, `extra_body` passthrough, the 630 s timeout floor, and the allowed body keys per dialect.
 - `test_managed_text_failures.py` covers credential-safe errors, remedy facts, edge failures, cancellation, same-key retries, one key per call, and concurrent calls.
+- `test_managed_text_error_surfacing.py` covers the cause a known gateway error code names, whether the raised error says a fresh call can succeed, the gateway reason an agent's `AgentExecutionError` repeats (and the provider text it never repeats), and retry middleware sending a final refusal once while still retrying a transient one.
 - `test_managed_text_deadline.py` covers the cumulative retry deadline under a fake loop clock, the full timeout on every attempt, the re-send count in messages, the last attempt deciding the error, and direct `validate()` refusals.
 
 ## Logs
 
 - 2026-10-10 - Pack added red, ahead of the implementation, from spec r4 (S2 test author).
 - 2026-10-13 - byok-api-keys S2: superseded rows from docs/spec/byok-api-keys/spec.md section 13 applied (api_keys / vidbyte_api_key, relay in AUTO, DIRECT oracles and goldens, construction-time refusals, M-9 and M-15 wording); contract text updated per G-1, INV-1, INV-2.
+- 2026-10-19 - fix/gateway-error-surfacing: `test_managed_text_error_surfacing.py` added; every case in it failed on main b7350ed6 and passes with the fix, except the five regression guards (unknown-code wording, two never-copy cases, transient retry, no-verdict retry), which pass on both.
