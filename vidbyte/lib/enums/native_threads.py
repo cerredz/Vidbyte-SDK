@@ -1,14 +1,14 @@
 """FILE: vidbyte/lib/enums/native_threads.py
 
-PURPOSE: Defines the closed vocabularies of the harness thread functions: which harness a call drives (NativeHarness), the verb and public function it is (NativeThreadVerb, NativeThreadOperation), the problems a call can fail with (NativeThreadProblem), the Grok permission modes and reasoning efforts, the Muse reasoning efforts, every command-line flag the SDK passes to grok, opencode, muse, wsl.exe and the reap's sh (GrokFlag, OpencodeFlag, MuseFlag, WslFlag, ShellFlag), the child environment variable names (NativeEnvironmentVariable), the Muse serve methods (MuseMethod), the opencode and grok event types the SDK reads (OpencodeEventType, GrokEventType), the Grok store scopes the thread helpers read (GrokThreadScope), the Grok bundled slash commands and agents the command functions run (GrokCommand, GrokAgent), the flags written inside a slash-command line (GrokCommandFlag) and the Muse bundled skill ids (MuseSkill).
+PURPOSE: Defines the closed vocabularies of the harness thread functions, their browser siblings and their helpers: which harness a call drives (NativeHarness), the verb and public function it is (NativeThreadVerb, NativeThreadOperation, which also names the nine <verb>_<harness>_with_browser functions), the problems a call can fail with (NativeThreadProblem), the record a function returns (NativeThreadResultRecord), the Grok permission modes and reasoning efforts, the Muse reasoning efforts, every command-line flag the SDK passes to grok, opencode, muse, wsl.exe and the reap's sh (GrokFlag, OpencodeFlag, MuseFlag, WslFlag, ShellFlag), the child environment variable names (NativeEnvironmentVariable), the Muse serve methods (MuseMethod), the opencode and grok event types the SDK reads (OpencodeEventType, GrokEventType), the Grok store scopes the thread helpers read (GrokThreadScope), the Grok bundled slash commands and agents the command functions run (GrokCommand, GrokAgent), the flags written inside a slash-command line (GrokCommandFlag) and the Muse bundled skill ids (MuseSkill).
 ROLE IN CODEBASE: Imported by the records in vidbyte/lib/dataclasses/native_threads.py, by the texts in vidbyte/lib/constants/native_threads.py, by NativeThreadError in vidbyte/lib/errors/base.py and by the thread functions under vidbyte/harnesses/native/. Exported from vidbyte/lib/enums/__init__.py; GrokPermissionMode, GrokReasoningEffort, MuseReasoningEffort, GrokThreadScope and GrokCommand are also re-exported from vidbyte.harnesses.native.
 ARCHITECTURE NOTE: Every enum here is a StrEnum, so str(member) and an f-string give the value; Python 3.11 formats a (str, Enum) member as Class.MEMBER, which would corrupt argv and environment entries. Flag values are the exact spellings of grok 1.0.52, opencode 1.18.31 and Muse Code 1.0.1.
-FUNCTION INVENTORY: One function, NativeEnvironmentVariable._generate_next_value_, which gives a member written auto() its own name as its value. NativeHarness, NativeThreadVerb, NativeThreadOperation, NativeThreadProblem, GrokPermissionMode, GrokReasoningEffort, MuseReasoningEffort, GrokFlag, OpencodeFlag, MuseFlag, WslFlag, ShellFlag, NativeEnvironmentVariable, MuseMethod, OpencodeEventType, GrokThreadScope, GrokCommand, GrokAgent, GrokCommandFlag, GrokEventType and MuseSkill.
+FUNCTION INVENTORY: One function, NativeEnvironmentVariable._generate_next_value_, which gives a member written auto() its own name as its value. NativeHarness, NativeThreadVerb, NativeThreadOperation, NativeThreadProblem, NativeThreadResultRecord, GrokPermissionMode, GrokReasoningEffort, MuseReasoningEffort, GrokFlag, OpencodeFlag, MuseFlag, WslFlag, ShellFlag, NativeEnvironmentVariable, MuseMethod, OpencodeEventType, GrokThreadScope, GrokCommand, GrokAgent, GrokCommandFlag, GrokEventType and MuseSkill.
 COMMON MODIFICATION PATTERNS: Append members only, never reorder them (the order is part of the contract). Add a member only when the vendor CLI adds the value, and use it in the harness module that builds the argv or reads the output in the same change. A new problem also needs its FailureCode members and its texts in vidbyte/lib/constants/native_threads.py.
 WHAT NOT TO DO IN THIS FILE: 1. Do not add an approve-everything member (bypassPermissions, --yolo, --auto, --always-approve); the SDK never approves everything. 2. Do not import anything from vidbyte; enums sit at the bottom layer. 3. Do not turn an enum here back into a (str, Enum).
-KNOWN EDGE CASES: NativeEnvironmentVariable values equal their names. MuseFlag.END_OF_OPTIONS is the bare "--" operand that keeps the Muse prompt from being read as a flag. WSL_UNAVAILABLE is a Muse-only problem and STORE_UNREADABLE a Grok-only one. GrokCommandFlag values are written inside the --single line, never as argv elements. MuseSkill values carry the bundled: prefix of the Muse skill registry.
+KNOWN EDGE CASES: NativeEnvironmentVariable values equal their names. MuseFlag.END_OF_OPTIONS is the bare "--" operand that keeps the Muse prompt from being read as a flag; MuseFlag.DISABLE_WEB_TOOLS is appended after it, which is harmless because argv order comes from code. WSL_UNAVAILABLE is a Muse-only problem and STORE_UNREADABLE a Grok-only one. The four browser problems (MOUNT_UNSUPPORTED to TOOLS_UNAVAILABLE) map to the shared browser.* codes for every harness. GrokFlag.DISABLE_WEB_SEARCH is a bare switch; ALLOW and DENY repeat once per rule. GrokCommandFlag values are written inside the --single line, never as argv elements. MuseSkill values carry the bundled: prefix of the Muse skill registry.
 RELATED DOCS: vidbyte/harnesses/README.md
-TESTS: tests/features/harness_threads/test_harness_threads_surface.py, tests/features/harness_threads/test_harness_threads_argv.py
+TESTS: tests/features/harness_threads/test_harness_threads_surface.py, tests/features/harness_threads/test_harness_threads_argv.py, tests/features/harness_threads/test_harness_threads_browser_contract.py
 """
 
 from __future__ import annotations
@@ -44,6 +44,15 @@ class NativeThreadOperation(StrEnum):
     RUN_MUSE_THREAD = "run_muse_thread"
     CONTINUE_MUSE_THREAD = "continue_muse_thread"
     FORK_MUSE_THREAD = "fork_muse_thread"
+    RUN_GROK_WITH_BROWSER = "run_grok_with_browser"
+    CONTINUE_GROK_WITH_BROWSER = "continue_grok_with_browser"
+    FORK_GROK_WITH_BROWSER = "fork_grok_with_browser"
+    RUN_OPENCODE_WITH_BROWSER = "run_opencode_with_browser"
+    CONTINUE_OPENCODE_WITH_BROWSER = "continue_opencode_with_browser"
+    FORK_OPENCODE_WITH_BROWSER = "fork_opencode_with_browser"
+    RUN_MUSE_WITH_BROWSER = "run_muse_with_browser"
+    CONTINUE_MUSE_WITH_BROWSER = "continue_muse_with_browser"
+    FORK_MUSE_WITH_BROWSER = "fork_muse_with_browser"
     LIST_GROK_THREADS = "list_grok_threads"
     LIST_RECENT_GROK_THREADS = "list_recent_grok_threads"
     LIST_GROK_THREADS_SINCE = "list_grok_threads_since"
@@ -106,8 +115,24 @@ class NativeThreadProblem(StrEnum):
     PROTOCOL_MISMATCH = "protocol_mismatch"
     RUN_FAILED = "run_failed"
     WSL_UNAVAILABLE = "wsl_unavailable"
+    MOUNT_UNSUPPORTED = "mount_unsupported"
+    RUNTIME_MISSING = "runtime_missing"
+    TOOL_INSTALL_FAILED = "tool_install_failed"
+    TOOLS_UNAVAILABLE = "tools_unavailable"
     COMMAND_NOT_RUN = "command_not_run"
     STORE_UNREADABLE = "store_unreadable"
+
+
+class NativeThreadResultRecord(StrEnum):
+    """The record a thread function returns, named in the expected text of its errors."""
+
+    NATIVE_THREAD_RESULT = "NativeThreadResult"
+    BROWSER_THREAD_RESULT = "BrowserThreadResult"
+    NATIVE_THREAD_SUMMARY = "NativeThreadSummary"
+    NATIVE_THREAD_SUMMARIES = "tuple of NativeThreadSummary"
+    NATIVE_COMMAND_OUTPUT = "NativeCommandOutput"
+    # A delete helper returns nothing on success.
+    NO_RESULT = "None"
 
 
 class GrokPermissionMode(StrEnum):
@@ -154,7 +179,10 @@ class GrokFlag(StrEnum):
     REASONING_EFFORT = "--reasoning-effort"
     RESUME = "--resume"
     FORK_SESSION = "--fork-session"
+    ALLOW = "--allow"
+    DENY = "--deny"
     AGENT = "--agent"
+    DISABLE_WEB_SEARCH = "--disable-web-search"
     SESSION_ID = "--session-id"
 
 
@@ -183,6 +211,7 @@ class MuseFlag(StrEnum):
     REASONING_EFFORT = "--reasoning-effort"
     USER_INPUT_AUTO_RESOLVE = "--user-input-auto-resolve"
     END_OF_OPTIONS = "--"
+    DISABLE_WEB_TOOLS = "--disable-web-tools"
     SESSION = "--session"
     OUT = "--out"
     DRY_RUN = "--dry-run"
@@ -224,6 +253,9 @@ class NativeEnvironmentVariable(StrEnum):
     XDG_CONFIG_HOME = "XDG_CONFIG_HOME"
     WSLENV = "WSLENV"
     VIDBYTE_PEER_MARK = "VIDBYTE_PEER_MARK"
+    GROK_CLAUDE_MCPS_ENABLED = "GROK_CLAUDE_MCPS_ENABLED"
+    GROK_CURSOR_MCPS_ENABLED = "GROK_CURSOR_MCPS_ENABLED"
+    VIDBYTE_REAP_MARKER = "VIDBYTE_REAP_MARKER"
     GROK_WORKFLOWS = "GROK_WORKFLOWS"
     # The working-directory variable opencode reads for its project.
     # auto() spells the value, because a literal assigned to the
@@ -246,6 +278,7 @@ class OpencodeEventType(StrEnum):
 
     TEXT = "text"
     ERROR = "error"
+    TOOL_USE = "tool_use"
 
 
 class GrokThreadScope(StrEnum):
@@ -327,6 +360,7 @@ __all__ = [
     "NativeHarness",
     "NativeThreadOperation",
     "NativeThreadProblem",
+    "NativeThreadResultRecord",
     "NativeThreadVerb",
     "OpencodeEventType",
     "OpencodeFlag",

@@ -1,6 +1,6 @@
 """FILE: tests/features/harness_threads/test_harness_threads_helper_surface.py
 
-PURPOSE: The contract of the 47 thread helpers and skill functions that needs no stand-in: their signatures and named defaults (§8.5, D-15), keyless helpers (INV-2, AC-10), one NativeThreadOperation per function named after it (INV-5, §9.1), the §9.3 tables, the exported records NativeThreadSummary and NativeCommandOutput (§9.1), RecordFieldConverter.to_utc_datetime (D-13, EC-14, EC-15), the new and widened error texts (AC-20, §12.4), and the root export lists left alone (INV-1).
+PURPOSE: The contract of the 47 thread helpers and skill functions that needs no stand-in: their signatures and named defaults (§8.5, D-15), keyless helpers (INV-2, AC-10), one NativeThreadOperation per function named after it (INV-5, §9.1), the §9.3 tables, the exported records NativeThreadSummary and NativeCommandOutput (§9.1), RecordFieldConverter.to_utc_datetime (D-13, EC-14, EC-15), the new and widened error texts (AC-20, §12.4), and vidbyte.harnesses' export list left alone (INV-1; the root vidbyte package re-exports the native names under the root-export contract, which tests/features/root_native_thread_exports checks).
 ROLE IN CODEBASE: Start here when a helper or skill function's parameters, a default, a record rule or an error text changes. Nothing here starts a process.
 ARCHITECTURE NOTE: Expected signatures are written out from spec §8.5 as (name, kind, default) rows, with the named defaults resolved from vidbyte.lib.constants.native_threads, so a literal default or a reordered keyword fails here. Error texts are checked only for the tokens the spec names verbatim (`timeout_seconds`, the control timeout, `transcript`, both Grok caps, `grok inspect --json`, `collidesWith`, `features.video_gen`, compaction, the scan cap), each accepted as the constant's name or its value. The two exceptions are texts §12.4 fixes character for character: the opencode protocol_mismatch next step (S4 R-16, SCAN_CAP_STEP) and the r5 muse command_not_run likely cause (D-33, MUSE_COMPACTION_CAUSE).
 FUNCTION INVENTORY: tail builds a keyword-only tail; expected_signatures holds the §8.5 table; kind maps an inspect kind to P or K; spellings lists the acceptable renderings of a numeric constant; git and literal_all read the merge base; the test_* functions are one behaviour each.
@@ -269,13 +269,15 @@ def test_the_muse_command_not_run_cause_is_the_r5_text(lib_api) -> None:
     assert cause == MUSE_COMPACTION_CAUSE, f"§12.4 r5: {cause!r}"
 
 
-def test_root_export_lists_are_untouched() -> None:
-    # INV-1: no name is added to vidbyte's or vidbyte.harnesses'
-    # __all__ (checked against the merge base when one exists).
+def test_harnesses_export_list_is_untouched() -> None:
+    # INV-1: no name is added to vidbyte.harnesses' __all__ (checked
+    # against the merge base when one exists). The root vidbyte
+    # package is the exception: vidbyte-cli may import only names in
+    # vidbyte.__all__, so every native name is re-exported there
+    # (tests/features/root_native_thread_exports).
     found = git("merge-base", "origin/main", "HEAD")
     if found.returncode != 0 or not found.stdout.strip():
         pytest.skip("origin/main is not available in this checkout (a shallow CI clone has no main ref)")
-    base = found.stdout.strip()
-    for path in ("vidbyte/__init__.py", "vidbyte/harnesses/__init__.py"):
-        before = literal_all(git("show", f"{base}:{path}").stdout)
-        assert literal_all((REPO_ROOT / path).read_text(encoding="utf-8")) == before, path
+    path = "vidbyte/harnesses/__init__.py"
+    before = literal_all(git("show", f"{found.stdout.strip()}:{path}").stdout)
+    assert literal_all((REPO_ROOT / path).read_text(encoding="utf-8")) == before, path

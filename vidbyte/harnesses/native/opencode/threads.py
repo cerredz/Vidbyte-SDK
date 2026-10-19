@@ -1,14 +1,14 @@
 """FILE: vidbyte/harnesses/native/opencode/threads.py
 
-PURPOSE: Defines the three public opencode thread functions (OpencodeThreads: run_opencode_thread, continue_opencode_thread, fork_opencode_thread) and the flow of one call (OpencodeThreadRun): find opencode, bind the caller's key to the model's provider in an inline config, run `opencode run --format=json` headless once with the prompt on stdin, or with --command and the command's arguments on stdin, and read its JSON events.
-ROLE IN CODEBASE: The functions are bound as module names in vidbyte/harnesses/native/opencode/__init__.py and re-exported from vidbyte.harnesses.native. OpencodeThreadRun uses NativeLauncher and NativeErrorFactory from hostkit, CliArgv and CliRunner from vidbyte.lib.process, and OpencodeWire (opencode/wire.py) to build the config and read the events. GLM and DeepSeek are reached through the model argument ("zai-coding-plan/glm-5.3", "deepseek/deepseek-v4-pro").
+PURPOSE: Defines the three public opencode thread functions (OpencodeThreads: run_opencode_thread, continue_opencode_thread, fork_opencode_thread) and the flow of one call (OpencodeThreadRun): find opencode, bind the caller's key to the model's provider in an inline config (with the browser tools mounted in it on a browser call), run `opencode run --format=json` headless once with the prompt on stdin, or with --command and the command's arguments on stdin, and read its JSON events.
+ROLE IN CODEBASE: The functions are bound as module names in vidbyte/harnesses/native/opencode/__init__.py and re-exported from vidbyte.harnesses.native. OpencodeThreadRun uses NativeLauncher and NativeErrorFactory from hostkit, CliArgv and CliRunner from vidbyte.lib.process, OpencodeWire (opencode/wire.py) to build the config and read the events, and OpencodeMounts (opencode/mounts.py) for the key variables a browser call removes. OpencodeBrowserHarness (opencode/browser.py) runs OpencodeThreadRun.execute with a mount. GLM and DeepSeek are reached through the model argument ("zai-coding-plan/glm-5.3", "deepseek/deepseek-v4-pro").
 ARCHITECTURE NOTE: The key reaches opencode only inside OPENCODE_CONFIG_CONTENT, whose provider apiKey beats a stored auth.json login (spec D-8); the caller's skill folders are listed in the same config and read in place, never copied. The prompt travels on stdin, so no prompt can become a flag and no prompt length meets the argv limit. A command run (request.command set, from opencode/commands.py) adds --command=<name> after the #1036 options and sends its arguments on stdin, or no stdin when it has none (spec D-8); with command None the argv and stdin are #1036's (spec INV-26). The module holds no literals of its own (spec INV-15): flags are OpencodeFlag members and every other value comes from vidbyte/lib/constants/native_threads.py.
-FUNCTION INVENTORY: OpencodeThreads.run_opencode_thread, continue_opencode_thread and fork_opencode_thread are the public functions; OpencodeThreads._call is the one guarded try they share. OpencodeThreadRun.execute is the narrated main function of one call; _environment builds the child's environment overlay and _argv builds the command line.
+FUNCTION INVENTORY: OpencodeThreads.run_opencode_thread, continue_opencode_thread and fork_opencode_thread are the public functions; OpencodeThreads._call is the one guarded try they share and returns the result of the run. OpencodeThreadRun.execute is the narrated main function of one call, with an optional browser mount, and returns the result with the process outcome (NativeThreadRun); _environment builds the child's environment overlay and _argv builds the command line.
 COMMON MODIFICATION PATTERNS: A new opencode option is an OpencodeThreadConfig field (vidbyte/lib/dataclasses/native_threads.py), an OpencodeFlag member and one CliOption in _argv. A new failure condition goes in OpencodeWire.read.
 WHAT NOT TO DO IN THIS FILE: 1. Do not put the key on argv, on stdin or in a file; it travels only inside OPENCODE_CONFIG_CONTENT of the child. 2. Do not drop --dir or the cwd; an inherited PWD must never choose the project. 3. Do not copy skills; opencode reads the folders the caller passed.
-KNOWN EDGE CASES: opencode also reads the workspace's own opencode.json, so a workspace can add providers, agents or plugins; pass only trusted workspaces (spec T-6). The key works only for providers that take an API key (EC-39). An unknown provider or model is reported by opencode and becomes run_failed with its text (EC-24).
+KNOWN EDGE CASES: Without a mount the call is exactly the plain call: the same config, environment and command line (spec INV-14). opencode also reads the workspace's own opencode.json, so a workspace can add providers, agents or plugins; pass only trusted workspaces (spec T-6). The key works only for providers that take an API key (EC-39). An unknown provider or model is reported by opencode and becomes run_failed with its text (EC-24).
 RELATED DOCS: vidbyte/harnesses/README.md
-TESTS: tests/features/harness_threads/
+TESTS: tests/features/harness_threads/; the mounted path: tests/features/harness_threads/test_harness_threads_browser_mounts.py, tests/features/harness_threads/test_harness_threads_browser_lifecycle.py
 """
 
 from __future__ import annotations
@@ -18,11 +18,14 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from vidbyte.harnesses.native.hostkit import NativeErrorFactory, NativeLauncher
+from vidbyte.harnesses.native.opencode.mounts import OpencodeMounts
 from vidbyte.harnesses.native.opencode.wire import OpencodeWire
 from vidbyte.lib.constants import native_threads
+from vidbyte.lib.dataclasses.browser_tools import BrowserMount
 from vidbyte.lib.dataclasses.native_threads import (
     NativeThreadRequest,
     NativeThreadResult,
+    NativeThreadRun,
     OpencodeThreadConfig,
 )
 from vidbyte.lib.dataclasses.process import CliInvocation, CliOption
@@ -67,7 +70,7 @@ class OpencodeThreads:
         try:
             request = NativeThreadRequest(harness=NativeHarness.OPENCODE, verb=verb, prompt=prompt, api_key=api_key, workspace=workspace, model=model, skills=skills, thread_id=thread_id)
             settings = OpencodeThreadConfig() if config is None else RecordFieldConverter.require_instance(config, native_threads.NATIVE_CONFIG_ARGUMENT, OpencodeThreadConfig)
-            return await OpencodeThreadRun.execute(request, settings, errors)
+            return (await OpencodeThreadRun.execute(request, settings, errors)).result
         except asyncio.CancelledError:
             raise
         except NativeThreadError:
@@ -79,16 +82,17 @@ class OpencodeThreads:
 
 
 class OpencodeThreadRun:
-    """One opencode call: launcher, inline config, environment, argv, run and events."""
+    """One opencode call: launcher, inline config, environment, argv, run and events, with an optional browser mount."""
 
     @staticmethod
-    async def execute(request: NativeThreadRequest, config: OpencodeThreadConfig, errors: NativeErrorFactory) -> NativeThreadResult:
+    async def execute(request: NativeThreadRequest, config: OpencodeThreadConfig, errors: NativeErrorFactory, *, mount: BrowserMount | None = None) -> NativeThreadRun:
         # Find opencode: the caller's command, then PATH.
         launcher = NativeLauncher.resolve(config.opencode_command, program=native_threads.OPENCODE_PROGRAM, fallback=None, errors=errors, request=request)
 
         # From here on the key, and the config value that holds it, are
-        # scrubbed from anything opencode prints.
-        content = OpencodeWire.config_content(request)
+        # scrubbed from anything opencode prints; on a browser call the
+        # same value also mounts the tools and holds their keys.
+        content = OpencodeWire.config_content(request, mount)
         errors.register_secret(request.api_key)
         errors.register_secret(content)
 
@@ -96,7 +100,10 @@ class OpencodeThreadRun:
         # Run opencode once, headless, in the workspace, with the inline
         # config in its environment and the prompt on stdin followed by
         # end of input, so the prompt is never read as an option. A
-        # command run without arguments sends no standard input.
+        # command run without arguments sends no standard input. A
+        # browser call also removes each mounted tool's unpassed key
+        # variable, so no server reads a key from the caller's own
+        # environment.
         invocation = CliInvocation(
             argv=OpencodeThreadRun._argv(launcher, request, config),
             env_overlay=OpencodeThreadRun._environment(content),
@@ -104,6 +111,7 @@ class OpencodeThreadRun:
             max_output_bytes=native_threads.NATIVE_PROCESS_MAX_OUTPUT_BYTES,
             cwd=Path(request.workspace),
             stdin_text=request.prompt or None,
+            env_remove=() if mount is None else OpencodeMounts.env_remove(mount),
         )
         outcome = await CliRunner().run(invocation)
 
@@ -112,8 +120,11 @@ class OpencodeThreadRun:
             program, *_arguments = launcher
             raise errors.from_launch_failure(outcome.launch_failure, program, request=request)
 
-        # Read the JSON events: the session id and the final text.
-        return OpencodeWire.read(outcome, request, errors, timeout_seconds=config.timeout_seconds)
+        # Read the JSON events: the session id and the final text, kept
+        # with the outcome, whose events a browser call reads again for
+        # its tool calls.
+        result = OpencodeWire.read(outcome, request, errors, timeout_seconds=config.timeout_seconds)
+        return NativeThreadRun(result=result, outcome=outcome)
 
     @staticmethod
     def _environment(content: str) -> dict[str, str]:

@@ -1,0 +1,1 @@
+Staged as {key}. It is saved to memory only when this pair's verifier gives a verdict, and the verifier may drop it first. Stage only what a later agent would be wrong or slower without.

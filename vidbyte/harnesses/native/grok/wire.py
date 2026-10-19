@@ -1,14 +1,14 @@
 """FILE: vidbyte/harnesses/native/grok/wire.py
 
-PURPOSE: Defines the readers of what grok prints and stores: GrokWire reads one `grok --single --output-format=json` run of #1036; GrokStreamWire reads one `--output-format=streaming-json` command run and its tool calls; GrokHelperWire reads one summary.json, a `grok export` transcript and a `grok sessions delete` answer. Each turns vendor output into a record, or into the NativeThreadError that names what went wrong.
-ROLE IN CODEBASE: GrokWire is called by GrokThreadRun.execute (grok/threads.py), GrokStreamWire by GrokCommandRun.execute (grok/commands.py), and GrokHelperWire by GrokStore (grok/store.py) for each summary.json and by GrokHelperRun (grok/helpers.py) for the export and delete children; all raise through the call's NativeErrorFactory (hostkit/errors.py).
-ARCHITECTURE NOTE: Pure: no process, no file and no await; the store and the helper flows read the files and run the children. Grok writes one JSON object at exit for a --single json run, and one JSON event per line for a streaming run (text, tool_call, tool_call_update, then end {sessionId}, or error {message}). Every member name and marker comes from vidbyte/lib/constants/native_threads.py (spec INV-15). The checks run in the INV-6 order: timeout, output cap, the vendor's error object (key rejected or run failed), a bare non-zero exit, then the shape of the answer and the thread id. A summary.json member the record refuses is protocol_mismatch naming the member as Grok spells it and the file (spec INV-6).
-FUNCTION INVENTORY: GrokWire.read is the narrated main function of a #1036 run; _answer parses stdout as one JSON object, or None. GrokStreamWire.read reads a command run in the spec §9.2 order, on the id the SDK minted (spec D-29); tool_calls lists the run's tool calls for the evidence check; _events parses the stream. GrokHelperWire.thread_file reads one summary.json into a GrokThreadFile; document reads a `grok export` transcript whole; deleted reads a `grok sessions delete` answer; _checked raises the problem NativeErrorFactory.child_problem finds in either child's outcome (spec D-35); _optional_text reads one optional text member of a summary.json.
+PURPOSE: Defines the readers of what grok prints and stores: GrokWire reads one `grok --single` run, from the one JSON answer of a plain #1036 call or the streamed events of a browser call, and reads a browser call's tool calls and connected servers from that stream; GrokStreamWire reads one `--output-format=streaming-json` command run and its tool calls; GrokHelperWire reads one summary.json, a `grok export` transcript and a `grok sessions delete` answer. Each turns vendor output into a record, or into the NativeThreadError that names what went wrong.
+ROLE IN CODEBASE: GrokWire is called by GrokThreadRun.execute (grok/threads.py; read on a plain call, read_stream on a browser call), and GrokBrowserHarness (grok/browser.py) calls its tool_calls and connected on a browser call's outcome; GrokStreamWire by GrokCommandRun.execute (grok/commands.py), and GrokHelperWire by GrokStore (grok/store.py) for each summary.json and by GrokHelperRun (grok/helpers.py) for the export and delete children; all raise through the call's NativeErrorFactory (hostkit/errors.py).
+ARCHITECTURE NOTE: Pure: no process, no file and no await; the store and the helper flows read the files and run the children. Grok writes one JSON object at exit for a --single json run, and one JSON event per line for a streaming run (text, tool_call, tool_call_update, then end {sessionId}, or error {message}); a browser call's stream (spec D-8 of the browser tools) also lists the connected tools in available_commands and closes with an end event carrying stopReason, and read_stream applies read's checks in the same order (its spec section 9.1). Every member name and marker comes from vidbyte/lib/constants/native_threads.py (spec INV-15). The checks run in the INV-6 order: timeout, output cap, the vendor's error object (key rejected or run failed), a bare non-zero exit, then the shape of the answer and the thread id. A summary.json member the record refuses is protocol_mismatch naming the member as Grok spells it and the file (spec INV-6).
+FUNCTION INVENTORY: GrokWire.read is the narrated main function of a #1036 run; read_stream is the narrated main function of a browser call; tool_calls reads the mounted-tool calls of a browser call; connected names the mounted servers the stream lists in available_commands; _answer parses stdout as one JSON object, or None; _stream_text joins the last non-empty run of text chunks. GrokStreamWire.read reads a command run in the spec §9.2 order, on the id the SDK minted (spec D-29); tool_calls lists the run's tool calls for the evidence check; _events parses the stream. GrokHelperWire.thread_file reads one summary.json into a GrokThreadFile; document reads a `grok export` transcript whole; deleted reads a `grok sessions delete` answer; _checked raises the problem NativeErrorFactory.child_problem finds in either child's outcome (spec D-35); _optional_text reads one optional text member of a summary.json.
 COMMON MODIFICATION PATTERNS: A new sign-in failure text from grok is one more marker in GROK_NOT_SIGNED_IN_MARKERS; a new answer member the SDK must read gets its name constant and one check in read; a new summary.json member is one name constant, one GROK_SUMMARY_MEMBERS entry and one read in thread_file.
 WHAT NOT TO DO IN THIS FILE: 1. Do not copy vendor text into an error unscrubbed; pass it as vendor_text and the factory scrubs and caps it. 2. Do not accept a cut stdout; a truncated answer is output_too_large, never parsed, and a transcript is returned whole or not at all (spec INV-21). 3. Do not start processes, read files or await anything here. 4. Do not take a command run's thread id from the stream; the SDK minted it, and an end event naming another id is protocol_mismatch.
-KNOWN EDGE CASES: A continue is matched case-insensitively and returns the id the caller gave. A fork whose answer is its source thread is protocol_mismatch, because grok then continued the source instead of copying it. A thread id that the result record would refuse is protocol_mismatch, not an argument error. A timed-out #1036 run carries no new thread id, because grok prints it only at exit; a command run always carries its minted id, and says the thread may not exist when it failed before any tool call or end event (spec INV-29, EC-81). A blank generated_title reads as no title. A tool event without a usable name is skipped, because it cannot be evidence.
+KNOWN EDGE CASES: A browser run whose stop reason is cancelled is a failed run, because a headless run cancels the turn when the agent calls a tool no rule allows (spec EC-41). The readers never raise on vendor text: a name whose server is not mounted, or whose tool part fails NATIVE_NAME_PATTERN, is skipped (EC-44). A continue is matched case-insensitively and returns the id the caller gave. A fork whose answer is its source thread is protocol_mismatch, because grok then continued the source instead of copying it. A thread id that the result record would refuse is protocol_mismatch, not an argument error. A timed-out #1036 run carries no new thread id, because grok prints it only at exit; a command run always carries its minted id, and says the thread may not exist when it failed before any tool call or end event (spec INV-29, EC-81). A blank generated_title reads as no title. A tool event without a usable name is skipped, because it cannot be evidence.
 RELATED DOCS: vidbyte/harnesses/README.md
-TESTS: tests/features/harness_threads/test_harness_threads_errors.py, tests/features/harness_threads/test_harness_threads_threads.py, tests/features/harness_threads/test_harness_threads_grok_commands.py, tests/features/harness_threads/test_harness_threads_grok_helpers.py
+TESTS: tests/features/harness_threads/test_harness_threads_errors.py, tests/features/harness_threads/test_harness_threads_threads.py, tests/features/harness_threads/test_harness_threads_grok_commands.py, tests/features/harness_threads/test_harness_threads_grok_helpers.py, tests/features/harness_threads/test_harness_threads_browser_mounts.py, tests/features/harness_threads/test_harness_threads_browser_lifecycle.py
 """
 
 from __future__ import annotations
@@ -18,7 +18,12 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from vidbyte.harnesses.native.hostkit import NativeErrorFactory
-from vidbyte.lib.constants import native_threads
+from vidbyte.lib.constants import browser_tools, native_threads
+from vidbyte.lib.dataclasses.browser_tools import (
+    BrowserMount,
+    BrowserToolCall,
+    BrowserToolCalls,
+)
 from vidbyte.lib.dataclasses.native_threads import (
     GrokThreadFile,
     NativeHelperRequest,
@@ -32,6 +37,7 @@ from vidbyte.lib.dataclasses.validation import (
     RecordFieldConverter,
     RecordFieldValidator,
 )
+from vidbyte.lib.enums.browser_tools import BrowserTool, BrowserToolCallStatus
 from vidbyte.lib.enums.native_threads import (
     GrokEventType,
     NativeHarness,
@@ -43,7 +49,7 @@ from vidbyte.lib.process import CliRunner
 
 
 class GrokWire:
-    """Reads the one JSON answer of a headless grok run."""
+    """Reads the one JSON answer of a plain headless grok run, or the streamed events of a browser run."""
 
     @staticmethod
     def read(outcome: CliOutcome, request: NativeThreadRequest, errors: NativeErrorFactory, *, timeout_seconds: float) -> NativeThreadResult:
@@ -93,6 +99,109 @@ class GrokWire:
         return NativeThreadResult(harness=NativeHarness.GROK, thread_id=thread_id, text=text[:cap], text_truncated=len(text) > cap)
 
     @staticmethod
+    def read_stream(outcome: CliOutcome, request: NativeThreadRequest, errors: NativeErrorFactory, *, timeout_seconds: float) -> NativeThreadResult:
+        # @intent grok-stream-failures-carry-the-named-thread
+        # Read the streamed events and the closing end event first, so
+        # every failure below carries the thread Grok already named.
+        events = CliRunner.json_objects(outcome.stdout)
+        end = next((event for event in reversed(events) if event.get(native_threads.GROK_TYPE_FIELD) == native_threads.GROK_END_EVENT), None)
+        session = None if end is None else end.get(native_threads.GROK_SESSION_FIELD)
+        known = session if isinstance(session, str) and RecordFieldValidator.accepts_text(session, max_chars=native_threads.NATIVE_THREAD_ID_MAX_CHARS, pattern=native_threads.NATIVE_THREAD_ID_PATTERN) else None
+
+        # The run passed its time bound, or printed more than the
+        # browser path's cap: the stream cannot be trusted, so the
+        # process outcome decides.
+        if outcome.timed_out:
+            raise errors.failure(NativeThreadProblem.TIMED_OUT, request=request, thread_id=known, outcome=outcome, vendor_text=outcome.stderr, seconds=timeout_seconds)
+        if outcome.stdout_truncated:
+            raise errors.failure(NativeThreadProblem.OUTPUT_TOO_LARGE, request=request, thread_id=known, outcome=outcome, vendor_text=outcome.stderr, cap_bytes=native_threads.NATIVE_PROCESS_MAX_OUTPUT_BYTES)
+
+        # Grok's own error event: a sign-in failure means the key was
+        # refused, anything else is a failed run.
+        error = next((event for event in events if event.get(native_threads.GROK_TYPE_FIELD) == native_threads.GROK_ERROR_TYPE), None)
+        if error is not None:
+            message = str(error.get(native_threads.GROK_MESSAGE_FIELD, ""))
+            refused = any(marker in message.casefold() for marker in native_threads.GROK_NOT_SIGNED_IN_MARKERS)
+            problem = NativeThreadProblem.KEY_REJECTED if refused else NativeThreadProblem.RUN_FAILED
+            raise errors.failure(problem, request=request, thread_id=known, outcome=outcome, vendor_text=message)
+
+        # A non-zero exit without an error event: report what grok
+        # wrote to stderr.
+        if outcome.exit_code != native_threads.NATIVE_SUCCESS_EXIT_CODE:
+            raise errors.failure(NativeThreadProblem.RUN_FAILED, request=request, thread_id=known, outcome=outcome, vendor_text=outcome.stderr)
+
+        # Exit 0: the stream must close with an end event.
+        if end is None:
+            raise errors.failure(NativeThreadProblem.PROTOCOL_MISMATCH, request=request, outcome=outcome, missing_member=native_threads.GROK_END_EVENT)
+
+        # @intent grok-cancelled-turn-is-a-failed-run
+        # A headless run cancels the turn when the agent calls a tool no
+        # rule allows, so a cancelled stop is a failed run, never a
+        # quiet answer.
+        stop = end.get(native_threads.GROK_STOP_REASON_FIELD)
+        if stop == native_threads.GROK_CANCELLED_STOP_REASON:
+            raise errors.failure(NativeThreadProblem.RUN_FAILED, request=request, thread_id=known, outcome=outcome, searched=native_threads.GROK_STOP_REASON_DETAIL.format(reason=stop))
+
+        # The end event must name a usable thread; a continue must
+        # answer on the thread it was given and a fork on a new one.
+        if known is None:
+            raise errors.failure(NativeThreadProblem.PROTOCOL_MISMATCH, request=request, outcome=outcome, missing_member=native_threads.GROK_SESSION_FIELD)
+        wrong = NativeErrorFactory.wrong_thread(request, known)
+        if wrong is not None:
+            detail = native_threads.NATIVE_WRONG_THREAD_DETAILS[wrong].format(answered=known, requested=request.thread_id)
+            raise errors.failure(wrong, request=request, thread_id=known, outcome=outcome, searched=detail)
+
+        # Return the caller's own id on a continue, the new one
+        # otherwise, with the answer cut at the result cap.
+        thread_id = request.thread_id if request.verb is NativeThreadVerb.CONTINUE and request.thread_id is not None else known
+        answer = GrokWire._stream_text(events)
+        cap = native_threads.NATIVE_RESULT_TEXT_MAX_CHARS
+        return NativeThreadResult(harness=NativeHarness.GROK, thread_id=thread_id, text=answer[:cap], text_truncated=len(answer) > cap)
+
+    @staticmethod
+    def tool_calls(outcome: CliOutcome, mount: BrowserMount) -> BrowserToolCalls:
+        # @intent grok-reader-skips-vendor-names-it-cannot-trust
+        # Each use_tool call on a mounted server, in the order Grok
+        # printed them, with the last status Grok reported for it: the
+        # model-written name splits at the first double underscore, a
+        # name that fails the record's rule is skipped rather than
+        # raised, and anything but completed (a denied call included)
+        # is failed.
+        events = CliRunner.json_objects(outcome.stdout)
+        mounted = {server.selection.definition.tool.value: server.selection.definition.tool for server in mount.servers}
+        statuses = {event.get(native_threads.GROK_TOOL_CALL_ID_FIELD): event.get(native_threads.GROK_STATUS_FIELD) for event in events if event.get(native_threads.GROK_TYPE_FIELD) == native_threads.GROK_TOOL_CALL_UPDATE_EVENT and isinstance(event.get(native_threads.GROK_STATUS_FIELD), str)}
+        calls: list[BrowserToolCall] = []
+        for event in events:
+            raw = event.get(native_threads.GROK_RAW_INPUT_FIELD)
+            name = raw.get(native_threads.GROK_RAW_TOOL_NAME_FIELD) if isinstance(raw, dict) else None
+            if event.get(native_threads.GROK_TYPE_FIELD) != native_threads.GROK_TOOL_CALL_EVENT or event.get(native_threads.GROK_TOOL_NAME_FIELD) != native_threads.GROK_USE_TOOL_NAME or not isinstance(name, str):
+                continue
+            server, separator, tool = name.partition(browser_tools.GROK_TOOL_NAME_SEPARATOR)
+            if not separator or server not in mounted or not RecordFieldValidator.accepts_text(tool, max_chars=native_threads.NATIVE_NAME_MAX_CHARS, pattern=native_threads.NATIVE_NAME_PATTERN):
+                continue
+            completed = statuses.get(event.get(native_threads.GROK_TOOL_CALL_ID_FIELD)) == native_threads.GROK_COMPLETED_STATUS
+            calls.append(BrowserToolCall(tool=mounted[server], name=tool, status=BrowserToolCallStatus.COMPLETED if completed else BrowserToolCallStatus.FAILED))
+        cap = browser_tools.BROWSER_TOOL_CALLS_MAX_ITEMS
+        return BrowserToolCalls(calls=tuple(calls[:cap]), truncated=len(calls) > cap)
+
+    @staticmethod
+    def connected(outcome: CliOutcome, mount: BrowserMount) -> tuple[BrowserTool, ...]:
+        # @intent grok-servers-show-only-in-the-tool-list
+        # A mounted server counts as connected only when one of its
+        # tools is in an available_commands list, the one per-server
+        # evidence a headless run prints. A call never adds a server:
+        # the model can name a tool whose server never connected, and
+        # Grok then answers "Tool not found" (spec D-11).
+        names: list[object] = []
+        for event in CliRunner.json_objects(outcome.stdout):
+            listed = event.get(native_threads.GROK_TOOLS_FIELD)
+            if event.get(native_threads.GROK_TYPE_FIELD) == native_threads.GROK_AVAILABLE_COMMANDS_EVENT and isinstance(listed, list):
+                names.extend(listed)
+        parts = [name.partition(browser_tools.GROK_TOOL_NAME_SEPARATOR) for name in names if isinstance(name, str)]
+        seen = {server for server, separator, _tool in parts if separator}
+        return tuple(server.selection.definition.tool for server in mount.servers if server.selection.definition.tool.value in seen)
+
+    @staticmethod
     def _answer(stdout: str) -> Mapping[str, object] | None:
         # The whole stdout as one JSON object, or None when it is not
         # one.
@@ -101,6 +210,20 @@ class GrokWire:
         except ValueError:
             return None
         return value if isinstance(value, dict) else None
+
+    @staticmethod
+    def _stream_text(events: list[Mapping[str, object]]) -> str:
+        # The answer is the last non-empty run of text chunks between
+        # usage events; earlier runs are narration before tool calls.
+        runs: list[list[str]] = [[]]
+        for event in events:
+            kind, data = event.get(native_threads.GROK_TYPE_FIELD), event.get(native_threads.GROK_DATA_FIELD)
+            if kind == native_threads.GROK_USAGE_EVENT:
+                runs.append([])
+            elif kind == native_threads.GROK_TEXT_EVENT and isinstance(data, str):
+                runs[-1].append(data)
+        texts = ["".join(run) for run in runs]
+        return next((joined for joined in reversed(texts) if joined), "")
 
 
 class GrokStreamWire:

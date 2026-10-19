@@ -98,7 +98,7 @@ class OpencodeCommands:
                 if settings.agent not in (None, native_threads.OPENCODE_PLAN_AGENT):
                     raise ConfigurationError(native_threads.OPENCODE_PLAN_AGENT_RULE.format(agent=native_threads.OPENCODE_PLAN_AGENT, got=settings.agent), details={native_threads.NATIVE_FIELD_DETAIL_KEY: native_threads.NATIVE_CONFIG_ARGUMENT})
                 settings = dataclasses.replace(settings, agent=native_threads.OPENCODE_PLAN_AGENT)
-            return await OpencodeThreadRun.execute(request, settings, errors)
+            return (await OpencodeThreadRun.execute(request, settings, errors)).result
         except asyncio.CancelledError:
             raise
         except NativeThreadError:

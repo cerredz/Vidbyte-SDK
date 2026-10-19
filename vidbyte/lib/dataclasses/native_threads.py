@@ -1,9 +1,9 @@
 """FILE: vidbyte/lib/dataclasses/native_threads.py
 
-PURPOSE: Defines the validated records of the harness thread functions, thread helpers and command functions: NativeThreadRequest, the checked arguments of one run, continue, fork or command call; NativeHelperRequest, the checked arguments of one keyless thread helper call; GrokThreadConfig, OpencodeThreadConfig and MuseThreadConfig, the per-harness settings a caller may pass; NativeThreadResult, what a run or a read returns; NativeThreadSummary, one listed thread; NativeCommandOutput, the printed output of a command that makes no thread; NativeToolCall, one tool call of a run's record; GrokCommandArguments, the checked slash command or agent and options of one Grok command call; and GrokThreadFile, one Grok summary.json as the store holds it.
-ROLE IN CODEBASE: NativeThreadRequest is built by the public run and command functions under vidbyte/harnesses/native/ (threads.py and commands.py of grok, opencode and muse) and NativeHelperRequest by the helpers (helpers.py of each); both are read by every step of their flows. The three config records, NativeThreadResult, NativeThreadSummary and NativeCommandOutput are re-exported from vidbyte.harnesses.native; callers build the configs, the functions return the others. NativeToolCall, GrokCommandArguments and GrokThreadFile are internal to the harness readers and flows.
+PURPOSE: Defines the validated records of the harness thread functions, thread helpers and command functions: NativeThreadRequest, the checked arguments of one run, continue, fork or command call; NativeHelperRequest, the checked arguments of one keyless thread helper call; GrokThreadConfig, OpencodeThreadConfig and MuseThreadConfig, the per-harness settings a caller may pass; NativeThreadResult, what a run or a read returns; NativeThreadSummary, one listed thread; NativeCommandOutput, the printed output of a command that makes no thread; NativeToolCall, one tool call of a run's record; GrokCommandArguments, the checked slash command or agent and options of one Grok command call; GrokThreadFile, one Grok summary.json as the store holds it; and NativeThreadRun, the result together with the CLI outcome it was read from, which the browser functions read the vendor's tool calls from.
+ROLE IN CODEBASE: NativeThreadRequest is built by the public run and command functions under vidbyte/harnesses/native/ (threads.py and commands.py of grok, opencode and muse) and NativeHelperRequest by the helpers (helpers.py of each); both are read by every step of their flows. The three config records, NativeThreadResult, NativeThreadSummary and NativeCommandOutput are re-exported from vidbyte.harnesses.native; callers build the configs, the functions return the others. NativeToolCall, GrokCommandArguments and GrokThreadFile are internal to the harness readers and flows. NativeThreadRun is internal: each <Harness>ThreadRun.execute returns it, the plain functions return its result, and NativeBrowserRun (vidbyte/harnesses/native/hostkit/browser.py) reads its outcome.
 ARCHITECTURE NOTE: Every check lives in __post_init__, so a constructed record is always valid. Field checks go through RecordFieldValidator and RecordFieldConverter (vidbyte/lib/dataclasses/validation.py), every int and bool through require_int and require_bool (lint C002); the rules that relate a field to another value (thread_id against the verb, a skill folder's SKILL.md, unique skill folder names, which helper takes which argument, which Grok command takes which option) raise ConfigurationError inline. A refused field raises ConfigurationError whose details["field"] is the public argument name (api_key, skills[2], objective, limit); the functions turn it into a NativeThreadError naming that argument, and the readers turn a refused NativeThreadSummary field into protocol_mismatch naming the vendor member. The workspace and each skill path are checked as given, absolute and existing, and then stored resolved, so a relative path never passes because of the current folder. Which helper takes which argument is read from the operation tables of vidbyte/lib/constants/native_threads.py.
-FUNCTION INVENTORY: NativeThreadRequest.__post_init__ is the narrated main function; _checked_workspace checks and resolves the workspace; _checked_model checks the model for the harness; _checked_thread_id ties the thread id to the verb; _checked_skills checks, resolves and names each skill folder; _checked_command checks the opencode command or Muse skill id. NativeHelperRequest.__post_init__ is narrated and calls _checked_thread_id, _checked_since, _checked_limit, _checked_query, _checked_scope and _checked_dry_run. GrokCommandArguments.__post_init__ is narrated and calls _checked_target, _checked_text, _checked_design_doc, _checked_counts, _checked_plan_flags, _checked_review_target, _checked_wrapper_text and _checked_skill_names. GrokThreadConfig, OpencodeThreadConfig, MuseThreadConfig, NativeThreadResult, NativeThreadSummary, NativeCommandOutput, NativeToolCall and GrokThreadFile have only __post_init__.
+FUNCTION INVENTORY: NativeThreadRequest.__post_init__ is the narrated main function; _checked_workspace checks and resolves the workspace; _checked_model checks the model for the harness; _checked_thread_id ties the thread id to the verb; _checked_skills checks, resolves and names each skill folder; _checked_command checks the opencode command or Muse skill id. NativeHelperRequest.__post_init__ is narrated and calls _checked_thread_id, _checked_since, _checked_limit, _checked_query, _checked_scope and _checked_dry_run. GrokCommandArguments.__post_init__ is narrated and calls _checked_target, _checked_text, _checked_design_doc, _checked_counts, _checked_plan_flags, _checked_review_target, _checked_wrapper_text and _checked_skill_names. GrokThreadConfig, OpencodeThreadConfig, MuseThreadConfig, NativeThreadResult, NativeThreadSummary, NativeCommandOutput, NativeToolCall, GrokThreadFile and NativeThreadRun have only __post_init__.
 COMMON MODIFICATION PATTERNS: A new config field adds one field and one validator call to its record, and its bound or pattern to vidbyte/lib/constants/native_threads.py. A config record never gets a model field: the model is an argument of every call. A new helper joins the operation tables in constants; a new Grok command option adds one field and one rule to GrokCommandArguments.
 WHAT NOT TO DO IN THIS FILE: 1. Do not read keys from environment variables. 2. Do not put a key value in an error message or its details; name the parameter instead. 3. Do not drop repr=False from a key field. 4. Do not import from vidbyte.harnesses; vidbyte/lib is the bottom layer. 5. Do not guard an int or bool field with an inline bool check; call require_int or require_bool.
 KNOWN EDGE CASES: The prompt cap is NATIVE_PROMPT_MAX_CHARS for opencode, which reads the prompt from stdin, and NATIVE_ARGV_PROMPT_MAX_CHARS for Grok and Muse, which take it on argv; on Windows the Grok and Muse prompt must also fit NATIVE_WINDOWS_ARGV_PROMPT_MAX_UNITS once quoted and counted in UTF-16 units, the way CreateProcess counts it; that ceiling leaves room for the rest of the command line, and a launch that still passes the limit is reported as launch_failed. An opencode request with a command may have an empty prompt, because the command then runs with no arguments and nothing goes on stdin. A skill item that is not a path is refused naming skills[<i>], while a skill list that is a str or holds too many items is refused naming skills. Two skill folders with the same folder name are refused, because each harness finds a skill by its folder name. since is refused as an int (hours or seconds would be a guess) and above NATIVE_SINCE_MAX (now - since would overflow). A NativeThreadSummary may not name itself as its parent. A design doc path is kept as given (not resolved), because it travels in the slash line the caller expects.
@@ -83,6 +83,7 @@ from vidbyte.lib.constants.native_threads import (
     NATIVE_WINDOWS_PLATFORM,
     OPENCODE_MODEL_PATTERN,
 )
+from vidbyte.lib.dataclasses.process import CliOutcome
 from vidbyte.lib.dataclasses.validation import (
     RecordFieldConverter,
     RecordFieldValidator,
@@ -583,6 +584,18 @@ class GrokThreadFile:
         RecordFieldConverter.require_instance(self.path, "GrokThreadFile.path", Path)
 
 
+@dataclass(frozen=True, slots=True)
+class NativeThreadRun:
+    """One finished thread call: the result the plain function returns and the CLI outcome it was read from."""
+
+    result: NativeThreadResult
+    outcome: CliOutcome
+
+    def __post_init__(self) -> None:
+        RecordFieldConverter.require_instance(self.result, "NativeThreadRun.result", NativeThreadResult)
+        RecordFieldConverter.require_instance(self.outcome, "NativeThreadRun.outcome", CliOutcome)
+
+
 __all__ = [
     "GrokCommandArguments",
     "GrokThreadConfig",
@@ -592,6 +605,7 @@ __all__ = [
     "NativeHelperRequest",
     "NativeThreadRequest",
     "NativeThreadResult",
+    "NativeThreadRun",
     "NativeThreadSummary",
     "NativeToolCall",
     "OpencodeThreadConfig",

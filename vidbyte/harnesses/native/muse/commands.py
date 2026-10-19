@@ -131,7 +131,7 @@ class MuseCommandRun:
         # so the prompt asks for the skill or the goal in words, then
         # #1036's run starts the thread with the caller's key.
         prompted = dataclasses.replace(request, prompt=template.format(skill=request.command, prompt=request.prompt))
-        result = await MuseThreadRun.execute(prompted, config, errors)
+        result = (await MuseThreadRun.execute(prompted, config, errors)).result
         thread_id = result.thread_id
 
         # muse exec returned its thread, so every error from here on

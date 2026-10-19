@@ -10,6 +10,7 @@ from vidbyte import FileContextItem as RootFileContextItem
 from vidbyte.context import (
     ContextManager,
     ContextWindow,
+    ContextWindowAlgorithm,
     DocumentContextItem,
     FileContextItem,
     MemoryContextItem,
@@ -17,6 +18,7 @@ from vidbyte.context import (
     TaskContextItem,
     TextContextItem,
     ToolCallContextItem,
+    ToolResultAdmission,
 )
 from vidbyte.context.primitives import TextContextItem as PrimitiveTextContextItem
 from vidbyte.lib.dataclasses import ContextItem, ContextResponse
@@ -126,6 +128,23 @@ class ContextManagementTests(unittest.TestCase):
         self.assertEqual(ContextWindow.preset.reflexion.name, "reflexion")
         self.assertEqual(ContextWindow.resolve_algorithm("compact_tool_outputs").name, "compact_tool_outputs")
         self.assertEqual(ContextWindow.resolve_algorithm("reflexion").name, "reflexion")
+
+    def test_invalid_admission_cap_fails_at_construction(self) -> None:
+        # @intent admission-cap-fails-at-construction
+        # [Hidden Failure] The runtime caps tool output only when a tool returns, so a bad cap must not wait until mid-run to fail.
+        for bad in (-1, True, 2.5, float("nan"), float("inf")):
+            with self.subTest(max_tool_result_chars=bad), self.assertRaisesRegex(ValueError, "max_tool_result_chars"):
+                ContextWindowAlgorithm(name="bad_compact", tool_result_admission=ToolResultAdmission.COMPACT, max_tool_result_chars=bad)
+
+    def test_invalid_admission_mode_fails_at_construction(self) -> None:
+        # @intent admission-cap-fails-at-construction
+        # [Hidden Failure] The runtime admits tool output only when a tool returns, so a mistyped mode would fail after the tool's side effects (or never, in a tool-free run).
+        for bad in ("hidden", "HIDE_RAW", "truncate", None, 3, ["compact"]):
+            with self.subTest(tool_result_admission=bad), self.assertRaisesRegex(ValueError, "tool_result_admission"):
+                ContextWindowAlgorithm(name="bad_mode", tool_result_admission=bad)
+        for good in ("raw", "compact", "hide_raw", *ToolResultAdmission):
+            with self.subTest(tool_result_admission=good):
+                self.assertEqual(ContextWindowAlgorithm(name="good_mode", tool_result_admission=good).tool_result_admission, good)
 
 
 if __name__ == "__main__":

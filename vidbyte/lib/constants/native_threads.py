@@ -1,14 +1,14 @@
 """FILE: vidbyte/lib/constants/native_threads.py
 
-PURPOSE: Holds every fixed value and text of the harness thread functions, the thread helpers, the command and skill functions and the canonical process helpers: time, size and count bounds, record patterns, program names, subcommand words, folder names, option values, JSON member names, vendor markers, evidence tool names and fragments, prompt templates, the per-operation argument tables, tested vendor versions, and the error texts (harness labels, summary and observation templates, detail sentences, the failure code of each harness and problem, and one likely cause and one next step per failure code).
-ROLE IN CODEBASE: Imported by the records in vidbyte/lib/dataclasses/native_threads.py (NativeThreadRequest, NativeHelperRequest, GrokCommandArguments and the rest), process.py and validation.py, by CliRunner in vidbyte/lib/process/runner.py, and by every module under vidbyte/harnesses/native/.
-ARCHITECTURE NOTE: The harness modules hold no literals of their own (spec INV-15): every flag is an enum member in vidbyte/lib/enums/native_threads.py, and every other value they need lives here, so a reviewer finds each vendor fact in one place. The timing knobs NATIVE_KILL_WAIT_SECONDS, MUSE_REAP_TIMEOUT_SECONDS and NATIVE_CONTROL_TIMEOUT_SECONDS are read through this module object at call time, never bound by a from-import, so one patch reaches every user.
-FUNCTION INVENTORY: No functions. Constants grouped as contract bounds, helper and command bounds, record patterns, process helper values, programs and folders, helper subcommands and store names, option values and separators, JSON member names, vendor markers, evidence and templates, the operation tables, tested versions, then the error texts and detail sentences.
-COMMON MODIFICATION PATTERNS: A value a harness module needs is added here under its feature prefix and used by name (lint A007, spec INV-15). A new failure code adds its pair to NATIVE_THREAD_FAILURE_CODES and its own texts to NATIVE_THREAD_LIKELY_CAUSES and NATIVE_THREAD_NEXT_STEPS. A new helper or command operation joins the operation tables (NATIVE_HELPER_OPERATIONS and the rest) that decide which arguments it takes; a new Grok command adds its evidence rows to GROK_EVIDENCE_TOOLS and GROK_EVIDENCE_FRAGMENTS.
+PURPOSE: Holds every fixed value and text of the harness thread functions, the thread helpers, the command and skill functions and the canonical process helpers: time, size and count bounds, record patterns, program names, subcommand words, folder names, option values, JSON member names, vendor markers, evidence tool names and fragments, prompt templates, the per-operation argument tables, tested vendor versions, the process reaper's fixed programs and script, and the error texts (harness labels, summary and observation templates, detail sentences, the failure code of each harness and problem, the record each operation returns, and one likely cause and one next step per failure code).
+ROLE IN CODEBASE: Imported by the records in vidbyte/lib/dataclasses/native_threads.py (NativeThreadRequest, NativeHelperRequest, GrokCommandArguments and the rest), process.py and validation.py, by CliRunner and ProcessReaper in vidbyte/lib/process/, and by every module under vidbyte/harnesses/native/. The browser tools' own values live beside it in vidbyte/lib/constants/browser_tools.py.
+ARCHITECTURE NOTE: The harness modules hold no literals of their own (spec INV-15): every flag is an enum member in vidbyte/lib/enums/native_threads.py, and every other value they need lives here, so a reviewer finds each vendor fact in one place. The timing knobs NATIVE_KILL_WAIT_SECONDS, MUSE_REAP_TIMEOUT_SECONDS and NATIVE_CONTROL_TIMEOUT_SECONDS, and the reaper's NATIVE_PS_PATHS, are read through this module object at call time, never bound by a from-import, so one patch reaches every user.
+FUNCTION INVENTORY: No functions. Constants grouped as contract bounds, helper and command bounds, record patterns, process helper values (the process reaper's among them), programs and folders, helper subcommands and store names, option values and separators, JSON member names (the browser path's Grok stream, opencode tool_use and Muse task records among them), vendor markers, evidence and templates, the operation tables, tested versions, then the error texts and detail sentences, the failure code table and NATIVE_THREAD_RESULT_RECORDS.
+COMMON MODIFICATION PATTERNS: A value a harness module needs is added here under its feature prefix and used by name (lint A007, spec INV-15). A new failure code adds its pair to NATIVE_THREAD_FAILURE_CODES and its own texts to NATIVE_THREAD_LIKELY_CAUSES and NATIVE_THREAD_NEXT_STEPS. A new operation adds its row to NATIVE_THREAD_RESULT_RECORDS. A new helper or command operation joins the operation tables (NATIVE_HELPER_OPERATIONS and the rest) that decide which arguments it takes; a new Grok command adds its evidence rows to GROK_EVIDENCE_TOOLS and GROK_EVIDENCE_FRAGMENTS.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import from vidbyte above vidbyte.lib.enums. 2. Do not name a constant with a password, token or secret word and give it a string (lint S054). 3. Do not add a carriage return to MUSE_REAP_SCRIPT; sh in the distro reads it from stdin. 4. Do not share one likely cause or next step between two codes of a harness; each code gets text written for it.
-KNOWN EDGE CASES: Patterns are applied with re.fullmatch, so each one describes the whole value. The texts must not contain a credential word followed by ":" or "=", because HarnessRedactor would rewrite such a phrase in vendor text. MUSE_REAP_SCRIPT runs with the caller's environment, which lacks the peer mark, so it never matches itself. The evidence fragments use forward slashes because evidence text is matched after every run of backslashes is folded to one slash. OPENCODE_COMMAND_NOT_FOUND_TEXT is a prefix: opencode appends the list of commands it has. OPENCODE_SESSION_QUERY may only ever be filled with a thread id that passed NATIVE_THREAD_ID_PATTERN.
+KNOWN EDGE CASES: Patterns are applied with re.fullmatch, so each one describes the whole value. The texts must not contain a credential word followed by ":" or "=", because HarnessRedactor would rewrite such a phrase in vendor text. MUSE_REAP_SCRIPT runs with the caller's environment, which lacks the peer mark, so it never matches itself; NATIVE_REAP_POWERSHELL_SCRIPT reads its marker from the environment and skips its own process for the same reason. The four browser.* codes are shared by the three harnesses, so each has one text per code, not per harness. Five next steps that name a plain function also name its _with_browser sibling (spec D-22). The evidence fragments use forward slashes because evidence text is matched after every run of backslashes is folded to one slash. OPENCODE_COMMAND_NOT_FOUND_TEXT is a prefix: opencode appends the list of commands it has. OPENCODE_SESSION_QUERY may only ever be filled with a thread id that passed NATIVE_THREAD_ID_PATTERN.
 RELATED DOCS: vidbyte/harnesses/README.md
-TESTS: tests/features/harness_threads/test_harness_threads_surface.py, tests/features/harness_threads/test_harness_threads_errors.py
+TESTS: tests/features/harness_threads/test_harness_threads_surface.py, tests/features/harness_threads/test_harness_threads_errors.py, tests/features/harness_threads/test_harness_threads_browser_contract.py
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ from vidbyte.lib.enums.native_threads import (
     NativeHarness,
     NativeThreadOperation,
     NativeThreadProblem,
+    NativeThreadResultRecord,
 )
 
 # Contract bounds: time limits, size caps and counts.
@@ -159,6 +160,27 @@ NATIVE_WINDOWS_DEFAULT_PATHEXT = ".COM;.EXE;.BAT;.CMD;.VBS;.JS;.WS;.MSC"
 NATIVE_WINDOWS_COMMAND_LINE_ENCODING = "utf-16-le"
 NATIVE_UTF16_UNIT_BYTES = 2
 NATIVE_COMMAND_LINE_TOO_LONG_WINERROR = 206
+# The process reaper (ProcessReaper, spec D-12). On Windows it runs the
+# System32 PowerShell with a fixed script that reads the marker from
+# VIDBYTE_REAP_MARKER, so the marker never sits on a command line it
+# would match; it kills every other process whose command line holds
+# the marker and prints how many it killed. On POSIX it lists processes
+# with ps from a fixed absolute path, never from PATH.
+NATIVE_POWERSHELL_PATH_PARTS = ("System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+NATIVE_POWERSHELL_ARGUMENTS = ("-NoProfile", "-NonInteractive", "-Command")
+NATIVE_REAP_POWERSHELL_SCRIPT = "$marker = $env:VIDBYTE_REAP_MARKER; $count = 0; if ($marker) { Get-CimInstance -ClassName Win32_Process | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -and $_.CommandLine.IndexOf($marker, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 } | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop; $count++ } catch { } } }; Write-Output $count"
+NATIVE_PS_PATHS = ("/bin/ps", "/usr/bin/ps")
+# Windows PowerShell creates an AppData Roaming folder in USERPROFILE
+# when it starts, so the reaper's PowerShell runs without USERPROFILE
+# and Windows takes the profile from the user's logon token: a
+# redirected USERPROFILE never gets a folder written into it.
+NATIVE_USER_PROFILE_VARIABLE = "USERPROFILE"
+# The count ProcessReaper.reap returns when it cannot list or stop
+# anything (no PowerShell or ps, a timeout, a defect): nothing that
+# can be counted was reaped.
+NATIVE_REAP_NONE_COUNT = 0
+NATIVE_PS_ARGUMENTS = ("-A", "-ww", "-o", "pid=,args=")
+NATIVE_REAP_COUNT_PATTERN = r"\s*(\d+)\s*"
 
 # Programs, subcommands, files and folders.
 GROK_PROGRAM = "grok"
@@ -180,6 +202,7 @@ GROK_HOME_KEY_HEX_CHARS = 16
 GROK_SKILLS_DIR = "skills"
 MUSE_CONFIG_SKILLS_PARTS = ("muse", "skills")
 MUSE_AUTH_FILE_PARTS = ("muse", "auth.json")
+MUSE_SETTINGS_PARTS = ("muse", "settings.json")
 NATIVE_SKILL_FILE_NAME = "SKILL.md"
 MUSE_WSL_MOUNT_ROOT = "/mnt"
 MUSE_WINDOWS_DRIVE_PATTERN = r"[A-Za-z]:"
@@ -211,8 +234,12 @@ NATIVE_BINARY_READ_MODE = "rb"
 
 # Fixed option values and separators.
 GROK_JSON_OUTPUT_FORMAT = "json"
+# Only the browser path streams, because tool calls and connected
+# servers are visible only in the stream (spec D-8).
+GROK_STREAMING_JSON_OUTPUT_FORMAT = "streaming-json"
 OPENCODE_JSON_FORMAT = "json"
 NATIVE_ENABLED_SWITCH = "1"
+NATIVE_DISABLED_SWITCH = "0"
 NATIVE_WSLENV_SEPARATOR = ":"
 NATIVE_WSLENV_UNIX_FLAG = "/u"
 NATIVE_PROCESS_OPTION_SEPARATOR = "="
@@ -264,6 +291,39 @@ MUSE_SESSION_FIELD = "session"
 MUSE_SESSION_ID_FIELD = "sessionId"
 MUSE_EXCLUDE_ITEMS_FIELD = "excludeItems"
 MUSE_COMMAND_ID_FIELD = "commandId"
+# The Grok streaming-json events of a browser run (vendor facts section
+# 2): the connected tools, text chunks between usage boundaries, each
+# tool call and its updates, and the closing end event.
+GROK_TEXT_EVENT = "text"
+GROK_USAGE_EVENT = "usage"
+GROK_END_EVENT = "end"
+GROK_TOOL_CALL_EVENT = "tool_call"
+GROK_TOOL_CALL_UPDATE_EVENT = "tool_call_update"
+GROK_AVAILABLE_COMMANDS_EVENT = "available_commands"
+GROK_DATA_FIELD = "data"
+GROK_STOP_REASON_FIELD = "stopReason"
+GROK_TOOL_CALL_ID_FIELD = "toolCallId"
+GROK_TOOL_NAME_FIELD = "toolName"
+GROK_RAW_INPUT_FIELD = "rawInput"
+GROK_RAW_TOOL_NAME_FIELD = "tool_name"
+GROK_STATUS_FIELD = "status"
+GROK_TOOLS_FIELD = "tools"
+GROK_USE_TOOL_NAME = "use_tool"
+GROK_CANCELLED_STOP_REASON = "cancelled"
+GROK_COMPLETED_STATUS = "completed"
+# The opencode tool_use event of a call to a mounted server.
+OPENCODE_TOOL_FIELD = "tool"
+OPENCODE_STATE_FIELD = "state"
+OPENCODE_STATE_STATUS_FIELD = "status"
+OPENCODE_COMPLETED_STATUS = "completed"
+# The Muse records of a call to a mounted server (spec A-1).
+MUSE_TASK_PROPOSED_TYPE = "task.lifecycle.proposed"
+MUSE_SIDE_EFFECT_INTENT_TYPE = "side_effect_intent"
+MUSE_TASK_COMPLETED_TYPE = "task.lifecycle.completed"
+MUSE_TASK_FAILED_TYPE = "task.lifecycle.failed"
+MUSE_TASK_ID_FIELD = "task_id"
+MUSE_TASK_KIND_FIELD = "task_kind"
+MUSE_OPERATION_FIELD = "operation"
 JSONRPC_VERSION_FIELD = "jsonrpc"
 JSONRPC_VERSION = "2.0"
 JSONRPC_ID_FIELD = "id"
@@ -285,9 +345,8 @@ GROK_LAST_TURN_SUMMARY_FIELD = "last_turn_summary"
 GROK_PARENT_FIELD = "parent_session_id"
 GROK_MODEL_FIELD = "current_model_id"
 GROK_AGENT_NAME_FIELD = "agent_name"
-GROK_DATA_FIELD = "data"
-GROK_TOOL_NAME_FIELD = "toolName"
-GROK_RAW_INPUT_FIELD = "rawInput"
+# GROK_DATA_FIELD, GROK_TOOL_NAME_FIELD and GROK_RAW_INPUT_FIELD are the
+# browser stream members above; the command reader shares them.
 GROK_END_MEMBER = "end"
 # opencode session list rows and the OPENCODE_SESSION_QUERY columns.
 OPENCODE_ID_FIELD = "id"
@@ -379,6 +438,9 @@ MUSE_TERMINAL_RECORD_MEMBER = "run.terminal.*"
 MUSE_FORK_SESSION_MEMBER = "result.session.sessionId"
 MUSE_COMPLETED_TERMINAL = "completed"
 MUSE_SESSION_STREAM_KIND = "session"
+# Muse fails a whole run when any configured MCP server fails to start
+# and names that server in its reason (vendor facts section 1).
+MUSE_REQUIRED_SERVER_MARKER = "Required MCP server"
 GROK_SESSION_NOT_FOUND_TEXT = "Session '{thread_id}' not found."
 OPENCODE_COMMAND_NOT_FOUND_TEXT = 'Command not found: "{command}"'
 MUSE_METHOD_NOT_FOUND_CODE = -32601
@@ -639,6 +701,10 @@ NATIVE_THREAD_SUMMARIES: MappingProxyType[NativeThreadProblem, str] = MappingPro
         NativeThreadProblem.PROTOCOL_MISMATCH: "{harness} answered in a form this SDK cannot read.",
         NativeThreadProblem.RUN_FAILED: "{harness} reported that the run failed.",
         NativeThreadProblem.WSL_UNAVAILABLE: "{harness} could not be reached through WSL.",
+        NativeThreadProblem.MOUNT_UNSUPPORTED: "{harness} cannot mount the selected browser tools safely, so nothing was started.",
+        NativeThreadProblem.RUNTIME_MISSING: "A program the selected browser tools need was not found, so {harness} was not started.",
+        NativeThreadProblem.TOOL_INSTALL_FAILED: "A selected browser tool could not be installed into the tool cache, so {harness} was not started.",
+        NativeThreadProblem.TOOLS_UNAVAILABLE: "{harness} finished, but its output does not show the mounted browser tools working.",
         NativeThreadProblem.COMMAND_NOT_RUN: "{harness} did not run the requested command or skill.",
         NativeThreadProblem.STORE_UNREADABLE: "{harness} keeps a thread store that the SDK could not read.",
     }
@@ -655,6 +721,10 @@ NATIVE_THREAD_OBSERVATIONS: MappingProxyType[NativeThreadProblem, str] = Mapping
         NativeThreadProblem.PROTOCOL_MISMATCH: "The output did not match what this SDK expects from {harness} {version}.",
         NativeThreadProblem.RUN_FAILED: "The vendor reported a failure of its own.",
         NativeThreadProblem.WSL_UNAVAILABLE: "Muse Code runs on Windows only inside a WSL distro.",
+        NativeThreadProblem.MOUNT_UNSUPPORTED: "Before anything starts, the SDK checks each selected tool against what {harness} can carry without writing a key into a file.",
+        NativeThreadProblem.RUNTIME_MISSING: "Before anything starts, the SDK checks for Node when a local tool is selected and for Chrome stable when a tool drives Chrome.",
+        NativeThreadProblem.TOOL_INSTALL_FAILED: "Each local browser tool is installed once, at its pinned version, into the tool cache under ~/.vidbyte/tools before its first use.",
+        NativeThreadProblem.TOOLS_UNAVAILABLE: "The SDK reads the vendor's own output for evidence that each mounted server connected or was used.",
         NativeThreadProblem.COMMAND_NOT_RUN: "The SDK looked for the evidence of the command in the run's own record and did not find it.",
         NativeThreadProblem.STORE_UNREADABLE: "The SDK reads the Grok store files itself, and a read failed.",
     }
@@ -675,6 +745,7 @@ MUSE_DISTRO_MISSING_DETAIL = "WSL has no distro named {distro}; {program} lists 
 MUSE_NOT_IN_DISTRO_DETAIL = "The SDK looked for {muse_path} inside the WSL distro {distro}."
 NATIVE_FORK_RETURNED_SOURCE_DETAIL = "The fork answered with its source thread, so the vendor continued the source thread instead of forking it."
 NATIVE_OTHER_THREAD_DETAIL = "The vendor answered on thread {answered} instead of {requested}."
+GROK_STOP_REASON_DETAIL = "Grok Build ended the turn with stop reason {reason}; a headless run cancels the turn when the agent calls a tool that no rule allows."
 # The detail of each wrong-thread problem of a Grok or opencode answer;
 # both are formatted with the answered and the requested id.
 NATIVE_WRONG_THREAD_DETAILS: MappingProxyType[NativeThreadProblem, str] = MappingProxyType(
@@ -758,6 +829,94 @@ NATIVE_THREAD_FAILURE_CODES: MappingProxyType[tuple[NativeHarness, NativeThreadP
         (NativeHarness.OPENCODE, NativeThreadProblem.COMMAND_NOT_RUN): FailureCode.OPENCODE_COMMAND_NOT_RUN,
         (NativeHarness.MUSE, NativeThreadProblem.COMMAND_NOT_RUN): FailureCode.MUSE_COMMAND_NOT_RUN,
         (NativeHarness.GROK, NativeThreadProblem.STORE_UNREADABLE): FailureCode.GROK_STORE_UNREADABLE,
+        # The browser tools: one shared code per problem, because the
+        # cause is the tool, not the harness (spec D-13).
+        (NativeHarness.GROK, NativeThreadProblem.MOUNT_UNSUPPORTED): FailureCode.BROWSER_MOUNT_UNSUPPORTED,
+        (NativeHarness.GROK, NativeThreadProblem.RUNTIME_MISSING): FailureCode.BROWSER_RUNTIME_MISSING,
+        (NativeHarness.GROK, NativeThreadProblem.TOOL_INSTALL_FAILED): FailureCode.BROWSER_TOOL_INSTALL_FAILED,
+        (NativeHarness.GROK, NativeThreadProblem.TOOLS_UNAVAILABLE): FailureCode.BROWSER_TOOLS_UNAVAILABLE,
+        (NativeHarness.OPENCODE, NativeThreadProblem.MOUNT_UNSUPPORTED): FailureCode.BROWSER_MOUNT_UNSUPPORTED,
+        (NativeHarness.OPENCODE, NativeThreadProblem.RUNTIME_MISSING): FailureCode.BROWSER_RUNTIME_MISSING,
+        (NativeHarness.OPENCODE, NativeThreadProblem.TOOL_INSTALL_FAILED): FailureCode.BROWSER_TOOL_INSTALL_FAILED,
+        (NativeHarness.OPENCODE, NativeThreadProblem.TOOLS_UNAVAILABLE): FailureCode.BROWSER_TOOLS_UNAVAILABLE,
+        (NativeHarness.MUSE, NativeThreadProblem.MOUNT_UNSUPPORTED): FailureCode.BROWSER_MOUNT_UNSUPPORTED,
+        (NativeHarness.MUSE, NativeThreadProblem.RUNTIME_MISSING): FailureCode.BROWSER_RUNTIME_MISSING,
+        (NativeHarness.MUSE, NativeThreadProblem.TOOL_INSTALL_FAILED): FailureCode.BROWSER_TOOL_INSTALL_FAILED,
+        (NativeHarness.MUSE, NativeThreadProblem.TOOLS_UNAVAILABLE): FailureCode.BROWSER_TOOLS_UNAVAILABLE,
+    }
+)
+
+# The record each operation returns, named by NativeThreadError.expected
+# (spec D-15): the plain functions return a NativeThreadResult and the
+# browser functions a BrowserThreadResult; the thread helpers return
+# what their signatures say, and a delete returns nothing.
+NATIVE_THREAD_RESULT_RECORDS: MappingProxyType[NativeThreadOperation, NativeThreadResultRecord] = MappingProxyType(
+    {
+        NativeThreadOperation.RUN_GROK_THREAD: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.CONTINUE_GROK_THREAD: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.FORK_GROK_THREAD: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.RUN_OPENCODE_THREAD: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.CONTINUE_OPENCODE_THREAD: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.FORK_OPENCODE_THREAD: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.RUN_MUSE_THREAD: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.CONTINUE_MUSE_THREAD: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.FORK_MUSE_THREAD: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.RUN_GROK_WITH_BROWSER: NativeThreadResultRecord.BROWSER_THREAD_RESULT,
+        NativeThreadOperation.CONTINUE_GROK_WITH_BROWSER: NativeThreadResultRecord.BROWSER_THREAD_RESULT,
+        NativeThreadOperation.FORK_GROK_WITH_BROWSER: NativeThreadResultRecord.BROWSER_THREAD_RESULT,
+        NativeThreadOperation.RUN_OPENCODE_WITH_BROWSER: NativeThreadResultRecord.BROWSER_THREAD_RESULT,
+        NativeThreadOperation.CONTINUE_OPENCODE_WITH_BROWSER: NativeThreadResultRecord.BROWSER_THREAD_RESULT,
+        NativeThreadOperation.FORK_OPENCODE_WITH_BROWSER: NativeThreadResultRecord.BROWSER_THREAD_RESULT,
+        NativeThreadOperation.RUN_MUSE_WITH_BROWSER: NativeThreadResultRecord.BROWSER_THREAD_RESULT,
+        NativeThreadOperation.CONTINUE_MUSE_WITH_BROWSER: NativeThreadResultRecord.BROWSER_THREAD_RESULT,
+        NativeThreadOperation.FORK_MUSE_WITH_BROWSER: NativeThreadResultRecord.BROWSER_THREAD_RESULT,
+        NativeThreadOperation.LIST_GROK_THREADS: NativeThreadResultRecord.NATIVE_THREAD_SUMMARIES,
+        NativeThreadOperation.LIST_RECENT_GROK_THREADS: NativeThreadResultRecord.NATIVE_THREAD_SUMMARIES,
+        NativeThreadOperation.LIST_GROK_THREADS_SINCE: NativeThreadResultRecord.NATIVE_THREAD_SUMMARIES,
+        NativeThreadOperation.GET_GROK_THREAD: NativeThreadResultRecord.NATIVE_THREAD_SUMMARY,
+        NativeThreadOperation.READ_GROK_THREAD: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.GET_GROK_THREAD_LINEAGE: NativeThreadResultRecord.NATIVE_THREAD_SUMMARIES,
+        NativeThreadOperation.SEARCH_GROK_THREADS: NativeThreadResultRecord.NATIVE_THREAD_SUMMARIES,
+        NativeThreadOperation.DELETE_GROK_THREAD: NativeThreadResultRecord.NO_RESULT,
+        NativeThreadOperation.LIST_OPENCODE_THREADS: NativeThreadResultRecord.NATIVE_THREAD_SUMMARIES,
+        NativeThreadOperation.LIST_RECENT_OPENCODE_THREADS: NativeThreadResultRecord.NATIVE_THREAD_SUMMARIES,
+        NativeThreadOperation.LIST_OPENCODE_THREADS_SINCE: NativeThreadResultRecord.NATIVE_THREAD_SUMMARIES,
+        NativeThreadOperation.GET_OPENCODE_THREAD: NativeThreadResultRecord.NATIVE_THREAD_SUMMARY,
+        NativeThreadOperation.READ_OPENCODE_THREAD: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.GET_OPENCODE_THREAD_LINEAGE: NativeThreadResultRecord.NATIVE_THREAD_SUMMARIES,
+        NativeThreadOperation.SEARCH_OPENCODE_THREADS: NativeThreadResultRecord.NATIVE_THREAD_SUMMARIES,
+        NativeThreadOperation.DELETE_OPENCODE_THREAD: NativeThreadResultRecord.NO_RESULT,
+        NativeThreadOperation.LIST_MUSE_THREADS: NativeThreadResultRecord.NATIVE_THREAD_SUMMARIES,
+        NativeThreadOperation.LIST_RECENT_MUSE_THREADS: NativeThreadResultRecord.NATIVE_THREAD_SUMMARIES,
+        NativeThreadOperation.LIST_MUSE_THREADS_SINCE: NativeThreadResultRecord.NATIVE_THREAD_SUMMARIES,
+        NativeThreadOperation.GET_MUSE_THREAD: NativeThreadResultRecord.NATIVE_THREAD_SUMMARY,
+        NativeThreadOperation.READ_MUSE_THREAD: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.GET_MUSE_THREAD_LINEAGE: NativeThreadResultRecord.NATIVE_THREAD_SUMMARIES,
+        NativeThreadOperation.RUN_GROK_COMMAND: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.RUN_GROK_GOAL: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.RUN_GROK_IMPLEMENT: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.RUN_GROK_DESIGN: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.RUN_GROK_EXECUTE_PLAN: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.RUN_GROK_REVIEW: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.RUN_GROK_CODE_REVIEW: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.RUN_GROK_RESUME_CLAUDE: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.RUN_GROK_RESUME_CODEX: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.RUN_GROK_RESUME_CURSOR: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.RUN_GROK_IMAGINE: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.RUN_GROK_IMAGINE_VIDEO: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.RUN_GROK_PLAN: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.RUN_GROK_EXPLORE: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.RUN_OPENCODE_COMMAND: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.RUN_OPENCODE_REVIEW: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.RUN_OPENCODE_INIT: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.RUN_OPENCODE_PLAN: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.RUN_MUSE_SKILL: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.RUN_MUSE_GOAL: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.RUN_MUSE_PLAN: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.RUN_MUSE_IMPORT: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.RUN_MUSE_SCAFFOLD: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.RUN_MUSE_BROWSER_APP: NativeThreadResultRecord.NATIVE_THREAD_RESULT,
+        NativeThreadOperation.INIT_MUSE_WORKSPACE: NativeThreadResultRecord.NATIVE_COMMAND_OUTPUT,
     }
 )
 
@@ -770,7 +929,7 @@ NATIVE_THREAD_LIKELY_CAUSES: MappingProxyType[FailureCode, str] = MappingProxyTy
         FailureCode.GROK_KEY_REJECTED: "xAI rejected the API key passed as api_key because it is wrong, revoked or lacks access, and the SDK never falls back to a stored grok login.",
         FailureCode.GROK_THREAD_NOT_FOUND: "Grok has no session with that id in the store the call searched, or it answered on a different session than the thread_id you passed, so the requested thread was not continued.",
         FailureCode.GROK_TIMED_OUT: "The Grok run needed more than timeout_seconds, often because it waited for an approval that a headless run cannot give, or because the task is large; a thread helper's grok child (export or sessions delete) has the fixed NATIVE_CONTROL_TIMEOUT_SECONDS instead, which config does not change.",
-        FailureCode.GROK_OUTPUT_TOO_LARGE: "Grok printed more than GROK_CLI_MAX_OUTPUT_BYTES for run_grok_thread, continue_grok_thread or fork_grok_thread, so its one JSON answer could not be read whole, or more than NATIVE_PROCESS_MAX_OUTPUT_BYTES for a command run's event stream or a grok export transcript, which cannot be returned whole.",
+        FailureCode.GROK_OUTPUT_TOO_LARGE: "Grok printed more than GROK_CLI_MAX_OUTPUT_BYTES for run_grok_thread, continue_grok_thread or fork_grok_thread, so its one JSON answer could not be read whole, or more than NATIVE_PROCESS_MAX_OUTPUT_BYTES for a call with browser tools, a command run's event stream or a grok export transcript, which cannot be returned whole.",
         FailureCode.GROK_PROTOCOL_MISMATCH: "The grok CLI printed output this SDK cannot read, or a fork returned its source thread; the installed Grok Build may differ from the release this SDK was checked against.",
         FailureCode.GROK_RUN_FAILED: "Grok Build reported a failure of its own, such as an unknown thread id, a model or API error, or a refused action.",
         FailureCode.OPENCODE_NOT_INSTALLED: "opencode is not on PATH, or the opencode_command you passed names a file that does not exist.",
@@ -798,6 +957,10 @@ NATIVE_THREAD_LIKELY_CAUSES: MappingProxyType[FailureCode, str] = MappingProxyTy
         FailureCode.GROK_STORE_UNREADABLE: "A folder or file under the Grok home could not be read, because of its permissions or a lock held by another process, or the user home folder could not be determined.",
         FailureCode.CONFIGURATION_INVALID_ARGUMENT: "An argument failed its check before anything started; the message names the argument and the rule it broke.",
         FailureCode.RUNTIME_ERROR: "An unexpected exception inside the SDK, which is a defect in the SDK rather than a vendor failure.",
+        FailureCode.BROWSER_MOUNT_UNSUPPORTED: "The selected tools ask for something this harness cannot carry safely: a keyed remote tool on Grok, a keyed or narrowed tool on Muse, a local tool on Muse in WSL mode, or more Grok allow and deny rules than fit on its command line.",
+        FailureCode.BROWSER_RUNTIME_MISSING: "Node 22.12.0 or later is not on PATH, the node found first is a Windows batch file, or a selected tool that drives Chrome found no Chrome stable install.",
+        FailureCode.BROWSER_TOOL_INSTALL_FAILED: "npm could not install a pinned tool package: the registry was unreachable, the install timed out, the npm that ships with Node is missing, the user home is unknown, or an earlier install left a broken folder.",
+        FailureCode.BROWSER_TOOLS_UNAVAILABLE: "A mounted tool server did not start or connect in time, or the agent used none of the mounted tools; opencode prints no per-server status, so there the two cannot be told apart.",
     }
 )
 
@@ -808,7 +971,7 @@ NATIVE_THREAD_NEXT_STEPS: MappingProxyType[FailureCode, str] = MappingProxyType(
         FailureCode.GROK_LAUNCHER_REFUSED: "Pass the real grok.exe in GrokThreadConfig(grok_command=(...,)), or install Grok Build's own binary under ~/.grok/bin.",
         FailureCode.GROK_LAUNCH_FAILED: "Check that grok runs from a terminal and that ~/.vidbyte/grok-homes is a writable folder, then retry; run concurrent Grok calls in one workspace only with a skill set an earlier call already prepared.",
         FailureCode.GROK_KEY_REJECTED: "Pass a valid xAI API key as api_key and retry.",
-        FailureCode.GROK_THREAD_NOT_FOUND: "Pass a thread_id that a Grok function or list_grok_threads returned for the same workspace and scope; a Grok thread can be continued only from the workspace that created it.",
+        FailureCode.GROK_THREAD_NOT_FOUND: "Pass a thread_id that a Grok function (such as run_grok_thread, fork_grok_thread, run_grok_with_browser or fork_grok_with_browser) or list_grok_threads returned for the same workspace and scope; a Grok thread can be continued only from the workspace that created it.",
         FailureCode.GROK_TIMED_OUT: "For a run, raise GrokThreadConfig.timeout_seconds, narrow the prompt, or choose a permission_mode that lets the run proceed, and continue the thread to finish a partial turn; for a thread helper, retry, or run grok export directly.",
         FailureCode.GROK_OUTPUT_TOO_LARGE: "For a run, ask Grok for a shorter answer, for example by having it write long results to a file in the workspace; for a read, export the transcript with grok export yourself.",
         FailureCode.GROK_PROTOCOL_MISMATCH: "Run grok --version and install the Grok Build release named in this message, then retry.",
@@ -817,18 +980,18 @@ NATIVE_THREAD_NEXT_STEPS: MappingProxyType[FailureCode, str] = MappingProxyType(
         FailureCode.OPENCODE_LAUNCHER_REFUSED: "Pass the opencode executable itself (opencode.exe) in OpencodeThreadConfig(opencode_command=(...,)).",
         FailureCode.OPENCODE_LAUNCH_FAILED: "Check that opencode runs from a terminal as the same user, then retry.",
         FailureCode.OPENCODE_KEY_REJECTED: "Pass a valid API key for the provider before the slash in model, for example a DeepSeek key for deepseek/deepseek-v4-pro, and retry.",
-        FailureCode.OPENCODE_THREAD_NOT_FOUND: "Pass a thread_id that an opencode function or list_opencode_threads returned for this user and machine.",
+        FailureCode.OPENCODE_THREAD_NOT_FOUND: "Pass a thread_id that an opencode function (such as run_opencode_thread, fork_opencode_thread, run_opencode_with_browser or fork_opencode_with_browser) or list_opencode_threads returned for this user and machine.",
         FailureCode.OPENCODE_TIMED_OUT: "For a run, raise OpencodeThreadConfig.timeout_seconds or narrow the prompt, and continue the session to finish a partial turn; for a thread helper, retry, or run opencode session list or opencode export directly.",
-        FailureCode.OPENCODE_OUTPUT_TOO_LARGE: "For a run, ask for a shorter answer or split the task across several continue_opencode_thread calls; for a read, export the transcript with opencode export yourself.",
+        FailureCode.OPENCODE_OUTPUT_TOO_LARGE: "For a run, ask for a shorter answer or split the task across several continue_opencode_thread or continue_opencode_with_browser calls; for a read, export the transcript with opencode export yourself.",
         FailureCode.OPENCODE_PROTOCOL_MISMATCH: "Run opencode --version and install the opencode release named in this message, then retry; when the message names the scan cap, list and search cannot cover this project, so get a known thread with get_opencode_thread, which needs no list, or delete old root sessions with delete_opencode_thread until fewer than the cap remain.",
         FailureCode.OPENCODE_RUN_FAILED: "Read the vendor text in this message, check that model names a provider and model that opencode knows, and retry.",
         FailureCode.MUSE_NOT_INSTALLED: "Install Muse Code, set MuseThreadConfig.muse_path to its path inside the distro, or pass its full path as muse_command.",
         FailureCode.MUSE_LAUNCHER_REFUSED: "Run Muse through WSL with MuseThreadConfig(wsl_distro=...), or pass a real executable as muse_command.",
         FailureCode.MUSE_LAUNCH_FAILED: "Check that muse runs from a terminal and that the system temp folder is writable, then retry.",
         FailureCode.MUSE_KEY_REJECTED: "Pass a valid Meta API key as api_key and retry.",
-        FailureCode.MUSE_THREAD_NOT_FOUND: "Pass a thread_id that a Muse function or list_muse_threads returned for this user and machine.",
+        FailureCode.MUSE_THREAD_NOT_FOUND: "Pass a thread_id that a Muse function (such as run_muse_thread, fork_muse_thread, run_muse_with_browser or fork_muse_with_browser) or list_muse_threads returned for this user and machine.",
         FailureCode.MUSE_TIMED_OUT: "For a run, raise MuseThreadConfig.timeout_seconds or narrow the prompt; for a thread helper, retry; in WSL mode check that the distro starts quickly from a terminal.",
-        FailureCode.MUSE_OUTPUT_TOO_LARGE: "For a run, ask for a shorter answer or split the task across several continue_muse_thread calls; for a read, export the transcript with muse export yourself.",
+        FailureCode.MUSE_OUTPUT_TOO_LARGE: "For a run, ask for a shorter answer or split the task across several continue_muse_thread or continue_muse_with_browser calls; for a read, export the transcript with muse export yourself.",
         FailureCode.MUSE_PROTOCOL_MISMATCH: "Run muse --version and install the Muse Code release named in this message, then retry.",
         FailureCode.MUSE_RUN_FAILED: "Read the vendor text in this message; a muse serve error usually clears once no other client holds the session.",
         FailureCode.MUSE_WSL_UNAVAILABLE: "Install WSL and a distro that holds Muse Code, then pass MuseThreadConfig(wsl_distro=...) with a name that wsl.exe -l -q lists.",
@@ -838,5 +1001,9 @@ NATIVE_THREAD_NEXT_STEPS: MappingProxyType[FailureCode, str] = MappingProxyType(
         FailureCode.GROK_STORE_UNREADABLE: "Fix the permissions of the path named in this message, or set HOME (POSIX) or USERPROFILE (Windows) for this process, then retry.",
         FailureCode.CONFIGURATION_INVALID_ARGUMENT: "Fix the argument named in this message and call again; nothing ran and nothing was written.",
         FailureCode.RUNTIME_ERROR: "Report the defect with the exception class named in this message; a retry may succeed if the cause was transient.",
+        FailureCode.BROWSER_MOUNT_UNSUPPORTED: "Choose tools this harness can mount, as the observation in this message describes, or run the same tools on a harness that can mount them.",
+        FailureCode.BROWSER_RUNTIME_MISSING: "Install Node 22.12.0 or later as a real node executable on PATH, and Google Chrome stable for playwright or chromedevtools, then call again.",
+        FailureCode.BROWSER_TOOL_INSTALL_FAILED: "Check network access to registry.npmjs.org and that the user home is writable, delete any broken folder this message names under ~/.vidbyte/tools, then call again.",
+        FailureCode.BROWSER_TOOLS_UNAVAILABLE: "Read the servers and the vendor text this message names, check each tool's key, and continue the thread with the same tools to try again.",
     }
 )

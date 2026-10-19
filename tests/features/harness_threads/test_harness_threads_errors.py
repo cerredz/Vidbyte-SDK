@@ -48,6 +48,7 @@ CHILD_CASES = [
     ("marker-on-a-clean-exit", "stderr", 0, 0, 0.0, True, ("stderr", "stdout"), None),
     ("clean-exit", "none", 0, 0, 0.0, False, (), None),
 ]
+BROWSER_CODES = ["browser.mount_unsupported", "browser.runtime_missing", "browser.tool_install_failed", "browser.tools_unavailable"]
 DIAGNOSTIC_FIELDS = ("error_kind", "expected", "actual", "safe_runtime_details", "likely_causes", "repair_approaches", "related_docs", "relevant_tests")
 
 
@@ -222,7 +223,7 @@ def test_every_code_has_its_own_likely_cause_and_next_step(lib_api) -> None:
     codes = lib_api.FailureCode
     harness_codes = [codes(f"{harness}.{problem}") for harness in HARNESSES for problem in PROBLEMS] + [codes("muse.wsl_unavailable")]
     harness_codes += [codes(code) for code in ("grok.command_not_run", "opencode.command_not_run", "muse.command_not_run", "grok.store_unreadable")]
-    expected = {*harness_codes, codes.CONFIGURATION_INVALID_ARGUMENT, codes.RUNTIME_ERROR}
+    expected = {*harness_codes, *(codes(code) for code in BROWSER_CODES), codes.CONFIGURATION_INVALID_ARGUMENT, codes.RUNTIME_ERROR}
     for table in (lib_api.constants.NATIVE_THREAD_LIKELY_CAUSES, lib_api.constants.NATIVE_THREAD_NEXT_STEPS):
         assert set(table) == expected
         assert all(isinstance(text, str) and text.strip() for text in table.values())

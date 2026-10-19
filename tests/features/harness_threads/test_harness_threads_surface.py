@@ -43,26 +43,28 @@ SUBPACKAGE_EXPORTS = {
     harness: [*(f"{verb}_{harness}_thread" for verb in ("run", "continue", "fork")), *(name for name in NEW_FUNCTIONS if f"_{harness}_" in f"_{name}_")]
     for harness in ("grok", "opencode", "muse")
 }
+BROWSER_FUNCTIONS = tuple(f"{verb}_{harness}_with_browser" for harness in ("grok", "opencode", "muse") for verb in ("run", "continue", "fork"))
 EXPECTED_EXPORTS = {
     *FUNCTIONS, "NativeThreadResult", "GrokThreadConfig", "OpencodeThreadConfig", "MuseThreadConfig",
     "NativeThreadError", "GrokPermissionMode", "GrokReasoningEffort", "MuseReasoningEffort",
     *NEW_FUNCTIONS, "NativeThreadSummary", "NativeCommandOutput", "GrokThreadScope", "GrokCommand",
+    *BROWSER_FUNCTIONS, "BrowserThreadResult", "BrowserToolCall",
 }
 EXPECTED_ENUMS = {
     "NativeHarness": ["grok", "opencode", "muse"],
     "NativeThreadVerb": ["run", "continue", "fork"],
-    "NativeThreadOperation": [*FUNCTIONS, *NEW_FUNCTIONS],
-    "NativeThreadProblem": ["not_installed", "launcher_refused", "launch_failed", "key_rejected", "thread_not_found", "timed_out", "output_too_large", "protocol_mismatch", "run_failed", "wsl_unavailable", "command_not_run", "store_unreadable"],
+    "NativeThreadOperation": [*FUNCTIONS, *BROWSER_FUNCTIONS, *NEW_FUNCTIONS],
+    "NativeThreadProblem": ["not_installed", "launcher_refused", "launch_failed", "key_rejected", "thread_not_found", "timed_out", "output_too_large", "protocol_mismatch", "run_failed", "wsl_unavailable", "mount_unsupported", "runtime_missing", "tool_install_failed", "tools_unavailable", "command_not_run", "store_unreadable"],
     "GrokPermissionMode": ["default", "acceptEdits", "dontAsk", "plan"],
     "GrokReasoningEffort": ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
     "MuseReasoningEffort": ["none", "minimal", "low", "medium", "high", "xhigh", "ultra"],
-    "GrokFlag": ["--single", "--output-format", "--cwd", "--permission-mode", "--model", "--reasoning-effort", "--resume", "--fork-session", "--agent", "--session-id"],
+    "GrokFlag": ["--single", "--output-format", "--cwd", "--permission-mode", "--model", "--reasoning-effort", "--resume", "--fork-session", "--allow", "--deny", "--agent", "--disable-web-search", "--session-id"],
     "OpencodeFlag": ["--format", "--dir", "--model", "--agent", "--variant", "--session", "--fork", "--command", "--max-count"],
-    "MuseFlag": ["--json", "--provider", "--workspace", "--session-id", "--model", "--reasoning-effort", "--user-input-auto-resolve", "--", "--session", "--out", "--dry-run"],
+    "MuseFlag": ["--json", "--provider", "--workspace", "--session-id", "--model", "--reasoning-effort", "--user-input-auto-resolve", "--", "--disable-web-tools", "--session", "--out", "--dry-run"],
     "WslFlag": ["-d", "-e", "-l", "-q"],
-    "NativeEnvironmentVariable": ["XAI_API_KEY", "GROK_CODE_XAI_API_KEY", "GROK_HOME", "GROK_DISABLE_AUTOUPDATER", "OPENCODE_CONFIG_CONTENT", "OPENCODE_DISABLE_AUTOUPDATE", "META_API_KEY", "MUSE_NO_AUTO_UPDATE", "MUSE_AUTH_PATH", "XDG_CONFIG_HOME", "WSLENV", "VIDBYTE_PEER_MARK", "GROK_WORKFLOWS", "PWD"],
+    "NativeEnvironmentVariable": ["XAI_API_KEY", "GROK_CODE_XAI_API_KEY", "GROK_HOME", "GROK_DISABLE_AUTOUPDATER", "OPENCODE_CONFIG_CONTENT", "OPENCODE_DISABLE_AUTOUPDATE", "META_API_KEY", "MUSE_NO_AUTO_UPDATE", "MUSE_AUTH_PATH", "XDG_CONFIG_HOME", "WSLENV", "VIDBYTE_PEER_MARK", "GROK_CLAUDE_MCPS_ENABLED", "GROK_CURSOR_MCPS_ENABLED", "VIDBYTE_REAP_MARKER", "GROK_WORKFLOWS", "PWD"],
     "MuseMethod": ["initialize", "initialized", "session/read", "session/fork", "session/list"],
-    "OpencodeEventType": ["text", "error"],
+    "OpencodeEventType": ["text", "error", "tool_use"],
     "GrokThreadScope": ["sdk", "user"],
     "GrokCommand": ["goal", "implement", "design", "execute-plan", "review", "code-review", "resume-claude", "resume-codex", "resume-cursor", "imagine", "imagine-video"],
     "GrokAgent": ["plan", "explore"],
@@ -71,7 +73,7 @@ EXPECTED_ENUMS = {
     "MuseSkill": ["bundled:plan", "bundled:import", "bundled:greenfield-project-scaffolding", "bundled:browser-app-delivery"],
 }
 PROBLEMS = ["not_installed", "launcher_refused", "launch_failed", "key_rejected", "thread_not_found", "timed_out", "output_too_large", "protocol_mismatch", "run_failed"]
-NEW_FAILURE_CODES = [f"{harness}.{problem}" for harness in ("grok", "opencode", "muse") for problem in PROBLEMS] + ["muse.wsl_unavailable"] + [
+NEW_FAILURE_CODES = [f"{harness}.{problem}" for harness in ("grok", "opencode", "muse") for problem in PROBLEMS] + ["muse.wsl_unavailable"] + ["browser.mount_unsupported", "browser.runtime_missing", "browser.tool_install_failed", "browser.tools_unavailable"] + [
     "grok.command_not_run", "opencode.command_not_run", "muse.command_not_run", "grok.store_unreadable",
 ]
 CONTRACT_CONSTANTS = {
@@ -158,19 +160,20 @@ def importable(module: str, name: str) -> bool:
 
 def test_native_package_exports_exactly_the_thread_functions_helpers_skills_and_their_records(api) -> None:
     # INV-1 / D-22, amended by the helpers spec INV-1: one literal
-    # __all__ with the nine functions, the 47 helpers and skill
-    # functions, the records, error and config enums (68 names); the
-    # subpackages export their own functions (25 / 15 / 16).
+    # __all__ with the nine functions, the nine browser functions, the
+    # 47 helpers and skill functions, the records, error and config
+    # enums (79 names); the subpackages export their own functions
+    # (25 / 15 / 16, plus three browser functions each).
     native = api.native
     assert sorted(native.__all__) == sorted(EXPECTED_EXPORTS) and len(native.__all__) == len(EXPECTED_EXPORTS)
     assert native.NativeThreadResult is api.NativeThreadResult
     assert (native.GrokThreadConfig, native.OpencodeThreadConfig, native.MuseThreadConfig) == (api.GrokThreadConfig, api.OpencodeThreadConfig, api.MuseThreadConfig)
     assert native.NativeThreadError is api.NativeThreadError
     assert (native.GrokPermissionMode, native.GrokReasoningEffort, native.MuseReasoningEffort) == (api.enums.GrokPermissionMode, api.enums.GrokReasoningEffort, api.enums.MuseReasoningEffort)
-    assert len(EXPECTED_EXPORTS) == 68 and len(native.__all__) == 68
+    assert len(EXPECTED_EXPORTS) == 79 and len(native.__all__) == 79
     for harness in ("grok", "opencode", "muse"):
         subpackage = importlib.import_module(f"vidbyte.harnesses.native.{harness}")
-        names = SUBPACKAGE_EXPORTS[harness]
+        names = [*SUBPACKAGE_EXPORTS[harness], *(f"{verb}_{harness}_with_browser" for verb in ("run", "continue", "fork"))]
         assert sorted(subpackage.__all__) == sorted(names) and len(subpackage.__all__) == len(names), harness
         for name in names:
             assert getattr(subpackage, name) is getattr(native, name), name
@@ -252,7 +255,7 @@ def test_old_public_names_no_longer_import(lib_api) -> None:
     # managed process are gone.
     still_there = [f"{module}.{name}" for module, name in OLD_NAMES if importable(module, name)]
     assert still_there == []
-    assert sorted(lib_api.process.__all__) == ["CliArgv", "CliRunner", "ProcessStopper"]
+    assert sorted(lib_api.process.__all__) == ["CliArgv", "CliRunner", "ProcessReaper", "ProcessStopper"]
 
 
 def test_rejected_design_files_are_deleted() -> None:
@@ -268,7 +271,7 @@ def test_branch_leaves_the_tools_and_configs_packages_as_main_has_them() -> None
     # AC-13 / INV-21: no file of vidbyte.tools or vidbyte.lib.configs,
     # and nothing of the old spec folder, differs from main.
     base = merge_base()
-    scoped = ("vidbyte/tools", "vidbyte/lib/configs", OLD_SPEC_FOLDER)
+    scoped = ("vidbyte/tools", "vidbyte/lib/configs", OLD_SPEC_FOLDER, ":(exclude)vidbyte/tools/builtins/codex", ":(exclude)vidbyte/tools/builtins/__init__.py", ":(exclude)vidbyte/tools/toolsets/codex.py", ":(exclude)vidbyte/tools/toolsets/__init__.py")
     changed = git("diff", "--name-only", base, "--", *scoped)
     assert changed.returncode == 0, changed.stderr
     untracked = git("ls-files", "--others", "--exclude-standard", "--", *scoped)
@@ -277,7 +280,8 @@ def test_branch_leaves_the_tools_and_configs_packages_as_main_has_them() -> None
 
 def test_import_vidbyte_starts_no_process_and_leaves_the_native_package_unloaded() -> None:
     # INV-23: a fresh `import vidbyte` starts nothing, does not import
-    # vidbyte.harnesses.native, and keeps main's root __all__.
+    # vidbyte.harnesses.native, and keeps main's root __all__, adding
+    # only native names.
     probe = textwrap.dedent(
         """
         import json, subprocess, sys
@@ -298,4 +302,8 @@ def test_import_vidbyte_starts_no_process_and_leaves_the_native_package_unloaded
     assert report["started"] == [] and report["native"] is False
     base = optional_merge_base()
     if base is not None:
-        assert report["all"] == literal_all(git("show", f"{base}:vidbyte/__init__.py").stdout)
+        # Main's names keep their order, and the only additions are the
+        # native names the root re-exports for vidbyte-cli.
+        before = literal_all(git("show", f"{base}:vidbyte/__init__.py").stdout)
+        assert [name for name in report["all"] if name in before] == before
+        assert set(report["all"]) - set(before) <= set(importlib.import_module("vidbyte.harnesses.native").__all__)

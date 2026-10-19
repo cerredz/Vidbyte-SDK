@@ -1,9 +1,9 @@
 """FILE: vidbyte/harnesses/native/muse/children.py
 
 PURPOSE: Defines MuseChildren, the shared plumbing of every muse child: the private config folder a call opens and closes, the environment overlay that points muse at it, the batch `muse serve` invocation, and the one way a muse child runs (reaped inside WSL on a timeout or a cancellation, with WSL launch failures explained).
-ROLE IN CODEBASE: Used by MuseThreadRun (muse/threads.py) for #1036's run, continue and fork, by MuseHelperRun (muse/helpers.py) for the Muse thread helpers and the evidence read, and through them by MuseCommandRun (muse/commands.py). It uses MuseLauncher (muse/launcher.py) and NativeSkillFolders from hostkit.
-ARCHITECTURE NOTE: Moved unchanged out of MuseThreadRun (spec D-10, INV-26), so the helpers launch muse exactly as the runs do. Every call gets a fresh temp folder as XDG_CONFIG_HOME, and MUSE_AUTH_PATH points at a file in it that is never created, so no saved Muse login or setting is read (spec INV-23). The folder is made in a worker thread whose preparation is shielded, so a cancel that lands while it is being made still removes it (spec INV-14). The module holds no literals of its own (spec INV-15).
-FUNCTION INVENTORY: open_config creates the private config folder with the given skills and survives a cancel; close_config removes it; overlay builds the environment every muse child of the call shares; serve builds a batch `muse serve` invocation; run runs one child, reaps it on a timeout or cancellation and reports launch failures. _prepare_config makes the folder in a worker thread; _discard removes the folder of a preparation whose caller was cancelled.
+ROLE IN CODEBASE: Used by MuseThreadRun (muse/threads.py) for #1036's run, continue and fork and their browser calls, by MuseHelperRun (muse/helpers.py) for the Muse thread helpers and the evidence read, and through them by MuseCommandRun (muse/commands.py). It uses MuseLauncher (muse/launcher.py), and NativeSkillFolders and the reviewed writer NativeBrowserTools.backend from hostkit.
+ARCHITECTURE NOTE: Moved unchanged out of MuseThreadRun (spec D-10, INV-26), so the helpers launch muse exactly as the runs do; the browser tools' settings write (#1183) moved with it. Every call gets a fresh temp folder as XDG_CONFIG_HOME, and MUSE_AUTH_PATH points at a file in it that is never created, so no saved Muse login or setting is read (spec INV-23). The folder is made in a worker thread whose preparation is shielded, so a cancel that lands while it is being made still removes it (spec INV-14). The module holds no literals of its own (spec INV-15).
+FUNCTION INVENTORY: open_config creates the private config folder with the given skills (and a browser call's settings) and survives a cancel; close_config removes it; overlay builds the environment every muse child of the call shares; serve builds a batch `muse serve` invocation; run runs one child, reaps it on a timeout or cancellation and reports launch failures. _prepare_config makes the folder in a worker thread; _discard removes the folder of a preparation whose caller was cancelled.
 COMMON MODIFICATION PATTERNS: A new variable every muse child needs goes in overlay; a new kind of muse child builds its own CliInvocation with launcher.environment and runs through run.
 WHAT NOT TO DO IN THIS FILE: 1. Do not give `muse serve` a key; it needs none, and META_API_KEY is removed from what it inherits. 2. Do not give the temp folder a fixed location; tempfile.mkdtemp picks it (S054). 3. Do not skip the reap on a timeout or a cancel; stopping wsl.exe does not stop what it started in the distro.
 KNOWN EDGE CASES: A removal that fails leaves the folder behind (#1036 EC-34). A second cancel while a cancelled preparation is being undone stops only the waiting, never the removal, which then ends in the background. On Windows the folder reaches muse in its /mnt form.
@@ -18,9 +18,13 @@ import contextlib
 import tempfile
 from pathlib import Path
 
-from vidbyte.harnesses.native.hostkit import NativeErrorFactory, NativeSkillFolders
+from vidbyte.harnesses.native.hostkit import (
+    NativeBrowserTools,
+    NativeErrorFactory,
+    NativeSkillFolders,
+)
 from vidbyte.harnesses.native.muse.launcher import MuseLauncher
-from vidbyte.lib.constants import native_threads
+from vidbyte.lib.constants import browser_tools, native_threads
 from vidbyte.lib.dataclasses.native_threads import (
     NativeHelperRequest,
     NativeThreadRequest,
@@ -38,15 +42,16 @@ class MuseChildren:
     """The private config folder, environment, serve invocation and reaping run every muse child of a call shares."""
 
     @staticmethod
-    async def open_config(skills: tuple[Path, ...], request: NativeThreadRequest | NativeHelperRequest, errors: NativeErrorFactory) -> Path:
+    async def open_config(skills: tuple[Path, ...], request: NativeThreadRequest | NativeHelperRequest, errors: NativeErrorFactory, *, settings: str | None = None) -> Path:
         # @intent muse-key-and-skills-through-a-private-config-home
         # A fresh private config folder holds only the caller's skills,
-        # so muse reads no saved login or setting; it is removed when
-        # the call ends, however it ends. Cancelling the await does not
+        # and on a browser call the settings that mount the tools, so
+        # muse reads no saved login or setting; it is removed when the
+        # call ends, however it ends. Cancelling the await does not
         # stop the worker thread that fills it, so a cancel that lands
         # mid-way waits for that work and removes the folder before it
         # goes on (#1036 INV-9).
-        preparing = asyncio.ensure_future(asyncio.to_thread(MuseChildren._prepare_config, skills, request, errors))
+        preparing = asyncio.ensure_future(asyncio.to_thread(MuseChildren._prepare_config, skills, request, errors, settings))
         try:
             return await asyncio.shield(preparing)
         except asyncio.CancelledError:
@@ -115,14 +120,17 @@ class MuseChildren:
         return outcome
 
     @staticmethod
-    def _prepare_config(skills: tuple[Path, ...], request: NativeThreadRequest | NativeHelperRequest, errors: NativeErrorFactory) -> Path:
-        # A new temp folder, with the skills copied into muse/skills; a
-        # folder that cannot be prepared is launch_failed and leaves
-        # nothing behind.
+    def _prepare_config(skills: tuple[Path, ...], request: NativeThreadRequest | NativeHelperRequest, errors: NativeErrorFactory, settings: str | None) -> Path:
+        # A new temp folder, with the skills copied into muse/skills
+        # and, on a browser call, the settings written whole to
+        # muse/settings.json through the reviewed writer; a folder that
+        # cannot be prepared is launch_failed and leaves nothing behind.
         folder: Path | None = None
         try:
             folder = Path(tempfile.mkdtemp())
             NativeSkillFolders.replace(skills, folder.joinpath(*native_threads.MUSE_CONFIG_SKILLS_PARTS))
+            if settings is not None:
+                NativeBrowserTools.backend.write_text(folder.joinpath(*native_threads.MUSE_SETTINGS_PARTS), settings, encoding=browser_tools.BROWSER_FILE_ENCODING, create_parents=True, atomic=True)
         except OSError as exc:
             if folder is not None:
                 with contextlib.suppress(OSError):

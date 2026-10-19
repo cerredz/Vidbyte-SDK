@@ -126,7 +126,10 @@ class ErrorCorrectionAlgorithm(InnerContextWindowAlgorithm):
         # Removes allow-listed, unfrozen managed primitives; returns (removed, skipped) id lists.
         removed: list[str] = []
         skipped: list[str] = []
-        for raw_id in stale_ids:
+        # @intent a-lone-stale-id-is-one-id
+        # An auditor naming one stale primitive often writes the bare id instead of a one-item array; iterating that string
+        # would test each character and remove nothing, so a lone value is one id, as _format_corrections treats a lone entry.
+        for raw_id in stale_ids if isinstance(stale_ids, (list, tuple)) else [stale_ids]:
             primitive_id = str(raw_id)
             # @intent removed-means-it-was-there
             # The auditor can name an id that is not in the context (a guess, or the same id twice); only a present
@@ -187,8 +190,12 @@ class ErrorCorrectionAlgorithm(InnerContextWindowAlgorithm):
                 why = str(entry.get("why_wrong") or "").strip()
                 text = f"{claim} — {why}" if claim and why else (claim or why)
             else:
-                text = str(entry)
-            corrections.append(_truncate(text, self.max_field_chars))
+                text = "" if entry is None else str(entry).strip()
+            # @intent blank-corrections-correct-nothing
+            # An entry with no claim and no reason (null, "", an echoed empty example) says nothing; counting it would
+            # make a pass that found nothing post a blank notice over the last real one.
+            if text:
+                corrections.append(_truncate(text, self.max_field_chars))
         return tuple(corrections)
 
     def _format_managed_primitives(self, ctx: ContextWindowRunContext) -> str:

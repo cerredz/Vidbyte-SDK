@@ -23,13 +23,16 @@ NAMED_MODULES = (
     # harness-thread-helpers-skills §12.3: the 10 new modules.
     "grok/store.py", "grok/helpers.py", "grok/commands.py", "opencode/helpers.py", "opencode/commands.py",
     "muse/children.py", "muse/helpers.py", "muse/commands.py", "hostkit/listing.py", "hostkit/evidence.py",
+    "hostkit/browser.py", "grok/browser.py", "grok/mounts.py", "opencode/browser.py", "opencode/mounts.py", "muse/browser.py", "muse/mounts.py",
 )
 ALLOWED_VALUES = ("", 0, 1)
 FORBIDDEN_IMPORT = "vidbyte.tools"
+# The Codex host (PR #1055) shares vidbyte/harnesses/native but is not a thread-function module; its own rules live in tests/features/codex_host/.
+HOST_SUBPACKAGE = "codex"
 
 
 def native_modules(*, require_named: bool = True) -> dict[str, ast.Module]:
-    found = {path.relative_to(PACKAGE).as_posix(): ast.parse(path.read_text(encoding="utf-8"), filename=str(path)) for path in sorted(PACKAGE.rglob("*.py"))}
+    found = {path.relative_to(PACKAGE).as_posix(): ast.parse(path.read_text(encoding="utf-8"), filename=str(path)) for path in sorted(PACKAGE.rglob("*.py")) if path.relative_to(PACKAGE).parts[0] != HOST_SUBPACKAGE}
     missing = [name for name in NAMED_MODULES if name not in found]
     assert not (require_named and missing), f"§12.3 names these modules under vidbyte/harnesses/native, and they are missing: {missing}"
     return found

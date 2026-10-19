@@ -1,0 +1,167 @@
+{
+  "name": "InfiniteMemory Agent",
+  "description": "Instructions for InfiniteMemoryAgent, one Markdown file per leaf: the root, generator, and verifier operating manuals that each agent's system prompt carries, the messages that brief a generator, a verifier, and a resumed root, the result card a parent receives for each pair, the replies of the memory tools and their quota line, the workspace map's header, and the model-facing descriptions of launch_subagent, remember, write_note, edit_file, and drop_entry and of their parameters.",
+  "key": "infinite_memory",
+  "prompts": {
+    "root_system_prompt": {
+      "path": "root_system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/root_system_prompt.md"
+    },
+    "generator_system_prompt": {
+      "path": "generator_system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/generator_system_prompt.md"
+    },
+    "verifier_system_prompt": {
+      "path": "verifier_system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/verifier_system_prompt.md"
+    },
+    "task_prompt": {
+      "path": "task_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/task_prompt.md"
+    },
+    "verifier_task_prompt": {
+      "path": "verifier_task_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/verifier_task_prompt.md"
+    },
+    "resume_prompt": {
+      "path": "resume_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/resume_prompt.md"
+    },
+    "result_card": {
+      "path": "result_card.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/result_card.md"
+    },
+    "replayed_label": {
+      "path": "replayed_label.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/replayed_label.md"
+    },
+    "launch_rejected_prompt": {
+      "path": "launch_rejected_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/launch_rejected_prompt.md"
+    },
+    "memory_rejected_prompt": {
+      "path": "memory_rejected_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/memory_rejected_prompt.md"
+    },
+    "remember_saved_prompt": {
+      "path": "remember_saved_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/remember_saved_prompt.md"
+    },
+    "remember_staged_prompt": {
+      "path": "remember_staged_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/remember_staged_prompt.md"
+    },
+    "note_saved_prompt": {
+      "path": "note_saved_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/note_saved_prompt.md"
+    },
+    "entry_dropped_prompt": {
+      "path": "entry_dropped_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/entry_dropped_prompt.md"
+    },
+    "quota_line": {
+      "path": "quota_line.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/quota_line.md"
+    },
+    "map_header": {
+      "path": "map_header.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/map_header.md"
+    },
+    "launch_tool_description": {
+      "path": "launch_tool_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/launch_tool_description.md"
+    },
+    "launch_tasks_description": {
+      "path": "launch_tasks_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/launch_tasks_description.md"
+    },
+    "launch_name_description": {
+      "path": "launch_name_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/launch_name_description.md"
+    },
+    "launch_goal_description": {
+      "path": "launch_goal_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/launch_goal_description.md"
+    },
+    "launch_done_criteria_description": {
+      "path": "launch_done_criteria_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/launch_done_criteria_description.md"
+    },
+    "launch_generator_prompt_description": {
+      "path": "launch_generator_prompt_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/launch_generator_prompt_description.md"
+    },
+    "launch_verifier_prompt_description": {
+      "path": "launch_verifier_prompt_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/launch_verifier_prompt_description.md"
+    },
+    "launch_context_description": {
+      "path": "launch_context_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/launch_context_description.md"
+    },
+    "launch_tools_description": {
+      "path": "launch_tools_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/launch_tools_description.md"
+    },
+    "remember_tool_description": {
+      "path": "remember_tool_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/remember_tool_description.md"
+    },
+    "remember_kind_description": {
+      "path": "remember_kind_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/remember_kind_description.md"
+    },
+    "remember_text_description": {
+      "path": "remember_text_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/remember_text_description.md"
+    },
+    "remember_tags_description": {
+      "path": "remember_tags_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/remember_tags_description.md"
+    },
+    "remember_refs_description": {
+      "path": "remember_refs_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/remember_refs_description.md"
+    },
+    "remember_supersedes_description": {
+      "path": "remember_supersedes_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/remember_supersedes_description.md"
+    },
+    "write_note_tool_description": {
+      "path": "write_note_tool_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/write_note_tool_description.md"
+    },
+    "note_path_description": {
+      "path": "note_path_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/note_path_description.md"
+    },
+    "write_note_text_description": {
+      "path": "write_note_text_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/write_note_text_description.md"
+    },
+    "write_note_file_description": {
+      "path": "write_note_file_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/write_note_file_description.md"
+    },
+    "edit_file_tool_description": {
+      "path": "edit_file_tool_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/edit_file_tool_description.md"
+    },
+    "edit_file_old_text_description": {
+      "path": "edit_file_old_text_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/edit_file_old_text_description.md"
+    },
+    "edit_file_new_text_description": {
+      "path": "edit_file_new_text_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/edit_file_new_text_description.md"
+    },
+    "drop_entry_tool_description": {
+      "path": "drop_entry_tool_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/drop_entry_tool_description.md"
+    },
+    "drop_entry_id_description": {
+      "path": "drop_entry_id_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/infinite_memory/drop_entry_id_description.md"
+    }
+  }
+}

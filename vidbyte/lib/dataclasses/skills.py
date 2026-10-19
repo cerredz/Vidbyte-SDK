@@ -1,7 +1,7 @@
 """FILE: vidbyte/lib/dataclasses/skills.py
 
-PURPOSE: Defines the immutable data contracts for agent skills: the resolved `SkillDocument` (plain skill text JevAgent selects before its main loop), the declarative skill entries that say where a SKILL.md comes from (`SkillEntry` and its six subclasses, one per source), and the `SkillResolution` a loader returns for each entry (a document, or a reason with an explanation).
-ROLE IN CODEBASE: JevAlignmentSettings accepts entries and documents and normalizes strings into documents; the agent-agnostic loader in vidbyte/agents/skills/ turns entries into resolutions; JevSkillsPreload sends document fields as decision state, injects selected text into one run's context, and reports unresolved entries with their reason.
+PURPOSE: Defines the immutable data contracts for agent skills: the resolved `SkillDocument` (plain skill text JevAgent selects before its main loop), the declarative skill entries that say where a SKILL.md comes from (`SkillEntry` and its six subclasses, one per source), the `SkillEntries` tuple one loader resolves (entries and documents with unique names), and the `SkillResolution` a loader returns for each entry (a document, or a reason with an explanation).
+ROLE IN CODEBASE: JevAlignmentSettings accepts entries and documents and normalizes strings into documents; the agent-agnostic loader in vidbyte/agents/skills/ builds one `SkillEntries` from its argument and turns those entries into resolutions; JevSkillsPreload sends document fields as decision state, injects selected text into one run's context, and reports unresolved entries with their reason.
 ARCHITECTURE NOTE: Data and validation only. No record reads a file, an environment variable, or the network: `LocalSkill.path` and `SkillsShSkill.directory` are pinned to absolute paths with `Path.absolute()`, which reads only the working folder name. Each entry subclass fixes its read-only `type` with `field(init=False)` and validates its own fields in the `_validate_source` hook, which the base `__post_init__` calls after checking `name`.
 FUNCTION INVENTORY:
     SkillDocument.__post_init__() -> None: validates required text and optional source while leaving every accepted string unchanged.
@@ -9,20 +9,22 @@ FUNCTION INVENTORY:
     SkillText.require_version / require_folder: the vendor version check (text, with a hint for an integer) and the folder check that returns the folder pinned to an absolute Path; each has one owner here, shared by the two vendor entries and the two folder entries.
     SkillEntry.__post_init__() -> None: checks `name`, then calls `_validate_source()`; the base hook raises because only the six subclasses are usable entries.
     InlineSkill, LocalSkill, SkillsShSkill, GitHubSkill, AnthropicSkill, OpenAISkill._validate_source() -> None: per-source field checks (section 9.1 of the spec).
+    SkillEntries.__post_init__() -> None: requires a tuple, then an entry or document at every position, then unique names; each error carries only a type name, a position, or the repeated names.
     SkillResolution.__post_init__() -> None: exactly one of a document, or a reason with a non-blank detail; `transient` is derived from the reason.
-COMMON MODIFICATION PATTERNS: A new source adds its `SkillSourceType` member, one entry subclass here that redeclares `type` with `init=False` and its member as default and overrides `_validate_source`, its resolver module in vidbyte/agents/skills/, the loader map entry, and the exports. A new field on an entry validates in that entry's `_validate_source`.
+COMMON MODIFICATION PATTERNS: A new source adds its `SkillSourceType` member, one entry subclass here that redeclares `type` with `init=False` and its member as default and overrides `_validate_source`, its resolver module in vidbyte/agents/skills/, the loader map entry, and the exports. A new field on an entry validates in that entry's `_validate_source`. The unique-name rule in `SkillEntries.__post_init__` has a twin in `JevAlignmentSettings._normalized_skills` (vidbyte/agents/jev/settings.py), kept separate on purpose (spec NG-10, Q-9): change both together, and tests/features/public_skill_loader/test_public_skill_loader_both_doors.py fails when they drift (INV-18).
 WHAT NOT TO DO:
     1. Do not normalize, trim, or rewrite a SkillDocument body or an inline entry's text.
     2. Do not read files, environment variables, or the network from a record; resolution belongs to vidbyte/agents/skills/.
     3. Do not call `super().__post_init__()` from an entry subclass; use the `_validate_source` hook.
     4. Do not show a token or API key in a repr or an error message; secret fields are `repr=False`.
-KNOWN EDGE CASES: Slotted dataclass subclasses are rebuilt as new classes, so a zero-argument `super()` inside them raises TypeError on Python 3.11 and 3.13; the template hook avoids it. Nonblank validation uses whitespace only to reject empty values; accepted strings are stored exactly. A name used as a folder must be one path segment: no `/`, `\\`, `:` (a Windows drive-relative name), or NUL, and not `.` or `..`. A GitHub `path` of `"."` (a SKILL.md at the repository root) is rejected. Secrets take part in equality and hashing, so two entries that differ only by token are different entries.
-RELATED DOCS: `docs/design/jev-skills-preload.md`, `docs/spec/jev-skill-sources/spec.md`, `vidbyte/agents/skills/README.md`, and `tests/features/jev_skills_preload/FEATURE.md`.
-TESTS: `tests/test_jev_skill_preload.py`; `tests/features/jev_skills_preload/test_skill_sources_entries.py`; `tests/features/jev_skills_preload/test_skill_sources_contract.py`.
+KNOWN EDGE CASES: Slotted dataclass subclasses are rebuilt as new classes, so a zero-argument `super()` inside them raises TypeError on Python 3.11 and 3.13; the template hook avoids it. Nonblank validation uses whitespace only to reject empty values; accepted strings are stored exactly. A name used as a folder must be one path segment: no `/`, `\\`, `:` (a Windows drive-relative name), or NUL, and not `.` or `..`. A GitHub `path` of `"."` (a SKILL.md at the repository root) is rejected. Secrets take part in equality and hashing, so two entries that differ only by token are different entries. `SkillEntries` compares names exactly (case-sensitive, no trimming or Unicode normalization), and it accepts only a tuple, so the loader converts a list first.
+RELATED DOCS: `docs/design/jev-skills-preload.md`, `docs/spec/jev-skill-sources/spec.md`, `docs/spec/public-skill-loader/spec.md`, `vidbyte/agents/skills/README.md`, `tests/features/jev_skills_preload/FEATURE.md`, and `tests/features/public_skill_loader/FEATURE.md`.
+TESTS: `tests/test_jev_skill_preload.py`; `tests/features/jev_skills_preload/test_skill_sources_entries.py`; `tests/features/jev_skills_preload/test_skill_sources_contract.py`; `tests/features/public_skill_loader/test_public_skill_loader_boundary.py`; `tests/features/public_skill_loader/test_public_skill_loader_contract.py`; `tests/features/public_skill_loader/test_public_skill_loader_both_doors.py`; `tests/features/public_skill_loader/test_public_skill_loader_security.py`.
 """
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -231,6 +233,40 @@ class OpenAISkill(SkillEntry):
 
 
 @dataclass(frozen=True, slots=True)
+class SkillEntries:
+    """The entries one SkillLoader resolves, checked once when the loader is built.
+
+    SkillLoader turns the caller's sequence into this tuple first. The
+    union is kept on purpose: a caller's SkillDocument is already
+    resolved, so the loader remembers it at once instead of reading it.
+    """
+
+    entries: tuple[SkillEntry | SkillDocument, ...]
+
+    def __post_init__(self) -> None:
+        # Text or a single value reaches the record unconverted, so it
+        # is rejected whole, by its type name only.
+        if not isinstance(self.entries, tuple):
+            raise ConfigurationError("SkillLoader entries must be a tuple or list of skill entries and SkillDocuments, not text or a single value.", details={"entries_type": type(self.entries).__name__})
+        # The first element that is not an entry or a document is named
+        # by its position and type, never its value, which could be a
+        # pasted token.
+        for position, entry in enumerate(self.entries):
+            if not isinstance(entry, (SkillEntry, SkillDocument)):
+                raise ConfigurationError(f"SkillLoader entries[{position}] is a {type(entry).__name__}, not a skill entry or SkillDocument; wrap skill text in InlineSkill.", details={"position": position, "entry_type": type(entry).__name__})
+        # @intent skill-entries-unique-names
+        # A name identifies one skill to callers through both doors,
+        # and JevAlignmentSettings._normalized_skills applies the same
+        # rule, so change both together; the both-doors test in
+        # tests/features/public_skill_loader/ fails when they drift.
+        # Two equal entries would also share one single-entry resolver
+        # group and abort the whole load.
+        repeated = sorted(name for name, count in Counter(entry.name for entry in self.entries).items() if count > 1)
+        if repeated:
+            raise ConfigurationError("SkillLoader entries must have unique names; rename or remove the entries listed in details['names'].", details={"names": repeated})
+
+
+@dataclass(frozen=True, slots=True)
 class SkillResolution:
     """What loading one entry produced: a document, or a reason with an explanation."""
 
@@ -261,6 +297,7 @@ __all__ = [
     "LocalSkill",
     "OpenAISkill",
     "SkillDocument",
+    "SkillEntries",
     "SkillEntry",
     "SkillResolution",
     "SkillText",

@@ -77,7 +77,8 @@ class GeminiProvider:
         # Answers to one parallel function-call turn must travel together in a single user turn.
         return self._merge_function_responses(history)
 
-    def _prompt_index(self, history: list[Mapping[str, Any]], boundary: int | None = None) -> int:
+    @staticmethod
+    def _prompt_index(history: list[Mapping[str, Any]], boundary: int | None = None) -> int:
         # @intent prompt-sits-at-the-run-boundary
         # The runtime's run boundary wins as it does in PromptPlacement, unless the history opens with a model turn.
         if boundary is not None and boundary <= len(history) and not (history and history[0].get("role") == "model"):
@@ -94,7 +95,7 @@ class GeminiProvider:
         # @intent gemini-prompt-opens-a-model-led-history
         # A rejected plain-text draft now opens this run's exchange, and Gemini refuses contents that start with a model turn.
         for index, turn in enumerate(history):
-            if not (self._has_part(turn, "functionCall") or (index == 0 and turn.get("role") == "model")):
+            if not (GeminiProvider._has_part(turn, "functionCall") or (index == 0 and turn.get("role") == "model")):
                 continue
             if index and history[index - 1].get("role") == "user":
                 continue

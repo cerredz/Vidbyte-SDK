@@ -1,0 +1,469 @@
+"""FILE: tests/features/codex_host/test_codex_host_review_gaps.py
+
+PURPOSE: Pins the windows the S4 review of CodexHost found open: a review cancelled during its registration read-back, a cancelled launch, a cancelled close, an unusable output_schema, a start still in flight when its caller left, the problem a late-accepted turn or goal run ends with, a mapping output_schema that only parses JSON, and the launch tool's cap slots on failure and cancellation; and, for review R-18 of the thread-helpers spec, a launch that fails midway keeping every field of the mapped error it rebuilds.
+ROLE IN CODEBASE: Regression layer of tests/features/codex_host/ (review.md R-1, R-2, R-6, R-7, R-10, R-12, R-13 and R-14, and docs/spec/codex-host-thread-helpers/review.md R-18; spec INV-7, INV-8, INV-11, INV-21, INV-24, INV-32, INV-37, D-35, D-36, EC-36, EC-52, EC-82 and EC-83). The host classes need the optional openai-codex extra, so CI skips them; the launch tool class runs over StubCodexHost and is CI-visible.
+ARCHITECTURE NOTE: Holds on the fake app-server keep one request unanswered while the test cancels its caller. Exact interrupt counts use the pack's one-worker barrier: with CODEX_HOST_WORKER_THREADS patched to 1, a later host call cannot return before an interrupt queued earlier has reached the fake. The R-18 test swaps the connection's CodexErrorMapper for codex_host_support.FieldCarryingMapper, which also sets error_type and thread_id, so the rebuild's dropped fields are visible.
+COMMON MODIFICATION PATTERNS: Add a cancellation window by holding the request the window awaits, cancelling the caller, releasing the hold, and asserting who owns what Codex accepted.
+KNOWN EDGE CASES: openai-codex queues a second turn/start on a thread behind a held first one, so a second continue is run as a task and never awaited while the first start is held. A late start lands through a callback a host worker posts to the loop, so a test that needs the landing polls for it, bounded by WAIT_SECONDS.
+RELATED DOCS: tests/features/codex_host/FEATURE.md; docs/spec/codex-host/review.md; docs/spec/codex-host/spec.md sections 6.1, 6.3 and 8.1.
+TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/codex_host/test_codex_host_review_gaps.py
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import unittest
+from dataclasses import dataclass
+from typing import Any
+
+from tests.features.codex_host.codex_host_support import (
+    WAIT_SECONDS,
+    FieldCarryingMapper,
+    HostTestCase,
+    StubCodexHost,
+    changed_error_fields,
+    input_texts,
+    requires_sdk,
+)
+
+
+@dataclass(frozen=True)
+class _DataclassAnswer:
+    """A record type a developer might pass as output_schema, which is not a Pydantic model."""
+
+    summary: str
+
+
+# EC-82: a type that is not a Pydantic model, and a mapping that cannot be serialized to JSON.
+UNUSABLE_SCHEMAS: tuple[tuple[str, Any], ...] = (
+    ("a dataclass type", _DataclassAnswer),
+    ("a mapping that is not JSON", {"type": "object", "properties": {"summary": object()}}),
+)
+
+
+@requires_sdk
+class CodexHostReviewReadBackCancellationTests(HostTestCase):
+    """R-1, INV-11 and INV-14: a review whose caller leaves during the read-back is still owned."""
+
+    async def test_a_review_cancelled_during_its_read_back_is_watched_and_interrupted_once(self) -> None:
+        from vidbyte.lib.dataclasses.codex_host import CodexReviewTarget, CodexTurnHandle
+        from vidbyte.lib.enums.codex import CodexReviewTargetKind
+
+        self.patch_connection("CODEX_HOST_WORKER_THREADS", 1)
+        host = await self.open_host()
+        seeded = self.server.seed_thread(completed_turns=1)
+        read_back = self.server.hold("thread/read", lambda params: bool(params.get("includeTurns")))
+        task = asyncio.ensure_future(host.start_codex_review(seeded.thread_id, CodexReviewTarget(kind=CodexReviewTargetKind.UNCOMMITTED_CHANGES)))
+        await asyncio.to_thread(read_back.wait_arrived)
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await asyncio.wait_for(task, WAIT_SECONDS)
+        read_back.release()
+        review_turn = seeded.turns[-1].turn_id
+        await self.wait_for_request("turn/interrupt", lambda params: params["turnId"] == review_turn)
+        # Barrier: with one host worker, this read returns only after any interrupt queued before it was sent.
+        await asyncio.wait_for(host.read_codex_thread(seeded.thread_id), WAIT_SECONDS)
+        self.assertEqual(self.count("turn/interrupt", lambda params: params["turnId"] == review_turn), 1)
+        snapshot = await self.wait_done(host, CodexTurnHandle(thread_id=seeded.thread_id, turn_id=review_turn))
+        self.assert_problem(snapshot, "interrupted", None)
+        # The ended review frees the thread, so the next turn on it is accepted.
+        handle = await asyncio.wait_for(host.continue_codex_thread(seeded.thread_id, "Apply the review."), WAIT_SECONDS)
+        self.assertEqual(handle.thread_id, seeded.thread_id)
+
+
+@requires_sdk
+class CodexHostOutputSchemaRefusalTests(HostTestCase):
+    """R-2, EC-82 and INV-8: an output_schema that cannot be used is refused before any request."""
+
+    async def test_spawn_continue_and_launch_refuse_an_unusable_schema_before_any_request(self) -> None:
+        from vidbyte.lib.dataclasses.codex_host import CodexSpawnRequest
+        from vidbyte.lib.errors import ConfigurationError
+
+        host = await self.open_host()
+        seeded = self.server.seed_thread(completed_turns=1)
+        calls = (
+            ("spawn", lambda schema: host.spawn_codex_thread(CodexSpawnRequest(prompt="Answer in JSON.", output_schema=schema))),
+            ("continue", lambda schema: host.continue_codex_thread(seeded.thread_id, "Answer in JSON.", overrides=CodexSpawnRequest(output_schema=schema))),
+            ("launch", lambda schema: host.launch_codex_subagents(["Answer in JSON."], request=CodexSpawnRequest(output_schema=schema))),
+        )
+        for label, schema in UNUSABLE_SCHEMAS:
+            for name, call in calls:
+                with self.subTest(schema=label, operation=name):
+                    before = len(self.server.requests)
+                    with self.assertRaises(ConfigurationError) as caught:
+                        await asyncio.wait_for(call(schema), WAIT_SECONDS)
+                    self.assertIn("output_schema", str(caught.exception))
+                    # Nothing was sent, so no thread was created or resumed for a turn that could never start.
+                    self.assertEqual(self.server.methods()[before:], [])
+
+
+@requires_sdk
+class CodexHostLaunchCancellationTests(HostTestCase):
+    """R-6, INV-37 and INV-11: a cancelled launch still stops every turn it already started."""
+
+    async def test_a_launch_cancelled_after_its_first_turn_interrupts_that_turn_once(self) -> None:
+        from vidbyte.lib.dataclasses.codex_host import CodexTurnHandle
+
+        self.patch_connection("CODEX_HOST_WORKER_THREADS", 1)
+        host = await self.open_host()
+        second_thread = self.server.hold("thread/start", lambda params: len(self.server.matching("thread/start")) >= 2)
+        task = asyncio.ensure_future(host.launch_codex_subagents(["Fix the first bug.", "Fix the second bug."]))
+        await asyncio.to_thread(second_thread.wait_arrived)
+        thread_id = self.server.matching("turn/start")[0].params["threadId"]
+        first_turn = self.server.threads[thread_id].turns[-1].turn_id
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await asyncio.wait_for(task, WAIT_SECONDS)
+        second_thread.release()
+        await self.wait_for_request("turn/interrupt", lambda params: params["turnId"] == first_turn)
+        # Barrier: with one host worker, this read returns only after any interrupt queued before it was sent.
+        await asyncio.wait_for(host.read_codex_thread(thread_id), WAIT_SECONDS)
+        self.assertEqual(self.count("turn/interrupt"), 1)
+        self.assertEqual(self.count("turn/start"), 1)
+        snapshot = await self.wait_done(host, CodexTurnHandle(thread_id=thread_id, turn_id=first_turn))
+        self.assert_problem(snapshot, "interrupted", None)
+
+
+@requires_sdk
+class CodexHostLaunchRebuildFieldTests(HostTestCase):
+    """Thread-helpers review R-18; codex-host INV-37, AC-18, EC-52 and D-22: a launch that fails midway raises the mapped error, every field kept."""
+
+    async def test_a_launch_that_fails_midway_keeps_every_field_of_the_mapped_error(self) -> None:
+        from tests.features.codex_host.codex_host_fakes import FakeRpcError
+
+        host = await self.open_host()
+        mapper = FieldCarryingMapper()
+        self.patch_connection("CodexErrorMapper", mapper)
+        self.server.fail("turn/start", FakeRpcError(-32603, "turn/start failed"), predicate=lambda params: input_texts(params) == [("text", "Part three.")])
+        error = await self.assert_codex_error(host.launch_codex_subagents(["Part one.", "Part two.", "Part three."]), "codex.api_error")
+        original = mapper.only(error.operation)
+        # The third start's error carried both fields, so a rebuild that drops either one is visible here.
+        self.assertTrue(original.thread_id)
+        self.assertTrue(original.safe_runtime_details["error_type"])
+        # EC-52: the mapped error, saying 2 turns were started and interrupted. The spec gives no literal for that
+        # sentence, so its words are checked, not its wording.
+        self.assertTrue(error.message.startswith(original.message + " "), error.message)
+        added = error.message[len(original.message) :]
+        self.assertRegex(added, r"\b2\b")
+        self.assertIn("started", added)
+        self.assertIn("interrupted", added)
+        self.assertEqual(changed_error_fields(error, original), {})
+
+
+@requires_sdk
+class CodexHostCloseCancellationTests(HostTestCase):
+    """R-7, INV-7 and NFR-9: a close cancelled while it interrupts still closes the client."""
+
+    async def test_a_close_cancelled_during_its_interrupts_still_closes_the_client(self) -> None:
+        host = await self.open_host()
+        await self.spawn(host)
+        held = self.server.hold("turn/interrupt")
+        closing = asyncio.ensure_future(host.__aexit__(None, None, None))
+        await asyncio.to_thread(held.wait_arrived)
+        closing.cancel()
+        held.release()
+        with self.assertRaises(asyncio.CancelledError):
+            await asyncio.wait_for(closing, WAIT_SECONDS)
+        # The client still closes once, so no app-server process outlives the host.
+        await self.wait_until(lambda: self.server.closed == 1, "the client to close")
+
+
+@requires_sdk
+class CodexHostInFlightStartTests(HostTestCase):
+    """R-10, INV-24, INV-11 and EC-36: a start still in flight after its caller left keeps its thread busy."""
+
+    async def test_a_continue_whose_start_is_in_flight_keeps_the_thread_busy_until_it_lands(self) -> None:
+        from vidbyte.lib.dataclasses.codex_host import CodexTurnHandle
+        from vidbyte.lib.errors import CodexAgentError
+
+        host = await self.open_host()
+        seeded = self.server.seed_thread(completed_turns=1)
+        start = self.server.hold("turn/start")
+        first = asyncio.ensure_future(host.continue_codex_thread(seeded.thread_id, "Fix the failing test."))
+        await asyncio.to_thread(start.wait_arrived)
+        first.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await asyncio.wait_for(first, WAIT_SECONDS)
+        # The retry runs as a task, because openai-codex would queue its turn/start behind the held one.
+        second = asyncio.ensure_future(host.continue_codex_thread(seeded.thread_id, "Fix the failing test."))
+        await asyncio.wait({second}, timeout=WAIT_SECONDS)
+        self.assertEqual(self.count("thread/resume"), 1)
+        self.assertTrue(second.done())
+        refused = second.exception()
+        self.assertIsInstance(refused, CodexAgentError)
+        assert isinstance(refused, CodexAgentError)
+        self.assertEqual(refused.failure_code, "codex.session_busy")
+        # Once the held start lands, its turn is owned and stopped, and the thread is free again.
+        start.release()
+        late = await self.wait_for_request("turn/interrupt", lambda params: params["threadId"] == seeded.thread_id)
+        snapshot = await self.wait_done(host, CodexTurnHandle(thread_id=seeded.thread_id, turn_id=late.params["turnId"]))
+        self.assert_problem(snapshot, "interrupted", None)
+        handle = await asyncio.wait_for(host.continue_codex_thread(seeded.thread_id, "Fix the failing test."), WAIT_SECONDS)
+        self.assertEqual(handle.thread_id, seeded.thread_id)
+        self.assertEqual(self.count("turn/start"), 2)
+
+    async def test_a_failed_in_flight_start_frees_its_thread_when_it_returns(self) -> None:
+        from vidbyte.lib.errors import CodexAgentError
+
+        host = await self.open_host()
+        seeded = self.server.seed_thread(completed_turns=1)
+        start = self.server.hold("turn/start")
+        self.server.fail("turn/start", self.fakes.FakeRpcError(-32603, "Codex could not start the turn."), times=1)
+        first = asyncio.ensure_future(host.continue_codex_thread(seeded.thread_id, "Fix the failing test."))
+        await asyncio.to_thread(start.wait_arrived)
+        first.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await asyncio.wait_for(first, WAIT_SECONDS)
+        start.release()
+        await asyncio.to_thread(start.wait_responded)
+        # The failed start accepted nothing, so its thread frees once the failure reaches the loop.
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + WAIT_SECONDS
+        handle = None
+        while handle is None:
+            try:
+                handle = await asyncio.wait_for(host.continue_codex_thread(seeded.thread_id, "Fix the failing test."), WAIT_SECONDS)
+            except CodexAgentError as error:
+                self.assertEqual(error.failure_code, "codex.session_busy")
+                if loop.time() > deadline:
+                    self.fail("the thread stayed busy after its failed start returned")
+                await asyncio.sleep(0.05)
+        self.assertEqual(handle.thread_id, seeded.thread_id)
+        self.assertEqual(self.count("turn/start"), 2)
+        self.assertEqual(self.count("turn/interrupt"), 0)
+
+
+@requires_sdk
+class CodexHostMappingSchemaTests(HostTestCase):
+    """R-12, D-36, EC-83 and EC-32: a mapping output_schema's answer is only parsed as JSON locally."""
+
+    async def test_a_mapping_schema_answer_is_parsed_as_json_and_not_compared_with_the_schema(self) -> None:
+        schema = {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]}
+        cases = (
+            # EC-83: valid JSON that misses the schema is not detected, so the parsed JSON is kept as returned.
+            ("valid JSON that misses the schema", '{"verdict": 1}', None, {"verdict": 1}),
+            # EC-32: an answer that is not JSON gets the schema problem and keeps its raw text.
+            ("text that is not JSON", "The summary is short.", "codex.schema_violation", None),
+        )
+        host = await self.open_host()
+        for label, answer, code, structured in cases:
+            with self.subTest(answer=label):
+                handle = await self.spawn(host, output_schema=schema)
+                self.server.complete_turn(handle.thread_id, handle.turn_id, final=answer)
+                snapshot = await self.wait_done(host, handle)
+                self.assert_problem(snapshot, "completed", code)
+                self.assertEqual(snapshot.result.structured, structured)
+                self.assertEqual(snapshot.result.final_response, answer)
+
+
+@requires_sdk
+class CodexHostLateStopTests(HostTestCase):
+    """R-13, D-35 and INV-11: a late turn or goal run gets one stop and ends with no problem."""
+
+    async def test_a_goal_spawn_cancelled_during_its_goal_start_is_cancelled_once_without_a_problem(self) -> None:
+        from vidbyte.lib.dataclasses.codex_host import CodexGoal, CodexSpawnRequest, CodexTurnHandle
+
+        self.patch_connection("CODEX_HOST_WORKER_THREADS", 1)
+        host = await self.open_host()
+        goal_start = self.server.hold("thread/goal/set", lambda params: params.get("objective") is not None)
+        request = CodexSpawnRequest(goal=CodexGoal(objective="Ship the release notes."))
+        task = asyncio.ensure_future(host.spawn_codex_thread(request))
+        thread_id = (await asyncio.to_thread(goal_start.wait_arrived)).params["threadId"]
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await asyncio.wait_for(task, WAIT_SECONDS)
+        goal_start.release()
+
+        def cancels() -> int:
+            return sum(1 for entry in self.server.kinds("cancel_goal_operation") if entry[1] == thread_id)
+
+        await self.wait_until(lambda: cancels() >= 1, "the late goal run's cancel")
+        # Barrier: with one host worker, this read returns only after any stop queued before it was sent.
+        await asyncio.wait_for(host.read_codex_thread(thread_id), WAIT_SECONDS)
+        self.assertEqual(cancels(), 1)
+        turn_id = self.server.threads[thread_id].turns[0].turn_id
+        snapshot = await self.wait_done(host, CodexTurnHandle(thread_id=thread_id, turn_id=turn_id))
+        # D-35: late acceptance is not one of Vidbyte's stop reasons, so the run carries no problem.
+        self.assert_problem(snapshot, "interrupted", None)
+
+    async def test_a_late_turn_is_interrupted_once_without_a_stop_reason(self) -> None:
+        from vidbyte.lib.dataclasses.codex_host import CodexSpawnRequest, CodexTurnHandle
+
+        self.patch_connection("CODEX_HOST_WORKER_THREADS", 1)
+        host = await self.open_host()
+        turn_start = self.server.hold("turn/start")
+        task = asyncio.ensure_future(host.spawn_codex_thread(CodexSpawnRequest(prompt="Fix the failing test.", timeout_seconds=600.0)))
+        thread_id = (await asyncio.to_thread(turn_start.wait_arrived)).params["threadId"]
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await asyncio.wait_for(task, WAIT_SECONDS)
+        turn_start.release()
+        await self.wait_until(lambda: bool(self.server.threads[thread_id].turns), "Codex to accept the late turn")
+        turn_id = self.server.threads[thread_id].turns[0].turn_id
+        await self.wait_for_request("turn/interrupt", lambda params: params["turnId"] == turn_id)
+        await asyncio.wait_for(host.read_codex_thread(thread_id), WAIT_SECONDS)
+        self.assertEqual(self.count("turn/interrupt", lambda params: params["turnId"] == turn_id), 1)
+        snapshot = await self.wait_done(host, CodexTurnHandle(thread_id=thread_id, turn_id=turn_id))
+        # D-35: the interrupt is the late acceptance's, not the turn's timeout, so no problem is reported.
+        self.assert_problem(snapshot, "interrupted", None)
+
+
+class CodexHostLaunchToolSlotTests(unittest.IsolatedAsyncioTestCase):
+    """R-14 and INV-32: the launch tool frees every cap slot it held when a launch fails or is cancelled."""
+
+    async def _launch(self, tools: Any, prompts: list[str]) -> Any:
+        from vidbyte.lib.dataclasses.tools import ToolCall
+
+        tool = next(tool for tool in tools if tool.spec().name == "launch_codex_subagents")
+        return await asyncio.wait_for(tool.execute(ToolCall(tool_name="launch_codex_subagents", arguments={"prompts": prompts})), WAIT_SECONDS)
+
+    async def _fail(self, host: StubCodexHost, tools: Any, prompts: list[str]) -> None:
+        from vidbyte.lib.dataclasses.tools import ToolStatus
+        from vidbyte.lib.errors import CodexAgentError
+
+        host.raises["launch_codex_subagents"] = CodexAgentError("Codex is overloaded.", failure_code="codex.api_error", operation="launch_codex_subagents")
+        self.assertEqual((await self._launch(tools, prompts)).status, ToolStatus.ERROR)
+        del host.raises["launch_codex_subagents"]
+
+    async def _cancel(self, host: StubCodexHost, tools: Any, prompts: list[str]) -> None:
+        host.gates["launch_codex_subagents"] = asyncio.Event()
+        task = asyncio.ensure_future(self._launch(tools, prompts))
+        for _ in range(10_000):
+            if "launch_codex_subagents" in host.names():
+                break
+            await asyncio.sleep(0)
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+        del host.gates["launch_codex_subagents"]
+
+    async def test_a_failed_or_cancelled_launch_frees_every_slot_it_held(self) -> None:
+        from vidbyte.lib.dataclasses.tools import ToolStatus
+        from vidbyte.tools.toolsets import CodexHostTools
+
+        prompts = ["Review module A.", "Review module B."]
+        for label, end_early in (("failed", self._fail), ("cancelled", self._cancel)):
+            with self.subTest(launch=label):
+                host = StubCodexHost()
+                tools = CodexHostTools(host, max_live_turns=len(prompts))
+                await end_early(host, tools, prompts)
+                # The first launch held the whole cap, so this one fits only if every slot came back.
+                launched = await self._launch(tools, prompts)
+                self.assertEqual(launched.status, ToolStatus.SUCCESS, launched.output)
+                self.assertEqual(len(json.loads(launched.output)), len(prompts))
+                self.assertEqual(host.names().count("launch_codex_subagents"), 2)
+
+
+@requires_sdk
+class CodexHostSchemaRefusalTextTests(HostTestCase):
+    """R-26, INV-9 and EC-82: refusing an unusable output_schema passes on no library text and no cause."""
+
+    async def test_an_unusable_mapping_schema_is_refused_without_the_library_text_or_its_cause(self) -> None:
+        from pydantic_core import to_jsonable_python
+
+        from tests.features.codex_host.codex_host_support import error_texts
+        from vidbyte.lib.dataclasses.codex_host import CodexSpawnRequest
+        from vidbyte.lib.dataclasses.tools import ToolCall, ToolStatus
+        from vidbyte.lib.errors import ConfigurationError
+        from vidbyte.tools.toolsets import CodexHostTools
+
+        cyclic: dict[str, Any] = {"type": "object"}
+        cyclic["self"] = cyclic
+        host = await self.open_host()
+        for label, schema in (("a mapping with an object value", UNUSABLE_SCHEMAS[1][1]), ("a cyclic mapping", cyclic)):
+            with self.subTest(schema=label):
+                # The text the JSON conversion fails with is the library's own, so it must reach no one.
+                with self.assertRaises((TypeError, ValueError)) as converting:
+                    to_jsonable_python(schema)
+                library_text = str(converting.exception)
+                with self.assertRaises(ConfigurationError) as caught:
+                    await asyncio.wait_for(host.spawn_codex_thread(CodexSpawnRequest(prompt="Answer in JSON.", output_schema=schema)), WAIT_SECONDS)
+                self.assertIn("output_schema", caught.exception.message)
+                self.assertIsNone(caught.exception.__cause__)
+                for text in error_texts(caught.exception):
+                    self.assertNotIn(library_text, text)
+                # The tool result is what the model reads, so it carries the same text and nothing more.
+                tools = CodexHostTools(host, max_live_turns=1, spawn_defaults=CodexSpawnRequest(output_schema=schema))
+                spawn = next(tool for tool in tools if tool.spec().name == "spawn_codex_thread")
+                result = await asyncio.wait_for(spawn.execute(ToolCall(tool_name="spawn_codex_thread", arguments={"prompt": "Answer in JSON."})), WAIT_SECONDS)
+                self.assertEqual(result.status, ToolStatus.ERROR)
+                self.assertIn("output_schema", result.output)
+                self.assertNotIn(library_text, result.output)
+
+    async def test_a_schema_with_a_cycle_under_a_schema_keyword_is_refused_before_any_request(self) -> None:
+        from vidbyte.lib.dataclasses.codex_host import CodexSpawnRequest
+        from vidbyte.lib.dataclasses.tools import ToolCall, ToolStatus
+        from vidbyte.lib.errors import ConfigurationError
+        from vidbyte.tools.toolsets import CodexHostTools
+
+        under_properties: dict[str, Any] = {"type": "object"}
+        under_properties["properties"] = {"summary": under_properties}
+        under_items: dict[str, Any] = {"type": "array"}
+        under_items["items"] = under_items
+        host = await self.open_host()
+        for label, schema in (("a cycle under properties", under_properties), ("a cycle under items", under_items)):
+            with self.subTest(schema=label):
+                # INV-8: the walk over the schema never ends, so the refusal is a ConfigurationError, not a RecursionError.
+                before = len(self.server.requests)
+                with self.assertRaises(ConfigurationError) as caught:
+                    await asyncio.wait_for(host.spawn_codex_thread(CodexSpawnRequest(prompt="Answer in JSON.", output_schema=schema)), WAIT_SECONDS)
+                self.assertIn("output_schema", caught.exception.message)
+                self.assertIsNone(caught.exception.__cause__)
+                self.assertEqual(self.server.methods()[before:], [])
+                # INV-10: the spawn tool reports the refusal as a result and never raises.
+                tools = CodexHostTools(host, max_live_turns=1, spawn_defaults=CodexSpawnRequest(output_schema=schema))
+                spawn = next(tool for tool in tools if tool.spec().name == "spawn_codex_thread")
+                result = await asyncio.wait_for(spawn.execute(ToolCall(tool_name="spawn_codex_thread", arguments={"prompt": "Answer in JSON."})), WAIT_SECONDS)
+                self.assertEqual(result.status, ToolStatus.ERROR)
+                self.assertTrue(result.output.startswith("configuration.invalid_argument: "), result.output)
+
+
+@requires_sdk
+class CodexHostInterruptAfterFailedStopTests(HostTestCase):
+    """R-27, AC-16, EC-25, EC-27 and D-7: a user interrupt is skipped only while another stop is in flight."""
+
+    async def test_a_user_interrupt_that_failed_is_sent_again_when_retried(self) -> None:
+        host = await self.open_host()
+        handle = await self.spawn(host)
+        self.server.fail("turn/interrupt", self.fakes.FakeRpcError(-32603, "Codex could not interrupt the turn."), times=1)
+        await self.assert_codex_error(host.interrupt_codex_turn(handle), "codex.api_error")
+        # The failed stop is over, so the retry the next step asks for is sent.
+        await asyncio.wait_for(host.interrupt_codex_turn(handle), WAIT_SECONDS)
+        self.assertEqual(self.count("turn/interrupt"), 2)
+        snapshot = await self.wait_done(host, handle)
+        self.assert_problem(snapshot, "interrupted", None)
+
+    async def test_a_user_interrupt_after_a_failed_timeout_stop_is_sent_and_the_timeout_label_stays(self) -> None:
+        self.patch_connection("CODEX_HOST_WORKER_THREADS", 1)
+        host = await self.open_host()
+        self.server.fail("turn/interrupt", self.fakes.FakeRpcError(-32603, "Codex could not interrupt the turn."), times=1)
+        handle = await self.spawn(host, timeout_seconds=0.2)
+        await self.wait_for_request("turn/interrupt", lambda params: params["turnId"] == handle.turn_id)
+        # Barrier: with one host worker, this read returns only after the failed timeout stop has returned.
+        await asyncio.wait_for(host.read_codex_thread(handle.thread_id), WAIT_SECONDS)
+        # EC-27: the failed timeout stop is not retried, and the turn keeps running.
+        running = await asyncio.wait_for(host.get_codex_turn_result(handle), WAIT_SECONDS)
+        self.assertEqual(running.status.value, "inProgress")
+        await asyncio.wait_for(host.interrupt_codex_turn(handle), WAIT_SECONDS)
+        self.assertEqual(self.count("turn/interrupt"), 2)
+        snapshot = await self.wait_done(host, handle)
+        # D-7: the timeout's stop came first, so its label stays once Codex reports the turn interrupted.
+        self.assert_problem(snapshot, "interrupted", "codex.turn_timed_out")
+
+    async def test_a_user_interrupt_while_the_timeout_stop_is_in_flight_sends_nothing_more(self) -> None:
+        host = await self.open_host()
+        held = self.server.hold("turn/interrupt")
+        handle = await self.spawn(host, timeout_seconds=0.2)
+        await asyncio.to_thread(held.wait_arrived)
+        # R-16: Vidbyte's own stop has not returned yet, so the user's call returns at once and sends nothing.
+        await asyncio.wait_for(host.interrupt_codex_turn(handle), WAIT_SECONDS)
+        self.assertEqual(self.count("turn/interrupt"), 1)
+        held.release()
+        snapshot = await self.wait_done(host, handle)
+        self.assert_problem(snapshot, "interrupted", "codex.turn_timed_out")
+        self.assertEqual(self.count("turn/interrupt"), 1)
+
+
+if __name__ == "__main__":
+    unittest.main()
