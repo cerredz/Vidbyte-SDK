@@ -1,14 +1,14 @@
 """FILE: vidbyte/harnesses/native/grok/threads.py
 
-PURPOSE: Defines the three public Grok Build thread functions (GrokThreads: run_grok_thread, continue_grok_thread, fork_grok_thread) and the flow of one call (GrokThreadRun): find grok, prepare the private Grok home with the caller's skills, run `grok --single` headless once with the caller's key, and read its one JSON answer.
-ROLE IN CODEBASE: The functions are bound as module names in vidbyte/harnesses/native/grok/__init__.py and re-exported from vidbyte.harnesses.native. GrokThreadRun uses NativeLauncher, NativeSkillFolders and NativeErrorFactory from hostkit, CliArgv and CliRunner from vidbyte.lib.process, and GrokWire (grok/wire.py) to read the answer.
+PURPOSE: Defines the three public Grok Build thread functions (GrokThreads: run_grok_thread, continue_grok_thread, fork_grok_thread) and the flow of one call (GrokThreadRun): find grok, prepare the private Grok home with the caller's skills, run `grok --single` headless once with the caller's key, and read its one JSON answer, or, on a browser call, run it with the per-call agent file and rules and read its streamed events.
+ROLE IN CODEBASE: The functions are bound as module names in vidbyte/harnesses/native/grok/__init__.py and re-exported from vidbyte.harnesses.native. GrokThreadRun uses NativeLauncher, NativeSkillFolders and NativeErrorFactory from hostkit, CliArgv and CliRunner from vidbyte.lib.process, GrokWire (grok/wire.py) to read the answer, and GrokMounts (grok/mounts.py) for a browser call's options and environment. GrokBrowserHarness (grok/browser.py) runs GrokThreadRun.execute with a mount.
 ARCHITECTURE NOTE: Every call runs grok with GROK_HOME set to a private home under ~/.vidbyte/grok-homes/, keyed by the resolved workspace (spec D-24), so no stored grok login and no file a workspace ships can supply the credential, an endpoint, a hook or a plugin; the caller's key reaches grok only through the child's environment. Continue and fork find the thread because the same workspace always maps to the same home. The module holds no literals of its own (spec INV-15): flags are GrokFlag members and every other value comes from vidbyte/lib/constants/native_threads.py.
-FUNCTION INVENTORY: GrokThreads.run_grok_thread, continue_grok_thread and fork_grok_thread are the public functions; GrokThreads._call is the one guarded try they share. GrokThreadRun.execute is the narrated main function of one call; _fallback names the installer's grok, _prepare_home creates the private home and its skills folder, _environment builds the child's environment overlay and _argv builds the command line.
+FUNCTION INVENTORY: GrokThreads.run_grok_thread, continue_grok_thread and fork_grok_thread are the public functions; GrokThreads._call is the one guarded try they share and returns the result of the run. GrokThreadRun.execute is the narrated main function of one call, with an optional browser mount, and returns the result with the process outcome (NativeThreadRun); _fallback names the installer's grok, _prepare_home creates the private home and its skills folder, _environment builds the child's environment overlay and _argv builds the command line.
 COMMON MODIFICATION PATTERNS: A new Grok option is a GrokThreadConfig field (vidbyte/lib/dataclasses/native_threads.py), a GrokFlag member and one CliOption in _argv. A new failure condition goes in GrokWire.read.
 WHAT NOT TO DO IN THIS FILE: 1. Do not put the key on argv or in a file; it travels only in XAI_API_KEY and GROK_CODE_XAI_API_KEY of the child. 2. Do not create the private home inside the workspace, and do not write anything into the workspace. 3. Do not pass an approve-everything permission mode; GrokPermissionMode has none.
-KNOWN EDGE CASES: Concurrent Grok calls in one workspace share one private home, so calls whose skill sets differ can collide while its skills folder is rebuilt (spec EC-27, an accepted limit; the GROK_LAUNCH_FAILED likely cause says so). An unknown model is not checked first: grok silently uses its default model (EC-25). The default permission mode refuses edits in a headless run (A-3). Grok prints the thread id only in the JSON answer at exit, so a run that fails before exit carries no new id (D-27).
+KNOWN EDGE CASES: Without a mount the call is exactly the plain call: json output, no agent file, no rules and the GROK_CLI_MAX_OUTPUT_BYTES cap (spec INV-14); a browser call streams, because tool calls and connected servers show only in the stream, and caps output at NATIVE_PROCESS_MAX_OUTPUT_BYTES, because streamed tool results can pass 4 MiB (D-8, D-19). Concurrent Grok calls in one workspace share one private home, so calls whose skill sets differ can collide while its skills folder is rebuilt (spec EC-27, an accepted limit; the GROK_LAUNCH_FAILED likely cause says so). An unknown model is not checked first: grok silently uses its default model (EC-25). The default permission mode refuses edits in a headless run (A-3). Grok prints the thread id only in the JSON answer at exit, so a run that fails before exit carries no new id (D-27).
 RELATED DOCS: vidbyte/harnesses/README.md
-TESTS: tests/features/harness_threads/
+TESTS: tests/features/harness_threads/; the mounted path: tests/features/harness_threads/test_harness_threads_browser_mounts.py, tests/features/harness_threads/test_harness_threads_browser_lifecycle.py
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from vidbyte.harnesses.native.grok.mounts import GrokMounts
 from vidbyte.harnesses.native.grok.wire import GrokWire
 from vidbyte.harnesses.native.hostkit import (
     NativeErrorFactory,
@@ -27,10 +28,12 @@ from vidbyte.harnesses.native.hostkit import (
     NativeSkillFolders,
 )
 from vidbyte.lib.constants import native_threads
+from vidbyte.lib.dataclasses.browser_tools import BrowserMount
 from vidbyte.lib.dataclasses.native_threads import (
     GrokThreadConfig,
     NativeThreadRequest,
     NativeThreadResult,
+    NativeThreadRun,
 )
 from vidbyte.lib.dataclasses.process import CliInvocation, CliOption
 from vidbyte.lib.dataclasses.validation import RecordFieldConverter
@@ -75,7 +78,7 @@ class GrokThreads:
         try:
             request = NativeThreadRequest(harness=NativeHarness.GROK, verb=verb, prompt=prompt, api_key=api_key, workspace=workspace, model=model, skills=skills, thread_id=thread_id)
             settings = GrokThreadConfig() if config is None else RecordFieldConverter.require_instance(config, native_threads.NATIVE_CONFIG_ARGUMENT, GrokThreadConfig)
-            return await GrokThreadRun.execute(request, settings, errors)
+            return (await GrokThreadRun.execute(request, settings, errors)).result
         except asyncio.CancelledError:
             raise
         except NativeThreadError:
@@ -87,10 +90,10 @@ class GrokThreads:
 
 
 class GrokThreadRun:
-    """One Grok Build call: launcher, private home, environment, argv, run and answer."""
+    """One Grok Build call: launcher, private home, environment, argv, run and answer, with an optional browser mount."""
 
     @staticmethod
-    async def execute(request: NativeThreadRequest, config: GrokThreadConfig, errors: NativeErrorFactory) -> NativeThreadResult:
+    async def execute(request: NativeThreadRequest, config: GrokThreadConfig, errors: NativeErrorFactory, *, mount: BrowserMount | None = None) -> NativeThreadRun:
         # Find grok: the caller's command, then PATH, then the copy the
         # Grok installer puts under the user's home folder.
         launcher = NativeLauncher.resolve(config.grok_command, program=native_threads.GROK_PROGRAM, fallback=GrokThreadRun._fallback(), errors=errors, request=request)
@@ -103,13 +106,19 @@ class GrokThreadRun:
         errors.register_secret(request.api_key)
 
         # Run grok once, headless, in the workspace, with the key and
-        # the private home in its environment and no standard input.
+        # the private home in its environment and no standard input. A
+        # browser call adds the mount: its options before --single, the
+        # compat switches and tool keys in the environment, each
+        # unpassed key variable removed, and the larger output cap its
+        # streamed tool results need.
+        overlay = GrokThreadRun._environment(request, home)
         invocation = CliInvocation(
-            argv=GrokThreadRun._argv(launcher, request, config),
-            env_overlay=GrokThreadRun._environment(request, home),
+            argv=GrokThreadRun._argv(launcher, request, config, mount),
+            env_overlay=overlay if mount is None else {**overlay, **GrokMounts.environment(mount)},
             timeout_seconds=config.timeout_seconds,
-            max_output_bytes=native_threads.GROK_CLI_MAX_OUTPUT_BYTES,
+            max_output_bytes=native_threads.GROK_CLI_MAX_OUTPUT_BYTES if mount is None else native_threads.NATIVE_PROCESS_MAX_OUTPUT_BYTES,
             cwd=Path(request.workspace),
+            env_remove=() if mount is None else GrokMounts.env_remove(mount),
         )
         outcome = await CliRunner().run(invocation)
 
@@ -118,8 +127,14 @@ class GrokThreadRun:
             program, *_arguments = launcher
             raise errors.from_launch_failure(outcome.launch_failure, program, request=request)
 
-        # Read the one JSON answer: the thread id and the final text.
-        return GrokWire.read(outcome, request, errors, timeout_seconds=config.timeout_seconds)
+        # Read the thread id and the final text: from the one JSON
+        # answer of a plain call, or from the streamed events of a
+        # browser call, kept with the outcome for its tool calls.
+        if mount is None:
+            result = GrokWire.read(outcome, request, errors, timeout_seconds=config.timeout_seconds)
+        else:
+            result = GrokWire.read_stream(outcome, request, errors, timeout_seconds=config.timeout_seconds)
+        return NativeThreadRun(result=result, outcome=outcome)
 
     @staticmethod
     def _fallback() -> Path | None:
@@ -165,11 +180,13 @@ class GrokThreadRun:
         }
 
     @staticmethod
-    def _argv(launcher: tuple[str, ...], request: NativeThreadRequest, config: GrokThreadConfig) -> tuple[str, ...]:
+    def _argv(launcher: tuple[str, ...], request: NativeThreadRequest, config: GrokThreadConfig, mount: BrowserMount | None) -> tuple[str, ...]:
         # Every option is one --flag=value element, and the prompt
-        # travels inside --single=, so it can never become a flag.
+        # travels inside --single=, so it can never become a flag; a
+        # browser call streams and puts its mount options before it.
+        output_format = native_threads.GROK_JSON_OUTPUT_FORMAT if mount is None else native_threads.GROK_STREAMING_JSON_OUTPUT_FORMAT
         options = [
-            CliOption(GrokFlag.OUTPUT_FORMAT, native_threads.GROK_JSON_OUTPUT_FORMAT),
+            CliOption(GrokFlag.OUTPUT_FORMAT, output_format),
             CliOption(GrokFlag.CWD, str(request.workspace)),
             CliOption(GrokFlag.PERMISSION_MODE, config.permission_mode.value),
         ]
@@ -181,6 +198,8 @@ class GrokThreadRun:
             options.append(CliOption(GrokFlag.RESUME, request.thread_id))
         if request.verb is NativeThreadVerb.FORK:
             options.append(CliOption(GrokFlag.FORK_SESSION))
+        if mount is not None:
+            options.extend(GrokMounts.options(mount))
         options.append(CliOption(GrokFlag.SINGLE, request.prompt))
         return CliArgv.build(launcher, options=tuple(options), style=CliOptionStyle.JOINED)
 

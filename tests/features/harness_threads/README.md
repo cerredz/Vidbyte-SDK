@@ -2,14 +2,15 @@
 
 ## Folder Description / Intent
 
-This folder tests the nine harness thread functions of `vidbyte.harnesses.native` (`run_`, `continue_` and `fork_` for Grok Build, opencode and Muse Code) and the process helpers under them, entirely offline. Every vendor program is the scripted stand-in `fake_harness.py`, which logs what it received; the thread functions, `CliRunner` and the filesystem are real. `NativeThreadError.relevant_tests` points here.
+This folder tests the nine harness thread functions of `vidbyte.harnesses.native` (`run_`, `continue_` and `fork_` for Grok Build, opencode and Muse Code), their nine `_with_browser` siblings that mount browser and web tools as MCP servers, and the process helpers under them, entirely offline. Every vendor program is the scripted stand-in `fake_harness.py`, which logs what it received; `node`, npm and the pinned MCP servers are played by `fake_browser.py`; the thread functions, `CliRunner` and the filesystem are real. `NativeThreadError.relevant_tests` points here.
 
 ## File Index
 
 - `README.md` describes the folder and its files.
 - `FEATURE.md` states the feature contract, the suite map and the strategies left out.
-- `conftest.py` provides the lazy contract imports, the sandbox (home, workspace, PATH, temp folder), stand-in builders, the INV-5 error check, timing knobs and process liveness checks.
+- `conftest.py` provides the lazy contract imports, the sandbox (home, workspace, PATH, temp folder), stand-in builders, the INV-5 error check, timing knobs and process liveness checks, and for the browser functions the node stand-in, the tool cache, a fake Chrome, the `browse` caller and the browser error check.
 - `fake_harness.py` is the standard-library stand-in for grok, opencode, muse (exec and batch serve) and wsl.exe.
+- `fake_browser.py` is the browser half of the stand-ins: a fake node that plays npm and the pinned MCP servers, a fake browser process, the offline remote endpoints, and how each vendor reads its compiled mount.
 - `test_harness_threads_surface.py` checks exports, signatures, vocabularies, failure codes, contract constants, removed names and files, and `import vidbyte`.
 - `test_harness_threads_acceptance.py` runs the spec's example and all nine functions end to end.
 - `test_harness_threads_threads.py` checks continue and fork identity and unknown threads.
@@ -24,9 +25,17 @@ This folder tests the nine harness thread functions of `vidbyte.harnesses.native
 - `test_harness_threads_runner.py` checks `CliRunner` and `CliInvocation`.
 - `test_harness_threads_wsl.py` checks Muse WSL mode on Windows.
 - `test_harness_threads_static_policy.py` checks the `ast` source rules of the harness modules.
+- `test_harness_threads_browser_fakes.py` checks that the browser stand-ins apply the vendor rules the browser tests rely on.
+- `test_harness_threads_browser_contract.py` checks the browser functions' exports, signatures, records, enums, codes, constants and module layering.
+- `test_harness_threads_browser_registry.py` checks the tool registry rows, string resolution and every tool and key refusal.
+- `test_harness_threads_browser_mounts.py` checks what each harness is given and what it reports back for each tool combination.
+- `test_harness_threads_browser_runtime.py` checks the Node and Chrome checks, the tool cache install and the per-call folder.
+- `test_harness_threads_browser_lifecycle.py` checks the browser reap, artifacts, the required check, concurrency and secret hygiene.
+- `test_harness_threads_browser_acceptance.py` runs the browser spec's developer snippet end to end.
 
 ## Logs
 
 - 2026-10-15 - Created for the harness thread functions (spec `docs/spec/harness-thread-functions/spec.md` r3); replaces the `grok_host`, `opencode_host`, `muse_host` and `native_backends` packs of the rejected design.
 - 2026-10-15 - Added regression tests for the S4 review findings R-4, R-6 to R-11 and R-24 (`docs/spec/harness-thread-functions/review.md`).
 - 2026-10-15 - Added regression tests for the re-review findings R-27 to R-30, and made the current-folder tests remove `NoDefaultCurrentDirectoryInExePath` (R-31).
+- 2026-10-17 - Added the browser-tool tests and `fake_browser.py` for the `_with_browser` functions (spec `docs/spec/harness-browser-tools/spec.md` r3), and updated the surface, errors and static-policy pins that spec §13 lists.

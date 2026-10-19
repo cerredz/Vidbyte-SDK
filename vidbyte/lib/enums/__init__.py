@@ -41,6 +41,15 @@ TESTS:
 from __future__ import annotations
 
 from vidbyte.lib.enums.agent_runtime import AgentRuntimeStateKey, AgentRuntimeType
+from vidbyte.lib.enums.browser_tools import (
+    BrowserCapability,
+    BrowserKeyRequirement,
+    BrowserTool,
+    BrowserToolCallStatus,
+    BrowserToolExclusion,
+    BrowserToolTransport,
+    BrowserToolVariable,
+)
 from vidbyte.lib.enums.codex import (
     CodexAccountKind,
     CodexApprovalMode,
@@ -145,6 +154,7 @@ from vidbyte.lib.enums.native_threads import (
     NativeHarness,
     NativeThreadOperation,
     NativeThreadProblem,
+    NativeThreadResultRecord,
     NativeThreadVerb,
     OpencodeEventType,
     OpencodeFlag,
@@ -203,6 +213,13 @@ __all__ = [
     "AgentType",
     "AssumptionAction",
     "BasisType",
+    "BrowserCapability",
+    "BrowserKeyRequirement",
+    "BrowserTool",
+    "BrowserToolCallStatus",
+    "BrowserToolExclusion",
+    "BrowserToolTransport",
+    "BrowserToolVariable",
     "BudgetPreset",
     "BurdenOfProofVerdict",
     "CircularityVerdict",
@@ -293,6 +310,7 @@ __all__ = [
     "NativeHarness",
     "NativeThreadOperation",
     "NativeThreadProblem",
+    "NativeThreadResultRecord",
     "NativeThreadVerb",
     "NecessarySufficientVerdict",
     "OpencodeEventType",

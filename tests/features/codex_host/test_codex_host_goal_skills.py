@@ -37,6 +37,7 @@ from tests.features.codex_host.codex_host_support import (
     HostTestCase,
     changed_error_fields,
     requires_sdk,
+    mapped_summary,
     thread_suffix,
 )
 from vidbyte.lib.errors import ConfigurationError
@@ -193,7 +194,7 @@ class CodexRunGoalTests(_GoalSkillCase):
                 error = await self.assert_codex_error(host.run_codex_goal("ship it", token_budget=500), "codex.command_not_run")
                 thread_id = self.started_thread()
                 self.assertEqual(error.operation, "run_codex_goal")
-                self.assertEqual(error.message, message + thread_suffix(thread_id))
+                self.assertEqual(mapped_summary(self, error), message + thread_suffix(thread_id))
                 self.assertEqual(error.next_step, NEXT_STEPS["codex.command_not_run"])
                 self.assertEqual(self.goal_cancels(thread_id), 1)
                 await self.barrier(host, thread_id)
@@ -204,7 +205,7 @@ class CodexRunGoalTests(_GoalSkillCase):
         self.server.fail("thread/goal/set", self.fakes.FakeRpcError(-32603, "pause refused"), predicate=lambda params: params.get("status") == "paused")
         self.server.fail("turn/interrupt", self.fakes.FakeRpcError(-32603, "interrupt refused"))
         error = await self.assert_codex_error(host.run_codex_goal("ship it"), "codex.command_not_run")
-        self.assertEqual(error.message, NO_GOAL_MESSAGE + thread_suffix(self.started_thread()))
+        self.assertEqual(mapped_summary(self, error), NO_GOAL_MESSAGE + thread_suffix(self.started_thread()))
 
     async def test_a_goal_check_that_fails_cancels_the_run_and_keeps_its_error(self) -> None:
         # AC-27, INV-22: the check's api_error keeps operation get_codex_goal and gains GOAL_UNCHECKED_MESSAGE.
@@ -378,18 +379,19 @@ class CodexRunSkillTests(_GoalSkillCase):
                 error = await self.assert_codex_error(host.run_codex_skill(skill, "x"), "codex.skill_not_found")
                 self.assertEqual(error.operation, "run_codex_skill")
                 prefix = _not_found_prefix(skill, APP_SERVER_PLACE)
-                self.assertTrue(error.message.startswith(prefix), error.message)
-                self.assertTrue(error.message.endswith("."), error.message)
-                names = set(_name_tokens(error.message[len(prefix) :]))
-                self.assertLessEqual({"openai-docs", "s"}, names, error.message)
-                self.assertFalse({"rv", "review-agent"} & names, error.message)
+                summary = mapped_summary(self, error)
+                self.assertTrue(summary.startswith(prefix), summary)
+                self.assertTrue(summary.endswith("."), summary)
+                names = set(_name_tokens(summary[len(prefix) :]))
+                self.assertLessEqual({"openai-docs", "s"}, names, summary)
+                self.assertFalse({"rv", "review-agent"} & names, summary)
                 self.assertEqual(self.sent_methods(), ["skills/list"])
         for skill in ("rv", "review-agent"):
             with self.subTest(disabled=skill):
                 self.remark()
                 error = await self.assert_codex_error(host.run_codex_skill(skill, "x"), "codex.skill_disabled")
                 self.assertEqual(error.operation, "run_codex_skill")
-                self.assertEqual(error.message, SKILL_DISABLED_MESSAGE.format(skill=skill, place=APP_SERVER_PLACE))
+                self.assertEqual(mapped_summary(self, error), SKILL_DISABLED_MESSAGE.format(skill=skill, place=APP_SERVER_PLACE))
                 self.assertEqual(self.sent_methods(), ["skills/list"])
         self.assertEqual(self.count("thread/start"), 0)
         self.assertEqual(self.count("turn/start"), 0)
@@ -407,14 +409,15 @@ class CodexRunSkillTests(_GoalSkillCase):
         request = CodexSpawnRequest(thread=CodexThreadSettings(cwd=WORK_A))
         error = await self.assert_codex_error(host.run_codex_skill("zz", "x", request=request), "codex.skill_not_found")
         prefix = _not_found_prefix("zz", f"the folder {WORK_A}")
-        self.assertTrue(error.message.startswith(prefix), error.message)
-        self.assertTrue(error.message.endswith(" and 5 more."), error.message)
-        tokens = set(_name_tokens(error.message[len(prefix) :]))
+        summary = mapped_summary(self, error)
+        self.assertTrue(summary.startswith(prefix), summary)
+        self.assertTrue(summary.endswith(" and 5 more."), summary)
+        tokens = set(_name_tokens(summary[len(prefix) :]))
         named = [entry["name"] for entry in many if entry["name"] in tokens]
         self.assertEqual(len(named), SKILL_NAMES_IN_ERROR, named)
 
         nothing = await self.assert_codex_error(host.run_codex_skill("zz", "x"), "codex.skill_not_found")
-        self.assertEqual(nothing.message, SKILL_NOT_FOUND_MESSAGE.format(skill="zz", place=APP_SERVER_PLACE, names="none"))
+        self.assertEqual(mapped_summary(self, nothing), SKILL_NOT_FOUND_MESSAGE.format(skill="zz", place=APP_SERVER_PLACE, names="none"))
 
     async def test_the_docs_run_is_the_skill_run_for_openai_docs(self) -> None:
         # AC-32, INV-26: the same input and read-back, and the errors carry run_codex_openai_docs.
@@ -438,7 +441,7 @@ class CodexRunSkillTests(_GoalSkillCase):
         self.server.drop_skill_input = True
         dropped = await self.assert_codex_error(host.run_codex_openai_docs("q"), "codex.command_not_run")
         self.assertEqual(dropped.operation, "run_codex_openai_docs")
-        self.assertEqual(dropped.message, SKILL_DROPPED_MESSAGE.format(skill="openai-docs") + thread_suffix(self.started_thread()))
+        self.assertEqual(mapped_summary(self, dropped), SKILL_DROPPED_MESSAGE.format(skill="openai-docs") + thread_suffix(self.started_thread()))
 
     async def test_bad_skill_arguments_are_refused_before_any_request(self) -> None:
         # AC-42, EC-37, EC-48, INV-6: an ephemeral thread could never be confirmed, so it is refused first.
@@ -492,7 +495,7 @@ class CodexSkillReadBackTests(_GoalSkillCase):
         error = await self.assert_codex_error(host.run_codex_skill("s", "do it"), "codex.command_not_run")
         thread_id = self.started_thread()
         self.assertEqual(error.operation, "run_codex_skill")
-        self.assertEqual(error.message, INPUT_NOT_RECORDED_MESSAGE.format(skill="s", seconds=FAR_DEADLINE_SECONDS) + thread_suffix(thread_id))
+        self.assertEqual(mapped_summary(self, error), INPUT_NOT_RECORDED_MESSAGE.format(skill="s", seconds=FAR_DEADLINE_SECONDS) + thread_suffix(thread_id))
         self.assertEqual(self.count("thread/turns/list", lambda params: params["threadId"] == thread_id), INPUT_CHECK_ATTEMPTS)
         self.assertEqual(self.interrupts(thread_id), 1)
         await self.barrier(host, thread_id)
@@ -502,7 +505,7 @@ class CodexSkillReadBackTests(_GoalSkillCase):
         self.server.drop_skill_input = True
         error = await self.assert_codex_error(host.run_codex_skill("s", "do it"), "codex.command_not_run")
         dropped = self.started_thread()
-        self.assertEqual(error.message, SKILL_DROPPED_MESSAGE.format(skill="s") + thread_suffix(dropped))
+        self.assertEqual(mapped_summary(self, error), SKILL_DROPPED_MESSAGE.format(skill="s") + thread_suffix(dropped))
         self.assertEqual(self.count("thread/turns/list", lambda params: params["threadId"] == dropped), 1)
         self.assertEqual(self.interrupts(dropped), 1)
         await self.barrier(host, dropped)
@@ -523,7 +526,7 @@ class CodexSkillReadBackTests(_GoalSkillCase):
                 error = await self.assert_codex_error(host.run_codex_skill("s", "do it"), "codex.command_not_run")
                 thread_id = self.started_thread()
                 self.assertEqual(error.operation, "run_codex_skill")
-                self.assertEqual(error.message, SKILL_DROPPED_MESSAGE.format(skill="s") + thread_suffix(thread_id))
+                self.assertEqual(mapped_summary(self, error), SKILL_DROPPED_MESSAGE.format(skill="s") + thread_suffix(thread_id))
                 # Codex did record a skill entry, so only its name can explain the miss.
                 (turn,) = self.server.threads[thread_id].turns
                 self.assertEqual(turn.items[0]["content"], [{"text": "do it", "type": "text"}, {"name": recorded, "path": SKILL_PATH, "type": "skill"}])
@@ -546,7 +549,7 @@ class CodexSkillReadBackTests(_GoalSkillCase):
         error = await self.assert_codex_error(host.run_codex_skill("s", "do it"), "codex.command_not_run")
         thread_id = self.started_thread()
         self.assertEqual(error.operation, "run_codex_skill")
-        self.assertEqual(error.message, INPUT_NOT_RECORDED_MESSAGE.format(skill="s", seconds=FAR_DEADLINE_SECONDS) + thread_suffix(thread_id))
+        self.assertEqual(mapped_summary(self, error), INPUT_NOT_RECORDED_MESSAGE.format(skill="s", seconds=FAR_DEADLINE_SECONDS) + thread_suffix(thread_id))
         earlier, started = self.server.threads[thread_id].turns
         self.assertEqual(earlier.items[0]["content"], _skill_input("do it", "s", SKILL_PATH))
         self.assertEqual(started.items, [])
@@ -564,7 +567,7 @@ class CodexSkillReadBackTests(_GoalSkillCase):
         self.server.fail("turn/interrupt", self.fakes.FakeRpcError(-32603, "interrupt refused"))
         host = await self.opened()
         error = await self.assert_codex_error(host.run_codex_skill("s", "do it"), "codex.command_not_run")
-        self.assertEqual(error.message, SKILL_DROPPED_MESSAGE.format(skill="s") + thread_suffix(self.started_thread()))
+        self.assertEqual(mapped_summary(self, error), SKILL_DROPPED_MESSAGE.format(skill="s") + thread_suffix(self.started_thread()))
         self.assertEqual(self.interrupts(self.started_thread()), 1)
 
     async def test_a_read_back_that_fails_interrupts_once_and_keeps_its_error(self) -> None:
@@ -605,7 +608,7 @@ class CodexSkillReadBackTests(_GoalSkillCase):
         error = await self.assert_codex_error(host.run_codex_skill("s", "do it"), "codex.command_not_run")
         thread_id = self.started_thread()
         self.assertEqual(error.operation, "run_codex_skill")
-        self.assertEqual(error.message, INPUT_NOT_RECORDED_MESSAGE.format(skill="s", seconds=0.25) + thread_suffix(thread_id))
+        self.assertEqual(mapped_summary(self, error), INPUT_NOT_RECORDED_MESSAGE.format(skill="s", seconds=0.25) + thread_suffix(thread_id))
         on_thread = [method for method in _thread_methods(self.sent(), thread_id) if method in ("thread/turns/list", "turn/interrupt")]
         self.assertEqual(on_thread, ["thread/turns/list", "turn/interrupt"])
 

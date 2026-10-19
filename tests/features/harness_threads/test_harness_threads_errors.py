@@ -23,6 +23,7 @@ EXIT = 93
 UNKNOWN_ID = "0192f0c4-beef-7bee-8f00-000000000000"
 DEFECT_THREAD = "0192f0c4-feed-7bee-8f00-000000000001"
 PROBLEMS = ["not_installed", "launcher_refused", "launch_failed", "key_rejected", "thread_not_found", "timed_out", "output_too_large", "protocol_mismatch", "run_failed"]
+BROWSER_CODES = ["browser.mount_unsupported", "browser.runtime_missing", "browser.tool_install_failed", "browser.tools_unavailable"]
 DIAGNOSTIC_FIELDS = ("error_kind", "expected", "actual", "safe_runtime_details", "likely_causes", "repair_approaches", "related_docs", "relevant_tests")
 
 
@@ -195,7 +196,7 @@ def test_every_code_has_its_own_likely_cause_and_next_step(lib_api) -> None:
     # plus invalid_argument and runtime.error.
     codes = lib_api.FailureCode
     harness_codes = [codes(f"{harness}.{problem}") for harness in HARNESSES for problem in PROBLEMS] + [codes("muse.wsl_unavailable")]
-    expected = {*harness_codes, codes.CONFIGURATION_INVALID_ARGUMENT, codes.RUNTIME_ERROR}
+    expected = {*harness_codes, *(codes(code) for code in BROWSER_CODES), codes.CONFIGURATION_INVALID_ARGUMENT, codes.RUNTIME_ERROR}
     for table in (lib_api.constants.NATIVE_THREAD_LIKELY_CAUSES, lib_api.constants.NATIVE_THREAD_NEXT_STEPS):
         assert set(table) == expected
         assert all(isinstance(text, str) and text.strip() for text in table.values())

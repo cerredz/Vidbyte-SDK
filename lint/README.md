@@ -179,6 +179,7 @@ Nested folders:
 | C018 | canonical-api-host | Vidbyte API URLs in vidbyte/ string literals use an origin the platform contract lists as live |
 | C019 | platform-error-code-contract | Platform-family or near-miss error codes that SDK code compares, matches, maps, or defines are in the platform contract's error_codes |
 | C020 | api-key-prefix-contract | One *API_KEY_PREFIX constant in vidbyte/lib/constants/ spells the API-key prefix, equal to the platform contract's api_key_prefix; no inline or foreign copies |
+| C021 | native-host-constants-in-lib | Native harness hosts under vidbyte/harnesses/native/ define no module-level constants; every fixed value lives in vidbyte/lib/constants/<domain>.py (PR #1055 review) |
 
 ## Adding a rule
 

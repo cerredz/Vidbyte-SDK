@@ -1,9 +1,9 @@
 """FILE: vidbyte/lib/dataclasses/native_threads.py
 
-PURPOSE: Defines the validated records of the harness thread functions: NativeThreadRequest, the checked arguments of one call; GrokThreadConfig, OpencodeThreadConfig and MuseThreadConfig, the per-harness settings a caller may pass; and NativeThreadResult, what a successful call returns.
-ROLE IN CODEBASE: NativeThreadRequest is built by the nine public functions under vidbyte/harnesses/native/ (grok/threads.py, opencode/threads.py, muse/threads.py) and read by every step of their flows. The three config records and NativeThreadResult are re-exported from vidbyte.harnesses.native; callers build the configs, the functions return the result.
+PURPOSE: Defines the validated records of the harness thread functions: NativeThreadRequest, the checked arguments of one call; GrokThreadConfig, OpencodeThreadConfig and MuseThreadConfig, the per-harness settings a caller may pass; NativeThreadResult, what a successful call returns; and NativeThreadRun, the result together with the CLI outcome it was read from, which the browser functions read the vendor's tool calls from.
+ROLE IN CODEBASE: NativeThreadRequest is built by the nine public functions under vidbyte/harnesses/native/ (grok/threads.py, opencode/threads.py, muse/threads.py) and read by every step of their flows. The three config records and NativeThreadResult are re-exported from vidbyte.harnesses.native; callers build the configs, the functions return the result. NativeThreadRun is internal: each <Harness>ThreadRun.execute returns it, the plain functions return its result, and NativeBrowserRun (vidbyte/harnesses/native/hostkit/browser.py) reads its outcome.
 ARCHITECTURE NOTE: Every check lives in __post_init__, so a constructed record is always valid. Field checks go through RecordFieldValidator and RecordFieldConverter (vidbyte/lib/dataclasses/validation.py); the three rules that relate a field to another value (thread_id against the verb, a skill folder's SKILL.md, unique skill folder names) raise ConfigurationError inline. A refused field raises ConfigurationError whose details["field"] is the public argument name (api_key, skills[2]); the thread functions turn it into a NativeThreadError naming that argument. The workspace and each skill path are checked as given, absolute and existing, and then stored resolved, so a relative path never passes because of the current folder.
-FUNCTION INVENTORY: NativeThreadRequest.__post_init__ is the narrated main function; _checked_workspace checks and resolves the workspace; _checked_model checks the model for the harness; _checked_thread_id ties the thread id to the verb; _checked_skills checks, resolves and names each skill folder. GrokThreadConfig, OpencodeThreadConfig, MuseThreadConfig and NativeThreadResult have only __post_init__.
+FUNCTION INVENTORY: NativeThreadRequest.__post_init__ is the narrated main function; _checked_workspace checks and resolves the workspace; _checked_model checks the model for the harness; _checked_thread_id ties the thread id to the verb; _checked_skills checks, resolves and names each skill folder. GrokThreadConfig, OpencodeThreadConfig, MuseThreadConfig, NativeThreadResult and NativeThreadRun have only __post_init__.
 COMMON MODIFICATION PATTERNS: A new config field adds one field and one validator call to its record, and its bound or pattern to vidbyte/lib/constants/native_threads.py. A config record never gets a model field: the model is an argument of every call.
 WHAT NOT TO DO IN THIS FILE: 1. Do not read keys from environment variables. 2. Do not put a key value in an error message or its details; name the parameter instead. 3. Do not drop repr=False from a key field. 4. Do not import from vidbyte.harnesses; vidbyte/lib is the bottom layer.
 KNOWN EDGE CASES: The prompt cap is NATIVE_PROMPT_MAX_CHARS for opencode, which reads the prompt from stdin, and NATIVE_ARGV_PROMPT_MAX_CHARS for Grok and Muse, which take it on argv; on Windows the Grok and Muse prompt must also fit NATIVE_WINDOWS_ARGV_PROMPT_MAX_UNITS once quoted and counted in UTF-16 units, the way CreateProcess counts it; that ceiling leaves room for the rest of the command line, and a launch that still passes the limit is reported as launch_failed. A skill item that is not a path is refused naming skills[<i>], while a skill list that is a str or holds too many items is refused naming skills. Two skill folders with the same folder name are refused, because each harness finds a skill by its folder name.
@@ -45,6 +45,7 @@ from vidbyte.lib.constants.native_threads import (
     NATIVE_WINDOWS_PLATFORM,
     OPENCODE_MODEL_PATTERN,
 )
+from vidbyte.lib.dataclasses.process import CliOutcome
 from vidbyte.lib.dataclasses.validation import (
     RecordFieldConverter,
     RecordFieldValidator,
@@ -225,4 +226,16 @@ class NativeThreadResult:
         RecordFieldValidator.require_bool(self.text_truncated, "NativeThreadResult.text_truncated")
 
 
-__all__ = ["GrokThreadConfig", "MuseThreadConfig", "NativeThreadRequest", "NativeThreadResult", "OpencodeThreadConfig"]
+@dataclass(frozen=True, slots=True)
+class NativeThreadRun:
+    """One finished thread call: the result the plain function returns and the CLI outcome it was read from."""
+
+    result: NativeThreadResult
+    outcome: CliOutcome
+
+    def __post_init__(self) -> None:
+        RecordFieldConverter.require_instance(self.result, "NativeThreadRun.result", NativeThreadResult)
+        RecordFieldConverter.require_instance(self.outcome, "NativeThreadRun.outcome", CliOutcome)
+
+
+__all__ = ["GrokThreadConfig", "MuseThreadConfig", "NativeThreadRequest", "NativeThreadResult", "NativeThreadRun", "OpencodeThreadConfig"]

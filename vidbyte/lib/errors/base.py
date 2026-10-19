@@ -62,7 +62,11 @@ if TYPE_CHECKING:
     from vidbyte.lib.dataclasses.agents import AgentMessage
     from vidbyte.lib.dataclasses.outputs import DeliveryReceipt
     from vidbyte.lib.enums.failure import FailureCode
-    from vidbyte.lib.enums.native_threads import NativeHarness, NativeThreadOperation
+    from vidbyte.lib.enums.native_threads import (
+        NativeHarness,
+        NativeThreadOperation,
+        NativeThreadResultRecord,
+    )
 
 
 class VidbyteSdkError(Exception):
@@ -149,21 +153,57 @@ class CodexAgentError(AgentExecutionError):
         "relevant_tests",
     )
 
-    def __init__(self, message: str, *, failure_code: str, operation: str, error_type: str = "", next_step: str = "", thread_id: str = "") -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        failure_code: str,
+        operation: str,
+        error_type: str = "",
+        next_step: str = "",
+        thread_id: str = "",
+        likely_cause: str = "",
+        method: str = "",
+        related_docs: tuple[str, ...] = (),
+        relevant_tests: tuple[str, ...] = (),
+    ) -> None:
         self.failure_code = failure_code
         self.operation = operation
         # The native thread the failed operation ran on, or "" when none was open yet.
         self.thread_id = thread_id
+        # The app-server method or SDK call that failed, or "" when the
+        # failure is not one call; CodexHost's mapper names it.
+        self.method = method
         self.error_kind = failure_code
         self.expected = f"Codex adapter operation {operation!r} completing successfully"
         self.actual = message
         self.safe_runtime_details = {"operation": operation, "error_type": error_type}
-        self.likely_causes = ("The Codex SDK rejected input, failed a lifecycle operation, or returned an invalid result.",)
+        if method:
+            self.safe_runtime_details["method"] = method
+        # A caller that knows the code's own cause, docs and tests passes
+        # them; every other caller keeps the general packet it had.
+        self.likely_cause = likely_cause
+        self.likely_causes = (likely_cause,) if likely_cause else ("The Codex SDK rejected input, failed a lifecycle operation, or returned an invalid result.",)
         self.next_step = next_step
         self.repair_approaches = (next_step,) if next_step else ("Inspect the operation and chained exception, then correct the matching Codex settings or runtime state.",)
-        self.related_docs = ("https://developers.openai.com/codex/sdk", "https://developers.openai.com/codex/app-server")
-        self.relevant_tests = ("python scripts/run_ci.py",)
+        self.related_docs = related_docs or ("https://developers.openai.com/codex/sdk", "https://developers.openai.com/codex/app-server")
+        self.relevant_tests = relevant_tests or ("python scripts/run_ci.py",)
         super().__init__(message, details={"error_kind": self.error_kind, "expected": self.expected, "actual": self.actual, "safe_runtime_details": self.safe_runtime_details, "likely_causes": self.likely_causes, "repair_approaches": self.repair_approaches, "related_docs": self.related_docs, "relevant_tests": self.relevant_tests})
+
+    def with_sentence(self, sentence: str) -> CodexAgentError:
+        """The same failure with sentence appended to its message; every other field is kept."""
+        return CodexAgentError(
+            self.message + sentence,
+            failure_code=self.failure_code,
+            operation=self.operation,
+            error_type=self.safe_runtime_details.get("error_type", ""),
+            next_step=self.next_step,
+            thread_id=self.thread_id,
+            likely_cause=self.likely_cause,
+            method=self.method,
+            related_docs=self.related_docs,
+            relevant_tests=self.relevant_tests,
+        )
 
 
 class AllModelsFailedError(AgentExecutionError):
@@ -585,10 +625,13 @@ class NativeThreadError(AgentExecutionError):
         exit_code: int | None = None,
         vendor_message: str | None = None,
         error_type: str = "",
+        result_record: NativeThreadResultRecord | None = None,
     ) -> None:
         # The factory in vidbyte/harnesses/native/hostkit/errors.py has
         # already composed and scrubbed the message and picked the texts
-        # written for this code, so this class only stores them.
+        # written for this code, so this class only stores them. The
+        # record the function returns on success names `expected`; None
+        # keeps the plain functions' NativeThreadResult text.
         self.failure_code = failure_code
         self.harness = harness
         self.operation = operation
@@ -599,7 +642,7 @@ class NativeThreadError(AgentExecutionError):
         self.vendor_message = vendor_message
         self.error_type = error_type
         self.error_kind = failure_code.value
-        self.expected = f"{operation.value} returning a NativeThreadResult"
+        self.expected = f"{operation.value} returning a {'NativeThreadResult' if result_record is None else result_record.value}"
         self.actual = message
         self.safe_runtime_details = {
             "harness": harness.value,

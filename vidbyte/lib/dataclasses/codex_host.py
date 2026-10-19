@@ -63,7 +63,7 @@ def _reject_small_int(owner: str, field_name: str, value: object, minimum: int) 
     if value is None:
         return
     if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
-        raise ConfigurationError(f"{owner} {field_name} must be None or an integer of at least {minimum}.")
+        raise ConfigurationError(f"{owner} {field_name} must be None or an integer of at least {minimum}.", details={"field": field_name})
 
 
 def _reject_bad_seconds(owner: str, field_name: str, value: object) -> None:
@@ -72,7 +72,7 @@ def _reject_bad_seconds(owner: str, field_name: str, value: object) -> None:
     if value is None:
         return
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= CODEX_HOST_MIN_EXCLUSIVE_SECONDS:
-        raise ConfigurationError(f"{owner} {field_name} must be None or a finite number of seconds greater than {CODEX_HOST_MIN_EXCLUSIVE_SECONDS:g}.")
+        raise ConfigurationError(f"{owner} {field_name} must be None or a finite number of seconds greater than {CODEX_HOST_MIN_EXCLUSIVE_SECONDS:g}.", details={"field": field_name})
 
 
 def _reject_non_str(owner: str, fields: Mapping[str, object]) -> None:

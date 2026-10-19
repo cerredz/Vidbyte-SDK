@@ -19,6 +19,7 @@ Similar Files:
 from __future__ import annotations
 
 import json
+import math
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -126,9 +127,13 @@ class TrajectoryCheckpointAlgorithm(InnerContextWindowAlgorithm):
             score = parsed.get("score")
             if score is not None:
                 try:
-                    score = round(float(score), 2)
+                    score = float(score)
                 except (ValueError, TypeError):
                     score = None
+            # @intent checkpoint-score-stays-on-its-scale
+            # The summarizer is told 0.0-1.0 and the trajectory_checkpoint tool clamps the same primitive's score and reads NaN/inf
+            # as unparsable, so a model's 85 or NaN must not reach the next request as "Score: 85.00" or "Score: nan".
+            score = round(min(1.0, max(0.0, score)), 2) if score is not None and math.isfinite(score) else None
             # @intent algorithm-note-ids-never-overwrite
             # The trajectory_checkpoint tool and earlier runs on a shared manager use this id shape, so skip registered ids.
             counter = checkpoint_index
