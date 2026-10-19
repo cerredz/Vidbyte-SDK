@@ -134,9 +134,12 @@ def test_native_and_subpackages_export_the_browser_functions(browser_api) -> Non
         for verb in VERBS:
             name = f"{verb}_{harness}_with_browser"
             assert name in subpackage.__all__ and getattr(subpackage, name) is getattr(native, name), name
-    for name in ("vidbyte", "vidbyte.harnesses"):
-        package = importlib.import_module(name)
-        assert not set(getattr(package, "__all__", ())) & {*BROWSER_FUNCTIONS, "BrowserThreadResult", "BrowserToolCall"}, f"§9.2: nothing is added to {name}"
+    # §9.2 also kept these names out of the root, but #1179's contract
+    # re-exports every native name from `vidbyte` (pinned in
+    # tests/features/root_native_thread_exports/), so only
+    # vidbyte.harnesses stays untouched.
+    harnesses = importlib.import_module("vidbyte.harnesses")
+    assert not set(getattr(harnesses, "__all__", ())) & {*BROWSER_FUNCTIONS, "BrowserThreadResult", "BrowserToolCall"}, "§9.2: nothing is added to vidbyte.harnesses"
 
 
 def test_browser_functions_take_the_plain_parameters_with_tools_after_model(browser_api) -> None:
