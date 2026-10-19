@@ -399,7 +399,7 @@ agent = JevAgent(
         name="researcher",
         system_prompt="Work from observed evidence and report your conclusions.",
         provider="openai",
-        model_name="gpt-4.1",
+        model_name="gpt-5.5",
     ),
     JevRuntimeSettings(
         continual=JevContinualSettings(
@@ -569,13 +569,13 @@ manager = BaseAgent(
     name="manager",
     system_prompt="Plan, delegate, track progress, and recover from blockers.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
 )
 researcher = BaseAgent(
     name="researcher",
     system_prompt="Research the assigned task and return evidence.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
 )
 team = MultiAgent(
     name="research-team",
@@ -715,7 +715,7 @@ agent = Agent(
     name="repo-analyst",
     system_prompt="Use the supplied context before answering.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
     context_manager=context,
 )
 ```
@@ -731,7 +731,7 @@ agent = Agent(
     name="repo-analyst",
     system_prompt="Use tools when they help answer precisely.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
     tools=[lookup_metric],
     algorithm=ContextWindow.preset.no_raw_tool_outputs,
 )
@@ -750,7 +750,7 @@ agent = Agent(
     name="reviewed-worker",
     system_prompt="Solve the task carefully.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
     algorithm=ContextWindow.preset.independent_critic,
 )
 
@@ -787,7 +787,7 @@ agent = Agent(
     name="repo-analyst",
     system_prompt="Use tools when they help answer precisely.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
     tools=[lookup_metric],
     algorithm=ContextWindow.preset.trajectory_checkpoints,
 )
@@ -808,7 +808,7 @@ agent = Agent(
     name="repo-analyst",
     system_prompt="Use tools when they help answer precisely.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
     tools=[lookup_metric],
     algorithm=ContextWindow.preset.problem_space_search,  # or ContextWindow.preset.error_correction
 )
@@ -828,7 +828,7 @@ agent = Agent(
     name="reviewed-producer",
     system_prompt="Produce the requested artifact.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
     algorithm=ContextWindow.preset.prosecutor_defender_judge,
 )
 
@@ -885,7 +885,7 @@ agent = Agent(
     name="repo-analyst",
     system_prompt="Use tools when they help answer precisely.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
     tools=[lookup_metric],
     trace=Trace.debug(events),
 )
@@ -910,7 +910,7 @@ agent = Agent(
     name="observed-worker",
     system_prompt="Work carefully.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
     trace=trace,
 )
 ```
@@ -922,7 +922,7 @@ agent = Agent(
     name="observed-agent",
     system_prompt="Work carefully.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
     trace=Trace.langfuse(public_key="...", secret_key="..."),
 )
 ```
@@ -939,7 +939,7 @@ agent = Agent(
     name="observed-agent",
     system_prompt="Work carefully.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
     tools=[lookup_metric],
     trace=Trace.langsmith_default(project="vidbyte-agents"),
 )
@@ -963,8 +963,8 @@ trace = Trace.langsmith_session(
 )
 
 async with trace.async_session(run_id=run_id):
-    planner = Agent(name="planner", system_prompt="Plan the work.", provider="openai", model_name="gpt-4.1", trace=trace)
-    writer = Agent(name="writer", system_prompt="Draft the answer.", provider="openai", model_name="gpt-4.1", trace=trace)
+    planner = Agent(name="planner", system_prompt="Plan the work.", provider="openai", model_name="gpt-5.5", trace=trace)
+    writer = Agent(name="writer", system_prompt="Draft the answer.", provider="openai", model_name="gpt-5.5", trace=trace)
     await planner.arun("Plan the release note")
     await writer.arun("Write the release note")
 ```
@@ -978,7 +978,7 @@ agent = Agent(
     name="continual-agent",
     system_prompt="Preserve useful run context.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
     trace=Trace.continual(["tool_calls", "failures"], max_memory_chars=1200),
 )
 ```
@@ -1005,7 +1005,7 @@ agent = Agent(
     name="worker",
     system_prompt="Work carefully.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
     trace_option=TraceOption.continual(ActionTrace, every_n_iterations=5, max_trace_iterations=3),
 )
 reply = await agent.arun("Fix the failing tests")
@@ -1081,8 +1081,8 @@ agent = Agent(
     name="repo-analyst",
     system_prompt="Use tools when they help answer precisely.",
     provider="openai",
-    model_name="gpt-4.1",
-    tools=[GrepTool(root_dir="."), ForkConversationTool(allowed_models=["gpt-4.1-mini"]), lookup_metric],
+    model_name="gpt-5.5",
+    tools=[GrepTool(root_dir="."), ForkConversationTool(allowed_models=["gpt-5.4-mini"]), lookup_metric],
     max_iterations=8,
     max_tokens=16_000,
 )
@@ -1155,7 +1155,7 @@ agent = Agent(
     name="repo-analyst",
     system_prompt="Use tools when they help answer precisely.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
     tools=[lookup_metric],
     middleware=[
         TenantPermissionMiddleware(db),
@@ -1177,7 +1177,7 @@ agent = Agent(
     name="resilient-worker",
     system_prompt="Use tools and recover from transient failures.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
     tools=[lookup_metric],
     agent_loop_settings=AgentLoopSettings(
         tool_error_policy=ToolErrorPolicy(max_retries_per_tool_call=2, max_total_tool_errors=5),
@@ -1228,7 +1228,7 @@ agent = Agent(
     name="bounded-agent",
     system_prompt="Keep working context compact.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
     tools=[lookup_metric],
     middleware=[
         MessageHistoryCompactionMiddleware.trim_to_token_budget(max_tokens=8000),
@@ -1269,7 +1269,7 @@ agent = Agent(
     name="trusted-worker",
     system_prompt="Work inside the configured sandbox.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
     tools=[write_tool],
     permission_policy=PermissionPolicy.allow_all(),
 )
@@ -1323,7 +1323,7 @@ registry.register(
         name="researcher",
         system_prompt="Answer directly and cite uncertainty.",
         provider="openai",
-        model_name="gpt-4.1",
+        model_name="gpt-5.5",
     )
 )
 
@@ -1416,7 +1416,7 @@ agent = Agent(
     name="repo-analyst",
     system_prompt="Use repository tools when they help.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
 ).with_preset_mcp_server(
     "github",
     env={"GITHUB_PERSONAL_ACCESS_TOKEN": os.environ["GITHUB_PERSONAL_ACCESS_TOKEN"]},
@@ -1484,7 +1484,7 @@ every runtime. Attach an agent in one line:
 ```python
 from vidbyte import Agent, FileSessionStore, Session
 
-agent = Agent(name="researcher", system_prompt="Investigate carefully.", provider="openai", model_name="gpt-4.1")
+agent = Agent(name="researcher", system_prompt="Investigate carefully.", provider="openai", model_name="gpt-5.5")
 store = FileSessionStore(root="./.vidbyte/sessions")
 session = agent.persist(store=store, policy=Session.PER_TURN_POLICY)
 reply = await session.arun("Investigate the failing test")
@@ -1529,7 +1529,7 @@ session.tag("research-main", "july-release")
 resolved_id = store.resolve("research-main")
 recent = store.list_sessions(agent_name="researcher", tag="july-release")
 
-rollup = session.usage(prices={"gpt-4.1": 0.00001})
+rollup = session.usage(prices={"gpt-5.5": 0.00001})
 print(rollup.tokens, rollup.tool_calls, rollup.cost)
 
 bundle = session.export()
@@ -1566,7 +1566,7 @@ from vidbyte.tools.builtins import (
     ResumeReplaceTool, ResumeAppendTool, ResumeOutputTool, SessionTool,
 )
 
-agent = Agent(name="researcher", system_prompt="...", provider="openai", model_name="gpt-4.1",
+agent = Agent(name="researcher", system_prompt="...", provider="openai", model_name="gpt-5.5",
               tools=[CheckpointTool(store), ForkTool(store), BatchForkTool(store), RewindTool(store),
                      ResumeReplaceTool(store), ResumeAppendTool(store), ResumeOutputTool(store),
                      SessionTool(store)])
@@ -1647,7 +1647,7 @@ agent = Agent(
     name="qa",
     system_prompt="Answer concisely.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
 )
 
 suite = EvalSuite("smoke", [
