@@ -19,7 +19,7 @@ Architecture:
     - Pipeline exports: BasePipeline, ConditionalPipeline, ParallelPipeline, PipelineNode, SequentialPipeline.
     - Output exports: OutputConnector, OutputDispatcher (sends any AgentMessage to a list of connectors), the sixteen destination connectors (SlackOutput through HubSpotTaskOutput) and TypefullyPlatform, and the OutputContent, DeliveryReceipt, OutputDestination, DeliveryStatus, and OutputDeliveryError records they use.
     - Harness exports: the Harness base class, specifications, run manifests, trajectory collection/sinks, and typed failures.
-    - Native harness thread exports: everything in vidbyte.harnesses.native.__all__, which is the nine run_/continue_/fork_ thread functions for Grok, opencode and Muse, plus NativeThreadResult, NativeThreadError, GrokThreadConfig, OpencodeThreadConfig, MuseThreadConfig, GrokPermissionMode, GrokReasoningEffort and MuseReasoningEffort. The records, enums and error import eagerly from vidbyte.lib. The functions load on first use through _LAZY_NATIVE_THREAD_EXPORTS and __getattr__, so `import vidbyte` never imports vidbyte.harnesses.native (harness thread spec INV-23). A new name in vidbyte.harnesses.native.__all__ joins that mapping (functions) or the vidbyte.lib imports (records, enums, errors) and this __all__, and then contracts/sdk-public-api.json is regenerated.
+    - Native harness thread exports: everything in vidbyte.harnesses.native.__all__, which is the nine run_/continue_/fork_ thread functions for Grok, opencode and Muse and their nine *_with_browser counterparts, plus NativeThreadResult, BrowserThreadResult, BrowserToolCall, NativeThreadError, GrokThreadConfig, OpencodeThreadConfig, MuseThreadConfig, GrokPermissionMode, GrokReasoningEffort and MuseReasoningEffort. The records, enums and error import eagerly from vidbyte.lib. The functions load on first use through _LAZY_NATIVE_THREAD_EXPORTS and __getattr__, so `import vidbyte` never imports vidbyte.harnesses.native (harness thread spec INV-23). A new name in vidbyte.harnesses.native.__all__ joins that mapping (functions) or the vidbyte.lib imports (records, enums, errors) and this __all__, and then contracts/sdk-public-api.json is regenerated.
     - Multi-agent exports: MultiAgent, MagenticOneOrchestrator, TaskLedger, AgentBinding, AgentTransfer, and immutable ledger contracts.
     - Workflow exports: StateGraph, StateMachine, stages, validators, routers, policies, records, and typed errors.
     - Error exports: MCP, pipeline, workflow, multi-agent execution, task-ledger, and agent-transfer error families, plus the general ConfigurationError raised for invalid configuration.
@@ -445,6 +445,7 @@ from vidbyte.lib.dataclasses.adversarial_agent_descriptor import (
 )
 from vidbyte.lib.dataclasses.agent_descriptor import AgentDescriptor
 from vidbyte.lib.dataclasses.aggregate_agent_descriptor import AggregateAgentDescriptor
+from vidbyte.lib.dataclasses.browser_tools import BrowserThreadResult, BrowserToolCall
 from vidbyte.lib.dataclasses.coding import CodingAgentSettings
 from vidbyte.lib.dataclasses.continual_trace_descriptor import (
     ContinualTraceAgentDescriptor,
@@ -749,14 +750,23 @@ if _typing.TYPE_CHECKING:
     # at runtime they load on first use through __getattr__ below.
     from vidbyte.harnesses.native import (
         continue_grok_thread,
+        continue_grok_with_browser,
         continue_muse_thread,
+        continue_muse_with_browser,
         continue_opencode_thread,
+        continue_opencode_with_browser,
         fork_grok_thread,
+        fork_grok_with_browser,
         fork_muse_thread,
+        fork_muse_with_browser,
         fork_opencode_thread,
+        fork_opencode_with_browser,
         run_grok_thread,
+        run_grok_with_browser,
         run_muse_thread,
+        run_muse_with_browser,
         run_opencode_thread,
+        run_opencode_with_browser,
     )
 
 __all__ = [
@@ -1198,6 +1208,8 @@ __all__ = [
     "TrajectoryCollector",
     "TrajectoryRecord",
     "TrajectorySink",
+    "BrowserThreadResult",
+    "BrowserToolCall",
     "GrokPermissionMode",
     "GrokReasoningEffort",
     "GrokThreadConfig",
@@ -1207,14 +1219,23 @@ __all__ = [
     "NativeThreadResult",
     "OpencodeThreadConfig",
     "continue_grok_thread",
+    "continue_grok_with_browser",
     "continue_muse_thread",
+    "continue_muse_with_browser",
     "continue_opencode_thread",
+    "continue_opencode_with_browser",
     "fork_grok_thread",
+    "fork_grok_with_browser",
     "fork_muse_thread",
+    "fork_muse_with_browser",
     "fork_opencode_thread",
+    "fork_opencode_with_browser",
     "run_grok_thread",
+    "run_grok_with_browser",
     "run_muse_thread",
+    "run_muse_with_browser",
     "run_opencode_thread",
+    "run_opencode_with_browser",
     "MemoryContextItem",
     "MinimalHandoff",
     "PlanContextItem",
@@ -1434,14 +1455,23 @@ __all__ = [
 # as lazy exports; each value is the package they load from.
 _LAZY_NATIVE_THREAD_EXPORTS: dict[str, str] = {
     "continue_grok_thread": "vidbyte.harnesses.native",
+    "continue_grok_with_browser": "vidbyte.harnesses.native",
     "continue_muse_thread": "vidbyte.harnesses.native",
+    "continue_muse_with_browser": "vidbyte.harnesses.native",
     "continue_opencode_thread": "vidbyte.harnesses.native",
+    "continue_opencode_with_browser": "vidbyte.harnesses.native",
     "fork_grok_thread": "vidbyte.harnesses.native",
+    "fork_grok_with_browser": "vidbyte.harnesses.native",
     "fork_muse_thread": "vidbyte.harnesses.native",
+    "fork_muse_with_browser": "vidbyte.harnesses.native",
     "fork_opencode_thread": "vidbyte.harnesses.native",
+    "fork_opencode_with_browser": "vidbyte.harnesses.native",
     "run_grok_thread": "vidbyte.harnesses.native",
+    "run_grok_with_browser": "vidbyte.harnesses.native",
     "run_muse_thread": "vidbyte.harnesses.native",
+    "run_muse_with_browser": "vidbyte.harnesses.native",
     "run_opencode_thread": "vidbyte.harnesses.native",
+    "run_opencode_with_browser": "vidbyte.harnesses.native",
 }
 
 # Type checkers never see these two hooks, so a misspelled root name
