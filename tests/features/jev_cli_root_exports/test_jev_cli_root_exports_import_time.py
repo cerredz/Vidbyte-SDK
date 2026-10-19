@@ -90,8 +90,7 @@ def test_fresh_import_binds_the_four_eagerly_without_loading_native_or_starting_
         """
     )
     assert report["eager"] == ALL_FOUR, (
-        "bind the four with ordinary imports in vidbyte/__init__.py, "
-        "not through __getattr__ or a lazy mapping"
+        "bind the four with ordinary imports in vidbyte/__init__.py, not through __getattr__ or a lazy mapping"
     )
     assert report["after_import"] is False, "import vidbyte loaded native"
     assert report["started"] == [], "import vidbyte started a process"

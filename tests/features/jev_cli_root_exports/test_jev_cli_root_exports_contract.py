@@ -92,8 +92,7 @@ def test_root_name_is_the_same_object_at_every_path_in_its_inv2_row(
     root = importlib.import_module("vidbyte")
     module = importlib.import_module(module_path)
     assert getattr(root, name) is getattr(module, name), (
-        f"vidbyte.{name} must be {module_path}.{name} itself; bind it in "
-        "vidbyte/__init__.py from the module it already comes from"
+        f"vidbyte.{name} must be {module_path}.{name} itself; bind it in vidbyte/__init__.py from the module it already comes from"
     )
     if listed:
         assert name in module.__all__, f"{module_path}.__all__ lost {name}"
@@ -164,8 +163,7 @@ def test_public_api_contract_lists_the_four_names_at_the_package_version() -> No
     pyproject = tomllib.loads(PYPROJECT_PATH.read_text(encoding="utf-8"))
     missing = sorted(set(SETTING_NAMES) - set(contract["exports"]))
     assert missing == [], (
-        "commit vidbyte/__init__.py, then run "
-        "scripts/generate-sdk-public-api.py; never edit the contract by hand"
+        "commit vidbyte/__init__.py, then run scripts/generate-sdk-public-api.py; never edit the contract by hand"
     )
     assert contract["version"] == pyproject["project"]["version"] == root.__version__
 
