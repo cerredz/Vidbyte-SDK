@@ -15,21 +15,21 @@ planner = Agent(
     name="planner",
     system_prompt="You create step-by-step plans for software tasks.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
 )
 
 coder = Agent(
     name="coder",
     system_prompt="You write clean, idiomatic Python code.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
 )
 
 reviewer = Agent(
     name="reviewer",
     system_prompt="You review code for correctness, style, and performance.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
 )
 ```
 
@@ -77,7 +77,7 @@ coder = Agent(
     name="coder",
     system_prompt="You write clean, idiomatic code.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
     capabilities=["code_generation", "code_review", "refactoring"],
     description="Expert Python and TypeScript developer with deep framework knowledge.",
     metadata={"language": "python", "team": "backend", "level": "senior"},

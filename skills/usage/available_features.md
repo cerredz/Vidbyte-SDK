@@ -66,10 +66,10 @@ from vidbyte import Agent, AgentBinding, AgentTransfer, MultiAgent, MultiAgentSe
 team = MultiAgent(
     name="delivery-team",
     system_prompt="Own the goal, delegate bounded tasks, and finish from verified evidence.",
-    orchestrator=Agent(name="manager", system_prompt="Manage the task ledger.", provider="openai", model_name="gpt-4.1"),
+    orchestrator=Agent(name="manager", system_prompt="Manage the task ledger.", provider="openai", model_name="gpt-5.5"),
     agents=[
         AgentBinding(
-            Agent(name="researcher", system_prompt="Research assigned tasks.", provider="openai", model_name="gpt-4.1"),
+            Agent(name="researcher", system_prompt="Research assigned tasks.", provider="openai", model_name="gpt-5.5"),
             transfer=AgentTransfer(),
         )
     ],
@@ -124,7 +124,7 @@ agent = Agent(
     name="robust-worker",
     system_prompt="Use tools carefully.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
     agent_loop_settings=AgentLoopSettings(
         tool_error_policy=ToolErrorPolicy(max_retries_per_tool_call=2),
     ),
@@ -149,7 +149,7 @@ agent = Agent(
     name="guarded",
     system_prompt="You are helpful.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
     middleware=[CustomGuardMiddleware()],
 )
 ```
@@ -198,7 +198,7 @@ Durable sessions persist agent state as a checkpoint DAG through `Session`, `Ses
 from vidbyte import Agent, FileSessionStore
 
 store = FileSessionStore("./.vidbyte/sessions")
-agent = Agent(name="researcher", system_prompt="...", provider="openai", model_name="gpt-4.1")
+agent = Agent(name="researcher", system_prompt="...", provider="openai", model_name="gpt-5.5")
 session = agent.persist(store=store)
 
 await session.arun("start the research")
@@ -247,7 +247,7 @@ agent = Agent(
     name="goal-driven",
     system_prompt=prompts.get(Prompt.GOALS_GOAL_PROMPT),
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
 )
 reply = await agent.arun(prompts.get(Prompt.CONTEXT_ENGINEERING_GUIDELINE_PROMPT))
 ```

@@ -285,7 +285,7 @@ agent = Agent(
     name="goal-driven",
     system_prompt=prompts.get(Prompt.GOALS_GOAL_PROMPT),
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
 )
 reply = await agent.arun("Explain how binary search trees balance themselves.")
 
@@ -294,7 +294,7 @@ agent = Agent(
     name="expert",
     system_prompt=prompts.get(Prompt.EXPERT_PROMPTING_EXPERT_PROMPT),
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
 )
 reply = await agent.arun("Build a REST API for a todo list application.")
 ```

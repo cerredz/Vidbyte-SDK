@@ -201,7 +201,7 @@ agent = BaseAgent(
     name="researcher",
     system_prompt="Answer directly and cite uncertainty.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
 )
 
 reply = await agent.arun("Draft a concise release note")
@@ -436,7 +436,7 @@ agent = Agent(
     name="observed-agent",
     system_prompt="Work carefully.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
     tools=[lookup_metric],
     trace=Trace.langsmith_default(project="vidbyte-agents"),
 )
@@ -500,7 +500,7 @@ actor_swarm = BaseAgent(
     name="swarm-coordinator",
     system_prompt="Coordinate parallel specialized sub-actors.",
     runtime=ActorRuntime(
-        worker_model="gpt-4o-mini",
+        worker_model="gpt-5.4-mini",
         dynamic_actors=True,
         max_loop=30,
         termination_mode="quiescence",
@@ -965,7 +965,7 @@ A system-prompt preset is a fixed paragraph an agent opts into with one keyword.
 ```python
 from vidbyte import BaseAgent, SystemPromptPreset
 
-agent = BaseAgent(name="analyst", system_prompt="Answer directly.", provider="openai", model_name="gpt-5.2",
+agent = BaseAgent(name="analyst", system_prompt="Answer directly.", provider="openai", model_name="gpt-5.5",
                   system_prompt_presets=[SystemPromptPreset.WORKING_PRINCIPLES])
 ```
 
@@ -1009,8 +1009,8 @@ task state directly.
 ```python
 from vidbyte import AgentBinding, AgentTransfer, BaseAgent, MultiAgent, MultiAgentSettings
 
-manager = BaseAgent(name="manager", system_prompt="Plan, delegate, and recover.", provider="openai", model_name="gpt-4.1")
-researcher = BaseAgent(name="researcher", system_prompt="Return evidence for assigned work.", provider="openai", model_name="gpt-4.1")
+manager = BaseAgent(name="manager", system_prompt="Plan, delegate, and recover.", provider="openai", model_name="gpt-5.5")
+researcher = BaseAgent(name="researcher", system_prompt="Return evidence for assigned work.", provider="openai", model_name="gpt-5.5")
 team = MultiAgent(
     name="research-team",
     system_prompt="Produce a grounded answer.",
@@ -1109,7 +1109,7 @@ Attach an agent in one line:
 from vidbyte import Agent, Session, FileSessionStore
 
 store = FileSessionStore(root="./.vidbyte/sessions")
-agent = Agent(name="researcher", system_prompt="Investigate carefully.", provider="openai", model_name="gpt-4.1")
+agent = Agent(name="researcher", system_prompt="Investigate carefully.", provider="openai", model_name="gpt-5.5")
 session = agent.persist(store=store, policy=Session.PER_TURN_POLICY)  # equivalent persistence path: Session(agent, store=store)
 reply = await session.arun("Investigate the failing test")
 print(session.id, session.head)

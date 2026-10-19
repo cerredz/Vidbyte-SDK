@@ -20,14 +20,14 @@ manager = BaseAgent(
     name="manager",
     system_prompt="Plan the work, delegate one task at a time, and recover from blockers.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
 )
 
 researcher = BaseAgent(
     name="researcher",
     system_prompt="Research only the assigned task and return useful evidence.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
 )
 
 team = MultiAgent(

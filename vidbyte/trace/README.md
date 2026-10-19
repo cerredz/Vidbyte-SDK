@@ -33,7 +33,7 @@ agent = Agent(
     name="debugged",
     system_prompt="Work carefully.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
     trace=Trace.debug(events),
 )
 
@@ -51,7 +51,7 @@ agent = Agent(
     name="observed",
     system_prompt="Work carefully.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
     trace=Trace.langsmith_default(project="vidbyte-agents"),
 )
 ```

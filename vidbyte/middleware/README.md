@@ -40,7 +40,7 @@ agent = Agent(
     name="guarded",
     system_prompt="Use tools only when they help.",
     provider="openai",
-    model_name="gpt-4.1",
+    model_name="gpt-5.5",
     tools=[lookup_metric],
     middleware=[TenantPolicy()],
     metadata={"tenant_id": "demo"},
@@ -51,6 +51,14 @@ Built-ins are available from `vidbyte.middleware.builtins` and include rate
 limits, token and cost budgets, runtime limits, retry, circuit breaker, audit,
 tool policy, tool-result compaction, message-history compaction, canary tripwire,
 confused-deputy guard, honeypot tool checks, and delegation limits.
+
+`ModelRetryMiddleware` and `ExponentialBackoffRetryMiddleware` do not retry a
+model error whose `retryable` attribute is `False`. The Vidbyte gateway sets it
+on a refusal that every new call meets again, such as an empty wallet (402), a
+model with no price (422), or a wrong Vidbyte key (401). The hook then returns
+`continue_()`, so the runtime raises the error with its reason, or a fallback
+model takes over, and no attempt is spent. An error without the attribute, or
+with `None` or `True`, is retried as before.
 
 `DelegationLimitsMiddleware(limits, depth=...)` holds one delegating tool to a
 depth cap and a per-call batch cap from a `DelegationLimits` record. It denies a

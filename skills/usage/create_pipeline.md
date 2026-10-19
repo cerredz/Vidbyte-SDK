@@ -25,9 +25,9 @@ Stages run in order. The output of stage N becomes the prompt for stage N+1. Ret
 ```python
 from vidbyte import SequentialPipeline, Agent
 
-planner = Agent(name="planner", system_prompt="Create a step-by-step plan.", provider="openai", model_name="gpt-4.1")
-coder = Agent(name="coder", system_prompt="Write code based on the plan.", provider="openai", model_name="gpt-4.1")
-tester = Agent(name="tester", system_prompt="Write tests for the code.", provider="openai", model_name="gpt-4.1")
+planner = Agent(name="planner", system_prompt="Create a step-by-step plan.", provider="openai", model_name="gpt-5.5")
+coder = Agent(name="coder", system_prompt="Write code based on the plan.", provider="openai", model_name="gpt-5.5")
+tester = Agent(name="tester", system_prompt="Write tests for the code.", provider="openai", model_name="gpt-5.5")
 
 pipeline = SequentialPipeline([planner, coder, tester])
 result = await pipeline.run("Build a binary search tree in Python")
@@ -44,9 +44,9 @@ All stages run concurrently with the same input. Outputs are joined with a confi
 from vidbyte import ParallelPipeline, Agent
 
 # Three agents investigate the same problem independently
-agent_a = Agent(name="a", system_prompt="Solve with functional approach.", provider="openai", model_name="gpt-4.1")
-agent_b = Agent(name="b", system_prompt="Solve with OOP approach.", provider="openai", model_name="gpt-4.1")
-agent_c = Agent(name="c", system_prompt="Solve with data-oriented approach.", provider="openai", model_name="gpt-4.1")
+agent_a = Agent(name="a", system_prompt="Solve with functional approach.", provider="openai", model_name="gpt-5.5")
+agent_b = Agent(name="b", system_prompt="Solve with OOP approach.", provider="openai", model_name="gpt-5.5")
+agent_c = Agent(name="c", system_prompt="Solve with data-oriented approach.", provider="openai", model_name="gpt-5.5")
 
 pipeline = ParallelPipeline([agent_a, agent_b, agent_c])
 result = await pipeline.run("Design a caching system")
@@ -65,8 +65,8 @@ A predicate function inspects the prompt and routes to the appropriate branch ag
 ```python
 from vidbyte import ConditionalPipeline, Agent
 
-code_agent = Agent(name="coder", system_prompt="Write production code.", provider="openai", model_name="gpt-4.1")
-research_agent = Agent(name="researcher", system_prompt="Research and explain.", provider="openai", model_name="gpt-4.1")
+code_agent = Agent(name="coder", system_prompt="Write production code.", provider="openai", model_name="gpt-5.5")
+research_agent = Agent(name="researcher", system_prompt="Research and explain.", provider="openai", model_name="gpt-5.5")
 
 def route(prompt: str) -> str:
     if any(word in prompt.lower() for word in ("implement", "code", "build", "write")):
@@ -93,12 +93,12 @@ Map stages run concurrently on the same input (fan-out), then a single reduce st
 from vidbyte import MapReducePipeline, Agent
 
 # Map agents: each analyzes the problem from a different angle
-security_agent = Agent(name="security", system_prompt="Audit for security vulnerabilities.", provider="openai", model_name="gpt-4.1")
-performance_agent = Agent(name="perf", system_prompt="Analyze for performance issues.", provider="openai", model_name="gpt-4.1")
-style_agent = Agent(name="style", system_prompt="Review code style and readability.", provider="openai", model_name="gpt-4.1")
+security_agent = Agent(name="security", system_prompt="Audit for security vulnerabilities.", provider="openai", model_name="gpt-5.5")
+performance_agent = Agent(name="perf", system_prompt="Analyze for performance issues.", provider="openai", model_name="gpt-5.5")
+style_agent = Agent(name="style", system_prompt="Review code style and readability.", provider="openai", model_name="gpt-5.5")
 
 # Reduce agent: synthesizes all findings into a single report
-summarizer = Agent(name="summarizer", system_prompt="Combine the following reviews into a single actionable report.", provider="openai", model_name="gpt-4.1")
+summarizer = Agent(name="summarizer", system_prompt="Combine the following reviews into a single actionable report.", provider="openai", model_name="gpt-5.5")
 
 pipeline = MapReducePipeline(
     map_stages=[security_agent, performance_agent, style_agent],

@@ -80,8 +80,8 @@ agent = Agent(
     name="planner",
     system_prompt="Plan carefully and fork isolated checks when useful.",
     provider="openai",
-    model_name="gpt-4.1",
-    tools=[ForkConversationTool(allowed_models=["gpt-4.1-mini"])],
+    model_name="gpt-5.5",
+    tools=[ForkConversationTool(allowed_models=["gpt-5.4-mini"])],
 )
 ```
 
