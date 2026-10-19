@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "source": {"repository": "cerredz/Vidbyte-SDK", "commit": "ebd18517defa61dc3b80c1542080fc5177296325", "generator": "scripts/generate-sdk-public-api.py"},
+  "source": {"repository": "cerredz/Vidbyte-SDK", "commit": "8d39dd9491451fccc797f6e83a22f47cd75c19e1", "generator": "scripts/generate-sdk-public-api.py"},
   "distribution": "vidbyte-sdk",
   "version": "0.4.0",
   "exports": [
@@ -247,6 +247,9 @@
     "InMemorySessionStore",
     "InMemoryTrajectorySink",
     "IndependentCriticAlgorithm",
+    "InfiniteEvent",
+    "InfiniteEventKind",
+    "InfiniteHandoff",
     "InfiniteMemoryAgent",
     "InfiniteMemoryAgentSettings",
     "InfiniteMemoryPreset",
