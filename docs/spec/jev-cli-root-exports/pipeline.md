@@ -17,8 +17,8 @@ Program: JevAgent in vidbyte-cli, run R1 of 8 (see request.md §C "This run's sc
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-19 | 2026-10-19 | reports/S0-scout.md | base_commit b7350ed6423642c9c178361eef87f3d9cda5589b |
 | S1 spec + review | done | 2026-10-19 | 2026-10-19 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | approved r3 4f988bdb (r1 b53eeeb9, r2 a9d04b51) |
-| S2 tests | running | 2026-10-19 | | reports/S2-test-author.md | |
-| S3 implement | pending | | | | |
+| S2 tests | done | 2026-10-19 | 2026-10-19 | reports/S2-test-author.md | S2_HEAD dc5108e6 (tests 5c3aa147); 21 red, re-run by orchestrator: contract file 18 failed |
+| S3 implement | running | 2026-10-19 | | reports/S3-implementer.md | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
@@ -41,6 +41,8 @@ Program: JevAgent in vidbyte-cli, run R1 of 8 (see request.md §C "This run's sc
 - 2026-10-19 — Round 2 (be962596, SOUND WITH FIXES 0B/3M/1m) all accepted → r3 approved: one-time diffs use MB=$(git merge-base origin/main HEAD); INV-15/AC-13 follow the generator's provenance rule (--check "current at <source.commit>"); INV-2 absence clause removed (attributes are context); S3 makes commit C right after gh pr create. Q-1/Q-2/Q-3 take default No.
 - 2026-10-19 — #1184 merged on SDK main (513aa614) by the repo owner account, outside this run; release-0-4-0.md:19 "#1184 gate" sentence is stale → §12.5 follow-up for the release PR, not edited here.
 
+- 2026-10-19 — S2 open item (INV-7 pinned member order as permanent) resolved through the spec author before S3: r3.1 5bb8b967 "existing members keep values and relative order; later PRs may add". Tests untouched.
+
 ## User replies (verbatim)
 - 2026-10-19 — answers to the alignment questions: request.md §A Prompt 3.
 
@@ -60,3 +62,5 @@ Program: JevAgent in vidbyte-cli, run R1 of 8 (see request.md §C "This run's sc
 - INV-2 name→path table: AgentLoopSettings {agents.settings.loop, agents.settings, agents}; PermissionPolicy {lib.dataclasses.security, lib.dataclasses, tools.security(.permissions)}; TextModelMode {lib.enums.text_model, lib.enums, lib.config}; JevDynamicComputeOption {lib.enums.jev, lib.enums} — source: S1 review R-3
 - Do NOT run `pip install -e` in this worktree: the global py -3.11 editable install points at the canonical checkout and other sessions rely on it. Bootstrap = inline PYTHONPATH=$(pwd) per command — source: code-map §1, local env traps
 - origin/main = 0cce5781 (b7350ed6 + #1184 + #1188); its delta touches no R1-gated path, so merging main in P4 is optional for correctness — source: S1 review r2
+- S2_HEAD = dc5108e6. Test tree: tests/features/jev_cli_root_exports/{FEATURE.md,README.md,test_jev_cli_root_exports_{acceptance,contract,import_time}.py}. S3/S5/S6 diff tests/ against it — must be empty — source: S2
+- Bind eagerly; a lazy __getattr__ mapping passes S015 + identity tests but fails the S2 fresh-interpreter eager probe — source: S2
