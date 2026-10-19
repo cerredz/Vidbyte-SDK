@@ -50,9 +50,13 @@ class ProviderKeyMatcher:
         # https://docs.cloud.google.com/docs/authentication/api-keys
         # https://github.com/google-gemini/cookbook/blob/main/tools/README.md
         (ModelProvider.GEMINI, ("AIza", "AQ."), re.compile(r"(?:AIza[A-Za-z0-9_-]{35}|AQ\.[A-Za-z0-9_-]+)")),
-        # Meta Model API (Muse Spark, Muse Code): an LLM| tag, the numeric
-        # app ID, then the secret. https://dev.meta.ai/docs/authentication
-        (ModelProvider.META, ("LLM|",), re.compile(r"LLM\|[0-9]+\|[A-Za-z0-9_-]+")),
+        # Meta Model API (Muse Spark, Muse Code): "API keys start with
+        # `LLM_`, followed by a numeric ID and the secret, separated by
+        # underscores", https://dev.meta.ai/docs/authentication (read
+        # 2026-10-17). The older LLM| form (an LLM| tag, the numeric app
+        # ID, |, then the secret) that #1027 read on the same page on
+        # 2026-10-15 is kept (meta-muse-managed-text spec Q-7).
+        (ModelProvider.META, ("LLM|", "LLM_"), re.compile(r"LLM(?:\|[0-9]+\|[A-Za-z0-9_-]+|_[0-9]+_[A-Za-z0-9_-]+)")),
     )
 
     # Table A: these providers issue only keys that carry their table F

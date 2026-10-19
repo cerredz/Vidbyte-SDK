@@ -1,12 +1,12 @@
 """FILE: tests/features/sdk_provider_keys/test_provider_keys_wire_contract.py
 
 PURPOSE: Proves what a relay call puts on the wire: the X-Vidbyte-Provider-Key header carries exactly the call provider's stripped key and nothing else does; a call with no provider key sends exactly the base_commit managed request; relay calls keep the 32,768 cap and the 630 s floor; and every re-send of one call, and every concurrent call, carries its own Idempotency-Key with identical headers.
-ROLE IN CODEBASE: Wire-contract layer of tests/features/sdk_provider_keys/ (spec AC-2, AC-3; INV-2, INV-3, INV-16, INV-20, INV-21; EC-9, EC-14, EC-28, EC-37, EC-38; FR-7). Exercises vidbyte/lib/http/vidbyte_gateway.py (VidbyteGatewayTransport) and vidbyte/lib/runners/text.py through the real adapters in vidbyte/providers/.
+ROLE IN CODEBASE: Wire-contract layer of tests/features/sdk_provider_keys/ (spec AC-2, AC-3; INV-2, INV-3, INV-16, INV-20, INV-21; EC-9, EC-14, EC-28, EC-37, EC-38; FR-7; meta-muse-managed-text AC-2, AC-3, AC-5, AC-6, INV-2 to INV-6, T-1; r4 AC-16, FR-9). Exercises vidbyte/lib/http/vidbyte_gateway.py (VidbyteGatewayTransport) and vidbyte/lib/runners/text.py through the real adapters in vidbyte/providers/.
 ARCHITECTURE NOTE: Each test runs TextModelRunner against a scripted inner transport (managed_text_fixtures.ScriptedGateway), the only fake, and reads what the gateway transport handed it. Retry waits are replaced at SLEEP_TARGET by BackoffRecorder, so re-sends take no wall-clock time.
 COMMON MODIFICATION PATTERNS: When the gateway serves a new provider, add its fake key to RELAY_KEYS and its cap field to CAP_FIELD. Keep header comparisons case-insensitive.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import the new constants or TextModelMode.DIRECT at module level. 2. Do not compare the relay header with the unstripped input; INV-2 says the value is the stripped key.
 KNOWN EDGE CASES: A provider variable holding another vendor's key shape is still that provider's key (EC-14). A NaN timeout must become the 630 s floor on a relay call as on a paid one.
-RELATED DOCS: tests/features/sdk_provider_keys/FEATURE.md; docs/spec/byok-api-keys/spec.md sections 6.1 (INV-2, INV-16, INV-20, INV-21) and 9.2 ("Wire").
+RELATED DOCS: tests/features/sdk_provider_keys/FEATURE.md; docs/spec/byok-api-keys/spec.md sections 6.1 (INV-2, INV-16, INV-20, INV-21) and 9.2 ("Wire"); docs/spec/meta-muse-managed-text/spec.md sections 6.1 and 6.2.
 TESTS: python -m pytest tests/features/sdk_provider_keys/test_provider_keys_wire_contract.py
 """
 
@@ -37,6 +37,9 @@ from tests.features.sdk_managed_text.managed_text_fixtures import (
 from tests.features.sdk_provider_keys.provider_keys_fixtures import (
     K_ANTHROPIC,
     K_GEMINI_AQ,
+    K_META,
+    K_META_2,
+    K_META_DOC,
     K_OPENAI,
     K_UNPROVEN,
     K_UNPROVEN_2,
@@ -62,9 +65,15 @@ RELAY_KEYS: dict[ModelProvider, str] = {
     ModelProvider.XAI: K_XAI,
     ModelProvider.DEEPSEEK: K_UNPROVEN,
     ModelProvider.KIMI: K_UNPROVEN_2,
+    # meta-muse-managed-text FR-2, FR-9: a Meta key is format-bound
+    # (LLM_<id>_<secret> or LLM|<id>|<secret>), so it binds to meta in
+    # any list. MetaRelayTests covers the LLM_ shape.
+    ModelProvider.META: K_META,
 }
 # The cap field each dialect uses (managed-generative-models spec section 9.2), Gemini's sits in generationConfig.
-CAP_FIELD = {ModelProvider.OPENAI: "max_output_tokens", ModelProvider.ANTHROPIC: "max_tokens", ModelProvider.XAI: "max_tokens", ModelProvider.DEEPSEEK: "max_tokens", ModelProvider.KIMI: "max_tokens"}
+# meta-muse-managed-text D-2, INV-5: MetaProvider writes the cap as
+# max_tokens.
+CAP_FIELD = {ModelProvider.OPENAI: "max_output_tokens", ModelProvider.ANTHROPIC: "max_tokens", ModelProvider.XAI: "max_tokens", ModelProvider.DEEPSEEK: "max_tokens", ModelProvider.KIMI: "max_tokens", ModelProvider.META: "max_tokens"}
 
 
 def gateway_call(provider: ModelProvider, environment: dict[str, str], *steps: HttpResponse, run_options: dict[str, Any] | None = None, **config_options: Any) -> tuple[ScriptedGateway, BackoffRecorder, Any]:
@@ -187,6 +196,61 @@ class RelayHeaderTests(unittest.TestCase):
         self.assertEqual(header(sent, "x-api-key"), "vidbyte-managed")
         self.assertNotIn(K_ANTHROPIC, flat(sent))
         self.assertNotIn(VIDBYTE_KEY, flat(sent))
+
+
+class MetaRelayTests(unittest.TestCase):
+    """meta-muse-managed-text AC-2, AC-3, INV-2 to INV-4, T-1: which Meta key a meta call relays, and that no other key rides with it."""
+
+    def test_a_meta_call_relays_the_lists_meta_key_before_meta_api_key_stripped_and_no_other_key(self) -> None:
+        # INV-2, INV-4, T-1: the list's Meta key wins over META_API_KEY;
+        # padding is removed; another provider's key never rides on a
+        # meta request.
+        cases = (
+            ("mixed list beats META_API_KEY", {"VIDBYTE_API_KEY": VIDBYTE_KEY, "META_API_KEY": K_META_2}, {"api_keys": [K_ANTHROPIC, K_OPENAI, K_META, K_XAI]}, K_META, (K_ANTHROPIC, K_OPENAI, K_XAI, K_META_2)),
+            ("padded list entry", {"VIDBYTE_API_KEY": VIDBYTE_KEY}, {"api_keys": [f"  {K_META}\n"]}, K_META, ()),
+            ("META_API_KEY with no list", {"VIDBYTE_API_KEY": VIDBYTE_KEY, "META_API_KEY": f"\t{K_META_2}  \n"}, {}, K_META_2, (K_META,)),
+            # meta-muse-managed-text AC-16 (i) and (ii), FR-9: the LLM_
+            # shape Meta documents relays the same way, from a mixed
+            # list (beating an LLM| META_API_KEY) or from the variable.
+            ("LLM_ key in a mixed list beats META_API_KEY", {"VIDBYTE_API_KEY": VIDBYTE_KEY, "META_API_KEY": K_META}, {"api_keys": [K_ANTHROPIC, K_OPENAI, K_META_DOC, K_XAI]}, K_META_DOC, (K_ANTHROPIC, K_OPENAI, K_XAI, K_META)),
+            ("LLM_ META_API_KEY with no list", {"VIDBYTE_API_KEY": VIDBYTE_KEY, "META_API_KEY": f"\t{K_META_DOC}  \n"}, {}, K_META_DOC, (K_META,)),
+        )
+        for label, environment, options, relayed, absent in cases:
+            with self.subTest(case=label):
+                transport, _, result = gateway_call(ModelProvider.META, environment, **options)
+                self.assertEqual(result.text, "Hi")
+                [sent] = transport.requests
+                self.assertEqual((sent["method"], sent["url"]), ("POST", GATEWAY_URL))
+                self.assertEqual(header_names(sent), RELAY_HEADERS)
+                self.assertEqual(provider_key_header(sent), relayed)
+                self.assertEqual(header(sent, "authorization"), f"Bearer {VIDBYTE_KEY}")
+                self.assertEqual((sent["json_body"]["provider"], sent["json_body"]["model"]), ("meta", "muse-spark-1.1"))
+                elsewhere = {name: value for name, value in sent["headers"].items() if name.lower() != RELAY_HEADER.lower()}
+                self.assertNotIn(relayed, flat({"url": sent["url"], "headers": elsewhere, "json_body": sent["json_body"], "idempotency_key": sent.get("idempotency_key")}))
+                for other in absent:
+                    self.assertNotIn(other, flat(sent))
+
+    def test_a_meta_call_without_a_meta_key_sends_exactly_the_three_vidbyte_paid_headers(self) -> None:
+        # AC-3, INV-3: no key, a blank META_API_KEY, or a list holding
+        # only the Vidbyte key all give the Vidbyte-paid meta request.
+        cases = (
+            ("no key", {"VIDBYTE_API_KEY": VIDBYTE_KEY}, {}),
+            ("blank META_API_KEY", {"VIDBYTE_API_KEY": VIDBYTE_KEY, "META_API_KEY": "   "}, {}),
+            ("Vidbyte entry only", {}, {"api_keys": [VIDBYTE_KEY]}),
+        )
+        for label, environment, options in cases:
+            with self.subTest(case=label):
+                transport, _, result = gateway_call(ModelProvider.META, environment, **options)
+                self.assertEqual(result.text, "Hi")
+                [sent] = transport.requests
+                self.assertEqual((sent["method"], sent["url"]), ("POST", GATEWAY_URL))
+                self.assertEqual(header_names(sent), PAID_HEADERS)
+                self.assertIsNone(provider_key_header(sent))
+                self.assertEqual(header(sent, "authorization"), f"Bearer {VIDBYTE_KEY}")
+                self.assertRegex(idempotency_key(sent) or "", KEY_PATTERN)
+                self.assertEqual(sent["json_body"]["provider"], "meta")
+                self.assertEqual(sent["json_body"]["body"]["max_tokens"], 32768)
+                self.assertEqual(sent["timeout_seconds"], 630.0)
 
 
 class RelayCapAndFloorTests(unittest.TestCase):

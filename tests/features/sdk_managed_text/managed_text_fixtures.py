@@ -4,7 +4,7 @@ PURPOSE: Shared offline fakes and provider-shaped answer factories for the Vidby
 ROLE IN CODEBASE: Imported by every test module in tests/features/sdk_managed_text/. It stands in only for the HTTP boundary below TextModelRunner and for the retry wait, so TextModelConfig, ProviderModelRegistry, the provider adapters, the runner and VidbyteGatewayTransport all run unmocked.
 ARCHITECTURE NOTE: ScriptedGateway records a deep copy of every inner request(...) call and answers from a script. In managed state the runner wraps it in VidbyteGatewayTransport, so it sees the gateway request; in BYOK state it sees the vendor request. Calling an instance returns itself, so it can also replace the HttpTransport class where a runner looks it up.
 FUNCTION INVENTORY: ScriptedGateway.request(**kwargs) records and answers one attempt; BackoffRecorder(delay) records one retry wait and optionally cancels; provider_answer(provider, text) builds a realistic 200 per dialect; provider_usage(provider) returns the usage block that answer carries; gateway_error(status) builds a gateway "error": true body; relayed_provider_error(provider, status) builds a vendor error body whose "error" is an object; edge_page(status, body) builds a non-JSON-object answer; header(request, name) reads a recorded header case-insensitively; idempotency_key(request) returns the recorded Idempotency-Key header.
-COMMON MODIFICATION PATTERNS: Add a provider to MANAGED_MODELS, provider_answer and relayed_provider_error together when the gateway starts serving it. Keep every scripted body carrying BODY_CANARY and LEAKED_KEY so credential-safety assertions stay meaningful.
+COMMON MODIFICATION PATTERNS: Add a provider to MANAGED_MODELS, provider_answer and relayed_provider_error together when the gateway starts serving it, and to _CHAT_PROVIDERS when it answers in the chat-completions shape. Keep every scripted body carrying BODY_CANARY and LEAKED_KEY so credential-safety assertions stay meaningful.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import symbols the feature adds (TextModelMode, VidbyteGatewayTransport, the new constants) at module level: before the feature exists that would make every test module a collection error and stop the rest of the suite. 2. Do not touch the network. 3. Do not encode production logic (cap defaults, retry rules) here; tests assert those from the spec's literal values.
 KNOWN EDGE CASES: The last scripted step repeats, so ScriptedGateway(gateway_error(502)) answers 502 to every attempt. Exceptions in the script are raised as-is, including BaseException subclasses such as asyncio.CancelledError.
 RELATED DOCS: tests/features/sdk_managed_text/FEATURE.md; docs/spec/managed-generative-models/spec.md section 9.2 (wire contract and failure mapping).
@@ -36,7 +36,10 @@ SLEEP_TARGET = "vidbyte.lib.http.vidbyte_gateway.asyncio.sleep"
 # Where TextModelRunner looks up its default transport class (spec section 13).
 RUNNER_TRANSPORT_TARGET = "vidbyte.lib.runners.text.HttpTransport"
 
-# The six providers the gateway serves, each with a realistic model id (registries/models.py defaults, section 4 for openai).
+# The seven providers the gateway serves, each with a realistic model id
+# (registries/models.py defaults, section 4 for openai).
+# Meta joined in docs/spec/meta-muse-managed-text/spec.md FR-1;
+# muse-spark-1.1 is its registry default.
 MANAGED_MODELS: dict[ModelProvider, str] = {
     ModelProvider.OPENAI: "gpt-5.5",
     ModelProvider.ANTHROPIC: "claude-sonnet-5",
@@ -44,18 +47,20 @@ MANAGED_MODELS: dict[ModelProvider, str] = {
     ModelProvider.XAI: "grok-4.5",
     ModelProvider.DEEPSEEK: "deepseek-v4-pro",
     ModelProvider.KIMI: "kimi-k2.7-code",
+    ModelProvider.META: "muse-spark-1.1",
 }
 # Text providers the SDK supports but the gateway does not (INV-8, NG-5).
 UNMANAGED_TEXT_PROVIDERS: tuple[ModelProvider, ...] = (
     ModelProvider.OPENROUTER,
     ModelProvider.GLM,
     ModelProvider.MINIMAX,
-    ModelProvider.META,
     ModelProvider.MISTRAL,
 )
 
 _REAL_SLEEP = asyncio.sleep
-_CHAT_PROVIDERS = frozenset({ModelProvider.XAI, ModelProvider.DEEPSEEK, ModelProvider.KIMI})
+# Providers that answer in the chat-completions shape; Meta's Muse API
+# is OpenAI-compatible chat completions.
+_CHAT_PROVIDERS = frozenset({ModelProvider.XAI, ModelProvider.DEEPSEEK, ModelProvider.KIMI, ModelProvider.META})
 
 
 class ScriptedGateway:
@@ -136,6 +141,8 @@ def gateway_error(status: int) -> HttpResponse:
 
 def relayed_provider_error(provider: ModelProvider, status: int) -> HttpResponse:
     # A vendor error relayed by the gateway; every vendor nests an object under "error", never the boolean true.
+    # Meta, like OpenAI, xAI, DeepSeek and Kimi, uses the OpenAI-style
+    # default branch below.
     detail = f"{BODY_CANARY} upstream said key {LEAKED_KEY}"
     if provider is ModelProvider.ANTHROPIC:
         return answer(status, {"type": "error", "error": {"type": "invalid_request_error", "message": detail}})
