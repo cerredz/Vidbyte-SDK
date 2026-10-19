@@ -16,6 +16,7 @@ If this feature regresses, the failure is usually silent: unverified memories la
 - A pair turns `VidbyteSdkError`, `OSError` and `ValueError` into its own card; siblings and the parent keep going. Cancellation propagates and leaves the journal resumable.
 - `resume(run_id=None)` continues the newest unfinished run (or the named one), replays finished pairs from the journal and re-runs interrupted ones; it refuses unsafe, unknown, finished or absent runs before any model call.
 - Each run starts from a clean context; the task, the rules and the workspace map reach every model call while old tool exchanges are trimmed past `INFINITE_HISTORY_MAX_TOKENS`.
+- The 40 prompt assets keep the text contract of `docs/spec/infinite-memory-prompts/spec.md` §8.5: the seven behavior-shaping assets each measure at least 1,000 tokens by `TokenEstimate.count` and 1,100 by tiktoken cl100k_base and state their pinned phrases; every formatted leaf holds exactly its placeholder set and no other brace; fragments end without a newline and whole texts with one; no asset holds a digit outside a list marker or a coding-only word; the 23 compact descriptions, the seven replies and the three shape leaves stay inside their size bounds; no asset repeats a rule sentence; headings survive in order.
 
 ## Actors / Callers
 
@@ -93,6 +94,21 @@ Each line is *input + state → wrong output if unguarded*, with the test that c
 
 What an easy generated test would miss: concurrency proven by timing instead of a gate; "no leak" checked only on the final reply instead of every root call; quota checked without interleaved rejections; resume tested only from a journal the implementation wrote itself (never hand-written in the documented shape); a torn line without its missing trailing newline.
 
+Prompt family text (the prompt rewrite, `docs/spec/infinite-memory-prompts/spec.md`; each line is *input + state → wrong output if unguarded*, with the test in `test_infinite_memory_prompts.py` that catches it):
+
+- A behavior-shaping asset ships under the floor, or meets the chars-divided-by-four floor while tiktoken says otherwise, or a system prompt is cut below its base size → the model reads a thinner brief than the user asked for (`test_section_4_snippet_prints_seven_lines_each_at_or_over_the_floor`, `test_behavior_asset_clears_the_floor_and_never_shrinks_below_baseline`).
+- A principle's rule is dropped, reworded past recognition, or written into another leaf than the stage that reads it → the behavior the user asked for is no longer stated where it acts (`test_pinned_phrase_is_present_in_its_leaf`, one id per leaf and phrase, matched after the spec's D-9 normalization).
+- A `VERDICT:` literal is reworded → the parser finds no verdict, the pair is `unchecked`, every staged entry is dropped (`test_verifier_system_prompt_states_the_three_verdict_literals_exactly`).
+- A placeholder is renamed, doubled or dropped, or prose gains a literal brace → every launch fails with a tool error, `map_header` and `resume_prompt` raise before a run starts (`test_formatted_leaf_renders_each_placeholder_once_and_leaves_no_brace`, `test_raw_leaves_hold_no_brace_at_all`).
+- A fragment gains a trailing newline → blank lines in every tool result and the map (`test_fragments_end_without_a_newline_and_whole_texts_with_exactly_one`).
+- An asset quotes a numeric limit → the model obeys a number the settings may have changed (`test_digits_appear_only_as_ordered_list_markers`).
+- A compact description, a reply or a shape leaf grows → the growth rides in every model call or tool result of every agent (`test_compact_description_sum_stays_within_ten_percent_of_baseline`, `test_every_reply_leaf_stays_within_eighty_tokens`, `test_shape_leaf_never_grows_past_its_baseline`); a description shrinks under four sentences → a label where the model needs operating knowledge (`test_every_compact_description_has_at_least_four_sentences`).
+- An asset clears the floor by pasting a rule twice → tokens with no behavior gain (`test_no_rule_sentence_repeats_inside_a_behavior_asset`).
+- `result_card` loses a label or carries the truncation marker; `quota_line` puts a letter or hyphen against a count → the parent misreads cards, the NFR-7 test counts five markers, the integer is unreadable (`test_result_card_keeps_its_labels_in_order_and_never_carries_the_cut_marker`, `test_quota_line_renders_each_count_as_a_standalone_integer`).
+- A heading is dropped, renamed or reordered → the principle-per-stage matrix no longer locates its rule (`test_every_base_heading_survives_in_order`).
+- A stray `.md` lands in the family folder, a leaf becomes inline JSON text, or a leaf is added or removed → an asset ships that no enum names, or the contract of 40 leaves breaks (`test_family_folder_holds_exactly_the_leaf_assets_as_path_and_source_url`, with the contract module's forty-leaf test).
+- Coding-only words in any leaf: already caught by `test_prompt_family_text_carries_no_coding_only_rules` in the contract module; not duplicated.
+
 ## Historical Regressions
 
 The pack was written red before the implementation (spec r3, S2). Spec review rounds R-1…R-23 shaped several tests: R-16 (AC-40 second run), R-17 (AC-37 malformed line), R-18 (AC-42 grep over 1 MB), R-19 (AC-38 upper-case verdict), R-20 (AC-31 replay-only batch), R-21 (AC-33 equal-size groups), R-23 (AC-41 reserved name at run time).
@@ -100,6 +116,8 @@ The pack was written red before the implementation (spec r3, S2). Spec review ro
 The S4 code review (`docs/spec/infinite-memory-agent/review.md`, a separate R- numbering) found bugs that the 89 original tests let through, and the tests named above now pin them: R-1 (card build and `pair_finished` outside the pair guard), R-3 (uncapped `dropped` and `files`), R-4 (replay refused by the context check), R-6 (EC-18 refusal without advice), R-8 (leaked temp files and raw write errors), and R-11 (stage-time entry rules, `edit_file` caps, and the verifier's `by` stamp could each be deleted with the pack still green).
 
 The S5 re-review found two more that the 107 tests at that point let through: R-26 (the R-7 fix copied a read-only seed's mode bits, so a second attach raised `PermissionError`) and R-27 (a refused two-file memory write could leave its first file changed, and one unwritable staged entry turned a pair's verdict `unchecked`). The four tests named above for those lines pin them.
+
+The prompt rewrite (`docs/spec/infinite-memory-prompts/spec.md` r3) added `test_infinite_memory_prompts.py` red at its base commit `7efceb55`: the floors on four assets by both measures and on `verifier_system_prompt` by tiktoken, and 27 new-phrase pins, were red; every other case was a guard that was green at the base and turns red only if the rewrite breaks what it names.
 
 ## Test Suite Map
 
@@ -110,6 +128,7 @@ The S5 re-review found two more that the 107 tests at that point let through: R-
 - `test_infinite_memory_workspace.py` — `remember`, supersede, `write_note`, `edit_file`, the caps (including bash bypass), large bookkeeping files, and the workspace map.
 - `test_infinite_memory_resume.py` — journal order and durability, `resume` replay and refusals, torn and malformed journals, cancellation, the reserved-name check before the journal, and key secrecy.
 - `test_infinite_memory_context.py` — history trimming and a clean context per run.
+- `test_infinite_memory_prompts.py` — the prompt family's text contract after the rewrite: token floors, pinned phrases, placeholder sets, newline and digit rules, size bounds, repeated sentences, card labels and quota integers, headings, folder parity. Pure text checks through the catalog; no model, no subprocess.
 - `infinite_memory_fixtures.py` — the scripted model tree, builders, and readers every module uses.
 
 Run: `PYTHONPATH=$(pwd) python -m pytest tests/features/infinite_memory_agent -q` from the repository root.
@@ -126,3 +145,4 @@ Run: `PYTHONPATH=$(pwd) python -m pytest tests/features/infinite_memory_agent -q
 - Rubber-stamp verifiers (EC-14), a root that never delegates (EC-40), and an explicit `system=` option (EC-32): accepted behaviors with nothing to assert.
 - Accessibility, browser, migration: no UI and no earlier on-disk format.
 - Case-folded protected names (S4 R-2, macOS): Windows `resolve()` returns the on-disk case, so `Entries.jsonl` or `SEED/brief.md` is already refused here and a test would pass at HEAD for the wrong reason. Making it fail would mean replacing `FileSystemPermissions.resolve_scoped_path`, which is not a seam this pack fakes.
+- For the prompt rewrite: the README size figures (prompt spec AC-11) are review-checked from the PR body, because the README sentence's shape is not fixed; system-prompt ceilings and the 1,500 target are review thresholds by the spec's own ruling (r2, R-4); a phrase pin on the 30 compact leaves whose nudges already exist (r2, R-5), a second banned-word scan (the contract module runs the regexes), and a check that each tool's schema description equals its leaf (no Python changes, so no drift is possible; the launch card fields are already matched by the contract module) would prove nothing the pack does not already prove.
