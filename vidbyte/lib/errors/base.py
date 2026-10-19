@@ -631,7 +631,8 @@ class NativeThreadError(AgentExecutionError):
         # already composed and scrubbed the message and picked the texts
         # written for this code, so this class only stores them. The
         # record the function returns on success names `expected`; None
-        # keeps the plain functions' NativeThreadResult text.
+        # keeps the plain functions' NativeThreadResult text, and a
+        # helper that returns nothing (a delete) says it returns None.
         self.failure_code = failure_code
         self.harness = harness
         self.operation = operation
@@ -642,7 +643,8 @@ class NativeThreadError(AgentExecutionError):
         self.vendor_message = vendor_message
         self.error_type = error_type
         self.error_kind = failure_code.value
-        self.expected = f"{operation.value} returning a {'NativeThreadResult' if result_record is None else result_record.value}"
+        returns = "NativeThreadResult" if result_record is None else result_record.value
+        self.expected = f"{operation.value} returning {returns}" if returns == "None" else f"{operation.value} returning a {returns}"
         self.actual = message
         self.safe_runtime_details = {
             "harness": harness.value,
