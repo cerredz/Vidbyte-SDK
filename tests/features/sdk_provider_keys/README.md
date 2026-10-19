@@ -23,3 +23,4 @@ This folder holds the feature tests for `api_keys`, `vidbyte_api_key`, `Provider
 ## Logs
 
 - 2026-10-13 - Pack added red, ahead of the implementation, from spec r4 (S2 test author).
+- 2026-10-17 - fix/meta-llm-key-shape: the key-shape tests of meta-muse-managed-text r4 (spec on `feat/meta-muse-managed-text`, PR #1180) ported ahead of that branch's gateway work. `K_META_DOC` (Meta's documented `LLM_` shape) added and the Meta prefix pin widened to `{"LLM|", "LLM_"}`; tests added for both Meta shapes in table F and the reserved prefixes, M-6, M-7 and M-18, the keyless kimi fallback (AC-17), `DIRECT` (AC-16), the section 8.5 row (INV-17), and the row's source comment and registries README row (AC-18). Tests that need the gateway to serve `meta` stay on that branch. Red until the Meta row of `KEY_FORMATS` proves and reserves `LLM_` and the two sources cite Meta's 2026-10-17 page.
