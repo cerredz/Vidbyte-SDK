@@ -1,7 +1,7 @@
 ---
 spec: infinite-memory-derived-events
 title: InfiniteMemoryAgent derived run events
-status: tests-written
+status: implemented
 revision: 4
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-infinite-memory-derived-events
@@ -9,7 +9,7 @@ branch: feat/infinite-memory-derived-events
 base_commit: 181f1992ce936f139b7d18f9ae999c97dcd3b005
 created: 2026-10-19
 updated: 2026-10-19
-pr:
+pr: https://github.com/cerredz/Vidbyte-SDK/pull/1191
 ---
 
 # Spec: InfiniteMemoryAgent derived run events
