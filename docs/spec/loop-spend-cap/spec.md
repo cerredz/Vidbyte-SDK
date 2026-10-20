@@ -1,7 +1,7 @@
 ---
 spec: loop-spend-cap
 title: An optional USD spend cap that every agent's own loop enforces
-status: implemented      # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
+status: pr-open          # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
 revision: 4
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-loop-spend-cap
@@ -1006,6 +1006,7 @@ Blocking questions: 0.
 | r3 | 2026-10-20 | S1 spec (review round 2, approved) | Closes r2 R-1..R-5 (§16, Round 2); status set to approved. New §12.3 row 27 (P4), forced by r2 R-1, with FR-10, AC-26, §11, §12.2, §12.5, and §12.6 updated to name it. §9.2 rule 1 covers `MultiAgentExecutionError`, and rule 4 says which ledger to read in that case (r2 R-2). §13 warns about the `build_test_agent` default (r2 R-3). §12.6 restates the codex-pin window and dependencies (r2 R-4). G-3 names the steps that may still spend after a cap stop (r2 R-5). No new ID except row 27; the §8.4 budget is unchanged. |
 | r3 | 2026-10-20 | S3 implement | Implemented §12.3 rows 1–25 and 27 in four phases (`e34ec9cf`, `711db90d`, `bcfc2654`, `c554521e`, plus the comment wrap `2a69ffee`); the pack and the codex file pass 174 of 174, lint passes, and the draft PR is #1192. |
 | r4 | 2026-10-20 | S1 spec (revision, S4 R-1) | Closes S4 R-1 (§16). New §12.3 row 28 (P3, `vidbyte/agents/jev/runtime.py`) and new AC-33 (P0). INV-5's CP1 now covers the check in `JevRuntime._delegate`; INV-6 gains the Delegated segment; D-13, EC-17, FR-3, W-5, and the §9.2 JevAgent row are amended; the "Deliberately not changed" entry for `jev/runtime.py` is struck. §8.4 gains a Changed files row (27 → 28, new files unchanged at 1). `status` stays `implemented`; the repair stage moves it on. r4.1 (orchestrator ruling, still r4): new A-8 states that an unrun specialist can be named in `response.specialist`, and how a caller tells the cases apart (`stop_reason == "max_spend"` with `iteration_count == 0`). Row 17 adds the matching Jev README clause. The `JevAgentResponse.specialist` docstring is a known follow-up, not a row. No behavior changes. r4.2: S5 re-review R-C1, R-C2 wording (§16). INV-6's Delegated row and the §9.2 JevAgent row bound spend per specialist reply, and new A-9 states that a specialist's queued prompts each carry their own cap. The §5 flowchart shows the delegated path's CP1. `revision` stays 4, and no behavior changes. |
+| r4 | 2026-10-20 | S6 PR | finalized for review. Status `pr-open`; the PR body is `docs/spec/loop-spend-cap/pr-body.md`. The §5 flowchart still matches the code, so it is unchanged. The release record gains `(#1192)` (`b4f564a9`, §12.3 row 16). No behavior changes. |
 
 **Implementation deviations (S3)**
 
