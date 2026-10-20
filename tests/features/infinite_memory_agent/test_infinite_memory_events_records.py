@@ -2,7 +2,7 @@
 
 PURPOSE: Proves the event vocabulary and records on their own, outside a scripted run: the public names and where they import from, the on_event settings check, the size bound of every details record at its worst case, the caps and line rules every record enforces, the envelope's own checks (at, details type, summary, keys), zero and unknown costs, how InfiniteEvents shortens keys over 508 characters, how it reads usage from a reply, how it sums a pair's usage over several replies or none, and how it clamps a huge settings limit.
 ROLE IN CODEBASE: Record-and-writer layer of tests/features/infinite_memory_agent/ for docs/spec/infinite-memory-events/spec.md (AC-21, AC-24, AC-30, AC-32, AC-37 a, b, f; INV-11..INV-14, INV-32..INV-36; EC-3, EC-13, EC-14, EC-36; D-18, D-24, D-25, D-27). Exercises vidbyte/lib/enums/infinite.py, vidbyte/lib/dataclasses/infinite.py, vidbyte/agents/infinite/settings.py, and vidbyte/agents/infinite/events.py with a real workspace, journal, and launch tool.
-ARCHITECTURE NOTE: The worst-case shapes and the byte figures are copied from spec section 9.1 (Worst case), and the field caps from its table, so this file states the bound independently of the implementation: a record that grows a field, loses a cap, or forgets a one-line rule fails here even when every scripted run still passes. The key rule is restated from INV-35 with hashlib, never read from the module under test.
+ARCHITECTURE NOTE: The worst-case shapes and the byte figures are copied from spec section 9.1 (Worst case), and the field caps from its table (the derived-events spec's 8 new and 8 enriched records were measured by its S2 test author from the same shapes, per its section 12.3 row 3), so this file states the bound independently of the implementation: a record that grows a field, loses a cap, or forgets a one-line rule fails here even when every scripted run still passes. The key rule is restated from INV-35 with hashlib, never read from the module under test.
 FUNCTION INVENTORY: test_the_public_names_are_one_object_wherever_they_are_exported (AC-24, NG-9); test_on_event_refuses_a_non_callable_or_asynchronous_sink (AC-21, INV-36, D-27); test_on_event_accepts_none_and_synchronous_callables_as_the_last_field (AC-21, INV-32); test_every_details_record_at_its_caps_fits_its_worst_case_figure (AC-30, INV-33, NFR-4); test_every_capped_field_refuses_one_character_more_and_every_list_a_sixth_item (AC-30, INV-12, INV-34, INV-35); test_one_line_fields_refuse_a_line_break (INV-12); test_the_envelope_refuses_a_wrong_time_details_type_summary_key_or_depth (AC-37 b, INV-11, INV-13, INV-14); test_cost_may_be_zero_or_unknown_but_never_negative_or_infinite (AC-37 a, INV-13, D-18); test_keys_over_508_characters_are_shortened_by_digest_and_stay_distinct (AC-32, INV-35, D-25); test_generator_usage_is_read_from_the_reply_rollup_and_unknown_cost_is_none (AC-37 f, D-18, EC-3); test_a_pairs_cost_is_known_only_when_every_reply_is_fully_priced_and_unknown_without_replies (D-18, EC-13, EC-14); test_a_limit_above_the_count_cap_is_reported_at_the_cap (EC-36, D-24). _worst, _baseline, _build, _refusal_field, _short_key, and _long_launcher_key are builders.
 COMMON MODIFICATION PATTERNS: A new details field adds one row to _FIELDS (with its cap and line type from spec section 9.1) and its worst-case value to _worst, and the spec's worst-case table figure is updated before _FIGURES here.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level. 2. Do not compute expected caps, sizes, or keys by calling the implementation's helpers; restate them from the spec. 3. Do not loosen _FIGURES to whatever the implementation measures; a larger number is a spec change.
@@ -19,6 +19,7 @@ import hashlib
 import logging
 import math
 import re
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -50,20 +51,31 @@ from tests.features.infinite_memory_agent.infinite_memory_fixtures import (
 from vidbyte.lib.errors import ConfigurationError
 
 # Spec section 9.1 Worst case: the largest details size in bytes of each record over the four json.dumps settings.
+# docs/spec/infinite-memory-derived-events/spec.md (section 12.3 row 3, D-15) has the S2 test author pin the figures of its
+# eight enriched and eight new records, measured from the _worst shapes below; the largest is InfiniteSubagentFinishedDetails
+# at 27,909 bytes, and an event wrapping it (280-character summary, 512-character key) is 31,987 bytes at most.
 _FIGURES = {
     "InfiniteRunStartedDetails": 15_450,
     "InfiniteRunResumedDetails": 8_686,
-    "InfiniteRunFinishedDetails": 6_930,
-    "InfiniteRunStoppedDetails": 6_824,
-    "InfiniteRefusalDetails": 6_795,
-    "InfiniteSubagentLaunchedDetails": 25_201,
+    "InfiniteRunFinishedDetails": 7_296,
+    "InfiniteRunStoppedDetails": 6_862,
+    "InfiniteRefusalDetails": 6_852,
+    "InfiniteSubagentLaunchedDetails": 25_442,
     "InfiniteSubagentReplayedDetails": 644,
     "InfiniteGeneratorFinishedDetails": 6_962,
-    "InfiniteSubagentFinishedDetails": 27_015,
-    "InfiniteMemorySavedDetails": 18_023,
-    "InfiniteMemoryStagedDetails": 6_147,
+    "InfiniteSubagentFinishedDetails": 27_909,
+    "InfiniteMemorySavedDetails": 18_165,
+    "InfiniteMemoryStagedDetails": 6_289,
     "InfiniteMemoryDroppedDetails": 1_658,
-    "InfiniteFileWrittenDetails": 13_544,
+    "InfiniteFileWrittenDetails": 13_686,
+    "InfiniteMemoryCommittedDetails": 6_174,
+    "InfiniteVerifierStartedDetails": 7_300,
+    "InfiniteVerifierFinishedDetails": 950,
+    "InfiniteSubagentAbortedDetails": 1_461,
+    "InfiniteBatchFinishedDetails": 225,
+    "InfiniteHandoffWrittenDetails": 10_120,
+    "InfiniteWorkspaceUsageDetails": 180,
+    "InfiniteAgentProgressDetails": 175,
 }
 # Each kind's details record (spec section 9.1); batch_rejected and tool_refused share one.
 _RECORD_OF_KIND = {
@@ -81,6 +93,14 @@ _RECORD_OF_KIND = {
     "memory_staged": "InfiniteMemoryStagedDetails",
     "memory_dropped": "InfiniteMemoryDroppedDetails",
     "file_written": "InfiniteFileWrittenDetails",
+    "memory_committed": "InfiniteMemoryCommittedDetails",
+    "verifier_started": "InfiniteVerifierStartedDetails",
+    "verifier_finished": "InfiniteVerifierFinishedDetails",
+    "subagent_aborted": "InfiniteSubagentAbortedDetails",
+    "batch_finished": "InfiniteBatchFinishedDetails",
+    "handoff_written": "InfiniteHandoffWrittenDetails",
+    "workspace_usage": "InfiniteWorkspaceUsageDetails",
+    "agent_progress": "InfiniteAgentProgressDetails",
 }
 # Spec section 9.1 text fields: (record, field, cap, line type, is a list). Line types: c collapsed, e exact one line,
 # m multi-line, k key, p task name, s staged key, t tag. Item texts of committed and dropped are checked separately.
@@ -125,17 +145,31 @@ _FIELDS = (
     ("InfiniteFileWrittenDetails", "path", PATH_MAX, "e", False),
     ("InfiniteFileWrittenDetails", "excerpt", TEXT_MAX, "m", False),
     ("InfiniteFileWrittenDetails", "description", LINE_MAX, "e", False),
+    # docs/spec/infinite-memory-derived-events/spec.md section 9.1: the new text fields.
+    ("InfiniteSubagentFinishedDetails", "error_type", LABEL_MAX, "c", False),
+    ("InfiniteMemoryCommittedDetails", "key", LABEL_MAX, "s", False),
+    ("InfiniteMemoryCommittedDetails", "text", TEXT_MAX, "e", False),
+    ("InfiniteVerifierStartedDetails", "files", LINE_MAX, "e", True),
+    ("InfiniteVerifierFinishedDetails", "stop_reason", LABEL_MAX, "c", False),
+    ("InfiniteSubagentAbortedDetails", "name", LABEL_MAX, "p", False),
+    ("InfiniteSubagentAbortedDetails", "key", KEY_MAX, "k", False),
+    ("InfiniteSubagentAbortedDetails", "error_type", LABEL_MAX, "c", False),
+    ("InfiniteHandoffWrittenDetails", "path", PATH_MAX, "e", False),
+    ("InfiniteHandoffWrittenDetails", "cut", LABEL_MAX, "e", True),
 )
 # Lists of item records, and the two entry lists that keep the entry rule's limit of 8 (INV-34).
 _ITEM_LISTS = (("InfiniteSubagentFinishedDetails", "committed"), ("InfiniteSubagentFinishedDetails", "dropped"))
 _EIGHT_ITEM_LISTS = {("InfiniteMemorySavedDetails", "tags"), ("InfiniteMemorySavedDetails", "refs")}
-_COST_RECORDS = ("InfiniteRunFinishedDetails", "InfiniteGeneratorFinishedDetails", "InfiniteSubagentFinishedDetails")
+_COST_RECORDS = ("InfiniteRunFinishedDetails", "InfiniteGeneratorFinishedDetails", "InfiniteSubagentFinishedDetails", "InfiniteVerifierFinishedDetails")
 _UTC_AT = datetime(2026, 10, 16, 8, 15, 0, 123_000, tzinfo=timezone.utc)
 _TINY_COST = 1.2345678901234567e-300
 _KEY = "k" * KEY_MAX
 _STAGED_KEY = "s" + "9" * (LABEL_MAX - 1)
 _NAME = "a" * LABEL_MAX
 _DIGEST = re.compile(r"~[0-9a-f]{16}/")
+# docs/spec/infinite-memory-derived-events/spec.md section 9.3: INFINITE_HANDOFF_SECTION_COUNT and INFINITE_EVENT_PERCENT_SCALE.
+_HANDOFF_SECTIONS = 9
+_PERCENT_SCALE = 100
 
 
 # ---------------------------------------------------------------- builders
@@ -160,10 +194,16 @@ def _worst(record: str, fill: str) -> dict[str, Any]:
     def items(cap: int, count: int = MAX_ITEMS) -> tuple[str, ...]:
         return (text(cap),) * count
 
+    def counts(*names: str) -> dict[str, int]:
+        return {name: MAX_COUNT for name in names}
+
     committed = InfiniteCommittedEntry(staged_key=_STAGED_KEY, entry_id=MAX_COUNT, kind=InfiniteEntryKind.OPEN_QUESTION, text=text(LABEL_MAX))
     dropped = InfiniteDroppedEntry(key=_STAGED_KEY, text=text(LABEL_MAX), reason=InfiniteDropReason.UNCHECKED, note=text(LABEL_MAX))
-    shapes: dict[str, dict[str, Any]] = {
-        "InfiniteRunStartedDetails": {
+    # docs/spec/infinite-memory-derived-events/spec.md section 9.1: the quota every memory event now carries.
+    quota = ("entries_left", "entries_max", "files_left", "files_max")
+    # Each shape is built only for the record asked for, so a record the derived-events spec left alone never needs its new enums.
+    shapes: dict[str, Callable[[], dict[str, Any]]] = {
+        "InfiniteRunStartedDetails": lambda: {
             "task": text(TEXT_MAX),
             "model": text(LINE_MAX),
             "preset": InfiniteMemoryPreset.SPARSE,
@@ -176,11 +216,19 @@ def _worst(record: str, fill: str) -> dict[str, Any]:
             "seeds": items(LABEL_MAX),
             "seeds_omitted": MAX_COUNT,
         },
-        "InfiniteRunResumedDetails": {"task": text(TEXT_MAX), "finished": MAX_COUNT, "interrupted": (_KEY,) * MAX_ITEMS, "interrupted_omitted": MAX_COUNT},
-        "InfiniteRunFinishedDetails": {"stop_reason": text(LABEL_MAX), "answer": text(TEXT_MAX), "pairs": MAX_COUNT, "agents": MAX_COUNT, "tokens": MAX_COUNT, "cost_usd": _TINY_COST},
-        "InfiniteRunStoppedDetails": {"reason": InfiniteStopCause.CANCELLED, "error_type": text(LABEL_MAX), "message": text(TEXT_MAX)},
-        "InfiniteRefusalDetails": {"tool": text(LABEL_MAX), "problem": text(TEXT_MAX)},
-        "InfiniteSubagentLaunchedDetails": {
+        "InfiniteRunResumedDetails": lambda: {"task": text(TEXT_MAX), "finished": MAX_COUNT, "interrupted": (_KEY,) * MAX_ITEMS, "interrupted_omitted": MAX_COUNT},
+        "InfiniteRunFinishedDetails": lambda: {
+            "stop_reason": text(LABEL_MAX),
+            "answer": text(TEXT_MAX),
+            "pairs": MAX_COUNT,
+            "agents": MAX_COUNT,
+            "tokens": MAX_COUNT,
+            "cost_usd": _TINY_COST,
+            **counts("iterations", "tool_calls", "duration_ms", "passed", "fixed", "failed", "unchecked", "committed", "files", "deepest", "events_failed"),
+        },
+        "InfiniteRunStoppedDetails": lambda: {"reason": InfiniteStopCause.CANCELLED, "error_type": text(LABEL_MAX), "message": text(TEXT_MAX), "events_failed": MAX_COUNT},
+        "InfiniteRefusalDetails": lambda: {"tool": text(LABEL_MAX), "problem": text(TEXT_MAX), "rule": _member("InfiniteRefusalRule", "max_entries_per_agent"), "source": _member("InfiniteRefusalSource", "middleware")},
+        "InfiniteSubagentLaunchedDetails": lambda: {
             "name": _NAME,
             "key": _KEY,
             "parent": _KEY,
@@ -194,9 +242,10 @@ def _worst(record: str, fill: str) -> dict[str, Any]:
             "context_omitted": MAX_COUNT,
             "tools": items(LABEL_MAX),
             "tools_omitted": MAX_COUNT,
+            **counts("attempt", "batch", "batch_index", "batch_size", "agents_started", "max_agents", "in_flight"),
         },
-        "InfiniteSubagentReplayedDetails": {"name": _NAME, "key": _KEY, "status": InfiniteResultStatus.PARTIAL, "verdict": InfiniteVerdict.UNCHECKED},
-        "InfiniteGeneratorFinishedDetails": {
+        "InfiniteSubagentReplayedDetails": lambda: {"name": _NAME, "key": _KEY, "status": InfiniteResultStatus.PARTIAL, "verdict": InfiniteVerdict.UNCHECKED},
+        "InfiniteGeneratorFinishedDetails": lambda: {
             "status": InfiniteResultStatus.PARTIAL,
             "stop_reason": text(LABEL_MAX),
             "summary": text(TEXT_MAX),
@@ -205,7 +254,7 @@ def _worst(record: str, fill: str) -> dict[str, Any]:
             "cost_usd": _TINY_COST,
             "duration_ms": MAX_COUNT,
         },
-        "InfiniteSubagentFinishedDetails": {
+        "InfiniteSubagentFinishedDetails": lambda: {
             "name": _NAME,
             "key": _KEY,
             "status": InfiniteResultStatus.PARTIAL,
@@ -219,13 +268,31 @@ def _worst(record: str, fill: str) -> dict[str, Any]:
             "files_omitted": MAX_COUNT,
             "tokens": MAX_COUNT,
             "cost_usd": _TINY_COST,
+            "error_type": text(LABEL_MAX),
+            **counts("agents_started", "max_agents", "in_flight"),
         },
-        "InfiniteMemorySavedDetails": {"id": MAX_COUNT, "kind": InfiniteEntryKind.OPEN_QUESTION, "text": text(TEXT_MAX), "tags": ("a" * 40,) * 8, "refs": items(LINE_MAX, 8), "supersedes": MAX_COUNT},
-        "InfiniteMemoryStagedDetails": {"key": _STAGED_KEY, "kind": InfiniteEntryKind.OPEN_QUESTION, "text": text(TEXT_MAX), "supersedes": MAX_COUNT},
-        "InfiniteMemoryDroppedDetails": {"key": _STAGED_KEY, "text": text(LABEL_MAX), "reason": InfiniteDropReason.UNCHECKED, "note": text(LABEL_MAX)},
-        "InfiniteFileWrittenDetails": {"path": text(PATH_MAX), "change": InfiniteFileChange.APPENDED, "added_chars": MAX_COUNT, "excerpt": text(TEXT_MAX), "description": text(LINE_MAX)},
+        "InfiniteMemorySavedDetails": lambda: {"id": MAX_COUNT, "kind": InfiniteEntryKind.OPEN_QUESTION, "text": text(TEXT_MAX), "tags": ("a" * 40,) * 8, "refs": items(LINE_MAX, 8), "supersedes": MAX_COUNT, **counts(*quota)},
+        "InfiniteMemoryStagedDetails": lambda: {"key": _STAGED_KEY, "kind": InfiniteEntryKind.OPEN_QUESTION, "text": text(TEXT_MAX), "supersedes": MAX_COUNT, **counts(*quota)},
+        "InfiniteMemoryDroppedDetails": lambda: {"key": _STAGED_KEY, "text": text(LABEL_MAX), "reason": InfiniteDropReason.UNCHECKED, "note": text(LABEL_MAX)},
+        "InfiniteFileWrittenDetails": lambda: {"path": text(PATH_MAX), "change": InfiniteFileChange.APPENDED, "added_chars": MAX_COUNT, "excerpt": text(TEXT_MAX), "description": text(LINE_MAX), **counts(*quota)},
+        # docs/spec/infinite-memory-derived-events/spec.md sections 8.5 and 9.1: the eight new records, with the longest enum values.
+        "InfiniteMemoryCommittedDetails": lambda: {"id": MAX_COUNT, "key": _STAGED_KEY, "kind": InfiniteEntryKind.OPEN_QUESTION, "text": text(TEXT_MAX), "supersedes": MAX_COUNT},
+        "InfiniteVerifierStartedDetails": lambda: {"staged": MAX_COUNT, "files": items(LINE_MAX), "files_omitted": MAX_COUNT},
+        "InfiniteVerifierFinishedDetails": lambda: {"verdict": InfiniteVerdict.UNCHECKED, "stop_reason": text(LABEL_MAX), "tool_calls": MAX_COUNT, "tokens": MAX_COUNT, "cost_usd": _TINY_COST, "duration_ms": MAX_COUNT},
+        "InfiniteSubagentAbortedDetails": lambda: {"name": _NAME, "key": _KEY, "reason": InfiniteStopCause.CANCELLED, "error_type": text(LABEL_MAX), "phase": _member("InfinitePairPhase", "generator"), "staged": MAX_COUNT},
+        "InfiniteBatchFinishedDetails": lambda: counts("batch", "passed", "fixed", "failed", "unchecked", "replayed", "duration_ms"),
+        "InfiniteHandoffWrittenDetails": lambda: {"path": text(PATH_MAX), "sections": (MAX_COUNT,) * _HANDOFF_SECTIONS, "cut": items(LABEL_MAX), "cut_omitted": MAX_COUNT},
+        "InfiniteWorkspaceUsageDetails": lambda: {"level": _PERCENT_SCALE, **counts("files", "max_files", "tokens", "max_tokens", "map_omitted")},
+        "InfiniteAgentProgressDetails": lambda: counts("iteration", "max_iterations", "model_calls", "tool_calls", "tokens"),
     }
-    return shapes[record]
+    return shapes[record]()
+
+
+def _member(enum_name: str, value: str) -> Any:
+    """The member of a derived-events enum (spec section 8.5) with this value, imported only when a shape needs it."""
+    from vidbyte.lib.enums import infinite
+
+    return getattr(infinite, enum_name)(value)
 
 
 def _build(record: str, fields: dict[str, Any]) -> Any:
@@ -272,7 +339,7 @@ def _long_launcher_key(head: str) -> str:
 
 
 def test_the_public_names_are_one_object_wherever_they_are_exported() -> None:
-    """AC-24, NG-9: InfiniteEvent, InfiniteEventKind, and InfiniteHandoff are the same objects from vidbyte, vidbyte.agents, and vidbyte.agents.infinite; InfiniteHandoff also from vidbyte.context and vidbyte.context.handoff; the four new enums from vidbyte.lib.enums; the kind has exactly the 14 values; details records stay out of the root package."""
+    """AC-24, NG-9: InfiniteEvent, InfiniteEventKind, and InfiniteHandoff are the same objects from vidbyte, vidbyte.agents, and vidbyte.agents.infinite; InfiniteHandoff also from vidbyte.context and vidbyte.context.handoff; the four new enums from vidbyte.lib.enums; the kind has exactly the 22 values of docs/spec/infinite-memory-derived-events/spec.md section 8.5; details records stay out of the root package."""
     import vidbyte
     import vidbyte.agents
     import vidbyte.agents.infinite
@@ -485,7 +552,7 @@ def test_keys_over_508_characters_are_shortened_by_digest_and_stay_distinct(tmp_
     launchers = [_long_launcher_key(head) for head in ("a", "z")]
     for key in launchers:
         launch = InfiniteLaunchTool(settings, workspace, journal, key=key, depth=9, extras=(), events=events)
-        events.subagent_launched(launch, card)
+        events.subagent_launched(launch, card, 0, 0, 1)
         memory = InfiniteAgentMemory(workspace, key=f"{key}/a/gen", role=InfiniteAgentRole.GENERATOR, run_id=journal.run_id, depth=10, events=events)
         events.file_written(memory, "notes/deep.md", InfiniteFileChange.CREATED, "Deep finding.\n", "Deep notes")
     assert kinds(seen) == ["subagent_launched", "file_written"] * 2

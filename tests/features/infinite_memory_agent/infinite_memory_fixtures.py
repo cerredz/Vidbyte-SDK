@@ -3,7 +3,7 @@
 PURPOSE: Shared offline harness for the InfiniteMemory agent feature pack: one scripted model runner that reaches every agent in the delegation tree, builders for settings and agents under tmp_path, and readers for the workspace, the journal, and prompt templates.
 ROLE IN CODEBASE: Imported by every test module in tests/features/infinite_memory_agent/. It replaces only the model runner, at BaseAgent._runner_for_model (spec section 13), so InfiniteWorkspace, InfiniteRunJournal, ParallelPipeline, the prompt catalog, the filesystem, and bash all run for real.
 ARCHITECTURE NOTE: ScriptedTree routes each model call by agent name (the root is "analyst"; a root-level pair "a" is "analyst/root/a/gen" and "analyst/root/a/ver") to that agent's list of steps and records what the agent was sent: prompt, system string, message history, and offered tools. A step is a tool call, a final reply, an error to raise, or a callable that observes the call (or waits on a Gate or Signal) and then returns one of those. A call with no step left is recorded as unscripted and fails, so an agent the feature must not run can never pass silently.
-FUNCTION INVENTORY: generator / verifier / pair_key name agents and keys; build_settings / build_agent / workspace_root / project_dir build the subject under tmp_path; tool_call / reply / fail / observe / after build steps; task / launch / simple_pair build launch_subagent arguments and one-call pairs; ScriptedTree.install patches the runner, ScriptedTree.calls_by / first_call / agents_called / position / assert_complete read what happened; Gate and Signal order concurrent agents without sleeps; read_jsonl / write_jsonl / entry_record / journal_paths / journal_records / events / finished_cards / write_journal / run_started_record / pair_started_record / pair_finished_record / run_finished_record / card_record read and write the section 9.1 shapes; prompt_text / template_regex / renderings / int_token / map_section / tool_results / tool_result / is_error / seen_text read rendered output; snapshot captures workspace bytes.
+FUNCTION INVENTORY: generator / verifier / pair_key name agents and keys; build_settings / build_agent / workspace_root / project_dir build the subject under tmp_path; tool_call / tool_calls / reply / fail / observe / after build steps (tool_calls asks for several tool calls in one model turn, in order); task / launch / simple_pair build launch_subagent arguments and one-call pairs; ScriptedTree.install patches the runner, ScriptedTree.calls_by / first_call / agents_called / position / assert_complete read what happened; Gate and Signal order concurrent agents without sleeps; read_jsonl / write_jsonl / entry_record / journal_paths / journal_records / events / finished_cards / write_journal / run_started_record / pair_started_record / pair_finished_record / run_finished_record / card_record read and write the section 9.1 shapes; prompt_text / template_regex / renderings / int_token / map_section / tool_results / tool_result / is_error / seen_text read rendered output; snapshot captures workspace bytes.
 COMMON MODIFICATION PATTERNS: Add a new step kind as a frozen dataclass plus one branch in ScriptedTree._respond. Keep every helper free of feature imports at module level; import feature symbols inside the helper that needs them.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import anything from vidbyte.agents.infinite, vidbyte.lib.constants.infinite, vidbyte.lib.enums.infinite, or the new Prompt members at module level: before the feature exists that would make every module in the pack a collection error and abort the whole test session. 2. Do not mock the workspace, the journal, the pipeline, the catalog, or bash (spec section 13). 3. Do not wait on wall-clock time; Gate and Signal use asyncio events, and their timeout only turns a hang into a failure. 4. Do not encode feature logic (caps, wording) here; tests take literal values from the spec or templates from the prompt catalog.
 KNOWN EDGE CASES: A runner that raises inside a child agent may be turned into a tool error by the parent, so unscripted calls and guard timeouts are also kept in ScriptedTree.unscripted and ScriptedTree.problems, which assert_complete checks. template_regex is only as strict as the literal text of the template it is given; a template made only of placeholders matches almost anything.
@@ -129,12 +129,23 @@ class RaiseStep:
     error: BaseException
 
 
-Step = ToolStep | ReplyStep | RaiseStep | Callable[["ModelCall"], Any]
+@dataclass(frozen=True)
+class ToolsStep:
+    calls: tuple[ToolStep, ...]
+    usage: Mapping[str, int]
+
+
+Step = ToolStep | ToolsStep | ReplyStep | RaiseStep | Callable[["ModelCall"], Any]
 
 
 def tool_call(name: str, args: Mapping[str, Any], usage: Mapping[str, int] | None = None) -> ToolStep:
     """The model asks for one tool call."""
     return ToolStep(name, dict(args), dict(usage or DEFAULT_USAGE))
+
+
+def tool_calls(*calls: ToolStep, usage: Mapping[str, int] | None = None) -> ToolsStep:
+    """The model asks for several tool calls in one turn; the loop runs them in the order given."""
+    return ToolsStep(tuple(calls), dict(usage or DEFAULT_USAGE))
 
 
 def reply(text: str, usage: Mapping[str, int] | None = None) -> ReplyStep:
@@ -342,6 +353,9 @@ class ScriptedTree:
             return TextModelResponse(provider=ModelProvider.OPENAI, model=MODEL, text=step.text, raw={}, usage=dict(step.usage))
         if isinstance(step, ToolStep):
             output = [{"type": "function_call", "name": step.name, "arguments": json.dumps(step.args), "call_id": f"call-{next(_CALL_IDS)}"}]
+            return SimpleNamespace(text="", raw={"output": output}, provider=ModelProvider.OPENAI, model=MODEL, usage=dict(step.usage))
+        if isinstance(step, ToolsStep):
+            output = [{"type": "function_call", "name": call.name, "arguments": json.dumps(call.args), "call_id": f"call-{next(_CALL_IDS)}"} for call in step.calls]
             return SimpleNamespace(text="", raw={"output": output}, provider=ModelProvider.OPENAI, model=MODEL, usage=dict(step.usage))
         raise AssertionError(f"not a scripted step: {step!r}")
 
