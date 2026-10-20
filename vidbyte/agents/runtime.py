@@ -512,7 +512,8 @@ class AgentRuntime:
                 tool_call_count=len(tool_calls),
             )
             if not tool_calls:
-                # Stop before any finish work once this run's measured spend reached its cap or can no longer be measured.
+                # Stop before any finish work once this run's measured
+                # spend reached its cap or can no longer be measured.
                 spend_stop = self._spend_cap_stop(iteration_count=state.iteration_count, tokens_used=state.tokens_used, contexts=state.call_contexts)
                 if spend_stop is not None:
                     return await self._finish_result(spend_stop, state)
@@ -701,7 +702,8 @@ class AgentRuntime:
                     contexts=state.call_contexts,
                 )
                 return await self._finish_result(result, state)
-            # Stop before the compute checkpoint and the next iteration's side calls once the spend cap is reached.
+            # Stop before the compute checkpoint and the next
+            # iteration's side calls once the spend cap is reached.
             spend_stop = self._spend_cap_stop(iteration_count=state.iteration_count, tokens_used=state.tokens_used, contexts=state.call_contexts)
             if spend_stop is not None:
                 return await self._finish_result(spend_stop, state)
@@ -1841,7 +1843,9 @@ class AgentRuntime:
         return replace(context_record, model_visible_result=visible_result)
 
     def _enforce_tool_settings(self, call: ToolCall, provider: str, messages: list[dict[str, Any]], call_contexts: list[ToolCallContext], tool_is_internal: bool, *, iteration_count: int, tokens_used: int | None) -> tuple[ToolCallContext, ToolResult] | AgentResult | None:
-        # Applies the spend cap, then the total tool-call budget, then ToolSettings hard budgets, then the allowed_tools gate and ToolSettings deny-class rules, before local execution.
+        # Applies the spend cap, then the total tool-call budget, then
+        # ToolSettings hard budgets, then the allowed_tools gate and
+        # ToolSettings deny-class rules, before local execution.
         # @intent spend-cap-binds-internal-tools
         # isDone and the launch tools are internal, and a launch tool
         # starts agents that spend, so the cap is checked before them.
@@ -2078,7 +2082,8 @@ class AgentRuntime:
         contexts: Sequence[ToolCallContext],
         started_at: float,
     ) -> AgentResult | None:
-        # Returns a stopped result when the spend cap, any countable budget, or the wall-clock deadline is exhausted.
+        # Returns a stopped result when the spend cap, any countable
+        # budget, or the wall-clock deadline is exhausted.
         spend_stop = self._spend_cap_stop(iteration_count=iteration_count, tokens_used=tokens_used, contexts=contexts)
         if spend_stop is not None:
             return spend_stop

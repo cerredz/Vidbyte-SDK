@@ -29,7 +29,8 @@ class EfficiencyBehavior:
     """Predicates over tool-loop efficiency for a completed agent run."""
 
     # @intent budget-stop-covers-every-runtime-budget
-    # The runtime's _budget_stop, its spend cap, and the ToolSettings hard budgets all end runs on these reasons.
+    # The runtime's _budget_stop, its spend cap, and the ToolSettings
+    # hard budgets all end runs on these reasons.
     _BUDGET_STOP_REASONS = {
         AgentStopReason.MAX_ITERATIONS.value,
         AgentStopReason.MAX_TOOL_CALLS.value,

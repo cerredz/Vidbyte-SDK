@@ -398,8 +398,10 @@ class ProsecutorDefenderJudgeRuntimeAlgorithm:
         self.runtime.recorder.append("system_prompt")
         producer = await self._run_producer(message, handle, context, metadata, options, trace_context)
         # @intent middleware-abort-ends-the-run
-        # An aborted producer left the SDK's stop text, not a candidate, and the abort ends the run, so no debate runs.
-        # A producer the spend cap stopped ends the run the same way, so no debate spends after it.
+        # An aborted producer left the SDK's stop text, not a candidate,
+        # and the abort ends the run, so no debate runs. A producer the
+        # spend cap stopped ends the run the same way, so no debate
+        # spends after it.
         if producer.metadata.get("stop_reason") in (AgentStopReason.MIDDLEWARE_ABORT.value, AgentStopReason.MAX_SPEND.value):
             return producer
 

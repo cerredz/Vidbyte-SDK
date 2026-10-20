@@ -332,7 +332,9 @@ class ForkConversationTool(BaseTool):
         return AgentLoopSettings(**values, **self._inherited_guardrails())
 
     def _inherited_guardrails(self) -> dict[str, Any]:
-        # Carries the parent's non-overridable guardrails so loop overrides cannot drop denied tools, contracts, or the spend cap.
+        # Carries the parent's non-overridable guardrails so loop
+        # overrides cannot drop denied tools, contracts, or the spend
+        # cap.
         parent = self._agent.agent_loop_settings
         return {
             "tool_settings": parent.tool_settings,

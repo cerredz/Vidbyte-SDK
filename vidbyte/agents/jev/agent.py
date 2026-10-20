@@ -127,7 +127,7 @@ class JevAgent(BaseAgent):
 
     @staticmethod
     def _require_capped_specialists(settings: JevAgentSettings) -> None:
-        # Rejects any specialist that could spend past this agent's spend cap.
+        # Rejects any specialist that could spend past this agent's cap.
         # @intent a-delegated-run-keeps-the-spend-cap
         # A specialist the gate chooses runs its own agent, never this
         # agent's loop, so only its own cap, no higher than this one,

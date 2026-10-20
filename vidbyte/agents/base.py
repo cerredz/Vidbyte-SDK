@@ -1206,8 +1206,8 @@ class BaseAgent(McpAttachableMixin):
             # Pop-one loop so prompts queued by drained runs join the same bounded drain.
             # @intent a-spend-cap-stop-ends-the-drain
             # Once a reply, the primary one included, stops on its spend
-            # cap, no further queued prompt runs; the rest are dropped and
-            # counted as truncated below.
+            # cap, no further queued prompt runs; the rest are dropped
+            # and counted as truncated below.
             while self._queued_prompts and completed < self.agent_loop_settings.max_queued_prompts and last_stop != AgentStopReason.MAX_SPEND.value:
                 prompt = self._queued_prompts.pop(0)
                 try:

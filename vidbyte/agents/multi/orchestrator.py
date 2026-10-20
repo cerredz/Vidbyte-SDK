@@ -188,8 +188,11 @@ class MagenticOneOrchestrator:
             await self._close_manager(manager, "run")
 
     async def _structured_phase(self, phase: str, prompt: str, schema: type[BaseModel], retries: int, round_number: int, convert: Callable[[BaseModel], Any]) -> Any:
-        # Retries only manager invocation/parse failures, never a middleware or spend-cap stop, and closes every structured phase fork.
-        # The public-contract conversion runs inside the retry, so a reply whose fields contradict its action is retried too.
+        # Retries only manager invocation/parse failures, never a
+        # middleware or spend-cap stop, and closes every structured
+        # phase fork. The public-contract conversion runs inside the
+        # retry, so a reply whose fields contradict its action is
+        # retried too.
         last_error: Exception | None = None
         for attempt in range(retries + 1):
             parse_attempt = attempt + 1
