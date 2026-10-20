@@ -20,12 +20,12 @@ Program: JevAgent in vidbyte-cli, run R1 of 8 (see request.md §C "This run's sc
 | S2 tests | done | 2026-10-19 | 2026-10-19 | reports/S2-test-author.md | S2_HEAD 09b4ef23 (was dc5108e6; S062 fix by the S2 author); 21 red at S2, re-run by orchestrator: contract file 18 failed |
 | S3 implement | done | 2026-10-19 | 2026-10-19 | reports/S3-implementer.md | S3_HEAD b1e17f66; draft PR #1190; budget 0 new / 3 changed; merged main twice (#1189, #1159) + regenerated contract each time; 682 exports, --check current at 76c61ffb |
 | S4 adversarial review | done | 2026-10-19 | 2026-10-19 | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; confirmed 1B (R-1 conflict) 1M (R-2 release recount) 3m (R-3 spec text, R-4 title, R-5 draft); refuted 0; status reviewed 95bdc8e3 |
-| S5 repair loop | running | 2026-10-19 | | reports/S5-repair-1.md | iteration 1 (prompt scratchpad/r1-s5-1-prompt.md) |
-| S5 re-review | pending | | | | |
+| S5 repair loop | done | 2026-10-19 | 2026-10-19 | reports/S5-repair-1.md | converged in 1 iteration; head 0a2f20be; R-1 7c8f8377 (merge 731f094c), R-2 26d05084, R-3 99d5f0fd; CI 39358180543 + Static 39358182288 success on 0a2f20be |
+| S5 re-review | done | 2026-10-19 | 2026-10-19 | reports/S5-rereview.md | SOUND 0B/0M/1m (R-C1: §12.5/:390 name stale inherited reds; fix in S6 briefing) |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 (cap reached; spec approved r3) · S5 repair iterations: 1/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 (cap reached; spec approved r3) · S5 repair iterations: 1/8 · S5 re-review rounds: 1/2
 
 ## Decisions the orchestrator made
 - 2026-10-19 — Program split into 8 PRs (request.md §C.2 D-P1) — the user's answers asked for separate SDK PRs, a separate gate PR, three Jev PRs, and universal max_spend.
@@ -51,6 +51,9 @@ Program: JevAgent in vidbyte-cli, run R1 of 8 (see request.md §C "This run's sc
 - 2026-10-19 — S4 conventions (1B/0M/1m) and conformance (1B/0M/0m) independently found the same Blocker: main moved to 0324d5d6 (#1147, +51 root exports, contract 729); #1190 CONFLICTING/DIRTY on the contract source.commit line only. Orchestrator re-verified (gh mergeable CONFLICTING DIRTY; merge-tree conflict only in contracts/sdk-public-api.json). Fix is the EC-7 path, handed to S5 after the verifier.
 
 - 2026-10-19 — R-4 (title) and R-5 (draft → ready) are routed to S6 / orchestrator, not S5; S5 does R-1, R-2, R-3 plus re-proving AC-5/6/9/12/13/14/15 at the new MB and dispatching ci.yml + static-policy.yml on the pushed head.
+
+- 2026-10-19 — Orchestrator re-ran the full source stage at 0a2f20be: SDK-LINT: PASS; pytest 1 failed / 7548 passed / 18 skipped; the 1 is the local-only `__all__` merge-base clause of test_import_vidbyte_starts_no_process… (:309), which passes on pristine 0324d5d6 and is skipped in CI. Converged: DONE, own gate green, remote CI + Static green on exact head, no open confirmed finding.
+- 2026-10-19 — Re-review R-C1 (Minor) handled in the S6 briefing, not with another repair iteration: the PR body names only the one real local-only red; the stale spec §12.5/:390 inherited-red list is corrected by S6's spec finalize commit.
 
 ## User replies (verbatim)
 - 2026-10-19 — answers to the alignment questions: request.md §A Prompt 3.
