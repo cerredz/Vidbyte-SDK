@@ -55,6 +55,8 @@ from vidbyte.lib.enums.infinite import (
     InfiniteFileChange,
     InfiniteMemoryPreset,
     InfinitePairPhase,
+    InfiniteRefusalRule,
+    InfiniteRefusalSource,
     InfiniteResultStatus,
     InfiniteStopCause,
     InfiniteVerdict,
@@ -302,7 +304,7 @@ class InfiniteRunResumedDetails:
 
 @dataclass(frozen=True, slots=True)
 class InfiniteRunFinishedDetails:
-    """run_finished: the stop reason, the root's answer, the finished pairs, the agents started, and the run's usage."""
+    """run_finished: the stop reason, the root's answer, the finished pairs, the agents started, the run's usage, this session's iterations, tool calls, and duration, the whole run's verdict counts, committed entries, created notes, and deepest pair, and the events that failed."""
 
     stop_reason: str
     answer: str
@@ -310,13 +312,24 @@ class InfiniteRunFinishedDetails:
     agents: int
     tokens: int
     cost_usd: float | None
+    iterations: int
+    tool_calls: int
+    duration_ms: int
+    passed: int
+    fixed: int
+    failed: int
+    unchecked: int
+    committed: int
+    files: int
+    deepest: int
+    events_failed: int
 
     def __post_init__(self) -> None:
         # None means a part of the cost is unknown; a known cost may be
         # 0 but never negative.
         RecordFieldValidator.require_text(self.stop_reason, "InfiniteRunFinishedDetails.stop_reason", max_chars=INFINITE_EVENT_LABEL_MAX_CHARS, allow_blank=True, one_line=True)
         RecordFieldValidator.require_text(self.answer, "InfiniteRunFinishedDetails.answer", max_chars=INFINITE_EVENT_TEXT_MAX_CHARS, allow_blank=True)
-        for name in ("pairs", "agents", "tokens"):
+        for name in ("pairs", "agents", "tokens", "iterations", "tool_calls", "duration_ms", "passed", "fixed", "failed", "unchecked", "committed", "files", "deepest", "events_failed"):
             RecordFieldValidator.require_int(getattr(self, name), f"InfiniteRunFinishedDetails.{name}", minimum=INFINITE_MIN_COUNT, maximum=INFINITE_EVENT_MAX_COUNT)
         if self.cost_usd is not None:
             RecordFieldValidator.require_number(self.cost_usd, "InfiniteRunFinishedDetails.cost_usd", maximum=sys.float_info.max, allow_zero=True)
@@ -324,11 +337,12 @@ class InfiniteRunFinishedDetails:
 
 @dataclass(frozen=True, slots=True)
 class InfiniteRunStoppedDetails:
-    """run_stopped: whether the run failed or was cancelled, the exception's class name, and its message."""
+    """run_stopped: whether the run failed or was cancelled, the exception's class name, its message, and the events that failed so far."""
 
     reason: InfiniteStopCause
     error_type: str
     message: str
+    events_failed: int
 
     def __post_init__(self) -> None:
         # An exception may carry no message, so only the class name
@@ -336,24 +350,30 @@ class InfiniteRunStoppedDetails:
         RecordFieldValidator.require_enum(self.reason, InfiniteStopCause, "InfiniteRunStoppedDetails.reason")
         RecordFieldValidator.require_text(self.error_type, "InfiniteRunStoppedDetails.error_type", max_chars=INFINITE_EVENT_LABEL_MAX_CHARS, one_line=True)
         RecordFieldValidator.require_text(self.message, "InfiniteRunStoppedDetails.message", max_chars=INFINITE_EVENT_TEXT_MAX_CHARS, allow_blank=True)
+        RecordFieldValidator.require_int(self.events_failed, "InfiniteRunStoppedDetails.events_failed", minimum=INFINITE_MIN_COUNT, maximum=INFINITE_EVENT_MAX_COUNT)
 
 
 @dataclass(frozen=True, slots=True)
 class InfiniteRefusalDetails:
-    """batch_rejected and tool_refused: the tool that refused the call and the problem it reported."""
+    """batch_rejected and tool_refused: the tool that refused the call, the problem it reported, the rule the call broke, and whether a tool or a middleware refused it."""
 
     tool: str
     problem: str
+    rule: InfiniteRefusalRule
+    source: InfiniteRefusalSource
 
     def __post_init__(self) -> None:
-        # The problem is the text the model saw, cut to the text cap.
+        # The problem is the text the model saw, cut to the text cap;
+        # the rule and the source are always named.
         RecordFieldValidator.require_text(self.tool, "InfiniteRefusalDetails.tool", max_chars=INFINITE_EVENT_LABEL_MAX_CHARS, one_line=True)
         RecordFieldValidator.require_text(self.problem, "InfiniteRefusalDetails.problem", max_chars=INFINITE_EVENT_TEXT_MAX_CHARS, allow_blank=True)
+        RecordFieldValidator.require_enum(self.rule, InfiniteRefusalRule, "InfiniteRefusalDetails.rule")
+        RecordFieldValidator.require_enum(self.source, InfiniteRefusalSource, "InfiniteRefusalDetails.source")
 
 
 @dataclass(frozen=True, slots=True)
 class InfiniteSubagentLaunchedDetails:
-    """subagent_launched: the pair's name, key, launcher key, and depth, and its task card cut to the event caps."""
+    """subagent_launched: the pair's name, key, launcher key, and depth, its task card cut to the event caps, its attempt, its place in its batch, and the tree's agents started, agent cap, and pairs in flight."""
 
     name: str
     key: str
@@ -368,13 +388,21 @@ class InfiniteSubagentLaunchedDetails:
     context_omitted: int
     tools: tuple[str, ...]
     tools_omitted: int
+    attempt: int
+    batch: int
+    batch_index: int
+    batch_size: int
+    agents_started: int
+    max_agents: int
+    in_flight: int
 
     def __post_init__(self) -> None:
-        # The pair is named by its task name and two keys.
+        # The pair is named by its task name and two keys; its counts
+        # are checked by name, the attempt included.
         RecordFieldValidator.require_text(self.name, "InfiniteSubagentLaunchedDetails.name", pattern=INFINITE_TASK_NAME_PATTERN)
         for name in ("key", "parent"):
             RecordFieldValidator.require_text(getattr(self, name), f"InfiniteSubagentLaunchedDetails.{name}", max_chars=INFINITE_EVENT_KEY_MAX_CHARS, one_line=True)
-        for name in ("depth", "done_criteria_omitted", "context_omitted", "tools_omitted"):
+        for name in ("depth", "done_criteria_omitted", "context_omitted", "tools_omitted", "attempt", "batch", "batch_index", "batch_size", "agents_started", "max_agents", "in_flight"):
             RecordFieldValidator.require_int(getattr(self, name), f"InfiniteSubagentLaunchedDetails.{name}", minimum=INFINITE_MIN_COUNT, maximum=INFINITE_EVENT_MAX_COUNT)
         # The card's texts keep their line breaks, cut to their caps.
         RecordFieldValidator.require_text(self.goal, "InfiniteSubagentLaunchedDetails.goal", max_chars=INFINITE_EVENT_TEXT_MAX_CHARS, allow_blank=True)
@@ -432,7 +460,7 @@ class InfiniteGeneratorFinishedDetails:
 
 @dataclass(frozen=True, slots=True)
 class InfiniteSubagentFinishedDetails:
-    """subagent_finished: the pair's outcome, its cut review, the entries it committed and dropped, the notes it wrote, and its usage."""
+    """subagent_finished: the pair's outcome, its cut review, the entries it committed and dropped, the notes it wrote, its usage, the class of the error its card reports, and the tree's agents started, agent cap, and pairs in flight."""
 
     name: str
     key: str
@@ -447,15 +475,21 @@ class InfiniteSubagentFinishedDetails:
     files_omitted: int
     tokens: int
     cost_usd: float | None
+    error_type: str
+    agents_started: int
+    max_agents: int
+    in_flight: int
 
     def __post_init__(self) -> None:
-        # The pair's identity and outcome, as on its journaled card.
+        # The pair's identity and outcome, as on its journaled card;
+        # the error class is blank when the card reports no error.
         RecordFieldValidator.require_text(self.name, "InfiniteSubagentFinishedDetails.name", pattern=INFINITE_TASK_NAME_PATTERN)
         RecordFieldValidator.require_text(self.key, "InfiniteSubagentFinishedDetails.key", max_chars=INFINITE_EVENT_KEY_MAX_CHARS, one_line=True)
         RecordFieldValidator.require_enum(self.status, InfiniteResultStatus, "InfiniteSubagentFinishedDetails.status")
         RecordFieldValidator.require_enum(self.verdict, InfiniteVerdict, "InfiniteSubagentFinishedDetails.verdict")
         RecordFieldValidator.require_text(self.review, "InfiniteSubagentFinishedDetails.review", max_chars=INFINITE_EVENT_TEXT_MAX_CHARS, allow_blank=True)
-        for name in ("committed_omitted", "dropped_omitted", "files_omitted", "tokens"):
+        RecordFieldValidator.require_text(self.error_type, "InfiniteSubagentFinishedDetails.error_type", max_chars=INFINITE_EVENT_LABEL_MAX_CHARS, allow_blank=True, one_line=True)
+        for name in ("committed_omitted", "dropped_omitted", "files_omitted", "tokens", "agents_started", "max_agents", "in_flight"):
             RecordFieldValidator.require_int(getattr(self, name), f"InfiniteSubagentFinishedDetails.{name}", minimum=INFINITE_MIN_COUNT, maximum=INFINITE_EVENT_MAX_COUNT)
         if self.cost_usd is not None:
             RecordFieldValidator.require_number(self.cost_usd, "InfiniteSubagentFinishedDetails.cost_usd", maximum=sys.float_info.max, allow_zero=True)
@@ -481,7 +515,7 @@ class InfiniteSubagentFinishedDetails:
 
 @dataclass(frozen=True, slots=True)
 class InfiniteMemorySavedDetails:
-    """memory_saved: one entry the root committed at once, with its id, kind, cut text, tags, refs, and the entry it replaces."""
+    """memory_saved: one entry the root committed at once, with its id, kind, cut text, tags, refs, the entry it replaces, and the root's quota left."""
 
     id: int
     kind: InfiniteEntryKind
@@ -489,6 +523,10 @@ class InfiniteMemorySavedDetails:
     tags: tuple[str, ...]
     refs: tuple[str, ...]
     supersedes: int | None
+    entries_left: int
+    entries_max: int
+    files_left: int
+    files_max: int
 
     def __post_init__(self) -> None:
         # The entry as committed; tags and refs keep the entry rule's
@@ -504,16 +542,24 @@ class InfiniteMemorySavedDetails:
             RecordFieldValidator.require_text(ref, "InfiniteMemorySavedDetails.refs", max_chars=INFINITE_EVENT_LINE_MAX_CHARS, one_line=True)
         if self.supersedes is not None:
             RecordFieldValidator.require_int(self.supersedes, "InfiniteMemorySavedDetails.supersedes", minimum=INFINITE_FIRST_ENTRY_ID, maximum=INFINITE_EVENT_MAX_COUNT)
+        # The agent's quota: the entries and new files it has left,
+        # and each allowance.
+        for name in ("entries_left", "entries_max", "files_left", "files_max"):
+            RecordFieldValidator.require_int(getattr(self, name), f"InfiniteMemorySavedDetails.{name}", minimum=INFINITE_MIN_COUNT, maximum=INFINITE_EVENT_MAX_COUNT)
 
 
 @dataclass(frozen=True, slots=True)
 class InfiniteMemoryStagedDetails:
-    """memory_staged: one entry a pair's agent proposed, with its staged key, kind, cut text, and the entry it would replace."""
+    """memory_staged: one entry a pair's agent proposed, with its staged key, kind, cut text, the entry it would replace, and the agent's quota left."""
 
     key: str
     kind: InfiniteEntryKind
     text: str
     supersedes: int | None
+    entries_left: int
+    entries_max: int
+    files_left: int
+    files_max: int
 
     def __post_init__(self) -> None:
         # The staged key is how the verifier and the finished pair name
@@ -523,6 +569,10 @@ class InfiniteMemoryStagedDetails:
         RecordFieldValidator.require_text(self.text, "InfiniteMemoryStagedDetails.text", max_chars=INFINITE_EVENT_TEXT_MAX_CHARS, allow_blank=True, one_line=True)
         if self.supersedes is not None:
             RecordFieldValidator.require_int(self.supersedes, "InfiniteMemoryStagedDetails.supersedes", minimum=INFINITE_FIRST_ENTRY_ID, maximum=INFINITE_EVENT_MAX_COUNT)
+        # The agent's quota: the entries and new files it has left,
+        # and each allowance.
+        for name in ("entries_left", "entries_max", "files_left", "files_max"):
+            RecordFieldValidator.require_int(getattr(self, name), f"InfiniteMemoryStagedDetails.{name}", minimum=INFINITE_MIN_COUNT, maximum=INFINITE_EVENT_MAX_COUNT)
 
 
 @dataclass(frozen=True, slots=True)
@@ -545,13 +595,17 @@ class InfiniteMemoryDroppedDetails:
 
 @dataclass(frozen=True, slots=True)
 class InfiniteFileWrittenDetails:
-    """file_written: the note's workspace-relative path, how it changed, how many characters the call wrote, an excerpt, and a created note's description."""
+    """file_written: the note's workspace-relative path, how it changed, how many characters the call wrote, an excerpt, a created note's description, and the agent's quota left."""
 
     path: str
     change: InfiniteFileChange
     added_chars: int
     excerpt: str
     description: str
+    entries_left: int
+    entries_max: int
+    files_left: int
+    files_max: int
 
     def __post_init__(self) -> None:
         # The excerpt keeps its line breaks; the description is empty
@@ -561,6 +615,10 @@ class InfiniteFileWrittenDetails:
         RecordFieldValidator.require_int(self.added_chars, "InfiniteFileWrittenDetails.added_chars", minimum=INFINITE_MIN_COUNT, maximum=INFINITE_EVENT_MAX_COUNT)
         RecordFieldValidator.require_text(self.excerpt, "InfiniteFileWrittenDetails.excerpt", max_chars=INFINITE_EVENT_TEXT_MAX_CHARS, allow_blank=True)
         RecordFieldValidator.require_text(self.description, "InfiniteFileWrittenDetails.description", max_chars=INFINITE_EVENT_LINE_MAX_CHARS, allow_blank=True, one_line=True)
+        # The agent's quota: the entries and new files it has left,
+        # and each allowance.
+        for name in ("entries_left", "entries_max", "files_left", "files_max"):
+            RecordFieldValidator.require_int(getattr(self, name), f"InfiniteFileWrittenDetails.{name}", minimum=INFINITE_MIN_COUNT, maximum=INFINITE_EVENT_MAX_COUNT)
 
 
 @dataclass(frozen=True, slots=True)
