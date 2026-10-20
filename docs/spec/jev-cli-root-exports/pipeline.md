@@ -19,13 +19,13 @@ Program: JevAgent in vidbyte-cli, run R1 of 8 (see request.md §C "This run's sc
 | S1 spec + review | done | 2026-10-19 | 2026-10-19 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | approved r3 4f988bdb (r1 b53eeeb9, r2 a9d04b51) |
 | S2 tests | done | 2026-10-19 | 2026-10-19 | reports/S2-test-author.md | S2_HEAD 09b4ef23 (was dc5108e6; S062 fix by the S2 author); 21 red at S2, re-run by orchestrator: contract file 18 failed |
 | S3 implement | done | 2026-10-19 | 2026-10-19 | reports/S3-implementer.md | S3_HEAD b1e17f66; draft PR #1190; budget 0 new / 3 changed; merged main twice (#1189, #1159) + regenerated contract each time; 682 exports, --check current at 76c61ffb |
-| S4 adversarial review | running | 2026-10-19 | | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md | |
-| S5 repair loop | pending | | | | |
+| S4 adversarial review | done | 2026-10-19 | 2026-10-19 | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; confirmed 1B (R-1 conflict) 1M (R-2 release recount) 3m (R-3 spec text, R-4 title, R-5 draft); refuted 0; status reviewed 95bdc8e3 |
+| S5 repair loop | running | 2026-10-19 | | reports/S5-repair-1.md | iteration 1 (prompt scratchpad/r1-s5-1-prompt.md) |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 (cap reached; spec approved r3) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 (cap reached; spec approved r3) · S5 repair iterations: 1/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-19 — Program split into 8 PRs (request.md §C.2 D-P1) — the user's answers asked for separate SDK PRs, a separate gate PR, three Jev PRs, and universal max_spend.
@@ -49,6 +49,8 @@ Program: JevAgent in vidbyte-cli, run R1 of 8 (see request.md §C "This run's sc
 - 2026-10-19 — Main moved twice during S3 (#1189, #1159); implementer merged (EC-7) and regenerated the contract after each merge; release-note counts recomputed (682, 43 added: 11 #1189 + 3 #1159 + 4 #1190 ...). S4 conformance lens must re-prove the counts.
 
 - 2026-10-19 — S4 conventions (1B/0M/1m) and conformance (1B/0M/0m) independently found the same Blocker: main moved to 0324d5d6 (#1147, +51 root exports, contract 729); #1190 CONFLICTING/DIRTY on the contract source.commit line only. Orchestrator re-verified (gh mergeable CONFLICTING DIRTY; merge-tree conflict only in contracts/sdk-public-api.json). Fix is the EC-7 path, handed to S5 after the verifier.
+
+- 2026-10-19 — R-4 (title) and R-5 (draft → ready) are routed to S6 / orchestrator, not S5; S5 does R-1, R-2, R-3 plus re-proving AC-5/6/9/12/13/14/15 at the new MB and dispatching ci.yml + static-policy.yml on the pushed head.
 
 ## User replies (verbatim)
 - 2026-10-19 — answers to the alignment questions: request.md §A Prompt 3.
