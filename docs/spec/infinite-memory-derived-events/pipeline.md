@@ -15,8 +15,8 @@ started: 2026-10-19 20:30
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-19 20:30 | 2026-10-19 20:50 | reports/S0-scout.md | base_commit 181f1992; code-map.md (4 sections, ~45 files) |
 | S1 spec + review | done | 2026-10-19 20:55 | 2026-10-20 | reports/S1-spec-author.md, S1-spec-reviewer-r1.md, S1-spec-reviewer-r2.md | spec r3 @c639e390 approved; r1 SOUND WITH FIXES (13 applied); r2 SOUND WITH FIXES (1B/2M/3m, 6 applied) |
-| S2 tests | running | 2026-10-20 | | | |
-| S3 implement | pending | | | | |
+| S2 tests | done | 2026-10-20 | 2026-10-20 | reports/S2-test-author.md | 4 new files, 87 red; 33 pinned tests updated (spec-mandated); pack 120 failed / 294 passed (re-run by orchestrator, identical); S2_HEAD = 2cab5070; spec r4 @2be3e9c8 resolved S2 items 1, 2, 4 |
+| S3 implement | running | 2026-10-20 | | | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
@@ -34,6 +34,11 @@ started: 2026-10-19 20:30
 - 2026-10-19 — Passed review r1 findings to the author by report path, not pasted — keeps orchestrator context lean; the author read the committed report.
 - 2026-10-20 — Spec r3 approved after round 2 (cap). Open questions take their stated defaults, per the no-stop rule: Q-1 keep records in `vidbyte/lib/dataclasses/infinite.py` and raise its cap (no new module); Q-2 root heartbeat every 10th tool iteration; Q-3 permission-policy denials of `launch_subagent` are not announced. A-5 (Ruff complexity defaults) left unverified; the spec's fallback (extract the verifier step, report it) applies.
 - 2026-10-20 — Earlier docs commits by the orchestrator lacked the Co-Authored-By trailer; every commit from here on carries it.
+- 2026-10-20 — S2 bounded exception to "never modify an existing test's assertions": the author may update only the PR #1159 pins that spec §12.5/§12.3 row 13/§13 list, each to the new exact expectation (no skip, xfail, deletion, or loosening). Verified: test-def counts unchanged in every existing file, no skip/xfail added, every failing pre-existing test fails on a missing kind/field/enum.
+- 2026-10-20 — S2 bootstrap override: no `pip install -e` from the worktree (the shared editable install points at the canonical checkout; field guide `local-ci-verification.md`); `PYTHONPATH=$(pwd)` instead. Verified `vidbyte` resolves to the worktree.
+- 2026-10-20 — S2 agent was interrupted by a session end with uncommitted pinned-test edits; resumed the same agent via SendMessage (not relaunched) so it kept its reasoning; it finished and committed.
+- 2026-10-20 — Ruled INV-8 vs AC-6 (S2 item 2) for AC-6, citing the spec's own NFR-8 and G-5 (byte-identical model-visible text): relayed error text in `problem`/`message` keeps the error's own absolute path; INV-8 narrowed to fields the SDK composes (spec r4, EC-29).
+- 2026-10-20 — Not forwarded to the spec: S2 items 5–7 (coverage notes for S4, the pre-existing harness_threads failure). Spec D-7 table row has an unescaped `|` (cosmetic, predates r4); the S3 implementer escapes it while it edits §17.
 
 ## User replies (verbatim)
 - 2026-10-19 (alignment answers) — "1) i am working on merging  1159 into main and it will land soon, maybe just start the run after this pr merges, so no confusions.  2) you can leave this out for now. 3) thats fine, I just want you to build these events into the agent that we have for now, I am sync them to dashboard later"
@@ -58,3 +63,8 @@ started: 2026-10-19 20:30
 - Lint A002 maps the name `attempt` to "retries" and scans every `ast.Name`/`ast.Attribute` in a function: never bind a local `attempt` or read `self.attempt`; the keyword argument `attempt=` is safe; `subagent_launched` carries `# @intent an-attempt-counts-journal-starts` within def−4..def+20 — *source:* S1 review r2 (R-18) / spec r3
 - `subagent_aborted` decrements `in_flight` only when `journal.finished(pair.key) is None`, as the first statement in the shield; `phase = COMMIT` is set after the `if status is not FAILED:` block, just before `if verdict is not UNCHECKED:` — *source:* spec r3 (R-17)
 - P2 (row 4's P2 bullet, then rows 5, 8, 6, 7, 11) is one atomic checkpoint; the pack runs only at the end of P2 — *source:* spec r3
+- New test files: `tests/features/infinite_memory_agent/test_infinite_memory_derived_{pairs,refusals,run,records}.py`; run with `PYTHONPATH=$(pwd) python -m pytest tests/features/infinite_memory_agent -q`; red baseline 120 failed / 294 passed; the one full-suite failure outside the pack is the pre-existing harness_threads FailureCode count — *source:* S2
+- AC-13/INV-3 patch `InfiniteWorkspace.commit_entry` on the class: `_commit` must call `workspace.commit_entry(...)` through the instance at call time. AC-20 records the caller file of `usage()`/`descriptions()`: both must be called from `events.py`; `map_omitted` looked up at call time. With a sink the wide run calls `usage()` ≤ 10 times and `descriptions()` exactly once; with no sink no `Infinite*Details`/`InfiniteEvent` is built anywhere, including runtime.py — *source:* S2
+- The constants comment must state the `_FIGURES` pins: largest record `SubagentFinished` 27,909 bytes, whole event ≤ 31,987. Default caps give no `workspace_usage`/`agent_progress` (a new workspace holds 3 files, start state (0, False)). `subagent_aborted` is sent by the launcher (`root`, depth 0 for a root-level pair), summary "<name> aborted (<reason>) in its <phase> step: <type>". Middleware `batch_rejected.problem` = metadata `reason`, else the result `output`; tool refusals use `str(error)` — *source:* S2
+- `verifier_started` `{files}` = `len(files)` over the whole `tuple(writer.files_written)` before the five-item cut (= `len(details.files) + details.files_omitted`); never the shown count — *source:* spec r4
+- Do NOT strip or rewrite absolute paths inside relayed error text (`problem`, `run_stopped.message`); INV-8's path ban covers only SDK-composed fields (keys, `handoff_written.path`, note/file lists, new fields) — *source:* spec r4 (EC-29)
