@@ -33,6 +33,16 @@ Owner key: `code` = fix in `vidbyte/` source (repair agent). `docs` = comments, 
 | R-12 | `vidbyte/agents/infinite/events.py:471`; AC-13 parametrization in `test_infinite_memory_derived_pairs.py:444` | (R-E5, tests) D-22's cause rule on `subagent_aborted.error_type` is unpinned. Mutation M11 survives (`414 passed`). V7 (the commit raises `RuntimeError` from `KeyError`): the reviewed code gives `KeyError`; M11 gives `RuntimeError`. It stays Minor: the field is pinned for aborts (AC-12, AC-13), the cause rule is pinned on `subagent_finished` (AC-14), and an error with an explicit `__cause__` escaping the pair's own code is rare. Cancellations and interrupts never carry one. | fixed @4f51cef1 (S2 test author) |
 | R-13 | `vidbyte/lib/dataclasses/infinite.py:760` | (R-V5, `[scope-adding]`) `InfiniteWorkspaceUsageDetails.level` accepts any value from 0 to 100, though only 0, 50, 75, 90, and 100 are emitted. The spec defines it this way (§8.5), so it needs a spec amendment first. Not for repair. | open · follow-up (`[scope-adding]`; needs a spec amendment and the user's decision; not built) |
 
+## Post-repair re-review Minors
+Source: reports/S5-rereview-1.md (verdict SOUND at `2e3696f7`: 0 Blocker, 0 Major). None changes behaviour.
+
+| ID | Owner | Where | Finding | Status |
+|---|---|---|---|---|
+| R-C1 | docs | `spec.md` §1 G-1, G-3 | G-1 put every `memory_committed` and `memory_dropped` on a card, but a pair that aborts in its commit step before its card is recorded (AC-13, EC-25) announces entries that are on no card. G-3 excused only a batch whose pipeline raised, not one whose pipeline never ran (EC-30, EC-31). | fixed @d5f61aa6 (G-1 also covers the dropped count: EC-25's error branch announces `memory_dropped` with no card) |
+| R-C2 | tests | `test_infinite_memory_derived_pairs.py:296`; `test-plan.md` open items 1, 2, 8 | The `verifier_started` summary pin accepted the five-name count that r4 ruled out, so a `len(shown)` mutation survived. | fixed @76314c4d (S2 test author) |
+| R-C3 | docs | `spec.md` §8.1 D-10, D-22 | D-10 did not name the second `phase = COMMIT` (`launch.py:311`); D-22 said a child's error arrives as `AgentExecutionError`. | fixed @20de6683 |
+| R-C4 | docs | `vidbyte/agents/infinite/README.md:120`; `events.py:457`; `lib/dataclasses/infinite.py:685` | "An abort means a pair stopped without a card" is false in EC-10, where the card is journaled and announced before the abort. | fixed @6cb56b1f (README notes name the case too) |
+
 ## What the implementation gets right (so nobody "fixes" it)
 - **Scope is exact and observation-only.** Every §12.3 row is done, with the prescribed wording. The source diff touches exactly the 13 files of §12.3. `vidbyte/agents/runtime.py`, `base.py`, `vidbyte/middleware`, `vidbyte/pipelines`, `vidbyte/__init__.py`, `contracts/`, and `lint/` have an empty diff. S3 changed no test. There is no suppression and no baseline edit.
 - **G-5, INV-5, and INV-6 hold beyond AC-21 and AC-26.** The conformance probe ran a tree with a refusal, a replay, a rule drop, an unchecked drop, a child error, and an AC-13 abort. On that tree, model-visible text and workspace files are byte-identical with a sink and without one. A sink that raises on every kind leaves the reply, journal, disk, and model calls unchanged (AC-22). Two runs give equal 47-event streams once normalized.

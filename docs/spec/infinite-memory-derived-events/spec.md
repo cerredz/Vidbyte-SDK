@@ -2,7 +2,7 @@
 spec: infinite-memory-derived-events
 title: InfiniteMemoryAgent derived run events
 status: reviewed
-revision: 6
+revision: 7
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-infinite-memory-derived-events
 branch: feat/infinite-memory-derived-events
@@ -1090,6 +1090,9 @@ Nothing emits a new kind yet, and every existing event is built and delivered ex
 | s4-10 | R-10 | Minor | §12.4 header item | Six touched module headers did not name the derived test files on their TESTS line. | accepted | Each names the derived test files that prove its change. |
 | s4-11 | R-11 | Minor | §7 NFR-7, §11, §12.4 | The spec named the lint's last line `AGENT-LINT: PASS`; `lint/core/report.py:58` prints `SDK-LINT: PASS`. | accepted | The string is replaced at all three sites. |
 | s2-3 | S2 item 4 | Minor | §13 | §13 did not cite every PR #1159 pin this spec changes. | accepted | Added as facts: pairs :128-137, stream :188/:194, :388, and :493, the two renames, and the `ToolsStep`/`tool_calls` fixture. |
+| s5-c1 | R-C1 | Minor | §1 G-1, G-3 | G-1 put every `memory_committed` and `memory_dropped` on a card, but a pair that aborts in its commit step before its card is recorded (AC-13, EC-25) announces entries that are on no card. G-3 excused only a batch whose pipeline raised, though in EC-30 and EC-31 the pipeline never runs. | accepted | G-1 excepts that pair for both counts: a probe showed EC-25's error branch announces `memory_dropped` and then `subagent_aborted` with no card, so the re-review's committed-only wording was not enough. G-3 reads "raised or never ran (EC-26, EC-30, EC-31)". |
+| s5-c3 | R-C3 | Minor | §8.1 D-10, D-22 | D-10 placed COMMIT at one point, though the s4-2 fix also sets it in the inner `except` branch; D-22 still said a child's error arrives as `AgentExecutionError`. | accepted | D-10 names both assignments. D-22 says a child's error arrives as a `VidbyteSdkError`: usually `AgentExecutionError` raised from the original, otherwise one of the three typed errors `BaseAgent` passes through, which the same cause rule names. |
+| s5-c4 | R-C4 | Minor | — (source only) | The package README and two docstrings said `subagent_aborted` means a pair stopped without a card, but EC-10 delivers the card and then the abort for the same key. | accepted | The README event line and both docstrings name that case, and the README notes add it with the advice to close a row on its first closing event. |
 
 ## §17 Revision history
 
@@ -1101,6 +1104,7 @@ Nothing emits a new kind yet, and every existing event is built and delivered ex
 | r4 | 2026-10-19 | S2 open items | Resolved S2's open items 1, 2, and 4 (§16 s2-1 to s2-3). The `verifier_started` summary's `{files}` counts every note written. INV-8's path clause covers only SDK-composed fields; relayed error text keeps its own paths (new EC-29, inherited from PR #1159). §13 lists the remaining pins S2 updated. No name, field, kind, enum member, constant, or signature changed. Status stays approved. |
 | r5 | 2026-10-19 | S3 implement | Implemented every §12.3 row except row 13 (S2's) in §12.6 phase order: P1 as six additive commits, P2 as one atomic checkpoint (row 4's P2 bullet, then rows 5, 8, 6, 7, 11), P3 as one commit per README; the infinite-memory pack passes 414 of 414, the agent lint and both CI stages pass apart from the known pre-existing failure, and no test changed. No AC proof was blank, so §6.2 is unchanged; the D-7 row's `str \| None` is escaped. Status: implemented. |
 | r6 | 2026-10-20 | S5 repair 1 | Applied the S4 review's code and docs findings (§16 s4-1, s4-2, s4-7 to s4-11). The pair's error branch enters phase `commit` before it records its card, and EC-25 says so. INV-10 and G-3 list two more accepted exceptions, new EC-30 (a `pair_started` write that fails part-way through a batch) and EC-31 (a sink `BaseException` on `subagent_launched`). INV-19, D-10, and §13 say a child's error arrives as a `VidbyteSdkError`, wrapped or passed through. The lint's last line is `SDK-LINT: PASS`. No name, field, kind, enum member, constant, signature, or test changed. Status stays reviewed. |
+| r7 | 2026-10-20 | S5 repair 2 | Applied the post-repair re-review's Minors (§16 s5-c1, s5-c3, s5-c4; R-C2 was the test author's, at `76314c4d`). G-1 excepts a pair that aborts in its commit step before its card is recorded, for both of its counts. G-3's batch sentence adds a pipeline that never ran (EC-30, EC-31). D-10 names the second COMMIT assignment, and D-22 says a child's error arrives as a `VidbyteSdkError`. Text only: no behaviour, name, field, kind, enum member, constant, signature, or test changed. Status stays reviewed. |
 
 **Implementation deviations (S3, r5).**
 
