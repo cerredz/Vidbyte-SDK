@@ -3,10 +3,10 @@
 PURPOSE: Defines the validated records of the composite thread functions: ThreadStep, one bound call of a thread function that is awaited as step(prompt); PromptSegment, one fixed or spliced piece of a prompt compose sends; StepOutcome, what one step call gave; WorkspaceDiff, the change between two workspace snapshots; JsonAnswer, a structured answer with its repair turns; ThreadVerdict, a verifier's decision; ChainResult, VerifyResult, HandoffResult and StagedResult, what the composites return; and StageSpec, StageAttempt and StageOutcome, the parts of a staged run.
 ROLE IN CODEBASE: Built and read by the composites under vidbyte/harnesses/native/compose/ (ThreadStep by the binders in steps.py, PromptSegment by texts.py and every module that builds a prompt, the results by chain.py, verify.py, handoff.py, stages.py and answers.py) and re-exported from vidbyte.harnesses.native.compose; callers build StageSpec themselves. The ensemble records live beside these in native_ensemble.py.
 ARCHITECTURE NOTE: Every check lives in __post_init__, so a constructed record is always valid. Each field's own type, size and item count goes through RecordFieldValidator and RecordFieldConverter; only the rules that relate fields to each other (exactly one of result and error, a thread id for a continue step, a run step for a stage) and the callable checks of ThreadStep are written here. ThreadStep checks its key, workspace, model, skills and thread id by building the NativeThreadRequest the nine functions use, with a probe prompt that is never sent, and stores the resolved values. It only stores and awaits an injected invoker (spec D-2): calling a function in its verb's argument order is behavior of the compose layer, which also checks the function against its table of the nine. Flags such as ok and failed_step are properties derived from the stored outcomes, never stored beside them.
-FUNCTION INVENTORY: ThreadStep.__post_init__ is the narrated main function, _checked_config stores the harness's own config record, and __call__ awaits the invoker. StepOutcome.ok, thread_id and text; JsonAnswer.ok, text and thread_id; ChainResult.failed_step; VerifyResult.agreement and failed_verifiers; HandoffResult.failed_step; StageOutcome.ok, text and thread_id; StagedResult.failed_stage. The other records have only __post_init__.
+FUNCTION INVENTORY: ThreadStep.__post_init__ is the narrated main function, _probe builds the NativeThreadRequest the nine functions use or returns its refusal, _withheld makes a refusal that quotes the model or thread id again without it, _checked_config stores the harness's own config record, and __call__ awaits the invoker. StepOutcome.ok, thread_id and text; JsonAnswer.ok, text and thread_id; ChainResult.failed_step; VerifyResult.agreement and failed_verifiers; HandoffResult.failed_step; StageOutcome.ok, text and thread_id; StagedResult.failed_stage. The other records have only __post_init__.
 COMMON MODIFICATION PATTERNS: A new bound adds its constant to vidbyte/lib/constants/native_compose.py and one validator call to its record. A new derived flag is a property, never a stored field.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import from vidbyte.harnesses; vidbyte/lib is the bottom layer, so ThreadStep checks only that function and invoker are callable. 2. Do not drop repr=False from ThreadStep.api_key or ThreadStep.invoker, or compare=False from invoker. 3. Do not dispatch on the verb or guard forks in ThreadStep.__call__; ThreadBinder.invoke owns that. 4. Do not build JsonAnswer[X](...); Python 3.11.0 refuses a subscripted call on this slotted generic record.
-KNOWN EDGE CASES: ThreadStep.workspace is typed Path | str and skills Sequence[str | Path] because the record must see the raw values: a relative path is refused before it is resolved, and a bare string is a sequence of characters, not a list of skills. After __post_init__ workspace is the resolved Path, skills a tuple of resolved Paths and config the harness's own record. A fork step without a thread id is checked as a run, because compose anchors it later. The decoded JSON lists (ThreadVerdict.findings) are stored as tuples. PromptSegment checks only its types: a spliced value may be long or hold a NUL until PromptFitter.fit removes and cuts it, so a cap or a pattern would refuse it after I/O began (INV-15, EC-37).
+KNOWN EDGE CASES: ThreadStep.workspace is typed Path | str and skills Sequence[str | Path] because the record must see the raw values: a relative path is refused before it is resolved, and a bare string is a sequence of characters, not a list of skills. After __post_init__ workspace is the resolved Path, skills a tuple of resolved Paths and config the harness's own record. A fork step without a thread id is checked as a run, because compose anchors it later. The decoded JSON lists (ThreadVerdict.findings) are stored as tuples. PromptSegment checks only its types: a spliced value may be long or hold a NUL until PromptFitter.fit removes and cuts it, so a cap or a pattern would refuse it after I/O began (INV-15, EC-37). A record never quotes a refused value a caller or a step's answer could have filled with a key: the closed sets, counts and flags are checked with quote=False, and a model or thread id the probe refuses is named by its type only, whether the step came from a binder, a direct build or dataclasses.replace (INV-4).
 RELATED DOCS: vidbyte/harnesses/README.md
 TESTS: tests/features/harness_compose/test_harness_compose_binding.py, tests/features/harness_compose/test_harness_compose_answers.py
 """
@@ -33,6 +33,7 @@ from vidbyte.lib.constants.native_compose import (
     COMPOSE_PROBE_PROMPT,
     COMPOSE_PROBLEM_MAX_CHARS,
     COMPOSE_VERDICT_MAX_FINDINGS,
+    COMPOSE_WITHHELD_VALUE,
     STAGE_DEFAULT_RETRIES,
     STAGE_MAX_LADDER,
     STAGE_MAX_RETRIES,
@@ -93,8 +94,8 @@ class ThreadStep:
             raise ConfigurationError(f"ThreadStep.function must be callable; got a value of type {type(self.function).__name__}.", details={"field": "ThreadStep.function"})
         if self.invoker is not None and not callable(self.invoker):
             raise ConfigurationError(f"ThreadStep.invoker must be callable or None; got a value of type {type(self.invoker).__name__}.", details={"field": "ThreadStep.invoker"})
-        object.__setattr__(self, "harness", RecordFieldConverter.to_enum(self.harness, NativeHarness, "ThreadStep.harness"))
-        object.__setattr__(self, "verb", RecordFieldConverter.to_enum(self.verb, NativeThreadVerb, "ThreadStep.verb"))
+        object.__setattr__(self, "harness", RecordFieldConverter.to_enum(self.harness, NativeHarness, "ThreadStep.harness", quote=False))
+        object.__setattr__(self, "verb", RecordFieldConverter.to_enum(self.verb, NativeThreadVerb, "ThreadStep.verb", quote=False))
 
         # A continue step needs the thread it continues; a fork without
         # a thread id waits for compose to anchor it.
@@ -103,23 +104,51 @@ class ThreadStep:
 
         # Check the key, workspace, model, skills and thread id with the
         # record the nine functions use, built with a probe prompt that
-        # is never sent, and keep its resolved paths.
-        probe = NativeThreadRequest(
-            harness=self.harness,
-            verb=NativeThreadVerb.RUN if self.thread_id is None else self.verb,
-            prompt=COMPOSE_PROBE_PROMPT,
-            api_key=self.api_key,
-            workspace=self.workspace,
-            model=self.model,
-            skills=self.skills,
-            thread_id=self.thread_id,
-        )
+        # is never sent, and keep its resolved paths. That record would
+        # quote a key misplaced in the model or thread id, so its
+        # refusal is raised again without the value, and outside any
+        # handler, so no exception context keeps the quoted original.
+        probe = self._probe()
+        if isinstance(probe, ConfigurationError):
+            raise self._withheld(probe)
         object.__setattr__(self, "workspace", probe.workspace)
         object.__setattr__(self, "skills", probe.skills)
 
         # No config means the harness's default record; a record of
         # another harness, or anything else, is refused naming config.
         object.__setattr__(self, "config", self._checked_config())
+
+    def _probe(self) -> NativeThreadRequest | ConfigurationError:
+        # The record the nine functions use, or the refusal it raised,
+        # returned so that __post_init__ raises outside this handler.
+        try:
+            return NativeThreadRequest(
+                harness=self.harness,
+                verb=NativeThreadVerb.RUN if self.thread_id is None else self.verb,
+                prompt=COMPOSE_PROBE_PROMPT,
+                api_key=self.api_key,
+                workspace=self.workspace,
+                model=self.model,
+                skills=self.skills,
+                thread_id=self.thread_id,
+            )
+        except ConfigurationError as error:
+            return error
+
+    def _withheld(self, error: ConfigurationError) -> ConfigurationError:
+        # @intent step-refusals-withhold-a-misplaced-key
+        # That record quotes a short bad value, and a model or thread id
+        # is caller text that can hold a key, so its refusal of either
+        # is made again naming the value by its type only, with the
+        # same field (spec INV-4, INV-5). The value is picked by the
+        # field the refusal names, because that is the value it quotes:
+        # scanning for each value instead could rewrite a model quoted
+        # inside a refused thread id and leave the rest of that quote.
+        value = {"model": self.model, "thread_id": self.thread_id}.get(error.details.get("field", ""))
+        head, quoted, tail = str(error).rpartition(repr(value))
+        if not isinstance(value, str) or not quoted:
+            return error
+        return ConfigurationError(head + COMPOSE_WITHHELD_VALUE.format(type_name=type(value).__name__) + tail, details=error.details)
 
     def _checked_config(self) -> GrokThreadConfig | OpencodeThreadConfig | MuseThreadConfig:
         # The harness's own config record, or its default when None.
@@ -149,7 +178,7 @@ class PromptSegment:
         # pattern here would refuse it after I/O began (spec INV-15,
         # EC-37).
         RecordFieldConverter.require_instance(self.text, "PromptSegment.text", str)
-        RecordFieldValidator.require_bool(self.spliced, "PromptSegment.spliced")
+        RecordFieldValidator.require_bool(self.spliced, "PromptSegment.spliced", quote=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,7 +195,7 @@ class WorkspaceDiff:
             RecordFieldValidator.require_text(name, "WorkspaceDiff.files", max_chars=COMPOSE_DIFF_MAX_CHARS, quote=False)
         object.__setattr__(self, "files", files)
         RecordFieldValidator.require_text(self.text, "WorkspaceDiff.text", max_chars=COMPOSE_DIFF_MAX_CHARS, allow_blank=True)
-        RecordFieldValidator.require_bool(self.truncated, "WorkspaceDiff.truncated")
+        RecordFieldValidator.require_bool(self.truncated, "WorkspaceDiff.truncated", quote=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,7 +269,7 @@ class ThreadVerdict:
     findings: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "decision", RecordFieldConverter.to_enum(self.decision, VerdictDecision, "ThreadVerdict.decision"))
+        object.__setattr__(self, "decision", RecordFieldConverter.to_enum(self.decision, VerdictDecision, "ThreadVerdict.decision", quote=False))
         RecordFieldValidator.require_text(self.summary, "ThreadVerdict.summary", max_chars=COMPOSE_ANSWER_TEXT_MAX_CHARS)
         findings = RecordFieldConverter.to_tuple(self.findings, "ThreadVerdict.findings", item_type=str, max_items=COMPOSE_VERDICT_MAX_FINDINGS)
         for index, finding in enumerate(findings):
@@ -322,7 +351,7 @@ class StageSpec:
         if self.step.verb is not NativeThreadVerb.RUN:
             raise ConfigurationError("StageSpec.step must be a run step, because every attempt starts a fresh thread.", details={"field": "StageSpec.step"})
         RecordFieldValidator.require_template(self.template, "StageSpec.template", fields=STAGE_TEMPLATE_FIELDS)
-        RecordFieldValidator.require_int(self.retries, "StageSpec.retries", minimum=STAGE_MIN_RETRIES, maximum=STAGE_MAX_RETRIES)
+        RecordFieldValidator.require_int(self.retries, "StageSpec.retries", minimum=STAGE_MIN_RETRIES, maximum=STAGE_MAX_RETRIES, quote=False)
         object.__setattr__(self, "ladder", RecordFieldConverter.to_tuple(self.ladder, "StageSpec.ladder", item_type=type(self.step.config), max_items=STAGE_MAX_LADDER))
 
 
@@ -335,10 +364,10 @@ class StageAttempt:
     decision: StageDecision | None = None
 
     def __post_init__(self) -> None:
-        RecordFieldValidator.require_int(self.rung, "StageAttempt.rung", minimum=STAGE_MIN_RUNG, maximum=STAGE_MAX_LADDER)
+        RecordFieldValidator.require_int(self.rung, "StageAttempt.rung", minimum=STAGE_MIN_RUNG, maximum=STAGE_MAX_LADDER, quote=False)
         RecordFieldConverter.require_instance(self.outcome, "StageAttempt.outcome", StepOutcome)
         if self.decision is not None:
-            object.__setattr__(self, "decision", RecordFieldConverter.to_enum(self.decision, StageDecision, "StageAttempt.decision"))
+            object.__setattr__(self, "decision", RecordFieldConverter.to_enum(self.decision, StageDecision, "StageAttempt.decision", quote=False))
 
 
 @dataclass(frozen=True, slots=True)

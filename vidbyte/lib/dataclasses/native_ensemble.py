@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Every check lives in __post_init__, with bounds from vidbyte/
 FUNCTION INVENTORY: EnsembleResult.failed_stage; the other records have only __post_init__.
 COMMON MODIFICATION PATTERNS: A new member of a planner or selector answer is one field here, one validator call, and the matching text in the schema prompt file; the decoders read member names from dataclasses.fields, so they follow without change.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import from vidbyte.harnesses; vidbyte/lib is the bottom layer. 2. Do not check offered numbers or the role count here; they depend on the run, which only compose knows. 3. Do not store a failed-stage flag; it is derived from the stored answers.
-KNOWN EDGE CASES: A role name is at most ENSEMBLE_ROLE_NAME_MAX_CHARS characters and holds no NUL, because it is spliced into several prompts. EnsemblePlan.roles and EnsembleRound.kept come from decoded JSON lists and are stored as tuples. A round keeps unique positive numbers; whether they were offered is checked by the decoder.
+KNOWN EDGE CASES: A role name is at most ENSEMBLE_ROLE_NAME_MAX_CHARS characters and holds no NUL, because it is spliced into several prompts. EnsemblePlan.roles and EnsembleRound.kept come from decoded JSON lists and are stored as tuples. A round keeps unique positive numbers; whether they were offered is checked by the decoder. A refused role name or proposal number is named by its type only (quote=False): a step's answer can echo a key into either, and the refusal is kept as that answer's problem (INV-4).
 RELATED DOCS: vidbyte/harnesses/README.md
 TESTS: tests/features/harness_compose/test_harness_compose_ensemble.py, tests/features/harness_compose/test_harness_compose_answers.py
 """
@@ -67,7 +67,7 @@ class EnsembleRole:
     goal: str
 
     def __post_init__(self) -> None:
-        RecordFieldValidator.require_text(self.name, "EnsembleRole.name", max_chars=ENSEMBLE_ROLE_NAME_MAX_CHARS, pattern=NATIVE_PROMPT_PATTERN)
+        RecordFieldValidator.require_text(self.name, "EnsembleRole.name", max_chars=ENSEMBLE_ROLE_NAME_MAX_CHARS, pattern=NATIVE_PROMPT_PATTERN, quote=False)
         RecordFieldValidator.require_text(self.identity, "EnsembleRole.identity", max_chars=COMPOSE_ANSWER_TEXT_MAX_CHARS)
         RecordFieldValidator.require_text(self.personality, "EnsembleRole.personality", max_chars=COMPOSE_ANSWER_TEXT_MAX_CHARS)
         RecordFieldValidator.require_text(self.expertise, "EnsembleRole.expertise", max_chars=COMPOSE_ANSWER_TEXT_MAX_CHARS)
@@ -120,7 +120,7 @@ class EnsembleSelection:
     guidance: str
 
     def __post_init__(self) -> None:
-        RecordFieldValidator.require_int(self.proposal, "EnsembleSelection.proposal", minimum=ENSEMBLE_MIN_PROPOSAL_NUMBER, maximum=ENSEMBLE_MAX_PROPOSERS)
+        RecordFieldValidator.require_int(self.proposal, "EnsembleSelection.proposal", minimum=ENSEMBLE_MIN_PROPOSAL_NUMBER, maximum=ENSEMBLE_MAX_PROPOSERS, quote=False)
         RecordFieldValidator.require_text(self.approach, "EnsembleSelection.approach", max_chars=COMPOSE_ANSWER_TEXT_MAX_CHARS)
         RecordFieldValidator.require_text(self.rationale, "EnsembleSelection.rationale", max_chars=COMPOSE_ANSWER_TEXT_MAX_CHARS)
         RecordFieldValidator.require_text(self.guidance, "EnsembleSelection.guidance", max_chars=COMPOSE_ANSWER_TEXT_MAX_CHARS)

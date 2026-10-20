@@ -2,11 +2,11 @@
 
 PURPOSE: Defines RecordFieldValidator, the one canonical field validator for validated records (text, optional text, Windows command-line length, str.format templates, positive finite numbers, bounded ints, strict bools, enum members, argv tuples and absolute directories), and RecordFieldConverter, the canonical conversions and checks records apply beside it (tuples, read-only mappings, enum members, paths and plain instance checks).
 ROLE IN CODEBASE: Called from the __post_init__ of the records in vidbyte/lib/dataclasses/native_threads.py, native_compose.py, native_ensemble.py and process.py, by the composites under vidbyte/harnesses/native/compose/ to check caller templates and prompt files and to measure prompts, and, through accepts_text, by the output readers GrokWire, OpencodeWire, MuseWire and MuseExecOutput under vidbyte/harnesses/native/ to check a vendor's thread id.
-ARCHITECTURE NOTE: Two classes of static methods, each taking the checked value first and the field name second, returning the checked or converted value or raising ConfigurationError. The checked variable is always named value, so the bool guards here are the single owner lint rules C002, C006, C007 and C008 point at. Messages name the field and the expected type or range, and quote a value only when it is a short, non-secret scalar or text and, for require_text, the caller did not pass quote=False. Every ConfigurationError also carries details["field"], so a caller can name the bad argument without reading the message text.
-FUNCTION INVENTORY: require_text (quote=False names a refused value by its type only), accepts_text (require_text's rule as a bool), require_optional_text, require_command_line_units (a value's quoted Windows command-line length must fit), command_line_units (that length, in UTF-16 code units), require_template (a str.format template of bare names from an allowed set, with the required names), require_number, require_int, require_bool, require_enum, require_argv, require_directory; _text_problem words what a text value fails, and _received renders the received value safely for a message. RecordFieldConverter: to_tuple (with optional item-count bounds), to_mapping, to_enum (a member or its exact value string), to_path (a str or os.PathLike, unchecked), require_instance.
+ARCHITECTURE NOTE: Two classes of static methods, each taking the checked value first and the field name second, returning the checked or converted value or raising ConfigurationError. The checked variable is always named value, so the bool guards here are the single owner lint rules C002, C006, C007 and C008 point at. Messages name the field and the expected type or range, and quote a value only when it is a short, non-secret scalar or text and the caller did not pass quote=False, which require_text, require_int, require_bool and to_enum take. Every ConfigurationError also carries details["field"], so a caller can name the bad argument without reading the message text.
+FUNCTION INVENTORY: require_text (quote=False names a refused value by its type only), accepts_text (require_text's rule as a bool), require_optional_text, require_command_line_units (a value's quoted Windows command-line length must fit), command_line_units (that length, in UTF-16 code units), require_template (a str.format template of bare names from an allowed set, with the required names), require_number, require_int and require_bool (each with quote), require_enum, require_argv, require_directory; _text_problem words what a text value fails, and _received renders the received value safely for a message. RecordFieldConverter: to_tuple (with optional item-count bounds), to_mapping, to_enum (a member or its exact value string, with quote), to_path (a str or os.PathLike, unchecked), require_instance.
 COMMON MODIFICATION PATTERNS: Add a new check as one more static method with value first and field_name second, and call it from a record's __post_init__; never copy a check into a record.
 WHAT NOT TO DO IN THIS FILE: 1. Do not convert values silently; to_path only wraps a path in Path and never checks or resolves it. 2. Do not quote mapping values or long text in a message; they can hold secrets. 3. Do not import from a layer above vidbyte.lib.
-KNOWN EDGE CASES: bool is an int subclass, so every numeric check refuses bool first. A field whose last name segment reads as a credential (password, token, secret, api_key) is never quoted, whatever its length. require_argv refuses a list on purpose, because argv fields must be immutable tuples. require_directory must run on the path as given, before Path.resolve(), or a relative path would pass. Caller text that can hold a key, such as a compose prompt or template, is checked with quote=False, because a short bad value would otherwise be quoted key and all.
+KNOWN EDGE CASES: bool is an int subclass, so every numeric check refuses bool first. A field whose last name segment reads as a credential (password, token, secret, api_key) is never quoted, whatever its length. require_argv refuses a list on purpose, because argv fields must be immutable tuples. require_directory must run on the path as given, before Path.resolve(), or a relative path would pass. Caller text or a record field that can hold a misplaced key, such as a compose prompt, template, harness, verb, retries count or verdict decision, is checked with quote=False, because a short bad value would otherwise be quoted key and all.
 RELATED DOCS: vidbyte/lib/README.md; lint/rules/c008_shared_validator_owner.py
 TESTS: tests/features/harness_threads/test_harness_threads_records.py, tests/features/harness_compose/test_harness_compose_validation.py
 """
@@ -114,17 +114,19 @@ class RecordFieldValidator:
         return value
 
     @staticmethod
-    def require_int(value: Any, field_name: str, *, minimum: int, maximum: int) -> int:
-        # An int, not bool, in [minimum, maximum].
+    def require_int(value: Any, field_name: str, *, minimum: int, maximum: int, quote: bool = True) -> int:
+        # An int, not bool, in [minimum, maximum]. With quote False a
+        # refusal names the value by its type only.
         if isinstance(value, bool) or not isinstance(value, int) or value < minimum or value > maximum:
-            raise ConfigurationError(f"{field_name} must be an integer from {minimum} to {maximum}; got {RecordFieldValidator._received(value, field_name)}.", details={"field": field_name})
+            raise ConfigurationError(f"{field_name} must be an integer from {minimum} to {maximum}; got {RecordFieldValidator._received(value, field_name, quote=quote)}.", details={"field": field_name})
         return value
 
     @staticmethod
-    def require_bool(value: Any, field_name: str) -> bool:
-        # Exactly True or False.
+    def require_bool(value: Any, field_name: str, *, quote: bool = True) -> bool:
+        # Exactly True or False. With quote False a refusal names the
+        # value by its type only.
         if not isinstance(value, bool):
-            raise ConfigurationError(f"{field_name} must be True or False; got {RecordFieldValidator._received(value, field_name)}.", details={"field": field_name})
+            raise ConfigurationError(f"{field_name} must be True or False; got {RecordFieldValidator._received(value, field_name, quote=quote)}.", details={"field": field_name})
         return value
 
     @staticmethod
@@ -196,15 +198,16 @@ class RecordFieldConverter:
         return MappingProxyType(dict(value))
 
     @staticmethod
-    def to_enum(value: Any, enum_type: type[EnumT], field_name: str) -> EnumT:
+    def to_enum(value: Any, enum_type: type[EnumT], field_name: str, *, quote: bool = True) -> EnumT:
         # A member of enum_type, or the exact value string of one,
-        # returned as the member; case is not folded.
+        # returned as the member; case is not folded. With quote False
+        # a refusal names the value by its type only.
         if isinstance(value, enum_type):
             return value
         members = {str(member.value): member for member in enum_type}
         if isinstance(value, str) and value in members:
             return members[value]
-        raise ConfigurationError(f"{field_name} must be one of {', '.join(members)}; got {RecordFieldValidator._received(value, field_name)}.", details={"field": field_name})
+        raise ConfigurationError(f"{field_name} must be one of {', '.join(members)}; got {RecordFieldValidator._received(value, field_name, quote=quote)}.", details={"field": field_name})
 
     @staticmethod
     def to_path(value: Any, field_name: str) -> Path:
