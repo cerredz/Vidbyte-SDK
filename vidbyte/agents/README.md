@@ -419,6 +419,9 @@ the whole measured spend or only a lower bound.
 The cap is per reply, hidden from the model, and not overridable through the fork tool.
 `Agent`, `CodingAgent`, `JevAgent`, and `InfiniteMemoryAgent` enforce it, as does every
 fork, clone, helper, or subagent built from the same settings, against its own spend.
+The SDK's own critic and prosecutor-defender-judge reviewer runs, and JevAgent's
+fixed-prompt agents, carry no cap by design: their spend counts at the parent's next
+check, so one review can carry a finished reply past the cap.
 Construction refuses it on a non-linear runtime, a non-text runner, a configured model
 the pricebook cannot price (OpenRouter, which reports its own cost, is exempt), a
 JevAgent specialist without its own cap at or below JevAgent's, and `CodexHarnessAgent`;
