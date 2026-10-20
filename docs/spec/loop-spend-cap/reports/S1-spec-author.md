@@ -257,3 +257,26 @@ The rest of the design:
 - `MultiAgentOrchestrator` is a Protocol. The class edited in row 23 is `MagenticOneOrchestrator`.
 - The auto-handoff still runs after a cap stop, by design (INV-23 last paragraph). It writes a handoff note about the stopped run.
 - A capped test agent now needs a priced configured model to construct (§13).
+
+---
+
+## Addendum: r3 (review round 2, approved), 2026-10-20
+
+**Commit:** `f1e7677e` "docs(spec): revise loop-spend-cap spec to r3 (review round 2, approved)". It changes only `spec.md`. The frontmatter is now `revision: 3`, `status: approved`.
+
+**Dispositions.** All five are accepted, and §16 logs them as Round 2, "r2 R-1".."r2 R-5".
+
+| Finding | Change |
+|---|---|
+| r2 R-1 Major (skill files omitted) | New §12.3 row 27 (P4). It covers the four table and list entries in `skills/agentic-loop-settings/SKILL.md` (§3.1, §4, §5, §6) and the routing cell at `skills/output-contracts/SKILL.md:58`. The rest of those files' staleness, such as `:158`, is out of scope. FR-10, AC-26, §11, §12.2, §12.5, and §12.6 now name the row. |
+| r2 R-2 (rule 1 "if and only if") | Rule 1 gains a third case: `MultiAgentExecutionError` with `details["stop_reason"] == "max_spend"` (row 23, or `finalize` at `orchestrator.py:173-175`). The contract preamble now lists the class. Rule 4 says to read `agent.get_usage().cost_measured` in that case, because no stopped reply reaches the caller. This follows from the R-2 fix. |
+| r2 R-3 (test default) | §13 warns that `build_test_agent` defaults to the unpriced `gpt-4.1-mini` (`tests/agent_test_support.py:70-71`). Capped fixtures must pass `gpt-5.4-mini` or `deepseek-v4-flash`, and their scripted responses must name a priced model. |
+| r2 R-4 (red window) | §12.6 now says the codex pin is red from the S2 pack until row 25 (P3), and that it needs row 2 (P1). Row 25 needs no other row. |
+| r2 R-5 (G-3) | G-3 now lists what INV-23 forbids. It also names what may still spend after a cap stop: `after_run`, an auto-handoff, a bound session rule, and a MultiAgent replan onto another capped worker. |
+
+**Self-check:**
+- The ID cross-reference finds no undefined ID.
+- Every AC is in a W row.
+- There is no key-shaped literal.
+- Tables have consistent columns under GFM rules.
+- There is still one CREATE row, and the §8.4 budget is unchanged.
