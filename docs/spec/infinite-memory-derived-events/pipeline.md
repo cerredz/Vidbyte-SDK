@@ -21,11 +21,11 @@ started: 2026-10-19 20:30
 | S4b test strengthening (R-3..R-6, R-12) | done | 2026-10-20 | 2026-10-20 | test-plan.md § "S4 strengthening" | 4f51cef1; pack 2 failed (the R-5 pin, two parametrized cases, red until R-2) / 416 passed (orchestrator re-ran); M1/M7/M10/M11 each now killed by exactly one test; **S2_HEAD = 4f51cef1** |
 | S5 repair loop | done | 2026-10-20 | 2026-10-20 | reports/S5-repair-1.md; verify-log.md | converged in 1/8: R-1, R-2, R-7..R-11 fixed (R-3..R-6, R-12 at 4f51cef1); HEAD c2a446b6 pushed. Orchestrator re-ran: pack 418 passed; SDK-LINT PASS; public API current; source stage 1 failed (inherited) / 7037 passed / 17 skipped; package stage `CI passed.`; tests unchanged since 4f51cef1; INV-20 paths untouched; 13 vidbyte files |
 | S5 re-review | done | 2026-10-20 | 2026-10-20 | reports/S5-rereview-1.md | round 1/2: SOUND; 0 Blocker / 0 Major / 4 Minor (R-C1 spec G-1/G-3 overclaim; R-C2 verifier_started count test accepts 5 or 7; R-C3 spec D-10/D-22 stale; R-C4 "abort means without a card" in README:120, events.py:457, dataclasses:685); every fixed R-id CONFIRMED FIXED |
-| S5 cleanup (re-review Minors) | running | 2026-10-20 | | | R-C2 → test author; R-C1, R-C3, R-C4 → repair iteration 2 |
-| S6 PR | pending | | | | |
+| S5 cleanup (re-review Minors) | done | 2026-10-20 | 2026-10-20 | reports/S5-repair-2.md; verify-log.md iteration 2 | R-C2 @76314c4d (test author; len(shown) mutant now killed); R-C1 @d5f61aa6, R-C3 @20de6683, R-C4 @6cb56b1f (text only: orchestrator AST check — events.py and lib dataclasses code-identical without docstrings); HEAD 0bd1674e pushed. Orchestrator re-ran: pack 418; SDK-LINT PASS; API current; source 1 failed (inherited) / 7037 / 17; package `CI passed.`; tests unchanged since 76314c4d. **S2_HEAD = 76314c4d** |
+| S6 PR | running | 2026-10-20 | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 (cap reached; spec approved at r3) · S5 repair iterations: 1/8 (converged) · S5 re-review rounds: 1/2 (running)
+- S1 review rounds: 2/2 (cap reached; spec approved at r3) · S5 repair iterations: 2/8 (converged) · S5 re-review rounds: 1/2 (SOUND; round 2 not needed — iteration 2 changed no executable line)
 
 ## Decisions the orchestrator made
 - 2026-10-19 — Asked 3 alignment questions instead of 8–10 — the user's invocation said "No need to ask 8-10 questions for this, keep to 3".
