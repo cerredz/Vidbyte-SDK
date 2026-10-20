@@ -402,7 +402,9 @@ stopped = reply.metadata["stop_reason"] == AgentStopReason.MAX_SPEND.value
 ```
 
 The loop checks the cap before every model call, every tool call (isDone and the
-launch tools included), every plain-text finish, and JevAgent's compute checkpoint. It
+launch tools included), every plain-text finish, and JevAgent's compute checkpoint.
+JevAgent also checks it before a specialist it chose starts, so a run whose gate or
+run-state writer has already reached the cap starts no specialist. It
 is a threshold checked between steps, never a maximum bill: a run stops below the cap
 plus its largest single step, and concurrent children that inherit the cap can each
 spend up to it. A stopped reply has `stop_reason` `"max_spend"`, which sessions report
