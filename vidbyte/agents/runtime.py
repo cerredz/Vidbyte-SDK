@@ -91,6 +91,7 @@ from vidbyte.agents.contract import AgentLoopSettingsOutputContract
 from vidbyte.agents.contracts.schema import SchemaConformance
 from vidbyte.agents.pricing import UsageTracker
 from vidbyte.agents.speed import AgentSpeedTracker
+from vidbyte.agents.spend_cap import AgentSpendCap
 from vidbyte.agents.types import AgentMessage
 from vidbyte.context.algorithms import ContextWindowAlgorithm
 from vidbyte.context.manager import ContextManager
@@ -511,6 +512,10 @@ class AgentRuntime:
                 tool_call_count=len(tool_calls),
             )
             if not tool_calls:
+                # Stop before any finish work once this run's measured spend reached its cap or can no longer be measured.
+                spend_stop = self._spend_cap_stop(iteration_count=state.iteration_count, tokens_used=state.tokens_used, contexts=state.call_contexts)
+                if spend_stop is not None:
+                    return await self._finish_result(spend_stop, state)
                 if self.config.max_tokens is not None and state.tokens_used is not None and state.tokens_used >= self.config.max_tokens:
                     token_stop = self._stopped_result(
                         "Agent runtime stopped after reaching max_tokens.",
@@ -696,6 +701,10 @@ class AgentRuntime:
                     contexts=state.call_contexts,
                 )
                 return await self._finish_result(result, state)
+            # Stop before the compute checkpoint and the next iteration's side calls once the spend cap is reached.
+            spend_stop = self._spend_cap_stop(iteration_count=state.iteration_count, tokens_used=state.tokens_used, contexts=state.call_contexts)
+            if spend_stop is not None:
+                return await self._finish_result(spend_stop, state)
             catalog = self.tools
             await self._after_tool_iteration(state, messages)
             # Bring in tools the agent added to or removed from its own catalog during this iteration.
@@ -1832,7 +1841,13 @@ class AgentRuntime:
         return replace(context_record, model_visible_result=visible_result)
 
     def _enforce_tool_settings(self, call: ToolCall, provider: str, messages: list[dict[str, Any]], call_contexts: list[ToolCallContext], tool_is_internal: bool, *, iteration_count: int, tokens_used: int | None) -> tuple[ToolCallContext, ToolResult] | AgentResult | None:
-        # Applies the total tool-call budget, then ToolSettings hard budgets, then the allowed_tools gate and ToolSettings deny-class rules, before local execution.
+        # Applies the spend cap, then the total tool-call budget, then ToolSettings hard budgets, then the allowed_tools gate and ToolSettings deny-class rules, before local execution.
+        # @intent spend-cap-binds-internal-tools
+        # isDone and the launch tools are internal, and a launch tool
+        # starts agents that spend, so the cap is checked before them.
+        spend_stop = self._spend_cap_stop(iteration_count=iteration_count, tokens_used=tokens_used, contexts=call_contexts)
+        if spend_stop is not None:
+            return spend_stop
         if tool_is_internal:
             return None
         settings = self.config.tool_settings
@@ -1858,6 +1873,18 @@ class AgentRuntime:
         if allowed is None or tool_name in allowed:
             return None
         return "allowed_tools_denied", {"tool_name": tool_name, "allowed_tools": sorted(allowed)}
+
+    def _spend_cap_stop(self, *, iteration_count: int, tokens_used: int | None, contexts: Sequence[ToolCallContext]) -> AgentResult | None:
+        # @intent spend-cap-reads-the-live-ledger
+        # The cap reads this agent's own tracker at the moment of the
+        # check, merged child replies included, and never records, so a
+        # stop sees the same spend the reply reports.
+        if self.config.max_spend_usd is None:
+            return None
+        output = AgentSpendCap.stop_output(self.config.max_spend_usd, self.usage_tracker.rollup())
+        if output is None:
+            return None
+        return self._stopped_result(output, stop_reason=AgentStopReason.MAX_SPEND, iteration_count=iteration_count, tokens_used=tokens_used, contexts=contexts)
 
     def _tool_settings_budget_stop(self, settings: ToolSettings | None, call_contexts: list[ToolCallContext], *, iteration_count: int, tokens_used: int | None) -> AgentResult | None:
         # Stops the run before executing a call that would exceed the total tool-call budget mid-iteration.
@@ -2051,7 +2078,10 @@ class AgentRuntime:
         contexts: Sequence[ToolCallContext],
         started_at: float,
     ) -> AgentResult | None:
-        # Returns a stopped result when any countable budget or the wall-clock deadline is exhausted.
+        # Returns a stopped result when the spend cap, any countable budget, or the wall-clock deadline is exhausted.
+        spend_stop = self._spend_cap_stop(iteration_count=iteration_count, tokens_used=tokens_used, contexts=contexts)
+        if spend_stop is not None:
+            return spend_stop
         if self.config.max_iterations is not None and iteration_count >= self.config.max_iterations:
             return self._stopped_result(
                 "Agent runtime stopped after reaching max_iterations.",
