@@ -20,12 +20,13 @@ Program: JevAgent in vidbyte-cli, run R3 of 8 (see request.md §C "This run's sc
 | S2 tests | done | 2026-10-20 | 2026-10-20 | reports/S2-test-author.md | b5a9e689 (tests 021f73dc, proof 19bfde45). Pack tests/features/loop_spend_cap: 123 tests in 10 files, plus the row-26 edit to tests/test_codex_output_contracts.py. The orchestrator re-ran the pack: `123 failed`, each for a missing feature (the max_spend_usd kwarg, UsageRollup.cost_measured, vidbyte.agents.spend_cap, agent.loop refusing max_spend_usd, docs). The diff outside the pack and docs/spec is only the one-line codex edit. Expected after S3: 174 passed (pack plus codex file) |
 | S3 implement | done | 2026-10-20 | 2026-10-20 | reports/S3-implementer.md | head daad59fb, draft PR https://github.com/cerredz/Vidbyte-SDK/pull/1192. Phases P1 e34ec9cf, P2 711db90d, P3 bcfc2654, P4 c554521e, style 2a69ffee. Orchestrator checks: test tree identical to b5a9e689; touched files are exactly the §12.3 rows plus docs/spec; pack plus codex `174 passed in 1.45s`; API `--check` current with 733 exports; inherited red fails at :278 on fork.py only; independent `lint/run.py` gives `SDK-LINT: PASS` with 0 REGRESSED. The implementer reports source stage 1 failed (the inherited red) and 7672 passed, package stage `CI passed.`, semgrep 0, NFR-5 runtime +37/40 and base +20/25 |
 | S4 adversarial review | done | 2026-10-20 | 2026-10-20 | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md; review.md | Lens reports 3b7d51e9, review f74587cb. Verdict MERGEABLE AFTER FIXES. Confirmed: R-1 Blocker (capped JevAgent delegation skips every check point; the orchestrator reproduced `final_response` at 2.118xC), R-2 Major (mypy arg-type at spend_cap.py:111; S009 346 to 347 within slack), R-3 Major (no NFR-1/INV-17 test; M3 survives), R-4 Major (refusal mutants M1/M2 survive), plus 5 Minors R-M1..R-M5. 0 refuted. Spec amended to r4 for R-1 (7446f579, 091fc173, 51ad5091, 5907a1e4): row 28 jev/runtime.py, AC-33, the delegated CP1, and A-8 for the unrun specialist |
-| S5 repair loop | pending (after S2b test additions, running) | | | | |
+| S2b test additions | done | 2026-10-20 | 2026-10-20 | (STATUS block; test-plan.md Mutation and Corrections) | b3796d74, pushed. AC-33 (gate and writer), NFR-1/INV-17 spy (plain run and drain of 3), INV-13 slug and primary refusals, R-M5 message shape, plus an EC-27 wire test (it closes the false skip reason at test-plan :66). Orchestrator re-run: `2 failed, 186 passed`, and the 2 failures are exactly the AC-33 cases (assert (calls, iteration_count) == (0, 0); today it is (1, 1)). M1-M6 are 6/6 killed with AC-33 deselected. The diff touches only the pack and test-plan.md |
+| S5 repair loop | running (iteration 1) | 2026-10-20 | | | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 (cap reached; spec approved r3) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 (cap reached; spec approved r3) · S5 repair iterations: 1/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-19: Program split into 8 PRs (request.md §C.2 D-P1). R3 is the SDK spend cap, and the CLI's `--max-spend` is C3.
@@ -40,6 +41,8 @@ Program: JevAgent in vidbyte-cli, run R3 of 8 (see request.md §C "This run's sc
 - 2026-10-20: S4 R-1 is in scope, because the user said "i want every agent to be tracking usage" and G-1, EC-17 and §9.2 rule 7 already promise a stop at C. So the spec was amended at r4 by a fresh spec author in Revision mode (the escalation-table path for a spec defect), not by the repair agent. The S1 review rounds are spent, so the orchestrator checked the r4 diff directly.
 - 2026-10-20: The r4 author's open item: after a delegated-path cap stop, `response.specialist` names an unrun specialist. Ruled a stated limitation (A-8) plus a README clause (row 17). No behavior change, because resetting JevResponse is scope the conversation never asked for. The `lib/dataclasses/jev.py:3863` docstring is a named follow-up, not a row.
 - 2026-10-20: Test gaps R-1 (AC-33), R-3, R-4 and R-M5 go to a blind S2b test author (owner of the pack) before S5, so the repair agent never writes the test for its own fix. In the mutation run, AC-33 must be deselected, because the `-x` suite would otherwise 'kill' every mutant through the still-red AC-33.
+
+- 2026-10-20: S2b's extra EC-27 test (a billed failure reaching the cap stops before the backup model) is accepted. It proves an existing spec EC, passes at daad59fb, kills M0, and corrects a false test-plan skip reason. It is not a scope addition.
 
 ## User replies (verbatim)
 - 2026-10-19: answers to the alignment questions are in request.md §A, Prompt 3.
