@@ -262,8 +262,13 @@ def test_the_section_4_snippet_prints_the_refusal_the_commit_and_the_totals_and_
 
 
 def test_run_finished_carries_this_sessions_loop_counts_and_the_whole_runs_card_totals(tmp_path: Path) -> None:
-    """AC-15, D-16: a run whose root saves an entry, writes a note, launches a (passed), b (fixed, 2 entries, a note), c (failed, 1 entry), and d (no verdict), then e (passed) whose generator launches n (passed), finishes with run_finished carrying the root result's iteration and tool-call counts (5 and 4), the verdict counts 3/1/1/1 from the cards, committed 3 (card entries only), files 2 (this run's files.jsonl records), deepest 2, events_failed 0, and a duration."""
+    """AC-15, D-16: on a workspace that already holds an earlier run's note and its files.jsonl record, a run whose root saves an entry, writes a note, launches a (passed), b (fixed, 2 entries, a note), c (failed, 1 entry), and d (no verdict), then e (passed) whose generator launches n (passed), finishes with run_finished carrying the root result's iteration and tool-call counts (5 and 4), the verdict counts 3/1/1/1 from the cards, committed 3 (card entries only), files 2 (this run's files.jsonl records, not the earlier run's: review R-4, mutation M10 would count 3), deepest 2, events_failed 0, and a duration."""
     seen: list[Any] = []
+    root = workspace_root(tmp_path)
+    (root / "notes").mkdir(parents=True)
+    (root / "notes" / "earlier.md").write_text("Pricing notes from an earlier run.\n", encoding="utf-8", newline="\n")
+    earlier = {"path": "notes/earlier.md", "description": "Pricing notes from an earlier run", "by": "root", "run": RUN_A, "at": "2026-10-15T02:49:00+00:00"}
+    write_jsonl(root / "files.jsonl", [earlier])
     agent = build_agent(tmp_path, on_event=seen.append)
     tree = ScriptedTree(
         {
@@ -288,12 +293,13 @@ def test_run_finished_carries_this_sessions_loop_counts_and_the_whole_runs_card_
     with tree.install():
         answer = agent.run(TASK)
     tree.assert_complete()
-    root = workspace_root(tmp_path)
     cards = finished_cards(root)
     verdicts = [card["verdict"] for card in cards.values()]
     run_id = answer.metadata["infinite_run_id"]
-    created = [record for record in read_jsonl(root / "files.jsonl") if record["run"] == run_id]
+    described = read_jsonl(root / "files.jsonl")
+    created = [record for record in described if record["run"] == run_id]
     assert (sorted(verdicts), sum(len(card["entries"]) for card in cards.values()), len(created)) == (["failed", "fixed", "passed", "passed", "passed", "unchecked"], 3, 2), "precondition: the cards and notes this script makes"
+    assert run_id != RUN_A and described[0] == earlier and len({record["path"] for record in described}) == 3, "precondition: the earlier run's record survived and names a third path"
     assert kinds(seen)[-1] == "run_finished"
     details = one(seen, "run_finished").details
     assert (details.iterations, details.tool_calls) == (answer.metadata["iteration_count"], answer.metadata["tool_call_count"]) == (5, 4)

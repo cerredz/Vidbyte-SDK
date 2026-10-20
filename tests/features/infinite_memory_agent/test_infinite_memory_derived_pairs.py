@@ -1,9 +1,9 @@
 """FILE: tests/features/infinite_memory_agent/test_infinite_memory_derived_pairs.py
 
-PURPOSE: Proves the derived events of pairs and launches: memory_committed per committed entry after it is on disk, rule and unchecked drops under the right agent, verifier_started and verifier_finished with their counts and usage, the quota fields equal to the quota line the model read, the batch offset, index, size, attempt, and tree counters on subagent_launched and subagent_finished, batch_finished totals (and none for a batch of replays or a pipeline that raises), subagent_aborted for a cancellation, a defect in the pair's own commit step, and an interrupt raised by the sink, the original error class on a child's failed card, and in_flight counting each pair once.
+PURPOSE: Proves the derived events of pairs and launches: memory_committed per committed entry after it is on disk, rule and unchecked drops under the right agent, verifier_started and verifier_finished with their counts and usage, the quota fields equal to the quota line the model read, the batch offset, index, size, attempt, and tree counters on subagent_launched and subagent_finished, batch_finished totals (and none for a batch of replays or a pipeline that raises), subagent_aborted for a cancellation in the generator or the verifier step, a defect in the pair's own commit step (with the cause rule for its error class), and an interrupt raised by the sink on a normal or an error card's finish (always in the commit step), the original error class on a child's failed card, and in_flight counting each pair once.
 ROLE IN CODEBASE: Pair-and-launch layer of tests/features/infinite_memory_agent/ for docs/spec/infinite-memory-derived-events/spec.md (AC-3, AC-4, AC-5, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14; INV-3, INV-4, INV-9, INV-10, INV-15, INV-16; EC-2, EC-5, EC-10, EC-16, EC-20, EC-24, EC-25, EC-26, EC-27; FR-1, FR-2, FR-4, FR-5, FR-8..FR-12; D-6..D-10, D-16, D-18, D-20, D-22). Exercises vidbyte/agents/infinite/launch.py, memory.py, journal.py, and events.py.
 ARCHITECTURE NOTE: Only the model runner is scripted; the workspace, journal, ParallelPipeline, and disk are real. Two seams are touched on purpose and nowhere else: the AC-13 tests wrap InfiniteWorkspace.commit_entry so that one call raises RuntimeError after delegating every other call to the real method, because spec section 13 names that the one way pair-owned code can raise past its card; and the EC-10 sink raises KeyboardInterrupt, which is the scenario itself. Sinks only record (the AC-3 sink also sets a Signal, and the INV-4 sink reads entries.jsonl at delivery time); every assertion runs after the run.
-FUNCTION INVENTORY: test_each_committed_entry_is_announced_in_staged_order_after_it_is_on_disk (AC-5, FR-2, INV-4, INV-9, D-18); test_an_entry_a_sibling_committed_first_is_dropped_by_rule_while_the_rest_commit (AC-3, FR-1, EC-20, INV-15); test_unchecked_entries_drop_under_the_last_agent_that_ran (AC-4 a, b; D-18, D-20); test_verifier_started_and_finished_carry_the_staged_count_the_notes_the_verdict_and_the_usage (FR-9, FR-10, D-6); test_each_quota_carrying_event_equals_the_quota_line_the_model_read (AC-9, FR-4); test_a_batch_beside_a_replay_announces_its_offset_index_counters_and_verdict_totals (AC-10, EC-5, D-7, D-9); test_a_pair_launched_again_after_a_resume_counts_a_second_attempt_and_continues_the_offset (AC-11, EC-16, D-8, D-16); test_a_cancelled_flat_generator_announces_its_abort_before_run_stopped (AC-12, INV-3, INV-15); test_an_error_in_the_pairs_own_commit_step_is_announced_and_the_run_goes_on (AC-13, EC-2, EC-26, INV-10); test_an_aborted_pair_re_raises_the_very_error_it_announced (INV-3, D-10); test_a_sink_interrupt_while_an_abort_is_announced_propagates_in_place_of_the_error (INV-3's exception); test_an_aborted_pair_with_a_long_key_carries_the_key_its_launch_carried (EC-24); test_a_child_agents_error_becomes_the_card_and_names_its_original_class (AC-14, EC-27, D-22); test_in_flight_counts_each_pair_once_and_never_goes_below_zero (INV-16, D-9, EC-10, EC-25); test_an_interrupt_the_sink_raises_on_subagent_finished_gives_one_abort_in_the_commit_phase (EC-10, INV-3, INV-10). _remember, _usage, _pair, _quota, _flaky_commit, and _cancel_while_alpha_waits are small builders.
+FUNCTION INVENTORY: test_each_committed_entry_is_announced_in_staged_order_after_it_is_on_disk (AC-5, FR-2, INV-4, INV-9, D-18); test_an_entry_a_sibling_committed_first_is_dropped_by_rule_while_the_rest_commit (AC-3, FR-1, EC-20, INV-15); test_unchecked_entries_drop_under_the_last_agent_that_ran (AC-4 a, b; D-18, D-20); test_verifier_started_and_finished_carry_the_staged_count_the_notes_the_verdict_and_the_usage (FR-9, FR-10, D-6); test_each_quota_carrying_event_equals_the_quota_line_the_model_read (AC-9, FR-4); test_a_batch_beside_a_replay_announces_its_offset_index_counters_and_verdict_totals (AC-10, EC-5, D-7, D-9); test_a_pair_launched_again_after_a_resume_counts_a_second_attempt_and_continues_the_offset (AC-11, EC-16, D-8, D-16); test_a_cancelled_flat_generator_announces_its_abort_before_run_stopped (AC-12, INV-3, INV-15); test_a_run_cancelled_while_the_verifier_waits_announces_its_abort_in_the_verifier_step (D-10, FR-11; review R-6); test_an_error_in_the_pairs_own_commit_step_is_announced_and_the_run_goes_on (AC-13, EC-2, EC-26, INV-10; D-22's cause rule, review R-12); test_an_aborted_pair_re_raises_the_very_error_it_announced (INV-3, D-10); test_a_sink_interrupt_while_an_abort_is_announced_propagates_in_place_of_the_error (INV-3's exception); test_an_aborted_pair_with_a_long_key_carries_the_key_its_launch_carried (EC-24); test_a_child_agents_error_becomes_the_card_and_names_its_original_class (AC-14, EC-27, D-22); test_in_flight_counts_each_pair_once_and_never_goes_below_zero (INV-16, D-9, EC-10, EC-25; a sink raising on a launch and on a finish, review R-3); test_an_interrupt_the_sink_raises_on_subagent_finished_gives_one_abort_in_the_commit_phase (EC-10, INV-3, INV-10); test_an_interrupt_the_sink_raises_on_an_error_cards_finish_still_aborts_in_the_commit_phase (EC-10 on the error branch, D-10; review R-5). _remember, _usage, _pair, _quota, _flaky_commit, and _cancel_while_alpha_waits are small builders.
 COMMON MODIFICATION PATTERNS: A new pair or launch event gets one test here that scripts the pair, asserts the exact kinds list (or the pair's own subsequence when sibling pairs interleave), and checks its details against the journal, entries.jsonl, or the text the model read.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level. 2. Do not assert inside a sink. 3. Do not pin the interleaving of two sibling pairs' events; pin each pair's own order and the batch's closing event. 4. Do not mock the journal, the pipeline, or the workspace beyond the one commit_entry fault the spec names.
 KNOWN EDGE CASES: The scripted model is unpriced, so every cost_usd is None; scripted usage needs total_tokens for a token count (the fixture's DEFAULT_USAGE has none and counts 0). A KeyboardInterrupt raised inside a pair's task leaves the loop at once, and asyncio then cancels the root's task, so EC-10's run_stopped names CancelledError. The verifier_started summary's {files} could mean the notes written or the notes shown, which the spec does not settle, so that one summary accepts both counts (test-plan OPEN ITEM).
@@ -403,9 +403,9 @@ def test_a_pair_launched_again_after_a_resume_counts_a_second_attempt_and_contin
 # ---------------------------------------------------------------- AC-12, AC-13, AC-14, EC-10: aborts and errors
 
 
-async def _cancel_while_alpha_waits(agent: Any) -> None:
-    """Starts arun, waits until pair alpha's generator has staged two entries and is waiting, cancels the run, and checks CancelledError propagates."""
-    started = Signal("alpha's generator is waiting")
+async def _cancel_while_alpha_waits(agent: Any, step: str = "generator") -> None:
+    """Starts arun, waits until pair alpha's `step` is waiting on its model call (the generator after staging two entries, or the verifier after the generator staged one entry and replied), cancels the run, and checks CancelledError propagates."""
+    started = Signal(f"alpha's {step} is waiting")
     never = Signal("a release that never comes")
 
     async def hold(call: ModelCall) -> object:
@@ -413,7 +413,11 @@ async def _cancel_while_alpha_waits(agent: Any) -> None:
         await never.wait(call.agent)
         return reply("unreachable")
 
-    tree = ScriptedTree({ROOT: [launch(task("alpha"))], generator("alpha"): [_remember(FACT), _remember(SECOND), hold]})
+    if step == "generator":
+        scripts = {ROOT: [launch(task("alpha"))], generator("alpha"): [_remember(FACT), _remember(SECOND), hold]}
+    else:
+        scripts = {ROOT: [launch(task("alpha"))], generator("alpha"): [_remember(FACT), reply(GEN_SUMMARY)], verifier("alpha"): [hold]}
+    tree = ScriptedTree(scripts)
     with tree.install():
         running = asyncio.create_task(agent.arun(TASK))
         await started.wait("the test")
@@ -441,12 +445,34 @@ async def test_a_cancelled_flat_generator_announces_its_abort_before_run_stopped
     assert_portable(seen)
 
 
-@pytest.mark.parametrize("fail_on", [1, 2], ids=["first-commit-fails", "second-commit-fails"])
-def test_an_error_in_the_pairs_own_commit_step_is_announced_and_the_run_goes_on(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fail_on: int) -> None:
-    """AC-13, EC-2, EC-26, INV-10: when the workspace commit raises RuntimeError on a passing pair's first (or second) staged entry, the entries already committed are announced, then subagent_aborted (failed, RuntimeError, phase commit, staged = entries still staged); the batch gets no batch_finished, the pair no subagent_finished or pair_finished, the root's launch_subagent result is the loop's "Tool execution failed: ..." error, and the run ends with run_finished."""
+@pytest.mark.asyncio
+async def test_a_run_cancelled_while_the_verifier_waits_announces_its_abort_in_the_verifier_step(tmp_path: Path) -> None:
+    """D-10, FR-11, INV-3, INV-15 (review R-6): cancelling the run while alpha's verifier waits on its model call (its generator staged one entry and replied) gives verifier_started and then subagent_aborted (alpha, root/alpha, cancelled, CancelledError, phase verifier, staged 1) from the root, right before run_stopped, with no verifier_finished, commit, or drop, and the CancelledError still propagates. A pair that never sets the verifier phase would report generator here (mutation M1)."""
+    from vidbyte.lib.enums.infinite import InfiniteAgentRole, InfinitePairPhase, InfiniteStopCause
+
+    seen: list[Any] = []
+    agent = build_agent(tmp_path, on_event=seen.append)
+    await _cancel_while_alpha_waits(agent, step="verifier")
+    assert kinds(seen) == ["run_started", "subagent_launched", "memory_staged", "generator_finished", "verifier_started", "subagent_aborted", "run_stopped"]
+    aborted = one(seen, "subagent_aborted")
+    assert (aborted.agent_key, aborted.role, aborted.depth) == ("root", InfiniteAgentRole.ROOT, 0)
+    details = aborted.details
+    assert (details.name, details.key, details.reason, details.error_type, details.phase, details.staged) == ("alpha", pair_key("alpha"), InfiniteStopCause.CANCELLED, "CancelledError", InfinitePairPhase.VERIFIER, 1)
+    assert aborted.summary == "alpha aborted (cancelled) in its verifier step: CancelledError"
+    assert "pair_finished" not in events(journal_records(workspace_root(tmp_path)))
+    assert_portable(seen)
+
+
+@pytest.mark.parametrize(("fail_on", "cause"), [(1, None), (2, None), (1, "KeyError")], ids=["first-commit-fails", "second-commit-fails", "first-commit-fails-from-a-key-error"])
+def test_an_error_in_the_pairs_own_commit_step_is_announced_and_the_run_goes_on(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fail_on: int, cause: str | None) -> None:
+    """AC-13, EC-2, EC-26, INV-10, D-22: when the workspace commit raises RuntimeError on a passing pair's first (or second) staged entry, the entries already committed are announced, then subagent_aborted (failed, phase commit, staged = entries still staged) whose error_type is RuntimeError, or KeyError when the RuntimeError was raised from a KeyError (the cause rule, review R-12), with the matching template summary; the batch gets no batch_finished, the pair no subagent_finished or pair_finished, the root's launch_subagent result is the loop's "Tool execution failed: ..." error, and the run ends with run_finished."""
     from vidbyte.lib.enums.infinite import InfinitePairPhase, InfiniteStopCause
 
-    calls = _flaky_commit(monkeypatch, fail_on, RuntimeError(FAULT))
+    error = RuntimeError(FAULT)
+    if cause is not None:
+        # The same object a `raise RuntimeError(...) from KeyError(...)` would carry.
+        error.__cause__ = KeyError("s1")
+    calls = _flaky_commit(monkeypatch, fail_on, error)
     seen: list[Any] = []
     agent = build_agent(tmp_path, on_event=seen.append)
     tree = ScriptedTree(
@@ -462,8 +488,10 @@ def test_an_error_in_the_pairs_own_commit_step_is_announced_and_the_run_goes_on(
     assert len(calls) == fail_on, "precondition: the injected commit failure fired"
     commits = ["memory_committed"] * (fail_on - 1)
     assert kinds(seen) == ["run_started", "subagent_launched", "memory_staged", "memory_staged", "generator_finished", "verifier_started", "verifier_finished", *commits, "subagent_aborted", "run_finished"]
-    details = one(seen, "subagent_aborted").details
-    assert (details.name, details.key, details.reason, details.error_type, details.phase, details.staged) == (PAIR, pair_key(PAIR), InfiniteStopCause.FAILED, "RuntimeError", InfinitePairPhase.COMMIT, 2 - (fail_on - 1))
+    aborted = one(seen, "subagent_aborted")
+    details = aborted.details
+    assert (details.name, details.key, details.reason, details.error_type, details.phase, details.staged) == (PAIR, pair_key(PAIR), InfiniteStopCause.FAILED, cause or "RuntimeError", InfinitePairPhase.COMMIT, 2 - (fail_on - 1))
+    assert aborted.summary == f"{PAIR} aborted (failed) in its commit step: {cause or 'RuntimeError'}"
     result = tool_result(tree.calls_by(ROOT)[1], "launch_subagent")
     assert is_error(result) and f"Tool execution failed: {FAULT}" in result, result
     assert events(journal_records(workspace_root(tmp_path))) == ["run_started", "pair_started", "run_finished"]
@@ -590,7 +618,7 @@ def test_a_child_agents_error_becomes_the_card_and_names_its_original_class(tmp_
 
 
 def test_in_flight_counts_each_pair_once_and_never_goes_below_zero(tmp_path: Path) -> None:
-    """INV-16, D-9, EC-10, EC-25, R-17: on one InfiniteEvents with a real launch tool and journal, in_flight rises on each launch even when the sink raises on that event, falls on subagent_finished, falls on subagent_aborted only for a pair the journal has not finished, and is floored at 0: launches read 1, 2, 3, then 2 and 1 after the aborts, and subagent_finished reads 2."""
+    """INV-16, D-9, EC-10, EC-25, R-17: on one InfiniteEvents with a real launch tool and journal, in_flight rises on each launch and falls on subagent_finished even when the sink raises on that event (b's launch, a's finish), falls on subagent_aborted only for a pair the journal has not finished, and is floored at 0: launches read 1, 2, 3, then 2 and 1 after the aborts, and subagent_finished reads 2. A decrement made after delivery would be skipped by the raising sink, so d's launch would read 3 (review R-3, mutation M7)."""
     from vidbyte.agents.infinite.events import InfiniteEvents
     from vidbyte.agents.infinite.journal import InfiniteRunJournal
     from vidbyte.agents.infinite.launch import InfiniteLaunchTool, InfinitePair
@@ -607,6 +635,8 @@ def test_in_flight_counts_each_pair_once_and_never_goes_below_zero(tmp_path: Pat
         seen.append(event)
         if event.kind.value == "subagent_launched" and event.details.name == "b":
             raise ValueError("the sink rejects b's launch")
+        if event.kind.value == "subagent_finished" and event.details.name == "a":
+            raise ValueError("the sink rejects a's finish")
 
     events_writer = InfiniteEvents(sink, journal.run_id)
     launch_tool = InfiniteLaunchTool(settings, workspace, journal, key="root", depth=0, extras=(), events=events_writer)
@@ -668,4 +698,41 @@ def test_an_interrupt_the_sink_raises_on_subagent_finished_gives_one_abort_in_th
     details = aborted.details
     assert (details.reason, details.error_type, details.phase, details.staged) == (InfiniteStopCause.CANCELLED, "KeyboardInterrupt", InfinitePairPhase.COMMIT, 0)
     assert events(journal_records(workspace_root(tmp_path))) == ["run_started", "pair_started", "pair_finished"]
+    assert_portable(seen)
+
+
+@pytest.mark.parametrize("failing", ["generator", "verifier"], ids=["generator-fails", "verifier-fails"])
+def test_an_interrupt_the_sink_raises_on_an_error_cards_finish_still_aborts_in_the_commit_phase(tmp_path: Path, failing: str) -> None:
+    """EC-10, D-10, section 12.3 row 6 (review R-5, pinning the R-2 fix): when alpha's generator (or its verifier) fails with RuntimeError, so the pair records that error as its card, and the sink then raises KeyboardInterrupt while handling that pair's subagent_finished, the pair is already in its commit step: subagent_aborted (cancelled, KeyboardInterrupt, phase commit, staged 0) follows the finish for the same key, the finish names RuntimeError, the journal holds the pair's pair_finished, and the very same KeyboardInterrupt reaches the caller. Red until the error branch sets the commit phase."""
+    from vidbyte.lib.enums.infinite import InfinitePairPhase, InfiniteResultStatus, InfiniteStopCause, InfiniteVerdict
+
+    seen: list[Any] = []
+    interrupts: list[KeyboardInterrupt] = []
+
+    def sink(event: Any) -> None:
+        seen.append(event)
+        if event.kind.value == "subagent_finished" and not interrupts:
+            interrupts.append(KeyboardInterrupt("the developer pressed Ctrl-C in the sink"))
+            raise interrupts[0]
+
+    agent = build_agent(tmp_path, on_event=sink)
+    if failing == "generator":
+        scripts = {ROOT: [launch(task("alpha"))], generator("alpha"): [fail(RuntimeError("runner bug"))]}
+        before, status = ["run_started", "subagent_launched"], InfiniteResultStatus.FAILED
+    else:
+        scripts = {ROOT: [launch(task("alpha"))], generator("alpha"): [reply(GEN_SUMMARY)], verifier("alpha"): [fail(RuntimeError("runner bug"))]}
+        before, status = ["run_started", "subagent_launched", "generator_finished", "verifier_started"], InfiniteResultStatus.DONE
+    tree = ScriptedTree(scripts)
+    with tree.install(), pytest.raises(KeyboardInterrupt) as raised:
+        agent.run(TASK)
+    tree.assert_complete()
+    assert raised.value is interrupts[0]
+    assert kinds(seen) == [*before, "subagent_finished", "subagent_aborted", "run_stopped"]
+    finished, aborted = one(seen, "subagent_finished"), one(seen, "subagent_aborted")
+    assert finished.details.key == aborted.details.key == pair_key("alpha")
+    assert (finished.details.status, finished.details.verdict, finished.details.error_type) == (status, InfiniteVerdict.UNCHECKED, "RuntimeError"), "precondition: the child's error became the pair's card"
+    assert events(journal_records(workspace_root(tmp_path))) == ["run_started", "pair_started", "pair_finished"]
+    details = aborted.details
+    assert (details.reason, details.error_type, details.phase, details.staged) == (InfiniteStopCause.CANCELLED, "KeyboardInterrupt", InfinitePairPhase.COMMIT, 0)
+    assert aborted.summary == "alpha aborted (cancelled) in its commit step: KeyboardInterrupt"
     assert_portable(seen)
