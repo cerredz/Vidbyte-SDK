@@ -22,11 +22,11 @@ Program: JevAgent in vidbyte-cli, run R3 of 8 (see request.md §C "This run's sc
 | S4 adversarial review | done | 2026-10-20 | 2026-10-20 | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md; review.md | Lens reports 3b7d51e9, review f74587cb. Verdict MERGEABLE AFTER FIXES. Confirmed: R-1 Blocker (capped JevAgent delegation skips every check point; the orchestrator reproduced `final_response` at 2.118xC), R-2 Major (mypy arg-type at spend_cap.py:111; S009 346 to 347 within slack), R-3 Major (no NFR-1/INV-17 test; M3 survives), R-4 Major (refusal mutants M1/M2 survive), plus 5 Minors R-M1..R-M5. 0 refuted. Spec amended to r4 for R-1 (7446f579, 091fc173, 51ad5091, 5907a1e4): row 28 jev/runtime.py, AC-33, the delegated CP1, and A-8 for the unrun specialist |
 | S2b test additions | done | 2026-10-20 | 2026-10-20 | (STATUS block; test-plan.md Mutation and Corrections) | b3796d74, pushed. AC-33 (gate and writer), NFR-1/INV-17 spy (plain run and drain of 3), INV-13 slug and primary refusals, R-M5 message shape, plus an EC-27 wire test (it closes the false skip reason at test-plan :66). Orchestrator re-run: `2 failed, 186 passed`, and the 2 failures are exactly the AC-33 cases (assert (calls, iteration_count) == (0, 0); today it is (1, 1)). M1-M6 are 6/6 killed with AC-33 deselected. The diff touches only the pack and test-plan.md |
 | S5 repair loop | done (1 iteration) | 2026-10-20 | 2026-10-20 | reports/S5-repair-1.md, verify-log.md | head eba8bf85 (code 0be0545d), pushed. Fixed R-1 (54a11a21, 9f684068), R-2 (b7e13995), R-M1 (de093778), R-M2 (de677706), R-M4 (977086ff) and R-M3 (0be0545d, section now 46 lines). R-3, R-4 and R-M5 were closed by S2b's tests. Orchestrator checks: tests unchanged against b3796d74; files are within r4 §12.3 plus docs; pack plus codex `188 passed`; the verifier's R-1 probe gives 0 specialist calls and `max_spend` in both delegated scenarios. The agent reports source `1 failed (inherited), 7686 passed`, package `CI passed.`, lint at base counts with S009 346, and semgrep 0. Dispatched CI 39422105237 and Static policy 39422108655 on eba8bf85 |
-| S5 re-review | running (round 1) | 2026-10-20 | | | |
+| S5 re-review | done (round 1, SOUND) | 2026-10-20 | 2026-10-20 | reports/S5-rereview.md | 1599aac8. 0 Blockers, 0 Majors, 2 Minors. R-C1: the INV-6 Delegated row and the §9.2 JevAgent row claimed a per-run bound, but a specialist draining queued prompts reaches 3.201xC (probe_specialist_drain.py). R-C2: the §5 flowchart and the spend_cap.py:5 header omit the delegated CP1. Spec r4.2 (68b67231, dc494a88) rewords both rows per specialist reply, adds A-9, and adds node DL to §5. Orchestrator check: only spec.md and the S1 report changed; revision stays 4 |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 (cap reached; spec approved r3) · S5 repair iterations: 1/8 · S5 re-review rounds: 1/2
+- S1 review rounds: 2/2 (cap reached; spec approved r3) · S5 repair iterations: 1/8 · S5 re-review rounds: 1/2 (SOUND)
 
 ## Decisions the orchestrator made
 - 2026-10-19: Program split into 8 PRs (request.md §C.2 D-P1). R3 is the SDK spend cap, and the CLI's `--max-spend` is C3.
@@ -44,6 +44,7 @@ Program: JevAgent in vidbyte-cli, run R3 of 8 (see request.md §C "This run's sc
 
 - 2026-10-20: S2b's extra EC-27 test (a billed failure reaching the cap stops before the backup model) is accepted. It proves an existing spec EC, passes at daad59fb, kills M0, and corrects a false test-plan skip reason. It is not a scope addition.
 
+- 2026-10-20: S5 re-review R-C1 is a stated limitation (A-9): each queued prompt a specialist drains gets its own cap (EC-41, Q-9). A JevAgent-level refusal would be `[scope-adding]`. The spec half of R-C2 is fixed in §5. The `spend_cap.py:5` header half is declined as a follow-up: r4 folds the delegated check into CP1, so the header's "CP1-CP4" stays true, and changing a code file would mean re-running every gate. Recorded for the PR body's follow-ups.
 ## User replies (verbatim)
 - 2026-10-19: answers to the alignment questions are in request.md §A, Prompt 3.
 
