@@ -341,6 +341,12 @@ On every row-28 stop, the probe saw this:
 
 **Ruling applied (`51ad5091`, still r4).** The orchestrator accepted the open item as a stated limitation. New §15 A-8 records it: a caller tells the cases apart by `stop_reason == "max_spend"` with `iteration_count == 0`, with one stated edge case (a specialist whose own pre-loop spend stops it at its own first CP1). Row 17 adds the Jev README clause. The `jev.py:3863` docstring is named as a follow-up, and no behavior changes.
 
+**r4.2 wording (`68b67231`, still r4).** This applies the S5 re-review's R-C1 and R-C2.
+- R-C1: INV-6's Delegated row and the §9.2 JevAgent row now bound spend per specialist reply. Each prompt the specialist drains has its own cap, up to `max_queued_prompts` (`base.py:1211`). New A-9 states this as a limitation; no refusal is added.
+- R-C2: the §5 flowchart gains a `DL` node (the CP1 in `_delegate`) that feeds the stop edge. The `spend_cap.py` header half is left as a follow-up.
+- No mermaid parser is installed offline. Both new diagram lines reuse constructs the diagram already has.
+- §9.2 rule 8 is unchanged, because rule 7 already states the per-reply rule for queued prompts.
+
 **Self-check (Stage E):**
 - Every table has a consistent column count.
 - No ID is referenced without a definition.
