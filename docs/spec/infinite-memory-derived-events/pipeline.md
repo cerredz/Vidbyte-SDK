@@ -18,8 +18,8 @@ started: 2026-10-19 20:30
 | S2 tests | done | 2026-10-20 | 2026-10-20 | reports/S2-test-author.md | 4 new files, 87 red; 33 pinned tests updated (spec-mandated); pack 120 failed / 294 passed (re-run by orchestrator, identical); S2_HEAD = 2cab5070; spec r4 @2be3e9c8 resolved S2 items 1, 2, 4 |
 | S3 implement | done | 2026-10-20 | 2026-10-20 | reports/S3-implementer.md | S3_HEAD = c1c3ecc0 (last code 939381ec); PR #1191 draft; pack 414/414 (orchestrator re-ran twice); SDK-LINT PASS; public API current; tests unchanged since 2cab5070; INV-20 paths unchanged; budget events 658/660, launch 455/470, records 832/870 |
 | S4 adversarial review | done | 2026-10-20 | 2026-10-20 | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md; review.md | 3× MERGEABLE AFTER FIXES; verifier: 0 Blocker / 6 Major (R-1 docs, R-2 code, R-3..R-6 tests) / 7 Minor (R-13 scope-adding follow-up); 0 refuted; R-E1's journal-then-announce fix refuted (breaks AC-10) |
-| S4b test strengthening (R-3..R-6, R-12) | running | 2026-10-20 | | | routed to the S2 test author |
-| S5 repair loop | pending | | | | |
+| S4b test strengthening (R-3..R-6, R-12) | done | 2026-10-20 | 2026-10-20 | test-plan.md § "S4 strengthening" | 4f51cef1; pack 2 failed (the R-5 pin, two parametrized cases, red until R-2) / 416 passed (orchestrator re-ran); M1/M7/M10/M11 each now killed by exactly one test; **S2_HEAD = 4f51cef1** |
+| S5 repair loop | running | 2026-10-20 | | | iteration 1 |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
 
@@ -42,6 +42,9 @@ started: 2026-10-19 20:30
 - 2026-10-20 — Routed the verifier's `tests`-owner findings (R-3, R-4, R-5, R-6 Major; R-12 Minor, kills mutation M11) to the original S2 test author (resumed), not to the repair agent — only the test author edits tests. Strengthening only: new cases or tighter assertions in S2's own derived-events files; no loosening. The R-5 pin is expected red until the repair agent lands R-2. S2_HEAD moves to the test author's last commit; S5 diffs against the new value.
 - 2026-10-20 — Order: test strengthening first, then S5 repair iteration 1 (sequential — both commit in the one worktree). R-13 (`level` accepts 0..100) is `[scope-adding]`: not built, listed as a follow-up for the user.
 - 2026-10-20 — The findings verifier disclosed one grep that printed 3 rows of `docs/spec/infinite-memory-events/spec.md` (outside its allowed docs list); no verdict depends on it. Noted, no action.
+- 2026-10-20 — Accepted `2 failed` (not 1) after strengthening: both are the two parametrized cases of the one R-5 pin (generator-fails, verifier-fails), red for the stated reason.
+- 2026-10-20 — Remote CI: `gh pr checks 1191` → "no checks reported"; every workflow in `.github/workflows/` (ci, static-policy, agents-md-placement, actionlint) has automatic triggers removed ("TEMPORARILY DISABLED", `workflow_dispatch` only). I will not dispatch CI against a deliberate repo-wide pause; the local full gate (`scripts/run_ci.py` source + package stages, lint, public API) is the convergence authority. The user can run `gh workflow run ci.yml --ref feat/infinite-memory-derived-events` if they want remote proof.
+- 2026-10-20 — S5 repair may edit spec.md text only for the docs-owner review rows (R-1, R-7, R-11, EC-25 wording) and must log them in §16/§17.
 - 2026-10-20 — Not forwarded to the spec: S2 items 5–7 (coverage notes for S4, the pre-existing harness_threads failure). Spec D-7 table row has an unescaped `|` (cosmetic, predates r4); the S3 implementer escapes it while it edits §17.
 
 ## User replies (verbatim)
