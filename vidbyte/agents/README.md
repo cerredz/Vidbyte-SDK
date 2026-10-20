@@ -383,11 +383,52 @@ stage. See [`output/README.md`](output/README.md) for the delivery rules and
 [`../lib/outputs/README.md`](../lib/outputs/README.md) for each provider's
 credential and limits.
 
+## Spend Cap
+
+`AgentLoopSettings(max_spend_usd=...)` caps one reply's measured spend in USD: the
+SDK-rated cost of every model call, billed failed attempt, context-window side call,
+priced search or fetch, and finished child agent in the agent's own usage ledger. It
+cannot see a failed call that reported no usage, Vidbyte's relay fee, a tool that pays
+an API without recording it, or a gap between list price and the provider's invoice.
+
+```python
+from vidbyte import Agent, AgentLoopSettings, AgentStopReason
+
+agent = Agent(name="researcher", system_prompt="Answer directly.",
+              provider="openai", model_name="gpt-5.4-mini",
+              agent_loop_settings=AgentLoopSettings(max_spend_usd=0.50))
+reply = agent.run("Summarize the open issues in this repository.")
+stopped = reply.metadata["stop_reason"] == AgentStopReason.MAX_SPEND.value
+```
+
+The loop checks the cap before every model call, every tool call (isDone and the
+launch tools included), every plain-text finish, and JevAgent's compute checkpoint. It
+is a threshold checked between steps, never a maximum bill: a run stops below the cap
+plus its largest single step, and concurrent children that inherit the cap can each
+spend up to it. A stopped reply has `stop_reason` `"max_spend"`, which sessions report
+as `resource.exhausted`; when the ledger cannot measure the spend, the run stops at the
+next check and its output names the cause. Nothing runs after a cap stop: no retry,
+reflection, review, grading, verifier, or queued prompt, and a `MultiAgent` worker's
+task is blocked. Read the spend with `agent.get_usage().cost_usd`; `cost_measured` on
+the same rollup says whether that is the whole measured spend or only a lower bound.
+
+The cap is per reply, hidden from the model, and not overridable through the fork tool.
+`Agent`, `CodingAgent`, `JevAgent`, and `InfiniteMemoryAgent` enforce it, as does every
+fork, clone, helper, or subagent built from the same settings, against its own spend.
+Construction refuses it on a non-linear runtime, a non-text runner, a configured model
+the pricebook cannot price (OpenRouter, which reports its own cost, is exempt), a
+JevAgent specialist without its own cap at or below JevAgent's, and `CodexHarnessAgent`;
+`MultiAgent` and `AggregateAgent` members each enforce their own. Use one capped agent
+object per concurrent run, because overlapping replies reset each other's ledger.
+Unlike `CostBudgetMiddleware`, which estimates spend from tokens at a flat rate and
+stops with `middleware_abort`, the cap reads the priced ledger and fails closed.
+
 ## Key Modules
 
 - `base.py`: `BaseAgent`, inferred runner construction, tool binding, context assembly, trace setup, and runtime dispatch.
 - `client.py`: namespace client used by `VidbyteSDK().agents`.
 - `fallback.py`: `AgentFallback`, the ordered model chain and the transforms that route a run to the next model.
+- `spend_cap.py`: `AgentSpendCap`, which decides from the live usage rollup whether a run with `AgentLoopSettings.max_spend_usd` must stop.
 - `base.py` also opens the run's `SystemPromptPresetScope` (`vidbyte/lib/system_prompt_presets.py`) and composes presets in `_runtime()` through `SystemPromptPresetComposer` (`vidbyte/prompts/system_prompt_presets.py`).
 - `settings/fallback.py`: `AgentFallbackSettings`, the validated developer-facing chain configuration.
 - `runtimes/`: linear, search, and actor-model runtime components.

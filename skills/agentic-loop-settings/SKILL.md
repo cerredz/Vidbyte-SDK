@@ -92,6 +92,7 @@ These parameters are stored on `AgentLoopSettings`, validated at construction ti
 | `max_iterations` | `int \| None` | `None` | Maximum number of model call + tool call cycles. The loop stops with `stop_reason=max_iterations` when this count is reached. Originally exposed as `max_tool_rounds`. |
 | `max_tokens` | `int \| None` | `None` | Maximum cumulative tokens consumed across all model calls in the run. The loop stops with `stop_reason=max_tokens` when usage reaches this ceiling. |
 | `max_tool_calls` | `int \| None` | `None` | Maximum total tool invocations across the entire run. Independent of iterations — an agent can hit this limit without exhausting `max_iterations` if it fans out many tools per iteration. Stops with `stop_reason=max_tool_calls`. |
+| `max_spend_usd` | `float \| None` | `None` | Optional USD cap on one reply's measured spend. The loop checks it before every model call, tool call, finish attempt, and compute checkpoint, and stops with `stop_reason=max_spend`. It is a threshold, not a maximum bill. See `vidbyte/agents/README.md`, section Spend Cap. |
 | `compaction_trigger_tokens` | `int \| None` | `None` | Token usage level at which context compaction triggers. Must be greater than `compaction_target_tokens`. |
 | `compaction_target_tokens` | `int \| None` | `None` | Target token usage after compaction completes. Must be less than `compaction_trigger_tokens`. |
 
@@ -169,6 +170,7 @@ These parameters are accepted and validated on `AgentLoopSettings` at constructi
 |-----------|-------|
 | Any integer field is `0` or negative | `{field} must be greater than zero when provided` |
 | `timeout_seconds` is `0.0` or negative | `timeout_seconds must be greater than zero when provided` |
+| `max_spend_usd` is not a finite number greater than 0 | `AgentLoopSettings.max_spend_usd must be a finite number greater than 0…` |
 | `compaction_target_tokens >= compaction_trigger_tokens` (when both set) | `compaction_target_tokens must be less than compaction_trigger_tokens` |
 | `tool_settings` is not a `ToolSettings` instance | `tool_settings must be a ToolSettings instance when provided` |
 | `max_tool_calls` and `ToolSettings.max_calls` both set and differ | must match when both are provided |
@@ -197,6 +199,7 @@ When the runtime stops due to an `AgentLoopSettings` budget, the `AgentResult.me
 | `"final_response"` | Agent completed normally (no budget hit) |
 | `"is_done"` | Agent called the `isDone` tool explicitly |
 | `"contract_unsatisfied"` | Output-contract floors still unmet after `max_contract_rejections` attempts |
+| `"max_spend"` | `max_spend_usd` reached, or a capped run's spend could not be measured |
 
 ---
 
@@ -223,7 +226,7 @@ Only budgets that are **both numerically calculable and tracked by the runtime l
 | `max_tokens` | cumulative tokens used so far |
 | `max_tool_calls` | live tool-call count |
 
-Budgets that have no meaningful live "current/limit" measurement are intentionally **excluded** from the context window: `max_retries`, `timeout_seconds`, `allowed_tools`, `max_parallel_tool_calls`, `context_window_budget`, and the compaction params. They remain available for introspection on `agent.agent_loop_settings`.
+Budgets that have no meaningful live "current/limit" measurement are intentionally **excluded** from the context window: `max_retries`, `timeout_seconds`, `max_spend_usd`, `allowed_tools`, `max_parallel_tool_calls`, `context_window_budget`, and the compaction params. They remain available for introspection on `agent.agent_loop_settings`.
 
 A budget that is not configured (`None`) is omitted from the block. When none of the calculable budgets are set, no block is injected at all and the system context is unchanged.
 

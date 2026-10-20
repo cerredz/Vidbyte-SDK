@@ -103,8 +103,9 @@ failure of a browser call keeps its harness's own `grok.*`, `opencode.*` or
 `runtime.compaction_failed`, `runtime.queue_limit`, and `resource.exhausted`
 describe deterministic execution boundaries.
 
-Limit failures normally stop cleanly or route to a continuation strategy. A
-middleware implementation error follows that middleware's existing
+Limit failures normally stop cleanly or route to a continuation strategy.
+A run that `AgentLoopSettings.max_spend_usd` stops (stop reason `max_spend`) reports `resource.exhausted`.
+A middleware implementation error follows that middleware's existing
 `fail_closed` setting.
 
 ## Session, state, and data

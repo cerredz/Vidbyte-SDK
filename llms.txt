@@ -726,7 +726,8 @@ alternative: it accepts a title, arbitrary section map, optional audience, and
 optional instructions, then records the authored handoff on its bound agent.
 
 `AgentLoopSettings` centralizes loop configuration. All positive integer limits
-must be greater than zero; `timeout_seconds` must be positive; and when both
+must be greater than zero; `timeout_seconds` must be positive;
+`max_spend_usd` must be a finite USD amount greater than zero; and when both
 compaction limits are set, `compaction_target_tokens` must be less than
 `compaction_trigger_tokens`.
 
@@ -735,6 +736,7 @@ compaction limits are set, `compaction_target_tokens` must be less than
 | `max_iterations`, `max_tokens`, `max_tool_calls` | Direct runtime hard ceilings |
 | `max_queued_prompts` | Maximum queued follow-up prompts; default 25 |
 | `max_parallel_tool_calls`, `max_retries`, `timeout_seconds` | Additional loop controls |
+| `max_spend_usd` | Optional USD cap on one reply's measured spend; stop reason `"max_spend"` |
 | `context_window_budget`, `compaction_trigger_tokens`, `compaction_target_tokens` | Context and compaction controls |
 | `allowed_tools` | Optional allowed tool-name tuple |
 | `tool_error_policy` | A nested `ToolErrorPolicy` instance |
@@ -742,8 +744,8 @@ compaction limits are set, `compaction_target_tokens` must be less than
 | `output_contracts`, `max_contract_rejections` | Finish floors and their retry budget |
 
 `to_runtime_config()` projects `max_iterations`, `max_tokens`, the effective
-`max_tool_calls`, `timeout_seconds`, the two compaction limits, and
-`tool_settings` to the direct runtime. If both `max_tool_calls` and
+`max_tool_calls`, `timeout_seconds`, `max_spend_usd`, the two compaction limits,
+and `tool_settings` to the direct runtime. If both `max_tool_calls` and
 `ToolSettings.max_calls` are supplied, they must agree. When `timeout_seconds`
 is set, the runtime stops at the first iteration boundary past the deadline
 with `stop_reason` `"timeout"`; in-flight calls are not cancelled, so pair the
