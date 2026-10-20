@@ -1,13 +1,13 @@
 """FILE: vidbyte/agents/infinite/journal.py
 
 PURPOSE: Defines InfiniteRunJournal, the append-only record of one InfiniteMemory run in .runs/<run_id>.jsonl: the task, every pair that started, every pair that finished with its result card, and how the run ended (its stop reason, the root's final answer, and the notes the root wrote), so an interrupted run can resume without redoing finished pairs and a finished one can be handed off.
-ROLE IN CODEBASE: Started by InfiniteMemoryRuntime.arun (runtime.py) for a new run, or found by InfiniteMemoryAgent.resume (agent.py) for an interrupted one; written and read by the launch tool (launch.py) for every pair; read by the agent to brief a resumed root and to build a run's handoff, by the launch tool to brief a re-run generator and to cap the number of agents, and by InfiniteEvents (events.py) for a resumed or finished run's event.
+ROLE IN CODEBASE: Started by InfiniteMemoryRuntime.arun (runtime.py) for a new run, or found by InfiniteMemoryAgent.resume (agent.py) for an interrupted one; written and read by the launch tool (launch.py) for every pair; read by the agent to brief a resumed root and to build a run's handoff, by the launch tool to brief a re-run generator and to cap the number of agents, and by InfiniteEvents (events.py) for run events, including the started list behind each launch's attempt and batch and the run's deepest depth.
 ARCHITECTURE NOTE: One JSON object per line, as spec section 9.1 documents. The bytes on disk belong to AppendOnlyJsonl (vidbyte/lib/util/jsonl.py), the SDK's canonical durable log: every record is written, flushed, and fsynced before the step it records counts as done, so a crash loses at most the record being written, which is then a torn final line that loading ignores and the next write cuts off. What each record means, and card serialization and parsing, live here, not on the record.
-FUNCTION INVENTORY: start writes run_started for a new run id; find validates a run id and loads the newest or the named unfinished journal, or with unfinished=False the newest or the named run in any state; pair_started, pair_finished, and finish write one record each; finished, finished_children, interrupted_children, cards, interrupted, and agents_started read what was loaded or written; _parse turns the whole lines AppendOnlyJsonl.read returns into a journal; _append stamps one record and hands it to AppendOnlyJsonl.append.
+FUNCTION INVENTORY: start writes run_started for a new run id; find validates a run id and loads the newest or the named unfinished journal, or with unfinished=False the newest or the named run in any state; pair_started, pair_finished, and finish write one record each; finished, finished_children, interrupted_children, cards, interrupted, started, and agents_started read what was loaded or written; _parse turns the whole lines AppendOnlyJsonl.read returns into a journal; _append stamps one record and hands it to AppendOnlyJsonl.append.
 COMMON MODIFICATION PATTERNS: A new record type adds one InfiniteJournalEvent member, one writer method here, and one case in _parse; old journals without it must still load.
 WHAT NOT TO DO IN THIS FILE: 1. Do not batch records or skip fsync; resume trusts every record already on disk. 2. Do not rewrite a journal; only the torn final line is ever cut off. 3. Do not follow a run id that fails INFINITE_RUN_ID_PATTERN; it could name a path outside .runs/. 4. Do not write settings or keys into a record.
 KNOWN EDGE CASES: A final line without its newline that does not parse is torn and ignored; one that parses is kept, and the next write first ends it with a newline. Any other malformed line refuses the journal with its line number. A pair started twice (re-run after a resume) counts as two pairs toward max_agents. Run ids start with a UTC timestamp, so sorting file names newest first sorts runs newest first. A run_finished record written before it carried answer and files still loads, with no answer and no root files; an answer that is not text, or files that are not a list of text, refuse the journal like any bad record.
-RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 6.1 INV-25 to INV-28, and 9.1); docs/spec/infinite-memory-events/spec.md (sections 9.1 and 9.2, D-29); vidbyte/agents/infinite/README.md
+RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 6.1 INV-25 to INV-28, and 9.1); docs/spec/infinite-memory-events/spec.md (sections 9.1 and 9.2, D-29); docs/spec/infinite-memory-derived-events/spec.md (section 8.5, D-7, D-8); vidbyte/agents/infinite/README.md
 TESTS: tests/features/infinite_memory_agent/test_infinite_memory_resume.py, tests/features/infinite_memory_agent/test_infinite_memory_delegation.py, tests/features/infinite_memory_agent/test_infinite_memory_events_stream.py, and tests/features/infinite_memory_agent/test_infinite_memory_handoff.py
 """
 
@@ -140,6 +140,11 @@ class InfiniteRunJournal:
     def interrupted(self) -> tuple[str, ...]:
         """Return the keys of pairs at any depth that started but never finished, each once, in starting order."""
         return tuple(dict.fromkeys(key for key in self._started if key not in self._cards))
+
+    @property
+    def started(self) -> tuple[str, ...]:
+        """Return every pair_started key in order, repeats kept."""
+        return tuple(self._started)
 
     @property
     def agents_started(self) -> int:
