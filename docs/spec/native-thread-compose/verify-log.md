@@ -7,14 +7,14 @@ Gate set (from context/code-map.md §1.3 and the S5 briefing §4; run from the w
 | 1 | Lint | `python lint/run.py` → last line `SDK-LINT: PASS` | local (also inside gate 6 and the remote source job) |
 | 2 | Ratchet counts | `python -m ruff check vidbyte --config lint/ruff.toml --select I001 --no-cache` → 223, must not rise; `python -m ruff check pyproject.toml vidbyte --config lint/ruff.toml --select TID251 --no-cache` → exactly 5 | local |
 | 3 | Semgrep | `semgrep --test --config .semgrep/typed-mapping-boundary-policy.yml .semgrep/typed-mapping-boundary-policy.py`, then `semgrep scan --error --config .semgrep/typed-mapping-boundary-policy.yml vidbyte` → 0 findings (semgrep from the scratch `semgrep-venv`) | local; remote in `static-policy.yml` |
-| 4 | New tests | `PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_compose` → 363 pass (299 before the test author's 64 regression cases, d9cc9ff6) | local |
+| 4 | New tests | `PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_compose` → 385 pass (363 before the test author's 22 R-33 cases, 8fcba2df; 299 before the 64 S4 regression cases, d9cc9ff6) | local |
 | 5 | Base pack | `PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads` → `436 passed, 2 skipped` | local |
 | 6 | CI source stage | `PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source` → `CI passed.` | local |
 | 7 | CI package stage | `env -u PYTHONPATH python scripts/run_ci.py --stage package --dist-dir <new empty scratch folder>` → `passed smoke checks.` | local |
 | 8 | AC-21 wheel half | `<installed copy>/python.exe -I <scratch>/s3/check_wheel_prompts.py <worktree>`, run from a folder outside the checkout → `AC-21 WHEEL HALF: PASS` | local only |
 | 9 | Comment width | `awk 'length($0) > 72' <file>`, piped to `grep -E '^[[:space:]]*#'`, over every changed source file → 0 lines | local only |
 | 10 | Remote checks | `gh workflow run ci.yml --ref feat/native-thread-compose` (Source / Python 3.11, Source / Python 3.12, Package on ubuntu-latest) and `gh workflow run static-policy.yml --ref feat/native-thread-compose`, then `gh run watch <id> --exit-status` | remote only; dispatch-only, so `gh pr checks` shows nothing |
-| — | Frozen test tree | `git diff d9cc9ff6..HEAD --stat -- tests` → empty (the test tree was last changed at d9cc9ff6, by the test author; iteration 1 used 34fe19b7) | local |
+| — | Frozen test tree | `git diff 1d7bfbec..HEAD --stat -- tests` → empty (the test tree was last changed at 8fcba2df, by the test author, and its baseline is 1d7bfbec; iteration 2 used d9cc9ff6 and iteration 1 used 34fe19b7) | local |
 
 ## Iteration 1 — 2026-10-18 12:57 -0400 — agent report: reports/S5-repair-1.md
 
@@ -214,3 +214,85 @@ The runner's git is still 2.55.0. Both EC-19 tests now run to their end on Linux
 Afterwards, `procs.py` printed `stand-in or grandchild processes: []`.
 
 **Still open:** none. R-32 is fixed and every gate is green at code HEAD bc351671. The follow-ups R-24 to R-31 stay outside this loop. The one judgement call for the re-review is the one-caller `whole` keyword (option 1 above). Its runner-up and flip condition are recorded above.
+
+## Iteration 3 — 2026-10-20 01:09 -0400 — agent report: reports/S5-repair-3.md
+
+**Defects in:**
+- **R-33** (Blocker, review.md, confirmed in reports/S5-findings-verifier-rr1.md). A short key put into a compose record field was quoted, key and all, in that record's `ConfigurationError` whenever the record was reached other than through a binder:
+  - a `ThreadStep` built directly or changed with `dataclasses.replace` (EC-78), through `harness`, `verb`, `model` and `thread_id`;
+  - `StageSpec.retries`, `StageAttempt.rung` and `.decision`, `ThreadVerdict.decision`, `WorkspaceDiff.truncated`, `EnsembleRole.name` and `EnsembleSelection.proposal`;
+  - three of those through a step's JSON answer, whose refusal `JsonAnswer.problem` keeps.
+- **Failing gate 4** at ad6ec58e: the test author's 21 R-33 rows (8fcba2df). The reproducer `PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider tests/features/harness_compose/test_harness_compose_keys.py` gave `21 failed, 26 passed in 7.88s`, each on `AssertionError: INV-4: the <site> refusal quotes the key`. Remote CI 39369688747 at 1d7bfbec was pre-repair evidence of the same 21.
+- HEAD had moved to 0fda73fb (the orchestrator's pipeline.md commit) before this iteration's first commit. This iteration's commits sit on it.
+- Not handed to this loop: the follow-ups R-24 to R-31, and the out-of-scope items of the verifier report section 5 (the base refusals, the base config records, the stdlib `Enum(value)` errors, accepted misplaced keys, the raw decoder text in `JsonAnswer.problem`).
+
+**Hypotheses and attempts** (R-33 is new in this iteration, so no earlier attempt applied):
+- **Root cause, confirmed by the reproducer and the code.** `RecordFieldValidator._received` quotes a short str. Compose's records still called `to_enum`, `require_int`, `require_bool` and one `require_text` with quoting on, and only the binders rewrote the probe `NativeThreadRequest`'s model refusal (`ThreadBinder._withheld`).
+- **Attempt 1, rejected before commit: the reference fix as written.** The verifier's `_withheld` (proposed_fix.diff) scans `(model, thread_id)` and rewrites the first repr it finds in the message. I tested that assumption first.
+  - The scratch probe `s5-3/probes/probe_withheld_exact.py` uses an accepted grok model `"grok-4"` and a refused `thread_id="<key> 'grok-4'"`. The thread id's repr is double-quoted and holds the model's repr.
+  - On the verifier's proof copy (`s5-verifier-rr1/lint_patched`), the scan rewrites only the model's repr. Both the direct build and `dataclasses.replace` print `key-shown=True | 'thread_id must match ^[A-Za-z0-9][A-Za-z0-9_-]*$; got "vbk-7c3a91e0d24f a value of type str".'`
+  - The input is contrived, but re-review round 2 is the last one, and the briefing asks for the class closed by construction.
+- **Attempt 2, chosen: pick the value by the field the refusal names.** `_withheld` reads `{"model": self.model, "thread_id": self.thread_id}.get(error.details.get("field", ""))`. The base refusal quotes exactly the value of the field it names, so `rpartition(repr(value))` removes the whole quote.
+  - The 8 cases of probe_withheld_exact.py are all `key-shown=False context=None cause=None` on this tree.
+  - The coupling to the base field names "model" and "thread_id" is guarded: a base rename would turn the six model and thread-id rows of `test_a_record_refusal_never_quotes_the_key_it_was_given` red on `details["field"]`.
+  - The flip condition: if the base record ever quotes a value other than the field it names, go back to a scan, longest repr first.
+- **Attempt 2a, failed lint, then fixed.** The first version passed `error.details.get("field")` straight to the lookup. `python lint/run.py` then failed with `S009 REGRESSED: 351 finding(s), allowance 350`.
+  - S009 is a package-wide mypy ratchet: `python -m mypy --config-file lint/mypy.ini vidbyte`.
+  - The new finding was `vidbyte\lib\dataclasses\native_compose.py:147:72: error: Argument 1 to "get" of "dict" has incompatible type "Any | None"; expected "str"  [arg-type]`.
+  - The fix aligns producer and consumer with a default, `.get("field", "")`, with the same behaviour: no field means nothing is withheld. No `Any` and no ignore were added. S009 went back to 350, and the whole lint count table is identical to iteration 2's.
+  - The verifier's proof copy never hit S009, because its scan does no dict lookup.
+- **Considered and not coded:**
+  - An inline try/except with `raise ... from None`. Known-failed: `from None` still sets `__context__`, which the rows walk (test-plan note for this iteration).
+  - An inline try/except with the raise after the handler. It works, as in the old binder, but it puts a handler and a sentinel into the narrated main function. `_probe` keeps it flat, as `_checked_config` does.
+  - Pre-checking the model and thread id with `quote=False` inside `ThreadStep`. It duplicates the base's per-harness rules (principle 5), and `require_optional_text` has no `quote` keyword, so it is outside the grant.
+  - Flipping `_received` so it never quotes a str (NG-1; its own PR).
+- **A trade-off, recorded.** `quote=False` hides every refused value, not only a str. For example, `StageSpec(retries=4)` now ends `got a value of type int.` where it used to end `got 4.`. The bound stays in the message, and grant (c) defines `quote` this way for `require_text`. The flip condition: if reviewers want ints quoted, change `_received` to withhold only str under `quote=False`, which is part of the SDK-wide `_received` move.
+- **Tooling trap, new here.** A long `<<'EOF'` heredoc holding apostrophes failed in the Bash tool (`unexpected EOF while looking for matching ''`). Edit scripts and commit messages were written with the file tool and applied with `s5-2/apply_edits.py`.
+
+**Changes:**
+
+| SHA | Commit |
+|---|---|
+| 0e4321a4 | fix(compose): withhold a misplaced key from every record refusal [R-33] |
+| 7aad13ba | docs(spec): record the R-33 grant for native-thread-compose |
+| this records commit | docs(spec): verify-log iteration 3 for native-thread-compose. It also carries the review.md R-33 status, this log's two refreshed gate-table rows and reports/S5-repair-3.md. |
+
+0e4321a4 touches 4 files and adds no file and no class (§8.4 holds):
+- `validation.py`: `quote` on `require_int`, `require_bool` and `to_enum`, defaulting to True, so the 11 base calls are unchanged; plus the header and method comments.
+- `native_compose.py`:
+  - `quote=False` at `ThreadStep.harness` and `.verb`, `PromptSegment.spliced`, `WorkspaceDiff.truncated`, `ThreadVerdict.decision`, `StageSpec.retries`, and `StageAttempt.rung` and `.decision`;
+  - `ThreadStep._probe` and `_withheld`, with `@intent step-refusals-withhold-a-misplaced-key`;
+  - the narrated probe step;
+  - the header FUNCTION INVENTORY and KNOWN EDGE CASES.
+- `native_ensemble.py`: `quote=False` at `EnsembleRole.name` and `EnsembleSelection.proposal`, plus a KNOWN EDGE CASES sentence.
+- `steps.py`: plain `return ThreadStep(...)` in both binders; `ThreadBinder._withheld` deleted; header lines 6 and 9 updated. The `quote=False` thread-id pre-check in `bind_continue` stays.
+
+7aad13ba changes exactly spec.md lines 731, 1103, 1308, 1588 and 1626 (5 insertions, 5 deletions), and the file stays CRLF.
+
+**Independent evidence beyond the frozen pack** (scratch outputs in `s5-3/probes/`):
+- The verifier's class sweep `s5-verifier-rr1/probe_sweep.py` on this tree prints `TOTAL (entry, record, field) pairs: 183; leaking: 4; clean: 179`. The 4 are the stdlib `Enum(value)` constructors (out of scope, item 4).
+- `ctx_count.py` prints `1796 ('clean', 'None')`, `352 ('ACCEPTED', '-')` and `4 ('OTHER-LEAK', '-')`: every refusal is clean and has no `__context__`.
+- `probe_answers.py` prints `key-in-problem=False` for all 4 answers, with the field still named (EC-28).
+- The reviewer's four `s5-rereview-1/probe_keys_*.py` probes print `key-in-message=False` on every line.
+- The verifier's 18-row test `test_s5v_rr1_record_keys.py`: `18 passed in 29.17s`.
+
+**Gate matrix out** (gates 1–9 at 7aad13ba, whose code is 0e4321a4, run in this worktree in this iteration; outputs in `s5-3/final/`):
+
+| Gate | Command | Result | Final lines |
+|---|---|---|---|
+| 1 lint | `python lint/run.py` | PASS. The count table matches iteration 2's line for line, with S009 at 350/350. | `S063 IMPROVED 4 -> 3. Lower it with: python lint/run.py --rule S063 --update-baseline`<br>`S064 RATCHETED: 4 known finding(s). Inspect with: python lint/run.py --rule S064 --all`<br>`SDK-LINT: PASS` |
+| 2 ratchets | ruff I001 / TID251 | PASS (223 / 5) | `Found 223 errors.`<br>``[*] 223 fixable with the `--fix` option.``<br>`Found 5 errors.` |
+| 3 semgrep | `--test`, then `scan --error` | PASS | `1/1: ✓ All tests passed`<br>`Ran 1 rule on 977 files: 0 findings.` (exit 0) |
+| 4 new tests | `pytest -q tests/features/harness_compose` | PASS (was 21 failed) | `385 passed in 55.26s` |
+| 5 base pack | `pytest -q tests/features/harness_threads` | PASS | `436 passed, 2 skipped in 45.46s` |
+| 6 source stage | `run_ci.py --stage source` | PASS | `================ 6026 passed, 16 skipped in 156.80s (0:02:36) =================`<br>`CI passed.` |
+| 7 package stage | `run_ci.py --stage package --dist-dir s5-3/final/dist-4` | PASS | `Installed vidbyte-sdk 0.3.0 passed smoke checks.`<br>`CI passed.` |
+| 8 AC-21 wheel half | `wheel-venv-4/Scripts/python.exe -I s3/check_wheel_prompts.py <worktree>`, from `s5-3/final/wheel-run-4`, using the briefing's copy recipe | PASS | `installed vidbyte: ...\s5-3\final\wheel-venv-4\Lib\site-packages\vidbyte\__init__.py (outside the checkout: True)`<br>`fixed combinations: 17, longest planner = 8304 chars, over 12000: {}`<br>`AC-21 WHEEL HALF: PASS` |
+| 9 comment width | awk over the 4 changed `.py` files | PASS | `over72=0` for each of the 4 files |
+| frozen tests | `git diff 1d7bfbec..HEAD --stat -- tests` | PASS | empty |
+| 10 remote: Static policy | run 39372992819 at 7aad13ba | PASS; watch exit 0 | `1/1: ✓ All tests passed`<br>`Ran 1 rule on 977 files: 0 findings.` |
+| 10 remote: CI | run 39372990529 at 7aad13ba | PASS: Source / Python 3.11, Source / Python 3.12 and Package; watch exit 0 | 3.11: `================= 5986 passed, 56 skipped in 109.14s (0:01:49) =================`, then `CI passed.`<br>3.12: `========== 5986 passed, 56 skipped, 19 warnings in 113.19s (0:01:53) ===========`, then `CI passed.`<br>Package: `Installed vidbyte-sdk 0.3.0 passed smoke checks.`, then `CI passed.` |
+
+Afterwards, `procs.py` printed `stand-in or grandchild processes: []`.
+
+**Still open:** none. R-33 is fixed, and every gate is green at code HEAD 0e4321a4, through 7aad13ba, locally and remotely. The remote totals are iteration 2's 5964 plus the 22 R-33 cases, and neither known remote flake occurred. The follow-ups R-24 to R-31 and the verifier's out-of-scope items stay outside this loop. The one design call for re-review round 2 is the field-keyed `_withheld`, which departs from the reference fix's scan. Its evidence, runner-up and flip condition are recorded above.
