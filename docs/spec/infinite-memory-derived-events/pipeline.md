@@ -4,7 +4,7 @@ repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-infinite-memory-derived-events
 branch: feat/infinite-memory-derived-events
 base_commit: 181f1992ce936f139b7d18f9ae999c97dcd3b005
-pr:
+pr: https://github.com/cerredz/Vidbyte-SDK/pull/1191
 until: none
 started: 2026-10-19 20:30
 ---
@@ -16,8 +16,8 @@ started: 2026-10-19 20:30
 | S0 worktree + capture + recon | done | 2026-10-19 20:30 | 2026-10-19 20:50 | reports/S0-scout.md | base_commit 181f1992; code-map.md (4 sections, ~45 files) |
 | S1 spec + review | done | 2026-10-19 20:55 | 2026-10-20 | reports/S1-spec-author.md, S1-spec-reviewer-r1.md, S1-spec-reviewer-r2.md | spec r3 @c639e390 approved; r1 SOUND WITH FIXES (13 applied); r2 SOUND WITH FIXES (1B/2M/3m, 6 applied) |
 | S2 tests | done | 2026-10-20 | 2026-10-20 | reports/S2-test-author.md | 4 new files, 87 red; 33 pinned tests updated (spec-mandated); pack 120 failed / 294 passed (re-run by orchestrator, identical); S2_HEAD = 2cab5070; spec r4 @2be3e9c8 resolved S2 items 1, 2, 4 |
-| S3 implement | running | 2026-10-20 | | | |
-| S4 adversarial review | pending | | | | |
+| S3 implement | done | 2026-10-20 | 2026-10-20 | reports/S3-implementer.md | S3_HEAD = c1c3ecc0 (last code 939381ec); PR #1191 draft; pack 414/414 (orchestrator re-ran twice); SDK-LINT PASS; public API current; tests unchanged since 2cab5070; INV-20 paths unchanged; budget events 658/660, launch 455/470, records 832/870 |
+| S4 adversarial review | running | 2026-10-20 | | | |
 | S5 repair loop | pending | | | | |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
@@ -67,4 +67,6 @@ started: 2026-10-19 20:30
 - AC-13/INV-3 patch `InfiniteWorkspace.commit_entry` on the class: `_commit` must call `workspace.commit_entry(...)` through the instance at call time. AC-20 records the caller file of `usage()`/`descriptions()`: both must be called from `events.py`; `map_omitted` looked up at call time. With a sink the wide run calls `usage()` ≤ 10 times and `descriptions()` exactly once; with no sink no `Infinite*Details`/`InfiniteEvent` is built anywhere, including runtime.py — *source:* S2
 - The constants comment must state the `_FIGURES` pins: largest record `SubagentFinished` 27,909 bytes, whole event ≤ 31,987. Default caps give no `workspace_usage`/`agent_progress` (a new workspace holds 3 files, start state (0, False)). `subagent_aborted` is sent by the launcher (`root`, depth 0 for a root-level pair), summary "<name> aborted (<reason>) in its <phase> step: <type>". Middleware `batch_rejected.problem` = metadata `reason`, else the result `output`; tool refusals use `str(error)` — *source:* S2
 - `verifier_started` `{files}` = `len(files)` over the whole `tuple(writer.files_written)` before the five-item cut (= `len(details.files) + details.files_omitted`); never the shown count — *source:* spec r4
+- A007 sits exactly at its baseline (255): any numeric literal inside a `with self._shielded(...)` body counts as operational (because `_deliver(..., depth, ...)` is there), so `_in_flight` `+= 1`/`- 1` sit just before the `with` (S3 deviation 1, vs D-9/R-17's "first statement in the shield"). `InfinitePair.run` is at the S024 nesting limit 3. S051 counts I001 tree-wide (223 at base and HEAD) — judge with `python lint/run.py --rule S051`. Lint prints `SDK-LINT: PASS` (spec NFR-7/§12.4 say `AGENT-LINT`). Worktree sources are CRLF, spec.md LF — *source:* S3
+- S3 deviations recorded in spec §17 r5: `_in_flight` placement; counters start at `INFINITE_MIN_COUNT`; `str(error)` inlined in `tool_refused`; extra import-sort commit 542124fa; extra PURPOSE-header commit 939381ec; spec revision bumped to 5 — *source:* S3
 - Do NOT strip or rewrite absolute paths inside relayed error text (`problem`, `run_stopped.message`); INV-8's path ban covers only SDK-composed fields (keys, `handoff_written.path`, note/file lists, new fields) — *source:* spec r4 (EC-29)
