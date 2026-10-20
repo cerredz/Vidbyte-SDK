@@ -577,7 +577,7 @@ class InfiniteMemoryStagedDetails:
 
 @dataclass(frozen=True, slots=True)
 class InfiniteMemoryDroppedDetails:
-    """memory_dropped: one staged entry the verifier dropped, with its staged key, a short cut of its text, the reason, and the note."""
+    """memory_dropped: one staged entry that was never committed (its verifier dropped it, the pair had no verdict, or a rule refused it at commit), with its staged key, a short cut of its text, the reason, and the note."""
 
     key: str
     text: str
