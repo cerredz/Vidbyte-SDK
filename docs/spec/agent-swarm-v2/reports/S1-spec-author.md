@@ -1,0 +1,31 @@
+# S1 spec author report — agent-swarm-v2 r1
+
+- **Stage:** S1 spec author
+- **Produced:** `docs/spec/agent-swarm-v2/spec.md` (r1, 999 lines, all 18 template sections §0–§17), committed as `57c20f68` (`docs(spec): add agent-swarm-v2 spec r1`) on `feat/agent-swarm` in the worktree; `pipeline.md` left untouched (the orchestrator's working change is uncommitted).
+- **Base:** `39ce8b20baf28690a3dc74b8fbdca9530119fdef` (PR #1174 head); spec frontmatter carries it.
+
+## What the spec decides
+
+1. **One shared prompt** (D-2, D-3): nine `system_*` section leaves (environment, tools, web search when selected, messaging, turns, goal, instructions, objective, thoroughness) joined by the runtime; `AgentSwarmMember` loses `system_prompt`; the thoroughness leaf has eight `##` subsections (multi_part, claims, completion_evidence, problems_resolved, faithful_scope, negative_coverage, self_review, can_simplify), six to eight sentences each; no leaf states a number.
+2. **Loose messaging** (D-4): `to` has no enum; only an unknown name or blank text is refused (`message_refused`); self-messages are queued; a message to a stopped member or after the stop is decided is `message_sent` + `message_undelivered` at once with a success reply.
+3. **Compaction** (D-10 to D-12, D-15): `compact(focus?)` tool records a pending request on the swarm runtime; `AgentSwarmMemberRuntime._after_tool_iteration` compacts before mail when a request is pending or the last real `input_tokens` ≥ 72,000; `ContextCompactionEngine.compact_provider_messages(mode=summarize_range)` with a new `AgentSwarmHandoffSummarizer` on the member's own runner (`_runner_for_model` + `_invoke_runner`, scriptable); kept tail ≤ 27,000 estimated tokens, at least one group; summary = engine's assistant-role message with a fixed prefix leaf; side call metered through the member's `UsageTracker`, counted in the swarm budget, recorded as `model_called`; the 90,000-token trim stays as backstop (now via `AgentSwarmTrimMiddleware`, a subclass that reports `history_trimmed` from its own stats); a failed side call → `model_error`, history kept.
+4. **Settings in lib + web search + limits** (D-1, D-5, D-6, D-18): `AgentSwarmSettings` moves to `vidbyte/lib/dataclasses/agent_swarm.py` (user decision recorded with the AGENTS.md exception-1 / "Existing code" tension); `search_tool: BaseTool` → `web_search: AgentSwarmWebSearch | str | None` (brave, browserbase, exa, parallel, tavily — the five with client modules) + `web_search_api_key`; 2–500 agents, 100,000 turns, ten billion tokens (`max_tokens`, new stop reason `max_tokens`), one day default / thirty days ceiling; budget enforced by `AgentSwarmObserverMiddleware` (`after_model_response` decides, `before_model_call` refuses further calls); runs returning after the decision are `agent_released`.
+5. **Events** (D-7 to D-9, D-13, D-14): 24 kinds (16 new), 8 new typed fields (`input_tokens`, `output_tokens`, `cached_tokens`, `model_calls`, `messages_dropped`, `omitted_chars`, `path`, `compaction_trigger`); every sent message has exactly one outcome; every agent exactly one terminal event; `swarm_stopping` before `swarm_ended`; `prepare()` returns `bool`.
+6. **Left as-is** (§3, D-16): await-free state model, outbox, TaskGroup/timeout, member runtime seam, turn middleware's role, cap and trim values, `allow_all()`, five tools, result numbering.
+
+## Self-check (Stage E)
+
+- All 18 sections present in template order; §12.3 rows 1–47 sequential; Prompt 4 and Prompt 5 blocks diffed byte-identical against `request.md`.
+- Every referenced ID is defined (G-1..7, NG-1..12, INV-1..40, AC-1..25, EC-1..35, FR-1..18, NFR-1..10, D-1..18, T-1..6, W-1..10, A-1..11, Q-1..5); the only undefined references (`Q-6`, `Q-8`) are inside the user's verbatim prompt.
+- §4 names appear in §8.5 and §12.3 (`AgentSwarmSettings`, `web_search`, `web_search_api_key`, `max_tokens`, `search_tool_for`, `call_model`, `record_tool_outcome`, `record_model_call`, `request_compaction`, `take_compaction_request`, `last_input_tokens`, `record_compaction`, the five new classes, the two new enums, `workplace_created`, the eight new event fields).
+- Budget: 16 new files (2 Python, 14 leaves), 6 new classes + 1 moved, 0 dependencies, 3 config keys added / 2 removed, 0 endpoints.
+- Every weighted phrase from `request.md` §D appears as an INV/FR/NFR/NG.
+- No test cases in the spec; §13 is facts only.
+- Paths/symbols re-verified this session: client class names (`vidbyte/tools/builtins/operations/__init__.py:20-26`), `CompactionMode.SUMMARIZE_RANGE`/`TRIM_WITH_PROVIDER_BOUNDARIES` (`base.py:19,29`), `CompactionStats` fields (`base.py:54-62`; no `changed` field — the trim middleware computes it at `context_compaction.py:226-228`, spec adjusted), `trim_with_provider_boundaries` construction (`context_compaction.py:163-165`), `MiddlewareDecision.abort(reason)` (`middleware.py:120`), summarizer leaf `vidbyte/prompts/prompts/trajectory_checkpoints_agentic_summarizer.md`, `AgentRuntime.arun(message, *, handle, ...)` (`runtime.py:273`; the handle is not stored, hence D-11), `_runner_for_model`/`_invoke_runner` (`base.py:1661`, `:1519`), `SummarizeRangeCompaction` groups (`strategies.py:334-366`), `_repair_tool_pairing` (`engine.py:90`), `patch.py:46-53`, `bash.py:138,240`, `tool.py:64-79`, S020 scope (`## File Index` headings only), no READMEs under `vidbyte/lib/{dataclasses,enums,constants}` or `vidbyte/middleware/builtins/`.
+
+## Open items for the orchestrator
+
+- Q-1..Q-5 are non-blocking with defaults (no broadcast; no event filter/cap; no native Anthropic path; budget counts reported usage only; blank text refused).
+- D-7 bends the closed-set-as-enum rule for two `text` words (`agent_cancelled`: working/idle; `workplace_prepared`: created/existed) on the user's own wording; flip is named.
+- A-1 (assistant-role summary followed by an assistant tool-call group is provider-safe, as the engine already ships) and A-2 (`_invoke_runner` forwards `system=`/`messages=`) are the two assumptions most worth a reviewer's eye.
+- AC-24 (an early loop exit → `agent_exited`) needs the test author to find a loop-native stop reachable with default `AgentLoopSettings`; the spec names the candidates (`AgentStopReason`) but does not verify which defaults enable one.

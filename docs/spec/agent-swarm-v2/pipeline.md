@@ -35,6 +35,8 @@ This run revises an existing feature branch. `base_commit` is the PR head at the
 
 - 2026-10-19 21:29 — Both S0 agents hit the account session limit at ~17:40 (reset 21:10) before writing any file; resumed via SendMessage from their saved transcripts at 21:29 rather than relaunched fresh, so their reading is not repeated.
 
+- 2026-10-20 15:19 — The S1 spec author hit the session limit at ~23:30 on 10-19 (reset 02:10) after reading but before writing anything; resumed via SendMessage from its transcript at 15:19 rather than relaunched, with the instruction to re-open any file it cites.
+
 ## User replies (verbatim)
 - 2026-10-19 17:15 — the ten alignment answers; verbatim in request.md §A Prompt 5.
 
