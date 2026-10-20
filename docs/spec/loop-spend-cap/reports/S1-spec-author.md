@@ -339,6 +339,8 @@ On every row-28 stop, the probe saw this:
 
 **Open item for the orchestrator.** On the new stop, `JevAgent.response.specialist` still holds the gate's choice ("database" in the probe), although that specialist never ran. Two texts say it names "the specialist that ran": `vidbyte/agents/jev/README.md:24` and the `JevAgentResponse.specialist` docstring (`vidbyte/lib/dataclasses/jev.py:3863`). Row 28 records the fact and changes neither. Either accept and document it, or have the repair agent reset it, which would be a behavior change outside R-1's code fix.
 
+**Ruling applied (`51ad5091`, still r4).** The orchestrator accepted the open item as a stated limitation. New §15 A-8 records it: a caller tells the cases apart by `stop_reason == "max_spend"` with `iteration_count == 0`, with one stated edge case (a specialist whose own pre-loop spend stops it at its own first CP1). Row 17 adds the Jev README clause. The `jev.py:3863` docstring is named as a follow-up, and no behavior changes.
+
 **Self-check (Stage E):**
 - Every table has a consistent column count.
 - No ID is referenced without a definition.
