@@ -55,7 +55,7 @@ Related:
 |---------|---------------------|
 | Loop budgets that force stop (`max_iterations`, `max_tokens`, `max_tool_calls`) | Flat `AgentLoopSettings` fields — `skills/agentic-loop-settings/SKILL.md` |
 | Universal tool deny / thrash budgets | `ToolSettings` — `skills/tool-settings/SKILL.md` |
-| Cost *ceilings* that abort the run | `CostBudgetMiddleware` |
+| Cost *ceilings* that abort the run | `AgentLoopSettings.max_spend_usd` (measured spend), or `CostBudgetMiddleware` |
 | LLM-as-judge quality checks after a run | Evals / graders |
 | Semantic / schema contracts | Deferred — not shipped |
 

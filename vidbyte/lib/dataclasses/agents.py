@@ -22,6 +22,7 @@ Relations:
 from __future__ import annotations
 
 import re
+import sys
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import Enum
@@ -32,6 +33,7 @@ from vidbyte.lib.constants.jev import (
     VIDBYTE_API_KEY_PATTERN,
     VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND,
 )
+from vidbyte.lib.dataclasses.validation import RecordFieldValidator
 from vidbyte.lib.enums.model_provider import ModelProvider
 from vidbyte.lib.enums.text_model import TextModelMode
 from vidbyte.lib.errors import AgentForkConfigurationError, ConfigurationError
@@ -72,6 +74,7 @@ class AgentStopReason(str, Enum):
     MAX_ERROR_CALLS = "max_error_calls"
     SLIDING_WINDOW_MAX_CALLS = "sliding_window_max_calls"
     TIMEOUT = "timeout"
+    MAX_SPEND = "max_spend"
     MIDDLEWARE_ABORT = "middleware_abort"
     TOOL_SETTINGS_DENIED = "tool_settings_denied"
     TOOL_LOOP_LIMIT = "tool_loop_limit"
@@ -135,6 +138,7 @@ class AgentRuntimeConfig:
     compaction_target_tokens: int | None = None
     tool_settings: "ToolSettings | None" = None
     allowed_tools: frozenset[str] | None = None
+    max_spend_usd: float | None = None
 
     def __post_init__(self) -> None:
         """Validate optional budget values."""
@@ -150,6 +154,12 @@ class AgentRuntimeConfig:
                 raise ValueError(f"{field_name} must be greater than zero when provided.")
         if self.timeout_seconds is not None and self.timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be greater than zero when provided.")
+        if self.max_spend_usd is not None:
+            RecordFieldValidator.require_number(
+                self.max_spend_usd,
+                "AgentRuntimeConfig.max_spend_usd",
+                maximum=sys.float_info.max,
+            )
 
 
 @dataclass(frozen=True, slots=True)

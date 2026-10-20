@@ -162,6 +162,7 @@ class AgentForker:
             max_parallel_tool_calls=base.max_parallel_tool_calls,
             max_retries=base.max_retries,
             timeout_seconds=base.timeout_seconds,
+            max_spend_usd=base.max_spend_usd,
             context_window_budget=base.context_window_budget,
             compaction_trigger_tokens=base.compaction_trigger_tokens,
             compaction_target_tokens=base.compaction_target_tokens,

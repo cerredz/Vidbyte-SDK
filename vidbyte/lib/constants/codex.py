@@ -346,6 +346,7 @@ CODEX_UNSUPPORTED_LOOP_FIELDS = (
     "allowed_tools",
     "tool_error_policy",
     "tool_settings",
+    "max_spend_usd",
 )
 CODEX_CONTRACTS_KEY = "output_contracts"
 # One turn at a time per agent instance. A Codex thread is a single conversation,

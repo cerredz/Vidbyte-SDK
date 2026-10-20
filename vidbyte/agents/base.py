@@ -39,6 +39,7 @@ from vidbyte.agents.output.connector import OutputConnector
 from vidbyte.agents.output.dispatcher import OutputDispatcher
 from vidbyte.agents.pricing import UsageRollup, UsageTracker
 from vidbyte.agents.speed import AgentSpeedHistory, AgentSpeedRollup, AgentSpeedTracker
+from vidbyte.agents.spend_cap import AgentSpendCap
 from vidbyte.agents.contracts import floors as contract_floors
 from vidbyte.agents.settings import AgentLoopSettings, ToolErrorPolicy, ToolSettings
 from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage
@@ -46,7 +47,7 @@ from vidbyte.context.manager import ContextManager
 from vidbyte.context.window import ContextWindow, ContextWindowAlgorithm
 from vidbyte.context.primitives import ContextItem
 from vidbyte.context.handoff import Handoff, MinimalHandoff
-from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig, FallbackModel, PauseDuration, ProviderKeys
+from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig, AgentStopReason, FallbackModel, PauseDuration, ProviderKeys
 from vidbyte.lib.dataclasses.prompts import SystemPromptPresetSelection
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.sessions import SESSION_SCHEMA_VERSION, RunState
@@ -245,6 +246,15 @@ class BaseAgent(McpAttachableMixin):
                 f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
                 "which does not support output contracts."
             )
+        # @intent spend-cap-is-never-silently-unenforced
+        # Only the linear loop checks the cap, a non-text runner records
+        # no usage, and an unpriced model is found only after a paid
+        # call, so each is refused here, before the agent spends.
+        if self.agent_loop_settings.max_spend_usd is not None and self.runtime_type not in _LINEAR_LOOP_RUNTIMES:
+            raise ConfigurationError(f"Agent {name} uses non-linear runtime {self.runtime_type.value}, which does not enforce max_spend_usd.")
+        spend_cap_refusal = AgentSpendCap.model_refusal(self.agent_loop_settings.max_spend_usd, self.runner_config, self.fallback)
+        if spend_cap_refusal is not None:
+            raise ConfigurationError(f"Agent {name} sets max_spend_usd, but {spend_cap_refusal}", details={"agent": name})
         self.runtime_config = self.agent_loop_settings.to_runtime_config()
         self.max_tool_rounds = self.agent_loop_settings.max_iterations
         self.system_prompt = system_prompt
@@ -668,6 +678,7 @@ class BaseAgent(McpAttachableMixin):
             "max_parallel_tool_calls",
             "max_retries",
             "timeout_seconds",
+            "max_spend_usd",
             "context_window_budget",
             "compaction_trigger_tokens",
             "compaction_target_tokens",
@@ -1184,21 +1195,27 @@ class BaseAgent(McpAttachableMixin):
         return len(self._queued_prompts)
 
     async def _drain_queued_prompts(self, metadata: dict[str, Any]) -> None:
-        """Run queued prompts in order after the primary run, recording outcomes into metadata."""
+        """Run queued prompts in order after the primary run, recording outcomes into metadata; a spend-cap stop ends the drain."""
         draining = self._draining_var.set(True)
         self.last_queued_replies = []
         completed = 0
+        last_stop = metadata.get("stop_reason")
         # Each drained run resets the usage tracker, so keep every run's usage to restore after the drain.
         run_usage = [self._usage_tracker.rollup()]
         try:
             # Pop-one loop so prompts queued by drained runs join the same bounded drain.
-            while self._queued_prompts and completed < self.agent_loop_settings.max_queued_prompts:
+            # @intent a-spend-cap-stop-ends-the-drain
+            # Once a reply, the primary one included, stops on its spend
+            # cap, no further queued prompt runs; the rest are dropped
+            # and counted as truncated below.
+            while self._queued_prompts and completed < self.agent_loop_settings.max_queued_prompts and last_stop != AgentStopReason.MAX_SPEND.value:
                 prompt = self._queued_prompts.pop(0)
                 try:
                     reply = await self.generate_reply(prompt)
                 finally:
                     run_usage.append(self._usage_tracker.rollup())
                 self.last_queued_replies.append(reply)
+                last_stop = reply.metadata.get("stop_reason")
                 completed += 1
             if self._queued_prompts:
                 metadata["queued_prompts_truncated"] = len(self._queued_prompts)
