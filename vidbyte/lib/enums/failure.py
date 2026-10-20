@@ -195,6 +195,10 @@ class FailureCode(str, Enum):
     BROWSER_RUNTIME_MISSING = "browser.runtime_missing"
     BROWSER_TOOL_INSTALL_FAILED = "browser.tool_install_failed"
     BROWSER_TOOLS_UNAVAILABLE = "browser.tools_unavailable"
+    GROK_COMMAND_NOT_RUN = "grok.command_not_run"
+    OPENCODE_COMMAND_NOT_RUN = "opencode.command_not_run"
+    MUSE_COMMAND_NOT_RUN = "muse.command_not_run"
+    GROK_STORE_UNREADABLE = "grok.store_unreadable"
 
     @property
     def category(self) -> str:

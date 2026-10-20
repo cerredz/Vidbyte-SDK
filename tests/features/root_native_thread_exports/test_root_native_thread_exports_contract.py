@@ -1,9 +1,9 @@
 """FILE: tests/features/root_native_thread_exports/test_root_native_thread_exports_contract.py
 
-PURPOSE: Contract tests for importing the native harness thread surface from the root `vidbyte` package: every name in vidbyte.harnesses.native.__all__ is in vidbyte.__all__ and is the very same object, the nine thread functions load lazily so a plain `import vidbyte` (and any attribute miss) still leaves vidbyte.harnesses.native unloaded, a misspelled name is still an AttributeError or ImportError, and contracts/sdk-public-api.json lists the names at the package version that vidbyte-cli pins.
+PURPOSE: Contract tests for importing the native harness thread surface from the root `vidbyte` package: every name in vidbyte.harnesses.native.__all__ is in vidbyte.__all__ and is the very same object, every native function (the nine thread functions, their browser counterparts, the thread helpers and the command functions) loads lazily so a plain `import vidbyte` (and any attribute miss) still leaves vidbyte.harnesses.native unloaded, a misspelled name is still an AttributeError or ImportError, and contracts/sdk-public-api.json lists the names at the package version that vidbyte-cli pins.
 ROLE IN CODEBASE: The executable form of tests/features/root_native_thread_exports/FEATURE.md. vidbyte-cli may import only names listed in the vendored public-API contract, which is vidbyte.__all__, so these tests are what keeps the thread functions reachable from there.
 ARCHITECTURE NOTE: The import-time checks run in a fresh interpreter with PYTHONPATH set to this checkout, because this test process has usually imported vidbyte.harnesses.native already. The contract check reads the committed JSON and pyproject.toml directly, as the CLI's lint does.
-FUNCTION INVENTORY: fresh_interpreter runs one probe script and returns its last JSON line; the test_* functions are one behaviour each.
+FUNCTION INVENTORY: fresh_interpreter runs one probe script and returns its last JSON line; the native_names and lazy_functions fixtures read vidbyte.harnesses.native.__all__ (a lowercase name is a lazily loaded function); the test_* functions are one behaviour each.
 COMMON MODIFICATION PATTERNS: A new name in vidbyte.harnesses.native.__all__ needs no change here; the tests read that list. Add it to vidbyte/__init__.py and regenerate the contract instead. FLOOR_NAMES only grows.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import vidbyte.harnesses.native inside a fresh-interpreter probe before the step that checks it is unloaded. 2. Do not start a vendor CLI; nothing here calls a thread function.
 KNOWN EDGE CASES: hasattr() on a module calls its __getattr__ for a missing name, so a hook that imported the native package before deciding would break the unloaded promise on every probe of a missing attribute.
@@ -59,6 +59,13 @@ def native_names() -> list[str]:
     return list(importlib.import_module("vidbyte.harnesses.native").__all__)
 
 
+@pytest.fixture(scope="module")
+def lazy_functions(native_names: list[str]) -> list[str]:
+    # Every lowercase native name is a function the root loads lazily;
+    # records, enums and the error are CapWords and load eagerly.
+    return sorted(name for name in native_names if name[0].islower())
+
+
 def test_the_native_package_still_exports_every_floor_name(native_names: list[str]) -> None:
     # The floor is meaningful only while the native package itself
     # still offers these names; a rename there must be a visible break.
@@ -85,14 +92,14 @@ def test_each_root_name_is_the_native_object_itself(native_names: list[str]) -> 
     assert [name for name in native_names if namespace[name] is not getattr(native, name)] == []
 
 
-def test_import_vidbyte_leaves_the_native_package_unloaded_until_a_function_is_named() -> None:
+def test_import_vidbyte_leaves_the_native_package_unloaded_until_a_function_is_named(lazy_functions: list[str]) -> None:
     report = fresh_interpreter(
         """
         import json, sys
         import vidbyte
         loaded = lambda: "vidbyte.harnesses.native" in sys.modules
         after_import = loaded()
-        listed = sorted(name for name in dir(vidbyte) if name.endswith("_thread"))
+        listed = sorted(name for name in dir(vidbyte) if name in LAZY_FUNCTIONS)
         probes = [hasattr(vidbyte, "__wrapped__"), hasattr(vidbyte, "run_claude_threads")]
         after_misses = loaded()
         config = vidbyte.GrokThreadConfig(permission_mode=vidbyte.GrokPermissionMode.ACCEPT_EDITS)
@@ -100,25 +107,25 @@ def test_import_vidbyte_leaves_the_native_package_unloaded_until_a_function_is_n
         from vidbyte import run_opencode_thread
         native = sys.modules["vidbyte.harnesses.native"]
         print(json.dumps({"after_import": after_import, "listed": listed, "probes": probes, "after_misses": after_misses, "mode": str(config.permission_mode), "after_records": after_records, "after_function": loaded(), "same": run_opencode_thread is native.run_opencode_thread}))
-        """
+        """.replace("LAZY_FUNCTIONS", repr(frozenset(lazy_functions)))
     )
     assert report["after_import"] is False
-    assert report["listed"] == sorted(THREAD_FUNCTIONS), "dir(vidbyte) must list the lazy thread functions before their first use"
+    assert report["listed"] == lazy_functions, "dir(vidbyte) must list the lazy thread functions before their first use"
     assert report["probes"] == [False, False] and report["after_misses"] is False, "an attribute miss must not import vidbyte.harnesses.native"
     assert report["mode"] == "acceptEdits" and report["after_records"] is False
     assert report["after_function"] is True and report["same"] is True
 
 
-def test_star_import_from_vidbyte_binds_every_thread_function() -> None:
+def test_star_import_from_vidbyte_binds_every_thread_function(lazy_functions: list[str]) -> None:
     report = fresh_interpreter(
         """
         import json
         namespace = {}
         exec("from vidbyte import *", namespace)
-        print(json.dumps(sorted(name for name in namespace if name.endswith("_thread"))))
-        """
+        print(json.dumps(sorted(name for name in namespace if name in LAZY_FUNCTIONS)))
+        """.replace("LAZY_FUNCTIONS", repr(frozenset(lazy_functions)))
     )
-    assert report == sorted(THREAD_FUNCTIONS)
+    assert report == lazy_functions
 
 
 def test_a_misspelled_root_name_is_still_an_attribute_or_import_error() -> None:

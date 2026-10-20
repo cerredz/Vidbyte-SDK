@@ -1,12 +1,12 @@
 """FILE: vidbyte/lib/dataclasses/validation.py
 
-PURPOSE: Defines RecordFieldValidator, the one canonical field validator for validated records and settings (text, optional text, tuples of text items, positive finite numbers or numbers that may be zero, bounded ints, strict bools, enum members, argv tuples, absolute directories, UTC datetimes at a resolution, and callables that may be required to be synchronous), and RecordFieldConverter, the canonical conversions and checks records apply beside it (tuples, read-only mappings, enum members, paths, resolved folders, lists of existing files and plain instance checks).
+PURPOSE: Defines RecordFieldValidator, the one canonical field validator for validated records and settings (text, optional text, tuples of text items, positive finite numbers or numbers that may be zero, bounded ints, strict bools, enum members, argv tuples, absolute directories, UTC datetimes at a resolution, and callables that may be required to be synchronous), and RecordFieldConverter, the canonical conversions and checks records apply beside it (tuples, read-only mappings, enum members, paths, UTC-aware times, resolved folders, lists of existing files and plain instance checks).
 ROLE IN CODEBASE: Called from the __post_init__ of the records in vidbyte/lib/dataclasses/native_threads.py, process.py, infinite.py and middleware.py (DelegationLimits), of InfiniteWorkspaceSettings and InfiniteMemoryAgentSettings (vidbyte/agents/infinite/settings.py, whose on_event sink goes through require_callable), of the InfiniteMemory event records (InfiniteEvent.at through require_utc_datetime, cost_usd through require_number with allow_zero), by DelegationLimitsMiddleware for its depth, and, through accepts_text, by the output readers GrokWire, OpencodeWire, MuseWire and MuseExecOutput under vidbyte/harnesses/native/ to check a vendor's thread id.
 ARCHITECTURE NOTE: Two classes of static methods, each taking the checked value first and the field name second, returning the checked or converted value or raising ConfigurationError. The checked variable is always named value, so the bool guards here are the single owner lint rules C002, C006, C007 and C008 point at. Messages name the field and the expected type or range, and quote a value only when it is a short, non-secret scalar or text. Every ConfigurationError also carries details["field"], so a caller can name the bad argument without reading the message text.
-FUNCTION INVENTORY: require_text (an optional character cap, pattern and one-line rule), accepts_text (require_text's rule as a bool), require_optional_text, require_text_items (a tuple of texts, each under require_text's rule), require_command_line_units (a value's quoted Windows command-line length), require_number (allow_zero admits 0), require_int (maximum optional), require_bool, require_enum, require_argv, require_directory, require_utc_datetime (a zero UTC offset and a microsecond resolution), require_callable (optional admits None; synchronous refuses async callables); _text_problem words what a text value fails, and _received renders the received value safely for a message. RecordFieldConverter: to_tuple, to_mapping, to_enum (a member or its exact value string), to_path (a str or os.PathLike, unchecked), to_folder (resolved, never a file, optionally existing), to_files (existing files, resolved, optionally with distinct names), require_instance.
+FUNCTION INVENTORY: require_text (an optional character cap, pattern and one-line rule), accepts_text (require_text's rule as a bool), require_optional_text, require_text_items (a tuple of texts, each under require_text's rule), require_command_line_units (a value's quoted Windows command-line length), require_number (allow_zero admits 0), require_int (maximum optional), require_bool, require_enum, require_argv, require_directory, require_utc_datetime (a zero UTC offset and a microsecond resolution), require_callable (optional admits None; synchronous refuses async callables); _text_problem words what a text value fails, and _received renders the received value safely for a message. RecordFieldConverter: to_tuple, to_mapping, to_enum (a member or its exact value string), to_path (a str or os.PathLike, unchecked), to_utc_datetime (an aware datetime or an ISO 8601 text with an offset, as UTC), to_folder (resolved, never a file, optionally existing), to_files (existing files, resolved, optionally with distinct names), require_instance.
 COMMON MODIFICATION PATTERNS: Add a new check as one more static method with value first and field_name second, and call it from a record's __post_init__; never copy a check into a record.
 WHAT NOT TO DO IN THIS FILE: 1. Do not convert values silently; to_path only wraps a path in Path and never checks or resolves it. 2. Do not quote mapping values or long text in a message; they can hold secrets. 3. Do not import from a layer above vidbyte.lib.
-KNOWN EDGE CASES: bool is an int subclass, so every numeric check refuses bool first. A field whose last name segment reads as a credential (password, token, secret, api_key) is never quoted, whatever its length. require_argv refuses a list on purpose, because argv fields must be immutable tuples. require_directory must run on the path as given, before Path.resolve(), or a relative path would pass; to_folder and to_files are the opposite choice, for settings that accept a relative path and store it resolved against the working directory at construction. require_text_items refuses a list, as require_argv does, so a frozen record cannot be changed through its field. require_utc_datetime accepts any zone whose offset is zero, not only timezone.utc. require_callable with synchronous relies on inspect.iscoroutinefunction, which sees through functools.partial and bound methods; an object's async __call__ is checked on its type, for the value and for every partial layer inside it, so a partial subclass with its own async __call__ is refused whether it is passed alone or inside another partial.
+KNOWN EDGE CASES: bool is an int subclass, so every numeric check refuses bool first. A field whose last name segment reads as a credential (password, token, secret, api_key) is never quoted, whatever its length. require_argv refuses a list on purpose, because argv fields must be immutable tuples. require_directory must run on the path as given, before Path.resolve(), or a relative path would pass; to_folder and to_files are the opposite choice, for settings that accept a relative path and store it resolved against the working directory at construction. to_utc_datetime refuses a naive time, because comparing it with an aware one raises TypeError later, and a time that overflows once moved to UTC (9999-12-31T23:00:00-05:00), so a garbled vendor time is a field error, never a raw OverflowError. require_text_items refuses a list, as require_argv does, so a frozen record cannot be changed through its field. require_utc_datetime accepts any zone whose offset is zero, not only timezone.utc. require_callable with synchronous relies on inspect.iscoroutinefunction, which sees through functools.partial and bound methods; an object's async __call__ is checked on its type, for the value and for every partial layer inside it, so a partial subclass with its own async __call__ is refused whether it is passed alone or inside another partial.
 RELATED DOCS: vidbyte/lib/README.md; lint/rules/c008_shared_validator_owner.py
 TESTS: tests/features/harness_threads/test_harness_threads_records.py; tests/test_record_field_validation.py (the options added for InfiniteMemory); tests/test_record_field_validation_event_options.py (allow_zero, require_utc_datetime, require_callable); tests/features/infinite_memory_agent/test_infinite_memory_contract.py
 """
@@ -20,7 +20,7 @@ import os
 import re
 import subprocess
 from collections.abc import Callable, Mapping
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from pathlib import Path
 from types import MappingProxyType
@@ -237,6 +237,25 @@ class RecordFieldConverter:
         if not isinstance(text, str):
             raise ConfigurationError(f"{field_name} must be a str or os.PathLike path; got a value of type {type(value).__name__}.", details={"field": field_name})
         return Path(text)
+
+    @staticmethod
+    def to_utc_datetime(value: Any, field_name: str) -> datetime:
+        # An aware datetime, or an ISO 8601 text that carries an
+        # offset, returned in UTC; a naive time, a date alone or any
+        # other type is refused, and so is a time that leaves the
+        # datetime range once moved to UTC.
+        parsed = value
+        if isinstance(value, str):
+            try:
+                parsed = datetime.fromisoformat(value)
+            except ValueError:
+                parsed = None
+        if not isinstance(parsed, datetime) or parsed.utcoffset() is None:
+            raise ConfigurationError(f"{field_name} must be a timezone-aware datetime or an ISO 8601 time with an offset; got {RecordFieldValidator._received(value, field_name)}.", details={"field": field_name})
+        try:
+            return parsed.astimezone(UTC)
+        except OverflowError as exc:
+            raise ConfigurationError(f"{field_name} must be a time that stays between year 1 and year 9999 in UTC; got {RecordFieldValidator._received(value, field_name)}.", details={"field": field_name}) from exc
 
     @staticmethod
     def to_folder(value: Any, field_name: str, *, must_exist: bool = False) -> Path:

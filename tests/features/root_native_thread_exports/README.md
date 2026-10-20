@@ -13,3 +13,4 @@ This folder tests that the native harness thread surface (the nine `run_`, `cont
 ## Logs
 
 - 2026-10-17 - Created for the 0.3.1 root export of the native thread surface, which vidbyte-cli's `resolve` command needs. The native package's `__all__` drives the checks, so a harness PR that adds a name there fails here until the root and the contract list it too.
+- 2026-10-19 - Merging PR #1147 added 47 native functions (thread helpers, `init_muse_workspace`, command and skill functions) and 4 records and enums to the root. The lazy-load and star-import probes now read the function list from the native package's `__all__` instead of matching the `_thread` suffix.

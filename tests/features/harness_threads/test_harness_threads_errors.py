@@ -1,18 +1,20 @@
 """FILE: tests/features/harness_threads/test_harness_threads_errors.py
 
-PURPOSE: Failure classification and detail: each INV-6 condition provoked through a stand-in yields its closed code with every INV-5 element in order (AC-10, NFR-7, FR-10): not installed, launch failed (EC-13), key rejected (EC-9), run failed (EC-23), protocol mismatch (EC-18), Muse serve failures, and an unexpected defect as runtime.error naming only its class (EC-32), the workspace, and on continue and fork the caller's thread id (INV-5 element 4, review R-7). Also the error class itself (D-10, §12.3 row 24) and the per-code likely-cause and next-step texts (comment 1).
+PURPOSE: Failure classification and detail: each INV-6 condition provoked through a stand-in yields its closed code with every INV-5 element in order (AC-10, NFR-7, FR-10): not installed, launch failed (EC-13), key rejected (EC-9), run failed (EC-23), protocol mismatch (EC-18), Muse serve failures, and an unexpected defect as runtime.error naming only its class (EC-32), the workspace, and on continue and fork the caller's thread id (INV-5 element 4, review R-7). Also the error class itself (D-10, §12.3 row 24), the per-code likely-cause and next-step texts (comment 1), and the one mapping of a finished helper or evidence child to its problem, NativeErrorFactory.child_problem (helpers spec D-35).
 ROLE IN CODEBASE: Start here when an error has the wrong code, loses a detail, or shows exception text it should not.
-ARCHITECTURE NOTE: check_error (conftest.py) asserts the INV-5 attributes, that likely_cause and next_step are exactly the texts NATIVE_THREAD_LIKELY_CAUSES and NATIVE_THREAD_NEXT_STEPS hold for the code, and that the message names, in order, the function, the code, the harness label, the workspace, the thread id when known, the observation, the vendor text, the likely cause and the next step. Timeouts and output caps are in test_harness_threads_process_bounds.py, batch launchers in test_harness_threads_launcher.py, WSL in test_harness_threads_wsl.py.
-FUNCTION INVENTORY: printed_session reads the thread id the stand-in printed; the test_* functions are one behaviour each.
+ARCHITECTURE NOTE: child_problem is pure, so its cases are real CliOutcome records from the real CliRunner over a tiny inline child (as test_harness_threads_runner.py builds them), handed to the static method on the class. check_error (conftest.py) asserts the INV-5 attributes, that likely_cause and next_step are exactly the texts NATIVE_THREAD_LIKELY_CAUSES and NATIVE_THREAD_NEXT_STEPS hold for the code, and that the message names, in order, the function, the code, the harness label, the workspace, the thread id when known, the observation, the vendor text, the likely cause and the next step. Timeouts and output caps are in test_harness_threads_process_bounds.py, batch launchers in test_harness_threads_launcher.py, WSL in test_harness_threads_wsl.py.
+FUNCTION INVENTORY: printed_session reads the thread id the stand-in printed; the test_* functions are one behaviour each; CHILD_SOURCE is the inline child behind the child_problem cases.
 COMMON MODIFICATION PATTERNS: A new failure condition is a spec change first (INV-6), then one stand-in mode and one case here.
 WHAT NOT TO DO IN THIS FILE: Do not compare the free text of likely causes or next steps; compare them to the constants maps.
 KNOWN EDGE CASES: The failure exit code is 93 so it cannot be confused with other digits in the message. On win32 a non-program file fails as os_error (WinError 193); on POSIX a non-executable file fails as permission_denied.
-RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §6.1 INV-5, INV-6, §6.2 AC-10, §6.3 EC-9, EC-13, EC-18, EC-23, EC-32, §12.3 rows 23, 24, 32; docs/spec/harness-thread-functions/review.md R-7
+RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §6.1 INV-5, INV-6, §6.2 AC-10, §6.3 EC-9, EC-13, EC-18, EC-23, EC-32, §12.3 rows 23, 24, 32; docs/spec/harness-thread-functions/review.md R-7; docs/spec/harness-thread-helpers-skills/spec.md §6.1 INV-22, §8.5, §12.3 row 36, D-35
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads/test_harness_threads_errors.py
 """
 
 from __future__ import annotations
 
+import importlib
+import inspect
 import sys
 from pathlib import Path
 
@@ -23,6 +25,29 @@ EXIT = 93
 UNKNOWN_ID = "0192f0c4-beef-7bee-8f00-000000000000"
 DEFECT_THREAD = "0192f0c4-feed-7bee-8f00-000000000001"
 PROBLEMS = ["not_installed", "launcher_refused", "launch_failed", "key_rejected", "thread_not_found", "timed_out", "output_too_large", "protocol_mismatch", "run_failed"]
+CHILD_CAP = 100
+CHILD_TIMEOUT = 1.0
+CHILD_SOURCE = """
+import sys, time
+marker, where, flood, code, hold = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), float(sys.argv[5])
+sys.stdout.write("o" * flood)
+if where != "none":
+    print(marker, file=sys.stderr if where == "stderr" else sys.stdout)
+sys.stdout.flush()
+sys.stderr.flush()
+time.sleep(hold)
+sys.exit(code)
+"""
+CHILD_CASES = [
+    ("timed-out-first", "stderr", 200, EXIT, 30.0, True, ("stderr", "stdout"), "timed_out"),
+    ("stdout-cut-before-the-marker", "stderr", 200, EXIT, 0.0, True, ("stderr", "stdout"), "output_too_large"),
+    ("marker-in-stderr", "stderr", 0, EXIT, 0.0, True, ("stderr", "stdout"), "thread_not_found"),
+    ("marker-in-stdout", "stdout", 0, EXIT, 0.0, True, ("stderr", "stdout"), "thread_not_found"),
+    ("marker-outside-the-texts", "stdout", 0, EXIT, 0.0, True, ("stderr",), "run_failed"),
+    ("no-marker-given", "stderr", 0, EXIT, 0.0, False, ("stderr",), "run_failed"),
+    ("marker-on-a-clean-exit", "stderr", 0, 0, 0.0, True, ("stderr", "stdout"), None),
+    ("clean-exit", "none", 0, 0, 0.0, False, (), None),
+]
 BROWSER_CODES = ["browser.mount_unsupported", "browser.runtime_missing", "browser.tool_install_failed", "browser.tools_unavailable"]
 DIAGNOSTIC_FIELDS = ("error_kind", "expected", "actual", "safe_runtime_details", "likely_causes", "repair_approaches", "related_docs", "relevant_tests")
 
@@ -192,10 +217,12 @@ async def test_error_class_carries_the_diagnostic_packet_for_this_feature(api, s
 
 
 def test_every_code_has_its_own_likely_cause_and_next_step(lib_api) -> None:
-    # D-10 / comment 1: texts written per code, for the 28 harness codes
-    # plus invalid_argument and runtime.error.
+    # D-10 / comment 1: texts written per code, for the 32 harness codes
+    # (helpers spec INV-22 adds the three command_not_run codes and
+    # grok.store_unreadable) plus invalid_argument and runtime.error.
     codes = lib_api.FailureCode
     harness_codes = [codes(f"{harness}.{problem}") for harness in HARNESSES for problem in PROBLEMS] + [codes("muse.wsl_unavailable")]
+    harness_codes += [codes(code) for code in ("grok.command_not_run", "opencode.command_not_run", "muse.command_not_run", "grok.store_unreadable")]
     expected = {*harness_codes, *(codes(code) for code in BROWSER_CODES), codes.CONFIGURATION_INVALID_ARGUMENT, codes.RUNTIME_ERROR}
     for table in (lib_api.constants.NATIVE_THREAD_LIKELY_CAUSES, lib_api.constants.NATIVE_THREAD_NEXT_STEPS):
         assert set(table) == expected
@@ -203,3 +230,24 @@ def test_every_code_has_its_own_likely_cause_and_next_step(lib_api) -> None:
         for harness in HARNESSES:
             texts = [table[code] for code in harness_codes if code.value.startswith(harness + ".")]
             assert len(set(texts)) == len(texts), f"{harness}: two codes share one text"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("where", "flood", "exit_code", "hold", "marked", "streams", "expected"), [case[1:] for case in CHILD_CASES], ids=[case[0] for case in CHILD_CASES])
+async def test_child_problem_maps_one_finished_child_in_the_d35_order(lib_api, where, flood, exit_code, hold, marked, streams, expected) -> None:
+    # D-35 (r4, S4 R-6): one pure static mapping for every helper and
+    # evidence child, in order: timed out, stdout cut, a non-zero exit
+    # with the marker in one of `texts`, any other non-zero exit, else
+    # None. Only `texts` is searched, never the outcome itself.
+    factory = importlib.import_module("vidbyte.harnesses.native.hostkit").NativeErrorFactory
+    assert isinstance(inspect.getattr_static(factory, "child_problem"), staticmethod), "D-35: child_problem is a @staticmethod"
+    marker = lib_api.constants.GROK_SESSION_NOT_FOUND_TEXT.format(thread_id=UNKNOWN_ID)
+    argv = (sys.executable, "-u", "-c", CHILD_SOURCE, marker, where, str(flood), str(exit_code), str(hold))
+    invocation = lib_api.CliInvocation(argv=argv, env_overlay={}, timeout_seconds=CHILD_TIMEOUT if hold else 20.0, max_output_bytes=CHILD_CAP)
+    outcome = await lib_api.CliRunner().run(invocation)
+    premise = (outcome.timed_out, outcome.stdout_truncated, outcome.exit_code == 0)
+    assert premise == (hold > 0, flood > CHILD_CAP, exit_code == 0 and not hold), f"test premise: {outcome!r}"
+    texts = tuple(getattr(outcome, stream) for stream in streams)
+    problem = factory.child_problem(outcome, marker=marker if marked else None, texts=texts)
+    want = None if expected is None else lib_api.enums.NativeThreadProblem(expected)
+    assert problem is want, f"D-35: {problem!r} != {want!r}"

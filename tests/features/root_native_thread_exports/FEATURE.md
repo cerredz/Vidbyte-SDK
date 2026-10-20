@@ -6,7 +6,7 @@ The harness thread functions (`run_`, `continue_` and `fork_` for Grok Build, op
 
 ## Contract
 
-Every name in `vidbyte.harnesses.native.__all__` is in `vidbyte.__all__`, and `vidbyte.<name>` is the same object as `vidbyte.harnesses.native.<name>`. The names first exported in 0.3.1 never leave the root. A plain `import vidbyte` still does not import `vidbyte.harnesses.native` (harness thread spec INV-23): the nine functions load the first time a caller names one, and an attribute miss never loads them. `dir(vidbyte)` and `from vidbyte import *` include the functions. A misspelled name is still an `AttributeError` or `ImportError`. `contracts/sdk-public-api.json` lists every one of these names, and its `version` equals `pyproject.toml` and `vidbyte.__version__`.
+Every name in `vidbyte.harnesses.native.__all__` is in `vidbyte.__all__`, and `vidbyte.<name>` is the same object as `vidbyte.harnesses.native.<name>`. The names first exported in 0.3.1 never leave the root. A plain `import vidbyte` still does not import `vidbyte.harnesses.native` (harness thread spec INV-23): every native function (the thread functions, their browser counterparts, the thread helpers and the command functions) loads the first time a caller names one, and an attribute miss never loads them. `dir(vidbyte)` and `from vidbyte import *` include the functions. A misspelled name is still an `AttributeError` or `ImportError`. `contracts/sdk-public-api.json` lists every one of these names, and its `version` equals `pyproject.toml` and `vidbyte.__version__`.
 
 ## Actors / Callers
 
@@ -47,6 +47,8 @@ On first use, the root module stores the loaded function in its own namespace, s
 ## Historical Regressions
 
 2026-10-17: created when 0.3.1 first exported the native thread surface from the root, so that vidbyte-cli could call the thread functions. Before that, the names lived only in `vidbyte.harnesses.native` (PR #1036).
+
+2026-10-19: the probes for `dir(vidbyte)` and the star import picked the lazy functions by the `_thread` suffix, which assumed the nine thread functions were the only ones. PR #1147's `get_grok_thread`, `read_muse_thread` and `delete_opencode_thread` end in `_thread` too, so the probes now take the lazy function list from the lowercase names in `vidbyte.harnesses.native.__all__`.
 
 ## Test Suite Map
 

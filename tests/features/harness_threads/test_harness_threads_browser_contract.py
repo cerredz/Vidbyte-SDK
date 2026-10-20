@@ -82,7 +82,21 @@ LIB_MODULES = ("vidbyte/lib/enums/browser_tools.py", "vidbyte/lib/dataclasses/br
 # Inside a harness subpackage, a module may import only these siblings
 # (D-27: browser -> threads -> wire -> mounts; Muse's launcher sits
 # below threads and browser, as on main).
-ALLOWED_SIBLINGS = {"mounts": set(), "wire": {"mounts"}, "threads": {"wire", "mounts", "launcher"}, "browser": {"threads", "wire", "mounts", "launcher"}}
+# The sibling modules each module of a harness subpackage may import.
+# The thread helpers' modules (PR #1147) sit beside the browser chain:
+# commands runs a thread, helpers reads the store or a child, and store
+# and children sit just above wire and launcher. No entry names browser.
+ALLOWED_SIBLINGS = {
+    "mounts": set(),
+    "launcher": set(),
+    "wire": {"mounts"},
+    "store": {"wire"},
+    "children": {"launcher"},
+    "helpers": {"wire", "store", "children", "launcher"},
+    "threads": {"wire", "mounts", "launcher", "store", "children"},
+    "commands": {"threads", "helpers", "store", "wire"},
+    "browser": {"threads", "wire", "mounts", "launcher"},
+}
 TOOL_KEYS_ANNOTATIONS = {"Mapping[str,str]|None", "None|Mapping[str,str]", "Optional[Mapping[str,str]]"}
 IMPORT_SECONDS = 180
 
@@ -217,18 +231,22 @@ def test_browser_enums_are_exported_str_enums_with_the_spec_members(browser_lib)
     assert package.BrowserToolVariable is variable and "BrowserToolVariable" in package.__all__
     assert not [member.name for member in variable if member.name.endswith(CREDENTIAL_WORDS)]
     record = browser_lib.enums.NativeThreadResultRecord
-    assert issubclass(record, enum.StrEnum) and {member.name: member.value for member in record} == {"NATIVE_THREAD_RESULT": "NativeThreadResult", "BROWSER_THREAD_RESULT": "BrowserThreadResult"}
+    # The browser record follows the plain one; the thread helpers'
+    # records (PR #1147) come after both.
+    assert issubclass(record, enum.StrEnum) and list({member.name: member.value for member in record}.items())[:2] == [("NATIVE_THREAD_RESULT", "NativeThreadResult"), ("BROWSER_THREAD_RESULT", "BrowserThreadResult")]
     assert package.NativeThreadResultRecord is record and "NativeThreadResultRecord" in browser_lib.enums.__all__
 
 
 def test_browser_codes_follow_main_and_map_for_every_harness(browser_lib) -> None:
-    # FR-16 / D-13 / §12.3 rows 4 and 8: four codes after
-    # MUSE_WSL_UNAVAILABLE, one pair per harness and problem, each with
-    # its own likely cause and next step.
+    # FR-16 / D-13 / §12.3 rows 4 and 8: four codes right after
+    # MUSE_WSL_UNAVAILABLE (the thread helpers' codes follow them), one
+    # pair per harness and problem, each with its own likely cause and
+    # next step.
     lib = browser_lib
     members = list(lib.FailureCode)
     names = [member.name for member in members]
-    assert [member.value for member in members[names.index("MUSE_WSL_UNAVAILABLE") + 1 :]] == list(BROWSER_PROBLEMS.values())
+    start = names.index("MUSE_WSL_UNAVAILABLE") + 1
+    assert [member.value for member in members[start : start + len(BROWSER_PROBLEMS)]] == list(BROWSER_PROBLEMS.values())
     table = lib.constants.NATIVE_THREAD_FAILURE_CODES
     for problem, code in BROWSER_PROBLEMS.items():
         for harness in lib.enums.NativeHarness:
@@ -238,16 +256,28 @@ def test_browser_codes_follow_main_and_map_for_every_harness(browser_lib) -> Non
     assert len({causes[code] for code in browser_codes}) == 4 and len({steps[code] for code in browser_codes}) == 4
 
 
-def test_result_record_table_covers_all_eighteen_operations(browser_lib) -> None:
-    # D-15 / §9.2: one entry per operation, browser ones naming
-    # BrowserThreadResult and plain ones NativeThreadResult.
-    lib = browser_lib
+def test_result_record_table_covers_every_operation(browser_api) -> None:
+    # D-15 / §9.2: one entry per operation, naming what the function
+    # of that name is annotated to return, so an error's `expected`
+    # text never disagrees with the signature (browser ones name
+    # BrowserThreadResult, plain ones NativeThreadResult, and the
+    # thread helpers their summaries, command output or None).
+    lib = browser_api
     table = lib.constants.NATIVE_THREAD_RESULT_RECORDS
     record = lib.enums.NativeThreadResultRecord
-    assert isinstance(table, types.MappingProxyType) and set(table) == set(lib.enums.NativeThreadOperation) and len(table) == 18
+    assert isinstance(table, types.MappingProxyType) and set(table) == set(lib.enums.NativeThreadOperation)
+    annotated = {
+        "NativeThreadResult": record.NATIVE_THREAD_RESULT,
+        "BrowserThreadResult": record.BROWSER_THREAD_RESULT,
+        "NativeThreadSummary": record.NATIVE_THREAD_SUMMARY,
+        "tuple[NativeThreadSummary, ...]": record.NATIVE_THREAD_SUMMARIES,
+        "NativeCommandOutput": record.NATIVE_COMMAND_OUTPUT,
+        "None": record.NO_RESULT,
+    }
     for operation, value in table.items():
-        expected = record.BROWSER_THREAD_RESULT if operation.value.endswith("_with_browser") else record.NATIVE_THREAD_RESULT
-        assert value is expected, operation
+        returns = inspect.signature(getattr(lib.native, operation.value)).return_annotation
+        assert value is annotated[returns], (operation, returns)
+    assert all(table[lib.enums.NativeThreadOperation(name)] is record.BROWSER_THREAD_RESULT for name in BROWSER_FUNCTIONS)
 
 
 def test_native_thread_error_expected_names_the_result_record(browser_lib) -> None:
@@ -311,8 +341,9 @@ def test_lib_and_hostkit_export_the_new_helpers(browser_lib) -> None:
 
 @pytest.mark.parametrize("harness", HARNESSES)
 def test_harness_subpackage_imports_run_one_way(harness) -> None:
-    # D-27 / §12.4: browser -> threads -> wire -> mounts; mounts imports
-    # nothing from its subpackage; nothing but __init__ imports
+    # D-27 / §12.4: browser -> threads -> wire -> mounts, with the
+    # helpers' modules layered beside them (ALLOWED_SIBLINGS); mounts
+    # imports nothing from its subpackage; nothing but __init__ imports
     # browser; no import hides inside a function.
     folder = NATIVE / harness
     for module in ("mounts", "browser"):
