@@ -139,3 +139,32 @@ r2 verifier result (scripts under `scratchpad/r2e-s1/scripts/`):
   - 37 §12.3 rows. 3 CREATE rows (2a, 3, 11) equal the §8.4 budget.
   - Every "row N" reference resolves, and no retired text survives outside the review log.
 - A key-shaped literal scan found none.
+
+## Revisions from review round 2
+
+spec.md is now revision 3, with `status: approved`, per the coordinator: the two review rounds are the approval. The review is `reports/S1-spec-review-r2.md`, and it marks the round-1 findings CLOSED. All five round-2 findings and both nits are accepted; none is declined. §16 records them as round 2, and §17 has the r3 row. Settled decisions are unchanged: DIRECT only, and the root names `ReasoningEffort`, `DecisionModelConfig` and `DecisionModelMode`.
+
+| Finding | Disposition | Change in spec r3 |
+|---|---|---|
+| R-1 [Blocker] | Accepted | Row 2b puts the configs import before `structured_output`, one name per line. Row 10's validation import names are sorted and wrapped. Row 4 and row 3a state their order. Row 3a also notes that `registries/__init__.py` already carries one I001 at base (`actors` last), so the new line adds none. §12.4 adds this obligation: a whole-tree run of `py -3.11 -m ruff check vidbyte --config lint/ruff.toml --select I001 --no-cache`, filtered to the touched paths, lists no file that is I001-clean at base. S051 is 259/259 (`lint/baseline.json:79`, `lint/README.md:130`). The obligation names the field-guide trap (`local-ci-verification.md:38`). |
+| R-2 [Major] | Accepted: do not import | Row 3(b) imports three names, not four, and says why: no method uses `GEMINI_THINKING_BUDGET_OFF`, and an unused import is an F401 finding. The §8.5 comment is updated. §12.4 adds "No added import is unused; S001 stays at 56". |
+| R-3 [Major] | Accepted | AC-4 and C5 item 4 choose the capability text only when the id's §9.2 line has a "sent" cell. Otherwise they choose the no-row text. The `o1`… line and the `gemini-2.5-pro` line are relabelled "refused (all; …)", and the reading note says every line with no "sent" cell is so marked. New INV-20 states the exact `REASONING_EFFORT_SUPPORT` contents and what `supported` returns. Rows 2a(d) and §12.4 cite INV-20. |
+| R-4 [Minor] | Accepted | New P6 row 29a (`REPO_MAP.md:185-187`) replaces the stale configs sentence with a general-intent one, with no file names (`agents-md-map.md:3`). New row 29b names `ReasoningEffortRegistry` in `vidbyte/lib/README.md:40`, following #1183 and #1159. §12.6 P6 lists rows 29, 29a, 29b and 30–34. Neither row is a new file. |
+| R-5 [Minor] | Accepted | A-4 now covers `grok-4.6` and `grok-4.5`. It says plainly that their "sent" cells rest on it, and that `grok-4.5` is the SDK default (`models.py:77`). A note under the xAI table says the same. A new quote, XA-39 (grok-4.6's Responses row on the reasoning page), sits beside XA-8. |
+| Nit: AC-10 | Accepted | AC-10 reads `got <repr>.`, with `got 'max'.` as the example, matching §8.5. |
+| Nit: `:309` mechanism | Accepted | §11, §13 and A-9 name both mechanisms: `merge_base()` (`:139-143`) for `:270-278`, and `optional_merge_base()` (`:131-137`) for `:309`. A-9 cites `ci.yml:27,48` (no `fetch-depth`). |
+
+How I checked R-1 independently:
+- I ran `py -3.11 -m ruff check --config lint/ruff.toml --select I001 --no-cache` on throwaway scratch copies (since deleted).
+- `configs/__init__.py` with the new import before `structured_output` passes; after it, I001.
+- Row 10's sorted names on one line fail at 89 columns, and `--diff` wants them wrapped. The registry's three-name import wraps the same way.
+- That is why §12.4 states the rule as "wrapped as ruff writes it" and does not prescribe hand-written lines.
+
+r3 verifier result:
+- `s1-verify-spec.py` (strict): 225 catalog lines (219 quotes, 6 absence checks), 0 failures.
+- `s1-crosscheck-table.py`: 0 unproven sent values.
+- `s1-table-shape.py`: 0 bad rows.
+- `s1-trace.py`: 0 problems.
+  - Counts: FR 12, NFR 7, AC 20, EC 29, W 10, INV 20, D 18, Q 10, A 13, NG 15.
+  - 39 §12.3 rows. 3 CREATE rows (2a, 3, 11) equal the §8.4 budget.
+- A separate scan of all 53 §9.2 model lines found no line without a "sent" cell that is not marked "refused (all)" (INV-20).
