@@ -1,19 +1,21 @@
 """FILE: tests/features/harness_compose/test_harness_compose_keys.py
 
-PURPOSE: Key hygiene (AC-15, INV-4, INV-5, INV-6, INV-26, T-3, D-28, EC-71): with every step bound to its own distinctive key and stand-ins that print keys into answers, plans, proposals, guidance and files, no fragment of any bound key reaches a later step's prompt or argv (COMPOSE_REDACTED_KEY stands in its place), any git argv or environment, the repr of a ThreadStep, StageSpec or EnsembleRoster, a ThreadComposeError's message or any attribute but result and diff (also when git's own text or a changed file's name holds the key), or a ConfigurationError, whether the caller put a key in a bad template or in any caller text that compose refuses (every composite's and alias's prompt, the chain and stage templates, the schema, a thread id, either binder's model); the records keep the raw text, error.result and error.diff included; each key reaches only its own step's child; os.environ is unchanged.
+PURPOSE: Key hygiene (AC-15, INV-4, INV-5, INV-6, INV-26, T-3, D-28, EC-28, EC-71, EC-78): with every step bound to its own distinctive key and stand-ins that print keys into answers, plans, proposals, guidance and files, no fragment of any bound key reaches a later step's prompt or argv (COMPOSE_REDACTED_KEY stands in its place), any git argv or environment, the repr of a ThreadStep, StageSpec or EnsembleRoster, a ThreadComposeError's message or any attribute but result and diff (also when git's own text or a changed file's name holds the key), or a ConfigurationError, whether the caller put a key in a bad template or in any caller text that compose refuses (every composite's and alias's prompt, the chain and stage templates, the schema, a thread id, either binder's model) or in one field of a record built without a binder (a ThreadStep built directly or changed with dataclasses.replace, a StageSpec, a ThreadVerdict, a StageAttempt, an EnsembleRole, an EnsembleSelection or a WorkspaceDiff), where neither the refusal nor any exception its context or cause chain keeps quotes the key, nor does the problem compose records when a step answers its key into a verdict's decision, a selection's proposal, a plan role's name or a round's kept list; the records keep the raw text, error.result and error.diff included; each key reaches only its own step's child; os.environ is unchanged.
 ROLE IN CODEBASE: Start here when a key shows up anywhere compose produced text.
 ARCHITECTURE NOTE: Keys are random placeholders (fresh_key, short_key), and leaks are searched as every 12-character fragment, so a partly scrubbed key is still caught. Prompts and argv are read from the stand-in logs, git children from the CliRunner spy. The stand-in scenarios hold the keys as answer text, the way a model would print them; the stand-in logs credentials only as digests.
-FUNCTION INVENTORY: assert_clean fails with the leaked fragments; credential_digests lists the key digests one launch received, opencode's inline config included; short_key makes a placeholder short enough for a refusal to quote; CallerText binds steps to one short key and holds a bad caller text with it; the test_* functions are one behaviour each.
-COMMON MODIFICATION PATTERNS: A new spliced value gets a key planted in it here and a clean-prompt assertion on the step that receives it.
+FUNCTION INVENTORY: assert_clean fails with the leaked fragments; credential_digests lists the key digests one launch received, opencode's inline config included; short_key makes a placeholder short enough for a refusal to quote; CallerText binds steps to one short key and holds a bad caller text with it; RecordText builds a ThreadStep directly, binds one, or builds a result record, each with one short key; RECORD_SITES maps each record field to the field its refusal names and the call that puts the key there; reachable lists an error and every exception its context and cause chains reach; error_surfaces joins the message, repr, args and attributes of each; AnswerText runs a verify_with or a run_ensemble in which one step answers its own short key into a JSON member; ANSWER_SITES maps each member to the field its problem names, the run and the answer that holds the problem; the test_* functions are one behaviour each.
+COMMON MODIFICATION PATTERNS: A new spliced value gets a key planted in it here and a clean-prompt assertion on the step that receives it. A new record field whose check can refuse a short str gets a RECORD_SITES row.
 WHAT NOT TO DO IN THIS FILE: Never use a real key; fresh_key makes a random placeholder in the base key pattern.
-KNOWN EDGE CASES: The raw answer and diff texts in the returned records are meant to keep the keys (EC-71); only text compose produces or splices is scrubbed. A refusal quotes a bad value only while its repr fits in 80 characters, so fresh_key's 75-character keys can never show such a leak; the caller-text cases use short_key's 16 characters, so the bad value's repr (33 characters) would still be quoted under a limit cut to less than half, and a value that gets past the template checks (only {previous}) but holds a brace, a space and a NUL, so a later text check is the one that refuses.
-RELATED DOCS: tests/features/harness_compose/FEATURE.md; docs/spec/native-thread-compose/spec.md §6.1 INV-4, INV-5, INV-26, §6.2 AC-15, §6.3 EC-71, §10 T-3; docs/spec/native-thread-compose/review.md R-3, R-17
+KNOWN EDGE CASES: The raw answer and diff texts in the returned records are meant to keep the keys (EC-71); only text compose produces or splices is scrubbed. A refusal quotes a bad value only while its repr fits in 80 characters, so fresh_key's 75-character keys can never show such a leak; the caller-text cases use short_key's 16 characters, so the bad value's repr (33 characters) would still be quoted under a limit cut to less than half, and a value that gets past the template checks (only {previous}) but holds a brace, a space and a NUL, so a later text check is the one that refuses. A record row's bad value ends in a newline, a NUL or a space where the field's pattern needs one to refuse: a bare key passes as a grok or muse model and as a thread id, which validation accepts, so that case is not a refusal and is out of R-33. An answer row checks only the problem compose records: the answer's turns keep the key raw, as the step's own text (EC-71). The round row is a guard: a kept refusal names only the type today, so it passes before R-33 lands too.
+RELATED DOCS: tests/features/harness_compose/FEATURE.md; docs/spec/native-thread-compose/spec.md §6.1 INV-4, INV-5, INV-26, §6.2 AC-15, §6.3 EC-28, EC-71, EC-78, §10 T-3; docs/spec/native-thread-compose/review.md R-3, R-17, R-33; docs/spec/native-thread-compose/reports/S5-findings-verifier-rr1.md §3.3, §4.2, §8
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_compose/test_harness_compose_keys.py
 """
 
 from __future__ import annotations
 
+import dataclasses
 import inspect
+import json
 import os
 import uuid
 
@@ -91,6 +93,147 @@ CALLER_TEXT_SITES = {
     "run_grok_verify_with_opencode_and_muse prompt": ("prompt", lambda t: t.compose.run_grok_verify_with_opencode_and_muse(t.bad, writer=t.grok(edits=True), opencode=t.opencode(), muse=t.muse())),
     "run_opencode_verify_with_grok_and_muse prompt": ("prompt", lambda t: t.compose.run_opencode_verify_with_grok_and_muse(t.bad, writer=t.opencode(), grok=t.grok(plan=True), muse=t.muse())),
     "run_muse_verify_with_grok_and_opencode prompt": ("prompt", lambda t: t.compose.run_muse_verify_with_grok_and_opencode(t.bad, writer=t.muse(), grok=t.grok(plan=True), opencode=t.opencode())),
+}
+
+
+class RecordText:
+    """Records a caller builds without a binder, with one short key."""
+
+    def __init__(self, api, steps, sandbox, pack, key: str) -> None:
+        self.api = api
+        self.records = api.records
+        self.ensemble = api.ensemble
+        self.steps = steps
+        self.sandbox = sandbox
+        self.pack = pack
+        self.key = key
+
+    def direct(self, kind: tuple[str, str], **changes):
+        # A ThreadStep built directly (EC-78) around the function of
+        # kind, a (harness, verb) pair, and valid apart from the
+        # fields the row changes, its harness or verb among them.
+        harness, verb = kind
+        values = {"function": self.api.functions[kind], "harness": harness, "verb": verb, "api_key": self.key, "workspace": self.sandbox.workspace}
+        if harness == "opencode":
+            values["model"] = self.pack.OPENCODE_MODEL
+        if verb != "run":
+            values["thread_id"] = THREAD_ID
+        values.update(changes)
+        return self.records.ThreadStep(**values)
+
+    def bound(self, harness: str = "grok", verb: str = "run", thread_id: str | None = None):
+        return self.steps.bind(harness, verb, thread_id, key=self.key)
+
+    def outcome(self):
+        result = self.api.NativeThreadResult(harness=self.api.NativeHarness.GROK, thread_id=THREAD_ID, text="x", text_truncated=False)
+        return self.records.StepOutcome(result=result)
+
+
+# R-33: every record field whose check can refuse a short str, with
+# the field its refusal names and the call that puts the key there.
+# Each row reaches one check, so a site that quotes fails its rows.
+RECORD_SITES = {
+    # A ThreadStep built directly (EC-78).
+    "ThreadStep() harness": ("ThreadStep.harness", lambda t: t.direct(("grok", "run"), harness=t.key)),
+    "ThreadStep() verb": ("ThreadStep.verb", lambda t: t.direct(("grok", "run"), verb=t.key)),
+    "ThreadStep() opencode model": ("model", lambda t: t.direct(("opencode", "run"), model=t.key)),
+    "ThreadStep() grok model with a newline": ("model", lambda t: t.direct(("grok", "run"), model=t.key + "\n")),
+    "ThreadStep() continue thread_id": ("thread_id", lambda t: t.direct(("grok", "continue"), thread_id=t.key + NUL)),
+    "ThreadStep() fork thread_id": ("thread_id", lambda t: t.direct(("opencode", "fork"), thread_id=t.key + " x")),
+    # A bound step changed with dataclasses.replace (EC-78).
+    "replace() harness": ("ThreadStep.harness", lambda t: dataclasses.replace(t.bound(), harness=t.key)),
+    "replace() verb": ("ThreadStep.verb", lambda t: dataclasses.replace(t.bound(), verb=t.key)),
+    "replace() opencode model": ("model", lambda t: dataclasses.replace(t.bound("opencode"), model=t.key)),
+    "replace() continue thread_id": ("thread_id", lambda t: dataclasses.replace(t.bound("grok", "continue", THREAD_ID), thread_id=t.key + NUL)),
+    # A StageSpec the caller builds.
+    "StageSpec retries": ("StageSpec.retries", lambda t: t.records.StageSpec(t.bound(), "Start.", t.key)),
+    "replace() StageSpec retries": ("StageSpec.retries", lambda t: dataclasses.replace(t.records.StageSpec(step=t.bound(), template="Start."), retries=t.key)),
+    # Result and answer records, public names a caller can build.
+    "ThreadVerdict decision": ("ThreadVerdict.decision", lambda t: t.records.ThreadVerdict(decision=t.key, summary="s")),
+    "StageAttempt rung": ("StageAttempt.rung", lambda t: t.records.StageAttempt(rung=t.key, outcome=t.outcome())),
+    "StageAttempt decision": ("StageAttempt.decision", lambda t: t.records.StageAttempt(rung=0, outcome=t.outcome(), decision=t.key)),
+    "EnsembleSelection proposal": ("EnsembleSelection.proposal", lambda t: t.ensemble.EnsembleSelection(proposal=t.key, approach="a", rationale="r", guidance="g")),
+    "EnsembleRole name": ("EnsembleRole.name", lambda t: t.ensemble.EnsembleRole(name=t.key + NUL, identity="i", personality="p", expertise="e", knowledge="k", skills="s", goal="g")),
+    "WorkspaceDiff truncated": ("WorkspaceDiff.truncated", lambda t: t.records.WorkspaceDiff(files=(), text="", truncated=t.key)),
+}
+
+
+def reachable(error: BaseException) -> list[BaseException]:
+    # The error and every exception its __context__ and __cause__
+    # chains reach, so a quoted original kept as context counts too.
+    found: list[BaseException] = []
+    pending: list[BaseException | None] = [error]
+    while pending:
+        item = pending.pop()
+        if item is None or any(item is seen for seen in found):
+            continue
+        found.append(item)
+        pending.extend((item.__context__, item.__cause__))
+    return found
+
+
+def error_surfaces(error: BaseException) -> str:
+    # Every text the error shows, and every exception it reaches:
+    # the message, the repr, the args and each attribute's repr.
+    return " ".join(" ".join([str(item), repr(item), repr(item.args), *(repr(value) for value in vars(item).values())]) for item in reachable(error))
+
+
+class AnswerText:
+    """Composites in which one step answers its own short key."""
+
+    def __init__(self, api, steps, pack, key: str) -> None:
+        self.compose = api.compose
+        self.ensemble = api.ensemble
+        self.steps = steps
+        self.pack = pack
+        self.key = key
+
+    def verify(self):
+        # A Grok verifier answers its key as the decision every turn.
+        writer = self.steps.bind("grok", edits=True, label="writer", fake={"text": "Done.", "write_files": {"feature.txt": "feature\n"}})
+        verifier = self.steps.bind("grok", plan=True, label="verifier", key=self.key, fake={"text": self.pack.verdict_json(self.key)})
+        return self.compose.verify_with(writer, [verifier], prompt=self.pack.PROMPT)
+
+    def ensemble_run(self, plan: str, selection: str, proposers: int = 1):
+        # A planner, Grok fork proposers, a selector and an implementer.
+        # One proposer offers the selector block 1 alone (EC-70); ten
+        # make it narrow them in a round first. The planner and the
+        # selector hold the key.
+        planner = self.steps.bind("grok", plan=True, label="planner", key=self.key, fake={"text": plan})
+        proposer = self.steps.bind("grok", "fork", plan=True, label="proposer", fake={"text": "PROPOSAL-ONE: lazy imports."})
+        selector = self.steps.bind("grok", plan=True, label="selector", key=self.key, fake={"text": selection})
+        implementer = self.steps.bind("grok", edits=True, label="implementer")
+        roster = self.ensemble.EnsembleRoster(planner=planner, proposers=[proposer] * proposers, selector=selector, implementer=implementer)
+        return self.compose.run_ensemble(self.pack.TASK, roster=roster)
+
+    def selection(self):
+        # The selector answers its key as the proposal number.
+        answer = json.dumps({"proposal": self.key, "approach": "a", "rationale": "r", "guidance": "g"})
+        return self.ensemble_run(self.pack.plan_json([("ROLE-ONE", "IDENTITY-ONE")]), answer)
+
+    def plan(self):
+        # The planner answers its key and a NUL as its one role's name.
+        return self.ensemble_run(self.pack.plan_json([(self.key + NUL, "IDENTITY-ONE")]), self.pack.selection_json(1))
+
+    def narrowing(self):
+        # Ten proposals, and the selector answers its key as the one
+        # proposal its round keeps.
+        roles = [(f"ROLE-{index:02d}", f"IDENTITY-{index:02d}") for index in range(1, 11)]
+        answer = json.dumps({"kept": [self.key], "summary": "s"})
+        return self.ensemble_run(self.pack.plan_json(roles), answer, proposers=10)
+
+
+# R-33: every JSON member a step answers whose record can refuse a
+# short str, with the field the problem names, the run whose step
+# answers its key there, and the answer that keeps the problem.
+# Section 3.3 of the R-33 verifier report found the first three; the
+# round's kept list already names only its type, and its row keeps
+# it that way.
+ANSWER_SITES = {
+    "verify_with verdict decision": ("ThreadVerdict.decision", lambda t: t.verify(), lambda result: result.verdicts[0]),
+    "run_ensemble selection proposal": ("EnsembleSelection.proposal", lambda t: t.selection(), lambda result: result.selection),
+    "run_ensemble plan role name": ("EnsembleRole.name", lambda t: t.plan(), lambda result: result.plan),
+    "run_ensemble round kept": ("EnsembleRound.kept", lambda t: t.narrowing(), lambda result: result.rounds[0] if result.rounds else None),
 }
 
 
@@ -218,8 +361,9 @@ async def test_a_refusal_of_caller_text_never_quotes_the_key_it_holds(compose_ap
     # AC-15 / INV-4 / INV-5 / T-3: a caller text that holds a key bound
     # to the call's steps gets past any template check and fails the
     # text check after it. The ConfigurationError names the argument,
-    # holds no fragment of the key in its message, args or any
-    # attribute, and nothing has started. Red until review R-3 lands.
+    # holds no fragment of the key in its message, repr, args or
+    # attributes, or in any exception its context or cause chain
+    # keeps, and nothing has started. Red until review R-3 lands.
     api = compose_api
     field, call = CALLER_TEXT_SITES[site]
     text = CallerText(api, steps, pack, short_key())
@@ -229,9 +373,50 @@ async def test_a_refusal_of_caller_text_never_quotes_the_key_it_holds(compose_ap
             await outcome
     error = refused.value
     assert error.details.get("field") == field, f"{site}: {error} {error.details}"
-    shown = " ".join([str(error), repr(error.args), *(repr(value) for value in vars(error).values())])
-    assert pack.leaks(shown, [text.key]) == [], f"INV-4: the {site} refusal quotes the key: {str(error)!r}"
+    assert pack.leaks(error_surfaces(error), [text.key]) == [], f"INV-4: the {site} refusal quotes the key: {str(error)!r}"
     assert sandbox.launches() == [], "refused before any process starts"
+
+
+@pytest.mark.parametrize("site", sorted(RECORD_SITES))
+def test_a_record_refusal_never_quotes_the_key_it_was_given(compose_api, sandbox, steps, pack, site) -> None:
+    # AC-15 / INV-4 / INV-5 / EC-78: a key in one field of a record
+    # built without a binder, or changed with dataclasses.replace,
+    # is refused by that record. The ConfigurationError names the
+    # field, nothing has started, and no fragment of the key is in
+    # its message, repr, args or attributes, or in any exception its
+    # context or cause chain keeps. Red until review R-33 lands.
+    api = compose_api
+    field, build = RECORD_SITES[site]
+    text = RecordText(api, steps, sandbox, pack, short_key())
+    with pytest.raises(api.ConfigurationError) as refused:
+        build(text)
+    error = refused.value
+    assert error.details.get("field") == field, f"{site}: {error} {error.details}"
+    assert sandbox.launches() == [], "refused before any process starts"
+    assert pack.leaks(error_surfaces(error), [text.key]) == [], f"INV-4: the {site} refusal quotes the key: {str(error)!r}"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("site", sorted(ANSWER_SITES))
+async def test_an_answer_member_refusal_never_quotes_the_key_in_its_problem(compose_api, sandbox, steps, pack, site) -> None:
+    # AC-15 / INV-4 / EC-28 / EC-71: a step answers its own key into
+    # a member whose record refuses it, on every turn. The answer
+    # ends with no value after its repair turns, the turns keep the
+    # raw text (EC-71), and the problem compose records names the
+    # field yet holds no fragment of the key. Red until review R-33
+    # lands, except the round row, which guards a refusal that names
+    # only the type.
+    api = compose_api
+    field, run, pick = ANSWER_SITES[site]
+    sandbox.make_repo()
+    text = AnswerText(api, steps, pack, short_key())
+    answer = pick(await run(text))
+    assert answer is not None and answer.value is None, f"{site}: the answer was accepted"
+    assert len(answer.turns) == 1 + api.constants.COMPOSE_JSON_REPAIR_TURNS, "the first turn and every repair turn ran"
+    assert all(text.key in turn.result.text for turn in answer.turns), "the turns keep the raw answer (EC-71)"
+    problem = answer.problem or ""
+    assert field in problem, f"EC-28: the problem names {field}: {problem!r}"
+    assert pack.leaks(problem, [text.key]) == [], f"INV-4: the {site} problem quotes the key: {problem!r}"
 
 
 @pytest.mark.asyncio
