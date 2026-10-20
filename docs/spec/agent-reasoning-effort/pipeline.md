@@ -15,8 +15,8 @@ Program: JevAgent in vidbyte-cli, run R2 of 8 (see request.md §C "This run's sc
 
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
-| S0 worktree + capture + recon | running | 2026-10-20 | | | worktree from origin/main 98a5d37b |
-| S1 spec + review | pending | | | | |
+| S0 worktree + capture + recon | done | 2026-10-20 | 2026-10-20 | reports/S0-scout.md | 2fabf8f8; code-map.md has 583 lines in 4 sections and about 45 source files. The orchestrator checked base.py:109 (AUTO is the default) and vidbyte_gateway.py:124 (a body field outside the allow-list gives 422) |
+| S1 spec + review | running | 2026-10-20 | | | |
 | S2 tests | pending | | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
@@ -31,6 +31,7 @@ Program: JevAgent in vidbyte-cli, run R2 of 8 (see request.md §C "This run's sc
 - 2026-10-20: The value set is fixed to the published six (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`) from catalog.js:555-557 and the CLI's `AgentReasoningEffort`, because the user said the commands "will not be changing over time".
 - 2026-10-20: The alignment questions are not re-asked. The program's answers (request.md §A Prompt 3, Q10) cover this run, and the open product points are the scope's Q-n defaults.
 
+- 2026-10-20: Gateway ruling. AUTO, the default, always goes through the Vidbyte gateway, which returns 422 on body fields outside EMITTED_KEYS, and those have no reasoning keys. So the effort is DIRECT-only, and a gateway mode with an effort set is refused at construction with a typed error naming DIRECT. Reasons: D-P9 never silently ignore, and C4 runs JevAgent's main model DIRECT on the user's key. Extending the gateway allow-list is a backend `[scope-adding]` follow-up. This is reported to the user, who can overrule it.
 ## User replies (verbatim)
 - 2026-10-19: answers to the alignment questions are in request.md §A, Prompt 3. Q10: "JevAgent should have a reasoning effort, this can be a pr into vidbyte-sdk/ and then update cli with this".
 
