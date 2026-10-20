@@ -84,7 +84,8 @@ Each is an input and state that leads to a wrong output, and each has a test her
   - a key in one field of a record built without a binder (a `ThreadStep` built directly or changed with `dataclasses.replace`, a `StageSpec`, `ThreadVerdict`, `StageAttempt`, `EnsembleRole`, `EnsembleSelection` or `WorkspaceDiff`) is quoted in that record's refusal, or in an exception the refusal keeps as its context or cause;
   - a key that a step answers into a verdict's `decision`, a selection's `proposal`, a plan role's `name` or a round's `kept` list is quoted in the `problem` of that answer;
   - a key is shown by a `functools.partial` `repr`;
-  - a key inside git's error text, or in the name of a file a reader changed, is shown by a `ThreadComposeError` message.
+  - a key inside git's error text, or in the name of a file a reader changed, is shown by a `ThreadComposeError` message;
+  - a key in the name of a file that a reader saved in its worktree reaches the cause, the context or the traceback of the `WORKTREE_FAILED` raised when that worktree cannot be removed, because compose chained the OS error that names the file.
 - Git:
   - a snapshot built with the real index, which changes what the user staged;
   - a caller's `GIT_DIR` or `GIT_INDEX_FILE` that points the snapshots at another repository;
@@ -133,6 +134,8 @@ Each is an input and state that leads to a wrong output, and each has a test her
 
 2026-10-19: review R-33 found that compose's own records quote a short key held in one of their fields whenever the record is reached other than through a binder. A caller can build the record directly or change it with `dataclasses.replace`. A step can answer the key into a JSON member, and `JsonAnswer.problem` keeps the refusal text (`docs/spec/native-thread-compose/reports/S5-findings-verifier-rr1.md`). `test_harness_compose_keys.py` has one row per sink: 18 record rows, 3 answer rows, and a guard row for a round's `kept` list, whose refusal names only its type. The 21 R-33 rows fail at `91773ed3` and pass on the verifier's reference fix. The caller-text cases now also check every exception a refusal keeps as its context or cause (`docs/spec/native-thread-compose/test-plan.md`, Coverage added for R-33).
 
+2026-10-20: review R-34 found that when a reader's worktree cannot be removed (EC-16), compose raised `WORKTREE_FAILED` `from` the `OSError`, which names the file that stayed (`docs/spec/native-thread-compose/reports/S5-findings-verifier-rr2.md`). A reader can save that file under a name that holds its key, so the traceback that `logging.exception` prints showed the key. `test_harness_compose_keys.py` has two held-file rows, through `verify_with` and `run_ensemble`, and two rows for the same rule at the folder sites: a temporary folder and a matching folder that cannot be made. All four fail at `89f67b7d` and pass on the verifier's reference fix. The AC-15 file-name test now also reads the traceback (`docs/spec/native-thread-compose/test-plan.md`, Coverage added for R-34).
+
 ## Test Suite Map
 
 - `test_harness_compose_acceptance.py`: the spec §4 snippet run as written against stand-ins on `PATH` (AC-1).
@@ -151,7 +154,7 @@ Each is an input and state that leads to a wrong output, and each has a test her
 - `test_harness_compose_concurrency.py`: cancellation, a second cancel or an anyio cancel scope during the cleanup, a cancel during a slow worktree add, a failed worktree add that stops its siblings before its error propagates, Grok serialization within a composite, and the lock per workspace across composites (AC-10, AC-11, INV-13, INV-14, INV-30, EC-17, EC-19, EC-22).
 - `test_harness_compose_removal.py`: a reader worktree that cannot be removed after its reader answered, with the record keeping every verdict or proposal and its thread id, and a running sibling stopped first (EC-16, INV-14, INV-15, D-26).
 - `test_harness_compose_derived_steps.py`: a relocated verifier, an anchored repair turn and a ladder rung that meet a deleted skill folder are recorded failures, never a raise (INV-9, INV-15, INV-19, INV-21, D-26).
-- `test_harness_compose_keys.py`: no key in another step's prompt, an error (the refusal of every caller text or record field that holds a key included), the problem of an answer whose member holds the step's key, a `repr` or git's argv or environment, while the raw records keep the step's own text (AC-15, INV-4, INV-5, EC-28, EC-71, EC-78, T-3).
+- `test_harness_compose_keys.py`: no key in another step's prompt, an error (the refusal of every caller text or record field that holds a key included), the problem of an answer whose member holds the step's key, the cause, context or traceback of a folder failure, a `repr` or git's argv or environment, while the raw records keep the step's own text (AC-15, INV-4, INV-5, EC-16, EC-28, EC-71, EC-78, T-3).
 
 Run `PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_compose`.
 
