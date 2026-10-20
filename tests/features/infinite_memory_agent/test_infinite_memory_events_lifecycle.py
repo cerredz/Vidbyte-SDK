@@ -78,14 +78,14 @@ async def _cancel_while_alpha_waits(agent: Any) -> None:
 
 @pytest.mark.asyncio
 async def test_a_cancelled_run_ends_with_run_stopped_and_its_resume_opens_with_run_resumed(tmp_path: Path) -> None:
-    """AC-5, INV-2, INV-6, INV-27: a run cancelled mid-pair ends its stream with run_stopped(cancelled, CancelledError), its journal holds exactly run_started and pair_started, and aresume() opens with run_resumed naming the interrupted pair and ends with run_finished, all under one run id."""
+    """AC-5, INV-2, INV-6, INV-27 (and derived-events AC-12, INV-15): a run cancelled mid-pair announces the pair's subagent_aborted and then ends its stream with run_stopped(cancelled, CancelledError), its journal holds exactly run_started and pair_started, and aresume() opens with run_resumed naming the interrupted pair and ends with run_finished, all under one run id."""
     from vidbyte.lib.enums.infinite import InfiniteAgentRole, InfiniteStopCause
 
     seen: list[Any] = []
     agent = build_agent(tmp_path, on_event=seen.append)
     await _cancel_while_alpha_waits(agent)
     first = list(seen)
-    assert kinds(first) == ["run_started", "subagent_launched", "run_stopped"]
+    assert kinds(first) == ["run_started", "subagent_launched", "subagent_aborted", "run_stopped"]
     stopped = first[-1]
     assert (stopped.agent_key, stopped.role, stopped.depth) == ("root", InfiniteAgentRole.ROOT, 0)
     assert (stopped.details.reason, stopped.details.error_type, stopped.details.message) == (InfiniteStopCause.CANCELLED, "CancelledError", "")
@@ -99,7 +99,7 @@ async def test_a_cancelled_run_ends_with_run_stopped_and_its_resume_opens_with_r
         answer = await agent.aresume()
     second.assert_complete()
     resumed = seen[len(first) :]
-    assert kinds(resumed) == ["run_resumed", "subagent_launched", "generator_finished", "subagent_finished", "run_finished"]
+    assert kinds(resumed) == ["run_resumed", "subagent_launched", "generator_finished", "verifier_started", "verifier_finished", "subagent_finished", "batch_finished", "run_finished"]
     opening = resumed[0].details
     assert (opening.task, opening.finished, opening.interrupted, opening.interrupted_omitted) == (TASK, 0, (pair_key("alpha"),), 0)
     assert resumed[0].summary == "Run resumed: 0 tasks done earlier, 1 will run again"

@@ -236,7 +236,9 @@ def test_a_hand_edited_run_finished_record_is_refused_with_its_line(tmp_path: Pa
 
 
 def test_a_malformed_entries_line_refuses_the_handoff_and_writes_nothing(tmp_path: Path) -> None:
-    """EC-19, INV-22: when entries.jsonl holds a line that is not an entry, run_handoff raises the workspace's ToolExecutionError naming the file and line, and no handoff file is written."""
+    """EC-19, INV-22: when entries.jsonl holds a line that is not an entry, run_handoff raises the workspace's ToolExecutionError naming the file and line (and, per docs/spec/infinite-memory-derived-events/spec.md section 9.1 and R-14, its refusal rule), and no handoff file is written."""
+    from vidbyte.lib.enums.infinite import InfiniteRefusalRule
+
     agent = build_agent(tmp_path)
     root = workspace_root(tmp_path)
     write_journal(root, RUN_A, [run_started_record(RUN_A, TASK), run_finished_record()])
@@ -245,7 +247,7 @@ def test_a_malformed_entries_line_refuses_the_handoff_and_writes_nothing(tmp_pat
         handle.write("{this is not an entry\n")
     with pytest.raises(ToolExecutionError) as refused:
         _handoff(agent, RUN_A)
-    assert refused.value.details == {"file": "entries.jsonl", "line": 2}
+    assert refused.value.details == {"file": "entries.jsonl", "line": 2, "rule": InfiniteRefusalRule.MALFORMED_MEMORY}
     assert list(root.rglob(f"*{HANDOFF_SUFFIX}")) == []
 
 

@@ -3,7 +3,7 @@
 PURPOSE: Proves the live event stream of an InfiniteMemory run as a caller sees it: the spec section 4 snippet's exact output, the exact kinds, envelopes, summaries, and details of a one-pair run, the root's memory_saved, durable-before-announced delivery, a raising or coroutine-returning sink changing nothing, the default with no sink, token totals, tools that stay quiet, the run id on every reply, and runs refused before their journal.
 ROLE IN CODEBASE: Event-stream layer of tests/features/infinite_memory_agent/ for docs/spec/infinite-memory-events/spec.md (AC-1, AC-2, AC-3, AC-4, AC-13, AC-15, AC-20, AC-23, AC-25, AC-26, AC-29; INV-1, INV-4, INV-5, INV-7, INV-9..INV-13, INV-21, INV-31, INV-36; EC-2, EC-5, EC-32; NFR-2). Exercises vidbyte/agents/infinite/events.py through runtime.py, launch.py, and memory.py.
 ARCHITECTURE NOTE: Only the model runner is scripted (ScriptedTree). The sink is a plain list.append or a small function defined in the test; InfiniteEvents, the records, the workspace, and the journal are real. A sink never asserts: InfiniteEvents catches what it raises, so it records what it saw and the test asserts after the run. Two runs are compared through run_view and calls_view, which replace the run id, stamps, tmp folder, and call ids with placeholders (proved equal for two identical runs without a sink before this file was written).
-FUNCTION INVENTORY: test_section_4_snippet_prints_the_two_run_events_and_the_nine_handoff_titles (AC-1); test_a_one_pair_run_delivers_seven_events_in_order_with_their_envelopes_summaries_and_details (AC-2, AC-13, INV-11, INV-12, INV-16, D-18); test_the_roots_entry_is_announced_once_by_memory_saved_before_its_next_model_call (AC-3, INV-17); test_a_sink_that_always_raises_changes_nothing_and_each_failure_is_logged_once_without_text (AC-4, INV-7); test_each_event_is_delivered_after_the_change_it_reports_is_on_disk (AC-26, INV-4); test_a_sink_that_returns_a_coroutine_has_it_closed_and_logged_as_a_type_error (AC-29a, INV-36, EC-32); test_a_sink_that_returns_a_task_it_scheduled_is_not_a_failure (AC-29b, INV-36); test_without_a_sink_the_journal_gains_only_answer_and_files_and_nothing_is_logged (AC-20, INV-9); test_without_a_sink_no_event_method_builds_an_event_or_logs (NFR-2, INV-9); test_token_totals_come_from_the_scripted_usage_and_match_get_usage (AC-23, INV-31, D-18); test_bash_grep_and_read_lines_deliver_no_event_and_no_event_carries_their_output_or_secrets (AC-25, INV-10); test_every_reply_names_its_journal_in_infinite_run_id (AC-15, INV-21, INV-29); test_a_run_refused_before_its_journal_delivers_no_event (EC-5, INV-1); test_a_keyboard_interrupt_raised_by_the_sink_is_not_swallowed (INV-7, EC-2). _compare_with_list_sink runs the AC-2 script with a list sink beside another sink.
+FUNCTION INVENTORY: test_section_4_snippet_prints_the_two_run_events_and_the_nine_handoff_titles (AC-1); test_a_one_pair_run_delivers_eleven_events_in_order_with_their_envelopes_summaries_and_details (AC-2, AC-13, INV-11, INV-12, INV-16, D-18); test_the_roots_entry_is_announced_once_by_memory_saved_before_its_next_model_call (AC-3, INV-17); test_a_sink_that_always_raises_changes_nothing_and_each_failure_is_logged_once_without_text (AC-4, INV-7); test_each_event_is_delivered_after_the_change_it_reports_is_on_disk (AC-26, INV-4); test_a_sink_that_returns_a_coroutine_has_it_closed_and_logged_as_a_type_error (AC-29a, INV-36, EC-32); test_a_sink_that_returns_a_task_it_scheduled_is_not_a_failure (AC-29b, INV-36); test_without_a_sink_the_journal_gains_only_answer_and_files_and_nothing_is_logged (AC-20, INV-9); test_without_a_sink_no_event_method_builds_an_event_or_logs (NFR-2, INV-9); test_token_totals_come_from_the_scripted_usage_and_match_get_usage (AC-23, INV-31, D-18); test_bash_grep_and_read_lines_deliver_no_event_and_no_event_carries_their_output_or_secrets (AC-25, INV-10); test_every_reply_names_its_journal_in_infinite_run_id (AC-15, INV-21, INV-29); test_a_run_refused_before_its_journal_delivers_no_event (EC-5, INV-1); test_a_keyboard_interrupt_raised_by_the_sink_is_not_swallowed (INV-7, EC-2). _compare_with_list_sink runs the AC-2 script with a list sink beside another sink.
 COMMON MODIFICATION PATTERNS: A new stream-level rule gets one test that runs a ScriptedTree with seen.append as the sink and ends with assert_portable(seen). Keep summaries compared with line(...) from infinite_events_fixtures.py so the expected text follows the spec's cut rule.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level. 2. Do not assert inside a sink. 3. Do not edit the section 4 snippet to make it easier to test; chdir into tmp_path instead. 4. Do not compare raw journals of two runs; compare run_view output, because run ids and stamps differ.
 KNOWN EDGE CASES: The snippet assigns names `reply` and `events`, so its scripted tree is built by a module helper and this file imports neither fixture name. The fixture's DEFAULT_USAGE has no total_tokens, so the AC-23 script sets total_tokens on every step; without it the rollup's total_tokens is None (S2 report). The scripted model is unpriced (cost_complete is False), so every cost_usd in a scripted run is None, never 0.0. Bash needs a POSIX bash or Git for Windows bash.
@@ -80,6 +80,31 @@ from vidbyte import tool
 from vidbyte.lib.errors import VidbyteSdkError
 
 SNIPPET_ANSWER = "Acme is cheapest at 49 USD per seat."
+# docs/spec/infinite-memory-derived-events/spec.md section 8.5: the 14 kinds of PR #1159, then the eight appended (D-19).
+DERIVED_KINDS = (
+    "run_started",
+    "run_resumed",
+    "run_finished",
+    "run_stopped",
+    "batch_rejected",
+    "subagent_launched",
+    "subagent_replayed",
+    "generator_finished",
+    "subagent_finished",
+    "memory_saved",
+    "memory_staged",
+    "memory_dropped",
+    "file_written",
+    "tool_refused",
+    "memory_committed",
+    "verifier_started",
+    "verifier_finished",
+    "subagent_aborted",
+    "batch_finished",
+    "handoff_written",
+    "workspace_usage",
+    "agent_progress",
+)
 # The three lines spec section 4 says the snippet prints, each ending with a line break.
 SNIPPET_LINES = (
     "run_started root Run started: Compare the list prices of our five competitors.",
@@ -162,8 +187,8 @@ def test_section_4_snippet_prints_the_two_run_events_and_the_nine_handoff_titles
     assert (tmp_path / "memory" / ".runs" / f"{run_id}.handoff.md").is_file()
 
 
-def test_a_one_pair_run_delivers_seven_events_in_order_with_their_envelopes_summaries_and_details(tmp_path: Path) -> None:
-    """AC-2, AC-13, INV-11, INV-12, INV-16, D-18: the AC-2 script delivers exactly seven events in order, each with the documented envelope, template summary, and details, all carrying the reply's run id."""
+def test_a_one_pair_run_delivers_eleven_events_in_order_with_their_envelopes_summaries_and_details(tmp_path: Path) -> None:
+    """AC-2, AC-13, INV-11, INV-12, INV-16, D-18 (and derived-events AC-2, section 9.2): the AC-2 script delivers exactly eleven events in order, each with the documented envelope, template summary, and details, all carrying the reply's run id."""
     from vidbyte.lib.dataclasses.infinite import InfiniteCommittedEntry
     from vidbyte.lib.enums.infinite import (
         InfiniteAgentRole,
@@ -185,14 +210,20 @@ def test_a_one_pair_run_delivers_seven_events_in_order_with_their_envelopes_summ
     assert {event.run_id for event in seen} == {run_id}
     at_root = ("root", InfiniteAgentRole.ROOT, 0)
     at_generator = (f"{pair_key(PAIR)}/gen", InfiniteAgentRole.GENERATOR, 1)
-    assert [(event.agent_key, event.role, event.depth) for event in seen] == [at_root, at_root, at_generator, at_generator, at_generator, at_root, at_root]
+    at_verifier = (f"{pair_key(PAIR)}/ver", InfiniteAgentRole.VERIFIER, 1)
+    assert [(event.agent_key, event.role, event.depth) for event in seen] == [at_root, at_root, at_generator, at_generator, at_generator, at_verifier, at_verifier, at_verifier, at_root, at_root, at_root]
+    entry_id = finished_cards(workspace_root(tmp_path))[pair_key(PAIR)]["entries"][0]
     assert [event.summary for event in seen] == [
         line(f"Run started: {TASK}", SUMMARY_MAX),
         line(f"root launched {PAIR}: Find the list prices for {PAIR}.", SUMMARY_MAX),
         f"{PAIR}/gen proposed s1 (fact): {FACT}",
         f"{PAIR}/gen created {NOTE_PATH}: {NOTE_DESCRIPTION}",
         f"{PAIR}/gen: done: {GEN_SUMMARY}",
+        f"{PAIR}/ver is checking 1 staged entries and 1 notes",
+        f"{PAIR}/ver: verdict passed",
+        f"{PAIR}/ver committed s1 as memory #{entry_id} (fact): {FACT}",
         f"{PAIR}: passed, 1 memories saved, 0 dropped, 1 files",
+        "root: batch 0 finished: 1 passed, 0 fixed, 0 failed, 0 unchecked, 0 replayed",
         f"Run finished (final_response): {ROOT_ANSWER}",
     ]
 
@@ -416,7 +447,7 @@ def test_without_a_sink_the_journal_gains_only_answer_and_files_and_nothing_is_l
 
 
 def test_without_a_sink_no_event_method_builds_an_event_or_logs(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
-    """NFR-2, INV-9: with on_event=None, each of the 14 public InfiniteEvents methods, one per event kind, returns before it reads its arguments, so no InfiniteEvent is built and the events module logs nothing."""
+    """NFR-2, INV-9 (and derived-events INV-1, INV-7, AC-23): with on_event=None, each of the 22 public InfiniteEvents methods, one per event kind, returns before it reads its arguments, so no InfiniteEvent is built and the events module logs nothing."""
     from vidbyte.agents.infinite.events import InfiniteEvents
     from vidbyte.lib.dataclasses.infinite import InfiniteEvent
     from vidbyte.lib.enums.infinite import InfiniteEventKind
@@ -434,6 +465,7 @@ def test_without_a_sink_no_event_method_builds_an_event_or_logs(monkeypatch: pyt
     events = InfiniteEvents(None, RUN_A)
     public = sorted(name for name, _ in inspect.getmembers(InfiniteEvents, inspect.isfunction) if not name.startswith("_"))
     assert public == sorted(kind.value for kind in InfiniteEventKind)
+    assert public == sorted(DERIVED_KINDS), "the 22 kinds of docs/spec/infinite-memory-derived-events/spec.md section 8.5"
     # A method that got past its no-sink return would either trip over a placeholder inside its shield, which logs a warning, or build an event, which is counted.
     for name in public:
         method = getattr(events, name)
@@ -490,7 +522,7 @@ def test_bash_grep_and_read_lines_deliver_no_event_and_no_event_carries_their_ou
     tree.assert_complete()
     root_calls = tree.calls_by(ROOT)
     assert "BASH-OUT-7731" in tool_result(root_calls[1], "bash") and not is_error(tool_result(root_calls[3], "read_lines")), "the tools must really run for this test to mean anything"
-    assert kinds(seen) == ["run_started", "subagent_launched", "generator_finished", "subagent_finished", "run_finished"]
+    assert kinds(seen) == ["run_started", "subagent_launched", "generator_finished", "verifier_started", "verifier_finished", "subagent_finished", "batch_finished", "run_finished"]
     texts = [text for event in seen for text in _texts(dataclasses.asdict(event))]
     forbidden = ("BASH-OUT-7731", "GEN-BASH-7731", secret, SYSTEM_PROMPT, str(tmp_path), tmp_path.as_posix())
     assert not [(needle, text) for needle in forbidden for text in texts if needle in text]

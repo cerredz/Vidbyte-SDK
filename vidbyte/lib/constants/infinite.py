@@ -1,13 +1,13 @@
 """FILE: vidbyte/lib/constants/infinite.py
 
-PURPOSE: Defines every named default, limit, pattern, tool name, workspace file name, and short label of the InfiniteMemory agent: the delegation caps, the workspace caps, the entry and card sizes, the history cap, the run-id and verdict formats, the map's fixed labels, the run events' caps, key rule, and summary templates, the reply metadata keys, and the run handoff's file suffix, caps, and run-id metadata key.
+PURPOSE: Defines every named default, limit, pattern, tool name, workspace file name, and short label of the InfiniteMemory agent: the delegation caps, the workspace caps, the entry and card sizes, the history cap, the run-id and verdict formats, the map's fixed labels, the run events' caps, key rule, summary templates, progress throttle, and usage levels, the reply metadata keys, the keys that name a denied call's limit and reason and a refusal's rule, and the run handoff's file suffix, caps, section count, and run-id metadata key.
 ROLE IN CODEBASE: Read by the settings and every module in vidbyte/agents/infinite/ (InfiniteEvents in events.py reads the event caps and templates), by the records in vidbyte/lib/dataclasses/infinite.py, by InfiniteHandoff (vidbyte/context/handoff/infinite.py), and by InfiniteMemoryAgentTools (vidbyte/tools/toolsets/infinite.py). The feature tests import the labels and caps to check output against them.
 ARCHITECTURE NOTE: Immutable constants only; behavior lives in the workspace, journal, memory, launch, and runtime modules. The limits are generous on purpose, because this agent exists to take on work that outgrows one context: each one only stops a runaway run, and the context caps are sized for a 128,000-token model: the role prompt, the tool descriptions, the map, and the trimmed history take about 105,000 tokens, which leaves room for the developer's own prompt and the reply. Patterns are raw strings compiled where they are used, and the label templates are filled with str.format.
-FUNCTION INVENTORY: No functions; defaults (INFINITE_DEFAULT_*), limits, patterns (INFINITE_*_PATTERN), tool names (INFINITE_*_TOOL_NAME and INFINITE_RESERVED_TOOL_NAMES), workspace layout names, labels, event caps (INFINITE_EVENT_*_MAX_*, the key digest, the byte bound, and the time factors), event summary templates (INFINITE_EVENT_*_SUMMARY), reply metadata keys (INFINITE_*_METADATA_KEY), and handoff caps and the handoff's run-id metadata key (INFINITE_HANDOFF_*).
+FUNCTION INVENTORY: No functions; defaults (INFINITE_DEFAULT_*), limits, patterns (INFINITE_*_PATTERN), tool names (INFINITE_*_TOOL_NAME and INFINITE_RESERVED_TOOL_NAMES), workspace layout names, labels, event caps (INFINITE_EVENT_*_MAX_*, the key digest, the byte bound, and the time factors), the key's depth rule (INFINITE_KEY_SEGMENTS_PER_DEPTH), the progress throttle (INFINITE_EVENT_PROGRESS_ITERATIONS), the usage levels and their scale (INFINITE_EVENT_USAGE_PERCENTS, INFINITE_EVENT_PERCENT_SCALE), event summary templates (INFINITE_EVENT_*_SUMMARY), reply metadata keys (INFINITE_*_METADATA_KEY), the denial keys (INFINITE_DENIAL_LIMIT_METADATA_KEY, INFINITE_DENIAL_REASON_METADATA_KEY), the refusal-rule key (INFINITE_REFUSAL_RULE_DETAILS_KEY), and handoff caps, section count, and the handoff's run-id metadata key (INFINITE_HANDOFF_*).
 COMMON MODIFICATION PATTERNS: Change a cap or label here, never at its use site, so the settings, the tools, the tests, and the folder README stay in step. Add a named constant here before writing another InfiniteMemory policy literal. A new event kind adds one summary template here; a new details field adds its cap here, and its row to _FIELDS and its worst-case details size to _FIGURES in tests/features/infinite_memory_agent/test_infinite_memory_events_records.py, which check every cap and keep each record under INFINITE_EVENT_MAX_DETAILS_BYTES.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import from any layer above vidbyte/lib. 2. Do not put model-facing sentences here; they belong in vidbyte/prompts/prompts/infinite_memory/. The event summaries are developer-facing display lines, and the handoff wording lives in vidbyte/context/handoff/infinite.py. 3. Do not rename a workspace file name; workspaces already on disk use it. 4. Do not tie an event cap to a setting; only fixed caps bound an event at any settings value.
 KNOWN EDGE CASES: Every token figure is TokenEstimate's characters-divided-by-four estimate, not a real tokenizer count. The verdict pattern accepts Markdown emphasis and a trailing period, and the last matching line wins. Grep's file-size cap is derived from max_tokens with INFINITE_UTF8_MAX_BYTES_PER_CHAR, so no workspace file is too large to search.
-RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 8.5, 9.1, and 9.3); docs/spec/infinite-memory-events/spec.md (section 9.1); vidbyte/agents/infinite/README.md
+RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 8.5, 9.1, and 9.3); docs/spec/infinite-memory-events/spec.md (section 9.1); docs/spec/infinite-memory-derived-events/spec.md (sections 9.2 and 9.3); vidbyte/agents/infinite/README.md
 TESTS: tests/features/infinite_memory_agent/test_infinite_memory_contract.py and the rest of tests/features/infinite_memory_agent/
 """
 
@@ -141,12 +141,13 @@ INFINITE_FINISHED_PAIR_LINE = "- {name}: {status}, verdict {verdict}, entries {e
 # ensure_ascii writes a character outside the Basic Multilingual Plane
 # as two \uXXXX escapes, which also covers ensure_ascii=False (at most
 # 6 bytes, for an escaped control character). The largest details
-# record, subagent_finished, holds 2,060 capped characters (24,720
-# bytes) plus 2,295 bytes of keys, numbers, enums, and JSON syntax:
-# 27,015 bytes, under the 32,768-byte bound, which is half of the
-# backend's 65,536-byte details cap. Its envelope adds at most 4,078,
-# so a whole event is at most 31,093; generator_finished's envelope,
-# 4,079, is the largest, but it wraps a smaller record.
+# record, subagent_finished, holds 2,124 capped characters (25,488
+# bytes) plus 2,421 bytes of keys, numbers, enums, and JSON syntax:
+# 27,909 bytes, under the 32,768-byte bound, which is half of the
+# backend's 65,536-byte details cap. Its envelope, a 280-character
+# summary and a 512-character key, adds at most 4,078, so a whole
+# event is at most 31,987; generator_finished's envelope, 4,079, is
+# the largest, but it wraps a smaller record.
 INFINITE_EVENT_SUMMARY_MAX_CHARS = 280
 INFINITE_EVENT_TEXT_MAX_CHARS = 500
 INFINITE_EVENT_PATH_MAX_CHARS = 500
@@ -173,17 +174,30 @@ INFINITE_EVENT_MAX_COUNT = 9_223_372_036_854_775_807
 INFINITE_EVENT_KEY_MAX_CHARS = 512
 INFINITE_EVENT_KEY_DIGEST_CHARS = 16
 INFINITE_EVENT_KEY_DIGEST_MARK = "~"
+# Every pair adds two segments to a key, its name and the generator's
+# "gen", so "root/a" is depth 1 and "root/a/gen/b" is depth 2.
+INFINITE_KEY_SEGMENTS_PER_DEPTH = 2
 
 # Event times are stamped to the millisecond, and a generator's
 # duration is reported in milliseconds.
 INFINITE_EVENT_MILLISECONDS_PER_SECOND = 1_000
 INFINITE_EVENT_MICROSECONDS_PER_MILLISECOND = 1_000
 
+# The root announces its progress every tenth tool iteration, and
+# workspace usage each time the highest of these percent levels that
+# its files or tokens reach changes. Percents are whole numbers on a
+# scale of 100, so the level check needs no float arithmetic.
+INFINITE_EVENT_PROGRESS_ITERATIONS = 10
+INFINITE_EVENT_USAGE_PERCENTS = (50, 75, 90, 100)
+INFINITE_EVENT_PERCENT_SCALE = 100
+
 # Event summaries: one developer-facing display line each, filled with
 # str.format, collapsed to one line, and cut to the summary cap. {agent}
 # is "root" or the last two segments of the agent's key. FILE_CREATED
 # is used for a created note that has a description, FILE_WRITTEN for
-# every other write.
+# every other write. The last eight announce the root's progress,
+# workspace usage, a saved handoff, a finished batch, the verifier's
+# start and verdict, an aborted pair, and a committed entry.
 INFINITE_EVENT_RUN_STARTED_SUMMARY = "Run started: {task}"
 INFINITE_EVENT_RUN_RESUMED_SUMMARY = "Run resumed: {finished} tasks done earlier, {interrupted} will run again"
 INFINITE_EVENT_RUN_FINISHED_SUMMARY = "Run finished ({stop_reason}): {answer}"
@@ -198,14 +212,30 @@ INFINITE_EVENT_MEMORY_STAGED_SUMMARY = "{agent} proposed {key} ({kind}): {text}"
 INFINITE_EVENT_MEMORY_DROPPED_SUMMARY = "{agent} dropped {key}: {text}"
 INFINITE_EVENT_FILE_WRITTEN_SUMMARY = "{agent} {change} {path}"
 INFINITE_EVENT_FILE_CREATED_SUMMARY = "{agent} created {path}: {description}"
+INFINITE_EVENT_AGENT_PROGRESS_SUMMARY = "{agent} is at iteration {iteration}: {model_calls} model calls, {tool_calls} tool calls"
+INFINITE_EVENT_WORKSPACE_USAGE_SUMMARY = "Workspace is at the {level}% level: {files} of {max_files} files, {tokens} of {max_tokens} tokens"
+INFINITE_EVENT_HANDOFF_WRITTEN_SUMMARY = "Handoff saved to {path}"
+INFINITE_EVENT_BATCH_FINISHED_SUMMARY = "{agent}: batch {batch} finished: {passed} passed, {fixed} fixed, {failed} failed, {unchecked} unchecked, {replayed} replayed"
+INFINITE_EVENT_VERIFIER_STARTED_SUMMARY = "{agent} is checking {staged} staged entries and {files} notes"
+INFINITE_EVENT_VERIFIER_FINISHED_SUMMARY = "{agent}: verdict {verdict}"
+INFINITE_EVENT_SUBAGENT_ABORTED_SUMMARY = "{name} aborted ({reason}) in its {phase} step: {error_type}"
+INFINITE_EVENT_MEMORY_COMMITTED_SUMMARY = "{agent} committed {key} as memory #{id} ({kind}): {text}"
 
-# Reply metadata keys: the run id this package adds, and the three the
-# agent runtime sets, which events read the stop reason, tool calls,
-# and usage from.
+# Reply metadata keys: the run id this package adds, and the five the
+# agent runtime sets, which events read the stop reason, the
+# iteration count, the tool-call count, the call records, and the
+# usage from.
 INFINITE_RUN_ID_METADATA_KEY = "infinite_run_id"
 INFINITE_STOP_REASON_METADATA_KEY = "stop_reason"
+INFINITE_ITERATIONS_METADATA_KEY = "iteration_count"
 INFINITE_TOOL_CALLS_METADATA_KEY = "tool_call_count"
+INFINITE_CALL_RECORDS_METADATA_KEY = "tool_calls"
 INFINITE_USAGE_METADATA_KEY = "usage_rollup"
+# Keys of a denied call's result metadata.
+INFINITE_DENIAL_LIMIT_METADATA_KEY = "limit"
+INFINITE_DENIAL_REASON_METADATA_KEY = "reason"
+# The error-details key that names a refusal's rule.
+INFINITE_REFUSAL_RULE_DETAILS_KEY = "rule"
 
 # The run handoff, written as .runs/<run_id>.handoff.md. Its caps fit
 # the backend's 24 sections of 16,000 characters however the text is
@@ -219,10 +249,13 @@ INFINITE_HANDOFF_SUFFIX = ".handoff.md"
 INFINITE_HANDOFF_OUTCOME_MAX_CHARS = 239_000
 INFINITE_HANDOFF_SECTION_MAX_CHARS = 15_900
 INFINITE_HANDOFF_LINE_MAX_CHARS = 1_000
+# The number of sections a handoff holds, in its fixed order.
+INFINITE_HANDOFF_SECTION_COUNT = 9
 # The handoff's metadata key for the id of the run it describes.
 INFINITE_HANDOFF_RUN_ID_METADATA_KEY = "run_id"
 
 __all__ = [
+    "INFINITE_CALL_RECORDS_METADATA_KEY",
     "INFINITE_CARD_TEXT_MAX_TOKENS",
     "INFINITE_CONTEXT_MAX_ITEMS",
     "INFINITE_DEFAULT_MAX_AGENTS",
@@ -234,13 +267,18 @@ __all__ = [
     "INFINITE_DEFAULT_MAX_ITERATIONS",
     "INFINITE_DEFAULT_MAX_PARALLEL",
     "INFINITE_DEFAULT_MAX_TOKENS",
+    "INFINITE_DENIAL_LIMIT_METADATA_KEY",
+    "INFINITE_DENIAL_REASON_METADATA_KEY",
     "INFINITE_DEPTH_STEP",
     "INFINITE_DROP_ENTRY_TOOL_NAME",
     "INFINITE_EDIT_FILE_TOOL_NAME",
     "INFINITE_ENTRIES_FILE",
+    "INFINITE_EVENT_AGENT_PROGRESS_SUMMARY",
+    "INFINITE_EVENT_BATCH_FINISHED_SUMMARY",
     "INFINITE_EVENT_FILE_CREATED_SUMMARY",
     "INFINITE_EVENT_FILE_WRITTEN_SUMMARY",
     "INFINITE_EVENT_GENERATOR_FINISHED_SUMMARY",
+    "INFINITE_EVENT_HANDOFF_WRITTEN_SUMMARY",
     "INFINITE_EVENT_KEY_DIGEST_CHARS",
     "INFINITE_EVENT_KEY_DIGEST_MARK",
     "INFINITE_EVENT_KEY_MAX_CHARS",
@@ -249,22 +287,30 @@ __all__ = [
     "INFINITE_EVENT_MAX_COUNT",
     "INFINITE_EVENT_MAX_DETAILS_BYTES",
     "INFINITE_EVENT_MAX_ITEMS",
+    "INFINITE_EVENT_MEMORY_COMMITTED_SUMMARY",
     "INFINITE_EVENT_MEMORY_DROPPED_SUMMARY",
     "INFINITE_EVENT_MEMORY_SAVED_SUMMARY",
     "INFINITE_EVENT_MEMORY_STAGED_SUMMARY",
     "INFINITE_EVENT_MICROSECONDS_PER_MILLISECOND",
     "INFINITE_EVENT_MILLISECONDS_PER_SECOND",
     "INFINITE_EVENT_PATH_MAX_CHARS",
+    "INFINITE_EVENT_PERCENT_SCALE",
+    "INFINITE_EVENT_PROGRESS_ITERATIONS",
     "INFINITE_EVENT_REFUSED_SUMMARY",
     "INFINITE_EVENT_RUN_FINISHED_SUMMARY",
     "INFINITE_EVENT_RUN_RESUMED_SUMMARY",
     "INFINITE_EVENT_RUN_STARTED_SUMMARY",
     "INFINITE_EVENT_RUN_STOPPED_SUMMARY",
+    "INFINITE_EVENT_SUBAGENT_ABORTED_SUMMARY",
     "INFINITE_EVENT_SUBAGENT_FINISHED_SUMMARY",
     "INFINITE_EVENT_SUBAGENT_LAUNCHED_SUMMARY",
     "INFINITE_EVENT_SUBAGENT_REPLAYED_SUMMARY",
     "INFINITE_EVENT_SUMMARY_MAX_CHARS",
     "INFINITE_EVENT_TEXT_MAX_CHARS",
+    "INFINITE_EVENT_USAGE_PERCENTS",
+    "INFINITE_EVENT_VERIFIER_FINISHED_SUMMARY",
+    "INFINITE_EVENT_VERIFIER_STARTED_SUMMARY",
+    "INFINITE_EVENT_WORKSPACE_USAGE_SUMMARY",
     "INFINITE_FILES_FILE",
     "INFINITE_FINISHED_PAIR_LINE",
     "INFINITE_FIRST_ENTRY_ID",
@@ -272,9 +318,12 @@ __all__ = [
     "INFINITE_HANDOFF_LINE_MAX_CHARS",
     "INFINITE_HANDOFF_OUTCOME_MAX_CHARS",
     "INFINITE_HANDOFF_RUN_ID_METADATA_KEY",
+    "INFINITE_HANDOFF_SECTION_COUNT",
     "INFINITE_HANDOFF_SECTION_MAX_CHARS",
     "INFINITE_HANDOFF_SUFFIX",
     "INFINITE_HISTORY_MAX_TOKENS",
+    "INFINITE_ITERATIONS_METADATA_KEY",
+    "INFINITE_KEY_SEGMENTS_PER_DEPTH",
     "INFINITE_LAUNCH_TASKS_ARGUMENT",
     "INFINITE_LAUNCH_TOOL_NAME",
     "INFINITE_MAP_MAX_TOKENS",
@@ -290,6 +339,7 @@ __all__ = [
     "INFINITE_NOTE_SUFFIXES",
     "INFINITE_NO_DESCRIPTION",
     "INFINITE_PAIR_TURN_SECONDS",
+    "INFINITE_REFUSAL_RULE_DETAILS_KEY",
     "INFINITE_REMEMBER_TOOL_NAME",
     "INFINITE_RESERVED_TOOL_NAMES",
     "INFINITE_ROOT_DEPTH",

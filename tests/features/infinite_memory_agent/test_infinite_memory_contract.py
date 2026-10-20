@@ -472,13 +472,17 @@ def _lines_after_header(path: Path) -> int:
 
 
 def test_new_modules_stay_inside_the_complexity_budget() -> None:
-    """NFR-1, section 8.4: the agent package has at most its 9 modules, and each of the 14 new modules is at most 400 lines after its header, except launch.py (410) and the lib records (620).
+    """NFR-1, section 8.4: the agent package has at most its 9 modules, and each of the 14 new modules is at most 400 lines after its header, except launch.py (470), the lib records (870), and events.py (660).
 
     The infinite-memory-events spec (docs/spec/infinite-memory-events/spec.md section 12.3 row 22, D-1, D-2) adds the
     events writer as the package's ninth module and the handoff as a new module, and raises the two caps because launch
     gains the task-ordered event loop and the lib records gain the event envelope and its 13 details records.
+
+    The infinite-memory-derived-events spec (docs/spec/infinite-memory-derived-events/spec.md D-15, section 8.4, and
+    section 12.3 row 13, executed by its S2 test author) raises three caps instead of adding a module: events.py
+    400 -> 660, launch.py 410 -> 470, and the lib records 620 -> 870, each its line estimate plus about 5 percent.
     """
-    caps = {"vidbyte/agents/infinite/launch.py": 410, "vidbyte/lib/dataclasses/infinite.py": 620}
+    caps = {"vidbyte/agents/infinite/launch.py": 470, "vidbyte/lib/dataclasses/infinite.py": 870, "vidbyte/agents/infinite/events.py": 660}
     package = REPO_ROOT / "vidbyte" / "agents" / "infinite"
     assert package.is_dir(), "vidbyte/agents/infinite does not exist"
     assert len(list(package.glob("*.py"))) <= 9

@@ -2,13 +2,13 @@
 
 PURPOSE: Defines InfiniteWorkspace, the one memory folder every agent in an InfiniteMemory tree shares, and its deterministic guardrails: setup of the folder, the bookkeeping files, and the seeds; the file and token caps recounted from disk before every tool write; the sparse-entry rules; entry commits and supersedes; note writes and edits inside the allowed paths; and the workspace map every agent sees.
 ROLE IN CODEBASE: Built once by InfiniteMemoryAgent (agent.py) from InfiniteWorkspaceSettings (settings.py); called by the memory tools (memory.py) for every remember, write_note, and edit_file, by the launch tool (launch.py) to resolve "#N" context ids and to commit a pair's staged entries, and by the runtime (runtime.py) and the launch tool to render the map.
-ARCHITECTURE NOTE: All data is plain files under the root (spec section 9.1): entries.jsonl holds the live entries, superseded.jsonl the replaced ones, files.jsonl one description per created note. Nothing is cached; every check reads the disk through FolderUsage (vidbyte/lib/tools/filesystem/usage.py), so files that bash or the developer wrote count too. Every write runs under one class-level lock and replaces whole files through LocalFileSystemBackend.write_text(atomic=True), so a reader never sees half a line. Rule violations raise ToolExecutionError with what to fix, which the memory tools return to the model.
-FUNCTION INVENTORY: __init__ and commit_entry are narrated main functions. usage, entries, check_entry, write_note, edit_file, and map_text are the public operations; relative names a note by its workspace-relative path for events and the handoff, and never raises; run_entries and descriptions read one run's live entries and the note descriptions for the handoff, outside the lock, as entries does, and write nothing. _text reads one bookkeeping file; _entry_lines parses a bookkeeping file into entries; _entry_rules refuses text UTF-8 cannot hold, then applies the sparse-entry rules; _note_path applies the note path rules; _room applies the workspace caps to FolderUsage's projection of a write; _descriptions reads files.jsonl leniently for the map and the handoff, all of it or one run's records; _entry_json and _stamp format one entry line and one UTC stamp. Counting files from disk is FolderUsage's and atomic writes are LocalFileSystemBackend's.
+ARCHITECTURE NOTE: All data is plain files under the root (spec section 9.1): entries.jsonl holds the live entries, superseded.jsonl the replaced ones, files.jsonl one description per created note. Nothing is cached; every check reads the disk through FolderUsage (vidbyte/lib/tools/filesystem/usage.py), so files that bash or the developer wrote count too. Every write runs under one class-level lock and replaces whole files through LocalFileSystemBackend.write_text(atomic=True), so a reader never sees half a line. Rule violations raise ToolExecutionError with what to fix and the rule's name in its details, under INFINITE_REFUSAL_RULE_DETAILS_KEY; the memory tools return the message to the model, and the events read the rule.
+FUNCTION INVENTORY: __init__ and commit_entry are narrated main functions. usage, entries, check_entry, write_note, edit_file, and map_text are the public operations; relative names a note by its workspace-relative path for events and the handoff, and never raises; map_omitted reads how many files a rendered map left out from its closing line, for the workspace_usage event, and never raises; run_entries and descriptions read one run's live entries and the note descriptions for the handoff, outside the lock, as entries does, and write nothing. _text reads one bookkeeping file; _entry_lines parses a bookkeeping file into entries; _entry_rules refuses text UTF-8 cannot hold, then applies the sparse-entry rules; _note_path applies the note path rules; _room applies the workspace caps to FolderUsage's projection of a write; _descriptions reads files.jsonl leniently for the map and the handoff, all of it or one run's records; _entry_json and _stamp format one entry line and one UTC stamp. Counting files from disk is FolderUsage's and atomic writes are LocalFileSystemBackend's.
 COMMON MODIFICATION PATTERNS: A new guardrail is one more check in the operation it guards, with an @intent comment and a ToolExecutionError message that says what to fix. A new bookkeeping file adds its name to vidbyte/lib/constants/infinite.py, to the setup loop in __init__, and to the reserved paths in _note_path.
-WHAT NOT TO DO IN THIS FILE: 1. Do not cache file counts, entries, or descriptions; bash can change the folder between any two calls. 2. Do not write outside the lock or write a file in place; use self.backend.write_text(..., atomic=True). 3. Do not apply max_file_tokens to the bookkeeping files; only max_tokens bounds them (INV-19). 4. Do not raise from map_text on bad file content.
+WHAT NOT TO DO IN THIS FILE: 1. Do not cache file counts, entries, or descriptions; bash can change the folder between any two calls. 2. Do not write outside the lock or write a file in place; use self.backend.write_text(..., atomic=True). 3. Do not apply max_file_tokens to the bookkeeping files; only max_tokens bounds them (INV-19). 4. Do not raise from map_text on bad file content, or from map_omitted on any text.
 KNOWN EDGE CASES: A malformed line in entries.jsonl or superseded.jsonl makes every entry operation fail with the file and line number until it is fixed, while map_text keeps working. A supersede writes the old line to superseded.jsonl before it rewrites entries.jsonl, so a crash between the two leaves the line in both files rather than in neither. Token counts are TokenEstimate's character estimate of the utf-8 text, with undecodable bytes counted as replacement characters. Text UTF-8 cannot hold raises UnicodeEncodeError, a ValueError the memory tools turn into a refusal, before any file is written; a pair agent's entry meets that check when it is staged, so InfinitePair._commit, which catches only ToolExecutionError, never sees it.
-RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 6.1 INV-16 to INV-24, and 9.1); docs/spec/infinite-memory-events/spec.md (section 9.2); vidbyte/agents/infinite/README.md
-TESTS: tests/features/infinite_memory_agent/test_infinite_memory_workspace.py, tests/features/infinite_memory_agent/test_infinite_memory_verification.py, and tests/features/infinite_memory_agent/test_infinite_memory_contract.py
+RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 6.1 INV-16 to INV-24, and 9.1); docs/spec/infinite-memory-events/spec.md (section 9.2); docs/spec/infinite-memory-derived-events/spec.md (sections 8.5 and 9.1); vidbyte/agents/infinite/README.md
+TESTS: tests/features/infinite_memory_agent/test_infinite_memory_workspace.py, tests/features/infinite_memory_agent/test_infinite_memory_verification.py, tests/features/infinite_memory_agent/test_infinite_memory_contract.py, tests/features/infinite_memory_agent/test_infinite_memory_derived_refusals.py, and tests/features/infinite_memory_agent/test_infinite_memory_derived_records.py
 """
 
 from __future__ import annotations
@@ -26,9 +26,11 @@ from vidbyte.lib.constants.infinite import (
     INFINITE_ENTRIES_FILE,
     INFINITE_FILES_FILE,
     INFINITE_MAP_MAX_TOKENS,
+    INFINITE_MIN_COUNT,
     INFINITE_MORE_FILES,
     INFINITE_NO_DESCRIPTION,
     INFINITE_NOTE_SUFFIXES,
+    INFINITE_REFUSAL_RULE_DETAILS_KEY,
     INFINITE_RUNS_DIRNAME,
     INFINITE_SEED_DIRNAME,
     INFINITE_SEED_LABEL,
@@ -42,7 +44,7 @@ from vidbyte.lib.dataclasses.infinite import (
     InfiniteStagedEntry,
     InfiniteWorkspaceUsage,
 )
-from vidbyte.lib.enums.infinite import InfiniteEntryKind
+from vidbyte.lib.enums.infinite import InfiniteEntryKind, InfiniteRefusalRule
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import ConfigurationError, ToolExecutionError
 from vidbyte.lib.tools.filesystem.backends.local import LocalFileSystemBackend
@@ -105,7 +107,7 @@ class InfiniteWorkspace:
         live = {entry.id: entry for entry, _ in self._entry_lines(INFINITE_ENTRIES_FILE, self._text(INFINITE_ENTRIES_FILE))}
         missing = [number for number in ids if number not in live]
         if missing:
-            raise ToolExecutionError(f"Memory entry #{missing[0]} is not a live entry in {INFINITE_ENTRIES_FILE}; name only ids the map's memory holds.")
+            raise ToolExecutionError(f"Memory entry #{missing[0]} is not a live entry in {INFINITE_ENTRIES_FILE}; name only ids the map's memory holds.", details={INFINITE_REFUSAL_RULE_DETAILS_KEY: InfiniteRefusalRule.UNKNOWN_ENTRY})
         return tuple(live[number] for number in ids)
 
     def run_entries(self, run_id: str) -> tuple[InfiniteEntry, ...]:
@@ -171,14 +173,14 @@ class InfiniteWorkspace:
             # Each agent may create only a few files, and every new file
             # needs a short one-line description for the map.
             if created and not may_create:
-                raise ToolExecutionError(f"{relative} does not exist, and you have used your allowance of new files; append to an existing note instead.")
+                raise ToolExecutionError(f"{relative} does not exist, and you have used your allowance of new files; append to an existing note instead.", details={INFINITE_REFUSAL_RULE_DETAILS_KEY: InfiniteRefusalRule.NEW_FILES_PER_AGENT})
             if created and (not isinstance(description, str) or not description.strip() or description.splitlines() != [description] or TokenEstimate.count(description) > self.settings.max_entry_tokens):
-                raise ToolExecutionError(f"{relative} is a new file, so it needs a one-line description of at most {self.settings.max_entry_tokens} tokens for the workspace map.")
+                raise ToolExecutionError(f"{relative} is a new file, so it needs a one-line description of at most {self.settings.max_entry_tokens} tokens for the workspace map.", details={INFINITE_REFUSAL_RULE_DETAILS_KEY: InfiniteRefusalRule.NOTE_DESCRIPTION})
             # @intent one-note-stays-under-the-file-cap
             # Appending never grows a note past max_file_tokens.
             note = ("" if created else target.read_text(encoding="utf-8", errors="replace")) + text
             if TokenEstimate.count(note) > self.settings.max_file_tokens:
-                raise ToolExecutionError(f"{relative} would be {TokenEstimate.count(note)} tokens, over max_file_tokens ({self.settings.max_file_tokens}); write a shorter text or start another note.")
+                raise ToolExecutionError(f"{relative} would be {TokenEstimate.count(note)} tokens, over max_file_tokens ({self.settings.max_file_tokens}); write a shorter text or start another note.", details={INFINITE_REFUSAL_RULE_DETAILS_KEY: InfiniteRefusalRule.MAX_FILE_TOKENS})
             changed = {relative: note}
             if created:
                 record = {"path": relative, "description": description, "by": by, "run": run, "at": self._stamp()}
@@ -199,17 +201,17 @@ class InfiniteWorkspace:
         with self._lock:
             target, relative = self._note_path(path)
             if not target.is_file():
-                raise ToolExecutionError(f"{relative} does not exist; create it with write_note first.")
+                raise ToolExecutionError(f"{relative} does not exist; create it with write_note first.", details={INFINITE_REFUSAL_RULE_DETAILS_KEY: InfiniteRefusalRule.NOTE_MISSING})
             # @intent edits-replace-exactly-one-match
             # An edit must name one place in the file, so zero or
             # several matches are refused with the count found.
             content = target.read_text(encoding="utf-8", errors="replace")
             matches = SubstringCounter.count_overlapping(content, old_text) if old_text else 0
             if matches != 1:
-                raise ToolExecutionError(f"old_text must appear exactly once in {relative}, but it appears {matches} times; include more of the surrounding text.")
+                raise ToolExecutionError(f"old_text must appear exactly once in {relative}, but it appears {matches} times; include more of the surrounding text.", details={INFINITE_REFUSAL_RULE_DETAILS_KEY: InfiniteRefusalRule.EDIT_MATCH})
             note = content.replace(old_text, new_text, 1)
             if TokenEstimate.count(note) > self.settings.max_file_tokens:
-                raise ToolExecutionError(f"{relative} would be {TokenEstimate.count(note)} tokens, over max_file_tokens ({self.settings.max_file_tokens}); write a shorter replacement.")
+                raise ToolExecutionError(f"{relative} would be {TokenEstimate.count(note)} tokens, over max_file_tokens ({self.settings.max_file_tokens}); write a shorter replacement.", details={INFINITE_REFUSAL_RULE_DETAILS_KEY: InfiniteRefusalRule.MAX_FILE_TOKENS})
             self._room(FolderUsage.tokens_by_file(self.root, skip=INFINITE_UNCOUNTED_DIRNAMES), {relative: note})
             self.backend.write_text(target, note, encoding="utf-8", create_parents=True, newline="", atomic=True)
         return relative
@@ -239,6 +241,24 @@ class InfiniteWorkspace:
                 return f"{shown}\n{INFINITE_MORE_FILES.format(count=len(lines) - index)}"
             shown = f"{shown}\n{line}"
         return shown
+
+    @staticmethod
+    def map_omitted(text: str) -> int:
+        """Return how many files a rendered map leaves out, read from its closing line, or 0 when the map is whole; never raises."""
+        # @intent a-cut-map-states-what-it-left-out
+        # map_text closes a cut map with the more-files line, so the
+        # count is read back from the last line without walking the
+        # disk again. Any other last line, a near miss included, or a
+        # count too long for int, means nothing is reported as cut.
+        head, _, tail = INFINITE_MORE_FILES.partition("{count}")
+        last = text.split("\n")[-1]
+        count = last[len(head) : len(last) - len(tail)]
+        if not (last.startswith(head) and last.endswith(tail) and count.isascii() and count.isdigit()):
+            return INFINITE_MIN_COUNT
+        try:
+            return int(count)
+        except ValueError:
+            return INFINITE_MIN_COUNT
 
     def relative(self, path: str) -> str:
         """Return a note path as its workspace-relative POSIX path, resolved as the note rules resolve it, or as given when it does not resolve inside the workspace."""
@@ -273,7 +293,7 @@ class InfiniteWorkspace:
                 draft = InfiniteEntryDraft(kind=InfiniteEntryKind(record["kind"]), text=record["text"], tags=tuple(record["tags"]) if isinstance(record["tags"], list) else record["tags"], refs=tuple(record["refs"]) if isinstance(record["refs"], list) else record["refs"], supersedes=record["supersedes"])
                 parsed.append((InfiniteEntry(id=record["id"], draft=draft, by=record["by"], verified_by=record["verified_by"], run=record["run"], at=record["at"]), line))
             except (ValueError, KeyError, TypeError, ConfigurationError) as exc:
-                raise ToolExecutionError(f"{name} line {number} is not a memory entry in the documented shape; fix or remove that line with bash.", details={"file": name, "line": number}) from exc
+                raise ToolExecutionError(f"{name} line {number} is not a memory entry in the documented shape; fix or remove that line with bash.", details={"file": name, "line": number, INFINITE_REFUSAL_RULE_DETAILS_KEY: InfiniteRefusalRule.MALFORMED_MEMORY}) from exc
         return parsed
 
     def _entry_rules(self, draft: InfiniteEntryDraft, live: list[tuple[InfiniteEntry, str]], staged: tuple[InfiniteStagedEntry, ...]) -> None:
@@ -288,16 +308,16 @@ class InfiniteWorkspace:
         # text is compared with case and spacing ignored, so a reworded
         # copy is not saved twice.
         if TokenEstimate.count(draft.text) > self.settings.max_entry_tokens:
-            raise ToolExecutionError(f"The entry text is {TokenEstimate.count(draft.text)} tokens, over max_entry_tokens ({self.settings.max_entry_tokens}); shorten it to one short line, or save the full text with write_note and remember a one-line pointer to that note.")
+            raise ToolExecutionError(f"The entry text is {TokenEstimate.count(draft.text)} tokens, over max_entry_tokens ({self.settings.max_entry_tokens}); shorten it to one short line, or save the full text with write_note and remember a one-line pointer to that note.", details={INFINITE_REFUSAL_RULE_DETAILS_KEY: InfiniteRefusalRule.MAX_ENTRY_TOKENS})
         normal = " ".join(draft.text.split()).casefold()
         twin = next((entry for entry, _ in live if " ".join(entry.draft.text.split()).casefold() == normal), None)
         if twin is not None:
-            raise ToolExecutionError(f"This text is already recorded as #{twin.id}; do not save it again.")
+            raise ToolExecutionError(f"This text is already recorded as #{twin.id}; do not save it again.", details={INFINITE_REFUSAL_RULE_DETAILS_KEY: InfiniteRefusalRule.DUPLICATE_ENTRY})
         sibling = next((item for item in staged if " ".join(item.draft.text.split()).casefold() == normal), None)
         if sibling is not None:
-            raise ToolExecutionError(f"This text is already staged as {sibling.key}; do not stage it again.")
+            raise ToolExecutionError(f"This text is already staged as {sibling.key}; do not stage it again.", details={INFINITE_REFUSAL_RULE_DETAILS_KEY: InfiniteRefusalRule.DUPLICATE_ENTRY})
         if draft.supersedes is not None and all(entry.id != draft.supersedes for entry, _ in live):
-            raise ToolExecutionError(f"supersedes names #{draft.supersedes}, which is not a live entry; give the id of an entry in {INFINITE_ENTRIES_FILE}.")
+            raise ToolExecutionError(f"supersedes names #{draft.supersedes}, which is not a live entry; give the id of an entry in {INFINITE_ENTRIES_FILE}.", details={INFINITE_REFUSAL_RULE_DETAILS_KEY: InfiniteRefusalRule.UNKNOWN_ENTRY})
 
     def _note_path(self, path: str) -> tuple[Path, str]:
         # @intent notes-stay-in-their-lane
@@ -307,22 +327,22 @@ class InfiniteWorkspace:
         # because the pair's result card lists it as one, and holds no
         # colon, which on Windows names a hidden stream of another file.
         if path and path.splitlines() != [path]:
-            raise ToolExecutionError(f"{path!r} breaks across lines; give a note path on one line.")
+            raise ToolExecutionError(f"{path!r} breaks across lines; give a note path on one line.", details={INFINITE_REFUSAL_RULE_DETAILS_KEY: InfiniteRefusalRule.NOTE_PATH})
         try:
             target = FileSystemPermissions.resolve_scoped_path(self._scope, path)
         except ToolExecutionError as exc:
-            raise ToolExecutionError(f"{path} is outside the workspace; give a path inside it, such as notes/topic.md.") from exc
+            raise ToolExecutionError(f"{path} is outside the workspace; give a path inside it, such as notes/topic.md.", details={INFINITE_REFUSAL_RULE_DETAILS_KEY: InfiniteRefusalRule.NOTE_PATH}) from exc
         if target.suffix not in INFINITE_NOTE_SUFFIXES:
-            raise ToolExecutionError(f"{path} must end in one of {', '.join(INFINITE_NOTE_SUFFIXES)}.")
+            raise ToolExecutionError(f"{path} must end in one of {', '.join(INFINITE_NOTE_SUFFIXES)}.", details={INFINITE_REFUSAL_RULE_DETAILS_KEY: InfiniteRefusalRule.NOTE_PATH})
         relative = target.relative_to(self.root)
         if ":" in relative.as_posix():
-            raise ToolExecutionError(f"{relative.as_posix()} holds a colon; write the note path without one.")
+            raise ToolExecutionError(f"{relative.as_posix()} holds a colon; write the note path without one.", details={INFINITE_REFUSAL_RULE_DETAILS_KEY: InfiniteRefusalRule.NOTE_PATH})
         # A case-insensitive disk, such as macOS's default, keeps the
         # caller's spelling, so the protected names are matched with
         # case ignored.
         folded = relative.as_posix().casefold()
         if target.is_dir() or folded.split("/")[0] in (INFINITE_SEED_DIRNAME, INFINITE_RUNS_DIRNAME) or folded in (INFINITE_ENTRIES_FILE, INFINITE_SUPERSEDED_FILE, INFINITE_FILES_FILE):
-            raise ToolExecutionError(f"{relative.as_posix()} is a seed file, a run journal, a memory file, or a folder, which no note may replace; write another path.")
+            raise ToolExecutionError(f"{relative.as_posix()} is a seed file, a run journal, a memory file, or a folder, which no note may replace; write another path.", details={INFINITE_REFUSAL_RULE_DETAILS_KEY: InfiniteRefusalRule.NOTE_PATH})
         return target, relative.as_posix()
 
     def _room(self, counts: Mapping[str, int], changed: Mapping[str, str]) -> None:
@@ -331,9 +351,9 @@ class InfiniteWorkspace:
         # the write, counted from disk just before it.
         after = FolderUsage.totals(counts, changed)
         if after.files > self.settings.max_files:
-            raise ToolExecutionError(f"This write would make {after.files} files, over max_files ({self.settings.max_files}); append to an existing note instead.")
+            raise ToolExecutionError(f"This write would make {after.files} files, over max_files ({self.settings.max_files}); append to an existing note instead.", details={INFINITE_REFUSAL_RULE_DETAILS_KEY: InfiniteRefusalRule.MAX_FILES})
         if after.tokens > self.settings.max_tokens:
-            raise ToolExecutionError(f"This write would make the workspace {after.tokens} tokens, over max_tokens ({self.settings.max_tokens}); write less, or ask the developer to raise the cap.")
+            raise ToolExecutionError(f"This write would make the workspace {after.tokens} tokens, over max_tokens ({self.settings.max_tokens}); write less, or ask the developer to raise the cap.", details={INFINITE_REFUSAL_RULE_DETAILS_KEY: InfiniteRefusalRule.MAX_TOKENS})
 
     @staticmethod
     def _descriptions(text: str, run: str | None = None) -> dict[str, str]:

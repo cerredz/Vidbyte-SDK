@@ -104,22 +104,30 @@ Each event is an `InfiniteEvent` whose `kind` is an `InfiniteEventKind`:
 
 - `run_started`: a new run opened its journal; its task, model, preset, limits, the root's extra tool names, and the seed file names.
 - `run_resumed`: a resumed run; its task, how many pairs finished earlier, and which started pairs will run again.
-- `run_finished`: the root's loop returned and `run_finished` is journaled; the stop reason, the answer, the pairs and agents, and the run's tokens and cost.
-- `run_stopped`: the run raised after its journal opened; `failed` for an `Exception`, `cancelled` for any other `BaseException`, with the error's class and message. The error is raised again unchanged, and the run stays resumable.
-- `batch_rejected`: `launch_subagent` refused a batch itself (unreadable tasks, a repeated name, a tool it cannot grant, an unknown entry, or `max_agents`). A call `DelegationLimitsMiddleware` denies never reaches the tool and has no event.
-- `subagent_launched`: a new pair, right after its `pair_started` record; its name, keys, depth, and task card.
+- `run_finished`: the root's loop returned and `run_finished` is journaled; the stop reason, the answer, the pairs and agents, and the run's tokens and cost; this session's iterations, tool calls, and duration; the whole run's passed, fixed, failed, and unchecked pairs, committed entries, created notes, and deepest pair depth; and `events_failed`, the events dropped so far.
+- `run_stopped`: the run raised after its journal opened; `failed` for an `Exception`, `cancelled` for any other `BaseException`, with the error's class and message and `events_failed`. The error is raised again unchanged, and the run stays resumable.
+- `agent_progress`: every tenth tool iteration of the root; the iteration, its cap, and the root's own model calls, tool calls, and tokens so far.
+- `workspace_usage`: the workspace's usage level changed (50, 75, 90, or 100 percent of `max_files` or `max_tokens`, whichever is higher, or back below), or the root's map started or stopped being cut; the files and tokens against their caps, and the files the map leaves out.
+- `handoff_written`: `run_handoff` saved a handoff; its workspace-relative path, each section's length in order, and the sections cut to their caps. It comes after the file is written, so it can follow the run's terminal event, or come for a run that has none.
+- `batch_rejected`: a `launch_subagent` batch was refused, with the `rule` it broke (an `InfiniteRefusalRule`) and its `source`: `tool` when `launch_subagent` refused it itself (unreadable tasks, a repeated name, a tool it cannot grant, an unknown entry, or `max_agents`), or `middleware` when `DelegationLimitsMiddleware` denied the call past `max_depth` or `max_parallel`. A denial is announced when its generator replies, or at the end of the root's tool iteration.
+- `batch_finished`: a batch's pipeline returned; its offset among the run's pair starts, its pairs' passed, fixed, failed, and unchecked counts, its replays, and its duration.
+- `subagent_launched`: a new pair, right after its `pair_started` record; its name, keys, depth, and task card, its `attempt` (2 or more when a resume runs it again), its batch offset and place in the batch, and the tree's `agents_started`, `max_agents`, and pairs `in_flight`.
 - `subagent_replayed`: a task whose name already finished in this run; its recorded card is reused and nothing runs.
 - `generator_finished`: a generator replied; its status, stop reason, summary, tool calls, usage, and time since its pair launched.
-- `subagent_finished`: a pair's card is journaled; its status, verdict, review, committed and dropped entries, notes, and the usage of both agents.
-- `memory_saved`: the root committed an entry to `entries.jsonl`.
-- `memory_staged`: a pair agent staged an entry for its verifier.
-- `memory_dropped`: a verifier dropped a staged entry.
-- `file_written`: a note was created, appended to, or edited.
-- `tool_refused`: a memory tool refused a call, with the problem the model was told.
+- `verifier_started`: a verifier is about to check its pair; how many entries are staged, and the notes the generator wrote.
+- `verifier_finished`: a verifier replied; its verdict, stop reason, tool calls, usage, and duration.
+- `subagent_finished`: a pair's card is journaled; its status, verdict, review, committed and dropped entries, notes, the usage of both agents, the class of the error its card reports (`error_type`, blank when none), and the tree's `agents_started`, `max_agents`, and pairs `in_flight`.
+- `subagent_aborted`: a pair stopped before its card was recorded, or the sink raised `KeyboardInterrupt` or `CancelledError` on its `subagent_finished`, which this then follows; `cancelled` for a cancellation or an interrupt, `failed` for an error in the pair's own code, with the error's class, the step it stopped in (`generator`, `verifier`, or `commit`), and the entries still staged. The error is raised again unchanged.
+- `memory_saved`: the root committed an entry to `entries.jsonl`, with the root's entries and new files left of its allowance.
+- `memory_staged`: a pair agent staged an entry for its verifier, with the agent's entries and new files left of its allowance.
+- `memory_committed`: a verifier's verdict committed a staged entry to `entries.jsonl`; its new id, staged key, kind, and text.
+- `memory_dropped`: a staged entry was not committed: its verifier dropped it, a rule refused it at commit, or the pair had no verdict; the agent is the verifier, or the generator when no verifier ran.
+- `file_written`: a note was created, appended to, or edited, with the agent's entries and new files left of its allowance.
+- `tool_refused`: a memory tool refused a call, with the problem the model was told and the `rule` it broke.
 
 Every event has `run_id`, `agent_key`, `role`, `depth`, `at`, a one-line `summary`, and typed `details`, a record from `vidbyte.lib.dataclasses.infinite` that serializes with `dataclasses.asdict`. Launch and pair-outcome events carry the launching agent (`root`, or a generator); memory events carry the agent that acted. The root is at depth 0 and a pair's agents at their launcher's depth plus 1; `at` is UTC, to the millisecond.
 
-- Caps: a summary is at most 280 characters, texts 500, paths 500, lines 120, and labels 64; a list shows its first five items and counts the rest in its `*_omitted` field; every count is at most 2^63 - 1. Cut text ends with ` … [cut]`, and a lone surrogate becomes `?`. Every details record is at most 32,768 bytes as JSON (27,015 at worst), and a whole event at most 31,093.
+- Caps: a summary is at most 280 characters, texts 500, paths 500, lines 120, and labels 64; a list shows its first five items and counts the rest in its `*_omitted` field; every count is at most 2^63 - 1. Cut text ends with ` … [cut]`, and a lone surrogate becomes `?`. Every details record is at most 32,768 bytes as JSON (27,909 at worst), and a whole event at most 31,987.
 - Keys: a pair key over 508 characters becomes `~`, 16 hexadecimal digits of its SHA-256, a slash, and its last 490 characters; an agent key keeps its `/gen` or `/ver`. Keys are never cut with the marker.
 - Usage: `tokens` sums the replies' `UsageRollup`s, and `cost_usd` is `None` whenever any part of the cost is unknown, never 0.
 - Note paths are workspace-relative POSIX paths, so `./notes/a.md` and `notes/a.md` are one note.
@@ -162,3 +170,10 @@ This package builds on canonical helpers in `vidbyte/lib/` rather than private c
 - Pairs that keep running after an error escaped their batch can deliver events after `run_finished` or `run_stopped`, so a consumer must not assume the terminal event is the last one of its run.
 - `vidbyte/context/handoff/infinite.py` must not import `vidbyte.lib.outputs`: `vidbyte.lib.dataclasses` imports `vidbyte.context` while it loads, and the outputs package needs the finished dataclasses package back, so that import breaks `import vidbyte`. It calls `TokenEstimate.truncate_chars` (`vidbyte/lib/util/text.py`), the cut `OutputText.truncate` delegates to, instead of copying it.
 - Before adding a private helper here, look in `vidbyte/lib/` for a canonical one and add an option to it, as `RecordFieldValidator`'s `one_line` and `require_text_items` were added for this package.
+- A pair cancelled after its batch created its task but before that task's first step announces no `subagent_aborted`, and `in_flight` stays raised for the rest of the session. So do the pairs a batch already announced when a later pair's `pair_started` write fails, or when the sink raises `KeyboardInterrupt` or `CancelledError` on a `subagent_launched`: either stops the batch before any of its pairs runs.
+- A sink that raises `KeyboardInterrupt` or `CancelledError` on a `subagent_finished` gets that pair's `subagent_aborted` (phase `commit`) right after it, though the card is already journaled and announced, and `in_flight` counts the pair once. Close a pair's row on its first closing event; an abort does not prove the pair has no card.
+- Root denials are announced at the end of the root's tool iteration, after every call of that iteration ran, so a denial follows the events of a batch launched in the same iteration.
+- A new refusal raise site in `memory.py`, `launch.py`, or `workspace.py` must name its `InfiniteRefusalRule` in the error's `details`, under `INFINITE_REFUSAL_RULE_DETAILS_KEY`; never classify a refusal by its message text.
+- On cancellation, a pair waiting on its own nested batch is woken only after that batch ends, so it may announce `subagent_aborted` after `run_stopped`.
+- A batch whose pipeline raises, on cancellation or when one pair aborts with an error, gets no `batch_finished`; close its rows on its pairs' last events or on the run's terminal event.
+- A child agent's error always arrives as a `VidbyteSdkError` (`AgentExecutionError`, or one of the three typed errors `BaseAgent` passes through unwrapped) and becomes the pair's card, with the original class in `subagent_finished`'s `error_type`; `subagent_aborted` means a cancellation, an interrupt, or a defect in the pair's own code.
