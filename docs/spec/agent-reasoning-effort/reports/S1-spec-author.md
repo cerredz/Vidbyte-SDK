@@ -107,3 +107,35 @@ Three scripts in `r2e-s1/scripts/` check the spec. The last two are independent 
 - No test cases, and no key-shaped literal.
 
 Not run: the repo gate, lint and tests. S1 writes no code, so the spec does not claim any of them passed.
+
+## Revisions from review round 1
+
+spec.md is now revision 2. Every finding in `reports/S1-spec-review.md` was accepted; none was declined. The spec records the round in §16 (review log, one row per finding) and §17 (r2 row). §0 has no revision log of its own: §0.2 is reserved for the user's verbatim replies, which the orchestrator appends, so I left it unchanged. Settled decisions are unchanged: DIRECT only, and the root names `ReasoningEffort`, `DecisionModelConfig` and `DecisionModelMode`.
+
+| Finding | Disposition | Change in spec r2 |
+|---|---|---|
+| R-1 [Blocker] | Accepted | INV-8 no longer refuses "a member of another enum". It says a str-valued member whose value is one of the six (for example `GrokReasoningEffort.HIGH`) is accepted by value, as `RecordFieldConverter.to_enum` does (`vidbyte/lib/dataclasses/validation.py:221-230`). AC-10 refuses only `"max"`, `""`, `"HIGH"` and `3`, and lists `GrokReasoningEffort.HIGH` as accepted and stored as the `ReasoningEffort` member. |
+| R-2 [Major] | Accepted | NG-14 now gives the true reason, a scope choice. The table covers the exact text ids of `MODEL_PROVIDER_RUNNER_TYPE_MAP` (`vidbyte/lib/constants/runners.py:47`), the catalog `ProviderModelRegistry` publishes (`models.py:316-325`). The prefix map (`utility.py:71`) builds other ids (`claude-opus-4-7`, `gpt-5.5-2026-04-23`, `gemini-3.5-flash-001`), and they get the no-row refusal. The same wording is in EC-10, the §9.2 reading notes, row 2a's WHAT NOT TO DO, row 3's KNOWN EDGE CASES and §13 (which offers these ids as a test seam for the no-row text). |
+| R-3 [Major] | Accepted | §8.5 adds a "registry, no row" text: `{provider}:{model} is not in the SDK's reasoning-effort table, so reasoning effort '{effort}' cannot be sent to it; the table was checked against vendor docs on {REASONING_EFFORT_AS_OF} (see "Reasoning Effort Sources" in vidbyte/lib/registries/README.md)`. The capability text ("it supports a, b") is used only for an id with a row, and `REASONING_EFFORT_SUPPORT` never holds an empty tuple, so `()` always means no row. INV-11, AC-4, EC-10, EC-11, EC-23, EC-24, the C5 contract item 4, the §8.5 method comments and rows 3, 4 and 29 follow. EC-24's stale "Q-10" reference is corrected to Q-9. |
+| R-4 [Major] | Accepted: follow the convention (option a) | The tables move to `vidbyte/lib/configs/reasoning_effort.py` (new row 2a; it imports only `vidbyte.lib.enums` and `typing`), exported from `vidbyte/lib/configs/__init__.py` (row 2b). `ReasoningEffortRegistry` stays in `vidbyte/lib/registries/reasoning_effort.py` (row 3), imports and re-exports the tables like `registries/structured_output.py`, and is exported from `registries/__init__.py` (row 3a). D-17 cites `declarative-config-resolution.md:38-43`, and r1's choice becomes its runner-up. Also updated: §2, §8.2, §8.4 (3 new files), §8.5, §9.3, §11 (field-guide bullet, baseline, layout), §12.2 (new configs row), §12.4, §12.5, §12.6 P1 order, §14 ask-first and rows 29 and 32. §11 and §13 name `test_harness_threads_surface.py:270-278` as an inherited local red that skips without `origin/main` (`:139-143`). Row ids 2a, 2b and 3a keep every existing row number stable. |
+| R-5 [Minor] | Accepted | AC-5 says that, for `TextModelConfig` only, GLM, Meta or a custom `endpoint` keeps the earlier refusal from `_require_gateway_shape` (`model_configs.py:95-96`, `:193-208`). That refusal is `UnsupportedProviderError` or the endpoint `ConfigurationError`, and both name `TextModelMode.DIRECT`. |
+| R-6 [Minor] | Accepted, and widened | GL-20 and GL-21 are requoted as their verbatim `description:` lines (raw lines 718 and 727), with the YAML path moved to an `(at ...)` locator. XA-29 is requoted with the raw spacing, `"description":"Assistant reasoning content."`, with its JSON path as a locator. The stricter verifier also caught GL-18, which the review did not list: it quoted a folded YAML scalar as one line. GL-18 is now its verbatim last line, with a locator. The catalog intro documents the locator, the HTML page-text rule and the `\| cell \| cell` row form. |
+| R-7 [Minor] | Accepted | A-6 is resolved by the new quote G103 (raw `gem_discovery.json` line 6343: the `ThinkingConfig.thinkingLevel` enum, upper case) with G4, G64, G65 and G5. A-7 is resolved by DS-37 plus a raw-HTML check: `reasoning_effort` sits at the same request-schema depth (26) as `model`, `max_tokens` and `temperature`, while object fields such as `thinking` sit at 28. A-8 is resolved as a code fact: `broker.py:168-174` → `base.py:1534-1537`, where `_call_with_supported_kwargs` (`:1694-1711`) drops the `model_name` that `TextModelRunner.arun` (`text.py:69`) does not take. A-4 is resolved for `grok-4.7` by the new quote XA-38 (the legacy chat-completions page's `model="grok-4.7",` example, raw line 51), which is added to that row's sources. A-4 stays open for `grok-4.6` only. A-9 now cites the skip mechanism. |
+| Q-1 [scope-adding] | Kept as an optional question, default No | Added as spec Q-10 (non-blocking, default No): sourced rows for `claude-opus-4-7`, `claude-opus-4-6`, `claude-opus-4-5-20251101` and `claude-sonnet-4-6`, and snapshot-to-alias mapping. Until Q-10 is answered, these ids are a stated limitation (NG-14, EC-10). |
+
+Also fixed while re-reading (not review findings):
+- Row 8 said no adapter overrides `_create_payload`. It now says `OpenRouterProvider` overrides it but calls `super()` first (`openrouter.py:56`).
+- NFR-4 now places the per-provider URL comments in the table module.
+- The §12.5 "D-20" reference is qualified as byok-api-keys D-20, the decision the pinned layout tests cite.
+
+r2 verifier result (scripts under `scratchpad/r2e-s1/scripts/`):
+- The strict `s1-verify-spec.py` (no JSON re-serialization, no flattened YAML, no whitespace normalization outside HTML; optional locator) checked 224 catalog lines (218 quotes, 6 absence checks) with 0 failures.
+- A mutation run planted 4 defects (flattened GL-20, re-spaced XA-29, XA-38 and GL-21), and the verifier caught all 4.
+- `s1-crosscheck-table.py`: 0 rows with an unproven sent value.
+- `s1-table-shape.py`: 0 rows with a wrong cell count.
+- New `s1-trace.py`: 0 problems.
+  - Counts: FR 12, NFR 7, AC 20, EC 29, W 10, INV 19, D 18, Q 10, A 13, NG 15.
+  - Every referenced id is defined. Every FR has a §12.3 row, and every AC is in a W row.
+  - 37 §12.3 rows. 3 CREATE rows (2a, 3, 11) equal the §8.4 budget.
+  - Every "row N" reference resolves, and no retired text survives outside the review log.
+- A key-shaped literal scan found none.
