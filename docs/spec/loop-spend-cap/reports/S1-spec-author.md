@@ -215,3 +215,45 @@ The rest of the design:
 | New tables | 0 |
 | New endpoints | 0 |
 | Public additions | 1 enum member, 1 property, 1 keyword. No root name. |
+
+---
+
+## Addendum: r2 (review round 1), 2026-10-20
+
+**Commit:** `d49469ee` "docs(spec): revise loop-spend-cap spec to r2 (review round 1)". It changes only `spec.md` (frontmatter `revision: 2`, `updated: 2026-10-20`).
+
+**Dispositions** (full rows in spec §16):
+
+| Finding | Disposition | Where it landed |
+|---|---|---|
+| R-1 Blocker (Codex ignores the cap) | accepted | `CODEX_UNSUPPORTED_LOOP_FIELDS` gains `max_spend_usd` (row 25). The set-equality pin `tests/test_codex_output_contracts.py:411` forces a one-entry `cases` edit, assigned to the S2 test author (row 26). The validator has no special case. INV-13, EC-39, AC-27. |
+| R-2 Blocker (cap stop gets reviewed, graded, retried) | accepted, plus one site the review missed | Rows 18–23 widen every `@intent middleware-abort-ends-the-run` site. Row 24 adds `InfinitePair._status` (`infinite/launch.py:335-344`): a cap-stopped generator was PARTIAL, so its verifier ran. `finalize` is untouched. INV-23, FR-11, D-19, AC-28, AC-29, EC-42. |
+| R-3 Major (unpriced model found after a paid call) | accepted | `AgentSpendCap.model_refusal` runs in `BaseAgent.__init__`. It refuses non-text runners and unpriced configured primary or fallback models; OpenRouter is exempt. The run-time blind stop stays as the fallback and names `provider:model`. Q-11 is answered Yes. |
+| R-4 Major (usage-less failed calls) | accepted | INV-3, rule 3, A-1 (now a known limitation), EC-38. Q-13 `[scope-adding]`, default No. |
+| R-5 Major (C3 contract uses non-root names, misses stop shapes) | accepted | Rules 1–9 rewritten: `OutputSchemaViolationError.stop_reason`, `usage_rollup` for the stop reason, `error_kind == "usage_accounting"`, constructor-only refusals, threshold-not-a-bill, specialist caps, one agent object per concurrent run. Q-12 closed. |
+| R-6 Major (concurrent reset fails the cap open) | accepted as a stated limitation | EC-35, T-4, INV-11, rule 9, README row. Q-14 `[scope-adding]`, default No. |
+| R-7 Major (queued prompts after a cap stop) | accepted (orchestrator: in scope) | The drain's `while` gains one condition (`base.py:1195`); `_generate_reply` (C901 10) is untouched. EC-20, EC-41, AC-31, T-2. Q-9 reworded. |
+| R-8 Minor (Q-10 label) | label accepted; capping reviewers declined on code | D-18: a reviewer's cap stop becomes a parsed review or a stage failure (`independent_critic.py:80-89`, `:111`; `prosecutor_defender_judge.py:513-522`), never a `max_spend` result. Q-10 struck through. |
+| R-9 Minor (DeepSeek) | accepted | Always rated at the peak rate (`pricing.py:131-135`). §13, NG-4, and EC-11 are fixed. |
+| R-10 Minor (validator claims) | accepted | INV-14 states both measured results. §9.2 tells C3 to validate `--max-spend` itself. |
+
+**What I measured for r2** (ruff C901/PLR0912/PLR0915, thresholds 10/12/50, on `base_commit`):
+- `_structured_phase` 6/6/20; `default_report_parser` 4/3/10; `InfinitePair._status` 3/3/4; `should_reflect` 2; critic `arun` 4; grader `arun` 3 and `_run_provider_trial` 2; `_drain_queued_prompts` 6/7/29.
+- `BaseAgent.__init__` (17/17/87) and `AgentRuntime._arun_once` (45/44/167) are already flagged, so lines added there add no finding.
+- Baseline tests over the r2 files: `429 passed in 8.23s`. The files were `tests/test_codex_output_contracts.py`, `tests/multi_agent`, `tests/test_algorithms_honor_middleware_abort.py`, `tests/features/infinite_memory_agent`, `tests/test_reflexion_algorithm.py`, and `tests/test_independent_critic_algorithm.py`.
+
+**Counts after r2:**
+- INV 23, AC 32, EC 42, FR 11, NFR 7, D 19, Q 14 (Q-10 withdrawn), and W 10.
+- §12.3 has 26 rows: 1 CREATE, 24 MODIFY by the implementer, and 1 test edit by S2.
+- The §8.4 budget is unchanged.
+
+**Self-check:**
+- The ID cross-reference script finds no undefined ID, and every AC is served by a W row.
+- The spec contains no key-shaped literal.
+- Every table has a consistent column count under GFM rules. A pre-existing raw pipe in row 14 was rewritten.
+- There is exactly 1 CREATE row.
+
+**Notes for the round-2 reviewer:**
+- `MultiAgentOrchestrator` is a Protocol. The class edited in row 23 is `MagenticOneOrchestrator`.
+- The auto-handoff still runs after a cap stop, by design (INV-23 last paragraph). It writes a handoff note about the stopped run.
+- A capped test agent now needs a priced configured model to construct (§13).
