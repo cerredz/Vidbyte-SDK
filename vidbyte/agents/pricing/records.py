@@ -11,8 +11,9 @@ Architecture:
     - OperationUsageRecord: One priced search/fetch operation and its USD cost.
     - UsageRecordingIntegrity: Whether metering itself stayed intact for a run.
     - UsageRollup: The per-call and per-operation ledgers plus None-aware totals,
-      including a run-level cache hit rate and the count of calls whose usage
-      could not be recorded.
+      including a run-level cache hit rate, the count of calls whose usage
+      could not be recorded, and `cost_measured`, whether `cost_usd` is the
+      whole measured spend.
 Relations:
     Built by vidbyte/agents/pricing/tracker.py; surfaced on
     AgentMessage.metadata["usage_rollup"] and BaseAgent.get_usage().
@@ -71,7 +72,8 @@ class UsageRollup:
 
     `unaccounted_call_count` counts model calls that reached the ledger but left no record (no parseable usage,
     an unknown provider, or an internal parse or pricing error). Like `recording_integrity`, it describes the
-    whole ledger, including in a rollup filtered to one UsageKind.
+    whole ledger, including in a rollup filtered to one UsageKind. `cost_measured` is True only when every
+    recorded call and operation has a price and metering stayed intact, so `cost_usd` is the whole measured spend.
     """
 
     calls: tuple[UsageRecord, ...] = field(default_factory=tuple)
@@ -87,6 +89,24 @@ class UsageRollup:
     operation_count: int = 0
     recording_integrity: UsageRecordingIntegrity = UsageRecordingIntegrity.INTACT
     unaccounted_call_count: int = 0
+
+    @property
+    def cost_measured(self) -> bool:
+        """Whether `cost_usd` is the whole measured spend of this ledger.
+
+        Unlike `cost_complete`, which is True when something was recorded and every record has a price, this is
+        also False when a call left no record or recording failed, and True for an empty ledger, which spent nothing.
+        """
+        # @intent unmeasured-spend-is-never-reported-as-measured
+        # A call with no price, a call that left no usage, or a failed
+        # recording leaves spend outside cost_usd, so a reader such as
+        # the spend cap must never take cost_usd as the full amount.
+        return (
+            self.recording_integrity is UsageRecordingIntegrity.INTACT
+            and self.unaccounted_call_count == 0
+            and all(record.cost_usd is not None for record in self.calls)
+            and all(record.cost_usd is not None for record in self.operations)
+        )
 
 
 __all__ = [

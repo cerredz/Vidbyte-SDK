@@ -8,7 +8,8 @@ Purpose:
     replacing scattered flat kwargs with a structured developer-facing abstraction.
 Architecture:
     - AgentLoopSettings: Plain class with __init__-level validation, rejecting
-      non-integral budgets and non-finite timeouts before runtime conversion.
+      non-integral budgets, non-finite timeouts, and an invalid USD spend cap
+      before runtime conversion.
     - to_runtime_config(): Converts to the internal AgentRuntimeConfig contract.
 Relations:
     Imported by vidbyte.agents.base. Exported from vidbyte.agents.settings.
@@ -20,6 +21,7 @@ Similar Files:
 from __future__ import annotations
 
 import math
+import sys
 from collections.abc import Sequence
 
 from vidbyte.agents.contract import AgentLoopSettingsOutputContract
@@ -27,6 +29,7 @@ from vidbyte.agents.contracts import OutputContract
 from vidbyte.agents.settings.tool import ToolSettings
 from vidbyte.agents.settings.tool_error import ToolErrorPolicy
 from vidbyte.lib.dataclasses.agents import AllowedToolNames
+from vidbyte.lib.dataclasses.validation import RecordFieldValidator
 from vidbyte.lib.errors import ConfigurationError
 
 _POSITIVE_INT_FIELDS = (
@@ -56,6 +59,7 @@ class AgentLoopSettings:
         max_parallel_tool_calls: int | None = None,
         max_retries: int | None = None,
         timeout_seconds: float | None = None,
+        max_spend_usd: float | None = None,
         context_window_budget: int | None = None,
         compaction_trigger_tokens: int | None = None,
         compaction_target_tokens: int | None = None,
@@ -73,6 +77,17 @@ class AgentLoopSettings:
         self.max_parallel_tool_calls = max_parallel_tool_calls
         self.max_retries = max_retries
         self.timeout_seconds = timeout_seconds
+        # A NaN, infinite, boolean, or non-positive cap would leave the
+        # run uncapped, so RecordFieldValidator refuses it here.
+        self.max_spend_usd = (
+            RecordFieldValidator.require_number(
+                max_spend_usd,
+                "AgentLoopSettings.max_spend_usd",
+                maximum=sys.float_info.max,
+            )
+            if max_spend_usd is not None
+            else None
+        )
         self.context_window_budget = context_window_budget
         self.compaction_trigger_tokens = compaction_trigger_tokens
         self.compaction_target_tokens = compaction_target_tokens
@@ -201,6 +216,7 @@ class AgentLoopSettings:
             max_tokens=self.max_tokens,
             max_tool_calls=max_tool_calls,
             timeout_seconds=self.timeout_seconds,
+            max_spend_usd=self.max_spend_usd,
             compaction_trigger_tokens=self.compaction_trigger_tokens,
             compaction_target_tokens=self.compaction_target_tokens,
             tool_settings=self.tool_settings,
@@ -219,6 +235,7 @@ class AgentLoopSettings:
                 "max_parallel_tool_calls",
                 "max_retries",
                 "timeout_seconds",
+                "max_spend_usd",
                 "context_window_budget",
                 "compaction_trigger_tokens",
                 "compaction_target_tokens",
