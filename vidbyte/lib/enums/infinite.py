@@ -8,7 +8,7 @@ COMMON MODIFICATION PATTERNS: A new entry kind is one more InfiniteEntryKind mem
 WHAT NOT TO DO IN THIS FILE: 1. Do not change a value; workspaces and journals already on disk carry it. 2. Do not add behavior or methods. 3. Do not define a feature constant here; constants live in vidbyte/lib/constants/infinite.py.
 KNOWN EDGE CASES: InfiniteVerdict.UNCHECKED is never written by a verifier; it marks a verdict that was missing, a verifier that failed, or a verifier that was skipped. InfiniteEventKind shares the run_started and run_finished values with InfiniteJournalEvent on purpose; they are separate vocabularies, one for live events and one for journal records. InfiniteRefusalRule.MAX_DEPTH and MAX_PARALLEL equal the limit values DelegationLimitsMiddleware puts in a denial's metadata, so a denial's rule is read from that value.
 RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 8.5 and 9.1); docs/spec/infinite-memory-events/spec.md (sections 8.5 and 9.1); docs/spec/infinite-memory-derived-events/spec.md (sections 8.5 and 9.1); vidbyte/agents/infinite/README.md
-TESTS: tests/features/infinite_memory_agent/test_infinite_memory_contract.py; tests/features/infinite_memory_agent/test_infinite_memory_events_records.py
+TESTS: tests/features/infinite_memory_agent/test_infinite_memory_contract.py; tests/features/infinite_memory_agent/test_infinite_memory_events_records.py; tests/features/infinite_memory_agent/test_infinite_memory_derived_records.py
 """
 
 from __future__ import annotations
