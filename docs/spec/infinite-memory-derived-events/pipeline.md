@@ -19,12 +19,12 @@ started: 2026-10-19 20:30
 | S3 implement | done | 2026-10-20 | 2026-10-20 | reports/S3-implementer.md | S3_HEAD = c1c3ecc0 (last code 939381ec); PR #1191 draft; pack 414/414 (orchestrator re-ran twice); SDK-LINT PASS; public API current; tests unchanged since 2cab5070; INV-20 paths unchanged; budget events 658/660, launch 455/470, records 832/870 |
 | S4 adversarial review | done | 2026-10-20 | 2026-10-20 | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md; review.md | 3× MERGEABLE AFTER FIXES; verifier: 0 Blocker / 6 Major (R-1 docs, R-2 code, R-3..R-6 tests) / 7 Minor (R-13 scope-adding follow-up); 0 refuted; R-E1's journal-then-announce fix refuted (breaks AC-10) |
 | S4b test strengthening (R-3..R-6, R-12) | done | 2026-10-20 | 2026-10-20 | test-plan.md § "S4 strengthening" | 4f51cef1; pack 2 failed (the R-5 pin, two parametrized cases, red until R-2) / 416 passed (orchestrator re-ran); M1/M7/M10/M11 each now killed by exactly one test; **S2_HEAD = 4f51cef1** |
-| S5 repair loop | running | 2026-10-20 | | | iteration 1 |
-| S5 re-review | pending | | | | |
+| S5 repair loop | done | 2026-10-20 | 2026-10-20 | reports/S5-repair-1.md; verify-log.md | converged in 1/8: R-1, R-2, R-7..R-11 fixed (R-3..R-6, R-12 at 4f51cef1); HEAD c2a446b6 pushed. Orchestrator re-ran: pack 418 passed; SDK-LINT PASS; public API current; source stage 1 failed (inherited) / 7037 passed / 17 skipped; package stage `CI passed.`; tests unchanged since 4f51cef1; INV-20 paths untouched; 13 vidbyte files |
+| S5 re-review | running | 2026-10-20 | | | round 1/2 |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 (cap reached; spec approved at r3) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 (cap reached; spec approved at r3) · S5 repair iterations: 1/8 (converged) · S5 re-review rounds: 1/2 (running)
 
 ## Decisions the orchestrator made
 - 2026-10-19 — Asked 3 alignment questions instead of 8–10 — the user's invocation said "No need to ask 8-10 questions for this, keep to 3".
@@ -45,6 +45,9 @@ started: 2026-10-19 20:30
 - 2026-10-20 — Accepted `2 failed` (not 1) after strengthening: both are the two parametrized cases of the one R-5 pin (generator-fails, verifier-fails), red for the stated reason.
 - 2026-10-20 — Remote CI: `gh pr checks 1191` → "no checks reported"; every workflow in `.github/workflows/` (ci, static-policy, agents-md-placement, actionlint) has automatic triggers removed ("TEMPORARILY DISABLED", `workflow_dispatch` only). I will not dispatch CI against a deliberate repo-wide pause; the local full gate (`scripts/run_ci.py` source + package stages, lint, public API) is the convergence authority. The user can run `gh workflow run ci.yml --ref feat/infinite-memory-derived-events` if they want remote proof.
 - 2026-10-20 — S5 repair may edit spec.md text only for the docs-owner review rows (R-1, R-7, R-11, EC-25 wording) and must log them in §16/§17.
+- 2026-10-20 — S5 repair agent was interrupted by a session end with one uncommitted launch.py edit; resumed the same agent (not relaunched); it finished with one commit per finding.
+- 2026-10-20 — Classified the one source-stage failure as inherited: `test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes` reads `vidbyte/lib/enums/failure.py` at `git merge-base origin/main HEAD` (test :191); `git diff 181f1992..HEAD -- vidbyte/lib/enums/failure.py` is empty. Count is 171 (field guide's 167 came from an older main).
+- 2026-10-20 — Convergence declared: repair STATUS DONE; my own full gate green except the inherited failure; remote checks none configured (workflows paused repo-wide); `review.md` has no open confirmed finding (R-13 is a `[scope-adding]` follow-up, not a must-fix).
 - 2026-10-20 — Not forwarded to the spec: S2 items 5–7 (coverage notes for S4, the pre-existing harness_threads failure). Spec D-7 table row has an unescaped `|` (cosmetic, predates r4); the S3 implementer escapes it while it edits §17.
 
 ## User replies (verbatim)
