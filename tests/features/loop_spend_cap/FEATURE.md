@@ -54,13 +54,18 @@ The failure inventory below lists, for each failure, the input and state, and th
 | AC-5 (CP2), EC-12 | the call that reaches the cap is a plain-text answer | review, done checks, `after_iteration`, and a continuation all still spend |
 | AC-6, D-11 | spend ≥ cap when the model calls isDone or an internal launch tool | the internal tool is exempt (it skips `_enforce_tool_settings`'s budgets), so it runs |
 | AC-7, EC-15 | a tool (priced search or sub-agent) crosses the cap mid-turn | the next tool in the turn runs; the compute checkpoint starts clones |
+| EC-27 | a billed failed attempt reaches the cap, then the agent switches to its fallback model | the backup model is called past the cap |
+| NFR-1, INV-17 | any run with `max_spend_usd=None` | the cap code still computes a rollup or a price at a check point or at construction; no output shows the wasted work |
 | AC-8, AC-9, EC-5, EC-6, EC-9 | a response with no usage, or naming an unpriced model, or OpenRouter without a cost | `cost_usd` sums only priced records, so the run looks cheap and never stops |
 | AC-22, EC-24, INV-8 | the cap and another budget are both exhausted at one check point | the run reports `max_iterations` / `max_tokens` / `max_tool_calls` and the caller never learns that money stopped it |
 | EC-25 | measured spend equals the cap exactly | `>` instead of `>=` lets one more segment spend |
 | AC-11, AC-12, AC-30, EC-32 | a capped MCTS or actor runtime, an image model, or an unpriced primary or fallback model | the cap is accepted and never enforced, or the meter is blind from the first call |
+| INV-13 | a capped agent given only `model_name="openai/<model>"` (no `provider=`), or a fallback chain whose primary (index 0) is unpriced or an image model | the construction checks skip the slug or the primary, so the cap is accepted and then ignored or blind |
+| INV-13, section 8.5 | an unpriced pair listed twice in the chain, or a primary whose provider or model the runner's normalization leaves missing | the refusal names a pair twice, prints `None` instead of `?`, or exempts a provider-less entry as if it were OpenRouter |
 | AC-13, EC-18 | a capped JevAgent delegates to an uncapped specialist | a delegated run never enters JevAgent's loop and spends uncapped |
 | AC-27, EC-39 | a capped `CodexHarnessAgent` | Codex owns its loop, so nothing checks the cap |
 | AC-14, EC-17 | Jev preflight decision calls alone reach the cap | the first generative call still happens |
+| AC-33, EC-17, INV-5 | a capped JevAgent's gate chooses a specialist after the gate's decision call, or the `RUN_STATE_RELATION` run-state writer, has already reached the cap | the specialist starts on its own ledger, which begins at $0, so the run spends past the cap and can even end `final_response` |
 | AC-15, INV-12, EC-14 | a tool runs child agents, alone or concurrently | child spend is invisible to the parent, or a child ignores the inherited cap |
 | AC-16, INV-15, EC-28, EC-29 | export/restore, YAML, `AgentForker` with `max_iterations`, the fork tool with a loop override or a `max_spend_usd` argument | the cap silently drops, or the model raises or clears its own budget |
 | AC-21, INV-16, D-14 | the system prompt is rendered | the model reads its budget and spends up to it deliberately |
@@ -74,19 +79,23 @@ The failure inventory below lists, for each failure, the input and state, and th
 
 ## Historical Regressions
 
-None yet: this pack was written before the feature existed (spec r3, S2 stage), from the approved spec alone.
+The pack was written before the feature existed (spec r3, S2 stage), from the approved spec alone. The S4 review of the first implementation (`daad59fb`) then found four gaps, and S2b added a test for each:
+
+- R-1 (Blocker): a capped JevAgent's delegated path had no spend check, so a specialist started after the gate or the run-state writer had reached the cap (S4's probe ended `final_response` at 2.118 x C). Spec r4 added AC-33; `test_a_reached_cap_starts_no_specialist_the_gate_chose` was red at `daad59fb` until the S5 fix.
+- R-3 (Major): NFR-1 had no test that could fail; a rollup computed before the uncapped return survived the whole suite. `test_an_uncapped_run_computes_no_spend_cap_rollup_or_price` now kills it.
+- R-4 (Major) and R-M5 (Minor): a slug model with no provider, a bad fallback-chain primary, and three refusal-message shapes survived as mutants. The three new refusal tests kill all five.
 
 ## Test Suite Map
 
 - `test_loop_spend_cap_acceptance.py`: AC-1 (the section 4 snippet, run as written, for each of its three lines) and AC-21 (the cap never reaches the wire).
 - `test_loop_spend_cap_contract.py`: AC-2, AC-3, AC-19, T-3, the `AgentStopReason.MAX_SPEND` value, `AgentSpendCap.stop_output` boundaries and cause text, and the export surface (D-16, AC-24's names).
-- `test_loop_spend_cap_runtime.py`: AC-4 to AC-9, AC-22, EC-25, INV-8 ties at CP2 and CP3, and the capped-below-the-cap equals uncapped metamorphic check.
+- `test_loop_spend_cap_runtime.py`: AC-4 to AC-9, AC-22, EC-25, EC-27, INV-8 ties at CP2 and CP3, the capped-below-the-cap equals uncapped metamorphic check, and NFR-1 / INV-17 (no spend-cap rollup or price lookup on an uncapped run).
 - `test_loop_spend_cap_children.py`: AC-15, AC-7 through a sub-agent, and concurrent capped children (EC-14, INV-12).
-- `test_loop_spend_cap_refusals.py`: AC-11, AC-12, AC-27, AC-30, and the refusal on a child fork (INV-12).
+- `test_loop_spend_cap_refusals.py`: AC-11, AC-12, AC-27, AC-30, the refusal on a child fork (INV-12), and the INV-13 edges: a slug model with no provider, an unmeasurable fallback-chain primary, and the message shape (distinct pairs, `?` for a missing part, no exemption for a provider-less entry).
 - `test_loop_spend_cap_copy_paths.py`: AC-16, EC-4 through YAML, EC-28, EC-29, EC-30.
 - `test_loop_spend_cap_run_ending.py`: AC-23, AC-28, AC-29, AC-31, AC-32.
 - `test_loop_spend_cap_failure_routing.py`: AC-17, AC-18.
-- `test_loop_spend_cap_jev.py`: AC-13, AC-14, AC-20, AC-25.
+- `test_loop_spend_cap_jev.py`: AC-13, AC-14, AC-20, AC-25, AC-33 (the delegated path's check before the chosen specialist starts).
 - `test_loop_spend_cap_docs.py`: AC-26 (everything outside `docs/`).
 - `loop_spend_cap_fixtures.py`: the shared offline harness.
 
@@ -94,7 +103,7 @@ Run with `PYTHONPATH=$(pwd) py -3.11 -m pytest -q tests/features/loop_spend_cap`
 
 ## Omitted Testing Strategies
 
-- No timing or performance test for NFR-2 (≤ 10 ms per check): wall-clock assertions are nondeterministic on shared CI machines, and the spec measured it.
+- No timing or performance test for NFR-2 (≤ 10 ms per check): wall-clock assertions are nondeterministic on shared CI machines, and the spec measured it. NFR-1 is pinned by who calls the rollup and the pricebook, not by time.
 - No test pins `10**400` raising `OverflowError` (INV-14): that is a documented quirk of the shared validator, not a promise, and pinning it would block a later fix.
 - No test asks for two overlapping replies on one agent object to keep separate caps (EC-35, R-6, Q-14): the spec states it as an accepted limitation.
 - No test for Q-7 to Q-14: they are scope-adding, and their default answer is No.

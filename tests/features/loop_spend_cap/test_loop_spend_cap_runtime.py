@@ -3,17 +3,21 @@
 PURPOSE: Prove the four spend-cap check points of the shared agent loop stop a run at
 the right moment: before the next model call (CP1), on a plain-text finish (CP2),
 before every tool call including internal ones (CP3), and before the after-tool
-iteration hook (CP4), for a reached cap and for a blind meter, and that a cap the
-run never reaches changes nothing.
+iteration hook (CP4), for a reached cap and for a blind meter, that a cap the
+run never reaches changes nothing, and that an uncapped run does no spend-cap work.
 ROLE IN CODEBASE: Behavior tests for AgentRuntime._arun_once and its new
 _spend_cap_stop, driven either through BaseAgent.generate_reply (reply level) or
-AgentRuntime.arun with a scripted RunnerHandle (runtime level).
+AgentRuntime.arun with a scripted RunnerHandle (runtime level); NFR-1 and INV-17
+for the uncapped fast path.
 ARCHITECTURE NOTE: Only the model wire is scripted. UsageTracker, the runtime loop,
 middleware dispatch and the tool executor are production code. Each expected dollar
 figure is the reference_cost of the same scripted responses, so "spend equals the
 cap" compares identical floats. A ProbeRuntime subclass counts the two runtime hooks
 the spec names (_continue_finish_attempt, _after_tool_iteration) by calling through
-to the real ones; a HookProbe middleware records which hooks ran.
+to the real ones; a HookProbe middleware records which hooks ran. A SpendCapWorkSpy
+calls through to the real UsageTracker.rollup and ModelPricingRegistry.resolve and
+records only the calls whose call stack passes through the spend cap's own code, so
+the NFR-1 test pins who did the work, never a raw call count.
 FUNCTION INVENTORY: test_a_tool_turn_that_reaches_the_cap_runs_none_of_its_tools;
 test_a_cap_the_run_never_reaches_changes_nothing; test_a_plain_text_answer_that_reaches_the_cap_is_replaced_before_any_finish_work;
 test_a_finish_or_internal_tool_requested_after_the_cap_never_executes;
@@ -23,7 +27,9 @@ test_a_response_without_usage_stops_the_run_blind;
 test_a_response_naming_an_unpriced_model_stops_the_run_and_names_it;
 test_openrouter_spend_is_enforced_from_its_reported_cost;
 test_a_failed_operation_recording_stops_the_run_blind;
-test_spend_after_the_last_tool_check_is_caught_at_the_next_iteration_before_max_iterations.
+test_spend_after_the_last_tool_check_is_caught_at_the_next_iteration_before_max_iterations;
+test_an_uncapped_run_computes_no_spend_cap_rollup_or_price;
+test_a_billed_failure_that_reaches_the_cap_stops_before_the_backup_model.
 COMMON MODIFICATION PATTERNS: A new check point adds one test that puts the
 crossing spend immediately before it and asserts the stop and what did not run; a
 new budget sharing a check point adds a parametrized tie case.
@@ -34,17 +40,27 @@ AgentSpendCap at module level; each test must fail on its own missing name.
 KNOWN EDGE CASES: A max_tokens or max_tool_calls tie at the same check point must
 stop with max_spend (INV-8). A cap stop's metadata keys equal those of any other
 budget stop (INV-9 "no new metadata key"). OpenRouter's reported cost prices a call
-the empty OpenRouter table cannot (EC-8).
-RELATED DOCS: docs/spec/loop-spend-cap/spec.md INV-4, INV-5, INV-8, INV-9, AC-4..AC-9,
-AC-22, EC-5..EC-16, EC-25; tests/features/loop_spend_cap/FEATURE.md.
+the empty OpenRouter table cannot (EC-8). An uncapped run still calls rollup() for
+its own reply metadata, and how often depends on the scenario, so NFR-1 is proved by
+the caller of each rollup and price lookup, not by a count; counting stop_output
+calls cannot prove it either, because a rollup computed before the uncapped return
+never reaches stop_output.
+RELATED DOCS: docs/spec/loop-spend-cap/spec.md INV-4, INV-5, INV-8, INV-9, INV-17,
+NFR-1, AC-4..AC-9, AC-22, EC-5..EC-16, EC-25, EC-27;
+tests/features/loop_spend_cap/FEATURE.md;
+tests/features/sdk_model_usage/test_billed_unusable_replies.py (the fallback wire).
 TESTS: PYTHONPATH=$(pwd) py -3.11 -m pytest -q tests/features/loop_spend_cap/test_loop_spend_cap_runtime.py
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import math
+import sys
 from collections.abc import Sequence
+from pathlib import Path
+from types import FrameType
 from typing import Any
 
 import pytest
@@ -70,11 +86,25 @@ from tests.features.loop_spend_cap.loop_spend_cap_fixtures import (
     text_response,
     usage,
 )
+from tests.features.sdk_model_usage.test_billed_unusable_replies import (
+    ANTHROPIC_REFUSAL,
+    GEMINI_OK,
+    GEMINI_TEST_KEY,
+)
 from vidbyte.agents import AgentRuntime
+from vidbyte.agents.base import BaseAgent
+from vidbyte.agents.pricing import UsageTracker
 from vidbyte.agents.settings import AgentLoopSettings
-from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig, FinishReview
+from vidbyte.lib.config import TextModelMode
+from vidbyte.lib.dataclasses.agents import (
+    AgentRuntimeConfig,
+    FallbackModel,
+    FinishReview,
+)
 from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision
 from vidbyte.lib.enums import ModelProvider
+from vidbyte.lib.http import HttpResponse, HttpTransport
+from vidbyte.lib.registries.pricing import ModelPricingRegistry
 from vidbyte.lib.runners import TextModelResponse
 from vidbyte.middleware.base import AgentMiddleware
 
@@ -575,3 +605,152 @@ def test_spend_after_the_last_tool_check_is_caught_at_the_next_iteration_before_
     assert (result.output, result.metadata["stop_reason"]) == (REACHED_TEXT, MAX_SPEND)
     assert (runtime.tool_iterations, runner.calls) == (1, 1)
     assert set(result.metadata) == set(control.metadata)
+
+
+# The spend cap's own code: the runtime helper spec section 8.5 names, and the policy module of section 12.3 row 1.
+SPEND_CAP_HELPER = "_spend_cap_stop"
+SPEND_CAP_MODULE = ("vidbyte", "agents", "spend_cap.py")
+
+
+class SpendCapWorkSpy:
+    """Calls through to the real ledger rollup and pricebook lookup, recording each call the spend cap's code made."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self.rollups: list[str] = []
+        self.price_lookups: list[str] = []
+        real_rollup = UsageTracker.rollup
+        real_resolve = ModelPricingRegistry.resolve
+
+        def rollup(tracker: UsageTracker, *args: Any, **kwargs: Any) -> Any:
+            self._record(self.rollups, sys._getframe(1))
+            return real_rollup(tracker, *args, **kwargs)
+
+        def resolve(registry: ModelPricingRegistry, *args: Any, **kwargs: Any) -> Any:
+            self._record(self.price_lookups, sys._getframe(1))
+            return real_resolve(registry, *args, **kwargs)
+
+        monkeypatch.setattr(UsageTracker, "rollup", rollup)
+        monkeypatch.setattr(ModelPricingRegistry, "resolve", resolve)
+
+    @staticmethod
+    def _record(calls: list[str], frame: FrameType | None) -> None:
+        # Walks the whole call stack, so a helper the cap code calls in between cannot hide the work.
+        while frame is not None:
+            code = frame.f_code
+            if (
+                code.co_name == SPEND_CAP_HELPER
+                or Path(code.co_filename).parts[-3:] == SPEND_CAP_MODULE
+            ):
+                calls.append(code.co_name)
+                return
+            frame = frame.f_back
+
+
+def _fast_path_run(scenario: str, *, capped: bool) -> tuple[Any, tuple[str, ...]]:
+    # A tool turn then a text answer, or a text answer followed by three queued prompts the drain runs as their own replies.
+    if scenario == "tool_then_text":
+        responses: list[object] = [
+            call_response(("lookup", {"q": "Paris"}), usage=usage(1_000, 100)),
+            text_response("Paris.", usage=usage(1_200, 40)),
+        ]
+        queued: tuple[str, ...] = ()
+    else:
+        responses = [
+            text_response(f"answer {n}", usage=usage(100, 10)) for n in range(4)
+        ]
+        queued = ("second", "third", "fourth")
+    # The capped control's cap sits one float step above everything the scenario spends, so no reply reaches it.
+    cap = math.nextafter(reference_cost(*responses), math.inf) if capped else None
+    agent = priced_agent(
+        ScriptedRunner(*responses), tools=[LookupTool()], loop=_loop(cap)
+    )
+    if queued:
+        agent.enqueue_prompts(list(queued))
+    return agent.run("Look up Paris."), queued
+
+
+@pytest.mark.parametrize("scenario", ["tool_then_text", "queued_drain_of_three"])
+def test_an_uncapped_run_computes_no_spend_cap_rollup_or_price(
+    scenario: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # NFR-1 and INV-17: with max_spend_usd=None no cap code reads the ledger or the pricebook, at construction or at
+    # any check point; the capped control proves the spy sees exactly that work once a cap is set.
+    spy = SpendCapWorkSpy(monkeypatch)
+
+    reply, queued = _fast_path_run(scenario, capped=False)
+
+    assert reply.metadata["stop_reason"] == "final_response"
+    assert reply.metadata.get("queued_prompt_runs", 0) == len(queued)
+    assert (spy.rollups, spy.price_lookups) == ([], [])
+
+    capped, _ = _fast_path_run(scenario, capped=True)
+
+    assert capped.metadata["stop_reason"] == "final_response"
+    assert capped.metadata.get("queued_prompt_runs", 0) == len(queued)
+    assert spy.rollups, "a capped run must read its ledger at its check points"
+    assert spy.price_lookups, (
+        "a capped agent must price its configured model at construction"
+    )
+
+
+class FallbackWire:
+    """Stands in for HttpTransport.request: Anthropic bills an empty refusal, Gemini answers; records each host called."""
+
+    def __init__(self) -> None:
+        self.hosts: list[str] = []
+
+    async def __call__(self, *, url: str, **_: Any) -> HttpResponse:
+        # A callable instance is not a descriptor, so no transport argument arrives.
+        self.hosts.append(url.split("/")[2])
+        body = ANTHROPIC_REFUSAL if "anthropic" in url else GEMINI_OK
+        return HttpResponse(
+            status_code=200,
+            body=json.dumps(body),
+            headers={"content-type": "application/json"},
+        )
+
+
+def _fallback_run(
+    monkeypatch: pytest.MonkeyPatch, cap: float | None
+) -> tuple[Any, BaseAgent, FallbackWire]:
+    # A direct-mode agent on a priced Anthropic primary with a priced Gemini backup; keys are built at runtime.
+    wire = FallbackWire()
+    monkeypatch.setattr(HttpTransport, "request", wire)
+    agent = BaseAgent(
+        name="researcher",
+        system_prompt="Answer.",
+        provider=ModelProvider.ANTHROPIC.value,
+        model_name="claude-sonnet-5",
+        api_keys=["sk-" + "ant-" + "mock", GEMINI_TEST_KEY],
+        model_mode=TextModelMode.DIRECT,
+        fallback=[FallbackModel(provider="gemini", model="gemini-3.5-flash")],
+        agent_loop_settings=_loop(cap, max_iterations=3),
+    )
+    return asyncio.run(agent.arun("hi")), agent, wire
+
+
+def test_a_billed_failure_that_reaches_the_cap_stops_before_the_backup_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # EC-27 and INV-5 (CP1): the billed failed attempt is recorded, and the fallback switch continues to CP1, which
+    # stops before the backup model is called once that attempt alone has reached C.
+    control, control_agent, control_wire = _fallback_run(monkeypatch, cap=None)
+    assert control.metadata["stop_reason"] == "final_response"
+    assert control_wire.hosts == [
+        "api.anthropic.com",
+        "generativelanguage.googleapis.com",
+    ]
+    billed = control_agent.get_usage().calls[0]
+    assert (billed.provider, billed.failed) == (ModelProvider.ANTHROPIC.value, True)
+    assert billed.cost_usd is not None and billed.cost_usd > 0
+
+    reply, agent, wire = _fallback_run(monkeypatch, cap=billed.cost_usd)
+
+    assert (reply.content, reply.metadata["stop_reason"]) == (REACHED_TEXT, MAX_SPEND)
+    assert wire.hosts == ["api.anthropic.com"]
+    rollup = reply.metadata["usage_rollup"]
+    assert [(call.provider, call.failed) for call in rollup.calls] == [
+        (ModelProvider.ANTHROPIC.value, True)
+    ]
+    assert rollup.cost_usd == billed.cost_usd == agent.get_usage().cost_usd
+    assert rollup.cost_measured is True

@@ -1,6 +1,6 @@
 # Test plan: An optional USD spend cap that every agent's own loop enforces
 
-Spec: `docs/spec/loop-spend-cap/spec.md` r3 · Framework: pytest 8.3.5 on CPython 3.11 (`py -3.11`) · Prior art copied: `tests/features/sdk_model_usage/test_nested_usage_bill.py` (the `HttpTransport.request` seam, patched with a callable instance), `tests/agent_test_support.py` (`bind_test_runner`, `OfflineTestAgent`), `tests/test_jev_usage_ledger.py` (the `TypeSafeProvider.run_decision` seam and `_answer`), `tests/test_multi_provider_agentic_grader.py` (the `ModalityDetector.create_runner` seam), `tests/features/infinite_memory_agent/infinite_memory_fixtures.py` (the `BaseAgent._runner_for_model` seam), `tests/test_pdj_stage_model_provenance.py` (`_ALLEGATIONS`, `_DEFENSES`, `_DECISIONS`)
+Spec: `docs/spec/loop-spend-cap/spec.md` r3 (S2), r4 for the S2b additions · Framework: pytest 8.3.5 on CPython 3.11 (`py -3.11`) · Prior art copied: `tests/features/sdk_model_usage/test_nested_usage_bill.py` (the `HttpTransport.request` seam, patched with a callable instance), `tests/agent_test_support.py` (`bind_test_runner`, `OfflineTestAgent`), `tests/test_jev_usage_ledger.py` (the `TypeSafeProvider.run_decision` seam and `_answer`), `tests/test_multi_provider_agentic_grader.py` (the `ModalityDetector.create_runner` seam), `tests/features/infinite_memory_agent/infinite_memory_fixtures.py` (the `BaseAgent._runner_for_model` seam), `tests/test_pdj_stage_model_provenance.py` (`_ALLEGATIONS`, `_DEFENSES`, `_DECISIONS`)
 
 All new tests are in `tests/features/loop_spend_cap/`. In the table, `<x>.py` means `tests/features/loop_spend_cap/test_loop_spend_cap_<x>.py`. Levels: **unit** = one record or policy class; **integration** = a real agent or runtime, the real `UsageTracker`, and the real ledger scope in `generate_reply`, with only the model wire scripted; **acceptance** = the §4 snippet through the root import and the gateway transport; **doc** = a check of a tracked text file. Every dollar figure is computed at test time from the live pricebook by `reference_cost` (it records the same scripted responses into a fresh `UsageTracker`), so a rate change never turns a test red, and exact-boundary tests compare identical floats.
 
@@ -53,6 +53,12 @@ All new tests are in `tests/features/loop_spend_cap/`. In the table, `<x>.py` me
 | AC-31 (ii), INV-11 | `run_ending.py` → `test_a_drained_reply_that_hits_the_cap_ends_the_drain` | integration | A drained reply stops on the cap and the drain continues | The uncapped control runs all 3 queued prompts |
 | AC-32, EC-40 | `run_ending.py` → `test_a_capped_reply_with_an_output_schema_raises_with_the_cap_stop` | integration | A cap stop with an output schema returns a reply, or the error hides the stop reason, or the queued prompt runs | The scripted second response is valid JSON for the schema, so a run that continued would satisfy it |
 | INV-4, INV-9 | `contract.py` → `test_stop_output_is_reached_at_exactly_the_cap_and_not_one_step_below`, `test_stop_output_reports_reached_before_blind`, `test_stop_output_names_every_blind_cause_in_spec_order`, `test_stop_output_names_a_lone_cause_without_separators[corrupted, operation]` | unit | `>` instead of `>=`; a blind check before the reached check; causes out of order or unsorted; separators around a lone cause | The boundary uses `nextafter(cap, 0)`. The order test uses a rollup whose model names sort differently from the order they were recorded in |
+| AC-33, EC-17, INV-5, INV-9, INV-10 (S2b, S4 R-1) | `jev.py` → `test_a_reached_cap_starts_no_specialist_the_gate_chose[gate_decision, run_state_relation_writer]` | integration | A capped JevAgent's gate chooses a specialist after (a) the gate's own decision call or (b) the `RUN_STATE_RELATION` run-state writer has already reached C → the specialist still runs on its own ledger, which starts at $0 (S4's probe: `final_response` at 2.118 × C), or the stop carries the wrong text, metadata, usage total or session routing | Two traps. (1) The specialist is capped at C and its own first call reaches C, so at `daad59fb` the reply also reads `max_spend`; the test therefore pins the specialist's call count and `iteration_count == 0`, which are the red (`assert (1, 1) == (0, 0)`). (2) A gate that took the main path would also stop at CP1 with no specialist call; an uncapped control on the same script proves the request is delegated (specialist 1 call, main model 0) and that only case (b) runs the writer. In (b) the gate's decision alone is asserted to stay below C. `response.specialist` is not asserted (spec A-8) |
+| NFR-1, INV-17 (S2b, S4 R-3) | `runtime.py` → `test_an_uncapped_run_computes_no_spend_cap_rollup_or_price[tool_then_text, queued_drain_of_three]` | integration | An uncapped run, or its construction, computes a ledger rollup or a pricebook lookup from the cap's code (mutant M3: a rollup before the `None` return) | A spy calls through to the real `UsageTracker.rollup` and `ModelPricingRegistry.resolve` and records only the calls whose call stack passes through `_spend_cap_stop` or `vidbyte/agents/spend_cap.py`. The capped control (cap one float step above all spend, same scenario) must record both kinds, so the spy is live. No raw count is pinned, because base code calls `rollup()` a scenario-dependent number of times. Counting `stop_output` calls would pass vacuously: M3 leaves that count at 0 |
+| INV-13 (S2b, S4 R-4 a) | `refusals.py` → `test_a_capped_slug_model_without_a_provider_is_refused_as_the_runner_reads_it[image, unpriced]` | integration | A capped agent given only `model_name="openai/<model>"` and no `provider=` skips the runner-type and price checks and is accepted (mutant M1) | The uncapped agent constructs with `runner_config.provider is None`, so the provider is truly absent, and the runner's normalization to `openai` is asserted first. Each case asserts the exact §9.2 message |
+| INV-13 (S2b, S4 R-4 b) | `refusals.py` → `test_a_capped_chain_whose_primary_is_unmeasurable_is_refused_naming_the_primary[unpriced_primary_priced_fallback, unpriced_primary_first_in_chain_order, image_primary_text_fallback]` | integration | A fallback chain hides an unpriced or image primary at chain index 0 (mutant M2: the chain read from index 1) | The fallbacks are priced text models, except one deliberately unpriced `-z` entry, so only the primary can trigger the first and third cases. The second case pins chain order with the primary named first |
+| INV-13, §8.5 (S2b, S4 R-M5) | `refusals.py` → `test_the_unpriced_refusal_names_each_pair_once_and_marks_a_missing_part[duplicate_unpriced_fallback, unpriced_primary_repeated_as_a_fallback, missing_provider, missing_model]` | integration | A pair is named twice (M4); a missing part prints `None` instead of `?` (M5); an entry with no provider is exempted as if it were OpenRouter (M6) | Each case first asserts the text runner type and the runner's own normalized provider and model, so the `?` cases test the documented normalization rather than a guess, and the uncapped agent must construct |
+| EC-27, INV-5 (CP1) (S2b) | `runtime.py` → `test_a_billed_failure_that_reaches_the_cap_stops_before_the_backup_model` | integration | A billed failed attempt reaches C, and the fallback switch then calls the backup model | It reuses the `HttpTransport.request` wire of `tests/features/sdk_model_usage/test_billed_unusable_replies.py:70-88`. C is the control's own billed-failure record, so C is reached exactly at the switch. The control proves that the switch happens (both hosts are called); capped, only the Anthropic host may be called. `>` for `>=` is caught on the wire (sanity mutant M0) |
 | D-16, FR-5 | `contract.py` → `test_spend_cap_policy_is_exported_from_its_own_module_only`, `test_max_spend_stop_reason_is_not_a_deliverable_answer` | unit | `AgentSpendCap` leaks into a package `__all__` (a new root name); `max_spend` counts as a deliverable answer | Both negative checks are paired with a positive one (`spend_cap.__all__`, the enum value) |
 
 ## Tests deliberately NOT written
@@ -63,10 +69,8 @@ All new tests are in `tests/features/loop_spend_cap/`. In the table, `<x>.py` me
 | A separate "no new spend-named `FailureCode`" test | It passes before the feature exists, and AC-17 pins the exact code the stop maps to |
 | `dataclasses.replace` revalidation of the cap | It re-proves `__post_init__`, which AC-3 already exercises |
 | A direct unit test of `AgentSpendCap.model_refusal` | It would re-prove the construction tests (AC-11, AC-12, AC-30) without the `BaseAgent.__init__` wiring that matters |
-| EC-27 (a fallback switch reaching CP1) | The switch `continue`s to the same CP1 that AC-22 pins, and the CP1 mutant is caught there. Driving a billed failure and then a switch offline would need a fallback-chain harness this pack does not have |
-| A "?" entry for a missing part in the chain message | The spec gives it no AC. `FallbackModel.__post_init__` already rejects an empty provider or model (`vidbyte/lib/dataclasses/agents.py:333-335`), so a test would have to guess at the runner's normalization to reach it |
 | The 0.4.0 release record (AC-26's last clause) and "no line calls unmeasured spend capped" | The pack must not read `docs/`, and the second clause is prose. Both are left to S5 review |
-| NFR-1 and NFR-2 timing | Wall-clock assertions are nondeterministic on shared machines. NFR-1 is shown by the metamorphic AC-10 test, and S4 can mutate the early return |
+| NFR-2 timing (≤ 10 ms per check) | Wall-clock assertions are nondeterministic on shared machines, and the spec measured it. NFR-1 is not a timing claim and has its own test (coverage map) |
 | `10**400` raising `OverflowError` | A quirk of the shared validator, not a promise; pinning it would block a later fix |
 | EC-35, R-6, Q-14 (overlapping replies on one agent object) | A stated limitation; a test demanding a fix would be a scope change |
 | Q-7 to Q-14 | Scope-adding; their default answer is No |
@@ -75,6 +79,12 @@ All new tests are in `tests/features/loop_spend_cap/`. In the table, `<x>.py` me
 | Property-based tests | Hypothesis is not installed; `cost_measured` is checked exhaustively over all 16 combinations plus the empty rollup instead |
 | EC-31 (a capped checkpoint restored by an older SDK) | It needs an older SDK; the spec accepts it as forward-only |
 | EC-11, EC-26 (rating differs from the bill; float accumulation) | Both are accepted limitations. The pack's reference sum uses the same order as the ledger, so the boundary tests are exact |
+
+**Corrections made in S2b.** Three S2 entries in this table were wrong. S2b removed the EC-27 and `?` rows, rewrote the NFR row, and wrote a test for each:
+
+- EC-27: S2 said the pack had no fallback-switch harness. One exists: `tests/features/sdk_model_usage/test_billed_unusable_replies.py:70-88` patches `HttpTransport.request` and drives a billed Anthropic refusal through a real switch to Gemini (S4 engineering review). `test_a_billed_failure_that_reaches_the_cap_stops_before_the_backup_model` reuses it.
+- NFR-1: S2 said the metamorphic AC-10 test shows it and left it to S4. It does not: AC-10 compares outputs, and a wasted rollup changes none of them, so mutant M3 survived the pack and the area suite (S4 R-3). A call's caller is deterministic, so wall-clock flakiness was never a reason. `test_an_uncapped_run_computes_no_spend_cap_rollup_or_price` now pins it.
+- The `?` entry: S2 said a test would have to guess at the runner's normalization. INV-13 states the rule (a part missing after the runner's own normalization shows as `?`), and the normalization is a public, offline call, so the test asserts it as a precondition. A primary with no provider, or with no model, reaches the rule without any `FallbackModel` (whose own check rejects empty parts).
 
 ## Red run (before implementation)
 
@@ -120,6 +130,38 @@ Independent check, outside the worktree and never committed: a throwaway prototy
 - the router, efficiency and Codex entries removed;
 - each run-ending guard removed;
 - the Jev `>`, `>=` and None cases.
+
+## S2b red run (spec r4, code head `daad59fb`)
+
+On HEAD `55b47231` (docs only on top of `daad59fb`), before S5's fix:
+
+```
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=$(pwd) py -3.11 -m pytest -q -p no:cacheprovider tests/features/loop_spend_cap tests/test_codex_output_contracts.py
+→ 2 failed, 186 passed
+>       assert (specialist_runner.calls, metadata["iteration_count"]) == (0, 0)
+E       assert (1, 1) == (0, 0)
+FAILED tests/features/loop_spend_cap/test_loop_spend_cap_jev.py::test_a_reached_cap_starts_no_specialist_the_gate_chose[gate_decision]
+FAILED tests/features/loop_spend_cap/test_loop_spend_cap_jev.py::test_a_reached_cap_starts_no_specialist_the_gate_chose[run_state_relation_writer]
+```
+
+Both AC-33 cases pass the stop-reason assertion today, because the specialist's own cap stops it, and fail on the specialist's call count. The area suite (`v_mutate.py`'s SUITE, from the worktree) gives `2 failed, 867 passed`: the same two cases and nothing else.
+
+Independent check, in a scratch copy and never committed: §12.3 row 28 applied exactly as the spec writes it (the `_spend_cap_stop(iteration_count=0, tokens_used=None, contexts=())` check and `response.finished` return between the `begin_delegated`/`require_accounted()` block and `specialist.agent.arun`) turns both cases green: the pack, the Codex file and `tests/test_jev_usage_ledger.py` give `199 passed`. The same check placed before the run-state writer fails the writer case (`assert (1, 1) == (0, 0)`), so the test pins the row's placement, not only its presence.
+
+## Mutation
+
+The S4 verifier's six surviving mutants (`scratchpad/r3-s4/verifier/probes/v_mutate.py`), run against a scratch copy of the S2b commit with the full area suite under `-x`. The two AC-33 cases are deselected for this run (a copy of the runner adds `--deselect`), because they are red at this code and would otherwise "kill" every mutant. "All S2b killers" comes from a second run of only the S2b tests without `-x`.
+
+| Mutant | Fault | Before S2b (S4, 855 tests) | After S2b | First failure under `-x` | All S2b killers |
+|---|---|---|---|---|---|
+| M1_providerless_skips_all_checks | `provider or model_name` → `and` in the "cannot run" guard | SURVIVED | KILLED | `refusals.py::test_a_capped_slug_model_without_a_provider_is_refused_as_the_runner_reads_it[image]` | slug `[image, unpriced]`; message shape `[missing_provider, missing_model]` |
+| M2_chain_skips_primary | the chain read from `fallback.models[1:]` | SURVIVED | KILLED | `refusals.py::test_a_capped_chain_whose_primary_is_unmeasurable_is_refused_naming_the_primary[unpriced_primary_priced_fallback]` | all three chain-primary cases |
+| M3_rollup_when_uncapped | `rollup()` computed before the `max_spend_usd is None` return | SURVIVED | KILLED | `runtime.py::test_an_uncapped_run_computes_no_spend_cap_rollup_or_price[tool_then_text]` | both NFR-1 cases |
+| M4_no_dedupe | each unpriced pair listed every time it appears | SURVIVED | KILLED | `refusals.py::test_the_unpriced_refusal_names_each_pair_once_and_marks_a_missing_part[duplicate_unpriced_fallback]` | `[duplicate_unpriced_fallback, unpriced_primary_repeated_as_a_fallback]` |
+| M5_question_mark_dropped | a missing part printed as `None` | SURVIVED | KILLED | `refusals.py::test_the_unpriced_refusal_names_each_pair_once_and_marks_a_missing_part[missing_provider]` | `[missing_provider, missing_model]` |
+| M6_openrouter_exemption_widened | an entry with no provider exempted like OpenRouter | SURVIVED | KILLED | `refusals.py::test_the_unpriced_refusal_names_each_pair_once_and_marks_a_missing_part[missing_provider]` | `[missing_provider]` |
+
+Killed 6, survived 0. Two more S2b checks: the row-28 check placed before the run-state writer is killed by AC-33's writer case (above), and sanity mutant M0 (`>=` → `>`) is killed by the EC-27 test on its wire assertion (the backup host is called).
 
 ## Notes for the implementer
 

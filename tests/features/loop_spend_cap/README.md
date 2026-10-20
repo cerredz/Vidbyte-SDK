@@ -33,3 +33,4 @@ The pack was written from the approved spec (`docs/spec/loop-spend-cap/spec.md` 
 ## Logs
 
 - 2026-10-20 - Pack written before implementation (spec r3, S2). All tests are red on the base commit for the missing names; a throwaway prototype of spec section 12 turned every test green, and 42 single-fault mutants of that prototype were each caught.
+- 2026-10-20 - S2b additions after the S4 review of `daad59fb` (spec r4): AC-33 (red until the S5 fix to `JevRuntime._delegate`), NFR-1 / INV-17, the INV-13 slug and fallback-primary refusals, the refusal message shape, and EC-27. The six surviving S4 mutants (M1-M6) are now each killed; see `docs/spec/loop-spend-cap/test-plan.md` "Mutation".

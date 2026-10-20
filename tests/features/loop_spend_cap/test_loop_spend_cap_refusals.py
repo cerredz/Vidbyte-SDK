@@ -15,6 +15,9 @@ FUNCTION INVENTORY: test_a_capped_non_linear_runtime_is_refused;
 test_a_capped_non_text_model_is_refused_naming_its_runner_type;
 test_a_capped_agent_with_an_unpriced_configured_model_is_refused_naming_each_one;
 test_a_capped_agent_whose_whole_chain_is_measurable_constructs;
+test_a_capped_slug_model_without_a_provider_is_refused_as_the_runner_reads_it;
+test_a_capped_chain_whose_primary_is_unmeasurable_is_refused_naming_the_primary;
+test_the_unpriced_refusal_names_each_pair_once_and_marks_a_missing_part;
 test_a_capped_parent_cannot_fork_a_child_onto_an_unpriced_model;
 test_codex_refuses_a_capped_loop_through_its_existing_field_list.
 COMMON MODIFICATION PATTERNS: A new agent kind that cannot see the loop adds one refusal
@@ -26,9 +29,13 @@ must not depend on one. 2. Do not assert a pricebook rate; assert only priced or
 KNOWN EDGE CASES: A fallback chain's index 0 is the primary, so the primary is listed
 first and only when it is the unpriced one. OpenRouter is exempt because it reports its
 own cost per call. The model names ending "-z" and "-b" carry letter suffixes, which the
-pricebook never treats as a release suffix.
-RELATED DOCS: docs/spec/loop-spend-cap/spec.md INV-13, section 9.2 refusal messages,
-AC-11, AC-12, AC-27, AC-30, EC-32, EC-39.
+pricebook never treats as a release suffix. A slug model such as "openai/<model>" with
+no provider= argument is read the way the runner normalizes it, so its provider is the
+slug's vendor; a bare model with no provider, or a provider with no model, keeps the
+missing part, which the refusal shows as "?". Such an agent constructs without a cap,
+because nothing builds its runner until it runs.
+RELATED DOCS: docs/spec/loop-spend-cap/spec.md INV-13, section 8.5 model_refusal,
+section 9.2 refusal messages, AC-11, AC-12, AC-27, AC-30, EC-5, EC-32, EC-39.
 TESTS: PYTHONPATH=$(pwd) py -3.11 -m pytest -q tests/features/loop_spend_cap/test_loop_spend_cap_refusals.py
 """
 
@@ -69,8 +76,8 @@ NON_LINEAR = [
 def _agent(
     *,
     loop: AgentLoopSettings | None,
-    provider: str = PRICED_PROVIDER.value,
-    model_name: str = PRICED_MODEL,
+    provider: str | None = PRICED_PROVIDER.value,
+    model_name: str | None = PRICED_MODEL,
     **options: object,
 ) -> BaseAgent:
     return BaseAgent(
@@ -98,6 +105,10 @@ def _assert_unpriced_text_model(provider: ModelProvider, model: str) -> None:
 
 def _unpriced_message(*pairs: str) -> str:
     return f"Agent researcher sets max_spend_usd, but the pricebook has no price for {', '.join(pairs)}, so its spend could not be measured."
+
+
+def _non_text_message(runner_type: str) -> str:
+    return f"Agent researcher sets max_spend_usd, but its {runner_type} runner runs outside the agent loop, which is the only place the spend cap is enforced."
 
 
 @pytest.mark.parametrize(
@@ -208,6 +219,149 @@ def test_a_capped_agent_whose_whole_chain_is_measurable_constructs(
 
     assert agent.agent_loop_settings.max_spend_usd == 0.25
     assert agent.runtime_config.max_spend_usd == 0.25
+
+
+@pytest.mark.parametrize(
+    "model", [IMAGE_MODEL, UNPRICED_MODEL], ids=["image", "unpriced"]
+)
+def test_a_capped_slug_model_without_a_provider_is_refused_as_the_runner_reads_it(
+    model: str,
+) -> None:
+    # INV-13 and S4 R-4 (a): both checks read the provider and model the runner normalizes, so an agent given only
+    # model_name="openai/<model>" and no provider= is refused exactly as one given provider="openai".
+    slug = f"{PRICED_PROVIDER.value}/{model}"
+    runner = Runner.from_model(provider=None, model_name=slug)
+    assert (runner.provider, runner.model_name) == (PRICED_PROVIDER.value, model)
+    assert (
+        _agent(
+            loop=AgentLoopSettings(), provider=None, model_name=slug
+        ).runner_config.provider
+        is None
+    )
+    if model == IMAGE_MODEL:
+        assert runner.resolve_runner_type() != "text"
+        expected = _non_text_message(runner.resolve_runner_type())
+    else:
+        _assert_unpriced_text_model(PRICED_PROVIDER, model)
+        expected = _unpriced_message(f"{PRICED_PROVIDER.value}:{model}")
+
+    with pytest.raises(ConfigurationError) as caught:
+        _agent(loop=capped_settings(1.0), provider=None, model_name=slug)
+
+    assert str(caught.value) == expected
+    assert caught.value.details == {"agent": "researcher"}
+
+
+@pytest.mark.parametrize(
+    ("model_name", "fallback", "named"),
+    [
+        (
+            UNPRICED_MODEL,
+            [FallbackModel(*PRICED_FALLBACK)],
+            [f"openai:{UNPRICED_MODEL}"],
+        ),
+        (
+            UNPRICED_MODEL,
+            [
+                FallbackModel(*PRICED_FALLBACK),
+                FallbackModel("openai", UNPRICED_MODEL + "-z"),
+            ],
+            [f"openai:{UNPRICED_MODEL}", f"openai:{UNPRICED_MODEL}-z"],
+        ),
+        (IMAGE_MODEL, [FallbackModel(*PRICED_FALLBACK)], None),
+    ],
+    ids=[
+        "unpriced_primary_priced_fallback",
+        "unpriced_primary_first_in_chain_order",
+        "image_primary_text_fallback",
+    ],
+)
+def test_a_capped_chain_whose_primary_is_unmeasurable_is_refused_naming_the_primary(
+    model_name: str, fallback: list[FallbackModel], named: list[str] | None
+) -> None:
+    # INV-13 and S4 R-4 (b): chain index 0 is the primary, so a fallback chain never hides an unpriced or non-text
+    # primary; an unpriced primary is named first, in chain order. `named` None means the non-text refusal.
+    assert_price_preconditions()
+    _assert_unpriced_text_model(ModelProvider.OPENAI, UNPRICED_MODEL + "-z")
+    assert ModelPricingRegistry.default().resolve(*PRICED_FALLBACK) is not None
+    assert (
+        _agent(loop=AgentLoopSettings(), model_name=model_name, fallback=fallback).name
+        == "researcher"
+    )
+    runner_type = Runner.from_model(
+        provider=PRICED_PROVIDER.value, model_name=model_name
+    ).resolve_runner_type()
+    assert (runner_type == "text") is (named is not None)
+
+    with pytest.raises(ConfigurationError) as caught:
+        _agent(loop=capped_settings(1.0), model_name=model_name, fallback=fallback)
+
+    assert str(caught.value) == (
+        _non_text_message(runner_type) if named is None else _unpriced_message(*named)
+    )
+    assert caught.value.details == {"agent": "researcher"}
+
+
+@pytest.mark.parametrize(
+    ("provider", "model_name", "fallback", "named"),
+    [
+        (
+            PRICED_PROVIDER.value,
+            PRICED_MODEL,
+            [
+                FallbackModel("openai", UNPRICED_MODEL),
+                FallbackModel("openai", UNPRICED_MODEL),
+            ],
+            f"openai:{UNPRICED_MODEL}",
+        ),
+        (
+            PRICED_PROVIDER.value,
+            UNPRICED_MODEL,
+            [FallbackModel("openai", UNPRICED_MODEL), FallbackModel(*PRICED_FALLBACK)],
+            f"openai:{UNPRICED_MODEL}",
+        ),
+        (None, PRICED_MODEL, None, f"?:{PRICED_MODEL}"),
+        (PRICED_PROVIDER.value, None, None, "openai:?"),
+    ],
+    ids=[
+        "duplicate_unpriced_fallback",
+        "unpriced_primary_repeated_as_a_fallback",
+        "missing_provider",
+        "missing_model",
+    ],
+)
+def test_the_unpriced_refusal_names_each_pair_once_and_marks_a_missing_part(
+    provider: str | None,
+    model_name: str | None,
+    fallback: list[FallbackModel] | None,
+    named: str,
+) -> None:
+    # INV-13 and section 8.5 (S4 R-M5): the refusal lists each distinct provider:model once, shows a part the
+    # runner's normalization leaves missing as "?", and exempts only OpenRouter, never an entry with no provider.
+    assert_price_preconditions()
+    runner = Runner.from_model(provider=provider, model_name=model_name)
+    assert runner.resolve_runner_type() == "text"
+    assert (runner.provider, runner.model_name) == (provider, model_name)
+    assert (
+        _agent(
+            loop=AgentLoopSettings(),
+            provider=provider,
+            model_name=model_name,
+            fallback=fallback,
+        ).name
+        == "researcher"
+    )
+
+    with pytest.raises(ConfigurationError) as caught:
+        _agent(
+            loop=capped_settings(1.0),
+            provider=provider,
+            model_name=model_name,
+            fallback=fallback,
+        )
+
+    assert str(caught.value) == _unpriced_message(named)
+    assert caught.value.details == {"agent": "researcher"}
 
 
 def test_a_capped_parent_cannot_fork_a_child_onto_an_unpriced_model() -> None:
