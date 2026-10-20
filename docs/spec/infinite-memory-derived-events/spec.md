@@ -1,7 +1,7 @@
 ---
 spec: infinite-memory-derived-events
 title: InfiniteMemoryAgent derived run events
-status: verified
+status: pr-open
 revision: 7
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-infinite-memory-derived-events
@@ -1105,6 +1105,7 @@ Nothing emits a new kind yet, and every existing event is built and delivered ex
 | r5 | 2026-10-19 | S3 implement | Implemented every §12.3 row except row 13 (S2's) in §12.6 phase order: P1 as six additive commits, P2 as one atomic checkpoint (row 4's P2 bullet, then rows 5, 8, 6, 7, 11), P3 as one commit per README; the infinite-memory pack passes 414 of 414, the agent lint and both CI stages pass apart from the known pre-existing failure, and no test changed. No AC proof was blank, so §6.2 is unchanged; the D-7 row's `str \| None` is escaped. Status: implemented. |
 | r6 | 2026-10-20 | S5 repair 1 | Applied the S4 review's code and docs findings (§16 s4-1, s4-2, s4-7 to s4-11). The pair's error branch enters phase `commit` before it records its card, and EC-25 says so. INV-10 and G-3 list two more accepted exceptions, new EC-30 (a `pair_started` write that fails part-way through a batch) and EC-31 (a sink `BaseException` on `subagent_launched`). INV-19, D-10, and §13 say a child's error arrives as a `VidbyteSdkError`, wrapped or passed through. The lint's last line is `SDK-LINT: PASS`. No name, field, kind, enum member, constant, signature, or test changed. Status stays reviewed. |
 | r7 | 2026-10-20 | S5 repair 2 | Applied the post-repair re-review's Minors (§16 s5-c1, s5-c3, s5-c4; R-C2 was the test author's, at `76314c4d`). G-1 excepts a pair that aborts in its commit step before its card is recorded, for both of its counts. G-3's batch sentence adds a pipeline that never ran (EC-30, EC-31). D-10 names the second COMMIT assignment, and D-22 says a child's error arrives as a `VidbyteSdkError`. Text only: no behaviour, name, field, kind, enum member, constant, signature, or test changed. Status stays reviewed. |
+| r7 | 2026-10-20 | S6 PR | Finalized for review. The PR body is `pr-body.md`, and draft PR #1191 carries it. §5 was checked against the shipped code and matches it, so it is unchanged; the deviations the body lists are the S3 ones below. Only the frontmatter (`status: pr-open`) and this row changed. |
 
 **Implementation deviations (S3, r5).**
 
