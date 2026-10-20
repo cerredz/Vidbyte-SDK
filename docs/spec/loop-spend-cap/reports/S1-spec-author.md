@@ -280,3 +280,69 @@ The rest of the design:
 - There is no key-shaped literal.
 - Tables have consistent columns under GFM rules.
 - There is still one CREATE row, and the §8.4 budget is unchanged.
+
+---
+
+## Addendum: r4 (revision for S4 R-1), 2026-10-20
+
+**Commit:** `7446f579` "docs(spec): revise loop-spend-cap spec r4 (check spend before JevAgent delegation)". It changes only `spec.md`. The frontmatter is now `revision: 4`, `updated: 2026-10-20`, and `status` stays `implemented`.
+
+**Disposition.** S4 R-1 (Blocker) is accepted, and the spec is amended at r4. The orchestrator ruled that it is required behavior, not a scope addition. The other S4 findings (R-2..R-4, R-M1..R-M5) need no spec change. R-M3's line count in the §17 "Implementation deviations" list is left for the repair agent.
+
+| Passage | Change | IDs |
+|---|---|---|
+| §12.3 "Deliberately not changed" | The `jev/runtime.py` entry is struck through, with its reason: the delegated path returns before the loop (`:129-130`), so no CP1 followed its pre-loop phases. | row 28 |
+| §12.3 | New row 28 (MODIFY, P3): `JevRuntime._delegate` calls `_spend_cap_stop(iteration_count=0, tokens_used=None, contexts=())` after the `begin_delegated`/`require_accounted()` block and before `specialist.agent.arun`. On a stop it returns `self.response.finished(spend_stop, self.usage.settle())`, under `# @intent a-reached-cap-starts-no-specialist`. | FR-3, INV-5, INV-6, D-13, EC-17, W-5, AC-33 |
+| INV-5 | CP1 also covers the check in `_delegate`. The new sub-bullet says why it is CP1, not a new name. The closing sentence adds "no specialist run". | INV-5 |
+| INV-6 | The Pre-loop row ends at the delegated CP1 and names the relation writer (`done/relation.py:52-55`, `done/run_state.py:344`). A new "Delegated" row covers the specialist's whole run, below `Cₛ + Gₛ ≤ C + Gₛ`. The End of run row starts after the specialist's reply on that path. The one-call overshoot sentence adds "no specialist". | INV-6 |
+| D-13 | "so the only loop that can enforce anything is the specialist's own" is struck through, with its reason. The Decision adds the run-time check, and the reason now reads "JevRuntime checks the cap once before delegating … the specialist's own cap bounds its run". | D-13 |
+| EC-17, FR-3, W-5, §9.2 JevAgent row | Each one states the delegated-path behavior. W-5 now serves AC-33. | EC-17, FR-3, W-5 |
+| §6.2 | New AC-33 (P0). Its proof column reads "S2b test". | AC-33 |
+| §8.4, §11, §12.6 | §8.4 gains a "Changed files: 28 (27 → 28)" row, and new files stay at 1. The §11 layout lists `jev/runtime.py`. P3 now includes row 28, which needs rows 3 and 5. | — |
+| §16, §17 | One S4 R-1 review-log row, and one r4 revision row. | — |
+
+**Why CP1, not a new "CP0".** The delegated check and CP1 at iteration 0 are the same point in a run: its first check, which closes the Pre-loop segment and comes before the first generative call. Folding the check into CP1 keeps these exact with no further edits: the Pre-loop row's "ends at the first CP1", §9.2's "counted at the first CP1", FR-3's and the §9.2 table's "CP1–CP4", and D-3's, row 13's and AC-26's "four check points". It also keeps the README and the `spend_cap.py` header true. A "CP0" would have made every one of those stale. INV-6 holds because the specialist's run is one new segment that begins only after a passing check. INV-7 holds because a blind meter never reaches the check (see the first bullet below).
+
+**What I checked against the code** (worktree HEAD `f74587cb`, code `daad59fb`):
+- `JevUsageAccount.failures` (`jev/usage.py:74-81`, `:84-91`) tests the same four conditions as `UsageRollup.cost_measured` (`pricing/records.py:94-109`). So once `require_accounted()` passes (`jev/runtime.py:122`, and `:219` with a run state), the meter is measured, and nothing spends before the new check. The check can therefore fire only on INV-4(a), and `settle()` returns a report.
+- `before_run` and `after_run` fire only inside `_arun_once` (`runtime.py:334`, `:956-980`). The delegated return skips `_finish_result`, as every delegated run already does.
+- `response.finished` sets the output and replaces `usage_rollup` with the run total (`jev/response.py:143-154`).
+- The gate records `response.specialist` before the check runs (`gate/gate.py:131`).
+
+**Independent probe.** The probe was a Python process fed on stdin. It patched the row-28 body onto `JevRuntime._delegate` in memory, used the S2 pack's fixtures, and wrote nothing to disk. The specialist was capped at C. "Writer" means the `RUN_STATE_RELATION` preset with an uncapped writer that made 4 calls at 20k input tokens each.
+
+| Case | Specialist calls | Stop | Spend |
+|---|---|---|---|
+| HEAD, gate = C | 1 | `max_spend`, from the specialist's own cap (`iteration_count` 1, `tokens_used` 120) | 2.310×C |
+| HEAD, writer | 1 | `final_response` | — |
+| row 28, gate = C | 0 | `max_spend` | 1.000×C |
+| row 28, writer | 0 | `max_spend` | 318×C, which is the writer's own Pre-loop segment, as INV-6 allows (the verifier's seeding gave 1.923×C) |
+| row 28, gate = C/10 | 1 | `final_response` | the check passes below the cap (INV-8) |
+
+On every row-28 stop, the probe saw this:
+- The output is the reached text.
+- The metadata is `iteration_count 0`, `tokens_used None`, `tool_call_count 0`, `tool_call_states ()`, `tool_calls ()`.
+- `usage_rollup == agent.response.usage.total`.
+- `FailureMetadataNormalizer.from_reply` gives one `resource.exhausted`/`exhausted`/`route` failure, with details `{"stop_reason": "max_spend", "iteration_count": 0, "tokens_used": None}`.
+
+**Seeding notes for the AC-33 test author** (`tests/features/loop_spend_cap/test_loop_spend_cap_jev.py`):
+- To make the gate pick the specialist, answer every question with `_answer(question, CLEAR, "database")` (`tests/test_jev_usage_ledger.py:57-62`). Pass `agents=(_specialist(capped_settings(C)),)`; no preset is needed, because the gate then asks only the specialist question.
+- Bind a `ScriptedRunner` to `specialist.agent` with `bind_test_runner`, and assert `.calls == 0`.
+- The gate case uses `C = reference_cost(<the decision response>)`.
+- The writer case uses `preflight=(JevPreflightPreset.RUN_STATE_RELATION,)`, with a `ScriptedRunner` bound to `agent.run_state`. Script several responses, because the writer retries its output schema.
+- **At HEAD, a specialist whose own first call reaches its cap also returns `max_spend`.** So `stop_reason` alone may not fail at HEAD. The assertions that do fail there are the 0-call assertion and `iteration_count == 0`.
+
+**Left unchanged on purpose.**
+- §12.3 rows 13 and 17 (the READMEs) stay as they are. Row 13 already requires "the four check points in plain words" and "the per-runtime table of §9.2 in prose", and both now include the delegated check, so the README mention R-1 asks for follows from row 13 as written. Row 17's sentence ("a delegated run never enters JevAgent's loop") stays true.
+- §12.2 lists folders, and `vidbyte/agents/jev/` is already in it.
+- §13 and §12.4 are unchanged.
+
+**Open item for the orchestrator.** On the new stop, `JevAgent.response.specialist` still holds the gate's choice ("database" in the probe), although that specialist never ran. Two texts say it names "the specialist that ran": `vidbyte/agents/jev/README.md:24` and the `JevAgentResponse.specialist` docstring (`vidbyte/lib/dataclasses/jev.py:3863`). Row 28 records the fact and changes neither. Either accept and document it, or have the repair agent reset it, which would be a behavior change outside R-1's code fix.
+
+**Self-check (Stage E):**
+- Every table has a consistent column count.
+- No ID is referenced without a definition.
+- AC-1..AC-33 are each served by a W row.
+- Row 28 serves FR-3, INV-5, INV-6, D-13, EC-17, W-5, and AC-33, and each of those maps back to row 28.
+- There is no key-shaped literal.
+- There is still exactly 1 CREATE row.
