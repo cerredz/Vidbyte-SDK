@@ -1,7 +1,7 @@
 ---
 spec: jev-cli-root-exports
 title: Root-export the loop, permission, text-mode, and compute names the CLI's JevAgent needs
-status: verified         # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
+status: pr-open          # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
 revision: 3              # r3.1: INV-7 wording only, per the S2 note
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-jev-cli-root-exports
@@ -116,18 +116,26 @@ The third line shows existing behavior that this PR does not change: `JevCompute
 
 ## §5 Flow diagram
 
+_Updated at S6 to match the shipped code and the PR #1190 flow chart: the contract holds 733 names after three merges of `main` (EC-7), not 668, and the chart now shows each eager import, the run-time `isinstance` check, and the unchanged `__getattr__` path (§17)._
+
 ```mermaid
 flowchart TD
-  A["caller: from vidbyte import PermissionPolicy (CLI services/jev/sdk.py)"] -->|root attribute lookup| B["vidbyte/__init__.py root import binding"]
-  B -->|the same class object| C["defining module: agents.settings.loop / lib.dataclasses.security / lib.enums.text_model / lib.enums.jev"]
-  B -->|literal __all__, read with ast| D["scripts/generate-sdk-public-api.py"]
-  D -->|668 sorted names, version 0.4.0, source.commit| E["contracts/sdk-public-api.json"]
-  E -->|vendored byte for byte in CLI PR C4| F["vidbyte-cli C028 admits the name"]
-  B -->|lint/run.py| G["S015: bound and listed once; S051: import order"]
-  E -->|lint/run.py| H["C016: committed contract equals the derived contract"]
+  A["Developer or vidbyte-cli: import vidbyte, or from vidbyte import PermissionPolicy"] --> B["vidbyte/__init__.py runs its eager imports"]
+  B --> C1["from vidbyte.agents import AgentLoopSettings<br/>(vidbyte.agents.settings, defined in agents/settings/loop.py:46)"]
+  B --> C2["from vidbyte.lib.dataclasses.security import PermissionPolicy<br/>(defined in security.py:33)"]
+  B --> C3["from vidbyte.lib.enums import JevDynamicComputeOption, TextModelMode<br/>(defined in lib/enums/jev.py:278 and lib/enums/text_model.py:17)"]
+  C1 --> D["The four names are bound in vars(vidbyte) and listed once each in the literal __all__"]
+  C2 --> D
+  C3 --> D
+  D -->|"vidbyte.X is the defining class: no copy, no wrapper"| E["JevAgentSettings.__post_init__ isinstance checks accept the caller's objects (agents/jev/settings.py:169-182)"]
+  D -.->|"a near miss such as vidbyte.PermissionPolicies"| F["Unchanged root __getattr__ raises AttributeError; vidbyte.harnesses.native stays unloaded"]
+  B -.->|"read as text with ast and tomllib; vidbyte is never imported"| G["scripts/generate-sdk-public-api.py (PublicApiDeriver.derive)"]
+  G --> H["contracts/sdk-public-api.json: 733 sorted names, version 0.4.0, source.commit 731f094c"]
+  H -->|"lint/run.py"| I["C016: committed contract equals the derived one; S015: each root name bound and listed once"]
+  H -->|"vendored in CLI PR C4"| J["vidbyte-cli lint C028 admits from vidbyte import X"]
 ```
 
-A caller's `from vidbyte import X` resolves to a binding the root module makes at import time. That binding is the class object from the defining module, not a wrapper, so `isinstance` checks and JevAgentSettings' validators see one class. The generator never imports `vidbyte`: it reads the literal `__all__` and `pyproject.toml` with `ast` and `tomllib`. It writes the sorted names, the version and the HEAD commit, and it refuses to write while either input file is uncommitted. Validation happens in the lint gate. S015 rejects an unbound or unlisted root name, S051 rejects import-order drift, and C016 rejects a committed contract that differs from what the source derives. The only state change is the committed JSON file. The CLI-side step F happens in a different repository, in a later PR.
+A caller's `from vidbyte import X` resolves to a binding the root module makes at import time. That binding is the class object from the defining module, not a wrapper, so `JevAgentSettings.__post_init__`'s `isinstance` checks accept the caller's objects, and a string `model_mode` still raises `ConfigurationError`. A near-miss name still goes through the unchanged `__getattr__`, which raises without loading the native package. The generator never imports `vidbyte`: it reads the literal `__all__` and `pyproject.toml` with `ast` and `tomllib`. It writes the sorted names, the version and the HEAD commit, and it refuses to write while either input file is uncommitted. Validation happens in the lint gate. S015 rejects an unbound or unlisted root name, S051 rejects import-order drift, and C016 rejects a committed contract that differs from what the source derives. The only state change is the committed JSON file. The CLI-side steps (H to J) happen in a different repository, in a later PR.
 
 ---
 
@@ -387,7 +395,7 @@ No secret is involved: none of the four classes holds a key, and their `repr` is
   - `local-ci-verification.md`, "Run the source stage with `PYTHONPATH=<worktree>` and the package stage without it": source stage and tests use the worktree on `PYTHONPATH`; the package stage runs without it.
   - `local-ci-verification.md`, "Check S051 import sorting with ruff over the whole `vidbyte` tree": run ruff I001 over `vidbyte`, not over one file.
   - `local-ci-verification.md`, "Two `harness_threads` surface tests fail locally …": `test_import_vidbyte_starts_no_process…` turns red because root `__all__` changes; classify it as pre-existing and do not edit it.
-  - `local-ci-verification.md`, "`test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes` fails on main itself": inherited, so name it in the PR body.
+  - `local-ci-verification.md`, "`test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes` fails on main itself": historical. It was inherited at S1 and S3, but #1147 replaced it with `…_32_harness_codes` (`test_harness_threads_surface.py:218`), which passes on `0324d5d6`. It no longer exists on `main`, so the PR body does not name it (re-review R-C1, §17).
   - `local-ci-verification.md`, "Main can break a long-lived feature branch …": after any merge of `main`, rerun `generate-sdk-public-api.py --check`.
   - `local-ci-verification.md`, "Semgrep only scans git-tracked files": `git add` first.
   - `local-ci-verification.md`, "Dispatched checks never unblock the merge": merge with `--admin --match-head-commit`.
@@ -512,7 +520,7 @@ No secret is involved: none of the four classes holds a key, and their `repr` is
 - `contracts/README.md` Change Log: no entry. It records the folder's creation only, and neither #1099 nor #1179 added a line when regenerating. — *source:* `contracts/README.md:35-37`
 - Lint-baseline ratchet: none. The seven rules that report `IMPROVED` on `main` (§11 baseline) improved in earlier PRs, not this one, so lowering their baselines is not this PR's change (hard rule 9). Leave `lint/baseline.json` untouched. Report any rule whose count this PR itself changes. — *source:* vidbyte-gates "ratchet … only after a genuine source improvement"; house style
 - `.env.example`, registrations, folder READMEs: N/A. There is no configuration, no registry, and no new folder.
-- PR body (S6): name the inherited failures, each with proof on pristine `main`. These are the 3 in `root_native_thread_exports`, the `assert 167 == 120` test, and the local-only `test_import_vidbyte_starts_no_process…`. List the follow-ups: Q-1, Q-3 (`ModelProvider` stays non-root; the CLI's provider parity check goes through `JevAgentSettings(provider=…)` until a later SDK PR exports it), the `denied=` doc bug from NG-7, the stale "#1184 gate" sentence in the release note (next bullet), and the CLI refresh of the vendored contract (C4).
+- PR body (S6): name the one inherited red, with proof on pristine `main`. It is the local-only `tests/features/harness_threads/test_harness_threads_surface.py::test_import_vidbyte_starts_no_process_and_leaves_the_native_package_unloaded`, red only at its merge-base clause (`:309`, inside `if base is not None:` at `:304`). It passes on pristine `0324d5d6`, CI skips that clause, and after the squash the clause passes on `main`. Do not name the 3 `root_native_thread_exports` tests, which pass since #1189, or the `assert 167 == 120` failure-code test, which no longer exists on `main` (corrected at S6, re-review R-C1). List the follow-ups: Q-3 (`ModelProvider` stays non-root; the CLI's provider parity check goes through `JevAgentSettings(provider=…)` until a later SDK PR exports it), the `denied=` doc bug from NG-7, the stale "#1184 gate" sentence in the release note (next bullet), and the CLI refresh of the vendored contract (C4). Q-1 is no longer a follow-up: #1189 root-exported the 11 browser names.
 - Follow-up, not done here: the release note's "#1184 gate" sentence has been stale since `513aa614`. That sentence is "Do not tag until the Meta key fix, #1184, is on `main`: on 2026-10-18, `main`'s Meta key rule still matched only the legacy `LLM|` shape …", in `docs/design/release-0-4-0.md:19`, the same line as row 2 (c). #1184 merged as `513aa614`, and the META row of `KEY_FORMATS` on `main` now accepts both shapes, `("LLM|", "LLM_")` (`vidbyte/lib/registries/provider_keys.py:59` on `0cce5781`). This PR does not edit that sentence; row 2 (c) replaces only the count sentence beside it. Correcting it is release-gate wording, and it is left for the release PR. — *source:* coordinator r3 note; review round 2 stale-fact list — *source:* field guide `local-ci-verification.md`; `.github/pull_request_template.md`
 
 ### 12.6 Phases and dependency order
@@ -660,6 +668,7 @@ So merging `main` is optional for correctness. If S3 merges it, `$MB` moves with
 | r3.1 | 2026-10-19 | S2 note (not a review round) | r3.1 — INV-7 wording per S2 note: the existing members of `TextModelMode` and `JevDynamicComputeOption` keep their values and relative order, and a later PR may add members (AGENTS.md treats a new compute option as a normal change). The rest of INV-7 is unchanged. Status: tests-written (S2 baseline dc5108e6) |
 | r3 | 2026-10-19 | S3 implement | Built §12.3 rows 1, 3 and 2 as commit A `f0527b55` (root bindings), commit B `c0f40bfd` (contract), and commit C `29cac984` (release note, #1190), with two main merges (EC-7) and two contract regenerations in between. Gates on `e332e43c`: lint PASS, pytest has only the 2 named inherited reds, the package stage passes, semgrep finds 0. Draft PR #1190. Status: implemented |
 | r3 | 2026-10-19 | S5 repair 1 | Merged `main` a third time (#1147, EC-7) as `731f094c` and regenerated the contract as `7c8f8377`: 733 exports, `source.commit` `731f094c` (review R-1). Recounted the release note as `26d05084`: 733 = 639 + 94, 51 from #1147 (R-2). Re-proved AC-5, 6, 9, 12, 13, 14 and 15 at `$MB` = `0324d5d6`, and corrected the inherited-red set in NFR-2, §11 and §13 (R-3). Scope, version and the 9-line root change are unchanged. Status stays reviewed |
+| r3 | 2026-10-19 | S6 PR | finalized for review. PR body at `docs/spec/jev-cli-root-exports/pr-body.md`; title `feat(agents): export AgentLoopSettings, PermissionPolicy, TextModelMode and JevDynamicComputeOption from vidbyte` (review R-4). §5 drifted from the code (668 names), so its chart and walk-through now match the PR's flow chart (733 names, each eager import, the `isinstance` check, the unchanged `__getattr__`). Re-review R-C1: §12.5 now names only the one local-only red, `test_import_vidbyte_starts_no_process…` at `:309`, and the §11 `…_28_harness_codes` field-guide bullet is marked historical; Q-1 is dropped from the follow-ups because #1189 did it. The §4 snippet ran as written with every `*API_KEY*` variable unset and printed its four lines. Status: pr-open. No source, test or contract change |
 
 **Implementation deviations (S3)**
 - **Main merged twice (EC-7; A-4 was wrong).** While this PR was open, `main` gained #1189 (`b21fd94e`, the 11 browser names of NG-1/Q-1) and #1159 (`181f1992`, `InfiniteEvent`, `InfiniteEventKind`, `InfiniteHandoff`). Both changed `vidbyte/__init__.py` and the contract. Each merge was committed with main's contract (`4c2fae0f`, `76c61ffb`) and then regenerated in a new commit (`1c4452fc`, `e332e43c`). The contract therefore holds 682 exports, not 668, and `source.commit` is `76c61ffb`, not commit A. In the second merge, the header hunk was resolved as main's new `- Agent exports:` line followed by this PR's bullet, unchanged. `vidbyte/__init__.py` still differs from `main` by exactly the 9 lines of row 1.
