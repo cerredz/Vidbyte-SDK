@@ -409,10 +409,12 @@ is a threshold checked between steps, never a maximum bill: a run stops below th
 plus its largest single step, and concurrent children that inherit the cap can each
 spend up to it. A stopped reply has `stop_reason` `"max_spend"`, which sessions report
 as `resource.exhausted`; when the ledger cannot measure the spend, the run stops at the
-next check and its output names the cause. Nothing runs after a cap stop: no retry,
-reflection, review, grading, verifier, or queued prompt, and a `MultiAgent` worker's
-task is blocked. Read the spend with `agent.get_usage().cost_usd`; `cost_measured` on
-the same rollup says whether that is the whole measured spend or only a lower bound.
+next check and its output names the cause. After a cap stop no SDK step continues the
+stopped work: no retry, reflection, review, grading, verifier, or queued prompt, and a
+`MultiAgent` worker's task is blocked. Only your own `after_run` middleware and a
+configured auto-handoff still run, and they can still spend. Read the spend with
+`agent.get_usage().cost_usd`; `cost_measured` on the same rollup says whether that is
+the whole measured spend or only a lower bound.
 
 The cap is per reply, hidden from the model, and not overridable through the fork tool.
 `Agent`, `CodingAgent`, `JevAgent`, and `InfiniteMemoryAgent` enforce it, as does every
