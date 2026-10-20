@@ -393,3 +393,42 @@ Open items:
 
 1. **The POSIX seams have not run.** The WSL2 instance on this host does not start, and the WSL1 one has no pytest or pydantic, so the `chmod 0o500` blocker, the `term_linger` window and the slow-add hook ran on win32 only. If CI fails one of these tests on Ubuntu, check the seam before the code. A removal that restores permissions before it deletes would defeat the blocker. A killed add on POSIX may clean its own registration, so there the "finished" marker is the assertion that catches it.
 2. **One traceback showed compose code.** The failing `{prompt}` cases end in a frame at `vidbyte/harnesses/native/compose/texts.py:103`, where the blank-template refusal is raised, and pytest printed that frame. No compose file was opened, and no test relies on what it showed.
+
+## 12. Addendum: R-33 rows (2026-10-19)
+
+The orchestrator sent confirmed finding R-33 back to S2. Compose's own records quote a short key held in one of their fields whenever the record is reached other than through a binder. The rows were written on top of `91773ed3`, whose `vidbyte/` is unchanged since `bc351671`. As before, they were written blind to the implementation. The sources were spec r5 (INV-4, INV-5, AC-15, EC-28, EC-71, EC-78), the `review.md` R-33 row, the verifier's report `reports/S5-findings-verifier-rr1.md` (sections 2, 3.3, 4.2 and 8) with its draft test, and the pack's own fixtures. The draft was adapted, not copied. The rows use the pack's fixtures and `short_key()`, and one helper, `error_surfaces`, now serves the caller-text rows and the record rows alike.
+
+| Item | Commit | Change |
+|---|---|---|
+| R-33 | `8fcba2df` | `test_harness_compose_keys.py`: `test_a_record_refusal_never_quotes_the_key_it_was_given`, 18 cases; `test_an_answer_member_refusal_never_quotes_the_key_in_its_problem`, 4 cases; the 21 caller-text cases now read `error_surfaces`. The pack's FEATURE.md and README.md record the new rows. |
+
+The pack now has 17 test files, 96 test functions and 385 cases. `test-plan.md` maps them under "Coverage added for R-33". In short:
+
+- **The 18 record rows and the first 3 answer rows** fail at HEAD, each on its INV-4 leak assertion, and pass on the verifier's reference fix.
+- **The fourth answer row is a guard.** A round's `kept` refusal names only the type (`EnsembleRound.kept must be a tuple of int items; got a value of type list.`), so it passes on both.
+- **The answer rows use the public surface:**
+  - verdict `decision`: `verify_with`, with a Grok verifier whose stand-in answers its own key;
+  - selection `proposal`: `run_ensemble`, with one Grok fork proposer and a selector that answers its key;
+  - plan role `name`: `run_ensemble`, with a planner that answers its key plus a NUL.
+
+  Each stand-in gives the same answer on every turn through the scenario field `text`. No internal decoder is called, and the stand-in is unchanged.
+
+Method notes:
+
+- **One row per sink.** A record's refusal and an answer's problem are separate sinks of the same check. So each of the three sites that a step's answer reaches has a record row and an answer row.
+- **Every surface an error exposes.** The record rows read the message, the repr, the args and each attribute, both of the refusal and of every exception that its `__context__` and `__cause__` reach. `__context__` is walked even when `__suppress_context__` is set, because `raise ... from None` only hides the original from tracebacks.
+- **Each row is tied to its site.** In a scratch copy of the proof copy, the script `mutate_r33.py` undid one site of the fix at a time: 11 sites, plus a variant that raises the clean rewrite inside the handler. Each mutant turned red the rows of its own site and no others. The `PromptSegment.spliced` mutant turned nothing red, because that record is internal (verifier section 4.2).
+- **The mutation run read the fix's lines.** To undo one site at a time, the script matches the `quote=False` call lines and the `_withheld` lines in the proof copy's `native_compose.py` and `native_ensemble.py`. By then the 21 rows had already been proven red at HEAD and green on the fix, and no row changed because of what the run showed. The worktree's `vidbyte/` was never opened.
+- **The caller-text cases now check more.** Before the change, the in-handler mutant passed the two binder model cases, because those cases read only the refusal itself. They now read `error_surfaces`, and they stay green at HEAD and on the fix.
+- **Each bad value is refused by the field under test.** Where a bare key passes a field's pattern (a grok model, a thread id), the row adds the one character that the pattern refuses: a newline, a NUL or " x". `details["field"]` pins the field.
+
+Gates on the final commit:
+
+- `PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_compose` gives `21 failed, 364 passed`. The failures are exactly the 21 R-33 rows.
+- On the proof copy (`s5-verifier-rr1/lint_patched`, with this keys module copied in), the keys module gives `47 passed`.
+- `python lint/run.py` ends `SDK-LINT: PASS`. The 72-column comment check prints 0 lines for the keys module, which has 457 lines.
+
+Open items:
+
+1. **The proof copy now holds this keys module.** The orchestrator asked for the copy. The verifier's original keys module is kept at `s2c/r33/lint_patched_keys.orig.py` in the session scratch folder.
+2. **A misplaced key that validation accepts is not covered.** A bare key as a grok or muse model or as a thread id passes validation, so it is not a refusal. It shows in `repr(ThreadStep)` and reaches the base's argv (verifier section 5, item 7). That needs a spec decision, such as a `model != api_key` check, before it can have a test.
