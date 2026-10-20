@@ -16,8 +16,8 @@ Program: JevAgent in vidbyte-cli, run R3 of 8 (see request.md §C "This run's sc
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-19 | 2026-10-19 | reports/S0-scout.md | base_commit 22993b5fcc4c45048fb0d5c5e0e4538601b854d9; code-map.md 455 lines (4 sections); about 12 edit targets; orchestrator spot-checked records.py:68-89, pricing.py:300-314, router.py:36-51, cost_budget.py:36-79 and harness_threads :218-232 |
-| S1 spec + review | running | 2026-10-19 | | reports/S1-spec-author.md | r1 a246ef08 (17 §12.3 rows, 26 AC, 37 EC, 22 INV, 12 Q of which 6 are scope-adding with default No, 0 blocking); review round 1 running |
-| S2 tests | pending | | | | |
+| S1 spec + review | done | 2026-10-19 | 2026-10-20 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | approved r3 f1e7677e (r1 a246ef08, r2 d49469ee). Round 1: 2 Blockers / 5 Majors / 3 Minors, all closed (R-6 as a stated limitation). Round 2: 0 Blockers / 1 Major / 4 Minors, fixed in r3 and checked by the orchestrator (row 27 present; rule 1 covers MultiAgentExecutionError, which is a root export; §13 warns about gpt-4.1-mini). 27 §12.3 rows |
+| S2 tests | running | 2026-10-20 | | | pack tests/features/loop_spend_cap plus the row-26 edit to tests/test_codex_output_contracts.py |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
@@ -25,12 +25,14 @@ Program: JevAgent in vidbyte-cli, run R3 of 8 (see request.md §C "This run's sc
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 1/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 (cap reached; spec approved r3) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-19: Program split into 8 PRs (request.md §C.2 D-P1). R3 is the SDK spend cap, and the CLI's `--max-spend` is C3.
 - 2026-10-19: Ships in unreleased 0.4.0 with no version bump (D-P2). The change is recorded in docs/design/release-0-4-0.md.
 - 2026-10-19: After S6, the orchestrator squash-merges with `--admin`. This uses the user's Q2 answer "you can just auto merge", which covers this program's SDK PRs only. Merge recipe: the "vidbyte release gates" memory, and R1's #1190 run.
+
+- 2026-10-20: The round-1 guidance sent to the author: accept R-1, R-2 and R-7 (the cap stop must end the run, so queued prompts must not run with a fresh cap, and this is not new scope); prefer refusing at construction for R-3; C3 classifies on root-reachable facts (`error_kind`, stop reason). Existing tests that a change forces (row 26) go to the S2 test author, never around them with a special case in the code.
 
 ## User replies (verbatim)
 - 2026-10-19: answers to the alignment questions are in request.md §A, Prompt 3.
