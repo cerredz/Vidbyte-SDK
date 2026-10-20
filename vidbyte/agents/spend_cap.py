@@ -108,7 +108,7 @@ class AgentSpendCap:
         for runner in runners:
             if runner.provider == ModelProvider.OPENROUTER.value:
                 continue
-            priced = bool(runner.provider and runner.model_name) and registry.resolve(ModelProvider(runner.provider), runner.model_name) is not None
+            priced = bool(runner.provider and runner.model_name and registry.resolve(ModelProvider(runner.provider), runner.model_name) is not None)
             pair = f"{runner.provider or '?'}:{runner.model_name or '?'}"
             if not priced and pair not in pairs:
                 pairs.append(pair)
