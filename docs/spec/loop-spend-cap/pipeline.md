@@ -4,7 +4,7 @@ repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-loop-spend-cap
 branch: feat/loop-spend-cap
 base_commit: 22993b5fcc4c45048fb0d5c5e0e4538601b854d9
-pr:
+pr: https://github.com/cerredz/Vidbyte-SDK/pull/1192
 until: none
 started: 2026-10-19
 ---
@@ -23,7 +23,7 @@ Program: JevAgent in vidbyte-cli, run R3 of 8 (see request.md §C "This run's sc
 | S2b test additions | done | 2026-10-20 | 2026-10-20 | (STATUS block; test-plan.md Mutation and Corrections) | b3796d74, pushed. AC-33 (gate and writer), NFR-1/INV-17 spy (plain run and drain of 3), INV-13 slug and primary refusals, R-M5 message shape, plus an EC-27 wire test (it closes the false skip reason at test-plan :66). Orchestrator re-run: `2 failed, 186 passed`, and the 2 failures are exactly the AC-33 cases (assert (calls, iteration_count) == (0, 0); today it is (1, 1)). M1-M6 are 6/6 killed with AC-33 deselected. The diff touches only the pack and test-plan.md |
 | S5 repair loop | done (1 iteration) | 2026-10-20 | 2026-10-20 | reports/S5-repair-1.md, verify-log.md | head eba8bf85 (code 0be0545d), pushed. Fixed R-1 (54a11a21, 9f684068), R-2 (b7e13995), R-M1 (de093778), R-M2 (de677706), R-M4 (977086ff) and R-M3 (0be0545d, section now 46 lines). R-3, R-4 and R-M5 were closed by S2b's tests. Orchestrator checks: tests unchanged against b3796d74; files are within r4 §12.3 plus docs; pack plus codex `188 passed`; the verifier's R-1 probe gives 0 specialist calls and `max_spend` in both delegated scenarios. The agent reports source `1 failed (inherited), 7686 passed`, package `CI passed.`, lint at base counts with S009 346, and semgrep 0. Dispatched CI 39422105237 and Static policy 39422108655 on eba8bf85 |
 | S5 re-review | done (round 1, SOUND) | 2026-10-20 | 2026-10-20 | reports/S5-rereview.md | 1599aac8. 0 Blockers, 0 Majors, 2 Minors. R-C1: the INV-6 Delegated row and the §9.2 JevAgent row claimed a per-run bound, but a specialist draining queued prompts reaches 3.201xC (probe_specialist_drain.py). R-C2: the §5 flowchart and the spend_cap.py:5 header omit the delegated CP1. Spec r4.2 (68b67231, dc494a88) rewords both rows per specialist reply, adds A-9, and adds node DL to §5. Orchestrator check: only spec.md and the S1 report changed; revision stays 4 |
-| S6 PR | pending | | | | |
+| S6 PR | done | 2026-10-20 | 2026-10-20 | reports/S6-pr-author.md | 995cfdfb (release record b4f564a9 inserts only " (#1192)"; spec status pr-open, revision 4). Title `feat(agents): add a USD spend cap that every agent loop enforces`, still a draft. The orchestrator checked that the live body equals pr-body.md apart from gh's trailing newline, that it holds no key-shaped literal, and that pack rerun gives 188 passed (agent). Next: dispatch CI and Static policy on the final head, `gh pr ready`, the ancestor check, then the --admin squash |
 
 ## Counters and caps
 - S1 review rounds: 2/2 (cap reached; spec approved r3) · S5 repair iterations: 1/8 · S5 re-review rounds: 1/2 (SOUND)
