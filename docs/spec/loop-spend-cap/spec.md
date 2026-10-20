@@ -1003,7 +1003,7 @@ Blocking questions: 0.
 **Implementation deviations (S3)**
 
 - `AgentSpendCap` (row 1) has the two static methods §8.5 names plus three private static helpers (`_blind_causes`, `_chain_runners`, `_unpriced_pairs`), so each method stays one level deep and at C901 ≤ 5; behavior is exactly §8.5.
-- The agents README Spend Cap section (row 13) is 38 lines including its heading (37 of body), against "at most about 36"; the example is 7 code lines plus its two fences.
+- The agents README Spend Cap section (row 13) is 46 lines including its heading (45 of body; `## Spend Cap` to the last text line), against "at most about 36"; the example is 7 code lines plus its two fences. *(Corrected in S5 iteration 1, S4 R-M3: it was 39 lines at S3's head `daad59fb`, not the 38 first recorded here. S5 then added 7 lines: 2 for r4's delegated-path check (row 13), 2 for R-M1, and 3 for R-M2.)*
 - Every comment block this change adds or extends is wrapped at 72 columns (`comment-format.md`); in the six extended `@intent` blocks the existing words are unchanged but reflowed.
 - Row 6's `@intent spend-cap-is-never-silently-unenforced` block sits above both construction refusals (the non-linear runtime check and `model_refusal`), since it states the reason for both.
 - Row 22's branch tests `reply.metadata.get("stop_reason")` directly, because the `stop_reason` local is assigned only after the `@intent limit-stops-are-failed-attempts` comment; it still sits after the middleware-abort branch and before the `worker_stopped` branch.

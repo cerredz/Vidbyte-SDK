@@ -142,7 +142,7 @@ Phase map: P1 = `e34ec9cf`, P2 = `711db90d`, P3 = `bcfc2654`, P4 = `c554521e`. `
 These are also recorded under spec §17.
 
 1. **`AgentSpendCap` has three private static helpers beyond the two methods.** They are `_blind_causes`, `_chain_runners` and `_unpriced_pairs`. With them, each method calls helpers one level deep (AGENTS.md principle 1) and stays at C901 ≤ 5. The behavior is exactly §8.5. A002 asked for an `@intent` on each, because each touches `provider`.
-2. **The README Spend Cap section is 38 lines including its heading (37 of body).** Row 13 asks for "at most about 36". The example is 7 code lines plus fences. Every clause row 13 requires is present. Cutting more would drop one of them.
+2. **The README Spend Cap section is 46 lines including its heading (45 of body).** *(Corrected in S5 iteration 1, S4 R-M3: it was 39 lines at this report's head `daad59fb`, not 38. S5 added 7 lines for spec r4's delegated-path check, R-M1 and R-M2.)* Row 13 asks for "at most about 36". The example is 7 code lines plus fences. Every clause row 13 requires is present. Cutting more would drop one of them.
 3. **Comments are wrapped at 72 columns.** This follows field guide `comment-format.md`, which says a single line over 72 also becomes a block. The rewrap covers:
    - the CP2 and CP4 narration;
    - the edited lead comments of `_budget_stop`, `_enforce_tool_settings`, `_structured_phase` and `_inherited_guardrails`;
