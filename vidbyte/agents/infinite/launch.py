@@ -305,9 +305,10 @@ class InfinitePair(BasePipeline):
                 # the files both agents wrote.
                 card = self._finish(last, status, verdict, summary, TokenEstimate.cap(review, INFINITE_CARD_TEXT_MAX_TOKENS, INFINITE_TRUNCATION_MARKER), (*writer.files_written, *checker.files_written))
             except (VidbyteSdkError, OSError, ValueError) as exc:
-                # After an error the work counts as unjudged, the error
-                # becomes the review, and the pair keeps it for its last
-                # event.
+                # The pair is now in its commit step. After an error the
+                # work counts as unjudged, the error becomes the review,
+                # and the pair keeps it for its last event.
+                phase = InfinitePairPhase.COMMIT
                 self.error = exc
                 card = self._finish(last, status, InfiniteVerdict.UNCHECKED, summary, TokenEstimate.cap(self._error_text(exc), INFINITE_CARD_TEXT_MAX_TOKENS, INFINITE_TRUNCATION_MARKER), (*writer.files_written, *checker.files_written))
         except BaseException as exc:
