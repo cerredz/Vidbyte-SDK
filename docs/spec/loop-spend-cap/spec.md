@@ -1,7 +1,7 @@
 ---
 spec: loop-spend-cap
 title: An optional USD spend cap that every agent's own loop enforces
-status: approved         # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
+status: implemented      # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
 revision: 3
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-loop-spend-cap
@@ -9,7 +9,7 @@ branch: feat/loop-spend-cap
 base_commit: 22993b5fcc4c45048fb0d5c5e0e4538601b854d9
 created: 2026-10-19
 updated: 2026-10-20
-pr:                      # filled at S3 (draft) and finalized at S6
+pr: https://github.com/cerredz/Vidbyte-SDK/pull/1192   # filled at S3 (draft) and finalized at S6
 ---
 
 # Spec: An optional USD spend cap that every agent's own loop enforces
