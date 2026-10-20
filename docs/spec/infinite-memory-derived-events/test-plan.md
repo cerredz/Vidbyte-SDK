@@ -77,7 +77,7 @@ This plan maps every requirement of `spec.md` r3 to the tests that prove it. All
 | INV-5 | DN AC-21 (`calls_view` over every model call, `run_view` over every file); DF AC-6 (problem equals the model's text) | run | A model-visible byte changed. | It compares against a no-sink run. |
 | INV-6 | DN AC-26 | run | Non-determinism. | See AC-26. |
 | INV-7 | DR AC-23; ES NFR-2 test | contract | Public helpers or properties. | See AC-23. |
-| INV-8 | ER worst-case sizes (`_FIGURES`, 21 records); `assert_portable` on every collected stream (summary ≤ 280 and one line, key ≤ 512, leaf types, size); DP::`test_an_aborted_pair_with_a_long_key_carries_the_key_its_launch_carried` (EC-24) | unit; run | A record over 32,768 bytes; a summary that is too long or spans lines; an unshortened key. | `_worst` builds each record at every cap. Absolute paths are checked only by the existing envelope test. See OPEN ITEM 2 for the disk refusal. |
+| INV-8 | ER worst-case sizes (`_FIGURES`, 21 records); `assert_portable` on every collected stream (summary ≤ 280 and one line, key ≤ 512, leaf types, size); DP::`test_an_aborted_pair_with_a_long_key_carries_the_key_its_launch_carried` (EC-24) | unit; run | A record over 32,768 bytes; a summary that is too long or spans lines; an unshortened key. | `_worst` builds each record at every cap. Absolute paths are checked only by the existing envelope test. The disk refusal's relayed path is allowed by EC-29 (OPEN ITEM 2, resolved at r4). |
 | INV-9 | DP AC-5 (`card["entries"]` equals the committed ids); DP AC-4 (drops equal the card's `dropped`) | run | A count mismatch. | It compares with the card on disk. |
 | INV-10 | DP AC-13 (abort, no finish); DP EC-10 (finish then abort, on the normal and, since S4, the error-card branch); DP AC-14 (finish, no abort) | run | Zero or two endings for one launch. | Each test pins the pair's full subsequence. |
 | INV-11 | DF AC-7, AC-8, EC-8, EC-19 | run | Missing or duplicate denials. | It pins exact lists. |
@@ -127,7 +127,7 @@ This plan maps every requirement of `spec.md` r3 to the tests that prove it. All
 | FR-5 | DP AC-10, AC-11 | run | | |
 | FR-6, FR-7 | DN AC-15, AC-16; DP AC-11 | run | | |
 | FR-8 | DP AC-14 | run | | |
-| FR-9, FR-10 | DP::`test_verifier_started_and_finished_carry_the_staged_count_the_notes_the_verdict_and_the_usage`; DP AC-4 (unchecked verdict) | run | Wrong staged count, wrong file list, missing `files_omitted`, wrong verdict or usage, wrong envelope. | 7 notes exceed the 5-item cap, so the cut is exercised. The verifier's usage (33) is different from the generator's. |
+| FR-9, FR-10 | DP::`test_verifier_started_and_finished_carry_the_staged_count_the_notes_the_verdict_and_the_usage`; DP AC-4 (unchecked verdict) | run | Wrong staged count, wrong file list, missing `files_omitted`, wrong verdict or usage, wrong envelope; a summary that counts the 5 names shown instead of the 7 notes written (re-review R-C2). | 7 notes exceed the 5-item cap, so the cut is exercised, and the two counts differ (7 against 5). The verifier's usage (33) is different from the generator's. |
 | FR-11 | DP AC-12, AC-13, EC-10; since S4: DP verifier-step cancellation (R-6, phase `verifier`), DP EC-10 error-card branch (R-5, phase `commit`), DP AC-13 cause item (R-12) | run | Since S4, all three D-10 phases are pinned at run level: `generator` (AC-12), `verifier` (R-6), and `commit` (AC-13, EC-10, R-5). | |
 | FR-12 | DP AC-10 | run | | |
 | FR-13 | DN AC-19 | run | | |
@@ -211,11 +211,11 @@ None fails on a fixture error, a timeout, or an import of the test module itself
 3. **NFR-5 is bounded in that same test:** `usage()` from `events.py` at most once per root tool iteration (10 in the wide script), and `descriptions()` exactly once.
 4. **Pinned byte figures.** Row 3 of §12.3 asks the constants comment to state the measured worst case. Use the figures `_FIGURES` pins: largest record `InfiniteSubagentFinishedDetails` 27,909 bytes, and a whole event at most 31,987 bytes (280-character summary, 512-character key). The other new records are listed in `_FIGURES` in ER.
 5. **Default caps give no new run-level events.** Under default caps the AC-2, quiet-tools, AC-3 (stream :250), and refusal scripts expect no `workspace_usage` and no `agent_progress`. The baseline workspace already holds 3 files (`entries.jsonl`, `superseded.jsonl`, `files.jsonl`), and the level starts at `(0, False)`.
-6. **Refusal problems are the text the model read.** For memory tools that is `str(error)`, and for the launch tool `exc.message`. The disk case's problem therefore names an absolute path the OS put in the `OSError` message (OPEN ITEM 2). The surrogate case reaches the workspace as `UnicodeEncodeError`, so its rule comes from the type. A malformed task card fails in `ToolArguments.records` as a `ConfigurationError` with no rule, so it is `invalid_arguments`. On Windows, `notes/a:b.md` is refused as "outside the workspace", which is still `note_path`.
+6. **Refusal problems are the text the model read.** For memory tools that is `str(error)`, and for the launch tool `exc.message`. The disk case's problem therefore names an absolute path the OS put in the `OSError` message (OPEN ITEM 2, resolved at r4 by EC-29). The surrogate case reaches the workspace as `UnicodeEncodeError`, so its rule comes from the type. A malformed task card fails in `ToolArguments.records` as a `ConfigurationError` with no rule, so it is `invalid_arguments`. On Windows, `notes/a:b.md` is refused as "outside the workspace", which is still `note_path`.
 7. **Envelopes and fallbacks.**
    - `subagent_aborted`'s envelope is the launcher (`root`, depth 0, for a root-level pair), like `subagent_launched` and `subagent_finished`. Its summary is `"<name> aborted (<reason>) in its <phase> step: <error_type>"`.
    - `batch_rejected` for a denied context uses the result's `reason`. When the metadata has no `reason`, it uses the result's `output`.
-8. **`verifier_started`'s summary.** The test accepts either count of notes (written 7 or shown 5) for `{files}` (OPEN ITEM 1). `details.files` must be the first 5 notes in write order, with `files_omitted` 2.
+8. **`verifier_started`'s summary.** `{files}` is every note written, so the test expects 7, not the 5 names shown (spec r4 §9.2; OPEN ITEM 1, resolved; re-review R-C2). `details.files` must be the first 5 notes in write order, with `files_omitted` 2.
 9. **EC-10.** A `KeyboardInterrupt` raised in a pair task makes `asyncio` cancel the root task. Its `run_stopped` names `CancelledError`, and the test does not pin that event's details.
 10. **Scripted usage** carries `total_tokens` wherever a token count is asserted. The default fixture usage has none and counts 0, so `agent_progress.tokens` is `state.tokens_used or 0`.
 11. **The P2 checkpoint is atomic.** Records, events, launch, memory, and runtime must land together before the pack is run (pipeline note). Most red tests turn green only when all of them exist.
@@ -260,13 +260,13 @@ Line numbers are at `33cfda07`, the S2 start. Each change makes an existing pin 
 
 ## Open items
 
-1. **`verifier_started` summary `{files}`.** §9.2 does not say whether it counts the notes written (7) or the notes shown (5). The test accepts both. The spec owner should settle this.
-2. **INV-8 against AC-6 for the disk refusal.**
+1. **`verifier_started` summary `{files}`.** *Resolved by spec r4 (§16 s2-1, §9.2): `{files}` is `len(files)`, counted on every note written before the five-item cut, never the number of names shown. Since re-review R-C2 the test pins 7 only (see "Re-review R-C2" below).* Original text: §9.2 does not say whether it counts the notes written (7) or the notes shown (5). The test accepts both. The spec owner should settle this.
+2. **INV-8 against AC-6 for the disk refusal.** *Resolved by spec r4 (§16 s2-2, new EC-29): AC-6 wins. INV-8's path clause covers only fields the SDK composes, and relayed error text such as `problem` keeps the OS's absolute path, which is an accepted limitation inherited from PR #1159. The `write-note-disk` case stands as written.* Original text:
    - AC-6 says `problem` equals the text at `181f1992`. For `write-note-disk`, that text is the `OSError` message, which names an absolute path the OS built from the SDK's workspace path, for example `[WinError 183] … 'C:\…\notes\a.md'`.
    - INV-8 forbids "an absolute path the SDK built" on events.
    - The test follows AC-6, which is the model-visible text. If S3 strips the path, this case goes red, and the spec owner decides which rule wins.
 3. **AC-13 seam.** The only way to make pair-owned code raise is to wrap `InfiniteWorkspace.commit_entry` on the class (§13). The implementation must keep calling it through the instance.
-4. **Spec §13 gaps (pins this spec changes that §13 does not cite).** All are listed above:
+4. **Spec §13 gaps (pins this spec changes that §13 does not cite).** *Resolved by spec r4 (§16 s2-3): §13 now lists these pins as facts.* Original text: All are listed above:
    - pairs :128-137 (replay list);
    - stream :188/:194 (AC-2 envelopes and summaries);
    - stream :493 (quiet-tools list);
@@ -276,7 +276,7 @@ Line numbers are at `33cfda07`, the S2 start. Each change makes an existing pin 
 5. **Wide script coverage.** It reaches 19 of 22 kinds. `run_resumed`, `run_stopped`, and `subagent_aborted` cannot occur in a finished run, so AC-20 to AC-22 and AC-26 do not cover the abort and resume paths. AC-21 asks only for the AC-2 and AC-7 scripts.
 6. **EC-22 is covered at the component level only.** No scripted developer middleware denies with an unknown `limit`.
 7. **A pre-existing, unrelated failure** remains in the full suite: `harness_threads` `FailureCode` count against local `main`.
-8. **The R-5 pin is red until the R-2 fix lands** (see the next section). Its two items fail at `test_infinite_memory_derived_pairs.py:736` until the inner `except` branch of `InfinitePair.run` sets `phase = InfinitePairPhase.COMMIT`. This is the code fix for review R-2.
+8. **The R-5 pin is red until the R-2 fix lands** (see the next section). *Resolved by the R-2 fix at `2c986483` (spec §16 s4-2). The error branch now enters phase `commit` first, both R-5 items pass, and the pack at `f9fe3efb` gives `418 passed`.* Original text: Its two items fail at `test_infinite_memory_derived_pairs.py:736` until the inner `except` branch of `InfinitePair.run` sets `phase = InfinitePairPhase.COMMIT`. This is the code fix for review R-2.
 
 ## S4 strengthening (review R-3..R-6, R-12)
 
@@ -348,3 +348,29 @@ PYTHONPATH=$(pwd) python -m pytest --collect-only -q -p no:cacheprovider
 python lint/run.py
 python srun.py BASE FIX-RC1 FIX-RC1+M1 FIX-RC1+M7 FIX-RC1+M10 FIX-RC1+M11 M1 M7 M10 M11   # in the sandbox
 ```
+
+### Re-review R-C2: `verifier_started`'s note count
+
+**The finding.** The post-repair re-review (`reports/S5-rereview-1.md`, R-C2, Minor) found that DP::`test_verifier_started_and_finished_carry_the_staged_count_the_notes_the_verdict_and_the_usage` still accepted 5 or 7 for the summary's `{files}`. Spec r4 had already settled the count (§16 s2-1, §9.2): `len(files)` over the whole `tuple(writer.files_written)`, before the five-item cut, and never the number of names shown. In this script that is 7.
+
+**The change** (tightening only, on `f9fe3efb`; the test name still describes it and is kept):
+- **`:296`.** `assert started.summary in {f"{PAIR}/ver is checking 2 staged entries and {count} notes" for count in (7, 5)}` became `assert started.summary == f"{PAIR}/ver is checking 2 staged entries and 7 notes"`.
+- **Docstrings and headers.**
+  - The test's docstring names the rule.
+  - The DP header's KNOWN EDGE CASES no longer says the spec leaves the count open.
+  - The DF header no longer points at the open INV-8 item; it cites EC-29.
+- **This plan.**
+  - Open items 1, 2, 4, and 8 are marked resolved, each with its source. Their original text is kept.
+  - The FR-9/FR-10 row, the INV-8 row, and implementer notes 6 and 8 follow the same change.
+
+**Proof:**
+- **At HEAD** (worktree, `f9fe3efb` plus this change): `418 passed in 8.48s`. The tightened test alone, run 3 times, gives `1 passed` each time. `--collect-only` gives `7055 tests collected`, and `python lint/run.py` gives `SDK-LINT: PASS`.
+- **The mutant.** It is the re-reviewer's `events.py:396` edit, `files=len(files)` → `files=len(shown)` in `verifier_started` only. It was applied with the sandbox runner (`srun.py RC2-SHOWN`) to a fresh copy of the worktree, and the worktree's `vidbyte/` was never edited.
+
+| Variant | Pack line | Failed item (failure line) |
+|---|---|---|
+| BASE | `418 passed in 9.95s` | none |
+| RC2-SHOWN, with the tightened test | `1 failed, 417 passed in 8.72s` | DP::`test_verifier_started_and_finished_carry_the_staged_count_the_notes_the_verdict_and_the_usage` (`:296`, `AssertionError: p/ver is checking 2 staged entries and 5 notes`) |
+| RC2-SHOWN, with the test as at `f9fe3efb` (control) | `418 passed in 8.74s` | none: the mutant survived the either-or pin, as R-C2 reported |
+
+After the runs, the sandbox's `vidbyte/` and `tests/` were again identical to the worktree's.
