@@ -20,7 +20,8 @@ started: 2026-10-19 20:30
 | S4 adversarial review | done | 2026-10-20 | 2026-10-20 | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md; review.md | 3× MERGEABLE AFTER FIXES; verifier: 0 Blocker / 6 Major (R-1 docs, R-2 code, R-3..R-6 tests) / 7 Minor (R-13 scope-adding follow-up); 0 refuted; R-E1's journal-then-announce fix refuted (breaks AC-10) |
 | S4b test strengthening (R-3..R-6, R-12) | done | 2026-10-20 | 2026-10-20 | test-plan.md § "S4 strengthening" | 4f51cef1; pack 2 failed (the R-5 pin, two parametrized cases, red until R-2) / 416 passed (orchestrator re-ran); M1/M7/M10/M11 each now killed by exactly one test; **S2_HEAD = 4f51cef1** |
 | S5 repair loop | done | 2026-10-20 | 2026-10-20 | reports/S5-repair-1.md; verify-log.md | converged in 1/8: R-1, R-2, R-7..R-11 fixed (R-3..R-6, R-12 at 4f51cef1); HEAD c2a446b6 pushed. Orchestrator re-ran: pack 418 passed; SDK-LINT PASS; public API current; source stage 1 failed (inherited) / 7037 passed / 17 skipped; package stage `CI passed.`; tests unchanged since 4f51cef1; INV-20 paths untouched; 13 vidbyte files |
-| S5 re-review | running | 2026-10-20 | | | round 1/2 |
+| S5 re-review | done | 2026-10-20 | 2026-10-20 | reports/S5-rereview-1.md | round 1/2: SOUND; 0 Blocker / 0 Major / 4 Minor (R-C1 spec G-1/G-3 overclaim; R-C2 verifier_started count test accepts 5 or 7; R-C3 spec D-10/D-22 stale; R-C4 "abort means without a card" in README:120, events.py:457, dataclasses:685); every fixed R-id CONFIRMED FIXED |
+| S5 cleanup (re-review Minors) | running | 2026-10-20 | | | R-C2 → test author; R-C1, R-C3, R-C4 → repair iteration 2 |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
@@ -48,6 +49,7 @@ started: 2026-10-19 20:30
 - 2026-10-20 — S5 repair agent was interrupted by a session end with one uncommitted launch.py edit; resumed the same agent (not relaunched); it finished with one commit per finding.
 - 2026-10-20 — Classified the one source-stage failure as inherited: `test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes` reads `vidbyte/lib/enums/failure.py` at `git merge-base origin/main HEAD` (test :191); `git diff 181f1992..HEAD -- vidbyte/lib/enums/failure.py` is empty. Count is 171 (field guide's 167 came from an older main).
 - 2026-10-20 — Convergence declared: repair STATUS DONE; my own full gate green except the inherited failure; remote checks none configured (workflows paused repo-wide); `review.md` has no open confirmed finding (R-13 is a `[scope-adding]` follow-up, not a must-fix).
+- 2026-10-20 — Re-review round 1 verdict SOUND. Chose to close its 4 Minors before S6 rather than pass them through: each is a text/test-pin inaccuracy a human reviewer would comment on, and R-C2 is a test that cannot catch the len(shown) mutant. R-C2 → the S2 test author (only it edits tests); R-C1/R-C3/R-C4 → repair iteration 2 (docs only, no executable change). No re-review round 2 unless an executable line changes; the orchestrator re-runs every gate instead.
 - 2026-10-20 — Not forwarded to the spec: S2 items 5–7 (coverage notes for S4, the pre-existing harness_threads failure). Spec D-7 table row has an unescaped `|` (cosmetic, predates r4); the S3 implementer escapes it while it edits §17.
 
 ## User replies (verbatim)
