@@ -16,8 +16,8 @@ This run revises an existing feature branch. `base_commit` is the PR head at the
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-19 17:19 | 2026-10-19 21:50 | reports/S0-scout.md, reports/S0-compaction-researcher.md | base_commit 39ce8b20; code-map.md (~60 files); compaction-research.md |
-| S1 spec + review | running | 2026-10-19 21:52 | | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-2.md | spec r1 at 57c20f68 → r2 at b8cb856c (round 1: 12 findings applied); round 2 (d55e3714): SOUND WITH FIXES, R-1..R-12 confirmed, R-13 Blocker / R-14..R-16 Major / R-17..R-19 Minor; author revising to r3 (final round) |
-| S2 tests | pending | | | | |
+| S1 spec + review | done | 2026-10-19 21:52 | 2026-10-20 17:05 | reports/S1-spec-author.md, reports/S1-spec-review.md, reports/S1-spec-review-2.md | spec r3 at 8a654d6c, status approved (18 FR, 25 AC, 35 EC, 40 INV, 18 D, 5 Q non-blocking, 11 A; 47 §12.3 rows; P1 additive → P2 → P3 single deletion commit → P4). Round 1: 12 findings applied in r2; round 2: 7 findings (1 Blocker / 3 Major / 3 Minor) applied in r3; 19/19 accepted, 0 → Q-n |
+| S2 tests | running | 2026-10-20 17:10 | | reports/S2-test-author.md | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
