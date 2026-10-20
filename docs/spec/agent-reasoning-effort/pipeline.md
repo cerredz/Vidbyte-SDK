@@ -16,15 +16,15 @@ Program: JevAgent in vidbyte-cli, run R2 of 8 (see request.md §C "This run's sc
 | Stage | Status | Started | Finished | Agent report | Key output |
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-20 | 2026-10-20 | reports/S0-scout.md | 2fabf8f8; code-map.md has 583 lines in 4 sections and about 45 source files. The orchestrator checked base.py:109 (AUTO is the default) and vidbyte_gateway.py:124 (a body field outside the allow-list gives 422) |
-| S1 spec + review | running | 2026-10-20 | | | |
-| S2 tests | pending | | | | |
+| S1 spec + review | done | 2026-10-20 | 2026-10-20 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | spec r3 approved (2306b357). Round 1: 1 Blocker, 3 Major, 3 Minor, all closed. Round 2: 1 Blocker, 2 Major, 2 Minor, all applied in r3, which the orchestrator verified |
+| S2 tests | running | 2026-10-20 | | | |
 | S3 implement | pending | | | | |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 0/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-20: Run started after R3 merged (D-P1 order). The scope folds in a root export of `DecisionModelConfig`, because C4 needs it under CLI lint C028 (program.md dependency note, 2026-10-20). How C4 sources the Vidbyte key stays open for C4.
@@ -51,3 +51,10 @@ Program: JevAgent in vidbyte-cli, run R2 of 8 (see request.md §C "This run's sc
 - `_generate_reply` and `_process_tool_call` are at C901 10/10, so no branch may be added to them. `BaseAgent.__init__` and `_arun_once` are already in the lint baseline. Source: S2, from the lint baseline.
 - Local-only inherited red after row 8: `test_harness_threads_surface.py:270-278` (`test_branch_leaves_the_tools_and_configs_packages_as_main_has_them`) fails once `vidbyte/tools/builtins/fork/fork.py` differs from merge-base. CI skips it, and it clears on merge. Source: orchestrator, read at :270.
 - Carried from R3 (#1192, 98a5d37b): the facts above come from R3's pipeline.md. Re-verify any `path:line` against 98a5d37b before relying on it, because R3 changed runtime.py, base.py and loop.py.
+- From S1: `RecordFieldConverter.to_enum` (validation.py:221-230) accepts any enum member whose value is one of the six, StrEnum or `(str, Enum)`, for example `GrokReasoningEffort.HIGH`. Its error shows the repr: `got 'max'.`. Source: S1 review, verified by the orchestrator.
+- From S1: Ruff lint rules with ZERO slack at 98a5d37b: S051 (sorted imports, I001) 259, A001 642, A006 34, A007 255, C008 45, S008 19, S015 13, S020 1, S060 32. Rules with slack: S001 56/59 and A002 608/703. Check I001 over the whole tree, never one file at a time (field guide local-ci-verification.md:38): `py -3.11 -m ruff check vidbyte --config lint/ruff.toml --select I001 --no-cache`. lint/ruff.toml sets no line length, so ruff's 88-column default decides wrapping. `vidbyte/lib/registries/__init__.py` already has one I001 finding at base; neither fix it nor worsen it. Source: S1 round 2, S051 verified at lint/baseline.json:79.
+- From S1: `Runner.from_model(...).build()` builds claude-opus-4-7, gpt-5.5-2026-04-23 and gemini-3.5-flash-001 through the prefix map (utility.py:71), but they have no table row. They are the test seam for the no-row text. Source: S1 review.
+- From S1: `TextModelConfig` for GLM or Meta in a gateway mode raises `UnsupportedProviderError` (not a ConfigurationError) in `_require_gateway_shape`, before any effort check. Source: S1 review.
+- From S1: `DEFAULT_PROVIDER_MODELS` (models.py:73-82) matches the CLI's seven defaults, and each has a usable row. A-4 (grok-4.5 and grok-4.6 served on chat completions) stays an assumption. Source: S1 round 2.
+- From S1: in `test_harness_threads_surface.py`, `:270-278` is red when `vidbyte/lib/configs/` (rows 2a and 2b) or `vidbyte/tools` differs from main, and skips without origin/main (`:139-143`). `:309` runs only when `optional_merge_base()` finds a base (`:131-137`). Both are inherited and local-only. Source: S1 round 2.
+- Drive C: is nearly full (between 44 MB and 5 GB free during S1), because the system pagefile grows under memory pressure from about 28 Claude sessions. Check `df -m /c` before a gate or any large write. Source: orchestrator, 2026-10-20.
