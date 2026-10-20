@@ -454,7 +454,7 @@ class InfiniteEvents:
             self._deliver(InfiniteEventKind.SUBAGENT_FINISHED, self._key(launch.key, role), role, self._count(launch.depth), summary, details)
 
     def subagent_aborted(self, pair: InfinitePair, error: BaseException, phase: InfinitePairPhase) -> None:
-        """Announce a pair that stopped without its card: failed for an Exception, cancelled otherwise, with the error's class, the step it stopped in, and the entries still staged."""
+        """Announce a pair that stopped before its card was recorded, or whose finish the sink interrupted: failed for an Exception, cancelled otherwise, with the error's class, the step it stopped in, and the entries still staged."""
         if self.on_event is None:
             return
         # A pair whose finish was already announced left the count

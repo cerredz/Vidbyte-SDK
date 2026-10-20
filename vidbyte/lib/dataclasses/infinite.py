@@ -682,7 +682,7 @@ class InfiniteVerifierFinishedDetails:
 
 @dataclass(frozen=True, slots=True)
 class InfiniteSubagentAbortedDetails:
-    """subagent_aborted: a pair that stopped without its card, with why, the error's class name, its step, and the entries still staged."""
+    """subagent_aborted: a pair that stopped before its card was recorded, or whose finish the sink interrupted, with why, the error's class name, its step, and the entries still staged."""
 
     name: str
     key: str
