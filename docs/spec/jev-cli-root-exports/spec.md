@@ -1,7 +1,7 @@
 ---
 spec: jev-cli-root-exports
 title: Root-export the loop, permission, text-mode, and compute names the CLI's JevAgent needs
-status: implemented      # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
+status: reviewed         # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
 revision: 3              # r3.1: INV-7 wording only, per the S2 note
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-jev-cli-root-exports
