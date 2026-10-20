@@ -432,3 +432,71 @@ Open items:
 
 1. **The proof copy now holds this keys module.** The orchestrator asked for the copy. The verifier's original keys module is kept at `s2c/r33/lint_patched_keys.orig.py` in the session scratch folder.
 2. **A misplaced key that validation accepts is not covered.** A bare key as a grok or muse model or as a thread id passes validation, so it is not a refusal. It shows in `repr(ThreadStep)` and reaches the base's argv (verifier section 5, item 7). That needs a spec decision, such as a `model != api_key` check, before it can have a test.
+
+## 13. Addendum: R-34 rows (2026-10-20)
+
+The orchestrator sent confirmed finding R-34 back to S2. When a reader's worktree cannot be removed (EC-16), `ComposeGit._delete` raised the scrubbed `WORKTREE_FAILED` `from` the raw `OSError`. That error names the file that stayed, and a reader can save that file under a name that holds its key. So the key reached `__cause__`, `__context__` and the traceback that `logging.exception` prints, which breaks ledger 3 (request.md:54), §14 Never, INV-4 and AC-15. No third re-review will run, so these rows are the only check on the repair.
+
+The rows were written on top of `7cc62403` and run again at `89f67b7d`. At both, `vidbyte/` is unchanged since `0e4321a4`. As before, they were written blind to the implementation. The sources were:
+
+- spec r5: INV-4, EC-16, EC-71, AC-15 and §14;
+- the `review.md` R-34 row;
+- the verifier's report `reports/S5-findings-verifier-rr2.md` (sections 2.3, 2.4, 3 and 5) and its probe;
+- the pack's own fixtures.
+
+The probe was adapted, not copied. The rows use the pack's `wait_until`, `check_compose_error`, `sandbox` and `pack` fixtures. The hold mirrors `RemovalBlocker` in `test_harness_compose_removal.py`, so EC-16 is set up the same way in both files.
+
+| Item | Commit | Change |
+|---|---|---|
+| R-34 | `bfe6747c` | `test_harness_compose_keys.py` gains four rows: two held-file rows, through `verify_with` and `run_ensemble`; a temporary-folder row; and a matching-folder row. The AC-15 file-name test now also reads the traceback of both its errors. New helpers: `KeyFileHold`, `worktree_root`, `settle`, `traceback_text` and `FolderRefusal`. The pack's FEATURE.md and README.md record the rows. |
+
+The pack now has 17 test files, 100 test functions and 389 cases. `test-plan.md` maps them under "Coverage added for R-34". In short:
+
+- **The two held-file rows** fail at HEAD on the INV-4 leak assertion, with the chain `['ThreadComposeError', 'PermissionError']`. They fail only after every EC-16 expectation has passed. Both pass on the verifier's reference fix. With the two leak assertions swapped, the traceback assertion alone fails at HEAD too.
+- **The two folder rows** fail at HEAD on the chain assertion: `GIT_FAILED chains ['FileNotFoundError']` and `WORKTREE_FAILED chains ['PermissionError']`. Both pass on the fix. No key reaches those OS texts in scope. The rows pin the rule at the two clean sites, which the fix changes too.
+- **The AC-15 file-name test** stays green at HEAD and on the fix: the tracebacks of its two errors show no key either.
+
+Method notes:
+
+- **The leak is in the chain, so the rows read it two ways.**
+  - `error_surfaces` walks `__cause__` and `__context__`, even when `__suppress_context__` is set. So it catches `raise ... from None` inside the handler; a mutant proves this.
+  - `traceback_text` is exactly what `logging.exception` prints, the ledger 3 surface.
+- **The reader saves the file, never the writer** (verifier section 5). A writer-saved name is in `error.result.writer.diff`, which EC-71 keeps raw. Such a row would stay red even with the fix.
+- **The hold uses the operating system's own rules,** as the removal tests do.
+  - On win32, the test holds the file open.
+  - On POSIX, the test runs `chmod 0o500` on the folder. First it checks that the folder holds only the key-named file. `rmtree` names the first entry it cannot unlink, and scandir order is not fixed.
+  - The rows skip as POSIX root.
+- **The EC-16 expectations come first,** so a row cannot pass because the removal did not fail. They are:
+  - the problem;
+  - the folder observation and `git worktree prune`;
+  - the verdict, or the plan and both proposals;
+  - no selector or implementer launch;
+  - only the held folder left, and no longer registered.
+- **The matching-folder row stands in for `os.mkdir`.** No OS seam refuses the matching folder of a fresh worktree.
+  - The verifier's probe I patched `pathlib.Path.mkdir` to raise `FileExistsError`.
+  - The row instead patches `os.mkdir`, which every Python folder API ends in. It raises the OS's own `PermissionError` (`EACCES`), only for that folder name inside a compose worktree.
+  - So the row does not depend on which folder API compose uses.
+- **Each row is tied to its site.**
+  - In a scratch copy of the proof copy, `mutate_r34.py` reverted one site at a time: `_delete` and `_folder`, each with `from error` and with `from None` inside the handler, and `_matching` with `from error`.
+  - Each mutant turned red the rows of its own site and no others.
+  - With `from None` at `_delete`, the traceback is clean, and only `error_surfaces` catches the leak.
+- **The mutation run read the fix's lines.** To revert one site at a time, the script matches the three fixed lines at each site in the proof copy's `git.py` and `workspace.py`. The verifier's section 4.1 quotes those lines. By then the four rows had been proven red at HEAD and green on the fix, and no row changed because of what the run showed. The worktree's `vidbyte/` was never opened.
+
+Gates on the final commit:
+
+- `PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_compose` gives `4 failed, 385 passed`. The failures are exactly the four R-34 rows.
+- On the proof copy (`s5-verifier-rr2/proof`, with this keys module copied in), the keys module gives `51 passed`.
+- `mutate_r34.py` gives `51 passed` at base, `2 failed` for each `_delete` mutant and `1 failed` for each folder mutant, at their own rows only, then `51 passed` once restored.
+- `python lint/run.py` ends `SDK-LINT: PASS`. The 72-column comment check prints 0 lines for the keys module, which has 703 lines.
+
+Ubuntu was reasoned out, not run (test-plan.md, "Coverage added for R-34"):
+
+- On POSIX, `rmtree` unlinks by basename with `dir_fd`. The `0o500` folder refuses with `EACCES`, and the default handler raises that error. Its text names the basename, which holds the whole key, on Python 3.11 (`onerror`) and 3.12 (`onexc`). The verifier saw this on WSL with Python 3.12.3 as `nobody`.
+- The temporary-folder row fails with `ENOTDIR` even for root. The matching-folder row raises its own error.
+- No assertion reads a path separator, a drive letter or an OS message.
+
+Open items:
+
+1. **The proof copy now holds this keys module,** as it did for R-33. The verifier's original is kept at `s2c/r34/proof_keys.orig.py` in the session scratch folder.
+2. **The POSIX hold has not run on Ubuntu.** The first CI run on ubuntu-latest, with Python 3.11 and 3.12, is the independent check. A failure there before the EC-16 expectations would point at the hold, not at R-34.
+3. **A git failure in flight while the folder is held (verifier probe J) has no row.** It needs a fault injected into compose's own git runner. After the fix, the held-file rows still pass if git's scrubbed error stays as the context, because they look for key fragments and do not ask for an empty chain.
