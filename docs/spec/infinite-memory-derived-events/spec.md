@@ -2,13 +2,13 @@
 spec: infinite-memory-derived-events
 title: InfiniteMemoryAgent derived run events
 status: reviewed
-revision: 5
+revision: 6
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-infinite-memory-derived-events
 branch: feat/infinite-memory-derived-events
 base_commit: 181f1992ce936f139b7d18f9ae999c97dcd3b005
 created: 2026-10-19
-updated: 2026-10-19
+updated: 2026-10-20
 pr: https://github.com/cerredz/Vidbyte-SDK/pull/1191
 ---
 
@@ -1085,6 +1085,9 @@ Nothing emits a new kind yet, and every existing event is built and delivered ex
 | s4-1 | R-1 | Major | §1 G-3, §6.1 INV-10, §6.3 | Two more paths leave a launched pair with no closing event: a `pair_started` write that fails part-way through a batch, and a sink `BaseException` on `subagent_launched`. | accepted (docs only) | INV-10 and G-3 list both as exceptions; new EC-30 and EC-31; the package README note and the launch module header name them. Journaling the whole batch before announcing it was refuted (it changes AC-10's `agents_started`). |
 | s4-2 | R-2 | Major | §6.3 EC-10, EC-25, §8.1 D-10 | The error branch of `InfinitePair.run` recorded its card without entering phase `commit`, so an abort raised there named `generator` or `verifier`. | accepted (code) | `phase = InfinitePairPhase.COMMIT` is the branch's first statement (`launch.py`), so every path reaches `_finish` in phase `commit`, as row 6 of §12.3 says. EC-25's "User sees" now names phase `commit`. |
 | s4-7 | R-7 | Minor | §6.1 INV-19, §8.1 D-10, §13 | "A child agent's error always arrives as `AgentExecutionError`" is false: `BaseAgent` passes `UsageAccountingError` and `FailureRaisedError` through unwrapped, and neither is an `AgentExecutionError`. | accepted | INV-19, D-10's last sentence, and the §13 seam fact say a child's error always arrives as a `VidbyteSdkError`, wrapped or one of the three typed errors; the launch module header and the package README say the same. Behaviour was already right. |
+| s4-8 | R-8 | Minor | — (source only) | `InfiniteMemoryDroppedDetails`'s docstring named only the verifier's drops. | accepted | The docstring names all three `InfiniteDropReason` reasons. |
+| s4-9 | R-9 | Minor | — (source only) | The events module header cited "(EC-10)" for two specs' rows, and the launch module header cited "(EC-37)", which this spec does not have. | accepted | New citations read "(derived-events EC-n)"; the denial sentence cites "(derived-events FR-15)". |
+| s4-10 | R-10 | Minor | §12.4 header item | Six touched module headers did not name the derived test files on their TESTS line. | accepted | Each names the derived test files that prove its change. |
 | s4-11 | R-11 | Minor | §7 NFR-7, §11, §12.4 | The spec named the lint's last line `AGENT-LINT: PASS`; `lint/core/report.py:58` prints `SDK-LINT: PASS`. | accepted | The string is replaced at all three sites. |
 | s2-3 | S2 item 4 | Minor | §13 | §13 did not cite every PR #1159 pin this spec changes. | accepted | Added as facts: pairs :128-137, stream :188/:194, :388, and :493, the two renames, and the `ToolsStep`/`tool_calls` fixture. |
 
@@ -1097,6 +1100,7 @@ Nothing emits a new kind yet, and every existing event is built and delivered ex
 | r3 | 2026-10-19 | S1 review r2 (final) | Applied R-14 to R-19 (§16): the handoff details pin is listed for S2; the remaining stale comments and docstrings are scheduled; caps are 660 / 470 / 870; the abort decrement and COMMIT placement are pinned; the A002 `attempt` trap is handled; citations are fixed. Status: approved. |
 | r4 | 2026-10-19 | S2 open items | Resolved S2's open items 1, 2, and 4 (§16 s2-1 to s2-3). The `verifier_started` summary's `{files}` counts every note written. INV-8's path clause covers only SDK-composed fields; relayed error text keeps its own paths (new EC-29, inherited from PR #1159). §13 lists the remaining pins S2 updated. No name, field, kind, enum member, constant, or signature changed. Status stays approved. |
 | r5 | 2026-10-19 | S3 implement | Implemented every §12.3 row except row 13 (S2's) in §12.6 phase order: P1 as six additive commits, P2 as one atomic checkpoint (row 4's P2 bullet, then rows 5, 8, 6, 7, 11), P3 as one commit per README; the infinite-memory pack passes 414 of 414, the agent lint and both CI stages pass apart from the known pre-existing failure, and no test changed. No AC proof was blank, so §6.2 is unchanged; the D-7 row's `str \| None` is escaped. Status: implemented. |
+| r6 | 2026-10-20 | S5 repair 1 | Applied the S4 review's code and docs findings (§16 s4-1, s4-2, s4-7 to s4-11). The pair's error branch enters phase `commit` before it records its card, and EC-25 says so. INV-10 and G-3 list two more accepted exceptions, new EC-30 (a `pair_started` write that fails part-way through a batch) and EC-31 (a sink `BaseException` on `subagent_launched`). INV-19, D-10, and §13 say a child's error arrives as a `VidbyteSdkError`, wrapped or passed through. The lint's last line is `SDK-LINT: PASS`. No name, field, kind, enum member, constant, signature, or test changed. Status stays reviewed. |
 
 **Implementation deviations (S3, r5).**
 
