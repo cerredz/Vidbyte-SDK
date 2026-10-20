@@ -333,7 +333,7 @@ The runtime builds one `InfiniteEvents` per run, as it does today. Every box tha
 | NFR-4 | Zero cost without a sink | P0 | INV-1 |
 | NFR-5 | Bounded cost with a sink | P1 | At most one extra `FolderUsage` scan per root tool iteration, and one `files.jsonl` read per `run_finished`. At most ⌈max_iterations ÷ 10⌉ `agent_progress` and at most one `workspace_usage` per root tool iteration per session. |
 | NFR-6 | Complexity budget | P0 | §8.4: no new module; `vidbyte.agents.infinite.events` ≤ 660, `vidbyte.agents.infinite.launch` ≤ 470, and `vidbyte.lib.dataclasses.infinite` ≤ 870 lines after the header; every other budget module ≤ 400. |
-| NFR-7 | Gates green | P0 | The agent lint ends `AGENT-LINT: PASS`, and both CI stages (`source`, `package`) pass, apart from the known pre-existing failure. The commands are in §11. |
+| NFR-7 | Gates green | P0 | The agent lint ends `SDK-LINT: PASS`, and both CI stages (`source`, `package`) pass, apart from the known pre-existing failure. The commands are in §11. |
 | NFR-8 | Privacy | P0 | INV-8. Error classes are named; error messages appear only where PR #1159 already put them (`run_stopped.message`, refusal `problem`), unchanged, including any absolute path the error itself names (EC-29). |
 
 ---
@@ -761,7 +761,7 @@ There is no data migration: nothing persisted changes. The contract changes and 
 - **Commands** (exact, from `context/code-map.md` §1.4, AGENTS.md, and `local-ci-verification.md`):
   - Install: `python -m pip install -e ".[dev]"`, once per environment. The S0 scout did not install, and an editable install must point at the worktree or be bypassed with `PYTHONPATH`.
   - Import-path check (first): `PYTHONPATH=$(pwd) python -c "import vidbyte,inspect;print(inspect.getfile(vidbyte))"`. It must print the worktree path, and printed `…\worktrees\vidbyte-sdk-infinite-memory-derived-events\vidbyte\__init__.py` in S1.
-  - Lint: `python lint/run.py` (focus `--rule <ID>`; `--all`; `--format json`). Its final line must read `AGENT-LINT: PASS`.
+  - Lint: `python lint/run.py` (focus `--rule <ID>`; `--all`; `--format json`). Its final line must read `SDK-LINT: PASS`.
   - S051: `python -m ruff check vidbyte --config lint/ruff.toml --select I001 --no-cache`.
   - Typecheck: none in the gate.
   - Test (focused): `PYTHONPATH=$(pwd) python -m pytest tests/features/infinite_memory_agent/test_infinite_memory_events_stream.py -q`.
@@ -903,7 +903,7 @@ There is no data migration: nothing persisted changes. The contract changes and 
 - [ ] No edit to `vidbyte/agents/runtime.py`, `base.py`, `vidbyte/middleware/`, or `vidbyte/pipelines/`. — *source:* NG-7; INV-20
 - [ ] The `_shielded` log line keeps its format: no message or summary text is logged. — *source:* events.py header rule 2; S043/S044
 - [ ] Line caps hold: `events.py` ≤ 660, `launch.py` ≤ 470, lib records ≤ 870, others ≤ 400; nine package modules. — *source:* §8.4; contract test
-- [ ] `python lint/run.py` ends `AGENT-LINT: PASS` with no baseline raised. Both `run_ci.py` stages pass, apart from the known pre-existing failure. The final 3–5 lines of each are quoted in the report. — *source:* AGENTS.md; house style; `local-ci-verification.md`
+- [ ] `python lint/run.py` ends `SDK-LINT: PASS` with no baseline raised. Both `run_ci.py` stages pass, apart from the known pre-existing failure. The final 3–5 lines of each are quoted in the report. — *source:* AGENTS.md; house style; `local-ci-verification.md`
 
 ### 12.5 Non-code actions
 
@@ -1084,6 +1084,7 @@ Nothing emits a new kind yet, and every existing event is built and delivered ex
 | s2-2 | S2 item 2 | Major | §6.1 INV-8, §6.3 EC-29, §7 NFR-8, §10 T-1 | INV-8 forbade SDK-built absolute paths on events, but AC-6 keeps the disk refusal's `OSError` text, which names one. | accepted (AC-6 wins) | INV-8's path clause now covers only fields the SDK composes. Relayed error text (`run_stopped.message`, `problem`, the refusal summary) keeps the error's own words: an accepted limitation inherited from PR #1159, not new exposure (new EC-29). The implementation must not strip paths from `problem`. |
 | s4-1 | R-1 | Major | §1 G-3, §6.1 INV-10, §6.3 | Two more paths leave a launched pair with no closing event: a `pair_started` write that fails part-way through a batch, and a sink `BaseException` on `subagent_launched`. | accepted (docs only) | INV-10 and G-3 list both as exceptions; new EC-30 and EC-31; the package README note and the launch module header name them. Journaling the whole batch before announcing it was refuted (it changes AC-10's `agents_started`). |
 | s4-7 | R-7 | Minor | §6.1 INV-19, §8.1 D-10, §13 | "A child agent's error always arrives as `AgentExecutionError`" is false: `BaseAgent` passes `UsageAccountingError` and `FailureRaisedError` through unwrapped, and neither is an `AgentExecutionError`. | accepted | INV-19, D-10's last sentence, and the §13 seam fact say a child's error always arrives as a `VidbyteSdkError`, wrapped or one of the three typed errors; the launch module header and the package README say the same. Behaviour was already right. |
+| s4-11 | R-11 | Minor | §7 NFR-7, §11, §12.4 | The spec named the lint's last line `AGENT-LINT: PASS`; `lint/core/report.py:58` prints `SDK-LINT: PASS`. | accepted | The string is replaced at all three sites. |
 | s2-3 | S2 item 4 | Minor | §13 | §13 did not cite every PR #1159 pin this spec changes. | accepted | Added as facts: pairs :128-137, stream :188/:194, :388, and :493, the two renames, and the `ToolsStep`/`tool_calls` fixture. |
 
 ## §17 Revision history
