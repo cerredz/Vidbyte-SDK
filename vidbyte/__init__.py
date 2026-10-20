@@ -10,6 +10,7 @@ Purpose:
 Architecture:
     - VidbyteSDK: Root namespace client.
     - Agent exports: BaseAgent, CodingAgent, CodingAgentSettings, CodingAgentTools, InfiniteMemoryAgent, InfiniteMemoryAgentSettings, InfiniteWorkspaceSettings, InfiniteMemoryPreset, InfiniteEvent, InfiniteEventKind, InfiniteHandoff, AgentCard, AgentMessage, AgentRegistry, AgentRunnerConfig, AgentSpec.
+    - Agent setting exports: AgentLoopSettings (loop limits), PermissionPolicy (which ToolPermission levels tools may use) and TextModelMode (gateway or direct text calls), which BaseAgent and JevAgentSettings take, plus JevDynamicComputeOption, the values of JevComputeSettings.dynamic_compute, so a caller limited to root names, such as vidbyte-cli, can set JevAgent's loop, permission, text-mode and compute options.
     - Configuration exports: YamlLoader, AgentSettings, ToolDefinition, MiddlewareDefinition.
     - Tool exports: BaseTool, ToolActivity, ToolCall, ToolCallActivity, ToolExecutor, ToolParameter, ToolPermission, ToolRegistry, ToolResult, ToolSpec, ToolStatus, ToolsFormatter.
     - Middleware exports: AgentMiddleware, MiddlewarePipeline, policy events, and diagnostic hook invocations.
@@ -50,6 +51,7 @@ from vidbyte.agents import (
     AgentDispatch,
     AgentForkSettings,
     AgentInput,
+    AgentLoopSettings,
     AgentMessage,
     AgentRegistry,
     AgentReport,
@@ -483,6 +485,7 @@ from vidbyte.lib.dataclasses.prosecutor_defender_judge import (
     ProsecutorDefenderJudgeReport,
     ProsecutorReportPayload,
 )
+from vidbyte.lib.dataclasses.security import PermissionPolicy
 from vidbyte.lib.dataclasses.skills import SkillResolution
 from vidbyte.lib.enums import (
     BudgetPreset,
@@ -491,11 +494,13 @@ from vidbyte.lib.enums import (
     GrokReasoningEffort,
     GrokThreadScope,
     InfiniteMemoryPreset,
+    JevDynamicComputeOption,
     MuseReasoningEffort,
     PermissionPreset,
     Prompt,
     StructuredOutputSupport,
     SystemPromptPreset,
+    TextModelMode,
 )
 from vidbyte.lib.enums.config import AgentType
 from vidbyte.lib.errors import (
@@ -889,6 +894,7 @@ __all__ = [
     "JevDiscoveredItemBatch",
     "JevDiscoveredItemEvidence",
     "JevComputeSettings",
+    "JevDynamicComputeOption",
     "JevContinualSettings",
     "JevContinuationGate",
     "JevDeliverable",
@@ -1118,6 +1124,8 @@ __all__ = [
     "AgentRuntimeStats",
     "AgentSpec",
     "AgentStopReason",
+    "AgentLoopSettings",
+    "TextModelMode",
     "ToolSettings",
     "ModelPricing",
     "ModelPricingRegistry",
@@ -1500,6 +1508,7 @@ __all__ = [
     "ToolExecutor",
     "ToolParameter",
     "ToolPermission",
+    "PermissionPolicy",
     "ToolRegistry",
     "ToolResult",
     "ToolSpec",
