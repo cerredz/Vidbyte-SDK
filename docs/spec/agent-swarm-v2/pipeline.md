@@ -25,7 +25,7 @@ This run revises an existing feature branch. `base_commit` is the PR head at the
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 0/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 1/2 (round 1: SOUND WITH FIXES, 1 Blocker / 7 Major / 4 Minor; author revising to r2) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-19 17:19 — Worktree created on the existing branch `feat/agent-swarm` (synced to origin at 39ce8b20) instead of a new `feat/<slug>` branch from `origin/main` — the user asked for PR #1174 to be updated in place, not replaced.
@@ -80,3 +80,13 @@ This run revises an existing feature branch. `base_commit` is the PR head at the
 - Web-search clients with modules: Brave, Browserbase, Exa, Parallel, Tavily (`vidbyte/tools/builtins/operations/__init__.py:20-26`); Firecrawl is a fetch, not a search; no Linkup/OpenAlex/SemanticScholar client, hence the five-member enum. — *source:* S1 author
 - Summarizer prompt precedent is a flat leaf `vidbyte/prompts/prompts/trajectory_checkpoints_agentic_summarizer.md`; the shared system prompt is nine `system_*` leaves the runtime joins, `system_thoroughness` holding eight `##` subsections; Prompt enum header count becomes 162/36. — *source:* S1 author
 - Subagents report the working directory is not the worktree after a resume; briefings must say to use absolute paths or `git -C`. — *source:* S1 author
+- `_runner_for_model()` returns `(runner, runner_type)`; `ScriptedSwarm.install()` patches it and `_ScriptedRunner.arun(prompt, **options)` accepts `system=`/`messages=`, so a summarizer side call on the member's own runner is scriptable (spec A-2 holds). — *source:* S1 reviewer
+- Lint A007 matches whole name parts (`"token" in re.split(...)`), so `minimum=0/1` beside `*_tokens` fields does not fire. — *source:* S1 reviewer
+- S020 scans only READMEs that declare `## File Index`; `vidbyte/middleware/README.md` has none (prose only); REPO_MAP is outside S020. — *source:* S1 reviewer
+- `_finish_result` runs only `after_run`; an `after_model_response` abort never reaches `review_finish`/`end_turn`; `_after_tool_iteration` (`runtime.py:700`) is skipped on a continued finish. — *source:* S1 reviewer
+- Side-call metering precedent `_invoke_context_window_runner` records via `usage_tracker.record_call` but does not bump `model_call_count`, so a compaction `model_called` event's `model_calls` repeats the loop's count unless handled. — *source:* S1 reviewer
+- `SummarizeRangeCompaction(keep_last=0)` keeps nothing, so the keep-last count must be ≥ 1; `after_count` is measured after `_repair_tool_pairing`, so `before − after + 1` is exact. — *source:* S1 reviewer
+- An early loop stop (AC-24, `agent_exited`) is reachable offline only via a swarm-hook exception under `fail_closed` (every `AgentLoopSettings`/`ToolSettings` guard defaults to None) → `middleware_abort`. — *source:* S1 reviewer
+- `Prompt` has exactly 149 members in 36 families (the second enum in the file is not counted); 149 − 1 + 14 = 162 holds; package data `*/*.md` covers new leaves. — *source:* S1 reviewer
+- `AnthropicUsage.input_tokens` excludes both cache buckets (`vidbyte/agents/pricing/anthropic.py:13,75`); `total_prompt_tokens` (`pricing/base.py:73-80`, overridden at `anthropic.py:73-80`) is the right measure of context size. — *source:* S1 reviewer
+- The timeout wraps the start flush before any member task exists (`agent_swarm/runtime.py:97-100`), so a timeout during the start flush creates no member task; terminal events for never-started members must come from the post-group stop path. — *source:* S1 reviewer
