@@ -1,0 +1,1203 @@
+---
+spec: agent-reasoning-effort
+title: A reasoning effort for an agent's generative model
+status: draft            # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
+revision: 1
+repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
+worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-agent-reasoning-effort
+branch: feat/agent-reasoning-effort
+base_commit: 98a5d37b7c2d44fd4d84fe4911bf1c701c694c77
+created: 2026-10-20
+updated: 2026-10-20
+pr:                      # filled at S3 (draft) and finalized at S6
+---
+
+# Spec: A reasoning effort for an agent's generative model
+
+> **TL;DR** — One provider-neutral setting, `reasoning_effort: ReasoningEffort | None`, goes on `BaseAgent` and `JevAgentSettings`. It has six values (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`). The agent's own text runner carries it onto every generative call, and each provider adapter sends it in that vendor's documented wire form. `vidbyte/lib/registries/reasoning_effort.py` holds one explicit table. The table has a row for each runnable model id, and every cell cites a quote from a raw-fetched vendor doc.
+>
+> The decision that matters most is that the effort is never silently ignored. Construction refuses it with `ConfigurationError` in four cases: on a gateway mode (AUTO, VIDBYTE_MANAGED), beside `thinking_config`, for a (model, value) the vendor does not document, and for a value the vendor documents only as a remap to another level. Unset sends nothing.
+>
+> The same PR root-exports `ReasoningEffort`, `DecisionModelConfig` and `DecisionModelMode` for vidbyte-cli C4/C5.
+
+## §0 User prompts
+
+The verbatim record lives in `docs/spec/agent-reasoning-effort/request.md` (§A has every prompt, §C the structured notes). The prompt that invoked the pipeline is below. This run's slice comes from the user's answer to alignment question 10 in Prompt 3 (request.md §A): "JevAgent should have a reasoning effort, this can be a pr into vidbyte-sdk/ and then update cli with this".
+
+### 0.1 Invoking request (verbatim)
+/spec-pipeline I like this and I agree with the setup, can you start building it into the vidbyte-cli/.
+
+### 0.2 User replies during the run
+_None yet. The orchestrator appends any reply the user sends during the run here verbatim, labeled with the revision it produced._
+
+---
+
+## Part A — Framing
+
+## §1 Goal
+
+Today the SDK has no effort setting that works the same way on every provider:
+- `TextModelConfig.thinking_config` is a raw mapping that only the Anthropic and Gemini adapters forward.
+- No agent path can set it.
+- `Runner` drops any option that is not a `TextModelConfig` field.
+
+vidbyte-cli already publishes `--reasoning-effort` with the copy "Sets how much reasoning each turn asks your model to spend: none, minimal, low, medium, high, or xhigh. Leave it empty to keep the provider's default. Higher effort spends more tokens on every turn." (request.md §C). Until this PR, the CLI has nothing to map that flag to.
+
+| ID | Goal (outcome) | How we will know | Source |
+|---|---|---|---|
+| G-1 | A developer sets one reasoning effort on any `BaseAgent` (and on `JevAgentSettings`). Every generative call the agent makes in `TextModelMode.DIRECT` then carries it in the provider's documented wire form. | AC-1, AC-2, AC-3, AC-9 | request.md §A Prompt 3 Q10; §C "What to build"; D-P9 |
+| G-2 | The effort is never silently ignored, dropped or remapped. A value the agent's models cannot take fails at construction, before any spend, with a message that names the supported values. | AC-4, AC-5, AC-6, AC-7, AC-10 | request.md §C Q1, Q2, Q3; D-P9 ("must not silently ignore") |
+| G-3 | vidbyte-cli C5 can import the enum, and C4 can import `DecisionModelConfig`, under CLI lint C028 (root names only). | AC-13 | request.md §C "Second slice"; "If the reasoning effort needs a new public enum, it is a root export too" |
+| G-4 | Reasoning spend stays visible to usage tracking and to R3's `max_spend_usd` cap. | AC-17 | request.md §C Q4; §D "i want every agent to be tracking usage" |
+| G-5 | Nothing changes for a caller who leaves the effort unset. | AC-8 | request.md §C "Unset means the SDK sends nothing, so the provider's default applies" |
+
+## §2 Objective
+
+When this PR merges, vidbyte-sdk 0.4.0 (unreleased, version unchanged) contains these items:
+- A root-exported `ReasoningEffort` StrEnum.
+- A `reasoning_effort` keyword on `BaseAgent`, and the same keyword on `Runner`, `AgentFallback` and `AgentFallbackSettings.to_fallback`.
+- A `reasoning_effort` field on `TextModelConfig`, `AgentRunnerConfig` and `JevAgentSettings`.
+- A lib-layer registry, `ReasoningEffortRegistry`, which owns the documented per-model mapping and the refusal text.
+- An agent-layer construction guard, `AgentReasoningEffortGuard`, modeled on R3's `AgentSpendCap`.
+- One attach call in each of the four text payload builders: OpenAI, Anthropic, Gemini, and the OpenAI-compatible builder that serves xAI, DeepSeek, GLM and Meta.
+- The copy paths that already carry `temperature`, which now carry the effort too: fork, ContinualTrace, Handoff, checkpoint and restore, and JevAgent's main agent plus its 8 child builders.
+- Root exports of `DecisionModelConfig` and `DecisionModelMode`.
+- A regenerated public-API contract with 736 exports.
+- The release-note sentence, and the README and skill-doc updates.
+
+This is PR R2 of the 8-PR "JevAgent in vidbyte-cli" program. The CLI flag mapping is C5, a later slice in another repo (NG-1).
+
+## §3 Non-goals
+
+- **NG-1** — Any vidbyte-cli change, including the jev `--reasoning-effort` mapping. — *Why not:* that is C5 (request.md §C "Not in this run").
+- **NG-2** — Sending the effort through the Vidbyte gateway (`AUTO`, `VIDBYTE_MANAGED`). — *Why not:* the gateway answers 422 to body fields outside its allow-list, and that allow-list has no reasoning key. Extending it is a backend change (orchestrator ruling, pipeline.md 2026-10-20). → Q-2.
+- **NG-3** — The harness efforts (`CodexReasoningEffort`, `GrokReasoningEffort`, `MuseReasoningEffort`). — *Why not:* request.md §C "Not in this run". They are separate CLIs with their own value sets.
+- **NG-4** — Reasoning for the Jev decision model (`DecisionModelRunner`, TypeSafe). — *Why not:* request.md §C Q3 and "Not in this run".
+- **NG-5** — Inheritance by Jev specialists and by the run-brief writer. — *Why not:* request.md §C Q3 says they "keep their own settings … State that last point as a limitation; inheritance is not added."
+- **NG-6** — Mapping an unsupported value to the nearest supported level. — *Why not:* D-P9. This would be `[scope-adding]` → Q-1, default No.
+- **NG-7** — Any value beyond the six, such as a vendor's `max`. — *Why not:* the value set is fixed to the published six (pipeline.md 2026-10-20; request.md §C).
+- **NG-8** — A per-hop effort on `FallbackModel`, an override on `AgentForkSettings`, or a model-supplied effort in the fork tool. — *Why not:* the conversation asks for one agent-wide setting. → Q-4.
+- **NG-9** — Changing how history echoes reasoning: OpenAI reasoning items, DeepSeek `reasoning_content` on final turns. — *Why not:* request.md §C Q5 sets the default "no parser change". The gaps are pre-existing and are recorded as limitations (EC-15, EC-16). → Q-5.
+- **NG-10** — A `reasoning_effort` key for YAML agent configs, `InfiniteMemoryAgentSettings`, `AggregateAgent`, `MultiAgent` or `CodexHarnessAgent`. — *Why not:* D-P9 names `BaseAgent` and `JevAgentSettings` only. The YAML loader already refuses unknown keys loudly (`AgentSettings._ALLOWED_FIELDS`). → Q-8.
+- **NG-11** — A new `UsageRollup` reasoning field, or any usage-parsing change. — *Why not:* every adapter's billed output already includes reasoning (§9.2 "Billing"). The briefing forbids a field unless an adapter drops billed tokens.
+- **NG-12** — Bumping the version, tagging, or publishing. — *Why not:* D-P2 keeps 0.4.0, which is unpublished. "updates the version" in Prompt 3 Q2 is overridden by D-P2.
+- **NG-13** — Refusing `temperature` together with an effort, or raising Anthropic's DIRECT `max_tokens` default of 1024. — *Why not:* both risks exist today at the vendors' default efforts and have no control in the conversation. They are stated as limitations EC-12 and EC-13. → Q-6, Q-7.
+- **NG-14** — Adding model ids to the runner catalog, or rows for ids the runner cannot build (pricebook-only ids such as `claude-opus-4-7`). — *Why not:* `Runner.build` raises "No runner mapping" for them today, so a row could never be used.
+- **NG-15** — Editing `EMITTED_KEYS`, the gateway wire contract, `FailureCode`, any test file, or any lint baseline. — *Why not:* orchestrator ruling; the hard rules in §14.
+
+## §4 Developer usage
+
+```python
+import os
+
+from vidbyte import Agent, ConfigurationError, JevAgent, JevAgentSettings, ReasoningEffort, TextModelMode
+
+planner = Agent(
+    name="planner",
+    system_prompt="Plan database migrations.",
+    provider="openai",
+    model_name="gpt-5.6-sol",
+    api_keys=[os.environ["OPENAI_API_KEY"]],
+    model_mode=TextModelMode.DIRECT,
+    reasoning_effort=ReasoningEffort.HIGH,
+)
+reply = planner.run("Plan a zero-downtime rename of users.email.")  # body carries "reasoning": {"effort": "high"}
+
+try:
+    Agent(name="fast", system_prompt="Answer briefly.", provider="gemini", model_name="gemini-3.5-flash",
+          api_keys=[os.environ["GEMINI_API_KEY"]], model_mode=TextModelMode.DIRECT, reasoning_effort=ReasoningEffort.XHIGH)
+except ConfigurationError as error:
+    print(error)
+
+jev = JevAgent(JevAgentSettings(name="jev", system_prompt="Work carefully.", provider="anthropic", model_name="claude-opus-5-5",
+                                api_keys=[os.environ["ANTHROPIC_API_KEY"]], model_mode=TextModelMode.DIRECT, reasoning_effort=ReasoningEffort.LOW))
+```
+
+Printed output (exactly one line):
+
+```text
+Agent fast sets reasoning_effort, but gemini:gemini-3.5-flash has no documented form for reasoning effort 'xhigh' (it supports minimal, low, medium, high).
+```
+
+Each `POST https://api.openai.com/v1/responses` that `planner.run` sends carries `"reasoning": {"effort": "high"}`, and the rest of the body is unchanged. The `fast` agent is refused at construction, before any request or spend. Each `POST https://api.anthropic.com/v1/messages` that `jev` sends for its main model, and for the Jev children listed in §9.2, carries `"output_config": {"effort": "low"}`.
+
+The developer no longer hand-builds `extra_body` or `thinking_config` per vendor. They no longer discover an unsupported level from a vendor 400, or from a silent remap, after paying for the call.
+
+## §5 Flow diagram
+
+```mermaid
+flowchart TD
+  A[Agent / JevAgentSettings ctor] -->|reasoning_effort| B[AgentRunnerConfig.__post_init__ to_enum]
+  B --> C[AgentReasoningEffortGuard.refuse_unsupported]
+  C -->|each chain entry| D[ReasoningEffortRegistry.refusal]
+  D -->|reason| X[ConfigurationError at construction]
+  D -->|None| E[agent.run / arun]
+  E --> F[BaseAgent._runner_for_model / AgentFallback.build_runner]
+  F -->|reasoning_effort| G[Runner._config_options_for]
+  G -->|TextModelConfig field| H[TextModelConfig._validate_reasoning_effort]
+  H -->|reason| X
+  H --> I[TextModelRunner.arun]
+  I --> J[adapter _create_payload]
+  J -->|payload| K[ReasoningEffortRegistry.attach]
+  K -->|deep-merged fragment| L[_attach_extra_body]
+  L --> M[HttpTransport.request to vendor]
+  M -->|usage| N[UsageTracker → UsageRollup → AgentSpendCap]
+```
+
+1. The constructor converts the value to the enum: `AgentRunnerConfig` for `BaseAgent`, and the class's own `__post_init__` for `JevAgentSettings`.
+2. Before any call, `AgentReasoningEffortGuard` asks the registry about the mode and about every (provider, model) in the chain, primary first. The first non-None reason, or the de-duplicated set of reasons, becomes one `ConfigurationError`.
+3. At run time, the agent's runner passes the value into `TextModelConfig`, which validates itself again. This covers callers that build a config directly. It also refuses `thinking_config` beside the effort, and an `extra_body` that overlaps the effort's keys.
+4. The adapter builds its usual payload. Just before `extra_body` is applied, the registry deep-merges a copy of the documented fragment.
+5. Usage parsing is unchanged, so billed reasoning reaches `UsageRollup` and the spend cap through each usage class's output tokens.
+
+No state is written except the checkpoint's `runtime_config["reasoning_effort"]`, and only when the effort is set.
+
+---
+
+## Part B — Behavior (this is the spec; everything else is framing)
+
+## §6 Behavior
+
+### 6.1 Invariants
+
+- **INV-1** — When `reasoning_effort` is unset (`None`), which is the default everywhere, these stay byte-identical to `base_commit` for every provider and every `TextModelMode`: every request body, every request URL and header set, every `runtime_config` that `export_state` writes, and every existing error message. Unset sends nothing, so the provider's default applies.
+- **INV-2** — When the effort is set and accepted, every generative request the agent's own text runners send carries exactly the §9.2 mapping-table fragment for (provider, model, effort). This covers the primary model and each fallback hop, in that hop's own provider form. The fragment is deep-merged into the adapter's payload, so no key the adapter set is lost. Examples are Anthropic `output_config.format` and Gemini `generationConfig.temperature`.
+- **INV-3** — A set effort is never silently ignored. It is either sent exactly as the table says, or refused with `ConfigurationError`. It is never dropped by `Runner`, never sent on a call the table does not cover, and never sent where the vendor documents that it maps the value to a different level.
+- **INV-4** — Every refusal happens at construction: in `BaseAgent.__init__`, `JevAgentSettings.__post_init__`, `TextModelConfig.__post_init__`, `Runner.build` (for a non-text runner) or `AgentForker.fork`. It always comes before any HTTP request, and before any key is read beyond the key matching that already runs.
+- **INV-5** — A set effort with `model_mode`/`mode` other than `TextModelMode.DIRECT` is always refused. The message names `TextModelMode.DIRECT`.
+- **INV-6** — Every entry of a fallback chain is checked. One entry without a documented form refuses the agent, wherever it sits in the chain (primary in front of a good fallback, or the reverse).
+- **INV-7** — `thinking_config` and `reasoning_effort` set together are always refused. An `extra_body` whose top-level keys overlap the effort fragment's top-level keys is always refused, because `payload.update` would overwrite the fragment.
+- **INV-8** — The value set is exactly `none`, `minimal`, `low`, `medium`, `high`, `xhigh`. Any other value is refused with a message that lists the six in that order: `max`, `""`, `"HIGH"`, a non-string, or a member of another enum. A set effort is converted to the `ReasoningEffort` member once, at the first record that receives it.
+- **INV-9** — Setting the effort never changes which key is sent, which endpoint is called, which provider or model serves the call, or the agent's permission policy. (request.md §D: "I dont want them to be able to use a key outside of this".)
+- **INV-10** — Billed reasoning tokens reach `UsageRollup` through each usage class's `output_tokens` and `cost_usd`, as they do today. No usage parser changes. (request.md §D: "i want every agent to be tracking usage"; Q7 "max_spend".)
+- **INV-11** — A refusal message is one sentence. It names the field, the `provider:model` (or the mode), the rejected value, and the supported values in enum order, or "no reasoning effort". It never contains a key, a prompt or `extra_body` values. (request.md §D: "raise an error with a message explaining".)
+- **INV-12** — `vidbyte.ReasoningEffort`, `vidbyte.DecisionModelConfig` and `vidbyte.DecisionModelMode` are the same objects as `vidbyte.lib.enums.ReasoningEffort`, `vidbyte.lib.dataclasses.model_configs.DecisionModelConfig` and `vidbyte.lib.enums.DecisionModelMode`.
+- **INV-13** — `ReasoningEffortRegistry.attach` never mutates or aliases the module tables. Each payload receives its own deep copy of the fragment.
+- **INV-14** — A checkpoint taken from an agent with an effort restores to an agent with the same effort. A checkpoint without the key restores with `None`. `SESSION_SCHEMA_VERSION` is unchanged.
+- **INV-15** — The JevAgent main agent, the fresh-continuation agent, bulk workers, clones, swarm helpers, `JevRunState`/`JevRunStateRelation`, `JevHandoff`, `JevReviewer` and `JevClarificationAgent` always run with `JevAgentSettings.reasoning_effort`. `JevRunBriefWriter`, specialists and Jev decision calls never receive it.
+
+**Must not regress:**
+- **INV-16** — `EMITTED_KEYS` and the managed-text wire contract (`tests/features/sdk_managed_text/test_managed_text_wire_contract.py`) are unchanged, and pass unedited.
+- **INV-17** — `thinking_config` behavior with no effort set is unchanged: Anthropic forwards it when truthy (`vidbyte/providers/anthropic.py:112`), Gemini when not `None` (`vidbyte/providers/gemini.py:194`).
+- **INV-18** — R3's spend-cap refusals keep their text and run first. The effort guard runs after them (`vidbyte/agents/base.py:250-257`).
+- **INV-19** — Existing keyword-only signature pins for these methods keep passing: `Runner.__init__`, `BaseAgent.__init__`, `AgentFallback.__init__` and `AgentFallbackSettings.to_fallback`. They live in `tests/features/sdk_provider_keys/test_provider_keys_contract.py:200-219`. `JevAgent.__init__` stays `(self, settings, runtime_settings)`, pinned in `tests/features/agent_output_connectors/test_output_connectors_agent_wiring.py:112`.
+
+### 6.2 Acceptance criteria
+
+| ID | Given | When | Then | Priority | Proof |
+|---|---|---|---|---|---|
+| AC-1 | a clean checkout of this branch, the three provider keys set (built at run time), and the HTTP seam scripted | the §4 snippet runs | `planner`'s Responses body carries `"reasoning": {"effort": "high"}`; exactly the shown line prints; `jev` constructs, and its main-model Messages body carries `"output_config": {"effort": "low"}` | P0 | |
+| AC-2 | a DIRECT agent on any provider and model the §9.2 table marks "sent" for a value | the agent runs one model call with that value, and the same call is made with the effort unset | the two request bodies differ by exactly the table's fragment, deep-merged; URL and headers are identical | P0 | |
+| AC-3 | each "sent" cell of the §9.2 mapping table | a `TextModelConfig(mode=DIRECT, reasoning_effort=v)` for that model runs through its adapter | the body contains the cell's fragment verbatim (key path and value spelling, including Gemini's upper-case level) | P0 | |
+| AC-4 | each "refused" cell of the §9.2 table, plus any model id with no row | an agent or `JevAgentSettings` is constructed with that value | `ConfigurationError` is raised with the §8.5 capability text, and the HTTP seam records zero requests | P0 | |
+| AC-5 | an effort set with `model_mode=TextModelMode.AUTO` or `VIDBYTE_MANAGED`, including the default AUTO | `BaseAgent`, `JevAgentSettings` or `TextModelConfig` is constructed | `ConfigurationError` names `TextModelMode.DIRECT`; zero requests; no key read beyond matching | P0 | |
+| AC-6 | a fallback chain with a primary that cannot take the value in front of a backup that can, and the reverse | the agent is constructed | it is refused in both orders. A chain where every entry can take the value runs, and each hop's request carries its own provider's form | P0 | |
+| AC-7 | a `TextModelConfig` with an effort plus `thinking_config`, or plus an `extra_body` that shares a top-level key with the fragment | it is constructed | `ConfigurationError` with the §8.5 text. An `extra_body` with disjoint keys is accepted, and both appear in the body | P0 | |
+| AC-8 | every provider and mode with the effort unset | any request is built and any checkpoint exported | the bodies equal `base_commit`'s, and `runtime_config` has no `"reasoning_effort"` key | P0 | |
+| AC-9 | `JevAgentSettings(reasoning_effort=v, model_mode=DIRECT)` on a supported model | the JevAgent and each child in INV-15 build their runners | each child's text requests carry the fragment. The brief writer, specialists and decision calls do not | P0 | |
+| AC-10 | `reasoning_effort` given as `"max"`, `""`, `"HIGH"`, `3`, or `GrokReasoningEffort.HIGH` | `BaseAgent`, `JevAgentSettings` or `TextModelConfig` is constructed | `ConfigurationError` "<Field> must be one of none, minimal, low, medium, high, xhigh; got <value>." A plain string such as `"high"` is accepted and stored as the member | P0 | |
+| AC-11 | an agent with an effort | `export_state()` then `BaseAgent.restore(state, api_keys=…)` | the restored agent's `runner_config.reasoning_effort` equals the original, and its requests carry the same fragment | P1 | |
+| AC-12 | an agent with an effort | `agent.fork()`, and `fork(AgentForkSettings(provider=…, model_name=…))` to a model that cannot take it | the plain fork carries the effort; the switched fork raises `ConfigurationError` (the fork tool turns it into a `ToolResult.error`) | P1 | |
+| AC-13 | a fresh interpreter | `from vidbyte import ReasoningEffort, DecisionModelConfig, DecisionModelMode` | the identities of INV-12 hold; `contracts/sdk-public-api.json` lists the three names and is current (C016); the root header has one "- Agent setting exports:" bullet that names all three | P0 | |
+| AC-14 | a DIRECT Anthropic agent with an `output_schema` and an effort | a structured-output call is built | `output_config` contains both `format` and `effort` | P0 | |
+| AC-15 | a DIRECT Gemini 3.x agent with `temperature` and an effort | the call is built | `generationConfig` contains `temperature` and `thinkingConfig.thinkingLevel` | P0 | |
+| AC-16 | `Runner(provider, model_name, reasoning_effort=v)` resolving to a non-text runner type | `build()` runs | `ConfigurationError`; the effort is never dropped | P1 | |
+| AC-17 | a DIRECT agent with an effort, whose scripted reply reports reasoning tokens in the vendor's documented usage shape | the call is recorded | `UsageRollup` output tokens and `cost_usd` equal those of the same reply recorded with no effort | P1 | |
+| AC-18 | the model given as `"openai/gpt-5.6"`, `"gpt-5.6"` (alias), `" GPT-5.5 "` or `"anthropic/claude-sonnet-5"` | the effort is checked | support is that of the normalized id (`gpt-5.6-sol`, `gpt-5.5`, `claude-sonnet-5`); the message names the model as given, stripped | P1 | |
+| AC-19 | the release record | `docs/design/release-0-4-0.md` is read | the §12.5 sentence follows the #1192 sentence on line 17, and line 19 says 736 exports, 97 added | P2 | |
+| AC-20 | the effort set (negative) | any call is built | the body never contains `max`, a remapped level, a key, or a reasoning field for a provider other than the call's own | P0 | |
+
+### 6.3 Edge cases and failure modes
+
+| ID | Trigger (input + state) | System behavior | User sees | Guarded by (INV-/D-) |
+|---|---|---|---|---|
+| EC-1 | `Agent(..., reasoning_effort=HIGH)` with the default `model_mode=AUTO` | Without a guard, the gateway would answer 422 on the unknown field after admission, or the effort would be dropped. Instead the agent is refused at construction | `ConfigurationError` naming `TextModelMode.DIRECT` | INV-5, D-2 |
+| EC-2 | `xhigh` on `gemini-3.5-flash` | Without a guard, the request would carry a level Gemini's enum lacks and fail with 400 after the call. Instead it is refused | the §4 message | INV-3, D-3 |
+| EC-3 | `medium` on `deepseek-v4-pro` | DeepSeek documents that `medium` "maps to high" (DS-6). Sending it would silently run `high`. Instead it is refused | capability message listing none, low, high | INV-3, D-4 |
+| EC-4 | `none` on any `muse-spark-*` | Meta returns HTTP 400 (MS-3, MS-5). Refused | capability message | D-3 |
+| EC-5 | primary `gemini-3.5-flash` + backup `gpt-5.5`, effort `xhigh` | Without the chain check, every primary call would 400 (`ProviderRequestError` ∈ `DEFAULT_FALLBACK_ERRORS`) and the run would silently move to the backup, paying for a failed call each turn. Refused at construction | capability message for the primary | INV-6, D-5 |
+| EC-6 | Anthropic agent with `output_schema` and an effort | `_attach_response_format` assigns `payload["output_config"]` whole (`anthropic.py:69-70`). A fragment attached earlier, or via `extra_body`, would be erased. The fragment is deep-merged after it | both keys present | INV-2, D-7 |
+| EC-7 | `TextModelConfig(extra_body={"reasoning": {...}}, reasoning_effort=LOW)` | `payload.update(extra_body)` would overwrite the fragment silently. Refused | overlap message | INV-7 |
+| EC-8 | `thinking_config={"type": "enabled", ...}` plus an effort | The request would be ambiguous: Anthropic would get two thinking controls, Gemini two `thinkingConfig` sources. Refused | both-set message | INV-7 |
+| EC-9 | `Runner(...image model..., reasoning_effort=HIGH).build()` | `_config_options_for` would drop the option, because `ImageModelConfig` has no such field. Refused | `ConfigurationError` | INV-3, D-1 |
+| EC-10 | a model id with no row: a new vendor model, `openrouter/*`, `kimi`, `mistral`, `minimax`, or a bare-only id | Refused. The table only lists ids the runner catalog can build and the docs cover | capability message with "no reasoning effort" | D-3; accepted limitation: a new model needs a table row |
+| EC-11 | Vendor docs change after `REASONING_EFFORT_AS_OF` | Two cases. A newly supported value is still refused, which is loud. A newly withdrawn value is sent; the vendor returns 400, which surfaces as `ProviderRequestError` (and moves to a fallback when one is configured) | vendor 400 or refusal | accepted limitation; `REASONING_EFFORT_AS_OF` plus the README sources section make the staleness visible |
+| EC-12 | Anthropic DIRECT with no `max_output_tokens` and a `high`/`xhigh` effort | `max_tokens` defaults to 1024 (`anthropic.py:56`), and thinking counts toward it (A3). The answer can be cut short. This is pre-existing: adaptive thinking is on by default on the 5.x models (A59) | truncated reply | accepted limitation (NG-13, Q-6) |
+| EC-13 | `temperature` set with an effort on OpenAI, Anthropic, DeepSeek or Gemini | Anthropic 5.x already returns 400 for non-default temperature on every request (A26). gpt-6-astra wants it removed when the effort is not `none` (O15). DeepSeek ignores it in thinking mode (DS-20). Gemini ignores it (G27). Most of this is pre-existing at the vendors' default efforts | vendor 400 or ignored temperature | accepted limitation (NG-13, Q-7) |
+| EC-14 | a forced `tool_choice` in thinking mode | 400 on Anthropic 5.5/Fable 5.1/Mythos 5.1 (A31) and DeepSeek (DS-22). Meta (MS-17) and GLM (GL-18) accept only auto. This is pre-existing, because thinking is on by default | vendor 400 | accepted limitation |
+| EC-15 | DeepSeek with tools, when history holds a final assistant turn without `reasoning_content` (multi-turn chat, a Jev same-context continuation, or an OpenAI → DeepSeek fallback hop) | DS-28 says the API returns 400. The SDK's final turns are `{"role": "assistant", "content": output}` (`runtime.py:2236-2237`). Pre-existing: thinking is on by default (DS-34). `low`/`high` change nothing, and `none` avoids it | vendor 400 | accepted limitation (NG-9, Q-5) |
+| EC-16 | OpenAI reasoning models in a tool loop | `formatter.py:359-381` drops reasoning items, and `openai.py:276` never echoes item ids, so the requests are accepted. The vendor still "highly recommend[s]" passing reasoning items back (O22). Pre-existing at the default effort | lower quality or more tokens | accepted limitation (NG-9, Q-5) |
+| EC-17 | a chat-completions hop (DeepSeek, xAI, GLM, Meta) followed by an OpenAI hop, carrying the transcript (`fallback.py:154-167`) | `_responses_items` rebuilds a tool-call turn as `{"role": "assistant", "content": ...}` plus `function_call` items and drops every other key (`openai.py:274-288`). Final turns carry no `reasoning_content`. So a chat hop's reasoning never reaches OpenAI | nothing | D-15 |
+| EC-18 | restore of a checkpoint on an SDK whose table no longer supports the stored (model, value) | `restore` re-runs the guard, which refuses | `ConfigurationError` on restore | INV-3; accepted (loud) |
+| EC-19 | fork, or `AgentForkSettings(provider/model_name)`, to a model that cannot take the effort | The child's `BaseAgent.__init__` refuses. The fork tool catches every exception and returns `ToolResult.error(..., metadata={"error_type": "ConfigurationError"})` (`vidbyte/tools/builtins/fork/fork.py:114-132`) | the model sees the reason | INV-3, D-16 |
+| EC-20 | a specialist's own `BaseAgent` without an effort, under a JevAgent with one | The specialist runs at its own setting (the provider default) | — | accepted limitation (NG-5) |
+| EC-21 | `model_name="anthropic/claude-sonnet-5"` with `provider=None` | The guard derives the pair with `Runner._normalize_provider_and_model`, exactly as the runner does | normal behavior | D-5 |
+| EC-22 | effort set, but the agent has no provider or no model name | The agent could never run (`Runner.build` requires both). Refused, so nothing is silently unused | identity message | INV-3 |
+| EC-23 | `deepseek-chat` / `deepseek-reasoner` | These names "will be discontinued … (2026-07-24)" (DS-19). No row, so refused | capability message | D-3 |
+| EC-24 | `claude-mythos-preview` | Deprecated. Its end-of-life date conflicts between the API reference (A92: June 30, 2026) and the deprecations page (A96). Refused | capability message | D-3, Q-10 |
+| EC-25 | `none` on `claude-opus-5` or `claude-haiku-5-5` | The SDK sends only `thinking: {"type": "disabled"}`, at the model's default effort (A56: high on Opus 5, medium on Haiku 5.5). The table says this works "at `high` effort or below" (A86, A81, A94) | thinking off | D-8 |
+| EC-26 | the effort on `claude-opus-4-8`, which does not think when the `thinking` field is omitted (A87) | `output_config.effort` is sent alone. It shapes token spend "whether or not thinking is enabled" (A33). The SDK does not turn adaptive thinking on | effort applies to output tokens | A-11; accepted |
+| EC-27 | concurrent agents in one process sharing the registry | `attach` deep-copies, so two payloads never share a fragment object | — | INV-13 |
+| EC-28 | a value equal to the vendor default (for example `medium` on `gpt-5.5`) | Sent explicitly. Anthropic says this "produces exactly the same behavior as omitting" (A57) | — | INV-2 |
+| EC-29 | a checkpoint taken by this SDK, restored by an older SDK that has no such key | The older `restore` ignores the unknown key, so the restored agent runs at the provider default | — | accepted (downgrade path) |
+
+**Rollback of the user action:** the developer deletes `reasoning_effort=…` and the next construction sends nothing (INV-1). A checkpoint written with the effort keeps `runtime_config["reasoning_effort"]`. Restoring it re-applies the effort. To drop it, restore and then fork with a fresh agent, or edit the stored key. The registry and the guard keep no other state.
+
+## §7 Requirements
+
+**Functional**
+| ID | Requirement | Priority | Source (request.md / G-) |
+|---|---|---|---|
+| FR-1 | `ReasoningEffort` is a `StrEnum` with exactly `NONE="none"`, `MINIMAL="minimal"`, `LOW="low"`, `MEDIUM="medium"`, `HIGH="high"`, `XHIGH="xhigh"`, in that order. It is defined in `vidbyte/lib/enums/text_model.py`, exported from `vidbyte.lib.enums`, and root-exported. | P0 | §C "The value set is already published"; G-3 |
+| FR-2 | `TextModelConfig.reasoning_effort: ReasoningEffort \| None = None` is appended as the last field. Construction converts it and refuses per INV-5, INV-7, INV-8 and the table. | P0 | §C "Every agent, through the shared path"; Q1, Q2; G-1, G-2 |
+| FR-3 | `ReasoningEffortRegistry` owns the §9.2 mapping (`REASONING_EFFORT_FORMS`, `REASONING_EFFORT_SUPPORT`, `REASONING_EFFORT_AS_OF`) and exposes `supported`, `refusal` and `attach` with the §8.5 texts. | P0 | §C "Provider facts must come from the providers' own documentation"; G-1, G-2 |
+| FR-4 | The four text payload builders (OpenAI `_create_text_payload`; Anthropic, Gemini and OpenAI-compatible `_create_payload`) call `ReasoningEffortRegistry.attach` immediately before `_attach_extra_body`. | P0 | §C "each provider adapter sends it in that provider's own wire form"; G-1 |
+| FR-5 | `Runner` takes `reasoning_effort` (keyword-only), passes it to text configs, and refuses it for any other runner type. | P0 | INV-3; G-2 |
+| FR-6 | `BaseAgent` takes `reasoning_effort` (keyword-only, after `temperature`). It stores the value on `AgentRunnerConfig.reasoning_effort` (appended field) and passes it to every runner it builds: `_runner_for_model` and each fallback hop. | P0 | D-P9; §C Q3; G-1 |
+| FR-7 | `AgentReasoningEffortGuard.refuse_unsupported` runs in `BaseAgent.__init__` right after the spend-cap refusal. It refuses a gateway mode, any chain entry without a form, and a missing provider or model. | P0 | §C Q1, Q3 ("a bad primary in front of a good fallback must be tested"); G-2 |
+| FR-8 | The paths that copy `temperature` today copy the effort too: `AgentForker.fork`, `ContinualTraceAgent.from_source_agent`, `HandoffAgent.from_source_agent`, `_export_runtime_config` (only when set) and `restore`. | P0 | §C Q3 "Which calls"; G-1 |
+| FR-9 | `JevAgentSettings.reasoning_effort: ReasoningEffort \| None = None` is appended as the last field and validated in `__post_init__`. `JevAgent` passes it to its main agent and to the 8 child builders that copy `temperature`. The brief writer, specialists and decisions are unchanged. | P0 | Q10 "JevAgent should have a reasoning effort"; §C Q3; G-1 |
+| FR-10 | Root-export `ReasoningEffort`, `DecisionModelConfig` and `DecisionModelMode`: the header bullet, eager imports, `__all__`, and the regenerated contract with 736 exports. | P0 | §C "Second slice"; G-3 |
+| FR-11 | `AgentFallback.__init__` and `AgentFallbackSettings.to_fallback` take `reasoning_effort` (keyword-only, default `None`). `from_spec` passes the agent's value, and `build_runner` hands it to every hop's `Runner`. | P0 | §C Q3; INV-6 |
+| FR-12 | Record the change in `docs/design/release-0-4-0.md` (line 17 sentence and line 19 tally) and update the READMEs and the skill doc in §12.5. | P1 | §C "Version (D-P2)"; AGENTS.md folder-README rule |
+
+**Non-functional**
+| ID | Requirement | Priority | Target |
+|---|---|---|---|
+| NFR-1 | Zero behavior change when unset (request.md §D "just run the jev agent with no parameters ... whatever these defaults are they will run") | P0 | AC-8: identical bodies and checkpoints; existing tests pass except the three layout pins S2 appends to (§13) |
+| NFR-2 | A refusal costs no I/O | P0 | 0 HTTP requests and 0 environment reads beyond today's key matching; the check is O(chain length) dictionary lookups |
+| NFR-3 | Lint stays at or below the base on every rule | P0 | zero new findings per rule versus `base_commit`, compared per rule rather than by totals (request.md "ratchet slack"): A001, A002, A007, A009, C008, C016, S008, S009, S015, S060; no baseline edit and no suppression |
+| NFR-4 | Every wire cell is traceable | P0 | each "sent" or "refused" cell cites a §9.2 quote ID with URL and UTC fetch time; the registry module comments name the vendor URL per provider; the registries README has a sources section |
+| NFR-5 | Reasoning spend is tracked for every agent that sets it (request.md §D "i want every agent to be tracking usage", "make "max_spend" a universal command") | P0 | AC-17; no change to `vidbyte/agents/pricing/*` |
+| NFR-6 | The refusal is one sentence that names the supported values (request.md §D "you can raise an error with a message explaining …") | P0 | §8.5 templates, character for character |
+| NFR-7 | Size and placement | P1 | `vidbyte/agents/base.py` grows by at most 12 lines; `vidbyte/agents/runtime.py`, `_generate_reply` and `_process_tool_call` are not touched; each new module stays under 400 lines |
+
+**Weighted words (request.md §D) → where each lands:**
+| Weighted word | Lands as |
+|---|---|
+| "JevAgent should have a reasoning effort" | FR-9, INV-15, AC-1, AC-9 |
+| "all the setting/things that are possible to be tweaked/customized through the jevAgent I want to add to the vidbyte-cli/" | FR-9, FR-10, AC-13 (a named `JevAgentSettings` field and root names the CLI can import) |
+| "i want every agent to be tracking usage" | INV-10, NFR-5, AC-17 |
+| "make "max_spend" a universal command in the cli" | INV-10, NFR-5 (reasoning spend reaches R3's cap); the CLI part is C3, not this slice |
+| "you can raise an error with a message explaining that they need 1 of these 7 api providers" | INV-11, NFR-6 (the same explain-the-fix standard for this refusal); the provider gate itself is C1, not this slice |
+| "a helper class that runs before the core logic runs" | INV-4, FR-7 (`AgentReasoningEffortGuard` runs at construction, before any call); the CLI gate is C1, not this slice |
+| "I want to make sure that the user has one of the 7 provider keys." | §9.2 table covers exactly the 7 CLI providers; the key gate is C1, not this slice |
+| "I dont want them to be able to use a key outside of this" | INV-9 |
+| "just run the jev agent with no parameters ... whatever these defaults are they will run." | INV-1, NFR-1, AC-8 |
+| "I dont want writes to be denied." | INV-9 (the effort never touches `permission_policy`); the CLI default is C4, not this slice |
+| "if there are clarifying questions the JevAgent will stop, stream these questions back …" | INV-15 (`JevClarificationAgent` runs on the main model with its effort); the protocol is C4, not this slice |
+| "Can you give me a checklist of all the basic/required commands" | not this slice (answered in request.md §C.0) |
+| "you can just auto merge that applies this change and updates the version" | auto-merge happens at S6, not this slice; "updates the version" is overridden by D-P2 (FR-12 records the change instead) |
+
+---
+
+## Part C — Design
+
+## §8 Architecture and decisions
+
+### 8.1 Decisions
+| ID | Decision | Deciding reason | Runner-up | Flips if |
+|---|---|---|---|---|
+| D-1 | The effort is a typed field on the provider-neutral request record (`TextModelConfig`). A lib registry turns (provider, model, effort) into the wire fragment, and each adapter attaches it with one call. | `TextModelConfig` is the one record every text call goes through (both runner builders, the streaming builders and direct callers). One registry keeps the 7 vendor formats in one audited table instead of 4 adapters. | A per-adapter `_attach_reasoning_effort` method holding its provider's forms | a vendor's form needs response-side handling (a parser change), which belongs in its adapter |
+| D-2 | The effort is sent only in `TextModelMode.DIRECT`. Any other mode with an effort is refused at construction. | The gateway refuses unknown body fields with 422, and `EMITTED_KEYS` has no reasoning keys (orchestrator ruling). D-P9 forbids a silent drop. C4 runs JevAgent DIRECT on the user's key. | Strip the effort in gateway modes | the backend allow-list gains the keys (Q-2) |
+| D-3 | Support is declared per exact model id after `ProviderModelRegistry.normalize_model` (prefix strip, alias). An id with no row supports nothing. Each row lists only values a raw vendor doc names for that model. | Vendors differ per model: gpt-6.1-sol has no `none` (O11), gemini-3.8-flash errors on `minimal` (G10), grok-4.3 has `none` and grok-4.7 does not. A per-provider rule would send 400s or remaps. | Per-provider value sets | vendors publish a machine-readable capability list the SDK can read at run time |
+| D-4 | A value the vendor documents as accepted but mapped to a different level is refused: DeepSeek `minimal`/`medium`/`xhigh`; GLM-5.2 `minimal`/`low`/`medium`/`xhigh`; Meta `xhigh`; grok-4.5 `xhigh`. | D-P9 "must not silently ignore". Sending `medium` and running `high` is a silent remap the caller pays for. | Send the value and let the vendor remap | Q-1 is answered Yes |
+| D-5 | The construction refusal lives in a focused agent-layer module, `AgentReasoningEffortGuard` (`vidbyte/agents/reasoning_effort.py`). `BaseAgent.__init__` calls it once, with no new branch, after R3's spend-cap refusal. It checks the mode and then every chain entry: `fallback.models` when a chain exists, else the primary from `Runner._normalize_provider_and_model`. | It mirrors the sibling `AgentSpendCap.model_refusal` (`spend_cap.py`), keeps `base.py` (1,830+ lines) thin, and refuses before the first call. `TextModelConfig` alone would refuse only at the first `arun`, and only for the hop in use, which fails INV-4 and INV-6 (a fallback config is built only on a switch, `base.py:1375`). | A refusal only in `TextModelConfig.__post_init__` | — |
+| D-6 | One agent-wide value, sent on every fallback hop in that hop's own provider form. Each hop is validated at construction. | The conversation asks for one setting. A per-hop value would be lost on restore anyway, because hops are stored as identity strings (`base.py:652`). | `FallbackModel.reasoning_effort` | Q-4 is answered Yes |
+| D-7 | `attach` runs immediately before `_attach_extra_body` and deep-merges a deep copy of the fragment. `TextModelConfig` refuses an `extra_body` whose top-level keys overlap the fragment's. | Anthropic's `_attach_response_format` assigns `output_config` whole (`anthropic.py:69-70`), and Gemini assembles `generationConfig` in `_attach_generation_config` (`gemini.py:179-197`). Attaching after both keeps their keys, and attaching before `extra_body` keeps the documented escape hatch last. | Route the fragment through `extra_body` | — |
+| D-8 | The `none` forms. OpenAI, DeepSeek and xAI send the effort value `"none"`. Anthropic sends `{"thinking": {"type": "disabled"}}`. Gemini 2.5 Flash and Flash-Lite send `thinkingBudget: 0`. GLM-5.2 sends `{"thinking": {"type": "disabled"}}`. Anywhere a vendor documents no off form, `none` is refused. | Each vendor documents its own off switch (O2, A12, G15, GL-11, DS-6, XA-13). The request defines `none` as "reasoning is explicitly off where the provider can express that". | Refuse `none` everywhere except effort-valued vendors | — |
+| D-9 | The Jev children follow the `temperature` precedent. The main agent and its 8 SDK-built children that copy `settings.temperature` also copy the effort. The brief writer (its own `JevRunBriefSettings.temperature`), specialists and decisions are not touched. | All of these children run on the same provider, model and key, so one check covers them. CLI's published copy is "how much reasoning each turn asks your model to spend". The briefing calls the temperature precedent "a fair reading". | Inherit only in run-scope copies (clones, swarm, bulk, fresh continuation) | Q-3 is answered Yes |
+| D-10 | Root-export `ReasoningEffort`, `DecisionModelConfig` and `DecisionModelMode`. `ModelProvider` stays non-root. | `DecisionModelConfig(provider: ModelProvider \| str = TYPESAFE, …, mode: DecisionModelMode = TYPESAFE)` takes a string provider, but C4 needs `DecisionModelMode.VIDBYTE_MANAGED` to pass `JevRuntimeSettings`' check (`jev/settings.py:385`). This follows #1190 ("ModelProvider stays non-root"). | Also root-export `ModelProvider` | C4 needs a provider other than the default TypeSafe |
+| D-11 | `ReasoningEffort` is a `StrEnum`. | The sibling effort enums `GrokReasoningEffort` and `MuseReasoningEffort` are `StrEnum`. `str(member)` and f-strings give the value (`vidbyte/lib/enums/native_threads.py:5`), which matters in messages and on the wire. | `(str, Enum)` like `TextModelMode` | — |
+| D-12 | Every carrier types the field `ReasoningEffort \| None`. Strings are accepted at run time through `RecordFieldConverter.to_enum`, the grain `model_mode` and `GrokThreadConfig.reasoning_effort` (`native_threads.py:452-459`) already follow. | `None` is structurally required, because unset must differ from every level (field guide strict-config-dataclasses allows such a union). One type everywhere keeps S009 (mypy) from gaining findings. | `ReasoningEffort \| str \| None` on the agent signatures | — |
+| D-13 | Checkpoints store `runtime_config["reasoning_effort"] = value` only when the effort is set. `restore` reads it with `.get`. | INV-1 keeps unset checkpoints byte-identical, and an old checkpoint restores as `None` with no schema bump. | Always store the key | — |
+| D-14 | Every refusal is `ConfigurationError`, with no new `FailureCode` member. | This is the R3 precedent. Appending a `FailureCode` member fails the surface test everywhere (pipeline.md "FailureCode trap"). | A dedicated error class | — |
+| D-15 | No parser or echo change. A chat hop's `reasoning_content` never reaches an OpenAI hop. | request.md Q5 default. `openai.py:274-288` rebuilds tool-call turns without extra keys, and final turns carry none. | Strip `reasoning_content` on hops | Q-5 is answered Yes |
+| D-16 | The fork tool (`vidbyte/tools/builtins/fork/fork.py`) is not edited. A fork child inherits the effort. A model-supplied switch to an incapable model returns the tool's existing error result. | No conversation control asks for a model-set effort. Editing `vidbyte/tools/` adds an inherited local red (`test_harness_threads_surface.py:270-278`). | Add an effort parameter to the tool schema | Q-4 is answered Yes |
+| D-17 | The registry lives in `vidbyte/lib/registries/`, as module-level tables plus a static-method class, and is not added to `vidbyte/lib/registries/__init__.py`. | It is bottom-layer lookup data like `provider_keys.py` and `models.py`. Callers import module paths directly (`compatible.py` imports `vidbyte.lib.registries.structured_output`). `vidbyte/lib/configs/` would turn the surface test red locally (`:274`). | `vidbyte/lib/configs/reasoning_effort.py` | — |
+| D-18 | The version stays 0.4.0, and the change is recorded in `docs/design/release-0-4-0.md`. | D-P2 | — | — |
+
+### 8.2 Patterns inherited
+- **Construction-time refusal over the model chain.** It refuses before the first paid call and checks every chain entry. Precedent: `vidbyte/agents/spend_cap.py:AgentSpendCap.model_refusal`, called at `vidbyte/agents/base.py:255-257`.
+- **Enum field converted in `__post_init__` with `RecordFieldConverter.to_enum`.** One canonical converter, owned by `validation.py` (C008). Precedent: `vidbyte/lib/dataclasses/native_threads.py:GrokThreadConfig.__post_init__` (`:458-459`).
+- **Lookup registry with documented sources.** Vendor facts are kept as data with citations. Precedents: `vidbyte/lib/registries/provider_keys.py:ProviderKeyMatcher` (KEY_FORMATS with sources in the registries README), `vidbyte/lib/registries/models.py:ProviderModelRegistry`.
+- **Copy-path threading of a runner field.** The effort rides the same lines as `temperature`. Precedents: `vidbyte/agents/fork.py:72`, `continual_trace.py:66`, `handoff.py:70`, `base.py:561,606,1685`, `fallback.py:142,210`, and the Jev builders listed in §12.3.
+- **Root export of an agent setting** (R1, #1190): one header bullet, an eager import, an `__all__` entry, and the contract regenerated by `scripts/generate-sdk-public-api.py`. Precedent: `vidbyte/__init__.py:13`, `:1127-1128`.
+- **Strict mapping table with first-party citations.** This is the boring industry pattern of an explicit capability matrix, instead of heuristics.
+
+### 8.3 Smaller design rejected
+
+**Option A, the smallest:** carry the effort as a per-vendor dictionary in `extra_body` (or `thinking_config`), built by `BaseAgent` from a small table. No new `TextModelConfig` field, and no adapter edits. It fails on four counts:
+- `Runner._config_options_for` keeps only fields of the target config (`utility.py:134`), and no agent path passes `extra_body` today, so a new pass-through would be needed anyway.
+- Every adapter applies `extra_body` with `payload.update` (`openai.py:340-343`, `anthropic.py:121-124`, `gemini.py:216-221`, `compatible.py:131-134`). On Anthropic, `{"output_config": {"effort": …}}` would erase `output_config.format`. That breaks every structured-output agent: the Jev machinery, ContinualTrace and Handoff. On Gemini, `{"generationConfig": …}` would erase temperature, `maxOutputTokens` and `responseSchema`. This fails INV-2 and AC-14/AC-15.
+- `thinking_config` is ignored by OpenAI and the compatible adapters, which fails INV-3.
+- It cannot be checked against `thinking_config` or `extra_body` collisions in one place, which fails INV-7.
+
+**Option B:** validate in `TextModelConfig` only, with no agent guard. It refuses only at the first `arun`, and only for the model in use. A bad primary in front of a good fallback is found only after a paid failed call, which fails INV-4 and INV-6.
+
+### 8.4 Complexity budget
+| Item | Count | Justification for each |
+|---|---|---|
+| New files | 2 | `vidbyte/lib/registries/reasoning_effort.py`: the lib-layer table and lookups. The adapters and `TextModelConfig` (lib) must import it, so it cannot live in `agents/`. `vidbyte/agents/reasoning_effort.py`: the guard reads `AgentFallback` (agents layer), which lib may not import (AGENTS.md §3), and `base.py` is over its size bound. |
+| New classes/modules | 3 | `ReasoningEffort` (enum, AGENTS.md placement), `ReasoningEffortRegistry` (FR-3), `AgentReasoningEffortGuard` (FR-7, sibling shape). |
+| New dependencies | 0 | — |
+| New config keys | 0 | The module constants `REASONING_EFFORT_AS_OF` and `GEMINI_THINKING_BUDGET_OFF` are not configuration. |
+| New collections/tables | 0 | — |
+| New public endpoints/commands | 3 root names | `ReasoningEffort`, `DecisionModelConfig`, `DecisionModelMode`. Also 7 new keyword parameters or fields: `BaseAgent`, `Runner`, `AgentFallback`, `AgentFallbackSettings.to_fallback`, `TextModelConfig`, `AgentRunnerConfig`, `JevAgentSettings`. |
+
+_The implementer may not exceed this budget without stopping and reporting BLOCKED._
+
+### 8.5 Key interfaces
+
+```python
+# vidbyte/lib/enums/text_model.py
+class ReasoningEffort(StrEnum):
+    NONE = "none"; MINIMAL = "minimal"; LOW = "low"; MEDIUM = "medium"; HIGH = "high"; XHIGH = "xhigh"
+
+# vidbyte/lib/registries/reasoning_effort.py
+REASONING_EFFORT_AS_OF: str = "2026-10-20"           # the date every table row was checked against the vendor docs
+GEMINI_THINKING_BUDGET_OFF: int = 0                  # Gemini 2.5 "disable thinking" budget (G15); named for A007
+REASONING_EFFORT_FORMS: dict[ModelProvider, dict[ReasoningEffort, dict[str, Any]]]     # §9.2 "Wire form" rows
+REASONING_EFFORT_SUPPORT: dict[ModelProvider, dict[str, tuple[ReasoningEffort, ...]]]  # lower-case model id -> values, enum order
+
+class ReasoningEffortRegistry:
+    @classmethod
+    def supported(cls, provider: ModelProvider | str, model: str) -> tuple[ReasoningEffort, ...]: ...
+    # () for a (provider, model) with no row; ConfigurationError for an unknown provider or blank model
+    @classmethod
+    def refusal(cls, *, provider: ModelProvider | str, model: str, effort: ReasoningEffort, mode: TextModelMode) -> str | None: ...
+    # mode reason first, then capability reason; None when the call may be sent
+    @classmethod
+    def attach(cls, payload: dict[str, Any], *, provider: ModelProvider | str, model: str, effort: ReasoningEffort | None) -> None: ...
+    # no-op for None; deep-merges a deep copy of the fragment; ConfigurationError (capability text) when unsupported
+
+# vidbyte/agents/reasoning_effort.py
+class AgentReasoningEffortGuard:
+    @staticmethod
+    def refuse_unsupported(*, agent_name: str, runner_config: AgentRunnerConfig, fallback: AgentFallback | None) -> None: ...
+
+# carriers (all keyword-only parameters, all default None; record fields appended last)
+TextModelConfig.reasoning_effort: ReasoningEffort | None = None
+AgentRunnerConfig.reasoning_effort: ReasoningEffort | None = None
+JevAgentSettings.reasoning_effort: ReasoningEffort | None = None
+TextModelConfig._validate_reasoning_effort(self) -> None    # private; the last call in __post_init__
+JevAgentSettings._validate_reasoning_effort(self) -> None   # private; called right after _validate_timeout()
+BaseAgent.__init__(..., temperature: float | None = None, reasoning_effort: ReasoningEffort | None = None, ...)
+Runner.__init__(..., temperature: float | None = None, reasoning_effort: ReasoningEffort | None = None, options=...)
+AgentFallback.__init__(models, *, ..., model_mode=TextModelMode.AUTO, reasoning_effort: ReasoningEffort | None = None)
+AgentFallbackSettings.to_fallback(*, primary, ..., model_mode=TextModelMode.AUTO, reasoning_effort: ReasoningEffort | None = None)
+```
+
+**Refusal texts (contract; `{…}` are substitutions; the registry returns its reasons without a trailing period):**
+
+| Site | Text |
+|---|---|
+| registry, capability | `{provider.value}:{model.strip()} has no documented form for reasoning effort '{effort.value}' (it supports {", ".join(v.value for v in supported)})`. When the tuple is empty, the parenthesis reads `(it supports no reasoning effort)`. |
+| registry, mode | `TextModelMode.{mode.name} sends calls through the Vidbyte gateway, which does not accept a reasoning effort; only TextModelMode.DIRECT sends it` |
+| `BaseAgent` (guard) | `Agent {agent_name} sets reasoning_effort, but {"; ".join(unique reasons in chain order)}.`, with `details={"agent": agent_name, "field": "reasoning_effort", "reasoning_effort": effort.value}` |
+| `BaseAgent` (guard), no identity | `Agent {agent_name} sets reasoning_effort, but it does not name both a provider and a model_name, so the effort cannot be checked against a model.`, same details |
+| `JevAgentSettings` | `JevAgentSettings sets reasoning_effort, but {reason}.`, with `details={"field": "JevAgentSettings.reasoning_effort", "reasoning_effort": effort.value}` |
+| `TextModelConfig`, mode or capability | `TextModelConfig sets reasoning_effort, but {reason}.`, with `details={"field": "TextModelConfig.reasoning_effort", "provider": provider.value, "model": model, "reasoning_effort": effort.value, "mode": mode.value}` |
+| `TextModelConfig`, both set | `TextModelConfig sets both reasoning_effort and thinking_config; set only one of them.` with `details={"field": "TextModelConfig.reasoning_effort"}` |
+| `TextModelConfig`, `extra_body` overlap | `TextModelConfig sets reasoning_effort, but extra_body also sets {", ".join(sorted(keys))}, which the effort's wire form uses; remove them from extra_body or unset reasoning_effort.` with `details={"field": "TextModelConfig.reasoning_effort"}` |
+| `Runner`, non-text runner | `Runner sets reasoning_effort, but model '{model_name}' resolves to a {runner_type} runner, which has no reasoning effort.` with `details={"provider": provider, "model": model_name, "runner_type": runner_type}` |
+| bad value (any carrier) | the existing `RecordFieldConverter.to_enum` text, with field names `AgentRunnerConfig.reasoning_effort`, `TextModelConfig.reasoning_effort` and `JevAgentSettings.reasoning_effort`: `<field> must be one of none, minimal, low, medium, high, xhigh; got <repr>.` |
+
+Which reason comes first:
+- `refusal` returns the mode reason whenever `mode is not TextModelMode.DIRECT`. Otherwise it returns the capability reason, or `None`.
+- In `TextModelConfig`, the conversion runs first. Then come the mode or capability check, then `thinking_config`, then the `extra_body` overlap.
+
+## §9 Data, API, configuration, migration
+
+### 9.1 Data model
+
+These records gain one optional field. None of them is persisted except the checkpoint key:
+
+| Record | Field | Type | Default | Validation |
+|---|---|---|---|---|
+| `TextModelConfig` (frozen, slots) | `reasoning_effort` (appended after `vidbyte_api_key`) | `ReasoningEffort \| None` | `None` | to_enum, then the registry refusal, then `thinking_config` exclusivity, then the `extra_body` overlap |
+| `AgentRunnerConfig` (frozen, slots) | `reasoning_effort` (appended after `model_mode`) | `ReasoningEffort \| None` | `None` | to_enum only. The model check is the guard's, because this record also holds agents with no model. |
+| `JevAgentSettings` (frozen, slots) | `reasoning_effort` (appended after `system_prompt_presets`) | `ReasoningEffort \| None` | `None` | to_enum, then the registry refusal against (`provider`, `model_name`, `model_mode`) |
+| `RunState.runtime_config` (existing free-form mapping) | key `"reasoning_effort"` | `str`, the enum value | absent | written only when set (D-13) |
+
+There are no indexes, collections or growth. The lifecycle is: the value is set at construction, immutable afterwards, and copied to child agents.
+
+### 9.2 API and interface surface
+
+#### Caller contract for vidbyte-cli C5 (named contract)
+
+1. **The field and the enum.** Import `ReasoningEffort`, `JevAgentSettings` and `TextModelMode` from root `vidbyte`. To set the effort, pass `JevAgentSettings(..., model_mode=TextModelMode.DIRECT, reasoning_effort=ReasoningEffort(<cli value>))`. The CLI's empty value means "omit the argument" (`None`). The SDK's six member values equal the CLI's `AgentReasoningEffort` values one for one.
+2. **Which calls it reaches.** The calls are listed in the "Every agent" table below. For JevAgent, it reaches every generative call of the main agent and of the children in INV-15, in DIRECT mode only. It never reaches Jev decision calls, the run-brief writer, or specialists.
+3. **What each provider receives.** This is the mapping table below, one fragment per "sent" cell, merged into the vendor body. Nothing is sent when the value is unset.
+4. **What is refused, and how.** Construction raises `vidbyte.ConfigurationError` with the §8.5 text in these cases:
+   - in any mode other than `TextModelMode.DIRECT` (including the default `AUTO`);
+   - for every "refused" cell, and for any model id without a row;
+   - for a value outside the six.
+
+   No request is sent. The CLI wraps the error once and carries the SDK text as the cause (CLI C021).
+5. **Spend.** Billed reasoning tokens are inside the usage the SDK records ("Billing" table), so `UsageRollup` and R3's `max_spend_usd` see them.
+6. **Version.** This ships in 0.4.0 (unpublished). The CLI's 0.4 pin (C4) brings it in.
+
+#### "Every agent": which calls carry the effort
+
+| Agent or call | Carries the effort | Where (at `base_commit`) |
+|---|---|---|
+| `BaseAgent` (`Agent`) main-loop text calls | yes | `vidbyte/agents/base.py:1676-1691` `_runner_for_model` |
+| each fallback hop, in its own provider's form | yes; every hop is checked at construction | `vidbyte/agents/fallback.py:193-215` `build_runner` |
+| context-window side calls and algorithm side calls through the agent's own `RunnerHandle` | yes (same runner) | `vidbyte/agents/runtime.py:1054-1061` |
+| `agent.fork()` children (`AgentForker.fork`) | yes; refused if the child's model cannot take it | `vidbyte/agents/fork.py:56-95` |
+| `ContinualTraceAgent.from_source_agent`, `HandoffAgent.from_source_agent` | yes | `continual_trace.py:58-71`, `handoff.py:57-75` |
+| `BaseAgent.restore` | yes (from `runtime_config`) | `base.py:584-631` |
+| `CodingAgent` (passes `**kwargs` to `BaseAgent`) | yes | `vidbyte/agents/coding` (no edit) |
+| JevAgent main agent | yes | `vidbyte/agents/jev/agent.py:92-107` |
+| Jev fresh-continuation, bulk workers, clones, swarm, `JevRunState`/`JevRunStateRelation`, `JevHandoff`, `JevReviewer`, `JevClarificationAgent` | yes (temperature precedent, D-9) | `jev/agent.py:63-72`, `bulk_work.py:49-56`, `compute/clone.py:32-39`, `compute/swarm.py:44-51`, `done/run_state.py:278-286` (Relation subclasses it, `done/relation.py:22`), `done/handoff.py:158-166`, `done/reviewer.py:34-42`, `gate/clarification.py:51-59` |
+| `JevRunBriefWriter` | no (uses `JevRunBriefSettings.temperature`) | `jev/brief/writer.py:57-65` |
+| Jev specialists (developer-built `BaseAgent`s) | their own setting only | `vidbyte/lib/dataclasses/jev.py:660-683` |
+| Jev decision calls (`DecisionModelRunner`, TypeSafe) | no | NG-4 |
+| `ModalityDetector`, image/video/audio/embedding runners | no; `Runner` refuses an effort for a non-text type | `vidbyte/lib/runners/utility.py:118-134` |
+| a direct `TextModelConfig` / `TextModelRunner` / `StreamingTextModelRunner` user | yes, when the field is set; the stream builders reuse the payload builders | `openai.py:123`, `anthropic.py:129` |
+| `AggregateAgent`, `MultiAgent`, `InfiniteMemoryAgent`, `CodexHarnessAgent`, YAML-loaded agents | not supported. `AggregateAgent`'s explicit signature raises `TypeError` (`aggregation.py:225`); YAML refuses the unknown key (`config.py:341-346`) | NG-10 |
+
+#### Mapping table (provider × model × value)
+
+How to read it:
+- "sent" means the call carries the provider's fragment from the "Wire form" row.
+- "refused" means `ConfigurationError` at construction.
+- Each cell's bracket names the §9.2 quote IDs that prove it. The quotes are listed at the end of this section.
+- A model id not listed in a provider's block is refused.
+- Lookup uses the lower-cased id after `ProviderModelRegistry.normalize_model`: the `"{provider}/"` prefix is stripped and `MODEL_ALIASES` is applied.
+- Only ids the runner catalog (`MODEL_PROVIDER_RUNNER_TYPE_MAP`, text type) can build get a row.
+
+**OpenAI** (`POST {endpoint}/responses`, `vidbyte/providers/openai.py:37`). Wire form for every value: `{"reasoning": {"effort": "<value>"}}` [O1, O3, O2, O5].
+
+| Model id | none | minimal | low | medium | high | xhigh | Sources |
+|---|---|---|---|---|---|---|---|
+| `gpt-5.6-sol` | sent | refused | sent | sent | sent | sent | O7 |
+| `gpt-5.6` (alias → `gpt-5.6-sol`) | sent | refused | sent | sent | sent | sent | O40, O41 |
+| `gpt-5.6-terra` | sent | refused | sent | sent | sent | sent | O42 |
+| `gpt-5.6-luna` | sent | refused | sent | sent | sent | sent | O43 |
+| `gpt-6-sol` | sent | refused | sent | sent | sent | sent | O8 |
+| `gpt-6-luna` | sent | refused | sent | sent | sent | sent | O44 |
+| `gpt-6.1-sol` | refused | refused | sent | sent | sent | sent | O45, O11 |
+| `gpt-6-astra` | refused | refused | sent | sent | sent | sent | O37, O12 |
+| `gpt-5.5` | sent | refused | sent | sent | sent | sent | O6 |
+| `gpt-5.5-pro` | refused | refused | refused | sent | sent | sent | O48 |
+| `gpt-5.4` | sent | refused | sent | sent | sent | sent | O46 |
+| `gpt-5.4-mini` | sent | refused | sent | sent | sent | sent | O9 |
+| `gpt-5.4-nano` | sent | refused | sent | sent | sent | sent | O47 |
+| `gpt-5.4-pro` | refused | refused | refused | sent | sent | sent | O49 |
+| `gpt-5.3-codex` | refused | refused | sent | sent | sent | sent | O50 |
+| `gpt-5` | refused | sent | sent | sent | sent | refused | O10 |
+| `o1`, `o3`, `o4-mini`, `gpt-5-mini`, `gpt-5-nano`, `gpt-4o` | refused | refused | refused | refused | refused | refused | unverified: the fetched model page lists no effort values [OA-1 … OA-6] |
+| `gpt-4.1` | refused (all) | | | | | | O14 ("non-reasoning") |
+| `gpt-4`, `gpt-4o-mini`, `gpt-4.1-mini`, `gpt-4.1-nano`, any other id | refused (all) | | | | | | no source |
+
+**Anthropic** (`POST {endpoint}/messages`).
+- `low`, `medium`, `high`, `xhigh` → `{"output_config": {"effort": "<value>"}}` [A1, A2].
+- `none` → `{"thinking": {"type": "disabled"}}` [A12, A67].
+- `minimal` has no form, because the documented values are low, medium, high, xhigh and max [A2].
+
+The `none` column is read from the per-model `"disabled"` cell of Anthropic's thinking table. "at `high` effort or below" means the call works at `low`, `medium` and `high` and returns 400 at `xhigh` [A94, A98]. The SDK sends only the `thinking` field for `none`, so the call runs at the model's default effort, which is `high` or `medium` [A56].
+
+| Model id | none | minimal | low | medium | high | xhigh | Sources |
+|---|---|---|---|---|---|---|---|
+| `claude-opus-5-5` | refused [A20] | refused | sent | sent | sent | sent | A7, A69f, A90, A95 |
+| `claude-sonnet-5-5` | refused [A80] | refused | sent | sent | sent | sent | A70, A69i, A95 |
+| `claude-fable-5-1` | refused [A82] | refused | sent | sent | sent | sent | A71, A69a, A95 |
+| `claude-mythos-5-1` | refused [A83] | refused | sent | sent | sent | sent | A71, A72, A5, A69b |
+| `claude-fable-5` | refused [A84] | refused | sent | sent | sent | sent | A73, A5, A69c |
+| `claude-mythos-5` | refused [A85] | refused | sent | sent | sent | sent | A73, A74, A5, A69d |
+| `claude-opus-5` | sent [A86, A12] | refused | sent | sent | sent | sent | A75, A69g |
+| `claude-haiku-5-5` | sent [A81, A12] | refused | sent | sent | sent | sent | A76, A69k, A95 |
+| `claude-sonnet-5` | sent [A17, A12] | refused | sent | sent | sent | sent | A58b, A61, A77, A62, A69j, A24 |
+| `claude-opus-4-8` | sent [A87] | refused | sent | sent | sent | sent | A78, A79, A5, A69h |
+| `claude-haiku-4-5`, `claude-haiku-4-5-20251001` | sent [A18] | refused | refused | refused | refused | refused | A9, A8, A25, A91 |
+| `claude-mythos-preview` | refused (all; deprecated, end-of-life dates conflict) | | | | | | A92, A96 |
+| `claude-3-5-sonnet-latest` | refused (all; retired) | | | | | | A93, A97 |
+
+**Gemini** (`POST {endpoint}/models/{model}:generateContent`).
+- `minimal`, `low`, `medium`, `high` → `{"generationConfig": {"thinkingConfig": {"thinkingLevel": "MINIMAL" | "LOW" | "MEDIUM" | "HIGH"}}}` [G8, G59, G4, G64, G65, G5].
+- `none` → `{"generationConfig": {"thinkingConfig": {"thinkingBudget": 0}}}` [G7, G15].
+- `xhigh` has no form, because the `ThinkingLevel` enum has none [G4, G64, G65, G5].
+
+The level tables come from the generateContent docs, which the SDK's adapter calls. An Interactions-API table that lists levels for 2.5 models (G100) conflicts with G16 and does not govern.
+
+| Model id | none | minimal | low | medium | high | xhigh | Sources |
+|---|---|---|---|---|---|---|---|
+| `gemini-3.8-flash` | refused [G10] | refused [G10] | sent | sent | sent | refused | G9, G11, G12, G13, G86 |
+| `gemini-3.6-flash` | refused [G10] | sent | sent | sent | sent | refused | G9, G10, G11, G12, G13, G22 |
+| `gemini-3.5-flash` | refused [G10] | sent | sent | sent | sent | refused | G18, G19, G94, G95, G96, G23 |
+| `gemini-3.5-flash-lite` | refused [G14a, G14b] | sent | sent | sent | sent | refused | G9, G10, G11, G12, G13, G21, G24 |
+| `gemini-3.1-flash-lite` | refused [G14a, G14b] | sent | sent | sent | sent | refused | G9, G10, G11, G12, G13, G18, G19, G94, G95, G96, G98 |
+| `gemini-3-flash-preview` | refused [G14a, G14b] | sent | sent | sent | sent | refused | G18, G19, G94, G95, G96, G97, G99 |
+| `gemini-3.1-pro-preview` | refused | refused [G19] | sent | sent | sent | refused | G18, G94, G95, G96, G20 |
+| `gemini-2.5-flash` | sent | refused | refused | refused | refused | refused | G15, G16, G17 |
+| `gemini-2.5-flash-lite` | sent | refused | refused | refused | refused | refused | G15, G16, G87 |
+| `gemini-2.5-pro` | refused [G88] | refused | refused | refused | refused | refused | G16, G88 |
+
+No fetched page documents a thinking-off form for any Gemini 3.x model. `thinking_budget` is still accepted on 3.5 Flash "for backward compatibility" [G101, G102], but no page says a budget of 0 turns thinking off there. `minimal` "does not guarantee that thinking is off" [G10], and 3 Flash and Flash-Lite "do not support full thinking-off" [G14a, G14b]. So `none` is refused on every 3.x row.
+
+**DeepSeek** (`POST https://api.deepseek.com/v1/chat/completions`, `vidbyte/lib/registries/models.py:99`). Wire form: `{"reasoning_effort": "<value>"}` [DS-37, DS-5, DS-6].
+
+| Model id | none | minimal | low | medium | high | xhigh | Sources |
+|---|---|---|---|---|---|---|---|
+| `deepseek-v4-pro`, `deepseek-flash`, `deepseek-v4-flash` | sent [DS-6] | refused (maps to low) [DS-6, DS-8] | sent | refused (maps to high) [DS-6, DS-9] | sent | refused (maps to high) [DS-6, DS-10] | DS-5, DS-15, DS-16, DS-18 |
+| `deepseek-chat`, `deepseek-reasoner` | refused (all; being discontinued) | | | | | | DS-19 |
+
+**xAI** (`POST https://api.x.ai/v1/chat/completions`, a legacy endpoint [XA-0a]). Wire form: `{"reasoning_effort": "<value>"}` [XA-1, XA-2].
+
+| Model id | none | minimal | low | medium | high | xhigh | Sources |
+|---|---|---|---|---|---|---|---|
+| `grok-4.7` | refused [XA-5] | refused | sent | sent | sent | sent | XA-9, XA-2, XA-37 |
+| `grok-4.6` | refused [XA-5] | refused | sent | sent | sent | sent | XA-10, XA-2, XA-7 |
+| `grok-4.5` | refused [XA-5] | refused | sent | sent | sent | refused (docs conflict: "treated as high" [XA-7] vs supported [XA-11]) | XA-8, XA-12, XA-2 |
+| `grok-4.3` | sent | refused | sent | sent | sent | refused (docs conflict: [XA-7], [XA-14] vs [XA-13]) | XA-13, XA-14, XA-15 |
+| `grok-4.5-latest`, `grok-4`, `grok-3`, `grok-4-fast-reasoning`, `grok-4-fast-non-reasoning`, `grok-code-fast-1`, `grok-build-latest` | refused (all; no per-id source, and aliases may differ [XA-4]) | | | | | | XA-4 |
+
+**GLM** (`POST https://open.bigmodel.cn/api/paas/v4/chat/completions` [GL-0], `vidbyte/lib/registries/models.py:100`).
+- `none` → `{"thinking": {"type": "disabled"}}` [GL-11, GL-91].
+- `low`, `high` → `{"thinking": {"type": "enabled"}, "reasoning_effort": "<value>"}` [GL-19, GL-90, GL-12].
+
+| Model id | none | minimal | low | medium | high | xhigh | Sources |
+|---|---|---|---|---|---|---|---|
+| `glm-5.2` | sent [GL-11] | refused (skips thinking, a remap) [GL-7, GL-9] | refused (maps to high) [GL-7, GL-9] | refused (maps to high) [GL-7, GL-9] | sent [GL-7, GL-9] | refused (maps to max) [GL-7, GL-9] | GL-12 |
+| `glm-5.3`, `glm-5.3-flash`, `glm-5.3-flashx` | refused [GL-5] | refused [GL-6, GL-8] | sent | refused [GL-6, GL-8] | sent | refused [GL-6, GL-8] | GL-6, GL-8, GL-13 |
+| `glm-5.1`, `glm-5-turbo`, `glm-4.7`, `glm-4.7-flash`, `glm-4.7-flashx`, `glm-4.6`, `glm-4` | refused (all; effort is 5.2+ only, and disabling is documented only for 5.2) | | | | | | GL-12, GL-11, GL-30 |
+
+**Meta / Muse** (`POST https://api.meta.ai/v1/chat/completions` [MS-30], `vidbyte/lib/registries/models.py:103`; the CLI's "muse" is `ModelProvider.META`). Wire form: `{"reasoning_effort": "<value>"}` [MS-1, MS-5].
+
+| Model id | none | minimal | low | medium | high | xhigh | Sources |
+|---|---|---|---|---|---|---|---|
+| `muse-spark-1.1`, `muse-spark-1.2`, `muse-spark-1.2-contributor`, `muse-spark-1.3`, `muse-spark-1.3-contributor` | refused (HTTP 400) [MS-3, MS-4, MS-5] | sent | sent | sent | sent | refused (docs conflict: "maps to … high" [MS-11] vs "Deeper reasoning" [MS-10]) | MS-5, MS-6, MS-7, MS-8, MS-9, MS-12, MS-13, MS-31, MS-32, MS-33 |
+
+#### Billing: do billed reasoning tokens reach `UsageRollup`? (request.md Q4)
+
+| Provider | Vendor fact | SDK parsing (unchanged) | Reaches the cap? |
+|---|---|---|---|
+| OpenAI | output usage "includes all tokens generated by the model" as `output_tokens` [O19, O20] | `vidbyte/agents/pricing/openai.py:39-49` prices `output_tokens` and records `reasoning_tokens` separately | yes |
+| Anthropic | thinking tokens "are billed as output tokens" [A35]; `output_tokens` is "the inclusive, authoritative total used for billing" [A36] | `vidbyte/agents/pricing/anthropic.py:47-58` prices `output_tokens` | yes |
+| Gemini | "response pricing is the sum of output tokens and thinking tokens" [G31]; `totalTokenCount` includes thoughts [G34] | `vidbyte/agents/pricing/gemini.py:59-63` sums candidates and thoughts | yes |
+| DeepSeek | total is "prompt + completion" [DS-24]; reasoning tokens sit in the completion breakdown [DS-25, DS-26]; billing on input and output [DS-27] | `vidbyte/agents/pricing/compatible.py:61-71` `_billed_output` keeps `completion_tokens` | yes |
+| xAI | reasoning "billed as part of your total consumption" [XA-22]; example `prompt_tokens: 32`, `completion_tokens: 9`, `total_tokens: 135`, `reasoning_tokens: 94` [XA-25a … XA-25d] | `_billed_output` adds reasoning when total = prompt + completion + reasoning (`compatible.py:61-71`) | yes |
+| Meta | "`reasoning_tokens` are part of `completion_tokens`" [MS-20] | `completion_tokens` | yes |
+| GLM | usage shows "Number of output tokens" and "Total number of tokens" with no reasoning field [GL-20, GL-21]; the thinking example has 239 + 8 = 247 [GL-22a … GL-22c] | `completion_tokens` | yes, under A-3 |
+
+Result: no adapter drops billed reasoning tokens. `UsageRollup` needs no field (NG-11), and R3's `max_spend_usd` sees reasoning spend.
+
+#### Echo requirements in a stateless tool loop (request.md Q5)
+
+| Provider | Vendor rule | SDK today (unchanged) | Consequence |
+|---|---|---|---|
+| OpenAI | "we highly recommend you pass back any reasoning items" [O22, O23] | `formatter.py:359-381` drops reasoning items; `openai.py:276` never echoes item ids, so requests are accepted | quality or token efficiency only; EC-16 |
+| Anthropic | "you must pass the thinking blocks … back to the API, complete and unmodified" [A39] | full content list kept (`formatter.py:388-396`) | compliant |
+| Gemini | omitting the first `functionCall`'s `thought_signature` returns 400 [G38] | `dict(content)` kept (`formatter.py:399-415`) | compliant |
+| DeepSeek | with tools, `reasoning_content` "must be fully passed back … even for turns where the model did not perform a tool call" or 400 [DS-28]; without tools it is ignored [DS-30] | tool-call turns keep it (`{**message}`, `formatter.py:347`); final turns are `{"role": "assistant", "content": output}` (`runtime.py:2236-2237`) | pre-existing risk at the default effort (thinking is on by default [DS-34]); EC-15 |
+| GLM | thinking blocks "should be explicitly preserved and returned together with the tool results" [GL-24, GL-27] | tool-call turns keep `reasoning_content` | compliant within a run |
+| xAI | chat accepts assistant reasoning content [XA-29]; the API is stateless [XA-31] | tool-call turns keep it | compliant |
+| Meta | reasoning content "is redacted to empty", so "there is nothing to replay" [MS-22] | — | nothing to echo |
+| chat hop → OpenAI hop | — | `openai.py:274-288` rebuilds tool-call turns without extra keys | a chat hop's `reasoning_content` never reaches OpenAI (D-15, EC-17) |
+
+#### Source catalog (verbatim quotes, raw-fetched 2026-10-20)
+
+Each line is `ID — "verbatim quote" — URL — fetched <UTC>`. Every quote was checked against the raw-fetched text by an independent script (see the S1 report). "OA-n" lines record a fetched page that names no effort values; that absence is what makes the cell "unverified → refused".
+
+<!-- QUOTE-CATALOG:BEGIN (generated by s1-build-catalog.py; do not hand-edit) -->
+
+**OpenAI**
+
+- **O1** — "The `reasoning.effort` parameter guides the model on how much to think when performing a task." — https://developers.openai.com/api/docs/guides/reasoning.md — fetched 2026-10-20T15:25:57Z
+- **O2** — "Supported values are model-dependent and can include `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`." — https://developers.openai.com/api/docs/guides/reasoning.md — fetched 2026-10-20T15:25:57Z
+- **O3** — "- `reasoning: optional Reasoning or null`" — https://developers.openai.com/api/reference/resources/responses/methods/create.md — fetched 2026-10-20T15:26:24Z
+- **O5** — "Some models support only a subset of these values, so check the relevant [model page](https://developers.openai.com/api/docs/models) before choosing a setting." — https://developers.openai.com/api/docs/guides/reasoning.md — fetched 2026-10-20T15:25:57Z
+- **O6** — "Reasoning.effort supports: none, low, medium (default), high and xhigh." — https://developers.openai.com/api/docs/models/gpt-5.5.md — fetched 2026-10-20T15:26:34Z
+- **O7** — "Reasoning.effort supports: none, low, medium (default), high, xhigh, and max." — https://developers.openai.com/api/docs/models/gpt-5.6-sol.md — fetched 2026-10-20T15:26:34Z
+- **O8** — "`reasoning.effort` supports `none`, `low`, `medium` (default), `high`, `xhigh`, and `max`." — https://developers.openai.com/api/docs/models/gpt-6-sol.md — fetched 2026-10-20T15:26:34Z
+- **O9** — "Reasoning.effort supports: none (default), low, medium, high and xhigh." — https://developers.openai.com/api/docs/models/gpt-5.4-mini.md — fetched 2026-10-20T15:26:34Z
+- **O10** — "Reasoning.effort supports: minimal, low, medium, and high." — https://developers.openai.com/api/docs/models/gpt-5.md — fetched 2026-10-20T15:27:22Z
+- **O11** — "The `none` and `minimal` reasoning efforts are not supported." — https://developers.openai.com/api/docs/models/gpt-6.1-sol.md — fetched 2026-10-20T15:26:35Z
+- **O12** — "does not support `none` reasoning" — https://developers.openai.com/api/docs/guides/reasoning.md — fetched 2026-10-20T15:25:57Z
+- **O14** — "> Smartest non-reasoning model" — https://developers.openai.com/api/docs/models/gpt-4.1.md — fetched 2026-10-20T15:26:36Z
+- **O15** — "**Unsupported parameters:** When reasoning effort is not `none`, remove `temperature`, `top_p`, and `top_logprobs`." — https://developers.openai.com/api/docs/guides/latest-model/gpt-6-astra.md — fetched 2026-10-20T15:27:22Z
+- **O19** — "Reported output token usage includes all tokens generated by the model, not only the text visible in a response. The Responses API reports this total as `output_tokens`, while the Chat Completions API reports it as `completion_tokens`." — https://developers.openai.com/api/docs/guides/token-counting.md — fetched 2026-10-20T15:26:24Z
+- **O20** — "The exact number of reasoning tokens used is visible in the [usage object of the response object](https://developers.openai.com/api/reference/resources/responses), under `output_tokens_details`:" — https://developers.openai.com/api/docs/guides/reasoning.md — fetched 2026-10-20T15:25:57Z
+- **O22** — "we highly recommend you pass back any reasoning items returned with the last function call (in addition to the output of your function). If the model calls multiple functions consecutively, you should pass back all reasoning items, function call items, and function call output items, since the last `user` message. This allows the model to continue its reasoning process to produce better results in the most token-efficient manner." — https://developers.openai.com/api/docs/guides/reasoning.md — fetched 2026-10-20T15:25:57Z
+- **O23** — "just ensure all items between the last user message and your function call output are passed into the next response untouched." — https://developers.openai.com/api/docs/guides/reasoning.md — fetched 2026-10-20T15:25:57Z
+- **O37** — "`reasoning.effort` supports `low`, `medium`, `high`, `xhigh`, and `max`." — https://developers.openai.com/api/docs/models/gpt-6-astra.md — fetched 2026-10-20T15:26:34Z
+- **O40** — "The `gpt-5.6` alias routes requests to `gpt-5.6-sol`, the model for flagship capability." — https://developers.openai.com/api/docs/guides/latest-model/gpt-5.6.md — fetched 2026-10-20T15:27:22Z
+- **O41** — "Set `reasoning.effort` intentionally. GPT-5.6 supports `none`, `low`, `medium`, `high`, `xhigh`, and `max`." — https://developers.openai.com/api/docs/guides/latest-model/gpt-5.6.md — fetched 2026-10-20T15:27:22Z
+- **O42** — "Reasoning.effort supports: none, low, medium (default), high, xhigh, and max." — https://developers.openai.com/api/docs/models/gpt-5.6-terra.md — fetched 2026-10-20T15:26:35Z
+- **O43** — "Reasoning.effort supports: none, low, medium (default), high, xhigh, and max." — https://developers.openai.com/api/docs/models/gpt-5.6-luna.md — fetched 2026-10-20T15:26:35Z
+- **O44** — "`reasoning.effort` supports `none`, `low`, `medium` (default), `high`, `xhigh`, and `max`." — https://developers.openai.com/api/docs/models/gpt-6-luna.md — fetched 2026-10-20T15:26:35Z
+- **O45** — "`reasoning.effort` supports `low`, `medium` (default), `high`, `xhigh`, and" — https://developers.openai.com/api/docs/models/gpt-6.1-sol.md — fetched 2026-10-20T15:26:35Z
+- **O46** — "Reasoning.effort supports: none (default), low, medium, high and xhigh." — https://developers.openai.com/api/docs/models/gpt-5.4.md — fetched 2026-10-20T15:26:35Z
+- **O47** — "Reasoning.effort supports: none (default), low, medium, high and xhigh." — https://developers.openai.com/api/docs/models/gpt-5.4-nano.md — fetched 2026-10-20T15:47:37Z
+- **O48** — "Reasoning.effort supports: medium, high (default) and xhigh." — https://developers.openai.com/api/docs/models/gpt-5.5-pro.md — fetched 2026-10-20T15:47:37Z
+- **O49** — "Reasoning.effort supports: medium (default), high and xhigh." — https://developers.openai.com/api/docs/models/gpt-5.4-pro.md — fetched 2026-10-20T15:47:38Z
+- **O50** — "GPT-5.3-Codex supports `low`, `medium`, `high`, and `xhigh` reasoning effort settings." — https://developers.openai.com/api/docs/models/gpt-5.3-codex.md — fetched 2026-10-20T16:12:47Z
+- **OA-1** — absent: the page never contains "effort" — https://developers.openai.com/api/docs/models/o1.md — fetched 2026-10-20T16:12:47Z
+- **OA-2** — absent: the page never contains "effort" — https://developers.openai.com/api/docs/models/o3.md — fetched 2026-10-20T16:12:46Z
+- **OA-3** — absent: the page never contains "effort" — https://developers.openai.com/api/docs/models/o4-mini.md — fetched 2026-10-20T16:12:47Z
+- **OA-4** — absent: the page never contains "effort" — https://developers.openai.com/api/docs/models/gpt-5-mini.md — fetched 2026-10-20T15:27:23Z
+- **OA-5** — absent: the page never contains "effort" — https://developers.openai.com/api/docs/models/gpt-5-nano.md — fetched 2026-10-20T16:12:47Z
+- **OA-6** — absent: the page never contains "effort" — https://developers.openai.com/api/docs/models/gpt-4o.md — fetched 2026-10-20T16:12:47Z
+
+**Anthropic**
+
+- **A1** — "Set `output_config.effort` on the request." — https://platform.claude.com/docs/en/build-with-claude/effort.md — fetched 2026-10-20T15:25:59Z
+- **A2** — "Valid values are `low`, `medium`, `high`, `xhigh`, or `max`." — https://platform.claude.com/docs/en/api/messages/create.md — fetched 2026-10-20T15:28:06Z
+- **A3** — "With `{"type": "adaptive"}`, Claude decides when and how much to think. With `{"type": "enabled"}` (manual extended thinking), you set a `budget_tokens` of at least 1,024. Thinking tokens count toward your `max_tokens` limit." — https://platform.claude.com/docs/en/api/messages/create.md — fetched 2026-10-20T15:28:06Z
+- **A5** — "| `xhigh`  | Extended capability for long-horizon work. Available on Claude Fable 5.1, Claude Mythos 5.1, Claude Fable 5, Claude Mythos 5, Claude Opus 5.5, Claude Opus 5, Claude Opus 4.8, Claude Opus 4.7, Claude Sonnet 5.5, Claude Sonnet 5, and Claude Haiku 5.5.                                                                                    | Long-running agentic and coding tasks (over 30 minutes) with token budgets in the millions |" — https://platform.claude.com/docs/en/build-with-claude/effort.md — fetched 2026-10-20T15:25:59Z
+- **A7** — "Claude Opus 5.5 supports all five effort levels, and `medium` is the default" — https://platform.claude.com/docs/en/build-with-claude/effort.md — fetched 2026-10-20T15:25:59Z
+- **A8** — "Models without a value don’t support the parameter." — https://platform.claude.com/docs/en/models/haiku-4-5/overview.md — fetched 2026-10-20T15:29:18Z
+- **A9** — "| [Default effort](https://platform.claude.com/docs/en/build-with-claude/effort)          | Not supported          |" — https://platform.claude.com/docs/en/models/haiku-4-5/overview.md — fetched 2026-10-20T15:29:18Z
+- **A12** — "Models marked `Always on` cannot turn thinking off. Models marked `On` default to thinking. Claude Opus 5, Claude Sonnet 5, and Claude Haiku 5.5 accept `thinking: {type: "disabled"}`." — https://platform.claude.com/docs/en/build-with-claude/thinking-troubleshooting.md — fetched 2026-10-20T15:28:05Z
+- **A17** — "| Claude Sonnet 5       | Adaptive thinking   | Adaptive thinking | 400 error                        | 400 error                                       | Thinking off                           |" — https://platform.claude.com/docs/en/build-with-claude/thinking.md — fetched 2026-10-20T15:28:05Z
+- **A18** — "| Claude Haiku 4.5      | Thinking off        | 400 error         | Extended thinking                | 400 error                                       | Thinking off                           |" — https://platform.claude.com/docs/en/build-with-claude/thinking.md — fetched 2026-10-20T15:28:05Z
+- **A20** — "| Claude Opus 5.5       | Adaptive thinking   | Adaptive thinking | 400 error                        | 400 error                                       | 400 error                              |" — https://platform.claude.com/docs/en/build-with-claude/thinking.md — fetched 2026-10-20T15:28:05Z
+- **A24** — "Model ID: `claude-sonnet-5`" — https://platform.claude.com/docs/en/models/sonnet-5/overview.md — fetched 2026-10-20T15:29:18Z
+- **A25** — "* `claude-haiku-4-5` is a convenience alias that resolves to the pinned snapshot `claude-haiku-4-5-20251001`." — https://platform.claude.com/docs/en/models/haiku-4-5/overview.md — fetched 2026-10-20T15:29:18Z
+- **A26** — "On Claude Fable 5.1, Claude Mythos 5.1, Claude Fable 5, Claude Mythos 5, Claude Mythos Preview, Claude Opus 5.5, Claude Opus 5, Claude Opus 4.8, Claude Opus 4.7, Claude Sonnet 5.5, Claude Sonnet 5, and Claude Haiku 5.5, non-default `temperature`, `top_p`, or `top_k` values return a 400 error on every request, regardless of whether thinking is used." — https://platform.claude.com/docs/en/build-with-claude/thinking.md — fetched 2026-10-20T15:28:05Z
+- **A31** — "The exceptions are Claude Opus 5.5, Claude Sonnet 5.5, Claude Fable 5.1, and Claude Mythos 5.1, which reject forced tool use on every request with a 400 error." — https://platform.claude.com/docs/en/build-with-claude/thinking.md — fetched 2026-10-20T15:28:05Z
+- **A33** — "Because effort applies to every output token, it works whether or not thinking is enabled." — https://platform.claude.com/docs/en/build-with-claude/effort.md — fetched 2026-10-20T15:25:59Z
+- **A35** — "Thinking has a cost: the tokens Claude spends reasoning are billed as output tokens, even when the thinking text isn't returned to you, and they count toward `max_tokens` alongside the response text." — https://platform.claude.com/docs/en/build-with-claude/thinking.md — fetched 2026-10-20T15:28:05Z
+- **A36** — "`output_tokens` remains the inclusive, authoritative total used for billing." — https://platform.claude.com/docs/en/api/messages/create.md — fetched 2026-10-20T15:28:06Z
+- **A39** — "**Preserving thinking blocks:** when you return tool results, you must pass the thinking blocks from the assistant message back to the API, complete and unmodified." — https://platform.claude.com/docs/en/build-with-claude/thinking.md — fetched 2026-10-20T15:28:05Z
+- **A56** — "Most Claude models default to high effort, spending as many tokens as needed for excellent results; Claude Opus 5.5 and Claude Haiku 5.5 default to medium." — https://platform.claude.com/docs/en/build-with-claude/effort.md — fetched 2026-10-20T15:25:59Z
+- **A57** — "Setting `effort` to the model's default (`"medium"` on Claude Opus 5.5 and Claude Haiku 5.5, `"high"` on other models) produces exactly the same behavior as omitting the `effort` parameter entirely." — https://platform.claude.com/docs/en/build-with-claude/effort.md — fetched 2026-10-20T15:25:59Z
+- **A58b** — "Claude Sonnet 5 defaults to `high` effort on the Claude API and Claude Code." — https://platform.claude.com/docs/en/build-with-claude/effort.md — fetched 2026-10-20T15:25:59Z
+- **A59** — "On Claude Opus 5.5, Claude Opus 5, Claude Sonnet 5.5, Claude Sonnet 5, Claude Fable 5.1, Claude Mythos 5.1, Claude Fable 5, Claude Mythos 5, Claude Mythos Preview, and Claude Haiku 5.5, thinking is already on and needs no configuration." — https://platform.claude.com/docs/en/build-with-claude/thinking.md — fetched 2026-10-20T15:28:05Z
+- **A61** — "* **Low effort:** For high-volume or latency-sensitive workloads. Suitable for chat and non-coding use cases where faster turnaround is prioritized." — https://platform.claude.com/docs/en/build-with-claude/effort.md — fetched 2026-10-20T15:25:59Z
+- **A62** — "* **Xhigh effort:** For the hardest coding and agentic tasks." — https://platform.claude.com/docs/en/build-with-claude/effort.md — fetched 2026-10-20T15:25:59Z
+- **A67** — "| Model                 | No `thinking` field | `"adaptive"`      | `"enabled"` with `budget_tokens` | `"between_tools"`                               | `"disabled"`                           |" — https://platform.claude.com/docs/en/build-with-claude/thinking.md — fetched 2026-10-20T15:28:05Z
+- **A69a** — "- claude-fable-5-1" — https://platform.claude.com/docs/en/build-with-claude/effort.md — fetched 2026-10-20T15:25:59Z
+- **A69b** — "- claude-mythos-5-1" — https://platform.claude.com/docs/en/build-with-claude/effort.md — fetched 2026-10-20T15:25:59Z
+- **A69c** — "- claude-fable-5" — https://platform.claude.com/docs/en/build-with-claude/effort.md — fetched 2026-10-20T15:25:59Z
+- **A69d** — "- claude-mythos-5" — https://platform.claude.com/docs/en/build-with-claude/effort.md — fetched 2026-10-20T15:25:59Z
+- **A69e** — "- claude-mythos-preview" — https://platform.claude.com/docs/en/build-with-claude/effort.md — fetched 2026-10-20T15:25:59Z
+- **A69f** — "- claude-opus-5-5" — https://platform.claude.com/docs/en/build-with-claude/effort.md — fetched 2026-10-20T15:25:59Z
+- **A69g** — "- claude-opus-5" — https://platform.claude.com/docs/en/build-with-claude/effort.md — fetched 2026-10-20T15:25:59Z
+- **A69h** — "- claude-opus-4-8" — https://platform.claude.com/docs/en/build-with-claude/effort.md — fetched 2026-10-20T15:25:59Z
+- **A69i** — "- claude-sonnet-5-5" — https://platform.claude.com/docs/en/build-with-claude/effort.md — fetched 2026-10-20T15:25:59Z
+- **A69j** — "- claude-sonnet-5" — https://platform.claude.com/docs/en/build-with-claude/effort.md — fetched 2026-10-20T15:25:59Z
+- **A69k** — "- claude-haiku-5-5" — https://platform.claude.com/docs/en/build-with-claude/effort.md — fetched 2026-10-20T15:25:59Z
+- **A70** — "Claude Sonnet 5.5 supports all five effort levels, and `high` is the default on the Claude API." — https://platform.claude.com/docs/en/build-with-claude/effort.md — fetched 2026-10-20T15:25:59Z
+- **A71** — "Claude Fable 5.1 supports all five effort levels. **Start with `high`, the default.** Step up to `xhigh` or `max` for the most capability-sensitive agentic and coding work, and step down to `medium` or `low` for routine or latency-sensitive work" — https://platform.claude.com/docs/en/build-with-claude/effort.md — fetched 2026-10-20T15:25:59Z
+- **A72** — "The same recommendations apply to Claude Mythos 5.1." — https://platform.claude.com/docs/en/build-with-claude/effort.md — fetched 2026-10-20T15:25:59Z
+- **A73** — "Effort is the primary control for trading off intelligence, latency, and cost on Claude Fable 5. **Start with `high`, the default, for most tasks**, use `xhigh` for the most capability-sensitive workloads, and step down to `medium` or `low` for routine work." — https://platform.claude.com/docs/en/build-with-claude/effort.md — fetched 2026-10-20T15:25:59Z
+- **A74** — "Reduce effort if a task completes but takes longer than necessary, or if you want a faster, more interactive working style. The same recommendations apply to Claude Mythos 5." — https://platform.claude.com/docs/en/build-with-claude/effort.md — fetched 2026-10-20T15:25:59Z
+- **A75** — "Claude Opus 5 supports all five effort levels." — https://platform.claude.com/docs/en/build-with-claude/effort.md — fetched 2026-10-20T15:25:59Z
+- **A76** — "Claude Haiku 5.5 supports all five effort levels, and `medium` is the default." — https://platform.claude.com/docs/en/build-with-claude/effort.md — fetched 2026-10-20T15:25:59Z
+- **A77** — "* **Medium effort:** Cost-saving step-down from the default. Comparable to Claude Sonnet 4.6 at high effort." — https://platform.claude.com/docs/en/build-with-claude/effort.md — fetched 2026-10-20T15:25:59Z
+- **A78** — "The guidance for Claude Opus 4.7 also applies to Claude Opus 4.8. **Start with `xhigh` for coding and agentic use cases**, use `high` for most other intelligence-sensitive workloads, and step down to `medium` or `low` only when you've measured that the lower level holds quality on your evals." — https://platform.claude.com/docs/en/build-with-claude/effort.md — fetched 2026-10-20T15:25:59Z
+- **A79** — "step down to `medium` or `low` only when you've measured that the lower level holds quality on your evals." — https://platform.claude.com/docs/en/build-with-claude/effort.md — fetched 2026-10-20T15:25:59Z
+- **A80** — "| Claude Sonnet 5.5     | Adaptive thinking   | Adaptive thinking | 400 error                        | Up-front thinking off at `high` effort or below | 400 error                              |" — https://platform.claude.com/docs/en/build-with-claude/thinking.md — fetched 2026-10-20T15:28:05Z
+- **A81** — "| Claude Haiku 5.5      | Adaptive thinking   | Adaptive thinking | 400 error                        | 400 error                                       | Thinking off at `high` effort or below |" — https://platform.claude.com/docs/en/build-with-claude/thinking.md — fetched 2026-10-20T15:28:05Z
+- **A82** — "| Claude Fable 5.1      | Adaptive thinking   | Adaptive thinking | 400 error                        | 400 error                                       | 400 error                              |" — https://platform.claude.com/docs/en/build-with-claude/thinking.md — fetched 2026-10-20T15:28:05Z
+- **A83** — "| Claude Mythos 5.1     | Adaptive thinking   | Adaptive thinking | 400 error                        | 400 error                                       | 400 error                              |" — https://platform.claude.com/docs/en/build-with-claude/thinking.md — fetched 2026-10-20T15:28:05Z
+- **A84** — "| Claude Fable 5        | Adaptive thinking   | Adaptive thinking | 400 error                        | 400 error                                       | 400 error                              |" — https://platform.claude.com/docs/en/build-with-claude/thinking.md — fetched 2026-10-20T15:28:05Z
+- **A85** — "| Claude Mythos 5       | Adaptive thinking   | Adaptive thinking | 400 error                        | 400 error                                       | 400 error                              |" — https://platform.claude.com/docs/en/build-with-claude/thinking.md — fetched 2026-10-20T15:28:05Z
+- **A86** — "| Claude Opus 5         | Adaptive thinking   | Adaptive thinking | 400 error                        | 400 error                                       | Thinking off at `high` effort or below |" — https://platform.claude.com/docs/en/build-with-claude/thinking.md — fetched 2026-10-20T15:28:05Z
+- **A87** — "| Claude Opus 4.8       | Thinking off        | Adaptive thinking | 400 error                        | 400 error                                       | Thinking off                           |" — https://platform.claude.com/docs/en/build-with-claude/thinking.md — fetched 2026-10-20T15:28:05Z
+- **A90** — "Model ID: `claude-opus-5-5`" — https://platform.claude.com/docs/en/models/opus-5-5/overview.md — fetched 2026-10-20T15:29:18Z
+- **A91** — "Model ID: `claude-haiku-4-5-20251001`" — https://platform.claude.com/docs/en/models/haiku-4-5/overview.md — fetched 2026-10-20T15:29:18Z
+- **A92** — "**Deprecated**: Will reach end-of-life on June 30, 2026. Please migrate to claude-mythos-5." — https://platform.claude.com/docs/en/api/messages/create.md — fetched 2026-10-20T15:28:06Z
+- **A93** — "These models were retired October 28, 2025." — https://platform.claude.com/docs/en/about-claude/model-deprecations.md — fetched 2026-10-20T15:29:19Z
+- **A94** — "In the table, "at `high` effort or below" means the request works at `low`, `medium`, and `high` effort and returns a 400 error at `xhigh` or `max`." — https://platform.claude.com/docs/en/build-with-claude/thinking.md — fetched 2026-10-20T15:28:05Z
+- **A95** — "| Claude API ID                                                                                             | `claude-fable-5-1`                                                                | `claude-opus-5-5`                                                               | `claude-sonnet-5-5`                                                                 | `claude-haiku-5-5`                                                                       |" — https://platform.claude.com/docs/en/models/overview.md — fetched 2026-10-20T15:28:06Z
+- **A96** — "| claude-mythos-preview      | Deprecated    | June 9, 2026       | To be announced                    |" — https://platform.claude.com/docs/en/about-claude/model-deprecations.md — fetched 2026-10-20T15:29:19Z
+- **A97** — "| October 28, 2025 | `claude-3-5-sonnet-20241022` | `claude-sonnet-5-5`     |" — https://platform.claude.com/docs/en/about-claude/model-deprecations.md — fetched 2026-10-20T15:29:19Z
+- **A98** — "You can also send `thinking: {"type": "disabled"}` at `high` effort or below. At `xhigh` or `max`, it returns a 400 error" — https://platform.claude.com/docs/en/build-with-claude/effort.md — fetched 2026-10-20T15:25:59Z
+
+**Gemini**
+
+- **G1** — ""thinkingLevel": "low"" — https://ai.google.dev/gemini-api/docs/generate-content/thinking.md.txt — fetched 2026-10-20T15:30:09Z
+- **G4** — "| `MINIMAL` | Little to no thinking. |" — https://ai.google.dev/api/generate-content.md.txt — fetched 2026-10-20T15:30:12Z
+- **G5** — "| `HIGH` | High thinking level. |" — https://ai.google.dev/api/generate-content.md.txt — fetched 2026-10-20T15:30:12Z
+- **G7** — "`thinkingBudget` `integer` The number of thoughts tokens that the model should generate." — https://ai.google.dev/api/generate-content.md.txt — fetched 2026-10-20T15:30:12Z
+- **G8** — "Optional. Config for thinking features. An error will be returned if this field is set for models that don't support thinking." — https://ai.google.dev/api/generate-content.md.txt — fetched 2026-10-20T15:30:12Z
+- **G9** — "| Thinking Level | Gemini 3.8 Flash | Gemini 3.6 Flash | Gemini 4 Argon | Gemini 3.5 \& 3.1 Flash-Lite | Gemini 3.1 Flash-Lite Image | Gemini 3 Flash | Gemini Robotics ER 2 | Description |" — https://ai.google.dev/gemini-api/docs/generate-content/thinking.md.txt — fetched 2026-10-20T15:30:09Z
+- **G10** — "| **`minimal`** | Not supported (error) | Supported | Not supported (error) | Supported (Default) | Supported (Default) | Supported | Supported | Matches the "no thinking" setting for most queries. Note, `minimal` does not guarantee that thinking is off, the model may reason very minimally for complex tasks. |" — https://ai.google.dev/gemini-api/docs/generate-content/thinking.md.txt — fetched 2026-10-20T15:30:09Z
+- **G11** — "| **`low`** | Supported | Supported | Supported | Supported | Not Supported | Supported | Supported | Minimizes latency and cost. |" — https://ai.google.dev/gemini-api/docs/generate-content/thinking.md.txt — fetched 2026-10-20T15:30:09Z
+- **G12** — "| **`medium`** | Supported (Default) | Supported (Default) | Supported (Default) | Supported | Not supported | Supported | Supported | Balanced thinking for most tasks. |" — https://ai.google.dev/gemini-api/docs/generate-content/thinking.md.txt — fetched 2026-10-20T15:30:09Z
+- **G13** — "| **`high`** | Supported (Dynamic) | Supported (Dynamic) | Supported (Dynamic) | Supported (Dynamic) | Supported (Dynamic) | Supported (Default, Dynamic) | Supported (Default, Dynamic) |" — https://ai.google.dev/gemini-api/docs/generate-content/thinking.md.txt — fetched 2026-10-20T15:30:09Z
+- **G14a** — "You cannot disable thinking for Gemini 4 Argon. Gemini 3 Flash and Flash-Lite" — https://ai.google.dev/gemini-api/docs/generate-content/thinking.md.txt — fetched 2026-10-20T15:30:09Z
+- **G14b** — "also do not support full thinking-off." — https://ai.google.dev/gemini-api/docs/generate-content/thinking.md.txt — fetched 2026-10-20T15:30:09Z
+- **G15** — "You can disable thinking by setting `thinkingBudget` to 0." — https://ai.google.dev/gemini-api/docs/generate-content/thinking.md.txt — fetched 2026-10-20T15:30:09Z
+- **G16** — "Gemini 2.5 series models don't support `thinkingLevel`; use `thinkingBudget`" — https://ai.google.dev/gemini-api/docs/generate-content/thinking.md.txt — fetched 2026-10-20T15:30:09Z
+- **G17** — "| **2.5 Flash** | Dynamic thinking | `0` to `24576` | `thinkingBudget = 0` | `thinkingBudget = -1` (Default) |" — https://ai.google.dev/gemini-api/docs/generate-content/thinking.md.txt — fetched 2026-10-20T15:30:09Z
+- **G18** — "| Thinking Level | Gemini 3.5 Flash | Gemini 3.1 Pro | Gemini 3.1 Flash-Lite | Gemini 3 Flash | Description |" — https://ai.google.dev/gemini-api/docs/generate-content/whats-new-gemini-3.5.md.txt — fetched 2026-10-20T15:30:10Z
+- **G19** — "| **`minimal`** | Supported | Not supported | Supported (Default) | Supported |" — https://ai.google.dev/gemini-api/docs/generate-content/whats-new-gemini-3.5.md.txt — fetched 2026-10-20T15:30:10Z
+- **G20** — "| gemini-3.1-pro-preview | On (high) | low, medium, high |" — https://ai.google.dev/gemini-api/docs/thinking.md.txt — fetched 2026-10-20T15:26:00Z
+- **G21** — "| gemini-3.5-flash-lite | On (minimal) | minimal, low, medium, high |" — https://ai.google.dev/gemini-api/docs/thinking.md.txt — fetched 2026-10-20T15:26:00Z
+- **G22** — "| gemini-3.6-flash | On (medium) | minimal, low, medium, high |" — https://ai.google.dev/gemini-api/docs/thinking.md.txt — fetched 2026-10-20T15:26:00Z
+- **G23** — "API requests to `gemini-3.5-flash` are automatically routed to `gemini-3.6-flash`." — https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash.md.txt — fetched 2026-10-20T15:30:11Z
+- **G24** — "| Gemini 3.5 Flash-Lite | `gemini-3.5-flash-lite` | `minimal` |" — https://ai.google.dev/gemini-api/docs/generate-content/whats-new-gemini-3.6.md.txt — fetched 2026-10-20T15:31:32Z
+- **G27** — "`temperature`, `top_p`, and `top_k` are deprecated. The API ignores these parameters and returns an error in future model generations." — https://ai.google.dev/gemini-api/docs/generate-content/whats-new-gemini-3.6.md.txt — fetched 2026-10-20T15:31:32Z
+- **G31** — "When you turn on thinking, response pricing is the sum of output tokens and thinking tokens. You can retrieve the total number of generated thinking tokens from the `thoughtsTokenCount` field (or SDK equivalent)." — https://ai.google.dev/gemini-api/docs/generate-content/tokens.md.txt — fetched 2026-10-20T15:30:11Z
+- **G34** — "`totalTokenCount` `integer` Total token count for the generation request (prompt + tool-use prompt + thoughts + response candidates)." — https://ai.google.dev/api/generate-content.md.txt — fetched 2026-10-20T15:30:12Z
+- **G38** — "If you omit a `thought_signature` for the first `functionCall` part in any step of the current turn, the request will fail with a 400 error." — https://ai.google.dev/gemini-api/docs/generate-content/thought-signatures.md.txt — fetched 2026-10-20T15:30:09Z
+- **G59** — ""thinkingLevel": "HIGH"" — https://ai.google.dev/gemini-api/docs/generate-content/whats-new-gemini-3.5.md.txt — fetched 2026-10-20T15:30:10Z
+- **G64** — "| `LOW` | Low thinking level. |" — https://ai.google.dev/api/generate-content.md.txt — fetched 2026-10-20T15:30:12Z
+- **G65** — "| `MEDIUM` | Medium thinking level. |" — https://ai.google.dev/api/generate-content.md.txt — fetched 2026-10-20T15:30:12Z
+- **G86** — "| gemini-3.8-flash | On (medium) | low, medium, high |" — https://ai.google.dev/gemini-api/docs/thinking.md.txt — fetched 2026-10-20T15:26:00Z
+- **G87** — "| **2.5 Flash Lite** | Model does not think | `512` to `24576` | `thinkingBudget = 0` | `thinkingBudget = -1` |" — https://ai.google.dev/gemini-api/docs/generate-content/thinking.md.txt — fetched 2026-10-20T15:30:09Z
+- **G88** — "| **2.5 Pro** | Dynamic thinking | `128` to `32768` | N/A: Cannot disable thinking | `thinkingBudget = -1` (Default) |" — https://ai.google.dev/gemini-api/docs/generate-content/thinking.md.txt — fetched 2026-10-20T15:30:09Z
+- **G94** — "| **`low`** | Supported | Supported | Supported | Supported | Minimizes latency and cost. |" — https://ai.google.dev/gemini-api/docs/generate-content/whats-new-gemini-3.5.md.txt — fetched 2026-10-20T15:30:10Z
+- **G95** — "| **`medium`** | Supported (Default) | Supported | Supported | Supported | Balanced thinking for most tasks. |" — https://ai.google.dev/gemini-api/docs/generate-content/whats-new-gemini-3.5.md.txt — fetched 2026-10-20T15:30:10Z
+- **G96** — "| **`high`** | Supported (Dynamic) | Supported (Default, Dynamic) | Supported (Dynamic) | Supported (Default, Dynamic) | Maximizes reasoning depth. |" — https://ai.google.dev/gemini-api/docs/generate-content/whats-new-gemini-3.5.md.txt — fetched 2026-10-20T15:30:10Z
+- **G97** — "| gemini-3-flash-preview | On (high) | minimal, low, medium, high |" — https://ai.google.dev/gemini-api/docs/thinking.md.txt — fetched 2026-10-20T15:26:00Z
+- **G98** — "| [Gemini 3.1 Flash-Lite](https://ai.google.dev/gemini-api/docs/models/gemini-3.1-flash-lite) | ``` gemini-3.1-flash-lite ``` |" — https://ai.google.dev/gemini-api/docs/models.md.txt — fetched 2026-10-20T15:30:12Z
+- **G99** — "| [Gemini 3 Flash](https://ai.google.dev/gemini-api/docs/models/gemini-3-flash-preview) | ``` gemini-3-flash-preview ``` |" — https://ai.google.dev/gemini-api/docs/models.md.txt — fetched 2026-10-20T15:30:12Z
+- **G100** — "| gemini-2.5-flash | On | low, medium, high |" — https://ai.google.dev/gemini-api/docs/thinking.md.txt — fetched 2026-10-20T15:26:00Z
+- **G101** — "3. **Will my old `thinking_budget` code still work?** Yes, `thinking_budget`" — https://ai.google.dev/gemini-api/docs/generate-content/whats-new-gemini-3.5.md.txt — fetched 2026-10-20T15:30:10Z
+- **G102** — "is still supported for backward compatibility, but we recommend migrating to" — https://ai.google.dev/gemini-api/docs/generate-content/whats-new-gemini-3.5.md.txt — fetched 2026-10-20T15:30:10Z
+
+**DeepSeek**
+
+- **DS-5** — "Possible values: [none, low, high, max]" — https://api-docs.deepseek.com/api/create-chat-completion/ — fetched 2026-10-20T15:28:41Z
+- **DS-6** — "Controls the thinking mode toggle and the thinking effort. none disables thinking mode; low / high / max enable thinking mode. The default effort is high. For compatibility with existing software, minimal is accepted and mapped to low, and medium / xhigh are accepted and mapped to high." — https://api-docs.deepseek.com/api/create-chat-completion/ — fetched 2026-10-20T15:28:41Z
+- **DS-7** — "When using Chat Completion with the OpenAI SDK to set the thinking parameter, you need to pass the thinking parameter within extra_body:" — https://api-docs.deepseek.com/guides/thinking_mode/ — fetched 2026-10-20T15:26:31Z
+- **DS-8** — "| minimal | low" — https://api-docs.deepseek.com/guides/thinking_mode/ — fetched 2026-10-20T15:26:31Z
+- **DS-9** — "| medium | high" — https://api-docs.deepseek.com/guides/thinking_mode/ — fetched 2026-10-20T15:26:31Z
+- **DS-10** — "| xhigh | high" — https://api-docs.deepseek.com/guides/thinking_mode/ — fetched 2026-10-20T15:26:31Z
+- **DS-15** — "The thinking modes of V4-Pro and V4-Flash now support three thinking effort levels: low / high / max." — https://api-docs.deepseek.com/updates/ — fetched 2026-10-20T15:29:37Z
+- **DS-16** — "Possible values: [deepseek-flash, deepseek-v4-pro]" — https://api-docs.deepseek.com/api/create-chat-completion/ — fetched 2026-10-20T15:28:41Z
+- **DS-18** — "(1) Use deepseek-flash as the model name. The legacy names deepseek-v4-flash and deepseek-v4-flash-vision-exp are still accepted, but the corresponding models have been retired, their requests are served by the DeepSeek-V4.1-Flash-1017 model and billed at the Flash price." — https://api-docs.deepseek.com/quick_start/pricing/ — fetched 2026-10-20T15:29:35Z
+- **DS-19** — "The two legacy API model names, deepseek-chat and deepseek-reasoner, will be discontinued in three months (2026-07-24)." — https://api-docs.deepseek.com/updates/ — fetched 2026-10-20T15:29:37Z
+- **DS-20** — "Thinking mode does not support the temperature, presence_penalty, or frequency_penalty parameters. Please note that, for compatibility with existing software, setting these parameters will not trigger an error but will also have no effect." — https://api-docs.deepseek.com/guides/thinking_mode/ — fetched 2026-10-20T15:26:31Z
+- **DS-22** — "required and named tool choices are not supported in thinking mode; the API returns a 400 error. Disable thinking mode first to use them." — https://api-docs.deepseek.com/api/create-chat-completion/ — fetched 2026-10-20T15:28:41Z
+- **DS-24** — "Total number of tokens used in the request (prompt + completion)." — https://api-docs.deepseek.com/api/create-chat-completion/ — fetched 2026-10-20T15:28:41Z
+- **DS-25** — "Breakdown of tokens used in a completion." — https://api-docs.deepseek.com/api/create-chat-completion/ — fetched 2026-10-20T15:28:41Z
+- **DS-26** — "Tokens generated by the model for reasoning." — https://api-docs.deepseek.com/api/create-chat-completion/ — fetched 2026-10-20T15:28:41Z
+- **DS-27** — "We bill model usage based on the total number of input and output tokens by the model." — https://api-docs.deepseek.com/quick_start/pricing/ — fetched 2026-10-20T15:29:35Z
+- **DS-28** — "Please note that for requests carrying the tools parameter, the reasoning_content must be fully passed back to the API in all subsequent requests — even for turns where the model did not perform a tool call. If your code does not correctly pass back reasoning_content, the API will return a 400 error." — https://api-docs.deepseek.com/guides/thinking_mode/ — fetched 2026-10-20T15:26:31Z
+- **DS-30** — "If the request does not carry the tools parameter: reasoning_content does not need to be passed back; even if passed to the API, it will be ignored and will not be concatenated into the context. See Multi-turn Conversation for details." — https://api-docs.deepseek.com/guides/thinking_mode/ — fetched 2026-10-20T15:26:31Z
+- **DS-34** — "(1) Thinking mode is enabled by default, with the default effort being high" — https://api-docs.deepseek.com/guides/thinking_mode/ — fetched 2026-10-20T15:26:31Z
+- **DS-37** — "reasoning_effort string" — https://api-docs.deepseek.com/api/create-chat-completion/ — fetched 2026-10-20T15:28:41Z
+
+**xAI**
+
+- **XA-0a** — "Chat Completions is offered as a legacy endpoint." — https://docs.x.ai/developers/model-capabilities/legacy/chat-completions.md — fetched 2026-10-20T15:26:54Z
+- **XA-1** — "`reasoning_effort` (string | null) — Constrains how hard a reasoning model thinks before responding. Higher efforts use more reasoning tokens for deeper thinking. The supported values and the default depend on the model." — https://docs.x.ai/developers/rest-api-reference/inference/chat-completions.md — fetched 2026-10-20T15:26:53Z
+- **XA-2** — "`grok-4.7`, `grok-4.6`, and `grok-4.5` support the `reasoning_effort` parameter, which controls how much effort the model spends thinking before responding." — https://docs.x.ai/developers/model-capabilities/text/reasoning.md — fetched 2026-10-20T15:26:53Z
+- **XA-4** — "Model-wide default when effort is omitted; aliases may have their own defaults." — https://docs.x.ai/openapi.json — fetched 2026-10-20T15:27:42Z
+- **XA-5** — "If not specified, `reasoning_effort` defaults to `"high"`. Reasoning cannot be disabled." — https://docs.x.ai/developers/model-capabilities/text/reasoning.md — fetched 2026-10-20T15:26:53Z
+- **XA-7** — "`"xhigh"` is available on `grok-4.6` and later. On models that do not support it, such as `grok-4.5`, requests with `"xhigh"` are treated as `"high"`." — https://docs.x.ai/developers/model-capabilities/text/reasoning.md — fetched 2026-10-20T15:26:53Z
+- **XA-8** — "| `grok-4.5` | `reasoning.effort`: `"low"` / `"medium"` / `"high"` (default) | Controls reasoning depth (cannot be disabled) |" — https://docs.x.ai/developers/model-capabilities/text/reasoning.md — fetched 2026-10-20T15:26:53Z
+- **XA-9** — "- **Reasoning efforts (supported):** `low`, `medium`, `high`, `xhigh`" — https://docs.x.ai/developers/models/grok-4.7.md — fetched 2026-10-20T15:27:29Z
+- **XA-10** — "- **Reasoning efforts (supported):** `low`, `medium`, `high`, `xhigh`" — https://docs.x.ai/developers/models/grok-4.6.md — fetched 2026-10-20T15:27:29Z
+- **XA-11** — "- **Reasoning efforts (supported):** `low`, `medium`, `high`, `xhigh`" — https://docs.x.ai/developers/models/grok-4.5.md — fetched 2026-10-20T15:27:29Z
+- **XA-12** — "configurable reasoning effort (low, medium, or high; default high)" — https://docs.x.ai/developers/release-notes.md — fetched 2026-10-20T15:26:54Z
+- **XA-13** — "- **Reasoning efforts (supported):** `none`, `low`, `medium`, `high`, `xhigh`" — https://docs.x.ai/developers/models/grok-4.3.md — fetched 2026-10-20T15:27:28Z
+- **XA-14** — "* 4 [reasoning effort](/developers/model-capabilities/text/reasoning#the-reasoning_effort-parameter) levels (none, low, medium, and high)" — https://docs.x.ai/developers/migration/may-15-retirement.md — fetched 2026-10-20T15:26:55Z
+- **XA-15** — "* Requests to any **non-reasoning** model in the list above will be served by **`grok-4.3` with `none` reasoning effort**." — https://docs.x.ai/developers/migration/may-15-retirement.md — fetched 2026-10-20T15:26:55Z
+- **XA-22** — "When you use a reasoning model, the reasoning tokens are billed as part of your total consumption." — https://docs.x.ai/developers/model-capabilities/text/reasoning.md — fetched 2026-10-20T15:26:53Z
+- **XA-25a** — ""prompt_tokens": 32," — https://docs.x.ai/developers/rest-api-reference/inference/chat-completions.md — fetched 2026-10-20T15:26:53Z
+- **XA-25b** — ""completion_tokens": 9," — https://docs.x.ai/developers/rest-api-reference/inference/chat-completions.md — fetched 2026-10-20T15:26:53Z
+- **XA-25c** — ""total_tokens": 135," — https://docs.x.ai/developers/rest-api-reference/inference/chat-completions.md — fetched 2026-10-20T15:26:53Z
+- **XA-25d** — ""reasoning_tokens": 94," — https://docs.x.ai/developers/rest-api-reference/inference/chat-completions.md — fetched 2026-10-20T15:26:53Z
+- **XA-29** — ""description": "Assistant reasoning content."" — https://docs.x.ai/openapi.json — fetched 2026-10-20T15:27:42Z
+- **XA-31** — "The xAI API is stateless and does not process a new request with the context of your previous request history." — https://docs.x.ai/developers/model-capabilities/legacy/chat-completions.md — fetched 2026-10-20T15:26:54Z
+- **XA-37** — "| APIs | [Responses API](/developers/rest-api-reference/inference/responses#create-new-response) |" — https://docs.x.ai/developers/grok-4-7.md — fetched 2026-10-20T15:26:54Z
+
+**GLM (Z.ai / BigModel)**
+
+- **GL-0** — "| OpenAI Chat Completion 协议 | `https://open.bigmodel.cn/api/paas/v4` |" — https://docs.bigmodel.cn/cn/guide/models/text/glm-5.3.md — fetched 2026-10-20T15:32:16Z
+- **GL-5** — "Note: GLM-5.3 and GLM-5.3-FLASH no longer support disabling thinking (an error will occur if the `thinking.type` parameter in the API request is set to `disabled`). Please ensure that thinking is enabled." — https://docs.z.ai/guides/capabilities/thinking.md — fetched 2026-10-20T15:31:15Z
+- **GL-6** — "For GLM-5.3 and GLM-5.3-FLASH, only `max`, `high` and `low` are supported. Any other input will result in an error." — https://docs.z.ai/guides/capabilities/thinking.md — fetched 2026-10-20T15:31:15Z
+- **GL-7** — "For GLM-5.2, the supported options are `max` (default and recommended, for deep inference), `xhigh`, `high` (enhanced inference), `medium`, `low`, `minimal`, and `none`. Among them, `none` or `minimal` indicate that the model stops thinking; `low`/`medium` are mapped to `high`; `xhigh` is mapped to `max`." — https://docs.z.ai/guides/capabilities/thinking.md — fetched 2026-10-20T15:31:15Z
+- **GL-8** — "针对 `GLM-5.3` `GLM-5.3-FLASH` `GLM-5.3-FLASHX`，仅支持 `max`、`high`、`low`，其余输入将报错；" — https://docs.bigmodel.cn/cn/guide/capabilities/thinking.md — fetched 2026-10-20T15:32:14Z
+- **GL-9** — "针对 `GLM-5.2`，支持 `max`（默认且推荐，深度推理）、`xhigh`、`high`（增强推理）、`medium`、`low`、`minimal`、`none`，其中 `none` 或 `minimal` 代表模型放弃思考；`low` / `medium` 映射为 `high`；`xhigh` 映射为 `max`" — https://docs.bigmodel.cn/cn/guide/capabilities/thinking.md — fetched 2026-10-20T15:32:14Z
+- **GL-11** — "**Disable deep thinking (GLM-5.3 is no longer supported, only GLM-5.2 supports it)**" — https://docs.z.ai/guides/capabilities/thinking.md — fetched 2026-10-20T15:31:15Z
+- **GL-12** — "* **`reasoning_effort`**: Controls the degree of reasoning within the thought chain, and is only supported by `GLM-5.2` and above." — https://docs.z.ai/guides/capabilities/thinking.md — fetched 2026-10-20T15:31:15Z
+- **GL-13** — "> If you want to disable thinking, use the following (note that `GLM-5.3` and `GLM-5.3-FLASH` use forced thinking and cannot be disabled):" — https://docs.z.ai/guides/capabilities/thinking-mode.md — fetched 2026-10-20T15:31:16Z
+- **GL-18** — "Used to control how the model selects which function to call. This is only applicable when the tool type is function. The default value is auto, and only auto is supported." — https://docs.z.ai/api-reference/llm/chat-completion.md — fetched 2026-10-20T15:31:16Z
+- **GL-19** — "* This parameter only takes effect when `thinking.type` is set to `enabled`." — https://docs.z.ai/guides/overview/concept-param.md — fetched 2026-10-20T15:31:17Z
+- **GL-20** — "components.schemas.ChatCompletionResponse.properties.usage.properties.completion_tokens.description: Number of output tokens" — https://docs.z.ai/api-reference/llm/chat-completion.md — fetched 2026-10-20T15:31:16Z
+- **GL-21** — "components.schemas.ChatCompletionResponse.properties.usage.properties.total_tokens.description: Total number of tokens" — https://docs.z.ai/api-reference/llm/chat-completion.md — fetched 2026-10-20T15:31:16Z
+- **GL-22a** — ""completion_tokens": 239," — https://docs.z.ai/guides/capabilities/thinking.md — fetched 2026-10-20T15:31:15Z
+- **GL-22b** — ""prompt_tokens": 8," — https://docs.z.ai/guides/capabilities/thinking.md — fetched 2026-10-20T15:31:15Z
+- **GL-22c** — ""total_tokens": 247" — https://docs.z.ai/guides/capabilities/thinking.md — fetched 2026-10-20T15:31:15Z
+- **GL-24** — "When using interleaved thinking with tools, **thinking blocks should be explicitly preserved and returned together with the tool results.**" — https://docs.z.ai/guides/capabilities/thinking-mode.md — fetched 2026-10-20T15:31:16Z
+- **GL-27** — "This applies to both **Interleaved Thinking** and **Preserved Thinking**—no manual differentiation is required. **Remember to return the historical** `reasoning_content`**to keep the reasoning coherent.**" — https://docs.z.ai/guides/capabilities/thinking-mode.md — fetched 2026-10-20T15:31:16Z
+- **GL-30** — "Thinking is activated by default in GLM-5.3 GLM-5.3-FLASH GLM-5.2 GLM-5.1 GLM-5 GLM-4.7 series, different from the default hybrid thinking in GLM-4.6." — https://docs.z.ai/guides/capabilities/thinking-mode.md — fetched 2026-10-20T15:31:16Z
+- **GL-90** — ""reasoning_effort": "max"" — https://docs.bigmodel.cn/cn/guide/models/text/glm-5.2.md — fetched 2026-10-20T15:32:15Z
+- **GL-91** — "* `disabled`: Disable deep thinking, provide direct answers" — https://docs.z.ai/guides/capabilities/thinking.md — fetched 2026-10-20T15:31:15Z
+
+**Meta**
+
+- **MS-1** — "On [Chat Completions](https://dev.meta.ai/docs/protocols/chat-completions), use the top-level `reasoning_effort` parameter." — https://dev.meta.ai/docs/reasoning.md — fetched 2026-10-20T15:33:29Z
+- **MS-3** — "| `"none"`    | Disables reasoning. **Not supported by Muse Wonder or Muse Spark**: returns `HTTP 400`." — https://dev.meta.ai/docs/reasoning.md — fetched 2026-10-20T15:33:29Z
+- **MS-4** — "Muse Spark always reasons, so `reasoning_effort: "none"` returns `HTTP 400`." — https://dev.meta.ai/docs/protocols/chat-completions.md — fetched 2026-10-20T15:33:30Z
+- **MS-5** — "Accepted values: `"none"`, `"minimal"`, `"low"`, `"medium"`, `"high"`, `"xhigh"`. When omitted, the model reasons by default; set this parameter to control how much. `"none"` (disable reasoning) is **not supported by Muse Spark** and returns `HTTP 400`." — https://dev.meta.ai/docs/protocols/chat-completions.md — fetched 2026-10-20T15:33:30Z
+- **MS-6** — "| `"minimal"` | Shortest reasoning pass." — https://dev.meta.ai/docs/reasoning.md — fetched 2026-10-20T15:33:29Z
+- **MS-7** — "| `"low"`     | Light reasoning." — https://dev.meta.ai/docs/reasoning.md — fetched 2026-10-20T15:33:29Z
+- **MS-8** — "| `"medium"`  | Moderate depth." — https://dev.meta.ai/docs/reasoning.md — fetched 2026-10-20T15:33:29Z
+- **MS-9** — "| `"high"`    | Deep reasoning." — https://dev.meta.ai/docs/reasoning.md — fetched 2026-10-20T15:33:29Z
+- **MS-10** — "| `"xhigh"`   | Deeper reasoning." — https://dev.meta.ai/docs/reasoning.md — fetched 2026-10-20T15:33:29Z
+- **MS-11** — "(`xhigh` is accepted, but it maps to the same reasoning strength as `high`, so `high` is effectively the maximum.)" — https://dev.meta.ai/docs/cookbook/reasoning-thinking-tokens.md — fetched 2026-10-20T15:33:31Z
+- **MS-12** — "Supports all [reasoning effort](https://dev.meta.ai/docs/reasoning) levels, including the `"max"` level for extended reasoning (not available with `muse-spark-1.3-contributor`)." — https://dev.meta.ai/docs/models.md — fetched 2026-10-20T15:33:29Z
+- **MS-13** — "- **Muse Spark 1.1** (`muse-spark-1.1`): the original version." — https://dev.meta.ai/docs/models.md — fetched 2026-10-20T15:33:29Z
+- **MS-17** — "Only `"auto"` (the default) is supported on both Chat Completions and the [Responses API](https://dev.meta.ai/docs/protocols/responses); `"none"`, `"required"`, and named function choices return `HTTP 400`" — https://dev.meta.ai/docs/tool-calling.md — fetched 2026-10-20T15:33:31Z
+- **MS-20** — "`reasoning_tokens` are part of `completion_tokens`: you pay for them as output and they count against your output-token budget, even though they never appear in the response text." — https://dev.meta.ai/docs/cookbook/reasoning-thinking-tokens.md — fetched 2026-10-20T15:33:31Z
+- **MS-22** — "Chat Completions cannot carry reasoning across turns for external API keys. Assistant messages expose a `reasoning_content` field, but it holds the model's **private** chain of thought and is **redacted to empty** before the response reaches an external caller, so there is nothing to replay and each turn reasons from scratch." — https://dev.meta.ai/docs/reasoning.md — fetched 2026-10-20T15:33:29Z
+- **MS-30** — "1. **Base URL**: `https://api.meta.ai/v1`." — https://dev.meta.ai/docs/agent-frameworks.md — fetched 2026-10-20T15:33:34Z
+- **MS-31** — "- **Muse Spark 1.2** (`muse-spark-1.2`): the previous version." — https://dev.meta.ai/docs/models.md — fetched 2026-10-20T15:33:29Z
+- **MS-32** — "| Muse Spark 1.3 Contributor (`muse-spark-1.3-contributor`) | Contributor mode          | Pay-as-you-go and [every plan](https://dev.meta.ai/docs/muse-code/subscriptions#about) |" — https://dev.meta.ai/docs/models.md — fetched 2026-10-20T15:33:29Z
+- **MS-33** — "| Muse Spark 1.2 Contributor (`muse-spark-1.2-contributor`) | Contributor mode          | Pay-as-you-go and [every plan](https://dev.meta.ai/docs/muse-code/subscriptions#about) |" — https://dev.meta.ai/docs/models.md — fetched 2026-10-20T15:33:29Z
+
+<!-- QUOTE-CATALOG:END -->
+
+### 9.3 Configuration and flags
+| Variable / key | Required | Default | Purpose | Lives in |
+|---|---|---|---|---|
+| `reasoning_effort` (constructor or field) | no | `None` (send nothing) | the agent's provider-neutral effort | `BaseAgent`, `JevAgentSettings`, `TextModelConfig`, `Runner` |
+| `REASONING_EFFORT_AS_OF` | n/a (module constant) | `"2026-10-20"` | the date the tables were checked against the vendor docs | `vidbyte/lib/registries/reasoning_effort.py` |
+
+No environment variable and no YAML key are added (NG-10).
+
+### 9.4 Migrations and compatibility
+- **Public contracts that change.** These changes are additive:
+  - Three root names. The contract goes from 733 to 736 exports.
+  - Seven new optional keyword parameters or appended fields.
+  - One optional checkpoint key.
+
+  Positional layouts are preserved, because every new field is appended last.
+- **No deprecation.** Nothing is removed or renamed. `thinking_config` keeps its meaning (INV-17).
+- **Checkpoints.** Old checkpoints restore with `None` (INV-14). New checkpoints restored by an older SDK drop the effort (EC-29). `SESSION_SCHEMA_VERSION` stays 1.
+- **Data migration.** N/A — no store or backfill.
+
+## §10 Security and tenancy
+| ID | Attacker | Shortest path to harm | Control | Where the control sits |
+|---|---|---|---|---|
+| T-1 | Careless user | They set `xhigh` on a model that remaps it or rejects it. They pay for failed calls, or for a level they did not ask for, on every turn and every fallback hop. | Server side: each vendor validates the body and answers 400 to a value its model does not accept (for example MS-3, G10), which surfaces as `ProviderRequestError`. That backstop cannot catch a remap, and it costs a call, so the SDK adds `AgentReasoningEffortGuard.refuse_unsupported`, which refuses at construction before any request (INV-3, INV-4, INV-6). | Vendor API (server); in the SDK process before `HttpTransport.request` |
+| T-2 | Hostile user (or a model driving the fork tool) | A model-chosen fork switches to a provider with a different wire form, to send an unsupported effort or to make a key travel to another vendor. | Server side: a vendor accepts only its own keys, so a key sent to the wrong vendor is refused there. In the SDK, keys stay bound to their provider by `ProviderKeyMatcher` (INV-9), the child agent is refused by its own guard (EC-19), and the fork tool cannot set an effort (D-16). | Vendor auth (server); `BaseAgent.__init__` of the child; `ProviderKeys.key_for` |
+| T-3 | Compromised teammate / leaked credential | They try to read a key from an error, a log or the checkpoint. | Server side: the key owner revokes the key at the vendor, which stops all use; nothing in this feature can extend a key's life. In the SDK, refusal texts contain only provider:model, mode and values (INV-11), `details` holds no key, and the checkpoint stores only the enum value. | Vendor key management (server); `ReasoningEffortRegistry.refusal`; `RecordFieldConverter.to_enum` |
+| T-4 | Another tenant | Through the gateway, one tenant's body field reaches a shared backend. | Server side: the Vidbyte gateway answers 422 to any body field outside its allow-list, and the allow-list is unchanged (INV-16). In the SDK, gateway modes never carry the effort (INV-5). | Vidbyte gateway allow-list (server); `TextModelConfig.__post_init__` and the guard |
+
+No new endpoint, command or auth path is added. Keys still flow only through `ProviderKeys` (the byok-api-keys conventions); no environment variable is read.
+
+## §11 Codebase grounding
+
+- **Rules read:**
+  - `AGENTS.md`, via code-map §1.1, where each rule is quoted. Rules re-checked at the source: Repository Map (full gate, folder READMEs, docs opaque), §1 one-level call chains, §2 narration, §3 layers and file size, §4 validated dataclasses, §5 shared logic once, Placement Rules (dataclasses, enums "no exceptions", "A new JevAgent capability is a named, validated field on `JevAgentSettings`").
+  - Folder READMEs: `vidbyte/agents/README.md` ("Model Fallback" :185-248, "Spend Cap" :386-431, "Key Modules" :433), `vidbyte/agents/jev/README.md` (:5, :28, :46), `vidbyte/providers/README.md` ("Contract Invariants" :596-606), `vidbyte/lib/registries/README.md` (sources sections :7, :36, :80).
+- **Field-guide entries applied:**
+  - `strict-config-dataclasses.md`: a union field only where structurally required. `None` = unset is required (D-12).
+  - `comment-format.md`: multi-line comments are PEP 8 blocks of at most 72 columns, directly above the line, with `# @intent` on its own first line.
+  - `blocking-lint-invariants.md`: A007 numeric literals get a named uppercase constant (`GEMINI_THINKING_BUDGET_OFF`).
+  - `provider-api-contracts.md`: provider facts come from raw vendor docs (§9.2 catalog).
+  - `fallback-coordination.md`: chain wiring goes through `AgentFallback`, never a parallel path.
+  - `jev-capability-layout.md`: generative fields go on `JevAgentSettings`.
+  - `local-ci-verification.md`: staged worktree gate; the harness surface test is red locally on root-export branches.
+- **Stack (from manifests):** Python 3.11 (`py -3.11` in this workspace), pytest 8.3.5 and pytest-asyncio 1.3.0 (`pyproject.toml:48-49`), ruff and mypy through `lint/run.py` (S008, S009). No database.
+- **Commands (exact, from `context/code-map.md` §1.2 / §3 / AGENTS.md):**
+  - Install: `python -m pip install -e ".[dev]"` (vidbyte-gates.md; AGENTS.md states none)
+  - Lint: `python lint/run.py`, `python lint/run.py --rule S010`, `python lint/run.py --rule S010 --all`, `python lint/run.py --format json`. The same `--rule <ID>` form runs any rule, for example `py -3.11 lint/run.py --rule C016`, `py -3.11 lint/run.py --rule S015`, `py -3.11 lint/run.py --rule C008`.
+  - Typecheck: mypy runs as lint rule S009 inside `python lint/run.py`, count-ratcheted in `lint/baseline.json`.
+  - Test (focused): `PYTHONPATH=$(pwd) py -3.11 -m pytest -q <file>`, for example `PYTHONPATH=$(pwd) py -3.11 -m pytest -q tests/features/sdk_managed_text/test_managed_text_wire_contract.py`
+  - Test (area): `PYTHONPATH=$(pwd) py -3.11 -m pytest -q tests/features/sdk_managed_text tests/features/loop_spend_cap tests/features/jev_cli_root_exports tests/features/root_native_thread_exports tests/test_gemini_provider_text.py tests/test_compatible_provider_text.py tests/test_deepseek_provider.py tests/test_agent_pricing.py tests/test_jev_agent.py`
+  - Contract: `python scripts/generate-sdk-public-api.py` (write) / `py -3.11 scripts/generate-sdk-public-api.py --check`. It refuses dirty inputs, so commit `vidbyte/__init__.py` first.
+  - Full local gate: `python scripts/run_ci.py` (AGENTS.md). In the worktree: `PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source`, then `--stage package` without `PYTHONPATH` (field guide local-ci-verification). The workspace form is `PYTHONIOENCODING=utf-8 PYTHONPATH=$(pwd) py -3.11 scripts/run_ci.py --stage source` and `env -u PYTHONPATH py -3.11 scripts/run_ci.py --stage package` (pipeline.md).
+  - Remote-only checks: dispatch-only `ci.yml` and `static-policy.yml` (`gh workflow run … --ref <branch>`, pipeline.md).
+- **Baseline on clean `origin/main`:** S1 did not run the gate. Known, from pipeline.md and the SDK-main known-red record:
+  - Pristine main passes, except for flaky MCP stdio and real-bash timeout tests.
+  - `tests/features/harness_threads/test_harness_threads_surface.py:309` (the `__all__` merge-base clause) goes red locally on any branch that adds a root export, so it goes red on this branch. It is inherited, CI skips it, and it is not edited (A-9).
+  - `:270-278` goes red locally only if `vidbyte/tools/` or `vidbyte/lib/configs/` changes. This design touches neither.
+- **Directory layout relevant to this change:**
+  ```
+  vidbyte/__init__.py                      root exports (header bullet :13, imports :448-504, __all__ :1127)
+  vidbyte/lib/enums/{text_model.py,__init__.py}
+  vidbyte/lib/dataclasses/{model_configs.py,agents.py,validation.py}
+  vidbyte/lib/registries/{models.py,reasoning_effort.py*,README.md}
+  vidbyte/lib/runners/{utility.py,text.py}
+  vidbyte/providers/{openai.py,anthropic.py,gemini.py,compatible.py,xai.py,README.md}
+  vidbyte/agents/{base.py,fallback.py,fork.py,continual_trace.py,handoff.py,spend_cap.py,reasoning_effort.py*,README.md}
+  vidbyte/agents/settings/fallback.py
+  vidbyte/agents/jev/{settings.py,agent.py,bulk_work.py,README.md}
+  vidbyte/agents/jev/{compute/{clone,swarm}.py,done/{handoff,reviewer,run_state}.py,gate/clarification.py}
+  contracts/sdk-public-api.json   skills/usage/create_agent.md   docs/design/release-0-4-0.md
+  (* = new)
+  ```
+- **Nearest sibling feature (the template to copy):** R3's loop spend cap, `vidbyte/agents/spend_cap.py` (`AgentSpendCap.model_refusal`, `_chain_runners`), plus its call at `vidbyte/agents/base.py:250-257` and its copy-path threading. Copy from it:
+  - the module header shape (FILE … TESTS);
+  - an `@intent` block on every function;
+  - `TYPE_CHECKING` imports of `AgentFallback` and `AgentRunnerConfig`;
+  - the chain walk: `fallback.models` when a chain exists, else the primary;
+  - the `"Agent {name} sets <field>, but {reason}"` message form.
+- **Reusable pieces:**
+  - `vidbyte/lib/dataclasses/validation.py:RecordFieldConverter.to_enum` (:222-230): member, or exact value string → member, else the six-value message.
+  - `vidbyte/lib/registries/models.py:ProviderModelRegistry.normalize_model` (:250-261): strips `"{provider}/"`, applies `MODEL_ALIASES` (`{"gpt-5.6": "gpt-5.6-sol"}`), and raises `ConfigurationError` for an unknown provider or blank model.
+  - `ProviderModelRegistry.resolve_provider` (:233-240): string → member. Pass `.value` for a member, because `str()` of a `(str, Enum)` member is `"ModelProvider.X"`.
+  - `vidbyte/lib/runners/utility.py:Runner._normalize_provider_and_model` (:151-172): the guard's primary identity.
+  - `vidbyte/lib/dataclasses/model_configs.py:TextModelConfig.normalized_provider` (:103-108).
+  - `vidbyte/agents/fallback.py:AgentFallback.models` (chain, index 0 is the primary).
+- **Code-style exemplar** (`vidbyte/lib/dataclasses/native_threads.py:449-459`):
+  ```python
+  @dataclass(frozen=True, slots=True)
+  class GrokThreadConfig:
+      """Settings of the Grok thread functions: reasoning effort, permission mode, time limit and an explicit grok launcher."""
+
+      reasoning_effort: GrokReasoningEffort | None = None
+      permission_mode: GrokPermissionMode = GrokPermissionMode.DEFAULT
+      timeout_seconds: float = NATIVE_THREAD_DEFAULT_SECONDS
+      grok_command: tuple[str, ...] | None = None
+
+      def __post_init__(self) -> None:
+          if self.reasoning_effort is not None:
+              object.__setattr__(self, "reasoning_effort", RecordFieldConverter.to_enum(self.reasoning_effort, GrokReasoningEffort, "GrokThreadConfig.reasoning_effort"))
+  ```
+- **Domain glossary:**
+  - DIRECT: straight to the provider with the caller's key; the only mode that sends the effort.
+  - AUTO / VIDBYTE_MANAGED: through the Vidbyte gateway.
+  - Fragment: the vendor-specific dictionary merged into one request body.
+  - Chain: the agent's model plus its fallback hops (`AgentFallback.models`).
+  - Remap: a vendor accepting a value but running a different level.
+- **Prior specs / design docs / ADRs that constrain this:**
+  - `docs/spec/loop-spend-cap/spec.md` §9.2, §12.3 and §15: the shape of the "Every agent" table and the construction-refusal precedent.
+  - `docs/design/release-0-4-0.md` :17 and :19.
+  - `docs/spec/agent-reasoning-effort/pipeline.md`: the gateway ruling.
+- **Conflicts between house style and AGENTS.md:**
+  1. House style asks for "one class per failure mode". The repo raises `ConfigurationError` with `details` for every configuration refusal, and R3 does the same. The repo wins (D-14).
+  2. REPO_MAP.md (descriptive, not binding) says new agent behavior should be "a setting here rather than as another constructor parameter". `temperature`, the sibling model-call option, is a `BaseAgent` constructor parameter (`base.py:112`). The grain of the code wins, and the effort sits beside it.
+
+## §12 Work breakdown — everything this PR has to do
+
+### 12.1 Feature list
+| ID | Feature (capability this PR adds) | Serves | Visible to |
+|---|---|---|---|
+| W-1 | `ReasoningEffort` enum, exported from `vidbyte.lib.enums` and the root | FR-1, FR-10, AC-10, AC-13 | developer |
+| W-2 | `ReasoningEffortRegistry` with the documented tables, refusal texts and attach | FR-3, AC-3, AC-4, AC-18, AC-20 | developer, operator (README sources) |
+| W-3 | `TextModelConfig.reasoning_effort` with construction checks | FR-2, AC-5, AC-7, AC-10 | developer |
+| W-4 | Adapters attach the fragment before `extra_body` | FR-4, AC-2, AC-3, AC-8, AC-14, AC-15, AC-17 | end user (vendor behavior) |
+| W-5 | `Runner` carries the effort and refuses non-text types | FR-5, AC-16 | developer |
+| W-6 | `BaseAgent` / `AgentRunnerConfig` / fallback carry the effort, with the construction guard | FR-6, FR-7, FR-11, AC-1, AC-4, AC-5, AC-6, AC-8 | developer |
+| W-7 | Copy paths: fork, ContinualTrace, Handoff, checkpoint, restore | FR-8, AC-11, AC-12 | developer |
+| W-8 | `JevAgentSettings.reasoning_effort` and the 9 Jev pass-throughs | FR-9, AC-1, AC-9 | developer, vidbyte-cli |
+| W-9 | Root exports and the regenerated contract | FR-10, AC-13 | vidbyte-cli |
+| W-10 | Release record, READMEs, skill doc | FR-12, AC-19, NFR-4 | developer, operator |
+
+### 12.2 Folder and module map
+| Folder | Kind of code (per repo rules) | New? | README / header obligation | May import from |
+|---|---|---|---|---|
+| `vidbyte/lib/enums/` | enums (Placement Rules → Enums) | no | none (no folder README); update the `text_model.py` header | stdlib only |
+| `vidbyte/lib/registries/` | lib-layer lookup registries | no (new file) | `README.md` gains a "Reasoning Effort Sources" section; A001 header on the new file | `vidbyte.lib.enums`, `vidbyte.lib.errors`, `vidbyte.lib.registries.models`, stdlib (AGENTS.md §3) |
+| `vidbyte/lib/dataclasses/` | validated records (Placement Rules → Dataclasses) | no | none (no folder README) | `vidbyte.lib.*` only |
+| `vidbyte/lib/runners/` | runner construction | no | none | `vidbyte.lib.*` only |
+| `vidbyte/providers/` | provider adapters | no | `README.md` "Contract Invariants" gains item 6 | `vidbyte.lib.*` |
+| `vidbyte/agents/` | agent layer | no (new file) | `README.md` gains a "Reasoning Effort" section and a Key Modules bullet; A001 header on the new file | `vidbyte.lib.*`, `vidbyte.agents.*` |
+| `vidbyte/agents/settings/` | agent settings | no | none | `vidbyte.lib.*`, `vidbyte.agents.*` |
+| `vidbyte/agents/jev/` (and subfolders) | JevAgent | no | `README.md` gains one sentence after :28 | as today |
+| `vidbyte/` root | public namespace | no | header bullet at :13 | everything |
+| `contracts/` | generated contract | no | regenerate only | — |
+| `skills/usage/`, `docs/design/` | docs | no | — | — |
+
+### 12.3 File-by-file actions
+| # | Action | Path | Kind of code | What exactly changes (symbols, signatures, exports, registrations) | Governing standard (AGENTS.md § / placement rule / field-guide file / lint rule ID) | Serves | Phase |
+|---|---|---|---|---|---|---|---|
+| 1 | MODIFY | `vidbyte/lib/enums/text_model.py` | enum | Add `class ReasoningEffort(StrEnum)` with the six members of §8.5 in order and a one-line docstring. Import `StrEnum`. Set `__all__ = ["ReasoningEffort", "TextModelMode"]`. Extend the header: PURPOSE names both enums; KNOWN EDGE CASES says "ReasoningEffort is sent only in DIRECT; unset sends nothing"; TESTS adds `tests/features/agent_reasoning_effort` (S2's pack). Keep `TextModelMode` as `(str, Enum)`, unchanged. | AGENTS.md Placement Rules → Enums ("defined in `vidbyte/lib/enums/<domain>.py` … no exceptions"); A001 header kept complete; D-11 StrEnum precedent `vidbyte/lib/enums/native_threads.py:5` | FR-1, W-1 | P1 |
+| 2 | MODIFY | `vidbyte/lib/enums/__init__.py` | enum export | Change `:214` to `from vidbyte.lib.enums.text_model import ReasoningEffort, TextModelMode`. Insert `"ReasoningEffort",` into `__all__` immediately before `"ReasoningStrategyEnum",` (alphabetical, about :350). | AGENTS.md Placement Rules → Enums ("every public enum is added to the export list"); S015 (static binding) | FR-1, W-1 | P1 |
+| 3 | CREATE | `vidbyte/lib/registries/reasoning_effort.py` | registry (lib) | (a) A001 module docstring with FILE, PURPOSE, ROLE IN CODEBASE (called by `TextModelConfig`, `JevAgentSettings`, `AgentReasoningEffortGuard`, and the four payload builders), ARCHITECTURE NOTE (lib layer; imports only enums, errors, `registries.models`; tables are data; unknown id → no support), FUNCTION INVENTORY, COMMON MODIFICATION PATTERNS (add a row only with a raw-doc quote recorded in the registries README; bump `REASONING_EFFORT_AS_OF`), WHAT NOT TO DO IN THIS FILE (no nearest-level mapping; no row for an id the runner cannot build; never mutate tables), KNOWN EDGE CASES (vendor remaps refused; Gemini `none` only on 2.5 Flash/Flash-Lite), RELATED DOCS (`vidbyte/lib/registries/README.md` "Reasoning Effort Sources"; `docs/spec/agent-reasoning-effort/spec.md` §9.2), TESTS. (b) Constants `REASONING_EFFORT_AS_OF`, `GEMINI_THINKING_BUDGET_OFF`. (c) `REASONING_EFFORT_FORMS` with the seven providers' wire forms exactly as the §9.2 "Wire form" lines give them (upper-case Gemini levels; GLM `low`/`high` include `{"thinking": {"type": "enabled"}}`). (d) `REASONING_EFFORT_SUPPORT` with exactly the §9.2 rows ("sent" cells only), keys lower-case, tuples in enum order, one comment per provider block naming the governing vendor URL (≤ 72 columns). (e) `class ReasoningEffortRegistry` with classmethods `supported`, `refusal`, `attach` (signatures §8.5) and at most three private leaf helpers: `_mode_refusal(mode) -> str \| None`, `_capability_refusal(provider_member, model, effort, supported) -> str`, `_merge(target, fragment) -> None` (recursive merge of nested dicts, other values replace). `supported` resolves the provider like `normalize_model` (an unknown provider or blank model raises its `ConfigurationError`), looks up `normalize_model(...).strip().lower()`, and returns `()` when there is no row. `attach` returns at once for `None` and raises the capability text if `effort not in supported(...)`. Each public method carries a `# @intent` block and plain-English narration. `__all__ = ["REASONING_EFFORT_AS_OF", "REASONING_EFFORT_FORMS", "REASONING_EFFORT_SUPPORT", "ReasoningEffortRegistry"]`. | AGENTS.md §3 (lib bottom layer), §1 (one-level helpers), §2 (narration); A001; A002 (`provider` token → `@intent` within 20 lines of each `def`); A007 (named budget constant); comment-format (72 columns); C008 (no primitive validator); D-17 (not added to `registries/__init__.py`) | FR-3, NFR-4, W-2 | P1 |
+| 4 | MODIFY | `vidbyte/lib/dataclasses/model_configs.py` | dataclass | (a) Imports: add `ReasoningEffort` to `from vidbyte.lib.enums import …`; `from vidbyte.lib.dataclasses.validation import RecordFieldConverter`; `from vidbyte.lib.registries.reasoning_effort import ReasoningEffortRegistry`. (b) `TextModelConfig`: append the field `reasoning_effort: ReasoningEffort \| None = None` after `vidbyte_api_key`. (c) `__post_init__`: append one statement, `self._validate_reasoning_effort()`, as the last line (no new branch in `__post_init__`). Extend its docstring with "and refuse a reasoning effort the call cannot send". (d) New private method `_validate_reasoning_effort(self) -> None`. It returns when `None`; otherwise it converts with `to_enum(…, "TextModelConfig.reasoning_effort")` and sets it with `object.__setattr__`. It then raises the §8.5 mode or capability text from `ReasoningEffortRegistry.refusal(provider=self.normalized_provider(), model=self.model, effort=…, mode=self.mode)`, then the both-set text when `thinking_config is not None`, then the overlap text when `set(self.extra_body or {})` intersects the top-level keys of the fragment (computed by `attach` into an empty dict). It carries `# @intent reasoning-effort-is-never-silently-ignored`. `DecisionModelConfig` is unchanged. | AGENTS.md §4 (validate in `__post_init__`, name field and value); field guide strict-config-dataclasses (to_enum; union only where required); A002; S060 (the method is private, no public `dict[str, Any]` signature); S008 (no branch added to `__post_init__`) | FR-2, W-3 | P1 |
+| 5 | MODIFY | `vidbyte/providers/openai.py` | adapter | In `_create_text_payload` (:252-261), immediately before `self._attach_extra_body(payload, config)` (:260), add: a `# @intent reasoning-effort-joins-before-extra-body` block (≤ 72 columns) saying the fragment merges after every builder that assigns a top-level key, and that an overlap with `extra_body` was refused at construction; then `ReasoningEffortRegistry.attach(payload, provider=config.normalized_provider(), model=config.model, effort=config.reasoning_effort)`. Add the module import. `stream_text` reuses this builder (:123), so it needs no edit. | A002 (`normalized_provider` contains `provider`); comment-format; providers README Contract Invariant 6 (row 32) | FR-4, W-4 | P2 |
+| 6 | MODIFY | `vidbyte/providers/anthropic.py` | adapter | Same as row 5 in `_create_payload` (:54-63), before `_attach_extra_body` (:62), so it runs after `_attach_response_format`, which assigns `output_config` whole (:69-70). | same as row 5; D-7 | FR-4, AC-14, W-4 | P2 |
+| 7 | MODIFY | `vidbyte/providers/gemini.py` | adapter | Same as row 5 in `_create_payload` (:58-69), before `_attach_extra_body` (:68), so it runs after `_attach_generation_config` (:179-197). | same as row 5; D-7 | FR-4, AC-15, W-4 | P2 |
+| 8 | MODIFY | `vidbyte/providers/compatible.py` | adapter | Same as row 5 in `OpenAICompatibleProvider._create_payload` (:58-66), before `_attach_extra_body` (:65). This covers `DeepSeekProvider`, `GLMProvider`, `MetaProvider`, `XAIProvider` (`xai.py:13`) and the other compatible subclasses; none overrides `_create_payload`. Providers without rows can never reach `attach` with an effort, because construction refuses them. | same as row 5 | FR-4, W-4 | P2 |
+| 9 | MODIFY | `vidbyte/lib/runners/utility.py` | runner | (a) `Runner.__init__` gains `reasoning_effort: ReasoningEffort \| None = None` after `temperature` (keyword-only) and stores `self.reasoning_effort`. (b) `_config_options_for`: inside the existing `if runner_type == RUNNER_TYPE_TEXT:` block add `options["reasoning_effort"] = self.reasoning_effort`. After the block, `if self.reasoning_effort is not None and runner_type != RUNNER_TYPE_TEXT:` raises the §8.5 Runner text. Extend the existing `@intent non-text-configs-take-their-providers-key` comment with one sentence: "an effort exists only for text configs, so another type refuses it". (c) Import `ReasoningEffort`. | AGENTS.md §5 (extend the shared helper instead of a parallel path); A002 (existing intent within the window); S008 (`_config_options_for` stays well under C901 10) | FR-5, AC-16, W-5 | P2 |
+| 10 | MODIFY | `vidbyte/lib/dataclasses/agents.py` | dataclass | `AgentRunnerConfig`: append `reasoning_effort: ReasoningEffort \| None = None` after `model_mode`. In `__post_init__` add `if self.reasoning_effort is not None: object.__setattr__(self, "reasoning_effort", RecordFieldConverter.to_enum(self.reasoning_effort, ReasoningEffort, "AgentRunnerConfig.reasoning_effort"))`. Update the docstring "Refuse a raw key list, a mode that is not the enum, or an effort outside the six." Imports: `RecordFieldConverter` beside `RecordFieldValidator` (:36); `ReasoningEffort` beside `TextModelMode` (:38). | AGENTS.md §4; field guide strict-config-dataclasses; C008 | FR-6, AC-10, W-6 | P3 |
+| 11 | CREATE | `vidbyte/agents/reasoning_effort.py` | agent policy module | A001 header modeled on `spend_cap.py`: FILE, PURPOSE, ROLE IN CODEBASE (called by `BaseAgent.__init__`), ARCHITECTURE NOTE (the chain is `fallback.models` when present, else the primary from `Runner._normalize_provider_and_model`; refusal order follows the chain; reasons de-duplicated in order), FUNCTION INVENTORY, COMMON MODIFICATION PATTERNS, WHAT NOT TO DO IN THIS FILE (never send, never mutate the runner config, never quote keys), KNOWN EDGE CASES (no identity → refused; fork children refused by their own construction), RELATED DOCS (agents README "Reasoning Effort"; this spec), TESTS. `TYPE_CHECKING` imports of `AgentFallback` and `AgentRunnerConfig`. `class AgentReasoningEffortGuard` with `@staticmethod refuse_unsupported(*, agent_name, runner_config, fallback) -> None`. It returns when `runner_config.reasoning_effort is None`. It builds the (provider, model) pairs (narrated). If any pair lacks a provider or a model, it raises the identity text. Otherwise it collects `ReasoningEffortRegistry.refusal(..., mode=runner_config.model_mode)` per pair, keeps the non-None reasons with `dict.fromkeys` order, and raises the §8.5 `BaseAgent` text when any remain. An `# @intent reasoning-effort-is-refused-before-any-call` block explains R3's lesson (a bad primary in front of a good fallback). `__all__ = ["AgentReasoningEffortGuard"]`. Not root-exported. | sibling `vidbyte/agents/spend_cap.py`; AGENTS.md §1, §2, §3; A001; A002 (`fallback`, `provider` tokens); comment-format; D-5 | FR-7, AC-4, AC-5, AC-6, W-6 | P3 |
+| 12 | MODIFY | `vidbyte/agents/base.py` | agent | (a) `__init__` gains `reasoning_effort: ReasoningEffort \| None = None` immediately after `temperature: float \| None = None` (:112, keyword-only). (b) `AgentRunnerConfig(...)` (:193-201) gains `reasoning_effort=reasoning_effort`. (c) One statement immediately after the spend-cap `raise` block (:256-257) and before `self.runtime_config = …`: `AgentReasoningEffortGuard.refuse_unsupported(agent_name=name, runner_config=self.runner_config, fallback=self.fallback)`, preceded by a one-line comment, with no new branch. (d) `_runner_for_model` (:1680-1687) passes `reasoning_effort=self.runner_config.reasoning_effort`. (e) `_export_runtime_config` (:634-669): after the `fallback_models` block, `if self.runner_config.reasoning_effort is not None: config["reasoning_effort"] = self.runner_config.reasoning_effort.value`, under `# @intent resume-keeps-the-reasoning-effort`. (f) `restore` (:599-627) passes `reasoning_effort=state.runtime_config.get("reasoning_effort")`. (g) Imports: `ReasoningEffort` in the `vidbyte.lib.enums` import (:58); `from vidbyte.agents.reasoning_effort import AgentReasoningEffortGuard` beside `spend_cap` (:42). `export_state` is unchanged. | NFR-7 (≤ 12 net lines; `_generate_reply`/`_process_tool_call` untouched); S008 (`__init__` already in the baseline; no branch added); S009 (one type everywhere); A002; INV-18 order | FR-6, FR-7, FR-8, AC-1, AC-11, W-6, W-7 | P3 |
+| 13 | MODIFY | `vidbyte/agents/fallback.py` | agent | (a) `AgentFallback.__init__` (:66-85) gains `reasoning_effort: ReasoningEffort \| None = None` after `model_mode`, stored as `self._reasoning_effort` with the existing "handed to every backup runner unchanged" comment extended. (b) `from_spec` (:108-113) passes `reasoning_effort=runner_config.reasoning_effort` to `settings.to_fallback`. (c) `build_runner` (:205-212) passes `reasoning_effort=self._reasoning_effort` to `Runner.from_model`. (d) Import `ReasoningEffort` (:33). `_primary_model` and `FallbackModel` are unchanged (D-6). | field guide fallback-coordination; A002 (existing intents in window); INV-19 signature pins | FR-11, AC-6, W-6 | P3 |
+| 14 | MODIFY | `vidbyte/agents/settings/fallback.py` | agent settings | `AgentFallbackSettings.to_fallback` (:114-137) gains `reasoning_effort: ReasoningEffort \| None = None` after `model_mode` and passes it to `AgentFallback(...)`. Extend the docstring/header line "with the agent's matched keys, mode and reasoning effort". Import `ReasoningEffort` (:29). `CodexHarnessAgent`'s call (`agents/codex/fallback.py:59`) keeps the default. | AGENTS.md Placement Rules (settings live here); INV-19 | FR-11, W-6 | P3 |
+| 15 | MODIFY | `vidbyte/agents/fork.py` | agent copy path | In `AgentForker.fork`'s `BaseAgent(...)` (:56-95), after `temperature=…` (:72), add `reasoning_effort=agent.runner_config.reasoning_effort`. Extend the `@intent children-carry-the-matched-keys` comment, or add one line, saying the child keeps the parent's effort and its own construction re-checks it against the child's model. | copy-path precedent (temperature); comment-format | FR-8, AC-12, W-7 | P4 |
+| 16 | MODIFY | `vidbyte/agents/continual_trace.py` | agent copy path | `ContinualTraceAgent.from_source_agent` (:58-71): add `reasoning_effort=source_agent.runner_config.reasoning_effort` after `temperature=` (:66). | `@intent side-agents-route-like-source` (:56) already states the rule | FR-8, W-7 | P4 |
+| 17 | MODIFY | `vidbyte/agents/handoff.py` | agent copy path | `HandoffAgent.from_source_agent` (:57-75): add `reasoning_effort=source_agent.runner_config.reasoning_effort` after `temperature=` (:70). | `@intent handoff-reuses-the-selected-runner` | FR-8, W-7 | P4 |
+| 18 | MODIFY | `vidbyte/agents/jev/settings.py` | agent settings | (a) `JevAgentSettings`: append `reasoning_effort: ReasoningEffort \| None = None` after `system_prompt_presets` (:151). (b) `__post_init__`: one call `self._validate_reasoning_effort()` immediately after `self._validate_timeout()` (:178). (c) New private method `_validate_reasoning_effort(self) -> None`. It returns for `None`; otherwise it converts with `to_enum(…, "JevAgentSettings.reasoning_effort")` and sets it with `object.__setattr__`. Then `ReasoningEffortRegistry.refusal(provider=self.provider, model=self.model_name, effort=…, mode=self.model_mode)` raises the §8.5 `JevAgentSettings` text. It carries `# @intent jev-effort-is-checked-against-its-model`. (d) Imports: `ReasoningEffort` in the `vidbyte.lib.enums` block (:54-63); `RecordFieldConverter`; `ReasoningEffortRegistry`. (e) Header: name the new field where the header lists the settings fields. | AGENTS.md Placement Rules → New JEV code ("a named, validated field on `JevAgentSettings`"); §4; field guide jev-capability-layout; A002; C008 | FR-9, AC-9, W-8 | P4 |
+| 19 | MODIFY | `vidbyte/agents/jev/agent.py` | agent | Add `reasoning_effort=settings.reasoning_effort` after `temperature=settings.temperature` in the fresh-continuation `partial(BaseAgent, …)` (:71) and in `super().__init__(…)` (:103). `JevAgent.__init__` signature unchanged (INV-19). | D-9; temperature precedent | FR-9, W-8 | P4 |
+| 20 | MODIFY | `vidbyte/agents/jev/bulk_work.py` | agent | `JevBulkWorker.__init__`'s `BaseAgent(...)`: add `reasoning_effort=settings.reasoning_effort` after :56. | D-9 | FR-9, W-8 | P4 |
+| 21 | MODIFY | `vidbyte/agents/jev/compute/clone.py` | agent | `JevCloneAgent.__init__`'s `super().__init__(...)`: add after :39. | D-9 | FR-9, W-8 | P4 |
+| 22 | MODIFY | `vidbyte/agents/jev/compute/swarm.py` | agent | `JevSwarmAgent.__init__`'s `super().__init__(...)`: add after :51. | D-9 | FR-9, W-8 | P4 |
+| 23 | MODIFY | `vidbyte/agents/jev/done/handoff.py` | agent | `JevHandoff.__init__`'s `super().__init__(...)`: add after :166. | D-9 | FR-9, AC-14, W-8 | P4 |
+| 24 | MODIFY | `vidbyte/agents/jev/done/reviewer.py` | agent | `JevReviewer.__init__`'s `super().__init__(...)`: add after :42. | D-9 | FR-9, W-8 | P4 |
+| 25 | MODIFY | `vidbyte/agents/jev/done/run_state.py` | agent | `JevRunState.__init__`'s `super().__init__(...)`: add after :286. `JevRunStateRelation` (`done/relation.py:22`) inherits it, so it needs no edit. | D-9 | FR-9, W-8 | P4 |
+| 26 | MODIFY | `vidbyte/agents/jev/gate/clarification.py` | agent | `JevClarificationAgent.__init__`'s `super().__init__(...)`: add after :59. | D-9 | FR-9, W-8 | P4 |
+| 27 | MODIFY | `vidbyte/__init__.py` | root namespace | (a) Replace the `:13` bullet with exactly: `    - Agent setting exports: AgentLoopSettings (loop limits), PermissionPolicy (which ToolPermission levels tools may use), TextModelMode (gateway or direct text calls) and ReasoningEffort (the provider-neutral reasoning effort a DIRECT text call sends), which BaseAgent and JevAgentSettings take, plus JevDynamicComputeOption, the values of JevComputeSettings.dynamic_compute, and DecisionModelConfig with its DecisionModelMode, the decision-model record JevRuntimeSettings.decision holds, so a caller limited to root names, such as vidbyte-cli, can set JevAgent's loop, permission, text-mode, reasoning-effort, compute and decision-model options.` (b) Add `from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig` in alphabetical position among the `vidbyte.lib.dataclasses` imports (:448-489, after `handoff_agent_descriptor`, before `multi_agent_descriptor`). (c) Add `DecisionModelMode` (after `BudgetPreset`) and `ReasoningEffort` (after `Prompt`) to the `from vidbyte.lib.enums import (…)` block (:490-504). (d) Insert `"ReasoningEffort", "DecisionModelConfig", "DecisionModelMode",` into `__all__` immediately after `"TextModelMode",` (:1128). | R1 #1190 pattern; S015; C016; `tests/features/jev_cli_root_exports` "one … bullet" (`HEADER_BULLET`); INV-12 | FR-10, AC-13, W-9 | P5 |
+| 28 | MODIFY (generated) | `contracts/sdk-public-api.json` | generated contract | After row 27 is committed, run `PYTHONPATH=$(pwd) py -3.11 scripts/generate-sdk-public-api.py` and commit the output (736 exports). Never hand-edit. | C016; `scripts/generate-sdk-public-api.py:7` ("Commit the vidbyte/__init__.py … first") | FR-10, AC-13, W-9 | P5 |
+| 29 | MODIFY | `vidbyte/lib/registries/README.md` | doc | New section `## Reasoning Effort Sources`, after "Provider Key Format Sources", in that section's style. It says `ReasoningEffortRegistry` in `reasoning_effort.py` maps the six values. Each source was opened on 2026-10-20 (`REASONING_EFFORT_AS_OF`). A cell is "sent" only when a raw vendor doc names the value for that model; vendor remaps and unverified models are refused. One line per provider gives the governing URLs (the §9.2 URLs) and that provider's wire form. Target ≤ 3,500 characters. | AGENTS.md folder-README rule; A009 (≤ 40,000); NFR-4; `provider_keys.py` precedent | FR-12, NFR-4, W-10 | P6 |
+| 30 | MODIFY | `vidbyte/agents/README.md` | doc | (a) New section `## Reasoning Effort` immediately after "Spend Cap" (before "Key Modules" :433), ≤ 1,800 characters. It covers: what it is; DIRECT only; the construction refusals; that it reaches the chain, forks, side agents, restore and the Jev children; that it does not reach specialists, the brief writer or decisions; the pointer to the registries README for the table. (b) A Key Modules bullet: `reasoning_effort.py` — `AgentReasoningEffortGuard`, the construction refusal for `reasoning_effort`. | AGENTS.md folder-README rule; A009 (33,180 now; stays ≤ 40,000) | FR-12, W-10 | P6 |
+| 31 | MODIFY | `vidbyte/agents/jev/README.md` | doc | One sentence after the presets paragraph (:28): `JevAgentSettings.reasoning_effort` reaches the main agent and every child that runs on its model, the machinery included, as `temperature` does; specialists and the run-brief writer keep their own settings and Jev decisions never use it; it needs `model_mode=TextModelMode.DIRECT`. | AGENTS.md folder-README rule; A009 | FR-12, W-10 | P6 |
+| 32 | MODIFY | `vidbyte/providers/README.md` | doc | Append Contract Invariant 6 under "Contract Invariants" (:596-606), ≤ 450 characters: **The reasoning effort is attached, never hand-built.** Each text payload builder calls `ReasoningEffortRegistry.attach` immediately before `_attach_extra_body`; a new provider adds its wire form and model rows to `vidbyte/lib/registries/reasoning_effort.py` with a raw-doc source. | AGENTS.md folder-README rule; A009 (40,944 now; legacy ceiling 55,000) | FR-4, FR-12, W-10 | P6 |
+| 33 | MODIFY | `skills/usage/create_agent.md` | doc | Add `    reasoning_effort: ReasoningEffort \| None = None,` after the `temperature` line of the constructor listing (:39). Extend the "Model" bullet (:62) with one clause: "`reasoning_effort` (a `ReasoningEffort`) is sent in the provider's own form on `TextModelMode.DIRECT` calls; unsupported values are refused at construction". | the file mirrors `BaseAgent.__init__` (its constructor listing at :23-55) | FR-12, W-10 | P6 |
+| 34 | MODIFY | `docs/design/release-0-4-0.md` | doc | (a) Line 17 ends with this text (verbatim, the before text): "The loop spend cap (#1192) adds `AgentLoopSettings.max_spend_usd`, an optional USD cap the shared agent loop checks against the run's live priced usage before every model call, tool call, finish attempt, and compute checkpoint; a run it stops ends with the new stop reason `AgentStopReason.MAX_SPEND`, which sessions report as the existing `resource.exhausted`, and `UsageRollup` gains the read-only `cost_measured`. No root name, `FailureCode` member, or default changes, so the contract still lists 733 exports." Append one space and this sentence after it: "The reasoning effort adds the root enum `ReasoningEffort` (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`) and an optional `reasoning_effort` on `BaseAgent` and `JevAgentSettings`, which each provider adapter sends in that provider's documented wire form on `TextModelMode.DIRECT` calls; construction refuses it with `ConfigurationError` in a gateway mode, beside `thinking_config`, or for a model and value with no documented form, and nothing is sent when it is unset. The same change makes `DecisionModelConfig` and `DecisionModelMode` root names, so the contract lists 736 exports; no `FailureCode` member or default changes." (b) In line 19, replace this sentence (verbatim, the before text): "The contract now lists 733 exports, against 639 at `v0.3.0`: 94 added and none removed, 3 from #1099, 4 from #1084, 17 from #1179, 11 from #1189, 3 from #1159, 51 from #1147, 4 from #1190, and `SystemPromptPreset` from #1095." with: "The contract now lists 736 exports, against 639 at `v0.3.0`: 97 added and none removed, 3 from #1099, 4 from #1084, 17 from #1179, 11 from #1189, 3 from #1159, 51 from #1147, 4 from #1190, `SystemPromptPreset` from #1095, and 3 from the reasoning-effort change." (c) The S3 PR author then inserts " (#N)" after "The reasoning effort" and replaces "the reasoning-effort change" with "#N" (§14). No other line changes. | request.md §C "Version (D-P2)"; briefing "quote the exact before text" | FR-12, AC-19, W-10 | P6 |
+
+New files in this table: 2 (rows 3 and 11), equal to the §8.4 budget.
+
+### 12.4 Standards checklist for this change
+
+- [ ] `ReasoningEffort` is defined in `vidbyte/lib/enums/text_model.py`, exported from `vidbyte/lib/enums/__init__.py`, and typed on every field and parameter that holds it (no plain `str`). — *source:* AGENTS.md Placement Rules → Enums
+- [ ] Both new modules open with an A001 header that has non-empty PURPOSE, ROLE IN CODEBASE, ARCHITECTURE NOTE, COMMON MODIFICATION PATTERNS, KNOWN EDGE CASES, RELATED DOCS and TESTS, plus FILE, FUNCTION INVENTORY and WHAT NOT TO DO IN THIS FILE as in `spend_cap.py`. — *source:* `lint/rules/a001_agent_readable_file_headers.py:24`; sibling `spend_cap.py:1-12`
+- [ ] Every new or changed function whose names include `provider`, `fallback`, `request`, `send`, `transport`, `checkpoint`, `persist` or `price` has a non-empty `# @intent <slug>` within 4 lines above or 20 lines below its `def`. This includes the four `_create_payload` / `_create_text_payload` builders, all three registry classmethods, `refuse_unsupported`, and both `_validate_reasoning_effort` methods. — *source:* `lint/rules/a002_intent_comments.py:21-45`
+- [ ] Every multi-line comment you write is a PEP 8 block of at most 72 columns, placed directly above the line it explains, with `# @intent` on its own first line. `awk 'length($0) > 72' <file> \| grep -E '^\s*#'` prints nothing for new comment lines. — *source:* field guide comment-format.md
+- [ ] Main functions (`refuse_unsupported`, `attach`, both `_validate_reasoning_effort` methods) carry short plain-English narration comments for each step. — *source:* AGENTS.md §2
+- [ ] Each public registry method calls a flat list of leaf helpers, and helpers call no further helpers of their own. Recursion inside `_merge` is the only self-call. — *source:* AGENTS.md §1
+- [ ] `vidbyte/lib/registries/reasoning_effort.py` imports nothing above `vidbyte.lib`. `vidbyte/lib/dataclasses/*` imports only `vidbyte.lib.*`. The agent guard imports `AgentFallback`/`AgentRunnerConfig` only under `TYPE_CHECKING`. — *source:* AGENTS.md §3
+- [ ] The new fields are validated in `__post_init__` through `RecordFieldConverter.to_enum`. No new primitive validator is defined, and the C008 count stays 45 or lower. Each `ConfigurationError` carries `details["field"]`. — *source:* AGENTS.md §4; `validation.py:3-7`; `lint/baseline.json` C008
+- [ ] The only numeric literal in the tables, Gemini's off budget, is the named constant `GEMINI_THINKING_BUDGET_OFF`. — *source:* A007; field guide blocking-lint-invariants
+- [ ] No new S008 finding (C901/PLR0912/PLR0915). No branch is added to `BaseAgent.__init__`, `TextModelConfig.__post_init__` or `JevAgentSettings.__post_init__`. `_generate_reply` and `_process_tool_call` are untouched. — *source:* `lint/baseline.json` S008; pipeline.md
+- [ ] No new mypy (S009) error. Every signature uses `ReasoningEffort \| None`. `restore` passes `state.runtime_config.get(...)` (typed `Any`). — *source:* `lint/baseline.json` S009; request.md "ratchet slack"
+- [ ] No public function under `vidbyte/lib/dataclasses/` or `vidbyte/sessions/` gains a `dict[str, Any]` annotation. — *source:* `lint/rules/s060_typed_public_seam_mappings.py:24`
+- [ ] Root names are bound by eager imports and listed in `__all__`. The contract is regenerated after committing `vidbyte/__init__.py`, and `--check` passes. — *source:* S015; C016; `scripts/generate-sdk-public-api.py:7`
+- [ ] One "- Agent setting exports:" bullet in the root header names all three new root names. — *source:* `tests/features/jev_cli_root_exports/test_jev_cli_root_exports_contract.py:35,181`
+- [ ] The four touched READMEs stay within A009 limits (40,000 characters; providers README 55,000). — *source:* `lint/rules/a009_readme_size_limit.py:20-31`
+- [ ] No `FailureCode` member is added. — *source:* pipeline.md "FailureCode trap"
+- [ ] No key-shaped literal (such as "sk-" plus hex) appears in code, docs or comments. — *source:* pipeline.md (GH013 push protection)
+- [ ] `EMITTED_KEYS`, every test file and `lint/baseline.json` are unchanged. — *source:* orchestrator ruling; §14
+- [ ] Nothing under `vidbyte/tools/` or `vidbyte/lib/configs/` changes. — *source:* `test_harness_threads_surface.py:270-278`; D-16, D-17
+- [ ] Each table row in `REASONING_EFFORT_SUPPORT` equals the §9.2 "sent" cells. No row exists for an id outside the runner catalog's text entries. — *source:* NFR-4; NG-14
+- [ ] Error messages match §8.5 character for character. They are one sentence and never quote a key or prompt. — *source:* INV-11; AGENTS.md §4 ("names the field and the bad value")
+
+### 12.5 Non-code actions
+- Regenerate `contracts/sdk-public-api.json` with `PYTHONPATH=$(pwd) py -3.11 scripts/generate-sdk-public-api.py`, after committing row 27 (733 → 736). — *source:* C016; pipeline.md
+- Add the "Reasoning Effort Sources" section — `vidbyte/lib/registries/README.md` — *source:* AGENTS.md folder-README rule; NFR-4
+- Add the "Reasoning Effort" section and the Key Modules bullet — `vidbyte/agents/README.md` — *source:* AGENTS.md folder-README rule (file index)
+- Add one sentence — `vidbyte/agents/jev/README.md` — *source:* AGENTS.md folder-README rule
+- Add Contract Invariant 6 — `vidbyte/providers/README.md` — *source:* AGENTS.md folder-README rule
+- Add the signature line and the Model clause — `skills/usage/create_agent.md` — *source:* the file mirrors `BaseAgent.__init__`
+- Add the release sentence and update the tally — `docs/design/release-0-4-0.md` :17, :19 — *source:* request.md §C (D-P2)
+- No `llms.txt`, `.env.example`, changelog, `registries/__init__.py` or baseline change. — *source:* none required (repo maintains no feature list in `llms.txt`; D-17)
+- Pinned layout tests (S2, not the implementer):
+  - `EXPECTED_TEXT_CONFIG_FIELDS` in `tests/features/sdk_managed_text/test_managed_text_selection.py:54-58` cannot pass unedited once `TextModelConfig` gains a field. The same holds for the `AgentRunnerConfig` and `JevAgentSettings` layouts in `tests/features/sdk_provider_keys/test_provider_keys_contract.py:128-140`.
+  - Their purpose (positional layout, "new fields are appended", D-20) is kept by appending `"reasoning_effort"` last. S2 makes that append.
+  - The implementer must not edit them (§13, §14).
+
+### 12.6 Phases and dependency order
+
+**P1 — Value and table** (ships: `ReasoningEffort`, the registry, and `TextModelConfig` validation; nothing is sent yet): rows 1, 2, 3, 4
+**P2 — Wire** (ships: a direct `TextModelConfig` user gets the fragment on every provider): rows 5, 6, 7, 8, 9
+**P3 — Agent** (ships: `Agent(reasoning_effort=…)` with the construction guard and fallback): rows 10, 11, 12, 13, 14
+**P4 — Copy paths and Jev** (ships: forks, side agents, restore and JevAgent): rows 15–26
+**P5 — Root and contract** (ships: C4/C5 imports): rows 27, 28 (28 after 27 is committed)
+**P6 — Docs and release record**: rows 29–34
+
+**Dependency order:**
+- P1 → P2 → P3 → P4 → P5 → P6.
+- Within P1: row 1 → 2 → 3 → 4.
+- Row 11 needs rows 3 and 10. Row 12 needs rows 10, 11 and 13.
+
+**Independent:**
+- Rows 5–8 are independent of each other.
+- Rows 15–17 are independent of each other, and so are rows 19–26.
+- Rows 29–33 are independent of each other.
+
+Each phase leaves every existing test passing, except the three layout pins (P1 and P3, §12.5). S2 updates those before implementation starts.
+
+## §13 Test seams (facts for the test author — no tests here)
+
+- **Framework:** pytest 8.3.5 with pytest-asyncio 1.3.0 (`pyproject.toml:48-49`), `testpaths = ["tests"]`. Many files are `unittest.TestCase` classes collected by pytest.
+- **Layout and naming:** a feature pack lives in `tests/features/<slug>/` with `FEATURE.md`, `README.md`, `<slug>_fixtures.py` and `test_*.py` (see `tests/features/loop_spend_cap/README.md`). The natural slug here is `agent_reasoning_effort`.
+- **Prior art to copy:**
+  - `tests/features/loop_spend_cap/test_loop_spend_cap_refusals.py` (construction refusals over primary and fallback);
+  - `tests/features/loop_spend_cap/test_loop_spend_cap_copy_paths.py:103-176` (checkpoint, fork and fork-tool copy paths);
+  - `tests/features/sdk_managed_text/test_managed_text_wire_contract.py:81-109` (body assertions per provider);
+  - `tests/features/jev_cli_root_exports/test_jev_cli_root_exports_contract.py` (root identity, header bullet, contract).
+- **Fixtures / factories:**
+  - `tests/features/sdk_managed_text/managed_text_fixtures.py:61-79` `ScriptedGateway` (records each request; `RUNNER_TRANSPORT_TARGET = "vidbyte.lib.runners.text.HttpTransport"` at :37);
+  - `tests/test_gemini_provider_text.py:30-35` `_ScriptedTransport` (adapter level);
+  - `tests/features/loop_spend_cap/test_loop_spend_cap_acceptance.py:78-123` `GatewayWire` with `monkeypatch.setattr(HttpTransport, "request", wire)` (agent level, end to end).
+- **Real seams (do not mock):**
+  - The only network seam is `HttpTransport.request` (`vidbyte/lib/http/transport.py:55`). Fake it there to observe the bodies the adapters build.
+  - `bind_test_runner` with a `ScriptedRunner` (`loop_spend_cap_fixtures.py:177-197`, `:308-322`) bypasses the adapters, so it cannot observe the wire fragment. Use it only for construction and copy-path facts.
+  - Do not monkeypatch `BaseAgent.__init__` or `AgentForker` (`tests/agent_test_support.py:24`).
+  - Build key-shaped fixtures at run time from parts (`tests/test_gemini_provider_text.py:26`), because the repo is public with GH013 push protection.
+- **Pinned tests that change (S2 edits, the implementer never edits):**
+  - `tests/features/sdk_managed_text/test_managed_text_selection.py:54-58`, asserted at `:344`: append `"reasoning_effort"` to `EXPECTED_TEXT_CONFIG_FIELDS`.
+  - `tests/features/sdk_provider_keys/test_provider_keys_contract.py:128-140`: append `"reasoning_effort"` to the `AgentRunnerConfig` and `JevAgentSettings` layouts. The hidden-field lists are unchanged, because the new field keeps `repr=True`.
+- **Pins that stay green:**
+  - the keyword-only signature subset checks (`test_provider_keys_contract.py:200-219`);
+  - `JevAgent.__init__` (`test_output_connectors_agent_wiring.py:112`, `tests/test_jev_agent.py:506`);
+  - the `CodingAgent` signature (`test_coding_agent_contract.py:117`);
+  - `EMITTED_KEYS` (unchanged).
+- **Inherited local reds (do not edit; CI skips):** `tests/features/harness_threads/test_harness_threads_surface.py:309`, red on any branch that adds a root export.
+- **Facts useful for oracles:**
+  - The vendor bodies for each cell are in §9.2.
+  - DIRECT URLs:
+    - OpenAI `https://api.openai.com/v1/responses` (the test file constant `OPENAI_RESPONSES_URL`, `test_managed_text_selection.py:52`);
+    - Anthropic `{endpoint}/messages`;
+    - Gemini `.../models/{model}:generateContent`;
+    - chat providers `{endpoint}/chat/completions`.
+  - `ConfigurationError` is `vidbyte.ConfigurationError`, and `str(error)` is its message.
+  - The usage shapes are those in §9.2 "Billing" (`tests/test_agent_pricing.py:61-72`, `:147-171` show OpenAI and chat reasoning-token parsing).
+- **Per-area config:** none beyond `pyproject.toml`.
+- **Run one file:** `PYTHONPATH=$(pwd) py -3.11 -m pytest -q <file>` · **Run all:** `python scripts/run_ci.py` (worktree: `PYTHONIOENCODING=utf-8 PYTHONPATH=$(pwd) py -3.11 scripts/run_ci.py --stage source`, then `env -u PYTHONPATH py -3.11 scripts/run_ci.py --stage package`)
+
+## §14 Agent boundaries
+- **Always:**
+  - Work only in the worktree.
+  - Use `py -3.11`, and set `PYTHONPATH` inline only.
+  - Run the focused tests after each phase.
+  - Run the staged full local gate before pushing, and compare lint per rule with `base_commit`.
+  - Cite FR, AC and W IDs in commit messages.
+  - Commit `vidbyte/__init__.py` before regenerating the contract.
+  - Copy the §8.5 texts exactly.
+  - Keep `REASONING_EFFORT_SUPPORT` equal to the §9.2 "sent" cells.
+  - End every commit message with the repo's attribution line.
+- **Ask first (stop and report BLOCKED):**
+  - Never modify a test file. That includes the three layout pins, which S2 owns.
+  - Exceeding the §8.4 budget, or touching a file outside §12.3.
+  - Any change to `EMITTED_KEYS`, the gateway, `vidbyte/tools/` or `vidbyte/lib/configs/`.
+  - Adding a table row, or a "sent" cell, that §9.2 does not have.
+  - A public contract change not in §9.2.
+  - A new `FailureCode` member.
+  - Adding a branch to `_generate_reply` or `_process_tool_call`.
+- **Never:**
+  - Commit secrets or key-shaped literals.
+  - Delete, skip or weaken a test.
+  - Raise `lint/baseline.json` or add a suppression.
+  - Push to main, tag or publish.
+  - Map an unsupported value to a nearest level.
+  - Send the effort in a gateway mode.
+  - Implement anything not in §12.
+  - Hand-edit `contracts/sdk-public-api.json`.
+- **Handoffs:**
+  - The S3 PR author inserts the PR number into the release sentence and the tally (row 34).
+  - S2 appends `"reasoning_effort"` to the three layout pins before implementation.
+
+## §15 Assumptions and open questions
+**Assumptions** (stand unless the user corrects them):
+- **A-1** — The Anthropic display names in the effort and thinking docs map to the ids as named: Claude Opus 5 → `claude-opus-5`, Claude Fable 5 → `claude-fable-5`, Claude Mythos 5 → `claude-mythos-5`, Claude Mythos 5.1 → `claude-mythos-5-1`, Claude Opus 4.8 → `claude-opus-4-8`. Each id is verbatim in the effort page's `supportedModels` list (A69a–A69k). The pairs for Fable 5.1, Opus 5.5, Sonnet 5.5, Haiku 5.5, Sonnet 5 and Haiku 4.5 are verbatim (A95, A24, A90, A25, A91). — *If wrong:* that row's cells move to the matching display row.
+- **A-2** — Meta's statements about "Muse Spark" cover every `muse-spark-*` id, the contributor variants included (MS-12, MS-13, MS-31, MS-32, MS-33). — *If wrong:* a contributor id's `minimal`…`high` cells become refused.
+- **A-3** — GLM's `completion_tokens` includes reasoning. The usage schema has no reasoning field (GL-20, GL-21), and the thinking example's totals add up as prompt + completion (GL-22a–c). — *If wrong:* GLM reasoning spend is under-counted. That is a pre-existing gap, because GLM thinking is on by default (GL-30). It is reported, not fixed.
+- **A-4** — xAI serves `grok-4.7` and `grok-4.6` on chat completions. XA-2 names the chat-style `reasoning_effort` parameter for them, but the grok-4.7 page lists only the Responses API (XA-37). — *If wrong:* those calls fail whatever the effort is (pre-existing). The cells would become refused.
+- **A-5** — The vendor docs fetched on 2026-10-20 are current. — *If wrong:* see EC-11. Bump `REASONING_EFFORT_AS_OF` with the table.
+- **A-6** — Gemini REST accepts the upper-case enum names (`"HIGH"`, G59, G4–G5). Lower-case also appears in a doc example (G1). — *If wrong:* send lower-case. Only the registry's form strings change.
+- **A-7** — DeepSeek's raw HTTP API takes `reasoning_effort` at the top level of the body (DS-37, DS-5). DS-7's `extra_body` note is about the OpenAI Python SDK. — *If wrong:* the DeepSeek form changes in the registry.
+- **A-8** — Actor runtimes (`broker.py:168`, the `model_name` option) and algorithm side calls go through the agent's own text runner and model, so checking the agent's own model covers them. — *If wrong:* an actor call to another model could carry an effort that model lacks. The vendor would return 400, which surfaces as `ProviderRequestError`.
+- **A-9** — Remote CI skips `test_harness_threads_surface.py:309` (request.md:84). This was not verified remotely.
+- **A-10** — OpenAI applies `reasoning.effort` the same way when the body also carries `tools` or `text.format`. No fetched doc says otherwise.
+- **A-11** — `output_config.effort` on `claude-opus-4-8`, without a `thinking` field, is accepted and shapes output spend (A33, A87). The SDK does not also enable adaptive thinking.
+- **A-12** — C4 builds JevAgent with `model_mode=TextModelMode.DIRECT` (briefing; D-P5). — *If wrong:* every C5 effort is refused with the mode text, which is loud.
+- **A-13** — The docs.z.ai pages describe the same API as `open.bigmodel.cn`, the SDK's endpoint. The bigmodel pages corroborate them (GL-0, GL-8, GL-9).
+
+**Open questions** (max 5 blocking):
+| ID | Question | Blocking? | Default if unanswered |
+|---|---|---|---|
+| Q-1 | [scope-adding] Map a value the model cannot express, or a vendor-remapped value, to the nearest documented level instead of refusing? | non-blocking | No (refuse; D-4) |
+| Q-2 | [scope-adding] Extend the Vidbyte gateway allow-list (a backend change plus `EMITTED_KEYS`) so `AUTO` and `VIDBYTE_MANAGED` can carry the effort? | non-blocking | No (DIRECT only; D-2) |
+| Q-3 | Should Jev's fixed-prompt machinery (`JevRunState`, `JevHandoff`, `JevReviewer`, `JevClarificationAgent`) stay at the provider default instead of inheriting the effort as it inherits `temperature`? | non-blocking | No (inherit; D-9) |
+| Q-4 | [scope-adding] A per-hop effort (`FallbackModel.reasoning_effort`), an `AgentForkSettings.reasoning_effort` override, or a fork-tool parameter? | non-blocking | No (D-6, D-16) |
+| Q-5 | [scope-adding] Echo OpenAI reasoning items and DeepSeek final-turn `reasoning_content` in history (EC-15, EC-16)? | non-blocking | No (no parser change; D-15) |
+| Q-6 | [scope-adding] Raise Anthropic's DIRECT `max_tokens` default (1024) when an effort is set (EC-12)? | non-blocking | No |
+| Q-7 | [scope-adding] Refuse `temperature` together with an effort where a vendor returns 400 or ignores it (EC-13)? | non-blocking | No |
+| Q-8 | [scope-adding] Accept `reasoning_effort` in YAML agent configs, `InfiniteMemoryAgentSettings` and `AggregateAgent`? | non-blocking | No (NG-10) |
+| Q-9 | Support `claude-mythos-preview` at `low`/`medium`/`high`? It is deprecated, and its end-of-life date conflicts between two Anthropic pages. | non-blocking | No (refused; EC-24) |
+
+Blocking questions: 0.
+
+## §16 Review log
+| Round | ID | Severity | Section | Finding (one line) | Disposition | Change made / reason |
+|---|---|---|---|---|---|---|
+
+## §17 Revision history
+| Revision | Date | Stage | Summary |
+|---|---|---|---|
+| r1 | 2026-10-20 | S1 spec | Initial spec |
