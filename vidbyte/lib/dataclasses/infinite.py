@@ -1,13 +1,13 @@
 """FILE: vidbyte/lib/dataclasses/infinite.py
 
-PURPOSE: Defines the 22 validated records of the InfiniteMemory agent: InfiniteTaskCard, one task a parent hands to a generator and verifier pair; InfiniteEntryDraft, one memory entry before it has an id; InfiniteEntry, one committed entry; InfiniteStagedEntry, a pair's entry waiting for its verdict; InfiniteResultCard, what a parent learns about one finished pair; InfiniteWorkspaceUsage, the workspace's file count and token total; InfiniteCommittedEntry and InfiniteDroppedEntry, what became of one staged entry; InfiniteEvent, one run event; and the 13 details records its kinds carry, joined in the InfiniteEventDetails alias.
+PURPOSE: Defines the 30 validated records of the InfiniteMemory agent: InfiniteTaskCard, one task a parent hands to a generator and verifier pair; InfiniteEntryDraft, one memory entry before it has an id; InfiniteEntry, one committed entry; InfiniteStagedEntry, a pair's entry waiting for its verdict; InfiniteResultCard, what a parent learns about one finished pair; InfiniteWorkspaceUsage, the workspace's file count and token total; InfiniteCommittedEntry and InfiniteDroppedEntry, what became of one staged entry; InfiniteEvent, one run event; and the 21 details records its kinds carry, joined in the InfiniteEventDetails alias.
 ROLE IN CODEBASE: Built and read by vidbyte/agents/infinite/: the launch tool turns the model's task list into InfiniteTaskCards and each finished pair into an InfiniteResultCard, the memory tools build InfiniteEntryDrafts and InfiniteStagedEntries, the workspace returns InfiniteEntry and InfiniteWorkspaceUsage records, and the journal stores and reloads the result cards. InfinitePair and InfiniteAgentMemory build InfiniteCommittedEntry and InfiniteDroppedEntry items on the run path; InfiniteEvent and the details records are built only by InfiniteEvents (vidbyte/agents/infinite/events.py) and handed to the caller's on_event sink. InfiniteEvent is exported from vidbyte and vidbyte.agents; the details records only from here.
 ARCHITECTURE NOTE: Validation only. Every check runs in __post_init__, so a constructed record is always valid and its callers never check it again. Each field check is one call to the SDK's canonical RecordFieldValidator or RecordFieldConverter (vidbyte/lib/dataclasses/validation.py); only this feature's own rules, such as what a context item may name, are written here. Sequence fields must already be tuples; the agents layer converts the model's JSON lists. Reading and writing the JSON-lines shapes lives in the workspace and journal modules, not here.
-FUNCTION INVENTORY: 22 frozen, slotted records, each with a __post_init__ that checks its fields through RecordFieldValidator and RecordFieldConverter and then applies its own rules: InfiniteTaskCard, InfiniteEntryDraft, InfiniteEntry, InfiniteStagedEntry, InfiniteResultCard, InfiniteWorkspaceUsage, InfiniteCommittedEntry, InfiniteDroppedEntry, the details records InfiniteRunStartedDetails, InfiniteRunResumedDetails, InfiniteRunFinishedDetails, InfiniteRunStoppedDetails, InfiniteRefusalDetails, InfiniteSubagentLaunchedDetails, InfiniteSubagentReplayedDetails, InfiniteGeneratorFinishedDetails, InfiniteSubagentFinishedDetails, InfiniteMemorySavedDetails, InfiniteMemoryStagedDetails, InfiniteMemoryDroppedDetails, InfiniteFileWrittenDetails, and InfiniteEvent, whose DETAILS_TYPES maps each kind to its details record. InfiniteEventDetails is the union of the 13 details records.
+FUNCTION INVENTORY: 30 frozen, slotted records, each with a __post_init__ that checks its fields through RecordFieldValidator and RecordFieldConverter and then applies its own rules: InfiniteTaskCard, InfiniteEntryDraft, InfiniteEntry, InfiniteStagedEntry, InfiniteResultCard, InfiniteWorkspaceUsage, InfiniteCommittedEntry, InfiniteDroppedEntry, the details records InfiniteRunStartedDetails, InfiniteRunResumedDetails, InfiniteRunFinishedDetails, InfiniteRunStoppedDetails, InfiniteRefusalDetails, InfiniteSubagentLaunchedDetails, InfiniteSubagentReplayedDetails, InfiniteGeneratorFinishedDetails, InfiniteSubagentFinishedDetails, InfiniteMemorySavedDetails, InfiniteMemoryStagedDetails, InfiniteMemoryDroppedDetails, InfiniteFileWrittenDetails, InfiniteMemoryCommittedDetails, InfiniteVerifierStartedDetails, InfiniteVerifierFinishedDetails, InfiniteSubagentAbortedDetails, InfiniteBatchFinishedDetails, InfiniteHandoffWrittenDetails, InfiniteWorkspaceUsageDetails, InfiniteAgentProgressDetails, and InfiniteEvent, whose DETAILS_TYPES maps each kind to its details record. InfiniteEventDetails is the union of the 21 details records.
 COMMON MODIFICATION PATTERNS: A new record field adds one field here and one RecordFieldValidator or RecordFieldConverter call in its record's __post_init__; its bound goes in vidbyte/lib/constants/infinite.py. A new event kind adds one details record here, one InfiniteEventDetails member, and one DETAILS_TYPES entry; a new details field adds its cap in vidbyte/lib/constants/infinite.py, and its row to _FIELDS and its worst-case details size to _FIGURES in tests/features/infinite_memory_agent/test_infinite_memory_events_records.py. A check the canonical validators lack becomes a new option or method there, never a helper here. A new task-card field is also one property in the launch_subagent schema and one prompt leaf for its description.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import from vidbyte.agents, vidbyte.tools, or any other layer above vidbyte/lib. 2. Do not add to_dict or from_dict methods or dict[str, Any] signatures; serialization lives in the workspace and the journal, and an event's consumer serializes it with dataclasses.asdict. 3. Do not convert a list or a string into a tuple here; a bare string would split into characters, so the caller converts and the record refuses anything else.
-KNOWN EDGE CASES: One line means no line break of any kind, as str.splitlines sees it. A context item that starts with "#" must be an entry id ("#42"); any other item is a relative path. InfiniteResultCard.summary and review may be empty, because a failed pair has neither. True is refused wherever a whole number is expected, although Python counts it as an int. A refusal names the field as Record.field, or Record.field[index] for one item of a tuple, except in the event records, where an item that breaks a cap is named by its list (Record.field), because the event contract names fields, not items. InfiniteCommittedEntry and InfiniteDroppedEntry carry no event caps, because the pair builds them with full text; the details record that shows them checks their texts. The worst-case JSON size of every details record is pinned by _FIGURES in tests/features/infinite_memory_agent/test_infinite_memory_events_records.py (27,015 bytes at most, under the 32,768-byte INFINITE_EVENT_MAX_DETAILS_BYTES).
-RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 8.5 and 9.1); docs/spec/infinite-memory-events/spec.md (sections 8.5 and 9.1); vidbyte/agents/infinite/README.md
+KNOWN EDGE CASES: One line means no line break of any kind, as str.splitlines sees it. A context item that starts with "#" must be an entry id ("#42"); any other item is a relative path. InfiniteResultCard.summary and review may be empty, because a failed pair has neither. True is refused wherever a whole number is expected, although Python counts it as an int. A refusal names the field as Record.field, or Record.field[index] for one item of a tuple, except in the event records, where an item that breaks a cap is named by its list (Record.field), because the event contract names fields, not items. InfiniteCommittedEntry and InfiniteDroppedEntry carry no event caps, because the pair builds them with full text; the details record that shows them checks their texts. The worst-case JSON size of every details record is pinned by _FIGURES in tests/features/infinite_memory_agent/test_infinite_memory_events_records.py (27,909 bytes at most, for InfiniteSubagentFinishedDetails, under the 32,768-byte INFINITE_EVENT_MAX_DETAILS_BYTES).
+RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 8.5 and 9.1); docs/spec/infinite-memory-events/spec.md (sections 8.5 and 9.1); docs/spec/infinite-memory-derived-events/spec.md (sections 8.5 and 9.1); vidbyte/agents/infinite/README.md
 TESTS: tests/features/infinite_memory_agent/test_infinite_memory_events_records.py, tests/features/infinite_memory_agent/test_infinite_memory_delegation.py, tests/features/infinite_memory_agent/test_infinite_memory_workspace.py, tests/features/infinite_memory_agent/test_infinite_memory_verification.py, and tests/features/infinite_memory_agent/test_infinite_memory_resume.py
 """
 
@@ -30,9 +30,11 @@ from vidbyte.lib.constants.infinite import (
     INFINITE_EVENT_MAX_ITEMS,
     INFINITE_EVENT_MICROSECONDS_PER_MILLISECOND,
     INFINITE_EVENT_PATH_MAX_CHARS,
+    INFINITE_EVENT_PERCENT_SCALE,
     INFINITE_EVENT_SUMMARY_MAX_CHARS,
     INFINITE_EVENT_TEXT_MAX_CHARS,
     INFINITE_FIRST_ENTRY_ID,
+    INFINITE_HANDOFF_SECTION_COUNT,
     INFINITE_MAX_REFS,
     INFINITE_MAX_TAGS,
     INFINITE_MIN_COUNT,
@@ -52,6 +54,7 @@ from vidbyte.lib.enums.infinite import (
     InfiniteEventKind,
     InfiniteFileChange,
     InfiniteMemoryPreset,
+    InfinitePairPhase,
     InfiniteResultStatus,
     InfiniteStopCause,
     InfiniteVerdict,
@@ -560,9 +563,168 @@ class InfiniteFileWrittenDetails:
         RecordFieldValidator.require_text(self.description, "InfiniteFileWrittenDetails.description", max_chars=INFINITE_EVENT_LINE_MAX_CHARS, allow_blank=True, one_line=True)
 
 
+@dataclass(frozen=True, slots=True)
+class InfiniteMemoryCommittedDetails:
+    """memory_committed: one staged entry committed after the verifier's pass, with its new id, staged key, kind, cut text, and the entry it replaces."""
+
+    id: int
+    key: str
+    kind: InfiniteEntryKind
+    text: str
+    supersedes: int | None
+
+    def __post_init__(self) -> None:
+        # The entry under its new id, still named by the staged key the
+        # pair's earlier events used.
+        RecordFieldValidator.require_int(self.id, "InfiniteMemoryCommittedDetails.id", minimum=INFINITE_FIRST_ENTRY_ID, maximum=INFINITE_EVENT_MAX_COUNT)
+        RecordFieldValidator.require_text(self.key, "InfiniteMemoryCommittedDetails.key", max_chars=INFINITE_EVENT_LABEL_MAX_CHARS, pattern=INFINITE_STAGED_KEY_PATTERN)
+        RecordFieldValidator.require_enum(self.kind, InfiniteEntryKind, "InfiniteMemoryCommittedDetails.kind")
+        RecordFieldValidator.require_text(self.text, "InfiniteMemoryCommittedDetails.text", max_chars=INFINITE_EVENT_TEXT_MAX_CHARS, allow_blank=True, one_line=True)
+        if self.supersedes is not None:
+            RecordFieldValidator.require_int(self.supersedes, "InfiniteMemoryCommittedDetails.supersedes", minimum=INFINITE_FIRST_ENTRY_ID, maximum=INFINITE_EVENT_MAX_COUNT)
+
+
+@dataclass(frozen=True, slots=True)
+class InfiniteVerifierStartedDetails:
+    """verifier_started: how many staged entries the verifier checks, and the notes the generator wrote."""
+
+    staged: int
+    files: tuple[str, ...]
+    files_omitted: int
+
+    def __post_init__(self) -> None:
+        # At most five note paths are shown; the rest are counted.
+        for name in ("staged", "files_omitted"):
+            RecordFieldValidator.require_int(getattr(self, name), f"InfiniteVerifierStartedDetails.{name}", minimum=INFINITE_MIN_COUNT, maximum=INFINITE_EVENT_MAX_COUNT)
+        RecordFieldValidator.require_text_items(self.files, "InfiniteVerifierStartedDetails.files", max_items=INFINITE_EVENT_MAX_ITEMS)
+        for path in self.files:
+            RecordFieldValidator.require_text(path, "InfiniteVerifierStartedDetails.files", max_chars=INFINITE_EVENT_LINE_MAX_CHARS, one_line=True)
+
+
+@dataclass(frozen=True, slots=True)
+class InfiniteVerifierFinishedDetails:
+    """verifier_finished: the verifier's verdict, stop reason, tool calls, usage, and time from its start to its reply."""
+
+    verdict: InfiniteVerdict
+    stop_reason: str
+    tool_calls: int
+    tokens: int
+    cost_usd: float | None
+    duration_ms: int
+
+    def __post_init__(self) -> None:
+        # The cost is None when any part of it is unknown.
+        RecordFieldValidator.require_enum(self.verdict, InfiniteVerdict, "InfiniteVerifierFinishedDetails.verdict")
+        RecordFieldValidator.require_text(self.stop_reason, "InfiniteVerifierFinishedDetails.stop_reason", max_chars=INFINITE_EVENT_LABEL_MAX_CHARS, allow_blank=True, one_line=True)
+        for name in ("tool_calls", "tokens", "duration_ms"):
+            RecordFieldValidator.require_int(getattr(self, name), f"InfiniteVerifierFinishedDetails.{name}", minimum=INFINITE_MIN_COUNT, maximum=INFINITE_EVENT_MAX_COUNT)
+        if self.cost_usd is not None:
+            RecordFieldValidator.require_number(self.cost_usd, "InfiniteVerifierFinishedDetails.cost_usd", maximum=sys.float_info.max, allow_zero=True)
+
+
+@dataclass(frozen=True, slots=True)
+class InfiniteSubagentAbortedDetails:
+    """subagent_aborted: a pair that stopped without its card, with why, the error's class name, its step, and the entries still staged."""
+
+    name: str
+    key: str
+    reason: InfiniteStopCause
+    error_type: str
+    phase: InfinitePairPhase
+    staged: int
+
+    def __post_init__(self) -> None:
+        # The pair's identity, then what stopped it and where; the
+        # error always has a class name.
+        RecordFieldValidator.require_text(self.name, "InfiniteSubagentAbortedDetails.name", pattern=INFINITE_TASK_NAME_PATTERN)
+        RecordFieldValidator.require_text(self.key, "InfiniteSubagentAbortedDetails.key", max_chars=INFINITE_EVENT_KEY_MAX_CHARS, one_line=True)
+        RecordFieldValidator.require_enum(self.reason, InfiniteStopCause, "InfiniteSubagentAbortedDetails.reason")
+        RecordFieldValidator.require_text(self.error_type, "InfiniteSubagentAbortedDetails.error_type", max_chars=INFINITE_EVENT_LABEL_MAX_CHARS, one_line=True)
+        RecordFieldValidator.require_enum(self.phase, InfinitePairPhase, "InfiniteSubagentAbortedDetails.phase")
+        RecordFieldValidator.require_int(self.staged, "InfiniteSubagentAbortedDetails.staged", minimum=INFINITE_MIN_COUNT, maximum=INFINITE_EVENT_MAX_COUNT)
+
+
+@dataclass(frozen=True, slots=True)
+class InfiniteBatchFinishedDetails:
+    """batch_finished: the batch's offset among the run's pair starts, its pairs' verdict counts, its replays, and its duration."""
+
+    batch: int
+    passed: int
+    fixed: int
+    failed: int
+    unchecked: int
+    replayed: int
+    duration_ms: int
+
+    def __post_init__(self) -> None:
+        # Every field is a count.
+        for name in ("batch", "passed", "fixed", "failed", "unchecked", "replayed", "duration_ms"):
+            RecordFieldValidator.require_int(getattr(self, name), f"InfiniteBatchFinishedDetails.{name}", minimum=INFINITE_MIN_COUNT, maximum=INFINITE_EVENT_MAX_COUNT)
+
+
+@dataclass(frozen=True, slots=True)
+class InfiniteHandoffWrittenDetails:
+    """handoff_written: the saved handoff's workspace-relative path, each section's length, and the titles of the sections cut to their caps."""
+
+    path: str
+    sections: tuple[int, ...]
+    cut: tuple[str, ...]
+    cut_omitted: int
+
+    def __post_init__(self) -> None:
+        # One length per section, in the handoff's fixed order, each a
+        # count; a failing length is named by its list.
+        RecordFieldValidator.require_text(self.path, "InfiniteHandoffWrittenDetails.path", max_chars=INFINITE_EVENT_PATH_MAX_CHARS, one_line=True)
+        RecordFieldConverter.require_instance(self.sections, "InfiniteHandoffWrittenDetails.sections", tuple)
+        RecordFieldConverter.to_tuple(self.sections, "InfiniteHandoffWrittenDetails.sections", item_type=int, max_items=INFINITE_HANDOFF_SECTION_COUNT)
+        for length in self.sections:
+            RecordFieldValidator.require_int(length, "InfiniteHandoffWrittenDetails.sections", minimum=INFINITE_MIN_COUNT, maximum=INFINITE_EVENT_MAX_COUNT)
+        # At most five cut titles are shown; the rest are counted.
+        RecordFieldValidator.require_text_items(self.cut, "InfiniteHandoffWrittenDetails.cut", max_items=INFINITE_EVENT_MAX_ITEMS)
+        for title in self.cut:
+            RecordFieldValidator.require_text(title, "InfiniteHandoffWrittenDetails.cut", max_chars=INFINITE_EVENT_LABEL_MAX_CHARS, one_line=True)
+        RecordFieldValidator.require_int(self.cut_omitted, "InfiniteHandoffWrittenDetails.cut_omitted", minimum=INFINITE_MIN_COUNT, maximum=INFINITE_EVENT_MAX_COUNT)
+
+
+@dataclass(frozen=True, slots=True)
+class InfiniteWorkspaceUsageDetails:
+    """workspace_usage: the percent level reached, the workspace's files and tokens against their caps, and the files the root's map leaves out."""
+
+    level: int
+    files: int
+    max_files: int
+    tokens: int
+    max_tokens: int
+    map_omitted: int
+
+    def __post_init__(self) -> None:
+        # The level is a whole percent; the rest are counts.
+        RecordFieldValidator.require_int(self.level, "InfiniteWorkspaceUsageDetails.level", minimum=INFINITE_MIN_COUNT, maximum=INFINITE_EVENT_PERCENT_SCALE)
+        for name in ("files", "max_files", "tokens", "max_tokens", "map_omitted"):
+            RecordFieldValidator.require_int(getattr(self, name), f"InfiniteWorkspaceUsageDetails.{name}", minimum=INFINITE_MIN_COUNT, maximum=INFINITE_EVENT_MAX_COUNT)
+
+
+@dataclass(frozen=True, slots=True)
+class InfiniteAgentProgressDetails:
+    """agent_progress: the root's iteration, its iteration cap, and its model calls, tool calls, and tokens so far."""
+
+    iteration: int
+    max_iterations: int | None
+    model_calls: int
+    tool_calls: int
+    tokens: int
+
+    def __post_init__(self) -> None:
+        # None means the loop has no iteration cap.
+        for name in ("iteration", "model_calls", "tool_calls", "tokens"):
+            RecordFieldValidator.require_int(getattr(self, name), f"InfiniteAgentProgressDetails.{name}", minimum=INFINITE_MIN_COUNT, maximum=INFINITE_EVENT_MAX_COUNT)
+        if self.max_iterations is not None:
+            RecordFieldValidator.require_int(self.max_iterations, "InfiniteAgentProgressDetails.max_iterations", minimum=INFINITE_MIN_COUNT, maximum=INFINITE_EVENT_MAX_COUNT)
+
+
 # The details record of every event kind; batch_rejected and
 # tool_refused share InfiniteRefusalDetails.
-InfiniteEventDetails = InfiniteRunStartedDetails | InfiniteRunResumedDetails | InfiniteRunFinishedDetails | InfiniteRunStoppedDetails | InfiniteRefusalDetails | InfiniteSubagentLaunchedDetails | InfiniteSubagentReplayedDetails | InfiniteGeneratorFinishedDetails | InfiniteSubagentFinishedDetails | InfiniteMemorySavedDetails | InfiniteMemoryStagedDetails | InfiniteMemoryDroppedDetails | InfiniteFileWrittenDetails
+InfiniteEventDetails = InfiniteRunStartedDetails | InfiniteRunResumedDetails | InfiniteRunFinishedDetails | InfiniteRunStoppedDetails | InfiniteRefusalDetails | InfiniteSubagentLaunchedDetails | InfiniteSubagentReplayedDetails | InfiniteGeneratorFinishedDetails | InfiniteSubagentFinishedDetails | InfiniteMemorySavedDetails | InfiniteMemoryStagedDetails | InfiniteMemoryDroppedDetails | InfiniteFileWrittenDetails | InfiniteMemoryCommittedDetails | InfiniteVerifierStartedDetails | InfiniteVerifierFinishedDetails | InfiniteSubagentAbortedDetails | InfiniteBatchFinishedDetails | InfiniteHandoffWrittenDetails | InfiniteWorkspaceUsageDetails | InfiniteAgentProgressDetails
 
 
 @dataclass(frozen=True, slots=True)
@@ -585,6 +747,14 @@ class InfiniteEvent:
         InfiniteEventKind.MEMORY_DROPPED: InfiniteMemoryDroppedDetails,
         InfiniteEventKind.FILE_WRITTEN: InfiniteFileWrittenDetails,
         InfiniteEventKind.TOOL_REFUSED: InfiniteRefusalDetails,
+        InfiniteEventKind.MEMORY_COMMITTED: InfiniteMemoryCommittedDetails,
+        InfiniteEventKind.VERIFIER_STARTED: InfiniteVerifierStartedDetails,
+        InfiniteEventKind.VERIFIER_FINISHED: InfiniteVerifierFinishedDetails,
+        InfiniteEventKind.SUBAGENT_ABORTED: InfiniteSubagentAbortedDetails,
+        InfiniteEventKind.BATCH_FINISHED: InfiniteBatchFinishedDetails,
+        InfiniteEventKind.HANDOFF_WRITTEN: InfiniteHandoffWrittenDetails,
+        InfiniteEventKind.WORKSPACE_USAGE: InfiniteWorkspaceUsageDetails,
+        InfiniteEventKind.AGENT_PROGRESS: InfiniteAgentProgressDetails,
     })
 
     kind: InfiniteEventKind
@@ -613,4 +783,4 @@ class InfiniteEvent:
         RecordFieldConverter.require_instance(self.details, "InfiniteEvent.details", InfiniteEvent.DETAILS_TYPES[self.kind])
 
 
-__all__ = ["InfiniteCommittedEntry", "InfiniteDroppedEntry", "InfiniteEntry", "InfiniteEntryDraft", "InfiniteEvent", "InfiniteEventDetails", "InfiniteFileWrittenDetails", "InfiniteGeneratorFinishedDetails", "InfiniteMemoryDroppedDetails", "InfiniteMemorySavedDetails", "InfiniteMemoryStagedDetails", "InfiniteRefusalDetails", "InfiniteResultCard", "InfiniteRunFinishedDetails", "InfiniteRunResumedDetails", "InfiniteRunStartedDetails", "InfiniteRunStoppedDetails", "InfiniteStagedEntry", "InfiniteSubagentFinishedDetails", "InfiniteSubagentLaunchedDetails", "InfiniteSubagentReplayedDetails", "InfiniteTaskCard", "InfiniteWorkspaceUsage"]
+__all__ = ["InfiniteAgentProgressDetails", "InfiniteBatchFinishedDetails", "InfiniteCommittedEntry", "InfiniteDroppedEntry", "InfiniteEntry", "InfiniteEntryDraft", "InfiniteEvent", "InfiniteEventDetails", "InfiniteFileWrittenDetails", "InfiniteGeneratorFinishedDetails", "InfiniteHandoffWrittenDetails", "InfiniteMemoryCommittedDetails", "InfiniteMemoryDroppedDetails", "InfiniteMemorySavedDetails", "InfiniteMemoryStagedDetails", "InfiniteRefusalDetails", "InfiniteResultCard", "InfiniteRunFinishedDetails", "InfiniteRunResumedDetails", "InfiniteRunStartedDetails", "InfiniteRunStoppedDetails", "InfiniteStagedEntry", "InfiniteSubagentAbortedDetails", "InfiniteSubagentFinishedDetails", "InfiniteSubagentLaunchedDetails", "InfiniteSubagentReplayedDetails", "InfiniteTaskCard", "InfiniteVerifierFinishedDetails", "InfiniteVerifierStartedDetails", "InfiniteWorkspaceUsage", "InfiniteWorkspaceUsageDetails"]
