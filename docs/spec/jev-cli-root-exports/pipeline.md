@@ -48,6 +48,8 @@ Program: JevAgent in vidbyte-cli, run R1 of 8 (see request.md §C "This run's sc
 - 2026-10-19 — S3 spot-check by orchestrator: pack unchanged vs 09b4ef23; only tests differing from origin/main are the pack; pack 21 passed; --check current at 76c61ffb; origin/main 181f1992 ancestor of HEAD. Full pytest 2 failed = named inherited reds (failure-codes 171==120 red on main; import-no-process local-only).
 - 2026-10-19 — Main moved twice during S3 (#1189, #1159); implementer merged (EC-7) and regenerated the contract after each merge; release-note counts recomputed (682, 43 added: 11 #1189 + 3 #1159 + 4 #1190 ...). S4 conformance lens must re-prove the counts.
 
+- 2026-10-19 — S4 conventions (1B/0M/1m) and conformance (1B/0M/0m) independently found the same Blocker: main moved to 0324d5d6 (#1147, +51 root exports, contract 729); #1190 CONFLICTING/DIRTY on the contract source.commit line only. Orchestrator re-verified (gh mergeable CONFLICTING DIRTY; merge-tree conflict only in contracts/sdk-public-api.json). Fix is the EC-7 path, handed to S5 after the verifier.
+
 ## User replies (verbatim)
 - 2026-10-19 — answers to the alignment questions: request.md §A Prompt 3.
 
@@ -61,6 +63,11 @@ Program: JevAgent in vidbyte-cli, run R1 of 8 (see request.md §C "This run's sc
 - Root __all__ is unsorted thematic clusters; import blocks are ruff-isort sorted (AgentLoopSettings between AgentInput and AgentMessage; enums into the vidbyte.lib.enums block ~:481-491) — source: S0
 - Rules most likely to bite: C016 (contract current, baseline 0), S015 (every root import in __all__ once), S051/I001, A001 headers + S020 File Index parity for a new test pack, root header line "- Error exports:" must keep ConfigurationError — source: S0
 - Editable install resolves to the canonical checkout: use PYTHONPATH=$(pwd) py -3.11 for source-stage gates and tests; no PYTHONPATH for package stage — source: S0
+- EC-7 merge recipe: `git merge origin/main` (never rebase); in the merge commit take main's contract (`git checkout --theirs contracts/sdk-public-api.json`), never hand-edit source.commit (C016 passes but provenance is false, EC-5); then regenerate in its own commit; expect 733 exports — source: S4 C/V
+- Release-note row 2(c) after #1147: "733 exports, against 639 at `v0.3.0`: 94 added and none removed, 3 from #1099, 4 from #1084, 17 from #1179, 11 from #1189, 3 from #1159, 51 from #1147, 4 from #1190, and `SystemPromptPreset` from #1095" — source: S4 C/V (re-prove)
+- After the merge MB=0324d5d6: re-prove AC-5/6/9/13/14/15 and the inherited reds on a pristine 0324d5d6 (#1147 adds failure codes; 171==120 changes) — source: S4 C
+- PR is a draft: `gh pr ready 1190` before merging; re-check `git ls-remote origin main` right before `gh pr merge --squash --admin --match-head-commit` — source: S4 C
+- Squash subject on public main must be `type(scope): sentence (#N)` — PR title lacks a scope (R-V2) — source: S4 V
 - test_import_vidbyte_starts_no_process... is red on any branch that changes root __all__; CI skips it — source: S0
 - Tests written before code: use the FEATURE_MISSING ImportError guard pattern (public_skill_loader precedent does not read the contract JSON in pytest) — source: S0
 - No permanent test may compare against base/merge base or pin an export count, module hash, or version literal (spec r2 NG-13, §13); such facts are proven once by command output — source: S1 review R-1
