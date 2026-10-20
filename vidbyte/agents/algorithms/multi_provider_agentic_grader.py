@@ -62,7 +62,8 @@ class MultiProviderAgenticGraderRuntimeAlgorithm:
         results = await self._run_provider_trials(message, context, handle, metadata, options, trace_context, active_models)
         # @intent middleware-abort-ends-the-run
         # A middleware abort in any trial stops the whole run, so its result is returned instead of grading the SDK's stop text.
-        aborted = next((res for res in results if isinstance(res, AgentResult) and res.metadata.get("stop_reason") == AgentStopReason.MIDDLEWARE_ABORT.value), None)
+        # A trial the spend cap stopped ends the run the same way, so no grader call spends after it.
+        aborted = next((res for res in results if isinstance(res, AgentResult) and res.metadata.get("stop_reason") in (AgentStopReason.MIDDLEWARE_ABORT.value, AgentStopReason.MAX_SPEND.value)), None)
         if aborted is not None:
             return aborted
         candidates, total_tokens, call_contexts = self._collect_candidates(active_models, results)
@@ -106,8 +107,8 @@ class MultiProviderAgenticGraderRuntimeAlgorithm:
         )
         # @intent isdone-answer-is-the-candidate
         # An isDone finish already returns its final_answer; the last captured text is that tool-call turn's text, not the answer.
-        # A middleware abort keeps its stop text as well, so arun can return it as the run's result.
-        if captured_output and res.metadata.get("stop_reason") not in (AgentStopReason.IS_DONE.value, AgentStopReason.MIDDLEWARE_ABORT.value):
+        # A middleware abort or a spend-cap stop keeps its stop text as well, so arun can return it as the run's result.
+        if captured_output and res.metadata.get("stop_reason") not in (AgentStopReason.IS_DONE.value, AgentStopReason.MIDDLEWARE_ABORT.value, AgentStopReason.MAX_SPEND.value):
             res = dataclasses.replace(res, output=captured_output[-1])
         return res
 

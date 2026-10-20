@@ -188,7 +188,7 @@ class MagenticOneOrchestrator:
             await self._close_manager(manager, "run")
 
     async def _structured_phase(self, phase: str, prompt: str, schema: type[BaseModel], retries: int, round_number: int, convert: Callable[[BaseModel], Any]) -> Any:
-        # Retries only manager invocation/parse failures, never a middleware stop, and closes every structured phase fork.
+        # Retries only manager invocation/parse failures, never a middleware or spend-cap stop, and closes every structured phase fork.
         # The public-contract conversion runs inside the retry, so a reply whose fields contradict its action is retried too.
         last_error: Exception | None = None
         for attempt in range(retries + 1):
@@ -208,6 +208,11 @@ class MagenticOneOrchestrator:
                 # mistake, so it ends here instead of paying for a retry.
                 if getattr(exc, "stop_reason", None) == AgentStopReason.MIDDLEWARE_ABORT.value:
                     raise MultiAgentExecutionError("Multi-agent manager phase was stopped by middleware.", details={"phase": phase, "round": round_number, "attempts": parse_attempt}) from exc
+                # @intent a-spend-cap-stop-ends-the-phase
+                # A phase its spend cap stopped would spend again on a
+                # retry, so it ends the run and names the stop reason.
+                if getattr(exc, "stop_reason", None) == AgentStopReason.MAX_SPEND.value:
+                    raise MultiAgentExecutionError("Multi-agent manager phase stopped at its spend cap.", details={"phase": phase, "round": round_number, "attempts": parse_attempt, "stop_reason": AgentStopReason.MAX_SPEND.value}) from exc
                 last_error = exc
             finally:
                 await self._close_manager(phase_agent, phase)

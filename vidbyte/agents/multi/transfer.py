@@ -189,6 +189,12 @@ class AgentTransfer:
             reason = str(reply.metadata.get("middleware_abort_reason") or "middleware_abort")
             blocker = TaskBlocker(code="middleware_abort", message=f"Worker run stopped by middleware: {reason}", retryable=False)
             return AgentReport(task_id=dispatch.task_id, status=TaskStatus.BLOCKED, blockers=(blocker,))
+        # @intent a-spend-cap-stop-blocks-the-task
+        # A worker its spend cap stopped would spend again on a retry,
+        # so the task is blocked, never retried as a failed attempt.
+        if reply.metadata.get("stop_reason") == AgentStopReason.MAX_SPEND.value:
+            blocker = TaskBlocker(code="max_spend", message="Worker run stopped at its spend cap.", retryable=False)
+            return AgentReport(task_id=dispatch.task_id, status=TaskStatus.BLOCKED, blockers=(blocker,))
         # @intent limit-stops-are-failed-attempts
         # A worker stopped by a budget, guard, or unmet output contract never reached an accepted answer, so the attempt failed.
         stop_reason = reply.metadata.get("stop_reason")

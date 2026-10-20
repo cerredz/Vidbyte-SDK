@@ -70,8 +70,10 @@ class AgentSpendCap:
 
     @staticmethod
     def _blind_causes(rollup: UsageRollup) -> list[str]:
-        # Names every cause that left spend unmeasured, in a fixed
-        # order, using names and counts only.
+        # @intent a-blind-stop-names-its-cause
+        # A caller must learn why a capped run stopped below its cap, so
+        # each cause is named in a fixed order, by provider, model,
+        # operation, and count only, never by prompt, key, or amount.
         causes: list[str] = []
         unpriced_calls = sorted({f"{record.provider}:{record.model}" for record in rollup.calls if record.cost_usd is None})
         if unpriced_calls:
@@ -87,16 +89,20 @@ class AgentSpendCap:
 
     @staticmethod
     def _chain_runners(runner_config: AgentRunnerConfig, fallback: AgentFallback | None) -> list[Runner]:
-        # One Runner per configured model, primary first, so each model
-        # is read with the runner's own provider normalization.
+        # @intent the-chain-is-read-as-its-runners-read-it
+        # Index 0 of a fallback chain is the primary, and each model is
+        # normalized as its runner normalizes it, so the check sees the
+        # provider and model a call would actually be billed under.
         if fallback is None:
             return [Runner.from_model(provider=runner_config.provider, model_name=runner_config.model_name)]
         return [Runner.from_model(provider=entry.provider, model_name=entry.model) for entry in fallback.models]
 
     @staticmethod
     def _unpriced_pairs(runners: Sequence[Runner]) -> list[str]:
-        # Lists each distinct provider:model the pricebook cannot price,
-        # in chain order, showing a missing part as "?".
+        # @intent each-unpriced-configured-model-is-named
+        # Each configured model the pricebook cannot price is named
+        # once, in chain order, with a missing part shown as "?";
+        # OpenRouter is skipped because it reports each call's cost.
         registry = ModelPricingRegistry.default()
         pairs: list[str] = []
         for runner in runners:

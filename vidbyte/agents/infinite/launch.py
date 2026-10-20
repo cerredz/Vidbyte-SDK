@@ -333,13 +333,16 @@ class InfinitePair(BasePipeline):
 
     @staticmethod
     def _status(reply: AgentMessage) -> InfiniteResultStatus:
-        # A blank reply is a failure; a normal finish is done, and any
-        # other stop with a reply is partial work worth verifying.
+        # A blank reply is a failure; a normal finish is done; a
+        # spend-cap stop is a failure, so no verifier spends after it;
+        # and any other stop with a reply is partial work worth verifying.
         if not reply.content.strip():
             return InfiniteResultStatus.FAILED
         match reply.metadata.get("stop_reason"):
             case AgentStopReason.FINAL_RESPONSE | AgentStopReason.IS_DONE:
                 return InfiniteResultStatus.DONE
+            case AgentStopReason.MAX_SPEND:
+                return InfiniteResultStatus.FAILED
             case _:
                 return InfiniteResultStatus.PARTIAL
 
