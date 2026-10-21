@@ -61,9 +61,12 @@ class AgentSwarmMemberRuntime(AgentRuntime):
         # so a plain BaseAgent or a fork can reach this class without a
         # swarm; refusing here names the entry point to use instead.
         if swarm_runtime is None or summarizer is None:
+            # The details name the part that is missing, the swarm
+            # runtime first, so a missing summarizer is named too.
+            field, value = ("received_swarm_runtime", swarm_runtime) if swarm_runtime is None else ("received_summarizer", summarizer)
             raise ConfigurationError(
                 "The 'agent_swarm_member' runtime is only available through AgentSwarm; construct AgentSwarm(AgentSwarmSettings(...)) and call arun(goal) instead of BaseAgent(runtime='agent_swarm_member').",
-                details={"received_swarm_runtime": type(swarm_runtime).__name__},
+                details={field: type(value).__name__},
             )
         self.swarm_runtime = swarm_runtime
         self._summarizer = summarizer
