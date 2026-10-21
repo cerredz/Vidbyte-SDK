@@ -154,37 +154,37 @@ Each line is *input + state → wrong output if unguarded*, with the test that c
 - An agent misses `compact` or the search tool, holds them in the wrong order, or the `to` schema still declares an `enum` (`test_each_agent_holds_exactly_the_swarm_tools_and_a_message_schema_naming_every_agent`, `test_three_members_are_created_then_started_in_order_with_the_search_tool_before_isdone`).
 
 **Messaging and wake-ups**
-- A self-message is refused, or never delivered (`test_a_message_to_oneself_is_accepted_and_delivered_at_the_next_tool_iteration`, `test_a_self_message_before_a_plain_reply_wakes_the_sender_at_once`).
+- A self-message is refused, or never delivered (`test_a_message_to_oneself_is_accepted_and_delivered_at_the_next_tool_iteration`, `test_a_self_message_sent_with_isdone_wakes_the_sender_at_once`).
 - An unknown name or blank text is queued, recorded as sent, or records no `message_refused` (`test_a_refused_message_is_a_tool_error_queues_nothing_and_the_loop_continues`).
 - A message to a failed peer is a tool error, or is queued and never resolved (`test_a_provider_error_fails_only_that_agent_names_its_cause_and_stops_its_mail`).
 - A send to an idle peer with the budget spent records no `wake_refused`, or its message is never marked undelivered (`test_a_spent_turn_budget_stops_wakes_and_ends_max_turns_with_the_message_undelivered`).
 - The lost wake-up, the blocking send, the misordered batch and the formatted text of r5 (`test_a_message_accepted_while_the_recipient_is_going_idle_is_never_lost`, `test_two_agents_messaging_each_other_mid_turn_never_deadlock`, `test_messages_queued_before_one_delivery_point_arrive_together_in_acceptance_order`, `test_message_text_reaches_the_recipient_whole_and_unformatted`).
 
 **The budget and the stop path**
-- A model call's usage is not recorded, or recorded with the wrong counts (`test_a_model_response_records_model_called_with_its_counts_and_grows_the_budget`).
-- The budget stop lets another member make one more paid call, leaves a parked agent waiting, or records the stop late (`test_crossing_the_token_budget_stops_the_swarm_in_the_same_block_and_refuses_every_later_call`, `test_the_first_response_crossing_the_budget_refuses_every_other_first_call`).
-- A member in the middle of a long tool call when the stop is decided makes another model call, or is cancelled instead of released (`test_a_member_inside_a_long_tool_call_finishes_it_and_is_released_without_another_model_call`).
-- A send whose response was in flight when the stop was decided is lost or delivered (`test_a_send_after_the_stop_is_decided_is_sent_then_undelivered_with_the_stopped_reply`).
+- A model call's usage is not recorded, or recorded with the wrong counts (`test_a_model_response_records_its_tokens_and_the_budget_grows_by_the_reported_total`).
+- The budget stop lets another member make one more paid call, leaves a parked agent waiting, or records the stop late (`test_the_response_that_crosses_max_tokens_stops_the_swarm_in_its_own_block_and_runs_nothing_more`, `test_the_first_response_crossing_the_budget_leaves_no_further_paid_call`).
+- A member in the middle of a long tool call when the stop is decided makes another model call, or is cancelled instead of released (`test_a_member_inside_a_long_tool_call_finishes_it_and_is_released_before_its_next_model_call`).
+- A send whose response was in flight when the stop was decided is lost or delivered (`test_a_message_sent_after_the_stop_is_recorded_sent_then_undelivered`).
 - A compact request still pending when the stop is decided makes a paid summary call after `swarm_stopping` (`test_a_compact_request_pending_at_the_stop_makes_no_summary_call_and_records_no_compaction`).
 - The trim records `history_trimmed` for a model call that the observer then refuses after the stop, so the record shows work on a call that was never sent (`test_a_model_call_refused_after_the_stop_records_no_history_trimmed`).
 - A model error that a retry middleware retries is not recorded, or the observer's hook changes the retry decision; AgentSwarm installs no retry, so the test appends one (`test_a_retried_model_error_records_model_error_and_the_agent_keeps_working`).
-- A provider that reports no usage crashes the observer or trips the budget (`test_missing_usage_records_zeros_and_never_trips_the_budget`).
-- The time limit leaves an agent with no ending, fails it, or labels a parked agent as working (`test_the_time_limit_cancels_every_agent_and_returns_timeout`, `test_the_time_limit_labels_working_and_idle_agents_and_fails_none`).
+- A provider that reports no usage crashes the observer or trips the budget (`test_a_provider_that_reports_no_usage_records_zeros_and_never_spends_the_budget`).
+- The time limit leaves an agent with no ending, fails it, or labels a parked agent as working (`test_the_time_limit_cancels_every_agent_and_returns_timeout`, `test_the_time_limit_labels_working_and_idle_agents_cancelled_and_fails_none`).
 - A recording bug fails the agent instead of exiting it, or leaves its inbox unresolved (`test_a_turn_middleware_recording_bug_exits_only_that_agent_naming_the_middleware_abort`).
 
 **Tool outcomes and the trim**
-- A long history is sent untrimmed, or the trim records the wrong count (`test_a_trimmed_history_records_history_trimmed_with_the_dropped_count`).
-- A result over the cap reaches the model uncut, or its truncation is unrecorded or off by one at the cap (`test_a_tool_result_over_the_cap_records_its_omitted_chars_and_one_at_the_cap_records_nothing`).
+- A long history is sent untrimmed, or the trim records the wrong count (`test_each_model_call_the_trim_changes_records_history_trimmed_with_its_exact_drop`).
+- A result over the cap reaches the model uncut, or its truncation is unrecorded or off by one at the cap (`test_a_tool_result_over_the_cap_records_its_exact_omitted_count_and_one_at_the_cap_records_none`).
 - Two agents writing one file are not reported as a collision, or a relative `patch_file` path is a different key (`test_two_agents_writing_one_file_record_file_changed_naming_the_previous_writer`); an agent rewriting its own file names itself as the peer (`test_one_agent_writing_one_file_twice_records_file_changed_with_no_peer_both_times`); a refused write still reports a change (`test_a_refused_write_records_no_file_changed`).
-- A non-zero exit or a bash timeout is silent, or a zero exit is reported (`test_a_non_zero_exit_and_a_timeout_record_command_failed_and_a_zero_exit_records_none`).
+- A non-zero exit or a bash timeout is silent, or a zero exit is reported (`test_bash_records_command_failed_for_a_non_zero_exit_and_none_for_zero`, `test_a_bash_command_that_runs_out_of_time_records_command_failed_timeout`).
 
 **Compaction**
-- `compact` rewrites the history mid-iteration, splits a tool call from its result, puts the inbox message before the summary, sends the summary call without the focus, or never counts the side call (`test_compact_with_a_focus_summarizes_older_history_before_mail_through_the_member_runner`).
-- The automatic trigger fires below the threshold, never fires, or reads output tokens; an Anthropic prompt held in its cache buckets never triggers (`test_a_prompt_at_the_trigger_compacts_automatically_and_one_below_does_not`, `test_anthropic_cache_buckets_count_toward_the_trigger`).
-- A request and the trigger in one iteration compact twice; two requests in one response compact twice (`test_a_pending_request_and_the_trigger_in_one_iteration_compact_once_as_tool`, `test_two_compact_calls_in_one_response_compact_once_with_the_last_focus`).
-- A failed summary call drops the history, fails the member, or swallows the mail (`test_a_failed_summary_call_keeps_the_history_delivers_mail_and_the_member_runs_on`).
-- A blank summary aborts the compaction; nothing older still makes a paid call (`test_a_blank_summary_still_compacts_with_the_prefix_only`, `test_compact_with_nothing_older_makes_no_side_call_and_no_event`).
-- A side call that crosses the budget loses its compaction or lets the member call the model again (`test_a_summary_call_crossing_the_budget_completes_the_compaction_then_releases`).
+- `compact` rewrites the history mid-iteration, splits a tool call from its result, puts the inbox message before the summary, sends the summary call without the focus, or never counts the side call (`test_a_compact_call_summarizes_only_the_older_history_and_mail_follows_the_summary`).
+- The automatic trigger fires below the threshold, never fires, or reads output tokens; an Anthropic prompt held in its cache buckets never triggers (`test_a_measured_context_at_the_trigger_compacts_automatically_and_one_below_does_not`, `test_anthropic_context_is_measured_as_all_three_input_buckets`).
+- A request and the trigger in one iteration compact twice; two requests in one response compact twice (`test_a_pending_request_and_the_trigger_in_one_iteration_compact_once`, `test_two_compact_calls_in_one_response_compact_once_with_the_last_focus`).
+- A failed summary call drops the history, fails the member, or swallows the mail (`test_a_failed_summary_keeps_the_history_delivers_mail_and_fails_nobody`).
+- A blank summary aborts the compaction; nothing older still makes a paid call (`test_a_blank_summary_still_compacts_to_the_prefix`, `test_a_compact_request_with_nothing_older_changes_nothing_and_is_consumed`).
+- A side call that crosses the budget loses its compaction or lets the member call the model again (`test_a_side_call_that_reaches_the_budget_completes_its_compaction_and_stops_the_swarm`).
 - The summary side call's tokens never reach the member's `tokens_used` (`test_the_summary_call_tokens_are_added_to_the_members_tokens_used`).
 - A size estimate that reads only `content` counts a Gemini member's `parts` history, and an OpenAI history whose text sits in `tool_calls`, as almost empty, so neither ever compacts and the trim becomes the mechanism (`test_a_gemini_member_at_the_trigger_compacts_its_parts_history_through_one_summary_call`, `test_an_openai_history_of_write_calls_only_compacts_at_the_trigger`).
 - A prompt whose uncompactable part (system prompt, tools, goal) keeps the measured context at the trigger makes every tool iteration pay for another summary of the summary; or a fix makes a `compact` request wait for growth too (`test_automatic_compaction_waits_for_a_target_of_new_history_and_a_compact_request_does_not`).
@@ -192,7 +192,7 @@ Each line is *input + state → wrong output if unguarded*, with the test that c
 **Runs, workplace, settings and events**
 - The workplace's first event is missing or misreports whether the folder was created (`test_the_first_event_reports_whether_the_run_created_the_workplace`).
 - A refused setting creates the folder or names no field; a web-search key leaks into a `repr`, an event, a model call or a refusal (`test_invalid_settings_are_refused_naming_the_field_and_creating_nothing`, `test_web_search_settings_without_a_key_with_a_dangling_key_or_an_unknown_provider_are_refused`, `test_web_search_key_never_appears_in_reprs_events_model_calls_or_errors`).
-- An event of a new kind sets a field it does not own, or a result without its `swarm_stopping` is accepted (`test_event_records_accept_each_kinds_own_fields`, `test_event_records_refuse_fields_of_other_kinds_and_bad_values`, `test_result_records_refuse_broken_event_streams`).
+- An event of a new kind sets a field it does not own, or a result without its `swarm_stopping` is accepted (`test_event_records_enforce_the_per_kind_field_table`, `test_result_records_enforce_one_ordered_sequence_ending_in_swarm_ended`).
 - Every r5 failure mode for concurrent runs, cancellation, the outbox and the callback keeps its r5 test in `test_agent_swarm_lifecycle.py`.
 
 **What an easy generated test would miss:**
