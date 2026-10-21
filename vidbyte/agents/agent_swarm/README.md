@@ -111,6 +111,7 @@ Every event has a `sequence` (1, 2, … in the order the changes happened) and `
 - `_after_tool_iteration` compacts before it appends mail, so a delivered message never sits before the summary.
 - `bash` is not confined to the workplace and inherits the process environment, so do not run a swarm where its agents should not reach.
 - Agents edit the same files at the same time, and nothing serializes their edits; concurrent edits to one file can collide. `file_changed` sees only `write_text` and `patch_file`, never a write made through `bash`.
+- A member makes no retry of a failed model call: the first provider error fails it, and its inbox is marked undelivered.
 - On Windows, a cancelled `bash` command (on the time limit) may keep running after the swarm returns.
 - Two swarms on one workplace at the same time are not guarded against each other.
 - Limits live in code, not in prompts. A new limit is a constant, a settings field, and a check whose refusal names it.
