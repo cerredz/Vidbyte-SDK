@@ -1,7 +1,7 @@
 ---
 spec: agent-reasoning-effort
 title: A reasoning effort for an agent's generative model
-status: reviewed      # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
+status: verified      # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
 revision: 4
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-agent-reasoning-effort
