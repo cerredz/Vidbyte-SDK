@@ -5,7 +5,7 @@ ROLE IN CODEBASE: capture_diff and in_worktree are bound as public names in vidb
 ARCHITECTURE NOTE: Both managers check the workspace when they are built, the way the nine thread functions do (an absolute existing folder, stored resolved), and start no git process until their block is entered (spec §9.2). All git work goes through ComposeGit (git.py), so every failure is a ThreadComposeError. A reader's worktree is built from a tree id the composite took, with a verifier's index set to the before-writer tree so git inside the worktree shows the writer's change (D-20, INV-9). The add and every removal run as tasks of their own that ComposeCalls.settle waits for through any number of cancels, so git never stops half-way through registering or unregistering a worktree, and the cancel goes on once git is done; each git step stays bounded by COMPOSE_GIT_TIMEOUT_SECONDS (EC-17, INV-30).
 FUNCTION INVENTORY: DiffCapture.capture_diff builds the manager; __aenter__ takes the before-snapshot and __aexit__ the after-snapshot and the diff. DisposableWorktree.in_worktree builds the manager for a caller and from_tree for a reader; backstop compares a read-only phase's snapshots; __aenter__ makes the folder, adds, fills and re-indexes the worktree and makes the matching folder, and removes the worktree again when any of that fails; __aexit__ removes it; _prepared, _settled and _matching are leaves.
 COMMON MODIFICATION PATTERNS: A new kind of reader workspace is another DisposableWorktree constructor that hands __aenter__ what to fill the worktree from. A new use of a diff goes through DiffCapture or through ComposeGit.snapshot and ComposeGit.diff directly.
-WHAT NOT TO DO IN THIS FILE: 1. Do not run git here; call ComposeGit. 2. Do not let a removal failure hide the block's own exception. 3. Do not take a diff after a block that raised; .diff stays None. 4. Do not leave a worktree behind when entering fails half-way.
+WHAT NOT TO DO IN THIS FILE: 1. Do not run git here; call ComposeGit. 2. Do not let a removal failure hide the block's own exception. 3. Do not take a diff after a block that raised; .diff stays None. 4. Do not leave a worktree behind when entering fails half-way. 5. Do not chain an OSError to a ThreadComposeError; keep only its type and raise after the handler (INV-4).
 KNOWN EDGE CASES: A workspace folder that no snapshot holds (empty, or holding only ignored files) is created inside the worktree after the fill (EC-74). A repository with no commit allows capture_diff but refuses in_worktree with WORKTREE_FAILED (EC-5). A cancel that lands during the add or a removal, once or many times, waits for that git step, then propagates; a git step past its time bound is stopped all the same. The backstop cannot tell who changed the files, so an edit by another process during a read-only phase is reported too (EC-11).
 RELATED DOCS: vidbyte/harnesses/README.md
 TESTS: tests/features/harness_compose/test_harness_compose_workspace.py, tests/features/harness_compose/test_harness_compose_git.py, tests/features/harness_compose/test_harness_compose_verify.py
@@ -180,14 +180,17 @@ class DisposableWorktree:
 
     async def _matching(self, git: ComposeGit, folder: Path) -> Path:
         # The workspace's own folder inside the worktree, made when no
-        # snapshot holds it because it is empty or ignored (EC-74).
+        # snapshot holds it because it is empty or ignored (EC-74). A
+        # failure keeps only the OS error's type and is raised after
+        # the handler, so it chains no OS text (INV-4).
         matching = folder / self.workspace.relative_to(git.root)
         try:
             await asyncio.to_thread(matching.mkdir, parents=True, exist_ok=True)
+            return matching
         except OSError as error:
-            observation = native_compose.THREAD_COMPOSE_FOLDER_OBSERVATION.format(folder=matching, error_type=type(error).__name__)
-            raise ComposeFailures.error(ThreadComposeProblem.WORKTREE_FAILED, self.workspace, observation, git.keys) from error
-        return matching
+            error_type = type(error).__name__
+        observation = native_compose.THREAD_COMPOSE_FOLDER_OBSERVATION.format(folder=matching, error_type=error_type)
+        raise ComposeFailures.error(ThreadComposeProblem.WORKTREE_FAILED, self.workspace, observation, git.keys)
 
 
 __all__ = ["DiffCapture", "DisposableWorktree"]
