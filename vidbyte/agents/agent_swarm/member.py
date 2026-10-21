@@ -2,11 +2,11 @@
 
 PURPOSE: Defines three of the parts that make one ordinary agent loop into a swarm member: AgentSwarmMemberRuntime, the member's loop, which after each tool iteration compacts the agent's own history when it is due and then hands it the messages that arrived during its turn; AgentSwarmMemberAgent, the BaseAgent each member runs as; and AgentSwarmMessageTool, the run-bound message tool. The turn middleware, which records tool calls and turns every finish attempt into the end of a turn, lives in the middleware layer (vidbyte/middleware/builtins/agent_swarm_turn.py) beside the trim and observer middleware (agent_swarm_observer.py); this module imports it to build each member, so it also resolves from here.
 ROLE IN CODEBASE: AgentSwarmRuntime (runtime.py) builds one AgentSwarmMemberAgent per member, holding one AgentSwarmMessageTool and the three swarm middleware; BaseAgent._runtime builds AgentSwarmMemberRuntime for it through RuntimeRegistry (vidbyte/lib/registries/runtimes.py), which resolves AgentRuntimeType.AGENT_SWARM_MEMBER. Every part calls back into the run's AgentSwarmRuntime, which owns every piece of swarm state. The compaction parts come from compaction.py. Only AgentSwarmMemberRuntime is exported from the package, so the registry can import it through the package.
-ARCHITECTURE NOTE: Each member runs one long BaseAgent run for the whole swarm, so a turn end is a finish attempt that the turn middleware turns into a wait. The loop's one documented seam for changing the conversation, _after_tool_iteration, does two things in a fixed order: a compaction when one is due (a compact request is pending, or the measured context reached the trigger), then mail, so a delivered message never comes before the summary and no tool call is open at the cut. The compaction reuses ContextCompactionEngine in summarize_range mode with the member's own AgentSwarmHandoffSummarizer, and its one side call is recorded once in the member's UsageTracker, added to its token count, and reported to the swarm like a loop call. AgentSwarmRuntime is imported only for type checking and never inside a function, so the package has no import cycle; the member runtime therefore refuses a missing swarm runtime or summarizer by checking for None, which is all a plain BaseAgent or a fork can pass.
-FUNCTION INVENTORY: AgentSwarmMemberRuntime.__init__ refuses construction outside a swarm and builds the compaction engine; _after_tool_iteration is the narrated main function of the seam; _measured_context, _keep_last, _compact, and _count_side_call are its leaf helpers. AgentSwarmMessageTool.spec declares message with every agent named in its recipient description, validate_call leaves every check to the swarm, and execute posts it. AgentSwarmMemberAgent.__init__ configures the member, call_model makes one call on its runner outside the loop, and _runtime_extension_kwargs hands the swarm runtime and the summarizer to its loop.
+ARCHITECTURE NOTE: Each member runs one long BaseAgent run for the whole swarm, so a turn end is a finish attempt that the turn middleware turns into a wait. The loop's one documented seam for changing the conversation, _after_tool_iteration, does two things in a fixed order: a compaction when one is due (a compact request is pending, or the measured context reached the trigger and, after the first compaction, the history's estimate grew by the target since the last one), then mail, so a delivered message never comes before the summary and no tool call is open at the cut. The compaction reuses ContextCompactionEngine in summarize_range mode with the member's own AgentSwarmHandoffSummarizer, and its one side call is recorded once in the member's UsageTracker, added to its token count, and reported to the swarm like a loop call. AgentSwarmRuntime is imported only for type checking and never inside a function, so the package has no import cycle; the member runtime therefore refuses a missing swarm runtime or summarizer by checking for None, which is all a plain BaseAgent or a fork can pass.
+FUNCTION INVENTORY: AgentSwarmMemberRuntime.__init__ refuses construction outside a swarm and builds the compaction engine; _after_tool_iteration is the narrated main function of the seam; _estimate, _measured_context, _keep_last, _compact, and _count_side_call are its leaf helpers. AgentSwarmMessageTool.spec declares message with every agent named in its recipient description, validate_call leaves every check to the swarm, and execute posts it. AgentSwarmMemberAgent.__init__ configures the member, call_model makes one call on its runner outside the loop, and _runtime_extension_kwargs hands the swarm runtime and the summarizer to its loop.
 COMMON MODIFICATION PATTERNS: A change to what a member holds (policy, compaction knobs, tool-result cap, middleware) is made in AgentSwarmMemberAgent.__init__ with its value in vidbyte/lib/constants/agent_swarm.py. A change to when or how a member compacts is made in _after_tool_iteration and its leaves. Model-facing text for the message tool comes from the agent_swarm prompt family, never from a literal here.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import AgentSwarmRuntime at run time; keep it under TYPE_CHECKING. 2. Do not keep swarm state in these classes; AgentSwarmRuntime owns it. 3. Do not define middleware here; the swarm middleware belong to the middleware layer. 4. Do not override any other loop hook. 5. Do not let one leaf helper of _after_tool_iteration call another; the main function sequences them. 6. Do not append mail before the compaction; the summary must come first.
-KNOWN EDGE CASES: An exception in collect_messages leaves the loop and fails that member with its cause; an exception inside the message tool is a tool error the model reads. A failed summary call is recorded as model_error and keeps the history unchanged. A compaction with nothing older than the kept messages makes no side call and records nothing. A compact request made in the same response as isDone waits for the first tool iteration after the agent is woken, because the loop skips this seam for a finishing response. The turn middleware's own edge cases are listed in its module.
+KNOWN EDGE CASES: An exception in collect_messages leaves the loop and fails that member with its cause; an exception inside the message tool is a tool error the model reads. A failed summary call is recorded as model_error and keeps the history unchanged. A compaction with nothing older than the kept messages makes no side call and records nothing. When the system prompt, the tools, and the goal alone reach the trigger, a repeat automatic compaction waits until the history's estimate has grown by the target since the last one, so it costs one summary per target of new history, not one per iteration. A compact request made in the same response as isDone waits for the first tool iteration after the agent is woken, because the loop skips this seam for a finishing response. The turn middleware's own edge cases are listed in its module.
 RELATED DOCS: docs/spec/agent-swarm-v2/spec.md (sections 6.1 INV-30 to INV-36, 8.1 D-4, D-10 to D-12, and 8.5); vidbyte/agents/agent_swarm/README.md; vidbyte/middleware/builtins/agent_swarm_turn.py
 TESTS: tests/features/agent_swarm/test_agent_swarm_contract.py, tests/features/agent_swarm/test_agent_swarm_messaging.py and tests/features/agent_swarm/test_agent_swarm_compaction.py
 """
@@ -69,6 +69,9 @@ class AgentSwarmMemberRuntime(AgentRuntime):
         self._summarizer = summarizer
         # One engine per member, holding the member's own summarizer.
         self._engine = ContextCompactionEngine(summarizer=summarizer)
+        # The estimate of the history right after the last compaction,
+        # None before the first.
+        self._compacted_estimate: int | None = None
         super().__init__(**kwargs)
 
     async def _after_tool_iteration(self, state: BaseAgentRuntimeLoopState, messages: list[dict[str, Any]]) -> None:
@@ -80,11 +83,20 @@ class AgentSwarmMemberRuntime(AgentRuntime):
         # reached the trigger; a request wins, so one iteration compacts
         # once. Nothing is compacted once the swarm is stopping.
         focus = self.swarm_runtime.take_compaction_request(name)
-        measured = self._measured_context(messages)
+        estimate = self._estimate(messages)
+        measured = self._measured_context(estimate)
         trigger_at = self.config.compaction_trigger_tokens
+        # @intent a-repeat-compaction-waits-for-new-history
+        # The prompt, the tools, and the goal are never compacted, so
+        # when they alone reach the trigger, every iteration would pay
+        # for a summary of the last summary. After the first compaction,
+        # an automatic one also waits until the history has grown by the
+        # target since the last; a compact request never waits.
+        target = self.config.compaction_target_tokens or 0
+        grown = self._compacted_estimate is None or estimate >= self._compacted_estimate + target
         if focus is not None:
             trigger: AgentSwarmCompactionTrigger | None = AgentSwarmCompactionTrigger.TOOL
-        elif trigger_at is not None and measured >= trigger_at:
+        elif trigger_at is not None and measured >= trigger_at and grown:
             trigger = AgentSwarmCompactionTrigger.AUTO
         else:
             trigger = None
@@ -99,6 +111,9 @@ class AgentSwarmMemberRuntime(AgentRuntime):
             # A summary call was made only when something older existed;
             # record its usage once, then the compaction itself.
             if stats is not None and self._summarizer.last_response is not None:
+                # Remember the rewritten history's size, so the next
+                # automatic compaction waits for a target of new history.
+                self._compacted_estimate = self._estimate(messages)
                 await self._count_side_call(state, self._summarizer.last_response)
                 await self.swarm_runtime.record_compaction(name, trigger, focus or "", measured, stats.before_count - stats.after_count + 1)
 
@@ -110,20 +125,23 @@ class AgentSwarmMemberRuntime(AgentRuntime):
         if text:
             messages.append({"role": "user", "content": text})
 
-    def _measured_context(self, messages: Sequence[Mapping[str, Any]]) -> int:
-        # The prompt size the provider last reported for this agent, or
-        # the four-characters-per-token estimate when it reported none.
-        # The estimate counts each whole message, because a tool call's
-        # arguments and Gemini's parts are sent too but are not content.
-        reported = self.swarm_runtime.last_prompt_tokens(self.agent_name)
-        if reported is not None:
-            return reported
+    @staticmethod
+    def _estimate(messages: Sequence[Mapping[str, Any]]) -> int:
+        # The four-characters-per-token estimate of the history. It
+        # counts each whole message, because a tool call's arguments and
+        # Gemini's parts are sent too but are not content.
         return sum(TokenEstimate.count(str(message)) for message in messages)
+
+    def _measured_context(self, estimate: int) -> int:
+        # The prompt size the provider last reported for this agent, or
+        # the history's estimate when it reported none.
+        reported = self.swarm_runtime.last_prompt_tokens(self.agent_name)
+        return reported if reported is not None else estimate
 
     def _keep_last(self, messages: Sequence[Mapping[str, Any]]) -> int:
         # Count the newest messages whose estimate fits the target, at
         # least one; the strategy rounds the count up to whole tool-call
-        # groups itself. Each whole message is counted, as above.
+        # groups itself. Each whole message is counted, as in _estimate.
         target = self.config.compaction_target_tokens or 0
         kept, used = 0, 0
         for message in reversed(messages):
