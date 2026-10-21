@@ -78,7 +78,7 @@ Levels: **feature** = the real loop, middleware, catalog, compaction engine, fil
 | INV-29 | oracle (cross-agent order of hook-derived events never asserted) | feature | — (a tolerance, not a check) | Tests only pin same-agent order (`_next_own`) |
 | INV-30..35 | compaction | feature | see AC-16..18, EC-6, EC-21..24 | — |
 | INV-36 | contract → AC-11 contract test; observer → AC-11 test | feature | trim removed or moved after compaction | — |
-| INV-37 | contract → `test_new_modules_stay_inside_the_complexity_budget_and_never_sleep` | static | a sleep, poll or lock; a module over 400 lines | AST scan of every swarm module and the observer module |
+| INV-37 | contract → `test_new_modules_stay_inside_the_complexity_budget_and_never_sleep` | static | a sleep, poll or lock; `runtime.py` over 500 lines after its header (spec r4 row 34, S4 R-3: its narration wrapped at 72 columns), or any other budgeted module over 400 | AST scan of every swarm module and the observer module; the per-module limit comes from `BUDGET_LINE_OVERRIDES`, which must name only budgeted modules, and each failure names the module's own limit |
 | INV-38, INV-39 | contract (tools), lifecycle → `test_tool_called_events_carry_name_and_status_and_skip_isdone` | feature | a tool missing or reordered; `isDone` ending the swarm | — |
 | INV-40 | lifecycle (concurrent and repeated `arun`), workplace (goal checks) | feature | a second concurrent run accepted | — |
 

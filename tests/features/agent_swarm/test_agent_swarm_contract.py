@@ -13,7 +13,7 @@ PURPOSE: Pins AgentSwarm's static contract:
 ROLE IN CODEBASE: Contract layer of tests/features/agent_swarm/ (docs/spec/agent-swarm-v2/spec.md AC-2, AC-21, AC-22; INV-1, INV-2, INV-3, INV-11, INV-16, INV-18, INV-21, INV-36, INV-37, INV-38; EC-34; FR-1, FR-3, NFR-2; D-17, D-18; sections 8.4, 8.5, 9.2, 12.3).
 ARCHITECTURE NOTE: Every feature symbol is imported inside the test that needs it, so before the feature exists each test fails on its own ImportError (or, for the budget test, on the missing module) and the rest of the suite still collects. Tool offers and system prompts are read from what the scripted runner receives on each agent's first call, never from the swarm's internals.
 FUNCTION INVENTORY: test_public_names_import_from_every_documented_path; test_records_and_settings_are_frozen_slotted_dataclasses_with_the_documented_fields; test_enum_values_are_the_documented_lowercase_strings; test_prompt_family_has_exactly_the_twenty_three_documented_leaves_with_their_fields; test_prompt_leaves_hold_no_digits_roles_or_examples; test_the_thoroughness_section_has_the_eight_headings_each_six_to_eight_sentences; test_runtime_type_refuses_outside_a_swarm_without_calling_a_model; test_each_agent_holds_exactly_the_swarm_tools_and_a_message_schema_naming_every_agent; test_every_member_gets_the_same_sectioned_system_prompt_then_the_agentic_loop_prompt; test_invalid_settings_are_refused_naming_the_field_and_creating_nothing; test_the_search_tool_setting_and_the_reserved_names_are_gone; test_tool_results_are_cut_and_a_long_history_is_trimmed_before_each_model_call; test_boundary_settings_are_accepted_with_documented_defaults; test_api_keys_never_appear_in_reprs_events_model_calls_or_errors; test_event_records_enforce_the_per_kind_field_table; test_result_records_enforce_one_ordered_sequence_ending_in_swarm_ended; test_new_modules_stay_inside_the_complexity_budget_and_never_sleep; test_entry_points_refuse_anything_but_their_documented_types.
-COMMON MODIFICATION PATTERNS: When the spec adds a prompt leaf, add it to LEAF_FIELDS with its format fields. When a setting gains a bound, add one row to INVALID_SETTINGS with the field the error must name. When the spec adds an event kind, add a valid shape to VALID_EVENTS and its refusals to INVALID_EVENTS.
+COMMON MODIFICATION PATTERNS: When the spec adds a prompt leaf, add it to LEAF_FIELDS with its format fields. When a setting gains a bound, add one row to INVALID_SETTINGS with the field the error must name. When the spec adds an event kind, add a valid shape to VALID_EVENTS and its refusals to INVALID_EVENTS. When the spec changes a module's line target, change BUDGET_LINES or that module's entry in BUDGET_LINE_OVERRIDES.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level. 2. Do not compare tool descriptions or refusals to hand-written text; they come from the prompt catalog. 3. Do not loosen the exact tool-name list to a subset or set check; INV-38 is an exact, ordered list.
 KNOWN EDGE CASES: A refusal's field may be named with an index suffix by a converter (AgentSwarmSettings.agents[1]), so field checks use startswith. Names in rendered prompts are joined with ", ", the separator the runtime already uses for the unknown-recipient reply. The trim test counts the history budget in characters with TOKEN_ESTIMATE_CHARS_PER_TOKEN, the four-characters-per-token estimate the trim uses; it reads one file that is three caps long, one more time than the budget holds plus one, and the cut ceiling allows a one-percent truncation notice. Sentence counting splits at . ! or ? followed by whitespace; a thoroughness subsection is the text between its heading line and the next one.
 RELATED DOCS: tests/features/agent_swarm/FEATURE.md; docs/spec/agent-swarm-v2/spec.md sections 6.1, 6.2, 8.4, 8.5, 9.2 and 12.3.
@@ -127,6 +127,9 @@ BUDGET_MODULES = (
     "vidbyte/lib/constants/agent_swarm.py",
     "vidbyte/lib/dataclasses/agent_swarm.py",
 )
+# Section 8.4 and spec r4 row 34: every budgeted module targets 400 lines after its header, except runtime.py, whose narrated steps wrapped at 72 columns (NFR-8) get 500.
+BUDGET_LINES = 400
+BUDGET_LINE_OVERRIDES = {"vidbyte/agents/agent_swarm/runtime.py": 500}
 # INV-37: no sleep or polling in the swarm package or its middleware.
 SLEEP_FREE_MODULES = (
     *(f"vidbyte/agents/agent_swarm/{name}" for name in PACKAGE_MODULES),
@@ -824,14 +827,17 @@ def _sleep_calls(path: Path) -> list[int]:
 
 
 def test_new_modules_stay_inside_the_complexity_budget_and_never_sleep() -> None:
-    """Section 8.4, section 12.2, INV-37: the package has its seven modules (compaction.py in, settings.py out) and no more, each budgeted module is at most 400 lines after its header, and no swarm module or swarm middleware sleeps or polls."""
+    """Section 8.4, section 12.2, INV-37, spec r4 row 34: the package has its seven modules (compaction.py in, settings.py out) and no more, runtime.py is at most 500 lines after its header and every other budgeted module at most 400, and no swarm module or swarm middleware sleeps or polls."""
     package = REPO_ROOT / "vidbyte" / "agents" / "agent_swarm"
     assert package.is_dir(), "vidbyte/agents/agent_swarm does not exist"
     assert sorted(path.name for path in package.glob("*.py")) == sorted(PACKAGE_MODULES)
+    assert set(BUDGET_LINE_OVERRIDES) <= set(BUDGET_MODULES), "a line-budget override names a module outside BUDGET_MODULES"
     for relative in BUDGET_MODULES:
         path = REPO_ROOT / relative
         assert path.is_file(), f"{relative} is missing"
-        assert _lines_after_header(path) <= 400, f"{relative} is over 400 lines after its header"
+        limit = BUDGET_LINE_OVERRIDES.get(relative, BUDGET_LINES)
+        lines = _lines_after_header(path)
+        assert lines <= limit, f"{relative} is {lines} lines after its header, over its {limit}-line limit"
     for relative in SLEEP_FREE_MODULES:
         assert _sleep_calls(REPO_ROOT / relative) == [], f"{relative} sleeps (INV-37: no polling)"
 
