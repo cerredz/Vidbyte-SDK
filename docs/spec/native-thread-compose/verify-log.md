@@ -7,14 +7,14 @@ Gate set (from context/code-map.md §1.3 and the S5 briefing §4; run from the w
 | 1 | Lint | `python lint/run.py` → last line `SDK-LINT: PASS` | local (also inside gate 6 and the remote source job) |
 | 2 | Ratchet counts | `python -m ruff check vidbyte --config lint/ruff.toml --select I001 --no-cache` → 223, must not rise; `python -m ruff check pyproject.toml vidbyte --config lint/ruff.toml --select TID251 --no-cache` → exactly 5 | local |
 | 3 | Semgrep | `semgrep --test --config .semgrep/typed-mapping-boundary-policy.yml .semgrep/typed-mapping-boundary-policy.py`, then `semgrep scan --error --config .semgrep/typed-mapping-boundary-policy.yml vidbyte` → 0 findings (semgrep from the scratch `semgrep-venv`) | local; remote in `static-policy.yml` |
-| 4 | New tests | `PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_compose` → 385 pass (363 before the test author's 22 R-33 cases, 8fcba2df; 299 before the 64 S4 regression cases, d9cc9ff6) | local |
+| 4 | New tests | `PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_compose` → 389 pass (385 before the test author's 4 R-34 rows, bfe6747c; 363 before the 22 R-33 cases, 8fcba2df; 299 before the 64 S4 regression cases, d9cc9ff6) | local |
 | 5 | Base pack | `PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads` → `436 passed, 2 skipped` | local |
 | 6 | CI source stage | `PYTHONPATH=$(pwd) python scripts/run_ci.py --stage source` → `CI passed.` | local |
 | 7 | CI package stage | `env -u PYTHONPATH python scripts/run_ci.py --stage package --dist-dir <new empty scratch folder>` → `passed smoke checks.` | local |
 | 8 | AC-21 wheel half | `<installed copy>/python.exe -I <scratch>/s3/check_wheel_prompts.py <worktree>`, run from a folder outside the checkout → `AC-21 WHEEL HALF: PASS` | local only |
 | 9 | Comment width | `awk 'length($0) > 72' <file>`, piped to `grep -E '^[[:space:]]*#'`, over every changed source file → 0 lines | local only |
 | 10 | Remote checks | `gh workflow run ci.yml --ref feat/native-thread-compose` (Source / Python 3.11, Source / Python 3.12, Package on ubuntu-latest) and `gh workflow run static-policy.yml --ref feat/native-thread-compose`, then `gh run watch <id> --exit-status` | remote only; dispatch-only, so `gh pr checks` shows nothing |
-| — | Frozen test tree | `git diff 1d7bfbec..HEAD --stat -- tests` → empty (the test tree was last changed at 8fcba2df, by the test author, and its baseline is 1d7bfbec; iteration 2 used d9cc9ff6 and iteration 1 used 34fe19b7) | local |
+| — | Frozen test tree | `git diff bfd2b2c4..HEAD --stat -- tests` → empty (the test tree was last changed at bfe6747c, by the test author, and its baseline is bfd2b2c4; iteration 3 used 1d7bfbec, iteration 2 d9cc9ff6 and iteration 1 34fe19b7) | local |
 
 ## Iteration 1 — 2026-10-18 12:57 -0400 — agent report: reports/S5-repair-1.md
 
@@ -296,3 +296,87 @@ Afterwards, `procs.py` printed `stand-in or grandchild processes: []`.
 Afterwards, `procs.py` printed `stand-in or grandchild processes: []`.
 
 **Still open:** none. R-33 is fixed, and every gate is green at code HEAD 0e4321a4, through 7aad13ba, locally and remotely. The remote totals are iteration 2's 5964 plus the 22 R-33 cases, and neither known remote flake occurred. The follow-ups R-24 to R-31 and the verifier's out-of-scope items stay outside this loop. The one design call for re-review round 2 is the field-keyed `_withheld`, which departs from the reference fix's scan. Its evidence, runner-up and flip condition are recorded above.
+
+## Iteration 4 — 2026-10-20 22:13 -0400 — agent report: reports/S5-repair-4.md
+
+**Defects in:**
+- **R-34** (Blocker, review.md). It was filed as R-RC2-1 in reports/S5-rereview-2-conformance.md and confirmed in reports/S5-findings-verifier-rr2.md.
+  - When a reader's worktree could not be removed (EC-16), `ComposeGit._delete` (git.py:228) raised its `ThreadComposeError` inside the `OSError` handler with `raise ... from error`.
+  - The chained `OSError` names the file `rmtree` could not delete, and a reader can name that file after its key. So the key reached `__cause__`, `__context__` and `traceback.format_exception(error)`, which is what `logging.exception` and an uncaught error print.
+  - The same form, with no key in scope, was at git.py:217 (`_folder`) and workspace.py:189 (`_matching`).
+- **Failing gate 4:** the test author's 4 R-34 rows (bfe6747c). At 0f32a1ac the reproducer `PYTHONPATH=$(pwd) python -m pytest -q -p no:cacheprovider tests/features/harness_compose/test_harness_compose_keys.py -k "chains_no_os_error"` gave `4 failed, 47 deselected in 2.01s`:
+  - `AssertionError: INV-4: the error or its chain ['ThreadComposeError', 'PermissionError'] shows a key`, for both held-file rows;
+  - `AssertionError: the R-34 rule: GIT_FAILED chains ['FileNotFoundError']`;
+  - `AssertionError: the R-34 rule: WORKTREE_FAILED chains ['PermissionError']`.
+- **Remote evidence before the repair:** CI 39506184626 at bfd2b2c4 failed the same rows: Python 3.11.17 `4 failed`, and Python 3.12.15 `2 failed` (the two folder rows only).
+- **HEAD moved before the first commit.** The orchestrator's pipeline.md commits bee8f422 and c159f679 landed first, and this iteration's commits sit on them.
+- **One interruption.** An API rate limit stopped this iteration after the fix was applied and gated, and before it was committed. The edits stayed unstaged, and nothing was lost.
+- **Not handed to this loop:** the follow-ups R-24 to R-31, the base functions' own errors and refusals (R-29, NG-1), and misplaced keys that validation accepts.
+
+**Hypotheses and attempts** (R-34 is new in this iteration, so no earlier attempt applied):
+- **Root cause, confirmed by the reproducer and the code.** The handler kept the whole `OSError`. `from error` stored it as `__cause__`, and raising inside the handler stored it as `__context__`.
+- **Known to fail, not retried:** `raise ... from None`. It still sets `__context__` (verifier §2.4, test-plan R-34 notes). The held-file rows walk that link, and the folder rows read it directly.
+- **Chosen: the verifier's reference diff, unchanged.**
+  - I ran `git apply --check -v`, then `git apply`.
+  - The 36 changed lines of `git -c core.autocrlf=false diff -- vidbyte` are identical to the reference diff's (`cmp`).
+  - One rule now holds at all three sites. Only `type(error).__name__` is kept inside the handler, and the observation is built and `ComposeFailures.error(...)` is raised after it, with no `from`. Each success path returns inside the `try`.
+  - There is no smaller complete equivalent: each site needs the capture, the moved raise and the success return.
+- **Considered, not coded:**
+  - An `else: return` in place of a `return` inside the `try`. It behaves the same, but it costs a line per site and is not the proved diff, which no reviewer will see.
+  - Fixing `_delete` alone. Two of the four rows guard `_folder` and `_matching`, and the briefing asks for the uniform rule.
+- **Checked before applying.** `lint/mypy.ini` leaves the optional `possibly-undefined` code off. `lint/ruff.toml` selects only TID251, and I001 comes from the command line. So a name bound only in a handler, and a `return` inside a `try`, trip nothing. Lint agreed: the count table is identical to iteration 3's (90 rows), with S009 at 350/350.
+- **Tooling trap, new here: `git apply` and `core.autocrlf`.**
+  - The system git config (`C:/Program Files/Git/etc/gitconfig`) sets `core.autocrlf=true`, and `git apply` honoured it: both files came out CRLF in the working tree (`git ls-files --eol`: `i/lf w/crlf`).
+  - The commit would still be LF. But the awk width check counts the `\r`, and the sibling compose files are LF.
+  - I restored LF byte for byte before committing, and `git diff --stat` stayed at +24/-12.
+  - After any `git apply` here, check `--eol`, or use `s5-2/apply_edits.py`.
+- **The optional question: why CI's Python 3.12 passed the held-file rows before the fix.** I answered it from raw source:
+  - **Sources.** Raw `Lib/shutil.py` at v3.12.3, v3.12.15 and v3.11.17, fetched with `gh api` into `s5-4/cpython-shutil/`. The runner's versions come from the CI 39506184626 log.
+  - **The change.** The 3.12 branch took the iterative `rmtree` in feb7870b46 (2024-06-01, "[3.12] GH-89727: Fix `shutil.rmtree()` recursion error on deep trees"), so every release from 3.12.4 on has it.
+  - **What 3.12.15 does.** The default `onexc`, a bare `raise`, re-raises the unlink failure inside the inner handler. The error escapes into `_rmtree_safe_fd`'s outer `except OSError as err:`, which runs `err.filename = path` and raises it again. `path` is the folder being walked, `<worktree>/held-by-test`, so the chained `PermissionError` named that folder, not `<key>.txt`.
+  - **What 3.11.17 and WSL's 3.12.3 do.** 3.11.17 has no backport, and 3.12.3 predates it. Both keep the recursive form, whose error names the basename.
+  - **Consequence.** On POSIX Python 3.12.4 or later, a held key-named file cannot show the leak; only win32 and the 3.11 leg can. The fix removes the chain, so every leg passes either way.
+- **Independent evidence beyond the frozen pack:**
+  - **The verifier's probe** `s5-verifier-rr2/test_s5v_rr2_chain.py`, run on the committed tree, gave `12 passed in 30.42s`, matching the verifier's proof copy:
+    - A to J print `chain=False traceback=False logging=False`;
+    - every chain is `['ThreadComposeError']` (J has two, both scrubbed);
+    - `pack error_surfaces` is True only for A and I, where EC-71 keeps the key in `result` or `diff`.
+  - **No chaining site is left.** `grep` over the compose sources finds no `from error`, and the only `except OSError` handlers left are the three fixed sites.
+
+**Changes:**
+
+| SHA | Commit |
+|---|---|
+| c5e40f82 | fix(compose): raise folder failures after the OSError handler, chaining no OS text [R-34] |
+| 1511846c | docs(spec): record the R-34 rule for native-thread-compose |
+| this records commit | docs(spec): verify-log iteration 4 for native-thread-compose. It also carries the review.md R-34 status, this log's two refreshed gate-table rows and reports/S5-repair-4.md. |
+
+c5e40f82 touches 2 files (+24/-12). It adds no file, class, public name, constant, message text, record field or literal. The only new identifier is the local `error_type`.
+- `git.py`: `_folder` and `_delete` follow the rule. WHAT NOT TO DO item 4 also forbids chaining an `OSError`, and the two leaf comments say why.
+- `workspace.py`: `_matching` follows the rule. WHAT NOT TO DO gains item 5, and the leaf comment says why.
+
+1511846c changes exactly spec.md line 1595, the §17 "Git failures." bullet (1 insertion, 1 deletion), and the file stays CRLF.
+
+**Gate matrix out** (gates 1–9 at 1511846c, whose code is c5e40f82, run in this worktree in this iteration; outputs in `s5-4/final/`):
+
+| Gate | Command | Result | Final lines |
+|---|---|---|---|
+| 1 lint | `python lint/run.py` | PASS. The count table matches iteration 3's line for line, with S009 at 350/350. | `S063 IMPROVED 4 -> 3. Lower it with: python lint/run.py --rule S063 --update-baseline`<br>`S064 RATCHETED: 4 known finding(s). Inspect with: python lint/run.py --rule S064 --all`<br>`SDK-LINT: PASS` |
+| 2 ratchets | ruff I001 / TID251 | PASS (223 / 5) | `Found 223 errors.`<br>``[*] 223 fixable with the `--fix` option.``<br>`Found 5 errors.` |
+| 3 semgrep | `--test`, then `scan --error` | PASS | `1/1: ✓ All tests passed`<br>`Ran 1 rule on 977 files: 0 findings.` (exit 0) |
+| 4 new tests | `pytest -q tests/features/harness_compose` | PASS (was 4 failed) | `389 passed in 53.09s` |
+| 5 base pack | `pytest -q tests/features/harness_threads` | PASS | `436 passed, 2 skipped in 44.67s` |
+| 6 source stage | `run_ci.py --stage source` | PASS | `================ 6030 passed, 16 skipped in 140.02s (0:02:20) =================`<br>`CI passed.` |
+| 7 package stage | `run_ci.py --stage package --dist-dir s5-4/final/dist-5` | PASS | `Installed vidbyte-sdk 0.3.0 passed smoke checks.`<br>`CI passed.` |
+| 8 AC-21 wheel half | `wheel-venv-5/Scripts/python.exe -I s3/check_wheel_prompts.py <worktree>`, from `s5-4/final/wheel-run-5`, using the briefing's copy recipe | PASS | `installed vidbyte: ...\s5-4\final\wheel-venv-5\Lib\site-packages\vidbyte\__init__.py (outside the checkout: True)`<br>`fixed combinations: 17, longest planner = 8304 chars, over 12000: {}`<br>`AC-21 WHEEL HALF: PASS` |
+| 9 comment width | awk over git.py and workspace.py | PASS | `over72=0` for each of the 2 files |
+| frozen tests | `git diff bfd2b2c4..HEAD --stat -- tests` | PASS | empty |
+| 10 remote: Static policy | run 39531298277 at 1511846c | PASS; watch exit 0 | `1/1: ✓ All tests passed`<br>`Ran 1 rule on 977 files: 0 findings.` |
+| 10 remote: CI | run 39531295940 at 1511846c | PASS: Source / Python 3.11, Source / Python 3.12 and Package; watch exit 0 | 3.11 (CPython 3.11.17): `================= 5990 passed, 56 skipped in 102.83s (0:01:42) =================`, then `CI passed.`<br>3.12 (CPython 3.12.15): `========== 5990 passed, 56 skipped, 19 warnings in 145.59s (0:02:25) ===========`, then `CI passed.`<br>Package: `Installed vidbyte-sdk 0.3.0 passed smoke checks.`, then `CI passed.` |
+
+Afterwards, `procs.py` printed `stand-in or grandchild processes: []`.
+
+**Still open:** none.
+- R-34 is fixed, and every gate is green at code HEAD c5e40f82, through 1511846c, locally and remotely.
+- The remote totals are iteration 3's 5986 plus the 4 R-34 rows on both legs, the skips are unchanged at 56, and neither known remote flake occurred.
+- The follow-ups R-24 to R-31 stay outside this loop.
