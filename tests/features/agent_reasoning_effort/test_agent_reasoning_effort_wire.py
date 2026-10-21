@@ -3,13 +3,15 @@
 PURPOSE: Prove on the HTTP seam that every "sent" cell of the spec's section 9.2 table
 adds exactly its fragment to the vendor body, deep-merged, with the URL, headers and
 key unchanged: through TextModelConfig and each of the four payload builders, through
-an agent on each provider, through the streaming builders, through Runner, through a
-fallback chain whose hops each send their own form, beside Anthropic structured
-output, Gemini temperature and schema, and a disjoint extra_body; and that
-thinking_config without an effort is forwarded as before.
+an agent on each provider, through the streaming builders, through Runner from the
+keyword or from options, through a fallback chain whose hops each send their own
+form, through a context-window algorithm that reuses the agent's own runner, beside
+Anthropic structured output, Gemini temperature and schema, and a disjoint
+extra_body; and that thinking_config without an effort is forwarded as before.
 ROLE IN CODEBASE: Covers spec AC-2, AC-3, AC-6 (capable chain), AC-7 (disjoint
-extra_body), AC-14, AC-15, AC-18 (agent level), AC-20, EC-6, EC-21, EC-28, INV-2,
-INV-9, INV-17, FR-4 and FR-5 for vidbyte/providers/{openai,anthropic,gemini,compatible}.py,
+extra_body), AC-14, AC-15, AC-18 (agent level), AC-20, AC-24, AC-26, AC-29, EC-6,
+EC-21, EC-28, EC-30, EC-35, INV-2, INV-9, INV-17, FR-4 and FR-5 for
+vidbyte/providers/{openai,anthropic,gemini,compatible}.py,
 vidbyte/lib/runners/utility.py, vidbyte/agents/base.py and vidbyte/agents/fallback.py.
 ARCHITECTURE NOTE: The only fake is the transport (Wire, or StreamWire for streams);
 TextModelConfig, the runners, the adapters, BaseAgent and AgentFallback are real.
@@ -19,7 +21,8 @@ golden body is stored and an unrelated adapter change cannot turn this red.
 FUNCTION INVENTORY: _config builds a DIRECT TextModelConfig with a run-time key;
 _one_call sends one call through TextModelRunner and returns its request;
 _one_stream does the same through StreamingTextModelRunner; _first_vendor_request
-runs an agent once; the test_* functions are one behaviour each.
+runs an agent once; _runner_call builds an openai/gpt-5.5 Runner and sends one call;
+the test_* functions are one behaviour each.
 COMMON MODIFICATION PATTERNS: A new provider adds its fragment rule and reply shape in
 the fixtures; the sweep picks up every SENT row by itself.
 WHAT NOT TO DO IN THIS FILE: 1. Do not compare against a stored body. 2. Do not bind a
@@ -27,9 +30,12 @@ ScriptedRunner; it bypasses the adapters and cannot see the fragment. 3. Do not 
 a key-shaped literal. 4. Do not import a feature name outside the FEATURE_MISSING guard.
 KNOWN EDGE CASES: The gpt-5.6 alias is sent with the alias as the body's model and
 gpt-5.6-sol's support. Anthropic's none form is "thinking" alone, so a disjoint
-extra_body may set "thinking" only beside a level that uses output_config.
+extra_body may set "thinking" only beside a level that uses output_config. The built
+config is read through TextModelRunner._config, which has no public accessor
+(tests/features/sdk_provider_keys reads it the same way).
 RELATED DOCS: docs/spec/agent-reasoning-effort/spec.md sections 6.1 INV-2, INV-9,
-INV-17, 6.2 AC-2, AC-3, AC-6, AC-7, AC-14, AC-15, AC-20, 9.2 and 13;
+INV-17, 6.2 AC-2, AC-3, AC-6, AC-7, AC-14, AC-15, AC-20, AC-24, AC-26, AC-29, 6.3
+EC-30, EC-35, 9.2 and 13;
 tests/features/agent_reasoning_effort/FEATURE.md.
 TESTS: PYTHONPATH=$(pwd) py -3.11 -m pytest -q tests/features/agent_reasoning_effort/test_agent_reasoning_effort_wire.py
 """
@@ -43,6 +49,9 @@ from typing import Any
 import pytest
 
 from tests.features.agent_reasoning_effort.agent_reasoning_effort_fixtures import (
+    ALGORITHM_REPLIES,
+    NON_TEXT_MODELS,
+    OWN_MODEL_ALGORITHMS,
     PROVIDERS,
     REPRESENTATIVE,
     StreamWire,
@@ -132,6 +141,21 @@ def _first_vendor_request(
 ) -> dict[str, Any]:
     wire = Wire(text='{"plan": "Add the column, backfill, swap."}').install(monkeypatch)
     return first_request(wire, agent, PROMPT)
+
+
+def _runner_call(**options: Any) -> tuple[Any, dict[str, Any]]:
+    # One DIRECT openai/gpt-5.5 call through Runner.build; returns the runner and its request.
+    wire = Wire()
+    runner = Runner(
+        provider="openai",
+        model_name="gpt-5.5",
+        api_keys=[provider_key("openai")],
+        model_mode=TextModelMode.DIRECT,
+        **options,
+    ).build(transport=wire)
+    runner.run(PROMPT, system=SYSTEM)
+    (request,) = wire.requests
+    return runner, request
 
 
 def _same_route(left: Mapping[str, Any], right: Mapping[str, Any]) -> None:
@@ -319,6 +343,84 @@ def test_runner_build_hands_the_effort_to_the_text_config() -> None:
     assert effort["json_body"] == deep_merge(
         unset["json_body"], fragment("xai", "xhigh")
     )
+
+
+def test_an_options_effort_reaches_the_text_config_and_the_wire() -> None:
+    # AC-26, FR-5, INV-3, review R-3: options["reasoning_effort"] is a
+    # TextModelConfig field, so Runner hands it on as it does the keyword;
+    # an unset keyword must not overwrite it with None.
+    _, unset = _runner_call()
+    runner, effort = _runner_call(options={"reasoning_effort": "high"})
+
+    assert runner._config.reasoning_effort is ReasoningEffort.HIGH
+    assert effort["json_body"] == deep_merge(
+        unset["json_body"], fragment("openai", "high")
+    )
+    _same_route(effort, unset)
+
+
+def test_the_keyword_effort_wins_over_an_options_effort() -> None:
+    # AC-29, FR-5: with both set, the keyword wins, as temperature's does,
+    # so only the keyword's fragment reaches the vendor.
+    _, unset = _runner_call()
+    runner, both = _runner_call(
+        reasoning_effort=ReasoningEffort.LOW, options={"reasoning_effort": "high"}
+    )
+
+    assert runner._config.reasoning_effort is ReasoningEffort.LOW
+    assert both["json_body"] == deep_merge(
+        unset["json_body"], fragment("openai", "low")
+    )
+
+
+def test_an_options_effort_of_none_is_unset_on_every_runner_type() -> None:
+    # EC-35, INV-1: None in options means unset, like the keyword's
+    # default: the text body is the body without it, and no non-text
+    # runner is refused.
+    _, unset = _runner_call()
+    runner, none = _runner_call(options={"reasoning_effort": None})
+    built = [
+        Runner(
+            provider="openai",
+            model_name=model,
+            api_keys=[provider_key("openai")],
+            options={"reasoning_effort": None},
+        ).build()
+        for model, _ in NON_TEXT_MODELS
+    ]
+
+    assert runner._config.reasoning_effort is None
+    assert none["json_body"] == unset["json_body"]
+    assert "reasoning" not in none["json_body"]
+    assert len(built) == len(NON_TEXT_MODELS)
+    assert None not in built
+
+
+@pytest.mark.parametrize(
+    ("key", "algorithm", "calls"),
+    [case[1:] for case in OWN_MODEL_ALGORITHMS],
+    ids=[case[0] for case in OWN_MODEL_ALGORITHMS],
+)
+def test_an_algorithm_on_the_agents_own_runner_sends_the_effort_on_every_call(
+    key: str, algorithm: object, calls: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # AC-24, EC-30, INV-2, D-19: the critic without a reviewer and the
+    # debate without stage models reuse the agent's own runner, so they
+    # are not refused, and every model call of the run carries the effort.
+    def run_requests(**options: Any) -> list[dict[str, Any]]:
+        wire = Wire(text=ALGORITHM_REPLIES[key]).install(monkeypatch)
+        direct_agent("openai", "gpt-5.5", algorithm=algorithm, **options).run(PROMPT)
+        return wire.vendor_requests()
+
+    unset = run_requests()
+    effort = run_requests(reasoning_effort=ReasoningEffort.HIGH)
+
+    assert len(effort) == len(unset) == calls
+    for sent, plain in zip(effort, unset, strict=True):
+        assert sent["json_body"] == deep_merge(
+            plain["json_body"], fragment("openai", "high")
+        )
+        _same_route(sent, plain)
 
 
 def test_a_chain_that_can_take_the_value_sends_each_hops_own_form(

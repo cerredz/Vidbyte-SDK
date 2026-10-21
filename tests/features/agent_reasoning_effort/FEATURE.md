@@ -2,7 +2,7 @@
 
 ## High-Level Feature Description
 
-`reasoning_effort` (a `ReasoningEffort`: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`) is one provider-neutral setting on `TextModelConfig`, `BaseAgent` and `JevAgentSettings`. On a `TextModelMode.DIRECT` call, each provider adapter sends it in that vendor's documented wire form, deep-merged into the body it already builds. Construction refuses, before any request, an effort the SDK's table has no documented form for, a gateway mode, an effort beside `thinking_config` or an overlapping `extra_body`, and any value outside the six. Unset, nothing changes. The same change root-exports `ReasoningEffort`, `DecisionModelConfig` and `DecisionModelMode`.
+`reasoning_effort` (a `ReasoningEffort`: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`) is one provider-neutral setting on `TextModelConfig`, `BaseAgent` and `JevAgentSettings`. On a `TextModelMode.DIRECT` call, each provider adapter sends it in that vendor's documented wire form, deep-merged into the body it already builds. Construction refuses, before any request, an effort the SDK's table has no documented form for, a gateway mode, an effort beside `thinking_config` or an overlapping `extra_body`, any value outside the six, an effort on a non-text `Runner`, and (spec r4) an agent whose context-window algorithm calls models through runners it builds itself. `Runner` takes the effort from its keyword or from `options["reasoning_effort"]`, and the keyword wins. Unset, nothing changes. The same change root-exports `ReasoningEffort`, `DecisionModelConfig` and `DecisionModelMode`.
 
 ## Contract
 
@@ -11,7 +11,9 @@
 - Every "sent" cell puts exactly its section 9.2 fragment into the vendor body, deep-merged, and changes nothing else: not the URL, not the headers, not the key (INV-2, INV-9, AC-2, AC-3, AC-20). Anthropic's `output_config.format` and Gemini's `generationConfig` keys survive (AC-14, AC-15).
 - Every refusal is a `ConfigurationError` raised at construction with the section 8.5 text, character for character, and zero HTTP requests (INV-4, INV-11, AC-4, AC-5, AC-7, AC-10, AC-16).
 - Every fallback-chain entry is checked, in either order; a capable chain sends each hop's own provider form (INV-6, AC-6).
-- The effort survives export and restore, forks, ContinualTrace and Handoff side agents, and reaches the JevAgent main agent, its fresh continuation and its eight children; it never reaches the brief writer, specialists or decision calls (INV-14, INV-15, AC-9, AC-11, AC-12).
+- An agent that sets an effort is refused with the section 8.5 algorithm text when its context-window algorithm builds its own runners: `multi_provider_agentic_grader` in any form, `independent_critic` with a reviewer model, or `prosecutor_defender_judge` with a stage model. The text names the sub-algorithm's fixed key, never the user's `name`, and any earlier guard reason comes first (AC-21 to AC-23, EC-31, EC-33, D-19). The critic without a reviewer and the debate without stage models reuse the agent's own runner, so every one of their calls sends the effort (AC-24); unset, every configuration runs as before (AC-25).
+- `Runner` reads the effort from the keyword or from `options["reasoning_effort"]`, the keyword winning. An options effort is sent, or refused by `TextModelConfig` with its own texts, exactly as the keyword is; `None` there means unset; every non-text runner type refuses it from either channel with the r4 `Runner` text (FR-5, AC-16, AC-26 to AC-29, EC-35, EC-36).
+- The effort survives export and restore (a restored fallback chain sends it on every hop in that hop's form), forks, ContinualTrace and Handoff side agents, and reaches the JevAgent main agent, its fresh continuation and its eight children; it never reaches the brief writer, specialists or decision calls (INV-14, INV-15, AC-9, AC-11, AC-12).
 - Unset sends nothing and writes no checkpoint key (INV-1, AC-8, NFR-1); billed reasoning tokens reach `UsageRollup` as before (INV-10, AC-17).
 
 ## Actors / Callers
@@ -20,7 +22,7 @@ SDK developers who construct `Agent`, `BaseAgent`, `TextModelConfig`, `TextModel
 
 ## Inputs and Preconditions
 
-A provider, a model id, a mode, an effort value (member, plain string, another enum's member, or a bad value), optionally a fallback chain, `thinking_config`, `extra_body`, `output_schema` and `temperature`. Every test runs offline. The only fake is the network: `HttpTransport.request` (or the transport handed to a runner) is replaced by `Wire`, which answers each vendor in its own response shape; Jev's delegated path also fakes `TypeSafeProvider.run_decision`, as R3's pack does. Provider keys are built at run time from parts and every real `*_API_KEY` variable is removed.
+A provider, a model id, a mode, an effort value (member, plain string, another enum's member, or a bad value) given as a keyword or in `Runner`'s `options`, optionally a fallback chain, a context-window algorithm, `thinking_config`, `extra_body`, `output_schema` and `temperature`. Every test runs offline. The only fake is the network: `HttpTransport.request` (or the transport handed to a runner) is replaced by `Wire`, which answers each vendor in its own response shape; Jev's delegated path also fakes `TypeSafeProvider.run_decision`, as R3's pack does. Provider keys are built at run time from parts and every real `*_API_KEY` variable is removed.
 
 ## Observable Outcomes
 
@@ -61,7 +63,15 @@ None at test time. `REASONING_EFFORT_AS_OF`, the pricebook and the provider cata
 | AC-7, INV-7, EC-7, EC-8 | `thinking_config` (even `{}`) or an overlapping `extra_body` beside an effort | `payload.update` overwrites the fragment, or two thinking controls reach the vendor |
 | AC-10, INV-8 | `"max"`, `""`, `"HIGH"`, `3`, `GrokReasoningEffort.MAX` | the value is sent raw, or case-folded |
 | AC-10 | `"high"` or `GrokReasoningEffort.HIGH` | the foreign member is stored as is and leaks its type into the wire or the checkpoint |
-| AC-16, EC-9 | an effort on an image model's `Runner` | the option is filtered out and dropped silently |
+| AC-16, AC-28, EC-9 | an effort on an image, audio, embedding or video model's `Runner`, from the keyword or from `options` | the option is filtered out and dropped silently, or the refusal names the type with a wrong article |
+| AC-26, AC-27, EC-36 | `Runner(options={"reasoning_effort": ...})` on a text model, with no keyword | the unset keyword overwrites the option with `None`, so a sendable effort is not sent and an unsendable or bad one is not refused |
+| AC-29 | both the keyword and `options` set, to different values | the options value wins over the keyword |
+| EC-35 | `options={"reasoning_effort": None}` | `None` is treated as a value: something is sent, or a non-text runner is refused |
+| AC-21 to AC-23, EC-33, D-19 | an effort with `multi_provider_agentic_grader` (preset name, preset object, a named algorithm, with or without `provider_models`), `independent_critic` with a reviewer model, or `prosecutor_defender_judge` with one stage model | the agent constructs and those runners send no effort, even on a model the table sends it for; or the text names the user's algorithm `name` |
+| EC-31 | an own-runner algorithm plus a gateway mode or a refused cell | the algorithm text hides the mode or capability reason |
+| EC-32 | a non-linear runtime with an algorithm and an effort | an effort reason replaces the runtime check's text |
+| AC-24, EC-30 | `independent_critic` without a reviewer, `prosecutor_defender_judge` without stage models | the agent is refused although every call reuses its own runner, or a reviewer or stage call drops the effort |
+| AC-25 | every algorithm configuration above with the effort unset | the algorithm check refuses or changes an agent that sets no effort |
 | EC-22 | an effort on an agent with no provider or no model | the effort is accepted and never checked or used |
 | EC-21, AC-18 | a slug, an alias, padding or upper case in the model id | support is looked up for the raw id and a supported model is refused, or the message names a rewritten id |
 | INV-18 | an effort on an unpriced model under a spend cap | the effort text replaces R3's spend-cap refusal |
@@ -70,6 +80,7 @@ None at test time. `REASONING_EFFORT_AS_OF`, the pricebook and the provider cata
 | AC-9, INV-15 | each Jev child on the main model | one child is built without the effort and runs at the vendor default |
 | AC-9, INV-15, EC-20 | the brief writer, a specialist, a decision call | Jev's effort leaks into a call that has its own settings or into the TypeSafe gateway |
 | AC-11, INV-14, EC-18, EC-29 | export then restore; an old checkpoint; a stored value the table no longer allows | the restored agent runs at the default, an old checkpoint fails, or a stale value is sent |
+| AC-11, D-6 (review R-4) | export then restore of an agent with a fallback chain | the restored chain drops the effort, or a hop sends another provider's form |
 | AC-12, EC-19, T-2, D-16 | `fork()`, a fork to an incapable model, the fork tool | the child drops the effort, or a model-chosen fork sends an unsupported effort |
 | FR-8 | `ContinualTraceAgent` and `HandoffAgent` built from a source agent | the side agent runs at the default effort |
 | AC-17, INV-10 | a reply that reports reasoning tokens | reasoning spend misses `UsageRollup` and R3's cap |
@@ -77,20 +88,25 @@ None at test time. `REASONING_EFFORT_AS_OF`, the pricebook and the provider cata
 
 ## Historical Regressions
 
-None yet: the pack was written before the feature existed (spec r3, stage S2), from the approved spec alone.
+The pack was written before the feature existed (spec r3, stage S2), from the approved spec alone. The S4 review of the first implementation then found these, and spec r4 gave each an ID and an exact text; the tests were added at stage S2b:
+- Review R-1: an agent with an effort and `multi_provider_agentic_grader`, a critic reviewer or a debate stage model constructed, and those algorithm-built runners never sent the effort. Now refused at construction (AC-21 to AC-23).
+- Review R-3: `Runner` overwrote `options["reasoning_effort"]` with the unset keyword's `None`, and refused a non-text type only for the keyword (AC-26 to AC-28, EC-36).
+- Review R-2: only an image model was tested for the non-text refusal, so a refusal narrowed to images passed (AC-28 over four types).
+- Review R-9: the r3 `Runner` text read "resolves to a image runner"; r4 quotes the type.
+- Review R-4: no test restored a chained agent, so a restore that dropped the effort for chained agents survived.
 
 ## Test Suite Map
 
 - `test_agent_reasoning_effort_acceptance.py`: AC-1 (the section 4 snippet, run as written).
-- `test_agent_reasoning_effort_contract.py`: AC-13, FR-1, FR-3 exports, INV-12, the section 8.5 signatures, `REASONING_EFFORT_AS_OF` and the README sources section the no-row text points to.
+- `test_agent_reasoning_effort_contract.py`: AC-13, FR-1, FR-3 exports, INV-12, the section 8.5 signatures (both guard methods), `REASONING_EFFORT_AS_OF` and the README sources section the no-row text points to.
 - `test_agent_reasoning_effort_registry.py`: INV-20 (table-driven, plus the structural invariant), AC-18, INV-13, the section 8.5 registry texts and their order.
-- `test_agent_reasoning_effort_wire.py`: AC-2, AC-3, AC-6 (capable chain), AC-7 (disjoint `extra_body`), AC-14, AC-15, AC-20, EC-21, INV-9, INV-17, streaming and `Runner`.
-- `test_agent_reasoning_effort_refusals.py`: AC-4, AC-5, AC-6 (refusals), AC-7, AC-10, AC-16, AC-18, EC-22, INV-18.
-- `test_agent_reasoning_effort_copy_paths.py`: AC-11, AC-12, EC-18, EC-19, INV-14, FR-8.
+- `test_agent_reasoning_effort_wire.py`: AC-2, AC-3, AC-6 (capable chain), AC-7 (disjoint `extra_body`), AC-14, AC-15, AC-20, AC-24, AC-26, AC-29, EC-21, EC-35, INV-9, INV-17, streaming and `Runner`.
+- `test_agent_reasoning_effort_refusals.py`: AC-4, AC-5, AC-6 (refusals), AC-7, AC-10, AC-16, AC-18, AC-21 to AC-23, AC-27, AC-28, EC-22, EC-30 to EC-33, EC-36, INV-18.
+- `test_agent_reasoning_effort_copy_paths.py`: AC-11 (a restored chain included), AC-12, EC-18, EC-19, INV-14, FR-8.
 - `test_agent_reasoning_effort_jev.py`: AC-9, INV-15, EC-20.
-- `test_agent_reasoning_effort_unset.py`: AC-8, NFR-1, INV-1.
+- `test_agent_reasoning_effort_unset.py`: AC-8, AC-25, NFR-1, INV-1.
 - `test_agent_reasoning_effort_usage.py`: AC-17, INV-10, NFR-5.
-- `agent_reasoning_effort_fixtures.py`: the section 9.2 oracle tables, the section 8.5 text builders, `Wire`, `StreamWire` and the agent builders.
+- `agent_reasoning_effort_fixtures.py`: the section 9.2 oracle tables, the section 8.5 text builders, the AC-21 to AC-24 algorithm configurations, the non-text models, `Wire`, `StreamWire` and the agent builders.
 
 Run with `PYTHONPATH=$(pwd) py -3.11 -m pytest -q tests/features/agent_reasoning_effort`.
 
@@ -100,7 +116,8 @@ Run with `PYTHONPATH=$(pwd) py -3.11 -m pytest -q tests/features/agent_reasoning
 - No property-based library: Hypothesis is not installed, and the table is finite, so the deep-merge identity and the refusal texts are checked exhaustively over every cell instead of sampled.
 - No golden files: every "unchanged" claim compares two builds made in the same test run.
 - No test pins the table's size, its key set, `REASONING_EFFORT_AS_OF`'s value, the export count or the package version, so a later sourced row or release keeps the pack green.
-- No test that the per-hop effort survives restore (D-6), and none for Q-1 to Q-10: the spec states them as limitations or leaves them unbuilt.
+- No test that a per-hop effort survives restore (D-6), and none for Q-1 to Q-11: the spec states them as limitations or leaves them unbuilt. In particular nothing tests that the effort is forwarded into an algorithm's own runners (Q-11 is No; the agent is refused instead).
+- No test that an `agent.algorithm` assigned after construction is refused: EC-34 is an accepted limitation.
 - No test of the pre-existing vendor behaviors the spec accepts as limitations (EC-11 to EC-17, EC-25, EC-26): they need a live vendor.
 - The release record (AC-19) lives under `docs/`, which these tests must not read; it is left to review.
 - No timing test for NFR-2: zero requests per refusal is asserted instead of a duration.

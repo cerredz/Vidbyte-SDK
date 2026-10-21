@@ -2,11 +2,12 @@
 
 PURPOSE: Prove that every path that copies an agent keeps its reasoning effort and
 re-checks it against the copy's model: export_state then restore (and the request the
-restored agent sends), an old checkpoint without the key, a stored value the table no
-longer allows, a plain fork, a fork to another model (capable or not), the fork tool
-the model drives, and the ContinualTrace and Handoff side agents.
-ROLE IN CODEBASE: Covers spec AC-11, AC-12, EC-18, EC-19, EC-29, INV-14, FR-8, T-2 and
-D-16 for vidbyte/agents/base.py (_export_runtime_config, restore),
+restored agent sends, on every hop of a restored fallback chain), an old checkpoint
+without the key, a stored value the table no longer allows, a plain fork, a fork to
+another model (capable or not), the fork tool the model drives, and the ContinualTrace
+and Handoff side agents.
+ROLE IN CODEBASE: Covers spec AC-11, AC-12, EC-18, EC-19, EC-29, INV-14, FR-8, T-2,
+D-6, D-16 and review R-4 for vidbyte/agents/base.py (_export_runtime_config, restore),
 vidbyte/agents/fork.py, vidbyte/agents/continual_trace.py, vidbyte/agents/handoff.py
 and vidbyte/tools/builtins/fork/fork.py (unchanged).
 ARCHITECTURE NOTE: The copies run for real against the Wire, so a copy that keeps the
@@ -20,12 +21,13 @@ behaviour each.
 COMMON MODIFICATION PATTERNS: A new copy path of the runner settings adds one test
 here that builds the copy and reads its first request.
 WHAT NOT TO DO IN THIS FILE: 1. Do not test that a per-hop effort survives restore;
-the spec states that limitation (D-6). 2. Do not monkeypatch AgentForker or
-BaseAgent.__init__. 3. Do not write a key-shaped literal.
+the spec states that limitation (D-6). The one agent-wide effort does survive, and
+every rebuilt hop sends it in its own form; that is tested. 2. Do not monkeypatch
+AgentForker or BaseAgent.__init__. 3. Do not write a key-shaped literal.
 KNOWN EDGE CASES: A fork child takes its parent's name. The fork tool catches every
 exception and returns ToolResult.error with the exception's type name.
 RELATED DOCS: docs/spec/agent-reasoning-effort/spec.md sections 6.1 INV-14, 6.2 AC-11,
-AC-12, 6.3 EC-18, EC-19, EC-29 and 9.2 "Every agent";
+AC-12, 6.3 EC-18, EC-19, EC-29, 8.1 D-6 and 9.2 "Every agent";
 tests/features/agent_reasoning_effort/FEATURE.md.
 TESTS: PYTHONPATH=$(pwd) py -3.11 -m pytest -q tests/features/agent_reasoning_effort/test_agent_reasoning_effort_copy_paths.py
 """
@@ -44,6 +46,7 @@ from tests.features.agent_reasoning_effort.agent_reasoning_effort_fixtures impor
     Wire,
     capability_reason,
     clear_provider_environment,
+    deep_merge,
     direct_agent,
     first_request,
     fragment,
@@ -126,6 +129,43 @@ def test_a_checkpoint_carries_the_effort_and_the_restored_agent_sends_it(
         first_request(wire, restored)["json_body"]["reasoning"]
         == fragment("openai", "low")["reasoning"]
     )
+
+
+def test_a_restored_chain_sends_the_kept_effort_in_each_hops_own_form(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # AC-11, INV-14, D-6, review R-4: the checkpoint keeps the one
+    # agent-wide effort and stores the hops as identity strings, so
+    # restore rebuilds the chain from that effort and each hop sends it in
+    # its own provider's form. The primary answers 500 so both hops send.
+    keys = provider_keys("openai", "anthropic")
+    chain = (("openai", "gpt-5.5"), ("anthropic", "claude-sonnet-5"))
+
+    def restored_hops(**options: Any) -> tuple[BaseAgent, list[dict[str, Any]]]:
+        state = direct_agent(
+            *chain[0], keys=keys, fallback=["anthropic/claude-sonnet-5"], **options
+        ).export_state()
+        restored = BaseAgent.restore(state, api_keys=keys)
+        wire = Wire(fail={"https://api.openai.com": 500}).install(monkeypatch)
+        restored.run("Plan a zero-downtime rename of users.email.")
+        return restored, wire.vendor_requests()
+
+    _, unset = restored_hops()
+    restored, effort = restored_hops(reasoning_effort=ReasoningEffort.HIGH)
+
+    assert restored.runner_config.reasoning_effort is ReasoningEffort.HIGH
+    assert [request["url"] for request in effort] == [
+        request["url"] for request in unset
+    ]
+    assert len(effort) == len(chain)
+    assert (
+        effort[0]["json_body"]["reasoning"],
+        effort[1]["json_body"]["output_config"],
+    ) == ({"effort": "high"}, {"effort": "high"})
+    for (provider, _), sent, plain in zip(chain, effort, unset, strict=True):
+        assert sent["json_body"] == deep_merge(
+            plain["json_body"], fragment(provider, "high")
+        ), provider
 
 
 def test_an_old_checkpoint_without_the_key_restores_with_no_effort(wire: Wire) -> None:

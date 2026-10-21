@@ -4,8 +4,11 @@ PURPOSE: Prove that an unset reasoning effort, whether omitted or passed as None
 changes nothing: for every provider and every TextModelMode the request URL, headers
 and body equal those of the build without the argument and carry no reasoning key, a
 checkpoint gains no key, a config whose effort is replaced by None is the never-set
-config, and an explicitly unset JevAgent sends what the default one sends.
-ROLE IN CODEBASE: Covers spec AC-8, NFR-1, INV-1 and D-13 for vidbyte/agents/base.py,
+config, an explicitly unset JevAgent sends what the default one sends, and every
+context-window algorithm configuration the algorithm refusal names still constructs
+and runs without an effort field.
+ROLE IN CODEBASE: Covers spec AC-8, AC-25, NFR-1, INV-1 and D-13 for
+vidbyte/agents/base.py, vidbyte/agents/reasoning_effort.py,
 vidbyte/lib/dataclasses/model_configs.py, the four payload builders, the gateway
 transport and vidbyte/agents/jev/settings.py. This is the user's "just run the jev
 agent with no parameters" promise.
@@ -24,9 +27,10 @@ WHAT NOT TO DO IN THIS FILE: 1. Do not compare against a stored body or checkpoi
 FEATURE_MISSING guard.
 KNOWN EDGE CASES: Gateway requests carry a fresh Idempotency-Key per call, so it is the
 one header dropped before comparing. GLM and Meta are not gateway-served, so they are
-checked in DIRECT only.
+checked in DIRECT only. The preset grader picks its models from the provider key
+variables at run time, so the algorithm test sets them with run-time keys.
 RELATED DOCS: docs/spec/agent-reasoning-effort/spec.md sections 6.1 INV-1, 6.2 AC-8,
-7 NFR-1 and 8.1 D-13; tests/features/agent_reasoning_effort/FEATURE.md.
+AC-25, 7 NFR-1 and 8.1 D-13, D-19; tests/features/agent_reasoning_effort/FEATURE.md.
 TESTS: PYTHONPATH=$(pwd) py -3.11 -m pytest -q tests/features/agent_reasoning_effort/test_agent_reasoning_effort_unset.py
 """
 
@@ -39,14 +43,19 @@ from typing import Any
 import pytest
 
 from tests.features.agent_reasoning_effort.agent_reasoning_effort_fixtures import (
+    ALGORITHM_REPLIES,
     GATEWAY_PROVIDERS,
+    OWN_MODEL_ALGORITHMS,
+    OWN_RUNNER_ALGORITHMS,
     PROVIDERS,
     REPRESENTATIVE,
     VIDBYTE_KEY,
     Wire,
     clear_provider_environment,
+    direct_agent,
     first_request,
     provider_key,
+    provider_keys,
 )
 from vidbyte import JevAgent, JevAgentSettings
 from vidbyte.agents.base import BaseAgent
@@ -69,6 +78,11 @@ CASES = [
 ]
 # The top-level keys the section 9.2 wire forms add to a vendor body.
 EFFORT_TOP_KEYS = {"reasoning", "reasoning_effort", "thinking"}
+# Every algorithm configuration of AC-21 to AC-24, as (case id, fixed key, algorithm).
+ALGORITHM_CASES = [
+    *OWN_RUNNER_ALGORITHMS,
+    *((case_id, key, algorithm) for case_id, key, algorithm, _ in OWN_MODEL_ALGORITHMS),
+]
 
 
 @pytest.fixture(autouse=True)
@@ -215,3 +229,34 @@ def test_an_explicitly_unset_jev_agent_sends_what_the_default_one_sends(
 
     assert _comparable(explicit) == _comparable(jev_request())
     assert _effort_fields(explicit["json_body"]) == set()
+
+
+@pytest.mark.parametrize(
+    ("key", "algorithm"),
+    [case[1:] for case in ALGORITHM_CASES],
+    ids=[case[0] for case in ALGORITHM_CASES],
+)
+def test_an_unset_effort_keeps_every_algorithm_configuration_running_as_before(
+    key: str, algorithm: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # AC-25, INV-1, D-19: refuse_algorithm_models has no effect when the
+    # effort is unset, so each configuration builds and runs, and no call,
+    # its own runners' calls included, carries an effort field.
+    monkeypatch.setenv("OPENAI_API_KEY", provider_key("openai"))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", provider_key("anthropic"))
+    wire = Wire(text=ALGORITHM_REPLIES[key]).install(monkeypatch)
+    agent = direct_agent(
+        "openai",
+        "gpt-5.5",
+        keys=provider_keys("openai", "anthropic"),
+        algorithm=algorithm,
+        reasoning_effort=None,
+    )
+
+    agent.run("Plan a zero-downtime rename of users.email.")
+
+    requests = wire.vendor_requests()
+    assert len(requests) >= 2, [request["url"] for request in requests]
+    assert [_effort_fields(request["json_body"]) for request in requests] == [
+        set() for _ in requests
+    ]

@@ -5,11 +5,14 @@ the spec's section 8.5 text character for character and its details, before any 
 request: every "refused" cell of the section 9.2 table on BaseAgent, TextModelConfig
 and JevAgentSettings; every id with no row; every gateway mode; every fallback-chain
 entry in either order; thinking_config and an overlapping extra_body; a value outside
-the six; a non-text Runner; an agent without a provider or model; and that R3's
-spend-cap refusal still comes first.
+the six; every non-text Runner type, from the keyword or from options; an options
+effort the text config cannot send; a context-window algorithm that builds its own
+runners, and the order of that refusal; an agent without a provider or model; and
+that R3's spend-cap refusal still comes first.
 ROLE IN CODEBASE: Covers spec AC-4, AC-5, AC-6 (refusals), AC-7, AC-10, AC-16,
-AC-18, EC-1 to EC-5, EC-7 to EC-10, EC-21 to EC-24, INV-3 to INV-8, INV-11, INV-18,
-INV-20 and NFR-2 for vidbyte/agents/reasoning_effort.py, vidbyte/agents/base.py,
+AC-18, AC-21 to AC-23, AC-27, AC-28, EC-1 to EC-5, EC-7 to EC-10, EC-21 to EC-24,
+EC-30 to EC-33, EC-36, INV-3 to INV-8, INV-11, INV-18, INV-20, NFR-2 and D-19 for
+vidbyte/agents/reasoning_effort.py, vidbyte/agents/base.py,
 vidbyte/lib/dataclasses/{agents,model_configs}.py, vidbyte/agents/jev/settings.py and
 vidbyte/lib/runners/utility.py.
 ARCHITECTURE NOTE: The wire is installed in every test and must record zero
@@ -28,9 +31,11 @@ value as a literal. 3. Do not import a feature name outside the FEATURE_MISSING 
 KNOWN EDGE CASES: TextModelConfig on GLM, Meta or a custom endpoint in a gateway mode
 keeps its earlier _require_gateway_shape refusal; BaseAgent builds no config at
 construction, so its guard gives the mode text there. The guard checks the pair the
-runner resolves, so a slug without a provider is checked as anthropic.
+runner resolves, so a slug without a provider is checked as anthropic. An agent-level
+reason (mode, cell, no row, no identity) outranks the algorithm text (EC-31).
 RELATED DOCS: docs/spec/agent-reasoning-effort/spec.md sections 6.1, 6.2 AC-4 to AC-7,
-AC-10, AC-16, AC-18, 6.3, 8.5 and 9.2; tests/features/agent_reasoning_effort/FEATURE.md.
+AC-10, AC-16, AC-18, AC-21 to AC-28, 6.3, 8.1 D-19, 8.5 and 9.2;
+tests/features/agent_reasoning_effort/FEATURE.md.
 TESTS: PYTHONPATH=$(pwd) py -3.11 -m pytest -q tests/features/agent_reasoning_effort/test_agent_reasoning_effort_refusals.py
 """
 
@@ -44,10 +49,14 @@ import pytest
 from tests.features.agent_reasoning_effort.agent_reasoning_effort_fixtures import (
     GATEWAY_PROVIDERS,
     NO_ROW,
+    NON_TEXT_MODELS,
+    OWN_RUNNER_ALGORITHMS,
     PROVIDERS,
     REPRESENTATIVE,
     SENT,
+    VIDBYTE_KEY,
     Wire,
+    algorithm_text,
     bad_value_text,
     capability_reason,
     cell_id,
@@ -60,15 +69,23 @@ from tests.features.agent_reasoning_effort.agent_reasoning_effort_fixtures impor
     provider_key,
     provider_keys,
     refused_cells,
+    runner_type_text,
 )
 from vidbyte import JevAgentSettings
 from vidbyte.agents import FallbackModel
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.settings import AgentLoopSettings
+from vidbyte.context.algorithms import DebateStageSettings, IndependentCriticAlgorithm
 from vidbyte.lib.dataclasses.model_configs import TextModelConfig
 from vidbyte.lib.enums import TextModelMode
 from vidbyte.lib.enums.native_threads import GrokReasoningEffort, MuseReasoningEffort
 from vidbyte.lib.errors import ConfigurationError, UnsupportedProviderError
+from vidbyte.lib.runners import (
+    AudioModelRunner,
+    EmbeddingModelRunner,
+    ImageModelRunner,
+    VideoModelRunner,
+)
 from vidbyte.lib.runners.utility import Runner
 
 FEATURE_MISSING: ImportError | None = None
@@ -88,6 +105,27 @@ GATEWAY_MODES = (
 )
 NOT_GATEWAY_SERVED = tuple(
     provider for provider in PROVIDERS if provider not in GATEWAY_PROVIDERS
+)
+# The class each non-text runner type builds when no effort is set (AC-28 control).
+NON_TEXT_RUNNERS: dict[str, type] = {
+    "image": ImageModelRunner,
+    "audio": AudioModelRunner,
+    "embedding": EmbeddingModelRunner,
+    "video": VideoModelRunner,
+}
+# (case, model, value, mode name or None for the default) for an options effort the
+# text config refuses (AC-27): the default AUTO, a refused cell, and an id with no row.
+OPTIONS_REFUSALS = (
+    ("default_auto", "gpt-5.5", "high", None),
+    ("refused_cell", "gpt-5.5", "minimal", "DIRECT"),
+    ("no_row", "gpt-4o", "high", "DIRECT"),
+)
+# The all-or-nothing model pairs EC-30 relies on, each given half set.
+HALF_SET_PAIRS = (
+    (IndependentCriticAlgorithm, {"reviewer_provider": "anthropic"}),
+    (IndependentCriticAlgorithm, {"reviewer_model": "claude-sonnet-5"}),
+    (DebateStageSettings, {"provider": "anthropic"}),
+    (DebateStageSettings, {"model": "claude-sonnet-5"}),
 )
 
 
@@ -596,37 +634,218 @@ def test_a_plain_string_or_another_enums_member_is_stored_as_the_member(
     ), stored
 
 
-def test_a_non_text_runner_refuses_the_effort_instead_of_dropping_it() -> None:
-    # AC-16, EC-9, FR-5: ImageModelConfig has no such field, so the
-    # options filter would drop the effort silently.
+@pytest.mark.parametrize("channel", ["keyword", "options"])
+@pytest.mark.parametrize(
+    ("model", "runner_type"),
+    NON_TEXT_MODELS,
+    ids=[runner_type for _, runner_type in NON_TEXT_MODELS],
+)
+def test_a_non_text_runner_refuses_the_effort_instead_of_dropping_it(
+    model: str, runner_type: str, channel: str, wire: Wire
+) -> None:
+    # AC-16, AC-28, EC-9, FR-5, INV-3, review R-2, R-9: no non-text
+    # config has the field, so the options filter would drop the effort
+    # silently, whether it came from the keyword or from options.
     keys = [provider_key("openai")]
+    effort: dict[str, Any] = (
+        {"reasoning_effort": ReasoningEffort.HIGH}
+        if channel == "keyword"
+        else {"options": {"reasoning_effort": "high"}}
+    )
+    unset = Runner(
+        provider="openai", model_name=model, api_keys=keys, reasoning_effort=None
+    ).build()
+    assert type(unset) is NON_TEXT_RUNNERS[runner_type]
+
     error = _refusal(
         lambda: Runner(
-            provider="openai",
-            model_name="gpt-image-2",
-            api_keys=keys,
-            reasoning_effort=ReasoningEffort.HIGH,
+            provider="openai", model_name=model, api_keys=keys, **effort
         ).build()
     )
 
-    assert (
-        str(error)
-        == "Runner sets reasoning_effort, but model 'gpt-image-2' resolves to a image runner, which has no reasoning effort."
-    )
+    assert str(error) == runner_type_text(model, runner_type)
     assert dict(error.details) == {
         "provider": "openai",
-        "model": "gpt-image-2",
-        "runner_type": "image",
+        "model": model,
+        "runner_type": runner_type,
     }
-    assert (
-        Runner(
+    assert wire.requests == []
+
+
+@pytest.mark.parametrize(
+    ("model", "value", "mode_name"),
+    [case[1:] for case in OPTIONS_REFUSALS],
+    ids=[case[0] for case in OPTIONS_REFUSALS],
+)
+def test_an_options_effort_the_text_config_cannot_send_is_refused_like_the_keyword(
+    model: str, value: str, mode_name: str | None, wire: Wire
+) -> None:
+    # AC-27, FR-5, INV-3, INV-4, review R-3: an options effort reaches
+    # TextModelConfig as the keyword does, so the existing section 8.5
+    # mode, capability or no-row text refuses it before any request.
+    if mode_name is None:
+        reason = mode_reason("AUTO")
+    elif model in SENT["openai"]:
+        reason = capability_reason("openai", model, value, SENT["openai"][model])
+    else:
+        reason = no_row_reason("openai", model, value, REASONING_EFFORT_AS_OF)
+    mode = {} if mode_name is None else {"model_mode": TextModelMode[mode_name]}
+
+    def build(**effort: Any) -> object:
+        return Runner(
             provider="openai",
-            model_name="gpt-image-2",
-            api_keys=keys,
-            reasoning_effort=None,
+            model_name=model,
+            api_keys=[provider_key("openai")],
+            vidbyte_api_key=VIDBYTE_KEY,
+            **mode,
+            **effort,
         ).build()
-        is not None
+
+    keyword = _refusal(lambda: build(reasoning_effort=ReasoningEffort(value)))
+    error = _refusal(lambda: build(options={"reasoning_effort": value}))
+
+    assert str(error) == f"TextModelConfig sets reasoning_effort, but {reason}."
+    assert str(error) == str(keyword)
+    assert dict(error.details) == {
+        "field": "TextModelConfig.reasoning_effort",
+        "provider": "openai",
+        "model": model,
+        "reasoning_effort": value,
+        "mode": TextModelMode[mode_name or "AUTO"].value,
+    }
+    assert wire.requests == []
+
+
+@pytest.mark.parametrize("value", ["max", "HIGH"])
+def test_an_options_effort_outside_the_six_is_refused_by_the_text_config(
+    value: str, wire: Wire
+) -> None:
+    # EC-36, INV-8, review R-3: the option is converted like the keyword,
+    # so a value outside the six gets the to_enum text, not a silent drop.
+    error = _refusal(
+        lambda: Runner(
+            provider="openai",
+            model_name="gpt-5.5",
+            api_keys=[provider_key("openai")],
+            model_mode=TextModelMode.DIRECT,
+            options={"reasoning_effort": value},
+        ).build()
     )
+
+    assert str(error) == bad_value_text("TextModelConfig.reasoning_effort", value)
+    assert wire.requests == []
+
+
+@pytest.mark.parametrize(
+    ("key", "algorithm"),
+    [case[1:] for case in OWN_RUNNER_ALGORITHMS],
+    ids=[case[0] for case in OWN_RUNNER_ALGORITHMS],
+)
+def test_an_algorithm_that_builds_its_own_runners_refuses_the_effort(
+    key: str, algorithm: object, wire: Wire
+) -> None:
+    # AC-21, AC-22, AC-23, EC-33, INV-3, INV-4, D-19, review R-1: those
+    # runners never receive the effort, even on a model the table sends
+    # it for, so the agent is refused; the text names the fixed key.
+    error = _refusal(
+        lambda: direct_agent(
+            "openai",
+            "gpt-5.5",
+            keys=provider_keys("openai", "anthropic"),
+            reasoning_effort="high",
+            algorithm=algorithm,
+        )
+    )
+
+    assert str(error) == algorithm_text("planner", key)
+    assert dict(error.details) == {
+        "agent": "planner",
+        "field": "reasoning_effort",
+        "reasoning_effort": "high",
+        "algorithm": key,
+    }
+    name = getattr(algorithm, "name", key)
+    assert name == key or name not in str(error)
+    assert wire.requests == []
+
+
+def test_an_earlier_guard_reason_outranks_the_algorithm_text(wire: Wire) -> None:
+    # EC-31, INV-18, D-19: refuse_unsupported runs first, so a gateway
+    # mode or a refused cell keeps its own text; the algorithm text comes
+    # only when every hop can send the effort.
+    grader = "multi_provider_agentic_grader"
+    sendable = _refusal(
+        lambda: direct_agent(
+            "openai", "gpt-5.5", reasoning_effort="high", algorithm=grader
+        )
+    )
+    gateway = _refusal(
+        lambda: BaseAgent(
+            name="planner",
+            system_prompt="Plan database migrations.",
+            provider="openai",
+            model_name="gpt-5.5",
+            api_keys=[provider_key("openai")],
+            reasoning_effort="high",
+            algorithm=grader,
+        )
+    )
+    refused_cell = _refusal(
+        lambda: direct_agent(
+            "openai", "gpt-5.5", reasoning_effort="minimal", algorithm=grader
+        )
+    )
+
+    assert str(sendable) == algorithm_text("planner", grader)
+    assert str(gateway) == guard_text("planner", mode_reason("AUTO"))
+    assert str(refused_cell) == guard_text(
+        "planner",
+        capability_reason("openai", "gpt-5.5", "minimal", SENT["openai"]["gpt-5.5"]),
+    )
+    assert wire.requests == []
+
+
+def test_a_non_linear_runtime_refuses_its_algorithm_before_either_guard_method(
+    wire: Wire,
+) -> None:
+    # EC-32: the existing runtime check runs before both guard methods,
+    # so an effort the guard would refuse (a refused cell) changes nothing.
+    def build(**effort: Any) -> BaseAgent:
+        return direct_agent(
+            "openai",
+            "gpt-5.5",
+            runtime="actor_model",
+            algorithm="multi_provider_agentic_grader",
+            **effort,
+        )
+
+    before = _refusal(build)
+
+    error = _refusal(lambda: build(reasoning_effort="minimal"))
+
+    assert str(error) == str(before)
+    assert "reasoning_effort" not in str(error)
+    assert wire.requests == []
+
+
+@pytest.mark.parametrize(
+    ("record", "fields"),
+    HALF_SET_PAIRS,
+    ids=[
+        "reviewer_provider_only",
+        "reviewer_model_only",
+        "stage_provider_only",
+        "stage_model_only",
+    ],
+)
+def test_a_half_set_model_pair_fails_before_any_agent_exists(
+    record: type, fields: dict[str, str]
+) -> None:
+    # EC-30, D-19: both pairs are all-or-nothing, so the guard's "reviewer
+    # set" and "stage sets both" checks never meet a half-set pair.
+    error = _refusal(lambda: record(**fields))
+
+    assert "reasoning_effort" not in str(error)
 
 
 @pytest.mark.parametrize(

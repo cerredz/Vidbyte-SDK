@@ -4,12 +4,12 @@ PURPOSE: Contract tests for the public shapes the reasoning effort adds: the
 ReasoningEffort enum (six StrEnum members in order), the three root names and their
 identities, a fresh-interpreter import, contracts/sdk-public-api.json, the one root
 header bullet, the package exports of the table and the registry, the keyword-only
-parameters of section 8.5, REASONING_EFFORT_AS_OF, and the registries README section
-the no-row refusal points to.
-ROLE IN CODEBASE: Covers spec AC-13, FR-1, FR-3, FR-10, INV-11 (the sources pointer
-resolves), INV-12, INV-19 (keyword-only additions) and D-17 for vidbyte/__init__.py,
-vidbyte/lib/enums, vidbyte/lib/configs, vidbyte/lib/registries and the agent
-signatures. vidbyte-cli C4 and C5 may import only root names the vendored contract
+parameters of section 8.5 (both guard methods included), REASONING_EFFORT_AS_OF, and
+the registries README section the no-row refusal points to.
+ROLE IN CODEBASE: Covers spec AC-13, FR-1, FR-3, FR-7, FR-10, INV-11 (the sources
+pointer resolves), INV-12, INV-19 (keyword-only additions), D-17 and D-19 for
+vidbyte/__init__.py, vidbyte/lib/enums, vidbyte/lib/configs, vidbyte/lib/registries,
+vidbyte/agents/reasoning_effort.py and the agent signatures. vidbyte-cli C4 and C5 may import only root names the vendored contract
 lists, so these are the names they build JevAgent with.
 ARCHITECTURE NOTE: In-process checks against the real packages, plus one subprocess
 with a clean environment for the fresh-interpreter import. The contract check reads
@@ -273,6 +273,25 @@ def test_the_guard_is_a_keyword_only_static_method() -> None:
 
     assert isinstance(raw, staticmethod)
     assert list(parameters) == ["agent_name", "runner_config", "fallback"]
+    assert {parameter.kind for parameter in parameters.values()} == {
+        inspect.Parameter.KEYWORD_ONLY
+    }
+
+
+def test_the_algorithm_guard_is_a_keyword_only_static_method() -> None:
+    # Section 8.5, FR-7, D-19 (r4): BaseAgent calls it by keyword right
+    # after the algorithm is resolved; a method of its own keeps
+    # refuse_unsupported's pinned parameters above unchanged.
+    guard = importlib.import_module(
+        "vidbyte.agents.reasoning_effort"
+    ).AgentReasoningEffortGuard
+    raw = inspect.getattr_static(guard, "refuse_algorithm_models", None)
+
+    assert isinstance(raw, staticmethod), (
+        "AgentReasoningEffortGuard has no static refuse_algorithm_models"
+    )
+    parameters = inspect.signature(guard.refuse_algorithm_models).parameters
+    assert list(parameters) == ["agent_name", "runner_config", "algorithm"]
     assert {parameter.kind for parameter in parameters.values()} == {
         inspect.Parameter.KEYWORD_ONLY
     }

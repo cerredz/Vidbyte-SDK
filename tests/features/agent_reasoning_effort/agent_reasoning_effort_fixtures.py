@@ -17,7 +17,10 @@ exists: each test module guards the feature's own names and fails at setup inste
 FUNCTION INVENTORY: fragment(provider, value) is the section 9.2 wire fragment;
 sent_cells / refused_cells / no_row_ids enumerate the table for parametrization;
 capability_reason / no_row_reason / mode_reason / guard_text build the section 8.5
-texts; deep_merge is the test's own oracle for "the fragment is deep-merged";
+texts, and algorithm_text / runner_type_text the r4 ones; OWN_RUNNER_ALGORITHMS and
+OWN_MODEL_ALGORITHMS are the context-window algorithm configurations of AC-21 to
+AC-24, with ALGORITHM_REPLIES; NON_TEXT_MODELS has one model per non-text runner
+type; deep_merge is the test's own oracle for "the fragment is deep-merged";
 nested_keys lists every key of a body; Wire records requests and answers each vendor;
 StreamWire records streaming requests; provider_key builds a key that matches its
 provider; clear_provider_environment removes every real key; direct_agent builds a
@@ -33,6 +36,8 @@ REASONING_EFFORT_AS_OF as a literal date; tests read it from the module. 4. Do n
 reach the network.
 KNOWN EDGE CASES: The gpt-5.6 line is an alias of gpt-5.6-sol, so tests check it
 through ReasoningEffortRegistry.supported and the wire, not as its own table key.
+The preset grader (provider_models=None) picks its models from the environment at
+run time, so a test that runs it sets the provider key variables first.
 Wire answers TypeSafe decision calls with HTTP 500 by default; JevAgent's gates fail
 open on a decision outage, so the main agent still runs and both requests are seen.
 A status other than 200 for a vendor URL makes the adapter raise ProviderRequestError,
@@ -53,6 +58,14 @@ from typing import Any
 import pytest
 
 from vidbyte.agents.base import BaseAgent
+from vidbyte.context import ContextWindow
+from vidbyte.context.algorithms import (
+    ContextWindowAlgorithm,
+    DebateStageSettings,
+    IndependentCriticAlgorithm,
+    MultiProviderAgenticGraderAlgorithm,
+    ProsecutorDefenderJudgeAlgorithm,
+)
 from vidbyte.lib.enums import TextModelMode
 from vidbyte.lib.errors import VidbyteSdkError
 from vidbyte.lib.http import HttpResponse, HttpTransport
@@ -214,6 +227,125 @@ REGISTRIES_README_POINTER = (
     '(see "Reasoning Effort Sources" in vidbyte/lib/registries/README.md)'
 )
 
+# Spec AC-21 to AC-23, D-19: (case id, the fixed key the algorithm text names, the
+# algorithm as BaseAgent takes it). Each one calls models through runners it builds
+# itself. The user-chosen names ("my-grader", "second-opinion", "debate") are never
+# the key (EC-33). claude-haiku-4-5 refuses "high"; claude-sonnet-5 sends it (AC-22).
+_STAGE_MODEL = DebateStageSettings(provider="anthropic", model="claude-sonnet-5")
+OWN_RUNNER_ALGORITHMS: tuple[tuple[str, str, ContextWindowAlgorithm | str], ...] = (
+    (
+        "AC-21:preset_name",
+        "multi_provider_agentic_grader",
+        "multi_provider_agentic_grader",
+    ),
+    (
+        "AC-21:preset_object",
+        "multi_provider_agentic_grader",
+        ContextWindow.preset.multi_provider_agentic_grader,
+    ),
+    (
+        "AC-21:named_with_provider_models",
+        "multi_provider_agentic_grader",
+        ContextWindowAlgorithm(
+            name="my-grader",
+            multi_provider_agentic_grader=MultiProviderAgenticGraderAlgorithm(
+                provider_models={"openai": "gpt-5.5", "anthropic": "claude-sonnet-5"},
+                grader_provider="openai",
+                grader_model="gpt-5.5",
+            ),
+        ),
+    ),
+    (
+        "AC-21:named_without_provider_models",
+        "multi_provider_agentic_grader",
+        ContextWindowAlgorithm(
+            name="my-grader",
+            multi_provider_agentic_grader=MultiProviderAgenticGraderAlgorithm(),
+        ),
+    ),
+    (
+        "AC-22:reviewer_on_a_refused_cell",
+        "independent_critic",
+        ContextWindowAlgorithm(
+            name="second-opinion",
+            independent_critic=IndependentCriticAlgorithm(
+                reviewer_provider="anthropic", reviewer_model="claude-haiku-4-5"
+            ),
+        ),
+    ),
+    (
+        "AC-22:reviewer_on_a_sent_cell",
+        "independent_critic",
+        ContextWindowAlgorithm(
+            name="second-opinion",
+            independent_critic=IndependentCriticAlgorithm(
+                reviewer_provider="anthropic", reviewer_model="claude-sonnet-5"
+            ),
+        ),
+    ),
+    (
+        "AC-23:prosecutor_model",
+        "prosecutor_defender_judge",
+        ContextWindowAlgorithm(
+            name="debate",
+            prosecutor_defender_judge=ProsecutorDefenderJudgeAlgorithm(
+                prosecutor=_STAGE_MODEL
+            ),
+        ),
+    ),
+    (
+        "AC-23:defender_model",
+        "prosecutor_defender_judge",
+        ContextWindowAlgorithm(
+            name="debate",
+            prosecutor_defender_judge=ProsecutorDefenderJudgeAlgorithm(
+                defender=_STAGE_MODEL
+            ),
+        ),
+    ),
+    (
+        "AC-23:judge_model",
+        "prosecutor_defender_judge",
+        ContextWindowAlgorithm(
+            name="debate",
+            prosecutor_defender_judge=ProsecutorDefenderJudgeAlgorithm(
+                judge=_STAGE_MODEL
+            ),
+        ),
+    ),
+)
+# Spec AC-24, EC-30: (case id, fixed key, algorithm, model calls in one run). Every
+# call reuses the agent's own runner: the producer and the reviewer, or the producer
+# and the three stages.
+OWN_MODEL_ALGORITHMS: tuple[tuple[str, str, ContextWindowAlgorithm | str, int], ...] = (
+    ("AC-24:critic_without_reviewer", "independent_critic", "independent_critic", 2),
+    (
+        "AC-24:debate_without_stage_models",
+        "prosecutor_defender_judge",
+        ContextWindowAlgorithm(
+            name="debate",
+            prosecutor_defender_judge=ProsecutorDefenderJudgeAlgorithm(),
+        ),
+        4,
+    ),
+)
+# A reply each algorithm accepts, so one run reaches every model call it makes. Every
+# debate report field has a default, so an empty object is a valid report per stage.
+ALGORITHM_REPLIES: dict[str, str] = {
+    "multi_provider_agentic_grader": "Done.",
+    "independent_critic": json.dumps(
+        {"verdict": "pass", "summary": "The plan is sound.", "findings": []}
+    ),
+    "prosecutor_defender_judge": "{}",
+}
+# Spec AC-16, AC-28, EC-9: one model per non-text runner type, with that type.
+NON_TEXT_MODELS: tuple[tuple[str, str], ...] = (
+    ("gpt-image-2", "image"),
+    ("tts-1", "audio"),
+    ("text-embedding-3-small", "embedding"),
+    ("sora-2", "video"),
+)
+
 
 def fragment(provider: str, value: str) -> dict[str, Any]:
     """The section 9.2 "Wire form" fragment one sent cell adds to the vendor body."""
@@ -292,6 +424,16 @@ def guard_text(agent_name: str, *reasons: str) -> str:
 def identity_text(agent_name: str) -> str:
     """Section 8.5 "BaseAgent (guard), no identity" text."""
     return f"Agent {agent_name} sets reasoning_effort, but it does not name both a provider and a model_name, so the effort cannot be checked against a model."
+
+
+def algorithm_text(agent_name: str, algorithm: str) -> str:
+    """Section 8.5 "BaseAgent (guard), algorithm" text (r4); algorithm is the sub-algorithm's fixed key."""
+    return f"Agent {agent_name} sets reasoning_effort, but its {algorithm} algorithm calls models through runners it builds itself, which never send the effort; unset reasoning_effort, or configure an algorithm that runs only on the agent's own model."
+
+
+def runner_type_text(model: str, runner_type: str) -> str:
+    """Section 8.5 "Runner, non-text runner" text (r4): the runner type is quoted as a value."""
+    return f"Runner sets reasoning_effort, but model '{model}' resolves to runner type '{runner_type}', which has no reasoning effort."
 
 
 def bad_value_text(field_name: str, value: object) -> str:
@@ -584,11 +726,15 @@ def first_request(
 
 
 __all__ = [
+    "ALGORITHM_REPLIES",
     "ALIASES",
     "ENUM_ORDER",
     "GATEWAY_PROVIDERS",
     "GATEWAY_URL",
+    "NON_TEXT_MODELS",
     "NO_ROW",
+    "OWN_MODEL_ALGORITHMS",
+    "OWN_RUNNER_ALGORITHMS",
     "PROVIDERS",
     "REGISTRIES_README_POINTER",
     "REPRESENTATIVE",
@@ -596,6 +742,7 @@ __all__ = [
     "VIDBYTE_KEY",
     "StreamWire",
     "Wire",
+    "algorithm_text",
     "bad_value_text",
     "capability_reason",
     "cell_id",
@@ -615,6 +762,7 @@ __all__ = [
     "refused_cells",
     "reply_body",
     "run_agent",
+    "runner_type_text",
     "sent_cells",
     "usage_for",
 ]
