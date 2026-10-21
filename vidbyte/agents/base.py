@@ -38,6 +38,7 @@ from vidbyte.agents.mixins import McpAttachableMixin
 from vidbyte.agents.output.connector import OutputConnector
 from vidbyte.agents.output.dispatcher import OutputDispatcher
 from vidbyte.agents.pricing import UsageRollup, UsageTracker
+from vidbyte.agents.reasoning_effort import AgentReasoningEffortGuard
 from vidbyte.agents.speed import AgentSpeedHistory, AgentSpeedRollup, AgentSpeedTracker
 from vidbyte.agents.spend_cap import AgentSpendCap
 from vidbyte.agents.contracts import floors as contract_floors
@@ -55,7 +56,7 @@ from vidbyte.lib.dataclasses.speed import RecordStreamInput
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.dataclasses.trace import TraceField, TraceOption, TraceSchema
 from vidbyte.lib.constants import RUNNER_TYPE_TEXT
-from vidbyte.lib.enums import AgentRuntimeType, ModelProvider, SystemPromptPreset, TextModelMode
+from vidbyte.lib.enums import AgentRuntimeType, ModelProvider, ReasoningEffort, SystemPromptPreset, TextModelMode
 from vidbyte.lib.errors import AgentExecutionError, AllModelsFailedError, ConfigurationError, FailureRaisedError, OutputSchemaViolationError, UsageAccountingError
 from vidbyte.lib.registries.provider_keys import ProviderKeyMatcher
 from vidbyte.lib.runners import Runner
@@ -110,6 +111,7 @@ class BaseAgent(McpAttachableMixin):
         provider: ModelProvider | str | None = None,
         model_name: str | None = None,
         temperature: float | None = None,
+        reasoning_effort: ReasoningEffort | None = None,
         timeout_seconds: float | None = None,
         run_id: str | None = None,
         description: str = "",
@@ -198,6 +200,7 @@ class BaseAgent(McpAttachableMixin):
             timeout_seconds=timeout_seconds,
             run_id=run_id,
             model_mode=model_mode,
+            reasoning_effort=reasoning_effort,
         )
         self.name = name
         self._fallback_spec = fallback
@@ -255,6 +258,8 @@ class BaseAgent(McpAttachableMixin):
         spend_cap_refusal = AgentSpendCap.model_refusal(self.agent_loop_settings.max_spend_usd, self.runner_config, self.fallback)
         if spend_cap_refusal is not None:
             raise ConfigurationError(f"Agent {name} sets max_spend_usd, but {spend_cap_refusal}", details={"agent": name})
+        # Refuse an effort the mode or a model in the chain cannot send.
+        AgentReasoningEffortGuard.refuse_unsupported(agent_name=name, runner_config=self.runner_config, fallback=self.fallback)
         self.runtime_config = self.agent_loop_settings.to_runtime_config()
         self.max_tool_rounds = self.agent_loop_settings.max_iterations
         self.system_prompt = system_prompt
@@ -604,6 +609,7 @@ class BaseAgent(McpAttachableMixin):
             provider=state.provider,
             model_name=state.model_name,
             temperature=state.temperature,
+            reasoning_effort=state.runtime_config.get("reasoning_effort"),
             api_keys=api_keys,
             vidbyte_api_key=vidbyte_api_key,
             model_mode=TextModelMode(state.runtime_config.get("model_mode", TextModelMode.AUTO.value)),
@@ -650,6 +656,10 @@ class BaseAgent(McpAttachableMixin):
             # @intent resume-keeps-fallback-chain
             # Store backups as credential-free 'provider/model' strings; keys re-resolve on restore.
             config["fallback_models"] = [m.identity() for m in self.fallback.models[1:]]
+        # @intent resume-keeps-the-reasoning-effort
+        # Written only when set, so an unset checkpoint stays unchanged.
+        if self.runner_config.reasoning_effort is not None:
+            config["reasoning_effort"] = self.runner_config.reasoning_effort.value
         if isinstance(self.runtime_config_obj, ActorRuntime):
             config.update(
                 {
@@ -1683,6 +1693,7 @@ class BaseAgent(McpAttachableMixin):
             api_keys=self.runner_config.api_keys,
             model_mode=self.runner_config.model_mode,
             temperature=self.runner_config.temperature,
+            reasoning_effort=self.runner_config.reasoning_effort,
             options=options,
         )
         runner_type = utility.resolve_runner_type()

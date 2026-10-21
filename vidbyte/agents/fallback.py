@@ -30,7 +30,7 @@ from vidbyte.lib.dataclasses.agents import (
     ProviderKeys,
 )
 from vidbyte.lib.dataclasses.runner import RunnerHandle
-from vidbyte.lib.enums import TextModelMode
+from vidbyte.lib.enums import ReasoningEffort, TextModelMode
 from vidbyte.lib.errors import (
     ConfigurationError,
     ProviderConfigurationError,
@@ -71,6 +71,7 @@ class AgentFallback:
         timeout_seconds: float | None = None,
         api_keys: ProviderKeys = ProviderKeys(),
         model_mode: TextModelMode = TextModelMode.AUTO,
+        reasoning_effort: ReasoningEffort | None = None,
     ) -> None:
         # Stores the chain (index 0 is the primary) and caches runners lazily, keyed by chain index.
         if not models:
@@ -78,10 +79,12 @@ class AgentFallback:
         self.models = tuple(models)
         self.fallback_on = tuple(fallback_on)
         self.timeout_seconds = timeout_seconds
-        # The agent's matched keys and mode, handed to every backup
-        # runner unchanged.
+        # The agent's matched keys, mode and reasoning effort, handed to
+        # every backup runner unchanged; each hop sends the effort in
+        # its own provider's form.
         self._api_keys = api_keys
         self._model_mode = model_mode
+        self._reasoning_effort = reasoning_effort
         self._runner_cache: dict[int, object] = {}
 
     @classmethod
@@ -110,6 +113,7 @@ class AgentFallback:
             timeout_seconds=runner_config.timeout_seconds,
             api_keys=runner_config.api_keys,
             model_mode=runner_config.model_mode,
+            reasoning_effort=runner_config.reasoning_effort,
         )
 
     @staticmethod
@@ -208,6 +212,7 @@ class AgentFallback:
                 api_keys=self._api_keys,
                 model_mode=self._model_mode,
                 temperature=target.temperature,
+                reasoning_effort=self._reasoning_effort,
                 options=options,
             ).build()
         return self._runner_cache[index]
