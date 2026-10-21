@@ -1,11 +1,47 @@
 {
   "name": "Agent Swarm",
-  "description": "Instructions for AgentSwarm, one Markdown file per leaf: the swarm prompt each agent's system prompt carries after its own, the model-facing descriptions of the message tool and its two parameters, the message tool's reply and its three refusals, and the user message that delivers other agents' messages with one labeled block per message.",
+  "description": "Instructions for AgentSwarm, one Markdown file per leaf: the nine sections of the one system prompt every agent shares, the model-facing descriptions of the message and compact tools and their parameters, the message tool's reply and its refusals, the compact tool's reply, the user message that delivers other agents' messages with one labeled block per message, and the summarizer prompt and summary prefix of a compaction.",
   "key": "agent_swarm",
   "prompts": {
     "system_prompt": {
       "path": "system_prompt.md",
       "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agent_swarm/system_prompt.md"
+    },
+    "system_environment": {
+      "path": "system_environment.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agent_swarm/system_environment.md"
+    },
+    "system_tools": {
+      "path": "system_tools.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agent_swarm/system_tools.md"
+    },
+    "system_web_search": {
+      "path": "system_web_search.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agent_swarm/system_web_search.md"
+    },
+    "system_messaging": {
+      "path": "system_messaging.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agent_swarm/system_messaging.md"
+    },
+    "system_turns": {
+      "path": "system_turns.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agent_swarm/system_turns.md"
+    },
+    "system_goal": {
+      "path": "system_goal.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agent_swarm/system_goal.md"
+    },
+    "system_instructions": {
+      "path": "system_instructions.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agent_swarm/system_instructions.md"
+    },
+    "system_objective": {
+      "path": "system_objective.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agent_swarm/system_objective.md"
+    },
+    "system_thoroughness": {
+      "path": "system_thoroughness.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agent_swarm/system_thoroughness.md"
     },
     "message_tool_description": {
       "path": "message_tool_description.md",
@@ -42,6 +78,26 @@
     "inbox_message": {
       "path": "inbox_message.md",
       "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agent_swarm/inbox_message.md"
+    },
+    "compact_tool_description": {
+      "path": "compact_tool_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agent_swarm/compact_tool_description.md"
+    },
+    "compact_focus_description": {
+      "path": "compact_focus_description.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agent_swarm/compact_focus_description.md"
+    },
+    "compact_requested": {
+      "path": "compact_requested.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agent_swarm/compact_requested.md"
+    },
+    "compaction_summarizer_prompt": {
+      "path": "compaction_summarizer_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agent_swarm/compaction_summarizer_prompt.md"
+    },
+    "compaction_summary_prefix": {
+      "path": "compaction_summary_prefix.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agent_swarm/compaction_summary_prefix.md"
     }
   }
 }
