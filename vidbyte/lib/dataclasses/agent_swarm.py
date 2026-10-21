@@ -3,7 +3,7 @@
 PURPOSE: Defines the four validated records of AgentSwarm: AgentSwarmMember, one agent a developer puts in a swarm; AgentSwarmSettings, the one configuration object of a swarm; AgentSwarmEvent, one fact of a swarm run; and AgentSwarmResult, what one run returns. Also defines AgentSwarmEventCallback, the type of the developer's on_event callback.
 ROLE IN CODEBASE: The lib home of every AgentSwarm record, so the settings sit in the bottom layer beside the records they hold (spec D-1, the user's choice over AGENTS.md exception 1). AgentSwarmMember and AgentSwarmSettings are built by the developer and passed to AgentSwarm (vidbyte/agents/agent_swarm/swarm.py), which hands the settings to one AgentSwarmRuntime per run; AgentSwarmEvent is built by AgentSwarmEvents and handed to on_event; AgentSwarmResult is built by AgentSwarmRuntime at the end of a run. AgentSwarmMember and AgentSwarmSettings are also exported from vidbyte.agents.agent_swarm, vidbyte.agents and the root vidbyte package.
 ARCHITECTURE NOTE: Validation only. Every check runs in __post_init__, so a constructed record is always valid and its callers never check it again. Each field check is one call to the SDK's canonical RecordFieldValidator or RecordFieldConverter (vidbyte/lib/dataclasses/validation.py), the key match is ProviderKeyMatcher's, and the member's provider is coerced with ModelProvider itself and its model checked with ProviderModelRegistry, the two proofs lint rule C012 recognizes; only this feature's own rules (distinct names, a turn budget of at least one turn per agent, a web-search key that belongs to a selected provider, which fields each event kind carries, and how a result's events are numbered) are written here. Checking settings never touches the disk: the workplace folder is created when a run starts.
-FUNCTION INVENTORY: Four frozen, slotted records, each with a narrated __post_init__ and no private helpers: AgentSwarmMember checks the name pattern, the prompt, the provider, and the model; AgentSwarmSettings checks the agents, the workplace, the three limits, the callback, the web-search provider and key, and matches the model keys; AgentSwarmEvent checks the numbers, the kind, the agent, and the per-kind field table; AgentSwarmResult checks the stop reason, the event sequence, the replies, and the callback error names. AgentSwarmEventCallback is a type alias.
+FUNCTION INVENTORY: Four frozen, slotted records, each with a narrated __post_init__ and no private helpers: AgentSwarmMember checks the name pattern, the provider, and the model; AgentSwarmSettings checks the agents, the workplace, the three limits, the callback, the web-search provider and key, and matches the model keys; AgentSwarmEvent checks the numbers, the kind, the agent, and the per-kind field table; AgentSwarmResult checks the stop reason, the event sequence with its one swarm_stopping, the replies, and the callback error names. AgentSwarmEventCallback is a type alias.
 COMMON MODIFICATION PATTERNS: A new event kind adds its row to _KIND_FIELDS, and to _BLANK_ALLOWED when one of its text fields may be blank. A new event field adds one field, its name in _OPTIONAL_FIELDS, and its check in AgentSwarmEvent.__post_init__. A new setting adds one field, one RecordFieldValidator or RecordFieldConverter call in AgentSwarmSettings.__post_init__, a named default in vidbyte/lib/constants/agent_swarm.py, and one row in the package README's limits table.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import from vidbyte.agents, vidbyte.tools, vidbyte.middleware, vidbyte.prompts, or any other layer above vidbyte/lib, not even inside a function. 2. Do not add to_dict or from_dict methods or dict[str, Any] signatures. 3. Do not quote message text, reply text, or a key in an error. 4. Do not create the workplace folder or any file in a record; a refused setting must leave the disk unchanged.
 KNOWN EDGE CASES: AGENT_IDLE text may be empty, because a model may end its turn with an empty reply; compaction text is empty when compact was called without a focus or the trigger fired. elapsed_ms may be 0 and two events may share one value; order is carried by sequence. True is refused wherever a whole number is expected, although Python counts it as an int. workplace="" is refused even though Path("") is the current folder, and a workplace that is an existing file is refused. Members on different providers share one api_keys list, matched once against every provider in member order. The web-search provider is matched by its exact value, so "Tavily" is refused. A refusal names the field as Record.field in the message and in details["field"].
@@ -99,7 +99,7 @@ _EARLIER_MESSAGE_KINDS = frozenset({AgentSwarmEventKind.MESSAGE_DELIVERED, Agent
 
 @dataclass(frozen=True, slots=True)
 class AgentSwarmMember:
-    """One agent of a swarm: its name, its own system prompt, and the model it runs on.
+    """One agent of a swarm: its name and the model it runs on; every agent shares the swarm's one system prompt.
 
     provider keeps its raw type until __post_init__ checks it, so the
     developer may name it as text ("openai"); afterwards it is a
@@ -107,7 +107,6 @@ class AgentSwarmMember:
     """
 
     name: str
-    system_prompt: str
     provider: ModelProvider | str
     model_name: str
 
@@ -117,7 +116,6 @@ class AgentSwarmMember:
         # agents pass to the message tool, and its name in every event,
         # so it is one short line of letters, digits, "_" and "-".
         RecordFieldValidator.require_text(self.name, "AgentSwarmMember.name", pattern=AGENT_SWARM_NAME_PATTERN, one_line=True)
-        RecordFieldValidator.require_text(self.system_prompt, "AgentSwarmMember.system_prompt")
         # Developers may name the provider as text; the enum is stored,
         # and a name the SDK does not know is refused with the known
         # ones.
@@ -306,13 +304,17 @@ class AgentSwarmResult:
         # @intent results-hold-one-complete-numbered-run
         # The events are the whole run numbered 1 to N with no gap or
         # repeat, ending in the run's one swarm_ended event, whose stop
-        # reason is the result's; a reader can then trust the record as
-        # the full order of what happened.
+        # reason is the result's, after exactly one swarm_stopping with
+        # that same reason; a reader can then trust the record as the
+        # full order of what happened.
         RecordFieldValidator.require_enum(self.stop_reason, AgentSwarmStopReason, "AgentSwarmResult.stop_reason")
         events = RecordFieldConverter.to_tuple(self.events, "AgentSwarmResult.events", item_type=AgentSwarmEvent)
         ended = [event for event in events if event.kind is AgentSwarmEventKind.SWARM_ENDED]
         if [event.sequence for event in events] != list(range(1, len(events) + 1)) or len(ended) != 1 or events[-1] is not ended[0]:
             raise ConfigurationError("AgentSwarmResult.events must be numbered 1 to N in order and end with its one swarm_ended event.", details={"field": "AgentSwarmResult.events"})
+        stopping = [event for event in events if event.kind is AgentSwarmEventKind.SWARM_STOPPING]
+        if len(stopping) != 1 or stopping[0].stop_reason is not ended[0].stop_reason:
+            raise ConfigurationError("AgentSwarmResult.events must hold exactly one swarm_stopping event before swarm_ended, with the same stop reason.", details={"field": "AgentSwarmResult.events"})
         if ended[0].stop_reason is not self.stop_reason:
             raise ConfigurationError("AgentSwarmResult.stop_reason must equal the stop reason of its swarm_ended event.", details={"field": "AgentSwarmResult.stop_reason"})
         object.__setattr__(self, "events", events)

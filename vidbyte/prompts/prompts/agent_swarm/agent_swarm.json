@@ -3,10 +3,6 @@
   "description": "Instructions for AgentSwarm, one Markdown file per leaf: the nine sections of the one system prompt every agent shares, the model-facing descriptions of the message and compact tools and their parameters, the message tool's reply and its refusals, the compact tool's reply, the user message that delivers other agents' messages with one labeled block per message, and the summarizer prompt and summary prefix of a compaction.",
   "key": "agent_swarm",
   "prompts": {
-    "system_prompt": {
-      "path": "system_prompt.md",
-      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agent_swarm/system_prompt.md"
-    },
     "system_environment": {
       "path": "system_environment.md",
       "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agent_swarm/system_environment.md"

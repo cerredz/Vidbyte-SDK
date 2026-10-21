@@ -4,10 +4,10 @@ PURPOSE: Defines AgentSwarmEvents, the event record of one swarm run: it numbers
 ROLE IN CODEBASE: Built by AgentSwarmRuntime (runtime.py) for each run; the runtime records an event in the same synchronous block that makes the state change and then awaits flush. Its events tuple and error type names become AgentSwarmResult.events and event_error_types. Exported by vidbyte/agents/agent_swarm/__init__.py and vidbyte/agents/__init__.py.
 ARCHITECTURE NOTE: An outbox. record never awaits, so the sequence it assigns is the true order of the state changes, whichever task records. flush delivers every recorded event that is not delivered yet, oldest first, under one asyncio.Semaphore of one (the SDK's mutex, since TID251 bans asyncio.Lock), so two agents flushing at once never hand the callback two events at the same time or out of order. Each event is marked delivered before its callback is awaited, so a flush that is cancelled inside a callback never hands that event over again, and the next flush continues with the event after it.
 FUNCTION INVENTORY: record builds, numbers, and keeps one AgentSwarmEvent; flush is the narrated main function that delivers the backlog; _deliver calls the callback for one event and keeps the type name of any Exception it raises; events and error_types read the record.
-COMMON MODIFICATION PATTERNS: A new event field adds one keyword to record, passed to AgentSwarmEvent, whose __post_init__ checks it per kind.
+COMMON MODIFICATION PATTERNS: A new event field adds one keyword to record, passed to AgentSwarmEvent, whose __post_init__ checks it per kind; record takes every optional event field as a keyword with the field's own default.
 WHAT NOT TO DO IN THIS FILE: 1. Do not await inside record; the sequence would stop matching the order of state changes. 2. Do not catch BaseException around the callback; cancellation must pass through. 3. Do not deliver an event before marking it delivered.
 KNOWN EDGE CASES: A slow callback holds back every agent that flushes after it, which is the intended back-pressure. When a time limit cancels the task inside a callback, that event's callback is cut short and is not repeated; the semaphore is released by the cancellation, so the run's last flush still delivers every later event. A message's id is its own sequence, so record assigns it for MESSAGE_SENT. elapsed_ms is whole milliseconds on the monotonic clock since this record was built. AgentSwarmRuntime builds one record with the runtime and replaces it with a fresh one when arun starts, before the first event, so elapsed_ms counts from the start of the run, not from when the runtime was built.
-RELATED DOCS: docs/spec/agent-swarm/spec.md (sections 6.1 INV-13 to INV-16, 8.1 D-6 and D-16, and 9.1); vidbyte/agents/agent_swarm/README.md
+RELATED DOCS: docs/spec/agent-swarm-v2/spec.md (sections 6.1 INV-16 to INV-21, 8.1 D-16, 8.5 and 9.1); vidbyte/agents/agent_swarm/README.md
 TESTS: tests/features/agent_swarm/test_agent_swarm_lifecycle.py
 """
 
@@ -20,7 +20,13 @@ import time
 from vidbyte.lib.constants import AGENT_SPEED_MILLISECONDS_PER_SECOND
 from vidbyte.lib.dataclasses.agent_swarm import AgentSwarmEvent, AgentSwarmEventCallback
 from vidbyte.lib.dataclasses.tools import ToolStatus
-from vidbyte.lib.enums.agent_swarm import AgentSwarmEventKind, AgentSwarmStopReason
+from vidbyte.lib.enums.agent_swarm import (
+    AgentSwarmAgentState,
+    AgentSwarmCompactionTrigger,
+    AgentSwarmEventKind,
+    AgentSwarmFolderState,
+    AgentSwarmStopReason,
+)
 
 
 class AgentSwarmEvents:
@@ -46,6 +52,16 @@ class AgentSwarmEvents:
         tool_name: str = "",
         tool_status: ToolStatus | None = None,
         stop_reason: AgentSwarmStopReason | None = None,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        cached_tokens: int = 0,
+        model_calls: int = 0,
+        messages_dropped: int = 0,
+        omitted_chars: int = 0,
+        path: str = "",
+        compaction_trigger: AgentSwarmCompactionTrigger | None = None,
+        agent_state: AgentSwarmAgentState | None = None,
+        folder_state: AgentSwarmFolderState | None = None,
     ) -> AgentSwarmEvent:
         """Number one state change, keep it for delivery, and return it; never awaits."""
         # The next sequence number and the whole milliseconds since the
@@ -53,7 +69,28 @@ class AgentSwarmEvents:
         sequence = len(self._events) + 1
         elapsed_ms = int((time.monotonic() - self._started_at) * AGENT_SPEED_MILLISECONDS_PER_SECOND)
         message_id = sequence if kind is AgentSwarmEventKind.MESSAGE_SENT else message_id
-        event = AgentSwarmEvent(sequence=sequence, kind=kind, agent=agent, elapsed_ms=elapsed_ms, peer=peer, message_id=message_id, text=text, tool_name=tool_name, tool_status=tool_status, stop_reason=stop_reason)
+        event = AgentSwarmEvent(
+            sequence=sequence,
+            kind=kind,
+            agent=agent,
+            elapsed_ms=elapsed_ms,
+            peer=peer,
+            message_id=message_id,
+            text=text,
+            tool_name=tool_name,
+            tool_status=tool_status,
+            stop_reason=stop_reason,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cached_tokens=cached_tokens,
+            model_calls=model_calls,
+            messages_dropped=messages_dropped,
+            omitted_chars=omitted_chars,
+            path=path,
+            compaction_trigger=compaction_trigger,
+            agent_state=agent_state,
+            folder_state=folder_state,
+        )
         self._events.append(event)
         return event
 
