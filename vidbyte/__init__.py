@@ -9,7 +9,7 @@ Purpose:
     their category packages.
 Architecture:
     - VidbyteSDK: Root namespace client.
-    - Agent exports: BaseAgent, CodingAgent, CodingAgentSettings, CodingAgentTools, InfiniteMemoryAgent, InfiniteMemoryAgentSettings, InfiniteWorkspaceSettings, InfiniteMemoryPreset, AgentSwarm, AgentSwarmSettings, AgentSwarmMember, AgentSwarmEventKind, AgentSwarmStopReason, AgentCard, AgentMessage, AgentRegistry, AgentRunnerConfig, AgentSpec.
+    - Agent exports: BaseAgent, CodingAgent, CodingAgentSettings, CodingAgentTools, InfiniteMemoryAgent, InfiniteMemoryAgentSettings, InfiniteWorkspaceSettings, InfiniteMemoryPreset, AgentSwarm, AgentSwarmSettings, AgentSwarmMember, AgentSwarmEventKind, AgentSwarmStopReason, AgentSwarmWebSearch, AgentCard, AgentMessage, AgentRegistry, AgentRunnerConfig, AgentSpec.
     - Configuration exports: YamlLoader, AgentSettings, ToolDefinition, MiddlewareDefinition.
     - Tool exports: BaseTool, ToolActivity, ToolCall, ToolCallActivity, ToolExecutor, ToolParameter, ToolPermission, ToolRegistry, ToolResult, ToolSpec, ToolStatus, ToolsFormatter.
     - Middleware exports: AgentMiddleware, MiddlewarePipeline, policy events, and diagnostic hook invocations.
@@ -473,6 +473,7 @@ from vidbyte.lib.dataclasses.prosecutor_defender_judge import (
 from vidbyte.lib.enums import (
     AgentSwarmEventKind,
     AgentSwarmStopReason,
+    AgentSwarmWebSearch,
     BudgetPreset,
     InfiniteMemoryPreset,
     PermissionPreset,
@@ -769,6 +770,7 @@ __all__ = [
     "AgentSwarmMember",
     "AgentSwarmSettings",
     "AgentSwarmStopReason",
+    "AgentSwarmWebSearch",
     "JevAgent",
     "JevAgentResponse",
     "JevAgentSettings",
