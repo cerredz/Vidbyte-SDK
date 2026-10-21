@@ -1241,7 +1241,7 @@ Blocking questions: 0.
 | r1 | 2026-10-20 | S1 spec | Initial spec |
 | r2 | 2026-10-20 | S1 review round 1 | R-1 to R-7 applied (§16): foreign str-valued enum members accepted by value; true NG-14 reason and Q-10; a no-row refusal text that names `REASONING_EFFORT_AS_OF`; tables moved to `vidbyte/lib/configs/reasoning_effort.py` (rows 2a, 2b, 3a; 3 new files); AC-5 caveat; GL-20, GL-21, XA-29 requoted verbatim; A-6, A-7, A-8 and A-4 (grok-4.7) resolved with sources. Settled decisions unchanged: DIRECT only; root names `ReasoningEffort`, `DecisionModelConfig`, `DecisionModelMode`. |
 | r3 | 2026-10-20 | S1 review round 2 (final) | R-1 to R-5 and two nits applied (§16): I001-clean import order (rows 2b, 4, 10, 3a) with a whole-tree §12.4 check; the registry drops the unused `GEMINI_THINKING_BUDGET_OFF` import; AC-4 and C5 item 4 pick the refusal text by whether a line has a "sent" cell, the two all-refused lines are marked "refused (all)", and INV-20 fixes the table contents; REPO_MAP and lib README rows 29a and 29b; A-4 covers grok-4.5. Status set to approved: the two review rounds are the approval. Settled decisions unchanged. |
-| r3 | 2026-10-20 | S3 implement | Every §12.3 row built against revision 3 in nine commits, 31a583f6 to e4e7bee4, on the S2 tests at 1fa23b65; pack 655/655 and the three pins green, `SDK-LINT: PASS`, full local gate green except the two inherited §13 reds; draft PR #1193. |
+| r3 | 2026-10-20 | S3 implement | Every §12.3 row built against revision 3 in ten code and docs commits, 31a583f6 to 182088a3, on the S2 tests at 1fa23b65; pack 655/655 and the three pins green, `SDK-LINT: PASS`, full local gate green except the two inherited §13 reds; draft PR #1193. |
 
 ### Implementation deviations
 
