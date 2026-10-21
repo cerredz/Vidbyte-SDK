@@ -20,12 +20,12 @@ This run revises an existing feature branch. `base_commit` is the PR head at the
 | S2 tests | done | 2026-10-20 17:10 | 2026-10-21 | reports/S2-test-author.md | 268 cases in 12 files (4 new: settings, stop, observer, compaction); tests 42d28420, spec Proof b24e4959; red 265/3 verified by the orchestrator (every cause is missing v2 code; 9 removed names each have a successor); test-pack README index fixed by S2 in a follow-up commit |
 | S3 implement | done | 2026-10-21 | 2026-10-21 | reports/S3-implementer.md | rows 1–47; 10 impl commits ae2fc62f..ce988064 (P3 = 20dbbcd9), contract 649a7880; blocked once on 3 test defects (fixed by S2 in 1ddc6b9d); local at 582c414d: pack 268/268, SDK-LINT PASS, contract current, run_ci source 3 failed (inherited harness_threads only) / 6511 passed, package CI passed, semgrep 0 findings; remote on 582c414d: CI 39549674849 success (Source 3.11, 3.12, Package), Static policy 39549676688 success; pushed, PR #1174 head 247204aa; budget 16/16 files, 8/8 classes |
 | S4 adversarial review | done | 2026-10-21 | 2026-10-21 | reports/S4-review-{conformance,conventions,engineering}.md, reports/S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; confirmed 3 Blocker (R-1 call chain, R-2 size estimate misses Gemini parts / OpenAI tool_calls, R-3 52 comment lines > 72 cols) + 4 Major (R-4 @intent, R-5 retry wording, R-6 compaction hysteresis, R-7 three surviving mutants); 12 Minor (R-8..R-19, three [scope-adding] follow-ups R-17/R-18/R-19); refuted/downgraded 3 |
-| S5 repair loop | running | 2026-10-21 | | reports/S2-test-amendment.md, reports/S5-repair-1.md | tests frozen at S2 amendment head 791a8d56 (S2_HEAD for S5): pack 4 failed (R-2 ×2, R-6, R-9, each on its named product defect) / 271 passed, re-run by the orchestrator; lint SDK-LINT: PASS; only removed assertion is the granted `<= 400` line |
+| S5 repair loop | converged (iteration 1/8) | 2026-10-21 | 2026-10-21 | reports/S2-test-amendment.md, reports/S5-repair-1.md, verify-log.md | tests frozen at S2 amendment head 791a8d56 (S2_HEAD for S5): pack 4 failed (R-2 ×2, R-6, R-9, each on its named product defect) / 271 passed, re-run by the orchestrator; lint SDK-LINT: PASS; only removed assertion is the granted `<= 400` line |
 | S5 re-review | pending | | | | |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 (round 1: SOUND WITH FIXES, 1 Blocker / 7 Major / 4 Minor, all applied in r2; round 2: SOUND WITH FIXES, 1 Blocker / 3 Major / 3 Minor, author applying in r3; no further review round — anything still disputed becomes a Q-n with a default) · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 (round 1: SOUND WITH FIXES, 1 Blocker / 7 Major / 4 Minor, all applied in r2; round 2: SOUND WITH FIXES, 1 Blocker / 3 Major / 3 Minor, author applying in r3; no further review round — anything still disputed becomes a Q-n with a default) · S5 repair iterations: 1/8 (converged) · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - 2026-10-19 17:19 — Worktree created on the existing branch `feat/agent-swarm` (synced to origin at 39ce8b20) instead of a new `feat/<slug>` branch from `origin/main` — the user asked for PR #1174 to be updated in place, not replaced.
@@ -58,6 +58,19 @@ This run revises an existing feature branch. `base_commit` is the PR head at the
   - Status is `reviewed`.
 
   **Test-change grant to S2.** The grant covers: R-3, the per-module cap; R-2, a Gemini branch in `ScriptedSwarm._respond` plus two tests; R-6, one test; R-9, one test; R-7, three mutant-killing tests; R-5, the AC-10 docstring; R-12, `test-plan.md:91`. The reason: the module-size assert at `test_agent_swarm_contract.py:834` contradicts NFR-8, a P0 requirement for 72-column narration, under row 34's own target, and every other item adds coverage the verifier proved missing. R-17, R-18, and R-19 stay `[scope-adding]` follow-ups for the user and get neither tests nor code. Tests freeze at S2's amendment head, and S5's diff must not touch them.
+
+- 2026-10-21 — **S5 iteration 1 converged (agent DONE, HEAD 04cf9caa).** The orchestrator re-ran the convergence checks itself:
+  - The tree is clean, and `git diff 791a8d56..HEAD -- tests/` is empty.
+  - The verify-log Iteration 1 entry exists. NG-1 holds (empty diff).
+  - 0 confirmed findings are `open`. Wide comment lines are 0 in all five swarm files.
+  - Pack `275 passed`; `SDK-LINT: PASS`; contract current.
+  - Remote CI 39690265996 and Static policy 39690268371 passed on 04cf9caa, the pushed HEAD.
+  - The source stage was re-run in the background.
+
+  Adjudications:
+  - **(1) The R-8 variant is accepted.** The details name the first missing part. The literal both-keys fix would break `test_agent_swarm_contract.py:330`, and a Minor does not justify a test change.
+  - **(2) S5 O-1 becomes a stated limitation, not a fix** (SKILL rule 11: a risk the conversation has no control for becomes a limitation or a default-no Q-n). Hysteresis growth is counted in estimate units, so dense CJK-like text peaked at 129,015 measured tokens, against 88,668 before R-6. The 90k trim shares that estimate's blind spot. Recorded as spec A-12 and Q-9, default no.
+  - **(3) Spec r5** brings the text in line with the code: `_end_reason` in §5, INV-12, EC-11/13/14, §8.2 and §8.5; the §8.5 `_estimate` and hysteresis state; Q-6..Q-9 for R-17, R-18, R-19 and O-1. No behavior change. Next: one final conformance re-review of 582c414d..HEAD.
 
 - 2026-10-20 16:30 — **No `pip install` of any kind in this worktree.** The machine's global editable `vidbyte-sdk` (0.4.0) resolves to a different worktree, `worktrees/vidbyte-sdk-infinite-memory-events`, and an editable install from here would re-point it under another session. Every stage runs tests and the source gate with `PYTHONPATH=<worktree>` (field guide `local-ci-verification.md`); the orchestrator verified that all 171 swarm tests collect that way and that `inspect.getfile(vidbyte)` prints this worktree. The S2 template's "bootstrap install" step is replaced by that rule in the briefing.
 

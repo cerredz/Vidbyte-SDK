@@ -2,7 +2,7 @@
 spec: agent-swarm-v2
 title: AgentSwarm revision: one shared prompt, loose messaging, per-agent compaction, generous limits, full event visibility
 status: reviewed
-revision: 4
+revision: 5
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-agent-swarm-v2
 branch: feat/agent-swarm
@@ -145,7 +145,7 @@ flowchart TD
   F -->|compact tool| K[AgentSwarmRuntime.request_compaction]
   F -->|_after_tool_iteration: compact if due, then mail| L[AgentSwarmHandoffSummarizer via ContextCompactionEngine]
   L -->|compaction, model_called| D
-  C -->|_end_check or budget or timeout| M[_stop: swarm_stopping, message_undelivered, release waiters]
+  C -->|_end_reason or budget or timeout| M[_stop: swarm_stopping, message_undelivered, release waiters]
   M -->|agent_released / agent_cancelled / agent_failed / agent_exited| D
   D -->|flush in order| N[on_event callback]
   C -->|swarm_ended last| O[AgentSwarmResult]
@@ -172,14 +172,14 @@ sequenceDiagram
     Ben->>RT: end_turn(reply) -> agent_idle; waits
     RT-->>Ben: wake with inbox -> message_delivered
   end
-  RT->>RT: _end_check -> _stop(quiet) -> swarm_stopping, release waiters
+  RT->>RT: _end_reason = quiet -> _stop(quiet) -> swarm_stopping, release waiters
   Ada->>RT: run returns -> agent_released
   Ben->>RT: run returns -> agent_released
   RT->>Ev: swarm_ended (last)
   RT-->>Dev: AgentSwarmResult
 ```
 
-Validation happens once, in `AgentSwarmSettings.__post_init__` (agents, folder, limits, web-search provider and key, keys matched to providers) and in `AgentSwarm.arun` (the goal is text), before any folder or agent exists. State changes only inside `AgentSwarmRuntime`, in blocks with no `await`: `post_message`, `collect_messages`, `end_turn`, `_fail`, `_stop`, `_end_check`, `record_model_call`, `record_tool_outcome`, `request_compaction`, and `record_compaction` each record their events in the same block and then await one flush. Failures are caught per member in `_run_member` (an SDK error, a stray cancel, an early exit) and never stop the others; a callback exception is kept by type name in the outbox; a failed summary call is recorded as `model_error` and the history is kept. The shared loop is never edited: the observer, trim, and turn middleware and the member runtime's `_after_tool_iteration` are the only code that runs inside a member's loop.
+Validation happens once, in `AgentSwarmSettings.__post_init__` (agents, folder, limits, web-search provider and key, keys matched to providers) and in `AgentSwarm.arun` (the goal is text), before any folder or agent exists. State changes only inside `AgentSwarmRuntime`, in blocks with no `await`: `post_message`, `collect_messages`, `end_turn`, `_fail`, `_stop`, `record_model_call`, `record_tool_outcome`, `request_compaction`, and `record_compaction` each record their events in the same block and then await one flush. Failures are caught per member in `_run_member` (an SDK error, a stray cancel, an early exit) and never stop the others; a callback exception is kept by type name in the outbox; a failed summary call is recorded as `model_error` and the history is kept. The shared loop is never edited: the observer, trim, and turn middleware and the member runtime's `_after_tool_iteration` are the only code that runs inside a member's loop.
 
 ---
 
@@ -205,7 +205,7 @@ Validation happens once, in `AgentSwarmSettings.__post_init__` (agents, folder, 
 - **INV-11** — The `to` parameter of the `message` tool declares no `enum`; its description names every member of the swarm.
 
 **Turns, ending, and limits**
-- **INV-12** — The swarm's stop reason is decided exactly once, in one block that sets it, records `swarm_stopping` (agent empty, `stop_reason`), records one `message_undelivered` per message still queued for a running agent and empties those inboxes in the same block, and releases every parked agent. The decision is made in `_end_check` (`quiet`, `max_turns`, `failed`), in `record_model_call` when the token budget is crossed (`max_tokens`), or after the task group has ended on the time limit (`timeout`) when nothing was decided before; in the `timeout` case the same block first records `agent_cancelled` with `agent_state` `working` for every member still in the working set, in member order, before `swarm_stopping` (a member whose task never started, or whose cancel branch never ran), so INV-14 holds for every member. (Must not regress: `_end_check`'s "the swarm ends exactly when nobody works".)
+- **INV-12** — The swarm's stop reason is decided exactly once, in one block that sets it, records `swarm_stopping` (agent empty, `stop_reason`), records one `message_undelivered` per message still queued for a running agent and empties those inboxes in the same block, and releases every parked agent. The decision is made by `_end_reason` (`quiet`, `max_turns`, `failed`), which only decides, and whose callers pass the reason to `_stop` in the same block, in `record_model_call` when the token budget is crossed (`max_tokens`), or after the task group has ended on the time limit (`timeout`) when nothing was decided before; in the `timeout` case the same block first records `agent_cancelled` with `agent_state` `working` for every member still in the working set, in member order, before `swarm_stopping` (a member whose task never started, or whose cancel branch never ran), so INV-14 holds for every member. (Must not regress: `_end_reason`'s "the swarm ends exactly when nobody works".)
 - **INV-13** — After the stop reason is decided, `end_turn` returns `""` without starting a turn (both before parking and after waking, discarding the agent from the working set first; the pre-park return still records `agent_idle` first, as today, so a member that ends a turn after the decision shows `agent_idle` then `agent_released`), `collect_messages` returns `""` without draining (the inboxes were emptied and marked undelivered by INV-12), `post_message` delivers nothing (INV-6), `_after_tool_iteration` performs no compaction, and the observer middleware refuses every further model call of every member (`before_model_call` returns abort), so no paid model call follows the decision except calls already in flight.
 - **INV-14** — Every agent's task ends with exactly one terminal event: `agent_released` (the run returned after the swarm released it, or after the stop reason was decided; its reply is kept), `agent_cancelled` (the swarm's own cancel, `agent_state` `working` or `idle`), `agent_failed` (an SDK error or a stray cancel, text = the cause), or `agent_exited` (the run returned on its own before the swarm decided, text = the run's own stop reason value). The `agent_released` and `agent_cancelled` branches of `_run_member` discard the member from the working set before recording, so every member in the working set has no terminal event yet (a parked member is in neither set and gets its event from its own cancel branch), and `_stop(timeout)` records `agent_cancelled` (`working`) for whoever is still in it (INV-12). `agent_failed` and `agent_exited` also record `message_undelivered` for every message in that agent's inbox in the same block and empty it.
 - **INV-15** — The swarm-wide token budget counts, per model call, `total_tokens` when the provider reports it, else `input_tokens + output_tokens` (missing values count as zero), for every call recorded through `record_model_call`: every loop call seen at `after_model_response` and every compaction side call. The first call that brings the total to `max_tokens` or above decides `max_tokens`.
@@ -285,10 +285,10 @@ Validation happens once, in `AgentSwarmSettings.__post_init__` (agents, folder, 
 | EC-8 | provider reports no usage (`model_usage is None`) on every call | `model_called` carries zeros; the budget never grows; auto compaction falls back to the character estimate; the summary side call's `usage_record` is `None` and is passed to `record_model_call` as `None` (never dereferenced), so the member keeps running | zeros in events; `max_tokens` cannot trigger (stated limitation, Q-4) | INV-15, INV-22, INV-32 |
 | EC-9 | `max_tokens` crossed on the very first response of the first member | `swarm_stopping` is the next event; every other member's first `before_model_call` is refused before any paid call; parked agents released | a run with one `model_called` and N `agent_released` | INV-13 |
 | EC-10 | the time limit expires inside a slow `on_event` callback during the start flush | as today the start events are delivered inside the limit and the cancel cuts the callback; no member task exists yet (`vidbyte/agents/agent_swarm/runtime.py:97-100` creates them after the flush), so no cancel branch runs; after the task group, `_stop(timeout)` records `agent_cancelled` with `agent_state` `working` for every member still in the working set (every member is marked working before the task group starts), in member order, then `swarm_stopping` with `timeout`, and the final flush delivers everything | `agent_cancelled` with `working` for every member, then `swarm_stopping`, `swarm_ended` | INV-12, INV-14, INV-20 |
-| EC-11 | a stray `CancelledError` from a tool while the swarm has not decided | `agent_failed` with `CancelledError: <detail>`, its inbox marked undelivered, `_end_check` runs, the error is re-raised; the task group ignores it and the others continue | `agent_failed`, possibly `swarm_stopping` | INV-14, D-16 |
+| EC-11 | a stray `CancelledError` from a tool while the swarm has not decided | `agent_failed` with `CancelledError: <detail>`, its inbox marked undelivered, `_end_reason` runs and its reason, if any, goes to `_stop`, the error is re-raised; the task group ignores it and the others continue | `agent_failed`, possibly `swarm_stopping` | INV-14, D-16 |
 | EC-12 | a member's loop returns `middleware_abort` because the observer refused a call after the stop was decided | treated as a release: `agent_released`, reply kept | the reply's metadata says `middleware_abort` | INV-14 |
-| EC-13 | a member's loop returns `tool_loop_limit` or `max_iterations` before the swarm decided | `agent_exited` with that value, inbox undelivered, `_end_check` | `agent_exited` instead of a sentence inside `agent_failed` | INV-14 |
-| EC-14 | every member fails or exits | `_end_check` decides `failed`; `swarm_stopping` then `swarm_ended` | `failed` with no `agent_released` | INV-12 |
+| EC-13 | a member's loop returns `tool_loop_limit` or `max_iterations` before the swarm decided | `agent_exited` with that value, inbox undelivered, `_end_reason` → `_stop` | `agent_exited` instead of a sentence inside `agent_failed` | INV-14 |
+| EC-14 | every member fails or exits | `_end_reason` decides `failed`; `swarm_stopping` then `swarm_ended` | `failed` with no `agent_released` | INV-12 |
 | EC-15 | `write_text` fails (path outside the root) | no `file_changed`; `tool_called` carries `error` | only the tool error | INV-26 |
 | EC-16 | `patch_file` succeeds with a relative `file_path` | `path` = `Path(root, file_path).resolve()`, the same file the tool wrote, so a later `write_text` to the same file resolves to the same key | collision detection works across both tools | INV-26, A-7 |
 | EC-17 | two members write the same file through `bash` | no `file_changed`; `bash` reports no path | collisions through `bash` stay invisible (NG-5) | — |
@@ -389,7 +389,7 @@ _Modules and interfaces, not file paths. The swarm keeps its r5 shape: one `Agen
 - **Toolset table of `(key, tool_class, client_class)` building `tool_class(client=client_class(key))`, keyed tool last, no key kept on the catalog** — `vidbyte/tools/toolsets/coding.py:CodingAgentTools.authenticate_tools`, `:get_tools`.
 - **Per-kind optional-field table on the event record** — `vidbyte/lib/dataclasses/agent_swarm.py:_KIND_FIELDS`, `_OPTIONAL_FIELDS`.
 - **Outbox: synchronous numbered `record`, ordered `flush` under one `asyncio.Semaphore()`** — `vidbyte/agents/agent_swarm/events.py:AgentSwarmEvents`.
-- **State change and its event in one block with no `await`, then one flush** — `vidbyte/agents/agent_swarm/runtime.py:post_message`, `:end_turn`, `:_end_check`.
+- **State change and its event in one block with no `await`, then one flush** — `vidbyte/agents/agent_swarm/runtime.py:post_message`, `:end_turn`, `:_stop`.
 - **Middleware that calls back into the run's swarm runtime, with `AgentSwarmRuntime` imported only under `TYPE_CHECKING`** — `vidbyte/middleware/builtins/agent_swarm_turn.py:AgentSwarmTurnMiddleware`.
 - **Middleware returning `MiddlewareDecision.continue_()` after observing, and `MiddlewareDecision.abort(reason)` to end a run** — `vidbyte/middleware/builtins/agent_swarm_turn.py:after_tool_call`; `vidbyte/lib/dataclasses/middleware.py:MiddlewareDecision.abort`.
 - **Engine-backed compaction middleware exposing a transform with `changed`/`before_count`/`after_count` metadata** — `vidbyte/middleware/compaction/context_compaction.py:MessageHistoryCompactionMiddleware.before_model_call`, `:trim_with_provider_boundaries`.
@@ -573,7 +573,7 @@ class AgentSwarmRuntime:
     async def record_compaction(self, name: str, trigger: AgentSwarmCompactionTrigger, focus: str, input_tokens: int, messages_dropped: int) -> None: ...
     @property
     def stopping(self) -> bool: ...                                                  # True once the stop reason is decided
-    # private: _run_member, _build_member, _render_system_prompt, _drain, _fail(name, kind, text), _stop(reason), _end_check,
+    # private: _run_member, _build_member, _render_system_prompt, _drain, _fail(name, kind, text), _stop(reason), _end_reason() -> reason | None,
     #          _failure_text, _early_exit_text, _budget_total(usage)
 
 # vidbyte/agents/agent_swarm/member.py
@@ -581,7 +581,7 @@ class AgentSwarmMemberRuntime(AgentRuntime):
     def __init__(self, *, swarm_runtime: AgentSwarmRuntime | None = None, summarizer: AgentSwarmHandoffSummarizer | None = None, **kwargs: Any) -> None: ...
     async def _after_tool_iteration(self, state: BaseAgentRuntimeLoopState, messages: list[dict[str, Any]]) -> None: ...
     # leaf helpers, each called only by _after_tool_iteration and none calling another (AGENTS.md §1):
-    #   _measured_context(messages) -> int, _keep_last(messages) -> int,
+    #   static _estimate(messages) -> int (whole messages, INV-33), _measured_context(estimate) -> int, _keep_last(messages) -> int,
     #   _compact(messages, keep_last) -> CompactionStats | None, async _count_side_call(state, response) -> None (awaits swarm.record_model_call)
 
 class AgentSwarmMessageTool(BaseTool):
@@ -677,13 +677,16 @@ AgentSwarmRuntime.post_message(sender, recipient, text):            # one block,
 
 AgentSwarmMemberRuntime._after_tool_iteration(state, messages):     # the only rewrite seam and the only orchestrator
     focus = swarm.take_compaction_request(name)                     # None when no request; "" for a request without focus
-    measured = _measured_context(messages)                          # swarm.last_prompt_tokens(name), else chars // 4
-    trigger = TOOL if focus is not None else (AUTO if measured >= self.config.compaction_trigger_tokens else None)
+    estimate = _estimate(messages)                                  # whole messages, chars // 4 (INV-33)
+    measured = _measured_context(estimate)                          # swarm.last_prompt_tokens(name), else the estimate
+    grown = compacted_estimate is None or estimate >= compacted_estimate + self.config.compaction_target_tokens   # INV-32 hysteresis
+    trigger = TOOL if focus is not None else (AUTO if measured >= self.config.compaction_trigger_tokens and grown else None)
     if trigger is not None and not swarm.stopping:
         summarizer.focus = focus or ""; summarizer.last_response = None
         keep_last = _keep_last(messages)                            # newest messages within compaction_target_tokens, at least 1
         stats = await _compact(messages, keep_last)                 # engine summarize_range; rewrites the list in place; None on a failed side call
         if stats is not None and summarizer.last_response is not None:   # a summary call was made: something older existed
+            compacted_estimate = _estimate(messages)                # the rewritten history's size; the next AUTO waits for a target of growth
             await _count_side_call(state, summarizer.last_response) # async leaf; see below
             await swarm.record_compaction(name, trigger, focus or "", input_tokens=measured, messages_dropped=stats.before_count - stats.after_count + 1)
     text = await swarm.collect_messages(name)                       # mail after the summary, never before; "" once the swarm is stopping
@@ -1019,6 +1022,8 @@ _Tests (`tests/features/agent_swarm/*`, `FEATURE.md`, `README.md`) are the S2 te
 - **A-10** — Provider usage parsers for OpenAI, Anthropic, and Gemini report `total_tokens` or both `input_tokens` and `output_tokens`, so the budget grows on every real call; the scripted fixtures report usage explicitly. — *If wrong:* the budget undercounts on that provider and EC-8/Q-4 apply.
 - **A-11** — The eight done-check ideas can be restated as practice in six to eight sentences each without JEV vocabulary, from the PURPOSE lines and `vidbyte/agents/jev/README.md:30-51`. — *If wrong:* the subsection is kept at six sentences minimum and the README prose is quoted more closely.
 
+- **A-12** — Hysteresis growth (INV-32) is counted with the four-characters-per-token estimate, which undercounts dense scripts such as CJK text by up to about 2.7 times. A member whose uncompactable part sits near the trigger can then send roughly that part plus the kept tail plus 27,000 *estimated* tokens before it compacts again. In S5's 24-iteration probe, CJK-like text peaked at 129,015 measured prompt tokens, against 88,668 before hysteresis, when it compacted on every iteration. The 90,000-token trim backstop uses the same estimate and so has the same blind spot. — *If wrong* (dense-script swarms on a model whose window is under about 130,000 tokens): Q-9.
+
 **Open questions** (max 5 blocking; none blocking here):
 | ID | Question | Blocking? | Default if unanswered |
 |---|---|---|---|
@@ -1027,6 +1032,10 @@ _Tests (`tests/features/agent_swarm/*`, `FEATURE.md`, `README.md`) are the S2 te
 | Q-3 | Should an Anthropic-native compaction fast path (beta header `compact-2026-09-04`) be built behind the same compaction seam as a follow-up PR? | non-blocking | Not in this revision (NG-6); the summarizer path is the default everywhere and the seam leaves room. |
 | Q-4 | When a provider reports no usage, should the budget estimate tokens from characters instead of counting zero? | non-blocking | No: the budget counts reported usage only (INV-15); auto compaction, which needs a number, falls back to the estimate. |
 | Q-5 | Should blank message text be delivered rather than refused, to be maximally loose? | non-blocking | No: blank text is refused as a malformed call (D-4); an unknown name is the other refusal. |
+| Q-6 | Should a drained inbox be delivered oldest first within a delivery budget, recording `message_delivered` only for the messages taken and leaving the rest queued, so a large inbox is never trimmed away unread (S4 R-17)? | non-blocking | No: `_drain` delivers the whole inbox as today; a drop is on the record as `history_trimmed` next to the deliveries (INV-7, INV-8, G-6). |
+| Q-7 | Should a member retry a transient provider error (429, 5xx) with an attempt counter that resets after each successful call (S4 R-18)? | non-blocking | No: AgentSwarm installs no retry; the first failed loop model call fails the member (INV-23, README). |
+| Q-8 | Should `AgentSwarmResult` report how many agents failed, since a run ends `quiet` when one agent finished and the rest failed (S4 R-19)? | non-blocking | No: callers scan `events` for `agent_failed` (NG-10 keeps result-level fields out). |
+| Q-9 | Should compaction growth, or a ceiling, be measured in provider-reported prompt tokens instead of the estimate, so dense scripts cannot outgrow a small window (A-12, S5 O-1)? | non-blocking | No: growth is counted with the estimate, the same unit as the keep count and the trim. |
 
 ## §16 Review log
 | Round | ID | Severity | Section | Finding (one line) | Disposition | Change made / reason |
@@ -1059,6 +1068,7 @@ _Tests (`tests/features/agent_swarm/*`, `FEATURE.md`, `README.md`) are the S2 te
 | r3 | 2026-10-20 | S1 revision | Review round 2 (final) applied, all seven findings accepted (1 Blocker, 3 Major, 3 Minor): `AGENT_SWARM_RESERVED_TOOL_NAMES` and the `AgentSwarmResult` `swarm_stopping` check wait for P3 so P1 keeps `import vidbyte` and every run intact; `_count_side_call` is async and awaited, passes `None` usage through the loop's guard with `{}` metadata; AC-24 and §13 name the reachable early exit (a raising recording hook → `middleware_abort` → `agent_exited`); §13 names the fixture seam for the Anthropic three-bucket branch; §14, FR-8, FR-16, row 4, INV-14 brought to r2 wording; the pre-park `end_turn` sequence is `agent_idle` then `agent_released`; P1 lists the tests expected red until P3. Cumulative: 19 findings over 2 rounds, 19 accepted, 0 rejected, 0 deferred to `Q-n`. |
 | r3 | 2026-10-21 | S3 implement | Rows 1-46 implemented in ten implementation commits on `739ac499` (`ae2fc62f`..`ce988064`; P3's deletions in the single commit `20dbbcd9`), the public-API contract regenerated (`649a7880`), on budget (16 files, 8 classes, 0 dependencies, 3 settings fields); the swarm pack passes 268/268 after S2's `1ddc6b9d`; every local gate green except the three inherited `harness_threads` cases; nine implementation deviations listed below. |
 | r4 | 2026-10-21 | S4 review | Verified review (review.md) applied to the spec text only: INV-23, AC-10, EC-25 say AgentSwarm installs no model retry (R-5); INV-32 and D-12 add compaction hysteresis, so a repeat automatic compaction waits for target-sized growth (R-6); INV-33 says every size estimate counts whole messages (R-2); row 34 has `_end_reason` decide the stop and callers pass it to `_stop` (R-1), with a 500-line target for `runtime.py` (R-3); S3 deviation 10 records that `file_changed` reads the path argument (R-14). Status set to reviewed. |
+| r5 | 2026-10-21 | S5 repair 1 | Spec text brought in line with the repaired code: `_end_reason` decides the stop reason and its callers pass it to `_stop` (§5, INV-12, EC-11, EC-13, EC-14, §8.2, §8.5); §8.5 shows `_estimate`, `_measured_context(estimate)` and the hysteresis state; A-12 records the dense-script limit of estimate-counted growth (S5 O-1); Q-6..Q-9 carry the four `[scope-adding]` follow-ups (S4 R-17, R-18, R-19; S5 O-1), each defaulting to no. No behavior change. |
 
 ### Implementation deviations (S3)
 
