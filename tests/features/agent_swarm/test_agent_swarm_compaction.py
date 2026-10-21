@@ -285,9 +285,11 @@ async def test_a_side_call_that_reaches_the_budget_completes_its_compaction_and_
     from vidbyte import AgentSwarmStopReason
 
     _setup(tmp_path)
-    side = reply(SUMMARY, usage={"input_tokens": 900, "output_tokens": 100})
+    log = EventLog()
+    # The scripted runner never suspends, so the side call waits for tester's turn to end; otherwise the stop would refuse tester's first call.
+    side = after(log.signal(IDLE, "tester"), reply(SUMMARY, usage={"input_tokens": 900, "output_tokens": 100}))
     scripted = ScriptedSwarm({"builder": [READ_ONE, READ_TWO, compact(), side], "tester": [reply("Tester done.")]})
-    result = await _run(tmp_path, scripted, EventLog(), max_tokens=1_000)
+    result = await _run(tmp_path, scripted, log, max_tokens=1_000)
 
     assert result.stop_reason is AgentSwarmStopReason.MAX_TOKENS, describe(result.events)
     side_called = of_kind(result.events, MODEL_CALLED, "builder")[3]

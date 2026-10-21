@@ -817,7 +817,8 @@ class _Replay:
             assert kind == UNDELIVERED, f"{kind} for {agent} after its {self.terminal[agent]}: {self.trace}"
         if kind in _WORKING_ONLY:
             assert self.state[agent] == "working", f"{kind} for {agent} while {self.state[agent]}: {self.trace}"
-        if kind not in _DERIVED and kind != UNDELIVERED:
+        # A compaction is checked against the side call's model_called before it, so it never becomes a base itself.
+        if kind not in _DERIVED | {COMPACTION} and kind != UNDELIVERED:
             self.last_base[agent] = event
         if kind == CREATED:
             assert self.state[agent] is None, f"{agent} created twice: {self.trace}"

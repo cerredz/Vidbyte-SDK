@@ -384,7 +384,8 @@ async def test_every_member_gets_the_same_sectioned_system_prompt_then_the_agent
         system = scripted.first_call(name).system
         loop_at = system.find(loop_text)
         assert loop_at > 0, f"the agentic-loop prompt is missing from {name}'s system string"
-        assert system[:loop_at].strip() == expected, f"{name}'s system prompt is not the shared section template"
+        # The "System prompt:" label is written by BaseContext.build_context_fixed (vidbyte/lib/dataclasses/context.py), shared by every agent.
+        assert system[:loop_at].strip() == "System prompt:\n" + expected, f"{name}'s system prompt is not the shared section template"
         assert str(workplace.resolve()) in system
 
 

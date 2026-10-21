@@ -108,7 +108,8 @@ def test_the_section_4_snippet_runs_as_written(tmp_path: Path, monkeypatch: pyte
     for name in SNIPPET_NAMES:
         system = scripted.first_call(name).system
         loop_at = system.find(loop_text)
-        assert loop_at > 0 and system[:loop_at].strip() == shared_system_prompt(name, SNIPPET_NAMES, workplace, search_tool=TAVILY_TOOL), f"{name}'s first call does not carry the shared template"
+        # The "System prompt:" label is written by BaseContext.build_context_fixed (vidbyte/lib/dataclasses/context.py), shared by every agent.
+        assert loop_at > 0 and system[:loop_at].strip() == "System prompt:\n" + shared_system_prompt(name, SNIPPET_NAMES, workplace, search_tool=TAVILY_TOOL), f"{name}'s first call does not carry the shared template"
     assert fake.queries == ["celsius to fahrenheit formula"]
     assert_event_invariants(result, SNIPPET_NAMES, max_turns=settings.max_turns)
     assert (workplace / "c2f.py").read_text(encoding="utf-8") == C2F_SOURCE
