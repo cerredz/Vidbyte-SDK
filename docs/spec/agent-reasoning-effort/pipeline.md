@@ -17,8 +17,8 @@ Program: JevAgent in vidbyte-cli, run R2 of 8 (see request.md §C "This run's sc
 |---|---|---|---|---|---|
 | S0 worktree + capture + recon | done | 2026-10-20 | 2026-10-20 | reports/S0-scout.md | 2fabf8f8; code-map.md has 583 lines in 4 sections and about 45 source files. The orchestrator checked base.py:109 (AUTO is the default) and vidbyte_gateway.py:124 (a body field outside the allow-list gives 422) |
 | S1 spec + review | done | 2026-10-20 | 2026-10-20 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | spec r3 approved (2306b357). Round 1: 1 Blocker, 3 Major, 3 Minor, all closed. Round 2: 1 Blocker, 2 Major, 2 Minor, all applied in r3, which the orchestrator verified |
-| S2 tests | running | 2026-10-20 | | | |
-| S3 implement | pending | | | | |
+| S2 tests | done | 2026-10-20 | 2026-10-20 | reports/S2-test-author.md | pack tests/features/agent_reasoning_effort (61 tests, 655 cases) + 3 pin appends; tests c6e5a710, docs 62b31d53. Orchestrator re-ran: 655 errors, all ImportError on the missing names; pins appended last; spec diff only §6.2 Proof cells |
+| S3 implement | running | 2026-10-20 | | | test-tree snapshot 62b31d53 |
 | S4 adversarial review | pending | | | | |
 | S5 repair loop | pending | | | | |
 | S6 PR | pending | | | | |
@@ -32,6 +32,8 @@ Program: JevAgent in vidbyte-cli, run R2 of 8 (see request.md §C "This run's sc
 - 2026-10-20: The alignment questions are not re-asked. The program's answers (request.md §A Prompt 3, Q10) cover this run, and the open product points are the scope's Q-n defaults.
 
 - 2026-10-20: Gateway ruling. AUTO, the default, always goes through the Vidbyte gateway, which returns 422 on body fields outside EMITTED_KEYS, and those have no reasoning keys. So the effort is DIRECT-only, and a gateway mode with an effort set is refused at construction with a typed error naming DIRECT. Reasons: D-P9 never silently ignore, and C4 runs JevAgent's main model DIRECT on the user's key. Extending the gateway allow-list is a backend `[scope-adding]` follow-up. This is reported to the user, who can overrule it.
+- 2026-10-20: S2 open items 1-3 are left as the tests pin them: the §8.5 runner template's "a image runner" (a kind-interpolated template, cosmetic), the stripped id in TextModelConfig details["model"] (per AC-18), and neutrality on the provider=None slug. Item 4 (INV-20 "exactly") is a review check, NFR-4. Item 5 (AC-8 proven by proxy) is accepted. The S2 prototype is withheld from S3 at scratchpad/r2e-s2-prototype-WITHHELD.
+
 ## User replies (verbatim)
 - 2026-10-19: answers to the alignment questions are in request.md §A, Prompt 3. Q10: "JevAgent should have a reasoning effort, this can be a pr into vidbyte-sdk/ and then update cli with this".
 
@@ -58,3 +60,7 @@ Program: JevAgent in vidbyte-cli, run R2 of 8 (see request.md §C "This run's sc
 - From S1: `DEFAULT_PROVIDER_MODELS` (models.py:73-82) matches the CLI's seven defaults, and each has a usable row. A-4 (grok-4.5 and grok-4.6 served on chat completions) stays an assumption. Source: S1 round 2.
 - From S1: in `test_harness_threads_surface.py`, `:270-278` is red when `vidbyte/lib/configs/` (rows 2a and 2b) or `vidbyte/tools` differs from main, and skips without origin/main (`:139-143`). `:309` runs only when `optional_merge_base()` finds a base (`:131-137`). Both are inherited and local-only. Source: S1 round 2.
 - Drive C: is nearly full (between 44 MB and 5 GB free during S1), because the system pagefile grows under memory pressure from about 28 Claude sessions. Check `df -m /c` before a gate or any large write. Source: orchestrator, 2026-10-20.
+- From S2: S062 (adjacent string literals) counts across tests and source, with an allowance of 889 and no slack. Source: S2.
+- From S2: the contract generator refuses uncommitted inputs, so commit vidbyte/__init__.py (row 27) before running row 28. Source: S2.
+- From S2: `AgentReasoningEffortGuard.refuse_unsupported` is a staticmethod with keyword-only (agent_name, runner_config, fallback). The four carriers take `reasoning_effort` keyword-only, default None. `runtime_config["reasoning_effort"]` is a plain str, written only when set. Refusal texts and details are compared exactly against §8.5. Source: S2.
+- From S2: the only fake in the pack is `Wire` on `HttpTransport.request` (or `transport=`). TypeSafe decision calls get 500, and Jev's gates fail open. Source: S2.
