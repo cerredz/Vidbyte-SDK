@@ -1,14 +1,14 @@
 ---
 spec: agent-reasoning-effort
 title: A reasoning effort for an agent's generative model
-status: verified      # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
+status: pr-open       # draft | approved | tests-written | implemented | reviewed | verified | pr-open | abandoned
 revision: 4
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-agent-reasoning-effort
 branch: feat/agent-reasoning-effort
 base_commit: 98a5d37b7c2d44fd4d84fe4911bf1c701c694c77
 created: 2026-10-20
-updated: 2026-10-20
+updated: 2026-10-21
 pr: https://github.com/cerredz/Vidbyte-SDK/pull/1193  # filled at S3 (draft) and finalized at S6
 ---
 
@@ -127,28 +127,33 @@ The developer no longer hand-builds `extra_body` or `thinking_config` per vendor
 
 ```mermaid
 flowchart TD
-  A[Agent / JevAgentSettings ctor] -->|reasoning_effort| B[AgentRunnerConfig.__post_init__ to_enum]
-  B --> C[AgentReasoningEffortGuard.refuse_unsupported]
-  C -->|each chain entry| D[ReasoningEffortRegistry.refusal]
-  D -->|reason| X[ConfigurationError at construction]
-  D -->|None| C2[AgentReasoningEffortGuard.refuse_algorithm_models]
-  C2 -->|algorithm builds its own runners| X
-  C2 -->|no such algorithm| E[agent.run / arun]
-  E --> F[BaseAgent._runner_for_model / AgentFallback.build_runner]
-  F -->|reasoning_effort| G[Runner._config_options_for]
-  G -->|TextModelConfig field| H[TextModelConfig._validate_reasoning_effort]
-  H -->|reason| X
-  H --> I[TextModelRunner.arun]
-  I --> J[adapter _create_payload]
-  J -->|payload| K[ReasoningEffortRegistry.attach]
-  K -->|deep-merged fragment| L[_attach_extra_body]
-  L --> M[HttpTransport.request to vendor]
-  M -->|usage| N[UsageTracker → UsageRollup → AgentSpendCap]
+  J["JevAgentSettings(reasoning_effort=...)"] --> J1["JevAgentSettings._validate_reasoning_effort: to_enum, then ReasoningEffortRegistry.refusal"]
+  J1 -->|"reason"| X["ConfigurationError at construction, before any request"]
+  J1 -->|"None: JevAgent passes it to its main agent and 8 child builders"| A
+  A["BaseAgent / Agent(reasoning_effort=...)"] --> B["AgentRunnerConfig.__post_init__: RecordFieldConverter.to_enum"]
+  B -->|"not one of the six"| X
+  B --> C["AgentReasoningEffortGuard.refuse_unsupported over every chain hop"]
+  C -->|"a hop without both a provider and a model"| X
+  C -->|"ReasoningEffortRegistry.refusal: gateway mode, refused cell, or no row"| X
+  C --> C2["ContextWindow.resolve_algorithm, then AgentReasoningEffortGuard.refuse_algorithm_models"]
+  C2 -->|"the algorithm builds its own runners"| X
+  C2 --> E["agent.run / arun"]
+  E --> F["BaseAgent._runner_for_model, or AgentFallback.build_runner for a fallback hop"]
+  F --> G["Runner.build: _config_options_for, where a set keyword wins and an options effort is kept"]
+  G -->|"an effort on an image, video, audio or embedding runner type"| X
+  G --> H["TextModelConfig.__post_init__: _validate_reasoning_effort"]
+  T["TextModelConfig built directly"] --> H
+  H -->|"mode or capability reason, thinking_config, or extra_body overlap"| X
+  H --> I["TextModelRunner: the provider's payload builder"]
+  I --> K["ReasoningEffortRegistry.attach: deep copy of the fragment, merged key by key"]
+  K --> L["_attach_extra_body"]
+  L --> M["HttpTransport.request to the vendor"]
+  M --> N["UsageTracker, UsageRollup, AgentSpendCap (parsers unchanged)"]
 ```
 
-1. The constructor converts the value to the enum: `AgentRunnerConfig` for `BaseAgent`, and the class's own `__post_init__` for `JevAgentSettings`.
+1. The constructor converts the value to the enum: `AgentRunnerConfig` for `BaseAgent`, and the class's own `__post_init__` for `JevAgentSettings`, which also asks the registry about its own provider, model and mode before JevAgent builds any agent.
 2. Before any call, `AgentReasoningEffortGuard` asks the registry about the mode and about every (provider, model) in the chain, primary first. The first non-None reason, or the de-duplicated set of reasons, becomes one `ConfigurationError`. Then, once the context-window algorithm is resolved, `refuse_algorithm_models` refuses the effort when that algorithm calls models through runners it builds itself (D-19).
-3. At run time, the agent's runner passes the value into `TextModelConfig`, which validates itself again. This covers callers that build a config directly. It also refuses `thinking_config` beside the effort, and an `extra_body` that overlaps the effort's keys.
+3. At run time, the agent's runner passes the value into `TextModelConfig`, which validates itself again. `Runner._config_options_for` lets a set keyword win, keeps an `options["reasoning_effort"]` when the keyword is unset, and refuses an effort on a non-text runner type. `TextModelConfig` covers callers that build a config directly. It also refuses `thinking_config` beside the effort, and an `extra_body` that overlaps the effort's keys.
 4. The adapter builds its usual payload. Just before `extra_body` is applied, the registry deep-merges a copy of the documented fragment.
 5. Usage parsing is unchanged, so billed reasoning reaches `UsageRollup` and the spend cap through each usage class's output tokens.
 
@@ -209,15 +214,15 @@ No state is written except the checkpoint's `runtime_config["reasoning_effort"]`
 | AC-18 | the model given as `"openai/gpt-5.6"`, `"gpt-5.6"` (alias), `" GPT-5.5 "` or `"anthropic/claude-sonnet-5"` | the effort is checked | support is that of the normalized id (`gpt-5.6-sol`, `gpt-5.5`, `claude-sonnet-5`). The message names the model as its carrier passes it to the registry, stripped of padding. `TextModelConfig` and `JevAgentSettings` pass it as given (`openai:openai/gpt-5.6`). The `BaseAgent` guard passes the id `Runner._normalize_provider_and_model` returns, with a vendor prefix split off (`openai:gpt-5.6`, D-5). No carrier applies the alias or changes case in the message (`gpt-5.6`, `GPT-5.5`). r4 (review R-7): r3 said "as given" for every carrier | P1 | `tests/features/agent_reasoning_effort/test_agent_reasoning_effort_registry.py::test_supported_normalizes_the_prefix_the_alias_padding_and_case`, `::test_refusal_names_the_model_as_given_but_stripped`; `tests/features/agent_reasoning_effort/test_agent_reasoning_effort_refusals.py::test_a_padded_upper_case_id_is_named_as_given_but_stripped`; `tests/features/agent_reasoning_effort/test_agent_reasoning_effort_wire.py::test_a_normalized_model_id_is_sent_with_its_rows_form` |
 | AC-19 | the release record | `docs/design/release-0-4-0.md` is read | the §12.5 sentence follows the #1192 sentence on line 17, and line 19 says 736 exports, 97 added | P2 | not tested: tests may not read `docs/`; implemented in e2de2026 (row 34, both before texts checked verbatim); S4 review checks `docs/design/release-0-4-0.md` lines 17 and 19 |
 | AC-20 | the effort set (negative) | any call is built | the body never contains `max`, a remapped level, a key, or a reasoning field for a provider other than the call's own | P0 | `tests/features/agent_reasoning_effort/test_agent_reasoning_effort_wire.py::test_each_sent_cell_adds_exactly_its_fragment_to_the_vendor_body`, `::test_an_agent_sends_its_own_providers_fragment_and_nothing_else`; `tests/features/agent_reasoning_effort/test_agent_reasoning_effort_registry.py::test_refusal_gives_the_section_8_5_reason_mode_first` |
-| AC-21 | a DIRECT agent whose own model the table sends the value for, with a `multi_provider_agentic_grader` algorithm in any configuration: `algorithm="multi_provider_agentic_grader"`, `ContextWindow.preset.multi_provider_agentic_grader`, or a `ContextWindowAlgorithm` with any `name` (such as `"my-grader"`) and any `MultiProviderAgenticGraderAlgorithm`, including `provider_models=None` | `BaseAgent` is constructed | `ConfigurationError` with the §8.5 algorithm text, where `{algorithm}` is `multi_provider_agentic_grader` whatever the algorithm's `name`, and `details` is `{"agent": <name>, "field": "reasoning_effort", "reasoning_effort": <value>, "algorithm": "multi_provider_agentic_grader"}`; the HTTP seam records zero requests | P0 | |
-| AC-22 | as AC-21, but the algorithm is `independent_critic` with `reviewer_provider` and `reviewer_model` set (for example `anthropic` and `claude-haiku-4-5`) | `BaseAgent` is constructed | the same refusal, with `independent_critic` as `{algorithm}` and in `details`. It is raised even when the table sends the value for the reviewer's model, because the reviewer's runner never receives the effort | P0 | |
-| AC-23 | as AC-21, but the algorithm is `prosecutor_defender_judge` in which exactly one stage sets both `provider` and `model`, and the other two set neither; one case for each of `prosecutor`, `defender` and `judge` | `BaseAgent` is constructed | the same refusal, with `prosecutor_defender_judge` as `{algorithm}` and in `details` | P0 | |
-| AC-24 | (positive control) as AC-21, but the algorithm is `independent_critic` with no reviewer, or `prosecutor_defender_judge` whose three stages set neither `provider` nor `model` | the agent is constructed and runs once on the scripted HTTP seam | no refusal. Every model request of the run carries the agent's own fragment: the producer's and the reviewer's requests, or each stage's request. These calls reuse the agent's own `RunnerHandle` | P0 | |
-| AC-25 | the effort unset, with each algorithm configuration of AC-21 to AC-24 | `BaseAgent` is constructed | `refuse_algorithm_models` returns without effect: the agent constructs as it does at `base_commit`, and no request body carries a reasoning field (INV-1) | P0 | |
-| AC-26 | `Runner(provider="openai", model_name="gpt-5.5", model_mode=TextModelMode.DIRECT, options={"reasoning_effort": "high"})` with no `reasoning_effort` keyword | `build()` runs, and the runner is called once | the built `TextModelConfig` holds `ReasoningEffort.HIGH`, and the request body carries `"reasoning": {"effort": "high"}` | P0 | |
-| AC-27 | `options={"reasoning_effort": v}` with no keyword, on a text model in `TextModelMode.AUTO` (the default), or on a §9.2 "refused" cell in DIRECT | `build()` runs | `TextModelConfig` refuses it with its existing §8.5 text (mode, capability or no-row), and the HTTP seam records zero requests | P0 | |
-| AC-28 | `options={"reasoning_effort": "high"}` with no keyword, on a model of each non-text runner type (`image`, `video`, `audio`, `embedding`) | `build()` runs | `ConfigurationError` with the §8.5 `Runner` text and its `details`; the effort is never dropped by the field filter | P0 | |
-| AC-29 | both set to different values: keyword `reasoning_effort=ReasoningEffort.LOW` and `options={"reasoning_effort": "high"}`, DIRECT, on a model the table sends both values for (such as `openai`/`gpt-5.5`) | `build()` runs, and the runner is called once | the keyword wins: the config holds `LOW`, and the body carries `"reasoning": {"effort": "low"}` only | P1 | |
+| AC-21 | a DIRECT agent whose own model the table sends the value for, with a `multi_provider_agentic_grader` algorithm in any configuration: `algorithm="multi_provider_agentic_grader"`, `ContextWindow.preset.multi_provider_agentic_grader`, or a `ContextWindowAlgorithm` with any `name` (such as `"my-grader"`) and any `MultiProviderAgenticGraderAlgorithm`, including `provider_models=None` | `BaseAgent` is constructed | `ConfigurationError` with the §8.5 algorithm text, where `{algorithm}` is `multi_provider_agentic_grader` whatever the algorithm's `name`, and `details` is `{"agent": <name>, "field": "reasoning_effort", "reasoning_effort": <value>, "algorithm": "multi_provider_agentic_grader"}`; the HTTP seam records zero requests | P0 | `tests/features/agent_reasoning_effort/test_agent_reasoning_effort_refusals.py::test_an_algorithm_that_builds_its_own_runners_refuses_the_effort[AC-21:preset_name]`, `[AC-21:preset_object]`, `[AC-21:named_with_provider_models]`, `[AC-21:named_without_provider_models]` |
+| AC-22 | as AC-21, but the algorithm is `independent_critic` with `reviewer_provider` and `reviewer_model` set (for example `anthropic` and `claude-haiku-4-5`) | `BaseAgent` is constructed | the same refusal, with `independent_critic` as `{algorithm}` and in `details`. It is raised even when the table sends the value for the reviewer's model, because the reviewer's runner never receives the effort | P0 | `tests/features/agent_reasoning_effort/test_agent_reasoning_effort_refusals.py::test_an_algorithm_that_builds_its_own_runners_refuses_the_effort[AC-22:reviewer_on_a_refused_cell]`, `[AC-22:reviewer_on_a_sent_cell]` |
+| AC-23 | as AC-21, but the algorithm is `prosecutor_defender_judge` in which exactly one stage sets both `provider` and `model`, and the other two set neither; one case for each of `prosecutor`, `defender` and `judge` | `BaseAgent` is constructed | the same refusal, with `prosecutor_defender_judge` as `{algorithm}` and in `details` | P0 | `tests/features/agent_reasoning_effort/test_agent_reasoning_effort_refusals.py::test_an_algorithm_that_builds_its_own_runners_refuses_the_effort[AC-23:prosecutor_model]`, `[AC-23:defender_model]`, `[AC-23:judge_model]` |
+| AC-24 | (positive control) as AC-21, but the algorithm is `independent_critic` with no reviewer, or `prosecutor_defender_judge` whose three stages set neither `provider` nor `model` | the agent is constructed and runs once on the scripted HTTP seam | no refusal. Every model request of the run carries the agent's own fragment: the producer's and the reviewer's requests, or each stage's request. These calls reuse the agent's own `RunnerHandle` | P0 | `tests/features/agent_reasoning_effort/test_agent_reasoning_effort_wire.py::test_an_algorithm_on_the_agents_own_runner_sends_the_effort_on_every_call` (`[AC-24:critic_without_reviewer]`, `[AC-24:debate_without_stage_models]`) |
+| AC-25 | the effort unset, with each algorithm configuration of AC-21 to AC-24 | `BaseAgent` is constructed | `refuse_algorithm_models` returns without effect: the agent constructs as it does at `base_commit`, and no request body carries a reasoning field (INV-1) | P0 | `tests/features/agent_reasoning_effort/test_agent_reasoning_effort_unset.py::test_an_unset_effort_keeps_every_algorithm_configuration_running_as_before` (11 cases: the 9 of AC-21 to AC-23 and the 2 of AC-24) |
+| AC-26 | `Runner(provider="openai", model_name="gpt-5.5", model_mode=TextModelMode.DIRECT, options={"reasoning_effort": "high"})` with no `reasoning_effort` keyword | `build()` runs, and the runner is called once | the built `TextModelConfig` holds `ReasoningEffort.HIGH`, and the request body carries `"reasoning": {"effort": "high"}` | P0 | `tests/features/agent_reasoning_effort/test_agent_reasoning_effort_wire.py::test_an_options_effort_reaches_the_text_config_and_the_wire` |
+| AC-27 | `options={"reasoning_effort": v}` with no keyword, on a text model in `TextModelMode.AUTO` (the default), or on a §9.2 "refused" cell in DIRECT | `build()` runs | `TextModelConfig` refuses it with its existing §8.5 text (mode, capability or no-row), and the HTTP seam records zero requests | P0 | `tests/features/agent_reasoning_effort/test_agent_reasoning_effort_refusals.py::test_an_options_effort_the_text_config_cannot_send_is_refused_like_the_keyword` (`[default_auto]`, `[refused_cell]`, `[no_row]`) |
+| AC-28 | `options={"reasoning_effort": "high"}` with no keyword, on a model of each non-text runner type (`image`, `video`, `audio`, `embedding`) | `build()` runs | `ConfigurationError` with the §8.5 `Runner` text and its `details`; the effort is never dropped by the field filter | P0 | `tests/features/agent_reasoning_effort/test_agent_reasoning_effort_refusals.py::test_a_non_text_runner_refuses_the_effort_instead_of_dropping_it[image-options]`, `[audio-options]`, `[embedding-options]`, `[video-options]` |
+| AC-29 | both set to different values: keyword `reasoning_effort=ReasoningEffort.LOW` and `options={"reasoning_effort": "high"}`, DIRECT, on a model the table sends both values for (such as `openai`/`gpt-5.5`) | `build()` runs, and the runner is called once | the keyword wins: the config holds `LOW`, and the body carries `"reasoning": {"effort": "low"}` only | P1 | `tests/features/agent_reasoning_effort/test_agent_reasoning_effort_wire.py::test_the_keyword_effort_wins_over_an_options_effort` |
 
 ### 6.3 Edge cases and failure modes
 
@@ -1276,6 +1281,7 @@ Blocking questions: 0.
 | r3 | 2026-10-20 | S1 review round 2 (final) | R-1 to R-5 and two nits applied (§16): I001-clean import order (rows 2b, 4, 10, 3a) with a whole-tree §12.4 check; the registry drops the unused `GEMINI_THINKING_BUDGET_OFF` import; AC-4 and C5 item 4 pick the refusal text by whether a line has a "sent" cell, the two all-refused lines are marked "refused (all)", and INV-20 fixes the table contents; REPO_MAP and lib README rows 29a and 29b; A-4 covers grok-4.5. Status set to approved: the two review rounds are the approval. Settled decisions unchanged. |
 | r3 | 2026-10-20 | S3 implement | Every §12.3 row built against revision 3 in ten code and docs commits, 31a583f6 to 182088a3, on the S2 tests at 1fa23b65; pack 655/655 and the three pins green, `SDK-LINT: PASS`, full local gate green except the two inherited §13 reds; draft PR #1193. |
 | r4 | 2026-10-20 | S4 review (spec amendment) | R-1, R-3, R-7 and R-9 from `review.md` applied (§16). Changed: §5 (flow and step 2); §6 INV-3, INV-11, AC-18, new AC-21 to AC-29 and EC-30 to EC-36; §7 FR-5, FR-7; §8.1 D-5 and new D-19; §8.4; §8.5 (the guard interface, the new algorithm text, the reworded `Runner` text); §9.2 (the C5 note and the "Every agent" rows); §12.1 W-5, W-6; §12.3 rows 9, 11, 12, 30; §12.4; §15 A-8 and new Q-11; §16; §17. Settled decisions unchanged. |
+| r4 | 2026-10-21 | S6 PR | finalized for review: status `pr-open`; §5 redrawn to the shipped flow (see "Recorded at S6"); §6.2 Proof cells of AC-21 to AC-29 filled (re-review R-C2); the release record carries #1193 (row 34(c), deviation 6). |
 
 ### Implementation deviations
 
@@ -1292,3 +1298,8 @@ Blocking questions: 0.
 2. **Conflict: §12.4 against §8.5 on `details` (review R-7).** §12.4 said every `ConfigurationError` carries `details["field"]`, but the §8.5 `Runner` details have no `field`. §8.5 wins, as the code does, and §12.4 now says so.
 3. **Conflict: INV-11 against §8.5 (review R-7).** INV-11 said every refusal names the field, the `provider:model` and the value, but the §8.5 both-set, overlap, `Runner` and no-identity texts do not. §8.5 wins, and INV-11 now describes what each kind of text names.
 4. **Conflict: AC-18 against D-5 (review R-7).** AC-18 said the message names the model "as given". The guard reads the model through `Runner._normalize_provider_and_model`, as D-5 prescribes, so it names `openai:gpt-5.6`, not `openai:openai/gpt-5.6`. The code's behavior wins: each carrier names the model as it passes it to the registry, and AC-18 now says so.
+
+### Recorded at S6
+
+1. **§5 drifted from the code, so it was redrawn to match the PR's flow chart.** The r4 diagram had no exit for the guard's no-identity refusal, the `to_enum` refusal or the `Runner` non-text refusal (AC-16, AC-28). It routed `JevAgentSettings` through `AgentRunnerConfig`, although the settings check their own provider, model and mode first. It named every adapter's builder `_create_payload`, but OpenAI's is `_create_text_payload`. The behavior the diagram describes did not change; step 1 and step 3 now say the same.
+2. **Deviation 6 is closed.** `docs/design/release-0-4-0.md` line 17 reads "The reasoning effort (#1193) adds", and line 19 reads "3 from #1193" (row 34(c)).
