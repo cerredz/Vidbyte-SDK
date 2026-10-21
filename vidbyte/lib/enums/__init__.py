@@ -38,7 +38,14 @@ TESTS:
 from __future__ import annotations
 
 from vidbyte.lib.enums.agent_runtime import AgentRuntimeStateKey, AgentRuntimeType
-from vidbyte.lib.enums.agent_swarm import AgentSwarmEventKind, AgentSwarmStopReason
+from vidbyte.lib.enums.agent_swarm import (
+    AgentSwarmAgentState,
+    AgentSwarmCompactionTrigger,
+    AgentSwarmEventKind,
+    AgentSwarmFolderState,
+    AgentSwarmStopReason,
+    AgentSwarmWebSearch,
+)
 from vidbyte.lib.enums.codex import (
     CodexApprovalMode,
     CodexContextAnchor,
@@ -183,8 +190,12 @@ __all__ = [
     "AgentRuntimeStateKey",
     "AgentRuntimeType",
     "AgentSpeedRecordingIntegrity",
+    "AgentSwarmAgentState",
+    "AgentSwarmCompactionTrigger",
     "AgentSwarmEventKind",
+    "AgentSwarmFolderState",
     "AgentSwarmStopReason",
+    "AgentSwarmWebSearch",
     "AgentType",
     "AssumptionAction",
     "BasisType",
