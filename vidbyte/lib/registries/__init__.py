@@ -22,6 +22,7 @@ from vidbyte.lib.registries.models import ProviderModelRegistry
 from vidbyte.lib.registries.pricing import DEEPSEEK_TIME_OF_DAY_RATES, OPENAI_GPT56_TIER_RATES, OPENAI_GPT6_TIER_RATES, ModelPricing, ModelPricingRegistry, PRICING_AS_OF, PRICING_SOURCE_URL, PROVIDER_PRICING
 from vidbyte.lib.registries.prompts import PromptRecord, Prompts
 from vidbyte.lib.registries.provider_keys import ProviderKeyMatcher
+from vidbyte.lib.registries.reasoning_effort import REASONING_EFFORT_AS_OF, REASONING_EFFORT_FORMS, REASONING_EFFORT_SUPPORT, ReasoningEffortRegistry
 from vidbyte.lib.registries.runtimes import RuntimeRegistry
 from vidbyte.lib.registries.structured_output import MODEL_SUPPORT, NATIVE_SCHEMA_WITHOUT_TOOLS, PROVIDER_SUPPORT, STRUCTURED_OUTPUT_AS_OF, STRUCTURED_OUTPUT_DESCRIPTIONS, StructuredOutputDescription, StructuredOutputRegistry
 from vidbyte.lib.registries.tools import ToolRegistry
@@ -44,6 +45,10 @@ __all__ = [
     "DEEPSEEK_TIME_OF_DAY_RATES",
     "PromptRecord",
     "Prompts",
+    "ReasoningEffortRegistry",
+    "REASONING_EFFORT_AS_OF",
+    "REASONING_EFFORT_FORMS",
+    "REASONING_EFFORT_SUPPORT",
     "RuntimeRegistry",
     "StructuredOutputRegistry",
     "StructuredOutputDescription",
