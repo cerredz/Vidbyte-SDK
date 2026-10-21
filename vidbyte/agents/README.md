@@ -449,8 +449,11 @@ agent = Agent(name="planner", system_prompt="Plan the change.",
 
 Construction refuses it with `ConfigurationError`, before any request or
 spend, in a gateway mode, for any model in the fallback chain that has no
-documented form for the value, for a model id the table does not list, and on
-an agent that does not name both a provider and a model. `TextModelConfig`
+documented form for the value, for a model id the table does not list, on an
+agent that does not name both a provider and a model, and when its
+context-window algorithm calls models through runners it builds itself
+(`multi_provider_agentic_grader`, `independent_critic` with a reviewer, or
+`prosecutor_defender_judge` with a stage model). `TextModelConfig`
 also refuses it beside `thinking_config` or an `extra_body` key its wire form
 uses, and `Runner` refuses it for a non-text runner. It reaches every fallback
 hop, in that hop's own form; forks, whose own construction re-checks it
