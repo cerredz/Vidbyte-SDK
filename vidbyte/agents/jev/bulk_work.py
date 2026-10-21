@@ -54,6 +54,7 @@ class JevBulkWorker(BasePipeline):
             api_keys=settings.api_keys,
             model_mode=settings.model_mode,
             temperature=settings.temperature,
+            reasoning_effort=settings.reasoning_effort,
             timeout_seconds=settings.timeout_seconds,
             tools=tuple(AgentForker._clone_tool(tool, None, None) for tool in tools),
             permission_policy=settings.permission_policy,

@@ -10,7 +10,7 @@ Purpose:
 Architecture:
     - VidbyteSDK: Root namespace client.
     - Agent exports: BaseAgent, CodingAgent, CodingAgentSettings, CodingAgentTools, InfiniteMemoryAgent, InfiniteMemoryAgentSettings, InfiniteWorkspaceSettings, InfiniteMemoryPreset, InfiniteEvent, InfiniteEventKind, InfiniteHandoff, AgentCard, AgentMessage, AgentRegistry, AgentRunnerConfig, AgentSpec.
-    - Agent setting exports: AgentLoopSettings (loop limits), PermissionPolicy (which ToolPermission levels tools may use) and TextModelMode (gateway or direct text calls), which BaseAgent and JevAgentSettings take, plus JevDynamicComputeOption, the values of JevComputeSettings.dynamic_compute, so a caller limited to root names, such as vidbyte-cli, can set JevAgent's loop, permission, text-mode and compute options.
+    - Agent setting exports: AgentLoopSettings (loop limits), PermissionPolicy (which ToolPermission levels tools may use), TextModelMode (gateway or direct text calls) and ReasoningEffort (the provider-neutral reasoning effort a DIRECT text call sends), which BaseAgent and JevAgentSettings take, plus JevDynamicComputeOption, the values of JevComputeSettings.dynamic_compute, and DecisionModelConfig with its DecisionModelMode, the decision-model record JevRuntimeSettings.decision holds, so a caller limited to root names, such as vidbyte-cli, can set JevAgent's loop, permission, text-mode, reasoning-effort, compute and decision-model options.
     - Configuration exports: YamlLoader, AgentSettings, ToolDefinition, MiddlewareDefinition.
     - Tool exports: BaseTool, ToolActivity, ToolCall, ToolCallActivity, ToolExecutor, ToolParameter, ToolPermission, ToolRegistry, ToolResult, ToolSpec, ToolStatus, ToolsFormatter.
     - Middleware exports: AgentMiddleware, MiddlewarePipeline, policy events, and diagnostic hook invocations.
@@ -456,6 +456,7 @@ from vidbyte.lib.dataclasses.continual_trace_descriptor import (
     ContinualTraceAgentDescriptor,
 )
 from vidbyte.lib.dataclasses.handoff_agent_descriptor import HandoffAgentDescriptor
+from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
 from vidbyte.lib.dataclasses.multi_agent_descriptor import MultiAgentDescriptor
 from vidbyte.lib.dataclasses.native_threads import (
     GrokThreadConfig,
@@ -489,6 +490,7 @@ from vidbyte.lib.dataclasses.security import PermissionPolicy
 from vidbyte.lib.dataclasses.skills import SkillResolution
 from vidbyte.lib.enums import (
     BudgetPreset,
+    DecisionModelMode,
     GrokCommand,
     GrokPermissionMode,
     GrokReasoningEffort,
@@ -498,6 +500,7 @@ from vidbyte.lib.enums import (
     MuseReasoningEffort,
     PermissionPreset,
     Prompt,
+    ReasoningEffort,
     StructuredOutputSupport,
     SystemPromptPreset,
     TextModelMode,
@@ -1126,6 +1129,9 @@ __all__ = [
     "AgentStopReason",
     "AgentLoopSettings",
     "TextModelMode",
+    "ReasoningEffort",
+    "DecisionModelConfig",
+    "DecisionModelMode",
     "ToolSettings",
     "ModelPricing",
     "ModelPricingRegistry",

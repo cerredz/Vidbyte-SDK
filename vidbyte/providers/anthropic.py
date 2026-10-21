@@ -12,6 +12,7 @@ from vidbyte.lib.errors import (
     ProviderResponseError,
 )
 from vidbyte.lib.http import HttpResponseParser, HttpTransport, SyncHttpTransport
+from vidbyte.lib.registries.reasoning_effort import ReasoningEffortRegistry
 from vidbyte.lib.runners.types import TextModelResponse
 from vidbyte.lib.util import PromptPlacement
 from vidbyte.providers.output_schema import OutputSchemaFormatter
@@ -59,6 +60,12 @@ class AnthropicProvider:
         self._attach_tools(payload, config)
         self._attach_response_format(payload, config)
         self._attach_metadata(payload, config, metadata)
+        # @intent reasoning-effort-joins-before-extra-body
+        # The effort's fragment merges after every step that sets a
+        # top-level key, so output_config.format from the schema step
+        # stays beside output_config.effort; an extra_body that
+        # overlaps the fragment was refused at construction.
+        ReasoningEffortRegistry.attach(payload, provider=config.normalized_provider(), model=config.model, effort=config.reasoning_effort)
         self._attach_extra_body(payload, config)
         return payload
 

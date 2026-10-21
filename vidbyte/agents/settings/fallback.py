@@ -12,7 +12,7 @@ Architecture:
       including a strict boolean enabled switch so false-like strings cannot enable fallback.
     - resolved_models(): Normalizes every entry against the agent's primary model.
     - named_providers(): The providers the entries name, which the agent matches its keys against.
-    - to_fallback(): Converts to the internal AgentFallback contract, with the agent's matched keys and mode.
+    - to_fallback(): Converts to the internal AgentFallback contract, with the agent's matched keys, mode and reasoning effort.
 Relations:
     Imported by vidbyte.agents.base. Exported from vidbyte.agents.settings.
 Similar Files:
@@ -26,7 +26,7 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from vidbyte.lib.dataclasses.agents import FallbackModel, ProviderKeys
-from vidbyte.lib.enums import ModelProvider, TextModelMode
+from vidbyte.lib.enums import ModelProvider, ReasoningEffort, TextModelMode
 from vidbyte.lib.errors import ConfigurationError
 
 if TYPE_CHECKING:
@@ -118,8 +118,9 @@ class AgentFallbackSettings:
         timeout_seconds: float | None = None,
         api_keys: ProviderKeys = ProviderKeys(),
         model_mode: TextModelMode = TextModelMode.AUTO,
+        reasoning_effort: ReasoningEffort | None = None,
     ) -> AgentFallback | None:
-        """Convert these settings into the internal AgentFallback, or None when disabled."""
+        """Convert these settings into the internal AgentFallback, with the agent's matched keys, mode and reasoning effort, or None when disabled."""
         from vidbyte.agents.fallback import DEFAULT_FALLBACK_ERRORS, AgentFallback
 
         if not self.enabled:
@@ -134,6 +135,7 @@ class AgentFallbackSettings:
             timeout_seconds=timeout_seconds,
             api_keys=api_keys,
             model_mode=model_mode,
+            reasoning_effort=reasoning_effort,
         )
 
     def _resolve_entry(self, entry: str | FallbackModel, primary: FallbackModel, position: int) -> FallbackModel:

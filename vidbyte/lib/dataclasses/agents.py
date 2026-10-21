@@ -6,7 +6,7 @@ Purpose:
     Exposes stable data structures like AgentCard and AgentMessage for registry and execution systems.
 Architecture:
     - ProviderKeys: The matched provider keys and Vidbyte key that an agent's children carry.
-    - AgentRunnerConfig: Primitive backend configuration, with the matched keys and the text-model mode.
+    - AgentRunnerConfig: Primitive backend configuration, with the matched keys, the text-model mode and the reasoning effort.
     - PauseDuration: Validated whole-number delay for BaseAgent.pause().
     - AllowedToolNames: Validated, stripped tool names for the AgentLoopSettings.allowed_tools gate.
     - FallbackModel: One entry in an ordered agent fallback chain.
@@ -33,9 +33,12 @@ from vidbyte.lib.constants.jev import (
     VIDBYTE_API_KEY_PATTERN,
     VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND,
 )
-from vidbyte.lib.dataclasses.validation import RecordFieldValidator
+from vidbyte.lib.dataclasses.validation import (
+    RecordFieldConverter,
+    RecordFieldValidator,
+)
 from vidbyte.lib.enums.model_provider import ModelProvider
-from vidbyte.lib.enums.text_model import TextModelMode
+from vidbyte.lib.enums.text_model import ReasoningEffort, TextModelMode
 from vidbyte.lib.errors import AgentForkConfigurationError, ConfigurationError
 
 if TYPE_CHECKING:
@@ -312,9 +315,10 @@ class AgentRunnerConfig:
     run_id: str | None = None
     timeout_seconds: float | None = None
     model_mode: TextModelMode = TextModelMode.AUTO
+    reasoning_effort: ReasoningEffort | None = None
 
     def __post_init__(self) -> None:
-        """Refuse a raw key list or a mode that is not the enum."""
+        """Refuse a raw key list, a mode that is not the enum, or an effort outside the six."""
         # @intent runner-config-carries-a-matched-record
         # BaseAgent matches the developer's list before it builds this
         # config, so a raw list here means matching was skipped; the
@@ -323,6 +327,10 @@ class AgentRunnerConfig:
             raise ConfigurationError("AgentRunnerConfig.api_keys must be a ProviderKeys record; BaseAgent matches the developer's list first.")
         if not isinstance(self.model_mode, TextModelMode):
             raise ConfigurationError("AgentRunnerConfig.model_mode must be a TextModelMode value.")
+        # Store the effort as the enum; whether the model can take it
+        # is the agent guard's check, because some agents have no model.
+        if self.reasoning_effort is not None:
+            object.__setattr__(self, "reasoning_effort", RecordFieldConverter.to_enum(self.reasoning_effort, ReasoningEffort, "AgentRunnerConfig.reasoning_effort"))
 
 
 @dataclass(frozen=True, slots=True)

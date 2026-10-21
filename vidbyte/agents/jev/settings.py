@@ -1,12 +1,12 @@
 """FILE: vidbyte/agents/jev/settings.py
 
 PURPOSE: Defines JevAgent's two opinionated public configuration objects: JevAgentSettings for the agents that generate, and JevRuntimeSettings for Jev's own decision policy, whose `continual` field holds JevContinualSettings for the done checks and continuations. JevRunBriefSettings configures the mid-run brief: the separate writer's model and limits and the brief's refresh cadence.
-ROLE IN CODEBASE: JevAgent maps JevAgentSettings into BaseAgent and builds its preflight gate from both objects at construction, so JevRuntime never reads settings to decide what to ask. JevAgentSettings matches its api_keys list once (ProviderKeyMatcher) and every Jev child carries that ProviderKeys record and the text-model mode; JevRunBriefSettings only normalizes its own list, which the brief writer matches against its provider.
+ROLE IN CODEBASE: JevAgent maps JevAgentSettings into BaseAgent and builds its preflight gate from both objects at construction, so JevRuntime never reads settings to decide what to ask. JevAgentSettings matches its api_keys list once (ProviderKeyMatcher) and every Jev child carries that ProviderKeys record, the text-model mode and reasoning_effort, which construction checks against the agent's own provider, model and mode; JevRunBriefSettings only normalizes its own list, which the brief writer matches against its provider.
 ARCHITECTURE NOTE: The surface is intentionally closed; named Jev capabilities belong here as explicit settings instead of a generic decisions collection. JevAgentSettings holds the main agent and the JevSpecialist candidates Jev may hand a run to; JevRuntimeSettings holds the decision model, the preflight flags, the continuation settings (the done checks and their limits), and the tool-selector threshold.
 COMMON MODIFICATION PATTERNS: Add a generative-agent field to JevAgentSettings or a Jev policy setting to JevRuntimeSettings, then implement its fixed policy in vidbyte/agents/jev/gate/ without exposing runtime replacement hooks.
 KNOWN EDGE CASES: The generative provider cannot be TypeSafe because Jev is a decision model; neither generative nor decision API keys appear in repr output. Specialist titles must be unique because each one is a Choice option name. Preflight presets are validated by JevPreflightRegistry and done checks by JevDoneRegistry at construction, every continuation limit rejects booleans and non-integers, so no TypeSafe key is needed until a run asks Jev; the tool-selector threshold rejects booleans, non-finite values, and out-of-range probabilities. JevAlignmentSettings.skills accepts SkillEntry, SkillDocument, and str values in one list: strings become inline_skill_<position> documents counted over the whole list, entries pass through unchanged and are resolved later by the preload's SkillLoader (no I/O here), and names must be unique across every kind.
 RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-multipart-done-criteria.md, docs/design/jev-run-brief.md, and skills/jev-agent/SKILL.md.
-TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, tests/test_jev_done.py, tests/test_jev_run_brief.py, tests/features/agent_output_connectors/test_output_connectors_agent_wiring.py, and scripts/test-jev-agent-scaffold.py.
+TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, tests/test_jev_done.py, tests/test_jev_run_brief.py, tests/features/agent_output_connectors/test_output_connectors_agent_wiring.py, tests/features/agent_reasoning_effort, and scripts/test-jev-agent-scaffold.py.
 """
 
 from __future__ import annotations
@@ -51,6 +51,7 @@ from vidbyte.lib.dataclasses.jev import JevProbability, JevSpecialist
 from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
 from vidbyte.lib.dataclasses.prompts import SystemPromptPresetSelection
 from vidbyte.lib.dataclasses.skills import SkillDocument, SkillEntry
+from vidbyte.lib.dataclasses.validation import RecordFieldConverter
 from vidbyte.lib.enums import (
     DecisionModelMode,
     JevContinuationGate,
@@ -58,6 +59,7 @@ from vidbyte.lib.enums import (
     JevDynamicComputeOption,
     JevPreflightPreset,
     ModelProvider,
+    ReasoningEffort,
     SystemPromptPreset,
     TextModelMode,
 )
@@ -65,6 +67,7 @@ from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.jev import JevDoneRegistry, JevPreflightRegistry
 from vidbyte.lib.jev.compute import JevComputeRegistry
 from vidbyte.lib.registries.provider_keys import ProviderKeyMatcher
+from vidbyte.lib.registries.reasoning_effort import ReasoningEffortRegistry
 from vidbyte.tools.security import PermissionPolicy
 
 
@@ -149,6 +152,7 @@ class JevAgentSettings:
     vidbyte_api_key: str | None = field(default=None, repr=False)
     model_mode: TextModelMode = TextModelMode.AUTO
     system_prompt_presets: tuple[SystemPromptPreset, ...] | None = None
+    reasoning_effort: ReasoningEffort | None = None
 
     def __post_init__(self) -> None:
         # Normalizes immutable inputs and rejects invalid agent configuration before runtime construction.
@@ -176,6 +180,7 @@ class JevAgentSettings:
             raise ConfigurationError("JevAgentSettings.tools must be an iterable of tool objects.") from exc
         self._validate_temperature()
         self._validate_timeout()
+        self._validate_reasoning_effort()
         if not isinstance(self.permission_policy, PermissionPolicy):
             raise ConfigurationError("JevAgentSettings.permission_policy must be a PermissionPolicy instance.")
         if not isinstance(self.loop, AgentLoopSettings):
@@ -237,6 +242,21 @@ class JevAgentSettings:
             return
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0.0:
             raise ConfigurationError("JevAgentSettings.timeout_seconds must be a finite number greater than zero.")
+
+    def _validate_reasoning_effort(self) -> None:
+        # @intent jev-effort-is-checked-against-its-model
+        # The main agent and every child on its model send this effort,
+        # so a value its mode or model cannot send is refused here,
+        # before JevAgent builds any agent or sends any request.
+        if self.reasoning_effort is None:
+            return
+        # Accept the enum or its exact value string, and store the enum.
+        effort = RecordFieldConverter.to_enum(self.reasoning_effort, ReasoningEffort, "JevAgentSettings.reasoning_effort")
+        object.__setattr__(self, "reasoning_effort", effort)
+        # Refuse a gateway mode, then a value the model's row lacks.
+        reason = ReasoningEffortRegistry.refusal(provider=self.provider, model=self.model_name, effort=effort, mode=self.model_mode)
+        if reason is not None:
+            raise ConfigurationError(f"JevAgentSettings sets reasoning_effort, but {reason}.", details={"field": "JevAgentSettings.reasoning_effort", "reasoning_effort": effort.value})
 
 
 @dataclass(frozen=True, slots=True)

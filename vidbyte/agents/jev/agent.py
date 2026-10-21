@@ -69,6 +69,7 @@ class JevAgent(BaseAgent):
                 api_keys=settings.api_keys,
                 model_mode=settings.model_mode,
                 temperature=settings.temperature,
+                reasoning_effort=settings.reasoning_effort,
                 timeout_seconds=settings.timeout_seconds,
                 # @intent jev-children-never-steal-main-agent-tools
                 # Agent-bound builtins get unbound copies, as in a fork, so the main agent's tools stay bound to it.
@@ -101,6 +102,7 @@ class JevAgent(BaseAgent):
             provider=settings.provider,
             model_name=settings.model_name,
             temperature=settings.temperature,
+            reasoning_effort=settings.reasoning_effort,
             timeout_seconds=settings.timeout_seconds,
             outputs=settings.outputs,
             system_prompt_presets=settings.system_prompt_presets,

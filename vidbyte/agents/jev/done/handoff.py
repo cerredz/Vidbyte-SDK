@@ -164,6 +164,7 @@ class JevHandoff(BaseAgent):
             provider=settings.provider,
             model_name=settings.model_name,
             temperature=settings.temperature,
+            reasoning_effort=settings.reasoning_effort,
             timeout_seconds=settings.timeout_seconds,
             output_schema=payload,
             # @intent handoff-writer-keeps-its-fixed-prompt

@@ -77,6 +77,36 @@ that can take it (the lone-key rule). A key that could belong to more than
 one provider, or to none, is refused, and the developer sets it in that
 provider's own environment variable instead, which is never matched.
 
+## Reasoning Effort Sources
+
+`REASONING_EFFORT_SUPPORT` and `REASONING_EFFORT_FORMS` in
+`vidbyte/lib/configs/reasoning_effort.py` map the six `ReasoningEffort`
+values (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`) to the models
+that document them and to each provider's wire form, and
+`ReasoningEffortRegistry` in `reasoning_effort.py` resolves that table.
+Each source below was opened on 2026-10-20, the date
+`REASONING_EFFORT_AS_OF` records. A cell is "sent" only when a raw vendor
+page names that value for that model. A value the vendor remaps to another
+level (DeepSeek `minimal`, `medium` and `xhigh`; GLM-5.2 `minimal`, `low`,
+`medium` and `xhigh`), a value the docs contradict (Muse `xhigh`; grok-4.5
+and grok-4.3 `xhigh`), and a
+model whose page lists no values are refused, never mapped to the nearest
+level. Lookup uses the id that `ProviderModelRegistry.normalize_model`
+returns (the provider's own prefix dropped, aliases applied), in lower
+case. An id with no row is refused with a text that names
+`REASONING_EFFORT_AS_OF`, because the vendor may have added the model
+after the table was last checked.
+
+| Provider | Wire form | Sources |
+|---|---|---|
+| OpenAI | `{"reasoning": {"effort": "<value>"}}` | https://developers.openai.com/api/docs/guides/reasoning.md and each model page under https://developers.openai.com/api/docs/models/; `gpt-5.6` is an alias of `gpt-5.6-sol` (https://developers.openai.com/api/docs/guides/latest-model/gpt-5.6.md). |
+| Anthropic | `{"output_config": {"effort": "<value>"}}`; `none` is `{"thinking": {"type": "disabled"}}` | https://platform.claude.com/docs/en/build-with-claude/effort.md, https://platform.claude.com/docs/en/api/messages/create.md, and the per-model `"disabled"` column of https://platform.claude.com/docs/en/build-with-claude/thinking.md. |
+| Gemini | `{"generationConfig": {"thinkingConfig": {"thinkingLevel": "<VALUE>"}}}`; `none` is a `thinkingBudget` of 0, on 2.5 Flash and Flash-Lite only | https://ai.google.dev/api/generate-content.md.txt, https://ai.google.dev/gemini-api/docs/generate-content/thinking.md.txt, and the model pages under https://ai.google.dev/gemini-api/docs/models/. |
+| DeepSeek | `{"reasoning_effort": "<value>"}` | https://api-docs.deepseek.com/api/create-chat-completion/ and https://api-docs.deepseek.com/guides/thinking_mode/. |
+| xAI | `{"reasoning_effort": "<value>"}` | https://docs.x.ai/developers/model-capabilities/text/reasoning.md, https://docs.x.ai/developers/rest-api-reference/inference/chat-completions.md, and the model pages under https://docs.x.ai/developers/models/. |
+| GLM | `{"thinking": {"type": "enabled"}, "reasoning_effort": "<value>"}`; `none` is `{"thinking": {"type": "disabled"}}` | https://docs.z.ai/guides/capabilities/thinking.md and https://docs.bigmodel.cn/cn/guide/capabilities/thinking.md. |
+| Meta | `{"reasoning_effort": "<value>"}` | https://dev.meta.ai/docs/reasoning.md and https://dev.meta.ai/docs/models.md. |
+
 ## Browser Tool Sources
 
 `BrowserToolRegistry` in `browser_tools.py` holds one row per tool that the
