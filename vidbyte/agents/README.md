@@ -430,12 +430,45 @@ object per concurrent run, because overlapping replies reset each other's ledger
 Unlike `CostBudgetMiddleware`, which estimates spend from tokens at a flat rate and
 stops with `middleware_abort`, the cap reads the priced ledger and fails closed.
 
+## Reasoning Effort
+
+`reasoning_effort`, a `ReasoningEffort` (`none`, `minimal`, `low`, `medium`,
+`high` or `xhigh`), asks the model to spend that much reasoning. Each provider
+adapter sends it in that provider's own documented form, such as OpenAI's
+`reasoning.effort` or Anthropic's `output_config.effort`, only on
+`TextModelMode.DIRECT` calls; nothing is sent when it is unset.
+
+```python
+from vidbyte import Agent, ReasoningEffort, TextModelMode
+
+agent = Agent(name="planner", system_prompt="Plan the change.",
+              provider="openai", model_name="gpt-5.5",
+              model_mode=TextModelMode.DIRECT,
+              reasoning_effort=ReasoningEffort.HIGH)
+```
+
+Construction refuses it with `ConfigurationError`, before any request or
+spend, in a gateway mode, for any model in the fallback chain that has no
+documented form for the value, for a model id the table does not list, and on
+an agent that does not name both a provider and a model. `TextModelConfig`
+also refuses it beside `thinking_config` or an `extra_body` key its wire form
+uses, and `Runner` refuses it for a non-text runner. It reaches every fallback
+hop, in that hop's own form; forks, whose own construction re-checks it
+against the child's model; `ContinualTraceAgent` and `HandoffAgent`; a
+checkpoint and `BaseAgent.restore`; and, through
+`JevAgentSettings.reasoning_effort`, JevAgent's main agent and its children.
+It does not reach Jev specialists, which keep their own setting, the run-brief
+writer, or Jev decision calls. The values each provider and model accept, and
+their sources, are in "Reasoning Effort Sources" in
+`vidbyte/lib/registries/README.md`.
+
 ## Key Modules
 
 - `base.py`: `BaseAgent`, inferred runner construction, tool binding, context assembly, trace setup, and runtime dispatch.
 - `client.py`: namespace client used by `VidbyteSDK().agents`.
 - `fallback.py`: `AgentFallback`, the ordered model chain and the transforms that route a run to the next model.
 - `spend_cap.py`: `AgentSpendCap`, which decides from the live usage rollup whether a run with `AgentLoopSettings.max_spend_usd` must stop.
+- `reasoning_effort.py`: `AgentReasoningEffortGuard`, the construction refusal for `reasoning_effort`.
 - `base.py` also opens the run's `SystemPromptPresetScope` (`vidbyte/lib/system_prompt_presets.py`) and composes presets in `_runtime()` through `SystemPromptPresetComposer` (`vidbyte/prompts/system_prompt_presets.py`).
 - `settings/fallback.py`: `AgentFallbackSettings`, the validated developer-facing chain configuration.
 - `runtimes/`: linear, search, and actor-model runtime components.

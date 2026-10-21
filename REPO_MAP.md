@@ -184,7 +184,7 @@ Configuration loading and resolution that sits beneath the higher-level declarat
 
 ##### `vidbyte/lib/configs/`
 
-Narrow, single-purpose configuration objects that do not belong in the general-purpose configuration loader. It currently holds one such object, describing how a model's structured output is requested and subsequently validated. These are kept separate from the general loader because they represent per-feature contracts rather than settings a user is expected to edit directly. A new narrow, feature-specific configuration shape belongs here rather than folded into the general-purpose loader.
+Narrow, single-purpose configuration objects that do not belong in the general-purpose configuration loader. It holds fixed per-feature capability data, such as which request shapes and reasoning levels each provider and model accepts, that the registries read and explain. These are kept separate from the general loader because they represent per-feature contracts rather than settings a user is expected to edit directly. A new narrow, feature-specific configuration shape belongs here rather than folded into the general-purpose loader.
 
 ##### `vidbyte/lib/constants/`
 

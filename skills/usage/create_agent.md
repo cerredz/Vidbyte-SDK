@@ -37,6 +37,7 @@ Agent(
     vidbyte_api_key: str | None = None,  # Vidbyte key for gateway calls; else VIDBYTE_API_KEY
     model_mode: TextModelMode = TextModelMode.AUTO,  # AUTO (gateway, relays your key), VIDBYTE_MANAGED, or DIRECT
     temperature: float | None = None,    # model temperature (0.0â€“2.0)
+    reasoning_effort: ReasoningEffort | None = None,  # none to xhigh; sent on DIRECT calls only
     max_tool_rounds: int | None = None,  # max tool-calling iterations before returning
     max_iterations: int | None = None,   # max total agent loop iterations
     max_tokens: int | None = None,       # max output tokens per model call
@@ -59,7 +60,7 @@ Agent(
 
 Each parameter has a specific role:
 - **Identity** (`name`, `description`, `capabilities`, `metadata`): Used for registry lookup, agent cards, and multi-agent discovery.
-- **Model** (`provider`, `model_name`, `api_keys`, `vidbyte_api_key`, `model_mode`, `temperature`, `modality`): Configures which model to use and how. `api_keys` is a plain list of provider keys that the agent matches once to its own and its fallback models; every child carries that match. `TextModelMode.DIRECT` calls the provider straight with your key and never contacts Vidbyte.
+- **Model** (`provider`, `model_name`, `api_keys`, `vidbyte_api_key`, `model_mode`, `temperature`, `reasoning_effort`, `modality`): Configures which model to use and how. `api_keys` is a plain list of provider keys that the agent matches once to its own and its fallback models; every child carries that match. `TextModelMode.DIRECT` calls the provider straight with your key and never contacts Vidbyte. `reasoning_effort` (a `ReasoningEffort`) is sent in the provider's own form on `TextModelMode.DIRECT` calls; unsupported values are refused at construction.
 - **Runtime** (`runtime`): Selects the execution paradigm — `linear` (default), `mcts_search`, or actor model. See [`skills/agent-runtimes/SKILL.md`](../agent-runtimes/SKILL.md). Note: non-linear runtimes are incompatible with middleware and context-window algorithms and raise `ConfigurationError` if combined.
 - **Execution** (`max_tool_rounds`, `max_iterations`, `max_tokens`): Controls resource consumption and loop limits.
 - **Capability** (`tools`, `middleware`, `permission_policy`): What the agent can do and how it behaves.
