@@ -18,8 +18,8 @@ Program: JevAgent in vidbyte-cli, run R2 of 8 (see request.md §C "This run's sc
 | S0 worktree + capture + recon | done | 2026-10-20 | 2026-10-20 | reports/S0-scout.md | 2fabf8f8; code-map.md has 583 lines in 4 sections and about 45 source files. The orchestrator checked base.py:109 (AUTO is the default) and vidbyte_gateway.py:124 (a body field outside the allow-list gives 422) |
 | S1 spec + review | done | 2026-10-20 | 2026-10-20 | reports/S1-spec-author.md, S1-spec-review.md, S1-spec-review-r2.md | spec r3 approved (2306b357). Round 1: 1 Blocker, 3 Major, 3 Minor, all closed. Round 2: 1 Blocker, 2 Major, 2 Minor, all applied in r3, which the orchestrator verified |
 | S2 tests | done | 2026-10-20 | 2026-10-20 | reports/S2-test-author.md | pack tests/features/agent_reasoning_effort (61 tests, 655 cases) + 3 pin appends; tests c6e5a710, docs 62b31d53. Orchestrator re-ran: 655 errors, all ImportError on the missing names; pins appended last; spec diff only §6.2 Proof cells |
-| S3 implement | running | 2026-10-20 | | | test-tree snapshot 62b31d53 |
-| S4 adversarial review | pending | | | | |
+| S3 implement | done | 2026-10-20 | 2026-10-20 | reports/S3-implementer.md | head ce751768, PR #1193 draft. Orchestrator re-ran: tests unchanged vs 1fa23b65; pack + pins + modality routing 703 passed; contract --check current at 736; root names import; independent lint/run.py SDK-LINT: PASS (A002 602, S001 56; every zero-slack rule equal) |
+| S4 adversarial review | running | 2026-10-20 | | | diff 98a5d37b..ce751768; 3 lenses in parallel, then the verifier |
 | S5 repair loop | pending | | | | |
 | S6 PR | pending | | | | |
 
