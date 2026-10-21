@@ -2,9 +2,9 @@
 
 PURPOSE: Shared offline harness for the AgentSwarm feature pack: one scripted model runner that reaches every member agent the swarm builds inside arun (and the compaction side call), an on_event recorder that turns swarm state changes into Signals, a recording fake for the Tavily HTTP call, a one-shot model retry seam, settings builders under tmp_path, transcript readers, and the event oracle every run is checked against.
 ROLE IN CODEBASE: Imported by every test module in tests/features/agent_swarm/. It replaces only the model runner, at BaseAgent._runner_for_model, and the Tavily client's HTTP search (docs/spec/agent-swarm-v2/spec.md section 13), so the agent loop, the middleware pipeline, the compaction engine, the prompt catalog, the file tools, bash, the filesystem, asyncio, and the settings validation all run for real.
-ARCHITECTURE NOTE: ScriptedSwarm routes each model call by agent name to that agent's list of steps (one continuous list across all its turns and compaction side calls, because each member runs one loop for the whole swarm) or to a behaviour function, and records what the agent was sent. Each response is stamped with the member's own provider and model, so UsageTracker parses Anthropic usage with Anthropic's parser (spec section 13). Becoming idle, waking, and stopping happen inside the swarm, not on a model call, so tests wait for them through EventLog.signal(kind, agent), which the on_event callback sets. assert_event_invariants is the oracle: it replays result.events as the spec's state machine for all twenty-four kinds and checks every invariant of spec section 6.1 that the event record can show.
-FUNCTION INVENTORY: member / build_settings / build_swarm / workplace_path build the subject; tool_call / calls / reply / finish / send / compact / search / fail / observe / after build steps; Gate and Signal order concurrent agents without sleeps; ScriptedSwarm.install patches the runner and ScriptedSwarm.calls_by / first_call / last_call / position / assert_complete read what happened; EventLog records on_event deliveries and sets Signals; FakeTavily stands in for the Tavily HTTP call; install_model_retry appends a one-shot retry middleware; run_swarm and guard_asyncio_run turn a hang into a failure; yield_to_loop is a zero-delay scheduler yield; tool_results / tool_result / is_error / user_messages / message_tool_calls / seen_text / prompt_text / template_regex / renderings read rendered output; of_kind / only / seq_of / pairs / describe read events; assert_event_invariants is the oracle; assert_no_stray_tasks and snapshot check what is left behind.
-COMMON MODIFICATION PATTERNS: Add a step kind as a frozen dataclass plus one branch in ScriptedSwarm._respond. When the spec adds an event kind, add its constant, its allowed fields to _ALLOWED_FIELDS, and its place in the lifecycle to _Replay.
+ARCHITECTURE NOTE: ScriptedSwarm routes each model call by agent name to that agent's list of steps (one continuous list across all its turns and compaction side calls, because each member runs one loop for the whole swarm) or to a behaviour function, and records what the agent was sent. Each response is stamped with the member's own provider and model and built in that provider's own response shape (OpenAI Responses function_call items, Anthropic tool_use blocks, Gemini candidate parts with usageMetadata), so the loop's formatter builds each provider's real history shapes and UsageTracker reads each provider's usage with that provider's parser (spec section 13). Becoming idle, waking, and stopping happen inside the swarm, not on a model call, so tests wait for them through EventLog.signal(kind, agent), which the on_event callback sets. assert_event_invariants is the oracle: it replays result.events as the spec's state machine for all twenty-four kinds and checks every invariant of spec section 6.1 that the event record can show.
+FUNCTION INVENTORY: member / build_settings / build_swarm / workplace_path build the subject; tool_call / calls / reply / finish / send / compact / search / fail / observe / after build steps; Gate and Signal order concurrent agents without sleeps; ScriptedSwarm.install patches the runner, ScriptedSwarm._respond answers each step in the member provider's own shape (OpenAI, Anthropic or Gemini), and ScriptedSwarm.calls_by / first_call / last_call / position / assert_complete read what happened; EventLog records on_event deliveries and sets Signals; FakeTavily stands in for the Tavily HTTP call; install_model_retry appends a one-shot retry middleware; run_swarm and guard_asyncio_run turn a hang into a failure; yield_to_loop is a zero-delay scheduler yield; tool_results / tool_result / is_error / user_messages / message_tool_calls / seen_text / prompt_text / template_regex / renderings read rendered output; of_kind / only / seq_of / pairs / describe read events; assert_event_invariants is the oracle; assert_no_stray_tasks and snapshot check what is left behind.
+COMMON MODIFICATION PATTERNS: Add a step kind as a frozen dataclass plus one branch in ScriptedSwarm._respond. A new member provider gets its response and usage shape as one more provider branch there, with a model name and a key-shaped fake key beside MODEL and FAKE_OPENAI_KEY. When the spec adds an event kind, add its constant, its allowed fields to _ALLOWED_FIELDS, and its place in the lifecycle to _Replay.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import anything from vidbyte.agents.agent_swarm, vidbyte.lib.dataclasses.agent_swarm, vidbyte.lib.enums.agent_swarm, vidbyte.lib.constants.agent_swarm, vidbyte.tools.toolsets.agent_swarm, vidbyte.middleware.builtins.agent_swarm_observer, or the new Prompt members at module level: before the feature exists that would make every module in the pack a collection error. 2. Do not mock the loop, the middleware pipeline, the compaction engine, the catalog, AgentSwarmEvents, the file tools, or bash (spec section 13). 3. Do not wait on wall-clock time; Gate, Signal and FakeTavily use asyncio events, their timeout only turns a hang into a failure, and yield_to_loop sleeps for zero seconds. 4. Do not encode feature wording here; tests take prompt text from the catalog.
 KNOWN EDGE CASES: The swarm contains exceptions raised by on_event, so an assertion inside an EventLog hook would only reach result.event_error_types; the oracle therefore checks event_error_types against the expected tuple. A runner that raises inside a member becomes agent_failed, so unscripted calls and guard failures are also kept in ScriptedSwarm.unscripted and ScriptedSwarm.problems, which assert_complete checks. Two member tasks cancelled by the time limit record their agent_cancelled events in the task group's order, which is a set's order, so tests compare that window as a set.
 RELATED DOCS: tests/features/agent_swarm/FEATURE.md; docs/spec/agent-swarm-v2/spec.md sections 6, 8.5, 9.1 and 13.
@@ -43,6 +43,7 @@ if TYPE_CHECKING:
 
 MODEL = "gpt-4.1"
 ANTHROPIC_MODEL = "claude-sonnet-5"
+GEMINI_MODEL = "gemini-3.5-flash"
 # The section 4 goal; every test that does not care about the goal's text uses it.
 GOAL = "Build a Celsius-to-Fahrenheit command-line tool with tests."
 # A failure-only guard: a Gate, Signal or blocking fake that is never released fails the test after this long instead of hanging it.
@@ -52,9 +53,10 @@ RUN_GUARD_SECONDS = 60.0
 DEFAULT_USAGE: Mapping[str, int] = {"input_tokens": 3, "output_tokens": 2}
 # The loop's own provisional answer to a refused isDone (vidbyte/agents/runtime.py).
 FINISH_NOT_ACCEPTED = "finish attempt not accepted yet; continue with the next message"
-# Key-shaped strings the provider-key matcher accepts as OpenAI's and Anthropic's, and a Tavily-shaped key; never real keys.
+# Key-shaped strings the provider-key matcher accepts as OpenAI's, Anthropic's and Gemini's ("AIza" plus 35 characters), and a Tavily-shaped key; never real keys.
 FAKE_OPENAI_KEY = "sk-proj-SwarmFakeKey0000AAAA1111"
 FAKE_ANTHROPIC_KEY = "sk-ant-SwarmFakeKey0000AAAA1111"
+FAKE_GEMINI_KEY = "AIzaSwarmFakeKey0000AAAA1111BBBB2222CCC"
 FAKE_TAVILY_KEY = "tvly-SwarmFakeKey0000AAAA1111"
 TAVILY_TOOL = "tavily_search"
 # INV-1: the nine section leaves in their fixed order; the web-search section only when web_search is set.
@@ -390,6 +392,18 @@ class ScriptedSwarm:
     def _respond(step: Any, provider: ModelProvider, model: str) -> object:
         if isinstance(step, RaiseStep):
             raise step.error
+        if provider is ModelProvider.GEMINI and isinstance(step, ReplyStep | ToolStep | MultiToolStep):
+            # Gemini's own shapes, as GeminiProvider.run_text returns them: one model candidate whose parts are the text or the functionCall parts, and usageMetadata for GeminiUsage to parse (none when the step reports no usage).
+            scripted = dict(step.usage)
+            reported = scripted.get("input_tokens", 0) + scripted.get("output_tokens", 0)
+            usage = {"promptTokenCount": scripted.get("input_tokens", 0), "candidatesTokenCount": scripted.get("output_tokens", 0), "totalTokenCount": scripted.get("total_tokens", reported)} if scripted else None
+            if isinstance(step, ReplyStep):
+                text, parts = step.text, [{"text": step.text}]
+            else:
+                items = step.steps if isinstance(step, MultiToolStep) else (step,)
+                text, parts = "", [{"functionCall": {"name": item.name, "args": dict(item.args), "id": f"gem-{next(_CALL_IDS)}"}} for item in items]
+            raw = {"candidates": [{"content": {"role": "model", "parts": parts}}], **({"usageMetadata": usage} if usage is not None else {})}
+            return TextModelResponse(provider=provider, model=model, text=text, raw=raw, usage=usage)
         if isinstance(step, ReplyStep):
             return TextModelResponse(provider=provider, model=model, text=step.text, raw={}, usage=dict(step.usage))
         if isinstance(step, ToolStep | MultiToolStep):

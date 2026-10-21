@@ -139,7 +139,7 @@ These are checked on every run by `assert_event_invariants` in `agent_swarm_fixt
 
 - The local filesystem (real, under `tmp_path`).
 - `bash` (a real subprocess); the timeout case lowers the bash tool's module-level timeout and runs a busy loop, so nothing waits on a timer.
-- The model runner: the only model fake, patched at `BaseAgent._runner_for_model` so it reaches every member built inside `arun`, and the compaction side call through `AgentSwarmMemberAgent.call_model`. It stamps each response with the member's own provider and model, so Anthropic usage is parsed by Anthropic's parser.
+- The model runner: the only model fake, patched at `BaseAgent._runner_for_model` so it reaches every member built inside `arun`, and the compaction side call through `AgentSwarmMemberAgent.call_model`. It stamps each response with the member's own provider and model and answers in that provider's own shape (OpenAI Responses items, Anthropic `tool_use` blocks, Gemini candidate `parts` with `usageMetadata`), so the loop builds each provider's real history and each provider's own parser reads the usage.
 - Web search: `TavilyClient.search` (the HTTP boundary) is replaced by a recording fake; the swarm, the toolset and `TavilySearchTool` are real.
 - The prompt catalog, the compaction engine, the middleware pipeline and `AgentSwarmEvents` (all real).
 - `asyncio` (real). Ordering is controlled with `Gate`, `Signal` and events the `on_event` callback observes, never with timed sleeps. The one timed wait is in `test_event_time_counts_from_arun_not_from_building_the_runtime`, where the time between building the runtime and calling `arun` is itself under test.
@@ -183,6 +183,7 @@ Each line is *input + state → wrong output if unguarded*, with the test that c
 - A failed summary call drops the history, fails the member, or swallows the mail (`test_a_failed_summary_call_keeps_the_history_delivers_mail_and_the_member_runs_on`).
 - A blank summary aborts the compaction; nothing older still makes a paid call (`test_a_blank_summary_still_compacts_with_the_prefix_only`, `test_compact_with_nothing_older_makes_no_side_call_and_no_event`).
 - A side call that crosses the budget loses its compaction or lets the member call the model again (`test_a_summary_call_crossing_the_budget_completes_the_compaction_then_releases`).
+- A size estimate that reads only `content` counts a Gemini member's `parts` history, and an OpenAI history whose text sits in `tool_calls`, as almost empty, so neither ever compacts and the trim becomes the mechanism (`test_a_gemini_member_at_the_trigger_compacts_its_parts_history_through_one_summary_call`, `test_an_openai_history_of_write_calls_only_compacts_at_the_trigger`).
 
 **Runs, workplace, settings and events**
 - The workplace's first event is missing or misreports whether the folder was created (`test_the_first_event_reports_whether_the_run_created_the_workplace`).
@@ -195,6 +196,7 @@ Each line is *input + state → wrong output if unguarded*, with the test that c
 - a budget stop checked only by its stop reason, never by the scripted calls that were not answered;
 - a compaction checked only by its event, never by the summary call's system, prompt and empty tool list, or by the next call's history;
 - an Anthropic usage path that is never parsed as Anthropic because the fake stamps every response OpenAI;
+- a size rule checked only on OpenAI text results, where `content` holds everything, never on Gemini `parts` or on call turns whose text sits in `tool_calls`;
 - a TIMEOUT test where nothing was actually blocked;
 - a failure test that only asserts `agent_failed` exists, not that it names the cause.
 
@@ -212,6 +214,10 @@ None yet in v2. The r5 pack was written red from spec r3 of `docs/spec/agent-swa
 | Eight event kinds, four stop reasons | §8.5 | enum sets, event tables, exact event lists, oracle |
 | Recording bug ends as `agent_failed` | INV-14, EC-12 | middleware-abort test |
 
+The S4 review of the v2 implementation (`docs/spec/agent-swarm-v2/review.md`, spec r4) found defects the pack did not catch. Each now has a test, red until the S5 repair:
+
+- **R-2:** the compaction size estimate read only `message["content"]`, so Gemini members and write-heavy OpenAI members never compacted. Tests: `test_a_gemini_member_at_the_trigger_compacts_its_parts_history_through_one_summary_call`, `test_an_openai_history_of_write_calls_only_compacts_at_the_trigger`.
+
 ## Test Suite Map
 
 - `test_agent_swarm_acceptance.py` covers the §4 snippet as written, three members created and started in order with the web-search tool, a swarm that ends after one turn each, and the goal reaching every call verbatim. Start here for a caller-visible regression.
@@ -219,12 +225,12 @@ None yet in v2. The r5 pack was written red from spec r3 of `docs/spec/agent-swa
 - `test_agent_swarm_lifecycle.py` covers the turn budget and `wake_refused`, the time limit and its labels, failures by provider error, tool exception and middleware abort, concurrent and repeated runs, cancellation, callback containment, the event outbox, and `tool_called` events.
 - `test_agent_swarm_stop.py` covers `model_called`, `model_error`, the token budget stop, refused calls after the stop, sends in flight at the stop, and missing usage.
 - `test_agent_swarm_observer.py` covers `history_trimmed`, `tool_result_truncated`, `file_changed` and `command_failed`.
-- `test_agent_swarm_compaction.py` covers the `compact` tool, automatic compaction at the trigger (OpenAI and Anthropic usage), the summary call, failures and blank summaries, and a side call that crosses the budget.
+- `test_agent_swarm_compaction.py` covers the `compact` tool, automatic compaction at the trigger (OpenAI and Anthropic usage, a Gemini `parts` history, an OpenAI history of write calls only), the summary call, failures and blank summaries, and a side call that crosses the budget.
 - `test_agent_swarm_settings.py` covers the lib settings record: import identity, members without prompts, web-search settings, the generous limits, defaults, key secrecy and the layering rule.
 - `test_agent_swarm_workplace.py` covers folder creation and preservation, `workplace_prepared`, a folder shared across runs, refused workplaces, path escapes, and goal checks.
 - `test_agent_swarm_contract.py` covers exports, enums, the prompt family, the runtime registry and refusal, the exact tools, schemas and system prompt, settings validation and key secrecy, record validation for twenty-four kinds, and the complexity budget.
 - `test_agent_swarm_property.py` covers seeded random schedules over two to four agents, self-messages and refusals included, checked against the oracle and against each agent's own transcript.
-- `agent_swarm_fixtures.py` holds the scripted runner (provider-stamped, with multi-call steps), `Gate`/`Signal`, `EventLog`, the recording Tavily fake, a one-shot retry middleware, builders, transcript readers and the event oracle.
+- `agent_swarm_fixtures.py` holds the scripted runner (provider-stamped and provider-shaped for OpenAI, Anthropic and Gemini, with multi-call steps), `Gate`/`Signal`, `EventLog`, the recording Tavily fake, a one-shot retry middleware, builders, transcript readers and the event oracle.
 
 Run: `PYTHONPATH=$(pwd) python -m pytest tests/features/agent_swarm -q` from the repository root.
 

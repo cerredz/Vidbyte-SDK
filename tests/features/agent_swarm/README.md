@@ -11,7 +11,7 @@ The pack covers AC-1 to AC-25 of `docs/spec/agent-swarm-v2/spec.md`, and `docs/s
 - `README.md` describes the scope and how to run the pack.
 - `FEATURE.md` defines the contract, the invariants, the known failure modes with the test that catches each, and the strategies left out on purpose.
 - `agent_swarm_fixtures.py` provides:
-  - the scripted runner routed by agent name, stamped with each member's provider;
+  - the scripted runner routed by agent name, stamped with each member's provider and answering in that provider's own response shape (OpenAI, Anthropic or Gemini);
   - the `on_event` recorder that turns events into Signals;
   - a recording, blocking or raising fake for the Tavily call;
   - a one-shot model retry seam;
@@ -46,7 +46,7 @@ The pack covers AC-1 to AC-25 of `docs/spec/agent-swarm-v2/spec.md`, and `docs/s
   - `tool_called` events.
 - `test_agent_swarm_stop.py` covers `model_called` token counts, `model_error` before a retry, the token budget stop, calls and sends in flight at the stop, and missing usage.
 - `test_agent_swarm_observer.py` covers `history_trimmed`, `tool_result_truncated`, `file_changed` and `command_failed`.
-- `test_agent_swarm_compaction.py` covers the `compact` tool, automatic compaction at the trigger (OpenAI and Anthropic usage), the summary side call, failed and blank summaries, and a side call that reaches the budget.
+- `test_agent_swarm_compaction.py` covers the `compact` tool, automatic compaction at the trigger (OpenAI and Anthropic usage, a Gemini `parts` history, and an OpenAI history of write calls only), the summary side call, failed and blank summaries, and a side call that reaches the budget.
 - `test_agent_swarm_settings.py` covers the lib settings record: one class under every import path, members without prompts, web-search settings, the limits, key secrecy, and the layering rule.
 - `test_agent_swarm_workplace.py` covers:
   - creating the workplace and keeping its files across runs;
