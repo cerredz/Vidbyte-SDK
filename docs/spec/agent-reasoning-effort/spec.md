@@ -16,7 +16,7 @@ pr: https://github.com/cerredz/Vidbyte-SDK/pull/1193  # filled at S3 (draft) and
 
 > **TL;DR** — One provider-neutral setting, `reasoning_effort: ReasoningEffort | None`, goes on `BaseAgent` and `JevAgentSettings`. It has six values (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`). The agent's own text runner carries it onto every generative call, and each provider adapter sends it in that vendor's documented wire form. `vidbyte/lib/configs/reasoning_effort.py` holds one explicit table, and `ReasoningEffortRegistry` in `vidbyte/lib/registries/reasoning_effort.py` resolves it. The table has a row for each documented model id in the provider catalog, and every cell cites a quote from a raw-fetched vendor doc.
 >
-> The decision that matters most is that the effort is never silently ignored. Construction refuses it with `ConfigurationError` in four cases: on a gateway mode (AUTO, VIDBYTE_MANAGED), beside `thinking_config`, for a (model, value) with no documented form (a model the table does not list included), and for a value the vendor documents only as a remap to another level. Unset sends nothing.
+> The decision that matters most is that the effort is never silently ignored. Construction refuses it with `ConfigurationError`, before any request: on a gateway mode (AUTO, VIDBYTE_MANAGED); beside `thinking_config`, or beside an `extra_body` that overlaps its wire form; for a (model, value) with no documented form (a model the table does not list included); for a value the vendor documents only as a remap to another level; for a value outside the six; on an agent that does not name both a provider and a model; on a non-text runner; and, from r4, on an agent whose context-window algorithm builds its own runners. Unset sends nothing.
 >
 > The same PR root-exports `ReasoningEffort`, `DecisionModelConfig` and `DecisionModelMode` for vidbyte-cli C4/C5.
 
@@ -1303,3 +1303,4 @@ Blocking questions: 0.
 
 1. **§5 drifted from the code, so it was redrawn to match the PR's flow chart.** The r4 diagram had no exit for the guard's no-identity refusal, the `to_enum` refusal or the `Runner` non-text refusal (AC-16, AC-28). It routed `JevAgentSettings` through `AgentRunnerConfig`, although the settings check their own provider, model and mode first. It named every adapter's builder `_create_payload`, but OpenAI's is `_create_text_payload`. The behavior the diagram describes did not change; step 1 and step 3 now say the same.
 2. **Deviation 6 is closed.** `docs/design/release-0-4-0.md` line 17 reads "The reasoning effort (#1193) adds", and line 19 reads "3 from #1193" (row 34(c)).
+3. **The TL;DR refusal list was corrected.** It said construction refuses "in four cases"; it now names every §8.5 refusal, including the r4 algorithm case.
