@@ -7,6 +7,7 @@ from vidbyte.lib.config import EmbeddingModelConfig, TextModelConfig
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ProviderConfigurationError, ProviderResponseError
 from vidbyte.lib.http import HttpResponseParser, HttpTransport
+from vidbyte.lib.registries.reasoning_effort import ReasoningEffortRegistry
 from vidbyte.lib.registries.structured_output import StructuredOutputRegistry
 from vidbyte.lib.runners.types import EmbeddingResponse, TextModelResponse
 from vidbyte.lib.tools.formatter import ToolsFormatter
@@ -65,6 +66,12 @@ class GeminiProvider:
         self._attach_tools(payload, config)
         self._attach_safety(payload, config)
         self._attach_cache(payload, config)
+        # @intent reasoning-effort-joins-before-extra-body
+        # The effort's fragment merges after every step that sets a
+        # top-level key, so generationConfig keeps its sampling and
+        # schema settings beside thinkingConfig; an extra_body that
+        # overlaps the fragment was refused at construction.
+        ReasoningEffortRegistry.attach(payload, provider=config.normalized_provider(), model=config.model, effort=config.reasoning_effort)
         self._attach_extra_body(payload, config, metadata)
         return payload
 

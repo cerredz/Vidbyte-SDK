@@ -18,7 +18,7 @@ from vidbyte.lib.constants import (
     RUNNER_TYPE_VIDEO,
 )
 from vidbyte.lib.dataclasses.agents import ProviderKeys
-from vidbyte.lib.enums import ModelProvider, TextModelMode
+from vidbyte.lib.enums import ModelProvider, ReasoningEffort, TextModelMode
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.registries.provider_keys import ProviderKeyMatcher
 
@@ -35,6 +35,7 @@ class Runner:
         vidbyte_api_key: str | None = None,
         model_mode: TextModelMode = TextModelMode.AUTO,
         temperature: float | None = None,
+        reasoning_effort: ReasoningEffort | None = None,
         options: Mapping[str, Any] | None = None,
     ) -> None:
         # Store primitive model/provider configuration for runner inference and construction.
@@ -44,6 +45,7 @@ class Runner:
         self.api_keys = ProviderKeyMatcher.match(api_keys, primary=self.provider, vidbyte_api_key=vidbyte_api_key, field_name="api_keys")
         self.model_mode = model_mode
         self.temperature = temperature
+        self.reasoning_effort = reasoning_effort
         self.options = dict(options or {})
 
     @classmethod
@@ -123,12 +125,20 @@ class Runner:
         # A text config takes the whole matched record and the mode, so
         # it resolves its own credentials. Image, video, audio, and
         # embedding configs keep api_key and get only their provider's
-        # matched key, or none, so their variable resolves as before.
+        # matched key, or none, so their variable resolves as before. An
+        # effort exists only for text configs, so another type refuses
+        # it rather than letting the field filter drop it.
         if runner_type == RUNNER_TYPE_TEXT:
             options["api_keys"] = self.api_keys
             options["mode"] = self.model_mode
+            options["reasoning_effort"] = self.reasoning_effort
         elif (provider_key := self.api_keys.key_for(self.provider or "")) is not None:
             options["api_key"] = provider_key
+        if self.reasoning_effort is not None and runner_type != RUNNER_TYPE_TEXT:
+            raise ConfigurationError(
+                f"Runner sets reasoning_effort, but model '{self.model_name}' resolves to a {runner_type} runner, which has no reasoning effort.",
+                details={"provider": self.provider, "model": self.model_name, "runner_type": runner_type},
+            )
         if self.temperature is not None and runner_type == RUNNER_TYPE_TEXT:
             options["temperature"] = self.temperature
         return {key: value for key, value in options.items() if key in allowed}
