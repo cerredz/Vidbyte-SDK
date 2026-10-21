@@ -1,9 +1,9 @@
 """FILE: tests/features/agent_swarm/test_agent_swarm_stop.py
 
-PURPOSE: Pins the swarm-wide token budget and what each model call records. Every model response records one model_called with its billed input, output and cached tokens and the loop's model call count, and the budget grows by the reported total (total_tokens when reported, else input plus output). The response that brings the total to max_tokens stops the swarm in its own block: swarm_stopping follows its model_called, parked agents are released, responses already in flight are answered but run no tool, a member inside a long tool call finishes it and is released at its next model call, a message sent after the decision is recorded sent then undelivered, and no member makes another model call. A model error records model_error before a retry that the test installs at the member's middleware seam (AgentSwarm installs none, spec r4 INV-23), and a provider that reports no usage records zeros and never spends the budget.
-ROLE IN CODEBASE: Budget and stop layer of tests/features/agent_swarm/ (docs/spec/agent-swarm-v2/spec.md AC-8, AC-9, AC-10; EC-4, EC-7, EC-8, EC-9, EC-12; INV-12, INV-13, INV-14, INV-15, INV-22, INV-23). Exercises AgentSwarmRuntime.record_model_call, record_model_error, the stop block, and AgentSwarmObserverMiddleware's before_model_call, after_model_response and on_model_error.
+PURPOSE: Pins the swarm-wide token budget and what each model call records. Every model response records one model_called with its billed input, output and cached tokens and the loop's model call count, and the budget grows by the reported total (total_tokens when reported, else input plus output). The response that brings the total to max_tokens stops the swarm in its own block: swarm_stopping follows its model_called, parked agents are released, responses already in flight are answered but run no tool, a member inside a long tool call finishes it and is released at its next model call, a message sent after the decision is recorded sent then undelivered, a model call refused after the decision records no history_trimmed, and no member makes another model call. A model error records model_error before a retry that the test installs at the member's middleware seam (AgentSwarm installs none, spec r4 INV-23), and a provider that reports no usage records zeros and never spends the budget.
+ROLE IN CODEBASE: Budget and stop layer of tests/features/agent_swarm/ (docs/spec/agent-swarm-v2/spec.md AC-8, AC-9, AC-10; EC-4, EC-7, EC-8, EC-9, EC-12; INV-12, INV-13, INV-14, INV-15, INV-22, INV-23, INV-24; S4 review R-9). Exercises AgentSwarmRuntime.record_model_call, record_model_error, the stop block, and AgentSwarmObserverMiddleware's before_model_call, after_model_response and on_model_error.
 ARCHITECTURE NOTE: The scripted runner's usage mapping is the only source of token counts, and it reaches the swarm through the loop's own UsageTracker, so every count asserted here is the one the OpenAI usage parser reads. Interleavings are forced with Signals and a blocking FakeTavily; the FakeTavily is released from an on_event hook when swarm_stopping is delivered, so the search provably returns after the decision.
-FUNCTION INVENTORY: _next_own (the next event of the same agent); test_a_model_response_records_its_tokens_and_the_budget_grows_by_the_reported_total (AC-8, INV-15, INV-22); test_the_response_that_crosses_max_tokens_stops_the_swarm_in_its_own_block_and_runs_nothing_more (AC-9, EC-12, INV-12, INV-13); test_a_member_inside_a_long_tool_call_finishes_it_and_is_released_before_its_next_model_call (EC-7); test_a_message_sent_after_the_stop_is_recorded_sent_then_undelivered (EC-4); test_the_first_response_crossing_the_budget_leaves_no_further_paid_call (EC-9); test_a_retried_model_error_records_model_error_and_the_agent_keeps_working (AC-10, INV-23); test_a_provider_that_reports_no_usage_records_zeros_and_never_spends_the_budget (EC-8).
+FUNCTION INVENTORY: _next_own (the next event of the same agent); test_a_model_response_records_its_tokens_and_the_budget_grows_by_the_reported_total (AC-8, INV-15, INV-22); test_the_response_that_crosses_max_tokens_stops_the_swarm_in_its_own_block_and_runs_nothing_more (AC-9, EC-12, INV-12, INV-13); test_a_member_inside_a_long_tool_call_finishes_it_and_is_released_before_its_next_model_call (EC-7); test_a_message_sent_after_the_stop_is_recorded_sent_then_undelivered (EC-4); test_a_model_call_refused_after_the_stop_records_no_history_trimmed (INV-13, INV-24, R-9); test_the_first_response_crossing_the_budget_leaves_no_further_paid_call (EC-9); test_a_retried_model_error_records_model_error_and_the_agent_keeps_working (AC-10, INV-23); test_a_provider_that_reports_no_usage_records_zeros_and_never_spends_the_budget (EC-8).
 COMMON MODIFICATION PATTERNS: A new budget rule gets one test that scripts usage on each step, sets max_tokens just at and just past the expected total, and asserts the stop reason and the swarm_stopping position.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level. 2. Do not read token counts back from the swarm's internals; read them from model_called events and the stop reason. 3. Do not wait on time; every wait here is a Signal, a blocking FakeTavily, or a scripted step.
 KNOWN EDGE CASES: A response that arrives after the decision still records its model_called (it was paid for) and then aborts, so its tool calls never run. Agents released by the stop record agent_released in the order their tasks resume, so only same-agent orderings are pinned. The EC-9 test lets the other members' first calls wait for swarm_stopping, so it holds whether their first call was dispatched before the decision (answered after it, running nothing) or refused at before_model_call.
@@ -29,6 +29,7 @@ from tests.features.agent_swarm.agent_swarm_fixtures import (
     STOPPING,
     TAVILY_TOOL,
     TOOL_CALLED,
+    TRIMMED,
     UNDELIVERED,
     EventLog,
     FakeTavily,
@@ -196,6 +197,36 @@ async def test_a_message_sent_after_the_stop_is_recorded_sent_then_undelivered(t
     assert [(event.tool_name, event.tool_status) for event in of_kind(events, TOOL_CALLED, "builder")] == [(TAVILY_TOOL, ToolStatus.SUCCESS), ("message", ToolStatus.SUCCESS)]
     assert of_kind(events, RELEASED, "builder")[0].sequence > follower.sequence
     assert len(scripted.calls_by("builder")) == 1
+    assert_event_invariants(result, NAMES, max_turns=swarm.settings.max_turns, log=log)
+    scripted.assert_complete()
+
+
+@pytest.mark.asyncio
+async def test_a_model_call_refused_after_the_stop_records_no_history_trimmed(tmp_path: Path) -> None:
+    """INV-13, INV-24 (S4 R-9): builder sends itself a 300,000-character note, so from its second call on its history is over AGENT_SWARM_HISTORY_MAX_TOKENS and the trim leaves out the send's call and result (one history_trimmed before the stop, two dropped); its second response is a Tavily search that returns only after tester's response reached the budget, and the observer refuses its next model call, so after swarm_stopping builder records the search's tool_called and agent_released only, and no history_trimmed for a call that is never sent."""
+    from vidbyte import AgentSwarmStopReason
+    from vidbyte.lib.dataclasses.tools import ToolStatus
+
+    fake = FakeTavily(block=True)
+    log = EventLog()
+    _release_on_stopping(log, fake)
+    scripted = ScriptedSwarm(
+        {
+            "builder": [send("builder", "n" * 300_000), search("c2f rounding")],
+            "tester": [after(fake.entered, reply("Tester done.", usage={"input_tokens": 990, "output_tokens": 10}))],
+        }
+    )
+    swarm = build_swarm(tmp_path, NAMES, max_tokens=1000, on_event=log.callback, **web_search_fields())
+    with scripted.install(), fake.install():
+        result = await run_swarm(swarm)
+
+    assert result.stop_reason is AgentSwarmStopReason.MAX_TOKENS, describe(result.events)
+    events = result.events
+    stopping = only(events, STOPPING)
+    # The history was over the cap before the stop, so the refused call's history, one search longer, would be trimmed too.
+    assert [(event.sequence < stopping.sequence, event.messages_dropped) for event in of_kind(events, TRIMMED, "builder")[:1]] == [(True, 2)], describe(events)
+    assert [(event.kind.value, event.tool_name, event.tool_status) for event in events[stopping.sequence :] if event.agent == "builder"] == [(TOOL_CALLED, TAVILY_TOOL, ToolStatus.SUCCESS), (RELEASED, "", None)], describe(events)
+    assert len(scripted.calls_by("builder")) == 2 and fake.problems == []
     assert_event_invariants(result, NAMES, max_turns=swarm.settings.max_turns, log=log)
     scripted.assert_complete()
 

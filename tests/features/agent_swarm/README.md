@@ -44,7 +44,7 @@ The pack covers AC-1 to AC-25 of `docs/spec/agent-swarm-v2/spec.md`, and `docs/s
   - a raising, slow or cancelled `on_event`;
   - concurrent flushes, and where the event clock starts;
   - `tool_called` events.
-- `test_agent_swarm_stop.py` covers `model_called` token counts, `model_error` before a retry, the token budget stop, calls and sends in flight at the stop, and missing usage.
+- `test_agent_swarm_stop.py` covers `model_called` token counts, `model_error` before a test-installed retry, the token budget stop, calls and sends in flight at the stop, no `history_trimmed` for a call refused after the stop, and missing usage.
 - `test_agent_swarm_observer.py` covers `history_trimmed`, `tool_result_truncated`, `file_changed` and `command_failed`.
 - `test_agent_swarm_compaction.py` covers the `compact` tool, automatic compaction at the trigger (OpenAI and Anthropic usage, a Gemini `parts` history, and an OpenAI history of write calls only), the wait for target-sized growth before a repeat automatic compaction, the summary side call, failed and blank summaries, and a side call that reaches the budget.
 - `test_agent_swarm_settings.py` covers the lib settings record: one class under every import path, members without prompts, web-search settings, the limits, key secrecy, and the layering rule.

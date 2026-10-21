@@ -165,6 +165,7 @@ Each line is *input + state → wrong output if unguarded*, with the test that c
 - The budget stop lets another member make one more paid call, leaves a parked agent waiting, or records the stop late (`test_crossing_the_token_budget_stops_the_swarm_in_the_same_block_and_refuses_every_later_call`, `test_the_first_response_crossing_the_budget_refuses_every_other_first_call`).
 - A member in the middle of a long tool call when the stop is decided makes another model call, or is cancelled instead of released (`test_a_member_inside_a_long_tool_call_finishes_it_and_is_released_without_another_model_call`).
 - A send whose response was in flight when the stop was decided is lost or delivered (`test_a_send_after_the_stop_is_decided_is_sent_then_undelivered_with_the_stopped_reply`).
+- The trim records `history_trimmed` for a model call that the observer then refuses after the stop, so the record shows work on a call that was never sent (`test_a_model_call_refused_after_the_stop_records_no_history_trimmed`).
 - A model error that a retry middleware retries is not recorded, or the observer's hook changes the retry decision; AgentSwarm installs no retry, so the test appends one (`test_a_retried_model_error_records_model_error_and_the_agent_keeps_working`).
 - A provider that reports no usage crashes the observer or trips the budget (`test_missing_usage_records_zeros_and_never_trips_the_budget`).
 - The time limit leaves an agent with no ending, fails it, or labels a parked agent as working (`test_the_time_limit_cancels_every_agent_and_returns_timeout`, `test_the_time_limit_labels_working_and_idle_agents_and_fails_none`).
@@ -218,6 +219,7 @@ None yet in v2. The r5 pack was written red from spec r3 of `docs/spec/agent-swa
 The S4 review of the v2 implementation (`docs/spec/agent-swarm-v2/review.md`, spec r4) found defects the pack did not catch. Each now has a test, red until the S5 repair:
 
 - **R-2:** the compaction size estimate read only `message["content"]`, so Gemini members and write-heavy OpenAI members never compacted. Tests: `test_a_gemini_member_at_the_trigger_compacts_its_parts_history_through_one_summary_call`, `test_an_openai_history_of_write_calls_only_compacts_at_the_trigger`.
+- **R-9:** the trim recorded `history_trimmed` for a call refused after the stop. Test: `test_a_model_call_refused_after_the_stop_records_no_history_trimmed`.
 - **R-6:** automatic compaction had no hysteresis, so a large goal made every iteration pay for a summary. Test: `test_automatic_compaction_waits_for_a_target_of_new_history_and_a_compact_request_does_not`.
 
 ## Test Suite Map
@@ -225,7 +227,7 @@ The S4 review of the v2 implementation (`docs/spec/agent-swarm-v2/review.md`, sp
 - `test_agent_swarm_acceptance.py` covers the §4 snippet as written, three members created and started in order with the web-search tool, a swarm that ends after one turn each, and the goal reaching every call verbatim. Start here for a caller-visible regression.
 - `test_agent_swarm_messaging.py` covers mid-turn delivery, batching, wakes after a reply or `isDone`, mail waiting at turn end, mutual messages, the lost-wake-up race, self-messages, the two refusals, and text fidelity.
 - `test_agent_swarm_lifecycle.py` covers the turn budget and `wake_refused`, the time limit and its labels, failures by provider error, tool exception and middleware abort, concurrent and repeated runs, cancellation, callback containment, the event outbox, and `tool_called` events.
-- `test_agent_swarm_stop.py` covers `model_called`, `model_error`, the token budget stop, refused calls after the stop, sends in flight at the stop, and missing usage.
+- `test_agent_swarm_stop.py` covers `model_called`, `model_error`, the token budget stop, refused calls after the stop and the trim they no longer record, sends in flight at the stop, and missing usage.
 - `test_agent_swarm_observer.py` covers `history_trimmed`, `tool_result_truncated`, `file_changed` and `command_failed`.
 - `test_agent_swarm_compaction.py` covers the `compact` tool, automatic compaction at the trigger (OpenAI and Anthropic usage, a Gemini `parts` history, an OpenAI history of write calls only), the wait for target-sized growth before a repeat automatic compaction, the summary call, failures and blank summaries, and a side call that crosses the budget.
 - `test_agent_swarm_settings.py` covers the lib settings record: import identity, members without prompts, web-search settings, the generous limits, defaults, key secrecy and the layering rule.
