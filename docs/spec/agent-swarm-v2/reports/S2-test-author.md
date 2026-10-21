@@ -144,3 +144,24 @@ SDK-LINT: PASS
 ```
 
 The one remaining finding is the baseline one, outside this folder: `vidbyte/agents/multi/README.md:26 File Index entry multi_agent.py is out of parity`. It was left as it is.
+
+## S3 follow-up (commit 1ddc6b9d)
+
+S3 found three defects in this pack after its implementation landed, and the orchestrator confirmed them (`11 failed, 257 passed` at `18565c17`). All three were test-side. Each fix keeps every assertion it touches at its original strength.
+
+- **D1: the oracle could never accept a `compaction` event (8 cases).** Root cause: `_Replay.step` in `agent_swarm_fixtures.py` stored every kind except derived kinds and `message_undelivered` as the agent's last base event, before dispatch. A `compaction` therefore became its own base, and `observation` then required that base to be a `model_called`, which could never hold. Change: `if kind not in _DERIVED | {COMPACTION} and kind != UNDELIVERED:`, plus a one-line comment. The compaction check itself (base is the side call's `model_called`, trigger set) is unchanged.
+- **D2: two system-string comparisons missed the shared loop's label (3 cases).** Root cause: every agent's system string is rendered by `BaseContext.build_context_fixed` (`vidbyte/lib/dataclasses/context.py:211-218`; the coordinator's note called it `ContextWindow`, but the method lives on `BaseContext`). It writes `"System prompt:\n"` before the prompt. That file is outside this change (NG-1). Change: `test_agent_swarm_contract.py::test_every_member_gets_the_same_sectioned_system_prompt_then_the_agentic_loop_prompt` and `test_agent_swarm_acceptance.py::test_the_section_4_snippet_runs_as_written` now compare `system[:loop_at].strip() == "System prompt:\n" + expected`. Each has a comment naming the label's source. The comparison is still exact equality.
+- **D3: the EC-6 test relied on scheduling that the scripted runner does not provide (1 case).** Root cause: the scripted runner never suspends. Builder therefore ran its whole script, and its summary side call crossed `max_tokens=1_000` before tester's first model call. Tester was then refused, as EC-12 requires, and its scripted reply was never consumed, so `assert_complete` failed. Change: in `test_a_side_call_that_reaches_the_budget_completes_its_compaction_and_stops_the_swarm`, the side step is now `after(log.signal(IDLE, "tester"), reply(SUMMARY, ...))`, and the same `EventLog` is passed to `_run`. Tester's call adds 5 tokens, so the side call is still the one that crosses the budget. All assertions are unchanged.
+
+Proof:
+
+```
+$ PYTHONPATH=<worktree> python -m pytest tests/features/agent_swarm -q -p no:cacheprovider
+....................................................                     [100%]
+268 passed in 7.07s
+
+$ PYTHONPATH=<worktree> python -m ruff check tests/features/agent_swarm --config lint/ruff.toml
+All checks passed!
+```
+
+The compaction module passed 8 repeated runs in a row (`12 passed` each), and the I001 noted earlier in the contract test is gone now that the modules exist.
