@@ -3,8 +3,8 @@
 PURPOSE: Defines AgentSwarmRuntime, one swarm run: it builds a fresh agent for every member, runs them all at once until no agent is working, the token budget is spent, or the time limit is reached, and owns every piece of swarm state in between: each agent's inbox, who is working, idle, or out, the turn and token counts, the waits of idle agents, each agent's measured context and pending compaction request, each file's last writer, the decided stop reason, and the replies.
 ROLE IN CODEBASE: Built by AgentSwarm.arun (swarm.py) once per run over the prepared workplace. Its entry points are called only by the swarm's own member parts: post_message by the message tool and collect_messages, take_compaction_request, last_prompt_tokens, and record_compaction by the member runtime (member.py); request_compaction by the compact tool (compaction.py); end_turn and record_tool_call by the turn middleware (vidbyte/middleware/builtins/agent_swarm_turn.py); stopping, record_model_call, record_model_error, record_tool_outcome, and record_history_trim by the observer and trim middleware (vidbyte/middleware/builtins/agent_swarm_observer.py), and the first two also by the member runtime for its summary call. It builds AgentSwarmMemberAgent (member.py) with AgentSwarmTools (vidbyte/tools/toolsets/agent_swarm.py) and records through AgentSwarmEvents (events.py). Exported by vidbyte/agents/agent_swarm/__init__.py and vidbyte/agents/__init__.py.
 ARCHITECTURE NOTE: Every agent runs on one event loop, so a block of code with no await in it runs without any other agent running in between. Every state change here (queueing a message, waking an agent, ending a turn, removing an agent, counting tokens, deciding the stop) happens inside such a block, together with the events that record it; delivery to on_event is awaited only afterwards. That is why nothing is ever lost or doubled: a send and the recipient's turn end cannot interleave, so whichever runs first decides; a message leaves its inbox in the same block that records its delivery or its undelivery; and because a send is queued in the sender's own step, "no agent is working" also means no message is in flight, so the end of the swarm is detected exactly, with no polling. The stop reason is set in one place, _stop, which in the same block marks every queued message undelivered and releases every idle agent; from then on the observer middleware refuses every further model call. The time limit is asyncio.timeout around one TaskGroup that owns every member task.
-FUNCTION INVENTORY: arun is the narrated main function of a run; _run_member is the main function of each member task; post_message and end_turn are the narrated main functions of a send and of a turn end; collect_messages, record_tool_call, record_tool_outcome, record_model_call, record_model_error, record_history_trim, request_compaction, take_compaction_request, last_prompt_tokens, record_compaction, and stopping are the member parts' other entry points. Helpers: _render_system_prompt renders the shared sections for one member; _build_member builds one agent; _refuse records and raises one refused send; _drain takes an inbox and records its deliveries; _fail removes a member and marks its mail undelivered; _stop decides the stop reason; _end_check decides the end once nobody works; _failure_text, _early_exit_text, and _budget_total only read their arguments.
-COMMON MODIFICATION PATTERNS: A new state change goes in one synchronous block that also records its event, followed by one await of the event flush. A new end condition belongs in _end_check, and every stop goes through _stop. A new observation adds one record_* entry point here and one hook in the observer middleware.
+FUNCTION INVENTORY: arun is the narrated main function of a run; _run_member is the main function of each member task; post_message and end_turn are the narrated main functions of a send and of a turn end; collect_messages, record_tool_call, record_tool_outcome, record_model_call, record_model_error, record_history_trim, request_compaction, take_compaction_request, last_prompt_tokens, record_compaction, and stopping are the member parts' other entry points. Helpers: _render_system_prompt renders the shared sections for one member; _build_member builds one agent; _refuse records and raises one refused send; _drain takes an inbox and records its deliveries; _fail removes a member and marks its mail undelivered; _stop records the decided stop reason; _end_reason decides the end reason once nobody works, and its caller passes it to _stop; _failure_text, _early_exit_text, and _budget_total only read their arguments.
+COMMON MODIFICATION PATTERNS: A new state change goes in one synchronous block that also records its event, followed by one await of the event flush. A new end condition belongs in _end_reason, and every stop goes through _stop. A new observation adds one record_* entry point here and one hook in the observer middleware.
 WHAT NOT TO DO IN THIS FILE: 1. Do not put an await between a state check and the change it decides. 2. Do not wait for a recipient in post_message; only the event flush may be awaited. 3. Do not poll or sleep. 4. Do not contain any member exception other than VidbyteSdkError and a CancelledError, and never swallow a CancelledError: its branch in _run_member records without flushing and always raises it again. 5. Do not format a message text or a focus with str.format; only the catalog templates are formatted. 6. Do not set the stop reason anywhere but _stop.
 KNOWN EDGE CASES: A message to an idle agent when the turn budget is spent is queued with one wake_refused and wakes nobody, and the swarm then ends MAX_TURNS and marks it undelivered. A message to an agent that failed or exited, or any message sent once the stop is decided, is a success that says the recipient stopped, recorded as sent and then undelivered. A run that returns before the stop is decided has exited, named by the loop's own stop reason (middleware_abort for a recording bug); one that returns after the decision is released. A CancelledError the swarm did not request, raised by a tool or by an on_event callback, fails only that agent, even an idle one, and is raised again; Python 3.11's TaskGroup ignores the cancelled task, so the other agents go on. On TIMEOUT each member task still running records agent_cancelled, working or idle, without flushing, and _stop records the same for members whose task never ran, so replies is empty; the final flush delivers them; when the swarm had already decided to stop, the decided reason stands. The token budget counts total_tokens, else input plus output, missing values as zero, so a provider that reports no usage never reaches it; a call already in flight at the decision still returns and is counted. Each member's run is told its own provider, so the loop reads its tool calls in that provider's shape even when the runner object does not name it. An exception from this module's own code inside a member task, or a KeyboardInterrupt, is not contained and leaves arun without a result.
 RELATED DOCS: docs/spec/agent-swarm-v2/spec.md (sections 6.1 INV-1 to INV-17, 8.1 D-4 to D-6, D-13 and D-14, 8.5 and 9.1); vidbyte/agents/agent_swarm/README.md
@@ -148,7 +148,9 @@ class AgentSwarmRuntime:
             if task is not None and task.cancelling() == 0 and self._stop_reason is None:
                 detail = str(cancel).strip() or "the run was cancelled, but not by the swarm"
                 self._fail(name, AgentSwarmEventKind.AGENT_FAILED, f"CancelledError: {detail}")
-                self._end_check()
+                reason = self._end_reason()
+                if reason is not None:
+                    self._stop(reason)
             else:
                 state = AgentSwarmAgentState.WORKING if name in self._working else AgentSwarmAgentState.IDLE
                 self._working.discard(name)
@@ -165,7 +167,9 @@ class AgentSwarmRuntime:
                 return
             self._fail(name, AgentSwarmEventKind.AGENT_EXITED, self._early_exit_text(reply))
         # The agent has left the swarm, and it may have been the last one working.
-        self._end_check()
+        reason = self._end_reason()
+        if reason is not None:
+            self._stop(reason)
         await self._events.flush()
 
     async def post_message(self, sender: str, recipient: object, text: object) -> str:
@@ -230,7 +234,9 @@ class AgentSwarmRuntime:
         self._working.discard(name)
         wake = asyncio.get_running_loop().create_future()
         self._waiting[name] = wake
-        self._end_check()
+        reason = self._end_reason()
+        if reason is not None:
+            self._stop(reason)
         await self._events.flush()
         await wake
         # A send marks the agent working before it resolves the wait; the stop resolves it without doing so.
@@ -372,18 +378,22 @@ class AgentSwarmRuntime:
                 wake.set_result(None)
         self._waiting.clear()
 
-    def _end_check(self) -> None:
+    def _end_reason(self) -> AgentSwarmStopReason | None:
         # @intent the-swarm-ends-exactly-when-nobody-works
-        # Sends are queued by working agents in their own step, so once nobody works no message is in flight. The reason is FAILED when every agent failed or exited, MAX_TURNS when a running agent holds mail no turn was left for, and QUIET otherwise.
+        # Sends are queued by working agents in their own step, so once
+        # nobody works no message is in flight. The reason is FAILED when
+        # every agent failed or exited, MAX_TURNS when a running agent
+        # holds mail no turn was left for, and QUIET otherwise. It only
+        # decides; each caller passes the reason to _stop in the same
+        # step, and None means the swarm goes on.
         if self._working or self._stop_reason is not None:
-            return
+            return None
         running = [name for name in self._names if name not in self._failed]
         if not running:
-            self._stop(AgentSwarmStopReason.FAILED)
-        elif any(self._inboxes[name] for name in running):
-            self._stop(AgentSwarmStopReason.MAX_TURNS)
-        else:
-            self._stop(AgentSwarmStopReason.QUIET)
+            return AgentSwarmStopReason.FAILED
+        if any(self._inboxes[name] for name in running):
+            return AgentSwarmStopReason.MAX_TURNS
+        return AgentSwarmStopReason.QUIET
 
     @staticmethod
     def _budget_total(usage: object | None) -> int:
