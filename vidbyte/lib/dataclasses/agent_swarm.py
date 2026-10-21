@@ -77,14 +77,14 @@ _KIND_FIELDS: dict[AgentSwarmEventKind, frozenset[str]] = {
 # The optional fields by type: whole-number counts, texts, and enums.
 _COUNT_FIELDS = ("input_tokens", "output_tokens", "cached_tokens", "model_calls", "messages_dropped", "omitted_chars")
 _TEXT_FIELDS = ("peer", "text", "tool_name", "path")
-_ENUM_FIELDS = (
-    ("tool_status", ToolStatus),
-    ("stop_reason", AgentSwarmStopReason),
-    ("compaction_trigger", AgentSwarmCompactionTrigger),
-    ("agent_state", AgentSwarmAgentState),
-    ("folder_state", AgentSwarmFolderState),
-)
-_OPTIONAL_FIELDS = ("message_id", *_COUNT_FIELDS, *_TEXT_FIELDS, *(name for name, _ in _ENUM_FIELDS))
+_ENUM_FIELDS: dict[str, type[ToolStatus | AgentSwarmStopReason | AgentSwarmCompactionTrigger | AgentSwarmAgentState | AgentSwarmFolderState]] = {
+    "tool_status": ToolStatus,
+    "stop_reason": AgentSwarmStopReason,
+    "compaction_trigger": AgentSwarmCompactionTrigger,
+    "agent_state": AgentSwarmAgentState,
+    "folder_state": AgentSwarmFolderState,
+}
+_OPTIONAL_FIELDS = ("message_id", *_COUNT_FIELDS, *_TEXT_FIELDS, *_ENUM_FIELDS)
 # The kinds that belong to the swarm rather than to one agent, and the
 # carried text fields a kind may leave blank; every other carried text
 # field must hold text.
@@ -195,15 +195,12 @@ class AgentSwarmEvent:
         # message names an earlier one, so a reader can pair every
         # outcome with its send.
         carried = _KIND_FIELDS[kind]
-        for name in _COUNT_FIELDS:
-            if name in carried:
-                RecordFieldValidator.require_int(getattr(self, name), f"AgentSwarmEvent.{name}", minimum=0)
-        for name in _TEXT_FIELDS:
-            if name in carried:
-                RecordFieldValidator.require_text(getattr(self, name), f"AgentSwarmEvent.{name}", allow_blank=kind in _BLANK_ALLOWED.get(name, frozenset()))
-        for name, enum_type in _ENUM_FIELDS:
-            if name in carried:
-                RecordFieldValidator.require_enum(getattr(self, name), enum_type, f"AgentSwarmEvent.{name}")
+        for name in sorted(carried.intersection(_COUNT_FIELDS)):
+            RecordFieldValidator.require_int(getattr(self, name), f"AgentSwarmEvent.{name}", minimum=0)
+        for name in sorted(carried.intersection(_TEXT_FIELDS)):
+            RecordFieldValidator.require_text(getattr(self, name), f"AgentSwarmEvent.{name}", allow_blank=kind in _BLANK_ALLOWED.get(name, frozenset()))
+        for name in sorted(carried.intersection(_ENUM_FIELDS)):
+            RecordFieldValidator.require_enum(getattr(self, name), _ENUM_FIELDS[name], f"AgentSwarmEvent.{name}")
         if kind is AgentSwarmEventKind.MESSAGE_SENT:
             RecordFieldValidator.require_int(self.message_id, "AgentSwarmEvent.message_id", minimum=self.sequence, maximum=self.sequence)
         if kind in _EARLIER_MESSAGE_KINDS:
