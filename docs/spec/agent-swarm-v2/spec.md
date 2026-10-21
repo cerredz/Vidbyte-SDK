@@ -1,14 +1,14 @@
 ---
 spec: agent-swarm-v2
 title: AgentSwarm revision: one shared prompt, loose messaging, per-agent compaction, generous limits, full event visibility
-status: approved
+status: implemented
 revision: 3
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-agent-swarm-v2
 branch: feat/agent-swarm
 base_commit: 39ce8b20baf28690a3dc74b8fbdca9530119fdef
 created: 2026-10-19
-updated: 2026-10-20
+updated: 2026-10-21
 pr: https://github.com/cerredz/Vidbyte-SDK/pull/1174   # revised in place; finalized at S6
 ---
 
