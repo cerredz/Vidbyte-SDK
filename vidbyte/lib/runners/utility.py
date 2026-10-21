@@ -138,7 +138,7 @@ class Runner:
             options["api_key"] = provider_key
         if options.get("reasoning_effort") is not None and runner_type != RUNNER_TYPE_TEXT:
             raise ConfigurationError(
-                f"Runner sets reasoning_effort, but model '{self.model_name}' resolves to a {runner_type} runner, which has no reasoning effort.",
+                f"Runner sets reasoning_effort, but model '{self.model_name}' resolves to runner type '{runner_type}', which has no reasoning effort.",
                 details={"provider": self.provider, "model": self.model_name, "runner_type": runner_type},
             )
         if self.temperature is not None and runner_type == RUNNER_TYPE_TEXT:
