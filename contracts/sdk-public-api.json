@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "source": {"repository": "cerredz/Vidbyte-SDK", "commit": "698f913b594f9cbeac6513d4883c0e4f0f1f4175", "generator": "scripts/generate-sdk-public-api.py"},
+  "source": {"repository": "cerredz/Vidbyte-SDK", "commit": "a319f44dfec4d2577e0707767bad87bbb7063fa8", "generator": "scripts/generate-sdk-public-api.py"},
   "distribution": "vidbyte-sdk",
   "version": "0.3.0",
   "exports": [
@@ -34,6 +34,7 @@
     "AgentSwarmMember",
     "AgentSwarmSettings",
     "AgentSwarmStopReason",
+    "AgentSwarmWebSearch",
     "AgentTransfer",
     "AgentTransferError",
     "AgentType",
