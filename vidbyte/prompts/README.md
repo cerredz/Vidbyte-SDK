@@ -109,10 +109,11 @@ is set), messaging, turns, the goal, instructions, the objective, and
 thoroughness, eight practices for finishing work completely. It assigns no role
 and states no numeric limit, because the limits are enforced in code. The three
 `message_*_description` leaves describe the `message` tool and its `to` and
-`text` parameters, `message_sent` and the three refusals are its replies, and
-`inbox` with one `inbox_message` per message is the user message that delivers
-them. The two `compact_*_description` leaves describe the `compact` tool and its
-`focus` parameter, `compact_requested` is its reply,
+`text` parameters, `message_sent` and `message_stopped_recipient` are its
+success replies, and `message_blank_text` and `message_unknown_recipient` its
+two refusals; `inbox` with one `inbox_message` per message is the user message
+that delivers them. The two `compact_*_description` leaves describe the
+`compact` tool and its `focus` parameter, `compact_requested` is its reply,
 `compaction_summarizer_prompt` asks the agent's own model for a ten-section
 handoff summary, and `compaction_summary_prefix` opens the summary message.
 
