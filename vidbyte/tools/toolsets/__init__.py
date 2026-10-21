@@ -9,7 +9,7 @@ Architecture:
     - ParadigmMinimalToolset: Minimal universal filesystem toolset.
     - CodingAgentTools: The seven tools a CodingAgent starts with over one root folder.
     - InfiniteMemoryAgentTools: bash over the project folder plus grep and read_lines over the memory workspace.
-    - AgentSwarmTools: bash, grep, read_lines, write_text and patch_file over one swarm's shared workplace folder.
+    - AgentSwarmTools: bash, grep, read_lines, write_text and patch_file over one swarm's shared workplace folder, plus the selected web-search tool.
 Relations:
     Consumed by vidbyte.paradigms harnesses; composes vidbyte.tools builtins.
 """
