@@ -1,7 +1,7 @@
 ---
 spec: native-thread-compose
 title: "Composite thread functions across Grok, opencode and Muse"
-status: reviewed
+status: pr-open
 revision: 5
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-native-thread-compose
@@ -9,7 +9,7 @@ branch: feat/native-thread-compose
 base_commit: 5c08c35edcb1827e190ca4e2b2b1370808ef24be
 pr_base: feat/native-grok-opencode-meta-hosts
 created: 2026-10-15
-updated: 2026-10-18
+updated: 2026-10-21
 pr: https://github.com/cerredz/Vidbyte-SDK/pull/1186
 ---
 
@@ -1573,6 +1573,7 @@ New files: rows 1, 3, 5, 7, 8 and 29 (6 lib modules), rows 11–16 and 19–25 (
 | r4 | 2026-10-17 | S1 spec (S2 test-author findings; not a review round) | S2-1: the Grok lock is a one-slot `asyncio.Semaphore` sized by the new `COMPOSE_GROK_MAX_CONCURRENT_CALLS`, because lint bans `asyncio.Lock` (D-5, row 12, INV-13, §8.5, §12.4); S2-2: one-line clarifications of the readings the tests encode (INV-6, INV-8, INV-18, INV-19, INV-23, INV-26, EC-44, §9.1). Status `tests-written`; behavior and public names are unchanged |
 | r4 | 2026-10-18 | S3 implement | All 28 rows of §12.3 implemented in phase order, in 26 commits, on draft PR #1186. The 276 compose tests and the full local gate pass, the AC-21 wheel half is proven, and no test file changed. The implementation deviations are listed below |
 | r5 | 2026-10-18 | S1 spec (as-built corrections after S5 repair 1; not a review round) | The passages that S5 iteration 1 made stale, listed in `reports/S5-repair-1.md` §6, now describe the code at `3a21352b`, each checked against the code itself. D-17, §8.2, row 12, §11 and §12.4: fan-out waits with `asyncio.wait(FIRST_EXCEPTION)`, cancels what still runs and waits for every child with `ComposeCalls.settle`, with no gather and no shield. EC-17, INV-30 and row 15: a started add and every removal run as settled tasks. §8.5 and row 14: `worktree_folder`, `add_worktree(folder) -> None` and `fill_worktree(folder, tree)`. A new row 29 for `vidbyte/lib/util/secret_text.py`, so 6 lib modules and 41 new files (§12.3, §12.6, §14). `PromptSegment` and `SecretText`, which §8.4 already counted, in §8.5, §9.1, §9.4 and rows 4, 6, 7, 13 and 14; the §8.4 class count says where the 51 classes live. The §17 deviations for rendering, plumbing helpers, fan-out and the record so far. None of these changed an ID, an AC row, a §4 line or a requirement's meaning. A follow-up commit records the orchestrator's decisions on the r5 open items: INV-1 and AC-22 name `SecretText` beside `JsonText`, and the 18 records and the 42 compose names stay; INV-18 records the up-front refusals of a blank shortest form (`COMPOSE_BLANK_PROMPT`) and of fixed text with a surrogate code point (`COMPOSE_UNENCODABLE_TEXT`), the send-time surrogate repair, and `schema` among the arguments a refusal names; new EC-79 (a blank template, S4 review R-13), EC-80 (surrogate halves in a spliced value) and EC-81 (a surrogate code point in caller text), both from S4 review R-12; §5, D-19, the §9.2 spliced-fields question and row 13 follow. EC-79 is stated as intended. At 5c7abad2 the code also refuses templates that hold `{prompt}` (`chain.py:130–132`); that is defect R-32, fixed in S5 iteration 2. The status is left to the orchestrator |
+| r5 | 2026-10-21 | S6 PR | finalized for review: status pr-open; the PR #1186 title and body come from pr-body.md. §5, INV-19 and T-1 still name `DiffCapture` and `parse_json_answer` where the composites call `ComposeGit` and the shared `JsonAnswers.ask`; names only, behavior unchanged, so §5 is not edited (pr-body.md, Deviations) |
 
 ### Implementation deviations
 
