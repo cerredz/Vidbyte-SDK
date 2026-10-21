@@ -39,6 +39,8 @@ This run revises an existing feature branch. `base_commit` is the PR head at the
 
 - 2026-10-20 16:20 — The Claude Code process restarted while the round-2 reviewer was running. Its report `reports/S1-spec-review-2.md` was already complete on disk (verdict, twelve confirmation lines, seven findings, verified claims); only its STATUS block never arrived. The orchestrator committed the report as-is (d55e3714) and did not resume the reviewer. The author was resumed from its transcript for r3.
 
+- 2026-10-20 (evening) — The S2 test author, launched at ~17:10 on HEAD b3582659, stopped when the account usage limit was reached and the Claude Code process restarted; it had written nothing (worktree clean, no test-plan.md, no test file touched). Resumed via SendMessage from its saved transcript after the limit reset rather than relaunched, with the instruction to re-open any file it cites. The session model changed to Opus 5.5 at this point; commit trailers from here on read `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+
 - 2026-10-20 16:30 — **No `pip install` of any kind in this worktree.** The machine's global editable `vidbyte-sdk` (0.4.0) resolves to a different worktree, `worktrees/vidbyte-sdk-infinite-memory-events`, and an editable install from here would re-point it under another session. Every stage runs tests and the source gate with `PYTHONPATH=<worktree>` (field guide `local-ci-verification.md`); the orchestrator verified that all 171 swarm tests collect that way and that `inspect.getfile(vidbyte)` prints this worktree. The S2 template's "bootstrap install" step is replaced by that rule in the briefing.
 
 ## User replies (verbatim)
