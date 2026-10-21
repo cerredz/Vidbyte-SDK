@@ -38,7 +38,7 @@ class ReasoningEffortRegistry:
         # or a blank model raises the catalog's own ConfigurationError.
         provider_member = ProviderModelRegistry._require_provider(provider)
         # Look the model up the way the catalog names it: without the
-        # provider's own prefix, with its aliases applied, in lower case.
+        # provider's own prefix, with aliases applied, in lower case.
         lookup = ProviderModelRegistry.normalize_model(provider_member, model).strip().lower()
         return REASONING_EFFORT_SUPPORT.get(provider_member, {}).get(lookup, ())
 
@@ -91,7 +91,7 @@ class ReasoningEffortRegistry:
     def _capability_refusal(provider_member: ModelProvider, model: str, effort: ReasoningEffort, supported: tuple[ReasoningEffort, ...]) -> str:
         # @intent no-row-is-not-called-incapable
         # A model with a row gets the values it does support; one with
-        # no row gets the table's check date, because the vendor may have
+        # no row gets the table's check date, as the vendor may have
         # added the model after the SDK's table was last checked.
         if not supported:
             return f"{provider_member.value}:{model.strip()} is not in the SDK's reasoning-effort table, so reasoning effort '{effort.value}' cannot be sent to it; the table was checked against vendor docs on {REASONING_EFFORT_AS_OF} (see \"Reasoning Effort Sources\" in vidbyte/lib/registries/README.md)"
@@ -99,7 +99,7 @@ class ReasoningEffortRegistry:
 
     @staticmethod
     def _merge(target: dict[str, Any], fragment: dict[str, Any]) -> None:
-        # Merges nested dictionaries key by key; any other value replaces.
+        # Merges nested dictionaries key by key; other values replace.
         for key, value in fragment.items():
             if isinstance(value, dict) and isinstance(target.get(key), dict):
                 ReasoningEffortRegistry._merge(target[key], value)

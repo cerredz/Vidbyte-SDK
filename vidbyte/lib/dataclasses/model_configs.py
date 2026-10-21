@@ -245,7 +245,7 @@ class TextModelConfig:
                 details={"field": "TextModelConfig.reasoning_effort"},
             )
         # extra_body is merged last, so a key the effort's fragment uses
-        # would silently replace it; build the fragment alone to compare.
+        # would silently replace it; build the fragment alone to check.
         fragment: dict[str, Any] = {}
         ReasoningEffortRegistry.attach(fragment, provider=provider, model=self.model, effort=effort)
         overlap = set(self.extra_body or {}) & set(fragment)
